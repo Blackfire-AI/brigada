@@ -182,30 +182,127 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 
 func TestReopenUpToDateStoreIsNoOp(t *testing.T) {
 	path, s := openFile(t)
-	if v, err := s.userVersion(context.Background()); err != nil || v != 1 {
-		t.Fatalf("user_version after the first open = %d, %v; want 1", v, err)
+	if v, err := s.userVersion(context.Background()); err != nil || v != 2 {
+		t.Fatalf("user_version after the first open = %d, %v; want 2", v, err)
 	}
 	insertProject(t, s.db)
 	s.Close()
 
-	// Re-applying 0001 would fail on the existing tables, so a clean
-	// reopen is itself the proof that nothing ran again.
+	// Re-applying a migration would fail on the existing tables, so a
+	// clean reopen is itself the proof that nothing ran again.
 	again, err := Open(context.Background(), path)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer again.Close()
-	if v, err := again.userVersion(context.Background()); err != nil || v != 1 {
-		t.Errorf("user_version after reopen = %d, %v; want 1", v, err)
+	if v, err := again.userVersion(context.Background()); err != nil || v != 2 {
+		t.Errorf("user_version after reopen = %d, %v; want 2", v, err)
 	}
 	if n := queryInt(t, again.db, "SELECT COUNT(*) FROM projects"); n != 1 {
 		t.Errorf("projects after reopen = %d, want 1", n)
 	}
 }
 
+// TestOpenUpgradesAV1Store builds the store a binary that only knows
+// 0001 would leave behind, then opens it with this binary and expects
+// migration 0002 to land without touching the existing rows.
+func TestOpenUpgradesAV1Store(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("open raw store: %v", err)
+	}
+	v1, err := migrationFS.ReadFile("migrations/0001_init.sql")
+	if err != nil {
+		t.Fatalf("read 0001: %v", err)
+	}
+	if _, err := db.Exec(string(v1)); err != nil {
+		t.Fatalf("apply 0001 by hand: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 1"); err != nil {
+		t.Fatalf("set user_version: %v", err)
+	}
+	project := insertProject(t, db)
+	plan := insertPlan(t, db, project)
+	task := insertTask(t, db, plan)
+	job := insertJob(t, db, project, task, fmt.Sprintf("task:%d", task), "done")
+	if err := db.Close(); err != nil {
+		t.Fatalf("close raw store: %v", err)
+	}
+
+	s, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	defer s.Close()
+	if v, err := s.userVersion(context.Background()); err != nil || v != 2 {
+		t.Errorf("user_version after upgrade = %d, %v; want 2", v, err)
+	}
+	got := queryStrings(t, s.db, "SELECT name FROM pragma_table_info('jobs')")
+	for _, want := range []string{
+		"first_leased", "last_leased", "queued_at", "lease_epoch",
+		"leased_seconds", "harness", "labels", "restart",
+		"released_by", "released_until", "release_note",
+		"released_lease", "done_lease",
+	} {
+		if !slices.Contains(got, want) {
+			t.Errorf("jobs after upgrade has no %s column", want)
+		}
+	}
+	if status := queryString(t, s.db, "SELECT status FROM jobs WHERE id = ?", job); status != "done" {
+		t.Errorf("v1 job after upgrade = %q, want done untouched", status)
+	}
+	if n := queryInt(t, s.db, "SELECT leased_seconds FROM jobs WHERE id = ?", job); n != 0 {
+		t.Errorf("v1 job leased_seconds = %d, want the 0 default", n)
+	}
+}
+
+func TestUpdateCommitsAndRollsBack(t *testing.T) {
+	s := openMemory(t)
+	ctx := context.Background()
+	if err := s.Update(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO runners (name, created_at) VALUES ('kept', ?)`, ts)
+		return err
+	}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	wantErr := errors.New("rolled back on purpose")
+	if err := s.Update(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO runners (name, created_at) VALUES ('dropped', ?)`, ts); err != nil {
+			t.Fatalf("insert inside update: %v", err)
+		}
+		return wantErr
+	}); err == nil {
+		t.Fatal("update swallowed fn's error")
+	} else if !errors.Is(err, wantErr) {
+		t.Errorf("update error = %v, want fn's error passed through", err)
+	}
+	var names []string
+	if err := s.View(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.Query("SELECT name FROM runners ORDER BY name")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				return err
+			}
+			names = append(names, name)
+		}
+		return rows.Err()
+	}); err != nil {
+		t.Fatalf("view: %v", err)
+	}
+	if want := []string{"kept"}; !slices.Equal(names, want) {
+		t.Errorf("runners after the rollback = %v, want %v", names, want)
+	}
+}
+
 func TestNewerUserVersionIsRefused(t *testing.T) {
 	path, s := openFile(t)
-	exec(t, s.db, "PRAGMA user_version = 2")
+	exec(t, s.db, "PRAGMA user_version = 3")
 	s.Close()
 
 	reopened, err := Open(context.Background(), path)
@@ -216,7 +313,7 @@ func TestNewerUserVersionIsRefused(t *testing.T) {
 	if !errors.Is(err, ErrTooNew) {
 		t.Errorf("error = %v; want it to wrap ErrTooNew", err)
 	}
-	for _, want := range []string{"user_version 2", "latest known migration 1"} {
+	for _, want := range []string{"user_version 3", "latest known migration 2"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}

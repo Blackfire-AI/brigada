@@ -69,3 +69,31 @@ func Open(ctx context.Context, path string) (*Store, error) {
 func (s *Store) Close() error {
 	return s.db.Close()
 }
+
+// Update runs fn in one transaction on the store, committing when fn
+// returns nil and rolling back when it does not. The connection string
+// already makes every transaction begin immediately (see dsn), so fn
+// holds the database's write lock from its first statement: two callers
+// cannot interleave inside fn, whatever pool connection each rides on
+// and however many processes share the file.
+func (s *Store) Update(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	return s.withTx(ctx, fn)
+}
+
+// View is Update named for reads: fn runs in the same single immediate
+// transaction, so what it sees is one consistent snapshot of the store.
+func (s *Store) View(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	return s.withTx(ctx, fn)
+}
+
+func (s *Store) withTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := fn(tx); err != nil {
+		tx.Rollback() // a no-op once nothing was written
+		return err
+	}
+	return tx.Commit()
+}
