@@ -142,12 +142,16 @@ func recordProgressTx(tx *sql.Tx, jobID int64, prog Progress, now time.Time) err
 // exactly one of Result or Error, the check result when the runner ran
 // the task's check, the artifacts the run produced, and the harness
 // session the run ended on — written back so the next session-mode job
-// on the key resumes it (§4.2).
+// on the key resumes it (§4.2). Outcome, when set, names a run the
+// runner stopped itself (§5.6): stalled, or past its class time cap.
+// It rides with a Result — the stopped run's outcome block — and ends
+// the job as stalled rather than done.
 type Completion struct {
 	Result      string
 	Error       string
 	CheckResult string
 	SessionID   string
+	Outcome     string
 	Artifacts   []Artifact
 }
 
@@ -160,7 +164,8 @@ type Artifact struct {
 	SHA256 string
 }
 
-// Complete finishes a job as done or failed. It is accepted while the
+// Complete finishes a job as done or failed — or, when the completion
+// carries a stop outcome, as stalled (§5.6). It is accepted while the
 // lease id matches and the caller is the lease's holder, even after the
 // lease expired and the job went back to queued, as long as nobody
 // re-leased it: a runner returning from an outage delivers its answer
@@ -171,6 +176,15 @@ type Artifact struct {
 func (e *Engine) Complete(ctx context.Context, owner, jobID int64, leaseID string, c Completion) (Answer, error) {
 	if (c.Result == "") == (c.Error == "") {
 		return "", fmt.Errorf("complete job %d: exactly one of result or error is required", jobID)
+	}
+	if c.Outcome != "" {
+		if !isStopOutcome(c.Outcome) {
+			return "", fmt.Errorf("complete job %d: outcome must be %s or %s when set, not %q",
+				jobID, OutcomeStalled, OutcomeTimeCap, c.Outcome)
+		}
+		if c.Error != "" {
+			return "", fmt.Errorf("complete job %d: an outcome names a stopped run's result, not an error", jobID)
+		}
 	}
 	var ans Answer
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
@@ -219,6 +233,9 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 	}
 
 	status := statusDone
+	if c.Outcome != "" {
+		status = statusStalled // both stop outcomes end the job as stalled (§5.6)
+	}
 	result, err := json.Marshal(struct {
 		Result    string `json:"result"`
 		SessionID string `json:"session_id,omitempty"`

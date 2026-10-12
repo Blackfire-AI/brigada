@@ -48,10 +48,22 @@ type Config struct {
 	HeartbeatEvery time.Duration
 	LeaseWait      time.Duration
 	CheckTimeout   time.Duration
-	// StallAfter and ToolCap are the stall policy (§5.6): zero keeps
-	// detection off — it arrives with BP8a-4b.
+	// StallAfter is how long without any worker activity a run counts
+	// as stalled (§5.6); zero keeps the 10-minute default, negative
+	// turns the silence watch off.
 	StallAfter time.Duration
-	ToolCap    time.Duration
+	// ClassCaps overrides the per-class caps (§5.6), keyed by job kind
+	// — work, fix, review, foreman. A zero entry keeps that class's
+	// default, a set field overrides it, a negative one switches that
+	// bound off for the class.
+	ClassCaps map[string]ClassCaps
+	// KillGrace is how long a stopped worker's process tree has between
+	// the runner's SIGTERM and its SIGKILL (§5.6); zero keeps 10 s.
+	KillGrace time.Duration
+	// Clock is the runner's time (§5.6): the wall the activity clock
+	// reads and the tickers the heartbeats beat on. Nil is real time;
+	// tests inject a manual one so no test sleeps minutes.
+	Clock Clock
 	// GitEnv is extra environment for the runner's own git commands —
 	// where its credentials ride when they come from config (§5.1).
 	// They never reach the worker's argv or prompt.
@@ -94,10 +106,76 @@ func (cfg *Config) defaults() error {
 	if cfg.CheckTimeout <= 0 {
 		cfg.CheckTimeout = defaultCheckTimeout
 	}
+	if cfg.StallAfter == 0 {
+		cfg.StallAfter = defaultStallAfter
+	}
+	if cfg.KillGrace <= 0 {
+		cfg.KillGrace = killGrace
+	}
+	cfg.Clock.fill()
+	cfg.ClassCaps = mergeClassCaps(cfg.ClassCaps)
 	if cfg.Log == nil {
 		cfg.Log = slog.Default()
 	}
 	return nil
+}
+
+// The stall policy's defaults (§5.6, §14): a worker silent for 10
+// minutes is stalled, one tool call may stay open for 30, and a killed
+// tree has 10 seconds between the term and the kill.
+const (
+	defaultStallAfter = 10 * time.Minute
+	defaultToolCap    = 30 * time.Minute
+	killGrace         = 10 * time.Second
+)
+
+// ClassCaps are one job class's own bounds (§5.6): how long a single
+// tool call may stay open — the bound on the suspension it buys the
+// stall clock — and how long the whole run may wall. The shipped
+// defaults sit just under the engine's hard caps (§14: 45 m work and
+// fix, 25 m review, 30 m foreman), so a runner that reaches its cap
+// completes the job with a useful result instead of racing the engine's
+// cap to a lost lease. A negative ToolCap leaves an in-flight call
+// suspending the stall clock unbounded — silence inside a tool call is
+// then never a stall — so switch it off only for a class whose long
+// calls are trusted.
+type ClassCaps struct {
+	ToolCap time.Duration
+	TimeCap time.Duration
+}
+
+// defaultClassCaps is what a class gets when nothing overrides it.
+func defaultClassCaps() map[string]ClassCaps {
+	return map[string]ClassCaps{
+		"work":    {ToolCap: defaultToolCap, TimeCap: 40 * time.Minute},
+		"fix":     {ToolCap: defaultToolCap, TimeCap: 40 * time.Minute},
+		"review":  {ToolCap: defaultToolCap, TimeCap: 20 * time.Minute},
+		"foreman": {ToolCap: defaultToolCap, TimeCap: 25 * time.Minute},
+	}
+}
+
+// mergeClassCaps folds the configured per-class caps over the defaults:
+// a set field overrides its default, a zero field keeps it, a negative
+// one switches that bound off for the class. A class the defaults do
+// not know starts from nothing — its tool calls get the 30-minute cap,
+// its runs no wall cap — so an unknown kind is watched for silence but
+// never cut short by a cap it never agreed to.
+func mergeClassCaps(configured map[string]ClassCaps) map[string]ClassCaps {
+	out := defaultClassCaps()
+	for kind, caps := range configured {
+		merged := out[kind]
+		if merged.ToolCap == 0 {
+			merged.ToolCap = defaultToolCap
+		}
+		if caps.ToolCap != 0 {
+			merged.ToolCap = caps.ToolCap
+		}
+		if caps.TimeCap != 0 {
+			merged.TimeCap = caps.TimeCap
+		}
+		out[kind] = merged
+	}
+	return out
 }
 
 // harnessesOffered is the distinct set of harnesses the advertisement

@@ -107,6 +107,17 @@ func TestRunnerFlow(t *testing.T) {
 	if code != http.StatusBadRequest {
 		t.Errorf("complete with neither result nor error = %d, want 400", code)
 	}
+	// An outcome must be one of the runner's stop outcomes (§5.6) and
+	// ride with a result, never an error.
+	for _, body := range []string{
+		fmt.Sprintf(`{"job_id":%d,"lease_id":%q,"result":"r","outcome":"finished"}`, g.JobID, g.LeaseID),
+		fmt.Sprintf(`{"job_id":%d,"lease_id":%q,"error":"e","outcome":"stalled"}`, g.JobID, g.LeaseID),
+	} {
+		code, _, data = e.do(http.MethodPost, "/v1/runner/complete", "r1", "", []byte(body))
+		if code != http.StatusBadRequest {
+			t.Errorf("complete with a bad outcome = %d %s, want 400", code, data)
+		}
+	}
 
 	// The client sees the finished job.
 	code, _, data = e.do(http.MethodGet, fmt.Sprintf("/v1/jobs/%d", jobID), "alice", "", nil)

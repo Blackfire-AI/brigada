@@ -58,6 +58,22 @@ func isTerminal(status string) bool {
 	return false
 }
 
+// The runner's stop outcomes (§5.6): the outcome a completion carries
+// when the runner ended the run itself — the worker stalled, or the
+// run passed its class time cap. Both end the job as stalled; the
+// result block tells the two apart, and the foreman that always takes
+// a stalled job (§5.6) reads it there.
+const (
+	OutcomeStalled = "stalled"
+	OutcomeTimeCap = "time_cap"
+)
+
+// isStopOutcome reports whether outcome is one the runner may complete
+// a run with (§5.6).
+func isStopOutcome(outcome string) bool {
+	return outcome == OutcomeStalled || outcome == OutcomeTimeCap
+}
+
 // Answer is how an engine call went. Errors are reserved for the store
 // and for caller mistakes (a malformed complete); a runner's protocol
 // outcome — lost, gone, fenced out — is an answer, so the caller can
