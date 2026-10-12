@@ -3,13 +3,18 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
 )
 
 // LeaseGrant is a job plus the lease that took it: what a runner needs
-// to run the job and to speak about it afterwards (§12.3).
+// to run the job and to speak about it afterwards (§12.3). The task
+// fields — RepoURL, BaseRef, CheckCmd — are what the runner's workspace
+// and check are made of (§5.1, §5.5); Attempt is the lease count after
+// this one, so a re-dispatched attempt can take a fresh branch name
+// (§6.4).
 type LeaseGrant struct {
 	JobID      int64
 	LeaseOwner int64 // the runner the lease belongs to
@@ -22,6 +27,16 @@ type LeaseGrant struct {
 	LeaseID    string
 	// LeaseExpiresAt is when the lease lapses without a heartbeat.
 	LeaseExpiresAt time.Time
+
+	Harness  string // the job's harness constraint; '' = any (§8)
+	RepoURL  string // the task's own repo, else the project's (§6.1)
+	BaseRef  string // the ref the worktree starts from
+	CheckCmd string // the check the runner runs after a done (§5.5); '' = none
+	Attempt  int64  // leases taken on the job, this one included
+	// ResumeSessionID is the harness session the key's last run ended
+	// on (§4.2), for a session-mode job to resume; empty when the key
+	// never ran or the job is fresh.
+	ResumeSessionID string
 }
 
 // Lease hands the caller the oldest queued job it may run, or nil when
@@ -126,6 +141,21 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				return nil, err
 			}
 		}
+		repo, baseRef, checkCmd, err := taskInfoTx(tx, j)
+		if err != nil {
+			return nil, err
+		}
+		resume := ""
+		if j.Mode == ModeSession {
+			// What the key's last run ended on, if it left a session id
+			// behind (§4.2); empty for the key's first session job.
+			var sid sql.NullString
+			if err := tx.QueryRow("SELECT harness_session_id FROM sessions WHERE key = ?", j.Key).Scan(&sid); err == nil && sid.Valid {
+				resume = sid.String
+			} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("read the session of %s: %w", j.Key, err)
+			}
+		}
 		return &LeaseGrant{
 			JobID:          j.ID,
 			LeaseOwner:     owner,
@@ -137,7 +167,32 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			Prompt:         j.Prompt,
 			LeaseID:        leaseID,
 			LeaseExpiresAt: expires,
+
+			Harness:         j.Harness,
+			RepoURL:         repo,
+			BaseRef:         baseRef,
+			CheckCmd:        checkCmd,
+			Attempt:         j.Attempts + 1,
+			ResumeSessionID: resume,
 		}, nil
 	}
 	return nil, nil // nothing this runner may take
+}
+
+// taskInfoTx reads the workspace fields of a worker job's task: the
+// repo URL (the task's own, else the project's, §6.1) and the base ref,
+// plus the check command the runner runs after a done (§5.5). A foreman
+// turn belongs to no task and gets empty fields.
+func taskInfoTx(tx *sql.Tx, j *jobRow) (repoURL, baseRef, checkCmd string, err error) {
+	if j.TaskID == 0 {
+		return "", "", "", nil
+	}
+	err = tx.QueryRow(`SELECT COALESCE(NULLIF(t.repo_url, ''), p.repo_url), t.base_ref, COALESCE(t.check_cmd, '')
+		FROM tasks t JOIN plans pl ON pl.id = t.plan_id JOIN projects p ON p.id = pl.project_id
+		WHERE t.id = ?`, j.TaskID).
+		Scan(&repoURL, &baseRef, &checkCmd)
+	if err != nil {
+		return "", "", "", fmt.Errorf("read task %d: %w", j.TaskID, err)
+	}
+	return repoURL, baseRef, checkCmd, nil
 }

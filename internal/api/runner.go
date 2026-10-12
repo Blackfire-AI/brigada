@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -15,13 +16,12 @@ import (
 // the body: what the body carries are references (job id, lease id) and
 // payloads, not who is calling.
 
-// handleRegister upserts the runner's row under its token name: the
-// name and last_seen are all that is stored. The advertised harnesses
-// and labels (§5.1, §8) are deliberately not persisted — the dispatcher
-// that would turn them into agent rows is a later phase, and the lease
-// call carries them on every poll, so a runner may change what it
-// offers without re-registering. The advertisement is echoed back only
-// to confirm the body was read.
+// handleRegister upserts the runner's row under its token name and
+// persists its advertisement (§5.1): the agents the body carries
+// replace the runner's set in the agents table, keyed by runner,
+// adapter and model (§11). The per-poll harness and label filter of
+// lease is unchanged: a runner may still widen or narrow what it offers
+// on every poll without re-registering.
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request, id identity) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -30,8 +30,22 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request, id ident
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	runnerID, err := s.eng.Register(r.Context(), id.name)
+	agents := make([]engine.AgentAdvert, len(req.Agents))
+	for i, a := range req.Agents {
+		agents[i] = engine.AgentAdvert{
+			Adapter: a.Adapter, Harness: a.Harness, Model: a.Model,
+			Family: a.Family, Account: a.Account, Classes: a.Classes,
+		}
+	}
+	runnerID, err := s.eng.Register(r.Context(), id.name, agents)
 	if err != nil {
+		// An advertisement the engine refuses is the caller's mistake;
+		// anything else — the store, the engine's own bookkeeping — is
+		// an internal failure, logged and named as one.
+		if errors.Is(err, engine.ErrInvalidAgent) {
+			writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+			return
+		}
 		s.writeInternal(w, r, "register runner "+id.name, err)
 		return
 	}
@@ -40,7 +54,8 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request, id ident
 		Name      string   `json:"name"`
 		Harnesses []string `json:"harnesses"`
 		Labels    []string `json:"labels"`
-	}{runnerID, id.name, nonNil(req.Harnesses), nonNil(req.Labels)})
+		Agents    int      `json:"agents"`
+	}{runnerID, id.name, nonNil(req.Harnesses), nonNil(req.Labels), len(agents)})
 }
 
 // handleLease long-polls for a job (§12.3): it re-asks the engine until
@@ -93,19 +108,33 @@ func (s *Server) handleLease(w http.ResponseWriter, r *http.Request, runnerID in
 	}
 }
 
-// handleHeartbeat reports the runner is still on the job (§12.3). The
-// caller must also be the lease's holder: the engine checks the runner
-// the token names against the runner the job was leased to, and a
-// mismatched runner is lost like any other non-holder.
+// handleHeartbeat reports the runner is still on the job (§12.3), with
+// the worker's progress riding along (§5.6). The caller must also be
+// the lease's holder: the engine checks the runner the token names
+// against the runner the job was leased to, and a mismatched runner is
+// lost like any other non-holder.
 func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request, runnerID int64) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req jobLeaseRequest
+	var req heartbeatRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	ans, expires, err := s.eng.Heartbeat(r.Context(), runnerID, req.JobID, req.LeaseID)
+	prog := engine.Progress{Events: nonNil(req.Events)}
+	if t, err := parseAPITime(req.LastProgressAt); err == nil {
+		prog.LastProgressAt = t
+	} else if req.LastProgressAt != "" {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "last_progress_at: "+err.Error())
+		return
+	}
+	if t, err := parseAPITime(req.LastActivityAt); err == nil {
+		prog.LastActivityAt = t
+	} else if req.LastActivityAt != "" {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "last_activity_at: "+err.Error())
+		return
+	}
+	ans, expires, err := s.eng.Heartbeat(r.Context(), runnerID, req.JobID, req.LeaseID, prog)
 	if err != nil {
 		s.writeInternal(w, r, fmt.Sprintf("heartbeat job %d", req.JobID), err)
 		return
@@ -121,8 +150,9 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request, runnerI
 	}{string(ans), expiry})
 }
 
-// handleComplete delivers the run's outcome (§5.4, §12.3): exactly one
-// of result or error, the harness session the run ended on, and the
+// handleComplete delivers the run's outcome (§5.4, §5.5, §12.3):
+// exactly one of result or error, the check result when the runner ran
+// the task's check, the harness session the run ended on, and the
 // artifacts it produced. As with heartbeat, only the lease's holder may
 // deliver it.
 func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request, runnerID int64) {
@@ -139,9 +169,10 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request, runnerID
 		return
 	}
 	c := engine.Completion{
-		Result:    req.Result,
-		Error:     req.Error,
-		SessionID: req.SessionID,
+		Result:      req.Result,
+		Error:       req.Error,
+		CheckResult: req.CheckResult,
+		SessionID:   req.SessionID,
 	}
 	for _, a := range req.Artifacts {
 		c.Artifacts = append(c.Artifacts, engine.Artifact{
@@ -175,13 +206,26 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request, runnerID 
 }
 
 // advertiseRequest is what a runner tells the engine about itself: the
-// harnesses and labels it offers (§8). In a lease it rides along every
-// poll; in a register it is the row's advertisement. WaitSeconds is the
+// harnesses and labels it offers (§8) and, in a register, the agents it
+// advertises (§5.1). In a lease it rides along every poll; in a
+// register it is the row's advertisement. WaitSeconds is the
 // client-given long-poll wait in seconds (§12.3).
 type advertiseRequest struct {
-	WaitSeconds float64  `json:"wait"`
-	Harnesses   []string `json:"harnesses"`
-	Labels      []string `json:"labels"`
+	WaitSeconds float64       `json:"wait"`
+	Harnesses   []string      `json:"harnesses"`
+	Labels      []string      `json:"labels"`
+	Agents      []agentAdvert `json:"agents"`
+}
+
+// agentAdvert is one advertised (adapter, harness, model) combination
+// (§5.1, §11): what the dispatcher chooses between (§8).
+type agentAdvert struct {
+	Adapter string   `json:"adapter"`
+	Harness string   `json:"harness"`
+	Model   string   `json:"model"`
+	Family  string   `json:"family"`
+	Account string   `json:"account"`
+	Classes []string `json:"classes"`
 }
 
 // jobLeaseRequest names a job and the lease the runner holds on it:
@@ -189,6 +233,16 @@ type advertiseRequest struct {
 type jobLeaseRequest struct {
 	JobID   int64  `json:"job_id"`
 	LeaseID string `json:"lease_id"`
+}
+
+// heartbeatRequest is a jobLeaseRequest plus the worker's progress
+// (§5.6): when it last made progress, the last sign of life, and the
+// last few progress events. The times are RFC 3339.
+type heartbeatRequest struct {
+	jobLeaseRequest
+	LastProgressAt string   `json:"last_progress_at"`
+	LastActivityAt string   `json:"last_activity_at"`
+	Events         []string `json:"events"`
 }
 
 type artifactRequest struct {
@@ -200,10 +254,11 @@ type artifactRequest struct {
 
 type completeRequest struct {
 	jobLeaseRequest
-	Result    string            `json:"result"`
-	Error     string            `json:"error"`
-	SessionID string            `json:"session_id"`
-	Artifacts []artifactRequest `json:"artifacts"`
+	Result      string            `json:"result"`
+	Error       string            `json:"error"`
+	CheckResult string            `json:"check_result"`
+	SessionID   string            `json:"session_id"`
+	Artifacts   []artifactRequest `json:"artifacts"`
 }
 
 type releaseRequest struct {
@@ -212,31 +267,49 @@ type releaseRequest struct {
 }
 
 // jobGrant is a lease grant as the runner receives it (§12.3): the job
-// to run and the lease to speak about it.
+// to run, the lease to speak about it, and the task's workspace fields
+// (§5.1, §5.5).
 type jobGrant struct {
-	JobID          int64     `json:"job_id"`
-	ProjectID      int64     `json:"project_id"`
-	TaskID         int64     `json:"task_id"`
-	Kind           string    `json:"kind"`
-	Mode           string    `json:"mode"`
-	Key            string    `json:"key"`
-	Prompt         string    `json:"prompt"`
-	LeaseID        string    `json:"lease_id"`
-	LeaseExpiresAt time.Time `json:"lease_expires_at"`
+	JobID           int64     `json:"job_id"`
+	ProjectID       int64     `json:"project_id"`
+	TaskID          int64     `json:"task_id"`
+	Kind            string    `json:"kind"`
+	Mode            string    `json:"mode"`
+	Key             string    `json:"key"`
+	Prompt          string    `json:"prompt"`
+	LeaseID         string    `json:"lease_id"`
+	LeaseExpiresAt  time.Time `json:"lease_expires_at"`
+	Harness         string    `json:"harness"`
+	RepoURL         string    `json:"repo_url"`
+	BaseRef         string    `json:"base_ref"`
+	CheckCmd        string    `json:"check_cmd"`
+	Attempt         int64     `json:"attempt"`
+	ResumeSessionID string    `json:"resume_session_id"`
 }
 
 func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 	return &jobGrant{
-		JobID:          g.JobID,
-		ProjectID:      g.ProjectID,
-		TaskID:         g.TaskID,
-		Kind:           string(g.Kind),
-		Mode:           string(g.Mode),
-		Key:            g.Key,
-		Prompt:         g.Prompt,
-		LeaseID:        g.LeaseID,
-		LeaseExpiresAt: g.LeaseExpiresAt,
+		JobID:           g.JobID,
+		ProjectID:       g.ProjectID,
+		TaskID:          g.TaskID,
+		Kind:            string(g.Kind),
+		Mode:            string(g.Mode),
+		Key:             g.Key,
+		Prompt:          g.Prompt,
+		LeaseID:         g.LeaseID,
+		LeaseExpiresAt:  g.LeaseExpiresAt,
+		Harness:         g.Harness,
+		RepoURL:         g.RepoURL,
+		BaseRef:         g.BaseRef,
+		CheckCmd:        g.CheckCmd,
+		Attempt:         g.Attempt,
+		ResumeSessionID: g.ResumeSessionID,
 	}
+}
+
+// parseAPITime reads an RFC 3339 timestamp from a request body.
+func parseAPITime(s string) (time.Time, error) {
+	return time.Parse(time.RFC3339Nano, s)
 }
 
 // submitRequest is the admin submit body (§12.1): the debug path until

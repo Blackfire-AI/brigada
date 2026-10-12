@@ -21,6 +21,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/store"
+	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
 // seedTS is the fixed moment the seeded rows carry; the schema treats
@@ -143,7 +144,10 @@ func newEnvTokens(t *testing.T, tokens string) *env {
 	}
 	e.api = api
 
-	socket := filepath.Join(tmp, "api.sock")
+	// Not under t.TempDir(): its name carries the test's, and on the
+	// platforms with long temporary directories that pushes a socket
+	// path past the kernel's sun_path cap.
+	socket := testsupport.ShortSocketPath(t)
 	l, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("listen on the test socket: %v", err)

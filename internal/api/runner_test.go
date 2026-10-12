@@ -1,7 +1,10 @@
 package api
 
 import (
+	"database/sql"
+
 	"fmt"
+	"github.com/Blackfire-AI/brigada/internal/engine"
 	"net/http"
 	"testing"
 	"time"
@@ -264,5 +267,111 @@ func TestStaleEpochThroughAPI(t *testing.T) {
 		Status string `json:"status"`
 	}](t, data).Status != "leased" {
 		t.Errorf("the leased job after the bump = %d %s, want leased still", code, data)
+	}
+}
+
+// TestRegisterPersistsAgents covers §5.1 through the API: the agents a
+// register carries are upserted into the agents table keyed by runner,
+// adapter and model, and a re-register replaces the runner's set.
+func TestRegisterPersistsAgents(t *testing.T) {
+	e := newEnv(t)
+	body := `{"agents":[
+		{"adapter":"claude","harness":"claude","model":"sonnet","family":"anthropic","account":"work","classes":["implement","review"]},
+		{"adapter":"kimi","harness":"kimi","model":"k2","family":"moonshot","account":"work","classes":["implement"]}
+	]}`
+	code, _, data := e.do(http.MethodPost, "/v1/runner/register", "r1", "", []byte(body))
+	if code != http.StatusOK {
+		t.Fatalf("register with agents: %d %s", code, data)
+	}
+	if got := decode[struct {
+		Agents int `json:"agents"`
+	}](t, data).Agents; got != 2 {
+		t.Errorf("register echoed %d agents, want 2", got)
+	}
+	var runnerID int64
+	var classes string
+	if err := e.st.View(e.ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT a.runner_id, a.classes FROM agents a JOIN runners r ON r.id = a.runner_id
+			WHERE r.name = 'r1' AND a.adapter = 'claude' AND a.model = 'sonnet'`).Scan(&runnerID, &classes)
+	}); err != nil {
+		t.Fatalf("the advertisement was not persisted: %v", err)
+	}
+	if classes != `["implement","review"]` {
+		t.Errorf("classes = %s, want the advertised ones", classes)
+	}
+
+	// A re-register replaces the set: kimi is gone, codex arrives.
+	replace := `{"agents":[{"adapter":"codex","harness":"codex","model":"gpt","family":"openai","account":"work","classes":["review"]}]}`
+	code, _, data = e.do(http.MethodPost, "/v1/runner/register", "r1", "", []byte(replace))
+	if code != http.StatusOK {
+		t.Fatalf("re-register: %d %s", code, data)
+	}
+	var n, kimi int
+	if err := e.st.View(e.ctx, func(tx *sql.Tx) error {
+		if err := tx.QueryRow("SELECT COUNT(*) FROM agents WHERE runner_id = ?", runnerID).Scan(&n); err != nil {
+			return err
+		}
+		return tx.QueryRow("SELECT COUNT(*) FROM agents WHERE runner_id = ? AND adapter = 'kimi'", runnerID).Scan(&kimi)
+	}); err != nil {
+		t.Fatalf("read agents: %v", err)
+	}
+	if n != 1 || kimi != 0 {
+		t.Errorf("agents after re-register = %d (kimi %d), want the set replaced", n, kimi)
+	}
+
+	// An agent missing its key fields is the caller's mistake: 400.
+	bad := `{"agents":[{"adapter":"claude","model":"sonnet"}]}`
+	code, _, data = e.do(http.MethodPost, "/v1/runner/register", "r2", "", []byte(bad))
+	if code != http.StatusBadRequest {
+		t.Errorf("register an agent without a harness: %d %s, want 400", code, data)
+	}
+}
+
+// TestClientRunnerProtocol runs the client side of §12.3 — the same
+// code the runner uses — against the server over the socket: register,
+// lease, heartbeat with progress, release.
+func TestClientRunnerProtocol(t *testing.T) {
+	e := newEnv(t)
+	c := NewClient(e.srv.Listener.Addr().String(), e.secrets["r1"])
+	if err := c.Register(e.ctx, []Agent{{
+		Adapter: "fake", Harness: "fake", Model: "fake-1",
+		Family: "testfam", Account: "acct-1", Classes: []string{"implement"},
+	}}); err != nil {
+		t.Fatalf("client register: %v", err)
+	}
+	jobID := e.submitWork()
+
+	grant, err := c.Lease(e.ctx, 0, []string{"claude"}, []string{"linux"})
+	if err != nil {
+		t.Fatalf("client lease: %v", err)
+	}
+	if grant == nil || grant.JobID != jobID {
+		t.Fatalf("client lease = %+v, want the submitted job", grant)
+	}
+	// The grant carries the task's workspace fields (§5.1).
+	if grant.RepoURL == "" || grant.BaseRef == "" || grant.CheckCmd == "" || grant.Attempt != 1 {
+		t.Errorf("grant fields = %+v, want the task's repo, base ref, check and attempt", grant)
+	}
+
+	ans, expires, err := c.Heartbeat(e.ctx, grant.JobID, grant.LeaseID, Progress{
+		LastProgressAt: time.Now(),
+		Events:         []string{"tool_start Edit"},
+	})
+	if err != nil || ans != engine.AnsOK || expires.IsZero() {
+		t.Fatalf("client heartbeat = %s, %v, %v; want ok with an expiry", ans, expires, err)
+	}
+	ans, err = c.Release(e.ctx, grant.JobID, grant.LeaseID, "done testing")
+	if err != nil || ans != engine.AnsOK {
+		t.Fatalf("client release = %s, %v; want ok", ans, err)
+	}
+	// The releaser holds nothing anymore: a late complete for the same
+	// lease is lost (§12.3).
+	ans, err = c.Complete(e.ctx, grant.JobID, grant.LeaseID, Completion{Result: `{"status":"done"}`})
+	if err != nil || ans != engine.AnsLost {
+		t.Fatalf("complete after release = %s, %v; want lost", ans, err)
+	}
+	// A wrong token is an error, not an answer.
+	if err := NewClient(e.srv.Listener.Addr().String(), "not-the-secret").Register(e.ctx, nil); err == nil {
+		t.Error("an unknown token was accepted, want an error")
 	}
 }

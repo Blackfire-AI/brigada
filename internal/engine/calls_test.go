@@ -56,7 +56,7 @@ func TestHeartbeatAnswers(t *testing.T) {
 		e.submit(e.work())
 		g := e.leaseAny(e.runner1)
 		e.clock.Advance(30 * time.Second)
-		ans, expires, err := e.eng.Heartbeat(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID)
+		ans, expires, err := e.eng.Heartbeat(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, Progress{})
 		if err != nil || ans != AnsOK {
 			t.Fatalf("heartbeat = %s, %v; want ok", ans, err)
 		}
