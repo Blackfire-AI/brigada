@@ -6,8 +6,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 )
+
+// Progress is what a runner's heartbeat carries besides its hold on
+// the job (§5.6): when the worker last made progress, the last sign of
+// life, and the last few progress events. The timestamps land on the
+// job's row; the events ride along for the runs the engine will have to
+// report (a stall), whose storage arrives with the history.
+type Progress struct {
+	LastProgressAt time.Time
+	LastActivityAt time.Time
+	Events         []string
+}
 
 // Heartbeat reports the runner is still on the job and returns ok with
 // a new expiry, or why not (§12.3): cancelled first, then gone for a
@@ -17,8 +29,10 @@ import (
 // the capability, the owner the identity, and both must agree —
 // stale_epoch once a recover fenced the caller out (§6.4), and lost
 // past the hard cap. An expired lease nobody re-leased is revived: the
-// job goes back to leased with the accrual clock restarted.
-func (e *Engine) Heartbeat(ctx context.Context, owner, jobID int64, leaseID string) (Answer, time.Time, error) {
+// job goes back to leased with the accrual clock restarted. Progress
+// from a heartbeat that answers ok is recorded on the row; the others
+// carry no hold, so they record nothing.
+func (e *Engine) Heartbeat(ctx context.Context, owner, jobID int64, leaseID string, prog Progress) (Answer, time.Time, error) {
 	var ans Answer
 	var expires time.Time
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
@@ -27,7 +41,7 @@ func (e *Engine) Heartbeat(ctx context.Context, owner, jobID int64, leaseID stri
 		if err != nil {
 			return err
 		}
-		ans, expires, err = e.heartbeatTx(tx, owner, jobID, leaseID, rep, now)
+		ans, expires, err = e.heartbeatTx(tx, owner, jobID, leaseID, prog, rep, now)
 		if err != nil {
 			return fmt.Errorf("heartbeat job %d: %w", jobID, err)
 		}
@@ -36,7 +50,7 @@ func (e *Engine) Heartbeat(ctx context.Context, owner, jobID int64, leaseID stri
 	return ans, expires, err
 }
 
-func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, rep SweepReport, now time.Time) (Answer, time.Time, error) {
+func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, prog Progress, rep SweepReport, now time.Time) (Answer, time.Time, error) {
 	job, err := loadJobTx(tx, jobID)
 	if err != nil {
 		return "", time.Time{}, err
@@ -79,6 +93,9 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, rep
 		}
 	}
 	expires := now.Add(e.cfg.LeaseTTL)
+	if err := recordProgressTx(tx, job.ID, prog, now); err != nil {
+		return "", time.Time{}, err
+	}
 	if job.Status == statusQueued {
 		// The lease expired and nobody re-leased: revive it. last_leased
 		// restarts here and only here, so the revived lease's wall time
@@ -95,15 +112,43 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, rep
 	return AnsOK, expires, nil
 }
 
-// Completion is a runner's answer for a job (§5.4, §12.3): exactly one
-// of Result or Error, the artifacts the run produced, and the harness
+// recordProgressTx stores a heartbeat's progress timestamps on the job
+// (§5.6): last_progress_at when the worker last made progress,
+// last_activity_at for the last sign of life — a heartbeat with no
+// progress yet still counts as activity, since the runner is on the
+// job. The events are not stored; they ride the protocol for the
+// reports that need them.
+func recordProgressTx(tx *sql.Tx, jobID int64, prog Progress, now time.Time) error {
+	progress, activity := prog.LastProgressAt, prog.LastActivityAt
+	if activity.IsZero() {
+		activity = now
+	}
+	var sets []string
+	var args []any
+	if !progress.IsZero() {
+		sets = append(sets, "last_progress_at = ?")
+		args = append(args, fmtTime(progress))
+	}
+	sets = append(sets, "last_activity_at = ?", "updated_at = ?")
+	args = append(args, fmtTime(activity), fmtTime(now))
+	args = append(args, jobID)
+	if _, err := tx.Exec("UPDATE jobs SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...); err != nil {
+		return fmt.Errorf("record progress on job %d: %w", jobID, err)
+	}
+	return nil
+}
+
+// Completion is a runner's answer for a job (§5.4, §5.5, §12.3):
+// exactly one of Result or Error, the check result when the runner ran
+// the task's check, the artifacts the run produced, and the harness
 // session the run ended on — written back so the next session-mode job
 // on the key resumes it (§4.2).
 type Completion struct {
-	Result    string
-	Error     string
-	SessionID string
-	Artifacts []Artifact
+	Result      string
+	Error       string
+	CheckResult string
+	SessionID   string
+	Artifacts   []Artifact
 }
 
 // Artifact is one stored artifact reference (§9): the session
@@ -193,8 +238,9 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 	accrue := accrualFrom(job.LastLeased, now)
 	if _, err := tx.Exec(`UPDATE jobs SET status = ?, result = ?, done_lease = ?,
 		lease_expires_at = NULL, last_leased = NULL, queued_at = NULL,
-		leased_seconds = leased_seconds + ?, updated_at = ?
-		WHERE id = ?`, status, string(result), leaseID, accrue, fmtTime(now), job.ID); err != nil {
+		leased_seconds = leased_seconds + ?, updated_at = ?,
+		check_result = COALESCE(NULLIF(?, ''), check_result)
+		WHERE id = ?`, status, string(result), leaseID, accrue, fmtTime(now), c.CheckResult, job.ID); err != nil {
 		return "", fmt.Errorf("finish job %d: %w", job.ID, err)
 	}
 	for _, a := range c.Artifacts {

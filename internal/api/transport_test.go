@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
 // unixClient is an HTTP client that talks to a Unix socket path.
@@ -57,7 +59,7 @@ func waitUntilHealthy(t *testing.T, socketPath string, listenErr <-chan error) {
 // file (§12.1).
 func TestListenSocket(t *testing.T) {
 	e := newEnv(t)
-	socketPath := filepath.Join(t.TempDir(), "engine.sock")
+	socketPath := testsupport.ShortSocketPath(t)
 
 	// A file that is not a socket — a typo'd path naming real data — is
 	// refused and left exactly as it was.
@@ -73,7 +75,7 @@ func TestListenSocket(t *testing.T) {
 		t.Errorf("the file at the path was touched: %q, %v", data, err)
 	}
 	// A directory on the path is refused the same way.
-	dirOnPath := filepath.Join(t.TempDir(), "engine.sock")
+	dirOnPath := testsupport.ShortSocketPath(t)
 	if err := os.Mkdir(dirOnPath, 0o700); err != nil {
 		t.Fatalf("make the directory: %v", err)
 	}
