@@ -246,6 +246,33 @@ func TestOpenSetsPragmas(t *testing.T) {
 	}
 }
 
+func TestOpenRefusesQueryAndFragmentChars(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"store?.db", "store#.db"} {
+		path := filepath.Join(dir, name)
+		s, err := Open(context.Background(), path)
+		if err == nil {
+			s.Close()
+			t.Errorf("open %q succeeded; want refusal", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "'?' or '#'") {
+			t.Errorf("open %q error = %v; want it to mention '?' and '#'", name, err)
+		}
+		if _, statErr := os.Stat(path); statErr == nil {
+			t.Errorf("open %q created the file despite refusing", name)
+		}
+	}
+
+	// ":memory:" contains neither character and stays allowed.
+	mem, err := Open(context.Background(), ":memory:")
+	if err != nil {
+		t.Errorf("open :memory:: %v; want it allowed", err)
+	} else {
+		mem.Close()
+	}
+}
+
 func TestMemorySchemaSurvivesThePool(t *testing.T) {
 	s := openMemory(t)
 	insertProject(t, s.db)
@@ -382,6 +409,33 @@ func TestCheckConstraintsRejectBadValues(t *testing.T) {
 				t.Errorf("error = %v; want a CHECK failure", err)
 			}
 		})
+	}
+}
+
+func TestJobTaskPresenceFollowsKind(t *testing.T) {
+	f := newFixture(t)
+
+	// A foreman turn belongs to no task: giving it one is refused.
+	if _, err := f.db.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
+		VALUES (?, ?, 'foreman', 'foreman-with-task', 'session', 'p', 'queued', ?, ?)`, f.project, f.task, ts, ts); err == nil || !strings.Contains(err.Error(), "CHECK") {
+		t.Errorf("foreman job with a task: err = %v; want a CHECK failure", err)
+	}
+
+	// A worker job always belongs to a task: leaving it out is refused,
+	// for every worker kind.
+	for _, kind := range []string{"work", "fix", "review"} {
+		if _, err := f.db.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
+			VALUES (?, NULL, ?, ?, 'fresh', 'p', 'queued', ?, ?)`, f.project, kind, fmt.Sprintf("%s-without-task", kind), ts, ts); err == nil || !strings.Contains(err.Error(), "CHECK") {
+			t.Errorf("%s job without a task: err = %v; want a CHECK failure", kind, err)
+		}
+	}
+
+	// The matched pairs pass: a foreman turn with no task (the fixture's
+	// work job already covers a worker with one).
+	exec(t, f.db, `INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
+		VALUES (?, NULL, 'foreman', ?, 'session', 'wake up', 'queued', ?, ?)`, f.project, fmt.Sprintf("foreman:%d", f.project), ts, ts)
+	if n := queryInt(t, f.db, "SELECT COUNT(*) FROM jobs WHERE kind = 'foreman'"); n != 1 {
+		t.Errorf("foreman jobs = %d, want 1", n)
 	}
 }
 

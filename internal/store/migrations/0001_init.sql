@@ -70,7 +70,9 @@ CREATE TABLE task_deps (
 
 -- One unit of dispatchable work (§12.3, §14). Worker jobs (work, fix,
 -- review) belong to a task; a foreman turn (§4.2) belongs to a project
--- alone, hence the nullable task_id and the project reference.
+-- alone, hence the nullable task_id and the project reference. The CHECK
+-- pins the pairing in both directions: a foreman job with a task and a
+-- worker job without one are each refused.
 -- status: queued, leased and running are live (see the partial index
 -- below); done, failed, cancelled and stalled are terminal — the runner
 -- completes a stalled job as such (§5.6). The worker's done, needs_help
@@ -86,6 +88,9 @@ CREATE TABLE jobs (
     mode              TEXT NOT NULL CHECK (mode IN ('fresh', 'session')),
     prompt            TEXT NOT NULL,                                           -- the composed prompt: template plus verbatim data (§1.4)
     status            TEXT NOT NULL CHECK (status IN ('queued', 'leased', 'running', 'done', 'failed', 'cancelled', 'stalled')),
+    -- The lease columns carry no constraint tying them to the live
+    -- statuses: lease_id, lease_owner, lease_expires_at and fence_token
+    -- are the lease engine's to police, not the schema's.
     lease_id          TEXT,                                                    -- set while a runner holds the job (§12.3)
     lease_owner       INTEGER REFERENCES runners(id) ON DELETE SET NULL,       -- the runner holding the lease
     lease_expires_at  TEXT,                                                    -- expiry is what makes a crashed runner safe (§5.1)
@@ -98,7 +103,8 @@ CREATE TABLE jobs (
     last_activity_at  TEXT,                                                    -- the last sign of life; stalls are measured from it (§5.6)
     transcript_id     INTEGER REFERENCES artifacts(id) ON DELETE SET NULL,     -- the session transcript (§9)
     created_at        TEXT NOT NULL,
-    updated_at        TEXT NOT NULL
+    updated_at        TEXT NOT NULL,
+    CHECK ((kind = 'foreman') = (task_id IS NULL))
 );
 
 -- Artifacts hold what must not be stuffed into the event log: full
