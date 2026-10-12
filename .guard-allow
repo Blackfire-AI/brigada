@@ -1,0 +1,6 @@
+# Exceptions for the leak guard (internal/tools/guard), which runs in CI
+# as `go run ./internal/tools/guard`. One entry per line, `path:regexp`: a
+# finding in the file at path whose line matches the regexp is dropped.
+# Blank lines and lines starting with # are ignored. The file itself is
+# not scanned, so an entry may quote the shape it permits. Keep this
+# empty; any entry must be justified in review.
