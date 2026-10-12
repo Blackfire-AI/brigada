@@ -22,6 +22,7 @@ Usage:
 Commands:
 
 	version    Print the brigada version and exit.
+	help       Print usage and exit.
 `
 
 // run is the entry point of the brigada command. It writes to stdout and
