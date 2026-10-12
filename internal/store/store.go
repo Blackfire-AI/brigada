@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // the pure-Go SQLite driver, so brigada stays one static binary
@@ -40,7 +41,14 @@ func dsn(path string) string {
 // database — which is what tests want. The journal-mode pragma is a
 // harmless no-op there: an in-memory database cannot use write-ahead
 // logging.
+//
+// A path containing '?' or '#' is refused: dsn appends the pragmas as
+// query parameters, so either character would be read as a delimiter and
+// the pragmas would silently not apply.
 func Open(ctx context.Context, path string) (*Store, error) {
+	if strings.ContainsAny(path, "?#") {
+		return nil, fmt.Errorf("open store %s: path must not contain '?' or '#': dsn appends the pragmas as query parameters, so either would be read as a delimiter", path)
+	}
 	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		return nil, fmt.Errorf("open store %s: %w", path, err)
