@@ -98,7 +98,7 @@ func TestSweepHardCaps(t *testing.T) {
 		r := e.submit(e.work())
 		g := e.leaseAny(e.runner1)
 		e.clock.Advance(46 * time.Minute)
-		ans, _, err := e.eng.Heartbeat(e.ctx, g.JobID, g.LeaseID)
+		ans, _, err := e.eng.Heartbeat(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID)
 		if err != nil {
 			t.Fatalf("heartbeat: %v", err)
 		}
@@ -110,7 +110,7 @@ func TestSweepHardCaps(t *testing.T) {
 		}
 		// A later heartbeat on the same failed job is gone, not lost:
 		// nothing of that call capped it.
-		if ans, _, _ := e.eng.Heartbeat(e.ctx, g.JobID, g.LeaseID); ans != AnsGone {
+		if ans, _, _ := e.eng.Heartbeat(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID); ans != AnsGone {
 			t.Errorf("later heartbeat = %s; want gone", ans)
 		}
 	})

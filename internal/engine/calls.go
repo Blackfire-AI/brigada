@@ -13,11 +13,12 @@ import (
 // a new expiry, or why not (§12.3): cancelled first, then gone for a
 // job that ended (lost, not gone, when this very call's sweep just
 // hard-capped the lease the caller holds), lost for a lease id that is
-// no longer the job's, stale_epoch once a recover fenced the caller
-// out (§6.4), and lost past the hard cap. An expired lease nobody
-// re-leased is revived: the job goes back to leased with the accrual
-// clock restarted.
-func (e *Engine) Heartbeat(ctx context.Context, jobID int64, leaseID string) (Answer, time.Time, error) {
+// no longer the job's or one the caller does not hold — the lease id is
+// the capability, the owner the identity, and both must agree —
+// stale_epoch once a recover fenced the caller out (§6.4), and lost
+// past the hard cap. An expired lease nobody re-leased is revived: the
+// job goes back to leased with the accrual clock restarted.
+func (e *Engine) Heartbeat(ctx context.Context, owner, jobID int64, leaseID string) (Answer, time.Time, error) {
 	var ans Answer
 	var expires time.Time
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
@@ -26,7 +27,7 @@ func (e *Engine) Heartbeat(ctx context.Context, jobID int64, leaseID string) (An
 		if err != nil {
 			return err
 		}
-		ans, expires, err = e.heartbeatTx(tx, jobID, leaseID, rep, now)
+		ans, expires, err = e.heartbeatTx(tx, owner, jobID, leaseID, rep, now)
 		if err != nil {
 			return fmt.Errorf("heartbeat job %d: %w", jobID, err)
 		}
@@ -35,7 +36,7 @@ func (e *Engine) Heartbeat(ctx context.Context, jobID int64, leaseID string) (An
 	return ans, expires, err
 }
 
-func (e *Engine) heartbeatTx(tx *sql.Tx, jobID int64, leaseID string, rep SweepReport, now time.Time) (Answer, time.Time, error) {
+func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, rep SweepReport, now time.Time) (Answer, time.Time, error) {
 	job, err := loadJobTx(tx, jobID)
 	if err != nil {
 		return "", time.Time{}, err
@@ -51,6 +52,11 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, jobID int64, leaseID string, rep SweepR
 		}
 		return AnsGone, time.Time{}, nil
 	case job.LeaseID == "" || job.LeaseID != leaseID:
+		return AnsLost, time.Time{}, nil
+	case job.LeaseOwner != owner:
+		// The lease id matches but the caller is not its holder: the
+		// heartbeat of a runner the job was never leased to is lost, so
+		// one runner cannot keep another's lease alive.
 		return AnsLost, time.Time{}, nil
 	}
 	epoch, err := epochTx(tx)
@@ -110,13 +116,14 @@ type Artifact struct {
 }
 
 // Complete finishes a job as done or failed. It is accepted while the
-// lease id matches, even after the lease expired and the job went back
-// to queued, as long as nobody re-leased it: a runner returning from an
-// outage delivers its answer instead of forcing a re-run (§12.3). It
-// is idempotent per lease id, answers gone when the job was finished by
-// someone else, lost after a re-lease, and cancelled when the job was
-// cancelled.
-func (e *Engine) Complete(ctx context.Context, jobID int64, leaseID string, c Completion) (Answer, error) {
+// lease id matches and the caller is the lease's holder, even after the
+// lease expired and the job went back to queued, as long as nobody
+// re-leased it: a runner returning from an outage delivers its answer
+// instead of forcing a re-run (§12.3). It is idempotent per lease id,
+// answers gone when the job was finished by someone else, lost after a
+// re-lease or from a runner that does not hold the lease, and cancelled
+// when the job was cancelled.
+func (e *Engine) Complete(ctx context.Context, owner, jobID int64, leaseID string, c Completion) (Answer, error) {
 	if (c.Result == "") == (c.Error == "") {
 		return "", fmt.Errorf("complete job %d: exactly one of result or error is required", jobID)
 	}
@@ -126,7 +133,7 @@ func (e *Engine) Complete(ctx context.Context, jobID int64, leaseID string, c Co
 		if _, err := sweepTx(tx, e.cfg, now); err != nil {
 			return err
 		}
-		a, err := e.completeTx(tx, jobID, leaseID, c, now)
+		a, err := e.completeTx(tx, owner, jobID, leaseID, c, now)
 		if err != nil {
 			return fmt.Errorf("complete job %d: %w", jobID, err)
 		}
@@ -136,7 +143,7 @@ func (e *Engine) Complete(ctx context.Context, jobID int64, leaseID string, c Co
 	return ans, err
 }
 
-func (e *Engine) completeTx(tx *sql.Tx, jobID int64, leaseID string, c Completion, now time.Time) (Answer, error) {
+func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Completion, now time.Time) (Answer, error) {
 	job, err := loadJobTx(tx, jobID)
 	if err != nil {
 		return "", err
@@ -152,6 +159,10 @@ func (e *Engine) completeTx(tx *sql.Tx, jobID int64, leaseID string, c Completio
 		}
 		return AnsGone, nil
 	case job.LeaseID == "" || job.LeaseID != leaseID:
+		return AnsLost, nil
+	case job.LeaseOwner != owner:
+		// As in release: the lease id is the capability, the owner the
+		// identity, and a completion from anyone else is lost.
 		return AnsLost, nil
 	}
 	epoch, err := epochTx(tx)

@@ -56,7 +56,7 @@ func TestHeartbeatAnswers(t *testing.T) {
 		e.submit(e.work())
 		g := e.leaseAny(e.runner1)
 		e.clock.Advance(30 * time.Second)
-		ans, expires, err := e.eng.Heartbeat(e.ctx, g.JobID, g.LeaseID)
+		ans, expires, err := e.eng.Heartbeat(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID)
 		if err != nil || ans != AnsOK {
 			t.Fatalf("heartbeat = %s, %v; want ok", ans, err)
 		}
@@ -110,10 +110,10 @@ func TestCompleteValidatesItsArguments(t *testing.T) {
 	e.submit(e.work())
 	g := e.leaseAny(e.runner1)
 
-	if _, err := e.eng.Complete(e.ctx, g.JobID, g.LeaseID, Completion{Result: "r", Error: "e"}); err == nil {
+	if _, err := e.eng.Complete(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, Completion{Result: "r", Error: "e"}); err == nil {
 		t.Error("complete with both result and error succeeded; want refusal")
 	}
-	if _, err := e.eng.Complete(e.ctx, g.JobID, g.LeaseID, Completion{}); err == nil {
+	if _, err := e.eng.Complete(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, Completion{}); err == nil {
 		t.Error("complete with neither result nor error succeeded; want refusal")
 	}
 	if status := e.str("SELECT status FROM jobs WHERE id = ?", g.JobID); status != statusLeased {
@@ -178,7 +178,7 @@ func TestCompleteIdempotentPerLease(t *testing.T) {
 		t.Errorf("artifacts = %d, want 1: the repeat stored nothing", got)
 	}
 	// Someone else's lease id gets gone, not already.
-	if ans, err := e.eng.Complete(e.ctx, g.JobID, "9-deadbeef", c); err != nil || ans != AnsGone {
+	if ans, err := e.eng.Complete(e.ctx, g.LeaseOwner, g.JobID, "9-deadbeef", c); err != nil || ans != AnsGone {
 		t.Errorf("complete with a foreign lease = %s, %v; want gone", ans, err)
 	}
 }
