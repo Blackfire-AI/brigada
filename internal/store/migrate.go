@@ -1,0 +1,142 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"embed"
+	"errors"
+	"fmt"
+	"io/fs"
+	"path"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// The schema migrations, one numbered file each, embedded so the single
+// binary carries them and the store stays self-contained (design §1.5).
+//
+//go:embed migrations/*.sql
+var migrationFS embed.FS
+
+// migration is one numbered schema change. version is the PRAGMA
+// user_version the store reaches once the migration has committed.
+type migration struct {
+	version int
+	name    string
+	sql     string
+}
+
+// allMigrations returns the embedded migrations in order. The numbering
+// must start at 1 with no gaps or duplicates: user_version doubles as a
+// count of applied migrations, which is what lets a binary tell an old
+// store from one from the future.
+func allMigrations() ([]migration, error) {
+	files, err := fs.Glob(migrationFS, "migrations/*.sql")
+	if err != nil {
+		return nil, err
+	}
+	var migs []migration
+	for _, file := range files {
+		base := strings.TrimSuffix(path.Base(file), ".sql")
+		num, name, ok := strings.Cut(base, "_")
+		if !ok {
+			return nil, fmt.Errorf("migration %s: file name must be <number>_<name>.sql", file)
+		}
+		version, err := strconv.Atoi(num)
+		if err != nil {
+			return nil, fmt.Errorf("migration %s: file name must be <number>_<name>.sql", file)
+		}
+		content, err := migrationFS.ReadFile(file)
+		if err != nil {
+			return nil, err
+		}
+		migs = append(migs, migration{version: version, name: name, sql: string(content)})
+	}
+	sort.Slice(migs, func(i, j int) bool { return migs[i].version < migs[j].version })
+	for i, m := range migs {
+		if m.version != i+1 {
+			return nil, fmt.Errorf("migrations must be numbered 1..%d in order; %04d_%s is out of place", len(migs), m.version, m.name)
+		}
+	}
+	return migs, nil
+}
+
+// ErrTooNew reports a store whose user_version is newer than the newest
+// migration this binary carries. An older binary must refuse such a store
+// outright rather than guess its way through a newer schema.
+var ErrTooNew = errors.New("store schema is newer than this binary")
+
+// migrate brings the store up to this binary's newest migration. An
+// up-to-date store is left untouched; a store from the future is refused
+// with an error wrapping ErrTooNew.
+func (s *Store) migrate(ctx context.Context) error {
+	migs, err := allMigrations()
+	if err != nil {
+		return err
+	}
+	version, err := s.userVersion(ctx)
+	if err != nil {
+		return err
+	}
+	if version > len(migs) {
+		return fmt.Errorf("%w: user_version %d, latest known migration %d; upgrade brigada first", ErrTooNew, version, len(migs))
+	}
+	for _, m := range migs[version:] {
+		if err := s.apply(ctx, m); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// apply runs one migration in its own transaction and sets user_version
+// on the same commit, so a failure anywhere leaves the store exactly as
+// it was. The version is read again inside the transaction: another
+// process may have migrated concurrently while this Open waited on the
+// write lock, and re-applying would then fail on the existing tables.
+func (s *Store) apply(ctx context.Context, m migration) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("migration %04d_%s: %w", m.version, m.name, err)
+	}
+	defer tx.Rollback() // a no-op once the commit below succeeds
+	version, err := userVersionTx(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("migration %04d_%s: %w", m.version, m.name, err)
+	}
+	switch {
+	case version >= m.version: // someone migrated concurrently
+		return tx.Commit()
+	case version != m.version-1:
+		return fmt.Errorf("migration %04d_%s: store is at version %d, want %d; the store changed under us", m.version, m.name, version, m.version-1)
+	}
+	if _, err := tx.ExecContext(ctx, m.sql); err != nil {
+		return fmt.Errorf("migration %04d_%s: %w", m.version, m.name, err)
+	}
+	if _, err := tx.ExecContext(ctx, "PRAGMA user_version = "+strconv.Itoa(m.version)); err != nil {
+		return fmt.Errorf("migration %04d_%s: set user_version: %w", m.version, m.name, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("migration %04d_%s: commit: %w", m.version, m.name, err)
+	}
+	return nil
+}
+
+// userVersion reads PRAGMA user_version, the store's schema version.
+func (s *Store) userVersion(ctx context.Context) (int, error) {
+	var version int
+	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return 0, fmt.Errorf("read user_version: %w", err)
+	}
+	return version, nil
+}
+
+// userVersionTx is userVersion inside a migration's transaction.
+func userVersionTx(ctx context.Context, tx *sql.Tx) (int, error) {
+	var version int
+	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return 0, fmt.Errorf("read user_version: %w", err)
+	}
+	return version, nil
+}
