@@ -218,7 +218,7 @@ func (e *env) leaseAny(owner int64) *LeaseGrant {
 
 func (e *env) heartbeat(g *LeaseGrant) Answer {
 	e.t.Helper()
-	ans, _, err := e.eng.Heartbeat(e.ctx, g.JobID, g.LeaseID)
+	ans, _, err := e.eng.Heartbeat(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID)
 	if err != nil {
 		e.t.Fatalf("heartbeat job %d: %v", g.JobID, err)
 	}
@@ -227,7 +227,7 @@ func (e *env) heartbeat(g *LeaseGrant) Answer {
 
 func (e *env) complete(g *LeaseGrant, c Completion) Answer {
 	e.t.Helper()
-	ans, err := e.eng.Complete(e.ctx, g.JobID, g.LeaseID, c)
+	ans, err := e.eng.Complete(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, c)
 	if err != nil {
 		e.t.Fatalf("complete job %d: %v", g.JobID, err)
 	}

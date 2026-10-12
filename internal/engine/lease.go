@@ -11,14 +11,15 @@ import (
 // LeaseGrant is a job plus the lease that took it: what a runner needs
 // to run the job and to speak about it afterwards (§12.3).
 type LeaseGrant struct {
-	JobID     int64
-	ProjectID int64
-	TaskID    int64 // 0 for a foreman turn
-	Kind      Kind
-	Mode      Mode
-	Key       string
-	Prompt    string
-	LeaseID   string
+	JobID      int64
+	LeaseOwner int64 // the runner the lease belongs to
+	ProjectID  int64
+	TaskID     int64 // 0 for a foreman turn
+	Kind       Kind
+	Mode       Mode
+	Key        string
+	Prompt     string
+	LeaseID    string
 	// LeaseExpiresAt is when the lease lapses without a heartbeat.
 	LeaseExpiresAt time.Time
 }
@@ -127,6 +128,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		}
 		return &LeaseGrant{
 			JobID:          j.ID,
+			LeaseOwner:     owner,
 			ProjectID:      j.ProjectID,
 			TaskID:         j.TaskID,
 			Kind:           j.Kind,

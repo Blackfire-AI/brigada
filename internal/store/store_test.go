@@ -166,8 +166,8 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 		t.Fatalf("open did not create the file: %v", err)
 	}
 	want := []string{
-		"agents", "artifacts", "events", "jobs", "messages", "meta",
-		"outcomes", "plans", "projects", "questions", "runners",
+		"agents", "artifacts", "events", "idempotency", "jobs", "messages",
+		"meta", "outcomes", "plans", "projects", "questions", "runners",
 		"sessions", "task_deps", "tasks", "tokens",
 	}
 	got := queryStrings(t, s.db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
@@ -182,8 +182,8 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 
 func TestReopenUpToDateStoreIsNoOp(t *testing.T) {
 	path, s := openFile(t)
-	if v, err := s.userVersion(context.Background()); err != nil || v != 2 {
-		t.Fatalf("user_version after the first open = %d, %v; want 2", v, err)
+	if v, err := s.userVersion(context.Background()); err != nil || v != 3 {
+		t.Fatalf("user_version after the first open = %d, %v; want 3", v, err)
 	}
 	insertProject(t, s.db)
 	s.Close()
@@ -195,8 +195,8 @@ func TestReopenUpToDateStoreIsNoOp(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer again.Close()
-	if v, err := again.userVersion(context.Background()); err != nil || v != 2 {
-		t.Errorf("user_version after reopen = %d, %v; want 2", v, err)
+	if v, err := again.userVersion(context.Background()); err != nil || v != 3 {
+		t.Errorf("user_version after reopen = %d, %v; want 3", v, err)
 	}
 	if n := queryInt(t, again.db, "SELECT COUNT(*) FROM projects"); n != 1 {
 		t.Errorf("projects after reopen = %d, want 1", n)
@@ -235,8 +235,11 @@ func TestOpenUpgradesAV1Store(t *testing.T) {
 		t.Fatalf("upgrade: %v", err)
 	}
 	defer s.Close()
-	if v, err := s.userVersion(context.Background()); err != nil || v != 2 {
-		t.Errorf("user_version after upgrade = %d, %v; want 2", v, err)
+	if v, err := s.userVersion(context.Background()); err != nil || v != 3 {
+		t.Errorf("user_version after upgrade = %d, %v; want 3", v, err)
+	}
+	if got := queryStrings(t, s.db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'idempotency'"); len(got) != 1 {
+		t.Errorf("idempotency table after upgrade = %v, want it created", got)
 	}
 	got := queryStrings(t, s.db, "SELECT name FROM pragma_table_info('jobs')")
 	for _, want := range []string{
@@ -302,7 +305,7 @@ func TestUpdateCommitsAndRollsBack(t *testing.T) {
 
 func TestNewerUserVersionIsRefused(t *testing.T) {
 	path, s := openFile(t)
-	exec(t, s.db, "PRAGMA user_version = 3")
+	exec(t, s.db, "PRAGMA user_version = 4")
 	s.Close()
 
 	reopened, err := Open(context.Background(), path)
@@ -313,7 +316,7 @@ func TestNewerUserVersionIsRefused(t *testing.T) {
 	if !errors.Is(err, ErrTooNew) {
 		t.Errorf("error = %v; want it to wrap ErrTooNew", err)
 	}
-	for _, want := range []string{"user_version 3", "latest known migration 2"} {
+	for _, want := range []string{"user_version 4", "latest known migration 3"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
