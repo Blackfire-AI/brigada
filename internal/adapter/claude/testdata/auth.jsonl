@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"sess-3","model":"sonnet","tools":["Read","Edit"]}
+{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Invalid API key provided. Please run /login to authenticate, then try again.","session_id":"sess-3"}

@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"sess-2","model":"sonnet","tools":["Read","Edit"]}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Working on the fix."}]}}
+{"type":"result","subtype":"error_limit","is_error":true,"result":"You've hit your usage limit. Try again at 9pm.","session_id":"sess-2"}

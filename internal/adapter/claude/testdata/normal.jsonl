@@ -1,0 +1,11 @@
+{"type":"system","subtype":"init","session_id":"sess-1","model":"sonnet","tools":["Read","Edit","Bash"]}
+claude-code 2.0.1 — starting headless session
+
+{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the task, then adding the file."}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"toolu-1","input":{"file_path":"README.md"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu-1","content":"# hello\n","is_error":false}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Now the edit."},{"type":"tool_use","name":"Edit","id":"toolu-2","input":{"file_path":"work.txt"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu-2","is_error":false}]}}
+{"type":"stream_event","data":"thinking"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Added work.txt."}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"Added work.txt.\n\n```json\n{\"status\": \"done\", \"summary\": \"added work.txt\", \"branch\": \"task-7-1\"}\n```","session_id":"sess-1","usage":{"input_tokens":120,"output_tokens":80}}
