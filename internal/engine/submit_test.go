@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"path/filepath"
 	"sync"
 	"testing"
 )
@@ -77,9 +78,12 @@ func TestSubmitCoalescesBehindLiveJob(t *testing.T) {
 	}
 }
 
-func TestConcurrentSubmitsCoalesce(t *testing.T) {
-	e := newEnv(t)
-	const n = 8
+// raceSubmits fires n concurrent submits of the same work job at e and
+// returns the one job they raced to create. Every submit must come back
+// created or pending — exactly one created, the rest pending behind it —
+// never an error: the loser of the one-live-job-per-key race coalesces.
+func raceSubmits(t *testing.T, e *env, n int) SubmitResult {
+	t.Helper()
 	results := make([]SubmitResult, n)
 	var errs []error
 	var mu sync.Mutex
@@ -125,6 +129,28 @@ func TestConcurrentSubmitsCoalesce(t *testing.T) {
 			t.Errorf("pending submit pointed at job %d; want the live job %d", res.JobID, created.JobID)
 		}
 	}
+	return created
+}
+
+func TestConcurrentSubmitsCoalesce(t *testing.T) {
+	e := newEnv(t)
+	created := raceSubmits(t, e, 8)
+	if got := e.int("SELECT COUNT(*) FROM jobs"); got != 1 {
+		t.Errorf("jobs after the race = %d, want 1", got)
+	}
+	if n := e.int("SELECT followup FROM jobs WHERE id = ?", created.JobID); n != 1 {
+		t.Errorf("live job followup = %d, want 1", n)
+	}
+}
+
+// The same race on a file-backed store: the pool hands the goroutines
+// several real connections to one database, so they contend on the
+// unique live-job index across connections and the losers take the
+// pending path from other connections, not just after the winner on a
+// shared one.
+func TestConcurrentSubmitsCoalesceOnFileStore(t *testing.T) {
+	e := newEnvAt(t, filepath.Join(t.TempDir(), "jobs.db"), nil)
+	created := raceSubmits(t, e, 8)
 	if got := e.int("SELECT COUNT(*) FROM jobs"); got != 1 {
 		t.Errorf("jobs after the race = %d, want 1", got)
 	}
@@ -270,5 +296,65 @@ func TestSubmitRestartRounds(t *testing.T) {
 	}
 	if got := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ?", e.task); got != 3 {
 		t.Errorf("task jobs = %d, want 3 (the original and two restarts)", got)
+	}
+}
+
+// A restart is its own budget (§14): a restarted fix or review counts
+// against the restart cap alone, never against the cap of the kind it
+// restarts, and the plain fix/review rounds still get their full
+// allowance after the restarts.
+func TestSubmitRestartedFixAndReviewCountAgainstRestartCapOnly(t *testing.T) {
+	for _, tc := range []struct {
+		kind       Kind
+		plainCap   int
+		restartCap int
+	}{
+		{KindFix, 3, 2},
+		{KindReview, 3, 2},
+	} {
+		t.Run(string(tc.kind), func(t *testing.T) {
+			e := newEnv(t)
+			round := func(restart bool) SubmitParams {
+				p := e.work()
+				p.Kind = tc.kind
+				p.Mode = ModeSession
+				p.Restart = restart
+				return p
+			}
+			run := func(p SubmitParams) {
+				t.Helper()
+				r := e.submit(p)
+				if r.Answer != AnsCreated {
+					t.Fatalf("submit = %s; want created", r.Answer)
+				}
+				g := e.leaseAny(e.runner1)
+				if g == nil || e.complete(g, done()) != AnsOK {
+					t.Fatal("the round did not run to completion")
+				}
+			}
+
+			// One plain round, then restarts to the restart cap: the
+			// restarts must not consume the plain rounds' budget.
+			run(round(false))
+			for i := 0; i < tc.restartCap; i++ {
+				run(round(true))
+			}
+			if r := e.submit(round(true)); r.Answer != AnsCapped {
+				t.Fatalf("one restart too many = %s; want capped against the restart cap", r.Answer)
+			}
+
+			// The plain cap is untouched by the restarts: the remaining
+			// plain rounds still fit, and only then is the cap spent.
+			for i := 1; i < tc.plainCap; i++ {
+				run(round(false))
+			}
+			if r := e.submit(round(false)); r.Answer != AnsCapped {
+				t.Fatalf("plain round past the %s cap = %s; want capped", tc.kind, r.Answer)
+			}
+			if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = ?", string(tc.kind)); got != int64(tc.plainCap+tc.restartCap) {
+				t.Errorf("%s jobs = %d, want %d (%d plain and %d restarts)",
+					tc.kind, got, tc.plainCap+tc.restartCap, tc.plainCap, tc.restartCap)
+			}
+		})
 	}
 }

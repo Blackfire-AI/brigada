@@ -203,8 +203,11 @@ func (e *Engine) completeTx(tx *sql.Tx, jobID int64, leaseID string, c Completio
 // Release gives a job back (§12.3): queued again with the attempt
 // refunded and the lease cleared — a late heartbeat or complete from
 // the releaser is lost — while the releaser does not see the job again
-// until the exclusion lapses. The reason is kept, bounded to 500 bytes.
-// Idempotent per lease id.
+// until the exclusion lapses. The caller must be the lease's owner: a
+// release under anyone else's name is lost, so released_by and the
+// exclusion window can never be pinned on a runner that does not hold
+// the lease. The reason is kept, bounded to 500 bytes. Idempotent per
+// lease id.
 func (e *Engine) Release(ctx context.Context, owner, jobID int64, leaseID, reason string) (Answer, error) {
 	var ans Answer
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
@@ -237,6 +240,11 @@ func (e *Engine) releaseTx(tx *sql.Tx, owner, jobID int64, leaseID, reason strin
 	case isTerminal(job.Status):
 		return AnsGone, nil
 	case job.LeaseID == "" || job.LeaseID != leaseID:
+		return AnsLost, nil
+	case job.LeaseOwner != owner:
+		// The lease id matches but the caller is not its holder: losing
+		// here keeps released_by — and with it the exclusion window —
+		// from landing on a runner the job was never leased to.
 		return AnsLost, nil
 	}
 	epoch, err := epochTx(tx)
