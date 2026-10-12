@@ -23,13 +23,20 @@ func unixClient(t *testing.T, socketPath string) *http.Client {
 }
 
 // waitUntilHealthy polls the socket until the engine answers, so a test
-// never races the server's startup.
-func waitUntilHealthy(t *testing.T, socketPath string) {
+// never races the server's startup. A Listen that returned before ever
+// serving — the bind refused, an over-long path — fails the test right
+// away with that error instead of a five-second "never answered".
+func waitUntilHealthy(t *testing.T, socketPath string, listenErr <-chan error) {
 	t.Helper()
 	client := unixClient(t, socketPath)
 	defer client.CloseIdleConnections()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
+		select {
+		case err := <-listenErr:
+			t.Fatalf("Listen on %s returned %v before the engine ever answered", socketPath, err)
+		default:
+		}
 		resp, err := client.Get("http://brigada/v1/health")
 		if err == nil {
 			resp.Body.Close()
@@ -87,7 +94,7 @@ func TestListenSocket(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() { served <- e.api.Listen(ctx, socketPath) }()
-	waitUntilHealthy(t, socketPath)
+	waitUntilHealthy(t, socketPath, served)
 
 	info, err := os.Stat(socketPath)
 	if err != nil {
@@ -114,15 +121,82 @@ func TestListenSocket(t *testing.T) {
 		t.Errorf("socket file after shutdown = %v, want it removed", err)
 	}
 
-	// And once more from a clean path, so the bind-and-rename itself is
-	// what served the last round's health checks too.
+	// And once more from a clean path, so the bind itself is what served
+	// the last round's health checks too.
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	served2 := make(chan error, 1)
 	go func() { served2 <- e.api.Listen(ctx2, socketPath) }()
-	waitUntilHealthy(t, socketPath)
+	waitUntilHealthy(t, socketPath, served2)
 	cancel2()
 	if err := <-served2; err != nil {
 		t.Fatalf("Listen over a stale socket = %v, want nil", err)
+	}
+}
+
+// TestListenSocket100BytePath: a socket path of exactly 100 bytes — one
+// every kernel's sun_path takes — binds and serves. The old scheme
+// bound at a staged name some 30 bytes longer and renamed it onto the
+// final path, which pushed such paths past the cap and failed the bind.
+func TestListenSocket100BytePath(t *testing.T) {
+	e := newEnv(t)
+	// A short root — one letter plus MkdirTemp's suffix under the temp
+	// dir — so a padded directory name can land the socket on exactly
+	// 100 bytes: root + "/" + pad + "/" + "s".
+	root, err := os.MkdirTemp("", "b")
+	if err != nil {
+		t.Fatalf("make the short temp root: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(root) })
+	pad := 97 - len(root)
+	if pad < 1 {
+		t.Skipf("the temp root %s is %d bytes; no room for a 100-byte socket path under it", root, len(root))
+	}
+	if err := os.Mkdir(filepath.Join(root, strings.Repeat("p", pad)), 0o700); err != nil {
+		t.Fatalf("make the padded directory: %v", err)
+	}
+	socketPath := filepath.Join(root, strings.Repeat("p", pad), "s")
+	if len(socketPath) != 100 {
+		t.Fatalf("socket path %s is %d bytes, want exactly 100", socketPath, len(socketPath))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	served := make(chan error, 1)
+	go func() { served <- e.api.Listen(ctx, socketPath) }()
+	waitUntilHealthy(t, socketPath, served)
+	cancel()
+	if err := <-served; err != nil {
+		t.Fatalf("Listen on the 100-byte path = %v, want nil", err)
+	}
+	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
+		t.Errorf("socket file after shutdown = %v, want it removed", err)
+	}
+}
+
+// TestListenSocketPathTooLong: a path past the sun_path cap is refused
+// up front, with the limit named and a way out, not a cryptic bind
+// failure — and nothing is created on the way out.
+func TestListenSocketPathTooLong(t *testing.T) {
+	e := newEnv(t)
+	root := t.TempDir()
+	if n := 109 - len(root); n < 1 {
+		t.Skipf("the temp root %s is %d bytes; no room for a 110-byte socket path under it", root, len(root))
+	}
+	long := filepath.Join(root, strings.Repeat("p", 109-len(root)))
+	if len(long) != 110 {
+		t.Fatalf("socket path %s is %d bytes, want exactly 110", long, len(long))
+	}
+	err := e.api.Listen(context.Background(), long)
+	if err == nil {
+		t.Fatal("Listen on a 110-byte path succeeded; want the length refusal")
+	}
+	for _, want := range []string{"104", "shorter state directory"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal = %v, want it to say %q", err, want)
+		}
+	}
+	if _, statErr := os.Stat(long); !os.IsNotExist(statErr) {
+		t.Errorf("the over-long path was touched: %v", statErr)
 	}
 }
 

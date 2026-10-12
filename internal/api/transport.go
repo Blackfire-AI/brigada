@@ -9,7 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -69,6 +69,18 @@ func (s *Server) Listen(ctx context.Context, socketPath string) error {
 // finish before it closes their connections.
 const shutdownGrace = 5 * time.Second
 
+// maxSocketPath is the longest Unix socket path the kernel accepts:
+// sockaddr_un.sun_path holds 104 bytes on macOS (108 on Linux), and a
+// bind past the cap fails with a bare "invalid argument" that names
+// nothing. Paths at or over the cap are refused up front instead.
+const maxSocketPath = 104
+
+// listenMu holds the umask window in listenSocket to one caller at a
+// time: the umask belongs to the whole process, so two concurrent
+// Listens here could interleave their set and restore and one socket
+// would be born world-accessible.
+var listenMu sync.Mutex
+
 // listenSocket binds the Unix socket at path, mode 0600: only the
 // engine's own user may talk to it.
 //
@@ -79,12 +91,18 @@ const shutdownGrace = 5 * time.Second
 // that neither connects nor is refused — a timeout, a permission error
 // — cannot prove staleness, so it is refused too.
 //
-// The socket is never briefly world-accessible: it is bound under a
-// freshly created 0700 directory (net.Listen itself creates the file
-// 0777 masked only by the umask), tightened to 0600 there, and only
-// then renamed onto path — an atomic replacement that also disposes of
-// a stale leftover in one step.
+// The socket is bound in place, at path itself, so no staging name can
+// push a workable path over the sun_path cap. net.Listen creates the
+// file 0777 masked by the umask, so a 0177 umask held only around the
+// call — restored right after, under listenMu, since the umask is
+// process-wide — makes it 0600 from birth; the Chmod below is a belt.
+// If another engine wins the race for the just-emptied path, the bind
+// answers EADDRINUSE, which is reported as a live engine, never stolen.
 func listenSocket(path string) (net.Listener, error) {
+	if len(path) >= maxSocketPath {
+		return nil, fmt.Errorf("socket path %s is %d bytes; a Unix socket path is capped at %d bytes (sun_path); use a shorter state directory",
+			path, len(path), maxSocketPath)
+	}
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {
 			return nil, fmt.Errorf("socket path %s: %s, not a Unix socket; refusing to remove or bind over it", path, info.Mode())
@@ -92,34 +110,30 @@ func listenSocket(path string) (net.Listener, error) {
 		if err := refuseUnlessStale(path); err != nil {
 			return nil, err
 		}
+		// Provably stale, or it vanished mid-probe: out of the way just
+		// before the bind. An engine rebinding it in that gap turns the
+		// bind below into EADDRINUSE.
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("remove the stale socket %s: %w", path, err)
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("stat socket %s: %w", path, err)
 	}
 
-	dir, err := os.MkdirTemp(filepath.Dir(path), ".brigada-sock-*")
+	listenMu.Lock()
+	defer listenMu.Unlock()
+	saved := syscall.Umask(0o177)
+	l, err := net.Listen("unix", path)
+	syscall.Umask(saved)
 	if err != nil {
-		return nil, fmt.Errorf("create the private socket dir near %s: %w", path, err)
+		if errors.Is(err, syscall.EADDRINUSE) {
+			return nil, fmt.Errorf("socket %s: another engine is listening on it; refusing to steal it", path)
+		}
+		return nil, fmt.Errorf("listen on %s: %w", path, err)
 	}
-	defer os.RemoveAll(dir)
-	staged := filepath.Join(dir, "sock")
-	l, err := net.Listen("unix", staged)
-	if err != nil {
-		return nil, fmt.Errorf("listen on %s: %w", staged, err)
-	}
-	if err := os.Chmod(staged, 0o600); err != nil {
+	if err := os.Chmod(path, 0o600); err != nil {
 		l.Close()
-		return nil, fmt.Errorf("chmod socket %s to 0600: %w", staged, err)
-	}
-	// The stale probe above can race another engine binding path in the
-	// meantime; look once more, so the rename that follows can never
-	// steal a live engine's socket.
-	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSocket != 0 && answersOn(path) {
-		l.Close()
-		return nil, fmt.Errorf("socket %s: another engine is listening on it; refusing to steal it", path)
-	}
-	if err := os.Rename(staged, path); err != nil {
-		l.Close()
-		return nil, fmt.Errorf("move the socket onto %s: %w", path, err)
+		return nil, fmt.Errorf("chmod socket %s to 0600: %w", path, err)
 	}
 	return l, nil
 }
@@ -137,17 +151,6 @@ func refuseUnlessStale(path string) error {
 	default:
 		return fmt.Errorf("socket %s: cannot prove it is stale (%v); refusing to remove it", path, err)
 	}
-}
-
-// answersOn reports whether anything accepts connections on the Unix
-// socket at path.
-func answersOn(path string) bool {
-	conn, err := net.DialTimeout("unix", path, time.Second)
-	if err != nil {
-		return false
-	}
-	conn.Close()
-	return true
 }
 
 // writeJSON writes v as the response body.
