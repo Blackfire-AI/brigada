@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -116,8 +117,47 @@ func TestCompleteValidatesItsArguments(t *testing.T) {
 	if _, err := e.eng.Complete(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, Completion{}); err == nil {
 		t.Error("complete with neither result nor error succeeded; want refusal")
 	}
+	if _, err := e.eng.Complete(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, Completion{Result: "r", Outcome: "finished"}); err == nil {
+		t.Error("complete with an outcome that is not a stop outcome succeeded; want refusal")
+	}
+	if _, err := e.eng.Complete(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, Completion{Error: "e", Outcome: OutcomeStalled}); err == nil {
+		t.Error("complete with an outcome beside an error succeeded; want refusal: an outcome rides with a result")
+	}
 	if status := e.str("SELECT status FROM jobs WHERE id = ?", g.JobID); status != statusLeased {
 		t.Errorf("status after the refusals = %q, want leased untouched", status)
+	}
+}
+
+// TestCompleteStopOutcomeIsStalled covers the §5.6 completion: a run the
+// runner stopped itself — stalled, or past its class time cap — ends
+// the job as stalled (both outcomes; the result block tells them
+// apart), terminal like any other end, with the result it carried kept.
+func TestCompleteStopOutcomeIsStalled(t *testing.T) {
+	for _, outcome := range []string{OutcomeStalled, OutcomeTimeCap} {
+		t.Run(outcome, func(t *testing.T) {
+			e := newEnv(t)
+			e.submit(e.work())
+			g := e.leaseAny(e.runner1)
+
+			c := Completion{
+				Result:  fmt.Sprintf(`{"status":%q,"reason":"no activity for over 10m"}`, outcome),
+				Outcome: outcome,
+			}
+			if ans := e.complete(g, c); ans != AnsOK {
+				t.Fatalf("complete = %s, want ok", ans)
+			}
+			if status := e.str("SELECT status FROM jobs WHERE id = ?", g.JobID); status != statusStalled {
+				t.Errorf("status = %q, want stalled", status)
+			}
+			if result := e.str("SELECT result FROM jobs WHERE id = ?", g.JobID); !strings.Contains(result, outcome) {
+				t.Errorf("result = %q, want the outcome block kept", result)
+			}
+			// Stalled is terminal: the key is free for a restart (§5.6,
+			// §11), and a late completion on the same lease is already.
+			if ans := e.complete(g, c); ans != AnsAlready {
+				t.Errorf("repeat complete = %s, want already", ans)
+			}
+		})
 	}
 }
 

@@ -153,8 +153,9 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request, runnerI
 // handleComplete delivers the run's outcome (§5.4, §5.5, §12.3):
 // exactly one of result or error, the check result when the runner ran
 // the task's check, the harness session the run ended on, and the
-// artifacts it produced. As with heartbeat, only the lease's holder may
-// deliver it.
+// artifacts it produced. An outcome set to stalled or time_cap (§5.6)
+// names a run the runner stopped itself, which ends the job as stalled.
+// As with heartbeat, only the lease's holder may deliver it.
 func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request, runnerID int64) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -168,11 +169,18 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request, runnerID
 			"exactly one of result or error is required")
 		return
 	}
+	if req.Outcome != "" &&
+		(req.Outcome != engine.OutcomeStalled && req.Outcome != engine.OutcomeTimeCap || req.Error != "") {
+		writeError(w, http.StatusBadRequest, codeBadRequest,
+			"outcome must be stalled or time_cap, with a result")
+		return
+	}
 	c := engine.Completion{
 		Result:      req.Result,
 		Error:       req.Error,
 		CheckResult: req.CheckResult,
 		SessionID:   req.SessionID,
+		Outcome:     req.Outcome,
 	}
 	for _, a := range req.Artifacts {
 		c.Artifacts = append(c.Artifacts, engine.Artifact{
@@ -254,8 +262,11 @@ type artifactRequest struct {
 
 type completeRequest struct {
 	jobLeaseRequest
-	Result      string            `json:"result"`
-	Error       string            `json:"error"`
+	Result string `json:"result"`
+	Error  string `json:"error"`
+	// Outcome names a run the runner stopped itself (§5.6) — stalled,
+	// or past its class time cap — and rides with the result.
+	Outcome     string            `json:"outcome,omitempty"`
 	CheckResult string            `json:"check_result"`
 	SessionID   string            `json:"session_id"`
 	Artifacts   []artifactRequest `json:"artifacts"`

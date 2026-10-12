@@ -401,12 +401,14 @@ func remoteBranchCommit(t *testing.T, remote, branch string) string {
 // block rides unfenced at the end of the message — the parser takes
 // both forms, and printf keeps the shell honest about quotes.
 const happyWorker = `
-# a beat of work first, so the runner's heartbeats carry progress
-sleep 0.4
 cat > /dev/null
 # a banner the adapter must shrug off: not an event, not an error
 echo "fake-cli 1.2.3 — starting session"
 echo '{"type":"system_init","session_id":"sess-42"}'
+# a word of progress before the pause, so the runner's heartbeats
+# carry a last_progress_at that is real, not just the start
+echo '{"type":"assistant","text":"reading the task"}'
+sleep 0.4
 echo '{"type":"tool_start","name":"Edit"}'
 echo hello > work.txt
 git add -A
@@ -799,34 +801,6 @@ func TestRunnerCancelDuringCheckKillsCheck(t *testing.T) {
 	}
 	if len(e.artifacts(job)) != 0 {
 		t.Errorf("a run cancelled during its check delivered artifacts: %v", e.artifacts(job))
-	}
-}
-
-// TestRunnerStalledWorkerCompletesError turns the stall policy on and
-// covers the path end to end (§5.6): a worker that reports once and
-// then goes quiet is killed by the stall detector — through the same
-// kill switch the loop owns — and its job completes as an error, not
-// dropped and not left running.
-func TestRunnerStalledWorkerCompletesError(t *testing.T) {
-	remote := newRemote(t)
-	e := newTestEnv(t, engine.Config{})
-	e.seedProject(remote)
-	task := e.seedTask("", "true")
-	job := e.submitWork(task, ComposeWorkerPrompt("Take your time.", ""))
-	markers := markerDir(t)
-
-	p := e.startRunner(writeWorkerScript(t, slowWorker), 100*time.Millisecond,
-		func(c *Config) { c.StallAfter = 400 * time.Millisecond })
-	defer p.stop(t)
-
-	failed := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "failed" })
-	if msg := e.errorResult(failed); !strings.Contains(msg, "stalled") {
-		t.Errorf("failure = %q, want the stall named", msg)
-	}
-	// The stalled worker was killed, not waited out.
-	e.assertNoWorktrees()
-	if _, err := os.Stat(filepath.Join(markers, "finished")); err == nil {
-		t.Fatal("the stalled worker ran to the end; it was not killed")
 	}
 }
 

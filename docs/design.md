@@ -110,7 +110,7 @@ After the worker exits with `done`, **the runner runs the task's check** in the 
 
 Workers sometimes get stuck: alive, but making no progress (seen in practice).
 
-- **Detection:** the adapter turns the CLI's event stream into progress events (tool calls, messages); the runner sends the time of the last one in each heartbeat. **Stalled = 10 minutes with no activity at all** (decided 2026-10-12; `stall_minutes`, configurable). A tool call in flight (a long build or test run) suspends the clock, bounded by its own `tool_call_cap_minutes` per class (default 30). Stalled, or the class time cap reached → the runner kills the process tree and completes the job as `stalled`, with the last progress events attached.
+- **Detection:** the adapter turns the CLI's event stream into progress events (tool calls, messages); the runner sends the time of the last one in each heartbeat. **Stalled = 10 minutes with no activity at all** (decided 2026-10-12; `stall_minutes`, configurable). A tool call in flight (a long build or test run) suspends the clock, bounded by its own `tool_call_cap_minutes` per class (default 30). Stalled, or the class time cap reached → the runner kills the process tree and completes the job with the outcome `stalled` or `time_cap`; either ends the job in the terminal `stalled` status, and the result block names which, with the last progress events attached.
 - A stalled job **always goes to the foreman** (decided 2026-10-12); there is no automatic nudge.
 - **Restart:** `restart(task, instruction, mode, agent?)` cancels any live job and creates a new job on the same task with the new instruction.
   - `mode=resume`: same session, the instruction appended (the worker keeps its context);
@@ -190,7 +190,7 @@ JSON over HTTP; locally on a Unix socket, remotely over TLS. Bearer tokens with 
 
 ### 12.3 Runner protocol
 
-`register` · `lease` (long-poll) · `heartbeat` (progress, last activity) · `complete` (result, check result, transcript upload) · `release`. Fencing as in Python v3.2.
+`register` · `lease` (long-poll) · `heartbeat` (progress, last activity) · `complete` (result or error; an outcome of `stalled`/`time_cap` when the runner stopped the run itself, §5.6; check result; artifacts) · `release`. Fencing as in Python v3.2.
 
 ## 13. Engine lifecycle
 

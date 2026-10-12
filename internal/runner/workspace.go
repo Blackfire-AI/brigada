@@ -38,6 +38,7 @@ type workspace struct {
 	mirror  string // the repo's cached bare mirror
 	dir     string // the task's worktree
 	branch  string
+	base    string // the commit the worktree was built on
 	repoURL string
 	gitEnv  []string
 }
@@ -119,7 +120,28 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 		w.discardWorktree(ctx)
 		return nil, fmt.Errorf("add the worktree for %s from %s: %w", w.branch, grant.BaseRef, trimCmdError(out, err))
 	}
+	// The commit the worktree starts from: what holdsWork compares the
+	// worker's HEAD against — a branch with no work on it is not a
+	// result (§5.6).
+	out, err := w.git(ctx, "-C", w.dir, "rev-parse", "HEAD")
+	if err != nil {
+		w.discardWorktree(ctx)
+		return nil, fmt.Errorf("read the worktree's base commit: %w", trimCmdError(out, err))
+	}
+	w.base = strings.TrimSpace(string(out))
 	return w, nil
+}
+
+// holdsWork reports whether the worktree holds anything beyond the base
+// it was built on: a commit the worker made, or edits it left behind. A
+// run the runner stopped early pushes only when it does (§5.6) — the
+// work is not lost, but an empty result branch is noise, not a result.
+func (w *workspace) holdsWork(ctx context.Context) bool {
+	if out, err := w.git(ctx, "-C", w.dir, "status", "--porcelain"); err == nil && strings.TrimSpace(string(out)) != "" {
+		return true
+	}
+	head, err := w.worktreeHead(ctx)
+	return err == nil && head != w.base
 }
 
 // remove takes the worktree down (§5.1: removed after complete), with

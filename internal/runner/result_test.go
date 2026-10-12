@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -9,7 +10,7 @@ func TestParseResultFenced(t *testing.T) {
 	msg := "I did the work.\n```json\n{\"status\":\"done\",\"summary\":\"edited work.txt\",\"branch\":\"brigade/task-1\"}\n```\n"
 	got := parseResult(msg)
 	want := WorkerResult{Status: "done", Summary: "edited work.txt", Branch: "brigade/task-1"}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("parseResult = %+v, want %+v", got, want)
 	}
 }
@@ -59,6 +60,13 @@ func TestParseResultTable(t *testing.T) {
 			"unknown status counts as malformed",
 			"```json\n{\"status\":\"finished\"}\n```",
 			WorkerResult{Status: "failed", Reason: "no-result", Summary: "```json\n{\"status\":\"finished\"}\n```"},
+		},
+		{
+			// stalled and time_cap are the runner's outcomes (§5.6), not
+			// statuses a worker may speak for itself.
+			"a worker cannot declare the runner's outcomes",
+			"```json\n{\"status\":\"stalled\"}\n```",
+			WorkerResult{Status: "failed", Reason: "no-result", Summary: "```json\n{\"status\":\"stalled\"}\n```"},
 		},
 		{
 			"empty message",

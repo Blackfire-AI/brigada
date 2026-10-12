@@ -9,13 +9,17 @@ import (
 // The worker result contract (§5.4): the worker's final message ends
 // with one JSON block carrying the run's outcome. The statuses the
 // worker may speak; the runner adds check_failed when its own check of
-// a done run fails (§5.5), and no-result when the block is missing or
-// malformed.
+// a done run fails (§5.5), no-result when the block is missing or
+// malformed, and stalled / time_cap when its own policy (§5.6) cut the
+// run short. A worker cannot speak those itself — decodeResult refuses
+// them — they are the runner's to say.
 const (
 	statusDone      = "done"
 	statusNeedsHelp = "needs_help"
 	statusFailed    = "failed"
 	statusCheckFail = "check_failed"
+	statusStalled   = "stalled"
+	statusTimeCap   = "time_cap"
 	reasonNoResult  = "no-result"
 )
 
@@ -29,6 +33,11 @@ type WorkerResult struct {
 	Question string `json:"question,omitempty"`
 	Branch   string `json:"branch,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+	// Progress is the last progress events, attached when the runner
+	// ends a stalled or time-capped run (§5.6) so what the worker was
+	// doing rides with the outcome. A worker's own block never carries
+	// it.
+	Progress []string `json:"progress,omitempty"`
 }
 
 // parseResult reads the result block out of a worker's final message

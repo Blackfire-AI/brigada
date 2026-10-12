@@ -31,17 +31,21 @@ type jobRun struct {
 	events       []adapter.Event
 	transcript   []byte
 	lastProgress time.Time
+	lastActivity time.Time
+	toolOpenedAt time.Time
 	sessionID    string
 	cliError     *adapter.Event
 	toolInFlight int
+	startedAt    time.Time
+	workerLive   bool
 	dropped      bool
-	stalled      string
+	stopped      *stop
 
 	// killWorker kills the worker's process group without ending the
-	// run: the stall path uses it, because a stalled worker's job still
-	// completes — as an error — instead of being dropped. It is
-	// assigned once, in execute, before the goroutines that may call it
-	// start, so it needs no lock.
+	// run: the stall and cap paths use it, because a stopped worker's
+	// job still completes — with an outcome — instead of being dropped.
+	// It is assigned once, in execute, before the goroutines that may
+	// call it start, so it needs no lock.
 	killWorker func()
 }
 
@@ -60,6 +64,7 @@ type jobRun struct {
 func (r *jobRun) execute(ctx context.Context) {
 	log := r.cfg.Log
 	log.InfoContext(ctx, "job leased", "job_id", r.grant.JobID, "kind", r.grant.Kind, "key", r.grant.Key)
+	r.startedAt = r.now() // the class time cap measures the whole run, from the lease
 
 	// A foreman turn is not a worker job: it has no task, so there is no
 	// workspace to make. The headless foreman wake-up arrives with the
@@ -118,8 +123,8 @@ func (r *jobRun) runJob(ctx context.Context, ws *workspace, kill <-chan struct{}
 			"job_id", r.grant.JobID)
 		return
 	}
-	if reason := r.takeStalled(); reason != "" {
-		r.finishWithError(ctx, reason)
+	if why := r.takeStopped(); why != nil {
+		r.finishStopped(ctx, ws, why)
 		return
 	}
 	r.finish(ctx, ad, ws, exitErr)
@@ -155,9 +160,16 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model string
 		return &noWorkerError{err}
 	}
 
-	r.setLastProgress(time.Now()) // a worker with no events yet is measured from its start
-	// The killer turns an abort or a stall into the worker's death: the
-	// CLI is not context-aware, so the group is signalled directly. It
+	// The activity clock starts at the worker's start — before the
+	// worker counts as watched, or a beat landing between the two would
+	// read a clock that never started: a worker that never reports
+	// anything is measured from its start (§5.6).
+	r.markActivity(r.now())
+	r.setWorkerUp(true)
+	defer r.setWorkerUp(false)
+	// The killer turns an abort, a stall or a cap into the worker's
+	// death: the CLI is not context-aware, so the group is signalled
+	// directly — a term first, the kill on its own schedule (§5.6). It
 	// stands down when the command is waited out cleanly.
 	workerDone := make(chan struct{})
 	killerDone := make(chan struct{})
@@ -169,7 +181,7 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model string
 		case <-workerDone:
 			return
 		}
-		killGroup(cmd)
+		terminateGroup(cmd, r.cfg.KillGrace)
 	}()
 
 	scanner := bufio.NewScanner(stdout)
@@ -190,30 +202,35 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model string
 
 // heartbeats reports the runner's hold on the job for as long as the
 // run lasts — the worker, the push, the check, the delivery — with the
-// worker's progress (§5.6). An engine answer that ends the hold —
-// lost, gone, cancelled, fenced out — aborts the run: the worker's (or
-// the check's) process group is killed and whatever the run produced
-// is dropped, never completed (§12.3). A transport failure is not an
-// answer: the beat is logged and the next one tried, and if the lease
-// lapses in the meantime a later beat answers lost.
+// worker's progress (§5.6). While the worker runs, every beat first
+// consults the stall policy: stalled, or past the class time cap, the
+// worker's tree is killed and the run completes with that outcome —
+// and the beats go on, because the completion still needs the lease.
+// An engine answer that ends the hold — lost, gone, cancelled, fenced
+// out — aborts the run: the worker's (or the check's) process group is
+// killed and whatever the run produced is dropped, never completed
+// (§12.3). A transport failure is not an answer: the beat is logged
+// and the next one tried, and if the lease lapses in the meantime a
+// later beat answers lost.
 func (r *jobRun) heartbeats(ctx context.Context, abort context.CancelFunc, done chan<- struct{}) {
 	defer close(done)
-	ticker := time.NewTicker(r.cfg.HeartbeatEvery)
+	ticker := r.cfg.Clock.NewTicker(r.cfg.HeartbeatEvery)
 	defer ticker.Stop()
-	stall := stallPolicy{StallAfter: r.cfg.StallAfter, ToolCap: r.cfg.ToolCap}
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			if stall.stalled(time.Now(), r.lastProgressOrStart(), r.toolsInFlight() > 0) {
-				// A stall kills the worker alone: the run itself goes on
-				// to complete the job as an error (§5.6), so the run's
-				// context stays alive. killWorker was set before this
-				// goroutine started; it is never nil here.
-				r.markStalled(fmt.Sprintf("worker stalled: no progress for over %s", r.cfg.StallAfter))
-				r.killWorker()
-				return
+		case <-ticker.Chan():
+			if r.workerUp() {
+				if why := r.stallPolicy().check(r.now(), r.timing()); why != nil {
+					// The policy stop kills the worker alone: the run
+					// itself goes on to complete the job with the
+					// outcome (§5.6), so the run's context stays alive.
+					// killWorker was set before this goroutine started;
+					// it is never nil here.
+					r.markStopped(why)
+					r.killWorker()
+				}
 			}
 			ans, _, err := r.client.Heartbeat(ctx, r.grant.JobID, r.grant.LeaseID, r.progress())
 			if err != nil {
@@ -237,9 +254,25 @@ func (r *jobRun) heartbeats(ctx context.Context, abort context.CancelFunc, done 
 	}
 }
 
+// stallPolicy is the run's watch (§5.6): the configured silence window,
+// and the caps of the class the job's kind belongs to.
+func (r *jobRun) stallPolicy() stallPolicy {
+	caps := r.cfg.ClassCaps[r.grant.Kind]
+	return stallPolicy{
+		StallAfter: r.cfg.StallAfter,
+		ToolCap:    caps.ToolCap,
+		TimeCap:    caps.TimeCap,
+		StartedAt:  r.startedAt,
+	}
+}
+
+// now is the run's clock — real time in production, the injected one in
+// tests (§5.6).
+func (r *jobRun) now() time.Time { return r.cfg.Clock.Now() }
+
 // recordEvent parses one stdout line and folds it into the run's
 // record: the event list (for the final message and the resume id), the
-// transcript (verbatim, for the artifact), the progress clock and the
+// transcript (verbatim, for the artifact), the activity clock and the
 // in-flight tool count (§5.6).
 func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte) {
 	r.mu.Lock()
@@ -250,7 +283,7 @@ func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte) {
 	if !ok {
 		return
 	}
-	ev.Time = time.Now()
+	ev.Time = r.now()
 	r.events = append(r.events, ev)
 	switch ev.Kind {
 	case adapter.EvSession:
@@ -263,20 +296,29 @@ func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte) {
 			r.cliError = &e
 		}
 	case adapter.EvToolStart:
+		if r.toolInFlight == 0 {
+			r.toolOpenedAt = ev.Time // the outermost open call bounds the suspension
+		}
 		r.toolInFlight++
 		r.lastProgress = ev.Time
+		r.lastActivity = ev.Time
 	case adapter.EvToolEnd:
 		if r.toolInFlight > 0 {
 			r.toolInFlight--
 		}
 		r.lastProgress = ev.Time
+		r.lastActivity = ev.Time
 	case adapter.EvMessage:
 		r.lastProgress = ev.Time
+		r.lastActivity = ev.Time
 	}
 }
 
 // progress is the heartbeat's payload (§5.6): when the worker last made
-// progress, the last sign of life, and the last few progress events.
+// progress, when it was last active — the worker's start, until its
+// first progress event — and the last few progress events. Times the
+// run has not reached yet stay zero, and the client leaves them out: a
+// beat before any activity reports a hold, not a fake timestamp.
 func (r *jobRun) progress() api.Progress {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -292,7 +334,7 @@ func (r *jobRun) progress() api.Progress {
 	}
 	return api.Progress{
 		LastProgressAt: r.lastProgress,
-		LastActivityAt: time.Now(),
+		LastActivityAt: r.lastActivity,
 		Events:         adapter.ProgressEvents(recent),
 	}
 }
@@ -304,25 +346,56 @@ func (r *jobRun) snapshotEvents() []adapter.Event {
 	return append([]adapter.Event(nil), r.events...)
 }
 
-func (r *jobRun) setLastProgress(t time.Time) {
+// recentProgress renders the last n progress events (§5.6) — what a
+// stopped run's completion attaches, so the record names what the
+// worker was doing, not just that it stopped.
+func (r *jobRun) recentProgress(n int) []string {
 	r.mu.Lock()
-	r.lastProgress = t
+	defer r.mu.Unlock()
+	var recent []adapter.Event
+	for i := len(r.events) - 1; i >= 0 && len(recent) < n; i-- {
+		if r.events[i].IsProgress() {
+			recent = append(recent, r.events[i])
+		}
+	}
+	for i, j := 0, len(recent)-1; i < j; i, j = i+1, j-1 {
+		recent[i], recent[j] = recent[j], recent[i]
+	}
+	return adapter.ProgressEvents(recent)
+}
+
+// timing snapshots what the stall policy reads (§5.6): the activity
+// clock, and whether — and since when — a tool call is in flight.
+func (r *jobRun) timing() runTiming {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return runTiming{
+		LastActivity: r.lastActivity,
+		ToolOpenedAt: r.toolOpenedAt,
+		ToolInFlight: r.toolInFlight > 0,
+	}
+}
+
+// markActivity sets the activity clock, at the worker's start.
+func (r *jobRun) markActivity(t time.Time) {
+	r.mu.Lock()
+	r.lastActivity = t
 	r.mu.Unlock()
 }
 
-func (r *jobRun) lastProgressOrStart() time.Time {
+func (r *jobRun) setWorkerUp(up bool) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.lastProgress.IsZero() {
-		return time.Now()
-	}
-	return r.lastProgress
+	r.workerLive = up
+	r.mu.Unlock()
 }
 
-func (r *jobRun) toolsInFlight() int {
+// workerUp reports whether the worker's process is the run's current
+// phase: the stall policy watches the worker (§5.6), not the runner's
+// own push and check, which make progress of their own.
+func (r *jobRun) workerUp() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.toolInFlight
+	return r.workerLive
 }
 
 func (r *jobRun) markDropped() {
@@ -351,18 +424,66 @@ func (r *jobRun) gone(ctx context.Context, what string) bool {
 	return true
 }
 
-func (r *jobRun) markStalled(reason string) {
+// markStopped records why the runner's policy cut the run short; the
+// first verdict stands — a check on a later beat cannot rename a stop
+// already delivered to the kill switch.
+func (r *jobRun) markStopped(why *stop) {
 	r.mu.Lock()
-	if r.stalled == "" {
-		r.stalled = reason
+	if r.stopped == nil {
+		r.stopped = why
 	}
 	r.mu.Unlock()
 }
 
-func (r *jobRun) takeStalled() string {
+func (r *jobRun) takeStopped() *stop {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.stalled
+	return r.stopped
+}
+
+// stoppedRunEventsKept is how many progress events a stopped run's
+// completion attaches (§5.6): enough to see what the worker was doing
+// when it went quiet, bounded so a runaway stream cannot swamp the
+// record.
+const stoppedRunEventsKept = 20
+
+// finishStopped completes a run the runner's own policy cut short
+// (§5.6): stalled, or past the class time cap. The outcome ends the
+// job as stalled — the engine's answer to "always goes to the foreman"
+// — and the result block carries the reason and the last progress
+// events, so the record names what the worker was doing when it
+// stopped; and the worker's work is not lost — whatever it committed,
+// or left uncommitted, goes to the result branch before the worktree
+// comes down, exactly as a done run's would.
+func (r *jobRun) finishStopped(ctx context.Context, ws *workspace, why *stop) {
+	res := WorkerResult{
+		Status:   why.Outcome,
+		Reason:   why.Reason,
+		Progress: r.recentProgress(stoppedRunEventsKept),
+	}
+	if ws.holdsWork(ctx) {
+		if err := ws.ensurePushed(ctx); err != nil {
+			if r.gone(ctx, "pushing the stopped run's branch") {
+				return
+			}
+			r.cfg.Log.WarnContext(ctx, "push the stopped run's branch",
+				"job_id", r.grant.JobID, "err", err)
+			res.Summary = "the branch could not be pushed: " + err.Error()
+		} else {
+			res.Branch = ws.branch
+		}
+	}
+	comp := api.Completion{SessionID: r.sessionIDOf(), Outcome: why.Outcome}
+	if err := r.saveTranscript(&comp); err != nil {
+		r.cfg.Log.WarnContext(ctx, "save transcript", "job_id", r.grant.JobID, "err", err)
+	}
+	encoded, err := json.Marshal(res)
+	if err != nil {
+		r.finishWithError(ctx, "encode the result block: "+err.Error())
+		return
+	}
+	comp.Result = string(encoded)
+	r.deliver(ctx, comp)
 }
 
 // finish turns the dead worker's record into the engine's completion

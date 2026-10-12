@@ -131,12 +131,15 @@ type Artifact struct {
 // Completion is a run's outcome as the client delivers it (§5.4, §5.5):
 // exactly one of Result or Error, the check result when the runner ran
 // the task's check, the harness session the run ended on, and the
-// artifacts it produced.
+// artifacts it produced. Outcome, when set to stalled or time_cap,
+// names a run the runner stopped itself (§5.6) and rides with the
+// Result.
 type Completion struct {
 	Result      string
 	Error       string
 	CheckResult string
 	SessionID   string
+	Outcome     string
 	Artifacts   []Artifact
 }
 
@@ -148,6 +151,7 @@ func (c *Client) Complete(ctx context.Context, jobID int64, leaseID string, comp
 		Error:           comp.Error,
 		CheckResult:     comp.CheckResult,
 		SessionID:       comp.SessionID,
+		Outcome:         comp.Outcome,
 	}
 	for _, a := range comp.Artifacts {
 		req.Artifacts = append(req.Artifacts, artifactRequest{
