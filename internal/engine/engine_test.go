@@ -57,9 +57,16 @@ func newEnv(t *testing.T) *env {
 // newEnvCfg builds an env, with adjust let loose on the Config before
 // the engine is built (zero fields keep their defaults, like New).
 func newEnvCfg(t *testing.T, adjust func(*Config)) *env {
+	return newEnvAt(t, ":memory:", adjust)
+}
+
+// newEnvAt builds an env over the store at path. ":memory:" is the
+// usual single-connection store; a temp file is for the tests that need
+// the pool to really hand several connections to one database.
+func newEnvAt(t *testing.T, path string, adjust func(*Config)) *env {
 	t.Helper()
 	ctx := context.Background()
-	st, err := store.Open(ctx, ":memory:")
+	st, err := store.Open(ctx, path)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

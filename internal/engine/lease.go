@@ -73,7 +73,10 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 	for _, j := range queued {
 		// A job that lost its runner MaxAttempts times fails here rather
 		// than being offered again — at lease time, not in the sweep, so
-		// a heartbeat can still revive a healthy third lease (§3).
+		// a heartbeat can still revive a healthy third lease (§3). This
+		// only fires when some runner asks for work; until then the job
+		// simply sits queued, and the queue TTL — not this rule — is
+		// what frees its key.
 		if e.cfg.MaxAttempts > 0 && j.Attempts >= int64(e.cfg.MaxAttempts) {
 			if err := failJobTx(tx, j.ID, fmt.Sprintf("runner lost %d times", e.cfg.MaxAttempts), 0, now); err != nil {
 				return nil, err

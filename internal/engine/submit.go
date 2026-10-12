@@ -140,9 +140,12 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 
 // roundCapReached counts the rounds the task has already spent against
 // the cap this submit would consume: fix and review rounds as job
-// counts, restart rounds as jobs flagged restart (§14). A task's caps
-// JSON — {"fix": 3, "review": 3, "restart": 2} — overrides the
-// configured defaults key by key.
+// counts, restart rounds as jobs flagged restart (§14). A restart round
+// is its own budget: a restarted fix or review counts against the
+// restart cap alone, and the fix and review counts skip restart rounds,
+// so replacing a runaway job never eats the task's fix or review
+// allowance. A task's caps JSON — {"fix": 3, "review": 3,
+// "restart": 2} — overrides the configured defaults key by key.
 func (e *Engine) roundCapReached(tx *sql.Tx, p SubmitParams) (bool, error) {
 	if p.TaskID == 0 {
 		return false, nil
@@ -150,12 +153,12 @@ func (e *Engine) roundCapReached(tx *sql.Tx, p SubmitParams) (bool, error) {
 	var which string
 	var limit int
 	switch {
+	case p.Restart:
+		which, limit = "restart", e.cfg.RoundCaps.Restart
 	case p.Kind == KindFix:
 		which, limit = "fix", e.cfg.RoundCaps.Fix
 	case p.Kind == KindReview:
 		which, limit = "review", e.cfg.RoundCaps.Review
-	case p.Restart:
-		which, limit = "restart", e.cfg.RoundCaps.Restart
 	default:
 		return false, nil
 	}
@@ -174,7 +177,9 @@ func (e *Engine) roundCapReached(tx *sql.Tx, p SubmitParams) (bool, error) {
 	default:
 		return false, fmt.Errorf("read caps of task %d: %w", p.TaskID, err)
 	}
-	query := "SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = ?"
+	// Restart rounds are excluded from the fix and review counts: they
+	// answered to the restart cap when they were created.
+	query := "SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = ? AND restart = 0"
 	args := []any{p.TaskID, which}
 	if which == "restart" {
 		query = "SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1"

@@ -229,6 +229,40 @@ func TestReleaseIdempotentAndLateCallsLost(t *testing.T) {
 	}
 }
 
+// A release under a foreign name is lost even with the right lease id:
+// released_by and its exclusion window belong to the lease's owner
+// alone, so no other runner can pin them — or dodge them — on the job.
+func TestReleaseByForeignOwnerLost(t *testing.T) {
+	e := newEnv(t)
+	r := e.submit(e.work())
+	g := e.leaseAny(e.runner1)
+	if g == nil {
+		t.Fatal("nothing to lease")
+	}
+
+	if ans := e.release(e.runner2, g, "found a job"); ans != AnsLost {
+		t.Fatalf("release by another runner = %s; want lost", ans)
+	}
+	// Nothing was written: the lease stands and no exclusion was pinned.
+	if status := e.str("SELECT status FROM jobs WHERE id = ?", r.JobID); status != statusLeased {
+		t.Errorf("status = %q, want leased untouched", status)
+	}
+	if by := e.int("SELECT COALESCE(released_by, 0) FROM jobs WHERE id = ?", r.JobID); by != 0 {
+		t.Errorf("released_by = %d, want none", by)
+	}
+	if until := e.str("SELECT released_until FROM jobs WHERE id = ?", r.JobID); until != "" {
+		t.Errorf("released_until = %q, want none set", until)
+	}
+
+	// The owner's own release still works and pins the exclusion on it.
+	if ans := e.release(e.runner1, g, "quota cooling"); ans != AnsOK {
+		t.Fatalf("release by the owner = %s; want ok", ans)
+	}
+	if by := e.int("SELECT released_by FROM jobs WHERE id = ?", r.JobID); by != e.runner1 {
+		t.Errorf("released_by = %d, want %d", by, e.runner1)
+	}
+}
+
 func TestReleaseNoteIsBounded(t *testing.T) {
 	e := newEnv(t)
 	r := e.submit(e.work())
