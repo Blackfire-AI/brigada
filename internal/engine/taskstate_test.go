@@ -274,38 +274,26 @@ func TestReviewJobWithoutARunnerIsNotAHeldJob(t *testing.T) {
 	}
 }
 
-// TestWorkCompletionParksTheTaskAtNeedsForeman: a failed check, a
-// worker's question, a failed run or a result that never parsed leaves
-// the rules nothing to carry forward, so the task parks at
-// needs_foreman with the event naming what waited (§3) — and nothing
-// queued behind it.
+// TestWorkCompletionParksTheTaskAtNeedsForeman: a worker's question, a
+// failed run or a result that never parsed leaves the rules nothing to
+// carry forward, so the task parks at needs_foreman with the event
+// naming what waited (§3) — and nothing queued behind it. A failed check
+// of a class without fix rounds (§7: no review, no rounds) parks the
+// same way.
 func TestWorkCompletionParksTheTaskAtNeedsForeman(t *testing.T) {
 	tests := []struct {
 		name    string
+		class   string // '' = the fixture's implement task
 		version func() Completion
 		event   string
 		check   func(*testing.T, eventPayload)
 	}{
 		{
-			name:  "done with a failed check",
+			name:  "a failed check of a class without fix rounds",
+			class: "answer",
 			event: evTaskCheckFailed,
 			version: func() Completion {
 				return doneOn("task/1-1", failCheck)
-			},
-			check: func(t *testing.T, p eventPayload) {
-				if !strings.Contains(p.Reason, "FAIL TestBoom") {
-					t.Errorf("check-failed payload = %+v, want the check's tail", p)
-				}
-			},
-		},
-		{
-			name:  "the runner's check_failed word",
-			event: evTaskCheckFailed,
-			version: func() Completion {
-				return Completion{
-					Result:      `{"status":"check_failed","summary":"the check failed"}`,
-					CheckResult: failCheck,
-				}
 			},
 			check: func(t *testing.T, p eventPayload) {
 				if !strings.Contains(p.Reason, "FAIL TestBoom") {
@@ -365,6 +353,9 @@ func TestWorkCompletionParksTheTaskAtNeedsForeman(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)
+			if tc.class != "" {
+				e.exec("UPDATE tasks SET class = ? WHERE id = ?", tc.class, e.task)
+			}
 			e.submit(e.work())
 			g := e.leaseAny(e.runner1)
 			if ans := e.complete(g, tc.version()); ans != AnsOK {
@@ -381,6 +372,9 @@ func TestWorkCompletionParksTheTaskAtNeedsForeman(t *testing.T) {
 				t.Errorf("the event's status = %q, want the task's state", p.Status)
 			}
 			tc.check(t, p)
+			if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'fix'", e.task); n != 0 {
+				t.Errorf("fix jobs = %d, want none behind a parked task", n)
+			}
 			if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'review'", e.task); n != 0 {
 				t.Errorf("review jobs = %d, want none behind a parked task", n)
 			}
@@ -389,8 +383,9 @@ func TestWorkCompletionParksTheTaskAtNeedsForeman(t *testing.T) {
 }
 
 // TestReviewVerdicts walks §7's outcomes: a substantive approve alone
-// finishes the task; changes and every unusable verdict park it at
-// needs_foreman — a fix round and another reviewer are F1d3's.
+// finishes the task; changes queues a fix round on the author's session
+// (§3, below); and every unusable verdict here parks — the reviewer is
+// the only agent of another family, so the retry has nobody to go to.
 func TestReviewVerdicts(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -413,9 +408,9 @@ func TestReviewVerdicts(t *testing.T) {
 			event:  evReviewNoVerdict,
 		},
 		{
-			name:   "changes",
+			name:   "changes queues a fix round",
 			result: `{"verdict":"changes","findings":"` + substantiveFindings + `"}`,
-			state:  taskNeedsForeman,
+			state:  taskReviewing,
 			event:  evReviewChanges,
 		},
 		{
@@ -462,8 +457,8 @@ func TestReviewVerdicts(t *testing.T) {
 			}
 		})
 	}
-	// The changes verdict carries its findings (§7): the fix round F1d3
-	// builds on them.
+	// The changes verdict carries its findings (§7): the fix round's
+	// feedback is built on them.
 	t.Run("changes carries the findings", func(t *testing.T) {
 		e := newEnv(t)
 		reviewer := e.agented("reviewer", "google", "review")

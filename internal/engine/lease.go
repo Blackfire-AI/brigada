@@ -184,13 +184,16 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		if err != nil {
 			return nil, err
 		}
-		// The family rule (§7, §8): a job that excludes a family needs
-		// one of this runner's agents of another family, review-capable.
-		// A runner with none — no agents at all, or only the author's
-		// family — does not get the job. That is an unmet placement, not
-		// a cap hold: nothing is stamped, and the queue TTL measures the
-		// job's wait like any other's.
-		if j.ExcludeFamily != "" && agent == 0 {
+		// The agent rules (§3, §7, §8): a job that excludes a family or
+		// an agent needs one of this runner's agents that passes the
+		// exclusions, review-capable; a job that requires an agent — a
+		// fix round on the author's session — needs that one. A runner
+		// with none — no agents at all, only the author's family, only
+		// the excluded reviewer, or not the author's agent — does not
+		// get the job. That is an unmet placement, not a cap hold:
+		// nothing is stamped, and the queue TTL measures the job's wait
+		// like any other's.
+		if (j.ExcludeFamily != "" || j.ExcludeAgent != 0 || j.RequireAgent != 0) && agent == 0 {
 			continue
 		}
 		// The cap gate (§8.1): the job starts only if every layer on its
@@ -366,18 +369,26 @@ func (r capReservation) layer(job caps.Job) (string, bool) {
 // leaseAgentTx picks the agent a lease records on the job (§8.1): the
 // runner's first agent — by id — matching the job's harness constraint,
 // or the runner's first agent when the job leaves the harness open.
-// Under the family rule (§7, §8) — a job that excludes a family, the
-// review job of an implement task — only the runner's agents of another
-// family that offer the review class qualify, and the first of those by
-// id is the pick. 0 when the runner advertises no such agent: the job
-// then runs with nothing to count by at the account and model layers,
-// except that the family rule's caller refuses the lease outright.
+// Under the family rule (§7, §8) — a job that excludes a family, an
+// agent or both, the review job of an implement task and its retry —
+// only the runner's agents that pass the exclusions and offer the
+// review class qualify, and the first of those by id is the pick. A
+// job that requires an agent (§3) — a fix round resuming the author's
+// session — has its pick named outright: that agent or none, so a
+// same-harness agent of another family never wins it. 0 when the
+// runner advertises no such agent: the job then runs with nothing to
+// count by at the account and model layers, except that both rules'
+// callers refuse the lease outright.
 func leaseAgentTx(tx *sql.Tx, runner int64, j *jobRow) (int64, error) {
 	query := "SELECT id, family, classes FROM agents WHERE runner_id = ?"
 	args := []any{runner}
 	if j.Harness != "" {
 		query += " AND harness = ?"
 		args = append(args, j.Harness)
+	}
+	if j.RequireAgent != 0 {
+		query += " AND id = ?"
+		args = append(args, j.RequireAgent)
 	}
 	rows, err := tx.Query(query+" ORDER BY id", args...)
 	if err != nil {
@@ -391,14 +402,30 @@ func leaseAgentTx(tx *sql.Tx, runner int64, j *jobRow) (int64, error) {
 		if err := rows.Scan(&id, &family, &classes); err != nil {
 			return 0, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 		}
-		if j.ExcludeFamily != "" &&
-			(family == j.ExcludeFamily || !agentOffersClass(classes, string(KindReview))) {
-			continue
+		if j.ExcludeFamily != "" || j.ExcludeAgent != 0 {
+			if !reviewAgentQualifies(id, family, classes, j.ExcludeFamily, j.ExcludeAgent) {
+				continue
+			}
 		}
 		pick = id
 		break
 	}
 	return pick, rows.Err()
+}
+
+// reviewAgentQualifies is the review placement's agent test (§7, §8):
+// another family than the excluded one, not the excluded agent, and
+// offering the review class. The excluded family and agent are the
+// author's and — on a retry — the first reviewer's; either left empty
+// (an agent-less author or reviewer) excludes nothing.
+func reviewAgentQualifies(id int64, family, classes, excludeFamily string, excludeAgent int64) bool {
+	switch {
+	case id == excludeAgent:
+		return false
+	case excludeFamily != "" && family == excludeFamily:
+		return false
+	}
+	return agentOffersClass(classes, string(KindReview))
 }
 
 // agentOffersClass reports whether the agent's advertised classes (§5.1,

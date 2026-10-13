@@ -59,13 +59,20 @@ const (
 const minSubstantiveFindings = 80
 
 // taskRunningTx moves a task off ready when one of its jobs is leased
-// (§6.1): running while the work happens. A task already past ready —
-// reviewing under its review job, parked at needs_foreman by an earlier
-// completion — keeps its state; only the road's first step is the
-// lease's to take.
+// (§6.1): running while the work happens. A fix round's lease also takes
+// the task back out of reviewing (§3): the review asked for changes, the
+// fix job on the author's session is the answer, and the task runs
+// again. Every other task already past ready — reviewing under its
+// review job, parked at needs_foreman by an earlier completion — keeps
+// its state; only the road's first step is the lease's to take.
 func taskRunningTx(tx *sql.Tx, j *jobRow, now time.Time) error {
-	res, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,
-		taskRunning, fmtTime(now), j.TaskID, taskReady)
+	query := `UPDATE tasks SET state = ?, updated_at = ? WHERE id = ? AND state = ?`
+	args := []any{taskRunning, fmtTime(now), j.TaskID, taskReady}
+	if j.Kind == KindFix {
+		query = `UPDATE tasks SET state = ?, updated_at = ? WHERE id = ? AND state IN (?, ?)`
+		args = append(args[:3], taskReady, taskReviewing)
+	}
+	res, err := tx.Exec(query, args...)
 	if err != nil {
 		return fmt.Errorf("mark task %d running: %w", j.TaskID, err)
 	}
@@ -84,31 +91,34 @@ func taskRunningTx(tx *sql.Tx, j *jobRow, now time.Time) error {
 // taskAfterCompletionTx moves a task's state after one of its jobs
 // completed (§3, §6.1, §7), inside the completion's own transaction:
 //
-//   - a work job of an implement task that ended done with its check
-//     passed moves the task to reviewing and queues its review job;
-//   - a work job of any other class that ended done finishes the task;
-//   - a failed check, a worker's needs_help, a failed or unusable result
-//     parks the task at needs_foreman — the rules cannot carry those
-//     forward alone, so they wait for the foreman's judgment (§3; the
-//     fix rounds that would follow arrive with F1d3);
-//   - a review job's verdict finishes the task, asks for changes, or
-//     names itself unusable (§7).
+//   - a work or fix job of an implement task that ended done with its
+//     check passed moves the task to reviewing and queues its review
+//     job;
+//   - a work or fix job of any other class that ended done finishes the
+//     task;
+//   - a failed check of an implement task with rounds left queues a fix
+//     round on the author's session (§3); without rounds, a worker's
+//     needs_help, a failed or unusable result, the task parks at
+//     needs_foreman — the rules cannot carry those forward alone, so
+//     they wait for the foreman's judgment (§3);
+//   - a review job's verdict finishes the task, asks for a fix round,
+//     or names itself unusable and is retried once (§7).
 func (e *Engine) taskAfterCompletionTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	switch job.Kind {
-	case KindWork:
+	case KindWork, KindFix:
 		var class string
 		if err := tx.QueryRow("SELECT class FROM tasks WHERE id = ?", job.TaskID).Scan(&class); err != nil {
 			return fmt.Errorf("read task %d: %w", job.TaskID, err)
 		}
 		return e.workCompletedTx(tx, job, c, class, now)
 	case KindReview:
-		return reviewCompletedTx(tx, job, c, now)
+		return e.reviewCompletedTx(tx, job, c, now)
 	default:
-		return nil // fix rounds answer to F1d3's rules, not yet these
+		return nil // a foreman turn belongs to no task (§4)
 	}
 }
 
-// workCompletedTx applies a work job's completion to its task.
+// workCompletedTx applies a work or fix job's completion to its task.
 func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class string, now time.Time) error {
 	wr, haveResult := parseWorkerResult(c.Result)
 	switch {
@@ -139,13 +149,129 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 		if tail == "" {
 			tail = wr.Summary
 		}
-		return needsForemanTx(tx, job, evTaskCheckFailed, eventPayload{Reason: boundNote(tail)}, now)
+		feedback := c.CheckResult
+		if feedback == "" {
+			feedback = tail
+		}
+		if class != classImplement {
+			// No fix rounds behind any other class (§7: a review-class
+			// task has none unless asked): the failure is the foreman's.
+			return needsForemanTx(tx, job, evTaskCheckFailed, eventPayload{Reason: boundNote(tail)}, now)
+		}
+		// §3: the failed check is a fix round's to answer, with the
+		// check's own output as the feedback; the event keeps the tail
+		// for the history whatever follows.
+		if _, err := appendEventTx(tx, evTaskCheckFailed, job.ProjectID, job.TaskID, job.ID,
+			eventPayload{Reason: boundNote(tail)}, now); err != nil {
+			return err
+		}
+		return e.queueFixRoundTx(tx, job, roundFix, feedback, tail, now)
 	case class != classImplement:
 		// No review behind any other class (§7): done is done.
 		return taskDoneTx(tx, job, now)
 	default:
 		return e.queueReviewTx(tx, job, wr, c.CheckResult, now)
 	}
+}
+
+// queueFixRoundTx queues the task's next fix round (§3): a job of kind
+// fix on the task's own key, in session mode, so it resumes the author's
+// session on the author's agent — the required agent is the pin, the
+// harness beside it, and the session's affinity the runner (§8). The
+// prompt is engine-composed (§1.4, §5.3): the worker template, the spec
+// verbatim, and the feedback verbatim — the check's output after a
+// failed check, the review's findings after a changes verdict. The
+// round names the budget it spends (§7): fix rounds after a failed
+// check, review rounds after changes. When the budget is spent the task
+// parks at needs_foreman with the event naming which cap ran out and
+// note beside it — the check's tail or the findings, the shorter line
+// of the same matter — for the foreman's judgment (§3, §10).
+func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note string, now time.Time) error {
+	_, capped, err := e.roundCapReached(tx, SubmitParams{TaskID: job.TaskID, Round: round})
+	if err != nil {
+		return err
+	}
+	if capped {
+		return outOfRoundsTx(tx, job, round, note, now)
+	}
+	spec, err := taskSpecTx(tx, job.TaskID)
+	if err != nil {
+		return err
+	}
+	harness, agent, err := authorPlacementTx(tx, job.TaskID)
+	if err != nil {
+		return err
+	}
+	sr, err := e.submitTx(tx, SubmitParams{
+		Key:          job.Key,
+		ProjectID:    job.ProjectID,
+		TaskID:       job.TaskID,
+		Kind:         KindFix,
+		Mode:         ModeSession,
+		Prompt:       prompt.ComposeWorkerPrompt(spec, feedback),
+		Harness:      harness,
+		RequireAgent: agent,
+		Round:        round,
+	}, now)
+	if err != nil {
+		return err
+	}
+	switch sr.Answer {
+	case AnsCreated:
+		_, err = appendEventTx(tx, evTaskFixRound, job.ProjectID, job.TaskID, job.ID,
+			eventPayload{Run: int64(sr.Run), Reason: round}, now)
+		return err
+	case AnsCapped:
+		return outOfRoundsTx(tx, job, round, note, now)
+	default:
+		// The completing job freed the key earlier in this transaction,
+		// so no live job can hold this submit. An event without its job
+		// would log a round that was never queued, so the impossible
+		// answer is an error instead.
+		return fmt.Errorf("queue the fix round of task %d: submit %s answered %s", job.TaskID, job.Key, sr.Answer)
+	}
+}
+
+// outOfRoundsTx parks a task whose rounds budget is spent (§3: "task
+// out of rounds"): the rules have carried it as far as its caps allow,
+// and what follows — re-plan, switch agent, split, ask the user — is
+// the foreman's judgment, so the event names which cap ran out and
+// carries what asked for the round — the check's tail or the review's
+// findings, bounded — beside it: that note is the needs-you queue's
+// reason line, the foreman's first word of the matter (§10).
+func outOfRoundsTx(tx *sql.Tx, job *jobRow, round, note string, now time.Time) error {
+	reason := "the task's " + round + " are spent"
+	if note != "" {
+		reason += ": " + boundNote(note)
+	}
+	return needsForemanTx(tx, job, evTaskOutOfRounds, eventPayload{Reason: reason}, now)
+}
+
+// authorPlacementTx reads the placement the task's fix rounds pin to
+// (§3, §8): the agent the latest work or fix job was leased to — the
+// job a fix round resumes, whose session sits on its runner — and that
+// agent's harness. The agent is the pin: the harness alone does not
+// name it, for another runner may offer the same harness and the
+// author's own may hold a second agent of it. An author with no agent
+// — an agent-less runner, or one a re-register has since dropped —
+// leaves the agent open and falls back to the job's own harness
+// constraint, the record's only word on where the work ran.
+func authorPlacementTx(tx *sql.Tx, taskID int64) (harness string, agent int64, err error) {
+	var agentHarness, jobHarness string
+	err = tx.QueryRow(`SELECT CASE WHEN a.id IS NULL THEN 0 ELSE j.agent_id END, COALESCE(a.harness, ''), COALESCE(j.harness, '')
+		FROM jobs j LEFT JOIN agents a ON a.id = j.agent_id
+		WHERE j.task_id = ? AND j.kind IN ('work', 'fix')
+		ORDER BY j.id DESC LIMIT 1`, taskID).Scan(&agent, &agentHarness, &jobHarness)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", 0, nil // no author job: the fix round's placement stays open
+	}
+	if err != nil {
+		return "", 0, fmt.Errorf("read the author job of task %d: %w", taskID, err)
+	}
+	if agentHarness != "" {
+		return agentHarness, agent, nil
+	}
+	return jobHarness, agent, nil
 }
 
 // queueReviewTx moves an implement task into reviewing and queues its
@@ -175,10 +301,9 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 		return err
 	}
 	// The one-live-job-per-key rule is free here: the work job went
-	// terminal earlier in this completion's transaction. A task whose
-	// own caps close its reviews (a review cap of 0) answers capped and
-	// sits in reviewing with the job_capped event naming why — the
-	// rounds rules that would carry it on are F1d3's.
+	// terminal earlier in this completion's transaction. A review spends
+	// none of the task's rounds (§7 caps the review loop's fix rounds,
+	// not the reviews), so nothing here answers capped.
 	_, err = e.submitTx(tx, SubmitParams{
 		Key:           job.Key,
 		ProjectID:     job.ProjectID,
@@ -211,11 +336,13 @@ func agentFamilyTx(tx *sql.Tx, agent int64) (string, error) {
 }
 
 // reviewCompletedTx applies a review job's verdict block (§7):
-// a substantive approve finishes the task, changes asks the foreman for
-// a fix round (F1d3), and anything else — no block, a malformed one, an
-// approve without substantive findings, a run that ended in an error —
-// is no verdict and waits for the foreman with another reviewer (F1d3).
-func reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
+// a substantive approve finishes the task; changes asks for a fix round
+// on the author's session with the findings as the feedback (§3), or
+// parks the task when the review rounds are spent; anything else — no
+// block, a malformed one, an approve without substantive findings, a run
+// that ended in an error — is no verdict and goes to another reviewer
+// once, before the task parks waiting for the foreman.
+func (e *Engine) reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	var v verdictBlock
 	haveVerdict := json.Unmarshal([]byte(c.Result), &v) == nil &&
 		(v.Verdict == verdictApprove || v.Verdict == verdictChanges)
@@ -226,20 +353,120 @@ func reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) err
 		}
 		return taskDoneTx(tx, job, now)
 	case haveVerdict && v.Verdict == verdictChanges:
-		return needsForemanTx(tx, job, evReviewChanges, eventPayload{Findings: boundNote(v.Findings)}, now)
+		// The findings are the fix round's feedback (§3) and the event's
+		// own payload (§9): the review's words are kept whatever follows.
+		if _, err := appendEventTx(tx, evReviewChanges, job.ProjectID, job.TaskID, job.ID,
+			eventPayload{Findings: boundNote(v.Findings)}, now); err != nil {
+			return err
+		}
+		return e.queueFixRoundTx(tx, job, roundReview, v.Findings, v.Findings, now)
 	default:
 		reason := "no verdict in the review result"
 		switch {
 		case c.Error != "":
 			// The run itself failed — the reviewer's CLI crashed, its
-			// account hit a limit — and the error is the foreman's to
-			// read, not lost beside a generic no-verdict.
+			// account hit a limit — and the error is the retry's to
+			// carry, not lost beside a generic no-verdict.
 			reason = c.Error
 		case haveVerdict:
 			reason = "approve without substantive findings"
 		}
+		return e.queueReviewRetryTx(tx, job, reason, now)
+	}
+}
+
+// queueReviewRetryTx answers an unusable review with another reviewer
+// (§7): a new review job, once per review cycle — a cycle being the
+// review of the change the task's latest author job produced — placed
+// on another agent of a non-author family, so the same reviewer never
+// reads its own output again. The retry asks the same question: its
+// prompt is the unusable review's own, which the engine composed from
+// the same template and the same verbatim data. When the retry is spent
+// or no agent can take it, the task parks at needs_foreman with the
+// no-verdict event, for the foreman's judgment.
+func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now time.Time) error {
+	spent, err := reviewRetrySpentTx(tx, job)
+	if err != nil {
+		return err
+	}
+	noAgent, err := noReviewAgentTx(tx, job.ExcludeFamily, job.AgentID)
+	if err != nil {
+		return err
+	}
+	if spent || noAgent {
+		if noAgent && !spent {
+			reason += "; no other agent of another family can take the retry"
+		}
 		return needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: boundNote(reason)}, now)
 	}
+	sr, err := e.submitTx(tx, SubmitParams{
+		Key:           job.Key,
+		ProjectID:     job.ProjectID,
+		TaskID:        job.TaskID,
+		Kind:          KindReview,
+		Mode:          ModeFresh,
+		Prompt:        job.Prompt,
+		ExcludeFamily: job.ExcludeFamily,
+		ExcludeAgent:  job.AgentID,
+	}, now)
+	if err != nil {
+		return err
+	}
+	if sr.Answer != AnsCreated {
+		// The unusable review freed the key earlier in this transaction,
+		// and a retry spends none of the task's rounds (§7), so no answer
+		// but a created job is expected here; an event without its job
+		// would log a retry that was never queued.
+		return fmt.Errorf("queue the review retry of task %d: submit %s answered %s", job.TaskID, job.Key, sr.Answer)
+	}
+	_, err = appendEventTx(tx, evReviewRetry, job.ProjectID, job.TaskID, job.ID,
+		eventPayload{Run: int64(sr.Run), Reason: boundNote(reason)}, now)
+	return err
+}
+
+// reviewRetrySpentTx reports whether this review is itself the retry of
+// its cycle (§7: up to one retry): the reviews of one cycle are the
+// review jobs queued after the task's latest author job, so a second
+// one means the cycle's retry already ran. A restarted review — one a
+// restart round replaced, §5.6 — is the same review asked again, not
+// another reviewer's word, so it does not count. Author jobs — work or
+// fix, including restarts — begin a new cycle with a fresh first
+// review.
+func reviewRetrySpentTx(tx *sql.Tx, job *jobRow) (bool, error) {
+	var reviews int64
+	err := tx.QueryRow(`SELECT COUNT(*) FROM jobs
+		WHERE task_id = ? AND kind = 'review' AND restart = 0
+		AND id > COALESCE((SELECT MAX(id) FROM jobs WHERE task_id = ? AND kind IN ('work', 'fix')), 0)`,
+		job.TaskID, job.TaskID).Scan(&reviews)
+	if err != nil {
+		return false, fmt.Errorf("count the reviews of task %d: %w", job.TaskID, err)
+	}
+	return reviews > 1, nil
+}
+
+// noReviewAgentTx reports whether no registered agent could take the
+// retry (§7): none passes the exclusions the job would carry — another
+// family than the author's, not the first reviewer's agent, offering
+// the review class — under the same test the lease-time pick applies
+// (§8). An agent whose runner never polls again waits out the queue TTL
+// like any queued job; this is the test for no candidate at all.
+func noReviewAgentTx(tx *sql.Tx, excludeFamily string, excludeAgent int64) (bool, error) {
+	rows, err := tx.Query("SELECT id, family, classes FROM agents")
+	if err != nil {
+		return false, fmt.Errorf("list the agents: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var family, classes string
+		if err := rows.Scan(&id, &family, &classes); err != nil {
+			return false, fmt.Errorf("list the agents: %w", err)
+		}
+		if reviewAgentQualifies(id, family, classes, excludeFamily, excludeAgent) {
+			return false, nil
+		}
+	}
+	return true, rows.Err()
 }
 
 // verdictBlock is the review's answer (§7): what the reviewer's final

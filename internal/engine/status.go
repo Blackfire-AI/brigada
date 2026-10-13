@@ -202,9 +202,13 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64) ([]StatusTask, error) {
 
 // needsYouEventKinds are the event kinds whose payload carries a parked
 // task's reason (§10). The set is the queue's vocabulary: a task is in
-// the queue because one of these parked it.
+// the queue because one of these parked it — except that
+// task_check_failed and review_changes also land without parking, as
+// the history's record of a failed check or a changes verdict that a
+// fix round then answered (§3); the queue reads them only for a task
+// already parked, whose latest of these kinds they may still be.
 var needsYouEventKinds = []string{
-	evTaskCheckFailed, evTaskNeedsHelp, evTaskFailed, evReviewChanges, evReviewNoVerdict,
+	evTaskCheckFailed, evTaskNeedsHelp, evTaskFailed, evTaskOutOfRounds, evReviewChanges, evReviewNoVerdict,
 }
 
 // statusNeedsYouTx lists the "needs you" queue (§10): the tasks parked

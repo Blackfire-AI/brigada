@@ -29,6 +29,26 @@ type SubmitParams struct {
 	// lease the job. The engine sets it on a task's review job, from
 	// the family of the author job's agent.
 	ExcludeFamily string
+	// ExcludeAgent is the retry rule's exclusion (§7): when set, that
+	// one agent may not lease the job on top of the family rule, so a
+	// review retry goes to another agent. The engine sets it on a
+	// review retry, from the first reviewer's agent.
+	ExcludeAgent int64
+	// RequireAgent is the fix round's pin (§3): when set, the one agent
+	// the job must run on — the author's own, read from the latest work
+	// or fix job — because the harness alone does not name it: another
+	// runner may offer the same harness, and the author's runner may
+	// hold a second agent of it. A runner not offering the agent cannot
+	// lease the job at all.
+	RequireAgent int64
+	// Round names the task's rounds budget this job spends (§7, §14):
+	// roundFix for a fix round a failed check asked for, roundReview
+	// for one a review's changes asked for — both counted as the task's
+	// fix jobs — and roundRestart for a restart. Empty spends nothing
+	// (a work job, a review job: §7 caps the review loop's fix rounds,
+	// not the reviews themselves) and lets a plain fix submit spend a
+	// fix round.
+	Round string
 	// Restart marks the job as a restart round (§5.6): any live job on
 	// the key is cancelled first, and the job counts toward the task's
 	// restart cap.
@@ -78,13 +98,13 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 	case p.Kind != KindForeman && p.TaskID == 0:
 		return SubmitResult{}, fmt.Errorf("kind %s needs a task", p.Kind)
 	}
-	capped, err := e.roundCapReached(tx, p)
+	round, capped, err := e.roundCapReached(tx, p)
 	if err != nil {
 		return SubmitResult{}, err
 	}
 	if capped {
 		if _, err := appendEventTx(tx, evJobCapped, p.ProjectID, p.TaskID, 0,
-			eventPayload{Answer: string(AnsCapped), Reason: "round cap reached"}, now); err != nil {
+			eventPayload{Answer: string(AnsCapped), Reason: "round cap reached: " + round}, now); err != nil {
 			return SubmitResult{}, err
 		}
 		return SubmitResult{Answer: AnsCapped}, nil
@@ -117,10 +137,11 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 
 	nowStr := fmtTime(now)
 	res, err := tx.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status,
-		harness, labels, restart, exclude_family, queued_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
+		harness, labels, restart, exclude_family, exclude_agent, require_agent, queued_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ProjectID, nullIfZero(p.TaskID), string(p.Kind), p.Key, string(p.Mode), p.Prompt,
-		p.Harness, string(labelsJSON), boolInt(p.Restart), p.ExcludeFamily, nowStr, nowStr, nowStr)
+		p.Harness, string(labelsJSON), boolInt(p.Restart), p.ExcludeFamily, nullIfZero(p.ExcludeAgent),
+		nullIfZero(p.RequireAgent), nowStr, nowStr, nowStr)
 	if err != nil {
 		if !isUniqueViolation(err) {
 			return SubmitResult{}, fmt.Errorf("create job: %w", err)
@@ -185,56 +206,86 @@ func taskSpecAndBaseTx(tx *sql.Tx, taskID int64) (spec, base string, err error) 
 	return spec, base, nil
 }
 
+// The rounds budgets a task carries (§7, §14), named as the keys of the
+// task's caps JSON: a fix round after a failed check spends a fix_rounds
+// budget, a fix round after a review's changes spends a review_rounds
+// budget — both are the task's fix jobs, one count against two caps —
+// and a restart spends the restart budget.
+const (
+	roundFix     = "fix_rounds"
+	roundReview  = "review_rounds"
+	roundRestart = "restart"
+)
+
 // roundCapReached counts the rounds the task has already spent against
-// the cap this submit would consume: fix and review rounds as job
-// counts, restart rounds as jobs flagged restart (§14). A restart round
-// is its own budget: a restarted fix or review counts against the
-// restart cap alone, and the fix and review counts skip restart rounds,
-// so replacing a runaway job never eats the task's fix or review
-// allowance. A task's caps JSON — {"fix": 3, "review": 3,
-// "restart": 2} — overrides the configured defaults key by key.
-func (e *Engine) roundCapReached(tx *sql.Tx, p SubmitParams) (bool, error) {
+// the cap this submit would consume (§7, §14). The budget comes from
+// Round when the engine names it — the two fix-round paths spend
+// different budgets — else from the kind: a plain fix submit spends a
+// fix round, a restart spends a restart round, and a work or review job
+// spends nothing, so reviews and their retries never eat the task's
+// rounds. A restart round is its own budget: the fix count skips jobs
+// flagged restart, so replacing a runaway job never eats the task's fix
+// or review allowance. A task's caps JSON — {"fix_rounds": 3,
+// "review_rounds": 2, "restart": 2} — overrides the configured defaults
+// key by key.
+func (e *Engine) roundCapReached(tx *sql.Tx, p SubmitParams) (string, bool, error) {
 	if p.TaskID == 0 {
-		return false, nil
+		return "", false, nil
 	}
-	var which string
-	var limit int
+	round := p.Round
 	switch {
 	case p.Restart:
-		which, limit = "restart", e.cfg.RoundCaps.Restart
-	case p.Kind == KindFix:
-		which, limit = "fix", e.cfg.RoundCaps.Fix
-	case p.Kind == KindReview:
-		which, limit = "review", e.cfg.RoundCaps.Review
-	default:
-		return false, nil
+		round = roundRestart
+	case round == "" && p.Kind == KindFix:
+		round = roundFix
+	}
+	if round == "" {
+		return "", false, nil
+	}
+	limit, err := e.roundLimitTx(tx, p.TaskID, round)
+	if err != nil {
+		return round, false, err
+	}
+	// Both fix-round budgets count the same jobs — the task's fix jobs,
+	// restarts excluded (§7); the restart budget counts restarts.
+	query := "SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = ? AND restart = 0"
+	args := []any{p.TaskID, KindFix}
+	if round == roundRestart {
+		query = "SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1"
+		args = []any{p.TaskID}
+	}
+	var count int
+	if err := tx.QueryRow(query, args...).Scan(&count); err != nil {
+		return round, false, fmt.Errorf("count %s rounds of task %d: %w", round, p.TaskID, err)
+	}
+	return round, count >= limit, nil
+}
+
+// roundLimitTx reads one rounds budget of the task: the configured
+// default, overridden by the task's caps JSON under the budget's own
+// key. round is one of the round… constants, which are those keys.
+func (e *Engine) roundLimitTx(tx *sql.Tx, taskID int64, round string) (int, error) {
+	limit := e.cfg.RoundCaps.Restart
+	switch round {
+	case roundFix:
+		limit = e.cfg.RoundCaps.Fix
+	case roundReview:
+		limit = e.cfg.RoundCaps.Review
 	}
 	var capsJSON string
-	err := tx.QueryRow("SELECT caps FROM tasks WHERE id = ?", p.TaskID).Scan(&capsJSON)
+	err := tx.QueryRow("SELECT caps FROM tasks WHERE id = ?", taskID).Scan(&capsJSON)
 	switch {
 	case err == nil:
 		var caps map[string]int
 		if json.Unmarshal([]byte(capsJSON), &caps) == nil {
-			if v, ok := caps[which]; ok {
+			if v, ok := caps[round]; ok {
 				limit = v
 			}
 		}
 	case errors.Is(err, sql.ErrNoRows):
 		// the insert's foreign key will say this plainly
 	default:
-		return false, fmt.Errorf("read caps of task %d: %w", p.TaskID, err)
+		return 0, fmt.Errorf("read caps of task %d: %w", taskID, err)
 	}
-	// Restart rounds are excluded from the fix and review counts: they
-	// answered to the restart cap when they were created.
-	query := "SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = ? AND restart = 0"
-	args := []any{p.TaskID, which}
-	if which == "restart" {
-		query = "SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1"
-		args = []any{p.TaskID}
-	}
-	var count int
-	if err := tx.QueryRow(query, args...).Scan(&count); err != nil {
-		return false, fmt.Errorf("count %s rounds of task %d: %w", which, p.TaskID, err)
-	}
-	return count >= limit, nil
+	return limit, nil
 }

@@ -149,6 +149,7 @@ func TestStatusNeedsYouReasonsFromTheLatestParkingEvent(t *testing.T) {
 	e := newEnv(t)
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
+	spare := e.agented("spare", "meta", "review")
 
 	// begin creates a plan through the real path — active, its one task
 	// ready, the task's work job queued — and leases the work job with
@@ -178,17 +179,22 @@ func TestStatusNeedsYouReasonsFromTheLatestParkingEvent(t *testing.T) {
 		t.Fatalf("complete the needs_help run: %s", ans)
 	}
 
-	// A failed check: the check's output tail, flattened to one line.
+	// A failed check of a task with no fix rounds behind it (a class
+	// without them): the check's output tail, flattened to one line.
 	checkTask, work := begin()
+	e.exec(`UPDATE tasks SET class = 'answer' WHERE id = ?`, checkTask)
 	if ans := e.complete(work, doneOn("task/3-1", failCheck)); ans != AnsOK {
 		t.Fatalf("complete the failed-check run: %s", ans)
 	}
 
-	// Review changes: the findings. No verdict: the no-verdict's words.
-	// Both park straight from the review job their done work queued (§7).
-	reviewVerdict := func(task int64, result string) {
+	// Review changes past the task's review rounds: the out-of-rounds
+	// words, with the findings that asked for the round beside them —
+	// the foreman reads what the review said, not only that the budget
+	// ran out. No verdict twice over: the no-verdict's words. Both park
+	// from the review job their done work queued (§7).
+	reviewVerdict := func(runner int64, task int64, result string) {
 		t.Helper()
-		rg := e.leaseAny(reviewer)
+		rg := e.leaseAny(runner)
 		if rg == nil || rg.TaskID != task || rg.Kind != KindReview {
 			t.Fatalf("the review job of task %d was not leased: %+v", task, rg)
 		}
@@ -197,15 +203,17 @@ func TestStatusNeedsYouReasonsFromTheLatestParkingEvent(t *testing.T) {
 		}
 	}
 	changesTask, work := begin()
+	e.exec(`UPDATE tasks SET caps = '{"review_rounds":0}' WHERE id = ?`, changesTask)
 	if ans := e.complete(work, doneOn("task/4-1", passCheck)); ans != AnsOK {
 		t.Fatalf("complete the work before the changes review: %s", ans)
 	}
-	reviewVerdict(changesTask, `{"verdict":"changes","findings":"the frob went boom"}`)
+	reviewVerdict(reviewer, changesTask, `{"verdict":"changes","findings":"the frob went boom"}`)
 	noVerdictTask, work := begin()
 	if ans := e.complete(work, doneOn("task/5-1", passCheck)); ans != AnsOK {
 		t.Fatalf("complete the work before the empty review: %s", ans)
 	}
-	reviewVerdict(noVerdictTask, `{"verdict":"approve","findings":"ok"}`)
+	reviewVerdict(reviewer, noVerdictTask, `{"verdict":"approve","findings":"ok"}`)
+	reviewVerdict(spare, noVerdictTask, `{}`)
 
 	// A question longer than one line flattens and cuts to about the
 	// limit; a task parked twice reads its latest event.
@@ -234,8 +242,8 @@ func TestStatusNeedsYouReasonsFromTheLatestParkingEvent(t *testing.T) {
 		failedTask:    "the adapter died",
 		helpTask:      "which API should the client call?",
 		checkTask:     "FAIL TestBoom the frobnicator was off",
-		changesTask:   "the frob went boom",
-		noVerdictTask: "approve without substantive findings",
+		changesTask:   "the task's review_rounds are spent: the frob went boom",
+		noVerdictTask: "no verdict in the review result",
 		twiceTask:     "the latest word",
 	}
 	for id, wantReason := range want {
