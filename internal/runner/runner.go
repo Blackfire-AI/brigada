@@ -240,6 +240,10 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := cfg.defaults(); err != nil {
 		return err
 	}
+	// The foreman turns' MCP configs die with their turns (§12.2); a
+	// runner killed mid-turn leaves its behind, token and all. The tree
+	// goes now, before any new turn's config joins it.
+	sweepMCPConfigs(ctx, cfg.StateDir, cfg.Log)
 	client := api.NewClient(cfg.Socket, cfg.Token)
 	registered := false
 	backoff := leaseBackoffMin

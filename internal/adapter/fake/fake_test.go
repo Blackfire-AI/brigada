@@ -172,4 +172,18 @@ func TestCommandRunsScript(t *testing.T) {
 	if !found {
 		t.Errorf("fresh run env = %v, want BRIGADA_FAKE_RESUME set empty", cmd.Env)
 	}
+
+	// The MCP config path rides in the environment as well, so a
+	// scripted foreman can see what its harness was offered (§12.2):
+	// the path, never the token inside it.
+	cmd, _ = a.Command(adapter.Job{Prompt: "foreman", MCPConfig: "/state/mcp/9/config.json"}, dir, "")
+	found = false
+	for _, kv := range cmd.Env {
+		if kv == "BRIGADA_FAKE_MCP_CONFIG=/state/mcp/9/config.json" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("foreman run env = %v, want the MCP config path in it", cmd.Env)
+	}
 }

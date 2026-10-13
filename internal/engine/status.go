@@ -17,9 +17,11 @@ type StatusInfo struct {
 	Jobs      map[string]int `json:"jobs"`
 }
 
-// jobStatuses is the job statuses' fixed vocabulary, in the order the
-// plain-text status prints them: live first, then terminal.
-var jobStatuses = []string{
+// JobStatuses is the job statuses' fixed vocabulary, in the order the
+// plain-text renderings print them: live first, then terminal. Status
+// zero-fills its counts over it, and the renderers — the client's
+// status command, the MCP bridge's status tool — share the order.
+var JobStatuses = []string{
 	statusQueued, statusLeased, statusRunning,
 	statusDone, statusFailed, statusCancelled, statusStalled,
 }
@@ -46,7 +48,7 @@ func (e *Engine) Status(ctx context.Context) (StatusInfo, error) {
 			return fmt.Errorf("count jobs by status: %w", err)
 		}
 		defer rows.Close()
-		counts := make(map[string]int, len(jobStatuses))
+		counts := make(map[string]int, len(JobStatuses))
 		for rows.Next() {
 			var status string
 			var n int
@@ -58,7 +60,7 @@ func (e *Engine) Status(ctx context.Context) (StatusInfo, error) {
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("count jobs by status: %w", err)
 		}
-		for _, s := range jobStatuses {
+		for _, s := range JobStatuses {
 			if _, ok := counts[s]; !ok {
 				counts[s] = 0 // every status appears in the answer, at zero
 			}

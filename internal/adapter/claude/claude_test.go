@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
+	"github.com/Blackfire-AI/brigada/internal/mcp"
 )
 
 // No test in this package runs the claude binary: Command is only ever
@@ -108,6 +109,98 @@ func TestCommand(t *testing.T) {
 				t.Errorf("%s: argv carries the prompt: %v", tc.name, cmd.Args)
 			}
 		}
+	}
+}
+
+// foremanTokenValue stands in for the lease-scoped foreman token
+// (§12.2) — distinctive enough that an argument or an environment entry
+// carrying it cannot pass for anything else.
+const foremanTokenValue = "foreman-token-4b7e2d1a9c"
+
+// TestCommandForemanScope is the foreman turn's golden argv (§4, §12.2):
+// a job that carries an MCP config gets the bridge — --mcp-config with
+// --strict-mcp-config, so no other server rides along — and brigada's
+// tool scope in place of the agent config's: the bridge's own tools
+// (the one tool table's whole offer, in the CLI's mcp__ spelling) plus
+// the read-only file tools, with the shell and every editing tool
+// denied by name. The foreman never edits code.
+//
+// The token itself — set in the environment the way the bridge's would
+// be — reaches neither the command line nor the worker's environment:
+// argv is public to anything listing processes, and the token is the
+// bridge's alone.
+func TestCommandForemanScope(t *testing.T) {
+	stubCLI(t)
+	t.Setenv(mcp.EnvToken, foremanTokenValue)
+	const prompt = "the foreman's wake prompt"
+	const config = "/runner-state/mcp/turn-x1/config.json"
+	wantScope := []string{"--allowedTools", "Read", "Grep", "Glob",
+		"mcp__brigada__status", "mcp__brigada__history",
+		"--disallowedTools", "Bash", "Edit", "MultiEdit", "NotebookEdit", "Write"}
+	cases := []struct {
+		name    string
+		ad      Adapter
+		wantArg []string
+	}{
+		{
+			name: "bare adapter",
+			ad:   Adapter{Binary: "/usr/local/bin/claude"},
+			wantArg: append([]string{"-p", "--output-format", "stream-json", "--verbose",
+				"--permission-mode", "acceptEdits",
+				"--mcp-config", config, "--strict-mcp-config"}, wantScope...),
+		},
+		{
+			name: "the foreman scope replaces the agent config's",
+			ad: Adapter{
+				PermissionMode:  "bypassPermissions",
+				AllowedTools:    []string{"Bash(git:*)", "Edit"},
+				DisallowedTools: []string{"WebFetch"},
+			},
+			wantArg: append([]string{"-p", "--output-format", "stream-json", "--verbose",
+				"--permission-mode", "bypassPermissions",
+				"--mcp-config", config, "--strict-mcp-config"}, wantScope...),
+		},
+	}
+	for _, tc := range cases {
+		cmd, err := tc.ad.Command(adapter.Job{Prompt: prompt, MCPConfig: config}, t.TempDir(), "")
+		if err != nil {
+			t.Fatalf("%s: build command: %v", tc.name, err)
+		}
+		want := append([]string{"/usr/local/bin/claude"}, tc.wantArg...)
+		if tc.ad.Binary == "" {
+			want[0] = "claude"
+		}
+		if !slices.Equal(cmd.Args, want) {
+			t.Errorf("%s: args =\n%v\nwant\n%v", tc.name, cmd.Args, want)
+		}
+		for _, arg := range cmd.Args {
+			if strings.Contains(arg, foremanTokenValue) {
+				t.Errorf("%s: argv carries the foreman token: %v", tc.name, cmd.Args)
+			}
+		}
+		for _, kv := range cmd.Env {
+			if strings.HasPrefix(kv, mcp.EnvToken+"=") || strings.Contains(kv, foremanTokenValue) {
+				t.Errorf("%s: the worker's environment carries the foreman token: %s", tc.name, kv)
+			}
+		}
+	}
+}
+
+// TestCommandWorkerPathUnchanged covers the other side of §4: a worker
+// job — no MCP config — is built exactly as it always was, with no MCP
+// flag and the agent config's own tool scope.
+func TestCommandWorkerPathUnchanged(t *testing.T) {
+	stubCLI(t)
+	ad := Adapter{AllowedTools: []string{"Bash(git:*)"}}
+	cmd, err := ad.Command(adapter.Job{Prompt: "p", Model: "sonnet"}, t.TempDir(), "sess-9")
+	if err != nil {
+		t.Fatalf("build command: %v", err)
+	}
+	want := []string{"claude", "-p", "--output-format", "stream-json", "--verbose",
+		"--model", "sonnet", "--resume", "sess-9", "--permission-mode", "acceptEdits",
+		"--allowedTools", "Bash(git:*)"}
+	if !slices.Equal(cmd.Args, want) {
+		t.Errorf("worker args =\n%v\nwant\n%v", cmd.Args, want)
 	}
 }
 

@@ -113,7 +113,7 @@ func TestStatusCountsJobsAndReadsTheInstance(t *testing.T) {
 	if st.Pid != 0 || st.StartedAt != "" {
 		t.Errorf("fresh status instance = %d/%q, want unrecorded zeros", st.Pid, st.StartedAt)
 	}
-	for _, s := range jobStatuses {
+	for _, s := range JobStatuses {
 		if _, ok := st.Jobs[s]; !ok {
 			t.Errorf("status jobs is missing %s: %v", s, st.Jobs)
 		}

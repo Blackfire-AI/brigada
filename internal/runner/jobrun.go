@@ -59,8 +59,10 @@ type jobRun struct {
 
 	// mcpConfig is the harness's MCP config for the run (§12.2), set
 	// once — on the foreman path, by foremanMCPConfig — before the
-	// worker starts; every task job keeps it empty. Read by runWorker
-	// alone, after the set, like killWorker.
+	// worker starts, and cleared by cleanupMCPConfig once the worker is
+	// dead, so that cleanup is idempotent however often it runs. Every
+	// task job keeps the field empty. Read by runWorker alone, between
+	// the two, like killWorker.
 	mcpConfig string
 }
 

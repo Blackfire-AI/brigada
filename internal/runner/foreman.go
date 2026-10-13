@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/mcp"
 )
 
 // runForemanTurn runs one headless foreman turn (§4.2 item 2, §4): the
@@ -32,8 +34,20 @@ func (r *jobRun) runForemanTurn(ctx context.Context) {
 	}
 	r.cfg.Log.InfoContext(ctx, "foreman turn", "job_id", r.grant.JobID, "key", r.grant.Key, "dir", dir)
 	// The MCP config is decided before the worker starts, where the
-	// bridge's file would reach the adapter's command.
-	r.mcpConfig = r.foremanMCPConfig()
+	// bridge's file would reach the adapter's command. A turn whose
+	// config cannot be written is a turn without brigada's tools — it
+	// cannot do its work, and the engine hears why; the hook leaves no
+	// debris of its own behind.
+	r.mcpConfig, err = r.foremanMCPConfig()
+	if err != nil {
+		r.finishWithError(ctx, "write the foreman's MCP config: "+err.Error())
+		return
+	}
+	// Whatever ends the turn from here — an early return added tomorrow,
+	// a panic in the worker's reading, the runner's own shutdown — the
+	// token's file dies with it: the deferred cleanup always runs, and
+	// runs idempotently beside the early one below.
+	defer r.cleanupMCPConfig()
 
 	kill := make(chan struct{})
 	r.killWorker = sync.OnceFunc(func() { close(kill) })
@@ -44,6 +58,11 @@ func (r *jobRun) runForemanTurn(ctx context.Context) {
 	exitErr := r.runWorker(runCtx, ad, model, dir, kill)
 	abort()
 	<-beatsDone
+	// The turn is over for the worker's side whatever comes next —
+	// dropped, stopped or completed — so the file goes now, before any
+	// completion can land: it must not outlive the turn. The deferred
+	// cleanup above finds nothing left to do.
+	r.cleanupMCPConfig()
 
 	if r.takeDropped() {
 		r.cfg.Log.WarnContext(context.WithoutCancel(ctx),
@@ -79,18 +98,104 @@ func foremanScratchDir(stateDir string, project int64) (string, error) {
 	return dir, nil
 }
 
-// foremanMCPConfig is the hook for the `brigada mcp` bridge (§12.2),
-// the item after this one: where the config that offers the foreman's
-// harness brigada's tools — the file naming the bridge's stdio server
-// — reaches the adapter (adapter.Job.MCPConfig). Nothing is passed
-// yet, so a turn runs with the harness's own tools and none of
-// brigada's; the bridge will return its config path here.
+// mcpConfigsDir is the root of the foreman turns' MCP configs under the
+// runner's state (§12.2): one private directory per turn, swept whole
+// at the runner's startup (sweepMCPConfigs).
+func mcpConfigsDir(stateDir string) string {
+	return filepath.Join(stateDir, "mcp")
+}
+
+// foremanMCPConfig writes the harness's MCP config for the turn (§12.2):
+// one server, `brigada` — the runner's own binary (os.Executable) run as
+// the mcp bridge over the engine's socket — with the lease-scoped
+// foreman token (r.grant.ForemanToken, §12.1) in the bridge's
+// environment alone. The file is mode 0600 in a private 0700 directory
+// of the runner's state, a fresh unguessable one per turn — never a
+// path another attempt could share, never the foreman's scratch
+// directory (that is the working directory the harness reads at will),
+// and never a command line, which anyone listing processes could read.
+// The token reaches this file and the bridge it names, and
+// cleanupMCPConfig deletes both when the turn ends.
 //
-// The bridge will authenticate with the lease-scoped foreman token the
-// grant carried (r.grant.ForemanToken, §12.1): the runner's only copy,
-// in memory on this jobRun alone — never the scratch directory, the
-// transcript, a log or any other file — and dead with the turn's lease.
-func (r *jobRun) foremanMCPConfig() string { return "" }
+// Every failure after the directory is made removes what it made — a
+// partial file included — so the caller's error path has no debris to
+// clean: it returns "" and nothing else.
+func (r *jobRun) foremanMCPConfig() (string, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("find the runner's own binary: %w", err)
+	}
+	root := mcpConfigsDir(r.cfg.StateDir)
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", fmt.Errorf("create %s: %w", root, err)
+	}
+	dir, err := os.MkdirTemp(root, "turn-")
+	if err != nil {
+		return "", fmt.Errorf("create a turn directory under %s: %w", root, err)
+	}
+	// From here the directory is this attempt's alone, and any failure
+	// takes it back whole — file, partial or whole, and all.
+	cleanup := func() {
+		os.Remove(filepath.Join(dir, "config.json"))
+		os.Remove(dir)
+	}
+	data, err := mcp.HarnessConfig(self, r.cfg.Socket, r.grant.ForemanToken)
+	if err != nil {
+		cleanup()
+		return "", fmt.Errorf("render the MCP config: %w", err)
+	}
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		cleanup()
+		return "", fmt.Errorf("write %s: %w", path, err)
+	}
+	// The directory is fresh, so the file is new — the chmod only pins
+	// the mode against a future that writes into a directory it did not
+	// make (§12.2: the token's file is 0600, whatever it replaced).
+	if err := os.Chmod(path, 0o600); err != nil {
+		cleanup()
+		return "", fmt.Errorf("chmod %s: %w", path, err)
+	}
+	return path, nil
+}
+
+// cleanupMCPConfig removes the turn's MCP config — the file, then the
+// private directory it lived in — whatever ended the turn. The token
+// inside is dead with the turn's lease; the file must not outlive it.
+// It is idempotent: the path is taken from r.mcpConfig and the field
+// cleared, so the call before the completion and the deferred one at
+// the turn's end are one cleanup, never a race over a file already
+// gone. A removal that fails is warned about and left: the file is
+// 0600 in a 0700 directory, and the token it holds is revoked already.
+func (r *jobRun) cleanupMCPConfig() {
+	path := r.mcpConfig
+	if path == "" {
+		return
+	}
+	r.mcpConfig = ""
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		r.cfg.Log.Warn("remove the foreman's MCP config", "job_id", r.grant.JobID, "path", path, "err", err)
+		return
+	}
+	// A directory left empty behind its file is debris, not a leak —
+	// said at debug level, for the sweep at startup takes it anyway.
+	if err := os.Remove(filepath.Dir(path)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		r.cfg.Log.Debug("remove the foreman's MCP config directory", "job_id", r.grant.JobID, "dir", filepath.Dir(path), "err", err)
+	}
+}
+
+// sweepMCPConfigs removes the whole MCP config tree at the runner's
+// startup (§12.2): each turn's config is deleted when its turn ends,
+// but a runner killed mid-turn never ran its cleanup, and the files it
+// left — each holding a token, revoked with its lease but a secret on
+// disk all the same — must not wait there. The tree is rebuilt by the
+// next turn that needs one.
+func sweepMCPConfigs(ctx context.Context, stateDir string, log *slog.Logger) {
+	root := mcpConfigsDir(stateDir)
+	if err := os.RemoveAll(root); err != nil {
+		log.WarnContext(ctx, "sweep the foreman turns' MCP configs", "dir", root, "err", err)
+	}
+}
 
 // finishForemanTurn turns the dead foreman CLI's record into the
 // engine's completion (§5.4's exemption): an adapter error or a

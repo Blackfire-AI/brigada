@@ -2,13 +2,18 @@ package runner
 
 import (
 	"database/sql"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/foreman"
 )
@@ -274,6 +279,270 @@ exit 7
 // the runner's handling of it can be checked byte for byte. Hex, the
 // shape the default mint produces.
 const fixedLeaseToken = "feedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed"
+
+// mcpTurnWorker is turnWorker with the turn's plumbing recorded for
+// the MCP config test: the config path the adapter was given, and the
+// environment and command line the worker itself saw — where the
+// lease-scoped token must not be.
+const mcpTurnWorker = `
+cat > prompt.txt
+printf '%s\n' "$BRIGADA_FAKE_MCP_CONFIG" > mcpconfig.txt
+env > env.txt
+echo '{"type":"system_init","session_id":"foreman-sess-5"}'
+echo '{"type":"assistant","text":"checking my tools"}'
+while [ ! -f "$BRIGADA_TEST_MARKERS/release" ]; do sleep 0.05; done
+echo '{"type":"result","text":"answered with the bridge"}'
+`
+
+// recordingAdapter wraps an adapter and keeps every command it built —
+// argv and environment — so a test can prove what did and did not
+// reach a command line the adapter built (§12.2).
+type recordingAdapter struct {
+	adapter.Adapter
+	mu   sync.Mutex
+	args [][]string
+	envs [][]string
+}
+
+// Command implements adapter.Adapter by delegation, recording the build.
+func (a *recordingAdapter) Command(job adapter.Job, workdir, resumeSessionID string) (*exec.Cmd, error) {
+	cmd, err := a.Adapter.Command(job, workdir, resumeSessionID)
+	if err != nil {
+		return cmd, err
+	}
+	a.mu.Lock()
+	a.args = append(a.args, cmd.Args)
+	a.envs = append(a.envs, cmd.Env)
+	a.mu.Unlock()
+	return cmd, nil
+}
+
+// carries reports whether any recorded argument or environment entry
+// contains s — the shape of "the secret reached a command".
+func (a *recordingAdapter) carries(s string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, args := range a.args {
+		for _, arg := range args {
+			if strings.Contains(arg, s) {
+				return true
+			}
+		}
+	}
+	for _, env := range a.envs {
+		for _, kv := range env {
+			if strings.Contains(kv, s) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestRunnerForemanMCPConfig covers the bridge's file on the runner
+// (§12.2): a foreman turn's MCP config is written before the worker
+// starts — mode 0600, in a private 0700 directory under the runner's
+// state, never in the scratch directory the worker runs in — names the
+// runner's own binary as the bridge with the socket, and carries the
+// lease-scoped token in the bridge's env alone: not in the command or
+// its arguments, not on any command line the adapter built, not in
+// anything the worker itself sees. Whatever ends the turn, the file is
+// gone when it ends.
+func TestRunnerForemanMCPConfig(t *testing.T) {
+	e := newTestEnv(t, engine.Config{NewLeaseToken: func() (string, error) { return fixedLeaseToken, nil }})
+	e.seedProject("")
+	e.setForeman("fake", "fake-1")
+	turn := e.submitForemanTurn("a wake with tools")
+	markers := markerDir(t)
+
+	// The adapter the runner drives is wrapped, so the command it built
+	// for the turn is kept for the token check below.
+	rec := &recordingAdapter{}
+	p := e.startRunner(writeWorkerScript(t, mcpTurnWorker), 100*time.Millisecond, func(c *Config) {
+		rec.Adapter = c.Adapters[0]
+		c.Adapters = []adapter.Adapter{rec}
+	})
+	defer p.stop(t)
+
+	// The config exists while the turn runs; the worker names the path
+	// the adapter was handed, under the runner's mcp root and in no
+	// directory the worker runs in.
+	e.waitUntil("the turn to record its MCP config", func() bool {
+		_, err := os.Stat(filepath.Join(e.foremanScratch(), "mcpconfig.txt"))
+		return err == nil
+	})
+	config := strings.TrimSpace(e.scratchFile("mcpconfig.txt"))
+	root := filepath.Join(e.stateDir, "mcp")
+	if !strings.HasPrefix(config, root+string(filepath.Separator)) {
+		t.Fatalf("the MCP config = %q, want it under %s", config, root)
+	}
+	if strings.HasPrefix(config, e.foremanScratch()) {
+		t.Errorf("the MCP config lives under the scratch directory: %s", config)
+	}
+
+	// The file is 0600, and every directory it sits in is private.
+	fi, err := os.Stat(config)
+	if err != nil {
+		t.Fatalf("stat the MCP config: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("the MCP config's mode = %v, want 0600", fi.Mode().Perm())
+	}
+	for _, dir := range []string{filepath.Dir(config), root} {
+		if fi, err = os.Stat(dir); err != nil || fi.Mode().Perm() != 0o700 {
+			t.Errorf("%s mode = %v (%v), want 0700", dir, fi.Mode().Perm(), err)
+		}
+	}
+
+	// The config names the runner's own binary as the bridge over the
+	// engine's socket, with the token in the bridge's env alone: the
+	// command and every argument stay clean of it, so no command line
+	// the config builds carries the secret.
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("find the test's own binary: %v", err)
+	}
+	data, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatalf("read the MCP config: %v", err)
+	}
+	var cfg struct {
+		Servers map[string]struct {
+			Command string            `json:"command"`
+			Args    []string          `json:"args"`
+			Env     map[string]string `json:"env"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("decode the MCP config %s: %v", data, err)
+	}
+	srv, ok := cfg.Servers["brigada"]
+	if !ok {
+		t.Fatalf("config servers = %v, want one named brigada", cfg.Servers)
+	}
+	if srv.Command != self {
+		t.Errorf("the bridge's command = %q, want the runner's own binary %q", srv.Command, self)
+	}
+	if want := []string{"mcp", "--socket", e.socket}; !slices.Equal(srv.Args, want) {
+		t.Errorf("the bridge's args = %v, want %v", srv.Args, want)
+	}
+	if len(srv.Env) != 1 || srv.Env["BRIGADA_TOKEN"] != fixedLeaseToken {
+		t.Errorf("the bridge's env = %v, want the lease token under BRIGADA_TOKEN alone", srv.Env)
+	}
+	ridesArgv := strings.Contains(srv.Command, fixedLeaseToken) ||
+		slices.ContainsFunc(srv.Args, func(a string) bool { return strings.Contains(a, fixedLeaseToken) })
+	if ridesArgv {
+		t.Errorf("the token rides the bridge's command line: %s", data)
+	}
+
+	// No command the adapter built for the turn carries the token —
+	// neither its arguments nor its environment (§12.2: the token is
+	// the bridge's, passed by the file alone).
+	if rec.carries(fixedLeaseToken) {
+		t.Error("the lease token reached a command the adapter built")
+	}
+
+	// The worker itself saw neither the token nor any other brigada
+	// secret: the token is the bridge's, passed by the file alone.
+	if env := e.scratchFile("env.txt"); strings.Contains(env, fixedLeaseToken) {
+		t.Errorf("the lease token reached the worker's environment:\n%s", env)
+	}
+
+	// The turn ends, and the file dies with it — the directory too.
+	if err := os.WriteFile(filepath.Join(markers, "release"), nil, 0o644); err != nil {
+		t.Fatalf("release the turn: %v", err)
+	}
+	e.waitJob(turn.JobID, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	if _, err := os.Stat(config); !os.IsNotExist(err) {
+		t.Errorf("the MCP config outlived the turn: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(config)); !os.IsNotExist(err) {
+		t.Errorf("the config directory outlived the turn: %v", err)
+	}
+}
+
+// TestRunnerForemanMCPConfigFailsTheTurn covers the hook's own failure:
+// a config that cannot be written is a turn without brigada's tools,
+// and the engine hears why instead of a silent tool-less turn — with
+// no debris of the failed attempt left behind.
+func TestRunnerForemanMCPConfigFailsTheTurn(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("a read-only directory does not stop root; this failure path needs a non-root user")
+	}
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject("")
+	e.setForeman("fake", "fake-1")
+	turn := e.submitForemanTurn("a wake whose config cannot be written")
+	markers := markerDir(t)
+	// Should the turn ever start, it may end: the test wants the
+	// failure, not a hang.
+	if err := os.WriteFile(filepath.Join(markers, "release"), nil, 0o644); err != nil {
+		t.Fatalf("release the turn's wait: %v", err)
+	}
+
+	// The configs' root, read-only and occupied: the startup sweep
+	// cannot empty it (its child is unremovable without write
+	// permission on it), and the hook cannot make a turn directory in
+	// it — the write fails after the root exists, the branch a partial
+	// failure takes. Writable again when the test ends, so the state
+	// directory's own cleanup can remove it.
+	root := filepath.Join(e.stateDir, "mcp")
+	stale := filepath.Join(root, "stale")
+	if err := os.MkdirAll(stale, 0o700); err != nil {
+		t.Fatalf("occupy the configs' root: %v", err)
+	}
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatalf("read-only the configs' root: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(root, 0o700) })
+
+	p := e.startRunner(writeWorkerScript(t, mcpTurnWorker), 100*time.Millisecond)
+	defer p.stop(t)
+
+	failed := e.waitJob(turn.JobID, func(j *engine.JobInfo) bool { return j.Status == "failed" })
+	if msg := e.errorResult(failed); !strings.Contains(msg, "MCP config") {
+		t.Errorf("failure = %q, want the MCP config named", msg)
+	}
+
+	// The failed attempt left nothing of its own: the root holds what
+	// the test planted and no turn directory beside it.
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read the configs' root: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "stale" {
+		var names []string
+		for _, d := range entries {
+			names = append(names, d.Name())
+		}
+		t.Errorf("the failed write left debris: %v", names)
+	}
+}
+
+// TestRunnerSweepsStaleMCPConfigs covers the startup sweep (§12.2): a
+// runner killed mid-turn never ran its cleanup, and the configs it left
+// — each holding a token, revoked with its lease but a secret on disk
+// all the same — are removed whole before any new turn adds one.
+func TestRunnerSweepsStaleMCPConfigs(t *testing.T) {
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject("")
+	stale := filepath.Join(e.stateDir, "mcp", "turn-stale")
+	if err := os.MkdirAll(stale, 0o700); err != nil {
+		t.Fatalf("make the stale config's directory: %v", err)
+	}
+	body := `{"mcpServers":{"brigada":{"env":{"BRIGADA_TOKEN":"a-dead-turn-token"}}}}`
+	if err := os.WriteFile(filepath.Join(stale, "config.json"), []byte(body), 0o600); err != nil {
+		t.Fatalf("plant the stale config: %v", err)
+	}
+
+	p := e.startRunner(writeWorkerScript(t, mcpTurnWorker), 100*time.Millisecond)
+	defer p.stop(t)
+
+	e.waitUntil("the stale MCP configs to be swept", func() bool {
+		_, err := os.Stat(filepath.Join(e.stateDir, "mcp"))
+		return os.IsNotExist(err)
+	})
+}
 
 // TestRunnerKeepsForemanTokenInMemory covers the token's one rule on
 // the runner (§12.1): it arrives in the grant and stays in memory —

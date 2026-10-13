@@ -4,9 +4,11 @@
 // workspace, the result contract and the check without any vendor CLI.
 //
 // The contract with the script: it runs in the worktree with the
-// composed prompt on stdin and BRIGADA_FAKE_RESUME holding the session
-// id to resume (empty for a fresh run); it emits one JSON event per
-// line on stdout and edits the worktree like a worker would.
+// composed prompt on stdin, BRIGADA_FAKE_RESUME holding the session
+// id to resume (empty for a fresh run) and BRIGADA_FAKE_MCP_CONFIG
+// holding the harness's MCP config path the job carried (empty when it
+// carried none); it emits one JSON event per line on stdout and edits
+// the worktree like a worker would.
 package fake
 
 import (
@@ -29,14 +31,17 @@ type Adapter struct {
 func (a *Adapter) Name() string { return "fake" }
 
 // Command implements adapter.Adapter: run the script in workdir with
-// the prompt on stdin. The resume session id rides in the environment,
-// never the prompt: it is the adapter's plumbing, not the worker's
-// business.
+// the prompt on stdin. The resume session id and the MCP config path
+// ride in the environment, never the prompt: they are the adapter's
+// plumbing, not the worker's business.
 func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*exec.Cmd, error) {
 	cmd := exec.Command(a.Script)
 	cmd.Dir = workdir
 	cmd.Stdin = strings.NewReader(job.Prompt)
-	cmd.Env = append(os.Environ(), "BRIGADA_FAKE_RESUME="+resumeSessionID)
+	cmd.Env = append(os.Environ(),
+		"BRIGADA_FAKE_RESUME="+resumeSessionID,
+		"BRIGADA_FAKE_MCP_CONFIG="+job.MCPConfig,
+	)
 	return cmd, nil
 }
 
