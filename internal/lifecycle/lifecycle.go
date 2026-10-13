@@ -10,6 +10,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/caps"
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/notify"
 	"github.com/Blackfire-AI/brigada/internal/store"
 )
 
@@ -37,6 +38,10 @@ type Config struct {
 	// Caps are the concurrency caps and cost weights the config file
 	// named (§8.1); the zero value caps nothing.
 	Caps caps.Limits
+	// Notify selects the local notifier (§10): notify.ModeAuto picks
+	// the OS tool on PATH, notify.ModeNone silences notifications; the
+	// empty value keeps auto.
+	Notify string
 	// IdleTick is how often busyness is checked; zero derives a tick
 	// from Idle, clamped to [200ms, 30s].
 	IdleTick time.Duration
@@ -124,6 +129,17 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("engine: %w", err)
 	}
 
+	// §10's delivery loop: the local notifier the config selected and a
+	// loop that walks the event log once per event. The pre-exit hook
+	// (§13) flushes whatever a tick has not delivered yet; a caller's
+	// own FlushNotifications still wins, the tests inject one.
+	notifier := notify.Resolve(cfg.Notify)
+	nloop := notify.NewLoop(st, notifier, log)
+	if cfg.FlushNotifications == nil {
+		cfg.FlushNotifications = nloop.Flush
+	}
+	log.InfoContext(ctx, "notifications", "notifier", notify.NameOf(notifier))
+
 	// Serving stops when stopServe is called; Listen then removes the
 	// socket it owns. The context is deliberately WithoutCancel: the
 	// engine's own shutdown, not the caller's exit, takes the listener
@@ -160,6 +176,9 @@ func Run(ctx context.Context, cfg Config) error {
 			}
 			return nil
 		case <-ticker.C:
+			if err := nloop.Flush(ctx); err != nil {
+				log.WarnContext(ctx, "deliver notifications failed", "err", err)
+			}
 			now := cfg.Now()
 			mon.poll(now)
 			if !mon.shouldExit(now) {

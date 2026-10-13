@@ -1,0 +1,163 @@
+package notify
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestMessage(t *testing.T) {
+	cases := []struct {
+		name string
+		ev   Event
+		body string
+		ok   bool
+	}{
+		{
+			name: "plan done",
+			ev:   Event{Kind: KindPlanDone, PlanID: 7, PlanTitle: "Fix the parser"},
+			body: "plan #7 done: Fix the parser",
+			ok:   true,
+		},
+		{
+			name: "check failed",
+			ev:   Event{Kind: KindTaskCheckFailed, Parked: true, TaskID: 3, Reason: "exit 1: parser_test.go:42"},
+			body: "task #3 needs you: exit 1: parser_test.go:42",
+			ok:   true,
+		},
+		{
+			name: "needs help reads the question",
+			ev:   Event{Kind: KindTaskNeedsHelp, Parked: true, TaskID: 4, Reason: "ignored", PlanTitle: "x"},
+			body: "task #4 needs you: ignored",
+			ok:   true,
+		},
+		{
+			name: "run failed",
+			ev:   Event{Kind: KindTaskFailed, Parked: true, TaskID: 5, Reason: "the CLI died mid-run"},
+			body: "task #5 needs you: the CLI died mid-run",
+			ok:   true,
+		},
+		{
+			name: "review changes read the findings",
+			ev:   Event{Kind: KindReviewChanges, Parked: true, TaskID: 6, Reason: "the off-by-one in retry"},
+			body: "task #6 needs you: the off-by-one in retry",
+			ok:   true,
+		},
+		{
+			name: "no verdict",
+			ev:   Event{Kind: KindReviewNoVerdict, Parked: true, TaskID: 7, Reason: "verdict block missing"},
+			body: "task #7 needs you: verdict block missing",
+			ok:   true,
+		},
+		{
+			name: "out of rounds, once the engine emits it",
+			ev:   Event{Kind: KindTaskOutOfRounds, Parked: true, TaskID: 8, Reason: "fix rounds spent"},
+			body: "task #8 needs you: fix rounds spent",
+			ok:   true,
+		},
+		{
+			name: "empty reason falls back to the kind",
+			ev:   Event{Kind: KindTaskCheckFailed, Parked: true, TaskID: 9},
+			body: "task #9 needs you: task_check_failed",
+			ok:   true,
+		},
+		{
+			name: "reason flattens to one line",
+			ev:   Event{Kind: KindTaskCheckFailed, Parked: true, TaskID: 2, Reason: "first line\nsecond\tline"},
+			body: "task #2 needs you: first line second line",
+			ok:   true,
+		},
+		// Everything else in the log never notifies.
+		{name: "job created", ev: Event{Kind: "job_created", TaskID: 1}},
+		{name: "task done", ev: Event{Kind: "task_done", TaskID: 1}},
+		{name: "plan created", ev: Event{Kind: "plan_created"}},
+		{name: "foreman set", ev: Event{Kind: "project_foreman_set"}},
+		{name: "lease events", ev: Event{Kind: "job_leased", TaskID: 1}},
+		{name: "empty kind", ev: Event{}},
+		// A failed check or a changes verdict that a fix round answers
+		// lands without parking the task: no banner.
+		{name: "check failed without park", ev: Event{Kind: KindTaskCheckFailed, TaskID: 1, Reason: "exit 1"}},
+		{name: "review changes without park", ev: Event{Kind: KindReviewChanges, TaskID: 1, Reason: "nit"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			title, body, ok := Message(tc.ev)
+			if ok != tc.ok {
+				t.Fatalf("Message ok = %v, want %v", ok, tc.ok)
+			}
+			if !tc.ok {
+				return
+			}
+			if title != "brigada" {
+				t.Errorf("title = %q, want brigada", title)
+			}
+			if body != tc.body {
+				t.Errorf("body = %q, want %q", body, tc.body)
+			}
+			if strings.Contains(body, "\n") {
+				t.Errorf("body %q is not one line", body)
+			}
+		})
+	}
+}
+
+func TestMessageBodyLimit(t *testing.T) {
+	ev := Event{Kind: KindTaskCheckFailed, Parked: true, TaskID: 1, Reason: strings.Repeat("x", bodyLimit*2)}
+	_, body, ok := Message(ev)
+	if !ok {
+		t.Fatal("a long reason must still notify")
+	}
+	if len(body) > bodyLimit+len("task #1 needs you: ")+4 {
+		t.Errorf("body is %d bytes, want it bounded near %d", len(body), bodyLimit)
+	}
+	if !strings.HasSuffix(body, "x") {
+		t.Errorf("body ends mid-rune: %q", body)
+	}
+}
+
+func TestParkedBy(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{"needs_foreman parks", `{"status":"needs_foreman","reason":"exit 1"}`, true},
+		{"needs_user parks", `{"status":"needs_user"}`, true},
+		{"no status does not park", `{"reason":"exit 1"}`, false},
+		{"another state does not park", `{"status":"running"}`, false},
+		{"empty payload does not park", "", false},
+		{"malformed payload does not park", "{not json", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parkedBy(tc.payload); got != tc.want {
+				t.Errorf("parkedBy(%q) = %v, want %v", tc.payload, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReasonOf(t *testing.T) {
+	cases := []struct {
+		name    string
+		kind    string
+		payload string
+		want    string
+	}{
+		{"question wins for needs help", KindTaskNeedsHelp,
+			`{"question":"how deep?\nnow","reason":"tail"}`, "how deep? now"},
+		{"findings win for review changes", KindReviewChanges,
+			`{"findings":"off by one","reason":"tail"}`, "off by one"},
+		{"reason for the rest", KindTaskCheckFailed,
+			`{"reason":"exit 3\nboom"}`, "exit 3 boom"},
+		{"status-only payload yields nothing", KindTaskFailed, `{"status":"needs_foreman"}`, ""},
+		{"empty payload yields nothing", KindTaskFailed, "", ""},
+		{"malformed payload yields nothing", KindTaskFailed, "{not json", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := reasonOf(tc.kind, tc.payload); got != tc.want {
+				t.Errorf("reasonOf = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
