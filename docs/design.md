@@ -4,7 +4,7 @@ Status: **v0.1, approved** 2026-10-12 after a cross-model review, as the Go desi
 
 ## 1. Principles
 
-1. **The foreman decides; the engine enforces.** Judgment (planning, answering, re-planning) is an LLM agent. Mechanics (queues, leases, eligibility, caps, routine retries) are deterministic Go code.
+1. **The foreman decides; the engine enforces.** Judgment (planning, answering, re-planning) is an LLM worker (the foreman, §4). Mechanics (queues, leases, eligibility, caps, routine retries) are deterministic Go code.
 2. **The engine is the mailbox.** The foreman and the task workers never talk directly. Every message goes through the engine, and every message is kept (§9).
 3. **No state lives only in a session.** Any session, the foreman's or a task worker's, can die at any moment; the engine and the plan file hold everything needed to continue.
 4. **Prompts: templates plus verbatim data.** The engine may compose a prompt only from fixed, versioned templates plus verbatim data (a task spec, review text, check output, a foreman answer). Verbatim data is always wrapped in explicit data delimiters, so one worker's output can't pose as instructions to the foreman or another worker. Anything that needs judgment goes to the foreman. This relaxes Python v3.2's "the server never builds prompts", which assumed no routine fix rounds in the server.
@@ -191,22 +191,23 @@ A task job (a task's first run, a fix round or a review) that cannot start becau
 
 Each agent also carries a **cost weight** (default 1), a relative cost the user sets, which the foreman sees through `capacity` (§12.2) when it chooses which tasks can wait for a cheaper agent.
 
-**Defaults** (proposal): conservative per adapter, all set in the engine's config. An example:
+**Defaults** (proposal): conservative per adapter, all set in the engine's config file. An example:
 
-```yaml
-caps:
-  global: 6
-  plan: 3
-  runner: 4          # default; a runner may advertise its own
-  account:           # per adapter account
-    claude: 3
-    codex: 2
-    kimi: 1
-  model:
-    <heavy-model>: 1
-cost:                # cost weight per agent, default 1
-  <agent>: 2
 ```
+caps.global = 6
+caps.plan = 3
+# a runner may advertise its own (--max-parallel); the smaller wins
+caps.runner = 4
+# per account label
+caps.account.claude = 3
+caps.account.codex = 2
+caps.account.kimi = 1
+caps.model.<heavy-model> = 1
+# cost weight per agent, default 1
+cost.<harness>/<model> = 2
+```
+
+Comments go on their own line; the parser does not strip trailing comments.
 
 **Backlog: adaptive caps.** When an account hits its limit while running N parallel jobs, the engine lowers that account's cap automatically and records the change and its reason; the user can raise it again.
 
