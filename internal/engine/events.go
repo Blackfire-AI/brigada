@@ -28,6 +28,7 @@ const (
 	evJobQueueTimedOut    = "job_queue_timed_out"   // the sweep failed a job past the queue TTL
 	evJobAttemptsExceeded = "job_attempts_exceeded" // the job lost MaxAttempts runners
 	evFenceEpochBumped    = "fence_epoch_bumped"    // recover fenced older-epoch leases out (§6.4)
+	evProjectForemanSet   = "project_foreman_set"   // setup: the project's foreman harness and model were chosen (§4.1)
 )
 
 // eventPayload is the small JSON an event row carries: the fields the
@@ -44,6 +45,8 @@ type eventPayload struct {
 	Attempt int64  `json:"attempt,omitempty"`
 	Epoch   int64  `json:"epoch,omitempty"`
 	Layer   string `json:"layer,omitempty"` // the cap layer that held the job (§8.1)
+	Harness string `json:"harness,omitempty"`
+	Model   string `json:"model,omitempty"`
 }
 
 // appendEventTx adds one row to the event log inside the caller's

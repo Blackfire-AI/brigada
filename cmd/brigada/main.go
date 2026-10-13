@@ -31,6 +31,7 @@ Commands:
 	mcp             Run the foreman's MCP bridge over stdio (§12.2).
 	status          Show the engine and its jobs by status.
 	task submit     Submit a task (debug path until the foreman exists).
+	project foreman Show or set a repo's foreman harness and model.
 	history         Show the timeline.
 	cancel <job>    Cancel a job.
 	version         Print the brigada version and exit.
@@ -61,6 +62,7 @@ var commands = map[string]command{
 	"mcp":     {name: "mcp", run: runMCP},
 	"status":  {name: "status", run: runStatus},
 	"task":    {name: "task", run: runTask},
+	"project": {name: "project", run: runProject},
 	"history": {name: "history", run: runHistory},
 	"cancel":  {name: "cancel", run: runCancel},
 }

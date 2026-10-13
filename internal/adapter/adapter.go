@@ -103,6 +103,23 @@ const (
 	ErrOther        ErrorKind = "other"
 )
 
+// ResumeCapableHarnesses is the set of harnesses a foreman may run on
+// (design §4.1): the foreman's turns wake headless and resume the
+// project's session, so choosing a foreman refuses a harness whose CLI
+// cannot resume headless. Every shipped adapter that resumes lists its
+// name here — the one place the set lives, which later adapters add
+// themselves to — and the engine consults the set at setup.
+var ResumeCapableHarnesses = map[string]bool{
+	"claude": true, // the Claude Code CLI: `claude -p --resume <session>` (§5.2)
+	"fake":   true, // the scripted test adapter
+}
+
+// ResumeCapable reports whether harness's CLI can resume a session
+// headless (§4.1), which the foreman's harness must.
+func ResumeCapable(harness string) bool {
+	return ResumeCapableHarnesses[harness]
+}
+
 // Event is one parsed line of the CLI's event stream. Which fields
 // carry data depends on Kind: tool calls fill Text (the tool name), a
 // message fills Text, a session id fills SessionID, an error fills

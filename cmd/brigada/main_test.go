@@ -86,6 +86,36 @@ func TestRun(t *testing.T) {
 			wantErr:  "task submit needs --spec FILE",
 		},
 		{
+			name:     "project without a subcommand is a usage error",
+			args:     []string{"project"},
+			wantCode: 2,
+			wantErr:  "usage: brigada project foreman",
+		},
+		{
+			name:     "unknown project subcommand is a usage error",
+			args:     []string{"project", "frob"},
+			wantCode: 2,
+			wantErr:  "unknown project subcommand",
+		},
+		{
+			name:     "project foreman without a repo is a usage error",
+			args:     []string{"project", "foreman"},
+			wantCode: 2,
+			wantErr:  "project foreman needs --repo URL",
+		},
+		{
+			name:     "project foreman with only a harness is a usage error",
+			args:     []string{"project", "foreman", "--repo", "https://example.invalid/x.git", "--harness", "claude"},
+			wantCode: 2,
+			wantErr:  "sets --harness and --model together",
+		},
+		{
+			name:     "project foreman with only a model is a usage error",
+			args:     []string{"project", "foreman", "--repo", "https://example.invalid/x.git", "--model", "opus"},
+			wantCode: 2,
+			wantErr:  "sets --harness and --model together",
+		},
+		{
 			name:     "mcp without a socket is a usage error",
 			args:     []string{"mcp"},
 			wantCode: 2,

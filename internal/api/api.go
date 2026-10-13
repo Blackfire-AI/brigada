@@ -65,6 +65,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/jobs/{id}", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleJobGet))
 	mux.HandleFunc("/v1/jobs/{id}/cancel", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.idempotent(s.handleJobCancel)))
 	mux.HandleFunc("/v1/admin/fence-epoch", s.authed([]string{roleAdmin}, s.idempotent(s.handleFenceEpoch)))
+	// The foreman's harness and model (§4.1): PUT chooses them, GET reads
+	// them back; the role sets differ per method, so the handler checks.
+	mux.HandleFunc("/v1/projects/foreman", s.authed(nil, s.handleProjectForeman))
 	// The mux's own 404 is plain text; the API speaks JSON everywhere.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, codeNotFound, "no such endpoint")
