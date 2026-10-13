@@ -59,13 +59,18 @@ The terms used by [product.md](product.md) and [design.md](design.md). Where a d
 
 ## Routing and limits
 
-- **Dispatcher:** the engine code that picks an agent for each task job: which agents are **eligible** (agent `ready`, meaning neither broken nor cooling, account not cooling, the class supported, the family rule for reviews, under the parallel cap, session affinity), then the best **score** (a success rate per repo, class and agent), with a small **exploration share** for the next-best (§8).
+- **Dispatcher:** the engine code that picks an agent for each task job: which agents are **eligible** (agent `ready`, meaning neither broken nor cooling, account not cooling, the class supported, the family rule for reviews, session affinity), then, among those with room under every concurrency cap, the best **score** (a success rate per repo, class and agent), with a small **exploration share** for the next-best (§8).
 - **Quota:** what is left of an account's subscription window.
 - **Limit hit:** a harness error saying the account's quota is used up. It **cools** the account: no agent on it is picked until the window resets (§8). For the foreman, the engine marks it **limited** and the user decides (§4.4).
-- **Parked:** a task with no eligible agent: it waits, and the user is notified (§3, §10).
+- **Parked:** a task with no eligible agent when caps are ignored: it waits, and the user is notified (§3, §10). A task blocked only by full caps is queued instead.
+- **Queued:** a task whose next job cannot start because some concurrency cap is full. It starts when a slot frees, oldest first, and notifies nobody (§8.1).
 - **Broken:** an agent taken out of dispatch after repeated failures, auth errors or a dead runner, until a probe passes or the user resets it (§8).
 - **Stall:** a worker alive but with no activity for `stall_minutes` (default 10). The runner kills it and completes the job as `stalled` (§5.6).
-- **Cap:** a hard bound on rounds, attempts or time: per-task round caps, the class time cap, `tool_call_cap_minutes`.
+- **Cap:** a hard bound on rounds, attempts, time or parallel jobs: per-task round caps, the class time cap, `tool_call_cap_minutes`, the concurrency caps.
+- **Concurrency cap:** a limit on parallel jobs at one layer: runner, account, model, plan or global. A job starts only if every layer has room; a task blocked only by full caps is queued and does not park; a pending foreman turn outranks queued task jobs (§8.1).
+- **Capacity:** what the foreman sees through the `capacity` tool: per agent, the effective cap, running jobs, quota state and cost weight; per layer, cap, use and queue depth (§12.2).
+- **Cost weight:** a relative cost per agent that the user sets (default 1), so the foreman can let tasks wait for a cheaper agent (§8.1).
+- **Foreman headroom:** a reserve on the foreman's account (a quota threshold, or a slot kept free) so task workers don't leave the foreman limited mid-plan (§8.2).
 - **Budget:** a spending bound the user can raise: per project, foreman wake-ups per day; per plan, task-worker-minutes (§4.3).
 
 ## Events and history
