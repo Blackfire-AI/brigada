@@ -3,6 +3,9 @@
 // materializes its own workspace by fetching the task's repo URL into a
 // per-task worktree, runs the agent CLI headless through an adapter, runs the
 // task's check itself once the worker reports done, and pushes the result
-// branch to the remote. It heartbeats progress and completes with a fencing
-// token, so lease expiry plus fencing make crashes safe.
+// branch to the remote. A foreman turn has none of that material side: it
+// runs the project's foreman session headless in a per-project scratch
+// directory, with no workspace and no check to run. It heartbeats progress
+// and completes with a fencing token, so lease expiry plus fencing make
+// crashes safe.
 package runner

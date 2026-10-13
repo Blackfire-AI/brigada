@@ -57,6 +57,11 @@ type Adapter interface {
 type Job struct {
 	Prompt string
 	Model  string
+	// MCPConfig names the harness's MCP config for the run: a config
+	// file's path, offered to the CLI through its own flag. It is where
+	// the `brigada mcp` bridge (§12.2) will hand the foreman's harness
+	// brigada's tool server; empty — every job today — adds nothing.
+	MCPConfig string
 }
 
 // EventKind is the shape of one progress event (§5.6): what the runner
