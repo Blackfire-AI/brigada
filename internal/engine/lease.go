@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -171,9 +172,18 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 		}
 
-		agent, err := leaseAgentTx(tx, owner, j.Harness)
+		agent, err := leaseAgentTx(tx, owner, j)
 		if err != nil {
 			return nil, err
+		}
+		// The family rule (§7, §8): a job that excludes a family needs
+		// one of this runner's agents of another family, review-capable.
+		// A runner with none — no agents at all, or only the author's
+		// family — does not get the job. That is an unmet placement, not
+		// a cap hold: nothing is stamped, and the queue TTL measures the
+		// job's wait like any other's.
+		if j.ExcludeFamily != "" && agent == 0 {
+			continue
 		}
 		// The cap gate (§8.1): the job starts only if every layer on its
 		// path has room. A full layer holds the job in place — it stays
@@ -243,6 +253,13 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		if _, err := appendEventTx(tx, evJobLeased, j.ProjectID, j.TaskID, j.ID,
 			eventPayload{Lease: leasePrefix(leaseID), Owner: owner, Attempt: j.Attempts + 1}, now); err != nil {
 			return nil, err
+		}
+		// The task leaves ready while one of its jobs is leased (§6.1);
+		// a task already past ready keeps the state it reached.
+		if j.TaskID != 0 {
+			if err := taskRunningTx(tx, j, now); err != nil {
+				return nil, err
+			}
 		}
 		repo, baseRef, checkCmd, err := taskInfoTx(tx, j)
 		if err != nil {
@@ -330,26 +347,52 @@ func (r capReservation) layer(job caps.Job) (string, bool) {
 }
 
 // leaseAgentTx picks the agent a lease records on the job (§8.1): the
-// runner's first agent — by id — that matches the job's harness
-// constraint, or the runner's first agent when the job leaves the
-// harness open. 0 when the runner advertises no such agent: the job
-// then runs with nothing to count by at the account and model layers.
-func leaseAgentTx(tx *sql.Tx, runner int64, harness string) (int64, error) {
-	query := "SELECT id FROM agents WHERE runner_id = ?"
+// runner's first agent — by id — matching the job's harness constraint,
+// or the runner's first agent when the job leaves the harness open.
+// Under the family rule (§7, §8) — a job that excludes a family, the
+// review job of an implement task — only the runner's agents of another
+// family that offer the review class qualify, and the first of those by
+// id is the pick. 0 when the runner advertises no such agent: the job
+// then runs with nothing to count by at the account and model layers,
+// except that the family rule's caller refuses the lease outright.
+func leaseAgentTx(tx *sql.Tx, runner int64, j *jobRow) (int64, error) {
+	query := "SELECT id, family, classes FROM agents WHERE runner_id = ?"
 	args := []any{runner}
-	if harness != "" {
+	if j.Harness != "" {
 		query += " AND harness = ?"
-		args = append(args, harness)
+		args = append(args, j.Harness)
 	}
-	var id int64
-	err := tx.QueryRow(query+" ORDER BY id LIMIT 1", args...).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, nil // the runner advertises no such agent
-	}
+	rows, err := tx.Query(query+" ORDER BY id", args...)
 	if err != nil {
 		return 0, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 	}
-	return id, nil
+	defer rows.Close()
+	var pick int64
+	for rows.Next() {
+		var id int64
+		var family, classes string
+		if err := rows.Scan(&id, &family, &classes); err != nil {
+			return 0, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
+		}
+		if j.ExcludeFamily != "" &&
+			(family == j.ExcludeFamily || !agentOffersClass(classes, string(KindReview))) {
+			continue
+		}
+		pick = id
+		break
+	}
+	return pick, rows.Err()
+}
+
+// agentOffersClass reports whether the agent's advertised classes (§5.1,
+// a JSON array) include class. A classes column that will not parse
+// offers nothing.
+func agentOffersClass(classes, class string) bool {
+	var offered []string
+	if json.Unmarshal([]byte(classes), &offered) != nil {
+		return false
+	}
+	return slices.Contains(offered, class)
 }
 
 // holdAtCapTx records that a full cap layer holds a queued job (§8.1).

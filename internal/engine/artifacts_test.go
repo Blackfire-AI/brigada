@@ -324,11 +324,12 @@ func TestPruneAppliesRetention(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prune: %v", err)
 	}
-	// The old artifact row, and the three old messages — the task's
-	// spec, the run's result, the note; the file stays, because the
-	// young row shares it.
-	if rep.Artifacts != 1 || rep.Messages != 3 || rep.Files != 0 {
-		t.Errorf("prune report = %+v, want one artifact, three messages, no file removed", rep)
+	// The old artifact row, and the four old messages — the task's spec,
+	// the review's spec (the completion queued the task's review job),
+	// the run's result, the note; the file stays, because the young row
+	// shares it.
+	if rep.Artifacts != 1 || rep.Messages != 4 || rep.Files != 0 {
+		t.Errorf("prune report = %+v, want one artifact, four messages, no file removed", rep)
 	}
 	if n := e.int("SELECT COUNT(*) FROM events"); n != eventsBefore {
 		t.Errorf("events = %d after pruning, want the same %d: the log is never pruned", n, eventsBefore)

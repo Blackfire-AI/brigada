@@ -179,7 +179,10 @@ func TestLeaseGrantCarriesTaskFields(t *testing.T) {
 	if g2.Mode == ModeSession && g2.ResumeSessionID != "" {
 		t.Errorf("resume session id = %q without a prior run", g2.ResumeSessionID)
 	}
-	e.complete(g2, Completion{Result: `{"status":"done"}`, SessionID: "sess-1"})
+	// A completion that parks the task (here: the worker asking its
+	// question, §3) frees the key without queuing anything behind it, so
+	// the session round below has the key to itself.
+	e.complete(g2, Completion{Result: `{"status":"needs_help","question":"which file?"}`, SessionID: "sess-1"})
 
 	// A task's own repo URL wins over the project's (§6.1).
 	e.exec("UPDATE tasks SET repo_url = 'https://example.invalid/other.git' WHERE id = ?", e.task)

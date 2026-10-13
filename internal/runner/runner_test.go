@@ -915,7 +915,9 @@ func TestRunnerHistoryEndToEnd(t *testing.T) {
 		t.Errorf("the job's transcript ref = %d, want the uploaded artifact %d", got, transcriptID)
 	}
 
-	// The history shows the job's whole timeline, oldest first.
+	// The history shows the job's whole timeline, oldest first: the run
+	// itself, then the review the completion queued (§7) — its created
+	// event names the review job, not the work job's id.
 	var page struct {
 		Items []struct {
 			Type    string `json:"type"`
@@ -933,23 +935,32 @@ func TestRunnerHistoryEndToEnd(t *testing.T) {
 	}
 	want := []string{
 		"event:job_created", "message:task_spec",
-		"event:job_leased",
-		"event:job_completed", "message:worker_result",
+		"event:job_leased", "event:task_running",
+		"event:job_completed", "event:task_reviewing", "event:job_created",
+		"message:worker_result", "message:task_spec",
 	}
 	if strings.Join(story, " ") != strings.Join(want, " ") {
-		t.Errorf("the job's timeline:\n got %v\nwant %v", story, want)
+		t.Errorf("the task's timeline:\n got %v\nwant %v", story, want)
 	}
+	reviewJob := e.int64Of("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review'", task)
 	for _, it := range page.Items {
-		if it.JobID != 0 && it.JobID != job {
-			t.Errorf("item %s names job %d, want %d", it.Kind, it.JobID, job)
+		if it.JobID != 0 && it.JobID != job && it.JobID != reviewJob {
+			t.Errorf("item %s names job %d, want %d or its review %d", it.Kind, it.JobID, job, reviewJob)
 		}
 	}
 	if len(page.Items) < 2 || page.Items[1].Author != "engine" || page.Items[1].Content != "the task spec" {
 		t.Errorf("the task_spec message = %+v, want the seeded spec from the engine", page.Items[1])
 	}
-	last := page.Items[len(page.Items)-1]
-	if last.Author != "worker" || !strings.Contains(last.Content, `"status":"done"`) {
-		t.Errorf("the worker_result message = %+v, want the worker's done block", last)
+	// The worker's own words are in the story: the done block of §5.4.
+	var workerResult string
+	var haveWorkerResult bool
+	for _, it := range page.Items {
+		if it.Kind == "worker_result" {
+			workerResult, haveWorkerResult = it.Content, it.Author == "worker"
+		}
+	}
+	if !haveWorkerResult || !strings.Contains(workerResult, `"status":"done"`) {
+		t.Errorf("the worker_result message = %q (%t), want the worker's done block", workerResult, haveWorkerResult)
 	}
 
 	// The artifacts endpoint streams the blob the path names.

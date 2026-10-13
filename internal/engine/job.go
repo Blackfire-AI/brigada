@@ -21,6 +21,8 @@ type jobRow struct {
 	Mode           Mode
 	Prompt         string
 	Status         string
+	AgentID        int64 // the agent the lease recorded; 0 until then
+	ExcludeFamily  string
 	LeaseID        string
 	LeaseOwner     int64
 	LeaseExpiresAt string
@@ -48,6 +50,7 @@ type jobRow struct {
 // jobColumns reads a job whole; COALESCE turns NULL into the zero value
 // so every scan is into plain fields.
 const jobColumns = `id, project_id, COALESCE(task_id, 0), kind, key, mode, prompt, status,
+	COALESCE(agent_id, 0), exclude_family,
 	COALESCE(lease_id, ''), COALESCE(lease_owner, 0), COALESCE(lease_expires_at, ''), COALESCE(lease_epoch, 0),
 	COALESCE(fence_token, 0), followup, attempts, COALESCE(result, ''),
 	COALESCE(first_leased, ''), COALESCE(last_leased, ''), COALESCE(queued_at, ''),
@@ -60,6 +63,7 @@ const jobColumns = `id, project_id, COALESCE(task_id, 0), kind, key, mode, promp
 func scanJob(row interface{ Scan(dest ...any) error }) (*jobRow, error) {
 	j := &jobRow{}
 	err := row.Scan(&j.ID, &j.ProjectID, &j.TaskID, &j.Kind, &j.Key, &j.Mode, &j.Prompt, &j.Status,
+		&j.AgentID, &j.ExcludeFamily,
 		&j.LeaseID, &j.LeaseOwner, &j.LeaseExpiresAt, &j.LeaseEpoch,
 		&j.FenceToken, &j.Followup, &j.Attempts, &j.Result,
 		&j.FirstLeased, &j.LastLeased, &j.QueuedAt,

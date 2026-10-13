@@ -121,8 +121,8 @@ func TestEventsTraceTheJobLifecycle(t *testing.T) {
 
 	want := []string{
 		evJobCreated, evJobCapped, evJobPending,
-		evJobLeased, evLeaseRequeued, evLeaseRevived,
-		evJobReleased, evJobLeased, evJobCompleted,
+		evJobLeased, evTaskRunning, evLeaseRequeued, evLeaseRevived,
+		evJobReleased, evJobLeased, evJobCompleted, evTaskReviewing, evJobCreated,
 	}
 	if got := e.eventKinds(); !equalStrings(got, want) {
 		t.Errorf("the job's events:\n got %v\nwant %v", got, want)
@@ -145,8 +145,17 @@ func TestEventsTraceTheJobLifecycle(t *testing.T) {
 	if rows[3].payload.Lease == g.LeaseID {
 		t.Error("the leased event carries the whole lease id, the capability itself")
 	}
-	if got := rows[8].payload.Status; got != statusDone {
+	if got := rows[9].payload.Status; got != statusDone {
 		t.Errorf("completed event status = %q, want %q", got, statusDone)
+	}
+	// The completion moved the task to reviewing and queued the review
+	// job (§7): the reviewing event names the state, the review's
+	// created event is the key's second run.
+	if rows[10].payload.Status != taskReviewing {
+		t.Errorf("reviewing event payload = %+v, want the state", rows[10].payload)
+	}
+	if rows[11].payload.Run != 2 {
+		t.Errorf("the review job's created event run = %d, want 2", rows[11].payload.Run)
 	}
 }
 
@@ -178,10 +187,10 @@ func TestEventsTraceTheFailuresAndTheFence(t *testing.T) {
 		if rep := e.mustSweep(); len(rep.HardCapped) != 1 {
 			t.Fatalf("the sweep hard-capped nothing: %+v", rep)
 		}
-		if got := e.eventKinds(); !equalStrings(got, []string{evJobCreated, evJobLeased, evJobHardCapped}) {
+		if got := e.eventKinds(); !equalStrings(got, []string{evJobCreated, evJobLeased, evTaskRunning, evJobHardCapped}) {
 			t.Errorf("events = %v", got)
 		}
-		if last := e.eventRows()[2]; last.payload.Status != statusFailed || last.payload.Reason == "" {
+		if last := e.eventRows()[3]; last.payload.Status != statusFailed || last.payload.Reason == "" {
 			t.Errorf("hard-cap event payload = %+v, want the failure status and the reason", last.payload)
 		}
 	})
@@ -199,11 +208,11 @@ func TestEventsTraceTheFailuresAndTheFence(t *testing.T) {
 		if got := e.leaseAny(e.runner2); got != nil {
 			e.t.Fatal("the job was offered past its attempt cap")
 		}
-		want := []string{evJobCreated, evJobLeased, evLeaseRequeued, evJobAttemptsExceeded}
+		want := []string{evJobCreated, evJobLeased, evTaskRunning, evLeaseRequeued, evJobAttemptsExceeded}
 		if got := e.eventKinds(); !equalStrings(got, want) {
 			t.Errorf("events = %v, want %v", got, want)
 		}
-		if last := e.eventRows()[3]; last.payload.Status != statusFailed || last.payload.Reason == "" {
+		if last := e.eventRows()[4]; last.payload.Status != statusFailed || last.payload.Reason == "" {
 			t.Errorf("attempt-cap event payload = %+v, want the failure status and the reason", last.payload)
 		}
 	})
@@ -245,11 +254,16 @@ func TestStopOutcomesNameThemselvesInTheEvent(t *testing.T) {
 			g := e.leaseAny(e.runner1)
 			e.complete(g, Completion{Result: tc.result, Outcome: tc.outcome})
 			rows := e.eventRows()
-			if len(rows) != 3 || rows[2].kind != evJobCompleted {
+			if len(rows) != 5 || rows[3].kind != evJobCompleted {
 				t.Fatalf("events = %v", e.eventKinds())
 			}
-			if rows[2].payload.Status != tc.outcome {
-				t.Errorf("completion event status = %q, want %q", rows[2].payload.Status, tc.outcome)
+			if rows[3].payload.Status != tc.outcome {
+				t.Errorf("completion event status = %q, want %q", rows[3].payload.Status, tc.outcome)
+			}
+			// A stopped run always goes to the foreman (§5.6): the task
+			// parks at needs_foreman with the failure's words.
+			if rows[4].kind != evTaskFailed || rows[4].payload.Status != taskNeedsForeman {
+				t.Errorf("the stopped run's task event = %s %+v, want %s with the state", rows[4].kind, rows[4].payload, evTaskFailed)
 			}
 		})
 	}

@@ -14,6 +14,7 @@ import (
 // prompts or secrets that made it happen.
 const (
 	evPlanCreated         = "plan_created"          // CreatePlan: a plan now exists (§6.2)
+	evPlanDone            = "plan_done"             // the plan's last open task finished (§6.2)
 	evJobCreated          = "job_created"           // submit: a queued job now exists
 	evJobPending          = "job_pending"           // submit: coalesced behind the key's live job
 	evJobCapped           = "job_capped"            // submit: the task's round cap is spent
@@ -28,6 +29,14 @@ const (
 	evJobQueueTimedOut    = "job_queue_timed_out"   // the sweep failed a job past the queue TTL
 	evJobAttemptsExceeded = "job_attempts_exceeded" // the job lost MaxAttempts runners
 	evFenceEpochBumped    = "fence_epoch_bumped"    // recover fenced older-epoch leases out (§6.4)
+	evTaskRunning         = "task_running"          // a lease took the task from ready (§6.1)
+	evTaskReviewing       = "task_reviewing"        // the work passed its check; the review job is queued (§7)
+	evTaskDone            = "task_done"             // the task is finished (§6.1)
+	evTaskCheckFailed     = "task_check_failed"     // the check failed; the task waits for the foreman (§3)
+	evTaskNeedsHelp       = "task_needs_help"       // the worker asked its question; the foreman answers (§3)
+	evTaskFailed          = "task_failed"           // the run failed or said nothing usable; the foreman decides (§3)
+	evReviewChanges       = "review_changes"        // the reviewer wants changes; the foreman decides (§7)
+	evReviewNoVerdict     = "review_no_verdict"     // the review ended without a usable verdict (§7)
 	evProjectForemanSet   = "project_foreman_set"   // setup: the project's foreman harness and model were chosen (§4.1)
 )
 
@@ -36,17 +45,20 @@ const (
 // its id's prefix — enough to tie the log entry to the lease, never the
 // whole capability.
 type eventPayload struct {
-	Answer  string `json:"answer,omitempty"`
-	Status  string `json:"status,omitempty"`
-	Reason  string `json:"reason,omitempty"`
-	Lease   string `json:"lease,omitempty"`
-	Owner   int64  `json:"owner,omitempty"`
-	Run     int64  `json:"run,omitempty"`
-	Attempt int64  `json:"attempt,omitempty"`
-	Epoch   int64  `json:"epoch,omitempty"`
-	Layer   string `json:"layer,omitempty"` // the cap layer that held the job (§8.1)
-	Harness string `json:"harness,omitempty"`
-	Model   string `json:"model,omitempty"`
+	Answer   string `json:"answer,omitempty"`
+	Status   string `json:"status,omitempty"` // the completion's, or the state a task or plan reached
+	Reason   string `json:"reason,omitempty"` // a check's output tail, a failure's words (§3, §5.5)
+	Lease    string `json:"lease,omitempty"`
+	Owner    int64  `json:"owner,omitempty"`
+	Run      int64  `json:"run,omitempty"`
+	Attempt  int64  `json:"attempt,omitempty"`
+	Epoch    int64  `json:"epoch,omitempty"`
+	Layer    string `json:"layer,omitempty"`    // the cap layer that held the job (§8.1)
+	Branch   string `json:"branch,omitempty"`   // the task's result branch (§6.4)
+	Question string `json:"question,omitempty"` // the worker's question (§5.4)
+	Findings string `json:"findings,omitempty"` // the review's findings (§7)
+	Harness  string `json:"harness,omitempty"`
+	Model    string `json:"model,omitempty"`
 }
 
 // appendEventTx adds one row to the event log inside the caller's
@@ -110,12 +122,15 @@ const (
 )
 
 // workerResultFields is the result block's conversation shape (§5.4):
-// what the worker_result message shows of a completed run.
+// what the worker_result message shows of a completed run. Reason is
+// the runner's word for its own outcomes — no-result, a stopped run
+// (§5.5, §5.6) — which a worker's own block never carries.
 type workerResultFields struct {
 	Status   string `json:"status"`
 	Summary  string `json:"summary,omitempty"`
 	Question string `json:"question,omitempty"`
 	Branch   string `json:"branch,omitempty"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 // workerResultMessage renders a completion's result as the message the

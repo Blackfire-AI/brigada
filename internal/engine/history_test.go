@@ -22,8 +22,10 @@ func TestHistoryMergesEventsAndMessagesOldestFirst(t *testing.T) {
 	e := newEnv(t)
 
 	// One run's whole story: the submit writes the created event and the
-	// task's spec message, the lease and the completion add theirs, each
-	// at its own instant.
+	// task's spec message, the lease adds its event and the task's move
+	// to running, and the completion adds its event, the worker's result
+	// message, the move to reviewing and the review job's own created
+	// event and spec message — each at its own instant.
 	r := e.submit(e.work())
 	e.clock.Advance(time.Minute)
 	g := e.leaseAny(e.runner1)
@@ -39,8 +41,12 @@ func TestHistoryMergesEventsAndMessagesOldestFirst(t *testing.T) {
 		"event:" + evJobCreated,
 		"message:" + msgKindTaskSpec,
 		"event:" + evJobLeased,
+		"event:" + evTaskRunning,
 		"event:" + evJobCompleted,
+		"event:" + evTaskReviewing,
+		"event:" + evJobCreated,
 		"message:" + msgKindWorkerResult,
+		"message:" + msgKindTaskSpec,
 	}
 	if got := timeline(page.Items); !equalStrings(got, want) {
 		t.Errorf("the timeline:\n got %v\nwant %v", got, want)
@@ -58,8 +64,8 @@ func TestHistoryMergesEventsAndMessagesOldestFirst(t *testing.T) {
 	if spec.Content != "the spec" || spec.Author != authorEngine || spec.EventID != first.ID {
 		t.Errorf("task_spec message = %+v, want the spec, the engine's name, the created event", spec)
 	}
-	res := page.Items[4]
-	if res.Author != authorWorker || res.EventID != page.Items[3].ID {
+	res := page.Items[7]
+	if res.Author != authorWorker || res.EventID != page.Items[4].ID {
 		t.Errorf("worker_result message = %+v, want the worker's name and the completed event", res)
 	}
 	if got := string(res.Content); got != `{"status":"done","summary":"finished"}` {
