@@ -56,6 +56,12 @@ type jobRun struct {
 	// It is assigned once, in execute, before the goroutines that may
 	// call it start, so it needs no lock.
 	killWorker func()
+
+	// mcpConfig is the harness's MCP config for the run (§12.2), set
+	// once — on the foreman path, by foremanMCPConfig — before the
+	// worker starts; every task job keeps it empty. Read by runWorker
+	// alone, after the set, like killWorker.
+	mcpConfig string
 }
 
 // execute runs the job end to end. Every failure is delivered to the
@@ -75,12 +81,11 @@ func (r *jobRun) execute(ctx context.Context) {
 	log.InfoContext(ctx, "job leased", "job_id", r.grant.JobID, "kind", r.grant.Kind, "key", r.grant.Key)
 	r.startedAt = r.now() // the class time cap measures the whole run, from the lease
 
-	// A foreman turn is not a worker job: it has no task, so there is no
-	// workspace to make. The headless foreman wake-up arrives with the
-	// foreman phase; until a runner can run it, the job goes back with
-	// the reason, for whatever runner can.
-	if r.grant.TaskID == 0 {
-		r.giveBack(ctx, "this runner cannot run foreman turns yet")
+	// A foreman turn is a worker job with no material side (§4): no
+	// task, so no workspace, no push, no check — the turn runs in the
+	// project's scratch directory under the same machinery.
+	if isForemanTurn(r.grant) {
+		r.runForemanTurn(ctx)
 		return
 	}
 
@@ -119,7 +124,7 @@ func (r *jobRun) execute(ctx context.Context) {
 // push, the check and the completion — everything the heartbeats cover.
 func (r *jobRun) runJob(ctx context.Context, ws *workspace, kill <-chan struct{}) {
 	ad, model := r.cfg.adapterFor(r.grant)
-	exitErr := r.runWorker(ctx, ad, model, ws, kill)
+	exitErr := r.runWorker(ctx, ad, model, ws.dir, kill)
 	if r.takeDropped() {
 		r.cfg.Log.WarnContext(ctx, "job no longer ours; worker killed and result dropped",
 			"job_id", r.grant.JobID, "worktree", ws.dir)
@@ -139,18 +144,18 @@ func (r *jobRun) runJob(ctx context.Context, ws *workspace, kill <-chan struct{}
 	r.finish(ctx, ad, ws, exitErr)
 }
 
-// runWorker starts the worker CLI and reads it to the end: the event
-// stream is parsed and recorded, and the process group is killed the
-// moment the run is aborted — the engine's answer turned bad, the
-// runner's own ctx ending, or a stall — while a clean exit is waited
-// out. It returns the command's wait error; what became of the run is
-// in the jobRun's fields.
-func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model string, ws *workspace, kill <-chan struct{}) error {
+// runWorker starts the worker CLI in workdir and reads it to the end:
+// the event stream is parsed and recorded, and the process group is
+// killed the moment the run is aborted — the engine's answer turned
+// bad, the runner's own ctx ending, or a stall — while a clean exit is
+// waited out. It returns the command's wait error; what became of the
+// run is in the jobRun's fields.
+func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workdir string, kill <-chan struct{}) error {
 	resume := ""
 	if r.grant.Mode == string(engine.ModeSession) {
 		resume = r.grant.ResumeSessionID
 	}
-	cmd, err := ad.Command(adapter.Job{Prompt: r.grant.Prompt, Model: model}, ws.dir, resume)
+	cmd, err := ad.Command(adapter.Job{Prompt: r.grant.Prompt, Model: model, MCPConfig: r.mcpConfig}, workdir, resume)
 	if err != nil {
 		return &noWorkerError{err}
 	}
@@ -635,16 +640,6 @@ func (r *jobRun) finishWithError(ctx context.Context, msg string) {
 		r.cfg.Log.WarnContext(ctx, "save transcript", "job_id", r.grant.JobID, "err", err)
 	}
 	r.deliver(ctx, comp)
-}
-
-// giveBack releases the job for the next runner, with the reason kept.
-func (r *jobRun) giveBack(ctx context.Context, reason string) {
-	ans, err := r.client.Release(ctx, r.grant.JobID, r.grant.LeaseID, reason)
-	if err != nil {
-		r.cfg.Log.ErrorContext(ctx, "release", "job_id", r.grant.JobID, "err", err)
-		return
-	}
-	r.cfg.Log.InfoContext(ctx, "job released", "job_id", r.grant.JobID, "answer", ans, "reason", reason)
 }
 
 // deliver completes the job, honouring the engine's answers (§12.3):
