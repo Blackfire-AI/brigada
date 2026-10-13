@@ -137,14 +137,14 @@ func TestConfigFile(t *testing.T) {
 	if _, err := LoadConfigFile(filepath.Join(dir, "absent")); err != nil {
 		t.Errorf("a missing config file must read as empty: %v", err)
 	}
-	if err := os.WriteFile(path, []byte("# a comment\n\nstate_dir = /elsewhere\nidle_minutes = 1.5\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("# a comment\n\nstate_dir = /elsewhere\nidle_minutes = 1.5\nnotify = none\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := LoadConfigFile(path)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.StateDir != "/elsewhere" || cfg.IdleMinutes != 1.5 {
+	if cfg.StateDir != "/elsewhere" || cfg.IdleMinutes != 1.5 || cfg.Notify != "none" {
 		t.Errorf("cfg = %+v, want the file's values", cfg)
 	}
 	if cfg.Caps.Global != nil || cfg.Caps.Account != nil {
@@ -179,6 +179,7 @@ func TestConfigFile(t *testing.T) {
 		"no equals":          "state_dir\n",
 		"bad number":         "idle_minutes = soon\n",
 		"negative":           "idle_minutes = -1\n",
+		"bad notify":         "notify = loud\n",
 		"unknown caps layer": "caps.middle = 2\n",
 		"bad caps value":     "caps.global = six\n",
 		"negative caps":      "caps.plan = -1\n",

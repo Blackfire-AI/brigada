@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/caps"
+	"github.com/Blackfire-AI/brigada/internal/notify"
 )
 
 // maxSocketPath is the longest Unix socket path the kernel accepts:
@@ -73,6 +74,7 @@ func CheckSocketPath(path string) error {
 type FileConfig struct {
 	StateDir    string
 	IdleMinutes float64     // 0 = the default
+	Notify      string      // notify = auto|none (§10); empty = auto
 	Caps        caps.Limits // the concurrency caps and cost weights (§8.1); zero = none
 }
 
@@ -121,10 +123,17 @@ func LoadConfigFile(path string) (FileConfig, error) {
 			if err == nil && cfg.IdleMinutes < 0 {
 				err = fmt.Errorf("negative")
 			}
+		case key == "notify":
+			switch value {
+			case notify.ModeAuto, notify.ModeNone:
+				cfg.Notify = value
+			default:
+				err = fmt.Errorf("want %s or %s", notify.ModeAuto, notify.ModeNone)
+			}
 		case strings.HasPrefix(key, "caps."), strings.HasPrefix(key, "cost."):
 			err = setCap(&cfg.Caps, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, a caps.<layer> or a cost.<harness>/<model>", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, a caps.<layer> or a cost.<harness>/<model>", path, n+1, key)
 		}
 		if err != nil {
 			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)

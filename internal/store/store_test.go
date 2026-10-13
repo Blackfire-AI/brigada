@@ -283,6 +283,64 @@ func TestOpenUpgradesAV1Store(t *testing.T) {
 	}
 }
 
+// TestNotifyCursorBackfillOnUpgrade builds the store a binary that
+// predates the notify_cursor migration would leave behind — every
+// migration before it, with a log full of events nobody was ever
+// notified about — then opens it with this binary. The cursor migration
+// must start the cursor at the log's end, not at 0: at 0, the first
+// engine start after the upgrade would replay the whole history as
+// notification banners (§10 promises a restart never re-notifies old
+// events). The boundary is derived from the migration's position in
+// the list, not hard-coded numbers, so renumbering — the placeholder
+// swap at merge included — cannot silently date the test.
+func TestNotifyCursorBackfillOnUpgrade(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatalf("list migrations: %v", err)
+	}
+	var before, after int
+	for _, m := range migs {
+		if m.name == "notify_cursor" {
+			before, after = m.version-1, m.version
+			break
+		}
+	}
+	if after == 0 {
+		t.Fatal("notify_cursor migration not found in allMigrations")
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("open raw store: %v", err)
+	}
+	// The versions are gapless 1..N, so the versions before the cursor
+	// migration are exactly the first `before` entries.
+	for _, m := range migs[:before] {
+		if _, err := db.Exec(m.sql); err != nil {
+			t.Fatalf("apply %04d_%s by hand: %v", m.version, m.name, err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA user_version = " + strconv.Itoa(before)); err != nil {
+		t.Fatalf("set user_version: %v", err)
+	}
+	// A history of the kinds that notify: two parkings and a plan done.
+	for _, kind := range []string{"task_check_failed", "plan_done", "task_needs_help"} {
+		exec(t, db, `INSERT INTO events (kind, payload, created_at) VALUES (?, '{}', ?)`, kind, ts)
+	}
+	maxID := queryInt(t, db, "SELECT MAX(id) FROM events")
+	if err := db.Close(); err != nil {
+		t.Fatalf("close raw store: %v", err)
+	}
+
+	s := openStore(t, path)
+	if v, err := s.userVersion(context.Background()); err != nil || v != after {
+		t.Errorf("user_version after upgrade = %d, %v; want %d", v, err, after)
+	}
+	if got := queryInt(t, s.db, "SELECT notify_cursor FROM meta WHERE id = 1"); got != maxID {
+		t.Errorf("notify_cursor after upgrade = %d, want the log's end %d", got, maxID)
+	}
+}
+
 func TestUpdateCommitsAndRollsBack(t *testing.T) {
 	s := openMemory(t)
 	ctx := context.Background()

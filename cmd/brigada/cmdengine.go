@@ -40,9 +40,7 @@ func runEngine(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		StateDir: rt.stateDir,
 		Idle:     idle,
 		Caps:     rt.file.Caps,
-		// The §10 notifications arrive in a later phase; the hook is the
-		// engine's promise to flush them before an idle exit.
-		FlushNotifications: nil,
+		Notify:   rt.file.Notify,
 	})
 	if err != nil {
 		return fail(stderr, err)
