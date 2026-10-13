@@ -147,17 +147,54 @@ func TestConfigFile(t *testing.T) {
 	if cfg.StateDir != "/elsewhere" || cfg.IdleMinutes != 1.5 {
 		t.Errorf("cfg = %+v, want the file's values", cfg)
 	}
+	if cfg.Caps.Global != nil || cfg.Caps.Account != nil {
+		t.Errorf("caps without keys = %+v, want none", cfg.Caps)
+	}
+
+	// The §8.1 caps and cost keys, the YAML example there in flat form.
+	if err := os.WriteFile(path, []byte("caps.global = 6\ncaps.plan = 3\ncaps.runner = 4\n"+
+		"caps.account.claude = 3\ncaps.model.heavy = 1\ncost.claude/sonnet = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadConfigFile(path)
+	if err != nil {
+		t.Fatalf("load caps: %v", err)
+	}
+	c := cfg.Caps
+	if c.Global == nil || *c.Global != 6 || c.Plan == nil || *c.Plan != 3 || c.Runner == nil || *c.Runner != 4 {
+		t.Errorf("scalar caps = %+v, want global 6, plan 3, runner 4", c)
+	}
+	if c.Account["claude"] != 3 || c.Model["heavy"] != 1 {
+		t.Errorf("keyed caps = account %v, model %v; want claude 3, heavy 1", c.Account, c.Model)
+	}
+	if got := c.CostOf("claude", "sonnet"); got != 2 {
+		t.Errorf("cost claude/sonnet = %d, want 2", got)
+	}
+	if got := c.CostOf("claude", "opus"); got != 1 {
+		t.Errorf("unnamed cost = %d, want the default 1", got)
+	}
+
 	for name, body := range map[string]string{
-		"unknown key": "frobnicate = 1\n",
-		"no equals":   "state_dir\n",
-		"bad number":  "idle_minutes = soon\n",
-		"negative":    "idle_minutes = -1\n",
+		"unknown key":        "frobnicate = 1\n",
+		"no equals":          "state_dir\n",
+		"bad number":         "idle_minutes = soon\n",
+		"negative":           "idle_minutes = -1\n",
+		"unknown caps layer": "caps.middle = 2\n",
+		"bad caps value":     "caps.global = six\n",
+		"negative caps":      "caps.plan = -1\n",
+		"empty account":      "caps.account. = 2\n",
+		"cost without pair":  "cost.claude = 2\n",
 	} {
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := LoadConfigFile(path); err == nil {
+		_, err := LoadConfigFile(path)
+		if err == nil {
 			t.Errorf("%s: accepted, want refusal", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "line 1") {
+			t.Errorf("%s: refusal %q does not name the line", name, err)
 		}
 	}
 }

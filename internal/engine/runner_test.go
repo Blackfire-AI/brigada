@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -8,7 +9,7 @@ import (
 func TestRegisterUpsertsByName(t *testing.T) {
 	e := newEnv(t)
 
-	first, err := e.eng.Register(e.ctx, "runner-a", nil)
+	first, err := e.eng.Register(e.ctx, "runner-a", 0, nil)
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -18,14 +19,14 @@ func TestRegisterUpsertsByName(t *testing.T) {
 	if got := e.int("SELECT COUNT(*) FROM runners WHERE name = 'runner-a'"); got != 1 {
 		t.Fatalf("rows for runner-a = %d, want 1", got)
 	}
-	again, err := e.eng.Register(e.ctx, "runner-a", nil)
+	again, err := e.eng.Register(e.ctx, "runner-a", 0, nil)
 	if err != nil {
 		t.Fatalf("re-register: %v", err)
 	}
 	if again != first {
 		t.Errorf("re-register id = %d, want %d: one row per name", again, first)
 	}
-	other, err := e.eng.Register(e.ctx, "runner-b", nil)
+	other, err := e.eng.Register(e.ctx, "runner-b", 0, nil)
 	if err != nil {
 		t.Fatalf("register second name: %v", err)
 	}
@@ -51,7 +52,7 @@ func TestRegisterPersistsAdvertisement(t *testing.T) {
 		{Adapter: "claude", Harness: "claude", Model: "sonnet", Family: "anthropic", Account: "work", Classes: []string{"implement", "review"}},
 		{Adapter: "kimi", Harness: "kimi", Model: "k2", Family: "moonshot", Account: "work", Classes: []string{"implement"}},
 	}
-	id, err := e.eng.Register(e.ctx, "runner-a", first)
+	id, err := e.eng.Register(e.ctx, "runner-a", 0, first)
 	if err != nil {
 		t.Fatalf("register with agents: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestRegisterPersistsAdvertisement(t *testing.T) {
 		{Adapter: "claude", Harness: "claude", Model: "sonnet", Family: "anthropic", Account: "personal", Classes: []string{"implement"}},
 		{Adapter: "codex", Harness: "codex", Model: "gpt", Family: "openai", Account: "work", Classes: []string{"review"}},
 	}
-	if _, err := e.eng.Register(e.ctx, "runner-a", second); err != nil {
+	if _, err := e.eng.Register(e.ctx, "runner-a", 0, second); err != nil {
 		t.Fatalf("re-register: %v", err)
 	}
 	if got := e.int("SELECT COUNT(*) FROM agents WHERE runner_id = ?", id); got != 2 {
@@ -86,7 +87,7 @@ func TestRegisterPersistsAdvertisement(t *testing.T) {
 	}
 
 	// Registering with no agents clears the set.
-	if _, err := e.eng.Register(e.ctx, "runner-a", nil); err != nil {
+	if _, err := e.eng.Register(e.ctx, "runner-a", 0, nil); err != nil {
 		t.Fatalf("register with no agents: %v", err)
 	}
 	if got := e.int("SELECT COUNT(*) FROM agents WHERE runner_id = ?", id); got != 0 {
@@ -99,7 +100,7 @@ func TestRegisterPersistsAdvertisement(t *testing.T) {
 		"no harness": {Adapter: "claude", Model: "sonnet"},
 		"no model":   {Adapter: "claude", Harness: "claude"},
 	} {
-		if _, err := e.eng.Register(e.ctx, "runner-a", []AgentAdvert{bad}); err == nil {
+		if _, err := e.eng.Register(e.ctx, "runner-a", 0, []AgentAdvert{bad}); err == nil {
 			t.Errorf("%s: accepted, want refusal", name)
 		}
 	}
@@ -109,8 +110,34 @@ func TestRegisterPersistsAdvertisement(t *testing.T) {
 		{Adapter: "claude", Harness: "claude", Model: "sonnet"},
 		{Adapter: "claude", Harness: "claude", Model: "sonnet", Account: "other"},
 	}
-	if _, err := e.eng.Register(e.ctx, "runner-a", dup); err == nil {
+	if _, err := e.eng.Register(e.ctx, "runner-a", 0, dup); err == nil {
 		t.Error("a duplicate agent key was accepted, want refusal")
+	}
+}
+
+// TestRegisterStoresTheRunnerCap covers the runner layer's own half
+// (§8.1): a runner advertises its max_parallel when it registers, a
+// re-register replaces it, 0 means unset again, and a negative value is
+// the caller's mistake.
+func TestRegisterStoresTheRunnerCap(t *testing.T) {
+	e := newEnv(t)
+	id, err := e.eng.Register(e.ctx, "capped", 4, nil)
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if got := e.int("SELECT max_parallel FROM runners WHERE id = ?", id); got != 4 {
+		t.Errorf("max_parallel = %d, want 4", got)
+	}
+	for _, want := range []int64{2, 0} {
+		if _, err := e.eng.Register(e.ctx, "capped", int(want), nil); err != nil {
+			t.Fatalf("re-register with %d: %v", want, err)
+		}
+		if got := e.int("SELECT max_parallel FROM runners WHERE id = ?", id); got != want {
+			t.Errorf("max_parallel after re-register = %d, want %d", got, want)
+		}
+	}
+	if _, err := e.eng.Register(e.ctx, "capped", -1, nil); !errors.Is(err, ErrInvalidAgent) {
+		t.Errorf("register with -1 = %v, want an invalid-advertisement refusal", err)
 	}
 }
 

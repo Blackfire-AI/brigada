@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
+	"github.com/Blackfire-AI/brigada/internal/caps"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/store"
 )
@@ -33,6 +34,9 @@ type Config struct {
 	// Idle is how long with no live jobs and no connected requests the
 	// engine tolerates before it exits (§13); zero keeps 30 minutes.
 	Idle time.Duration
+	// Caps are the concurrency caps and cost weights the config file
+	// named (§8.1); the zero value caps nothing.
+	Caps caps.Limits
 	// IdleTick is how often busyness is checked; zero derives a tick
 	// from Idle, clamped to [200ms, 30s].
 	IdleTick time.Duration
@@ -111,7 +115,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("engine: %w", err)
 	}
 	defer st.Close()
-	eng := engine.New(st, engine.Config{Now: cfg.Now})
+	eng := engine.New(st, engine.Config{Now: cfg.Now, Caps: cfg.Caps})
 	if err := eng.RecordInstance(ctx, int64(os.Getpid()), started); err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}

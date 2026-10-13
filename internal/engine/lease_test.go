@@ -206,6 +206,64 @@ func TestReleaseExclusionAndLapse(t *testing.T) {
 	})
 }
 
+// TestLeaseRecordsTheAgent covers what the caps layers count by (§8.1):
+// a lease sets the job's agent to the runner's first agent matching the
+// job's harness — by id — or the runner's first agent when the job
+// leaves the harness open, and to nothing when the runner has no such
+// agent. Which job a lease takes does not change.
+func TestLeaseRecordsTheAgent(t *testing.T) {
+	e := newEnv(t)
+	agented, err := e.eng.Register(e.ctx, "agented", 0, []AgentAdvert{
+		{Adapter: "claude", Harness: "claude", Model: "sonnet", Family: "anthropic", Account: "work"},
+		{Adapter: "gemini", Harness: "gemini", Model: "flash", Family: "google", Account: "work"},
+	})
+	if err != nil {
+		t.Fatalf("register an agented runner: %v", err)
+	}
+	claude := e.int("SELECT id FROM agents WHERE runner_id = ? AND harness = 'claude'", agented)
+	gemini := e.int("SELECT id FROM agents WHERE runner_id = ? AND harness = 'gemini'", agented)
+	if claude == 0 || gemini == 0 || claude > gemini {
+		t.Fatalf("agents = claude %d, gemini %d; want both, claude first by id", claude, gemini)
+	}
+
+	// A job with a harness constraint gets the matching agent.
+	task2 := e.addTask("{}")
+	geminiJob := e.work()
+	geminiJob.Harness = "gemini"
+	geminiJob.Key = keyOf(task2)
+	geminiJob.TaskID = task2
+	e.submit(geminiJob)
+	g := e.lease(agented, []string{"gemini", "claude"}, nil)
+	if g == nil {
+		t.Fatal("the agented runner found nothing")
+	}
+	if got := e.int("SELECT COALESCE(agent_id, 0) FROM jobs WHERE id = ?", g.JobID); got != gemini {
+		t.Errorf("agent_id = %d, want the gemini agent %d", got, gemini)
+	}
+
+	// A job that leaves the harness open gets the runner's first agent.
+	open := e.submit(e.work())
+	if g = e.lease(agented, []string{"gemini", "claude"}, nil); g == nil || g.JobID != open.JobID {
+		t.Fatalf("second lease = %+v, want job %d", g, open.JobID)
+	}
+	if got := e.int("SELECT COALESCE(agent_id, 0) FROM jobs WHERE id = ?", g.JobID); got != claude {
+		t.Errorf("agent_id = %d, want the first agent %d", got, claude)
+	}
+
+	// A runner that advertises no agents records none.
+	task3 := e.addTask("{}")
+	plain := e.work()
+	plain.Key = keyOf(task3)
+	plain.TaskID = task3
+	plainJob := e.submit(plain)
+	if g = e.leaseAny(e.runner1); g == nil || g.JobID != plainJob.JobID {
+		t.Fatalf("a plain runner got %+v, want job %d", g, plainJob.JobID)
+	}
+	if got := e.int("SELECT COALESCE(agent_id, 0) FROM jobs WHERE id = ?", g.JobID); got != 0 {
+		t.Errorf("agent_id = %d, want none for an agent-less runner", got)
+	}
+}
+
 func TestSessionAffinity(t *testing.T) {
 	e := newEnv(t)
 	p := e.work()

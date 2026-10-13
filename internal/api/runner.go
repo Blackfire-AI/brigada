@@ -37,7 +37,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request, id ident
 			Family: a.Family, Account: a.Account, Classes: a.Classes,
 		}
 	}
-	runnerID, err := s.eng.Register(r.Context(), id.name, agents)
+	runnerID, err := s.eng.Register(r.Context(), id.name, req.MaxParallel, agents)
 	if err != nil {
 		// An advertisement the engine refuses is the caller's mistake;
 		// anything else — the store, the engine's own bookkeeping — is
@@ -210,11 +210,13 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request, runnerID 
 
 // advertiseRequest is what a runner tells the engine about itself: the
 // harnesses and labels it offers (§8) and, in a register, the agents it
-// advertises (§5.1). In a lease it rides along every poll; in a
-// register it is the row's advertisement. WaitSeconds is the
-// client-given long-poll wait in seconds (§12.3).
+// advertises (§5.1) and its own cap on parallel jobs (§8.1). In a lease
+// it rides along every poll; in a register it is the row's
+// advertisement. WaitSeconds is the client-given long-poll wait in
+// seconds (§12.3).
 type advertiseRequest struct {
 	WaitSeconds float64       `json:"wait"`
+	MaxParallel int           `json:"max_parallel"` // the runner's own cap; 0 = unset (§8.1)
 	Harnesses   []string      `json:"harnesses"`
 	Labels      []string      `json:"labels"`
 	Agents      []agentAdvert `json:"agents"`

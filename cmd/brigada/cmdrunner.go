@@ -28,6 +28,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		workerScript string
 		classes      string
 		labels       string
+		maxParallel  int
 		noStart      bool
 	)
 	fs.StringVar(&harness, "harness", "claude", "the harness this runner offers: claude, or fake with --worker-script")
@@ -35,6 +36,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	fs.StringVar(&workerScript, "worker-script", "", "with --harness fake: the scripted worker the fake adapter drives (tests)")
 	fs.StringVar(&classes, "classes", "implement,review,answer", "the task classes this runner takes, comma-separated")
 	fs.StringVar(&labels, "labels", "", "labels this runner offers on every lease poll, comma-separated")
+	fs.IntVar(&maxParallel, "max-parallel", 0, "this runner's own cap on parallel jobs, advertised at register (0 = unset)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	if code := common.parse(stderr, args); code != 0 {
 		return code
@@ -86,8 +88,9 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			Account: name,
 			Classes: splitList(classes),
 		}},
-		Adapters: []adapter.Adapter{ad},
-		Labels:   splitList(labels),
+		Adapters:    []adapter.Adapter{ad},
+		Labels:      splitList(labels),
+		MaxParallel: maxParallel,
 	}); err != nil {
 		return fail(stderr, fmt.Errorf("runner: %w", err))
 	}

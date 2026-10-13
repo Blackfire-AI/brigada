@@ -43,6 +43,9 @@ type Config struct {
 	Adapters []adapter.Adapter
 	// Labels are offered on every lease poll (§8).
 	Labels []string
+	// MaxParallel is the runner's own cap on parallel jobs (§8.1),
+	// advertised at register; 0 means unset.
+	MaxParallel int
 	// HeartbeatEvery, LeaseWait and CheckTimeout override the defaults;
 	// zero keeps them.
 	HeartbeatEvery time.Duration
@@ -245,7 +248,7 @@ func Run(ctx context.Context, cfg Config) error {
 			return err
 		}
 		if !registered {
-			if err := client.Register(ctx, cfg.Agents); err != nil {
+			if err := client.Register(ctx, cfg.Agents, cfg.MaxParallel); err != nil {
 				if permanent := callerMistake(err); permanent != nil {
 					return permanent
 				}

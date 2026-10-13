@@ -59,11 +59,16 @@ func (a AgentAdvert) classesJSON() (string, error) {
 // agents the call carries replace the runner's set, keyed by runner,
 // adapter and model (§11). Agents the new set no longer names are
 // deleted; ones it keeps keep their rows, so the outcomes that reference
-// them survive a restart. The row's id is what every lease the runner
-// takes references, so a runner must register before it can lease.
-func (e *Engine) Register(ctx context.Context, name string, agents []AgentAdvert) (int64, error) {
+// them survive a restart. maxParallel is the runner's own cap on
+// parallel jobs (§8.1): 0 means it advertised none. The row's id is what
+// every lease the runner takes references, so a runner must register
+// before it can lease.
+func (e *Engine) Register(ctx context.Context, name string, maxParallel int, agents []AgentAdvert) (int64, error) {
 	if name == "" {
 		return 0, fmt.Errorf("register runner: name is required")
+	}
+	if maxParallel < 0 {
+		return 0, fmt.Errorf("register runner %q: %w: max_parallel must be 0 or more, got %d", name, ErrInvalidAgent, maxParallel)
 	}
 	for _, a := range agents {
 		if err := a.valid(); err != nil {
@@ -76,12 +81,12 @@ func (e *Engine) Register(ctx context.Context, name string, agents []AgentAdvert
 		err := tx.QueryRow("SELECT id FROM runners WHERE name = ?", name).Scan(&id)
 		switch {
 		case err == nil:
-			if _, err := tx.Exec("UPDATE runners SET last_seen_at = ? WHERE id = ?", nowStr, id); err != nil {
+			if _, err := tx.Exec("UPDATE runners SET last_seen_at = ?, max_parallel = ? WHERE id = ?", nowStr, maxParallel, id); err != nil {
 				return fmt.Errorf("touch: %w", err)
 			}
 		case errors.Is(err, sql.ErrNoRows):
-			res, err := tx.Exec("INSERT INTO runners (name, created_at, last_seen_at) VALUES (?, ?, ?)",
-				name, nowStr, nowStr)
+			res, err := tx.Exec("INSERT INTO runners (name, max_parallel, created_at, last_seen_at) VALUES (?, ?, ?, ?)",
+				name, maxParallel, nowStr, nowStr)
 			if err != nil {
 				return fmt.Errorf("insert: %w", err)
 			}
