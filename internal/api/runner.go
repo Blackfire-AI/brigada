@@ -182,11 +182,6 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request, runnerID
 		SessionID:   req.SessionID,
 		Outcome:     req.Outcome,
 	}
-	for _, a := range req.Artifacts {
-		c.Artifacts = append(c.Artifacts, engine.Artifact{
-			Kind: a.Kind, Path: a.Path, Size: a.Size, SHA256: a.SHA256,
-		})
-	}
 	ans, err := s.eng.Complete(r.Context(), runnerID, req.JobID, req.LeaseID, c)
 	if err != nil {
 		s.writeInternal(w, r, fmt.Sprintf("complete job %d", req.JobID), err)
@@ -253,23 +248,21 @@ type heartbeatRequest struct {
 	Events         []string `json:"events"`
 }
 
-type artifactRequest struct {
-	Kind   string `json:"kind"`
-	Path   string `json:"path"`
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256"`
-}
-
 type completeRequest struct {
 	jobLeaseRequest
 	Result string `json:"result"`
 	Error  string `json:"error"`
 	// Outcome names a run the runner stopped itself (§5.6) — stalled,
 	// or past its class time cap — and rides with the result.
-	Outcome     string            `json:"outcome,omitempty"`
-	CheckResult string            `json:"check_result"`
-	SessionID   string            `json:"session_id"`
-	Artifacts   []artifactRequest `json:"artifacts"`
+	//
+	// Artifacts are deliberately not part of the body: a completion
+	// carrying paths of the caller's choosing could point the engine's
+	// readers anywhere. The runner uploads artifacts through
+	// /v1/runner/artifacts (§9), which stores them itself; an
+	// "artifacts" field here is ignored.
+	Outcome     string `json:"outcome,omitempty"`
+	CheckResult string `json:"check_result"`
+	SessionID   string `json:"session_id"`
 }
 
 type releaseRequest struct {

@@ -1,0 +1,3 @@
+claude-code 2.0.1
+
+No conversation found with session ID: sess-gone. Please check the session ID and try again.

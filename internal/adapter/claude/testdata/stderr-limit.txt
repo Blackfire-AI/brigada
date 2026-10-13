@@ -1,0 +1,2 @@
+claude-code 2.0.1 — starting headless session
+⏺ Usage limit reached — resets at 9pm.

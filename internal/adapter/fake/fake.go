@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -95,6 +96,53 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 	default:
 		return adapter.Event{}, false
 	}
+}
+
+// resumeIDGap is what may sit between the session noun and its absence
+// in a resume-failure line: at most the words "id" and the id itself.
+// An id is a machine token — it carries a digit or a dash — which is
+// what keeps a neighboring plain word ("option", "config") from
+// slipping into the gap and masquerading as the missing thing.
+const resumeIDGap = `(?: (?:with )?(?:an? )?id)?[ :]*(?:["'` + "`" + `]?[0-9a-z-]*[0-9-][0-9a-z-]*["'` + "`" + `]?)?`
+
+// resumeGone is the shape of a resume that cannot happen (§5.6) as the
+// CLIs print it to stderr, plain text before any JSON: the session or
+// conversation is the thing missing — no such, not found, gone — or the
+// resume itself failed. The noun and its absence sit next to each
+// other, with at most an id between (resumeIDGap), so a line that
+// merely mentions a session while missing something else — an unknown
+// session option, a config file not found — is not read as a lost
+// session.
+var resumeGone = regexp.MustCompile(`(?:` +
+	`no such (?:session|conversation)` +
+	`|no (?:session|conversation) (?:was )?found` +
+	`|(?:session|conversation)` + resumeIDGap + `(?: was)? not found` +
+	`|(?:session|conversation)` + resumeIDGap + ` (?:does not|doesn't) exist` +
+	`|(?:failed to|unable to|cannot|can't|could not|couldn't) resume` +
+	`|resume failed` +
+	`)`)
+
+// ParseErrEvent implements adapter.Adapter: stderr rides the same
+// pipeline as stdout. A JSON error line parses as it would on stdout;
+// a resume that cannot be found usually prints only plain text there,
+// before any JSON, and is recognized by its shape (resumeGone);
+// anything else — a warning, a progress note — carries nothing to
+// act on.
+func (a *Adapter) ParseErrEvent(line []byte) (adapter.Event, bool) {
+	if len(strings.TrimSpace(string(line))) == 0 {
+		return adapter.Event{}, false
+	}
+	if ev, ok := a.ParseEvent(line); ok && ev.Kind == adapter.EvError {
+		return ev, true
+	}
+	if resumeGone.MatchString(strings.ToLower(string(line))) {
+		return adapter.Event{
+			Kind:      adapter.EvError,
+			ErrorKind: adapter.ErrResumeFailed,
+			Text:      strings.TrimSpace(string(line)),
+		}, true
+	}
+	return adapter.Event{}, false
 }
 
 // ResultText implements adapter.Adapter: the final message is the last

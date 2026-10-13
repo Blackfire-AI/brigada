@@ -198,11 +198,18 @@ func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 // readBody reads the request body up to maxBody. Over the cap it
 // answers 413 itself and reports false.
 func readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+	return readBodyCap(w, r, maxBody)
+}
+
+// readBodyCap is readBody with the caller's cap: the artifact upload
+// carries blobs the 1 MiB default was never meant for (§9), bounded by
+// its own configured limit instead.
+func readBodyCap(w http.ResponseWriter, r *http.Request, cap int64) ([]byte, bool) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, cap))
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
 		writeError(w, http.StatusRequestEntityTooLarge, codeTooLarge,
-			fmt.Sprintf("request body over the %d byte cap", maxBody))
+			fmt.Sprintf("request body over the %d byte cap", cap))
 		return nil, false
 	}
 	if err != nil {

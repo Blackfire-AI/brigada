@@ -78,6 +78,10 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 		return SubmitResult{}, err
 	}
 	if capped {
+		if _, err := appendEventTx(tx, evJobCapped, p.ProjectID, p.TaskID, 0,
+			eventPayload{Answer: string(AnsCapped), Reason: "round cap reached"}, now); err != nil {
+			return SubmitResult{}, err
+		}
 		return SubmitResult{Answer: AnsCapped}, nil
 	}
 	if p.Restart {
@@ -87,7 +91,7 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 			return SubmitResult{}, err
 		}
 		if live != nil {
-			if _, err := cancelTx(tx, live, now); err != nil {
+			if _, err := cancelTx(tx, live, "replaced by a restart", now); err != nil {
 				return SubmitResult{}, err
 			}
 		}
@@ -129,13 +133,44 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 		if _, uerr := tx.Exec("UPDATE jobs SET followup = 1, updated_at = ? WHERE id = ?", nowStr, live.ID); uerr != nil {
 			return SubmitResult{}, fmt.Errorf("set the follow-up flag on job %d: %w", live.ID, uerr)
 		}
+		if _, err := appendEventTx(tx, evJobPending, p.ProjectID, p.TaskID, live.ID,
+			eventPayload{Answer: string(AnsPending)}, now); err != nil {
+			return SubmitResult{}, err
+		}
 		return SubmitResult{Answer: AnsPending, JobID: live.ID}, nil
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
 		return SubmitResult{}, fmt.Errorf("create job: last insert id: %w", err)
 	}
+	eventID, err := appendEventTx(tx, evJobCreated, p.ProjectID, p.TaskID, id,
+		eventPayload{Answer: string(AnsCreated), Run: int64(run)}, now)
+	if err != nil {
+		return SubmitResult{}, err
+	}
+	// A worker job's submit is the conversation's first word about the
+	// task: the spec the worker will be told, kept as a message (§9).
+	if p.TaskID != 0 {
+		spec, err := taskSpecTx(tx, p.TaskID)
+		if err != nil {
+			return SubmitResult{}, err
+		}
+		if err := appendMessageTx(tx, p.ProjectID, eventID, msgKindTaskSpec, authorEngine, spec, now); err != nil {
+			return SubmitResult{}, err
+		}
+	}
 	return SubmitResult{Answer: AnsCreated, JobID: id, Run: run}, nil
+}
+
+// taskSpecTx reads the task's spec (§6.1): the verbatim text the worker
+// prompt wraps (§1.4) and the task_spec message keeps (§9).
+func taskSpecTx(tx *sql.Tx, taskID int64) (string, error) {
+	var spec string
+	err := tx.QueryRow("SELECT spec FROM tasks WHERE id = ?", taskID).Scan(&spec)
+	if err != nil {
+		return "", fmt.Errorf("read the spec of task %d: %w", taskID, err)
+	}
+	return spec, nil
 }
 
 // roundCapReached counts the rounds the task has already spent against

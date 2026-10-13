@@ -70,6 +70,13 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// Path is the store file's path as opened — ":memory:" for a private
+// in-memory store — so callers can place the engine's other files
+// (artifact blobs, §9) beside the one database.
+func (s *Store) Path() string {
+	return s.path
+}
+
 // Update runs fn in one transaction on the store, committing when fn
 // returns nil and rolling back when it does not. The connection string
 // already makes every transaction begin immediately (see dsn), so fn

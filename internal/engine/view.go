@@ -29,8 +29,11 @@ type JobInfo struct {
 	Result         json.RawMessage `json:"result,omitempty"`
 	CheckResult    json.RawMessage `json:"check_result,omitempty"`
 	LeaseExpiresAt string          `json:"lease_expires_at,omitempty"`
-	CreatedAt      string          `json:"created_at"`
-	UpdatedAt      string          `json:"updated_at"`
+	// TranscriptID is the job's transcript artifact (§9), the run's own
+	// record of itself; 0 until the runner uploaded one.
+	TranscriptID int64  `json:"transcript_id,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // Job reads one job by id (§12.1); nil when there is none. Like every
@@ -48,15 +51,17 @@ func (e *Engine) Job(ctx context.Context, id int64) (*JobInfo, error) {
 		}
 		var created, updated string
 		var check sql.NullString
+		var transcript sql.NullInt64
 		if j != nil {
-			if err := tx.QueryRow("SELECT created_at, updated_at, check_result FROM jobs WHERE id = ?", id).
-				Scan(&created, &updated, &check); err != nil {
+			if err := tx.QueryRow("SELECT created_at, updated_at, check_result, transcript_id FROM jobs WHERE id = ?", id).
+				Scan(&created, &updated, &check, &transcript); err != nil {
 				return fmt.Errorf("read timestamps: %w", err)
 			}
 		}
 		info = jobInfoOf(j)
 		if info != nil {
 			info.CreatedAt, info.UpdatedAt = created, updated
+			info.TranscriptID = transcript.Int64
 			if check.Valid && check.String != "" {
 				info.CheckResult = json.RawMessage(check.String)
 			}

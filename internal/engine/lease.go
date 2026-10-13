@@ -94,7 +94,12 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		// simply sits queued, and the queue TTL — not this rule — is
 		// what frees its key.
 		if e.cfg.MaxAttempts > 0 && j.Attempts >= int64(e.cfg.MaxAttempts) {
-			if err := failJobTx(tx, j.ID, fmt.Sprintf("runner lost %d times", e.cfg.MaxAttempts), 0, now); err != nil {
+			reason := fmt.Sprintf("runner lost %d times", e.cfg.MaxAttempts)
+			if err := failJobTx(tx, j.ID, reason, 0, now); err != nil {
+				return nil, err
+			}
+			if _, err := appendEventTx(tx, evJobAttemptsExceeded, j.ProjectID, j.TaskID, j.ID,
+				eventPayload{Status: statusFailed, Reason: reason}, now); err != nil {
 				return nil, err
 			}
 			continue
@@ -140,6 +145,10 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			if err := upsertSessionTx(tx, j.Key, owner, "", now); err != nil {
 				return nil, err
 			}
+		}
+		if _, err := appendEventTx(tx, evJobLeased, j.ProjectID, j.TaskID, j.ID,
+			eventPayload{Lease: leasePrefix(leaseID), Owner: owner, Attempt: j.Attempts + 1}, now); err != nil {
+			return nil, err
 		}
 		repo, baseRef, checkCmd, err := taskInfoTx(tx, j)
 		if err != nil {

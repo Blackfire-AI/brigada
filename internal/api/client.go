@@ -3,14 +3,18 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/history"
 )
 
 // Client is the engine API's client side, the one callers run: the
@@ -119,28 +123,19 @@ func (c *Client) Heartbeat(ctx context.Context, jobID int64, leaseID string, pro
 	return engine.Answer(out.Answer), expires, nil
 }
 
-// Artifact is one artifact reference a completion carries (§9): the
-// session transcript after a job, the log of a check the runner ran.
-type Artifact struct {
-	Kind   string `json:"kind"`
-	Path   string `json:"path"`
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256"`
-}
-
 // Completion is a run's outcome as the client delivers it (§5.4, §5.5):
 // exactly one of Result or Error, the check result when the runner ran
-// the task's check, the harness session the run ended on, and the
-// artifacts it produced. Outcome, when set to stalled or time_cap,
-// names a run the runner stopped itself (§5.6) and rides with the
-// Result.
+// the task's check, and the harness session the run ended on. Outcome,
+// when set to stalled or time_cap, names a run the runner stopped
+// itself (§5.6) and rides with the Result. Artifacts are not the
+// completion's to name: the runner uploads them through
+// UploadArtifact (§9), which stores them itself.
 type Completion struct {
 	Result      string
 	Error       string
 	CheckResult string
 	SessionID   string
 	Outcome     string
-	Artifacts   []Artifact
 }
 
 // Complete delivers the run's outcome (§12.3).
@@ -153,11 +148,6 @@ func (c *Client) Complete(ctx context.Context, jobID int64, leaseID string, comp
 		SessionID:       comp.SessionID,
 		Outcome:         comp.Outcome,
 	}
-	for _, a := range comp.Artifacts {
-		req.Artifacts = append(req.Artifacts, artifactRequest{
-			Kind: a.Kind, Path: a.Path, Size: a.Size, SHA256: a.SHA256,
-		})
-	}
 	return c.answer(ctx, "/v1/runner/complete", req)
 }
 
@@ -169,6 +159,73 @@ func (c *Client) Release(ctx context.Context, jobID int64, leaseID, reason strin
 		Reason:          reason,
 	}
 	return c.answer(ctx, "/v1/runner/release", req)
+}
+
+// UploadArtifact uploads one artifact blob of a run the caller holds
+// (§9, §12.3): the session's transcript or the check's log, keyed by
+// job and lease and fenced like a complete. The engine caps the blob
+// and stores it content-addressed; the same content for the same job
+// and kind answers already with the first row's id.
+func (c *Client) UploadArtifact(ctx context.Context, jobID int64, leaseID, kind string, data []byte) (engine.Answer, int64, error) {
+	req := artifactUploadRequest{
+		jobLeaseRequest: jobLeaseRequest{JobID: jobID, LeaseID: leaseID},
+		Kind:            kind,
+		Content:         base64.StdEncoding.EncodeToString(data),
+	}
+	var out struct {
+		Answer     string `json:"answer"`
+		ArtifactID int64  `json:"artifact_id"`
+	}
+	if err := c.call(ctx, http.MethodPost, "/v1/runner/artifacts", req, &out); err != nil {
+		return "", 0, err
+	}
+	return engine.Answer(out.Answer), out.ArtifactID, nil
+}
+
+// HistoryQuery is one page of the timeline as the client asks for it
+// (§9): the filters, the cursor the previous page ended on, and the
+// page size.
+type HistoryQuery struct {
+	ProjectID int64
+	TaskID    int64
+	JobID     int64
+	Since     string
+	Limit     int
+}
+
+// History reads one page of the timeline (§9): events and messages
+// merged, oldest first.
+func (c *Client) History(ctx context.Context, q HistoryQuery) (history.Page, error) {
+	vals := make(url.Values)
+	add := func(name string, n int64) {
+		if n != 0 {
+			vals.Set(name, strconv.FormatInt(n, 10))
+		}
+	}
+	add("project", q.ProjectID)
+	add("task", q.TaskID)
+	add("job", q.JobID)
+	if q.Since != "" {
+		vals.Set("since", q.Since)
+	}
+	if q.Limit > 0 {
+		vals.Set("limit", strconv.Itoa(q.Limit))
+	}
+	var page history.Page
+	path := "/v1/history"
+	if enc := vals.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	if err := c.call(ctx, http.MethodGet, path, nil, &page); err != nil {
+		return history.Page{}, err
+	}
+	return page, nil
+}
+
+// Artifact fetches one artifact's blob (§9): the transcript or check
+// log a run left behind.
+func (c *Client) Artifact(ctx context.Context, id int64) ([]byte, error) {
+	return c.raw(ctx, http.MethodGet, "/v1/artifacts/"+strconv.FormatInt(id, 10))
 }
 
 // Progress is what a heartbeat carries besides its hold (§5.6).
@@ -262,4 +319,36 @@ func (c *Client) answer(ctx context.Context, path string, body any) (engine.Answ
 		return "", err
 	}
 	return engine.Answer(out.Answer), nil
+}
+
+// raw performs one call whose answer is bytes, not JSON — an artifact
+// blob streams through exactly as it lies (§9) — with the transport and
+// refusal handling of call.
+func (c *Client) raw(ctx context.Context, method, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, "http://brigada"+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", method, path, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", method, path, err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: read response: %w", method, path, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		var eb struct {
+			Error string `json:"error"`
+			Code  string `json:"code"`
+		}
+		json.Unmarshal(data, &eb) // the shape is best-effort for the message
+		return nil, &StatusError{
+			Method: method, Path: path,
+			Status: resp.StatusCode, APICode: eb.Code, Message: eb.Error,
+		}
+	}
+	return data, nil
 }
