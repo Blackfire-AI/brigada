@@ -137,25 +137,58 @@ func syncTokens(ctx context.Context, st *store.Store, tokens []token) error {
 // authenticate maps the request's bearer secret to an identity. The
 // secret is hashed and every stored hash is compared in constant time,
 // with no early exit, so timing does not reveal which entry matched.
-// A missing, malformed or unknown token fails closed.
+// A secret the token file does not know is offered to the engine's
+// lease tokens before being refused. A missing, malformed or unknown
+// token fails closed.
 func (s *Server) authenticate(r *http.Request) (identity, bool) {
-	const scheme = "bearer "
-	auth := r.Header.Get("Authorization")
-	if len(auth) <= len(scheme) || !strings.EqualFold(auth[:len(scheme)], scheme) {
+	secret, ok := bearerSecret(r)
+	if !ok {
 		return identity{}, false
 	}
-	digest := sha256.Sum256([]byte(auth[len(scheme):]))
+	digest := sha256.Sum256([]byte(secret))
 	hit := -1
 	for i := range s.tokens {
 		if subtle.ConstantTimeCompare(digest[:], s.tokens[i].sha[:]) == 1 {
 			hit = i
 		}
 	}
-	if hit < 0 {
+	if hit >= 0 {
+		t := &s.tokens[hit]
+		return identity{name: t.name, role: t.role, project: t.project}, true
+	}
+	return s.authenticateLeaseToken(r, secret)
+}
+
+// bearerSecret reads the request's bearer credential: the Authorization
+// header's payload after the scheme, case-insensitively. A missing,
+// empty or non-bearer header answers false.
+func bearerSecret(r *http.Request) (string, bool) {
+	const scheme = "bearer "
+	auth := r.Header.Get("Authorization")
+	if len(auth) <= len(scheme) || !strings.EqualFold(auth[:len(scheme)], scheme) {
+		return "", false
+	}
+	return auth[len(scheme):], true
+}
+
+// authenticateLeaseToken resolves a secret the token file does not know
+// to a lease-scoped foreman token (§12.1): the token the engine minted
+// with the lease of a foreman turn, short-lived and scoped to the
+// turn's project. The identity it yields is a foreman like any other,
+// so mayTouchProject walls it into that project unchanged; the engine
+// checks the token's expiry, so one past its lease is refused here even
+// before the sweep has collected the row. A store failure fails closed
+// like an unknown secret — logged, but never with the secret in it.
+func (s *Server) authenticateLeaseToken(r *http.Request, secret string) (identity, bool) {
+	project, job, ok, err := s.eng.LeaseTokenScope(r.Context(), secret)
+	if err != nil {
+		s.log.ErrorContext(r.Context(), "api: resolve a lease token failed", "err", err)
 		return identity{}, false
 	}
-	t := &s.tokens[hit]
-	return identity{name: t.name, role: t.role, project: t.project}, true
+	if !ok {
+		return identity{}, false
+	}
+	return identity{name: fmt.Sprintf("lease:%d", job), role: roleForeman, project: project}, true
 }
 
 // handler is an endpoint that knows who is calling.

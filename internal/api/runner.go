@@ -291,6 +291,13 @@ type jobGrant struct {
 	CheckCmd        string    `json:"check_cmd"`
 	Attempt         int64     `json:"attempt"`
 	ResumeSessionID string    `json:"resume_session_id"`
+	// ForemanToken is the lease-scoped foreman token (§12.1): minted with
+	// the lease of a foreman turn, empty for every task job. This grant
+	// is the secret's only appearance on the wire — the engine stores
+	// only its hash, and the runner keeps it in memory alone (§5.1: a
+	// runner never holds a long-lived foreman token; the lease-scoped one
+	// is all it ever has).
+	ForemanToken string `json:"foreman_token,omitempty"`
 }
 
 func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
@@ -310,6 +317,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		CheckCmd:        g.CheckCmd,
 		Attempt:         g.Attempt,
 		ResumeSessionID: g.ResumeSessionID,
+		ForemanToken:    g.ForemanToken,
 	}
 }
 

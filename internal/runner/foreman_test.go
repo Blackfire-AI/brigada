@@ -269,3 +269,69 @@ exit 7
 		t.Errorf("a failed turn made a worktree: %v", err)
 	}
 }
+
+// fixedLeaseToken is the secret a test pins the engine's mint to, so
+// the runner's handling of it can be checked byte for byte. Hex, the
+// shape the default mint produces.
+const fixedLeaseToken = "0f2d9a8c61b4e3577a90c2fd18be4c63d5a1f0e8b7c92d46a3b5e7f1092c4d68"
+
+// TestRunnerKeepsForemanTokenInMemory covers the token's one rule on
+// the runner (§12.1): it arrives in the grant and stays in memory —
+// never the scratch directory, a record, the transcript or any other
+// file under the runner's or the engine's state.
+func TestRunnerKeepsForemanTokenInMemory(t *testing.T) {
+	e := newTestEnv(t, engine.Config{NewLeaseToken: func() (string, error) { return fixedLeaseToken, nil }})
+	e.seedProject("")
+	e.setForeman("fake", "fake-1")
+	turn := e.submitForemanTurn("a wake")
+	markers := markerDir(t)
+	if err := os.WriteFile(filepath.Join(markers, "release"), nil, 0o644); err != nil {
+		t.Fatalf("release the turn's wait: %v", err)
+	}
+
+	p := e.startRunner(writeWorkerScript(t, turnWorker), 100*time.Millisecond)
+	defer p.stop(t)
+
+	e.waitJob(turn.JobID, func(j *engine.JobInfo) bool { return j.Status == "done" })
+
+	// The turn ran and spent its lease: the token was minted for it, and
+	// died with the completion.
+	if n := e.int64Of("SELECT COUNT(*) FROM lease_tokens"); n != 0 {
+		t.Errorf("lease tokens after the turn = %d, want 0", n)
+	}
+
+	// No file the runner or the engine wrote carries the secret: not the
+	// scratch directory's, not the records', not the transcript blob.
+	var files []string
+	err := filepath.WalkDir(e.stateDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		files = append(files, path)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(data), fixedLeaseToken) {
+			t.Errorf("the lease token landed in %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk the runner's state: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatal("the runner's state directory is empty; the walk proved nothing")
+	}
+	if a, ok := e.artifacts(turn.JobID)["transcript"]; ok {
+		blob, err := os.ReadFile(a.Path)
+		if err != nil {
+			t.Fatalf("read the transcript blob: %v", err)
+		}
+		if strings.Contains(string(blob), fixedLeaseToken) {
+			t.Error("the lease token landed in the turn's transcript")
+		}
+	} else {
+		t.Error("the turn left no transcript artifact to check")
+	}
+}

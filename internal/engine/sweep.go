@@ -93,6 +93,12 @@ func sweepTx(tx *sql.Tx, cfg Config, now time.Time) (SweepReport, error) {
 			WHERE id = ?`, x.expires, accrue, nowStr, x.id); err != nil {
 			return rep, fmt.Errorf("requeue expired job %d: %w", x.id, err)
 		}
+		// The lapsed lease's foreman token is dead at its expiry; a
+		// later revive may bring the lease back, but not the token —
+		// the next lease of the job mints a fresh one (§12.1).
+		if err := revokeLeaseTokensTx(tx, x.id); err != nil {
+			return rep, err
+		}
 		if _, err := appendEventTx(tx, evLeaseRequeued, x.project, x.task, x.id,
 			eventPayload{Lease: leasePrefix(x.lease)}, now); err != nil {
 			return rep, err
