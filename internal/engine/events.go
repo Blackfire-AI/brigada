@@ -17,6 +17,7 @@ const (
 	evJobPending          = "job_pending"           // submit: coalesced behind the key's live job
 	evJobCapped           = "job_capped"            // submit: the task's round cap is spent
 	evJobLeased           = "job_leased"            // a runner took the job
+	evJobCapHeld          = "job_cap_held"          // a lease poll skipped the job: a cap layer has no room (§8.1)
 	evLeaseRevived        = "lease_revived"         // a heartbeat revived a lapsed lease
 	evJobReleased         = "job_released"          // the holder gave the job back
 	evJobCompleted        = "job_completed"         // done, failed, stalled, time_cap, check_failed…
@@ -41,6 +42,7 @@ type eventPayload struct {
 	Run     int64  `json:"run,omitempty"`
 	Attempt int64  `json:"attempt,omitempty"`
 	Epoch   int64  `json:"epoch,omitempty"`
+	Layer   string `json:"layer,omitempty"` // the cap layer that held the job (§8.1)
 }
 
 // appendEventTx adds one row to the event log inside the caller's
