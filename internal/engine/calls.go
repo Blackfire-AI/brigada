@@ -119,6 +119,12 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, pro
 		fmtTime(expires), fmtTime(now), job.ID); err != nil {
 		return "", time.Time{}, fmt.Errorf("extend job %d: %w", job.ID, err)
 	}
+	// The lease-scoped foreman token, when the job carries one, lives
+	// and dies with the lease: a beat that extends the lease extends the
+	// token to the same expiry (§12.1).
+	if err := extendLeaseTokensTx(tx, job.ID, expires); err != nil {
+		return "", time.Time{}, err
+	}
 	return AnsOK, expires, nil
 }
 
@@ -263,6 +269,11 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 		WHERE id = ?`, status, string(result), leaseID, accrue, fmtTime(now), c.CheckResult, job.ID); err != nil {
 		return "", fmt.Errorf("finish job %d: %w", job.ID, err)
 	}
+	// The turn is over, and its lease-scoped foreman token with it
+	// (§12.1): revoked here, in the same transaction as the completion.
+	if err := revokeLeaseTokensTx(tx, job.ID); err != nil {
+		return "", err
+	}
 	// Artifacts arrive only through the upload endpoint (§9), which
 	// stores the blob itself: a completion carries references to
 	// nothing the engine can be pointed at.
@@ -351,6 +362,11 @@ func (e *Engine) releaseTx(tx *sql.Tx, owner, jobID int64, leaseID, reason strin
 		accrue, fmtTime(now), job.ID); err != nil {
 		return "", fmt.Errorf("requeue job %d: %w", job.ID, err)
 	}
+	// The lease the token was minted for is gone, so the token is too
+	// (§12.1); the turn's next lease mints a fresh one.
+	if err := revokeLeaseTokensTx(tx, job.ID); err != nil {
+		return "", err
+	}
 	if _, err := appendEventTx(tx, evJobReleased, job.ProjectID, job.TaskID, job.ID,
 		eventPayload{Reason: boundNote(reason), Lease: leasePrefix(leaseID), Owner: owner}, now); err != nil {
 		return "", err
@@ -401,6 +417,9 @@ func cancelTx(tx *sql.Tx, job *jobRow, reason string, now time.Time) (Answer, er
 		WHERE id = ?`, accrue, fmtTime(now), job.ID); err != nil {
 		return "", fmt.Errorf("cancel job %d: %w", job.ID, err)
 	}
+	if err := revokeLeaseTokensTx(tx, job.ID); err != nil {
+		return "", err
+	}
 	if _, err := appendEventTx(tx, evJobCancelled, job.ProjectID, job.TaskID, job.ID,
 		eventPayload{Reason: reason}, now); err != nil {
 		return "", err
@@ -421,6 +440,12 @@ func (e *Engine) BumpFenceEpoch(ctx context.Context) (int, error) {
 		}
 		if _, err := tx.Exec("UPDATE meta SET fence_epoch = fence_epoch + 1 WHERE id = 1"); err != nil {
 			return fmt.Errorf("bump fence_epoch: %w", err)
+		}
+		// Every lease the bump fences out takes its lease-scoped token
+		// with it (§6.4, §12.1); leases granted under the new epoch mint
+		// fresh ones.
+		if err := revokeAllLeaseTokensTx(tx); err != nil {
+			return err
 		}
 		var err error
 		epoch, err = epochTx(tx)

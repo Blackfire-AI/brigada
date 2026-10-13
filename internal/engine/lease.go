@@ -29,6 +29,12 @@ type LeaseGrant struct {
 	LeaseID    string
 	// LeaseExpiresAt is when the lease lapses without a heartbeat.
 	LeaseExpiresAt time.Time
+	// ForemanToken is the lease-scoped foreman token (§12.1, §12.2),
+	// minted with the lease of a foreman turn and empty for every task
+	// job. It is the secret's only appearance: it reaches the runner in
+	// the grant and lives in the runner's memory alone — never a log,
+	// an event or an error message, and the store keeps only its hash.
+	ForemanToken string
 
 	Harness  string // the job's harness constraint; '' = any (§8)
 	RepoURL  string // the task's own repo, else the project's (§6.1)
@@ -224,6 +230,16 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				return nil, err
 			}
 		}
+		// A foreman turn's lease mints its scoped token (§12.1): the
+		// secret rides the grant, and only its hash the store.
+		foremanToken := ""
+		if j.Kind == KindForeman {
+			secret, err := e.mintLeaseTokenTx(tx, j, leaseID, expires, now)
+			if err != nil {
+				return nil, err
+			}
+			foremanToken = secret
+		}
 		if _, err := appendEventTx(tx, evJobLeased, j.ProjectID, j.TaskID, j.ID,
 			eventPayload{Lease: leasePrefix(leaseID), Owner: owner, Attempt: j.Attempts + 1}, now); err != nil {
 			return nil, err
@@ -254,6 +270,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			Prompt:         j.Prompt,
 			LeaseID:        leaseID,
 			LeaseExpiresAt: expires,
+			ForemanToken:   foremanToken,
 
 			Harness:         j.Harness,
 			RepoURL:         repo,

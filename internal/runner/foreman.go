@@ -85,6 +85,11 @@ func foremanScratchDir(stateDir string, project int64) (string, error) {
 // — reaches the adapter (adapter.Job.MCPConfig). Nothing is passed
 // yet, so a turn runs with the harness's own tools and none of
 // brigada's; the bridge will return its config path here.
+//
+// The bridge will authenticate with the lease-scoped foreman token the
+// grant carried (r.grant.ForemanToken, §12.1): the runner's only copy,
+// in memory on this jobRun alone — never the scratch directory, the
+// transcript, a log or any other file — and dead with the turn's lease.
 func (r *jobRun) foremanMCPConfig() string { return "" }
 
 // finishForemanTurn turns the dead foreman CLI's record into the

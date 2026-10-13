@@ -145,6 +145,10 @@ type Config struct {
 	Retention time.Duration
 	// NewLeaseID mints lease ids: <owner>-<random hex>.
 	NewLeaseID func(owner int64) (string, error)
+	// NewLeaseToken mints the secret of a lease-scoped foreman token
+	// (§12.1): random hex, returned once in the grant and stored only
+	// as its sha256.
+	NewLeaseToken func() (string, error)
 }
 
 // DefaultConfig returns the shipped settings (design §14 and §5.1): a
@@ -169,6 +173,7 @@ func DefaultConfig() Config {
 		RoundCaps:        RoundCaps{Fix: 3, Review: 3, Restart: 2},
 		MaxArtifactBytes: defaultMaxArtifactBytes,
 		NewLeaseID:       newLeaseID,
+		NewLeaseToken:    newLeaseToken,
 	}
 }
 
@@ -246,6 +251,9 @@ func New(s *store.Store, cfg Config) *Engine {
 	}
 	if cfg.NewLeaseID != nil {
 		def.NewLeaseID = cfg.NewLeaseID
+	}
+	if cfg.NewLeaseToken != nil {
+		def.NewLeaseToken = cfg.NewLeaseToken
 	}
 	return &Engine{store: s, cfg: def}
 }

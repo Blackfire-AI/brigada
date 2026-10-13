@@ -176,7 +176,9 @@ func errorJSON(msg string) string {
 
 // failJobTx fails a job with msg, banking accrual seconds of leased
 // time. The lease id stays: it is what tells a late holder their own
-// sweep, not another runner, ended the job.
+// sweep, not another runner, ended the job. A failure ends the turn, so
+// whatever wrote it — a hard cap, the queue TTL, lost runners — revokes
+// the job's lease-scoped foreman token in the same transaction.
 func failJobTx(tx *sql.Tx, id int64, msg string, accrue int64, now time.Time) error {
 	_, err := tx.Exec(`UPDATE jobs SET status = 'failed', result = ?, lease_expires_at = NULL,
 		last_leased = NULL, queued_at = NULL, leased_seconds = leased_seconds + ?, updated_at = ?
@@ -184,7 +186,7 @@ func failJobTx(tx *sql.Tx, id int64, msg string, accrue int64, now time.Time) er
 	if err != nil {
 		return fmt.Errorf("fail job %d: %w", id, err)
 	}
-	return nil
+	return revokeLeaseTokensTx(tx, id)
 }
 
 // accrualFrom returns the seconds of leased time between the lease
