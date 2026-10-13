@@ -85,21 +85,16 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 
 	// The project is the repo (§4.1: one project per repository): find
 	// it by URL, else create it with the base ref's branch as its
-	// default. The foreman's harness and model are the foreman phase's
-	// to configure; the debug path leaves them empty.
+	// default. The foreman's harness and model are setup's to choose;
+	// the debug path leaves them empty.
 	var project int64
 	err := tx.QueryRow("SELECT id FROM projects WHERE repo_url = ?", p.RepoURL).Scan(&project)
 	switch {
 	case err == nil:
 	case errors.Is(err, sql.ErrNoRows):
-		res, err := tx.Exec(`INSERT INTO projects (repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
-			VALUES (?, ?, '{}', '', '', ?, ?)`, p.RepoURL, baseBranchOf(p.BaseRef), nowStr, nowStr)
+		project, err = createProjectTx(tx, p.RepoURL, baseBranchOf(p.BaseRef), "", "", now)
 		if err != nil {
-			return TaskResult{}, fmt.Errorf("create the project of %s: %w", p.RepoURL, err)
-		}
-		project, err = res.LastInsertId()
-		if err != nil {
-			return TaskResult{}, fmt.Errorf("create the project of %s: last insert id: %w", p.RepoURL, err)
+			return TaskResult{}, err
 		}
 	default:
 		return TaskResult{}, fmt.Errorf("read the project of %s: %w", p.RepoURL, err)

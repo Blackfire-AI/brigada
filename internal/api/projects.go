@@ -1,0 +1,132 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"slices"
+	"strconv"
+
+	"github.com/Blackfire-AI/brigada/internal/engine"
+)
+
+// handleProjectForeman serves the foreman's harness and model (§4.1,
+// §12.1). One path, two methods with different role sets — PUT chooses
+// the foreman's harness and model (client, admin), idempotently; GET
+// reads the choice back (client, admin, foreman) — so the method picks
+// the roles here instead of the route doing it.
+func (s *Server) handleProjectForeman(w http.ResponseWriter, r *http.Request, id identity) {
+	roles := map[string][]string{
+		http.MethodPut: {roleClient, roleAdmin},
+		http.MethodGet: {roleClient, roleAdmin, roleForeman},
+	}[r.Method]
+	if roles == nil {
+		writeError(w, http.StatusMethodNotAllowed, codeMethodNotAllowed,
+			"method "+r.Method+" is not allowed here; want PUT or GET")
+		return
+	}
+	if !slices.Contains(roles, id.role) {
+		writeError(w, http.StatusForbidden, codeForbidden,
+			fmt.Sprintf("role %q may not call this endpoint", id.role))
+		return
+	}
+	if r.Method == http.MethodPut {
+		s.idempotent(s.handleForemanSet)(w, r, id)
+		return
+	}
+	s.handleForemanGet(w, r, id)
+}
+
+// handleForemanSet stores the user's choice of the foreman's harness
+// and model (§4.1): the harness must resume headless, so a foreman turn
+// can wake and continue the project's session. The engine's refusals —
+// an empty field, a harness that cannot resume — are the caller's own
+// mistakes, so they answer 400 like the task submit's; anything else —
+// the store, the engine's own bookkeeping — is an internal failure,
+// logged and named as one.
+func (s *Server) handleForemanSet(w http.ResponseWriter, r *http.Request, _ identity) {
+	var req foremanSetRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	setting, err := s.eng.SetProjectForeman(r.Context(), req.RepoURL, req.Harness, req.Model)
+	if err != nil {
+		if errors.Is(err, engine.ErrInvalidForeman) {
+			writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+			return
+		}
+		s.writeInternal(w, r, "choose the foreman", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, setting)
+}
+
+// handleForemanGet reads the foreman setting back (§4.1): which harness
+// and model the repo's project runs its foreman on. A foreman token is
+// walled into its own project (§12.1): another project's repo and a repo
+// the engine has no project for both answer the same 403 — a 404 would
+// leak that the repo exists at all. Anyone else hears the plain 404 for
+// a repo with no project, not an empty setting.
+func (s *Server) handleForemanGet(w http.ResponseWriter, r *http.Request, id identity) {
+	repo := r.URL.Query().Get("repo")
+	if repo == "" {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "the repo query parameter is required")
+		return
+	}
+	setting, err := s.eng.ProjectForeman(r.Context(), repo)
+	if err != nil {
+		s.writeInternal(w, r, "read the foreman setting", err)
+		return
+	}
+	// A repo with no project has no project id to check against; for a
+	// foreman that is the same as an out-of-scope one, so both refusals
+	// stay indistinguishable.
+	project := int64(0)
+	if setting != nil {
+		project = setting.ProjectID
+	}
+	if !id.mayTouchProject(project) {
+		writeError(w, http.StatusForbidden, codeForbidden,
+			"foreman token is scoped to project "+strconv.FormatInt(id.project, 10))
+		return
+	}
+	if setting == nil {
+		writeError(w, http.StatusNotFound, codeNotFound, "no project for repo "+repo)
+		return
+	}
+	writeJSON(w, http.StatusOK, setting)
+}
+
+// foremanSetRequest is the PUT body's shape (§4.1): which repo, and the
+// harness and model the foreman runs on.
+type foremanSetRequest struct {
+	RepoURL string `json:"repo_url"`
+	Harness string `json:"harness"`
+	Model   string `json:"model"`
+}
+
+// SetProjectForeman chooses the foreman's harness and model for a repo
+// (§4.1), creating the project when the engine has none for the URL. The
+// engine refuses an empty field and a harness that cannot resume
+// headless; those refusals come back as the API's 400s.
+func (c *Client) SetProjectForeman(ctx context.Context, repoURL, harness, model string) (engine.ForemanSetting, error) {
+	body := foremanSetRequest{RepoURL: repoURL, Harness: harness, Model: model}
+	var out engine.ForemanSetting
+	if err := c.call(ctx, http.MethodPut, "/v1/projects/foreman", body, &out); err != nil {
+		return engine.ForemanSetting{}, err
+	}
+	return out, nil
+}
+
+// ProjectForeman reads the foreman's harness and model back (§4.1). The
+// API's 404 — the repo has no project — comes back as the call's error.
+func (c *Client) ProjectForeman(ctx context.Context, repoURL string) (engine.ForemanSetting, error) {
+	var out engine.ForemanSetting
+	path := "/v1/projects/foreman?repo=" + url.QueryEscape(repoURL)
+	if err := c.call(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return engine.ForemanSetting{}, err
+	}
+	return out, nil
+}
