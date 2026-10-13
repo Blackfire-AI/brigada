@@ -47,7 +47,10 @@ type LeaseGrant struct {
 // just released it (until the exclusion lapses), and — for a
 // session-mode job — is not a different runner than the one the key's
 // live session sits on. A job whose path is full at a concurrency cap
-// is skipped and stays queued, waiting for a slot (§8.1).
+// is skipped and stays queued, waiting for a slot (§8.1). A pending
+// foreman turn outranks every queued task job (§8.1): turns come
+// first, oldest first among themselves, and the layers a held turn
+// waits on are closed to task jobs for the rest of the call.
 func (e *Engine) Lease(ctx context.Context, owner int64, harnesses, labels []string) (*LeaseGrant, error) {
 	var grant *LeaseGrant
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
@@ -101,8 +104,29 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		return nil, fmt.Errorf("read runner %d: %w", owner, err)
 	}
 
-	nowStr := fmtTime(now)
+	// The foreman is never starved (§8.1): a pending foreman turn
+	// outranks every queued task job, so the poll walks the queue with
+	// turns first — oldest first within each group, the order the query
+	// already read. Task jobs among themselves keep their oldest-first
+	// order, and a queue with no turn in it is walked exactly as
+	// before.
+	ordered := make([]*jobRow, 0, len(queued))
 	for _, j := range queued {
+		if j.Kind == KindForeman {
+			ordered = append(ordered, j)
+		}
+	}
+	for _, j := range queued {
+		if j.Kind != KindForeman {
+			ordered = append(ordered, j)
+		}
+	}
+
+	// reserved keeps, for this call alone, the layer instances a
+	// foreman turn this runner could take is held at.
+	var reserved capReservation
+	nowStr := fmtTime(now)
+	for _, j := range ordered {
 		// A job that lost its runner MaxAttempts times fails here rather
 		// than being offered again — at lease time, not in the sweep, so
 		// a heartbeat can still revive a healthy third lease (§3). This
@@ -158,7 +182,24 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			if err := holdAtCapTx(tx, j, layer, now); err != nil {
 				return nil, err
 			}
+			// A held turn reserves the layer it waits on for the rest
+			// of this call: the next slot that frees there goes to it,
+			// not to a task job leasing behind it in the same poll.
+			if j.Kind == KindForeman {
+				reserved.reserve(layer, cjob.Account)
+			}
 			continue
+		}
+		// What a held turn reserved, a task job may not take in the
+		// same call (§8.1): it waits like any held job, its queue TTL
+		// protected by the hold the reservation stamps.
+		if j.Kind != KindForeman {
+			if layer, held := reserved.layer(cjob); held {
+				if err := holdAtCapTx(tx, j, layer, now); err != nil {
+					return nil, err
+				}
+				continue
+			}
 		}
 		leaseID, err := e.cfg.NewLeaseID(owner)
 		if err != nil {
@@ -223,6 +264,52 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		}, nil
 	}
 	return nil, nil // nothing this runner may take
+}
+
+// capReservation is what one lease poll holds back for waiting foreman
+// turns (§8.1): the layer instances at which a queued foreman job this
+// runner could take is held. It lives in memory for the current
+// leaseTx call alone — the next poll recomputes it from the store —
+// and while a layer instance stays reserved, no task job in the same
+// call may lease through it, or it would fill the slot the turn is
+// waiting for.
+type capReservation struct {
+	global  bool            // a turn is held at the global cap
+	runner  bool            // a turn is held at this runner's own cap
+	account map[string]bool // by account label: a turn held at that account's cap
+}
+
+// reserve adds the layer a foreman turn was held at. Room holds a turn
+// only at the layers it counts toward (§8.1) — runner, account and
+// global — so any other layer reserves nothing.
+func (r *capReservation) reserve(layer, account string) {
+	switch layer {
+	case caps.LayerGlobal:
+		r.global = true
+	case caps.LayerRunner:
+		r.runner = true
+	case caps.LayerAccount:
+		if r.account == nil {
+			r.account = map[string]bool{}
+		}
+		r.account[account] = true
+	}
+}
+
+// layer reports the first reserved layer instance the dispatch would
+// run through, in the order Room names layers full (§8.1), and whether
+// there is one. A reserved runner layer is always the polling runner's
+// own: a lease in this call would run on no other.
+func (r capReservation) layer(job caps.Job) (string, bool) {
+	switch {
+	case r.runner:
+		return caps.LayerRunner, true
+	case job.Account != "" && r.account[job.Account]:
+		return caps.LayerAccount, true
+	case r.global:
+		return caps.LayerGlobal, true
+	}
+	return "", false
 }
 
 // leaseAgentTx picks the agent a lease records on the job (§8.1): the
