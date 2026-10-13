@@ -11,7 +11,6 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/history"
-	"github.com/Blackfire-AI/brigada/internal/runner"
 )
 
 // runStatus is the client's status (§13): the engine — which process,
@@ -68,7 +67,8 @@ func runTask(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 // runTaskSubmit is the debug submit (§12.1): one task created whole —
 // repo, base ref, spec, check — with its first work job queued, the
-// worker prompt composed from the versioned template (§5.3).
+// worker prompt composed by the engine from the versioned template plus
+// the spec verbatim (§1.4, §5.3).
 func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("task submit")
 	common := addCommon(fs)
@@ -118,7 +118,6 @@ func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer)
 		Title:    title,
 		Spec:     specBody,
 		CheckCmd: check,
-		Prompt:   runner.ComposeWorkerPrompt(specBody, ""),
 		Harness:  harness,
 	})
 	if err != nil {

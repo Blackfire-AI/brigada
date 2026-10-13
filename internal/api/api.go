@@ -61,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/artifacts/{id}", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleArtifactGet))
 	mux.HandleFunc("/v1/jobs", s.authed([]string{roleAdmin}, s.idempotent(s.handleSubmit)))
 	mux.HandleFunc("/v1/tasks", s.authed([]string{roleAdmin}, s.idempotent(s.handleTaskSubmit)))
+	mux.HandleFunc("/v1/plans", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handlePlanCreate)))
 	mux.HandleFunc("/v1/jobs/{id}", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleJobGet))
 	mux.HandleFunc("/v1/jobs/{id}/cancel", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.idempotent(s.handleJobCancel)))
 	mux.HandleFunc("/v1/admin/fence-epoch", s.authed([]string{roleAdmin}, s.idempotent(s.handleFenceEpoch)))

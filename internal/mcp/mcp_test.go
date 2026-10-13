@@ -28,6 +28,11 @@ const seedTS = "2026-10-13T12:00:00.000000000Z"
 
 const tokenFileBody = "c1 client client-secret-9\n"
 
+// foremanTokenFile scopes the bridge's token to the seeded project —
+// the role a real bridge runs under (§12.2), and the only one that may
+// create plans without naming a repo.
+const foremanTokenFile = "f1 foreman:1 foreman-secret-9\n"
+
 // env is one test engine: store, engine and API on a Unix socket, with
 // a project, one completed job and its timeline seeded for the tools
 // to read.
@@ -35,9 +40,16 @@ type env struct {
 	t      *testing.T
 	socket string
 	client *api.Client
+	st     *store.Store
 }
 
 func newEnv(t *testing.T) *env {
+	return newEnvToken(t, tokenFileBody, "client-secret-9")
+}
+
+// newEnvToken is newEnv with the bridge's client bearing one given
+// secret of the token file the engine loads.
+func newEnvToken(t *testing.T, tokens, secret string) *env {
 	t.Helper()
 	ctx := context.Background()
 	tmp := t.TempDir()
@@ -46,11 +58,11 @@ func newEnv(t *testing.T) *env {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
-	tokens := filepath.Join(tmp, "tokens")
-	if err := os.WriteFile(tokens, []byte(tokenFileBody), 0o600); err != nil {
+	tokenPath := filepath.Join(tmp, "tokens")
+	if err := os.WriteFile(tokenPath, []byte(tokens), 0o600); err != nil {
 		t.Fatalf("write token file: %v", err)
 	}
-	srv, err := api.New(ctx, st, engine.New(st, engine.Config{}), nil, tokens)
+	srv, err := api.New(ctx, st, engine.New(st, engine.Config{}), nil, tokenPath)
 	if err != nil {
 		t.Fatalf("build api server: %v", err)
 	}
@@ -66,7 +78,7 @@ func newEnv(t *testing.T) *env {
 	hs.Start()
 	t.Cleanup(hs.Close)
 
-	e := &env{t: t, socket: socket, client: api.NewClient(socket, "client-secret-9")}
+	e := &env{t: t, socket: socket, client: api.NewClient(socket, secret), st: st}
 	err = st.Update(ctx, func(tx *sql.Tx) error {
 		res, err := tx.Exec(`INSERT INTO projects (repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
 			VALUES ('https://example.invalid/x.git', 'main', '{}', 'claude', 'sonnet', ?, ?)`, seedTS, seedTS)
@@ -376,8 +388,8 @@ func TestServeUnknownMethodAndTool(t *testing.T) {
 	if a.Error == nil || a.Error.Code != codeMethodNotFound {
 		t.Errorf("unknown method = %+v, want method not found", a.Error)
 	}
-	a = s.call(2, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{}})
-	if a.Error == nil || a.Error.Code != codeInvalidParams || !strings.Contains(a.Error.Message, "plan_create") {
+	a = s.call(2, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{}})
+	if a.Error == nil || a.Error.Code != codeInvalidParams || !strings.Contains(a.Error.Message, "plan_amend") {
 		t.Errorf("unknown tool = %+v, want invalid params naming it", a.Error)
 	}
 }

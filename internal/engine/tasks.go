@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
 // TaskParams is one task submitted whole (§12.1: tasks, create): the
 // debug submit path until the foreman's plan tools exist — one repo, one
-// base ref, the spec verbatim, the check the runner runs after a done
-// (§5.5), and the composed worker prompt (§5.3) for the job it queues.
+// base ref, the spec verbatim, and the check the runner runs after a
+// done (§5.5). The worker prompt is not the caller's to bring: the
+// engine composes it from the spec (§1.4, §5.3).
 type TaskParams struct {
 	RepoURL  string
 	BaseRef  string
@@ -20,7 +23,6 @@ type TaskParams struct {
 	Spec     string
 	CheckCmd string // '' = no check
 	Class    string // '' = implement
-	Prompt   string
 	// Harness and Labels are the queued job's placement constraints
 	// (§8): the harness that must run it and the labels a runner must
 	// offer in full.
@@ -40,9 +42,11 @@ type TaskResult struct {
 
 // SubmitTask creates one task and queues its first work job (§12.1, the
 // debug path until the foreman exists): the project is found by repo URL
-// or created, the task lands ready on a plan of its own, and the job is
-// submitted on the task's key in the same transaction, so a caller never
-// sees a task whose job failed to appear.
+// or created, the task lands ready on a plan of its own, and the job —
+// its prompt composed by the engine from the versioned template plus the
+// spec verbatim (§1.4, §5.3) — is submitted on the task's key in the
+// same transaction, so a caller never sees a task whose job failed to
+// appear.
 func (e *Engine) SubmitTask(ctx context.Context, p TaskParams) (TaskResult, error) {
 	var res TaskResult
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
@@ -68,8 +72,6 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 		return TaskResult{}, fmt.Errorf("base ref is required: the ref the worktree starts from")
 	case p.Spec == "":
 		return TaskResult{}, fmt.Errorf("spec is required: the worker's task, verbatim (§1.4)")
-	case p.Prompt == "":
-		return TaskResult{}, fmt.Errorf("prompt is required: the composed worker prompt (§5.3)")
 	}
 	class := p.Class
 	if class == "" {
@@ -135,7 +137,7 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 		TaskID:    taskID,
 		Kind:      KindWork,
 		Mode:      ModeFresh,
-		Prompt:    p.Prompt,
+		Prompt:    prompt.ComposeWorkerPrompt(p.Spec, ""),
 		Harness:   p.Harness,
 		Labels:    p.Labels,
 	}, now)

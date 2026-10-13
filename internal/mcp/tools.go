@@ -29,9 +29,51 @@ type Tool struct {
 }
 
 // tools is the bridge's whole offer (§12.2), the one list a later item
-// extends: plan_create, events and capacity each add an entry here, and
-// ToolNames carries the addition to the foreman's tool scope.
+// extends: plan_amend, task_restart, answer, ask_user, events and
+// capacity each add an entry here, and ToolNames carries the addition
+// to the foreman's tool scope.
 var tools = []Tool{
+	{
+		Name:        "plan_create",
+		Description: "Create a plan with exactly one task and queue its first work job (one task per plan until plans with dependencies). The plan is active at once.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"title": map[string]any{
+					"type":        "string",
+					"description": "the plan's title",
+				},
+				"tasks": map[string]any{
+					"type":        "array",
+					"description": "the plan's tasks; exactly one",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"title": map[string]any{
+								"type":        "string",
+								"description": "the task's title; default is the spec's first line",
+							},
+							"spec": map[string]any{
+								"type":        "string",
+								"description": "the task spec, verbatim: what the worker is to do",
+							},
+							"check": map[string]any{
+								"type":        "string",
+								"description": "the check command the runner runs after a done; empty = none",
+							},
+							"class": map[string]any{
+								"type":        "string",
+								"description": "the task's class (default implement)",
+							},
+						},
+						"required": []string{"spec"},
+					},
+				},
+			},
+			"required": []string{"title", "tasks"},
+		},
+		Call: callPlanCreate,
+	},
 	{
 		Name:        "status",
 		Description: "The engine's own state: which process it is, up how long, and the jobs by status.",

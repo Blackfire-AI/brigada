@@ -1,12 +1,16 @@
-package runner
+// Package prompt holds the fixed, versioned templates worker prompts are
+// composed from (design §5.3, §1.4): only the engine composes prompts —
+// from these templates plus verbatim data — so the package sits below
+// both the engine, which stamps prompts into the jobs it creates, and
+// the CLI, and nothing below it but the standard library.
+package prompt
 
 import "strings"
 
 // WorkerTemplateVersion is the worker prompt template's version (§5.3):
-// the engine composes prompts only from fixed, versioned templates plus
+// prompts are composed only from fixed, versioned templates plus
 // verbatim data (§1.4), so a template change is a version bump, never a
-// silent edit. The runner ships the template; the engine stamps it into
-// the job's prompt when it creates the job.
+// silent edit.
 const WorkerTemplateVersion = 1
 
 // workerTemplate is the fixed part of every worker prompt (§5.3). It

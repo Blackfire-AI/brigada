@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
 func TestSubmitTaskCreatesProjectPlanTaskAndJob(t *testing.T) {
@@ -14,7 +16,6 @@ func TestSubmitTaskCreatesProjectPlanTaskAndJob(t *testing.T) {
 		BaseRef:  "main",
 		Spec:     "do the thing",
 		CheckCmd: "go test ./...",
-		Prompt:   "the composed prompt",
 	})
 	if res.Answer != AnsCreated || res.Run != 1 {
 		t.Fatalf("submit task = %+v, want created run 1", res)
@@ -44,8 +45,8 @@ func TestSubmitTaskCreatesProjectPlanTaskAndJob(t *testing.T) {
 	if key := e.str("SELECT key FROM jobs WHERE id = ?", res.JobID); key != fmt.Sprintf("task:%d", res.TaskID) {
 		t.Errorf("job key = %q, want task:%d", key, res.TaskID)
 	}
-	if prompt := e.str("SELECT prompt FROM jobs WHERE id = ?", res.JobID); prompt != "the composed prompt" {
-		t.Errorf("job prompt = %q, want the caller's composed prompt", prompt)
+	if promptText := e.str("SELECT prompt FROM jobs WHERE id = ?", res.JobID); promptText != prompt.ComposeWorkerPrompt("do the thing", "") {
+		t.Errorf("job prompt = %q, want the engine's composed template plus the spec verbatim", promptText)
 	}
 	// The submit's task_spec message rode along (§9).
 	if got := e.int("SELECT COUNT(*) FROM messages WHERE kind = 'task_spec' AND event_id = (SELECT id FROM events WHERE job_id = ?)", res.JobID); got != 1 {
@@ -55,8 +56,8 @@ func TestSubmitTaskCreatesProjectPlanTaskAndJob(t *testing.T) {
 
 func TestSubmitTaskReusesTheProjectOfTheRepo(t *testing.T) {
 	e := newEnv(t)
-	first := e.submitTask(TaskParams{RepoURL: "https://example.invalid/one.git", BaseRef: "main", Spec: "first", Prompt: "p1"})
-	second := e.submitTask(TaskParams{RepoURL: "https://example.invalid/one.git", BaseRef: "main", Spec: "second", Prompt: "p2"})
+	first := e.submitTask(TaskParams{RepoURL: "https://example.invalid/one.git", BaseRef: "main", Spec: "first"})
+	second := e.submitTask(TaskParams{RepoURL: "https://example.invalid/one.git", BaseRef: "main", Spec: "second"})
 	if first.ProjectID != second.ProjectID {
 		t.Errorf("two submits of one repo made projects %d and %d; want one", first.ProjectID, second.ProjectID)
 	}
@@ -72,12 +73,11 @@ func TestSubmitTaskReusesTheProjectOfTheRepo(t *testing.T) {
 func TestSubmitTaskValidates(t *testing.T) {
 	e := newEnv(t)
 	for name, drop := range map[string]func(p *TaskParams){
-		"no repo":   func(p *TaskParams) { p.RepoURL = "" },
-		"no base":   func(p *TaskParams) { p.BaseRef = "" },
-		"no spec":   func(p *TaskParams) { p.Spec = "" },
-		"no prompt": func(p *TaskParams) { p.Prompt = "" },
+		"no repo": func(p *TaskParams) { p.RepoURL = "" },
+		"no base": func(p *TaskParams) { p.BaseRef = "" },
+		"no spec": func(p *TaskParams) { p.Spec = "" },
 	} {
-		p := TaskParams{RepoURL: "https://example.invalid/one.git", BaseRef: "main", Spec: "s", Prompt: "p"}
+		p := TaskParams{RepoURL: "https://example.invalid/one.git", BaseRef: "main", Spec: "s"}
 		drop(&p)
 		if _, err := e.eng.SubmitTask(e.ctx, p); err == nil {
 			t.Errorf("%s: accepted, want refusal", name)
@@ -92,13 +92,13 @@ func TestSubmitTaskTitleDefaultsToTheSpecsFirstLine(t *testing.T) {
 	e := newEnv(t)
 	res := e.submitTask(TaskParams{
 		RepoURL: "https://example.invalid/one.git", BaseRef: "main",
-		Spec: "\n\nfix the frobnicator\nsecond line", Prompt: "p",
+		Spec: "\n\nfix the frobnicator\nsecond line",
 	})
 	if got := e.str("SELECT title FROM tasks WHERE id = ?", res.TaskID); got != "fix the frobnicator" {
 		t.Errorf("task title = %q, want the spec's first non-empty line", got)
 	}
 	long := strings.Repeat("x", 200)
-	res = e.submitTask(TaskParams{RepoURL: "https://example.invalid/one.git", BaseRef: "main", Spec: long, Prompt: "p"})
+	res = e.submitTask(TaskParams{RepoURL: "https://example.invalid/one.git", BaseRef: "main", Spec: long})
 	if got := e.str("SELECT title FROM tasks WHERE id = ?", res.TaskID); len(got) != 83 || !strings.HasSuffix(got, "…") {
 		t.Errorf("task title = %q (%d bytes), want 80 bytes plus the ellipsis", got, len(got))
 	}

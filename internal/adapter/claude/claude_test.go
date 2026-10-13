@@ -135,7 +135,7 @@ func TestCommandForemanScope(t *testing.T) {
 	const prompt = "the foreman's wake prompt"
 	const config = "/runner-state/mcp/turn-x1/config.json"
 	wantScope := []string{"--allowedTools", "Read", "Grep", "Glob",
-		"mcp__brigada__status", "mcp__brigada__history",
+		"mcp__brigada__plan_create", "mcp__brigada__status", "mcp__brigada__history",
 		"--disallowedTools", "Bash", "Edit", "MultiEdit", "NotebookEdit", "Write"}
 	cases := []struct {
 		name    string
