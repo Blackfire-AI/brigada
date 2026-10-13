@@ -76,7 +76,7 @@ var tools = []Tool{
 	},
 	{
 		Name:        "status",
-		Description: "The engine's own state: which process it is, up how long, and the jobs by status.",
+		Description: "The engine's own state: which process it is, up how long, the jobs by status — plus the plans with their tasks and the \"needs you\" queue: tasks parked at needs_foreman or needs_user, and plans awaiting approval, each with its reason. Your token scopes the view to your project.",
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
@@ -156,7 +156,10 @@ func toolByName(name string) (Tool, bool) {
 }
 
 // callStatus renders /v1/status as text (§12.2): the engine's process
-// and uptime, then the jobs by status in the statuses' fixed order.
+// and uptime, the jobs by status in the statuses' fixed order, then the
+// plans with their tasks and the "needs you" queue (§10) — the same
+// sections api.StatusSections renders for the client's status command,
+// scoped by the token the client bears.
 func callStatus(ctx context.Context, c *api.Client, _ json.RawMessage) (string, error) {
 	st, err := c.Status(ctx)
 	if err != nil {
@@ -173,6 +176,8 @@ func callStatus(ctx context.Context, c *api.Client, _ json.RawMessage) (string, 
 		counts = append(counts, fmt.Sprintf("%s %d", s, st.Jobs[s]))
 	}
 	fmt.Fprintf(&b, "jobs: %s", strings.Join(counts, " "))
+	fmt.Fprintln(&b)
+	fmt.Fprint(&b, api.StatusSections(st))
 	return b.String(), nil
 }
 

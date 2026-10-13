@@ -1,0 +1,298 @@
+package engine
+
+import (
+	"database/sql"
+	"strings"
+	"testing"
+	"time"
+)
+
+// addPlan seeds one plan in the named project — the tests' shortcut for
+// the states plan_create cannot reach yet (done, pending_approval, a
+// second project); updated is the plan's updated_at, what the status
+// reads as the moment a done plan went done.
+func (e *env) addPlanState(project int64, title, state string, updated time.Time) int64 {
+	e.t.Helper()
+	var id int64
+	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO plans (project_id, title, state, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?)`, project, title, state, seedTS, fmtTime(updated))
+		if err != nil {
+			return err
+		}
+		id, err = res.LastInsertId()
+		return err
+	}); err != nil {
+		e.t.Fatalf("add plan %q: %v", title, err)
+	}
+	return id
+}
+
+// addProject seeds one more project, for the scope tests.
+func (e *env) addProject(repo string) int64 {
+	e.t.Helper()
+	var id int64
+	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO projects (repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
+			VALUES (?, 'main', '{}', 'claude', 'sonnet', ?, ?)`, repo, seedTS, seedTS)
+		if err != nil {
+			return err
+		}
+		id, err = res.LastInsertId()
+		return err
+	}); err != nil {
+		e.t.Fatalf("add project %q: %v", repo, err)
+	}
+	return id
+}
+
+// addTaskToPlan seeds one task on a plan other than the fixture's.
+func (e *env) addTaskToPlan(plan int64, title, state string) int64 {
+	e.t.Helper()
+	var id int64
+	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, base_ref, caps, created_at, updated_at)
+			VALUES (?, ?, 'the spec', 'go test ./...', 'implement', ?, 'main', '{}', ?, ?)`,
+			plan, title, state, seedTS, seedTS)
+		if err != nil {
+			return err
+		}
+		id, err = res.LastInsertId()
+		return err
+	}); err != nil {
+		e.t.Fatalf("add task %q: %v", title, err)
+	}
+	return id
+}
+
+// addTaskEvent seeds one event for a task — the shortcut for states the
+// current rules cannot reach again (a second parking, another project).
+func (e *env) addTaskEvent(task, project int64, kind, payload string) {
+	e.t.Helper()
+	e.exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
+		VALUES (?, ?, ?, NULL, ?, ?)`, kind, project, task, payload, fmtTime(e.clock.Now()))
+}
+
+func TestStatusListsPlansAndTasks(t *testing.T) {
+	e := newEnv(t)
+	now := e.clock.Now()
+
+	// The seeded plan is active with its ready task; a second task in
+	// another state, its branch set, still belongs to it.
+	reviewing := e.addTask("{}")
+	e.exec(`UPDATE tasks SET state = ?, branch = ? WHERE id = ?`, taskReviewing, "task/2-1", reviewing)
+
+	// A task parked for the user with no parking event: it queues with no
+	// reason, and it is still one of the plan's tasks.
+	userTask := e.addTask("{}")
+	e.exec(`UPDATE tasks SET state = ? WHERE id = ?`, taskNeedsUser, userTask)
+
+	// The done window: one plan finished an hour ago, one a day and an
+	// hour ago; a plan waiting for approval and a cancelled one.
+	recent := e.addPlanState(e.project, "freshly done", planDone, now.Add(-time.Hour))
+	e.addTaskToPlan(recent, "the finished task", taskDone)
+	e.addPlanState(e.project, "stale done", planDone, now.Add(-statusDoneWindow-time.Hour))
+	approval := e.addPlanState(e.project, "a big plan", "pending_approval", now)
+	e.addPlanState(e.project, "a cancelled plan", "cancelled", now)
+
+	st, err := e.eng.Status(e.ctx, 0)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	// The plans: the active one and the recently done one, in id order;
+	// the stale, pending and cancelled plans stay out.
+	if len(st.Plans) != 2 {
+		t.Fatalf("plans = %d, want the active and the recent done: %+v", len(st.Plans), st.Plans)
+	}
+	active, done := st.Plans[0], st.Plans[1]
+	if active.ID != e.plan || active.State != "active" || active.Title != "a plan" {
+		t.Errorf("first plan = %+v, want the seeded active plan", active)
+	}
+	if active.RepoURL != "https://example.invalid/brigada.git" {
+		t.Errorf("first plan repo = %q, want the project's URL", active.RepoURL)
+	}
+	wantTasks := []StatusTask{
+		{ID: e.task, Title: "another task", Class: "implement", State: taskReady},
+		{ID: reviewing, Title: "another task", Class: "implement", State: taskReviewing, Branch: "task/2-1"},
+		{ID: userTask, Title: "another task", Class: "implement", State: taskNeedsUser},
+	}
+	if len(active.Tasks) != len(wantTasks) {
+		t.Fatalf("the active plan's tasks = %+v, want %d", active.Tasks, len(wantTasks))
+	}
+	for i, want := range wantTasks {
+		if got := active.Tasks[i]; got != want {
+			t.Errorf("task %d = %+v, want %+v", i, got, want)
+		}
+	}
+	if done.ID != recent || done.State != planDone || done.Title != "freshly done" {
+		t.Errorf("second plan = %+v, want the recently done one", done)
+	}
+	if len(done.Tasks) != 1 || done.Tasks[0].State != taskDone {
+		t.Errorf("the done plan's tasks = %+v, want its one done task", done.Tasks)
+	}
+
+	// The needs-you queue: the user's task with no reason, then the plan
+	// awaiting approval — in id order.
+	if len(st.NeedsYou) != 2 {
+		t.Fatalf("needs you = %+v, want the user's task and the pending plan", st.NeedsYou)
+	}
+	if got := st.NeedsYou[0]; got.Kind != "task" || got.ID != userTask || got.State != taskNeedsUser || got.Reason != "" || got.PlanID != e.plan {
+		t.Errorf("the task entry = %+v, want the needs_user task, unreasoned, on its plan", got)
+	}
+	if got := st.NeedsYou[1]; got.Kind != "plan" || got.ID != approval || got.State != "pending_approval" || got.Reason != "" {
+		t.Errorf("the plan entry = %+v, want the pending_approval plan, unreasoned", got)
+	}
+}
+
+func TestStatusNeedsYouReasonsFromTheLatestParkingEvent(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+
+	// begin creates a plan through the real path — active, its one task
+	// ready, the task's work job queued — and leases the work job with
+	// the author, so each case below drives only its completion.
+	begin := func() (task int64, work *LeaseGrant) {
+		t.Helper()
+		res, err := e.eng.CreatePlan(e.ctx, e.project, "a plan", []PlanTask{{Title: "a task", Spec: "do the thing"}})
+		if err != nil {
+			t.Fatalf("create plan: %v", err)
+		}
+		g := e.leaseAny(author)
+		if g == nil || g.TaskID != res.TaskID {
+			t.Fatalf("the work job was not leased: %+v, want task %d's", g, res.TaskID)
+		}
+		return res.TaskID, g
+	}
+
+	// A failed run: the failure's words.
+	failedTask, work := begin()
+	if ans := e.complete(work, Completion{Error: "the adapter died"}); ans != AnsOK {
+		t.Fatalf("complete the failed run: %s", ans)
+	}
+
+	// A worker's question: the question, verbatim.
+	helpTask, work := begin()
+	if ans := e.complete(work, Completion{Result: `{"status":"needs_help","question":"which API should the client call?"}`}); ans != AnsOK {
+		t.Fatalf("complete the needs_help run: %s", ans)
+	}
+
+	// A failed check: the check's output tail, flattened to one line.
+	checkTask, work := begin()
+	if ans := e.complete(work, doneOn("task/3-1", failCheck)); ans != AnsOK {
+		t.Fatalf("complete the failed-check run: %s", ans)
+	}
+
+	// Review changes: the findings. No verdict: the no-verdict's words.
+	// Both park straight from the review job their done work queued (§7).
+	reviewVerdict := func(task int64, result string) {
+		t.Helper()
+		rg := e.leaseAny(reviewer)
+		if rg == nil || rg.TaskID != task || rg.Kind != KindReview {
+			t.Fatalf("the review job of task %d was not leased: %+v", task, rg)
+		}
+		if ans := e.complete(rg, Completion{Result: result}); ans != AnsOK {
+			t.Fatalf("complete the review of task %d: %s", task, ans)
+		}
+	}
+	changesTask, work := begin()
+	if ans := e.complete(work, doneOn("task/4-1", passCheck)); ans != AnsOK {
+		t.Fatalf("complete the work before the changes review: %s", ans)
+	}
+	reviewVerdict(changesTask, `{"verdict":"changes","findings":"the frob went boom"}`)
+	noVerdictTask, work := begin()
+	if ans := e.complete(work, doneOn("task/5-1", passCheck)); ans != AnsOK {
+		t.Fatalf("complete the work before the empty review: %s", ans)
+	}
+	reviewVerdict(noVerdictTask, `{"verdict":"approve","findings":"ok"}`)
+
+	// A question longer than one line flattens and cuts to about the
+	// limit; a task parked twice reads its latest event.
+	longTask := e.addTask("{}")
+	e.exec(`UPDATE tasks SET state = ? WHERE id = ?`, taskNeedsForeman, longTask)
+	e.addTaskEvent(longTask, e.project, evTaskNeedsHelp,
+		`{"question":"`+strings.Repeat("very ", 40)+`long question?"}`)
+	twiceTask := e.addTask("{}")
+	e.exec(`UPDATE tasks SET state = ? WHERE id = ?`, taskNeedsForeman, twiceTask)
+	e.addTaskEvent(twiceTask, e.project, evTaskFailed, `{"reason":"the first word"}`)
+	e.clock.Advance(time.Second)
+	e.addTaskEvent(twiceTask, e.project, evTaskNeedsHelp, `{"question":"the latest word"}`)
+
+	st, err := e.eng.Status(e.ctx, 0)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	reasons := map[int64]string{}
+	for _, it := range st.NeedsYou {
+		if it.Kind != "task" {
+			t.Fatalf("needs you holds %+v, want tasks alone", it)
+		}
+		reasons[it.ID] = it.Reason
+	}
+	want := map[int64]string{
+		failedTask:    "the adapter died",
+		helpTask:      "which API should the client call?",
+		checkTask:     "FAIL TestBoom the frobnicator was off",
+		changesTask:   "the frob went boom",
+		noVerdictTask: "approve without substantive findings",
+		twiceTask:     "the latest word",
+	}
+	for id, wantReason := range want {
+		if got := reasons[id]; got != wantReason {
+			t.Errorf("reason of task %d = %q, want %q", id, got, wantReason)
+		}
+	}
+	if len(reasons) != len(want)+1 {
+		t.Errorf("needs you holds %d entries, want %d: %v", len(reasons), len(want)+1, reasons)
+	}
+	if got := reasons[longTask]; len(got) > needsYouReasonLimit || strings.Contains(got, "\n") {
+		t.Errorf("the long reason = %q (%d bytes), want one line within %d bytes", got, len(got), needsYouReasonLimit)
+	}
+}
+
+func TestStatusScopesToTheCallersProject(t *testing.T) {
+	e := newEnv(t)
+
+	// A second project with its own active plan and a parked task.
+	other := e.addProject("https://example.invalid/other.git")
+	otherPlan := e.addPlanState(other, "the other plan", "active", e.clock.Now())
+	otherTask := e.addTaskToPlan(otherPlan, "the other task", taskNeedsForeman)
+	e.addTaskEvent(otherTask, other, evTaskFailed, `{"reason":"their adapter died"}`)
+	e.addTaskEvent(e.task, e.project, evTaskNeedsHelp, `{"question":"the seeded task's question"}`)
+	e.exec(`UPDATE tasks SET state = ? WHERE id = ?`, taskNeedsForeman, e.task)
+
+	// Every project: both plans, both parked tasks.
+	all, err := e.eng.Status(e.ctx, 0)
+	if err != nil {
+		t.Fatalf("status of every project: %v", err)
+	}
+	if len(all.Plans) != 2 || len(all.NeedsYou) != 2 {
+		t.Fatalf("unscoped status = %d plans %+v, want both projects' plans and queues", len(all.Plans), all.NeedsYou)
+	}
+
+	// The foreman's scope: its own project alone.
+	own, err := e.eng.Status(e.ctx, e.project)
+	if err != nil {
+		t.Fatalf("status of the foreman's project: %v", err)
+	}
+	if len(own.Plans) != 1 || own.Plans[0].ID != e.plan {
+		t.Errorf("scoped plans = %+v, want the foreman's own plan alone", own.Plans)
+	}
+	if len(own.NeedsYou) != 1 || own.NeedsYou[0].ID != e.task {
+		t.Errorf("scoped needs you = %+v, want the foreman's own task alone", own.NeedsYou)
+	}
+	if own.NeedsYou[0].Reason != "the seeded task's question" {
+		t.Errorf("scoped reason = %q, want the question", own.NeedsYou[0].Reason)
+	}
+
+	// The other project scoped the same way.
+	theirs, err := e.eng.Status(e.ctx, other)
+	if err != nil {
+		t.Fatalf("status of the other project: %v", err)
+	}
+	if len(theirs.Plans) != 1 || theirs.Plans[0].ID != otherPlan ||
+		len(theirs.NeedsYou) != 1 || theirs.NeedsYou[0].ID != otherTask {
+		t.Errorf("the other project's status = %+v / %+v, want its plan and task alone", theirs.Plans, theirs.NeedsYou)
+	}
+}

@@ -7,14 +7,21 @@ import (
 )
 
 // handleStatus reads the engine's own state (§13): which process it is,
-// since when, and the jobs by status. One of the two places a client
-// learns the engine is alive besides /v1/health, and the one with
-// content.
-func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, _ identity) {
+// since when, and the jobs by status — plus the plans and the "needs
+// you" queue (§10), which a foreman caller reads scoped to its own
+// project (§12.1): the token's project is the scope the engine filters
+// by, and a client or admin reads every project. One of the two places
+// a client learns the engine is alive besides /v1/health, and the one
+// with content.
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id identity) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	st, err := s.eng.Status(r.Context())
+	var project int64
+	if id.role == roleForeman {
+		project = id.project
+	}
+	st, err := s.eng.Status(r.Context(), project)
 	if err != nil {
 		s.writeInternal(w, r, "read status", err)
 		return

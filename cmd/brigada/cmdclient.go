@@ -13,9 +13,10 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/history"
 )
 
-// runStatus is the client's status (§13): the engine — which process,
-// up how long — and the jobs by status, plain text, one line each, the
-// statuses in a fixed order.
+// runStatus is the client's status (§13, §10): the engine — which
+// process, up how long — the jobs by status, then the plans with their
+// tasks and the "needs you" queue, plain text, one line each, the
+// sections rendered by api.StatusSections like the foreman's MCP tool.
 func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("status")
 	common := addCommon(fs)
@@ -48,6 +49,7 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		counts = append(counts, fmt.Sprintf("%s %d", s, st.Jobs[s]))
 	}
 	fmt.Fprintf(stdout, "jobs: %s\n", strings.Join(counts, " "))
+	fmt.Fprintln(stdout, api.StatusSections(st))
 	return 0
 }
 

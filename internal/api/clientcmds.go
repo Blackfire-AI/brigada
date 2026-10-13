@@ -15,11 +15,16 @@ func (c *Client) Health(ctx context.Context) error {
 	return c.call(ctx, http.MethodGet, "/v1/health", nil, nil)
 }
 
-// Status is the engine's own state as the client reads it (§13).
+// Status is the engine's own state as the client reads it (§13): the
+// pid, the start, the jobs by status — and the plans with their tasks
+// and the "needs you" queue (§10), scoped by the token: a foreman token
+// reads its own project, a client or admin every project.
 type Status struct {
-	Pid       int64          `json:"pid"`
-	StartedAt string         `json:"started_at"`
-	Jobs      map[string]int `json:"jobs"`
+	Pid       int64                 `json:"pid"`
+	StartedAt string                `json:"started_at"`
+	Jobs      map[string]int        `json:"jobs"`
+	Plans     []engine.StatusPlan   `json:"plans"`
+	NeedsYou  []engine.NeedsYouItem `json:"needs_you"`
 }
 
 // Status reads the engine's own state (§13): which process it is, since
