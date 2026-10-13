@@ -50,6 +50,14 @@ All of them are the one `brigada` binary in different roles.
 
 ## 4. The foreman
 
+**The foreman is a worker** (decided 2026-10-13). It runs on the same machinery as any worker: an official CLI driven through the same adapters (§5.2), with headless resume, transcripts, quota and limit detection, and stall handling. A headless foreman turn is a job (kind `foreman`, §11). Elsewhere in this design, "worker" means a task job: the foreman job is excluded from dispatcher scoring, quota re-dispatch, review routing and the runner's checks; its harness and model are fixed by the user, and its limit goes to the user (§4.4). It differs from other workers in three ways:
+
+- **Instructions:** the foreman instructions, where a worker gets the worker instructions (the result block of §5.4, `needs_help`, check discipline, no dispatch tools).
+- **Permissions:** the `foreman` token, scoped to its project (plans, answers, restarts), where a worker runs under the runner token with no plan scope (§12.1).
+- **Lifecycle:** one long-lived resumable session per project (`foreman:<project>`), with harness and model chosen by the user, woken by events and attachable. A worker gets one job per task, picked by the dispatcher.
+
+Workers never get the foreman instructions. A worker that thinks its task should be split returns `needs_help` with a proposed split, and the foreman decides.
+
 ### 4.1 What it is
 
 - An official CLI session, **harness and model chosen by the user** (decided 2026-10-12), e.g. Claude Code with a given model, with brigada's MCP tools (§12.2) and the foreman instructions (a versioned file shipped with brigada).
@@ -74,7 +82,7 @@ Foreman turns while you're away use your subscription. A per-project budget of f
 
 ### 4.4 When the foreman hits its limit
 
-The runner detects the limit-hit error from the foreman's CLI. The engine marks the foreman `limited(until)`, or `limited(unknown)` when the error carries no reset time, stops waking it, and **notifies the user** (§10), who chooses: wait for the reset, switch the foreman's harness or model (the new session rebuilds its context from the engine, per product §4's kill-and-rebuild test), or let approved plans continue without it. Routine rules keep working throughout.
+The runner detects the limit-hit error from the foreman's CLI. The engine marks the foreman `limited(until)`, or `limited(unknown)` when the error carries no reset time, stops waking it, and **notifies the user** (§10), who chooses: wait for the reset, switch the foreman's harness or model (the new session rebuilds its context from the engine, per product §4's kill-and-rebuild test), or let approved plans continue without it. Routine rules keep working throughout. When the same account also serves worker jobs, a foreman limit-hit cools that account in the dispatcher (§8), and a worker limit-hit on that account stops foreman wakes until the reset.
 
 ## 5. Workers and runners
 
@@ -102,6 +110,8 @@ The worker's final message ends with one JSON block:
 
 A missing or malformed block counts as `failed` with reason `no-result`. The runner verifies the branch was pushed.
 
+The contract binds task jobs (`work`, `fix`, `review`, §11). A foreman job is exempt: its turn's output is its tool calls (§12.2), and ending without a result block is not `failed`. On `needs_help`, `question` carries the question or a proposed split of the task; the foreman answers it or re-plans through `plan_amend` (§3, §6.2), so the split needs no field of its own.
+
 ### 5.5 Checks run by the runner
 
 After the worker exits with `done`, **the runner runs the task's check** in the worktree, not the worker. Exit code plus the output tail are the check result. That keeps the outcome record honest (a self-reported check would bias it).
@@ -112,6 +122,7 @@ Workers sometimes get stuck: alive, but making no progress (seen in practice).
 
 - **Detection:** the adapter turns the CLI's event stream into progress events (tool calls, messages); the runner sends the time of the last one in each heartbeat. **Stalled = 10 minutes with no activity at all** (decided 2026-10-12; `stall_minutes`, configurable). A tool call in flight (a long build or test run) suspends the clock, bounded by its own `tool_call_cap_minutes` per class (default 30). Stalled, or the class time cap reached → the runner kills the process tree and completes the job with the outcome `stalled` or `time_cap`; either ends the job in the terminal `stalled` status, and the result block names which, with the last progress events attached.
 - A stalled job **always goes to the foreman** (decided 2026-10-12); there is no automatic nudge.
+- A stalled foreman turn is killed and completed like any stalled job, but never routes to the foreman itself: its unconsumed events return to pending and are re-delivered on the next wake or attach (§4.2), the engine may wake it again while wake-up budget remains (§4.3), and the user is notified when it stalls repeatedly or the budget runs out.
 - **Restart:** `restart(task, instruction, mode, agent?)` cancels any live job and creates a new job on the same task with the new instruction.
   - `mode=resume`: same session, the instruction appended (the worker keeps its context);
   - `mode=fresh`: a new session, the instruction plus the previous job's summary and last progress (for a worker stuck in a loop);
@@ -220,6 +231,7 @@ Transformations, so nothing is lost in translation:
 1. Gemini CLI's headless resume support.
 2. The foreman's wake-up budget defaults.
 3. `tool_call_cap_minutes` defaults per class.
+4. Foreman entry point: in addition to the `brigada` command, a `/brigada` skill or MCP prompt in the user's own harness that opens or attaches the dedicated foreman session, subject to the attach discipline of §4.2. Decide in phase 2.
 
 Settled 2026-10-12: stalled = 10 minutes with no activity; stalls always go to the foreman; plan files at `.brigada/plans/` on the `brigada/plans` branch by default, `main` as a setting.
 
