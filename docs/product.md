@@ -1,6 +1,6 @@
 # brigada: product brief
 
-Status: **draft v2**, 2026-10-12. It replaces a first brief written for an earlier Python implementation. The contract is [design.md](design.md); where this brief and the design disagree, the design wins until amended. Tags: **(decided, date)** is settled; **(proposal)** is open.
+Status: **draft v2**, 2026-10-12. It replaces a first brief written for an earlier Python implementation. Terms are defined in [glossary.md](glossary.md). The contract is [design.md](design.md); where this brief and the design disagree, the design wins until amended. Tags: **(decided, date)** is settled; **(proposal)** is open.
 
 ## 1. One line
 
@@ -42,7 +42,7 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
  runner: worktree → agent CLI headless → check → branch
 ```
 
-- **The foreman is an agent, not our own model loop.** It runs in an official CLI session (configurable: claude, codex, …) with brigada's MCP tools and foreman instructions. It is a worker with its own instructions, permissions and lifecycle, running on the same machinery as every task agent (decided 2026-10-13). The conversation uses that harness's own UI: `brigada` opens the foreman in your terminal.
+- **The foreman is an agent, not our own model loop.** It runs in an official CLI session (configurable: claude, codex, …) with brigada's MCP tools and foreman instructions. It is a worker, as every task agent is: an instance of a headless harness plus a model, on the same machinery, differing only in its instructions, permissions and lifecycle (decided 2026-10-13). The conversation uses that harness's own UI: `brigada` opens the foreman in your terminal.
 - **The engine does the mechanics in code:** who is eligible, healthy and has quota; leases and fencing; caps and budgets; the outcome record; review routing. The foreman decides; the engine enforces.
 - **No state lives only in the foreman's session.** The plan, tasks, decisions, pending questions and outcomes are in the engine store (and the plan also in the repo), so a foreman session can end, crash or resume without losing work. Acceptance test: kill the foreman mid-plan; a fresh session rebuilds the plan, in-flight tasks and open questions from engine tools alone.
 - **You choose the foreman's harness and model** (decided 2026-10-12), e.g. Claude Code with a given model. **When it hits its subscription limit, brigada notifies you and you decide** (decided 2026-10-12): wait for the reset, switch the foreman to another harness or model (the new session rebuilds everything from the engine, per the test above), or let approved plans continue without it. Without any foreman, the plain commands still work: `brigada status`, `stats`, `cancel`, and approved plans keep running.
@@ -52,7 +52,7 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 **Launch is local:** client, engine and runner on one machine. The engine is a background process that `brigada` starts on demand, because tasks run for many minutes after the conversation ends (proposal; this replaces v1's "no resident daemon"). It runs as a single instance (a lock on its store), shuts down when idle, and recovers from a crash or reboot through the lease protocol: leases expire, fencing holds, capped retries resume.
 
 **Remote is in the backlog,** but the local version is built for it from day one, so remote later is a deployment change, not a rewrite. The rules (proposal):
-1. Clients (the CLI, the foreman's MCP tools, other harnesses) talk to the engine **only through its API**, never the store directly, even on localhost.
+1. API callers (the CLI, the foreman's MCP tools, other harnesses) talk to the engine **only through its API**, never the store directly, even on localhost.
 2. Runners talk to the engine **only through the lease protocol** (lease, heartbeat, complete). The local runner is just a runner on the same host.
 3. **Tokens from day one,** even locally: a client token and a runner token.
 4. **No host-local assumptions in task data:** repos are identified by URL plus ref, not by laptop paths; results are pushed branches, not files on disk. A task's repo must have a remote to fetch from and push to; a local-only repo is rejected with a clear error.

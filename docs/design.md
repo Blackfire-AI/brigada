@@ -1,13 +1,13 @@
 # brigada: design
 
-Status: **v0.1, approved** 2026-10-12 after a cross-model review, as the Go design baseline. What and why: [product.md](product.md). It supersedes the design of the earlier Python implementation ("v3.2"), which stays the reference for what is ported (§14). Tags: **(decided, date)** is settled; everything else is a proposal.
+Status: **v0.1, approved** 2026-10-12 after a cross-model review, as the Go design baseline. What and why: [product.md](product.md). Terms: [glossary.md](glossary.md). It supersedes the design of the earlier Python implementation ("v3.2"), which stays the reference for what is ported (§14). Tags: **(decided, date)** is settled; everything else is a proposal.
 
 ## 1. Principles
 
 1. **The foreman decides; the engine enforces.** Judgment (planning, answering, re-planning) is an LLM agent. Mechanics (queues, leases, eligibility, caps, routine retries) are deterministic Go code.
-2. **The engine is the mailbox.** The foreman and the workers never talk directly. Every message goes through the engine, and every message is kept (§9).
-3. **No state lives only in a session.** A foreman or worker session can die at any moment; the engine and the plan file hold everything needed to continue.
-4. **Prompts: templates plus verbatim data.** The engine may compose a prompt only from fixed, versioned templates plus verbatim data (a task spec, review text, check output, a foreman answer). Verbatim data is always wrapped in explicit data delimiters, so worker output can't pose as instructions to the foreman or a worker. Anything that needs judgment goes to the foreman. This relaxes Python v3.2's "the server never builds prompts", which assumed no routine fix rounds in the server.
+2. **The engine is the mailbox.** The foreman and the task workers never talk directly. Every message goes through the engine, and every message is kept (§9).
+3. **No state lives only in a session.** Any session, the foreman's or a task worker's, can die at any moment; the engine and the plan file hold everything needed to continue.
+4. **Prompts: templates plus verbatim data.** The engine may compose a prompt only from fixed, versioned templates plus verbatim data (a task spec, review text, check output, a foreman answer). Verbatim data is always wrapped in explicit data delimiters, so one worker's output can't pose as instructions to the foreman or another worker. Anything that needs judgment goes to the foreman. This relaxes Python v3.2's "the server never builds prompts", which assumed no routine fix rounds in the server.
 5. **Remote-ready** (product §5): clients only through the API, runners only through the lease protocol, tokens everywhere, repos by URL, self-contained state.
 
 ## 2. Processes
@@ -18,7 +18,7 @@ Status: **v0.1, approved** 2026-10-12 after a cross-model review, as the Go desi
 | engine | API, store, rules, dispatcher, foreman wake-ups | background process, started on demand | a server |
 | runner | leases jobs, runs agent CLIs, runs checks | same host, separate process | any host with logged-in CLIs |
 | foreman session | an official CLI (your choice of harness and model) with brigada's MCP tools | started by the runner (headless) or by `brigada` (when you chat) | same |
-| worker session | an official CLI running one task | started by the runner | same |
+| worker session | a **worker**: one instance of an official CLI, a harness plus a model, running headless. A task worker runs one task; the foreman is a long-lived worker (§4) | started by the runner | same |
 
 All of them are the one `brigada` binary in different roles.
 
@@ -50,13 +50,13 @@ All of them are the one `brigada` binary in different roles.
 
 ## 4. The foreman
 
-**The foreman is a worker** (decided 2026-10-13). It runs on the same machinery as any worker: an official CLI driven through the same adapters (§5.2), with headless resume, transcripts, quota and limit detection, and stall handling. A headless foreman turn is a job (kind `foreman`, §11). Elsewhere in this design, "worker" means a task job: the foreman job is excluded from dispatcher scoring, quota re-dispatch, review routing and the runner's checks; its harness and model are fixed by the user, and its limit goes to the user (§4.4). It differs from other workers in three ways:
+**The foreman is a worker** (decided 2026-10-13). A worker is an instance of a headless harness plus a model (§2); what it does comes from its instructions, permissions and lifecycle. The foreman runs on the same machinery as any other worker: an official CLI driven through the same adapters (§5.2), with headless resume, transcripts, quota and limit detection, and stall handling. A headless foreman turn is a job (kind `foreman`, §11). Where task-specific rules say "worker" (§3, §5.3–5.5, §7, §8), they mean a task worker: the foreman job is excluded from dispatcher scoring, quota re-dispatch, review routing and the runner's checks; its harness and model are fixed by the user, and its limit goes to the user (§4.4). It differs from a task worker in three ways:
 
-- **Instructions:** the foreman instructions, where a worker gets the worker instructions (the result block of §5.4, `needs_help`, check discipline, no dispatch tools).
-- **Permissions:** the `foreman` token, scoped to its project (plans, answers, restarts), where a worker runs under the runner token with no plan scope (§12.1).
-- **Lifecycle:** one long-lived resumable session per project (`foreman:<project>`), with harness and model chosen by the user, woken by events and attachable. A worker gets one job per task, picked by the dispatcher.
+- **Instructions:** the foreman instructions, where a task worker gets the worker instructions (the result block of §5.4, `needs_help`, check discipline, no dispatch tools).
+- **Permissions:** the `foreman` token, scoped to its project (plans, answers, restarts), where a task worker runs under the runner token with no plan scope (§12.1).
+- **Lifecycle:** one long-lived resumable session per project (`foreman:<project>`), with harness and model chosen by the user, woken by events and attachable. A task worker's jobs all belong to one task and one session (`task:<id>`), its agent picked by the dispatcher.
 
-Workers never get the foreman instructions. A worker that thinks its task should be split returns `needs_help` with a proposed split, and the foreman decides.
+Task workers never get the foreman instructions. A task worker that thinks its task should be split returns `needs_help` with a proposed split, and the foreman decides.
 
 ### 4.1 What it is
 
@@ -70,7 +70,7 @@ Workers never get the foreman instructions. A worker that thinks its task should
    - The attach hold is lease-like: the client heartbeats it, and it expires if the terminal is killed. A second live attach is refused.
    - **On detach the client writes the current harness session id back** to the engine, as runners do on complete (`--resume` forks session ids; Python v3.2 §2a). Otherwise the next wake would resume the pre-chat id and lose the conversation.
    - Judgment events that arrive while you're attached reach the foreman through its `events` tool, which the instructions tell it to check between replies. On release, any events it didn't consume are evaluated for a wake-up.
-   - **Events are consumed only when a foreman turn completes,** or when the attached foreman reads them through `events`. A cancelled or failed turn's events return to pending and are re-delivered on the next wake or attach, so cancelling a turn to attach never drops a worker's question.
+   - **Events are consumed only when a foreman turn completes,** or when the attached foreman reads them through `events`. A cancelled or failed turn's events return to pending and are re-delivered on the next wake or attach, so cancelling a turn to attach never drops a task worker's question.
    - At attach, pending events are put into the session's opening prompt (the same wake template), so they surface at once instead of waiting for your next reply.
 2. **The engine wakes it:** when a judgment event arrives and nobody is attached, the engine submits a **foreman turn**: a headless resume of the same session, with a template prompt plus the pending events verbatim. The foreman acts through its tools and exits. Several events coalesce into one turn (the follow-up flag of Python v3.2).
 
@@ -78,11 +78,11 @@ Your next chat sees everything the foreman did while you were away, because it's
 
 ### 4.3 Budget
 
-Foreman turns while you're away use your subscription. A per-project budget of foreman wake-ups per day and worker-minutes per plan (Python v3.2's per-key budget) bounds them. When it runs out, judgment events wait for you, and you're notified. You can raise it: `brigada budget <plan> +<minutes>` for worker-minutes and `brigada budget --wakes +<n>` for today's wake-ups (clamped steps, as in Python v3.2's budget raise); the wake-up budget also resets each day.
+Foreman turns while you're away use your subscription. A per-project budget of foreman wake-ups per day bounds them, and a budget of task-worker-minutes per plan bounds the plan's task jobs (both from Python v3.2's per-key budget). When it runs out, judgment events wait for you, and you're notified. You can raise it: `brigada budget <plan> +<minutes>` for task-worker-minutes and `brigada budget --wakes +<n>` for today's wake-ups (clamped steps, as in Python v3.2's budget raise); the wake-up budget also resets each day.
 
 ### 4.4 When the foreman hits its limit
 
-The runner detects the limit-hit error from the foreman's CLI. The engine marks the foreman `limited(until)`, or `limited(unknown)` when the error carries no reset time, stops waking it, and **notifies the user** (§10), who chooses: wait for the reset, switch the foreman's harness or model (the new session rebuilds its context from the engine, per product §4's kill-and-rebuild test), or let approved plans continue without it. Routine rules keep working throughout. When the same account also serves worker jobs, a foreman limit-hit cools that account in the dispatcher (§8), and a worker limit-hit on that account stops foreman wakes until the reset.
+The runner detects the limit-hit error from the foreman's CLI. The engine marks the foreman `limited(until)`, or `limited(unknown)` when the error carries no reset time, stops waking it, and **notifies the user** (§10), who chooses: wait for the reset, switch the foreman's harness or model (the new session rebuilds its context from the engine, per product §4's kill-and-rebuild test), or let approved plans continue without it. Routine rules keep working throughout. When the same account also serves task workers, a foreman limit-hit cools that account in the dispatcher (§8), and a worker limit-hit on that account stops foreman wakes until the reset.
 
 ## 5. Workers and runners
 
@@ -110,7 +110,7 @@ The worker's final message ends with one JSON block:
 
 A missing or malformed block counts as `failed` with reason `no-result`. The runner verifies the branch was pushed.
 
-The contract binds task jobs (`work`, `fix`, `review`, §11). A foreman job is exempt: its turn's output is its tool calls (§12.2), and ending without a result block is not `failed`. On `needs_help`, `question` carries the question or a proposed split of the task; the foreman answers it or re-plans through `plan_amend` (§3, §6.2), so the split needs no field of its own.
+The contract binds task jobs (`work`, `fix`, `review`, §11); a review job's block is the verdict block of §7. A foreman job is exempt: its turn's output is its tool calls (§12.2), and ending without a result block is not `failed`. On `needs_help`, `question` carries the question or a proposed split of the task; the foreman answers it or re-plans through `plan_amend` (§3, §6.2), so the split needs no field of its own.
 
 ### 5.5 Checks run by the runner
 
@@ -193,11 +193,11 @@ Local OS notifications plus a "needs you" queue in `brigada status`: plan approv
 
 JSON over HTTP; locally on a Unix socket, remotely over TLS. Bearer tokens with roles: `client`, `foreman` (scoped to its project), `runner`, `admin`. Groups: projects, plans, tasks (create, amend, cancel, restart), questions (answer), events (long-poll and SSE), history, stats, budget, agents and runners, artifacts.
 
-**Idempotency.** The caller is often an LLM whose tool calls may repeat. `plan_create`, `plan_amend`, `task_restart` and `answer` take an idempotency key (client-supplied, or derived: task + round for restart and answer); a repeat returns the first call's result. The key is minted by the `brigada mcp` bridge per logical tool call (a hash of the call's content within the session), not left to the LLM; identical `plan_create` content within a short window also dedupes. Worker jobs are keyed `task:<id>`: one live job per key makes duplicate job creation coalesce into the follow-up flag, which `status` shows.
+**Idempotency.** The caller is often an LLM whose tool calls may repeat. `plan_create`, `plan_amend`, `task_restart` and `answer` take an idempotency key (client-supplied, or derived: task + round for restart and answer); a repeat returns the first call's result. The key is minted by the `brigada mcp` bridge per logical tool call (a hash of the call's content within the session), not left to the LLM; identical `plan_create` content within a short window also dedupes. Task jobs are keyed `task:<id>`: one live job per key makes duplicate job creation coalesce into the follow-up flag, which `status` shows.
 
 ### 12.2 Foreman MCP tools
 
-`plan_create` · `plan_amend` · `task_restart` · `task_cancel` · `answer` (a worker's question) · `ask_user` · `events` (long-poll, for the attached session) · `status` · `stats` · `history`. The MCP server is a `brigada mcp` stdio process started by the foreman's harness; it calls the engine API with the foreman token.
+`plan_create` · `plan_amend` · `task_restart` · `task_cancel` · `answer` (a task worker's question) · `ask_user` · `events` (long-poll, for the attached session) · `status` · `stats` · `history`. The MCP server is a `brigada mcp` stdio process started by the foreman's harness; it calls the engine API with the foreman token.
 
 ### 12.3 Runner protocol
 
@@ -213,10 +213,10 @@ Moves over with its tests: the lease engine with fencing, one live job per key, 
 
 Transformations, so nothing is lost in translation:
 - **`trigger` human/bot is obsolete:** there are no human-submitted jobs (your input is chat, not a job). Don't port it.
-- **The run cap (bot rounds)** becomes per-task caps on fix, review and restart rounds, plus per-plan worker-minutes.
+- **The run cap (bot rounds)** becomes per-task caps on fix, review and restart rounds, plus per-plan task-worker-minutes.
 - **The per-key budget raise** becomes `brigada budget` (§4.3).
-- **Keys:** worker jobs `task:<id>`, the foreman `foreman:<project>`. One live job per key, coalescing, the follow-up flag and affinity hang off them.
-- **Session write-back and resume-fail → restart in place** (§2a) are kept for workers and for the foreman's attach (§4.2).
+- **Keys:** task jobs `task:<id>`, the foreman `foreman:<project>`. One live job per key, coalescing, the follow-up flag and affinity hang off them.
+- **Session write-back and resume-fail → restart in place** (§2a) are kept for task workers and for the foreman's attach (§4.2).
 
 ## 15. Phases
 
