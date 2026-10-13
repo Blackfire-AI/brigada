@@ -47,8 +47,12 @@ type workspace struct {
 // the repo's mirror is cloned or fetched, then the worktree is added on
 // its own branch from the base ref. A repo without a URL is refused
 // outright (product §5 rule 6: repos are addressed by URL): no clone,
-// no worktree, no worker.
+// no worktree, no worker. A review job takes the other worktree (§7):
+// the task's result branch, read-only.
 func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*workspace, error) {
+	if isReviewJob(grant) {
+		return prepareReviewWorkspace(ctx, cfg, grant)
+	}
 	if grant.RepoURL == "" {
 		return nil, fmt.Errorf("task %d: no repo URL; a task must name a repo to work in", grant.TaskID)
 	}
@@ -62,55 +66,8 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 		repoURL: grant.RepoURL,
 		gitEnv:  cfg.GitEnv,
 	}
-	if _, err := os.Stat(w.mirror); err == nil {
-		// The fetch takes every branch but the runners' own result
-		// branches: those sit in this mirror checked out by live
-		// worktrees, and git refuses to move a ref under a checkout.
-		// The mirror never needs them from the remote — the runner
-		// pushes them, and the worktrees create them here — and the
-		// negative refspec keeps them out of pruning too.
-		if out, err := w.git(ctx, "--git-dir", w.mirror, "fetch", "--prune", "origin",
-			"+refs/heads/*:refs/heads/*", "^refs/heads/brigada/*"); err != nil {
-			return nil, fmt.Errorf("fetch the mirror of %s: %w", redactURL(grant.RepoURL), trimCmdError(out, err))
-		}
-		// A follow-up job may build on an earlier attempt's result
-		// branch (§5.3: feedback rounds resume the work). The fetch
-		// above skips the brigada/ namespace wholesale, and a runner
-		// that never ran the earlier attempt — or re-cloned its mirror —
-		// would not have the ref. So the base branch is fetched by name
-		// when it lives there: this runner holds at most one brigada/
-		// ref checked out at a time, its own, and it is not this job's
-		// base.
-		if strings.HasPrefix(grant.BaseRef, "brigada/") {
-			if out, err := w.git(ctx, "--git-dir", w.mirror, "fetch", "origin",
-				"+refs/heads/"+grant.BaseRef+":refs/heads/"+grant.BaseRef); err != nil {
-				return nil, fmt.Errorf("fetch the base branch %s from %s: %w",
-					grant.BaseRef, redactURL(grant.RepoURL), trimCmdError(out, err))
-			}
-		}
-	} else {
-		if err := os.MkdirAll(filepath.Dir(w.mirror), 0o755); err != nil {
-			return nil, fmt.Errorf("create the mirror directory: %w", err)
-		}
-		if out, err := w.git(ctx, "clone", "--mirror", grant.RepoURL, w.mirror); err != nil {
-			return nil, fmt.Errorf("clone %s: %w", redactURL(grant.RepoURL), trimCmdError(out, err))
-		}
-	}
-	// A fallback identity and no signing, so a fresh worktree can commit
-	// whatever the host's global git config says; a signed-in CLI sets
-	// its own identity per commit. Mirror mode is unset because it
-	// refuses every refspec push — the worker's `git push origin HEAD`
-	// (§5.3) and the runner's own both carry refspecs — while the
-	// fetches above pass explicit refspecs and never needed it.
-	for _, kv := range [][2]string{
-		{"user.name", "brigada runner"},
-		{"user.email", "runner@brigada.invalid"},
-		{"commit.gpgsign", "false"},
-		{"remote.origin.mirror", "false"},
-	} {
-		if out, err := w.git(ctx, "--git-dir", w.mirror, "config", kv[0], kv[1]); err != nil {
-			return nil, fmt.Errorf("set %s on the mirror: %w", kv[0], trimCmdError(out, err))
-		}
+	if err := w.materializeMirror(ctx, grant.BaseRef); err != nil {
+		return nil, err
 	}
 	// A worktree left behind by a crashed run of the same job would make
 	// the add below fail on the path; the runner is sequential, so what
@@ -130,6 +87,116 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 	}
 	w.base = strings.TrimSpace(string(out))
 	return w, nil
+}
+
+// prepareReviewWorkspace materializes the reviewer's checkout (§7): the
+// worktree sits at the task's result branch exactly as the remote holds
+// it, on a detached HEAD — no branch is created, moved or pushed, for
+// the review only reads. The branch is fetched by name: the mirror's
+// general fetch skips the runners' brigada/ namespace, and the runner
+// that reviews the work may never have run it.
+func prepareReviewWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*workspace, error) {
+	if grant.RepoURL == "" {
+		return nil, fmt.Errorf("task %d: no repo URL; a review must name a repo to read", grant.TaskID)
+	}
+	if grant.ReviewBranch == "" {
+		return nil, fmt.Errorf("task %d: no result branch to review; the work round left none", grant.TaskID)
+	}
+	w := &workspace{
+		mirror:  mirrorPath(cfg.StateDir, grant.RepoURL),
+		dir:     filepath.Join(cfg.StateDir, "worktrees", fmt.Sprintf("job-%d", grant.JobID)),
+		branch:  grant.ReviewBranch,
+		repoURL: grant.RepoURL,
+		gitEnv:  cfg.GitEnv,
+	}
+	if err := w.materializeMirror(ctx, grant.BaseRef); err != nil {
+		return nil, err
+	}
+	if err := w.fetchBranch(ctx, grant.ReviewBranch); err != nil {
+		return nil, err
+	}
+	w.discardWorktree(ctx)
+	if out, err := w.git(ctx, "--git-dir", w.mirror, "worktree", "add", "--detach", w.dir, w.branch); err != nil {
+		w.discardWorktree(ctx)
+		return nil, fmt.Errorf("add the review worktree at %s: %w", w.branch, trimCmdError(out, err))
+	}
+	// The commit under review, kept for the record like a work
+	// worktree's base; the review path itself never pushes, so nothing
+	// compares against it.
+	out, err := w.git(ctx, "-C", w.dir, "rev-parse", "HEAD")
+	if err != nil {
+		w.discardWorktree(ctx)
+		return nil, fmt.Errorf("read the review worktree's commit: %w", trimCmdError(out, err))
+	}
+	w.base = strings.TrimSpace(string(out))
+	return w, nil
+}
+
+// materializeMirror clones or fetches the repo's cached mirror (§5.1)
+// and pins its fallback identity, fetching baseRef by name when it
+// lives in the runners' own brigada/ namespace.
+func (w *workspace) materializeMirror(ctx context.Context, baseRef string) error {
+	if _, err := os.Stat(w.mirror); err == nil {
+		// The fetch takes every branch but the runners' own result
+		// branches: those sit in this mirror checked out by live
+		// worktrees, and git refuses to move a ref under a checkout.
+		// The mirror never needs them from the remote — the runner
+		// pushes them, and the worktrees create them here — and the
+		// negative refspec keeps them out of pruning too.
+		if out, err := w.git(ctx, "--git-dir", w.mirror, "fetch", "--prune", "origin",
+			"+refs/heads/*:refs/heads/*", "^refs/heads/brigada/*"); err != nil {
+			return fmt.Errorf("fetch the mirror of %s: %w", redactURL(w.repoURL), trimCmdError(out, err))
+		}
+		// A follow-up job may build on an earlier attempt's result
+		// branch (§5.3: feedback rounds resume the work). The fetch
+		// above skips the brigada/ namespace wholesale, and a runner
+		// that never ran the earlier attempt — or re-cloned its mirror —
+		// would not have the ref. So the base branch is fetched by name
+		// when it lives there: this runner holds at most one brigada/
+		// ref checked out at a time, its own, and it is not this job's
+		// base.
+		if strings.HasPrefix(baseRef, "brigada/") {
+			if err := w.fetchBranch(ctx, baseRef); err != nil {
+				return err
+			}
+		}
+	} else {
+		if err := os.MkdirAll(filepath.Dir(w.mirror), 0o755); err != nil {
+			return fmt.Errorf("create the mirror directory: %w", err)
+		}
+		if out, err := w.git(ctx, "clone", "--mirror", w.repoURL, w.mirror); err != nil {
+			return fmt.Errorf("clone %s: %w", redactURL(w.repoURL), trimCmdError(out, err))
+		}
+	}
+	// A fallback identity and no signing, so a fresh worktree can commit
+	// whatever the host's global git config says; a signed-in CLI sets
+	// its own identity per commit. Mirror mode is unset because it
+	// refuses every refspec push — the worker's `git push origin HEAD`
+	// (§5.3) and the runner's own both carry refspecs — while the
+	// fetches above pass explicit refspecs and never needed it.
+	for _, kv := range [][2]string{
+		{"user.name", "brigada runner"},
+		{"user.email", "runner@brigada.invalid"},
+		{"commit.gpgsign", "false"},
+		{"remote.origin.mirror", "false"},
+	} {
+		if out, err := w.git(ctx, "--git-dir", w.mirror, "config", kv[0], kv[1]); err != nil {
+			return fmt.Errorf("set %s on the mirror: %w", kv[0], trimCmdError(out, err))
+		}
+	}
+	return nil
+}
+
+// fetchBranch fetches one branch by name into the mirror (§5.1): a ref
+// the general fetch skips — a base that lives in the runners' brigada/
+// namespace, or a review's result branch — fetched for the job that
+// names it, from a remote that holds it.
+func (w *workspace) fetchBranch(ctx context.Context, branch string) error {
+	if out, err := w.git(ctx, "--git-dir", w.mirror, "fetch", "origin",
+		"+refs/heads/"+branch+":refs/heads/"+branch); err != nil {
+		return fmt.Errorf("fetch the branch %s from %s: %w", branch, redactURL(w.repoURL), trimCmdError(out, err))
+	}
+	return nil
 }
 
 // holdsWork reports whether the worktree holds anything beyond the base

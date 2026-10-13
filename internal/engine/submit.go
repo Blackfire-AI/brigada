@@ -170,12 +170,19 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 // taskSpecTx reads the task's spec (§6.1): the verbatim text the worker
 // prompt wraps (§1.4) and the task_spec message keeps (§9).
 func taskSpecTx(tx *sql.Tx, taskID int64) (string, error) {
-	var spec string
-	err := tx.QueryRow("SELECT spec FROM tasks WHERE id = ?", taskID).Scan(&spec)
-	if err != nil {
-		return "", fmt.Errorf("read the spec of task %d: %w", taskID, err)
+	spec, _, err := taskSpecAndBaseTx(tx, taskID)
+	return spec, err
+}
+
+// taskSpecAndBaseTx reads the task's spec and base ref together: the
+// two verbatim inputs a review prompt wraps (§7) beside the check
+// result — the base names the diff's other end, and it is read here so
+// the composition stays one query inside the completion's transaction.
+func taskSpecAndBaseTx(tx *sql.Tx, taskID int64) (spec, base string, err error) {
+	if err := tx.QueryRow("SELECT spec, base_ref FROM tasks WHERE id = ?", taskID).Scan(&spec, &base); err != nil {
+		return "", "", fmt.Errorf("read task %d: %w", taskID, err)
 	}
-	return spec, nil
+	return spec, base, nil
 }
 
 // roundCapReached counts the rounds the task has already spent against

@@ -143,6 +143,10 @@ func (r *jobRun) runJob(ctx context.Context, ws *workspace, kill <-chan struct{}
 		r.finishStopped(ctx, ws, why)
 		return
 	}
+	if isReviewJob(r.grant) {
+		r.finishReview(ctx, ad, exitErr)
+		return
+	}
 	r.finish(ctx, ad, ws, exitErr)
 }
 
@@ -519,14 +523,16 @@ const stoppedRunEventsKept = 20
 // events, so the record names what the worker was doing when it
 // stopped; and the worker's work is not lost — whatever it committed,
 // or left uncommitted, goes to the result branch before the worktree
-// comes down, exactly as a done run's would.
+// comes down, exactly as a done run's would. A review is the exception
+// (§7): it holds nothing of its own to save, and its branch is the
+// work round's, so nothing is pushed for one.
 func (r *jobRun) finishStopped(ctx context.Context, ws *workspace, why *stop) {
 	res := WorkerResult{
 		Status:   why.Outcome,
 		Reason:   why.Reason,
 		Progress: r.recentProgress(stoppedRunEventsKept),
 	}
-	if ws.holdsWork(ctx) {
+	if !isReviewJob(r.grant) && ws.holdsWork(ctx) {
 		if err := ws.ensurePushed(ctx); err != nil {
 			if r.gone(ctx, "pushing the stopped run's branch") {
 				return

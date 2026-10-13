@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
 // Task states (§6.1): the road a task walks, and the places it can
@@ -148,10 +150,13 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 
 // queueReviewTx moves an implement task into reviewing and queues its
 // review job (§7): same key, fresh session, placed on another family
-// than the author's. The review job's prompt is the runner item's to
-// compose (F1d2); until then the job carries the reviewer's inputs —
-// the spec, the check result and the branch. The implementer's summary
-// is deliberately none of them (§7's anti-steering rule).
+// than the author's. The engine composes the reviewer's prompt itself
+// (§1.4: only the engine composes prompts) — the review template, the
+// spec and the check result verbatim, and the diff command naming the
+// task's base and the result branch. The implementer's summary is
+// deliberately no input of the composition (§7's anti-steering rule);
+// the branch and base stay on the task's own row for the runner's
+// grant to read at lease time.
 func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, checkJSON string, now time.Time) error {
 	if _, err := tx.Exec(`UPDATE tasks SET state = ?, branch = COALESCE(NULLIF(?, ''), branch), updated_at = ?
 		WHERE id = ?`, taskReviewing, wr.Branch, fmtTime(now), job.TaskID); err != nil {
@@ -165,13 +170,9 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 	if err != nil {
 		return err
 	}
-	spec, err := taskSpecTx(tx, job.TaskID)
+	spec, base, err := taskSpecAndBaseTx(tx, job.TaskID)
 	if err != nil {
 		return err
-	}
-	inputs, err := json.Marshal(reviewInputs{Spec: spec, CheckResult: json.RawMessage(checkJSON), Branch: wr.Branch})
-	if err != nil {
-		return fmt.Errorf("encode the review inputs of task %d: %w", job.TaskID, err)
 	}
 	// The one-live-job-per-key rule is free here: the work job went
 	// terminal earlier in this completion's transaction. A task whose
@@ -184,18 +185,10 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 		TaskID:        job.TaskID,
 		Kind:          KindReview,
 		Mode:          ModeFresh,
-		Prompt:        string(inputs),
+		Prompt:        prompt.ComposeReviewPrompt(spec, checkJSON, base, wr.Branch),
 		ExcludeFamily: exclude,
 	}, now)
 	return err
-}
-
-// reviewInputs is what a review job carries until the runner item (F1d2)
-// composes the reviewer's prompt from it (§7).
-type reviewInputs struct {
-	Spec        string          `json:"spec"`
-	CheckResult json.RawMessage `json:"check_result,omitempty"` // the runner's check JSON, verbatim; none when the task has no check
-	Branch      string          `json:"branch,omitempty"`
 }
 
 // agentFamilyTx reads the family a review must differ from (§7): the
@@ -220,8 +213,8 @@ func agentFamilyTx(tx *sql.Tx, agent int64) (string, error) {
 // reviewCompletedTx applies a review job's verdict block (§7):
 // a substantive approve finishes the task, changes asks the foreman for
 // a fix round (F1d3), and anything else — no block, a malformed one, an
-// approve without substantive findings — is no verdict and waits for
-// the foreman with another reviewer (F1d3).
+// approve without substantive findings, a run that ended in an error —
+// is no verdict and waits for the foreman with another reviewer (F1d3).
 func reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	var v verdictBlock
 	haveVerdict := json.Unmarshal([]byte(c.Result), &v) == nil &&
@@ -236,10 +229,16 @@ func reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) err
 		return needsForemanTx(tx, job, evReviewChanges, eventPayload{Findings: boundNote(v.Findings)}, now)
 	default:
 		reason := "no verdict in the review result"
-		if haveVerdict {
+		switch {
+		case c.Error != "":
+			// The run itself failed — the reviewer's CLI crashed, its
+			// account hit a limit — and the error is the foreman's to
+			// read, not lost beside a generic no-verdict.
+			reason = c.Error
+		case haveVerdict:
 			reason = "approve without substantive findings"
 		}
-		return needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: reason}, now)
+		return needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: boundNote(reason)}, now)
 	}
 }
 

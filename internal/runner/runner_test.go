@@ -427,6 +427,26 @@ func writeWorkerScript(t *testing.T, body string) string {
 	return path
 }
 
+// fakeResultScript emits the fake adapter's result event with exactly
+// the text given, as one verbatim line out of a quoted heredoc: Go
+// renders the JSON (escapes and all), and no shell ever gets a say in
+// it. That is the portability rule for these lines — dash's printf
+// leaves an unknown escape like \" alone while bash's POSIX mode folds
+// it to a bare quote, and dash's echo folds \\ where bash's leaves it,
+// so a printf or echo whose format carries the JSON's own escapes
+// reads differently on Linux and macOS however carefully it is quoted.
+// A heredoc with a quoted delimiter expands nothing and interprets
+// nothing; the text must only not hold the delimiter as a whole line.
+func fakeResultScript(text string) string {
+	// A struct of two strings cannot fail to marshal; the error is
+	// ignored for that alone.
+	line, _ := json.Marshal(struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}{"result", text})
+	return "cat <<'EOF_RESULT'\n" + string(line) + "\nEOF_RESULT\n"
+}
+
 // remoteBranchCommit returns the commit the remote holds for branch, or
 // "" when it does not have it.
 func remoteBranchCommit(t *testing.T, remote, branch string) string {
@@ -484,15 +504,17 @@ echo '{"type":"result","text":"I finished everything, trust me"}'
 
 // slowWorker runs for ~20 s and only then reports done; the markers say
 // whether it ever started and whether it ran to the end — a killed
-// worker leaves no finished marker.
-const slowWorker = `
+// worker leaves no finished marker. Its result line goes through
+// fakeResultScript: an echo carrying the JSON's own \\ escapes reads
+// differently on dash's echo and on bash's, and the tests must not
+// care which /bin/sh they run under.
+var slowWorker = `
 cat > /dev/null
 echo '{"type":"assistant","text":"starting"}'
 : > "$BRIGADA_TEST_MARKERS/started"
 i=0
 while [ $i -lt 200 ]; do sleep 0.1; i=$((i+1)); done
-echo '{"type":"result","text":"{\\"status\\":\\"done\\",\\"summary\\":\\"finally done\\"}"}'
-: > "$BRIGADA_TEST_MARKERS/finished"
+` + fakeResultScript(`{"status":"done","summary":"finally done"}`) + `: > "$BRIGADA_TEST_MARKERS/finished"
 `
 
 func markerDir(t *testing.T) string {
