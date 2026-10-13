@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/caps"
@@ -195,7 +196,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			return nil, err
 		}
 		if room, layer := caps.Room(e.cfg.Caps, usage, cjob); !room {
-			if err := holdAtCapTx(tx, j, layer, now); err != nil {
+			if err := holdAtCapTx(tx, j, cjob, layer, now); err != nil {
 				return nil, err
 			}
 			// A held turn reserves the layer it waits on for the rest
@@ -211,7 +212,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		// protected by the hold the reservation stamps.
 		if j.Kind != KindForeman {
 			if layer, held := reserved.layer(cjob); held {
-				if err := holdAtCapTx(tx, j, layer, now); err != nil {
+				if err := holdAtCapTx(tx, j, cjob, layer, now); err != nil {
 					return nil, err
 				}
 				continue
@@ -225,7 +226,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		_, err = tx.Exec(`UPDATE jobs SET status = 'leased', lease_id = ?, lease_owner = ?, lease_expires_at = ?,
 			lease_epoch = ?, fence_token = attempts + 1, attempts = attempts + 1, agent_id = ?,
 			first_leased = COALESCE(first_leased, ?), last_leased = ?, queued_at = NULL,
-			cap_held_at = NULL, cap_held_layer = NULL,
+			cap_held_at = NULL, cap_held_layer = NULL, cap_held_key = NULL,
 			released_by = NULL, released_until = NULL, released_lease = NULL, updated_at = ?
 			WHERE id = ?`,
 			leaseID, owner, fmtTime(expires), epoch, nullIfZero(agent), nowStr, nowStr, nowStr, j.ID)
@@ -400,10 +401,15 @@ func agentOffersClass(classes, class string) bool {
 // later of queued_at and it, so a job runners keep finding cap-blocked
 // waits as long as it takes — while the job_cap_held event lands only
 // when the hold starts or moves to another layer, never per poll.
-func holdAtCapTx(tx *sql.Tx, j *jobRow, layer string, now time.Time) error {
+// cap_held_layer names the layer kind and cap_held_key the held instance
+// — the polling runner's id, the account label, the model name or the
+// plan id, empty for a global hold — so the capacity snapshot attributes
+// the queued job to exactly the instance that had no room, never to a
+// guess from the job's harness (§12.2).
+func holdAtCapTx(tx *sql.Tx, j *jobRow, job caps.Job, layer string, now time.Time) error {
 	nowStr := fmtTime(now)
-	if _, err := tx.Exec(`UPDATE jobs SET cap_held_at = ?, cap_held_layer = ?, updated_at = ? WHERE id = ?`,
-		nowStr, layer, nowStr, j.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE jobs SET cap_held_at = ?, cap_held_layer = ?, cap_held_key = ?, updated_at = ? WHERE id = ?`,
+		nowStr, layer, holdKey(layer, job), nowStr, j.ID); err != nil {
 		return fmt.Errorf("hold job %d at the %s cap: %w", j.ID, layer, err)
 	}
 	if j.CapHeldLayer == layer {
@@ -414,6 +420,25 @@ func holdAtCapTx(tx *sql.Tx, j *jobRow, layer string, now time.Time) error {
 		return err
 	}
 	return nil
+}
+
+// holdKey is the cap_held_key stamp for one hold (§12.2): the instance
+// within the layer that had no room — the polling runner's id, the
+// account label, the model name or the plan id. A global hold names no
+// instance and stamps an empty key.
+func holdKey(layer string, job caps.Job) string {
+	switch layer {
+	case caps.LayerRunner:
+		return strconv.FormatInt(job.Runner, 10)
+	case caps.LayerAccount:
+		return job.Account
+	case caps.LayerModel:
+		return job.Model
+	case caps.LayerPlan:
+		return strconv.FormatInt(job.Plan, 10)
+	default:
+		return ""
+	}
 }
 
 // taskInfoTx reads the workspace fields of a worker job's task: the

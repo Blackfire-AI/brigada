@@ -32,6 +32,26 @@ func (c *Client) Status(ctx context.Context) (Status, error) {
 	return st, nil
 }
 
+// Capacity reads the capacity snapshot (§12.2) through /v1/capacity:
+// per agent the effective cap, the layer that sets it, the running
+// jobs, the quota state and the cost weight; per layer — each runner,
+// each account, each capped model, each active plan of the project and
+// global — the cap, the use and the queue depth. projectID limits the
+// plan layer to one project's active plans; 0 names none, which for a
+// foreman token means its own project (§12.1) and for a client or
+// admin means every project's.
+func (c *Client) Capacity(ctx context.Context, projectID int64) (engine.CapacitySnapshot, error) {
+	path := "/v1/capacity"
+	if projectID != 0 {
+		path += "?project=" + strconv.FormatInt(projectID, 10)
+	}
+	var snap engine.CapacitySnapshot
+	if err := c.call(ctx, http.MethodGet, path, nil, &snap); err != nil {
+		return engine.CapacitySnapshot{}, err
+	}
+	return snap, nil
+}
+
 // TaskSubmit is one task submitted whole, as the debug path sends it
 // (§12.1): the repo and base ref, the spec verbatim, and the check. The
 // worker prompt is the engine's to compose (§1.4), never the caller's.
