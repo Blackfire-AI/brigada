@@ -206,16 +206,15 @@ func TestCompleteIdempotentPerLease(t *testing.T) {
 	c := Completion{
 		Result:    `{"status":"done","summary":"finished"}`,
 		SessionID: "hs-9",
-		Artifacts: []Artifact{{Kind: "transcript", Path: "artifacts/1.jsonl", Size: 42, SHA256: "abc"}},
 	}
 	if ans := e.complete(g, c); ans != AnsOK {
-		t.Fatalf("complete = %s; want ok", ans)
+		t.Fatalf("complete = %s, want ok", ans)
 	}
 	if ans := e.complete(g, c); ans != AnsAlready {
-		t.Errorf("second complete = %s; want already", ans)
+		t.Errorf("second complete = %s, want already", ans)
 	}
-	if got := e.int("SELECT COUNT(*) FROM artifacts WHERE job_id = ?", g.JobID); got != 1 {
-		t.Errorf("artifacts = %d, want 1: the repeat stored nothing", got)
+	if n := e.int("SELECT COUNT(*) FROM events WHERE job_id = ? AND kind = 'job_completed'", g.JobID); n != 1 {
+		t.Errorf("completed events = %d, want 1: the repeat stored nothing", n)
 	}
 	// Someone else's lease id gets gone, not already.
 	if ans, err := e.eng.Complete(e.ctx, g.LeaseOwner, g.JobID, "9-deadbeef", c); err != nil || ans != AnsGone {

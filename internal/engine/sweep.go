@@ -17,7 +17,9 @@ type SweepReport struct {
 
 // Sweep runs the engine's maintenance pass by hand. Every engine call
 // runs it first; the exported form is for tests and for an idle engine
-// keeping the store honest without leasing anything (§13).
+// keeping the store honest without leasing anything (§13). A configured
+// retention (§9) rides along: the sweep prunes what aged out of its
+// window, messages and artifacts, leaving the event log whole.
 func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 	var rep SweepReport
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
@@ -27,6 +29,11 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 	})
 	if err != nil {
 		return SweepReport{}, fmt.Errorf("sweep: %w", err)
+	}
+	if e.cfg.Retention > 0 {
+		if _, err := e.Prune(ctx, e.cfg.Now().Add(-e.cfg.Retention)); err != nil {
+			return rep, fmt.Errorf("sweep: %w", err)
+		}
 	}
 	return rep, nil
 }
@@ -47,7 +54,8 @@ func sweepTx(tx *sql.Tx, cfg Config, now time.Time) (SweepReport, error) {
 	var rep SweepReport
 	nowStr := fmtTime(now)
 
-	rows, err := tx.Query(`SELECT id, COALESCE(last_leased, ''), COALESCE(lease_expires_at, '')
+	rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0), COALESCE(lease_id, ''),
+		COALESCE(last_leased, ''), COALESCE(lease_expires_at, '')
 		FROM jobs
 		WHERE status IN ('leased', 'running') AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`, nowStr)
 	if err != nil {
@@ -55,12 +63,14 @@ func sweepTx(tx *sql.Tx, cfg Config, now time.Time) (SweepReport, error) {
 	}
 	type lapsed struct {
 		id            int64
+		project, task int64
+		lease         string
 		last, expires string
 	}
 	var lapsedAll []lapsed
 	for rows.Next() {
 		var x lapsed
-		if err := rows.Scan(&x.id, &x.last, &x.expires); err != nil {
+		if err := rows.Scan(&x.id, &x.project, &x.task, &x.lease, &x.last, &x.expires); err != nil {
 			rows.Close()
 			return rep, fmt.Errorf("sweep expired leases: %w", err)
 		}
@@ -82,6 +92,10 @@ func sweepTx(tx *sql.Tx, cfg Config, now time.Time) (SweepReport, error) {
 			WHERE id = ?`, x.expires, accrue, nowStr, x.id); err != nil {
 			return rep, fmt.Errorf("requeue expired job %d: %w", x.id, err)
 		}
+		if _, err := appendEventTx(tx, evLeaseRequeued, x.project, x.task, x.id,
+			eventPayload{Lease: leasePrefix(x.lease)}, now); err != nil {
+			return rep, err
+		}
 		rep.Expired = append(rep.Expired, x.id)
 	}
 
@@ -90,7 +104,7 @@ func sweepTx(tx *sql.Tx, cfg Config, now time.Time) (SweepReport, error) {
 		if !ok || limit <= 0 {
 			continue
 		}
-		rows, err := tx.Query(`SELECT id, COALESCE(first_leased, ''), COALESCE(last_leased, '')
+		rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0), COALESCE(first_leased, ''), COALESCE(last_leased, '')
 			FROM jobs
 			WHERE status IN ('queued', 'leased', 'running') AND kind = ? AND first_leased IS NOT NULL AND first_leased <= ?`,
 			string(kind), fmtTime(now.Add(-limit)))
@@ -98,13 +112,14 @@ func sweepTx(tx *sql.Tx, cfg Config, now time.Time) (SweepReport, error) {
 			return rep, fmt.Errorf("sweep hard caps: %w", err)
 		}
 		type capped struct {
-			id          int64
-			first, last string
+			id            int64
+			project, task int64
+			first, last   string
 		}
 		var cappedAll []capped
 		for rows.Next() {
 			var x capped
-			if err := rows.Scan(&x.id, &x.first, &x.last); err != nil {
+			if err := rows.Scan(&x.id, &x.project, &x.task, &x.first, &x.last); err != nil {
 				rows.Close()
 				return rep, fmt.Errorf("sweep hard caps: %w", err)
 			}
@@ -120,7 +135,12 @@ func sweepTx(tx *sql.Tx, cfg Config, now time.Time) (SweepReport, error) {
 				// the cap, not its discovery, ends the lease
 				accrue = accrualFrom(x.last, first.Add(limit))
 			}
-			if err := failJobTx(tx, x.id, capError(kind, limit), accrue, now); err != nil {
+			reason := capError(kind, limit)
+			if err := failJobTx(tx, x.id, reason, accrue, now); err != nil {
+				return rep, err
+			}
+			if _, err := appendEventTx(tx, evJobHardCapped, x.project, x.task, x.id,
+				eventPayload{Status: statusFailed, Reason: reason}, now); err != nil {
 				return rep, err
 			}
 			rep.HardCapped = append(rep.HardCapped, x.id)
@@ -128,30 +148,38 @@ func sweepTx(tx *sql.Tx, cfg Config, now time.Time) (SweepReport, error) {
 	}
 
 	if cfg.QueueTTL > 0 {
-		rows, err := tx.Query(`SELECT id FROM jobs
+		rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0) FROM jobs
 			WHERE status = 'queued' AND queued_at IS NOT NULL AND queued_at <= ?`, fmtTime(now.Add(-cfg.QueueTTL)))
 		if err != nil {
 			return rep, fmt.Errorf("sweep queue TTL: %w", err)
 		}
-		var ids []int64
+		type waiting struct {
+			id            int64
+			project, task int64
+		}
+		var waitingAll []waiting
 		for rows.Next() {
-			var id int64
-			if err := rows.Scan(&id); err != nil {
+			var x waiting
+			if err := rows.Scan(&x.id, &x.project, &x.task); err != nil {
 				rows.Close()
 				return rep, fmt.Errorf("sweep queue TTL: %w", err)
 			}
-			ids = append(ids, id)
+			waitingAll = append(waitingAll, x)
 		}
 		if err := rows.Err(); err != nil {
 			return rep, fmt.Errorf("sweep queue TTL: %w", err)
 		}
 		rows.Close()
-		for _, id := range ids {
-			if err := failJobTx(tx, id,
-				fmt.Sprintf("queue TTL exceeded: no runner leased the job within %s", capText(cfg.QueueTTL)), 0, now); err != nil {
+		for _, x := range waitingAll {
+			reason := fmt.Sprintf("queue TTL exceeded: no runner leased the job within %s", capText(cfg.QueueTTL))
+			if err := failJobTx(tx, x.id, reason, 0, now); err != nil {
 				return rep, err
 			}
-			rep.QueueTimedOut = append(rep.QueueTimedOut, id)
+			if _, err := appendEventTx(tx, evJobQueueTimedOut, x.project, x.task, x.id,
+				eventPayload{Status: statusFailed, Reason: reason}, now); err != nil {
+				return rep, err
+			}
+			rep.QueueTimedOut = append(rep.QueueTimedOut, x.id)
 		}
 	}
 

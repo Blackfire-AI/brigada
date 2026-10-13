@@ -181,13 +181,14 @@ func TestParseEvent(t *testing.T) {
 			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrAuth, Text: "Not logged in: please run /login"}, true},
 		{"resume result", `{"type":"result","subtype":"error_during_execution","is_error":true,"result":"No conversation found with session ID: x"}`,
 			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrResumeFailed, Text: "No conversation found with session ID: x"}, true},
-		// The CLI also puts its failures on stderr as plain text; the
-		// phrase table reads those lines the same way.
-		{"stderr limit text", `⏺ You've hit your usage limit. Try again at 9pm.`,
+		// The CLI also puts failures on stderr as plain text; on stdout
+		// prose the broad table still reads them, the error result's own
+		// vocabulary.
+		{"plain-text limit line", `⏺ You've hit your usage limit. Try again at 9pm.`,
 			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrLimit, Text: `⏺ You've hit your usage limit. Try again at 9pm.`}, true},
-		{"stderr auth text", `error: unauthorized (401)`,
+		{"plain-text auth line", `error: unauthorized (401)`,
 			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrAuth, Text: `error: unauthorized (401)`}, true},
-		{"stderr resume text", `No session found: conversation not found for sess-9`,
+		{"plain-text resume line", `No session found: conversation not found for sess-9`,
 			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrResumeFailed, Text: `No session found: conversation not found for sess-9`}, true},
 		{"banner prose", `claude-code 2.0.1 — starting session`, adapter.Event{}, false},
 		{"blank line", `   `, adapter.Event{}, false},
@@ -204,6 +205,128 @@ func TestParseEvent(t *testing.T) {
 		}
 		if got != tc.want {
 			t.Errorf("%s: event = %+v, want %+v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestParseErrEvent(t *testing.T) {
+	a := &Adapter{}
+	cases := []struct {
+		name string
+		line string
+		want adapter.Event
+		ok   bool
+	}{
+		// The failures the CLI prints only to stderr, before any JSON:
+		// plain text named in full, sorted by the strict table — stderr
+		// also carries the CLI's warnings, so only a phrase that names
+		// the failure itself counts there.
+		{"resume failure", `No conversation found with session ID: sess-gone`,
+			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrResumeFailed, Text: `No conversation found with session ID: sess-gone`}, true},
+		{"limit, mixed case", `⏺ Usage LIMIT reached — resets at 9pm`,
+			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrLimit, Text: `⏺ Usage LIMIT reached — resets at 9pm`}, true},
+		{"auth, not logged in", `error: not logged in`,
+			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrAuth, Text: `error: not logged in`}, true},
+		{"auth, invalid key", `Invalid API key provided`,
+			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrAuth, Text: `Invalid API key provided`}, true},
+		// A JSON error line parses as it would on stdout: an error
+		// result by the broad table, an error object by the strict one.
+		{"json error result", `{"type":"result","subtype":"error_limit","is_error":true,"result":"Usage limit reached"}`,
+			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrLimit, Text: "Usage limit reached"}, true},
+		{"json error naming no known failure", `{"type":"result","is_error":true,"result":"the CLI gave up"}`,
+			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrOther, Text: "the CLI gave up"}, true},
+		{"json error object", `{"type":"error","error":{"message":"Usage limit reached — resets at 9pm"}}`,
+			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrLimit,
+				Text: `{"type":"error","error":{"message":"Usage limit reached — resets at 9pm"}}`}, true},
+		{"json error object naming no failure", `{"type":"error","error":{"message":"MCP server requires authentication"}}`,
+			adapter.Event{}, false},
+		// Stderr carries failures only: the CLI's other events belong to
+		// its stdout stream, and a line there is not one of them.
+		{"json success on stderr", `{"type":"result","subtype":"success","result":"all done","session_id":"sess-7"}`,
+			adapter.Event{}, false},
+		{"json assistant on stderr", `{"type":"assistant","message":{"content":[{"type":"text","text":"working on it"}]}}`,
+			adapter.Event{}, false},
+		// Warnings and banners carry nothing to act on: the broad
+		// substrings — "authentication", "rate limit", "unauthorized" —
+		// are exactly what a harmless stderr line mentions.
+		{"mcp server requires authentication", `Warning: MCP server "github" requires authentication; its tools are unavailable`,
+			adapter.Event{}, false},
+		{"rate-limited retry", `⏳ Rate limited — retrying in 2s (attempt 2/5)`, adapter.Event{}, false},
+		{"unauthorized telemetry note", `debug: telemetry push unauthorized (401); skipped`, adapter.Event{}, false},
+		{"old limit wording is not the failure", `⏺ You've hit your usage limit. Try again at 9pm.`, adapter.Event{}, false},
+		{"unknown session option", `Warning: unknown session option 'strict' ignored`, adapter.Event{}, false},
+		{"config file not found", `debug: config file not found, using defaults`, adapter.Event{}, false},
+		{"banner", `claude-code 2.0.1 — starting headless session`, adapter.Event{}, false},
+		{"blank line", `   `, adapter.Event{}, false},
+		{"not json", `oops`, adapter.Event{}, false},
+		{"broken json", `{"type":"assistant","message":`, adapter.Event{}, false},
+	}
+	for _, tc := range cases {
+		got, ok := a.ParseErrEvent([]byte(tc.line))
+		if ok != tc.ok {
+			t.Errorf("%s: ok = %v, want %v", tc.name, ok, tc.ok)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("%s: event = %+v, want %+v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestStderrFixtures reads the CLI's stderr transcripts from testdata/:
+// the failure each names is the event it yields, however much noise
+// rides around it, and noise alone yields nothing.
+func TestStderrFixtures(t *testing.T) {
+	a := &Adapter{}
+	cases := []struct {
+		name    string
+		fixture string
+		events  []adapter.Event
+	}{
+		{
+			name:    "a resume that finds no conversation",
+			fixture: "stderr-resume.txt",
+			events: []adapter.Event{
+				{Kind: adapter.EvError, ErrorKind: adapter.ErrResumeFailed,
+					Text: "No conversation found with session ID: sess-gone. Please check the session ID and try again."},
+			},
+		},
+		{
+			name:    "a limit hit",
+			fixture: "stderr-limit.txt",
+			events: []adapter.Event{
+				{Kind: adapter.EvError, ErrorKind: adapter.ErrLimit,
+					Text: "⏺ Usage limit reached — resets at 9pm."},
+			},
+		},
+		{
+			name:    "an auth failure",
+			fixture: "stderr-auth.txt",
+			events: []adapter.Event{
+				{Kind: adapter.EvError, ErrorKind: adapter.ErrAuth,
+					Text: "error: Invalid API key provided. Please run /login to authenticate, then try again."},
+			},
+		},
+		{
+			// Warnings alone — the harmless lines that mention
+			// authentication and rate limits among them — yield nothing.
+			name:    "warnings only, auth and rate-limit mentions included",
+			fixture: "stderr-noise.txt",
+		},
+	}
+	for _, tc := range cases {
+		data, err := os.ReadFile(filepath.Join("testdata", tc.fixture))
+		if err != nil {
+			t.Fatalf("read fixture: %v", err)
+		}
+		var events []adapter.Event
+		for _, line := range strings.Split(string(data), "\n") {
+			if ev, ok := a.ParseErrEvent([]byte(line)); ok {
+				events = append(events, ev)
+			}
+		}
+		if !slices.Equal(events, tc.events) {
+			t.Errorf("%s: events =\n%+v\nwant\n%+v", tc.name, events, tc.events)
 		}
 	}
 }

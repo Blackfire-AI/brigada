@@ -3,8 +3,6 @@ package runner
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,11 +33,22 @@ type jobRun struct {
 	toolOpenedAt time.Time
 	sessionID    string
 	cliError     *adapter.Event
+	// stderrError is the first error the adapter sorted from stderr,
+	// kept apart from the stream's own cliError: stderr also carries
+	// the CLI's warnings, so finish weighs it against the exit, not
+	// against the run.
+	stderrError  *adapter.Event
 	toolInFlight int
 	startedAt    time.Time
 	workerLive   bool
 	dropped      bool
 	stopped      *stop
+
+	// transcriptCap bounds the transcript bytes kept in memory and
+	// uploaded; 0 keeps the 64 MiB default — the engine's upload cap's
+	// own default (§9). A field, not the constant, so a test can
+	// shrink it without writing 64 MiB first.
+	transcriptCap int
 
 	// killWorker kills the worker's process group without ending the
 	// run: the stall and cap paths use it, because a stopped worker's
@@ -151,8 +160,11 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model string
 	// inherit, so it is materialized first for the same scrub.
 	cmd.Env = scrubEnv(cmd.Env, r.cfg.GitEnv)
 	cmd.SysProcAttr = processGroup()
-	cmd.Stderr = io.Discard // the event stream is stdout; adapters parse it
 	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return &noWorkerError{err}
+	}
+	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return &noWorkerError{err}
 	}
@@ -184,16 +196,39 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model string
 		terminateGroup(cmd, r.cfg.KillGrace)
 	}()
 
+	// Stderr rides the same pipeline as stdout (§5.2): the CLI prints
+	// some failures only there — a resume-not-found before any JSON, a
+	// limit or an auth message — and the adapter turns them into error
+	// events like any other. Both readers finish before the wait, as
+	// the pipes need draining when Wait closes them; a scanner that
+	// gave up on an over-long line stops reading, so the rest of the
+	// stream is drained to Discard — a worker that keeps writing into a
+	// full pipe would otherwise block on it until the policy kills it.
+	stderrDone := make(chan struct{})
+	go func() {
+		defer close(stderrDone)
+		sc := bufio.NewScanner(stderr)
+		sc.Buffer(make([]byte, 64<<10), 1<<20)
+		for sc.Scan() {
+			r.recordEvent(ad, sc.Bytes(), true)
+		}
+		if err := sc.Err(); err != nil {
+			r.cfg.Log.WarnContext(ctx, "reading the worker's stderr failed", "job_id", r.grant.JobID, "err", err)
+			io.Copy(io.Discard, stderr)
+		}
+	}()
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64<<10), 1<<20)
 	for scanner.Scan() {
-		r.recordEvent(ad, scanner.Bytes())
+		r.recordEvent(ad, scanner.Bytes(), false)
 	}
 	if err := scanner.Err(); err != nil {
-		// An unreadably long line ends the stream early; the worker runs
-		// on, but the record names what happened to its output.
+		// An unreadably long line ends the record's view of the stream
+		// early; the worker runs on, with its output drained.
 		r.cfg.Log.WarnContext(ctx, "reading the worker's stream failed", "job_id", r.grant.JobID, "err", err)
+		io.Copy(io.Discard, stdout)
 	}
+	<-stderrDone
 	waitErr := cmd.Wait()
 	close(workerDone)
 	<-killerDone
@@ -270,16 +305,32 @@ func (r *jobRun) stallPolicy() stallPolicy {
 // tests (§5.6).
 func (r *jobRun) now() time.Time { return r.cfg.Clock.Now() }
 
-// recordEvent parses one stdout line and folds it into the run's
-// record: the event list (for the final message and the resume id), the
-// transcript (verbatim, for the artifact), the activity clock and the
-// in-flight tool count (§5.6).
-func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte) {
+// recordEvent parses one line of the worker's output — stdout's event
+// stream, or stderr riding the same pipeline (§5.2) — and folds it into
+// the run's record: the event list (for the final message and the
+// resume id), the transcript (verbatim, for the artifact; stderr lines
+// tagged as such), the activity clock and the in-flight tool count
+// (§5.6). The transcript stays bounded: past twice the cap it is
+// compacted to its head and tail, so a runaway stream neither outgrows
+// memory nor prices itself out of the upload.
+func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte, fromStderr bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if fromStderr {
+		r.transcript = append(r.transcript, "stderr: "...)
+	}
 	r.transcript = append(r.transcript, line...)
 	r.transcript = append(r.transcript, '\n')
-	ev, ok := ad.ParseEvent(line)
+	if len(r.transcript) > 2*r.uploadCap() {
+		r.transcript = compactTranscript(r.transcript, r.uploadCap())
+	}
+	var ev adapter.Event
+	var ok bool
+	if fromStderr {
+		ev, ok = ad.ParseErrEvent(line)
+	} else {
+		ev, ok = ad.ParseEvent(line)
+	}
 	if !ok {
 		return
 	}
@@ -291,7 +342,14 @@ func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte) {
 			r.sessionID = ev.SessionID
 		}
 	case adapter.EvError:
-		if r.cliError == nil {
+		// A stderr-sorted error is kept apart from the stream's own
+		// (see stderrError): stderr carries warnings beside failures.
+		if fromStderr {
+			if r.stderrError == nil {
+				e := ev
+				r.stderrError = &e
+			}
+		} else if r.cliError == nil {
 			e := ev
 			r.cliError = &e
 		}
@@ -474,7 +532,7 @@ func (r *jobRun) finishStopped(ctx context.Context, ws *workspace, why *stop) {
 		}
 	}
 	comp := api.Completion{SessionID: r.sessionIDOf(), Outcome: why.Outcome}
-	if err := r.saveTranscript(&comp); err != nil {
+	if err := r.saveTranscript(ctx); err != nil {
 		r.cfg.Log.WarnContext(ctx, "save transcript", "job_id", r.grant.JobID, "err", err)
 	}
 	encoded, err := json.Marshal(res)
@@ -488,14 +546,21 @@ func (r *jobRun) finishStopped(ctx context.Context, ws *workspace, why *stop) {
 
 // finish turns the dead worker's record into the engine's completion
 // (§5.4, §5.5): the result block, the branch push it reported, the
-// check the runner ran, and the artifacts. The CLI's own error beats
+// check the runner ran, and the artifacts. The stream's own error beats
 // everything the worker said — a CLI that failed produced no result
-// worth reading.
+// worth reading. An error sorted from stderr counts only against a run
+// that did not end clean: stderr carries the CLI's warnings — an MCP
+// server that wants attention, a rate-limited retry — and a warning
+// beside a good result must not fail the run.
 func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, exitErr error) {
 	var cliErr *adapter.Event
 	r.mu.Lock()
-	if r.cliError != nil {
+	switch {
+	case r.cliError != nil:
 		e := *r.cliError
+		cliErr = &e
+	case r.stderrError != nil && exitErr != nil:
+		e := *r.stderrError
 		cliErr = &e
 	}
 	r.mu.Unlock()
@@ -514,7 +579,7 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 	}
 
 	comp := api.Completion{SessionID: r.sessionIDOf()}
-	if err := r.saveTranscript(&comp); err != nil {
+	if err := r.saveTranscript(ctx); err != nil {
 		r.cfg.Log.WarnContext(ctx, "save transcript", "job_id", r.grant.JobID, "err", err)
 	}
 
@@ -537,7 +602,9 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 				return
 			}
 			comp.CheckResult = check.JSON()
-			r.saveRecord(&comp, "check_log", fmt.Sprintf("job-%d-check.log", r.grant.JobID), []byte(check.Log))
+			if err := r.saveRecord(ctx, "check_log", fmt.Sprintf("job-%d-check.log", r.grant.JobID), []byte(check.Log)); err != nil {
+				r.cfg.Log.WarnContext(ctx, "save check log", "job_id", r.grant.JobID, "err", err)
+			}
 			if check.Failed() {
 				// §5.5: a failed check is the job's outcome, not a footnote.
 				result.Status = statusCheckFail
@@ -564,7 +631,7 @@ func (r *jobRun) sessionIDOf() string {
 // produce a result, and the reason is the engine's to keep.
 func (r *jobRun) finishWithError(ctx context.Context, msg string) {
 	comp := api.Completion{Error: msg, SessionID: r.sessionIDOf()}
-	if err := r.saveTranscript(&comp); err != nil {
+	if err := r.saveTranscript(ctx); err != nil {
 		r.cfg.Log.WarnContext(ctx, "save transcript", "job_id", r.grant.JobID, "err", err)
 	}
 	r.deliver(ctx, comp)
@@ -644,37 +711,45 @@ func (r *jobRun) complete(ctx context.Context, comp api.Completion) (engine.Answ
 	return "", lastErr
 }
 
-// saveTranscript writes the run's event stream to the runner's records
-// and references it as the job's transcript artifact (§9).
-func (r *jobRun) saveTranscript(comp *api.Completion) error {
+// saveTranscript uploads the run's whole event stream — stdout's events
+// and the stderr that rode the same pipeline — as the job's transcript
+// artifact (§9).
+func (r *jobRun) saveTranscript(ctx context.Context) error {
 	r.mu.Lock()
 	data := append([]byte(nil), r.transcript...)
 	r.mu.Unlock()
 	if len(data) == 0 {
 		return nil
 	}
-	return r.saveRecord(comp, "transcript", fmt.Sprintf("job-%d-transcript.jsonl", r.grant.JobID), data)
+	return r.saveRecord(ctx, "transcript", fmt.Sprintf("job-%d-transcript.jsonl", r.grant.JobID), data)
 }
 
-// saveRecord writes one run record under the runner's state directory
-// and attaches it to the completion as an artifact.
-func (r *jobRun) saveRecord(comp *api.Completion, kind, name string, data []byte) error {
+// saveRecord uploads one run record to the engine as an artifact (§9)
+// and keeps a copy under the runner's state directory, where a run's
+// own output stays reachable whatever the engine does. A record over
+// the artifact cap is compacted — head and tail, the middle dropped —
+// before it is written or uploaded, so a runaway stream costs its
+// middle, not its record. The upload is fenced like the completion it
+// precedes and idempotent by content, so a retry costs nothing.
+func (r *jobRun) saveRecord(ctx context.Context, kind, name string, data []byte) error {
+	data = compactTranscript(data, r.uploadCap())
 	dir := filepath.Join(r.cfg.StateDir, "records")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
 		return err
 	}
-	sum := sha256.Sum256(data)
-	comp.Artifacts = append(comp.Artifacts, api.Artifact{
-		Kind:   kind,
-		Path:   path,
-		Size:   int64(len(data)),
-		SHA256: hex.EncodeToString(sum[:]),
-	})
-	return nil
+	ans, _, err := r.client.UploadArtifact(ctx, r.grant.JobID, r.grant.LeaseID, kind, data)
+	if err != nil {
+		return err
+	}
+	switch ans {
+	case engine.AnsOK, engine.AnsAlready:
+		return nil
+	default:
+		return fmt.Errorf("the engine answered %s", ans)
+	}
 }
 
 // noWorkerError marks a failure to build or start the worker command:

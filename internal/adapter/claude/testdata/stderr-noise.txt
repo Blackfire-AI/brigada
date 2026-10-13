@@ -1,0 +1,7 @@
+claude-code 2.0.1 — starting headless session
+Warning: unknown session option 'strict' ignored; continuing with defaults
+Warning: MCP server "github" requires authentication; its tools are unavailable this run
+debug: config file not found, using defaults
+
+⏳ Rate limited — retrying in 2s (attempt 2/5)
+⏺ Escaping to plan mode… (ctrl-r to toggle)

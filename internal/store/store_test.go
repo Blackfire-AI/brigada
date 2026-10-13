@@ -182,8 +182,8 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 
 func TestReopenUpToDateStoreIsNoOp(t *testing.T) {
 	path, s := openFile(t)
-	if v, err := s.userVersion(context.Background()); err != nil || v != 3 {
-		t.Fatalf("user_version after the first open = %d, %v; want 3", v, err)
+	if v, err := s.userVersion(context.Background()); err != nil || v != 4 {
+		t.Fatalf("user_version after the first open = %d, %v; want 4", v, err)
 	}
 	insertProject(t, s.db)
 	s.Close()
@@ -195,8 +195,8 @@ func TestReopenUpToDateStoreIsNoOp(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer again.Close()
-	if v, err := again.userVersion(context.Background()); err != nil || v != 3 {
-		t.Errorf("user_version after reopen = %d, %v; want 3", v, err)
+	if v, err := again.userVersion(context.Background()); err != nil || v != 4 {
+		t.Errorf("user_version after reopen = %d, %v; want 4", v, err)
 	}
 	if n := queryInt(t, again.db, "SELECT COUNT(*) FROM projects"); n != 1 {
 		t.Errorf("projects after reopen = %d, want 1", n)
@@ -205,7 +205,7 @@ func TestReopenUpToDateStoreIsNoOp(t *testing.T) {
 
 // TestOpenUpgradesAV1Store builds the store a binary that only knows
 // 0001 would leave behind, then opens it with this binary and expects
-// migration 0002 to land without touching the existing rows.
+// the later migrations to land without touching the existing rows.
 func TestOpenUpgradesAV1Store(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "store.db")
 	db, err := sql.Open("sqlite", dsn(path))
@@ -235,8 +235,8 @@ func TestOpenUpgradesAV1Store(t *testing.T) {
 		t.Fatalf("upgrade: %v", err)
 	}
 	defer s.Close()
-	if v, err := s.userVersion(context.Background()); err != nil || v != 3 {
-		t.Errorf("user_version after upgrade = %d, %v; want 3", v, err)
+	if v, err := s.userVersion(context.Background()); err != nil || v != 4 {
+		t.Errorf("user_version after upgrade = %d, %v; want 4", v, err)
 	}
 	if got := queryStrings(t, s.db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'idempotency'"); len(got) != 1 {
 		t.Errorf("idempotency table after upgrade = %v, want it created", got)
@@ -305,7 +305,7 @@ func TestUpdateCommitsAndRollsBack(t *testing.T) {
 
 func TestNewerUserVersionIsRefused(t *testing.T) {
 	path, s := openFile(t)
-	exec(t, s.db, "PRAGMA user_version = 4")
+	exec(t, s.db, "PRAGMA user_version = 5")
 	s.Close()
 
 	reopened, err := Open(context.Background(), path)
@@ -316,7 +316,7 @@ func TestNewerUserVersionIsRefused(t *testing.T) {
 	if !errors.Is(err, ErrTooNew) {
 		t.Errorf("error = %v; want it to wrap ErrTooNew", err)
 	}
-	for _, want := range []string{"user_version 4", "latest known migration 3"} {
+	for _, want := range []string{"user_version 5", "latest known migration 4"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}

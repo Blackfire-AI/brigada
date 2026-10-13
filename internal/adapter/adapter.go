@@ -38,6 +38,13 @@ type Adapter interface {
 	// on its stdout must not fail an otherwise good run.
 	ParseEvent(line []byte) (Event, bool)
 
+	// ParseErrEvent parses one line of the CLI's stderr, which rides
+	// the same event pipeline as stdout: some failures print only there
+	// — a resume-not-found before any JSON, a limit or an auth message
+	// — and must become error events all the same. false means the line
+	// carries nothing to act on, like a progress note or a warning.
+	ParseErrEvent(line []byte) (Event, bool)
+
 	// ResultText returns the worker's final message from the events it
 	// parsed: the text the result contract (§5.4) is read from.
 	ResultText(events []Event) string
@@ -74,7 +81,9 @@ const (
 
 // ErrorKind sorts an error event: a quota limit hit (the account cools
 // and the job moves to another agent), an authentication failure (the
-// agent is broken until a probe passes), and everything else.
+// agent is broken until a probe passes), a resume that could not happen
+// (the session is gone or forked; §5.6 restarts fresh in place), and
+// everything else.
 type ErrorKind string
 
 const (

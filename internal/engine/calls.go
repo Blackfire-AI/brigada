@@ -86,7 +86,12 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, pro
 	if limit, ok := e.cfg.HardCaps[job.Kind]; ok && limit > 0 && job.FirstLeased != "" {
 		if first, err := parseTime(job.FirstLeased); err == nil && now.Sub(first) > limit {
 			accrue := accrualFrom(job.LastLeased, first.Add(limit))
-			if err := failJobTx(tx, job.ID, capError(job.Kind, limit), accrue, now); err != nil {
+			reason := capError(job.Kind, limit)
+			if err := failJobTx(tx, job.ID, reason, accrue, now); err != nil {
+				return "", time.Time{}, err
+			}
+			if _, err := appendEventTx(tx, evJobHardCapped, job.ProjectID, job.TaskID, job.ID,
+				eventPayload{Status: statusFailed, Reason: reason}, now); err != nil {
 				return "", time.Time{}, err
 			}
 			return AnsLost, time.Time{}, nil
@@ -104,6 +109,10 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, pro
 			queued_at = NULL, updated_at = ? WHERE id = ?`,
 			fmtTime(now), fmtTime(expires), fmtTime(now), job.ID); err != nil {
 			return "", time.Time{}, fmt.Errorf("revive job %d: %w", job.ID, err)
+		}
+		if _, err := appendEventTx(tx, evLeaseRevived, job.ProjectID, job.TaskID, job.ID,
+			eventPayload{Lease: leasePrefix(leaseID)}, now); err != nil {
+			return "", time.Time{}, err
 		}
 	} else if _, err := tx.Exec(`UPDATE jobs SET lease_expires_at = ?, updated_at = ? WHERE id = ?`,
 		fmtTime(expires), fmtTime(now), job.ID); err != nil {
@@ -140,28 +149,21 @@ func recordProgressTx(tx *sql.Tx, jobID int64, prog Progress, now time.Time) err
 
 // Completion is a runner's answer for a job (§5.4, §5.5, §12.3):
 // exactly one of Result or Error, the check result when the runner ran
-// the task's check, the artifacts the run produced, and the harness
-// session the run ended on — written back so the next session-mode job
-// on the key resumes it (§4.2). Outcome, when set, names a run the
-// runner stopped itself (§5.6): stalled, or past its class time cap.
-// It rides with a Result — the stopped run's outcome block — and ends
-// the job as stalled rather than done.
+// the task's check, and the harness session the run ended on — written
+// back so the next session-mode job on the key resumes it (§4.2).
+// Artifacts are not the completion's to name: the runner uploads them
+// through the artifact endpoint (§9), which stores them itself, so a
+// runner can never point the engine's readers at a path of its
+// choosing. Outcome, when set, names a run the runner stopped itself
+// (§5.6): stalled, or past its class time cap. It rides with a Result
+// — the stopped run's outcome block — and ends the job as stalled
+// rather than done.
 type Completion struct {
 	Result      string
 	Error       string
 	CheckResult string
 	SessionID   string
 	Outcome     string
-	Artifacts   []Artifact
-}
-
-// Artifact is one stored artifact reference (§9): the session
-// transcript after a job, the log of a check the runner ran.
-type Artifact struct {
-	Kind   string // 'transcript' or 'check_log'
-	Path   string
-	Size   int64
-	SHA256 string
 }
 
 // Complete finishes a job as done or failed — or, when the completion
@@ -260,10 +262,20 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 		WHERE id = ?`, status, string(result), leaseID, accrue, fmtTime(now), c.CheckResult, job.ID); err != nil {
 		return "", fmt.Errorf("finish job %d: %w", job.ID, err)
 	}
-	for _, a := range c.Artifacts {
-		if _, err := tx.Exec(`INSERT INTO artifacts (job_id, kind, path, size, sha256, created_at)
-			VALUES (?, ?, ?, ?, ?, ?)`, job.ID, a.Kind, a.Path, a.Size, a.SHA256, fmtTime(now)); err != nil {
-			return "", fmt.Errorf("store artifact for job %d: %w", job.ID, err)
+	// Artifacts arrive only through the upload endpoint (§9), which
+	// stores the blob itself: a completion carries references to
+	// nothing the engine can be pointed at.
+	eventID, err := appendEventTx(tx, evJobCompleted, job.ProjectID, job.TaskID, job.ID,
+		eventPayload{Status: completionStatus(c), Lease: leasePrefix(leaseID)}, now)
+	if err != nil {
+		return "", err
+	}
+	if c.Result != "" {
+		// The run's answer is a conversation item too (§9): what the
+		// worker ended saying, kept with the event that ended the job.
+		if err := appendMessageTx(tx, job.ProjectID, eventID, msgKindWorkerResult,
+			authorWorker, workerResultMessage(c.Result), now); err != nil {
+			return "", err
 		}
 	}
 	if c.SessionID != "" {
@@ -338,6 +350,10 @@ func (e *Engine) releaseTx(tx *sql.Tx, owner, jobID int64, leaseID, reason strin
 		accrue, fmtTime(now), job.ID); err != nil {
 		return "", fmt.Errorf("requeue job %d: %w", job.ID, err)
 	}
+	if _, err := appendEventTx(tx, evJobReleased, job.ProjectID, job.TaskID, job.ID,
+		eventPayload{Reason: boundNote(reason), Lease: leasePrefix(leaseID), Owner: owner}, now); err != nil {
+		return "", err
+	}
 	return AnsOK, nil
 }
 
@@ -364,7 +380,7 @@ func (e *Engine) Cancel(ctx context.Context, jobID int64) (Answer, error) {
 		case isTerminal(job.Status):
 			ans = AnsGone
 		default:
-			ans, err = cancelTx(tx, job, now)
+			ans, err = cancelTx(tx, job, "", now)
 		}
 		if err != nil {
 			return fmt.Errorf("cancel job %d: %w", jobID, err)
@@ -375,13 +391,18 @@ func (e *Engine) Cancel(ctx context.Context, jobID int64) (Answer, error) {
 }
 
 // cancelTx ends a live job as cancelled, banking whatever the lease in
-// force has run up.
-func cancelTx(tx *sql.Tx, job *jobRow, now time.Time) (Answer, error) {
+// force has run up. Reason names who asked: empty for a plain cancel,
+// or the submit that replaced the job with a restart round (§5.6).
+func cancelTx(tx *sql.Tx, job *jobRow, reason string, now time.Time) (Answer, error) {
 	accrue := accrualFrom(job.LastLeased, now)
 	if _, err := tx.Exec(`UPDATE jobs SET status = 'cancelled', followup = 0, lease_expires_at = NULL,
 		last_leased = NULL, queued_at = NULL, leased_seconds = leased_seconds + ?, updated_at = ?
 		WHERE id = ?`, accrue, fmtTime(now), job.ID); err != nil {
 		return "", fmt.Errorf("cancel job %d: %w", job.ID, err)
+	}
+	if _, err := appendEventTx(tx, evJobCancelled, job.ProjectID, job.TaskID, job.ID,
+		eventPayload{Reason: reason}, now); err != nil {
+		return "", err
 	}
 	return AnsOK, nil
 }
@@ -393,7 +414,8 @@ func cancelTx(tx *sql.Tx, job *jobRow, now time.Time) (Answer, error) {
 func (e *Engine) BumpFenceEpoch(ctx context.Context) (int, error) {
 	var epoch int64
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		if _, err := sweepTx(tx, e.cfg, e.cfg.Now()); err != nil {
+		now := e.cfg.Now()
+		if _, err := sweepTx(tx, e.cfg, now); err != nil {
 			return err
 		}
 		if _, err := tx.Exec("UPDATE meta SET fence_epoch = fence_epoch + 1 WHERE id = 1"); err != nil {
@@ -401,6 +423,10 @@ func (e *Engine) BumpFenceEpoch(ctx context.Context) (int, error) {
 		}
 		var err error
 		epoch, err = epochTx(tx)
+		if err != nil {
+			return err
+		}
+		_, err = appendEventTx(tx, evFenceEpochBumped, 0, 0, 0, eventPayload{Epoch: epoch}, now)
 		return err
 	})
 	if err != nil {

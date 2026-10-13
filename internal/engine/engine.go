@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -125,6 +126,18 @@ type Config struct {
 	// RoundCaps are the default per-task round caps; a task's caps JSON
 	// ("fix", "review", "restart") overrides them per task.
 	RoundCaps RoundCaps
+	// DataDir is where the engine keeps its artifact blobs (§9), laid
+	// out content-addressed under artifacts/<sha256[:2]>/<sha256>. Zero
+	// derives the directory of the store file; a store with no file of
+	// its own keeps zero, and artifact uploads answer that plainly.
+	DataDir string
+	// MaxArtifactBytes caps one artifact upload (§9); zero keeps the
+	// 64 MiB default.
+	MaxArtifactBytes int64
+	// Retention is how long messages and artifacts are kept before the
+	// sweep prunes them (§9); zero — the default — keeps everything.
+	// The event log is never pruned.
+	Retention time.Duration
 	// NewLeaseID mints lease ids: <owner>-<random hex>.
 	NewLeaseID func(owner int64) (string, error)
 }
@@ -132,7 +145,9 @@ type Config struct {
 // DefaultConfig returns the shipped settings (design §14 and §5.1): a
 // 90 s lease, a 120 s release exclusion, three lost attempts, a 10 m
 // queue TTL, hard caps of 45 m for work and fix, 25 m for review and
-// 30 m for a foreman turn, and round caps of fix 3, review 3, restart 2.
+// 30 m for a foreman turn, round caps of fix 3, review 3, restart 2,
+// and artifact uploads capped at 64 MiB each. Retention keeps
+// everything (§9); DataDir follows the store file.
 func DefaultConfig() Config {
 	return Config{
 		Now:            func() time.Time { return time.Now().UTC() },
@@ -146,10 +161,15 @@ func DefaultConfig() Config {
 			KindReview:  25 * time.Minute,
 			KindForeman: 30 * time.Minute,
 		},
-		RoundCaps:  RoundCaps{Fix: 3, Review: 3, Restart: 2},
-		NewLeaseID: newLeaseID,
+		RoundCaps:        RoundCaps{Fix: 3, Review: 3, Restart: 2},
+		MaxArtifactBytes: defaultMaxArtifactBytes,
+		NewLeaseID:       newLeaseID,
 	}
 }
+
+// defaultMaxArtifactBytes is the artifact upload cap (§9): room for a
+// long session's transcript or check log, not for a runaway stream.
+const defaultMaxArtifactBytes = 64 << 20
 
 // newLeaseID mints the default lease id: the owning runner and random
 // hex, unique per lease for the life of the store.
@@ -204,11 +224,25 @@ func New(s *store.Store, cfg Config) *Engine {
 	if cfg.RoundCaps.Restart > 0 {
 		def.RoundCaps.Restart = cfg.RoundCaps.Restart
 	}
+	if cfg.DataDir != "" {
+		def.DataDir = cfg.DataDir
+	} else if p := s.Path(); p != "" && p != ":memory:" {
+		def.DataDir = filepath.Dir(p)
+	}
+	if cfg.MaxArtifactBytes > 0 {
+		def.MaxArtifactBytes = cfg.MaxArtifactBytes
+	}
+	if cfg.Retention > 0 {
+		def.Retention = cfg.Retention
+	}
 	if cfg.NewLeaseID != nil {
 		def.NewLeaseID = cfg.NewLeaseID
 	}
 	return &Engine{store: s, cfg: def}
 }
+
+// MaxArtifactBytes is the configured cap on one artifact upload.
+func (e *Engine) MaxArtifactBytes() int64 { return e.cfg.MaxArtifactBytes }
 
 // timeLayout is the store's timestamp format: fixed-width UTC text, so
 // lexicographic order is chronological order and the schema's TEXT

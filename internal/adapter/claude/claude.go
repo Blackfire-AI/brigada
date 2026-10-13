@@ -164,9 +164,8 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 	}
 	var lj lineJSON
 	if err := json.Unmarshal(trimmed, &lj); err != nil {
-		// Not the CLI's JSON: a banner, prose, or the failure text the
-		// CLI puts on stderr instead of an error result. The phrase
-		// table decides — nothing else in prose is an event.
+		// Not the CLI's JSON: a banner, or prose on its stdout. The
+		// broad table decides — nothing else in prose is an event.
 		return errorFromText(string(trimmed))
 	}
 	switch lj.Type {
@@ -184,6 +183,40 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 	default:
 		return adapter.Event{}, false
 	}
+}
+
+// ParseErrEvent implements adapter.Adapter: one line of the CLI's
+// stderr, the strictest stream the adapter reads. The failures that
+// print only there — a resume the CLI cannot do, before any JSON; a
+// spent account; a broken login — are plain text named in full, and the
+// strict table sorts them, because stderr also carries the CLI's
+// chatter: an MCP server that "requires authentication", a "rate
+// limited, retrying" note, and a warning must not fail a run that ended
+// clean. The CLI's JSON there is an error result, sorted as on stdout
+// by the broad table, or an error object, sorted like plain stderr
+// text; anything else — a banner, a warning, a progress note — is not
+// the run's business.
+func (a *Adapter) ParseErrEvent(line []byte) (adapter.Event, bool) {
+	trimmed := bytes.TrimSpace(line)
+	if len(trimmed) == 0 {
+		return adapter.Event{}, false
+	}
+	var lj lineJSON
+	if err := json.Unmarshal(trimmed, &lj); err == nil && lj.Type != "" {
+		// The CLI's JSON on the wrong stream: its error result sorts as
+		// it would on stdout, its error object like plain stderr text;
+		// every other event belongs to stdout's stream, not here.
+		switch lj.Type {
+		case "result":
+			if ev, ok := resultEvent(lj); ok && ev.Kind == adapter.EvError {
+				return ev, true
+			}
+		case "error":
+			return phraseEvent(stderrPhrases, string(trimmed))
+		}
+		return adapter.Event{}, false
+	}
+	return phraseEvent(stderrPhrases, string(trimmed))
 }
 
 // assistantEvent reads one assistant message. A message that calls a
@@ -235,13 +268,18 @@ func resultEvent(lj lineJSON) (adapter.Event, bool) {
 	return adapter.Event{Kind: adapter.EvMessage, Text: lj.Result}, true
 }
 
-// errorPhrases names, in one table, the failures the adapter sorts by:
-// what their text looks like, case-insensitively, and the kind each
-// sorts into. First match wins; extend the table, not the code.
-var errorPhrases = []struct {
+// errorPhrase is one row of a phrase table: what a failure's text looks
+// like, case-insensitively, and the kind each sorts into. First match
+// wins; extend the table, not the code.
+type errorPhrase struct {
 	kind   adapter.ErrorKind
 	phrase string
-}{
+}
+
+// errorPhrases is the broad table an error result's text sorts by: an
+// error result is the CLI's own verdict on the whole run, so its text
+// can afford loose phrases.
+var errorPhrases = []errorPhrase{
 	// A resume the CLI cannot do: the session is gone (§5.6, §14), and
 	// the answer is a fresh run in place, not another resume.
 	{adapter.ErrResumeFailed, "no conversation found"},
@@ -261,17 +299,38 @@ var errorPhrases = []struct {
 	{adapter.ErrAuth, "unauthorized"},
 }
 
-// errorFromText sorts one piece of failure text — an error result's, or
-// a line of the CLI's stderr — by the phrase table. Text that names no
-// known failure is not an event.
-func errorFromText(text string) (adapter.Event, bool) {
+// stderrPhrases is the strict table stderr sorts by: only the failure
+// messages the CLI itself prints there, named in full. Stderr also
+// carries the CLI's chatter — an MCP server that "requires
+// authentication", a "rate limited, retrying" note — and a warning must
+// not fail a run that ended clean, so the broad substrings an error
+// result's text can afford earn no place here.
+var stderrPhrases = []errorPhrase{
+	{adapter.ErrResumeFailed, "no conversation found"},
+	{adapter.ErrResumeFailed, "conversation not found"},
+	{adapter.ErrResumeFailed, "session not found"},
+	{adapter.ErrResumeFailed, "no session found"},
+	{adapter.ErrLimit, "usage limit reached"},
+	{adapter.ErrAuth, "invalid api key"},
+	{adapter.ErrAuth, "please run /login"},
+	{adapter.ErrAuth, "not logged in"},
+}
+
+// phraseEvent sorts one piece of text by one table. Text that names
+// nothing in the table is not an event.
+func phraseEvent(table []errorPhrase, text string) (adapter.Event, bool) {
 	lower := strings.ToLower(text)
-	for _, m := range errorPhrases {
+	for _, m := range table {
 		if strings.Contains(lower, m.phrase) {
 			return adapter.Event{Kind: adapter.EvError, ErrorKind: m.kind, Text: text}, true
 		}
 	}
 	return adapter.Event{}, false
+}
+
+// errorFromText sorts an error result's text by the broad table.
+func errorFromText(text string) (adapter.Event, bool) {
+	return phraseEvent(errorPhrases, text)
 }
 
 // ResultText implements adapter.Adapter: the run's final text is the

@@ -297,6 +297,43 @@ func (e *testEnv) waitUntil(what string, cond func() bool) {
 	}
 }
 
+// int64Of reads one integer column from the store.
+func (e *testEnv) int64Of(query string, args ...any) int64 {
+	e.t.Helper()
+	var v int64
+	err := e.st.View(e.ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow(query, args...).Scan(&v)
+	})
+	if err != nil {
+		e.t.Fatalf("query %q %v: %v", query, args, err)
+	}
+	return v
+}
+
+// get performs one GET with a token and returns the body, failing on
+// anything but 200.
+func (e *testEnv) get(path, token string) []byte {
+	e.t.Helper()
+	req, err := http.NewRequest(http.MethodGet, "http://brigada"+path, nil)
+	if err != nil {
+		e.t.Fatalf("get %s: %v", path, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+e.secrets[token])
+	resp, err := e.client.Do(req)
+	if err != nil {
+		e.t.Fatalf("get %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		e.t.Fatalf("get %s: read body: %v", path, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		e.t.Fatalf("get %s: %d %s", path, resp.StatusCode, data)
+	}
+	return data
+}
+
 // workerResult unwraps the WorkerResult the runner completed with,
 // which the engine stores as a JSON string inside the job's result.
 func (e *testEnv) workerResult(job *engine.JobInfo) WorkerResult {
@@ -336,10 +373,18 @@ func (e *testEnv) checkResult(job *engine.JobInfo) CheckResult {
 	return res
 }
 
+// testArtifact is one artifact row as the runner's tests read it.
+type testArtifact struct {
+	Kind   string
+	Path   string
+	Size   int64
+	SHA256 string
+}
+
 // artifacts reads the job's artifact rows from the store.
-func (e *testEnv) artifacts(job int64) map[string]api.Artifact {
+func (e *testEnv) artifacts(job int64) map[string]testArtifact {
 	e.t.Helper()
-	out := map[string]api.Artifact{}
+	out := map[string]testArtifact{}
 	err := e.st.View(e.ctx, func(tx *sql.Tx) error {
 		rows, err := tx.Query("SELECT kind, path, size, sha256 FROM artifacts WHERE job_id = ?", job)
 		if err != nil {
@@ -347,7 +392,7 @@ func (e *testEnv) artifacts(job int64) map[string]api.Artifact {
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var a api.Artifact
+			var a testArtifact
 			if err := rows.Scan(&a.Kind, &a.Path, &a.Size, &a.SHA256); err != nil {
 				return err
 			}
@@ -734,6 +779,185 @@ func (e *testEnv) assertRegistration() {
 	}
 }
 
+// TestRunnerStderrOnlyFailure covers the stderr pipeline (§5.2): a CLI
+// that reports its failure only on stderr — here a resume that cannot
+// be found, printed before any JSON — still fails the run as that
+// error, and the line rides the uploaded transcript.
+func TestRunnerStderrOnlyFailure(t *testing.T) {
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	task := e.seedTask("", "true")
+	job := e.submitWork(task, ComposeWorkerPrompt("Do something.", ""))
+	markerDir(t)
+
+	worker := `
+cat > /dev/null
+echo "error: resume session sess-gone not found" >&2
+exit 1
+`
+	p := e.startRunner(writeWorkerScript(t, worker), 100*time.Millisecond)
+	defer p.stop(t)
+
+	failed := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "failed" })
+	msg := e.errorResult(failed)
+	if !strings.Contains(msg, "resume_failed") || !strings.Contains(msg, "not found") {
+		t.Errorf("failure = %q, want the stderr-only resume failure named", msg)
+	}
+
+	// The transcript carries the stderr line, tagged as such (§9).
+	arts := e.artifacts(job)
+	a, ok := arts["transcript"]
+	if !ok {
+		t.Fatalf("no transcript artifact for job %d (have %v)", job, arts)
+	}
+	data, err := os.ReadFile(a.Path)
+	if err != nil {
+		t.Fatalf("read the transcript artifact: %v", err)
+	}
+	if !strings.Contains(string(data), "stderr: error: resume session sess-gone not found") {
+		t.Errorf("the transcript does not carry the stderr line:\n%s", data)
+	}
+	e.assertNoWorktrees()
+}
+
+// TestRunnerStderrErrorWeighsAgainstTheExit covers the weighing (§5.2,
+// §5.6): stderr carries the CLI's warnings beside its failures, so an
+// error sorted from it fails the run only when the CLI did not end
+// clean — a warning beside a good result never does.
+func TestRunnerStderrErrorWeighsAgainstTheExit(t *testing.T) {
+	t.Run("an error beside a clean exit and a good result", func(t *testing.T) {
+		remote := newRemote(t)
+		e := newTestEnv(t, engine.Config{})
+		e.seedProject(remote)
+		task := e.seedTask("", `test "$(cat work.txt)" = hello`)
+		job := e.submitWork(task, ComposeWorkerPrompt("Add work.txt.", ""))
+		markerDir(t)
+
+		worker := `
+cat > /dev/null
+echo '{"type":"error","kind":"auth","message":"MCP server github requires authentication"}' >&2
+echo hello > work.txt
+git add -A
+git commit -qm 'fake work: add work.txt'
+printf '{"type":"result","text":"done amid warnings: {\\"status\\":\\"done\\",\\"summary\\":\\"added work.txt\\"}"}\n'
+`
+		p := e.startRunner(writeWorkerScript(t, worker), 100*time.Millisecond)
+		defer p.stop(t)
+
+		done := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
+		res := e.workerResult(done)
+		if res.Status != "done" {
+			t.Errorf("worker result = %+v, want done: the stderr warning must not fail a clean run", res)
+		}
+		e.assertNoWorktrees()
+	})
+	t.Run("an error against a non-zero exit", func(t *testing.T) {
+		remote := newRemote(t)
+		e := newTestEnv(t, engine.Config{})
+		e.seedProject(remote)
+		task := e.seedTask("", "true")
+		job := e.submitWork(task, ComposeWorkerPrompt("Do something.", ""))
+		markerDir(t)
+
+		worker := `
+cat > /dev/null
+echo '{"type":"error","kind":"auth","message":"invalid API key provided"}' >&2
+exit 1
+`
+		p := e.startRunner(writeWorkerScript(t, worker), 100*time.Millisecond)
+		defer p.stop(t)
+
+		failed := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "failed" })
+		msg := e.errorResult(failed)
+		if !strings.Contains(msg, "auth") || !strings.Contains(msg, "invalid API key") {
+			t.Errorf("failure = %q, want the stderr error against the non-clean exit", msg)
+		}
+		e.assertNoWorktrees()
+	})
+}
+
+// TestRunnerHistoryEndToEnd is the whole story on one page (§9): a fake
+// worker run uploads its transcript and check log as artifacts —
+// content-addressed on the engine's own disk — and the history reads
+// the job's timeline: events and messages merged, oldest first.
+func TestRunnerHistoryEndToEnd(t *testing.T) {
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
+	job := e.submitWork(task, ComposeWorkerPrompt("Add work.txt with hello in it.", ""))
+	markerDir(t)
+
+	p := e.startRunner(writeWorkerScript(t, happyWorker), 100*time.Millisecond)
+	defer p.stop(t)
+
+	e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
+
+	// The artifacts live in the engine's data directory, addressed by
+	// their content.
+	arts := e.artifacts(job)
+	for _, kind := range []string{"transcript", "check_log"} {
+		a, ok := arts[kind]
+		if !ok {
+			t.Fatalf("no %s artifact for job %d (have %v)", kind, job, arts)
+		}
+		if !strings.Contains(a.Path, filepath.Join("artifacts", a.SHA256[:2], a.SHA256)) {
+			t.Errorf("the %s artifact's path = %q, want the content-addressed layout", kind, a.Path)
+		}
+		if _, err := os.Stat(a.Path); err != nil {
+			t.Errorf("the %s blob is not on the engine's disk: %v", kind, err)
+		}
+	}
+	transcriptID := e.int64Of("SELECT id FROM artifacts WHERE job_id = ? AND kind = 'transcript'", job)
+	if got := e.int64Of("SELECT COALESCE(transcript_id, 0) FROM jobs WHERE id = ?", job); got != transcriptID {
+		t.Errorf("the job's transcript ref = %d, want the uploaded artifact %d", got, transcriptID)
+	}
+
+	// The history shows the job's whole timeline, oldest first.
+	var page struct {
+		Items []struct {
+			Type    string `json:"type"`
+			Kind    string `json:"kind"`
+			JobID   int64  `json:"job_id"`
+			Author  string `json:"author"`
+			Content string `json:"content"`
+		} `json:"items"`
+		NextCursor string `json:"next_cursor"`
+	}
+	e.doJSON(http.MethodGet, fmt.Sprintf("/v1/history?task=%d&limit=50", task), "root", "", &page)
+	var story []string
+	for _, it := range page.Items {
+		story = append(story, it.Type+":"+it.Kind)
+	}
+	want := []string{
+		"event:job_created", "message:task_spec",
+		"event:job_leased",
+		"event:job_completed", "message:worker_result",
+	}
+	if strings.Join(story, " ") != strings.Join(want, " ") {
+		t.Errorf("the job's timeline:\n got %v\nwant %v", story, want)
+	}
+	for _, it := range page.Items {
+		if it.JobID != 0 && it.JobID != job {
+			t.Errorf("item %s names job %d, want %d", it.Kind, it.JobID, job)
+		}
+	}
+	if len(page.Items) < 2 || page.Items[1].Author != "engine" || page.Items[1].Content != "the task spec" {
+		t.Errorf("the task_spec message = %+v, want the seeded spec from the engine", page.Items[1])
+	}
+	last := page.Items[len(page.Items)-1]
+	if last.Author != "worker" || !strings.Contains(last.Content, `"status":"done"`) {
+		t.Errorf("the worker_result message = %+v, want the worker's done block", last)
+	}
+
+	// The artifacts endpoint streams the blob the path names.
+	transcript := e.get("/v1/artifacts/"+fmt.Sprint(transcriptID), "root")
+	if !strings.Contains(string(transcript), "sess-42") {
+		t.Errorf("the streamed transcript does not carry the session event:\n%s", transcript)
+	}
+}
+
 // TestRunnerLongCheckKeepsLease covers the fix for a check that
 // outlives several lease TTLs: the heartbeats span the push, the check
 // and the delivery, so a slow check does not lapse the lease and turn
@@ -799,8 +1023,15 @@ func TestRunnerCancelDuringCheckKillsCheck(t *testing.T) {
 	if len(final.Result) != 0 {
 		t.Errorf("a run cancelled during its check delivered a result: %s", final.Result)
 	}
-	if len(e.artifacts(job)) != 0 {
-		t.Errorf("a run cancelled during its check delivered artifacts: %v", e.artifacts(job))
+	// The transcript the worker's session already earned stays (§9: it
+	// is uploaded after every job); the check log of a killed check —
+	// and any completion — must not join it.
+	arts := e.artifacts(job)
+	if _, ok := arts["transcript"]; !ok {
+		t.Errorf("the cancelled run's transcript was not kept: %v", arts)
+	}
+	if _, ok := arts["check_log"]; ok {
+		t.Errorf("the cancelled check delivered a log: %v", arts)
 	}
 }
 

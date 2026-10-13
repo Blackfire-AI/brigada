@@ -54,6 +54,59 @@ func TestParseEvent(t *testing.T) {
 	}
 }
 
+func TestParseErrEvent(t *testing.T) {
+	a := &Adapter{}
+	cases := []struct {
+		name string
+		line string
+		want adapter.Event
+		ok   bool
+	}{
+		// The resume failure CLIs print only to stderr, before any JSON
+		// (§5.6): plain text there still becomes the error it names.
+		// The session noun and its absence sit next to each other, with
+		// at most an id between.
+		{"resume not found", "error: resume session sess-9 not found",
+			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrResumeFailed, Text: "error: resume session sess-9 not found"}, true},
+		{"no such session", "no such session: sess-9",
+			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrResumeFailed, Text: "no such session: sess-9"}, true},
+		{"conversation not found with id", "Error: no conversation found with session ID: 3f2a1b",
+			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrResumeFailed, Text: "Error: no conversation found with session ID: 3f2a1b"}, true},
+		{"session with id not found", "session id 3f2a1b was not found",
+			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrResumeFailed, Text: "session id 3f2a1b was not found"}, true},
+		{"session gone", "session a1b2c3 does not exist",
+			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrResumeFailed, Text: "session a1b2c3 does not exist"}, true},
+		{"failed to resume", "failed to resume the session",
+			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrResumeFailed, Text: "failed to resume the session"}, true},
+		// A JSON error line parses as it would on stdout.
+		{"limit error", `{"type":"error","kind":"limit","message":"quota exhausted"}`,
+			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrLimit, Text: "quota exhausted"}, true},
+		{"auth error", `{"type":"error","kind":"auth","message":"expired token"}`,
+			adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrAuth, Text: "expired token"}, true},
+		// Warnings and banners carry nothing to act on — including the
+		// ones that mention a session while missing something else: the
+		// matcher must not read every absence near "session" as a lost
+		// session.
+		{"warning", "warn: retrying in 2s", adapter.Event{}, false},
+		{"blank line", "   ", adapter.Event{}, false},
+		{"resume that worked", "resumed session sess-9", adapter.Event{}, false},
+		{"unknown session option", "warning: unknown session option 'strict' ignored", adapter.Event{}, false},
+		{"session option not found", "warn: session option 'strict' not found, using default", adapter.Event{}, false},
+		{"session option missing", "warn: session option missing, using default", adapter.Event{}, false},
+		{"config file not found", "debug: config file not found, using defaults", adapter.Event{}, false},
+	}
+	for _, tc := range cases {
+		got, ok := a.ParseErrEvent([]byte(tc.line))
+		if ok != tc.ok {
+			t.Errorf("%s: ok = %v, want %v", tc.name, ok, tc.ok)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("%s: event = %+v, want %+v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestResultText(t *testing.T) {
 	a := &Adapter{}
 	events := []adapter.Event{}
