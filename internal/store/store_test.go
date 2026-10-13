@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -180,10 +181,25 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 	}
 }
 
+// schemaVersion is the version this binary's migrations reach, derived
+// from the migration list so the next migration doesn't break these tests.
+func schemaVersion(t *testing.T) int {
+	t.Helper()
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatalf("list migrations: %v", err)
+	}
+	if len(migs) == 0 || migs[len(migs)-1].version != len(migs) {
+		t.Fatalf("migrations are not numbered 1..%d without gaps", len(migs))
+	}
+	return len(migs)
+}
+
 func TestReopenUpToDateStoreIsNoOp(t *testing.T) {
 	path, s := openFile(t)
-	if v, err := s.userVersion(context.Background()); err != nil || v != 4 {
-		t.Fatalf("user_version after the first open = %d, %v; want 4", v, err)
+	want := schemaVersion(t)
+	if v, err := s.userVersion(context.Background()); err != nil || v != want {
+		t.Fatalf("user_version after the first open = %d, %v; want %d", v, err, want)
 	}
 	insertProject(t, s.db)
 	s.Close()
@@ -195,8 +211,8 @@ func TestReopenUpToDateStoreIsNoOp(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer again.Close()
-	if v, err := again.userVersion(context.Background()); err != nil || v != 4 {
-		t.Errorf("user_version after reopen = %d, %v; want 4", v, err)
+	if v, err := again.userVersion(context.Background()); err != nil || v != want {
+		t.Errorf("user_version after reopen = %d, %v; want %d", v, err, want)
 	}
 	if n := queryInt(t, again.db, "SELECT COUNT(*) FROM projects"); n != 1 {
 		t.Errorf("projects after reopen = %d, want 1", n)
@@ -235,8 +251,8 @@ func TestOpenUpgradesAV1Store(t *testing.T) {
 		t.Fatalf("upgrade: %v", err)
 	}
 	defer s.Close()
-	if v, err := s.userVersion(context.Background()); err != nil || v != 4 {
-		t.Errorf("user_version after upgrade = %d, %v; want 4", v, err)
+	if v, err := s.userVersion(context.Background()); err != nil || v != schemaVersion(t) {
+		t.Errorf("user_version after upgrade = %d, %v; want %d", v, err, schemaVersion(t))
 	}
 	if got := queryStrings(t, s.db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'idempotency'"); len(got) != 1 {
 		t.Errorf("idempotency table after upgrade = %v, want it created", got)
@@ -305,7 +321,7 @@ func TestUpdateCommitsAndRollsBack(t *testing.T) {
 
 func TestNewerUserVersionIsRefused(t *testing.T) {
 	path, s := openFile(t)
-	exec(t, s.db, "PRAGMA user_version = 5")
+	exec(t, s.db, "PRAGMA user_version = "+strconv.Itoa(schemaVersion(t)+1))
 	s.Close()
 
 	reopened, err := Open(context.Background(), path)
@@ -316,7 +332,10 @@ func TestNewerUserVersionIsRefused(t *testing.T) {
 	if !errors.Is(err, ErrTooNew) {
 		t.Errorf("error = %v; want it to wrap ErrTooNew", err)
 	}
-	for _, want := range []string{"user_version 5", "latest known migration 4"} {
+	for _, want := range []string{
+		fmt.Sprintf("user_version %d", schemaVersion(t)+1),
+		fmt.Sprintf("latest known migration %d", schemaVersion(t)),
+	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}

@@ -202,6 +202,17 @@ func (e *env) submit(p SubmitParams) SubmitResult {
 	return res
 }
 
+// submitTask runs one whole debug task submit (§12.1), failing the test
+// on the engine's refusal.
+func (e *env) submitTask(p TaskParams) TaskResult {
+	e.t.Helper()
+	res, err := e.eng.SubmitTask(e.ctx, p)
+	if err != nil {
+		e.t.Fatalf("submit task for %s: %v", p.RepoURL, err)
+	}
+	return res
+}
+
 func (e *env) lease(owner int64, harnesses, labels []string) *LeaseGrant {
 	e.t.Helper()
 	g, err := e.eng.Lease(e.ctx, owner, harnesses, labels)

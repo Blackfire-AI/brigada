@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
@@ -22,6 +23,7 @@ type Server struct {
 	log       *slog.Logger
 	tokens    []token
 	idemLocks keyLocks
+	inFlight  atomic.Int64
 }
 
 // New builds the API server: it loads the token file — refusing one
@@ -48,6 +50,7 @@ func New(ctx context.Context, st *store.Store, eng *engine.Engine, log *slog.Log
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/health", s.handleHealth)
+	mux.HandleFunc("/v1/status", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleStatus))
 	mux.HandleFunc("/v1/runner/register", s.authed([]string{roleRunner}, s.handleRegister))
 	mux.HandleFunc("/v1/runner/lease", s.authed([]string{roleRunner}, s.withRunner(s.handleLease)))
 	mux.HandleFunc("/v1/runner/heartbeat", s.authed([]string{roleRunner}, s.withRunner(s.handleHeartbeat)))
@@ -57,6 +60,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/history", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleHistory))
 	mux.HandleFunc("/v1/artifacts/{id}", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleArtifactGet))
 	mux.HandleFunc("/v1/jobs", s.authed([]string{roleAdmin}, s.idempotent(s.handleSubmit)))
+	mux.HandleFunc("/v1/tasks", s.authed([]string{roleAdmin}, s.idempotent(s.handleTaskSubmit)))
 	mux.HandleFunc("/v1/jobs/{id}", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleJobGet))
 	mux.HandleFunc("/v1/jobs/{id}/cancel", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.idempotent(s.handleJobCancel)))
 	mux.HandleFunc("/v1/admin/fence-epoch", s.authed([]string{roleAdmin}, s.idempotent(s.handleFenceEpoch)))
@@ -64,7 +68,25 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, codeNotFound, "no such endpoint")
 	})
-	return mux
+	return s.counting(mux)
+}
+
+// counting tracks the requests currently being served, so the engine's
+// idle rule (§13) can tell a quiet moment from a connected long-poll: a
+// runner waiting on a lease holds a request open, and an engine with a
+// listener occupied has work to do.
+func (s *Server) counting(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.inFlight.Add(1)
+		defer s.inFlight.Add(-1)
+		h.ServeHTTP(w, r)
+	})
+}
+
+// InFlight is the number of requests the API is serving right now —
+// §13's "connected long-polls" as a number.
+func (s *Server) InFlight() int {
+	return int(s.inFlight.Load())
 }
 
 // handleHealth is the one endpoint without authentication (§12.1): a
