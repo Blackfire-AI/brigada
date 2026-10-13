@@ -40,7 +40,7 @@ All of them are the one `brigada` binary in different roles.
 | review "changes", rounds left | rule | fix round: same session, template + review text |
 | transient error (CLI crash, network) | rule | retry the job, capped |
 | a dependency is done | rule | the dependent task becomes ready |
-| quota limit hit by a worker | rule | cool the account (§8); re-dispatch to another eligible agent as a **fresh** attempt carrying the previous job's summary if it produced one, else its last progress events (a session can't move between agents), counting toward caps; no eligible agent → the task parks and the user is notified (§10) |
+| quota limit hit by a worker | rule | cool the account (§8); re-dispatch to another eligible agent as a **fresh** attempt carrying the previous job's summary if it produced one, else its last progress events (a session can't move between agents), counting toward the task's attempt caps; no eligible agent → the task parks and the user is notified (§10) |
 | worker `needs_help` | **foreman** | answer → next job on the same session, or re-plan |
 | task out of rounds or retries | **foreman** | re-plan, switch agent, split, or ask the user |
 | worker stalled (§5.6) | **foreman** (decided 2026-10-12: always; no automatic nudge) | restart with a new instruction, switch agent, or ask the user |
@@ -83,6 +83,10 @@ Foreman turns while you're away use your subscription. A per-project budget of f
 ### 4.4 When the foreman hits its limit
 
 The runner detects the limit-hit error from the foreman's CLI. The engine marks the foreman `limited(until)`, or `limited(unknown)` when the error carries no reset time, stops waking it, and **notifies the user** (§10), who chooses: wait for the reset, switch the foreman's harness or model (the new session rebuilds its context from the engine, per product §4's kill-and-rebuild test), or let approved plans continue without it. Routine rules keep working throughout. When the same account also serves task workers, a foreman limit-hit cools that account in the dispatcher (§8), and a worker limit-hit on that account stops foreman wakes until the reset.
+
+### 4.5 Capacity
+
+(decided 2026-10-13) The foreman instructions tell it to check `capacity` (§12.2) when it plans, and to use it to choose how wide the task graph is, when to sequence instead of fanning out, which tasks can wait for a cheaper agent, and to give honest time estimates ("3 tasks now, 2 after the reset at <time>"). The engine stays binding: if the foreman's view is stale, the dispatcher queues the extra tasks and never exceeds a cap (§8.1). The foreman decides; the engine enforces (§1).
 
 ## 5. Workers and runners
 
@@ -127,7 +131,7 @@ Workers sometimes get stuck: alive, but making no progress (seen in practice).
   - `mode=resume`: same session, the instruction appended (the worker keeps its context);
   - `mode=fresh`: a new session, the instruction plus the previous job's summary and last progress (for a worker stuck in a loop);
   - optional `agent` to move the task to another agent.
-- **Who restarts:** the foreman (a judgment event), or the user directly: `brigada restart <task> -m "…" [--fresh] [--agent …]`. A restart is a new attempt on the task and counts toward its caps. A resume that fails (the session is gone or forked) restarts fresh in place, as in Python v3.2 §2a.
+- **Who restarts:** the foreman (a judgment event), or the user directly: `brigada restart <task> -m "…" [--fresh] [--agent …]`. A restart is a new attempt on the task and counts toward its attempt caps. A resume that fails (the session is gone or forked) restarts fresh in place, as in Python v3.2 §2a.
 
 ## 6. Plans and tasks
 
@@ -164,11 +168,51 @@ After an `implement` job is done and its check passed, the engine creates a revi
 
 ## 8. Dispatcher
 
-- **Eligible:** the adapter supports the class; family rule for reviews; agent `ready` (not `broken`, not `cooling`); account not cooling; under the max-parallel cap; session affinity (a resumed session stays on its agent and runner).
-- **Score:** per (repo, class, agent): a success rate with a prior, where success = check passed and review approved within the rounds. Defaults for a cold start; an exploration share (default 10%) goes to the next-best eligible agent.
+- **Eligible:** the adapter supports the class; family rule for reviews; agent `ready` (not `broken`, not `cooling`); account not cooling; session affinity (a resumed session stays on its agent and runner).
+- **Cap room:** an eligible agent is picked only if every concurrency cap on its path has room (§8.1). Caps shrink the set of eligible agents with room, so a task whose best agent is cap-blocked goes to the next-best agent with room; it waits in the queue only when no eligible agent has room, and that never parks it. **Parking** means no agent is eligible with caps ignored.
+- **Score:** per (repo, class, agent): a success rate with a prior, where success = check passed and review approved within the rounds. Defaults for a cold start; an exploration share (default 10%) goes to the next-best eligible agent with room.
 - **Quota:** limit-hit errors cool the whole account until its window resets; CodexBar's CLI JSON is an optional extra signal.
 - **Health:** repeated failures, auth errors or a dead runner → `broken(reason)` until a probe passes or the user resets it.
 - Every decision is recorded with its reason ("why this agent").
+
+### 8.1 Concurrency caps
+
+**Layered caps** (decided 2026-10-13). A job may start only if every layer has room; the effective capacity is the minimum across the layers:
+
+- **Runner:** max parallel jobs per runner, for the host's CPU, memory and parallel builds and tests. The runner advertises its own cap when it registers; the effective runner cap is the smaller of that and the config's.
+- **Account:** max parallel jobs per adapter account, for the vendor's session and rate limits; parallel sessions also drain the 5-hour window faster.
+- **Model** (optional): a per-model cap, such as 1 for a heavy model.
+- **Plan:** max parallel tasks per plan, because tasks touching the same files end in merge conflicts. A task counts while it has a live job (`running`, `checking` or `reviewing`, §6.1).
+- **Global:** an overall ceiling for the engine.
+
+A task job (a task's first run, a fix round or a review) that cannot start because some layer is full waits in the queue, oldest first, and starts when a slot frees; it does not park (§3) and does not notify the user.
+
+**The foreman is never starved.** Foreman turns count toward the runner, account and global caps (not the plan or model caps), and a pending foreman turn outranks every queued task job at each of those layers: the next slot that frees on its path goes to it. Its wait is therefore bounded by the running jobs' class time caps (§5.6). An attached chat (§4.2) is not a job, but it is a live session on the foreman's account: it counts toward that account's cap while held, without ever waiting for room, so the dispatcher starts no new task job there until there is room again.
+
+Each agent also carries a **cost weight** (default 1), a relative cost the user sets, which the foreman sees through `capacity` (§12.2) when it chooses which tasks can wait for a cheaper agent.
+
+**Defaults** (proposal): conservative per adapter, all set in the engine's config. An example:
+
+```yaml
+caps:
+  global: 6
+  plan: 3
+  runner: 4          # default; a runner may advertise its own
+  account:           # per adapter account
+    claude: 3
+    codex: 2
+    kimi: 1
+  model:
+    <heavy-model>: 1
+cost:                # cost weight per agent, default 1
+  <agent>: 2
+```
+
+**Backlog: adaptive caps.** When an account hits its limit while running N parallel jobs, the engine lowers that account's cap automatically and records the change and its reason; the user can raise it again.
+
+### 8.2 Foreman headroom
+
+(proposal) The foreman's session uses quota on its own account, so task workers must not drain that account and leave the foreman `limited` mid-plan (§4.4). The dispatcher prefers other accounts for task workers, and stops dispatching task workers to the foreman's account above a reserve threshold: by default 80% of the 5-hour window used, when CodexBar data is available; without it, a lower parallel cap for task workers on that account: `max(cap − 1, 0)`, so one slot stays reserved for the foreman even while no foreman turn runs. At an account cap of 1 that is 0: task workers never run on the foreman's account.
 
 ## 9. History
 
@@ -197,7 +241,7 @@ JSON over HTTP; locally on a Unix socket, remotely over TLS. Bearer tokens with 
 
 ### 12.2 Foreman MCP tools
 
-`plan_create` · `plan_amend` · `task_restart` · `task_cancel` · `answer` (a task worker's question) · `ask_user` · `events` (long-poll, for the attached session) · `status` · `stats` · `history`. The MCP server is a `brigada mcp` stdio process started by the foreman's harness; it calls the engine API with the foreman token.
+`plan_create` · `plan_amend` · `task_restart` · `task_cancel` · `answer` (a task worker's question) · `ask_user` · `events` (long-poll, for the attached session) · `status` · `stats` · `history` · `capacity`. `capacity` returns, per agent: its effective cap and the layer that sets it (§8.1; on the foreman's account, after headroom, §8.2), running jobs, quota state (`ready`, or `cooling` until a time, plus the percent used of the 5-hour and weekly windows when CodexBar data is available) and cost weight. It also returns each layer's cap, use and queue depth: per runner, account and any capped model, per active plan of the foreman's project, and global. A queued task has no agent yet, so queue depth is reported per layer, not per agent. The MCP server is a `brigada mcp` stdio process started by the foreman's harness; it calls the engine API with the foreman token.
 
 ### 12.3 Runner protocol
 
@@ -220,8 +264,8 @@ Transformations, so nothing is lost in translation:
 
 ## 15. Phases
 
-1. **Engine:** store, API, runner protocol, local runner, one adapter (claude), check by the runner, history (events, messages, transcripts).
-2. **Foreman, one task:** the foreman for one task end to end (attach and headless wake), review, `brigada status/history`.
+1. **Engine:** store, API, runner protocol, local runner, one adapter (claude), check by the runner, history (events, messages, transcripts), the concurrency caps (§8.1).
+2. **Foreman, one task:** the foreman for one task end to end (attach and headless wake), review, `brigada status/history`, the `capacity` tool (§12.2) and foreman headroom (§8.2).
 3. **Plans:** plans with dependencies, the approval limit, the plan file, the dispatcher with outcomes.
 4. **Failures:** failure handling: stall detection, restart with new instruction, needs_help loop, the foreman's limit flow, notifications.
 5. **Re-planning:** re-planning, the planner's outcomes.
