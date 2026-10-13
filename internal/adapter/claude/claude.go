@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
+	"github.com/Blackfire-AI/brigada/internal/mcp"
 )
 
 // Adapter drives the official claude CLI (2.x) in its headless print
@@ -39,6 +40,19 @@ type Adapter struct {
 // the agent config does not name one: edits inside the working tree are
 // accepted without a prompt, which headless runs cannot answer anyway.
 const workerPermissionMode = "acceptEdits"
+
+// foremanToolScope is the foreman's tool scope (§4): brigada's MCP tools
+// — the bridge's whole offer, in the mcp__<server>__<tool> spelling the
+// CLI names them by — plus the read-only file tools. The deny side
+// names the shell and every editing tool the CLI carries, so no
+// permission mode can let one through: the foreman never edits code.
+func foremanToolScope() (allowed, disallowed []string) {
+	allowed = []string{"Read", "Grep", "Glob"}
+	for _, name := range mcp.ToolNames() {
+		allowed = append(allowed, "mcp__"+mcp.ServerName+"__"+name)
+	}
+	return allowed, []string{"Bash", "Edit", "MultiEdit", "NotebookEdit", "Write"}
+}
 
 var _ adapter.Adapter = (*Adapter)(nil)
 
@@ -75,11 +89,21 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		mode = workerPermissionMode
 	}
 	args = append(args, "--permission-mode", mode)
-	if len(a.AllowedTools) > 0 {
-		args = append(args, append([]string{"--allowedTools"}, a.AllowedTools...)...)
+	allowed, disallowed := a.AllowedTools, a.DisallowedTools
+	if job.MCPConfig != "" {
+		// A job that carries an MCP config is a foreman turn (§12.2): the
+		// bridge is the turn's own, and the CLI offers no other server
+		// beside it. The foreman's tool scope is brigada's too (§4), not
+		// the agent config's — it decides through the bridge and reads
+		// the repo, and never edits code.
+		args = append(args, "--mcp-config", job.MCPConfig, "--strict-mcp-config")
+		allowed, disallowed = foremanToolScope()
 	}
-	if len(a.DisallowedTools) > 0 {
-		args = append(args, append([]string{"--disallowedTools"}, a.DisallowedTools...)...)
+	if len(allowed) > 0 {
+		args = append(args, append([]string{"--allowedTools"}, allowed...)...)
+	}
+	if len(disallowed) > 0 {
+		args = append(args, append([]string{"--disallowedTools"}, disallowed...)...)
 	}
 	cmd := exec.Command(binary, args...)
 	if cmd.Err != nil {

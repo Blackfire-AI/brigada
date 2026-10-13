@@ -28,6 +28,7 @@ Commands:
 
 	engine          Run the engine: store and API on the Unix socket.
 	runner          Run a runner: lease jobs, run workers, run checks.
+	mcp             Run the foreman's MCP bridge over stdio (§12.2).
 	status          Show the engine and its jobs by status.
 	task submit     Submit a task (debug path until the foreman exists).
 	history         Show the timeline.
@@ -57,6 +58,7 @@ type command struct {
 var commands = map[string]command{
 	"engine":  {name: "engine", run: runEngine},
 	"runner":  {name: "runner", run: runRunner},
+	"mcp":     {name: "mcp", run: runMCP},
 	"status":  {name: "status", run: runStatus},
 	"task":    {name: "task", run: runTask},
 	"history": {name: "history", run: runHistory},

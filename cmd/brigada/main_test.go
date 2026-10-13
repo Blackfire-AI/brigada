@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Blackfire-AI/brigada/internal/mcp"
 	"github.com/Blackfire-AI/brigada/internal/version"
 )
 
@@ -84,6 +85,12 @@ func TestRun(t *testing.T) {
 			wantCode: 2,
 			wantErr:  "task submit needs --spec FILE",
 		},
+		{
+			name:     "mcp without a socket is a usage error",
+			args:     []string{"mcp"},
+			wantCode: 2,
+			wantErr:  "mcp needs --socket PATH",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -101,5 +108,24 @@ func TestRun(t *testing.T) {
 				t.Errorf("run(%q) stderr = %q, want it to contain %q", tt.args, stderr.String(), tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestRunMCPNeedsToken covers the bridge's one credential rule (§12.2):
+// the token comes from BRIGADA_TOKEN — the environment the harness's
+// MCP config names — and never from a flag. Without it the bridge
+// refuses to start: it has nothing to call the engine with.
+func TestRunMCPNeedsToken(t *testing.T) {
+	t.Setenv(mcp.EnvToken, "")
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"mcp", "--socket", "/run/brigada/api.sock"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("mcp without a token: exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), mcp.EnvToken) {
+		t.Errorf("mcp without a token: stderr = %q, want %s named in it", stderr.String(), mcp.EnvToken)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("mcp without a token wrote to stdout: %q, want the protocol's stream untouched", stdout.String())
 	}
 }
