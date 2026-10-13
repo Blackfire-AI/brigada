@@ -37,7 +37,7 @@ func (e *Engine) Heartbeat(ctx context.Context, owner, jobID int64, leaseID stri
 	var expires time.Time
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
-		rep, err := sweepTx(tx, e.cfg, now)
+		rep, err := e.sweepTx(tx, now)
 		if err != nil {
 			return err
 		}
@@ -92,6 +92,12 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, pro
 			}
 			if _, err := appendEventTx(tx, evJobHardCapped, job.ProjectID, job.TaskID, job.ID,
 				eventPayload{Status: statusFailed, Reason: reason}, now); err != nil {
+				return "", time.Time{}, err
+			}
+			// A foreman turn capped here returns its events and
+			// re-evaluates the wake like any ending (§4.2); for the
+			// other kinds this is a no-op.
+			if err := e.foremanFinishedTx(tx, job, statusFailed, now); err != nil {
 				return "", time.Time{}, err
 			}
 			return AnsLost, time.Time{}, nil
@@ -198,7 +204,7 @@ func (e *Engine) Complete(ctx context.Context, owner, jobID int64, leaseID strin
 	var ans Answer
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
-		if _, err := sweepTx(tx, e.cfg, now); err != nil {
+		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
 		a, err := e.completeTx(tx, owner, jobID, leaseID, c, now)
@@ -301,6 +307,11 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 			return "", err
 		}
 	}
+	if job.Kind == KindForeman {
+		// The turn's events are consumed by its completion, never before
+		// (§4.2), and the next wake is evaluated in this same transaction.
+		return AnsOK, e.foremanFinishedTx(tx, job, status, now)
+	}
 	if job.TaskID != 0 {
 		// The task's state follows its job's completion (§3, §6.1, §7):
 		// reviewing behind a passed check, done behind a verdict or a
@@ -325,7 +336,7 @@ func (e *Engine) Release(ctx context.Context, owner, jobID int64, leaseID, reaso
 	var ans Answer
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
-		if _, err := sweepTx(tx, e.cfg, now); err != nil {
+		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
 		a, err := e.releaseTx(tx, owner, jobID, leaseID, reason, now)
@@ -397,7 +408,7 @@ func (e *Engine) Cancel(ctx context.Context, jobID int64) (Answer, error) {
 	var ans Answer
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
-		if _, err := sweepTx(tx, e.cfg, now); err != nil {
+		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
 		job, err := loadJobTx(tx, jobID)
@@ -412,7 +423,7 @@ func (e *Engine) Cancel(ctx context.Context, jobID int64) (Answer, error) {
 		case isTerminal(job.Status):
 			ans = AnsGone
 		default:
-			ans, err = cancelTx(tx, job, "", now)
+			ans, err = e.cancelTx(tx, job, "", now)
 		}
 		if err != nil {
 			return fmt.Errorf("cancel job %d: %w", jobID, err)
@@ -423,9 +434,9 @@ func (e *Engine) Cancel(ctx context.Context, jobID int64) (Answer, error) {
 }
 
 // cancelTx ends a live job as cancelled, banking whatever the lease in
-// force has run up. Reason names who asked: empty for a plain cancel,
-// or the submit that replaced the job with a restart round (§5.6).
-func cancelTx(tx *sql.Tx, job *jobRow, reason string, now time.Time) (Answer, error) {
+// force has run up. Reason names who asked: empty for a plain cancel, or
+// the submit that replaced the job with a restart round (§5.6).
+func (e *Engine) cancelTx(tx *sql.Tx, job *jobRow, reason string, now time.Time) (Answer, error) {
 	accrue := accrualFrom(job.LastLeased, now)
 	if _, err := tx.Exec(`UPDATE jobs SET status = 'cancelled', followup = 0, lease_expires_at = NULL,
 		last_leased = NULL, queued_at = NULL, leased_seconds = leased_seconds + ?, updated_at = ?
@@ -439,6 +450,11 @@ func cancelTx(tx *sql.Tx, job *jobRow, reason string, now time.Time) (Answer, er
 		eventPayload{Reason: reason}, now); err != nil {
 		return "", err
 	}
+	// A cancelled foreman turn returns its events to pending (§4.2), and
+	// the wake that follows runs in this same transaction.
+	if err := e.foremanFinishedTx(tx, job, statusCancelled, now); err != nil {
+		return "", err
+	}
 	return AnsOK, nil
 }
 
@@ -450,7 +466,7 @@ func (e *Engine) BumpFenceEpoch(ctx context.Context) (int, error) {
 	var epoch int64
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
-		if _, err := sweepTx(tx, e.cfg, now); err != nil {
+		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
 		if _, err := tx.Exec("UPDATE meta SET fence_epoch = fence_epoch + 1 WHERE id = 1"); err != nil {
@@ -482,7 +498,7 @@ func (e *Engine) BumpFenceEpoch(ctx context.Context) (int, error) {
 func (e *Engine) PlanWorkerSeconds(ctx context.Context, planID int64) (time.Duration, error) {
 	var secs int64
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		if _, err := sweepTx(tx, e.cfg, e.cfg.Now()); err != nil {
+		if _, err := e.sweepTx(tx, e.cfg.Now()); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(`SELECT COALESCE(SUM(j.leased_seconds), 0)

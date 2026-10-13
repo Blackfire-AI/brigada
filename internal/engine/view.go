@@ -42,7 +42,7 @@ type JobInfo struct {
 func (e *Engine) Job(ctx context.Context, id int64) (*JobInfo, error) {
 	var info *JobInfo
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		if _, err := sweepTx(tx, e.cfg, e.cfg.Now()); err != nil {
+		if _, err := e.sweepTx(tx, e.cfg.Now()); err != nil {
 			return err
 		}
 		j, err := loadJobTx(tx, id)

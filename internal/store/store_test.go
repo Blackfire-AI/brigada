@@ -167,9 +167,9 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 		t.Fatalf("open did not create the file: %v", err)
 	}
 	want := []string{
-		"agents", "artifacts", "events", "idempotency", "jobs", "lease_tokens",
-		"messages", "meta", "outcomes", "plans", "projects", "questions",
-		"runners", "sessions", "task_deps", "tasks", "tokens",
+		"agents", "artifacts", "events", "foreman_inbox", "idempotency", "jobs",
+		"lease_tokens", "messages", "meta", "outcomes", "plans", "projects",
+		"questions", "runners", "sessions", "task_deps", "tasks", "tokens",
 	}
 	got := queryStrings(t, s.db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
 	if !slices.Equal(got, want) {
@@ -332,12 +332,83 @@ func TestNotifyCursorBackfillOnUpgrade(t *testing.T) {
 		t.Fatalf("close raw store: %v", err)
 	}
 
+	// Open applies every migration from the cursor's on, so the store
+	// ends at the newest version, whichever migrations follow the cursor.
 	s := openStore(t, path)
-	if v, err := s.userVersion(context.Background()); err != nil || v != after {
-		t.Errorf("user_version after upgrade = %d, %v; want %d", v, err, after)
+	if v, err := s.userVersion(context.Background()); err != nil || v != len(migs) {
+		t.Errorf("user_version after upgrade = %d, %v; want the newest %d", v, err, len(migs))
 	}
 	if got := queryInt(t, s.db, "SELECT notify_cursor FROM meta WHERE id = 1"); got != maxID {
 		t.Errorf("notify_cursor after upgrade = %d, want the log's end %d", got, maxID)
+	}
+}
+
+// TestForemanInboxBackfillOnUpgrade builds the store a binary that
+// predates the foreman_inbox migration would leave behind — with tasks
+// already parked at needs_foreman by the old log — then opens it with
+// this binary. The migration must give every parked task one pending row
+// pointing at its latest parking event (a later event of another kind is
+// not it), so the first engine start after the upgrade wakes for parks
+// the old log already holds. The boundary is derived from the
+// migration's position in the list, as in TestNotifyCursorBackfillOnUpgrade.
+func TestForemanInboxBackfillOnUpgrade(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatalf("list migrations: %v", err)
+	}
+	var before int
+	for _, m := range migs {
+		if m.name == "foreman_inbox" {
+			before = m.version - 1
+			break
+		}
+	}
+	if before == 0 {
+		t.Fatal("foreman_inbox migration not found in allMigrations")
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("open raw store: %v", err)
+	}
+	for _, m := range migs[:before] {
+		if _, err := db.Exec(m.sql); err != nil {
+			t.Fatalf("apply %04d_%s by hand: %v", m.version, m.name, err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA user_version = " + strconv.Itoa(before)); err != nil {
+		t.Fatalf("set user_version: %v", err)
+	}
+	project := insertProject(t, db)
+	plan := insertPlan(t, db, project)
+	// The parked task: an older question, the failure that parked it, and
+	// a later non-parking event — the row must point at the latest
+	// parking event, not the log's latest word.
+	parked := insertTask(t, db, plan)
+	exec(t, db, "UPDATE tasks SET state = 'needs_foreman' WHERE id = ?", parked)
+	exec(t, db, `INSERT INTO events (kind, project_id, task_id, payload, created_at)
+		VALUES ('task_needs_help', ?, ?, '{"question":"which file?"}', ?)`, project, parked, ts)
+	parkedAt := insertID(t, db, `INSERT INTO events (kind, project_id, task_id, payload, created_at)
+		VALUES ('task_failed', ?, ?, '{"reason":"no result block"}', ?)`, project, parked, ts)
+	exec(t, db, `INSERT INTO events (kind, project_id, task_id, payload, created_at)
+		VALUES ('task_running', ?, ?, '{}', ?)`, project, parked, ts)
+	// A finished task's judgment events get no row: nothing waits on it.
+	finished := insertTask(t, db, plan)
+	exec(t, db, "UPDATE tasks SET state = 'done' WHERE id = ?", finished)
+	exec(t, db, `INSERT INTO events (kind, project_id, task_id, payload, created_at)
+		VALUES ('task_failed', ?, ?, '{"reason":"done long ago"}', ?)`, project, finished, ts)
+	if err := db.Close(); err != nil {
+		t.Fatalf("close raw store: %v", err)
+	}
+
+	s := openStore(t, path)
+	if v, err := s.userVersion(context.Background()); err != nil || v != len(migs) {
+		t.Errorf("user_version after upgrade = %d, %v; want the newest %d", v, err, len(migs))
+	}
+	got := queryStrings(t, s.db, `SELECT event_id || ':' || state || ':' || COALESCE(job_id, 0) || ':' || attempts
+		FROM foreman_inbox ORDER BY event_id`)
+	if want := []string{fmt.Sprintf("%d:pending:0:0", parkedAt)}; !slices.Equal(got, want) {
+		t.Errorf("foreman_inbox after upgrade = %v, want exactly %v", got, want)
 	}
 }
 

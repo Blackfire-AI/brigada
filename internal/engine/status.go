@@ -89,7 +89,7 @@ func (e *Engine) Status(ctx context.Context, project int64) (StatusInfo, error) 
 	info.NeedsYou = []NeedsYouItem{}
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
-		if _, err := sweepTx(tx, e.cfg, now); err != nil {
+		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
 		var pid sql.NullInt64

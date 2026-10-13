@@ -198,9 +198,10 @@ func TestLeaseGrantCarriesTaskFields(t *testing.T) {
 	}
 	e.complete(g3, done())
 
-	// A foreman turn carries no task fields.
-	e.submit(e.foremanTurn())
-	gf := e.leaseAny(e.runner1)
+	// A foreman turn carries no task fields. The needs_help park above
+	// already woke one (§4.2) — it waits for the project's foreman
+	// harness, so the lease asks for it by name.
+	gf := e.lease(e.runner1, []string{"claude"}, nil)
 	if gf == nil || gf.TaskID != 0 || gf.RepoURL != "" || gf.BaseRef != "" || gf.CheckCmd != "" {
 		t.Errorf("foreman grant = %+v, want no task fields", gf)
 	}
