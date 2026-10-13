@@ -94,8 +94,12 @@ const (
 	AnsStaleEpoch Answer = "stale_epoch" // fenced out by a recover (§6.4)
 )
 
-// RoundCaps are the per-task caps on fix, review and restart rounds
-// (§14): what the run cap of the earlier implementation became.
+// RoundCaps are the per-task caps on feedback rounds and restarts (§7,
+// §14): what the run cap of the earlier implementation became. Fix caps
+// the fix rounds a failed check asks for, Review the fix rounds a
+// review's "changes" asks for — both counted as the task's fix jobs —
+// and Restart the restarts (§5.6). A task's caps JSON overrides them
+// key by key (fix_rounds, review_rounds, restart).
 type RoundCaps struct {
 	Fix     int
 	Review  int
@@ -125,7 +129,7 @@ type Config struct {
 	// their kind only.
 	HardCaps map[Kind]time.Duration
 	// RoundCaps are the default per-task round caps; a task's caps JSON
-	// ("fix", "review", "restart") overrides them per task.
+	// (fix_rounds, review_rounds, restart) overrides them per task.
 	RoundCaps RoundCaps
 	// Caps are the layered concurrency caps and cost weights (§8.1),
 	// as the config named them; the zero value caps nothing. A runner's
@@ -154,9 +158,9 @@ type Config struct {
 // DefaultConfig returns the shipped settings (design §14 and §5.1): a
 // 90 s lease, a 120 s release exclusion, three lost attempts, a 10 m
 // queue TTL, hard caps of 45 m for work and fix, 25 m for review and
-// 30 m for a foreman turn, round caps of fix 3, review 3, restart 2,
-// and artifact uploads capped at 64 MiB each. Retention keeps
-// everything (§9); DataDir follows the store file.
+// 30 m for a foreman turn, round caps of fix 2 and review 2 (§7's
+// default), restart 2, and artifact uploads capped at 64 MiB each.
+// Retention keeps everything (§9); DataDir follows the store file.
 func DefaultConfig() Config {
 	return Config{
 		Now:            func() time.Time { return time.Now().UTC() },
@@ -170,7 +174,7 @@ func DefaultConfig() Config {
 			KindReview:  25 * time.Minute,
 			KindForeman: 30 * time.Minute,
 		},
-		RoundCaps:        RoundCaps{Fix: 3, Review: 3, Restart: 2},
+		RoundCaps:        RoundCaps{Fix: 2, Review: 2, Restart: 2},
 		MaxArtifactBytes: defaultMaxArtifactBytes,
 		NewLeaseID:       newLeaseID,
 		NewLeaseToken:    newLeaseToken,

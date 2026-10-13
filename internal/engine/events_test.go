@@ -72,7 +72,7 @@ func TestEventsTraceTheJobLifecycle(t *testing.T) {
 
 	// submit: the created event, then the capped and pending answers.
 	r := e.submit(e.work())
-	e.exec(`UPDATE tasks SET caps = '{"fix":0}' WHERE id = ?`, e.task)
+	e.exec(`UPDATE tasks SET caps = '{"fix_rounds":0}' WHERE id = ?`, e.task)
 	fix := SubmitParams{
 		Key:       fmt.Sprintf("task:%d", e.task),
 		ProjectID: e.project,

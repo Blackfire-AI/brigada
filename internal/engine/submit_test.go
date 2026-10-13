@@ -180,63 +180,74 @@ func TestSubmitValidatesKindAndTask(t *testing.T) {
 }
 
 func TestSubmitRoundCaps(t *testing.T) {
-	for _, tc := range []struct {
-		kind Kind
-		cap  int
-	}{
-		{KindFix, 3},
-		{KindReview, 3},
-	} {
-		t.Run(string(tc.kind), func(t *testing.T) {
-			e := newEnv(t)
-			for i := 1; i <= tc.cap; i++ {
-				p := e.work()
-				p.Kind = tc.kind
-				p.Mode = ModeSession
-				r := e.submit(p)
-				if r.Answer != AnsCreated {
-					t.Fatalf("round %d submit = %s; want created", i, r.Answer)
-				}
-				g := e.leaseAny(e.runner1)
-				if g == nil {
-					t.Fatalf("round %d: nothing to lease", i)
-				}
-				if ans := e.complete(g, done()); ans != AnsOK {
-					t.Fatalf("round %d complete = %s; want ok", i, ans)
-				}
-			}
-			p := e.work()
-			p.Kind = tc.kind
-			r := e.submit(p)
-			if r.Answer != AnsCapped {
-				t.Fatalf("submit past the cap = %s; want capped", r.Answer)
-			}
-			if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = ?", string(tc.kind)); got != int64(tc.cap) {
-				t.Errorf("%s jobs = %d, want %d: a capped submit creates nothing", tc.kind, got, tc.cap)
-			}
+	// The rounds budgets belong to the task's fix jobs (§7): two fix
+	// rounds fit the default, the third is capped, and a capped submit
+	// creates nothing. Reviews spend none of them — §7 caps the review
+	// loop's fix rounds, not the reviews — so review submits are never
+	// capped. A class without review keeps the completions from queueing
+	// anything behind the rounds this test counts.
+	e := newEnv(t)
+	e.exec("UPDATE tasks SET class = 'answer' WHERE id = ?", e.task)
+	for i := 1; i <= 2; i++ {
+		p := e.work()
+		p.Kind = KindFix
+		p.Mode = ModeSession
+		r := e.submit(p)
+		if r.Answer != AnsCreated {
+			t.Fatalf("fix round %d submit = %s; want created", i, r.Answer)
+		}
+		g := e.leaseAny(e.runner1)
+		if g == nil {
+			t.Fatalf("fix round %d: nothing to lease", i)
+		}
+		if ans := e.complete(g, done()); ans != AnsOK {
+			t.Fatalf("fix round %d complete = %s; want ok", i, ans)
+		}
+	}
+	p := e.work()
+	p.Kind = KindFix
+	if r := e.submit(p); r.Answer != AnsCapped {
+		t.Fatalf("fix submit past the default of 2 = %s; want capped", r.Answer)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'fix'"); got != 2 {
+		t.Errorf("fix jobs = %d, want 2: a capped submit creates nothing", got)
+	}
 
-			// Work jobs carry no round cap: the key keeps cycling. Each
-			// cycle completes with the worker asking its question (§3),
-			// which parks the task without queueing anything behind it —
-			// a done would queue the task's review job on the same key
-			// (§7), and coalescing behind it is a different test.
-			for i := 0; i < tc.cap+2; i++ {
-				r := e.submit(e.work())
-				if r.Answer != AnsCreated {
-					t.Fatalf("work submit %d = %s; want created", i, r.Answer)
-				}
-				g := e.leaseAny(e.runner1)
-				if g == nil || e.complete(g, Completion{Result: `{"status":"needs_help","question":"stuck"}`}) != AnsOK {
-					t.Fatalf("work cycle %d failed", i)
-				}
-			}
-		})
+	for i := 0; i < 4; i++ {
+		p := e.work()
+		p.Kind = KindReview
+		p.Mode = ModeFresh
+		r := e.submit(p)
+		if r.Answer != AnsCreated {
+			t.Fatalf("review submit %d = %s; want created: reviews spend no rounds", i, r.Answer)
+		}
+		g := e.leaseAny(e.runner1)
+		if g == nil || e.complete(g, done()) != AnsOK {
+			t.Fatalf("review cycle %d failed", i)
+		}
+	}
+
+	// Work jobs carry no round cap either: the key keeps cycling. Each
+	// cycle completes with the worker asking its question (§3), which
+	// parks the task without queueing anything behind it — a done would
+	// queue the task's review job on the same key (§7), and coalescing
+	// behind it is a different test.
+	for i := 0; i < 4; i++ {
+		r := e.submit(e.work())
+		if r.Answer != AnsCreated {
+			t.Fatalf("work submit %d = %s; want created", i, r.Answer)
+		}
+		g := e.leaseAny(e.runner1)
+		if g == nil || e.complete(g, Completion{Result: `{"status":"needs_help","question":"stuck"}`}) != AnsOK {
+			t.Fatalf("work cycle %d failed", i)
+		}
 	}
 }
 
 func TestSubmitTaskCapOverrides(t *testing.T) {
 	e := newEnv(t)
-	task := e.addTask(`{"fix": 1}`)
+	task := e.addTask(`{"fix_rounds": 1}`)
+	e.exec("UPDATE tasks SET class = 'answer' WHERE id IN (?, ?)", task, e.task)
 	p := SubmitParams{
 		Key:       fmt.Sprintf("task:%d", task),
 		ProjectID: e.project,
@@ -252,10 +263,11 @@ func TestSubmitTaskCapOverrides(t *testing.T) {
 		t.Fatal("first fix did not run to completion")
 	}
 	if r := e.submit(p); r.Answer != AnsCapped {
-		t.Errorf("second fix against a fix cap of 1 = %s; want capped", r.Answer)
+		t.Errorf("second fix against a fix_rounds of 1 = %s; want capped", r.Answer)
 	}
 
-	// The override is per task: the default task still allows three.
+	// The override is per task: the default-caps task still allows its
+	// own two.
 	q := e.work()
 	q.Kind = KindFix
 	if r := e.submit(q); r.Answer != AnsCreated {
@@ -308,61 +320,72 @@ func TestSubmitRestartRounds(t *testing.T) {
 }
 
 // A restart is its own budget (§14): a restarted fix or review counts
-// against the restart cap alone, never against the cap of the kind it
-// restarts, and the plain fix/review rounds still get their full
-// allowance after the restarts.
+// against the restart cap alone, never against the rounds budget of the
+// kind it restarts, and the plain rounds still get their full allowance
+// after the restarts — for a fix, the default two; for a review, no
+// budget at all (§7).
 func TestSubmitRestartedFixAndReviewCountAgainstRestartCapOnly(t *testing.T) {
-	for _, tc := range []struct {
-		kind       Kind
-		plainCap   int
-		restartCap int
-	}{
-		{KindFix, 3, 2},
-		{KindReview, 3, 2},
-	} {
-		t.Run(string(tc.kind), func(t *testing.T) {
-			e := newEnv(t)
-			round := func(restart bool) SubmitParams {
-				p := e.work()
-				p.Kind = tc.kind
-				p.Mode = ModeSession
-				p.Restart = restart
-				return p
-			}
-			run := func(p SubmitParams) {
-				t.Helper()
-				r := e.submit(p)
-				if r.Answer != AnsCreated {
-					t.Fatalf("submit = %s; want created", r.Answer)
-				}
-				g := e.leaseAny(e.runner1)
-				if g == nil || e.complete(g, done()) != AnsOK {
-					t.Fatal("the round did not run to completion")
-				}
-			}
-
-			// One plain round, then restarts to the restart cap: the
-			// restarts must not consume the plain rounds' budget.
-			run(round(false))
-			for i := 0; i < tc.restartCap; i++ {
-				run(round(true))
-			}
-			if r := e.submit(round(true)); r.Answer != AnsCapped {
-				t.Fatalf("one restart too many = %s; want capped against the restart cap", r.Answer)
-			}
-
-			// The plain cap is untouched by the restarts: the remaining
-			// plain rounds still fit, and only then is the cap spent.
-			for i := 1; i < tc.plainCap; i++ {
-				run(round(false))
-			}
-			if r := e.submit(round(false)); r.Answer != AnsCapped {
-				t.Fatalf("plain round past the %s cap = %s; want capped", tc.kind, r.Answer)
-			}
-			if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = ?", string(tc.kind)); got != int64(tc.plainCap+tc.restartCap) {
-				t.Errorf("%s jobs = %d, want %d (%d plain and %d restarts)",
-					tc.kind, got, tc.plainCap+tc.restartCap, tc.plainCap, tc.restartCap)
-			}
-		})
+	run := func(e *env, p SubmitParams) {
+		t.Helper()
+		r := e.submit(p)
+		if r.Answer != AnsCreated {
+			t.Fatalf("submit = %s; want created", r.Answer)
+		}
+		g := e.leaseAny(e.runner1)
+		if g == nil || e.complete(g, done()) != AnsOK {
+			t.Fatal("the round did not run to completion")
+		}
 	}
+	t.Run("fix", func(t *testing.T) {
+		e := newEnv(t)
+		e.exec("UPDATE tasks SET class = 'answer' WHERE id = ?", e.task)
+		round := func(restart bool) SubmitParams {
+			p := e.work()
+			p.Kind = KindFix
+			p.Mode = ModeSession
+			p.Restart = restart
+			return p
+		}
+		// One plain round, then restarts to the restart cap of 2: the
+		// restarts must not consume the plain rounds' budget.
+		run(e, round(false))
+		run(e, round(true))
+		run(e, round(true))
+		if r := e.submit(round(true)); r.Answer != AnsCapped {
+			t.Fatalf("one restart too many = %s, want capped against the restart cap", r.Answer)
+		}
+		// The fix budget is untouched by the restarts: the second plain
+		// round still fits, and only the third is capped.
+		run(e, round(false))
+		if r := e.submit(round(false)); r.Answer != AnsCapped {
+			t.Fatalf("plain fix round past the cap of 2 = %s, want capped", r.Answer)
+		}
+		if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'fix'"); got != 4 {
+			t.Errorf("fix jobs = %d, want 4 (two plain and two restarts)", got)
+		}
+	})
+	t.Run("review", func(t *testing.T) {
+		e := newEnv(t)
+		round := func(restart bool) SubmitParams {
+			p := e.work()
+			p.Kind = KindReview
+			p.Mode = ModeFresh
+			p.Restart = restart
+			return p
+		}
+		// Plain reviews spend no rounds (§7): three fit where a budget
+		// would have allowed two. The restarts still count against
+		// theirs alone.
+		run(e, round(false))
+		run(e, round(false))
+		run(e, round(false))
+		run(e, round(true))
+		run(e, round(true))
+		if r := e.submit(round(true)); r.Answer != AnsCapped {
+			t.Fatalf("one restart too many = %s, want capped against the restart cap", r.Answer)
+		}
+		if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'review'"); got != 5 {
+			t.Errorf("review jobs = %d, want 5 (three plain and two restarts)", got)
+		}
+	})
 }

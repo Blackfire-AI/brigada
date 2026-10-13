@@ -290,7 +290,13 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 			return "", err
 		}
 	}
-	if c.SessionID != "" {
+	if c.SessionID != "" && job.Kind != KindReview {
+		// A review's session is never the key's resume target (§7): the
+		// key holds several sessions in turn — the author's, a
+		// cross-family reviewer's — and the fix round a changes verdict
+		// queues must resume the author's, whose runner the session's
+		// affinity also pins (§8). Writing the reviewer's id here would
+		// send that fix round to the reviewer's session instead.
 		if err := upsertSessionTx(tx, job.Key, job.LeaseOwner, c.SessionID, now); err != nil {
 			return "", err
 		}
