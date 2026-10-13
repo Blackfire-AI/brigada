@@ -2,8 +2,11 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 
 	"fmt"
+	"strings"
+
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"net/http"
 	"testing"
@@ -134,6 +137,30 @@ func TestRunnerFlow(t *testing.T) {
 	}](t, data)
 	if job.Status != "done" || job.Result.Result == "" || job.Result.SessionID != "sess-1" || job.Attempts != 1 {
 		t.Errorf("finished job = %s, want done with the result, the written-back session and one attempt", data)
+	}
+
+	// The completion queued the task's review job (§7) on the same key;
+	// r1 takes it and delivers a verdict, so the key is free for the
+	// turn below and the review's own flow is exercised end to end.
+	_, data = e.lease("r1", 0)
+	review := decode[struct {
+		Job *jobGrant `json:"job"`
+	}](t, data).Job
+	if review == nil || review.Kind != "review" {
+		t.Fatalf("lease of the review job = %+v, want the queued review", review)
+	}
+	verdictResult, err := json.Marshal(map[string]string{
+		"verdict":  "approve",
+		"findings": strings.Repeat("looks right: the work matches the spec. ", 3),
+	})
+	if err != nil {
+		t.Fatalf("encode the verdict: %v", err)
+	}
+	verdict := fmt.Sprintf(`{"job_id":%d,"lease_id":%q,"result":%q}`,
+		review.JobID, review.LeaseID, string(verdictResult))
+	code, _, data = e.do(http.MethodPost, "/v1/runner/complete", "r1", "", []byte(verdict))
+	if code != http.StatusOK || decode[answerBody](t, data).Answer != "ok" {
+		t.Fatalf("complete the review: %d %s, want ok", code, data)
 	}
 
 	// Release: the job goes back to queued, the releaser does not see it

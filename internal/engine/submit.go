@@ -24,6 +24,11 @@ type SubmitParams struct {
 	// full (§8).
 	Harness string
 	Labels  []string
+	// ExcludeFamily is the family rule's exclusion (§7, §8): when set,
+	// only an agent of another family that offers the review class may
+	// lease the job. The engine sets it on a task's review job, from
+	// the family of the author job's agent.
+	ExcludeFamily string
 	// Restart marks the job as a restart round (§5.6): any live job on
 	// the key is cancelled first, and the job counts toward the task's
 	// restart cap.
@@ -112,10 +117,10 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 
 	nowStr := fmtTime(now)
 	res, err := tx.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status,
-		harness, labels, restart, queued_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
+		harness, labels, restart, exclude_family, queued_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
 		p.ProjectID, nullIfZero(p.TaskID), string(p.Kind), p.Key, string(p.Mode), p.Prompt,
-		p.Harness, string(labelsJSON), boolInt(p.Restart), nowStr, nowStr, nowStr)
+		p.Harness, string(labelsJSON), boolInt(p.Restart), p.ExcludeFamily, nowStr, nowStr, nowStr)
 	if err != nil {
 		if !isUniqueViolation(err) {
 			return SubmitResult{}, fmt.Errorf("create job: %w", err)

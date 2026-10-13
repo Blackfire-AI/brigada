@@ -215,14 +215,18 @@ func TestSubmitRoundCaps(t *testing.T) {
 				t.Errorf("%s jobs = %d, want %d: a capped submit creates nothing", tc.kind, got, tc.cap)
 			}
 
-			// Work jobs carry no round cap: the key keeps cycling.
+			// Work jobs carry no round cap: the key keeps cycling. Each
+			// cycle completes with the worker asking its question (§3),
+			// which parks the task without queueing anything behind it —
+			// a done would queue the task's review job on the same key
+			// (§7), and coalescing behind it is a different test.
 			for i := 0; i < tc.cap+2; i++ {
 				r := e.submit(e.work())
 				if r.Answer != AnsCreated {
 					t.Fatalf("work submit %d = %s; want created", i, r.Answer)
 				}
 				g := e.leaseAny(e.runner1)
-				if g == nil || e.complete(g, done()) != AnsOK {
+				if g == nil || e.complete(g, Completion{Result: `{"status":"needs_help","question":"stuck"}`}) != AnsOK {
 					t.Fatalf("work cycle %d failed", i)
 				}
 			}
@@ -292,10 +296,14 @@ func TestSubmitRestartRounds(t *testing.T) {
 		t.Fatal("the second restart job did not run")
 	}
 	if r := e.submit(restart); r.Answer != AnsCapped {
-		t.Errorf("third restart = %s; want capped against the default of 2", r.Answer)
+		t.Errorf("third restart = %s, want capped against the default of 2", r.Answer)
 	}
-	if got := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ?", e.task); got != 3 {
-		t.Errorf("task jobs = %d, want 3 (the original and two restarts)", got)
+	// The original, two restarts, and the two review jobs the restarts'
+	// done completions queued (§7) — the second restart replaced the
+	// first review job with its own, as a restart replaces whatever is
+	// live on the key (§5.6).
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ?", e.task); got != 5 {
+		t.Errorf("task jobs = %d, want 5 (the original, two restarts and two reviews)", got)
 	}
 }
 

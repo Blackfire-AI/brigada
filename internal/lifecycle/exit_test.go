@@ -196,9 +196,11 @@ func TestBP8aExit(t *testing.T) {
 		t.Fatalf("worker runs after the first task = %d, want 1", runs)
 	}
 
-	// 4. `brigada history --task` shows the whole timeline (§9).
+	// 4. `brigada history --task` shows the whole timeline (§9): the run
+	// itself, then the review job its completion queued (§7) — which
+	// this one-family world never leases, so its story ends at creation.
 	if kinds := historyKinds(t, bin, state, 1); strings.Join(kinds, " ") !=
-		"job_created task_spec job_leased job_completed worker_result" {
+		"job_created task_spec job_leased task_running job_completed task_reviewing job_created worker_result task_spec" {
 		t.Errorf("the first task's timeline = %v, want the whole story", kinds)
 	}
 
@@ -213,7 +215,9 @@ func TestBP8aExit(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("second task submit exit = %d, stderr = %q", code, stderr)
 	}
-	if want := "task 2 job 2: created (run 1)\n"; stdout != want {
+	// The first task's completion queued its review job (§7), which took
+	// the next job id; the second task's work job follows it.
+	if want := "task 2 job 3: created (run 1)\n"; stdout != want {
 		t.Errorf("second task submit output = %q, want %q", stdout, want)
 	}
 	waitFor(t, "the second worker to be running", func() bool {

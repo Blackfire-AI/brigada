@@ -295,6 +295,15 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 			return "", err
 		}
 	}
+	if job.TaskID != 0 {
+		// The task's state follows its job's completion (§3, §6.1, §7):
+		// reviewing behind a passed check, done behind a verdict or a
+		// non-implement class, or parked at needs_foreman — each move in
+		// this same transaction, each with its event.
+		if err := e.taskAfterCompletionTx(tx, job, c, now); err != nil {
+			return "", err
+		}
+	}
 	return AnsOK, nil
 }
 
