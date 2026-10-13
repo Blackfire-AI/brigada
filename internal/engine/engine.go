@@ -131,6 +131,12 @@ type Config struct {
 	// RoundCaps are the default per-task round caps; a task's caps JSON
 	// (fix_rounds, review_rounds, restart) overrides them per task.
 	RoundCaps RoundCaps
+	// ForemanWakeBudget is how many foreman turns a project may be woken
+	// into per UTC day (§4.3); zero — the default — keeps
+	// defaultForemanWakeBudget. The count is of the project's foreman
+	// jobs, every one of them: turns this engine wakes and turns a person
+	// submits by hand alike.
+	ForemanWakeBudget int
 	// Caps are the layered concurrency caps and cost weights (§8.1),
 	// as the config named them; the zero value caps nothing. A runner's
 	// own advertised cap folds into the runner layer.
@@ -174,16 +180,24 @@ func DefaultConfig() Config {
 			KindReview:  25 * time.Minute,
 			KindForeman: 30 * time.Minute,
 		},
-		RoundCaps:        RoundCaps{Fix: 2, Review: 2, Restart: 2},
-		MaxArtifactBytes: defaultMaxArtifactBytes,
-		NewLeaseID:       newLeaseID,
-		NewLeaseToken:    newLeaseToken,
+		RoundCaps:         RoundCaps{Fix: 2, Review: 2, Restart: 2},
+		ForemanWakeBudget: defaultForemanWakeBudget,
+		MaxArtifactBytes:  defaultMaxArtifactBytes,
+		NewLeaseID:        newLeaseID,
+		NewLeaseToken:     newLeaseToken,
 	}
 }
 
 // defaultMaxArtifactBytes is the artifact upload cap (§9): room for a
 // long session's transcript or check log, not for a runaway stream.
 const defaultMaxArtifactBytes = 64 << 20
+
+// defaultForemanWakeBudget is the shipped per-project wake budget (§4.3):
+// foreman turns per UTC day — room for a busy project's judgment events
+// without a runaway loop of turns. Every foreman job of the project
+// counts against it, the engine's wakes and a person's manual submits
+// alike.
+const defaultForemanWakeBudget = 20
 
 // newLeaseID mints the default lease id: the owning runner and random
 // hex, unique per lease for the life of the store.
@@ -237,6 +251,9 @@ func New(s *store.Store, cfg Config) *Engine {
 	}
 	if cfg.RoundCaps.Restart > 0 {
 		def.RoundCaps.Restart = cfg.RoundCaps.Restart
+	}
+	if cfg.ForemanWakeBudget > 0 {
+		def.ForemanWakeBudget = cfg.ForemanWakeBudget
 	}
 	// The caps have no nonzero default to keep: the zero Limits caps
 	// nothing, which is the default, so the configured value stands as

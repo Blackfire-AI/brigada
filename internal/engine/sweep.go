@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -24,7 +25,7 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 	var rep SweepReport
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		var err error
-		rep, err = sweepTx(tx, e.cfg, e.cfg.Now())
+		rep, err = e.sweepTx(tx, e.cfg.Now())
 		return err
 	})
 	if err != nil {
@@ -51,7 +52,7 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 //
 // Leased wall time is banked wherever a lease ends: expiry at the
 // expiry itself, a cap at the cap moment, never past them.
-func sweepTx(tx *sql.Tx, cfg Config, now time.Time) (SweepReport, error) {
+func (e *Engine) sweepTx(tx *sql.Tx, now time.Time) (SweepReport, error) {
 	var rep SweepReport
 	nowStr := fmtTime(now)
 
@@ -107,7 +108,7 @@ func sweepTx(tx *sql.Tx, cfg Config, now time.Time) (SweepReport, error) {
 	}
 
 	for _, kind := range []Kind{KindWork, KindFix, KindReview, KindForeman} {
-		limit, ok := cfg.HardCaps[kind]
+		limit, ok := e.cfg.HardCaps[kind]
 		if !ok || limit <= 0 {
 			continue
 		}
@@ -150,17 +151,20 @@ func sweepTx(tx *sql.Tx, cfg Config, now time.Time) (SweepReport, error) {
 				eventPayload{Status: statusFailed, Reason: reason}, now); err != nil {
 				return rep, err
 			}
+			if err := e.sweptForemanFinishedTx(tx, x.id, x.project, now); err != nil {
+				return rep, err
+			}
 			rep.HardCapped = append(rep.HardCapped, x.id)
 		}
 	}
 
-	if cfg.QueueTTL > 0 {
+	if e.cfg.QueueTTL > 0 {
 		// The TTL is for jobs no runner can serve (§8.1); a job held only
 		// by a full cap layer waits as long as it takes, so the clock
 		// counts from the later of queued_at and the last cap hold.
 		rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0) FROM jobs
 			WHERE status = 'queued' AND queued_at IS NOT NULL
-			AND max(queued_at, COALESCE(cap_held_at, queued_at)) <= ?`, fmtTime(now.Add(-cfg.QueueTTL)))
+			AND max(queued_at, COALESCE(cap_held_at, queued_at)) <= ?`, fmtTime(now.Add(-e.cfg.QueueTTL)))
 		if err != nil {
 			return rep, fmt.Errorf("sweep queue TTL: %w", err)
 		}
@@ -182,7 +186,7 @@ func sweepTx(tx *sql.Tx, cfg Config, now time.Time) (SweepReport, error) {
 		}
 		rows.Close()
 		for _, x := range waitingAll {
-			reason := fmt.Sprintf("queue TTL exceeded: no runner leased the job within %s", capText(cfg.QueueTTL))
+			reason := fmt.Sprintf("queue TTL exceeded: no runner leased the job within %s", capText(e.cfg.QueueTTL))
 			if err := failJobTx(tx, x.id, reason, 0, now); err != nil {
 				return rep, err
 			}
@@ -190,9 +194,31 @@ func sweepTx(tx *sql.Tx, cfg Config, now time.Time) (SweepReport, error) {
 				eventPayload{Status: statusFailed, Reason: reason}, now); err != nil {
 				return rep, err
 			}
+			if err := e.sweptForemanFinishedTx(tx, x.id, x.project, now); err != nil {
+				return rep, err
+			}
 			rep.QueueTimedOut = append(rep.QueueTimedOut, x.id)
 		}
 	}
 
 	return rep, nil
+}
+
+// sweptForemanFinishedTx settles a foreman turn the sweep just failed
+// (§4.2): its delivered events return to pending and the next wake is
+// evaluated, in the sweep's own transaction. Jobs of other kinds, and a
+// job that is not a failed foreman turn, are a no-op.
+func (e *Engine) sweptForemanFinishedTx(tx *sql.Tx, id, project int64, now time.Time) error {
+	var kind Kind
+	var status string
+	if err := tx.QueryRow("SELECT kind, status FROM jobs WHERE id = ?", id).Scan(&kind, &status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("read job %d for the foreman inbox: %w", id, err)
+	}
+	if kind != KindForeman || status != statusFailed {
+		return nil
+	}
+	return e.foremanFinishedTx(tx, &jobRow{ID: id, ProjectID: project, Kind: kind}, status, now)
 }

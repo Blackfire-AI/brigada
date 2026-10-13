@@ -124,6 +124,12 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := eng.RecordInstance(ctx, int64(os.Getpid()), started); err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}
+	// Recovery (§13): judgment events that parked a task while no engine
+	// ran get their foreman turn now — after the sweep, as every engine
+	// call does it, and before the API serves a soul.
+	if err := eng.RecoverForemanWakes(ctx); err != nil {
+		return fmt.Errorf("engine: %w", err)
+	}
 	srv, err := api.New(ctx, st, eng, log, p.Tokens)
 	if err != nil {
 		return fmt.Errorf("engine: %w", err)

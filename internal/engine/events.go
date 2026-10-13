@@ -13,34 +13,37 @@ import (
 // and the payload's vocabulary stays small: what happened, never the
 // prompts or secrets that made it happen.
 const (
-	evPlanCreated         = "plan_created"          // CreatePlan: a plan now exists (§6.2)
-	evPlanDone            = "plan_done"             // the plan's last open task finished (§6.2)
-	evJobCreated          = "job_created"           // submit: a queued job now exists
-	evJobPending          = "job_pending"           // submit: coalesced behind the key's live job
-	evJobCapped           = "job_capped"            // submit: the task's round cap is spent
-	evJobLeased           = "job_leased"            // a runner took the job
-	evJobCapHeld          = "job_cap_held"          // a lease poll skipped the job: a cap layer has no room (§8.1)
-	evLeaseRevived        = "lease_revived"         // a heartbeat revived a lapsed lease
-	evJobReleased         = "job_released"          // the holder gave the job back
-	evJobCompleted        = "job_completed"         // done, failed, stalled, time_cap, check_failed…
-	evJobCancelled        = "job_cancelled"         // a live job was stopped
-	evLeaseRequeued       = "lease_requeued"        // the sweep requeued an expired lease
-	evJobHardCapped       = "job_hard_capped"       // the sweep failed a job past its kind's hard cap
-	evJobQueueTimedOut    = "job_queue_timed_out"   // the sweep failed a job past the queue TTL
-	evJobAttemptsExceeded = "job_attempts_exceeded" // the job lost MaxAttempts runners
-	evFenceEpochBumped    = "fence_epoch_bumped"    // recover fenced older-epoch leases out (§6.4)
-	evTaskRunning         = "task_running"          // a lease took the task from ready (§6.1)
-	evTaskReviewing       = "task_reviewing"        // the work passed its check; the review job is queued (§7)
-	evTaskDone            = "task_done"             // the task is finished (§6.1)
-	evTaskCheckFailed     = "task_check_failed"     // the check failed; a fix round answers it, or the task waits for the foreman (§3)
-	evTaskFixRound        = "task_fix_round"        // a fix round is queued on the author's session (§3)
-	evTaskOutOfRounds     = "task_out_of_rounds"    // the task's rounds are spent; the foreman decides (§3)
-	evTaskNeedsHelp       = "task_needs_help"       // the worker asked its question; the foreman answers (§3)
-	evTaskFailed          = "task_failed"           // the run failed or said nothing usable; the foreman decides (§3)
-	evReviewChanges       = "review_changes"        // the reviewer wants changes; a fix round answers them (§3, §7)
-	evReviewNoVerdict     = "review_no_verdict"     // the review ended without a usable verdict; the retry is spent or impossible (§7)
-	evReviewRetry         = "review_retry"          // an unusable verdict goes to another reviewer (§7)
-	evProjectForemanSet   = "project_foreman_set"   // setup: the project's foreman harness and model were chosen (§4.1)
+	evPlanCreated            = "plan_created"              // CreatePlan: a plan now exists (§6.2)
+	evPlanDone               = "plan_done"                 // the plan's last open task finished (§6.2)
+	evJobCreated             = "job_created"               // submit: a queued job now exists
+	evJobPending             = "job_pending"               // submit: coalesced behind the key's live job
+	evJobCapped              = "job_capped"                // submit: the task's round cap is spent
+	evJobLeased              = "job_leased"                // a runner took the job
+	evJobCapHeld             = "job_cap_held"              // a lease poll skipped the job: a cap layer has no room (§8.1)
+	evLeaseRevived           = "lease_revived"             // a heartbeat revived a lapsed lease
+	evJobReleased            = "job_released"              // the holder gave the job back
+	evJobCompleted           = "job_completed"             // done, failed, stalled, time_cap, check_failed…
+	evJobCancelled           = "job_cancelled"             // a live job was stopped
+	evLeaseRequeued          = "lease_requeued"            // the sweep requeued an expired lease
+	evJobHardCapped          = "job_hard_capped"           // the sweep failed a job past its kind's hard cap
+	evJobQueueTimedOut       = "job_queue_timed_out"       // the sweep failed a job past the queue TTL
+	evJobAttemptsExceeded    = "job_attempts_exceeded"     // the job lost MaxAttempts runners
+	evFenceEpochBumped       = "fence_epoch_bumped"        // recover fenced older-epoch leases out (§6.4)
+	evTaskRunning            = "task_running"              // a lease took the task from ready (§6.1)
+	evTaskReviewing          = "task_reviewing"            // the work passed its check; the review job is queued (§7)
+	evTaskDone               = "task_done"                 // the task is finished (§6.1)
+	evTaskCheckFailed        = "task_check_failed"         // the check failed; a fix round answers it, or the task waits for the foreman (§3)
+	evTaskFixRound           = "task_fix_round"            // a fix round is queued on the author's session (§3)
+	evTaskOutOfRounds        = "task_out_of_rounds"        // the task's rounds are spent; the foreman decides (§3)
+	evTaskNeedsHelp          = "task_needs_help"           // the worker asked its question; the foreman answers (§3)
+	evTaskFailed             = "task_failed"               // the run failed or said nothing usable; the foreman decides (§3)
+	evReviewChanges          = "review_changes"            // the reviewer wants changes; a fix round answers them (§3, §7)
+	evReviewNoVerdict        = "review_no_verdict"         // the review ended without a usable verdict; the retry is spent or impossible (§7)
+	evReviewRetry            = "review_retry"              // an unusable verdict goes to another reviewer (§7)
+	evProjectForemanSet      = "project_foreman_set"       // setup: the project's foreman harness and model were chosen (§4.1)
+	evForemanWoken           = "foreman_woken"             // a foreman turn was queued with the project's pending events (§4.2)
+	evForemanWakeBudgetSpent = "foreman_wake_budget_spent" // the day's foreman wake budget is spent; the events stay pending (§4.3)
+	evForemanWakeStalled     = "foreman_wake_stalled"      // foreman turns failed consecutively on the same events; waking stops (§4.2)
 )
 
 // eventPayload is the small JSON an event row carries: the fields the
@@ -62,6 +65,8 @@ type eventPayload struct {
 	Findings string `json:"findings,omitempty"` // the review's findings (§7)
 	Harness  string `json:"harness,omitempty"`
 	Model    string `json:"model,omitempty"`
+	Job      int64  `json:"job,omitempty"`   // a job the event names besides its own job_id column
+	Count    int64  `json:"count,omitempty"` // how many of something the event counts (§4.2, §4.3)
 }
 
 // appendEventTx adds one row to the event log inside the caller's

@@ -70,7 +70,7 @@ func (e *Engine) Lease(ctx context.Context, owner int64, harnesses, labels []str
 	var grant *LeaseGrant
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
-		if _, err := sweepTx(tx, e.cfg, now); err != nil {
+		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
 		g, err := e.leaseTx(tx, owner, harnesses, labels, now)
@@ -155,6 +155,9 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 			if _, err := appendEventTx(tx, evJobAttemptsExceeded, j.ProjectID, j.TaskID, j.ID,
 				eventPayload{Status: statusFailed, Reason: reason}, now); err != nil {
+				return nil, err
+			}
+			if err := e.foremanFinishedTx(tx, j, statusFailed, now); err != nil {
 				return nil, err
 			}
 			continue

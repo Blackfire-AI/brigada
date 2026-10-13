@@ -136,10 +136,10 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 		if reason == "" {
 			reason = "no result block"
 		}
-		return needsForemanTx(tx, job, evTaskFailed, eventPayload{Reason: boundNote(reason)}, now)
+		return e.needsForemanTx(tx, job, evTaskFailed, eventPayload{Reason: boundNote(reason)}, now)
 	case wr.Status == workerNeedsHelp:
 		// §3: the question is the foreman's to answer, verbatim.
-		return needsForemanTx(tx, job, evTaskNeedsHelp, eventPayload{Question: boundNote(wr.Question)}, now)
+		return e.needsForemanTx(tx, job, evTaskNeedsHelp, eventPayload{Question: boundNote(wr.Question)}, now)
 	case wr.Status == workerCheckFailed || !checkPassed(c.CheckResult):
 		// The check the runner ran failed (§5.5) — the runner says so
 		// itself, or the done carries a failed check result. The tail
@@ -156,7 +156,7 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 		if class != classImplement {
 			// No fix rounds behind any other class (§7: a review-class
 			// task has none unless asked): the failure is the foreman's.
-			return needsForemanTx(tx, job, evTaskCheckFailed, eventPayload{Reason: boundNote(tail)}, now)
+			return e.needsForemanTx(tx, job, evTaskCheckFailed, eventPayload{Reason: boundNote(tail)}, now)
 		}
 		// §3: the failed check is a fix round's to answer, with the
 		// check's own output as the feedback; the event keeps the tail
@@ -168,7 +168,7 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 		return e.queueFixRoundTx(tx, job, roundFix, feedback, tail, now)
 	case class != classImplement:
 		// No review behind any other class (§7): done is done.
-		return taskDoneTx(tx, job, now)
+		return e.taskDoneTx(tx, job, now)
 	default:
 		return e.queueReviewTx(tx, job, wr, c.CheckResult, now)
 	}
@@ -192,7 +192,7 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 		return err
 	}
 	if capped {
-		return outOfRoundsTx(tx, job, round, note, now)
+		return e.outOfRoundsTx(tx, job, round, note, now)
 	}
 	spec, err := taskSpecTx(tx, job.TaskID)
 	if err != nil {
@@ -222,7 +222,7 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 			eventPayload{Run: int64(sr.Run), Reason: round}, now)
 		return err
 	case AnsCapped:
-		return outOfRoundsTx(tx, job, round, note, now)
+		return e.outOfRoundsTx(tx, job, round, note, now)
 	default:
 		// The completing job freed the key earlier in this transaction,
 		// so no live job can hold this submit. An event without its job
@@ -239,12 +239,12 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 // carries what asked for the round — the check's tail or the review's
 // findings, bounded — beside it: that note is the needs-you queue's
 // reason line, the foreman's first word of the matter (§10).
-func outOfRoundsTx(tx *sql.Tx, job *jobRow, round, note string, now time.Time) error {
+func (e *Engine) outOfRoundsTx(tx *sql.Tx, job *jobRow, round, note string, now time.Time) error {
 	reason := "the task's " + round + " are spent"
 	if note != "" {
 		reason += ": " + boundNote(note)
 	}
-	return needsForemanTx(tx, job, evTaskOutOfRounds, eventPayload{Reason: reason}, now)
+	return e.needsForemanTx(tx, job, evTaskOutOfRounds, eventPayload{Reason: reason}, now)
 }
 
 // authorPlacementTx reads the placement the task's fix rounds pin to
@@ -351,7 +351,7 @@ func (e *Engine) reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now ti
 		if err := recordOutcomeTx(tx, job, now); err != nil {
 			return err
 		}
-		return taskDoneTx(tx, job, now)
+		return e.taskDoneTx(tx, job, now)
 	case haveVerdict && v.Verdict == verdictChanges:
 		// The findings are the fix round's feedback (§3) and the event's
 		// own payload (§9): the review's words are kept whatever follows.
@@ -397,7 +397,7 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 		if noAgent && !spent {
 			reason += "; no other agent of another family can take the retry"
 		}
-		return needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: boundNote(reason)}, now)
+		return e.needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: boundNote(reason)}, now)
 	}
 	sr, err := e.submitTx(tx, SubmitParams{
 		Key:           job.Key,
@@ -500,22 +500,28 @@ func recordOutcomeTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 // needsForemanTx parks a task at needs_foreman (§3): the completion was
 // nothing the rules can carry forward on their own, so the task waits
 // for the foreman's judgment. The event kind names what waited and the
-// payload what the foreman will read.
-func needsForemanTx(tx *sql.Tx, job *jobRow, kind string, payload eventPayload, now time.Time) error {
+// payload what the foreman will read. The event lands in the foreman's
+// inbox (§4.2) and a wake is evaluated, both in this same transaction:
+// the park itself is what makes the foreman's turn happen.
+func (e *Engine) needsForemanTx(tx *sql.Tx, job *jobRow, kind string, payload eventPayload, now time.Time) error {
 	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
 		taskNeedsForeman, fmtTime(now), job.TaskID); err != nil {
 		return fmt.Errorf("park task %d at needs_foreman: %w", job.TaskID, err)
 	}
 	payload.Status = taskNeedsForeman
-	_, err := appendEventTx(tx, kind, job.ProjectID, job.TaskID, job.ID, payload, now)
-	return err
+	if err := inboxEventTx(tx, kind, job.ProjectID, job.TaskID, job.ID, payload, now); err != nil {
+		return err
+	}
+	return e.wakeForemanTx(tx, job.ProjectID, now)
 }
 
 // taskDoneTx finishes a task and, when that closed the plan's last open
 // task, the plan with it (§6.1, §6.2). The plan_done event names the
 // task and the job that ended it; the user's notification (§3, §10)
-// rides on that event later.
-func taskDoneTx(tx *sql.Tx, job *jobRow, now time.Time) error {
+// rides on that event later. The plan_done event is a judgment event too
+// (§4.2) — the foreman reports the finished plan — so it lands in the
+// inbox and wakes a turn, in this same transaction.
+func (e *Engine) taskDoneTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
 		taskDone, fmtTime(now), job.TaskID); err != nil {
 		return fmt.Errorf("finish task %d: %w", job.TaskID, err)
@@ -537,9 +543,11 @@ func taskDoneTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 		planDone, fmtTime(now), plan); err != nil {
 		return fmt.Errorf("finish plan %d: %w", plan, err)
 	}
-	_, err := appendEventTx(tx, evPlanDone, job.ProjectID, job.TaskID, job.ID,
-		eventPayload{Status: planDone}, now)
-	return err
+	if err := inboxEventTx(tx, evPlanDone, job.ProjectID, job.TaskID, job.ID,
+		eventPayload{Status: planDone}, now); err != nil {
+		return err
+	}
+	return e.wakeForemanTx(tx, job.ProjectID, now)
 }
 
 // parseWorkerResult decodes the worker's result block (§5.4). ok is

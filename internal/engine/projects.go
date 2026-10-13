@@ -61,7 +61,7 @@ func (e *Engine) SetProjectForeman(ctx context.Context, repoURL, harness, model 
 	setting := ForemanSetting{RepoURL: repoURL, Harness: harness, Model: model}
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
-		if _, err := sweepTx(tx, e.cfg, now); err != nil {
+		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
 		var project int64
@@ -103,7 +103,7 @@ func (e *Engine) ProjectForeman(ctx context.Context, repoURL string) (*ForemanSe
 	}
 	var setting *ForemanSetting
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		if _, err := sweepTx(tx, e.cfg, e.cfg.Now()); err != nil {
+		if _, err := e.sweepTx(tx, e.cfg.Now()); err != nil {
 			return err
 		}
 		var f ForemanSetting

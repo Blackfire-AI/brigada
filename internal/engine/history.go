@@ -49,7 +49,7 @@ func (e *Engine) History(ctx context.Context, q HistoryQuery) (history.Page, err
 
 	var page history.Page
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		if _, err := sweepTx(tx, e.cfg, e.cfg.Now()); err != nil {
+		if _, err := e.sweepTx(tx, e.cfg.Now()); err != nil {
 			return err
 		}
 		events, err := historyEventsTx(tx, q, cursor)

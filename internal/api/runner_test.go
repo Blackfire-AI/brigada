@@ -165,13 +165,20 @@ func TestRunnerFlow(t *testing.T) {
 
 	// Release: the job goes back to queued, the releaser does not see it
 	// again until the exclusion lapses, another runner takes it (§12.3).
+	// The verdict finished the plan, so the engine's own wake queued this
+	// turn already (§4.2) — the submit above coalesced behind it — and it
+	// waits for the project's foreman harness like any turn.
 	turn := fmt.Sprintf(`{"key":"foreman:%d","project_id":%d,"kind":"foreman","mode":"session","prompt":"wake up"}`,
 		e.project1, e.project1)
 	code, _, data = e.do(http.MethodPost, "/v1/jobs", "root", "", []byte(turn))
 	if code != http.StatusOK {
-		t.Fatalf("submit the foreman turn: %d %s", code, data)
+		t.Fatalf("submit the foreman turn: %d %s, want ok", code, data)
 	}
-	_, data = e.lease("r1", 0)
+	code, _, data = e.do(http.MethodPost, "/v1/runner/lease", "r1", "",
+		[]byte(`{"wait":0,"harnesses":["claude"]}`))
+	if code != http.StatusOK {
+		t.Fatalf("lease the foreman turn: %d %s, want ok", code, data)
+	}
 	g2 := decode[struct {
 		Job *jobGrant `json:"job"`
 	}](t, data).Job
@@ -191,14 +198,22 @@ func TestRunnerFlow(t *testing.T) {
 	}
 	// The turn is session-mode and its session sits on r1 (§8), so r2
 	// cannot take it either; once the exclusion lapses, r1 can.
-	_, data = e.lease("r2", 0)
+	code, _, data = e.do(http.MethodPost, "/v1/runner/lease", "r2", "",
+		[]byte(`{"wait":0,"harnesses":["claude"]}`))
+	if code != http.StatusOK {
+		t.Fatalf("lease by r2: %d %s, want ok", code, data)
+	}
 	if job := decode[struct {
 		Job *jobGrant `json:"job"`
 	}](t, data).Job; job != nil {
 		t.Errorf("another runner leased a session pinned elsewhere: %+v", job)
 	}
 	e.clock.Advance(2*time.Minute + time.Second)
-	_, data = e.lease("r1", 0)
+	code, _, data = e.do(http.MethodPost, "/v1/runner/lease", "r1", "",
+		[]byte(`{"wait":0,"harnesses":["claude"]}`))
+	if code != http.StatusOK {
+		t.Fatalf("lease by r1 after the exclusion: %d %s, want ok", code, data)
+	}
 	g3 := decode[struct {
 		Job *jobGrant `json:"job"`
 	}](t, data).Job

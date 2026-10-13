@@ -254,7 +254,9 @@ func TestStopOutcomesNameThemselvesInTheEvent(t *testing.T) {
 			g := e.leaseAny(e.runner1)
 			e.complete(g, Completion{Result: tc.result, Outcome: tc.outcome})
 			rows := e.eventRows()
-			if len(rows) != 5 || rows[3].kind != evJobCompleted {
+			// The park wakes the foreman (§4.2): the turn's job and its
+			// event follow the task's.
+			if len(rows) != 7 || rows[3].kind != evJobCompleted {
 				t.Fatalf("events = %v", e.eventKinds())
 			}
 			if rows[3].payload.Status != tc.outcome {
@@ -264,6 +266,9 @@ func TestStopOutcomesNameThemselvesInTheEvent(t *testing.T) {
 			// parks at needs_foreman with the failure's words.
 			if rows[4].kind != evTaskFailed || rows[4].payload.Status != taskNeedsForeman {
 				t.Errorf("the stopped run's task event = %s %+v, want %s with the state", rows[4].kind, rows[4].payload, evTaskFailed)
+			}
+			if rows[6].kind != evForemanWoken || rows[6].payload.Count != 1 {
+				t.Errorf("the park's wake event = %s %+v, want %s counting one event", rows[6].kind, rows[6].payload, evForemanWoken)
 			}
 		})
 	}
@@ -353,7 +358,7 @@ func TestEventsShareTheChangeTransaction(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				_, err = cancelTx(tx, job, "", e.clock.Now())
+				_, err = e.eng.cancelTx(tx, job, "", e.clock.Now())
 				return err
 			},
 		},
@@ -366,7 +371,7 @@ func TestEventsShareTheChangeTransaction(t *testing.T) {
 				return g
 			},
 			run: func(e *env, tx *sql.Tx, _ *LeaseGrant) error {
-				_, err := sweepTx(tx, e.eng.cfg, e.clock.Now())
+				_, err := e.eng.sweepTx(tx, e.clock.Now())
 				return err
 			},
 		},
