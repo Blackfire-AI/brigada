@@ -263,7 +263,7 @@ func TestOpenUpgradesAV1Store(t *testing.T) {
 		"first_leased", "last_leased", "queued_at", "lease_epoch",
 		"leased_seconds", "harness", "labels", "restart",
 		"released_by", "released_until", "release_note",
-		"released_lease", "done_lease", "cap_held_at", "cap_held_layer",
+		"released_lease", "done_lease", "cap_held_at", "cap_held_layer", "cap_held_key",
 	} {
 		if !slices.Contains(got, want) {
 			t.Errorf("jobs after upgrade has no %s column", want)

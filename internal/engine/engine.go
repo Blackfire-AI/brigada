@@ -261,17 +261,18 @@ func New(s *store.Store, cfg Config) *Engine {
 // MaxArtifactBytes is the configured cap on one artifact upload.
 func (e *Engine) MaxArtifactBytes() int64 { return e.cfg.MaxArtifactBytes }
 
-// timeLayout is the store's timestamp format: fixed-width UTC text, so
-// lexicographic order is chronological order and the schema's TEXT
-// columns can be compared and indexed as they are written (§11).
-const timeLayout = "2006-01-02T15:04:05.000000000Z07:00"
+// TimeLayout is the store's timestamp format (§11): fixed-width UTC
+// text, so lexicographic order is chronological order and the schema's
+// TEXT columns can be compared and indexed as they are written. Tests
+// and tools that seed store timestamps directly format with it.
+const TimeLayout = "2006-01-02T15:04:05.000000000Z07:00"
 
 func fmtTime(t time.Time) string {
-	return t.UTC().Format(timeLayout)
+	return t.UTC().Format(TimeLayout)
 }
 
 func parseTime(s string) (time.Time, error) {
-	return time.Parse(timeLayout, s)
+	return time.Parse(TimeLayout, s)
 }
 
 // capText renders a cap for the error that names it: "45m", not "45m0s".
