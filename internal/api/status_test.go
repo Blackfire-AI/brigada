@@ -3,7 +3,10 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
+
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
 // TestStatusEndpoint covers /v1/status (§13): the engine's own state —
@@ -50,7 +53,7 @@ func TestTaskSubmitEndpoint(t *testing.T) {
 		t.Fatalf("client submits a task: %d, want 403", code)
 	}
 
-	body := `{"repo_url":"https://example.invalid/three.git","base_ref":"main","spec":"the spec","check_cmd":"go test ./...","prompt":"the composed prompt","harness":"claude"}`
+	body := `{"repo_url":"https://example.invalid/three.git","base_ref":"main","spec":"the spec","check_cmd":"go test ./...","harness":"claude"}`
 	code, _, data := e.do(http.MethodPost, "/v1/tasks", "root", "", []byte(body))
 	if code != http.StatusOK {
 		t.Fatalf("admin submits a task: %d %s", code, data)
@@ -66,8 +69,9 @@ func TestTaskSubmitEndpoint(t *testing.T) {
 		t.Fatalf("submit = %+v, want created with task, job and run 1", res)
 	}
 
-	// The queued job carries the harness constraint and the composed
-	// prompt verbatim, and a runner may lease it (§8).
+	// The queued job carries the harness constraint, and the engine
+	// composed its prompt from the template plus the spec verbatim
+	// (§1.4, §5.3); a runner may lease it (§8).
 	_, _, jobBody := e.do(http.MethodGet, fmt.Sprintf("/v1/jobs/%d", res.JobID), "root", "", nil)
 	job := decode[struct {
 		Key     string   `json:"key"`
@@ -79,8 +83,11 @@ func TestTaskSubmitEndpoint(t *testing.T) {
 	if job.Key != fmt.Sprintf("task:%d", res.TaskID) || job.Status != "queued" {
 		t.Errorf("job = %+v, want queued on the task's key", job)
 	}
-	if job.Prompt != "the composed prompt" || job.Harness != "claude" {
-		t.Errorf("job prompt/harness = %q/%q, want what the caller sent", job.Prompt, job.Harness)
+	if job.Prompt != prompt.ComposeWorkerPrompt("the spec", "") || !strings.Contains(job.Prompt, "<task-spec>\nthe spec\n</task-spec>") {
+		t.Errorf("job prompt = %q, want the engine's composed prompt with the spec verbatim", job.Prompt)
+	}
+	if job.Harness != "claude" {
+		t.Errorf("job harness = %q, want what the caller sent", job.Harness)
 	}
 	e.register("r1")
 	grant := `{"wait":0,"harnesses":["claude"]}`
@@ -102,9 +109,8 @@ func TestTaskSubmitEndpoint(t *testing.T) {
 
 	// The caller's mistakes are 400s naming the field (§12.1).
 	for name, bad := range map[string]string{
-		"no repo":    `{"base_ref":"main","spec":"s","prompt":"p"}`,
-		"no spec":    `{"repo_url":"https://example.invalid/x.git","base_ref":"main","prompt":"p"}`,
-		"no prompt":  `{"repo_url":"https://example.invalid/x.git","base_ref":"main","spec":"s"}`,
+		"no repo":    `{"base_ref":"main","spec":"s"}`,
+		"no spec":    `{"repo_url":"https://example.invalid/x.git","base_ref":"main"}`,
 		"bad encode": `{"repo_url":42}`,
 	} {
 		code, _, data := e.do(http.MethodPost, "/v1/tasks", "root", "", []byte(bad))

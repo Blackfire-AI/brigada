@@ -13,6 +13,7 @@ import (
 // and the payload's vocabulary stays small: what happened, never the
 // prompts or secrets that made it happen.
 const (
+	evPlanCreated         = "plan_created"          // CreatePlan: a plan now exists (§6.2)
 	evJobCreated          = "job_created"           // submit: a queued job now exists
 	evJobPending          = "job_pending"           // submit: coalesced behind the key's live job
 	evJobCapped           = "job_capped"            // submit: the task's round cap is spent

@@ -41,7 +41,6 @@ func (s *Server) handleTaskSubmit(w http.ResponseWriter, r *http.Request, _ iden
 		Spec:     req.Spec,
 		CheckCmd: req.CheckCmd,
 		Class:    req.Class,
-		Prompt:   req.Prompt,
 		Harness:  req.Harness,
 		Labels:   nonNil(req.Labels),
 	})
@@ -61,9 +60,9 @@ func (s *Server) handleTaskSubmit(w http.ResponseWriter, r *http.Request, _ iden
 }
 
 // taskSubmitRequest is the debug task submit's body (§12.1): the repo
-// and base ref of the workspace (§5.1), the spec verbatim (§1.4), the
-// check the runner runs after a done (§5.5), and the composed worker
-// prompt (§5.3) the job carries.
+// and base ref of the workspace (§5.1), the spec verbatim (§1.4), and
+// the check the runner runs after a done (§5.5). The worker prompt is
+// the engine's to compose (§1.4), never the caller's to send.
 type taskSubmitRequest struct {
 	RepoURL  string   `json:"repo_url"`
 	BaseRef  string   `json:"base_ref"`
@@ -71,7 +70,6 @@ type taskSubmitRequest struct {
 	Spec     string   `json:"spec"`
 	CheckCmd string   `json:"check_cmd"`
 	Class    string   `json:"class"`
-	Prompt   string   `json:"prompt"`
 	Harness  string   `json:"harness"`
 	Labels   []string `json:"labels"`
 }

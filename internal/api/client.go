@@ -268,6 +268,14 @@ type JobGrant jobGrant
 // out and turning every other status into an error that names the API's
 // own message.
 func (c *Client) call(ctx context.Context, method, path string, body, out any) error {
+	return c.callKeyed(ctx, method, path, "", body, out)
+}
+
+// callKeyed is call with one extra request header: the idempotency key
+// a mutating call rides (§12.1), minted by whoever knows what makes the
+// call one logical call — the bridge, for a tool call — and never the
+// model.
+func (c *Client) callKeyed(ctx context.Context, method, path, idemKey string, body, out any) error {
 	var rd io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -282,6 +290,9 @@ func (c *Client) call(ctx context.Context, method, path string, body, out any) e
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
+	if idemKey != "" {
+		req.Header.Set("Idempotency-Key", idemKey)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("%s %s: %w", method, path, err)

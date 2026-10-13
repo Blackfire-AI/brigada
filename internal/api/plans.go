@@ -1,0 +1,126 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+
+	"github.com/Blackfire-AI/brigada/internal/engine"
+)
+
+// handlePlanCreate is the foreman's plan_create behind the API (§6.2,
+// §12.1, §12.2): one plan with exactly one task, active from the start,
+// its first work job queued. A foreman token names no project — its own
+// is the only one it may plan in, and a repo URL that says otherwise is
+// a 403 — while a client or admin must name the project's repo URL. The
+// idempotency wrapper around it replays a repeated call's first answer
+// (§12.1).
+func (s *Server) handlePlanCreate(w http.ResponseWriter, r *http.Request, id identity) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var req planCreateRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	var project int64
+	if id.role == roleForeman {
+		project = id.project
+		if req.RepoURL != "" {
+			named, ok, err := s.projectOfRepo(r.Context(), req.RepoURL)
+			if err != nil {
+				s.writeInternal(w, r, "resolve the repo", err)
+				return
+			}
+			if !ok || named != project {
+				writeError(w, http.StatusForbidden, codeForbidden,
+					"foreman token is scoped to project "+strconv.FormatInt(id.project, 10))
+				return
+			}
+		}
+	} else {
+		if req.RepoURL == "" {
+			writeError(w, http.StatusBadRequest, codeBadRequest,
+				"repo_url is required: name the project's repo URL")
+			return
+		}
+		named, ok, err := s.projectOfRepo(r.Context(), req.RepoURL)
+		if err != nil {
+			s.writeInternal(w, r, "resolve the repo", err)
+			return
+		}
+		if !ok {
+			writeError(w, http.StatusNotFound, codeNotFound,
+				"no project for repo "+req.RepoURL)
+			return
+		}
+		project = named
+	}
+	tasks := make([]engine.PlanTask, len(req.Tasks))
+	for i, t := range req.Tasks {
+		tasks[i] = engine.PlanTask{Title: t.Title, Spec: t.Spec, Check: t.Check, Class: t.Class}
+	}
+	res, err := s.eng.CreatePlan(r.Context(), project, req.Title, tasks)
+	if err != nil {
+		// Like the task submit: a plan the engine will not take — no
+		// title, no tasks, more than one task — is the caller's
+		// mistake, not the engine's failure.
+		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, planCreateResponse{
+		Answer: string(res.Answer),
+		PlanID: res.PlanID,
+		TaskID: res.TaskID,
+		JobID:  res.JobID,
+	})
+}
+
+// projectOfRepo resolves the project a repo URL names (product §5 rule
+// 6): repos are addressed by URL, so the URL is the caller's only way
+// to point at a project. ok=false means no project carries the repo.
+func (s *Server) projectOfRepo(ctx context.Context, repo string) (int64, bool, error) {
+	var project int64
+	err := s.st.View(ctx, func(tx *sql.Tx) error {
+		err := tx.QueryRow("SELECT id FROM projects WHERE repo_url = ?", repo).Scan(&project)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	})
+	if err != nil {
+		return 0, false, fmt.Errorf("read the project of %s: %w", repo, err)
+	}
+	return project, project != 0, nil
+}
+
+// planCreateRequest is the plan_create body (§6.1, §6.2): the plan's
+// title and its tasks. A foreman caller may leave repo_url out — its
+// token names the project — and any repo_url it sends must agree with
+// that token; every other role must send it.
+type planCreateRequest struct {
+	RepoURL string         `json:"repo_url"`
+	Title   string         `json:"title"`
+	Tasks   []planTaskBody `json:"tasks"`
+}
+
+// planTaskBody is one task of the plan as the body carries it (§6.1):
+// title, spec, check and class.
+type planTaskBody struct {
+	Title string `json:"title"`
+	Spec  string `json:"spec"`
+	Check string `json:"check"`
+	Class string `json:"class"`
+}
+
+// planCreateResponse names what the call created: the plan, its one
+// task, and the queued work job to wait on.
+type planCreateResponse struct {
+	Answer string `json:"answer"`
+	PlanID int64  `json:"plan_id"`
+	TaskID int64  `json:"task_id"`
+	JobID  int64  `json:"job_id"`
+}

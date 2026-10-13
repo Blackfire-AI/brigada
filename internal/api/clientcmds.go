@@ -33,8 +33,8 @@ func (c *Client) Status(ctx context.Context) (Status, error) {
 }
 
 // TaskSubmit is one task submitted whole, as the debug path sends it
-// (§12.1): the repo and base ref, the spec verbatim, the check, and the
-// composed worker prompt of the job it queues.
+// (§12.1): the repo and base ref, the spec verbatim, and the check. The
+// worker prompt is the engine's to compose (§1.4), never the caller's.
 type TaskSubmit struct {
 	RepoURL  string
 	BaseRef  string
@@ -42,7 +42,6 @@ type TaskSubmit struct {
 	Spec     string
 	CheckCmd string
 	Class    string
-	Prompt   string
 	Harness  string
 	Labels   []string
 }
@@ -66,7 +65,6 @@ func (c *Client) SubmitTask(ctx context.Context, t TaskSubmit) (TaskSubmitResult
 		Spec:     t.Spec,
 		CheckCmd: t.CheckCmd,
 		Class:    t.Class,
-		Prompt:   t.Prompt,
 		Harness:  t.Harness,
 		Labels:   t.Labels,
 	}
@@ -80,6 +78,57 @@ func (c *Client) SubmitTask(ctx context.Context, t TaskSubmit) (TaskSubmitResult
 		TaskID:    out.TaskID,
 		JobID:     out.JobID,
 		Run:       out.Run,
+	}, nil
+}
+
+// PlanCreate is a plan_create call as the bridge sends it (§6.2, §12.1,
+// §12.2): the plan's title, its tasks — exactly one until plans with
+// dependencies — and, for a caller that is not the project's foreman,
+// the repo URL naming the project. A foreman token's own project is the
+// only one it may plan in, so it leaves RepoURL empty.
+type PlanCreate struct {
+	RepoURL string
+	Title   string
+	Tasks   []PlanTask
+}
+
+// PlanTask is one task of the plan (§6.1): title, spec, check and
+// class; an empty class means implement.
+type PlanTask struct {
+	Title string
+	Spec  string
+	Check string
+	Class string
+}
+
+// PlanCreateResult names what the call created: the plan, its one task,
+// and the queued work job.
+type PlanCreateResult struct {
+	Answer engine.Answer
+	PlanID int64
+	TaskID int64
+	JobID  int64
+}
+
+// CreatePlan creates a plan with one task and its first work job queued
+// (§6.2, §12.1). idemKey is the call's idempotency key, minted per
+// logical call by the caller that knows what makes one — the bridge
+// hashes the tool call's arguments — so a repeated call replays the
+// first answer instead of planning twice.
+func (c *Client) CreatePlan(ctx context.Context, p PlanCreate, idemKey string) (PlanCreateResult, error) {
+	body := planCreateRequest{RepoURL: p.RepoURL, Title: p.Title, Tasks: make([]planTaskBody, len(p.Tasks))}
+	for i, t := range p.Tasks {
+		body.Tasks[i] = planTaskBody{Title: t.Title, Spec: t.Spec, Check: t.Check, Class: t.Class}
+	}
+	var out planCreateResponse
+	if err := c.callKeyed(ctx, http.MethodPost, "/v1/plans", idemKey, body, &out); err != nil {
+		return PlanCreateResult{}, err
+	}
+	return PlanCreateResult{
+		Answer: engine.Answer(out.Answer),
+		PlanID: out.PlanID,
+		TaskID: out.TaskID,
+		JobID:  out.JobID,
 	}, nil
 }
 
