@@ -1,11 +1,13 @@
 package api
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
@@ -40,6 +42,98 @@ func TestStatusEndpoint(t *testing.T) {
 		}
 	}
 	_ = own
+}
+
+// TestStatusEndpointPlansAndNeedsYou covers /v1/status's plans and
+// "needs you" sections (§6.1, §6.2, §10): the active plan with its
+// task, a task parked at needs_foreman with its event's reason, and the
+// foreman's scope — the token's project alone, where a client reads
+// every project.
+func TestStatusEndpointPlansAndNeedsYou(t *testing.T) {
+	e := newEnv(t)
+	e.submitWork()
+
+	// Seed what the env does not carry: the fixture's task parked for
+	// the foreman with the event that parked it, and a plan with a parked
+	// task in the other project.
+	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		now := e.clock.Now().UTC().Format(engine.TimeLayout)
+		if _, err := tx.Exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
+			VALUES ('task_needs_help', ?, ?, NULL, '{"question":"which API should the client call?"}', ?)`,
+			e.project1, e.task, now); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE tasks SET state = 'needs_foreman' WHERE id = ?`, e.task); err != nil {
+			return err
+		}
+		plan, err := tx.Exec(`INSERT INTO plans (project_id, title, state, created_at, updated_at)
+			VALUES (?, 'the other plan', 'active', ?, ?)`, e.project2, now, now)
+		if err != nil {
+			return err
+		}
+		planID, err := plan.LastInsertId()
+		if err != nil {
+			return err
+		}
+		task, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, base_ref, caps, created_at, updated_at)
+			VALUES (?, 'the other task', 'the spec', NULL, 'implement', 'needs_foreman', 'main', '{}', ?, ?)`,
+			planID, now, now)
+		if err != nil {
+			return err
+		}
+		taskID, err := task.LastInsertId()
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
+			VALUES ('task_failed', ?, ?, NULL, '{"reason":"their adapter died"}', ?)`,
+			e.project2, taskID, now)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed the parked tasks: %v", err)
+	}
+
+	// The client reads every project: both plans, both parked tasks.
+	code, _, data := e.do(http.MethodGet, "/v1/status", "alice", "", nil)
+	if code != http.StatusOK {
+		t.Fatalf("client reads status: %d %s", code, data)
+	}
+	st := decode[engine.StatusInfo](t, data)
+	if len(st.Plans) != 2 || len(st.NeedsYou) != 2 {
+		t.Fatalf("the client's status = %d plans, %+v, want both projects' plans and queues", len(st.Plans), st.NeedsYou)
+	}
+	byID := map[int64]engine.StatusPlan{}
+	for _, p := range st.Plans {
+		byID[p.ID] = p
+	}
+	own := byID[e.plan]
+	if own.State != "active" || own.RepoURL != "https://example.invalid/one.git" || len(own.Tasks) != 1 ||
+		own.Tasks[0].ID != e.task || own.Tasks[0].State != "needs_foreman" {
+		t.Errorf("the own plan = %+v, want the active plan with its parked task", own)
+	}
+	reasons := map[int64]string{}
+	for _, it := range st.NeedsYou {
+		reasons[it.ID] = it.Reason
+	}
+	if got := reasons[e.task]; got != "which API should the client call?" {
+		t.Errorf("the own task's reason = %q, want the question the event carries", got)
+	}
+
+	// The foreman is walled into its own project: its plan and its task
+	// alone, the other project's nowhere.
+	code, _, data = e.do(http.MethodGet, "/v1/status", "foreman1", "", nil)
+	if code != http.StatusOK {
+		t.Fatalf("the foreman reads status: %d %s", code, data)
+	}
+	fst := decode[engine.StatusInfo](t, data)
+	if len(fst.Plans) != 1 || fst.Plans[0].ID != e.plan {
+		t.Errorf("the foreman's plans = %+v, want its own project alone", fst.Plans)
+	}
+	if len(fst.NeedsYou) != 1 || fst.NeedsYou[0].ID != e.task ||
+		fst.NeedsYou[0].Reason != "which API should the client call?" {
+		t.Errorf("the foreman's needs you = %+v, want its own task with its reason", fst.NeedsYou)
+	}
 }
 
 // TestTaskSubmitEndpoint covers /v1/tasks (§12.1): the debug submit —

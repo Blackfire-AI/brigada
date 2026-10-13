@@ -106,7 +106,7 @@ func TestSubmitTaskTitleDefaultsToTheSpecsFirstLine(t *testing.T) {
 
 func TestStatusCountsJobsAndReadsTheInstance(t *testing.T) {
 	e := newEnv(t)
-	st, err := e.eng.Status(e.ctx)
+	st, err := e.eng.Status(e.ctx, 0)
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestStatusCountsJobsAndReadsTheInstance(t *testing.T) {
 	}
 
 	first := e.submit(e.work())
-	if st, err = e.eng.Status(e.ctx); err != nil {
+	if st, err = e.eng.Status(e.ctx, 0); err != nil {
 		t.Fatalf("status: %v", err)
 	}
 	if st.Jobs[statusQueued] != 1 {
@@ -128,7 +128,7 @@ func TestStatusCountsJobsAndReadsTheInstance(t *testing.T) {
 	}
 	_ = first
 	e.leaseAny(e.runner1)
-	if st, err = e.eng.Status(e.ctx); err != nil {
+	if st, err = e.eng.Status(e.ctx, 0); err != nil {
 		t.Fatalf("status: %v", err)
 	}
 	if st.Jobs[statusQueued] != 0 || st.Jobs[statusLeased] != 1 {
@@ -138,7 +138,7 @@ func TestStatusCountsJobsAndReadsTheInstance(t *testing.T) {
 	if err := e.eng.RecordInstance(e.ctx, 4242, e.clock.Now()); err != nil {
 		t.Fatalf("record instance: %v", err)
 	}
-	if st, err = e.eng.Status(e.ctx); err != nil {
+	if st, err = e.eng.Status(e.ctx, 0); err != nil {
 		t.Fatalf("status: %v", err)
 	}
 	if st.Pid != 4242 || st.StartedAt == "" {

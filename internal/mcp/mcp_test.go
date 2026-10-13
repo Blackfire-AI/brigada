@@ -323,6 +323,57 @@ func TestServeCallStatus(t *testing.T) {
 	if !strings.Contains(text, "done 1") {
 		t.Errorf("status text = %q, want the seeded done job counted", text)
 	}
+	if !strings.Contains(text, "plans: none") || !strings.Contains(text, "needs you: nothing") {
+		t.Errorf("status text = %q, want the empty plans and needs-you sections said in words", text)
+	}
+}
+
+// TestServeCallStatusPlansAndNeedsYou covers the status tool's plans and
+// needs-you sections (§6.1, §6.2, §10): one line per plan, its tasks
+// indented beneath it with their branches, then the queue with each
+// entry's reason from its latest event — the same lines the client's
+// status command prints.
+func TestServeCallStatusPlansAndNeedsYou(t *testing.T) {
+	e := newEnv(t)
+	err := e.st.Update(context.Background(), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO plans (project_id, title, state, created_at, updated_at)
+			VALUES (1, 'fix the frobnicator', 'active', ?, ?)`, seedTS, seedTS); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, base_ref, caps, created_at, updated_at)
+			VALUES (1, 'the frobnicator', 'the spec', 'go test ./...', 'implement', 'ready', 'main', '{}', ?, ?)`, seedTS, seedTS); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, branch, base_ref, caps, created_at, updated_at)
+			VALUES (1, 'wire the sprocket', 'the spec', 'go test ./...', 'implement', 'needs_foreman', 'task/2-1', 'main', '{}', ?, ?)`, seedTS, seedTS); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
+			VALUES ('task_needs_help', 1, 2, NULL, '{"question":"should the sprocket be blue?"}', ?)`, seedTS)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed the plan and its tasks: %v", err)
+	}
+
+	s := start(t, e)
+	a := s.call(3, "tools/call", map[string]any{"name": "status", "arguments": map[string]any{}})
+	text, isError := toolText(t, a)
+	if isError {
+		t.Fatalf("status errored: %s", text)
+	}
+	for _, want := range []string{
+		"plans:\n",
+		"#1 active fix the frobnicator\n",
+		"  task #1 ready the frobnicator\n",
+		"  task #2 needs_foreman wire the sprocket [task/2-1]\n",
+		"needs you:\n",
+		"task #2 needs_foreman: should the sprocket be blue?",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("status text = %q, want it to contain %q", text, want)
+		}
+	}
 }
 
 // TestServeCallHistory covers the history tool (§9, §12.2): the

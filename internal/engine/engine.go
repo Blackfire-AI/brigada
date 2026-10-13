@@ -285,11 +285,15 @@ func capError(kind Kind, limit time.Duration) string {
 	return fmt.Sprintf("hard cap exceeded: %s jobs are capped at %s", kind, capText(limit))
 }
 
-// boundNote keeps a release reason to 500 bytes. The cut backs off to a
-// complete rune: it may not land inside one, nor on a lead byte whose
-// continuation was cut off.
+// boundNote keeps a release reason to 500 bytes.
 func boundNote(s string) string {
-	const max = 500
+	return cutRune(s, 500)
+}
+
+// cutRune keeps s within max bytes. The cut backs off to a complete
+// rune: it may not land inside one, nor on a lead byte whose
+// continuation was cut off.
+func cutRune(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
