@@ -1,10 +1,11 @@
 package engine
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
 // agented registers a runner advertising exactly one agent — family and
@@ -133,16 +134,23 @@ func TestTaskRunsReviewsAndFinishes(t *testing.T) {
 	if exclude := e.str("SELECT exclude_family FROM jobs WHERE id = ?", review); exclude != "anthropic" {
 		t.Errorf("review job exclude_family = %q, want the author's family", exclude)
 	}
-	// The reviewer's inputs ride the prompt column until the runner item
-	// composes them into one (F1d2): the spec, the check result and the
-	// branch — never the implementer's summary (§7).
-	prompt := e.str("SELECT prompt FROM jobs WHERE id = ?", review)
-	var inputs reviewInputs
-	if err := json.Unmarshal([]byte(prompt), &inputs); err != nil {
-		t.Fatalf("review prompt = %q: %v", prompt, err)
+	// The engine composes the reviewer's prompt itself (§1.4, §7) and
+	// stores it on the job: the review template with the spec and the
+	// check result verbatim, and the diff command naming the task's base
+	// and the result branch. The implementer's summary — "added the
+	// thing", in the completion above — is none of its inputs (§7's
+	// anti-steering rule).
+	promptOf := e.str("SELECT prompt FROM jobs WHERE id = ?", review)
+	if want := prompt.ComposeReviewPrompt("the spec", passCheck, "main", "task/1-1"); promptOf != want {
+		t.Errorf("review prompt = %q\nwant the composed\n%q", promptOf, want)
 	}
-	if inputs.Spec != "the spec" || inputs.Branch != "task/1-1" || string(inputs.CheckResult) != passCheck {
-		t.Errorf("review inputs = %+v, want the spec, the check result and the branch", inputs)
+	if strings.Contains(promptOf, "added the thing") {
+		t.Errorf("the review prompt carries the implementer's summary (§7):\n%s", promptOf)
+	}
+	// The branch and base stay on the task's own row (§6.1), where the
+	// review's grant reads them at lease time.
+	if branch := e.str("SELECT branch FROM tasks WHERE id = ?", e.task); branch != "task/1-1" {
+		t.Errorf("task branch = %q, want the result's", branch)
 	}
 
 	// The family rule (§7, §8): the author's runner — its only agent is
@@ -153,6 +161,15 @@ func TestTaskRunsReviewsAndFinishes(t *testing.T) {
 	rg := e.leaseAny(reviewer)
 	if rg == nil || rg.JobID != review {
 		t.Fatalf("the other-family runner leased %+v, want the review job %d", rg, review)
+	}
+	// The review's grant carries the branch to review and the base ref
+	// of the diff (§7), and no check to run: the task's check already
+	// spoke, at the work round this review judges.
+	if rg.ReviewBranch != "task/1-1" || rg.BaseRef != "main" {
+		t.Errorf("review grant branch/base = %q/%q, want task/1-1 on main", rg.ReviewBranch, rg.BaseRef)
+	}
+	if rg.CheckCmd != "" {
+		t.Errorf("review grant check = %q, want none", rg.CheckCmd)
 	}
 	if agent := e.int("SELECT COALESCE(agent_id, 0) FROM jobs WHERE id = ?", review); agent != e.agentOf(reviewer) {
 		t.Errorf("review job agent = %d, want the reviewer's %d", agent, e.agentOf(reviewer))

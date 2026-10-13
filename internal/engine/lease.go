@@ -40,9 +40,16 @@ type LeaseGrant struct {
 
 	Harness  string // the job's harness constraint; '' = any (§8)
 	RepoURL  string // the task's own repo, else the project's (§6.1)
-	BaseRef  string // the ref the worktree starts from
-	CheckCmd string // the check the runner runs after a done (§5.5); '' = none
-	Attempt  int64  // leases taken on the job, this one included
+	BaseRef  string // the ref the worktree starts from; for a review, the diff's base end (§7)
+	CheckCmd string // the check the runner runs after a done (§5.5); '' = none — always for a review
+	// ReviewBranch is the task's result branch a review job reviews
+	// (§7): the runner's worktree sits at it, fetched from the remote,
+	// and it is all the review reads — never pushed, never re-made.
+	// Empty for every kind but review: a work job's worktree makes its
+	// own branch. BaseRef and ReviewBranch together name the diff the
+	// review prompt tells the reviewer to run.
+	ReviewBranch string
+	Attempt      int64 // leases taken on the job, this one included
 	// ResumeSessionID is the harness session the key's last run ended
 	// on (§4.2), for a session-mode job to resume; empty when the key
 	// never ran or the job is fresh.
@@ -262,9 +269,17 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				return nil, err
 			}
 		}
-		repo, baseRef, checkCmd, err := taskInfoTx(tx, j)
+		repo, baseRef, checkCmd, branch, err := taskInfoTx(tx, j)
 		if err != nil {
 			return nil, err
+		}
+		reviewBranch := ""
+		if j.Kind == KindReview {
+			// The review reads the task's result branch (§7) and runs no
+			// check: the task's check already spoke, at the work round
+			// this review judges, so the grant carries the branch alone.
+			reviewBranch = branch
+			checkCmd = ""
 		}
 		resume := ""
 		if j.Mode == ModeSession {
@@ -294,6 +309,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			RepoURL:         repo,
 			BaseRef:         baseRef,
 			CheckCmd:        checkCmd,
+			ReviewBranch:    reviewBranch,
 			Attempt:         j.Attempts + 1,
 			ResumeSessionID: resume,
 		}, nil
@@ -442,19 +458,20 @@ func holdKey(layer string, job caps.Job) string {
 }
 
 // taskInfoTx reads the workspace fields of a worker job's task: the
-// repo URL (the task's own, else the project's, §6.1) and the base ref,
-// plus the check command the runner runs after a done (§5.5). A foreman
-// turn belongs to no task and gets empty fields.
-func taskInfoTx(tx *sql.Tx, j *jobRow) (repoURL, baseRef, checkCmd string, err error) {
+// repo URL (the task's own, else the project's, §6.1), the base ref,
+// the check command the runner runs after a done (§5.5), and the
+// result branch a review job reviews (§7). A foreman turn belongs to
+// no task and gets empty fields.
+func taskInfoTx(tx *sql.Tx, j *jobRow) (repoURL, baseRef, checkCmd, branch string, err error) {
 	if j.TaskID == 0 {
-		return "", "", "", nil
+		return "", "", "", "", nil
 	}
-	err = tx.QueryRow(`SELECT COALESCE(NULLIF(t.repo_url, ''), p.repo_url), t.base_ref, COALESCE(t.check_cmd, '')
+	err = tx.QueryRow(`SELECT COALESCE(NULLIF(t.repo_url, ''), p.repo_url), t.base_ref, COALESCE(t.check_cmd, ''), COALESCE(t.branch, '')
 		FROM tasks t JOIN plans pl ON pl.id = t.plan_id JOIN projects p ON p.id = pl.project_id
 		WHERE t.id = ?`, j.TaskID).
-		Scan(&repoURL, &baseRef, &checkCmd)
+		Scan(&repoURL, &baseRef, &checkCmd, &branch)
 	if err != nil {
-		return "", "", "", fmt.Errorf("read task %d: %w", j.TaskID, err)
+		return "", "", "", "", fmt.Errorf("read task %d: %w", j.TaskID, err)
 	}
-	return repoURL, baseRef, checkCmd, nil
+	return repoURL, baseRef, checkCmd, branch, nil
 }

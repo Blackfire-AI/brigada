@@ -274,23 +274,26 @@ type releaseRequest struct {
 
 // jobGrant is a lease grant as the runner receives it (§12.3): the job
 // to run, the lease to speak about it, and the task's workspace fields
-// (§5.1, §5.5).
+// (§5.1, §5.5, §7).
 type jobGrant struct {
-	JobID           int64     `json:"job_id"`
-	ProjectID       int64     `json:"project_id"`
-	TaskID          int64     `json:"task_id"`
-	Kind            string    `json:"kind"`
-	Mode            string    `json:"mode"`
-	Key             string    `json:"key"`
-	Prompt          string    `json:"prompt"`
-	LeaseID         string    `json:"lease_id"`
-	LeaseExpiresAt  time.Time `json:"lease_expires_at"`
-	Harness         string    `json:"harness"`
-	RepoURL         string    `json:"repo_url"`
-	BaseRef         string    `json:"base_ref"`
-	CheckCmd        string    `json:"check_cmd"`
-	Attempt         int64     `json:"attempt"`
-	ResumeSessionID string    `json:"resume_session_id"`
+	JobID          int64     `json:"job_id"`
+	ProjectID      int64     `json:"project_id"`
+	TaskID         int64     `json:"task_id"`
+	Kind           string    `json:"kind"`
+	Mode           string    `json:"mode"`
+	Key            string    `json:"key"`
+	Prompt         string    `json:"prompt"`
+	LeaseID        string    `json:"lease_id"`
+	LeaseExpiresAt time.Time `json:"lease_expires_at"`
+	Harness        string    `json:"harness"`
+	RepoURL        string    `json:"repo_url"`
+	BaseRef        string    `json:"base_ref"`
+	CheckCmd       string    `json:"check_cmd"`
+	// ReviewBranch is the task's result branch a review job reviews
+	// (§7): the worktree sits at it. Empty for every other kind.
+	ReviewBranch    string `json:"review_branch,omitempty"`
+	Attempt         int64  `json:"attempt"`
+	ResumeSessionID string `json:"resume_session_id"`
 	// ForemanToken is the lease-scoped foreman token (§12.1): minted with
 	// the lease of a foreman turn, empty for every task job. This grant
 	// is the secret's only appearance on the wire — the engine stores
@@ -315,6 +318,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		RepoURL:         g.RepoURL,
 		BaseRef:         g.BaseRef,
 		CheckCmd:        g.CheckCmd,
+		ReviewBranch:    g.ReviewBranch,
 		Attempt:         g.Attempt,
 		ResumeSessionID: g.ResumeSessionID,
 		ForemanToken:    g.ForemanToken,
