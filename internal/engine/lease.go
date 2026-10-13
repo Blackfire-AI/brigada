@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/caps"
 )
 
 // LeaseGrant is a job plus the lease that took it: what a runner needs
@@ -44,7 +46,8 @@ type LeaseGrant struct {
 // owner offers its harness and all its labels, is not the runner that
 // just released it (until the exclusion lapses), and — for a
 // session-mode job — is not a different runner than the one the key's
-// live session sits on.
+// live session sits on. A job whose path is full at a concurrency cap
+// is skipped and stays queued, waiting for a slot (§8.1).
 func (e *Engine) Lease(ctx context.Context, owner int64, harnesses, labels []string) (*LeaseGrant, error) {
 	var grant *LeaseGrant
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
@@ -84,6 +87,19 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		return nil, fmt.Errorf("list queued jobs: %w", err)
 	}
 	rows.Close()
+
+	// The gate's two fixed inputs (§8.1): the live jobs counted per
+	// layer, built once — a lease below adds to it, so a later decision
+	// in this same call sees the slot it took — and the cap this runner
+	// advertised, folded with the config's by caps.RunnerCap.
+	usage, err := capsUsageTx(tx)
+	if err != nil {
+		return nil, err
+	}
+	var advertised int
+	if err := tx.QueryRow("SELECT COALESCE((SELECT max_parallel FROM runners WHERE id = ?), 0)", owner).Scan(&advertised); err != nil {
+		return nil, fmt.Errorf("read runner %d: %w", owner, err)
+	}
 
 	nowStr := fmtTime(now)
 	for _, j := range queued {
@@ -125,11 +141,26 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 		}
 
-		leaseID, err := e.cfg.NewLeaseID(owner)
+		agent, err := leaseAgentTx(tx, owner, j.Harness)
 		if err != nil {
 			return nil, err
 		}
-		agent, err := leaseAgentTx(tx, owner, j.Harness)
+		// The cap gate (§8.1): the job starts only if every layer on its
+		// path has room. A full layer holds the job in place — it stays
+		// queued and the loop moves on, so a later job on a layer with
+		// room can still be leased — and the hold is stamped on the job,
+		// which is what keeps the queue TTL from failing it (§8.1).
+		cjob, err := capsJobTx(tx, owner, agent, advertised, j)
+		if err != nil {
+			return nil, err
+		}
+		if room, layer := caps.Room(e.cfg.Caps, usage, cjob); !room {
+			if err := holdAtCapTx(tx, j, layer, now); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		leaseID, err := e.cfg.NewLeaseID(owner)
 		if err != nil {
 			return nil, err
 		}
@@ -137,12 +168,14 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		_, err = tx.Exec(`UPDATE jobs SET status = 'leased', lease_id = ?, lease_owner = ?, lease_expires_at = ?,
 			lease_epoch = ?, fence_token = attempts + 1, attempts = attempts + 1, agent_id = ?,
 			first_leased = COALESCE(first_leased, ?), last_leased = ?, queued_at = NULL,
+			cap_held_at = NULL, cap_held_layer = NULL,
 			released_by = NULL, released_until = NULL, released_lease = NULL, updated_at = ?
 			WHERE id = ?`,
 			leaseID, owner, fmtTime(expires), epoch, nullIfZero(agent), nowStr, nowStr, nowStr, j.ID)
 		if err != nil {
 			return nil, fmt.Errorf("lease job %d: %w", j.ID, err)
 		}
+		usage.Add(cjob.Runner, cjob.Account, cjob.Model, cjob.Plan)
 		if j.Mode == ModeSession {
 			// The session now sits on this runner: later session jobs on
 			// the key are invisible to the others (§8).
@@ -213,6 +246,27 @@ func leaseAgentTx(tx *sql.Tx, runner int64, harness string) (int64, error) {
 		return 0, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 	}
 	return id, nil
+}
+
+// holdAtCapTx records that a full cap layer holds a queued job (§8.1).
+// cap_held_at is stamped on every hold — the queue TTL counts from the
+// later of queued_at and it, so a job runners keep finding cap-blocked
+// waits as long as it takes — while the job_cap_held event lands only
+// when the hold starts or moves to another layer, never per poll.
+func holdAtCapTx(tx *sql.Tx, j *jobRow, layer string, now time.Time) error {
+	nowStr := fmtTime(now)
+	if _, err := tx.Exec(`UPDATE jobs SET cap_held_at = ?, cap_held_layer = ?, updated_at = ? WHERE id = ?`,
+		nowStr, layer, nowStr, j.ID); err != nil {
+		return fmt.Errorf("hold job %d at the %s cap: %w", j.ID, layer, err)
+	}
+	if j.CapHeldLayer == layer {
+		return nil
+	}
+	if _, err := appendEventTx(tx, evJobCapHeld, j.ProjectID, j.TaskID, j.ID,
+		eventPayload{Layer: layer}, now); err != nil {
+		return err
+	}
+	return nil
 }
 
 // taskInfoTx reads the workspace fields of a worker job's task: the

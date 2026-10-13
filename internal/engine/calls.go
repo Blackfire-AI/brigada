@@ -104,9 +104,10 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, pro
 	if job.Status == statusQueued {
 		// The lease expired and nobody re-leased: revive it. last_leased
 		// restarts here and only here, so the revived lease's wall time
-		// is banked from this moment, not from the lapsed lease.
+		// is banked from this moment, not from the lapsed lease. Any cap
+		// hold on the queued stint is over: the job is live again.
 		if _, err := tx.Exec(`UPDATE jobs SET status = 'leased', last_leased = ?, lease_expires_at = ?,
-			queued_at = NULL, updated_at = ? WHERE id = ?`,
+				queued_at = NULL, cap_held_at = NULL, cap_held_layer = NULL, updated_at = ? WHERE id = ?`,
 			fmtTime(now), fmtTime(expires), fmtTime(now), job.ID); err != nil {
 			return "", time.Time{}, fmt.Errorf("revive job %d: %w", job.ID, err)
 		}

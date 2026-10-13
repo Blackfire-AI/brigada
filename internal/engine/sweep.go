@@ -46,7 +46,8 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 //  2. a live job past its kind's hard cap from first_leased fails with
 //     the cap named in the error (§14);
 //  3. a queued job nobody leased within the queue TTL fails, so it
-//     cannot wedge its key.
+//     cannot wedge its key — unless a runner keeps finding it held by a
+//     full cap layer, which restarts the clock (§8.1);
 //
 // Leased wall time is banked wherever a lease ends: expiry at the
 // expiry itself, a cap at the cap moment, never past them.
@@ -148,8 +149,12 @@ func sweepTx(tx *sql.Tx, cfg Config, now time.Time) (SweepReport, error) {
 	}
 
 	if cfg.QueueTTL > 0 {
+		// The TTL is for jobs no runner can serve (§8.1); a job held only
+		// by a full cap layer waits as long as it takes, so the clock
+		// counts from the later of queued_at and the last cap hold.
 		rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0) FROM jobs
-			WHERE status = 'queued' AND queued_at IS NOT NULL AND queued_at <= ?`, fmtTime(now.Add(-cfg.QueueTTL)))
+			WHERE status = 'queued' AND queued_at IS NOT NULL
+			AND max(queued_at, COALESCE(cap_held_at, queued_at)) <= ?`, fmtTime(now.Add(-cfg.QueueTTL)))
 		if err != nil {
 			return rep, fmt.Errorf("sweep queue TTL: %w", err)
 		}

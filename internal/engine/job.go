@@ -32,6 +32,8 @@ type jobRow struct {
 	FirstLeased    string
 	LastLeased     string
 	QueuedAt       string
+	CapHeldAt      string // when a lease poll last found the job held by a full cap layer (§8.1)
+	CapHeldLayer   string // the layer that held it; the job_cap_held event moves with a change
 	LeasedSeconds  int64
 	Harness        string
 	Labels         string
@@ -49,6 +51,7 @@ const jobColumns = `id, project_id, COALESCE(task_id, 0), kind, key, mode, promp
 	COALESCE(lease_id, ''), COALESCE(lease_owner, 0), COALESCE(lease_expires_at, ''), COALESCE(lease_epoch, 0),
 	COALESCE(fence_token, 0), followup, attempts, COALESCE(result, ''),
 	COALESCE(first_leased, ''), COALESCE(last_leased, ''), COALESCE(queued_at, ''),
+	COALESCE(cap_held_at, ''), COALESCE(cap_held_layer, ''),
 	COALESCE(leased_seconds, 0), harness, labels, restart,
 	COALESCE(released_by, 0), COALESCE(released_until, ''), COALESCE(release_note, ''),
 	COALESCE(released_lease, ''), COALESCE(done_lease, '')`
@@ -60,6 +63,7 @@ func scanJob(row interface{ Scan(dest ...any) error }) (*jobRow, error) {
 		&j.LeaseID, &j.LeaseOwner, &j.LeaseExpiresAt, &j.LeaseEpoch,
 		&j.FenceToken, &j.Followup, &j.Attempts, &j.Result,
 		&j.FirstLeased, &j.LastLeased, &j.QueuedAt,
+		&j.CapHeldAt, &j.CapHeldLayer,
 		&j.LeasedSeconds, &j.Harness, &j.Labels, &j.Restart,
 		&j.ReleasedBy, &j.ReleasedUntil, &j.ReleaseNote, &j.ReleasedLease,
 		&j.DoneLease)
