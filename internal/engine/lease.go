@@ -129,13 +129,17 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		if err != nil {
 			return nil, err
 		}
+		agent, err := leaseAgentTx(tx, owner, j.Harness)
+		if err != nil {
+			return nil, err
+		}
 		expires := now.Add(e.cfg.LeaseTTL)
 		_, err = tx.Exec(`UPDATE jobs SET status = 'leased', lease_id = ?, lease_owner = ?, lease_expires_at = ?,
-			lease_epoch = ?, fence_token = attempts + 1, attempts = attempts + 1,
+			lease_epoch = ?, fence_token = attempts + 1, attempts = attempts + 1, agent_id = ?,
 			first_leased = COALESCE(first_leased, ?), last_leased = ?, queued_at = NULL,
 			released_by = NULL, released_until = NULL, released_lease = NULL, updated_at = ?
 			WHERE id = ?`,
-			leaseID, owner, fmtTime(expires), epoch, nowStr, nowStr, nowStr, j.ID)
+			leaseID, owner, fmtTime(expires), epoch, nullIfZero(agent), nowStr, nowStr, nowStr, j.ID)
 		if err != nil {
 			return nil, fmt.Errorf("lease job %d: %w", j.ID, err)
 		}
@@ -186,6 +190,29 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		}, nil
 	}
 	return nil, nil // nothing this runner may take
+}
+
+// leaseAgentTx picks the agent a lease records on the job (§8.1): the
+// runner's first agent — by id — that matches the job's harness
+// constraint, or the runner's first agent when the job leaves the
+// harness open. 0 when the runner advertises no such agent: the job
+// then runs with nothing to count by at the account and model layers.
+func leaseAgentTx(tx *sql.Tx, runner int64, harness string) (int64, error) {
+	query := "SELECT id FROM agents WHERE runner_id = ?"
+	args := []any{runner}
+	if harness != "" {
+		query += " AND harness = ?"
+		args = append(args, harness)
+	}
+	var id int64
+	err := tx.QueryRow(query+" ORDER BY id LIMIT 1", args...).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil // the runner advertises no such agent
+	}
+	if err != nil {
+		return 0, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
+	}
+	return id, nil
 }
 
 // taskInfoTx reads the workspace fields of a worker job's task: the

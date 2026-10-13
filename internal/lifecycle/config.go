@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/Blackfire-AI/brigada/internal/caps"
 )
 
 // maxSocketPath is the longest Unix socket path the kernel accepts:
@@ -70,7 +72,8 @@ func CheckSocketPath(path string) error {
 // silently tune nothing.
 type FileConfig struct {
 	StateDir    string
-	IdleMinutes float64 // 0 = the default
+	IdleMinutes float64     // 0 = the default
+	Caps        caps.Limits // the concurrency caps and cost weights (§8.1); zero = none
 }
 
 // DefaultConfigPath is where the config file lives when nothing names
@@ -110,20 +113,72 @@ func LoadConfigFile(path string) (FileConfig, error) {
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
 		var err error
-		switch key {
-		case "state_dir":
+		switch {
+		case key == "state_dir":
 			cfg.StateDir = value
-		case "idle_minutes":
+		case key == "idle_minutes":
 			cfg.IdleMinutes, err = strconv.ParseFloat(value, 64)
 			if err == nil && cfg.IdleMinutes < 0 {
 				err = fmt.Errorf("negative")
 			}
-			if err != nil {
-				return FileConfig{}, fmt.Errorf("config %s: line %d: idle_minutes: %v", path, n+1, err)
-			}
+		case strings.HasPrefix(key, "caps."), strings.HasPrefix(key, "cost."):
+			err = setCap(&cfg.Caps, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir or idle_minutes", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, a caps.<layer> or a cost.<harness>/<model>", path, n+1, key)
+		}
+		if err != nil {
+			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)
 		}
 	}
 	return cfg, nil
+}
+
+// setCap sets one caps or cost key of §8.1 on l, mirroring the YAML
+// example there in the file's flat `key = value` shape: caps.global,
+// caps.plan, caps.runner, caps.account.<label>, caps.model.<model> and
+// cost.<harness>/<model>. Every value is a non-negative integer; a key
+// the file never names leaves the layer uncapped — or, for cost, the
+// weight at its default of 1.
+func setCap(l *caps.Limits, key, value string) error {
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 {
+		return fmt.Errorf("want a non-negative integer, got %q", value)
+	}
+	if rest, ok := strings.CutPrefix(key, "cost."); ok {
+		harness, model, ok := strings.Cut(rest, "/")
+		if !ok || harness == "" || model == "" {
+			return fmt.Errorf("want cost.<harness>/<model>")
+		}
+		if l.Cost == nil {
+			l.Cost = map[string]int{}
+		}
+		l.Cost[harness+"/"+model] = n
+		return nil
+	}
+	rest, _ := strings.CutPrefix(key, "caps.")
+	switch {
+	case rest == "global":
+		l.Global = &n
+	case rest == "plan":
+		l.Plan = &n
+	case rest == "runner":
+		l.Runner = &n
+	default:
+		if label, ok := strings.CutPrefix(rest, "account."); ok && label != "" {
+			if l.Account == nil {
+				l.Account = map[string]int{}
+			}
+			l.Account[label] = n
+			return nil
+		}
+		if model, ok := strings.CutPrefix(rest, "model."); ok && model != "" {
+			if l.Model == nil {
+				l.Model = map[string]int{}
+			}
+			l.Model[model] = n
+			return nil
+		}
+		return fmt.Errorf("unknown caps layer %q; want global, plan, runner, account.<label> or model.<model>", rest)
+	}
+	return nil
 }

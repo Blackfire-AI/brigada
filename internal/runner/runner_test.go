@@ -712,7 +712,7 @@ func TestRunnerLeaseLostMidRun(t *testing.T) {
 
 	// The second runner long-polls until the lapse hands it the job.
 	r2 := api.NewClient(e.socket, e.secrets["r2"])
-	if err := r2.Register(e.ctx, nil); err != nil {
+	if err := r2.Register(e.ctx, nil, 0); err != nil {
 		t.Fatalf("register r2: %v", err)
 	}
 	grant, err := r2.Lease(e.ctx, 5*time.Second, nil, nil)

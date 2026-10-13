@@ -242,6 +242,7 @@ func TestOpenUpgradesAV1Store(t *testing.T) {
 	plan := insertPlan(t, db, project)
 	task := insertTask(t, db, plan)
 	job := insertJob(t, db, project, task, fmt.Sprintf("task:%d", task), "done")
+	runner := insertRunner(t, db)
 	if err := db.Close(); err != nil {
 		t.Fatalf("close raw store: %v", err)
 	}
@@ -267,6 +268,12 @@ func TestOpenUpgradesAV1Store(t *testing.T) {
 		if !slices.Contains(got, want) {
 			t.Errorf("jobs after upgrade has no %s column", want)
 		}
+	}
+	if cols := queryStrings(t, s.db, "SELECT name FROM pragma_table_info('runners')"); !slices.Contains(cols, "max_parallel") {
+		t.Errorf("runners after upgrade has no max_parallel column: %v", cols)
+	}
+	if n := queryInt(t, s.db, "SELECT max_parallel FROM runners WHERE id = ?", runner); n != 0 {
+		t.Errorf("v1 runner max_parallel = %d, want the 0 default", n)
 	}
 	if status := queryString(t, s.db, "SELECT status FROM jobs WHERE id = ?", job); status != "done" {
 		t.Errorf("v1 job after upgrade = %q, want done untouched", status)

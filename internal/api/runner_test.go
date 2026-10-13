@@ -347,7 +347,7 @@ func TestClientRunnerProtocol(t *testing.T) {
 	if err := c.Register(e.ctx, []Agent{{
 		Adapter: "fake", Harness: "fake", Model: "fake-1",
 		Family: "testfam", Account: "acct-1", Classes: []string{"implement"},
-	}}); err != nil {
+	}}, 0); err != nil {
 		t.Fatalf("client register: %v", err)
 	}
 	jobID := e.submitWork()
@@ -382,7 +382,7 @@ func TestClientRunnerProtocol(t *testing.T) {
 		t.Fatalf("complete after release = %s, %v; want lost", ans, err)
 	}
 	// A wrong token is an error, not an answer.
-	if err := NewClient(e.srv.Listener.Addr().String(), "not-the-secret").Register(e.ctx, nil); err == nil {
+	if err := NewClient(e.srv.Listener.Addr().String(), "not-the-secret").Register(e.ctx, nil, 0); err == nil {
 		t.Error("an unknown token was accepted, want an error")
 	}
 }

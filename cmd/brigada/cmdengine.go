@@ -39,6 +39,7 @@ func runEngine(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	err := lifecycle.Run(ctx, lifecycle.Config{
 		StateDir: rt.stateDir,
 		Idle:     idle,
+		Caps:     rt.file.Caps,
 		// The §10 notifications arrive in a later phase; the hook is the
 		// engine's promise to flush them before an idle exit.
 		FlushNotifications: nil,

@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Blackfire-AI/brigada/internal/caps"
 	"github.com/Blackfire-AI/brigada/internal/store"
 )
 
@@ -126,6 +127,10 @@ type Config struct {
 	// RoundCaps are the default per-task round caps; a task's caps JSON
 	// ("fix", "review", "restart") overrides them per task.
 	RoundCaps RoundCaps
+	// Caps are the layered concurrency caps and cost weights (§8.1),
+	// as the config named them; the zero value caps nothing. A runner's
+	// own advertised cap folds into the runner layer.
+	Caps caps.Limits
 	// DataDir is where the engine keeps its artifact blobs (§9), laid
 	// out content-addressed under artifacts/<sha256[:2]>/<sha256>. Zero
 	// derives the directory of the store file; a store with no file of
@@ -224,6 +229,10 @@ func New(s *store.Store, cfg Config) *Engine {
 	if cfg.RoundCaps.Restart > 0 {
 		def.RoundCaps.Restart = cfg.RoundCaps.Restart
 	}
+	// The caps have no nonzero default to keep: the zero Limits caps
+	// nothing, which is the default, so the configured value stands as
+	// given — a set limit of 0 caps that layer at nothing (§8.1).
+	def.Caps = cfg.Caps
 	if cfg.DataDir != "" {
 		def.DataDir = cfg.DataDir
 	} else if p := s.Path(); p != "" && p != ":memory:" {

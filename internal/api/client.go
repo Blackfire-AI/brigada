@@ -57,10 +57,11 @@ type Agent struct {
 }
 
 // Register registers the runner under its token's name with its
-// advertised agents (§5.1, §12.3). A re-register replaces the runner's
-// set.
-func (c *Client) Register(ctx context.Context, agents []Agent) error {
-	body := advertiseRequest{Agents: make([]agentAdvert, len(agents))}
+// advertised agents (§5.1, §12.3) and its own cap on parallel jobs
+// (§8.1); maxParallel 0 means the runner advertised none. A re-register
+// replaces the runner's set.
+func (c *Client) Register(ctx context.Context, agents []Agent, maxParallel int) error {
+	body := advertiseRequest{MaxParallel: maxParallel, Agents: make([]agentAdvert, len(agents))}
 	for i, a := range agents {
 		body.Agents[i] = agentAdvert{
 			Adapter: a.Adapter, Harness: a.Harness, Model: a.Model,
