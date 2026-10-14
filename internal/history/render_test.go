@@ -38,6 +38,11 @@ func goldenItems() []Item {
 			Content:   `{"status":"done","summary":"added the README","branch":"task/3-1"}`,
 			CreatedAt: "2026-10-12T12:04:00.000000000Z",
 		},
+		{
+			Type: TypeEvent, ID: 4, Kind: "foreman_report", ProjectID: 7, JobID: 12,
+			Payload:   []byte(`{"report":"the task's question is answered\nnothing needs you"}`),
+			CreatedAt: "2026-10-12T12:05:00.000000000Z",
+		},
 	}
 }
 

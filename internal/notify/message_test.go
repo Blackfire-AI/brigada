@@ -7,64 +7,95 @@ import (
 
 func TestMessage(t *testing.T) {
 	cases := []struct {
-		name string
-		ev   Event
-		body string
-		ok   bool
+		name  string
+		ev    Event
+		title string
+		body  string
+		ok    bool
 	}{
 		{
-			name: "plan done",
-			ev:   Event{Kind: KindPlanDone, PlanID: 7, PlanTitle: "Fix the parser"},
-			body: "plan #7 done: Fix the parser",
-			ok:   true,
+			name:  "plan done",
+			ev:    Event{Kind: KindPlanDone, PlanID: 7, PlanTitle: "Fix the parser"},
+			title: "brigada",
+			body:  "plan #7 done: Fix the parser",
+			ok:    true,
 		},
 		{
-			name: "check failed",
-			ev:   Event{Kind: KindTaskCheckFailed, Parked: true, TaskID: 3, Reason: "exit 1: parser_test.go:42"},
-			body: "task #3 needs you: exit 1: parser_test.go:42",
-			ok:   true,
+			name:  "foreman report reads its first line",
+			ev:    Event{Kind: KindForemanReport, Reason: "plan #2 done: merge task/6-1 then task/7-1\nthe rest waits for you"},
+			title: "brigada foreman",
+			body:  "plan #2 done: merge task/6-1 then task/7-1",
+			ok:    true,
 		},
 		{
-			name: "needs help reads the question",
-			ev:   Event{Kind: KindTaskNeedsHelp, Parked: true, TaskID: 4, Reason: "ignored", PlanTitle: "x"},
-			body: "task #4 needs you: ignored",
-			ok:   true,
+			name:  "foreman report needs no park",
+			ev:    Event{Kind: KindForemanReport, Reason: "all quiet; nothing needs you"},
+			title: "brigada foreman",
+			body:  "all quiet; nothing needs you",
+			ok:    true,
 		},
 		{
-			name: "run failed",
-			ev:   Event{Kind: KindTaskFailed, Parked: true, TaskID: 5, Reason: "the CLI died mid-run"},
-			body: "task #5 needs you: the CLI died mid-run",
-			ok:   true,
+			name:  "foreman report falls back to the kind",
+			ev:    Event{Kind: KindForemanReport},
+			title: "brigada foreman",
+			body:  "foreman_report",
+			ok:    true,
 		},
 		{
-			name: "review changes read the findings",
-			ev:   Event{Kind: KindReviewChanges, Parked: true, TaskID: 6, Reason: "the off-by-one in retry"},
-			body: "task #6 needs you: the off-by-one in retry",
-			ok:   true,
+			name:  "check failed",
+			ev:    Event{Kind: KindTaskCheckFailed, Parked: true, TaskID: 3, Reason: "exit 1: parser_test.go:42"},
+			title: "brigada",
+			body:  "task #3 needs you: exit 1: parser_test.go:42",
+			ok:    true,
 		},
 		{
-			name: "no verdict",
-			ev:   Event{Kind: KindReviewNoVerdict, Parked: true, TaskID: 7, Reason: "verdict block missing"},
-			body: "task #7 needs you: verdict block missing",
-			ok:   true,
+			name:  "needs help reads the question",
+			ev:    Event{Kind: KindTaskNeedsHelp, Parked: true, TaskID: 4, Reason: "ignored", PlanTitle: "x"},
+			title: "brigada",
+			body:  "task #4 needs you: ignored",
+			ok:    true,
 		},
 		{
-			name: "out of rounds, once the engine emits it",
-			ev:   Event{Kind: KindTaskOutOfRounds, Parked: true, TaskID: 8, Reason: "fix rounds spent"},
-			body: "task #8 needs you: fix rounds spent",
-			ok:   true,
+			name:  "run failed",
+			ev:    Event{Kind: KindTaskFailed, Parked: true, TaskID: 5, Reason: "the CLI died mid-run"},
+			title: "brigada",
+			body:  "task #5 needs you: the CLI died mid-run",
+			ok:    true,
 		},
 		{
-			name: "empty reason falls back to the kind",
-			ev:   Event{Kind: KindTaskCheckFailed, Parked: true, TaskID: 9},
-			body: "task #9 needs you: task_check_failed",
-			ok:   true,
+			name:  "review changes read the findings",
+			ev:    Event{Kind: KindReviewChanges, Parked: true, TaskID: 6, Reason: "the off-by-one in retry"},
+			title: "brigada",
+			body:  "task #6 needs you: the off-by-one in retry",
+			ok:    true,
 		},
 		{
-			name: "reason flattens to one line",
-			ev:   Event{Kind: KindTaskCheckFailed, Parked: true, TaskID: 2, Reason: "first line\nsecond\tline"},
-			body: "task #2 needs you: first line second line",
-			ok:   true,
+			name:  "no verdict",
+			ev:    Event{Kind: KindReviewNoVerdict, Parked: true, TaskID: 7, Reason: "verdict block missing"},
+			title: "brigada",
+			body:  "task #7 needs you: verdict block missing",
+			ok:    true,
+		},
+		{
+			name:  "out of rounds, once the engine emits it",
+			ev:    Event{Kind: KindTaskOutOfRounds, Parked: true, TaskID: 8, Reason: "fix rounds spent"},
+			title: "brigada",
+			body:  "task #8 needs you: fix rounds spent",
+			ok:    true,
+		},
+		{
+			name:  "empty reason falls back to the kind",
+			ev:    Event{Kind: KindTaskCheckFailed, Parked: true, TaskID: 9},
+			title: "brigada",
+			body:  "task #9 needs you: task_check_failed",
+			ok:    true,
+		},
+		{
+			name:  "reason flattens to one line",
+			ev:    Event{Kind: KindTaskCheckFailed, Parked: true, TaskID: 2, Reason: "first line\nsecond\tline"},
+			title: "brigada",
+			body:  "task #2 needs you: first line second line",
+			ok:    true,
 		},
 		// Everything else in the log never notifies.
 		{name: "job created", ev: Event{Kind: "job_created", TaskID: 1}},
@@ -87,8 +118,8 @@ func TestMessage(t *testing.T) {
 			if !tc.ok {
 				return
 			}
-			if title != "brigada" {
-				t.Errorf("title = %q, want brigada", title)
+			if title != tc.title {
+				t.Errorf("title = %q, want %q", title, tc.title)
 			}
 			if body != tc.body {
 				t.Errorf("body = %q, want %q", body, tc.body)
@@ -111,6 +142,23 @@ func TestMessageBodyLimit(t *testing.T) {
 	}
 	if !strings.HasSuffix(body, "x") {
 		t.Errorf("body ends mid-rune: %q", body)
+	}
+
+	// A report's banner is bounded the same way: its first line alone,
+	// cut at the limit, the lines after it never joined in.
+	report := Event{Kind: KindForemanReport, Reason: strings.Repeat("y", bodyLimit*2) + "\nsecond line"}
+	title, body, ok := Message(report)
+	if !ok {
+		t.Fatal("a long report must still notify")
+	}
+	if title != foremanTitle {
+		t.Errorf("title = %q, want %q", title, foremanTitle)
+	}
+	if len(body) > bodyLimit {
+		t.Errorf("report body is %d bytes, want it bounded at %d", len(body), bodyLimit)
+	}
+	if strings.Contains(body, "second line") {
+		t.Errorf("report body = %q, want the first line alone", body)
 	}
 }
 
@@ -147,6 +195,9 @@ func TestReasonOf(t *testing.T) {
 			`{"question":"how deep?\nnow","reason":"tail"}`, "how deep? now"},
 		{"findings win for review changes", KindReviewChanges,
 			`{"findings":"off by one","reason":"tail"}`, "off by one"},
+		{"a report keeps its first line", KindForemanReport,
+			`{"report":"plan #3 done: merge task/4-1\nthen task/5-1"}`, "plan #3 done: merge task/4-1"},
+		{"a report that names nothing yields nothing", KindForemanReport, `{"reason":"tail"}`, ""},
 		{"reason for the rest", KindTaskCheckFailed,
 			`{"reason":"exit 3\nboom"}`, "exit 3 boom"},
 		{"status-only payload yields nothing", KindTaskFailed, `{"status":"needs_foreman"}`, ""},

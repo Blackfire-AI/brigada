@@ -326,11 +326,15 @@ func TestServeCallStatus(t *testing.T) {
 	if !strings.Contains(text, "plans: none") || !strings.Contains(text, "needs you: nothing") {
 		t.Errorf("status text = %q, want the empty plans and needs-you sections said in words", text)
 	}
+	if !strings.Contains(text, "foreman report: none") {
+		t.Errorf("status text = %q, want a foreman that never reported said in words", text)
+	}
 }
 
-// TestServeCallStatusPlansAndNeedsYou covers the status tool's plans and
-// needs-you sections (§6.1, §6.2, §10): one line per plan, its tasks
-// indented beneath it with their branches, then the queue with each
+// TestServeCallStatusPlansAndNeedsYou covers the status tool's plans,
+// report and needs-you sections (§6.1, §6.2, §3, §10): one line per
+// plan, its tasks indented beneath it with their branches, the latest
+// foreman report with its time and lines, then the queue with each
 // entry's reason from its latest event — the same lines the client's
 // status command prints.
 func TestServeCallStatusPlansAndNeedsYou(t *testing.T) {
@@ -348,8 +352,12 @@ func TestServeCallStatusPlansAndNeedsYou(t *testing.T) {
 			VALUES (1, 'wire the sprocket', 'the spec', 'go test ./...', 'implement', 'needs_foreman', 'task/2-1', 'main', '{}', ?, ?)`, seedTS, seedTS); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
+			VALUES ('task_needs_help', 1, 2, NULL, '{"question":"should the sprocket be blue?"}', ?)`, seedTS); err != nil {
+			return err
+		}
 		_, err := tx.Exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
-			VALUES ('task_needs_help', 1, 2, NULL, '{"question":"should the sprocket be blue?"}', ?)`, seedTS)
+			VALUES ('foreman_report', 1, NULL, NULL, '{"report":"woke for the question of task 2; parked for you\nmerge task/2-1 when approved"}', ?)`, seedTS)
 		return err
 	})
 	if err != nil {
@@ -367,6 +375,9 @@ func TestServeCallStatusPlansAndNeedsYou(t *testing.T) {
 		"#1 active fix the frobnicator\n",
 		"  task #1 ready the frobnicator\n",
 		"  task #2 needs_foreman wire the sprocket [task/2-1]\n",
+		"foreman report:\n",
+		seedTS + " project #1: woke for the question of task 2; parked for you\n",
+		"  merge task/2-1 when approved\n",
 		"needs you:\n",
 		"task #2 needs_foreman: should the sprocket be blue?",
 	} {

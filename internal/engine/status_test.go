@@ -259,6 +259,75 @@ func TestStatusNeedsYouReasonsFromTheLatestParkingEvent(t *testing.T) {
 	}
 }
 
+// TestStatusShowsTheLatestForemanReport covers the report the status
+// carries (§3, §10): the scope's latest foreman_report — the moment it
+// landed and the first lines of its text, the rest left to the history
+// — or nothing at all when no turn has reported yet.
+func TestStatusShowsTheLatestForemanReport(t *testing.T) {
+	e := newEnv(t)
+	addReport := func(project int64, text string) {
+		e.t.Helper()
+		e.exec(`INSERT INTO events (kind, project_id, payload, created_at)
+			VALUES (?, ?, ?, ?)`, evForemanReport, project,
+			`{"report":`+mustJSON(text)+`}`, fmtTime(e.clock.Now()))
+	}
+
+	// Two reports of the fixture's project and an older one of another:
+	// a scoped read shows the project's latest, an unscoped one the
+	// latest of them all, and a scope without reports shows none.
+	other := e.addProject("https://example.invalid/other.git")
+	addReport(other, "their first turn ended quietly")
+	e.clock.Advance(time.Minute)
+	addReport(e.project, "woke for the question of task 4; answered it")
+	e.clock.Advance(time.Minute)
+	at := fmtTime(e.clock.Now())
+	addReport(e.project, "plan 2 done: every task approved\nmerge task/6-1\nthen task/7-1\nthen task/8-1\nthen task/9-1\nthen task/10-1")
+
+	st, err := e.eng.Status(e.ctx, e.project)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if st.Report == nil {
+		t.Fatal("the scoped status carries no report, want the project's latest")
+	}
+	if st.Report.ProjectID != e.project || st.Report.CreatedAt != at {
+		t.Errorf("the report = project %d at %s, want project %d at %s (the latest, not the first)",
+			st.Report.ProjectID, st.Report.CreatedAt, e.project, at)
+	}
+	// The first few lines show; the sixth stays for the history.
+	want := "plan 2 done: every task approved\nmerge task/6-1\nthen task/7-1\nthen task/8-1\nthen task/9-1"
+	if st.Report.Text != want {
+		t.Errorf("the report text = %q, want the first %d lines:\n%q", st.Report.Text, statusReportLines, want)
+	}
+
+	all, err := e.eng.Status(e.ctx, 0)
+	if err != nil {
+		t.Fatalf("status of every project: %v", err)
+	}
+	if all.Report == nil || all.Report.ProjectID != e.project || all.Report.CreatedAt != at {
+		t.Errorf("the unscoped report = %+v, want the latest of all the projects", all.Report)
+	}
+
+	theirs, err := e.eng.Status(e.ctx, other)
+	if err != nil {
+		t.Fatalf("status of the other project: %v", err)
+	}
+	if theirs.Report == nil || theirs.Report.ProjectID != other || theirs.Report.Text != "their first turn ended quietly" {
+		t.Errorf("the other project's report = %+v, want its own", theirs.Report)
+	}
+
+	// A project whose foreman never reported shows nothing, not an
+	// empty report.
+	fresh := e.addProject("https://example.invalid/fresh.git")
+	st, err = e.eng.Status(e.ctx, fresh)
+	if err != nil {
+		t.Fatalf("status of the fresh project: %v", err)
+	}
+	if st.Report != nil {
+		t.Errorf("the fresh project's report = %+v, want none", st.Report)
+	}
+}
+
 func TestStatusScopesToTheCallersProject(t *testing.T) {
 	e := newEnv(t)
 

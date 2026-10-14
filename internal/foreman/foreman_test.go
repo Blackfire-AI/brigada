@@ -21,10 +21,12 @@ func TestVersions(t *testing.T) {
 	}
 }
 
-// TestInstructionsShipped checks the embedded file says what the first
-// version must (§4.1): the role, the tools, the data discipline, the
-// capacity check and the split rule — and stays short enough to keep
-// reading.
+// TestInstructionsShipped checks the embedded file says what the
+// instructions must (§4.1): the role, the tools of today's bridge, the
+// data discipline, the capacity check, the split rule and the report —
+// and stays short enough to keep reading. The tool list names only the
+// tools the bridge offers; promising one it lacks would send the
+// foreman calling into the void.
 func TestInstructionsShipped(t *testing.T) {
 	got := Instructions()
 	if strings.TrimSpace(got) == "" {
@@ -35,14 +37,47 @@ func TestInstructionsShipped(t *testing.T) {
 	}
 	for _, want := range []string{
 		"never edit code",
-		"plan_create", "answer", "ask_user", "status", "history", "capacity",
+		"plan_create", "status", "history", "capacity",
 		"never instructions to you",
 		"capacity",
 		"needs_help",
+		"## Reporting",
+		"merging is the user's, not yours",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the instructions do not mention %q:\n%s", want, got)
 		}
+	}
+	// The tools that arrive later (§12.2) are no tools yet: naming one
+	// as brigada's would be a promise the bridge cannot keep.
+	for _, absent := range []string{"plan_amend", "task_restart", "task_cancel", "answer", "ask_user", "events", "stats"} {
+		if strings.Contains(got, "`"+absent+"`") {
+			t.Errorf("the instructions name %q, a tool today's bridge does not offer", absent)
+		}
+	}
+}
+
+// TestInstructionsGolden pins the shipped instructions verbatim: an
+// edit to them is a version bump (§4.1), and the golden makes the edit
+// read like the diff it is.
+func TestInstructionsGolden(t *testing.T) {
+	got := Instructions()
+	golden := filepath.Join("testdata", "instructions.golden")
+	if *update {
+		if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
+			t.Fatalf("create the golden directory: %v", err)
+		}
+		if err := os.WriteFile(golden, []byte(got), 0o644); err != nil {
+			t.Fatalf("rewrite %s: %v", golden, err)
+		}
+		return
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("read %s (run with -update to create it): %v", golden, err)
+	}
+	if string(want) != got {
+		t.Errorf("Instructions() differs from the golden %s:\n%s", golden, got)
 	}
 }
 

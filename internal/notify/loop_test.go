@@ -127,6 +127,29 @@ func TestLoopFailingNotifierDoesNotStall(t *testing.T) {
 	}
 }
 
+// TestLoopDeliversForemanReport covers a report's delivery (§3, §10):
+// the banner carries the foreman's name and the report's first line,
+// and — unlike a parked task's kinds — no gate holds it back.
+func TestLoopDeliversForemanReport(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t, ctx, filepath.Join(t.TempDir(), "store.db"))
+	defer st.Close()
+	seedProject(t, ctx, st)
+
+	appendEvent(t, ctx, st, "job_created", 0, 0, "{}")
+	appendEvent(t, ctx, st, KindForemanReport, 1, 0,
+		`{"report":"plan #1 done: merge task/1-1 then task/2-1\nnothing else needs you"}`)
+
+	fake := &Fake{}
+	if err := NewLoop(st, fake, nil).Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	notes := fake.Notes()
+	if len(notes) != 1 || notes[0] != (Note{foremanTitle, "plan #1 done: merge task/1-1 then task/2-1"}) {
+		t.Fatalf("notes %v, want the report's first line under the foreman's title", notes)
+	}
+}
+
 func TestLoopNoneNotifierStillAdvances(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t, ctx, filepath.Join(t.TempDir(), "store.db"))

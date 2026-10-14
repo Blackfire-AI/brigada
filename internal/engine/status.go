@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -18,18 +19,36 @@ const statusDoneWindow = 24 * time.Hour
 // carries (§10): one line, about this many bytes, never a paragraph.
 const needsYouReasonLimit = 160
 
+// statusReportLines is how much of the latest foreman report the status
+// shows (§10): the first few lines, the rest kept for the history. The
+// payload itself is already bounded where the engine wrote it.
+const statusReportLines = 5
+
 // StatusInfo is the engine's own state as the API shows it (§13): which
 // process is the engine, since when, the jobs by status — and the plans
-// (§6.1, §6.2) with the "needs you" queue (§10): the tasks parked for a
-// person and the plans waiting for approval. The pid and start are what
-// the lifecycle recorded (RecordInstance); a store no engine of this
-// binary has recorded shows zero values.
+// (§6.1, §6.2) with the latest foreman report (§3, §10) and the "needs
+// you" queue (§10): the tasks parked for a person and the plans waiting
+// for approval. The pid and start are what the lifecycle recorded
+// (RecordInstance); a store no engine of this binary has recorded shows
+// zero values.
 type StatusInfo struct {
 	Pid       int64          `json:"pid"`
 	StartedAt string         `json:"started_at"`
 	Jobs      map[string]int `json:"jobs"`
 	Plans     []StatusPlan   `json:"plans"`
+	Report    *StatusReport  `json:"report,omitempty"`
 	NeedsYou  []NeedsYouItem `json:"needs_you"`
+}
+
+// StatusReport is the latest foreman report the status shows (§3, §10):
+// the final message of the project's last done foreman turn — when it
+// ended, and the first lines of what it said. The foreman token's scope
+// is one project; a caller reading every project sees the latest report
+// among them, the project named by its id.
+type StatusReport struct {
+	ProjectID int64  `json:"project_id"`
+	CreatedAt string `json:"created_at"`
+	Text      string `json:"text"`
 }
 
 // StatusPlan is one plan the status lists (§6.1, §6.2, §10): every
@@ -126,6 +145,9 @@ func (e *Engine) Status(ctx context.Context, project int64) (StatusInfo, error) 
 		if info.Plans, err = statusPlansTx(tx, project, now); err != nil {
 			return err
 		}
+		if info.Report, err = statusReportTx(tx, project); err != nil {
+			return err
+		}
 		if info.NeedsYou, err = statusNeedsYouTx(tx, project); err != nil {
 			return err
 		}
@@ -198,6 +220,47 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64) ([]StatusTask, error) {
 		return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
 	}
 	return tasks, nil
+}
+
+// statusReportTx reads the latest foreman report in scope (§3, §10):
+// the newest foreman_report event of the project — of every project
+// when the caller reads all — with the moment it landed and the first
+// lines of its text. A scope with no report yet reads nil.
+func statusReportTx(tx *sql.Tx, project int64) (*StatusReport, error) {
+	query := `SELECT COALESCE(project_id, 0), payload, created_at
+		FROM events WHERE kind = ?`
+	args := []any{evForemanReport}
+	if project != 0 {
+		query += " AND project_id = ?"
+		args = append(args, project)
+	}
+	query += " ORDER BY id DESC LIMIT 1"
+	var rep StatusReport
+	var payload string
+	err := tx.QueryRow(query, args...).Scan(&rep.ProjectID, &payload, &rep.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read the latest foreman report: %w", err)
+	}
+	var p eventPayload
+	if json.Unmarshal([]byte(payload), &p) == nil {
+		rep.Text = firstLines(p.Report, statusReportLines)
+	}
+	return &rep, nil
+}
+
+// firstLines keeps s's first max lines, the rest left to the history.
+func firstLines(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= max {
+		return s
+	}
+	return strings.Join(lines[:max], "\n")
 }
 
 // needsYouEventKinds are the event kinds whose payload carries a parked

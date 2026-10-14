@@ -63,6 +63,11 @@ func TestStatusEndpointPlansAndNeedsYou(t *testing.T) {
 			e.project1, e.task, now); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
+			VALUES ('foreman_report', ?, NULL, NULL, '{"report":"woke for the question of task 1; parked for you"}', ?)`,
+			e.project1, now); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`UPDATE tasks SET state = 'needs_foreman' WHERE id = ?`, e.task); err != nil {
 			return err
 		}
@@ -133,6 +138,12 @@ func TestStatusEndpointPlansAndNeedsYou(t *testing.T) {
 	if len(fst.NeedsYou) != 1 || fst.NeedsYou[0].ID != e.task ||
 		fst.NeedsYou[0].Reason != "which API should the client call?" {
 		t.Errorf("the foreman's needs you = %+v, want its own task with its reason", fst.NeedsYou)
+	}
+	// The latest report rides the same scoping: the foreman's own
+	// project's, with its text verbatim.
+	if fst.Report == nil || fst.Report.ProjectID != e.project1 ||
+		fst.Report.Text != "woke for the question of task 1; parked for you" {
+		t.Errorf("the foreman's report = %+v, want its own project's with its text", fst.Report)
 	}
 }
 

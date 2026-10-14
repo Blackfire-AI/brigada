@@ -37,6 +37,7 @@ type eventPayload struct {
 	Reason   string `json:"reason,omitempty"`
 	Question string `json:"question,omitempty"`
 	Findings string `json:"findings,omitempty"`
+	Report   string `json:"report,omitempty"`
 }
 
 // Loop is the delivery loop (§13): it polls the event log for rows
@@ -208,8 +209,9 @@ func parkedBy(payload string) bool {
 // "needs you" queue makes: the worker's question for a needs_help, the
 // review's findings for review changes, the named reason — the check's
 // tail, the failure's words — for the rest, flattened to one line. A
-// payload that names nothing yields the empty string and Message falls
-// back to the kind itself.
+// foreman report is its payload's own field, kept to its first line —
+// the line the banner shows. A payload that names nothing yields the
+// empty string and Message falls back to the kind itself.
 func reasonOf(kind, payload string) string {
 	if payload == "" {
 		return ""
@@ -217,6 +219,9 @@ func reasonOf(kind, payload string) string {
 	var p eventPayload
 	if err := json.Unmarshal([]byte(payload), &p); err != nil {
 		return ""
+	}
+	if kind == KindForemanReport {
+		return firstLine(p.Report)
 	}
 	reason := p.Reason
 	switch kind {
