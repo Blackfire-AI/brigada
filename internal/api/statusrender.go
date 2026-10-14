@@ -82,8 +82,9 @@ func runningLines(jobs []engine.StatusJob, now time.Time) []string {
 }
 
 // describeJob is one running job in a few words: "task #3 work ·
-// claude/sonnet · 1m40s · tool_start Edit". A foreman turn names no
-// task; the parts the engine does not know yet are left out.
+// claude/sonnet · 1m40s · Edit". A foreman turn names no task; the
+// parts the engine does not know yet are left out. A "tool_start Edit"
+// event shows as the tool's name alone; other events show as they are.
 func describeJob(j engine.StatusJob, now time.Time) string {
 	head := fmt.Sprintf("job #%d", j.ID)
 	if j.TaskID != 0 {
@@ -101,7 +102,7 @@ func describeJob(j engine.StatusJob, now time.Time) string {
 		parts = append(parts, now.Sub(t).Truncate(time.Second).String())
 	}
 	if j.LastEvent != "" {
-		parts = append(parts, j.LastEvent)
+		parts = append(parts, strings.TrimPrefix(j.LastEvent, "tool_start "))
 	}
 	return strings.Join(parts, " · ")
 }

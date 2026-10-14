@@ -138,7 +138,9 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, pro
 // (§5.6): last_progress_at when the worker last made progress,
 // last_activity_at for the last sign of life — a heartbeat with no
 // progress yet still counts as activity, since the runner is on the
-// job. The events are not stored; they ride the protocol for the
+// job. Of the events only one line is stored, the newest that is not a
+// tool end: a tool end carries the call's id, not the tool's name, so
+// it says nothing to a person. The rest ride the protocol for the
 // reports that need them.
 func recordProgressTx(tx *sql.Tx, jobID int64, prog Progress, now time.Time) error {
 	progress, activity := prog.LastProgressAt, prog.LastActivityAt
@@ -151,11 +153,16 @@ func recordProgressTx(tx *sql.Tx, jobID int64, prog Progress, now time.Time) err
 		sets = append(sets, "last_progress_at = ?")
 		args = append(args, fmtTime(progress))
 	}
-	if n := len(prog.Events); n > 0 {
-		// The newest event, one short line, for the status views
-		// (§10); the rules read only the times.
+	for i := len(prog.Events) - 1; i >= 0; i-- {
+		// The newest event that names something, one short line, for
+		// the status views (§10); the rules read only the times. A
+		// heartbeat of tool ends alone leaves the last event as it was.
+		if strings.HasPrefix(prog.Events[i], "tool_end") {
+			continue
+		}
 		sets = append(sets, "last_event = ?")
-		args = append(args, oneLine(prog.Events[n-1], lastEventLimit))
+		args = append(args, oneLine(prog.Events[i], lastEventLimit))
+		break
 	}
 	sets = append(sets, "last_activity_at = ?", "updated_at = ?")
 	args = append(args, fmtTime(activity), fmtTime(now))

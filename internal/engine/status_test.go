@@ -416,6 +416,27 @@ func TestStatusListsRunningJobsWithTheirLastEvent(t *testing.T) {
 	}
 }
 
+// TestHeartbeatLastEventSkipsToolEnds: a tool end carries a call id,
+// not a tool name, so the last event stays the newest event that is not
+// one (§10); a heartbeat of tool ends alone keeps it.
+func TestHeartbeatLastEventSkipsToolEnds(t *testing.T) {
+	e := newEnv(t)
+	e.submit(e.work())
+	g := e.leaseAny(e.runner1)
+	if g == nil {
+		t.Fatal("nothing to lease")
+	}
+	for _, events := range [][]string{{"tool_start Edit", "tool_end toolu_x"}, {"tool_end toolu_y"}} {
+		prog := Progress{LastProgressAt: e.clock.Now(), Events: events}
+		if ans, _, err := e.eng.Heartbeat(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, prog); err != nil || ans != AnsOK {
+			t.Fatalf("heartbeat = %s, %v; want ok", ans, err)
+		}
+		if got, want := e.str("SELECT COALESCE(last_event, '') FROM jobs WHERE id = ?", g.JobID), "tool_start Edit"; got != want {
+			t.Errorf("last_event after %q = %q, want %q", events, got, want)
+		}
+	}
+}
+
 // TestNewLeaseClearsTheLastEvent: a job re-leased after its lease
 // expired starts with no last
 // event, so the status never shows the previous attempt's last tool
