@@ -250,7 +250,7 @@ func (e *testEnv) startRunner(script string, heartbeatEvery time.Duration, adjus
 			Socket:         e.socket,
 			Token:          e.secrets["r1"],
 			StateDir:       e.stateDir,
-			Agents:         []api.Agent{{Adapter: "fake", Harness: "fake", Model: "fake-1", Family: "testfam", Account: "acct-1", Classes: []string{"implement", "review"}}},
+			Agents:         []api.Agent{{Adapter: "fake", Harness: "fake", Model: "fake-1", Family: "testfam", Account: "acct-1", Classes: []string{"implement", "review", "answer"}}},
 			Adapters:       []adapter.Adapter{ad},
 			Labels:         []string{"test"},
 			HeartbeatEvery: heartbeatEvery,

@@ -54,7 +54,11 @@ func (r *jobRun) runForemanTurn(ctx context.Context) {
 	runCtx, abort := context.WithCancel(ctx)
 	beatsDone := make(chan struct{})
 	go r.heartbeats(runCtx, abort, beatsDone)
-	ad, model := r.cfg.adapterFor(r.grant)
+	ad, model, err := r.cfg.agentFor(r.grant)
+	if err != nil {
+		r.finishWithError(ctx, err.Error())
+		return
+	}
 	exitErr := r.runWorker(runCtx, ad, model, dir, kill)
 	abort()
 	<-beatsDone

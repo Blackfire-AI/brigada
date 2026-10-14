@@ -10,13 +10,14 @@ import (
 )
 
 // addAgent advertises one agent on a runner, the way a register would,
-// and returns its id.
+// and returns its id. The agent takes every class: these tests place
+// jobs by harness and caps, not by class.
 func (e *env) addAgent(runner int64, harness, model, account string) int64 {
 	e.t.Helper()
 	var id int64
 	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
 		res, err := tx.Exec(`INSERT INTO agents (runner_id, adapter, harness, model, family, account, classes, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?)`, runner, harness, harness, model, harness, account, seedTS, seedTS)
+			VALUES (?, ?, ?, ?, ?, ?, '["implement","review","answer"]', ?, ?)`, runner, harness, harness, model, harness, account, seedTS, seedTS)
 		if err != nil {
 			return err
 		}

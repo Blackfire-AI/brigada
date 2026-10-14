@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -71,6 +72,12 @@ type Config struct {
 	// where its credentials ride when they come from config (§5.1).
 	// They never reach the worker's argv or prompt.
 	GitEnv []string
+	// Ready, when set, runs once the runner holds its state directory's
+	// lock and its configuration has passed — the moment it is up. The
+	// caller's startup line belongs here: printed before Run, a second
+	// process on the same state directory would announce itself up and
+	// then be refused at the lock.
+	Ready func()
 	// Log is the runner's logger; nil uses the default.
 	Log *slog.Logger
 }
@@ -193,25 +200,60 @@ func (cfg *Config) harnessesOffered() []string {
 	return out
 }
 
-// adapterFor picks the adapter and model to run a job with: the agent
-// advertised for the job's harness constraint, or the first agent's
-// when the job leaves the harness open (§8). Choosing between several
-// agents of one harness is the dispatcher's to do, a later phase.
-func (cfg *Config) adapterFor(grant *api.JobGrant) (adapter.Adapter, string) {
-	byName := make(map[string]adapter.Adapter, len(cfg.Adapters))
-	for _, ad := range cfg.Adapters {
-		byName[ad.Name()] = ad
+// agentFor picks the adapter and model to run a job with (§5.1, §8):
+// the agent the lease named in the grant — never the job's own harness
+// constraint, which is the dispatcher's input, and never a fallback to
+// the first agent. A runner offers at most one agent per harness, so
+// the named harness identifies the agent outright; several agents of
+// one adapter name (two scripted fakes) pair with that name's adapters
+// in advertisement order. A grant naming an agent this runner does not
+// offer — or naming none — is an error the job fails with.
+func (cfg *Config) agentFor(grant *api.JobGrant) (adapter.Adapter, string, error) {
+	offered := cfg.harnessesOffered()
+	if grant.Agent == "" {
+		return nil, "", fmt.Errorf("the lease named no agent; this runner offers %s", strings.Join(offered, ", "))
 	}
-	choice := cfg.Agents[0]
-	if grant.Harness != "" {
-		for _, a := range cfg.Agents {
-			if a.Harness == grant.Harness {
-				choice = a
-				break
-			}
+	for i, a := range cfg.Agents {
+		if a.Harness != grant.Agent {
+			continue
+		}
+		ad := cfg.adapterOfAgent(i)
+		if ad == nil {
+			return nil, "", fmt.Errorf("agent %s names adapter %q, which the runner does not carry", a.Harness, a.Adapter)
+		}
+		return ad, a.Model, nil
+	}
+	return nil, "", fmt.Errorf("the lease named agent %q, which this runner does not offer (offered: %s)",
+		grant.Agent, strings.Join(offered, ", "))
+}
+
+// adapterOfAgent returns the adapter paired with the i-th advertised
+// agent. Agents pair with adapters of their adapter name in order: the
+// first agent naming a name takes that name's first adapter, the
+// second its second — deterministic without extra configuration, and
+// the only pairing two same-named agents (two scripted fakes) can
+// have. Nil when no adapter of the name exists.
+func (cfg *Config) adapterOfAgent(i int) adapter.Adapter {
+	var nth int
+	for j, a := range cfg.Agents {
+		if j >= i {
+			break
+		}
+		if a.Adapter == cfg.Agents[i].Adapter {
+			nth++
 		}
 	}
-	return byName[choice.Adapter], choice.Model
+	seen := 0
+	for _, ad := range cfg.Adapters {
+		if ad.Name() != cfg.Agents[i].Adapter {
+			continue
+		}
+		if seen == nth {
+			return ad
+		}
+		seen++
+	}
+	return nil
 }
 
 // leaseBackoffMin and leaseBackoffMax bound the wait between lease
@@ -239,6 +281,17 @@ const (
 func Run(ctx context.Context, cfg Config) error {
 	if err := cfg.defaults(); err != nil {
 		return err
+	}
+	// One runner process per state directory (§5.1): the runner token
+	// names one identity, and a second process on it would replace the
+	// first's agents at register while both drove the same worktrees.
+	unlock, err := lockStateDir(cfg.StateDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if cfg.Ready != nil {
+		cfg.Ready()
 	}
 	// The foreman turns' MCP configs die with their turns (§12.2); a
 	// runner killed mid-turn leaves its behind, token and all. The tree

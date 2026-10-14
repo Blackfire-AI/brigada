@@ -39,6 +39,7 @@ type LeaseGrant struct {
 	ForemanToken string
 
 	Harness  string // the job's harness constraint; '' = any (§8)
+	Agent    string // the harness of the agent the lease picked (§8); '' = none
 	RepoURL  string // the task's own repo, else the project's (§6.1)
 	BaseRef  string // the ref the worktree starts from; for a review, the diff's base end (§7)
 	CheckCmd string // the check the runner runs after a done (§5.5); '' = none — always for a review
@@ -191,7 +192,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 		}
 
-		agent, err := leaseAgentTx(tx, owner, j)
+		agent, agentHarness, err := leaseAgentTx(tx, owner, j)
 		if err != nil {
 			return nil, err
 		}
@@ -200,12 +201,26 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		// exclusions, review-capable; a job that requires an agent — a
 		// fix round on the author's session — needs that one. A runner
 		// with none — no agents at all, only the author's family, only
-		// the excluded reviewer, or not the author's agent — does not
-		// get the job. That is an unmet placement, not a cap hold:
-		// nothing is stamped, and the queue TTL measures the job's wait
-		// like any other's.
-		if (j.ExcludeFamily != "" || j.ExcludeAgent != 0 || j.RequireAgent != 0) && agent == 0 {
-			continue
+		// the excluded reviewer, not the author's agent, or no agent
+		// that takes the job's class — does not get the job. That is an
+		// unmet placement, not a cap hold: nothing is stamped, and the
+		// queue TTL measures the job's wait like any other's. A runner
+		// with no agents at all is the exception, and only for a job
+		// that carries no placement of its own: it leases with nothing
+		// recorded, as before — a class filter over an empty
+		// advertisement would leave such a runner nothing ever.
+		if agent == 0 {
+			becauseplaced := j.ExcludeFamily != "" || j.ExcludeAgent != 0 || j.RequireAgent != 0
+			if !becauseplaced {
+				var has bool
+				if has, err = runnerHasAgentsTx(tx, owner); err != nil {
+					return nil, err
+				}
+				becauseplaced = has
+			}
+			if becauseplaced {
+				continue
+			}
 		}
 		// The cap gate (§8.1): the job starts only if every layer on its
 		// path has room. A full layer holds the job in place — it stays
@@ -332,6 +347,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			ForemanToken:   foremanToken,
 
 			Harness:         j.Harness,
+			Agent:           agentHarness,
 			RepoURL:         repo,
 			BaseRef:         baseRef,
 			CheckCmd:        checkCmd,
@@ -392,19 +408,18 @@ func (r capReservation) layer(job caps.Job) (string, bool) {
 
 // leaseAgentTx picks the agent a lease records on the job (§8.1): the
 // runner's first agent — by id — matching the job's harness constraint,
-// or the runner's first agent when the job leaves the harness open.
-// Under the family rule (§7, §8) — a job that excludes a family, an
-// agent or both, the review job of an implement task and its retry —
-// only the runner's agents that pass the exclusions and offer the
-// review class qualify, and the first of those by id is the pick. A
-// job that requires an agent (§3) — a fix round resuming the author's
-// session — has its pick named outright: that agent or none, so a
-// same-harness agent of another family never wins it. 0 when the
-// runner advertises no such agent: the job then runs with nothing to
-// count by at the account and model layers, except that both rules'
-// callers refuse the lease outright.
-func leaseAgentTx(tx *sql.Tx, runner int64, j *jobRow) (int64, error) {
-	query := "SELECT id, family, classes FROM agents WHERE runner_id = ?"
+// offering the job kind's class, and passing the family rule's
+// exclusions when it carries them (§7, §8); when the job leaves the
+// harness open, every agent qualifies on that count. A job that
+// requires an agent (§3) — a fix round resuming the author's session —
+// has its pick named outright: that agent or none, so a same-harness
+// agent of another family never wins it. 0 when the runner advertises
+// no such agent — the caller then refuses the lease, unless the runner
+// advertises nothing at all. The harness of the pick rides beside the
+// id, so the grant can name the agent to the runner.
+func leaseAgentTx(tx *sql.Tx, runner int64, j *jobRow) (int64, string, error) {
+	class := kindClass(j.Kind)
+	query := "SELECT id, family, harness, classes FROM agents WHERE runner_id = ?"
 	args := []any{runner}
 	if j.Harness != "" {
 		query += " AND harness = ?"
@@ -416,15 +431,23 @@ func leaseAgentTx(tx *sql.Tx, runner int64, j *jobRow) (int64, error) {
 	}
 	rows, err := tx.Query(query+" ORDER BY id", args...)
 	if err != nil {
-		return 0, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
+		return 0, "", fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 	}
 	defer rows.Close()
 	var pick int64
+	var pickHarness string
 	for rows.Next() {
 		var id int64
-		var family, classes string
-		if err := rows.Scan(&id, &family, &classes); err != nil {
-			return 0, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
+		var family, harness, classes string
+		if err := rows.Scan(&id, &family, &harness, &classes); err != nil {
+			return 0, "", fmt.Errorf("pick the agent of runner %d: %w", runner, err)
+		}
+		// The class rule (§5.1, §8: "eligible: the adapter supports the
+		// class"): an agent that does not take the job kind's class never
+		// runs it — an implement round never lands on a review-only
+		// agent, whatever its id order.
+		if class != "" && !agentOffersClass(classes, class) {
+			continue
 		}
 		if j.ExcludeFamily != "" || j.ExcludeAgent != 0 {
 			if !reviewAgentQualifies(id, family, classes, j.ExcludeFamily, j.ExcludeAgent) {
@@ -432,9 +455,38 @@ func leaseAgentTx(tx *sql.Tx, runner int64, j *jobRow) (int64, error) {
 			}
 		}
 		pick = id
+		pickHarness = harness
 		break
 	}
-	return pick, rows.Err()
+	return pick, pickHarness, rows.Err()
+}
+
+// kindClass is the task class a job kind runs (§6.2, §8): work and fix
+// are implement rounds, a review is the review class, a foreman turn
+// the answer flow. A kind with no class of its own leaves the class
+// filter off — such a job is placed by its harness alone.
+func kindClass(k Kind) string {
+	switch k {
+	case KindWork, KindFix:
+		return "implement"
+	case KindReview:
+		return string(KindReview)
+	case KindForeman:
+		return "answer"
+	}
+	return ""
+}
+
+// runnerHasAgentsTx reports whether the runner advertised any agents at
+// all. The lease's refusal rule turns on it: a runner with agents that
+// offers none for a job does not take it, while a runner with no
+// advertisement leases with nothing recorded, as it always has.
+func runnerHasAgentsTx(tx *sql.Tx, runner int64) (bool, error) {
+	var n int
+	if err := tx.QueryRow("SELECT COUNT(*) FROM agents WHERE runner_id = ?", runner).Scan(&n); err != nil {
+		return false, fmt.Errorf("count the agents of runner %d: %w", runner, err)
+	}
+	return n > 0, nil
 }
 
 // reviewAgentQualifies is the review placement's agent test (§7, §8):
