@@ -5,13 +5,15 @@ import (
 	"strings"
 )
 
-// StatusSections renders one status answer's plans and "needs you"
-// sections (§6.1, §6.2, §10) as plain text, after the pid/uptime and
-// jobs lines: the `plans:` lines — one per plan, its tasks indented
-// beneath it — then the `needs you:` queue, "nothing" when it is empty.
-// The client's status command and the MCP bridge's status tool share
-// this rendering, so a user and the foreman read the same lines; a
-// task's branch rides in brackets only once it has one.
+// StatusSections renders one status answer's plans, foreman report and
+// "needs you" sections (§6.1, §6.2, §3, §10) as plain text, after the
+// pid/uptime and jobs lines: the `plans:` lines — one per plan, its
+// tasks indented beneath it — then the `foreman report:` block — the
+// latest report's time and first lines, the project named — then the
+// `needs you:` queue, "nothing" when it is empty. The client's status
+// command and the MCP bridge's status tool share this rendering, so a
+// user and the foreman read the same lines; a task's branch rides in
+// brackets only once it has one.
 func StatusSections(st Status) string {
 	var lines []string
 	if len(st.Plans) == 0 {
@@ -27,6 +29,19 @@ func StatusSections(st Status) string {
 				}
 				lines = append(lines, line)
 			}
+		}
+	}
+	if st.Report == nil {
+		lines = append(lines, "foreman report: none")
+	} else {
+		lines = append(lines, "foreman report:")
+		for i, ln := range strings.Split(st.Report.Text, "\n") {
+			if i == 0 {
+				ln = fmt.Sprintf("%s project #%d: %s", st.Report.CreatedAt, st.Report.ProjectID, ln)
+			} else if ln != "" {
+				ln = "  " + ln
+			}
+			lines = append(lines, ln)
 		}
 	}
 	if len(st.NeedsYou) == 0 {

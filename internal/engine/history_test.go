@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -183,5 +184,39 @@ func TestHistoryFiltersByProjectTaskAndJob(t *testing.T) {
 	}
 	if len(page.Items) != 4 {
 		t.Errorf("the project's timeline = %v", timeline(page.Items))
+	}
+}
+
+// TestHistoryListsForemanReports covers the report's place in the
+// timeline (§3, §9): a done foreman turn's report is an event like any
+// other — under the turn's job, carrying its text — so `brigada
+// history` lists every report the foreman ever wrote.
+func TestHistoryListsForemanReports(t *testing.T) {
+	e := newEnv(t)
+
+	e.submit(e.foremanTurn())
+	e.clock.Advance(time.Minute)
+	g := e.lease(e.runner1, []string{"claude"}, nil)
+	e.clock.Advance(time.Minute)
+	e.complete(g, Completion{Result: `{"status":"done","summary":"woke for the question; answered it"}`})
+
+	page, err := e.eng.History(e.ctx, HistoryQuery{})
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	var report *history.Item
+	for i := range page.Items {
+		if page.Items[i].Kind == evForemanReport {
+			report = &page.Items[i]
+		}
+	}
+	if report == nil {
+		t.Fatalf("the timeline holds no foreman_report: %v", timeline(page.Items))
+	}
+	if report.Type != history.TypeEvent || report.JobID != g.JobID || report.ProjectID != e.project {
+		t.Errorf("the report item = %+v, want the turn's own event", report)
+	}
+	if !strings.Contains(string(report.Payload), `"report":"woke for the question; answered it"`) {
+		t.Errorf("the report payload = %s, want the turn's final message", report.Payload)
 	}
 }

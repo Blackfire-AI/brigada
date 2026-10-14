@@ -7,11 +7,12 @@ import (
 )
 
 // The event kinds the engine's log can carry that wake the user (§10).
-// The set is the notification vocabulary: a plan finishing, and the
-// reasons a task parks at needs_foreman — the same kinds the "needs
-// you" queue reads in `brigada status`. Kinds the engine adds later
-// (the foreman's limit and budget-out, §4.4, §4.3) slot into the table
-// below; everything else in the log never notifies.
+// The set is the notification vocabulary: a plan finishing, the
+// foreman's report after a headless turn, and the reasons a task parks
+// at needs_foreman — the same kinds the "needs you" queue reads in
+// `brigada status`. Kinds the engine adds later (the foreman's limit
+// and budget-out, §4.4, §4.3) slot into the table below; everything
+// else in the log never notifies.
 const (
 	KindPlanDone        = "plan_done"          // the plan's last open task finished (§6.2)
 	KindTaskCheckFailed = "task_check_failed"  // the check failed; the task waits for the foreman (§3)
@@ -20,11 +21,17 @@ const (
 	KindReviewChanges   = "review_changes"     // the reviewer wants changes (§7)
 	KindReviewNoVerdict = "review_no_verdict"  // the review ended without a usable verdict (§7)
 	KindTaskOutOfRounds = "task_out_of_rounds" // the task spent its rounds; arrives with the rounds work
+	KindForemanReport   = "foreman_report"     // a done foreman turn's final message, its report to the user (§3, §10)
 )
 
 // title is the notification's bold line: the one name every banner
 // carries, whatever happened, so a glance attributes it to brigada.
 const title = "brigada"
+
+// foremanTitle is the report's bold line: the banner that speaks with
+// the foreman's own voice, so a one-line report reads as the foreman's
+// word and not another of the engine's alerts.
+const foremanTitle = "brigada foreman"
 
 // bodyLimit bounds a notification's body line: a check's tail or a
 // review's findings can be long; a banner is not the place for them.
@@ -41,7 +48,8 @@ type Event struct {
 	PlanTitle string
 	// Reason is the payload's words for why the user is woken — the
 	// check's tail, the worker's question, the review's findings —
-	// already picked for the kind and flattened to one line.
+	// already picked for the kind and flattened to one line, except a
+	// report's, whose own lines the mapper cuts to the first.
 	Reason string
 	// Parked is true when the event parked its task (its payload names
 	// needs_foreman or needs_user as the task's state). A needs-you kind
@@ -70,6 +78,16 @@ func Message(ev Event) (t, body string, ok bool) {
 	switch {
 	case ev.Kind == KindPlanDone:
 		return title, oneLine(fmt.Sprintf("plan #%d done: %s", ev.PlanID, ev.PlanTitle), bodyLimit), true
+	case ev.Kind == KindForemanReport:
+		// A report is the foreman speaking, so its banner carries the
+		// foreman's name; the body is the report's first line — written
+		// for exactly this banner — never the lines after it (§3, §10).
+		// No parked gate: a report is not a task waiting.
+		body := firstLine(ev.Reason)
+		if body == "" {
+			body = ev.Kind
+		}
+		return foremanTitle, oneLine(body, bodyLimit), true
 	case needsForemanKinds[ev.Kind] && ev.Parked:
 		reason := ev.Reason
 		if reason == "" {
@@ -78,6 +96,15 @@ func Message(ev Event) (t, body string, ok bool) {
 		return title, oneLine(fmt.Sprintf("task #%d needs you: %s", ev.TaskID, reason), bodyLimit), true
 	}
 	return "", "", false
+}
+
+// firstLine keeps s up to its first newline: the line of a report a
+// banner shows, the rest left for `brigada status` and the history.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 // oneLine flattens s to a single line of at most about max bytes:

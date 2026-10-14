@@ -308,6 +308,14 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 		}
 	}
 	if job.Kind == KindForeman {
+		// A done turn reports to the user (§3, §10) before the inbox
+		// settles, so the report is in the log ahead of anything the
+		// settle's wake appends.
+		if status == statusDone {
+			if err := foremanReportTx(tx, job, c, now); err != nil {
+				return "", err
+			}
+		}
 		// The turn's events are consumed by its completion, never before
 		// (§4.2), and the next wake is evaluated in this same transaction.
 		return AnsOK, e.foremanFinishedTx(tx, job, status, now)

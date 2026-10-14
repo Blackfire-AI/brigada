@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -18,9 +19,11 @@ import (
 // TestStatusGolden runs `brigada status` against a real engine started
 // in-process (§13), over a store seeded with plans in every listed
 // state: the plans print with their tasks indented beneath them, the
-// stale and pending plans stay out of the plans section, and the
-// needs-you queue names each entry with its reason — one line per
-// entry, the sections exactly as the foreman's MCP tool renders them.
+// stale and pending plans stay out of the plans section, the latest
+// foreman report shows beneath the plans with its time and first lines,
+// and the needs-you queue names each entry with its reason — one line
+// per entry, the sections exactly as the foreman's MCP tool renders
+// them.
 func TestStatusGolden(t *testing.T) {
 	state := testsupport.ShortStateDir(t)
 
@@ -60,6 +63,9 @@ func TestStatusGolden(t *testing.T) {
 			VALUES (3, 'tidy the docs', 'the spec', NULL, 'answer', 'done', 'task/3-1', 'main', '{}', ?, ?)`, at(-2*time.Hour), at(-time.Hour))
 		exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
 			VALUES ('task_needs_help', 1, 2, NULL, '{"question":"should the sprocket be blue?"}', ?)`, at(0))
+		exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
+			VALUES ('foreman_report', 1, NULL, NULL, '{"report":"plan 3 done: merge task/3-1\nnothing else needs you"}', ?)`,
+			at(-30*time.Minute))
 		return nil
 	})
 	st.Close()
@@ -116,17 +122,21 @@ func TestStatusGolden(t *testing.T) {
 
 	// The sections: the golden, exactly — the active plan with both its
 	// tasks, the plan done inside the window, the stale one out, the
-	// pending one only in the queue.
-	want := `plans:
+	// latest foreman report under the plans, the pending plan only in
+	// the queue.
+	want := fmt.Sprintf(`plans:
 #1 active fix the frobnicator
   task #1 ready the frobnicator
   task #2 needs_foreman wire the sprocket [task/2-1]
 #3 done fresh work
   task #3 done tidy the docs [task/3-1]
+foreman report:
+%s project #1: plan 3 done: merge task/3-1
+  nothing else needs you
 needs you:
 task #2 needs_foreman: should the sprocket be blue?
 plan #4 pending_approval
-`
+`, at(-30*time.Minute))
 	if got := "plans:\n" + lines[1]; got != want {
 		t.Errorf("status sections =\n%s\nwant the golden:\n%s", got, want)
 	}

@@ -145,3 +145,65 @@ func TestSubmitForemanTurnCoalesces(t *testing.T) {
 		t.Errorf("new turn followup = %d, want 0", n)
 	}
 }
+
+// TestForemanTurnReportsToTheUser covers the report a foreman turn
+// leaves behind (§3, §10): a done turn's final message becomes the
+// project's foreman_report event — the text a notification and
+// `brigada status` read, bounded like any event's words and carrying no
+// prompt — while an empty final message, a failed turn and a stalled
+// one report nothing: their words were not an answer for the user, and
+// the stalled or failed turn's events return to pending instead (§4.2).
+func TestForemanTurnReportsToTheUser(t *testing.T) {
+	e := newEnv(t)
+
+	turn := func(c Completion) {
+		t.Helper()
+		r := e.submit(e.foremanTurn())
+		g := e.lease(e.runner1, []string{"claude"}, nil)
+		if g == nil || g.JobID != r.JobID {
+			t.Fatalf("the foreman turn was not leased: %+v, want job %d", g, r.JobID)
+		}
+		if ans := e.complete(g, c); ans != AnsOK {
+			t.Fatalf("complete the foreman turn: %s", ans)
+		}
+	}
+	reports := func() int64 {
+		return e.int("SELECT COUNT(*) FROM events WHERE kind = ?", evForemanReport)
+	}
+
+	// A done turn's final message is the report, verbatim, under the
+	// turn's own job and no task — a foreman turn belongs to none (§4).
+	turn(Completion{Result: `{"status":"done","summary":"woke for the question of task 7; answered it\nnothing needs you"}`})
+	want := `{"report":"woke for the question of task 7; answered it\nnothing needs you"}`
+	if got := e.str("SELECT payload FROM events WHERE kind = ?", evForemanReport); got != want {
+		t.Errorf("the report payload = %s, want the turn's final message alone:\n%s", got, want)
+	}
+	if job := e.int("SELECT COALESCE(job_id, 0) FROM events WHERE kind = ?", evForemanReport); job == 0 {
+		t.Error("the report event names no job")
+	}
+	if task := e.int("SELECT COALESCE(task_id, 0) FROM events WHERE kind = ?", evForemanReport); task != 0 {
+		t.Errorf("the report event names task %d, want none: a foreman turn belongs to no task", task)
+	}
+	if n := e.int(`SELECT COUNT(*) FROM foreman_inbox
+		WHERE event_id IN (SELECT id FROM events WHERE kind = ?)`, evForemanReport); n != 0 {
+		t.Error("the report landed in the foreman inbox; it is the user's to read, not the foreman's to judge")
+	}
+
+	// An empty final message, a failed turn and a stalled one report
+	// nothing; only the done turn's report is in the log.
+	turn(Completion{Result: `{"status":"done"}`})
+	turn(Completion{Error: "the foreman CLI died"})
+	turn(Completion{Result: `{"status":"stalled","summary":"a partial answer"}`, Outcome: OutcomeStalled})
+	if got := reports(); got != 1 {
+		t.Errorf("foreman_report events = %d, want the one done turn's alone", got)
+	}
+
+	// A report longer than any event's words is bounded where it lands.
+	turn(Completion{Result: `{"status":"done","summary":"` + strings.Repeat("long ", 200) + `"}`})
+	if got := reports(); got != 2 {
+		t.Fatalf("foreman_report events = %d, want 2", got)
+	}
+	if payload := e.str("SELECT payload FROM events WHERE kind = ? ORDER BY id DESC LIMIT 1", evForemanReport); len(payload) > 512+len(`{"report":""}`) {
+		t.Errorf("the long report's payload runs %d bytes, want it bounded near 500", len(payload))
+	}
+}

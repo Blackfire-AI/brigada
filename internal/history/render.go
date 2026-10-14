@@ -55,6 +55,7 @@ func summary(it Item) string {
 		Answer  string `json:"answer"`
 		Status  string `json:"status"`
 		Reason  string `json:"reason"`
+		Report  string `json:"report"`
 		Lease   string `json:"lease"`
 		Owner   int64  `json:"owner"`
 		Run     int64  `json:"run"`
@@ -78,6 +79,7 @@ func summary(it Item) string {
 	add("answer", p.Answer)
 	add("status", p.Status)
 	add("reason", p.Reason)
+	add("report", p.Report)
 	add("lease", p.Lease)
 	addInt("owner", p.Owner)
 	addInt("run", p.Run)

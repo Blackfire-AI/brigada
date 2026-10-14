@@ -236,6 +236,26 @@ func wakeEventText(kind, payload string) string {
 	return text
 }
 
+// foremanReportTx appends a done foreman turn's report to the user
+// (§3, §10): the final message the turn ended saying, kept as the event
+// a notification and `brigada status` read — the turn spoke to the user,
+// and the log is where the user's side hears it (§9). The payload holds
+// the report alone, bounded like any event's words and never a prompt;
+// the turn's own prompt stays on its job. An empty final message is no
+// report. A turn that ended any other way — failed, stalled, cancelled
+// — reports nothing: its words were not an answer, and its events
+// return to pending instead (§4.2). The report is no judgment event, so
+// it never lands in the inbox and wakes nothing.
+func foremanReportTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
+	wr, ok := parseWorkerResult(c.Result)
+	if !ok || wr.Summary == "" {
+		return nil
+	}
+	_, err := appendEventTx(tx, evForemanReport, job.ProjectID, 0, job.ID,
+		eventPayload{Report: boundNote(wr.Summary)}, now)
+	return err
+}
+
 // foremanFinishedTx settles a finished foreman turn's inbox (§4.2): a
 // turn that completed done consumed the events it was woken with; a
 // failed or stalled one returns them to pending a carried attempt the

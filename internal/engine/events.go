@@ -41,6 +41,7 @@ const (
 	evReviewNoVerdict        = "review_no_verdict"         // the review ended without a usable verdict; the retry is spent or impossible (§7)
 	evReviewRetry            = "review_retry"              // an unusable verdict goes to another reviewer (§7)
 	evProjectForemanSet      = "project_foreman_set"       // setup: the project's foreman harness and model were chosen (§4.1)
+	evForemanReport          = "foreman_report"            // a done foreman turn's final message, reported to the user (§3, §10)
 	evForemanWoken           = "foreman_woken"             // a foreman turn was queued with the project's pending events (§4.2)
 	evForemanWakeBudgetSpent = "foreman_wake_budget_spent" // the day's foreman wake budget is spent; the events stay pending (§4.3)
 	evForemanWakeStalled     = "foreman_wake_stalled"      // foreman turns failed consecutively on the same events; waking stops (§4.2)
@@ -63,6 +64,7 @@ type eventPayload struct {
 	Branch   string `json:"branch,omitempty"`   // the task's result branch (§6.4)
 	Question string `json:"question,omitempty"` // the worker's question (§5.4)
 	Findings string `json:"findings,omitempty"` // the review's findings (§7)
+	Report   string `json:"report,omitempty"`   // a foreman turn's final message, its report to the user (§3, §10)
 	Harness  string `json:"harness,omitempty"`
 	Model    string `json:"model,omitempty"`
 	Job      int64  `json:"job,omitempty"`   // a job the event names besides its own job_id column
