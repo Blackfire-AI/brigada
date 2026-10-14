@@ -57,8 +57,8 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 // AttachCommand implements adapter.Interactive for the tests' attached
 // sessions (§4.2 item 1): the script runs in the working directory with
 // the same plumbing the headless contract carries — the resume id, the
-// MCP config path — plus the attach's own: the new session id and the
-// opening prompt, which the terminal's stdin cannot bring a script the
+// MCP config path — plus the attach's own: the new session id, the
+// status bar's command and the opening prompt, which the terminal's stdin cannot bring a script the
 // way the harness reads its initial prompt. The streams stay unwired:
 // the caller owns them.
 func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSessionID string) (*exec.Cmd, error) {
@@ -69,6 +69,7 @@ func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSe
 		"BRIGADA_FAKE_SESSION="+newSessionID,
 		"BRIGADA_FAKE_MCP_CONFIG="+job.MCPConfig,
 		"BRIGADA_FAKE_PROMPT="+job.Prompt,
+		"BRIGADA_FAKE_STATUS_LINE="+job.StatusLine,
 	)
 	return cmd, nil
 }

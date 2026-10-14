@@ -62,6 +62,13 @@ type Job struct {
 	// the `brigada mcp` bridge (§12.2) will hand the foreman's harness
 	// brigada's tool server; empty — every job today — adds nothing.
 	MCPConfig string
+	// StatusLine is a shell command whose one line of output an
+	// interactive session shows in its status bar, re-run every few
+	// seconds (§10): the attach sets it to `brigada status --line`, so
+	// the user sees what the workers are doing while they chat with the
+	// foreman. Only AttachCommand reads it, and an adapter whose CLI has
+	// no status bar ignores it; empty adds nothing.
+	StatusLine string
 }
 
 // Interactive is the optional adapter interface for the attach (§4.2

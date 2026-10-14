@@ -235,6 +235,14 @@ func TestAttachCommandGolden(t *testing.T) {
 				"--mcp-config", config, "--strict-mcp-config"}, wantScope...),
 		},
 		{
+			name: "a status line rides as this session's settings",
+			ad:   Adapter{Binary: "/usr/local/bin/claude"},
+			job:  adapter.Job{Prompt: prompt, MCPConfig: config, StatusLine: "'/opt/brigada' status --line"},
+			wantArg: append([]string{prompt, "--session-id", newID,
+				"--mcp-config", config, "--strict-mcp-config",
+				"--settings", `{"statusLine":{"command":"'/opt/brigada' status --line","refreshInterval":3,"type":"command"}}`}, wantScope...),
+		},
+		{
 			name: "no model adds no flag",
 			ad:   Adapter{},
 			job:  adapter.Job{Prompt: prompt, MCPConfig: config},

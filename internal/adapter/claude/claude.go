@@ -120,6 +120,10 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	return cmd, nil
 }
 
+// statusLineRefreshSeconds is how often the attached session's status
+// bar re-runs its command while nothing else updates it (§10).
+const statusLineRefreshSeconds = 3
+
 // AttachCommand implements adapter.Interactive (§4.2 item 1): the CLI
 // interactive — no -p, no stream to parse — with the opening prompt as
 // its initial prompt, carrying the bridge and the foreman's tool scope
@@ -162,6 +166,24 @@ func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSe
 		args = append(args, "--model", job.Model)
 	}
 	args = append(args, "--mcp-config", job.MCPConfig, "--strict-mcp-config")
+	if job.StatusLine != "" {
+		// The CLI's status bar runs the command on a timer as well as on
+		// the session's own events, so it stays current while the chat
+		// is idle and the workers are not. The settings ride on the flag
+		// for this session alone; the user's own settings files are
+		// never touched.
+		settings, err := json.Marshal(map[string]any{
+			"statusLine": map[string]any{
+				"type":            "command",
+				"command":         job.StatusLine,
+				"refreshInterval": statusLineRefreshSeconds,
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("encode the status line settings: %w", err)
+		}
+		args = append(args, "--settings", string(settings))
+	}
 	allowed, disallowed := foremanToolScope()
 	args = append(args, append([]string{"--allowedTools"}, allowed...)...)
 	args = append(args, append([]string{"--disallowedTools"}, disallowed...)...)

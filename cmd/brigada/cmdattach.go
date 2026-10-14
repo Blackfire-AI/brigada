@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -188,7 +189,10 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 		defer removeConfig()
 		return abandon(fmt.Errorf("generate the new session id: %w", err))
 	}
-	cmd, err := inter.AttachCommand(adapter.Job{Prompt: res.Prompt, Model: res.Model, MCPConfig: config}, scratch, res.SessionID, newSessionID)
+	cmd, err := inter.AttachCommand(adapter.Job{
+		Prompt: res.Prompt, Model: res.Model, MCPConfig: config,
+		StatusLine: statusLineCommand(rt),
+	}, scratch, res.SessionID, newSessionID)
 	if err != nil {
 		defer removeConfig()
 		return abandon(fmt.Errorf("build the %s session: %w", res.Harness, err))
@@ -370,4 +374,38 @@ func newSessionID() (string, error) {
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4, random
 	b[8] = (b[8] & 0x3f) | 0x80 // the RFC 4122 variant
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
+// statusLineCommand is the shell command the attached session's status
+// bar runs (§10): this very binary's `status --line` on the attach's own
+// state directory and config, so the bar reads the engine the foreman
+// works with. The paths are made absolute first: the bar runs in the
+// session's working directory, the foreman's scratch, not where the
+// attach was started. Empty — no status bar — when the binary cannot
+// name its own path.
+func statusLineCommand(rt *runtime) string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	parts := []string{shellQuote(exe), "status", "--line", "--state-dir", shellQuote(absPath(rt.stateDir))}
+	if rt.configPath != "" {
+		parts = append(parts, "--config", shellQuote(absPath(rt.configPath)))
+	}
+	return strings.Join(parts, " ")
+}
+
+// absPath is p made absolute against the current directory, or p itself
+// when the current directory cannot be read.
+func absPath(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
+}
+
+// shellQuote quotes s for a POSIX shell: single quotes around it, each
+// single quote inside closed, escaped and reopened.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
