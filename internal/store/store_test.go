@@ -167,9 +167,9 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 		t.Fatalf("open did not create the file: %v", err)
 	}
 	want := []string{
-		"agents", "artifacts", "events", "foreman_inbox", "idempotency", "jobs",
-		"lease_tokens", "messages", "meta", "outcomes", "plans", "projects",
-		"questions", "runners", "sessions", "task_deps", "tasks", "tokens",
+		"agents", "artifacts", "attach_holds", "events", "foreman_inbox", "hold_tokens",
+		"idempotency", "jobs", "lease_tokens", "messages", "meta", "outcomes", "plans",
+		"projects", "questions", "runners", "sessions", "task_deps", "tasks", "tokens",
 	}
 	got := queryStrings(t, s.db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
 	if !slices.Equal(got, want) {

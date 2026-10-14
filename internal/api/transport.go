@@ -27,6 +27,7 @@ const (
 	codeNotFound         = "not_found"
 	codeBadRequest       = "bad_request"
 	codeIdemConflict     = "idempotency_conflict"
+	codeConflict         = "conflict"
 	codeTooLarge         = "payload_too_large"
 	codeMethodNotAllowed = "method_not_allowed"
 	codeInternal         = "internal"

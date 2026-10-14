@@ -87,11 +87,13 @@ const (
 	AnsAlready    Answer = "already"     // the idempotent repeat of a call that took effect
 	AnsCreated    Answer = "created"     // submit: a queued job now exists
 	AnsPending    Answer = "pending"     // submit: a live job holds the key; the follow-up flag is set
+	AnsBusy       Answer = "busy"        // attach: the foreman is already spoken for
 	AnsCapped     Answer = "capped"      // submit: the task's round cap is spent; nothing was created
 	AnsCancelled  Answer = "cancelled"   // the job was cancelled
 	AnsGone       Answer = "gone"        // no such job, or it ended without the caller's part in it
 	AnsLost       Answer = "lost"        // the lease belongs to someone else now
 	AnsStaleEpoch Answer = "stale_epoch" // fenced out by a recover (§6.4)
+	AnsExpired    Answer = "expired"     // attach release: the hold lapsed first; the session id was still written
 )
 
 // RoundCaps are the per-task caps on feedback rounds and restarts (§7,

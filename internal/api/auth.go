@@ -172,23 +172,32 @@ func bearerSecret(r *http.Request) (string, bool) {
 }
 
 // authenticateLeaseToken resolves a secret the token file does not know
-// to a lease-scoped foreman token (§12.1): the token the engine minted
-// with the lease of a foreman turn, short-lived and scoped to the
-// turn's project. The identity it yields is a foreman like any other,
-// so mayTouchProject walls it into that project unchanged; the engine
-// checks the token's expiry, so one past its lease is refused here even
-// before the sweep has collected the row. A store failure fails closed
-// like an unknown secret — logged, but never with the secret in it.
+// to an engine-minted, short-lived foreman token (§12.1): first the
+// lease-scoped token minted with a foreman turn's lease, then the
+// hold-scoped token of an attach hold (§4.2 item 1). Either identity is
+// a foreman like any other, so mayTouchProject walls it into that
+// project unchanged; the engine checks the token's expiry, so one past
+// its lease or hold is refused here even before the sweep has collected
+// the row. A store failure fails closed like an unknown secret — logged,
+// but never with the secret in it.
 func (s *Server) authenticateLeaseToken(r *http.Request, secret string) (identity, bool) {
 	project, job, ok, err := s.eng.LeaseTokenScope(r.Context(), secret)
 	if err != nil {
 		s.log.ErrorContext(r.Context(), "api: resolve a lease token failed", "err", err)
 		return identity{}, false
 	}
-	if !ok {
+	if ok {
+		return identity{name: fmt.Sprintf("lease:%d", job), role: roleForeman, project: project}, true
+	}
+	project, hold, ok, err := s.eng.HoldTokenScope(r.Context(), secret)
+	if err != nil {
+		s.log.ErrorContext(r.Context(), "api: resolve a hold token failed", "err", err)
 		return identity{}, false
 	}
-	return identity{name: fmt.Sprintf("lease:%d", job), role: roleForeman, project: project}, true
+	if ok {
+		return identity{name: fmt.Sprintf("hold:%d", hold), role: roleForeman, project: project}, true
+	}
+	return identity{}, false
 }
 
 // handler is an endpoint that knows who is calling.

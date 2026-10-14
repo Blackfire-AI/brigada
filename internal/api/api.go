@@ -65,6 +65,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/tasks/{id}/answer", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskAnswer)))
 	mux.HandleFunc("/v1/tasks/{id}/restart", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskRestart)))
 	mux.HandleFunc("/v1/plans", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handlePlanCreate)))
+	// The attach hold (§4.2 item 1): the client or admin takes the
+	// foreman for an attached chat, heartbeats and releases it; the
+	// foreman role long-polls the project's events.
+	mux.HandleFunc("/v1/foreman/attach", s.authed([]string{roleClient, roleAdmin}, s.handleForemanAttach))
+	mux.HandleFunc("/v1/foreman/heartbeat", s.authed([]string{roleClient, roleAdmin}, s.handleForemanHeartbeat))
+	mux.HandleFunc("/v1/foreman/release", s.authed([]string{roleClient, roleAdmin}, s.handleForemanRelease))
+	mux.HandleFunc("/v1/events", s.authed([]string{roleForeman}, s.handleForemanEvents))
 	mux.HandleFunc("/v1/jobs/{id}", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleJobGet))
 	mux.HandleFunc("/v1/jobs/{id}/cancel", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.idempotent(s.handleJobCancel)))
 	mux.HandleFunc("/v1/admin/fence-epoch", s.authed([]string{roleAdmin}, s.idempotent(s.handleFenceEpoch)))

@@ -47,6 +47,9 @@ const (
 	evForemanWoken           = "foreman_woken"             // a foreman turn was queued with the project's pending events (§4.2)
 	evForemanWakeBudgetSpent = "foreman_wake_budget_spent" // the day's foreman wake budget is spent; the events stay pending (§4.3)
 	evForemanWakeStalled     = "foreman_wake_stalled"      // foreman turns failed consecutively on the same events; waking stops (§4.2)
+	evForemanAttached        = "foreman_attached"          // a hold took the foreman for an attached chat (§4.2 item 1)
+	evForemanDetached        = "foreman_detached"          // the attached chat ended; the hold released (§4.2 item 1)
+	evForemanAttachExpired   = "foreman_attach_expired"    // the hold expired unheartbeated; its rows returned pending (§4.2 item 1)
 )
 
 // eventPayload is the small JSON an event row carries: the fields the
@@ -73,6 +76,7 @@ type eventPayload struct {
 	Harness    string `json:"harness,omitempty"`
 	Model      string `json:"model,omitempty"`
 	Job        int64  `json:"job,omitempty"`   // a job the event names besides its own job_id column
+	Hold       int64  `json:"hold,omitempty"`  // the attach hold the event names (§4.2 item 1)
 	Count      int64  `json:"count,omitempty"` // how many of something the event counts (§4.2, §4.3)
 }
 
