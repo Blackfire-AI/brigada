@@ -321,9 +321,10 @@ func TestSubmitRestartRounds(t *testing.T) {
 
 // A restart is its own budget (§14): a restarted fix or review counts
 // against the restart cap alone, never against the rounds budget of the
-// kind it restarts, and the plain rounds still get their full allowance
-// after the restarts — for a fix, the default two; for a review, no
-// budget at all (§7).
+// kind it restarts, and the fix budget starts afresh after the
+// restarts — the count is scoped to the fix rounds of the task's latest
+// attempt, so the new attempt carries the default two unspent; for a
+// review, no budget at all (§7).
 func TestSubmitRestartedFixAndReviewCountAgainstRestartCapOnly(t *testing.T) {
 	run := func(e *env, p SubmitParams) {
 		t.Helper()
@@ -354,14 +355,17 @@ func TestSubmitRestartedFixAndReviewCountAgainstRestartCapOnly(t *testing.T) {
 		if r := e.submit(round(true)); r.Answer != AnsCapped {
 			t.Fatalf("one restart too many = %s, want capped against the restart cap", r.Answer)
 		}
-		// The fix budget is untouched by the restarts: the second plain
-		// round still fits, and only the third is capped.
+		// The fix budget starts afresh behind the latest restart (§5.6):
+		// the round before the restarts does not count against the new
+		// attempt's allowance, so two plain rounds fit again and only the
+		// third is capped.
+		run(e, round(false))
 		run(e, round(false))
 		if r := e.submit(round(false)); r.Answer != AnsCapped {
 			t.Fatalf("plain fix round past the cap of 2 = %s, want capped", r.Answer)
 		}
-		if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'fix'"); got != 4 {
-			t.Errorf("fix jobs = %d, want 4 (two plain and two restarts)", got)
+		if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'fix'"); got != 5 {
+			t.Errorf("fix jobs = %d, want 5 (one plain before the restarts, two restarts, two plain after)", got)
 		}
 	})
 	t.Run("review", func(t *testing.T) {

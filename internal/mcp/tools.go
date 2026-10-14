@@ -75,6 +75,44 @@ var tools = []Tool{
 		Call: callPlanCreate,
 	},
 	{
+		Name:        "answer",
+		Description: "Answer a task worker's question (the task must be parked at needs_foreman by its question, as status shows). The answer reaches the worker verbatim on its own session and agent, and spends none of the task's rounds.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"task": map[string]any{
+					"type":        "integer",
+					"description": "the asking task's id",
+				},
+				"text": map[string]any{
+					"type":        "string",
+					"description": "the answer, verbatim: what the worker must know to proceed",
+				},
+			},
+			"required": []string{"task", "text"},
+		},
+		Call: callAnswer,
+	},
+	{
+		Name:        "task_restart",
+		Description: "Restart a task parked at needs_foreman — failed, out of rounds, or one whose review keeps asking for changes — as a fresh attempt from the task's base on a new branch, with your note handed to the worker verbatim as feedback (what went wrong, what to avoid). Spends one of the task's restarts; the fresh attempt gets its rounds back.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"task": map[string]any{
+					"type":        "integer",
+					"description": "the parked task's id",
+				},
+				"note": map[string]any{
+					"type":        "string",
+					"description": "the note for the fresh attempt, verbatim; empty = none",
+				},
+			},
+			"required": []string{"task"},
+		},
+		Call: callTaskRestart,
+	},
+	{
 		Name:        "status",
 		Description: "The engine's own state: which process it is, up how long, the jobs by status — plus the plans with their tasks and the \"needs you\" queue: tasks parked at needs_foreman or needs_user, and plans awaiting approval, each with its reason. Your token scopes the view to your project.",
 		InputSchema: map[string]any{
