@@ -38,6 +38,12 @@ type Adapter struct {
 
 var _ adapter.Adapter = (*Adapter)(nil)
 
+// DefaultModel is the agent's name for the CLI's own default model: the
+// one the CLI picks when no -m names another. The runner offers it when
+// the agent's configuration sets no --model, and the adapter's answer
+// to it is no -m flag at all.
+const DefaultModel = "default"
+
 // Name implements adapter.Adapter: the harness this adapter drives,
 // which the runner's advertisement pairs it with (§5.1).
 func (a *Adapter) Name() string { return "kimi" }
@@ -64,7 +70,7 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		"-p", job.Prompt,
 		"--output-format", "stream-json",
 	}
-	if job.Model != "" {
+	if job.Model != "" && job.Model != DefaultModel {
 		args = append(args, "-m", job.Model)
 	}
 	if resumeSessionID != "" {

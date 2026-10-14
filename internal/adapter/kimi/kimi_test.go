@@ -72,6 +72,14 @@ func TestCommand(t *testing.T) {
 				"--session", "session_9f2a"},
 		},
 		{
+			// The CLI's own default model is named, not passed: no -m
+			// flag, so the CLI picks its default itself.
+			name:    "the default model names none",
+			job:     adapter.Job{Prompt: prompt, Model: DefaultModel},
+			wantExe: "kimi",
+			wantArg: []string{"-p", prompt, "--output-format", "stream-json"},
+		},
+		{
 			name:    "extra args pass through",
 			ad:      Adapter{ExtraArgs: []string{"--lang", "en"}},
 			job:     adapter.Job{Prompt: prompt},
