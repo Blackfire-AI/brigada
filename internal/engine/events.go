@@ -153,13 +153,21 @@ type workerResultFields struct {
 }
 
 // workerResultMessage renders a completion's result as the message the
-// history keeps: the block's own fields when it parsed, else the block
-// verbatim under an unknown status, so a malformed contract still shows
-// up as the worker's answer rather than vanishing.
+// history keeps: the block's own fields when it parsed — a worker's
+// result block (§5.4), or a reviewer's verdict block (§7), decoded as
+// reviewCompletedTx decodes it — else the block verbatim under an
+// unknown status, so a malformed contract still shows up as the
+// worker's answer rather than vanishing.
 func workerResultMessage(result string) string {
 	var wr workerResultFields
 	if err := json.Unmarshal([]byte(result), &wr); err == nil && wr.Status != "" {
 		if b, err := json.Marshal(wr); err == nil {
+			return string(b)
+		}
+	}
+	var v verdictBlock
+	if err := json.Unmarshal([]byte(result), &v); err == nil && v.Verdict != "" {
+		if b, err := json.Marshal(v); err == nil {
 			return string(b)
 		}
 	}

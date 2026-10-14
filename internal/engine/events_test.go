@@ -403,3 +403,42 @@ func TestEventsShareTheChangeTransaction(t *testing.T) {
 		})
 	}
 }
+
+// TestWorkerResultMessageShapes pins how the history renders each kind
+// of completion result: a worker's result block by its fields, a
+// reviewer's verdict block by its verdict and findings — the shape a
+// review job completes with — and anything else verbatim under the
+// unknown status.
+func TestWorkerResultMessageShapes(t *testing.T) {
+	cases := []struct {
+		name, result, want string
+	}{
+		{
+			name:   "worker result block",
+			result: `{"status":"done","summary":"edited work.txt","branch":"brigada/task-1"}`,
+			want:   `{"status":"done","summary":"edited work.txt","branch":"brigada/task-1"}`,
+		},
+		{
+			name:   "review approve",
+			result: `{"verdict": "approve", "findings": "checked the diff against the spec"}`,
+			want:   `{"verdict":"approve","findings":"checked the diff against the spec"}`,
+		},
+		{
+			name:   "review changes",
+			result: `{"verdict":"changes","findings":"the test misses the error path"}`,
+			want:   `{"verdict":"changes","findings":"the test misses the error path"}`,
+		},
+		{
+			name:   "no block at all",
+			result: `I finished everything, trust me`,
+			want:   `{"status":"unknown","summary":"I finished everything, trust me"}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := workerResultMessage(tc.result); got != tc.want {
+				t.Errorf("workerResultMessage(%s) = %s, want %s", tc.result, got, tc.want)
+			}
+		})
+	}
+}
