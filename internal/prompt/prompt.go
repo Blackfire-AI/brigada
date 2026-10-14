@@ -11,7 +11,7 @@ import "strings"
 // prompts are composed only from fixed, versioned templates plus
 // verbatim data (§1.4), so a template change is a version bump, never a
 // silent edit.
-const WorkerTemplateVersion = 2
+const WorkerTemplateVersion = 3
 
 // ReviewTemplateVersion is the review prompt template's version (§7),
 // under the same rule as the worker's (§1.4).
@@ -43,7 +43,7 @@ End your final message with exactly one JSON result block, fenced as a
 %FENCE%json code block, and nothing after it:
 
 {"status": "done" | "needs_help" | "failed", "summary": "...",
- "question": "...", "branch": "..."}
+ "question": "...", "branch": "...", "discoveries": "..."}
 
 - "done": the work is finished and left in the worktree. "summary"
   says what changed and why; "branch", if you give it, is the branch
@@ -51,6 +51,10 @@ End your final message with exactly one JSON result block, fenced as a
 - "needs_help": you cannot proceed without a human or the foreman.
   "question" holds the one question that unblocks you.
 - "failed": you could not do the task. "summary" says what stopped you.
+- "discoveries" is optional: facts you learned that matter beyond this
+  task (an API quirk, a flaky test, a wrong assumption in the plan,
+  something a later task will trip over). Leave it out when there are
+  none.
 
 A final message without a well-formed result block counts as a failed
 run with no result, so the last thing you print must be the block.

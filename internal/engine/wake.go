@@ -308,6 +308,8 @@ func wakeEventText(kind, payload string) string {
 		text = p.Question
 	case evReviewChanges:
 		text = p.Findings
+	case evTaskDiscoveries:
+		text = p.Discoveries
 	}
 	if text == "" {
 		return kind

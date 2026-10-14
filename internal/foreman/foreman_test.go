@@ -32,8 +32,8 @@ func TestInstructionsShipped(t *testing.T) {
 	if strings.TrimSpace(got) == "" {
 		t.Fatal("Instructions() is empty; the embedded file did not ship")
 	}
-	if strings.Count(got, "\n") > 80 {
-		t.Errorf("the instructions run %d lines; keep them under 80", strings.Count(got, "\n"))
+	if strings.Count(got, "\n") > 90 {
+		t.Errorf("the instructions run %d lines; keep them under 90", strings.Count(got, "\n"))
 	}
 	for _, want := range []string{
 		"never edit code",

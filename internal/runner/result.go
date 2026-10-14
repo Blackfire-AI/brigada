@@ -33,6 +33,10 @@ type WorkerResult struct {
 	Question string `json:"question,omitempty"`
 	Branch   string `json:"branch,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+	// Discoveries is what the worker learned that matters beyond its own
+	// task (§5.4); the runner keeps it so the engine can hand it to the
+	// foreman (§4.2).
+	Discoveries string `json:"discoveries,omitempty"`
 	// Progress is the last progress events, attached when the runner
 	// ends a stalled or time-capped run (§5.6) so what the worker was
 	// doing rides with the outcome. A worker's own block never carries

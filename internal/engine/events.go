@@ -36,6 +36,7 @@ const (
 	evTaskFixRound           = "task_fix_round"            // a fix round is queued on the author's session (§3)
 	evTaskOutOfRounds        = "task_out_of_rounds"        // the task's rounds are spent; the foreman decides (§3)
 	evTaskNeedsHelp          = "task_needs_help"           // the worker asked its question; the foreman answers (§3)
+	evTaskDiscoveries        = "task_discoveries"          // a worker's result carried discoveries; they reach the foreman, no wake of their own (§4.2)
 	evTaskAnswered           = "task_answered"             // the foreman answered; the author's session resumes (§3)
 	evTaskRestarted          = "task_restarted"            // the foreman restarted the task; a fresh work attempt is queued (§3, §5.6)
 	evTaskFailed             = "task_failed"               // the run failed or said nothing usable; the foreman decides (§3)
@@ -69,6 +70,8 @@ type eventPayload struct {
 	Layer    string `json:"layer,omitempty"`    // the cap layer that held the job (§8.1)
 	Branch   string `json:"branch,omitempty"`   // the task's result branch (§6.4)
 	Question string `json:"question,omitempty"` // the worker's question (§5.4)
+	// Discoveries is what a worker learned beyond its own task (§4.2).
+	Discoveries string `json:"discoveries,omitempty"`
 	// QuestionID names the questions row an answer filled (§3, §11):
 	// the task_answered event's own reference to the exchange it made.
 	QuestionID int64  `json:"question_id,omitempty"`
@@ -155,6 +158,8 @@ type workerResultFields struct {
 	Question string `json:"question,omitempty"`
 	Branch   string `json:"branch,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+	// Discoveries is what the worker learned beyond its task (§5.4, §9).
+	Discoveries string `json:"discoveries,omitempty"`
 }
 
 // workerResultMessage renders a completion's result as the message the

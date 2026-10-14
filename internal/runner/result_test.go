@@ -93,6 +93,19 @@ func TestParseResultTable(t *testing.T) {
 	}
 }
 
+// TestParseResultDiscoveries checks the optional discoveries field
+// (§5.4): kept when the block carries it, empty when it does not.
+func TestParseResultDiscoveries(t *testing.T) {
+	with := parseResult("```json\n{\"status\":\"done\",\"summary\":\"s\",\"discoveries\":\"the API rounds down\"}\n```\n")
+	if with.Discoveries != "the API rounds down" {
+		t.Errorf("Discoveries = %q, want the worker's words", with.Discoveries)
+	}
+	without := parseResult("```json\n{\"status\":\"done\",\"summary\":\"s\"}\n```\n")
+	if without.Discoveries != "" {
+		t.Errorf("Discoveries = %q, want empty", without.Discoveries)
+	}
+}
+
 func TestTailOf(t *testing.T) {
 	if got := tailOf("hello", 10); got != "hello" {
 		t.Errorf("short string: %q", got)
