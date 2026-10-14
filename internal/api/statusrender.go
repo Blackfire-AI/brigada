@@ -3,11 +3,16 @@ package api
 import (
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
-// StatusSections renders one status answer's plans, foreman report and
-// "needs you" sections (§6.1, §6.2, §3, §10) as plain text, after the
-// pid/uptime and jobs lines: the `plans:` lines — one per plan, its
+// StatusSections renders one status answer's running jobs, plans,
+// foreman report and "needs you" sections (§6.1, §6.2, §3, §10) as
+// plain text, after the pid/uptime and jobs lines: the `running:` lines
+// — one per job a runner holds, with the worker's latest event — then
+// the `plans:` lines — one per plan, its
 // tasks indented beneath it — then the `foreman report:` block — the
 // latest report's time and first lines, the project named — then the
 // `needs you:` queue, "nothing" when it is empty. The client's status
@@ -15,7 +20,7 @@ import (
 // user and the foreman read the same lines; a task's branch rides in
 // brackets only once it has one.
 func StatusSections(st Status) string {
-	var lines []string
+	lines := runningLines(st.Running, time.Now())
 	if len(st.Plans) == 0 {
 		lines = append(lines, "plans: none")
 	} else {
@@ -57,4 +62,85 @@ func StatusSections(st Status) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// runningLines renders the jobs a runner holds (§10), one line each:
+// the job, its task, its kind, the agent, how long it has run and what
+// the worker did last.
+func runningLines(jobs []engine.StatusJob, now time.Time) []string {
+	if len(jobs) == 0 {
+		return []string{"running: none"}
+	}
+	lines := []string{"running:"}
+	for _, j := range jobs {
+		lines = append(lines, "  "+describeJob(j, now))
+	}
+	return lines
+}
+
+// describeJob is one running job in a few words: "task #3 work ·
+// claude/sonnet · 1m40s · tool_start Edit". A foreman turn names no
+// task; the parts the engine does not know yet are left out.
+func describeJob(j engine.StatusJob, now time.Time) string {
+	head := fmt.Sprintf("job #%d", j.ID)
+	if j.TaskID != 0 {
+		head = fmt.Sprintf("task #%d", j.TaskID)
+	}
+	parts := []string{head + " " + j.Kind}
+	if j.Harness != "" {
+		agent := j.Harness
+		if j.Model != "" {
+			agent += "/" + j.Model
+		}
+		parts = append(parts, agent)
+	}
+	if t, err := time.Parse(engine.TimeLayout, j.LeasedAt); err == nil && !now.Before(t) {
+		parts = append(parts, now.Sub(t).Truncate(time.Second).String())
+	}
+	if j.LastEvent != "" {
+		parts = append(parts, j.LastEvent)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// StatusLine renders the status as one short line for a terminal status
+// bar (§10): the running jobs — the first one described, the rest
+// counted — then what needs the user, or "idle" when nothing runs and
+// nothing waits. An idle line names the latest plan that finished
+// inside status's window, so a bar shows a plan's end even when nothing
+// else announced it.
+func StatusLine(st Status, now time.Time) string {
+	var parts []string
+	switch n := len(st.Running); {
+	case n == 1:
+		parts = append(parts, describeJob(st.Running[0], now))
+	case n > 1:
+		parts = append(parts, fmt.Sprintf("%s (+%d more)", describeJob(st.Running[0], now), n-1))
+	}
+	if q := st.Jobs["queued"]; q > 0 {
+		parts = append(parts, fmt.Sprintf("%d queued", q))
+	}
+	if n := len(st.NeedsYou); n > 0 {
+		parts = append(parts, fmt.Sprintf("needs you: %d", n))
+	}
+	if len(parts) == 0 {
+		if p := latestDonePlan(st.Plans); p != nil {
+			return fmt.Sprintf("brigada: idle · plan #%d done", p.ID)
+		}
+		return "brigada: idle"
+	}
+	return "brigada: " + strings.Join(parts, " · ")
+}
+
+// latestDonePlan is the done plan with the highest id among those the
+// status lists, or nil: plan ids grow with time, and status lists only
+// the plans that finished inside its window.
+func latestDonePlan(plans []engine.StatusPlan) *engine.StatusPlan {
+	var latest *engine.StatusPlan
+	for i := range plans {
+		if plans[i].State == "done" && (latest == nil || plans[i].ID > latest.ID) {
+			latest = &plans[i]
+		}
+	}
+	return latest
 }

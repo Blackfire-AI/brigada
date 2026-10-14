@@ -273,7 +273,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		_, err = tx.Exec(`UPDATE jobs SET status = 'leased', lease_id = ?, lease_owner = ?, lease_expires_at = ?,
 			lease_epoch = ?, fence_token = attempts + 1, attempts = attempts + 1, agent_id = ?,
 			branch = COALESCE(branch, NULLIF(?, '')),
-			first_leased = COALESCE(first_leased, ?), last_leased = ?, queued_at = NULL,
+			first_leased = COALESCE(first_leased, ?), last_leased = ?, queued_at = NULL, last_event = NULL,
 			cap_held_at = NULL, cap_held_layer = NULL, cap_held_key = NULL,
 			released_by = NULL, released_until = NULL, released_lease = NULL, updated_at = ?
 			WHERE id = ?`,

@@ -19,6 +19,10 @@ const statusDoneWindow = 24 * time.Hour
 // carries (§10): one line, about this many bytes, never a paragraph.
 const needsYouReasonLimit = 160
 
+// lastEventLimit is the most a running job's last event carries in the
+// status views (§10): one line, about this many bytes.
+const lastEventLimit = 120
+
 // statusReportLines is how much of the latest foreman report the status
 // shows (§10): the first few lines, the rest kept for the history. The
 // payload itself is already bounded where the engine wrote it.
@@ -35,9 +39,25 @@ type StatusInfo struct {
 	Pid       int64          `json:"pid"`
 	StartedAt string         `json:"started_at"`
 	Jobs      map[string]int `json:"jobs"`
+	Running   []StatusJob    `json:"running"`
 	Plans     []StatusPlan   `json:"plans"`
 	Report    *StatusReport  `json:"report,omitempty"`
 	NeedsYou  []NeedsYouItem `json:"needs_you"`
+}
+
+// StatusJob is one job a runner holds right now (§10): which job, for
+// which task, of what kind, on which agent, since when, and the
+// worker's latest progress event — what it is doing, in one line. A
+// foreman turn has no task; an agent-less runner's job names no agent.
+type StatusJob struct {
+	ID        int64  `json:"id"`
+	TaskID    int64  `json:"task_id,omitempty"`
+	Kind      string `json:"kind"`
+	Status    string `json:"status"`
+	Harness   string `json:"harness,omitempty"`
+	Model     string `json:"model,omitempty"`
+	LeasedAt  string `json:"leased_at,omitempty"`
+	LastEvent string `json:"last_event,omitempty"`
 }
 
 // StatusReport is the latest foreman report the status shows (§3, §10):
@@ -104,6 +124,7 @@ var JobStatuses = []string{
 // admin callers read all of them.
 func (e *Engine) Status(ctx context.Context, project int64) (StatusInfo, error) {
 	var info StatusInfo
+	info.Running = []StatusJob{}
 	info.Plans = []StatusPlan{}
 	info.NeedsYou = []NeedsYouItem{}
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
@@ -142,6 +163,9 @@ func (e *Engine) Status(ctx context.Context, project int64) (StatusInfo, error) 
 			}
 		}
 		info.Jobs = counts
+		if info.Running, err = statusRunningTx(tx, project); err != nil {
+			return err
+		}
 		if info.Plans, err = statusPlansTx(tx, project, now); err != nil {
 			return err
 		}
@@ -157,6 +181,40 @@ func (e *Engine) Status(ctx context.Context, project int64) (StatusInfo, error) 
 		return StatusInfo{}, fmt.Errorf("read status: %w", err)
 	}
 	return info, nil
+}
+
+// statusRunningTx lists the jobs a runner holds (§10), oldest lease
+// first: leased or running, with the agent they were dispatched to and
+// the worker's latest progress event.
+func statusRunningTx(tx *sql.Tx, project int64) ([]StatusJob, error) {
+	query := `SELECT j.id, COALESCE(j.task_id, 0), j.kind, j.status,
+			COALESCE(a.harness, ''), COALESCE(a.model, ''),
+			COALESCE(j.last_leased, j.first_leased, ''), COALESCE(j.last_event, '')
+		FROM jobs j LEFT JOIN agents a ON a.id = j.agent_id
+		WHERE j.status IN (?, ?)`
+	args := []any{statusLeased, statusRunning}
+	if project != 0 {
+		query += " AND j.project_id = ?"
+		args = append(args, project)
+	}
+	query += " ORDER BY COALESCE(j.last_leased, j.first_leased, j.created_at), j.id"
+	rows, err := tx.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list the running jobs: %w", err)
+	}
+	defer rows.Close()
+	jobs := []StatusJob{}
+	for rows.Next() {
+		var j StatusJob
+		if err := rows.Scan(&j.ID, &j.TaskID, &j.Kind, &j.Status, &j.Harness, &j.Model, &j.LeasedAt, &j.LastEvent); err != nil {
+			return nil, fmt.Errorf("list the running jobs: %w", err)
+		}
+		jobs = append(jobs, j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list the running jobs: %w", err)
+	}
+	return jobs, nil
 }
 
 // statusPlansTx lists the plans the status shows (§6.1, §6.2, §10):

@@ -26,6 +26,7 @@ type Status struct {
 	Pid       int64                 `json:"pid"`
 	StartedAt string                `json:"started_at"`
 	Jobs      map[string]int        `json:"jobs"`
+	Running   []engine.StatusJob    `json:"running"`
 	Plans     []engine.StatusPlan   `json:"plans"`
 	Report    *engine.StatusReport  `json:"report,omitempty"`
 	NeedsYou  []engine.NeedsYouItem `json:"needs_you"`
