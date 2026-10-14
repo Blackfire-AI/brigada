@@ -49,7 +49,15 @@ type LeaseGrant struct {
 	// own branch. BaseRef and ReviewBranch together name the diff the
 	// review prompt tells the reviewer to run.
 	ReviewBranch string
-	Attempt      int64 // leases taken on the job, this one included
+	// Branch is the branch the engine names a work or fix job to work
+	// on (§5.1): a work job makes it from the base ref, a fix round
+	// continues the task's current branch, and the runner builds and
+	// pushes exactly it — never a name of its own choosing. Named once,
+	// at the job's first lease, and kept by every later lease of the
+	// same job. Empty for a review, which reads ReviewBranch and moves
+	// nothing, and for a foreman turn, which belongs to no task.
+	Branch  string
+	Attempt int64 // leases taken on the job, this one included
 	// ResumeSessionID is the harness session the key's last run ended
 	// on (§4.2), for a session-mode job to resume; empty when the key
 	// never ran or the job is fresh.
@@ -235,14 +243,26 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		if err != nil {
 			return nil, err
 		}
+		// The branch a job works on is the engine's to name (§5.1), and
+		// it is named once: the first lease computes it and the column
+		// keeps it, so a re-lease after a lost lease works on the same
+		// branch as the lease before it.
+		jobBranch := j.Branch
+		if jobBranch == "" {
+			jobBranch, err = jobBranchTx(tx, j)
+			if err != nil {
+				return nil, err
+			}
+		}
 		expires := now.Add(e.cfg.LeaseTTL)
 		_, err = tx.Exec(`UPDATE jobs SET status = 'leased', lease_id = ?, lease_owner = ?, lease_expires_at = ?,
 			lease_epoch = ?, fence_token = attempts + 1, attempts = attempts + 1, agent_id = ?,
+			branch = COALESCE(branch, NULLIF(?, '')),
 			first_leased = COALESCE(first_leased, ?), last_leased = ?, queued_at = NULL,
 			cap_held_at = NULL, cap_held_layer = NULL, cap_held_key = NULL,
 			released_by = NULL, released_until = NULL, released_lease = NULL, updated_at = ?
 			WHERE id = ?`,
-			leaseID, owner, fmtTime(expires), epoch, nullIfZero(agent), nowStr, nowStr, nowStr, j.ID)
+			leaseID, owner, fmtTime(expires), epoch, nullIfZero(agent), jobBranch, nowStr, nowStr, nowStr, j.ID)
 		if err != nil {
 			return nil, fmt.Errorf("lease job %d: %w", j.ID, err)
 		}
@@ -316,6 +336,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			BaseRef:         baseRef,
 			CheckCmd:        checkCmd,
 			ReviewBranch:    reviewBranch,
+			Branch:          jobBranch,
 			Attempt:         j.Attempts + 1,
 			ResumeSessionID: resume,
 		}, nil
@@ -504,4 +525,41 @@ func taskInfoTx(tx *sql.Tx, j *jobRow) (repoURL, baseRef, checkCmd, branch strin
 		return "", "", "", "", fmt.Errorf("read task %d: %w", j.TaskID, err)
 	}
 	return repoURL, baseRef, checkCmd, branch, nil
+}
+
+// jobBranchTx names the branch a work or fix job works on (§5.1, §5.6):
+// the task's current branch for a fix round — the round continues the
+// work the task's completion recorded — and for a work job a name of
+// the task's own: brigada/task-<id> for its first attempt, and
+// brigada/task-<id>-r<n> after the task's n-th restart, counted over
+// the task's restart jobs, this one included, so each restart works on
+// a branch no earlier attempt pushed to and its push from a fresh base
+// is a fast-forward of its own branch. A fix round on a task that has
+// no branch yet — nothing of its work completed to record one — takes
+// the work rule's name: the branch its work starts on. A review reads
+// the task's branch without moving it (§7) and a foreman turn belongs
+// to no task; both name nothing.
+func jobBranchTx(tx *sql.Tx, j *jobRow) (string, error) {
+	if j.Kind != KindWork && j.Kind != KindFix {
+		return "", nil
+	}
+	if j.Kind == KindFix {
+		var branch string
+		if err := tx.QueryRow("SELECT COALESCE(branch, '') FROM tasks WHERE id = ?", j.TaskID).
+			Scan(&branch); err != nil {
+			return "", fmt.Errorf("read the branch of task %d: %w", j.TaskID, err)
+		}
+		if branch != "" {
+			return branch, nil
+		}
+	}
+	var restarts int64
+	if err := tx.QueryRow("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1", j.TaskID).
+		Scan(&restarts); err != nil {
+		return "", fmt.Errorf("count the restarts of task %d: %w", j.TaskID, err)
+	}
+	if restarts == 0 {
+		return fmt.Sprintf("brigada/task-%d", j.TaskID), nil
+	}
+	return fmt.Sprintf("brigada/task-%d-r%d", j.TaskID, restarts), nil
 }

@@ -121,6 +121,24 @@ func (e *Engine) taskAfterCompletionTx(tx *sql.Tx, job *jobRow, c Completion, no
 // workCompletedTx applies a work or fix job's completion to its task.
 func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class string, now time.Time) error {
 	wr, haveResult := parseWorkerResult(c.Result)
+	// The task's branch follows the work that certainly shipped (§6.4):
+	// a done run's, a check-failed run's too — the push precedes the
+	// check (§5.5) — so those completions repoint it, each to the branch
+	// the engine named the job (a restart's branch above all, so the
+	// review behind it reads the new attempt's work). Nothing else
+	// moves it: a questioning or failed run pushed nothing, and a
+	// stopped one's push is a rescue of half-made work, not a result —
+	// its branch, a restart's especially, may hold no work at all. The
+	// value is the job's, not the result block's: the branch is the
+	// engine's to name (§5.1), and the runner fills the block with this
+	// same name when the worker left it empty.
+	if job.Branch != "" && haveResult &&
+		(wr.Status == workerDone || wr.Status == workerCheckFailed || !checkPassed(c.CheckResult)) {
+		if _, err := tx.Exec(`UPDATE tasks SET branch = ?, updated_at = ? WHERE id = ?`,
+			job.Branch, fmtTime(now), job.TaskID); err != nil {
+			return fmt.Errorf("record the branch of task %d: %w", job.TaskID, err)
+		}
+	}
 	switch {
 	case !haveResult || (wr.Status != workerDone && wr.Status != workerCheckFailed && wr.Status != workerNeedsHelp):
 		// A failed run, a stopped one, a block that never parsed: all
@@ -282,14 +300,22 @@ func authorPlacementTx(tx *sql.Tx, taskID int64) (harness string, agent int64, e
 // task's base and the result branch. The implementer's summary is
 // deliberately no input of the composition (§7's anti-steering rule);
 // the branch and base stay on the task's own row for the runner's
-// grant to read at lease time.
+// grant to read at lease time. The branch itself is the engine's, from
+// the job it was named for at lease time — the runner pushed exactly
+// it (§5.1) — and a worker's block naming another branch cannot
+// redirect the review: the block's name stands in only for a job no
+// engine named a branch for.
 func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, checkJSON string, now time.Time) error {
+	branch := job.Branch
+	if branch == "" {
+		branch = wr.Branch
+	}
 	if _, err := tx.Exec(`UPDATE tasks SET state = ?, branch = COALESCE(NULLIF(?, ''), branch), updated_at = ?
-		WHERE id = ?`, taskReviewing, wr.Branch, fmtTime(now), job.TaskID); err != nil {
+		WHERE id = ?`, taskReviewing, branch, fmtTime(now), job.TaskID); err != nil {
 		return fmt.Errorf("move task %d to reviewing: %w", job.TaskID, err)
 	}
 	if _, err := appendEventTx(tx, evTaskReviewing, job.ProjectID, job.TaskID, job.ID,
-		eventPayload{Status: taskReviewing, Branch: wr.Branch}, now); err != nil {
+		eventPayload{Status: taskReviewing, Branch: branch}, now); err != nil {
 		return err
 	}
 	exclude, err := agentFamilyTx(tx, job.AgentID)
@@ -310,7 +336,7 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 		TaskID:        job.TaskID,
 		Kind:          KindReview,
 		Mode:          ModeFresh,
-		Prompt:        prompt.ComposeReviewPrompt(spec, checkJSON, base, wr.Branch),
+		Prompt:        prompt.ComposeReviewPrompt(spec, checkJSON, base, branch),
 		ExcludeFamily: exclude,
 	}, now)
 	return err

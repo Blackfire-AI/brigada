@@ -32,6 +32,7 @@ type jobRow struct {
 	FenceToken     int64
 	Followup       bool
 	Attempts       int64
+	Branch         string // the branch the engine named the job (§5.1); '' until its first lease
 	Result         string
 	FirstLeased    string
 	LastLeased     string
@@ -55,7 +56,7 @@ type jobRow struct {
 const jobColumns = `id, project_id, COALESCE(task_id, 0), kind, key, mode, prompt, status,
 	COALESCE(agent_id, 0), exclude_family, COALESCE(exclude_agent, 0), COALESCE(require_agent, 0),
 	COALESCE(lease_id, ''), COALESCE(lease_owner, 0), COALESCE(lease_expires_at, ''), COALESCE(lease_epoch, 0),
-	COALESCE(fence_token, 0), followup, attempts, COALESCE(result, ''),
+	COALESCE(fence_token, 0), followup, attempts, COALESCE(branch, ''), COALESCE(result, ''),
 	COALESCE(first_leased, ''), COALESCE(last_leased, ''), COALESCE(queued_at, ''),
 	COALESCE(cap_held_at, ''), COALESCE(cap_held_layer, ''), COALESCE(cap_held_key, ''),
 	COALESCE(leased_seconds, 0), harness, labels, restart,
@@ -68,7 +69,7 @@ func scanJob(row interface{ Scan(dest ...any) error }) (*jobRow, error) {
 	err := row.Scan(&j.ID, &j.ProjectID, &j.TaskID, &j.Kind, &j.Key, &j.Mode, &j.Prompt, &j.Status,
 		&j.AgentID, &j.ExcludeFamily, &j.ExcludeAgent, &j.RequireAgent,
 		&j.LeaseID, &j.LeaseOwner, &j.LeaseExpiresAt, &j.LeaseEpoch,
-		&j.FenceToken, &j.Followup, &j.Attempts, &j.Result,
+		&j.FenceToken, &j.Followup, &j.Attempts, &j.Branch, &j.Result,
 		&j.FirstLeased, &j.LastLeased, &j.QueuedAt,
 		&j.CapHeldAt, &j.CapHeldLayer, &j.CapHeldKey,
 		&j.LeasedSeconds, &j.Harness, &j.Labels, &j.Restart,
