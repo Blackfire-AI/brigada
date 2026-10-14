@@ -17,7 +17,7 @@ var instructions string
 // InstructionsVersion is the foreman instructions' version (§4.1): the
 // versioned file shipped with brigada that every foreman prompt
 // prepends. Editing instructions.md means bumping this.
-const InstructionsVersion = 3
+const InstructionsVersion = 4
 
 // Instructions returns the foreman instructions (§4.1): what the
 // foreman is, what it may and may not do, and how it goes about
@@ -50,6 +50,22 @@ you do, and your next turn sees this one in the session.
 // rather than inventing work.
 const noEventsLine = "No events are pending; call status to check whether anything needs you.\n"
 
+// EventBlocks renders events the way every wake prompt carries them
+// (§4.2): each in its own data delimiters, verbatim, one blank line
+// between blocks. The `events` tool's answers and the headless turns'
+// prompts read alike — the same discipline as the worker prompt (§5.3),
+// so what reaches the foreman as data can never pose as instructions
+// about how to run (§1.4).
+func EventBlocks(events []string) string {
+	var b strings.Builder
+	for _, ev := range events {
+		b.WriteString("\n<event>\n")
+		b.WriteString(ev)
+		b.WriteString("\n</event>\n")
+	}
+	return b.String()
+}
+
 // ComposeTurnPrompt builds a headless foreman turn's wake prompt
 // (§4.2 item 2): the fixed, versioned template plus the pending events
 // verbatim, each wrapped in its own data delimiters — the same
@@ -63,10 +79,6 @@ func ComposeTurnPrompt(events []string) string {
 		b.WriteString(noEventsLine)
 		return b.String()
 	}
-	for _, ev := range events {
-		b.WriteString("\n<event>\n")
-		b.WriteString(ev)
-		b.WriteString("\n</event>\n")
-	}
+	b.WriteString(EventBlocks(events))
 	return b.String()
 }

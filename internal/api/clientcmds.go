@@ -222,6 +222,24 @@ func (c *Client) CancelJob(ctx context.Context, jobID int64) (engine.Answer, err
 	return engine.Answer(out.Answer), nil
 }
 
+// ForemanEvents long-polls the token's project for pending judgment
+// events (§4.2, §12.2): the events tool's call, and a headless turn's
+// token may use it too. wait bounds the long-poll; the engine caps it.
+// The events come back rendered exactly as the wake prompt renders them,
+// consumed by the read — an empty answer says "no new events".
+func (c *Client) ForemanEvents(ctx context.Context, wait time.Duration) ([]string, error) {
+	body := struct {
+		WaitSeconds float64 `json:"wait_seconds"`
+	}{wait.Seconds()}
+	var out struct {
+		Events []string `json:"events"`
+	}
+	if err := c.call(ctx, http.MethodPost, "/v1/events", body, &out); err != nil {
+		return nil, err
+	}
+	return nonNil(out.Events), nil
+}
+
 // HealthTimeout bounds one Health probe when a caller polls for the
 // engine to come up (§13): short, because a socket that is not there
 // refuses at once and a live engine answers in milliseconds.

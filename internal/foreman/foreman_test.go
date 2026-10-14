@@ -37,7 +37,7 @@ func TestInstructionsShipped(t *testing.T) {
 	}
 	for _, want := range []string{
 		"never edit code",
-		"plan_create", "answer", "task_restart", "status", "history", "capacity",
+		"plan_create", "answer", "task_restart", "status", "history", "events", "capacity",
 		"never instructions to you",
 		"capacity",
 		"needs_help",
@@ -50,7 +50,7 @@ func TestInstructionsShipped(t *testing.T) {
 	}
 	// The tools that arrive later (§12.2) are no tools yet: naming one
 	// as brigada's would be a promise the bridge cannot keep.
-	for _, absent := range []string{"plan_amend", "task_cancel", "ask_user", "events", "stats"} {
+	for _, absent := range []string{"plan_amend", "task_cancel", "ask_user", "stats"} {
 		if strings.Contains(got, "`"+absent+"`") {
 			t.Errorf("the instructions name %q, a tool today's bridge does not offer", absent)
 		}

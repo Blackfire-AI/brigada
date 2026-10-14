@@ -39,7 +39,7 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 	return rep, nil
 }
 
-// sweepTx is the maintenance pass, in three rounds:
+// sweepTx is the maintenance pass, in four rounds:
 //
 //  1. an expired lease goes back to queued keeping its lease id, so its
 //     holder can still revive or complete it — only a re-lease, which
@@ -49,6 +49,9 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 //  3. a queued job nobody leased within the queue TTL fails, so it
 //     cannot wedge its key — unless a runner keeps finding it held by a
 //     full cap layer, which restarts the clock (§8.1);
+//  4. an expired attach hold returns its delivered events to pending
+//     uncounted, revokes its token, and re-evaluates the wake (§4.2
+//     item 1);
 //
 // Leased wall time is banked wherever a lease ends: expiry at the
 // expiry itself, a cap at the cap moment, never past them.
@@ -198,6 +201,33 @@ func (e *Engine) sweepTx(tx *sql.Tx, now time.Time) (SweepReport, error) {
 				return rep, err
 			}
 			rep.QueueTimedOut = append(rep.QueueTimedOut, x.id)
+		}
+	}
+
+	rows, err = tx.Query(`SELECT id, project_id FROM attach_holds WHERE state = 'live' AND expires_at <= ?`, nowStr)
+	if err != nil {
+		return rep, fmt.Errorf("sweep expired attach holds: %w", err)
+	}
+	type lapsedHold struct {
+		id, project int64
+	}
+	var holds []lapsedHold
+	for rows.Next() {
+		var h lapsedHold
+		if err := rows.Scan(&h.id, &h.project); err != nil {
+			rows.Close()
+			return rep, fmt.Errorf("sweep expired attach holds: %w", err)
+		}
+		holds = append(holds, h)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return rep, fmt.Errorf("sweep expired attach holds: %w", err)
+	}
+	rows.Close()
+	for _, h := range holds {
+		if err := e.expireAttachHoldTx(tx, h.id, h.project, now); err != nil {
+			return rep, err
 		}
 	}
 

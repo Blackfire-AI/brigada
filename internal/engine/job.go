@@ -153,12 +153,16 @@ func affinityFreeTx(tx *sql.Tx, key string, owner int64) (bool, error) {
 // upsertSessionTx records the key's session: which runner holds it and,
 // when known, the harness session id the last run ended on (§4.2, §14).
 // An empty harnessSessionID keeps what is stored: leasing does not know
-// it, completing does.
+// it, completing does. A runner of 0 names no runner — the attach
+// release's write-back, whose chat ran in the user's own terminal — and
+// keeps the row's runner affinity: the id it writes is the key's, not
+// this caller's, so the release must not hand the key to whoever leases
+// next by wiping the runner the last lease pinned (§8).
 func upsertSessionTx(tx *sql.Tx, key string, runner int64, harnessSessionID string, now time.Time) error {
 	_, err := tx.Exec(`INSERT INTO sessions (key, runner_id, harness_session_id, state, last_used_at, created_at)
 		VALUES (?, ?, ?, 'active', ?, ?)
 		ON CONFLICT(key) DO UPDATE SET
-			runner_id = excluded.runner_id,
+			runner_id = COALESCE(excluded.runner_id, sessions.runner_id),
 			last_used_at = excluded.last_used_at,
 			state = 'active',
 			harness_session_id = CASE WHEN excluded.harness_session_id <> '' THEN excluded.harness_session_id ELSE sessions.harness_session_id END`,

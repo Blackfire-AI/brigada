@@ -57,6 +57,18 @@ func (e *Engine) wakeForemanTx(tx *sql.Tx, project int64, now time.Time) error {
 	if pending == 0 {
 		return nil
 	}
+	// An attached chat holds the foreman (§4.2 item 1): while a hold
+	// lives, no headless turn is submitted — the events wait for the
+	// attached session, which reads them through its `events` tool. The
+	// sweep at every call's top has already expired what lapsed.
+	var held int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM attach_holds WHERE project_id = ? AND state = 'live' AND expires_at > ?`,
+		project, fmtTime(now)).Scan(&held); err != nil {
+		return fmt.Errorf("read the attach holds of project %d: %w", project, err)
+	}
+	if held > 0 {
+		return nil
+	}
 	var harness, model string
 	err := tx.QueryRow("SELECT foreman_harness, foreman_model FROM projects WHERE id = ?", project).
 		Scan(&harness, &model)
@@ -149,7 +161,10 @@ func (e *Engine) wakeForemanTx(tx *sql.Tx, project int64, now time.Time) error {
 		// re-evaluates, so the events stay pending rather than ride two.
 		return nil
 	}
-	if _, err := tx.Exec(`UPDATE foreman_inbox SET state = ?, job_id = ? WHERE project_id = ? AND state = ?`,
+	// hold_id clears with the delivery's move (0014): a row an expired
+	// hold returned keeps its hold the way a returned row keeps its job,
+	// and the turn that takes it must not carry the dead hold's name.
+	if _, err := tx.Exec(`UPDATE foreman_inbox SET state = ?, job_id = ?, hold_id = NULL WHERE project_id = ? AND state = ?`,
 		inboxDelivered, res.JobID, project, inboxPending); err != nil {
 		return fmt.Errorf("deliver the inbox of project %d to job %d: %w", project, res.JobID, err)
 	}
@@ -313,11 +328,15 @@ func (e *Engine) RecoverForemanWakes(ctx context.Context) error {
 		// to a turn that ended without its settle — a heartbeat's hard cap
 		// in a binary before that rule, a crash between the two writes.
 		// The row returns to pending, its attempts untouched, and the wake
-		// loop below picks the project up again.
+		// loop below picks the project up again. A row delivered to a live
+		// hold is not the heal's: no turn carried it, and the attached
+		// session's opening prompt already read it (§4.2 item 1).
 		if _, err := tx.Exec(`UPDATE foreman_inbox SET state = ?
 			WHERE state = ? AND job_id NOT IN (
-				SELECT id FROM jobs WHERE status IN ('queued', 'leased', 'running'))`,
-			inboxPending, inboxDelivered); err != nil {
+				SELECT id FROM jobs WHERE status IN ('queued', 'leased', 'running'))
+			AND (hold_id IS NULL OR hold_id NOT IN (
+				SELECT id FROM attach_holds WHERE state = 'live' AND expires_at > ?))`,
+			inboxPending, inboxDelivered, fmtTime(now)); err != nil {
 			return fmt.Errorf("heal the foreman inbox: %w", err)
 		}
 		rows, err := tx.Query(`SELECT DISTINCT project_id FROM foreman_inbox
