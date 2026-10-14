@@ -306,8 +306,11 @@ func authorPlacementTx(tx *sql.Tx, taskID int64) (harness string, agent int64, e
 // review job (§7): same key, fresh session, placed on another family
 // than the author's. The engine composes the reviewer's prompt itself
 // (§1.4: only the engine composes prompts) — the review template, the
-// spec and the check result verbatim, and the diff command naming the
-// task's base and the result branch. The implementer's summary is
+// spec and the check result verbatim, the feedback the author was given
+// for the round (the completing job's prompt is its record: a fix
+// round's check output or findings, a restart's note), and the diff
+// command naming the task's base and the result branch. The
+// implementer's summary is
 // deliberately no input of the composition (§7's anti-steering rule);
 // the branch and base stay on the task's own row for the runner's
 // grant to read at lease time. The branch itself is the engine's, from
@@ -346,7 +349,7 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 		TaskID:        job.TaskID,
 		Kind:          KindReview,
 		Mode:          ModeFresh,
-		Prompt:        prompt.ComposeReviewPrompt(spec, checkJSON, base, branch),
+		Prompt:        prompt.ComposeReviewPrompt(spec, prompt.WorkerFeedback(job.Prompt), checkJSON, base, branch),
 		ExcludeFamily: exclude,
 	}, now)
 	return err

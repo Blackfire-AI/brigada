@@ -143,7 +143,7 @@ func TestTaskRunsReviewsAndFinishes(t *testing.T) {
 	// summary — "added the thing", in the completion above — is none of
 	// its inputs either (§7's anti-steering rule).
 	promptOf := e.str("SELECT prompt FROM jobs WHERE id = ?", review)
-	if want := prompt.ComposeReviewPrompt("the spec", passCheck, "main", branchOf(e.task)); promptOf != want {
+	if want := prompt.ComposeReviewPrompt("the spec", "", passCheck, "main", branchOf(e.task)); promptOf != want {
 		t.Errorf("review prompt = %q\nwant the composed\n%q", promptOf, want)
 	}
 	if strings.Contains(promptOf, "added the thing") {
