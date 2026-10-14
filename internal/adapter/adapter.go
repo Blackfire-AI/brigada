@@ -112,6 +112,11 @@ const (
 var ResumeCapableHarnesses = map[string]bool{
 	"claude": true, // the Claude Code CLI: `claude -p --resume <session>` (§5.2)
 	"fake":   true, // the scripted test adapter
+	// kimi is absent although its CLI resumes headless (`kimi --session
+	// <id>`): this set gates the foreman's harness, whose turns carry the
+	// `brigada mcp` bridge (§12.2), and kimi has no MCP-config flag to
+	// offer it — its adapter refuses such jobs outright. A foreman cannot
+	// run on kimi until its CLI can carry the bridge.
 }
 
 // ResumeCapable reports whether harness's CLI can resume a session

@@ -1,0 +1,2 @@
+error: failed to run prompt: Session "session_0eaf12cd" not found.
+See log: /home/worker/.kimi-code/logs/kimi-code.log

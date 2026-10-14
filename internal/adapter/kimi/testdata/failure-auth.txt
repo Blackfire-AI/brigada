@@ -1,0 +1,2 @@
+error: failed to run prompt: The provided authorization grant is invalid
+See log: /home/worker/.kimi-code/logs/kimi-code.log

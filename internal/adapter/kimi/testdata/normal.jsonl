@@ -1,0 +1,7 @@
+{"role":"meta","type":"system.version","version":"2.1.0"}
+{"role":"assistant","tool_calls":[{"type":"function","id":"tool_a","function":{"name":"Read","arguments":"{\"path\":\"README.md\"}"}}]}
+{"role":"tool","tool_call_id":"tool_a","content":"1\t# the repository"}
+{"role":"assistant","content":"Now let me look at the tests:","tool_calls":[{"type":"function","id":"tool_b","function":{"name":"Grep","arguments":"{\"pattern\":\"adapter\"}"}}]}
+{"role":"tool","tool_call_id":"tool_b","content":[{"type":"text","text":"two matches"}]}
+{"role":"assistant","content":"The final answer text."}
+{"role":"meta","type":"session.resume_hint","session_id":"session_1f08abcd","command":"kimi -r session_1f08abcd","content":"To resume this session: kimi -r session_1f08abcd"}
