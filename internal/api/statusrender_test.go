@@ -31,12 +31,15 @@ func TestStatusLine(t *testing.T) {
 			Plans:   []engine.StatusPlan{{ID: 1, State: "done"}},
 		}, "brigada: job #9 foreman"},
 		{"one job", Status{Running: []engine.StatusJob{work}},
-			"brigada: task #3 work · claude/sonnet · 1m40s · tool_start Edit"},
+			"brigada: task #3 work · claude/sonnet · 1m40s · Edit"},
+		{"a non-tool event shows as it is", Status{Running: []engine.StatusJob{
+			{ID: 7, TaskID: 5, Kind: "work", Status: "running", LastEvent: "text thinking"}}},
+			"brigada: task #5 work · text thinking"},
 		{"two jobs, a queue and a parked task", Status{
 			Running:  []engine.StatusJob{work, review},
 			Jobs:     map[string]int{"queued": 2},
 			NeedsYou: []engine.NeedsYouItem{{Kind: "task", ID: 7}},
-		}, "brigada: task #3 work · claude/sonnet · 1m40s · tool_start Edit (+1 more) · 2 queued · needs you: 1"},
+		}, "brigada: task #3 work · claude/sonnet · 1m40s · Edit (+1 more) · 2 queued · needs you: 1"},
 		{"a foreman turn", Status{Running: []engine.StatusJob{{ID: 9, Kind: "foreman", Status: "running"}}},
 			"brigada: job #9 foreman"},
 	}
