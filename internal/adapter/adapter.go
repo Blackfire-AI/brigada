@@ -23,7 +23,7 @@ type Adapter interface {
 	// The environment is the adapter's to build, under one policy: the
 	// worker's own login state is its business — the ambient
 	// environment, the vendor CLI's tokens and configuration, are what
-	// it needs to run and to push its branch (§5.3) — but the adapter
+	// it needs to run (§5.3) — but the adapter
 	// must not add brigada's own secrets to it. The runner enforces the
 	// line from its side: whatever variables its git credentials ride
 	// (Config.GitEnv) are stripped from the command's environment

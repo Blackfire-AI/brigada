@@ -496,6 +496,17 @@ br=$(git rev-parse --abbrev-ref HEAD)
 printf '{"type":"result","text":"done and pushed: {\\"status\\":\\"done\\",\\"summary\\":\\"pushed work.txt\\",\\"branch\\":\\"%s\\"}"}\n' "$br"
 `
 
+// editOnlyWorker has no shell of its own, as a worker that may only
+// edit files: it leaves its edit uncommitted and reports done without
+// naming a branch, so the commit, the push and the check are all the
+// runner's (§5.3).
+var editOnlyWorker = `
+cat > /dev/null
+echo '{"type":"tool_start","name":"Edit"}'
+echo edited > work.txt
+echo '{"type":"tool_end","name":"Edit"}'
+` + fakeResultScript(`{"status":"done","summary":"edited work.txt"}`)
+
 const noResultWorker = `
 cat > /dev/null
 echo '{"type":"assistant","text":"thinking hard about it"}'
@@ -607,8 +618,9 @@ func TestRunnerHappyPath(t *testing.T) {
 }
 
 // TestRunnerWorkerPushesItself is the happy path where the worker does
-// the pushing (§5.3: the template tells it to) and the runner's
-// ls-remote check finds the branch already there.
+// the pushing anyway (§5.3 lets a worker with a shell commit, never asks
+// it to push) and the runner's ls-remote check finds the branch already
+// there.
 func TestRunnerWorkerPushesItself(t *testing.T) {
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
@@ -630,6 +642,39 @@ func TestRunnerWorkerPushesItself(t *testing.T) {
 	}
 	if check := e.checkResult(done); check.ExitCode != 0 {
 		t.Errorf("check = %+v, want a pass", check)
+	}
+	e.assertNoWorktrees()
+}
+
+// TestRunnerWorkerLeavesEditsUncommitted is the worker the template
+// now describes (§5.3): it edits, commits nothing, names no branch, and
+// the runner still commits, pushes, names the branch and runs the check.
+func TestRunnerWorkerLeavesEditsUncommitted(t *testing.T) {
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	task := e.seedTask("", `test "$(cat work.txt)" = edited`)
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Edit work.txt.", ""))
+	markerDir(t)
+
+	p := e.startRunner(writeWorkerScript(t, editOnlyWorker), 100*time.Millisecond)
+	defer p.stop(t)
+
+	done := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	res := e.workerResult(done)
+	if res.Status != "done" || res.Branch != taskBranch(task, 1) {
+		t.Errorf("worker result = %+v, want done on the runner's branch %s", res, taskBranch(task, 1))
+	}
+	if remoteBranchCommit(t, remote, taskBranch(task, 1)) == "" {
+		t.Fatalf("branch %s was never pushed to the remote", taskBranch(task, 1))
+	}
+	clone := t.TempDir()
+	git(t, "", "clone", "-q", "--branch", taskBranch(task, 1), remote, clone)
+	if data, err := os.ReadFile(filepath.Join(clone, "work.txt")); err != nil || string(data) != "edited\n" {
+		t.Errorf("the pushed branch does not hold the uncommitted edit: %q (%v)", data, err)
+	}
+	if check := e.checkResult(done); check.ExitCode != 0 || check.TimedOut {
+		t.Errorf("check = %+v, want a pass on the runner's commit", check)
 	}
 	e.assertNoWorktrees()
 }

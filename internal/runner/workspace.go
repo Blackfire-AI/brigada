@@ -216,8 +216,8 @@ func (w *workspace) materializeMirror(ctx context.Context, baseRef string) error
 	// A fallback identity and no signing, so a fresh worktree can commit
 	// whatever the host's global git config says; a signed-in CLI sets
 	// its own identity per commit. Mirror mode is unset because it
-	// refuses every refspec push — the worker's `git push origin HEAD`
-	// (§5.3) and the runner's own both carry refspecs — while the
+	// refuses every refspec push — the runner's own, and a worker's
+	// `git push origin HEAD` if one pushes anyway — while the
 	// fetches above pass explicit refspecs and never needed it.
 	for _, kv := range [][2]string{
 		{"user.name", "brigada runner"},
@@ -275,8 +275,11 @@ func (w *workspace) discardWorktree(ctx context.Context) {
 
 // ensurePushed verifies the branch on the remote holds exactly the
 // worktree's commit, and makes it so when it does not (§5.4). The
-// worker usually pushes its own branch, but a branch that merely exists
-// is not enough: an early push followed by more work, or edits the
+// template tells the worker to leave the commit and the push to the
+// runner (§5.3), but a worker may push anyway — a run that ignored it,
+// or a prompt from an older template — so ensurePushed verifies rather
+// than trusts: a branch that merely exists is not enough, since an
+// early push followed by more work, or edits the
 // worker never committed, would leave the remote holding something
 // other than what the runner is about to vouch for. So: leftovers the
 // worker left uncommitted are committed, then the remote's SHA is
