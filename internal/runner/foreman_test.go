@@ -296,10 +296,14 @@ const fixedLeaseToken = "feedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfee
 // the MCP config test: the config path the adapter was given, and the
 // environment and command line the worker itself saw — where the
 // lease-scoped token must not be.
+//
+// The test waits for mcpconfig.txt, then reads env.txt: so env.txt is
+// written first, and each file appears whole (written aside, renamed
+// into place), or a loaded run reads it missing or half written.
 const mcpTurnWorker = `
 cat > prompt.txt
-printf '%s\n' "$BRIGADA_FAKE_MCP_CONFIG" > mcpconfig.txt
-env > env.txt
+env > env.tmp && mv env.tmp env.txt
+printf '%s\n' "$BRIGADA_FAKE_MCP_CONFIG" > mcpconfig.tmp && mv mcpconfig.tmp mcpconfig.txt
 echo '{"type":"system_init","session_id":"foreman-sess-5"}'
 echo '{"type":"assistant","text":"checking my tools"}'
 while [ ! -f "$BRIGADA_TEST_MARKERS/release" ]; do sleep 0.05; done

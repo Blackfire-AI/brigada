@@ -286,9 +286,15 @@ type jobGrant struct {
 	LeaseID        string    `json:"lease_id"`
 	LeaseExpiresAt time.Time `json:"lease_expires_at"`
 	Harness        string    `json:"harness"`
-	RepoURL        string    `json:"repo_url"`
-	BaseRef        string    `json:"base_ref"`
-	CheckCmd       string    `json:"check_cmd"`
+	// Agent is the harness of the agent the lease picked for the job
+	// (§8): the runner runs the job with that agent's adapter and model,
+	// never with the job's own harness constraint, which placed the job
+	// but does not name the worker. Empty when the lease recorded no
+	// agent.
+	Agent    string `json:"agent,omitempty"`
+	RepoURL  string `json:"repo_url"`
+	BaseRef  string `json:"base_ref"`
+	CheckCmd string `json:"check_cmd"`
 	// ReviewBranch is the task's result branch a review job reviews
 	// (§7): the worktree sits at it. Empty for every other kind.
 	ReviewBranch string `json:"review_branch,omitempty"`
@@ -321,6 +327,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		LeaseID:         g.LeaseID,
 		LeaseExpiresAt:  g.LeaseExpiresAt,
 		Harness:         g.Harness,
+		Agent:           g.Agent,
 		RepoURL:         g.RepoURL,
 		BaseRef:         g.BaseRef,
 		CheckCmd:        g.CheckCmd,

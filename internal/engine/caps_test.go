@@ -8,11 +8,12 @@ import (
 )
 
 // seedAgent gives a seeded runner one advertised agent, the way a
-// register would.
+// register would. The agent takes every class: these tests place jobs
+// by harness and caps, not by class.
 func (e *env) seedAgent(runner int64, adapter, harness, model, account string) {
 	e.t.Helper()
 	e.exec(`INSERT INTO agents (runner_id, adapter, harness, model, family, account, classes, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?)`, runner, adapter, harness, model, adapter, account, seedTS, seedTS)
+		VALUES (?, ?, ?, ?, ?, ?, '["implement","review","answer"]', ?, ?)`, runner, adapter, harness, model, adapter, account, seedTS, seedTS)
 }
 
 // addPlan adds another plan to the fixture's project, and addPlanTask a

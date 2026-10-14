@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Blackfire-AI/brigada/internal/adapter"
+	"github.com/Blackfire-AI/brigada/internal/adapter/fake"
+	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
@@ -369,5 +372,62 @@ func TestRunnerWedgedReviewFailsFast(t *testing.T) {
 	// It wedged after doing its reading: the markers it managed to
 	// leave still show the run sat where §7 says it must.
 	assertReviewerSaw(t, markers, branch, pushed)
+	e.assertNoWorktrees()
+}
+
+// TestRunnerRunsTheAgentTheLeaseNamed is BPF1i on one runner (§5.1,
+// §8): a runner offering two agents — a reviewer of another family and
+// an implementer, each driving its own adapter — registers both, the
+// work job runs the implementer's script even though the review-only
+// agent sits first by id, and the review the family rule sends to the
+// other family runs that agent's script. The grant names the agent the
+// dispatcher picked, never the job's empty harness constraint, and
+// each script leaves its own marker, so the test can tell which
+// adapter actually ran.
+func TestRunnerRunsTheAgentTheLeaseNamed(t *testing.T) {
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	markers := markerDir(t)
+	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
+	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", ""))
+	t.Setenv("BRIGADA_TEST_BRANCH", taskBranch(task, 1))
+
+	workBody := "echo implement-ran > \"$BRIGADA_TEST_MARKERS/work-by\"\n" + happyWorker
+	reviewBody := "echo review-ran > \"$BRIGADA_TEST_MARKERS/review-by\"\n" + reviewScript(reviewApproveResult)
+	workAd := &fake.Adapter{Script: writeWorkerScript(t, workBody)}
+	reviewAd := &fake.Adapter{Script: writeWorkerScript(t, reviewBody)}
+	p := e.startRunner("", 100*time.Millisecond, func(cfg *Config) {
+		cfg.Agents = []api.Agent{
+			{Adapter: "fake", Harness: "revwh", Model: "fake-2", Family: "otherfam", Account: "acct-2", Classes: []string{"review"}},
+			{Adapter: "fake", Harness: "implh", Model: "fake-1", Family: "workfam", Account: "acct-1", Classes: []string{"implement"}},
+		}
+		cfg.Adapters = []adapter.Adapter{reviewAd, workAd}
+		cfg.StallAfter = 3 * time.Second
+		cfg.ClassCaps = map[string]ClassCaps{"review": {TimeCap: 8 * time.Second}}
+	})
+	defer p.stop(t)
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	e.waitTaskState(task, "done")
+
+	if got := reviewerMarker(t, markers, "work-by"); got != "implement-ran\n" {
+		t.Errorf("the work ran %q, want the implementer's script", got)
+	}
+	if got := reviewerMarker(t, markers, "review-by"); got != "review-ran\n" {
+		t.Errorf("the review ran %q, want the other family's script", got)
+	}
+	implAgent := e.int64Of("SELECT id FROM agents WHERE family = 'workfam'")
+	reviewAgent := e.int64Of("SELECT id FROM agents WHERE family = 'otherfam'")
+	if implAgent == 0 || reviewAgent == 0 {
+		t.Fatalf("agents = impl %d, review %d; want both registered", implAgent, reviewAgent)
+	}
+	review := e.int64Of("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review'", task)
+	if got := e.int64Of("SELECT COALESCE(agent_id, 0) FROM jobs WHERE id = ?", work); got != implAgent {
+		t.Errorf("the work job's agent = %d, want the implementer %d", got, implAgent)
+	}
+	if got := e.int64Of("SELECT COALESCE(agent_id, 0) FROM jobs WHERE id = ?", review); got != reviewAgent {
+		t.Errorf("the review job's agent = %d, want the other family's %d", got, reviewAgent)
+	}
 	e.assertNoWorktrees()
 }

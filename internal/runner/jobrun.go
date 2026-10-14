@@ -125,7 +125,14 @@ func (r *jobRun) execute(ctx context.Context) {
 // runJob is the job after the workspace exists: the worker, then the
 // push, the check and the completion — everything the heartbeats cover.
 func (r *jobRun) runJob(ctx context.Context, ws *workspace, kill <-chan struct{}) {
-	ad, model := r.cfg.adapterFor(r.grant)
+	ad, model, err := r.cfg.agentFor(r.grant)
+	if err != nil {
+		// The lease named an agent this runner does not offer — a stale
+		// advertisement, or an engine that knows another set. The job
+		// fails with the reason rather than running on a wrong CLI.
+		r.finishWithError(ctx, err.Error())
+		return
+	}
 	exitErr := r.runWorker(ctx, ad, model, ws.dir, kill)
 	if r.takeDropped() {
 		r.cfg.Log.WarnContext(ctx, "job no longer ours; worker killed and result dropped",
