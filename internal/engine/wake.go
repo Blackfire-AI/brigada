@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/foreman"
 )
 
 // The foreman inbox's states (§4.2): pending while no turn has carried
@@ -40,7 +42,44 @@ func inboxEventTx(tx *sql.Tx, kind string, project, task, job int64, payload eve
 	return nil
 }
 
-// wakeForemanTx evaluates one wake for the project (§4.2 item 2, §4.3):
+// WakeOutcome is what one wake evaluation did (§4.2): woke a turn, or
+// why the pending inbox stays pending. `brigada ask` reports it, so a
+// user message never queues in silence (§4.2 item 3).
+type WakeOutcome string
+
+const (
+	WakeWoken       WakeOutcome = "woken"           // a foreman turn was submitted carrying the inbox
+	WakeNothing     WakeOutcome = "nothing_pending" // the inbox was empty
+	WakeAttached    WakeOutcome = "attached"        // a person is attached; the session reads the inbox through events
+	WakeTurnRunning WakeOutcome = "turn_running"    // a turn is live; its completion re-evaluates
+	WakeNoForeman   WakeOutcome = "no_foreman"      // the project names no foreman harness
+	WakeStalled     WakeOutcome = "stalled"         // failing turns carried the inbox too often
+	WakeBudgetSpent WakeOutcome = "budget_spent"    // the day's wake budget is spent (§4.3)
+	WakeDuplicate   WakeOutcome = "duplicate"       // a user message repeating one sent moments ago (§12.1); nothing new was queued
+)
+
+// ForemanInbox is the foreman's pending inbox as it reaches a session
+// (§4.2): the judgment events, rendered as event lines — data — and the
+// user's messages (§4.2 item 3), kept apart because they are the one
+// input that is a request rather than data (§1.4).
+type ForemanInbox struct {
+	Events       []string              `json:"events"`
+	UserMessages []foreman.UserMessage `json:"user_messages"`
+}
+
+// Empty reports whether the inbox holds nothing at all.
+func (in ForemanInbox) Empty() bool {
+	return len(in.Events) == 0 && len(in.UserMessages) == 0
+}
+
+// wakeForemanTx evaluates one wake for the project, its outcome left to
+// wakeOutcomeTx's callers that report it.
+func (e *Engine) wakeForemanTx(tx *sql.Tx, project int64, now time.Time) error {
+	_, err := e.wakeOutcomeTx(tx, project, now)
+	return err
+}
+
+// wakeOutcomeTx evaluates one wake for the project (§4.2 item 2, §4.3):
 // with pending inbox rows, a foreman harness, no live turn on the key, a
 // run of failed turns that has not stalled, and a wake budget with room,
 // it submits a foreman turn carrying every pending event verbatim and
@@ -48,14 +87,14 @@ func inboxEventTx(tx *sql.Tx, kind string, project, task, job int64, payload eve
 // a live turn, the stall, the budget — leaves the events pending; a live
 // turn's completion re-evaluates, and `brigada status` shows the parked
 // tasks either way.
-func (e *Engine) wakeForemanTx(tx *sql.Tx, project int64, now time.Time) error {
+func (e *Engine) wakeOutcomeTx(tx *sql.Tx, project int64, now time.Time) (WakeOutcome, error) {
 	var pending int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM foreman_inbox WHERE project_id = ? AND state = ?`,
 		project, inboxPending).Scan(&pending); err != nil {
-		return fmt.Errorf("read the foreman inbox of project %d: %w", project, err)
+		return "", fmt.Errorf("read the foreman inbox of project %d: %w", project, err)
 	}
 	if pending == 0 {
-		return nil
+		return WakeNothing, nil
 	}
 	// An attached chat holds the foreman (§4.2 item 1): while a hold
 	// lives, no headless turn is submitted — the events wait for the
@@ -64,39 +103,39 @@ func (e *Engine) wakeForemanTx(tx *sql.Tx, project int64, now time.Time) error {
 	var held int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM attach_holds WHERE project_id = ? AND state = 'live' AND expires_at > ?`,
 		project, fmtTime(now)).Scan(&held); err != nil {
-		return fmt.Errorf("read the attach holds of project %d: %w", project, err)
+		return "", fmt.Errorf("read the attach holds of project %d: %w", project, err)
 	}
 	if held > 0 {
-		return nil
+		return WakeAttached, nil
 	}
 	var harness, model string
 	err := tx.QueryRow("SELECT foreman_harness, foreman_model FROM projects WHERE id = ?", project).
 		Scan(&harness, &model)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return fmt.Errorf("no such project %d", project)
+		return "", fmt.Errorf("no such project %d", project)
 	case err != nil:
-		return fmt.Errorf("read the foreman of project %d: %w", project, err)
+		return "", fmt.Errorf("read the foreman of project %d: %w", project, err)
 	}
 	if harness == "" || model == "" {
 		// Nobody to wake: the foreman is the user's own choice (§4.1), and
 		// a project that never named one keeps its events pending until
 		// someone does.
-		return nil
+		return WakeNoForeman, nil
 	}
 	key := fmt.Sprintf("foreman:%d", project)
 	live, err := liveJobTx(tx, key)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if live != nil {
 		// The turn's completion re-evaluates (§4.2): events that arrived
 		// while it ran get the next turn then, not a second job now.
-		return nil
+		return WakeTurnRunning, nil
 	}
 	stalled, err := foremanWakeStalledTx(tx, project)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if stalled {
 		// Named once per episode of failures: the wake a later evaluation
@@ -107,20 +146,20 @@ func (e *Engine) wakeForemanTx(tx *sql.Tx, project int64, now time.Time) error {
 		var lastStall sql.NullInt64
 		if err := tx.QueryRow(`SELECT MAX(id) FROM events WHERE kind = ? AND project_id = ?`,
 			evForemanWakeStalled, project).Scan(&lastStall); err != nil {
-			return fmt.Errorf("read the last wake-stalled event of project %d: %w", project, err)
+			return "", fmt.Errorf("read the last wake-stalled event of project %d: %w", project, err)
 		}
 		var woke int
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = ? AND project_id = ? AND id > ?`,
 			evForemanWoken, project, lastStall.Int64).Scan(&woke); err != nil {
-			return fmt.Errorf("read the woken events of project %d: %w", project, err)
+			return "", fmt.Errorf("read the woken events of project %d: %w", project, err)
 		}
 		if woke > 0 {
 			if _, err := appendEventTx(tx, evForemanWakeStalled, project, 0, 0,
 				eventPayload{Count: foremanWakeStallThreshold}, now); err != nil {
-				return err
+				return "", err
 			}
 		}
-		return nil
+		return WakeStalled, nil
 	}
 	// The day's budget counts every foreman job of the project since UTC
 	// midnight — the turns this engine wakes and a person's manual submits
@@ -130,47 +169,56 @@ func (e *Engine) wakeForemanTx(tx *sql.Tx, project int64, now time.Time) error {
 	var wakes int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind = ? AND created_at >= ?`,
 		project, KindForeman, dayStart).Scan(&wakes); err != nil {
-		return fmt.Errorf("count the day's foreman turns of project %d: %w", project, err)
+		return "", fmt.Errorf("count the day's foreman turns of project %d: %w", project, err)
 	}
-	if wakes >= e.cfg.ForemanWakeBudget {
+	carriesUser, err := pendingUserMessagesTx(tx, project)
+	if err != nil {
+		return "", err
+	}
+	// A wake that carries a user message is not charged (§4.3, §4.2 item
+	// 3): the budget bounds the foreman reacting on its own, and a user
+	// asking is as attended as a chat.
+	if wakes >= e.cfg.ForemanWakeBudget && carriesUser == 0 {
 		// The budget is spent (§4.3): at most one event says so per project
 		// per day, and the events stay pending for the next day or a raise.
 		var spent int
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = ? AND project_id = ? AND created_at >= ?`,
 			evForemanWakeBudgetSpent, project, dayStart).Scan(&spent); err != nil {
-			return fmt.Errorf("read the budget-spent events of project %d: %w", project, err)
+			return "", fmt.Errorf("read the budget-spent events of project %d: %w", project, err)
 		}
 		if spent == 0 {
 			if _, err := appendEventTx(tx, evForemanWakeBudgetSpent, project, 0, 0,
 				eventPayload{Count: int64(e.cfg.ForemanWakeBudget)}, now); err != nil {
-				return err
+				return "", err
 			}
 		}
-		return nil
+		return WakeBudgetSpent, nil
 	}
-	lines, err := pendingEventLinesTx(tx, project)
+	inbox, err := pendingInboxTx(tx, project)
 	if err != nil {
-		return err
+		return "", err
 	}
-	res, err := e.submitForemanTurnTx(tx, project, lines, now)
+	res, err := e.submitForemanTurnTx(tx, project, inbox, now)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if res.Answer != AnsCreated {
 		// A live turn appeared inside this transaction: its completion
 		// re-evaluates, so the events stay pending rather than ride two.
-		return nil
+		return WakeTurnRunning, nil
 	}
 	// hold_id clears with the delivery's move (0014): a row an expired
 	// hold returned keeps its hold the way a returned row keeps its job,
 	// and the turn that takes it must not carry the dead hold's name.
 	if _, err := tx.Exec(`UPDATE foreman_inbox SET state = ?, job_id = ?, hold_id = NULL WHERE project_id = ? AND state = ?`,
 		inboxDelivered, res.JobID, project, inboxPending); err != nil {
-		return fmt.Errorf("deliver the inbox of project %d to job %d: %w", project, res.JobID, err)
+		return "", fmt.Errorf("deliver the inbox of project %d to job %d: %w", project, res.JobID, err)
 	}
-	_, err = appendEventTx(tx, evForemanWoken, project, 0, res.JobID,
-		eventPayload{Job: res.JobID, Count: int64(len(lines))}, now)
-	return err
+	if _, err := appendEventTx(tx, evForemanWoken, project, 0, res.JobID,
+		eventPayload{Job: res.JobID, Count: int64(len(inbox.Events) + len(inbox.UserMessages))}, now); err != nil {
+		return "", err
+	}
+	return WakeWoken, nil
 }
 
 // foremanWakeStalledTx reports whether the project's wake has stalled
@@ -187,14 +235,19 @@ func foremanWakeStalledTx(tx *sql.Tx, project int64) (bool, error) {
 	return least.Valid && least.Int64 >= foremanWakeStallThreshold, nil
 }
 
-// pendingEventLinesTx renders the project's pending inbox rows as the
+// The foreman_inbox table's rows are judgment events and, since §4.2
+// item 3, user messages too: one row per event either way, told apart
+// by the event's kind (0013's header predates the messages).
+//
+// pendingInboxTx renders the project's pending inbox (§4.2): the user's
+// messages (§4.2 item 3) verbatim, apart, and the judgment events as the
 // wake prompt's event lines (§4.2 item 2): one per event — the kind, the
 // task id and title, and the event's own words as the log holds them,
 // bounded only by what the payload already holds — so the foreman reads
 // what the log holds, not the needs-you queue's one-line abridgement
 // (§10). The title alone is flattened to one line: a newline there would
 // break the event's own line, while the payload's words stay verbatim.
-func pendingEventLinesTx(tx *sql.Tx, project int64) ([]string, error) {
+func pendingInboxTx(tx *sql.Tx, project int64) (ForemanInbox, error) {
 	rows, err := tx.Query(`SELECT e.kind, COALESCE(e.task_id, 0), COALESCE(t.title, ''), e.payload
 		FROM foreman_inbox i
 		JOIN events e ON e.id = i.event_id
@@ -202,30 +255,41 @@ func pendingEventLinesTx(tx *sql.Tx, project int64) ([]string, error) {
 		WHERE i.project_id = ? AND i.state = ?
 		ORDER BY e.id`, project, inboxPending)
 	if err != nil {
-		return nil, fmt.Errorf("read the pending events of project %d: %w", project, err)
+		return ForemanInbox{}, fmt.Errorf("read the pending events of project %d: %w", project, err)
 	}
-	lines := []string{}
+	inbox := ForemanInbox{Events: []string{}, UserMessages: []foreman.UserMessage{}}
 	for rows.Next() {
 		var kind, payload string
 		var task int64
 		var title string
 		if err := rows.Scan(&kind, &task, &title, &payload); err != nil {
 			rows.Close()
-			return nil, fmt.Errorf("read the pending events of project %d: %w", project, err)
+			return ForemanInbox{}, fmt.Errorf("read the pending events of project %d: %w", project, err)
+		}
+		if kind == evUserMessage {
+			// The user's words go apart, verbatim: a request, never an
+			// event line (§1.4, §4.2 item 3).
+			var p eventPayload
+			if err := json.Unmarshal([]byte(payload), &p); err != nil {
+				rows.Close()
+				return ForemanInbox{}, fmt.Errorf("read a user message of project %d: %w", project, err)
+			}
+			inbox.UserMessages = append(inbox.UserMessages, foreman.UserMessage{Source: p.Source, Text: p.Text})
+			continue
 		}
 		text := "the plan is done"
 		if kind != evPlanDone {
 			text = wakeEventText(kind, payload)
 		}
-		lines = append(lines, fmt.Sprintf("%s task %d %s: %s",
+		inbox.Events = append(inbox.Events, fmt.Sprintf("%s task %d %s: %s",
 			kind, task, strings.Join(strings.Fields(title), " "), text))
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return nil, fmt.Errorf("read the pending events of project %d: %w", project, err)
+		return ForemanInbox{}, fmt.Errorf("read the pending events of project %d: %w", project, err)
 	}
 	rows.Close()
-	return lines, nil
+	return inbox, nil
 }
 
 // wakeEventText renders one inbox event's own words (§4.2, §9): the

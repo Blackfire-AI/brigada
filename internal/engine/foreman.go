@@ -25,7 +25,7 @@ func (e *Engine) SubmitForemanTurn(ctx context.Context, project int64, events []
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
-		r, err := e.submitForemanTurnTx(tx, project, events, now)
+		r, err := e.submitForemanTurnTx(tx, project, ForemanInbox{Events: events}, now)
 		if err != nil {
 			return fmt.Errorf("submit foreman turn for project %d: %w", project, err)
 		}
@@ -35,7 +35,7 @@ func (e *Engine) SubmitForemanTurn(ctx context.Context, project int64, events []
 	return res, err
 }
 
-func (e *Engine) submitForemanTurnTx(tx *sql.Tx, project int64, events []string, now time.Time) (SubmitResult, error) {
+func (e *Engine) submitForemanTurnTx(tx *sql.Tx, project int64, inbox ForemanInbox, now time.Time) (SubmitResult, error) {
 	var harness, model string
 	err := tx.QueryRow("SELECT foreman_harness, foreman_model FROM projects WHERE id = ?", project).
 		Scan(&harness, &model)
@@ -62,7 +62,7 @@ func (e *Engine) submitForemanTurnTx(tx *sql.Tx, project int64, events []string,
 		ProjectID: project,
 		Kind:      KindForeman,
 		Mode:      ModeSession,
-		Prompt:    foreman.Instructions() + "\n" + foreman.ComposeTurnPrompt(events),
+		Prompt:    foreman.Instructions() + "\n" + foreman.ComposeTurnPromptWith(inbox.Events, inbox.UserMessages),
 		Harness:   harness,
 	}, now)
 }

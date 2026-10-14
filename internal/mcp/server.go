@@ -42,6 +42,17 @@ type Server struct {
 	// Log is where the bridge's own notes go: stderr, never stdout —
 	// stdout is the protocol's alone. Nil discards them.
 	Log *slog.Logger
+	// Tools is the offer: nil is the foreman's tools (§12.2); the client
+	// bridge passes ClientTools.
+	Tools []Tool
+}
+
+// offer is the tool list this server serves.
+func (s *Server) offer() []Tool {
+	if s.Tools != nil {
+		return s.Tools
+	}
+	return tools
 }
 
 // request is one line of the protocol as it arrives: a JSON-RPC 2.0
@@ -137,7 +148,7 @@ func (s *Server) handleLine(ctx context.Context, line []byte) *response {
 	case req.Method == "ping":
 		resp.Result = struct{}{}
 	case req.Method == "tools/list":
-		resp.Result = toolsListResult{Tools: toolInfos()}
+		resp.Result = toolsListResult{Tools: toolInfos(s.offer())}
 	case req.Method == "tools/call":
 		resp.Result, resp.Error = s.callTool(ctx, req.Params)
 	default:
@@ -184,7 +195,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &rpcError{codeInvalidParams, "tools/call params: " + err.Error()}
 	}
-	tool, ok := toolByName(p.Name)
+	tool, ok := toolByName(s.offer(), p.Name)
 	if !ok {
 		return nil, &rpcError{codeInvalidParams, "unknown tool: " + p.Name}
 	}

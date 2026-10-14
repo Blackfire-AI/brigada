@@ -153,17 +153,17 @@ func (e *Engine) attachTx(tx *sql.Tx, project int64, force bool, now time.Time) 
 	// and job_id cleared: a forced attach takes rows a cancelled turn
 	// carried, and the stale job_id would send the recovery's heal after
 	// them (§13) while the hold still lives.
-	lines, err := pendingEventLinesTx(tx, project)
+	inbox, err := pendingInboxTx(tx, project)
 	if err != nil {
 		return AttachResult{}, err
 	}
-	res.Prompt = foreman.Instructions() + "\n" + foreman.ComposeTurnPrompt(lines)
+	res.Prompt = foreman.Instructions() + "\n" + foreman.ComposeTurnPromptWith(inbox.Events, inbox.UserMessages)
 	if _, err := tx.Exec(`UPDATE foreman_inbox SET state = ?, hold_id = ?, job_id = NULL WHERE project_id = ? AND state = ?`,
 		inboxDelivered, res.HoldID, project, inboxPending); err != nil {
 		return AttachResult{}, fmt.Errorf("deliver the inbox of project %d to hold %d: %w", project, res.HoldID, err)
 	}
 	_, err = appendEventTx(tx, evForemanAttached, project, 0, 0,
-		eventPayload{Hold: res.HoldID, Count: int64(len(lines))}, now)
+		eventPayload{Hold: res.HoldID, Count: int64(len(inbox.Events) + len(inbox.UserMessages))}, now)
 	return res, err
 }
 
@@ -278,26 +278,26 @@ func (e *Engine) ReleaseAttach(ctx context.Context, holdID int64, sessionID stri
 	return ans, err
 }
 
-// ForemanEvents reads the project's pending judgment events (§4.2): the
-// one check the `events` tool's long-poll re-asks — the rows render
-// exactly as the wake prompt renders them, and reading them here is
-// consuming them (§4.2: events are consumed when the attached foreman
-// reads them through `events`). An empty answer says "no new events"; the
-// API's long-poll loops on it, so a headless turn's token may call it too.
-func (e *Engine) ForemanEvents(ctx context.Context, project int64) ([]string, error) {
-	var lines []string
+// ForemanEvents reads the project's pending inbox (§4.2): the one check
+// the `events` tool's long-poll re-asks — the judgment events render
+// exactly as the wake prompt renders them, the user's messages (§4.2
+// item 3) apart — and reading them here is consuming them (§4.2: events
+// are consumed when the attached foreman reads them through `events`).
+// An empty inbox says "no new events"; the API's long-poll loops on it,
+// so a headless turn's token may call it too.
+func (e *Engine) ForemanEvents(ctx context.Context, project int64) (ForemanInbox, error) {
+	var inbox ForemanInbox
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
 		var err error
-		lines, err = pendingEventLinesTx(tx, project)
+		inbox, err = pendingInboxTx(tx, project)
 		if err != nil {
 			return err
 		}
-		if len(lines) == 0 {
-			lines = []string{}
+		if inbox.Empty() {
 			return nil
 		}
 		if _, err := tx.Exec(`UPDATE foreman_inbox SET state = ? WHERE project_id = ? AND state = ?`,
@@ -306,7 +306,7 @@ func (e *Engine) ForemanEvents(ctx context.Context, project int64) ([]string, er
 		}
 		return nil
 	})
-	return lines, err
+	return inbox, err
 }
 
 // HoldTokenScope resolves the secret of an attach hold's foreman token to

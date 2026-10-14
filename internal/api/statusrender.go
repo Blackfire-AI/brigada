@@ -49,6 +49,9 @@ func StatusSections(st Status) string {
 			lines = append(lines, ln)
 		}
 	}
+	if st.ForemanMessages > 0 {
+		lines = append(lines, fmt.Sprintf("messages for the foreman: %d waiting", st.ForemanMessages))
+	}
 	if len(st.NeedsYou) == 0 {
 		lines = append(lines, "needs you: nothing")
 	} else {
@@ -119,6 +122,12 @@ func StatusLine(st Status, now time.Time) string {
 	}
 	if q := st.Jobs["queued"]; q > 0 {
 		parts = append(parts, fmt.Sprintf("%d queued", q))
+	}
+	switch n := st.ForemanMessages; {
+	case n == 1:
+		parts = append(parts, "1 message for the foreman")
+	case n > 1:
+		parts = append(parts, fmt.Sprintf("%d messages for the foreman", n))
 	}
 	if n := len(st.NeedsYou); n > 0 {
 		parts = append(parts, fmt.Sprintf("needs you: %d", n))
