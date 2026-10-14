@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -52,6 +53,7 @@ case "$prompt" in
 	git rev-parse HEAD > "$M/review-head" 2>&1
 	git --no-pager diff "main...$BRIGADA_TEST_BRANCH" --name-only > "$M/review-diff" 2>&1
 	cat work.txt > "$M/review-work" 2>&1
+	cat .brigada-review.diff > "$M/review-difffile" 2>&1
 	echo '{"type":"tool_end","name":"Read"}'
 	@RESULT@
 	;;
@@ -215,6 +217,11 @@ func assertReviewerSaw(t *testing.T, markers, branch, pushed string) {
 	}
 	if diff := reviewerMarker(t, markers, "review-diff"); !strings.Contains(diff, "work.txt") {
 		t.Errorf("the diff the reviewer ran does not name the work:\n%s", diff)
+	}
+	// The runner wrote the diff into the worktree for a reviewer
+	// without a shell: the same change the command shows.
+	if df := reviewerMarker(t, markers, "review-difffile"); !strings.Contains(df, "+++ b/work.txt") || !strings.Contains(df, "+hello") {
+		t.Errorf("the runner's diff file does not hold the change:\n%s", df)
 	}
 	if work := reviewerMarker(t, markers, "review-work"); work != "hello\n" {
 		t.Errorf("the branch content the reviewer read = %q, want hello", work)
@@ -430,4 +437,134 @@ func TestRunnerRunsTheAgentTheLeaseNamed(t *testing.T) {
 		t.Errorf("the review job's agent = %d, want the other family's %d", got, reviewAgent)
 	}
 	e.assertNoWorktrees()
+}
+
+// reviewDiffRepo is a plain repo on a change branch off main: the
+// change writes each of files with its content, so the tests below can
+// size the diff the reviewer would read.
+func reviewDiffRepo(t *testing.T, files map[string]string) *workspace {
+	t.Helper()
+	dir := t.TempDir()
+	git(t, dir, "init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "add", "-A")
+	git(t, dir, "-c", "user.name=seed", "-c", "user.email=seed@brigada.invalid", "commit", "-qm", "seed")
+	git(t, dir, "checkout", "-q", "-b", "brigada/task-1")
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git(t, dir, "add", "-A")
+	git(t, dir, "-c", "user.name=seed", "-c", "user.email=seed@brigada.invalid", "commit", "-qm", "change")
+	return &workspace{dir: dir}
+}
+
+// TestWriteReviewDiff covers the diff file a reviewer without a shell
+// reads (§7): the whole change when it fits; past the bound, the stat
+// of every file and a cut diff, marked as cut; and a change that holds
+// the file's name itself is refused rather than overwritten.
+func TestWriteReviewDiff(t *testing.T) {
+	ctx := context.Background()
+	read := func(t *testing.T, w *workspace) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(w.dir, prompt.ReviewDiffFile))
+		if err != nil {
+			t.Fatalf("read the diff file: %v", err)
+		}
+		return string(data)
+	}
+
+	t.Run("fits", func(t *testing.T) {
+		w := reviewDiffRepo(t, map[string]string{"work.txt": "hello\n"})
+		if err := w.writeReviewDiff(ctx, "main"); err != nil {
+			t.Fatal(err)
+		}
+		got := read(t, w)
+		if !strings.Contains(got, "+++ b/work.txt") || !strings.Contains(got, "+hello") || strings.Contains(got, "[cut") {
+			t.Errorf("diff file = %q, want the whole change uncut", got)
+		}
+	})
+
+	t.Run("past the bound", func(t *testing.T) {
+		big := strings.Repeat("a line of a large generated file\n", reviewDiffMaxBytes/16)
+		w := reviewDiffRepo(t, map[string]string{"big.txt": big, "small.txt": "small\n"})
+		if err := w.writeReviewDiff(ctx, "main"); err != nil {
+			t.Fatal(err)
+		}
+		got := read(t, w)
+		if len(got) > reviewDiffMaxBytes+4096 {
+			t.Errorf("diff file is %d bytes, want about the %d-byte bound", len(got), reviewDiffMaxBytes)
+		}
+		for _, want := range []string{"past the runner's", "big.txt", "small.txt", "[cut: the rest of the diff is past the bound]"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("the cut diff file lacks %q", want)
+			}
+		}
+	})
+
+	t.Run("function context past the bound, plain fits", func(t *testing.T) {
+		// No line starts like a function, so whole-function context
+		// is the whole large file, while the edit's own hunk is tiny.
+		var base strings.Builder
+		for i := 0; i < reviewDiffMaxBytes/10; i++ {
+			fmt.Fprintf(&base, "  line %d\n", i)
+		}
+		dir := t.TempDir()
+		commit := func(msg string) {
+			git(t, dir, "add", "-A")
+			git(t, dir, "-c", "user.name=seed", "-c", "user.email=seed@brigada.invalid", "commit", "-qm", msg)
+		}
+		git(t, dir, "init", "-q", "-b", "main")
+		if err := os.WriteFile(filepath.Join(dir, "big.txt"), []byte(base.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		commit("seed")
+		git(t, dir, "checkout", "-q", "-b", "brigada/task-1")
+		edited := strings.Replace(base.String(), "  line 7000\n", "  line 7000 changed\n", 1)
+		if err := os.WriteFile(filepath.Join(dir, "big.txt"), []byte(edited), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		commit("edit one line")
+		w := &workspace{dir: dir}
+		if err := w.writeReviewDiff(ctx, "main"); err != nil {
+			t.Fatal(err)
+		}
+		got := read(t, w)
+		if !strings.Contains(got, "+  line 7000 changed") || strings.Contains(got, "[cut") || len(got) > 64<<10 {
+			t.Errorf("diff file is %d bytes, want the plain uncut diff of the one-line edit", len(got))
+		}
+	})
+
+	t.Run("the change holds the name", func(t *testing.T) {
+		w := reviewDiffRepo(t, map[string]string{prompt.ReviewDiffFile: "planted\n"})
+		if err := w.writeReviewDiff(ctx, "main"); err == nil {
+			t.Fatal("writeReviewDiff overwrote a file the change holds")
+		}
+		if got := read(t, w); got != "planted\n" {
+			t.Errorf("the change's own file was replaced: %q", got)
+		}
+	})
+}
+
+// TestCappedBuffer: the runner keeps the first bytes of a command's
+// output up to the limit and drops the rest without ever failing the
+// write, so git runs to its end and the runner's memory stays bounded.
+func TestCappedBuffer(t *testing.T) {
+	c := &cappedBuffer{limit: 5}
+	for _, chunk := range []string{"abc", "defg", "hij"} {
+		if n, err := c.Write([]byte(chunk)); n != len(chunk) || err != nil {
+			t.Fatalf("Write(%q) = %d, %v; want the whole chunk taken", chunk, n, err)
+		}
+	}
+	if got := c.buf.String(); got != "abcde" || !c.full {
+		t.Errorf("kept %q, full %v; want abcde and full", got, c.full)
+	}
+	under := &cappedBuffer{limit: 5}
+	_, _ = under.Write([]byte("abcde"))
+	if under.full {
+		t.Error("output exactly at the limit reads as past it")
+	}
 }
