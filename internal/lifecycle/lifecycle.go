@@ -163,6 +163,15 @@ func Run(ctx context.Context, cfg Config) error {
 		} else if n > 0 {
 			return true
 		}
+		// An attached chat is a live session on this engine (§13): its
+		// hold's token and events tool answer here, so the engine of an
+		// attach that is still beating stays up however quiet the chat.
+		if n, err := eng.LiveAttaches(ctx); err != nil {
+			log.WarnContext(ctx, "idle check: count live attach holds failed", "err", err)
+			return true
+		} else if n > 0 {
+			return true
+		}
 		return srv.InFlight() > 0
 	}
 	mon := newIdleMonitor(cfg.Idle, busy, started)

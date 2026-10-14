@@ -52,7 +52,15 @@ func (s *Server) handleForemanAttach(w http.ResponseWriter, r *http.Request, _ i
 		if res.JobID != 0 {
 			what = fmt.Sprintf("turn %d is live", res.JobID)
 		}
-		writeError(w, http.StatusConflict, codeConflict, "foreman is busy: "+what)
+		// The refusal carries what made it busy as fields, not just
+		// words: the client waits a turn out and refuses a second
+		// attach by branch, never by parsing the message.
+		writeJSON(w, http.StatusConflict, attachConflict{
+			Error:  "foreman is busy: " + what,
+			Code:   codeConflict,
+			JobID:  res.JobID,
+			HoldID: res.HoldID,
+		})
 		return
 	}
 	writeJSON(w, http.StatusOK, attachResponse{
@@ -180,6 +188,18 @@ func (s *Server) handleForemanEvents(w http.ResponseWriter, r *http.Request, id 
 type attachRequest struct {
 	RepoURL string `json:"repo_url"`
 	Force   bool   `json:"force"`
+}
+
+// attachConflict is the busy attach's 409 body: the error shape every
+// refusal shares, plus what made it busy — the live turn's job id, or
+// the live hold's id; the one that made it busy is set, the other zero
+// — so the client can wait a turn out and refuse a second attach
+// without parsing the message.
+type attachConflict struct {
+	Error  string `json:"error"`
+	Code   string `json:"code"`
+	JobID  int64  `json:"job_id"`
+	HoldID int64  `json:"hold_id"`
 }
 
 // attachResponse names what attach created: the hold, its foreman token

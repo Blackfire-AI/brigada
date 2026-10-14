@@ -20,12 +20,6 @@ func TestRun(t *testing.T) {
 		wantErr  string
 	}{
 		{
-			name:     "no arguments prints usage",
-			args:     nil,
-			wantCode: 0,
-			wantOut:  usage,
-		},
-		{
 			name:     "short help flag prints usage",
 			args:     []string{"-h"},
 			wantCode: 0,
@@ -120,6 +114,12 @@ func TestRun(t *testing.T) {
 			args:     []string{"mcp"},
 			wantCode: 2,
 			wantErr:  "mcp needs --socket PATH",
+		},
+		{
+			name:     "attach with positional arguments is a usage error",
+			args:     []string{"attach", "extra"},
+			wantCode: 2,
+			wantErr:  "attach takes no positional arguments",
 		},
 	}
 	for _, tt := range tests {

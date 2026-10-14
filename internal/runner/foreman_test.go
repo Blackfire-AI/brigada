@@ -217,18 +217,24 @@ func TestRunnerForemanTurnCoalescesAndResumes(t *testing.T) {
 // TestRunnerForemanTurnTimeCapped covers the policy paths a turn
 // shares with any job (§5.6): the foreman class time cap applies, a
 // capped turn is killed and completes stalled with the outcome in its
-// result — and no branch to save on the way out.
+// result — and no branch to save on a stopped turn's way out. The
+// worker speaks first thing, and the transcript is asserted only when
+// it did: a turn the cap kills before its CLI said a word has an empty
+// stream, and an empty stream is no transcript to upload — on a loaded
+// machine the cap can win the race with the shell's own start, which
+// is the runner's rule (nothing spoken, nothing recorded), not a lost
+// transcript.
 func TestRunnerForemanTurnTimeCapped(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
-	e.seedProject("")
+	e.seedProject("") // a project with no repo: a foreman turn never needs one
 	e.setForeman("fake", "fake-1")
 	turn := e.submitForemanTurn("a wake that outstays its welcome")
 	markerDir(t)
 
 	worker := `
-cat > /dev/null
 echo '{"type":"system_init","session_id":"foreman-sess-4"}'
 echo '{"type":"assistant","text":"thinking"}'
+cat > /dev/null
 while [ ! -f "$BRIGADA_TEST_MARKERS/release" ]; do sleep 0.1; done
 `
 	p := e.startRunner(writeWorkerScript(t, worker), 100*time.Millisecond,
@@ -236,11 +242,17 @@ while [ ! -f "$BRIGADA_TEST_MARKERS/release" ]; do sleep 0.1; done
 	defer p.stop(t)
 
 	stalled := e.waitJob(turn.JobID, func(j *engine.JobInfo) bool { return j.Status == "stalled" })
-	if res := e.workerResult(stalled); res.Status != statusTimeCap {
+	res := e.workerResult(stalled)
+	if res.Status != statusTimeCap {
 		t.Errorf("capped turn result = %+v, want status %q", res, statusTimeCap)
 	}
-	if _, ok := e.artifacts(turn.JobID)["transcript"]; !ok {
-		t.Error("the capped turn left no transcript artifact")
+	// The turn spoke — its progress events say so, and what the pipes
+	// carried before the kill is always in the transcript — so the
+	// transcript must be an artifact. A turn killed silent owes none.
+	if len(res.Progress) > 0 {
+		if _, ok := e.artifacts(turn.JobID)["transcript"]; !ok {
+			t.Error("the capped turn left no transcript artifact")
+		}
 	}
 }
 

@@ -22,10 +22,14 @@ engine, runner and foreman are all this binary in different roles.
 
 Usage:
 
+	brigada            With no subcommand, attach to this repo's foreman
+	                   and chat (§4.2).
 	brigada <command> [arguments]
 
 Commands:
 
+	attach          Attach to this repo's foreman and chat (what a bare
+	                brigada runs).
 	engine          Run the engine: store and API on the Unix socket.
 	runner          Run a runner: lease jobs, run workers, run checks.
 	mcp             Run the foreman's MCP bridge over stdio (§12.2).
@@ -57,6 +61,7 @@ type command struct {
 }
 
 var commands = map[string]command{
+	"attach":  {name: "attach", run: runAttach},
 	"engine":  {name: "engine", run: runEngine},
 	"runner":  {name: "runner", run: runRunner},
 	"mcp":     {name: "mcp", run: runMCP},
@@ -72,8 +77,8 @@ var commands = map[string]command{
 // spawning a process.
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprint(stdout, usage)
-		return 0
+		// A bare brigada is the chat (§4.2 item 1): the user's way in.
+		return runAttach(ctx, nil, stdout, stderr)
 	}
 	switch args[0] {
 	case "version":

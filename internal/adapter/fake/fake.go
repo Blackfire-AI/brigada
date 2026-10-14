@@ -8,7 +8,10 @@
 // id to resume (empty for a fresh run) and BRIGADA_FAKE_MCP_CONFIG
 // holding the harness's MCP config path the job carried (empty when it
 // carried none); it emits one JSON event per line on stdout and edits
-// the worktree like a worker would.
+// the worktree like a worker would. An attached session (§4.2 item 1)
+// runs the script with the terminal's streams — so the prompt rides in
+// BRIGADA_FAKE_PROMPT instead — and BRIGADA_FAKE_SESSION holding the
+// new session id the client generated.
 package fake
 
 import (
@@ -26,6 +29,12 @@ type Adapter struct {
 	Script string
 }
 
+var _ adapter.Adapter = (*Adapter)(nil)
+
+// The fake CLI carries the attach too (§4.2 item 1): the same script,
+// driven interactively.
+var _ adapter.Interactive = (*Adapter)(nil)
+
 // Name implements adapter.Adapter: the fake adapter's identifier, the
 // name a runner's advertisement pairs with it (§5.1).
 func (a *Adapter) Name() string { return "fake" }
@@ -41,6 +50,25 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	cmd.Env = append(os.Environ(),
 		"BRIGADA_FAKE_RESUME="+resumeSessionID,
 		"BRIGADA_FAKE_MCP_CONFIG="+job.MCPConfig,
+	)
+	return cmd, nil
+}
+
+// AttachCommand implements adapter.Interactive for the tests' attached
+// sessions (§4.2 item 1): the script runs in the working directory with
+// the same plumbing the headless contract carries — the resume id, the
+// MCP config path — plus the attach's own: the new session id and the
+// opening prompt, which the terminal's stdin cannot bring a script the
+// way the harness reads its initial prompt. The streams stay unwired:
+// the caller owns them.
+func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSessionID string) (*exec.Cmd, error) {
+	cmd := exec.Command(a.Script)
+	cmd.Dir = workdir
+	cmd.Env = append(os.Environ(),
+		"BRIGADA_FAKE_RESUME="+resumeSessionID,
+		"BRIGADA_FAKE_SESSION="+newSessionID,
+		"BRIGADA_FAKE_MCP_CONFIG="+job.MCPConfig,
+		"BRIGADA_FAKE_PROMPT="+job.Prompt,
 	)
 	return cmd, nil
 }

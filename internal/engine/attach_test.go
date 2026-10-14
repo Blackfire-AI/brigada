@@ -508,3 +508,33 @@ func TestReleaseKeepsTheRunnerAffinity(t *testing.T) {
 		t.Errorf("the key's session id after the release = %q, want fs-9", got)
 	}
 }
+
+// TestLiveAttachesCountsLiveHolds is the idle rule's "attached
+// sessions" (§13): a heartbeated hold is an open chat, and the engine
+// of an attach that is still beating counts as busy however quiet the
+// chat; the release and the lapse both end that.
+func TestLiveAttachesCountsLiveHolds(t *testing.T) {
+	e := newEnv(t)
+	if n, err := e.eng.LiveAttaches(e.ctx); err != nil || n != 0 {
+		t.Fatalf("live attaches with none = %d (%v), want 0", n, err)
+	}
+	res := e.attach(false)
+	if n, err := e.eng.LiveAttaches(e.ctx); err != nil || n != 1 {
+		t.Fatalf("live attaches with a hold = %d (%v), want 1", n, err)
+	}
+	e.attachHeartbeat(res.HoldID)
+	if n, err := e.eng.LiveAttaches(e.ctx); err != nil || n != 1 {
+		t.Fatalf("live attaches after a beat = %d (%v), want 1: a beating hold is a live session", n, err)
+	}
+	e.releaseAttach(res.HoldID, "fs-1")
+	if n, err := e.eng.LiveAttaches(e.ctx); err != nil || n != 0 {
+		t.Fatalf("live attaches after the release = %d (%v), want 0", n, err)
+	}
+	// A hold that outlived its expiry is no session still attached: the
+	// sweep settles it, and the idle rule does not wait on it.
+	res = e.attach(false)
+	e.clock.Advance(2 * attachHoldTTL)
+	if n, err := e.eng.LiveAttaches(e.ctx); err != nil || n != 0 {
+		t.Fatalf("live attaches past the expiry = %d (%v), want 0", n, err)
+	}
+}
