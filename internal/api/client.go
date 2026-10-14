@@ -247,6 +247,10 @@ type StatusError struct {
 	Status  int
 	APICode string // the API's own error code, e.g. unknown_runner
 	Message string
+	// Body is the refusal's raw body, kept for the callers that read a
+	// structured refusal the plain message cannot carry — the attach's
+	// busy answer names the turn or hold that made it busy.
+	Body []byte
 }
 
 func (e *StatusError) Error() string {
@@ -310,7 +314,7 @@ func (c *Client) callKeyed(ctx context.Context, method, path, idemKey string, bo
 		json.Unmarshal(data, &eb) // the shape is best-effort for the message
 		return &StatusError{
 			Method: method, Path: path,
-			Status: resp.StatusCode, APICode: eb.Code, Message: eb.Error,
+			Status: resp.StatusCode, APICode: eb.Code, Message: eb.Error, Body: data,
 		}
 	}
 	if out == nil {
@@ -359,7 +363,7 @@ func (c *Client) raw(ctx context.Context, method, path string) ([]byte, error) {
 		json.Unmarshal(data, &eb) // the shape is best-effort for the message
 		return nil, &StatusError{
 			Method: method, Path: path,
-			Status: resp.StatusCode, APICode: eb.Code, Message: eb.Error,
+			Status: resp.StatusCode, APICode: eb.Code, Message: eb.Error, Body: data,
 		}
 	}
 	return data, nil

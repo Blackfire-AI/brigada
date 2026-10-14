@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -238,6 +240,76 @@ func (c *Client) ForemanEvents(ctx context.Context, wait time.Duration) ([]strin
 		return nil, err
 	}
 	return nonNil(out.Events), nil
+}
+
+// AttachResult is the attach answer as the client reads it (§4.2 item
+// 1): a created hold carries everything the attached session needs;
+// the busy answer carries what made it busy — the live turn's job id,
+// or the live hold's id — so the caller can wait one out and refuse
+// the other without parsing words.
+type AttachResult struct {
+	Answer       engine.Answer
+	HoldID       int64 // the created hold; a busy answer names the live hold
+	JobID        int64 // a busy answer names the live foreman turn; 0 otherwise
+	ForemanToken string
+	Harness      string
+	Model        string
+	SessionID    string // the key's current harness session id; '' = none
+	Prompt       string // the opening prompt
+	ExpiresAt    time.Time
+}
+
+// Attach takes the foreman's key for an attached chat (§4.2 item 1),
+// naming the project by its repo URL the way every caller does (§12.1).
+// force cancels a live foreman turn rather than waiting it out. A busy
+// answer — a live turn, or a second live attach — is not an error: it
+// comes back with Answer busy and the id that made it busy, for the
+// caller to branch on.
+func (c *Client) Attach(ctx context.Context, repoURL string, force bool) (AttachResult, error) {
+	var out attachResponse
+	err := c.call(ctx, http.MethodPost, "/v1/foreman/attach", attachRequest{RepoURL: repoURL, Force: force}, &out)
+	if err != nil {
+		var se *StatusError
+		if errors.As(err, &se) && se.Status == http.StatusConflict {
+			var busy attachConflict
+			if json.Unmarshal(se.Body, &busy) == nil {
+				return AttachResult{Answer: engine.AnsBusy, JobID: busy.JobID, HoldID: busy.HoldID}, nil
+			}
+		}
+		return AttachResult{}, err
+	}
+	return AttachResult{
+		Answer:       engine.Answer(out.Answer),
+		HoldID:       out.HoldID,
+		ForemanToken: out.ForemanToken,
+		Harness:      out.Harness,
+		Model:        out.Model,
+		SessionID:    out.SessionID,
+		Prompt:       out.Prompt,
+		ExpiresAt:    out.ExpiresAt,
+	}, nil
+}
+
+// AttachHeartbeat extends a live attach hold (§4.2 item 1), the way the
+// runner's heartbeat extends a lease. The engine's answers — ok, gone —
+// ride in the return, not as errors.
+func (c *Client) AttachHeartbeat(ctx context.Context, holdID int64) (engine.Answer, error) {
+	var out struct {
+		Answer string `json:"answer"`
+	}
+	if err := c.call(ctx, http.MethodPost, "/v1/foreman/heartbeat", holdRequest{HoldID: holdID}, &out); err != nil {
+		return "", err
+	}
+	return engine.Answer(out.Answer), nil
+}
+
+// ReleaseAttach ends an attached chat (§4.2 item 1), carrying the
+// harness session id the chat ended on: a resume forks session ids,
+// and the key's row must carry the id the chat reached. The engine's
+// answers — ok; expired for a late release whose hold lapsed but whose
+// session id was still written; gone — ride in the return.
+func (c *Client) ReleaseAttach(ctx context.Context, holdID int64, sessionID string) (engine.Answer, error) {
+	return c.answer(ctx, "/v1/foreman/release", releaseAttachRequest{HoldID: holdID, SessionID: sessionID})
 }
 
 // HealthTimeout bounds one Health probe when a caller polls for the

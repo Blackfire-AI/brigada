@@ -188,6 +188,106 @@ func TestCommandForemanScope(t *testing.T) {
 	}
 }
 
+// TestAttachCommandGolden is the attached session's golden argv (§4.2
+// item 1): the CLI interactive — no -p, nothing to parse — with the
+// opening prompt as its initial prompt, the bridge and the foreman's
+// tool scope exactly as a headless turn carries them, and the session
+// flags that make the write-back possible: a first session starts
+// under the client's --session-id alone, a resume forks the key's
+// session onto it with --fork-session. The prompt leads the argv —
+// the tool-scope flags are variadic, and a positional after them would
+// parse as one more tool name, leaving the session with no prompt. The
+// streams stay unwired — the terminal is the caller's — and the hold
+// token, like every brigada secret, reaches neither argv nor the
+// environment.
+func TestAttachCommandGolden(t *testing.T) {
+	stubCLI(t)
+	t.Setenv(mcp.EnvToken, foremanTokenValue)
+	const prompt = "the foreman's opening prompt"
+	const config = "/runner-state/mcp/turn-x1/config.json"
+	const newID = "9f1d2b34-51a6-4c8e-a2d7-0b3c4d5e6f70"
+	wantScope := []string{"--allowedTools", "Read", "Grep", "Glob",
+		"mcp__brigada__plan_create", "mcp__brigada__answer", "mcp__brigada__task_restart",
+		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__events",
+		"mcp__brigada__capacity",
+		"--disallowedTools", "Bash", "Edit", "MultiEdit", "NotebookEdit", "Write"}
+	cases := []struct {
+		name    string
+		ad      Adapter
+		job     adapter.Job
+		resume  string
+		wantArg []string
+	}{
+		{
+			name: "first session, with the model",
+			ad:   Adapter{Binary: "/usr/local/bin/claude"},
+			job:  adapter.Job{Prompt: prompt, Model: "sonnet", MCPConfig: config},
+			wantArg: append([]string{prompt, "--session-id", newID, "--model", "sonnet",
+				"--mcp-config", config, "--strict-mcp-config"}, wantScope...),
+		},
+		{
+			name:   "resume forks onto the new id",
+			ad:     Adapter{Binary: "/usr/local/bin/claude"},
+			job:    adapter.Job{Prompt: prompt, Model: "sonnet", MCPConfig: config},
+			resume: "sess-first",
+			wantArg: append([]string{prompt, "--resume", "sess-first", "--fork-session",
+				"--session-id", newID, "--model", "sonnet",
+				"--mcp-config", config, "--strict-mcp-config"}, wantScope...),
+		},
+		{
+			name: "no model adds no flag",
+			ad:   Adapter{},
+			job:  adapter.Job{Prompt: prompt, MCPConfig: config},
+			wantArg: append([]string{prompt, "--session-id", newID,
+				"--mcp-config", config, "--strict-mcp-config"}, wantScope...),
+		},
+	}
+	for _, tc := range cases {
+		cmd, err := tc.ad.AttachCommand(tc.job, t.TempDir(), tc.resume, newID)
+		if err != nil {
+			t.Fatalf("%s: build the attached session: %v", tc.name, err)
+		}
+		want := append([]string{"/usr/local/bin/claude"}, tc.wantArg...)
+		if tc.ad.Binary == "" {
+			want[0] = "claude"
+		}
+		if !slices.Equal(cmd.Args, want) {
+			t.Errorf("%s: args =\n%v\nwant\n%v", tc.name, cmd.Args, want)
+		}
+		// The terminal is the caller's: the adapter wires no stream,
+		// unlike the headless command whose stdin carries the prompt.
+		if cmd.Stdin != nil || cmd.Stdout != nil || cmd.Stderr != nil {
+			t.Errorf("%s: the attached session has streams wired: stdin %v, stdout %v, stderr %v",
+				tc.name, cmd.Stdin, cmd.Stdout, cmd.Stderr)
+		}
+		for _, arg := range cmd.Args {
+			if strings.Contains(arg, foremanTokenValue) {
+				t.Errorf("%s: argv carries the foreman token: %v", tc.name, cmd.Args)
+			}
+		}
+		for _, kv := range cmd.Env {
+			if strings.HasPrefix(kv, mcp.EnvToken+"=") || strings.Contains(kv, foremanTokenValue) {
+				t.Errorf("%s: the attached environment carries the foreman token: %s", tc.name, kv)
+			}
+		}
+	}
+}
+
+// TestAttachCommandRefusesWhatItCannotBuild covers the refusals (§4.2
+// item 1): an attach without a generated session id has nothing to
+// name to the CLI, and one without the bridge's config is a chat
+// without brigada's tools — neither is built half-way.
+func TestAttachCommandRefusesWhatItCannotBuild(t *testing.T) {
+	stubCLI(t)
+	a := &Adapter{}
+	if _, err := a.AttachCommand(adapter.Job{Prompt: "p", MCPConfig: "/tmp/config.json"}, "", "", ""); err == nil {
+		t.Error("an attach without a new session id was built")
+	}
+	if _, err := a.AttachCommand(adapter.Job{Prompt: "p"}, "", "", "sess-new"); err == nil {
+		t.Error("an attach without an MCP config was built")
+	}
+}
+
 // TestCommandWorkerPathUnchanged covers the other side of §4: a worker
 // job — no MCP config — is built exactly as it always was, with no MCP
 // flag and the agent config's own tool scope.

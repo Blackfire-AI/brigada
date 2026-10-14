@@ -64,6 +64,27 @@ type Job struct {
 	MCPConfig string
 }
 
+// Interactive is the optional adapter interface for the attach (§4.2
+// item 1): an adapter whose CLI can carry an interactive terminal
+// session — the user's own chat with the foreman, not a headless run —
+// implements it beside Adapter. The client asserts it when it attaches
+// and builds the command through it; a harness whose adapter does not
+// implement it cannot be attached to, and the client says so rather
+// than falling back to a headless run, which is no chat at all.
+type Interactive interface {
+	// AttachCommand builds the interactive command for job, to run in
+	// workdir on the caller's terminal: the adapter wires none of the
+	// process's streams — stdin is the user's, and the caller connects
+	// it. The opening prompt (job.Prompt) reaches the CLI the way it
+	// takes one interactively; the MCP config and the model ride as in
+	// Command. resumeSessionID is the key's current harness session,
+	// empty when the foreman has never run; newSessionID is the id the
+	// client generated for the session this chat forks into — the CLI
+	// names it itself, so the client knows what to write back on detach
+	// (§4.2) without reading the CLI's own files.
+	AttachCommand(job Job, workdir, resumeSessionID, newSessionID string) (*exec.Cmd, error)
+}
+
 // EventKind is the shape of one progress event (§5.6): what the runner
 // tracks for heartbeats and, later, stall detection.
 type EventKind string

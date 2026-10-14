@@ -8,6 +8,7 @@ package claude
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -55,6 +56,10 @@ func foremanToolScope() (allowed, disallowed []string) {
 }
 
 var _ adapter.Adapter = (*Adapter)(nil)
+
+// The claude CLI carries the attach too (§4.2 item 1): interactive
+// resume on a forked session id.
+var _ adapter.Interactive = (*Adapter)(nil)
 
 // Name implements adapter.Adapter: the harness this adapter drives,
 // which the runner's advertisement pairs it with (§5.1).
@@ -111,6 +116,60 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	}
 	cmd.Dir = workdir
 	cmd.Stdin = strings.NewReader(job.Prompt)
+	cmd.Env = workerEnv(os.Environ())
+	return cmd, nil
+}
+
+// AttachCommand implements adapter.Interactive (§4.2 item 1): the CLI
+// interactive — no -p, no stream to parse — with the opening prompt as
+// its initial prompt, carrying the bridge and the foreman's tool scope
+// exactly as a headless turn does. The session flags are the write-back
+// made possible (§4.2): a resume forks the CLI's session ids, so the
+// attach resumes the key's session and forks it onto the client's
+// --session-id, which the client generated and will release with —
+// nobody has to read the CLI's own session files. A first session
+// starts under the client's id alone.
+//
+// The streams are the caller's to wire: an interactive session belongs
+// to the terminal, and the adapter leaves stdin, stdout and stderr
+// untouched for the client to connect.
+func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSessionID string) (*exec.Cmd, error) {
+	if newSessionID == "" {
+		return nil, fmt.Errorf("the attach generates the new session id; an empty one cannot be named to the CLI")
+	}
+	if job.MCPConfig == "" {
+		return nil, fmt.Errorf("an attached foreman runs with the bridge: the job carries no MCP config")
+	}
+	binary := a.Binary
+	if binary == "" {
+		binary = "claude"
+	}
+	args := make([]string, 0, 24)
+	// The opening prompt is the CLI's initial prompt, its one positional
+	// argument — and it leads the argv, before every flag: the tool-scope
+	// flags take a variadic list (<tools...>), so a positional after them
+	// would parse as one more tool name and the session would start with
+	// no prompt at all. First, nothing can capture it. (The headless
+	// command has no such care to take: its prompt rides on stdin.)
+	if job.Prompt != "" {
+		args = append(args, job.Prompt)
+	}
+	if resumeSessionID != "" {
+		args = append(args, "--resume", resumeSessionID, "--fork-session")
+	}
+	args = append(args, "--session-id", newSessionID)
+	if job.Model != "" {
+		args = append(args, "--model", job.Model)
+	}
+	args = append(args, "--mcp-config", job.MCPConfig, "--strict-mcp-config")
+	allowed, disallowed := foremanToolScope()
+	args = append(args, append([]string{"--allowedTools"}, allowed...)...)
+	args = append(args, append([]string{"--disallowedTools"}, disallowed...)...)
+	cmd := exec.Command(binary, args...)
+	if cmd.Err != nil {
+		return nil, cmd.Err
+	}
+	cmd.Dir = workdir
 	cmd.Env = workerEnv(os.Environ())
 	return cmd, nil
 }

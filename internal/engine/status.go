@@ -407,3 +407,21 @@ func (e *Engine) LiveJobs(ctx context.Context) (int, error) {
 	}
 	return n, nil
 }
+
+// LiveAttaches counts the live attach holds (§4.2 item 1), which is the
+// §13 idle rule's "attached sessions": a heartbeated hold is a user's
+// open chat with the foreman, and the engine that served the attach
+// stays — the hold's token, its events tool and its wake rule all
+// answer on this engine's socket. A hold past its expiry is the sweep's
+// to settle, not a session still attached.
+func (e *Engine) LiveAttaches(ctx context.Context) (int, error) {
+	var n int
+	err := e.store.View(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT COUNT(*) FROM attach_holds WHERE state = 'live' AND expires_at > ?",
+			fmtTime(e.cfg.Now())).Scan(&n)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count live attach holds: %w", err)
+	}
+	return n, nil
+}
