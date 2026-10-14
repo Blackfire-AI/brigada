@@ -46,6 +46,7 @@ All of them are the one `brigada` binary in different roles.
 | worker stalled (§5.6) | **foreman** (decided 2026-10-12: always; no automatic nudge) | restart with a new instruction, switch agent, or ask the user |
 | plan above the approval limit | **user** | approve, edit or reject (§6.3) |
 | foreman limit hit (§4.4) | **user** | wait, switch foreman, or continue without it (decided 2026-10-12) |
+| job finished with `discoveries` (§5.4; proposal, 2026-10-14) | **foreman** | read them on the next turn as verbatim data in delimiters (§1.4); then `plan_amend`, put the fact into the spec of a task that hasn't started, or ignore it |
 | plan done | rule | notify the user directly (§10); the foreman may add a summary on its next turn, skipped when it's `limited` or out of budget |
 
 ## 4. The foreman
@@ -79,6 +80,8 @@ Task workers never get the foreman instructions. A task worker that thinks its t
    - **Not charged to the wake budget:** a user message is you driving, like a chat, so a wake that carries one skips the day's budget (§4.3). It still obeys the wake stall (§5.6).
    - **The answer says what happened:** a turn was woken, or why the message waits — you're attached (naming the hold), a turn is already running, the project has no foreman harness, the wake stalled (and, once §4.4 lands, the foreman is limited until a time). It returns the message's id, so a caller can follow it in the history.
    - The project is named by its repo URL, or is the only project the engine has.
+
+**Discoveries** (proposal, 2026-10-14): a finished job's `discoveries` (§5.4) reach the foreman on its next turn as verbatim data inside the `<event>` delimiters (§1.4), like any worker text. The foreman decides what to do: amend the plan (`plan_amend`), put the fact into the spec of a task that hasn't started yet, or ignore it. The engine never forwards them into another worker's prompt; only the foreman's decision can.
 
 Your next chat sees everything the foreman did while you were away, because it's the same session, and the history (§9) has it too.
 
@@ -115,8 +118,10 @@ A fixed worker template (versioned) plus the task spec verbatim, plus the answer
 The worker's final message ends with one JSON block:
 
 ```json
-{"status": "done" | "needs_help" | "failed", "summary": "…", "question": "…", "branch": "…"}
+{"status": "done" | "needs_help" | "failed", "summary": "…", "question": "…", "branch": "…", "discoveries": "…"}
 ```
+
+`discoveries` is optional (proposal, 2026-10-14). It holds facts the worker learned that matter beyond its own task: an API quirk, a flaky test, a wrong assumption in the plan, something a later task will trip over. An absent or empty field means none. A review's verdict block (§7) and foreman turns don't carry it. Workers never message each other, and the engine never forwards discoveries into another worker's prompt on its own. Only the foreman's decision can carry them (§4.2).
 
 A missing or malformed block counts as `failed` with reason `no-result`. The runner verifies the branch was pushed.
 
@@ -229,7 +234,7 @@ Comments go on their own line; the parser does not strip trailing comments.
 
 Everything is kept and readable (decided 2026-10-12).
 
-- **Messages:** one table of conversation items per project: user ⇄ foreman turns (a user message, §4.2 item 3, is kept with author `user`), foreman tool calls and their results, worker task specs and results, questions and answers, reviews, notifications. `brigada history [--plan|--task]` shows them as one timeline.
+- **Messages:** one table of conversation items per project: user ⇄ foreman turns (a user message, §4.2 item 3, is kept with author `user`), foreman tool calls and their results, worker task specs and results, questions and answers, reviews, notifications. A job's `discoveries` (§5.4; proposal, 2026-10-14) stay with that job's result message. `brigada history [--plan|--task]` shows them as one timeline.
 - **Transcripts:** after every job, the runner uploads the session's full transcript (the CLI's own event log) to the engine as an artifact, linked from the job. The foreman's chat transcript is archived the same way after each attach and each headless turn.
 - **Events:** an append-only event log is the backbone. Messages and transcripts reference events.
 - Retention is configurable; the default keeps everything.
