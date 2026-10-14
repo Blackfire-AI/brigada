@@ -167,7 +167,7 @@ func TestEventsTraceTheFailuresAndTheFence(t *testing.T) {
 		if rep := e.mustSweep(); len(rep.QueueTimedOut) != 1 {
 			t.Fatalf("the sweep timed nothing out: %+v", rep)
 		}
-		if got := e.eventKinds(); !equalStrings(got, []string{evJobCreated, evJobQueueTimedOut}) {
+		if got := e.eventKinds(); !equalStrings(got, []string{evJobCreated, evJobQueueTimedOut, evTaskFailed, evJobCreated, evForemanWoken}) {
 			t.Errorf("events = %v", got)
 		}
 		last := e.eventRows()[1]
@@ -187,7 +187,7 @@ func TestEventsTraceTheFailuresAndTheFence(t *testing.T) {
 		if rep := e.mustSweep(); len(rep.HardCapped) != 1 {
 			t.Fatalf("the sweep hard-capped nothing: %+v", rep)
 		}
-		if got := e.eventKinds(); !equalStrings(got, []string{evJobCreated, evJobLeased, evTaskRunning, evJobHardCapped}) {
+		if got := e.eventKinds(); !equalStrings(got, []string{evJobCreated, evJobLeased, evTaskRunning, evJobHardCapped, evTaskFailed, evJobCreated, evForemanWoken}) {
 			t.Errorf("events = %v", got)
 		}
 		if last := e.eventRows()[3]; last.payload.Status != statusFailed || last.payload.Reason == "" {
