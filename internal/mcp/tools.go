@@ -55,11 +55,11 @@ var tools = []Tool{
 							},
 							"spec": map[string]any{
 								"type":        "string",
-								"description": "the task spec, verbatim: what the worker is to do",
+								"description": "the task spec, verbatim: what the worker is to do. Never ask the worker to run the check, commit or push: the runner does all three after the worker exits, and a worker may have no shell at all",
 							},
 							"check": map[string]any{
 								"type":        "string",
-								"description": "the check command the runner runs after a done; empty = none",
+								"description": "the check command the runner runs after a done, in the task's worktree; empty = none. The worker never runs it",
 							},
 							"class": map[string]any{
 								"type":        "string",
@@ -86,7 +86,7 @@ var tools = []Tool{
 				},
 				"text": map[string]any{
 					"type":        "string",
-					"description": "the answer, verbatim: what the worker must know to proceed",
+					"description": "the answer, verbatim: what the worker must know to proceed. A worker asking permission for git, a build or the check needs none of them: tell it to leave its edits in the worktree and report done, since the runner commits, pushes and checks. Never ask the user to widen a worker's permissions",
 				},
 			},
 			"required": []string{"task", "text"},
