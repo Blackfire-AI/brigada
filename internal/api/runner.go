@@ -291,7 +291,13 @@ type jobGrant struct {
 	CheckCmd       string    `json:"check_cmd"`
 	// ReviewBranch is the task's result branch a review job reviews
 	// (§7): the worktree sits at it. Empty for every other kind.
-	ReviewBranch    string `json:"review_branch,omitempty"`
+	ReviewBranch string `json:"review_branch,omitempty"`
+	// Branch is the branch the engine names a work or fix job to work
+	// on (§5.1): the worktree is built on it and the run's work is
+	// pushed to it. Empty for a review and a foreman turn — and for an
+	// engine that does not name branches, where the runner falls back
+	// to its own naming.
+	Branch          string `json:"branch,omitempty"`
 	Attempt         int64  `json:"attempt"`
 	ResumeSessionID string `json:"resume_session_id"`
 	// ForemanToken is the lease-scoped foreman token (§12.1): minted with
@@ -319,6 +325,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		BaseRef:         g.BaseRef,
 		CheckCmd:        g.CheckCmd,
 		ReviewBranch:    g.ReviewBranch,
+		Branch:          g.Branch,
 		Attempt:         g.Attempt,
 		ResumeSessionID: g.ResumeSessionID,
 		ForemanToken:    g.ForemanToken,

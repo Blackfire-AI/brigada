@@ -28,6 +28,15 @@ func TestTaskBranch(t *testing.T) {
 			t.Errorf("taskBranch(%d, %d) = %q, want %q", tc.taskID, tc.attempt, got, tc.want)
 		}
 	}
+	// The grant's own branch wins verbatim, whatever the attempt; only a
+	// grant without one — an older engine — falls back to the naming
+	// above.
+	if got := grantBranch(&api.JobGrant{TaskID: 7, Attempt: 2, Branch: "brigada/task-7-r1"}); got != "brigada/task-7-r1" {
+		t.Errorf("grantBranch with a branch = %q, want the grant's own", got)
+	}
+	if got := grantBranch(&api.JobGrant{TaskID: 7, Attempt: 2}); got != "brigada/task-7-a2" {
+		t.Errorf("grantBranch without a branch = %q, want the fallback", got)
+	}
 }
 
 func TestPrepareWorkspaceRejectsMissingURL(t *testing.T) {
@@ -268,5 +277,125 @@ func TestWorkspaceBaseOnResultBranch(t *testing.T) {
 	// And its own branch is still its own.
 	if ws2.branch != "brigada/task-9" {
 		t.Errorf("follow-up branch = %q, want brigada/task-9", ws2.branch)
+	}
+}
+
+// TestFixJobContinuesTheBranch covers the fix round's workspace (§3,
+// §5.1): the grant names the task's branch — the engine's choice, not
+// the runner's — and the worktree starts at that branch's head as the
+// remote holds it, so the round's work builds on the work before it and
+// its push is a fast-forward of the branch, never a force.
+func TestFixJobContinuesTheBranch(t *testing.T) {
+	ctx := context.Background()
+	remote := newRemote(t)
+	cfg := &Config{StateDir: t.TempDir()}
+
+	// The work round: the branch the grant names, pushed with its work.
+	ws, err := prepareWorkspace(ctx, cfg, &api.JobGrant{
+		JobID: 41, TaskID: 5, Kind: "work", Attempt: 1,
+		RepoURL: remote, BaseRef: "main", Branch: "brigada/task-5",
+	})
+	if err != nil {
+		t.Fatalf("prepare the work workspace: %v", err)
+	}
+	if ws.branch != "brigada/task-5" {
+		t.Errorf("work branch = %q, want the grant's brigada/task-5", ws.branch)
+	}
+	git(t, ws.dir, "commit", "--allow-empty", "-m", "the work")
+	if err := ws.ensurePushed(ctx); err != nil {
+		t.Fatalf("ship the work: %v", err)
+	}
+	ws.remove(ctx)
+
+	// The fix round continues the branch: its worktree starts at the
+	// pushed head, and its own work lands on top of it.
+	fix, err := prepareWorkspace(ctx, cfg, &api.JobGrant{
+		JobID: 42, TaskID: 5, Kind: "fix", Attempt: 1,
+		RepoURL: remote, BaseRef: "main", Branch: "brigada/task-5",
+	})
+	if err != nil {
+		t.Fatalf("prepare the fix workspace: %v", err)
+	}
+	defer fix.remove(ctx)
+	if fix.branch != "brigada/task-5" {
+		t.Errorf("fix branch = %q, want the task's brigada/task-5", fix.branch)
+	}
+	if out := git(t, fix.dir, "log", "--oneline", "-1"); !strings.Contains(out, "the work") {
+		t.Errorf("the fix worktree starts at %q, want the pushed work", strings.TrimSpace(out))
+	}
+	git(t, fix.dir, "commit", "--allow-empty", "-m", "the fix")
+	if err := fix.ensurePushed(ctx); err != nil {
+		t.Fatalf("ship the fix: %v", err)
+	}
+	clone := t.TempDir()
+	git(t, "", "clone", "-q", "--branch", "brigada/task-5", remote, clone)
+	if out := git(t, clone, "log", "--oneline"); !strings.Contains(out, "the fix") || !strings.Contains(out, "the work") {
+		t.Errorf("the branch's history = %q, want the fix on top of the work", out)
+	}
+
+	// A remote branch that moved beyond the worktree's start is never
+	// force-pushed over: the push is refused instead.
+	mover := t.TempDir()
+	git(t, "", "clone", "-q", "--branch", "brigada/task-5", remote, mover)
+	git(t, mover, "-c", "user.name=seed", "-c", "user.email=seed@brigada.invalid",
+		"commit", "--allow-empty", "-m", "moved on")
+	git(t, mover, "push", "-q", "origin", "brigada/task-5")
+	git(t, fix.dir, "commit", "--allow-empty", "-m", "behind the move")
+	if err := fix.ensurePushed(ctx); err == nil {
+		t.Error("a non-fast-forward push succeeded; want the refusal, never a force push")
+	}
+}
+
+// TestFixJobWithoutAPushedBranch covers the fix round whose branch the
+// remote does not hold — the work never pushed anything: the worktree
+// starts at the base ref like a work job's, and the round's push brings
+// the branch its start.
+func TestFixJobWithoutAPushedBranch(t *testing.T) {
+	ctx := context.Background()
+	remote := newRemote(t)
+	fix, err := prepareWorkspace(ctx, &Config{StateDir: t.TempDir()}, &api.JobGrant{
+		JobID: 43, TaskID: 6, Kind: "fix", Attempt: 1,
+		RepoURL: remote, BaseRef: "main", Branch: "brigada/task-6",
+	})
+	if err != nil {
+		t.Fatalf("prepare the fix workspace: %v", err)
+	}
+	defer fix.remove(ctx)
+	if out := git(t, fix.dir, "log", "--oneline", "-1"); !strings.Contains(out, "seed") {
+		t.Errorf("the fix worktree starts at %q, want the base ref's seed commit", strings.TrimSpace(out))
+	}
+	if err := fix.ensurePushed(ctx); err != nil {
+		t.Fatalf("push the branch the remote lacked: %v", err)
+	}
+}
+
+// TestRemoteBranchSeparatesAbsentFromUnreachable pins the two ways an
+// ls-remote answer can be no (§3): a remote that answers cleanly that
+// it holds no such branch, and a remote that cannot be asked at all.
+// The fix round's workspace builds on the difference — the first falls
+// back to the base ref, the second fails the job rather than silently
+// rebuild from the base — so the two must not fold into one boolean.
+func TestRemoteBranchSeparatesAbsentFromUnreachable(t *testing.T) {
+	ctx := context.Background()
+	w := &workspace{repoURL: newRemote(t)}
+
+	if sha, ok, err := w.remoteBranch(ctx, "brigada/task-99"); err != nil || ok || sha != "" {
+		t.Errorf("an absent branch = %q/%t/%v, want a clean no", sha, ok, err)
+	}
+
+	// A branch the remote does hold answers with its commit.
+	seed := t.TempDir()
+	git(t, "", "clone", "-q", w.repoURL, seed)
+	git(t, seed, "-c", "user.name=seed", "-c", "user.email=seed@brigada.invalid",
+		"commit", "--allow-empty", "-m", "work")
+	git(t, seed, "branch", "brigada/task-99")
+	git(t, seed, "push", "-q", "origin", "brigada/task-99")
+	if sha, ok, err := w.remoteBranch(ctx, "brigada/task-99"); err != nil || !ok || sha == "" {
+		t.Errorf("the pushed branch = %q/%t/%v, want its commit", sha, ok, err)
+	}
+
+	bad := &workspace{repoURL: "file://" + filepath.Join(t.TempDir(), "missing.git")}
+	if _, ok, err := bad.remoteBranch(ctx, "brigada/task-1"); err == nil || ok {
+		t.Errorf("an unreachable remote = %t/%v, want the question's failure, not absence", ok, err)
 	}
 }

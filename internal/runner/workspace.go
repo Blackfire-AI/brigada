@@ -12,25 +12,46 @@ import (
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
+	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
 // A runner's workspace (§5.1, product rule 6): a per-repo mirror cache
 // under the runner's state directory, and one git worktree per task,
-// on a branch of its own, built from the job's base ref. The mirror is
-// cloned once and fetched afterwards; the worktree is removed after the
-// job completes. The runner pushes result branches to the repo's remote
-// itself, with its own credentials (config or environment), which never
-// reach the worker's argv or prompt.
+// on the branch the job's grant names, built from the job's base ref —
+// or, for a fix round, from the head of the branch it continues. The
+// mirror is cloned once and fetched afterwards; the worktree is removed
+// after the job completes. The runner pushes result branches to the
+// repo's remote itself, with its own credentials (config or
+// environment), which never reach the worker's argv or prompt.
 
-// taskBranch is the result branch a task's attempt works on (§5.1):
-// brigada/task-<id>, with an attempt suffix once a job was re-leased —
-// a re-dispatched attempt never reuses the branch name of the one
-// before it (§6.4).
+// taskBranch is the runner's own fallback naming for a result branch
+// (§5.1): brigada/task-<id>, with an attempt suffix once a job was
+// re-leased. It names the branch only when the grant carries none — an
+// engine that does not name branches itself.
 func taskBranch(taskID, attempt int64) string {
 	if attempt <= 1 {
 		return fmt.Sprintf("brigada/task-%d", taskID)
 	}
 	return fmt.Sprintf("brigada/task-%d-a%d", taskID, attempt)
+}
+
+// grantBranch is the branch the job's grant names it to work on: the
+// engine's choice, made once at the job's first lease and kept by its
+// later leases. A grant without one — an older engine — falls back to
+// the runner's own naming above.
+func grantBranch(grant *api.JobGrant) string {
+	if grant.Branch != "" {
+		return grant.Branch
+	}
+	return taskBranch(grant.TaskID, grant.Attempt)
+}
+
+// isFixJob reports whether the grant is a fix round (§3): the round
+// that continues the task's existing branch — after a failed check, a
+// changes verdict, or as the answer that resumes the author's session —
+// instead of starting one from the base ref.
+func isFixJob(grant *api.JobGrant) bool {
+	return engine.Kind(grant.Kind) == engine.KindFix
 }
 
 // workspace is one task's materialized checkout.
@@ -45,7 +66,9 @@ type workspace struct {
 
 // prepareWorkspace materializes the workspace for a leased job (§5.1):
 // the repo's mirror is cloned or fetched, then the worktree is added on
-// its own branch from the base ref. A repo without a URL is refused
+// the grant's branch — a work job's from the base ref, a fix round's
+// from the head of the task's branch as the remote holds it, so the
+// round builds on the work before it. A repo without a URL is refused
 // outright (product §5 rule 6: repos are addressed by URL): no clone,
 // no worktree, no worker. A review job takes the other worktree (§7):
 // the task's result branch, read-only.
@@ -62,20 +85,42 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 	w := &workspace{
 		mirror:  mirrorPath(cfg.StateDir, grant.RepoURL),
 		dir:     filepath.Join(cfg.StateDir, "worktrees", fmt.Sprintf("job-%d", grant.JobID)),
-		branch:  taskBranch(grant.TaskID, grant.Attempt),
+		branch:  grantBranch(grant),
 		repoURL: grant.RepoURL,
 		gitEnv:  cfg.GitEnv,
 	}
 	if err := w.materializeMirror(ctx, grant.BaseRef); err != nil {
 		return nil, err
 	}
+	start := grant.BaseRef
+	if isFixJob(grant) && grant.Branch != "" {
+		// The round continues the task's branch (§3): the worktree
+		// starts at the branch's head as the remote holds it, fetched by
+		// name — the mirror's own fetch skips the runners' brigada/
+		// namespace — so the round's work builds on the work before it
+		// and its push is a fast-forward of the branch, never a force.
+		// A remote that answers cleanly that it holds no such branch —
+		// nothing was ever pushed — leaves the round on the base ref,
+		// where the work itself starts. A remote that cannot be asked at
+		// all fails the job instead: reading that as absence would
+		// silently rebuild the round from the base and throw away the
+		// work it was sent to continue.
+		if _, holds, err := w.remoteBranch(ctx, grant.Branch); err != nil {
+			return nil, err
+		} else if holds {
+			if err := w.fetchBranch(ctx, grant.Branch); err != nil {
+				return nil, err
+			}
+			start = grant.Branch
+		}
+	}
 	// A worktree left behind by a crashed run of the same job would make
 	// the add below fail on the path; the runner is sequential, so what
 	// sits there now is dead.
 	w.discardWorktree(ctx)
-	if out, err := w.git(ctx, "--git-dir", w.mirror, "worktree", "add", "-B", w.branch, w.dir, grant.BaseRef); err != nil {
+	if out, err := w.git(ctx, "--git-dir", w.mirror, "worktree", "add", "-B", w.branch, w.dir, start); err != nil {
 		w.discardWorktree(ctx)
-		return nil, fmt.Errorf("add the worktree for %s from %s: %w", w.branch, grant.BaseRef, trimCmdError(out, err))
+		return nil, fmt.Errorf("add the worktree for %s from %s: %w", w.branch, start, trimCmdError(out, err))
 	}
 	// The commit the worktree starts from: what holdsWork compares the
 	// worker's HEAD against — a branch with no work on it is not a
@@ -288,18 +333,36 @@ func (w *workspace) worktreeHead(ctx context.Context) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// remoteBranchSHA is the commit the remote holds for the branch; false
-// when the remote does not have it (§5.4).
+// remoteBranch is the commit the remote holds for one branch: false
+// when the remote answers cleanly that it has no such ref, and an
+// error when the question itself failed — the remote could not be
+// asked, a network or credentials fault. The two are not the same
+// absence, and the fix round's workspace builds on the difference
+// (§3): the callers that cannot use it take remoteBranchSHA below.
+func (w *workspace) remoteBranch(ctx context.Context, branch string) (string, bool, error) {
+	out, err := w.git(ctx, "ls-remote", w.repoURL, "refs/heads/"+branch)
+	if err != nil {
+		return "", false, fmt.Errorf("ask %s for the branch %s: %w",
+			redactURL(w.repoURL), branch, trimCmdError(out, err))
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) < 2 || fields[1] != "refs/heads/"+branch {
+		return "", false, nil
+	}
+	return fields[0], true, nil
+}
+
+// remoteBranchSHA is the commit the remote holds for the worktree's
+// branch; false when the remote does not have it (§5.4). A failure to
+// ask reads the same as an absent branch here: the push path that
+// uses this pushes first and asks again, so the difference buys it
+// nothing.
 func (w *workspace) remoteBranchSHA(ctx context.Context) (string, bool) {
-	out, err := w.git(ctx, "ls-remote", w.repoURL, "refs/heads/"+w.branch)
+	sha, ok, err := w.remoteBranch(ctx, w.branch)
 	if err != nil {
 		return "", false
 	}
-	fields := strings.Fields(string(out))
-	if len(fields) < 2 || fields[1] != "refs/heads/"+w.branch {
-		return "", false
-	}
-	return fields[0], true
+	return sha, ok
 }
 
 // git runs one git command with the runner's own environment, where its

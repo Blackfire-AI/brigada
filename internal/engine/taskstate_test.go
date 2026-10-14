@@ -118,8 +118,9 @@ func TestTaskRunsReviewsAndFinishes(t *testing.T) {
 	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskReviewing {
 		t.Fatalf("task state after the done = %q, want reviewing", state)
 	}
-	if branch := e.str("SELECT branch FROM tasks WHERE id = ?", e.task); branch != "task/1-1" {
-		t.Errorf("task branch = %q, want the result's", branch)
+	if branch := e.str("SELECT branch FROM tasks WHERE id = ?", e.task); branch != branchOf(e.task) {
+		t.Errorf("task branch = %q, want the engine's %q, not the result block's name",
+			branch, branchOf(e.task))
 	}
 	review := e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review'", e.task)
 	if review == 0 {
@@ -137,20 +138,24 @@ func TestTaskRunsReviewsAndFinishes(t *testing.T) {
 	// The engine composes the reviewer's prompt itself (§1.4, §7) and
 	// stores it on the job: the review template with the spec and the
 	// check result verbatim, and the diff command naming the task's base
-	// and the result branch. The implementer's summary — "added the
-	// thing", in the completion above — is none of its inputs (§7's
-	// anti-steering rule).
+	// and the result branch — the engine's own name for it (§5.1), never
+	// the worker's "task/1-1" the block above carried. The implementer's
+	// summary — "added the thing", in the completion above — is none of
+	// its inputs either (§7's anti-steering rule).
 	promptOf := e.str("SELECT prompt FROM jobs WHERE id = ?", review)
-	if want := prompt.ComposeReviewPrompt("the spec", passCheck, "main", "task/1-1"); promptOf != want {
+	if want := prompt.ComposeReviewPrompt("the spec", passCheck, "main", branchOf(e.task)); promptOf != want {
 		t.Errorf("review prompt = %q\nwant the composed\n%q", promptOf, want)
 	}
 	if strings.Contains(promptOf, "added the thing") {
 		t.Errorf("the review prompt carries the implementer's summary (§7):\n%s", promptOf)
 	}
+	if strings.Contains(promptOf, "task/1-1") {
+		t.Errorf("the review prompt carries the worker's branch name (§5.1):\n%s", promptOf)
+	}
 	// The branch and base stay on the task's own row (§6.1), where the
 	// review's grant reads them at lease time.
-	if branch := e.str("SELECT branch FROM tasks WHERE id = ?", e.task); branch != "task/1-1" {
-		t.Errorf("task branch = %q, want the result's", branch)
+	if branch := e.str("SELECT branch FROM tasks WHERE id = ?", e.task); branch != branchOf(e.task) {
+		t.Errorf("task branch = %q, want the engine's %q", branch, branchOf(e.task))
 	}
 
 	// The family rule (§7, §8): the author's runner — its only agent is
@@ -163,10 +168,12 @@ func TestTaskRunsReviewsAndFinishes(t *testing.T) {
 		t.Fatalf("the other-family runner leased %+v, want the review job %d", rg, review)
 	}
 	// The review's grant carries the branch to review and the base ref
-	// of the diff (§7), and no check to run: the task's check already
-	// spoke, at the work round this review judges.
-	if rg.ReviewBranch != "task/1-1" || rg.BaseRef != "main" {
-		t.Errorf("review grant branch/base = %q/%q, want task/1-1 on main", rg.ReviewBranch, rg.BaseRef)
+	// of the diff (§7) — the engine's branch, not the block's — and no
+	// check to run: the task's check already spoke, at the work round
+	// this review judges.
+	if rg.ReviewBranch != branchOf(e.task) || rg.BaseRef != "main" {
+		t.Errorf("review grant branch/base = %q/%q, want %s on main",
+			rg.ReviewBranch, rg.BaseRef, branchOf(e.task))
 	}
 	if rg.CheckCmd != "" {
 		t.Errorf("review grant check = %q, want none", rg.CheckCmd)
