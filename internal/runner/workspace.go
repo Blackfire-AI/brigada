@@ -174,6 +174,10 @@ func prepareReviewWorkspace(ctx context.Context, cfg *Config, grant *api.JobGran
 		return nil, fmt.Errorf("read the review worktree's commit: %w", trimCmdError(out, err))
 	}
 	w.base = strings.TrimSpace(string(out))
+	if err := w.writeReviewDiff(ctx, grant.BaseRef); err != nil {
+		w.discardWorktree(ctx)
+		return nil, err
+	}
 	return w, nil
 }
 
@@ -279,9 +283,9 @@ func (w *workspace) discardWorktree(ctx context.Context) {
 // runner (§5.3), but a worker may push anyway — a run that ignored it,
 // or a prompt from an older template — so ensurePushed verifies rather
 // than trusts: a branch that merely exists is not enough, since an
-// early push followed by more work, or edits the
-// worker never committed, would leave the remote holding something
-// other than what the runner is about to vouch for. So: leftovers the
+// early push followed by more work, or edits the worker never
+// committed, would leave the remote holding something other than what
+// the runner is about to vouch for. So: leftovers the
 // worker left uncommitted are committed, then the remote's SHA is
 // compared with the worktree's HEAD, and a mismatch is pushed. A
 // ls-remote that still disagrees after the push was no push.
