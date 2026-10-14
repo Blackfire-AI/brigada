@@ -123,7 +123,7 @@ var tools = []Tool{
 	},
 	{
 		Name:        "history",
-		Description: "The project's timeline — events and messages merged, oldest first — optionally one task's, at most `limit` items.",
+		Description: "The project's timeline — events and messages merged, oldest first — the newest `limit` items (default 100), the newest at the end. To read further back, narrow to one `task` or raise `limit`.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -247,7 +247,8 @@ func parseStartedAt(s string) time.Time {
 }
 
 // callHistory renders /v1/history as text (§9, §12.2) with
-// internal/history, optionally one task's timeline and a page size. The
+// internal/history, optionally one task's timeline and a page size. It
+// reads the newest page, so the latest items are always in view. The
 // token the client bears scopes the project (§12.1): a foreman's token
 // sees its own project whatever it asks.
 func callHistory(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
@@ -260,7 +261,7 @@ func callHistory(ctx context.Context, c *api.Client, args json.RawMessage) (stri
 			return "", fmt.Errorf("arguments: %w", err)
 		}
 	}
-	q := api.HistoryQuery{Limit: a.Limit}
+	q := api.HistoryQuery{Limit: a.Limit, Last: true}
 	if a.Task != nil {
 		q.TaskID = *a.Task
 	}

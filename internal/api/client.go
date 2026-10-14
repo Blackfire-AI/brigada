@@ -185,17 +185,19 @@ func (c *Client) UploadArtifact(ctx context.Context, jobID int64, leaseID, kind 
 
 // HistoryQuery is one page of the timeline as the client asks for it
 // (§9): the filters, the cursor the previous page ended on, and the
-// page size.
+// page size. Last asks for the newest page instead of the next one; it
+// cannot be combined with Since.
 type HistoryQuery struct {
 	ProjectID int64
 	TaskID    int64
 	JobID     int64
 	Since     string
 	Limit     int
+	Last      bool
 }
 
 // History reads one page of the timeline (§9): events and messages
-// merged, oldest first.
+// merged, oldest first. With Last it is the newest page.
 func (c *Client) History(ctx context.Context, q HistoryQuery) (history.Page, error) {
 	vals := make(url.Values)
 	add := func(name string, n int64) {
@@ -211,6 +213,9 @@ func (c *Client) History(ctx context.Context, q HistoryQuery) (history.Page, err
 	}
 	if q.Limit > 0 {
 		vals.Set("limit", strconv.Itoa(q.Limit))
+	}
+	if q.Last {
+		vals.Set("last", "1")
 	}
 	var page history.Page
 	path := "/v1/history"
