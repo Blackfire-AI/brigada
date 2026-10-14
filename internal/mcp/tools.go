@@ -114,7 +114,7 @@ var tools = []Tool{
 	},
 	{
 		Name:        "status",
-		Description: "The engine's own state: which process it is, up how long, the jobs by status — plus the plans with their tasks and the \"needs you\" queue: tasks parked at needs_foreman or needs_user, and plans awaiting approval, each with its reason. Your token scopes the view to your project.",
+		Description: "The engine's own state: which process it is, up how long, the jobs by status — plus the running jobs with each worker's latest event, the plans with their tasks and the \"needs you\" queue: tasks parked at needs_foreman or needs_user, and plans awaiting approval, each with its reason. Your token scopes the view to your project.",
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},

@@ -104,14 +104,15 @@ func TestStatusGolden(t *testing.T) {
 
 	// The first two lines name the engine and count the jobs; their
 	// values vary (a real pid, a real uptime), their shape does not.
+	// The running section follows, empty: no runner holds a job.
 	out := stdout.String()
 	lines := strings.SplitN(out, "plans:\n", 2)
 	if len(lines) != 2 {
 		t.Fatalf("status printed %q, want a plans section in it", out)
 	}
 	head := strings.Split(strings.TrimSuffix(lines[0], "\n"), "\n")
-	if len(head) != 2 {
-		t.Fatalf("status head = %q, want the engine line and the jobs line", lines[0])
+	if len(head) != 3 || head[2] != "running: none" {
+		t.Fatalf("status head = %q, want the engine line, the jobs line and an empty running section", lines[0])
 	}
 	if matched, _ := regexp.MatchString(`^engine pid [0-9]+ up [0-9hms]+$`, head[0]); !matched {
 		t.Errorf("the engine line = %q, want `engine pid <pid> up <uptime>`", head[0])

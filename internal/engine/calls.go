@@ -151,6 +151,12 @@ func recordProgressTx(tx *sql.Tx, jobID int64, prog Progress, now time.Time) err
 		sets = append(sets, "last_progress_at = ?")
 		args = append(args, fmtTime(progress))
 	}
+	if n := len(prog.Events); n > 0 {
+		// The newest event, one short line, for the status views
+		// (§10); the rules read only the times.
+		sets = append(sets, "last_event = ?")
+		args = append(args, oneLine(prog.Events[n-1], lastEventLimit))
+	}
 	sets = append(sets, "last_activity_at = ?", "updated_at = ?")
 	args = append(args, fmtTime(activity), fmtTime(now))
 	args = append(args, jobID)

@@ -21,11 +21,15 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	fs := newFlagSet("status")
 	common := addCommon(fs)
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
+	line := fs.Bool("line", false, "print one short line for a terminal status bar; never starts the engine")
 	if code := common.parse(stderr, args); code != 0 {
 		return code
 	}
 	if extra := fs.Args(); len(extra) > 0 {
 		return usagef(stderr, "status takes no arguments, got %q", extra)
+	}
+	if *line {
+		return statusLine(ctx, common, stdout)
 	}
 	rt, code := resolveRuntime(common, stderr)
 	if code != 0 {
@@ -50,6 +54,34 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	}
 	fmt.Fprintf(stdout, "jobs: %s\n", strings.Join(counts, " "))
 	fmt.Fprintln(stdout, api.StatusSections(st))
+	return 0
+}
+
+// statusLine is `brigada status --line` (§10): the status as one short
+// line, for a terminal status bar that runs it every few seconds — the
+// attached foreman's, above all. A status bar must never start an
+// engine nor print an error page, so it never starts one, and anything
+// that keeps it from reading the status becomes a one-line answer on
+// stdout with exit 0: the bar shows it, and the next tick tries again.
+func statusLine(ctx context.Context, common *commonFlags, stdout io.Writer) int {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	rt, code := resolveRuntime(common, io.Discard)
+	if code != 0 {
+		fmt.Fprintln(stdout, "brigada: no state directory")
+		return 0
+	}
+	client, code := connect(ctx, rt, "client", true, io.Discard)
+	if code != 0 {
+		fmt.Fprintln(stdout, "brigada: engine not running")
+		return 0
+	}
+	st, err := client.Status(ctx)
+	if err != nil {
+		fmt.Fprintln(stdout, "brigada: status unavailable")
+		return 0
+	}
+	fmt.Fprintln(stdout, api.StatusLine(st, time.Now()))
 	return 0
 }
 

@@ -373,3 +373,70 @@ func TestStatusScopesToTheCallersProject(t *testing.T) {
 		t.Errorf("the other project's status = %+v / %+v, want its plan and task alone", theirs.Plans, theirs.NeedsYou)
 	}
 }
+
+// TestStatusListsRunningJobsWithTheirLastEvent: a heartbeat's newest
+// progress event lands on the job, flattened to one line, and the
+// status lists the held job with it (§10); a heartbeat without events
+// keeps the last one, and a finished job leaves the list.
+func TestStatusListsRunningJobsWithTheirLastEvent(t *testing.T) {
+	e := newEnv(t)
+	e.submit(e.work())
+	g := e.leaseAny(e.runner1)
+	if g == nil {
+		t.Fatal("nothing to lease")
+	}
+	prog := Progress{LastProgressAt: e.clock.Now(), Events: []string{"tool_start Read", "tool_start Edit\n  internal/runner/review.go"}}
+	if ans, _, err := e.eng.Heartbeat(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, prog); err != nil || ans != AnsOK {
+		t.Fatalf("heartbeat = %s, %v; want ok", ans, err)
+	}
+	if ans := e.heartbeat(g); ans != AnsOK {
+		t.Fatalf("an eventless heartbeat = %s; want ok", ans)
+	}
+
+	st, err := e.eng.Status(e.ctx, 0)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(st.Running) != 1 {
+		t.Fatalf("running = %+v, want the one held job", st.Running)
+	}
+	j := st.Running[0]
+	if j.ID != g.JobID || j.Kind != string(KindWork) || j.LeasedAt == "" {
+		t.Errorf("running job = %+v, want job %d, kind work, with its lease start", j, g.JobID)
+	}
+	if want := "tool_start Edit internal/runner/review.go"; j.LastEvent != want {
+		t.Errorf("last event = %q, want the newest event on one line %q", j.LastEvent, want)
+	}
+
+	if ans := e.complete(g, Completion{Result: `{"status":"done","summary":"ok"}`}); ans != AnsOK {
+		t.Fatalf("complete = %s; want ok", ans)
+	}
+	if st, err = e.eng.Status(e.ctx, 0); err != nil || len(st.Running) != 0 {
+		t.Errorf("running after the job finished = %+v (%v), want none", st.Running, err)
+	}
+}
+
+// TestNewLeaseClearsTheLastEvent: a job re-leased after its lease
+// expired starts with no last
+// event, so the status never shows the previous attempt's last tool
+// call beside the new attempt's fresh elapsed time.
+func TestNewLeaseClearsTheLastEvent(t *testing.T) {
+	e := newEnv(t)
+	e.submit(e.work())
+	g := e.leaseAny(e.runner1)
+	if g == nil {
+		t.Fatal("nothing to lease")
+	}
+	prog := Progress{LastProgressAt: e.clock.Now(), Events: []string{"tool_start Edit"}}
+	if ans, _, err := e.eng.Heartbeat(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, prog); err != nil || ans != AnsOK {
+		t.Fatalf("heartbeat = %s, %v; want ok", ans, err)
+	}
+	e.expireLease()
+	g2 := e.leaseAny(e.runner1)
+	if g2 == nil || g2.JobID != g.JobID {
+		t.Fatalf("re-lease = %+v, want job %d again", g2, g.JobID)
+	}
+	if got := e.str("SELECT COALESCE(last_event, '') FROM jobs WHERE id = ?", g.JobID); got != "" {
+		t.Errorf("last_event after a new lease = %q, want it cleared", got)
+	}
+}
