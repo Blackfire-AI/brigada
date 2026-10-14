@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+// TestWorkerPromptMentionsDiscoveries checks the worker template lists
+// the optional discoveries field of the result block (§5.4).
+func TestWorkerPromptMentionsDiscoveries(t *testing.T) {
+	if got := ComposeWorkerPrompt("spec", ""); !strings.Contains(got, `"discoveries"`) {
+		t.Errorf("the worker prompt does not mention discoveries:\n%s", got)
+	}
+}
+
 func TestWorkerTemplateVersion(t *testing.T) {
 	if WorkerTemplateVersion <= 0 {
 		t.Errorf("WorkerTemplateVersion = %d, want a positive version", WorkerTemplateVersion)

@@ -121,6 +121,16 @@ func (e *Engine) taskAfterCompletionTx(tx *sql.Tx, job *jobRow, c Completion, no
 // workCompletedTx applies a work or fix job's completion to its task.
 func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class string, now time.Time) error {
 	wr, haveResult := parseWorkerResult(c.Result)
+	// Discoveries (§5.4) reach the foreman's inbox whatever the task does
+	// next, so a park in this same completion carries them in its wake.
+	// They never wake the foreman alone: a later wake delivers them with
+	// the rest of the inbox (§4.2).
+	if haveResult && wr.Discoveries != "" {
+		if err := inboxEventTx(tx, evTaskDiscoveries, job.ProjectID, job.TaskID, job.ID,
+			eventPayload{Discoveries: boundNote(wr.Discoveries)}, now); err != nil {
+			return err
+		}
+	}
 	// The task's branch follows the work that certainly shipped (§6.4):
 	// a done run's, a check-failed run's too — the push precedes the
 	// check (§5.5) — so those completions repoint it, each to the branch

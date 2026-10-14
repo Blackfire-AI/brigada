@@ -266,6 +266,83 @@ func TestPlanDoneWakesTheForeman(t *testing.T) {
 	}
 }
 
+// discoveryDone drives the fixture's work job, leased by author, to a
+// completion with the given result block under a passing check.
+func (e *env) discoveryDone(author int64, result string) {
+	e.t.Helper()
+	e.submit(e.work())
+	g := e.leaseAny(author)
+	if g == nil {
+		e.t.Fatal("the work job was not leased")
+	}
+	if ans := e.complete(g, Completion{Result: result, CheckResult: passCheck}); ans != AnsOK {
+		e.t.Fatalf("complete the work: %s", ans)
+	}
+}
+
+// TestDiscoveriesRideWithoutWaking is §4.2 "Discoveries": a done result
+// with discoveries queues the review, adds the event to the inbox and
+// wakes no foreman turn; the worker_result message keeps the field (§9).
+func TestDiscoveriesRideWithoutWaking(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	e.agented("reviewer", "google", "implement", "review")
+	e.discoveryDone(author, `{"status":"done","summary":"s","discoveries":"the API rounds down"}`)
+	if e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'review'", e.task) != 1 {
+		t.Error("the review job was not queued")
+	}
+	if got := e.countEvents(evTaskDiscoveries); got != 1 {
+		t.Errorf("task_discoveries events = %d, want 1", got)
+	}
+	if want := []string{"pending:0"}; !equalStrings(e.inboxStates(), want) {
+		t.Errorf("inbox = %v, want %v", e.inboxStates(), want)
+	}
+	if got := e.foremanJobs(); got != 0 {
+		t.Errorf("foreman turns = %d, want 0", got)
+	}
+	msg := e.str("SELECT content FROM messages WHERE project_id = ? AND kind = ?", e.project, msgKindWorkerResult)
+	if !strings.Contains(msg, `"discoveries":"the API rounds down"`) {
+		t.Errorf("worker_result message = %q, want it to keep discoveries", msg)
+	}
+}
+
+// TestDiscoveriesRideAParkWake checks a park carries the discoveries of
+// the same completion in its wake (§4.2).
+func TestDiscoveriesRideAParkWake(t *testing.T) {
+	e := newEnv(t)
+	e.submit(e.work())
+	g := e.leaseAny(e.runner1)
+	if g == nil {
+		t.Fatal("the work job was not leased")
+	}
+	e.complete(g, Completion{Result: `{"status":"needs_help","question":"which file?","discoveries":"the API rounds down"}`})
+	if got := e.foremanJobs(); got != 1 {
+		t.Fatalf("foreman turns = %d, want 1", got)
+	}
+	job := e.int("SELECT id FROM jobs WHERE kind = 'foreman'")
+	prompt := e.str("SELECT prompt FROM jobs WHERE id = ?", job)
+	for _, want := range []string{
+		"<event>\n" + e.wakeLine(evTaskNeedsHelp, "which file?") + "\n</event>",
+		"<event>\n" + e.wakeLine(evTaskDiscoveries, "the API rounds down") + "\n</event>",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("wake prompt = %q, want it to carry:\n%s", prompt, want)
+		}
+	}
+}
+
+// TestNoDiscoveriesNoEvent checks a result without the field adds no
+// task_discoveries event.
+func TestNoDiscoveriesNoEvent(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	e.agented("reviewer", "google", "implement", "review")
+	e.discoveryDone(author, `{"status":"done","summary":"s"}`)
+	if got := e.countEvents(evTaskDiscoveries); got != 0 {
+		t.Errorf("task_discoveries events = %d, want 0", got)
+	}
+}
+
 // TestRecoverForemanWakesOnStart is the recovery (§13): pending inbox
 // rows with no live foreman turn get their wake when the engine starts,
 // and a project whose turn is live is left alone.
