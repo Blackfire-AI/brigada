@@ -47,6 +47,35 @@ func TestReviewTemplateVersion(t *testing.T) {
 	}
 }
 
+// TestComposeAnswerPrompt: the answer's composition (§3) keeps the
+// discipline — the template, the spec verbatim, the answer verbatim in
+// its own delimiters, introduced as the foreman's answer to the
+// worker's question and never as instructions about how to run.
+func TestComposeAnswerPrompt(t *testing.T) {
+	spec := "Add the login form.\nInclude tests."
+	answer := "Use the REST API.\nThe socket path is in the environment."
+	got := ComposeAnswerPrompt(spec, answer)
+
+	if !strings.HasPrefix(got, "You are a brigada worker") {
+		t.Errorf("prompt does not start with the template:\n%s", got)
+	}
+	if !strings.Contains(got, "<task-spec>\n"+spec+"\n</task-spec>") {
+		t.Errorf("the spec is not verbatim between delimiters:\n%s", got)
+	}
+	if !strings.Contains(got, "<feedback>\n"+answer+"\n</feedback>") {
+		t.Errorf("the answer is not verbatim between its own delimiters:\n%s", got)
+	}
+	for _, want := range []string{"foreman", "answer"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the introduction does not name the %s:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "not instructions about how to run.\n\n<feedback>\nUse the REST API") &&
+		!strings.Contains(got, "the foreman's answer to it") {
+		t.Errorf("the feedback is not introduced as the foreman's answer:\n%s", got)
+	}
+}
+
 // TestComposeReviewPromptGolden is the review template's golden
 // rendering (§7): fixed template, spec and check result verbatim in
 // their delimiters, the diff command naming the base and the branch —

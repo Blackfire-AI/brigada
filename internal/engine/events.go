@@ -36,6 +36,8 @@ const (
 	evTaskFixRound           = "task_fix_round"            // a fix round is queued on the author's session (§3)
 	evTaskOutOfRounds        = "task_out_of_rounds"        // the task's rounds are spent; the foreman decides (§3)
 	evTaskNeedsHelp          = "task_needs_help"           // the worker asked its question; the foreman answers (§3)
+	evTaskAnswered           = "task_answered"             // the foreman answered; the author's session resumes (§3)
+	evTaskRestarted          = "task_restarted"            // the foreman restarted the task; a fresh work attempt is queued (§3, §5.6)
 	evTaskFailed             = "task_failed"               // the run failed or said nothing usable; the foreman decides (§3)
 	evReviewChanges          = "review_changes"            // the reviewer wants changes; a fix round answers them (§3, §7)
 	evReviewNoVerdict        = "review_no_verdict"         // the review ended without a usable verdict; the retry is spent or impossible (§7)
@@ -63,12 +65,15 @@ type eventPayload struct {
 	Layer    string `json:"layer,omitempty"`    // the cap layer that held the job (§8.1)
 	Branch   string `json:"branch,omitempty"`   // the task's result branch (§6.4)
 	Question string `json:"question,omitempty"` // the worker's question (§5.4)
-	Findings string `json:"findings,omitempty"` // the review's findings (§7)
-	Report   string `json:"report,omitempty"`   // a foreman turn's final message, its report to the user (§3, §10)
-	Harness  string `json:"harness,omitempty"`
-	Model    string `json:"model,omitempty"`
-	Job      int64  `json:"job,omitempty"`   // a job the event names besides its own job_id column
-	Count    int64  `json:"count,omitempty"` // how many of something the event counts (§4.2, §4.3)
+	// QuestionID names the questions row an answer filled (§3, §11):
+	// the task_answered event's own reference to the exchange it made.
+	QuestionID int64  `json:"question_id,omitempty"`
+	Findings   string `json:"findings,omitempty"` // the review's findings (§7)
+	Report     string `json:"report,omitempty"`   // a foreman turn's final message, its report to the user (§3, §10)
+	Harness    string `json:"harness,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Job        int64  `json:"job,omitempty"`   // a job the event names besides its own job_id column
+	Count      int64  `json:"count,omitempty"` // how many of something the event counts (§4.2, §4.3)
 }
 
 // appendEventTx adds one row to the event log inside the caller's

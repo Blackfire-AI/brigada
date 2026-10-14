@@ -159,6 +159,56 @@ func (c *Client) CreatePlan(ctx context.Context, p PlanCreate, idemKey string) (
 	}, nil
 }
 
+// TaskAnswerResult names what an answer did: the questions row it
+// filled and the job that carries the answer to its worker.
+type TaskAnswerResult struct {
+	Answer     engine.Answer
+	QuestionID int64
+	JobID      int64
+	Run        int
+}
+
+// Answer answers a task worker's question (§3, §12.1, §12.2): the task
+// must be parked at needs_foreman by its question; the answer resumes
+// the author's session, verbatim. idemKey is the call's idempotency
+// key, minted per logical call by the bridge (§12.1).
+func (c *Client) Answer(ctx context.Context, task int64, text, idemKey string) (TaskAnswerResult, error) {
+	var out taskAnswerResponse
+	path := "/v1/tasks/" + strconv.FormatInt(task, 10) + "/answer"
+	if err := c.callKeyed(ctx, http.MethodPost, path, idemKey, taskAnswerRequest{Text: text}, &out); err != nil {
+		return TaskAnswerResult{}, err
+	}
+	return TaskAnswerResult{
+		Answer:     engine.Answer(out.Answer),
+		QuestionID: out.QuestionID,
+		JobID:      out.JobID,
+		Run:        out.Run,
+	}, nil
+}
+
+// TaskRestartResult names what a task_restart did: the fresh work job.
+type TaskRestartResult struct {
+	Answer engine.Answer
+	JobID  int64
+	Run    int
+}
+
+// RestartTask restarts a parked task (§3, §5.6, §12.1, §12.2): a fresh
+// work attempt from the task's base, the note handed to the worker
+// verbatim when there is one. idemKey as in Answer.
+func (c *Client) RestartTask(ctx context.Context, task int64, note, idemKey string) (TaskRestartResult, error) {
+	var out taskRestartResponse
+	path := "/v1/tasks/" + strconv.FormatInt(task, 10) + "/restart"
+	if err := c.callKeyed(ctx, http.MethodPost, path, idemKey, taskRestartRequest{Note: note}, &out); err != nil {
+		return TaskRestartResult{}, err
+	}
+	return TaskRestartResult{
+		Answer: engine.Answer(out.Answer),
+		JobID:  out.JobID,
+		Run:    out.Run,
+	}, nil
+}
+
 // CancelJob stops a live job (§12.1). The engine's answers — ok, already,
 // gone — come back as engine answers, not errors.
 func (c *Client) CancelJob(ctx context.Context, jobID int64) (engine.Answer, error) {
