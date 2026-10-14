@@ -78,12 +78,17 @@ func (s *Server) handleArtifactUpload(w http.ResponseWriter, r *http.Request, ru
 // oldest first, one page at a time. A client or admin may read any
 // project or all of them; a foreman token is walled into its own (§12.1)
 // — an explicit ask for another project is refused, no ask means its
-// own.
+// own. Any non-empty last reads the newest page instead of the next one;
+// it has no next cursor and cannot be combined with since.
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request, id identity) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	q := engine.HistoryQuery{Since: r.URL.Query().Get("since")}
+	q := engine.HistoryQuery{Since: r.URL.Query().Get("since"), Last: r.URL.Query().Get("last") != ""}
+	if q.Last && q.Since != "" {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "last cannot be combined with since")
+		return
+	}
 	if q.Since != "" {
 		if _, ok := history.ParseCursor(q.Since); !ok {
 			writeError(w, http.StatusBadRequest, codeBadRequest, "since: malformed cursor")

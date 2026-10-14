@@ -152,6 +152,21 @@ func TestHistoryEndpointScopesTheForeman(t *testing.T) {
 		t.Errorf("first item = %+v, want the created event", page.Items[0])
 	}
 
+	// The newest page is the tail of the timeline: one item, the last
+	// of the full page.
+	code, _, data = e.do(http.MethodGet, "/v1/history?last=1&limit=1", "alice", "", nil)
+	if code != http.StatusOK {
+		t.Fatalf("newest history page: %d %s", code, data)
+	}
+	newest := decode[history.Page](t, data)
+	lastItem := page.Items[len(page.Items)-1]
+	if len(newest.Items) != 1 {
+		t.Fatalf("newest page items = %d, want 1", len(newest.Items))
+	}
+	if got := newest.Items[0]; got.Kind != lastItem.Kind || got.CreatedAt != lastItem.CreatedAt {
+		t.Errorf("newest item = %+v, want the full page's last %+v", got, lastItem)
+	}
+
 	// A foreman token is walled into its own project (§12.1): asking
 	// for another's is forbidden, and asking for none means its own.
 	code, _, data = e.do(http.MethodGet, "/v1/history?project=2", "foreman1", "", nil)

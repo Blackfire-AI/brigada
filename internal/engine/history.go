@@ -22,20 +22,31 @@ const (
 // page. Every filter is optional; ProjectID and TaskID narrow to one
 // project or task, JobID to one job's whole story, Since is the cursor
 // the previous page ended on, and Limit bounds the page (kept between
-// 1 and 500, default 100).
+// 1 and 500, default 100). Last asks for the newest page instead of the
+// next one: the filters and Limit still apply, Since must be empty, and
+// the page has no next cursor — to read further back, narrow with the
+// task or job filter, or raise the limit.
 type HistoryQuery struct {
 	ProjectID int64
 	TaskID    int64
 	JobID     int64
 	Since     string
 	Limit     int
+	Last      bool
 }
 
 // History reads one page of the timeline (§9): events and messages
 // merged, oldest first, as one story. Like every engine call it sweeps
 // first, so the log it reads is the rules' current word. The next
-// cursor is empty when the timeline is exhausted.
+// cursor is empty when the timeline is exhausted. In Last mode the page
+// is the newest Limit items, still oldest first within it, and the next
+// cursor is always empty: there is no forward continuation from the
+// newest page. Read further back by narrowing to a task or job, or by
+// raising the limit. Last cannot continue from a cursor.
 func (e *Engine) History(ctx context.Context, q HistoryQuery) (history.Page, error) {
+	if q.Last && q.Since != "" {
+		return history.Page{}, fmt.Errorf("history: last cannot continue from a cursor")
+	}
 	if q.Limit <= 0 {
 		q.Limit = defaultHistoryLimit
 	}
@@ -62,8 +73,12 @@ func (e *Engine) History(ctx context.Context, q HistoryQuery) (history.Page, err
 		}
 		items := history.Merge(events, messages)
 		if len(items) > q.Limit {
-			items = items[:q.Limit]
-			page.NextCursor = history.CursorOf(items[q.Limit-1])
+			if q.Last {
+				items = items[len(items)-q.Limit:]
+			} else {
+				items = items[:q.Limit]
+				page.NextCursor = history.CursorOf(items[q.Limit-1])
+			}
 		}
 		page.Items = items
 		return nil
@@ -74,7 +89,8 @@ func (e *Engine) History(ctx context.Context, q HistoryQuery) (history.Page, err
 	return page, nil
 }
 
-// historyEventsTx reads the page's events, oldest first. The cursor
+// historyEventsTx reads the page's events, oldest first — newest first in
+// Last mode, where Merge re-sorts and no cursor applies. The cursor
 // carries the last item of the previous page — of either type — so an
 // event continues only strictly past it: an event at the cursor's own
 // instant sorts before a message there, and past-page events at that
@@ -103,10 +119,14 @@ func historyEventsTx(tx *sql.Tx, q HistoryQuery, cursor history.CursorKey) ([]hi
 			args = append(args, cursor.CreatedAt)
 		}
 	}
+	order, limit := "created_at, id", q.Limit+1
+	if q.Last {
+		order, limit = "created_at DESC, id DESC", q.Limit
+	}
 	rows, err := tx.Query(`SELECT id, kind, COALESCE(project_id, 0), COALESCE(task_id, 0),
 		COALESCE(job_id, 0), payload, created_at
 		FROM events WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY created_at, id LIMIT ?`, append(args, q.Limit+1)...)
+		ORDER BY `+order+` LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("read events: %w", err)
 	}
@@ -124,7 +144,8 @@ func historyEventsTx(tx *sql.Tx, q HistoryQuery, cursor history.CursorKey) ([]hi
 	return out, rows.Err()
 }
 
-// historyMessagesTx reads the page's messages, oldest first. A task or
+// historyMessagesTx reads the page's messages, oldest first — newest
+// first in Last mode, like the events. A task or
 // job filter reaches a message through the event that produced it —
 // that reference is what ties a conversation item to the story it
 // belongs to (§9). Past the cursor's instant a message continues at
@@ -154,9 +175,13 @@ func historyMessagesTx(tx *sql.Tx, q HistoryQuery, cursor history.CursorKey) ([]
 			args = append(args, cursor.CreatedAt)
 		}
 	}
+	order, limit := "m.created_at, m.id", q.Limit+1
+	if q.Last {
+		order, limit = "m.created_at DESC, m.id DESC", q.Limit
+	}
 	rows, err := tx.Query(`SELECT m.id, m.project_id, COALESCE(m.event_id, 0), m.kind, m.author, m.content, m.created_at
 		FROM messages m WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY m.created_at, m.id LIMIT ?`, append(args, q.Limit+1)...)
+		ORDER BY `+order+` LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("read messages: %w", err)
 	}

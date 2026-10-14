@@ -74,6 +74,41 @@ func TestHistoryMergesEventsAndMessagesOldestFirst(t *testing.T) {
 	}
 }
 
+// TestHistoryNewestPage checks the Last mode (§9): the page is the
+// newest items, oldest first within it, with no cursor to continue on,
+// and a cursor cannot be combined with it.
+func TestHistoryNewestPage(t *testing.T) {
+	e := newEnv(t)
+
+	e.submit(e.work())
+	e.clock.Advance(time.Minute)
+	g := e.leaseAny(e.runner1)
+	e.clock.Advance(time.Minute)
+	e.complete(g, done())
+
+	page, err := e.eng.History(e.ctx, HistoryQuery{Limit: 4, Last: true})
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	want := []string{
+		"event:" + evTaskReviewing,
+		"event:" + evJobCreated,
+		"message:" + msgKindWorkerResult,
+		"message:" + msgKindTaskSpec,
+	}
+	if got := timeline(page.Items); !equalStrings(got, want) {
+		t.Errorf("the newest page:\n got %v\nwant %v", got, want)
+	}
+	if page.NextCursor != "" {
+		t.Errorf("the newest page carries a cursor: %q", page.NextCursor)
+	}
+
+	cursor := history.CursorOf(page.Items[len(page.Items)-1])
+	if _, err := e.eng.History(e.ctx, HistoryQuery{Limit: 4, Last: true, Since: cursor}); err == nil {
+		t.Error("last with a cursor: want an error")
+	}
+}
+
 func TestHistoryPaginatesByCursor(t *testing.T) {
 	e := newEnv(t)
 
