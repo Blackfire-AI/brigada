@@ -92,7 +92,8 @@ Not at launch (backlog):
 |---|---|
 | Orchestrator.inc (13k★, Go, Apache-2.0): orchestrator, workers, 27+ harnesses, kanban | you pick the agent per task; no outcome or quota routing; desktop app; telemetry on by default |
 | Multica (52k★): board, agents as teammates, remote runtimes | no routing, checks or cross-review; its license restricts embedding |
-| Claude Code Projects, Codex cloud, agent teams | one vendor each, cloud |
+| Claude Code Projects, Codex cloud | one vendor each, cloud |
+| Claude Code agent teams (experimental): a lead session, teammates, a shared task list, a mailbox; local | interactive only (no teammates in headless mode); one team per session with a fixed lead, in-process teammates not restored on resume; the lead approves teammates' plans without the user; single vendor; no outcome routing, no checks it runs itself, no cross-family review. A neighbour, not a substitute: it can't run inside brigada's headless workers |
 | Gas Town, Symphony, vibe-kanban, claude-squad | orchestration without outcome routing |
 | CodexBar (22k★) | shows quota only; brigada uses it as a source |
 
