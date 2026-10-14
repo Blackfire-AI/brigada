@@ -277,6 +277,10 @@ func TestChangesFixRoundSecondReviewApproves(t *testing.T) {
 	if rg2 == nil {
 		t.Fatal("the second review job was not leased")
 	}
+	// The second review sees the findings that steered the fix round (§7).
+	if p := e.str("SELECT prompt FROM jobs WHERE id = ?", rg2.JobID); !strings.Contains(p, "<feedback>") || !strings.Contains(p, findings) {
+		t.Errorf("second review prompt lacks the fix round's feedback:\n%s", p)
+	}
 	if exclude := e.str("SELECT exclude_family FROM jobs WHERE id = ?", rg2.JobID); exclude != "anthropic" {
 		t.Errorf("second review exclude_family = %q, want the author's family again", exclude)
 	}
