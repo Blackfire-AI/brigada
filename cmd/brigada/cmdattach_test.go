@@ -278,6 +278,12 @@ func TestAttachRunsTheSessionAndReleases(t *testing.T) {
 	out, _, done := e.runAttachCmd(t)
 	env := e.scratchFile(t, "env.txt")
 
+	// The session's status bar runs this binary's one-line status on the
+	// attach's own state directory (§10), quoted for the shell.
+	if want := " status --line --state-dir " + shellQuote(e.stateDir); !strings.Contains(env, "BRIGADA_FAKE_STATUS_LINE='") || !strings.Contains(env, want) {
+		t.Errorf("the session's status line command is not this binary's status --line on %s:\n%s", e.stateDir, env)
+	}
+
 	// The session ran in the project's foreman scratch directory (§4) —
 	// the very directory the runner's turns use, by the shared rule.
 	where, err := filepath.EvalSymlinks(e.scratchFile(t, "where.txt"))
@@ -720,5 +726,39 @@ func TestNewSessionIDIsAUUID(t *testing.T) {
 			t.Errorf("newSessionID() repeated %q", id)
 		}
 		seen[id] = true
+	}
+}
+
+// TestShellQuote: the status bar's command reaches a POSIX shell, so
+// every path in it is quoted whole, single quotes included.
+func TestShellQuote(t *testing.T) {
+	cases := map[string]string{
+		"/usr/local/bin/brigada": `'/usr/local/bin/brigada'`,
+		"/Users/a b/state":       `'/Users/a b/state'`,
+		"/tmp/it's here":         `'/tmp/it'\''s here'`,
+		"$HOME/`id`":             "'$HOME/`id`'",
+	}
+	for in, want := range cases {
+		if got := shellQuote(in); got != want {
+			t.Errorf("shellQuote(%q) = %s, want %s", in, got, want)
+		}
+	}
+}
+
+// TestStatusLineCommandAbsolutePaths: the status bar runs in the
+// foreman's scratch directory, so a relative --state-dir or --config
+// the attach was given reaches it absolute, resolved where the attach
+// started.
+func TestStatusLineCommandAbsolutePaths(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	got := statusLineCommand(&runtime{stateDir: "state", configPath: "conf/config"})
+	for _, want := range []string{
+		" --state-dir " + shellQuote(filepath.Join(dir, "state")),
+		" --config " + shellQuote(filepath.Join(dir, "conf", "config")),
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status line command = %s, want it to carry %s", got, want)
+		}
 	}
 }
