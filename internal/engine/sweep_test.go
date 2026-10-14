@@ -22,10 +22,44 @@ func TestSweepKeepsExpiredLeaseID(t *testing.T) {
 	if leaseID := e.str("SELECT lease_id FROM jobs WHERE id = ?", g.JobID); leaseID != g.LeaseID {
 		t.Errorf("lease_id = %q, want %q kept so the holder can still revive or complete", leaseID, g.LeaseID)
 	}
-	// The queue TTL clock restarts at the expiry, the moment the job
-	// went back to waiting.
-	if queuedAt := e.str("SELECT queued_at FROM jobs WHERE id = ?", g.JobID); queuedAt != fmtTime(e.clock.Now().Add(-time.Second)) {
-		t.Errorf("queued_at = %q, want the expiry moment", queuedAt)
+	// The queue TTL clock restarts at the requeue the sweep observes.
+	if queuedAt := e.str("SELECT queued_at FROM jobs WHERE id = ?", g.JobID); queuedAt != fmtTime(e.clock.Now()) {
+		t.Errorf("queued_at = %q, want the requeue moment", queuedAt)
+	}
+}
+
+// TestSweepRequeueAfterEngineGapRestartsTTL: the engine's host slept, so
+// the sweep ran long after the lease expired. The requeue must not be
+// failed by the queue TTL in the same sweep: the clock counts from the
+// requeue, not the expiry (§8.1).
+func TestSweepRequeueAfterEngineGapRestartsTTL(t *testing.T) {
+	e := newEnv(t)
+	e.submit(e.work())
+	g := e.leaseAny(e.runner1)
+	e.clock.Advance(e.eng.cfg.LeaseTTL + time.Second + 11*time.Minute)
+	requeuedAt := e.clock.Now()
+	rep := e.mustSweep()
+
+	if len(rep.Expired) != 1 || rep.Expired[0] != g.JobID {
+		t.Fatalf("sweep report expired = %v, want [%d]", rep.Expired, g.JobID)
+	}
+	if len(rep.QueueTimedOut) != 0 {
+		t.Fatalf("sweep report queue-timed-out = %v, want none", rep.QueueTimedOut)
+	}
+	if status := e.str("SELECT status FROM jobs WHERE id = ?", g.JobID); status != statusQueued {
+		t.Errorf("status = %q, want queued", status)
+	}
+	if queuedAt := e.str("SELECT queued_at FROM jobs WHERE id = ?", g.JobID); queuedAt != fmtTime(requeuedAt) {
+		t.Errorf("queued_at = %q, want the requeue moment %q", queuedAt, fmtTime(requeuedAt))
+	}
+
+	e.clock.Advance(10*time.Minute + 2*time.Second)
+	rep = e.mustSweep()
+	if len(rep.QueueTimedOut) != 1 || rep.QueueTimedOut[0] != g.JobID {
+		t.Fatalf("sweep report queue-timed-out = %v, want [%d]", rep.QueueTimedOut, g.JobID)
+	}
+	if status := e.str("SELECT status FROM jobs WHERE id = ?", g.JobID); status != statusFailed {
+		t.Errorf("status = %q, want failed", status)
 	}
 }
 

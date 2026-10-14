@@ -43,7 +43,8 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 //
 //  1. an expired lease goes back to queued keeping its lease id, so its
 //     holder can still revive or complete it — only a re-lease, which
-//     stamps a fresh id, locks them out (§12.3);
+//     stamps a fresh id, locks them out (§12.3); its queue-TTL clock
+//     restarts at the requeue (§8.1);
 //  2. a live job past its kind's hard cap from first_leased fails with
 //     the cap named in the error (§14); a job with a task parks the task
 //     at needs_foreman with a task_failed event naming the cap, and the
@@ -94,11 +95,13 @@ func (e *Engine) sweepTx(tx *sql.Tx, now time.Time) (SweepReport, error) {
 		if expired, err := parseTime(x.expires); err == nil {
 			accrue = accrualFrom(x.last, expired)
 		}
-		// queued_at restarts at the expiry, the moment the job actually
-		// went back to waiting, and the lease id survives (see above).
+		// The queue-TTL clock restarts at the requeue the sweep observes:
+		// a leased job was being served, and the gap from the expiry to
+		// now (a host sleep) is not queue wait, because only the engine
+		// leases jobs out (§8.1). The lease id survives (see above).
 		if _, err := tx.Exec(`UPDATE jobs SET status = 'queued', queued_at = ?, last_leased = NULL,
 			lease_expires_at = NULL, leased_seconds = leased_seconds + ?, updated_at = ?
-			WHERE id = ?`, x.expires, accrue, nowStr, x.id); err != nil {
+			WHERE id = ?`, nowStr, accrue, nowStr, x.id); err != nil {
 			return rep, fmt.Errorf("requeue expired job %d: %w", x.id, err)
 		}
 		// The lapsed lease's foreman token is dead at its expiry; a
