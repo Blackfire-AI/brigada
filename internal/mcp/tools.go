@@ -176,10 +176,10 @@ type toolsListResult struct {
 	Tools []toolInfo `json:"tools"`
 }
 
-// toolInfos renders the offer for tools/list.
-func toolInfos() []toolInfo {
-	out := make([]toolInfo, 0, len(tools))
-	for _, t := range tools {
+// toolInfos renders an offer for tools/list.
+func toolInfos(offer []Tool) []toolInfo {
+	out := make([]toolInfo, 0, len(offer))
+	for _, t := range offer {
 		out = append(out, toolInfo{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
 	}
 	return out
@@ -197,9 +197,9 @@ func ToolNames() []string {
 	return out
 }
 
-// toolByName finds the tool a tools/call names.
-func toolByName(name string) (Tool, bool) {
-	for _, t := range tools {
+// toolByName finds the tool a tools/call names in an offer.
+func toolByName(offer []Tool, name string) (Tool, bool) {
+	for _, t := range offer {
 		if t.Name == name {
 			return t, true
 		}

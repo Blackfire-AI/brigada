@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/foreman"
 )
 
 // Health probes /v1/health (§12.1): the one unauthenticated endpoint,
@@ -23,13 +24,16 @@ func (c *Client) Health(ctx context.Context) error {
 // scoped by the token: a foreman token reads its own project, a client
 // or admin every project.
 type Status struct {
-	Pid       int64                 `json:"pid"`
-	StartedAt string                `json:"started_at"`
-	Jobs      map[string]int        `json:"jobs"`
-	Running   []engine.StatusJob    `json:"running"`
-	Plans     []engine.StatusPlan   `json:"plans"`
-	Report    *engine.StatusReport  `json:"report,omitempty"`
-	NeedsYou  []engine.NeedsYouItem `json:"needs_you"`
+	Pid       int64              `json:"pid"`
+	StartedAt string             `json:"started_at"`
+	Jobs      map[string]int     `json:"jobs"`
+	Running   []engine.StatusJob `json:"running"`
+	// ForemanMessages counts the user's messages waiting for the
+	// foreman (§4.2 item 3).
+	ForemanMessages int                   `json:"foreman_messages"`
+	Plans           []engine.StatusPlan   `json:"plans"`
+	Report          *engine.StatusReport  `json:"report,omitempty"`
+	NeedsYou        []engine.NeedsYouItem `json:"needs_you"`
 }
 
 // Status reads the engine's own state (§13): which process it is, since
@@ -230,17 +234,18 @@ func (c *Client) CancelJob(ctx context.Context, jobID int64) (engine.Answer, err
 // token may use it too. wait bounds the long-poll; the engine caps it.
 // The events come back rendered exactly as the wake prompt renders them,
 // consumed by the read — an empty answer says "no new events".
-func (c *Client) ForemanEvents(ctx context.Context, wait time.Duration) ([]string, error) {
+func (c *Client) ForemanEvents(ctx context.Context, wait time.Duration) (engine.ForemanInbox, error) {
 	body := struct {
 		WaitSeconds float64 `json:"wait_seconds"`
 	}{wait.Seconds()}
-	var out struct {
-		Events []string `json:"events"`
-	}
+	var out engine.ForemanInbox
 	if err := c.call(ctx, http.MethodPost, "/v1/events", body, &out); err != nil {
-		return nil, err
+		return engine.ForemanInbox{}, err
 	}
-	return nonNil(out.Events), nil
+	if out.UserMessages == nil {
+		out.UserMessages = []foreman.UserMessage{}
+	}
+	return engine.ForemanInbox{Events: nonNil(out.Events), UserMessages: out.UserMessages}, nil
 }
 
 // AttachResult is the attach answer as the client reads it (§4.2 item
@@ -324,4 +329,17 @@ func (c *Client) HealthProbe(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, HealthTimeout)
 	defer cancel()
 	return c.Health(ctx)
+}
+
+// AskForeman sends the user's message to a project's foreman (§4.2
+// item 3) through /v1/foreman/messages and returns what it did: the
+// project, the event that holds it, and the wake's outcome. An empty
+// repoURL names the engine's only project; idemKey, when set, makes a
+// retried call send one message (§12.1).
+func (c *Client) AskForeman(ctx context.Context, repoURL, text, idemKey string) (engine.AskResult, error) {
+	var res engine.AskResult
+	if err := c.callKeyed(ctx, http.MethodPost, "/v1/foreman/messages", idemKey, askRequest{RepoURL: repoURL, Text: text}, &res); err != nil {
+		return engine.AskResult{}, err
+	}
+	return res, nil
 }

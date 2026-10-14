@@ -61,3 +61,14 @@ func TestStatusSectionsRunning(t *testing.T) {
 		t.Errorf("status sections begin %q, want the running job's line", got)
 	}
 }
+
+// TestStatusLineCountsMessagesForTheForeman: a waiting user message is
+// no idle state (§4.2 item 3): the bar counts it.
+func TestStatusLineCountsMessagesForTheForeman(t *testing.T) {
+	if got := StatusLine(Status{ForemanMessages: 1}, time.Now()); got != "brigada: 1 message for the foreman" {
+		t.Errorf("StatusLine = %q", got)
+	}
+	if got := StatusLine(Status{ForemanMessages: 2}, time.Now()); got != "brigada: 2 messages for the foreman" {
+		t.Errorf("StatusLine = %q", got)
+	}
+}

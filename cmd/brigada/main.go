@@ -30,6 +30,7 @@ Commands:
 
 	attach          Attach to this repo's foreman and chat (what a bare
 	                brigada runs).
+	ask <message>   Send the foreman a message without attaching.
 	engine          Run the engine: store and API on the Unix socket.
 	runner          Run a runner: lease jobs, run workers, run checks.
 	mcp             Run the foreman's MCP bridge over stdio (§12.2).
@@ -62,6 +63,7 @@ type command struct {
 
 var commands = map[string]command{
 	"attach":  {name: "attach", run: runAttach},
+	"ask":     {name: "ask", run: runAsk},
 	"engine":  {name: "engine", run: runEngine},
 	"runner":  {name: "runner", run: runRunner},
 	"mcp":     {name: "mcp", run: runMCP},

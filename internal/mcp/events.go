@@ -32,12 +32,15 @@ func callEvents(ctx context.Context, c *api.Client, args json.RawMessage) (strin
 	if a.WaitSeconds < 0 {
 		a.WaitSeconds = 0
 	}
-	events, err := c.ForemanEvents(ctx, time.Duration(a.WaitSeconds*float64(time.Second)))
+	inbox, err := c.ForemanEvents(ctx, time.Duration(a.WaitSeconds*float64(time.Second)))
 	if err != nil {
 		return "", err
 	}
-	if len(events) == 0 {
+	if inbox.Empty() {
 		return "no new events", nil
 	}
-	return foreman.EventBlocks(events), nil
+	// The events come first, as data; the user's messages follow in their
+	// one framed section (§4.2 item 3), exactly as a wake prompt carries
+	// both — the framing travels with the section, in this same answer.
+	return foreman.EventsAnswer(inbox.Events, inbox.UserMessages), nil
 }

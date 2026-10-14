@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/foreman"
 )
 
 // maxEventsWait caps the events long-poll's client-given wait (§4.2):
@@ -159,13 +160,13 @@ func (s *Server) handleForemanEvents(w http.ResponseWriter, r *http.Request, id 
 		if r.Context().Err() != nil {
 			return
 		}
-		events, err := s.eng.ForemanEvents(r.Context(), id.project)
+		inbox, err := s.eng.ForemanEvents(r.Context(), id.project)
 		if err != nil {
 			s.writeInternal(w, r, "read the foreman events", err)
 			return
 		}
-		if len(events) > 0 {
-			writeJSON(w, http.StatusOK, eventsResponse{Events: events})
+		if !inbox.Empty() {
+			writeJSON(w, http.StatusOK, eventsResponse{Events: inbox.Events, UserMessages: inbox.UserMessages})
 			return
 		}
 		if remain := time.Until(deadline); remain > 0 {
@@ -178,7 +179,7 @@ func (s *Server) handleForemanEvents(w http.ResponseWriter, r *http.Request, id 
 			}
 			continue
 		}
-		writeJSON(w, http.StatusOK, eventsResponse{Events: []string{}})
+		writeJSON(w, http.StatusOK, eventsResponse{Events: []string{}, UserMessages: []foreman.UserMessage{}})
 		return
 	}
 }
@@ -240,5 +241,6 @@ type eventsRequest struct {
 // exactly as the wake prompt renders them, consumed by the read. Empty
 // says "no new events".
 type eventsResponse struct {
-	Events []string `json:"events"`
+	Events       []string              `json:"events"`
+	UserMessages []foreman.UserMessage `json:"user_messages"` // the user's messages, apart from the events (§4.2 item 3)
 }

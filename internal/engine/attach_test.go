@@ -264,8 +264,8 @@ func TestParkWhileAttachedWaitsForTheSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the foreman events: %v", err)
 	}
-	if want := []string{e.wakeLine(evTaskNeedsHelp, "which file?")}; !equalStrings(events, want) {
-		t.Fatalf("the events = %v, want the park's line verbatim", events)
+	if want := []string{e.wakeLine(evTaskNeedsHelp, "which file?")}; !equalStrings(events.Events, want) || len(events.UserMessages) != 0 {
+		t.Fatalf("the events = %+v, want the park's line verbatim and no user message", events)
 	}
 	// The row arrived while the hold lived, so it was never delivered to
 	// the hold — the read consumes it from pending, holdless.
@@ -276,8 +276,8 @@ func TestParkWhileAttachedWaitsForTheSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the foreman events again: %v", err)
 	}
-	if len(again) != 0 {
-		t.Errorf("the second read = %v, want empty: the events are consumed", again)
+	if !again.Empty() {
+		t.Errorf("the second read = %+v, want empty: the events are consumed", again)
 	}
 	e.releaseAttach(res.HoldID, "")
 	if got := e.foremanJobs(); got != 0 {

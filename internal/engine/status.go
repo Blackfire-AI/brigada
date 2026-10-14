@@ -40,9 +40,13 @@ type StatusInfo struct {
 	StartedAt string         `json:"started_at"`
 	Jobs      map[string]int `json:"jobs"`
 	Running   []StatusJob    `json:"running"`
-	Plans     []StatusPlan   `json:"plans"`
-	Report    *StatusReport  `json:"report,omitempty"`
-	NeedsYou  []NeedsYouItem `json:"needs_you"`
+	// ForemanMessages counts the user's messages waiting in the foreman
+	// inbox (§4.2 item 3): queued while a chat is attached, a turn runs,
+	// or the wake cannot happen; delivered ones are not counted.
+	ForemanMessages int            `json:"foreman_messages"`
+	Plans           []StatusPlan   `json:"plans"`
+	Report          *StatusReport  `json:"report,omitempty"`
+	NeedsYou        []NeedsYouItem `json:"needs_you"`
 }
 
 // StatusJob is one job a runner holds right now (§10): which job, for
@@ -166,6 +170,9 @@ func (e *Engine) Status(ctx context.Context, project int64) (StatusInfo, error) 
 		if info.Running, err = statusRunningTx(tx, project); err != nil {
 			return err
 		}
+		if info.ForemanMessages, err = pendingUserMessagesTx(tx, project); err != nil {
+			return err
+		}
 		if info.Plans, err = statusPlansTx(tx, project, now); err != nil {
 			return err
 		}
@@ -181,6 +188,23 @@ func (e *Engine) Status(ctx context.Context, project int64) (StatusInfo, error) 
 		return StatusInfo{}, fmt.Errorf("read status: %w", err)
 	}
 	return info, nil
+}
+
+// pendingUserMessagesTx counts the user's messages still pending in the
+// foreman inbox (§4.2 item 3), for one project or, with 0, every one.
+func pendingUserMessagesTx(tx *sql.Tx, project int64) (int, error) {
+	query := `SELECT COUNT(*) FROM foreman_inbox i JOIN events e ON e.id = i.event_id
+		WHERE i.state = ? AND e.kind = ?`
+	args := []any{inboxPending, evUserMessage}
+	if project != 0 {
+		query += " AND i.project_id = ?"
+		args = append(args, project)
+	}
+	var n int
+	if err := tx.QueryRow(query, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count the pending user messages: %w", err)
+	}
+	return n, nil
 }
 
 // statusRunningTx lists the jobs a runner holds (§10), oldest lease
