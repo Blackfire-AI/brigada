@@ -169,6 +169,9 @@ func TestComposeTurnPromptWithUserMessages(t *testing.T) {
 	if strings.Contains(only, noEventsLine) || !strings.Contains(only, "1. from the user:\namend §5.4") {
 		t.Errorf("a wake for one unlabelled message =\n%s", only)
 	}
+	if !strings.Contains(only, "when there are any") || strings.Contains(only, "events that woke you") {
+		t.Errorf("a message-only wake's template must not assume events:\n%s", only)
+	}
 	if ComposeTurnPromptWith(nil, nil) != ComposeTurnPrompt(nil) || UserMessageBlocks(nil) != "" {
 		t.Error("no messages must render exactly as before")
 	}
