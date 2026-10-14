@@ -110,7 +110,7 @@ func (w *workspace) writeReviewDiff(ctx context.Context, base string) error {
 		}
 	}
 	if full || len(diff) > reviewDiffMaxBytes {
-		stat, statFull, err := w.gitStdout(ctx, reviewDiffMaxBytes, "diff", "--no-color", "--stat=200", rng)
+		stat, statFull, err := w.gitStdout(ctx, reviewDiffMaxBytes, append(diffArgs, "--stat=200", rng)...)
 		if err != nil {
 			return fmt.Errorf("stat the change under review (%s): %w", rng, err)
 		}
