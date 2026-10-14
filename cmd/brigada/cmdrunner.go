@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
 	"github.com/Blackfire-AI/brigada/internal/adapter/fake"
+	"github.com/Blackfire-AI/brigada/internal/adapter/kimi"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/runner"
@@ -26,14 +29,16 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		harness      string
 		model        string
 		workerScript string
+		agentFile    string
 		classes      string
 		labels       string
 		maxParallel  int
 		noStart      bool
 	)
-	fs.StringVar(&harness, "harness", "claude", "the harness this runner offers: claude, or fake with --worker-script")
-	fs.StringVar(&model, "model", "", "the model to run (claude default: sonnet; fake default: fake-1)")
+	fs.StringVar(&harness, "harness", "claude", "the harness this runner offers: claude, kimi, or fake with --worker-script")
+	fs.StringVar(&model, "model", "", "the model to run (claude default: sonnet; kimi default: the CLI's own; fake default: fake-1)")
 	fs.StringVar(&workerScript, "worker-script", "", "with --harness fake: the scripted worker the fake adapter drives (tests)")
+	fs.StringVar(&agentFile, "agent-file", "", "with --harness kimi: the agent definition file the CLI session starts under")
 	fs.StringVar(&classes, "classes", "implement,review,answer", "the task classes this runner takes, comma-separated")
 	fs.StringVar(&labels, "labels", "", "labels this runner offers on every lease poll, comma-separated")
 	fs.IntVar(&maxParallel, "max-parallel", 0, "this runner's own cap on parallel jobs, advertised at register (0 = unset)")
@@ -52,11 +57,34 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	var ad adapter.Adapter
 	switch harness {
 	case "claude":
+		if agentFile != "" {
+			return usagef(stderr, "--agent-file is a --harness kimi flag; the claude harness takes none")
+		}
 		ad = &claude.Adapter{}
 		if model == "" {
 			model = "sonnet"
 		}
+	case "kimi":
+		// The agent file is resolved and checked here, not at the first
+		// job: a typo in the path is a startup failure, never a job's.
+		if agentFile != "" {
+			abs, err := filepath.Abs(agentFile)
+			if err != nil {
+				return fail(stderr, fmt.Errorf("--agent-file: %w", err))
+			}
+			if _, err := os.Stat(abs); err != nil {
+				return fail(stderr, fmt.Errorf("--agent-file: %w", err))
+			}
+			agentFile = abs
+		}
+		ad = &kimi.Adapter{AgentFile: agentFile}
+		if model == "" {
+			model = kimi.DefaultModel
+		}
 	case "fake":
+		if agentFile != "" {
+			return usagef(stderr, "--agent-file is a --harness kimi flag; the fake harness takes none")
+		}
 		if workerScript == "" {
 			return usagef(stderr, "--harness fake needs --worker-script: the scripted worker the fake adapter drives")
 		}
@@ -65,7 +93,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			model = "fake-1"
 		}
 	default:
-		return usagef(stderr, "unknown harness %q; want claude or fake", harness)
+		return usagef(stderr, "unknown harness %q; want claude, kimi or fake", harness)
 	}
 
 	if code := ensureEngine(ctx, rt, noStart, stderr); code != 0 {
