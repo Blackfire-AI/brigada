@@ -40,7 +40,7 @@ All of them are the one `brigada` binary in different roles.
 | review "changes", rounds left | rule | fix round: same session, template + review text |
 | transient error (CLI crash, network) | rule | retry the job, capped |
 | a dependency is done | rule | the dependent task becomes ready |
-| quota limit hit by a worker | rule | cool the account (§8); re-dispatch to another eligible agent as a **fresh** attempt carrying the previous job's summary if it produced one, else its last progress events (a session can't move between agents), counting toward the task's attempt caps; no eligible agent → the task parks and the user is notified (§10) |
+| quota limit hit by a worker | rule | cool the account (§8); re-dispatch to another eligible agent as a **fresh** attempt (on the task's next `-r<n>` branch, §6.4) carrying the previous job's summary if it produced one, else its last progress events (a session can't move between agents), counting toward the task's attempt caps; no eligible agent → the task parks and the user is notified (§10) |
 | worker `needs_help` | **foreman** | answer → next job on the same session, or re-plan |
 | task out of rounds or retries | **foreman** | re-plan, switch agent, split, or ask the user |
 | worker stalled (§5.6) | **foreman** (decided 2026-10-12: always; no automatic nudge) | restart with a new instruction, switch agent, or ask the user |
@@ -160,7 +160,11 @@ For fault tolerance, the engine writes each plan as **`.brigada/plans/<plan-id>.
 - **Doesn't restore** without a snapshot: messages, transcripts and outcomes; the dispatcher's scores restart from defaults. Said plainly in the command's output.
 - **Tokens** live in a config file outside the store (the store keeps only hashes), so clients, runners and the foreman can still authenticate; runners re-register.
 - **Fence epoch:** recover bumps a store-wide fence epoch, and every lease, heartbeat or complete that references the pre-recovery epoch is rejected, so a late runner can't write into the rebuilt store.
-- **In-flight work:** recover waits one lease-expiry window before re-dispatching, so runners whose heartbeats now fail have killed their workers. Re-dispatched attempts use new branch names (an attempt suffix), never the old ones.
+- **In-flight work:** recover waits one lease-expiry window before re-dispatching, so runners whose heartbeats now fail have killed their workers. Re-dispatched work does not get a new branch name; the rules below decide which branch each kind of re-dispatch works on.
+- **Branch names:** a task's first job works on `brigada/task-<id>`, and the engine names each job's branch.
+  - **Re-lease** (the lease expired or the runner crashed, and the same job is leased again): keeps its job's branch.
+  - **Restart** (§5.6, either mode, or a re-dispatch to another agent): works on `brigada/task-<id>-r<n>`, where `<n>` counts the task's restarts.
+  - **Fix round** (§3): continues the task's branch, the one its last job pushed, so the fix lands on top of the work under review.
 
 ## 7. Review policy (in the core)
 
