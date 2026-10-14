@@ -45,10 +45,14 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 //     holder can still revive or complete it — only a re-lease, which
 //     stamps a fresh id, locks them out (§12.3);
 //  2. a live job past its kind's hard cap from first_leased fails with
-//     the cap named in the error (§14);
+//     the cap named in the error (§14); a job with a task parks the task
+//     at needs_foreman with a task_failed event naming the cap, and the
+//     foreman is woken (needsForemanTx does both);
 //  3. a queued job nobody leased within the queue TTL fails, so it
 //     cannot wedge its key — unless a runner keeps finding it held by a
-//     full cap layer, which restarts the clock (§8.1);
+//     full cap layer, which restarts the clock (§8.1); a job with a task
+//     parks the task at needs_foreman with a task_failed event naming the
+//     TTL, and the foreman is woken, as in round 2;
 //  4. an expired attach hold returns its delivered events to pending
 //     uncounted, revokes its token, and re-evaluates the wake (§4.2
 //     item 1);
@@ -157,6 +161,12 @@ func (e *Engine) sweepTx(tx *sql.Tx, now time.Time) (SweepReport, error) {
 			if err := e.sweptForemanFinishedTx(tx, x.id, x.project, now); err != nil {
 				return rep, err
 			}
+			if x.task != 0 {
+				if err := e.needsForemanTx(tx, &jobRow{ID: x.id, ProjectID: x.project, TaskID: x.task},
+					evTaskFailed, eventPayload{Reason: boundNote(reason)}, now); err != nil {
+					return rep, err
+				}
+			}
 			rep.HardCapped = append(rep.HardCapped, x.id)
 		}
 	}
@@ -199,6 +209,12 @@ func (e *Engine) sweepTx(tx *sql.Tx, now time.Time) (SweepReport, error) {
 			}
 			if err := e.sweptForemanFinishedTx(tx, x.id, x.project, now); err != nil {
 				return rep, err
+			}
+			if x.task != 0 {
+				if err := e.needsForemanTx(tx, &jobRow{ID: x.id, ProjectID: x.project, TaskID: x.task},
+					evTaskFailed, eventPayload{Reason: boundNote(reason)}, now); err != nil {
+					return rep, err
+				}
 			}
 			rep.QueueTimedOut = append(rep.QueueTimedOut, x.id)
 		}

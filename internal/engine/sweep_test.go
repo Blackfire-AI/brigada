@@ -145,6 +145,55 @@ func TestSweepQueueTTL(t *testing.T) {
 	}
 }
 
+// checkSweptTaskParked asserts a sweep-failed task job parked its task at
+// needs_foreman, woke the foreman, and left the task restartable.
+func checkSweptTaskParked(t *testing.T, e *env) {
+	t.Helper()
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+		t.Errorf("task state = %q, want %q", state, taskNeedsForeman)
+	}
+	if n := e.countEvents(evTaskFailed); n != 1 {
+		t.Errorf("task_failed events = %d, want 1", n)
+	}
+	if n := e.foremanJobs(); n != 1 {
+		t.Errorf("foreman jobs = %d, want 1", n)
+	}
+	if _, err := e.eng.RestartTask(e.ctx, e.project, e.task, "redo"); err != nil {
+		t.Fatalf("RestartTask after the sweep failure: %v", err)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskReady {
+		t.Errorf("task state after restart = %q, want %q", state, taskReady)
+	}
+	if n := e.countEvents(evTaskRestarted); n != 1 {
+		t.Errorf("task_restarted events = %d, want 1", n)
+	}
+}
+
+// TestSweepHardCapParksTask: a hard-capped task job parks its task.
+func TestSweepHardCapParksTask(t *testing.T) {
+	e := newEnv(t)
+	r := e.submit(e.work())
+	if g := e.leaseAny(e.runner1); g == nil {
+		t.Fatal("nothing to lease")
+	}
+	e.clock.Advance(46 * time.Minute)
+	if rep := e.mustSweep(); !slices.Contains(rep.HardCapped, r.JobID) {
+		t.Fatalf("sweep report hard-capped = %v, want job %d", rep.HardCapped, r.JobID)
+	}
+	checkSweptTaskParked(t, e)
+}
+
+// TestSweepQueueTTLParksTask: a queue-TTL-failed task job parks its task.
+func TestSweepQueueTTLParksTask(t *testing.T) {
+	e := newEnv(t)
+	r := e.submit(e.work())
+	e.clock.Advance(10*time.Minute + 2*time.Second)
+	if rep := e.mustSweep(); !slices.Contains(rep.QueueTimedOut, r.JobID) {
+		t.Fatalf("sweep report timed out = %v, want job %d", rep.QueueTimedOut, r.JobID)
+	}
+	checkSweptTaskParked(t, e)
+}
+
 func TestWorkerTimeAccrual(t *testing.T) {
 	e := newEnv(t)
 
