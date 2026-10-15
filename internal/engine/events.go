@@ -54,6 +54,10 @@ const (
 	evForemanAttached        = "foreman_attached"          // a hold took the foreman for an attached chat (§4.2 item 1)
 	evForemanDetached        = "foreman_detached"          // the attached chat ended; the hold released (§4.2 item 1)
 	evForemanAttachExpired   = "foreman_attach_expired"    // the hold expired unheartbeated; its rows returned pending (§4.2 item 1)
+	evAgentCooling           = "agent_cooling"             // a task job's limit cooled its account until a time (§8 "Quota")
+	evAgentBroken            = "agent_broken"              // an agent was marked broken, with the reason (§8 "Health")
+	evAgentRecovered         = "agent_recovered"           // a runner came back; its runner-stale agents are ready again (§8 "Health")
+	evAgentReset             = "agent_reset"               // the user cleared broken and cooling on the agents of a harness and model (§8)
 )
 
 // eventPayload is the small JSON an event row carries: the fields the
@@ -83,10 +87,11 @@ type eventPayload struct {
 	Source     string `json:"source,omitempty"`   // the client token label a user message came from (§12.2)
 	Harness    string `json:"harness,omitempty"`
 	Model      string `json:"model,omitempty"`
-	Until      string `json:"until,omitempty"` // a foreman limit's reset time, RFC3339; absent when unknown (§4.4)
-	Job        int64  `json:"job,omitempty"`   // a job the event names besides its own job_id column
-	Hold       int64  `json:"hold,omitempty"`  // the attach hold the event names (§4.2 item 1)
-	Count      int64  `json:"count,omitempty"` // how many of something the event counts (§4.2, §4.3)
+	Account    string `json:"account,omitempty"` // the quota account a cooling names (§8)
+	Until      string `json:"until,omitempty"`   // a foreman limit's reset time, RFC3339; absent when unknown (§4.4)
+	Job        int64  `json:"job,omitempty"`     // a job the event names besides its own job_id column
+	Hold       int64  `json:"hold,omitempty"`    // the attach hold the event names (§4.2 item 1)
+	Count      int64  `json:"count,omitempty"`   // how many of something the event counts (§4.2, §4.3)
 	// The agent pick's why (§8): the agent, its score, how the rank
 	// chose it (pickBest or pickExploration), and the better-ranked
 	// agents passed over because their cap path had no room.

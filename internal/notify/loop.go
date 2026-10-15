@@ -39,6 +39,8 @@ type eventPayload struct {
 	Findings string `json:"findings,omitempty"`
 	Report   string `json:"report,omitempty"`
 	Until    string `json:"until,omitempty"`
+	Harness  string `json:"harness,omitempty"`
+	Model    string `json:"model,omitempty"`
 }
 
 // Loop is the delivery loop (§13): it polls the event log for rows
@@ -226,6 +228,10 @@ func reasonOf(kind, payload string) string {
 	}
 	if kind == KindForemanLimited {
 		return p.Until
+	}
+	if kind == KindAgentBroken {
+		// "harness/model: reason" — the pair `brigada agent reset` takes.
+		return oneLine(p.Harness+"/"+p.Model+": "+p.Reason, bodyLimit)
 	}
 	reason := p.Reason
 	switch kind {

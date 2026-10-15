@@ -34,6 +34,8 @@ type Status struct {
 	Plans           []engine.StatusPlan   `json:"plans"`
 	Report          *engine.StatusReport  `json:"report,omitempty"`
 	NeedsYou        []engine.NeedsYouItem `json:"needs_you"`
+	// Cooling lists the agents held back for quota (§8, §10).
+	Cooling []engine.CoolingAgent `json:"cooling,omitempty"`
 }
 
 // Status reads the engine's own state (§13): which process it is, since
@@ -244,6 +246,20 @@ func (c *Client) CancelJob(ctx context.Context, jobID int64) (engine.Answer, err
 		return "", err
 	}
 	return engine.Answer(out.Answer), nil
+}
+
+// ResetAgent clears broken and cooling (§8) on the agents of a harness
+// and model through /v1/agents/reset; it returns how many agents
+// matched. An unknown pair is the API's not-found error.
+func (c *Client) ResetAgent(ctx context.Context, harness, model string) (int, error) {
+	body := agentResetRequest{Harness: harness, Model: model}
+	var out struct {
+		Reset int `json:"reset"`
+	}
+	if err := c.call(ctx, http.MethodPost, "/v1/agents/reset", body, &out); err != nil {
+		return 0, err
+	}
+	return out.Reset, nil
 }
 
 // ForemanEvents long-polls the token's project for pending judgment

@@ -47,6 +47,9 @@ type StatusInfo struct {
 	Plans           []StatusPlan   `json:"plans"`
 	Report          *StatusReport  `json:"report,omitempty"`
 	NeedsYou        []NeedsYouItem `json:"needs_you"`
+	// Cooling lists the agents held back for quota (§8, §10): shown
+	// beside the running jobs, never in the needs-you queue.
+	Cooling []CoolingAgent `json:"cooling,omitempty"`
 }
 
 // StatusJob is one job a runner holds right now (§10): which job, for
@@ -103,7 +106,7 @@ type StatusTask struct {
 // the worker's question for a needs_help, the review's findings for
 // review changes, the check's tail or the failure's words for the rest.
 type NeedsYouItem struct {
-	Kind   string `json:"kind"` // "task", "plan", or "foreman" (a limited foreman, §4.4; ID is the project's, Title its repo URL)
+	Kind   string `json:"kind"` // "task", "plan", "foreman" (a limited foreman, §4.4; ID is the project's, Title its repo URL) or "agent" (a broken one, §8; ID is the agent's, Title harness/model)
 	ID     int64  `json:"id"`
 	State  string `json:"state"`
 	Title  string `json:"title"`
@@ -180,6 +183,9 @@ func (e *Engine) Status(ctx context.Context, project int64) (StatusInfo, error) 
 			return err
 		}
 		if info.NeedsYou, err = statusNeedsYouTx(tx, project, now); err != nil {
+			return err
+		}
+		if info.Cooling, err = statusCoolingTx(tx, now); err != nil {
 			return err
 		}
 		return nil
@@ -458,6 +464,32 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	}
 	if err := lrows.Err(); err != nil {
 		return nil, fmt.Errorf("list the limited foremen: %w", err)
+	}
+	lrows.Close()
+
+	// A broken agent takes nothing until a person fixes it and resets it
+	// (§8 "Health"). Agents belong to no project, so only the unscoped
+	// view lists them. Cooling is not here: it waits for a clock.
+	if project == 0 {
+		brows, err := tx.Query(`SELECT id, harness, model, health_reason FROM agents WHERE health = 'broken' ORDER BY id`)
+		if err != nil {
+			return nil, fmt.Errorf("list the broken agents: %w", err)
+		}
+		defer brows.Close()
+		for brows.Next() {
+			var it NeedsYouItem
+			var harness, model string
+			if err := brows.Scan(&it.ID, &harness, &model, &it.Reason); err != nil {
+				return nil, fmt.Errorf("list the broken agents: %w", err)
+			}
+			it.Kind = "agent"
+			it.State = "broken"
+			it.Title = harness + "/" + model
+			items = append(items, it)
+		}
+		if err := brows.Err(); err != nil {
+			return nil, fmt.Errorf("list the broken agents: %w", err)
+		}
 	}
 	return items, nil
 }

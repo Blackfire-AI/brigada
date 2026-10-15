@@ -39,7 +39,7 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 	return rep, nil
 }
 
-// sweepTx is the maintenance pass, in four rounds:
+// sweepTx is the maintenance pass, in five rounds:
 //
 //  1. an expired lease goes back to queued keeping its lease id, so its
 //     holder can still revive or complete it — only a re-lease, which
@@ -57,6 +57,8 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 //  4. an expired attach hold returns its delivered events to pending
 //     uncounted, revokes its token, and re-evaluates the wake (§4.2
 //     item 1);
+//  5. the agents of a runner unseen past the stale window are marked
+//     broken("runner stale") (§8 "Health");
 //
 // Leased wall time is banked wherever a lease ends: expiry at the
 // expiry itself, a cap at the cap moment, never past them.
@@ -248,6 +250,11 @@ func (e *Engine) sweepTx(tx *sql.Tx, now time.Time) (SweepReport, error) {
 		if err := e.expireAttachHoldTx(tx, h.id, h.project, now); err != nil {
 			return rep, err
 		}
+	}
+
+	// A runner unseen past the stale window loses its agents' health (§8).
+	if err := e.sweepStaleRunnersTx(tx, now); err != nil {
+		return rep, err
 	}
 
 	return rep, nil

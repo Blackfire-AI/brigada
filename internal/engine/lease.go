@@ -80,6 +80,11 @@ func (e *Engine) Lease(ctx context.Context, owner int64, harnesses, labels []str
 	var grant *LeaseGrant
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
+		// A poll shows the runner is here, before the sweep can call it
+		// stale (§8 "Health").
+		if err := e.runnerSeenTx(tx, owner, now); err != nil {
+			return err
+		}
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}

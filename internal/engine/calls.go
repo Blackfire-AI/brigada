@@ -37,6 +37,11 @@ func (e *Engine) Heartbeat(ctx context.Context, owner, jobID int64, leaseID stri
 	var expires time.Time
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
+		// The heartbeat shows the runner is here, before the sweep can
+		// call it stale (§8 "Health").
+		if err := e.runnerSeenTx(tx, owner, now); err != nil {
+			return err
+		}
 		rep, err := e.sweepTx(tx, now)
 		if err != nil {
 			return err
@@ -324,6 +329,12 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 		if err := upsertSessionTx(tx, job.Key, job.LeaseOwner, c.SessionID, now); err != nil {
 			return "", err
 		}
+	}
+	// The agent's quota and health follow its completion (§8): a limit
+	// cools the account, an auth error or a streak of failures breaks
+	// the agent.
+	if err := e.agentOutcomeTx(tx, job, c, now); err != nil {
+		return "", err
 	}
 	if job.Kind == KindForeman {
 		// A limit hit marks the foreman limited before the inbox settles,

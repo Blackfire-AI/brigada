@@ -23,6 +23,7 @@ const (
 	KindTaskOutOfRounds = "task_out_of_rounds" // the task spent its rounds; arrives with the rounds work
 	KindForemanReport   = "foreman_report"     // a done foreman turn's final message, its report to the user (§3, §10)
 	KindForemanLimited  = "foreman_limited"    // the foreman's CLI hit its subscription limit (§4.4, §10)
+	KindAgentBroken     = "agent_broken"       // an agent was marked broken (§8 "Health", §10)
 )
 
 // title is the notification's bold line: the one name every banner
@@ -97,6 +98,10 @@ func Message(ev Event) (t, body string, ok bool) {
 			when = "until " + ev.Reason
 		}
 		return title, oneLine("the foreman hit its limit ("+when+"): wait, or switch it with `brigada project foreman`", bodyLimit), true
+	case ev.Kind == KindAgentBroken:
+		// Reason is "harness/model: why": the user fixes the login or
+		// the runner, then resets the agent.
+		return title, oneLine("agent broken, "+ev.Reason+": fix it, then `brigada agent reset <harness>/<model>`", bodyLimit), true
 	case needsForemanKinds[ev.Kind] && ev.Parked:
 		reason := ev.Reason
 		if reason == "" {

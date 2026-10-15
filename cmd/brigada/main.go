@@ -39,6 +39,8 @@ Commands:
 	project foreman Show or set a repo's foreman harness and model.
 	history         Show the timeline.
 	stats           Show which agent wins which class, per repo.
+	agent reset <harness>/<model>
+	                Clear a broken or cooling agent.
 	cancel <job>    Cancel a job.
 	version         Print the brigada version and exit.
 	help            Print usage and exit.
@@ -74,6 +76,7 @@ var commands = map[string]command{
 	"history": {name: "history", run: runHistory},
 	"stats":   {name: "stats", run: runStats},
 	"cancel":  {name: "cancel", run: runCancel},
+	"agent":   {name: "agent", run: runAgent},
 }
 
 // run is the entry point of the brigada command. It writes to stdout and
