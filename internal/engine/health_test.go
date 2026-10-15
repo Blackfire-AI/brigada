@@ -125,6 +125,156 @@ func TestForemanLimitCoolsNoAccount(t *testing.T) {
 	}
 }
 
+// reviewerLimit is what a review job's limit completion carries.
+func reviewerLimit(until time.Time) Completion {
+	return Completion{
+		Error:      "reviewer CLI failed (limit): 5-hour usage limit",
+		ErrorKind:  "limit",
+		LimitUntil: until.Format(time.RFC3339),
+	}
+}
+
+// TestReviewLimitCoolsTheReviewersAccountAndRedispatches is §8 "Quota"
+// on the review path: a review job's limit cools the reviewer's whole
+// account, siblings included, and the no-verdict retry that follows
+// skips the cooling agents and lands on the other family's reviewer.
+func TestReviewLimitCoolsTheReviewersAccountAndRedispatches(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	first := e.agented("first", "google", "implement", "review")
+	second := e.agented("second", "meta", "implement", "review")
+	sibling := e.addAgent(e.runner2, "google-sibling", "m1", "google") // first's account
+	e.submit(e.work())
+	e.runWork(author, doneOn("task/1-1", passCheck))
+	review := e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review'", e.task)
+	rg := e.leaseAny(first)
+	if rg == nil || rg.JobID != review {
+		t.Fatalf("the first reviewer leased %+v, want the review job %d", rg, review)
+	}
+	until := e.clock.Now().Add(3 * time.Hour)
+	if ans := e.complete(rg, reviewerLimit(until)); ans != AnsOK {
+		t.Fatalf("complete the limited review: %s", ans)
+	}
+
+	for _, id := range []int64{e.agentOf(first), sibling} {
+		if h, _, cool := e.agentState(id); h != "ready" || cool != fmtTime(until) {
+			t.Errorf("reviewer's account agent %d: health %q cooling %q, want ready, cooling until %s", id, h, cool, fmtTime(until))
+		}
+	}
+	for _, id := range []int64{e.agentOf(second), e.agentOf(author)} {
+		if _, _, cool := e.agentState(id); cool != "" {
+			t.Errorf("agent %d of another account is cooling until %q", id, cool)
+		}
+	}
+	if got := e.countEvents(evAgentCooling); got != 1 {
+		t.Errorf("agent_cooling events = %d, want 1", got)
+	}
+
+	retry := e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review' ORDER BY id DESC LIMIT 1", e.task)
+	if retry == review {
+		t.Fatalf("no retry review job was queued; have %v", e.eventKinds())
+	}
+	if got := e.leaseAny(first); got != nil {
+		t.Fatalf("the cooling reviewer leased the retry, job %d", got.JobID)
+	}
+	if got := e.leaseAny(e.runner2); got != nil {
+		t.Fatalf("the cooling sibling leased the retry, job %d", got.JobID)
+	}
+	rg2 := e.leaseAny(second)
+	if rg2 == nil || rg2.JobID != retry {
+		t.Fatalf("the other family's reviewer leased %+v, want the retry job %d", rg2, retry)
+	}
+}
+
+// TestReviewLimitWithNoOtherReviewerParks: the same limit with no other
+// family's reviewer registered parks the task at needs_foreman, with the
+// limit as the reason, and the reviewer's account still cools.
+func TestReviewLimitWithNoOtherReviewerParks(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	lone := e.agented("lone", "google", "implement", "review")
+	e.submit(e.work())
+	e.runWork(author, doneOn("task/1-1", passCheck))
+	rg := e.leaseAny(lone)
+	if rg == nil || rg.Kind != KindReview {
+		t.Fatalf("the review job was not leased: %+v", rg)
+	}
+	until := e.clock.Now().Add(2 * time.Hour)
+	if ans := e.complete(rg, reviewerLimit(until)); ans != AnsOK {
+		t.Fatalf("complete the limited review: %s", ans)
+	}
+	if _, _, cool := e.agentState(e.agentOf(lone)); cool != fmtTime(until) {
+		t.Errorf("reviewer cooling = %q, want %s", cool, fmtTime(until))
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+		t.Errorf("task state = %q, want needs_foreman with no other reviewer", state)
+	}
+	if p, ok := e.eventPayloadOf(evReviewNoVerdict); !ok || !strings.Contains(p.Reason, "limit") {
+		t.Errorf("review_no_verdict payload = %+v (%t), want the limit named", p, ok)
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'review'", e.task); n != 1 {
+		t.Errorf("review jobs = %d, want the limited one alone", n)
+	}
+}
+
+// TestAuthErrorOnReviewBreaksTheReviewer: an auth completion on a review
+// job breaks the reviewer's agent alone.
+func TestAuthErrorOnReviewBreaksTheReviewer(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	first := e.agented("first", "google", "implement", "review")
+	second := e.agented("second", "meta", "implement", "review")
+	e.submit(e.work())
+	e.runWork(author, doneOn("task/1-1", passCheck))
+	rg := e.leaseAny(first)
+	if rg == nil || rg.Kind != KindReview {
+		t.Fatalf("the review job was not leased: %+v", rg)
+	}
+	if ans := e.complete(rg, Completion{Error: "not logged in", ErrorKind: "auth"}); ans != AnsOK {
+		t.Fatalf("complete the review: %s", ans)
+	}
+	if h, why, _ := e.agentState(e.agentOf(first)); h != "broken" || why != "auth" {
+		t.Errorf("reviewer: health %q reason %q, want broken(auth)", h, why)
+	}
+	for _, id := range []int64{e.agentOf(second), e.agentOf(author)} {
+		if h, _, _ := e.agentState(id); h != "ready" {
+			t.Errorf("agent %d health %q, want ready", id, h)
+		}
+	}
+}
+
+// TestFailureStreakCountsAcrossJobKinds: an agent's failed work job and
+// failed review job in a row make a streak, whatever the kinds.
+func TestFailureStreakCountsAcrossJobKinds(t *testing.T) {
+	e := newEnv(t)
+	a := e.addAgent(e.runner1, "claude", "sonnet", "work")
+	e.runPinned(e.runner1, "claude", Completion{Error: "worker CLI failed"})
+	if h, _, _ := e.agentState(a); h != "ready" {
+		t.Fatalf("health after one failure = %q, want ready", h)
+	}
+	e.clock.Advance(time.Second)
+	// The failure woke the foreman; its turn would take the agent's next
+	// lease and a done completion would end the streak, so it is cancelled.
+	if turn := e.int("SELECT COALESCE(MAX(id), 0) FROM jobs WHERE kind = 'foreman' AND status = 'queued'"); turn != 0 {
+		e.cancel(turn)
+	}
+
+	p := e.workOn(e.addTask("{}"))
+	p.Kind = KindReview
+	p.Harness = "claude"
+	e.submit(p)
+	g := e.lease(e.runner1, []string{"claude"}, nil)
+	if g == nil || g.Kind != KindReview {
+		t.Fatalf("the review job was not leased: %+v", g)
+	}
+	if ans := e.complete(g, Completion{Error: "reviewer CLI failed"}); ans != AnsOK {
+		t.Fatalf("complete: %s", ans)
+	}
+	if h, why, _ := e.agentState(a); h != "broken" || why != "repeated failures" {
+		t.Errorf("health after a failed work and a failed review = %q (%q), want broken(repeated failures)", h, why)
+	}
+}
+
 // TestAuthErrorMarksTheAgentBroken is §8 "Health": an auth completion
 // breaks that agent alone, and the event reaches the user's banner.
 func TestAuthErrorMarksTheAgentBroken(t *testing.T) {
