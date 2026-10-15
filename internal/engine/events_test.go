@@ -208,12 +208,16 @@ func TestEventsTraceTheFailuresAndTheFence(t *testing.T) {
 		if got := e.leaseAny(e.runner2); got != nil {
 			e.t.Fatal("the job was offered past its attempt cap")
 		}
-		want := []string{evJobCreated, evJobLeased, evTaskRunning, evLeaseRequeued, evJobAttemptsExceeded}
+		want := []string{evJobCreated, evJobLeased, evTaskRunning, evLeaseRequeued, evJobAttemptsExceeded,
+			evTaskFailed, evJobCreated, evForemanWoken}
 		if got := e.eventKinds(); !equalStrings(got, want) {
 			t.Errorf("events = %v, want %v", got, want)
 		}
 		if last := e.eventRows()[4]; last.payload.Status != statusFailed || last.payload.Reason == "" {
 			t.Errorf("attempt-cap event payload = %+v, want the failure status and the reason", last.payload)
+		}
+		if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+			t.Errorf("task state = %s, want needs_foreman without another eligible agent", state)
 		}
 	})
 

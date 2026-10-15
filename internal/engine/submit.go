@@ -29,16 +29,16 @@ type SubmitParams struct {
 	// lease the job. The engine sets it on a task's review job, from
 	// the family of the author job's agent.
 	ExcludeFamily string
-	// ExcludeAgent is the retry rule's exclusion (§7): when set, that
-	// one agent may not lease the job on top of the family rule, so a
-	// review retry goes to another agent. The engine sets it on a
-	// review retry, from the first reviewer's agent.
+	// ExcludeAgent is the retry rule's exclusion (§3, §7): when set,
+	// that one agent may not lease the job. Work jobs have no family
+	// rule; review retries also apply the review family and class rules.
 	ExcludeAgent int64
-	// RequireAgent is the fix round's pin (§3): when set, the one agent
+	// RequireAgent is a placement pin (§3): when set, the one agent
 	// the job must run on — the author's own, read from the latest work
 	// or fix job — because the harness alone does not name it: another
 	// runner may offer the same harness, and the author's runner may
-	// hold a second agent of it. A runner not offering the agent cannot
+	// hold a second agent of it. An automatic restart pins a different
+	// eligible agent instead. A runner not offering the agent cannot
 	// lease the job at all.
 	RequireAgent int64
 	// Round names the task's rounds budget this job spends (§7, §14):

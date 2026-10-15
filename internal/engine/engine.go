@@ -135,6 +135,9 @@ type Config struct {
 	// RoundCaps are the default per-task round caps; a task's caps JSON
 	// (fix_rounds, review_rounds, restart) overrides them per task.
 	RoundCaps RoundCaps
+	// TaskAutoRetry retries a transient work failure once on another ready
+	// agent (§3). Nil keeps the default, on; false parks immediately.
+	TaskAutoRetry *bool
 	// ForemanWakeBudget is how many foreman turns a project may be woken
 	// into per UTC day (§4.3); zero — the default — keeps
 	// defaultForemanWakeBudget. The count is of the project's foreman
@@ -213,6 +216,7 @@ type Config struct {
 // default), restart 2, and artifact uploads capped at 64 MiB each.
 // Retention keeps everything (§9); DataDir follows the store file.
 func DefaultConfig() Config {
+	autoRetry := true
 	return Config{
 		Now:            func() time.Time { return time.Now().UTC() },
 		LeaseTTL:       90 * time.Second,
@@ -226,6 +230,7 @@ func DefaultConfig() Config {
 			KindForeman: 30 * time.Minute,
 		},
 		RoundCaps:         RoundCaps{Fix: 2, Review: 2, Restart: 2},
+		TaskAutoRetry:     &autoRetry,
 		ForemanWakeBudget: defaultForemanWakeBudget,
 		MaxArtifactBytes:  defaultMaxArtifactBytes,
 		NewLeaseID:        newLeaseID,
@@ -314,6 +319,9 @@ func New(s *store.Store, cfg Config) *Engine {
 	}
 	if cfg.RoundCaps.Restart > 0 {
 		def.RoundCaps.Restart = cfg.RoundCaps.Restart
+	}
+	if cfg.TaskAutoRetry != nil {
+		def.TaskAutoRetry = cfg.TaskAutoRetry
 	}
 	if cfg.ForemanWakeBudget > 0 {
 		def.ForemanWakeBudget = cfg.ForemanWakeBudget

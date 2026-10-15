@@ -183,6 +183,11 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			if err := e.foremanFinishedTx(tx, j, statusFailed, now); err != nil {
 				return nil, err
 			}
+			if j.TaskID != 0 {
+				if err := e.taskAfterCompletionTx(tx, j, Completion{Error: reason, ErrorKind: "runner_lost"}, now); err != nil {
+					return nil, err
+				}
+			}
 			continue
 		}
 		if j.Harness != "" && !slices.Contains(harnesses, j.Harness) {
@@ -502,11 +507,21 @@ func (e *Engine) explore() bool {
 // when the runner advertises no such agent — the caller then refuses
 // the lease, unless the runner advertises nothing at all.
 func leaseAgentsTx(tx *sql.Tx, runner int64, j *jobRow, now string) ([]agentCand, error) {
-	class := kindClass(j.Kind)
+	return eligibleAgentsTx(tx, runner, j, kindClass(j.Kind), now)
+}
+
+// eligibleAgentsTx shares eligibility and ranking with automatic retries,
+// whose candidate lookup uses the task's class rather than the job kind's.
+// Runner 0 ranks all registered agents for an automatic restart's pin.
+func eligibleAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
 	query := `SELECT a.id, a.family, a.harness, a.classes, COALESCE(o.attempts, 0), COALESCE(o.successes, 0)
 		FROM agents a LEFT JOIN outcomes o ON o.agent_id = a.id AND o.project_id = ? AND o.class = ?
-		WHERE a.runner_id = ? AND a.health = 'ready' AND (a.cooling_until IS NULL OR a.cooling_until <= ?)`
-	args := []any{j.ProjectID, class, runner, now}
+		WHERE a.health = 'ready' AND (a.cooling_until IS NULL OR a.cooling_until <= ?)`
+	args := []any{j.ProjectID, class, now}
+	if runner != 0 {
+		query += " AND a.runner_id = ?"
+		args = append(args, runner)
+	}
 	if j.Harness != "" {
 		query += " AND a.harness = ?"
 		args = append(args, j.Harness)
@@ -528,14 +543,17 @@ func leaseAgentsTx(tx *sql.Tx, runner int64, j *jobRow, now string) ([]agentCand
 		if err := rows.Scan(&id, &family, &harness, &classes, &attempts, &successes); err != nil {
 			return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 		}
-		// The class rule (§5.1, §8: "eligible: the adapter supports the
-		// class"): an agent that does not take the job kind's class never
-		// runs it — an implement round never lands on a review-only
-		// agent, whatever its id order.
-		if class != "" && !agentOffersClass(classes, class) {
+		// Ordinary work and fix leases use the implement class. A pinned
+		// work restart already qualified against the task's class when
+		// the retry was queued; do not reject that pin for lacking implement.
+		pinnedRetry := j.Kind == KindWork && j.Restart && j.RequireAgent != 0
+		if class != "" && !pinnedRetry && !agentOffersClass(classes, class) {
 			continue
 		}
-		if j.ExcludeFamily != "" || j.ExcludeAgent != 0 {
+		if id == j.ExcludeAgent {
+			continue
+		}
+		if j.ExcludeFamily != "" || (j.Kind == KindReview && j.ExcludeAgent != 0) {
 			if !reviewAgentQualifies(id, family, classes, j.ExcludeFamily, j.ExcludeAgent) {
 				continue
 			}
@@ -552,10 +570,9 @@ func leaseAgentsTx(tx *sql.Tx, runner int64, j *jobRow, now string) ([]agentCand
 	return cands, nil
 }
 
-// kindClass is the task class a job kind runs (§6.2, §8): work and fix
-// are implement rounds, a review is the review class, a foreman turn
-// the answer flow. A kind with no class of its own leaves the class
-// filter off — such a job is placed by its harness alone.
+// kindClass is the dispatch class for ordinary leases (§8): work and fix
+// use implement regardless of the task's class; review and foreman jobs
+// use review and answer respectively.
 func kindClass(k Kind) string {
 	switch k {
 	case KindWork, KindFix:

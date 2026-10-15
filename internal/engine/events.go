@@ -45,7 +45,7 @@ const (
 	evTaskNeedsHelp          = "task_needs_help"           // the worker asked its question; the foreman answers (§3)
 	evTaskDiscoveries        = "task_discoveries"          // a worker's result carried discoveries; they reach the foreman, no wake of their own (§4.2)
 	evTaskAnswered           = "task_answered"             // the foreman answered; the author's session resumes (§3)
-	evTaskRestarted          = "task_restarted"            // the foreman restarted the task; a fresh work attempt is queued (§3, §5.6)
+	evTaskRestarted          = "task_restarted"            // a foreman or automatic restart queued a fresh work attempt (§3, §5.6)
 	evTaskFailed             = "task_failed"               // the run failed or said nothing usable; the foreman decides (§3)
 	evReviewChanges          = "review_changes"            // the reviewer wants changes; a fix round answers them (§3, §7)
 	evReviewNoVerdict        = "review_no_verdict"         // the review ended without a usable verdict; the retry is spent or impossible (§7)

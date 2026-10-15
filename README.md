@@ -23,6 +23,8 @@ brigada drives the vendors' **unmodified** CLIs, each signed in with your own ac
 
 Being built in Go: a single binary and a local SQLite store, with an MCP server so your harness can call it. The engine is moving over step by step, with its tests, from an earlier Python implementation. Plans are mirrored to `.brigada/plans/<plan-id>.yaml` on the `brigada/plans` branch. Set `snapshot_dir` in the config file (an absolute directory outside the state directory) and the engine snapshots its store daily, keeping the last seven; with the engine stopped, `brigada recover` restores the newest snapshot into a fresh store and rebuilds newer plans from their plan files. Without a snapshot, messages, transcripts and outcomes are not restored.
 
+Transient worker CLI failures (including quota and authentication errors) and terminal runner loss get one automatic restart on a different ready agent when available. The restart uses a fresh session and branch and keeps the failure reason in its context. Set `task_auto_retry = false` in the config file to park these failures for the foreman immediately; the default is `true`. Failed checks continue through the fix-round policy.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).

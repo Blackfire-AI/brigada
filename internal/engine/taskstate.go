@@ -103,6 +103,9 @@ func taskRunningTx(tx *sql.Tx, j *jobRow, now time.Time) error {
 //     they wait for the foreman's judgment (§3);
 //   - a review job's verdict finishes the task, asks for a fix round,
 //     or names itself unusable and is retried once (§7).
+//
+// A classified transient work failure can instead spend the first restart
+// on another eligible agent, before any failure judgment is emitted (§3).
 func (e *Engine) taskAfterCompletionTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	switch job.Kind {
 	case KindWork, KindFix:
@@ -120,6 +123,16 @@ func (e *Engine) taskAfterCompletionTx(tx *sql.Tx, job *jobRow, c Completion, no
 
 // workCompletedTx applies a work or fix job's completion to its task.
 func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class string, now time.Time) error {
+	// Retry only classified CLI errors or terminal runner loss. A result
+	// contract failure, stopped run or failed check belongs to its own path.
+	if c.Error != "" {
+		switch c.ErrorKind {
+		case "limit", "auth", "other", "runner_lost":
+			if retried, err := e.autoRestartTaskTx(tx, job, c.ErrorKind, c.Error, now); err != nil || retried {
+				return err
+			}
+		}
+	}
 	wr, haveResult := parseWorkerResult(c.Result)
 	// Discoveries (§5.4) reach the foreman's inbox whatever the task does
 	// next, so a park in this same completion carries them in its wake.
@@ -151,7 +164,8 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 	}
 	switch {
 	case !haveResult || (wr.Status != workerDone && wr.Status != workerCheckFailed && wr.Status != workerNeedsHelp):
-		// A failed run, a stopped one, a block that never parsed: all
+		// A failure the retry policy could not carry, a stopped run, or
+		// a block that never parsed: all
 		// the foreman's to judge (§3, §5.6), each with what the run
 		// said for itself.
 		reason := wr.Summary
@@ -200,6 +214,61 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 	default:
 		return e.queueReviewTx(tx, job, wr, c.CheckResult, now)
 	}
+}
+
+// autoRestartTaskTx spends the first restart, at most once, on a different
+// ready agent (§3, §8). Fix jobs and reviews keep their existing policies.
+// Decide before emitting task_failed: the restart is the inbox's single
+// judgment event for this failure, with its kind and text in the reason.
+func (e *Engine) autoRestartTaskTx(tx *sql.Tx, job *jobRow, kind, text string, now time.Time) (bool, error) {
+	if !*e.cfg.TaskAutoRetry || job.Kind != KindWork || job.AgentID == 0 {
+		return false, nil
+	}
+	var restarts int
+	if err := tx.QueryRow("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1", job.TaskID).Scan(&restarts); err != nil {
+		return false, fmt.Errorf("count the restarts of task %d: %w", job.TaskID, err)
+	}
+	if restarts != 0 {
+		return false, nil
+	}
+	if _, capped, err := e.roundCapReached(tx, SubmitParams{TaskID: job.TaskID, Restart: true}); err != nil || capped {
+		return false, err
+	}
+	// Retry candidates must offer the task's own class. Keep this filter
+	// local to retry selection: ordinary work/fix dispatch uses implement.
+	var class string
+	if err := tx.QueryRow("SELECT class FROM tasks WHERE id = ?", job.TaskID).Scan(&class); err != nil {
+		return false, fmt.Errorf("read the class of task %d: %w", job.TaskID, err)
+	}
+	// Use the dispatcher's eligibility and ranking, across runners, without
+	// a family exclusion: a work retry may use the same family.
+	cands, err := eligibleAgentsTx(tx, 0, &jobRow{
+		ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindWork, ExcludeAgent: job.AgentID,
+	}, class, fmtTime(now))
+	if err != nil || len(cands) == 0 {
+		return false, err
+	}
+	agent := cands[0].id
+	reason := boundNote(fmt.Sprintf("%s: %s", kind, text))
+	// A CLI error has no usable result summary. Carry the last progress
+	// the runner persisted, when available, into the fresh session (§5.6).
+	var lastEvent string
+	if err := tx.QueryRow("SELECT COALESCE(last_event, '') FROM jobs WHERE id = ?", job.ID).Scan(&lastEvent); err != nil {
+		return false, fmt.Errorf("read the last progress of job %d: %w", job.ID, err)
+	}
+	note := reason
+	if lastEvent != "" {
+		note += "\nLast progress: " + boundNote(lastEvent)
+	}
+	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, agent, now)
+	if err != nil {
+		return false, err
+	}
+	if err := inboxEventTx(tx, evTaskRestarted, job.ProjectID, job.TaskID, r.JobID,
+		eventPayload{Status: taskReady, Run: int64(r.Run), Reason: reason, Agent: agent}, now); err != nil {
+		return false, err
+	}
+	return true, e.wakeForemanTx(tx, job.ProjectID, now)
 }
 
 // queueFixRoundTx queues the task's next fix round (§3): a job of kind

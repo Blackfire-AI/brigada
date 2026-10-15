@@ -180,19 +180,35 @@ func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note string, n
 		return RestartResult{}, fmt.Errorf(
 			"the task's restart budget is spent; the task stays parked at needs_foreman")
 	}
+	r, err := e.queueTaskRestartTx(tx, project, taskID, note, 0, now)
+	if err != nil {
+		return RestartResult{}, err
+	}
+	if _, err := appendEventTx(tx, evTaskRestarted, project, taskID, r.JobID,
+		eventPayload{Run: int64(r.Run), Reason: boundNote(note)}, now); err != nil {
+		return RestartResult{}, err
+	}
+	return r, nil
+}
+
+// queueTaskRestartTx is shared by the foreman's restart and the automatic
+// retry (§3, §5.6). The caller checks the budget and records the decision;
+// an automatic retry pins the new attempt to a different eligible agent.
+func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note string, agent int64, now time.Time) (RestartResult, error) {
 	spec, err := taskSpecTx(tx, taskID)
 	if err != nil {
 		return RestartResult{}, err
 	}
 	key := fmt.Sprintf("task:%d", taskID)
 	sr, err := e.submitTx(tx, SubmitParams{
-		Key:       key,
-		ProjectID: project,
-		TaskID:    taskID,
-		Kind:      KindWork,
-		Mode:      ModeFresh,
-		Prompt:    prompt.ComposeWorkerPrompt(spec, note),
-		Restart:   true,
+		Key:          key,
+		ProjectID:    project,
+		TaskID:       taskID,
+		Kind:         KindWork,
+		Mode:         ModeFresh,
+		Prompt:       prompt.ComposeWorkerPrompt(spec, note),
+		Restart:      true,
+		RequireAgent: agent,
 	}, now)
 	if err != nil {
 		return RestartResult{}, err
@@ -203,10 +219,6 @@ func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note string, n
 	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
 		taskReady, fmtTime(now), taskID); err != nil {
 		return RestartResult{}, fmt.Errorf("return task %d to ready: %w", taskID, err)
-	}
-	if _, err := appendEventTx(tx, evTaskRestarted, project, taskID, sr.JobID,
-		eventPayload{Run: int64(sr.Run)}, now); err != nil {
-		return RestartResult{}, err
 	}
 	return RestartResult{Answer: sr.Answer, JobID: sr.JobID, Run: sr.Run}, nil
 }
