@@ -354,6 +354,11 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 		// (§4.2), and the next wake is evaluated in this same transaction.
 		return AnsOK, e.foremanFinishedTx(tx, job, status, now)
 	}
+	if job.TaskID == 0 && job.Kind == KindReview {
+		// A standalone review has no task to move (§7): its verdict goes
+		// to the outcome record and the history alone.
+		return AnsOK, e.standaloneReviewCompletedTx(tx, job, c, now)
+	}
 	if job.TaskID != 0 {
 		// The task's state follows its job's completion (§3, §6.1, §7):
 		// reviewing behind a passed check, done behind a verdict or a

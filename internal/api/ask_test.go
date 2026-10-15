@@ -47,3 +47,24 @@ func TestAskRoute(t *testing.T) {
 		}
 	}
 }
+
+// TestReviewRoute: only the client and admin roles may queue a
+// standalone review (§7, §12.1); a blank branch is a bad request and an
+// unknown repo a not-found.
+func TestReviewRoute(t *testing.T) {
+	e := newEnv(t)
+	body := func(repo, branch string) []byte {
+		return attachBody(map[string]any{"repo_url": repo, "branch": branch})
+	}
+	for _, who := range []string{"foreman1", "r1"} {
+		if code, _, data := e.do(http.MethodPost, "/v1/reviews", who, "", body(repo1, "feature/x")); code != http.StatusForbidden {
+			t.Errorf("review as %s = %d %s, want 403", who, code, data)
+		}
+	}
+	if code, _, data := e.do(http.MethodPost, "/v1/reviews", "alice", "", body(repo1, " ")); code != http.StatusBadRequest || !strings.Contains(string(data), "branch") {
+		t.Errorf("blank branch = %d %s, want 400 naming the branch", code, data)
+	}
+	if code, _, data := e.do(http.MethodPost, "/v1/reviews", "alice", "", body("https://example.invalid/none.git", "feature/x")); code != http.StatusNotFound {
+		t.Errorf("unknown repo = %d %s, want 404", code, data)
+	}
+}

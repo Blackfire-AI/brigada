@@ -387,6 +387,18 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			// this review judges, so the grant carries the branch alone.
 			reviewBranch = branch
 			checkCmd = ""
+			if j.TaskID == 0 {
+				// A standalone review has no task to hold any of it: the
+				// project gives the repo and the diff's base (its default
+				// branch), the job itself the branch it reads.
+				repo, baseRef, err = standaloneReviewInfoTx(tx, j)
+				if err != nil {
+					return nil, err
+				}
+				reviewBranch = j.Branch
+			}
+			// A review names no branch of its own: it reads one.
+			jobBranch = ""
 		}
 		resume := ""
 		if j.Mode == ModeSession {
@@ -685,6 +697,17 @@ func taskInfoTx(tx *sql.Tx, j *jobRow) (repoURL, baseRef, checkCmd, branch strin
 		return "", "", "", "", fmt.Errorf("read task %d: %w", j.TaskID, err)
 	}
 	return repoURL, baseRef, checkCmd, branch, nil
+}
+
+// standaloneReviewInfoTx reads what a task-less review's grant needs
+// from the project (§7): its repo URL, and its default branch as the
+// base end of the diff.
+func standaloneReviewInfoTx(tx *sql.Tx, j *jobRow) (repoURL, baseRef string, err error) {
+	if err := tx.QueryRow("SELECT repo_url, default_branch FROM projects WHERE id = ?", j.ProjectID).
+		Scan(&repoURL, &baseRef); err != nil {
+		return "", "", fmt.Errorf("read project %d: %w", j.ProjectID, err)
+	}
+	return repoURL, baseRef, nil
 }
 
 // jobBranchTx names the branch a work or fix job works on (§5.1, §5.6):

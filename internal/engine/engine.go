@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -203,6 +204,15 @@ type Config struct {
 	SnapshotEvery time.Duration
 	// SnapshotKeep is how many snapshots stay; zero keeps 7.
 	SnapshotKeep int
+	// DefaultReviewer is the harness a standalone review (§7, `brigada
+	// review --branch`) goes to when the author's family cannot be
+	// told; empty = none, and such a review is then refused.
+	DefaultReviewer string
+	// BranchTrailers reads the Co-Authored-By trailer values of the
+	// commits a branch holds beyond its base, one per line, from the
+	// repo at repoURL; a standalone review's author-family fallback.
+	// Nil keeps the git-backed default; tests inject it.
+	BranchTrailers func(ctx context.Context, repoURL, base, branch string) (string, error)
 	// Warnf logs the warnings of work the engine does best-effort, the
 	// plan-file mirror's failed pushes among them; nil logs to the
 	// standard logger.
@@ -370,6 +380,10 @@ func New(s *store.Store, cfg Config) *Engine {
 		def.PlanFileTimeout = cfg.PlanFileTimeout
 	}
 	def.SnapshotDir = cfg.SnapshotDir
+	def.DefaultReviewer = cfg.DefaultReviewer
+	if cfg.BranchTrailers != nil {
+		def.BranchTrailers = cfg.BranchTrailers
+	}
 	if cfg.SnapshotEvery > 0 {
 		def.SnapshotEvery = cfg.SnapshotEvery
 	}

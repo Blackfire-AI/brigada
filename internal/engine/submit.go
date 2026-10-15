@@ -55,6 +55,19 @@ type SubmitParams struct {
 	// the key is cancelled first, and the job counts toward the task's
 	// restart cap.
 	Restart bool
+	// Branch is the branch a standalone review (no task) reads: the one
+	// job whose branch the submit names, since no task row holds it. The
+	// engine names the branch of every other job at its first lease.
+	Branch string
+}
+
+// branch is the branch the submit names, for the job_created event: only
+// a task-less review carries one.
+func (p SubmitParams) branch() string {
+	if p.TaskID == 0 {
+		return p.Branch
+	}
+	return ""
 }
 
 // SubmitResult is what Submit did.
@@ -97,8 +110,10 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 		return SubmitResult{}, fmt.Errorf("key is required")
 	case p.Kind == KindForeman && p.TaskID != 0:
 		return SubmitResult{}, fmt.Errorf("a foreman turn belongs to no task")
-	case p.Kind != KindForeman && p.TaskID == 0:
+	case p.Kind != KindForeman && p.Kind != KindReview && p.TaskID == 0:
 		return SubmitResult{}, fmt.Errorf("kind %s needs a task", p.Kind)
+	case p.Kind == KindReview && p.TaskID == 0 && p.Branch == "":
+		return SubmitResult{}, fmt.Errorf("a review without a task needs a branch")
 	}
 	round, capped, err := e.roundCapReached(tx, p)
 	if err != nil {
@@ -138,12 +153,16 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 	run++
 
 	nowStr := fmtTime(now)
+	var branch any
+	if p.TaskID == 0 && p.Branch != "" {
+		branch = p.Branch
+	}
 	res, err := tx.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status,
-		harness, labels, restart, round, exclude_family, exclude_agent, require_agent, queued_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		harness, labels, restart, round, exclude_family, exclude_agent, require_agent, branch, queued_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ProjectID, nullIfZero(p.TaskID), string(p.Kind), p.Key, string(p.Mode), p.Prompt,
 		p.Harness, string(labelsJSON), boolInt(p.Restart), round, p.ExcludeFamily, nullIfZero(p.ExcludeAgent),
-		nullIfZero(p.RequireAgent), nowStr, nowStr, nowStr)
+		nullIfZero(p.RequireAgent), branch, nowStr, nowStr, nowStr)
 	if err != nil {
 		if !isUniqueViolation(err) {
 			return SubmitResult{}, fmt.Errorf("create job: %w", err)
@@ -172,7 +191,7 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 		return SubmitResult{}, fmt.Errorf("create job: last insert id: %w", err)
 	}
 	eventID, err := appendEventTx(tx, evJobCreated, p.ProjectID, p.TaskID, id,
-		eventPayload{Answer: string(AnsCreated), Run: int64(run)}, now)
+		eventPayload{Answer: string(AnsCreated), Run: int64(run), Branch: p.branch()}, now)
 	if err != nil {
 		return SubmitResult{}, err
 	}
