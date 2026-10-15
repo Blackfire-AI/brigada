@@ -693,24 +693,12 @@ func (e *Engine) taskDoneTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 	if err := e.releaseDependentsTx(tx, job.ProjectID, job.TaskID, now); err != nil {
 		return err
 	}
-	var plan, open int64
-	if err := tx.QueryRow(`SELECT t.plan_id,
-		(SELECT COUNT(*) FROM tasks o WHERE o.plan_id = t.plan_id AND o.state <> ?)
-		FROM tasks t WHERE t.id = ?`, taskDone, job.TaskID).Scan(&plan, &open); err != nil {
+	var plan int64
+	if err := tx.QueryRow("SELECT plan_id FROM tasks WHERE id = ?", job.TaskID).Scan(&plan); err != nil {
 		return fmt.Errorf("read the plan of task %d: %w", job.TaskID, err)
 	}
-	if open > 0 {
-		return nil
-	}
-	if _, err := tx.Exec(`UPDATE plans SET state = ?, updated_at = ? WHERE id = ?`,
-		planDone, fmtTime(now), plan); err != nil {
-		return fmt.Errorf("finish plan %d: %w", plan, err)
-	}
-	if err := inboxEventTx(tx, evPlanDone, job.ProjectID, job.TaskID, job.ID,
-		eventPayload{Status: planDone}, now); err != nil {
-		return err
-	}
-	return e.wakeForemanTx(tx, job.ProjectID, now)
+	_, err := e.finishPlanIfClosedTx(tx, job.ProjectID, plan, job.TaskID, job.ID, now)
+	return err
 }
 
 // parseWorkerResult decodes the worker's result block (§5.4). ok is

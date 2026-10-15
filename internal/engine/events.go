@@ -16,6 +16,7 @@ const (
 	evPlanCreated            = "plan_created"              // CreatePlan: a plan now exists (§6.2)
 	evPlanDone               = "plan_done"                 // the plan's last open task finished (§6.2)
 	evPlanAwaitingApproval   = "plan_awaiting_approval"    // CreatePlan: the plan is over the approval limit and waits for the user's yes (§6.3)
+	evPlanAmended            = "plan_amended"              // the foreman amended a live plan: tasks added, cancelled or re-pointed (§12.2)
 	evPlanApproved           = "plan_approved"             // the user approved the plan; its first wave is queued (§6.3)
 	evPlanRejected           = "plan_rejected"             // the user rejected the plan; its tasks are cancelled (§6.3)
 	evJobCreated             = "job_created"               // submit: a queued job now exists

@@ -259,10 +259,12 @@ func foremanWakeStalledTx(tx *sql.Tx, project int64) (bool, error) {
 // (§10). The title alone is flattened to one line: a newline there would
 // break the event's own line, while the payload's words stay verbatim.
 func pendingInboxTx(tx *sql.Tx, project int64) (ForemanInbox, error) {
-	rows, err := tx.Query(`SELECT e.kind, COALESCE(e.task_id, 0), COALESCE(t.title, ''), e.payload
+	rows, err := tx.Query(`SELECT e.kind, COALESCE(e.task_id, 0), COALESCE(t.title, ''), e.payload,
+		COALESCE(pp.id, 0), COALESCE(pp.title, '')
 		FROM foreman_inbox i
 		JOIN events e ON e.id = i.event_id
 		LEFT JOIN tasks t ON t.id = e.task_id
+		LEFT JOIN plans pp ON pp.id = CASE WHEN json_valid(e.payload) THEN json_extract(e.payload, '$.plan') END
 		WHERE i.project_id = ? AND i.state = ?
 		ORDER BY e.id`, project, inboxPending)
 	if err != nil {
@@ -272,8 +274,9 @@ func pendingInboxTx(tx *sql.Tx, project int64) (ForemanInbox, error) {
 	for rows.Next() {
 		var kind, payload string
 		var task int64
-		var title string
-		if err := rows.Scan(&kind, &task, &title, &payload); err != nil {
+		var title, planTitle string
+		var plan int64
+		if err := rows.Scan(&kind, &task, &title, &payload, &plan, &planTitle); err != nil {
 			rows.Close()
 			return ForemanInbox{}, fmt.Errorf("read the pending events of project %d: %w", project, err)
 		}
@@ -291,6 +294,16 @@ func pendingInboxTx(tx *sql.Tx, project int64) (ForemanInbox, error) {
 		text := "the plan is done"
 		if kind != evPlanDone {
 			text = wakeEventText(kind, payload)
+		} else {
+			// The finished plan by its own id and title — a completion
+			// an amendment or an approval caused names no task — and
+			// the done report's account of what never ran or failed.
+			if plan != 0 && task == 0 {
+				text += fmt.Sprintf(" (plan %d %q)", plan, strings.Join(strings.Fields(planTitle), " "))
+			}
+			if why := wakeEventText(kind, payload); why != kind {
+				text += "; " + why
+			}
 		}
 		inbox.Events = append(inbox.Events, fmt.Sprintf("%s task %d %s: %s",
 			kind, task, strings.Join(strings.Fields(title), " "), text))

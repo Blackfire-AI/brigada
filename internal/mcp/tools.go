@@ -29,8 +29,7 @@ type Tool struct {
 }
 
 // tools is the bridge's whole offer (§12.2), the one list a later item
-// extends: plan_amend, task_restart, answer, ask_user, events and
-// capacity each add an entry here, and ToolNames carries the addition
+// extends: ask_user and the like each add an entry here, and ToolNames carries the addition
 // to the foreman's tool scope.
 var tools = []Tool{
 	{
@@ -82,6 +81,62 @@ var tools = []Tool{
 			"required": []string{"title", "tasks"},
 		},
 		Call: callPlanCreate,
+	},
+	{
+		Name:        "plan_amend",
+		Description: "Amend a live plan (active or awaiting approval): add tasks, cancel tasks, and re-point the dependencies of a waiting task. Use it to re-plan when a task fails for good or the user's ask changes: a dependency that will never be done (a task failed or cancelled) leaves its dependents waiting forever unless you re-point them (retarget) to another task or drop the dependency (empty deps). Tasks are named by their name or id (as status shows). Validation is plan_create's: names unique, deps in the plan and never on a cancelled task, no cycle — one refusal rejects the whole amendment. Cancelling stops a task's live jobs. Waiting tasks whose dependencies are all done start in the same call. An added task may push the plan over the project's approval limit: it then waits for the user's approval and nothing new starts. A plan left with only permanently waiting tasks is closed, and its done report names what never ran.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"plan": map[string]any{
+					"type":        "integer",
+					"description": "the plan's id",
+				},
+				"add": map[string]any{
+					"type":        "array",
+					"description": "tasks to add, as plan_create takes them",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"title": map[string]any{"type": "string", "description": "the task's title; default is the spec's first line"},
+							"name":  map[string]any{"type": "string", "description": "a short name, unique in the plan; optional"},
+							"deps": map[string]any{
+								"type":        "array",
+								"items":       map[string]any{"type": []string{"string", "integer"}},
+								"description": "tasks of this plan (new or old, by name or id) that must be done before this one starts; default none",
+							},
+							"spec":  map[string]any{"type": "string", "description": "the task spec, verbatim: what the worker is to do. Never ask the worker to run the check, commit or push"},
+							"check": map[string]any{"type": "string", "description": "the check command the runner runs after a done; empty = none"},
+							"class": map[string]any{"type": "string", "description": "the task's class (default implement)"},
+						},
+						"required": []string{"spec"},
+					},
+				},
+				"cancel": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": []string{"string", "integer"}},
+					"description": "tasks to cancel, by name or id; a done task cannot be cancelled",
+				},
+				"retarget": map[string]any{
+					"type":        "array",
+					"description": "waiting (pending) tasks whose dependencies are replaced",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"task": map[string]any{"type": []string{"string", "integer"}, "description": "the waiting task, by name or id"},
+							"deps": map[string]any{
+								"type":        "array",
+								"items":       map[string]any{"type": []string{"string", "integer"}},
+								"description": "its new complete dependency list; empty drops every dependency",
+							},
+						},
+						"required": []string{"task", "deps"},
+					},
+				},
+			},
+			"required": []string{"plan"},
+		},
+		Call: callPlanAmend,
 	},
 	{
 		Name:        "answer",

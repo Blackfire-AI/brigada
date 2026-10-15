@@ -250,46 +250,26 @@ func (e *Engine) ApprovePlan(ctx context.Context, project, plan int64) (PlanDeci
 		if _, err := tx.Exec(`UPDATE plans SET state = 'active', updated_at = ? WHERE id = ?`, fmtTime(now), plan); err != nil {
 			return fmt.Errorf("activate plan %d: %w", plan, err)
 		}
-		rows, err := tx.Query(`SELECT t.id, t.name, t.spec FROM tasks t
-			WHERE t.plan_id = ? AND t.state = ?
-			AND NOT EXISTS (SELECT 1 FROM task_deps d WHERE d.task_id = t.id)
-			ORDER BY t.id`, plan, taskPending)
+		// The first wave: the pending tasks waiting for nothing open (a
+		// plan an amendment held may have tasks whose dependencies are
+		// already done).
+		first, err := e.readyPlanTasksTx(tx, proj, plan, now)
 		if err != nil {
-			return fmt.Errorf("read the first wave of plan %d: %w", plan, err)
+			return err
 		}
-		type wave struct {
-			id         int64
-			name, spec string
-		}
-		var first []wave
-		for rows.Next() {
-			var w wave
-			if err := rows.Scan(&w.id, &w.name, &w.spec); err != nil {
-				rows.Close()
-				return fmt.Errorf("read the first wave of plan %d: %w", plan, err)
-			}
-			first = append(first, w)
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return fmt.Errorf("read the first wave of plan %d: %w", plan, err)
-		}
-		rows.Close()
-		res = PlanDecision{PlanID: plan, State: "active"}
-		for _, w := range first {
-			if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
-				taskReady, fmtTime(now), w.id); err != nil {
-				return fmt.Errorf("ready task %d: %w", w.id, err)
-			}
-			sr, err := e.queueTaskWorkTx(tx, proj, w.id, w.spec, now)
-			if err != nil {
-				return err
-			}
-			res.Tasks = append(res.Tasks, CreatedTask{TaskID: w.id, Name: w.name, JobID: sr.JobID})
-		}
+		res = PlanDecision{PlanID: plan, State: "active", Tasks: first}
 		if err := inboxEventTx(tx, evPlanApproved, proj, 0, 0,
 			eventPayload{Plan: plan, Status: "active", Count: int64(len(first))}, now); err != nil {
 			return err
+		}
+		// An amendment may have left nothing to run (every task done,
+		// cancelled or stuck behind one): the approved plan is finished.
+		closed, err := e.finishPlanIfClosedTx(tx, proj, plan, 0, 0, now)
+		if err != nil {
+			return err
+		}
+		if closed {
+			res.State = planDone
 		}
 		return e.wakeForemanTx(tx, proj, now)
 	})
@@ -316,9 +296,24 @@ func (e *Engine) RejectPlan(ctx context.Context, project, plan int64) (PlanDecis
 		if _, err := tx.Exec(`UPDATE plans SET state = ?, updated_at = ? WHERE id = ?`, planCancelled, fmtTime(now), plan); err != nil {
 			return fmt.Errorf("cancel plan %d: %w", plan, err)
 		}
+		// A plan an amendment held may have tasks already running.
+		nodes, err := loadAmendNodesTx(tx, plan)
+		if err != nil {
+			return err
+		}
+		for _, n := range nodes {
+			if n.state != taskDone && n.state != taskCancelled {
+				if err := e.cancelTaskJobsTx(tx, n.id, now); err != nil {
+					return err
+				}
+			}
+		}
 		if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE plan_id = ? AND state NOT IN (?, ?)`,
 			taskCancelled, fmtTime(now), plan, taskDone, taskCancelled); err != nil {
 			return fmt.Errorf("cancel the tasks of plan %d: %w", plan, err)
+		}
+		if err := recordPlanOutcomeTx(tx, proj, false, now); err != nil {
+			return err
 		}
 		res = PlanDecision{PlanID: plan, State: planCancelled}
 		if err := inboxEventTx(tx, evPlanRejected, proj, 0, 0,
