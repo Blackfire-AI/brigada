@@ -272,6 +272,9 @@ func (e *Engine) outOfRoundsTx(tx *sql.Tx, job *jobRow, round, note string, now 
 	if note != "" {
 		reason += ": " + boundNote(note)
 	}
+	if err := recordTaskOutcomeTx(tx, job, false, now); err != nil {
+		return err
+	}
 	return e.needsForemanTx(tx, job, evTaskOutOfRounds, eventPayload{Reason: reason}, now)
 }
 
@@ -536,6 +539,52 @@ func recordOutcomeTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 	return nil
 }
 
+// recordTaskOutcomeTx counts a task's end on the outcome record (§8,
+// §11): one attempt on the task's class for the agent of the task's last
+// work or fix job — the author of the final result, which a fix round may
+// have moved off the first agent — and one success when the task ended
+// approved: its check passed and its review approved within the rounds.
+// A task that ran out of rounds counts the attempt alone. An author with
+// no agent — an agent-less runner, a task cancelled before it ran — has
+// nobody to score and records nothing. The task's state guards the
+// count: a task already past its end (done, failed, cancelled, or parked
+// at needs_foreman by the same end) was counted once, so a second
+// processing of the same end adds nothing. It runs before the transition
+// that moves the state, in that transition's transaction.
+func recordTaskOutcomeTx(tx *sql.Tx, job *jobRow, success bool, now time.Time) error {
+	var state, class string
+	if err := tx.QueryRow("SELECT state, class FROM tasks WHERE id = ?", job.TaskID).Scan(&state, &class); err != nil {
+		return fmt.Errorf("read task %d: %w", job.TaskID, err)
+	}
+	switch state {
+	case taskDone, taskFailed, taskCancelled, taskNeedsForeman:
+		return nil
+	}
+	var agent int64
+	err := tx.QueryRow(`SELECT COALESCE(agent_id, 0) FROM jobs
+		WHERE task_id = ? AND kind IN ('work', 'fix')
+		ORDER BY id DESC LIMIT 1`, job.TaskID).Scan(&agent)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && agent == 0) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read the author job of task %d: %w", job.TaskID, err)
+	}
+	successes := 0
+	if success {
+		successes = 1
+	}
+	_, err = tx.Exec(`INSERT INTO outcomes (project_id, agent_id, class, attempts, successes, updated_at)
+		VALUES (?, ?, ?, 1, ?, ?)
+		ON CONFLICT(project_id, agent_id, class) DO UPDATE SET
+			attempts = attempts + 1, successes = successes + excluded.successes, updated_at = excluded.updated_at`,
+		job.ProjectID, agent, class, successes, fmtTime(now))
+	if err != nil {
+		return fmt.Errorf("record the outcome of task %d: %w", job.TaskID, err)
+	}
+	return nil
+}
+
 // needsForemanTx parks a task at needs_foreman (§3): the completion was
 // nothing the rules can carry forward on their own, so the task waits
 // for the foreman's judgment. The event kind names what waited and the
@@ -561,6 +610,9 @@ func (e *Engine) needsForemanTx(tx *sql.Tx, job *jobRow, kind string, payload ev
 // (§4.2) — the foreman reports the finished plan — so it lands in the
 // inbox and wakes a turn, in this same transaction.
 func (e *Engine) taskDoneTx(tx *sql.Tx, job *jobRow, now time.Time) error {
+	if err := recordTaskOutcomeTx(tx, job, true, now); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
 		taskDone, fmtTime(now), job.TaskID); err != nil {
 		return fmt.Errorf("finish task %d: %w", job.TaskID, err)
