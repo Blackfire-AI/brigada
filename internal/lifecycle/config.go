@@ -130,10 +130,14 @@ func LoadConfigFile(path string) (FileConfig, error) {
 			default:
 				err = fmt.Errorf("want %s or %s", notify.ModeAuto, notify.ModeNone)
 			}
+		case key == "headroom":
+			var on bool
+			on, err = strconv.ParseBool(value)
+			cfg.Caps.NoHeadroom = !on
 		case strings.HasPrefix(key, "caps."), strings.HasPrefix(key, "cost."):
 			err = setCap(&cfg.Caps, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, a caps.<layer> or a cost.<harness>/<model>", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, headroom, a caps.<layer> or a cost.<harness>/<model>", path, n+1, key)
 		}
 		if err != nil {
 			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)

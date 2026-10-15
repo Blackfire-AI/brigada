@@ -20,6 +20,18 @@ type Limits struct {
 	Account map[string]int // by account label
 	Model   map[string]int // by model; a per-model cap such as 1 for a heavy model
 	Cost    map[string]int // by "harness/model"
+
+	// NoHeadroom turns the foreman headroom rule (§8.2) off. The rule
+	// is on by default, so the zero value keeps it.
+	NoHeadroom bool
+}
+
+// HeadroomCap is the account cap a task job sees on the foreman's
+// account (§8.2): one lower than the configured cap, never below 0, so
+// one slot stays reserved for the foreman. An uncapped account (nil
+// limit) stays uncapped: there is no cap to lower.
+func HeadroomCap(limit int) int {
+	return max(limit-1, 0)
 }
 
 // CostOf is the cost weight of one (harness, model) pair (§8.1): what
@@ -59,6 +71,9 @@ type Job struct {
 	Model     string
 	Plan      int64
 	Foreman   bool
+	// Headroom marks a task job whose account is the foreman's (§8.2):
+	// the account layer sees HeadroomCap of the configured cap.
+	Headroom bool
 }
 
 // Usage is the live-job count per layer (§8.1). Live means leased or
@@ -118,8 +133,13 @@ func Room(limits Limits, usage Usage, job Job) (bool, string) {
 	if limit := limits.RunnerCap(job.RunnerCap); limit != nil && usage.Runner[job.Runner] >= *limit {
 		return false, LayerRunner
 	}
-	if limit, capped := limits.Account[job.Account]; capped && usage.Account[job.Account] >= limit {
-		return false, LayerAccount
+	if limit, capped := limits.Account[job.Account]; capped {
+		if job.Headroom && !job.Foreman && !limits.NoHeadroom {
+			limit = HeadroomCap(limit)
+		}
+		if usage.Account[job.Account] >= limit {
+			return false, LayerAccount
+		}
 	}
 	if !job.Foreman {
 		if limit, capped := limits.Model[job.Model]; capped && usage.Model[job.Model] >= limit {
