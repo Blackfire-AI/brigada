@@ -65,12 +65,34 @@ func (e *Engine) SetProjectForeman(ctx context.Context, repoURL, harness, model 
 			return err
 		}
 		var project int64
-		err := tx.QueryRow("SELECT id FROM projects WHERE repo_url = ?", repoURL).Scan(&project)
+		var oldHarness, oldModel string
+		cleared := false
+		err := tx.QueryRow("SELECT id, foreman_harness, foreman_model FROM projects WHERE repo_url = ?", repoURL).
+			Scan(&project, &oldHarness, &oldModel)
 		switch {
 		case err == nil:
 			if _, err := tx.Exec("UPDATE projects SET foreman_harness = ?, foreman_model = ?, updated_at = ? WHERE id = ?",
 				harness, model, fmtTime(now), project); err != nil {
 				return fmt.Errorf("set the foreman of the project of %s: %w", repoURL, err)
+			}
+			if harness != oldHarness || model != oldModel {
+				// The user chose to switch (§4.4): the limit was the old
+				// foreman's, so the new one starts unlimited.
+				res, err := tx.Exec("UPDATE projects SET foreman_limited = NULL WHERE id = ? AND foreman_limited IS NOT NULL", project)
+				if err != nil {
+					return fmt.Errorf("clear the foreman limit of the project of %s: %w", repoURL, err)
+				}
+				n, _ := res.RowsAffected()
+				cleared = n > 0
+			}
+			if harness != oldHarness {
+				// A session id belongs to one harness's CLI: the new
+				// foreman starts fresh, rebuilding its context from the
+				// engine, and never resumes the old harness's session.
+				if _, err := tx.Exec("UPDATE sessions SET harness_session_id = NULL WHERE key = ?",
+					fmt.Sprintf("foreman:%d", project)); err != nil {
+					return fmt.Errorf("drop the old foreman session of the project of %s: %w", repoURL, err)
+				}
 			}
 		case errors.Is(err, sql.ErrNoRows):
 			project, err = createProjectTx(tx, repoURL, setupDefaultBranch, harness, model, now)
@@ -85,6 +107,11 @@ func (e *Engine) SetProjectForeman(ctx context.Context, repoURL, harness, model 
 			return err
 		}
 		setting.ProjectID = project
+		if cleared {
+			// The events the limit held back reach the new foreman now,
+			// not at the next event.
+			return e.wakeForemanTx(tx, project, now)
+		}
 		return nil
 	})
 	if err != nil {

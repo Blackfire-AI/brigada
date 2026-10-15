@@ -244,7 +244,7 @@ func (r *jobRun) finishForemanTurn(ctx context.Context, ad adapter.Adapter, exit
 	}
 	r.mu.Unlock()
 	if cliErr != nil {
-		r.finishWithError(ctx, fmt.Sprintf("foreman CLI failed (%s): %s", cliErr.ErrorKind, cliErr.Text))
+		r.finishWithCLIError(ctx, fmt.Sprintf("foreman CLI failed (%s): %s", cliErr.ErrorKind, cliErr.Text), cliErr)
 		return
 	}
 	if nw := (&noWorkerError{}); errors.As(exitErr, &nw) {

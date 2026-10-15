@@ -85,6 +85,7 @@ type eventJSON struct {
 	SessionID string `json:"session_id"`
 	Kind      string `json:"kind"`
 	Message   string `json:"message"`
+	Until     string `json:"until"` // a limit error's reset time, RFC3339 (§4.4)
 }
 
 // ParseEvent implements adapter.Adapter. A line that is not one of the
@@ -126,7 +127,11 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 		if text == "" {
 			text = ev.Text
 		}
-		return adapter.Event{Kind: adapter.EvError, ErrorKind: kind, Text: text}, true
+		limitUntil := ""
+		if kind == adapter.ErrLimit {
+			limitUntil = ev.Until
+		}
+		return adapter.Event{Kind: adapter.EvError, ErrorKind: kind, Text: text, LimitUntil: limitUntil}, true
 	default:
 		return adapter.Event{}, false
 	}

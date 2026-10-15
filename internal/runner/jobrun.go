@@ -585,7 +585,7 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 	}
 	r.mu.Unlock()
 	if cliErr != nil {
-		r.finishWithError(ctx, fmt.Sprintf("worker CLI failed (%s): %s", cliErr.ErrorKind, cliErr.Text))
+		r.finishWithCLIError(ctx, fmt.Sprintf("worker CLI failed (%s): %s", cliErr.ErrorKind, cliErr.Text), cliErr)
 		return
 	}
 	if nw := (&noWorkerError{}); errors.As(exitErr, &nw) {
@@ -650,7 +650,22 @@ func (r *jobRun) sessionIDOf() string {
 // finishWithError completes the job with an error: the run cannot
 // produce a result, and the reason is the engine's to keep.
 func (r *jobRun) finishWithError(ctx context.Context, msg string) {
-	comp := api.Completion{Error: msg, SessionID: r.sessionIDOf()}
+	r.deliverError(ctx, api.Completion{Error: msg, SessionID: r.sessionIDOf()})
+}
+
+// finishWithCLIError is finishWithError for a failure the CLI itself
+// reported: the error's kind rides with the completion, and a limit's
+// reset time when the adapter found one (§4.4).
+func (r *jobRun) finishWithCLIError(ctx context.Context, msg string, cliErr *adapter.Event) {
+	r.deliverError(ctx, api.Completion{
+		Error:      msg,
+		SessionID:  r.sessionIDOf(),
+		ErrorKind:  string(cliErr.ErrorKind),
+		LimitUntil: cliErr.LimitUntil,
+	})
+}
+
+func (r *jobRun) deliverError(ctx context.Context, comp api.Completion) {
 	if err := r.saveTranscript(ctx); err != nil {
 		r.cfg.Log.WarnContext(ctx, "save transcript", "job_id", r.grant.JobID, "err", err)
 	}

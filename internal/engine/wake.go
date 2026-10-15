@@ -56,6 +56,7 @@ const (
 	WakeStalled     WakeOutcome = "stalled"         // failing turns carried the inbox too often
 	WakeBudgetSpent WakeOutcome = "budget_spent"    // the day's wake budget is spent (§4.3)
 	WakeDuplicate   WakeOutcome = "duplicate"       // a user message repeating one sent moments ago (§12.1); nothing new was queued
+	WakeLimited     WakeOutcome = "limited"         // the foreman hit its subscription limit and has not reset (§4.4)
 )
 
 // ForemanInbox is the foreman's pending inbox as it reaches a session
@@ -84,7 +85,7 @@ func (e *Engine) wakeForemanTx(tx *sql.Tx, project int64, now time.Time) error {
 // run of failed turns that has not stalled, and a wake budget with room,
 // it submits a foreman turn carrying every pending event verbatim and
 // marks them delivered to that job. Anything that says no — no harness,
-// a live turn, the stall, the budget — leaves the events pending; a live
+// a live turn, the limit, the stall, the budget — leaves the events pending; a live
 // turn's completion re-evaluates, and `brigada status` shows the parked
 // tasks either way.
 func (e *Engine) wakeOutcomeTx(tx *sql.Tx, project int64, now time.Time) (WakeOutcome, error) {
@@ -132,6 +133,16 @@ func (e *Engine) wakeOutcomeTx(tx *sql.Tx, project int64, now time.Time) (WakeOu
 		// The turn's completion re-evaluates (§4.2): events that arrived
 		// while it ran get the next turn then, not a second job now.
 		return WakeTurnRunning, nil
+	}
+	// A limited foreman is not woken into the same wall (§4.4): the inbox
+	// waits for the reset or the user's switch. A reset time that passed
+	// is cleared here and the wake goes on.
+	limited, _, err := foremanLimitedTx(tx, project, now)
+	if err != nil {
+		return "", err
+	}
+	if limited {
+		return WakeLimited, nil
 	}
 	stalled, err := foremanWakeStalledTx(tx, project)
 	if err != nil {

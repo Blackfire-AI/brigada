@@ -115,6 +115,11 @@ func askOutcome(res engine.AskResult) string {
 		return fmt.Sprintf("queued for the foreman of project %d: its wake stalled after failing turns; see `brigada status`", p)
 	case engine.WakeBudgetSpent:
 		return fmt.Sprintf("queued for the foreman of project %d: today's wake budget is spent", p)
+	case engine.WakeLimited:
+		if res.LimitedUntil == "" {
+			return fmt.Sprintf("queued for the foreman of project %d: the foreman is limited, reset time unknown; wait, or switch it with `brigada project foreman`", p)
+		}
+		return fmt.Sprintf("queued for the foreman of project %d: the foreman is limited until %s; wait, or switch it with `brigada project foreman`", p, res.LimitedUntil)
 	default:
 		return fmt.Sprintf("queued for the foreman of project %d (%s)", p, res.Outcome)
 	}

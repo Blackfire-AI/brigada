@@ -181,6 +181,8 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request, runnerID
 		CheckResult: req.CheckResult,
 		SessionID:   req.SessionID,
 		Outcome:     req.Outcome,
+		ErrorKind:   req.ErrorKind,
+		LimitUntil:  req.LimitUntil,
 	}
 	ans, err := s.eng.Complete(r.Context(), runnerID, req.JobID, req.LeaseID, c)
 	if err != nil {
@@ -265,6 +267,10 @@ type completeRequest struct {
 	Outcome     string `json:"outcome,omitempty"`
 	CheckResult string `json:"check_result"`
 	SessionID   string `json:"session_id"`
+	// ErrorKind and LimitUntil ride with an error: the CLI failure's kind
+	// and, for a limit, its reset time (§4.4).
+	ErrorKind  string `json:"error_kind,omitempty"`
+	LimitUntil string `json:"limit_until,omitempty"`
 }
 
 type releaseRequest struct {

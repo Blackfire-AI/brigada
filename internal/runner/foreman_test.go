@@ -287,6 +287,42 @@ exit 7
 	}
 }
 
+// TestRunnerForemanLimitReachesTheEngine covers §4.4's first link: the
+// kind of the CLI's error — and the reset time its event carried —
+// rides the completion, so the engine marks the foreman limited.
+func TestRunnerForemanLimitReachesTheEngine(t *testing.T) {
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject("")
+	e.setForeman("fake", "fake-1")
+	turn := e.submitForemanTurn("a wake")
+	markerDir(t)
+
+	until := time.Now().Add(3 * time.Hour).UTC().Truncate(time.Second)
+	worker := `
+cat > /dev/null
+echo '{"type":"system_init","session_id":"foreman-sess-9"}'
+echo '{"type":"error","kind":"limit","text":"You have hit your usage limit","until":"` + until.Format(time.RFC3339) + `"}'
+exit 1
+`
+	p := e.startRunner(writeWorkerScript(t, worker), 100*time.Millisecond)
+	defer p.stop(t)
+
+	e.waitJob(turn.JobID, func(j *engine.JobInfo) bool { return j.Status == "failed" })
+	var limited sql.NullString
+	if err := e.st.View(e.ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT foreman_limited FROM projects WHERE id = ?", e.project).Scan(&limited)
+	}); err != nil {
+		t.Fatalf("read the limited state: %v", err)
+	}
+	if !limited.Valid || limited.String == "unknown" {
+		t.Fatalf("limited state = %+v, want the reset time the CLI named", limited)
+	}
+	got, err := time.Parse(engine.TimeLayout, limited.String)
+	if err != nil || !got.Equal(until) {
+		t.Errorf("limited until %q (%v), want %s", limited.String, err, until.Format(time.RFC3339))
+	}
+}
+
 // fixedLeaseToken is the secret a test pins the engine's mint to, so
 // the runner's handling of it can be checked byte for byte. Hex, the
 // shape the default mint produces.
