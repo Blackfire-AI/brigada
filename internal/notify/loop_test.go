@@ -324,6 +324,25 @@ func seedProject(t *testing.T, ctx context.Context, st *store.Store) {
 // appendEvent adds one row to the log the way the engine writes it:
 // kind, the task it names, and the payload JSON. It returns the row's
 // id, for tests that pin the cursor's position.
+// TestLoopPlanDoneNamesPlanFromPayload: a plan that finishes by an
+// amendment or an approval has no task to resolve its plan through; the
+// event's payload names it.
+func TestLoopPlanDoneNamesPlanFromPayload(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t, ctx, filepath.Join(t.TempDir(), "store.db"))
+	defer st.Close()
+	seedProject(t, ctx, st)
+	appendEvent(t, ctx, st, KindPlanDone, 0, 0, `{"status":"done","plan":1}`)
+
+	fake := &Fake{}
+	if err := NewLoop(st, fake, nil).Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	if notes := fake.Notes(); len(notes) != 1 || notes[0] != (Note{"brigada", "plan #1 done: Ship it"}) {
+		t.Fatalf("notes = %v, want the plan named from the payload", notes)
+	}
+}
+
 func appendEvent(t *testing.T, ctx context.Context, st *store.Store, kind string, project, task int64, payload string) int64 {
 	t.Helper()
 	var projectRef, taskRef any

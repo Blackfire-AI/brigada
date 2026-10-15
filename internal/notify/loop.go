@@ -167,10 +167,11 @@ func (l *Loop) advance(ctx context.Context, id int64) error {
 // renders what it has.
 func eventsAfterTx(tx *sql.Tx, after, limit int64) ([]Event, error) {
 	rows, err := tx.Query(`SELECT e.id, e.kind, COALESCE(e.task_id, 0),
-		COALESCE(t.plan_id, 0), COALESCE(p.title, ''), e.payload
+		COALESCE(t.plan_id, pp.id, 0), COALESCE(p.title, pp.title, ''), e.payload
 		FROM events e
 		LEFT JOIN tasks t ON t.id = e.task_id
 		LEFT JOIN plans p ON p.id = t.plan_id
+		LEFT JOIN plans pp ON pp.id = CASE WHEN json_valid(e.payload) THEN json_extract(e.payload, '$.plan') END
 		WHERE e.id > ?
 		ORDER BY e.id
 		LIMIT ?`, after, limit)

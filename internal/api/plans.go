@@ -186,6 +186,105 @@ type planDecisionResponse struct {
 	Tasks  []planCreatedTask `json:"tasks,omitempty"`
 }
 
+// handlePlanAmend is the foreman's plan_amend behind the API (§12.2):
+// tasks added, tasks cancelled, a waiting task's dependencies re-pointed,
+// in one transaction. The plan's id names it: a foreman token is walled
+// into its own project, a client or admin reaches every project's plans.
+// A plan that is not there is a 404, one that is done or cancelled a 409,
+// and an amendment the engine refuses — a cycle, an unknown name — a 400.
+// Idempotent like the other foreman writes.
+func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id identity) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	planID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "plan id must be an integer")
+		return
+	}
+	var req planAmendRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	var project int64
+	err = s.st.View(r.Context(), func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT project_id FROM plans WHERE id = ?", planID).Scan(&project)
+	})
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		writeError(w, http.StatusNotFound, codeNotFound, "no such plan "+strconv.FormatInt(planID, 10))
+		return
+	case err != nil:
+		s.writeInternal(w, r, "resolve the plan", err)
+		return
+	}
+	if !id.mayTouchProject(project) {
+		writeError(w, http.StatusForbidden, codeForbidden,
+			"foreman token is scoped to project "+strconv.FormatInt(id.project, 10))
+		return
+	}
+	// Only a user's token can attest that the user approved the skips;
+	// the foreman's own cancellations are never approved.
+	am := engine.PlanAmendment{Cancel: req.Cancel, SkipApproved: id.role != roleForeman}
+	for _, t := range req.Add {
+		am.Add = append(am.Add, engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Spec: t.Spec, Check: t.Check, Class: t.Class})
+	}
+	for _, rt := range req.Retarget {
+		am.Retarget = append(am.Retarget, engine.PlanRetarget{Task: rt.Task, Deps: rt.Deps})
+	}
+	res, err := s.eng.AmendPlan(r.Context(), project, planID, am)
+	switch {
+	case errors.Is(err, engine.ErrNoPlan):
+		writeError(w, http.StatusNotFound, codeNotFound, err.Error())
+		return
+	case errors.Is(err, engine.ErrPlanNotLive):
+		writeError(w, http.StatusConflict, codeConflict, err.Error())
+		return
+	case err != nil:
+		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+		return
+	}
+	out := planAmendResponse{
+		PlanID:     res.PlanID,
+		State:      res.State,
+		Cancelled:  res.Cancelled,
+		Retargeted: res.Retargeted,
+		Reasons:    res.Reasons,
+	}
+	for _, t := range res.Added {
+		out.Added = append(out.Added, planCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
+	}
+	for _, t := range res.Started {
+		out.Started = append(out.Started, planCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// planAmendRequest is the plan_amend body (§12.2): tasks to add (deps
+// name tasks of the plan, by name or id), tasks to cancel, and waiting
+// tasks whose whole dependency set is replaced.
+type planAmendRequest struct {
+	Add      []planTaskBody     `json:"add,omitempty"`
+	Cancel   []string           `json:"cancel,omitempty"`
+	Retarget []planRetargetBody `json:"retarget,omitempty"`
+}
+
+type planRetargetBody struct {
+	Task string   `json:"task"`
+	Deps []string `json:"deps"`
+}
+
+// planAmendResponse names what the amendment did.
+type planAmendResponse struct {
+	PlanID     int64             `json:"plan_id"`
+	State      string            `json:"state"`
+	Added      []planCreatedTask `json:"added,omitempty"`
+	Cancelled  []int64           `json:"cancelled,omitempty"`
+	Retargeted []int64           `json:"retargeted,omitempty"`
+	Started    []planCreatedTask `json:"started,omitempty"`
+	Reasons    []string          `json:"reasons,omitempty"`
+}
+
 // planCreatedTask is one task the plan made: its id, name and work job
 // (0 while it waits on dependencies).
 type planCreatedTask struct {

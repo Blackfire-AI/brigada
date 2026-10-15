@@ -200,6 +200,80 @@ func TestServeCallPlanCreateAwaitsApproval(t *testing.T) {
 	}
 }
 
+// TestServeCallPlanAmend covers plan_amend end to end (§12.2): a plan of
+// two tasks, a amended — a cancelled, b re-pointed off it and started,
+// c added, one dependency named by its bare id — and the text names what
+// changed and started; a cycle comes back as the tool's own error and
+// changes nothing.
+func TestServeCallPlanAmend(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	s := start(t, e)
+	a := s.call(1, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{
+		"title": "two steps",
+		"tasks": []any{
+			map[string]any{"name": "a", "spec": "one"},
+			map[string]any{"name": "b", "spec": "two", "deps": []any{"a"}},
+		},
+	}})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("plan_create errored: %s", text)
+	}
+	state := func(name string) string {
+		var st string
+		if err := e.st.View(t.Context(), func(tx *sql.Tx) error {
+			return tx.QueryRow("SELECT state FROM tasks WHERE name = ?", name).Scan(&st)
+		}); err != nil {
+			t.Fatalf("read task %s: %v", name, err)
+		}
+		return st
+	}
+
+	a = s.call(2, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan":     1,
+		"cancel":   []any{"a"},
+		"retarget": []any{map[string]any{"task": "b", "deps": []any{}}},
+		"add":      []any{map[string]any{"name": "c", "spec": "three", "deps": []any{1}}},
+	}})
+	text, isError := toolText(t, a)
+	if !isError || !strings.Contains(text, "cancelled and will never be done") && !strings.Contains(text, "which is cancelled") {
+		t.Fatalf("a dep on the cancelled task a (by id) = %q, error %v, want a refusal", text, isError)
+	}
+	if state("a") != "ready" || state("b") != "pending" {
+		t.Fatalf("a refused amendment changed the plan: a %s, b %s", state("a"), state("b"))
+	}
+
+	a = s.call(3, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan":     1,
+		"cancel":   []any{"a"},
+		"retarget": []any{map[string]any{"task": "b", "deps": []any{}}},
+		"add":      []any{map[string]any{"name": "c", "spec": "three", "deps": []any{"b"}}},
+	}})
+	text, isError = toolText(t, a)
+	if isError {
+		t.Fatalf("plan_amend errored: %s", text)
+	}
+	for _, want := range []string{"plan 1 amended", "state active", "added task", "cancelled task 1", "re-pointed task 2", "work job"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("plan_amend text = %q, want it to say %q", text, want)
+		}
+	}
+	if state("a") != "cancelled" || state("b") != "ready" || state("c") != "pending" {
+		t.Errorf("states a %s, b %s, c %s; want cancelled, ready, pending", state("a"), state("b"), state("c"))
+	}
+
+	a = s.call(4, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan":     1,
+		"retarget": []any{map[string]any{"task": "c", "deps": []any{"c"}}},
+	}})
+	if text, isError = toolText(t, a); !isError || !strings.Contains(text, "depends on itself") {
+		t.Errorf("a self-dependency = %q, error %v, want the tool's error", text, isError)
+	}
+	a = s.call(5, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{}})
+	if text, isError = toolText(t, a); !isError || !strings.Contains(text, "plan is required") {
+		t.Errorf("no plan = %q, error %v, want the tool's error", text, isError)
+	}
+}
+
 // TestIdemKey covers the key's mint (§12.1): one logical call — the
 // same arguments — mints one key; another call mints another.
 func TestIdemKey(t *testing.T) {
@@ -216,7 +290,7 @@ func TestIdemKey(t *testing.T) {
 	if idemKey("plan_create", a.canonical()) == idemKey("plan_create", b.canonical()) {
 		t.Error("a different call minted the same key")
 	}
-	if idemKey("plan_create", a.canonical()) == idemKey("plan_amend", a.canonical()) {
+	if idemKey("plan_create", a.canonical()) == idemKey("plan_other", a.canonical()) {
 		t.Error("the key does not name its tool")
 	}
 }

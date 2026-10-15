@@ -88,6 +88,115 @@ func callPlanCreate(ctx context.Context, c *api.Client, args json.RawMessage) (s
 	return b.String(), nil
 }
 
+// taskRef names a task of a plan — by name or by id — as the model writes
+// it: a string, or a bare number for an id.
+type taskRef string
+
+func (r *taskRef) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*r = taskRef(s)
+		return nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(b, &n); err != nil {
+		return fmt.Errorf("a task is named by a string or an id, got %s", b)
+	}
+	*r = taskRef(n.String())
+	return nil
+}
+
+func refStrings(refs []taskRef) []string {
+	out := make([]string, len(refs))
+	for i, r := range refs {
+		out[i] = string(r)
+	}
+	return out
+}
+
+// planAmendArgs is the plan_amend tool's arguments (§12.2).
+type planAmendArgs struct {
+	Plan     int64             `json:"plan"`
+	Add      []planAddArg      `json:"add"`
+	Cancel   []taskRef         `json:"cancel"`
+	Retarget []planRetargetArg `json:"retarget"`
+}
+
+type planAddArg struct {
+	Title string    `json:"title"`
+	Name  string    `json:"name"`
+	Deps  []taskRef `json:"deps"`
+	Spec  string    `json:"spec"`
+	Check string    `json:"check"`
+	Class string    `json:"class"`
+}
+
+type planRetargetArg struct {
+	Task taskRef   `json:"task"`
+	Deps []taskRef `json:"deps"`
+}
+
+// callPlanAmend runs the plan_amend tool (§12.2): the amendment through
+// /v1/plans/{id}/amend, rendered as text naming what changed, what
+// started and the plan's state. The idempotency key is minted from the
+// arguments, as plan_create's is.
+func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
+	var a planAmendArgs
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &a); err != nil {
+			return "", fmt.Errorf("arguments: %w", err)
+		}
+	}
+	if a.Plan == 0 {
+		return "", fmt.Errorf("plan is required: the id of the plan to amend")
+	}
+	for i := range a.Add {
+		if a.Add[i].Class == "" {
+			a.Add[i].Class = "implement"
+		}
+	}
+	am := api.PlanAmend{Cancel: refStrings(a.Cancel)}
+	for _, t := range a.Add {
+		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Spec: t.Spec, Check: t.Check, Class: t.Class})
+	}
+	for _, rt := range a.Retarget {
+		am.Retarget = append(am.Retarget, api.PlanRetarget{Task: string(rt.Task), Deps: refStrings(rt.Deps)})
+	}
+	res, err := c.AmendPlan(ctx, a.Plan, am, idemKey("plan_amend", a))
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "plan %d amended: state %s", res.PlanID, res.State)
+	label := func(t api.PlanCreatedTask) string {
+		s := fmt.Sprintf("task %d", t.TaskID)
+		if t.Name != "" {
+			s += " " + t.Name
+		}
+		return s
+	}
+	for _, t := range res.Added {
+		fmt.Fprintf(&b, "\nadded %s", label(t))
+	}
+	for _, id := range res.Cancelled {
+		fmt.Fprintf(&b, "\ncancelled task %d", id)
+	}
+	for _, id := range res.Retargeted {
+		fmt.Fprintf(&b, "\nre-pointed task %d", id)
+	}
+	for _, t := range res.Started {
+		fmt.Fprintf(&b, "\n%s: work job %d queued", label(t), t.JobID)
+	}
+	switch {
+	case res.State == "pending_approval":
+		fmt.Fprintf(&b, "\nawaiting approval, no new work queued. Why: %s. Tell the user: `brigada plan approve %d` starts it, `brigada plan reject %d` cancels it.",
+			strings.Join(res.Reasons, "; "), res.PlanID, res.PlanID)
+	case res.State == "done":
+		b.WriteString("\nthe amendment closed the plan; its done report follows in your events")
+	}
+	return b.String(), nil
+}
+
 // idemKey mints one logical call's idempotency key (§12.1): the tool's
 // name plus a hash of its arguments, canonicalized through the parsed
 // shape so two serializations of one call — the same fields in another

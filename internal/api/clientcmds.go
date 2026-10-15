@@ -207,6 +207,60 @@ func (c *Client) CreatePlan(ctx context.Context, p PlanCreate, idemKey string) (
 	return res, nil
 }
 
+// PlanAmend is a plan_amend call as the bridge sends it (§12.2): tasks to
+// add, tasks to cancel, and waiting tasks whose dependencies are
+// re-pointed. Tasks and dependencies name tasks of the plan by name, or
+// by id as a decimal.
+type PlanAmend struct {
+	Add      []PlanTask
+	Cancel   []string
+	Retarget []PlanRetarget
+}
+
+// PlanRetarget replaces one waiting task's whole dependency set.
+type PlanRetarget struct {
+	Task string
+	Deps []string
+}
+
+// PlanAmendResult names what the amendment did: the plan's state after it,
+// the added tasks, the ids cancelled and re-pointed, the tasks it started
+// (a work job queued), and why the plan waits for approval, if it does.
+type PlanAmendResult struct {
+	PlanID     int64
+	State      string
+	Added      []PlanCreatedTask
+	Cancelled  []int64
+	Retargeted []int64
+	Started    []PlanCreatedTask
+	Reasons    []string
+}
+
+// AmendPlan amends a live plan (§12.2). idemKey is the call's
+// idempotency key, minted per logical call by the bridge.
+func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey string) (PlanAmendResult, error) {
+	body := planAmendRequest{Cancel: a.Cancel}
+	for _, t := range a.Add {
+		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Spec: t.Spec, Check: t.Check, Class: t.Class})
+	}
+	for _, rt := range a.Retarget {
+		body.Retarget = append(body.Retarget, planRetargetBody{Task: rt.Task, Deps: rt.Deps})
+	}
+	var out planAmendResponse
+	path := "/v1/plans/" + strconv.FormatInt(plan, 10) + "/amend"
+	if err := c.callKeyed(ctx, http.MethodPost, path, idemKey, body, &out); err != nil {
+		return PlanAmendResult{}, err
+	}
+	res := PlanAmendResult{PlanID: out.PlanID, State: out.State, Cancelled: out.Cancelled, Retargeted: out.Retargeted, Reasons: out.Reasons}
+	for _, t := range out.Added {
+		res.Added = append(res.Added, PlanCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
+	}
+	for _, t := range out.Started {
+		res.Started = append(res.Started, PlanCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
+	}
+	return res, nil
+}
+
 // PlanDecisionResult is what approving or rejecting a plan did (§6.3):
 // the plan's new state and, for an approval, the first wave's tasks
 // with their queued work jobs.

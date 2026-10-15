@@ -121,9 +121,23 @@ func validatePlanGraph(tasks []PlanTask) ([][]int, error) {
 			}
 		}
 	}
-	// Depth-first search for a cycle: state 1 = on the current path,
-	// 2 = finished with no cycle through it.
-	state := make([]int, len(tasks))
+	if c := findCycle(deps); c != nil {
+		names := make([]string, len(c))
+		for k, idx := range c {
+			names[k] = label(idx)
+		}
+		return nil, fmt.Errorf("dependency cycle: %s", strings.Join(names, " -> "))
+	}
+	return deps, nil
+}
+
+// findCycle searches a dependency graph (each node's dependencies as
+// indexes) for a cycle and returns its nodes, the first repeated at the
+// end; nil when the graph is acyclic.
+func findCycle(deps [][]int) []int {
+	// Depth-first search: state 1 = on the current path, 2 = finished
+	// with no cycle through it.
+	state := make([]int, len(deps))
 	var path []int
 	var visit func(i int) []int
 	visit = func(i int) []int {
@@ -147,19 +161,15 @@ func validatePlanGraph(tasks []PlanTask) ([][]int, error) {
 		state[i] = 2
 		return nil
 	}
-	for i := range tasks {
+	for i := range deps {
 		if state[i] != 0 {
 			continue
 		}
 		if c := visit(i); c != nil {
-			names := make([]string, len(c))
-			for k, idx := range c {
-				names[k] = label(idx)
-			}
-			return nil, fmt.Errorf("dependency cycle: %s", strings.Join(names, " -> "))
+			return c
 		}
 	}
-	return deps, nil
+	return nil
 }
 
 func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []PlanTask, now time.Time) (CreatePlanResult, error) {
@@ -318,6 +328,7 @@ func (e *Engine) queueTaskWorkTx(tx *sql.Tx, project, taskID int64, spec string,
 // decides the dependent's fate.
 func (e *Engine) releaseDependentsTx(tx *sql.Tx, project, done int64, now time.Time) error {
 	rows, err := tx.Query(`SELECT t.id, t.spec FROM task_deps d JOIN tasks t ON t.id = d.task_id
+		JOIN plans p ON p.id = t.plan_id AND p.state = 'active'
 		WHERE d.depends_on_task_id = ? AND t.state = ?
 		AND NOT EXISTS (SELECT 1 FROM task_deps o JOIN tasks x ON x.id = o.depends_on_task_id
 			WHERE o.task_id = t.id AND x.state <> ?)
