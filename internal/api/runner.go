@@ -225,7 +225,9 @@ type advertiseRequest struct {
 }
 
 // agentAdvert is one advertised (adapter, harness, model) combination
-// (§5.1, §11): what the dispatcher chooses between (§8).
+// (§5.1, §11): what the dispatcher chooses between (§8). Account labels
+// the login whose quota the agent spends; the runner defaults it to the
+// harness name.
 type agentAdvert struct {
 	Adapter string   `json:"adapter"`
 	Harness string   `json:"harness"`

@@ -213,6 +213,140 @@ func TestRunnerHarnessFlags(t *testing.T) {
 	}
 }
 
+// registeredAccounts starts an engine on a fresh state directory, runs a
+// runner with the given args against it, and returns the account stored
+// for each offered harness together with the runner's own name — what
+// the engine holds, not what the flag parser produced.
+func registeredAccounts(t *testing.T, harnesses []string, args ...string) (accounts map[string]string, runnerName string) {
+	t.Helper()
+	state := testsupport.ShortStateDir(t)
+	st, err := store.Open(context.Background(), lifecycle.PathsOf(state).Store)
+	if err != nil {
+		t.Fatalf("open the store: %v", err)
+	}
+	defer st.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- lifecycle.Run(ctx, lifecycle.Config{StateDir: state, Idle: time.Minute}) }()
+	socket := lifecycle.PathsOf(state).Socket
+	deadline := time.Now().Add(10 * time.Second)
+	for !lifecycle.EngineRunning(ctx, socket) {
+		if time.Now().After(deadline) {
+			t.Fatal("the engine did not answer in time")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	runnerName, _, err = lifecycle.TokenForRole(lifecycle.PathsOf(state).Tokens, "runner")
+	if err != nil {
+		t.Fatalf("read the runner token: %v", err)
+	}
+
+	rctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	runDone := make(chan int, 1)
+	full := append([]string{"runner", "--state-dir", state, "--no-start"}, args...)
+	go func() { runDone <- run(rctx, full, io.Discard, io.Discard) }()
+	accounts = map[string]string{}
+	deadline = time.Now().Add(10 * time.Second)
+	for len(accounts) < len(harnesses) {
+		for _, h := range harnesses {
+			var account string
+			err := st.View(ctx, func(tx *sql.Tx) error {
+				return tx.QueryRow("SELECT account FROM agents WHERE harness = ?", h).Scan(&account)
+			})
+			if err == nil {
+				accounts[h] = account
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				t.Fatalf("read the registered account: %v", err)
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the runner did not register its agents in time")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	stop()
+	select {
+	case <-runDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the runner did not stop")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Error("the engine did not stop")
+	}
+	return accounts, runnerName
+}
+
+// TestRunnerAccountLabels: the account an agent registers under is its
+// account= label, else its harness name — never the runner's name — so
+// one agent's quota cooling cannot reach another harness's login.
+func TestRunnerAccountLabels(t *testing.T) {
+	worker := filepath.Join(t.TempDir(), "worker.sh")
+	if err := os.WriteFile(worker, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write the worker script: %v", err)
+	}
+
+	t.Run("default and explicit labels", func(t *testing.T) {
+		accounts, runnerName := registeredAccounts(t, []string{"claude", "fake"},
+			"--agent", "harness=claude",
+			"--agent", "harness=fake,account=second-login",
+			"--worker-script", worker)
+		if accounts["claude"] != "claude" {
+			t.Errorf("claude's account = %q, want its harness name", accounts["claude"])
+		}
+		if accounts["fake"] != "second-login" {
+			t.Errorf("fake's account = %q, want second-login", accounts["fake"])
+		}
+		for h, a := range accounts {
+			if a == runnerName {
+				t.Errorf("%s's account is the runner's name %q", h, runnerName)
+			}
+		}
+	})
+
+	t.Run("shorthand flags default to the harness", func(t *testing.T) {
+		accounts, runnerName := registeredAccounts(t, []string{"fake"}, "--harness", "fake", "--worker-script", worker)
+		if accounts["fake"] != "fake" || accounts["fake"] == runnerName {
+			t.Errorf("fake's account = %q (runner %q), want the harness name", accounts["fake"], runnerName)
+		}
+	})
+
+	// A runner offers one agent per harness, so two agents of one harness
+	// sharing an account live on two runners.
+	t.Run("two agents of one harness share an explicit account", func(t *testing.T) {
+		first, _ := registeredAccounts(t, []string{"claude"}, "--agent", "harness=claude,account=team")
+		second, _ := registeredAccounts(t, []string{"claude"}, "--agent", "harness=claude,model=opus,account=team")
+		if first["claude"] != "team" || second["claude"] != "team" {
+			t.Errorf("accounts = %q and %q, want both team", first["claude"], second["claude"])
+		}
+	})
+}
+
+// TestAgentSpecAccount: the --agent parser keeps the account= key and
+// round-trips it.
+func TestAgentSpecAccount(t *testing.T) {
+	s := &agentSpecs{}
+	if err := s.Set("harness=claude,account=a,classes=review"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if got := s.specs[0].accountLabel(); got != "a" {
+		t.Errorf("accountLabel = %q, want a", got)
+	}
+	if got := s.specs[0].String(); !strings.Contains(got, "account=a") {
+		t.Errorf("String() = %q, want it to carry account=a", got)
+	}
+	if err := s.Set("harness=kimi"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if got := s.specs[1].accountLabel(); got != "kimi" {
+		t.Errorf("default accountLabel = %q, want kimi", got)
+	}
+}
+
 // TestRunnerAgentFlag covers the --agent flag's rules at startup: two
 // agents register as two rows with their own models and classes, a
 // duplicate harness is a usage error, mixing --agent with the

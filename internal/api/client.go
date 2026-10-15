@@ -46,7 +46,9 @@ func NewClient(socketPath, token string) *Client {
 
 // Agent is one advertised agent as the client sends it (§5.1): an
 // (adapter, harness, model) combination with its family, account label
-// and the classes it can take.
+// and the classes it can take. The account labels the login whose quota
+// the agent spends (§8: quota cooling covers the whole account); the
+// runner's default is the harness name.
 type Agent struct {
 	Adapter string   `json:"adapter"`
 	Harness string   `json:"harness"`
