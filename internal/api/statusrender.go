@@ -21,6 +21,9 @@ import (
 // brackets only once it has one.
 func StatusSections(st Status) string {
 	lines := runningLines(st.Running, time.Now())
+	for _, a := range st.Cooling {
+		lines = append(lines, fmt.Sprintf("cooling: %s/%s until %s (account %s)", a.Harness, a.Model, a.Until, a.Account))
+	}
 	if len(st.Plans) == 0 {
 		lines = append(lines, "plans: none")
 	} else {
@@ -58,6 +61,9 @@ func StatusSections(st Status) string {
 		lines = append(lines, "needs you:")
 		for _, n := range st.NeedsYou {
 			line := fmt.Sprintf("%s #%d %s", n.Kind, n.ID, n.State)
+			if n.Kind == "agent" {
+				line = fmt.Sprintf("agent %s %s", n.Title, n.State) // named as `brigada agent reset` takes it
+			}
 			if n.Reason != "" {
 				line += ": " + n.Reason
 			}

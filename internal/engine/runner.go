@@ -81,8 +81,13 @@ func (e *Engine) Register(ctx context.Context, name string, maxParallel int, age
 		err := tx.QueryRow("SELECT id FROM runners WHERE name = ?", name).Scan(&id)
 		switch {
 		case err == nil:
-			if _, err := tx.Exec("UPDATE runners SET last_seen_at = ?, max_parallel = ? WHERE id = ?", nowStr, maxParallel, id); err != nil {
+			if _, err := tx.Exec("UPDATE runners SET max_parallel = ? WHERE id = ?", maxParallel, id); err != nil {
 				return fmt.Errorf("touch: %w", err)
+			}
+			// The runner is back: its seen time moves and the agents
+			// broken only for being stale come back (§8 "Health").
+			if err := e.runnerSeenTx(tx, id, e.cfg.Now()); err != nil {
+				return err
 			}
 		case errors.Is(err, sql.ErrNoRows):
 			res, err := tx.Exec("INSERT INTO runners (name, max_parallel, created_at, last_seen_at) VALUES (?, ?, ?, ?)",

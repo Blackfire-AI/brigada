@@ -170,6 +170,15 @@ type Config struct {
 	// Rand draws the exploration roll, a float in [0, 1); tests inject
 	// it to pin both branches of the pick.
 	Rand func() float64
+	// LimitCooling is how long a task job's limit with no known reset
+	// cools its account (§8 "Quota"); zero keeps 30 minutes.
+	LimitCooling time.Duration
+	// FailureStreak is how many consecutive failed completions by one
+	// agent mark it broken (§8 "Health"); zero keeps 2.
+	FailureStreak int
+	// RunnerStale is how long a runner may go unseen before the sweep
+	// marks its agents broken (§8 "Health"); zero keeps 15 minutes.
+	RunnerStale time.Duration
 }
 
 // DefaultConfig returns the shipped settings (design §14 and §5.1): a
@@ -198,6 +207,9 @@ func DefaultConfig() Config {
 		NewLeaseToken:     newLeaseToken,
 		ExploreShare:      &exploreDefault,
 		Rand:              mrand.Float64,
+		LimitCooling:      defaultLimitCooling,
+		FailureStreak:     defaultFailureStreak,
+		RunnerStale:       defaultRunnerStale,
 	}
 }
 
@@ -300,6 +312,15 @@ func New(s *store.Store, cfg Config) *Engine {
 	}
 	if cfg.Rand != nil {
 		def.Rand = cfg.Rand
+	}
+	if cfg.LimitCooling > 0 {
+		def.LimitCooling = cfg.LimitCooling
+	}
+	if cfg.FailureStreak > 0 {
+		def.FailureStreak = cfg.FailureStreak
+	}
+	if cfg.RunnerStale > 0 {
+		def.RunnerStale = cfg.RunnerStale
 	}
 	return &Engine{store: s, cfg: def}
 }
