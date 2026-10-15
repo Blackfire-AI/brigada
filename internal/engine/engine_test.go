@@ -97,7 +97,10 @@ func newEnvAt(t *testing.T, path string, adjust func(*Config)) *env {
 	if err != nil {
 		t.Fatalf("seed store: %v", err)
 	}
-	cfg := Config{Now: e.clock.Now}
+	// No exploration by default, so a test's pick is the ranked best; the
+	// tests of the exploration share set it themselves.
+	noExplore := 0.0
+	cfg := Config{Now: e.clock.Now, ExploreShare: &noExplore}
 	if adjust != nil {
 		adjust(&cfg)
 	}

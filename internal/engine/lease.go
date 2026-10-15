@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strconv"
 	"time"
 
@@ -192,7 +193,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 		}
 
-		agent, agentHarness, err := leaseAgentTx(tx, owner, j)
+		cands, err := leaseAgentsTx(tx, owner, j, nowStr)
 		if err != nil {
 			return nil, err
 		}
@@ -201,15 +202,16 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		// exclusions, review-capable; a job that requires an agent — a
 		// fix round on the author's session — needs that one. A runner
 		// with none — no agents at all, only the author's family, only
-		// the excluded reviewer, not the author's agent, or no agent
-		// that takes the job's class — does not get the job. That is an
-		// unmet placement, not a cap hold: nothing is stamped, and the
-		// queue TTL measures the job's wait like any other's. A runner
-		// with no agents at all is the exception, and only for a job
-		// that carries no placement of its own: it leases with nothing
-		// recorded, as before — a class filter over an empty
-		// advertisement would leave such a runner nothing ever.
-		if agent == 0 {
+		// the excluded reviewer, not the author's agent, no agent that
+		// takes the job's class, or none ready and out of cooling — does
+		// not get the job. That is an unmet placement, not a cap hold:
+		// nothing is stamped, and the queue TTL measures the job's wait
+		// like any other's. A runner with no agents at all is the
+		// exception, and only for a job that carries no placement of its
+		// own: it leases with nothing recorded, as before — a class
+		// filter over an empty advertisement would leave such a runner
+		// nothing ever.
+		if len(cands) == 0 {
 			becauseplaced := j.ExcludeFamily != "" || j.ExcludeAgent != 0 || j.RequireAgent != 0
 			if !becauseplaced {
 				var has bool
@@ -221,39 +223,63 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			if becauseplaced {
 				continue
 			}
+			cands = []agentCand{{}} // no agent recorded
+		}
+		// The rank choice (§8): the best-scored agent, or — by the
+		// exploration share, when a next-best exists — the next-best, so a
+		// weaker agent keeps being measured.
+		walk, pick := cands, pickBest
+		if len(cands) > 1 && e.explore() {
+			walk = append([]agentCand{cands[1], cands[0]}, cands[2:]...)
+			pick = pickExploration
 		}
 		// The cap gate (§8.1): the job starts only if every layer on its
-		// path has room. A full layer holds the job in place — it stays
-		// queued and the loop moves on, so a later job on a layer with
-		// room can still be leased — and the hold is stamped on the job,
-		// which is what keeps the queue TTL from failing it (§8.1).
-		cjob, err := capsJobTx(tx, owner, agent, advertised, j)
-		if err != nil {
-			return nil, err
+		// path has room. The walk takes the first agent in pick order
+		// whose path has room, so a full account does not hold the job
+		// while a lower-ranked agent has room. A full layer on every
+		// agent holds the job in place — it stays queued and the loop
+		// moves on, so a later job on a layer with room can still be
+		// leased — and the hold, stamped on the job from the first agent
+		// walked, is what keeps the queue TTL from failing it (§8.1).
+		// What a held turn reserved, a task job may not take in the same
+		// call (§8.1): it waits like any held job.
+		var chosen *agentCand
+		var cjob, holdJob caps.Job
+		var holdLayer string
+		var holdByRoom bool
+		for i := range walk {
+			c := &walk[i]
+			cj, err := capsJobTx(tx, owner, c.id, advertised, j)
+			if err != nil {
+				return nil, err
+			}
+			layer, byRoom := "", false
+			if room, l := caps.Room(e.cfg.Caps, usage, cj); !room {
+				layer, byRoom = l, true
+			} else if j.Kind != KindForeman {
+				layer, _ = reserved.layer(cj)
+			}
+			if layer == "" {
+				chosen, cjob = c, cj
+				break
+			}
+			if i == 0 {
+				holdJob, holdLayer, holdByRoom = cj, layer, byRoom
+			}
 		}
-		if room, layer := caps.Room(e.cfg.Caps, usage, cjob); !room {
-			if err := holdAtCapTx(tx, j, cjob, layer, now); err != nil {
+		if chosen == nil {
+			if err := holdAtCapTx(tx, j, holdJob, holdLayer, now); err != nil {
 				return nil, err
 			}
 			// A held turn reserves the layer it waits on for the rest
 			// of this call: the next slot that frees there goes to it,
 			// not to a task job leasing behind it in the same poll.
-			if j.Kind == KindForeman {
-				reserved.reserve(layer, cjob.Account)
+			if holdByRoom && j.Kind == KindForeman {
+				reserved.reserve(holdLayer, holdJob.Account)
 			}
 			continue
 		}
-		// What a held turn reserved, a task job may not take in the
-		// same call (§8.1): it waits like any held job, its queue TTL
-		// protected by the hold the reservation stamps.
-		if j.Kind != KindForeman {
-			if layer, held := reserved.layer(cjob); held {
-				if err := holdAtCapTx(tx, j, cjob, layer, now); err != nil {
-					return nil, err
-				}
-				continue
-			}
-		}
+		agent, agentHarness := chosen.id, chosen.harness
 		leaseID, err := e.cfg.NewLeaseID(owner)
 		if err != nil {
 			return nil, err
@@ -302,6 +328,28 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		if _, err := appendEventTx(tx, evJobLeased, j.ProjectID, j.TaskID, j.ID,
 			eventPayload{Lease: leasePrefix(leaseID), Owner: owner, Attempt: j.Attempts + 1}, now); err != nil {
 			return nil, err
+		}
+		// Why this agent (§8): plain log, no inbox row and no wake. The
+		// agents ranked above the pick that were passed over for cap room
+		// are named; an exploration pick passed over the best on purpose,
+		// which is not a cap matter, and a walk that fell back from the
+		// explored agent to the best is a best pick.
+		if agent != 0 && j.Kind != KindForeman {
+			var over []int64
+			if pick == pickExploration && chosen.rank != 1 {
+				pick = pickBest
+			}
+			if pick == pickBest {
+				for _, c := range cands {
+					if c.rank < chosen.rank {
+						over = append(over, c.id)
+					}
+				}
+			}
+			if _, err := appendEventTx(tx, evJobAgentPicked, j.ProjectID, j.TaskID, j.ID,
+				eventPayload{Agent: agent, Score: chosen.score, Pick: pick, PassedOver: over}, now); err != nil {
+				return nil, err
+			}
 		}
 		// The task leaves ready while one of its jobs is leased (§6.1);
 		// a task already past ready keeps the state it reached.
@@ -406,41 +454,66 @@ func (r capReservation) layer(job caps.Job) (string, bool) {
 	return "", false
 }
 
-// leaseAgentTx picks the agent a lease records on the job (§8.1): the
-// runner's first agent — by id — matching the job's harness constraint,
-// offering the job kind's class, and passing the family rule's
-// exclusions when it carries them (§7, §8); when the job leaves the
-// harness open, every agent qualifies on that count. A job that
-// requires an agent (§3) — a fix round resuming the author's session —
-// has its pick named outright: that agent or none, so a same-harness
-// agent of another family never wins it. 0 when the runner advertises
-// no such agent — the caller then refuses the lease, unless the runner
-// advertises nothing at all. The harness of the pick rides beside the
-// id, so the grant can name the agent to the runner.
-func leaseAgentTx(tx *sql.Tx, runner int64, j *jobRow) (int64, string, error) {
+// The rank choices a lease records (§8).
+const (
+	pickBest        = "best"
+	pickExploration = "exploration"
+)
+
+// agentCand is one eligible agent of the lease's ranking (§8): its
+// harness rides beside the id so the grant can name it, its score is the
+// outcome record's for the job's (repo, class), and rank is its place in
+// the ranking, 0 the best.
+type agentCand struct {
+	id      int64
+	harness string
+	score   float64
+	rank    int
+}
+
+// explore rolls the exploration share (§8): true when this pick should
+// take the next-best agent. A share of 0 never rolls.
+func (e *Engine) explore() bool {
+	share := *e.cfg.ExploreShare
+	return share > 0 && e.cfg.Rand() < share
+}
+
+// leaseAgentsTx ranks the agents the lease may pick from (§8, §8.1): the
+// runner's agents matching the job's harness constraint, ready and out
+// of cooling at now, offering the job kind's class, and passing the
+// family rule's exclusions when it carries them (§7, §8) — best score
+// first for the job's (repo, class), ties in id order, so a runner with
+// no record at all ranks by id. A job that requires an agent (§3) — a
+// fix round resuming the author's session — has its list named
+// outright: that agent or none, never ranked against another. Empty
+// when the runner advertises no such agent — the caller then refuses
+// the lease, unless the runner advertises nothing at all.
+func leaseAgentsTx(tx *sql.Tx, runner int64, j *jobRow, now string) ([]agentCand, error) {
 	class := kindClass(j.Kind)
-	query := "SELECT id, family, harness, classes FROM agents WHERE runner_id = ?"
-	args := []any{runner}
+	query := `SELECT a.id, a.family, a.harness, a.classes, COALESCE(o.attempts, 0), COALESCE(o.successes, 0)
+		FROM agents a LEFT JOIN outcomes o ON o.agent_id = a.id AND o.project_id = ? AND o.class = ?
+		WHERE a.runner_id = ? AND a.health = 'ready' AND (a.cooling_until IS NULL OR a.cooling_until <= ?)`
+	args := []any{j.ProjectID, class, runner, now}
 	if j.Harness != "" {
-		query += " AND harness = ?"
+		query += " AND a.harness = ?"
 		args = append(args, j.Harness)
 	}
 	if j.RequireAgent != 0 {
-		query += " AND id = ?"
+		query += " AND a.id = ?"
 		args = append(args, j.RequireAgent)
 	}
-	rows, err := tx.Query(query+" ORDER BY id", args...)
+	rows, err := tx.Query(query+" ORDER BY a.id", args...)
 	if err != nil {
-		return 0, "", fmt.Errorf("pick the agent of runner %d: %w", runner, err)
+		return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 	}
 	defer rows.Close()
-	var pick int64
-	var pickHarness string
+	var cands []agentCand
 	for rows.Next() {
 		var id int64
+		var attempts, successes int
 		var family, harness, classes string
-		if err := rows.Scan(&id, &family, &harness, &classes); err != nil {
-			return 0, "", fmt.Errorf("pick the agent of runner %d: %w", runner, err)
+		if err := rows.Scan(&id, &family, &harness, &classes, &attempts, &successes); err != nil {
+			return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 		}
 		// The class rule (§5.1, §8: "eligible: the adapter supports the
 		// class"): an agent that does not take the job kind's class never
@@ -454,11 +527,16 @@ func leaseAgentTx(tx *sql.Tx, runner int64, j *jobRow) (int64, string, error) {
 				continue
 			}
 		}
-		pick = id
-		pickHarness = harness
-		break
+		cands = append(cands, agentCand{id: id, harness: harness, score: Score(attempts, successes)})
 	}
-	return pick, pickHarness, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
+	}
+	sort.SliceStable(cands, func(x, y int) bool { return cands[x].score > cands[y].score })
+	for i := range cands {
+		cands[i].rank = i
+	}
+	return cands, nil
 }
 
 // kindClass is the task class a job kind runs (§6.2, §8): work and fix

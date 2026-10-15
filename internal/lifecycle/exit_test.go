@@ -200,7 +200,7 @@ func TestBP8aExit(t *testing.T) {
 	// itself, then the review job its completion queued (§7) — which
 	// this one-family world never leases, so its story ends at creation.
 	if kinds := historyKinds(t, bin, state, 1); strings.Join(kinds, " ") !=
-		"job_created task_spec job_leased task_running job_completed task_reviewing job_created worker_result task_spec" {
+		"job_created task_spec job_leased job_agent_picked task_running job_completed task_reviewing job_created worker_result task_spec" {
 		t.Errorf("the first task's timeline = %v, want the whole story", kinds)
 	}
 

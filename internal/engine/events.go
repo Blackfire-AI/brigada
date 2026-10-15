@@ -20,6 +20,7 @@ const (
 	evJobCapped              = "job_capped"                // submit: the task's round cap is spent
 	evJobLeased              = "job_leased"                // a runner took the job
 	evJobCapHeld             = "job_cap_held"              // a lease poll skipped the job: a cap layer has no room (§8.1)
+	evJobAgentPicked         = "job_agent_picked"          // why a task job's lease took its agent: score, best or exploration, passed over for cap room (§8)
 	evLeaseRevived           = "lease_revived"             // a heartbeat revived a lapsed lease
 	evJobReleased            = "job_released"              // the holder gave the job back
 	evJobCompleted           = "job_completed"             // done, failed, stalled, time_cap, check_failed…
@@ -86,6 +87,13 @@ type eventPayload struct {
 	Job        int64  `json:"job,omitempty"`   // a job the event names besides its own job_id column
 	Hold       int64  `json:"hold,omitempty"`  // the attach hold the event names (§4.2 item 1)
 	Count      int64  `json:"count,omitempty"` // how many of something the event counts (§4.2, §4.3)
+	// The agent pick's why (§8): the agent, its score, how the rank
+	// chose it (pickBest or pickExploration), and the better-ranked
+	// agents passed over because their cap path had no room.
+	Agent      int64   `json:"agent,omitempty"`
+	Score      float64 `json:"score,omitempty"`
+	Pick       string  `json:"pick,omitempty"`
+	PassedOver []int64 `json:"passed_over,omitempty"`
 }
 
 // appendEventTx adds one row to the event log inside the caller's

@@ -1002,7 +1002,7 @@ func TestRunnerHistoryEndToEnd(t *testing.T) {
 	}
 	want := []string{
 		"event:job_created", "message:task_spec",
-		"event:job_leased", "event:task_running",
+		"event:job_leased", "event:job_agent_picked", "event:task_running",
 		"event:job_completed", "event:task_reviewing", "event:job_created",
 		"message:worker_result", "message:task_spec",
 	}
