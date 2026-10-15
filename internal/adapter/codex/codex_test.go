@@ -217,7 +217,26 @@ func TestParseFixtureMCPTools(t *testing.T) {
 	want := []adapter.Event{
 		{Kind: adapter.EvToolStart, Text: "brigada/plan_create"},
 		{Kind: adapter.EvToolEnd, Text: "brigada/plan_create"},
-		{Kind: adapter.EvError, ErrorKind: adapter.ErrOther, Text: "bridge exploded"},
+		// A failed call is the tool's outcome, not a fatal CLI error:
+		// the end event names the failure and the run may still end clean.
+		{Kind: adapter.EvToolEnd, Text: "brigada/status: bridge exploded"},
+	}
+	if !slices.Equal(events, want) {
+		t.Errorf("events = %+v, want %+v", events, want)
+	}
+}
+
+// TestParseFixtureMCPNullError pins the live misread of 2026-10-15: an
+// item.completed mcp_tool_call with a non-completed status and
+// "error":null read as a fatal error whose text was the four bytes
+// "null". It is the tool's end with the status named, nothing more.
+func TestParseFixtureMCPNullError(t *testing.T) {
+	events := parseFixture(t, "mcp_null_error.jsonl")
+	want := []adapter.Event{
+		{Kind: adapter.EvSession, SessionID: "01a140f9-97d3-79c3-ae80-1b9bf2ad6c49"},
+		{Kind: adapter.EvToolStart, Text: "brigada/task_restart"},
+		{Kind: adapter.EvToolEnd, Text: "brigada/task_restart: failed"},
+		{Kind: adapter.EvMessage, Text: "the restart was refused; I planned around it"},
 	}
 	if !slices.Equal(events, want) {
 		t.Errorf("events = %+v, want %+v", events, want)

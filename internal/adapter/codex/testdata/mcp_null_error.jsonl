@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"01a140f9-97d3-79c3-ae80-1b9bf2ad6c49"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"type":"mcp_tool_call","server":"brigada","tool":"task_restart","arguments":{},"status":"in_progress"}}
+{"type":"item.completed","item":{"type":"mcp_tool_call","server":"brigada","tool":"task_restart","arguments":{},"status":"failed","error":null}}
+{"type":"item.completed","item":{"type":"agent_message","text":"the restart was refused; I planned around it"}}
+{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}
