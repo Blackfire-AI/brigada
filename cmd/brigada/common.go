@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -86,6 +87,24 @@ func resolveRuntime(c *commonFlags, stderr io.Writer) (*runtime, int) {
 		return nil, fail(stderr, err)
 	}
 	return rt, 0
+}
+
+// moveToStateDir makes the state directory the process's working
+// directory. A daemon and its children must not sit in a launcher's
+// directory that can be removed; the state directory is home from the
+// moment the runtime resolves (§13). A relative state directory is made
+// absolute first, so the paths derived from it still point at it.
+func moveToStateDir(rt *runtime, stderr io.Writer) int {
+	abs, err := filepath.Abs(rt.stateDir)
+	if err == nil {
+		err = os.Chdir(abs)
+	}
+	if err != nil {
+		return fail(stderr, fmt.Errorf("move to the state directory: %w", err))
+	}
+	rt.stateDir = abs
+	rt.paths = lifecycle.PathsOf(abs)
+	return 0
 }
 
 // configForStart is the config path to hand an engine started on demand

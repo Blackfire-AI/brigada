@@ -29,6 +29,9 @@ func runEngine(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if code != 0 {
 		return code
 	}
+	if code := moveToStateDir(rt, stderr); code != 0 {
+		return code
+	}
 	idle := time.Duration(0)
 	switch {
 	case idleMinutes > 0:

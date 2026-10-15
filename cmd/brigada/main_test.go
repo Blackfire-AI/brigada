@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -157,5 +159,60 @@ func TestRunMCPNeedsToken(t *testing.T) {
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("mcp without a token wrote to stdout: %q, want the protocol's stream untouched", stdout.String())
+	}
+}
+
+// TestRunnerMovesToItsStateDir covers the daemon's home (§13): once the
+// runtime resolves, the runner's working directory is its state
+// directory, so children never inherit a launcher's directory that can
+// vanish. The agent file check fails fast, after the move.
+func TestRunnerMovesToItsStateDir(t *testing.T) {
+	t.Chdir(t.TempDir())
+	// A short path: t.TempDir under the test's name overruns the socket
+	// path cap, and resolveRuntime would refuse before the move.
+	st, err := os.MkdirTemp("", "bs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(st) })
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"runner", "--state-dir", st, "--agent", "harness=kimi,agent-file=/no/such/file"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("runner with a missing agent file: exit code = %d, want 1; stderr = %q", code, stderr.String())
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// SameFile, not string equality: macOS resolves /var to /private/var.
+	got, err := os.Stat(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.Stat(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(got, want) {
+		t.Errorf("working directory = %q, want the state directory %q", cwd, st)
+	}
+}
+
+// TestEngineRefusesAStateDirItCannotEnter covers the move's failure: a
+// state directory that is not a directory stops the engine at once,
+// naming it.
+func TestEngineRefusesAStateDirItCannotEnter(t *testing.T) {
+	t.Chdir(t.TempDir())
+	notDir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notDir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"engine", "--state-dir", notDir}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("engine with a file as state dir: exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "state directory") {
+		t.Errorf("stderr = %q, want the state directory mentioned", stderr.String())
 	}
 }
