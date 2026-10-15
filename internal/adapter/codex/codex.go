@@ -9,8 +9,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -20,13 +23,8 @@ import (
 // zero value runs `codex` from PATH; the fields carry what the agent's
 // configuration passes through.
 //
-// It is a worker harness only, and absent from
-// adapter.ResumeCapableHarnesses although its CLI resumes headless
-// (`codex exec resume <id>`): that set gates the foreman's harness,
-// whose turns carry the `brigada mcp` bridge (§12.2), and the exec run
-// path offers no MCP-config flag to carry it — Command refuses such
-// jobs outright, as the kimi adapter does. A foreman cannot run on
-// codex until its CLI can carry the bridge.
+// It can also be a foreman harness: codex's config overrides carry the
+// runner-written MCP bridge into `codex exec`.
 type Adapter struct {
 	// Binary is the CLI to run; "codex" when empty.
 	Binary string
@@ -52,27 +50,37 @@ func (a *Adapter) Name() string { return "codex" }
 // Command implements adapter.Adapter: the fresh or resume invocation of
 // the CLI, running in workdir:
 //
-//	codex exec --json -s workspace-write [-m model] [resume <id>] -- <prompt>
-//
-// The sandbox is workspace-write: the worker edits inside its worktree
-// without approval and the CLI's own default keeps the network off. The
-// CLI's default sandbox is read-only, so -s is not optional; the flag
-// that bypasses approvals and sandbox is never passed. No
-// --skip-git-repo-check either: a worker's directory is a worktree,
-// which is a git repo. The prompt is the positional after `--`, argv
+// A worker runs `codex exec --json -s workspace-write`; a foreman runs
+// `codex exec --json --approve-for-me` with the MCP overrides below.
+// The worker's sandbox lets it edit inside its worktree without approval,
+// while the CLI's default keeps the network off. No --skip-git-repo-check:
+// a worker's directory is a worktree, which is a git repo. The prompt is
+// the positional after `--`, argv
 // and no shell, verbatim — the engine's product (§1.4), not the
 // adapter's to edit, and a prompt that starts with a dash stays one.
+// For a foreman, --approve-for-me implies workspace-write and cannot be
+// combined with -s: containment is the runner's scratch directory (which
+// contains no repo) plus the foreman's instructions. The foreman never
+// edits code by policy, not enforcement; this is weaker than Claude's
+// allow/deny scope (§4).
 // The environment is the runner's ambient set minus brigada's own share
 // of it (§5.1): every BRIGADA_-prefixed variable is dropped.
 func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*exec.Cmd, error) {
-	if job.MCPConfig != "" {
-		return nil, errors.New("codex: the exec run path has no MCP-config flag; a job carrying an MCP config cannot run on it")
-	}
 	binary := a.Binary
 	if binary == "" {
 		binary = "codex"
 	}
-	args := []string{"exec", "--json", "-s", "workspace-write"}
+	args := []string{"exec", "--json"}
+	if job.MCPConfig == "" {
+		args = append(args, "-s", "workspace-write")
+	} else {
+		configArgs, err := mcpConfigArgs(job.MCPConfig)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, "--approve-for-me")
+		args = append(args, configArgs...)
+	}
 	if job.Model != "" && job.Model != DefaultModel {
 		args = append(args, "-m", job.Model)
 	}
@@ -88,6 +96,57 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	cmd.Dir = workdir
 	cmd.Env = workerEnv(os.Environ())
 	return cmd, nil
+}
+
+type mcpConfig struct {
+	Servers map[string]mcpServer `json:"mcpServers"`
+}
+
+type mcpServer struct {
+	Command *string            `json:"command"`
+	Args    *[]string          `json:"args"`
+	Env     *map[string]string `json:"env"`
+}
+
+func mcpConfigArgs(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("codex: read MCP config %q: %w", path, err)
+	}
+	var cfg mcpConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("codex: decode MCP config %q: %w", path, err)
+	}
+	if len(cfg.Servers) != 1 {
+		return nil, fmt.Errorf("codex: MCP config must name exactly one server, got %d", len(cfg.Servers))
+	}
+	var name string
+	var srv mcpServer
+	for name, srv = range cfg.Servers {
+		break
+	}
+	if name == "" || srv.Command == nil || srv.Args == nil || srv.Env == nil || *srv.Command == "" {
+		return nil, errors.New("codex: MCP config server is missing command, args, or env")
+	}
+	quotedArgs := make([]string, len(*srv.Args))
+	for i, value := range *srv.Args {
+		quotedArgs[i] = strconv.Quote(value)
+	}
+	keys := make([]string, 0, len(*srv.Env))
+	for key := range *srv.Env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	quotedEnv := make([]string, 0, len(keys))
+	for _, key := range keys {
+		quotedEnv = append(quotedEnv, key+"="+strconv.Quote((*srv.Env)[key]))
+	}
+	prefix := "mcp_servers." + name
+	return []string{
+		"-c", prefix + ".command=" + strconv.Quote(*srv.Command),
+		"-c", prefix + ".args=[" + strings.Join(quotedArgs, ",") + "]",
+		"-c", prefix + ".env={" + strings.Join(quotedEnv, ",") + "}",
+	}, nil
 }
 
 // envPrefix marks brigada's own variables: the runner's token, the
@@ -120,13 +179,18 @@ type lineJSON struct {
 }
 
 // itemJSON is the item of an item.started / item.completed event. The
-// types this adapter reads: agent_message, command_execution and error;
+// types this adapter reads: agent_message, command_execution, mcp_tool_call
+// and error;
 // every other type (reasoning, file changes, …) is ignored.
 type itemJSON struct {
-	Type    string `json:"type"`
-	Text    string `json:"text"`
-	Message string `json:"message"`
-	Command string `json:"command"`
+	Type    string          `json:"type"`
+	Text    string          `json:"text"`
+	Message string          `json:"message"`
+	Command string          `json:"command"`
+	Server  string          `json:"server"`
+	Tool    string          `json:"tool"`
+	Status  string          `json:"status"`
+	Error   json.RawMessage `json:"error"`
 }
 
 // maxToolText bounds a command's text in a tool event: a heredoc can
@@ -149,6 +213,8 @@ func firstLine(command string) string {
 //	item.completed agent_message      → assistant message
 //	item.started command_execution    → tool start (the command's first line)
 //	item.completed command_execution  → tool end (the same text)
+//	item.started mcp_tool_call       → tool start (server/tool)
+//	item.completed mcp_tool_call     → tool end, or error when it failed
 //	error, turn.failed, error item    → an error event, sorted by its text
 //	turn.started, turn.completed      → ignored: the usage counters it
 //	                                    carries are no progress
@@ -204,6 +270,15 @@ func itemEvent(lj lineJSON) (adapter.Event, bool) {
 			kind = adapter.EvToolStart
 		}
 		return adapter.Event{Kind: kind, Text: firstLine(lj.Item.Command)}, true
+	case "mcp_tool_call":
+		text := firstLine(lj.Item.Server + "/" + lj.Item.Tool)
+		if started {
+			return adapter.Event{Kind: adapter.EvToolStart, Text: text}, true
+		}
+		if lj.Item.Status != "" && lj.Item.Status != "completed" && lj.Item.Status != "success" {
+			return errorEvent(mcpErrorText(lj.Item))
+		}
+		return adapter.Event{Kind: adapter.EvToolEnd, Text: text}, true
 	case "error":
 		if started {
 			return adapter.Event{}, false
@@ -212,6 +287,26 @@ func itemEvent(lj lineJSON) (adapter.Event, bool) {
 	default:
 		return adapter.Event{}, false
 	}
+}
+
+func mcpErrorText(item *itemJSON) string {
+	if len(item.Error) != 0 {
+		var message string
+		if json.Unmarshal(item.Error, &message) == nil && message != "" {
+			return message
+		}
+		var detail struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(item.Error, &detail) == nil && detail.Message != "" {
+			return detail.Message
+		}
+		return string(item.Error)
+	}
+	if item.Message != "" {
+		return item.Message
+	}
+	return item.Status
 }
 
 // ParseErrEvent implements adapter.Adapter: one line of the CLI's

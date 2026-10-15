@@ -31,9 +31,9 @@ func TestName(t *testing.T) {
 	}
 }
 
-func TestNotAForemanHarness(t *testing.T) {
-	if adapter.ResumeCapable("codex") {
-		t.Error("codex is in ResumeCapableHarnesses; it cannot carry the foreman's MCP bridge")
+func TestForemanHarnessEligibility(t *testing.T) {
+	if !adapter.ResumeCapable("codex") {
+		t.Error("codex is absent from ResumeCapableHarnesses")
 	}
 }
 
@@ -108,10 +108,37 @@ func TestCommand(t *testing.T) {
 	}
 }
 
-func TestCommandMCPConfigRefused(t *testing.T) {
+func TestCommandMCPConfig(t *testing.T) {
 	stubCLI(t)
-	if _, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", MCPConfig: "/tmp/mcp.json"}, t.TempDir(), ""); err == nil {
-		t.Fatal("Command accepted an MCP config; the exec path has no flag for it")
+	config := filepath.Join(t.TempDir(), "mcp.json")
+	if err := os.WriteFile(config, []byte(`{"mcpServers":{"brigada":{"command":"/bin/brigada","args":["mcp","--socket","/tmp/sock"],"env":{"BRIGADA_TOKEN":"secret"}}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", MCPConfig: config, Model: "gpt-5"}, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("Command: %v", err)
+	}
+	args := strings.Join(cmd.Args[1:], " ")
+	if !strings.Contains(args, "--approve-for-me") || strings.Contains(args, " -s ") || !strings.Contains(args, `mcp_servers.brigada.command="/bin/brigada"`) || !strings.Contains(args, `mcp_servers.brigada.args=["mcp","--socket","/tmp/sock"]`) || !strings.Contains(args, `mcp_servers.brigada.env={BRIGADA_TOKEN="secret"}`) {
+		t.Errorf("foreman args = %q", args)
+	}
+}
+
+func TestCommandMCPConfigRejectsInvalidServers(t *testing.T) {
+	stubCLI(t)
+	for name, body := range map[string]string{
+		"two servers":  `{"mcpServers":{"a":{"command":"a","args":[],"env":{}},"b":{"command":"b","args":[],"env":{}}}}`,
+		"missing args": `{"mcpServers":{"brigada":{"command":"/bin/brigada","env":{}}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "mcp.json")
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", MCPConfig: path}, t.TempDir(), ""); err == nil {
+				t.Fatal("Command accepted an invalid MCP config")
+			}
+		})
 	}
 }
 
@@ -182,6 +209,18 @@ func TestParseFixtureTools(t *testing.T) {
 	}
 	if got := (&Adapter{}).ResultText(events); got != "the note starts with a fixture heading" {
 		t.Errorf("ResultText = %q", got)
+	}
+}
+
+func TestParseFixtureMCPTools(t *testing.T) {
+	events := parseFixture(t, "mcp_tools.jsonl")
+	want := []adapter.Event{
+		{Kind: adapter.EvToolStart, Text: "brigada/plan_create"},
+		{Kind: adapter.EvToolEnd, Text: "brigada/plan_create"},
+		{Kind: adapter.EvError, ErrorKind: adapter.ErrOther, Text: "bridge exploded"},
+	}
+	if !slices.Equal(events, want) {
+		t.Errorf("events = %+v, want %+v", events, want)
 	}
 }
 

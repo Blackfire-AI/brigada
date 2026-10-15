@@ -1,0 +1,3 @@
+{"type":"item.started","item":{"type":"mcp_tool_call","server":"brigada","tool":"plan_create","arguments":{},"status":"in_progress"}}
+{"type":"item.completed","item":{"type":"mcp_tool_call","server":"brigada","tool":"plan_create","arguments":{},"status":"completed","result":{}}}
+{"type":"item.completed","item":{"type":"mcp_tool_call","server":"brigada","tool":"status","arguments":{},"status":"failed","error":{"message":"bridge exploded"}}}

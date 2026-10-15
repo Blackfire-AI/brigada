@@ -139,6 +139,7 @@ const (
 // themselves to — and the engine consults the set at setup.
 var ResumeCapableHarnesses = map[string]bool{
 	"claude": true, // the Claude Code CLI: `claude -p --resume <session>` (§5.2)
+	"codex":  true, // Codex CLI: `codex exec resume <id>`; -c carries the foreman's MCP bridge
 	"fake":   true, // the scripted test adapter
 	// kimi is absent although its CLI resumes headless (`kimi --session
 	// <id>`): this set gates the foreman's harness, whose turns carry the

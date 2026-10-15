@@ -64,16 +64,21 @@ func TestProjectForemanGolden(t *testing.T) {
 		t.Fatalf("read printed %q, want %q", got, want)
 	}
 
-	// The engine's refusal — a harness that cannot resume headless — is
-	// the command's failure, with the rule on the line.
+	// Codex is resume-capable and can carry the foreman's MCP bridge.
 	stdout.Reset()
 	stderr.Reset()
 	code = run(ctx, []string{"project", "foreman", "--repo", repo, "--harness", "codex", "--model", "opus", "--state-dir", state},
 		&stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("the refused choose exit = %d, want 1", code)
+	if code != 0 || stdout.String() != "foreman set: harness=codex model=opus\n" {
+		t.Fatalf("codex choose exit = %d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "cannot resume headless") {
-		t.Fatalf("the refusal = %q, want the resume rule named", stderr.String())
+
+	// Kimi still has no way to carry the bridge, so it remains refused.
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{"project", "foreman", "--repo", repo, "--harness", "kimi", "--model", "opus", "--state-dir", state},
+		&stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "cannot resume headless") {
+		t.Fatalf("kimi refusal = code %d, stderr=%q", code, stderr.String())
 	}
 }
