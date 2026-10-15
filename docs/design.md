@@ -107,7 +107,7 @@ The runner detects the limit-hit error from the foreman's CLI. The engine marks 
 
 ### 5.2 Adapters
 
-One per CLI: build the headless command (fresh or resume), parse the CLI's event stream into progress events, detect limit-hit and auth errors, find the session id for resume. Copied where useful from Orchestrator.inc's Apache-2.0 adapters, keeping upstream license headers, carrying their NOTICE and marking modified files (CodexBar, if used, is MIT: same idea).
+One per CLI: build the headless command (fresh or resume), parse the CLI's event stream into progress events, detect limit-hit and auth errors, find the session id for resume. Copied where useful from Orchestrator.inc's Apache-2.0 adapters, keeping upstream license headers, carrying their NOTICE and marking modified files (CodexBar, if used, is MIT: same idea). The claude adapter's default worker scope allows exactly `go build`, `go test`, `go vet` and `gofmt` — the worker compiles and tests its own work as it goes; the runner still runs the check, so no new code reaches execution — and an agent config's explicit tool scope replaces the default (decided 2026-10-15).
 
 ### 5.3 The worker prompt
 

@@ -53,7 +53,8 @@ func TestCommand(t *testing.T) {
 			job:     adapter.Job{Prompt: prompt, Model: "sonnet"},
 			wantExe: "/usr/local/bin/claude",
 			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose",
-				"--model", "sonnet", "--permission-mode", "acceptEdits"},
+				"--model", "sonnet", "--permission-mode", "acceptEdits",
+				"--allowedTools", "Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)"},
 		},
 		{
 			name:    "resume run, default binary, no model",
@@ -61,7 +62,8 @@ func TestCommand(t *testing.T) {
 			resume:  "sess-9",
 			wantExe: "claude",
 			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose",
-				"--resume", "sess-9", "--permission-mode", "acceptEdits"},
+				"--resume", "sess-9", "--permission-mode", "acceptEdits",
+				"--allowedTools", "Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)"},
 		},
 		{
 			name: "tool scope and permission mode pass through",
@@ -311,6 +313,45 @@ func TestCommandWorkerPathUnchanged(t *testing.T) {
 		"--allowedTools", "Bash(git:*)"}
 	if !slices.Equal(cmd.Args, want) {
 		t.Errorf("worker args =\n%v\nwant\n%v", cmd.Args, want)
+	}
+}
+
+// TestCommandWorkerDefaultScope pins the code worker's default tool scope
+// (§5.2): a worker with no explicit scope may run the Go toolchain's
+// build, test, vet and format commands and nothing else of the shell, and
+// denies nothing by name. A foreman turn — a job with an MCP config — is
+// not a worker: it gets the foreman's scope, as TestCommandForemanScope
+// pins it.
+func TestCommandWorkerDefaultScope(t *testing.T) {
+	stubCLI(t)
+	var ad Adapter
+	cmd, err := ad.Command(adapter.Job{Prompt: "p"}, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("build worker command: %v", err)
+	}
+	want := []string{"--allowedTools",
+		"Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)"}
+	if !slices.Equal(cmd.Args[len(cmd.Args)-len(want):], want) {
+		t.Errorf("worker args = %v\nwant them to end with %v", cmd.Args, want)
+	}
+	if slices.Contains(cmd.Args, "--disallowedTools") {
+		t.Errorf("worker args deny tools by default: %v", cmd.Args)
+	}
+
+	const config = "/runner-state/mcp/turn-x1/config.json"
+	foreman, err := ad.Command(adapter.Job{Prompt: "p", MCPConfig: config}, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("build foreman command: %v", err)
+	}
+	wantForeman := []string{"claude", "-p", "--output-format", "stream-json", "--verbose",
+		"--permission-mode", "acceptEdits", "--mcp-config", config, "--strict-mcp-config",
+		"--allowedTools", "Read", "Grep", "Glob",
+		"mcp__brigada__plan_create", "mcp__brigada__answer", "mcp__brigada__task_restart",
+		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__events",
+		"mcp__brigada__capacity",
+		"--disallowedTools", "Bash", "Edit", "MultiEdit", "NotebookEdit", "Write"}
+	if !slices.Equal(foreman.Args, wantForeman) {
+		t.Errorf("foreman args =\n%v\nwant\n%v", foreman.Args, wantForeman)
 	}
 }
 
