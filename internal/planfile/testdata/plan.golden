@@ -1,0 +1,39 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 7
+title: "Ship the frobnicator"
+repo: "https://example.invalid/brigada.git"
+state: active
+created: 2026-10-12T12:00:00Z
+updated: 2026-10-12T12:30:00.5Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; states are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+tasks:
+  - id: 11
+    name: "schema"
+    title: "Add the schema"
+    class: "implement"
+    deps: []
+    state: done
+    branch: "brigada/task-11"
+    rounds: 0
+  - id: 12
+    name: "api"
+    title: "Expose it"
+    class: "implement"
+    deps: ["schema"]
+    state: needs_foreman
+    branch: "brigada/task-12"
+    rounds: 2
+    question: "Which \"auth\" scheme?\nbearer or basic?"
+  - id: 13
+    name: "docs"
+    title: "Write the docs"
+    class: "answer"
+    deps: ["schema", "api"]
+    state: pending
+    branch: ""
+    rounds: 0

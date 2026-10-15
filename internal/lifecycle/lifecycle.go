@@ -120,7 +120,12 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("engine: %w", err)
 	}
 	defer st.Close()
-	eng := engine.New(st, engine.Config{Now: cfg.Now, Caps: cfg.Caps})
+	eng := engine.New(st, engine.Config{Now: cfg.Now, Caps: cfg.Caps, PlanFiles: true})
+	// A push still running when the engine stops finishes before the
+	// store closes (defers run last-in first); what it misses stays marked
+	// in the store for the next run's catch-up below.
+	defer eng.WaitPlanFiles()
+	eng.SyncPlanFiles()
 	if err := eng.RecordInstance(ctx, int64(os.Getpid()), started); err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}

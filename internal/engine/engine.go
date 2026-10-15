@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	mrand "math/rand"
 	"path/filepath"
 	"strconv"
@@ -179,6 +180,21 @@ type Config struct {
 	// RunnerStale is how long a runner may go unseen before the sweep
 	// marks its agents broken (§8 "Health"); zero keeps 15 minutes.
 	RunnerStale time.Duration
+	// PlanFiles turns the plan-file mirror on (§6.4): after each plan
+	// change the engine pushes the plan's file to the project's remote.
+	// Off by default — the mirror runs git against the project's repo URL —
+	// and on in the running engine.
+	PlanFiles bool
+	// PlanFileRetry is how long a failed push holds the next attempt back;
+	// zero keeps 30 seconds.
+	PlanFileRetry time.Duration
+	// PlanFileTimeout bounds one plan's fetch, commit and push; zero keeps
+	// two minutes.
+	PlanFileTimeout time.Duration
+	// Warnf logs the warnings of work the engine does best-effort, the
+	// plan-file mirror's failed pushes among them; nil logs to the
+	// standard logger.
+	Warnf func(format string, args ...any)
 }
 
 // DefaultConfig returns the shipped settings (design §14 and §5.1): a
@@ -210,6 +226,9 @@ func DefaultConfig() Config {
 		LimitCooling:      defaultLimitCooling,
 		FailureStreak:     defaultFailureStreak,
 		RunnerStale:       defaultRunnerStale,
+		PlanFileRetry:     defaultPlanFileRetry,
+		PlanFileTimeout:   defaultPlanFileTimeout,
+		Warnf:             log.Printf,
 	}
 }
 
@@ -247,8 +266,9 @@ func newLeaseID(owner int64) (string, error) {
 // sweep, so expired leases and overspent caps are dealt with before
 // anything reads or writes a job.
 type Engine struct {
-	store *store.Store
-	cfg   Config
+	store  mirroredStore // the store; its commits start the plan-file mirror (§6.4)
+	cfg    Config
+	mirror planMirror // the plan-file mirror's background push (§6.4)
 }
 
 // New returns an engine over s. Zero fields of cfg keep their defaults.
@@ -322,7 +342,19 @@ func New(s *store.Store, cfg Config) *Engine {
 	if cfg.RunnerStale > 0 {
 		def.RunnerStale = cfg.RunnerStale
 	}
-	return &Engine{store: s, cfg: def}
+	def.PlanFiles = cfg.PlanFiles
+	if cfg.PlanFileRetry > 0 {
+		def.PlanFileRetry = cfg.PlanFileRetry
+	}
+	if cfg.PlanFileTimeout > 0 {
+		def.PlanFileTimeout = cfg.PlanFileTimeout
+	}
+	if cfg.Warnf != nil {
+		def.Warnf = cfg.Warnf
+	}
+	e := &Engine{cfg: def}
+	e.store = mirroredStore{Store: s, e: e}
+	return e
 }
 
 // MaxArtifactBytes is the configured cap on one artifact upload.
