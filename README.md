@@ -21,7 +21,7 @@ brigada drives the vendors' **unmodified** CLIs, each signed in with your own ac
 
 ## Status
 
-Being built in Go: a single binary and a local SQLite store, with an MCP server so your harness can call it. The engine is moving over step by step, with its tests, from an earlier Python implementation. Plans are mirrored to `.brigada/plans/<plan-id>.yaml` on the `brigada/plans` branch.
+Being built in Go: a single binary and a local SQLite store, with an MCP server so your harness can call it. The engine is moving over step by step, with its tests, from an earlier Python implementation. Plans are mirrored to `.brigada/plans/<plan-id>.yaml` on the `brigada/plans` branch. Set `snapshot_dir` in the config file (an absolute directory outside the state directory) and the engine snapshots its store daily, keeping the last seven; with the engine stopped, `brigada recover` restores the newest snapshot into a fresh store and rebuilds newer plans from their plan files. Without a snapshot, messages, transcripts and outcomes are not restored.
 
 ## License
 

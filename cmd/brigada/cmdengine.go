@@ -44,6 +44,8 @@ func runEngine(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		Idle:     idle,
 		Caps:     rt.file.Caps,
 		Notify:   rt.file.Notify,
+
+		SnapshotDir: rt.file.SnapshotDir,
 	})
 	if err != nil {
 		return fail(stderr, err)

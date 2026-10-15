@@ -46,6 +46,8 @@ Commands:
 	plan reject <id>
 	                Reject such a plan and cancel its tasks.
 	cancel <job>    Cancel a job.
+	recover         Rebuild a lost store from the newest snapshot and the
+	                plan files; the engine must be stopped (§6.4).
 	version         Print the brigada version and exit.
 	help            Print usage and exit.
 
@@ -82,6 +84,7 @@ var commands = map[string]command{
 	"cancel":  {name: "cancel", run: runCancel},
 	"agent":   {name: "agent", run: runAgent},
 	"plan":    {name: "plan", run: runPlan},
+	"recover": {name: "recover", run: runRecover},
 }
 
 // run is the entry point of the brigada command. It writes to stdout and

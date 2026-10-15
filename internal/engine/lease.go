@@ -99,6 +99,14 @@ func (e *Engine) Lease(ctx context.Context, owner int64, harnesses, labels []str
 }
 
 func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, now time.Time) (*LeaseGrant, error) {
+	// After a recover nothing is leased until one lease-expiry window has
+	// passed (§6.4); the jobs wait queued, the sweep above has already
+	// requeued the leases the lost store held.
+	if held, err := e.dispatchHeldTx(tx, now); err != nil {
+		return nil, err
+	} else if held {
+		return nil, nil
+	}
 	epoch, err := epochTx(tx)
 	if err != nil {
 		return nil, err

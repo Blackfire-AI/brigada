@@ -507,31 +507,78 @@ func (e *Engine) cancelTx(tx *sql.Tx, job *jobRow, reason string, now time.Time)
 func (e *Engine) BumpFenceEpoch(ctx context.Context) (int, error) {
 	var epoch int64
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		now := e.cfg.Now()
-		if _, err := e.sweepTx(tx, now); err != nil {
-			return err
-		}
-		if _, err := tx.Exec("UPDATE meta SET fence_epoch = fence_epoch + 1 WHERE id = 1"); err != nil {
-			return fmt.Errorf("bump fence_epoch: %w", err)
-		}
-		// Every lease the bump fences out takes its lease-scoped token
-		// with it (§6.4, §12.1); leases granted under the new epoch mint
-		// fresh ones.
-		if err := revokeAllLeaseTokensTx(tx); err != nil {
-			return err
-		}
 		var err error
-		epoch, err = epochTx(tx)
-		if err != nil {
-			return err
-		}
-		_, err = appendEventTx(tx, evFenceEpochBumped, 0, 0, 0, eventPayload{Epoch: epoch}, now)
+		epoch, err = e.bumpFenceEpochTx(tx, e.cfg.Now())
 		return err
 	})
 	if err != nil {
 		return 0, fmt.Errorf("bump fence epoch: %w", err)
 	}
 	return int(epoch), nil
+}
+
+func (e *Engine) bumpFenceEpochTx(tx *sql.Tx, now time.Time) (int64, error) {
+	if _, err := e.sweepTx(tx, now); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec("UPDATE meta SET fence_epoch = fence_epoch + 1 WHERE id = 1"); err != nil {
+		return 0, fmt.Errorf("bump fence_epoch: %w", err)
+	}
+	// Every lease the bump fences out takes its lease-scoped token
+	// with it (§6.4, §12.1); leases granted under the new epoch mint
+	// fresh ones.
+	if err := revokeAllLeaseTokensTx(tx); err != nil {
+		return 0, err
+	}
+	epoch, err := epochTx(tx)
+	if err != nil {
+		return 0, err
+	}
+	_, err = appendEventTx(tx, evFenceEpochBumped, 0, 0, 0, eventPayload{Epoch: epoch}, now)
+	return epoch, err
+}
+
+// MarkRecovered is the last step of a recover (§6.4), in one transaction:
+// it bumps the fence epoch, so a late runner's lease, heartbeat or
+// complete from before the recovery is refused, and stamps the recovery
+// time, from which the engine holds dispatch for one lease-expiry window
+// (dispatchHeldTx) so the runners whose heartbeats now fail have killed
+// their workers before anything is leased again.
+func (e *Engine) MarkRecovered(ctx context.Context) (epoch int, err error) {
+	var n int64
+	err = e.store.Update(ctx, func(tx *sql.Tx) error {
+		now := e.cfg.Now()
+		var err error
+		if n, err = e.bumpFenceEpochTx(tx, now); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("UPDATE meta SET recovered_at = ? WHERE id = 1", fmtTime(now)); err != nil {
+			return fmt.Errorf("stamp recovered_at: %w", err)
+		}
+		_, err = appendEventTx(tx, evStoreRecovered, 0, 0, 0, eventPayload{Epoch: n}, now)
+		return err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("mark recovered: %w", err)
+	}
+	return int(n), nil
+}
+
+// dispatchHeldTx reports whether the dispatch hold after a recover is
+// still on at now: recovered_at plus one lease TTL.
+func (e *Engine) dispatchHeldTx(tx *sql.Tx, now time.Time) (bool, error) {
+	var at sql.NullString
+	if err := tx.QueryRow("SELECT recovered_at FROM meta WHERE id = 1").Scan(&at); err != nil {
+		return false, fmt.Errorf("read recovered_at: %w", err)
+	}
+	if !at.Valid || at.String == "" {
+		return false, nil
+	}
+	t, err := parseTime(at.String)
+	if err != nil {
+		return false, fmt.Errorf("recovered_at: %w", err)
+	}
+	return now.Before(t.Add(e.cfg.LeaseTTL)), nil
 }
 
 // PlanWorkerSeconds sums the leased wall time the plan's jobs have

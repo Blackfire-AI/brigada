@@ -76,6 +76,10 @@ type FileConfig struct {
 	IdleMinutes float64     // 0 = the default
 	Notify      string      // notify = auto|none (§10); empty = auto
 	Caps        caps.Limits // the concurrency caps and cost weights (§8.1); zero = none
+	// SnapshotDir is where the engine snapshots its store daily (§6.4):
+	// an absolute directory outside the state directory's store. Empty =
+	// no snapshots.
+	SnapshotDir string
 }
 
 // DefaultConfigPath is where the config file lives when nothing names
@@ -130,6 +134,11 @@ func LoadConfigFile(path string) (FileConfig, error) {
 			default:
 				err = fmt.Errorf("want %s or %s", notify.ModeAuto, notify.ModeNone)
 			}
+		case key == "snapshot_dir":
+			if value != "" && !filepath.IsAbs(value) {
+				err = fmt.Errorf("want an absolute directory, got %q", value)
+			}
+			cfg.SnapshotDir = value
 		case key == "headroom":
 			var on bool
 			on, err = strconv.ParseBool(value)
@@ -137,7 +146,7 @@ func LoadConfigFile(path string) (FileConfig, error) {
 		case strings.HasPrefix(key, "caps."), strings.HasPrefix(key, "cost."):
 			err = setCap(&cfg.Caps, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, headroom, a caps.<layer> or a cost.<harness>/<model>", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, snapshot_dir, headroom, a caps.<layer> or a cost.<harness>/<model>", path, n+1, key)
 		}
 		if err != nil {
 			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)

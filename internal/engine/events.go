@@ -33,6 +33,9 @@ const (
 	evJobQueueTimedOut       = "job_queue_timed_out"       // the sweep failed a job past the queue TTL
 	evJobAttemptsExceeded    = "job_attempts_exceeded"     // the job lost MaxAttempts runners
 	evFenceEpochBumped       = "fence_epoch_bumped"        // recover fenced older-epoch leases out (§6.4)
+	evStoreRecovered         = "store_recovered"           // recover rebuilt the store; dispatch is held one lease TTL (§6.4)
+	evPlanRecovered          = "plan_recovered"            // recover rebuilt or updated a plan from its plan file (§6.4)
+	evSnapshotTaken          = "snapshot_taken"            // the engine snapshotted its store (§6.4)
 	evTaskRunning            = "task_running"              // a lease took the task from ready (§6.1)
 	evTaskReviewing          = "task_reviewing"            // the work passed its check; the review job is queued (§7)
 	evTaskDone               = "task_done"                 // the task is finished (§6.1)
@@ -95,6 +98,8 @@ type eventPayload struct {
 	Job        int64  `json:"job,omitempty"`     // a job the event names besides its own job_id column
 	Hold       int64  `json:"hold,omitempty"`    // the attach hold the event names (§4.2 item 1)
 	Count      int64  `json:"count,omitempty"`   // how many of something the event counts (§4.2, §4.3)
+	Path       string `json:"path,omitempty"`    // a snapshot's file (§6.4)
+	Bytes      int64  `json:"bytes,omitempty"`   // a snapshot's size (§6.4)
 	// The agent pick's why (§8): the agent, its score, how the rank
 	// chose it (pickBest or pickExploration), and the better-ranked
 	// agents passed over because their cap path had no room.
