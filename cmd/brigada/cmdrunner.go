@@ -14,6 +14,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter/codex"
 	"github.com/Blackfire-AI/brigada/internal/adapter/fake"
 	"github.com/Blackfire-AI/brigada/internal/adapter/kimi"
+	"github.com/Blackfire-AI/brigada/internal/adapter/opencode"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/runner"
@@ -38,8 +39,8 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		maxParallel  int
 		noStart      bool
 	)
-	fs.StringVar(&harness, "harness", "claude", "the harness this runner offers: claude, kimi, codex, or fake with --worker-script")
-	fs.StringVar(&model, "model", "", "the model to run (claude default: sonnet; kimi and codex default: the CLI's own; fake default: fake-1)")
+	fs.StringVar(&harness, "harness", "claude", "the harness this runner offers: claude, kimi, codex, opencode, or fake with --worker-script")
+	fs.StringVar(&model, "model", "", "the model to run (claude default: sonnet; kimi, codex and opencode default: the CLI's own; opencode model: provider/model; fake default: fake-1)")
 	fs.StringVar(&workerScript, "worker-script", "", "with --harness fake: the scripted worker the fake adapter drives (tests)")
 	fs.StringVar(&agentFile, "agent-file", "", "with --harness kimi: the agent definition file the CLI session starts under")
 	fs.StringVar(&classes, "classes", defaultClasses, "the task classes this runner takes, comma-separated")
@@ -127,6 +128,14 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			if spec.model == "" {
 				spec.model = codex.DefaultModel
 			}
+		case "opencode":
+			if spec.agentFile != "" {
+				return usagef(stderr, "--agent-file is a --harness kimi flag; the opencode harness takes none")
+			}
+			ad = &opencode.Adapter{}
+			if spec.model == "" {
+				spec.model = opencode.DefaultModel
+			}
 		case "fake":
 			if spec.agentFile != "" {
 				return usagef(stderr, "--agent-file is a --harness kimi flag; the fake harness takes none")
@@ -139,7 +148,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 				spec.model = "fake-1"
 			}
 		default:
-			return usagef(stderr, "unknown harness %q; want claude, kimi, codex or fake", spec.harness)
+			return usagef(stderr, "unknown harness %q; want claude, kimi, codex, opencode or fake", spec.harness)
 		}
 		ads = append(ads, ad)
 		adverts = append(adverts, api.Agent{

@@ -134,9 +134,8 @@ const (
 // ResumeCapableHarnesses is the set of harnesses a foreman may run on
 // (design §4.1): the foreman's turns wake headless and resume the
 // project's session, so choosing a foreman refuses a harness whose CLI
-// cannot resume headless. Every shipped adapter that resumes lists its
-// name here — the one place the set lives, which later adapters add
-// themselves to — and the engine consults the set at setup.
+// cannot resume headless and carry the foreman's MCP bridge. This is
+// the one place that set lives; the engine consults it at setup.
 var ResumeCapableHarnesses = map[string]bool{
 	"claude": true, // the Claude Code CLI: `claude -p --resume <session>` (§5.2)
 	"codex":  true, // Codex CLI: `codex exec resume <id>`; -c carries the foreman's MCP bridge
@@ -146,6 +145,9 @@ var ResumeCapableHarnesses = map[string]bool{
 	// `brigada mcp` bridge (§12.2), and kimi has no MCP-config flag to
 	// offer it — its adapter refuses such jobs outright. A foreman cannot
 	// run on kimi until its CLI can carry the bridge.
+	// opencode is also worker-only although `opencode run -s <id>`
+	// resumes headless: its run path has no MCP-config flag to carry
+	// the foreman bridge. Like kimi, its adapter refuses MCP-config jobs.
 }
 
 // ResumeCapable reports whether harness's CLI can resume a session
@@ -159,9 +161,11 @@ func ResumeCapable(harness string) bool {
 // message fills Text, a session id fills SessionID, an error fills
 // ErrorKind and Text.
 type Event struct {
-	Kind      EventKind
-	Time      time.Time // when the adapter parsed it; the runner's clock
-	Text      string
+	Kind EventKind
+	Time time.Time // when the adapter parsed it; the runner's clock
+	Text string
+	// SessionID may accompany any kind when the CLI puts its id in
+	// every envelope (including an error before a session-start event).
 	SessionID string
 	ErrorKind ErrorKind
 	// LimitUntil is a limit error's reset time, RFC3339, when the CLI's
