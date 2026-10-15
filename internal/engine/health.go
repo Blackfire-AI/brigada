@@ -36,8 +36,9 @@ const (
 var ErrNoAgent = errors.New("no such agent")
 
 // agentOutcomeTx keeps the quota and health states (§8) from what a
-// task or foreman completion shows: a limit cools the account, an auth
-// error or a streak of failures marks the agent broken. A job that ran
+// job completion of any kind shows — work, fix, review or foreman: a
+// limit cools the account, an auth error or a streak of failures marks
+// the agent broken. A job that ran
 // on no recorded agent, or a completion without an error, changes
 // nothing.
 func (e *Engine) agentOutcomeTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
