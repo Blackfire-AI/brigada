@@ -37,14 +37,25 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// TestRunnerKimiRegisters runs the runner command against a real engine
-// started in-process (§13), the same lifecycle a user's engine sees,
-// with --harness kimi and no --model: the agent that registers carries
-// the kimi adapter and the kimi family, its model is the name for the
-// CLI's own default, and the startup line says "default" rather than an
-// empty string. The agent file resolves at startup, so a good one is
-// through before the first job.
-func TestRunnerKimiRegisters(t *testing.T) {
+// TestRunnerHarnessRegisters covers both runner flag forms and verifies that
+// provider/model survives advertisement unchanged. No worker CLI is run.
+func TestRunnerHarnessRegisters(t *testing.T) {
+	for _, tc := range []struct {
+		name, harness, model string
+		agentForm            bool
+	}{
+		{"kimi default", "kimi", "default", false},
+		{"opencode default", "opencode", "default", false},
+		{"opencode model shorthand", "opencode", "provider/model", false},
+		{"opencode model agent flag", "opencode", "provider/model", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testRunnerHarnessRegisters(t, tc.harness, tc.model, tc.agentForm)
+		})
+	}
+}
+
+func testRunnerHarnessRegisters(t *testing.T, harness, wantModel string, agentForm bool) {
 	state := testsupport.ShortStateDir(t)
 	agentFile := filepath.Join(t.TempDir(), "worker.md")
 	if err := os.WriteFile(agentFile, []byte("# the agent\n"), 0o644); err != nil {
@@ -78,15 +89,24 @@ func TestRunnerKimiRegisters(t *testing.T) {
 	defer stop()
 	out := &syncBuffer{}
 	runDone := make(chan int, 1)
-	go func() {
-		runDone <- run(rctx, []string{"runner", "--harness", "kimi", "--agent-file", agentFile,
-			"--state-dir", state, "--no-start"}, out, io.Discard)
-	}()
+	args := []string{"runner", "--state-dir", state, "--no-start"}
+	if agentForm {
+		args = append(args, "--agent", "harness="+harness+",model="+wantModel)
+	} else {
+		args = append(args, "--harness", harness)
+		if wantModel != "default" {
+			args = append(args, "--model", wantModel)
+		}
+		if harness == "kimi" {
+			args = append(args, "--agent-file", agentFile)
+		}
+	}
+	go func() { runDone <- run(rctx, args, out, io.Discard) }()
 	var adapterName, family, model string
 	deadline = time.Now().Add(10 * time.Second)
 	for {
 		err := st.View(ctx, func(tx *sql.Tx) error {
-			return tx.QueryRow("SELECT adapter, family, model FROM agents WHERE harness = 'kimi'").
+			return tx.QueryRow("SELECT adapter, family, model FROM agents WHERE harness = ?", harness).
 				Scan(&adapterName, &family, &model)
 		})
 		if err == nil {
@@ -107,14 +127,14 @@ func TestRunnerKimiRegisters(t *testing.T) {
 		t.Fatal("the runner did not stop")
 	}
 
-	if adapterName != "kimi" || family != "kimi" {
-		t.Errorf("the registered agent = adapter %s, family %s; want kimi, kimi", adapterName, family)
+	if adapterName != harness || family != harness {
+		t.Errorf("the registered agent = adapter %s, family %s; want %s, %s", adapterName, family, harness, harness)
 	}
-	if model != "default" {
-		t.Errorf("the registered model = %q, want \"default\": the name for the CLI's own", model)
+	if model != wantModel {
+		t.Errorf("the registered model = %q, want %q", model, wantModel)
 	}
-	if line := out.String(); !strings.Contains(line, "kimi (model default, classes implement,review,answer)") {
-		t.Errorf("the startup line = %q, want the model to read default with the classes", line)
+	if line := out.String(); !strings.Contains(line, harness+" (model "+wantModel+", classes implement,review,answer)") {
+		t.Errorf("the startup line = %q, want the harness and model with the classes", line)
 	}
 
 	// The engine stops cleanly once the runner is gone.
@@ -132,7 +152,7 @@ func TestRunnerKimiRegisters(t *testing.T) {
 // TestRunnerHarnessFlags covers the harness flag's rules at startup:
 // --agent-file belongs to kimi alone and is a usage error under every
 // other harness, an agent file that does not exist fails at once rather
-// than at the first job, and an unknown harness names all three.
+// than at the first job, and an unknown harness names every supported adapter.
 func TestRunnerHarnessFlags(t *testing.T) {
 	state := testsupport.ShortStateDir(t)
 	dir := t.TempDir()
@@ -147,14 +167,20 @@ func TestRunnerHarnessFlags(t *testing.T) {
 		wantErr  string
 	}{
 		{
-			name:     "an unknown harness names all four",
+			name:     "an unknown harness names all five",
 			args:     []string{"runner", "--harness", "gemini", "--state-dir", state},
 			wantCode: 2,
-			wantErr:  `unknown harness "gemini"; want claude, kimi, codex or fake`,
+			wantErr:  `unknown harness "gemini"; want claude, kimi, codex, opencode or fake`,
 		},
 		{
 			name:     "agent file with the claude harness is a usage error",
 			args:     []string{"runner", "--harness", "claude", "--agent-file", agentFile, "--state-dir", state},
+			wantCode: 2,
+			wantErr:  "--agent-file is a --harness kimi flag",
+		},
+		{
+			name:     "agent file with the opencode harness is a usage error",
+			args:     []string{"runner", "--harness", "opencode", "--agent-file", agentFile, "--state-dir", state},
 			wantCode: 2,
 			wantErr:  "--agent-file is a --harness kimi flag",
 		},
@@ -243,9 +269,9 @@ func TestRunnerAgentFlag(t *testing.T) {
 			wantErr: `unknown field "budget"`,
 		},
 		{
-			name:    "an unknown harness names all four",
+			name:    "an unknown harness names all five",
 			args:    []string{"runner", "--agent", "harness=gemini", "--state-dir", state},
-			wantErr: `unknown harness "gemini"; want claude, kimi, codex or fake`,
+			wantErr: `unknown harness "gemini"; want claude, kimi, codex, opencode or fake`,
 		},
 		{
 			name:    "an agent file under the claude harness is refused",

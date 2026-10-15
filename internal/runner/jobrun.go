@@ -354,11 +354,10 @@ func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte, fromStderr bool) {
 	}
 	ev.Time = r.now()
 	r.events = append(r.events, ev)
+	if ev.SessionID != "" {
+		r.sessionID = ev.SessionID
+	}
 	switch ev.Kind {
-	case adapter.EvSession:
-		if ev.SessionID != "" {
-			r.sessionID = ev.SessionID
-		}
 	case adapter.EvError:
 		// A stderr-sorted error is kept apart from the stream's own
 		// (see stderrError): stderr carries warnings beside failures.

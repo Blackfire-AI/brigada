@@ -14,6 +14,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
 	"github.com/Blackfire-AI/brigada/internal/adapter/fake"
+	"github.com/Blackfire-AI/brigada/internal/adapter/opencode"
 	"github.com/Blackfire-AI/brigada/internal/api"
 )
 
@@ -60,6 +61,49 @@ func TestAgentForSelectsTheNamedAgent(t *testing.T) {
 	for _, h := range []string{"fakea", "fakeb"} {
 		if _, _, err := two.agentFor(&api.JobGrant{Agent: h}); err != nil {
 			t.Errorf("agentFor(%s): %v", h, err)
+		}
+	}
+}
+
+func TestAgentForOpenCode(t *testing.T) {
+	opencodeAdapter := &opencode.Adapter{}
+	cfg := Config{
+		Agents: []api.Agent{
+			{Adapter: "fake", Harness: "fake", Model: "fake-1"},
+			{Adapter: "opencode", Harness: "opencode", Model: "provider/model", Family: "opencode"},
+		},
+		Adapters: []adapter.Adapter{&fake.Adapter{}, opencodeAdapter},
+	}
+	ad, model, err := cfg.agentFor(&api.JobGrant{Agent: "opencode"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ad != opencodeAdapter || model != "provider/model" {
+		t.Errorf("agentFor(opencode) = %v/%s, want the advertised adapter/provider/model", ad, model)
+	}
+	if got := cfg.harnessesOffered(); len(got) != 2 || got[0] != "fake" || got[1] != "opencode" {
+		t.Errorf("offered harnesses = %v, want fake and opencode", got)
+	}
+}
+
+// OpenCode may fail before step_start. Its error envelope still carries
+// the session id; recording it must retain both the failure and resume id.
+func TestOpenCodeErrorSessionWriteBack(t *testing.T) {
+	for _, stderr := range []bool{false, true} {
+		r := &jobRun{cfg: &Config{Clock: realClock()}}
+		r.recordEvent(&opencode.Adapter{}, []byte(`{"type":"error","sessionID":"ses_early","error":{"name":"APIError","data":{"message":"quota exhausted","statusCode":429}}}`), stderr)
+		if r.sessionID != "ses_early" {
+			t.Errorf("stderr %v: session id = %q, want ses_early", stderr, r.sessionID)
+		}
+		failure := r.cliError
+		if stderr {
+			failure = r.stderrError
+		}
+		if failure == nil || failure.ErrorKind != adapter.ErrLimit {
+			t.Errorf("stderr %v: failure = %+v, want limit", stderr, failure)
+		}
+		if !r.lastProgress.IsZero() || r.toolInFlight != 0 {
+			t.Errorf("an error counted as progress: %+v", r)
 		}
 	}
 }

@@ -1,0 +1,1 @@
+{"type":"error","timestamp":1792097709557,"sessionID":"ses_fixture","error":{"name":"APIError","data":{"message":"Usage limit reached: quota exhausted","statusCode":429,"isRetryable":false,"responseBody":"{\"error\":{\"message\":\"Usage limit reached: quota exhausted\"}}","metadata":{"url":"https://fixture.invalid/v1/chat/completions"}}}}
