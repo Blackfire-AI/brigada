@@ -1,0 +1,51 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Creating the release and uploading assets needs contents:write. If the
+# repository's default workflow permissions are read-only, this block still
+# grants it to this workflow's token.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.27.x
+      # modernc.org/sqlite is pure Go and the module has no cgo files or build
+      # constraints, so CGO_ENABLED=0 cross-compiles every target from this
+      # one runner.
+      - name: build
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          mkdir dist stage
+          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            name="brigada-${os}-${arch}"
+            GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X github.com/Blackfire-AI/brigada/internal/version.Version=${version}" \
+              -o "stage/brigada" ./cmd/brigada
+            # Raw binary (curl-able) and a tarball holding the same binary.
+            cp stage/brigada "dist/${name}"
+            tar -C stage -czf "dist/${name}.tar.gz" brigada
+          done
+          cd dist
+          sha256sum brigada-* > SHA256SUMS
+          ls -l
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
