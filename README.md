@@ -108,6 +108,17 @@ brigada cancel <job-id>
 
 brigada has no API-key setting of its own yet. Workers inherit your environment (minus brigada's own variables), so a CLI that you have set up with an API key the way its vendor documents is driven the same way. See [docs/TERMS.md](docs/TERMS.md).
 
+## Releasing
+
+Maintainers tag a version and push the tag:
+
+```
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The `release` workflow builds `brigada-<os>-<arch>` binaries (darwin and linux, amd64 and arm64) with the tag as the version, plus a `.tar.gz` of each and `SHA256SUMS`, and attaches them to a new GitHub release. Users without Go download the binary for their platform from the releases page; with Go, `go install github.com/Blackfire-AI/brigada/cmd/brigada@latest` works too. `brigada version` prints the tag without its leading `v`; a plain `go build` prints `0.0.0-dev`.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
