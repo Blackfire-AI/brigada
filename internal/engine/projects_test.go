@@ -90,7 +90,7 @@ func TestSetProjectForemanRefusals(t *testing.T) {
 		{"no repo", "", "claude", "opus", "repo URL is required"},
 		{"no harness", repo, "", "opus", "foreman harness is required"},
 		{"no model", repo, "claude", "", "foreman model is required"},
-		{"unresumable harness", repo, "codex", "opus", `harness "codex" cannot resume headless`},
+		{"unresumable harness", repo, "kimi", "opus", `harness "kimi" cannot resume headless`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := e.eng.SetProjectForeman(e.ctx, tc.url, tc.harness, tc.model)
@@ -113,7 +113,7 @@ func TestSetProjectForemanRefusals(t *testing.T) {
 
 	// The refusal names the harnesses that do resume, so the caller knows
 	// what to pick instead.
-	if _, err := e.eng.SetProjectForeman(e.ctx, repo, "codex", "opus"); err == nil ||
+	if _, err := e.eng.SetProjectForeman(e.ctx, repo, "kimi", "opus"); err == nil ||
 		!strings.Contains(err.Error(), "claude") {
 		t.Errorf("the refusal = %v, want it to name a resume-capable harness", err)
 	}

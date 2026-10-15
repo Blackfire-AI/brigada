@@ -115,12 +115,19 @@ func TestProjectForemanRules(t *testing.T) {
 
 	// An unresumable harness is a 400 that names the refusal.
 	code, _, data = e.do(http.MethodPut, "/v1/projects/foreman", "alice", "",
-		[]byte(`{"repo_url":"`+repo+`","harness":"codex","model":"opus"}`))
+		[]byte(`{"repo_url":"`+repo+`","harness":"kimi","model":"opus"}`))
 	if code != http.StatusBadRequest {
 		t.Fatalf("an unresumable harness: %d %s, want 400", code, data)
 	}
 	if err := decode[errBody](t, data); !strings.Contains(err.Error, "cannot resume headless") || err.Code != codeBadRequest {
 		t.Errorf("the refusal = %+v, want the bad_request code and the resume rule named", err)
+	}
+
+	// Codex resumed by thread id is foreman-capable now (§4.4's switch).
+	code, _, data = e.do(http.MethodPut, "/v1/projects/foreman", "alice", "",
+		[]byte(`{"repo_url":"`+repo+`","harness":"codex","model":"gpt-5.3-codex"}`))
+	if code != http.StatusOK {
+		t.Fatalf("a codex foreman: %d %s, want 200", code, data)
 	}
 
 	// Empty fields are the caller's mistakes too.
