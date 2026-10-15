@@ -80,6 +80,10 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		}
 		args = append(args, "--approve-for-me")
 		args = append(args, configArgs...)
+		// A foreman turn runs in the runner's scratch directory, which
+		// is deliberately not a git repo; codex refuses such directories
+		// without this flag. It skips only the repo check, nothing else.
+		args = append(args, "--skip-git-repo-check")
 	}
 	if job.Model != "" && job.Model != DefaultModel {
 		args = append(args, "-m", job.Model)
