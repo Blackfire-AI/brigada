@@ -228,6 +228,24 @@ func ComposeReviewPrompt(spec, feedback, checkResult, base, branch string) strin
 	return b.String()
 }
 
+// standaloneReviewSpec stands in for the task spec of a review that has
+// no task (`brigada review --branch`, §7): the template's shape is kept,
+// and the spec section says plainly that the diff is all there is to
+// judge against.
+const standaloneReviewSpec = "There is no task spec: this is a standalone review of a branch, asked for\n" +
+	"by a person, with no plan or task behind it. Judge the change on its own\n" +
+	"merits — whether it is correct, holds together, breaks what it touches\n" +
+	"and is tested as far as it should be — from the diff and the files it\n" +
+	"touches."
+
+// ComposeStandaloneReviewPrompt builds the prompt of a review that
+// belongs to no task: the review template with the standalone stand-in
+// for the spec, no check result and no feedback, and the diff command
+// filled with the base and the branch.
+func ComposeStandaloneReviewPrompt(base, branch string) string {
+	return ComposeReviewPrompt(standaloneReviewSpec, "", "", base, branch)
+}
+
 // WorkerFeedback returns the feedback a worker job's prompt carries: the
 // text between the first "<feedback>\n" and the following "\n</feedback>",
 // or "" when the prompt has no such section (a first round's work job).

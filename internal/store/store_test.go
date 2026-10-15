@@ -344,6 +344,70 @@ func TestNotifyCursorBackfillOnUpgrade(t *testing.T) {
 	}
 }
 
+// TestReviewWithoutTaskMigrationKeepsTheRows builds the store of a
+// binary that predates migration 0023 — a job with an artifact and an
+// event hanging off it — and opens it with this binary: the CHECK edit
+// must not cascade into the jobs' dependents, and a pooled connection
+// must see the relaxed rule at once.
+func TestReviewWithoutTaskMigrationKeepsTheRows(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatalf("list migrations: %v", err)
+	}
+	var before int
+	for _, m := range migs {
+		if m.name == "review_without_task" {
+			before = m.version - 1
+			break
+		}
+	}
+	if before == 0 {
+		t.Fatal("review_without_task migration not found in allMigrations")
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("open raw store: %v", err)
+	}
+	for _, m := range migs[:before] {
+		if _, err := db.Exec(m.sql); err != nil {
+			t.Fatalf("apply %04d_%s by hand: %v", m.version, m.name, err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA user_version = " + strconv.Itoa(before)); err != nil {
+		t.Fatalf("set user_version: %v", err)
+	}
+	project := insertProject(t, db)
+	plan := insertPlan(t, db, project)
+	task := insertTask(t, db, plan)
+	job := insertJob(t, db, project, task, fmt.Sprintf("task:%d", task), "done")
+	exec(t, db, "INSERT INTO artifacts (job_id, kind, path, size, sha256, created_at) VALUES (?, 'transcript', 'p', 1, 'h', ?)", job, ts)
+	if err := db.Close(); err != nil {
+		t.Fatalf("close raw store: %v", err)
+	}
+
+	s, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	defer s.Close()
+	if n := queryInt(t, s.db, "SELECT COUNT(*) FROM artifacts WHERE job_id = ?", job); n != 1 {
+		t.Errorf("artifacts after the upgrade = %d, want the job's 1", n)
+	}
+	exec(t, s.db, `INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, branch, created_at, updated_at)
+		VALUES (?, NULL, 'review', 'review:1:x', 'fresh', 'p', 'queued', 'x', ?, ?)`, project, ts, ts)
+	if _, err := s.db.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
+		VALUES (?, NULL, 'work', 'work-without-task', 'fresh', 'p', 'queued', ?, ?)`, project, ts, ts); err == nil {
+		t.Error("a work job without a task was accepted after the upgrade")
+	}
+	// The edit survives a reopen: the schema on disk holds it.
+	s.Close()
+	again := openStore(t, path)
+	if n := queryInt(t, again.db, "SELECT COUNT(*) FROM jobs WHERE kind = 'review' AND task_id IS NULL"); n != 1 {
+		t.Errorf("task-less reviews after reopen = %d, want 1", n)
+	}
+}
+
 // TestForemanInboxBackfillOnUpgrade builds the store a binary that
 // predates the foreman_inbox migration would leave behind — with tasks
 // already parked at needs_foreman by the old log — then opens it with
@@ -677,14 +741,21 @@ func TestJobTaskPresenceFollowsKind(t *testing.T) {
 		t.Errorf("foreman job with a task: err = %v; want a CHECK failure", err)
 	}
 
-	// A worker job always belongs to a task: leaving it out is refused,
-	// for every worker kind.
-	for _, kind := range []string{"work", "fix", "review"} {
+	// A work or fix job always belongs to a task: leaving it out is
+	// refused. A review may go without one: the standalone review of
+	// `brigada review --branch` (migration 0023).
+	for _, kind := range []string{"work", "fix"} {
 		if _, err := f.db.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
 			VALUES (?, NULL, ?, ?, 'fresh', 'p', 'queued', ?, ?)`, f.project, kind, fmt.Sprintf("%s-without-task", kind), ts, ts); err == nil || !strings.Contains(err.Error(), "CHECK") {
 			t.Errorf("%s job without a task: err = %v; want a CHECK failure", kind, err)
 		}
 	}
+	exec(t, f.db, `INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
+		VALUES (?, NULL, 'review', 'review-without-task', 'fresh', 'p', 'queued', ?, ?)`, f.project, ts, ts)
+	// ...but a review with a task is as before, and the edit left the
+	// foreman rule alone.
+	exec(t, f.db, `INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
+		VALUES (?, ?, 'review', 'review-with-task', 'fresh', 'p', 'queued', ?, ?)`, f.project, f.task, ts, ts)
 
 	// The matched pairs pass: a foreman turn with no task (the fixture's
 	// work job already covers a worker with one).

@@ -78,6 +78,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/foreman/heartbeat", s.authed([]string{roleClient, roleAdmin}, s.handleForemanHeartbeat))
 	mux.HandleFunc("/v1/foreman/release", s.authed([]string{roleClient, roleAdmin}, s.handleForemanRelease))
 	mux.HandleFunc("/v1/foreman/messages", s.authed([]string{roleClient, roleAdmin}, s.idempotent(s.handleForemanAsk)))
+	mux.HandleFunc("/v1/reviews", s.authed([]string{roleClient, roleAdmin}, s.idempotent(s.handleReview)))
 	mux.HandleFunc("/v1/events", s.authed([]string{roleForeman}, s.handleForemanEvents))
 	mux.HandleFunc("/v1/jobs/{id}", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleJobGet))
 	mux.HandleFunc("/v1/jobs/{id}/cancel", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.idempotent(s.handleJobCancel)))

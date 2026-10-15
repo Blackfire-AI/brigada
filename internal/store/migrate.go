@@ -114,6 +114,11 @@ func (s *Store) apply(ctx context.Context, m migration) error {
 	if _, err := tx.ExecContext(ctx, m.sql); err != nil {
 		return fmt.Errorf("migration %04d_%s: %w", m.version, m.name, err)
 	}
+	if edit := schemaEdits[m.version]; edit != nil {
+		if err := edit(ctx, tx); err != nil {
+			return fmt.Errorf("migration %04d_%s: %w", m.version, m.name, err)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, "PRAGMA user_version = "+strconv.Itoa(m.version)); err != nil {
 		return fmt.Errorf("migration %04d_%s: set user_version: %w", m.version, m.name, err)
 	}
@@ -139,4 +144,51 @@ func userVersionTx(ctx context.Context, tx *sql.Tx) (int, error) {
 		return 0, fmt.Errorf("read user_version: %w", err)
 	}
 	return version, nil
+}
+
+// schemaEdits are the migrations whose change SQLite's ALTER TABLE
+// cannot express, run in the migration's transaction right after its
+// SQL, by migration number.
+var schemaEdits = map[int]func(ctx context.Context, tx *sql.Tx) error{
+	23: relaxJobsTaskCheck,
+}
+
+// jobsPairingCheck is the CHECK 0001 put on jobs: foreman jobs have no
+// task and every other job has one. jobsPairingCheckRelaxed lets a
+// review job go without a task too.
+const (
+	jobsPairingCheck        = "CHECK ((kind = 'foreman') = (task_id IS NULL))"
+	jobsPairingCheckRelaxed = "CHECK ((kind = 'foreman') = (task_id IS NULL) OR kind = 'review')"
+)
+
+// relaxJobsTaskCheck edits the jobs table's CHECK in place, by the
+// procedure the SQLite documentation gives for changing a constraint
+// without rebuilding the table (a rebuild drops the table, and with
+// foreign keys enforced that cascades into the artifacts): edit the
+// table's sql in the schema table and bump the schema version, so every
+// connection re-reads the schema.
+func relaxJobsTaskCheck(ctx context.Context, tx *sql.Tx) error {
+	var version int
+	if err := tx.QueryRowContext(ctx, "PRAGMA schema_version").Scan(&version); err != nil {
+		return fmt.Errorf("read schema_version: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "PRAGMA writable_schema = ON"); err != nil {
+		return fmt.Errorf("allow schema edits: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE sqlite_master SET sql = replace(sql, ?, ?)
+		WHERE type = 'table' AND name = 'jobs' AND instr(sql, ?) > 0`,
+		jobsPairingCheck, jobsPairingCheckRelaxed, jobsPairingCheck)
+	if err != nil {
+		return fmt.Errorf("edit the jobs table: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return fmt.Errorf("edit the jobs table: its kind/task CHECK was not found (rows %d, err %v)", n, err)
+	}
+	if _, err := tx.ExecContext(ctx, "PRAGMA schema_version = "+strconv.Itoa(version+1)); err != nil {
+		return fmt.Errorf("bump schema_version: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "PRAGMA writable_schema = OFF"); err != nil {
+		return fmt.Errorf("close schema edits: %w", err)
+	}
+	return nil
 }

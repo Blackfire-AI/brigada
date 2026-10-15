@@ -63,6 +63,7 @@ func summary(it Item) string {
 		Epoch   int64  `json:"epoch"`
 		Path    string `json:"path"`
 		Bytes   int64  `json:"bytes"`
+		Branch  string `json:"branch"`
 	}
 	if json.Unmarshal(it.Payload, &p) != nil {
 		return string(it.Payload)
@@ -77,6 +78,11 @@ func summary(it Item) string {
 		if v != 0 {
 			parts = append(parts, k+"="+strconv.FormatInt(v, 10))
 		}
+	}
+	// Only a standalone review's events name their branch: it is the one
+	// job with no task row to say where it reads.
+	if it.Kind == "job_created" || it.Kind == "review_verdict" {
+		add("branch", p.Branch)
 	}
 	add("answer", p.Answer)
 	add("status", p.Status)
