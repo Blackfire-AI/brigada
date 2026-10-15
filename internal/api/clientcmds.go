@@ -135,8 +135,8 @@ func (c *Client) SubmitTask(ctx context.Context, t TaskSubmit) (TaskSubmitResult
 }
 
 // PlanCreate is a plan_create call as the bridge sends it (§6.2, §12.1,
-// §12.2): the plan's title, its tasks — exactly one until plans with
-// dependencies — and, for a caller that is not the project's foreman,
+// §12.2): the plan's title, its tasks — each may depend on
+// others of the plan by name — and, for a caller that is not the project's foreman,
 // the repo URL naming the project. A foreman token's own project is the
 // only one it may plan in, so it leaves RepoURL empty.
 type PlanCreate struct {
@@ -145,25 +145,37 @@ type PlanCreate struct {
 	Tasks   []PlanTask
 }
 
-// PlanTask is one task of the plan (§6.1): title, spec, check and
-// class; an empty class means implement.
+// PlanTask is one task of the plan (§6.1): title, name, spec,
+// check, class and dependencies; an empty class means implement.
 type PlanTask struct {
 	Title string
+	Name  string   // the handle other tasks name in Deps; '' = unnamed
+	Deps  []string // names of tasks of the same plan this one waits for
 	Spec  string
 	Check string
 	Class string
 }
 
-// PlanCreateResult names what the call created: the plan, its one task,
-// and the queued work job.
+// PlanCreateResult names what the call created: the plan, the first
+// ready task with its queued work job, and every task.
 type PlanCreateResult struct {
 	Answer engine.Answer
 	PlanID int64
 	TaskID int64
 	JobID  int64
+	Tasks  []PlanCreatedTask
 }
 
-// CreatePlan creates a plan with one task and its first work job queued
+// PlanCreatedTask is one task the plan made; JobID is 0 while the task
+// waits on its dependencies.
+type PlanCreatedTask struct {
+	TaskID int64
+	Name   string
+	JobID  int64
+}
+
+// CreatePlan creates a plan with its tasks and the work job of each
+// task without dependencies queued
 // (§6.2, §12.1). idemKey is the call's idempotency key, minted per
 // logical call by the caller that knows what makes one — the bridge
 // hashes the tool call's arguments — so a repeated call replays the
@@ -171,18 +183,22 @@ type PlanCreateResult struct {
 func (c *Client) CreatePlan(ctx context.Context, p PlanCreate, idemKey string) (PlanCreateResult, error) {
 	body := planCreateRequest{RepoURL: p.RepoURL, Title: p.Title, Tasks: make([]planTaskBody, len(p.Tasks))}
 	for i, t := range p.Tasks {
-		body.Tasks[i] = planTaskBody{Title: t.Title, Spec: t.Spec, Check: t.Check, Class: t.Class}
+		body.Tasks[i] = planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Spec: t.Spec, Check: t.Check, Class: t.Class}
 	}
 	var out planCreateResponse
 	if err := c.callKeyed(ctx, http.MethodPost, "/v1/plans", idemKey, body, &out); err != nil {
 		return PlanCreateResult{}, err
 	}
-	return PlanCreateResult{
+	res := PlanCreateResult{
 		Answer: engine.Answer(out.Answer),
 		PlanID: out.PlanID,
 		TaskID: out.TaskID,
 		JobID:  out.JobID,
-	}, nil
+	}
+	for _, t := range out.Tasks {
+		res.Tasks = append(res.Tasks, PlanCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
+	}
+	return res, nil
 }
 
 // TaskAnswerResult names what an answer did: the questions row it

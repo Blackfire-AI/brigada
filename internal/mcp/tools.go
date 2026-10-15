@@ -35,7 +35,7 @@ type Tool struct {
 var tools = []Tool{
 	{
 		Name:        "plan_create",
-		Description: "Create a plan with exactly one task and queue its first work job (one task per plan until plans with dependencies). The plan is active at once.",
+		Description: "Create a plan of one or more tasks and queue the first work job of every task with no dependencies. A task may wait on others of the same plan by name (deps); it starts when all of them are done, and stays waiting if one fails or needs you. A dependency cycle refuses the plan. The plan is active at once.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -45,13 +45,22 @@ var tools = []Tool{
 				},
 				"tasks": map[string]any{
 					"type":        "array",
-					"description": "the plan's tasks; exactly one",
+					"description": "the plan's tasks",
 					"items": map[string]any{
 						"type": "object",
 						"properties": map[string]any{
 							"title": map[string]any{
 								"type":        "string",
 								"description": "the task's title; default is the spec's first line",
+							},
+							"name": map[string]any{
+								"type":        "string",
+								"description": "a short name, unique in the plan, so other tasks can list this one in deps; optional",
+							},
+							"deps": map[string]any{
+								"type":        "array",
+								"items":       map[string]any{"type": "string"},
+								"description": "names of tasks of this same plan that must be done before this one starts; default none",
 							},
 							"spec": map[string]any{
 								"type":        "string",

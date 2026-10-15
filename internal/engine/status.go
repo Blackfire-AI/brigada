@@ -97,6 +97,9 @@ type StatusTask struct {
 	Class  string `json:"class"`
 	State  string `json:"state"`
 	Branch string `json:"branch"` // empty while the task has no result branch yet
+	// WaitingOn names the unfinished dependencies of a task that waits
+	// on them (§6.1): each by its plan name, or "#id" when unnamed.
+	WaitingOn []string `json:"waiting_on,omitempty"`
 }
 
 // NeedsYouItem is one entry of the "needs you" queue (§10): something a
@@ -307,7 +310,40 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64) ([]StatusTask, error) {
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
 	}
+	rows.Close()
+	for i := range tasks {
+		if tasks[i].State != taskPending {
+			continue
+		}
+		if tasks[i].WaitingOn, err = statusWaitingOnTx(tx, tasks[i].ID); err != nil {
+			return nil, err
+		}
+	}
 	return tasks, nil
+}
+
+// statusWaitingOnTx names the dependencies of a task that are not done
+// yet, in id order: the plan name, or "#id" for a task without one.
+func statusWaitingOnTx(tx *sql.Tx, task int64) ([]string, error) {
+	rows, err := tx.Query(`SELECT x.id, x.name FROM task_deps d JOIN tasks x ON x.id = d.depends_on_task_id
+		WHERE d.task_id = ? AND x.state <> ? ORDER BY x.id`, task, taskDone)
+	if err != nil {
+		return nil, fmt.Errorf("list what task %d waits on: %w", task, err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, fmt.Errorf("list what task %d waits on: %w", task, err)
+		}
+		if name == "" {
+			name = fmt.Sprintf("#%d", id)
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
 }
 
 // statusReportTx reads the latest foreman report in scope (§3, §10):

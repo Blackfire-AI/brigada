@@ -32,6 +32,9 @@ func StatusSections(st Status) string {
 			lines = append(lines, fmt.Sprintf("#%d %s %s", p.ID, p.State, p.Title))
 			for _, t := range p.Tasks {
 				line := fmt.Sprintf("  task #%d %s %s", t.ID, t.State, t.Title)
+				if len(t.WaitingOn) > 0 {
+					line += " (waiting on " + strings.Join(t.WaitingOn, ", ") + ")"
+				}
 				if t.Branch != "" {
 					line += " [" + t.Branch + "]"
 				}

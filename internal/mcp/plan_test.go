@@ -126,10 +126,10 @@ func TestServeCallPlanCreate(t *testing.T) {
 	}
 }
 
-// TestServeCallPlanCreateRefusesTwoTasks covers the one-task rule as
-// the foreman reads it (§6.1): the engine's refusal comes back as the
-// tool's own error naming the rule, and nothing is created.
-func TestServeCallPlanCreateRefusesTwoTasks(t *testing.T) {
+// TestServeCallPlanCreateRefusesCycle covers the graph rule as the
+// foreman reads it (§6.1): a dependency cycle comes back as the tool's
+// own error naming the cycle's tasks, and nothing is created.
+func TestServeCallPlanCreateRefusesCycle(t *testing.T) {
 	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
 	s := start(t, e)
 	a := s.call(1, "tools/call", map[string]any{
@@ -137,17 +137,17 @@ func TestServeCallPlanCreateRefusesTwoTasks(t *testing.T) {
 		"arguments": map[string]any{
 			"title": "two tasks",
 			"tasks": []any{
-				map[string]any{"spec": "one"},
-				map[string]any{"spec": "two"},
+				map[string]any{"name": "a", "spec": "one", "deps": []any{"b"}},
+				map[string]any{"name": "b", "spec": "two", "deps": []any{"a"}},
 			},
 		},
 	})
 	text, isError := toolText(t, a)
 	if !isError {
-		t.Fatalf("plan_create with two tasks = %q, want the tool's error", text)
+		t.Fatalf("plan_create with a cycle = %q, want the tool's error", text)
 	}
-	if !strings.Contains(text, "one task per plan until plans with dependencies") {
-		t.Errorf("error text = %q, want the one-task rule named", text)
+	if !strings.Contains(text, "dependency cycle: a -> b -> a") {
+		t.Errorf("error text = %q, want the cycle named", text)
 	}
 	var n int64
 	if err := e.st.View(t.Context(), func(tx *sql.Tx) error {
