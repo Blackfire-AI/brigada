@@ -46,6 +46,23 @@ func (c *Client) Status(ctx context.Context) (Status, error) {
 	return st, nil
 }
 
+// Stats reads the outcome record per project (§8) through /v1/stats:
+// each agent's attempts, successes and score per class, the
+// registered-but-unrecorded ones at attempts 0. projectID names one
+// project; 0 names none, which for a foreman token means its own
+// project (§12.1) and for a client or admin every project.
+func (c *Client) Stats(ctx context.Context, projectID int64) ([]engine.ProjectStats, error) {
+	path := "/v1/stats"
+	if projectID != 0 {
+		path += "?project=" + strconv.FormatInt(projectID, 10)
+	}
+	var out []engine.ProjectStats
+	if err := c.call(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Capacity reads the capacity snapshot (§12.2) through /v1/capacity:
 // per agent the effective cap, the layer that sets it, the running
 // jobs, the quota state and the cost weight; per layer — each runner,

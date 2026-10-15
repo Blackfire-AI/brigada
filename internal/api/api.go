@@ -51,6 +51,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/health", s.handleHealth)
 	mux.HandleFunc("/v1/status", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleStatus))
+	mux.HandleFunc("/v1/stats", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleStats))
 	mux.HandleFunc("/v1/capacity", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.handleCapacity))
 	mux.HandleFunc("/v1/runner/register", s.authed([]string{roleRunner}, s.handleRegister))
 	mux.HandleFunc("/v1/runner/lease", s.authed([]string{roleRunner}, s.withRunner(s.handleLease)))

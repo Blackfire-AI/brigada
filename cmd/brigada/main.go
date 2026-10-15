@@ -38,6 +38,7 @@ Commands:
 	task submit     Submit a task (debug path until the foreman exists).
 	project foreman Show or set a repo's foreman harness and model.
 	history         Show the timeline.
+	stats           Show which agent wins which class, per repo.
 	cancel <job>    Cancel a job.
 	version         Print the brigada version and exit.
 	help            Print usage and exit.
@@ -71,6 +72,7 @@ var commands = map[string]command{
 	"task":    {name: "task", run: runTask},
 	"project": {name: "project", run: runProject},
 	"history": {name: "history", run: runHistory},
+	"stats":   {name: "stats", run: runStats},
 	"cancel":  {name: "cancel", run: runCancel},
 }
 

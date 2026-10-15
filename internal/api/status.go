@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
 )
@@ -89,4 +90,34 @@ type taskSubmitResponse struct {
 	TaskID    int64  `json:"task_id"`
 	JobID     int64  `json:"job_id"`
 	Run       int    `json:"run"`
+}
+
+// handleStats reads what the outcome record has learned (§8): per
+// project, every agent's attempts, successes and score per class, the
+// registered-but-unrecorded ones at attempts 0. Scoped like status: a
+// client or admin reads every project, or one with ?project=; a
+// foreman token is walled into its own project (§12.1) — an explicit
+// ask for another is refused, no ask means its own.
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request, id identity) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	project, err := queryInt64(w, r, "project")
+	if err != nil {
+		return
+	}
+	if id.role == roleForeman {
+		if project != 0 && !id.mayTouchProject(project) {
+			writeError(w, http.StatusForbidden, codeForbidden,
+				"foreman token is scoped to project "+strconv.FormatInt(id.project, 10))
+			return
+		}
+		project = id.project
+	}
+	stats, err := s.eng.Stats(r.Context(), project)
+	if err != nil {
+		s.writeInternal(w, r, "read stats", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
 }
