@@ -33,6 +33,7 @@ The terms used by [product.md](product.md) and [design.md](design.md). Where a d
 
 - **Project:** one repository, identified by its URL, with its own foreman, settings and records.
 - **Plan:** a graph of tasks for one ask, with dependencies, a lifecycle and an approval rule (§6). Mirrored to the **plan file** in the repo (§6.4).
+- **Plan file:** the mirror of a plan in the repo, `.brigada/plans/<plan-id>.yaml`, pushed to the `brigada/plans` branch on every plan change; the store stays authoritative and `brigada recover` reads it back (§6.4).
 - **Task:** one unit of work in a plan: title, spec, check, class, dependencies, repo and base ref, caps (§6.1).
 - **Spec:** the task's instructions to the task worker, passed verbatim.
 - **Class:** what kind of work a task is: `implement`, `review`, `answer`, …. Eligibility, scores, caps and the approval limit are per class.
