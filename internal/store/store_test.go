@@ -168,7 +168,7 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 	}
 	want := []string{
 		"agents", "artifacts", "attach_holds", "events", "foreman_inbox", "hold_tokens",
-		"idempotency", "jobs", "lease_tokens", "messages", "meta", "outcomes", "plans",
+		"idempotency", "jobs", "lease_tokens", "messages", "meta", "outcomes", "plan_mirror_dirty", "plans",
 		"projects", "questions", "runners", "sessions", "task_deps", "tasks", "tokens",
 	}
 	got := queryStrings(t, s.db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
@@ -176,7 +176,8 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 		t.Errorf("tables after a fresh open:\n got %v\nwant %v", got, want)
 	}
 	triggers := queryStrings(t, s.db, "SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name")
-	if want := []string{"events_no_delete", "events_no_update"}; !slices.Equal(triggers, want) {
+	if want := []string{"events_no_delete", "events_no_update", "plan_mirror_dep_insert", "plan_mirror_plan_insert",
+		"plan_mirror_plan_update", "plan_mirror_task_insert", "plan_mirror_task_update"}; !slices.Equal(triggers, want) {
 		t.Errorf("triggers after a fresh open: got %v, want %v", triggers, want)
 	}
 }
