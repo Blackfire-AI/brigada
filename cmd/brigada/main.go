@@ -41,6 +41,10 @@ Commands:
 	stats           Show which agent wins which class, per repo.
 	agent reset <harness>/<model>
 	                Clear a broken or cooling agent.
+	plan approve <id>
+	                Approve a plan waiting over the approval limit (§6.3).
+	plan reject <id>
+	                Reject such a plan and cancel its tasks.
 	cancel <job>    Cancel a job.
 	version         Print the brigada version and exit.
 	help            Print usage and exit.
@@ -77,6 +81,7 @@ var commands = map[string]command{
 	"stats":   {name: "stats", run: runStats},
 	"cancel":  {name: "cancel", run: runCancel},
 	"agent":   {name: "agent", run: runAgent},
+	"plan":    {name: "plan", run: runPlan},
 }
 
 // run is the entry point of the brigada command. It writes to stdout and

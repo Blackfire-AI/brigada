@@ -164,6 +164,10 @@ type PlanCreateResult struct {
 	TaskID int64
 	JobID  int64
 	Tasks  []PlanCreatedTask
+	// State and Reasons: the plan's state, and why it waits when the
+	// approval limit holds it (§6.3).
+	State   string
+	Reasons []string
 }
 
 // PlanCreatedTask is one task the plan made; JobID is 0 while the task
@@ -190,11 +194,47 @@ func (c *Client) CreatePlan(ctx context.Context, p PlanCreate, idemKey string) (
 		return PlanCreateResult{}, err
 	}
 	res := PlanCreateResult{
-		Answer: engine.Answer(out.Answer),
-		PlanID: out.PlanID,
-		TaskID: out.TaskID,
-		JobID:  out.JobID,
+		Answer:  engine.Answer(out.Answer),
+		PlanID:  out.PlanID,
+		TaskID:  out.TaskID,
+		JobID:   out.JobID,
+		State:   out.State,
+		Reasons: out.Reasons,
 	}
+	for _, t := range out.Tasks {
+		res.Tasks = append(res.Tasks, PlanCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
+	}
+	return res, nil
+}
+
+// PlanDecisionResult is what approving or rejecting a plan did (§6.3):
+// the plan's new state and, for an approval, the first wave's tasks
+// with their queued work jobs.
+type PlanDecisionResult struct {
+	PlanID int64
+	State  string
+	Tasks  []PlanCreatedTask
+}
+
+// ApprovePlan is the user's yes (§6.3): the plan's first wave queues.
+// A plan that is not there is the API's not-found error, one not
+// awaiting approval its conflict.
+func (c *Client) ApprovePlan(ctx context.Context, plan int64) (PlanDecisionResult, error) {
+	return c.decidePlan(ctx, plan, "approve")
+}
+
+// RejectPlan is the user's no (§6.3): the plan's tasks are cancelled.
+func (c *Client) RejectPlan(ctx context.Context, plan int64) (PlanDecisionResult, error) {
+	return c.decidePlan(ctx, plan, "reject")
+}
+
+func (c *Client) decidePlan(ctx context.Context, plan int64, verb string) (PlanDecisionResult, error) {
+	var out planDecisionResponse
+	path := "/v1/plans/" + strconv.FormatInt(plan, 10) + "/" + verb
+	if err := c.call(ctx, http.MethodPost, path, struct{}{}, &out); err != nil {
+		return PlanDecisionResult{}, err
+	}
+	res := PlanDecisionResult{PlanID: out.PlanID, State: out.State}
 	for _, t := range out.Tasks {
 		res.Tasks = append(res.Tasks, PlanCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
 	}

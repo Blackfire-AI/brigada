@@ -24,6 +24,9 @@ const (
 	KindForemanReport   = "foreman_report"     // a done foreman turn's final message, its report to the user (§3, §10)
 	KindForemanLimited  = "foreman_limited"    // the foreman's CLI hit its subscription limit (§4.4, §10)
 	KindAgentBroken     = "agent_broken"       // an agent was marked broken (§8 "Health", §10)
+	// KindPlanAwaitingApproval: a plan is over the approval limit and
+	// waits for the user's yes (§6.3, §10).
+	KindPlanAwaitingApproval = "plan_awaiting_approval"
 )
 
 // title is the notification's bold line: the one name every banner
@@ -102,6 +105,11 @@ func Message(ev Event) (t, body string, ok bool) {
 		// Reason is "harness/model: why": the user fixes the login or
 		// the runner, then resets the agent.
 		return title, oneLine("agent broken, "+ev.Reason+": fix it, then `brigada agent reset <harness>/<model>`", bodyLimit), true
+	case ev.Kind == KindPlanAwaitingApproval:
+		// Reason is the limit's words (task count, classes, protected
+		// paths); the user answers with approve or reject.
+		return title, oneLine(fmt.Sprintf("plan #%d needs your approval: %s: `brigada plan approve %d` or `brigada plan reject %d`",
+			ev.PlanID, ev.Reason, ev.PlanID, ev.PlanID), bodyLimit), true
 	case needsForemanKinds[ev.Kind] && ev.Parked:
 		reason := ev.Reason
 		if reason == "" {

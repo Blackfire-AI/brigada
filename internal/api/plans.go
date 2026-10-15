@@ -72,10 +72,12 @@ func (s *Server) handlePlanCreate(w http.ResponseWriter, r *http.Request, id ide
 		return
 	}
 	out := planCreateResponse{
-		Answer: string(res.Answer),
-		PlanID: res.PlanID,
-		TaskID: res.TaskID,
-		JobID:  res.JobID,
+		Answer:  string(res.Answer),
+		PlanID:  res.PlanID,
+		TaskID:  res.TaskID,
+		JobID:   res.JobID,
+		State:   res.State,
+		Reasons: res.Reasons,
 	}
 	for _, t := range res.Tasks {
 		out.Tasks = append(out.Tasks, planCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
@@ -130,6 +132,57 @@ type planCreateResponse struct {
 	PlanID int64             `json:"plan_id"`
 	TaskID int64             `json:"task_id"`
 	JobID  int64             `json:"job_id"`
+	Tasks  []planCreatedTask `json:"tasks,omitempty"`
+	// State is the plan's, and Reasons why it waits when the approval
+	// limit holds it (§6.3): the foreman tells the user.
+	State   string   `json:"state,omitempty"`
+	Reasons []string `json:"reasons,omitempty"`
+}
+
+// handlePlanDecision is the user's yes or no on a plan awaiting approval
+// (§6.3): approve queues its first wave, reject cancels its tasks.
+// Client and admin tokens only — the foreman never confirms its own
+// plans. A plan that is not there is a 404, one not awaiting a 409.
+func (s *Server) handlePlanDecision(approve bool) handler {
+	return func(w http.ResponseWriter, r *http.Request, _ identity) {
+		if !requireMethod(w, r, http.MethodPost) {
+			return
+		}
+		planID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, codeBadRequest, "plan id must be an integer")
+			return
+		}
+		var res engine.PlanDecision
+		if approve {
+			res, err = s.eng.ApprovePlan(r.Context(), 0, planID)
+		} else {
+			res, err = s.eng.RejectPlan(r.Context(), 0, planID)
+		}
+		switch {
+		case errors.Is(err, engine.ErrNoPlan):
+			writeError(w, http.StatusNotFound, codeNotFound, err.Error())
+			return
+		case errors.Is(err, engine.ErrPlanNotAwaiting):
+			writeError(w, http.StatusConflict, codeConflict, err.Error())
+			return
+		case err != nil:
+			s.writeInternal(w, r, "decide the plan", err)
+			return
+		}
+		out := planDecisionResponse{PlanID: res.PlanID, State: res.State}
+		for _, t := range res.Tasks {
+			out.Tasks = append(out.Tasks, planCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
+		}
+		writeJSON(w, http.StatusOK, out)
+	}
+}
+
+// planDecisionResponse names the plan's new state and, for an approval,
+// the first wave's tasks with their queued jobs.
+type planDecisionResponse struct {
+	PlanID int64             `json:"plan_id"`
+	State  string            `json:"state"`
 	Tasks  []planCreatedTask `json:"tasks,omitempty"`
 }
 

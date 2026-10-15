@@ -41,6 +41,7 @@ type eventPayload struct {
 	Until    string `json:"until,omitempty"`
 	Harness  string `json:"harness,omitempty"`
 	Model    string `json:"model,omitempty"`
+	Plan     int64  `json:"plan,omitempty"`
 }
 
 // Loop is the delivery loop (§13): it polls the event log for rows
@@ -186,6 +187,13 @@ func eventsAfterTx(tx *sql.Tx, after, limit int64) ([]Event, error) {
 		}
 		ev.Reason = reasonOf(ev.Kind, payload)
 		ev.Parked = parkedBy(payload)
+		if ev.Kind == KindPlanAwaitingApproval {
+			// The event names its plan in the payload, not through a task.
+			var p eventPayload
+			if json.Unmarshal([]byte(payload), &p) == nil {
+				ev.PlanID = p.Plan
+			}
+		}
 		out = append(out, ev)
 	}
 	if err := rows.Err(); err != nil {
@@ -228,6 +236,9 @@ func reasonOf(kind, payload string) string {
 	}
 	if kind == KindForemanLimited {
 		return p.Until
+	}
+	if kind == KindPlanAwaitingApproval {
+		return oneLine(p.Reason, bodyLimit)
 	}
 	if kind == KindAgentBroken {
 		// "harness/model: reason" — the pair `brigada agent reset` takes.
