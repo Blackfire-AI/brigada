@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	mrand "math/rand"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -161,6 +162,14 @@ type Config struct {
 	// (§12.1): random hex, returned once in the grant and stored only
 	// as its sha256.
 	NewLeaseToken func() (string, error)
+	// ExploreShare is the share of picks (§8) that take the next-best
+	// agent instead of the best, so a weaker agent keeps being measured.
+	// A pointer, because 0 is a real setting — never explore — while nil
+	// keeps the default, defaultExploreShare.
+	ExploreShare *float64
+	// Rand draws the exploration roll, a float in [0, 1); tests inject
+	// it to pin both branches of the pick.
+	Rand func() float64
 }
 
 // DefaultConfig returns the shipped settings (design §14 and §5.1): a
@@ -187,8 +196,16 @@ func DefaultConfig() Config {
 		MaxArtifactBytes:  defaultMaxArtifactBytes,
 		NewLeaseID:        newLeaseID,
 		NewLeaseToken:     newLeaseToken,
+		ExploreShare:      &exploreDefault,
+		Rand:              mrand.Float64,
 	}
 }
+
+// defaultExploreShare is the shipped exploration share (§8): one pick in
+// ten takes the next-best agent.
+const defaultExploreShare = 0.1
+
+var exploreDefault = defaultExploreShare
 
 // defaultMaxArtifactBytes is the artifact upload cap (§9): room for a
 // long session's transcript or check log, not for a runaway stream.
@@ -277,6 +294,12 @@ func New(s *store.Store, cfg Config) *Engine {
 	}
 	if cfg.NewLeaseToken != nil {
 		def.NewLeaseToken = cfg.NewLeaseToken
+	}
+	if cfg.ExploreShare != nil {
+		def.ExploreShare = cfg.ExploreShare
+	}
+	if cfg.Rand != nil {
+		def.Rand = cfg.Rand
 	}
 	return &Engine{store: s, cfg: def}
 }

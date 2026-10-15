@@ -79,8 +79,15 @@ func TestForemanTurnTakesTheFreedAccountSlot(t *testing.T) {
 	if g == nil || g.JobID != fill.JobID {
 		t.Fatalf("filling lease = %+v, want job %d", g, fill.JobID)
 	}
-	older := e.submit(e.workOn(e.addTask("{}"))) // waits on the work account
-	turn := e.submit(e.foremanTurn())            // so does the turn
+	// The older job and the turn are pinned to the claude harness: an
+	// open harness would let them take the personal agent's room (§8
+	// "best with room"), which is not what this test is about.
+	olderp := e.workOn(e.addTask("{}"))
+	olderp.Harness = "claude"
+	older := e.submit(olderp) // waits on the work account
+	turnp := e.foremanTurn()
+	turnp.Harness = "claude"
+	turn := e.submit(turnp) // so does the turn
 	other := e.workOn(e.addTask("{}"))
 	other.Harness = "kimi" // through the personal account
 	otherJob := e.submit(other)
@@ -95,7 +102,7 @@ func TestForemanTurnTakesTheFreedAccountSlot(t *testing.T) {
 	if ans := e.complete(g, done()); ans != AnsOK {
 		t.Fatalf("free the work account: %s", ans)
 	}
-	if g := e.leaseAny(e.runner1); g == nil || g.JobID != turn.JobID {
+	if g := e.lease(e.runner1, []string{"claude", "kimi"}, nil); g == nil || g.JobID != turn.JobID {
 		t.Fatalf("lease after the account freed = %+v, want the foreman turn %d, not the older task job %d", g, turn.JobID, older.JobID)
 	}
 }
