@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/mcp"
@@ -698,5 +699,37 @@ func TestTranscripts(t *testing.T) {
 func TestResultTextNoEvents(t *testing.T) {
 	if got := (&Adapter{}).ResultText(nil); got != "" {
 		t.Errorf("ResultText(nil) = %q, want empty", got)
+	}
+}
+
+// TestSessionLimit covers the CLI's session-limit message: a limit on
+// both streams, with the reset time when it parses and empty when not.
+func TestSessionLimit(t *testing.T) {
+	defer func(old func() time.Time) { now = old }(now)
+	now = func() time.Time { return time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC) }
+	a := &Adapter{}
+	live := "You've hit your session limit · resets 6:40pm (Europe/Moscow)"
+	cases := []struct {
+		name, line, until string
+	}{
+		{"live message", live, "2026-10-15T18:40:00+03:00"},
+		{"live message as error result", `{"type":"result","is_error":true,"result":"` + live + `"}`, "2026-10-15T18:40:00+03:00"},
+		{"time already past rolls to tomorrow", "You've hit your session limit · resets 9:00am (Europe/Moscow)", "2026-10-16T09:00:00+03:00"},
+		{"no time suffix", "You've hit your session limit", ""},
+		{"unknown zone", "You've hit your session limit · resets 6:40pm (Mars/Olympus)", ""},
+		{"bad hour", "You've hit your session limit · resets 13:40pm (Europe/Moscow)", ""},
+	}
+	parsers := map[string]func([]byte) (adapter.Event, bool){"stdout": a.ParseEvent, "stderr": a.ParseErrEvent}
+	for _, tc := range cases {
+		for name, parse := range parsers {
+			ev, ok := parse([]byte(tc.line))
+			if !ok || ev.Kind != adapter.EvError || ev.ErrorKind != adapter.ErrLimit {
+				t.Errorf("%s/%s: event = %+v, ok = %v, want a limit error", tc.name, name, ev, ok)
+				continue
+			}
+			if ev.LimitUntil != tc.until {
+				t.Errorf("%s/%s: LimitUntil = %q, want %q", tc.name, name, ev.LimitUntil, tc.until)
+			}
+		}
 	}
 }
