@@ -367,3 +367,61 @@ func TestParseErrEvent(t *testing.T) {
 		})
 	}
 }
+
+// TestAttachCommandGolden pins the interactive argv. The opening prompt is
+// positional in Codex's own TUI; unlike the headless command, no output,
+// sandbox, or approval flags belong here.
+func TestAttachCommandGolden(t *testing.T) {
+	stubCLI(t)
+	const prompt = "the foreman's opening prompt"
+	dir := t.TempDir()
+	cases := []struct {
+		name   string
+		ad     Adapter
+		job    adapter.Job
+		resume string
+		want   []string
+	}{
+		{
+			name: "fresh session",
+			job:  adapter.Job{Prompt: prompt},
+			want: []string{"codex", prompt},
+		},
+		{
+			name:   "resume existing thread",
+			ad:     Adapter{Binary: "/usr/local/bin/codex"},
+			job:    adapter.Job{Prompt: prompt, Model: "gpt-5"},
+			resume: "01a140b7-6c27-7441-b9a1-1a082df4d4c9",
+			want:   []string{"/usr/local/bin/codex", "resume", "01a140b7-6c27-7441-b9a1-1a082df4d4c9", "-m", "gpt-5", prompt},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, err := tc.ad.AttachCommand(tc.job, dir, tc.resume, "client-session-id")
+			if err != nil {
+				t.Fatalf("AttachCommand: %v", err)
+			}
+			want := slices.Clone(tc.want)
+			if tc.ad.Binary == "" {
+				want[0] = "codex"
+			}
+			if filepath.Base(cmd.Path) != filepath.Base(want[0]) {
+				t.Errorf("executable = %q, want %q", cmd.Path, want[0])
+			}
+			if got := cmd.Args[1:]; !slices.Equal(got, want[1:]) {
+				t.Errorf("args = %q, want %q", got, want[1:])
+			}
+			if cmd.Dir != dir {
+				t.Errorf("Dir = %q, want %q", cmd.Dir, dir)
+			}
+			if cmd.Stdin != nil || cmd.Stdout != nil || cmd.Stderr != nil {
+				t.Errorf("interactive command wires terminal streams: stdin %v stdout %v stderr %v", cmd.Stdin, cmd.Stdout, cmd.Stderr)
+			}
+			for _, arg := range cmd.Args {
+				if arg == "--json" || arg == "-s" || arg == "--approve-for-me" {
+					t.Errorf("headless/approval flag leaked into interactive argv: %q", arg)
+				}
+			}
+		})
+	}
+}

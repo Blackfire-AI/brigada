@@ -36,6 +36,7 @@ type Adapter struct {
 }
 
 var _ adapter.Adapter = (*Adapter)(nil)
+var _ adapter.Interactive = (*Adapter)(nil)
 
 // DefaultModel is the agent's name for the CLI's own default model: the
 // one the CLI picks when no -m names another. The runner offers it when
@@ -151,6 +152,46 @@ func mcpConfigArgs(path string) ([]string, error) {
 		"-c", prefix + ".args=[" + strings.Join(quotedArgs, ",") + "]",
 		"-c", prefix + ".env={" + strings.Join(quotedEnv, ",") + "}",
 	}, nil
+}
+
+// AttachCommand implements adapter.Interactive: Codex's own terminal UI is
+// started directly, with the opening prompt as its positional argument. A
+// saved exec thread is resumed with `codex resume <thread-id>`; without one,
+// plain `codex` starts a fresh conversation. The client-generated session id
+// is intentionally unused: Codex does not expose Claude's fork/session-id
+// pair. On detach the client nevertheless writes its minted id back as the
+// key's session, so a later headless or interactive resume targets a thread
+// Codex never created and falls back to a fresh run; this is the documented
+// limitation until Codex exposes a fork/session-id facility.
+//
+// This command deliberately carries only interactive options. In particular
+// it does not inherit the headless --json, -s, or approval-bypass flags. Codex
+// has no equivalent of Claude's statusLine setting, so StatusLine is ignored.
+// MCPConfig is likewise not translated: Codex has no adapter-supported MCP
+// config flag; the terminal remains the CLI's own interactive session.
+func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, _ string) (*exec.Cmd, error) {
+	binary := a.Binary
+	if binary == "" {
+		binary = "codex"
+	}
+	args := make([]string, 0, 6+len(a.ExtraArgs))
+	if resumeSessionID != "" {
+		args = append(args, "resume", resumeSessionID)
+	}
+	if job.Model != "" && job.Model != DefaultModel {
+		args = append(args, "-m", job.Model)
+	}
+	args = append(args, a.ExtraArgs...)
+	if job.Prompt != "" {
+		args = append(args, job.Prompt)
+	}
+	cmd := exec.Command(binary, args...)
+	if cmd.Err != nil {
+		return nil, cmd.Err
+	}
+	cmd.Dir = workdir
+	cmd.Env = workerEnv(os.Environ())
+	return cmd, nil
 }
 
 // envPrefix marks brigada's own variables: the runner's token, the

@@ -11,8 +11,8 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
-	"github.com/Blackfire-AI/brigada/internal/adapter/fake"
 	"github.com/Blackfire-AI/brigada/internal/adapter/codex"
+	"github.com/Blackfire-AI/brigada/internal/adapter/fake"
 	"github.com/Blackfire-AI/brigada/internal/adapter/kimi"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
