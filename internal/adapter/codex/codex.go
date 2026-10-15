@@ -218,7 +218,7 @@ func firstLine(command string) string {
 //	item.started command_execution    → tool start (the command's first line)
 //	item.completed command_execution  → tool end (the same text)
 //	item.started mcp_tool_call       → tool start (server/tool)
-//	item.completed mcp_tool_call     → tool end, or error when it failed
+//	item.completed mcp_tool_call     → tool end, naming the error when the call failed
 //	error, turn.failed, error item    → an error event, sorted by its text
 //	turn.started, turn.completed      → ignored: the usage counters it
 //	                                    carries are no progress
@@ -279,8 +279,17 @@ func itemEvent(lj lineJSON) (adapter.Event, bool) {
 		if started {
 			return adapter.Event{Kind: adapter.EvToolStart, Text: text}, true
 		}
+		// A failed call is the tool's outcome, not the CLI's: the model
+		// reads the failure and answers around it, and the run may still
+		// end clean (turn.completed). It maps to the tool's end with the
+		// error named, never to the stream's fatal error — only
+		// turn.failed and the CLI's own error events are that (the first
+		// live codex foreman turn was failed by a null-error misread
+		// here, 2026-10-15).
 		if lj.Item.Status != "" && lj.Item.Status != "completed" && lj.Item.Status != "success" {
-			return errorEvent(mcpErrorText(lj.Item))
+			if why := mcpErrorText(lj.Item); why != "" {
+				text = firstLine(text + ": " + why)
+			}
 		}
 		return adapter.Event{Kind: adapter.EvToolEnd, Text: text}, true
 	case "error":
@@ -294,7 +303,9 @@ func itemEvent(lj lineJSON) (adapter.Event, bool) {
 }
 
 func mcpErrorText(item *itemJSON) string {
-	if len(item.Error) != 0 {
+	// json.RawMessage keeps JSON null as its four bytes; that is no
+	// error text at all.
+	if raw := strings.TrimSpace(string(item.Error)); raw != "" && raw != "null" {
 		var message string
 		if json.Unmarshal(item.Error, &message) == nil && message != "" {
 			return message
