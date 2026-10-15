@@ -119,7 +119,7 @@ func TestCommandMCPConfig(t *testing.T) {
 		t.Fatalf("Command: %v", err)
 	}
 	args := strings.Join(cmd.Args[1:], " ")
-	if !strings.Contains(args, "--approve-for-me") || strings.Contains(args, " -s ") || !strings.Contains(args, `mcp_servers.brigada.command="/bin/brigada"`) || !strings.Contains(args, `mcp_servers.brigada.args=["mcp","--socket","/tmp/sock"]`) || !strings.Contains(args, `mcp_servers.brigada.env={BRIGADA_TOKEN="secret"}`) {
+	if !strings.Contains(args, "--approve-for-me") || !strings.Contains(args, "--skip-git-repo-check") || strings.Contains(args, " -s ") || !strings.Contains(args, `mcp_servers.brigada.command="/bin/brigada"`) || !strings.Contains(args, `mcp_servers.brigada.args=["mcp","--socket","/tmp/sock"]`) || !strings.Contains(args, `mcp_servers.brigada.env={BRIGADA_TOKEN="secret"}`) {
 		t.Errorf("foreman args = %q", args)
 	}
 }
