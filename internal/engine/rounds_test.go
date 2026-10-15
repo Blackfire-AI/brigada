@@ -511,8 +511,8 @@ func TestNoVerdictRetriesOnAnotherAgentAndApproves(t *testing.T) {
 	if attempts != 1 {
 		t.Errorf("the retrying agent's outcome attempts = %d, want its one substantive approve", attempts)
 	}
-	if n := e.int("SELECT COUNT(*) FROM outcomes"); n != 1 {
-		t.Errorf("outcome rows = %d, want the second reviewer's alone", n)
+	if n := e.int("SELECT COUNT(*) FROM outcomes WHERE class = 'review'"); n != 1 {
+		t.Errorf("review outcome rows = %d, want the second reviewer's alone", n)
 	}
 }
 

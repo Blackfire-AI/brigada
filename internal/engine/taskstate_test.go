@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -209,8 +210,110 @@ func TestTaskRunsReviewsAndFinishes(t *testing.T) {
 	if attempts != 1 || successes != 1 {
 		t.Errorf("outcome of the review = %d/%d, want 1/1", attempts, successes)
 	}
-	if n := e.int("SELECT COUNT(*) FROM outcomes"); n != 1 {
-		t.Errorf("outcome rows = %d, want the reviewer's alone", n)
+	if n := e.int("SELECT COUNT(*) FROM outcomes WHERE class = 'review'"); n != 1 {
+		t.Errorf("review outcome rows = %d, want the reviewer's alone", n)
+	}
+}
+
+// outcomeOf reads an agent's attempts and successes on a class; a
+// missing row reads 0/0.
+func (e *env) outcomeOf(agent int64, class string) (attempts, successes int64) {
+	e.t.Helper()
+	return e.int("SELECT COALESCE(SUM(attempts), 0) FROM outcomes WHERE agent_id = ? AND class = ?", agent, class),
+		e.int("SELECT COALESCE(SUM(successes), 0) FROM outcomes WHERE agent_id = ? AND class = ?", agent, class)
+}
+
+// TestApprovedTaskScoresTheFinalAuthor: an approved task counts an
+// attempt and a success on the implement class for the agent of the
+// last work or fix job — not an earlier job's agent — and the reviewer's
+// own row lands beside it without collision (§8, §11).
+func TestApprovedTaskScoresTheFinalAuthor(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	earlier := e.agented("earlier", "openai", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+
+	e.submit(e.work())
+	first := e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'work'", e.task)
+	e.runWork(author, doneOn("task/1-1", failCheck))
+	e.runWork(author, doneOn("task/1-1", passCheck))
+	// Fix rounds pin to the author's agent, so the earlier job's agent is
+	// set by hand: the final result's author is still the one scored.
+	e.exec("UPDATE jobs SET agent_id = ? WHERE id = ?", e.agentOf(earlier), first)
+	e.runReview(reviewer, `{"verdict":"approve","findings":"`+substantiveFindings+`"}`)
+
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskDone {
+		t.Fatalf("task state = %q, want done", state)
+	}
+	if a, s := e.outcomeOf(e.agentOf(author), "implement"); a != 1 || s != 1 {
+		t.Errorf("final author's implement outcome = %d/%d, want 1/1", a, s)
+	}
+	if a, s := e.outcomeOf(e.agentOf(earlier), "implement"); a != 0 || s != 0 {
+		t.Errorf("earlier agent's implement outcome = %d/%d, want none", a, s)
+	}
+	if a, s := e.outcomeOf(e.agentOf(reviewer), "review"); a != 1 || s != 1 {
+		t.Errorf("reviewer's review outcome = %d/%d, want 1/1", a, s)
+	}
+	if n := e.int("SELECT COUNT(*) FROM outcomes"); n != 2 {
+		t.Errorf("outcome rows = %d, want the author's and the reviewer's", n)
+	}
+}
+
+// TestOutOfRoundsScoresTheAttemptOnly: a task that runs out of rounds
+// counts the attempt and no success.
+func TestOutOfRoundsScoresTheAttemptOnly(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	e.exec("UPDATE tasks SET caps = ? WHERE id = ?", `{"fix_rounds":0}`, e.task)
+	e.submit(e.work())
+	e.runWork(author, doneOn("task/1-1", failCheck))
+
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+		t.Fatalf("task state = %q, want needs_foreman", state)
+	}
+	if a, s := e.outcomeOf(e.agentOf(author), "implement"); a != 1 || s != 0 {
+		t.Errorf("implement outcome = %d/%d, want 1/0", a, s)
+	}
+}
+
+// TestTaskWithoutAnAuthorAgentScoresNothing: a work job that ran on an
+// agent-less runner has nobody to score.
+func TestTaskWithoutAnAuthorAgentScoresNothing(t *testing.T) {
+	e := newEnv(t)
+	reviewer := e.agented("reviewer", "google", "review")
+	e.runToReview(e.runner1)
+	e.runReview(reviewer, `{"verdict":"approve","findings":"`+substantiveFindings+`"}`)
+
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskDone {
+		t.Fatalf("task state = %q, want done", state)
+	}
+	if n := e.int("SELECT COUNT(*) FROM outcomes WHERE class = 'implement'"); n != 0 {
+		t.Errorf("implement outcome rows = %d, want none", n)
+	}
+}
+
+// TestTerminalTransitionCountsOnce: processing the same end twice, the
+// way a later re-read would, adds nothing the second time.
+func TestTerminalTransitionCountsOnce(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.submit(e.work())
+	e.runWork(author, doneOn("task/1-1", passCheck))
+	e.runReview(reviewer, `{"verdict":"approve","findings":"`+substantiveFindings+`"}`)
+
+	review := e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review'", e.task)
+	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		job, err := loadJobTx(tx, review)
+		if err != nil {
+			return err
+		}
+		return e.eng.taskDoneTx(tx, job, e.eng.cfg.Now())
+	}); err != nil {
+		t.Fatalf("process the terminal transition again: %v", err)
+	}
+	if a, s := e.outcomeOf(e.agentOf(author), "implement"); a != 1 || s != 1 {
+		t.Errorf("implement outcome after a second processing = %d/%d, want 1/1", a, s)
 	}
 }
 
