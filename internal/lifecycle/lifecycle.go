@@ -45,6 +45,8 @@ type Config struct {
 	// SnapshotDir is where the engine snapshots its store daily (§6.4);
 	// empty takes no snapshots.
 	SnapshotDir string
+	// TaskAutoRetry controls transient work retries; nil keeps the default, on.
+	TaskAutoRetry *bool
 	// IdleTick is how often busyness is checked; zero derives a tick
 	// from Idle, clamped to [200ms, 30s].
 	IdleTick time.Duration
@@ -123,7 +125,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("engine: %w", err)
 	}
 	defer st.Close()
-	eng := engine.New(st, engine.Config{Now: cfg.Now, Caps: cfg.Caps, PlanFiles: true, SnapshotDir: cfg.SnapshotDir})
+	eng := engine.New(st, engine.Config{Now: cfg.Now, Caps: cfg.Caps, PlanFiles: true, SnapshotDir: cfg.SnapshotDir, TaskAutoRetry: cfg.TaskAutoRetry})
 	// A push still running when the engine stops finishes before the
 	// store closes (defers run last-in first); what it misses stays marked
 	// in the store for the next run's catch-up below.

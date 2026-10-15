@@ -80,6 +80,9 @@ type FileConfig struct {
 	// an absolute directory outside the state directory's store. Empty =
 	// no snapshots.
 	SnapshotDir string
+	// TaskAutoRetry controls one automatic restart after a transient work
+	// failure. Nil keeps the engine default, on.
+	TaskAutoRetry *bool
 }
 
 // DefaultConfigPath is where the config file lives when nothing names
@@ -143,10 +146,14 @@ func LoadConfigFile(path string) (FileConfig, error) {
 			var on bool
 			on, err = strconv.ParseBool(value)
 			cfg.Caps.NoHeadroom = !on
+		case key == "task_auto_retry":
+			var on bool
+			on, err = strconv.ParseBool(value)
+			cfg.TaskAutoRetry = &on
 		case strings.HasPrefix(key, "caps."), strings.HasPrefix(key, "cost."):
 			err = setCap(&cfg.Caps, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, snapshot_dir, headroom, a caps.<layer> or a cost.<harness>/<model>", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, snapshot_dir, headroom, task_auto_retry, a caps.<layer> or a cost.<harness>/<model>", path, n+1, key)
 		}
 		if err != nil {
 			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)

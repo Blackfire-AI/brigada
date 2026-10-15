@@ -306,6 +306,35 @@ func TestSessionAffinity(t *testing.T) {
 	}
 }
 
+// Ordinary work and fix jobs retain implement dispatch even when their
+// task has another class; task-class eligibility is a retry policy.
+func TestNonImplementTaskLeasesOnImplementAgent(t *testing.T) {
+	for _, class := range []string{"research", "answer"} {
+		for _, kind := range []Kind{KindWork, KindFix} {
+			t.Run(class+"/"+string(kind), func(t *testing.T) {
+				e := newEnv(t)
+				e.exec("UPDATE tasks SET class = ? WHERE id = ?", class, e.task)
+				specialist := e.agented("specialist", "a", class)
+				implementer := e.agented("implementer", "b", "implement")
+				p := e.work()
+				p.Kind = kind
+				if kind == KindFix {
+					p.Mode = ModeSession
+					p.RequireAgent = e.agentOf(implementer)
+				}
+				job := e.submit(p)
+				if got := e.leaseAny(specialist); got != nil {
+					t.Fatalf("task-class-only agent leased %+v, want ordinary implement dispatch", got)
+				}
+				g := e.leaseAny(implementer)
+				if g == nil || g.JobID != job.JobID || e.jobAgent(g.JobID) != e.agentOf(implementer) {
+					t.Fatalf("implement agent leased %+v, want %s job %d for %s task", g, kind, job.JobID, class)
+				}
+			})
+		}
+	}
+}
+
 // TestLeasePicksTheAgentByClass covers the class rule (§8: "eligible:
 // the adapter supports the class"): a work job lands on the agent whose
 // classes include implement — even when a review-only agent sits first
