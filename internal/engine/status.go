@@ -465,6 +465,17 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 		return nil, fmt.Errorf("list the plans awaiting approval: %w", err)
 	}
 	prows.Close()
+	// Why each waits (§6.3): the plan_awaiting_approval event's words.
+	for i := range items {
+		if items[i].Kind != "plan" {
+			continue
+		}
+		reason, err := awaitingReasonTx(tx, items[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		items[i].Reason = oneLine(reason, needsYouReasonLimit)
+	}
 
 	// A limited foreman is waiting for the user's choice (§4.4): wait,
 	// switch it, or let approved plans run without it. A reset time that
@@ -528,6 +539,28 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 		}
 	}
 	return items, nil
+}
+
+// awaitingReasonTx reads the reasons the plan's latest
+// plan_awaiting_approval event gave (§6.3); "" for a plan with no such
+// event.
+func awaitingReasonTx(tx *sql.Tx, plan int64) (string, error) {
+	rows, err := tx.Query(`SELECT payload FROM events WHERE kind = ? ORDER BY id DESC`, evPlanAwaitingApproval)
+	if err != nil {
+		return "", fmt.Errorf("read why plan %d awaits approval: %w", plan, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return "", fmt.Errorf("read why plan %d awaits approval: %w", plan, err)
+		}
+		var p eventPayload
+		if json.Unmarshal([]byte(payload), &p) == nil && p.Plan == plan {
+			return p.Reason, nil
+		}
+	}
+	return "", rows.Err()
 }
 
 // needsYouReason renders one parked task's reason from its latest

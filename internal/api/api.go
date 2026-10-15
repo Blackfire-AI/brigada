@@ -67,6 +67,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/tasks/{id}/answer", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskAnswer)))
 	mux.HandleFunc("/v1/tasks/{id}/restart", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskRestart)))
 	mux.HandleFunc("/v1/plans", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handlePlanCreate)))
+	// The user's yes or no on a plan over the approval limit (§6.3): no
+	// foreman role, the foreman never confirms its own plans.
+	mux.HandleFunc("/v1/plans/{id}/approve", s.authed([]string{roleClient, roleAdmin}, s.idempotent(s.handlePlanDecision(true))))
+	mux.HandleFunc("/v1/plans/{id}/reject", s.authed([]string{roleClient, roleAdmin}, s.idempotent(s.handlePlanDecision(false))))
 	// The attach hold (§4.2 item 1): the client or admin takes the
 	// foreman for an attached chat, heartbeats and releases it; the
 	// foreman role long-polls the project's events.

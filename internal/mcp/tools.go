@@ -35,7 +35,7 @@ type Tool struct {
 var tools = []Tool{
 	{
 		Name:        "plan_create",
-		Description: "Create a plan of one or more tasks and queue the first work job of every task with no dependencies. A task may wait on others of the same plan by name (deps); it starts when all of them are done, and stays waiting if one fails or needs you. A dependency cycle refuses the plan. The plan is active at once.",
+		Description: "Create a plan of one or more tasks and queue the first work job of every task with no dependencies. A task may wait on others of the same plan by name (deps); it starts when all of them are done, and stays waiting if one fails or needs you. A dependency cycle refuses the plan. The plan is active at once, unless it is over the project's approval limit (many tasks, an unusual class, a protected path): then it waits for the user's approval, nothing is queued, and the answer says why — tell the user; only they can approve it.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

@@ -45,11 +45,18 @@ type CreatePlanResult struct {
 	JobID  int64
 	Run    int
 	Tasks  []CreatedTask
+	// State is the plan's: "active", or planAwaitingApproval when the
+	// approval limit holds it (§6.3), with Reasons — one phrase each —
+	// saying why. A held plan queued no job: TaskID, JobID and Run are
+	// zero.
+	State   string
+	Reasons []string
 }
 
-// CreatePlan is the foreman's plan_create (§6.2, §12.2): one plan,
-// active from the start — the approval limit arrives with the plan
-// phase — holding its tasks (§6.1). A task with no dependencies is ready
+// CreatePlan is the foreman's plan_create (§6.2, §12.2): one plan
+// holding its tasks (§6.1), active from the start unless the project's
+// approval limit (§6.3) holds it for the user's yes — then no job is
+// queued and the plan_awaiting_approval event says why. A task with no dependencies is ready
 // and its first work job is queued on the task's key, its prompt
 // composed here from the versioned template plus the spec verbatim
 // (§1.4, §5.3); a task with dependencies waits, pending, until the last
@@ -184,8 +191,20 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 	}
 	nowStr := fmtTime(now)
 
+	// The approval limit (§6.3), after validation and before any work
+	// is queued.
+	settings, err := projectApprovalTx(tx, project)
+	if err != nil {
+		return CreatePlanResult{}, err
+	}
+	verdict := settings.evaluate(tasks)
+	planState := "active"
+	if verdict.Needed {
+		planState = planAwaitingApproval
+	}
+
 	plan, err := tx.Exec(`INSERT INTO plans (project_id, title, state, created_at, updated_at)
-		VALUES (?, ?, 'active', ?, ?)`, project, title, nowStr, nowStr)
+		VALUES (?, ?, ?, ?, ?)`, project, title, planState, nowStr, nowStr)
 	if err != nil {
 		return CreatePlanResult{}, fmt.Errorf("create the plan: %w", err)
 	}
@@ -198,9 +217,24 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		return CreatePlanResult{}, err
 	}
 
+	res := CreatePlanResult{PlanID: planID, State: planState, Tasks: make([]CreatedTask, len(tasks))}
+	if verdict.Needed {
+		res.Reasons = verdict.reasons(settings.Classes)
+		if _, err := appendEventTx(tx, evPlanAwaitingApproval, project, 0, 0, eventPayload{
+			Plan:    planID,
+			Count:   int64(len(tasks)),
+			Classes: verdict.Classes,
+			Paths:   verdict.Paths,
+			Reason:  strings.Join(res.Reasons, "; "),
+		}, now); err != nil {
+			return CreatePlanResult{}, err
+		}
+	}
+
 	// The tasks (§6.1): ready at once when they wait for nothing, on the
-	// project's repo and base ref; pending while a dependency is open.
-	res := CreatePlanResult{PlanID: planID, Tasks: make([]CreatedTask, len(tasks))}
+	// project's repo and base ref; pending while a dependency is open —
+	// and, in a plan awaiting approval, all pending: the approval readies
+	// the first wave.
 	for i, t := range tasks {
 		class := t.Class
 		if class == "" {
@@ -211,7 +245,7 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 			taskTitle = taskTitleOf(t.Spec)
 		}
 		state := taskReady
-		if len(deps[i]) > 0 {
+		if len(deps[i]) > 0 || verdict.Needed {
 			state = taskPending
 		}
 		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, created_at, updated_at)
@@ -233,6 +267,10 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 				return CreatePlanResult{}, fmt.Errorf("record the dependencies: %w", err)
 			}
 		}
+	}
+
+	if verdict.Needed {
+		return res, nil
 	}
 
 	// The first work job of every ready task (§1.4). The first of them

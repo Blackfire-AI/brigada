@@ -15,6 +15,9 @@ import (
 const (
 	evPlanCreated            = "plan_created"              // CreatePlan: a plan now exists (§6.2)
 	evPlanDone               = "plan_done"                 // the plan's last open task finished (§6.2)
+	evPlanAwaitingApproval   = "plan_awaiting_approval"    // CreatePlan: the plan is over the approval limit and waits for the user's yes (§6.3)
+	evPlanApproved           = "plan_approved"             // the user approved the plan; its first wave is queued (§6.3)
+	evPlanRejected           = "plan_rejected"             // the user rejected the plan; its tasks are cancelled (§6.3)
 	evJobCreated             = "job_created"               // submit: a queued job now exists
 	evJobPending             = "job_pending"               // submit: coalesced behind the key's live job
 	evJobCapped              = "job_capped"                // submit: the task's round cap is spent
@@ -95,10 +98,16 @@ type eventPayload struct {
 	// The agent pick's why (§8): the agent, its score, how the rank
 	// chose it (pickBest or pickExploration), and the better-ranked
 	// agents passed over because their cap path had no room.
-	Agent      int64   `json:"agent,omitempty"`
-	Score      float64 `json:"score,omitempty"`
-	Pick       string  `json:"pick,omitempty"`
-	PassedOver []int64 `json:"passed_over,omitempty"`
+	// The approval limit's why (§6.3): the plan, and the classes and
+	// protected paths that put it over (Count holds the task count,
+	// Reason the reasons in words).
+	Plan       int64    `json:"plan,omitempty"`
+	Classes    []string `json:"classes,omitempty"`
+	Paths      []string `json:"paths,omitempty"`
+	Agent      int64    `json:"agent,omitempty"`
+	Score      float64  `json:"score,omitempty"`
+	Pick       string   `json:"pick,omitempty"`
+	PassedOver []int64  `json:"passed_over,omitempty"`
 }
 
 // appendEventTx adds one row to the event log inside the caller's

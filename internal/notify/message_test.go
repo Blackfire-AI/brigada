@@ -14,6 +14,13 @@ func TestMessage(t *testing.T) {
 		ok    bool
 	}{
 		{
+			name:  "plan awaiting approval",
+			ev:    Event{Kind: KindPlanAwaitingApproval, PlanID: 9, Reason: "6 tasks, over the limit of 5"},
+			title: "brigada",
+			body:  "plan #9 needs your approval: 6 tasks, over the limit of 5: `brigada plan approve 9` or `brigada plan reject 9`",
+			ok:    true,
+		},
+		{
 			name:  "plan done",
 			ev:    Event{Kind: KindPlanDone, PlanID: 7, PlanTitle: "Fix the parser"},
 			title: "brigada",

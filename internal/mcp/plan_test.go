@@ -160,6 +160,46 @@ func TestServeCallPlanCreateRefusesCycle(t *testing.T) {
 	}
 }
 
+// TestServeCallPlanCreateAwaitsApproval covers the approval limit as the
+// foreman reads it (§6.3): a plan over it comes back naming the state
+// and the reasons, with no job queued, and the foreman has no tool to
+// approve it.
+func TestServeCallPlanCreateAwaitsApproval(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	s := start(t, e)
+	var tasks []any
+	for _, spec := range []string{"a", "b", "c", "d", "e", "f"} {
+		tasks = append(tasks, map[string]any{"spec": spec})
+	}
+	a := s.call(1, "tools/call", map[string]any{
+		"name":      "plan_create",
+		"arguments": map[string]any{"title": "a big plan", "tasks": tasks},
+	})
+	text, isError := toolText(t, a)
+	if isError {
+		t.Fatalf("plan_create errored: %s", text)
+	}
+	for _, want := range []string{"awaiting approval", "pending_approval", "6 tasks, over the limit of 5", "brigada plan approve"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("plan_create text = %q, want it to say %q", text, want)
+		}
+	}
+	var jobs int64
+	if err := e.st.View(t.Context(), func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT COUNT(*) FROM jobs WHERE kind = 'work'").Scan(&jobs)
+	}); err != nil {
+		t.Fatalf("count jobs: %v", err)
+	}
+	if jobs != 0 {
+		t.Errorf("jobs = %d, want none queued while the plan awaits", jobs)
+	}
+	for _, tool := range tools {
+		if strings.Contains(tool.Name, "approve") {
+			t.Errorf("the foreman has a tool %q: confirmation is the user's", tool.Name)
+		}
+	}
+}
+
 // TestIdemKey covers the key's mint (§12.1): one logical call — the
 // same arguments — mints one key; another call mints another.
 func TestIdemKey(t *testing.T) {

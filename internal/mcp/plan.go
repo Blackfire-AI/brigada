@@ -61,6 +61,13 @@ func callPlanCreate(ctx context.Context, c *api.Client, args json.RawMessage) (s
 	if err != nil {
 		return "", err
 	}
+	if res.State == "pending_approval" {
+		// Over the approval limit (§6.3): nothing queued, and only the
+		// user's `brigada plan approve` starts it — the foreman has no
+		// tool for that. Tell the user why it waits.
+		return fmt.Sprintf("plan %d %q: awaiting approval (state pending_approval), %d tasks, no work job queued. Why: %s. Tell the user: `brigada plan approve %d` starts it, `brigada plan reject %d` cancels it.",
+			res.PlanID, a.Title, len(res.Tasks), strings.Join(res.Reasons, "; "), res.PlanID, res.PlanID), nil
+	}
 	if len(res.Tasks) <= 1 {
 		return fmt.Sprintf("plan %d %q: task %d, work job %d %s",
 			res.PlanID, a.Title, res.TaskID, res.JobID, res.Answer), nil
