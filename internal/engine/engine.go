@@ -191,6 +191,15 @@ type Config struct {
 	// PlanFileTimeout bounds one plan's fetch, commit and push; zero keeps
 	// two minutes.
 	PlanFileTimeout time.Duration
+	// SnapshotDir is where the engine snapshots its store (§6.4): a
+	// directory outside the store's own. Empty — the default — takes no
+	// snapshots.
+	SnapshotDir string
+	// SnapshotEvery is the interval between snapshots; zero keeps 24
+	// hours. Tests move it; the shipped engine does not.
+	SnapshotEvery time.Duration
+	// SnapshotKeep is how many snapshots stay; zero keeps 7.
+	SnapshotKeep int
 	// Warnf logs the warnings of work the engine does best-effort, the
 	// plan-file mirror's failed pushes among them; nil logs to the
 	// standard logger.
@@ -228,6 +237,8 @@ func DefaultConfig() Config {
 		RunnerStale:       defaultRunnerStale,
 		PlanFileRetry:     defaultPlanFileRetry,
 		PlanFileTimeout:   defaultPlanFileTimeout,
+		SnapshotEvery:     defaultSnapshotEvery,
+		SnapshotKeep:      defaultSnapshotKeep,
 		Warnf:             log.Printf,
 	}
 }
@@ -269,6 +280,7 @@ type Engine struct {
 	store  mirroredStore // the store; its commits start the plan-file mirror (§6.4)
 	cfg    Config
 	mirror planMirror // the plan-file mirror's background push (§6.4)
+	snap   snapshotState
 }
 
 // New returns an engine over s. Zero fields of cfg keep their defaults.
@@ -349,6 +361,13 @@ func New(s *store.Store, cfg Config) *Engine {
 	if cfg.PlanFileTimeout > 0 {
 		def.PlanFileTimeout = cfg.PlanFileTimeout
 	}
+	def.SnapshotDir = cfg.SnapshotDir
+	if cfg.SnapshotEvery > 0 {
+		def.SnapshotEvery = cfg.SnapshotEvery
+	}
+	if cfg.SnapshotKeep > 0 {
+		def.SnapshotKeep = cfg.SnapshotKeep
+	}
 	if cfg.Warnf != nil {
 		def.Warnf = cfg.Warnf
 	}
@@ -356,6 +375,10 @@ func New(s *store.Store, cfg Config) *Engine {
 	e.store = mirroredStore{Store: s, e: e}
 	return e
 }
+
+// LeaseTTL is the configured lease lifetime (§5.1), which is also how
+// long dispatch is held after a recover.
+func (e *Engine) LeaseTTL() time.Duration { return e.cfg.LeaseTTL }
 
 // MaxArtifactBytes is the configured cap on one artifact upload.
 func (e *Engine) MaxArtifactBytes() int64 { return e.cfg.MaxArtifactBytes }

@@ -3,7 +3,7 @@
 // of the project's remote. The file holds the graph, the task states, the
 // branches and the open questions — never transcripts. The store is
 // authoritative; the file is a mirror that may lag, and it exists so a
-// lost store can be rebuilt from the repo (the recover task, later).
+// lost store can be rebuilt from the repo (`brigada recover`).
 //
 // The YAML is hand-rolled in one fixed layout, with no dependency: the
 // shape is ours, the writer is the reader's inverse, and Parse refuses
@@ -114,8 +114,8 @@ func Render(p Plan) ([]byte, error) {
 // Parse reads a plan file back: the inverse of Render, strict. Full-line
 // comments and blank lines may stand anywhere; every other line must be
 // the one the layout expects next, or Parse names the line and stops. It
-// is for the recover task (§6.4); nothing calls it yet but the mirror's
-// commit message, which reads the file it is about to replace.
+// is what recover reads plan files with (Fetch, §6.4), and what the
+// mirror's commit message reads the file it is about to replace with.
 func Parse(data []byte) (Plan, error) {
 	r := &reader{}
 	for i, line := range strings.Split(string(data), "\n") {

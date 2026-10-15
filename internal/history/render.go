@@ -61,6 +61,8 @@ func summary(it Item) string {
 		Run     int64  `json:"run"`
 		Attempt int64  `json:"attempt"`
 		Epoch   int64  `json:"epoch"`
+		Path    string `json:"path"`
+		Bytes   int64  `json:"bytes"`
 	}
 	if json.Unmarshal(it.Payload, &p) != nil {
 		return string(it.Payload)
@@ -85,6 +87,8 @@ func summary(it Item) string {
 	addInt("run", p.Run)
 	addInt("attempt", p.Attempt)
 	addInt("epoch", p.Epoch)
+	add("path", p.Path)
+	addInt("bytes", p.Bytes)
 	return strings.Join(parts, " ")
 }
 
