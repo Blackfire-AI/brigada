@@ -21,7 +21,7 @@ brigada drives the vendors' **unmodified** CLIs, each signed in with your own ac
 
 ## Status
 
-Being built in Go: a single binary and a local SQLite store, with an MCP server so your harness can call it. The engine is moving over step by step, with its tests, from an earlier Python implementation.
+Being built in Go: a single binary and a local SQLite store, with an MCP server so your harness can call it. The engine is moving over step by step, with its tests, from an earlier Python implementation. Plans are mirrored to `.brigada/plans/<plan-id>.yaml` on the `brigada/plans` branch.
 
 ## License
 
