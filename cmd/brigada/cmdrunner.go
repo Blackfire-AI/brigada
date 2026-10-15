@@ -48,7 +48,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	fs.IntVar(&maxParallel, "max-parallel", 0, "this runner's own cap on parallel jobs, advertised at register (0 = unset)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	agents := &agentSpecs{}
-	fs.Var(agents, "agent", "one offered agent, repeatable: harness=<h>[,model=<m>][,classes=<c1>+<c2>][,agent-file=<path>]; replaces --harness/--model/--classes/--agent-file")
+	fs.Var(agents, "agent", "one offered agent, repeatable: harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,agent-file=<path>]; account defaults to the harness name; replaces --harness/--model/--classes/--agent-file")
 	if code := common.parse(stderr, args); code != 0 {
 		return code
 	}
@@ -156,6 +156,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			Harness: spec.harness,
 			Model:   spec.model,
 			Family:  spec.harness,
+			Account: spec.accountLabel(),
 			Classes: spec.classes,
 		})
 	}
@@ -166,9 +167,6 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	name, secret, err := lifecycle.TokenForRole(rt.paths.Tokens, "runner")
 	if err != nil {
 		return fail(stderr, err)
-	}
-	for i := range adverts {
-		adverts[i].Account = name
 	}
 	parts := make([]string, len(adverts))
 	for i, a := range adverts {
@@ -199,7 +197,18 @@ type agentSpec struct {
 	harness   string
 	model     string
 	classes   []string
+	account   string
 	agentFile string
+}
+
+// accountLabel is the account the agent's quota is shared under (§8): the
+// explicit account= label, else the harness name — one login per CLI on
+// a runner is the common shape, so the account is the harness's login.
+func (s agentSpec) accountLabel() string {
+	if s.account != "" {
+		return s.account
+	}
+	return s.harness
 }
 
 // defaultClasses is what an agent takes when nothing narrows it — the
@@ -224,8 +233,8 @@ func (s *agentSpecs) String() string {
 }
 
 // Set parses one --agent value: harness=<h>[,model=<m>][,classes=<c1>+<c2>]
-// [,agent-file=<path>]. The harness is required; the rest keeps its
-// harness's default. Everything but existence is validated here, so a
+// [,account=<label>][,agent-file=<path>]. The harness is required; the
+// rest keeps its harness's default. Everything but existence is validated here, so a
 // bad agent is a startup failure, never a job's.
 func (s *agentSpecs) Set(v string) error {
 	spec := agentSpec{classes: splitList(defaultClasses)}
@@ -237,7 +246,7 @@ func (s *agentSpecs) Set(v string) error {
 		}
 		key, value, ok := strings.Cut(field, "=")
 		if !ok {
-			return fmt.Errorf("--agent %q: want harness=<h>[,model=<m>][,classes=<c1>+<c2>][,agent-file=<path>]", v)
+			return fmt.Errorf("--agent %q: want harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,agent-file=<path>]", v)
 		}
 		switch key {
 		case "harness":
@@ -247,10 +256,12 @@ func (s *agentSpecs) Set(v string) error {
 		case "classes":
 			sawClasses = true
 			spec.classes = splitPlusList(value)
+		case "account":
+			spec.account = value
 		case "agent-file":
 			spec.agentFile = value
 		default:
-			return fmt.Errorf("--agent %q: unknown field %q; want harness, model, classes or agent-file", v, key)
+			return fmt.Errorf("--agent %q: unknown field %q; want harness, model, classes, account or agent-file", v, key)
 		}
 	}
 	if spec.harness == "" {
@@ -270,6 +281,9 @@ func (s agentSpec) String() string {
 	}
 	if len(s.classes) > 0 {
 		fields = append(fields, "classes="+strings.Join(s.classes, "+"))
+	}
+	if s.account != "" {
+		fields = append(fields, "account="+s.account)
 	}
 	if s.agentFile != "" {
 		fields = append(fields, "agent-file="+s.agentFile)
