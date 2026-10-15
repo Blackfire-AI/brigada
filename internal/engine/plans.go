@@ -5,45 +5,59 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
-// oneTaskRule is the refusal a plan of any other size earns (§6.1):
-// dependencies arrive with plans in phase 3, until then a plan is one
-// task, so the foreman splits its work into one-task plans.
-const oneTaskRule = "one task per plan until plans with dependencies (phase 3)"
-
 // PlanTask is one task of a plan as its creator names it (§6.1): the
 // title, the spec verbatim (§1.4), the check the runner runs after a
-// done (§5.5), and the class. Dependencies, caps and per-task repos
-// arrive with the plan tools of phase 3.
+// done (§5.5), and the class. Name is the short handle the plan's author
+// gives it so others can depend on it, and Deps the names of the tasks of
+// the same plan it waits for (§6.1). Caps and per-task repos arrive with
+// the plan tools of phase 3.
 type PlanTask struct {
 	Title string
+	Name  string // '' = unnamed: nothing can depend on it
 	Spec  string
 	Check string
 	Class string // '' = implement
+	Deps  []string
 }
 
-// CreatePlanResult is what CreatePlan did: the plan, its one task, and
-// the first work job's own submit answer — created or, should a live
-// job already hold the key, pending.
+// CreatedTask is one task CreatePlan made: its id, its name, and the
+// work job queued for it — zero for a task that waits on dependencies.
+type CreatedTask struct {
+	TaskID int64
+	Name   string
+	JobID  int64
+}
+
+// CreatePlanResult is what CreatePlan did: the plan, its tasks, and the
+// first ready task's work job's own submit answer — created or, should
+// a live job already hold the key, pending. TaskID, JobID and Run are
+// that first ready task's: for the one-task plan, the task.
 type CreatePlanResult struct {
 	Answer Answer
 	PlanID int64
 	TaskID int64
 	JobID  int64
 	Run    int
+	Tasks  []CreatedTask
 }
 
 // CreatePlan is the foreman's plan_create (§6.2, §12.2): one plan,
 // active from the start — the approval limit arrives with the plan
-// phase — holding exactly one ready task whose first work job is
-// queued on the task's key, its prompt composed here from the versioned
-// template plus the spec verbatim (§1.4, §5.3). Plan, task, job, the
-// plan_created event and the task_spec message land in one transaction,
-// so a caller never sees a plan whose task or job failed to appear.
+// phase — holding its tasks (§6.1). A task with no dependencies is ready
+// and its first work job is queued on the task's key, its prompt
+// composed here from the versioned template plus the spec verbatim
+// (§1.4, §5.3); a task with dependencies waits, pending, until the last
+// of them is done. The graph is validated whole before anything is
+// written: a dependency naming no task of the plan, a self-dependency
+// or a cycle refuses the plan. Plan, tasks, edges, jobs, the
+// plan_created event and the task_spec messages land in one
+// transaction, so a caller never sees a plan half made.
 func (e *Engine) CreatePlan(ctx context.Context, project int64, title string, tasks []PlanTask) (CreatePlanResult, error) {
 	var res CreatePlanResult
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
@@ -61,35 +75,112 @@ func (e *Engine) CreatePlan(ctx context.Context, project int64, title string, ta
 	return res, err
 }
 
+// validatePlanGraph checks a plan's names and dependencies (§6.1) and
+// returns each task's dependencies as indexes into tasks, duplicates
+// folded. Names are unique where set; every dep names a task of the plan
+// and not its own; the graph has no cycle, the refusal naming the
+// cycle's tasks.
+func validatePlanGraph(tasks []PlanTask) ([][]int, error) {
+	byName := map[string]int{}
+	for i, t := range tasks {
+		if t.Name == "" {
+			continue
+		}
+		if j, dup := byName[t.Name]; dup {
+			return nil, fmt.Errorf("task name %q is used by tasks %d and %d: names are unique in a plan", t.Name, j+1, i+1)
+		}
+		byName[t.Name] = i
+	}
+	label := func(i int) string {
+		if tasks[i].Name != "" {
+			return tasks[i].Name
+		}
+		return fmt.Sprintf("task %d", i+1)
+	}
+	deps := make([][]int, len(tasks))
+	for i, t := range tasks {
+		seen := map[int]bool{}
+		for _, d := range t.Deps {
+			j, ok := byName[d]
+			switch {
+			case !ok:
+				return nil, fmt.Errorf("%s depends on %q, which names no task of this plan", label(i), d)
+			case j == i:
+				return nil, fmt.Errorf("%s depends on itself", label(i))
+			}
+			if !seen[j] {
+				seen[j] = true
+				deps[i] = append(deps[i], j)
+			}
+		}
+	}
+	// Depth-first search for a cycle: state 1 = on the current path,
+	// 2 = finished with no cycle through it.
+	state := make([]int, len(tasks))
+	var path []int
+	var visit func(i int) []int
+	visit = func(i int) []int {
+		state[i] = 1
+		path = append(path, i)
+		for _, j := range deps[i] {
+			switch state[j] {
+			case 1:
+				for k, p := range path {
+					if p == j {
+						return append(append([]int{}, path[k:]...), j)
+					}
+				}
+			case 0:
+				if c := visit(j); c != nil {
+					return c
+				}
+			}
+		}
+		path = path[:len(path)-1]
+		state[i] = 2
+		return nil
+	}
+	for i := range tasks {
+		if state[i] != 0 {
+			continue
+		}
+		if c := visit(i); c != nil {
+			names := make([]string, len(c))
+			for k, idx := range c {
+				names[k] = label(idx)
+			}
+			return nil, fmt.Errorf("dependency cycle: %s", strings.Join(names, " -> "))
+		}
+	}
+	return deps, nil
+}
+
 func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []PlanTask, now time.Time) (CreatePlanResult, error) {
 	if title == "" {
 		return CreatePlanResult{}, fmt.Errorf("plan title is required")
 	}
-	if len(tasks) != 1 {
-		return CreatePlanResult{}, fmt.Errorf("a plan takes exactly one task, got %d: %s", len(tasks), oneTaskRule)
+	if len(tasks) == 0 {
+		return CreatePlanResult{}, fmt.Errorf("a plan takes at least one task")
 	}
-	t := tasks[0]
-	if t.Spec == "" {
-		return CreatePlanResult{}, fmt.Errorf("task spec is required: the worker's task, verbatim (§1.4)")
+	for i, t := range tasks {
+		if t.Spec == "" {
+			return CreatePlanResult{}, fmt.Errorf("task %d: spec is required: the worker's task, verbatim (§1.4)", i+1)
+		}
+	}
+	deps, err := validatePlanGraph(tasks)
+	if err != nil {
+		return CreatePlanResult{}, err
 	}
 	// The worktree starts from the project's default branch: a plan's
 	// tasks work the project's repo (§6.1), and per-task repos are the
 	// plan phase's to add.
 	var baseRef string
-	err := tx.QueryRow("SELECT default_branch FROM projects WHERE id = ?", project).Scan(&baseRef)
+	err = tx.QueryRow("SELECT default_branch FROM projects WHERE id = ?", project).Scan(&baseRef)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return CreatePlanResult{}, fmt.Errorf("no such project %d", project)
 	case err != nil:
 		return CreatePlanResult{}, fmt.Errorf("read project %d: %w", project, err)
-	}
-	class := t.Class
-	if class == "" {
-		class = "implement"
-	}
-	taskTitle := t.Title
-	if taskTitle == "" {
-		taskTitle = taskTitleOf(t.Spec)
 	}
 	nowStr := fmtTime(now)
 
@@ -107,39 +198,121 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		return CreatePlanResult{}, err
 	}
 
-	// The task (§6.1): ready at once — its plan has no other task to
-	// wait for — on the project's repo and base ref.
-	task, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, base_ref, caps, created_at, updated_at)
-		VALUES (?, ?, ?, NULLIF(?, ''), ?, 'ready', ?, '{}', ?, ?)`,
-		planID, taskTitle, t.Spec, t.Check, class, baseRef, nowStr, nowStr)
-	if err != nil {
-		return CreatePlanResult{}, fmt.Errorf("create the task: %w", err)
+	// The tasks (§6.1): ready at once when they wait for nothing, on the
+	// project's repo and base ref; pending while a dependency is open.
+	res := CreatePlanResult{PlanID: planID, Tasks: make([]CreatedTask, len(tasks))}
+	for i, t := range tasks {
+		class := t.Class
+		if class == "" {
+			class = "implement"
+		}
+		taskTitle := t.Title
+		if taskTitle == "" {
+			taskTitle = taskTitleOf(t.Spec)
+		}
+		state := taskReady
+		if len(deps[i]) > 0 {
+			state = taskPending
+		}
+		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, created_at, updated_at)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', ?, ?)`,
+			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, nowStr, nowStr)
+		if err != nil {
+			return CreatePlanResult{}, fmt.Errorf("create the task: %w", err)
+		}
+		taskID, err := r.LastInsertId()
+		if err != nil {
+			return CreatePlanResult{}, fmt.Errorf("create the task: last insert id: %w", err)
+		}
+		res.Tasks[i] = CreatedTask{TaskID: taskID, Name: t.Name}
 	}
-	taskID, err := task.LastInsertId()
-	if err != nil {
-		return CreatePlanResult{}, fmt.Errorf("create the task: last insert id: %w", err)
+	for i, ds := range deps {
+		for _, j := range ds {
+			if _, err := tx.Exec(`INSERT INTO task_deps (plan_id, task_id, depends_on_task_id) VALUES (?, ?, ?)`,
+				planID, res.Tasks[i].TaskID, res.Tasks[j].TaskID); err != nil {
+				return CreatePlanResult{}, fmt.Errorf("record the dependencies: %w", err)
+			}
+		}
 	}
 
-	// The first work job, its prompt composed here (§1.4): only the
-	// engine builds prompts, from the versioned template plus the spec
-	// verbatim. submitTx appends the job_created event and the task_spec
-	// message, as it does for the debug submit.
-	sr, err := e.submitTx(tx, SubmitParams{
+	// The first work job of every ready task (§1.4). The first of them
+	// answers for the plan.
+	first := true
+	for i, t := range tasks {
+		if len(deps[i]) > 0 {
+			continue
+		}
+		sr, err := e.queueTaskWorkTx(tx, project, res.Tasks[i].TaskID, t.Spec, now)
+		if err != nil {
+			return CreatePlanResult{}, err
+		}
+		res.Tasks[i].JobID = sr.JobID
+		if first {
+			first = false
+			res.Answer, res.TaskID, res.JobID, res.Run = sr.Answer, res.Tasks[i].TaskID, sr.JobID, sr.Run
+		}
+	}
+	return res, nil
+}
+
+// queueTaskWorkTx queues a task's first work job on the task's key, its
+// prompt composed here (§1.4): only the engine builds prompts, from the
+// versioned template plus the spec verbatim. submitTx appends the
+// job_created event and the task_spec message, as it does for the debug
+// submit.
+func (e *Engine) queueTaskWorkTx(tx *sql.Tx, project, taskID int64, spec string, now time.Time) (SubmitResult, error) {
+	return e.submitTx(tx, SubmitParams{
 		Key:       fmt.Sprintf("task:%d", taskID),
 		ProjectID: project,
 		TaskID:    taskID,
 		Kind:      KindWork,
 		Mode:      ModeFresh,
-		Prompt:    prompt.ComposeWorkerPrompt(t.Spec, ""),
+		Prompt:    prompt.ComposeWorkerPrompt(spec, ""),
 	}, now)
+}
+
+// releaseDependentsTx frees the tasks that waited on a task now done
+// (§6.1): each pending dependent whose dependencies are all done turns
+// ready and has its first work job queued, in the completion's own
+// transaction. A dependent with another dependency still open keeps
+// waiting, and so does one whose dependency failed or parked at
+// needs_foreman: that dependency never reaches done, and the foreman
+// decides the dependent's fate.
+func (e *Engine) releaseDependentsTx(tx *sql.Tx, project, done int64, now time.Time) error {
+	rows, err := tx.Query(`SELECT t.id, t.spec FROM task_deps d JOIN tasks t ON t.id = d.task_id
+		WHERE d.depends_on_task_id = ? AND t.state = ?
+		AND NOT EXISTS (SELECT 1 FROM task_deps o JOIN tasks x ON x.id = o.depends_on_task_id
+			WHERE o.task_id = t.id AND x.state <> ?)
+		ORDER BY t.id`, done, taskPending, taskDone)
 	if err != nil {
-		return CreatePlanResult{}, err
+		return fmt.Errorf("read the dependents of task %d: %w", done, err)
 	}
-	return CreatePlanResult{
-		Answer: sr.Answer,
-		PlanID: planID,
-		TaskID: taskID,
-		JobID:  sr.JobID,
-		Run:    sr.Run,
-	}, nil
+	type freed struct {
+		id   int64
+		spec string
+	}
+	var free []freed
+	for rows.Next() {
+		var f freed
+		if err := rows.Scan(&f.id, &f.spec); err != nil {
+			rows.Close()
+			return fmt.Errorf("read the dependents of task %d: %w", done, err)
+		}
+		free = append(free, f)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("read the dependents of task %d: %w", done, err)
+	}
+	rows.Close()
+	for _, f := range free {
+		if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
+			taskReady, fmtTime(now), f.id); err != nil {
+			return fmt.Errorf("ready task %d: %w", f.id, err)
+		}
+		if _, err := e.queueTaskWorkTx(tx, project, f.id, f.spec, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }

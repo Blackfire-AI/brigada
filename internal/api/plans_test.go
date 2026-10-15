@@ -82,7 +82,8 @@ func TestPlanCreateEndpoint(t *testing.T) {
 	for name, bad := range map[string]string{
 		"no title":   `{"tasks":[{"spec":"s"}]}`,
 		"no tasks":   `{"title":"x","tasks":[]}`,
-		"two tasks":  `{"title":"x","tasks":[{"spec":"one"},{"spec":"two"}]}`,
+		"a cycle":    `{"title":"x","tasks":[{"name":"a","spec":"one","deps":["b"]},{"name":"b","spec":"two","deps":["a"]}]}`,
+		"outside":    `{"title":"x","tasks":[{"name":"a","spec":"one","deps":["zzz"]}]}`,
 		"no spec":    `{"title":"x","tasks":[{"title":"t"}]}`,
 		"bad encode": `{"title":42}`,
 	} {

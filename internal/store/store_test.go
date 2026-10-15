@@ -555,8 +555,8 @@ func TestForeignKeysAreEnforced(t *testing.T) {
 			"INSERT INTO tasks (plan_id, title, spec, class, state, base_ref, caps, created_at, updated_at) VALUES (?, 'x', 's', 'implement', 'ready', 'main', '{}', ?, ?)",
 			[]any{bad, ts, ts}},
 		{"task_dep without its dependency",
-			"INSERT INTO task_deps (task_id, dep_id) VALUES (?, ?)",
-			[]any{f.task, bad}},
+			"INSERT INTO task_deps (plan_id, task_id, depends_on_task_id) VALUES (?, ?, ?)",
+			[]any{f.plan, f.task, bad}},
 		{"job without its project",
 			"INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at) VALUES (?, ?, 'work', 'fk-job-project', 'fresh', 'p', 'queued', ?, ?)",
 			[]any{bad, f.task, ts, ts}},
@@ -755,15 +755,16 @@ func TestTaskDeps(t *testing.T) {
 	f := newFixture(t)
 	other := insertTask(t, f.db, f.plan)
 
-	if _, err := f.db.Exec("INSERT INTO task_deps (task_id, dep_id) VALUES (?, ?)", f.task, f.task); err == nil || !strings.Contains(err.Error(), "CHECK") {
+	const ins = "INSERT INTO task_deps (plan_id, task_id, depends_on_task_id) VALUES (?, ?, ?)"
+	if _, err := f.db.Exec(ins, f.plan, f.task, f.task); err == nil || !strings.Contains(err.Error(), "CHECK") {
 		t.Errorf("self-edge: err = %v; want a CHECK failure", err)
 	}
-	exec(t, f.db, "INSERT INTO task_deps (task_id, dep_id) VALUES (?, ?)", f.task, other)
-	if _, err := f.db.Exec("INSERT INTO task_deps (task_id, dep_id) VALUES (?, ?)", f.task, other); err == nil || !strings.Contains(err.Error(), "UNIQUE") {
+	exec(t, f.db, ins, f.plan, f.task, other)
+	if _, err := f.db.Exec(ins, f.plan, f.task, other); err == nil || !strings.Contains(err.Error(), "UNIQUE") {
 		t.Errorf("duplicate edge: err = %v; want a UNIQUE failure", err)
 	}
 	// The reverse edge is a distinct edge, not a duplicate.
-	exec(t, f.db, "INSERT INTO task_deps (task_id, dep_id) VALUES (?, ?)", other, f.task)
+	exec(t, f.db, ins, f.plan, other, f.task)
 	if n := queryInt(t, f.db, "SELECT COUNT(*) FROM task_deps"); n != 2 {
 		t.Errorf("task_deps rows = %d, want 2", n)
 	}

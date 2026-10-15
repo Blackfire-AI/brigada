@@ -2,6 +2,7 @@ package engine
 
 import (
 	"database/sql"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -121,7 +122,7 @@ func TestStatusListsPlansAndTasks(t *testing.T) {
 		t.Fatalf("the active plan's tasks = %+v, want %d", active.Tasks, len(wantTasks))
 	}
 	for i, want := range wantTasks {
-		if got := active.Tasks[i]; got != want {
+		if got := active.Tasks[i]; !reflect.DeepEqual(got, want) {
 			t.Errorf("task %d = %+v, want %+v", i, got, want)
 		}
 	}

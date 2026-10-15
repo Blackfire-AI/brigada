@@ -621,6 +621,9 @@ func (e *Engine) taskDoneTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 		eventPayload{Status: taskDone}, now); err != nil {
 		return err
 	}
+	if err := e.releaseDependentsTx(tx, job.ProjectID, job.TaskID, now); err != nil {
+		return err
+	}
 	var plan, open int64
 	if err := tx.QueryRow(`SELECT t.plan_id,
 		(SELECT COUNT(*) FROM tasks o WHERE o.plan_id = t.plan_id AND o.state <> ?)

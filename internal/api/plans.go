@@ -12,8 +12,8 @@ import (
 )
 
 // handlePlanCreate is the foreman's plan_create behind the API (§6.2,
-// §12.1, §12.2): one plan with exactly one task, active from the start,
-// its first work job queued. A foreman token names no project — its own
+// §12.1, §12.2): one plan with its tasks, active from the start,
+// the work job of every task without dependencies queued. A foreman token names no project — its own
 // is the only one it may plan in, and a repo URL that says otherwise is
 // a 403 — while a client or admin must name the project's repo URL. The
 // idempotency wrapper around it replays a repeated call's first answer
@@ -61,22 +61,26 @@ func (s *Server) handlePlanCreate(w http.ResponseWriter, r *http.Request, id ide
 	}
 	tasks := make([]engine.PlanTask, len(req.Tasks))
 	for i, t := range req.Tasks {
-		tasks[i] = engine.PlanTask{Title: t.Title, Spec: t.Spec, Check: t.Check, Class: t.Class}
+		tasks[i] = engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Spec: t.Spec, Check: t.Check, Class: t.Class}
 	}
 	res, err := s.eng.CreatePlan(r.Context(), project, req.Title, tasks)
 	if err != nil {
 		// Like the task submit: a plan the engine will not take — no
-		// title, no tasks, more than one task — is the caller's
+		// title, no tasks, a dependency cycle — is the caller's
 		// mistake, not the engine's failure.
 		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, planCreateResponse{
+	out := planCreateResponse{
 		Answer: string(res.Answer),
 		PlanID: res.PlanID,
 		TaskID: res.TaskID,
 		JobID:  res.JobID,
-	})
+	}
+	for _, t := range res.Tasks {
+		out.Tasks = append(out.Tasks, planCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // projectOfRepo resolves the project a repo URL names (product §5 rule
@@ -108,19 +112,31 @@ type planCreateRequest struct {
 }
 
 // planTaskBody is one task of the plan as the body carries it (§6.1):
-// title, spec, check and class.
+// title, name, spec, check, class and the names of the tasks it
+// depends on.
 type planTaskBody struct {
-	Title string `json:"title"`
-	Spec  string `json:"spec"`
-	Check string `json:"check"`
-	Class string `json:"class"`
+	Title string   `json:"title"`
+	Name  string   `json:"name,omitempty"`
+	Deps  []string `json:"deps,omitempty"`
+	Spec  string   `json:"spec"`
+	Check string   `json:"check"`
+	Class string   `json:"class"`
 }
 
-// planCreateResponse names what the call created: the plan, its one
-// task, and the queued work job to wait on.
+// planCreateResponse names what the call created: the plan, the
+// first ready task with its queued work job to wait on, and every task.
 type planCreateResponse struct {
-	Answer string `json:"answer"`
-	PlanID int64  `json:"plan_id"`
+	Answer string            `json:"answer"`
+	PlanID int64             `json:"plan_id"`
+	TaskID int64             `json:"task_id"`
+	JobID  int64             `json:"job_id"`
+	Tasks  []planCreatedTask `json:"tasks,omitempty"`
+}
+
+// planCreatedTask is one task the plan made: its id, name and work job
+// (0 while it waits on dependencies).
+type planCreatedTask struct {
 	TaskID int64  `json:"task_id"`
+	Name   string `json:"name,omitempty"`
 	JobID  int64  `json:"job_id"`
 }
