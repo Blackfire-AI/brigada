@@ -57,6 +57,9 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if code != 0 {
 		return code
 	}
+	if code := moveToStateDir(rt, stderr); code != 0 {
+		return code
+	}
 
 	// The shorthand flags describe one agent; --agent describes every
 	// one itself. Mixing the two forms is a usage error, so an argument
