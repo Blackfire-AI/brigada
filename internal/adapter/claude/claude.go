@@ -11,7 +11,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/mcp"
@@ -410,6 +413,7 @@ var errorPhrases = []errorPhrase{
 	{adapter.ErrLimit, "rate limit"},
 	{adapter.ErrLimit, "limit reached"},
 	{adapter.ErrLimit, "try again at"},
+	{adapter.ErrLimit, "hit your session limit"},
 	// The CLI's login (§8): the agent is broken until a probe passes.
 	{adapter.ErrAuth, "invalid api key"},
 	{adapter.ErrAuth, "please run /login"},
@@ -430,6 +434,7 @@ var stderrPhrases = []errorPhrase{
 	{adapter.ErrResumeFailed, "session not found"},
 	{adapter.ErrResumeFailed, "no session found"},
 	{adapter.ErrLimit, "usage limit reached"},
+	{adapter.ErrLimit, "hit your session limit"},
 	{adapter.ErrAuth, "invalid api key"},
 	{adapter.ErrAuth, "please run /login"},
 	{adapter.ErrAuth, "not logged in"},
@@ -441,10 +446,53 @@ func phraseEvent(table []errorPhrase, text string) (adapter.Event, bool) {
 	lower := strings.ToLower(text)
 	for _, m := range table {
 		if strings.Contains(lower, m.phrase) {
-			return adapter.Event{Kind: adapter.EvError, ErrorKind: m.kind, Text: text}, true
+			ev := adapter.Event{Kind: adapter.EvError, ErrorKind: m.kind, Text: text}
+			if m.kind == adapter.ErrLimit {
+				ev.LimitUntil = limitReset(text, now())
+			}
+			return ev, true
 		}
 	}
 	return adapter.Event{}, false
+}
+
+// now is the clock limitReset reads; tests replace it.
+var now = time.Now
+
+// resetRe finds the CLI's reset note: "resets 6:40pm (Europe/Moscow)".
+var resetRe = regexp.MustCompile(`(?i)resets\s+(\d{1,2})(?::(\d{2}))?\s*([ap])m\s*\(([^)]+)\)`)
+
+// limitReset reads the reset time out of a limit message, as an RFC3339
+// instant: the next occurrence of that wall-clock time in the named zone.
+// Best effort — anything that does not parse is "" (unknown), never an
+// error.
+func limitReset(text string, at time.Time) string {
+	m := resetRe.FindStringSubmatch(text)
+	if m == nil {
+		return ""
+	}
+	hour, _ := strconv.Atoi(m[1])
+	min := 0
+	if m[2] != "" {
+		min, _ = strconv.Atoi(m[2])
+	}
+	if hour < 1 || hour > 12 || min > 59 {
+		return ""
+	}
+	hour %= 12
+	if strings.EqualFold(m[3], "p") {
+		hour += 12
+	}
+	loc, err := time.LoadLocation(strings.TrimSpace(m[4]))
+	if err != nil {
+		return ""
+	}
+	local := at.In(loc)
+	t := time.Date(local.Year(), local.Month(), local.Day(), hour, min, 0, 0, loc)
+	if !t.After(at) {
+		t = time.Date(local.Year(), local.Month(), local.Day()+1, hour, min, 0, 0, loc)
+	}
+	return t.Format(time.RFC3339)
 }
 
 // errorFromText sorts an error result's text by the broad table.
