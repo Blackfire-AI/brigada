@@ -659,6 +659,28 @@ func TestAttachHarnessWithoutInteractiveFailsClearly(t *testing.T) {
 	}
 }
 
+func TestDefaultAdapterForAttachCodexIsInteractive(t *testing.T) {
+	ad, ok := defaultAdapterForAttach("codex")
+	if !ok {
+		t.Fatal("defaultAdapterForAttach(codex) = unavailable, want available")
+	}
+	if _, ok := ad.(adapter.Interactive); !ok {
+		t.Fatalf("defaultAdapterForAttach(codex) returned %T, want adapter.Interactive", ad)
+	}
+
+	for _, harness := range []string{"kimi", "opencode"} {
+		ad, ok := defaultAdapterForAttach(harness)
+		if harness == "opencode" && ok {
+			t.Errorf("defaultAdapterForAttach(%q) = %T, want unavailable", harness, ad)
+		}
+		if ok {
+			if _, interactive := ad.(adapter.Interactive); interactive {
+				t.Errorf("defaultAdapterForAttach(%q) returned an interactive adapter", harness)
+			}
+		}
+	}
+}
+
 // TestAttachFailsOutsideAProjectsRepo covers the project's absences
 // (§4.2 item 1): a working directory that is no repository at all — a
 // bare `brigada` included — and a repository whose origin names no

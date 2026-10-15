@@ -19,6 +19,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
+	"github.com/Blackfire-AI/brigada/internal/adapter/codex"
 	"github.com/Blackfire-AI/brigada/internal/adapter/kimi"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
@@ -133,6 +134,12 @@ func defaultAdapterForAttach(harness string) (adapter.Adapter, bool) {
 	switch harness {
 	case "claude":
 		return &claude.Adapter{}, true
+	case "codex":
+		// Codex can drive an interactive attach, but remains excluded from
+		// ResumeCapableHarnesses until its exec path can carry the foreman's
+		// §12.2 MCP bridge. Keep the adapter registered so attach is ready
+		// when that foreman gate is revisited.
+		return &codex.Adapter{}, true
 	case "kimi":
 		return &kimi.Adapter{}, true
 	}
