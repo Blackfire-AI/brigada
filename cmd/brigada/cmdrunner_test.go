@@ -147,10 +147,10 @@ func TestRunnerHarnessFlags(t *testing.T) {
 		wantErr  string
 	}{
 		{
-			name:     "an unknown harness names all three",
-			args:     []string{"runner", "--harness", "codex", "--state-dir", state},
+			name:     "an unknown harness names all four",
+			args:     []string{"runner", "--harness", "gemini", "--state-dir", state},
 			wantCode: 2,
-			wantErr:  `unknown harness "codex"; want claude, kimi or fake`,
+			wantErr:  `unknown harness "gemini"; want claude, kimi, codex or fake`,
 		},
 		{
 			name:     "agent file with the claude harness is a usage error",
@@ -243,9 +243,9 @@ func TestRunnerAgentFlag(t *testing.T) {
 			wantErr: `unknown field "budget"`,
 		},
 		{
-			name:    "an unknown harness names all three",
-			args:    []string{"runner", "--agent", "harness=codex", "--state-dir", state},
-			wantErr: `unknown harness "codex"; want claude, kimi or fake`,
+			name:    "an unknown harness names all four",
+			args:    []string{"runner", "--agent", "harness=gemini", "--state-dir", state},
+			wantErr: `unknown harness "gemini"; want claude, kimi, codex or fake`,
 		},
 		{
 			name:    "an agent file under the claude harness is refused",

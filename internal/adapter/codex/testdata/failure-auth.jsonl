@@ -1,0 +1,2 @@
+{"type":"error","message":"Not logged in. Please log in with `codex login`."}
+{"type":"turn.failed","error":{"message":"Not logged in. Please log in with `codex login`."}}

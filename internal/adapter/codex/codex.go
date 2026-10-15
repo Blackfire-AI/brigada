@@ -1,0 +1,310 @@
+// Package codex drives the Codex CLI headless (design §5.2): one run per
+// job, `codex exec --json`, resumed by thread id when the job carries
+// one. The CLI's own login state — its subscription tokens, its
+// configuration — is the ambient environment's business; brigada adds
+// nothing of its own to it and takes the runner's share back out.
+package codex
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"os"
+	"os/exec"
+	"strings"
+
+	"github.com/Blackfire-AI/brigada/internal/adapter"
+)
+
+// Adapter drives the codex CLI (0.162.x) in its headless exec mode. The
+// zero value runs `codex` from PATH; the fields carry what the agent's
+// configuration passes through.
+//
+// It is a worker harness only, and absent from
+// adapter.ResumeCapableHarnesses although its CLI resumes headless
+// (`codex exec resume <id>`): that set gates the foreman's harness,
+// whose turns carry the `brigada mcp` bridge (§12.2), and the exec run
+// path offers no MCP-config flag to carry it — Command refuses such
+// jobs outright, as the kimi adapter does. A foreman cannot run on
+// codex until its CLI can carry the bridge.
+type Adapter struct {
+	// Binary is the CLI to run; "codex" when empty.
+	Binary string
+
+	// ExtraArgs are further flags the agent's configuration passes
+	// through, appended verbatim after the adapter's own, before the
+	// prompt. Empty adds nothing.
+	ExtraArgs []string
+}
+
+var _ adapter.Adapter = (*Adapter)(nil)
+
+// DefaultModel is the agent's name for the CLI's own default model: the
+// one the CLI picks when no -m names another. The runner offers it when
+// the agent's configuration sets no --model, and the adapter's answer
+// to it is no -m flag at all.
+const DefaultModel = "default"
+
+// Name implements adapter.Adapter: the harness this adapter drives,
+// which the runner's advertisement pairs it with (§5.1).
+func (a *Adapter) Name() string { return "codex" }
+
+// Command implements adapter.Adapter: the fresh or resume invocation of
+// the CLI, running in workdir:
+//
+//	codex exec --json -s workspace-write [-m model] [resume <id>] -- <prompt>
+//
+// The sandbox is workspace-write: the worker edits inside its worktree
+// without approval and the CLI's own default keeps the network off. The
+// CLI's default sandbox is read-only, so -s is not optional; the flag
+// that bypasses approvals and sandbox is never passed. No
+// --skip-git-repo-check either: a worker's directory is a worktree,
+// which is a git repo. The prompt is the positional after `--`, argv
+// and no shell, verbatim — the engine's product (§1.4), not the
+// adapter's to edit, and a prompt that starts with a dash stays one.
+// The environment is the runner's ambient set minus brigada's own share
+// of it (§5.1): every BRIGADA_-prefixed variable is dropped.
+func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*exec.Cmd, error) {
+	if job.MCPConfig != "" {
+		return nil, errors.New("codex: the exec run path has no MCP-config flag; a job carrying an MCP config cannot run on it")
+	}
+	binary := a.Binary
+	if binary == "" {
+		binary = "codex"
+	}
+	args := []string{"exec", "--json", "-s", "workspace-write"}
+	if job.Model != "" && job.Model != DefaultModel {
+		args = append(args, "-m", job.Model)
+	}
+	args = append(args, a.ExtraArgs...)
+	if resumeSessionID != "" {
+		args = append(args, "resume", resumeSessionID)
+	}
+	args = append(args, "--", job.Prompt)
+	cmd := exec.Command(binary, args...)
+	if cmd.Err != nil {
+		return nil, cmd.Err
+	}
+	cmd.Dir = workdir
+	cmd.Env = workerEnv(os.Environ())
+	return cmd, nil
+}
+
+// envPrefix marks brigada's own variables: the runner's token, the
+// engine's socket and anything else the orchestrator rides in its
+// environment. None of it is the worker's to see.
+const envPrefix = "BRIGADA_"
+
+// workerEnv is the ambient environment minus everything brigada-prefixed.
+func workerEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, envPrefix) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
+// lineJSON is one line of the CLI's --json output: one event per line.
+// Only the fields the adapter reads are declared.
+type lineJSON struct {
+	Type     string    `json:"type"`
+	ThreadID string    `json:"thread_id"`
+	Message  string    `json:"message"`
+	Item     *itemJSON `json:"item"`
+	Error    *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// itemJSON is the item of an item.started / item.completed event. The
+// types this adapter reads: agent_message, command_execution and error;
+// every other type (reasoning, file changes, …) is ignored.
+type itemJSON struct {
+	Type    string `json:"type"`
+	Text    string `json:"text"`
+	Message string `json:"message"`
+	Command string `json:"command"`
+}
+
+// maxToolText bounds a command's text in a tool event: a heredoc can
+// run to kilobytes, and the event is a progress line.
+const maxToolText = 200
+
+// firstLine is the command's first line, cut to maxToolText runes.
+func firstLine(command string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(command), "\n")
+	if r := []rune(line); len(r) > maxToolText {
+		line = string(r[:maxToolText])
+	}
+	return line
+}
+
+// ParseEvent implements adapter.Adapter: one line of the CLI's --json
+// stream turned into one progress event.
+//
+//	thread.started                    → session id (the thread id)
+//	item.completed agent_message      → assistant message
+//	item.started command_execution    → tool start (the command's first line)
+//	item.completed command_execution  → tool end (the same text)
+//	error, turn.failed, error item    → an error event, sorted by its text
+//	turn.started, turn.completed      → ignored: the usage counters it
+//	                                    carries are no progress
+//
+// Unknown event and item types and malformed lines are ignored, never
+// fatal, so a stray line cannot fail an otherwise good run.
+func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
+	trimmed := bytes.TrimSpace(line)
+	if len(trimmed) == 0 {
+		return adapter.Event{}, false
+	}
+	var lj lineJSON
+	if err := json.Unmarshal(trimmed, &lj); err != nil {
+		// Not the CLI's JSON: noise, or a failure printed as prose.
+		// Prose sorts by the strict table only.
+		return phraseEvent(stderrPhrases, string(trimmed))
+	}
+	switch lj.Type {
+	case "thread.started":
+		if lj.ThreadID == "" {
+			return adapter.Event{}, false
+		}
+		return adapter.Event{Kind: adapter.EvSession, SessionID: lj.ThreadID}, true
+	case "item.started", "item.completed":
+		return itemEvent(lj)
+	case "error":
+		return errorEvent(lj.Message)
+	case "turn.failed":
+		if lj.Error == nil {
+			return errorEvent("")
+		}
+		return errorEvent(lj.Error.Message)
+	default:
+		return adapter.Event{}, false
+	}
+}
+
+// itemEvent reads one item event.
+func itemEvent(lj lineJSON) (adapter.Event, bool) {
+	if lj.Item == nil {
+		return adapter.Event{}, false
+	}
+	started := lj.Type == "item.started"
+	switch lj.Item.Type {
+	case "agent_message":
+		if started || lj.Item.Text == "" {
+			return adapter.Event{}, false
+		}
+		return adapter.Event{Kind: adapter.EvMessage, Text: lj.Item.Text}, true
+	case "command_execution":
+		kind := adapter.EvToolEnd
+		if started {
+			kind = adapter.EvToolStart
+		}
+		return adapter.Event{Kind: kind, Text: firstLine(lj.Item.Command)}, true
+	case "error":
+		if started {
+			return adapter.Event{}, false
+		}
+		return errorEvent(lj.Item.Message)
+	default:
+		return adapter.Event{}, false
+	}
+}
+
+// ParseErrEvent implements adapter.Adapter: one line of the CLI's
+// stderr, the strictest stream the adapter reads. Stderr carries the
+// CLI's chatter — retry notes, warnings, MCP noise — so prose there
+// sorts by the strict table only: a failure message named in full, or
+// nothing, and noise cannot fail a run that ended clean. The CLI's JSON
+// there is an error event, sorted as on stdout.
+func (a *Adapter) ParseErrEvent(line []byte) (adapter.Event, bool) {
+	trimmed := bytes.TrimSpace(line)
+	if len(trimmed) == 0 {
+		return adapter.Event{}, false
+	}
+	var lj lineJSON
+	if err := json.Unmarshal(trimmed, &lj); err == nil && lj.Type != "" {
+		switch lj.Type {
+		case "error", "turn.failed":
+			return a.ParseEvent(trimmed)
+		}
+		return adapter.Event{}, false
+	}
+	return phraseEvent(stderrPhrases, string(trimmed))
+}
+
+// errorPhrase is one row of a phrase table: what a failure's text looks
+// like, case-insensitively, and the kind each sorts into. First match
+// wins; extend the table, not the code.
+type errorPhrase struct {
+	kind   adapter.ErrorKind
+	phrase string
+}
+
+// errorPhrases is the broad table a JSON error's text sorts by: an
+// error event is the CLI's own verdict, so its text can afford loose
+// phrases.
+var errorPhrases = []errorPhrase{
+	// A resume the CLI cannot do: the thread is gone (§5.6, §14), and
+	// the answer is a fresh run in place, not another resume.
+	{adapter.ErrResumeFailed, "no saved session found"},
+	{adapter.ErrResumeFailed, "session not found"},
+	{adapter.ErrResumeFailed, "no session found"},
+	// The account's quota window (§8): the account cools, the job moves.
+	{adapter.ErrLimit, "usage limit"},
+	{adapter.ErrLimit, "rate limit"},
+	// The CLI's login (§8): the agent is broken until a probe passes.
+	{adapter.ErrAuth, "log in"},
+	{adapter.ErrAuth, "unauthorized"},
+	{adapter.ErrAuth, "invalid api key"},
+}
+
+// stderrPhrases is the strict table prose sorts by: only the failure
+// messages the CLI itself prints, named in full. The loose "rate limit"
+// and "unauthorized" earn no place here — a "rate limited, retrying"
+// note or an MCP server's 401 must not fail a run that ended clean.
+var stderrPhrases = []errorPhrase{
+	{adapter.ErrResumeFailed, "no saved session found"},
+	{adapter.ErrResumeFailed, "session not found"},
+	{adapter.ErrLimit, "hit your usage limit"},
+	{adapter.ErrLimit, "usage limit reached"},
+	{adapter.ErrAuth, "not logged in"},
+	{adapter.ErrAuth, "please log in"},
+	{adapter.ErrAuth, "invalid api key"},
+}
+
+// errorEvent sorts a JSON error's text by the broad table; text that
+// names nothing is still a failure, of kind other.
+func errorEvent(text string) (adapter.Event, bool) {
+	if ev, ok := phraseEvent(errorPhrases, text); ok {
+		return ev, true
+	}
+	return adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrOther, Text: text}, true
+}
+
+// phraseEvent sorts one piece of text by one table. Text that names
+// nothing in the table is not an event.
+func phraseEvent(table []errorPhrase, text string) (adapter.Event, bool) {
+	lower := strings.ToLower(text)
+	for _, m := range table {
+		if strings.Contains(lower, m.phrase) {
+			return adapter.Event{Kind: adapter.EvError, ErrorKind: m.kind, Text: text}, true
+		}
+	}
+	return adapter.Event{}, false
+}
+
+// ResultText implements adapter.Adapter: the run's final answer is the
+// last agent_message of the run (§5.4); a run that never spoke has none.
+func (a *Adapter) ResultText(events []adapter.Event) string {
+	result := ""
+	for _, e := range events {
+		if e.Kind == adapter.EvMessage && e.Text != "" {
+			result = e.Text
+		}
+	}
+	return result
+}
