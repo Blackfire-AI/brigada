@@ -103,7 +103,7 @@ type StatusTask struct {
 // the worker's question for a needs_help, the review's findings for
 // review changes, the check's tail or the failure's words for the rest.
 type NeedsYouItem struct {
-	Kind   string `json:"kind"` // "task" or "plan"
+	Kind   string `json:"kind"` // "task", "plan", or "foreman" (a limited foreman, §4.4; ID is the project's, Title its repo URL)
 	ID     int64  `json:"id"`
 	State  string `json:"state"`
 	Title  string `json:"title"`
@@ -179,7 +179,7 @@ func (e *Engine) Status(ctx context.Context, project int64) (StatusInfo, error) 
 		if info.Report, err = statusReportTx(tx, project); err != nil {
 			return err
 		}
-		if info.NeedsYou, err = statusNeedsYouTx(tx, project); err != nil {
+		if info.NeedsYou, err = statusNeedsYouTx(tx, project, now); err != nil {
 			return err
 		}
 		return nil
@@ -360,7 +360,7 @@ var needsYouEventKinds = []string{
 // at needs_foreman or needs_user — each with what its latest parking
 // event said — and the plans waiting for approval. Entries read in id
 // order; project scopes the queue to one project, 0 to all.
-func statusNeedsYouTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
+func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem, error) {
 	kinds := "'" + strings.Join(needsYouEventKinds, "', '") + "'"
 	query := fmt.Sprintf(`SELECT t.id, t.plan_id, t.title, t.state, COALESCE(e.kind, ''), COALESCE(e.payload, '')
 		FROM tasks t
@@ -421,6 +421,43 @@ func statusNeedsYouTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
 	}
 	if err := prows.Err(); err != nil {
 		return nil, fmt.Errorf("list the plans awaiting approval: %w", err)
+	}
+	prows.Close()
+
+	// A limited foreman is waiting for the user's choice (§4.4): wait,
+	// switch it, or let approved plans run without it. A reset time that
+	// passed is not listed; the next wake clears it.
+	lquery := `SELECT id, repo_url, foreman_limited FROM projects WHERE foreman_limited IS NOT NULL`
+	largs := []any{}
+	if project != 0 {
+		lquery += " AND id = ?"
+		largs = append(largs, project)
+	}
+	lquery += " ORDER BY id"
+	lrows, err := tx.Query(lquery, largs...)
+	if err != nil {
+		return nil, fmt.Errorf("list the limited foremen: %w", err)
+	}
+	defer lrows.Close()
+	for lrows.Next() {
+		var it NeedsYouItem
+		var state string
+		if err := lrows.Scan(&it.ID, &it.Title, &state); err != nil {
+			return nil, fmt.Errorf("list the limited foremen: %w", err)
+		}
+		it.Kind = "foreman"
+		it.State = "limited"
+		if state == foremanLimitUnknown {
+			it.Reason = "limited, reset time unknown"
+		} else if t, err := parseTime(state); err == nil && t.After(now) {
+			it.Reason = "limited until " + state
+		} else {
+			continue
+		}
+		items = append(items, it)
+	}
+	if err := lrows.Err(); err != nil {
+		return nil, fmt.Errorf("list the limited foremen: %w", err)
 	}
 	return items, nil
 }

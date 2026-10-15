@@ -37,6 +37,10 @@ type AskResult struct {
 	// HoldID names the attach that holds the foreman when the message
 	// waits for it (§4.2 item 3); 0 otherwise.
 	HoldID int64 `json:"hold_id,omitempty"`
+	// LimitedUntil is the reset time (RFC3339) of a limited foreman
+	// (§4.4); empty when the outcome is limited and the time unknown, and
+	// for every other outcome.
+	LimitedUntil string `json:"limited_until,omitempty"`
 }
 
 // AskForeman puts the user's message in the project's foreman inbox and
@@ -96,6 +100,11 @@ func (e *Engine) AskForeman(ctx context.Context, repoURL, text, source string) (
 			return err
 		}
 		res = AskResult{ProjectID: project, EventID: eventID, Outcome: outcome}
+		if outcome == WakeLimited {
+			if _, res.LimitedUntil, err = foremanLimitedTx(tx, project, now); err != nil {
+				return err
+			}
+		}
 		if outcome == WakeAttached {
 			if err := tx.QueryRow(`SELECT id FROM attach_holds WHERE project_id = ? AND state = 'live' ORDER BY id DESC LIMIT 1`,
 				project).Scan(&res.HoldID); err != nil && !errors.Is(err, sql.ErrNoRows) {

@@ -137,6 +137,12 @@ type Completion struct {
 	CheckResult string
 	SessionID   string
 	Outcome     string
+	// ErrorKind sorts an Error: the adapter's kind for a CLI failure
+	// ("limit", "auth"…), empty when the failure was none the CLI named.
+	// LimitUntil is the reset time of a "limit" (RFC3339, best-effort):
+	// empty means unknown.
+	ErrorKind  string
+	LimitUntil string
 }
 
 // Complete delivers the run's outcome (§12.3).
@@ -148,6 +154,8 @@ func (c *Client) Complete(ctx context.Context, jobID int64, leaseID string, comp
 		CheckResult:     comp.CheckResult,
 		SessionID:       comp.SessionID,
 		Outcome:         comp.Outcome,
+		ErrorKind:       comp.ErrorKind,
+		LimitUntil:      comp.LimitUntil,
 	}
 	return c.answer(ctx, "/v1/runner/complete", req)
 }

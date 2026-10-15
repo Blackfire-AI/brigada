@@ -38,6 +38,7 @@ type eventPayload struct {
 	Question string `json:"question,omitempty"`
 	Findings string `json:"findings,omitempty"`
 	Report   string `json:"report,omitempty"`
+	Until    string `json:"until,omitempty"`
 }
 
 // Loop is the delivery loop (§13): it polls the event log for rows
@@ -222,6 +223,9 @@ func reasonOf(kind, payload string) string {
 	}
 	if kind == KindForemanReport {
 		return firstLine(p.Report)
+	}
+	if kind == KindForemanLimited {
+		return p.Until
 	}
 	reason := p.Reason
 	switch kind {

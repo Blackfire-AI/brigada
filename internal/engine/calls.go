@@ -190,6 +190,11 @@ type Completion struct {
 	CheckResult string
 	SessionID   string
 	Outcome     string
+	// ErrorKind sorts an Error — "limit" when the CLI hit its
+	// subscription limit (§4.4) — and LimitUntil is the reset time then,
+	// RFC3339, empty when unknown.
+	ErrorKind  string
+	LimitUntil string
 }
 
 // Complete finishes a job as done or failed — or, when the completion
@@ -321,6 +326,11 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 		}
 	}
 	if job.Kind == KindForeman {
+		// A limit hit marks the foreman limited before the inbox settles,
+		// so the settle's wake already sees it (§4.4).
+		if err := foremanLimitHitTx(tx, job, c, now); err != nil {
+			return "", err
+		}
 		// A done turn reports to the user (§3, §10) before the inbox
 		// settles, so the report is in the log ahead of anything the
 		// settle's wake appends.

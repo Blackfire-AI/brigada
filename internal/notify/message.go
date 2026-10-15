@@ -22,6 +22,7 @@ const (
 	KindReviewNoVerdict = "review_no_verdict"  // the review ended without a usable verdict (§7)
 	KindTaskOutOfRounds = "task_out_of_rounds" // the task spent its rounds; arrives with the rounds work
 	KindForemanReport   = "foreman_report"     // a done foreman turn's final message, its report to the user (§3, §10)
+	KindForemanLimited  = "foreman_limited"    // the foreman's CLI hit its subscription limit (§4.4, §10)
 )
 
 // title is the notification's bold line: the one name every banner
@@ -88,6 +89,14 @@ func Message(ev Event) (t, body string, ok bool) {
 			body = ev.Kind
 		}
 		return foremanTitle, oneLine(body, bodyLimit), true
+	case ev.Kind == KindForemanLimited:
+		// Reason is the reset time, empty when the error named none: the
+		// user chooses to wait, switch the foreman, or go on without it.
+		when := "reset time unknown"
+		if ev.Reason != "" {
+			when = "until " + ev.Reason
+		}
+		return title, oneLine("the foreman hit its limit ("+when+"): wait, or switch it with `brigada project foreman`", bodyLimit), true
 	case needsForemanKinds[ev.Kind] && ev.Parked:
 		reason := ev.Reason
 		if reason == "" {

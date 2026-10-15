@@ -163,6 +163,9 @@ type Event struct {
 	Text      string
 	SessionID string
 	ErrorKind ErrorKind
+	// LimitUntil is a limit error's reset time, RFC3339, when the CLI's
+	// text carried one machine-readably; empty when unknown (§4.4).
+	LimitUntil string
 }
 
 // IsProgress reports whether the event is progress in the sense of
