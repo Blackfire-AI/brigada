@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 
 	"github.com/Blackfire-AI/brigada/internal/caps"
 )
@@ -60,7 +61,7 @@ func capsUsageTx(tx *sql.Tx) (caps.Usage, error) {
 // flag, and the cap the runner advertised for the runner layer to fold
 // with the config's. Agent 0 — the runner advertises none that fits —
 // leaves the account and model layers nothing to count by.
-func capsJobTx(tx *sql.Tx, owner, agent int64, advertised int, j *jobRow) (caps.Job, error) {
+func capsJobTx(tx *sql.Tx, owner, agent int64, advertised int, j *jobRow, limits caps.Limits) (caps.Job, error) {
 	job := caps.Job{Runner: owner, RunnerCap: advertised, Foreman: j.Kind == KindForeman}
 	if agent != 0 {
 		if err := tx.QueryRow("SELECT account, model FROM agents WHERE id = ?", agent).Scan(&job.Account, &job.Model); err != nil {
@@ -72,5 +73,37 @@ func capsJobTx(tx *sql.Tx, owner, agent int64, advertised int, j *jobRow) (caps.
 			return caps.Job{}, fmt.Errorf("read the plan of task %d: %w", j.TaskID, err)
 		}
 	}
+	// Foreman headroom (§8.2): a task job — work, fix or review — on one
+	// of the project's foreman accounts sees that account's cap lowered.
+	if !limits.NoHeadroom && !job.Foreman && job.Account != "" {
+		accounts, err := foremanAccountsTx(tx, j.ProjectID)
+		if err != nil {
+			return caps.Job{}, err
+		}
+		job.Headroom = slices.Contains(accounts, job.Account)
+	}
 	return job, nil
+}
+
+// foremanAccountsTx is the project's reserved accounts (§8.2): the
+// account labels of the agents advertising the project's foreman
+// harness, sorted. A project with no foreman, or a foreman harness no
+// agent advertises, has none.
+func foremanAccountsTx(tx *sql.Tx, project int64) ([]string, error) {
+	rows, err := tx.Query(`SELECT DISTINCT a.account FROM agents a
+		JOIN projects p ON p.foreman_harness = a.harness
+		WHERE p.id = ? AND p.foreman_harness <> '' ORDER BY a.account`, project)
+	if err != nil {
+		return nil, fmt.Errorf("list foreman accounts of project %d: %w", project, err)
+	}
+	defer rows.Close()
+	var accounts []string
+	for rows.Next() {
+		var account string
+		if err := rows.Scan(&account); err != nil {
+			return nil, fmt.Errorf("list foreman accounts of project %d: %w", project, err)
+		}
+		accounts = append(accounts, account)
+	}
+	return accounts, rows.Err()
 }

@@ -254,7 +254,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		var holdByRoom bool
 		for i := range walk {
 			c := &walk[i]
-			cj, err := capsJobTx(tx, owner, c.id, advertised, j)
+			cj, err := capsJobTx(tx, owner, c.id, advertised, j, e.cfg.Caps)
 			if err != nil {
 				return nil, err
 			}

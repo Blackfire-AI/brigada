@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Blackfire-AI/brigada/internal/caps"
 	"github.com/Blackfire-AI/brigada/internal/store"
 )
 
@@ -100,7 +101,10 @@ func newEnvAt(t *testing.T, path string, adjust func(*Config)) *env {
 	// No exploration by default, so a test's pick is the ranked best; the
 	// tests of the exploration share set it themselves.
 	noExplore := 0.0
-	cfg := Config{Now: e.clock.Now, ExploreShare: &noExplore}
+	// The fixture's project has a claude foreman, so the headroom rule
+	// (§8.2) would lower the cap of any claude account the cap suites
+	// use; it is off here, and the headroom tests turn it on.
+	cfg := Config{Now: e.clock.Now, ExploreShare: &noExplore, Caps: caps.Limits{NoHeadroom: true}}
 	if adjust != nil {
 		adjust(&cfg)
 	}

@@ -23,6 +23,20 @@ import (
 type CapacitySnapshot struct {
 	Agents []CapacityAgent `json:"agents"`
 	Layers []CapacityLayer `json:"layers"`
+	// Headroom lists the accounts reserved for a foreman (§8.2), one
+	// per project and account; empty when no project has one or the
+	// rule is off.
+	Headroom []CapacityHeadroom `json:"headroom,omitempty"`
+}
+
+// CapacityHeadroom is one reserved account as capacity reports it
+// (§8.2): the foreman's account of a project and the cap task workers
+// see on it — one lower than the account's cap, never below 0. An
+// uncapped account has no slot to reserve and is not listed.
+type CapacityHeadroom struct {
+	ProjectID int64  `json:"project_id"`
+	Account   string `json:"account"`
+	Cap       *int   `json:"cap"`
 }
 
 // CapacityAgent is one advertised agent as capacity reports it
@@ -362,6 +376,49 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 		Layer: caps.LayerGlobal,
 		Cap:   cfg.Caps.Global, Use: usage.Global, Queue: queueGlobal,
 	})
+
+	// The reserved accounts (§8.2): per project, the foreman's accounts
+	// and the cap task workers see on each.
+	if !cfg.Caps.NoHeadroom {
+		hq := "SELECT id FROM projects WHERE foreman_harness <> ''"
+		var hargs []any
+		if projectID != 0 {
+			hq += " AND id = ?"
+			hargs = append(hargs, projectID)
+		}
+		rows, err = tx.Query(hq+" ORDER BY id", hargs...)
+		if err != nil {
+			return CapacitySnapshot{}, fmt.Errorf("list foreman projects: %w", err)
+		}
+		var projects []int64
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return CapacitySnapshot{}, fmt.Errorf("list foreman projects: %w", err)
+			}
+			projects = append(projects, id)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return CapacitySnapshot{}, fmt.Errorf("list foreman projects: %w", err)
+		}
+		rows.Close()
+		for _, id := range projects {
+			accounts, err := foremanAccountsTx(tx, id)
+			if err != nil {
+				return CapacitySnapshot{}, err
+			}
+			for _, account := range accounts {
+				v, ok := cfg.Caps.Account[account]
+				if !ok {
+					continue // an uncapped account has no slot to reserve
+				}
+				eff := caps.HeadroomCap(v)
+				snap.Headroom = append(snap.Headroom, CapacityHeadroom{ProjectID: id, Account: account, Cap: &eff})
+			}
+		}
+	}
 	return snap, nil
 }
 

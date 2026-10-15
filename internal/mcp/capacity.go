@@ -46,6 +46,9 @@ func callCapacity(ctx context.Context, c *api.Client, _ json.RawMessage) (string
 		}
 		fmt.Fprintf(&b, "%s cap=%s use=%d queue=%d\n", name, capText(l.Cap), l.Use, l.Queue)
 	}
+	for _, h := range snap.Headroom {
+		fmt.Fprintf(&b, "headroom project %d account=%s cap=%s\n", h.ProjectID, h.Account, capText(h.Cap))
+	}
 	return strings.TrimRight(b.String(), "\n"), nil
 }
 
