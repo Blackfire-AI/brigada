@@ -55,6 +55,16 @@ func foremanToolScope() (allowed, disallowed []string) {
 	return allowed, []string{"Bash", "Edit", "MultiEdit", "NotebookEdit", "Write"}
 }
 
+// workerToolScope is the code worker's default tool scope (§5.2): the Go
+// toolchain's build, test, vet and format commands, and nothing else of
+// the shell. The worker verifies its own work as it goes; the runner
+// still runs the check on the same tree, so no new code reaches
+// execution — the check already runs what tests the worker wrote. The
+// agent config's explicit scope replaces this default.
+func workerToolScope() (allowed, disallowed []string) {
+	return []string{"Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)"}, nil
+}
+
 var _ adapter.Adapter = (*Adapter)(nil)
 
 // The claude CLI carries the attach too (§4.2 item 1): interactive
@@ -103,6 +113,10 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		// the repo, and never edits code.
 		args = append(args, "--mcp-config", job.MCPConfig, "--strict-mcp-config")
 		allowed, disallowed = foremanToolScope()
+	} else if len(allowed) == 0 {
+		// A code worker with no explicit scope gets the default (§5.2):
+		// the Go toolchain, so it can build and test as it goes.
+		allowed, disallowed = workerToolScope()
 	}
 	if len(allowed) > 0 {
 		args = append(args, append([]string{"--allowedTools"}, allowed...)...)
