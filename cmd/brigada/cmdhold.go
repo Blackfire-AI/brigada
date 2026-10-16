@@ -23,11 +23,30 @@ func runHold(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "yield":
 		return runHoldYield(ctx, args[1:], stderr)
+	case "confirm":
+		return runHoldConfirm(args[1:], stderr)
 	case "release":
 		return runHoldRelease(ctx, args[1:], stdout, stderr)
 	default:
-		return usagef(stderr, "unknown hold subcommand %q; want release or yield", args[0])
+		return usagef(stderr, "unknown hold subcommand %q; want confirm, release or yield", args[0])
 	}
+}
+
+// runHoldConfirm is init's SessionStart hook (§4.6 "Identity"). The session
+// id is correlation only, never authority, and the engine has no API to
+// receive it yet: the bridge already sends the id it reads from its own
+// environment at hold_acquire. So this accepts the hook's input, changes
+// nothing and always exits zero, so the hook is installed and safe until
+// that API exists. Every failure is swallowed as in hold yield.
+func runHoldConfirm(args []string, stderr io.Writer) int {
+	fs := newFlagSet("hold confirm")
+	common := addCommon(fs)
+	fs.String("session", os.Getenv("CLAUDE_CODE_SESSION_ID"), "harness session id (correlation only)")
+	var diagnostics bytes.Buffer
+	if code := common.parse(&diagnostics, args); code != 0 {
+		fmt.Fprintf(stderr, "brigada hold confirm: invalid hook arguments\n")
+	}
+	return 0
 }
 
 // runHoldRelease is `brigada hold release --repo URL` (§4.6): the user's
