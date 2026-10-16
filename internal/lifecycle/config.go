@@ -136,9 +136,19 @@ func DefaultConfigPath() string {
 // LoadConfigFile reads the config file. A missing file is the empty
 // config, not an error: most installs have none.
 func LoadConfigFile(path string) (FileConfig, error) {
+	return loadConfigFile(path, false)
+}
+
+// LoadRequiredConfigFile reads a config file explicitly named by the caller.
+// Missing explicit files are errors: falling back could select unintended state.
+func LoadRequiredConfigFile(path string) (FileConfig, error) {
+	return loadConfigFile(path, true)
+}
+
+func loadConfigFile(path string, required bool) (FileConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if !required && os.IsNotExist(err) {
 			return FileConfig{}, nil
 		}
 		return FileConfig{}, fmt.Errorf("read config %s: %w", path, err)

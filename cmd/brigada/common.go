@@ -65,7 +65,11 @@ func resolveRuntime(c *commonFlags, stderr io.Writer) (*runtime, int) {
 	if path == "" {
 		path = lifecycle.DefaultConfigPath()
 	}
-	file, err := lifecycle.LoadConfigFile(path)
+	loadConfig := lifecycle.LoadConfigFile
+	if explicit {
+		loadConfig = lifecycle.LoadRequiredConfigFile
+	}
+	file, err := loadConfig(path)
 	if err != nil {
 		return nil, fail(stderr, err)
 	}

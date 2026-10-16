@@ -73,6 +73,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/tasks/{id}/restart", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.fenced(true, s.idempotent(s.handleTaskRestart))))
 	mux.HandleFunc("/v1/plans", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.fenced(true, s.idempotent(s.handlePlanCreate))))
 	mux.HandleFunc("/v1/plans/{id}/amend", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.fenced(true, s.idempotent(s.handlePlanAmend))))
+	mux.HandleFunc("/v1/foreman/ask-user", s.authed([]string{roleForeman}, s.fenced(true, s.idempotent(s.handleAskUser))))
 	mux.HandleFunc("/v1/foreman/decision-note", s.authed([]string{roleForeman}, s.fenced(true, s.idempotent(s.handleDecisionNote))))
 	// The user's yes or no on a plan over the approval limit (§6.3): no
 	// foreman role, the foreman never confirms its own plans.

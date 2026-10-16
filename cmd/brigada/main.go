@@ -34,6 +34,7 @@ Commands:
 	                brigada runs).
 	ask <message>   Send the foreman a message without attaching.
 	hold release    Release a stuck interactive hold on the foreman (--repo).
+	hold yield      Stop hook: yield only the bound bridge hold; always exits 0.
 	review --branch <x>
 	                Review a branch with an agent of another family than
 	                its author's, with no plan or task (§7).

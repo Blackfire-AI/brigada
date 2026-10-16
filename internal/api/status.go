@@ -18,8 +18,15 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id identit
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	var project int64
+	project, err := queryInt64(w, r, "project")
+	if err != nil {
+		return
+	}
 	if id.role == roleForeman {
+		if project != 0 && !id.mayTouchProject(project) {
+			writeError(w, http.StatusForbidden, codeForbidden, "foreman token is scoped to its project")
+			return
+		}
 		project = id.project
 	}
 	st, err := s.eng.Status(r.Context(), project)

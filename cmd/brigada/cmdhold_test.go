@@ -2,8 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
 // TestHoldRelease covers `brigada hold release --repo URL` (§4.6): the
@@ -26,8 +31,12 @@ func TestHoldRelease(t *testing.T) {
 		t.Errorf("hold alone = %d %q, want usage", code, stderr.String())
 	}
 	stderr.Reset()
-	if code := run(ctx, []string{"hold", "yield"}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), `unknown hold subcommand "yield"`) {
-		t.Errorf("hold yield = %d %q, want a usage error", code, stderr.String())
+	hookState := t.TempDir()
+	if code := run(ctx, []string{"hold", "yield", "--state-dir", hookState}, &stdout, &stderr); code != 0 {
+		t.Errorf("hold yield = %d %q, want hook-safe exit zero", code, stderr.String())
+	}
+	if data, err := os.ReadFile(filepath.Join(hookState, "hold-yield.log")); err != nil || len(data) == 0 {
+		t.Errorf("failed hook must log locally: %s %v", data, err)
 	}
 	if code, _, stderr := do(hold); code != 2 || !strings.Contains(stderr, "needs --repo URL") {
 		t.Errorf("hold release without a repo = %d %q, want a usage error", code, stderr)
@@ -40,5 +49,25 @@ func TestHoldRelease(t *testing.T) {
 	}
 	if code, stdout, stderr := do(hold, "--repo", repo); code != 0 || !strings.Contains(stdout, "no interactive hold on "+repo) {
 		t.Errorf("hold release with nothing held = %d %q (stderr %q), want the none-held line", code, stdout, stderr)
+	}
+}
+
+// This path must fail before consulting any bridge bindings, while preserving
+// the Stop hook's exit-zero contract and recording why no yield was attempted.
+func TestHoldYieldMissingExplicitConfigLogsAndStops(t *testing.T) {
+	state := testsupport.ShortStateDir(t)
+	missing := filepath.Join(t.TempDir(), "missing-config")
+	var stderr bytes.Buffer
+	code := runHoldYield(context.Background(), []string{"--state-dir", state, "--config", missing}, &stderr)
+	if code != 0 {
+		t.Fatalf("hook exited %d: %s", code, stderr.String())
+	}
+	want := "read config " + missing
+	if !strings.Contains(stderr.String(), want) {
+		t.Fatalf("missing config was not rejected before bridge discovery: %s", stderr.String())
+	}
+	log, err := os.ReadFile(filepath.Join(state, "hold-yield.log"))
+	if err != nil || !strings.Contains(string(log), want) {
+		t.Fatalf("missing config failure was not logged: %s %v", log, err)
 	}
 }
