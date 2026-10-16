@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
+	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
 // runProject is the project command's dispatch: `project foreman`, the
@@ -18,15 +19,19 @@ import (
 // project the engine knows.
 func runProject(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		return usagef(stderr, "usage: brigada project foreman [--repo URL] [--harness H --model M] | brigada project list")
+		return usagef(stderr, "usage: brigada project foreman|list|set|show [--repo URL] ...")
 	}
 	switch args[0] {
 	case "foreman":
 		return runProjectForeman(ctx, args[1:], stdout, stderr)
 	case "list":
 		return runProjectList(ctx, args[1:], stdout, stderr)
+	case "set":
+		return runProjectSettings(ctx, "set", args[1:], stdout, stderr)
+	case "show":
+		return runProjectSettings(ctx, "show", args[1:], stdout, stderr)
 	default:
-		return usagef(stderr, "unknown project subcommand %q; want foreman or list", args[0])
+		return usagef(stderr, "unknown project subcommand %q; want foreman, list, set or show", args[0])
 	}
 }
 
@@ -65,6 +70,90 @@ func runProjectList(ctx context.Context, args []string, stdout, stderr io.Writer
 			foreman = p.Harness + "/" + p.Model
 		}
 		fmt.Fprintf(stdout, "%s  foreman=%s  active_plans=%d  needs_you=%d\n", p.RepoURL, foreman, p.ActivePlans, p.NeedsYou)
+	}
+	return 0
+}
+
+// runProjectSettings is `project set` and `project show` (§6.3): the
+// approval limit's three settings. set takes key=value pairs after the
+// flags and prints the settings as they now stand; show prints every key
+// with its effective value and whether it is the default. --repo
+// defaults to the working directory's origin. Values are validated by
+// the engine's own parser before the engine is contacted, so a value
+// accepted here is one the limit understands.
+func runProjectSettings(ctx context.Context, verb string, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("project " + verb)
+	common := addCommon(fs)
+	var (
+		repo    string
+		noStart bool
+	)
+	fs.StringVar(&repo, "repo", "", "the repository URL (default: the working directory's origin)")
+	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
+	if code := common.parse(stderr, args); code != 0 {
+		return code
+	}
+	validKeys := strings.Join(engine.SettingKeys, ", ")
+	values := map[string]string{}
+	pairs := fs.Args()
+	if verb == "show" && len(pairs) > 0 {
+		return usagef(stderr, "project show takes no positional arguments, got %q", pairs)
+	}
+	if verb == "set" && len(pairs) == 0 {
+		return usagef(stderr, "usage: brigada project set [--repo URL] key=value ...; valid keys: %s", validKeys)
+	}
+	for _, p := range pairs {
+		key, value, ok := strings.Cut(p, "=")
+		if !ok {
+			return usagef(stderr, "project set wants key=value, got %q; valid keys: %s", p, validKeys)
+		}
+		if _, dup := values[key]; dup {
+			return usagef(stderr, "project set names %s twice", key)
+		}
+		if err := engine.ValidateSettingValue(key, value); err != nil {
+			return usagef(stderr, "%v", err)
+		}
+		values[key] = value
+	}
+	if repo == "" {
+		dir, err := os.Getwd()
+		if err != nil {
+			return fail(stderr, fmt.Errorf("find the working directory: %w", err))
+		}
+		if repo, err = gitOriginURL(dir); err != nil {
+			return fail(stderr, err)
+		}
+	}
+	rt, code := resolveRuntime(common, stderr)
+	if code != 0 {
+		return code
+	}
+	client, code := connect(ctx, rt, "client", noStart, stderr)
+	if code != 0 {
+		return code
+	}
+	var (
+		got engine.ProjectSettings
+		err error
+	)
+	if verb == "set" {
+		got, err = client.SetProjectSettings(ctx, repo, values)
+	} else {
+		got, err = client.ProjectSettings(ctx, repo)
+		var se *api.StatusError
+		if errors.As(err, &se) && se.Status == http.StatusNotFound {
+			return fail(stderr, fmt.Errorf("no project for repo %s; set one of its settings or choose its foreman first", repo))
+		}
+	}
+	if err != nil {
+		return fail(stderr, err)
+	}
+	for _, s := range got.Settings {
+		state := "set"
+		if s.Default {
+			state = "default"
+		}
+		fmt.Fprintf(stdout, "%s=%s (%s)\n", s.Key, s.Value, state)
 	}
 	return 0
 }

@@ -88,7 +88,13 @@ brigada plan reject 7     # cancels the plan's tasks
 
 Only you can decide: the foreman has no way to approve its own plans. `approval_max_tasks = 0` makes every plan wait, and a negative value switches the limit off.
 
-These three settings are JSON keys in the project's settings, held in the store. They are not keys of the config file, which refuses them as unknown, and no brigada command edits them today; the defaults above apply unless the project's settings row says otherwise.
+These three settings belong to the project and are held in the store. They are not keys of the config file, which refuses them as unknown. Change them with `brigada project set [--repo URL] key=value ...` and read them with `brigada project show [--repo URL]`; `--repo` defaults to the `origin` of the repo you are in, and flags go before the `key=value` pairs. The values:
+
+- `approval_max_tasks=N`: an integer. `0` makes every plan wait; a negative number switches the limit off.
+- `approval_classes=implement+review`: classes joined with `+`.
+- `approval_protected_paths=infra/**+db/*.sql`: glob patterns joined with `+`.
+
+An empty value, as in `approval_max_tasks=`, puts the key back to its default. An unknown key or a value the key does not take is refused with a usage error that names the valid keys, and nothing is stored. `project show` prints every key with its effective value and whether it is the default, for example `approval_max_tasks=5 (default)`; an empty path list shows as `none`. `project set` creates the project if the repo has none yet, and prints the same listing afterwards. Only you can run these commands; the foreman has no tool for them.
 
 **The plan file.** Every change to a plan is mirrored to `.brigada/plans/<plan-id>.yaml` and pushed to the `brigada/plans` branch of your remote, not to your default branch. The file holds the graph, the task states, the branches and the open questions; not transcripts. The store is the authority, and the file is a copy that may lag (a push that fails is retried on the next change). It exists so that `brigada recover` can rebuild plans after a lost store (section 7), and so you can see a plan from another machine.
 
@@ -221,6 +227,7 @@ cost.claude/opus = 2
 - `brigada cancel <job-id>`: stop one live job. See section 2.
 - `brigada project foreman [--repo URL] [--harness H --model M]`: show, or with both flags set, the repo's foreman (`claude` or `codex`); `--repo` defaults to the origin of the working directory. See section 10.
 - `brigada project list`: every project with its foreman, active plans and needs-you count. See section 2, "Several repositories".
+- `brigada project set [--repo URL] key=value ...`, `brigada project show [--repo URL]`: set and read the project's approval limit (`approval_max_tasks`, `approval_classes`, `approval_protected_paths`). See section 3.
 
 **Care**
 
