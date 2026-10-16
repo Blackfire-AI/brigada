@@ -257,9 +257,18 @@ func TestRunnerStallDefaultWindowWithManualClock(t *testing.T) {
 		_, err := os.Stat(filepath.Join(markers, "started"))
 		return err == nil
 	})
-	clk.Advance(defaultStallAfter + time.Minute)
-
-	stopped := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == statusStalled })
+	// The advance is repeated until the job stalls: the worker's marker
+	// can land before the run counts the worker as watched, so a single
+	// advance may fire the one beat too early (it finds no worker to
+	// judge) or move the clock before the activity clock starts from it.
+	// Each advance leaves the silence longer than the window again.
+	stopped := e.waitJob(job, func(j *engine.JobInfo) bool {
+		if j.Status == statusStalled {
+			return true
+		}
+		clk.Advance(defaultStallAfter + time.Minute)
+		return false
+	})
 	res := e.workerResult(stopped)
 	if res.Status != statusStalled {
 		t.Errorf("worker result = %+v, want status %q", res, statusStalled)
