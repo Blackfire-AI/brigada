@@ -77,8 +77,13 @@ func (e *Engine) SetProjectForemanEffort(ctx context.Context, repoURL, harness, 
 		return ForemanSetting{}, fmt.Errorf("%w: %v", ErrInvalidForeman, err)
 	}
 
-	setting := ForemanSetting{RepoURL: repoURL, Harness: harness, Model: model, Effort: effort}
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+	shown := RedactRepoURL(repoURL)
+	canon, err := Canonicalize(repoURL)
+	if err != nil {
+		return ForemanSetting{}, fmt.Errorf("%w: %v", ErrInvalidForeman, err)
+	}
+	setting := ForemanSetting{RepoURL: canon, Harness: harness, Model: model, Effort: effort}
+	err = e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
@@ -86,22 +91,21 @@ func (e *Engine) SetProjectForemanEffort(ctx context.Context, repoURL, harness, 
 		var project int64
 		var oldHarness, oldModel string
 		cleared := false
-		err := tx.QueryRow("SELECT id, foreman_harness, foreman_model FROM projects WHERE repo_url = ?", repoURL).
-			Scan(&project, &oldHarness, &oldModel)
+		err := lookupProjectTx(tx, repoURL, "id, foreman_harness, foreman_model", &project, &oldHarness, &oldModel)
 		switch {
 		case err == nil:
 			// An effort change alone is no switch: the session and any
 			// limit stay, and only the next turn runs at the new level.
 			if _, err := tx.Exec("UPDATE projects SET foreman_harness = ?, foreman_model = ?, foreman_effort = ?, updated_at = ? WHERE id = ?",
 				harness, model, effort, fmtTime(now), project); err != nil {
-				return fmt.Errorf("set the foreman of the project of %s: %w", repoURL, err)
+				return fmt.Errorf("set the foreman of the project of %s: %w", shown, err)
 			}
 			if harness != oldHarness || model != oldModel {
 				// The user chose to switch (§4.4): the limit was the old
 				// foreman's, so the new one starts unlimited.
 				res, err := tx.Exec("UPDATE projects SET foreman_limited = NULL WHERE id = ? AND foreman_limited IS NOT NULL", project)
 				if err != nil {
-					return fmt.Errorf("clear the foreman limit of the project of %s: %w", repoURL, err)
+					return fmt.Errorf("clear the foreman limit of the project of %s: %w", shown, err)
 				}
 				n, _ := res.RowsAffected()
 				cleared = n > 0
@@ -112,7 +116,7 @@ func (e *Engine) SetProjectForemanEffort(ctx context.Context, repoURL, harness, 
 				// engine, and never resumes the old harness's session.
 				if _, err := tx.Exec("UPDATE sessions SET harness_session_id = NULL WHERE key = ?",
 					fmt.Sprintf("foreman:%d", project)); err != nil {
-					return fmt.Errorf("drop the old foreman session of the project of %s: %w", repoURL, err)
+					return fmt.Errorf("drop the old foreman session of the project of %s: %w", shown, err)
 				}
 				// A turn leased under the old generation must not write
 				// its session back after this (foremanSessionStaleTx).
@@ -127,11 +131,11 @@ func (e *Engine) SetProjectForemanEffort(ctx context.Context, repoURL, harness, 
 			}
 			if effort != "" {
 				if _, err := tx.Exec("UPDATE projects SET foreman_effort = ? WHERE id = ?", effort, project); err != nil {
-					return fmt.Errorf("set the foreman effort of the project of %s: %w", repoURL, err)
+					return fmt.Errorf("set the foreman effort of the project of %s: %w", shown, err)
 				}
 			}
 		default:
-			return fmt.Errorf("read the project of %s: %w", repoURL, err)
+			return fmt.Errorf("read the project of %s: %w", shown, err)
 		}
 		if _, err := appendEventTx(tx, evProjectForemanSet, project, 0, 0,
 			eventPayload{Harness: harness, Model: model, Effort: effort}, now); err != nil {
@@ -151,7 +155,7 @@ func (e *Engine) SetProjectForemanEffort(ctx context.Context, repoURL, harness, 
 		return nil
 	})
 	if err != nil {
-		return ForemanSetting{}, fmt.Errorf("set the foreman of the project of %s: %w", repoURL, err)
+		return ForemanSetting{}, fmt.Errorf("set the foreman of the project of %s: %w", shown, err)
 	}
 	return setting, nil
 }
@@ -164,6 +168,7 @@ func (e *Engine) ProjectForeman(ctx context.Context, repoURL string) (*ForemanSe
 	if repoURL == "" {
 		return nil, fmt.Errorf("repo URL is required (product §5 rule 6: repos are addressed by URL)")
 	}
+	shown := RedactRepoURL(repoURL)
 	var setting *ForemanSetting
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		if _, err := e.sweepTx(tx, e.cfg.Now()); err != nil {
@@ -171,15 +176,16 @@ func (e *Engine) ProjectForeman(ctx context.Context, repoURL string) (*ForemanSe
 		}
 		var f ForemanSetting
 		var project int64
-		err := tx.QueryRow("SELECT id, foreman_harness, foreman_model, foreman_effort FROM projects WHERE repo_url = ?",
-			repoURL).Scan(&project, &f.Harness, &f.Model, &f.Effort)
+		var canon string
+		err := lookupProjectTx(tx, repoURL, "id, repo_url, foreman_harness, foreman_model, foreman_effort",
+			&project, &canon, &f.Harness, &f.Model, &f.Effort)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
-			return fmt.Errorf("read the project of %s: %w", repoURL, err)
+			return fmt.Errorf("read the project of %s: %w", shown, err)
 		}
-		f.ProjectID, f.RepoURL = project, repoURL
+		f.ProjectID, f.RepoURL = project, canon
 		if f.Harness != "" && f.Model != "" {
 			offered, err := pairRegisteredTx(tx, f.Harness, f.Model)
 			if err != nil {
@@ -191,7 +197,7 @@ func (e *Engine) ProjectForeman(ctx context.Context, repoURL string) (*ForemanSe
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("read the foreman of the project of %s: %w", repoURL, err)
+		return nil, fmt.Errorf("read the foreman of the project of %s: %w", shown, err)
 	}
 	return setting, nil
 }
@@ -258,15 +264,24 @@ func (e *Engine) Projects(ctx context.Context) ([]ProjectInfo, error) {
 // the default branch's derivation differs — the task submit reads it off
 // the base ref, setup has no ref and takes setupDefaultBranch.
 func createProjectTx(tx *sql.Tx, repoURL, defaultBranch, harness, model string, now time.Time) (int64, error) {
-	nowStr := fmtTime(now)
-	res, err := tx.Exec(`INSERT INTO projects (repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
-		VALUES (?, ?, '{}', ?, ?, ?, ?)`, repoURL, defaultBranch, harness, model, nowStr, nowStr)
+	shown := RedactRepoURL(repoURL)
+	parts, err := parseRepo(repoURL)
 	if err != nil {
-		return 0, fmt.Errorf("create the project of %s: %w", repoURL, err)
+		return 0, fmt.Errorf("create the project of %s: %w", shown, err)
+	}
+	if parts.Transport == "" {
+		return 0, fmt.Errorf("create the project of %s: %w: a bare host/path names an identity but no transport; give an https://, ssh:// or scp-like URL",
+			shown, ErrInvalidRepoURL)
+	}
+	nowStr := fmtTime(now)
+	res, err := tx.Exec(`INSERT INTO projects (repo_url, transport_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
+		VALUES (?, ?, ?, '{}', ?, ?, ?, ?)`, parts.Canon, parts.Transport, defaultBranch, harness, model, nowStr, nowStr)
+	if err != nil {
+		return 0, fmt.Errorf("create the project of %s: %w", shown, err)
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return 0, fmt.Errorf("create the project of %s: last insert id: %w", repoURL, err)
+		return 0, fmt.Errorf("create the project of %s: last insert id: %w", shown, err)
 	}
 	return id, nil
 }

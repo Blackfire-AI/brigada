@@ -199,6 +199,8 @@ func TestRedactURL(t *testing.T) {
 		"https://token@example.invalid/repo.git":       "https://token@example.invalid/repo.git", // no password: nothing to redact
 		"file:///tmp/remote.git":                       "file:///tmp/remote.git",
 		"git@github.com:org/repo.git":                  "git@github.com:org/repo.git",
+		// A scp-like password holding digits and a '/' is no host and port.
+		"fatal: 'u.n:1234/s3cr3t/x@example.invalid:t/r' failed": "fatal: '***@example.invalid:t/r' failed",
 	}
 	for in, want := range cases {
 		if got := redactURL(in); got != want {

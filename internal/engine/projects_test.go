@@ -17,10 +17,11 @@ func TestSetProjectForemanCreatesProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("set the foreman of %s: %v", repo, err)
 	}
-	if set.ProjectID == 0 || set.RepoURL != repo || set.Harness != "claude" || set.Model != "opus" {
-		t.Fatalf("the setting = %+v; want the repo, claude and opus on a real project id", set)
+	const canon = "example.invalid/new"
+	if set.ProjectID == 0 || set.RepoURL != canon || set.Harness != "claude" || set.Model != "opus" {
+		t.Fatalf("the setting = %+v; want the canonical repo, claude and opus on a real project id", set)
 	}
-	if got := e.int("SELECT COUNT(*) FROM projects WHERE repo_url = ?", repo); got != 1 {
+	if got := e.int("SELECT COUNT(*) FROM projects WHERE repo_url = ?", canon); got != 1 {
 		t.Fatalf("projects for %s = %d, want 1", repo, got)
 	}
 	if got := e.str("SELECT default_branch FROM projects WHERE id = ?", set.ProjectID); got != setupDefaultBranch {

@@ -75,7 +75,7 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 			return err
 		}
 		in.project = project
-		if err := tx.QueryRow("SELECT repo_url, default_branch FROM projects WHERE id = ?", project).
+		if err := tx.QueryRow("SELECT COALESCE(NULLIF(transport_url, ''), repo_url), default_branch FROM projects WHERE id = ?", project).
 			Scan(&in.repo, &in.base); err != nil {
 			return fmt.Errorf("read project %d: %w", project, err)
 		}

@@ -717,7 +717,7 @@ func TestAttachFailsOutsideAProjectsRepo(t *testing.T) {
 		code := run(context.Background(), []string{"attach", "--state-dir", e.stateDir, "--no-start"}, &stdout, &stderr)
 		msg := stderr.String()
 		if code != 1 || !strings.Contains(msg, "no origin URL") ||
-			!strings.Contains(msg, "known projects: https://example.invalid/elsewhere.git") {
+			!strings.Contains(msg, "known projects: example.invalid/elsewhere") {
 			t.Errorf("attach in %s = code %d, stderr %q, want the origin error and the known projects", d, code, msg)
 		}
 	}
@@ -736,7 +736,7 @@ func TestAttachFailsOutsideAProjectsRepo(t *testing.T) {
 	if !strings.Contains(msg, "project foreman") {
 		t.Errorf("stderr = %q, want it to say what to do next", msg)
 	}
-	if !strings.Contains(msg, "known projects: https://example.invalid/elsewhere.git") {
+	if !strings.Contains(msg, "known projects: example.invalid/elsewhere") {
 		t.Errorf("stderr = %q, want it to list the known projects", msg)
 	}
 

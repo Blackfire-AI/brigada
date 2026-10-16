@@ -129,6 +129,23 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	defer st.Close()
 	eng := engine.New(st, engine.Config{Now: cfg.Now, Caps: cfg.Caps, PlanFiles: true, SnapshotDir: cfg.SnapshotDir, TaskAutoRetry: cfg.TaskAutoRetry, DefaultReviewer: cfg.DefaultReviewer})
+	// Project identities are canonical repo URLs (design §13.1): rows
+	// written in an older form are rewritten once, before anything reads
+	// them. Rows that cannot be, or that name one repository twice, stay
+	// as they are and are said so here and in the status.
+	canon, err := eng.CanonicalizeProjects(ctx)
+	if err != nil {
+		return fmt.Errorf("engine: %w", err)
+	}
+	if canon.Rewritten > 0 {
+		log.InfoContext(ctx, "project identities rewritten to canonical repo URLs", "projects", canon.Rewritten)
+	}
+	for repo, ids := range canon.Collisions {
+		log.WarnContext(ctx, "projects name the same repository and were left as they are", "repo", repo, "projects", ids)
+	}
+	for id, why := range canon.Failed {
+		log.WarnContext(ctx, "a project's repo URL cannot be canonicalized and was left as it is", "project", id, "why", why)
+	}
 	// A push still running when the engine stops finishes before the
 	// store closes (defers run last-in first); what it misses stays marked
 	// in the store for the next run's catch-up below.

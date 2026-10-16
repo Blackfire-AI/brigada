@@ -56,7 +56,7 @@ func (e *Engine) SubmitTask(ctx context.Context, p TaskParams) (TaskResult, erro
 		}
 		r, err := e.submitTaskTx(tx, p, now)
 		if err != nil {
-			return fmt.Errorf("submit task for %s: %w", p.RepoURL, err)
+			return fmt.Errorf("submit task for %s: %w", RedactRepoURL(p.RepoURL), err)
 		}
 		res = r
 		return nil
@@ -87,8 +87,13 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 	// it by URL, else create it with the base ref's branch as its
 	// default. The foreman's harness and model are setup's to choose;
 	// the debug path leaves them empty.
+	parts, err := parseRepo(p.RepoURL)
+	if err != nil {
+		return TaskResult{}, err
+	}
 	var project int64
-	err := tx.QueryRow("SELECT id FROM projects WHERE repo_url = ?", p.RepoURL).Scan(&project)
+	var projectTransport string
+	err = lookupProjectTx(tx, p.RepoURL, "id, COALESCE(NULLIF(transport_url, ''), repo_url)", &project, &projectTransport)
 	switch {
 	case err == nil:
 	case errors.Is(err, sql.ErrNoRows):
@@ -96,8 +101,16 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 		if err != nil {
 			return TaskResult{}, err
 		}
+		projectTransport = parts.Transport
 	default:
-		return TaskResult{}, fmt.Errorf("read the project of %s: %w", p.RepoURL, err)
+		return TaskResult{}, fmt.Errorf("read the project of %s: %w", RedactRepoURL(p.RepoURL), err)
+	}
+	// The runner fetches with the URL the task named (§5.1): when it
+	// is another form of the project's repo than the project holds, the
+	// task keeps its own credential-free transport.
+	taskRepo := ""
+	if parts.Transport != "" && parts.Transport != projectTransport {
+		taskRepo = parts.Transport
 	}
 
 	// One plan per submitted task: the debug path has no plan builder,
@@ -113,11 +126,12 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 	}
 
 	// The task itself (§6.1): ready at once, on the project's repo — a
-	// task's own repo_url stays NULL, which taskInfoTx reads as "the
+	// task's own repo_url stays NULL unless it was named by another
+	// transport than the project holds; taskInfoTx reads NULL as "the
 	// project's" (§6.1).
-	task, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, base_ref, caps, created_at, updated_at)
-		VALUES (?, ?, ?, NULLIF(?, ''), ?, 'ready', ?, '{}', ?, ?)`,
-		planID, title, p.Spec, p.CheckCmd, class, p.BaseRef, nowStr, nowStr)
+	task, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, base_ref, caps, repo_url, created_at, updated_at)
+		VALUES (?, ?, ?, NULLIF(?, ''), ?, 'ready', ?, '{}', NULLIF(?, ''), ?, ?)`,
+		planID, title, p.Spec, p.CheckCmd, class, p.BaseRef, taskRepo, nowStr, nowStr)
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create the task: %w", err)
 	}

@@ -111,8 +111,8 @@ func TestRecoverFromSnapshotAndPlanFiles(t *testing.T) {
 	}
 	for _, want := range []string{
 		"restored the store from the snapshot",
-		"plan #9 (" + f.remote + "): rebuilt",
-		"plan #1 (" + f.remote + "): kept",
+		"plan #9 (file:" + f.remote + "): rebuilt",
+		"plan #1 (file:" + f.remote + "): kept",
 		"fence epoch is now 2",
 		"dispatch is held for 1m30s",
 		"tokens live outside the store",
@@ -154,7 +154,7 @@ func TestRecoverWithoutSnapshotSaysWhatIsNotRestored(t *testing.T) {
 		"no snapshot to restore from",
 		"NOT restored without a snapshot: messages, transcripts and outcomes",
 		"the dispatcher's scores restart from defaults",
-		"plan #5 (" + f.remote + "): rebuilt",
+		"plan #5 (file:" + f.remote + "): rebuilt",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)

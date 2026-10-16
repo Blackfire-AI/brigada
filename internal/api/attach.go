@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -33,12 +34,16 @@ func (s *Server) handleForemanAttach(w http.ResponseWriter, r *http.Request, _ i
 		return
 	}
 	project, ok, err := s.projectOfRepo(r.Context(), req.RepoURL)
+	if errors.Is(err, engine.ErrInvalidRepoURL) {
+		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		s.writeInternal(w, r, "resolve the repo", err)
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, codeNotFound, "no project for repo "+req.RepoURL)
+		writeError(w, http.StatusNotFound, codeNotFound, "no project for repo "+engine.RedactRepoURL(req.RepoURL))
 		return
 	}
 	res, err := s.eng.Attach(r.Context(), project, req.Force)

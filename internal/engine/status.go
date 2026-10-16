@@ -529,6 +529,14 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	}
 	lrows.Close()
 
+	// Two projects that name one repository were left apart at startup
+	// (design §13.1); a person decides which stays.
+	dups, err := duplicateProjectItemsTx(tx, project)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, dups...)
+
 	// A broken agent takes nothing until a person fixes it and resets it
 	// (§8 "Health"). Agents belong to no project, so only the unscoped
 	// view lists them. Cooling is not here: it waits for a clock.

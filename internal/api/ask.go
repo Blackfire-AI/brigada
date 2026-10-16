@@ -33,7 +33,7 @@ func (s *Server) handleForemanAsk(w http.ResponseWriter, r *http.Request, id ide
 	// every client token speaks with the user's voice.
 	res, err := s.eng.AskForeman(r.Context(), req.RepoURL, req.Text, id.name)
 	switch {
-	case errors.Is(err, engine.ErrInvalidMessage):
+	case errors.Is(err, engine.ErrInvalidMessage), errors.Is(err, engine.ErrInvalidRepoURL):
 		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
 		return
 	case errors.Is(err, engine.ErrNoProject):

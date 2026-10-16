@@ -56,31 +56,42 @@ var (
 // what it can.
 func (e *Engine) RecoverPlans(ctx context.Context, extraRepos []string) (results []PlanRecovery, warnings []string, err error) {
 	type project struct {
-		id                           int64
-		repo, defaultBranch, setting string
+		id                                      int64
+		repo, transport, defaultBranch, setting string
 	}
 	var projects []project
+	// A restored snapshot may hold identities in an older form: bring
+	// them to the canonical one before any lookup (idempotent).
+	if _, rerr := e.CanonicalizeProjects(ctx); rerr != nil {
+		return nil, nil, fmt.Errorf("recover plans: %w", rerr)
+	}
 	err = e.store.Store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		for _, repo := range extraRepos {
-			var id int64
-			err := tx.QueryRow("SELECT id FROM projects WHERE repo_url = ?", repo).Scan(&id)
-			if errors.Is(err, sql.ErrNoRows) {
+			_, err := LookupProjectTx(tx, repo)
+			switch {
+			case errors.Is(err, sql.ErrNoRows):
 				if _, err := createProjectTx(tx, repo, setupDefaultBranch, "", "", now); err != nil {
+					if errors.Is(err, ErrInvalidRepoURL) {
+						warnings = append(warnings, err.Error())
+						continue
+					}
 					return err
 				}
-			} else if err != nil {
-				return fmt.Errorf("read the project of %s: %w", repo, err)
+			case errors.Is(err, ErrInvalidRepoURL):
+				warnings = append(warnings, fmt.Sprintf("%s: %v", RedactRepoURL(repo), err))
+			case err != nil:
+				return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repo), err)
 			}
 		}
-		rows, err := tx.Query("SELECT id, repo_url, default_branch, settings FROM projects ORDER BY id")
+		rows, err := tx.Query("SELECT id, repo_url, COALESCE(NULLIF(transport_url, ''), repo_url), default_branch, settings FROM projects ORDER BY id")
 		if err != nil {
 			return fmt.Errorf("list projects: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var p project
-			if err := rows.Scan(&p.id, &p.repo, &p.defaultBranch, &p.setting); err != nil {
+			if err := rows.Scan(&p.id, &p.repo, &p.transport, &p.defaultBranch, &p.setting); err != nil {
 				return fmt.Errorf("list projects: %w", err)
 			}
 			projects = append(projects, p)
@@ -99,7 +110,7 @@ func (e *Engine) RecoverPlans(ctx context.Context, extraRepos []string) (results
 				continue
 			}
 		}
-		target := planFileTarget(p.repo, p.defaultBranch, cfg.Branch)
+		target := planFileTarget(p.transport, p.defaultBranch, cfg.Branch)
 		fctx, cancel := context.WithTimeout(ctx, e.cfg.PlanFileTimeout)
 		fetched, err := planfile.Fetch(fctx, target)
 		cancel()
@@ -133,8 +144,10 @@ func (e *Engine) applyPlanFileTx(tx *sql.Tx, project int64, repo, defaultBranch 
 	skip := func(format string, args ...any) (string, string, error) {
 		return PlanSkipped, fmt.Sprintf(format, args...), nil
 	}
-	if p.Repo != repo {
-		return skip("the file names repo %q, not %q", p.Repo, repo)
+	// A file written before identities were canonical names the repo as it
+	// was given; it is the same repo when it canonicalizes to the project's.
+	if fileRepo, cerr := Canonicalize(p.Repo); p.Repo != repo && (cerr != nil || fileRepo != repo) {
+		return skip("the file names repo %q, not %q", RedactRepoURL(p.Repo), repo)
 	}
 	if !planStates[p.State] {
 		return skip("unknown plan state %q", p.State)

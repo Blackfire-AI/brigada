@@ -166,14 +166,15 @@ func (e *Engine) ProjectSettings(ctx context.Context, repoURL string) (*ProjectS
 			return err
 		}
 		var project int64
-		err := tx.QueryRow("SELECT id FROM projects WHERE repo_url = ?", repoURL).Scan(&project)
+		var canon string
+		err := lookupProjectTx(tx, repoURL, "id, repo_url", &project, &canon)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
-			return fmt.Errorf("read the project of %s: %w", repoURL, err)
+			return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
 		}
-		v, err := settingsViewTx(tx, project, repoURL)
+		v, err := settingsViewTx(tx, project, canon)
 		if err != nil {
 			return err
 		}
@@ -181,7 +182,7 @@ func (e *Engine) ProjectSettings(ctx context.Context, repoURL string) (*ProjectS
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("read the settings of the project of %s: %w", repoURL, err)
+		return nil, fmt.Errorf("read the settings of the project of %s: %w", RedactRepoURL(repoURL), err)
 	}
 	return out, nil
 }
@@ -198,6 +199,10 @@ func (e *Engine) SetProjectSettings(ctx context.Context, repoURL string, values 
 	if len(values) == 0 {
 		return ProjectSettings{}, fmt.Errorf("%w: no key=value given; valid keys: %s", ErrInvalidSetting, strings.Join(SettingKeys, ", "))
 	}
+	canon, cerr := Canonicalize(repoURL)
+	if cerr != nil {
+		return ProjectSettings{}, fmt.Errorf("%w: %v", ErrInvalidSetting, cerr)
+	}
 	parsed := map[string]json.RawMessage{}
 	for k, v := range values {
 		raw, err := parseSettingValue(k, v)
@@ -213,17 +218,17 @@ func (e *Engine) SetProjectSettings(ctx context.Context, repoURL string, values 
 			return err
 		}
 		var project int64
-		var rawSettings string
-		err := tx.QueryRow("SELECT id, settings FROM projects WHERE repo_url = ?", repoURL).Scan(&project, &rawSettings)
+		var rawSettings, shownRepo string
+		err := lookupProjectTx(tx, repoURL, "id, settings, repo_url", &project, &rawSettings, &shownRepo)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			project, err = createProjectTx(tx, repoURL, setupDefaultBranch, "", "", now)
 			if err != nil {
 				return err
 			}
-			rawSettings = ""
+			rawSettings, shownRepo = "", canon
 		case err != nil:
-			return fmt.Errorf("read the project of %s: %w", repoURL, err)
+			return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
 		}
 		row := map[string]json.RawMessage{}
 		if rawSettings != "" {
@@ -245,11 +250,11 @@ func (e *Engine) SetProjectSettings(ctx context.Context, repoURL string, values 
 		if _, err := tx.Exec("UPDATE projects SET settings = ?, updated_at = ? WHERE id = ?", string(b), fmtTime(now), project); err != nil {
 			return fmt.Errorf("store the settings of project %d: %w", project, err)
 		}
-		out, err = settingsViewTx(tx, project, repoURL)
+		out, err = settingsViewTx(tx, project, shownRepo)
 		return err
 	})
 	if err != nil {
-		return ProjectSettings{}, fmt.Errorf("set the settings of the project of %s: %w", repoURL, err)
+		return ProjectSettings{}, fmt.Errorf("set the settings of the project of %s: %w", RedactRepoURL(repoURL), err)
 	}
 	return out, nil
 }

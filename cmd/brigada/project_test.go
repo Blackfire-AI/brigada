@@ -96,8 +96,10 @@ func TestProjectForemanGolden(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("list exit = %d, stderr = %q", code, stderr.String())
 	}
-	wantList := repo + "  foreman=codex/opus  active_plans=0  needs_you=0\n" +
-		other + "  foreman=claude/opus  active_plans=0  needs_you=0\n"
+	// Projects are listed by canonical repo URL (design §13.1).
+	canonRepo, canonOther := "example.invalid/golden", "example.invalid/other"
+	wantList := canonRepo + "  foreman=codex/opus  active_plans=0  needs_you=0\n" +
+		canonOther + "  foreman=claude/opus  active_plans=0  needs_you=0\n"
 	if got := stdout.String(); got != wantList {
 		t.Fatalf("list printed %q, want %q", got, wantList)
 	}
@@ -106,7 +108,7 @@ func TestProjectForemanGolden(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	code = run(ctx, []string{"ask", "--repo", "https://example.invalid/nope.git", "--state-dir", state, "hello"}, &stdout, &stderr)
-	if code != 1 || !strings.Contains(stderr.String(), "known projects: "+repo+", "+other) {
+	if code != 1 || !strings.Contains(stderr.String(), "known projects: "+canonRepo+", "+canonOther) {
 		t.Fatalf("ask refusal = code %d, stderr=%q", code, stderr.String())
 	}
 
