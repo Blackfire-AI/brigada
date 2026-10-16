@@ -51,6 +51,7 @@ const (
 	evReviewChanges          = "review_changes"            // the reviewer wants changes; a fix round answers them (§3, §7)
 	evReviewNoVerdict        = "review_no_verdict"         // the review ended without a usable verdict; the retry is spent or impossible (§7)
 	evReviewVerdict          = "review_verdict"            // a standalone review (no task) ended: approve, changes or no verdict, with the findings and the branch (§7)
+	evReviewUnservable       = "review_unservable"         // a task's queued review can never be taken: no agent of another family offers review (§7, §10)
 	evReviewRetry            = "review_retry"              // an unusable verdict goes to another reviewer (§7)
 	evProjectForemanSet      = "project_foreman_set"       // setup: the project's foreman harness and model were chosen (§4.1)
 	evForemanReport          = "foreman_report"            // a done foreman turn's final message, reported to the user (§3, §10)

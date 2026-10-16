@@ -517,7 +517,12 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 		Prompt:        prompt.ComposeReviewPrompt(spec, prompt.WorkerFeedback(job.Prompt), checkJSON, base, branch),
 		ExcludeFamily: exclude,
 	}, now)
-	return err
+	if err != nil {
+		return err
+	}
+	// A review nobody could ever take is flagged at once, not at the
+	// next sweep: the user hears of it when the task starts waiting.
+	return flagUnservableReviewsTx(tx, now)
 }
 
 // agentFamilyTx reads the family a review must differ from (§7): the
