@@ -55,6 +55,9 @@ type LeaseGrant struct {
 	RepoURL      string // the task's own repo, else the project's (§6.1)
 	BaseRef      string // the ref the worktree starts from; for a review, the diff's base end (§7)
 	CheckCmd     string // the check the runner runs after a done (§5.5); '' = none — always for a review
+	// Setup is the environment step the runner runs before the worker and
+	// again before the check (§5.7); nil = the project had none.
+	Setup *SetupSpec
 	// ReviewBranch is the task's result branch a review job reviews
 	// (§7): the runner's worktree sits at it, fetched from the remote,
 	// and it is all the review reads — never pushed, never re-made.
@@ -456,6 +459,21 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			// A review names no branch of its own: it reads one.
 			jobBranch = ""
 		}
+		// The environment step (§5.7): the task's recorded setup, for a
+		// work, fix or review job alike; a task-less review has no
+		// record, so the project's setting stands. A foreman turn has
+		// none.
+		var setup *SetupSpec
+		switch {
+		case j.TaskID != 0:
+			if setup, err = taskSetupTx(tx, j.TaskID); err != nil {
+				return nil, err
+			}
+		case j.Kind == KindReview:
+			if setup, err = projectSetupTx(tx, j.ProjectID); err != nil {
+				return nil, err
+			}
+		}
 		resume := ""
 		if j.Mode == ModeSession {
 			// What the key's last run ended on, if it left a session id
@@ -524,6 +542,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			RepoURL:         repo,
 			BaseRef:         baseRef,
 			CheckCmd:        checkCmd,
+			Setup:           setup,
 			ReviewBranch:    reviewBranch,
 			Branch:          jobBranch,
 			Attempt:         j.Attempts + 1,

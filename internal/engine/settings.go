@@ -29,6 +29,12 @@ const (
 	SettingApprovalProtectedPaths = "approval_protected_paths"
 	SettingDefaultCheck           = "default_check"
 	SettingWorkerTools            = "worker_tools"
+	// The environment step (§5.7): the command, the repo-relative files
+	// whose contents key its cache, and its time bound in minutes. Schema
+	// 1 of the shared file is flat, so the three are sibling keys.
+	SettingSetup              = "setup"
+	SettingSetupCacheKeyFiles = "setup_cache_key_files"
+	SettingSetupTimeout       = "setup_timeout_minutes"
 	// The interactive hold's two bounds (§4.6), in minutes: idle without
 	// activity, and absolute from acquire.
 	SettingHoldIdleMinutes = "hold_idle_minutes"
@@ -47,7 +53,8 @@ const (
 
 // SettingKeys are the editable keys, in the order show prints them.
 var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
-	SettingDefaultCheck, SettingWorkerTools, SettingHoldIdleMinutes, SettingHoldMaxMinutes, SettingInstructions}
+	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
+	SettingHoldIdleMinutes, SettingHoldMaxMinutes, SettingInstructions}
 
 // MaxInstructionsBytes bounds the project instruction text (§5.9): a
 // starting value, open in §16 item 11. Above it a set or an import is
@@ -133,7 +140,7 @@ var classWord = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 func parseSettingValue(key, value string) (json.RawMessage, error) {
 	switch key {
 	case SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths, SettingDefaultCheck, SettingWorkerTools,
-		SettingHoldIdleMinutes, SettingHoldMaxMinutes, SettingInstructions:
+		SettingHoldIdleMinutes, SettingHoldMaxMinutes, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingInstructions:
 	default:
 		return nil, fmt.Errorf("%w: unknown key %q; valid keys: %s", ErrInvalidSetting, key, strings.Join(SettingKeys, ", "))
 	}
@@ -149,7 +156,7 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 	if value == "" {
 		return nil, nil
 	}
-	if key == SettingDefaultCheck {
+	if key == SettingDefaultCheck || key == SettingSetup {
 		return json.Marshal(strings.TrimSpace(value))
 	}
 	if key == SettingInstructions {
@@ -176,7 +183,7 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 		}
 		return json.RawMessage(strconv.Itoa(n)), nil
 	}
-	if key == SettingHoldIdleMinutes || key == SettingHoldMaxMinutes {
+	if key == SettingHoldIdleMinutes || key == SettingHoldMaxMinutes || key == SettingSetupTimeout {
 		n, err := strconv.Atoi(value)
 		if err != nil || n <= 0 {
 			return nil, fmt.Errorf("%w: %s takes a positive whole number of minutes, got %q",
@@ -194,6 +201,11 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 		if key == SettingApprovalClasses && !classWord.MatchString(item) {
 			return nil, fmt.Errorf("%w: %s item %q is not a class name (letters, digits, _ . -)",
 				ErrInvalidSetting, key, item)
+		}
+		if key == SettingSetupCacheKeyFiles {
+			if err := validateCacheKeyFile(item); err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrInvalidSetting, err)
+			}
 		}
 		if key == SettingApprovalProtectedPaths {
 			if _, err := filepath.Match(item, "x"); err != nil {
@@ -274,6 +286,25 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string) (ProjectSettings, er
 			sv.Value = "agent default"
 			if s, ok := rawString(cur); ok {
 				sv.Value = s
+			}
+		case SettingSetup:
+			sv.Value = "none"
+			if s, ok := rawString(cur); ok && s != "" {
+				sv.Value = s
+			}
+		case SettingSetupCacheKeyFiles:
+			sv.Value = "none"
+			if has {
+				var l stringList
+				if json.Unmarshal(cur, &l) == nil && len(l) > 0 {
+					sv.Value = list(l)
+				}
+			}
+		case SettingSetupTimeout:
+			sv.Value = strconv.Itoa(defaultSetupTimeoutMinutes)
+			var n int
+			if has && json.Unmarshal(cur, &n) == nil && n > 0 {
+				sv.Value = strconv.Itoa(n)
 			}
 		case SettingHoldIdleMinutes:
 			sv.Value = strconv.Itoa(int(idle / time.Minute))

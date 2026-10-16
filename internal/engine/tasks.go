@@ -129,9 +129,13 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 	// task's own repo_url stays NULL unless it was named by another
 	// transport than the project holds; taskInfoTx reads NULL as "the
 	// project's" (§6.1).
-	task, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, base_ref, caps, repo_url, created_at, updated_at)
-		VALUES (?, ?, ?, NULLIF(?, ''), ?, 'ready', ?, '{}', NULLIF(?, ''), ?, ?)`,
-		planID, title, p.Spec, p.CheckCmd, class, p.BaseRef, taskRepo, nowStr, nowStr)
+	setup, err := taskProjectSetupTx(tx, project)
+	if err != nil {
+		return TaskResult{}, err
+	}
+	task, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, base_ref, caps, repo_url, setup, created_at, updated_at)
+		VALUES (?, ?, ?, NULLIF(?, ''), ?, 'ready', ?, '{}', NULLIF(?, ''), NULLIF(?, ''), ?, ?)`,
+		planID, title, p.Spec, p.CheckCmd, class, p.BaseRef, taskRepo, setup, nowStr, nowStr)
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create the task: %w", err)
 	}

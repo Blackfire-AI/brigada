@@ -128,6 +128,10 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 	// contract failure, stopped run or failed check belongs to its own path.
 	if c.Error != "" {
 		switch c.ErrorKind {
+		case ErrorKindSetup:
+			if retried, err := e.retrySetupFailureTx(tx, job, c, now); err != nil || retried {
+				return err
+			}
 		case "limit", "auth", "other", "runner_lost":
 			if retried, err := e.autoRestartTaskTx(tx, job, c.ErrorKind, c.Error, now); err != nil || retried {
 				return err
@@ -230,6 +234,38 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 	default:
 		return e.queueReviewTx(tx, job, wr, c.CheckResult, now)
 	}
+}
+
+// retrySetupFailureTx answers a failed setup (§5.7) like a transient error
+// (§3): the work job is queued again, up to setupRetries times, on any
+// eligible agent — the environment failed, not the agent, and no fix round
+// or agent health is charged. A fix job, or a task whose retries are spent,
+// falls through to the foreman's park with the failure as its reason.
+func (e *Engine) retrySetupFailureTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) (bool, error) {
+	if job.Kind != KindWork {
+		return false, nil
+	}
+	failed, err := setupRetryCountTx(tx, job.TaskID)
+	if err != nil {
+		return false, err
+	}
+	if failed > setupRetries {
+		return false, nil
+	}
+	// A spent restart budget cannot take the retry's submit: the task goes
+	// to the foreman instead, as for any retry that cannot be queued.
+	if _, capped, err := e.roundCapReached(tx, SubmitParams{TaskID: job.TaskID, Restart: true}); err != nil || capped {
+		return false, err
+	}
+	reason := boundNote(c.Error)
+	note := reason + "\nThe environment failed before any work was judged; nothing of the previous attempt is lost or to be fixed."
+	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, now)
+	if err != nil {
+		return false, err
+	}
+	_, err = appendEventTx(tx, evTaskRestarted, job.ProjectID, job.TaskID, r.JobID,
+		eventPayload{Status: taskReady, Run: int64(r.Run), Reason: reason}, now)
+	return err == nil, err
 }
 
 // autoRestartTaskTx spends the first restart, at most once, on a different

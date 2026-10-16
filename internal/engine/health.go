@@ -58,6 +58,10 @@ func (e *Engine) agentOutcomeTx(tx *sql.Tx, job *jobRow, c Completion, now time.
 		return e.coolAccountTx(tx, job, c, now)
 	case "auth":
 		return e.markBrokenTx(tx, job, job.AgentID, brokenAuth, now)
+	case ErrorKindSetup:
+		// The environment failed, not the agent (§5.7): the failure is
+		// neither quota nor health, and never counts toward the streak.
+		return nil
 	}
 	// The agent's last N completions all failed, the one just written
 	// included. The jobs table is the count: terminal done, failed and
@@ -65,6 +69,7 @@ func (e *Engine) agentOutcomeTx(tx *sql.Tx, job *jobRow, c Completion, now time.
 	n := e.cfg.FailureStreak
 	rows, err := tx.Query(`SELECT status FROM jobs
 		WHERE agent_id = ? AND status IN ('done', 'failed', 'stalled')
+		AND NOT (status = 'failed' AND result LIKE '%"error":"setup failed%')
 		ORDER BY updated_at DESC, id DESC LIMIT ?`, job.AgentID, n)
 	if err != nil {
 		return fmt.Errorf("count the failures of agent %d: %w", job.AgentID, err)
