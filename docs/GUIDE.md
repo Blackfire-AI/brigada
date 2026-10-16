@@ -44,6 +44,8 @@ When `notify` is `auto` (the default), the engine also raises a desktop notifica
 
 `brigada diff <task-id> [--stat] [--repo URL]` prints what a task changed, as `git diff <base>...<branch>` for the task's base ref and its latest result branch (`-r<n>` included). Run it inside the project's repository: the working directory's origin must be the task's repo, or it refuses and names both (`--repo` says which URL the directory stands for when its origin is a mirror or fork). It fetches the two refs from origin, no checkout, and prints to stdout, so it pipes to a pager. A task with no result branch yet says so.
 
+`brigada land <task-id>... [--onto BRANCH] [--repo URL] [--landed ID]... [--no-check]` lands approved work in your own repository, on the checked-out branch (the project's default branch, or the one named with `--onto`; it never switches branches). Each task becomes one commit holding only its own diff against its own base, so a stacked task lands as just its work; tasks go in dependency order, and a dependency must be in the same call, already landed (found by its `Brigada-Task:` trailer) or named with `--landed`. The message is built from the task's title, spec and the worker's summary, with `Brigada-Task`, `Brigada-Branch` and `Co-Authored-By` trailers. Then the project's default check runs once, and land prints `git push origin <branch>` and stops: it never pushes and never touches the remote's branches. It refuses, changing nothing, a dirty tree, a task that is not approved, a local branch behind its remote, a directory whose origin is not the task's project, a dependency that is not landed, and a missing default check (unless `--no-check`). On a conflict it stops, names the files and leaves the tree for you to resolve; commit with the printed `git commit -F` and rerun land for the rest.
+
 `brigada logs <job-id>` prints what a job's worker did, from its transcript, as readable lines: messages, tool starts and ends, errors. `--check` prints the job's check log instead; `--tail N` keeps the last N lines; `--task N` picks that task's latest job instead of a job id (`brigada history --task N` lists them all). `--follow` polls a running job's latest move every two seconds until the job ends, then prints the transcript tail.
 
 ### The path a task walks
@@ -254,6 +256,7 @@ cost.claude/opus = 2
 - `brigada status` [`--line`]: the engine, jobs, plans and the needs-you queue. See section 2.
 - `brigada history` [`--task N`] [`--job N`] [`--limit N`]: the timeline. See section 2.
 - `brigada diff <task-id>` [`--stat`] [`--repo URL`]: what a task changed, `git diff base...branch`; run inside the repo. See section 2.
+- `brigada land <task-id>...` [`--onto BRANCH`] [`--repo URL`] [`--landed ID`]... [`--no-check`]: squash approved tasks onto the checked-out branch, one commit each, in dependency order; rerun the default check; print the push command and stop. See section 2.
 - `brigada logs <job-id>` [`--check`] [`--tail N`] [`--follow`] [`--task N`]: a job's transcript as readable lines, or its check log. See section 2.
 - `brigada stats`: attempts, successes, rate and confidence per agent, class and repo. See section 6.
 

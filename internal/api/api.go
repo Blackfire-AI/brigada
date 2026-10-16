@@ -66,6 +66,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/jobs", s.authed([]string{roleAdmin}, s.idempotent(s.handleSubmit)))
 	mux.HandleFunc("/v1/tasks", s.authed([]string{roleAdmin}, s.idempotent(s.handleTaskSubmit)))
 	mux.HandleFunc("/v1/tasks/{id}", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.handleTaskGet))
+	mux.HandleFunc("/v1/tasks/{id}/land", s.authed([]string{roleClient, roleAdmin}, s.handleTaskLand))
 	// Foreman mutations go through the hold fence (§4.6): a mode A
 	// credential must carry its fence, and a stale call is rejected before
 	// the idempotency wrapper can record anything.
