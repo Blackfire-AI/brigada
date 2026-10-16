@@ -28,6 +28,16 @@ func (c *Client) Task(ctx context.Context, id int64) (engine.TaskInfo, error) {
 	return t, nil
 }
 
+// TaskLand reads what `brigada land` needs of a task (§7.1). A task
+// that is not there is a *StatusError with 404.
+func (c *Client) TaskLand(ctx context.Context, id int64) (engine.TaskLandInfo, error) {
+	var t engine.TaskLandInfo
+	if err := c.call(ctx, http.MethodGet, "/v1/tasks/"+strconv.FormatInt(id, 10)+"/land", nil, &t); err != nil {
+		return engine.TaskLandInfo{}, err
+	}
+	return t, nil
+}
+
 // Job reads one job (§12.1): its status, and the ids of its transcript
 // and check log artifacts. A job that is not there is a *StatusError
 // with 404.

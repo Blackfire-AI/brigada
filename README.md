@@ -98,6 +98,7 @@ The foreman makes a plan, the runner works each task on its own branch in a work
 brigada status        # engine, jobs, plans, what needs you
 brigada history       # the timeline
 brigada diff <task-id>      # what a task changed (inside the repo; --stat for a summary)
+brigada land <task-id>...   # squash approved tasks onto this branch, one commit each; never pushes
 brigada logs <job-id>       # what a job's worker did (--check, --tail N, --follow, --task N)
 brigada stats         # which agent wins which class on this repo
 brigada plan approve <id>   # or: brigada plan reject <id>

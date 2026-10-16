@@ -54,6 +54,10 @@ Commands:
 	history         Show the timeline.
 	diff <task-id>  Show what a task changed: git diff base...branch, run
 	                inside the repo (--stat, --repo URL).
+	land <task-id>...
+	                Squash approved tasks onto this branch, one commit each,
+	                rerun the default check, print the push command; never
+	                pushes (--onto, --repo, --landed, --no-check; §7.1).
 	logs <job-id>   Show what a job's worker did: the transcript as
 	                readable lines (--check, --tail N, --follow, --task N).
 	stats           Show which agent wins which class, per repo.
@@ -107,6 +111,7 @@ var commands = map[string]command{
 	"plan":    {name: "plan", run: runPlan},
 	"recover": {name: "recover", run: runRecover},
 	"diff":    {name: "diff", run: runDiff},
+	"land":    {name: "land", run: runLand},
 	"logs":    {name: "logs", run: runLogs},
 }
 

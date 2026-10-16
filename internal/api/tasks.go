@@ -131,6 +131,30 @@ func (s *Server) handleTaskGet(w http.ResponseWriter, r *http.Request, id identi
 	writeJSON(w, http.StatusOK, task)
 }
 
+// handleTaskLand reads what `brigada land` needs of a task (§7.1): the
+// spec, dependencies, approval and the author's summary and family. A
+// client or admin token only: land is the user's command, never the
+// foreman's.
+func (s *Server) handleTaskLand(w http.ResponseWriter, r *http.Request, id identity) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	taskID, ok := parseTaskID(w, r)
+	if !ok {
+		return
+	}
+	info, err := s.eng.TaskLand(r.Context(), taskID)
+	if err != nil {
+		s.writeInternal(w, r, "read task landing data", err)
+		return
+	}
+	if info == nil {
+		writeError(w, http.StatusNotFound, codeNotFound, "no such task "+strconv.FormatInt(taskID, 10))
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
 // parseTaskID reads the {id} path value as a task id.
 func parseTaskID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	taskID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
