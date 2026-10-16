@@ -145,6 +145,11 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			byName[n.name] = i
 		}
 	}
+	approval, err := projectApprovalTx(tx, proj)
+	if err != nil {
+		return AmendPlanResult{}, err
+	}
+	am.Add = approval.withDefaultCheck(am.Add)
 	for i, t := range am.Add {
 		if t.Spec == "" {
 			return AmendPlanResult{}, fmt.Errorf("added task %d: spec is required: the worker's task, verbatim (§1.4)", i+1)

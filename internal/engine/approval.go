@@ -45,6 +45,24 @@ type approvalSettings struct {
 	MaxTasks       *int       `json:"approval_max_tasks"`
 	Classes        stringList `json:"approval_classes"`
 	ProtectedPaths stringList `json:"approval_protected_paths"`
+	DefaultCheck   string     `json:"default_check"`
+}
+
+// withDefaultCheck returns the tasks with every omitted check set to the
+// project's default check (§6.1), resolved now so the task stores it and
+// a later change of the default leaves it alone. No default: unchanged.
+func (s approvalSettings) withDefaultCheck(tasks []PlanTask) []PlanTask {
+	if s.DefaultCheck == "" {
+		return tasks
+	}
+	out := make([]PlanTask, len(tasks))
+	copy(out, tasks)
+	for i := range out {
+		if out[i].Check == "" {
+			out[i].Check = s.DefaultCheck
+		}
+	}
+	return out
 }
 
 // stringList reads a JSON array of strings, or one comma-separated

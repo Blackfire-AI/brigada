@@ -62,6 +62,7 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingApprovalMaxTasks, Value: "3"},
 		{Key: SettingApprovalClasses, Value: "implement+review+answer", Default: true},
 		{Key: SettingApprovalProtectedPaths, Value: "infra/**"},
+		{Key: SettingDefaultCheck, Value: "none", Default: true},
 	}
 	if len(got.Settings) != len(want) {
 		t.Fatalf("settings = %+v, want %+v", got.Settings, want)
@@ -75,7 +76,7 @@ func TestProjectSettingsView(t *testing.T) {
 		t.Errorf("stored settings %s lost an unrelated key", raw)
 	}
 	read, err := e.eng.ProjectSettings(e.ctx, envRepo)
-	if err != nil || read == nil || len(read.Settings) != 3 || read.Settings[0].Value != "3" {
+	if err != nil || read == nil || len(read.Settings) != 4 || read.Settings[0].Value != "3" {
 		t.Fatalf("read = %+v, %v", read, err)
 	}
 	if none, err := e.eng.ProjectSettings(e.ctx, "https://example.invalid/none.git"); err != nil || none != nil {
