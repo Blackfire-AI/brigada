@@ -73,14 +73,23 @@ func (w wireFile) changed() bool { return w.err == nil && !bytes.Equal(w.old, w.
 // and writes nothing.
 func planWiring(root string) []wireFile {
 	skill := skillContent()
-	steps := []struct {
-		rel  string
-		edit func([]byte, bool) ([]byte, string, error)
-	}{
+	return planSteps(root, []wireStep{
 		{wiringMCPFile, func(d []byte, exists bool) ([]byte, string, error) { return mergeMCPServer(d, exists) }},
 		{wiringSettingsFile, func(d []byte, exists bool) ([]byte, string, error) { return mergeHooks(d, exists) }},
 		{wiringSkillFile, func(d []byte, exists bool) ([]byte, string, error) { return mergeSkill(d, exists, skill) }},
-	}
+	})
+}
+
+// wireStep is one file a wiring plan edits: its path under the root and
+// the edit that turns its current bytes into the wanted ones.
+type wireStep struct {
+	rel  string
+	edit func([]byte, bool) ([]byte, string, error)
+}
+
+// planSteps reads each step's file under root and computes its edit;
+// like planWiring it writes nothing.
+func planSteps(root string, steps []wireStep) []wireFile {
 	var files []wireFile
 	for _, s := range steps {
 		w := wireFile{rel: s.rel, path: filepath.Join(root, filepath.FromSlash(s.rel))}
@@ -212,10 +221,16 @@ this file and replaces it on "brigada init"; put your own instructions elsewhere
 // mergeSkill owns the whole file, but only when it carries brigada's marker;
 // any other file at the path is the user's and is left alone.
 func mergeSkill(old []byte, exists bool, want []byte) ([]byte, string, error) {
+	return mergeSkillMarked(old, exists, want, wiringSkillMarker)
+}
+
+// mergeSkillMarked is mergeSkill for a skill whose ownership marker is
+// the given one.
+func mergeSkillMarked(old []byte, exists bool, want []byte, marker string) ([]byte, string, error) {
 	if !exists {
 		return want, "created", nil
 	}
-	if !bytes.Contains(old, []byte(wiringSkillMarker)) {
+	if !bytes.Contains(old, []byte(marker)) {
 		return nil, "", errors.New("exists and is not brigada's (no brigada marker); rename it or remove it to let init manage the skill")
 	}
 	if bytes.Equal(old, want) {
@@ -237,9 +252,15 @@ func renderNew(v any) ([]byte, error) {
 
 // mergeMCPServer adds or replaces the "brigada" server under mcpServers.
 func mergeMCPServer(d []byte, exists bool) ([]byte, string, error) {
-	ours := mcpBridge{Command: "brigada", Args: []string{"mcp", "--foreman"}}
+	return mergeMCPEntry(d, exists, "brigada", []string{"mcp", "--foreman"})
+}
+
+// mergeMCPEntry adds or replaces the server called name under mcpServers
+// with the `brigada` command and args; every other byte stays.
+func mergeMCPEntry(d []byte, exists bool, name string, args []string) ([]byte, string, error) {
+	ours := mcpBridge{Command: "brigada", Args: args}
 	if !exists {
-		out, err := renderNew(map[string]any{"mcpServers": map[string]any{"brigada": ours}})
+		out, err := renderNew(map[string]any{"mcpServers": map[string]any{name: ours}})
 		return out, "created", err
 	}
 	root, err := jsonRoot(d)
@@ -248,16 +269,16 @@ func mergeMCPServer(d []byte, exists bool) ([]byte, string, error) {
 	}
 	mi := root.lookup("mcpServers")
 	if mi < 0 {
-		out, err := jsonInsert(d, root, "mcpServers", map[string]any{"brigada": ours})
+		out, err := jsonInsert(d, root, "mcpServers", map[string]any{name: ours})
 		return out, "added", err
 	}
 	servers, err := jsonSub(d, root, mi, '{', "mcpServers")
 	if err != nil {
 		return nil, "", err
 	}
-	bi := servers.lookup("brigada")
+	bi := servers.lookup(name)
 	if bi < 0 {
-		out, err := jsonInsert(d, servers, "brigada", ours)
+		out, err := jsonInsert(d, servers, name, ours)
 		return out, "added", err
 	}
 	span := servers.vals[bi]

@@ -244,3 +244,52 @@ func TestPromptCheckout(t *testing.T) {
 		t.Error("checkout metadata can forge data delimiters")
 	}
 }
+
+// TestCoordinatorInstructionsShipped checks the coordinator text says
+// what mode B needs (§4.6) and stays short: its tools, no plan tool, and
+// the user's explicit yes before any approval.
+func TestCoordinatorInstructionsShipped(t *testing.T) {
+	if CoordinatorInstructionsVersion <= 0 {
+		t.Errorf("CoordinatorInstructionsVersion = %d, want a positive version", CoordinatorInstructionsVersion)
+	}
+	got := CoordinatorInstructions()
+	if strings.TrimSpace(got) == "" {
+		t.Fatal("CoordinatorInstructions() is empty; the embedded file did not ship")
+	}
+	if strings.Count(got, "\n") > 60 {
+		t.Errorf("the coordinator instructions run %d lines; keep them under 60", strings.Count(got, "\n"))
+	}
+	for _, want := range []string{
+		"list_projects", "ask_foreman", "status", "history", "plan_approve", "plan_reject",
+		"explicit yes", "never yours", "version", "One request per project",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the coordinator instructions do not mention %q", want)
+		}
+	}
+	for _, absent := range []string{"plan_create", "plan_amend", "task_restart", "task_cancel", "hold_acquire", "decision_note"} {
+		if strings.Contains(got, "`"+absent+"`") {
+			t.Errorf("the coordinator instructions name %q, a tool the coordinator does not have", absent)
+		}
+	}
+}
+
+// TestCoordinatorInstructionsGolden pins the coordinator text verbatim,
+// like the foreman's: an edit is a version bump.
+func TestCoordinatorInstructionsGolden(t *testing.T) {
+	got := CoordinatorInstructions()
+	golden := filepath.Join("testdata", "coordinator.golden")
+	if *update {
+		if err := os.WriteFile(golden, []byte(got), 0o644); err != nil {
+			t.Fatalf("rewrite %s: %v", golden, err)
+		}
+		return
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("read %s (run with -update to create it): %v", golden, err)
+	}
+	if string(want) != got {
+		t.Errorf("CoordinatorInstructions() differs from the golden %s:\n%s", golden, got)
+	}
+}

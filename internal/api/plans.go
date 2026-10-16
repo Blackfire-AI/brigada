@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -166,15 +168,49 @@ func (s *Server) handlePlanDecision(approve bool) handler {
 			writeError(w, http.StatusBadRequest, codeBadRequest, "plan id must be an integer")
 			return
 		}
+		// The body is optional: the CLI sends none that matters. A
+		// coordinator names the project and the plan version the user was
+		// shown (§4.6 mode B).
+		var req planDecisionRequest
+		body, ok := readBody(w, r)
+		if !ok {
+			return
+		}
+		if len(bytes.TrimSpace(body)) > 0 {
+			if err := json.Unmarshal(body, &req); err != nil {
+				writeError(w, http.StatusBadRequest, codeBadRequest, "malformed JSON body: "+err.Error())
+				return
+			}
+		}
+		var project int64
+		if req.RepoURL != "" {
+			named, found, err := s.projectOfRepo(r.Context(), req.RepoURL)
+			if errors.Is(err, engine.ErrInvalidRepoURL) {
+				writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+				return
+			}
+			if err != nil {
+				s.writeInternal(w, r, "resolve the repo", err)
+				return
+			}
+			if !found {
+				writeError(w, http.StatusNotFound, codeNotFound, "no project for repo "+engine.RedactRepoURL(req.RepoURL))
+				return
+			}
+			project = named
+		}
 		var res engine.PlanDecision
 		if approve {
-			res, err = s.eng.ApprovePlan(r.Context(), 0, planID)
+			res, err = s.eng.ApprovePlanVersion(r.Context(), project, planID, req.Version)
 		} else {
-			res, err = s.eng.RejectPlan(r.Context(), 0, planID)
+			res, err = s.eng.RejectPlanVersion(r.Context(), project, planID, req.Version)
 		}
 		switch {
 		case errors.Is(err, engine.ErrNoPlan):
 			writeError(w, http.StatusNotFound, codeNotFound, err.Error())
+			return
+		case errors.Is(err, engine.ErrPlanVersionStale):
+			writeError(w, http.StatusConflict, codeStalePlan, err.Error())
 			return
 		case errors.Is(err, engine.ErrPlanNotAwaiting):
 			writeError(w, http.StatusConflict, codeConflict, err.Error())
@@ -189,6 +225,15 @@ func (s *Server) handlePlanDecision(approve bool) handler {
 		}
 		writeJSON(w, http.StatusOK, out)
 	}
+}
+
+// planDecisionRequest is the optional approve/reject body (§4.6 mode B):
+// the project the plan must belong to and the plan version the user was
+// shown. A version that is not the plan's current one is refused whole
+// (code stale_plan); both omitted checks nothing, as the CLI does.
+type planDecisionRequest struct {
+	RepoURL string `json:"repo_url,omitempty"`
+	Version int64  `json:"version,omitempty"`
 }
 
 // planDecisionResponse names the plan's new state and, for an approval,

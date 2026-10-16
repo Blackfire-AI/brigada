@@ -351,10 +351,28 @@ func (c *Client) RejectPlan(ctx context.Context, plan int64) (PlanDecisionResult
 	return c.decidePlan(ctx, plan, "reject")
 }
 
+// ApprovePlanVersion is ApprovePlan for the plan version the user was
+// shown (§4.6 mode B): the plan must belong to repoURL's project and
+// still be at version, else the API refuses with its stale_plan 409 and
+// nothing is applied.
+func (c *Client) ApprovePlanVersion(ctx context.Context, repoURL string, plan, version int64) (PlanDecisionResult, error) {
+	return c.decidePlanBody(ctx, plan, "approve", planDecisionRequest{RepoURL: repoURL, Version: version})
+}
+
+// RejectPlanVersion is RejectPlan for the plan version the user was
+// shown; see ApprovePlanVersion.
+func (c *Client) RejectPlanVersion(ctx context.Context, repoURL string, plan, version int64) (PlanDecisionResult, error) {
+	return c.decidePlanBody(ctx, plan, "reject", planDecisionRequest{RepoURL: repoURL, Version: version})
+}
+
 func (c *Client) decidePlan(ctx context.Context, plan int64, verb string) (PlanDecisionResult, error) {
+	return c.decidePlanBody(ctx, plan, verb, planDecisionRequest{})
+}
+
+func (c *Client) decidePlanBody(ctx context.Context, plan int64, verb string, body planDecisionRequest) (PlanDecisionResult, error) {
 	var out planDecisionResponse
 	path := "/v1/plans/" + strconv.FormatInt(plan, 10) + "/" + verb
-	if err := c.call(ctx, http.MethodPost, path, struct{}{}, &out); err != nil {
+	if err := c.call(ctx, http.MethodPost, path, body, &out); err != nil {
 		return PlanDecisionResult{}, err
 	}
 	res := PlanDecisionResult{PlanID: out.PlanID, State: out.State}

@@ -334,6 +334,11 @@ func callStatus(ctx context.Context, c *api.Client, args json.RawMessage) (strin
 	if err != nil {
 		return "", err
 	}
+	return statusText(st), nil
+}
+
+// statusText renders a status answer as the status tools print it.
+func statusText(st api.Status) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "engine pid %d", st.Pid)
 	if started := parseStartedAt(st.StartedAt); !started.IsZero() {
@@ -352,7 +357,7 @@ func callStatus(ctx context.Context, c *api.Client, args json.RawMessage) (strin
 			fmt.Fprintf(&b, "\n\nproject #%d:\n%s", si.ProjectID, prompt.ForemanInstructionsSection(si.Text))
 		}
 	}
-	return b.String(), nil
+	return b.String()
 }
 
 // parseStartedAt reads the engine's started_at into a time; a zero time

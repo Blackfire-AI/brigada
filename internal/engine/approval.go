@@ -264,6 +264,10 @@ func matchProtected(patterns []string, text string) []string {
 var (
 	ErrNoPlan          = errors.New("no such plan")
 	ErrPlanNotAwaiting = errors.New("plan is not awaiting approval")
+	// ErrPlanVersionStale marks a decision that names a plan version the
+	// plan has moved past (§4.6 mode B): an amendment landed after the
+	// user looked, so nothing is applied and the plan must be shown again.
+	ErrPlanVersionStale = errors.New("plan changed since it was shown")
 )
 
 // PlanDecision is what approving or rejecting a plan did: the plan's
@@ -281,13 +285,20 @@ type PlanDecision struct {
 // one transaction. project scopes the plan to one project; 0 names any.
 // The foreman never calls it: confirmation is the user's.
 func (e *Engine) ApprovePlan(ctx context.Context, project, plan int64) (PlanDecision, error) {
+	return e.ApprovePlanVersion(ctx, project, plan, 0)
+}
+
+// ApprovePlanVersion is ApprovePlan for the plan version the user was
+// shown (§4.6 mode B): a plan amended since is refused whole with
+// ErrPlanVersionStale. Version 0 names no version and checks nothing.
+func (e *Engine) ApprovePlanVersion(ctx context.Context, project, plan, version int64) (PlanDecision, error) {
 	var res PlanDecision
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
-		proj, err := awaitingPlanTx(tx, project, plan)
+		proj, err := awaitingPlanTx(tx, project, plan, version)
 		if err != nil {
 			return err
 		}
@@ -327,13 +338,19 @@ func (e *Engine) ApprovePlan(ctx context.Context, project, plan int64) (PlanDeci
 // cancelled; nothing was queued, so no job needs stopping. The foreman
 // hears of it through its inbox.
 func (e *Engine) RejectPlan(ctx context.Context, project, plan int64) (PlanDecision, error) {
+	return e.RejectPlanVersion(ctx, project, plan, 0)
+}
+
+// RejectPlanVersion is RejectPlan for the plan version the user was
+// shown; see ApprovePlanVersion.
+func (e *Engine) RejectPlanVersion(ctx context.Context, project, plan, version int64) (PlanDecision, error) {
 	var res PlanDecision
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
-		proj, err := awaitingPlanTx(tx, project, plan)
+		proj, err := awaitingPlanTx(tx, project, plan, version)
 		if err != nil {
 			return err
 		}
@@ -373,11 +390,12 @@ func (e *Engine) RejectPlan(ctx context.Context, project, plan int64) (PlanDecis
 }
 
 // awaitingPlanTx finds the plan and checks it waits for approval,
-// returning its project.
-func awaitingPlanTx(tx *sql.Tx, project, plan int64) (int64, error) {
-	var proj int64
+// returning its project. A non-zero version must be the plan's current
+// one, else the decision is stale (ErrPlanVersionStale).
+func awaitingPlanTx(tx *sql.Tx, project, plan, version int64) (int64, error) {
+	var proj, have int64
 	var state string
-	err := tx.QueryRow("SELECT project_id, state FROM plans WHERE id = ?", plan).Scan(&proj, &state)
+	err := tx.QueryRow("SELECT project_id, state, version FROM plans WHERE id = ?", plan).Scan(&proj, &state, &have)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && project != 0 && proj != project) {
 		return 0, fmt.Errorf("%w: %d", ErrNoPlan, plan)
 	}
@@ -386,6 +404,9 @@ func awaitingPlanTx(tx *sql.Tx, project, plan int64) (int64, error) {
 	}
 	if state != planAwaitingApproval {
 		return 0, fmt.Errorf("%w: plan %d is %s", ErrPlanNotAwaiting, plan, state)
+	}
+	if version != 0 && version != have {
+		return 0, fmt.Errorf("%w: plan %d is at version %d, not the version %d you were shown; read the plan again and show it to the user", ErrPlanVersionStale, plan, have, version)
 	}
 	return proj, nil
 }

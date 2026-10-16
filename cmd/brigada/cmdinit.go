@@ -40,7 +40,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	check := fs.String("check", "", "default check command (suggested from build files; never executed by init)")
 	tools := fs.String("tools", "", "worker scope in runner tools= syntax; applied only to Claude workers")
 	foreman := fs.String("foreman", "", "choose a usable resume-capable agent as harness/model")
-	noWiring := fs.Bool("no-wiring", false, "skip harness wiring (the bridge, hooks and foreman skill for mode A)")
+	noWiring := fs.Bool("no-wiring", false, "skip harness wiring (the bridge, hooks and foreman skill for mode A; in a parent folder, the coordinator's)")
+	all := fs.Bool("all", false, "in a folder that is not a repository: register every new repository found, without asking")
 	agents := &agentSpecs{}
 	fs.Var(agents, "agent", "repeatable, same complete syntax and model defaults as brigada runner")
 	signedIn := map[string]bool{}
@@ -54,7 +55,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		return nil
 	})
 	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprintln(stdout, "Usage: brigada init [--probe | --yes] [options] (inside one repository)")
+		fmt.Fprintln(stdout, "Usage: brigada init [--probe | --yes] [options] (inside one repository, or in a folder holding several: then --all selects them)")
 		fs.SetOutput(stdout)
 		fs.PrintDefaults()
 		return 0
@@ -75,7 +76,14 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	root, err := gitRoot(cwd)
 	if err != nil {
-		return fail(stderr, fmt.Errorf("init needs one repository with an origin; parent-folder discovery is not implemented: %w", err))
+		// Not a repository: the parent-folder run (design §13.1, §4.6 mode B).
+		if *check != "" || toolsProvided || len(agents.specs) > 0 || *limited || len(signedIn) > 0 {
+			return usagef(stderr, "--check, --tools, --agent, --signed-in and --accept-limited set up one repository; this folder is not one (parent-folder init takes --all, --foreman, --yes, --probe and --no-wiring)")
+		}
+		return runInitParent(ctx, cwd, parentOptions{yes: *yes, probe: *probe, all: *all, noWiring: *noWiring, foreman: *foreman}, common, bufio.NewReader(projectStdin), stdout, stderr)
+	}
+	if *all {
+		return usagef(stderr, "--all selects projects in a parent folder; this is one repository")
 	}
 	// An origin must exist; a real local bare remote is valid. Multiple origin
 	// URLs with different identities are ambiguous and must be fixed by the user.

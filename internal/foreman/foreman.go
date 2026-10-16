@@ -26,6 +26,20 @@ const InstructionsVersion = 11
 // planning, answering and talking with the user.
 func Instructions() string { return instructions }
 
+//go:embed coordinator.md
+var coordinatorInstructions string
+
+// CoordinatorInstructionsVersion is the coordinator instructions'
+// version (§4.6 mode B): the text `brigada init` installs in a parent
+// folder for a session over several projects. Editing coordinator.md
+// means bumping this.
+const CoordinatorInstructionsVersion = 1
+
+// CoordinatorInstructions returns the coordinator instructions: what a
+// coordinator session is, which tools it has, and that approving a plan
+// waits for the user's explicit yes.
+func CoordinatorInstructions() string { return coordinatorInstructions }
+
 // TurnTemplateVersion is the wake template's version (§4.2 item 2,
 // §1.4): like the worker template (§5.3), a change to the template
 // below is a version bump, never a silent edit.

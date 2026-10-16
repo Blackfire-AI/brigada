@@ -397,10 +397,10 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		}
 	}
 	if newState != state {
-		if _, err := tx.Exec(`UPDATE plans SET state = ?, updated_at = ? WHERE id = ?`, newState, nowStr, plan); err != nil {
+		if _, err := tx.Exec(`UPDATE plans SET state = ?, version = version + 1, updated_at = ? WHERE id = ?`, newState, nowStr, plan); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("hold plan %d for approval: %w", plan, err)
 		}
-	} else if _, err := tx.Exec(`UPDATE plans SET updated_at = ? WHERE id = ?`, nowStr, plan); err != nil {
+	} else if _, err := tx.Exec(`UPDATE plans SET version = version + 1, updated_at = ? WHERE id = ?`, nowStr, plan); err != nil {
 		return AmendPlanResult{}, fmt.Errorf("touch plan %d: %w", plan, err)
 	}
 	if newState == planAwaitingApproval && verdict.Needed {
