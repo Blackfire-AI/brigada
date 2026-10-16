@@ -31,6 +31,10 @@ func (s *Server) handlePlanCreate(w http.ResponseWriter, r *http.Request, id ide
 		project = id.project
 		if req.RepoURL != "" {
 			named, ok, err := s.projectOfRepo(r.Context(), req.RepoURL)
+			if errors.Is(err, engine.ErrInvalidRepoURL) {
+				writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+				return
+			}
 			if err != nil {
 				s.writeInternal(w, r, "resolve the repo", err)
 				return
@@ -48,13 +52,17 @@ func (s *Server) handlePlanCreate(w http.ResponseWriter, r *http.Request, id ide
 			return
 		}
 		named, ok, err := s.projectOfRepo(r.Context(), req.RepoURL)
+		if errors.Is(err, engine.ErrInvalidRepoURL) {
+			writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+			return
+		}
 		if err != nil {
 			s.writeInternal(w, r, "resolve the repo", err)
 			return
 		}
 		if !ok {
 			writeError(w, http.StatusNotFound, codeNotFound,
-				"no project for repo "+req.RepoURL)
+				"no project for repo "+engine.RedactRepoURL(req.RepoURL))
 			return
 		}
 		project = named
@@ -91,14 +99,15 @@ func (s *Server) handlePlanCreate(w http.ResponseWriter, r *http.Request, id ide
 func (s *Server) projectOfRepo(ctx context.Context, repo string) (int64, bool, error) {
 	var project int64
 	err := s.st.View(ctx, func(tx *sql.Tx) error {
-		err := tx.QueryRow("SELECT id FROM projects WHERE repo_url = ?", repo).Scan(&project)
+		var err error
+		project, err = engine.LookupProjectTx(tx, repo)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		return err
 	})
 	if err != nil {
-		return 0, false, fmt.Errorf("read the project of %s: %w", repo, err)
+		return 0, false, fmt.Errorf("read the project of %s: %w", engine.RedactRepoURL(repo), err)
 	}
 	return project, project != 0, nil
 }

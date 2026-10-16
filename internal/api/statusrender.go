@@ -84,6 +84,10 @@ func StatusSections(st Status) string {
 		lines = append(lines, "needs you:")
 		for _, n := range st.NeedsYou {
 			line := fmt.Sprintf("%s #%d %s", n.Kind, n.ID, n.State)
+			if n.Kind == "project" {
+				lines = append(lines, n.Reason)
+				continue
+			}
 			if n.Kind == "agent" {
 				line = fmt.Sprintf("agent %s %s", n.Title, n.State) // named as `brigada agent reset` takes it
 			}

@@ -491,5 +491,11 @@ var credURLRe = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@:\s]+:[^/@\s
 // redacts credentials itself, but the runner quotes URLs and git output
 // in its errors, and one leak through a job record is one too many.
 func redactURL(s string) string {
-	return credURLRe.ReplaceAllString(s, "$1***@")
+	s = credURLRe.ReplaceAllString(s, "$1***@")
+	return scpCredRe.ReplaceAllString(s, "${1}***@")
 }
+
+// scpCredRe matches the userinfo of a scheme-less URL whose password
+// holds a ':' or '/', such as user:1234/secret@host:org/repo: a run of
+// non-space characters, with a ':' and then a '/', that ends in '@'.
+var scpCredRe = regexp.MustCompile(`(^|[\s'"(])[^\s'"@/:]+:[^\s'"@/][^\s'"@]*/[^\s'"@]*@`)

@@ -124,12 +124,12 @@ func (e *Engine) AskForeman(ctx context.Context, repoURL, text, source string) (
 func askProjectTx(tx *sql.Tx, repoURL string) (int64, error) {
 	var project int64
 	if repoURL != "" {
-		err := tx.QueryRow("SELECT id FROM projects WHERE repo_url = ?", repoURL).Scan(&project)
+		project, err := LookupProjectTx(tx, repoURL)
 		if errors.Is(err, sql.ErrNoRows) {
-			return 0, fmt.Errorf("%w: no project for repo %s", ErrNoProject, repoURL)
+			return 0, fmt.Errorf("%w: no project for repo %s", ErrNoProject, RedactRepoURL(repoURL))
 		}
 		if err != nil {
-			return 0, fmt.Errorf("resolve the repo %s: %w", repoURL, err)
+			return 0, fmt.Errorf("resolve the repo %s: %w", RedactRepoURL(repoURL), err)
 		}
 		return project, nil
 	}

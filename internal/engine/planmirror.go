@@ -232,10 +232,10 @@ type planSnapshot struct {
 // questions, in one transaction. sql.ErrNoRows when there is no such plan.
 func readPlanSnapshotTx(tx *sql.Tx, planID int64) (planSnapshot, error) {
 	var s planSnapshot
-	var created, updated, settings, defaultBranch string
-	err := tx.QueryRow(`SELECT p.title, p.state, p.created_at, p.updated_at, pr.repo_url, pr.default_branch, pr.settings
+	var created, updated, settings, defaultBranch, transport string
+	err := tx.QueryRow(`SELECT p.title, p.state, p.created_at, p.updated_at, pr.repo_url, COALESCE(NULLIF(pr.transport_url, ''), pr.repo_url), pr.default_branch, pr.settings
 		FROM plans p JOIN projects pr ON pr.id = p.project_id WHERE p.id = ?`, planID).
-		Scan(&s.plan.Title, &s.plan.State, &created, &updated, &s.plan.Repo, &defaultBranch, &settings)
+		Scan(&s.plan.Title, &s.plan.State, &created, &updated, &s.plan.Repo, &transport, &defaultBranch, &settings)
 	if err != nil {
 		return planSnapshot{}, err
 	}
@@ -252,7 +252,7 @@ func readPlanSnapshotTx(tx *sql.Tx, planID int64) (planSnapshot, error) {
 			return planSnapshot{}, fmt.Errorf("parse the settings of the project of plan %d: %w", planID, err)
 		}
 	}
-	s.target = planFileTarget(s.plan.Repo, defaultBranch, cfg.Branch)
+	s.target = planFileTarget(transport, defaultBranch, cfg.Branch)
 	if err := tx.QueryRow("SELECT COALESCE((SELECT seq FROM plan_mirror_dirty WHERE plan_id = ?), 0)", planID).Scan(&s.seq); err != nil {
 		return planSnapshot{}, fmt.Errorf("read the mirror mark of plan %d: %w", planID, err)
 	}

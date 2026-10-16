@@ -827,12 +827,25 @@ func taskInfoTx(tx *sql.Tx, j *jobRow) (repoURL, baseRef, checkCmd, branch strin
 		}
 		return "", "", "", "", nil
 	}
-	err = tx.QueryRow(`SELECT COALESCE(NULLIF(t.repo_url, ''), p.repo_url), t.base_ref, COALESCE(t.check_cmd, ''), COALESCE(t.branch, '')
+	var override string
+	err = tx.QueryRow(`SELECT COALESCE(t.repo_url, ''), COALESCE(NULLIF(p.transport_url, ''), p.repo_url), t.base_ref, COALESCE(t.check_cmd, ''), COALESCE(t.branch, '')
 		FROM tasks t JOIN plans pl ON pl.id = t.plan_id JOIN projects p ON p.id = pl.project_id
 		WHERE t.id = ?`, j.TaskID).
-		Scan(&repoURL, &baseRef, &checkCmd, &branch)
+		Scan(&override, &repoURL, &baseRef, &checkCmd, &branch)
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("read task %d: %w", j.TaskID, err)
+	}
+	if override != "" {
+		// The task's own URL is the transport the runner fetches with
+		// (§5.1), as given. A legacy override the canonical rules refuse
+		// (an ambiguous or credential-looking form) is never handed on:
+		// the grant carries no repo, so the runner fails the job with
+		// "no repo URL" instead of a git error quoting the string into a
+		// failure result and its event.
+		if _, perr := Canonicalize(override); perr != nil {
+			return "", baseRef, checkCmd, branch, nil
+		}
+		repoURL = override
 	}
 	return repoURL, baseRef, checkCmd, branch, nil
 }
@@ -842,7 +855,7 @@ func taskInfoTx(tx *sql.Tx, j *jobRow) (repoURL, baseRef, checkCmd, branch strin
 // base end of the diff. Foreman turns use the same project metadata
 // for their reading checkout.
 func standaloneReviewInfoTx(tx *sql.Tx, j *jobRow) (repoURL, baseRef string, err error) {
-	if err := tx.QueryRow("SELECT repo_url, default_branch FROM projects WHERE id = ?", j.ProjectID).
+	if err := tx.QueryRow("SELECT COALESCE(NULLIF(transport_url, ''), repo_url), default_branch FROM projects WHERE id = ?", j.ProjectID).
 		Scan(&repoURL, &baseRef); err != nil {
 		return "", "", fmt.Errorf("read project %d: %w", j.ProjectID, err)
 	}

@@ -161,8 +161,21 @@ func TestForemanChoiceWarnsOnlyWhenNoAgentIsRegistered(t *testing.T) {
 		t.Fatalf("choice with a broken agent = %+v, %v; want served", got, err)
 	}
 	read, err := e.eng.ProjectForeman(e.ctx, effortRepo)
-	if err != nil || read == nil || *read != got {
+	if err != nil || read == nil {
 		t.Fatalf("the setting read back = %+v, %v; want %+v", read, err, got)
+	}
+	// The fixture seeds its project row with the raw URL, as a store from
+	// before the canonical identity holds it until the engine's start-up
+	// rewrite; compare the URLs by their canonical form, every other field
+	// exactly.
+	readCanon, err := Canonicalize(read.RepoURL)
+	if err != nil {
+		t.Fatalf("canonicalize the read-back repo URL %q: %v", read.RepoURL, err)
+	}
+	readBack := *read
+	readBack.RepoURL = readCanon
+	if readBack != got {
+		t.Fatalf("the setting read back = %+v; want %+v", readBack, got)
 	}
 
 	// The cooling agent holds its turn as cooling, not as a missing pair.

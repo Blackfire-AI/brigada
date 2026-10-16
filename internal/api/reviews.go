@@ -30,7 +30,7 @@ func (s *Server) handleReview(w http.ResponseWriter, r *http.Request, id identit
 	}
 	res, err := s.eng.ReviewBranch(r.Context(), req.RepoURL, req.Branch)
 	switch {
-	case errors.Is(err, engine.ErrInvalidReview):
+	case errors.Is(err, engine.ErrInvalidReview), errors.Is(err, engine.ErrInvalidRepoURL):
 		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
 		return
 	case errors.Is(err, engine.ErrNoProject):

@@ -76,6 +76,10 @@ func (s *Server) handleForemanGet(w http.ResponseWriter, r *http.Request, id ide
 		return
 	}
 	setting, err := s.eng.ProjectForeman(r.Context(), repo)
+	if errors.Is(err, engine.ErrInvalidRepoURL) {
+		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		s.writeInternal(w, r, "read the foreman setting", err)
 		return
@@ -93,7 +97,7 @@ func (s *Server) handleForemanGet(w http.ResponseWriter, r *http.Request, id ide
 		return
 	}
 	if setting == nil {
-		writeError(w, http.StatusNotFound, codeNotFound, "no project for repo "+repo)
+		writeError(w, http.StatusNotFound, codeNotFound, "no project for repo "+engine.RedactRepoURL(repo))
 		return
 	}
 	writeJSON(w, http.StatusOK, setting)

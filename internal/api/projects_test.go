@@ -27,7 +27,7 @@ func TestProjectForemanRoundTrip(t *testing.T) {
 		Harness   string `json:"harness"`
 		Model     string `json:"model"`
 	}](t, data)
-	if set.ProjectID == 0 || set.RepoURL != repo || set.Harness != "claude" || set.Model != "opus" {
+	if set.ProjectID == 0 || set.RepoURL != "example.invalid/foreman" || set.Harness != "claude" || set.Model != "opus" {
 		t.Fatalf("the choice answered %+v; want the repo's project on claude and opus", set)
 	}
 	if set.ProjectID != 3 {

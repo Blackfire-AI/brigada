@@ -35,12 +35,16 @@ func (s *Server) handleProjectSettings(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 	got, err := s.eng.ProjectSettings(r.Context(), repo)
+	if errors.Is(err, engine.ErrInvalidRepoURL) {
+		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		s.writeInternal(w, r, "read the project settings", err)
 		return
 	}
 	if got == nil {
-		writeError(w, http.StatusNotFound, codeNotFound, "no project for repo "+repo)
+		writeError(w, http.StatusNotFound, codeNotFound, "no project for repo "+engine.RedactRepoURL(repo))
 		return
 	}
 	writeJSON(w, http.StatusOK, got)

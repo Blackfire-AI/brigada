@@ -71,7 +71,7 @@ func (e *Engine) Attach(ctx context.Context, project int64, force bool) (AttachR
 
 func (e *Engine) attachTx(tx *sql.Tx, project int64, force bool, now time.Time) (AttachResult, error) {
 	var harness, model, effort, repo, branch string
-	err := tx.QueryRow("SELECT foreman_harness, foreman_model, foreman_effort, repo_url, default_branch FROM projects WHERE id = ?", project).
+	err := tx.QueryRow("SELECT foreman_harness, foreman_model, foreman_effort, COALESCE(NULLIF(transport_url, ''), repo_url), default_branch FROM projects WHERE id = ?", project).
 		Scan(&harness, &model, &effort, &repo, &branch)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
