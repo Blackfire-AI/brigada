@@ -44,6 +44,12 @@ type jobRun struct {
 	dropped      bool
 	stopped      *stop
 
+	// extraEnv names the job's extra checkouts (§5.8), one
+	// BRIGADA_REPO_<NAME>=<path> each; extraCommits is the commit each
+	// resolved to, by name. Both are set once, before the setup runs.
+	extraEnv     []string
+	extraCommits map[string]string
+
 	// transcriptCap bounds the transcript bytes kept in memory and
 	// uploaded; 0 keeps the 64 MiB default — the engine's upload cap's
 	// own default (§9). A field, not the constant, so a test can
@@ -128,6 +134,7 @@ func (r *jobRun) execute(ctx context.Context) {
 	}
 	r.runJob(runCtx, ws, kill)
 	r.cleanupSetup()
+	r.cleanupExtras()
 	abort()
 	<-beatsDone
 
@@ -148,6 +155,19 @@ func (r *jobRun) runJob(ctx context.Context, ws *workspace, kill <-chan struct{}
 		// advertisement, or an engine that knows another set. The job
 		// fails with the reason rather than running on a wrong CLI.
 		r.finishWithError(ctx, err.Error())
+		return
+	}
+	// The extra repositories (§5.8) come first: setup, the worker and the
+	// check all see them. One the runner cannot fetch is an infrastructure
+	// failure, delivered like a failed setup.
+	if why := r.prepareExtras(ctx); why != "" {
+		if r.gone(ctx, "checking out the extra repositories") {
+			return
+		}
+		r.finishWithSetupError(ctx, why)
+		return
+	}
+	if r.gone(ctx, "checking out the extra repositories") {
 		return
 	}
 	// The environment step (§5.7) runs before the worker, as the runner:
@@ -208,6 +228,8 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 	// environment, whatever the adapter put there. An unset Env means
 	// inherit, so it is materialized first for the same scrub.
 	cmd.Env = scrubEnv(cmd.Env, r.cfg.GitEnv)
+	// The extra checkouts' paths (§5.8) ride along, after the scrub.
+	cmd.Env = withEnv(cmd.Env, r.extraEnvVars())
 	cmd.SysProcAttr = processGroup()
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -658,7 +680,7 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 			if r.gone(ctx, "running the setup before the check") {
 				return
 			}
-			check := runCheck(ctx, ws.dir, r.grant.CheckCmd, r.cfg.CheckTimeout)
+			check := runCheck(ctx, ws.dir, r.grant.CheckCmd, r.cfg.CheckTimeout, r.extraEnvVars()...)
 			if r.gone(ctx, "running the check") {
 				// The check was cut short by the run ending, not by the
 				// check: a killed check's exit code says nothing.
@@ -674,6 +696,9 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 			}
 		}
 	}
+	// The commit each extra repository resolved to is the runner's to say
+	// (§5.8); a worker's own claim is replaced.
+	result.ExtraRepos = r.extraCommits
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		r.finishWithError(ctx, "encode the result block: "+err.Error())

@@ -100,6 +100,10 @@ type amendNode struct {
 	base                    int   // the named base, an index into the node list; -1 = none named
 	cancelNow, retargetedBy bool
 	skipApproved            bool // a cancelled task whose skip the user approved
+	// extra is the list the task itself named (§5.8), nil when it inherits
+	// the project default; extraRec is the record an added task carries.
+	extra    []ExtraRepo
+	extraRec string
 }
 
 func (n amendNode) label() string {
@@ -150,6 +154,17 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		return AmendPlanResult{}, err
 	}
 	am.Add = approval.withDefaultCheck(am.Add)
+	// The extra repositories (§5.8) of an added task resolve now, as the
+	// default check does.
+	extraDef, err := projectExtraReposTx(tx, proj)
+	if err != nil {
+		return AmendPlanResult{}, err
+	}
+	var addExtraRecs []string
+	am.Add, addExtraRecs, err = resolveTaskExtras(extraDef, am.Add, func(i int) string { return fmt.Sprintf("added task %d", i+1) })
+	if err != nil {
+		return AmendPlanResult{}, err
+	}
 	for i, t := range am.Add {
 		if t.Spec == "" {
 			return AmendPlanResult{}, fmt.Errorf("added task %d: spec is required: the worker's task, verbatim (§1.4)", i+1)
@@ -168,7 +183,8 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if title == "" {
 			title = taskTitleOf(t.Spec)
 		}
-		nodes = append(nodes, amendNode{base: -1, name: t.Name, state: taskPending, spec: t.Spec, check: t.Check, class: class, title: title})
+		nodes = append(nodes, amendNode{base: -1, name: t.Name, state: taskPending, spec: t.Spec, check: t.Check, class: class, title: title,
+			extra: t.ExtraRepos, extraRec: addExtraRecs[i]})
 	}
 	resolve := func(ref string) (int, error) {
 		if i, ok := byName[ref]; ok {
@@ -309,7 +325,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	var kept []PlanTask
 	for _, n := range nodes {
 		if n.state != taskCancelled {
-			kept = append(kept, PlanTask{Spec: n.spec, Check: n.check, Class: n.class})
+			kept = append(kept, PlanTask{Spec: n.spec, Check: n.check, Class: n.class, ExtraRepos: n.extra})
 		}
 	}
 	verdict := settings.evaluate(kept)
@@ -338,9 +354,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	}
 	for k := range am.Add {
 		i := existing + k
-		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, created_at, updated_at)
-			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', NULLIF(?, ''), ?, ?)`,
-			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskPending, baseRef, setupRec, nowStr, nowStr)
+		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, created_at, updated_at)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', NULLIF(?, ''), NULLIF(?, ''), ?, ?)`,
+			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskPending, baseRef, setupRec, nodes[i].extraRec, nowStr, nowStr)
 		if err != nil {
 			return AmendPlanResult{}, fmt.Errorf("create the task: %w", err)
 		}
@@ -476,7 +492,7 @@ func joinIDs(ids []int64) string {
 // loadAmendNodesTx reads a plan's tasks, by id, with their dependencies
 // as indexes into the same list.
 func loadAmendNodesTx(tx *sql.Tx, plan int64) ([]amendNode, error) {
-	rows, err := tx.Query(`SELECT id, name, state, title, spec, COALESCE(check_cmd, ''), class, skip_approved
+	rows, err := tx.Query(`SELECT id, name, state, title, spec, COALESCE(check_cmd, ''), class, skip_approved, COALESCE(extra_repos, '')
 		FROM tasks WHERE plan_id = ? ORDER BY id`, plan)
 	if err != nil {
 		return nil, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
@@ -484,9 +500,15 @@ func loadAmendNodesTx(tx *sql.Tx, plan int64) ([]amendNode, error) {
 	var nodes []amendNode
 	for rows.Next() {
 		n := amendNode{base: -1}
-		if err := rows.Scan(&n.id, &n.name, &n.state, &n.title, &n.spec, &n.check, &n.class, &n.skipApproved); err != nil {
+		var extraRec string
+		if err := rows.Scan(&n.id, &n.name, &n.state, &n.title, &n.spec, &n.check, &n.class, &n.skipApproved, &extraRec); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
+		}
+		// Only a list the task named is the plan's to re-check (§5.8); an
+		// inherited default never needed approval.
+		if spec := parseExtraReposRecord(extraRec); spec != nil && spec.Source == ExtraSourceTask {
+			n.extra = spec.Repos
 		}
 		nodes = append(nodes, n)
 	}

@@ -317,6 +317,10 @@ type jobGrant struct {
 	// Setup is the environment step (§5.7) the runner runs before the
 	// worker and again before the check; absent when the task has none.
 	Setup *engine.SetupSpec `json:"setup,omitempty"`
+	// ExtraRepos are the read-only repositories (§5.8) the runner checks
+	// out beside the worktree; each carries the credential-free URL to
+	// fetch from. Empty when the task has none.
+	ExtraRepos []engine.ExtraRepo `json:"extra_repos,omitempty"`
 	// ReviewBranch is the task's result branch a review job reviews
 	// (§7): the worktree sits at it. Empty for every other kind.
 	ReviewBranch string `json:"review_branch,omitempty"`
@@ -360,6 +364,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		BaseRef:         g.BaseRef,
 		CheckCmd:        g.CheckCmd,
 		Setup:           g.Setup,
+		ExtraRepos:      g.ExtraRepos,
 		ReviewBranch:    g.ReviewBranch,
 		Branch:          g.Branch,
 		Attempt:         g.Attempt,

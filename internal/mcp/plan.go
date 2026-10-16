@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
+	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
 // planCreateArgs is the plan_create tool's arguments (§6.2, §12.2): the
@@ -27,6 +28,29 @@ type planTaskArg struct {
 	Spec  string   `json:"spec"`
 	Check string   `json:"check"`
 	Class string   `json:"class"`
+	// ExtraRepos (§5.8): absent inherits the project default, a list (even
+	// []) replaces it. No omitempty, so [] and absent hash differently.
+	ExtraRepos []extraRepoArg `json:"extra_repos"`
+}
+
+// extraRepoArg is one read-only extra repository of a task (§5.8).
+type extraRepoArg struct {
+	Name string `json:"name"`
+	Repo string `json:"repo"`
+	Ref  string `json:"ref,omitempty"`
+}
+
+// extraRepos maps the tool's argument to the API's shape, keeping the
+// difference between absent (nil) and empty.
+func extraRepos(in []extraRepoArg) []engine.ExtraRepo {
+	if in == nil {
+		return nil
+	}
+	out := make([]engine.ExtraRepo, len(in))
+	for i, x := range in {
+		out[i] = engine.ExtraRepo{Name: x.Name, Repo: x.Repo, Ref: x.Ref}
+	}
+	return out
 }
 
 // callPlanCreate runs the plan_create tool (§6.2, §12.2): the plan and
@@ -56,7 +80,7 @@ func callPlanCreate(ctx context.Context, c *api.Client, args json.RawMessage) (s
 	a = a.canonical()
 	p := api.PlanCreate{Title: a.Title, Tasks: make([]api.PlanTask, len(a.Tasks))}
 	for i, t := range a.Tasks {
-		p.Tasks[i] = api.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class}
+		p.Tasks[i] = api.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class, ExtraRepos: extraRepos(t.ExtraRepos)}
 	}
 	res, err := c.CreatePlan(ctx, p, idemKey("plan_create", a))
 	if err != nil {
@@ -131,6 +155,8 @@ type planAddArg struct {
 	Spec  string    `json:"spec"`
 	Check string    `json:"check"`
 	Class string    `json:"class"`
+	// ExtraRepos as planTaskArg's.
+	ExtraRepos []extraRepoArg `json:"extra_repos"`
 }
 
 type planRetargetArg struct {
@@ -160,7 +186,7 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 	}
 	am := api.PlanAmend{Cancel: refStrings(a.Cancel)}
 	for _, t := range a.Add {
-		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Spec: t.Spec, Check: t.Check, Class: t.Class})
+		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Spec: t.Spec, Check: t.Check, Class: t.Class, ExtraRepos: extraRepos(t.ExtraRepos)})
 	}
 	for _, rt := range a.Retarget {
 		am.Retarget = append(am.Retarget, api.PlanRetarget{Task: string(rt.Task), Deps: refStrings(rt.Deps), Base: string(rt.Base)})

@@ -58,6 +58,10 @@ type LeaseGrant struct {
 	// Setup is the environment step the runner runs before the worker and
 	// again before the check (§5.7); nil = the project had none.
 	Setup *SetupSpec
+	// ExtraRepos are the read-only repositories the runner checks out
+	// beside the worktree (§5.8): the task's recorded list, the project's
+	// default for a task-less review.
+	ExtraRepos []ExtraRepo
 	// ReviewBranch is the task's result branch a review job reviews
 	// (§7): the runner's worktree sits at it, fetched from the remote,
 	// and it is all the review reads — never pushed, never re-made.
@@ -464,15 +468,24 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		// record, so the project's setting stands. A foreman turn has
 		// none.
 		var setup *SetupSpec
+		var extraRepos []ExtraRepo
 		switch {
 		case j.TaskID != 0:
 			if setup, err = taskSetupTx(tx, j.TaskID); err != nil {
+				return nil, err
+			}
+			if extraRepos, err = taskExtraReposTx(tx, j.TaskID); err != nil {
 				return nil, err
 			}
 		case j.Kind == KindReview:
 			if setup, err = projectSetupTx(tx, j.ProjectID); err != nil {
 				return nil, err
 			}
+			def, err := projectExtraReposTx(tx, j.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			extraRepos = def.repos
 		}
 		resume := ""
 		if j.Mode == ModeSession {
@@ -543,6 +556,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			BaseRef:         baseRef,
 			CheckCmd:        checkCmd,
 			Setup:           setup,
+			ExtraRepos:      extraRepos,
 			ReviewBranch:    reviewBranch,
 			Branch:          jobBranch,
 			Attempt:         j.Attempts + 1,

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -351,7 +350,9 @@ func Run(ctx context.Context, cfg Config) error {
 	// longer reused (and replaced) by the next attempt; this runner holds
 	// the state directory's lock, so whatever is there now is dead. The
 	// mirrors' records of them are pruned by the next set-up.
-	if err := os.RemoveAll(filepath.Join(cfg.StateDir, "worktrees")); err != nil {
+	// The extra checkouts beside them (§5.8) are read-only, so they are
+	// made writable first.
+	if err := removeAllWritableErr(filepath.Join(cfg.StateDir, "worktrees")); err != nil {
 		cfg.Log.WarnContext(ctx, "sweep the worktrees a crashed runner left", "err", err)
 	}
 	// Likewise the jobs' private setup cache copies (§5.7).

@@ -67,6 +67,7 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingSetup, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingSetupCacheKeyFiles, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingSetupTimeout, Value: "15", Default: true, Source: SourceDefault},
+		{Key: SettingExtraRepos, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingHoldIdleMinutes, Value: "15", Default: true, Source: SourceDefault},
 		{Key: SettingHoldMaxMinutes, Value: "240", Default: true, Source: SourceDefault},
 		{Key: SettingInstructions, Value: "none", Default: true, Source: SourceDefault},

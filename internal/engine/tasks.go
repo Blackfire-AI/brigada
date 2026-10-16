@@ -133,9 +133,16 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 	if err != nil {
 		return TaskResult{}, err
 	}
-	task, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, base_ref, caps, repo_url, setup, created_at, updated_at)
-		VALUES (?, ?, ?, NULLIF(?, ''), ?, 'ready', ?, '{}', NULLIF(?, ''), NULLIF(?, ''), ?, ?)`,
-		planID, title, p.Spec, p.CheckCmd, class, p.BaseRef, taskRepo, setup, nowStr, nowStr)
+	// The extra repositories (§5.8): the debug submit names none of its
+	// own, so the task takes the project default.
+	extraDef, err := projectExtraReposTx(tx, project)
+	if err != nil {
+		return TaskResult{}, err
+	}
+	extraRec := extraReposRecord(extraDef.spec(nil))
+	task, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, base_ref, caps, repo_url, setup, extra_repos, created_at, updated_at)
+		VALUES (?, ?, ?, NULLIF(?, ''), ?, 'ready', ?, '{}', NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?)`,
+		planID, title, p.Spec, p.CheckCmd, class, p.BaseRef, taskRepo, setup, extraRec, nowStr, nowStr)
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create the task: %w", err)
 	}

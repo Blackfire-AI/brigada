@@ -60,7 +60,7 @@ func (c CheckResult) JSON() string {
 // is killed — killing only sh would leave the check's grandchildren
 // (a build, a test binary) holding the output pipe and the run hanging
 // — and the last checkTailBytes of its combined output are kept.
-func runCheck(ctx context.Context, dir, command string, timeout time.Duration) CheckResult {
+func runCheck(ctx context.Context, dir, command string, timeout time.Duration, env ...string) CheckResult {
 	if command == "" {
 		return CheckResult{}
 	}
@@ -71,6 +71,8 @@ func runCheck(ctx context.Context, dir, command string, timeout time.Duration) C
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = dir
+	// The extra checkouts' variables (§5.8) join the inherited environment.
+	cmd.Env = withEnv(nil, env)
 	cmd.SysProcAttr = processGroup()
 	// The context's cancel kills the group, not just sh; WaitDelay
 	// bounds the wait for the pipes the killed tree can no longer
