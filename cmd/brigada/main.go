@@ -33,6 +33,7 @@ Commands:
 	attach          Attach to this repo's foreman and chat (what a bare
 	                brigada runs).
 	ask <message>   Send the foreman a message without attaching.
+	hold release    Release a stuck interactive hold on the foreman (--repo).
 	review --branch <x>
 	                Review a branch with an agent of another family than
 	                its author's, with no plan or task (§7).
@@ -90,6 +91,7 @@ var commands = map[string]command{
 	"init":    {name: "init", run: runInit},
 	"attach":  {name: "attach", run: runAttach},
 	"ask":     {name: "ask", run: runAsk},
+	"hold":    {name: "hold", run: runHold},
 	"review":  {name: "review", run: runReview},
 	"engine":  {name: "engine", run: runEngine},
 	"runner":  {name: "runner", run: runRunner},

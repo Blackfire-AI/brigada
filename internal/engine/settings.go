@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
@@ -25,10 +26,21 @@ const (
 	SettingApprovalProtectedPaths = "approval_protected_paths"
 	SettingDefaultCheck           = "default_check"
 	SettingWorkerTools            = "worker_tools"
+	// The interactive hold's two bounds (§4.6), in minutes: idle without
+	// activity, and absolute from acquire.
+	SettingHoldIdleMinutes = "hold_idle_minutes"
+	SettingHoldMaxMinutes  = "hold_max_minutes"
+)
+
+// The hold bounds' defaults (§4.6): a starting guess, open in §16.
+const (
+	defaultHoldIdleMinutes = 15
+	defaultHoldMaxMinutes  = 240
 )
 
 // SettingKeys are the editable keys, in the order show prints them.
-var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths, SettingDefaultCheck, SettingWorkerTools}
+var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
+	SettingDefaultCheck, SettingWorkerTools, SettingHoldIdleMinutes, SettingHoldMaxMinutes}
 
 // settingListSep separates the items of a list value on the command line.
 const settingListSep = "+"
@@ -76,7 +88,8 @@ var classWord = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 // Every refusal names the valid keys.
 func parseSettingValue(key, value string) (json.RawMessage, error) {
 	switch key {
-	case SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths, SettingDefaultCheck, SettingWorkerTools:
+	case SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths, SettingDefaultCheck, SettingWorkerTools,
+		SettingHoldIdleMinutes, SettingHoldMaxMinutes:
 	default:
 		return nil, fmt.Errorf("%w: unknown key %q; valid keys: %s", ErrInvalidSetting, key, strings.Join(SettingKeys, ", "))
 	}
@@ -106,6 +119,14 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 		n, err := strconv.Atoi(value)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s takes an integer (0 = every plan waits, negative = off), got %q",
+				ErrInvalidSetting, key, value)
+		}
+		return json.RawMessage(strconv.Itoa(n)), nil
+	}
+	if key == SettingHoldIdleMinutes || key == SettingHoldMaxMinutes {
+		n, err := strconv.Atoi(value)
+		if err != nil || n <= 0 {
+			return nil, fmt.Errorf("%w: %s takes a positive whole number of minutes, got %q",
 				ErrInvalidSetting, key, value)
 		}
 		return json.RawMessage(strconv.Itoa(n)), nil
@@ -163,6 +184,10 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string) (ProjectSettings, er
 	if err != nil {
 		return ProjectSettings{}, err
 	}
+	idle, maxHold, err := holdBoundsTx(tx, project)
+	if err != nil {
+		return ProjectSettings{}, err
+	}
 	list := func(l []string) string {
 		if len(l) == 0 {
 			return "none"
@@ -197,6 +222,10 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string) (ProjectSettings, er
 			if s, ok := rawString(cur); ok {
 				sv.Value = s
 			}
+		case SettingHoldIdleMinutes:
+			sv.Value = strconv.Itoa(int(idle / time.Minute))
+		case SettingHoldMaxMinutes:
+			sv.Value = strconv.Itoa(int(maxHold / time.Minute))
 		}
 		out.Settings = append(out.Settings, sv)
 	}
@@ -318,4 +347,30 @@ func (e *Engine) SetProjectSettings(ctx context.Context, repoURL string, values 
 		return ProjectSettings{}, fmt.Errorf("set the settings of the project of %s: %w", RedactRepoURL(repoURL), err)
 	}
 	return out, nil
+}
+
+// holdBoundsTx reads the project's interactive-hold bounds (§4.6): the
+// idle and the absolute limit, each its setting or the default. A value
+// that does not parse as a positive number is the default — the setting
+// path validates, so only a hand-edited row lands there.
+func holdBoundsTx(tx *sql.Tx, project int64) (idle, maxHold time.Duration, err error) {
+	var raw string
+	if err := tx.QueryRow("SELECT settings FROM projects WHERE id = ?", project).Scan(&raw); err != nil {
+		return 0, 0, fmt.Errorf("read the settings of project %d: %w", project, err)
+	}
+	minutes := map[string]int{SettingHoldIdleMinutes: defaultHoldIdleMinutes, SettingHoldMaxMinutes: defaultHoldMaxMinutes}
+	if raw != "" {
+		var present map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(raw), &present); err != nil {
+			return 0, 0, fmt.Errorf("parse the settings of project %d: %w", project, err)
+		}
+		for k := range minutes {
+			var n int
+			if v, ok := present[k]; ok && json.Unmarshal(v, &n) == nil && n > 0 {
+				minutes[k] = n
+			}
+		}
+	}
+	return time.Duration(minutes[SettingHoldIdleMinutes]) * time.Minute,
+		time.Duration(minutes[SettingHoldMaxMinutes]) * time.Minute, nil
 }

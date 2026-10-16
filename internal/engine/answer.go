@@ -58,7 +58,7 @@ type RestartResult struct {
 // appear.
 func (e *Engine) Answer(ctx context.Context, project, taskID int64, text string) (AnswerResult, error) {
 	var res AnswerResult
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+	err := e.updateGuarded(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
@@ -153,7 +153,7 @@ func (e *Engine) answerTx(tx *sql.Tx, project, taskID int64, text string, now ti
 // job.
 func (e *Engine) RestartTask(ctx context.Context, project, taskID int64, note string) (RestartResult, error) {
 	var res RestartResult
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+	err := e.updateGuarded(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err

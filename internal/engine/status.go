@@ -43,10 +43,14 @@ type StatusInfo struct {
 	// ForemanMessages counts the user's messages waiting in the foreman
 	// inbox (§4.2 item 3): queued while a chat is attached, a turn runs,
 	// or the wake cannot happen; delivered ones are not counted.
-	ForemanMessages int            `json:"foreman_messages"`
-	Plans           []StatusPlan   `json:"plans"`
-	Report          *StatusReport  `json:"report,omitempty"`
-	NeedsYou        []NeedsYouItem `json:"needs_you"`
+	ForemanMessages int `json:"foreman_messages"`
+	// Slots is who holds the foreman's live slot, per project (§4.6):
+	// free, an interactive hold, a headless turn or an attach, with the
+	// holder's label and since when.
+	Slots    []Slot         `json:"slots"`
+	Plans    []StatusPlan   `json:"plans"`
+	Report   *StatusReport  `json:"report,omitempty"`
+	NeedsYou []NeedsYouItem `json:"needs_you"`
 	// Cooling lists the agents held back for quota (§8, §10): shown
 	// beside the running jobs, never in the needs-you queue.
 	Cooling []CoolingAgent `json:"cooling,omitempty"`
@@ -183,6 +187,9 @@ func (e *Engine) Status(ctx context.Context, project int64) (StatusInfo, error) 
 		if info.ForemanMessages, err = pendingUserMessagesTx(tx, project); err != nil {
 			return err
 		}
+		if info.Slots, err = statusSlotsTx(tx, project, now); err != nil {
+			return err
+		}
 		if info.Plans, err = statusPlansTx(tx, project, now); err != nil {
 			return err
 		}
@@ -204,6 +211,44 @@ func (e *Engine) Status(ctx context.Context, project int64) (StatusInfo, error) 
 		return StatusInfo{}, fmt.Errorf("read status: %w", err)
 	}
 	return info, nil
+}
+
+// statusSlotsTx lists the foreman slot of one project, or of every
+// project with 0 (§4.6).
+func statusSlotsTx(tx *sql.Tx, project int64, now time.Time) ([]Slot, error) {
+	query := "SELECT id FROM projects"
+	var args []any
+	if project != 0 {
+		query += " WHERE id = ?"
+		args = append(args, project)
+	}
+	rows, err := tx.Query(query+" ORDER BY id", args...)
+	if err != nil {
+		return nil, fmt.Errorf("list the projects for the slots: %w", err)
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("list the projects for the slots: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("list the projects for the slots: %w", err)
+	}
+	rows.Close()
+	slots := []Slot{}
+	for _, id := range ids {
+		s, err := slotTx(tx, id, now)
+		if err != nil {
+			return nil, err
+		}
+		slots = append(slots, s)
+	}
+	return slots, nil
 }
 
 // pendingUserMessagesTx counts the user's messages still pending in the

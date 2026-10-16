@@ -320,6 +320,12 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (SweepR
 		}
 	}
 
+	// An interactive hold whose clocks ran out ends (§4.6): revoke, bump
+	// the fence, then the wake.
+	if err := e.expireInteractiveHoldsTx(tx, now); err != nil {
+		return rep, err
+	}
+
 	// A runner unseen past the stale window loses its agents' health (§8).
 	if err := e.sweepStaleRunnersTx(tx, now); err != nil {
 		return rep, err

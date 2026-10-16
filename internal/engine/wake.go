@@ -51,6 +51,7 @@ const (
 	WakeWoken       WakeOutcome = "woken"           // a foreman turn was submitted carrying the inbox
 	WakeNothing     WakeOutcome = "nothing_pending" // the inbox was empty
 	WakeAttached    WakeOutcome = "attached"        // a person is attached; the session reads the inbox through events
+	WakeHeld        WakeOutcome = "held"            // the user's own session holds the slot (§4.6); it reads the inbox through events
 	WakeTurnRunning WakeOutcome = "turn_running"    // a turn is live; its completion re-evaluates
 	WakeNoForeman   WakeOutcome = "no_foreman"      // the project names no foreman harness
 	WakeStalled     WakeOutcome = "stalled"         // failing turns carried the inbox too often
@@ -96,6 +97,17 @@ func (e *Engine) wakeOutcomeTx(tx *sql.Tx, project int64, now time.Time) (WakeOu
 	}
 	if pending == 0 {
 		return WakeNothing, nil
+	}
+	// An interactive hold has the slot (§4.6): the session reads the
+	// inbox through its `events` tool, and the hold's end re-evaluates
+	// the wake, after the credential is revoked and the fence bumped.
+	var interactive int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM interactive_holds WHERE project_id = ? AND state = 'live'`,
+		project).Scan(&interactive); err != nil {
+		return "", fmt.Errorf("read the interactive holds of project %d: %w", project, err)
+	}
+	if interactive > 0 {
+		return WakeHeld, nil
 	}
 	// An attached chat holds the foreman (§4.2 item 1): while a hold
 	// lives, no headless turn is submitted — the events wait for the
@@ -259,14 +271,21 @@ func foremanWakeStalledTx(tx *sql.Tx, project int64) (bool, error) {
 // (§10). The title alone is flattened to one line: a newline there would
 // break the event's own line, while the payload's words stay verbatim.
 func pendingInboxTx(tx *sql.Tx, project int64) (ForemanInbox, error) {
+	return inboxRowsTx(tx, project, inboxPending, 0)
+}
+
+// inboxRowsTx renders the project's inbox rows in one state, optionally
+// only those a given job carried (job 0 = any): pending ones for a wake,
+// delivered ones for a status that names what a live turn carries.
+func inboxRowsTx(tx *sql.Tx, project int64, state string, job int64) (ForemanInbox, error) {
 	rows, err := tx.Query(`SELECT e.kind, COALESCE(e.task_id, 0), COALESCE(t.title, ''), e.payload,
 		COALESCE(pp.id, 0), COALESCE(pp.title, '')
 		FROM foreman_inbox i
 		JOIN events e ON e.id = i.event_id
 		LEFT JOIN tasks t ON t.id = e.task_id
 		LEFT JOIN plans pp ON pp.id = CASE WHEN json_valid(e.payload) THEN json_extract(e.payload, '$.plan') END
-		WHERE i.project_id = ? AND i.state = ?
-		ORDER BY e.id`, project, inboxPending)
+		WHERE i.project_id = ? AND i.state = ? AND (? = 0 OR i.job_id = ?)
+		ORDER BY e.id`, project, state, job, job)
 	if err != nil {
 		return ForemanInbox{}, fmt.Errorf("read the pending events of project %d: %w", project, err)
 	}

@@ -29,6 +29,9 @@ type AttachResult struct {
 	Answer Answer
 	HoldID int64 // the created hold; a busy second attach names the live hold
 	JobID  int64 // a busy answer names the live foreman turn, when that made it busy
+	// InteractiveHoldID is the user's own session's hold (§4.6), when that
+	// made the attach busy.
+	InteractiveHoldID int64
 	// ForemanToken is the hold-scoped foreman token (§12.1): it works
 	// while the hold lives and dies with the hold. Empty on busy.
 	ForemanToken  string
@@ -83,6 +86,16 @@ func (e *Engine) attachTx(tx *sql.Tx, project int64, force bool, now time.Time) 
 		// Nobody to attach to: the foreman is the user's own choice
 		// (§4.1), and a project that never named one has nobody to run.
 		return AttachResult{}, fmt.Errorf("the project has no foreman harness; set it with `brigada project foreman`")
+	}
+	// The user's own session holds the slot (§4.6): the chat waits for
+	// its yield, expiry or a forced release (`brigada hold release`).
+	var interactive int64
+	err = tx.QueryRow(`SELECT id FROM interactive_holds WHERE project_id = ? AND state = 'live'`, project).Scan(&interactive)
+	switch {
+	case err == nil:
+		return AttachResult{Answer: AnsBusy, InteractiveHoldID: interactive}, nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return AttachResult{}, fmt.Errorf("read the interactive holds of project %d: %w", project, err)
 	}
 	// The second-attach rule (§4.2 item 1): one live hold at a time, so
 	// two terminals never resume one session at once.
@@ -293,7 +306,7 @@ func (e *Engine) ReleaseAttach(ctx context.Context, holdID int64, sessionID stri
 // so a headless turn's token may call it too.
 func (e *Engine) ForemanEvents(ctx context.Context, project int64) (ForemanInbox, error) {
 	var inbox ForemanInbox
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+	err := e.updateGuarded(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
@@ -309,6 +322,11 @@ func (e *Engine) ForemanEvents(ctx context.Context, project int64) (ForemanInbox
 		if _, err := tx.Exec(`UPDATE foreman_inbox SET state = ? WHERE project_id = ? AND state = ?`,
 			inboxConsumed, project, inboxPending); err != nil {
 			return fmt.Errorf("consume the inbox of project %d: %w", project, err)
+		}
+		// A consuming `events` call by a hold is activity (§4.6), in the
+		// same transaction that consumed.
+		if g := holdGuardOf(ctx); g != nil {
+			return e.touchHoldTx(tx, g.Hold, g.Fence, now)
 		}
 		return nil
 	})
