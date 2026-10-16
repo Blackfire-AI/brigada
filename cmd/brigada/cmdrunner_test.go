@@ -41,21 +41,52 @@ func (b *syncBuffer) String() string {
 // provider/model survives advertisement unchanged. No worker CLI is run.
 func TestRunnerHarnessRegisters(t *testing.T) {
 	for _, tc := range []struct {
-		name, harness, model string
-		agentForm            bool
+		name, harness, model, family string
+		agentForm                    bool
 	}{
-		{"kimi default", "kimi", "default", false},
-		{"opencode default", "opencode", "default", false},
-		{"opencode model shorthand", "opencode", "provider/model", false},
-		{"opencode model agent flag", "opencode", "provider/model", true},
+		{"kimi default", "kimi", "default", "kimi", false},
+		{"codex default", "codex", "default", "codex", false},
+		{"opencode default", "opencode", "default", "opencode", false},
+		{"opencode model shorthand", "opencode", "provider/model", "opencode", false},
+		{"opencode model agent flag", "opencode", "provider/model", "opencode", true},
+		{"opencode GLM provider", "opencode", "zai-coding-plan/glm-5.3", "zhipu", true},
+		{"opencode GLM bare", "opencode", "glm-5.3", "zhipu", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			testRunnerHarnessRegisters(t, tc.harness, tc.model, tc.agentForm)
+			testRunnerHarnessRegisters(t, tc.harness, tc.model, tc.family, tc.agentForm)
 		})
 	}
 }
 
-func testRunnerHarnessRegisters(t *testing.T, harness, wantModel string, agentForm bool) {
+func TestResolveRunnerAgentModels(t *testing.T) {
+	for _, tc := range []struct {
+		harness, model, wantModel, wantFamily string
+	}{
+		{"claude", "", "sonnet", "anthropic"},
+		{"codex", "", "default", "codex"},
+		{"kimi", "", "default", "kimi"},
+		{"opencode", "", "default", "opencode"},
+		{"opencode", "zai-coding-plan/glm-5.3", "zai-coding-plan/glm-5.3", "zhipu"},
+		{"opencode", "glm-5.3", "glm-5.3", "zhipu"},
+		{"opencode", "provider/model", "provider/model", "opencode"},
+	} {
+		t.Run(tc.harness+"/"+tc.model, func(t *testing.T) {
+			spec := agentSpec{harness: tc.harness, model: tc.model, classes: splitList(defaultClasses)}
+			ads, agents, err := resolveRunnerAgents(&runtime{}, []agentSpec{spec}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ads) != 1 || len(agents) != 1 {
+				t.Fatalf("got %d adapters and %d agents", len(ads), len(agents))
+			}
+			if ads[0].Name() != tc.harness || agents[0].Model != tc.wantModel || agents[0].Family != tc.wantFamily {
+				t.Fatalf("adapter=%s agent=%+v; want harness=%s model=%s family=%s", ads[0].Name(), agents[0], tc.harness, tc.wantModel, tc.wantFamily)
+			}
+		})
+	}
+}
+
+func testRunnerHarnessRegisters(t *testing.T, harness, wantModel, wantFamily string, agentForm bool) {
 	state := testsupport.ShortStateDir(t)
 	agentFile := filepath.Join(t.TempDir(), "worker.md")
 	if err := os.WriteFile(agentFile, []byte("# the agent\n"), 0o644); err != nil {
@@ -127,8 +158,8 @@ func testRunnerHarnessRegisters(t *testing.T, harness, wantModel string, agentFo
 		t.Fatal("the runner did not stop")
 	}
 
-	if adapterName != harness || family != harness {
-		t.Errorf("the registered agent = adapter %s, family %s; want %s, %s", adapterName, family, harness, harness)
+	if adapterName != harness || family != wantFamily {
+		t.Errorf("the registered agent = adapter %s, family %s; want %s, %s", adapterName, family, harness, wantFamily)
 	}
 	if model != wantModel {
 		t.Errorf("the registered model = %q, want %q", model, wantModel)

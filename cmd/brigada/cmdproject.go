@@ -202,6 +202,21 @@ func gitRoot(dir string) (string, error) {
 // still-imported value and print a conflict, with both values, for a
 // local override.
 func runProjectImport(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	return runProjectImportWithConfirm(ctx, args, stdout, stderr, func(prompt string) (bool, error) {
+		fmt.Fprint(stdout, prompt+" [y/N] ")
+		answer, _ := bufio.NewReader(projectStdin).ReadString('\n')
+		a := strings.ToLower(strings.TrimSpace(answer))
+		confirmed := a == "y" || a == "yes"
+		if !confirmed {
+			fmt.Fprintln(stdout)
+		}
+		return confirmed, nil
+	})
+}
+
+// Init supplies its prompt handling so an import confirmation follows the same
+// terminal formatting and EOF rules as the rest of setup.
+func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, stderr io.Writer, confirm func(string) (bool, error)) int {
 	fs := newFlagSet("project import")
 	common := addCommon(fs)
 	var (
@@ -262,10 +277,11 @@ func runProjectImport(ctx context.Context, args []string, stdout, stderr io.Writ
 		for _, d := range res.Diffs {
 			fmt.Fprintf(stdout, "  %s: hand-set %s -> file %s\n", d.Key, d.Old, d.New)
 		}
-		fmt.Fprint(stdout, "replace them? [y/N] ")
-		answer, _ := bufio.NewReader(projectStdin).ReadString('\n')
-		if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
-			fmt.Fprintln(stdout)
+		confirmed, err := confirm("replace them?")
+		if err != nil {
+			return fail(stderr, err)
+		}
+		if !confirmed {
 			fmt.Fprintln(stdout, "not imported; nothing changed (--yes accepts the replacement)")
 			return 1
 		}

@@ -70,16 +70,18 @@ func TestInitProbeAndRefusals(t *testing.T) {
 		want     string
 	}{
 		{"probe", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}, "", 0, "Probe only"},
-		{"declined", []string{"--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}, "n\n", 0, "Declined"},
+		{"declined", []string{"--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}, "n\n", 1, "Declined"},
 		{"one family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=anthropic/claude-opus-4", "--signed-in", "claude,opencode"}, "", 1, "--accept-limited"},
 		{"limited acknowledged", []string{"--probe", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--signed-in", "claude"}, "", 0, "LIMITED SETUP"},
 		{"zero", []string{"--yes", "--agent", "harness=claude,model=sonnet"}, "", 1, "zero usable agents"},
 		{"no explicit models", []string{"--probe"}, "", 1, "zero usable agents"},
-		{"bad model", []string{"--probe", "--agent", "harness=claude,model=unknown"}, "", 2, "cannot identify the family"},
-		{"bad classes", []string{"--probe", "--agent", "harness=claude,model=sonnet,classes=bad class"}, "", 2, "agent classes"},
-		{"non claude tools", []string{"--probe", "--agent", "harness=codex,model=gpt-5,tools=none"}, "", 2, "tools="},
-		{"bad effort", []string{"--probe", "--agent", "harness=codex,model=gpt-5,effort=bogus"}, "", 2, "effort"},
-		{"incapable foreman", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=kimi,model=kimi-k2", "--signed-in", "claude,kimi", "--foreman", "kimi/kimi-k2"}, "", 2, "resumes headless"},
+		{"bad model", []string{"--probe", "--agent", "harness=claude,model=unknown"}, "", 1, "cannot identify the family"},
+		{"bad classes", []string{"--probe", "--agent", "harness=claude,model=sonnet,classes=bad class"}, "", 1, "agent classes"},
+		{"non claude tools", []string{"--probe", "--agent", "harness=codex,model=gpt-5,tools=none"}, "", 1, "tools="},
+		{"bad effort", []string{"--probe", "--agent", "harness=codex,model=gpt-5,effort=bogus"}, "", 1, "effort"},
+		{"incapable foreman", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=kimi,model=kimi-k2", "--signed-in", "claude,kimi", "--foreman", "kimi/kimi-k2"}, "", 1, "resumes headless"},
+		{"GLM second family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=zai-coding-plan/glm-5.3", "--signed-in", "claude,opencode"}, "", 0, "family=zhipu"},
+		{"runner defaults", []string{"--probe", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex"}, "", 0, "harness=codex,model=default"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
@@ -105,6 +107,114 @@ func TestInitProbeAndRefusals(t *testing.T) {
 			}
 			if strings.Contains(out, "ready") {
 				t.Errorf("probe/limited/refusal claimed ready: %s", out)
+			}
+		})
+	}
+}
+
+func TestInitPromptDefaultsAndSkip(t *testing.T) {
+	for _, tc := range []struct {
+		name, stdin string
+		wantAgents  []string
+		wantSkipped []string
+		want        string
+	}{
+		{
+			name: "blank uses every default", stdin: "\n\n\n\nn\n",
+			wantAgents: []string{"claude,model=sonnet", "codex,model=default", "kimi,model=default", "opencode,model=default"},
+			want:       "Declined",
+		},
+		{
+			name: "dash skips accounts", stdin: "-\n\n-\n-\nn",
+			wantAgents: []string{"codex,model=default"}, wantSkipped: []string{"claude", "kimi", "opencode"},
+			want: "Declined",
+		},
+		{
+			name: "all skipped", stdin: "-\n-\n-\n-\n",
+			wantSkipped: initHarnesses, want: "zero usable agents",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			importRepo(t)
+			fakeInitPATH(t, initHarnesses...)
+			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
+			code, out, err := initDo(t, state, tc.stdin, "--signed-in", "claude,codex,kimi,opencode", "--accept-limited", "--check", "true", "--tools", "none")
+			if code != 1 || !strings.Contains(out+err, tc.want) {
+				t.Fatalf("got %d\n%s\n%s", code, out, err)
+			}
+			for _, agent := range tc.wantAgents {
+				if !strings.Contains(out, "  agent harness="+agent+",") {
+					t.Errorf("missing default agent %s in %s", agent, out)
+				}
+			}
+			for _, harness := range tc.wantSkipped {
+				if strings.Contains(out, "  agent harness="+harness+",") {
+					t.Errorf("registered skipped harness %s", harness)
+				}
+			}
+			for _, path := range []string{state, ".brigada"} {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Errorf("refusal wrote %s: %v", path, err)
+				}
+			}
+		})
+	}
+}
+
+func TestInitNonTerminalPrompts(t *testing.T) {
+	importRepo(t)
+	fakeInitPATH(t, initHarnesses...)
+	code, out, err := initDo(t, testsupport.ShortStateDir(t), "\n\n\n\ny\ny\ny\ny\nn\n", "--check", "true", "--tools", "none")
+	if code != 1 || !strings.Contains(out, "Declined") || err != "" {
+		t.Fatalf("got %d\n%s\n%s", code, out, err)
+	}
+	for _, prompt := range []string{
+		"Model served by claude account [sonnet] (- to skip):",
+		"Model served by codex account [default] (- to skip):",
+		"Model served by kimi account [default] (- to skip):",
+		"Model served by opencode account [default] (- to skip):",
+		"Confirm claude account claude is signed in and serves sonnet? [y/N]",
+		"Confirm codex account codex is signed in and serves default? [y/N]",
+		"Confirm kimi account kimi is signed in and serves default? [y/N]",
+		"Confirm opencode account opencode is signed in and serves default? [y/N]",
+		"Apply this plan (including the file diff above)? [y/N]",
+	} {
+		if !strings.Contains(out, "\n"+prompt+"\n") {
+			t.Errorf("prompt is missing or not on its own line: %q\n%s", prompt, out)
+		}
+	}
+}
+
+func TestInitNoInput(t *testing.T) {
+	for _, tc := range []struct {
+		name, stdin, want string
+		args              []string
+	}{
+		{"no model input", "", "--agent harness=claude", nil},
+		{"model input exhausted", "\n", "--agent harness=codex", nil},
+		{"no authentication input", "", "--signed-in claude", []string{"--agent", "harness=claude"}},
+		{"no apply input", "", "--yes", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited"}},
+		{"no check input", "", "--check COMMAND", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--check="}},
+		{"no tools input", "", "--tools", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--tools="}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			importRepo(t)
+			fakeInitPATH(t, "claude", "codex")
+			args := append([]string{"--check", "true", "--tools", "none"}, tc.args...)
+			code, out, err := initDo(t, testsupport.ShortStateDir(t), tc.stdin, args...)
+			if code != 1 {
+				t.Fatalf("got %d\n%s\n%s", code, out, err)
+			}
+			for _, want := range []string{"no input available", "--agent", "--signed-in", tc.want} {
+				if !strings.Contains(err, want) {
+					t.Errorf("missing %q in %q", want, err)
+				}
+			}
+			if strings.Contains(out, "  agent harness=") && tc.name == "no model input" {
+				t.Fatal("treated EOF as a default model answer")
+			}
+			if _, err := os.Stat(".brigada"); !os.IsNotExist(err) {
+				t.Fatalf("EOF wrote configuration: %v", err)
 			}
 		})
 	}
