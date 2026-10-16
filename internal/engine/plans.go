@@ -221,6 +221,7 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 	if err != nil {
 		return CreatePlanResult{}, err
 	}
+	tasks = settings.withDefaultCheck(tasks)
 	verdict := settings.evaluate(tasks)
 	planState := "active"
 	if verdict.Needed {

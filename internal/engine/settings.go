@@ -21,10 +21,11 @@ const (
 	SettingApprovalMaxTasks       = "approval_max_tasks"
 	SettingApprovalClasses        = "approval_classes"
 	SettingApprovalProtectedPaths = "approval_protected_paths"
+	SettingDefaultCheck           = "default_check"
 )
 
 // SettingKeys are the editable keys, in the order show prints them.
-var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths}
+var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths, SettingDefaultCheck}
 
 // settingListSep separates the items of a list value on the command line.
 const settingListSep = "+"
@@ -57,7 +58,7 @@ var classWord = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 // Every refusal names the valid keys.
 func parseSettingValue(key, value string) (json.RawMessage, error) {
 	switch key {
-	case SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths:
+	case SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths, SettingDefaultCheck:
 	default:
 		return nil, fmt.Errorf("%w: unknown key %q; valid keys: %s", ErrInvalidSetting, key, strings.Join(SettingKeys, ", "))
 	}
@@ -72,6 +73,9 @@ func parseSettingValue(key, value string) (json.RawMessage, error) {
 func parseKnownValue(key, value string) (json.RawMessage, error) {
 	if value == "" {
 		return nil, nil
+	}
+	if key == SettingDefaultCheck {
+		return json.Marshal(strings.TrimSpace(value))
 	}
 	if key == SettingApprovalMaxTasks {
 		n, err := strconv.Atoi(value)
@@ -148,6 +152,11 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string) (ProjectSettings, er
 			sv.Value = list(eff.Classes)
 		case SettingApprovalProtectedPaths:
 			sv.Value = list(eff.ProtectedPaths)
+		case SettingDefaultCheck:
+			sv.Value = eff.DefaultCheck
+			if sv.Value == "" {
+				sv.Value = "none"
+			}
 		}
 		out.Settings = append(out.Settings, sv)
 	}
