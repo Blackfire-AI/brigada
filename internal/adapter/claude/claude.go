@@ -55,7 +55,7 @@ func foremanToolScope() (allowed, disallowed []string) {
 	for _, name := range mcp.ToolNames() {
 		allowed = append(allowed, "mcp__"+mcp.ServerName+"__"+name)
 	}
-	return allowed, []string{"Bash", "Edit", "MultiEdit", "NotebookEdit", "Write"}
+	return allowed, []string{"Bash", "Edit", "NotebookEdit", "Write"}
 }
 
 // workerToolScope is the code worker's default tool scope (§5.2): the Go

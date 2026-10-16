@@ -141,7 +141,7 @@ func TestCommandForemanScope(t *testing.T) {
 		"mcp__brigada__plan_create", "mcp__brigada__plan_amend", "mcp__brigada__answer", "mcp__brigada__task_restart",
 		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__events",
 		"mcp__brigada__capacity",
-		"--disallowedTools", "Bash", "Edit", "MultiEdit", "NotebookEdit", "Write"}
+		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "Write"}
 	cases := []struct {
 		name    string
 		ad      Adapter
@@ -213,7 +213,7 @@ func TestAttachCommandGolden(t *testing.T) {
 		"mcp__brigada__plan_create", "mcp__brigada__plan_amend", "mcp__brigada__answer", "mcp__brigada__task_restart",
 		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__events",
 		"mcp__brigada__capacity",
-		"--disallowedTools", "Bash", "Edit", "MultiEdit", "NotebookEdit", "Write"}
+		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "Write"}
 	cases := []struct {
 		name    string
 		ad      Adapter
@@ -350,7 +350,7 @@ func TestCommandWorkerDefaultScope(t *testing.T) {
 		"mcp__brigada__plan_create", "mcp__brigada__plan_amend", "mcp__brigada__answer", "mcp__brigada__task_restart",
 		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__events",
 		"mcp__brigada__capacity",
-		"--disallowedTools", "Bash", "Edit", "MultiEdit", "NotebookEdit", "Write"}
+		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "Write"}
 	if !slices.Equal(foreman.Args, wantForeman) {
 		t.Errorf("foreman args =\n%v\nwant\n%v", foreman.Args, wantForeman)
 	}
