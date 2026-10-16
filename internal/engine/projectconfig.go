@@ -89,8 +89,9 @@ var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // configSettingKeys are the project settings schema 1 of the shared file
 // may carry (§13.1): the approval limit, the default check, the worker
-// tool policy and the environment step (§5.7), and nothing else. It is its own list, never SettingKeys:
-// a setting added for the local store (the mode A hold bounds, for one)
+// tool policy, the environment step (§5.7) and the extra repositories
+// (§5.8), and nothing else. It is its own list, never SettingKeys: a
+// setting added for the local store (the mode A hold bounds, for one)
 // does not become shared-file policy by being editable.
 var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
@@ -235,7 +236,7 @@ func settingText(key string, v yamlValue) (string, error) {
 			return "", configErr("%s (line %d) must be a string, not a list", key, v.line)
 		}
 		return nonEmpty(key, v, v.scalar)
-	default: // the two list keys
+	default: // the list keys
 		items := v.list
 		if !v.isList {
 			if v.scalar == "" {

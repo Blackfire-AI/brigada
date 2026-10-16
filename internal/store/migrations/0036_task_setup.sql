@@ -4,4 +4,4 @@
 -- the project had no setup then.
 ALTER TABLE tasks ADD COLUMN setup TEXT;
 -- The setup log is an artifact of its own kind (§5.7, §9). The artifacts
--- CHECK is widened in place by schemaEdits[35].
+-- CHECK is widened in place by schemaEdits[36].
