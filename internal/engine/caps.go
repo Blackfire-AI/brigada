@@ -87,11 +87,12 @@ func capsJobTx(tx *sql.Tx, owner, agent int64, advertised int, j *jobRow, limits
 
 // foremanAccountsTx is the project's reserved accounts (§8.2): the
 // account labels of the agents advertising the project's foreman
-// harness, sorted. A project with no foreman, or a foreman harness no
-// agent advertises, has none.
+// harness and model — the pair its turns are leased to — sorted. A
+// project with no foreman, or a foreman pair no agent advertises, has
+// none.
 func foremanAccountsTx(tx *sql.Tx, project int64) ([]string, error) {
 	rows, err := tx.Query(`SELECT DISTINCT a.account FROM agents a
-		JOIN projects p ON p.foreman_harness = a.harness
+		JOIN projects p ON p.foreman_harness = a.harness AND p.foreman_model = a.model
 		WHERE p.id = ? AND p.foreman_harness <> '' ORDER BY a.account`, project)
 	if err != nil {
 		return nil, fmt.Errorf("list foreman accounts of project %d: %w", project, err)

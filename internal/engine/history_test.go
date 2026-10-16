@@ -228,6 +228,7 @@ func TestHistoryFiltersByProjectTaskAndJob(t *testing.T) {
 // history` lists every report the foreman ever wrote.
 func TestHistoryListsForemanReports(t *testing.T) {
 	e := newEnv(t)
+	e.seedAgent(e.runner1, "claude", "claude", "sonnet", "claude") // the project's foreman pair
 
 	e.submit(e.foremanTurn())
 	e.clock.Advance(time.Minute)

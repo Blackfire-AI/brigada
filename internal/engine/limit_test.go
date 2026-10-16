@@ -260,10 +260,7 @@ func TestHarnessSwitchNeverResumesTheOldSession(t *testing.T) {
 		t.Fatalf("switch the harness: %v", err)
 	}
 	e.park("a third?")
-	g = e.lease(e.runner1, []string{"fake"}, nil)
-	if g == nil {
-		t.Fatal("the foreman turn was not leased on the new harness")
-	}
+	g = e.leaseForeman() // the helper offers the project's current pair: fake/scripted
 	if g.ResumeSessionID != "" {
 		t.Errorf("resume after a harness switch = %q, want a fresh session", g.ResumeSessionID)
 	}

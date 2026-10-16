@@ -168,6 +168,10 @@ func TestRunnerFlow(t *testing.T) {
 	// The verdict finished the plan, so the engine's own wake queued this
 	// turn already (§4.2) — the submit above coalesced behind it — and it
 	// waits for the project's foreman harness like any turn.
+	// Both runners offer the project's foreman pair (claude/sonnet): a turn
+	// is leased only to an agent offering exactly its pair.
+	e.registerForeman("r1")
+	e.registerForeman("r2")
 	turn := fmt.Sprintf(`{"key":"foreman:%d","project_id":%d,"kind":"foreman","mode":"session","prompt":"wake up"}`,
 		e.project1, e.project1)
 	code, _, data = e.do(http.MethodPost, "/v1/jobs", "root", "", []byte(turn))

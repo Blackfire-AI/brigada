@@ -84,6 +84,7 @@ func TestForemanTurnGrantCarriesTheProjectEffort(t *testing.T) {
 	for _, effort := range []string{"", "max"} {
 		t.Run("effort="+effort, func(t *testing.T) {
 			e := newEnv(t)
+			e.offerForeman(e.runner1)
 			if _, err := e.eng.SetProjectForemanEffort(e.ctx, effortRepo, "claude", "sonnet", effort); err != nil {
 				t.Fatalf("set the foreman: %v", err)
 			}
@@ -107,6 +108,7 @@ func TestForemanTurnGrantCarriesTheProjectEffort(t *testing.T) {
 // effort of the harness that runs the turn (here none, so the agent's own).
 func TestQueuedTurnIgnoresEffortOfALaterHarness(t *testing.T) {
 	e := newEnv(t)
+	e.offerForeman(e.runner1) // the queued turn's own pair, claude/sonnet
 	if _, err := e.eng.SetProjectForemanEffort(e.ctx, effortRepo, "claude", "sonnet", "high"); err != nil {
 		t.Fatalf("set the foreman: %v", err)
 	}

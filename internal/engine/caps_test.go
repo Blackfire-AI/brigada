@@ -60,7 +60,7 @@ func TestCapsUsageCountsLiveJobs(t *testing.T) {
 		t.Fatalf("leases = %v, %v; want jobs %d, %d", g1, g2, first.JobID, second.JobID)
 	}
 	turn := e.submit(e.foremanTurn()) // runner 1 again, on its first agent
-	gf := e.leaseAny(e.runner1)
+	gf := e.leaseClaude(e.runner1)
 	if gf == nil || gf.JobID != turn.JobID {
 		t.Fatalf("foreman lease = %v, want job %d", gf, turn.JobID)
 	}

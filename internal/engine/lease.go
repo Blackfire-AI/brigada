@@ -43,11 +43,18 @@ type LeaseGrant struct {
 	// effort stands.
 	ForemanEffort string
 
-	Harness  string // the job's harness constraint; '' = any (§8)
-	Agent    string // the harness of the agent the lease picked (§8); '' = none
-	RepoURL  string // the task's own repo, else the project's (§6.1)
-	BaseRef  string // the ref the worktree starts from; for a review, the diff's base end (§7)
-	CheckCmd string // the check the runner runs after a done (§5.5); '' = none — always for a review
+	Harness string // the job's harness constraint; '' = any (§8)
+	Agent   string // the harness of the agent the lease picked (§8); '' = none
+	// AgentAdapter and AgentModel name the picked agent exactly, as a
+	// foreman turn's grant carries them: a registration is identified by
+	// its runner, adapter and model, and the harness alone can name two of
+	// them. Empty on every other kind of grant, whose runner resolves the
+	// agent by its harness.
+	AgentAdapter string
+	AgentModel   string
+	RepoURL      string // the task's own repo, else the project's (§6.1)
+	BaseRef      string // the ref the worktree starts from; for a review, the diff's base end (§7)
+	CheckCmd     string // the check the runner runs after a done (§5.5); '' = none — always for a review
 	// ReviewBranch is the task's result branch a review job reviews
 	// (§7): the runner's worktree sits at it, fetched from the remote,
 	// and it is all the review reads — never pushed, never re-made.
@@ -216,7 +223,22 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 			continue
 		}
-		if j.Harness != "" && !slices.Contains(harnesses, j.Harness) {
+		// The harness the job is placed on: a foreman turn's is resolved
+		// from its pair (a turn submitted without a harness runs on the
+		// project's), and a turn with no whole pair is held — no poll takes
+		// it, and none reserves capacity for it.
+		jobHarness := j.Harness
+		if j.Kind == KindForeman {
+			pair, err := foremanPairTx(tx, j)
+			if err != nil {
+				return nil, err
+			}
+			if !pair.ok() {
+				continue
+			}
+			jobHarness = pair.harness
+		}
+		if jobHarness != "" && !slices.Contains(harnesses, jobHarness) {
 			continue
 		}
 		if !labelsCover(labels, jobLabels(j)) {
@@ -256,7 +278,9 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		// filter over an empty advertisement would leave such a runner
 		// nothing ever.
 		if len(cands) == 0 {
-			becauseplaced := j.ExcludeFamily != "" || j.ExcludeAgent != 0 || j.RequireAgent != 0
+			// A foreman turn is placed on its pair: a runner with no agent
+			// for it, agentless included, does not get it.
+			becauseplaced := j.Kind == KindForeman || j.ExcludeFamily != "" || j.ExcludeAgent != 0 || j.RequireAgent != 0
 			if !becauseplaced {
 				var has bool
 				if has, err = runnerHasAgentsTx(tx, owner); err != nil {
@@ -363,6 +387,12 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		// secret rides the grant, and only its hash the store.
 		foremanToken := ""
 		if j.Kind == KindForeman {
+			// The session generation this lease runs under: the completion
+			// writes its session id back only while it is still current.
+			if _, err := tx.Exec("UPDATE jobs SET session_gen = COALESCE((SELECT foreman_session_gen FROM projects WHERE id = ?), 0) WHERE id = ?",
+				j.ProjectID, j.ID); err != nil {
+				return nil, fmt.Errorf("stamp the session generation of job %d: %w", j.ID, err)
+			}
 			secret, err := e.mintLeaseTokenTx(tx, j, leaseID, expires, now)
 			if err != nil {
 				return nil, err
@@ -436,6 +466,19 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return nil, fmt.Errorf("read the session of %s: %w", j.Key, err)
 			}
+			// A session id belongs to one harness's CLI: a foreman turn
+			// that runs on another harness than the project's current one
+			// (a turn queued before a switch) starts fresh, never resuming
+			// the session of the harness the project now runs.
+			if resume != "" && j.Kind == KindForeman {
+				var projectHarness string
+				if err := tx.QueryRow("SELECT foreman_harness FROM projects WHERE id = ?", j.ProjectID).Scan(&projectHarness); err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return nil, fmt.Errorf("read the foreman of project %d: %w", j.ProjectID, err)
+				}
+				if projectHarness != agentHarness {
+					resume = ""
+				}
+			}
 		}
 		foremanEffort := ""
 		if j.Kind == KindForeman {
@@ -456,6 +499,10 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				foremanEffort = projectEffort
 			}
 		}
+		agentAdapter, agentModel := "", ""
+		if j.Kind == KindForeman {
+			agentAdapter, agentModel = chosen.adapter, chosen.model
+		}
 		return &LeaseGrant{
 			JobID:          j.ID,
 			LeaseOwner:     owner,
@@ -472,6 +519,8 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			ForemanEffort:   foremanEffort,
 			Harness:         j.Harness,
 			Agent:           agentHarness,
+			AgentAdapter:    agentAdapter,
+			AgentModel:      agentModel,
 			RepoURL:         repo,
 			BaseRef:         baseRef,
 			CheckCmd:        checkCmd,
@@ -542,6 +591,7 @@ const (
 // the ranking, 0 the best.
 type agentCand struct {
 	id      int64
+	adapter string // the adapter the agent was registered under: with the model, its identity on its runner
 	harness string
 	score   float64
 	rank    int
@@ -588,7 +638,21 @@ func eligibleAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string) ([
 // deadline filled in: what the cooling hold (§8.1) and the queue-TTL
 // park reason read.
 func qualifyingAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
-	query := `SELECT a.id, a.family, a.harness, a.classes, a.model, a.health, COALESCE(a.cooling_until, ''), COALESCE(o.attempts, 0), COALESCE(o.successes, 0)
+	// A foreman turn runs on the harness AND model its project chose: only
+	// an agent offering exactly that pair qualifies, and a turn whose pair
+	// cannot be resolved has no agent at all.
+	harness, model := j.Harness, ""
+	if j.Kind == KindForeman {
+		pair, err := foremanPairTx(tx, j)
+		if err != nil {
+			return nil, err
+		}
+		if !pair.ok() {
+			return nil, nil
+		}
+		harness, model = pair.harness, pair.model
+	}
+	query := `SELECT a.id, a.family, a.harness, a.classes, a.model, a.health, COALESCE(a.cooling_until, ''), COALESCE(o.attempts, 0), COALESCE(o.successes, 0), a.adapter
 		FROM agents a LEFT JOIN outcomes o ON o.agent_id = a.id AND o.project_id = ? AND o.class = ?
 		WHERE 1 = 1`
 	args := []any{j.ProjectID, class}
@@ -600,9 +664,13 @@ func qualifyingAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string, 
 		query += " AND a.runner_id = ?"
 		args = append(args, runner)
 	}
-	if j.Harness != "" {
+	if harness != "" {
 		query += " AND a.harness = ?"
-		args = append(args, j.Harness)
+		args = append(args, harness)
+	}
+	if model != "" {
+		query += " AND a.model = ?"
+		args = append(args, model)
 	}
 	if j.RequireAgent != 0 {
 		query += " AND a.id = ?"
@@ -617,8 +685,8 @@ func qualifyingAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string, 
 	for rows.Next() {
 		var id int64
 		var attempts, successes int
-		var family, harness, classes, model, health, cooling string
-		if err := rows.Scan(&id, &family, &harness, &classes, &model, &health, &cooling, &attempts, &successes); err != nil {
+		var family, harness, classes, model, health, cooling, adapterName string
+		if err := rows.Scan(&id, &family, &harness, &classes, &model, &health, &cooling, &attempts, &successes, &adapterName); err != nil {
 			return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 		}
 		// Ordinary work and fix leases use the implement class. A pinned
@@ -636,7 +704,7 @@ func qualifyingAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string, 
 				continue
 			}
 		}
-		cands = append(cands, agentCand{id: id, harness: harness, model: model, health: health, cooling: cooling, score: Score(attempts, successes)})
+		cands = append(cands, agentCand{id: id, adapter: adapterName, harness: harness, model: model, health: health, cooling: cooling, score: Score(attempts, successes)})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)

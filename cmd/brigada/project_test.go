@@ -53,6 +53,16 @@ func TestProjectForemanGolden(t *testing.T) {
 	if got, want := stdout.String(), "foreman set: harness=claude model=opus\n"; got != want {
 		t.Fatalf("choose printed %q, want %q", got, want)
 	}
+	// No runner has registered an agent for the pair yet: the choice
+	// stands, and the command warns and names the runner flag that would
+	// serve it. The warning is on stderr, so the choice's own line is the
+	// same one.
+	for _, want := range []string{"warning:", "claude/opus", "--agent harness=claude,model=opus"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("choose warned %q, want it to contain %q", stderr.String(), want)
+		}
+	}
+	stderr.Reset()
 
 	// Reading back prints the stored values, harness first.
 	stdout.Reset()

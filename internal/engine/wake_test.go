@@ -32,11 +32,31 @@ func (e *env) liveForeman() int64 {
 	return e.int("SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind = 'foreman' AND status IN ('queued', 'leased', 'running')", e.project)
 }
 
-// leaseForeman leases the project's live foreman turn, which waits for
-// the fixture project's harness, claude.
+// leaseForeman leases the project's live foreman turn. A foreman turn is
+// placed on an agent offering exactly the project's chosen harness and
+// model, so the helper polls as a runner of its own that offers whatever
+// pair the project has chosen by now, for the answer class only: the
+// seeded runners stay agentless for the worker leases these tests make.
 func (e *env) leaseForeman() *LeaseGrant {
 	e.t.Helper()
-	g := e.lease(e.runner1, []string{"claude"}, nil)
+	var harness, model string
+	if err := e.st.View(e.ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT foreman_harness, foreman_model FROM projects WHERE id = ?", e.project).Scan(&harness, &model)
+	}); err != nil {
+		e.t.Fatalf("read the foreman pair: %v", err)
+	}
+	e.exec(`INSERT INTO runners (name, created_at, last_seen_at)
+		SELECT 'runner-foreman', ?, ? WHERE NOT EXISTS (SELECT 1 FROM runners WHERE name = 'runner-foreman')`, seedTS, seedTS)
+	runner := e.int("SELECT id FROM runners WHERE name = 'runner-foreman'")
+	e.exec(`INSERT INTO agents (runner_id, adapter, harness, model, family, account, classes, created_at, updated_at)
+		SELECT ?, ?, ?, ?, ?, ?, '["answer"]', ?, ?
+		WHERE NOT EXISTS (SELECT 1 FROM agents WHERE runner_id = ? AND adapter = ? AND model = ?)`,
+		runner, harness, harness, model, harness, harness, seedTS, seedTS, runner, harness, model)
+	// These tests are about the wake, not the agent's health: a streak of
+	// failed turns (which they stage on purpose) must not take the helper's
+	// agent out from under the next lease.
+	e.exec("UPDATE agents SET health = 'ready', health_reason = '' WHERE runner_id = ?", runner)
+	g := e.lease(runner, []string{harness}, nil)
 	if g == nil {
 		e.t.Fatal("the foreman turn was not leased")
 	}

@@ -189,6 +189,17 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (SweepR
 		return rep, err
 	}
 
+	// A foreman turn whose harness/model pair no registered agent offers
+	// waits for one to register, however long that takes; it is not an
+	// unserved job the TTL may fail. It is stamped whether or not the TTL
+	// is on, so the status always names the wait, and it runs before the
+	// other holds so a hold the pair's registration made stale is lifted
+	// before they read it. A registered agent that is merely busy or
+	// cooling is the other holds' wait, not this one.
+	if err := e.holdNoPairTx(tx, now); err != nil {
+		return rep, err
+	}
+
 	if e.cfg.QueueTTL > 0 {
 		// A job whose every candidate runner is at capacity is waiting
 		// for a slot, not unserved: stamp it before the TTL reads it.

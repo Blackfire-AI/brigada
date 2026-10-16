@@ -65,6 +65,16 @@ func TestStatusSectionsRunning(t *testing.T) {
 	}
 }
 
+// TestStatusSectionsNamesAMissingForemanPair: a foreman turn held because
+// no runner offers its harness/model says so, naming the pair.
+func TestStatusSectionsNamesAMissingForemanPair(t *testing.T) {
+	st := Status{Held: []engine.HeldJob{{ID: 9, Kind: "foreman", Layer: "no_pair", Agent: "claude/opus"}}}
+	want := "held: job #9 foreman: foreman turn waiting: no runner offers claude/opus"
+	if got := StatusSections(st); !strings.Contains(got, want) {
+		t.Errorf("status sections = %q, want the line %q", got, want)
+	}
+}
+
 // TestStatusLineCountsMessagesForTheForeman: a waiting user message is
 // no idle state (§4.2 item 3): the bar counts it.
 func TestStatusLineCountsMessagesForTheForeman(t *testing.T) {

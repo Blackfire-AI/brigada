@@ -133,6 +133,21 @@ func (e *Engine) holdBusyRunnersTx(tx *sql.Tx, now time.Time, polling int64) err
 	nowStr := fmtTime(now)
 	for _, j := range queued {
 		required := jobLabels(j)
+		// The harness the lease polls match: a foreman turn's comes from
+		// its resolved pair, so a turn submitted without a harness counts
+		// the runners that could take it on the project's, and a turn with
+		// no whole pair has no candidate at all.
+		jobHarness := j.Harness
+		if j.Kind == KindForeman {
+			pair, err := foremanPairTx(tx, j)
+			if err != nil {
+				return err
+			}
+			if !pair.ok() {
+				continue
+			}
+			jobHarness = pair.harness
+		}
 		var first int64
 		candidates, busy := 0, 0
 		for _, r := range runners {
@@ -143,7 +158,7 @@ func (e *Engine) holdBusyRunnersTx(tx *sql.Tx, now time.Time, polling int64) err
 			// to a runner whose poll offers it, whatever it registered.
 			// A runner whose offer is not recorded yet is unknown, so it
 			// is no candidate for a pinned job.
-			if j.Harness != "" && !(r.harnessesKnown && slices.Contains(r.harnesses, j.Harness)) {
+			if jobHarness != "" && !(r.harnessesKnown && slices.Contains(r.harnesses, jobHarness)) {
 				continue
 			}
 			if j.ReleasedBy == r.id && j.ReleasedUntil != "" && j.ReleasedUntil > nowStr {
@@ -211,7 +226,8 @@ func (e *Engine) holdBusyRunnersTx(tx *sql.Tx, now time.Time, polling int64) err
 // it (§10): the job, its task and kind, and the layer that has no room
 // — "runner" is a job waiting for a runner slot, "cooling" one waiting
 // for its agent's quota to reset: Agent ("harness/model") is the one
-// whose cooling ends first and Until when.
+// whose cooling ends first and Until when; "no_pair" is a foreman turn
+// waiting for a runner agent that offers its harness/model, named by Agent.
 type HeldJob struct {
 	ID     int64  `json:"id"`
 	TaskID int64  `json:"task_id,omitempty"`
@@ -226,7 +242,8 @@ type HeldJob struct {
 // first.
 func statusHeldTx(tx *sql.Tx, project int64) ([]HeldJob, error) {
 	query := `SELECT j.id, COALESCE(j.task_id, 0), j.kind, j.cap_held_layer, COALESCE(j.cap_held_at, ''),
-		COALESCE(a.harness || '/' || a.model, ''), COALESCE(a.cooling_until, '')
+		CASE WHEN j.cap_held_layer = '` + layerNoPair + `' THEN COALESCE(j.cap_held_key, '') ELSE COALESCE(a.harness || '/' || a.model, '') END,
+		COALESCE(a.cooling_until, '')
 		FROM jobs j LEFT JOIN agents a ON j.cap_held_layer = '` + layerCooling + `' AND CAST(a.id AS TEXT) = j.cap_held_key
 		WHERE j.status = 'queued' AND j.cap_held_layer IS NOT NULL`
 	var args []any

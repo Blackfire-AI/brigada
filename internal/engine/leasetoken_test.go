@@ -80,6 +80,7 @@ func (e *env) assertSecretNowhere(secret string) {
 // event or message.
 func TestLeaseMintsForemanToken(t *testing.T) {
 	e := newEnv(t)
+	e.offerForeman(e.runner2)
 
 	task := e.submit(e.work())
 	g := e.leaseAny(e.runner1)
@@ -92,7 +93,7 @@ func TestLeaseMintsForemanToken(t *testing.T) {
 	e.complete(g, done())
 
 	turn := e.submit(e.foremanTurn())
-	fg := e.leaseAny(e.runner2)
+	fg := e.leaseClaude(e.runner2)
 	if fg == nil || fg.JobID != turn.JobID {
 		t.Fatalf("the foreman turn was not leased: %+v", fg)
 	}
@@ -133,7 +134,7 @@ func TestLeaseMintsForemanToken(t *testing.T) {
 	// Two leases of the same key mint two different secrets.
 	e.complete(fg, done())
 	turn2 := e.submit(e.foremanTurn())
-	fg2 := e.leaseAny(e.runner2)
+	fg2 := e.leaseClaude(e.runner2)
 	if fg2 == nil || fg2.JobID != turn2.JobID {
 		t.Fatalf("the second turn was not leased: %+v", fg2)
 	}
@@ -152,8 +153,9 @@ func TestLeaseMintsForemanToken(t *testing.T) {
 // expiry, so the bridge's calls live as long as the turn does.
 func TestLeaseTokenHeartbeatExtendsIt(t *testing.T) {
 	e := newEnv(t)
+	e.offerForeman(e.runner1)
 	turn := e.submit(e.foremanTurn())
-	g := e.leaseAny(e.runner1)
+	g := e.leaseClaude(e.runner1)
 
 	before := e.leaseTokenRow(turn.JobID).expires
 	e.clock.Advance(30 * time.Second)
@@ -188,8 +190,9 @@ func TestLeaseTokenHeartbeatExtendsIt(t *testing.T) {
 func TestLeaseTokenRevokedWhenTheTurnEnds(t *testing.T) {
 	t.Run("complete", func(t *testing.T) {
 		e := newEnv(t)
+		e.offerForeman(e.runner1)
 		turn := e.submit(e.foremanTurn())
-		g := e.leaseAny(e.runner1)
+		g := e.leaseClaude(e.runner1)
 		if ans := e.complete(g, done()); ans != AnsOK {
 			t.Fatalf("complete = %s, want ok", ans)
 		}
@@ -202,8 +205,9 @@ func TestLeaseTokenRevokedWhenTheTurnEnds(t *testing.T) {
 	})
 	t.Run("release", func(t *testing.T) {
 		e := newEnv(t)
+		e.offerForeman(e.runner1)
 		turn := e.submit(e.foremanTurn())
-		g := e.leaseAny(e.runner1)
+		g := e.leaseClaude(e.runner1)
 		if ans := e.release(e.runner1, g, "wrong harness"); ans != AnsOK {
 			t.Fatalf("release = %s, want ok", ans)
 		}
@@ -216,8 +220,9 @@ func TestLeaseTokenRevokedWhenTheTurnEnds(t *testing.T) {
 	})
 	t.Run("cancel", func(t *testing.T) {
 		e := newEnv(t)
+		e.offerForeman(e.runner1)
 		turn := e.submit(e.foremanTurn())
-		g := e.leaseAny(e.runner1)
+		g := e.leaseClaude(e.runner1)
 		if ans := e.cancel(turn.JobID); ans != AnsOK {
 			t.Fatalf("cancel = %s, want ok", ans)
 		}
@@ -230,8 +235,9 @@ func TestLeaseTokenRevokedWhenTheTurnEnds(t *testing.T) {
 	})
 	t.Run("the sweep's lease expiry", func(t *testing.T) {
 		e := newEnv(t)
+		e.offerForeman(e.runner1)
 		turn := e.submit(e.foremanTurn())
-		g := e.leaseAny(e.runner1)
+		g := e.leaseClaude(e.runner1)
 		rep := e.expireLease()
 		if len(rep.Expired) != 1 || rep.Expired[0] != turn.JobID {
 			t.Fatalf("the sweep expired %+v, want job %d", rep.Expired, turn.JobID)
@@ -245,8 +251,9 @@ func TestLeaseTokenRevokedWhenTheTurnEnds(t *testing.T) {
 	})
 	t.Run("a hard cap", func(t *testing.T) {
 		e := newEnvCfg(t, func(c *Config) { c.HardCaps = map[Kind]time.Duration{KindForeman: time.Minute} })
+		e.offerForeman(e.runner1)
 		turn := e.submit(e.foremanTurn())
-		g := e.leaseAny(e.runner1)
+		g := e.leaseClaude(e.runner1)
 		e.clock.Advance(2 * time.Minute)
 		e.mustSweep()
 		if row := e.leaseTokenRow(turn.JobID); row != nil {
@@ -265,8 +272,9 @@ func TestLeaseTokenRevokedWhenTheTurnEnds(t *testing.T) {
 // check's, not the sweep's.
 func TestLeaseTokenExpiresWithoutSweep(t *testing.T) {
 	e := newEnv(t)
+	e.offerForeman(e.runner1)
 	e.submit(e.foremanTurn())
-	g := e.leaseAny(e.runner1)
+	g := e.leaseClaude(e.runner1)
 
 	e.clock.Advance(e.eng.cfg.LeaseTTL + time.Second)
 	if _, ok := e.scopeOf(g.ForemanToken); ok {
@@ -281,8 +289,9 @@ func TestLeaseTokenExpiresWithoutSweep(t *testing.T) {
 // bump fences every older-epoch lease out, and their tokens with them.
 func TestLeaseTokenDiesAtAFenceBump(t *testing.T) {
 	e := newEnv(t)
+	e.offerForeman(e.runner1)
 	e.submit(e.foremanTurn())
-	g := e.leaseAny(e.runner1)
+	g := e.leaseClaude(e.runner1)
 
 	epoch, err := e.eng.BumpFenceEpoch(e.ctx)
 	if err != nil {
