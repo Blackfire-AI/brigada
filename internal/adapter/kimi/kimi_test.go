@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
@@ -289,6 +290,18 @@ func TestFailureFixtures(t *testing.T) {
 			event: adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrAuth,
 				Text: "error: failed to run prompt: provider managed:kimi-code has no credential configured"},
 		},
+		{
+			name:    "a usage limit behind an auth error code",
+			fixture: "failure-limit.txt",
+			event: adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrLimit,
+				Text: "error: failed to run prompt: provider.auth_error: 403 You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends. To continue now, purchase extra usage or upgrade"},
+		},
+		{
+			name:    "a 403 that is a genuine auth failure",
+			fixture: "failure-auth-403.txt",
+			event: adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrAuth,
+				Text: "error: failed to run prompt: provider.auth_error: 403 Forbidden: invalid API key"},
+		},
 	}
 	for _, tc := range cases {
 		data, err := os.ReadFile(filepath.Join("testdata", tc.fixture))
@@ -307,6 +320,46 @@ func TestFailureFixtures(t *testing.T) {
 			if !slices.Equal(events, []adapter.Event{tc.event}) {
 				t.Errorf("%s: events =\n%+v\nwant\n%+v", tc.name, events, []adapter.Event{tc.event})
 			}
+		}
+	}
+}
+
+// TestLimitReset: a limit message that gives a reset instant sets
+// LimitUntil; one that gives none, or a past one, leaves it empty.
+func TestLimitReset(t *testing.T) {
+	defer func(old func() time.Time) { now = old }(now)
+	now = func() time.Time { return time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC) }
+	cases := []struct {
+		name, line, until string
+	}{
+		{"an instant", "error: failed to run prompt: usage limit reached, resets at 2026-10-15T18:40:00+03:00", "2026-10-15T18:40:00+03:00"},
+		{"an instant after the window wording", "error: failed to run prompt: provider.auth_error: 403 You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends at 2026-10-15T18:40:00Z", "2026-10-15T18:40:00Z"},
+		{"a wall-clock time in a zone", "error: failed to run prompt: usage limit reached, resets 6:40pm (Europe/Moscow)", "2026-10-15T18:40:00+03:00"},
+		{"a window length is not a reset", "error: failed to run prompt: 5-hour usage limit reached", ""},
+		{"a past instant", "error: failed to run prompt: usage limit reached, resets at 2026-10-15T08:00:00Z", ""},
+	}
+	for _, tc := range cases {
+		ev, ok := errorFromText(tc.line)
+		if !ok || ev.ErrorKind != adapter.ErrLimit || ev.LimitUntil != tc.until {
+			t.Errorf("%s: got %+v, want limit until %q", tc.name, ev, tc.until)
+		}
+	}
+}
+
+// TestStatusCodeUnderAuthPrefix: a bare 429 behind the provider's
+// auth_error prefix is still a limit, and a 401 behind it still auth.
+func TestStatusCodeUnderAuthPrefix(t *testing.T) {
+	cases := []struct {
+		line string
+		kind adapter.ErrorKind
+	}{
+		{"error: failed to run prompt: provider.auth_error: 429 Too many requests", adapter.ErrLimit},
+		{"error: failed to run prompt: provider.auth_error: 401 Invalid token", adapter.ErrAuth},
+	}
+	for _, tc := range cases {
+		ev, ok := errorFromText(tc.line)
+		if !ok || ev.ErrorKind != tc.kind {
+			t.Errorf("%q: got %+v, want kind %v", tc.line, ev, tc.kind)
 		}
 	}
 }
