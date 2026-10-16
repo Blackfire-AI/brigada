@@ -12,7 +12,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
@@ -252,26 +255,90 @@ type errorPhrase struct {
 
 // errorPhrases sorts a failure line's reason. Resume sorts first: a
 // session id is hex digits, and the numeric code phrases ("401", "429")
-// must not read a gone session's id as its kind.
+// must not read a gone session's id as its kind. The phrases that name a
+// limit come next, ahead of the auth ones: the CLI prefixes a quota
+// message with the provider's error code (`provider.auth_error: 403
+// You've reached your 5-hour usage limit…`), and the code must not
+// outvote what the message says.
 var errorPhrases = []errorPhrase{
 	// A resume that cannot happen: the session --session named is gone
 	// (§5.6, §14), and the answer is a fresh run in place, not another
 	// resume.
 	{adapter.ErrResumeFailed, `" not found`},
+	// The account's quota window (§8): the account cools, the job moves.
+	// "usage limit" and "5-hour" are from a real capture (kimi 2.1.1);
+	// the rest is the vocabulary other limit messages are expected to
+	// carry.
+	{adapter.ErrLimit, "rate limit"},
+	{adapter.ErrLimit, "usage limit"},
+	{adapter.ErrLimit, "quota"},
+	{adapter.ErrLimit, "5-hour"},
+	{adapter.ErrLimit, "reset window"},
 	// The CLI's login (§8): the agent is broken until a probe passes.
 	{adapter.ErrAuth, "authorization grant is invalid"},
 	{adapter.ErrAuth, "no credential configured"},
 	{adapter.ErrAuth, "unauthorized"},
 	{adapter.ErrAuth, "401"},
-	// The account's quota window (§8): the account cools, the job moves.
-	// UNVERIFIED: no real kimi limit message has been captured yet —
-	// these phrases are the vocabulary such a message is expected to
-	// carry, checked against nothing.
-	{adapter.ErrLimit, "rate limit"},
-	{adapter.ErrLimit, "usage limit"},
-	{adapter.ErrLimit, "quota"},
+	// Bare status codes: a line that names no limit keeps the kind its
+	// other words give it, and the status code outvotes the generic
+	// provider-error words below it.
 	{adapter.ErrLimit, "429"},
 	{adapter.ErrLimit, "too many requests"},
+	{adapter.ErrAuth, "auth_error"},
+	{adapter.ErrAuth, "invalid api key"},
+}
+
+// now is the clock limitReset reads; tests replace it.
+var now = time.Now
+
+// resetInstantRe finds a reset given as an instant, anywhere after the
+// word "reset": "resets at 2026-10-15T18:40:00+03:00". The one real
+// limit message captured gives no time at all, so this is the shape a
+// message that does is expected to take.
+var resetInstantRe = regexp.MustCompile(`(?i)reset.*?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))`)
+
+// resetClockRe finds a reset given as a wall-clock time in a named zone,
+// the claude CLI's convention: "resets 6:40pm (Europe/Moscow)".
+var resetClockRe = regexp.MustCompile(`(?i)resets\s+(\d{1,2})(?::(\d{2}))?\s*([ap])m\s*\(([^)]+)\)`)
+
+// limitReset reads the reset time out of a limit message, as an RFC3339
+// instant. Best effort: a message that gives no time, or one already
+// past at, is "" (unknown) and the default cooling applies. A window
+// length like "5-hour" is never a reset.
+func limitReset(text string, at time.Time) string {
+	if m := resetInstantRe.FindStringSubmatch(text); m != nil {
+		t, err := time.Parse(time.RFC3339, m[1])
+		if err != nil || !t.After(at) {
+			return ""
+		}
+		return t.Format(time.RFC3339)
+	}
+	m := resetClockRe.FindStringSubmatch(text)
+	if m == nil {
+		return ""
+	}
+	hour, _ := strconv.Atoi(m[1])
+	min := 0
+	if m[2] != "" {
+		min, _ = strconv.Atoi(m[2])
+	}
+	if hour < 1 || hour > 12 || min > 59 {
+		return ""
+	}
+	hour %= 12
+	if strings.EqualFold(m[3], "p") {
+		hour += 12
+	}
+	loc, err := time.LoadLocation(strings.TrimSpace(m[4]))
+	if err != nil {
+		return ""
+	}
+	local := at.In(loc)
+	t := time.Date(local.Year(), local.Month(), local.Day(), hour, min, 0, 0, loc)
+	if !t.After(at) {
+		t = time.Date(local.Year(), local.Month(), local.Day()+1, hour, min, 0, 0, loc)
+	}
+	return t.Format(time.RFC3339)
 }
 
 // errorFromText reads one plain line: a failure line is an error event
@@ -288,7 +355,11 @@ func errorFromText(text string) (adapter.Event, bool) {
 			break
 		}
 	}
-	return adapter.Event{Kind: adapter.EvError, ErrorKind: kind, Text: text}, true
+	ev := adapter.Event{Kind: adapter.EvError, ErrorKind: kind, Text: text}
+	if kind == adapter.ErrLimit {
+		ev.LimitUntil = limitReset(text, now())
+	}
+	return ev, true
 }
 
 // ResultText implements adapter.Adapter: the run's final answer is the
