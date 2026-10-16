@@ -35,7 +35,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request, id ident
 		agents[i] = engine.AgentAdvert{
 			Adapter: a.Adapter, Harness: a.Harness, Model: a.Model,
 			Family: a.Family, Account: a.Account, Classes: a.Classes,
-			Effort: a.Effort,
+			Effort: a.Effort, Tools: a.Tools,
 		}
 	}
 	runnerID, err := s.eng.Register(r.Context(), id.name, req.MaxParallel, agents)
@@ -238,6 +238,7 @@ type agentAdvert struct {
 	Classes []string `json:"classes"`
 	// Effort is the agent's reasoning-effort level; empty when unset.
 	Effort string `json:"effort,omitempty"`
+	Tools  string `json:"tools,omitempty"`
 }
 
 // jobLeaseRequest names a job and the lease the runner holds on it:

@@ -58,7 +58,7 @@ The main package lives in `cmd/brigada`, so that is the install path. Make sure 
 snapshot_dir = /home/you/backups/brigada
 ```
 
-Other keys: `state_dir`, `idle_minutes`, `headroom`, `task_auto_retry`, `default_reviewer`, `caps.*` and `cost.<harness>/<model>`. An unknown key is an error. State lives in `~/.local/state/brigada` (or `$XDG_STATE_HOME/brigada`); `--state-dir` and `--config` override both; they go after the command, for example `brigada status --state-dir DIR`.
+Other keys: `state_dir`, `idle_minutes`, `headroom`, `task_auto_retry`, `default_reviewer`, `caps.*`, `cost.<harness>/<model>` and `tools.claude/<model>`. An unknown key is an error. State lives in `~/.local/state/brigada` (or `$XDG_STATE_HOME/brigada`); `--state-dir` and `--config` override both; they go after the command, for example `brigada status --state-dir DIR`.
 
 **3. Log in to the CLIs you already pay for.** Use each CLI's own sign-in flow, as you normally would, so that it works by itself in a terminal. brigada never asks for or stores your credentials.
 
@@ -68,7 +68,7 @@ Other keys: `state_dir`, `idle_minutes`, `headroom`, `task_auto_retry`, `default
 brigada project foreman --repo <origin-url> --harness claude --model sonnet
 ```
 
-The harness must be `claude` or `codex`. Run the command with `--repo` alone to show the stored choice.
+The harness must be `claude` or `codex`; add `--effort <level>` to choose how hard the foreman reasons (docs/GUIDE.md, section 10). Run the command with `--repo` alone to show the stored choice.
 
 **5. Start a runner.** A runner offers your signed-in CLIs as agents and runs the jobs the engine hands out. Leave it running in its own terminal:
 
@@ -76,7 +76,7 @@ The harness must be `claude` or `codex`. Run the command with `--repo` alone to 
 brigada runner --agent harness=claude --agent harness=codex
 ```
 
-Each `--agent` is `harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>]`, at most one per harness. The engine starts on demand, and stops after 30 idle minutes by default. Check on it any time with `brigada status`.
+Each `--agent` is `harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,effort=<level>][,tools=<p1>+<p2>]`, at most one per harness. By default claude workers run with a Go-only shell scope (`go build`, `go test`, `go vet`, `gofmt`), so for a Node, Python or Rust repo widen it with `tools=`, for example `--agent 'harness=claude,tools=Bash(npm test:*)+Bash(npx jest:*)'` (see the guide, section 5). The engine starts on demand, and stops after 30 idle minutes by default. Check on it any time with `brigada status`.
 
 **6. Ask.** From inside the repo, chat with the foreman:
 

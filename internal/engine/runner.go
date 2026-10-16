@@ -32,6 +32,10 @@ type AgentAdvert struct {
 	// unset. It is not part of the agent's key: outcomes group by harness
 	// and model.
 	Effort string
+	// Tools is the claude worker scope the runner recorded (§5.2), the
+	// patterns joined by "+" or "none"; "" for a harness brigada does not
+	// scope.
+	Tools string
 }
 
 func (a AgentAdvert) valid() error {
@@ -140,9 +144,9 @@ func advertiseTx(tx *sql.Tx, runner int64, adverts []AgentAdvert, nowStr string)
 		if err != nil {
 			return err
 		}
-		res, err := tx.Exec(`UPDATE agents SET harness = ?, family = ?, account = ?, classes = ?, effort = ?, updated_at = ?
+		res, err := tx.Exec(`UPDATE agents SET harness = ?, family = ?, account = ?, classes = ?, effort = ?, tools = ?, updated_at = ?
 			WHERE runner_id = ? AND adapter = ? AND model = ?`,
-			a.Harness, a.Family, a.Account, classes, a.Effort, nowStr, runner, a.Adapter, a.Model)
+			a.Harness, a.Family, a.Account, classes, a.Effort, a.Tools, nowStr, runner, a.Adapter, a.Model)
 		if err != nil {
 			return fmt.Errorf("update agent %s/%s: %w", a.Adapter, a.Model, err)
 		}
@@ -153,9 +157,9 @@ func advertiseTx(tx *sql.Tx, runner int64, adverts []AgentAdvert, nowStr string)
 		if n > 0 {
 			continue
 		}
-		if _, err := tx.Exec(`INSERT INTO agents (runner_id, adapter, harness, model, family, account, classes, effort, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			runner, a.Adapter, a.Harness, a.Model, a.Family, a.Account, classes, a.Effort, nowStr, nowStr); err != nil {
+		if _, err := tx.Exec(`INSERT INTO agents (runner_id, adapter, harness, model, family, account, classes, effort, tools, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			runner, a.Adapter, a.Harness, a.Model, a.Family, a.Account, classes, a.Effort, a.Tools, nowStr, nowStr); err != nil {
 			return fmt.Errorf("insert agent %s/%s: %w", a.Adapter, a.Model, err)
 		}
 	}

@@ -66,6 +66,10 @@ type CapacityAgent struct {
 	// Cost is the agent's cost weight (§8.1): the configured weight of
 	// its (harness, model) pair, 1 when the config names none.
 	Cost int `json:"cost"`
+	// Tools is a claude worker agent's shell scope as its runner
+	// advertised it (§5.2): Claude Code patterns joined by "+", or
+	// "none". Empty for a harness brigada does not scope.
+	Tools string `json:"tools,omitempty"`
 }
 
 // CapacityLayer is one cap layer's row as capacity reports it (§12.2):
@@ -124,6 +128,7 @@ type capacityAgent struct {
 	harness, model  string
 	account, health string
 	coolingUntil    string
+	tools           string
 }
 
 // capacityTx builds the capacity snapshot (§12.2) inside the caller's
@@ -159,14 +164,14 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 	rows.Close()
 
 	agents := []capacityAgent{}
-	rows, err = tx.Query(`SELECT id, runner_id, harness, model, account, health, COALESCE(cooling_until, '')
+	rows, err = tx.Query(`SELECT id, runner_id, harness, model, account, health, COALESCE(cooling_until, ''), tools
 		FROM agents ORDER BY id`)
 	if err != nil {
 		return CapacitySnapshot{}, fmt.Errorf("list agents: %w", err)
 	}
 	for rows.Next() {
 		var a capacityAgent
-		if err := rows.Scan(&a.id, &a.runner, &a.harness, &a.model, &a.account, &a.health, &a.coolingUntil); err != nil {
+		if err := rows.Scan(&a.id, &a.runner, &a.harness, &a.model, &a.account, &a.health, &a.coolingUntil, &a.tools); err != nil {
 			rows.Close()
 			return CapacitySnapshot{}, fmt.Errorf("list agents: %w", err)
 		}
@@ -283,6 +288,7 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 			Quota:        quota,
 			CoolingUntil: coolingUntil,
 			Cost:         cfg.Caps.CostOf(a.harness, a.model),
+			Tools:        a.tools,
 		})
 	}
 

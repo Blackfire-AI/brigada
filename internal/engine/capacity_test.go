@@ -293,6 +293,27 @@ func TestCapacityUncappedAgent(t *testing.T) {
 	assertNoLayer(t, snap, caps.LayerModel)
 }
 
+// TestCapacityAgentTools covers the one field the agent registration
+// records for the foreman: the worker scope as advertised, empty for an
+// agent that advertised none.
+func TestCapacityAgentTools(t *testing.T) {
+	e := newEnv(t)
+	scoped := e.addAgent(e.runner1, "claude", "sonnet", "work")
+	plain := e.addAgent(e.runner1, "codex", "gpt", "work")
+	e.exec("UPDATE agents SET tools = ? WHERE id = ?", "Bash(npm test:*)+Bash(npx jest:*)", scoped)
+
+	snap, err := e.eng.Capacity(e.ctx, e.project)
+	if err != nil {
+		t.Fatalf("capacity: %v", err)
+	}
+	if got := snapAgent(t, snap, scoped).Tools; got != "Bash(npm test:*)+Bash(npx jest:*)" {
+		t.Errorf("scoped agent's tools = %q", got)
+	}
+	if got := snapAgent(t, snap, plain).Tools; got != "" {
+		t.Errorf("unscoped agent's tools = %q, want empty", got)
+	}
+}
+
 // TestCapacityModelHoldInstance covers the queue depth's attribution by
 // the hold's stamped instance, not the harness's first agent (§12.2):
 // the first codex agent by id — the one a harness guess would pick —

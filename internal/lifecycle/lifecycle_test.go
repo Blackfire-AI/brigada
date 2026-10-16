@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -174,6 +175,31 @@ func TestConfigFile(t *testing.T) {
 		t.Errorf("unnamed cost = %d, want the default 1", got)
 	}
 
+	// The tools key: a +-separated scope per pair, none distinct from a
+	// pair the file never names.
+	if err := os.WriteFile(path, []byte("tools.claude/sonnet = Bash(npm test:*)+Bash(npx jest:*)\ntools.claude/opus = none\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadConfigFile(path)
+	if err != nil {
+		t.Fatalf("load tools: %v", err)
+	}
+	if got := cfg.Tools["claude/sonnet"]; !slices.Equal(got, []string{"Bash(npm test:*)", "Bash(npx jest:*)"}) {
+		t.Errorf("tools claude/sonnet = %v", got)
+	}
+	if got, ok := cfg.Tools["claude/opus"]; !ok || got == nil || len(got) != 0 {
+		t.Errorf("tools claude/opus = %v (set %v), want an explicit empty none", got, ok)
+	}
+	if _, ok := cfg.Tools["claude/haiku"]; ok {
+		t.Error("an unnamed pair has a tools entry; it must read as the default")
+	}
+	if err := os.WriteFile(path, []byte("tools.codex/gpt = none\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfigFile(path); err == nil || !strings.Contains(err.Error(), "workspace-write") {
+		t.Errorf("tools for codex error = %v, want the codex sandbox named", err)
+	}
+
 	for name, body := range map[string]string{
 		"unknown key":        "frobnicate = 1\n",
 		"no equals":          "state_dir\n",
@@ -185,6 +211,11 @@ func TestConfigFile(t *testing.T) {
 		"negative caps":      "caps.plan = -1\n",
 		"empty account":      "caps.account. = 2\n",
 		"cost without pair":  "cost.claude = 2\n",
+		"tools without pair": "tools.claude = none\n",
+		"tools empty":        "tools.claude/sonnet = +\n",
+		"tools for codex":    "tools.codex/gpt = none\n",
+		"tools for kimi":     "tools.kimi/default = none\n",
+		"tools for opencode": "tools.opencode/default = none\n",
 	} {
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)

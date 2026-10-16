@@ -86,6 +86,49 @@ type FileConfig struct {
 	// DefaultReviewer is the harness a standalone review (§7) goes to when
 	// its author's family cannot be told. Empty = none.
 	DefaultReviewer string
+	// Tools is the default claude worker tool scope per "harness/model"
+	// (§5.2, tools.<harness>/<model>): the parsed patterns, an empty
+	// non-nil list for an explicit none. A pair the file never names has
+	// no entry, which is the Go default and not none.
+	Tools map[string][]string
+}
+
+// ParseTools parses a tool scope in its flag and config spelling: Claude
+// Code tool patterns separated by "+", or "none" for the file tools
+// alone. The result is non-nil for none, so a caller can tell an
+// explicit none from no scope at all. A pattern containing a comma
+// cannot ride an --agent value, which splits on commas.
+func ParseTools(value string) ([]string, error) {
+	value = strings.TrimSpace(value)
+	if value == "none" {
+		return []string{}, nil
+	}
+	out := []string{}
+	for _, f := range strings.Split(value, "+") {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("want Claude Code tool patterns separated by +, or none")
+	}
+	return out, nil
+}
+
+// ToolsRefusal is why a harness other than claude takes no tools scope,
+// naming the sandbox model it runs under instead (read from each
+// adapter): brigada scopes the claude CLI's tools only.
+func ToolsRefusal(harness string) string {
+	switch harness {
+	case "codex":
+		return "the codex harness takes no tools scope: workers run `codex exec -s workspace-write`, a sandbox that lets them edit inside the worktree and keeps the network off by default"
+	case "kimi":
+		return "the kimi harness takes no tools scope: workers run headless with -p, which takes no approval prompts, so brigada has no tool list to narrow"
+	case "opencode":
+		return "the opencode harness takes no tools scope: headless `opencode run` permits edits and denies bash by default, and brigada passes it no permission flags"
+	default:
+		return fmt.Sprintf("the %s harness takes no tools scope: only the claude harness has a tool list", harness)
+	}
 }
 
 // DefaultConfigPath is where the config file lives when nothing names
@@ -157,14 +200,39 @@ func LoadConfigFile(path string) (FileConfig, error) {
 			cfg.TaskAutoRetry = &on
 		case strings.HasPrefix(key, "caps."), strings.HasPrefix(key, "cost."):
 			err = setCap(&cfg.Caps, key, value)
+		case strings.HasPrefix(key, "tools."):
+			err = setTools(&cfg, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, snapshot_dir, headroom, task_auto_retry, default_reviewer, a caps.<layer> or a cost.<harness>/<model>", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, snapshot_dir, headroom, task_auto_retry, default_reviewer, a caps.<layer>, a cost.<harness>/<model> or a tools.claude/<model>", path, n+1, key)
 		}
 		if err != nil {
 			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)
 		}
 	}
 	return cfg, nil
+}
+
+// setTools sets one tools.<harness>/<model> key: the claude worker scope
+// default of that pair. Any other harness is refused with its own
+// sandbox model's description.
+func setTools(cfg *FileConfig, key, value string) error {
+	rest, _ := strings.CutPrefix(key, "tools.")
+	harness, model, ok := strings.Cut(rest, "/")
+	if !ok || harness == "" || model == "" {
+		return fmt.Errorf("want tools.<harness>/<model>")
+	}
+	if harness != "claude" {
+		return fmt.Errorf("%s", ToolsRefusal(harness))
+	}
+	tools, err := ParseTools(value)
+	if err != nil {
+		return err
+	}
+	if cfg.Tools == nil {
+		cfg.Tools = map[string][]string{}
+	}
+	cfg.Tools[harness+"/"+model] = tools
+	return nil
 }
 
 // setCap sets one caps or cost key of §8.1 on l, mirroring the YAML
