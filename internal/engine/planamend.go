@@ -343,6 +343,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if nodes[i].id, err = r.LastInsertId(); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("create the task: last insert id: %w", err)
 		}
+		if err := stampTaskInstructionsTx(tx, proj, nodes[i].id, now); err != nil {
+			return AmendPlanResult{}, err
+		}
 		res.Added = append(res.Added, CreatedTask{TaskID: nodes[i].id, Name: nodes[i].name})
 	}
 	writeDeps := func(i int) error {

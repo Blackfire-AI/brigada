@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
@@ -30,6 +33,10 @@ const (
 	// activity, and absolute from acquire.
 	SettingHoldIdleMinutes = "hold_idle_minutes"
 	SettingHoldMaxMinutes  = "hold_max_minutes"
+	// The project's instruction text for every worker and reviewer
+	// (§5.9). Stored as the text itself: the client reads the file named
+	// by project.yaml's instructions_file and sends the content.
+	SettingInstructions = "instructions"
 )
 
 // The hold bounds' defaults (§4.6): a starting guess, open in §16.
@@ -40,7 +47,44 @@ const (
 
 // SettingKeys are the editable keys, in the order show prints them.
 var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
-	SettingDefaultCheck, SettingWorkerTools, SettingHoldIdleMinutes, SettingHoldMaxMinutes}
+	SettingDefaultCheck, SettingWorkerTools, SettingHoldIdleMinutes, SettingHoldMaxMinutes, SettingInstructions}
+
+// MaxInstructionsBytes bounds the project instruction text (§5.9): a
+// starting value, open in §16 item 11. Above it a set or an import is
+// refused, never truncated.
+const MaxInstructionsBytes = 8192
+
+// ValidateInstructions checks an instruction text the way the engine does:
+// valid UTF-8, no NUL, at most MaxInstructionsBytes. The refusal names
+// the size and the limit.
+func ValidateInstructions(text string) error {
+	if len(text) > MaxInstructionsBytes {
+		return fmt.Errorf("%w: %s is %d bytes, over the %d byte limit; shorten it (nothing is truncated)",
+			ErrInvalidSetting, SettingInstructions, len(text), MaxInstructionsBytes)
+	}
+	if !utf8.ValidString(text) {
+		return fmt.Errorf("%w: %s is not valid UTF-8", ErrInvalidSetting, SettingInstructions)
+	}
+	if strings.ContainsRune(text, 0) {
+		return fmt.Errorf("%w: %s holds a NUL byte", ErrInvalidSetting, SettingInstructions)
+	}
+	return nil
+}
+
+// instructionsDigest is the SHA-256 of an instruction text, hex.
+func instructionsDigest(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
+}
+
+// instructionsSummary is how the settings view and the foreman's status
+// name a stored text: its size and a short digest, never the text.
+func instructionsSummary(text string) string {
+	if text == "" {
+		return "none"
+	}
+	return fmt.Sprintf("%d bytes, sha256 %s", len(text), instructionsDigest(text)[:12])
+}
 
 // settingListSep separates the items of a list value on the command line.
 const settingListSep = "+"
@@ -89,7 +133,7 @@ var classWord = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 func parseSettingValue(key, value string) (json.RawMessage, error) {
 	switch key {
 	case SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths, SettingDefaultCheck, SettingWorkerTools,
-		SettingHoldIdleMinutes, SettingHoldMaxMinutes:
+		SettingHoldIdleMinutes, SettingHoldMaxMinutes, SettingInstructions:
 	default:
 		return nil, fmt.Errorf("%w: unknown key %q; valid keys: %s", ErrInvalidSetting, key, strings.Join(SettingKeys, ", "))
 	}
@@ -107,6 +151,15 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 	}
 	if key == SettingDefaultCheck {
 		return json.Marshal(strings.TrimSpace(value))
+	}
+	if key == SettingInstructions {
+		if strings.TrimSpace(value) == "" {
+			return nil, nil // an empty text is an unset value
+		}
+		if err := ValidateInstructions(value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
 	}
 	if key == SettingWorkerTools {
 		tools, err := adapter.ParseToolScope(value)
@@ -226,6 +279,9 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string) (ProjectSettings, er
 			sv.Value = strconv.Itoa(int(idle / time.Minute))
 		case SettingHoldMaxMinutes:
 			sv.Value = strconv.Itoa(int(maxHold / time.Minute))
+		case SettingInstructions:
+			text, _ := rawString(cur)
+			sv.Value = instructionsSummary(text)
 		}
 		out.Settings = append(out.Settings, sv)
 	}

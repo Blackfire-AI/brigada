@@ -139,6 +139,13 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create the task: last insert id: %w", err)
 	}
+	if err := stampTaskInstructionsTx(tx, project, taskID, now); err != nil {
+		return TaskResult{}, err
+	}
+	instructions, err := taskInstructionsTx(tx, taskID)
+	if err != nil {
+		return TaskResult{}, err
+	}
 
 	sr, err := e.submitTx(tx, SubmitParams{
 		Key:       fmt.Sprintf("task:%d", taskID),
@@ -146,7 +153,7 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 		TaskID:    taskID,
 		Kind:      KindWork,
 		Mode:      ModeFresh,
-		Prompt:    prompt.ComposeWorkerPrompt(p.Spec, p.CheckCmd, ""),
+		Prompt:    prompt.ComposeWorkerPrompt(p.Spec, p.CheckCmd, "", prompt.WithInstructions(instructions)),
 		Harness:   p.Harness,
 		Labels:    p.Labels,
 	}, now)

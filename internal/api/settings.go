@@ -97,7 +97,7 @@ func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request, _ i
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	got, err := s.eng.ImportProjectConfig(r.Context(), req.RepoURL, req.Content, req.Accept)
+	got, err := s.eng.ImportProjectConfigWith(r.Context(), req.RepoURL, req.Content, req.Instructions, req.Accept)
 	if err != nil {
 		if errors.Is(err, engine.ErrInvalidSetting) || errors.Is(err, engine.ErrInvalidRepoURL) {
 			writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
@@ -116,14 +116,23 @@ type importRequest struct {
 	RepoURL string `json:"repo_url"`
 	Content []byte `json:"content"` // base64 on the wire: the hash covers the exact bytes
 	Accept  bool   `json:"accept,omitempty"`
+	// Instructions is the text of the file project.yaml's instructions_file
+	// names, read by the client (§5.9); nil when the file names none.
+	Instructions *string `json:"instructions,omitempty"`
 }
 
 // ImportProjectConfig sends a project.yaml's content for import. With
 // accept false a first import over hand-set values returns them as diffs
 // (NeedsConfirm) and changes nothing.
 func (c *Client) ImportProjectConfig(ctx context.Context, repoURL string, content []byte, accept bool) (engine.ImportResult, error) {
+	return c.ImportProjectConfigWith(ctx, repoURL, content, nil, accept)
+}
+
+// ImportProjectConfigWith is ImportProjectConfig for a file that names an
+// instructions_file: instructions is the text the client read from it.
+func (c *Client) ImportProjectConfigWith(ctx context.Context, repoURL string, content []byte, instructions *string, accept bool) (engine.ImportResult, error) {
 	var out engine.ImportResult
-	if err := c.call(ctx, http.MethodPut, "/v1/projects/import", importRequest{RepoURL: repoURL, Content: content, Accept: accept}, &out); err != nil {
+	if err := c.call(ctx, http.MethodPut, "/v1/projects/import", importRequest{RepoURL: repoURL, Content: content, Accept: accept, Instructions: instructions}, &out); err != nil {
 		return engine.ImportResult{}, err
 	}
 	return out, nil

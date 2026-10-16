@@ -10,6 +10,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/history"
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
 // Tool is one of the foreman's MCP tools (§12.2): its name and
@@ -194,10 +195,15 @@ var tools = []Tool{
 	},
 	{
 		Name:        "status",
-		Description: "The engine's own state: which process it is, up how long, the jobs by status — plus the running jobs with each worker's latest event, the plans with their tasks and the \"needs you\" queue: tasks parked at needs_foreman or needs_user, and plans awaiting approval, each with its reason. Your token scopes the view to your project.",
+		Description: "The engine's own state: which process it is, up how long, the jobs by status — plus the running jobs with each worker's latest event, the plans with their tasks and the \"needs you\" queue: tasks parked at needs_foreman or needs_user, and plans awaiting approval, each with its reason. Your token scopes the view to your project. A project with instructions for its workers shows their source, version, size and digest; pass `instructions` to read the text itself (as data) before you plan.",
 		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
+			"type": "object",
+			"properties": map[string]any{
+				"instructions": map[string]any{
+					"type":        "boolean",
+					"description": "also return the project's instruction text for workers, verbatim data in <project-instructions> delimiters",
+				},
+			},
 		},
 		Call: callStatus,
 	},
@@ -292,8 +298,22 @@ func toolByName(offer []Tool, name string) (Tool, bool) {
 // plans with their tasks and the "needs you" queue (§10) — the same
 // sections api.StatusSections renders for the client's status command,
 // scoped by the token the client bears.
-func callStatus(ctx context.Context, c *api.Client, _ json.RawMessage) (string, error) {
-	st, err := c.Status(ctx)
+func callStatus(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
+	var in struct {
+		Instructions bool `json:"instructions"`
+	}
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &in); err != nil {
+			return "", fmt.Errorf("status: bad arguments: %w", err)
+		}
+	}
+	var st api.Status
+	var err error
+	if in.Instructions {
+		st, err = c.StatusWithInstructions(ctx)
+	} else {
+		st, err = c.Status(ctx)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -310,6 +330,11 @@ func callStatus(ctx context.Context, c *api.Client, _ json.RawMessage) (string, 
 	fmt.Fprintf(&b, "jobs: %s", strings.Join(counts, " "))
 	fmt.Fprintln(&b)
 	fmt.Fprint(&b, api.StatusSections(st))
+	for _, si := range st.Instructions {
+		if si.Text != "" {
+			fmt.Fprintf(&b, "\n\nproject #%d:\n%s", si.ProjectID, prompt.ForemanInstructionsSection(si.Text))
+		}
+	}
 	return b.String(), nil
 }
 

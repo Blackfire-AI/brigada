@@ -61,15 +61,33 @@ type Status struct {
 	Cooling []engine.CoolingAgent `json:"cooling,omitempty"`
 	// Held lists the queued jobs a full cap layer holds (§8.1).
 	Held []engine.HeldJob `json:"held,omitempty"`
+	// Instructions names the projects with project instructions (§5.9):
+	// source, version, size and digest; the text only when asked for.
+	Instructions []engine.StatusInstructions `json:"instructions,omitempty"`
 }
 
 // Status reads the engine's own state (§13): which process it is, since
 // when, and the jobs by status.
 func (c *Client) Status(ctx context.Context) (Status, error) {
+	return c.status(ctx, false)
+}
+
+// StatusWithInstructions is Status with the full project instruction
+// text (§5.9), for the foreman's status tool.
+func (c *Client) StatusWithInstructions(ctx context.Context) (Status, error) {
+	return c.status(ctx, true)
+}
+
+func (c *Client) status(ctx context.Context, withText bool) (Status, error) {
 	var st Status
 	path := "/v1/status"
+	sep := "?"
 	if c.readProject != 0 {
-		path += "?project=" + strconv.FormatInt(c.readProject, 10)
+		path += sep + "project=" + strconv.FormatInt(c.readProject, 10)
+		sep = "&"
+	}
+	if withText {
+		path += sep + "instructions=1"
 	}
 	if err := c.call(ctx, http.MethodGet, path, nil, &st); err != nil {
 		return Status{}, err

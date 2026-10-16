@@ -66,6 +66,7 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingWorkerTools, Value: "agent default", Default: true, Source: SourceDefault},
 		{Key: SettingHoldIdleMinutes, Value: "15", Default: true, Source: SourceDefault},
 		{Key: SettingHoldMaxMinutes, Value: "240", Default: true, Source: SourceDefault},
+		{Key: SettingInstructions, Value: "none", Default: true, Source: SourceDefault},
 	}
 	if len(got.Settings) != len(want) {
 		t.Fatalf("settings = %+v, want %+v", got.Settings, want)

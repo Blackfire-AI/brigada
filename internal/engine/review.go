@@ -143,12 +143,16 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 			}
 			return fmt.Errorf("%w: no ready agent of the default reviewer's harness %q offers the review class", ErrNoReviewer, harness)
 		}
+		instructions, _, err := projectInstructionsTx(tx, in.project)
+		if err != nil {
+			return err
+		}
 		sr, err := e.submitTx(tx, SubmitParams{
 			Key:           fmt.Sprintf("review:%d:%s", in.project, branch),
 			ProjectID:     in.project,
 			Kind:          KindReview,
 			Mode:          ModeFresh,
-			Prompt:        prompt.ComposeStandaloneReviewPrompt(in.base, branch),
+			Prompt:        prompt.ComposeStandaloneReviewPrompt(in.base, branch, prompt.WithInstructions(instructions)),
 			Harness:       harness,
 			ExcludeFamily: family,
 			Branch:        branch,

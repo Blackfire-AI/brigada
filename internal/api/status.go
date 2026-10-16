@@ -29,7 +29,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id identit
 		}
 		project = id.project
 	}
-	st, err := s.eng.Status(r.Context(), project)
+	var st engine.StatusInfo
+	if r.URL.Query().Get("instructions") != "" {
+		st, err = s.eng.StatusWithInstructions(r.Context(), project)
+	} else {
+		st, err = s.eng.Status(r.Context(), project)
+	}
 	if err != nil {
 		s.writeInternal(w, r, "read status", err)
 		return
