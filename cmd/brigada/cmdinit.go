@@ -40,6 +40,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	check := fs.String("check", "", "default check command (suggested from build files; never executed by init)")
 	tools := fs.String("tools", "", "worker scope in runner tools= syntax; applied only to Claude workers")
 	foreman := fs.String("foreman", "", "choose a usable resume-capable agent as harness/model")
+	noWiring := fs.Bool("no-wiring", false, "skip harness wiring (the bridge, hooks and foreman skill for mode A)")
 	agents := &agentSpecs{}
 	fs.Var(agents, "agent", "repeatable, same complete syntax and model defaults as brigada runner")
 	signedIn := map[string]bool{}
@@ -310,6 +311,16 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	} else {
 		fmt.Fprintf(stdout, "New %s:\n%s", engine.ProjectConfigPath, proposed)
 	}
+	var wiring []wireFile
+	if !*noWiring {
+		if probes["claude"].installed {
+			wiring = planWiring(root)
+			printWiringPlan(stdout, wiring)
+		}
+		if probes["codex"].installed {
+			fmt.Fprint(stdout, codexWiringText)
+		}
+	}
 	if *probe {
 		fmt.Fprintln(stdout, "Probe only; nothing written or started. Re-run without --probe to confirm, or with --yes to apply.")
 		return 0
@@ -336,6 +347,14 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	partial := func(err error) int {
 		return fail(stderr, fmt.Errorf("partial init: project.yaml is in place; %w; fix the error and rerun init", err))
+	}
+	if err := applyWiring(wiring); err != nil {
+		return partial(err)
+	}
+	for _, f := range wiring {
+		if f.changed() {
+			fmt.Fprintf(stdout, "Wired %s (%s); no git commit or push.\n", f.rel, f.state)
+		}
 	}
 	if err := lifecycle.EnsureEngine(ctx, lifecycle.StartOptions{Socket: rt.paths.Socket, StateDir: rt.stateDir, ConfigPath: rt.configForStart(), Binary: initBinary}); err != nil {
 		return partial(err)
@@ -398,7 +417,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	} else {
 		fmt.Fprintln(stdout, "Project configured; inspect the existing runner agents above before sending work.")
 	}
-	fmt.Fprintln(stdout, "Next: brigada ask \"your task\" / brigada attach; brigada status. Once Mode A lands, open your harness in the repo; init does not install Mode A wiring today.")
+	fmt.Fprintln(stdout, "Next: brigada ask \"your task\" / brigada attach; brigada status. Open your harness in the repo to use mode A where it is wired (the hold-only bootstrap credential of design §12.1 is not built yet).")
 	return 0
 }
 
@@ -461,7 +480,7 @@ func writeInitFile(file string, old, next []byte, existed bool) error {
 	}
 	current, err := os.ReadFile(file)
 	if (existed && (err != nil || !bytes.Equal(current, old))) || (!existed && !os.IsNotExist(err)) {
-		return fmt.Errorf("project.yaml changed after the plan was printed; rerun init to review it")
+		return fmt.Errorf("%s changed after the plan was printed; rerun init to review it", filepath.Base(file))
 	}
 	if existed && bytes.Equal(old, next) {
 		return nil
@@ -477,7 +496,7 @@ func writeInitFile(file string, old, next []byte, existed bool) error {
 		}
 		mode = s.Mode().Perm()
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(file), ".project-*.yaml")
+	tmp, err := os.CreateTemp(filepath.Dir(file), ".brigada-*.tmp")
 	if err != nil {
 		return err
 	}
