@@ -85,6 +85,50 @@ func (c *Client) SetProjectSettings(ctx context.Context, repoURL string, values 
 	return out, nil
 }
 
+// handleProjectImport imports a project.yaml the client read (§13.1): the
+// body carries the file's content, never a path. A file the engine
+// refuses (unknown key, wrong schema, another repo) is the caller's own
+// and answers 400.
+func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request, _ identity) {
+	if !requireMethod(w, r, http.MethodPut) {
+		return
+	}
+	var req importRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	got, err := s.eng.ImportProjectConfig(r.Context(), req.RepoURL, req.Content, req.Accept)
+	if err != nil {
+		if errors.Is(err, engine.ErrInvalidSetting) || errors.Is(err, engine.ErrInvalidRepoURL) {
+			writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+			return
+		}
+		s.writeInternal(w, r, "import the project configuration", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, got)
+}
+
+// importRequest is the PUT body's shape: the repo's origin, the file's
+// content, and whether the user accepted a first import's replacement of
+// hand-set values.
+type importRequest struct {
+	RepoURL string `json:"repo_url"`
+	Content []byte `json:"content"` // base64 on the wire: the hash covers the exact bytes
+	Accept  bool   `json:"accept,omitempty"`
+}
+
+// ImportProjectConfig sends a project.yaml's content for import. With
+// accept false a first import over hand-set values returns them as diffs
+// (NeedsConfirm) and changes nothing.
+func (c *Client) ImportProjectConfig(ctx context.Context, repoURL string, content []byte, accept bool) (engine.ImportResult, error) {
+	var out engine.ImportResult
+	if err := c.call(ctx, http.MethodPut, "/v1/projects/import", importRequest{RepoURL: repoURL, Content: content, Accept: accept}, &out); err != nil {
+		return engine.ImportResult{}, err
+	}
+	return out, nil
+}
+
 // ProjectSettings reads the repo's settings. The API's 404 — the repo has
 // no project — comes back as the call's error.
 func (c *Client) ProjectSettings(ctx context.Context, repoURL string) (engine.ProjectSettings, error) {

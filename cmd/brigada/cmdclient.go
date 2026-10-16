@@ -54,6 +54,7 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	}
 	fmt.Fprintf(stdout, "jobs: %s\n", strings.Join(counts, " "))
 	fmt.Fprintln(stdout, api.StatusSections(st))
+	reportProjectConfigStatus(ctx, client, stdout)
 	return 0
 }
 

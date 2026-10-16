@@ -69,7 +69,8 @@ func TestProjectSettingsGolden(t *testing.T) {
 	want := "approval_max_tasks=5 (default)\n" +
 		"approval_classes=implement+review+answer (default)\n" +
 		"approval_protected_paths=infra/**+db/*.sql (set)\n" +
-		"default_check=none (default)\n"
+		"default_check=none (default)\n" +
+		"worker_tools=agent default (default)\n"
 	if stdout != want {
 		t.Fatalf("set printed %q, want %q", stdout, want)
 	}
@@ -84,7 +85,8 @@ func TestProjectSettingsGolden(t *testing.T) {
 	want = "approval_max_tasks=0 (set)\n" +
 		"approval_classes=implement (set)\n" +
 		"approval_protected_paths=infra/**+db/*.sql (set)\n" +
-		"default_check=none (default)\n"
+		"default_check=none (default)\n" +
+		"worker_tools=agent default (default)\n"
 	if code != 0 || stdout != want {
 		t.Fatalf("second set = %d %q (stderr %q), want %q", code, stdout, stderr, want)
 	}
@@ -94,21 +96,22 @@ func TestProjectSettingsGolden(t *testing.T) {
 	want = "approval_max_tasks=5 (default)\n" +
 		"approval_classes=implement+review+answer (default)\n" +
 		"approval_protected_paths=none (default)\n" +
-		"default_check=none (default)\n"
+		"default_check=none (default)\n" +
+		"worker_tools=agent default (default)\n"
 	if code != 0 || stdout != want {
 		t.Fatalf("reset = %d %q (stderr %q), want %q", code, stdout, stderr, want)
 	}
 
 	// A bad key is a usage error naming the valid keys.
 	code, _, stderr = do("project", "set", "--repo", repo, "approval_max=3")
-	wantErr := `brigada: invalid project setting: unknown key "approval_max"; valid keys: approval_max_tasks, approval_classes, approval_protected_paths, default_check` + "\n"
+	wantErr := `brigada: invalid project setting: unknown key "approval_max"; valid keys: approval_max_tasks, approval_classes, approval_protected_paths, default_check, worker_tools` + "\n"
 	if code != 2 || stderr != wantErr {
 		t.Fatalf("bad key = %d %q, want 2 %q", code, stderr, wantErr)
 	}
 
 	// A bad value is a usage error naming what the key takes.
 	code, _, stderr = do("project", "set", "--repo", repo, "approval_max_tasks=many")
-	wantErr = `brigada: invalid project setting: approval_max_tasks takes an integer (0 = every plan waits, negative = off), got "many"; valid keys: approval_max_tasks, approval_classes, approval_protected_paths, default_check` + "\n"
+	wantErr = `brigada: invalid project setting: approval_max_tasks takes an integer (0 = every plan waits, negative = off), got "many"; valid keys: approval_max_tasks, approval_classes, approval_protected_paths, default_check, worker_tools` + "\n"
 	if code != 2 || stderr != wantErr {
 		t.Fatalf("bad value = %d %q, want 2 %q", code, stderr, wantErr)
 	}

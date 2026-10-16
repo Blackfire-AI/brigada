@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -20,7 +23,7 @@ import (
 // project the engine knows.
 func runProject(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		return usagef(stderr, "usage: brigada project foreman|list|set|show [--repo URL] ...")
+		return usagef(stderr, "usage: brigada project foreman|list|set|show|import [--repo URL] ...")
 	}
 	switch args[0] {
 	case "foreman":
@@ -31,8 +34,10 @@ func runProject(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return runProjectSettings(ctx, "set", args[1:], stdout, stderr)
 	case "show":
 		return runProjectSettings(ctx, "show", args[1:], stdout, stderr)
+	case "import":
+		return runProjectImport(ctx, args[1:], stdout, stderr)
 	default:
-		return usagef(stderr, "unknown project subcommand %q; want foreman, list, set or show", args[0])
+		return usagef(stderr, "unknown project subcommand %q; want foreman, list, set, show or import", args[0])
 	}
 }
 
@@ -149,14 +154,173 @@ func runProjectSettings(ctx context.Context, verb string, args []string, stdout,
 	if err != nil {
 		return fail(stderr, err)
 	}
+	printSettings(stdout, got)
+	return 0
+}
+
+// printSettings prints every key with its value and provenance (§13.1):
+// (default), (set) for a local override, or (imported <hash>) for a value
+// the last project.yaml import set.
+func printSettings(stdout io.Writer, got engine.ProjectSettings) {
 	for _, s := range got.Settings {
 		state := "set"
-		if s.Default {
+		switch {
+		case s.Default:
 			state = "default"
+		case s.Source == engine.SourceImported:
+			state = "imported " + shortHash(s.Hash)
 		}
 		fmt.Fprintf(stdout, "%s=%s (%s)\n", s.Key, s.Value, state)
 	}
+}
+
+// shortHash is the first 12 characters of a content hash.
+func shortHash(h string) string {
+	if len(h) > 12 {
+		return h[:12]
+	}
+	return h
+}
+
+// projectStdin is where the import's confirmation is read from; a test
+// replaces it.
+var projectStdin io.Reader = os.Stdin
+
+// gitRoot returns the top of the repository containing dir.
+func gitRoot(dir string) (string, error) {
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "", fmt.Errorf("the working directory %s is not inside a git repository", dir)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// runProjectImport is `project import` (§13.1): the client reads the
+// repo's .brigada/project.yaml and sends its content; the engine never
+// reads a repo path. A first import over hand-set values prints the diff
+// and asks (--yes accepts); later imports apply a file change over a
+// still-imported value and print a conflict, with both values, for a
+// local override.
+func runProjectImport(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("project import")
+	common := addCommon(fs)
+	var (
+		repo    string
+		file    string
+		yes     bool
+		noStart bool
+	)
+	fs.StringVar(&repo, "repo", "", "the repository URL the file must name (default: the working directory's origin)")
+	fs.StringVar(&file, "file", "", "the project.yaml to read (default: "+engine.ProjectConfigPath+" in the working directory's repository)")
+	fs.BoolVar(&yes, "yes", false, "accept replacing hand-set values on a first import")
+	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
+	if code := common.parse(stderr, args); code != 0 {
+		return code
+	}
+	if extra := fs.Args(); len(extra) > 0 {
+		return usagef(stderr, "project import takes no positional arguments, got %q", extra)
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return fail(stderr, fmt.Errorf("find the working directory: %w", err))
+	}
+	if repo == "" {
+		if repo, err = gitOriginURL(dir); err != nil {
+			return fail(stderr, err)
+		}
+	}
+	if file == "" {
+		root, err := gitRoot(dir)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		file = filepath.Join(root, filepath.FromSlash(engine.ProjectConfigPath))
+	}
+	content, err := os.ReadFile(file)
+	if err != nil {
+		return fail(stderr, fmt.Errorf("read the project configuration: %w", err))
+	}
+	// Refuse a bad file before contacting the engine; the engine validates
+	// again, since it is the one that stores.
+	if _, err := engine.ParseProjectConfig(content); err != nil {
+		return fail(stderr, err)
+	}
+	rt, code := resolveRuntime(common, stderr)
+	if code != 0 {
+		return code
+	}
+	client, code := connect(ctx, rt, "client", noStart, stderr)
+	if code != 0 {
+		return code
+	}
+	res, err := client.ImportProjectConfig(ctx, repo, content, yes)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if res.NeedsConfirm {
+		fmt.Fprintln(stdout, "first import: these hand-set values would be replaced by the file's:")
+		for _, d := range res.Diffs {
+			fmt.Fprintf(stdout, "  %s: hand-set %s -> file %s\n", d.Key, d.Old, d.New)
+		}
+		fmt.Fprint(stdout, "replace them? [y/N] ")
+		answer, _ := bufio.NewReader(projectStdin).ReadString('\n')
+		if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
+			fmt.Fprintln(stdout)
+			fmt.Fprintln(stdout, "not imported; nothing changed (--yes accepts the replacement)")
+			return 1
+		}
+		if res, err = client.ImportProjectConfig(ctx, repo, content, true); err != nil {
+			return fail(stderr, err)
+		}
+	}
+	fmt.Fprintf(stdout, "imported %s (hash %s)\n", engine.ProjectConfigPath, shortHash(res.Hash))
+	for _, c := range res.Applied {
+		fmt.Fprintf(stdout, "  %s: %s -> %s\n", c.Key, c.Old, c.New)
+	}
+	for _, c := range res.Conflicts {
+		fmt.Fprintf(stdout, "conflict: %s: local override %s kept, file has %s; to take the file's value: brigada project set %s= then import again\n",
+			c.Key, c.Old, c.New, c.Key)
+	}
+	if res.Settings != nil {
+		printSettings(stdout, *res.Settings)
+	}
 	return 0
+}
+
+// reportProjectConfigStatus is status's flag (§13.1) for a project whose
+// committed file differs from what was last imported. The client knows the
+// file because it runs in the repo; the engine never looks. It only
+// reports: nothing is imported by it. Silent when the working directory is
+// no repo with the file, or the engine has no project for its origin.
+func reportProjectConfigStatus(ctx context.Context, client *api.Client, stdout io.Writer) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	root, err := gitRoot(dir)
+	if err != nil {
+		return
+	}
+	content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(engine.ProjectConfigPath)))
+	if err != nil {
+		return
+	}
+	origin, err := gitOriginURL(dir)
+	if err != nil {
+		return
+	}
+	got, err := client.ProjectSettings(ctx, origin)
+	if err != nil {
+		return
+	}
+	hash := engine.ConfigHash(content)
+	switch {
+	case got.ImportHash == "":
+		fmt.Fprintf(stdout, "%s: not imported yet (brigada project import)\n", engine.ProjectConfigPath)
+	case got.ImportHash != hash:
+		fmt.Fprintf(stdout, "%s: changed since the last import (file %s, imported %s); brigada project import applies it\n",
+			engine.ProjectConfigPath, shortHash(hash), shortHash(got.ImportHash))
+	}
 }
 
 // knownProjectsHint names the projects the engine has, for the error of a
