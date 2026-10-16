@@ -84,7 +84,7 @@ Not at launch (backlog):
 - remote engine and runners;
 - GitHub issues as a source, notifications;
 - the foreman in your own harness session, a coordinator session over several projects, and one-step `brigada init` with a committed `.brigada/project.yaml` (designed 2026-10-16, [design.md](design.md) §15 phase 6; not built);
-- a web UI, containers, auto-merge;
+- a web UI, containers, auto-merge (a local `brigada land` that squashes approved branches onto a local branch and stops before any push is designed, 2026-10-16, [design.md](design.md) §7.1; not built);
 - connectors to chat front ends.
 
 ## 7. Alternatives and position
