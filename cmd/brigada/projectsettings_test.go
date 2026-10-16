@@ -42,11 +42,12 @@ func startSettingsEngine(t *testing.T) (context.Context, string) {
 	return ctx, state
 }
 
-// holdDefaults are the interactive hold's two bounds (§4.6) at their
-// defaults, the last lines of every settings print.
-const holdDefaults = "hold_idle_minutes=15 (default)\n" + "hold_max_minutes=240 (default)\n"
+// holdDefaults are the interactive hold's two bounds (§4.6) and the
+// project instructions (§5.9) at their defaults, the last lines of every
+// settings print.
+const holdDefaults = "hold_idle_minutes=15 (default)\n" + "hold_max_minutes=240 (default)\n" + "instructions=none (default)\n"
 
-const validSettingKeys = "approval_max_tasks, approval_classes, approval_protected_paths, default_check, worker_tools, hold_idle_minutes, hold_max_minutes"
+const validSettingKeys = "approval_max_tasks, approval_classes, approval_protected_paths, default_check, worker_tools, hold_idle_minutes, hold_max_minutes, instructions"
 
 // TestProjectSettingsGolden covers project set and show: the defaults,
 // one override, the reset, and the usage errors for a bad key and value.

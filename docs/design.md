@@ -199,7 +199,7 @@ One per CLI: build the headless command (fresh or resume), parse the CLI's event
 
 ### 5.3 The worker prompt
 
-A fixed worker template (versioned) plus the task spec verbatim, plus the answer or feedback for follow-up jobs. The template tells the worker to end with the result block (§5.4). A project may add its own instruction text, injected as verbatim data in its own delimiters after the template's contract and before the task spec (§5.9; proposal, 2026-10-16).
+A fixed worker template (versioned) plus the task spec verbatim, plus the answer or feedback for follow-up jobs. The template tells the worker to end with the result block (§5.4). A project may add its own instruction text, injected as verbatim data in its own delimiters after the template's contract and before the task spec (§5.9; implemented).
 
 ### 5.4 Worker result contract
 
@@ -288,13 +288,13 @@ The URL is canonicalized as the project's is (§13.1 item 1), so SSH and HTTPS f
 
 **What it does not decide.** A plan spanning repositories, tasks that *change* two repositories, stays out of scope (§16 item 7). `extra_repos` does not answer that question and must not be read as the first step of an answer. It only supplies read-only context to a task that still changes exactly one repository: one branch, one repo URL, one project and foreman, one set of pushed branches. It brings none of the open items of item 7: whose foreman owns the plan, what the foreman token's project wall (§12.1) allows, how a task waits on a branch of another repo. Write access to an extra repository, a task that pushes to it, or a task that waits for another's branch is a different design.
 
-### 5.9 Project instructions for every worker (proposal, 2026-10-16)
+### 5.9 Project instructions for every worker (proposal, 2026-10-16; implemented)
 
-Workers run official CLIs, and each reads its own harness's project instruction file: `CLAUDE.md` for Claude Code, `AGENTS.md` for Codex and others. A rule written for one harness never reaches a worker of another family, so the same project gets different behaviour from different agents. The project therefore has one **instruction text** that brigada puts into every worker and reviewer prompt itself, whatever the harness. Designed, not shipped; the key name and flags below are proposals.
+Workers run official CLIs, and each reads its own harness's project instruction file: `CLAUDE.md` for Claude Code, `AGENTS.md` for Codex and others. A rule written for one harness never reaches a worker of another family, so the same project gets different behaviour from different agents. The project therefore has one **instruction text** that brigada puts into every worker and reviewer prompt itself, whatever the harness. Implemented: the key is `instructions_file`; the local override is the project setting `instructions` (`brigada project set instructions=@<file>`, `@-` for stdin, or the text itself), not a separate `project instructions` command; the foreman reads the text through `status` with `instructions` set. Still open: the bulk apply to existing tasks, and a per-task re-resolution at `plan_amend` (the amend only adds, cancels and re-points tasks; an added task resolves at creation).
 
 **Where it comes from.** Two sources, both resolved by the client, never by the engine from a path (product §5 rule 1):
 - **The file.** `.brigada/project.yaml` (§13.1) may set `instructions_file`, a repo-relative path to a markdown file (for example `.brigada/instructions.md`). The client reads it at import, as it reads the rest of the file, and sends the text over the API. The path must be relative, stay inside the repository after symlinks are resolved, and name a regular file; anything else is refused at import, naming the path. The engine stores the text, never a path to read. The file may be the repo's `CLAUDE.md` or `AGENTS.md`, but then a harness that reads that file itself sees the rules twice, so a separate file is the recommendation.
-- **The project setting.** `brigada project instructions --set <file>|-` (the name is a proposal) stores text as a local override, for rules the user does not want in the repo.
+- **The project setting.** `brigada project set instructions=@<file>` (`@-` reads stdin) stores text as a local override, for rules the user does not want in the repo. The client reads the file; the engine takes the text.
 
 Which wins is §13.1's rule, unchanged: a local override, then the last imported file value, then the built-in default, which is no text. `status` and `brigada project` show the effective text's source (`local override`, or `file <path>, imported <time>`), its settings version, its byte size and a SHA-256 digest. A changed file over a store value that is still the previous import applies; over a local override it does not, and the conflict is shown with both texts for the user to resolve. Neither wins silently.
 

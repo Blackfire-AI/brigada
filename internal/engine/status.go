@@ -57,6 +57,10 @@ type StatusInfo struct {
 	// Held lists the queued jobs a full cap layer holds (§8.1); the
 	// runner layer's are jobs waiting for a runner slot.
 	Held []HeldJob `json:"held,omitempty"`
+	// Instructions lists the projects in scope that have project
+	// instructions (§5.9): source, version, size and digest; the text only
+	// from StatusWithInstructions.
+	Instructions []StatusInstructions `json:"instructions,omitempty"`
 }
 
 // StatusJob is one job a runner holds right now (§10): which job, for
@@ -141,6 +145,17 @@ var JobStatuses = []string{
 // project — the API passes a foreman caller's own project, and client or
 // admin callers read all of them.
 func (e *Engine) Status(ctx context.Context, project int64) (StatusInfo, error) {
+	return e.status(ctx, project, false)
+}
+
+// StatusWithInstructions is Status with the full project instruction text
+// in StatusInfo.Instructions (§5.9): the foreman reads it as data before
+// it plans. Plain Status names source, version, size and digest only.
+func (e *Engine) StatusWithInstructions(ctx context.Context, project int64) (StatusInfo, error) {
+	return e.status(ctx, project, true)
+}
+
+func (e *Engine) status(ctx context.Context, project int64, withText bool) (StatusInfo, error) {
 	var info StatusInfo
 	info.Running = []StatusJob{}
 	info.Plans = []StatusPlan{}
@@ -203,6 +218,9 @@ func (e *Engine) Status(ctx context.Context, project int64) (StatusInfo, error) 
 			return err
 		}
 		if info.Held, err = statusHeldTx(tx, project); err != nil {
+			return err
+		}
+		if info.Instructions, err = statusInstructionsTx(tx, project, withText); err != nil {
 			return err
 		}
 		return nil

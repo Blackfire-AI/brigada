@@ -283,6 +283,9 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		if err != nil {
 			return CreatePlanResult{}, fmt.Errorf("create the task: last insert id: %w", err)
 		}
+		if err := stampTaskInstructionsTx(tx, project, taskID, now); err != nil {
+			return CreatePlanResult{}, err
+		}
 		res.Tasks[i] = CreatedTask{TaskID: taskID, Name: t.Name}
 	}
 	for i, ds := range deps {
@@ -331,13 +334,17 @@ func (e *Engine) queueTaskWorkTx(tx *sql.Tx, project, taskID int64, spec string,
 	if err != nil {
 		return SubmitResult{}, err
 	}
+	instructions, err := taskInstructionsTx(tx, taskID)
+	if err != nil {
+		return SubmitResult{}, err
+	}
 	return e.submitTx(tx, SubmitParams{
 		Key:       fmt.Sprintf("task:%d", taskID),
 		ProjectID: project,
 		TaskID:    taskID,
 		Kind:      KindWork,
 		Mode:      ModeFresh,
-		Prompt:    prompt.ComposeWorkerPrompt(spec, check, ""),
+		Prompt:    prompt.ComposeWorkerPrompt(spec, check, "", prompt.WithInstructions(instructions)),
 	}, now)
 }
 

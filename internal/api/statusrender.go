@@ -111,7 +111,22 @@ func StatusSections(st Status) string {
 			lines = append(lines, line)
 		}
 	}
+	for _, in := range st.Instructions {
+		line := fmt.Sprintf("project instructions (project #%d): %s, %d bytes, sha256 %s", in.ProjectID, in.Source, in.Bytes, in.Digest)
+		if in.Version != "" {
+			line += ", version " + shortVersion(in.Version)
+		}
+		lines = append(lines, line)
+	}
 	return strings.Join(lines, "\n")
+}
+
+// shortVersion is the first 12 characters of an import hash.
+func shortVersion(h string) string {
+	if len(h) > 12 {
+		return h[:12]
+	}
+	return h
 }
 
 // runningLines renders the jobs a runner holds (§10), one line each:

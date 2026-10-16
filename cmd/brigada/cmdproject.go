@@ -116,6 +116,15 @@ func runProjectSettings(ctx context.Context, verb string, args []string, stdout,
 		if _, dup := values[key]; dup {
 			return usagef(stderr, "project set names %s twice", key)
 		}
+		if key == engine.SettingInstructions && strings.HasPrefix(value, "@") {
+			// instructions=@file (or @- for stdin) reads the text here: the
+			// engine takes the text, never a path (§5.9).
+			text, err := readInstructionsArg(value[1:])
+			if err != nil {
+				return fail(stderr, err)
+			}
+			value = text
+		}
 		if err := engine.ValidateSettingValue(key, value); err != nil {
 			return usagef(stderr, "%v", err)
 		}
@@ -172,6 +181,63 @@ func printSettings(stdout io.Writer, got engine.ProjectSettings) {
 		}
 		fmt.Fprintf(stdout, "%s=%s (%s)\n", s.Key, s.Value, state)
 	}
+}
+
+// readInstructionsArg reads the text of `project set instructions=@path`
+// (@- is stdin), bounded like the engine bounds it: a text over the limit
+// is refused, never cut (§5.9).
+func readInstructionsArg(path string) (string, error) {
+	var r io.Reader = projectStdin
+	if path != "-" {
+		f, err := os.Open(path)
+		if err != nil {
+			return "", fmt.Errorf("read the instructions: %w", err)
+		}
+		defer f.Close()
+		r = f
+	}
+	b, err := io.ReadAll(io.LimitReader(r, engine.MaxInstructionsBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("read the instructions: %w", err)
+	}
+	return string(b), nil
+}
+
+// readInstructionsFile reads the file project.yaml's instructions_file
+// names (§5.9), for the import: the path must stay inside the repository
+// at root after symlinks are resolved and name a regular file, and the
+// text is bounded and checked as the engine will check it. Refusals name
+// the path. An empty file is returned as "": an unset value.
+func readInstructionsFile(root, rel string) (string, error) {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("instructions_file %s: resolve the repository root: %w", rel, err)
+	}
+	full, err := filepath.EvalSymlinks(filepath.Join(realRoot, filepath.FromSlash(rel)))
+	if err != nil {
+		return "", fmt.Errorf("instructions_file %s: %w", rel, err)
+	}
+	if inside, err := filepath.Rel(realRoot, full); err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("instructions_file %s resolves outside the repository", rel)
+	}
+	st, err := os.Stat(full)
+	if err != nil {
+		return "", fmt.Errorf("instructions_file %s: %w", rel, err)
+	}
+	if !st.Mode().IsRegular() {
+		return "", fmt.Errorf("instructions_file %s is not a regular file", rel)
+	}
+	if st.Size() > engine.MaxInstructionsBytes {
+		return "", fmt.Errorf("instructions_file %s is %d bytes, over the %d byte limit; shorten it (nothing is truncated)", rel, st.Size(), engine.MaxInstructionsBytes)
+	}
+	b, err := os.ReadFile(full)
+	if err != nil {
+		return "", fmt.Errorf("instructions_file %s: %w", rel, err)
+	}
+	if err := engine.ValidateInstructions(string(b)); err != nil {
+		return "", fmt.Errorf("instructions_file %s: %s", rel, strings.TrimPrefix(err.Error(), engine.ErrInvalidSetting.Error()+": "))
+	}
+	return string(b), nil
 }
 
 // shortHash is the first 12 characters of a content hash.
@@ -257,8 +323,26 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 	}
 	// Refuse a bad file before contacting the engine; the engine validates
 	// again, since it is the one that stores.
-	if _, err := engine.ParseProjectConfig(content); err != nil {
+	cfg, err := engine.ParseProjectConfig(content)
+	if err != nil {
 		return fail(stderr, err)
+	}
+	// A file that names an instructions_file has the client read it: the
+	// engine takes the text, never the path (§5.9).
+	var instructions *string
+	if cfg.InstructionsFile != "" {
+		root, err := gitRoot(filepath.Dir(file))
+		if err != nil {
+			return fail(stderr, err)
+		}
+		text, err := readInstructionsFile(root, cfg.InstructionsFile)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		instructions = &text
+		if strings.TrimSpace(text) == "" {
+			fmt.Fprintf(stdout, "instructions_file %s is empty: the project's instructions are unset\n", cfg.InstructionsFile)
+		}
 	}
 	rt, code := resolveRuntime(common, stderr)
 	if code != 0 {
@@ -268,7 +352,7 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 	if code != 0 {
 		return code
 	}
-	res, err := client.ImportProjectConfig(ctx, repo, content, yes)
+	res, err := client.ImportProjectConfigWith(ctx, repo, content, instructions, yes)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -285,7 +369,7 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 			fmt.Fprintln(stdout, "not imported; nothing changed (--yes accepts the replacement)")
 			return 1
 		}
-		if res, err = client.ImportProjectConfig(ctx, repo, content, true); err != nil {
+		if res, err = client.ImportProjectConfigWith(ctx, repo, content, instructions, true); err != nil {
 			return fail(stderr, err)
 		}
 	}
@@ -329,7 +413,13 @@ func reportProjectConfigStatus(ctx context.Context, client *api.Client, stdout i
 	if err != nil {
 		return
 	}
-	hash := engine.ConfigHash(content)
+	var instructions *string
+	if cfg, err := engine.ParseProjectConfig(content); err == nil && cfg.InstructionsFile != "" {
+		if text, err := readInstructionsFile(root, cfg.InstructionsFile); err == nil {
+			instructions = &text
+		}
+	}
+	hash := engine.ConfigHashWith(content, instructions)
 	switch {
 	case got.ImportHash == "":
 		fmt.Fprintf(stdout, "%s: not imported yet (brigada project import)\n", engine.ProjectConfigPath)

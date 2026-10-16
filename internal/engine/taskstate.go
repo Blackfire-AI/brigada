@@ -315,6 +315,10 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 	if err != nil {
 		return err
 	}
+	instructions, err := taskInstructionsTx(tx, job.TaskID)
+	if err != nil {
+		return err
+	}
 	harness, agent, err := authorPlacementTx(tx, job.TaskID)
 	if err != nil {
 		return err
@@ -325,7 +329,7 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 		TaskID:       job.TaskID,
 		Kind:         KindFix,
 		Mode:         ModeSession,
-		Prompt:       prompt.ComposeWorkerPrompt(spec, check, feedback),
+		Prompt:       prompt.ComposeWorkerPrompt(spec, check, feedback, prompt.WithInstructions(instructions)),
 		Harness:      harness,
 		RequireAgent: agent,
 		Round:        round,
@@ -504,6 +508,10 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 	if err != nil {
 		return err
 	}
+	instructions, err := taskInstructionsTx(tx, job.TaskID)
+	if err != nil {
+		return err
+	}
 	// The one-live-job-per-key rule is free here: the work job went
 	// terminal earlier in this completion's transaction. A review spends
 	// none of the task's rounds (§7 caps the review loop's fix rounds,
@@ -514,7 +522,7 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 		TaskID:        job.TaskID,
 		Kind:          KindReview,
 		Mode:          ModeFresh,
-		Prompt:        prompt.ComposeReviewPrompt(spec, prompt.WorkerFeedback(job.Prompt), checkJSON, base, branch),
+		Prompt:        prompt.ComposeReviewPrompt(spec, prompt.WorkerFeedback(job.Prompt), checkJSON, base, branch, prompt.WithInstructions(instructions)),
 		ExcludeFamily: exclude,
 	}, now)
 	if err != nil {

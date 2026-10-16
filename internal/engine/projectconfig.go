@@ -32,6 +32,10 @@ const maxProjectConfigBytes = 64 << 10
 const (
 	configKeySchema = "schema"
 	configKeyRepo   = "repo"
+	// configKeyInstructionsFile names a repo-relative markdown file the
+	// client reads at import (§5.9); the engine stores its text under
+	// SettingInstructions and never the path to read.
+	configKeyInstructionsFile = "instructions_file"
 )
 
 // ConfigHash is the hash of a project.yaml's bytes, as the store records
@@ -41,11 +45,25 @@ func ConfigHash(content []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// ConfigHashWith is ConfigHash for a file with an instructions_file: the
+// hash covers the yaml and the text read from that path, so a change to
+// the text alone counts as a changed file. With nil text it is ConfigHash.
+func ConfigHashWith(content []byte, instructions *string) string {
+	if instructions == nil {
+		return ConfigHash(content)
+	}
+	return ConfigHash(append(append([]byte{}, content...), "\x00instructions\x00"+*instructions...))
+}
+
 // ProjectConfig is a parsed, validated schema-1 file: the repo identity
 // it names and the settings it sets, each already in the stored shape.
 type ProjectConfig struct {
 	// Repo is the canonical identity the file names.
 	Repo string
+	// InstructionsFile is the repo-relative path the file names under
+	// instructions_file, "" when it sets none. The client reads it; the
+	// text rides beside the file's bytes at import.
+	InstructionsFile string
 	// Values holds the stored JSON of each setting the file sets.
 	Values map[string]json.RawMessage
 }
@@ -105,7 +123,7 @@ func ParseProjectConfig(content []byte) (ProjectConfig, error) {
 	if ver != ProjectConfigSchema {
 		return ProjectConfig{}, configErr("unknown %s version %d; this brigada reads %s %d", configKeySchema, ver, configKeySchema, ProjectConfigSchema)
 	}
-	valid := append([]string{configKeySchema, configKeyRepo}, configSettingKeys...)
+	valid := append([]string{configKeySchema, configKeyRepo, configKeyInstructionsFile}, configSettingKeys...)
 	for _, k := range order {
 		if !slicesContains(valid, k) {
 			return ProjectConfig{}, configErr("unknown key %q (line %d); valid keys: %s", k, entries[k].line, strings.Join(valid, ", "))
@@ -130,6 +148,15 @@ func ParseProjectConfig(content []byte) (ProjectConfig, error) {
 		return ProjectConfig{}, configErr("%s must be written in its canonical form %q (host[:port]/path, or file:<absolute path> for a file remote)", configKeyRepo, canon)
 	}
 	cfg.Repo = canon
+	if iv, ok := entries[configKeyInstructionsFile]; ok {
+		if iv.isList || iv.blockOpen || strings.TrimSpace(iv.scalar) == "" {
+			return ProjectConfig{}, configErr("%s (line %d) must be a repo-relative path string; omit the key for no instructions", configKeyInstructionsFile, iv.line)
+		}
+		if err := checkInstructionsPath(iv.scalar); err != nil {
+			return ProjectConfig{}, configErr("%s (line %d): %v", configKeyInstructionsFile, iv.line, err)
+		}
+		cfg.InstructionsFile = iv.scalar
+	}
 	for _, k := range configSettingKeys {
 		v, ok := entries[k]
 		if !ok {
@@ -146,6 +173,21 @@ func ParseProjectConfig(content []byte) (ProjectConfig, error) {
 		cfg.Values[k] = raw
 	}
 	return cfg, nil
+}
+
+// checkInstructionsPath refuses an instructions_file that is not a plain
+// repo-relative path (§5.9). That it stays inside the repository after
+// symlinks, and names a regular file, only the client can check.
+func checkInstructionsPath(p string) error {
+	if strings.HasPrefix(p, "/") || strings.HasPrefix(p, "~") || strings.Contains(p, `\`) || strings.ContainsRune(p, 0) {
+		return fmt.Errorf("%q must be a repo-relative path", p)
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return fmt.Errorf("%q must stay inside the repository", p)
+		}
+	}
+	return nil
 }
 
 func slicesContains(list []string, s string) bool {
@@ -458,6 +500,10 @@ func renderSettingRaw(key string, raw json.RawMessage) string {
 	if raw == nil {
 		return "default"
 	}
+	if key == SettingInstructions {
+		s, _ := rawString(raw)
+		return instructionsSummary(s)
+	}
 	if s, ok := rawString(raw); ok {
 		return s
 	}
@@ -469,6 +515,18 @@ func renderSettingRaw(key string, raw json.RawMessage) string {
 		return strings.Join(l, settingListSep)
 	}
 	return compactJSON(raw)
+}
+
+// renderConflictRaw shows a value in a conflict: an instruction text in
+// full, since the user resolves the conflict by comparing both texts
+// (§5.9); every other key as renderSettingRaw does.
+func renderConflictRaw(key string, raw json.RawMessage) string {
+	if key == SettingInstructions {
+		if s, ok := rawString(raw); ok {
+			return s
+		}
+	}
+	return renderSettingRaw(key, raw)
 }
 
 // --- import ----------------------------------------------------------
@@ -512,6 +570,16 @@ type ImportResult struct {
 // until it is repeated with accept. Validation, settings and provenance
 // land in one transaction.
 func (e *Engine) ImportProjectConfig(ctx context.Context, repoURL string, content []byte, accept bool) (ImportResult, error) {
+	return e.ImportProjectConfigWith(ctx, repoURL, content, nil, accept)
+}
+
+// ImportProjectConfigWith is ImportProjectConfig for a file that names an
+// instructions_file (§5.9): instructions is the text the client read from
+// that path, never a path for the engine to read. A file that names one
+// with no text sent is refused; an empty text is an unset value. The
+// text is bounded like a `project set` of it, and a refusal leaves the
+// previous value in effect.
+func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, content []byte, instructions *string, accept bool) (ImportResult, error) {
 	if repoURL == "" {
 		return ImportResult{}, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
 	}
@@ -526,7 +594,24 @@ func (e *Engine) ImportProjectConfig(ctx context.Context, repoURL string, conten
 	if cfg.Repo != canon {
 		return ImportResult{}, configErr("repo %q is not this repository's origin %q; refusing to import another repository's configuration", cfg.Repo, canon)
 	}
-	hash := ConfigHash(content)
+	switch {
+	case cfg.InstructionsFile != "" && instructions == nil:
+		return ImportResult{}, configErr("%s names %q but no text was sent: the client reads the file and sends its content", configKeyInstructionsFile, cfg.InstructionsFile)
+	case cfg.InstructionsFile == "" && instructions != nil:
+		return ImportResult{}, configErr("instructions text was sent but the file sets no %s", configKeyInstructionsFile)
+	case instructions != nil && strings.TrimSpace(*instructions) != "":
+		if err := ValidateInstructions(*instructions); err != nil {
+			return ImportResult{}, configErr("%s: %s", cfg.InstructionsFile, strings.TrimPrefix(err.Error(), ErrInvalidSetting.Error()+": "))
+		}
+		raw, err := json.Marshal(*instructions)
+		if err != nil {
+			return ImportResult{}, fmt.Errorf("encode the instructions: %w", err)
+		}
+		cfg.Values[SettingInstructions] = raw
+	}
+	// The hash covers the yaml and the instruction text, so a change to the
+	// text alone shows as a changed import.
+	hash := ConfigHashWith(content, instructions)
 	res := ImportResult{Hash: hash}
 	err = e.store.Update(ctx, func(tx *sql.Tx) error {
 		res = ImportResult{Hash: hash}
@@ -591,7 +676,7 @@ func (e *Engine) ImportProjectConfig(ctx context.Context, repoURL string, conten
 					res.Applied = append(res.Applied, ConfigChange{k, renderSettingRaw(k, cur), renderSettingRaw(k, fv)})
 				}
 			default:
-				res.Conflicts = append(res.Conflicts, ConfigChange{k, renderSettingRaw(k, cur), renderSettingRaw(k, fv)})
+				res.Conflicts = append(res.Conflicts, ConfigChange{k, renderConflictRaw(k, cur), renderConflictRaw(k, fv)})
 			}
 		}
 		if len(res.Diffs) > 0 && !accept {
