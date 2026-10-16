@@ -73,6 +73,33 @@ func TestProjectForemanGolden(t *testing.T) {
 		t.Fatalf("codex choose exit = %d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
 	}
 
+	// The list: one line per project, the foreman a project has not
+	// chosen shown as "-".
+	other := "https://example.invalid/other.git"
+	if code := run(ctx, []string{"project", "foreman", "--repo", other, "--harness", "claude", "--model", "opus", "--state-dir", state},
+		&stdout, &stderr); code != 0 {
+		t.Fatalf("second project exit = %d, stderr = %q", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{"project", "list", "--state-dir", state}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("list exit = %d, stderr = %q", code, stderr.String())
+	}
+	wantList := repo + "  foreman=codex/opus  active_plans=0  needs_you=0\n" +
+		other + "  foreman=claude/opus  active_plans=0  needs_you=0\n"
+	if got := stdout.String(); got != wantList {
+		t.Fatalf("list printed %q, want %q", got, wantList)
+	}
+
+	// An ask for a repo with no project names the known ones.
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{"ask", "--repo", "https://example.invalid/nope.git", "--state-dir", state, "hello"}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "known projects: "+repo+", "+other) {
+		t.Fatalf("ask refusal = code %d, stderr=%q", code, stderr.String())
+	}
+
 	// Kimi still has no way to carry the bridge, so it remains refused.
 	stdout.Reset()
 	stderr.Reset()

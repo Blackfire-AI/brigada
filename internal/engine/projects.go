@@ -153,6 +153,62 @@ func (e *Engine) ProjectForeman(ctx context.Context, repoURL string) (*ForemanSe
 	return setting, nil
 }
 
+// ProjectInfo is one line of the project list: a project's repo URL and
+// foreman, how many plans are active in it and how many items wait on
+// the user (§10).
+type ProjectInfo struct {
+	ProjectID   int64  `json:"project_id"`
+	RepoURL     string `json:"repo_url"`
+	Harness     string `json:"harness"`
+	Model       string `json:"model"`
+	ActivePlans int    `json:"active_plans"`
+	NeedsYou    int    `json:"needs_you"`
+}
+
+// Projects lists every project the engine has, oldest first, each with
+// its foreman, its active plans and its needs-you count — the count the
+// status shows for that project alone.
+func (e *Engine) Projects(ctx context.Context) ([]ProjectInfo, error) {
+	out := []ProjectInfo{}
+	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+		now := e.cfg.Now()
+		if _, err := e.sweepTx(tx, now); err != nil {
+			return err
+		}
+		rows, err := tx.Query(`SELECT pr.id, pr.repo_url, pr.foreman_harness, pr.foreman_model,
+				(SELECT COUNT(*) FROM plans p WHERE p.project_id = pr.id AND p.state = 'active')
+			FROM projects pr ORDER BY pr.id`)
+		if err != nil {
+			return fmt.Errorf("list the projects: %w", err)
+		}
+		for rows.Next() {
+			var p ProjectInfo
+			if err := rows.Scan(&p.ProjectID, &p.RepoURL, &p.Harness, &p.Model, &p.ActivePlans); err != nil {
+				rows.Close()
+				return fmt.Errorf("list the projects: %w", err)
+			}
+			out = append(out, p)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("list the projects: %w", err)
+		}
+		rows.Close()
+		for i := range out {
+			items, err := statusNeedsYouTx(tx, out[i].ProjectID, now)
+			if err != nil {
+				return err
+			}
+			out[i].NeedsYou = len(items)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list the projects: %w", err)
+	}
+	return out, nil
+}
+
 // createProjectTx inserts one project row (§4.1, §11): the repo URL, its
 // default branch and the foreman's harness and model, empty until setup
 // chooses them. SubmitTask and SetProjectForeman share the insert; only

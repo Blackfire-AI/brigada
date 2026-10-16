@@ -704,8 +704,25 @@ func TestAttachFailsOutsideAProjectsRepo(t *testing.T) {
 		}
 	}
 
-	// A repository whose origin names no project.
+	// With a running engine that has projects, the same failures list
+	// them: outside any repository, and in a repository with no origin.
 	e := newAttachEnv(t, "https://example.invalid/elsewhere.git", "fake", "fake-1")
+	noOrigin := t.TempDir()
+	if out, err := exec.Command("git", "-C", noOrigin, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	for _, d := range []string{t.TempDir(), noOrigin} {
+		t.Chdir(d)
+		var stdout, stderr bytes.Buffer
+		code := run(context.Background(), []string{"attach", "--state-dir", e.stateDir, "--no-start"}, &stdout, &stderr)
+		msg := stderr.String()
+		if code != 1 || !strings.Contains(msg, "no origin URL") ||
+			!strings.Contains(msg, "known projects: https://example.invalid/elsewhere.git") {
+			t.Errorf("attach in %s = code %d, stderr %q, want the origin error and the known projects", d, code, msg)
+		}
+	}
+
+	// A repository whose origin names no project.
 	cloneRemote(t, remote)
 	var stdout, stderr bytes.Buffer
 	code := run(context.Background(), []string{"attach", "--state-dir", e.stateDir, "--no-start"}, &stdout, &stderr)
@@ -718,6 +735,9 @@ func TestAttachFailsOutsideAProjectsRepo(t *testing.T) {
 	}
 	if !strings.Contains(msg, "project foreman") {
 		t.Errorf("stderr = %q, want it to say what to do next", msg)
+	}
+	if !strings.Contains(msg, "known projects: https://example.invalid/elsewhere.git") {
+		t.Errorf("stderr = %q, want it to list the known projects", msg)
 	}
 
 	// A project with no foreman chosen.
