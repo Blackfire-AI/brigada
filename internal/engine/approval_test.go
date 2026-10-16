@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -128,6 +129,45 @@ func TestApprovalLimitZeroAndNegative(t *testing.T) {
 	e = newEnv(t)
 	e.setSettings(`{"approval_max_tasks": 2}`)
 	e.assertAwaits(e.createPlan(nTasks(3)), "3 tasks, over the limit of 2")
+}
+
+// TestPlanDecisionVersion: a decision naming the plan version the user
+// was shown is applied only while the plan is still at it; an amendment
+// of any kind moves the version and the old decision is refused whole.
+// Version 0 names none and checks nothing (the CLI's decisions).
+func TestPlanDecisionVersion(t *testing.T) {
+	e := newEnv(t)
+	e.setSettings(`{"approval_max_tasks": 0}`)
+	res := e.createPlan(nTasks(1))
+	e.assertAwaits(res, "approval_max_tasks 0")
+	if got := e.int("SELECT version FROM plans WHERE id = ?", res.PlanID); got != 1 {
+		t.Fatalf("new plan version = %d, want 1", got)
+	}
+	e.amend(res.PlanID, PlanAmendment{Add: []PlanTask{{Name: "more", Spec: "one more"}}})
+	if got := e.int("SELECT version FROM plans WHERE id = ?", res.PlanID); got != 2 {
+		t.Fatalf("version after an amendment = %d, want 2", got)
+	}
+	if _, err := e.eng.ApprovePlanVersion(e.ctx, 0, res.PlanID, 1); !errors.Is(err, ErrPlanVersionStale) {
+		t.Fatalf("approve at the old version: %v, want ErrPlanVersionStale", err)
+	}
+	if _, err := e.eng.RejectPlanVersion(e.ctx, 0, res.PlanID, 1); !errors.Is(err, ErrPlanVersionStale) {
+		t.Fatalf("reject at the old version: %v, want ErrPlanVersionStale", err)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planAwaitingApproval {
+		t.Fatalf("a stale decision moved the plan to %q", got)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'work'"); got != 0 {
+		t.Fatalf("a stale decision queued %d work jobs", got)
+	}
+	dec, err := e.eng.ApprovePlanVersion(e.ctx, e.project, res.PlanID, 2)
+	if err != nil || dec.State != "active" {
+		t.Fatalf("approve at the current version: %+v, %v", dec, err)
+	}
+
+	other := e.createPlan(nTasks(1))
+	if _, err := e.eng.RejectPlanVersion(e.ctx, 0, other.PlanID, 0); err != nil {
+		t.Fatalf("reject with no version: %v", err)
+	}
 }
 
 func TestApprovePlanQueuesFirstWaveOnly(t *testing.T) {

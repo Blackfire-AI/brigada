@@ -28,6 +28,7 @@ const (
 	codeBadRequest       = "bad_request"
 	codeIdemConflict     = "idempotency_conflict"
 	codeConflict         = "conflict"
+	codeStalePlan        = "stale_plan" // a decision on a plan version the plan has moved past; nothing was applied
 	codeTooLarge         = "payload_too_large"
 	codeMethodNotAllowed = "method_not_allowed"
 	codeInternal         = "internal"

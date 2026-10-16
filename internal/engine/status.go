@@ -127,6 +127,12 @@ type NeedsYouItem struct {
 	Title  string `json:"title"`
 	Reason string `json:"reason,omitempty"`
 	PlanID int64  `json:"plan_id,omitempty"` // the task's plan, when the entry is a task
+	// A plan awaiting approval also carries what a coordinator shows the
+	// user and quotes back (§4.6 mode B): the project's repo URL, the
+	// plan's version — an amendment bumps it — and its tasks.
+	RepoURL string       `json:"repo_url,omitempty"`
+	Version int64        `json:"version,omitempty"`
+	Tasks   []StatusTask `json:"tasks,omitempty"`
 }
 
 // JobStatuses is the job statuses' fixed vocabulary, in the order the
@@ -526,13 +532,14 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	}
 	items = append(items, noReviewer...)
 
-	pquery := `SELECT id, title FROM plans WHERE state = 'pending_approval'`
+	pquery := `SELECT p.id, p.title, p.version, pr.repo_url FROM plans p JOIN projects pr ON pr.id = p.project_id
+		WHERE p.state = 'pending_approval'`
 	pargs := []any{}
 	if project != 0 {
-		pquery += " AND project_id = ?"
+		pquery += " AND p.project_id = ?"
 		pargs = append(pargs, project)
 	}
-	pquery += " ORDER BY id"
+	pquery += " ORDER BY p.id"
 	prows, err := tx.Query(pquery, pargs...)
 	if err != nil {
 		return nil, fmt.Errorf("list the plans awaiting approval: %w", err)
@@ -540,7 +547,7 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	defer prows.Close()
 	for prows.Next() {
 		var it NeedsYouItem
-		if err := prows.Scan(&it.ID, &it.Title); err != nil {
+		if err := prows.Scan(&it.ID, &it.Title, &it.Version, &it.RepoURL); err != nil {
 			return nil, fmt.Errorf("list the plans awaiting approval: %w", err)
 		}
 		it.Kind = "plan"
@@ -561,6 +568,9 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 			return nil, err
 		}
 		items[i].Reason = oneLine(reason, needsYouReasonLimit)
+		if items[i].Tasks, err = statusPlanTasksTx(tx, items[i].ID); err != nil {
+			return nil, err
+		}
 	}
 
 	// A limited foreman is waiting for the user's choice (§4.4): wait,

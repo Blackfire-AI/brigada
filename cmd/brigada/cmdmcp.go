@@ -23,7 +23,7 @@ func runMCP(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var socket string
 	fs.StringVar(&socket, "socket", "", "the engine API's Unix socket path (required for the bare headless bridge; interactive modes use --state-dir and --config)")
 	foreman := fs.Bool("foreman", false, "serve interactive foreman tools for this repository (or an explicit repo URL)")
-	coordinator := fs.Bool("coordinator", false, "coordinator selector (not yet available)")
+	coordinator := fs.Bool("coordinator", false, "serve the coordinator tools (list_projects, ask_foreman, status, history, plan_approve, plan_reject) over every project, with the state directory's client token")
 	client := fs.Bool("client", false, "serve the client tools (ask_foreman, status, history) with the state directory's client token, for any harness acting for the user")
 	if code := common.parse(stderr, args); code != 0 {
 		return code
@@ -38,7 +38,10 @@ func runMCP(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return usagef(stderr, "mcp selectors --client, --foreman and --coordinator are mutually exclusive")
 	}
 	if *coordinator {
-		return usagef(stderr, "mcp --coordinator is not yet available")
+		if len(fs.Args()) > 0 {
+			return usagef(stderr, "mcp --coordinator takes no arguments, got %q", fs.Args())
+		}
+		return runBridgeMCP(ctx, common, mcp.CoordinatorTools, stderr)
 	}
 	if *foreman {
 		if len(fs.Args()) > 1 {
@@ -54,7 +57,7 @@ func runMCP(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return usagef(stderr, "mcp takes no arguments, got %q", extra)
 	}
 	if *client {
-		return runClientMCP(ctx, common, stderr)
+		return runBridgeMCP(ctx, common, mcp.ClientTools, stderr)
 	}
 	if socket == "" {
 		return usagef(stderr, "mcp needs --socket PATH: the engine API's Unix socket")
@@ -76,13 +79,13 @@ func runMCP(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// runClientMCP is `brigada mcp --client` (§12.2, proposal 2026-10-14):
+// runBridgeMCP is `brigada mcp --client` and `--coordinator` (§12.2):
 // the same stdio bridge for any other harness acting for the user — it
-// offers ClientTools and bears the client token from the state
-// directory's token file, never a foreman token. The engine starts on
-// demand like for any client command; its notes go to stderr, since
-// stdout is the protocol's.
-func runClientMCP(ctx context.Context, common *commonFlags, stderr io.Writer) int {
+// offers the selector's tools (ClientTools, CoordinatorTools) and bears
+// the client token from the state directory's token file, never a
+// foreman token. The engine starts on demand like for any client
+// command; its notes go to stderr, since stdout is the protocol's.
+func runBridgeMCP(ctx context.Context, common *commonFlags, offer []mcp.Tool, stderr io.Writer) int {
 	rt, code := resolveRuntime(common, stderr)
 	if code != 0 {
 		return code
@@ -94,7 +97,7 @@ func runClientMCP(ctx context.Context, common *commonFlags, stderr io.Writer) in
 	srv := &mcp.Server{
 		Client: c,
 		Log:    slog.New(slog.NewTextHandler(stderr, nil)),
-		Tools:  mcp.ClientTools,
+		Tools:  offer,
 	}
 	if err := srv.Serve(ctx, os.Stdin, os.Stdout); err != nil && ctx.Err() == nil {
 		return fail(stderr, fmt.Errorf("mcp: %w", err))

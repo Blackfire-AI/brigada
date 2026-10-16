@@ -207,7 +207,7 @@ func (e *Engine) applyPlanFileTx(tx *sql.Tx, project int64, repo, defaultBranch 
 	}
 
 	if exists {
-		if _, err := tx.Exec("UPDATE plans SET title = ?, state = ?, updated_at = ? WHERE id = ?",
+		if _, err := tx.Exec("UPDATE plans SET title = ?, state = ?, version = version + 1, updated_at = ? WHERE id = ?",
 			p.Title, p.State, fmtTime(p.Updated), p.ID); err != nil {
 			return "", "", fmt.Errorf("update plan %d: %w", p.ID, err)
 		}
