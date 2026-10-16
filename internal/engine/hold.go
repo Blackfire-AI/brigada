@@ -76,6 +76,8 @@ type HoldDigest struct {
 	Plans        []StatusPlan          `json:"plans"`
 	Events       []string              `json:"events"`
 	UserMessages []foreman.UserMessage `json:"user_messages"`
+	// Each note carries its own verbatim-data framing and neutralized tags.
+	DecisionNotes []string `json:"decision_notes"`
 }
 
 // HoldAcquire is a hold request: the project, the bridge instance asking
@@ -86,6 +88,11 @@ type HoldAcquire struct {
 	BridgeInstance string
 	Label          string
 	SessionHint    string
+	// Verified harness observations only; never populated from tool arguments
+	// or session_hint. They select journal history, never mutation authority.
+	HarnessSessionID         string
+	HarnessSessionSource     string
+	HarnessSessionObservedAt time.Time
 }
 
 // HoldResult is acquire's answer: created with the credential (its one
@@ -175,6 +182,9 @@ func (e *Engine) AcquireHold(ctx context.Context, req HoldAcquire) (HoldResult, 
 	if req.BridgeInstance == "" {
 		return HoldResult{}, fmt.Errorf("%w: a bridge instance id is required", ErrInvalidMessage)
 	}
+	if req.HarnessSessionID != "" && (req.HarnessSessionSource == "" || req.HarnessSessionObservedAt.IsZero()) {
+		return HoldResult{}, fmt.Errorf("%w: harness session metadata needs a source and observed time", ErrInvalidMessage)
+	}
 	var res HoldResult
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
@@ -214,6 +224,10 @@ func (e *Engine) AcquireHold(ctx context.Context, req HoldAcquire) (HoldResult, 
 			res = HoldResult{Answer: AnsBusy, Busy: &slot}
 			return nil
 		}
+		since, err := lastHeldEventTx(tx, req)
+		if err != nil {
+			return err
+		}
 		idle, maxHold, err := holdBoundsTx(tx, req.Project)
 		if err != nil {
 			return err
@@ -247,6 +261,13 @@ func (e *Engine) AcquireHold(ctx context.Context, req HoldAcquire) (HoldResult, 
 		if res.HoldID, err = r.LastInsertId(); err != nil {
 			return fmt.Errorf("create the interactive hold of project %d: last insert id: %w", req.Project, err)
 		}
+		if req.HarnessSessionID != "" {
+			if _, err := tx.Exec(`UPDATE interactive_holds SET harness_session_id = ?,
+				harness_session_source = ?, harness_session_observed_at = ? WHERE id = ?`,
+				req.HarnessSessionID, req.HarnessSessionSource, fmtTime(req.HarnessSessionObservedAt), res.HoldID); err != nil {
+				return err
+			}
+		}
 		if _, err := appendEventTx(tx, evHoldAcquired, req.Project, 0, 0,
 			eventPayload{Hold: res.HoldID, Fence: fence, Source: req.Label}, now); err != nil {
 			return err
@@ -259,7 +280,14 @@ func (e *Engine) AcquireHold(ctx context.Context, req HoldAcquire) (HoldResult, 
 		if err != nil {
 			return err
 		}
-		res.Digest = &HoldDigest{Plans: plans, Events: inbox.Events, UserMessages: inbox.UserMessages}
+		notes, _, err := decisionNotesTx(tx, req.Project, since)
+		if err != nil {
+			return err
+		}
+		for i, note := range notes {
+			notes[i] = foreman.EventsAnswer([]string{note}, nil)
+		}
+		res.Digest = &HoldDigest{Plans: plans, Events: inbox.Events, UserMessages: inbox.UserMessages, DecisionNotes: notes}
 		return nil
 	})
 	if err != nil {

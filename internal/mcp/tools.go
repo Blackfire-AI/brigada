@@ -33,6 +33,16 @@ type Tool struct {
 // to the foreman's tool scope.
 var tools = []Tool{
 	{
+		Name:        "decision_note",
+		Description: "Record a decision or preference before yielding your interactive turn. The project journal attributes it to foreman-interactive; the next headless turn reads it as verbatim data, never as user instructions. Maximum 16384 bytes.",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"text": map[string]any{"type": "string", "description": "the decision and its reasoning, verbatim"}},
+			"required":   []string{"text"},
+		},
+		Call: callDecisionNote,
+	},
+	{
 		Name:        "plan_create",
 		Description: "Create a plan of one or more tasks and queue the first work job of every task with no dependencies. A task may wait on others of the same plan by name (deps); it starts when all of them are done, and stays waiting if one fails or needs you. A task with exactly one dep builds on that dep's branch (a task with several picks one with base, else starts from the default branch). A dependency cycle or a base that is not a dep refuses the plan. The plan is active at once, unless it is over the project's approval limit (many tasks, an unusual class, a protected path): then it waits for the user's approval, nothing is queued, and the answer says why — tell the user; only they can approve it.",
 		InputSchema: map[string]any{

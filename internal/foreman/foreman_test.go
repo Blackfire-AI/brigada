@@ -43,6 +43,7 @@ func TestInstructionsShipped(t *testing.T) {
 		"needs_help",
 		"## Reporting",
 		"merging is the user's, not yours",
+		"hold_acquire", "decision_note", "hold_yield", "foreman_busy", "stay read-only",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the instructions do not mention %q:\n%s", want, got)
