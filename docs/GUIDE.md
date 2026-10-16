@@ -24,6 +24,8 @@ git diff main | brigada ask -
 
 A message you send is not charged against the foreman's daily limit on its own wake-ups (20 per UTC day, per project); a wake that carries your message goes ahead even when that limit is spent.
 
+For the whole picture of how a day goes, see [How it fits your day](../README.md#how-it-fits-your-day) in the README. To let another coding harness (Claude Code, Codex) send messages and read status, see [From your own harness](../README.md#from-your-own-harness).
+
 ### Following the work
 
 `brigada status` prints the engine (pid, uptime), the job counts by status, the jobs a runner holds right now with the worker's last move, any agents cooling down, the plans with their tasks, the foreman's latest report, how many messages wait for the foreman, and the **needs you** queue. `brigada status --line` prints one short line for a terminal status bar; it never starts the engine. The queue lists what only you (or the foreman) can unblock:
@@ -255,7 +257,7 @@ cost.claude/opus = 2
 
 - `brigada engine` [`--idle-minutes N`]: run the engine in the foreground. You rarely need it; commands start it on demand. See section 1.
 - `brigada recover` [`--snapshot-dir DIR`] [`--repo URL`]: rebuild a lost store; the engine must be stopped. See section 7.
-- `brigada mcp --client`: serve brigada's client tools (`ask_foreman`, `status`, `history`) over stdio to another coding harness that acts for you. The same command with `--socket PATH` is the bridge a foreman session uses; you do not run that by hand.
+- `brigada mcp --client`: serve brigada's client tools (`ask_foreman`, `status`, `history`) over stdio to another coding harness that acts for you; how to register it is in the README's [From your own harness](../README.md#from-your-own-harness). The same command with `--socket PATH` is the bridge a foreman session uses; you do not run that by hand.
 - `brigada version`: print the version.
 - `brigada help`: print the usage.
 

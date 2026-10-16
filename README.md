@@ -106,6 +106,45 @@ brigada cancel <job-id>
 
 Day two and beyond: [docs/GUIDE.md](docs/GUIDE.md). Working in several repositories (one project and foreman per repo, `brigada project list`): [Several repositories](docs/GUIDE.md#several-repositories).
 
+## How it fits your day
+
+Each repo has one long-lived **foreman** session, a `claude` or `codex` CLI that holds brigada's tools. You do not start it per task; you come and go from it. This is fullest with a `claude` foreman. An attached `codex` session is Codex's own terminal interface without brigada's tools, and a later headless turn may start a fresh Codex thread instead of continuing your chat; see [the guide, section 10](docs/GUIDE.md#10-foreman-on-claude-or-codex).
+
+- **Attach for a conversation.** `brigada` inside the repo puts you in the foreman's own session: think out loud, review a plan, answer its questions. Leave when you are done. With `claude`, the next headless turn continues the same session.
+- **Ask for a message.** `brigada ask "..."` drops a request in the foreman's inbox and returns at once, without a conversation.
+- **Status for the queue.** `brigada status` shows the jobs, the plans and the **needs you** queue: plans waiting for your approval, tasks parked for judgment, a limited foreman.
+- **While you are away,** work continues headless. The runner works each task on its own branch, runs its check and pushes it; a reviewer of another family reads the change. The foreman wakes on events (a plan done, a task parked, a question), acts on them, and leaves a report. While you are attached it does not start headless turns, and what piled up reaches it when you attach.
+- **At the end, you merge.** Each task's work is a branch on your remote. brigada does not merge anything; you read the branches and merge the ones you want.
+- **The records** live on your machine, in the state directory (`~/.local/state/brigada` by default): the store, transcripts, check logs and the outcome record behind `brigada history` and `brigada stats`. Plan files are mirrored to the `brigada/plans` branch of your remote.
+
+Each repo has its own foreman. More in [the guide](docs/GUIDE.md#2-daily-use).
+
+## From your own harness
+
+`brigada mcp --client` is an MCP server over stdio. Register it in another coding harness, and that harness can talk to the foreman and watch the work without you relaying between them. `brigada` must be on the `PATH` of the harness that launches it (or use the absolute path of the executable in the commands below).
+
+**Claude Code** (the `--` separates Claude Code's options from the brigada command; `--scope user` makes the server available in all your Claude Code projects, where the default `local` scope is limited to the current project):
+
+```
+claude mcp add --scope user --transport stdio brigada -- brigada mcp --client
+```
+
+**Codex:**
+
+```
+codex mcp add brigada -- brigada mcp --client
+```
+
+These forms follow `claude mcp add --help` and `codex mcp add --help` as of 2026-10-16. A non-default state directory or config file goes after `mcp`, in the command that is launched: `brigada mcp --client --state-dir /absolute/path`. Put no token in the command; the bridge reads the client token from the state directory.
+
+It offers three tools:
+
+- `ask_foreman`: send the foreman a message as you. It takes `text` and `repo_url`, the project's repo URL (the one `git remote get-url origin` prints). `repo_url` may be left out only when the engine knows a single project; with several repos, always pass it, for example `{"text": "fix the flaky auth test; the check is: go test ./auth/...", "repo_url": "git@github.com:you/app.git"}`. With nobody attached, the foreman wakes up and acts on it; with a chat attached, the message waits for the foreman's next read. The answer says which happened. The same text again within a day counts as a retry of the first call, so reword it to send it anew.
+- `status`: the engine's state across every project, as in `brigada status`.
+- `history`: the timeline, optionally one `task`, at most `limit` items (1 to 500, default 100).
+
+The engine starts on demand, as for any brigada command. The other harness acts **for you**, with the client token: it can send your message and read status and history. It is never the foreman and cannot do what the foreman does. A runner must still be running for the work to happen.
+
 ## API keys
 
 brigada has no API-key setting of its own yet. Workers inherit your environment (minus brigada's own variables), so a CLI that you have set up with an API key the way its vendor documents is driven the same way. See [docs/TERMS.md](docs/TERMS.md).
