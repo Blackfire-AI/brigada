@@ -51,12 +51,9 @@ func (e *Engine) submitForemanTurnTx(tx *sql.Tx, project int64, inbox ForemanInb
 		// `brigada project foreman` is the command that records it.
 		return SubmitResult{}, fmt.Errorf("the project has no foreman harness; set it with `brigada project foreman`")
 	}
-	// The harness is the job's placement constraint (§8): only a runner
-	// offering it may take the turn. The model has nowhere to ride yet —
-	// the agent a lease lands on is the runner's advertisement, and
-	// choosing by the user's model is the dispatcher's to learn — but
-	// requiring both keeps the project's foreman whole from the first
-	// turn on.
+	// The harness and model are the job's placement constraint (§8): only
+	// an agent offering exactly that pair may take the turn, so it runs on
+	// the model the user chose (foremanPairTx).
 	return e.submitTx(tx, SubmitParams{
 		Key:       fmt.Sprintf("foreman:%d", project),
 		ProjectID: project,
@@ -64,5 +61,6 @@ func (e *Engine) submitForemanTurnTx(tx *sql.Tx, project int64, inbox ForemanInb
 		Mode:      ModeSession,
 		Prompt:    foreman.Instructions() + "\n" + foreman.ComposeTurnPromptWith(inbox.Events, inbox.UserMessages),
 		Harness:   harness,
+		Model:     model,
 	}, now)
 }

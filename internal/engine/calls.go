@@ -326,8 +326,17 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 		// queues must resume the author's, whose runner the session's
 		// affinity also pins (§8). Writing the reviewer's id here would
 		// send that fix round to the reviewer's session instead.
-		if err := upsertSessionTx(tx, job.Key, job.LeaseOwner, c.SessionID, now); err != nil {
+		// A foreman turn that ran on another harness than the project's
+		// current one (the project switched while it ran) must not leave
+		// its session behind: the new foreman would resume the old CLI's.
+		stale, err := foremanSessionStaleTx(tx, job)
+		if err != nil {
 			return "", err
+		}
+		if !stale {
+			if err := upsertSessionTx(tx, job.Key, job.LeaseOwner, c.SessionID, now); err != nil {
+				return "", err
+			}
 		}
 	}
 	// The agent's quota and health follow its completion (§8): a limit

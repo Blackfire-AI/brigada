@@ -252,6 +252,12 @@ func runProjectForeman(ctx context.Context, args []string, stdout, stderr io.Wri
 		return fail(stderr, err)
 	}
 	fmt.Fprintf(stdout, "foreman set: harness=%s model=%s%s\n", setting.Harness, setting.Model, effortField(setting.Effort))
+	if setting.Unserved {
+		// The choice stands, but a foreman turn runs only on an agent that
+		// offers exactly this pair: until one is registered the turns wait.
+		fmt.Fprintf(stderr, "warning: no registered runner agent offers %[1]s/%[2]s; foreman turns will wait until one does. Start a runner (another one, if yours already offers %[1]s) with --agent harness=%[1]s,model=%[2]s\n",
+			setting.Harness, setting.Model)
+	}
 	return 0
 }
 

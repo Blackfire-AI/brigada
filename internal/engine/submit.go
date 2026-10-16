@@ -24,6 +24,11 @@ type SubmitParams struct {
 	// full (§8).
 	Harness string
 	Labels  []string
+	// Model is the model a foreman turn must run on, beside its harness:
+	// only an agent offering exactly that pair may lease the turn. Empty on
+	// every other job, and on a turn submitted without one, which follows
+	// the project's own choice (foremanPairTx).
+	Model string
 	// ExcludeFamily is the family rule's exclusion (§7, §8): when set,
 	// only an agent of another family that offers the review class may
 	// lease the job. The engine sets it on a task's review job, from
@@ -158,10 +163,10 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 		branch = p.Branch
 	}
 	res, err := tx.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status,
-		harness, labels, restart, round, exclude_family, exclude_agent, require_agent, branch, queued_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		harness, model, labels, restart, round, exclude_family, exclude_agent, require_agent, branch, queued_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ProjectID, nullIfZero(p.TaskID), string(p.Kind), p.Key, string(p.Mode), p.Prompt,
-		p.Harness, string(labelsJSON), boolInt(p.Restart), round, p.ExcludeFamily, nullIfZero(p.ExcludeAgent),
+		p.Harness, p.Model, string(labelsJSON), boolInt(p.Restart), round, p.ExcludeFamily, nullIfZero(p.ExcludeAgent),
 		nullIfZero(p.RequireAgent), branch, nowStr, nowStr, nowStr)
 	if err != nil {
 		if !isUniqueViolation(err) {

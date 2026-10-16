@@ -23,6 +23,11 @@ type ForemanSetting struct {
 	Model     string `json:"model"`
 	// Effort is the foreman's reasoning-effort level; empty when unset.
 	Effort string `json:"effort,omitempty"`
+	// Unserved is set on the answer to a choice when no registered runner
+	// agent offers the foreman class for the chosen harness/model pair: the
+	// foreman's turns will wait until one does. It says nothing of a
+	// registered agent that is only busy, cooling or broken.
+	Unserved bool `json:"unserved,omitempty"`
 }
 
 // ErrInvalidForeman marks a refusal the caller caused: a foreman setting
@@ -109,6 +114,11 @@ func (e *Engine) SetProjectForemanEffort(ctx context.Context, repoURL, harness, 
 					fmt.Sprintf("foreman:%d", project)); err != nil {
 					return fmt.Errorf("drop the old foreman session of the project of %s: %w", repoURL, err)
 				}
+				// A turn leased under the old generation must not write
+				// its session back after this (foremanSessionStaleTx).
+				if _, err := tx.Exec("UPDATE projects SET foreman_session_gen = foreman_session_gen + 1 WHERE id = ?", project); err != nil {
+					return fmt.Errorf("bump the foreman session generation of the project of %s: %w", repoURL, err)
+				}
 			}
 		case errors.Is(err, sql.ErrNoRows):
 			project, err = createProjectTx(tx, repoURL, setupDefaultBranch, harness, model, now)
@@ -128,6 +138,11 @@ func (e *Engine) SetProjectForemanEffort(ctx context.Context, repoURL, harness, 
 			return err
 		}
 		setting.ProjectID = project
+		offered, err := pairRegisteredTx(tx, harness, model)
+		if err != nil {
+			return err
+		}
+		setting.Unserved = !offered
 		if cleared {
 			// The events the limit held back reach the new foreman now,
 			// not at the next event.
@@ -165,6 +180,13 @@ func (e *Engine) ProjectForeman(ctx context.Context, repoURL string) (*ForemanSe
 			return fmt.Errorf("read the project of %s: %w", repoURL, err)
 		}
 		f.ProjectID, f.RepoURL = project, repoURL
+		if f.Harness != "" && f.Model != "" {
+			offered, err := pairRegisteredTx(tx, f.Harness, f.Model)
+			if err != nil {
+				return err
+			}
+			f.Unserved = !offered
+		}
 		setting = &f
 		return nil
 	})

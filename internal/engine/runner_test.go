@@ -147,6 +147,9 @@ func TestRegisterStoresTheRunnerCap(t *testing.T) {
 // and the attempt number a re-dispatch's branch name needs (§6.4).
 func TestLeaseGrantCarriesTaskFields(t *testing.T) {
 	e := newEnv(t)
+	// The runner offers the project's foreman pair, which the last lease
+	// below needs, beside the worker classes the first ones use.
+	e.seedAgent(e.runner1, "claude", "claude", "sonnet", "claude")
 	p := e.work()
 	p.Harness = "claude"
 	p.Labels = []string{"linux"}

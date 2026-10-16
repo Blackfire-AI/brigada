@@ -102,6 +102,7 @@ func TestSubmitForemanTurnNeedsHarness(t *testing.T) {
 // follow-up flag is set, and both wakes wait on the one job.
 func TestSubmitForemanTurnCoalesces(t *testing.T) {
 	e := newEnv(t)
+	e.offerForeman(e.runner1)
 
 	first, err := e.eng.SubmitForemanTurn(e.ctx, e.project, wakeEvents[:1])
 	if err != nil {
@@ -155,6 +156,7 @@ func TestSubmitForemanTurnCoalesces(t *testing.T) {
 // the stalled or failed turn's events return to pending instead (§4.2).
 func TestForemanTurnReportsToTheUser(t *testing.T) {
 	e := newEnv(t)
+	e.offerForeman(e.runner1)
 
 	turn := func(c Completion) {
 		t.Helper()

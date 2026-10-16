@@ -398,6 +398,72 @@ func TestEffortMigrationKeepsTheRows(t *testing.T) {
 	exec(t, s.db, "UPDATE agents SET effort = 'max'")
 }
 
+// TestJobModelMigrationBackfillsLiveForemanTurns builds the store of a
+// binary that predates the job-model migration, with foreman turns in each
+// state, and opens it with this binary: a live turn on the project's own
+// harness (or on none) takes the project's model; a live turn on another
+// harness has no recoverable model and keeps none, so the engine holds it;
+// a finished turn is left alone.
+func TestJobModelMigrationBackfillsLiveForemanTurns(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatalf("list migrations: %v", err)
+	}
+	var before int
+	for _, m := range migs {
+		if m.name == "job_model" {
+			before = m.version - 1
+			break
+		}
+	}
+	if before == 0 {
+		t.Fatal("job_model migration not found in allMigrations")
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("open raw store: %v", err)
+	}
+	for _, m := range migs[:before] {
+		if _, err := db.Exec(m.sql); err != nil {
+			t.Fatalf("apply %04d_%s by hand: %v", m.version, m.name, err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA user_version = " + strconv.Itoa(before)); err != nil {
+		t.Fatalf("set user_version: %v", err)
+	}
+	project := insertProject(t, db) // claude/sonnet
+	turn := func(key, status, harness string) int64 {
+		return insertID(t, db, `INSERT INTO jobs (project_id, kind, key, mode, prompt, status, harness, created_at, updated_at)
+			VALUES (?, 'foreman', ?, 'session', 'p', ?, ?, ?, ?)`, project, key, status, harness, ts, ts)
+	}
+	own := turn("foreman:own", "queued", "claude")
+	none := turn("foreman:none", "queued", "")
+	leased := turn("foreman:leased", "leased", "claude")
+	other := turn("foreman:other", "queued", "codex")
+	finished := turn("foreman:finished", "done", "claude")
+	if err := db.Close(); err != nil {
+		t.Fatalf("close raw store: %v", err)
+	}
+
+	s := openStore(t, path)
+	for _, tc := range []struct {
+		name string
+		job  int64
+		want string
+	}{
+		{"queued on the project's harness", own, "sonnet"},
+		{"queued with no harness", none, "sonnet"},
+		{"leased on the project's harness", leased, "sonnet"},
+		{"queued on another harness", other, ""},
+		{"finished", finished, ""},
+	} {
+		if got := queryString(t, s.db, "SELECT model FROM jobs WHERE id = ?", tc.job); got != tc.want {
+			t.Errorf("%s: model = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestReviewWithoutTaskMigrationKeepsTheRows builds the store of a
 // binary that predates migration 0023 — a job with an artifact and an
 // event hanging off it — and opens it with this binary: the CHECK edit

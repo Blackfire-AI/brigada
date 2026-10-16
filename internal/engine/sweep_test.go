@@ -113,8 +113,9 @@ func TestSweepHardCaps(t *testing.T) {
 		e := newEnvCfg(t, func(c *Config) {
 			c.HardCaps = map[Kind]time.Duration{KindForeman: 5 * time.Minute}
 		})
+		e.seedAgent(e.runner1, "claude", "claude", "sonnet", "claude") // the project's foreman pair
 		r := e.submit(e.foremanTurn())
-		if g := e.leaseAny(e.runner1); g == nil {
+		if g := e.leaseClaude(e.runner1); g == nil {
 			t.Fatal("nothing to lease")
 		}
 		e.clock.Advance(6 * time.Minute)

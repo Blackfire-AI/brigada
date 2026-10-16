@@ -189,6 +189,20 @@ func (e *env) work() SubmitParams {
 	}
 }
 
+// offerForeman advertises, on each runner, an agent for the fixture
+// project's foreman pair (claude/sonnet) that takes the answer class
+// only: a foreman turn is leased to an agent offering exactly its pair,
+// and never to a runner with none. A runner given this offers no worker
+// class, so tests that also lease workers there seed a full agent with
+// seedAgent instead.
+func (e *env) offerForeman(runners ...int64) {
+	e.t.Helper()
+	for _, r := range runners {
+		e.exec(`INSERT INTO agents (runner_id, adapter, harness, model, family, account, classes, created_at, updated_at)
+			VALUES (?, 'claude', 'claude', 'sonnet', 'claude', 'claude', '["answer"]', ?, ?)`, r, seedTS, seedTS)
+	}
+}
+
 // foremanTurn is a wake-up turn for the fixture's project.
 func (e *env) foremanTurn() SubmitParams {
 	return SubmitParams{
@@ -232,6 +246,14 @@ func (e *env) lease(owner int64, harnesses, labels []string) *LeaseGrant {
 func (e *env) leaseAny(owner int64) *LeaseGrant {
 	e.t.Helper()
 	return e.lease(owner, nil, nil)
+}
+
+// leaseClaude is a lease poll offering the claude harness: the one a
+// foreman turn of the fixture project (claude/sonnet) needs, since a turn
+// with no harness of its own runs on the project's.
+func (e *env) leaseClaude(owner int64) *LeaseGrant {
+	e.t.Helper()
+	return e.lease(owner, []string{"claude"}, nil)
 }
 
 func (e *env) heartbeat(g *LeaseGrant) Answer {

@@ -32,12 +32,30 @@ func (e *env) submitTurn(project int64) int64 {
 	}](e.t, data).JobID
 }
 
+// registerForeman registers the runner with the one agent a seeded
+// project's foreman turn needs: claude/sonnet, the pair both projects
+// chose, taking every class so the runner still serves workers.
+func (e *env) registerForeman(name string) int64 {
+	e.t.Helper()
+	code, _, data := e.do(http.MethodPost, "/v1/runner/register", name, "",
+		[]byte(`{"harnesses":["claude"],"labels":["linux"],"agents":[{"adapter":"claude","harness":"claude","model":"sonnet","family":"claude","account":"claude","classes":["implement","review","answer"]}]}`))
+	if code != http.StatusOK {
+		e.t.Fatalf("register %s with its agent: %d %s", name, code, data)
+	}
+	return decode[struct {
+		RunnerID int64 `json:"runner_id"`
+	}](e.t, data).RunnerID
+}
+
 // leaseTurnBy registers the runner and leases the queued foreman turn,
 // returning its grant.
 func (e *env) leaseTurnBy(name string) *jobGrant {
 	e.t.Helper()
-	e.register(name)
-	_, data := e.lease(name, 0)
+	e.registerForeman(name)
+	code, _, data := e.do(http.MethodPost, "/v1/runner/lease", name, "", []byte(`{"wait":0,"harnesses":["claude"]}`))
+	if code != http.StatusOK {
+		e.t.Fatalf("lease by %s: %d %s", name, code, data)
+	}
 	g := decode[struct {
 		Job *jobGrant `json:"job"`
 	}](e.t, data).Job
@@ -84,7 +102,6 @@ func TestLeaseTokenAuthenticatesAsForeman(t *testing.T) {
 
 	// A task job's grant carries none: both turns are already leased, so
 	// the task job is all the other runner finds.
-	e.register("r2")
 	if turn := e.leaseTurnBy("r2"); turn.JobID != other {
 		t.Fatalf("the second runner leased job %d, want the other project's turn %d", turn.JobID, other)
 	}

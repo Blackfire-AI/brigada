@@ -29,6 +29,10 @@ func StatusSections(st Status) string {
 		if h.TaskID != 0 {
 			what = fmt.Sprintf("task #%d", h.TaskID)
 		}
+		if h.Layer == "no_pair" {
+			lines = append(lines, fmt.Sprintf("held: %s %s: foreman turn waiting: no runner offers %s", what, h.Kind, h.Agent))
+			continue
+		}
 		wait := "waiting for a free " + h.Layer + " slot"
 		switch {
 		case h.Layer == "runner":
