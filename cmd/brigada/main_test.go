@@ -52,6 +52,12 @@ func TestRun(t *testing.T) {
 			wantErr:  "brigada: unknown command \"frobnicate\"\n\n" + usage,
 		},
 		{
+			name:     "a leading flag says flags go after the command",
+			args:     []string{"--state-dir", "/tmp/x", "status"},
+			wantCode: 2,
+			wantErr:  "brigada: flags go after the command, for example brigada status --state-dir DIR\n",
+		},
+		{
 			name:     "task without a subcommand is a usage error",
 			args:     []string{"task"},
 			wantCode: 2,
@@ -147,6 +153,13 @@ func TestRun(t *testing.T) {
 // the token comes from BRIGADA_TOKEN — the environment the harness's
 // MCP config names — and never from a flag. Without it the bridge
 // refuses to start: it has nothing to call the engine with.
+func TestUsageSaysFlagsGoAfterTheCommand(t *testing.T) {
+	want := "Common flags, after the command name and before its arguments:"
+	if !strings.Contains(usage, want) {
+		t.Errorf("usage does not contain %q", want)
+	}
+}
+
 func TestRunMCPNeedsToken(t *testing.T) {
 	t.Setenv(mcp.EnvToken, "")
 	var stdout, stderr bytes.Buffer
