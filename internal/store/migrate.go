@@ -151,7 +151,7 @@ func userVersionTx(ctx context.Context, tx *sql.Tx) (int, error) {
 // SQL, by migration number.
 var schemaEdits = map[int]func(ctx context.Context, tx *sql.Tx) error{
 	23: relaxJobsTaskCheck,
-	35: widenArtifactKinds,
+	36: widenArtifactKinds,
 }
 
 // jobsPairingCheck is the CHECK 0001 put on jobs: foreman jobs have no

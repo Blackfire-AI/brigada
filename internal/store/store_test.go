@@ -971,3 +971,38 @@ func TestMetaFenceEpochStartsAtOne(t *testing.T) {
 		t.Errorf("meta rows = %d, want the single row", n)
 	}
 }
+
+// TestSchemaEditsMatchTheirMigrations pins each in-place schema edit to
+// the migration it belongs to by name, not only by number: migrations get
+// renumbered when parallel work lands, and an edit keyed to a stale number
+// runs inside an unrelated migration's transaction without any test
+// noticing the end state.
+func TestSchemaEditsMatchTheirMigrations(t *testing.T) {
+	want := map[int]string{
+		23: "review_without_task",
+		36: "task_setup",
+	}
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatalf("list migrations: %v", err)
+	}
+	byVersion := map[int]string{}
+	for _, m := range migs {
+		byVersion[m.version] = m.name
+	}
+	for v := range schemaEdits {
+		name, ok := want[v]
+		if !ok {
+			t.Errorf("schemaEdits[%d] has no expected migration name here; add it", v)
+			continue
+		}
+		if byVersion[v] != name {
+			t.Errorf("schemaEdits[%d] runs in migration %04d_%s, want %s", v, v, byVersion[v], name)
+		}
+	}
+	for v := range want {
+		if _, ok := schemaEdits[v]; !ok {
+			t.Errorf("schemaEdits has no edit for migration %d (%s)", v, want[v])
+		}
+	}
+}
