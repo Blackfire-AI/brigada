@@ -1004,6 +1004,8 @@ func TestRunnerHistoryEndToEnd(t *testing.T) {
 		"event:job_created", "message:task_spec",
 		"event:job_leased", "event:job_agent_picked", "event:task_running",
 		"event:job_completed", "event:task_reviewing", "event:job_created",
+		// The fixture has one agent: the review has no reviewer of another family.
+		"event:review_unservable",
 		"message:worker_result", "message:task_spec",
 	}
 	if strings.Join(story, " ") != strings.Join(want, " ") {

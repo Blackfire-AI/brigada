@@ -440,6 +440,14 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	}
 	rows.Close()
 
+	// A task whose review no agent could ever take waits at reviewing:
+	// listed beside the parked tasks until a reviewer registers.
+	noReviewer, err := statusNoReviewerTx(tx, project)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, noReviewer...)
+
 	pquery := `SELECT id, title FROM plans WHERE state = 'pending_approval'`
 	pargs := []any{}
 	if project != 0 {

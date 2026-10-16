@@ -61,6 +61,15 @@ func TestStatusGolden(t *testing.T) {
 			VALUES (1, 'wire the sprocket', 'the spec', 'go test ./...', 'implement', 'needs_foreman', 'task/2-1', 'main', '{}', ?, ?)`, at(0), at(0))
 		exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, branch, base_ref, caps, created_at, updated_at)
 			VALUES (3, 'tidy the docs', 'the spec', NULL, 'answer', 'done', 'task/3-1', 'main', '{}', ?, ?)`, at(-2*time.Hour), at(-time.Hour))
+		exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, branch, base_ref, caps, created_at, updated_at)
+			VALUES (1, 'review the gadget', 'the spec', 'go test ./...', 'implement', 'reviewing', 'task/4-1', 'main', '{}', ?, ?)`, at(0), at(0))
+		// One agent, of the author's family, and the task's review job
+		// waiting for a reviewer of another family: nobody can take it.
+		exec(`INSERT INTO runners (name, created_at) VALUES ('solo', ?)`, at(0))
+		exec(`INSERT INTO agents (runner_id, adapter, harness, model, family, account, classes, created_at, updated_at)
+			VALUES (1, 'claude', 'claude', 'sonnet', 'claude', 'claude', '["implement","review"]', ?, ?)`, at(0), at(0))
+		exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, exclude_family, queued_at, created_at, updated_at)
+			VALUES (1, 4, 'review', 'task:4', 'fresh', 'review it', 'queued', 'claude', ?, ?, ?)`, at(0), at(0), at(0))
 		exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
 			VALUES ('task_needs_help', 1, 2, NULL, '{"question":"should the sprocket be blue?"}', ?)`, at(0))
 		exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
@@ -117,7 +126,7 @@ func TestStatusGolden(t *testing.T) {
 	if matched, _ := regexp.MatchString(`^engine pid [0-9]+ up [0-9hms]+$`, head[0]); !matched {
 		t.Errorf("the engine line = %q, want `engine pid <pid> up <uptime>`", head[0])
 	}
-	if want := "jobs: queued 0 leased 0 running 0 done 0 failed 0 cancelled 0 stalled 0"; head[1] != want {
+	if want := "jobs: queued 1 leased 0 running 0 done 0 failed 0 cancelled 0 stalled 0"; head[1] != want {
 		t.Errorf("the jobs line = %q, want %q", head[1], want)
 	}
 
@@ -129,6 +138,7 @@ func TestStatusGolden(t *testing.T) {
 #1 active fix the frobnicator
   task #1 ready the frobnicator
   task #2 needs_foreman wire the sprocket [task/2-1]
+  task #4 reviewing review the gadget [task/4-1]
 #3 done fresh work
   task #3 done tidy the docs [task/3-1]
 foreman report:
@@ -136,6 +146,7 @@ foreman report:
   nothing else needs you
 needs you:
 task #2 needs_foreman: should the sprocket be blue?
+task #4 reviewing: no reviewer: every agent offering review is of the author's family (claude); offer an agent of another family to the runner (--agent harness=…) or review by hand
 plan #4 pending_approval
 `, at(-30*time.Minute))
 	if got := "plans:\n" + lines[1]; got != want {

@@ -176,11 +176,17 @@ func (e *Engine) sweepTx(tx *sql.Tx, now time.Time) (SweepReport, error) {
 		}
 	}
 
+	// A queued review no agent could ever take is flagged before the TTL
+	// reads it, so the notification precedes the park.
+	if err := flagUnservableReviewsTx(tx, now); err != nil {
+		return rep, err
+	}
+
 	if e.cfg.QueueTTL > 0 {
 		// The TTL is for jobs no runner can serve (§8.1); a job held only
 		// by a full cap layer waits as long as it takes, so the clock
 		// counts from the later of queued_at and the last cap hold.
-		rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0) FROM jobs
+		rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0), kind, exclude_family, COALESCE(exclude_agent, 0) FROM jobs
 			WHERE status = 'queued' AND queued_at IS NOT NULL
 			AND max(queued_at, COALESCE(cap_held_at, queued_at)) <= ?`, fmtTime(now.Add(-e.cfg.QueueTTL)))
 		if err != nil {
@@ -189,11 +195,13 @@ func (e *Engine) sweepTx(tx *sql.Tx, now time.Time) (SweepReport, error) {
 		type waiting struct {
 			id            int64
 			project, task int64
+			kind, family  string
+			excludeAgent  int64
 		}
 		var waitingAll []waiting
 		for rows.Next() {
 			var x waiting
-			if err := rows.Scan(&x.id, &x.project, &x.task); err != nil {
+			if err := rows.Scan(&x.id, &x.project, &x.task, &x.kind, &x.family, &x.excludeAgent); err != nil {
 				rows.Close()
 				return rep, fmt.Errorf("sweep queue TTL: %w", err)
 			}
@@ -205,6 +213,16 @@ func (e *Engine) sweepTx(tx *sql.Tx, now time.Time) (SweepReport, error) {
 		rows.Close()
 		for _, x := range waitingAll {
 			reason := fmt.Sprintf("queue TTL exceeded: no runner leased the job within %s", capText(e.cfg.QueueTTL))
+			if x.task != 0 {
+				// A review no agent could ever take says so, not the bare TTL.
+				bad, err := reviewUnservableTx(tx, &jobRow{Kind: Kind(x.kind), ExcludeFamily: x.family, ExcludeAgent: x.excludeAgent})
+				if err != nil {
+					return rep, err
+				}
+				if bad {
+					reason = noReviewerWhy(x.family)
+				}
+			}
 			if err := failJobTx(tx, x.id, reason, 0, now); err != nil {
 				return rep, err
 			}

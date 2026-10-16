@@ -24,6 +24,9 @@ const (
 	KindForemanReport   = "foreman_report"     // a done foreman turn's final message, its report to the user (§3, §10)
 	KindForemanLimited  = "foreman_limited"    // the foreman's CLI hit its subscription limit (§4.4, §10)
 	KindAgentBroken     = "agent_broken"       // an agent was marked broken (§8 "Health", §10)
+	// KindReviewUnservable: a task's queued review can never be taken —
+	// no agent of another family offers review (§7, §10).
+	KindReviewUnservable = "review_unservable"
 	// KindPlanAwaitingApproval: a plan is over the approval limit and
 	// waits for the user's yes (§6.3, §10).
 	KindPlanAwaitingApproval = "plan_awaiting_approval"
@@ -110,6 +113,10 @@ func Message(ev Event) (t, body string, ok bool) {
 		// paths); the user answers with approve or reject.
 		return title, oneLine(fmt.Sprintf("plan #%d needs your approval: %s: `brigada plan approve %d` or `brigada plan reject %d`",
 			ev.PlanID, ev.Reason, ev.PlanID, ev.PlanID), bodyLimit), true
+	case ev.Kind == KindReviewUnservable:
+		// Reason is the needs-you entry's own words: what is missing and
+		// what the user can do about it.
+		return title, oneLine(fmt.Sprintf("task #%d reviewing: %s", ev.TaskID, ev.Reason), bodyLimit), true
 	case needsForemanKinds[ev.Kind] && ev.Parked:
 		reason := ev.Reason
 		if reason == "" {
