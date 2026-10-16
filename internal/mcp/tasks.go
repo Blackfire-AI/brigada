@@ -8,6 +8,22 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/api"
 )
 
+func callDecisionNote(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
+	var a struct {
+		Text string `json:"text"`
+	}
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &a); err != nil {
+			return "", fmt.Errorf("arguments: %w", err)
+		}
+	}
+	res, err := c.DecisionNote(ctx, a.Text, idemKey("decision_note", a))
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("decision note recorded: event %d", res.EventID), nil
+}
+
 // answerArgs is the answer tool's arguments (§3, §12.2): the asking
 // task and the answer's text.
 type answerArgs struct {

@@ -142,6 +142,11 @@ type acquireRequest struct {
 	BridgeInstance string `json:"bridge_instance"`
 	Label          string `json:"label"`
 	SessionHint    string `json:"session_hint"`
+	// Observations from the bridge's verified harness channel, kept separate
+	// from model-supplied hints. These select history, never authority.
+	HarnessSessionID         string    `json:"harness_session_id"`
+	HarnessSessionSource     string    `json:"harness_session_source"`
+	HarnessSessionObservedAt time.Time `json:"harness_session_observed_at"`
 }
 
 // AcquireResponse is the created hold: its id, the credential (the
@@ -192,7 +197,13 @@ func (s *Server) handleHoldAcquire(w http.ResponseWriter, r *http.Request, _ ide
 	}
 	res, err := s.eng.AcquireHold(r.Context(), engine.HoldAcquire{
 		Project: project, BridgeInstance: req.BridgeInstance, Label: req.Label, SessionHint: req.SessionHint,
+		HarnessSessionID: req.HarnessSessionID, HarnessSessionSource: req.HarnessSessionSource,
+		HarnessSessionObservedAt: req.HarnessSessionObservedAt,
 	})
+	if errors.Is(err, engine.ErrInvalidMessage) {
+		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		s.writeInternal(w, r, "acquire the hold", err)
 		return
