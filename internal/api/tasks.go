@@ -105,6 +105,32 @@ func (s *Server) taskProject(w http.ResponseWriter, r *http.Request, id identity
 	return project, true
 }
 
+// handleTaskGet reads one task (§12.1): its repo, base ref, result
+// branch and latest job — what a client needs to find the change. A
+// foreman token is walled into its own project's tasks.
+func (s *Server) handleTaskGet(w http.ResponseWriter, r *http.Request, id identity) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	taskID, ok := parseTaskID(w, r)
+	if !ok {
+		return
+	}
+	if _, ok := s.taskProject(w, r, id, taskID); !ok {
+		return
+	}
+	task, err := s.eng.Task(r.Context(), taskID)
+	if err != nil {
+		s.writeInternal(w, r, "read task", err)
+		return
+	}
+	if task == nil {
+		writeError(w, http.StatusNotFound, codeNotFound, "no such task "+strconv.FormatInt(taskID, 10))
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
 // parseTaskID reads the {id} path value as a task id.
 func parseTaskID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	taskID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)

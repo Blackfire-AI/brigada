@@ -60,6 +60,36 @@ func countJobs(t *testing.T, e *env, task int64) int64 {
 	return n
 }
 
+// TestTaskGetEndpoint covers GET /v1/tasks/{id}: a client reads the
+// task's repo, base ref and result branch; a missing task is a 404; a
+// runner token may not read.
+func TestTaskGetEndpoint(t *testing.T) {
+	e := newEnv(t)
+	task := seedParked(t, e, e.plan, "task_needs_help", `{"question":"q"}`)
+	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE tasks SET branch = 'brigada/task-1-r2' WHERE id = ?", task)
+		return err
+	}); err != nil {
+		t.Fatalf("set the branch: %v", err)
+	}
+	path := fmt.Sprintf("/v1/tasks/%d", task)
+	code, _, data := e.do(http.MethodGet, path, "foreman1", "", nil)
+	if code != http.StatusOK {
+		t.Fatalf("read a task: %d %s, want 200", code, data)
+	}
+	for _, want := range []string{`"base_ref":"main"`, `"branch":"brigada/task-1-r2"`, `"repo_url":`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("task body %s lacks %s", data, want)
+		}
+	}
+	if code, _, _ := e.do(http.MethodGet, "/v1/tasks/99999", "foreman1", "", nil); code != http.StatusNotFound {
+		t.Errorf("read a missing task: %d, want 404", code)
+	}
+	if code, _, _ := e.do(http.MethodGet, path, "r1", "", nil); code != http.StatusForbidden {
+		t.Errorf("runner reads a task: %d, want 403", code)
+	}
+}
+
 // TestTaskAnswerEndpoint covers /v1/tasks/{id}/answer (§3, §12.1): the
 // foreman answers its own project's parked task, a foreman token
 // outside its project is a 403, a runner may not, the engine's

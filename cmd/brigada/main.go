@@ -46,6 +46,10 @@ Commands:
 	project set     Set a project's approval limit: key=value ... (§6.3).
 	project show    Show a project's approval limit and whether each is the default.
 	history         Show the timeline.
+	diff <task-id>  Show what a task changed: git diff base...branch, run
+	                inside the repo (--stat, --repo URL).
+	logs <job-id>   Show what a job's worker did: the transcript as
+	                readable lines (--check, --tail N, --follow, --task N).
 	stats           Show which agent wins which class, per repo.
 	agent reset <harness>/<model>
 	                Clear a broken or cooling agent.
@@ -94,6 +98,8 @@ var commands = map[string]command{
 	"agent":   {name: "agent", run: runAgent},
 	"plan":    {name: "plan", run: runPlan},
 	"recover": {name: "recover", run: runRecover},
+	"diff":    {name: "diff", run: runDiff},
+	"logs":    {name: "logs", run: runLogs},
 }
 
 // run is the entry point of the brigada command. It writes to stdout and

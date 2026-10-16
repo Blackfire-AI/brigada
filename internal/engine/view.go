@@ -31,9 +31,12 @@ type JobInfo struct {
 	LeaseExpiresAt string          `json:"lease_expires_at,omitempty"`
 	// TranscriptID is the job's transcript artifact (§9), the run's own
 	// record of itself; 0 until the runner uploaded one.
-	TranscriptID int64  `json:"transcript_id,omitempty"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	TranscriptID int64 `json:"transcript_id,omitempty"`
+	// CheckLogID is the job's newest check log artifact (§9); 0 when the
+	// job ran no check or left no log.
+	CheckLogID int64  `json:"check_log_id,omitempty"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
 }
 
 // Job reads one job by id (§12.1); nil when there is none. Like every
@@ -52,16 +55,22 @@ func (e *Engine) Job(ctx context.Context, id int64) (*JobInfo, error) {
 		var created, updated string
 		var check sql.NullString
 		var transcript sql.NullInt64
+		var checkLog int64
 		if j != nil {
 			if err := tx.QueryRow("SELECT created_at, updated_at, check_result, transcript_id FROM jobs WHERE id = ?", id).
 				Scan(&created, &updated, &check, &transcript); err != nil {
 				return fmt.Errorf("read timestamps: %w", err)
+			}
+			if err := tx.QueryRow("SELECT COALESCE(MAX(id), 0) FROM artifacts WHERE job_id = ? AND kind = ?", id, ArtifactCheckLog).
+				Scan(&checkLog); err != nil {
+				return fmt.Errorf("read check log: %w", err)
 			}
 		}
 		info = jobInfoOf(j)
 		if info != nil {
 			info.CreatedAt, info.UpdatedAt = created, updated
 			info.TranscriptID = transcript.Int64
+			info.CheckLogID = checkLog
 			if check.Valid && check.String != "" {
 				info.CheckResult = json.RawMessage(check.String)
 			}

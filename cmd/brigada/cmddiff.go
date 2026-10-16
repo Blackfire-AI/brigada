@@ -1,0 +1,156 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strings"
+
+	"github.com/Blackfire-AI/brigada/internal/engine"
+)
+
+// taskReader is the one thing diff asks the engine: which refs. The
+// engine runs no git for a client (product §5 rule 1).
+type taskReader interface {
+	Task(ctx context.Context, id int64) (engine.TaskInfo, error)
+}
+
+// runDiff is `brigada diff <task-id> [--stat] [--repo URL]`: the task's
+// change as git shows it, base...branch, on stdout so it pipes to a
+// pager. It runs inside the project's repository, fetches the two refs
+// from origin (refs only, no checkout) and diffs them locally.
+func runDiff(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("diff")
+	common := addCommon(fs)
+	stat := fs.Bool("stat", false, "print the diffstat instead of the whole diff")
+	repo := fs.String("repo", "", "the repository URL the working directory stands for (default: its origin's URL)")
+	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
+	rest, code := parseWithPositional(common, stderr, args)
+	if code != 0 {
+		return code
+	}
+	if len(rest) != 1 {
+		return usagef(stderr, "usage: brigada diff <task-id> [--stat] [--repo URL]")
+	}
+	id, ok := parseID(stderr, "task id", rest[0])
+	if !ok {
+		return 2
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return fail(stderr, fmt.Errorf("find the working directory: %w", err))
+	}
+	rt, code := resolveRuntime(common, stderr)
+	if code != 0 {
+		return code
+	}
+	client, code := connect(ctx, rt, "client", *noStart, stderr)
+	if code != 0 {
+		return code
+	}
+	return printDiff(ctx, client, dir, id, *repo, *stat, stdout, stderr)
+}
+
+// parseWithPositional parses args that carry one leading positional
+// (`diff 7 --stat`), which the flag package would otherwise stop at: the
+// flags before it and the flags after it both count. It returns what is
+// left over once every flag is taken.
+func parseWithPositional(c *commonFlags, stderr io.Writer, args []string) ([]string, int) {
+	if code := c.parse(stderr, args); code != 0 {
+		return nil, code
+	}
+	rest := c.fs.Args()
+	if len(rest) == 0 {
+		return nil, 0
+	}
+	first := rest[0]
+	if code := c.parse(stderr, rest[1:]); code != 0 {
+		return nil, code
+	}
+	return append([]string{first}, c.fs.Args()...), 0
+}
+
+// printDiff reads the task's refs, checks the working directory is the
+// task's repository, fetches the two refs and prints the diff.
+func printDiff(ctx context.Context, client taskReader, dir string, id int64, repo string, stat bool, stdout, stderr io.Writer) int {
+	task, err := client.Task(ctx, id)
+	if err != nil {
+		if isNotFound(err) {
+			return fail(stderr, fmt.Errorf("task %d: no such task", id))
+		}
+		return fail(stderr, err)
+	}
+	if task.Branch == "" {
+		return fail(stderr, fmt.Errorf("task %d has no result branch yet (state %s); nothing to diff", id, task.State))
+	}
+	here := repo
+	if here == "" {
+		origin, err := gitOriginURL(dir)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		here = origin
+	}
+	if !sameRepo(here, task.RepoURL) {
+		return fail(stderr, fmt.Errorf("task %d belongs to %s, but this directory is %s; run diff inside that repository", id, task.RepoURL, here))
+	}
+	// Private refs under refs/brigada/diff: a base that is a tag or a
+	// branch, and a result branch, land somewhere the diff can name
+	// without touching the user's own branches or checkout.
+	baseRef := fmt.Sprintf("refs/brigada/diff/%d/base", id)
+	branchRef := fmt.Sprintf("refs/brigada/diff/%d/branch", id)
+	if err := runGit(ctx, dir, nil, stderr, "fetch", "--quiet", "origin",
+		"+"+task.BaseRef+":"+baseRef, "+"+task.Branch+":"+branchRef); err != nil {
+		return fail(stderr, fmt.Errorf("fetch %s and %s from origin: %w", task.BaseRef, task.Branch, err))
+	}
+	gitArgs := []string{"--no-pager", "diff"}
+	if stat {
+		gitArgs = append(gitArgs, "--stat")
+	}
+	gitArgs = append(gitArgs, baseRef+"..."+branchRef)
+	if err := runGit(ctx, dir, stdout, stderr, gitArgs...); err != nil {
+		return fail(stderr, fmt.Errorf("diff %s...%s: %w", task.BaseRef, task.Branch, err))
+	}
+	return 0
+}
+
+// runGit runs git in dir with the given output sinks; a nil stdout
+// discards it. A failure carries git's own words when stderr is not a
+// sink the caller already shows.
+func runGit(ctx context.Context, dir string, stdout, stderr io.Writer, args ...string) error {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	var errb bytes.Buffer
+	cmd.Stderr = &errb
+	if stdout != nil {
+		cmd.Stdout = stdout
+	}
+	err := cmd.Run()
+	if err != nil {
+		if msg := strings.TrimSpace(errb.String()); msg != "" {
+			return fmt.Errorf("%s", msg)
+		}
+		return err
+	}
+	if errb.Len() > 0 {
+		stderr.Write(errb.Bytes())
+	}
+	return nil
+}
+
+// sameRepo reports whether two repo URLs name one repository. It is the
+// one place the comparison lives, so it can move to the canonical-URL
+// function when that lands: for now, case, a trailing slash and a
+// trailing .git do not tell repositories apart.
+func sameRepo(a, b string) bool {
+	norm := func(s string) string {
+		s = strings.TrimSpace(s)
+		s = strings.TrimRight(s, "/")
+		s = strings.TrimSuffix(s, ".git")
+		return strings.ToLower(strings.TrimRight(s, "/"))
+	}
+	return norm(a) == norm(b)
+}
