@@ -61,7 +61,7 @@ func (s *Server) handlePlanCreate(w http.ResponseWriter, r *http.Request, id ide
 	}
 	tasks := make([]engine.PlanTask, len(req.Tasks))
 	for i, t := range req.Tasks {
-		tasks[i] = engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Spec: t.Spec, Check: t.Check, Class: t.Class}
+		tasks[i] = engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class}
 	}
 	res, err := s.eng.CreatePlan(r.Context(), project, req.Title, tasks)
 	if err != nil {
@@ -120,6 +120,7 @@ type planTaskBody struct {
 	Title string   `json:"title"`
 	Name  string   `json:"name,omitempty"`
 	Deps  []string `json:"deps,omitempty"`
+	Base  string   `json:"base,omitempty"`
 	Spec  string   `json:"spec"`
 	Check string   `json:"check"`
 	Class string   `json:"class"`
@@ -227,10 +228,10 @@ func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id iden
 	// the foreman's own cancellations are never approved.
 	am := engine.PlanAmendment{Cancel: req.Cancel, SkipApproved: id.role != roleForeman}
 	for _, t := range req.Add {
-		am.Add = append(am.Add, engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Spec: t.Spec, Check: t.Check, Class: t.Class})
+		am.Add = append(am.Add, engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class})
 	}
 	for _, rt := range req.Retarget {
-		am.Retarget = append(am.Retarget, engine.PlanRetarget{Task: rt.Task, Deps: rt.Deps})
+		am.Retarget = append(am.Retarget, engine.PlanRetarget{Task: rt.Task, Deps: rt.Deps, Base: rt.Base})
 	}
 	res, err := s.eng.AmendPlan(r.Context(), project, planID, am)
 	switch {
@@ -272,6 +273,7 @@ type planAmendRequest struct {
 type planRetargetBody struct {
 	Task string   `json:"task"`
 	Deps []string `json:"deps"`
+	Base string   `json:"base,omitempty"`
 }
 
 // planAmendResponse names what the amendment did.

@@ -78,8 +78,8 @@ End every headless turn with a short report for the user, its first
 line written for a one-line notification: what woke you, what you did,
 and what, if anything, needs the user. When the wake was a finished
 plan, name the plan, each task with its approved branch, and the order
-to merge them in; merging is the user's, not yours — brigada does not
-merge. When nothing needed you, a one-line report is enough.
+to merge them in (a task after its base); merging is the user's, not yours.
+When nothing needed you, a one-line report is enough.
 
 ## Turns
 

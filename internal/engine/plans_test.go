@@ -187,6 +187,159 @@ func TestCreatePlanWithDeps(t *testing.T) {
 	if got := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ?", ship.TaskID); got != 0 {
 		t.Errorf("ship jobs = %d, want 0 while it waits", got)
 	}
+	// A waiting task keeps the default branch until it is released.
+	if got := e.str("SELECT base_ref FROM tasks WHERE id = ?", ship.TaskID); got != "main" {
+		t.Errorf("ship base ref while waiting = %q, want main", got)
+	}
+	if got := e.int("SELECT COUNT(*) FROM task_deps WHERE task_id = ? AND is_base = 1", ship.TaskID); got != 0 {
+		t.Errorf("ship named bases = %d, want 0", got)
+	}
+
+	// A base is recorded on its edge; one that is not a dep, or names no
+	// task, refuses the whole plan.
+	based, err := e.eng.CreatePlan(e.ctx, e.project, "based", []PlanTask{
+		{Name: "a", Spec: "a", Class: "answer"},
+		{Name: "b", Spec: "b", Class: "answer"},
+		{Name: "c", Spec: "c", Class: "answer", Deps: []string{"a", "b"}, Base: "b"},
+	})
+	if err != nil {
+		t.Fatalf("create the based plan: %v", err)
+	}
+	c, b := based.Tasks[2].TaskID, based.Tasks[1].TaskID
+	if got := e.int("SELECT depends_on_task_id FROM task_deps WHERE task_id = ? AND is_base = 1", c); got != b {
+		t.Errorf("c's base edge = task %d, want b (%d)", got, b)
+	}
+	for name, tasks := range map[string][]PlanTask{
+		"base not a dep": {
+			{Name: "a", Spec: "a"}, {Name: "b", Spec: "b"},
+			{Name: "c", Spec: "c", Deps: []string{"a"}, Base: "b"},
+		},
+		"base names no task": {
+			{Name: "a", Spec: "a"},
+			{Name: "c", Spec: "c", Deps: []string{"a"}, Base: "zzz"},
+		},
+		"base without deps": {
+			{Name: "a", Spec: "a", Base: "a"},
+		},
+	} {
+		before := e.int("SELECT COUNT(*) FROM plans")
+		_, err := e.eng.CreatePlan(e.ctx, e.project, name, tasks)
+		if err == nil || !strings.Contains(err.Error(), "not one of its deps") {
+			t.Errorf("%s: err = %v, want the base refused with its reason", name, err)
+		}
+		if after := e.int("SELECT COUNT(*) FROM plans"); after != before {
+			t.Errorf("%s: a refused plan left %d plans behind", name, after-before)
+		}
+	}
+}
+
+// TestStackedBaseResolution: when a dependent is released its base_ref is
+// the final result branch of the dependency it stacks on: the only dep,
+// or the named one among several; several with no base keep the default
+// branch. The grant carries it to the runner.
+func TestStackedBaseResolution(t *testing.T) {
+	e := newEnv(t)
+	res, err := e.eng.CreatePlan(e.ctx, e.project, "stacked", []PlanTask{
+		{Name: "a", Spec: "a", Class: "answer"},
+		{Name: "b", Spec: "b", Class: "answer"},
+		{Name: "one", Spec: "one", Class: "answer", Deps: []string{"a"}},
+		{Name: "named", Spec: "named", Class: "answer", Deps: []string{"a", "b"}, Base: "b"},
+		{Name: "plain", Spec: "plain", Class: "answer", Deps: []string{"a", "b"}},
+	})
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	id := map[string]int64{}
+	for _, tk := range res.Tasks {
+		id[tk.Name] = tk.TaskID
+	}
+	for range 2 {
+		g := e.leaseAny(e.runner1)
+		if g == nil {
+			t.Fatal("a root was not leased")
+		}
+		if g.BaseRef != "main" {
+			t.Errorf("root grant base = %q, want main", g.BaseRef)
+		}
+		if ans := e.complete(g, done()); ans != AnsOK {
+			t.Fatalf("complete a root: %s", ans)
+		}
+	}
+	want := map[string]string{
+		"one":   branchOf(id["a"]),
+		"named": branchOf(id["b"]),
+		"plain": "main",
+	}
+	for name, base := range want {
+		if got := e.str("SELECT base_ref FROM tasks WHERE id = ?", id[name]); got != base {
+			t.Errorf("%s base ref = %q, want %q", name, got, base)
+		}
+	}
+	for range 3 {
+		g := e.leaseAny(e.runner1)
+		if g == nil {
+			t.Fatal("a dependent was not leased")
+		}
+		for name, tid := range id {
+			if tid == g.TaskID {
+				if w, ok := want[name]; !ok || g.BaseRef != w {
+					t.Errorf("%s grant base = %q, want %q", name, g.BaseRef, w)
+				}
+			}
+		}
+		e.complete(g, done())
+	}
+}
+
+// TestAmendBases: an added task and a retargeted one take a base as
+// creation does; a retarget replaces the earlier base with the earlier
+// deps, and a base outside the new deps refuses the whole amendment.
+func TestAmendBases(t *testing.T) {
+	e := newEnv(t)
+	res, err := e.eng.CreatePlan(e.ctx, e.project, "amend bases", []PlanTask{
+		{Name: "a", Spec: "a", Class: "answer"},
+		{Name: "b", Spec: "b", Class: "answer"},
+		{Name: "gate", Spec: "gate", Class: "answer", Deps: []string{"a", "b"}, Base: "a"},
+	})
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	a, b, gate := res.Tasks[0].TaskID, res.Tasks[1].TaskID, res.Tasks[2].TaskID
+
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+		Add: []PlanTask{{Name: "bad", Spec: "x", Deps: []string{"a"}, Base: "b"}},
+	}); err == nil || !strings.Contains(err.Error(), "not one of its deps") {
+		t.Errorf("added task with a base outside its deps: err = %v, want refusal", err)
+	}
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+		Retarget: []PlanRetarget{{Task: "gate", Deps: []string{"a"}, Base: "b"}},
+	}); err == nil || !strings.Contains(err.Error(), "not one of its deps") {
+		t.Errorf("retarget with a base outside its deps: err = %v, want refusal", err)
+	}
+	if got := e.int("SELECT depends_on_task_id FROM task_deps WHERE task_id = ? AND is_base = 1", gate); got != a {
+		t.Errorf("a refused amendment changed gate's base edge to %d, want a (%d)", got, a)
+	}
+	if got := e.int("SELECT COUNT(*) FROM tasks WHERE plan_id = ?", res.PlanID); got != 3 {
+		t.Errorf("a refused amendment left %d tasks, want 3", got)
+	}
+
+	am := e.amend(res.PlanID, PlanAmendment{
+		Add:      []PlanTask{{Name: "extra", Spec: "extra", Class: "answer", Deps: []string{"a", "b"}, Base: "b"}},
+		Retarget: []PlanRetarget{{Task: "gate", Deps: []string{"a", "b"}}},
+	})
+	extra := am.Added[0].TaskID
+	if got := e.int("SELECT COUNT(*) FROM task_deps WHERE task_id = ? AND is_base = 1", gate); got != 0 {
+		t.Errorf("retargeted gate keeps %d named bases, want 0 (the retarget names none)", got)
+	}
+	for range 2 {
+		e.complete(e.leaseAny(e.runner1), done())
+	}
+	if got := e.str("SELECT base_ref FROM tasks WHERE id = ?", extra); got != branchOf(b) {
+		t.Errorf("extra base ref = %q, want b's branch %q", got, branchOf(b))
+	}
+	if got := e.str("SELECT base_ref FROM tasks WHERE id = ?", gate); got != "main" {
+		t.Errorf("gate base ref = %q, want main (two deps, no base)", got)
+	}
 }
 
 // TestCompletionReleasesDependent: the last dependency's completion
@@ -213,9 +366,17 @@ func TestCompletionReleasesDependent(t *testing.T) {
 	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
 		t.Errorf("plan state = %q, want active", got)
 	}
+	// ship's only dependency is its base: the row now names build's
+	// result branch, written before the work job was queued.
+	if got := e.str("SELECT base_ref FROM tasks WHERE id = ?", ship.TaskID); got != branchOf(build.TaskID) {
+		t.Errorf("ship base ref = %q, want build's branch %q", got, branchOf(build.TaskID))
+	}
 	g = e.leaseAny(e.runner1)
 	if g == nil || g.TaskID != ship.TaskID {
 		t.Fatalf("lease = %+v, want ship's job", g)
+	}
+	if g.BaseRef != branchOf(build.TaskID) {
+		t.Errorf("ship grant base = %q, want build's branch %q", g.BaseRef, branchOf(build.TaskID))
 	}
 	if ans := e.complete(g, done()); ans != AnsOK {
 		t.Fatalf("complete ship: %s", ans)

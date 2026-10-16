@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +49,7 @@ type Task struct {
 	Title    string
 	Class    string
 	Deps     []string
+	Base     string // the dep whose branch the work starts from; '' = the default branch
 	State    string
 	Branch   string // the result branch (§6.4); '' until the task pushed one
 	Rounds   int    // fix and review rounds spent (§7)
@@ -61,7 +63,9 @@ const header = `# Brigada plan file (§6.4): a mirror of the engine's store, whi
 `
 
 const tasksComment = `# §6.1: the graph. A task waits (pending) until every task named in deps is
-# done; states are the engine's (§6.1), rounds the fix and review rounds
+# done; its work starts from the branch of base, one of deps, or from the
+# default branch when base is empty; merge a task after its base. States
+# are the engine's (§6.1), rounds the fix and review rounds
 # spent (§7), question the worker's open question (§3), when it has one.
 `
 
@@ -101,6 +105,7 @@ func Render(p Plan) ([]byte, error) {
 			deps[i] = strconv.Quote(d)
 		}
 		fmt.Fprintf(&b, "    deps: [%s]\n", strings.Join(deps, ", "))
+		fmt.Fprintf(&b, "    base: %s\n", strconv.Quote(t.Base))
 		fmt.Fprintf(&b, "    state: %s\n", t.State)
 		fmt.Fprintf(&b, "    branch: %s\n", strconv.Quote(t.Branch))
 		fmt.Fprintf(&b, "    rounds: %d\n", t.Rounds)
@@ -284,6 +289,15 @@ func (r *reader) task() (Task, error) {
 	}
 	if t.Deps, err = parseList(deps); err != nil {
 		return Task{}, r.errf("deps: %v", err)
+	}
+	// base is absent from files written before stacked bases.
+	if r.peekIs(in + "base:") {
+		if t.Base, err = r.quotedField(in, "base"); err != nil {
+			return Task{}, err
+		}
+		if t.Base != "" && !slices.Contains(t.Deps, t.Base) {
+			return Task{}, r.errf("base: %q is not one of deps", t.Base)
+		}
 	}
 	if t.State, err = r.wordField(in, "state"); err != nil {
 		return Task{}, err
