@@ -21,6 +21,10 @@ type Progress struct {
 	Events         []string
 }
 
+// heartbeatDeadline bounds one heartbeat's transaction, which does not
+// follow its request's cancellation.
+const heartbeatDeadline = 30 * time.Second
+
 // Heartbeat reports the runner is still on the job and returns ok with
 // a new expiry, or why not (§12.3): cancelled first, then gone for a
 // job that ended (lost, not gone, when this very call's sweep just
@@ -35,12 +39,21 @@ type Progress struct {
 func (e *Engine) Heartbeat(ctx context.Context, owner, jobID int64, leaseID string, prog Progress) (Answer, time.Time, error) {
 	var ans Answer
 	var expires time.Time
+	// A heartbeat that began is finished on a context of its own: a request
+	// that gives up mid-sweep (a client timeout under load) must not roll
+	// the transaction back and cost a live worker its lease. The deadline
+	// keeps a wedged store from holding the call forever.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), heartbeatDeadline)
+	defer cancel()
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		// The heartbeat shows the runner is here, before the sweep can
 		// call it stale (§8 "Health").
 		if err := e.runnerSeenTx(tx, owner, now); err != nil {
 			return err
+		}
+		if e.beforeHeartbeatSweep != nil {
+			e.beforeHeartbeatSweep()
 		}
 		rep, err := e.sweepTx(tx, now)
 		if err != nil {

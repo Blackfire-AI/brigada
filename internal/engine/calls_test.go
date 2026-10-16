@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -367,5 +368,48 @@ func TestCancelLiveJob(t *testing.T) {
 	}
 	if ans := e.cancel(done2.JobID); ans != AnsGone {
 		t.Errorf("cancel of a done job = %s; want gone", ans)
+	}
+}
+
+// TestHeartbeatOutlivesItsRequestContext covers a slow sweep: a beat
+// whose request is cancelled mid-sweep (a client timeout under load)
+// still commits and keeps the lease, since a failed beat would cost a
+// live worker its lease.
+func TestHeartbeatOutlivesItsRequestContext(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		cancel bool
+	}{{"slow sweep", false}, {"request cancelled mid-sweep", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.submit(e.work())
+			g := e.leaseAny(e.runner1)
+			e.clock.Advance(30 * time.Second)
+
+			ctx, cancel := context.WithCancel(e.ctx)
+			defer cancel()
+			swept := false
+			e.eng.beforeHeartbeatSweep = func() {
+				swept = true
+				time.Sleep(50 * time.Millisecond)
+				if tc.cancel {
+					cancel()
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			ans, expires, err := e.eng.Heartbeat(ctx, g.LeaseOwner, g.JobID, g.LeaseID, Progress{})
+			if !swept {
+				t.Fatal("the sweep hook never ran")
+			}
+			if err != nil || ans != AnsOK {
+				t.Fatalf("heartbeat = %s, %v; want ok", ans, err)
+			}
+			if got := e.str("SELECT lease_expires_at FROM jobs WHERE id = ?", g.JobID); got != fmtTime(expires) {
+				t.Errorf("stored expiry = %q, want %q: the beat did not commit", got, fmtTime(expires))
+			}
+			if status := e.str("SELECT status FROM jobs WHERE id = ?", g.JobID); status != statusLeased {
+				t.Errorf("status = %q, want leased", status)
+			}
+		})
 	}
 }

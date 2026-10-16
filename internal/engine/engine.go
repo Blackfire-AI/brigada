@@ -296,6 +296,10 @@ type Engine struct {
 	cfg    Config
 	mirror planMirror // the plan-file mirror's background push (§6.4)
 	snap   snapshotState
+
+	// beforeHeartbeatSweep, when set by a test, runs inside a heartbeat's
+	// transaction just before its sweep, to play a slow sweep out.
+	beforeHeartbeatSweep func()
 }
 
 // New returns an engine over s. Zero fields of cfg keep their defaults.
