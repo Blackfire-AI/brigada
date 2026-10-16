@@ -116,7 +116,7 @@ An empty value, as in `approval_max_tasks=`, puts the key back to its default. A
 brigada runner --agent harness=claude,model=sonnet --agent harness=codex,account=work
 ```
 
-`harness` is `claude`, `kimi`, `codex` or `opencode`; `model` defaults to `sonnet` for claude and to the CLI's own default for the others (for opencode, a model is `provider/model`); `classes` is a `+`-separated list, default `implement+review+answer`; `agent-file=<path>` is for kimi only; `effort=<level>` is validated per harness (see Effort below). Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `--agent-file` describe one agent; the two forms cannot be mixed. Also: `--labels` (labels the runner offers), `--max-parallel N` (how many concurrent jobs this runner runs; the default 1 is one at a time) and `--no-start`. Keep the runner running: a job nobody leases within ten minutes fails, but the ten minutes do not count while every runner that could take the job is full: `brigada status` shows such a job as held, waiting for a runner slot. `kimi` and `opencode` are worker-only; the foreman can be `claude` or `codex`.
+`harness` is `claude`, `kimi`, `codex` or `opencode`; `model` defaults to `sonnet` for claude and to the CLI's own default for the others (for opencode, a model is `provider/model`); `classes` is a `+`-separated list, default `implement+review+answer`; `agent-file=<path>` is for kimi only; `effort=<level>` is validated per harness (see Effort below); `tools=<p1>+<p2>` is for claude only (see Worker tools below). Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `--agent-file` describe one agent; the two forms cannot be mixed. Also: `--labels` (labels the runner offers), `--max-parallel N` (how many concurrent jobs this runner runs; the default 1 is one at a time) and `--no-start`. Keep the runner running: a job nobody leases within ten minutes fails, but the ten minutes do not count while every runner that could take the job is full: `brigada status` shows such a job as held, waiting for a runner slot. `kimi` and `opencode` are worker-only; the foreman can be `claude` or `codex`.
 
 **Effort.** `effort=<level>` on an agent sets how hard its CLI reasons; leave it out for the CLI's own default. brigada accepts these levels per harness and passes each one through one fixed flag, never a raw argument:
 
@@ -128,6 +128,14 @@ brigada runner --agent harness=claude,model=sonnet --agent harness=codex,account
 | `kimi` | none: its CLI documents no effort option, so `effort=` is refused | — |
 
 The lists are brigada's accepted values, not a promise that every model supports every one: the CLI judges that. For codex the key is model-dependent. For opencode a variant is provider- and model-specific and the three listed are the ones its help names, not every variant that exists. Any other level is a usage error at startup. Effort is not part of an agent's identity: the dispatcher, `agent reset` and the outcome record still key by `harness/model`; `status` and `stats` print `claude/opus@high` only for an agent that has an effort set. The foreman's effort is chosen separately (section 10).
+
+**Worker tools (claude).** A claude worker edits files in its worktree, and its shell is limited to `go build`, `go test`, `go vet` and `gofmt`: the default scope is Go only, so in a Node, Python or Rust repo it cannot run its own tests (the runner's check still runs on the finished tree). `tools=` replaces that default for one agent with a `+`-separated list of Claude Code tool patterns:
+
+```
+brigada runner --agent 'harness=claude,tools=Bash(npm test:*)+Bash(npx jest:*)'
+```
+
+`tools=none` means the file tools only, no shell at all. The config key `tools.claude/<model>` (same syntax) sets the default for that model's agent; `tools=` on the `--agent` wins over it, and an agent with neither keeps the Go default. A pattern cannot contain a comma (the `--agent` value splits on commas). The scope applies to workers only: the foreman's own tools (read-only file tools and brigada's MCP tools, no shell and no edits) never change, whatever `tools=` says. `codex`, `kimi` and `opencode` refuse `tools=`, since brigada has no tool list for them: codex workers run in the `workspace-write` sandbox, kimi runs headless with `-p` (no approval prompts), and opencode permits edits and denies bash headless by default. `brigada runner` prints each claude agent's scope at startup, and the foreman's capacity read shows it as `tools=` on the agent.
 
 **Accounts.** An agent's account is the login whose quota it spends. The account label defaults to the harness name, which is right when each CLI has one login. If you have a second login for a CLI, offer it as another runner's agent with `account=<label>` so that the two logins keep separate quotas, caps and cooling.
 
@@ -197,6 +205,7 @@ The config file is optional. Format: one `key = value` per line; a line starting
 | `caps.account.<label>` | integer, 0 or more | no cap | Most parallel jobs on one account label (section 5). |
 | `caps.model.<model>` | integer, 0 or more | no cap | Most parallel jobs on one model. |
 | `cost.<harness>/<model>` | integer, 0 or more | 1 | Relative cost weight of an agent, shown to the foreman. |
+| `tools.claude/<model>` | `+`-separated Claude Code tool patterns, or `none` | the Go scope | Default shell scope of the claude worker agent on that model; `--agent ...,tools=` overrides it (section 5). Other harnesses are refused. |
 
 Effort is not a config-file key: it is set per agent with `brigada runner --agent …,effort=<level>` (section 5) and per project foreman with `brigada project foreman --effort <level>` (section 10). `cost.*` keys name `harness/model` without an effort.
 
@@ -223,7 +232,7 @@ cost.claude/opus = 2
 
 **Working**
 
-- `brigada runner --agent harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,agent-file=<path>][,effort=<level>]`: run a runner that leases jobs, runs workers and checks, and pushes branches. See section 5.
+- `brigada runner --agent harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]`: run a runner that leases jobs, runs workers and checks, and pushes branches. See section 5.
 - `brigada task submit --repo URL [--base REF] --spec FILE|- [--check CMD] [--title T] [--harness H]`: submit one task directly, without the foreman. A debugging path; the base ref defaults to `main`. See sections 3 and 4.
 - `brigada review --branch <name> [--repo URL]`: review a branch with an agent of another family, with no plan. See section 4.
 

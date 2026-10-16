@@ -36,8 +36,12 @@ func callCapacity(ctx context.Context, c *api.Client, _ json.RawMessage) (string
 		if a.Quota == "cooling" {
 			quota += " until " + a.CoolingUntil
 		}
-		fmt.Fprintf(&b, "agent %d %s/%s account=%s cap=%s running=%d quota=%s cost=%d\n",
-			a.ID, a.Harness, a.Model, a.Account, cap, a.Running, quota, a.Cost)
+		tools := ""
+		if a.Tools != "" {
+			tools = " tools=" + a.Tools
+		}
+		fmt.Fprintf(&b, "agent %d %s/%s account=%s cap=%s running=%d quota=%s cost=%d%s\n",
+			a.ID, a.Harness, a.Model, a.Account, cap, a.Running, quota, a.Cost, tools)
 	}
 	for _, l := range snap.Layers {
 		name := l.Layer

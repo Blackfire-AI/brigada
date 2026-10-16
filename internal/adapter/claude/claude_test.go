@@ -340,7 +340,36 @@ func TestCommandWorkerDefaultScope(t *testing.T) {
 		t.Errorf("worker args deny tools by default: %v", cmd.Args)
 	}
 
+	// An explicit scope replaces the default; an explicit none is file
+	// tools only — no shell flag at all, not the default.
+	over := Adapter{AllowedTools: []string{"Bash(npm test:*)", "Bash(npx jest:*)"}}
+	cmd, err = over.Command(adapter.Job{Prompt: "p"}, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("build override command: %v", err)
+	}
+	wantOver := []string{"--allowedTools", "Bash(npm test:*)", "Bash(npx jest:*)"}
+	if !slices.Equal(cmd.Args[len(cmd.Args)-len(wantOver):], wantOver) || slices.Contains(cmd.Args, "Bash(go test:*)") {
+		t.Errorf("override args = %v, want them to end with %v and drop the Go default", cmd.Args, wantOver)
+	}
+	none := Adapter{AllowedTools: []string{}}
+	cmd, err = none.Command(adapter.Job{Prompt: "p"}, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("build none command: %v", err)
+	}
+	if slices.Contains(cmd.Args, "--allowedTools") || slices.Contains(cmd.Args, "Bash(go test:*)") {
+		t.Errorf("tools=none args = %v, want no allowed tools at all", cmd.Args)
+	}
+
 	const config = "/runner-state/mcp/turn-x1/config.json"
+	// A worker scope never reaches a foreman turn.
+	foremanAd := Adapter{AllowedTools: []string{"Bash"}}
+	foremanBypass, err := foremanAd.Command(adapter.Job{Prompt: "p", MCPConfig: config}, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("build foreman command: %v", err)
+	}
+	if slices.Contains(foremanBypass.Args, "Bash") && !slices.Contains(foremanBypass.Args[slices.Index(foremanBypass.Args, "--disallowedTools"):], "Bash") {
+		t.Errorf("a worker scope reached the foreman: %v", foremanBypass.Args)
+	}
 	foreman, err := ad.Command(adapter.Job{Prompt: "p", MCPConfig: config}, t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("build foreman command: %v", err)
@@ -767,5 +796,18 @@ func TestForemanReadingCheckout(t *testing.T) {
 		if cmd.Dir != "/runner/foreman/1" {
 			t.Errorf("session cwd changed: %s", cmd.Dir)
 		}
+	}
+}
+
+// TestScopeText pins the registration's spelling of a worker scope.
+func TestScopeText(t *testing.T) {
+	if got, want := ScopeText(nil), "Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*)"; got != want {
+		t.Errorf("default scope text = %q, want %q", got, want)
+	}
+	if got := ScopeText([]string{}); got != "none" {
+		t.Errorf("explicit none text = %q, want none", got)
+	}
+	if got := ScopeText([]string{"Bash(npm test:*)", "Bash(npx jest:*)"}); got != "Bash(npm test:*)+Bash(npx jest:*)" {
+		t.Errorf("override text = %q", got)
 	}
 }

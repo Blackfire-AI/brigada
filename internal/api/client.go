@@ -58,6 +58,9 @@ type Agent struct {
 	Classes []string `json:"classes"`
 	// Effort is the agent's reasoning-effort level; empty when unset.
 	Effort string `json:"effort,omitempty"`
+	// Tools is a claude worker's tool scope (§5.2), "+"-joined or
+	// "none"; empty for a harness brigada does not scope.
+	Tools string `json:"tools,omitempty"`
 }
 
 // Register registers the runner under its token's name with its
@@ -70,7 +73,7 @@ func (c *Client) Register(ctx context.Context, agents []Agent, maxParallel int) 
 		body.Agents[i] = agentAdvert{
 			Adapter: a.Adapter, Harness: a.Harness, Model: a.Model,
 			Family: a.Family, Account: a.Account, Classes: a.Classes,
-			Effort: a.Effort,
+			Effort: a.Effort, Tools: a.Tools,
 		}
 	}
 	var out struct {

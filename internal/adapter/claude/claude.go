@@ -35,7 +35,11 @@ type Adapter struct {
 	PermissionMode string
 
 	// AllowedTools and DisallowedTools are the agent config's tool scope
-	// (§5.2), passed through as the CLI's own flags. Empty adds nothing.
+	// (§5.2), passed through as the CLI's own flags. They scope a code
+	// worker only: a foreman turn or attach always runs under the
+	// foreman's own scope and never reads them. A nil AllowedTools is
+	// "no explicit scope" and the worker gets the Go default; a non-nil
+	// empty one is explicitly none — the file tools alone, no shell.
 	AllowedTools    []string
 	DisallowedTools []string
 }
@@ -65,7 +69,27 @@ func foremanToolScope() (allowed, disallowed []string) {
 // execution — the check already runs what tests the worker wrote. The
 // agent config's explicit scope replaces this default.
 func workerToolScope() (allowed, disallowed []string) {
-	return []string{"Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)"}, nil
+	return DefaultWorkerTools(), nil
+}
+
+// DefaultWorkerTools is the Go default scope a worker runs under when
+// the agent names none, as a fresh list.
+func DefaultWorkerTools() []string {
+	return []string{"Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)"}
+}
+
+// ScopeText renders a worker scope as the agent registration records it
+// and the runner prints it: the patterns joined by "+", the --agent
+// tools= spelling, and "none" for the explicitly empty scope. A nil
+// scope is the default and renders as the Go default's patterns.
+func ScopeText(tools []string) string {
+	if tools == nil {
+		tools = DefaultWorkerTools()
+	}
+	if len(tools) == 0 {
+		return "none"
+	}
+	return strings.Join(tools, "+")
 }
 
 var _ adapter.Adapter = (*Adapter)(nil)
@@ -125,7 +149,7 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 			args = append(args, "--add-dir", job.ReadOnlyRepo)
 		}
 		allowed, disallowed = foremanToolScope()
-	} else if len(allowed) == 0 {
+	} else if allowed == nil {
 		// A code worker with no explicit scope gets the default (§5.2):
 		// the Go toolchain, so it can build and test as it goes.
 		allowed, disallowed = workerToolScope()

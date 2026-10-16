@@ -192,6 +192,18 @@ func TestRunnerHarnessFlags(t *testing.T) {
 			wantErr:  "--agent-file is a --harness kimi flag",
 		},
 		{
+			name:     "tools with the fake harness is a usage error",
+			args:     []string{"runner", "--agent", "harness=fake,tools=none", "--state-dir", state},
+			wantCode: 2,
+			wantErr:  "takes no tools scope",
+		},
+		{
+			name:     "tools with the codex harness is a usage error",
+			args:     []string{"runner", "--agent", "harness=codex,tools=Bash(ls:*)", "--state-dir", state},
+			wantCode: 2,
+			wantErr:  "codex harness takes no tools scope",
+		},
+		{
 			name: "a missing agent file fails at startup",
 			args: []string{"runner", "--harness", "kimi", "--agent-file", filepath.Join(dir, "nope.md"),
 				"--state-dir", state},
@@ -347,6 +359,36 @@ func TestAgentSpecAccount(t *testing.T) {
 	}
 }
 
+// TestAgentSpecTools: the tools= key parses +-separated patterns, none
+// as an explicit empty scope distinct from unset, and round-trips.
+func TestAgentSpecTools(t *testing.T) {
+	s := &agentSpecs{}
+	for _, v := range []string{
+		"harness=claude,tools=Bash(npm test:*)+Bash(npx jest:*)",
+		"harness=claude,model=opus,tools=none",
+		"harness=claude,model=haiku",
+	} {
+		if err := s.Set(v); err != nil {
+			t.Fatalf("Set(%q): %v", v, err)
+		}
+	}
+	if got := s.specs[0].tools; len(got) != 2 || got[0] != "Bash(npm test:*)" || got[1] != "Bash(npx jest:*)" {
+		t.Errorf("tools = %v", got)
+	}
+	if got := s.specs[1].tools; got == nil || len(got) != 0 {
+		t.Errorf("tools=none = %#v, want an empty non-nil scope", got)
+	}
+	if s.specs[2].tools != nil {
+		t.Errorf("unset tools = %#v, want nil (the default)", s.specs[2].tools)
+	}
+	if got := s.specs[1].String(); !strings.Contains(got, "tools=none") {
+		t.Errorf("String() = %q, want tools=none", got)
+	}
+	if err := s.Set("harness=claude,tools=+"); err == nil {
+		t.Error("an empty tools list was accepted")
+	}
+}
+
 // TestRunnerAgentFlag covers the --agent flag's rules at startup: two
 // agents register as two rows with their own models and classes, a
 // duplicate harness is a usage error, mixing --agent with the
@@ -416,6 +458,26 @@ func TestRunnerAgentFlag(t *testing.T) {
 			name:    "a missing agent file fails at startup",
 			args:    []string{"runner", "--agent", "harness=kimi,agent-file=" + filepath.Join(dir, "nope.md"), "--state-dir", state},
 			wantErr: "nope.md",
+		},
+		{
+			name:    "tools under codex names its sandbox",
+			args:    []string{"runner", "--agent", "harness=codex,tools=none", "--state-dir", state},
+			wantErr: "-s workspace-write",
+		},
+		{
+			name:    "tools under kimi names its headless mode",
+			args:    []string{"runner", "--agent", "harness=kimi,tools=Bash(npm test:*)", "--state-dir", state},
+			wantErr: "no approval prompts",
+		},
+		{
+			name:    "tools under opencode names its permissions",
+			args:    []string{"runner", "--agent", "harness=opencode,tools=none", "--state-dir", state},
+			wantErr: "denies bash by default",
+		},
+		{
+			name:    "an empty tools list is refused",
+			args:    []string{"runner", "--agent", "harness=claude,tools=", "--state-dir", state},
+			wantErr: "tool patterns",
 		},
 		{
 			name:    "an empty classes list is refused",
@@ -546,7 +608,8 @@ func TestRunnerAgentFlag(t *testing.T) {
 		t.Errorf("the fake agent's classes = %s, want only review", fakeClasses)
 	}
 	line := out.String()
-	for _, want := range []string{"claude (model sonnet@high, classes implement,review,answer)", "fake (model fake-1, classes review)"} {
+	for _, want := range []string{"claude (model sonnet@high, classes implement,review,answer)", "fake (model fake-1, classes review)",
+		"claude (model sonnet@high, classes implement,review,answer) tools Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*);"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("the startup line = %q, want it to list %q", line, want)
 		}
