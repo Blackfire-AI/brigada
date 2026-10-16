@@ -46,6 +46,11 @@ func runAsk(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	// A command typed by a person is deliberate each time: no key.
 	res, err := client.AskForeman(ctx, *repo, text, "")
 	if err != nil {
+		if isNotFound(err) {
+			if hint := knownProjectsHint(ctx, client); hint != "" {
+				err = fmt.Errorf("%w; %s", err, hint)
+			}
+		}
 		return fail(stderr, err)
 	}
 	fmt.Fprintln(stdout, mcp.AskOutcomeLine(res))

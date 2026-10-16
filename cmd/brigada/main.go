@@ -40,7 +40,9 @@ Commands:
 	mcp             Run the foreman's MCP bridge over stdio (§12.2).
 	status          Show the engine and its jobs by status.
 	task submit     Submit a task (debug path until the foreman exists).
-	project foreman Show or set a repo's foreman harness and model.
+	project foreman Show or set a repo's foreman harness and model
+	                (--repo defaults to this repo's origin).
+	project list    List the projects: repo, foreman, active plans, needs-you.
 	history         Show the timeline.
 	stats           Show which agent wins which class, per repo.
 	agent reset <harness>/<model>

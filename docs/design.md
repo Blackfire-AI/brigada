@@ -294,6 +294,7 @@ Transformations, so nothing is lost in translation:
 2. The foreman's wake-up budget defaults.
 3. `tool_call_cap_minutes` defaults per class.
 4. Foreman entry point: in addition to the `brigada` command, a `/brigada` skill or MCP prompt in the user's own harness that opens or attaches the dedicated foreman session, subject to the attach discipline of §4.2. Decide in phase 2.
+5. Cross-repo plans: a project is one repo URL with its own foreman, and a plan belongs to one project, so a change spanning `api` and `web` is two plans the user coordinates. Either one foreman over several projects, or a plan whose tasks each name a repo. Either keeps §5 rule 6 (repos are addressed by URL, never by path or name), and either must settle whose foreman owns the plan, what the foreman token's project wall (§12.1) allows, and how a task waits on a branch of another repo.
 
 Settled 2026-10-12: stalled = 10 minutes with no activity; stalls always go to the foreman; plan files at `.brigada/plans/` on the `brigada/plans` branch by default, `main` as a setting.
 

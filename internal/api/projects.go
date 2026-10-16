@@ -99,6 +99,31 @@ func (s *Server) handleForemanGet(w http.ResponseWriter, r *http.Request, id ide
 	writeJSON(w, http.StatusOK, setting)
 }
 
+// handleProjectList serves the list of every project (client, admin): a
+// foreman token is walled into its own project (§12.1) and has no use
+// for the others' URLs.
+func (s *Server) handleProjectList(w http.ResponseWriter, r *http.Request, _ identity) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	projects, err := s.eng.Projects(r.Context())
+	if err != nil {
+		s.writeInternal(w, r, "list the projects", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, projects)
+}
+
+// Projects lists every project the engine has with its foreman, active
+// plans and needs-you count.
+func (c *Client) Projects(ctx context.Context) ([]engine.ProjectInfo, error) {
+	var out []engine.ProjectInfo
+	if err := c.call(ctx, http.MethodGet, "/v1/projects", nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // foremanSetRequest is the PUT body's shape (§4.1): which repo, and the
 // harness and model the foreman runs on.
 type foremanSetRequest struct {

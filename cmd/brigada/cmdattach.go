@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -52,6 +51,15 @@ func runAttach(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	}
 	repo, err := gitOriginURL(dir)
 	if err != nil {
+		// The directory maps to no project: say which projects there are,
+		// when a running engine can be asked (it is never started for this).
+		if rt, code := resolveRuntime(common, io.Discard); code == 0 {
+			if client, code := connect(ctx, rt, "client", true, io.Discard); code == 0 {
+				if hint := knownProjectsHint(ctx, client); hint != "" {
+					err = fmt.Errorf("%w; %s", err, hint)
+				}
+			}
+		}
 		return fail(stderr, err)
 	}
 	rt, code := resolveRuntime(common, stderr)
@@ -68,11 +76,14 @@ func runAttach(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	// held (§4.1).
 	setting, err := client.ProjectForeman(ctx, repo)
 	if err != nil {
-		var se *api.StatusError
-		if errors.As(err, &se) && se.Status == http.StatusNotFound {
-			return fail(stderr, fmt.Errorf(
+		if isNotFound(err) {
+			msg := fmt.Sprintf(
 				"no project for repo %s (the origin of %s); choose its foreman first: brigada project foreman --repo %s --harness <harness> --model <model>",
-				repo, dir, repo))
+				repo, dir, repo)
+			if hint := knownProjectsHint(ctx, client); hint != "" {
+				msg += "; " + hint
+			}
+			return fail(stderr, errors.New(msg))
 		}
 		return fail(stderr, err)
 	}

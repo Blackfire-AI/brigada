@@ -56,6 +56,19 @@ Off the road: `needs_foreman` and `needs_user` (parked, see the queue above), `f
 
 `brigada cancel <job-id>` stops one live job: a worker, a review, or a foreman turn. The runner learns on its next heartbeat. It cancels that job only. It does not cancel the task or the plan, and it is not an approval of anything. To drop a whole plan that is waiting for approval, use `plan reject`. To drop tasks of a running plan, ask the foreman; it can cancel tasks and re-point what depended on them. Job ids are not task ids: `status` shows a running job as `task #N …`, so find the job id with `brigada history --task N`.
 
+### Several repositories
+
+A **project** is one repo URL (the `origin` URL, exactly as the engine was told it), and each project has its own foreman session, plans, history and stats. If you work in `api`, `web` and `infra` repos, you have three projects and three foremen, all served by one engine and the same runners. A monorepo is one project.
+
+Working with several:
+
+- Choose a foreman once per repo: inside the repo, `brigada project foreman --harness <h> --model <m>` (the repo defaults to the origin of the working directory like `attach`; `--repo <origin-url>` names it from anywhere).
+- `brigada project list` prints one line per project: the repo URL, the foreman as `harness/model` (`-` if none is chosen), the active plans and the needs-you count.
+- Attach inside the repo you want to talk to. Ask one repo at a time: `brigada ask --repo <origin-url> "..."`. Without `--repo`, `ask` works only while the engine has exactly one project; with more it refuses and `project list` shows the URLs. When `attach` or `ask` cannot map a repo to a project, the error lists the known projects' URLs.
+- `brigada status` shows the plans and the needs-you queue of all projects together; use `project list` to see the counts per repo.
+
+Not supported today: a plan whose tasks span repos (a plan belongs to one project, and each task runs in that repo), and a foreman that knows about another repo's work (it sees only its own project's events). For a change that touches two repos, ask each repo's foreman separately and carry the coordination yourself, such as merging in order. Cross-repo plans are an open question in [design.md](design.md) section 16.
+
 ## 3. Plans
 
 You ask; the foreman turns the ask into a **plan**: a set of tasks, each with a spec for the worker, a check command and a class (`implement` by default, also `review` and `answer`), and a list of the tasks it depends on. A task with no dependencies is queued at once. A task with dependencies waits (`pending`) until all of them are done; if one of them fails or is cancelled, the dependents keep waiting until the foreman re-points them to another task or drops the dependency. The foreman can amend a live plan: add tasks, cancel tasks, re-point dependencies. A plan is `done` when no live work is left, and that is not the same as everything succeeding: the plan's done report names the tasks that failed, that were cancelled without your approval, and that never ran. A foreman that cancels a task is abandoning it; brigada does not count that as your approved skip, and there is no command that records one for you.
@@ -206,7 +219,8 @@ cost.claude/opus = 2
 - `brigada plan approve <id>`, `brigada plan reject <id>`: your answer on a plan over the approval limit. See section 3.
 - `brigada agent reset <harness>/<model>`: clear a broken or cooling agent. See section 5.
 - `brigada cancel <job-id>`: stop one live job. See section 2.
-- `brigada project foreman --repo URL [--harness H --model M]`: show, or with both flags set, the repo's foreman (`claude` or `codex`). See section 10.
+- `brigada project foreman [--repo URL] [--harness H --model M]`: show, or with both flags set, the repo's foreman (`claude` or `codex`); `--repo` defaults to the origin of the working directory. See section 10.
+- `brigada project list`: every project with its foreman, active plans and needs-you count. See section 2, "Several repositories".
 
 **Care**
 
@@ -218,7 +232,7 @@ cost.claude/opus = 2
 
 ## 10. Foreman on claude or codex
 
-Only `claude` and `codex` can be a foreman; `kimi` and `opencode` are worker-only. Choose with `brigada project foreman --repo <origin-url> --harness <h> --model <m>`; with `--repo` alone it shows the choice.
+Only `claude` and `codex` can be a foreman; `kimi` and `opencode` are worker-only. Choose with `brigada project foreman --repo <origin-url> --harness <h> --model <m>` (inside the repo, `--repo` can be left out); without `--harness` and `--model` it shows the choice.
 
 **Reading the code.** Headless turns and attach refresh `<state>/runner/foreman/<project>/repo` from the project's repo URL at its configured default branch. The opening prompt names the checkout's absolute path, branch and commit. Read the code and its CLAUDE.md/AGENTS.md before planning; the snapshot may lag the remote by one fetch. A clone or fetch failure fails the turn (or attach) with the git reason. The session's working directory stays the parent scratch directory, so existing sessions continue to resume.
 

@@ -104,7 +104,7 @@ brigada cancel <job-id>
 
 `brigada help` lists every command.
 
-Day two and beyond: [docs/GUIDE.md](docs/GUIDE.md).
+Day two and beyond: [docs/GUIDE.md](docs/GUIDE.md). Working in several repositories (one project and foreman per repo, `brigada project list`): [Several repositories](docs/GUIDE.md#several-repositories).
 
 ## API keys
 
