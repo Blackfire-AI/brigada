@@ -150,8 +150,10 @@ func TestQueueTTLParkReasonNamesTheMissingReviewer(t *testing.T) {
 			author := e.agented("author", "anthropic", "implement", "review")
 			review := e.runToReview(author)
 			if tt.otherFamily {
-				r := e.agented("reviewer", "google", "review")
-				e.exec("UPDATE agents SET cooling_until = ? WHERE id = ?", fmtTime(e.clock.Now().Add(time.Hour)), e.agentOf(r))
+				// A ready reviewer nobody leases with: merely waiting. (A
+				// reviewer whose account cools is no longer this case: the
+				// job is held until the cooling ends, see cooling_test.go.)
+				e.agented("reviewer", "google", "review")
 			}
 			e.clock.Advance(11 * time.Minute)
 			rep := e.mustSweep()

@@ -195,10 +195,17 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (SweepR
 		if err := e.holdBusyRunnersTx(tx, now, polling); err != nil {
 			return rep, err
 		}
+		// A job whose every qualifying agent is cooling waits for the
+		// cooling to end. It runs after the runner rule: see holdCoolingTx
+		// for which hold wins.
+		if err := e.holdCoolingTx(tx, now); err != nil {
+			return rep, err
+		}
 		// The TTL is for jobs no runner can serve (§8.1); a job held only
-		// by a full cap layer waits as long as it takes, so the clock
-		// counts from the later of queued_at and the last cap hold.
-		rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0), kind, exclude_family, COALESCE(exclude_agent, 0) FROM jobs
+		// by a full cap layer, or waiting for its cooling agent, waits as
+		// long as it takes, so the clock counts from the later of
+		// queued_at and the last hold.
+		rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0), kind, exclude_family, COALESCE(exclude_agent, 0), COALESCE(require_agent, 0) FROM jobs
 			WHERE status = 'queued' AND queued_at IS NOT NULL
 			AND max(queued_at, COALESCE(cap_held_at, queued_at)) <= ?`, fmtTime(now.Add(-e.cfg.QueueTTL)))
 		if err != nil {
@@ -209,11 +216,12 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (SweepR
 			project, task int64
 			kind, family  string
 			excludeAgent  int64
+			requireAgent  int64
 		}
 		var waitingAll []waiting
 		for rows.Next() {
 			var x waiting
-			if err := rows.Scan(&x.id, &x.project, &x.task, &x.kind, &x.family, &x.excludeAgent); err != nil {
+			if err := rows.Scan(&x.id, &x.project, &x.task, &x.kind, &x.family, &x.excludeAgent, &x.requireAgent); err != nil {
 				rows.Close()
 				return rep, fmt.Errorf("sweep queue TTL: %w", err)
 			}
@@ -225,6 +233,25 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (SweepR
 		rows.Close()
 		for _, x := range waitingAll {
 			reason := fmt.Sprintf("queue TTL exceeded: no runner leased the job within %s", capText(e.cfg.QueueTTL))
+			if x.requireAgent != 0 {
+				// A pin on a broken agent has no end in sight, so it is not
+				// held (a cooling one is, see holdCoolingTx); the park names
+				// the pin and the state instead of blaming the runners.
+				var harness, model, health, why string
+				err := tx.QueryRow("SELECT harness, model, health, health_reason FROM agents WHERE id = ?", x.requireAgent).
+					Scan(&harness, &model, &health, &why)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return rep, fmt.Errorf("read the pinned agent %d: %w", x.requireAgent, err)
+				}
+				if err == nil && health == "broken" {
+					state := "broken"
+					if why != "" {
+						state += ": " + why
+					}
+					reason = fmt.Sprintf("queue TTL exceeded: job pinned to %s/%s (%s); no runner leased the job within %s",
+						harness, model, state, capText(e.cfg.QueueTTL))
+				}
+			}
 			if x.task != 0 {
 				// A review no agent could ever take says so, not the bare TTL.
 				bad, err := reviewUnservableTx(tx, &jobRow{Kind: Kind(x.kind), ExcludeFamily: x.family, ExcludeAgent: x.excludeAgent})

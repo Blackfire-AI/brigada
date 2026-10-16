@@ -30,8 +30,13 @@ func StatusSections(st Status) string {
 			what = fmt.Sprintf("task #%d", h.TaskID)
 		}
 		wait := "waiting for a free " + h.Layer + " slot"
-		if h.Layer == "runner" {
+		switch {
+		case h.Layer == "runner":
 			wait = "waiting for a runner slot"
+		case h.Layer == "cooling" && h.Agent != "":
+			wait = fmt.Sprintf("waiting: %s cooling until %s", h.Agent, h.Until)
+		case h.Layer == "cooling":
+			wait = "waiting: agent cooling"
 		}
 		lines = append(lines, fmt.Sprintf("held: %s %s: %s", what, h.Kind, wait))
 	}
