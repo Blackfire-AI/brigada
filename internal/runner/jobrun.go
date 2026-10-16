@@ -127,6 +127,7 @@ func (r *jobRun) execute(ctx context.Context) {
 		return
 	}
 	r.runJob(runCtx, ws, kill)
+	r.cleanupSetup()
 	abort()
 	<-beatsDone
 
@@ -147,6 +148,20 @@ func (r *jobRun) runJob(ctx context.Context, ws *workspace, kill <-chan struct{}
 		// advertisement, or an engine that knows another set. The job
 		// fails with the reason rather than running on a wrong CLI.
 		r.finishWithError(ctx, err.Error())
+		return
+	}
+	// The environment step (§5.7) runs before the worker, as the runner:
+	// the worker never sees it or chooses its command. The stall clock
+	// has not started, so only the setup's own timeout bounds it. A review
+	// job gets the same environment in its worktree.
+	if why := r.runSetup(ctx, ws.dir, true); why != "" {
+		if r.gone(ctx, "running the setup") {
+			return
+		}
+		r.finishWithSetupError(ctx, why)
+		return
+	}
+	if r.gone(ctx, "running the setup") {
 		return
 	}
 	exitErr := r.runWorker(ctx, ad, model, ws.dir, kill)
@@ -630,6 +645,19 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 			result.Branch = ws.branch
 		}
 		if r.grant.CheckCmd != "" {
+			// The worker may have changed a lock file or a script the
+			// setup calls, so it runs again before the check (§5.7); it
+			// never replaces the shared cache entry now.
+			if why := r.runSetup(ctx, ws.dir, false); why != "" {
+				if r.gone(ctx, "running the setup before the check") {
+					return
+				}
+				r.finishWithSetupError(ctx, why)
+				return
+			}
+			if r.gone(ctx, "running the setup before the check") {
+				return
+			}
 			check := runCheck(ctx, ws.dir, r.grant.CheckCmd, r.cfg.CheckTimeout)
 			if r.gone(ctx, "running the check") {
 				// The check was cut short by the run ending, not by the
@@ -677,6 +705,19 @@ func (r *jobRun) finishWithCLIError(ctx context.Context, msg string, cliErr *ada
 		SessionID:  r.sessionIDOf(),
 		ErrorKind:  string(cliErr.ErrorKind),
 		LimitUntil: cliErr.LimitUntil,
+	})
+}
+
+// finishWithSetupError completes the job with a failed setup (§5.7): an
+// infrastructure failure, sorted as such so the engine retries it as a
+// transient error and charges neither a fix round nor the agent. The
+// setup's log is already uploaded; the message carries the exit or the
+// timeout alone, since the command's output is data, not a message.
+func (r *jobRun) finishWithSetupError(ctx context.Context, msg string) {
+	r.deliverError(ctx, api.Completion{
+		Error:     msg,
+		SessionID: r.sessionIDOf(),
+		ErrorKind: engine.ErrorKindSetup,
 	})
 }
 

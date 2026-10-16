@@ -22,6 +22,9 @@ import (
 const (
 	ArtifactTranscript = "transcript"
 	ArtifactCheckLog   = "check_log"
+	// ArtifactSetupLog is the log of the setup command (§5.7), kept next
+	// to the check log so a failed setup can be read.
+	ArtifactSetupLog = "setup_log"
 )
 
 // ErrInvalidArtifact marks a refusal the caller caused: an artifact the
@@ -72,10 +75,10 @@ func scanArtifact(row interface{ Scan(dest ...any) error }) (*ArtifactInfo, erro
 // a transcript upload points the job's transcript ref at the row.
 func (e *Engine) UploadArtifact(ctx context.Context, owner, jobID int64, leaseID, kind string, data []byte) (Answer, *ArtifactInfo, error) {
 	switch kind {
-	case ArtifactTranscript, ArtifactCheckLog:
+	case ArtifactTranscript, ArtifactCheckLog, ArtifactSetupLog:
 	default:
-		return "", nil, fmt.Errorf("%w: kind must be %s or %s, not %q",
-			ErrInvalidArtifact, ArtifactTranscript, ArtifactCheckLog, kind)
+		return "", nil, fmt.Errorf("%w: kind must be %s, %s or %s, not %q",
+			ErrInvalidArtifact, ArtifactTranscript, ArtifactCheckLog, ArtifactSetupLog, kind)
 	}
 	if int64(len(data)) > e.cfg.MaxArtifactBytes {
 		return "", nil, fmt.Errorf("%w: %d bytes, cap %d", ErrArtifactTooLarge, len(data), e.cfg.MaxArtifactBytes)

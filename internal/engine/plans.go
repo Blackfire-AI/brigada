@@ -260,6 +260,10 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 	// project's repo and base ref; pending while a dependency is open —
 	// and, in a plan awaiting approval, all pending: the approval readies
 	// the first wave.
+	setupRec, err := taskProjectSetupTx(tx, project)
+	if err != nil {
+		return CreatePlanResult{}, err
+	}
 	for i, t := range tasks {
 		class := t.Class
 		if class == "" {
@@ -273,9 +277,9 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		if len(deps[i]) > 0 || verdict.Needed {
 			state = taskPending
 		}
-		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, created_at, updated_at)
-			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', ?, ?)`,
-			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, nowStr, nowStr)
+		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, created_at, updated_at)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', NULLIF(?, ''), ?, ?)`,
+			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, setupRec, nowStr, nowStr)
 		if err != nil {
 			return CreatePlanResult{}, fmt.Errorf("create the task: %w", err)
 		}

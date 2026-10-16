@@ -59,6 +59,9 @@ type Config struct {
 	HeartbeatEvery time.Duration
 	LeaseWait      time.Duration
 	CheckTimeout   time.Duration
+	// SetupTimeout, when set, replaces the time bound a task's recorded
+	// setup carries (§5.7); zero keeps the recorded one.
+	SetupTimeout time.Duration
 	// StallAfter is how long without any worker activity a run counts
 	// as stalled (§5.6); zero keeps the 10-minute default, negative
 	// turns the silence watch off.
@@ -351,6 +354,8 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := os.RemoveAll(filepath.Join(cfg.StateDir, "worktrees")); err != nil {
 		cfg.Log.WarnContext(ctx, "sweep the worktrees a crashed runner left", "err", err)
 	}
+	// Likewise the jobs' private setup cache copies (§5.7).
+	removeAllWritable(setupJobsRoot(cfg.StateDir))
 	client := api.NewClient(cfg.Socket, cfg.Token)
 	registered := false
 	backoff := leaseBackoffMin

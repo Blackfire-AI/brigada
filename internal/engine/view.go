@@ -34,7 +34,10 @@ type JobInfo struct {
 	TranscriptID int64 `json:"transcript_id,omitempty"`
 	// CheckLogID is the job's newest check log artifact (§9); 0 when the
 	// job ran no check or left no log.
-	CheckLogID int64  `json:"check_log_id,omitempty"`
+	CheckLogID int64 `json:"check_log_id,omitempty"`
+	// SetupLogID is the job's newest setup log artifact (§5.7); 0 when the
+	// job ran no setup.
+	SetupLogID int64  `json:"setup_log_id,omitempty"`
 	CreatedAt  string `json:"created_at"`
 	UpdatedAt  string `json:"updated_at"`
 }
@@ -55,7 +58,7 @@ func (e *Engine) Job(ctx context.Context, id int64) (*JobInfo, error) {
 		var created, updated string
 		var check sql.NullString
 		var transcript sql.NullInt64
-		var checkLog int64
+		var checkLog, setupLog int64
 		if j != nil {
 			if err := tx.QueryRow("SELECT created_at, updated_at, check_result, transcript_id FROM jobs WHERE id = ?", id).
 				Scan(&created, &updated, &check, &transcript); err != nil {
@@ -65,12 +68,17 @@ func (e *Engine) Job(ctx context.Context, id int64) (*JobInfo, error) {
 				Scan(&checkLog); err != nil {
 				return fmt.Errorf("read check log: %w", err)
 			}
+			if err := tx.QueryRow("SELECT COALESCE(MAX(id), 0) FROM artifacts WHERE job_id = ? AND kind = ?", id, ArtifactSetupLog).
+				Scan(&setupLog); err != nil {
+				return fmt.Errorf("read setup log: %w", err)
+			}
 		}
 		info = jobInfoOf(j)
 		if info != nil {
 			info.CreatedAt, info.UpdatedAt = created, updated
 			info.TranscriptID = transcript.Int64
 			info.CheckLogID = checkLog
+			info.SetupLogID = setupLog
 			if check.Valid && check.String != "" {
 				info.CheckResult = json.RawMessage(check.String)
 			}

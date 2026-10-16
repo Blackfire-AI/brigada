@@ -151,6 +151,7 @@ func userVersionTx(ctx context.Context, tx *sql.Tx) (int, error) {
 // SQL, by migration number.
 var schemaEdits = map[int]func(ctx context.Context, tx *sql.Tx) error{
 	23: relaxJobsTaskCheck,
+	35: widenArtifactKinds,
 }
 
 // jobsPairingCheck is the CHECK 0001 put on jobs: foreman jobs have no
@@ -168,6 +169,24 @@ const (
 // table's sql in the schema table and bump the schema version, so every
 // connection re-reads the schema.
 func relaxJobsTaskCheck(ctx context.Context, tx *sql.Tx) error {
+	return editTableCheck(ctx, tx, "jobs", jobsPairingCheck, jobsPairingCheckRelaxed)
+}
+
+// The artifacts kind CHECK 0001 put on the table, and the one that also
+// admits the setup log (§5.7).
+const (
+	artifactKindCheck      = "CHECK (kind IN ('transcript', 'check_log'))"
+	artifactKindCheckSetup = "CHECK (kind IN ('transcript', 'check_log', 'setup_log'))"
+)
+
+// widenArtifactKinds lets the artifacts table hold a setup log, by the
+// same in-place edit.
+func widenArtifactKinds(ctx context.Context, tx *sql.Tx) error {
+	return editTableCheck(ctx, tx, "artifacts", artifactKindCheck, artifactKindCheckSetup)
+}
+
+// editTableCheck replaces one constraint's text in a table's stored sql.
+func editTableCheck(ctx context.Context, tx *sql.Tx, table, from, to string) error {
 	var version int
 	if err := tx.QueryRowContext(ctx, "PRAGMA schema_version").Scan(&version); err != nil {
 		return fmt.Errorf("read schema_version: %w", err)
@@ -176,13 +195,13 @@ func relaxJobsTaskCheck(ctx context.Context, tx *sql.Tx) error {
 		return fmt.Errorf("allow schema edits: %w", err)
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE sqlite_master SET sql = replace(sql, ?, ?)
-		WHERE type = 'table' AND name = 'jobs' AND instr(sql, ?) > 0`,
-		jobsPairingCheck, jobsPairingCheckRelaxed, jobsPairingCheck)
+		WHERE type = 'table' AND name = ? AND instr(sql, ?) > 0`,
+		from, to, table, from)
 	if err != nil {
-		return fmt.Errorf("edit the jobs table: %w", err)
+		return fmt.Errorf("edit the %s table: %w", table, err)
 	}
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return fmt.Errorf("edit the jobs table: its kind/task CHECK was not found (rows %d, err %v)", n, err)
+		return fmt.Errorf("edit the %s table: %q was not found (rows %d, err %v)", table, from, n, err)
 	}
 	if _, err := tx.ExecContext(ctx, "PRAGMA schema_version = "+strconv.Itoa(version+1)); err != nil {
 		return fmt.Errorf("bump schema_version: %w", err)
