@@ -6,6 +6,7 @@ package opencode
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -34,6 +35,9 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	if job.MCPConfig != "" {
 		return nil, errors.New("opencode: the CLI run path has no MCP-config flag; a job carrying an MCP config cannot run on it")
 	}
+	if err := adapter.ValidateEffort("opencode", job.Effort); err != nil {
+		return nil, fmt.Errorf("opencode: %w", err)
+	}
 	binary := a.Binary
 	if binary == "" {
 		binary = "opencode"
@@ -41,6 +45,10 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	args := []string{"run", "--format", "json"}
 	if job.Model != "" && job.Model != DefaultModel {
 		args = append(args, "-m", job.Model)
+	}
+	if job.Effort != "" {
+		// --variant is the CLI's provider-specific reasoning effort.
+		args = append(args, "--variant", job.Effort)
 	}
 	if resumeSessionID != "" {
 		args = append(args, "-s", resumeSessionID)

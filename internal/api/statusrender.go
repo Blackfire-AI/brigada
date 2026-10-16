@@ -115,6 +115,9 @@ func describeJob(j engine.StatusJob, now time.Time) string {
 		agent := j.Harness
 		if j.Model != "" {
 			agent += "/" + j.Model
+			if j.Effort != "" {
+				agent += "@" + j.Effort
+			}
 		}
 		parts = append(parts, agent)
 	}

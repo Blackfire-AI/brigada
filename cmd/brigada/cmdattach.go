@@ -214,7 +214,7 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 		return abandon(fmt.Errorf("generate the new session id: %w", err))
 	}
 	cmd, err := inter.AttachCommand(adapter.Job{
-		Prompt: res.Prompt, Model: res.Model, MCPConfig: config, ReadOnlyRepo: checkout.Path,
+		Prompt: res.Prompt, Model: res.Model, Effort: res.Effort, MCPConfig: config, ReadOnlyRepo: checkout.Path,
 		StatusLine: statusLineCommand(rt),
 	}, scratch, res.SessionID, newSessionID)
 	if err != nil {

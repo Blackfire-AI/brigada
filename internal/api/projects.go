@@ -51,7 +51,7 @@ func (s *Server) handleForemanSet(w http.ResponseWriter, r *http.Request, _ iden
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	setting, err := s.eng.SetProjectForeman(r.Context(), req.RepoURL, req.Harness, req.Model)
+	setting, err := s.eng.SetProjectForemanEffort(r.Context(), req.RepoURL, req.Harness, req.Model, req.Effort)
 	if err != nil {
 		if errors.Is(err, engine.ErrInvalidForeman) {
 			writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
@@ -130,14 +130,16 @@ type foremanSetRequest struct {
 	RepoURL string `json:"repo_url"`
 	Harness string `json:"harness"`
 	Model   string `json:"model"`
+	// Effort is the foreman's reasoning-effort level; empty = unset.
+	Effort string `json:"effort,omitempty"`
 }
 
 // SetProjectForeman chooses the foreman's harness and model for a repo
 // (§4.1), creating the project when the engine has none for the URL. The
 // engine refuses an empty field and a harness that cannot resume
 // headless; those refusals come back as the API's 400s.
-func (c *Client) SetProjectForeman(ctx context.Context, repoURL, harness, model string) (engine.ForemanSetting, error) {
-	body := foremanSetRequest{RepoURL: repoURL, Harness: harness, Model: model}
+func (c *Client) SetProjectForeman(ctx context.Context, repoURL, harness, model, effort string) (engine.ForemanSetting, error) {
+	body := foremanSetRequest{RepoURL: repoURL, Harness: harness, Model: model, Effort: effort}
 	var out engine.ForemanSetting
 	if err := c.call(ctx, http.MethodPut, "/v1/projects/foreman", body, &out); err != nil {
 		return engine.ForemanSetting{}, err

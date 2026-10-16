@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
 
 // ErrInvalidAgent marks a refusal the caller caused: an advertisement
@@ -26,6 +28,10 @@ type AgentAdvert struct {
 	Family  string
 	Account string
 	Classes []string
+	// Effort is the reasoning-effort level the agent runs at; empty when
+	// unset. It is not part of the agent's key: outcomes group by harness
+	// and model.
+	Effort string
 }
 
 func (a AgentAdvert) valid() error {
@@ -36,6 +42,9 @@ func (a AgentAdvert) valid() error {
 		return fmt.Errorf("%w: harness is required", ErrInvalidAgent)
 	case a.Model == "":
 		return fmt.Errorf("%w: model is required", ErrInvalidAgent)
+	}
+	if err := adapter.ValidateEffort(a.Harness, a.Effort); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidAgent, err)
 	}
 	return nil
 }
@@ -131,9 +140,9 @@ func advertiseTx(tx *sql.Tx, runner int64, adverts []AgentAdvert, nowStr string)
 		if err != nil {
 			return err
 		}
-		res, err := tx.Exec(`UPDATE agents SET harness = ?, family = ?, account = ?, classes = ?, updated_at = ?
+		res, err := tx.Exec(`UPDATE agents SET harness = ?, family = ?, account = ?, classes = ?, effort = ?, updated_at = ?
 			WHERE runner_id = ? AND adapter = ? AND model = ?`,
-			a.Harness, a.Family, a.Account, classes, nowStr, runner, a.Adapter, a.Model)
+			a.Harness, a.Family, a.Account, classes, a.Effort, nowStr, runner, a.Adapter, a.Model)
 		if err != nil {
 			return fmt.Errorf("update agent %s/%s: %w", a.Adapter, a.Model, err)
 		}
@@ -144,9 +153,9 @@ func advertiseTx(tx *sql.Tx, runner int64, adverts []AgentAdvert, nowStr string)
 		if n > 0 {
 			continue
 		}
-		if _, err := tx.Exec(`INSERT INTO agents (runner_id, adapter, harness, model, family, account, classes, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			runner, a.Adapter, a.Harness, a.Model, a.Family, a.Account, classes, nowStr, nowStr); err != nil {
+		if _, err := tx.Exec(`INSERT INTO agents (runner_id, adapter, harness, model, family, account, classes, effort, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			runner, a.Adapter, a.Harness, a.Model, a.Family, a.Account, classes, a.Effort, nowStr, nowStr); err != nil {
 			return fmt.Errorf("insert agent %s/%s: %w", a.Adapter, a.Model, err)
 		}
 	}

@@ -409,6 +409,7 @@ type AttachResult struct {
 	DefaultBranch string
 	Harness       string
 	Model         string
+	Effort        string // the foreman's reasoning-effort level; '' = unset
 	SessionID     string // the key's current harness session id; '' = none
 	Prompt        string // the opening prompt
 	ExpiresAt     time.Time
@@ -441,6 +442,7 @@ func (c *Client) Attach(ctx context.Context, repoURL string, force bool) (Attach
 		DefaultBranch: out.DefaultBranch,
 		Harness:       out.Harness,
 		Model:         out.Model,
+		Effort:        out.Effort,
 		SessionID:     out.SessionID,
 		Prompt:        out.Prompt,
 		ExpiresAt:     out.ExpiresAt,

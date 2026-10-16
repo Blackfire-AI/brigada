@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -61,6 +62,9 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	// here: refusing beats silently dropping the bridge the turn needs.
 	if job.MCPConfig != "" {
 		return nil, errors.New("kimi: the CLI has no MCP-config flag; a job carrying an MCP config cannot run on it")
+	}
+	if err := adapter.ValidateEffort("kimi", job.Effort); err != nil {
+		return nil, fmt.Errorf("kimi: %w", err)
 	}
 	binary := a.Binary
 	if binary == "" {

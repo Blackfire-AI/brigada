@@ -422,6 +422,21 @@ func TestRunnerAgentFlag(t *testing.T) {
 			args:    []string{"runner", "--agent", "harness=claude,classes=", "--state-dir", state},
 			wantErr: `classes is empty`,
 		},
+		{
+			name:    "an effort outside the claude levels is refused",
+			args:    []string{"runner", "--agent", "harness=claude,effort=turbo", "--state-dir", state},
+			wantErr: `effort "turbo" is not supported for harness "claude"; want one of low, medium, high, xhigh, max`,
+		},
+		{
+			name:    "kimi has no effort control",
+			args:    []string{"runner", "--agent", "harness=kimi,effort=high", "--state-dir", state},
+			wantErr: `effort is not supported for harness "kimi"`,
+		},
+		{
+			name:    "an opencode variant brigada does not map is refused",
+			args:    []string{"runner", "--agent", "harness=opencode,effort=low", "--state-dir", state},
+			wantErr: `effort "low" is not supported for harness "opencode"; want one of minimal, high, max`,
+		},
 	}
 	for _, tt := range bad {
 		t.Run(tt.name, func(t *testing.T) {
@@ -462,7 +477,7 @@ func TestRunnerAgentFlag(t *testing.T) {
 	runDone := make(chan int, 1)
 	go func() {
 		runDone <- run(rctx, []string{"runner",
-			"--agent", "harness=claude,model=sonnet,classes=implement+review+answer",
+			"--agent", "harness=claude,model=sonnet,effort=high,classes=implement+review+answer",
 			"--agent", "harness=fake,classes=review",
 			"--worker-script", worker,
 			"--state-dir", state, "--no-start"}, out, io.Discard)
@@ -495,7 +510,7 @@ func TestRunnerAgentFlag(t *testing.T) {
 	// before it can announce itself up: the startup line belongs to a
 	// runner that is running.
 	secondArgs := []string{"runner",
-		"--agent", "harness=claude,model=sonnet,classes=implement+review+answer",
+		"--agent", "harness=claude,model=sonnet,effort=high,classes=implement+review+answer",
 		"--agent", "harness=fake,classes=review",
 		"--worker-script", worker,
 		"--state-dir", state, "--no-start"}
@@ -515,11 +530,23 @@ func TestRunnerAgentFlag(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the runner did not stop")
 	}
+	var claudeEffort, fakeEffort string
+	if err := st.View(ctx, func(tx *sql.Tx) error {
+		if err := tx.QueryRow("SELECT effort FROM agents WHERE harness = 'claude'").Scan(&claudeEffort); err != nil {
+			return err
+		}
+		return tx.QueryRow("SELECT effort FROM agents WHERE harness = 'fake'").Scan(&fakeEffort)
+	}); err != nil {
+		t.Fatalf("read the agents' effort: %v", err)
+	}
+	if claudeEffort != "high" || fakeEffort != "" {
+		t.Errorf("registered effort = claude %q, fake %q; want high and unset", claudeEffort, fakeEffort)
+	}
 	if !strings.Contains(fakeClasses, `"review"`) {
 		t.Errorf("the fake agent's classes = %s, want only review", fakeClasses)
 	}
 	line := out.String()
-	for _, want := range []string{"claude (model sonnet, classes implement,review,answer)", "fake (model fake-1, classes review)"} {
+	for _, want := range []string{"claude (model sonnet@high, classes implement,review,answer)", "fake (model fake-1, classes review)"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("the startup line = %q, want it to list %q", line, want)
 		}

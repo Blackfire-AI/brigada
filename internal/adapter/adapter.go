@@ -57,6 +57,10 @@ type Adapter interface {
 type Job struct {
 	Prompt string
 	Model  string
+	// Effort is the reasoning-effort level for the run, one of the harness's
+	// accepted levels (ValidateEffort); empty adds nothing. An adapter whose
+	// CLI has no effort control refuses a non-empty one.
+	Effort string
 	// MCPConfig names the harness's MCP config for the run: a config
 	// file's path, offered to the CLI through its own flag. It is where
 	// the `brigada mcp` bridge (§12.2) will hand the foreman's harness

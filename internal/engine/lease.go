@@ -38,6 +38,10 @@ type LeaseGrant struct {
 	// the grant and lives in the runner's memory alone — never a log,
 	// an event or an error message, and the store keeps only its hash.
 	ForemanToken string
+	// ForemanEffort is the project's chosen foreman effort level, set on a
+	// foreman turn's grant only; '' = none chosen, the runner agent's own
+	// effort stands.
+	ForemanEffort string
 
 	Harness  string // the job's harness constraint; '' = any (§8)
 	Agent    string // the harness of the agent the lease picked (§8); '' = none
@@ -433,6 +437,25 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				return nil, fmt.Errorf("read the session of %s: %w", j.Key, err)
 			}
 		}
+		foremanEffort := ""
+		if j.Kind == KindForeman {
+			// The project's chosen foreman effort rides a foreman turn's
+			// grant, and overrides the runner agent's own for the turn. The
+			// level was validated for the project's harness, so it rides only
+			// when that is the harness the turn runs on: a turn queued before
+			// a switch to another harness keeps its agent's own effort.
+			var projectHarness, projectEffort string
+			if err := tx.QueryRow("SELECT foreman_harness, foreman_effort FROM projects WHERE id = ?", j.ProjectID).Scan(&projectHarness, &projectEffort); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("read the foreman effort of project %d: %w", j.ProjectID, err)
+			}
+			runsOn := agentHarness
+			if runsOn == "" {
+				runsOn = j.Harness // no agent recorded: the job's own constraint
+			}
+			if projectHarness == runsOn {
+				foremanEffort = projectEffort
+			}
+		}
 		return &LeaseGrant{
 			JobID:          j.ID,
 			LeaseOwner:     owner,
@@ -446,6 +469,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			LeaseExpiresAt: expires,
 			ForemanToken:   foremanToken,
 
+			ForemanEffort:   foremanEffort,
 			Harness:         j.Harness,
 			Agent:           agentHarness,
 			RepoURL:         repo,

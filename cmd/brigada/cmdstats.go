@@ -83,7 +83,7 @@ func renderStats(w io.Writer, stats []engine.ProjectStats) error {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "  AGENT\tCLASS\tATTEMPTS\tSUCCESSES\tRATE\tCONFIDENCE")
 		for _, r := range p.Rows {
-			agent := r.Harness + "/" + r.Model
+			agent := agentName(r.Harness, r.Model, r.Effort)
 			if !r.Live {
 				agent += " (stale)"
 			}

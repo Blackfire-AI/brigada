@@ -26,6 +26,7 @@ type StatsRow struct {
 	AgentID   int64   `json:"agent_id"`
 	Harness   string  `json:"harness"`
 	Model     string  `json:"model"`
+	Effort    string  `json:"effort,omitempty"` // the agent's effort level; outcomes still group by harness/model
 	Account   string  `json:"account"`
 	Runner    string  `json:"runner"`
 	Live      bool    `json:"live"` // the runner was seen within the stats window
@@ -78,7 +79,7 @@ type statsAgent struct {
 }
 
 func statsTx(tx *sql.Tx, project int64, now time.Time) ([]ProjectStats, error) {
-	rows, err := tx.Query(`SELECT a.id, a.harness, a.model, a.account, a.classes, r.name, COALESCE(r.last_seen_at, '')
+	rows, err := tx.Query(`SELECT a.id, a.harness, a.model, a.effort, a.account, a.classes, r.name, COALESCE(r.last_seen_at, '')
 		FROM agents a JOIN runners r ON r.id = a.runner_id ORDER BY a.id`)
 	if err != nil {
 		return nil, fmt.Errorf("list agents: %w", err)
@@ -88,7 +89,7 @@ func statsTx(tx *sql.Tx, project int64, now time.Time) ([]ProjectStats, error) {
 	for rows.Next() {
 		var a statsAgent
 		var classes, seen string
-		if err := rows.Scan(&a.AgentID, &a.Harness, &a.Model, &a.Account, &classes, &a.Runner, &seen); err != nil {
+		if err := rows.Scan(&a.AgentID, &a.Harness, &a.Model, &a.Effort, &a.Account, &classes, &a.Runner, &seen); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("list agents: %w", err)
 		}

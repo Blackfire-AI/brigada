@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 )
@@ -195,11 +196,13 @@ func runProjectForeman(ctx context.Context, args []string, stdout, stderr io.Wri
 		repo    string
 		harness string
 		model   string
+		effort  string
 		noStart bool
 	)
 	fs.StringVar(&repo, "repo", "", "the repository URL (product §5 rule 6); empty = the origin of the working directory")
 	fs.StringVar(&harness, "harness", "", "the foreman's harness: a CLI that resumes headless (§4.1); empty = show the choice")
 	fs.StringVar(&model, "model", "", "the foreman's model; goes with --harness")
+	fs.StringVar(&effort, "effort", "", "the foreman's reasoning effort, validated per harness (claude: low|medium|high|xhigh|max); goes with --harness; empty = the CLI's default")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	if code := common.parse(stderr, args); code != 0 {
 		return code
@@ -222,6 +225,12 @@ func runProjectForeman(ctx context.Context, args []string, stdout, stderr io.Wri
 	if (harness == "") != (model == "") {
 		return usagef(stderr, "project foreman sets --harness and --model together; with neither it shows the choice")
 	}
+	if harness == "" && effort != "" {
+		return usagef(stderr, "project foreman sets --effort with --harness and --model; with none of them it shows the choice")
+	}
+	if err := adapter.ValidateEffort(harness, effort); err != nil {
+		return usagef(stderr, "--effort: %v", err)
+	}
 	rt, code := resolveRuntime(common, stderr)
 	if code != 0 {
 		return code
@@ -235,13 +244,32 @@ func runProjectForeman(ctx context.Context, args []string, stdout, stderr io.Wri
 		if err != nil {
 			return fail(stderr, err)
 		}
-		fmt.Fprintf(stdout, "harness=%s model=%s\n", setting.Harness, setting.Model)
+		fmt.Fprintf(stdout, "harness=%s model=%s%s\n", setting.Harness, setting.Model, effortField(setting.Effort))
 		return 0
 	}
-	setting, err := client.SetProjectForeman(ctx, repo, harness, model)
+	setting, err := client.SetProjectForeman(ctx, repo, harness, model, effort)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "foreman set: harness=%s model=%s\n", setting.Harness, setting.Model)
+	fmt.Fprintf(stdout, "foreman set: harness=%s model=%s%s\n", setting.Harness, setting.Model, effortField(setting.Effort))
 	return 0
+}
+
+// agentName is an agent's display name, harness/model, with @effort only
+// where an effort is set: claude/opus@high.
+func agentName(harness, model, effort string) string {
+	name := harness + "/" + model
+	if effort != "" {
+		name += "@" + effort
+	}
+	return name
+}
+
+// effortField is the " effort=<level>" suffix of a printed foreman choice;
+// empty when no effort is set, so an unset effort prints as before.
+func effortField(effort string) string {
+	if effort == "" {
+		return ""
+	}
+	return " effort=" + effort
 }
