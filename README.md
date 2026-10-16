@@ -104,6 +104,8 @@ brigada cancel <job-id>
 
 `brigada help` lists every command.
 
+Day two and beyond: [docs/GUIDE.md](docs/GUIDE.md).
+
 ## API keys
 
 brigada has no API-key setting of its own yet. Workers inherit your environment (minus brigada's own variables), so a CLI that you have set up with an API key the way its vendor documents is driven the same way. See [docs/TERMS.md](docs/TERMS.md).
