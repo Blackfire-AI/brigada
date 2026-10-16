@@ -40,6 +40,7 @@ approval_protected_paths:
 		{"unknown key", string(cfgFile("agents: [claude]\n")), `unknown key "agents"`},
 		{"secret-bearing key", string(cfgFile("api_token: abc\n")), `unknown key "api_token"`},
 		{"local path key", string(cfgFile("state_dir: /home/me/.state\n")), `unknown key "state_dir"`},
+		{"local-only setting", string(cfgFile("hold_idle_minutes: 20\n")), `unknown key "hold_idle_minutes"`},
 		{"duplicate key", string(cfgFile("default_check: a\ndefault_check: b\n")), `key "default_check" appears twice`},
 		{"repo with a scheme", "schema: 1\nrepo: https://example.invalid/brigada.git\n", "canonical form"},
 		{"repo with a credential", "schema: 1\nrepo: https://tok:secret@example.invalid/brigada\n", "canonical form"},
