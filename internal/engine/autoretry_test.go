@@ -36,7 +36,7 @@ func TestTransientWorkFailureRestartsOnAnotherAgent(t *testing.T) {
 			if p, ok := e.eventPayloadOf(evTaskRestarted); !ok || p.Reason != reason || p.Agent != otherAgent || p.Run != 2 {
 				t.Errorf("restart event = %+v (%t), want reason, other agent and run 2", p, ok)
 			}
-			if got := e.str("SELECT prompt FROM jobs WHERE id = ?", retry); got != prompt.ComposeWorkerPrompt("the spec", reason) {
+			if got := e.str("SELECT prompt FROM jobs WHERE id = ?", retry); got != prompt.ComposeWorkerPrompt("the spec", "go test ./...", reason) {
 				t.Errorf("restart prompt = %q, want failure context in worker feedback", got)
 			}
 			if n := e.countEvents(evTaskFailed); n != 0 {

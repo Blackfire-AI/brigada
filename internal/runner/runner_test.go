@@ -540,7 +540,7 @@ func TestRunnerHappyPath(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", "", ""))
 	markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, happyWorker), 100*time.Millisecond)
@@ -626,7 +626,7 @@ func TestRunnerWorkerPushesItself(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", `test -f work.txt`)
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
 	markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, pushingWorker), 100*time.Millisecond)
@@ -654,7 +654,7 @@ func TestRunnerWorkerLeavesEditsUncommitted(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", `test "$(cat work.txt)" = edited`)
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Edit work.txt.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Edit work.txt.", "", ""))
 	markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, editOnlyWorker), 100*time.Millisecond)
@@ -684,7 +684,7 @@ func TestRunnerNoResultBlock(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Do something.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Do something.", "", ""))
 	markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, noResultWorker), 100*time.Millisecond)
@@ -706,7 +706,7 @@ func TestRunnerCheckFailed(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", "echo check-boom; exit 3")
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
 	markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, happyWorker), 100*time.Millisecond)
@@ -734,7 +734,7 @@ func TestRunnerHeartbeatCancelledKillsWorker(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
 	markers := markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, slowWorker), 100*time.Millisecond)
@@ -767,7 +767,7 @@ func TestRunnerLeaseLostMidRun(t *testing.T) {
 	e := newTestEnv(t, engine.Config{LeaseTTL: 300 * time.Millisecond})
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
 	markers := markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, slowWorker), 600*time.Millisecond)
@@ -810,7 +810,7 @@ func TestRunnerRejectsRepoWithoutURL(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject("") // a project with no repo URL
 	task := e.seedTask("", "true")
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Anything.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Anything.", "", ""))
 	markers := markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, slowWorker), 100*time.Millisecond)
@@ -856,7 +856,7 @@ func TestRunnerStderrOnlyFailure(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Do something.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Do something.", "", ""))
 	markerDir(t)
 
 	worker := `
@@ -899,7 +899,7 @@ func TestRunnerStderrErrorWeighsAgainstTheExit(t *testing.T) {
 		e := newTestEnv(t, engine.Config{})
 		e.seedProject(remote)
 		task := e.seedTask("", `test "$(cat work.txt)" = hello`)
-		job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", ""))
+		job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
 		markerDir(t)
 
 		worker := `
@@ -925,7 +925,7 @@ printf '{"type":"result","text":"done amid warnings: {\\"status\\":\\"done\\",\\
 		e := newTestEnv(t, engine.Config{})
 		e.seedProject(remote)
 		task := e.seedTask("", "true")
-		job := e.submitWork(task, prompt.ComposeWorkerPrompt("Do something.", ""))
+		job := e.submitWork(task, prompt.ComposeWorkerPrompt("Do something.", "", ""))
 		markerDir(t)
 
 		worker := `
@@ -954,7 +954,7 @@ func TestRunnerHistoryEndToEnd(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", "", ""))
 	markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, happyWorker), 100*time.Millisecond)
@@ -1048,7 +1048,7 @@ func TestRunnerLongCheckKeepsLease(t *testing.T) {
 	e.seedProject(remote)
 	// A check that crosses several lease windows, then passes.
 	task := e.seedTask("", "sleep 1.5 && echo check-ok")
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
 	markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, happyWorker), 150*time.Millisecond)
@@ -1076,7 +1076,7 @@ func TestRunnerCancelDuringCheckKillsCheck(t *testing.T) {
 	markers := markerDir(t)
 	check := `touch "$BRIGADA_TEST_MARKERS/check-started" && sleep 5 && touch "$BRIGADA_TEST_MARKERS/check-finished" && exit 0`
 	task := e.seedTask("", check)
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
 
 	p := e.startRunner(writeWorkerScript(t, happyWorker), 100*time.Millisecond)
 	defer p.stop(t)
@@ -1142,7 +1142,7 @@ func TestRunnerSurvivesSocketBlink(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	e.startAPI()
 
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
 	done := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
 	if res := e.workerResult(done); res.Status != "done" {
 		t.Errorf("worker result = %+v, want done after the blink", res)
@@ -1186,7 +1186,7 @@ printf '{"type":"result","text":"done: {\\"status\\":\\"done\\",\\"summary\\":\\
 		func(c *Config) { c.GitEnv = []string{"BRIGADA_TEST_GITCRED=hush-hush"} })
 	defer p.stop(t)
 
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
 	done := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
 	if res := e.workerResult(done); res.Status != "done" {
 		t.Errorf("worker result = %+v, want done: the credential scrub broke the run", res)

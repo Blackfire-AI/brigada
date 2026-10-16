@@ -216,6 +216,17 @@ func taskSpecTx(tx *sql.Tx, taskID int64) (string, error) {
 	return spec, err
 }
 
+// taskCheckTx reads the task's check command (§5.5), "" when it has
+// none: the worker prompt names it so the worker knows what decides its
+// task, and the check-failure feedback and events quote it.
+func taskCheckTx(tx *sql.Tx, taskID int64) (string, error) {
+	var check string
+	if err := tx.QueryRow("SELECT COALESCE(check_cmd, '') FROM tasks WHERE id = ?", taskID).Scan(&check); err != nil {
+		return "", fmt.Errorf("read the check of task %d: %w", taskID, err)
+	}
+	return check, nil
+}
+
 // taskSpecAndBaseTx reads the task's spec and base ref together: the
 // two verbatim inputs a review prompt wraps (§7) beside the check
 // result — the base names the diff's other end, and it is read here so

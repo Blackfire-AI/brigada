@@ -188,7 +188,7 @@ func TestTaskSubmitEndpoint(t *testing.T) {
 	if job.Key != fmt.Sprintf("task:%d", res.TaskID) || job.Status != "queued" {
 		t.Errorf("job = %+v, want queued on the task's key", job)
 	}
-	if job.Prompt != prompt.ComposeWorkerPrompt("the spec", "") || !strings.Contains(job.Prompt, "<task-spec>\nthe spec\n</task-spec>") {
+	if job.Prompt != prompt.ComposeWorkerPrompt("the spec", "go test ./...", "") || !strings.Contains(job.Prompt, "<task-spec>\nthe spec\n</task-spec>") {
 		t.Errorf("job prompt = %q, want the engine's composed prompt with the spec verbatim", job.Prompt)
 	}
 	if job.Harness != "claude" {

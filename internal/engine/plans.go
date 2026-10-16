@@ -309,13 +309,17 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 // job_created event and the task_spec message, as it does for the debug
 // submit.
 func (e *Engine) queueTaskWorkTx(tx *sql.Tx, project, taskID int64, spec string, now time.Time) (SubmitResult, error) {
+	check, err := taskCheckTx(tx, taskID)
+	if err != nil {
+		return SubmitResult{}, err
+	}
 	return e.submitTx(tx, SubmitParams{
 		Key:       fmt.Sprintf("task:%d", taskID),
 		ProjectID: project,
 		TaskID:    taskID,
 		Kind:      KindWork,
 		Mode:      ModeFresh,
-		Prompt:    prompt.ComposeWorkerPrompt(spec, ""),
+		Prompt:    prompt.ComposeWorkerPrompt(spec, check, ""),
 	}, now)
 }
 

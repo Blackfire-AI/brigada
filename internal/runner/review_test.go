@@ -252,7 +252,7 @@ func TestRunnerRunsReviewJobToEnd(t *testing.T) {
 	e.seedProject(remote)
 	markers := markerDir(t)
 	task := e.seedTask("", `echo check >> "$BRIGADA_TEST_MARKERS/checks"; test "$(cat work.txt)" = hello`)
-	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", ""))
+	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", "", ""))
 
 	p := e.startReviewRunner(t, taskBranch(task, 1), reviewScript(reviewApproveResult))
 	defer p.stop(t)
@@ -306,7 +306,7 @@ func TestRunnerReviewWithoutAVerdictBlock(t *testing.T) {
 	e.seedProject(remote)
 	markers := markerDir(t)
 	task := e.seedTask("", `echo check >> "$BRIGADA_TEST_MARKERS/checks"; test "$(cat work.txt)" = hello`)
-	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", ""))
+	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", "", ""))
 
 	p := e.startReviewRunner(t, taskBranch(task, 1), reviewScript(reviewNoVerdictResult))
 	defer p.stop(t)
@@ -349,7 +349,7 @@ func TestRunnerWedgedReviewFailsFast(t *testing.T) {
 	e.seedProject(remote)
 	markers := markerDir(t)
 	task := e.seedTask("", `echo check >> "$BRIGADA_TEST_MARKERS/checks"; test "$(cat work.txt)" = hello`)
-	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", ""))
+	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", "", ""))
 
 	p := e.startReviewRunner(t, taskBranch(task, 1), reviewScript(reviewWedgedResult))
 	defer p.stop(t)
@@ -397,7 +397,7 @@ func TestRunnerRunsTheAgentTheLeaseNamed(t *testing.T) {
 	e.seedProject(remote)
 	markers := markerDir(t)
 	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
-	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", ""))
+	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", "", ""))
 	t.Setenv("BRIGADA_TEST_BRANCH", taskBranch(task, 1))
 
 	workBody := "echo implement-ran > \"$BRIGADA_TEST_MARKERS/work-by\"\n" + happyWorker

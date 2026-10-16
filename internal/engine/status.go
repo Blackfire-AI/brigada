@@ -580,6 +580,9 @@ func needsYouReason(kind, payload string) string {
 		return oneLine(kind, needsYouReasonLimit)
 	}
 	reason := p.Reason
+	if text, ok := checkEventText(kind, p); ok {
+		reason = text
+	}
 	switch kind {
 	case evTaskNeedsHelp:
 		reason = p.Question

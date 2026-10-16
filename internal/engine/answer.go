@@ -98,6 +98,10 @@ func (e *Engine) answerTx(tx *sql.Tx, project, taskID int64, text string, now ti
 	if err != nil {
 		return AnswerResult{}, err
 	}
+	check, err := taskCheckTx(tx, taskID)
+	if err != nil {
+		return AnswerResult{}, err
+	}
 	harness, agent, err := authorPlacementTx(tx, taskID)
 	if err != nil {
 		return AnswerResult{}, err
@@ -109,7 +113,7 @@ func (e *Engine) answerTx(tx *sql.Tx, project, taskID int64, text string, now ti
 		TaskID:       taskID,
 		Kind:         KindFix,
 		Mode:         ModeSession,
-		Prompt:       prompt.ComposeAnswerPrompt(spec, text),
+		Prompt:       prompt.ComposeAnswerPrompt(spec, check, text),
 		Harness:      harness,
 		RequireAgent: agent,
 		Round:        roundNone,
@@ -199,6 +203,10 @@ func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note stri
 	if err != nil {
 		return RestartResult{}, err
 	}
+	check, err := taskCheckTx(tx, taskID)
+	if err != nil {
+		return RestartResult{}, err
+	}
 	key := fmt.Sprintf("task:%d", taskID)
 	sr, err := e.submitTx(tx, SubmitParams{
 		Key:          key,
@@ -206,7 +214,7 @@ func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note stri
 		TaskID:       taskID,
 		Kind:         KindWork,
 		Mode:         ModeFresh,
-		Prompt:       prompt.ComposeWorkerPrompt(spec, note),
+		Prompt:       prompt.ComposeWorkerPrompt(spec, check, note),
 		Restart:      true,
 		RequireAgent: agent,
 	}, now)

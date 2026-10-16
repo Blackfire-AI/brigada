@@ -109,7 +109,7 @@ func TestServeCallAnswer(t *testing.T) {
 		t.Errorf("questions.answer = %q, want the foreman's, verbatim", answer)
 	}
 	if got, want := strOf(t, e, "SELECT prompt FROM jobs WHERE kind = 'fix'"),
-		prompt.ComposeAnswerPrompt("the spec", "Use the REST API over the Unix socket."); got != want {
+		prompt.ComposeAnswerPrompt("the spec", "go test ./...", "Use the REST API over the Unix socket."); got != want {
 		t.Errorf("answer job prompt = %q\nwant the composed\n%q", got, want)
 	}
 	if mode := strOf(t, e, "SELECT mode FROM jobs WHERE kind = 'fix'"); mode != "session" {
@@ -197,7 +197,7 @@ func TestServeCallTaskRestart(t *testing.T) {
 		t.Errorf("restart job restart flag = %q, want 1", restart)
 	}
 	if got, want := strOf(t, e, "SELECT prompt FROM jobs WHERE task_id = ?", task),
-		prompt.ComposeWorkerPrompt("the spec", note); got != want {
+		prompt.ComposeWorkerPrompt("the spec", "go test ./...", note); got != want {
 		t.Errorf("restart job prompt = %q\nwant the composed\n%q", got, want)
 	}
 	if state := strOf(t, e, "SELECT state FROM tasks WHERE id = ?", task); state != "ready" {
