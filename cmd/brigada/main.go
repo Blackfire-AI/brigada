@@ -29,6 +29,7 @@ Usage:
 
 Commands:
 
+	init            Probe and confirm setup of this repository (phase 6(a)).
 	attach          Attach to this repo's foreman and chat (what a bare
 	                brigada runs).
 	ask <message>   Send the foreman a message without attaching.
@@ -86,6 +87,7 @@ type command struct {
 }
 
 var commands = map[string]command{
+	"init":    {name: "init", run: runInit},
 	"attach":  {name: "attach", run: runAttach},
 	"ask":     {name: "ask", run: runAsk},
 	"review":  {name: "review", run: runReview},

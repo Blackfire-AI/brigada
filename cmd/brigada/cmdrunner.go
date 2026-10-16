@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -81,99 +82,13 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		})
 	}
 
-	var ads []adapter.Adapter
-	var adverts []api.Agent
-	seen := map[string]bool{}
-	for _, spec := range agents.specs {
-		if seen[spec.harness] {
-			return usagef(stderr, "harness %q is offered twice: at most one agent per harness per runner", spec.harness)
+	ads, adverts, err := resolveRunnerAgents(rt, agents.specs, workerScript)
+	if err != nil {
+		var pathErr *os.PathError
+		if errors.As(err, &pathErr) {
+			return fail(stderr, err)
 		}
-		seen[spec.harness] = true
-		if len(spec.classes) == 0 {
-			return usagef(stderr, "the agent for harness %q takes no classes: --classes must name at least one", spec.harness)
-		}
-		var ad adapter.Adapter
-		if spec.tools != nil && spec.harness != "claude" {
-			return usagef(stderr, "--agent tools=: %s", lifecycle.ToolsRefusal(spec.harness))
-		}
-		switch spec.harness {
-		case "claude":
-			if spec.agentFile != "" {
-				return usagef(stderr, "--agent-file is a --harness kimi flag; the claude harness takes none")
-			}
-			if spec.model == "" {
-				spec.model = "sonnet"
-			}
-			// The flag wins over the config key; neither is the Go
-			// default (nil), which is not the same as none (empty).
-			tools := spec.tools
-			if tools == nil {
-				tools = rt.file.Tools["claude/"+spec.model]
-			}
-			ad = &claude.Adapter{AllowedTools: tools}
-			spec.toolsText = claude.ScopeText(tools)
-		case "kimi":
-			// The agent file is resolved and checked here, not at the
-			// first job: a typo in the path is a startup failure, never
-			// a job's.
-			if spec.agentFile != "" {
-				abs, err := filepath.Abs(spec.agentFile)
-				if err != nil {
-					return fail(stderr, fmt.Errorf("agent-file: %w", err))
-				}
-				if _, err := os.Stat(abs); err != nil {
-					return fail(stderr, fmt.Errorf("agent-file: %w", err))
-				}
-				spec.agentFile = abs
-			}
-			ad = &kimi.Adapter{AgentFile: spec.agentFile}
-			if spec.model == "" {
-				spec.model = kimi.DefaultModel
-			}
-		case "codex":
-			if spec.agentFile != "" {
-				return usagef(stderr, "--agent-file is a --harness kimi flag; the codex harness takes none")
-			}
-			ad = &codex.Adapter{}
-			if spec.model == "" {
-				spec.model = codex.DefaultModel
-			}
-		case "opencode":
-			if spec.agentFile != "" {
-				return usagef(stderr, "--agent-file is a --harness kimi flag; the opencode harness takes none")
-			}
-			ad = &opencode.Adapter{}
-			if spec.model == "" {
-				spec.model = opencode.DefaultModel
-			}
-		case "fake":
-			if spec.agentFile != "" {
-				return usagef(stderr, "--agent-file is a --harness kimi flag; the fake harness takes none")
-			}
-			if workerScript == "" {
-				return usagef(stderr, "--harness fake needs --worker-script: the scripted worker the fake adapter drives")
-			}
-			ad = &fake.Adapter{Script: workerScript}
-			if spec.model == "" {
-				spec.model = "fake-1"
-			}
-		default:
-			return usagef(stderr, "unknown harness %q; want claude, kimi, codex, opencode or fake", spec.harness)
-		}
-		if err := adapter.ValidateEffort(spec.harness, spec.effort); err != nil {
-			return usagef(stderr, "--agent harness=%s: %v", spec.harness, err)
-		}
-		ads = append(ads, ad)
-		adverts = append(adverts, api.Agent{
-			Effort:  spec.effort,
-			Adapter: ad.Name(),
-			Harness: spec.harness,
-			Model:   spec.model,
-			Family:  spec.harness,
-			Account: spec.accountLabel(),
-			Classes: spec.classes,
-			Tools:   spec.toolsText,
-		})
+		return usagef(stderr, "%v", err)
 	}
 
 	if code := ensureEngine(ctx, rt, noStart, stderr); code != 0 {
@@ -202,6 +117,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		Token:       secret,
 		StateDir:    runnerStateDir(rt),
 		Agents:      adverts,
+		AgentSpecs:  runnerSpecStrings(agents.specs),
 		Adapters:    ads,
 		Labels:      splitList(labels),
 		MaxParallel: maxParallel,
@@ -364,6 +280,124 @@ func splitPlusList(s string) []string {
 	}
 	if out == nil {
 		return []string{}
+	}
+	return out
+}
+
+// resolveRunnerAgents is shared by runner and init: validation, defaults and
+// effective advertisements must agree before init starts a detached runner.
+func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([]adapter.Adapter, []api.Agent, error) {
+	var ads []adapter.Adapter
+	var adverts []api.Agent
+	seen := map[string]bool{}
+	for _, spec := range specs {
+		if seen[spec.harness] {
+			return nil, nil, fmt.Errorf("harness %q is offered twice: at most one agent per harness per runner", spec.harness)
+		}
+		seen[spec.harness] = true
+		if len(spec.classes) == 0 {
+			return nil, nil, fmt.Errorf("the agent for harness %q takes no classes: --classes must name at least one", spec.harness)
+		}
+		var ad adapter.Adapter
+		if spec.tools != nil && spec.harness != "claude" {
+			return nil, nil, fmt.Errorf("--agent tools=: %s", lifecycle.ToolsRefusal(spec.harness))
+		}
+		switch spec.harness {
+		case "claude":
+			if spec.agentFile != "" {
+				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the claude harness takes none")
+			}
+			if spec.model == "" {
+				spec.model = "sonnet"
+			}
+			// The flag wins over the config key; neither is the Go
+			// default (nil), which is not the same as none (empty).
+			tools := spec.tools
+			if tools == nil {
+				tools = rt.file.Tools["claude/"+spec.model]
+			}
+			ad = &claude.Adapter{AllowedTools: tools}
+			spec.toolsText = claude.ScopeText(tools)
+		case "kimi":
+			// The agent file is resolved and checked here, not at the
+			// first job: a typo in the path is a startup failure, never
+			// a job's.
+			if spec.agentFile != "" {
+				abs, err := filepath.Abs(spec.agentFile)
+				if err != nil {
+					return nil, nil, fmt.Errorf("agent-file: %w", err)
+				}
+				if _, err := os.Stat(abs); err != nil {
+					return nil, nil, fmt.Errorf("agent-file: %w", err)
+				}
+				spec.agentFile = abs
+			}
+			ad = &kimi.Adapter{AgentFile: spec.agentFile}
+			if spec.model == "" {
+				spec.model = kimi.DefaultModel
+			}
+		case "codex":
+			if spec.agentFile != "" {
+				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the codex harness takes none")
+			}
+			ad = &codex.Adapter{}
+			if spec.model == "" {
+				spec.model = codex.DefaultModel
+			}
+		case "opencode":
+			if spec.agentFile != "" {
+				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the opencode harness takes none")
+			}
+			ad = &opencode.Adapter{}
+			if spec.model == "" {
+				spec.model = opencode.DefaultModel
+			}
+		case "fake":
+			if spec.agentFile != "" {
+				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the fake harness takes none")
+			}
+			if workerScript == "" {
+				return nil, nil, fmt.Errorf("--harness fake needs --worker-script: the scripted worker the fake adapter drives")
+			}
+			ad = &fake.Adapter{Script: workerScript}
+			if spec.model == "" {
+				spec.model = "fake-1"
+			}
+		default:
+			return nil, nil, fmt.Errorf("unknown harness %q; want claude, kimi, codex, opencode or fake", spec.harness)
+		}
+		if err := adapter.ValidateEffort(spec.harness, spec.effort); err != nil {
+			return nil, nil, fmt.Errorf("--agent harness=%s: %v", spec.harness, err)
+		}
+		ads = append(ads, ad)
+		adverts = append(adverts, api.Agent{
+			Effort:  spec.effort,
+			Adapter: ad.Name(),
+			Harness: spec.harness,
+			Model:   spec.model,
+			Family:  runnerFamily(spec.harness, spec.model),
+			Account: spec.accountLabel(),
+			Classes: spec.classes,
+			Tools:   spec.toolsText,
+		})
+	}
+
+	return ads, adverts, nil
+}
+
+func runnerFamily(harness, model string) string {
+	if family, err := adapter.ModelFamily(model); err == nil {
+		return family
+	}
+	// Standalone runner retains its historical support for CLI-default and
+	// custom model aliases. Init requires an explicit identifiable model.
+	return harness
+}
+
+func runnerSpecStrings(specs []agentSpec) []string {
+	out := make([]string, len(specs))
+	for i, spec := range specs {
+		out[i] = spec.String()
 	}
 	return out
 }

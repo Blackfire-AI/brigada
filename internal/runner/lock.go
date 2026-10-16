@@ -2,14 +2,8 @@ package runner
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
+	"github.com/Blackfire-AI/brigada/internal/runnerstate"
 	"sync"
-	"syscall"
 )
 
 // mirrorLocks serializes the mutations of one repo's shared mirror
@@ -134,47 +128,5 @@ func lockMirrorFor(ctx context.Context, mirror string, branches ...string) (func
 // returns its release. A lock another runner process holds is refused
 // with its pid named.
 func lockStateDir(stateDir string) (func(), error) {
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		return nil, fmt.Errorf("runner: create the state directory: %w", err)
-	}
-	path := filepath.Join(stateDir, "runner.lock")
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
-	if err != nil {
-		return nil, fmt.Errorf("runner: open the runner lock %s: %w", path, err)
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		pid := lockPid(f)
-		f.Close()
-		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
-			if pid > 0 {
-				return nil, fmt.Errorf("runner: another runner (pid %d) is already running on this state directory (lock %s); a second would replace its agents at register, so refusing to start", pid, path)
-			}
-			return nil, fmt.Errorf("runner: another runner holds the lock %s; refusing to start a second", path)
-		}
-		return nil, fmt.Errorf("runner: lock %s: %w", path, err)
-	}
-	if err := f.Truncate(0); err == nil {
-		f.Seek(0, 0)
-		f.WriteString(strconv.Itoa(os.Getpid()) + "\n")
-	}
-	unlock := func() {
-		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		f.Close()
-	}
-	return unlock, nil
-}
-
-// lockPid reads the holder's pid from a lock file this process could
-// not lock: whatever the holder last wrote. 0 when it holds nothing
-// readable — the message then names the lock alone, never a guess.
-func lockPid(f *os.File) int {
-	data, err := os.ReadFile(f.Name())
-	if err != nil {
-		return 0
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
-		return 0
-	}
-	return pid
+	return runnerstate.Acquire(stateDir)
 }

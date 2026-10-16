@@ -15,6 +15,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/api"
+	"github.com/Blackfire-AI/brigada/internal/runnerstate"
 )
 
 // heartbeatEvery is how often the runner heartbeats a running job
@@ -42,6 +43,9 @@ type Config struct {
 	// Agents is the runner's advertisement (§5.1): one entry per
 	// (adapter, harness, model) it offers, persisted by register.
 	Agents []api.Agent
+	// AgentSpecs records the local launch configuration for init comparisons,
+	// including agent-file, which is not part of the engine advertisement.
+	AgentSpecs []string
 	// Adapters are the adapter implementations the runner can drive;
 	// each agent's Adapter names one of them.
 	Adapters []adapter.Adapter
@@ -332,6 +336,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer unlock()
+
 	if cfg.Ready != nil {
 		cfg.Ready()
 	}
@@ -388,6 +393,11 @@ func Run(ctx context.Context, cfg Config) error {
 				}
 				backoff = min(backoff*2, leaseBackoffMax)
 				continue
+			}
+			// The detached starter waits for this record, rather than trusting
+			// a log line or a live pid before registration has actually succeeded.
+			if err := runnerstate.Publish(cfg.StateDir, cfg.Agents, cfg.AgentSpecs...); err != nil {
+				return fmt.Errorf("record runner agents: %w", err)
 			}
 			registered = true
 			backoff = leaseBackoffMin
