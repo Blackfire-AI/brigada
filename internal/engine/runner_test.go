@@ -198,12 +198,13 @@ func TestLeaseGrantCarriesTaskFields(t *testing.T) {
 	}
 	e.complete(g3, done())
 
-	// A foreman turn carries no task fields. The needs_help park above
+	// A foreman turn carries the project repo/default branch for reading,
+	// with no task or check. The needs_help park above
 	// already woke one (§4.2) — it waits for the project's foreman
 	// harness, so the lease asks for it by name.
 	gf := e.lease(e.runner1, []string{"claude"}, nil)
-	if gf == nil || gf.TaskID != 0 || gf.RepoURL != "" || gf.BaseRef != "" || gf.CheckCmd != "" {
-		t.Errorf("foreman grant = %+v, want no task fields", gf)
+	if gf == nil || gf.TaskID != 0 || gf.RepoURL != "https://example.invalid/brigada.git" || gf.BaseRef != "main" || gf.CheckCmd != "" {
+		t.Errorf("foreman grant = %+v, want project checkout metadata and no task/check", gf)
 	}
 }
 

@@ -64,6 +64,8 @@ type jobRun struct {
 	// task job keeps the field empty. Read by runWorker alone, between
 	// the two, like killWorker.
 	mcpConfig string
+	// foremanRepo is the prepared reading checkout, empty for task jobs.
+	foremanRepo string
 }
 
 // execute runs the job end to end. Every failure is delivered to the
@@ -83,9 +85,9 @@ func (r *jobRun) execute(ctx context.Context) {
 	log.InfoContext(ctx, "job leased", "job_id", r.grant.JobID, "kind", r.grant.Kind, "key", r.grant.Key)
 	r.startedAt = r.now() // the class time cap measures the whole run, from the lease
 
-	// A foreman turn is a worker job with no material side (§4): no
-	// task, so no workspace, no push, no check — the turn runs in the
-	// project's scratch directory under the same machinery.
+	// A foreman turn has no task worktree, push or check (§4). It reads
+	// a checkout under the project's scratch directory, where its
+	// harness session keeps running under the same machinery.
 	if isForemanTurn(r.grant) {
 		r.runForemanTurn(ctx)
 		return
@@ -168,7 +170,7 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 	if r.grant.Mode == string(engine.ModeSession) {
 		resume = r.grant.ResumeSessionID
 	}
-	cmd, err := ad.Command(adapter.Job{Prompt: r.grant.Prompt, Model: model, MCPConfig: r.mcpConfig}, workdir, resume)
+	cmd, err := ad.Command(adapter.Job{Prompt: r.grant.Prompt, Model: model, MCPConfig: r.mcpConfig, ReadOnlyRepo: r.foremanRepo}, workdir, resume)
 	if err != nil {
 		return &noWorkerError{err}
 	}

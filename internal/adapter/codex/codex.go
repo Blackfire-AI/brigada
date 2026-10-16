@@ -52,18 +52,17 @@ func (a *Adapter) Name() string { return "codex" }
 // the CLI, running in workdir:
 //
 // A worker runs `codex exec --json -s workspace-write`; a foreman runs
-// `codex exec --json --approve-for-me` with the MCP overrides below.
+// `codex exec --json -s read-only` with MCP and approval overrides below.
 // The worker's sandbox lets it edit inside its worktree without approval,
 // while the CLI's default keeps the network off. No --skip-git-repo-check:
 // a worker's directory is a worktree, which is a git repo. The prompt is
 // the positional after `--`, argv
 // and no shell, verbatim — the engine's product (§1.4), not the
 // adapter's to edit, and a prompt that starts with a dash stays one.
-// For a foreman, --approve-for-me implies workspace-write and cannot be
-// combined with -s: containment is the runner's scratch directory (which
-// contains no repo) plus the foreman's instructions. The foreman never
-// edits code by policy, not enforcement; this is weaker than Claude's
-// allow/deny scope (§4).
+// For a foreman, use the read-only sandbox and independent approval settings.
+// --approve-for-me selects workspace-write and conflicts with -s. Automatic
+// review remains available to MCP; sandbox and permission escalations are
+// rejected, so policy alone cannot turn the reading checkout writable.
 // The environment is the runner's ambient set minus brigada's own share
 // of it (§5.1): every BRIGADA_-prefixed variable is dropped.
 func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*exec.Cmd, error) {
@@ -79,7 +78,7 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		if err != nil {
 			return nil, err
 		}
-		args = append(args, "--approve-for-me")
+		args = append(args, foremanPermissions()...)
 		args = append(args, configArgs...)
 		// A foreman turn runs in the runner's scratch directory, which
 		// is deliberately not a git repo; codex refuses such directories
@@ -101,6 +100,17 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	cmd.Dir = workdir
 	cmd.Env = workerEnv(os.Environ())
 	return cmd, nil
+}
+
+// foremanPermissions keeps MCP approval review separate from filesystem
+// approval. CLI 0.162.1 accepts these settings; the --approve-for-me alias
+// would instead force workspace-write. No sandbox escape is auto-approved.
+func foremanPermissions() []string {
+	return []string{
+		"-s", "read-only",
+		"-c", `approvals_reviewer="auto_review"`,
+		"-c", `approval_policy={granular={sandbox_approval=false,rules=false,mcp_elicitations=true,request_permissions=false,skill_approval=false}}`,
+	}
 }
 
 type mcpConfig struct {
@@ -164,9 +174,9 @@ func mcpConfigArgs(path string) ([]string, error) {
 // Codex never created and falls back to a fresh run; this is the documented
 // limitation until Codex exposes a fork/session-id facility.
 //
-// This command deliberately carries only interactive options. In particular
-// it does not inherit the headless --json, -s, or approval-bypass flags. Codex
-// has no equivalent of Claude's statusLine setting, so StatusLine is ignored.
+// A foreman reading checkout gets the same read-only sandbox and separate
+// approval settings as a headless turn, without --json or approval bypass.
+// Codex has no equivalent of Claude's statusLine, so StatusLine is ignored.
 // MCPConfig is likewise not translated: Codex has no adapter-supported MCP
 // config flag; the terminal remains the CLI's own interactive session.
 func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, _ string) (*exec.Cmd, error) {
@@ -175,6 +185,9 @@ func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, _ str
 		binary = "codex"
 	}
 	args := make([]string, 0, 6+len(a.ExtraArgs))
+	if job.ReadOnlyRepo != "" {
+		args = append(args, foremanPermissions()...)
+	}
 	if resumeSessionID != "" {
 		args = append(args, "resume", resumeSessionID)
 	}

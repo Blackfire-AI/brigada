@@ -19,7 +19,7 @@ var instructions string
 // InstructionsVersion is the foreman instructions' version (§4.1): the
 // versioned file shipped with brigada that every foreman prompt
 // prepends. Editing instructions.md means bumping this.
-const InstructionsVersion = 6
+const InstructionsVersion = 7
 
 // Instructions returns the foreman instructions (§4.1): what the
 // foreman is, what it may and may not do, and how it goes about
@@ -29,7 +29,7 @@ func Instructions() string { return instructions }
 // TurnTemplateVersion is the wake template's version (§4.2 item 2,
 // §1.4): like the worker template (§5.3), a change to the template
 // below is a version bump, never a silent edit.
-const TurnTemplateVersion = 3
+const TurnTemplateVersion = 4
 
 // turnTemplate is the fixed part of every headless turn's wake prompt
 // (§4.2 item 2). It tells the foreman why it woke, where the verbatim
@@ -178,4 +178,25 @@ func ComposeTurnPromptWith(events []string, userMessages []UserMessage) string {
 	b.WriteString(EventBlocks(events))
 	b.WriteString(UserMessageBlocks(userMessages))
 	return b.String()
+}
+
+// Checkout identifies the runner-prepared reading copy at this turn's fetch.
+type Checkout struct {
+	Path   string
+	Branch string
+	Commit string
+}
+
+// WithCheckout adds runtime checkout metadata to either a headless wake or
+// attach opening prompt. Both are composed before the client/runner fetches;
+// adding the snapshot here keeps the path and commit accurate on resumes too.
+func WithCheckout(prompt string, checkout Checkout) string {
+	return prompt + fmt.Sprintf(`
+Project checkout (read-only; refreshed before this session):
+Path: %q
+Branch: %q
+Commit: %q
+Read the checkout's CLAUDE.md and AGENTS.md, when present, and the code before planning.
+The snapshot may lag the remote by one fetch. Never edit or push this checkout.
+`, neutralize(checkout.Path), neutralize(checkout.Branch), neutralize(checkout.Commit))
 }

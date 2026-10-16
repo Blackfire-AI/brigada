@@ -23,6 +23,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter/kimi"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/foreman"
 	"github.com/Blackfire-AI/brigada/internal/runner"
 )
 
@@ -179,6 +180,11 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 	if err != nil {
 		return abandon(fmt.Errorf("make the foreman's scratch directory: %w", err))
 	}
+	checkout, err := runner.PrepareForemanCheckout(ctx, scratch, res.RepoURL, res.DefaultBranch, nil)
+	if err != nil {
+		return abandon(fmt.Errorf("prepare the foreman checkout: %w", err))
+	}
+	res.Prompt = foreman.WithCheckout(res.Prompt, checkout)
 	// The MCP config for the hold's token (§12.2): the bridge is this
 	// own binary, the token reaches the file and the bridge alone, and
 	// the file dies with the attach, however the attach ends.
@@ -197,7 +203,7 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 		return abandon(fmt.Errorf("generate the new session id: %w", err))
 	}
 	cmd, err := inter.AttachCommand(adapter.Job{
-		Prompt: res.Prompt, Model: res.Model, MCPConfig: config,
+		Prompt: res.Prompt, Model: res.Model, MCPConfig: config, ReadOnlyRepo: checkout.Path,
 		StatusLine: statusLineCommand(rt),
 	}, scratch, res.SessionID, newSessionID)
 	if err != nil {

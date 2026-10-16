@@ -684,9 +684,13 @@ func holdKey(layer string, job caps.Job) string {
 // repo URL (the task's own, else the project's, §6.1), the base ref,
 // the check command the runner runs after a done (§5.5), and the
 // result branch a review job reviews (§7). A foreman turn belongs to
-// no task and gets empty fields.
+// no task; its reading checkout uses the project repo and default branch.
 func taskInfoTx(tx *sql.Tx, j *jobRow) (repoURL, baseRef, checkCmd, branch string, err error) {
 	if j.TaskID == 0 {
+		if j.Kind == KindForeman {
+			repoURL, baseRef, err = standaloneReviewInfoTx(tx, j)
+			return repoURL, baseRef, "", "", err
+		}
 		return "", "", "", "", nil
 	}
 	err = tx.QueryRow(`SELECT COALESCE(NULLIF(t.repo_url, ''), p.repo_url), t.base_ref, COALESCE(t.check_cmd, ''), COALESCE(t.branch, '')
@@ -701,7 +705,8 @@ func taskInfoTx(tx *sql.Tx, j *jobRow) (repoURL, baseRef, checkCmd, branch strin
 
 // standaloneReviewInfoTx reads what a task-less review's grant needs
 // from the project (§7): its repo URL, and its default branch as the
-// base end of the diff.
+// base end of the diff. Foreman turns use the same project metadata
+// for their reading checkout.
 func standaloneReviewInfoTx(tx *sql.Tx, j *jobRow) (repoURL, baseRef string, err error) {
 	if err := tx.QueryRow("SELECT repo_url, default_branch FROM projects WHERE id = ?", j.ProjectID).
 		Scan(&repoURL, &baseRef); err != nil {

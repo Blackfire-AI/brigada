@@ -115,6 +115,9 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		// the agent config's — it decides through the bridge and reads
 		// the repo, and never edits code.
 		args = append(args, "--mcp-config", job.MCPConfig, "--strict-mcp-config")
+		if job.ReadOnlyRepo != "" {
+			args = append(args, "--add-dir", job.ReadOnlyRepo)
+		}
 		allowed, disallowed = foremanToolScope()
 	} else if len(allowed) == 0 {
 		// A code worker with no explicit scope gets the default (§5.2):
@@ -134,6 +137,9 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	cmd.Dir = workdir
 	cmd.Stdin = strings.NewReader(job.Prompt)
 	cmd.Env = workerEnv(os.Environ())
+	if job.ReadOnlyRepo != "" {
+		cmd.Env = append(cmd.Env, "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1")
+	}
 	return cmd, nil
 }
 
@@ -183,6 +189,9 @@ func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSe
 		args = append(args, "--model", job.Model)
 	}
 	args = append(args, "--mcp-config", job.MCPConfig, "--strict-mcp-config")
+	if job.ReadOnlyRepo != "" {
+		args = append(args, "--add-dir", job.ReadOnlyRepo)
+	}
 	if job.StatusLine != "" {
 		// The CLI's status bar runs the command on a timer as well as on
 		// the session's own events, so it stays current while the chat
@@ -210,6 +219,9 @@ func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSe
 	}
 	cmd.Dir = workdir
 	cmd.Env = workerEnv(os.Environ())
+	if job.ReadOnlyRepo != "" {
+		cmd.Env = append(cmd.Env, "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1")
+	}
 	return cmd, nil
 }
 
