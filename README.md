@@ -37,7 +37,7 @@ Local mode and its limits:
 
 ## Quick start
 
-You need Go 1.27 or newer, `git`, a repository with an `origin` remote, and the CLIs for the agents you will use installed and signed in. The runner example in step 5 offers two families, `claude` and `codex`, so it needs both. A change is reviewed by an agent of a different family than its author, so with a single family the review cannot complete; keep at least two families among your agents (for example `claude` and `kimi`, or `claude` and `opencode`) and edit the `--agent` list to match what you have.
+You need Go 1.27 or newer, `git`, a repository with an `origin` remote, and signed-in agent CLIs on `PATH`. Reviews require another model family, so offer review-capable agents from at least two families. Two CLIs serving the same model family count as one.
 
 **1. Install.**
 
@@ -48,37 +48,37 @@ brigada version
 
 The main package lives in `cmd/brigada`, so that is the install path. Make sure `$(go env GOPATH)/bin` is on your `PATH`. Prebuilt binaries are not published yet.
 
-**2. Configure the engine (optional).** The engine runs with defaults and needs no config file. To change them, write `~/.config/brigada/config` (or `$XDG_CONFIG_HOME/brigada/config`), one `key = value` per line, `#` for comments:
+**2. Initialize from inside your repository.** Sign in using each CLI's own login flow first, then run:
 
 ```
-# desktop notifications use the OS tool when found (macOS osascript, Linux
-# notify-send); that is the default. Uncomment to turn them off:
-# notify = none
-# daily snapshots of the store, last seven kept; an absolute directory
-snapshot_dir = /home/you/backups/brigada
+brigada init
 ```
 
-Other keys: `state_dir`, `idle_minutes`, `headroom`, `task_auto_retry`, `default_reviewer`, `caps.*`, `cost.<harness>/<model>` and `tools.claude/<model>`. An unknown key is an error. State lives in `~/.local/state/brigada` (or `$XDG_STATE_HOME/brigada`); `--state-dir` and `--config` override both; they go after the command, for example `brigada status --state-dir DIR`.
+Init probes installed `claude`, `codex`, `kimi` and `opencode` binaries, asks which models your accounts serve and asks you to confirm authentication when a documented cheap status command is unavailable. It prints the canonical repository identity, agents, foreman, suggested default check and Claude worker scope, and the proposed `.brigada/project.yaml`. Nothing is written or started until you confirm. Checks are suggested from build files, never executed by init. With an existing project file, init preserves other settings and comments and shows a diff.
 
-**3. Log in to the CLIs you already pay for.** Use each CLI's own sign-in flow, as you normally would, so that it works by itself in a terminal. brigada never asks for or stores your credentials.
-
-**4. Name the foreman.** From your repo, choose which CLI and model plays the foreman for it (the repo URL is the one `git remote get-url origin` prints):
+For a probe without prompts or writes, name the models explicitly. `--signed-in` is your explicit confirmation for a harness whose authentication cannot be verified:
 
 ```
-brigada project foreman --repo <origin-url> --harness claude --model sonnet
+brigada init --probe --agent harness=claude,model=sonnet --agent harness=codex,model=gpt-5 --signed-in claude,codex
 ```
 
-The harness must be `claude` or `codex`; add `--effort <level>` to choose how hard the foreman reasons (docs/GUIDE.md, section 10). Run the command with `--repo` alone to show the stored choice.
+Replace `--probe` with `--yes` for non-interactive apply. Override suggestions with `--check 'go test ./...'`, `--tools 'Bash(go test:*)'` and `--foreman claude/sonnet`. `--agent` accepts the runner's full syntax, including account, classes, effort, agent-file and Claude-only tools. An explicit agent tool scope wins; a local `tools.claude/<model>` setting is kept unless you pass `--tools`. Without build-file defaults, supply both `--check` and `--tools`. A single review family stops setup unless you explicitly pass `--accept-limited`; unavailable cross-family reviews still wait, and the result is reported as limited.
 
-**5. Start a runner.** A runner offers your signed-in CLIs as agents and runs the jobs the engine hands out. Leave it running in its own terminal:
+Apply imports the project file with provenance, registers the foreman, starts the engine on demand and starts a detached runner. State lives in `~/.local/state/brigada` (or `$XDG_STATE_HOME/brigada`); the runner's log is `runner.log` there. `--state-dir` and `--config` override the defaults. A running runner is kept, and init reports whether its agents differ. Authentication data stays local and never goes in the project file. Init never commits or pushes; you decide whether to commit `.brigada/project.yaml`.
+
+This implements phase 6(a) for one repository. It does not register MCP servers or install harness instructions. Once Mode A lands, you will open your harness in the repo; until then use `brigada ask`, `brigada attach` and `brigada status`.
+
+**By hand:** the manual equivalents remain available:
 
 ```
-brigada runner --agent harness=claude --agent harness=codex
+brigada project foreman --harness claude --model sonnet
+brigada project import               # if you wrote .brigada/project.yaml
+brigada runner --agent harness=claude,model=sonnet --agent harness=codex,model=gpt-5
 ```
 
-Each `--agent` is `harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,effort=<level>][,tools=<p1>+<p2>]`, at most one per harness. By default claude workers run with a Go-only shell scope (`go build`, `go test`, `go vet`, `gofmt`), so for a Node, Python or Rust repo widen it with `tools=`, for example `--agent 'harness=claude,tools=Bash(npm test:*)+Bash(npx jest:*)'` (see the guide, section 5). The engine starts on demand, and stops after 30 idle minutes by default. Check on it any time with `brigada status`.
+The manual runner stays in its terminal. Optional engine configuration is `~/.config/brigada/config` (`$XDG_CONFIG_HOME/brigada/config`), one `key = value` per line; see the guide for settings.
 
-**6. Ask.** From inside the repo, chat with the foreman:
+**3. Ask.** From inside the repo, chat with the foreman:
 
 ```
 brigada
