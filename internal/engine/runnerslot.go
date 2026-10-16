@@ -21,6 +21,10 @@ import (
 // queued_at and cap_held_at) restarts at the moment a slot frees, and
 // the job is parked only after it has spent a whole TTL with a free
 // slot nobody took.
+//
+// A job waiting for a cooling agent is the same kind of wait, held on
+// its own layer by cooling.go; no runner counts as a candidate for it
+// here, since no agent is eligible while the quota cools.
 
 // runnerSlot is one registered runner as the busy-runner rule reads it.
 type runnerSlot struct {
@@ -205,26 +209,32 @@ func (e *Engine) holdBusyRunnersTx(tx *sql.Tx, now time.Time, polling int64) err
 
 // HeldJob is a queued job a full cap layer holds, as the status shows
 // it (§10): the job, its task and kind, and the layer that has no room
-// — "runner" is a job waiting for a runner slot.
+// — "runner" is a job waiting for a runner slot, "cooling" one waiting
+// for its agent's quota to reset: Agent ("harness/model") is the one
+// whose cooling ends first and Until when.
 type HeldJob struct {
 	ID     int64  `json:"id"`
 	TaskID int64  `json:"task_id,omitempty"`
 	Kind   string `json:"kind"`
 	Layer  string `json:"layer"`
 	Since  string `json:"since,omitempty"`
+	Agent  string `json:"agent,omitempty"`
+	Until  string `json:"until,omitempty"`
 }
 
 // statusHeldTx lists the queued jobs held by a full cap layer, oldest
 // first.
 func statusHeldTx(tx *sql.Tx, project int64) ([]HeldJob, error) {
-	query := `SELECT id, COALESCE(task_id, 0), kind, cap_held_layer, COALESCE(cap_held_at, '')
-		FROM jobs WHERE status = 'queued' AND cap_held_layer IS NOT NULL`
+	query := `SELECT j.id, COALESCE(j.task_id, 0), j.kind, j.cap_held_layer, COALESCE(j.cap_held_at, ''),
+		COALESCE(a.harness || '/' || a.model, ''), COALESCE(a.cooling_until, '')
+		FROM jobs j LEFT JOIN agents a ON j.cap_held_layer = '` + layerCooling + `' AND CAST(a.id AS TEXT) = j.cap_held_key
+		WHERE j.status = 'queued' AND j.cap_held_layer IS NOT NULL`
 	var args []any
 	if project != 0 {
-		query += " AND project_id = ?"
+		query += " AND j.project_id = ?"
 		args = append(args, project)
 	}
-	rows, err := tx.Query(query+" ORDER BY id", args...)
+	rows, err := tx.Query(query+" ORDER BY j.id", args...)
 	if err != nil {
 		return nil, fmt.Errorf("list the held jobs: %w", err)
 	}
@@ -232,7 +242,7 @@ func statusHeldTx(tx *sql.Tx, project int64) ([]HeldJob, error) {
 	out := []HeldJob{}
 	for rows.Next() {
 		var h HeldJob
-		if err := rows.Scan(&h.ID, &h.TaskID, &h.Kind, &h.Layer, &h.Since); err != nil {
+		if err := rows.Scan(&h.ID, &h.TaskID, &h.Kind, &h.Layer, &h.Since, &h.Agent, &h.Until); err != nil {
 			return nil, fmt.Errorf("list the held jobs: %w", err)
 		}
 		out = append(out, h)

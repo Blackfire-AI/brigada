@@ -545,6 +545,12 @@ type agentCand struct {
 	harness string
 	score   float64
 	rank    int
+
+	// Filled for every lookup, but read only for the agents that cannot
+	// take the job yet (qualifyingAgentsTx): model, health, cooling_until.
+	model   string
+	health  string
+	cooling string
 }
 
 // explore rolls the exploration share (§8): true when this pick should
@@ -572,10 +578,24 @@ func leaseAgentsTx(tx *sql.Tx, runner int64, j *jobRow, now string) ([]agentCand
 // whose candidate lookup uses the task's class rather than the job kind's.
 // Runner 0 ranks all registered agents for an automatic restart's pin.
 func eligibleAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
-	query := `SELECT a.id, a.family, a.harness, a.classes, COALESCE(o.attempts, 0), COALESCE(o.successes, 0)
+	return qualifyingAgentsTx(tx, runner, j, class, now, false)
+}
+
+// qualifyingAgentsTx is eligibleAgentsTx's lookup. With unavailable
+// true it also returns the agents that are broken or cooling at now —
+// those that qualify for the job by pin, harness, class and family rule
+// but cannot take it yet — with their model, health and cooling
+// deadline filled in: what the cooling hold (§8.1) and the queue-TTL
+// park reason read.
+func qualifyingAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
+	query := `SELECT a.id, a.family, a.harness, a.classes, a.model, a.health, COALESCE(a.cooling_until, ''), COALESCE(o.attempts, 0), COALESCE(o.successes, 0)
 		FROM agents a LEFT JOIN outcomes o ON o.agent_id = a.id AND o.project_id = ? AND o.class = ?
-		WHERE a.health = 'ready' AND (a.cooling_until IS NULL OR a.cooling_until <= ?)`
-	args := []any{j.ProjectID, class, now}
+		WHERE 1 = 1`
+	args := []any{j.ProjectID, class}
+	if !unavailable {
+		query += " AND a.health = 'ready' AND (a.cooling_until IS NULL OR a.cooling_until <= ?)"
+		args = append(args, now)
+	}
 	if runner != 0 {
 		query += " AND a.runner_id = ?"
 		args = append(args, runner)
@@ -597,8 +617,8 @@ func eligibleAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string) ([
 	for rows.Next() {
 		var id int64
 		var attempts, successes int
-		var family, harness, classes string
-		if err := rows.Scan(&id, &family, &harness, &classes, &attempts, &successes); err != nil {
+		var family, harness, classes, model, health, cooling string
+		if err := rows.Scan(&id, &family, &harness, &classes, &model, &health, &cooling, &attempts, &successes); err != nil {
 			return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 		}
 		// Ordinary work and fix leases use the implement class. A pinned
@@ -616,7 +636,7 @@ func eligibleAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string) ([
 				continue
 			}
 		}
-		cands = append(cands, agentCand{id: id, harness: harness, score: Score(attempts, successes)})
+		cands = append(cands, agentCand{id: id, harness: harness, model: model, health: health, cooling: cooling, score: Score(attempts, successes)})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
