@@ -94,8 +94,18 @@ func printDiff(ctx context.Context, client taskReader, dir string, id int64, rep
 		}
 		here = origin
 	}
-	if !sameRepo(here, task.RepoURL) {
-		return fail(stderr, fmt.Errorf("task %d belongs to %s, but this directory is %s; run diff inside that repository", id, task.RepoURL, here))
+	// Use the engine's project identity rule, just as attach and ask do.
+	// Invalid URLs must be refused even when their raw spellings match.
+	here, err = engine.Canonicalize(here)
+	if err != nil {
+		return fail(stderr, fmt.Errorf("canonicalize this directory's repository URL: %w", err))
+	}
+	taskRepo, err := engine.Canonicalize(task.RepoURL)
+	if err != nil {
+		return fail(stderr, fmt.Errorf("canonicalize task %d's repository URL: %w", id, err))
+	}
+	if here != taskRepo {
+		return fail(stderr, fmt.Errorf("task %d belongs to %s, but this directory is %s; run diff inside that repository", id, taskRepo, here))
 	}
 	// Private refs under refs/brigada/diff: a base that is a tag or a
 	// branch, and a result branch, land somewhere the diff can name
@@ -139,18 +149,4 @@ func runGit(ctx context.Context, dir string, stdout, stderr io.Writer, args ...s
 		stderr.Write(errb.Bytes())
 	}
 	return nil
-}
-
-// sameRepo reports whether two repo URLs name one repository. It is the
-// one place the comparison lives, so it can move to the canonical-URL
-// function when that lands: for now, case, a trailing slash and a
-// trailing .git do not tell repositories apart.
-func sameRepo(a, b string) bool {
-	norm := func(s string) string {
-		s = strings.TrimSpace(s)
-		s = strings.TrimRight(s, "/")
-		s = strings.TrimSuffix(s, ".git")
-		return strings.ToLower(strings.TrimRight(s, "/"))
-	}
-	return norm(a) == norm(b)
 }
