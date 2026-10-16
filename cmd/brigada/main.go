@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/Blackfire-AI/brigada/internal/version"
@@ -54,7 +55,7 @@ Commands:
 	version         Print the brigada version and exit.
 	help            Print usage and exit.
 
-Common flags, before a command's own:
+Common flags, after the command name and before its arguments:
 
 	--state-dir DIR   State directory (default: $XDG_STATE_HOME/brigada,
 	                  else ~/.local/state/brigada).
@@ -109,6 +110,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	cmd, ok := commands[args[0]]
 	if !ok {
+		if strings.HasPrefix(args[0], "-") {
+			fmt.Fprintln(stderr, "brigada: flags go after the command, for example brigada status --state-dir DIR")
+			return 2
+		}
 		fmt.Fprintf(stderr, "brigada: unknown command %q\n\n%s", args[0], usage)
 		return 2
 	}
