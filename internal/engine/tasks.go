@@ -132,7 +132,7 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 		TaskID:    taskID,
 		Kind:      KindWork,
 		Mode:      ModeFresh,
-		Prompt:    prompt.ComposeWorkerPrompt(p.Spec, ""),
+		Prompt:    prompt.ComposeWorkerPrompt(p.Spec, p.CheckCmd, ""),
 		Harness:   p.Harness,
 		Labels:    p.Labels,
 	}, now)

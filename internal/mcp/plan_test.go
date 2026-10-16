@@ -100,7 +100,7 @@ func TestServeCallPlanCreate(t *testing.T) {
 			t.Errorf("plan_create text = %q, want it to name %s", text, want)
 		}
 	}
-	if jobPrompt != prompt.ComposeWorkerPrompt("Fix the frobnicator.\nKeep its tests whole.", "") {
+	if jobPrompt != prompt.ComposeWorkerPrompt("Fix the frobnicator.\nKeep its tests whole.", "go test ./...", "") {
 		t.Errorf("job prompt = %q, want the engine's composed template plus the spec verbatim", jobPrompt)
 	}
 	assertOneActivePlan(t, e, plan, task, job)

@@ -86,7 +86,7 @@ func TestAnswerResumesTheAuthorsSession(t *testing.T) {
 	// introduced as the foreman's answer — and the worker's summary, which
 	// the result block also carried, is no input of it at all.
 	if got, want := e.str("SELECT prompt FROM jobs WHERE id = ?", fix),
-		prompt.ComposeAnswerPrompt("the spec", "Use the REST API over the Unix socket."); got != want {
+		prompt.ComposeAnswerPrompt("the spec", "go test ./...", "Use the REST API over the Unix socket."); got != want {
 		t.Errorf("answer prompt = %q\nwant the composed\n%q", got, want)
 	}
 	if strings.Contains(e.str("SELECT prompt FROM jobs WHERE id = ?", fix), "I am stuck choosing") {
@@ -267,7 +267,7 @@ func TestRestartTaskFreshAttempt(t *testing.T) {
 		t.Errorf("restart job require_agent = %d, want no pin: a restart may switch agents", pin)
 	}
 	if got, want := e.str("SELECT prompt FROM jobs WHERE id = ?", work),
-		prompt.ComposeWorkerPrompt("the spec", note); got != want {
+		prompt.ComposeWorkerPrompt("the spec", "go test ./...", note); got != want {
 		t.Errorf("restart prompt = %q\nwant the composed\n%q", got, want)
 	}
 	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskReady {
@@ -310,7 +310,7 @@ func TestRestartTaskWithoutNote(t *testing.T) {
 		t.Fatalf("restart without a note: %v", err)
 	}
 	if got, want := e.str("SELECT prompt FROM jobs WHERE id = ?", res.JobID),
-		prompt.ComposeWorkerPrompt("the spec", ""); got != want {
+		prompt.ComposeWorkerPrompt("the spec", "go test ./...", ""); got != want {
 		t.Errorf("restart prompt = %q, want the plain worker prompt\n%q", got, want)
 	}
 }

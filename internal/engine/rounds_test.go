@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -94,11 +95,15 @@ func TestCheckFailFixRoundRunsAgainAndReviews(t *testing.T) {
 		t.Errorf("fix job harness = %q, want the author agent's own %q", harness, "author")
 	}
 	// The engine composes the fix round's prompt itself (§1.4, §5.3):
-	// the worker template, the spec, and the check result verbatim as
-	// the feedback.
+	// the worker template, the spec, the check command, and the failed
+	// check rendered as the feedback: command, exit code, output tail.
+	wantFeedback := "The check \"go test ./...\" exited 3.\nFAIL TestBoom\nthe frobnicator was off"
 	if got, want := e.str("SELECT prompt FROM jobs WHERE id = ?", fix),
-		prompt.ComposeWorkerPrompt("the spec", failCheck); got != want {
+		prompt.ComposeWorkerPrompt("the spec", "go test ./...", wantFeedback); got != want {
 		t.Errorf("fix prompt = %q\nwant the composed\n%q", got, want)
+	}
+	if p, ok := e.eventPayloadOf(evTaskCheckFailed); !ok || p.Check != "go test ./..." || p.ExitCode != 3 || p.CheckOutput != "FAIL TestBoom\nthe frobnicator was off" {
+		t.Errorf("check-failed event = %+v (%t), want the command, exit code and tail", p, ok)
 	}
 	if p, ok := e.eventPayloadOf(evTaskCheckFailed); !ok || p.Status != "" {
 		t.Errorf("check-failed event = %+v (%t), want the tail without a parking status", p, ok)
@@ -235,7 +240,7 @@ func TestChangesFixRoundSecondReviewApproves(t *testing.T) {
 		t.Errorf("fix job mode = %q, want session", mode)
 	}
 	if got, want := e.str("SELECT prompt FROM jobs WHERE id = ?", fix),
-		prompt.ComposeWorkerPrompt("the spec", findings); got != want {
+		prompt.ComposeWorkerPrompt("the spec", "go test ./...", findings); got != want {
 		t.Errorf("fix prompt = %q\nwant the composed\n%q", got, want)
 	}
 	if p, ok := e.eventPayloadOf(evReviewChanges); !ok || p.Findings != findings {
@@ -617,4 +622,84 @@ func TestNoVerdictTwiceParksTheTask(t *testing.T) {
 			t.Errorf("review jobs = %d, want the lone one alone", n)
 		}
 	})
+}
+
+// emptyTailCheck is a failed check that printed nothing: the case the
+// bare JSON left nobody able to act on.
+const emptyTailCheck = `{"exit_code":1,"timed_out":false,"output_tail":""}`
+
+// TestCheckFailFeedbackNamesAnEmptyTail: a check that printed nothing and
+// one the timeout cut short are worded for the worker, not left as JSON.
+func TestCheckFailFeedbackNamesAnEmptyTail(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	e.exec(`UPDATE tasks SET check_cmd = 'test -f DOES_NOT_EXIST' WHERE id = ?`, e.task)
+
+	e.submit(e.work())
+	g := e.leaseAny(author)
+	if ans := e.complete(g, doneOnSession("task/1-1", emptyTailCheck, "hs-author-1")); ans != AnsOK {
+		t.Fatalf("complete the failed-check work: %s", ans)
+	}
+	fix := e.fixJob()
+	want := prompt.ComposeWorkerPrompt("the spec", "test -f DOES_NOT_EXIST",
+		"The check \"test -f DOES_NOT_EXIST\" exited 1.\n(the check printed nothing)")
+	if got := e.str("SELECT prompt FROM jobs WHERE id = ?", fix); got != want {
+		t.Errorf("fix prompt = %q\nwant the composed\n%q", got, want)
+	}
+	if !strings.Contains(want, "<check-command>\ntest -f DOES_NOT_EXIST\n</check-command>") {
+		t.Errorf("the prompt does not carry the check command in its delimiters:\n%s", want)
+	}
+
+	fg := e.authorLease(author)
+	if fg == nil || fg.JobID != fix {
+		t.Fatalf("the author's runner leased %+v, want the fix job %d", fg, fix)
+	}
+	timedOut := `{"exit_code":-1,"timed_out":true,"output_tail":""}`
+	if ans := e.complete(fg, doneOnSession("task/1-1", timedOut, "hs-author-1")); ans != AnsOK {
+		t.Fatalf("complete the timed-out fix round: %s", ans)
+	}
+	fix2 := e.int("SELECT MAX(id) FROM jobs WHERE task_id = ? AND kind = 'fix'", e.task)
+	if fix2 == fix {
+		t.Fatalf("no second fix round queued; have %v", e.eventKinds())
+	}
+	if got := e.str("SELECT prompt FROM jobs WHERE id = ?", fix2); !strings.Contains(got, "<feedback>\nThe check \"test -f DOES_NOT_EXIST\" exited -1 after the timeout.\n") {
+		t.Errorf("second fix prompt = %q, want the timeout worded", got)
+	}
+}
+
+// TestOutOfRoundsNeedsYouNamesTheCheck: when the fix rounds are spent the
+// needs-you reason and the foreman's wake carry the check command and its
+// exit code first, then the worker's summary.
+func TestOutOfRoundsNeedsYouNamesTheCheck(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	e.exec(`UPDATE tasks SET check_cmd = 'test -f DOES_NOT_EXIST', caps = ? WHERE id = ?`, `{"fix_rounds":0}`, e.task)
+
+	e.submit(e.work())
+	g := e.leaseAny(author)
+	if ans := e.complete(g, doneOn("task/1-1", emptyTailCheck)); ans != AnsOK {
+		t.Fatalf("complete the failed-check work: %s", ans)
+	}
+	p, ok := e.eventPayloadOf(evTaskOutOfRounds)
+	if !ok || p.Check != "test -f DOES_NOT_EXIST" || p.ExitCode != 1 {
+		t.Fatalf("out-of-rounds payload = %+v (%t), want the check command and exit code", p, ok)
+	}
+	st, err := e.eng.Status(e.ctx, 0)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	want := `check "test -f DOES_NOT_EXIST" exited 1 (no output); fix_rounds spent: added the thing`
+	var got string
+	for _, it := range st.NeedsYou {
+		if it.Kind == "task" && it.ID == e.task {
+			got = it.Reason
+		}
+	}
+	if got != want {
+		t.Errorf("needs-you reason = %q, want %q", got, want)
+	}
+	raw, _ := json.Marshal(p)
+	if text := wakeEventText(evTaskOutOfRounds, string(raw)); text != want {
+		t.Errorf("wake text = %q, want %q", text, want)
+	}
 }

@@ -73,17 +73,24 @@ const (
 // its id's prefix — enough to tie the log entry to the lease, never the
 // whole capability.
 type eventPayload struct {
-	Answer   string `json:"answer,omitempty"`
-	Status   string `json:"status,omitempty"` // the completion's, or the state a task or plan reached
-	Reason   string `json:"reason,omitempty"` // a check's output tail, a failure's words (§3, §5.5)
-	Lease    string `json:"lease,omitempty"`
-	Owner    int64  `json:"owner,omitempty"`
-	Run      int64  `json:"run,omitempty"`
-	Attempt  int64  `json:"attempt,omitempty"`
-	Epoch    int64  `json:"epoch,omitempty"`
-	Layer    string `json:"layer,omitempty"`    // the cap layer that held the job (§8.1)
-	Branch   string `json:"branch,omitempty"`   // the task's result branch (§6.4)
-	Question string `json:"question,omitempty"` // the worker's question (§5.4)
+	Answer  string `json:"answer,omitempty"`
+	Status  string `json:"status,omitempty"` // the completion's, or the state a task or plan reached
+	Reason  string `json:"reason,omitempty"` // a check's output tail, a failure's words (§3, §5.5)
+	Lease   string `json:"lease,omitempty"`
+	Owner   int64  `json:"owner,omitempty"`
+	Run     int64  `json:"run,omitempty"`
+	Attempt int64  `json:"attempt,omitempty"`
+	Epoch   int64  `json:"epoch,omitempty"`
+	Layer   string `json:"layer,omitempty"` // the cap layer that held the job (§8.1)
+	// The failed check a task_check_failed or task_out_of_rounds names:
+	// its command, exit code, whether the timeout cut it short, and the
+	// tail of its output — each bounded.
+	Check       string `json:"check,omitempty"`
+	ExitCode    int    `json:"exit_code,omitempty"`
+	TimedOut    bool   `json:"timed_out,omitempty"`
+	CheckOutput string `json:"check_output,omitempty"`
+	Branch      string `json:"branch,omitempty"`   // the task's result branch (§6.4)
+	Question    string `json:"question,omitempty"` // the worker's question (§5.4)
 	// Discoveries is what a worker learned beyond its own task (§4.2).
 	Discoveries string `json:"discoveries,omitempty"`
 	// QuestionID names the questions row an answer filled (§3, §11):

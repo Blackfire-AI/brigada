@@ -72,7 +72,7 @@ func TestCreatePlanOneTask(t *testing.T) {
 		t.Errorf("job status = %q, want queued", status)
 	}
 	spec := "Fix the frobnicator.\nKeep its tests whole."
-	if p := e.str("SELECT prompt FROM jobs WHERE id = ?", res.JobID); p != prompt.ComposeWorkerPrompt(spec, "") {
+	if p := e.str("SELECT prompt FROM jobs WHERE id = ?", res.JobID); p != prompt.ComposeWorkerPrompt(spec, "go test ./...", "") {
 		t.Errorf("job prompt = %q, want the composed template plus the spec verbatim", p)
 	} else if !strings.Contains(p, "<task-spec>\n"+spec+"\n</task-spec>") {
 		t.Errorf("job prompt = %q, want the spec verbatim between delimiters", p)

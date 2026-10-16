@@ -200,7 +200,7 @@ func TestRunnerStalledWorker(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
 	markers := markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, silentWorker), 100*time.Millisecond,
@@ -245,7 +245,7 @@ func TestRunnerStallDefaultWindowWithManualClock(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
 	markers := markerDir(t)
 
 	clk := newManualClock()
@@ -278,7 +278,7 @@ func TestRunnerToolCallSuspendsStallClock(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", "", ""))
 	markerDir(t)
 
 	// The stall window is a third of the call: without the suspension
@@ -306,7 +306,7 @@ func TestRunnerToolCallOverCap(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
 	markers := markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, longToolWorker), 100*time.Millisecond,
@@ -341,7 +341,7 @@ func TestRunnerClassTimeCap(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
 	markers := markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, silentWorker), 100*time.Millisecond,
@@ -373,7 +373,7 @@ func TestRunnerStoppedRunPushesCommittedWork(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
 	markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, stalledCommitter), 100*time.Millisecond,
@@ -408,7 +408,7 @@ func TestRunnerStallKillsProcessTree(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
 	markers := markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, termProofWorker), 100*time.Millisecond,
@@ -459,7 +459,7 @@ func TestRunnerStallKillsChildAfterLeaderExits(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
-	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", ""))
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
 	markers := markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, termLoyalWorker), 100*time.Millisecond,

@@ -327,6 +327,9 @@ func wakeEventText(kind, payload string) string {
 		return kind
 	}
 	text := p.Reason
+	if t, ok := checkEventText(kind, p); ok {
+		text = t
+	}
 	switch kind {
 	case evTaskNeedsHelp:
 		text = p.Question

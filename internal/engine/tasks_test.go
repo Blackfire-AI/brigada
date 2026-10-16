@@ -45,7 +45,7 @@ func TestSubmitTaskCreatesProjectPlanTaskAndJob(t *testing.T) {
 	if key := e.str("SELECT key FROM jobs WHERE id = ?", res.JobID); key != fmt.Sprintf("task:%d", res.TaskID) {
 		t.Errorf("job key = %q, want task:%d", key, res.TaskID)
 	}
-	if promptText := e.str("SELECT prompt FROM jobs WHERE id = ?", res.JobID); promptText != prompt.ComposeWorkerPrompt("do the thing", "") {
+	if promptText := e.str("SELECT prompt FROM jobs WHERE id = ?", res.JobID); promptText != prompt.ComposeWorkerPrompt("do the thing", "go test ./...", "") {
 		t.Errorf("job prompt = %q, want the engine's composed template plus the spec verbatim", promptText)
 	}
 	// The submit's task_spec message rode along (§9).

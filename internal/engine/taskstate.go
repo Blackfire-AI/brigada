@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/prompt"
@@ -191,23 +192,38 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 		if tail == "" {
 			tail = wr.Summary
 		}
-		feedback := c.CheckResult
-		if feedback == "" {
-			feedback = tail
+		cmd, err := taskCheckTx(tx, job.TaskID)
+		if err != nil {
+			return err
+		}
+		co, ran := parseCheckResult(c.CheckResult)
+		failure := &checkFailure{Cmd: cmd, ExitCode: co.ExitCode, TimedOut: co.TimedOut, Output: co.Output}
+		if !ran {
+			// The runner said the check failed but sent no report: no
+			// exit code to quote.
+			failure.ExitCode = -1
+		}
+		feedback := tail
+		if ran {
+			feedback = failure.feedback()
 		}
 		if class != classImplement {
 			// No fix rounds behind any other class (§7: a review-class
 			// task has none unless asked): the failure is the foreman's.
-			return e.needsForemanTx(tx, job, evTaskCheckFailed, eventPayload{Reason: boundNote(tail)}, now)
+			return e.needsForemanTx(tx, job, evTaskCheckFailed, failure.payload(boundNote(tail)), now)
 		}
 		// §3: the failed check is a fix round's to answer, with the
-		// check's own output as the feedback; the event keeps the tail
-		// for the history whatever follows.
+		// check's own command, exit code and output as the feedback; the
+		// event keeps them for the history whatever follows.
 		if _, err := appendEventTx(tx, evTaskCheckFailed, job.ProjectID, job.TaskID, job.ID,
-			eventPayload{Reason: boundNote(tail)}, now); err != nil {
+			failure.payload(boundNote(tail)), now); err != nil {
 			return err
 		}
-		return e.queueFixRoundTx(tx, job, roundFix, feedback, tail, now)
+		note := wr.Summary
+		if note == "" {
+			note = tail
+		}
+		return e.queueFixRoundTx(tx, job, roundFix, feedback, note, failure, now)
 	case class != classImplement:
 		// No review behind any other class (§7): done is done.
 		return e.taskDoneTx(tx, job, now)
@@ -283,15 +299,19 @@ func (e *Engine) autoRestartTaskTx(tx *sql.Tx, job *jobRow, kind, text string, n
 // parks at needs_foreman with the event naming which cap ran out and
 // note beside it — the check's tail or the findings, the shorter line
 // of the same matter — for the foreman's judgment (§3, §10).
-func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note string, now time.Time) error {
+func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note string, failure *checkFailure, now time.Time) error {
 	_, capped, err := e.roundCapReached(tx, SubmitParams{TaskID: job.TaskID, Round: round})
 	if err != nil {
 		return err
 	}
 	if capped {
-		return e.outOfRoundsTx(tx, job, round, note, now)
+		return e.outOfRoundsTx(tx, job, round, note, failure, now)
 	}
 	spec, err := taskSpecTx(tx, job.TaskID)
+	if err != nil {
+		return err
+	}
+	check, err := taskCheckTx(tx, job.TaskID)
 	if err != nil {
 		return err
 	}
@@ -305,7 +325,7 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 		TaskID:       job.TaskID,
 		Kind:         KindFix,
 		Mode:         ModeSession,
-		Prompt:       prompt.ComposeWorkerPrompt(spec, feedback),
+		Prompt:       prompt.ComposeWorkerPrompt(spec, check, feedback),
 		Harness:      harness,
 		RequireAgent: agent,
 		Round:        round,
@@ -319,7 +339,7 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 			eventPayload{Run: int64(sr.Run), Reason: round}, now)
 		return err
 	case AnsCapped:
-		return e.outOfRoundsTx(tx, job, round, note, now)
+		return e.outOfRoundsTx(tx, job, round, note, failure, now)
 	default:
 		// The completing job freed the key earlier in this transaction,
 		// so no live job can hold this submit. An event without its job
@@ -336,15 +356,88 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 // carries what asked for the round — the check's tail or the review's
 // findings, bounded — beside it: that note is the needs-you queue's
 // reason line, the foreman's first word of the matter (§10).
-func (e *Engine) outOfRoundsTx(tx *sql.Tx, job *jobRow, round, note string, now time.Time) error {
+func (e *Engine) outOfRoundsTx(tx *sql.Tx, job *jobRow, round, note string, failure *checkFailure, now time.Time) error {
 	reason := "the task's " + round + " are spent"
+	if failure != nil {
+		// The check's command and exit code render first (needsYouReason),
+		// so the reason keeps the round's name and the worker's words.
+		reason = round + " spent"
+	}
 	if note != "" {
 		reason += ": " + boundNote(note)
 	}
 	if err := recordTaskOutcomeTx(tx, job, false, now); err != nil {
 		return err
 	}
-	return e.needsForemanTx(tx, job, evTaskOutOfRounds, eventPayload{Reason: reason}, now)
+	payload := eventPayload{Reason: reason}
+	if failure != nil {
+		payload = failure.payload(reason)
+	}
+	return e.needsForemanTx(tx, job, evTaskOutOfRounds, payload, now)
+}
+
+// checkFailure is a failed check as the events and the fix round's
+// feedback quote it: the command the task carries, the exit code, whether
+// the timeout cut it short, and the tail of its output.
+type checkFailure struct {
+	Cmd      string
+	ExitCode int
+	TimedOut bool
+	Output   string
+}
+
+// payload is the event payload of a failed check: the reason beside the
+// bounded command, exit code and output tail.
+func (f *checkFailure) payload(reason string) eventPayload {
+	return eventPayload{
+		Reason: reason, Check: boundNote(f.Cmd), ExitCode: f.ExitCode,
+		TimedOut: f.TimedOut, CheckOutput: boundNote(f.Output),
+	}
+}
+
+// feedback renders the failed check as the fix round's feedback: which
+// command, how it ended, then its output tail verbatim.
+func (f *checkFailure) feedback() string {
+	out := f.Output
+	if out == "" {
+		out = "(the check printed nothing)"
+	}
+	return checkHeadline("The check", f.Cmd, f.ExitCode, f.TimedOut) + ".\n" + out
+}
+
+// checkEventText renders a check-failure event's payload for a reader of
+// the event — the needs-you queue and the foreman's wake: the command,
+// its exit code and its output (or "no output") first, then, for the
+// spent rounds, the reason beside them. ok is false for any other event
+// and for one that names no command.
+func checkEventText(kind string, p eventPayload) (text string, ok bool) {
+	if p.Check == "" || (kind != evTaskCheckFailed && kind != evTaskOutOfRounds) {
+		return "", false
+	}
+	text = checkHeadline("check", p.Check, p.ExitCode, p.TimedOut)
+	if p.CheckOutput == "" {
+		text += " (no output)"
+	} else {
+		text += ": " + p.CheckOutput
+	}
+	if kind == evTaskOutOfRounds && p.Reason != "" {
+		text += "; " + p.Reason
+	}
+	return text, true
+}
+
+// checkHeadline words a failed check: `<subject> "<command>" exited <code>`,
+// plus " after the timeout" when the timeout cut it short.
+func checkHeadline(subject, cmd string, exitCode int, timedOut bool) string {
+	s := subject
+	if cmd != "" {
+		s += ` "` + cmd + `"`
+	}
+	s += " exited " + strconv.Itoa(exitCode)
+	if timedOut {
+		s += " after the timeout"
+	}
+	return s
 }
 
 // authorPlacementTx reads the placement the task's fix rounds pin to
@@ -470,7 +563,7 @@ func (e *Engine) reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now ti
 			eventPayload{Findings: boundNote(v.Findings)}, now); err != nil {
 			return err
 		}
-		return e.queueFixRoundTx(tx, job, roundReview, v.Findings, v.Findings, now)
+		return e.queueFixRoundTx(tx, job, roundReview, v.Findings, v.Findings, nil, now)
 	default:
 		reason := "no verdict in the review result"
 		switch {
