@@ -177,6 +177,121 @@ func TestSweepQueueTTL(t *testing.T) {
 	if next := e.submit(e.work()); next.Answer != AnsCreated || next.Run != 2 {
 		t.Errorf("submit after the TTL failure = %+v; want created run 2", next)
 	}
+
+	t.Run("busy runner", func(t *testing.T) { testSweepQueueTTLBusyRunner(t) })
+	t.Run("busy runner not polling for the harness", func(t *testing.T) { testSweepQueueTTLNarrowedPoll(t) })
+}
+
+// testSweepQueueTTLNarrowedPoll: a full runner registered for two
+// harnesses but polling for one is no candidate for a job pinned to the
+// other — the lease would never give it the job — so that job keeps the
+// plain TTL, while a job pinned to the polled harness keeps waiting.
+func testSweepQueueTTLNarrowedPoll(t *testing.T) {
+	e := newEnvCfg(t, func(c *Config) { c.LeaseTTL = time.Hour })
+	e.seedAgent(e.runner1, "claude", "claude", "sonnet", "work")
+	e.seedAgent(e.runner1, "codex", "codex", "gpt", "other")
+	e.submit(e.work())
+	g := e.lease(e.runner1, []string{"claude"}, nil) // polls for claude only
+	if g == nil {
+		t.Fatal("nothing to lease")
+	}
+	pinned := func(harness string) SubmitResult {
+		p := e.work()
+		p.TaskID = e.addTask("{}")
+		p.Key = keyOf(p.TaskID)
+		p.Harness = harness
+		return e.submit(p)
+	}
+	codex := pinned("codex")
+	claude := pinned("claude")
+
+	e.clock.Advance(9 * time.Minute)
+	if ans := e.heartbeat(g); ans != AnsOK {
+		t.Fatalf("heartbeat = %s; want ok", ans)
+	}
+	e.clock.Advance(9 * time.Minute)
+	if ans := e.heartbeat(g); ans != AnsOK {
+		t.Fatalf("heartbeat = %s; want ok", ans)
+	}
+	status := func(job int64) string { return e.str("SELECT status FROM jobs WHERE id = ?", job) }
+	if status(codex.JobID) != statusFailed {
+		t.Errorf("codex-pinned job status = %q, want failed: no runner offers codex on its polls", status(codex.JobID))
+	}
+	if status(claude.JobID) != statusQueued {
+		t.Errorf("claude-pinned job status = %q, want queued: its runner is full, not absent", status(claude.JobID))
+	}
+}
+
+// testSweepQueueTTLBusyRunner: a queued job whose only candidate runner
+// is at its advertised capacity (unset = one job, a sequential runner)
+// is waiting for a slot, not unserved — it survives the TTL, shows as a
+// runner-layer hold, and is parked only after a slot has been free for
+// the whole TTL. A job no runner can serve keeps the plain TTL.
+func testSweepQueueTTLBusyRunner(t *testing.T) {
+	e := newEnvCfg(t, func(c *Config) { c.LeaseTTL = time.Hour })
+	e.seedAgent(e.runner1, "claude", "claude", "sonnet", "work")
+	e.submit(e.work())
+	g := e.leaseAny(e.runner1)
+	if g == nil {
+		t.Fatal("nothing to lease")
+	}
+	waiting := e.submit(e.workOn(e.addTask("{}")))
+	unservable := e.work()
+	unservable.TaskID = e.addTask("{}")
+	unservable.Key = keyOf(unservable.TaskID)
+	unservable.Harness = "gemini" // no runner offers it
+	unservableJob := e.submit(unservable)
+
+	status := func(job int64) string { return e.str("SELECT status FROM jobs WHERE id = ?", job) }
+	// step moves time on with the busy runner still beating, so it is not stale.
+	step := func(d time.Duration) SweepReport {
+		e.clock.Advance(d)
+		if ans := e.heartbeat(g); ans != AnsOK {
+			t.Fatalf("heartbeat = %s; want ok", ans)
+		}
+		return e.mustSweep()
+	}
+
+	rep := step(9 * time.Minute)
+	if layer := e.str("SELECT COALESCE(cap_held_layer, '') FROM jobs WHERE id = ?", waiting.JobID); layer != "runner" {
+		t.Fatalf("waiting job hold layer = %q, want runner", layer)
+	}
+	// The status names it: held at the runner layer, waiting for a slot.
+	info, err := e.eng.Status(e.ctx, 0)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(info.Held) != 1 || info.Held[0].ID != waiting.JobID || info.Held[0].Layer != "runner" {
+		t.Errorf("status held = %+v, want job %d at the runner layer", info.Held, waiting.JobID)
+	}
+	rep = step(9 * time.Minute) // 18 minutes since it queued
+	if slices.Contains(rep.QueueTimedOut, waiting.JobID) || status(waiting.JobID) != statusQueued {
+		t.Fatalf("the job waiting for a runner slot was parked at 18m: %v", rep.QueueTimedOut)
+	}
+	// (the heartbeat's own sweep may have parked it, so read the status)
+	if status(unservableJob.JobID) != statusFailed {
+		t.Errorf("unservable job status = %q, want failed: no candidate runner keeps the TTL", status(unservableJob.JobID))
+	}
+	if rep = step(9 * time.Minute); slices.Contains(rep.QueueTimedOut, waiting.JobID) {
+		t.Fatalf("the job waiting for a runner slot was parked at 27m")
+	}
+
+	// The slot frees: the hold lifts and the clock restarts there.
+	if ans := e.complete(g, done()); ans != AnsOK {
+		t.Fatalf("complete = %s; want ok", ans)
+	}
+	e.mustSweep()
+	if layer := e.str("SELECT COALESCE(cap_held_layer, '') FROM jobs WHERE id = ?", waiting.JobID); layer != "" {
+		t.Errorf("hold layer after the slot freed = %q, want it lifted", layer)
+	}
+	e.clock.Advance(9*time.Minute + 59*time.Second)
+	if rep := e.mustSweep(); slices.Contains(rep.QueueTimedOut, waiting.JobID) {
+		t.Fatalf("parked at 9m59s of a free slot: %v", rep.QueueTimedOut)
+	}
+	e.clock.Advance(2 * time.Second)
+	if rep := e.mustSweep(); !slices.Contains(rep.QueueTimedOut, waiting.JobID) {
+		t.Fatalf("sweep timed out = %v, want job %d parked after ten minutes with a free slot", rep.QueueTimedOut, waiting.JobID)
+	}
 }
 
 // checkSweptTaskParked asserts a sweep-failed task job parked its task at

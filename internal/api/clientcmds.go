@@ -36,6 +36,8 @@ type Status struct {
 	NeedsYou        []engine.NeedsYouItem `json:"needs_you"`
 	// Cooling lists the agents held back for quota (§8, §10).
 	Cooling []engine.CoolingAgent `json:"cooling,omitempty"`
+	// Held lists the queued jobs a full cap layer holds (§8.1).
+	Held []engine.HeldJob `json:"held,omitempty"`
 }
 
 // Status reads the engine's own state (§13): which process it is, since

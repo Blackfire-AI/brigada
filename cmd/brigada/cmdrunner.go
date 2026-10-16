@@ -45,7 +45,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	fs.StringVar(&agentFile, "agent-file", "", "with --harness kimi: the agent definition file the CLI session starts under")
 	fs.StringVar(&classes, "classes", defaultClasses, "the task classes this runner takes, comma-separated")
 	fs.StringVar(&labels, "labels", "", "labels this runner offers on every lease poll, comma-separated")
-	fs.IntVar(&maxParallel, "max-parallel", 0, "this runner's own cap on parallel jobs, advertised at register (0 = unset)")
+	fs.IntVar(&maxParallel, "max-parallel", 0, "how many concurrent jobs this runner runs, advertised at register (0 = unset, one at a time)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	agents := &agentSpecs{}
 	fs.Var(agents, "agent", "one offered agent, repeatable: harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,agent-file=<path>]; account defaults to the harness name; replaces --harness/--model/--classes/--agent-file")

@@ -85,7 +85,29 @@ func (e *Engine) Lease(ctx context.Context, owner int64, harnesses, labels []str
 		if err := e.runnerSeenTx(tx, owner, now); err != nil {
 			return err
 		}
-		if _, err := e.sweepTx(tx, now); err != nil {
+		// What it offers is what the sweep's busy-runner rule reads to
+		// tell whether it could take a labelled job.
+		offered := labels
+		if offered == nil {
+			offered = []string{}
+		}
+		labelsJSON, err := json.Marshal(offered)
+		if err != nil {
+			return fmt.Errorf("encode labels: %w", err)
+		}
+		offeredHarnesses := harnesses
+		if offeredHarnesses == nil {
+			offeredHarnesses = []string{}
+		}
+		harnessesJSON, err := json.Marshal(offeredHarnesses)
+		if err != nil {
+			return fmt.Errorf("encode harnesses: %w", err)
+		}
+		if _, err := tx.Exec("UPDATE runners SET labels = ?, harnesses = ? WHERE id = ?",
+			string(labelsJSON), string(harnessesJSON), owner); err != nil {
+			return fmt.Errorf("record the offer of runner %d: %w", owner, err)
+		}
+		if _, err := e.sweepPolledTx(tx, now, owner); err != nil {
 			return err
 		}
 		g, err := e.leaseTx(tx, owner, harnesses, labels, now)
@@ -318,7 +340,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			lease_epoch = ?, fence_token = attempts + 1, attempts = attempts + 1, agent_id = ?,
 			branch = COALESCE(branch, NULLIF(?, '')),
 			first_leased = COALESCE(first_leased, ?), last_leased = ?, queued_at = NULL, last_event = NULL,
-			cap_held_at = NULL, cap_held_layer = NULL, cap_held_key = NULL,
+			cap_held_at = NULL, cap_held_layer = NULL, cap_held_key = NULL, slot_hold = 0,
 			released_by = NULL, released_until = NULL, released_lease = NULL, updated_at = ?
 			WHERE id = ?`,
 			leaseID, owner, fmtTime(expires), epoch, nullIfZero(agent), jobBranch, nowStr, nowStr, nowStr, j.ID)
@@ -647,7 +669,7 @@ func agentOffersClass(classes, class string) bool {
 // guess from the job's harness (§12.2).
 func holdAtCapTx(tx *sql.Tx, j *jobRow, job caps.Job, layer string, now time.Time) error {
 	nowStr := fmtTime(now)
-	if _, err := tx.Exec(`UPDATE jobs SET cap_held_at = ?, cap_held_layer = ?, cap_held_key = ?, updated_at = ? WHERE id = ?`,
+	if _, err := tx.Exec(`UPDATE jobs SET cap_held_at = ?, cap_held_layer = ?, cap_held_key = ?, slot_hold = 0, updated_at = ? WHERE id = ?`,
 		nowStr, layer, holdKey(layer, job), nowStr, j.ID); err != nil {
 		return fmt.Errorf("hold job %d at the %s cap: %w", j.ID, layer, err)
 	}

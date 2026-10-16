@@ -24,6 +24,17 @@ func StatusSections(st Status) string {
 	for _, a := range st.Cooling {
 		lines = append(lines, fmt.Sprintf("cooling: %s/%s until %s (account %s)", a.Harness, a.Model, a.Until, a.Account))
 	}
+	for _, h := range st.Held {
+		what := fmt.Sprintf("job #%d", h.ID)
+		if h.TaskID != 0 {
+			what = fmt.Sprintf("task #%d", h.TaskID)
+		}
+		wait := "waiting for a free " + h.Layer + " slot"
+		if h.Layer == "runner" {
+			wait = "waiting for a runner slot"
+		}
+		lines = append(lines, fmt.Sprintf("held: %s %s: %s", what, h.Kind, wait))
+	}
 	if len(st.Plans) == 0 {
 		lines = append(lines, "plans: none")
 	} else {
