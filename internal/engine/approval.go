@@ -46,6 +46,9 @@ type approvalSettings struct {
 	Classes        stringList `json:"approval_classes"`
 	ProtectedPaths stringList `json:"approval_protected_paths"`
 	DefaultCheck   string     `json:"default_check"`
+	// ExtraRepos is the project's default list (§5.8): a repository a task
+	// names outside it needs approval.
+	ExtraRepos []ExtraRepo `json:"extra_repos"`
 }
 
 // withDefaultCheck returns the tasks with every omitted check set to the
@@ -104,6 +107,9 @@ type approvalVerdict struct {
 	Always  bool // the limit is 0: every plan waits
 	Classes []string
 	Paths   []string
+	// Extras describes each extra repository a task names outside the
+	// project's default list (§5.8), with its ref.
+	Extras []string
 }
 
 // reasons renders the verdict as short phrases, one per reason.
@@ -119,6 +125,9 @@ func (v approvalVerdict) reasons(allowed []string) []string {
 	}
 	if len(v.Paths) > 0 {
 		out = append(out, "protected paths: "+strings.Join(v.Paths, ", "))
+	}
+	if len(v.Extras) > 0 {
+		out = append(out, "extra repositories outside the project default: "+strings.Join(v.Extras, ", "))
 	}
 	return out
 }
@@ -161,8 +170,25 @@ func (s approvalSettings) evaluate(tasks []PlanTask) approvalVerdict {
 	for _, c := range s.Classes {
 		allowed[c] = true
 	}
-	seenClass, seenPath := map[string]bool{}, map[string]bool{}
+	seenClass, seenPath, seenExtra := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	inDefault := map[string]bool{}
+	for _, x := range s.ExtraRepos {
+		inDefault[x.Repo] = true
+	}
 	for _, t := range tasks {
+		// A task that names a repository (§5.8) outside the project's
+		// default widens what the runner reads with the user's git
+		// credentials; one that inherits the default never does.
+		for _, x := range t.ExtraRepos {
+			if inDefault[x.Repo] {
+				continue
+			}
+			if d := extraRepoDescription(x); !seenExtra[d] {
+				seenExtra[d] = true
+				v.Extras = append(v.Extras, d)
+				v.Needed = true
+			}
+		}
 		class := t.Class
 		if class == "" {
 			class = classImplement

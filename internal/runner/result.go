@@ -42,6 +42,10 @@ type WorkerResult struct {
 	// doing rides with the outcome. A worker's own block never carries
 	// it.
 	Progress []string `json:"progress,omitempty"`
+	// ExtraRepos is the commit each extra repository resolved to (§5.8),
+	// by name, so the history shows what the job saw. The runner sets it;
+	// a worker's own block never carries it.
+	ExtraRepos map[string]string `json:"extra_repos,omitempty"`
 }
 
 // parseResult reads the result block out of a worker's final message

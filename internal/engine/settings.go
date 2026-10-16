@@ -54,7 +54,7 @@ const (
 // SettingKeys are the editable keys, in the order show prints them.
 var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
-	SettingHoldIdleMinutes, SettingHoldMaxMinutes, SettingInstructions}
+	SettingExtraRepos, SettingHoldIdleMinutes, SettingHoldMaxMinutes, SettingInstructions}
 
 // MaxInstructionsBytes bounds the project instruction text (§5.9): a
 // starting value, open in §16 item 11. Above it a set or an import is
@@ -140,7 +140,8 @@ var classWord = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 func parseSettingValue(key, value string) (json.RawMessage, error) {
 	switch key {
 	case SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths, SettingDefaultCheck, SettingWorkerTools,
-		SettingHoldIdleMinutes, SettingHoldMaxMinutes, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingInstructions:
+		SettingHoldIdleMinutes, SettingHoldMaxMinutes, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
+		SettingExtraRepos, SettingInstructions:
 	default:
 		return nil, fmt.Errorf("%w: unknown key %q; valid keys: %s", ErrInvalidSetting, key, strings.Join(SettingKeys, ", "))
 	}
@@ -192,6 +193,7 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 		return json.RawMessage(strconv.Itoa(n)), nil
 	}
 	var items []string
+	var entries []ExtraRepo
 	for _, item := range strings.Split(value, settingListSep) {
 		item = strings.TrimSpace(item)
 		if item == "" {
@@ -207,12 +209,29 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 				return nil, fmt.Errorf("%w: %v", ErrInvalidSetting, err)
 			}
 		}
+		if key == SettingExtraRepos {
+			x, err := parseExtraRepoItem(item)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, x)
+			continue
+		}
 		if key == SettingApprovalProtectedPaths {
 			if _, err := filepath.Match(item, "x"); err != nil {
 				return nil, fmt.Errorf("%w: %s item %q is not a valid glob: %v", ErrInvalidSetting, key, item, err)
 			}
 		}
 		items = append(items, item)
+	}
+	if key == SettingExtraRepos {
+		// Resolved here, once, so the stored default is canonical and
+		// carries the URL the runner fetches from (§5.8).
+		resolved, err := resolveExtraRepos(entries)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(resolved)
 	}
 	b, err := json.Marshal(items)
 	if err != nil {
@@ -305,6 +324,11 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string) (ProjectSettings, er
 			var n int
 			if has && json.Unmarshal(cur, &n) == nil && n > 0 {
 				sv.Value = strconv.Itoa(n)
+			}
+		case SettingExtraRepos:
+			sv.Value = "none"
+			if has {
+				sv.Value = renderSettingRaw(k, cur)
 			}
 		case SettingHoldIdleMinutes:
 			sv.Value = strconv.Itoa(int(idle / time.Minute))

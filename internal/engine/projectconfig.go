@@ -93,7 +93,8 @@ var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // a setting added for the local store (the mode A hold bounds, for one)
 // does not become shared-file policy by being editable.
 var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
-	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout}
+	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
+	SettingExtraRepos}
 
 // ParseProjectConfig parses and validates a project.yaml. Anything but
 // schema 1's keys is refused with the key named: an unknown key, an
@@ -503,6 +504,19 @@ func renderSettingRaw(key string, raw json.RawMessage) string {
 	if key == SettingInstructions {
 		s, _ := rawString(raw)
 		return instructionsSummary(s)
+	}
+	if key == SettingExtraRepos {
+		var l []ExtraRepo
+		if json.Unmarshal(raw, &l) == nil {
+			if len(l) == 0 {
+				return "none"
+			}
+			items := make([]string, len(l))
+			for i, x := range l {
+				items[i] = extraRepoText(x)
+			}
+			return strings.Join(items, settingListSep)
+		}
 	}
 	if s, ok := rawString(raw); ok {
 		return s

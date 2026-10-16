@@ -28,6 +28,9 @@ type PlanTask struct {
 	// starts from; '' = the only dep when there is exactly one, else the
 	// project's default branch.
 	Base string
+	// ExtraRepos are the read-only repositories the task is given (§5.8).
+	// nil = inherit the project default; non-nil, even empty, replaces it.
+	ExtraRepos []ExtraRepo
 }
 
 // CreatedTask is one task CreatePlan made: its id, its name, and the
@@ -222,6 +225,17 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		return CreatePlanResult{}, err
 	}
 	tasks = settings.withDefaultCheck(tasks)
+	// The extra repositories (§5.8) resolve once, here: each task's own
+	// list canonicalized, the effective list (its own or the project
+	// default) recorded with the task.
+	extraDef, err := projectExtraReposTx(tx, project)
+	if err != nil {
+		return CreatePlanResult{}, err
+	}
+	tasks, extraRecs, err := resolveTaskExtras(extraDef, tasks, func(i int) string { return fmt.Sprintf("task %d", i+1) })
+	if err != nil {
+		return CreatePlanResult{}, err
+	}
 	verdict := settings.evaluate(tasks)
 	planState := "active"
 	if verdict.Needed {
@@ -277,9 +291,9 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		if len(deps[i]) > 0 || verdict.Needed {
 			state = taskPending
 		}
-		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, created_at, updated_at)
-			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', NULLIF(?, ''), ?, ?)`,
-			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, setupRec, nowStr, nowStr)
+		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, created_at, updated_at)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', NULLIF(?, ''), NULLIF(?, ''), ?, ?)`,
+			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, setupRec, extraRecs[i], nowStr, nowStr)
 		if err != nil {
 			return CreatePlanResult{}, fmt.Errorf("create the task: %w", err)
 		}

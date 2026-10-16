@@ -69,7 +69,7 @@ func (s *Server) handlePlanCreate(w http.ResponseWriter, r *http.Request, id ide
 	}
 	tasks := make([]engine.PlanTask, len(req.Tasks))
 	for i, t := range req.Tasks {
-		tasks[i] = engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class}
+		tasks[i] = engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class, ExtraRepos: t.ExtraRepos}
 	}
 	res, err := s.eng.CreatePlan(r.Context(), project, req.Title, tasks)
 	if err != nil {
@@ -133,6 +133,9 @@ type planTaskBody struct {
 	Spec  string   `json:"spec"`
 	Check string   `json:"check"`
 	Class string   `json:"class"`
+	// ExtraRepos (§5.8): absent or null inherits the project default; a
+	// list, even [], replaces it. No omitempty: [] must survive the trip.
+	ExtraRepos []engine.ExtraRepo `json:"extra_repos"`
 }
 
 // planCreateResponse names what the call created: the plan, the
@@ -237,7 +240,7 @@ func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id iden
 	// the foreman's own cancellations are never approved.
 	am := engine.PlanAmendment{Cancel: req.Cancel, SkipApproved: id.role != roleForeman}
 	for _, t := range req.Add {
-		am.Add = append(am.Add, engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class})
+		am.Add = append(am.Add, engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class, ExtraRepos: t.ExtraRepos})
 	}
 	for _, rt := range req.Retarget {
 		am.Retarget = append(am.Retarget, engine.PlanRetarget{Task: rt.Task, Deps: rt.Deps, Base: rt.Base})

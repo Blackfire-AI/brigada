@@ -29,6 +29,21 @@ type Tool struct {
 	Call func(ctx context.Context, c *api.Client, args json.RawMessage) (string, error)
 }
 
+// extraReposSchema is the extra_repos property of a plan task (§5.8).
+var extraReposSchema = map[string]any{
+	"type":        "array",
+	"description": "other repositories the task reads (never changes), checked out read-only beside its worktree; the check, setup and worker find each at $BRIGADA_REPO_<NAME> (name uppercased, - as _), so write the check as `go test ./... -schema \"$BRIGADA_REPO_SCHEMA\"`. Omit it to inherit the project's default list; a list, even [], replaces the default. A repository outside the project default sends the plan to the user for approval. A branch or tag ref moves: only a full commit SHA is reproducible",
+	"items": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"name": map[string]any{"type": "string", "description": "[a-z][a-z0-9_-]*, unique in the list"},
+			"repo": map[string]any{"type": "string", "description": "the repository's git URL (ssh or https; a token in it is dropped)"},
+			"ref":  map[string]any{"type": "string", "description": "branch, tag or commit; default: the repository's default branch"},
+		},
+		"required": []string{"name", "repo"},
+	},
+}
+
 // tools is the bridge's whole offer (§12.2), the one list a later item
 // extends: ask_user and the like each add an entry here, and ToolNames carries the addition
 // to the foreman's tool scope.
@@ -88,6 +103,7 @@ var tools = []Tool{
 								"type":        "string",
 								"description": "the task's class (default implement)",
 							},
+							"extra_repos": extraReposSchema,
 						},
 						"required": []string{"spec"},
 					},
@@ -120,10 +136,11 @@ var tools = []Tool{
 								"items":       map[string]any{"type": []string{"string", "integer"}},
 								"description": "tasks of this plan (new or old, by name or id) that must be done before this one starts; default none",
 							},
-							"base":  map[string]any{"type": []string{"string", "integer"}, "description": "one of its deps whose result branch the work starts from; default as plan_create's"},
-							"spec":  map[string]any{"type": "string", "description": "the task spec, verbatim: what the worker is to do. Never ask the worker to run the check, commit or push"},
-							"check": map[string]any{"type": "string", "description": "the check command the runner runs after a done; empty = none"},
-							"class": map[string]any{"type": "string", "description": "the task's class (default implement)"},
+							"base":        map[string]any{"type": []string{"string", "integer"}, "description": "one of its deps whose result branch the work starts from; default as plan_create's"},
+							"spec":        map[string]any{"type": "string", "description": "the task spec, verbatim: what the worker is to do. Never ask the worker to run the check, commit or push"},
+							"check":       map[string]any{"type": "string", "description": "the check command the runner runs after a done; empty = none"},
+							"class":       map[string]any{"type": "string", "description": "the task's class (default implement)"},
+							"extra_repos": extraReposSchema,
 						},
 						"required": []string{"spec"},
 					},

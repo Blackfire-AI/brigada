@@ -54,6 +54,18 @@ type Task struct {
 	Branch   string // the result branch (§6.4); '' until the task pushed one
 	Rounds   int    // fix and review rounds spent (§7)
 	Question string // the open question (§3), '' when there is none
+	// ExtraRepos are the read-only repositories the task was given (§5.8),
+	// as the task recorded them: the canonical identity, never a URL that
+	// could carry a credential.
+	ExtraRepos []ExtraRepo
+}
+
+// ExtraRepo is one extra repository of a task (§5.8): its name, canonical
+// repository identity and ref (” = the default branch).
+type ExtraRepo struct {
+	Name string
+	Repo string
+	Ref  string
 }
 
 const header = `# Brigada plan file (§6.4): a mirror of the engine's store, which stays
@@ -109,6 +121,14 @@ func Render(p Plan) ([]byte, error) {
 		fmt.Fprintf(&b, "    state: %s\n", t.State)
 		fmt.Fprintf(&b, "    branch: %s\n", strconv.Quote(t.Branch))
 		fmt.Fprintf(&b, "    rounds: %d\n", t.Rounds)
+		if len(t.ExtraRepos) > 0 {
+			// Each entry is [name, repo, ref], ref "" for the default branch.
+			items := make([]string, len(t.ExtraRepos))
+			for i, x := range t.ExtraRepos {
+				items[i] = fmt.Sprintf("[%s, %s, %s]", strconv.Quote(x.Name), strconv.Quote(x.Repo), strconv.Quote(x.Ref))
+			}
+			fmt.Fprintf(&b, "    extra_repos: [%s]\n", strings.Join(items, ", "))
+		}
 		if t.Question != "" {
 			fmt.Fprintf(&b, "    question: %s\n", strconv.Quote(t.Question))
 		}
@@ -313,6 +333,17 @@ func (r *reader) task() (Task, error) {
 		return Task{}, r.errf("rounds: %d out of range", rounds)
 	}
 	t.Rounds = int(rounds)
+	// extra_repos is written only when the task has some (§5.8), so files
+	// written before it stay valid.
+	if r.peekIs(in + "extra_repos:") {
+		raw, err := r.field(in, "extra_repos")
+		if err != nil {
+			return Task{}, err
+		}
+		if t.ExtraRepos, err = parseExtraRepos(raw); err != nil {
+			return Task{}, r.errf("extra_repos: %v", err)
+		}
+	}
 	if r.peekIs(in + "question:") {
 		if t.Question, err = r.quotedField(in, "question"); err != nil {
 			return Task{}, err
@@ -322,6 +353,58 @@ func (r *reader) task() (Task, error) {
 		}
 	}
 	return t, nil
+}
+
+// parseExtraRepos reads `[["name", "repo", "ref"], ...]`, the inverse of
+// Render's extra_repos line. An empty list is refused: the line is written
+// only when there is an entry.
+func parseExtraRepos(s string) ([]ExtraRepo, error) {
+	if !strings.HasPrefix(s, "[") || !strings.HasSuffix(s, "]") {
+		return nil, fmt.Errorf("%q is not a [list]", s)
+	}
+	s = s[1 : len(s)-1]
+	var out []ExtraRepo
+	for s != "" {
+		if len(out) > 0 {
+			if !strings.HasPrefix(s, ", ") {
+				return nil, fmt.Errorf("want \", \" between entries, got %q", s)
+			}
+			s = s[2:]
+		}
+		if !strings.HasPrefix(s, "[") {
+			return nil, fmt.Errorf("want an entry [name, repo, ref], got %q", s)
+		}
+		s = s[1:]
+		var parts [3]string
+		for i := range parts {
+			if i > 0 {
+				if !strings.HasPrefix(s, ", ") {
+					return nil, fmt.Errorf("want \", \" between the parts of an entry, got %q", s)
+				}
+				s = s[2:]
+			}
+			prefix, err := strconv.QuotedPrefix(s)
+			if err != nil || !strings.HasPrefix(s, `"`) {
+				return nil, fmt.Errorf("want a double-quoted part, got %q", s)
+			}
+			if parts[i], err = strconv.Unquote(prefix); err != nil {
+				return nil, err
+			}
+			s = s[len(prefix):]
+		}
+		if !strings.HasPrefix(s, "]") {
+			return nil, fmt.Errorf("want ] closing an entry, got %q", s)
+		}
+		s = s[1:]
+		if parts[0] == "" || parts[1] == "" {
+			return nil, fmt.Errorf("an entry needs a name and a repo")
+		}
+		out = append(out, ExtraRepo{Name: parts[0], Repo: parts[1], Ref: parts[2]})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("written only when there is one")
+	}
+	return out, nil
 }
 
 // unquote reads a whole double-quoted string.
