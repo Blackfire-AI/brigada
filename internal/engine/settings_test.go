@@ -59,10 +59,11 @@ func TestProjectSettingsView(t *testing.T) {
 	e.setSettings(`{"approval_max_tasks": 3, "other": "kept"}`)
 	got := e.set(map[string]string{SettingApprovalProtectedPaths: "infra/**"})
 	want := []SettingValue{
-		{Key: SettingApprovalMaxTasks, Value: "3"},
-		{Key: SettingApprovalClasses, Value: "implement+review+answer", Default: true},
-		{Key: SettingApprovalProtectedPaths, Value: "infra/**"},
-		{Key: SettingDefaultCheck, Value: "none", Default: true},
+		{Key: SettingApprovalMaxTasks, Value: "3", Source: SourceLocal},
+		{Key: SettingApprovalClasses, Value: "implement+review+answer", Default: true, Source: SourceDefault},
+		{Key: SettingApprovalProtectedPaths, Value: "infra/**", Source: SourceLocal},
+		{Key: SettingDefaultCheck, Value: "none", Default: true, Source: SourceDefault},
+		{Key: SettingWorkerTools, Value: "agent default", Default: true, Source: SourceDefault},
 	}
 	if len(got.Settings) != len(want) {
 		t.Fatalf("settings = %+v, want %+v", got.Settings, want)
@@ -76,7 +77,7 @@ func TestProjectSettingsView(t *testing.T) {
 		t.Errorf("stored settings %s lost an unrelated key", raw)
 	}
 	read, err := e.eng.ProjectSettings(e.ctx, envRepo)
-	if err != nil || read == nil || len(read.Settings) != 4 || read.Settings[0].Value != "3" {
+	if err != nil || read == nil || len(read.Settings) != 5 || read.Settings[0].Value != "3" {
 		t.Fatalf("read = %+v, %v", read, err)
 	}
 	if none, err := e.eng.ProjectSettings(e.ctx, "https://example.invalid/none.git"); err != nil || none != nil {

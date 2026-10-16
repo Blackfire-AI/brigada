@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/caps"
 	"github.com/Blackfire-AI/brigada/internal/notify"
 )
@@ -99,20 +100,7 @@ type FileConfig struct {
 // explicit none from no scope at all. A pattern containing a comma
 // cannot ride an --agent value, which splits on commas.
 func ParseTools(value string) ([]string, error) {
-	value = strings.TrimSpace(value)
-	if value == "none" {
-		return []string{}, nil
-	}
-	out := []string{}
-	for _, f := range strings.Split(value, "+") {
-		if f = strings.TrimSpace(f); f != "" {
-			out = append(out, f)
-		}
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("want Claude Code tool patterns separated by +, or none")
-	}
-	return out, nil
+	return adapter.ParseToolScope(value)
 }
 
 // ToolsRefusal is why a harness other than claude takes no tools scope,

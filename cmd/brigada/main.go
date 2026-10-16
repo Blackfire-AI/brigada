@@ -44,7 +44,10 @@ Commands:
 	                (--repo defaults to this repo's origin).
 	project list    List the projects: repo, foreman, active plans, needs-you.
 	project set     Set a project's approval limit: key=value ... (§6.3).
-	project show    Show a project's approval limit and whether each is the default.
+	project show    Show a project's settings and where each comes from
+	                (default, set locally, or imported).
+	project import  Import this repo's .brigada/project.yaml (§13.1); --yes
+	                accepts replacing hand-set values on a first import.
 	history         Show the timeline.
 	diff <task-id>  Show what a task changed: git diff base...branch, run
 	                inside the repo (--stat, --repo URL).
