@@ -18,6 +18,27 @@ func (c *Client) Health(ctx context.Context) error {
 	return c.call(ctx, http.MethodGet, "/v1/health", nil, nil)
 }
 
+// Task reads one task (§12.1): its repo, base ref, result branch and
+// latest job. A task that is not there is a *StatusError with 404.
+func (c *Client) Task(ctx context.Context, id int64) (engine.TaskInfo, error) {
+	var t engine.TaskInfo
+	if err := c.call(ctx, http.MethodGet, "/v1/tasks/"+strconv.FormatInt(id, 10), nil, &t); err != nil {
+		return engine.TaskInfo{}, err
+	}
+	return t, nil
+}
+
+// Job reads one job (§12.1): its status, and the ids of its transcript
+// and check log artifacts. A job that is not there is a *StatusError
+// with 404.
+func (c *Client) Job(ctx context.Context, id int64) (engine.JobInfo, error) {
+	var j engine.JobInfo
+	if err := c.call(ctx, http.MethodGet, "/v1/jobs/"+strconv.FormatInt(id, 10), nil, &j); err != nil {
+		return engine.JobInfo{}, err
+	}
+	return j, nil
+}
+
 // Status is the engine's own state as the client reads it (§13): the
 // pid, the start, the jobs by status — and the plans with their tasks,
 // the latest foreman report (§3, §10) and the "needs you" queue (§10),
