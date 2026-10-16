@@ -284,6 +284,23 @@ func splitPlusList(s string) []string {
 	return out
 }
 
+// runnerDefaultModel is the model recorded when a harness has no model flag.
+func runnerDefaultModel(harness string) string {
+	switch harness {
+	case "claude":
+		return "sonnet"
+	case "codex":
+		return codex.DefaultModel
+	case "kimi":
+		return kimi.DefaultModel
+	case "opencode":
+		return opencode.DefaultModel
+	case "fake":
+		return "fake-1"
+	}
+	return ""
+}
+
 // resolveRunnerAgents is shared by runner and init: validation, defaults and
 // effective advertisements must agree before init starts a detached runner.
 func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([]adapter.Adapter, []api.Agent, error) {
@@ -298,6 +315,9 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 		if len(spec.classes) == 0 {
 			return nil, nil, fmt.Errorf("the agent for harness %q takes no classes: --classes must name at least one", spec.harness)
 		}
+		if spec.model == "" {
+			spec.model = runnerDefaultModel(spec.harness)
+		}
 		var ad adapter.Adapter
 		if spec.tools != nil && spec.harness != "claude" {
 			return nil, nil, fmt.Errorf("--agent tools=: %s", lifecycle.ToolsRefusal(spec.harness))
@@ -306,9 +326,6 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 		case "claude":
 			if spec.agentFile != "" {
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the claude harness takes none")
-			}
-			if spec.model == "" {
-				spec.model = "sonnet"
 			}
 			// The flag wins over the config key; neither is the Go
 			// default (nil), which is not the same as none (empty).
@@ -333,25 +350,16 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 				spec.agentFile = abs
 			}
 			ad = &kimi.Adapter{AgentFile: spec.agentFile}
-			if spec.model == "" {
-				spec.model = kimi.DefaultModel
-			}
 		case "codex":
 			if spec.agentFile != "" {
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the codex harness takes none")
 			}
 			ad = &codex.Adapter{}
-			if spec.model == "" {
-				spec.model = codex.DefaultModel
-			}
 		case "opencode":
 			if spec.agentFile != "" {
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the opencode harness takes none")
 			}
 			ad = &opencode.Adapter{}
-			if spec.model == "" {
-				spec.model = opencode.DefaultModel
-			}
 		case "fake":
 			if spec.agentFile != "" {
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the fake harness takes none")
@@ -360,9 +368,6 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 				return nil, nil, fmt.Errorf("--harness fake needs --worker-script: the scripted worker the fake adapter drives")
 			}
 			ad = &fake.Adapter{Script: workerScript}
-			if spec.model == "" {
-				spec.model = "fake-1"
-			}
 		default:
 			return nil, nil, fmt.Errorf("unknown harness %q; want claude, kimi, codex, opencode or fake", spec.harness)
 		}
@@ -370,12 +375,14 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 			return nil, nil, fmt.Errorf("--agent harness=%s: %v", spec.harness, err)
 		}
 		ads = append(ads, ad)
+		// Keep support for custom aliases, using the shared harness fallback.
+		family, _ := adapter.AgentFamily(spec.harness, spec.model)
 		adverts = append(adverts, api.Agent{
 			Effort:  spec.effort,
 			Adapter: ad.Name(),
 			Harness: spec.harness,
 			Model:   spec.model,
-			Family:  runnerFamily(spec.harness, spec.model),
+			Family:  family,
 			Account: spec.accountLabel(),
 			Classes: spec.classes,
 			Tools:   spec.toolsText,
@@ -383,15 +390,6 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 	}
 
 	return ads, adverts, nil
-}
-
-func runnerFamily(harness, model string) string {
-	if family, err := adapter.ModelFamily(model); err == nil {
-		return family
-	}
-	// Standalone runner retains its historical support for CLI-default and
-	// custom model aliases. Init requires an explicit identifiable model.
-	return harness
 }
 
 func runnerSpecStrings(specs []agentSpec) []string {

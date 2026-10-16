@@ -6,6 +6,20 @@ import (
 	"unicode"
 )
 
+// AgentFamily uses the model's family, or the harness for a CLI-default model.
+// For an unknown alias it returns the historical harness fallback and an error:
+// standalone runners support custom aliases, while init requires known models.
+func AgentFamily(harness, model string) (string, error) {
+	if model == "default" && (harness == "codex" || harness == "kimi" || harness == "opencode") {
+		return harness, nil
+	}
+	family, err := ModelFamily(model)
+	if err != nil {
+		return harness, err
+	}
+	return family, nil
+}
+
 // ModelFamily identifies a model independently of the CLI/provider serving it.
 // Unknown aliases need an explicit model name in init, rather than a guessed family.
 func ModelFamily(model string) (string, error) {
@@ -30,6 +44,7 @@ func ModelFamily(model string) (string, error) {
 		{"alibaba", []string{"qwen"}},
 		{"meta", []string{"llama"}},
 		{"mistral", []string{"mistral", "codestral", "devstral"}},
+		{"zhipu", []string{"glm"}},
 	} {
 		for _, prefix := range group.prefixes {
 			if name == prefix || strings.HasPrefix(name, prefix+"-") || strings.HasPrefix(name, prefix+".") {

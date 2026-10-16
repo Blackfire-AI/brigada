@@ -18,13 +18,20 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
+	"github.com/mattn/go-isatty"
 )
 
 // initBinary is empty in production (this executable); integration tests use
 // the built CLI to exercise real detached engine and runner startup.
 var initBinary string
 
-func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code int) {
+	// Init has one refusal status, including invalid or incomplete setup input.
+	defer func() {
+		if code != 0 {
+			code = 1
+		}
+	}()
 	fs := newFlagSet("init")
 	common := addCommon(fs)
 	yes := fs.Bool("yes", false, "apply the displayed plan without prompting (does not confirm authentication)")
@@ -34,7 +41,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	tools := fs.String("tools", "", "worker scope in runner tools= syntax; applied only to Claude workers")
 	foreman := fs.String("foreman", "", "choose a usable resume-capable agent as harness/model")
 	agents := &agentSpecs{}
-	fs.Var(agents, "agent", "repeatable, same complete syntax as brigada runner; name the model each account serves")
+	fs.Var(agents, "agent", "repeatable, same complete syntax and model defaults as brigada runner")
 	signedIn := map[string]bool{}
 	fs.Func("signed-in", "confirm an installed harness is authenticated (repeatable or comma-separated); local only", func(v string) error {
 		for _, h := range splitList(v) {
@@ -93,15 +100,33 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	reader := bufio.NewReader(projectStdin)
 	canAsk := !*yes && !*probe
-	ask := func(prompt string) string {
-		if !canAsk {
-			return ""
-		}
-		fmt.Fprint(stdout, prompt)
-		v, _ := reader.ReadString('\n')
-		return strings.TrimSpace(v)
+	terminal := false
+	if f, ok := projectStdin.(*os.File); ok {
+		terminal = isatty.IsTerminal(f.Fd())
 	}
-	confirm := func(prompt string) bool { v := strings.ToLower(ask(prompt + " [y/N] ")); return v == "y" || v == "yes" }
+	ask := func(prompt, flags string) (string, error) {
+		if !canAsk {
+			return "", nil
+		}
+		if terminal {
+			fmt.Fprint(stdout, prompt)
+		} else {
+			fmt.Fprintln(stdout, strings.TrimSpace(prompt))
+		}
+		v, err := reader.ReadString('\n')
+		if err == io.EOF && len(v) == 0 {
+			return "", fmt.Errorf("no input available; supply %s; use --agent for accounts and --signed-in for authentication", flags)
+		}
+		if err != nil && err != io.EOF {
+			return "", fmt.Errorf("cannot read answer (%v); supply %s; use --agent for accounts and --signed-in for authentication", err, flags)
+		}
+		return strings.TrimSpace(v), nil
+	}
+	confirm := func(prompt, flags string) (bool, error) {
+		v, err := ask(prompt+" [y/N] ", flags)
+		v = strings.ToLower(v)
+		return v == "y" || v == "yes", err
+	}
 	probes := map[string]harnessProbe{}
 	for _, h := range initHarnesses {
 		p := probeHarness(ctx, h)
@@ -112,16 +137,20 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "  %s: installed; %s\n", h, p.evidence)
 	}
-	if len(agents.specs) == 0 {
+	if len(agents.specs) == 0 && canAsk {
 		for _, h := range initHarnesses {
 			if !probes[h].installed {
 				continue
 			}
-			model := ask("Model served by " + h + " account (blank to skip; or use --agent harness=" + h + ",model=MODEL): ")
-			if model != "" {
-				if err := agents.Set("harness=" + h + ",model=" + model); err != nil {
-					return usagef(stderr, "%v", err)
-				}
+			model, err := ask(fmt.Sprintf("Model served by %s account [%s] (- to skip): ", h, runnerDefaultModel(h)), "--agent harness="+h+",model=MODEL")
+			if err != nil {
+				return fail(stderr, err)
+			}
+			if model == "-" {
+				continue
+			}
+			if err := agents.Set("harness=" + h + ",model=" + model); err != nil {
+				return usagef(stderr, "%v", err)
 			}
 		}
 	}
@@ -137,9 +166,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		seen[spec.harness] = true
 		if spec.model == "" {
-			spec.model = ask("Model served by " + spec.harness + " account (required): ")
+			spec.model = runnerDefaultModel(spec.harness)
 		}
-		family, err := adapter.ModelFamily(spec.model)
+		family, err := adapter.AgentFamily(spec.harness, spec.model)
 		if err != nil {
 			return usagef(stderr, "--agent %s: %v", spec.harness, err)
 		}
@@ -163,7 +192,10 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		authenticated := p.signedIn || signedIn[spec.harness]
 		if !authenticated {
-			authenticated = confirm("Confirm " + spec.harness + " account " + spec.accountLabel() + " is signed in and serves " + spec.model + "?")
+			authenticated, err = confirm("Confirm "+spec.harness+" account "+spec.accountLabel()+" is signed in and serves "+spec.model+"?", "--signed-in "+spec.harness)
+			if err != nil {
+				return fail(stderr, err)
+			}
 		}
 		if !authenticated {
 			fmt.Fprintf(stdout, "  skipping %s: authentication unconfirmed; sign in and pass --signed-in %s or confirm interactively\n", spec.harness, spec.harness)
@@ -176,7 +208,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "  agent %s: family=%s classes=%s\n", spec.String(), family, strings.Join(spec.classes, "+"))
 	}
 	if len(usable) == 0 {
-		return fail(stderr, fmt.Errorf("zero usable agents; install and sign in to a supported harness, then name its model with --agent and confirm authentication; nothing written or started"))
+		return fail(stderr, fmt.Errorf("zero usable agents; install and sign in to a supported harness, then name it with --agent and confirm authentication with --signed-in; nothing written or started"))
 	}
 	isLimited := len(families) < 2
 	if isLimited {
@@ -235,10 +267,16 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 
 	if *check == "" {
-		*check = ask("Default check (required; --check COMMAND): ")
+		*check, err = ask("Default check (required; --check COMMAND): ", "--check COMMAND")
+		if err != nil {
+			return fail(stderr, err)
+		}
 	}
 	if *tools == "" {
-		*tools = ask("Worker tools (required; --tools PATTERN+PATTERN or none): ")
+		*tools, err = ask("Worker tools (required; --tools PATTERN+PATTERN or none): ", "--tools PATTERN+PATTERN or none")
+		if err != nil {
+			return fail(stderr, err)
+		}
 	}
 	if *check == "" || *tools == "" {
 		return usagef(stderr, "no build-file defaults matched; supply --check and --tools, or answer interactively")
@@ -276,9 +314,15 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "Probe only; nothing written or started. Re-run without --probe to confirm, or with --yes to apply.")
 		return 0
 	}
-	if !*yes && !confirm("Apply this plan (including the file diff above)?") {
-		fmt.Fprintln(stdout, "Declined; nothing written or started.")
-		return 0
+	if !*yes {
+		apply, err := confirm("Apply this plan (including the file diff above)?", "--yes to apply the displayed plan")
+		if err != nil {
+			return fail(stderr, err)
+		}
+		if !apply {
+			fmt.Fprintln(stdout, "Declined; nothing written or started.")
+			return 1
+		}
 	}
 	// The first mutation is after the complete plan and confirmation. A
 	// concurrent edit must not be silently overwritten after the review.
@@ -298,8 +342,6 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	// Reuse project import's validation, first-import confirmation and conflict
 	// reporting, rather than implementing a second provenance path.
-	previousStdin := projectStdin
-	projectStdin = reader
 	importArgs := []string{"--repo", origin, "--file", file, "--state-dir", rt.stateDir, "--no-start"}
 	if rt.explicitCfg {
 		importArgs = append(importArgs, "--config", rt.configPath)
@@ -307,8 +349,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if *yes {
 		importArgs = append(importArgs, "--yes")
 	}
-	code = runProjectImport(ctx, importArgs, stdout, stderr)
-	projectStdin = previousStdin
+	code = runProjectImportWithConfirm(ctx, importArgs, stdout, stderr, func(prompt string) (bool, error) {
+		return confirm(prompt, "--yes to accept replacing hand-set values on import")
+	})
 	if code != 0 {
 		return partial(fmt.Errorf("project import did not finish; the engine may be running; no runner was started"))
 	}
