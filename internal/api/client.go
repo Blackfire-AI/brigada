@@ -24,8 +24,10 @@ import (
 // engine.Answer values, not errors: they are outcomes the caller branches
 // on. Errors are the transport and the API's own refusals.
 type Client struct {
-	http  *http.Client
-	token string
+	http        *http.Client
+	token       string
+	fence       int64
+	readProject int64
 }
 
 // NewClient builds a client for the engine's Unix socket, bearing the
@@ -215,6 +217,9 @@ type HistoryQuery struct {
 // History reads one page of the timeline (§9): events and messages
 // merged, oldest first. With Last it is the newest page.
 func (c *Client) History(ctx context.Context, q HistoryQuery) (history.Page, error) {
+	if q.ProjectID == 0 {
+		q.ProjectID = c.readProject
+	}
 	vals := make(url.Values)
 	add := func(name string, n int64) {
 		if n != 0 {
@@ -315,6 +320,9 @@ func (c *Client) callKeyed(ctx context.Context, method, path, idemKey string, bo
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
+	if c.fence != 0 {
+		req.Header.Set(holdFenceHeader, strconv.FormatInt(c.fence, 10))
+	}
 	if idemKey != "" {
 		req.Header.Set("Idempotency-Key", idemKey)
 	}

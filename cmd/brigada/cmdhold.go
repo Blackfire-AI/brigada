@@ -1,11 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/lifecycle"
+	"github.com/Blackfire-AI/brigada/internal/mcp"
 )
 
 // runHold is the hold command's dispatch (§4.6): `hold release`, the
@@ -15,10 +21,12 @@ func runHold(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return usagef(stderr, "usage: brigada hold release --repo URL")
 	}
 	switch args[0] {
+	case "yield":
+		return runHoldYield(ctx, args[1:], stderr)
 	case "release":
 		return runHoldRelease(ctx, args[1:], stdout, stderr)
 	default:
-		return usagef(stderr, "unknown hold subcommand %q; want release", args[0])
+		return usagef(stderr, "unknown hold subcommand %q; want release or yield", args[0])
 	}
 }
 
@@ -62,5 +70,52 @@ func runHoldRelease(ctx context.Context, args []string, stdout, stderr io.Writer
 		return 0
 	}
 	fmt.Fprintf(stdout, "released the interactive hold on %s: its credential is revoked and pending events are re-evaluated for a wake\n", *repo)
+	return 0
+}
+
+// runHoldYield is safe in a harness Stop hook: every failure, including flags
+// and local state resolution, exits zero and leaves a best-effort local log.
+func runHoldYield(ctx context.Context, args []string, stderr io.Writer) int {
+	fs := newFlagSet("hold yield")
+	common := addCommon(fs)
+	session := fs.String("session", os.Getenv("CLAUDE_CODE_SESSION_ID"), "harness session id (correlation only)")
+	var diagnostics bytes.Buffer
+	report := func(err error) int {
+		state := common.stateDir
+		if state == "" {
+			path := common.config
+			if path == "" {
+				path = lifecycle.DefaultConfigPath()
+			}
+			if config, err := lifecycle.LoadConfigFile(path); err == nil {
+				state = config.StateDir
+			}
+		}
+		if state == "" {
+			state = lifecycle.DefaultStateDir()
+		}
+		if diagnostics.Len() > 0 {
+			err = fmt.Errorf("%w: %s", err, diagnostics.String())
+		}
+		mcp.LogHookFailure(state, err)
+		fmt.Fprintf(stderr, "brigada hold yield: %v\n", err)
+		return 0
+	}
+	if code := common.parse(&diagnostics, args); code != 0 {
+		return report(errors.New("invalid hook arguments"))
+	}
+	if len(fs.Args()) > 0 {
+		return report(errors.New("hold yield takes no positional arguments"))
+	}
+	rt, code := resolveRuntime(common, &diagnostics)
+	if code != 0 {
+		return report(errors.New("resolve hook state directory"))
+	}
+	common.stateDir = rt.stateDir
+	hookCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := mcp.YieldFromHook(hookCtx, rt.stateDir, *session); err != nil {
+		return report(err)
+	}
 	return 0
 }

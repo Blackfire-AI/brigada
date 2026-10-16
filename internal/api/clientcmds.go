@@ -67,7 +67,11 @@ type Status struct {
 // when, and the jobs by status.
 func (c *Client) Status(ctx context.Context) (Status, error) {
 	var st Status
-	if err := c.call(ctx, http.MethodGet, "/v1/status", nil, &st); err != nil {
+	path := "/v1/status"
+	if c.readProject != 0 {
+		path += "?project=" + strconv.FormatInt(c.readProject, 10)
+	}
+	if err := c.call(ctx, http.MethodGet, path, nil, &st); err != nil {
 		return Status{}, err
 	}
 	return st, nil
@@ -79,6 +83,9 @@ func (c *Client) Status(ctx context.Context) (Status, error) {
 // project; 0 names none, which for a foreman token means its own
 // project (§12.1) and for a client or admin every project.
 func (c *Client) Stats(ctx context.Context, projectID int64) ([]engine.ProjectStats, error) {
+	if projectID == 0 {
+		projectID = c.readProject
+	}
 	path := "/v1/stats"
 	if projectID != 0 {
 		path += "?project=" + strconv.FormatInt(projectID, 10)
@@ -99,6 +106,9 @@ func (c *Client) Stats(ctx context.Context, projectID int64) ([]engine.ProjectSt
 // foreman token means its own project (§12.1) and for a client or
 // admin means every project's.
 func (c *Client) Capacity(ctx context.Context, projectID int64) (engine.CapacitySnapshot, error) {
+	if projectID == 0 {
+		projectID = c.readProject
+	}
 	path := "/v1/capacity"
 	if projectID != 0 {
 		path += "?project=" + strconv.FormatInt(projectID, 10)
