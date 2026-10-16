@@ -108,4 +108,47 @@ func TestProjectForemanGolden(t *testing.T) {
 	if code != 1 || !strings.Contains(stderr.String(), "cannot resume headless") {
 		t.Fatalf("kimi refusal = code %d, stderr=%q", code, stderr.String())
 	}
+
+	// An effort is shown where set, on the choice and on the read-back;
+	// a choice without one clears it and prints as before.
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{"project", "foreman", "--repo", repo, "--harness", "claude", "--model", "opus", "--effort", "high", "--state-dir", state},
+		&stdout, &stderr)
+	if code != 0 || stdout.String() != "foreman set: harness=claude model=opus effort=high\n" {
+		t.Fatalf("effort choose exit = %d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	code = run(ctx, []string{"project", "foreman", "--repo", repo, "--state-dir", state}, &stdout, &stderr)
+	if code != 0 || stdout.String() != "harness=claude model=opus effort=high\n" {
+		t.Fatalf("effort read exit = %d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	code = run(ctx, []string{"project", "foreman", "--repo", repo, "--harness", "claude", "--model", "opus", "--state-dir", state},
+		&stdout, &stderr)
+	if code != 0 || stdout.String() != "foreman set: harness=claude model=opus\n" {
+		t.Fatalf("effort cleared exit = %d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+
+	// Levels are validated per harness, and effort goes with a choice.
+	for name, args := range map[string][]string{
+		"unknown level":   {"--harness", "claude", "--model", "opus", "--effort", "turbo"},
+		"effort alone":    {"--effort", "high"},
+		"codex bad level": {"--harness", "codex", "--model", "opus", "--effort", "extreme"},
+	} {
+		stdout.Reset()
+		stderr.Reset()
+		full := append([]string{"project", "foreman", "--repo", repo}, args...)
+		full = append(full, "--state-dir", state)
+		if code := run(ctx, full, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "effort") {
+			t.Errorf("%s: code %d, stderr=%q; want a usage error naming effort", name, code, stderr.String())
+		}
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{"project", "foreman", "--repo", repo, "--harness", "codex", "--model", "opus", "--effort", "xhigh", "--state-dir", state},
+		&stdout, &stderr)
+	if code != 0 || stdout.String() != "foreman set: harness=codex model=opus effort=xhigh\n" {
+		t.Fatalf("codex effort exit = %d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
 }

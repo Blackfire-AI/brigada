@@ -56,6 +56,8 @@ type Agent struct {
 	Family  string   `json:"family"`
 	Account string   `json:"account"`
 	Classes []string `json:"classes"`
+	// Effort is the agent's reasoning-effort level; empty when unset.
+	Effort string `json:"effort,omitempty"`
 }
 
 // Register registers the runner under its token's name with its
@@ -68,6 +70,7 @@ func (c *Client) Register(ctx context.Context, agents []Agent, maxParallel int) 
 		body.Agents[i] = agentAdvert{
 			Adapter: a.Adapter, Harness: a.Harness, Model: a.Model,
 			Family: a.Family, Account: a.Account, Classes: a.Classes,
+			Effort: a.Effort,
 		}
 	}
 	var out struct {

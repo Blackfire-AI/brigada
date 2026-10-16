@@ -116,7 +116,18 @@ An empty value, as in `approval_max_tasks=`, puts the key back to its default. A
 brigada runner --agent harness=claude,model=sonnet --agent harness=codex,account=work
 ```
 
-`harness` is `claude`, `kimi`, `codex` or `opencode`; `model` defaults to `sonnet` for claude and to the CLI's own default for the others (for opencode, a model is `provider/model`); `classes` is a `+`-separated list, default `implement+review+answer`; `agent-file=<path>` is for kimi only. Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `--agent-file` describe one agent; the two forms cannot be mixed. Also: `--labels` (labels the runner offers), `--max-parallel N` (how many concurrent jobs this runner runs; the default 1 is one at a time) and `--no-start`. Keep the runner running: a job nobody leases within ten minutes fails, but the ten minutes do not count while every runner that could take the job is full: `brigada status` shows such a job as held, waiting for a runner slot. `kimi` and `opencode` are worker-only; the foreman can be `claude` or `codex`.
+`harness` is `claude`, `kimi`, `codex` or `opencode`; `model` defaults to `sonnet` for claude and to the CLI's own default for the others (for opencode, a model is `provider/model`); `classes` is a `+`-separated list, default `implement+review+answer`; `agent-file=<path>` is for kimi only; `effort=<level>` is validated per harness (see Effort below). Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `--agent-file` describe one agent; the two forms cannot be mixed. Also: `--labels` (labels the runner offers), `--max-parallel N` (how many concurrent jobs this runner runs; the default 1 is one at a time) and `--no-start`. Keep the runner running: a job nobody leases within ten minutes fails, but the ten minutes do not count while every runner that could take the job is full: `brigada status` shows such a job as held, waiting for a runner slot. `kimi` and `opencode` are worker-only; the foreman can be `claude` or `codex`.
+
+**Effort.** `effort=<level>` on an agent sets how hard its CLI reasons; leave it out for the CLI's own default. brigada accepts these levels per harness and passes each one through one fixed flag, never a raw argument:
+
+| Harness | Accepted levels | Passed as |
+|---|---|---|
+| `claude` | `low`, `medium`, `high`, `xhigh`, `max` | `--effort <level>` (fresh, resume and attach) |
+| `codex` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | `-c model_reasoning_effort="<level>"` |
+| `opencode` | `minimal`, `high`, `max` | `--variant <level>` |
+| `kimi` | none: its CLI documents no effort option, so `effort=` is refused | — |
+
+The lists are brigada's accepted values, not a promise that every model supports every one: the CLI judges that. For codex the key is model-dependent. For opencode a variant is provider- and model-specific and the three listed are the ones its help names, not every variant that exists. Any other level is a usage error at startup. Effort is not part of an agent's identity: the dispatcher, `agent reset` and the outcome record still key by `harness/model`; `status` and `stats` print `claude/opus@high` only for an agent that has an effort set. The foreman's effort is chosen separately (section 10).
 
 **Accounts.** An agent's account is the login whose quota it spends. The account label defaults to the harness name, which is right when each CLI has one login. If you have a second login for a CLI, offer it as another runner's agent with `account=<label>` so that the two logins keep separate quotas, caps and cooling.
 
@@ -187,6 +198,8 @@ The config file is optional. Format: one `key = value` per line; a line starting
 | `caps.model.<model>` | integer, 0 or more | no cap | Most parallel jobs on one model. |
 | `cost.<harness>/<model>` | integer, 0 or more | 1 | Relative cost weight of an agent, shown to the foreman. |
 
+Effort is not a config-file key: it is set per agent with `brigada runner --agent …,effort=<level>` (section 5) and per project foreman with `brigada project foreman --effort <level>` (section 10). `cost.*` keys name `harness/model` without an effort.
+
 A cap of `0` caps the layer at nothing, which is different from leaving it out. An example:
 
 ```
@@ -210,7 +223,7 @@ cost.claude/opus = 2
 
 **Working**
 
-- `brigada runner --agent harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,agent-file=<path>]`: run a runner that leases jobs, runs workers and checks, and pushes branches. See section 5.
+- `brigada runner --agent harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,agent-file=<path>][,effort=<level>]`: run a runner that leases jobs, runs workers and checks, and pushes branches. See section 5.
 - `brigada task submit --repo URL [--base REF] --spec FILE|- [--check CMD] [--title T] [--harness H]`: submit one task directly, without the foreman. A debugging path; the base ref defaults to `main`. See sections 3 and 4.
 - `brigada review --branch <name> [--repo URL]`: review a branch with an agent of another family, with no plan. See section 4.
 
@@ -225,7 +238,7 @@ cost.claude/opus = 2
 - `brigada plan approve <id>`, `brigada plan reject <id>`: your answer on a plan over the approval limit. See section 3.
 - `brigada agent reset <harness>/<model>`: clear a broken or cooling agent. See section 5.
 - `brigada cancel <job-id>`: stop one live job. See section 2.
-- `brigada project foreman [--repo URL] [--harness H --model M]`: show, or with both flags set, the repo's foreman (`claude` or `codex`); `--repo` defaults to the origin of the working directory. See section 10.
+- `brigada project foreman [--repo URL] [--harness H --model M [--effort E]]`: show, or with the harness and model set, the repo's foreman (`claude` or `codex`) and its effort; `--repo` defaults to the origin of the working directory. See section 10.
 - `brigada project list`: every project with its foreman, active plans and needs-you count. See section 2, "Several repositories".
 - `brigada project set [--repo URL] key=value ...`, `brigada project show [--repo URL]`: set and read the project's approval limit (`approval_max_tasks`, `approval_classes`, `approval_protected_paths`). See section 3.
 
@@ -241,12 +254,14 @@ cost.claude/opus = 2
 
 Only `claude` and `codex` can be a foreman; `kimi` and `opencode` are worker-only. Choose with `brigada project foreman --repo <origin-url> --harness <h> --model <m>` (inside the repo, `--repo` can be left out); without `--harness` and `--model` it shows the choice.
 
+**Effort.** Add `--effort <level>` to choose the foreman's reasoning effort (`claude`: `low`, `medium`, `high`, `xhigh`, `max`; `codex`: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`; the levels and their meaning are in section 5). It goes with `--harness` and `--model`, and choosing again without `--effort` clears it. It is shown as `effort=<level>` by `project foreman --repo`, applies to headless turns and to attach, and overrides the effort of the runner agent that serves the turn; workers and reviewers keep their own agent's effort. Known limit: a headless turn still runs on the serving runner agent's model, not on the `--model` chosen here (only attach uses it), so pair the effort with a runner agent on the model you want.
+
 **Reading the code.** Headless turns and attach refresh `<state>/runner/foreman/<project>/repo` from the project's repo URL at its configured default branch. The opening prompt names the checkout's absolute path, branch and commit. Read the code and its CLAUDE.md/AGENTS.md before planning; the snapshot may lag the remote by one fetch. A clone or fetch failure fails the turn (or attach) with the git reason. The session's working directory stays the parent scratch directory, so existing sessions continue to resume.
 
 **What differs.** With `claude`, `--add-dir` grants access to the checkout, and additional-directory CLAUDE.md loading is enabled. The foreman may read files (`Read`, `Grep`, `Glob`) and call brigada's tools; the shell and every editing tool (`Bash`, `Edit`, `NotebookEdit`, `Write`) remain denied. With `codex` 0.162.1, the checkout is named in the prompt and the foreman runs with `-s read-only`. Independent config overrides keep automatic review for MCP approvals and reject sandbox/permission escalations. The `--approve-for-me` alias cannot be used here: it selects `workspace-write`, which would make the scratch's repo writable. Codex's filesystem sandbox protects the checkout from writes; instructions alone are not that protection. Codex still has shell tools, unlike Claude's explicit tool denials.
 
 **Attach differs too.** An attached `claude` foreman is the same session the headless turns resume, so the next turn continues your chat. The first attach shows Claude Code's own "trust this folder" prompt for the foreman's working directory under the state directory. Choose yes: it is brigada's scratch folder, with its reading checkout under `repo`. An attached `codex` session is Codex's own terminal interface; it does not carry brigada's tools, and Codex does not expose the thread in a form brigada can write back, so a later headless turn may start a fresh Codex thread instead of continuing the chat.
 
-**Switching.** Running `project foreman` again with another harness starts a fresh foreman session: a session belongs to one CLI, so the old one is dropped and the new foreman rebuilds what it needs from the engine (the plans, the history, the pending events). A change of model on the same harness keeps the session. Switching also clears a foreman limit, as in section 5. Nothing about plans or tasks is lost.
+**Switching.** Running `project foreman` again with another harness starts a fresh foreman session: a session belongs to one CLI, so the old one is dropped and the new foreman rebuilds what it needs from the engine (the plans, the history, the pending events). A change of model or of effort on the same harness keeps the session. Switching also clears a foreman limit, as in section 5. Nothing about plans or tasks is lost.
 
 Back to the [README](../README.md).

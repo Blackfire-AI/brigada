@@ -48,7 +48,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	fs.IntVar(&maxParallel, "max-parallel", 0, "how many concurrent jobs this runner runs, advertised at register (0 = unset, one at a time)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	agents := &agentSpecs{}
-	fs.Var(agents, "agent", "one offered agent, repeatable: harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,agent-file=<path>]; account defaults to the harness name; replaces --harness/--model/--classes/--agent-file")
+	fs.Var(agents, "agent", "one offered agent, repeatable: harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,agent-file=<path>][,effort=<level>]; account defaults to the harness name; effort is validated per harness (claude, codex, opencode; kimi has none); replaces --harness/--model/--classes/--agent-file")
 	if code := common.parse(stderr, args); code != 0 {
 		return code
 	}
@@ -150,8 +150,12 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		default:
 			return usagef(stderr, "unknown harness %q; want claude, kimi, codex, opencode or fake", spec.harness)
 		}
+		if err := adapter.ValidateEffort(spec.harness, spec.effort); err != nil {
+			return usagef(stderr, "--agent harness=%s: %v", spec.harness, err)
+		}
 		ads = append(ads, ad)
 		adverts = append(adverts, api.Agent{
+			Effort:  spec.effort,
 			Adapter: ad.Name(),
 			Harness: spec.harness,
 			Model:   spec.model,
@@ -170,7 +174,11 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	}
 	parts := make([]string, len(adverts))
 	for i, a := range adverts {
-		parts[i] = fmt.Sprintf("%s (model %s, classes %s)", a.Harness, a.Model, strings.Join(a.Classes, ","))
+		model := a.Model
+		if a.Effort != "" {
+			model += "@" + a.Effort
+		}
+		parts[i] = fmt.Sprintf("%s (model %s, classes %s)", a.Harness, model, strings.Join(a.Classes, ","))
 	}
 	// The startup line prints from inside Run, once the runner holds its
 	// state directory's lock: printed here, a second process on the same
@@ -199,6 +207,7 @@ type agentSpec struct {
 	classes   []string
 	account   string
 	agentFile string
+	effort    string
 }
 
 // accountLabel is the account the agent's quota is shared under (§8): the
@@ -260,8 +269,10 @@ func (s *agentSpecs) Set(v string) error {
 			spec.account = value
 		case "agent-file":
 			spec.agentFile = value
+		case "effort":
+			spec.effort = value
 		default:
-			return fmt.Errorf("--agent %q: unknown field %q; want harness, model, classes, account or agent-file", v, key)
+			return fmt.Errorf("--agent %q: unknown field %q; want harness, model, classes, account, agent-file or effort", v, key)
 		}
 	}
 	if spec.harness == "" {
@@ -287,6 +298,9 @@ func (s agentSpec) String() string {
 	}
 	if s.agentFile != "" {
 		fields = append(fields, "agent-file="+s.agentFile)
+	}
+	if s.effort != "" {
+		fields = append(fields, "effort="+s.effort)
 	}
 	return strings.Join(fields, ",")
 }

@@ -88,6 +88,11 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	if job.Model != "" && job.Model != DefaultModel {
 		args = append(args, "-m", job.Model)
 	}
+	effortArgs, err := effortArgs(job.Effort)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, effortArgs...)
 	args = append(args, a.ExtraArgs...)
 	if resumeSessionID != "" {
 		args = append(args, "resume", resumeSessionID)
@@ -111,6 +116,19 @@ func foremanPermissions() []string {
 		"-c", `approvals_reviewer="auto_review"`,
 		"-c", `approval_policy={granular={sandbox_approval=false,rules=false,mcp_elicitations=true,request_permissions=false,skill_approval=false}}`,
 	}
+}
+
+// effortArgs is the fixed -c override that carries the job's effort: only
+// the model_reasoning_effort key, its value a quoted TOML string. Empty
+// effort adds nothing; a level outside brigada's accepted set is refused.
+func effortArgs(effort string) ([]string, error) {
+	if err := adapter.ValidateEffort("codex", effort); err != nil {
+		return nil, fmt.Errorf("codex: %w", err)
+	}
+	if effort == "" {
+		return nil, nil
+	}
+	return []string{"-c", "model_reasoning_effort=" + strconv.Quote(effort)}, nil
 }
 
 type mcpConfig struct {
@@ -194,6 +212,11 @@ func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, _ str
 	if job.Model != "" && job.Model != DefaultModel {
 		args = append(args, "-m", job.Model)
 	}
+	effortArgs, err := effortArgs(job.Effort)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, effortArgs...)
 	args = append(args, a.ExtraArgs...)
 	if job.Prompt != "" {
 		args = append(args, job.Prompt)

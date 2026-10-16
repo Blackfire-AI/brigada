@@ -103,6 +103,7 @@ type eventPayload struct {
 	Source     string `json:"source,omitempty"`   // the client token label a user message came from (§12.2)
 	Harness    string `json:"harness,omitempty"`
 	Model      string `json:"model,omitempty"`
+	Effort     string `json:"effort,omitempty"`  // a foreman setting's reasoning-effort level
 	Account    string `json:"account,omitempty"` // the quota account a cooling names (§8)
 	Until      string `json:"until,omitempty"`   // a foreman limit's reset time, RFC3339; absent when unknown (§4.4)
 	Job        int64  `json:"job,omitempty"`     // a job the event names besides its own job_id column

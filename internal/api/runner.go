@@ -35,6 +35,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request, id ident
 		agents[i] = engine.AgentAdvert{
 			Adapter: a.Adapter, Harness: a.Harness, Model: a.Model,
 			Family: a.Family, Account: a.Account, Classes: a.Classes,
+			Effort: a.Effort,
 		}
 	}
 	runnerID, err := s.eng.Register(r.Context(), id.name, req.MaxParallel, agents)
@@ -235,6 +236,8 @@ type agentAdvert struct {
 	Family  string   `json:"family"`
 	Account string   `json:"account"`
 	Classes []string `json:"classes"`
+	// Effort is the agent's reasoning-effort level; empty when unset.
+	Effort string `json:"effort,omitempty"`
 }
 
 // jobLeaseRequest names a job and the lease the runner holds on it:
@@ -321,6 +324,10 @@ type jobGrant struct {
 	// runner never holds a long-lived foreman token; the lease-scoped one
 	// is all it ever has).
 	ForemanToken string `json:"foreman_token,omitempty"`
+	// ForemanEffort is the project's chosen foreman effort level, on a
+	// foreman turn's grant only. It overrides the runner agent's effort
+	// for the turn; empty keeps the agent's.
+	ForemanEffort string `json:"foreman_effort,omitempty"`
 }
 
 func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
@@ -344,6 +351,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		Attempt:         g.Attempt,
 		ResumeSessionID: g.ResumeSessionID,
 		ForemanToken:    g.ForemanToken,
+		ForemanEffort:   g.ForemanEffort,
 	}
 }
 

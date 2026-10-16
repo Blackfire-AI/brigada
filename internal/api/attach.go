@@ -72,6 +72,7 @@ func (s *Server) handleForemanAttach(w http.ResponseWriter, r *http.Request, _ i
 		DefaultBranch: res.DefaultBranch,
 		Harness:       res.Harness,
 		Model:         res.Model,
+		Effort:        res.Effort,
 		SessionID:     res.SessionID,
 		Prompt:        res.Prompt,
 		ExpiresAt:     res.ExpiresAt,
@@ -217,6 +218,7 @@ type attachResponse struct {
 	DefaultBranch string    `json:"default_branch"`
 	Harness       string    `json:"harness"`
 	Model         string    `json:"model"`
+	Effort        string    `json:"effort,omitempty"`
 	SessionID     string    `json:"session_id"`
 	Prompt        string    `json:"prompt"`
 	ExpiresAt     time.Time `json:"expires_at"`

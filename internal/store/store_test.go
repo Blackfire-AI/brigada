@@ -344,6 +344,60 @@ func TestNotifyCursorBackfillOnUpgrade(t *testing.T) {
 	}
 }
 
+// TestEffortMigrationKeepsTheRows builds the store of a binary that
+// predates the effort migration — a project, a runner and an agent — and
+// opens it with this binary: both new columns exist, default to unset and
+// the old rows keep their values.
+func TestEffortMigrationKeepsTheRows(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatalf("list migrations: %v", err)
+	}
+	var before int
+	for _, m := range migs {
+		if m.name == "effort" {
+			before = m.version - 1
+			break
+		}
+	}
+	if before == 0 {
+		t.Fatal("effort migration not found in allMigrations")
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("open raw store: %v", err)
+	}
+	for _, m := range migs[:before] {
+		if _, err := db.Exec(m.sql); err != nil {
+			t.Fatalf("apply %04d_%s by hand: %v", m.version, m.name, err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA user_version = " + strconv.Itoa(before)); err != nil {
+		t.Fatalf("set user_version: %v", err)
+	}
+	insertProject(t, db)
+	runner := insertID(t, db, "INSERT INTO runners (name, created_at, last_seen_at) VALUES ('r', ?, ?)", ts, ts)
+	exec(t, db, `INSERT INTO agents (runner_id, adapter, harness, model, family, account, classes, created_at, updated_at)
+		VALUES (?, 'claude', 'claude', 'opus', 'claude', 'claude', '[]', ?, ?)`, runner, ts, ts)
+	if err := db.Close(); err != nil {
+		t.Fatalf("close raw store: %v", err)
+	}
+
+	s := openStore(t, path)
+	if got := queryString(t, s.db, "SELECT foreman_effort FROM projects"); got != "" {
+		t.Errorf("foreman_effort of an old project = %q, want unset", got)
+	}
+	if got := queryString(t, s.db, "SELECT effort FROM agents"); got != "" {
+		t.Errorf("effort of an old agent = %q, want unset", got)
+	}
+	if got := queryString(t, s.db, "SELECT model FROM agents"); got != "opus" {
+		t.Errorf("model of the old agent = %q, want opus", got)
+	}
+	exec(t, s.db, "UPDATE projects SET foreman_effort = 'high'")
+	exec(t, s.db, "UPDATE agents SET effort = 'max'")
+}
+
 // TestReviewWithoutTaskMigrationKeepsTheRows builds the store of a
 // binary that predates migration 0023 — a job with an artifact and an
 // event hanging off it — and opens it with this binary: the CHECK edit

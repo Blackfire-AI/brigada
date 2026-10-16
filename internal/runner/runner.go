@@ -230,6 +230,22 @@ func (cfg *Config) agentFor(grant *api.JobGrant) (adapter.Adapter, string, error
 		grant.Agent, strings.Join(offered, ", "))
 }
 
+// effortFor is the reasoning-effort level to run a job at: the effort of
+// the agent the lease named, except that a foreman turn whose project
+// chose a foreman effort runs at that one. Workers and reviewers keep
+// their agent's own. Empty means unset: the CLI's default.
+func (cfg *Config) effortFor(grant *api.JobGrant) string {
+	if grant.Kind == "foreman" && grant.ForemanEffort != "" {
+		return grant.ForemanEffort
+	}
+	for _, a := range cfg.Agents {
+		if a.Harness == grant.Agent {
+			return a.Effort
+		}
+	}
+	return ""
+}
+
 // adapterOfAgent returns the adapter paired with the i-th advertised
 // agent. Agents pair with adapters of their adapter name in order: the
 // first agent naming a name takes that name's first adapter, the

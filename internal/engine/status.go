@@ -66,6 +66,7 @@ type StatusJob struct {
 	Status    string `json:"status"`
 	Harness   string `json:"harness,omitempty"`
 	Model     string `json:"model,omitempty"`
+	Effort    string `json:"effort,omitempty"` // the agent's effort level; shown as model@effort
 	LeasedAt  string `json:"leased_at,omitempty"`
 	LastEvent string `json:"last_event,omitempty"`
 }
@@ -227,7 +228,7 @@ func pendingUserMessagesTx(tx *sql.Tx, project int64) (int, error) {
 // the worker's latest progress event.
 func statusRunningTx(tx *sql.Tx, project int64) ([]StatusJob, error) {
 	query := `SELECT j.id, COALESCE(j.task_id, 0), j.kind, j.status,
-			COALESCE(a.harness, ''), COALESCE(a.model, ''),
+			COALESCE(a.harness, ''), COALESCE(a.model, ''), COALESCE(a.effort, ''),
 			COALESCE(j.last_leased, j.first_leased, ''), COALESCE(j.last_event, '')
 		FROM jobs j LEFT JOIN agents a ON a.id = j.agent_id
 		WHERE j.status IN (?, ?)`
@@ -245,7 +246,7 @@ func statusRunningTx(tx *sql.Tx, project int64) ([]StatusJob, error) {
 	jobs := []StatusJob{}
 	for rows.Next() {
 		var j StatusJob
-		if err := rows.Scan(&j.ID, &j.TaskID, &j.Kind, &j.Status, &j.Harness, &j.Model, &j.LeasedAt, &j.LastEvent); err != nil {
+		if err := rows.Scan(&j.ID, &j.TaskID, &j.Kind, &j.Status, &j.Harness, &j.Model, &j.Effort, &j.LeasedAt, &j.LastEvent); err != nil {
 			return nil, fmt.Errorf("list the running jobs: %w", err)
 		}
 		jobs = append(jobs, j)

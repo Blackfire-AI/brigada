@@ -21,6 +21,8 @@ type ForemanSetting struct {
 	RepoURL   string `json:"repo_url"`
 	Harness   string `json:"harness"`
 	Model     string `json:"model"`
+	// Effort is the foreman's reasoning-effort level; empty when unset.
+	Effort string `json:"effort,omitempty"`
 }
 
 // ErrInvalidForeman marks a refusal the caller caused: a foreman setting
@@ -44,6 +46,14 @@ const setupDefaultBranch = "main"
 // with its event in one transaction, so the log never names a choice
 // the row does not hold.
 func (e *Engine) SetProjectForeman(ctx context.Context, repoURL, harness, model string) (ForemanSetting, error) {
+	return e.SetProjectForemanEffort(ctx, repoURL, harness, model, "")
+}
+
+// SetProjectForemanEffort is SetProjectForeman with the foreman's
+// reasoning-effort level, validated against the harness's accepted set;
+// empty leaves the CLI's own default. An effort change on the same harness
+// keeps the session (only a harness change drops it).
+func (e *Engine) SetProjectForemanEffort(ctx context.Context, repoURL, harness, model, effort string) (ForemanSetting, error) {
 	if repoURL == "" {
 		return ForemanSetting{}, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidForeman)
 	}
@@ -58,7 +68,11 @@ func (e *Engine) SetProjectForeman(ctx context.Context, repoURL, harness, model 
 			ErrInvalidForeman, harness, strings.Join(resumeCapableHarnesses(), ", "))
 	}
 
-	setting := ForemanSetting{RepoURL: repoURL, Harness: harness, Model: model}
+	if err := adapter.ValidateEffort(harness, effort); err != nil {
+		return ForemanSetting{}, fmt.Errorf("%w: %v", ErrInvalidForeman, err)
+	}
+
+	setting := ForemanSetting{RepoURL: repoURL, Harness: harness, Model: model, Effort: effort}
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
@@ -71,8 +85,10 @@ func (e *Engine) SetProjectForeman(ctx context.Context, repoURL, harness, model 
 			Scan(&project, &oldHarness, &oldModel)
 		switch {
 		case err == nil:
-			if _, err := tx.Exec("UPDATE projects SET foreman_harness = ?, foreman_model = ?, updated_at = ? WHERE id = ?",
-				harness, model, fmtTime(now), project); err != nil {
+			// An effort change alone is no switch: the session and any
+			// limit stay, and only the next turn runs at the new level.
+			if _, err := tx.Exec("UPDATE projects SET foreman_harness = ?, foreman_model = ?, foreman_effort = ?, updated_at = ? WHERE id = ?",
+				harness, model, effort, fmtTime(now), project); err != nil {
 				return fmt.Errorf("set the foreman of the project of %s: %w", repoURL, err)
 			}
 			if harness != oldHarness || model != oldModel {
@@ -99,11 +115,16 @@ func (e *Engine) SetProjectForeman(ctx context.Context, repoURL, harness, model 
 			if err != nil {
 				return err
 			}
+			if effort != "" {
+				if _, err := tx.Exec("UPDATE projects SET foreman_effort = ? WHERE id = ?", effort, project); err != nil {
+					return fmt.Errorf("set the foreman effort of the project of %s: %w", repoURL, err)
+				}
+			}
 		default:
 			return fmt.Errorf("read the project of %s: %w", repoURL, err)
 		}
 		if _, err := appendEventTx(tx, evProjectForemanSet, project, 0, 0,
-			eventPayload{Harness: harness, Model: model}, now); err != nil {
+			eventPayload{Harness: harness, Model: model, Effort: effort}, now); err != nil {
 			return err
 		}
 		setting.ProjectID = project
@@ -135,8 +156,8 @@ func (e *Engine) ProjectForeman(ctx context.Context, repoURL string) (*ForemanSe
 		}
 		var f ForemanSetting
 		var project int64
-		err := tx.QueryRow("SELECT id, foreman_harness, foreman_model FROM projects WHERE repo_url = ?",
-			repoURL).Scan(&project, &f.Harness, &f.Model)
+		err := tx.QueryRow("SELECT id, foreman_harness, foreman_model, foreman_effort FROM projects WHERE repo_url = ?",
+			repoURL).Scan(&project, &f.Harness, &f.Model, &f.Effort)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}

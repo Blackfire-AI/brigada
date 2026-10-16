@@ -99,6 +99,12 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	if job.Model != "" {
 		args = append(args, "--model", job.Model)
 	}
+	if err := adapter.ValidateEffort("claude", job.Effort); err != nil {
+		return nil, fmt.Errorf("claude: %w", err)
+	}
+	if job.Effort != "" {
+		args = append(args, "--effort", job.Effort)
+	}
 	if resumeSessionID != "" {
 		args = append(args, "--resume", resumeSessionID)
 	}
@@ -187,6 +193,12 @@ func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSe
 	args = append(args, "--session-id", newSessionID)
 	if job.Model != "" {
 		args = append(args, "--model", job.Model)
+	}
+	if err := adapter.ValidateEffort("claude", job.Effort); err != nil {
+		return nil, fmt.Errorf("claude: %w", err)
+	}
+	if job.Effort != "" {
+		args = append(args, "--effort", job.Effort)
 	}
 	args = append(args, "--mcp-config", job.MCPConfig, "--strict-mcp-config")
 	if job.ReadOnlyRepo != "" {
