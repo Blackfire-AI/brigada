@@ -121,7 +121,7 @@ func (e *Engine) SetProjectForemanEffort(ctx context.Context, repoURL, harness, 
 				// A turn leased under the old generation must not write
 				// its session back after this (foremanSessionStaleTx).
 				if _, err := tx.Exec("UPDATE projects SET foreman_session_gen = foreman_session_gen + 1 WHERE id = ?", project); err != nil {
-					return fmt.Errorf("bump the foreman session generation of the project of %s: %w", repoURL, err)
+					return fmt.Errorf("bump the foreman session generation of the project of %s: %w", shown, err)
 				}
 			}
 		case errors.Is(err, sql.ErrNoRows):

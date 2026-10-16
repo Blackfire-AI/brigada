@@ -74,6 +74,15 @@ var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // unknown schema version, a value of the wrong type, a repo that is not
 // in canonical form. The YAML is a strict subset (top-level keys with a
 // scalar, a flow list or a block list), the same hand-rolled kind the
+
+// configSettingKeys are the project settings schema 1 of the shared file
+// may carry (§13.1): the approval limit, the default check and the worker
+// tool policy, and nothing else. It is its own list, never SettingKeys:
+// a setting added for the local store (the mode A hold bounds, for one)
+// does not become shared-file policy by being editable.
+var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
+	SettingDefaultCheck, SettingWorkerTools}
+
 // plan files use, so the engine takes no dependency for it.
 func ParseProjectConfig(content []byte) (ProjectConfig, error) {
 	if len(content) > maxProjectConfigBytes {
@@ -97,7 +106,7 @@ func ParseProjectConfig(content []byte) (ProjectConfig, error) {
 	if ver != ProjectConfigSchema {
 		return ProjectConfig{}, configErr("unknown %s version %d; this brigada reads %s %d", configKeySchema, ver, configKeySchema, ProjectConfigSchema)
 	}
-	valid := append([]string{configKeySchema, configKeyRepo}, SettingKeys...)
+	valid := append([]string{configKeySchema, configKeyRepo}, configSettingKeys...)
 	for _, k := range order {
 		if !slicesContains(valid, k) {
 			return ProjectConfig{}, configErr("unknown key %q (line %d); valid keys: %s", k, entries[k].line, strings.Join(valid, ", "))
@@ -122,7 +131,7 @@ func ParseProjectConfig(content []byte) (ProjectConfig, error) {
 		return ProjectConfig{}, configErr("%s must be written in its canonical form %q (host[:port]/path, or file:<absolute path> for a file remote)", configKeyRepo, canon)
 	}
 	cfg.Repo = canon
-	for _, k := range SettingKeys {
+	for _, k := range configSettingKeys {
 		v, ok := entries[k]
 		if !ok {
 			continue
