@@ -93,15 +93,6 @@ func (r *jobRun) execute(ctx context.Context) {
 		return
 	}
 
-	ws, err := prepareWorkspace(ctx, r.cfg, r.grant)
-	if err != nil {
-		// A task with no repo URL or an unbuildable worktree cannot be
-		// run by anyone; the job fails with the reason instead of
-		// bouncing between runners.
-		r.finishWithError(ctx, err.Error())
-		return
-	}
-
 	// The worker's kill switch exists before any goroutine that may
 	// fire it: the heartbeat loop (a stall) closes the channel, the
 	// worker's killer goroutine receives it — the field is written once,
@@ -109,9 +100,32 @@ func (r *jobRun) execute(ctx context.Context) {
 	kill := make(chan struct{})
 	r.killWorker = sync.OnceFunc(func() { close(kill) })
 
+	// The lease is kept from the moment it is taken, set-up included: a
+	// job that waits behind another's clone of the shared mirror, or for
+	// an author's worktree to come down, would otherwise lapse and be
+	// leased again while this run still meant to build its worktree. An
+	// answer that ends the hold aborts runCtx, and with it the set-up.
 	runCtx, abort := context.WithCancel(ctx)
 	beatsDone := make(chan struct{})
 	go r.heartbeats(runCtx, abort, beatsDone)
+
+	ws, err := prepareWorkspace(runCtx, r.cfg, r.grant)
+	if err != nil {
+		if r.takeDropped() || runCtx.Err() != nil {
+			// The hold ended (or the runner is shutting down) during the
+			// set-up: nothing is delivered, as for a run that ends later.
+			r.cfg.Log.WarnContext(context.WithoutCancel(ctx), "job set-up ended before the worktree was ready; nothing delivered",
+				"job_id", r.grant.JobID, "err", err)
+		} else {
+			// A task with no repo URL or an unbuildable worktree cannot
+			// be run by anyone; the job fails with the reason instead of
+			// bouncing between runners.
+			r.finishWithError(runCtx, err.Error())
+		}
+		abort()
+		<-beatsDone
+		return
+	}
 	r.runJob(runCtx, ws, kill)
 	abort()
 	<-beatsDone

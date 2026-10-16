@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -266,8 +269,10 @@ const (
 )
 
 // Run is the runner (§5.1): it registers the runner and its
-// advertisement, then long-polls leases and runs one job at a time —
-// workspace, worker, result contract, check, push — until ctx is done.
+// advertisement, then long-polls leases and runs up to MaxParallel jobs
+// at once (one when unset), each in its own goroutine — workspace,
+// worker, result contract, check, push — until ctx is done; it polls
+// only while a slot is free, and on the way out waits for its jobs.
 // It takes cfg by value and fills its defaults in its own copy, so the
 // caller's Config is never mutated; the job runs hold the filled copy.
 //
@@ -297,9 +302,34 @@ func Run(ctx context.Context, cfg Config) error {
 	// runner killed mid-turn leaves its behind, token and all. The tree
 	// goes now, before any new turn's config joins it.
 	sweepMCPConfigs(ctx, cfg.StateDir, cfg.Log)
+	// Worktrees are named by lease, so a crashed run's directory is no
+	// longer reused (and replaced) by the next attempt; this runner holds
+	// the state directory's lock, so whatever is there now is dead. The
+	// mirrors' records of them are pruned by the next set-up.
+	if err := os.RemoveAll(filepath.Join(cfg.StateDir, "worktrees")); err != nil {
+		cfg.Log.WarnContext(ctx, "sweep the worktrees a crashed runner left", "err", err)
+	}
 	client := api.NewClient(cfg.Socket, cfg.Token)
 	registered := false
 	backoff := leaseBackoffMin
+
+	// The slot semaphore (§8.1): one token per job the runner may run at
+	// once, --max-parallel of them, one when unset. The loop takes a
+	// token before it polls and hands it to the job it leases, so it
+	// never holds a lease it has no slot to run; a poll that brings
+	// nothing gives it back. Every job runs in its own goroutine, on
+	// its own jobRun.
+	slots := make(chan struct{}, max(cfg.MaxParallel, 1))
+	var jobs sync.WaitGroup
+	// However Run ends, the jobs end with it: the context they run
+	// under is cancelled and waited out, so a lease the runner stops
+	// serving lapses (§5.6) and no job outlives the runner's lock.
+	runCtx, stopJobs := context.WithCancel(ctx)
+	defer func() {
+		stopJobs()
+		jobs.Wait()
+	}()
+
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -327,7 +357,17 @@ func Run(ctx context.Context, cfg Config) error {
 			cfg.Log.InfoContext(ctx, "runner registered", "socket", cfg.Socket, "agents", len(cfg.Agents))
 		}
 
+		// Poll only while a slot is free; a full runner waits here for
+		// a job to end, or for shutdown.
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 		grant, err := client.Lease(ctx, cfg.LeaseWait, cfg.harnessesOffered(), cfg.Labels)
+		if err != nil || grant == nil {
+			<-slots
+		}
 		if err != nil {
 			if permanent := callerMistake(err); permanent != nil {
 				return permanent
@@ -351,7 +391,14 @@ func Run(ctx context.Context, cfg Config) error {
 			continue // the wait ran out with nothing to do
 		}
 		r := &jobRun{cfg: &cfg, client: client, grant: grant}
-		r.execute(ctx)
+		jobs.Add(1)
+		go func() {
+			defer func() {
+				<-slots
+				jobs.Done()
+			}()
+			r.execute(runCtx)
+		}()
 	}
 }
 

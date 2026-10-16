@@ -63,6 +63,13 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 // Leased wall time is banked wherever a lease ends: expiry at the
 // expiry itself, a cap at the cap moment, never past them.
 func (e *Engine) sweepTx(tx *sql.Tx, now time.Time) (SweepReport, error) {
+	return e.sweepPolledTx(tx, now, 0)
+}
+
+// sweepPolledTx is sweepTx run for a lease poll by runner polling (0 for
+// any other call): a runner asking for work has a free slot, which the
+// busy-runner rule of the queue TTL takes into account.
+func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (SweepReport, error) {
 	var rep SweepReport
 	nowStr := fmtTime(now)
 
@@ -183,6 +190,11 @@ func (e *Engine) sweepTx(tx *sql.Tx, now time.Time) (SweepReport, error) {
 	}
 
 	if e.cfg.QueueTTL > 0 {
+		// A job whose every candidate runner is at capacity is waiting
+		// for a slot, not unserved: stamp it before the TTL reads it.
+		if err := e.holdBusyRunnersTx(tx, now, polling); err != nil {
+			return rep, err
+		}
 		// The TTL is for jobs no runner can serve (§8.1); a job held only
 		// by a full cap layer waits as long as it takes, so the clock
 		// counts from the later of queued_at and the last cap hold.

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
@@ -56,12 +57,15 @@ func isFixJob(grant *api.JobGrant) bool {
 
 // workspace is one task's materialized checkout.
 type workspace struct {
-	mirror  string // the repo's cached bare mirror
-	dir     string // the task's worktree
-	branch  string
-	base    string // the commit the worktree was built on
-	repoURL string
-	gitEnv  []string
+	mirror string // the repo's cached bare mirror
+	dir    string // the task's worktree
+	branch string
+	base   string // the commit the worktree was built on
+	// holdsBranch is whether branch is registered as checked out by this
+	// worktree (see holdBranch); guarded by the mirror's lock.
+	holdsBranch bool
+	repoURL     string
+	gitEnv      []string
 }
 
 // prepareWorkspace materializes the workspace for a leased job (§5.1):
@@ -84,11 +88,25 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 	}
 	w := &workspace{
 		mirror:  mirrorPath(cfg.StateDir, grant.RepoURL),
-		dir:     filepath.Join(cfg.StateDir, "worktrees", fmt.Sprintf("job-%d", grant.JobID)),
+		dir:     worktreeDir(cfg.StateDir, grant),
 		branch:  grantBranch(grant),
 		repoURL: grant.RepoURL,
 		gitEnv:  cfg.GitEnv,
 	}
+	// The mirror is shared by every job of the repo, and a concurrent
+	// runner has several in flight: its clone, fetches and worktree
+	// records are changed under the mirror's lock, held through the
+	// worktree add and released before the job runs.
+	//
+	// A follow-up of a task waits first for the author's worktree to come
+	// down: the branches it fetches or checks out (its own result
+	// branch, the one it continues, a brigada/ base) cannot move while a
+	// live worktree holds them. The wait gives up when the job's ctx ends.
+	unlock, err := lockMirrorFor(ctx, w.mirror, w.branch, grant.Branch, brigadaRef(grant.BaseRef))
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	if err := w.materializeMirror(ctx, grant.BaseRef); err != nil {
 		return nil, err
 	}
@@ -115,19 +133,23 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 		}
 	}
 	// A worktree left behind by a crashed run of the same job would make
-	// the add below fail on the path; the runner is sequential, so what
-	// sits there now is dead.
-	w.discardWorktree(ctx)
+	// the add below fail on the path; a job id is leased to one run at a
+	// time, so what sits at this job's own path now is dead.
+	w.discardLocked(ctx)
 	if out, err := w.git(ctx, "--git-dir", w.mirror, "worktree", "add", "-B", w.branch, w.dir, start); err != nil {
-		w.discardWorktree(ctx)
+		w.discardLocked(ctx)
 		return nil, fmt.Errorf("add the worktree for %s from %s: %w", w.branch, start, trimCmdError(out, err))
 	}
+	// The branch is checked out here from now until the worktree comes
+	// down; the hold is taken under the mirror's lock, with no gap.
+	holdBranch(w.mirror, w.branch)
+	w.holdsBranch = true
 	// The commit the worktree starts from: what holdsWork compares the
 	// worker's HEAD against — a branch with no work on it is not a
 	// result (§5.6).
 	out, err := w.git(ctx, "-C", w.dir, "rev-parse", "HEAD")
 	if err != nil {
-		w.discardWorktree(ctx)
+		w.discardLocked(ctx)
 		return nil, fmt.Errorf("read the worktree's base commit: %w", trimCmdError(out, err))
 	}
 	w.base = strings.TrimSpace(string(out))
@@ -149,20 +171,27 @@ func prepareReviewWorkspace(ctx context.Context, cfg *Config, grant *api.JobGran
 	}
 	w := &workspace{
 		mirror:  mirrorPath(cfg.StateDir, grant.RepoURL),
-		dir:     filepath.Join(cfg.StateDir, "worktrees", fmt.Sprintf("job-%d", grant.JobID)),
+		dir:     worktreeDir(cfg.StateDir, grant),
 		branch:  grant.ReviewBranch,
 		repoURL: grant.RepoURL,
 		gitEnv:  cfg.GitEnv,
 	}
+	// See prepareWorkspace: the result branch is the author's, possibly
+	// still checked out in a worktree that is on its way down.
+	unlock, err := lockMirrorFor(ctx, w.mirror, grant.ReviewBranch, brigadaRef(grant.BaseRef))
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	if err := w.materializeMirror(ctx, grant.BaseRef); err != nil {
 		return nil, err
 	}
 	if err := w.fetchBranch(ctx, grant.ReviewBranch); err != nil {
 		return nil, err
 	}
-	w.discardWorktree(ctx)
+	w.discardLocked(ctx)
 	if out, err := w.git(ctx, "--git-dir", w.mirror, "worktree", "add", "--detach", w.dir, w.branch); err != nil {
-		w.discardWorktree(ctx)
+		w.discardLocked(ctx)
 		return nil, fmt.Errorf("add the review worktree at %s: %w", w.branch, trimCmdError(out, err))
 	}
 	// The commit under review, kept for the record like a work
@@ -170,12 +199,12 @@ func prepareReviewWorkspace(ctx context.Context, cfg *Config, grant *api.JobGran
 	// compares against it.
 	out, err := w.git(ctx, "-C", w.dir, "rev-parse", "HEAD")
 	if err != nil {
-		w.discardWorktree(ctx)
+		w.discardLocked(ctx)
 		return nil, fmt.Errorf("read the review worktree's commit: %w", trimCmdError(out, err))
 	}
 	w.base = strings.TrimSpace(string(out))
 	if err := w.writeReviewDiff(ctx, grant.BaseRef); err != nil {
-		w.discardWorktree(ctx)
+		w.discardLocked(ctx)
 		return nil, err
 	}
 	return w, nil
@@ -214,6 +243,9 @@ func (w *workspace) materializeMirror(ctx context.Context, baseRef string) error
 			return fmt.Errorf("create the mirror directory: %w", err)
 		}
 		if out, err := w.git(ctx, "clone", "--mirror", w.repoURL, w.mirror); err != nil {
+			// A clone cut short (the job's lease lost, the runner stopping)
+			// must not leave a half mirror the next job would fetch into.
+			_ = os.RemoveAll(w.mirror)
 			return fmt.Errorf("clone %s: %w", redactURL(w.repoURL), trimCmdError(out, err))
 		}
 	}
@@ -272,9 +304,49 @@ func (w *workspace) remove(ctx context.Context) {
 // discardWorktree removes the worktree and prunes the mirror's records.
 // A worktree that is already gone is success here.
 func (w *workspace) discardWorktree(ctx context.Context) {
+	// The teardown must happen whatever ended the job, so it waits for
+	// the lock on a context that cannot be cancelled.
+	unlock, err := lockMirror(context.WithoutCancel(ctx), w.mirror)
+	if err != nil {
+		return
+	}
+	defer unlock()
+	w.discardLocked(ctx)
+}
+
+// discardLocked is discardWorktree for a caller that already holds the
+// mirror's lock. It runs on a context of its own: the set-up that fails
+// because its job was aborted must still take back what it made.
+func (w *workspace) discardLocked(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
 	_, _ = w.git(ctx, "--git-dir", w.mirror, "worktree", "remove", "--force", w.dir)
 	_, _ = w.git(ctx, "--git-dir", w.mirror, "worktree", "prune")
 	_ = os.RemoveAll(w.dir)
+	if w.holdsBranch {
+		w.holdsBranch = false
+		releaseBranch(w.mirror, w.branch)
+	}
+}
+
+// worktreeDir is the lease's own worktree path: job id and attempt. A
+// job re-leased while the run that lost it is still winding down (its
+// heartbeats failed, a spare slot took the job again) must not share a
+// directory with it, or either attempt's set-up or cleanup could delete
+// the other's live checkout. Directories a crashed runner left behind
+// are swept at startup (see Run).
+func worktreeDir(stateDir string, grant *api.JobGrant) string {
+	return filepath.Join(stateDir, "worktrees", fmt.Sprintf("job-%d-a%d", grant.JobID, grant.Attempt))
+}
+
+// brigadaRef is ref when it lives in the runners' own brigada/ namespace
+// — the one the mirror's general fetch skips, so a job fetches it by
+// name — and "" otherwise.
+func brigadaRef(ref string) string {
+	if strings.HasPrefix(ref, "brigada/") {
+		return ref
+	}
+	return ""
 }
 
 // ensurePushed verifies the branch on the remote holds exactly the

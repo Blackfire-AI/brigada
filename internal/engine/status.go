@@ -50,6 +50,9 @@ type StatusInfo struct {
 	// Cooling lists the agents held back for quota (§8, §10): shown
 	// beside the running jobs, never in the needs-you queue.
 	Cooling []CoolingAgent `json:"cooling,omitempty"`
+	// Held lists the queued jobs a full cap layer holds (§8.1); the
+	// runner layer's are jobs waiting for a runner slot.
+	Held []HeldJob `json:"held,omitempty"`
 }
 
 // StatusJob is one job a runner holds right now (§10): which job, for
@@ -189,6 +192,9 @@ func (e *Engine) Status(ctx context.Context, project int64) (StatusInfo, error) 
 			return err
 		}
 		if info.Cooling, err = statusCoolingTx(tx, now); err != nil {
+			return err
+		}
+		if info.Held, err = statusHeldTx(tx, project); err != nil {
 			return err
 		}
 		return nil
