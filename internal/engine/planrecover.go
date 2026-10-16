@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -187,6 +188,9 @@ func (e *Engine) applyPlanFileTx(tx *sql.Tx, project int64, repo, defaultBranch 
 				return skip("task %d depends on %q, which is no other task of the plan", t.ID, d)
 			}
 		}
+		if t.Base != "" && !slices.Contains(t.Deps, t.Base) {
+			return skip("task %d has base %q, which is not one of its deps", t.ID, t.Base)
+		}
 	}
 
 	if exists {
@@ -233,7 +237,7 @@ func (e *Engine) applyPlanFileTx(tx *sql.Tx, project int64, repo, defaultBranch 
 	}
 	for _, t := range p.Tasks {
 		for _, d := range t.Deps {
-			if _, err := tx.Exec("INSERT INTO task_deps (plan_id, task_id, depends_on_task_id) VALUES (?, ?, ?)", p.ID, t.ID, ids[d]); err != nil {
+			if _, err := tx.Exec("INSERT INTO task_deps (plan_id, task_id, depends_on_task_id, is_base) VALUES (?, ?, ?, ?)", p.ID, t.ID, ids[d], d == t.Base); err != nil {
 				return "", "", fmt.Errorf("rebuild an edge of plan %d: %w", p.ID, err)
 			}
 		}

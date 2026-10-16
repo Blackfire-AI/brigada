@@ -153,6 +153,52 @@ func TestRestartedWorkRecordsTheNewBranch(t *testing.T) {
 	}
 }
 
+// TestStackedBaseFollowsTheRestartBranch covers a dependent's base after
+// its dependency was restarted (§5.6, §6.1): the base is the branch the
+// engine recorded when the dependency finally completed — the restart's
+// -r<n> name, not the first attempt's — and it is written when the
+// dependent is released, with the grant carrying it to the runner.
+func TestStackedBaseFollowsTheRestartBranch(t *testing.T) {
+	e := newEnv(t)
+	res, err := e.eng.CreatePlan(e.ctx, e.project, "restarted base", []PlanTask{
+		{Name: "lib", Spec: "write the lib", Class: "answer"},
+		{Name: "app", Spec: "use the lib", Class: "answer", Deps: []string{"lib"}},
+	})
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	lib, app := res.Tasks[0].TaskID, res.Tasks[1].TaskID
+
+	g := e.leaseAny(e.runner1)
+	if g == nil || g.TaskID != lib {
+		t.Fatalf("lease = %+v, want lib's job", g)
+	}
+	if ans := e.complete(g, Completion{Result: `{"status":"needs_help","question":"which way?"}`}); ans != AnsOK {
+		t.Fatalf("park lib: %s", ans)
+	}
+	if _, err := e.eng.RestartTask(e.ctx, e.project, lib, "start over"); err != nil {
+		t.Fatalf("restart lib: %v", err)
+	}
+	if got := e.str("SELECT base_ref FROM tasks WHERE id = ?", app); got != "main" {
+		t.Errorf("app base ref before lib is done = %q, want main", got)
+	}
+	g = e.leaseAny(e.runner1)
+	restart := fmt.Sprintf("brigada/task-%d-r1", lib)
+	if g == nil || g.Branch != restart {
+		t.Fatalf("restarted lib grant = %+v, want branch %q", g, restart)
+	}
+	if ans := e.complete(g, done()); ans != AnsOK {
+		t.Fatalf("complete the restarted lib: %s", ans)
+	}
+	if got := e.str("SELECT base_ref FROM tasks WHERE id = ?", app); got != restart {
+		t.Errorf("app base ref = %q, want the restart's branch %q", got, restart)
+	}
+	g = e.leaseAny(e.runner1)
+	if g == nil || g.TaskID != app || g.BaseRef != restart {
+		t.Fatalf("app grant = %+v, want base %q", g, restart)
+	}
+}
+
 // parkNeedsHelp completes the leased work job with a worker question,
 // parking the task for the foreman (§3) so a restart may act on it.
 func parkNeedsHelp(t *testing.T, e *env, g *LeaseGrant) {

@@ -153,6 +153,7 @@ type PlanTask struct {
 	Title string
 	Name  string   // the handle other tasks name in Deps; '' = unnamed
 	Deps  []string // names of tasks of the same plan this one waits for
+	Base  string   // the one of Deps whose branch the work starts from; '' = the default rule
 	Spec  string
 	Check string
 	Class string
@@ -189,7 +190,7 @@ type PlanCreatedTask struct {
 func (c *Client) CreatePlan(ctx context.Context, p PlanCreate, idemKey string) (PlanCreateResult, error) {
 	body := planCreateRequest{RepoURL: p.RepoURL, Title: p.Title, Tasks: make([]planTaskBody, len(p.Tasks))}
 	for i, t := range p.Tasks {
-		body.Tasks[i] = planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Spec: t.Spec, Check: t.Check, Class: t.Class}
+		body.Tasks[i] = planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class}
 	}
 	var out planCreateResponse
 	if err := c.callKeyed(ctx, http.MethodPost, "/v1/plans", idemKey, body, &out); err != nil {
@@ -223,6 +224,7 @@ type PlanAmend struct {
 type PlanRetarget struct {
 	Task string
 	Deps []string
+	Base string
 }
 
 // PlanAmendResult names what the amendment did: the plan's state after it,
@@ -243,10 +245,10 @@ type PlanAmendResult struct {
 func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey string) (PlanAmendResult, error) {
 	body := planAmendRequest{Cancel: a.Cancel}
 	for _, t := range a.Add {
-		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Spec: t.Spec, Check: t.Check, Class: t.Class})
+		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class})
 	}
 	for _, rt := range a.Retarget {
-		body.Retarget = append(body.Retarget, planRetargetBody{Task: rt.Task, Deps: rt.Deps})
+		body.Retarget = append(body.Retarget, planRetargetBody{Task: rt.Task, Deps: rt.Deps, Base: rt.Base})
 	}
 	var out planAmendResponse
 	path := "/v1/plans/" + strconv.FormatInt(plan, 10) + "/amend"

@@ -289,7 +289,7 @@ func readPlanSnapshotTx(tx *sql.Tx, planID int64) (planSnapshot, error) {
 	}
 	rows.Close()
 
-	edges, err := tx.Query(`SELECT d.task_id, x.name FROM task_deps d JOIN tasks x ON x.id = d.depends_on_task_id
+	edges, err := tx.Query(`SELECT d.task_id, x.name, d.is_base FROM task_deps d JOIN tasks x ON x.id = d.depends_on_task_id
 		WHERE d.plan_id = ? ORDER BY d.task_id, x.id`, planID)
 	if err != nil {
 		return planSnapshot{}, fmt.Errorf("read the edges of plan %d: %w", planID, err)
@@ -298,15 +298,26 @@ func readPlanSnapshotTx(tx *sql.Tx, planID int64) (planSnapshot, error) {
 	for edges.Next() {
 		var task int64
 		var dep string
-		if err := edges.Scan(&task, &dep); err != nil {
+		var isBase bool
+		if err := edges.Scan(&task, &dep, &isBase); err != nil {
 			return planSnapshot{}, fmt.Errorf("read the edges of plan %d: %w", planID, err)
 		}
 		if i, ok := index[task]; ok {
 			s.plan.Tasks[i].Deps = append(s.plan.Tasks[i].Deps, dep)
+			if isBase {
+				s.plan.Tasks[i].Base = dep
+			}
 		}
 	}
 	if err := edges.Err(); err != nil {
 		return planSnapshot{}, fmt.Errorf("read the edges of plan %d: %w", planID, err)
+	}
+	// The file shows the base the engine will use: the named one, else
+	// the only dependency.
+	for i, t := range s.plan.Tasks {
+		if t.Base == "" && len(t.Deps) == 1 {
+			s.plan.Tasks[i].Base = t.Deps[0]
+		}
 	}
 	return s, nil
 }

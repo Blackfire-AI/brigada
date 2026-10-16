@@ -23,6 +23,7 @@ type planTaskArg struct {
 	Title string   `json:"title"`
 	Name  string   `json:"name"`
 	Deps  []string `json:"deps"`
+	Base  string   `json:"base,omitempty"`
 	Spec  string   `json:"spec"`
 	Check string   `json:"check"`
 	Class string   `json:"class"`
@@ -55,7 +56,7 @@ func callPlanCreate(ctx context.Context, c *api.Client, args json.RawMessage) (s
 	a = a.canonical()
 	p := api.PlanCreate{Title: a.Title, Tasks: make([]api.PlanTask, len(a.Tasks))}
 	for i, t := range a.Tasks {
-		p.Tasks[i] = api.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Spec: t.Spec, Check: t.Check, Class: t.Class}
+		p.Tasks[i] = api.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class}
 	}
 	res, err := c.CreatePlan(ctx, p, idemKey("plan_create", a))
 	if err != nil {
@@ -126,6 +127,7 @@ type planAddArg struct {
 	Title string    `json:"title"`
 	Name  string    `json:"name"`
 	Deps  []taskRef `json:"deps"`
+	Base  taskRef   `json:"base,omitempty"`
 	Spec  string    `json:"spec"`
 	Check string    `json:"check"`
 	Class string    `json:"class"`
@@ -134,6 +136,7 @@ type planAddArg struct {
 type planRetargetArg struct {
 	Task taskRef   `json:"task"`
 	Deps []taskRef `json:"deps"`
+	Base taskRef   `json:"base,omitempty"`
 }
 
 // callPlanAmend runs the plan_amend tool (§12.2): the amendment through
@@ -157,10 +160,10 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 	}
 	am := api.PlanAmend{Cancel: refStrings(a.Cancel)}
 	for _, t := range a.Add {
-		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Spec: t.Spec, Check: t.Check, Class: t.Class})
+		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Spec: t.Spec, Check: t.Check, Class: t.Class})
 	}
 	for _, rt := range a.Retarget {
-		am.Retarget = append(am.Retarget, api.PlanRetarget{Task: string(rt.Task), Deps: refStrings(rt.Deps)})
+		am.Retarget = append(am.Retarget, api.PlanRetarget{Task: string(rt.Task), Deps: refStrings(rt.Deps), Base: string(rt.Base)})
 	}
 	res, err := c.AmendPlan(ctx, a.Plan, am, idemKey("plan_amend", a))
 	if err != nil {

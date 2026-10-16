@@ -24,6 +24,10 @@ type PlanTask struct {
 	Check string
 	Class string // '' = implement
 	Deps  []string
+	// Base names the one of Deps whose result branch this task's work
+	// starts from; '' = the only dep when there is exactly one, else the
+	// project's default branch.
+	Base string
 }
 
 // CreatedTask is one task CreatePlan made: its id, its name, and the
@@ -84,17 +88,18 @@ func (e *Engine) CreatePlan(ctx context.Context, project int64, title string, ta
 
 // validatePlanGraph checks a plan's names and dependencies (§6.1) and
 // returns each task's dependencies as indexes into tasks, duplicates
-// folded. Names are unique where set; every dep names a task of the plan
-// and not its own; the graph has no cycle, the refusal naming the
-// cycle's tasks.
-func validatePlanGraph(tasks []PlanTask) ([][]int, error) {
+// folded, and each task's base as an index into tasks (-1 = none named).
+// Names are unique where set; every dep names a task of the plan and not
+// its own; a base is one of the task's own deps; the graph has no cycle,
+// the refusal naming the cycle's tasks.
+func validatePlanGraph(tasks []PlanTask) ([][]int, []int, error) {
 	byName := map[string]int{}
 	for i, t := range tasks {
 		if t.Name == "" {
 			continue
 		}
 		if j, dup := byName[t.Name]; dup {
-			return nil, fmt.Errorf("task name %q is used by tasks %d and %d: names are unique in a plan", t.Name, j+1, i+1)
+			return nil, nil, fmt.Errorf("task name %q is used by tasks %d and %d: names are unique in a plan", t.Name, j+1, i+1)
 		}
 		byName[t.Name] = i
 	}
@@ -105,20 +110,29 @@ func validatePlanGraph(tasks []PlanTask) ([][]int, error) {
 		return fmt.Sprintf("task %d", i+1)
 	}
 	deps := make([][]int, len(tasks))
+	bases := make([]int, len(tasks))
 	for i, t := range tasks {
+		bases[i] = -1
 		seen := map[int]bool{}
 		for _, d := range t.Deps {
 			j, ok := byName[d]
 			switch {
 			case !ok:
-				return nil, fmt.Errorf("%s depends on %q, which names no task of this plan", label(i), d)
+				return nil, nil, fmt.Errorf("%s depends on %q, which names no task of this plan", label(i), d)
 			case j == i:
-				return nil, fmt.Errorf("%s depends on itself", label(i))
+				return nil, nil, fmt.Errorf("%s depends on itself", label(i))
 			}
 			if !seen[j] {
 				seen[j] = true
 				deps[i] = append(deps[i], j)
 			}
+		}
+		if t.Base != "" {
+			j, ok := byName[t.Base]
+			if !ok || !seen[j] {
+				return nil, nil, fmt.Errorf("%s has base %q, which is not one of its deps: a base is the name of a task it depends on", label(i), t.Base)
+			}
+			bases[i] = j
 		}
 	}
 	if c := findCycle(deps); c != nil {
@@ -126,9 +140,9 @@ func validatePlanGraph(tasks []PlanTask) ([][]int, error) {
 		for k, idx := range c {
 			names[k] = label(idx)
 		}
-		return nil, fmt.Errorf("dependency cycle: %s", strings.Join(names, " -> "))
+		return nil, nil, fmt.Errorf("dependency cycle: %s", strings.Join(names, " -> "))
 	}
-	return deps, nil
+	return deps, bases, nil
 }
 
 // findCycle searches a dependency graph (each node's dependencies as
@@ -184,7 +198,7 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 			return CreatePlanResult{}, fmt.Errorf("task %d: spec is required: the worker's task, verbatim (§1.4)", i+1)
 		}
 	}
-	deps, err := validatePlanGraph(tasks)
+	deps, bases, err := validatePlanGraph(tasks)
 	if err != nil {
 		return CreatePlanResult{}, err
 	}
@@ -272,8 +286,8 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 	}
 	for i, ds := range deps {
 		for _, j := range ds {
-			if _, err := tx.Exec(`INSERT INTO task_deps (plan_id, task_id, depends_on_task_id) VALUES (?, ?, ?)`,
-				planID, res.Tasks[i].TaskID, res.Tasks[j].TaskID); err != nil {
+			if _, err := tx.Exec(`INSERT INTO task_deps (plan_id, task_id, depends_on_task_id, is_base) VALUES (?, ?, ?, ?)`,
+				planID, res.Tasks[i].TaskID, res.Tasks[j].TaskID, bases[i] == j); err != nil {
 				return CreatePlanResult{}, fmt.Errorf("record the dependencies: %w", err)
 			}
 		}
@@ -309,6 +323,9 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 // job_created event and the task_spec message, as it does for the debug
 // submit.
 func (e *Engine) queueTaskWorkTx(tx *sql.Tx, project, taskID int64, spec string, now time.Time) (SubmitResult, error) {
+	if err := resolveBaseTx(tx, taskID, now); err != nil {
+		return SubmitResult{}, err
+	}
 	check, err := taskCheckTx(tx, taskID)
 	if err != nil {
 		return SubmitResult{}, err
@@ -321,6 +338,33 @@ func (e *Engine) queueTaskWorkTx(tx *sql.Tx, project, taskID int64, spec string,
 		Mode:      ModeFresh,
 		Prompt:    prompt.ComposeWorkerPrompt(spec, check, ""),
 	}, now)
+}
+
+// resolveBaseTx writes a task's base_ref when its work is queued (§6.1):
+// the final result branch of the dependency it stacks on, as the engine
+// recorded it on that task (a restart's -r<n> name included), so the
+// worktree starts from the dependency's work and the review's diff
+// base…branch shows only the task's own change. The stacked dependency
+// is the one named base, else the only one; with several and none named,
+// or with none, the row keeps the project's default branch it was
+// created with. A dependency that recorded no branch (a task that pushed
+// none) leaves the default branch too. Every path that readies a task —
+// creation, release, approval, amendment — queues through here.
+func resolveBaseTx(tx *sql.Tx, taskID int64, now time.Time) error {
+	var branch string
+	err := tx.QueryRow(`SELECT COALESCE(x.branch, '') FROM task_deps d JOIN tasks x ON x.id = d.depends_on_task_id
+		WHERE d.task_id = ? AND (d.is_base = 1 OR (SELECT COUNT(*) FROM task_deps o WHERE o.task_id = d.task_id) = 1)
+		ORDER BY d.is_base DESC LIMIT 1`, taskID).Scan(&branch)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && branch == "") {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read the base of task %d: %w", taskID, err)
+	}
+	if _, err := tx.Exec(`UPDATE tasks SET base_ref = ?, updated_at = ? WHERE id = ?`, branch, fmtTime(now), taskID); err != nil {
+		return fmt.Errorf("write the base of task %d: %w", taskID, err)
+	}
+	return nil
 }
 
 // releaseDependentsTx frees the tasks that waited on a task now done
