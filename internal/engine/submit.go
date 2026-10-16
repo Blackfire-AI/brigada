@@ -120,6 +120,19 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 	case p.Kind == KindReview && p.TaskID == 0 && p.Branch == "":
 		return SubmitResult{}, fmt.Errorf("a review without a task needs a branch")
 	}
+	if p.Kind == KindForeman {
+		// The common foreman submission boundary (§4.6): a headless turn
+		// starts only from a free slot, whoever asks — the wake, a manual
+		// submit or the admin path.
+		var held int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM interactive_holds WHERE project_id = ? AND state = 'live'`,
+			p.ProjectID).Scan(&held); err != nil {
+			return SubmitResult{}, fmt.Errorf("read the interactive holds of project %d: %w", p.ProjectID, err)
+		}
+		if held > 0 {
+			return SubmitResult{}, ErrSlotHeld
+		}
+	}
 	round, capped, err := e.roundCapReached(tx, p)
 	if err != nil {
 		return SubmitResult{}, err

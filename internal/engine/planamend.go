@@ -71,7 +71,7 @@ var ErrPlanNotLive = errors.New("plan is not live")
 // project scopes the plan to one project; 0 names any.
 func (e *Engine) AmendPlan(ctx context.Context, project, plan int64, am PlanAmendment) (AmendPlanResult, error) {
 	var res AmendPlanResult
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+	err := e.updateGuarded(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err

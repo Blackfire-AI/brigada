@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -65,10 +66,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/jobs", s.authed([]string{roleAdmin}, s.idempotent(s.handleSubmit)))
 	mux.HandleFunc("/v1/tasks", s.authed([]string{roleAdmin}, s.idempotent(s.handleTaskSubmit)))
 	mux.HandleFunc("/v1/tasks/{id}", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.handleTaskGet))
-	mux.HandleFunc("/v1/tasks/{id}/answer", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskAnswer)))
-	mux.HandleFunc("/v1/tasks/{id}/restart", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskRestart)))
-	mux.HandleFunc("/v1/plans", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handlePlanCreate)))
-	mux.HandleFunc("/v1/plans/{id}/amend", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handlePlanAmend)))
+	// Foreman mutations go through the hold fence (§4.6): a mode A
+	// credential must carry its fence, and a stale call is rejected before
+	// the idempotency wrapper can record anything.
+	mux.HandleFunc("/v1/tasks/{id}/answer", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.fenced(true, s.idempotent(s.handleTaskAnswer))))
+	mux.HandleFunc("/v1/tasks/{id}/restart", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.fenced(true, s.idempotent(s.handleTaskRestart))))
+	mux.HandleFunc("/v1/plans", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.fenced(true, s.idempotent(s.handlePlanCreate))))
+	mux.HandleFunc("/v1/plans/{id}/amend", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.fenced(true, s.idempotent(s.handlePlanAmend))))
 	// The user's yes or no on a plan over the approval limit (§6.3): no
 	// foreman role, the foreman never confirms its own plans.
 	mux.HandleFunc("/v1/plans/{id}/approve", s.authed([]string{roleClient, roleAdmin}, s.idempotent(s.handlePlanDecision(true))))
@@ -81,9 +85,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/foreman/release", s.authed([]string{roleClient, roleAdmin}, s.handleForemanRelease))
 	mux.HandleFunc("/v1/foreman/messages", s.authed([]string{roleClient, roleAdmin}, s.idempotent(s.handleForemanAsk)))
 	mux.HandleFunc("/v1/reviews", s.authed([]string{roleClient, roleAdmin}, s.idempotent(s.handleReview)))
-	mux.HandleFunc("/v1/events", s.authed([]string{roleForeman}, s.handleForemanEvents))
+	// The interactive hold (§4.6): the user's own session takes the slot
+	// with a client or admin token and then works with the credential it
+	// is given; release is the user's forced release of a stuck one.
+	mux.HandleFunc("/v1/foreman/hold/acquire", s.authed([]string{roleClient, roleAdmin}, s.handleHoldAcquire))
+	mux.HandleFunc("/v1/foreman/hold/heartbeat", s.authed([]string{roleForeman}, s.handleHoldHeartbeat))
+	mux.HandleFunc("/v1/foreman/hold/yield", s.authed([]string{roleForeman}, s.handleHoldYield))
+	mux.HandleFunc("/v1/foreman/hold/release", s.authed([]string{roleClient, roleAdmin}, s.handleHoldRelease))
+	mux.HandleFunc("/v1/events", s.authed([]string{roleForeman}, s.fenced(false, s.handleForemanEvents)))
 	mux.HandleFunc("/v1/jobs/{id}", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleJobGet))
-	mux.HandleFunc("/v1/jobs/{id}/cancel", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.idempotent(s.handleJobCancel)))
+	mux.HandleFunc("/v1/jobs/{id}/cancel", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.fenced(true, s.idempotent(s.handleJobCancel))))
 	mux.HandleFunc("/v1/admin/fence-epoch", s.authed([]string{roleAdmin}, s.idempotent(s.handleFenceEpoch)))
 	// The foreman's harness and model (§4.1): PUT chooses them, GET reads
 	// them back; the role sets differ per method, so the handler checks.
@@ -147,6 +158,11 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request, _ identity
 		return
 	}
 	res, err := s.eng.Submit(r.Context(), *p)
+	if errors.Is(err, engine.ErrSlotHeld) {
+		// A foreman turn only starts from a free slot (§4.6).
+		writeError(w, http.StatusConflict, codeHoldBusy, err.Error())
+		return
+	}
 	if err != nil {
 		// Submit's errors are caller mistakes (an empty key, a kind that
 		// needs no task, an unknown project or task), so they surface as

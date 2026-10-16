@@ -24,6 +24,20 @@ func StatusSections(st Status) string {
 	for _, a := range st.Cooling {
 		lines = append(lines, fmt.Sprintf("cooling: %s/%s until %s (account %s)", a.Harness, a.Model, a.Until, a.Account))
 	}
+	for _, sl := range st.Slots {
+		if sl.State == engine.SlotFree {
+			continue
+		}
+		line := fmt.Sprintf("foreman slot (project #%d): %s", sl.ProjectID, sl.State)
+		if sl.Label != "" {
+			line += fmt.Sprintf(" %q", sl.Label)
+		}
+		line += fmt.Sprintf(" #%d since %s", sl.HolderID, sl.Since)
+		if len(sl.Events) > 0 {
+			line += fmt.Sprintf(", carrying %d event(s)", len(sl.Events))
+		}
+		lines = append(lines, line)
+	}
 	for _, h := range st.Held {
 		what := fmt.Sprintf("job #%d", h.ID)
 		if h.TaskID != 0 {

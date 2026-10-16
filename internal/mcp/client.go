@@ -107,6 +107,8 @@ func askOutcome(res engine.AskResult) string {
 		return fmt.Sprintf("is the same message sent to the foreman of project %d moments ago; it was not queued again", p)
 	case engine.WakeNothing:
 		return fmt.Sprintf("queued for the foreman of project %d: nothing was pending to wake it for", p)
+	case engine.WakeHeld:
+		return fmt.Sprintf("queued for the foreman of project %d: your own session holds it, and reads the message on its next events call", p)
 	case engine.WakeTurnRunning:
 		return fmt.Sprintf("queued for the foreman of project %d: a foreman turn is running, and the next turn carries it", p)
 	case engine.WakeNoForeman:

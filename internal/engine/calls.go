@@ -475,7 +475,7 @@ func (e *Engine) releaseTx(tx *sql.Tx, owner, jobID int64, leaseID, reason strin
 // carries no lease, so a client may cancel through a recover (§6.4).
 func (e *Engine) Cancel(ctx context.Context, jobID int64) (Answer, error) {
 	var ans Answer
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+	err := e.updateGuarded(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
