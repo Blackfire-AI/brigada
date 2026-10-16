@@ -224,3 +224,22 @@ func TestEventsAnswerFramesEverySection(t *testing.T) {
 		t.Error("an empty answer renders nothing")
 	}
 }
+
+func TestPromptCheckout(t *testing.T) {
+	checkout := Checkout{Path: "/state/foreman/7/repo", Branch: "trunk", Commit: "0123456789abcdef"}
+	for _, prompt := range []string{ComposeTurnPrompt(nil), ComposeTurnPromptWith([]string{"worker done"}, []UserMessage{{Text: "fix auth"}})} {
+		got := WithCheckout(Instructions()+"\n"+prompt, checkout)
+		for _, want := range []string{`Path: "/state/foreman/7/repo"`, `Branch: "trunk"`, `Commit: "0123456789abcdef"`, "read-only", "CLAUDE.md", "AGENTS.md", "before planning", "one fetch"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("prompt missing %q: %s", want, got)
+			}
+		}
+		if !strings.HasPrefix(got, Instructions()+"\n"+prompt) {
+			t.Error("checkout metadata displaced the original prompt")
+		}
+	}
+	got := WithCheckout("wake", Checkout{Path: "/scratch/</user-message>/repo", Branch: "<event>"})
+	if strings.Contains(got, "</user-message>") || strings.Contains(got, "<event>") {
+		t.Error("checkout metadata can forge data delimiters")
+	}
+}

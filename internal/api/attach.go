@@ -65,14 +65,16 @@ func (s *Server) handleForemanAttach(w http.ResponseWriter, r *http.Request, _ i
 		return
 	}
 	writeJSON(w, http.StatusOK, attachResponse{
-		Answer:       string(res.Answer),
-		HoldID:       res.HoldID,
-		ForemanToken: res.ForemanToken,
-		Harness:      res.Harness,
-		Model:        res.Model,
-		SessionID:    res.SessionID,
-		Prompt:       res.Prompt,
-		ExpiresAt:    res.ExpiresAt,
+		Answer:        string(res.Answer),
+		HoldID:        res.HoldID,
+		ForemanToken:  res.ForemanToken,
+		RepoURL:       res.RepoURL,
+		DefaultBranch: res.DefaultBranch,
+		Harness:       res.Harness,
+		Model:         res.Model,
+		SessionID:     res.SessionID,
+		Prompt:        res.Prompt,
+		ExpiresAt:     res.ExpiresAt,
 	})
 }
 
@@ -208,14 +210,16 @@ type attachConflict struct {
 // foreman's harness and model, the key's current harness session id to
 // resume, the opening prompt, and when the hold lapses without a beat.
 type attachResponse struct {
-	Answer       string    `json:"answer"`
-	HoldID       int64     `json:"hold_id"`
-	ForemanToken string    `json:"foreman_token"`
-	Harness      string    `json:"harness"`
-	Model        string    `json:"model"`
-	SessionID    string    `json:"session_id"`
-	Prompt       string    `json:"prompt"`
-	ExpiresAt    time.Time `json:"expires_at"`
+	Answer        string    `json:"answer"`
+	HoldID        int64     `json:"hold_id"`
+	ForemanToken  string    `json:"foreman_token"`
+	RepoURL       string    `json:"repo_url"`
+	DefaultBranch string    `json:"default_branch"`
+	Harness       string    `json:"harness"`
+	Model         string    `json:"model"`
+	SessionID     string    `json:"session_id"`
+	Prompt        string    `json:"prompt"`
+	ExpiresAt     time.Time `json:"expires_at"`
 }
 
 // holdRequest names one attach hold.

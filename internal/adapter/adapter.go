@@ -62,6 +62,9 @@ type Job struct {
 	// the `brigada mcp` bridge (§12.2) will hand the foreman's harness
 	// brigada's tool server; empty — every job today — adds nothing.
 	MCPConfig string
+	// ReadOnlyRepo is the foreman checkout the harness may inspect.
+	// Claude adds it to its read scope; Codex reads the path from the prompt.
+	ReadOnlyRepo string
 	// StatusLine is a shell command whose one line of output an
 	// interactive session shows in its status bar, re-run every few
 	// seconds (§10): the attach sets it to `brigada status --line`, so

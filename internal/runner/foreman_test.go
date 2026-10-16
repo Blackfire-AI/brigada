@@ -26,9 +26,11 @@ import (
 // setForeman points the project's foreman at a harness and model.
 func (e *testEnv) setForeman(harness, model string) {
 	e.t.Helper()
+	// Older fixtures seed no URL; every foreman now needs code to read.
+	repo := newRemote(e.t)
 	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
-		_, err := tx.Exec("UPDATE projects SET foreman_harness = ?, foreman_model = ? WHERE id = ?",
-			harness, model, e.project)
+		_, err := tx.Exec("UPDATE projects SET foreman_harness = ?, foreman_model = ?, repo_url = COALESCE(NULLIF(repo_url, ''), ?) WHERE id = ?",
+			harness, model, repo, e.project)
 		return err
 	})
 	if err != nil {
@@ -83,12 +85,20 @@ echo '{"type":"result","text":"answered the worker; the plan stands"}'
 
 // TestRunnerForemanTurnRunsInScratchDir is the turn's happy path (§4,
 // §4.2 item 2, §5.4): the foreman wakes headless, runs in the project's
-// scratch directory — no repo, no worktree, no check — and a clean exit
-// without any result block completes the job as done with the final
+// scratch directory, with a reading repo but no task worktree or check.
+// A clean exit without any result block completes the job as done with the final
 // message as its summary.
 func TestRunnerForemanTurnRunsInScratchDir(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
-	e.seedProject("") // a project with no repo: a foreman turn never needs one
+	remote := newRemote(t)
+	git(t, "", "--git-dir", strings.TrimPrefix(remote, "file://"), "branch", "project-default", "main")
+	e.seedProject(remote)
+	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE projects SET default_branch = 'project-default' WHERE id = ?", e.project)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	e.setForeman("fake", "fake-1")
 	turn := e.submitForemanTurn("the worker of task 7 asked: should I split the CLI from the parser?")
 	markers := markerDir(t)
@@ -139,6 +149,18 @@ func TestRunnerForemanTurnRunsInScratchDir(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "<event>\nthe worker of task 7 asked: should I split the CLI from the parser?\n</event>") {
 		t.Errorf("the wake event is not verbatim in the prompt:\n%s", prompt)
+	}
+
+	repoDir := filepath.Join(e.foremanScratch(), "repo")
+	head := strings.TrimSpace(git(t, repoDir, "rev-parse", "HEAD"))
+	wantHead := strings.TrimSpace(git(t, "", "--git-dir", strings.TrimPrefix(remote, "file://"), "rev-parse", "project-default"))
+	if head != wantHead || strings.TrimSpace(git(t, repoDir, "branch", "--show-current")) != "project-default" {
+		t.Fatalf("checkout is not at the project's default branch head: %s, want %s", head, wantHead)
+	}
+	for _, line := range []string{repoDir, `Branch: "project-default"`, head} {
+		if !strings.Contains(prompt, line) {
+			t.Errorf("prompt missing checkout metadata %q", line)
+		}
 	}
 
 	// The key's first turn: nothing to resume.
@@ -226,7 +248,7 @@ func TestRunnerForemanTurnCoalescesAndResumes(t *testing.T) {
 // transcript.
 func TestRunnerForemanTurnTimeCapped(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
-	e.seedProject("") // a project with no repo: a foreman turn never needs one
+	e.seedProject("") // setForeman supplies the reading repo
 	e.setForeman("fake", "fake-1")
 	turn := e.submitForemanTurn("a wake that outstays its welcome")
 	markerDir(t)
@@ -654,5 +676,92 @@ func TestRunnerKeepsForemanTokenInMemory(t *testing.T) {
 		}
 	} else {
 		t.Error("the turn left no transcript artifact to check")
+	}
+}
+
+func TestRunnerForemanCheckoutRefreshes(t *testing.T) {
+	e := newTestEnv(t, engine.Config{})
+	remote := newRemote(t)
+	e.seedProject(remote)
+	e.setForeman("fake", "fake-1")
+	markers := markerDir(t)
+	if err := os.WriteFile(filepath.Join(markers, "release"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first := e.submitForemanTurn("first read")
+	p := e.startRunner(writeWorkerScript(t, turnWorker), 100*time.Millisecond)
+	defer p.stop(t)
+	e.waitJob(first.JobID, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	repo := filepath.Join(e.foremanScratch(), "repo")
+	old := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+	seed := t.TempDir()
+	git(t, "", "clone", "--branch", "main", remote, seed)
+	if err := os.WriteFile(filepath.Join(seed, "auth.txt"), []byte("updated code"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, seed, "add", ".")
+	git(t, seed, "-c", "user.name=test", "-c", "user.email=test@brigada.invalid", "commit", "-m", "remote moved")
+	git(t, seed, "push", "origin", "main")
+	want := strings.TrimSpace(git(t, seed, "rev-parse", "HEAD"))
+	// Preparation discards stale changes and files without touching the
+	// session's own records in scratch.
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "untracked.txt"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second := e.submitForemanTurn("read again")
+	e.waitJob(second.JobID, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	got := strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
+	if got != want || got == old {
+		t.Fatalf("checkout = %s, want new head %s (old %s)", got, want, old)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "untracked.txt")); !os.IsNotExist(err) {
+		t.Errorf("stale file survived refresh: %v", err)
+	}
+	if !strings.Contains(e.scratchFile("prompt.txt"), want) {
+		t.Error("second prompt did not name the refreshed commit")
+	}
+	if strings.TrimSpace(e.scratchFile("resume.txt")) != "foreman-sess-1" {
+		t.Error("refresh lost the session")
+	}
+}
+
+func TestRunnerForemanCheckoutGitFailure(t *testing.T) {
+	for _, fetch := range []bool{false, true} {
+		name := "clone"
+		if fetch {
+			name = "fetch"
+		}
+		t.Run(name, func(t *testing.T) {
+			e := newTestEnv(t, engine.Config{})
+			remote := newRemote(t)
+			e.seedProject(remote)
+			e.setForeman("fake", "fake-1")
+			if fetch {
+				scratch, err := ForemanScratchDir(e.stateDir, e.project)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := PrepareForemanCheckout(e.ctx, scratch, remote, "main", nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Rename(strings.TrimPrefix(remote, "file://"), strings.TrimPrefix(remote, "file://")+"-gone"); err != nil {
+				t.Fatal(err)
+			}
+			turn := e.submitForemanTurn("cannot read the repo")
+			p := e.startRunner(writeWorkerScript(t, turnWorker), 100*time.Millisecond)
+			defer p.stop(t)
+			failed := e.waitJob(turn.JobID, func(j *engine.JobInfo) bool { return j.Status == "failed" })
+			reason := e.errorResult(failed)
+			if !strings.Contains(reason, name) || !strings.Contains(reason, "does not appear to be a git repository") {
+				t.Errorf("failure = %s, want %s and the git reason", reason, name)
+			}
+			if _, err := os.Stat(filepath.Join(e.foremanScratch(), "where.txt")); !os.IsNotExist(err) {
+				t.Errorf("CLI started without code: %v", err)
+			}
+		})
 	}
 }

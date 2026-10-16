@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
+	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
 	"github.com/Blackfire-AI/brigada/internal/adapter/fake"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
@@ -782,5 +783,50 @@ func TestStatusLineCommandAbsolutePaths(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("status line command = %s, want it to carry %s", got, want)
 		}
+	}
+}
+
+func TestAttachClaudeAddsReadingCheckout(t *testing.T) {
+	remote := testsupport.NewGitRemote(t)
+	cloneRemote(t, remote)
+	e := newAttachEnv(t, remote, "claude", "sonnet")
+	script := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\0' \"$@\" > argv.txt\npwd > where.txt\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := adapterForAttach
+	adapterForAttach = func(harness string) (adapter.Adapter, bool) {
+		return &claude.Adapter{Binary: script}, harness == "claude"
+	}
+	t.Cleanup(func() { adapterForAttach = orig })
+	_, errOut, done := e.runAttachCmd(t)
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("attach exit %d: %s", code, errOut.String())
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("attach did not end")
+	}
+	scratch := e.scratch(t)
+	repo := filepath.Join(scratch, "repo")
+	argv := strings.Split(e.scratchFile(t, "argv.txt"), "\x00")
+	i := slices.Index(argv, "--add-dir")
+	if i < 0 || i+1 >= len(argv) || argv[i+1] != repo {
+		t.Fatalf("attach lacks --add-dir %s: %v", repo, argv)
+	}
+	if !strings.Contains(argv[0], repo) || !strings.Contains(argv[0], `Branch: "main"`) {
+		t.Errorf("opening prompt lacks checkout: %s", argv[0])
+	}
+	if _, err := os.Stat(filepath.Join(repo, "README.md")); err != nil {
+		t.Fatal(err)
+	}
+	where, err := filepath.EvalSymlinks(e.scratchFile(t, "where.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(scratch)
+	if err != nil || where != want {
+		t.Errorf("cwd = %s, want %s: %v", where, want, err)
 	}
 }

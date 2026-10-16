@@ -31,12 +31,14 @@ type AttachResult struct {
 	JobID  int64 // a busy answer names the live foreman turn, when that made it busy
 	// ForemanToken is the hold-scoped foreman token (§12.1): it works
 	// while the hold lives and dies with the hold. Empty on busy.
-	ForemanToken string
-	Harness      string
-	Model        string
-	SessionID    string // the key's current harness session id; '' = none
-	Prompt       string // the opening prompt
-	ExpiresAt    time.Time
+	ForemanToken  string
+	RepoURL       string
+	DefaultBranch string
+	Harness       string
+	Model         string
+	SessionID     string // the key's current harness session id; '' = none
+	Prompt        string // the opening prompt
+	ExpiresAt     time.Time
 }
 
 // Attach takes the foreman's key for the user's interactive session with
@@ -67,9 +69,9 @@ func (e *Engine) Attach(ctx context.Context, project int64, force bool) (AttachR
 }
 
 func (e *Engine) attachTx(tx *sql.Tx, project int64, force bool, now time.Time) (AttachResult, error) {
-	var harness, model string
-	err := tx.QueryRow("SELECT foreman_harness, foreman_model FROM projects WHERE id = ?", project).
-		Scan(&harness, &model)
+	var harness, model, repo, branch string
+	err := tx.QueryRow("SELECT foreman_harness, foreman_model, repo_url, default_branch FROM projects WHERE id = ?", project).
+		Scan(&harness, &model, &repo, &branch)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return AttachResult{}, fmt.Errorf("no such project %d", project)
@@ -110,10 +112,12 @@ func (e *Engine) attachTx(tx *sql.Tx, project int64, force bool, now time.Time) 
 		}
 	}
 	res := AttachResult{
-		Answer:    AnsCreated,
-		Harness:   harness,
-		Model:     model,
-		ExpiresAt: now.Add(attachHoldTTL),
+		Answer:        AnsCreated,
+		RepoURL:       repo,
+		DefaultBranch: branch,
+		Harness:       harness,
+		Model:         model,
+		ExpiresAt:     now.Add(attachHoldTTL),
 	}
 	resHold, err := tx.Exec(`INSERT INTO attach_holds (project_id, state, expires_at, created_at) VALUES (?, 'live', ?, ?)`,
 		project, fmtTime(res.ExpiresAt), fmtTime(now))

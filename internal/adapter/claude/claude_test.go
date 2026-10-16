@@ -3,6 +3,7 @@ package claude
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -730,6 +731,41 @@ func TestSessionLimit(t *testing.T) {
 			if ev.LimitUntil != tc.until {
 				t.Errorf("%s/%s: LimitUntil = %q, want %q", tc.name, name, ev.LimitUntil, tc.until)
 			}
+		}
+	}
+}
+
+func TestForemanReadingCheckout(t *testing.T) {
+	stubCLI(t)
+	ad := &Adapter{PermissionMode: "bypassPermissions"}
+	job := adapter.Job{MCPConfig: "/runner/mcp/config.json", ReadOnlyRepo: "/runner/foreman/1/repo"}
+	headless, err := ad.Command(job, "/runner/foreman/1", "saved")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attached, err := ad.AttachCommand(job, "/runner/foreman/1", "saved", "new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cmd := range []*exec.Cmd{headless, attached} {
+		i := slices.Index(cmd.Args, "--add-dir")
+		if i < 0 || i+1 >= len(cmd.Args) || cmd.Args[i+1] != job.ReadOnlyRepo {
+			t.Errorf("missing reading scope: %v", cmd.Args)
+		}
+		i = slices.Index(cmd.Args, "--disallowedTools")
+		if i < 0 {
+			t.Fatalf("missing edit denials: %v", cmd.Args)
+		}
+		for _, denied := range []string{"Bash", "Edit", "NotebookEdit", "Write"} {
+			if !slices.Contains(cmd.Args[i+1:], denied) {
+				t.Errorf("%s no longer denied: %v", denied, cmd.Args)
+			}
+		}
+		if !slices.Contains(cmd.Env, "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1") {
+			t.Error("additional CLAUDE.md loading disabled")
+		}
+		if cmd.Dir != "/runner/foreman/1" {
+			t.Errorf("session cwd changed: %s", cmd.Dir)
 		}
 	}
 }

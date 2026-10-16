@@ -14,6 +14,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/foreman"
 	"github.com/Blackfire-AI/brigada/internal/mcp"
 )
 
@@ -21,7 +22,7 @@ import (
 // foreman is a worker on the same machinery — the same adapters, the
 // same session resume on the key, the same stall watch and class caps,
 // the same transcript — without the task worker's material side. No
-// workspace is made: no repo to clone, no worktree, no branch to push,
+// task workspace is made: a reading checkout, no branch to push,
 // no check to run (§4: the foreman job is excluded from the runner's
 // checks). The turn runs in the project's scratch directory and is
 // exempt from the result contract (§5.4): a clean exit completes the
@@ -32,6 +33,13 @@ func (r *jobRun) runForemanTurn(ctx context.Context) {
 		r.finishWithError(ctx, "make the foreman's scratch directory: "+err.Error())
 		return
 	}
+	checkout, err := PrepareForemanCheckout(ctx, dir, r.grant.RepoURL, r.grant.BaseRef, r.cfg.GitEnv)
+	if err != nil {
+		r.finishWithError(ctx, "prepare the foreman checkout: "+err.Error())
+		return
+	}
+	r.foremanRepo = checkout.Path
+	r.grant.Prompt = foreman.WithCheckout(r.grant.Prompt, checkout)
 	r.cfg.Log.InfoContext(ctx, "foreman turn", "job_id", r.grant.JobID, "key", r.grant.Key, "dir", dir)
 	// The MCP config is decided before the worker starts, where the
 	// bridge's file would reach the adapter's command. A turn whose

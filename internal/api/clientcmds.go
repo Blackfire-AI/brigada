@@ -397,15 +397,17 @@ func (c *Client) ForemanEvents(ctx context.Context, wait time.Duration) (engine.
 // or the live hold's id — so the caller can wait one out and refuse
 // the other without parsing words.
 type AttachResult struct {
-	Answer       engine.Answer
-	HoldID       int64 // the created hold; a busy answer names the live hold
-	JobID        int64 // a busy answer names the live foreman turn; 0 otherwise
-	ForemanToken string
-	Harness      string
-	Model        string
-	SessionID    string // the key's current harness session id; '' = none
-	Prompt       string // the opening prompt
-	ExpiresAt    time.Time
+	Answer        engine.Answer
+	HoldID        int64 // the created hold; a busy answer names the live hold
+	JobID         int64 // a busy answer names the live foreman turn; 0 otherwise
+	ForemanToken  string
+	RepoURL       string
+	DefaultBranch string
+	Harness       string
+	Model         string
+	SessionID     string // the key's current harness session id; '' = none
+	Prompt        string // the opening prompt
+	ExpiresAt     time.Time
 }
 
 // Attach takes the foreman's key for an attached chat (§4.2 item 1),
@@ -428,14 +430,16 @@ func (c *Client) Attach(ctx context.Context, repoURL string, force bool) (Attach
 		return AttachResult{}, err
 	}
 	return AttachResult{
-		Answer:       engine.Answer(out.Answer),
-		HoldID:       out.HoldID,
-		ForemanToken: out.ForemanToken,
-		Harness:      out.Harness,
-		Model:        out.Model,
-		SessionID:    out.SessionID,
-		Prompt:       out.Prompt,
-		ExpiresAt:    out.ExpiresAt,
+		Answer:        engine.Answer(out.Answer),
+		HoldID:        out.HoldID,
+		ForemanToken:  out.ForemanToken,
+		RepoURL:       out.RepoURL,
+		DefaultBranch: out.DefaultBranch,
+		Harness:       out.Harness,
+		Model:         out.Model,
+		SessionID:     out.SessionID,
+		Prompt:        out.Prompt,
+		ExpiresAt:     out.ExpiresAt,
 	}, nil
 }
 

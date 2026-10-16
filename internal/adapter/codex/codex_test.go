@@ -119,7 +119,7 @@ func TestCommandMCPConfig(t *testing.T) {
 		t.Fatalf("Command: %v", err)
 	}
 	args := strings.Join(cmd.Args[1:], " ")
-	if !strings.Contains(args, "--approve-for-me") || !strings.Contains(args, "--skip-git-repo-check") || strings.Contains(args, " -s ") || !strings.Contains(args, `mcp_servers.brigada.command="/bin/brigada"`) || !strings.Contains(args, `mcp_servers.brigada.args=["mcp","--socket","/tmp/sock"]`) || !strings.Contains(args, `mcp_servers.brigada.env={BRIGADA_TOKEN="secret"}`) {
+	if strings.Contains(args, "--approve-for-me") || !strings.Contains(args, "--skip-git-repo-check") || !strings.Contains(args, "-s read-only") || !strings.Contains(args, `approvals_reviewer="auto_review"`) || !strings.Contains(args, "sandbox_approval=false") || !strings.Contains(args, "request_permissions=false") || !strings.Contains(args, "mcp_elicitations=true") || !strings.Contains(args, `mcp_servers.brigada.command="/bin/brigada"`) || !strings.Contains(args, `mcp_servers.brigada.args=["mcp","--socket","/tmp/sock"]`) || !strings.Contains(args, `mcp_servers.brigada.env={BRIGADA_TOKEN="secret"}`) {
 		t.Errorf("foreman args = %q", args)
 	}
 }
@@ -423,5 +423,27 @@ func TestAttachCommandGolden(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAttachReadingCheckoutIsReadOnly(t *testing.T) {
+	stubCLI(t)
+	cmd, err := (&Adapter{}).AttachCommand(adapter.Job{Prompt: "read code", ReadOnlyRepo: "/state/foreman/1/repo"}, "/state/foreman/1", "saved", "new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(cmd.Args, " ")
+	for _, want := range []string{"-s read-only", `approvals_reviewer="auto_review"`, "sandbox_approval=false", "request_permissions=false", "mcp_elicitations=true"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("missing %s: %v", want, cmd.Args)
+		}
+	}
+	for _, bad := range []string{"--approve-for-me", "--add-dir", "--dangerously-bypass-approvals-and-sandbox"} {
+		if slices.Contains(cmd.Args, bad) {
+			t.Errorf("unsafe flag %s: %v", bad, cmd.Args)
+		}
+	}
+	if cmd.Dir != "/state/foreman/1" {
+		t.Errorf("session cwd changed: %s", cmd.Dir)
 	}
 }
