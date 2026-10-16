@@ -69,12 +69,6 @@ type yamlValue struct {
 
 var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// ParseProjectConfig parses and validates a project.yaml. Anything but
-// schema 1's keys is refused with the key named: an unknown key, an
-// unknown schema version, a value of the wrong type, a repo that is not
-// in canonical form. The YAML is a strict subset (top-level keys with a
-// scalar, a flow list or a block list), the same hand-rolled kind the
-
 // configSettingKeys are the project settings schema 1 of the shared file
 // may carry (§13.1): the approval limit, the default check and the worker
 // tool policy, and nothing else. It is its own list, never SettingKeys:
@@ -83,6 +77,11 @@ var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingDefaultCheck, SettingWorkerTools}
 
+// ParseProjectConfig parses and validates a project.yaml. Anything but
+// schema 1's keys is refused with the key named: an unknown key, an
+// unknown schema version, a value of the wrong type, a repo that is not
+// in canonical form. The YAML is a strict subset (top-level keys with a
+// scalar, a flow list or a block list), the same hand-rolled kind the
 // plan files use, so the engine takes no dependency for it.
 func ParseProjectConfig(content []byte) (ProjectConfig, error) {
 	if len(content) > maxProjectConfigBytes {
