@@ -187,31 +187,39 @@ func (e *Engine) wakeOutcomeTx(tx *sql.Tx, project int64, now time.Time) (WakeOu
 	// The day's budget counts every foreman job of the project since UTC
 	// midnight — the turns this engine wakes and a person's manual submits
 	// alike (§4.3) — so a hand-submitted turn spends the same budget it
-	// bounds.
-	dayStart := fmtTime(now.Truncate(24 * time.Hour))
+	// bounds. The budget itself is the project's foreman_wakes_per_day
+	// setting, else the engine's configured default.
+	dayStart, dayEnd := wakeDayBounds(now)
+	dayStartText := fmtTime(dayStart)
 	var wakes int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind = ? AND created_at >= ?`,
-		project, KindForeman, dayStart).Scan(&wakes); err != nil {
+		project, KindForeman, dayStartText).Scan(&wakes); err != nil {
 		return "", fmt.Errorf("count the day's foreman turns of project %d: %w", project, err)
 	}
 	carriesUser, err := pendingUserMessagesTx(tx, project)
 	if err != nil {
 		return "", err
 	}
+	budget, _, err := e.foremanWakeBudgetTx(tx, project)
+	if err != nil {
+		return "", err
+	}
 	// A wake that carries a user message is not charged (§4.3, §4.2 item
 	// 3): the budget bounds the foreman reacting on its own, and a user
 	// asking is as attended as a chat.
-	if wakes >= e.cfg.ForemanWakeBudget && carriesUser == 0 {
-		// The budget is spent (§4.3): at most one event says so per project
-		// per day, and the events stay pending for the next day or a raise.
+	if wakes >= budget && carriesUser == 0 {
+		// The budget is spent (§4.3): at most one event says so per
+		// project per budget window, carrying the count and the window's
+		// end — the notification and the needs-you entry read it (§10) —
+		// and the events stay pending for the next day or a raise.
 		var spent int
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = ? AND project_id = ? AND created_at >= ?`,
-			evForemanWakeBudgetSpent, project, dayStart).Scan(&spent); err != nil {
+			evForemanWakeBudgetSpent, project, dayStartText).Scan(&spent); err != nil {
 			return "", fmt.Errorf("read the budget-spent events of project %d: %w", project, err)
 		}
 		if spent == 0 {
 			if _, err := appendEventTx(tx, evForemanWakeBudgetSpent, project, 0, 0,
-				eventPayload{Count: int64(e.cfg.ForemanWakeBudget)}, now); err != nil {
+				eventPayload{Count: int64(budget), Until: fmtTime(dayEnd)}, now); err != nil {
 				return "", err
 			}
 		}

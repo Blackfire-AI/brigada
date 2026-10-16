@@ -214,6 +214,14 @@ func (e *Engine) status(ctx context.Context, project int64, withText bool) (Stat
 		if info.NeedsYou, err = statusNeedsYouTx(tx, project, now); err != nil {
 			return err
 		}
+		// A wake the day's budget holds is its own entry (§4.3): the
+		// limited-foreman line above says the CLI's limit; this one says
+		// the budget spent, and what to do about it.
+		budgetItems, err := e.statusWakeBudgetTx(tx, project, now)
+		if err != nil {
+			return err
+		}
+		info.NeedsYou = append(info.NeedsYou, budgetItems...)
 		if info.Cooling, err = statusCoolingTx(tx, now); err != nil {
 			return err
 		}

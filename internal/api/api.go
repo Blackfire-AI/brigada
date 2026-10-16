@@ -105,6 +105,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/projects", s.authed([]string{roleClient, roleAdmin}, s.handleProjectList))
 	// The project's editable settings (§6.3): PUT sets, GET reads.
 	mux.HandleFunc("/v1/projects/settings", s.authed(nil, s.handleProjectSettings))
+	// The foreman wake budget (§4.3): GET reads it, PUT sets it and
+	// re-evaluates the waiting wake.
+	mux.HandleFunc("/v1/budget", s.authed(nil, s.handleBudget))
 	// Explicit import of the repo's .brigada/project.yaml (§13.1): the
 	// client sends the file's content.
 	mux.HandleFunc("/v1/projects/import", s.authed([]string{roleClient, roleAdmin}, s.idempotent(s.handleProjectImport)))

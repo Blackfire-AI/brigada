@@ -67,6 +67,9 @@ Commands:
 	                Approve a plan waiting over the approval limit (§6.3).
 	plan reject <id>
 	                Reject such a plan and cancel its tasks.
+	budget [--repo URL] [--wakes N]
+	                Show the project's foreman wake budget: today's use
+	                and the reset time; --wakes sets it (§4.3).
 	cancel <job>    Cancel a job.
 	recover         Rebuild a lost store from the newest snapshot and the
 	                plan files; the engine must be stopped (§6.4).
@@ -109,6 +112,7 @@ var commands = map[string]command{
 	"cancel":  {name: "cancel", run: runCancel},
 	"agent":   {name: "agent", run: runAgent},
 	"plan":    {name: "plan", run: runPlan},
+	"budget":  {name: "budget", run: runBudget},
 	"recover": {name: "recover", run: runRecover},
 	"diff":    {name: "diff", run: runDiff},
 	"land":    {name: "land", run: runLand},

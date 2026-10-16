@@ -126,9 +126,18 @@ func ParseProjectConfig(content []byte) (ProjectConfig, error) {
 	}
 	valid := append([]string{configKeySchema, configKeyRepo, configKeyInstructionsFile}, configSettingKeys...)
 	for _, k := range order {
-		if !slicesContains(valid, k) {
-			return ProjectConfig{}, configErr("unknown key %q (line %d); valid keys: %s", k, entries[k].line, strings.Join(valid, ", "))
+		if slicesContains(valid, k) {
+			continue
 		}
+		// A local-only setting (a key of `project set`, not of the
+		// shared file) is refused by name, so the fix is on the line:
+		// the file is shared with every clone, and these keys are one
+		// engine's own.
+		if slicesContains(SettingKeys, k) {
+			return ProjectConfig{}, configErr("%s (line %d) is a local-only setting of this engine's store, not a key of the shared file; set it with %s",
+				k, entries[k].line, localSettingHint(k))
+		}
+		return ProjectConfig{}, configErr("unknown key %q (line %d); valid keys: %s", k, entries[k].line, strings.Join(valid, ", "))
 	}
 	cfg := ProjectConfig{Values: map[string]json.RawMessage{}}
 	rv, ok := entries[configKeyRepo]
@@ -198,6 +207,15 @@ func slicesContains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// localSettingHint names the command that sets one local-only setting,
+// so a refusal of it in project.yaml says what to run instead.
+func localSettingHint(key string) string {
+	if key == SettingForemanWakesPerDay {
+		return "`brigada budget --repo <url> --wakes N`"
+	}
+	return "`brigada project set " + key + "=<value>`"
 }
 
 // settingText turns a file value into the command-line spelling the shared
@@ -496,6 +514,15 @@ func rawString(raw json.RawMessage) (string, bool) {
 	return s, true
 }
 
+// rawInt reads a stored JSON number.
+func rawInt(raw json.RawMessage) (int, bool) {
+	var n int
+	if raw == nil || json.Unmarshal(raw, &n) != nil {
+		return 0, false
+	}
+	return n, true
+}
+
 // renderSettingRaw shows a stored value the way project show does.
 func renderSettingRaw(key string, raw json.RawMessage) string {
 	if raw == nil {
@@ -717,7 +744,7 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 		if _, err := tx.Exec("UPDATE projects SET settings = ?, settings_prov = ?, updated_at = ? WHERE id = ?", string(b), pb, fmtTime(now), project); err != nil {
 			return fmt.Errorf("store the settings of project %d: %w", project, err)
 		}
-		v, err := settingsViewTx(tx, project, shownRepo)
+		v, err := settingsViewTx(tx, project, shownRepo, e.cfg.ForemanWakeBudget)
 		if err != nil {
 			return err
 		}

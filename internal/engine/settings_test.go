@@ -2,6 +2,7 @@ package engine
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -70,6 +71,7 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingExtraRepos, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingHoldIdleMinutes, Value: "15", Default: true, Source: SourceDefault},
 		{Key: SettingHoldMaxMinutes, Value: "240", Default: true, Source: SourceDefault},
+		{Key: SettingForemanWakesPerDay, Value: "20", Default: true, Source: SourceDefault},
 		{Key: SettingInstructions, Value: "none", Default: true, Source: SourceDefault},
 	}
 	if len(got.Settings) != len(want) {
@@ -102,6 +104,8 @@ func TestSetProjectSettingsRefusals(t *testing.T) {
 		{SettingApprovalClasses: "has space"},
 		{SettingApprovalProtectedPaths: "bad[glob"},
 		{SettingApprovalMaxTasks: "2", "nope": "1"},
+		{SettingForemanWakesPerDay: "0"},
+		{SettingForemanWakesPerDay: strconv.Itoa(MaxForemanWakesPerDay + 1)},
 	} {
 		_, err := e.eng.SetProjectSettings(e.ctx, envRepo, values)
 		if !errors.Is(err, ErrInvalidSetting) {

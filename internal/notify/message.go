@@ -8,22 +8,22 @@ import (
 
 // The event kinds the engine's log can carry that wake the user (§10).
 // The set is the notification vocabulary: a plan finishing, the
-// foreman's report after a headless turn, and the reasons a task parks
-// at needs_foreman — the same kinds the "needs you" queue reads in
-// `brigada status`. Kinds the engine adds later (the foreman's limit
-// and budget-out, §4.4, §4.3) slot into the table below; everything
-// else in the log never notifies.
+// foreman's report after a headless turn, the foreman's limit and its
+// budget out (§4.4, §4.3), and the reasons a task parks at
+// needs_foreman — the same kinds the "needs you" queue reads in
+// `brigada status`. Everything else in the log never notifies.
 const (
-	KindPlanDone        = "plan_done"          // the plan's last open task finished (§6.2)
-	KindTaskCheckFailed = "task_check_failed"  // the check failed; the task waits for the foreman (§3)
-	KindTaskNeedsHelp   = "task_needs_help"    // the worker asked its question (§3)
-	KindTaskFailed      = "task_failed"        // the run failed; the foreman decides (§3)
-	KindReviewChanges   = "review_changes"     // the reviewer wants changes (§7)
-	KindReviewNoVerdict = "review_no_verdict"  // the review ended without a usable verdict (§7)
-	KindTaskOutOfRounds = "task_out_of_rounds" // the task spent its rounds; arrives with the rounds work
-	KindForemanReport   = "foreman_report"     // a done foreman turn's final message, its report to the user (§3, §10)
-	KindForemanLimited  = "foreman_limited"    // the foreman's CLI hit its subscription limit (§4.4, §10)
-	KindAgentBroken     = "agent_broken"       // an agent was marked broken (§8 "Health", §10)
+	KindPlanDone               = "plan_done"                 // the plan's last open task finished (§6.2)
+	KindTaskCheckFailed        = "task_check_failed"         // the check failed; the task waits for the foreman (§3)
+	KindTaskNeedsHelp          = "task_needs_help"           // the worker asked its question (§3)
+	KindTaskFailed             = "task_failed"               // the run failed; the foreman decides (§3)
+	KindReviewChanges          = "review_changes"            // the reviewer wants changes (§7)
+	KindReviewNoVerdict        = "review_no_verdict"         // the review ended without a usable verdict (§7)
+	KindTaskOutOfRounds        = "task_out_of_rounds"        // the task spent its rounds; arrives with the rounds work
+	KindForemanReport          = "foreman_report"            // a done foreman turn's final message, its report to the user (§3, §10)
+	KindForemanLimited         = "foreman_limited"           // the foreman's CLI hit its subscription limit (§4.4, §10)
+	KindForemanWakeBudgetSpent = "foreman_wake_budget_spent" // the day's foreman wake budget is spent (§4.3, §10)
+	KindAgentBroken            = "agent_broken"              // an agent was marked broken (§8 "Health", §10)
 	// KindReviewUnservable: a task's queued review can never be taken —
 	// no agent of another family offers review (§7, §10).
 	KindReviewUnservable = "review_unservable"
@@ -104,6 +104,15 @@ func Message(ev Event) (t, body string, ok bool) {
 			when = "until " + ev.Reason
 		}
 		return title, oneLine("the foreman hit its limit ("+when+"): wait, or switch it with `brigada project foreman`", bodyLimit), true
+	case ev.Kind == KindForemanWakeBudgetSpent:
+		// Reason is "20/20 today, resets <time>" — the budget spent and
+		// the window's end (§4.3). The user raises it, or sends a
+		// message: a wake that carries one is not charged.
+		when := "resets at the next UTC day"
+		if ev.Reason != "" {
+			when = ev.Reason
+		}
+		return title, oneLine("the foreman's wake budget is spent ("+when+"); raise it with `brigada budget --wakes N` or send `brigada ask`", bodyLimit), true
 	case ev.Kind == KindAgentBroken:
 		// Reason is "harness/model: why": the user fixes the login or
 		// the runner, then resets the agent.
