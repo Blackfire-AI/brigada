@@ -43,6 +43,8 @@ Commands:
 	project foreman Show or set a repo's foreman harness and model
 	                (--repo defaults to this repo's origin).
 	project list    List the projects: repo, foreman, active plans, needs-you.
+	project set     Set a project's approval limit: key=value ... (§6.3).
+	project show    Show a project's approval limit and whether each is the default.
 	history         Show the timeline.
 	stats           Show which agent wins which class, per repo.
 	agent reset <harness>/<model>

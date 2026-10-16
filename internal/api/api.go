@@ -88,6 +88,8 @@ func (s *Server) Handler() http.Handler {
 	// them back; the role sets differ per method, so the handler checks.
 	mux.HandleFunc("/v1/projects/foreman", s.authed(nil, s.handleProjectForeman))
 	mux.HandleFunc("/v1/projects", s.authed([]string{roleClient, roleAdmin}, s.handleProjectList))
+	// The project's editable settings (§6.3): PUT sets, GET reads.
+	mux.HandleFunc("/v1/projects/settings", s.authed(nil, s.handleProjectSettings))
 	// The mux's own 404 is plain text; the API speaks JSON everywhere.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, codeNotFound, "no such endpoint")
