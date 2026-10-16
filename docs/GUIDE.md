@@ -22,7 +22,7 @@ State lives in the state directory: `~/.local/state/brigada`, or `$XDG_STATE_HOM
 git diff main | brigada ask -
 ```
 
-A message you send is not charged against the foreman's daily limit on its own wake-ups (20 per UTC day, per project); a wake that carries your message goes ahead even when that limit is spent.
+A message you send is not charged against the foreman's daily limit on its own wake-ups (default 20 per UTC day, per project; `brigada budget` shows and raises it, section 9); a wake that carries your message goes ahead even when that limit is spent.
 
 For the whole picture of how a day goes, see [How it fits your day](../README.md#how-it-fits-your-day) in the README. To let another coding harness (Claude Code, Codex) send messages and read status, see [From your own harness](../README.md#from-your-own-harness).
 
@@ -36,9 +36,10 @@ For the whole picture of how a day goes, see [How it fits your day](../README.md
 | `task #N needs_foreman: <reason>` | judgment: the worker asked a question, the check failed with no rounds left, a review wanted changes, the task failed. The foreman is woken for these; the entry is there so you can see it and step in |
 | `task #N needs_user: <reason>` | an answer from you, for a task parked for you directly |
 | `foreman #N limited: <until>` | a choice: wait, switch the foreman, or let approved plans run without it (section 5) |
+| `foreman #N budget_spent: wake budget spent (20/20 today, resets <UTC time>); <n> events waiting` | raise the day's wake budget with `brigada budget --wakes N`, or send `brigada ask`: a wake that carries your message is not charged (section 2) |
 | `agent <harness>/<model> broken: <reason>` | a fix, then `brigada agent reset <harness>/<model>` (section 5) |
 
-When `notify` is `auto` (the default), the engine also raises a desktop notification for the same kinds of moments: a plan done, a plan waiting for approval, a task parked, the foreman's report, a limited foreman, a broken agent.
+When `notify` is `auto` (the default), the engine also raises a desktop notification for the same kinds of moments: a plan done, a plan waiting for approval, a task parked, the foreman's report, a limited foreman, a foreman's wake budget spent, a broken agent.
 
 `brigada history` prints the timeline, oldest first: events and messages together. `--task N` and `--job N` narrow it to one task or one job; `--limit N` (1 to 500, default 100) is the page size, and every page is followed to the end.
 
@@ -212,6 +213,7 @@ The config file is optional. Format: one `key = value` per line; a line starting
 | `snapshot_dir` | absolute path | none (no snapshots) | Where the daily store snapshots go; the last seven are kept (section 7). |
 | `headroom` | `true` or `false` | `true` | Keep one slot free for the foreman on its account (section 5). |
 | `task_auto_retry` | `true` or `false` | `true` | One automatic restart on another agent after a transient worker failure (section 5). |
+| `foreman_wakes_per_day` | integer, 1 to 1000 | 20 | Default daily foreman wake-ups per project (section 2). `brigada budget --wakes N` sets it per project in the store — a project setting the shared project.yaml refuses as local-only. |
 | `default_reviewer` | harness name | none | The harness that takes a standalone review when the branch's author family cannot be told (section 4). |
 | `caps.global` | integer, 0 or more | no cap | Most parallel jobs in the whole engine. |
 | `caps.plan` | integer, 0 or more | no cap | Most parallel tasks per plan. |
@@ -263,6 +265,7 @@ cost.claude/opus = 2
 **Deciding**
 
 - `brigada plan approve <id>`, `brigada plan reject <id>`: your answer on a plan over the approval limit. See section 3.
+- `brigada budget` `[--repo URL]` `[--wakes N]`: show the project's foreman wake budget — the daily bound on headless foreman turns — with today's use and the UTC reset time; `--wakes N` (1 to 1000) sets it, and a raise wakes whatever the spent budget parked, at once. Without `--repo`, the engine's only project is named, like `ask`. See section 2.
 - `brigada agent reset <harness>/<model>`: clear a broken or cooling agent. See section 5.
 - `brigada cancel <job-id>`: stop one live job. See section 2.
 - `brigada project foreman [--repo URL] [--harness H --model M [--effort E]]`: show, or with the harness and model set, the repo's foreman (`claude` or `codex`) and its effort; `--repo` defaults to the origin of the working directory. See section 10.

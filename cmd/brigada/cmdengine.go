@@ -48,7 +48,8 @@ func runEngine(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		SnapshotDir:   rt.file.SnapshotDir,
 		TaskAutoRetry: rt.file.TaskAutoRetry,
 
-		DefaultReviewer: rt.file.DefaultReviewer,
+		ForemanWakeBudget: rt.file.ForemanWakesPerDay,
+		DefaultReviewer:   rt.file.DefaultReviewer,
 	})
 	if err != nil {
 		return fail(stderr, err)

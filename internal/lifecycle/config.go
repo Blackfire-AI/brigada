@@ -9,6 +9,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/caps"
+	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/notify"
 )
 
@@ -84,6 +85,10 @@ type FileConfig struct {
 	// TaskAutoRetry controls one automatic restart after a transient work
 	// failure. Nil keeps the engine default, on.
 	TaskAutoRetry *bool
+	// ForemanWakesPerDay is the default daily foreman wake budget of
+	// every project (§4.3); 0 keeps the built-in default. A project's
+	// foreman_wakes_per_day setting overrides it.
+	ForemanWakesPerDay int
 	// DefaultReviewer is the harness a standalone review (§7) goes to when
 	// its author's family cannot be told. Empty = none.
 	DefaultReviewer string
@@ -196,12 +201,19 @@ func loadConfigFile(path string, required bool) (FileConfig, error) {
 			var on bool
 			on, err = strconv.ParseBool(value)
 			cfg.TaskAutoRetry = &on
+		case key == "foreman_wakes_per_day":
+			var n int
+			n, err = strconv.Atoi(value)
+			if err == nil && (n < 1 || n > engine.MaxForemanWakesPerDay) {
+				err = fmt.Errorf("want an integer from 1 to %d", engine.MaxForemanWakesPerDay)
+			}
+			cfg.ForemanWakesPerDay = n
 		case strings.HasPrefix(key, "caps."), strings.HasPrefix(key, "cost."):
 			err = setCap(&cfg.Caps, key, value)
 		case strings.HasPrefix(key, "tools."):
 			err = setTools(&cfg, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, snapshot_dir, headroom, task_auto_retry, default_reviewer, a caps.<layer>, a cost.<harness>/<model> or a tools.claude/<model>", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, snapshot_dir, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, a caps.<layer>, a cost.<harness>/<model> or a tools.claude/<model>", path, n+1, key)
 		}
 		if err != nil {
 			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)

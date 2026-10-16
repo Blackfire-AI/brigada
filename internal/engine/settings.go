@@ -39,11 +39,20 @@ const (
 	// activity, and absolute from acquire.
 	SettingHoldIdleMinutes = "hold_idle_minutes"
 	SettingHoldMaxMinutes  = "hold_max_minutes"
+	// The project's daily foreman wake budget (§4.3): headless foreman
+	// turns per UTC day. Local only — the shared project.yaml refuses
+	// it — and set through `brigada budget --wakes N`, which also
+	// re-evaluates the waiting wake.
+	SettingForemanWakesPerDay = "foreman_wakes_per_day"
 	// The project's instruction text for every worker and reviewer
 	// (§5.9). Stored as the text itself: the client reads the file named
 	// by project.yaml's instructions_file and sends the content.
 	SettingInstructions = "instructions"
 )
+
+// MaxForemanWakesPerDay bounds a set wake budget (§4.3): a sane ceiling
+// on the day's foreman turns, so a typo cannot buy a thousand-turn day.
+const MaxForemanWakesPerDay = 1000
 
 // The hold bounds' defaults (§4.6): a starting guess, open in §16.
 const (
@@ -54,7 +63,7 @@ const (
 // SettingKeys are the editable keys, in the order show prints them.
 var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
-	SettingExtraRepos, SettingHoldIdleMinutes, SettingHoldMaxMinutes, SettingInstructions}
+	SettingExtraRepos, SettingHoldIdleMinutes, SettingHoldMaxMinutes, SettingForemanWakesPerDay, SettingInstructions}
 
 // MaxInstructionsBytes bounds the project instruction text (§5.9): a
 // starting value, open in §16 item 11. Above it a set or an import is
@@ -141,7 +150,7 @@ func parseSettingValue(key, value string) (json.RawMessage, error) {
 	switch key {
 	case SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths, SettingDefaultCheck, SettingWorkerTools,
 		SettingHoldIdleMinutes, SettingHoldMaxMinutes, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
-		SettingExtraRepos, SettingInstructions:
+		SettingExtraRepos, SettingForemanWakesPerDay, SettingInstructions:
 	default:
 		return nil, fmt.Errorf("%w: unknown key %q; valid keys: %s", ErrInvalidSetting, key, strings.Join(SettingKeys, ", "))
 	}
@@ -189,6 +198,14 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 		if err != nil || n <= 0 {
 			return nil, fmt.Errorf("%w: %s takes a positive whole number of minutes, got %q",
 				ErrInvalidSetting, key, value)
+		}
+		return json.RawMessage(strconv.Itoa(n)), nil
+	}
+	if key == SettingForemanWakesPerDay {
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > MaxForemanWakesPerDay {
+			return nil, fmt.Errorf("%w: %s takes a positive whole number of foreman wakes per day, at most %d, got %q",
+				ErrInvalidSetting, key, MaxForemanWakesPerDay, value)
 		}
 		return json.RawMessage(strconv.Itoa(n)), nil
 	}
@@ -248,8 +265,10 @@ func ValidateSettingValue(key, value string) error {
 }
 
 // settingsViewTx renders the project's settings row: each key's
-// effective value and whether the row overrides it.
-func settingsViewTx(tx *sql.Tx, project int64, repo string) (ProjectSettings, error) {
+// effective value and whether the row overrides it. wakeBudgetDefault
+// is the engine-wide wake budget (§4.3) the foreman_wakes_per_day key
+// falls back to.
+func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault int) (ProjectSettings, error) {
 	var raw, rawProv string
 	if err := tx.QueryRow("SELECT settings, settings_prov FROM projects WHERE id = ?", project).Scan(&raw, &rawProv); err != nil {
 		return ProjectSettings{}, fmt.Errorf("read the settings of project %d: %w", project, err)
@@ -334,6 +353,12 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string) (ProjectSettings, er
 			sv.Value = strconv.Itoa(int(idle / time.Minute))
 		case SettingHoldMaxMinutes:
 			sv.Value = strconv.Itoa(int(maxHold / time.Minute))
+		case SettingForemanWakesPerDay:
+			budget := wakeBudgetDefault
+			if n, ok := rawInt(cur); ok && n > 0 {
+				budget = n
+			}
+			sv.Value = strconv.Itoa(budget)
 		case SettingInstructions:
 			text, _ := rawString(cur)
 			sv.Value = instructionsSummary(text)
@@ -363,7 +388,7 @@ func (e *Engine) ProjectSettings(ctx context.Context, repoURL string) (*ProjectS
 		if err != nil {
 			return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
 		}
-		v, err := settingsViewTx(tx, project, canon)
+		v, err := settingsViewTx(tx, project, canon, e.cfg.ForemanWakeBudget)
 		if err != nil {
 			return err
 		}
@@ -451,7 +476,7 @@ func (e *Engine) SetProjectSettings(ctx context.Context, repoURL string, values 
 		if _, err := tx.Exec("UPDATE projects SET settings = ?, settings_prov = ?, updated_at = ? WHERE id = ?", string(b), pb, fmtTime(now), project); err != nil {
 			return fmt.Errorf("store the settings of project %d: %w", project, err)
 		}
-		out, err = settingsViewTx(tx, project, shownRepo)
+		out, err = settingsViewTx(tx, project, shownRepo, e.cfg.ForemanWakeBudget)
 		return err
 	})
 	if err != nil {

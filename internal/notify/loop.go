@@ -42,6 +42,7 @@ type eventPayload struct {
 	Harness  string `json:"harness,omitempty"`
 	Model    string `json:"model,omitempty"`
 	Plan     int64  `json:"plan,omitempty"`
+	Count    int64  `json:"count,omitempty"`
 }
 
 // Loop is the delivery loop (§13): it polls the event log for rows
@@ -237,6 +238,17 @@ func reasonOf(kind, payload string) string {
 	}
 	if kind == KindForemanLimited {
 		return p.Until
+	}
+	if kind == KindForemanWakeBudgetSpent {
+		// "20/20 today, resets <time>": the budget the event's Count
+		// holds, spent, and the window's end its Until names.
+		if p.Count > 0 && p.Until != "" {
+			return oneLine(fmt.Sprintf("%d/%d today, resets %s", p.Count, p.Count, p.Until), bodyLimit)
+		}
+		if p.Until != "" {
+			return "resets " + p.Until
+		}
+		return ""
 	}
 	if kind == KindPlanAwaitingApproval {
 		return oneLine(p.Reason, bodyLimit)

@@ -47,6 +47,10 @@ type Config struct {
 	SnapshotDir string
 	// TaskAutoRetry controls transient work retries; nil keeps the default, on.
 	TaskAutoRetry *bool
+	// ForemanWakeBudget is the default daily foreman wake budget of every
+	// project (§4.3); 0 keeps the built-in default of 20. A project's
+	// foreman_wakes_per_day setting overrides it.
+	ForemanWakeBudget int
 	// DefaultReviewer is the harness a standalone review goes to when its
 	// author's family cannot be told; empty = none.
 	DefaultReviewer string
@@ -128,7 +132,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("engine: %w", err)
 	}
 	defer st.Close()
-	eng := engine.New(st, engine.Config{Now: cfg.Now, Caps: cfg.Caps, PlanFiles: true, SnapshotDir: cfg.SnapshotDir, TaskAutoRetry: cfg.TaskAutoRetry, DefaultReviewer: cfg.DefaultReviewer})
+	eng := engine.New(st, engine.Config{Now: cfg.Now, Caps: cfg.Caps, PlanFiles: true, SnapshotDir: cfg.SnapshotDir, TaskAutoRetry: cfg.TaskAutoRetry, ForemanWakeBudget: cfg.ForemanWakeBudget, DefaultReviewer: cfg.DefaultReviewer})
 	// Project identities are canonical repo URLs (design §13.1): rows
 	// written in an older form are rewritten once, before anything reads
 	// them. Rows that cannot be, or that name one repository twice, stay
