@@ -42,7 +42,7 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
  runner: worktree → agent CLI headless → check → branch
 ```
 
-- **The foreman is an agent, not our own model loop.** It runs in an official CLI session (configurable: claude, codex, …) with brigada's MCP tools and foreman instructions. It is a worker, as every task agent is: an instance of a headless harness plus a model, on the same machinery, differing only in its instructions, permissions and lifecycle (decided 2026-10-13). The conversation uses that harness's own UI: `brigada` opens the foreman in your terminal.
+- **The foreman is an agent, not our own model loop.** It runs in an official CLI session (configurable: claude, codex, …) with brigada's MCP tools and foreman instructions. The brigada-owned headless foreman is a worker, as every task agent is (in your own session, mode A, the foreman role is exercised by your interactive session, which brigada does not run and which is not a worker; design §4.6): an instance of a headless harness plus a model, on the same machinery, differing only in its instructions, permissions and lifecycle (decided 2026-10-13). The conversation uses that harness's own UI. Direction (decided 2026-10-16; design only, not yet built): the harness you already use is the foreman. `brigada init` sets a repo up in one step, registering brigada's tools in your harness for that repo, and you talk in your own session; one session can also coordinate several projects' foremen. While nobody is typing, the engine wakes a separate brigada-owned foreman session, and the engine journal is the handoff between the two conversations ([design.md](design.md) §4.6, §13.1). `brigada` opening the foreman in your terminal stays as the fallback for a harness that cannot host the tools.
 - **The engine does the mechanics in code:** who is eligible, healthy and has quota; leases and fencing; caps and budgets; the outcome record; review routing. The foreman decides; the engine enforces.
 - **No state lives only in the foreman's session.** The plan, tasks, decisions, pending questions and outcomes are in the engine store (and the plan also in the repo), so a foreman session can end, crash or resume without losing work. Acceptance test: kill the foreman mid-plan; a fresh session rebuilds the plan, in-flight tasks and open questions from engine tools alone.
 - **You choose the foreman's harness and model** (decided 2026-10-12), e.g. Claude Code with a given model. **When it hits its subscription limit, brigada notifies you and you decide** (decided 2026-10-12): wait for the reset, switch the foreman to another harness or model (the new session rebuilds everything from the engine, per the test above), or let approved plans continue without it. Without any foreman, the plain commands still work: `brigada status`, `stats`, `cancel`, and approved plans keep running.
@@ -83,6 +83,7 @@ In:
 Not at launch (backlog):
 - remote engine and runners;
 - GitHub issues as a source, notifications;
+- the foreman in your own harness session, a coordinator session over several projects, and one-step `brigada init` with a committed `.brigada/project.yaml` (designed 2026-10-16, [design.md](design.md) §15 phase 6; not built);
 - a web UI, containers, auto-merge;
 - connectors to chat front ends.
 
@@ -133,5 +134,5 @@ Decided (2026-10-12): you choose the foreman's harness and model, and decide wha
 
 Open:
 1. The size and risk limit for plan approval: how it's measured (task count, classes, files touched, protected paths).
-2. **How the foreman learns about events while nobody is typing** (interactive only, or resumed headless by the engine); see [design.md](design.md) §4.
+2. **How the foreman learns about events while nobody is typing** (interactive only, or resumed headless by the engine); see [design.md](design.md) §4. For your own session the direction is set (2026-10-16): events reach it while it holds the foreman role, and the engine wakes a separate headless foreman session otherwise (§4.6); the per-harness facts it needs are open (§16 item 4).
 3. Where the plan file lives in the repo (a path such as `.brigada/plans/`, and on which branch), and what wins if it and the engine store disagree.
