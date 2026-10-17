@@ -114,7 +114,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if f, ok := projectStdin.(*os.File); ok {
 		terminal = isatty.IsTerminal(f.Fd())
 	}
-	ask := func(prompt, flags string) (string, error) {
+	askLine := func(prompt, flags string) (string, error) {
 		if !canAsk {
 			return "", nil
 		}
@@ -130,7 +130,11 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if err != nil && err != io.EOF {
 			return "", fmt.Errorf("cannot read answer (%v); supply %s; use --agent for accounts and --signed-in for authentication", err, flags)
 		}
-		return strings.TrimSpace(v), nil
+		return strings.TrimSuffix(strings.TrimSuffix(v, "\n"), "\r"), nil
+	}
+	ask := func(prompt, flags string) (string, error) {
+		v, err := askLine(prompt, flags)
+		return strings.TrimSpace(v), err
 	}
 	confirm := func(prompt, flags string) (bool, error) {
 		v, err := ask(prompt+" [y/N] ", flags)
@@ -168,15 +172,31 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				continue
 			}
 			signedIn[h] = true
-			model, err := ask(fmt.Sprintf("%s model [%s] (Enter = default, - = don't use %s): ", h, initModelName(runnerDefaultModel(h)), h), "--agent harness="+h+",model=MODEL")
-			if err != nil {
-				return fail(stderr, err)
+			question := h + " model"
+			if h == "opencode" {
+				question += " as provider/model, e.g. zai-coding-plan/glm-5.3"
 			}
-			if model == "-" {
-				continue
-			}
-			if err := agents.Set("harness=" + h + ",model=" + model); err != nil {
-				return usagef(stderr, "%v", err)
+			prompt := fmt.Sprintf("%s [%s] (Enter = default, - = don't use %s): ", question, initModelName(runnerDefaultModel(h)), h)
+			for attempt := 0; attempt < 3; attempt++ {
+				model, err := askLine(prompt, "--agent harness="+h+",model=MODEL")
+				if err != nil {
+					return fail(stderr, err)
+				}
+				if model == "-" {
+					break
+				}
+				if model == "" {
+					model = runnerDefaultModel(h)
+				}
+				if _, err := initModelFamily(h, model); err != nil {
+					if attempt == 2 {
+						return usagef(stderr, "--agent %s: %v", h, err)
+					}
+					fmt.Fprintf(stdout, "  %v; try again.\n", err)
+					continue
+				}
+				agents.specs = append(agents.specs, agentSpec{harness: h, model: model, classes: splitList(defaultClasses)})
+				break
 			}
 		}
 	}
@@ -195,7 +215,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if spec.model == "" {
 			spec.model = runnerDefaultModel(spec.harness)
 		}
-		_, err := adapter.AgentFamily(spec.harness, spec.model)
+		_, err := initModelFamily(spec.harness, spec.model)
 		if err != nil {
 			return usagef(stderr, "--agent %s: %v", spec.harness, err)
 		}
@@ -240,7 +260,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		usable = append(usable, spec)
 		if slices.Contains(spec.classes, "review") {
 			family, _ := adapter.AgentFamily(spec.harness, spec.model)
-			families[family] = true
+			if family != "" {
+				families[family] = true
+			}
 		}
 	}
 	if len(usable) == 0 {
@@ -473,11 +495,20 @@ func initModelName(model string) string {
 	return model
 }
 
+func initModelFamily(harness, model string) (string, error) {
+	if harness == "opencode" && model != "default" && !strings.Contains(model, "/") {
+		return "", fmt.Errorf("opencode needs provider/model, e.g. zai-coding-plan/glm-5.3")
+	}
+	return adapter.AgentFamily(harness, model)
+}
+
 func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agentSpec) {
 	fmt.Fprintln(w, "\nPlan\n  Agents (each implements, reviews and answers questions):")
 	for _, s := range agents {
 		family, _ := adapter.AgentFamily(s.harness, s.model)
 		switch family {
+		case "":
+			family = "unknown (give provider/model to count it for review)"
 		case "anthropic":
 			family = "Anthropic"
 		case "openai":
