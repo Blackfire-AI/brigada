@@ -28,12 +28,13 @@ var initBinary string
 
 func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code int) {
 	fs := newFlagSet("init",
-		"brigada init [--probe | --yes] [options] (inside one repository, or in a folder holding several: then --all selects them)",
+		"brigada init [--probe | --yes] [--verbose] [options] (inside one repository, or in a folder holding several: then --all selects them)",
 		"Probe and confirm setup of one repository or a folder of repositories.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	yes := fs.Bool("yes", false, "apply the displayed plan without prompting (does not confirm authentication)")
 	probe := fs.Bool("probe", false, "print the plan only; write nothing and start nothing")
+	verbose := fs.Bool("verbose", false, "also print the full contents of new repository setup files")
 	limited := fs.Bool("accept-limited", false, "acknowledge fewer than two review families; reviews still require another family")
 	check := fs.String("check", "", "default check command (suggested from build files; never executed by init)")
 	tools := fs.String("tools", "", "worker scope in runner tools= syntax; applied only to Claude workers")
@@ -384,19 +385,24 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		fmt.Fprintf(stdout, "  %-9s %s\n", a.Harness, permissions)
 	}
 	fmt.Fprintf(stdout, "Register project and foreman; import %s; start engine on demand and one detached runner in %s.\n", engine.ProjectConfigPath, rt.stateDir)
-	if exists {
-		printInitDiff(stdout, old, proposed)
-	} else {
-		fmt.Fprintf(stdout, "New %s:\n%s", engine.ProjectConfigPath, proposed)
-	}
 	var wiring []wireFile
+	if !*noWiring && probes["claude"].installed {
+		wiring = planWiring(root)
+	}
+	files := append([]wireFile{{rel: engine.ProjectConfigPath, old: old, next: proposed, exists: exists}}, wiring...)
+	printInitFiles(stdout, files, *verbose)
 	if !*noWiring {
-		if probes["claude"].installed {
-			wiring = planWiring(root)
-			printWiringPlan(stdout, wiring)
-		}
 		if probes["codex"].installed {
 			fmt.Fprint(stdout, codexWiringText)
+		}
+		var workers []string
+		for _, h := range []string{"kimi", "opencode"} {
+			if probes[h].installed {
+				workers = append(workers, h)
+			}
+		}
+		if len(workers) > 0 {
+			fmt.Fprintf(stdout, "  %s: work as workers only; nothing to set up.\n", strings.Join(workers, ", "))
 		}
 	}
 	if *probe {
@@ -552,11 +558,15 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 }
 
 func initApplyPrompt(files int, running bool) string {
+	noun := "files"
+	if files == 1 {
+		noun = "file"
+	}
 	switch {
 	case files > 0 && !running:
-		return fmt.Sprintf("Write %d files and start the runner?", files)
+		return fmt.Sprintf("Write %d %s and start the runner?", files, noun)
 	case files > 0:
-		return fmt.Sprintf("Write %d files?", files)
+		return fmt.Sprintf("Write %d %s?", files, noun)
 	case !running:
 		return "Start the runner?"
 	default:

@@ -355,8 +355,8 @@ func TestInitApplyPrompts(t *testing.T) {
 		name, prompt    string
 		exists, running bool
 	}{
-		{"write and start", "Write 1 files and start the runner? [y/N]", false, false},
-		{"write", "Write 1 files? [y/N]", false, true},
+		{"write and start", "Write 1 file and start the runner? [y/N]", false, false},
+		{"write", "Write 1 file? [y/N]", false, true},
 		{"start", "Start the runner? [y/N]", true, false},
 		{"register", "Register the project? [y/N]", true, true},
 	} {
@@ -467,7 +467,7 @@ func TestInitSuggestedCheckQuestion(t *testing.T) {
 				t.Fatal(err)
 			}
 			fakeInitPATH(t, "claude", "codex")
-			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "\n\n"+tc.answer+"\nn\n", "--signed-in", "claude,codex", "--no-wiring")
+			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "\n\n"+tc.answer+"\nn\n", "--signed-in", "claude,codex", "--no-wiring", "--verbose")
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
@@ -835,7 +835,7 @@ func TestInitProbeAndRefusalsWithExistingWiring(t *testing.T) {
 			if code != tc.code {
 				t.Fatalf("got %d, want %d\n%s\n%s", code, tc.code, out, errOut)
 			}
-			if strings.Contains(out, "ready") || !strings.Contains(out, ".claude/settings.local.json: unchanged") {
+			if strings.Contains(out, "ready") || !strings.Contains(strings.Join(strings.Fields(out), " "), ".claude/settings.local.json unchanged, private (kept out of git):") {
 				t.Errorf("existing wiring output:\n%s", out)
 			}
 			if wireRead(t, ".", ".claude/settings.local.json") != local {
