@@ -15,10 +15,13 @@ import (
 // foreman, sent without attaching — the words as arguments, or "-" to
 // read them from stdin — and the answer says what happened to it.
 func runAsk(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("ask")
+	fs := newFlagSet("ask",
+		"brigada ask [--repo URL] <message...> | -",
+		"Send the foreman a message, or read it from standard input with -.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	repo := fs.String("repo", "", "the project's repo URL; empty names the engine's only project")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	words := fs.Args()

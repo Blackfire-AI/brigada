@@ -18,7 +18,10 @@ import (
 // is not built; this command carries the wake budget alone, so it takes
 // no positional arguments.
 func runBudget(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("budget")
+	fs := newFlagSet("budget",
+		"brigada budget [--repo URL] [--wakes N] [--no-start]",
+		"Show or set a project’s daily foreman wake budget.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	var (
 		repo    string
@@ -28,7 +31,7 @@ func runBudget(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	fs.StringVar(&repo, "repo", "", "the repository URL (default: the engine's only project, like ask)")
 	fs.IntVar(&wakes, "wakes", 0, "set the project's daily foreman wake budget, 1 to "+strconv.Itoa(engine.MaxForemanWakesPerDay)+"; omitted = show it alone")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if extra := fs.Args(); len(extra) > 0 {

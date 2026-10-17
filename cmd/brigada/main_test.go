@@ -14,6 +14,8 @@ import (
 )
 
 func TestRun(t *testing.T) {
+	// The missing-repo case must not inherit this checkout's origin.
+	t.Chdir(t.TempDir())
 	tests := []struct {
 		name     string
 		args     []string

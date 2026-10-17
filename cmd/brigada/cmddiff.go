@@ -23,13 +23,16 @@ type taskReader interface {
 // pager. It runs inside the project's repository, fetches the two refs
 // from origin (refs only, no checkout) and diffs them locally.
 func runDiff(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("diff")
+	fs := newFlagSet("diff",
+		"brigada diff [--stat] [--repo URL] [--no-start] <task-id>",
+		"Show a task’s changes as git diff base...branch inside its repository.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	stat := fs.Bool("stat", false, "print the diffstat instead of the whole diff")
 	repo := fs.String("repo", "", "the repository URL the working directory stands for (default: its origin's URL)")
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
-	rest, code := parseWithPositional(common, stderr, args)
-	if code != 0 {
+	rest, code, stop := parseWithPositional(common, stdout, stderr, args)
+	if stop {
 		return code
 	}
 	if len(rest) != 1 {
@@ -58,19 +61,19 @@ func runDiff(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 // (`diff 7 --stat`), which the flag package would otherwise stop at: the
 // flags before it and the flags after it both count. It returns what is
 // left over once every flag is taken.
-func parseWithPositional(c *commonFlags, stderr io.Writer, args []string) ([]string, int) {
-	if code := c.parse(stderr, args); code != 0 {
-		return nil, code
+func parseWithPositional(c *commonFlags, stdout, stderr io.Writer, args []string) ([]string, int, bool) {
+	if code, stop := c.parse(stdout, stderr, args); stop {
+		return nil, code, true
 	}
 	rest := c.fs.Args()
 	if len(rest) == 0 {
-		return nil, 0
+		return nil, 0, false
 	}
 	first := rest[0]
-	if code := c.parse(stderr, rest[1:]); code != 0 {
-		return nil, code
+	if code, stop := c.parse(stdout, stderr, rest[1:]); stop {
+		return nil, code, true
 	}
-	return append([]string{first}, c.fs.Args()...), 0
+	return append([]string{first}, c.fs.Args()...), 0, false
 }
 
 // printDiff reads the task's refs, checks the working directory is the

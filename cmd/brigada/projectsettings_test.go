@@ -112,16 +112,16 @@ func TestProjectSettingsGolden(t *testing.T) {
 		t.Fatalf("reset = %d %q (stderr %q), want %q", code, stdout, stderr, want)
 	}
 
-	// A bad key is a usage error naming the valid keys.
+	// A bad key is a usage error naming the valid keys and the help command.
 	code, _, stderr = do("project", "set", "--repo", repo, "approval_max=3")
-	wantErr := `brigada: invalid project setting: unknown key "approval_max"; valid keys: ` + validSettingKeys + "\n"
+	wantErr := `brigada: invalid project setting: unknown key "approval_max"; valid keys: ` + validSettingKeys + "\nRun 'brigada project set --help' for usage.\n"
 	if code != 2 || stderr != wantErr {
 		t.Fatalf("bad key = %d %q, want 2 %q", code, stderr, wantErr)
 	}
 
-	// A bad value is a usage error naming what the key takes.
+	// A bad value is a usage error naming what the key takes and the help command.
 	code, _, stderr = do("project", "set", "--repo", repo, "approval_max_tasks=many")
-	wantErr = `brigada: invalid project setting: approval_max_tasks takes an integer (0 = every plan waits, negative = off), got "many"; valid keys: ` + validSettingKeys + "\n"
+	wantErr = `brigada: invalid project setting: approval_max_tasks takes an integer (0 = every plan waits, negative = off), got "many"; valid keys: ` + validSettingKeys + "\nRun 'brigada project set --help' for usage.\n"
 	if code != 2 || stderr != wantErr {
 		t.Fatalf("bad value = %d %q, want 2 %q", code, stderr, wantErr)
 	}

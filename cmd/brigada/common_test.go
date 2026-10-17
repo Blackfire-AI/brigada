@@ -13,7 +13,7 @@ import (
 func TestResolveRuntimeRequiresExplicitConfig(t *testing.T) {
 	state := testsupport.ShortStateDir(t)
 	missing := filepath.Join(t.TempDir(), "missing-config")
-	common := addCommon(newFlagSet("test"))
+	common := addCommon(newFlagSet("test", "brigada test", "Test command."))
 	common.config, common.stateDir = missing, state
 	var stderr bytes.Buffer
 	if rt, code := resolveRuntime(common, &stderr); code == 0 || rt != nil || !strings.Contains(stderr.String(), "read config "+missing) {

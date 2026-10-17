@@ -19,10 +19,13 @@ type statsReader interface {
 // learned, a plain table per repo — which agent wins which class, with
 // how many attempts behind it.
 func runStats(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("stats")
+	fs := newFlagSet("stats",
+		"brigada stats [--no-start]",
+		"Show agent results by task class and repository.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if extra := fs.Args(); len(extra) > 0 {

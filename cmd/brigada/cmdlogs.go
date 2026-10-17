@@ -42,7 +42,10 @@ const logLineLimit = 300
 // job's transcript as readable lines, or its check log. `--task N`
 // names the task's latest job instead of a job id.
 func runLogs(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("logs")
+	fs := newFlagSet("logs",
+		"brigada logs [--check] [--tail N] [--follow] [--no-start] <job-id> | --task ID",
+		"Show a job’s transcript or check log, optionally following live progress.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	var (
 		check   bool
@@ -57,8 +60,8 @@ func runLogs(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs.Int64Var(&task, "task", 0, "name a task's latest job instead of a job id")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	const usage = "usage: brigada logs <job-id> [--check] [--tail N] [--follow]  |  brigada logs --task N [...]"
-	rest, code := parseWithPositional(common, stderr, args)
-	if code != 0 {
+	rest, code, stop := parseWithPositional(common, stdout, stderr, args)
+	if stop {
 		return code
 	}
 	var job int64

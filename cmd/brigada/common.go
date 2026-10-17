@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -13,11 +14,18 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 )
 
-// newFlagSet builds a command's flag set with its output muted: usage
-// errors are printed by the command, with its name and exit code.
-func newFlagSet(name string) *flag.FlagSet {
+// newFlagSet is the shared factory, replaceable in tests to inspect each
+// command's actual registrations without maintaining a second flag list.
+var newFlagSet = makeFlagSet
+
+// makeFlagSet keeps flag diagnostics muted; parse chooses the output stream.
+func makeFlagSet(name, synopsis, description string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: %s\n\n%s\n\nFlags:\n", synopsis, description)
+		fs.PrintDefaults()
+	}
 	return fs
 }
 
@@ -38,12 +46,19 @@ func addCommon(fs *flag.FlagSet) *commonFlags {
 	return c
 }
 
-// parse parses args, reporting a flag error as exit code 2.
-func (c *commonFlags) parse(stderr io.Writer, args []string) int {
+// parse reports help on stdout and errors on stderr. stop tells the caller
+// to return code, including when help successfully exits with code zero.
+func (c *commonFlags) parse(stdout, stderr io.Writer, args []string) (code int, stop bool) {
 	if err := c.fs.Parse(args); err != nil {
-		return usagef(stderr, "%v", err)
+		if errors.Is(err, flag.ErrHelp) {
+			c.fs.SetOutput(stdout)
+			c.fs.Usage()
+			c.fs.SetOutput(io.Discard)
+			return 0, true
+		}
+		return usagef(commandStderr(stderr, c.fs.Name()), "%v", err), true
 	}
-	return 0
+	return 0, false
 }
 
 // runtime is one command's resolved context: the state directory, the

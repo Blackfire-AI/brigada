@@ -14,12 +14,15 @@ import (
 // stopped, it fails, or it has been idle long enough. Meant to run in
 // the background — a client that needs it starts it detached (§13).
 func runEngine(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("engine")
+	fs := newFlagSet("engine",
+		"brigada engine [--idle-minutes N]",
+		"Run the engine and its API on the Unix socket.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	var idleMinutes float64
 	fs.Float64Var(&idleMinutes, "idle-minutes", 0,
 		"exit after this many minutes with no live jobs and no connected requests (default 30; config file's idle_minutes in between)")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if args := fs.Args(); len(args) > 0 {

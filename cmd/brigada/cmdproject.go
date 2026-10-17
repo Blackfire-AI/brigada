@@ -22,33 +22,20 @@ import (
 // runs the foreman and which model it runs on — and `project list`, every
 // project the engine knows.
 func runProject(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		return usagef(stderr, "usage: brigada project foreman|list|set|show|import [--repo URL] ...")
-	}
-	switch args[0] {
-	case "foreman":
-		return runProjectForeman(ctx, args[1:], stdout, stderr)
-	case "list":
-		return runProjectList(ctx, args[1:], stdout, stderr)
-	case "set":
-		return runProjectSettings(ctx, "set", args[1:], stdout, stderr)
-	case "show":
-		return runProjectSettings(ctx, "show", args[1:], stdout, stderr)
-	case "import":
-		return runProjectImport(ctx, args[1:], stdout, stderr)
-	default:
-		return usagef(stderr, "unknown project subcommand %q; want foreman, list, set, show or import", args[0])
-	}
+	return dispatch(ctx, args, stdout, stderr, "project", "usage: brigada project foreman|list|set|show|import [--repo URL] ...", "foreman, list, set, show or import", projectCommands)
 }
 
 // runProjectList prints one line per project: the repo URL, the foreman's
 // harness/model ("-" while none is chosen), the active plans and what
 // waits on the user.
 func runProjectList(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("project list")
+	fs := newFlagSet("project list",
+		"brigada project list [--no-start]",
+		"List projects with their foreman, active plans and needs-you count.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if extra := fs.Args(); len(extra) > 0 {
@@ -88,7 +75,14 @@ func runProjectList(ctx context.Context, args []string, stdout, stderr io.Writer
 // the engine's own parser before the engine is contacted, so a value
 // accepted here is one the limit understands.
 func runProjectSettings(ctx context.Context, verb string, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("project " + verb)
+	synopsis := "brigada project " + verb + " [--repo URL] [--no-start]"
+	description := "Show a project’s settings and where each value comes from."
+	if verb == "set" {
+		synopsis += " key=value ..."
+		description = "Set project settings, including approval limits and worker instructions."
+	}
+	fs := newFlagSet("project "+verb, synopsis, description)
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	var (
 		repo    string
@@ -96,7 +90,7 @@ func runProjectSettings(ctx context.Context, verb string, args []string, stdout,
 	)
 	fs.StringVar(&repo, "repo", "", "the repository URL (default: the working directory's origin)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	validKeys := strings.Join(engine.SettingKeys, ", ")
@@ -283,7 +277,10 @@ func runProjectImport(ctx context.Context, args []string, stdout, stderr io.Writ
 // Init supplies its prompt handling so an import confirmation follows the same
 // terminal formatting and EOF rules as the rest of setup.
 func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, stderr io.Writer, confirm func(string) (bool, error)) int {
-	fs := newFlagSet("project import")
+	fs := newFlagSet("project import",
+		"brigada project import [--repo URL] [--file PATH] [--yes] [--no-start]",
+		"Import the repository’s .brigada/project.yaml settings.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	var (
 		repo    string
@@ -295,7 +292,7 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 	fs.StringVar(&file, "file", "", "the project.yaml to read (default: "+engine.ProjectConfigPath+" in the working directory's repository)")
 	fs.BoolVar(&yes, "yes", false, "accept replacing hand-set values on a first import")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if extra := fs.Args(); len(extra) > 0 {
@@ -460,7 +457,10 @@ func isNotFound(err error) bool {
 // the stored choice; with neither it just prints what is stored, empty
 // fields and all.
 func runProjectForeman(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("project foreman")
+	fs := newFlagSet("project foreman",
+		"brigada project foreman [--repo URL] [--harness HARNESS --model MODEL [--effort LEVEL]] [--no-start]",
+		"Show or choose a project’s foreman harness, model and reasoning effort.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	var (
 		repo    string
@@ -474,7 +474,7 @@ func runProjectForeman(ctx context.Context, args []string, stdout, stderr io.Wri
 	fs.StringVar(&model, "model", "", "the foreman's model; goes with --harness")
 	fs.StringVar(&effort, "effort", "", "the foreman's reasoning effort, validated per harness (claude: low|medium|high|xhigh|max); goes with --harness; empty = the CLI's default")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if extra := fs.Args(); len(extra) > 0 {
