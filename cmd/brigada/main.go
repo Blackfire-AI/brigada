@@ -41,6 +41,7 @@ Commands:
 	                its author's, with no plan or task (§7).
 	engine          Run the engine: store and API on the Unix socket.
 	runner          Run a runner: lease jobs, run workers, run checks.
+	stop            Stop the detached runner (--engine: the engine too).
 	mcp             Run the foreman's MCP bridge over stdio (§12.2).
 	status          Show the engine and its jobs by status.
 	task submit     Submit a task (debug path until the foreman exists).
@@ -110,6 +111,7 @@ var commands = map[string]command{
 	"review":  {name: "review", run: runReview},
 	"engine":  {name: "engine", run: runEngine},
 	"runner":  {name: "runner", run: runRunner},
+	"stop":    {name: "stop", run: runStop},
 	"mcp":     {name: "mcp", run: runMCP},
 	"status":  {name: "status", run: runStatus},
 	"task":    {name: "task", run: runTask, subcommands: taskCommands},
