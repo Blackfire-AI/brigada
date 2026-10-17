@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -15,18 +16,19 @@ import (
 )
 
 // Harness wiring for mode A (design §13.1 item 7, §4.6 "What the facts
-// allow"): the bridge in the repository's .mcp.json, the Stop and
-// SessionStart hooks in .claude/settings.json, and the foreman instructions
-// as a brigada-owned skill. The shared files are edited minimally: only the
-// inserted or replaced entries change, never the rest of the user's bytes.
+// allow"): the bridge in the repository's .mcp.json, the Stop hook in
+// .claude/settings.local.json, and the foreman instructions as a brigada-owned
+// skill. The files are edited minimally: only brigada's entries change,
+// never the rest of the user's bytes.
 
 const (
-	wiringMCPFile      = ".mcp.json"
-	wiringSettingsFile = ".claude/settings.json"
-	wiringSkillFile    = ".claude/skills/brigada-foreman/SKILL.md"
-	wiringSkillMarker  = "<!-- brigada-managed: foreman-instructions"
-	hookYieldCommand   = "brigada hold yield"
-	hookConfirmCommand = "brigada hold confirm"
+	wiringMCPFile            = ".mcp.json"
+	wiringSettingsFile       = ".claude/settings.local.json"
+	wiringSharedSettingsFile = ".claude/settings.json"
+	wiringSkillFile          = ".claude/skills/brigada-foreman/SKILL.md"
+	wiringSkillMarker        = "<!-- brigada-managed: foreman-instructions"
+	hookYieldCommand         = "brigada hold yield"
+	hookConfirmCommand       = "brigada hold confirm"
 )
 
 // codexWiringText is what init prints for Codex instead of writing anything:
@@ -63,7 +65,7 @@ type wireFile struct {
 	old    []byte
 	exists bool
 	next   []byte
-	state  string // created, added, replaced, unchanged
+	state  string // created, added, replaced, removed, unchanged
 	err    error
 }
 
@@ -73,11 +75,50 @@ func (w wireFile) changed() bool { return w.err == nil && !bytes.Equal(w.old, w.
 // and writes nothing.
 func planWiring(root string) []wireFile {
 	skill := skillContent()
-	return planSteps(root, []wireStep{
+	files := planSteps(root, []wireStep{
 		{wiringMCPFile, func(d []byte, exists bool) ([]byte, string, error) { return mergeMCPServer(d, exists) }},
 		{wiringSettingsFile, func(d []byte, exists bool) ([]byte, string, error) { return mergeHooks(d, exists) }},
+		{wiringSharedSettingsFile, removeSharedHooks},
 		{wiringSkillFile, func(d []byte, exists bool) ([]byte, string, error) { return mergeSkill(d, exists, skill) }},
 	})
+	// Ignore the private settings before creating them. Include the exclude edit
+	// in the reviewed plan and use the same concurrent-edit guard on apply.
+	if settings := files[1]; !settings.exists && settings.changed() {
+		if exclude := planSettingsExclude(root); exclude != nil {
+			files = append([]wireFile{*exclude}, files...)
+		}
+	}
+	return files
+}
+
+func planSettingsExclude(root string) *wireFile {
+	err := exec.Command("git", "-C", root, "check-ignore", "-q", "--", wiringSettingsFile).Run()
+	if err == nil {
+		return nil
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		return &wireFile{rel: "git info/exclude", err: fmt.Errorf("checking private settings ignore: %w", err)}
+	}
+	out, err := exec.Command("git", "-C", root, "rev-parse", "--git-path", "info/exclude").Output()
+	if err != nil {
+		return &wireFile{rel: "git info/exclude", err: fmt.Errorf("locating exclude file: %w", err)}
+	}
+	path := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	files := planSteps(filepath.Dir(path), []wireStep{{filepath.Base(path), func(d []byte, exists bool) ([]byte, string, error) {
+		next := append([]byte(nil), d...)
+		if len(next) > 0 && next[len(next)-1] != '\n' {
+			next = append(next, '\n')
+		}
+		next = append(next, "/"+wiringSettingsFile+"\n"...)
+		return next, "added", nil
+	}}})
+	f := files[0]
+	f.rel = filepath.ToSlash(strings.TrimSpace(string(out)))
+	return &f
 }
 
 // wireStep is one file a wiring plan edits: its path under the root and
@@ -136,7 +177,7 @@ func printWiringPlan(w io.Writer, files []wireFile) {
 		case f.err != nil:
 			fmt.Fprintf(w, "    %s: left alone, not changed (%v)\n", f.rel, f.err)
 		case f.state == "unchanged":
-			fmt.Fprintf(w, "    %s: already wired; unchanged\n", f.rel)
+			fmt.Fprintf(w, "    %s: unchanged\n", f.rel)
 		default:
 			fmt.Fprintf(w, "    %s: %s\n", f.rel, f.state)
 			if f.rel == wiringSkillFile && !f.exists {
@@ -289,33 +330,86 @@ func mergeMCPEntry(d []byte, exists bool, name string, args []string) ([]byte, s
 	return out, "replaced", err
 }
 
-// mergeHooks adds or replaces brigada's Stop and SessionStart hooks.
+// mergeHooks adds or replaces brigada's Stop hook in private settings.
 func mergeHooks(d []byte, exists bool) ([]byte, string, error) {
-	events := []struct{ name, command string }{
-		{"SessionStart", hookConfirmCommand},
-		{"Stop", hookYieldCommand},
-	}
 	if !exists {
-		hooks := map[string]any{}
-		for _, e := range events {
-			hooks[e.name] = []hookGroup{{Hooks: []hookCommand{{Type: "command", Command: e.command}}}}
-		}
+		hooks := map[string]any{"Stop": []hookGroup{{Hooks: []hookCommand{{Type: "command", Command: hookYieldCommand}}}}}
 		out, err := renderNew(map[string]any{"hooks": hooks})
 		return out, "created", err
 	}
+	return mergeHook(d, "Stop", hookYieldCommand)
+}
+
+// removeSharedHooks migrates only exact brigada commands out of shared
+// settings. Commands with user-supplied flags and all other bytes stay put.
+func removeSharedHooks(d []byte, exists bool) ([]byte, string, error) {
+	if !exists {
+		return d, "unchanged", nil
+	}
 	state := "unchanged"
-	for _, e := range events {
-		var st string
-		var err error
-		d, st, err = mergeHook(d, e.name, e.command)
+	for {
+		next, removed, err := removeSharedHook(d)
 		if err != nil {
 			return nil, "", err
 		}
-		if st != "unchanged" && (state == "unchanged" || st == "replaced") {
-			state = st
+		if !removed {
+			return d, state, nil
+		}
+		d, state = next, "removed"
+	}
+}
+
+func removeSharedHook(d []byte) ([]byte, bool, error) {
+	root, err := jsonRoot(d)
+	if err != nil {
+		return nil, false, err
+	}
+	hi := root.lookup("hooks")
+	if hi < 0 {
+		return d, false, nil
+	}
+	hooks, err := jsonSub(d, root, hi, '{', "hooks")
+	if err != nil {
+		return nil, false, err
+	}
+	for ei, event := range hooks.keys {
+		list, err := jsonSub(d, hooks, ei, '[', "hooks."+event)
+		if err != nil {
+			return nil, false, err
+		}
+		for gi, gspan := range list.vals {
+			if d[gspan.start] != '{' {
+				continue
+			}
+			group, err := jsonParse(d, gspan.start)
+			if err != nil {
+				return nil, false, err
+			}
+			ii := group.lookup("hooks")
+			if ii < 0 || d[group.vals[ii].start] != '[' {
+				continue
+			}
+			inner, err := jsonParse(d, group.vals[ii].start)
+			if err != nil {
+				return nil, false, err
+			}
+			for i, hspan := range inner.vals {
+				var hook map[string]json.RawMessage
+				var command string
+				if json.Unmarshal(d[hspan.start:hspan.end], &hook) != nil || json.Unmarshal(hook["command"], &command) != nil || (command != hookYieldCommand && command != hookConfirmCommand) {
+					continue
+				}
+				if len(inner.vals) > 1 {
+					return jsonRemove(d, inner, i), true, nil
+				}
+				if len(list.vals) > 1 {
+					return jsonRemove(d, list, gi), true, nil
+				}
+				return jsonRemove(d, hooks, ei), true, nil
+			}
 		}
 	}
-	return d, state, nil
+	return d, false, nil
 }
 
 func mergeHook(d []byte, event, command string) ([]byte, string, error) {
@@ -404,6 +498,25 @@ type jsonContainer struct {
 	keys        []string
 	keyStarts   []int
 	vals        []jsonSpan
+}
+
+// jsonRemove drops a member or element and its adjacent separator, preserving
+// every surviving value and its formatting.
+func jsonRemove(d []byte, c *jsonContainer, i int) []byte {
+	start, end := c.vals[i].start, c.vals[i].end
+	if c.obj {
+		start = c.keyStarts[i]
+	}
+	if i+1 < len(c.vals) {
+		end = c.vals[i+1].start
+		if c.obj {
+			end = c.keyStarts[i+1]
+		}
+	} else if i > 0 {
+		start = c.vals[i-1].end
+	}
+	out := append([]byte(nil), d[:start]...)
+	return append(out, d[end:]...)
 }
 
 func (c *jsonContainer) lookup(key string) int {
