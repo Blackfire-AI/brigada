@@ -71,7 +71,7 @@ func TestInitProbeAndRefusals(t *testing.T) {
 		want     string
 	}{
 		{"probe", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}, "", 0, "Probe only"},
-		{"declined", []string{"--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}, "n\n", 1, "Declined"},
+		{"declined", []string{"--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}, "\nn\n", 1, "Declined"},
 		{"one family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=anthropic/claude-opus-4", "--signed-in", "claude,opencode"}, "", 1, "--accept-limited"},
 		{"limited acknowledged", []string{"--probe", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--signed-in", "claude"}, "", 0, "LIMITED SETUP"},
 		{"zero", []string{"--yes", "--agent", "harness=claude,model=sonnet"}, "", 1, "zero usable agents"},
@@ -325,7 +325,7 @@ func TestInitQuestionsBeforePlan(t *testing.T) {
 		t.Fatalf("asked for a model after sign-in was declined:\n%s", out)
 	}
 	lastQuestion := strings.Index(out, "Worker tools (required;")
-	for _, line := range []string{"\nPlan\n", "    codex     CLI default", "  Review:", "  Foreman:", "Default check:", "Register project and foreman"} {
+	for _, line := range []string{"\nPlan\n", "    codex     CLI default", "  Review:", "  Foreman:", "Check after every task:", "Register project and foreman"} {
 		if pos := strings.Index(out, line); lastQuestion < 0 || pos <= lastQuestion {
 			t.Errorf("plan line %q preceded the last setup question:\n%s", line, out)
 		}
@@ -390,6 +390,8 @@ func TestInitBuildSuggestions(t *testing.T) {
 		{"go.mod", "module x", "go test ./...", "Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*)"},
 		{"package.json", `{"scripts":{"test":"touch should-never-exist"}}`, "npm test", "Bash(npm test:*)"},
 		{"Cargo.toml", "[package]", "cargo test", "Bash(cargo test:*)"},
+		{"uv.lock", "", "uv run pytest", "Bash(uv run pytest:*)"},
+		{"poetry.lock", "", "poetry run pytest", "Bash(poetry run pytest:*)"},
 		{"pyproject.toml", "[project]", "python -m pytest", "Bash(python -m pytest:*)"},
 		{"pytest.ini", "[pytest]", "python -m pytest", "Bash(python -m pytest:*)"},
 		{"package.json", `{"scripts":{"build":"x"}}`, "", ""},
@@ -406,6 +408,150 @@ func TestInitBuildSuggestions(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(root, "should-never-exist")); !os.IsNotExist(err) {
 				t.Fatal("executed test script")
+			}
+		})
+	}
+}
+
+func TestInitBuildSuggestionOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name, check string
+		files       []string
+	}{
+		{"go first", "go test ./...", []string{"go.mod", "package.json", "Cargo.toml", "uv.lock", "poetry.lock", "pyproject.toml"}},
+		{"npm before cargo", "npm test", []string{"package.json", "Cargo.toml", "uv.lock", "poetry.lock"}},
+		{"cargo before python", "cargo test", []string{"Cargo.toml", "uv.lock", "poetry.lock"}},
+		{"uv before poetry and plain pytest", "uv run pytest", []string{"uv.lock", "poetry.lock", "pyproject.toml", "pytest.ini"}},
+		{"poetry before plain pytest", "poetry run pytest", []string{"poetry.lock", "pyproject.toml", "pytest.ini"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			for _, name := range tc.files {
+				body := ""
+				if name == "package.json" {
+					body = `{"scripts":{"test":"exit 99"}}`
+				}
+				if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			check, _, err := suggestInitDefaults(root)
+			if err != nil || check != tc.check {
+				t.Fatalf("got %q, %v; want %q", check, err, tc.check)
+			}
+		})
+	}
+}
+
+func TestInitSuggestedCheckQuestion(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, body, answer, check string
+	}{
+		{"go Enter", "go.mod", "module x", "", "go test ./..."},
+		{"npm Enter", "package.json", `{"scripts":{"test":"exit 99"}}`, "", "npm test"},
+		{"cargo Enter", "Cargo.toml", "[package]", "", "cargo test"},
+		{"uv Enter", "uv.lock", "", "", "uv run pytest"},
+		{"poetry Enter", "poetry.lock", "", "", "poetry run pytest"},
+		{"pyproject Enter", "pyproject.toml", "[project]", "", "python -m pytest"},
+		{"pytest Enter", "pytest.ini", "[pytest]", "", "python -m pytest"},
+		{"typed replacement", "uv.lock", "", "uv run pytest -q", "uv run pytest -q"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			importRepo(t)
+			if err := os.WriteFile(tc.source, []byte(tc.body), 0644); err != nil {
+				t.Fatal(err)
+			}
+			suggestion, _, err := suggestInitDefaults(".")
+			if err != nil {
+				t.Fatal(err)
+			}
+			fakeInitPATH(t, "claude", "codex")
+			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "\n\n"+tc.answer+"\nn\n", "--signed-in", "claude,codex", "--no-wiring")
+			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
+				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+			}
+			prompt := "\nCheck to run after every task [" + suggestion + "] (from " + tc.source + "):" + "\n"
+			question := strings.Index(out, prompt)
+			if question <= strings.Index(out, "codex model [") || question >= strings.Index(out, "\nPlan\n") || strings.Count(out, prompt) != 1 {
+				t.Fatalf("check question missing or out of order:\n%s", out)
+			}
+			for _, want := range []string{
+				"Check after every task: " + tc.check + " (init does not run it; edit .brigada/project.yaml to change it)",
+				"default_check: " + strconv.Quote(tc.check),
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("missing %q in:\n%s", want, out)
+				}
+			}
+			if _, err := os.Stat(".brigada"); !os.IsNotExist(err) {
+				t.Fatalf("declined init wrote configuration: %v", err)
+			}
+		})
+	}
+}
+
+func TestInitSkipsSuggestedCheckQuestion(t *testing.T) {
+	for _, tc := range []struct {
+		name, existing, check string
+		args                  []string
+	}{
+		{"flag", "", "flag check", []string{"--check", "flag check"}},
+		{"project value", "default_check: project check\n", "project check", nil},
+		{"flag overrides project", "default_check: project check\n", "flag check", []string{"--check", "flag check"}},
+		{"probe", "", "uv run pytest", []string{"--probe"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			write := importRepo(t)
+			if tc.existing != "" {
+				write(projectFile(tc.existing))
+			}
+			if err := os.WriteFile("uv.lock", nil, 0644); err != nil {
+				t.Fatal(err)
+			}
+			fakeInitPATH(t, "claude", "codex")
+			args := append([]string{"--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring"}, tc.args...)
+			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "n\n", args...)
+			wantCode := 1
+			if tc.name == "probe" {
+				wantCode = 0
+			}
+			if code != wantCode || errOut != "" || strings.Contains(out, "Check to run after every task [") || !strings.Contains(out, "Check after every task: "+tc.check+" (") {
+				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+			}
+		})
+	}
+}
+
+func TestInitWorkerPermissions(t *testing.T) {
+	for _, tc := range []struct{ tools, permissions string }{
+		{"", "edits files; shell limited to: Bash(uv run pytest:*)"},
+		{",tools=none", "edits files; no shell"},
+		{",tools=Bash(custom check:*)", "edits files; shell limited to: Bash(custom check:*)"},
+	} {
+		t.Run(tc.permissions, func(t *testing.T) {
+			importRepo(t)
+			if err := os.WriteFile("uv.lock", nil, 0644); err != nil {
+				t.Fatal(err)
+			}
+			fakeInitPATH(t, initHarnesses...)
+			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "", "--probe",
+				"--agent", "harness=claude"+tc.tools, "--agent", "harness=codex", "--agent", "harness=kimi", "--agent", "harness=opencode",
+				"--signed-in", "claude,codex,kimi,opencode", "--no-wiring")
+			if code != 0 || errOut != "" {
+				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+			}
+			want := "Worker permissions:\n" +
+				"  claude    " + tc.permissions + "\n" +
+				"  codex     edits files and runs commands inside codex's workspace-write sandbox\n" +
+				"  kimi      edits files and runs commands headless, with no approval prompts\n" +
+				"  opencode  edits files; no shell\n"
+			if !strings.Contains(out, want) {
+				t.Errorf("permissions table missing:\n%s", out)
+			}
+			for _, old := range []string{"Default check:", "Worker tools:", "effective worker tools:", "ready"} {
+				if strings.Contains(out, old) {
+					t.Errorf("unexpected %q in:\n%s", old, out)
+				}
 			}
 		})
 	}
@@ -632,12 +778,12 @@ func TestInitKeepsMachineToolScope(t *testing.T) {
 	args := []string{"--probe", "--config", config, "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}
 	state := testsupport.ShortStateDir(t)
 	code, out, err := initDo(t, state, "", args...)
-	if code != 0 || !strings.Contains(out, "claude/sonnet effective worker tools: none") {
+	if code != 0 || !strings.Contains(out, "  claude    edits files; no shell\n") {
 		t.Fatalf("%d %s %s", code, out, err)
 	}
 	args = append(args, "--tools", "Bash(go test:*)")
 	code, out, err = initDo(t, state, "", args...)
-	if code != 0 || !strings.Contains(out, "claude/sonnet effective worker tools: Bash(go test:*)") {
+	if code != 0 || !strings.Contains(out, "  claude    edits files; shell limited to: Bash(go test:*)\n") {
 		t.Fatalf("%d %s %s", code, out, err)
 	}
 	data, e := os.ReadFile(config)
