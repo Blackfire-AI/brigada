@@ -326,7 +326,7 @@ func TestInitQuestionsBeforePlan(t *testing.T) {
 		t.Fatalf("asked for a model after sign-in was declined:\n%s", out)
 	}
 	lastQuestion := strings.Index(out, "Worker tools (required;")
-	for _, line := range []string{"\nPlan\n", "    codex     CLI default", "  Review:", "  Foreman:", "Check after every task:", "Register project and foreman"} {
+	for _, line := range []string{"\nPlan\n", "    codex     CLI default", "  Review:", "  Foreman:", "Check after every task:", "Background:"} {
 		if pos := strings.Index(out, line); lastQuestion < 0 || pos <= lastQuestion {
 			t.Errorf("plan line %q preceded the last setup question:\n%s", line, out)
 		}
@@ -702,6 +702,14 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 		log, _ := os.ReadFile(filepath.Join(state, "engine.log"))
 		t.Fatalf("%d\n%s\n%s\nengine log: %s", code, out, err, log)
 	}
+	for _, want := range []string{"Done: wrote ", "files (not committed). Detached runner started (pid ", "stop it with: brigada stop", "Next:\n  1. Open Claude Code here (`claude`)", "  2. Or, without a session: brigada ask", "Stop the runner: brigada stop"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "§") {
+		t.Errorf("output names a design section:\n%s", out)
+	}
 	if !lifecycle.EngineRunning(context.Background(), lifecycle.PathsOf(state).Socket) {
 		t.Fatal("engine not started")
 	}
@@ -757,6 +765,9 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 	code, out, err = initDo(t, state, "unknown\nsonnet\ngpt-5\ny\n", "--signed-in", "claude,codex", "--no-wiring")
 	if code != 0 || strings.Count(out, "claude model [") != 2 || !strings.Contains(out, "Runner already running") {
 		t.Fatalf("interactive retry: %d\n%s\n%s", code, out, err)
+	}
+	if strings.Contains(out, "Open Claude Code here") || !strings.Contains(out, "  1. Or, without a session: brigada ask") || strings.Contains(out, "§") {
+		t.Fatalf("--no-wiring Next block:\n%s", out)
 	}
 	data, _ := os.ReadFile(calls)
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {

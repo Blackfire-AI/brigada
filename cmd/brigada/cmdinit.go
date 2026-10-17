@@ -384,7 +384,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 		fmt.Fprintf(stdout, "  %-9s %s\n", a.Harness, permissions)
 	}
-	fmt.Fprintf(stdout, "Register project and foreman; import %s; start engine on demand and one detached runner in %s.\n", engine.ProjectConfigPath, rt.stateDir)
+	fmt.Fprintln(stdout, "Background: the engine starts when a command needs it and exits after 30 idle minutes.")
+	fmt.Fprintf(stdout, "  The runner starts now and keeps running; log: %s; stop it with: brigada stop\n", filepath.Join(rt.stateDir, "runner.log"))
 	var wiring []wireFile
 	if !*noWiring && probes["claude"].installed {
 		wiring = planWiring(root)
@@ -434,20 +435,19 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err := writeInitFile(file, old, proposed, exists); err != nil {
 		return fail(stderr, err)
 	}
-	if exists && bytes.Equal(old, proposed) {
-		fmt.Fprintf(stdout, "Unchanged file %s.\n", engine.ProjectConfigPath)
-	} else {
-		fmt.Fprintf(stdout, "Applied file %s; no git commit or push.\n", engine.ProjectConfigPath)
-	}
 	partial := func(err error) int {
 		return fail(stderr, fmt.Errorf("partial init: project.yaml is in place; %w; fix the error and rerun init", err))
 	}
 	if err := applyWiring(wiring); err != nil {
 		return partial(err)
 	}
+	written := 0
+	if !exists || !bytes.Equal(old, proposed) {
+		written++
+	}
 	for _, f := range wiring {
 		if f.changed() {
-			fmt.Fprintf(stdout, "Wired %s (%s); no git commit or push.\n", f.rel, f.state)
+			written++
 		}
 	}
 	if err := lifecycle.EnsureEngine(ctx, lifecycle.StartOptions{Socket: rt.paths.Socket, StateDir: rt.stateDir, ConfigPath: rt.configForStart(), Binary: initBinary}); err != nil {
@@ -491,6 +491,16 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		return partial(fmt.Errorf("project registered and imported, but runner startup failed: %w", err))
 	}
 	agentsMatch := true
+	var done strings.Builder
+	done.WriteString("Done: ")
+	switch written {
+	case 0:
+		done.WriteString("no files needed writing.")
+	case 1:
+		done.WriteString("wrote 1 file (not committed).")
+	default:
+		fmt.Fprintf(&done, "wrote %d files (not committed).", written)
+	}
 	if result.Existing {
 		difference := "agents match the chosen ones"
 		if result.Record.Agents == nil {
@@ -500,18 +510,26 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			agentsMatch = false
 			difference = "agents differ from the chosen ones; existing agents kept"
 		}
-		fmt.Fprintf(stdout, "Runner already running (pid %d); no second runner started; %s.\n", result.Record.PID, difference)
+		fmt.Fprintf(&done, " Runner already running (pid %d); no second runner started; %s.", result.Record.PID, difference)
 	} else {
-		fmt.Fprintf(stdout, "Detached runner started (pid %d); log: %s\n", result.Record.PID, filepath.Join(rt.stateDir, "runner.log"))
+		fmt.Fprintf(&done, " Detached runner started (pid %d).", result.Record.PID)
 	}
 	if isLimited {
-		fmt.Fprintln(stdout, "Limited setup applied; cross-family reviews may wait.")
+		done.WriteString(" Limited setup applied; cross-family reviews may wait.")
 	} else if agentsMatch {
-		fmt.Fprintln(stdout, "Setup ready.")
+		done.WriteString(" Setup ready.")
 	} else {
-		fmt.Fprintln(stdout, "Project configured; inspect the existing runner agents above before sending work.")
+		done.WriteString(" Project configured; inspect the existing runner agents above before sending work.")
 	}
-	fmt.Fprintln(stdout, "Next: brigada ask \"your task\" / brigada attach; brigada status. Open your harness in the repo to use mode A where it is wired (the hold-only bootstrap credential of design §12.1 is not built yet).")
+	fmt.Fprintln(stdout, done.String())
+	fmt.Fprintln(stdout, "Next:")
+	step := 1
+	if !*noWiring && probes["claude"].installed {
+		fmt.Fprintf(stdout, "  %d. Open Claude Code here (`claude`), approve the brigada MCP server when asked, and say what you want built. Your session plans; you approve the plan.\n", step)
+		step++
+	}
+	fmt.Fprintf(stdout, "  %d. Or, without a session: brigada ask \"what you want built\"\n", step)
+	fmt.Fprintln(stdout, "  Watch progress: brigada status    Stop the runner: brigada stop")
 	return 0
 }
 
