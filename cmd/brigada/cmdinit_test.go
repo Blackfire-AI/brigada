@@ -172,6 +172,7 @@ func TestInitPromptDefaultsAndSkip(t *testing.T) {
 
 func TestInitNonTerminalPrompts(t *testing.T) {
 	importRepo(t)
+	wireGit(t, ".", "config", "core.excludesFile", os.DevNull)
 	fakeInitPATH(t, initHarnesses...)
 	code, out, err := initDo(t, testsupport.ShortStateDir(t), "y\n\ny\n\ny\n\ny\n\nn\n", "--check", "true", "--tools", "none")
 	if code != 1 || !strings.Contains(out, "Declined") || err != "" {
@@ -186,7 +187,7 @@ func TestInitNonTerminalPrompts(t *testing.T) {
 		"kimi model [CLI default] (Enter = default, - = don't use kimi):",
 		"Are you signed in to opencode? [y/N]",
 		"opencode model as provider/model, e.g. zai-coding-plan/glm-5.3 [CLI default] (Enter = default, - = don't use opencode):",
-		"Write 4 files and start the runner? [y/N]",
+		"Write 5 files and start the runner? [y/N]",
 	}
 	previous := -1
 	for _, prompt := range prompts {
@@ -805,5 +806,41 @@ func TestInitNoInstalledAgents(t *testing.T) {
 	}
 	if _, e := os.Stat(".brigada"); !os.IsNotExist(e) {
 		t.Fatal("created project config")
+	}
+}
+
+func TestInitProbeAndRefusalsWithExistingWiring(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		extra []string
+		stdin string
+		code  int
+	}{
+		{"probe", []string{"--probe"}, "", 0},
+		{"refusal", nil, "n\n", 1},
+		{"limited", []string{"--probe", "--accept-limited"}, "", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			importRepo(t)
+			wireApply(t, ".")
+			local := wireRead(t, ".", ".claude/settings.local.json")
+			fakeInitPATH(t, "claude", "codex")
+			args := []string{"--agent", "harness=claude,model=sonnet", "--signed-in", "claude,codex", "--check", "true", "--tools", "none"}
+			if tc.name != "limited" {
+				args = append(args, "--agent", "harness=codex,model=gpt-5")
+			}
+			args = append(args, tc.extra...)
+			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
+			code, out, errOut := initDo(t, state, tc.stdin, args...)
+			if code != tc.code {
+				t.Fatalf("got %d, want %d\n%s\n%s", code, tc.code, out, errOut)
+			}
+			if strings.Contains(out, "ready") || !strings.Contains(out, ".claude/settings.local.json: unchanged") {
+				t.Errorf("existing wiring output:\n%s", out)
+			}
+			if wireRead(t, ".", ".claude/settings.local.json") != local {
+				t.Error("probe/refusal changed private settings")
+			}
+		})
 	}
 }
