@@ -296,6 +296,124 @@ func TestRunnerRunsReviewJobToEnd(t *testing.T) {
 	e.assertNoWorktrees()
 }
 
+// TestRunnerReviewCLIErrorReachesTheEngine checks both sources of CLI
+// errors: limits carry their reset time to account cooling, and auth
+// failures break the reviewer immediately with the auth reason.
+func TestRunnerReviewCLIErrorReachesTheEngine(t *testing.T) {
+	for _, kind := range []string{"limit", "auth"} {
+		for _, source := range []string{"stdout", "stderr"} {
+			t.Run(kind+"/"+source, func(t *testing.T) {
+				remote := newRemote(t)
+				e := newTestEnv(t, engine.Config{})
+				e.seedProject(remote)
+				markerDir(t)
+				task := e.seedTask("", "")
+				work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", "", ""))
+
+				until := time.Now().Add(3 * time.Hour).UTC().Truncate(time.Second)
+				redirect := ""
+				if source == "stderr" {
+					redirect = " >&2"
+				}
+				failure := `echo '{"type":"error","kind":"` + kind + `","text":"review unavailable","until":"` + until.Format(time.RFC3339) + `"}'` + redirect + "\nexit 1\n"
+				p := e.startReviewRunner(t, taskBranch(task, 1), reviewScript(failure))
+				defer p.stop(t)
+
+				e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+				review := e.int64Of("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review'", task)
+				failed := e.waitJob(review, func(j *engine.JobInfo) bool { return j.Status == "failed" })
+				if got, want := e.errorResult(failed), "reviewer CLI failed ("+kind+"): review unavailable"; got != want {
+					t.Errorf("failure = %q, want %q", got, want)
+				}
+
+				var health, reason, cooling string
+				if err := e.st.View(e.ctx, func(tx *sql.Tx) error {
+					return tx.QueryRow(`SELECT health, health_reason, COALESCE(cooling_until, '')
+						FROM agents WHERE id = (SELECT agent_id FROM jobs WHERE id = ?)`, review).
+						Scan(&health, &reason, &cooling)
+				}); err != nil {
+					t.Fatalf("read the reviewer's health: %v", err)
+				}
+				if kind == "auth" {
+					if health != "broken" || reason != "auth" || cooling != "" {
+						t.Errorf("reviewer health = %q, reason = %q, cooling = %q; want broken, auth, no cooling", health, reason, cooling)
+					}
+				} else {
+					if health != "ready" || reason != "" {
+						t.Errorf("reviewer health = %q, reason = %q; want ready with no broken reason", health, reason)
+					}
+					if got, err := time.Parse(engine.TimeLayout, cooling); err != nil || !got.Equal(until) {
+						t.Errorf("cooling until %q (%v), want the adapter's reset time %s", cooling, err, until.Format(time.RFC3339))
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestRunnerReviewLimitAfterFailureCoolsInsteadOfBreaking checks that a
+// limit does not extend an earlier review failure's streak. Standalone
+// reviews let both jobs use one agent without a task's retry exclusion.
+func TestRunnerReviewLimitAfterFailureCoolsInsteadOfBreaking(t *testing.T) {
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(newRemote(t))
+	markerDir(t)
+	until := time.Now().Add(3 * time.Hour).UTC().Truncate(time.Second)
+	worker := `
+cat > /dev/null
+echo '{"type":"system_init","session_id":"sess-rev"}'
+if [ ! -f "$BRIGADA_TEST_MARKERS/first-review-failed" ]; then
+	touch "$BRIGADA_TEST_MARKERS/first-review-failed"
+	echo '{"type":"error","kind":"other","text":"review crashed"}'
+else
+	echo '{"type":"error","kind":"limit","text":"5-hour usage limit","until":"` + until.Format(time.RFC3339) + `"}'
+fi
+exit 1
+`
+	p := e.startRunner(writeWorkerScript(t, worker), 100*time.Millisecond)
+	defer p.stop(t)
+
+	submit := func() int64 {
+		t.Helper()
+		res, err := e.eng.Submit(e.ctx, engine.SubmitParams{
+			Key: "review:main", ProjectID: e.project, Kind: engine.KindReview,
+			Mode: engine.ModeFresh, Prompt: "review main", Branch: "main",
+		})
+		if err != nil || res.Answer != engine.AnsCreated {
+			t.Fatalf("submit review: %+v, %v", res, err)
+		}
+		return res.JobID
+	}
+	first := submit()
+	failed := e.waitJob(first, func(j *engine.JobInfo) bool { return j.Status == "failed" })
+	if got := e.errorResult(failed); got != "reviewer CLI failed (other): review crashed" {
+		t.Fatalf("first failure = %q, want the reviewer's ordinary CLI failure", got)
+	}
+	second := submit()
+	limited := e.waitJob(second, func(j *engine.JobInfo) bool { return j.Status == "failed" })
+	if got := e.errorResult(limited); got != "reviewer CLI failed (limit): 5-hour usage limit" {
+		t.Fatalf("second failure = %q, want the reviewer's limit", got)
+	}
+
+	agent := e.int64Of("SELECT agent_id FROM jobs WHERE id = ?", first)
+	if got := e.int64Of("SELECT agent_id FROM jobs WHERE id = ?", second); got != agent {
+		t.Fatalf("second review agent = %d, want the first review's %d", got, agent)
+	}
+	var health, reason, cooling string
+	if err := e.st.View(e.ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT health, health_reason, COALESCE(cooling_until, '') FROM agents WHERE id = ?", agent).
+			Scan(&health, &reason, &cooling)
+	}); err != nil {
+		t.Fatalf("read the reviewer's health: %v", err)
+	}
+	if health != "ready" || reason != "" {
+		t.Errorf("reviewer health = %q, reason = %q; want ready, not broken by repeated failures", health, reason)
+	}
+	if got, err := time.Parse(engine.TimeLayout, cooling); err != nil || !got.Equal(until) {
+		t.Errorf("cooling until %q (%v), want %s", cooling, err, until.Format(time.RFC3339))
+	}
+}
+
 // TestRunnerReviewWithoutAVerdictBlock: a reviewer that never fences a
 // verdict completes with an empty one — the run is done, not failed —
 // and the engine records review_no_verdict and parks the task for the

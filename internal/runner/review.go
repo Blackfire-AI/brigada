@@ -58,7 +58,7 @@ func (r *jobRun) finishReview(ctx context.Context, ad adapter.Adapter, exitErr e
 	}
 	r.mu.Unlock()
 	if cliErr != nil {
-		r.finishWithError(ctx, fmt.Sprintf("reviewer CLI failed (%s): %s", cliErr.ErrorKind, cliErr.Text))
+		r.finishWithCLIError(ctx, fmt.Sprintf("reviewer CLI failed (%s): %s", cliErr.ErrorKind, cliErr.Text), cliErr)
 		return
 	}
 	if nw := (&noWorkerError{}); errors.As(exitErr, &nw) {
