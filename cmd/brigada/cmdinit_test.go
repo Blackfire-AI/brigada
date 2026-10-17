@@ -121,6 +121,95 @@ func TestInitProbeAndRefusals(t *testing.T) {
 	}
 }
 
+// TestInitProbePlanLayout checks the whole probe's presentation without
+// depending on temporary paths, process IDs or git's default exclude contents.
+func TestInitProbePlanLayout(t *testing.T) {
+	importRepo(t)
+	wireGit(t, ".", "config", "core.excludesFile", os.DevNull)
+	for _, name := range []string{"pyproject.toml", "uv.lock"} {
+		if err := os.WriteFile(name, nil, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fakeInitPATH(t, initHarnesses...)
+	code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "", "--probe",
+		"--agent", "harness=claude,model=opus", "--agent", "harness=codex", "--signed-in", "claude,codex")
+	if code != 0 || errOut != "" {
+		t.Fatalf("probe = %d\n%s\n%s", code, out, errOut)
+	}
+	wantPrefixes := []string{
+		"brigada init: set up example.invalid/imported",
+		"Agent CLIs found:",
+		"  claude    sign-in can't be checked",
+		"  codex     sign-in can't be checked",
+		"  kimi      sign-in can't be checked",
+		"  opencode  sign-in can't be checked",
+		"Plan",
+		"  Agents (each implements, reviews and answers questions):",
+		"    claude    opus",
+		"    codex     CLI default",
+		"  Review: 2 model families;",
+		"  Foreman: claude/opus ",
+		"  Check after every task: uv run pytest (",
+		"  Worker permissions:",
+		"    claude    edits files; shell limited to: Bash(uv run pytest:*)",
+		"    codex     edits files and runs commands inside codex's workspace-write sandbox",
+		"  Files in this repository (",
+		"    .brigada/project.yaml ",
+		"    .mcp.json ",
+		"    .claude/settings.local.json ",
+		"    .claude/skills/brigada-foreman/SKILL.md ",
+		"    .git/info/exclude ",
+		"    (full contents: --verbose)",
+		"  Codex (optional:",
+		"    codex mcp add brigada-foreman -- brigada mcp --foreman",
+		"    For codex exec, see the GUIDE section on the foreman's harness.",
+		"  kimi, opencode: work as workers only; nothing to set up.",
+		"  Background: the engine starts when a command needs it and exits after 30 idle minutes.",
+		"    The runner starts now and keeps running; log: ",
+		"Probe only; nothing written or started.",
+	}
+	lines := strings.Split(out, "\n")
+	next := 0
+	for _, line := range lines {
+		if next < len(wantPrefixes) && strings.HasPrefix(line, wantPrefixes[next]) {
+			next++
+		}
+	}
+	if next != len(wantPrefixes) {
+		t.Fatalf("missing or out-of-order prefix %q:\n%s", wantPrefixes[next], out)
+	}
+	plan := strings.Index(out, "\nPlan\n")
+	probe := strings.Index(out, "\nProbe only;")
+	if !strings.HasSuffix(out[:plan], "\n") || !strings.HasSuffix(out[:probe], "\n") || strings.Contains(out, "\n\n\n") {
+		t.Errorf("expected one blank line before Plan and Probe only:\n%s", out)
+	}
+	for _, line := range strings.Split(out[plan+len("\nPlan\n"):probe], "\n") {
+		if line != "" && !strings.HasPrefix(line, "  ") {
+			t.Errorf("line outside the Plan block: %q", line)
+		}
+	}
+	paths := []string{".brigada/project.yaml", ".mcp.json", ".claude/settings.local.json", ".claude/skills/brigada-foreman/SKILL.md", ".git/info/exclude"}
+	width := 0
+	for _, path := range paths {
+		width = max(width, len(path))
+	}
+	for _, path := range paths {
+		for _, line := range lines {
+			if !strings.HasPrefix(line, "    "+path+" ") {
+				continue
+			}
+			padding := strings.Repeat(" ", width-len(path)+2)
+			if !strings.HasPrefix(line, "    "+path+padding) || strings.HasPrefix(line[4+width+2:], " ") {
+				t.Errorf("file states must align two spaces after the longest path: %q", line)
+			}
+		}
+	}
+	if strings.Contains(out, "ready") {
+		t.Errorf("probe claimed ready before applying:\n%s", out)
+	}
+}
+
 func TestInitPromptDefaultsAndSkip(t *testing.T) {
 	for _, tc := range []struct {
 		name, stdin string
@@ -188,6 +277,9 @@ func TestInitNonTerminalPrompts(t *testing.T) {
 		"Are you signed in to opencode? [y/N]",
 		"opencode model as provider/model, e.g. zai-coding-plan/glm-5.3 [CLI default] (Enter = default, - = don't use opencode):",
 		"Write 5 files and start the runner? [y/N]",
+	}
+	if !strings.Contains(out, "\n\n"+prompts[0]+"\n") || strings.Contains(out, "\n\n\n"+prompts[0]) {
+		t.Errorf("expected one blank line between CLI detection and questions:\n%s", out)
 	}
 	previous := -1
 	for _, prompt := range prompts {
@@ -326,7 +418,7 @@ func TestInitQuestionsBeforePlan(t *testing.T) {
 		t.Fatalf("asked for a model after sign-in was declined:\n%s", out)
 	}
 	lastQuestion := strings.Index(out, "Worker tools (required;")
-	for _, line := range []string{"\nPlan\n", "    codex     CLI default", "  Review:", "  Foreman:", "Check after every task:", "Background:"} {
+	for _, line := range []string{"\nPlan\n", "    codex     CLI default", "  Review:", "  Foreman:", "  Check after every task:", "  Background:"} {
 		if pos := strings.Index(out, line); lastQuestion < 0 || pos <= lastQuestion {
 			t.Errorf("plan line %q preceded the last setup question:\n%s", line, out)
 		}
@@ -379,7 +471,7 @@ func TestInitApplyPrompts(t *testing.T) {
 				defer release()
 			}
 			code, out, err := initDo(t, state, "n\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--check", "true", "--tools", "none", "--no-wiring")
-			if code != 1 || err != "" || !strings.Contains(out, "\n"+tc.prompt+"\n") || !strings.Contains(out, "Declined") {
+			if code != 1 || err != "" || !strings.Contains(out, "\n\n"+tc.prompt+"\n") || strings.Contains(out, "\n\n\n"+tc.prompt) || !strings.Contains(out, "Declined") {
 				t.Fatalf("got %d\n%s\n%s", code, out, err)
 			}
 		})
@@ -541,11 +633,11 @@ func TestInitWorkerPermissions(t *testing.T) {
 			if code != 0 || errOut != "" {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
-			want := "Worker permissions:\n" +
-				"  claude    " + tc.permissions + "\n" +
-				"  codex     edits files and runs commands inside codex's workspace-write sandbox\n" +
-				"  kimi      edits files and runs commands headless, with no approval prompts\n" +
-				"  opencode  edits files; no shell\n"
+			want := "  Worker permissions:\n" +
+				"    claude    " + tc.permissions + "\n" +
+				"    codex     edits files and runs commands inside codex's workspace-write sandbox\n" +
+				"    kimi      edits files and runs commands headless, with no approval prompts\n" +
+				"    opencode  edits files; no shell\n"
 			if !strings.Contains(out, want) {
 				t.Errorf("permissions table missing:\n%s", out)
 			}
@@ -565,7 +657,7 @@ func TestInitExistingProjectDiffAndOrigin(t *testing.T) {
 	fakeInitPATH(t, "claude", "codex")
 	args := []string{"--probe", "--agent", "harness=claude,model=sonnet,account=work,effort=high,classes=review+answer,tools=none", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex", "--check", "new check"}
 	code, out, err := initDo(t, testsupport.ShortStateDir(t), "", args...)
-	if code != 0 || !strings.Contains(out, "--- existing") || !strings.Contains(out, `+default_check: "new check" # retain this comment`) {
+	if code != 0 || !strings.Contains(out, "\n      --- existing\n") || !strings.Contains(out, "\n      "+`+default_check: "new check" # retain this comment`) {
 		t.Fatalf("%d %s %s", code, out, err)
 	}
 	got, _ := os.ReadFile(engine.ProjectConfigPath)

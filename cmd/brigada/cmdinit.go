@@ -108,6 +108,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	reader := bufio.NewReader(projectStdin)
 	canAsk := !*yes && !*probe
+	asked := false
 	if canAsk {
 		fmt.Fprint(stdout, "brigada runs coding tasks on the agent CLIs you are signed in to. A foreman\n(an agent session) turns your request into a plan of tasks; a runner in the\nbackground runs each task in its own git worktree, runs your check, and has\nan agent of another model family review it. Init asks a few questions, shows\nwhat it will write and start, and changes nothing until you confirm.\n\n")
 	}
@@ -119,6 +120,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if !canAsk {
 			return "", nil
 		}
+		asked = true
 		if terminal {
 			fmt.Fprint(stdout, prompt)
 		} else {
@@ -365,8 +367,11 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil {
 		return usagef(stderr, "%v", err)
 	}
+	if asked {
+		fmt.Fprintln(stdout)
+	}
 	printInitAgents(stdout, usable, len(families), *chosen)
-	fmt.Fprintf(stdout, "Check after every task: %s (init does not run it; edit .brigada/project.yaml to change it)\nWorker permissions:\n", *check)
+	fmt.Fprintf(stdout, "  Check after every task: %s (init does not run it; edit .brigada/project.yaml to change it)\n  Worker permissions:\n", *check)
 	for _, a := range adverts {
 		var permissions string
 		switch a.Harness {
@@ -382,10 +387,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		case "opencode":
 			permissions = "edits files; no shell"
 		}
-		fmt.Fprintf(stdout, "  %-9s %s\n", a.Harness, permissions)
+		fmt.Fprintf(stdout, "    %-9s %s\n", a.Harness, permissions)
 	}
-	fmt.Fprintln(stdout, "Background: the engine starts when a command needs it and exits after 30 idle minutes.")
-	fmt.Fprintf(stdout, "  The runner starts now and keeps running; log: %s; stop it with: brigada stop\n", filepath.Join(rt.stateDir, "runner.log"))
 	var wiring []wireFile
 	if !*noWiring && probes["claude"].installed {
 		wiring = planWiring(root)
@@ -406,6 +409,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			fmt.Fprintf(stdout, "  %s: work as workers only; nothing to set up.\n", strings.Join(workers, ", "))
 		}
 	}
+	fmt.Fprintln(stdout, "  Background: the engine starts when a command needs it and exits after 30 idle minutes.")
+	fmt.Fprintf(stdout, "    The runner starts now and keeps running; log: %s; stop it with: brigada stop\n", filepath.Join(rt.stateDir, "runner.log"))
+	fmt.Fprintln(stdout)
 	if *probe {
 		fmt.Fprintln(stdout, "Probe only; nothing written or started. Re-run without --probe to confirm, or with --yes to apply.")
 		return 0
@@ -548,7 +554,7 @@ func initModelFamily(harness, model string) (string, error) {
 }
 
 func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agentSpec) {
-	fmt.Fprintln(w, "\nPlan\n  Agents (each implements, reviews and answers questions):")
+	fmt.Fprintln(w, "Plan\n  Agents (each implements, reviews and answers questions):")
 	for _, s := range agents {
 		family, _ := adapter.AgentFamily(s.harness, s.model)
 		switch family {
@@ -614,19 +620,19 @@ func initOrigin(ctx context.Context, root string) (string, string, error) {
 }
 
 func printInitDiff(w io.Writer, old, next []byte) {
-	fmt.Fprintf(w, "Diff for %s:\n--- existing\n+++ proposed\n", engine.ProjectConfigPath)
+	fmt.Fprintf(w, "      Diff for %s:\n      --- existing\n      +++ proposed\n", engine.ProjectConfigPath)
 	if bytes.Equal(old, next) {
-		fmt.Fprintln(w, "(unchanged)")
+		fmt.Fprintln(w, "      (unchanged)")
 		return
 	}
 	// A complete replacement hunk makes every retained comment/setting visible.
 	a, b := strings.Split(strings.TrimSuffix(string(old), "\n"), "\n"), strings.Split(strings.TrimSuffix(string(next), "\n"), "\n")
-	fmt.Fprintf(w, "@@ -1,%d +1,%d @@\n", len(a), len(b))
+	fmt.Fprintf(w, "      @@ -1,%d +1,%d @@\n", len(a), len(b))
 	for _, line := range a {
-		fmt.Fprintln(w, "-"+line)
+		fmt.Fprintln(w, "      -"+line)
 	}
 	for _, line := range b {
-		fmt.Fprintln(w, "+"+line)
+		fmt.Fprintln(w, "      +"+line)
 	}
 }
 

@@ -36,7 +36,7 @@ const (
 // no project-scope path is verified, so the user-level command is the user's
 // to run (§4.6 "What the facts allow", item 7 approvals).
 const codexWiringText = `  Codex (optional: only to plan from your own Codex session). Run once yourself; it registers brigada for Codex in every project, under the name brigada-foreman so it doesn't replace another brigada server you may have:
-      codex mcp add brigada-foreman -- brigada mcp --foreman
+    codex mcp add brigada-foreman -- brigada mcp --foreman
     For codex exec, see the GUIDE section on the foreman's harness.
 `
 
@@ -185,6 +185,12 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 			ordered = append(ordered, f)
 		}
 	}
+	pathWidth := 0
+	for _, f := range ordered {
+		if f.exists || f.changed() || f.err != nil {
+			pathWidth = max(pathWidth, len(f.rel))
+		}
+	}
 	for _, f := range ordered {
 		if !f.exists && !f.changed() && f.err == nil {
 			continue
@@ -216,7 +222,7 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 		if f.rel == wiringSettingsFile {
 			state += ", private (kept out of git)"
 		}
-		fmt.Fprintf(w, "    %-39s %s: %s\n", f.rel, state, purpose)
+		fmt.Fprintf(w, "    %-*s  %s: %s\n", pathWidth, f.rel, state, purpose)
 		if f.changed() {
 			if f.exists {
 				if f.rel == engine.ProjectConfigPath {
