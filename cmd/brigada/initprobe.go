@@ -97,30 +97,43 @@ func cheapHarnessCommand(ctx context.Context, harness string, args ...string) ([
 }
 
 func suggestInitDefaults(root string) (check, tools string, err error) {
+	check, tools, _, err = suggestInitDefaultsWithSource(root)
+	return
+}
+
+func suggestInitDefaultsWithSource(root string) (check, tools, source string, err error) {
 	exists := func(name string) bool { s, e := os.Stat(filepath.Join(root, name)); return e == nil && !s.IsDir() }
 	switch {
 	case exists("go.mod"):
-		return "go test ./...", strings.Join(claude.DefaultWorkerTools(), "+"), nil
+		return "go test ./...", strings.Join(claude.DefaultWorkerTools(), "+"), "go.mod", nil
 	case exists("package.json"):
 		data, e := os.ReadFile(filepath.Join(root, "package.json"))
 		if e != nil {
-			return "", "", e
+			return "", "", "", e
 		}
 		var pkg struct {
 			Scripts map[string]string `json:"scripts"`
 		}
 		if e = json.Unmarshal(data, &pkg); e != nil {
-			return "", "", fmt.Errorf("read package.json: %w", e)
+			return "", "", "", fmt.Errorf("read package.json: %w", e)
 		}
 		if strings.TrimSpace(pkg.Scripts["test"]) != "" {
-			return "npm test", "Bash(npm test:*)", nil
+			return "npm test", "Bash(npm test:*)", "package.json", nil
 		}
 	}
 	if exists("Cargo.toml") {
-		return "cargo test", "Bash(cargo test:*)", nil
+		return "cargo test", "Bash(cargo test:*)", "Cargo.toml", nil
 	}
-	if exists("pyproject.toml") || exists("pytest.ini") {
-		return "python -m pytest", "Bash(python -m pytest:*)", nil
+	if exists("uv.lock") {
+		return "uv run pytest", "Bash(uv run pytest:*)", "uv.lock", nil
 	}
-	return "", "", nil
+	if exists("poetry.lock") {
+		return "poetry run pytest", "Bash(poetry run pytest:*)", "poetry.lock", nil
+	}
+	for _, name := range []string{"pyproject.toml", "pytest.ini"} {
+		if exists(name) {
+			return "python -m pytest", "Bash(python -m pytest:*)", name, nil
+		}
+	}
+	return "", "", "", nil
 }

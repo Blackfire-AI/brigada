@@ -311,11 +311,20 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 	}
 	if *check == "" || *tools == "" {
-		suggestion, scope, err := suggestInitDefaults(root)
+		suggestion, scope, source, err := suggestInitDefaultsWithSource(root)
 		if err != nil {
 			return fail(stderr, err)
 		}
 		if *check == "" {
+			if canAsk && suggestion != "" {
+				answer, err := ask(fmt.Sprintf("Check to run after every task [%s] (from %s): ", suggestion, source), "--check COMMAND")
+				if err != nil {
+					return fail(stderr, err)
+				}
+				if answer != "" {
+					suggestion = answer
+				}
+			}
 			*check = suggestion
 		}
 		if *tools == "" {
@@ -356,11 +365,23 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		return usagef(stderr, "%v", err)
 	}
 	printInitAgents(stdout, usable, len(families), *chosen)
-	fmt.Fprintf(stdout, "Default check: %s (suggested only; not executed)\nWorker tools: %s (Claude workers only)\n", *check, *tools)
+	fmt.Fprintf(stdout, "Check after every task: %s (init does not run it; edit .brigada/project.yaml to change it)\nWorker permissions:\n", *check)
 	for _, a := range adverts {
-		if a.Tools != "" {
-			fmt.Fprintf(stdout, "  %s/%s effective worker tools: %s\n", a.Harness, a.Model, a.Tools)
+		var permissions string
+		switch a.Harness {
+		case "claude":
+			permissions = "edits files; no shell"
+			if a.Tools != "none" {
+				permissions = "edits files; shell limited to: " + a.Tools
+			}
+		case "codex":
+			permissions = "edits files and runs commands inside codex's workspace-write sandbox"
+		case "kimi":
+			permissions = "edits files and runs commands headless, with no approval prompts"
+		case "opencode":
+			permissions = "edits files; no shell"
 		}
+		fmt.Fprintf(stdout, "  %-9s %s\n", a.Harness, permissions)
 	}
 	fmt.Fprintf(stdout, "Register project and foreman; import %s; start engine on demand and one detached runner in %s.\n", engine.ProjectConfigPath, rt.stateDir)
 	if exists {
