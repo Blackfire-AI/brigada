@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
@@ -209,8 +211,8 @@ func TestWiringDamagedFilesAreReportedAndLeftAlone(t *testing.T) {
 				t.Fatal("file not planned")
 			}
 			var plan bytes.Buffer
-			printWiringPlan(&plan, files)
-			if !strings.Contains(plan.String(), tc.rel+": left alone, not changed (") {
+			printInitFiles(&plan, files, false)
+			if !strings.Contains(strings.Join(strings.Fields(plan.String()), " "), tc.rel+" left alone:") {
 				t.Errorf("missing damaged-file reason: %s", plan.String())
 			}
 			if err := applyWiring(files); err != nil {
@@ -254,10 +256,16 @@ func TestInitProbeListsWiringWritesNothing(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
-			for _, want := range []string{"Harness wiring", ".mcp.json: created", ".claude/settings.local.json: created", "brigada-foreman/SKILL.md: created", "codex mcp add brigada-foreman -- brigada mcp --foreman", "auto_review"} {
-				if strings.Contains(out, want) != tc.wantWiring {
+			for _, want := range []string{".mcp.json new:", ".claude/settings.local.json new, private (kept out of git):", "brigada-foreman/SKILL.md new:", "codex mcp add brigada-foreman -- brigada mcp --foreman"} {
+				if strings.Contains(strings.Join(strings.Fields(out), " "), want) != tc.wantWiring {
 					t.Errorf("%q present = %v, want %v\n%s", want, !tc.wantWiring, tc.wantWiring, out)
 				}
+			}
+			if !strings.Contains(out, "Files in this repository (brigada never commits them;") || !strings.Contains(strings.Join(strings.Fields(out), " "), ".brigada/project.yaml new:") {
+				t.Errorf("missing repository files block:\n%s", out)
+			}
+			if strings.Contains(out, "auto_review") || strings.Contains(out, "already") || strings.Contains(out, "ready") {
+				t.Errorf("unexpected setup/approval claim:\n%s", out)
 			}
 			for _, rel := range []string{".mcp.json", ".claude"} {
 				if _, err := os.Stat(rel); !os.IsNotExist(err) {
@@ -300,6 +308,91 @@ func TestInitProbeShowsDiffOfExistingWiring(t *testing.T) {
 	}
 }
 
+func TestInitNewFileContentsRequireVerbose(t *testing.T) {
+	for _, verbose := range []bool{false, true} {
+		t.Run(fmt.Sprint(verbose), func(t *testing.T) {
+			importRepo(t)
+			fakeInitPATH(t, "claude", "codex")
+			args := []string{"--probe", "--check", "true", "--tools", "none", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}
+			if verbose {
+				args = append(args, "--verbose")
+			}
+			code, out, errOut := initDo(t, filepath.Join(testsupport.ShortStateDir(t), "absent"), "", args...)
+			if code != 0 {
+				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+			}
+			if !verbose {
+				for _, content := range []string{"default_check:", `"mcpServers":`, `"hooks":`, "name: brigada-foreman"} {
+					if strings.Contains(out, content) {
+						t.Errorf("new file contents shown without --verbose (%q):\n%s", content, out)
+					}
+				}
+			}
+			project, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none")
+			if err != nil {
+				t.Fatal(err)
+			}
+			files := append([]wireFile{{rel: engine.ProjectConfigPath, next: project}}, planWiring(".")...)
+			previous := -1
+			for _, f := range files {
+				if f.exists || f.err != nil || f.state == "unchanged" {
+					continue
+				}
+				full := "      " + strings.Join(splitDiffLines(f.next), "\n      ") + "\n"
+				if strings.Contains(out, full) != verbose {
+					t.Errorf("%s full contents present = %v, want %v\n%s", f.rel, !verbose, verbose, out)
+				}
+				if !verbose && strings.Contains(out, "+++ b/"+f.rel) {
+					t.Errorf("new file %s printed as a diff\n%s", f.rel, out)
+				}
+				position := strings.Index(out, "    "+f.rel)
+				if position <= previous {
+					t.Errorf("%s missing or out of order\n%s", f.rel, out)
+				}
+				previous = position
+			}
+		})
+	}
+}
+
+func TestInitApplyPromptFileCounts(t *testing.T) {
+	for _, tc := range []struct {
+		files   int
+		running bool
+		want    string
+	}{
+		{1, false, "Write 1 file and start the runner?"},
+		{1, true, "Write 1 file?"},
+		{5, false, "Write 5 files and start the runner?"},
+		{5, true, "Write 5 files?"},
+	} {
+		if got := initApplyPrompt(tc.files, tc.running); got != tc.want {
+			t.Errorf("initApplyPrompt(%d, %v) = %q, want %q", tc.files, tc.running, got, tc.want)
+		}
+	}
+}
+
+func TestInitWorkerOnlyWiringNotes(t *testing.T) {
+	for _, workers := range [][]string{nil, {"kimi"}, {"opencode"}, {"kimi", "opencode"}} {
+		t.Run(strings.Join(workers, ","), func(t *testing.T) {
+			importRepo(t)
+			fakeInitPATH(t, append([]string{"claude"}, workers...)...)
+			code, out, errOut := initDo(t, filepath.Join(testsupport.ShortStateDir(t), "absent"), "", "--probe", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--signed-in", "claude", "--check", "true", "--tools", "none")
+			if code != 0 {
+				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+			}
+			note := ": work as workers only; nothing to set up."
+			if len(workers) == 0 {
+				if strings.Contains(out, note) {
+					t.Errorf("worker note without installed workers:\n%s", out)
+				}
+			} else if !strings.Contains(out, strings.Join(workers, ", ")+note) {
+				t.Errorf("missing installed-worker note:\n%s", out)
+			}
+		})
+	}
+}
+
 func TestWiringMigratesOldInstallAndStaysUnchanged(t *testing.T) {
 	root := wireRepo(t)
 	shared := `{
@@ -315,7 +408,7 @@ func TestWiringMigratesOldInstallAndStaysUnchanged(t *testing.T) {
 	wireWrite(t, root, wiringSharedSettingsFile, shared)
 	files := planWiring(root)
 	var plan bytes.Buffer
-	printWiringPlan(&plan, files)
+	printInitFiles(&plan, files, false)
 	if !strings.Contains(plan.String(), "--- a/"+wiringSharedSettingsFile) || !strings.Contains(plan.String(), "+++ b/"+wiringSharedSettingsFile) {
 		t.Fatalf("missing migration diff:\n%s", plan.String())
 	}
@@ -371,8 +464,8 @@ func TestWiringPrivateSettingsExcludeAddedOnce(t *testing.T) {
 	wireWrite(t, root, ".git/info/exclude", "# user's exclude rules")
 	files := planWiring(root)
 	var plan bytes.Buffer
-	printWiringPlan(&plan, files)
-	if !strings.Contains(plan.String(), ".git/info/exclude: added") || !strings.Contains(plan.String(), "+/.claude/settings.local.json") {
+	printInitFiles(&plan, files, false)
+	if !strings.Contains(strings.Join(strings.Fields(plan.String()), " "), ".git/info/exclude changes:") || !strings.Contains(plan.String(), "+/.claude/settings.local.json") {
 		t.Fatalf("exclude missing from plan:\n%s", plan.String())
 	}
 	if got := wireRead(t, root, ".git/info/exclude"); got != "# user's exclude rules" {
