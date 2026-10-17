@@ -44,8 +44,8 @@ func TestRunnerHarnessRegisters(t *testing.T) {
 		name, harness, model, family string
 		agentForm                    bool
 	}{
-		{"kimi default", "kimi", "default", "kimi", false},
-		{"codex default", "codex", "default", "codex", false},
+		{"kimi default", "kimi", "default", "moonshot", false},
+		{"codex default", "codex", "default", "openai", false},
 		{"opencode default", "opencode", "default", "opencode", false},
 		{"opencode model shorthand", "opencode", "provider/model", "opencode", false},
 		{"opencode model agent flag", "opencode", "provider/model", "opencode", true},
@@ -63,8 +63,8 @@ func TestResolveRunnerAgentModels(t *testing.T) {
 		harness, model, wantModel, wantFamily string
 	}{
 		{"claude", "", "sonnet", "anthropic"},
-		{"codex", "", "default", "codex"},
-		{"kimi", "", "default", "kimi"},
+		{"codex", "", "default", "openai"},
+		{"kimi", "", "default", "moonshot"},
 		{"opencode", "", "default", "opencode"},
 		{"opencode", "zai-coding-plan/glm-5.3", "zai-coding-plan/glm-5.3", "zhipu"},
 		{"opencode", "glm-5.3", "glm-5.3", "zhipu"},

@@ -6,12 +6,20 @@ import (
 	"unicode"
 )
 
-// AgentFamily uses the model's family, or the harness for a CLI-default model.
+// AgentFamily uses the model's family, including known CLI defaults. OpenCode's
+// default can serve any provider, so its family is unknown (empty, without error).
 // For an unknown alias it returns the historical harness fallback and an error:
 // standalone runners support custom aliases, while init requires known models.
 func AgentFamily(harness, model string) (string, error) {
-	if model == "default" && (harness == "codex" || harness == "kimi" || harness == "opencode") {
-		return harness, nil
+	if model == "default" {
+		switch harness {
+		case "codex":
+			return "openai", nil
+		case "kimi":
+			return "moonshot", nil
+		case "opencode":
+			return "", nil
+		}
 	}
 	family, err := ModelFamily(model)
 	if err != nil {

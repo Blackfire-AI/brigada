@@ -33,9 +33,9 @@ func TestAgentFamily(t *testing.T) {
 		wantError              bool
 	}{
 		{"claude", "sonnet", "anthropic", false},
-		{"codex", "default", "codex", false},
-		{"kimi", "default", "kimi", false},
-		{"opencode", "default", "opencode", false},
+		{"codex", "default", "openai", false},
+		{"kimi", "default", "moonshot", false},
+		{"opencode", "default", "", false},
 		{"opencode", "zai-coding-plan/glm-5.3", "zhipu", false},
 		{"opencode", "glm-5.3", "zhipu", false},
 		{"opencode", "anthropic/claude-sonnet-4", "anthropic", false},

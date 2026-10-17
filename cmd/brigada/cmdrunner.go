@@ -380,6 +380,11 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 		ads = append(ads, ad)
 		// Keep support for custom aliases, using the shared harness fallback.
 		family, _ := adapter.AgentFamily(spec.harness, spec.model)
+		if family == "" {
+			// OpenCode's CLI default has no known provider; retain its
+			// historical registration fallback for standalone runners.
+			family = spec.harness
+		}
 		adverts = append(adverts, api.Agent{
 			Effort:  spec.effort,
 			Adapter: ad.Name(),

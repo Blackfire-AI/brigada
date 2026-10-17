@@ -83,6 +83,11 @@ func TestInitProbeAndRefusals(t *testing.T) {
 		{"incapable foreman", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=kimi,model=kimi-k2", "--signed-in", "claude,kimi", "--foreman", "kimi/kimi-k2"}, "", 1, "resumes headless"},
 		{"GLM second family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=zai-coding-plan/glm-5.3", "--signed-in", "claude,opencode"}, "", 0, "Zhipu (GLM)"},
 		{"runner defaults", []string{"--probe", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex"}, "", 0, "    codex     CLI default"},
+		{"codex default second family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=default", "--signed-in", "claude,codex"}, "", 0, "Review: 2 model families"},
+		{"opencode default unknown family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=default", "--signed-in", "claude,opencode"}, "", 1, "--accept-limited"},
+		{"opencode default limited acknowledged", []string{"--probe", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=default", "--signed-in", "claude,opencode"}, "", 0, "family: unknown (give provider/model to count it for review)"},
+		{"opencode needs provider", []string{"--probe", "--agent", "harness=opencode,model=glm"}, "", 1, "opencode needs provider/model, e.g. zai-coding-plan/glm-5.3"},
+		{"model whitespace", []string{"--probe", "--agent", "harness=claude,model=sonnet other"}, "", 1, "model must be a nonempty model identifier"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
@@ -180,7 +185,7 @@ func TestInitNonTerminalPrompts(t *testing.T) {
 		"Are you signed in to kimi? [y/N]",
 		"kimi model [CLI default] (Enter = default, - = don't use kimi):",
 		"Are you signed in to opencode? [y/N]",
-		"opencode model [CLI default] (Enter = default, - = don't use opencode):",
+		"opencode model as provider/model, e.g. zai-coding-plan/glm-5.3 [CLI default] (Enter = default, - = don't use opencode):",
 		"Write 4 files and start the runner? [y/N]",
 	}
 	previous := -1
@@ -200,7 +205,7 @@ func TestInitNonTerminalPrompts(t *testing.T) {
 		"changes nothing until you confirm.",
 		"Agent CLIs found:",
 		"  claude    sign-in can't be checked",
-		"  Review: 4 model families; a task is always reviewed by a family other than its author's.",
+		"  Review: 3 model families; a task is always reviewed by a family other than its author's.",
 		"  Foreman: claude/sonnet (the first agent that can resume a session headless; change it with --foreman HARNESS/MODEL)",
 	} {
 		if !strings.Contains(out, want) {
@@ -244,6 +249,66 @@ func TestInitNoInput(t *testing.T) {
 			}
 			if _, err := os.Stat(".brigada"); !os.IsNotExist(err) {
 				t.Fatalf("EOF wrote configuration: %v", err)
+			}
+		})
+	}
+}
+
+func TestInitModelRetries(t *testing.T) {
+	for _, tc := range []struct {
+		name, harness, answers, reason, model string
+		tries                                 int
+	}{
+		{"unknown then valid", "claude", "unknown\nsonnet\n", "cannot identify the family", "sonnet", 2},
+		{"whitespace then valid", "claude", "sonnet other\nsonnet\n", "model must be a nonempty model identifier", "sonnet", 2},
+		{"spaces then valid", "claude", "   \nsonnet\n", "model must be a nonempty model identifier", "sonnet", 2},
+		{"provider then valid", "opencode", "glm\nzai-coding-plan/glm-5.3\n", "opencode needs provider/model, e.g. zai-coding-plan/glm-5.3", "zai-coding-plan/glm-5.3", 2},
+		{"retry then default", "claude", "unknown\n\n", "cannot identify the family", "sonnet", 2},
+		{"retry then skip", "claude", "unknown\n-\n", "cannot identify the family", "", 2},
+		{"third answer valid", "claude", "unknown\nsonnet other\nsonnet\n", "cannot identify the family", "sonnet", 3},
+		{"three invalid answers", "claude", "unknown\nunknown\nunknown\n", "cannot identify the family", "", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			importRepo(t)
+			calls := fakeInitPATH(t, "claude", "codex", "opencode")
+			answers := tc.answers + "\n-\nn\n"
+			if tc.harness == "opencode" {
+				answers = "\n\n" + tc.answers + "n\n"
+			}
+			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
+			code, out, err := initDo(t, state, answers, "--signed-in", "claude,codex,opencode", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
+			if code != 1 || strings.Count(out, tc.harness+" model ") != tc.tries {
+				t.Fatalf("got %d\n%s\n%s", code, out, err)
+			}
+			if !strings.Contains(out, "\n  "+tc.reason) || !strings.Contains(out, "; try again.\n") {
+				t.Fatalf("missing indented retry reason:\n%s", out)
+			}
+			if tc.name == "three invalid answers" {
+				if !strings.Contains(err, "--agent claude: "+tc.reason) || strings.Contains(out, "\nPlan\n") {
+					t.Fatalf("did not stop with the model error after three attempts:\n%s\n%s", out, err)
+				}
+			} else {
+				if err != "" || !strings.Contains(out, "Declined") {
+					t.Fatalf("valid answer did not reach the plan:\n%s\n%s", out, err)
+				}
+				plan := out[strings.Index(out, "\nPlan\n"):]
+				if tc.model != "" && !strings.Contains(plan, tc.model) {
+					t.Fatalf("accepted model missing from plan:\n%s", plan)
+				}
+				if tc.name == "retry then skip" && strings.Contains(plan, "    claude ") {
+					t.Fatalf("skipped model in plan:\n%s", plan)
+				}
+			}
+			for _, path := range []string{state, ".brigada"} {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Errorf("model retry/refusal wrote %s: %v", path, err)
+				}
+			}
+			data, _ := os.ReadFile(calls)
+			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+				if !strings.HasSuffix(line, " --help") {
+					t.Errorf("unexpected harness execution: %s", line)
+				}
 			}
 		})
 	}
@@ -541,6 +606,10 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 	again, live, e := runnerstate.Running(filepath.Join(state, "runner"))
 	if e != nil || !live || again.PID != rec.PID {
 		t.Fatalf("runner replaced: %+v %v", again, e)
+	}
+	code, out, err = initDo(t, state, "unknown\nsonnet\ngpt-5\ny\n", "--signed-in", "claude,codex", "--no-wiring")
+	if code != 0 || strings.Count(out, "claude model [") != 2 || !strings.Contains(out, "Runner already running") {
+		t.Fatalf("interactive retry: %d\n%s\n%s", code, out, err)
 	}
 	data, _ := os.ReadFile(calls)
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
