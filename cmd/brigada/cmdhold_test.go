@@ -58,7 +58,7 @@ func TestHoldYieldMissingExplicitConfigLogsAndStops(t *testing.T) {
 	state := testsupport.ShortStateDir(t)
 	missing := filepath.Join(t.TempDir(), "missing-config")
 	var stderr bytes.Buffer
-	code := runHoldYield(context.Background(), []string{"--state-dir", state, "--config", missing}, &stderr)
+	code := runHoldYield(context.Background(), []string{"--state-dir", state, "--config", missing}, &bytes.Buffer{}, &stderr)
 	if code != 0 {
 		t.Fatalf("hook exited %d: %s", code, stderr.String())
 	}

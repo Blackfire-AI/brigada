@@ -17,19 +17,7 @@ import (
 // runHold is the hold command's dispatch (§4.6): `hold release`, the
 // user's forced release of a stuck interactive hold.
 func runHold(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		return usagef(stderr, "usage: brigada hold release --repo URL")
-	}
-	switch args[0] {
-	case "yield":
-		return runHoldYield(ctx, args[1:], stderr)
-	case "confirm":
-		return runHoldConfirm(args[1:], stderr)
-	case "release":
-		return runHoldRelease(ctx, args[1:], stdout, stderr)
-	default:
-		return usagef(stderr, "unknown hold subcommand %q; want confirm, release or yield", args[0])
-	}
+	return dispatch(ctx, args, stdout, stderr, "hold", "usage: brigada hold release --repo URL", "confirm, release or yield", holdCommands)
 }
 
 // runHoldConfirm is init's SessionStart hook (§4.6 "Identity"). The session
@@ -38,12 +26,15 @@ func runHold(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 // environment at hold_acquire. So this accepts the hook's input, changes
 // nothing and always exits zero, so the hook is installed and safe until
 // that API exists. Every failure is swallowed as in hold yield.
-func runHoldConfirm(args []string, stderr io.Writer) int {
-	fs := newFlagSet("hold confirm")
+func runHoldConfirm(args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("hold confirm",
+		"brigada hold confirm [--session ID]",
+		"Accept SessionStart hook input for correlation; always exit successfully.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	fs.String("session", os.Getenv("CLAUDE_CODE_SESSION_ID"), "harness session id (correlation only)")
 	var diagnostics bytes.Buffer
-	if code := common.parse(&diagnostics, args); code != 0 {
+	if code, stop := common.parse(stdout, &diagnostics, args); stop && code != 0 {
 		fmt.Fprintf(stderr, "brigada hold confirm: invalid hook arguments\n")
 	}
 	return 0
@@ -55,10 +46,13 @@ func runHoldConfirm(args []string, stderr io.Writer) int {
 // revokes the credential and bumps the fence before it re-evaluates the
 // wake, so the stuck session's next call meets stale_hold.
 func runHoldRelease(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("hold release")
+	fs := newFlagSet("hold release",
+		"brigada hold release --repo URL",
+		"Release a stuck interactive hold on the foreman.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	repo := fs.String("repo", "", "the project's repo URL")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if extra := fs.Args(); len(extra) > 0 {
@@ -94,8 +88,11 @@ func runHoldRelease(ctx context.Context, args []string, stdout, stderr io.Writer
 
 // runHoldYield is safe in a harness Stop hook: every failure, including flags
 // and local state resolution, exits zero and leaves a best-effort local log.
-func runHoldYield(ctx context.Context, args []string, stderr io.Writer) int {
-	fs := newFlagSet("hold yield")
+func runHoldYield(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("hold yield",
+		"brigada hold yield [--session ID]",
+		"Yield only the bound bridge hold from a Stop hook; always exit successfully.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	session := fs.String("session", os.Getenv("CLAUDE_CODE_SESSION_ID"), "harness session id (correlation only)")
 	var diagnostics bytes.Buffer
@@ -120,8 +117,11 @@ func runHoldYield(ctx context.Context, args []string, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "brigada hold yield: %v\n", err)
 		return 0
 	}
-	if code := common.parse(&diagnostics, args); code != 0 {
-		return report(errors.New("invalid hook arguments"))
+	if code, stop := common.parse(stdout, &diagnostics, args); stop {
+		if code != 0 {
+			return report(errors.New("invalid hook arguments"))
+		}
+		return 0
 	}
 	if len(fs.Args()) > 0 {
 		return report(errors.New("hold yield takes no positional arguments"))

@@ -68,7 +68,10 @@ func (l *idList) Set(s string) error {
 // checked-out branch of the user's own repository, one commit each, the
 // default check rerun, and the push command printed, never run.
 func runLand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("land")
+	fs := newFlagSet("land",
+		"brigada land [--onto BRANCH] [--repo URL] [--landed ID]... [--no-check] [--no-start] <task-id>...",
+		"Squash approved tasks onto the checked-out branch, rerun the check and print the push command.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	var opts landOptions
 	var landed idList
@@ -82,7 +85,7 @@ func runLand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var rest []string
 	remaining := args
 	for {
-		if code := common.parse(stderr, remaining); code != 0 {
+		if code, stop := common.parse(stdout, stderr, remaining); stop {
 			return code
 		}
 		left := fs.Args()

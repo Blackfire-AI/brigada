@@ -14,15 +14,7 @@ type agentResetter interface {
 }
 
 func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		return usagef(stderr, "usage: brigada agent reset <harness>/<model>")
-	}
-	switch args[0] {
-	case "reset":
-		return runAgentReset(ctx, args[1:], stdout, stderr)
-	default:
-		return usagef(stderr, "unknown agent subcommand %q; want reset", args[0])
-	}
+	return dispatch(ctx, args, stdout, stderr, "agent", "usage: brigada agent reset <harness>/<model>", "reset", agentCommands)
 }
 
 // runAgentReset clears a broken or cooling agent (§8: "or the user
@@ -32,10 +24,13 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 // has fixed a login or has waited out a quota means. The harness is the
 // part before the first slash, so a model name may hold slashes itself.
 func runAgentReset(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("agent reset")
+	fs := newFlagSet("agent reset",
+		"brigada agent reset [--no-start] <harness>/<model>",
+		"Clear a broken or cooling agent on every runner that offers it.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	rest := fs.Args()

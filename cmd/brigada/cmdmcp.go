@@ -18,14 +18,17 @@ import (
 // the protocol's, so nothing else is printed on either — the bridge's
 // own notes go to stderr.
 func runMCP(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("mcp")
+	fs := newFlagSet("mcp",
+		"brigada mcp [--foreman [URL] | --coordinator | --client | --socket PATH]",
+		"Serve the foreman, coordinator, client, or headless bridge tools over stdio.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	var socket string
 	fs.StringVar(&socket, "socket", "", "the engine API's Unix socket path (required for the bare headless bridge; interactive modes use --state-dir and --config)")
 	foreman := fs.Bool("foreman", false, "serve interactive foreman tools for this repository (or an explicit repo URL)")
 	coordinator := fs.Bool("coordinator", false, "serve the coordinator tools (list_projects, ask_foreman, status, history, plan_approve, plan_reject) over every project, with the state directory's client token")
 	client := fs.Bool("client", false, "serve the client tools (ask_foreman, status, history) with the state directory's client token, for any harness acting for the user")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	selectors := 0

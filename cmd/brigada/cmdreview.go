@@ -13,12 +13,15 @@ import (
 // review job, prints its id and exits; the verdict arrives through
 // history, status and notifications like any review's.
 func runReview(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("review")
+	fs := newFlagSet("review",
+		"brigada review --branch BRANCH [--repo URL] [--no-start]",
+		"Review a branch with an agent from another model family.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	branch := fs.String("branch", "", "the branch to review (required)")
 	repo := fs.String("repo", "", "the project's repo URL; empty names the engine's only project")
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if extra := fs.Args(); len(extra) > 0 || *branch == "" {

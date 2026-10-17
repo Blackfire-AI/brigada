@@ -18,25 +18,22 @@ type planDecider interface {
 const planUsage = "usage: brigada plan approve <id> | brigada plan reject <id>"
 
 func runPlan(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		return usagef(stderr, planUsage)
-	}
-	switch args[0] {
-	case "approve", "reject":
-		return runPlanDecision(ctx, args[0], args[1:], stdout, stderr)
-	default:
-		return usagef(stderr, "unknown plan subcommand %q; want approve or reject", args[0])
-	}
+	return dispatch(ctx, args, stdout, stderr, "plan", planUsage, "approve or reject", planCommands)
 }
 
 // runPlanDecision is the user's yes or no on a plan over the approval
 // limit (§6.3). Only the client token can say it: the foreman has no
 // way to confirm its own plans.
 func runPlanDecision(ctx context.Context, verb string, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("plan " + verb)
+	description := "Approve a plan waiting over the approval limit and queue its tasks."
+	if verb == "reject" {
+		description = "Reject a plan waiting over the approval limit and cancel its tasks."
+	}
+	fs := newFlagSet("plan "+verb, "brigada plan "+verb+" [--no-start] <id>", description)
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	rest := fs.Args()

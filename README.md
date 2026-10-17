@@ -50,6 +50,8 @@ brigada land <task-id>...   # squash approved tasks onto this branch; never push
 
 For several repositories (a coordinator session in the parent folder), the watching commands, configuration and the command reference, read the [guide](docs/GUIDE.md).
 
+`brigada help` lists commands. Use `brigada land --help` (or `brigada help land`) for a command's usage and flags, and `brigada project --help` for its subcommands. Each subcommand has help too, for example `brigada project foreman --help`.
+
 ## No telemetry
 
 brigada sends no usage data, analytics or crash reports anywhere. That is a promise about brigada, not about the CLIs it drives: each official CLI sends your prompts and the code it reads to its own model provider, as it does when you run it by hand, under your account and that vendor's terms. The runner also pushes task branches to your repository's git remote with your git credentials, and the engine mirrors plan files (titles, task states, dependencies, open questions) to the `brigada/plans` branch of that remote.

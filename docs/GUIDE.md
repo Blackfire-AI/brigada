@@ -458,7 +458,9 @@ Every key `brigada project set` and `project show` know, with defaults as the en
 
 ## 14. Command reference
 
-`brigada help` prints the command list. A command's flags go after its name; every command also takes `--state-dir DIR` and `--config PATH`, and most client commands take `--no-start` (fail instead of starting the engine). Exit codes: 0 ok, 1 error, 2 usage.
+`brigada help` prints the command list. `brigada <command> --help` (also `-h` or `-help`) prints its usage, description and flags; `brigada help <command> [<subcommand>]` prints the same help. For two-level commands such as `project`, `agent`, `plan`, `hold` and `task`, `--help` or `help` lists subcommands; use, for example, `brigada project foreman --help` for their flags. Help exits 0. Usage errors point to the relevant help command on stderr.
+
+A command's flags go after its name and before its positional arguments (diff, logs and land also accept flags after their IDs); every executable command also takes `--state-dir DIR` and `--config PATH`, and most client commands take `--no-start` (fail instead of starting the engine). Exit codes: 0 ok, 1 error, 2 usage. Init's setup refusals exit 1, and the hold hooks always exit 0.
 
 **Starting**
 
@@ -505,7 +507,7 @@ Every key `brigada project set` and `project show` know, with defaults as the en
 - `brigada engine` [`--idle-minutes N`]: run the engine in the foreground. You rarely need it; commands start it on demand.
 - `brigada recover` [`--snapshot-dir DIR`] [`--repo URL`]: rebuild a lost store; the engine must be stopped. See section 10.
 - `brigada version`: print the version.
-- `brigada help`: print the usage.
+- `brigada help [<command> [<subcommand>]]`: print top-level or command usage.
 
 ## 15. Known limits
 

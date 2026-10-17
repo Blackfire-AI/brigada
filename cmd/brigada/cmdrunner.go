@@ -28,7 +28,10 @@ import (
 // starts on demand here too (§13); before it is up the runner waits
 // and retries, which is also how it survives an engine's restart.
 func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("runner")
+	fs := newFlagSet("runner",
+		"brigada runner [--agent SPEC]... [--harness HARNESS] [--model MODEL] [--classes CLASSES] [--agent-file PATH] [--worker-script PATH] [--labels LABELS] [--max-parallel N] [--no-start]",
+		"Run a runner that leases jobs, runs workers and checks, and pushes task branches.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	var (
 		harness      string
@@ -50,7 +53,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	agents := &agentSpecs{}
 	fs.Var(agents, "agent", "one offered agent, repeatable: harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]; account defaults to the harness name; effort is validated per harness (claude, codex, opencode; kimi has none); tools= (claude only) replaces the Go shell scope with Claude Code tool patterns, none = file tools only; replaces --harness/--model/--classes/--agent-file")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if extra := fs.Args(); len(extra) > 0 {

@@ -22,13 +22,16 @@ func (r *repoList) Set(v string) error { *r = append(*r, v); return nil }
 // lock refuses it otherwise. The tokens live in the state directory's
 // token file, outside the store, and stay as they are.
 func runRecover(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("recover")
+	fs := newFlagSet("recover",
+		"brigada recover [--snapshot-dir DIR] [--repo URL]...",
+		"Rebuild a lost store from the newest snapshot and repository plan files.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	var repos repoList
 	var snapshotDir string
 	fs.Var(&repos, "repo", "a repository URL whose plan files to apply, beyond the snapshot's projects (repeatable)")
 	fs.StringVar(&snapshotDir, "snapshot-dir", "", "the snapshot directory (default: the config file's snapshot_dir)")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if extra := fs.Args(); len(extra) > 0 {

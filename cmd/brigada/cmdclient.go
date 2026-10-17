@@ -18,11 +18,14 @@ import (
 // tasks and the "needs you" queue, plain text, one line each, the
 // sections rendered by api.StatusSections like the foreman's MCP tool.
 func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("status")
+	fs := newFlagSet("status",
+		"brigada status [--line] [--no-start]",
+		"Show the engine, jobs, plans and what needs your attention.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
 	line := fs.Bool("line", false, "print one short line for a terminal status bar; never starts the engine")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if extra := fs.Args(); len(extra) > 0 {
@@ -89,15 +92,7 @@ func statusLine(ctx context.Context, common *commonFlags, stdout io.Writer) int 
 // runTask is the task command's dispatch: `task submit`, the debug
 // submit path until the foreman exists (§12.1).
 func runTask(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		return usagef(stderr, "usage: brigada task submit --repo URL --base REF --spec FILE|- --check CMD [--harness claude]")
-	}
-	switch args[0] {
-	case "submit":
-		return runTaskSubmit(ctx, args[1:], stdout, stderr)
-	default:
-		return usagef(stderr, "unknown task subcommand %q; want submit", args[0])
-	}
+	return dispatch(ctx, args, stdout, stderr, "task", "usage: brigada task submit --repo URL --base REF --spec FILE|- --check CMD [--harness claude]", "submit", taskCommands)
 }
 
 // runTaskSubmit is the debug submit (§12.1): one task created whole —
@@ -105,7 +100,10 @@ func runTask(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 // worker prompt composed by the engine from the versioned template plus
 // the spec verbatim (§1.4, §5.3).
 func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("task submit")
+	fs := newFlagSet("task submit",
+		"brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title TITLE] [--harness HARNESS] [--no-start]",
+		"Submit one task directly, without the foreman.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	var (
 		repo    string
@@ -123,7 +121,7 @@ func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer)
 	fs.StringVar(&title, "title", "", "the task's title; default is the spec's first line")
 	fs.StringVar(&harness, "harness", "", "the harness that must run the job (default: any)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if extra := fs.Args(); len(extra) > 0 {
@@ -181,7 +179,10 @@ func readSpec(path string) (string, error) {
 // runHistory is the §9 timeline as plain text: events and messages
 // merged, oldest first, every page followed to the end.
 func runHistory(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("history")
+	fs := newFlagSet("history",
+		"brigada history [--task ID] [--job ID] [--limit N] [--no-start]",
+		"Show the timeline, optionally filtered by task or job.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	var (
 		task    int64
@@ -193,7 +194,7 @@ func runHistory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	fs.Int64Var(&job, "job", 0, "show one job's timeline")
 	fs.IntVar(&limit, "limit", 100, "page size, 1..500")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if extra := fs.Args(); len(extra) > 0 {
@@ -231,10 +232,13 @@ func runHistory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 
 // runCancel stops a live job (§12.1).
 func runCancel(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("cancel")
+	fs := newFlagSet("cancel",
+		"brigada cancel [--no-start] <job-id>",
+		"Cancel a live job.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	rest := fs.Args()

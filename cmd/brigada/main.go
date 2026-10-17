@@ -35,6 +35,7 @@ Commands:
 	ask <message>   Send the foreman a message without attaching.
 	hold release    Release a stuck interactive hold on the foreman (--repo).
 	hold yield      Stop hook: yield only the bound bridge hold; always exits 0.
+	hold confirm    SessionStart hook: accept session correlation; always exits 0.
 	review --branch <x>
 	                Review a branch with an agent of another family than
 	                its author's, with no plan or task (§7).
@@ -74,7 +75,8 @@ Commands:
 	recover         Rebuild a lost store from the newest snapshot and the
 	                plan files; the engine must be stopped (§6.4).
 	version         Print the brigada version and exit.
-	help            Print usage and exit.
+	help [command [subcommand]]
+	                Print top-level or command usage and exit.
 
 Common flags, after the command name and before its arguments:
 
@@ -84,13 +86,18 @@ Common flags, after the command name and before its arguments:
 	                  else ~/.config/brigada/config).
 
 Exit codes: 0 ok, 1 error, 2 usage.
+
+Use brigada <command> --help for its flags and arguments, or
+brigada <command> <subcommand> --help for a subcommand.
 `
 
 // command is one subcommand: its flags, parsed against args, and its
 // body. Commands print their own usage errors (exit 2) and their own
 // failures (exit 1); run only draws the map.
 type command struct {
-	name string
+	name        string
+	description string
+	subcommands map[string]command
 	// run parses args and executes. The ctx ends on SIGINT/SIGTERM.
 	run func(ctx context.Context, args []string, stdout, stderr io.Writer) int
 }
@@ -99,24 +106,25 @@ var commands = map[string]command{
 	"init":    {name: "init", run: runInit},
 	"attach":  {name: "attach", run: runAttach},
 	"ask":     {name: "ask", run: runAsk},
-	"hold":    {name: "hold", run: runHold},
+	"hold":    {name: "hold", run: runHold, subcommands: holdCommands},
 	"review":  {name: "review", run: runReview},
 	"engine":  {name: "engine", run: runEngine},
 	"runner":  {name: "runner", run: runRunner},
 	"mcp":     {name: "mcp", run: runMCP},
 	"status":  {name: "status", run: runStatus},
-	"task":    {name: "task", run: runTask},
-	"project": {name: "project", run: runProject},
+	"task":    {name: "task", run: runTask, subcommands: taskCommands},
+	"project": {name: "project", run: runProject, subcommands: projectCommands},
 	"history": {name: "history", run: runHistory},
 	"stats":   {name: "stats", run: runStats},
 	"cancel":  {name: "cancel", run: runCancel},
-	"agent":   {name: "agent", run: runAgent},
-	"plan":    {name: "plan", run: runPlan},
+	"agent":   {name: "agent", run: runAgent, subcommands: agentCommands},
+	"plan":    {name: "plan", run: runPlan, subcommands: planCommands},
 	"budget":  {name: "budget", run: runBudget},
 	"recover": {name: "recover", run: runRecover},
 	"diff":    {name: "diff", run: runDiff},
 	"land":    {name: "land", run: runLand},
 	"logs":    {name: "logs", run: runLogs},
+	"version": {name: "version", run: runVersion},
 }
 
 // run is the entry point of the brigada command. It writes to stdout and
@@ -128,10 +136,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runAttach(ctx, nil, stdout, stderr)
 	}
 	switch args[0] {
-	case "version":
-		fmt.Fprintf(stdout, "brigada %s\n", version.Version)
+	case "help":
+		if len(args) > 1 {
+			return run(ctx, append(append([]string{}, args[1:]...), "--help"), stdout, stderr)
+		}
+		fmt.Fprint(stdout, usage)
 		return 0
-	case "-h", "--help", "help":
+	case "-h", "--help", "-help":
 		fmt.Fprint(stdout, usage)
 		return 0
 	}
@@ -147,6 +158,20 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return cmd.run(ctx, args[1:], stdout, stderr)
 }
 
+func runVersion(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("version", "brigada version", "Print the brigada version and exit.")
+	stderr = commandStderr(stderr, fs.Name())
+	common := addCommon(fs)
+	if code, stop := common.parse(stdout, stderr, args); stop {
+		return code
+	}
+	if len(fs.Args()) != 0 {
+		return usagef(stderr, "version takes no positional arguments")
+	}
+	fmt.Fprintf(stdout, "brigada %s\n", version.Version)
+	return 0
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -156,7 +181,23 @@ func main() {
 // usagef prints a usage error and returns exit code 2.
 func usagef(stderr io.Writer, format string, args ...any) int {
 	fmt.Fprintf(stderr, "brigada: "+format+"\n", args...)
+	name := ""
+	if w, ok := stderr.(commandErrorWriter); ok {
+		name = " " + w.name
+	}
+	fmt.Fprintf(stderr, "Run 'brigada%s --help' for usage.\n", name)
 	return 2
+}
+
+// commandErrorWriter carries the command name to usagef, including errors
+// reported by shared helpers such as parseID.
+type commandErrorWriter struct {
+	io.Writer
+	name string
+}
+
+func commandStderr(stderr io.Writer, name string) io.Writer {
+	return commandErrorWriter{Writer: stderr, name: name}
 }
 
 // fail prints an error and returns exit code 1.

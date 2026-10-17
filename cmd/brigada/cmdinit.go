@@ -26,13 +26,10 @@ import (
 var initBinary string
 
 func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code int) {
-	// Init has one refusal status, including invalid or incomplete setup input.
-	defer func() {
-		if code != 0 {
-			code = 1
-		}
-	}()
-	fs := newFlagSet("init")
+	fs := newFlagSet("init",
+		"brigada init [--probe | --yes] [options] (inside one repository, or in a folder holding several: then --all selects them)",
+		"Probe and confirm setup of one repository or a folder of repositories.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	yes := fs.Bool("yes", false, "apply the displayed plan without prompting (does not confirm authentication)")
 	probe := fs.Bool("probe", false, "print the plan only; write nothing and start nothing")
@@ -54,18 +51,18 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 		return nil
 	})
-	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprintln(stdout, "Usage: brigada init [--probe | --yes] [options] (inside one repository, or in a folder holding several: then --all selects them)")
-		fs.SetOutput(stdout)
-		fs.PrintDefaults()
-		return 0
-	}
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if len(fs.Args()) != 0 {
 		return usagef(stderr, "init takes no positional arguments; run it inside one repository")
 	}
+	// Setup refusals retain init’s exit code 1; flag and argument errors above use 2.
+	defer func() {
+		if code != 0 {
+			code = 1
+		}
+	}()
 	toolsProvided := *tools != ""
 	if *yes && *probe {
 		return usagef(stderr, "--yes and --probe are mutually exclusive")

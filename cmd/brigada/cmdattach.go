@@ -35,11 +35,14 @@ import (
 // harness exits, when the hold is released with the session id the
 // chat ended on.
 func runAttach(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("attach")
+	fs := newFlagSet("attach",
+		"brigada attach [--force] [--no-start]",
+		"Attach to this repository’s foreman and chat.")
+	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	force := fs.Bool("force", false, "cancel a live foreman turn rather than wait for it to finish")
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
-	if code := common.parse(stderr, args); code != 0 {
+	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if extra := fs.Args(); len(extra) > 0 {
