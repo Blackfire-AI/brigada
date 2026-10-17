@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -80,8 +81,8 @@ func TestInitProbeAndRefusals(t *testing.T) {
 		{"non claude tools", []string{"--probe", "--agent", "harness=codex,model=gpt-5,tools=none"}, "", 1, "tools="},
 		{"bad effort", []string{"--probe", "--agent", "harness=codex,model=gpt-5,effort=bogus"}, "", 1, "effort"},
 		{"incapable foreman", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=kimi,model=kimi-k2", "--signed-in", "claude,kimi", "--foreman", "kimi/kimi-k2"}, "", 1, "resumes headless"},
-		{"GLM second family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=zai-coding-plan/glm-5.3", "--signed-in", "claude,opencode"}, "", 0, "family=zhipu"},
-		{"runner defaults", []string{"--probe", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex"}, "", 0, "harness=codex,model=default"},
+		{"GLM second family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=zai-coding-plan/glm-5.3", "--signed-in", "claude,opencode"}, "", 0, "Zhipu (GLM)"},
+		{"runner defaults", []string{"--probe", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex"}, "", 0, "    codex     CLI default"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
@@ -108,6 +109,9 @@ func TestInitProbeAndRefusals(t *testing.T) {
 			if strings.Contains(out, "ready") {
 				t.Errorf("probe/limited/refusal claimed ready: %s", out)
 			}
+			if (slices.Contains(tc.args, "--yes") || slices.Contains(tc.args, "--probe")) && strings.Contains(out, "brigada runs coding tasks") {
+				t.Errorf("noninteractive run printed the introduction: %s", out)
+			}
 		})
 	}
 }
@@ -121,12 +125,12 @@ func TestInitPromptDefaultsAndSkip(t *testing.T) {
 	}{
 		{
 			name: "blank uses every default", stdin: "\n\n\n\nn\n",
-			wantAgents: []string{"claude,model=sonnet", "codex,model=default", "kimi,model=default", "opencode,model=default"},
+			wantAgents: []string{"claude    sonnet", "codex     CLI default", "kimi      CLI default", "opencode  CLI default"},
 			want:       "Declined",
 		},
 		{
 			name: "dash skips accounts", stdin: "-\n\n-\n-\nn",
-			wantAgents: []string{"codex,model=default"}, wantSkipped: []string{"claude", "kimi", "opencode"},
+			wantAgents: []string{"codex     CLI default"}, wantSkipped: []string{"claude", "kimi", "opencode"},
 			want: "Declined",
 		},
 		{
@@ -143,12 +147,12 @@ func TestInitPromptDefaultsAndSkip(t *testing.T) {
 				t.Fatalf("got %d\n%s\n%s", code, out, err)
 			}
 			for _, agent := range tc.wantAgents {
-				if !strings.Contains(out, "  agent harness="+agent+",") {
+				if !strings.Contains(out, "    "+agent) {
 					t.Errorf("missing default agent %s in %s", agent, out)
 				}
 			}
 			for _, harness := range tc.wantSkipped {
-				if strings.Contains(out, "  agent harness="+harness+",") {
+				if strings.Contains(out, "    "+harness+" ") {
 					t.Errorf("registered skipped harness %s", harness)
 				}
 			}
@@ -164,23 +168,48 @@ func TestInitPromptDefaultsAndSkip(t *testing.T) {
 func TestInitNonTerminalPrompts(t *testing.T) {
 	importRepo(t)
 	fakeInitPATH(t, initHarnesses...)
-	code, out, err := initDo(t, testsupport.ShortStateDir(t), "\n\n\n\ny\ny\ny\ny\nn\n", "--check", "true", "--tools", "none")
+	code, out, err := initDo(t, testsupport.ShortStateDir(t), "y\n\ny\n\ny\n\ny\n\nn\n", "--check", "true", "--tools", "none")
 	if code != 1 || !strings.Contains(out, "Declined") || err != "" {
 		t.Fatalf("got %d\n%s\n%s", code, out, err)
 	}
-	for _, prompt := range []string{
-		"Model served by claude account [sonnet] (- to skip):",
-		"Model served by codex account [default] (- to skip):",
-		"Model served by kimi account [default] (- to skip):",
-		"Model served by opencode account [default] (- to skip):",
-		"Confirm claude account claude is signed in and serves sonnet? [y/N]",
-		"Confirm codex account codex is signed in and serves default? [y/N]",
-		"Confirm kimi account kimi is signed in and serves default? [y/N]",
-		"Confirm opencode account opencode is signed in and serves default? [y/N]",
-		"Apply this plan (including the file diff above)? [y/N]",
+	prompts := []string{
+		"Are you signed in to claude? [y/N]",
+		"claude model [sonnet] (Enter = default, - = don't use claude):",
+		"Are you signed in to codex? [y/N]",
+		"codex model [CLI default] (Enter = default, - = don't use codex):",
+		"Are you signed in to kimi? [y/N]",
+		"kimi model [CLI default] (Enter = default, - = don't use kimi):",
+		"Are you signed in to opencode? [y/N]",
+		"opencode model [CLI default] (Enter = default, - = don't use opencode):",
+		"Write 4 files and start the runner? [y/N]",
+	}
+	previous := -1
+	for _, prompt := range prompts {
+		position := strings.Index(out, "\n"+prompt+"\n")
+		if position < 0 || position <= previous {
+			t.Errorf("prompt is missing, out of order or not on its own line: %q\n%s", prompt, out)
+		}
+		previous = position
+	}
+	plan := strings.Index(out, "\nPlan\n")
+	if last := strings.Index(out, prompts[len(prompts)-2]); plan <= last || plan >= previous {
+		t.Errorf("plan must follow setup questions and precede confirmation:\n%s", out)
+	}
+	for _, want := range []string{
+		"brigada init: set up example.invalid/imported",
+		"changes nothing until you confirm.",
+		"Agent CLIs found:",
+		"  claude    sign-in can't be checked",
+		"  Review: 4 model families; a task is always reviewed by a family other than its author's.",
+		"  Foreman: claude/sonnet (the first agent that can resume a session headless; change it with --foreman HARNESS/MODEL)",
 	} {
-		if !strings.Contains(out, "\n"+prompt+"\n") {
-			t.Errorf("prompt is missing or not on its own line: %q\n%s", prompt, out)
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in %s", want, out)
+		}
+	}
+	for _, internal := range []string{"documented by --help", "agent harness=", "classes=implement+review+answer"} {
+		if strings.Contains(out, internal) {
+			t.Errorf("printed internal detail %q", internal)
 		}
 	}
 }
@@ -190,8 +219,8 @@ func TestInitNoInput(t *testing.T) {
 		name, stdin, want string
 		args              []string
 	}{
-		{"no model input", "", "--agent harness=claude", nil},
-		{"model input exhausted", "\n", "--agent harness=codex", nil},
+		{"no model input", "", "--signed-in claude", nil},
+		{"model input exhausted", "y\n", "--agent harness=claude", nil},
 		{"no authentication input", "", "--signed-in claude", []string{"--agent", "harness=claude"}},
 		{"no apply input", "", "--yes", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited"}},
 		{"no check input", "", "--check COMMAND", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--check="}},
@@ -210,11 +239,82 @@ func TestInitNoInput(t *testing.T) {
 					t.Errorf("missing %q in %q", want, err)
 				}
 			}
-			if strings.Contains(out, "  agent harness=") && tc.name == "no model input" {
+			if strings.Contains(out, "\nPlan\n") && tc.name == "no model input" {
 				t.Fatal("treated EOF as a default model answer")
 			}
 			if _, err := os.Stat(".brigada"); !os.IsNotExist(err) {
 				t.Fatalf("EOF wrote configuration: %v", err)
+			}
+		})
+	}
+}
+
+func TestInitQuestionsBeforePlan(t *testing.T) {
+	importRepo(t)
+	fakeInitPATH(t, initHarnesses...)
+	code, out, err := initDo(t, testsupport.ShortStateDir(t), "n\ny\n\ny\n\nn\ntrue\nnone\nn\n", "--no-wiring")
+	if code != 1 || err != "" || !strings.Contains(out, "Declined") {
+		t.Fatalf("got %d\n%s\n%s", code, out, err)
+	}
+	if strings.Contains(out, "claude model [") || strings.Contains(out, "opencode model [") {
+		t.Fatalf("asked for a model after sign-in was declined:\n%s", out)
+	}
+	lastQuestion := strings.Index(out, "Worker tools (required;")
+	for _, line := range []string{"\nPlan\n", "    codex     CLI default", "  Review:", "  Foreman:", "Default check:", "Register project and foreman"} {
+		if pos := strings.Index(out, line); lastQuestion < 0 || pos <= lastQuestion {
+			t.Errorf("plan line %q preceded the last setup question:\n%s", line, out)
+		}
+	}
+}
+
+func TestInitExplicitAccountQuestions(t *testing.T) {
+	importRepo(t)
+	fakeInitPATH(t, "claude", "codex")
+	code, out, err := initDo(t, testsupport.ShortStateDir(t), "y\ny\nn\n", "--agent", "harness=codex", "--agent", "harness=claude,account=work,classes=review", "--check", "true", "--tools", "none", "--no-wiring")
+	if code != 1 || err != "" || !strings.Contains(out, "Declined") {
+		t.Fatalf("got %d\n%s\n%s", code, out, err)
+	}
+	claude := strings.Index(out, "Are you signed in to claude account work? [y/N]")
+	codex := strings.Index(out, "Are you signed in to codex? [y/N]")
+	if claude < 0 || codex <= claude || strings.Contains(out, "codex account codex") {
+		t.Fatalf("incorrect sign-in question wording or order:\n%s", out)
+	}
+	if !strings.Contains(out, "family: Anthropic (review only)") || strings.Contains(out, "(implement, review, answer only)") {
+		t.Fatalf("incorrect agent classes display:\n%s", out)
+	}
+}
+
+func TestInitApplyPrompts(t *testing.T) {
+	for _, tc := range []struct {
+		name, prompt    string
+		exists, running bool
+	}{
+		{"write and start", "Write 1 files and start the runner? [y/N]", false, false},
+		{"write", "Write 1 files? [y/N]", false, true},
+		{"start", "Start the runner? [y/N]", true, false},
+		{"register", "Register the project? [y/N]", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			write := importRepo(t)
+			fakeInitPATH(t, "claude", "codex")
+			state := testsupport.ShortStateDir(t)
+			if tc.exists {
+				config, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none")
+				if err != nil {
+					t.Fatal(err)
+				}
+				write(string(config))
+			}
+			if tc.running {
+				release, err := runnerstate.Acquire(filepath.Join(state, "runner"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer release()
+			}
+			code, out, err := initDo(t, state, "n\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--check", "true", "--tools", "none", "--no-wiring")
+			if code != 1 || err != "" || !strings.Contains(out, "\n"+tc.prompt+"\n") || !strings.Contains(out, "Declined") {
+				t.Fatalf("got %d\n%s\n%s", code, out, err)
 			}
 		})
 	}
@@ -312,15 +412,18 @@ esac
 	}
 	for _, h := range []string{"claude", "codex"} {
 		p := probeHarness(context.Background(), h)
-		if !p.signedIn || !strings.Contains(p.evidence, "documented by --help") {
+		if !p.signedIn || p.status != "signed in" || !strings.Contains(p.evidence, "documented by --help") {
 			t.Fatalf("%s: %+v", h, p)
 		}
 		if strings.Contains(p.evidence, "never-print-me") {
 			t.Fatal("leaked authentication output")
 		}
 	}
-	if p := probeHarness(context.Background(), "kimi"); p.signedIn {
-		t.Fatal("assumed kimi authenticated")
+	if p := probeHarness(context.Background(), "kimi"); p.signedIn || p.status != "sign-in can't be checked" {
+		t.Fatalf("unexpected kimi status: %+v", p)
+	}
+	if p := probeHarness(context.Background(), "opencode"); p.installed || p.status != "not installed" {
+		t.Fatalf("unexpected missing CLI status: %+v", p)
 	}
 	data, _ := os.ReadFile(calls)
 	if strings.Contains(string(data), "kimi ") {
@@ -329,6 +432,24 @@ esac
 	// A status word in prose is not a documented command.
 	if helpNamesCommand("Use status to check your job", "status") {
 		t.Fatal("matched prose")
+	}
+}
+
+func TestInitSignedOutStatus(t *testing.T) {
+	importRepo(t)
+	fakeInitPATH(t, "claude", "codex")
+	for _, h := range []string{"claude", "codex"} {
+		parent, status := "auth", `{"loggedIn":false}`
+		if h == "codex" {
+			parent, status = "login", "Not logged in"
+		}
+		script := "#!/bin/sh\ncase \"$*\" in\n --help) echo '  " + parent + "  Authentication' ;;\n '" + parent + " --help') echo '  status  Authentication status' ;;\n '" + parent + " status') echo '" + status + "' ;;\n *) exit 89 ;;\nesac\n"
+		if err := os.WriteFile(filepath.Join(os.Getenv("PATH"), h), []byte(script), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if p := probeHarness(context.Background(), h); p.signedIn || p.status != "not signed in" {
+			t.Fatalf("%s: %+v", h, p)
+		}
 	}
 }
 

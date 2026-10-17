@@ -18,6 +18,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
+	"github.com/Blackfire-AI/brigada/internal/runnerstate"
 	"github.com/mattn/go-isatty"
 )
 
@@ -88,7 +89,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "Init plan for %s\n", canon)
+	fmt.Fprintf(stdout, "brigada init: set up %s\n\n", canon)
 	rt, code := resolveRuntime(common, stderr)
 	if code != 0 {
 		return code
@@ -106,6 +107,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	reader := bufio.NewReader(projectStdin)
 	canAsk := !*yes && !*probe
+	if canAsk {
+		fmt.Fprint(stdout, "brigada runs coding tasks on the agent CLIs you are signed in to. A foreman\n(an agent session) turns your request into a plan of tasks; a runner in the\nbackground runs each task in its own git worktree, runs your check, and has\nan agent of another model family review it. Init asks a few questions, shows\nwhat it will write and start, and changes nothing until you confirm.\n\n")
+	}
 	terminal := false
 	if f, ok := projectStdin.(*os.File); ok {
 		terminal = isatty.IsTerminal(f.Fd())
@@ -134,21 +138,37 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		return v == "y" || v == "yes", err
 	}
 	probes := map[string]harnessProbe{}
+	fmt.Fprintln(stdout, "Agent CLIs found:")
 	for _, h := range initHarnesses {
 		p := probeHarness(ctx, h)
 		probes[h] = p
-		if !p.installed {
-			fmt.Fprintf(stdout, "  %s: not on PATH\n", h)
-			continue
+		fmt.Fprintf(stdout, "  %-9s %s\n", h, p.status)
+	}
+	fmt.Fprintln(stdout)
+	authenticate := func(spec agentSpec) (bool, error) {
+		if probes[spec.harness].signedIn || signedIn[spec.harness] {
+			return true, nil
 		}
-		fmt.Fprintf(stdout, "  %s: installed; %s\n", h, p.evidence)
+		name := spec.harness
+		if spec.accountLabel() != spec.harness {
+			name += " account " + spec.accountLabel()
+		}
+		return confirm("Are you signed in to "+name+"?", "--signed-in "+spec.harness)
 	}
 	if len(agents.specs) == 0 && canAsk {
 		for _, h := range initHarnesses {
 			if !probes[h].installed {
 				continue
 			}
-			model, err := ask(fmt.Sprintf("Model served by %s account [%s] (- to skip): ", h, runnerDefaultModel(h)), "--agent harness="+h+",model=MODEL")
+			authenticated, err := authenticate(agentSpec{harness: h})
+			if err != nil {
+				return fail(stderr, err)
+			}
+			if !authenticated {
+				continue
+			}
+			signedIn[h] = true
+			model, err := ask(fmt.Sprintf("%s model [%s] (Enter = default, - = don't use %s): ", h, initModelName(runnerDefaultModel(h)), h), "--agent harness="+h+",model=MODEL")
 			if err != nil {
 				return fail(stderr, err)
 			}
@@ -161,6 +181,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 	}
 	var usable []agentSpec
+	var available []agentSpec
 	seen := map[string]bool{}
 	families := map[string]bool{}
 	for _, spec := range agents.specs {
@@ -174,7 +195,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if spec.model == "" {
 			spec.model = runnerDefaultModel(spec.harness)
 		}
-		family, err := adapter.AgentFamily(spec.harness, spec.model)
+		_, err := adapter.AgentFamily(spec.harness, spec.model)
 		if err != nil {
 			return usagef(stderr, "--agent %s: %v", spec.harness, err)
 		}
@@ -196,22 +217,31 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			fmt.Fprintf(stdout, "  skipping %s: not on PATH\n", spec.harness)
 			continue
 		}
-		authenticated := p.signedIn || signedIn[spec.harness]
-		if !authenticated {
-			authenticated, err = confirm("Confirm "+spec.harness+" account "+spec.accountLabel()+" is signed in and serves "+spec.model+"?", "--signed-in "+spec.harness)
+		available = append(available, spec)
+	}
+	// Keep all questions in CLI order, even when --agent flags use another order.
+	for _, h := range initHarnesses {
+		for _, spec := range available {
+			if spec.harness != h {
+				continue
+			}
+			authenticated, err := authenticate(spec)
 			if err != nil {
 				return fail(stderr, err)
 			}
+			signedIn[h] = authenticated
 		}
-		if !authenticated {
+	}
+	for _, spec := range available {
+		if !signedIn[spec.harness] {
 			fmt.Fprintf(stdout, "  skipping %s: authentication unconfirmed; sign in and pass --signed-in %s or confirm interactively\n", spec.harness, spec.harness)
 			continue
 		}
 		usable = append(usable, spec)
 		if slices.Contains(spec.classes, "review") {
+			family, _ := adapter.AgentFamily(spec.harness, spec.model)
 			families[family] = true
 		}
-		fmt.Fprintf(stdout, "  agent %s: family=%s classes=%s\n", spec.String(), family, strings.Join(spec.classes, "+"))
 	}
 	if len(usable) == 0 {
 		return fail(stderr, fmt.Errorf("zero usable agents; install and sign in to a supported harness, then name it with --agent and confirm authentication with --signed-in; nothing written or started"))
@@ -234,7 +264,6 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if chosen == nil {
 		return usagef(stderr, "--foreman must name a usable agent that resumes headless (claude/model or codex/model); none matched")
 	}
-	fmt.Fprintf(stdout, "Foreman: %s\n", agentName(chosen.harness, chosen.model, chosen.effort))
 	file := filepath.Join(root, filepath.FromSlash(engine.ProjectConfigPath))
 	if err := initSafeFile(file); err != nil {
 		return fail(stderr, err)
@@ -304,6 +333,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil {
 		return usagef(stderr, "%v", err)
 	}
+	printInitAgents(stdout, usable, len(families), *chosen)
 	fmt.Fprintf(stdout, "Default check: %s (suggested only; not executed)\nWorker tools: %s (Claude workers only)\n", *check, *tools)
 	for _, a := range adverts {
 		if a.Tools != "" {
@@ -331,7 +361,17 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		return 0
 	}
 	if !*yes {
-		apply, err := confirm("Apply this plan (including the file diff above)?", "--yes to apply the displayed plan")
+		files := 0
+		if !exists || !bytes.Equal(old, proposed) {
+			files++
+		}
+		for _, f := range wiring {
+			if f.changed() {
+				files++
+			}
+		}
+		_, running, _ := runnerstate.Running(runnerStateDir(rt))
+		apply, err := confirm(initApplyPrompt(files, running), "--yes to apply the displayed plan")
 		if err != nil {
 			return fail(stderr, err)
 		}
@@ -424,6 +464,52 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	fmt.Fprintln(stdout, "Next: brigada ask \"your task\" / brigada attach; brigada status. Open your harness in the repo to use mode A where it is wired (the hold-only bootstrap credential of design §12.1 is not built yet).")
 	return 0
+}
+
+func initModelName(model string) string {
+	if model == "default" {
+		return "CLI default"
+	}
+	return model
+}
+
+func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agentSpec) {
+	fmt.Fprintln(w, "\nPlan\n  Agents (each implements, reviews and answers questions):")
+	for _, s := range agents {
+		family, _ := adapter.AgentFamily(s.harness, s.model)
+		switch family {
+		case "anthropic":
+			family = "Anthropic"
+		case "openai":
+			family = "OpenAI"
+		case "moonshot":
+			family = "Moonshot"
+		case "zhipu":
+			family = "Zhipu (GLM)"
+		case "google":
+			family = "Google"
+		}
+		classes := ""
+		if len(s.classes) != 3 || !slices.Contains(s.classes, "implement") || !slices.Contains(s.classes, "review") || !slices.Contains(s.classes, "answer") {
+			classes = " (" + strings.Join(s.classes, ", ") + " only)"
+		}
+		fmt.Fprintf(w, "    %-9s %-25s family: %s%s\n", s.harness, initModelName(s.model), family, classes)
+	}
+	fmt.Fprintf(w, "  Review: %d model families; a task is always reviewed by a family other than its author's.\n", families)
+	fmt.Fprintf(w, "  Foreman: %s (the first agent that can resume a session headless; change it with --foreman HARNESS/MODEL)\n", agentName(foreman.harness, foreman.model, foreman.effort))
+}
+
+func initApplyPrompt(files int, running bool) string {
+	switch {
+	case files > 0 && !running:
+		return fmt.Sprintf("Write %d files and start the runner?", files)
+	case files > 0:
+		return fmt.Sprintf("Write %d files?", files)
+	case !running:
+		return "Start the runner?"
+	default:
+		return "Register the project?"
+	}
 }
 
 func initOrigin(ctx context.Context, root string) (string, string, error) {
