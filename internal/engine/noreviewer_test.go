@@ -32,6 +32,9 @@ func TestReviewUnservable(t *testing.T) {
 		want          bool
 	}{
 		{"one family only", []agent{{family: "anthropic", classes: review}}, "anthropic", 0, KindReview, true},
+		{"unknown family only", []agent{{family: "", classes: review}}, "anthropic", 0, KindReview, true},
+		{"same and unknown families", []agent{{family: "anthropic", classes: review}, {family: "", classes: review}}, "anthropic", 0, KindReview, true},
+		{"unknown and known other family", []agent{{family: "", classes: review}, {family: "google", classes: review}}, "anthropic", 0, KindReview, false},
 		{"other family ready", []agent{{family: "anthropic", classes: review}, {family: "google", classes: review}}, "anthropic", 0, KindReview, false},
 		{"other family cooling", []agent{{family: "anthropic", classes: review}, {family: "google", classes: review, cooling: true}}, "anthropic", 0, KindReview, false},
 		{"other family broken", []agent{{family: "anthropic", classes: review}, {family: "google", classes: review, health: "broken"}}, "anthropic", 0, KindReview, false},
@@ -40,6 +43,9 @@ func TestReviewUnservable(t *testing.T) {
 		{"retry: a second other-family agent remains", []agent{{family: "anthropic", classes: review}, {family: "google", classes: review}, {family: "openai", classes: review}}, "anthropic", 2, KindReview, false},
 		{"no agents at all", nil, "anthropic", 0, KindReview, true},
 		{"author without a family excludes nothing", []agent{{family: "anthropic", classes: []string{"implement"}}}, "", 0, KindReview, false},
+		{"no family exclusion allows unknown family", []agent{{family: "", classes: review}}, "", 0, KindReview, false},
+		{"unknown family retry excludes only agent", []agent{{family: "", classes: review}}, "", 1, KindReview, true},
+		{"unknown family retry has another agent", []agent{{family: "", classes: review}, {family: "", classes: review}}, "", 1, KindReview, false},
 		{"not a review job", []agent{{family: "anthropic", classes: review}}, "anthropic", 0, KindWork, false},
 	}
 	for i, tt := range tests {
@@ -77,7 +83,7 @@ func TestReviewUnservable(t *testing.T) {
 	}
 }
 
-const wantNoReviewer = "no reviewer: every agent offering review is of the author's family (anthropic); " +
+const wantNoReviewer = "no reviewer: needs a reviewer of another family than the author (anthropic); " +
 	"offer an agent of another family to the runner (--agent harness=…) or review by hand"
 
 // needsYouTask returns the task's needs-you entry, if any.
@@ -101,6 +107,7 @@ func (e *env) needsYouTask(task int64) (NeedsYouItem, bool) {
 func TestStatusListsAnUnservableReview(t *testing.T) {
 	e := newEnv(t)
 	author := e.agented("author", "anthropic", "implement", "review")
+	e.agented("unknown-reviewer", "", "review")
 	e.runToReview(author)
 
 	it, ok := e.needsYouTask(e.task)
@@ -138,12 +145,14 @@ func TestCoolingReviewerIsNotMissing(t *testing.T) {
 // when the review was unservable, and keeps the bare wording otherwise.
 func TestQueueTTLParkReasonNamesTheMissingReviewer(t *testing.T) {
 	for _, tt := range []struct {
-		name         string
-		otherFamily  bool
-		want, wantNo string
+		name          string
+		otherFamily   bool
+		unknownFamily bool
+		want, wantNo  string
 	}{
-		{"unservable", false, "no reviewer: no agent of a family other than anthropic offers review", "queue TTL exceeded"},
-		{"merely waiting", true, "queue TTL exceeded: no runner leased the job within", "no reviewer"},
+		{"unservable", false, false, "no reviewer: no agent of a family other than anthropic offers review", "queue TTL exceeded"},
+		{"unknown family unservable", false, true, "no reviewer: no agent of a family other than anthropic offers review", "queue TTL exceeded"},
+		{"merely waiting", true, false, "queue TTL exceeded: no runner leased the job within", "no reviewer"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			e := newEnvCfg(t, func(c *Config) { c.QueueTTL = 10 * time.Minute })
@@ -154,6 +163,11 @@ func TestQueueTTLParkReasonNamesTheMissingReviewer(t *testing.T) {
 				// reviewer whose account cools is no longer this case: the
 				// job is held until the cooling ends, see cooling_test.go.)
 				e.agented("reviewer", "google", "review")
+			}
+			if tt.unknownFamily {
+				runner := e.agented("unknown-reviewer", "", "review")
+				// Even cooling cannot hold a review this agent cannot take.
+				e.exec("UPDATE agents SET cooling_until = ? WHERE runner_id = ?", fmtTime(e.clock.Now().Add(time.Hour)), runner)
 			}
 			e.clock.Advance(11 * time.Minute)
 			rep := e.mustSweep()

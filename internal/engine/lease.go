@@ -777,15 +777,15 @@ func runnerHasAgentsTx(tx *sql.Tx, runner int64) (bool, error) {
 }
 
 // reviewAgentQualifies is the review placement's agent test (§7, §8):
-// another family than the excluded one, not the excluded agent, and
-// offering the review class. The excluded family and agent are the
-// author's and — on a retry — the first reviewer's; either left empty
-// (an agent-less author or reviewer) excludes nothing.
+// when a family is excluded, the agent needs a known different family;
+// it must also offer review and differ from the excluded agent. The
+// exclusions name the author's family and, on a retry, the first
+// reviewer's agent; empty values exclude nothing.
 func reviewAgentQualifies(id int64, family, classes, excludeFamily string, excludeAgent int64) bool {
 	switch {
 	case id == excludeAgent:
 		return false
-	case excludeFamily != "" && family == excludeFamily:
+	case excludeFamily != "" && (family == "" || family == excludeFamily):
 		return false
 	}
 	return agentOffersClass(classes, string(KindReview))

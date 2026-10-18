@@ -328,6 +328,10 @@ func TestReviewJobFamilyRule(t *testing.T) {
 
 	sameFamily := e.agented("same", "anthropic", "implement", "review") // the family, even review-capable
 	noReviewClass := e.agented("no-review", "google", "implement")      // another family, wrong classes
+	unknownFamily := e.agented("unknown", "", "review")
+	if got := e.leaseAny(unknownFamily); got != nil {
+		t.Errorf("a runner of unknown family leased job %d", got.JobID)
+	}
 	if got := e.leaseAny(sameFamily); got != nil {
 		t.Errorf("a runner of the author's family leased job %d", got.JobID)
 	}
@@ -338,10 +342,10 @@ func TestReviewJobFamilyRule(t *testing.T) {
 		t.Errorf("an agent-less runner leased job %d", got.JobID)
 	}
 
-	// A runner of both families gets the review through the other one:
-	// the first agent by id is the author's family and does not qualify,
-	// so the second is the pick.
+	// The mixed runner skips the unknown and author's families and
+	// picks its known other-family reviewer.
 	mixed, err := e.eng.Register(e.ctx, "mixed", 0, []AgentAdvert{
+		{Adapter: "fake", Harness: "mixed-unknown", Model: "default", Family: "", Account: "a", Classes: []string{"review"}},
 		{Adapter: "fake", Harness: "mixed-anthropic", Model: "m1", Family: "anthropic", Account: "a", Classes: []string{"review"}},
 		{Adapter: "fake", Harness: "mixed-google", Model: "m2", Family: "google", Account: "a", Classes: []string{"implement", "review"}},
 	})
@@ -355,6 +359,19 @@ func TestReviewJobFamilyRule(t *testing.T) {
 	want := e.int("SELECT id FROM agents WHERE runner_id = ? AND harness = 'mixed-google'", mixed)
 	if agent := e.int("SELECT COALESCE(agent_id, 0) FROM jobs WHERE id = ?", review); agent != want {
 		t.Errorf("review job agent = %d, want the other family's %d", agent, want)
+	}
+}
+
+func TestUnknownAuthorFamilyReview(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "", "implement")
+	review := e.runToReview(author)
+	if got := e.str("SELECT exclude_family FROM jobs WHERE id = ?", review); got != "" {
+		t.Fatalf("exclude_family = %q, want unknown", got)
+	}
+	reviewer := e.agented("reviewer", "", "review")
+	if got := e.leaseAny(reviewer); got == nil || got.JobID != review {
+		t.Errorf("unknown-family reviewer leased %+v, want job %d", got, review)
 	}
 }
 

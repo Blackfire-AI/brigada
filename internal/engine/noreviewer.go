@@ -8,7 +8,7 @@ import (
 
 // reviewUnservableTx reports whether a queued review job could never be
 // taken by any registered agent, even one ready and out of cooling: no
-// agent of a family other than the job's ExcludeFamily, other than its
+// agent of a known family other than the job's ExcludeFamily, other than its
 // ExcludeAgent (the retry case), offers the review class — the test
 // eligibleAgentsTx applies minus health and cooling. A cooling or broken
 // agent of the right family makes the job merely wait, never
@@ -37,7 +37,7 @@ func noReviewerEntry(family string) string {
 	if family == "" {
 		return "no reviewer: no agent offers review; offer an agent that does to the runner (--agent harness=…) or review by hand"
 	}
-	return "no reviewer: every agent offering review is of the author's family (" + family +
+	return "no reviewer: needs a reviewer of another family than the author (" + family +
 		"); offer an agent of another family to the runner (--agent harness=…) or review by hand"
 }
 

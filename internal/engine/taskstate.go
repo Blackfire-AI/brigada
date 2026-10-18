@@ -536,6 +536,7 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 		eventPayload{Status: taskReviewing, Branch: branch}, now); err != nil {
 		return err
 	}
+	// An unknown author family leaves ExcludeFamily empty; only an explicit agent exclusion applies.
 	exclude, err := agentFamilyTx(tx, job.AgentID)
 	if err != nil {
 		return err
