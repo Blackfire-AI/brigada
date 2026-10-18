@@ -830,6 +830,12 @@ func initFamilyName(family string) string {
 		return "Meta"
 	case "mistral":
 		return "Mistral"
+	case "xiaomi":
+		return "Xiaomi"
+	case "meituan":
+		return "Meituan"
+	case "nvidia":
+		return "NVIDIA"
 	default:
 		return family
 	}

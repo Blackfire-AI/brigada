@@ -119,7 +119,7 @@ func TestInitProbeAndRefusals(t *testing.T) {
 			}
 			data, _ := os.ReadFile(calls)
 			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-				if !strings.HasSuffix(line, " --help") && line != "opencode models" && line != "opencode providers list" && line != "codex debug models" && line != "codex debug models --bundled" {
+				if !strings.HasSuffix(line, " --help") && line != "opencode models" && line != "opencode models --verbose" && line != "opencode providers list" && line != "codex debug models" && line != "codex debug models --bundled" {
 					t.Errorf("guessed/paid invocation: %q", line)
 				}
 			}

@@ -121,6 +121,9 @@ func TestRunnerHarnessRegisters(t *testing.T) {
 		{"opencode model agent flag", "opencode", "provider/model", "opencode", true},
 		{"opencode GLM provider", "opencode", "zai-coding-plan/glm-5.3", "zhipu", true},
 		{"opencode GLM bare", "opencode", "glm-5.3", "zhipu", false},
+		{"opencode mimo", "opencode", "opencode/mimo-v2-flash-free", "xiaomi", true},
+		{"opencode longcat", "opencode", "opencode/longcat-flash-chat", "meituan", false},
+		{"opencode nemotron", "opencode", "opencode/nemotron-3-super-free", "nvidia", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			testRunnerHarnessRegisters(t, tc.harness, tc.model, tc.family, tc.agentForm)

@@ -421,7 +421,7 @@ func TestInitOpenCodeModelSource(t *testing.T) {
 		t.Fatalf("source = %+v", got)
 	}
 	data, err := os.ReadFile(calls)
-	if err != nil || string(data) != "opencode --help\nopencode models\nopencode providers list\n" {
+	if err != nil || string(data) != "opencode --help\nopencode models --help\nopencode models\nopencode providers list\n" {
 		t.Fatalf("unexpected calls %q: %v", data, err)
 	}
 }
@@ -433,11 +433,11 @@ func TestInitOpenCodeDiscoverySafety(t *testing.T) {
 		wantCalls                string
 	}{
 		{"unverified prose", "Use models or auth to inspect your setup", "exit 89", "exit 89", 0, 0, "opencode --help\n"},
-		{"models only", "  opencode models [provider]", "printf 'fixture/gpt-5\\nfixture/gpt-5\\ninvalid row\\n/providerless\\nprovider/\\n'", "exit 89", 1, 0, "opencode --help\nopencode models\n"},
+		{"models only", "  opencode models [provider]", "printf 'fixture/gpt-5\\nfixture/gpt-5\\ninvalid row\\n/providerless\\nprovider/\\n'", "exit 89", 1, 0, "opencode --help\nopencode models --help\nopencode models\n"},
 		{"auth only", "  opencode auth Manage credentials", "exit 89", "printf '● never-print-me oauth\\n'", 0, 1, "opencode --help\nopencode auth list\n"},
-		{"signed out", "  opencode models [provider]\n  opencode auth Manage credentials", "printf 'fixture/gpt-5\\n'", "printf '┌ Credentials /never-print-me\\n└ 0 credentials\\n'", 1, 0, "opencode --help\nopencode models\nopencode auth list\n"},
-		{"model error", "  opencode models [provider]\n  opencode auth Manage credentials", "printf 'never-print-me'; exit 1", "printf '● never-print-me oauth\\n'", 0, 1, "opencode --help\nopencode models\nopencode auth list\n"},
-		{"auth error", "  opencode models [provider]\n  opencode auth Manage credentials", "printf 'fixture/gpt-5\\n'", "printf '● never-print-me oauth\\n'; exit 1", 0, 0, "opencode --help\nopencode models\nopencode auth list\n"},
+		{"signed out", "  opencode models [provider]\n  opencode auth Manage credentials", "printf 'fixture/gpt-5\\n'", "printf '┌ Credentials /never-print-me\\n└ 0 credentials\\n'", 1, 0, "opencode --help\nopencode models --help\nopencode models\nopencode auth list\n"},
+		{"model error", "  opencode models [provider]\n  opencode auth Manage credentials", "printf 'never-print-me'; exit 1", "printf '● never-print-me oauth\\n'", 0, 1, "opencode --help\nopencode models --help\nopencode models\nopencode auth list\n"},
+		{"auth error", "  opencode models [provider]\n  opencode auth Manage credentials", "printf 'fixture/gpt-5\\n'", "printf '● never-print-me oauth\\n'; exit 1", 0, 0, "opencode --help\nopencode models --help\nopencode models\nopencode auth list\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := fakeInitPATH(t, "opencode")
