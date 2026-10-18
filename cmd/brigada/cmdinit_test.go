@@ -434,8 +434,7 @@ func TestInitModelRetries(t *testing.T) {
 func TestInitQuestionsBeforePlan(t *testing.T) {
 	// Claude is declined before its model menu; OpenCode is confirmed by
 	// its probe and skipped in its menu. Check/tools still precede the Plan.
-	// The single-foreman notice is now part of Step 2, so match the Plan
-	// foreman line by its existing explanation rather than its shared label.
+	// Match the complete Plan foreman line to avoid the Step 2 notice.
 	importRepo(t)
 	fakeInitPATH(t, initHarnesses...)
 	code, out, err := initDo(t, testsupport.ShortStateDir(t), "n\ny\n\ny\n\n\n-\ntrue\nnone\nn\n", "--no-wiring")
@@ -449,7 +448,7 @@ func TestInitQuestionsBeforePlan(t *testing.T) {
 		t.Fatalf("check without a build-file suggestion must have no default:\n%s", out)
 	}
 	lastQuestion := strings.Index(out, "Worker tools (required;")
-	for _, line := range []string{"\nPlan\n", "    codex     CLI default", "  Reviews:", "  Foreman: codex/default", "  Check:", "  In the background:"} {
+	for _, line := range []string{"\nPlan\n", "    codex     CLI default", "  Reviews:", "  Foreman: codex/CLI default\n", "  Check:", "  In the background:"} {
 		if pos := strings.Index(out, line); lastQuestion < 0 || pos <= lastQuestion {
 			t.Errorf("plan line %q preceded the last setup question:\n%s", line, out)
 		}
@@ -470,7 +469,7 @@ func TestInitExplicitAccountQuestions(t *testing.T) {
 	if claude < 0 || codex <= claude || strings.Contains(out, "codex account codex") {
 		t.Fatalf("incorrect sign-in question wording or order:\n%s", out)
 	}
-	if !strings.Contains(out, "  Pick 1-2 [2]:") || !strings.Contains(out, "  Foreman: codex/default\n") {
+	if !strings.Contains(out, "  Pick 1-2 [2]:") || !strings.Contains(out, "  Foreman: codex/CLI default\n") {
 		t.Fatalf("did not preserve flag-order foreman default:\n%s", out)
 	}
 	if !strings.Contains(strings.Join(strings.Fields(out), " "), "Anthropic reviews only") || strings.Contains(out, "(implement, review, answer only)") {
@@ -993,6 +992,78 @@ func TestInitInteractiveTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	out := initInteractiveTranscript(t, false)
+	if out != string(want) {
+		t.Fatalf("interactive transcript:\n%s\nwant:\n%s", out, want)
+	}
+}
+
+func TestInitInteractiveLongModels(t *testing.T) {
+	out := initInteractiveTranscript(t, true)
+	if !strings.Contains(out, "  Foreman: codex/gpt-6.1-sol\n") {
+		t.Fatalf("foreman did not use resolved default:\n%s", out)
+	}
+	plan := strings.Split(strings.Split(out, "\nPlan\n  Agents:\n")[1], "  Reviews:")[0]
+	families := []string{"Anthropic", "OpenAI", "Moonshot", "Zhipu (GLM)"}
+	column := -1
+	rows := 0
+	for _, line := range strings.Split(plan, "\n") {
+		for _, family := range families {
+			if offset := strings.Index(line, family); offset >= 0 {
+				if column >= 0 && offset != column {
+					t.Errorf("family column = %d, want %d: %q", offset, column, line)
+				}
+				column = offset
+				rows++
+			}
+		}
+	}
+	if rows != 4 || !strings.Contains(plan, "kimi-code/kimi-for-coding") || !strings.Contains(plan, "zai-coding-plan/glm-5.3-highspeed") {
+		t.Fatalf("missing agent rows:\n%s", plan)
+	}
+	role := strings.Index(plan, "writes code,")
+	if role < 0 {
+		t.Fatalf("missing worker roles:\n%s", plan)
+	}
+	roleColumn := role - strings.LastIndex(plan[:role], "\n") - 1
+	if !strings.Contains(plan, "\n"+strings.Repeat(" ", roleColumn)+"reviews\n") {
+		t.Fatalf("role continuation did not stay in its column:\n%s", plan)
+	}
+}
+
+func TestInitAgentsVeryLongModel(t *testing.T) {
+	for _, size := range []int{35, 100} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			foreman := agentSpec{harness: "codex", model: "default", effort: "high", classes: []string{"implement", "review"}}
+			agents := []agentSpec{
+				foreman,
+				{harness: "opencode", model: "zai-coding-plan/glm-" + strings.Repeat("x", size), classes: []string{"implement", "review"}},
+			}
+			sources := map[string]initModelSource{
+				"codex": {entries: []initModelEntry{{value: "default", name: "gpt-6.1-sol"}}},
+			}
+			var out bytes.Buffer
+			printInitAgents(&out, agents, 2, foreman, sources)
+			for _, line := range strings.Split(out.String(), "\n") {
+				if len([]rune(line)) >= 80 {
+					t.Errorf("line must be under 80 columns: %q", line)
+				}
+			}
+			for _, family := range []string{"OpenAI", "Zhipu (GLM)"} {
+				if !strings.Contains(out.String(), "\n"+strings.Repeat(" ", 14)+family) {
+					t.Errorf("family must start under the model column: %q\n%s", family, out.String())
+				}
+			}
+			if !strings.Contains(out.String(), "  Foreman: codex/gpt-6.1-sol@high\n") {
+				t.Errorf("foreman lost resolved default or effort:\n%s", out.String())
+			}
+		})
+	}
+}
+
+// Both transcript variants exercise the full interactive flow and refuse apply.
+func initInteractiveTranscript(t *testing.T, longModels bool) string {
+	t.Helper()
 	importRepo(t)
 	wireGit(t, ".", "config", "core.excludesFile", os.DevNull)
 	wireWrite(t, ".", ".gitignore", "/.claude/settings.local.json\n")
@@ -1023,20 +1094,26 @@ func TestInitInteractiveTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script = bytes.ReplaceAll(script, []byte("fixture/gpt-5"), []byte("zai-coding-plan/glm-5.3"))
+	model := "zai-coding-plan/glm-5.3"
+	if longModels {
+		model += "-highspeed"
+	}
+	script = bytes.ReplaceAll(script, []byte("fixture/gpt-5"), []byte(model))
 	script = bytes.ReplaceAll(script, []byte("fixture/glm-5.3"), []byte("zai-coding-plan/glm-5.2"))
 	if err := os.WriteFile(opencode, script, 0755); err != nil {
 		t.Fatal(err)
 	}
-	// Accept defaults, opt in to Kimi but leave it review-only, and pick
-	// OpenCode model 1. Decline only the final apply to keep the run read-only.
+	// The golden accepts defaults and leaves Kimi review-only. The long-model
+	// variant picks Haiku, a non-default Kimi model, and Codex as foreman.
+	// Both pick OpenCode model 1 and decline only the final apply.
 	state := filepath.Join(os.Getenv("HOME"), ".local", "state", "brigada")
-	code, out, errOut := initDo(t, state, "\n\ny\n\nN\n1\n\n\nn\n")
+	input := "\n\ny\n\nN\n1\n\n\nn\n"
+	if longModels {
+		input = "3\n\ny\n3\nN\n1\n2\n\nn\n"
+	}
+	code, out, errOut := initDo(t, state, input)
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
-	}
-	if out != string(want) {
-		t.Fatalf("interactive transcript:\n%s\nwant:\n%s", out, want)
 	}
 	for _, line := range strings.Split(out, "\n") {
 		if len([]rune(line)) >= 80 {
@@ -1051,6 +1128,7 @@ func TestInitInteractiveTranscript(t *testing.T) {
 			t.Fatalf("declined init wrote %s: %v", path, err)
 		}
 	}
+	return out
 }
 
 func TestInitForemanQuestion(t *testing.T) {
@@ -1162,7 +1240,7 @@ func TestInitOpenCodeMenuUnknownFamilies(t *testing.T) {
 				t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 			}
 			menu := strings.Split(strings.Split(out, "Which model should opencode run?\n")[1], "\nPlan\n")[0]
-			if !strings.Contains(menu, "2 more from `opencode models` aren't listed: brigada can't tell their model family, which it needs to pick reviewers.\n") || !strings.Contains(menu, tc.prompt) {
+			if !strings.Contains(menu, "    2 more from `opencode models` aren't listed: brigada can't tell their model\n    family, which it needs to pick reviewers.\n") || !strings.Contains(menu, tc.prompt) {
 				t.Fatalf("missing omitted count or incorrect prompt:\n%s", menu)
 			}
 			rows := regexp.MustCompile(`(?m)^\s+\d+  .*`).FindAllString(menu, -1)
