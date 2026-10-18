@@ -1,6 +1,10 @@
 package adapter
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 func TestModelFamily(t *testing.T) {
 	for _, tc := range []struct{ model, family string }{
@@ -35,6 +39,15 @@ func TestAgentFamily(t *testing.T) {
 		{"claude", "sonnet", "anthropic", false},
 		{"codex", "default", "openai", false},
 		{"kimi", "default", "moonshot", false},
+		{"kimi", "kimi-code/k3-256k", "moonshot", false},
+		{"kimi", "k3", "moonshot", false},
+		{"kimi", "kimi-code/kimi-for-coding", "moonshot", false},
+		{"kimi", "custom/unknown", "moonshot", false},
+		{"kimi", "provider/claude-sonnet-4", "anthropic", false},
+		{"kimi", "gpt-5", "openai", false},
+		{"kimi", "", "kimi", true},
+		{"kimi", "k3 other", "kimi", true},
+		{"kimi", "k3\nSECRET", "kimi", true},
 		{"opencode", "default", "", false},
 		{"opencode", "zai-coding-plan/glm-5.3", "zhipu", false},
 		{"opencode", "glm-5.3", "zhipu", false},
@@ -48,5 +61,18 @@ func TestAgentFamily(t *testing.T) {
 				t.Fatalf("got %q, %v; want %q, error=%v", family, err, tc.family, tc.wantError)
 			}
 		})
+	}
+}
+
+func TestModelFamilyUnknownErrorListsPrefixes(t *testing.T) {
+	var prefixes []string
+	for _, group := range modelFamilyPrefixes {
+		prefixes = append(prefixes, group.prefixes...)
+	}
+	const model = "opencode/beam-free"
+	_, err := ModelFamily(model)
+	want := fmt.Sprintf("cannot identify the family of model %q: brigada recognises model names starting with %s", model, strings.Join(prefixes, ", "))
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,7 +45,7 @@ case "$*" in
      echo 'Commands: no verified authentication status here'
    fi
    exit 0 ;;
- models) [ "${0##*/}" = opencode ] || exit 89; printf 'fixture/model-one\nfixture/model-two\n' ;;
+ models) [ "${0##*/}" = opencode ] || exit 89; printf 'fixture/gpt-5\nfixture/glm-5.3\n' ;;
  'auth list') [ "${0##*/}" = opencode ] || exit 89; printf '┌ Credentials\n● Provider one oauth\n● Provider two api\n└ 2 credentials\n' ;;
  *) echo 'unexpected harness invocation' >&2; exit 89 ;;
 esac
@@ -375,6 +376,7 @@ func TestInitModelRetries(t *testing.T) {
 		{"whitespace then valid", "claude", "sonnet other\nsonnet\n", "model must be a nonempty model identifier", "sonnet", 2},
 		{"spaces then valid", "claude", "   \nsonnet\n", "model must be a nonempty model identifier", "sonnet", 2},
 		{"provider then valid", "opencode", "glm\nzai-coding-plan/glm-5.3\n", "opencode needs provider/model, e.g. zai-coding-plan/glm-5.3", "zai-coding-plan/glm-5.3", 2},
+		{"unknown provider model then valid", "opencode", "opencode/beam-free\n1\n", "cannot identify the family", "fixture/gpt-5", 2},
 		{"retry then default", "claude", "unknown\n\n", "cannot identify the family", "sonnet", 2},
 		{"retry then skip", "claude", "unknown\n-\n", "cannot identify the family", "", 2},
 		{"third answer valid", "claude", "unknown\nsonnet other\nsonnet\n", "cannot identify the family", "sonnet", 3},
@@ -395,11 +397,11 @@ func TestInitModelRetries(t *testing.T) {
 			if code != 1 || strings.Count(out, map[string]string{"claude": "    Pick 1-3 or -, or type a model id [1]:", "opencode": "    Pick 1-2 or -, or type provider/model [-]:"}[tc.harness]) != tc.tries {
 				t.Fatalf("got %d\n%s\n%s", code, out, err)
 			}
-			if !strings.Contains(out, "\n  "+tc.reason) || !strings.Contains(out, "; try again.\n") {
+			if !strings.Contains(out, "\n  "+tc.reason) || !strings.Contains(out, "; try again.\n") || !strings.Contains(out, "pick a numbered entry, or type a model whose name says its family") {
 				t.Fatalf("missing indented retry reason:\n%s", out)
 			}
 			if tc.name == "three invalid answers" {
-				if !strings.Contains(err, "--agent claude: "+tc.reason) || strings.Contains(out, "\nPlan\n") {
+				if !strings.Contains(err, "--agent claude: "+tc.reason) || !strings.Contains(err, "pick a numbered entry, or type a model whose name says its family") || strings.Contains(out, "\nPlan\n") {
 					t.Fatalf("did not stop with the model error after three attempts:\n%s\n%s", out, err)
 				}
 			} else {
@@ -1021,8 +1023,8 @@ func TestInitInteractiveTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script = bytes.ReplaceAll(script, []byte("fixture/model-one"), []byte("zai-coding-plan/glm-5.3"))
-	script = bytes.ReplaceAll(script, []byte("fixture/model-two"), []byte("zai-coding-plan/glm-5.2"))
+	script = bytes.ReplaceAll(script, []byte("fixture/gpt-5"), []byte("zai-coding-plan/glm-5.3"))
+	script = bytes.ReplaceAll(script, []byte("fixture/glm-5.3"), []byte("zai-coding-plan/glm-5.2"))
 	if err := os.WriteFile(opencode, script, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1133,5 +1135,97 @@ func TestInitUnconfirmedUseQuestions(t *testing.T) {
 				t.Errorf("number did not pick the second OpenCode model:\n%s", out)
 			}
 		})
+	}
+}
+
+func TestInitOpenCodeMenuUnknownFamilies(t *testing.T) {
+	for _, tc := range []struct {
+		name, models, answer, prompt string
+	}{
+		{"mixed", "opencode/beam-free\\nopencode/claude-sonnet-4\\nopencode/big-pickle\\nopencode/beam-free\\n", "1\n", "Pick 1 or -, or type provider/model [-]:"},
+		{"all unknown", "opencode/beam-free\\nopencode/big-pickle\\n", "opencode/claude-sonnet-4\n", "Pick -, or type provider/model [-]:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			importRepo(t)
+			fakeInitPATH(t, "codex", "opencode")
+			path := filepath.Join(os.Getenv("PATH"), "opencode")
+			script, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script = bytes.ReplaceAll(script, []byte("fixture/gpt-5\\nfixture/glm-5.3\\n"), []byte(tc.models))
+			if err := os.WriteFile(path, script, 0755); err != nil {
+				t.Fatal(err)
+			}
+			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "1\n"+tc.answer+"n\n", "--signed-in", "codex", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
+			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
+				t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
+			}
+			menu := strings.Split(strings.Split(out, "Which model should opencode run?\n")[1], "\nPlan\n")[0]
+			if !strings.Contains(menu, "2 more from `opencode models` aren't listed: brigada can't tell their model family, which it needs to pick reviewers.\n") || !strings.Contains(menu, tc.prompt) {
+				t.Fatalf("missing omitted count or incorrect prompt:\n%s", menu)
+			}
+			rows := regexp.MustCompile(`(?m)^\s+\d+  .*`).FindAllString(menu, -1)
+			if tc.name == "mixed" {
+				if len(rows) != 1 || strings.TrimSpace(rows[0]) != "1  opencode/claude-sonnet-4  Anthropic" {
+					t.Fatalf("numbered unknown model or missing family: %q", rows)
+				}
+			} else if len(rows) != 0 {
+				t.Fatalf("numbered unknown models: %q", rows)
+			}
+			if strings.Contains(menu, "beam-free") || strings.Contains(menu, "big-pickle") {
+				t.Fatalf("listed unknown model:\n%s", menu)
+			}
+		})
+	}
+}
+
+func TestInitEveryNumberedModelCanBePicked(t *testing.T) {
+	importRepo(t)
+	fakeInitPATH(t, initHarnesses...)
+	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".codex", "config.toml"), "model = \"gpt-6.1-sol\"\n")
+	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".kimi-code", "config.toml"), `default_model = "kimi-code/k3"
+[models."kimi-code/k3-256k"]
+[models."kimi-code/kimi-for-coding"]
+[models."kimi-code/kimi-for-coding-highspeed"]
+[models."provider/gemini-2.5-pro"]
+`)
+	args := []string{"--signed-in", strings.Join(initHarnesses, ","), "--foreman", "codex/default", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring"}
+	code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "1\n1\n-\n-\nn\n", args...)
+	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
+		t.Fatalf("baseline init = %d\n%s\n%s", code, out, errOut)
+	}
+	rowsPattern := regexp.MustCompile(`(?m)^\s+(\d+)  (\S+)  (\S+(?: \(GLM\))?)`)
+	for _, harness := range initHarnesses {
+		menu := strings.Split(strings.Split(out, "Which model should "+harness+" run?\n")[1], "    Pick ")[0]
+		rows := rowsPattern.FindAllStringSubmatch(menu, -1)
+		if len(rows) == 0 {
+			t.Fatalf("no numbered entries for %s:\n%s", harness, menu)
+		}
+		for _, row := range rows {
+			t.Run(harness+"/"+row[1], func(t *testing.T) {
+				answers := map[string]string{"claude": "1\n", "codex": "1\n", "kimi": "-\n", "opencode": "-\n"}
+				answers[harness] = row[1] + "\n"
+				if harness == "kimi" {
+					answers[harness] += "n\n" // Keep Kimi review-only.
+				}
+				var input strings.Builder
+				for _, h := range initHarnesses {
+					input.WriteString(answers[h])
+				}
+				input.WriteString("n\n")
+				code, out, errOut := initDo(t, testsupport.ShortStateDir(t), input.String(), args...)
+				if code != 1 || errOut != "" || !strings.Contains(out, "Declined") || strings.Contains(out, "try again") {
+					t.Fatalf("numbered entry %s rejected: %d\n%s\n%s", row[0], code, out, errOut)
+				}
+				plan := strings.Split(out, "\nPlan\n")[1]
+				for _, line := range strings.Split(plan, "\n") {
+					if strings.HasPrefix(line, "    "+harness+" ") && strings.Contains(line, row[2]) && strings.Contains(line, row[3]) {
+						return
+					}
+				}
+				t.Fatalf("picked entry missing model/family in plan:\n%s", plan)
+			})
+		}
 	}
 }

@@ -222,18 +222,22 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				width = max(width, len(initMenuModelName(entry)))
 			}
 			for _, entry := range entries {
-				fmt.Fprintf(stdout, "      %2d  %s", entry.id, initMenuModelName(entry))
+				family, _ := initModelFamily(h, entry.value)
+				fmt.Fprintf(stdout, "      %2d  %-*s  %s", entry.id, width, initMenuModelName(entry), initFamilyName(family))
 				if entry.note != "" {
 					note := entry.note
 					if home, err := os.UserHomeDir(); err == nil && home != "" {
 						note = strings.ReplaceAll(note, "("+home+string(os.PathSeparator), "(~/")
 					}
-					fmt.Fprintf(stdout, "%s%s", strings.Repeat(" ", width-len(initMenuModelName(entry))+2), note)
+					fmt.Fprintf(stdout, "  %s", note)
 				}
 				fmt.Fprintln(stdout)
 			}
 			if h != "kimi" {
 				fmt.Fprintf(stdout, "       -  don't use %s\n", h)
+			}
+			if sources[h].unknownCount > 0 {
+				fmt.Fprintf(stdout, "    %d more from `opencode models` aren't listed: brigada can't tell their model family, which it needs to pick reviewers.\n", sources[h].unknownCount)
 			}
 			defaultAnswer := "-"
 			if len(entries) > 0 && h != "opencode" {
@@ -270,9 +274,10 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				}
 				if _, err := initModelFamily(h, model); err != nil {
 					if attempt == 2 {
-						return usagef(stderr, "--agent %s: %v", h, err)
+						return usagef(stderr, "--agent %s: %v; pick a numbered entry, or type a model whose name says its family", h, err)
 					}
 					fmt.Fprintf(stdout, "  %v; try again.\n", err)
+					fmt.Fprintln(stdout, "  pick a numbered entry, or type a model whose name says its family")
 					continue
 				}
 				classes := splitList(defaultClasses)
@@ -795,26 +800,40 @@ func initAgentModelName(s agentSpec, sources map[string]initModelSource) string 
 	return initModelName(s.model)
 }
 
+func initFamilyName(family string) string {
+	switch family {
+	case "":
+		return "unknown family"
+	case "anthropic":
+		return "Anthropic"
+	case "openai":
+		return "OpenAI"
+	case "moonshot":
+		return "Moonshot"
+	case "zhipu":
+		return "Zhipu (GLM)"
+	case "google":
+		return "Google"
+	case "deepseek":
+		return "DeepSeek"
+	case "alibaba":
+		return "Alibaba"
+	case "meta":
+		return "Meta"
+	case "mistral":
+		return "Mistral"
+	default:
+		return family
+	}
+}
+
 func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agentSpec, sources map[string]initModelSource) {
 	fmt.Fprintln(w, "Plan\n  Agents:")
 	modelWidth, familyWidth := 0, 0
 	familyNames := make([]string, len(agents))
 	for i, s := range agents {
 		family, _ := adapter.AgentFamily(s.harness, s.model)
-		switch family {
-		case "":
-			family = "unknown family"
-		case "anthropic":
-			family = "Anthropic"
-		case "openai":
-			family = "OpenAI"
-		case "moonshot":
-			family = "Moonshot"
-		case "zhipu":
-			family = "Zhipu"
-		case "google":
-			family = "Google"
-		}
+		family = initFamilyName(family)
 		familyNames[i] = family
 		modelWidth = max(modelWidth, utf8.RuneCountInString(initAgentModelName(s, sources)))
 		familyWidth = max(familyWidth, utf8.RuneCountInString(family))
