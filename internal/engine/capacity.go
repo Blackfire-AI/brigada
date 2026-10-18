@@ -386,7 +386,7 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 	// The reserved accounts (§8.2): per project, the foreman's accounts
 	// and the cap task workers see on each.
 	if !cfg.Caps.NoHeadroom {
-		hq := "SELECT id FROM projects WHERE foreman_harness <> ''"
+		hq := "SELECT id FROM projects WHERE archived_at IS NULL AND foreman_harness <> ''"
 		var hargs []any
 		if projectID != 0 {
 			hq += " AND id = ?"

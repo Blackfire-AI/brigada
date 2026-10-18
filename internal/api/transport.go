@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
 // maxBody caps every request body at 1 MiB: the API carries job specs
@@ -175,6 +177,10 @@ func writeError(w http.ResponseWriter, code int, apiCode, msg string) {
 // writeInternal answers 500 for an engine or store failure. The error's
 // text goes to the log, not the response: it may name paths or rows.
 func (s *Server) writeInternal(w http.ResponseWriter, r *http.Request, what string, err error) {
+	if errors.Is(err, engine.ErrProjectArchived) {
+		writeError(w, http.StatusConflict, codeConflict, err.Error())
+		return
+	}
 	s.log.Error("api: "+what+" failed", "method", r.Method, "path", r.URL.Path, "err", err)
 	writeError(w, http.StatusInternalServerError, codeInternal, what+" failed")
 }

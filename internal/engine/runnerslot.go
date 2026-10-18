@@ -245,7 +245,7 @@ func statusHeldTx(tx *sql.Tx, project int64) ([]HeldJob, error) {
 		CASE WHEN j.cap_held_layer = '` + layerNoPair + `' THEN COALESCE(j.cap_held_key, '') ELSE COALESCE(a.harness || '/' || a.model, '') END,
 		COALESCE(a.cooling_until, '')
 		FROM jobs j LEFT JOIN agents a ON j.cap_held_layer = '` + layerCooling + `' AND CAST(a.id AS TEXT) = j.cap_held_key
-		WHERE j.status = 'queued' AND j.cap_held_layer IS NOT NULL`
+		WHERE j.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) AND j.status = 'queued' AND j.cap_held_layer IS NOT NULL`
 	var args []any
 	if project != 0 {
 		query += " AND j.project_id = ?"

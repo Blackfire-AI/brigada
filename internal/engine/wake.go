@@ -78,6 +78,10 @@ func (in ForemanInbox) Empty() bool {
 // wakeOutcomeTx's callers that report it.
 func (e *Engine) wakeForemanTx(tx *sql.Tx, project int64, now time.Time) error {
 	_, err := e.wakeOutcomeTx(tx, project, now)
+	// Background events must not resurrect a removed project or break a sweep.
+	if errors.Is(err, ErrProjectArchived) {
+		return nil
+	}
 	return err
 }
 
@@ -90,6 +94,9 @@ func (e *Engine) wakeForemanTx(tx *sql.Tx, project int64, now time.Time) error {
 // turn's completion re-evaluates, and `brigada status` shows the parked
 // tasks either way.
 func (e *Engine) wakeOutcomeTx(tx *sql.Tx, project int64, now time.Time) (WakeOutcome, error) {
+	if err := activeProjectTx(tx, project); err != nil {
+		return "", err
+	}
 	var pending int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM foreman_inbox WHERE project_id = ? AND state = ?`,
 		project, inboxPending).Scan(&pending); err != nil {

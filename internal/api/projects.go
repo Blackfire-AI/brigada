@@ -118,7 +118,7 @@ func (s *Server) handleProjectList(w http.ResponseWriter, r *http.Request, _ ide
 	writeJSON(w, http.StatusOK, projects)
 }
 
-// Projects lists every project the engine has with its foreman, active
+// Projects lists active projects with their foreman, active
 // plans and needs-you count.
 func (c *Client) Projects(ctx context.Context) ([]engine.ProjectInfo, error) {
 	var out []engine.ProjectInfo
@@ -160,4 +160,44 @@ func (c *Client) ProjectForeman(ctx context.Context, repoURL string) (engine.For
 		return engine.ForemanSetting{}, err
 	}
 	return out, nil
+}
+
+// projectArchiveRequest names the repository to remove and whether its live
+// work should be cancelled. Only client and admin callers may remove projects.
+type projectArchiveRequest struct {
+	RepoURL string `json:"repo_url"`
+	Cancel  bool   `json:"cancel"`
+}
+
+func (s *Server) handleProjectArchive(w http.ResponseWriter, r *http.Request, _ identity) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var req projectArchiveRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.RepoURL == "" {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "repo URL is required")
+		return
+	}
+	answer, err := s.eng.ArchiveProject(r.Context(), req.RepoURL, req.Cancel)
+	switch {
+	case errors.Is(err, engine.ErrProjectBusy):
+		writeError(w, http.StatusConflict, codeConflict, err.Error())
+	case errors.Is(err, engine.ErrNoProject):
+		writeError(w, http.StatusNotFound, codeNotFound, err.Error())
+	case errors.Is(err, engine.ErrInvalidRepoURL):
+		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+	case err != nil:
+		s.writeInternal(w, r, "archive the project", err)
+	default:
+		writeJSON(w, http.StatusOK, answerBody{Answer: string(answer)})
+	}
+}
+
+// ArchiveProject removes a repository from active service, preserving history.
+// cancel authorizes cancellation of its live jobs and unfinished plans.
+func (c *Client) ArchiveProject(ctx context.Context, repoURL string, cancel bool) (engine.Answer, error) {
+	return c.answer(ctx, "/v1/projects/archive", projectArchiveRequest{RepoURL: repoURL, Cancel: cancel})
 }

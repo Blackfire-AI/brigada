@@ -190,6 +190,9 @@ func findCycle(deps [][]int) []int {
 }
 
 func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []PlanTask, now time.Time) (CreatePlanResult, error) {
+	if err := activeProjectTx(tx, project); err != nil {
+		return CreatePlanResult{}, err
+	}
 	if title == "" {
 		return CreatePlanResult{}, fmt.Errorf("plan title is required")
 	}

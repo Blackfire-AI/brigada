@@ -19,6 +19,9 @@ func (e *Engine) AskUser(ctx context.Context, project int64, text string) (int64
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
+		if err := activeProjectTx(tx, project); err != nil {
+			return err
+		}
 		result, err := tx.Exec(`INSERT INTO questions (project_id,question,created_at) VALUES (?,?,?)`, project, text, fmtTime(now))
 		if err != nil {
 			return err

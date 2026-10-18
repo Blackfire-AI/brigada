@@ -105,6 +105,9 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 	default:
 		return TaskResult{}, fmt.Errorf("read the project of %s: %w", RedactRepoURL(p.RepoURL), err)
 	}
+	if err := activeProjectTx(tx, project); err != nil {
+		return TaskResult{}, err
+	}
 	// The runner fetches with the URL the task named (§5.1): when it
 	// is another form of the project's repo than the project holds, the
 	// task keeps its own credential-free transport.

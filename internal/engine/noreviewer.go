@@ -146,7 +146,7 @@ func queuedReviewsTx(tx *sql.Tx, project int64) ([]queuedReview, error) {
 	query := `SELECT j.id, j.project_id, j.task_id, t.plan_id, t.title,
 		EXISTS (SELECT 1 FROM events e WHERE e.kind = ? AND e.job_id = j.id)
 		FROM jobs j JOIN tasks t ON t.id = j.task_id
-		WHERE j.status = 'queued' AND j.kind = 'review' AND t.state = ?`
+		WHERE j.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) AND j.status = 'queued' AND j.kind = 'review' AND t.state = ?`
 	args := []any{evReviewUnservable, taskReviewing}
 	if project != 0 {
 		query += " AND j.project_id = ?"

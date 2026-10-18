@@ -205,6 +205,9 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 	var reserved capReservation
 	nowStr := fmtTime(now)
 	for _, j := range ordered {
+		if err := activeProjectTx(tx, j.ProjectID); err != nil {
+			return nil, err
+		}
 		// A job that lost its runner MaxAttempts times fails here rather
 		// than being offered again — at lease time, not in the sweep, so
 		// a heartbeat can still revive a healthy third lease (§3). This

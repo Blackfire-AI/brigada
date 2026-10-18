@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // The approval limit (§6.3): a plan the user has not pre-approved starts
@@ -354,33 +355,10 @@ func (e *Engine) RejectPlanVersion(ctx context.Context, project, plan, version i
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE plans SET state = ?, updated_at = ? WHERE id = ?`, planCancelled, fmtTime(now), plan); err != nil {
-			return fmt.Errorf("cancel plan %d: %w", plan, err)
-		}
-		// A plan an amendment held may have tasks already running.
-		nodes, err := loadAmendNodesTx(tx, plan)
-		if err != nil {
-			return err
-		}
-		for _, n := range nodes {
-			if n.state != taskDone && n.state != taskCancelled {
-				if err := e.cancelTaskJobsTx(tx, n.id, now); err != nil {
-					return err
-				}
-			}
-		}
-		if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE plan_id = ? AND state NOT IN (?, ?)`,
-			taskCancelled, fmtTime(now), plan, taskDone, taskCancelled); err != nil {
-			return fmt.Errorf("cancel the tasks of plan %d: %w", plan, err)
-		}
-		if err := recordPlanOutcomeTx(tx, proj, false, now); err != nil {
+		if err := e.cancelPlanTx(tx, proj, plan, evPlanRejected, now); err != nil {
 			return err
 		}
 		res = PlanDecision{PlanID: plan, State: planCancelled}
-		if err := inboxEventTx(tx, evPlanRejected, proj, 0, 0,
-			eventPayload{Plan: plan, Status: planCancelled}, now); err != nil {
-			return err
-		}
 		return e.wakeForemanTx(tx, proj, now)
 	})
 	if err != nil {
@@ -402,6 +380,9 @@ func awaitingPlanTx(tx *sql.Tx, project, plan, version int64) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("read plan %d: %w", plan, err)
 	}
+	if err := activeProjectTx(tx, proj); err != nil {
+		return 0, err
+	}
 	if state != planAwaitingApproval {
 		return 0, fmt.Errorf("%w: plan %d is %s", ErrPlanNotAwaiting, plan, state)
 	}
@@ -409,4 +390,35 @@ func awaitingPlanTx(tx *sql.Tx, project, plan, version int64) (int64, error) {
 		return 0, fmt.Errorf("%w: plan %d is at version %d, not the version %d you were shown; read the plan again and show it to the user", ErrPlanVersionStale, plan, have, version)
 	}
 	return proj, nil
+}
+
+// cancelPlanTx shares task/job cancellation and outcome accounting with rejection.
+func (e *Engine) cancelPlanTx(tx *sql.Tx, proj, plan int64, eventKind string, now time.Time) error {
+	if _, err := tx.Exec(`UPDATE plans SET state = ?, updated_at = ? WHERE id = ?`, planCancelled, fmtTime(now), plan); err != nil {
+		return fmt.Errorf("cancel plan %d: %w", plan, err)
+	}
+	// A plan an amendment held may have tasks already running.
+	nodes, err := loadAmendNodesTx(tx, plan)
+	if err != nil {
+		return err
+	}
+	for _, n := range nodes {
+		if n.state != taskDone && n.state != taskCancelled {
+			if err := e.cancelTaskJobsTx(tx, n.id, now); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE plan_id = ? AND state NOT IN (?, ?)`,
+		taskCancelled, fmtTime(now), plan, taskDone, taskCancelled); err != nil {
+		return fmt.Errorf("cancel the tasks of plan %d: %w", plan, err)
+	}
+	if err := recordPlanOutcomeTx(tx, proj, false, now); err != nil {
+		return err
+	}
+	if err := inboxEventTx(tx, eventKind, proj, 0, 0,
+		eventPayload{Plan: plan, Status: planCancelled}, now); err != nil {
+		return err
+	}
+	return nil
 }
