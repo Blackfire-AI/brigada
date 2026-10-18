@@ -11,6 +11,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/history"
+	"github.com/Blackfire-AI/brigada/internal/logo"
 )
 
 // runStatus is the client's status (§13, §10): the engine — which
@@ -67,26 +68,40 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int
 // engine nor print an error page, so it never starts one, and anything
 // that keeps it from reading the status becomes a one-line answer on
 // stdout with exit 0: the bar shows it, and the next tick tries again.
+// Every line starts with the one-line logo.
 func statusLine(ctx context.Context, common *commonFlags, stdout io.Writer) int {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
+	say := func(line string) int {
+		fmt.Fprintln(stdout, withLogo(stdout, line))
+		return 0
+	}
 	rt, code := resolveRuntime(common, io.Discard)
 	if code != 0 {
-		fmt.Fprintln(stdout, "brigada: no state directory")
-		return 0
+		return say("brigada: no state directory")
 	}
 	client, code := connect(ctx, rt, "client", true, io.Discard)
 	if code != 0 {
-		fmt.Fprintln(stdout, "brigada: engine not running")
-		return 0
+		return say("brigada: engine not running")
 	}
 	st, err := client.Status(ctx)
 	if err != nil {
-		fmt.Fprintln(stdout, "brigada: status unavailable")
-		return 0
+		return say("brigada: status unavailable")
 	}
-	fmt.Fprintln(stdout, api.StatusLine(st, time.Now()))
-	return 0
+	return say(api.StatusLine(st, time.Now()))
+}
+
+// withLogo turns the leading "brigada" of a status line into the one-line
+// logo, "▙ brigada", when the locale can print it. A status bar reads the
+// line from a pipe, so the ▙ is never colored.
+func withLogo(stdout io.Writer, line string) string {
+	caps := logo.Caps{UTF8: detectCaps(stdout).UTF8}
+	mark := strings.TrimSuffix(logo.String(logo.OneLine, caps), "\n")
+	rest, ok := strings.CutPrefix(line, "brigada")
+	if mark == "" || !ok {
+		return line
+	}
+	return mark + rest
 }
 
 // runTask is the task command's dispatch: `task submit`, the debugging

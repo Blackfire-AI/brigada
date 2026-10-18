@@ -107,6 +107,38 @@ func TestInitBanner(t *testing.T) {
 	}
 }
 
+// status --line starts with the one-line logo, uncolored even when the
+// environment offers color, and without it when the locale is not UTF-8.
+func TestStatusLineLogo(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		caps logo.Caps
+		want string
+	}{
+		{"UTF-8", logo.Caps{UTF8: true}, "▙ brigada: engine not running\n"},
+		{"UTF-8 on a colored terminal", logo.Caps{TTY: true, Color: logo.TrueColor, UTF8: true, Width: 80}, "▙ brigada: engine not running\n"},
+		{"no UTF-8", logo.Caps{}, "brigada: engine not running\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			asTerminal(t, tc.caps)
+			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
+			if got := runOut(t, "status", "--line", "--state-dir", state); got != tc.want {
+				t.Errorf("status --line = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	asTerminal(t, logo.Caps{UTF8: true})
+	for line, want := range map[string]string{
+		"brigada: idle":                "▙ brigada: idle",
+		"brigada: idle · plan #3 done": "▙ brigada: idle · plan #3 done",
+		"not ours":                     "not ours",
+	} {
+		if got := withLogo(io.Discard, line); got != want {
+			t.Errorf("withLogo(%q) = %q, want %q", line, got, want)
+		}
+	}
+}
+
 var ansi = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 // columns is the widest line of s in a terminal, with tabs at every
