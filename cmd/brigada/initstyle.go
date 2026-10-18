@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -95,18 +96,22 @@ func initPrompt(w io.Writer, prompt string) string {
 }
 
 func initMenuPrefix(w io.Writer, indent string, id int, name string, width int, selected bool) string {
+	return initMenuSymbolPrefix(w, indent, strconv.Itoa(id), name, width, selected)
+}
+
+func initMenuSymbolPrefix(w io.Writer, indent, id, name string, width int, selected bool) string {
 	out := initPresentation(w)
 	if !out.styled {
-		return fmt.Sprintf("%s%2d  %-*s", indent, id, width, name)
+		return fmt.Sprintf("%s%2s  %-*s", indent, id, width, name)
 	}
 	if selected {
 		// Leave one space between the pointer and the first digit.
-		number := fmt.Sprintf("%2d", id)
+		number := fmt.Sprintf("%2s", id)
 		column := len(indent) + len(number) - len(strings.TrimLeft(number, " ")) - 2
 		indent = indent[:column] + out.style.Pointer() + indent[column+1:]
 		name = out.style.Bold(name)
 	}
-	return indent + out.style.Accent(fmt.Sprintf("%2d", id)) + "  " + name + strings.Repeat(" ", max(0, width-term.VisibleWidth(name)))
+	return indent + out.style.Accent(fmt.Sprintf("%2s", id)) + "  " + name + strings.Repeat(" ", max(0, width-term.VisibleWidth(name)))
 }
 
 // Check candidates mark the saved command in their note. Render that marker

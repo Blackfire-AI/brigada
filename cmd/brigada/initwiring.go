@@ -246,7 +246,11 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 				}
 			} else if verbose {
 				for _, line := range splitDiffLines(f.next) {
-					fmt.Fprintln(w, "      "+line)
+					if f.rel == engine.ProjectConfigPath {
+						printInitFileLine(w, "      ", line)
+					} else {
+						fmt.Fprintln(w, "      "+line)
+					}
 				}
 			}
 		}

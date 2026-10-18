@@ -25,3 +25,34 @@ func TestProjectConfigDefaultsPreservesContent(t *testing.T) {
 		t.Fatal("replaced another repo's identity")
 	}
 }
+
+func TestProjectConfigDefaultsNoCheck(t *testing.T) {
+	const repo = "example.invalid/project"
+	for _, old := range []string{
+		"",
+		"# policy\nschema: 1\nrepo: example.invalid/project\napproval_max_tasks: 7\ndefault_check: old # check comment\nworker_tools: none\n\n# last comment\n",
+		"schema: 1\nrepo: example.invalid/project\nworker_tools: none\n",
+	} {
+		got, err := ProjectConfigDefaults([]byte(old), repo, "", "none")
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := ParseProjectConfig(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := cfg.Values[SettingDefaultCheck]; ok || strings.Contains(string(got), "default_check:") {
+			t.Fatalf("no-check must omit the key: %s", got)
+		}
+		if strings.Contains(old, "default_check:") {
+			want := strings.ReplaceAll(old, "default_check: old # check comment\n", "")
+			if string(got) != want {
+				t.Fatalf("must remove only the check line: %s, want %s", got, want)
+			}
+		}
+		again, err := ProjectConfigDefaults(got, repo, "", "none")
+		if err != nil || !bytes.Equal(got, again) {
+			t.Fatalf("not idempotent: %s %v", again, err)
+		}
+	}
+}

@@ -179,9 +179,9 @@ func TestInitPlainCheckMenuWidth(t *testing.T) {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			var b bytes.Buffer
 			w := initOutput{Writer: &b, style: term.New(logo.Caps{TTY: true, Width: width})}
-			note := strings.Repeat("n", 75)
+			note := strings.Repeat("n", 72)
 			_, exhausted, err := askInitCheck(w, func(string, string) (string, error) { return "", nil },
-				[]checkCandidate{{Command: "check", Note: note}})
+				initCheckEntries([]checkCandidate{{Command: "check", Note: note}}, "", "", false))
 			if err != nil || exhausted {
 				t.Fatalf("check question: exhausted=%v, err=%v", exhausted, err)
 			}
@@ -207,7 +207,7 @@ func TestInitPlainCurrentCheckWidth(t *testing.T) {
 			w := initOutput{Writer: &b, style: term.New(logo.Caps{TTY: true, Width: tc.width})}
 			command := strings.Repeat("c", tc.commandLength)
 			got, exhausted, err := askInitCheck(w, func(string, string) (string, error) { return "", nil },
-				initCheckEntries(nil, command, "none"))
+				initCheckEntries(nil, command, "none", true))
 			if err != nil || exhausted || got != command {
 				t.Fatalf("check question = %q, exhausted=%v, err=%v", got, exhausted, err)
 			}
@@ -474,5 +474,50 @@ func TestInitAgentChangeLaterConfigPaths(t *testing.T) {
 	}
 	if got := initAgentChangeLater(map[string]initModelSource{"claude": {signIn: harnessProbe{installed: true}}}); got != "run brigada init again" {
 		t.Errorf("Claude guidance = %q", got)
+	}
+}
+
+func TestInitNoCheckMenuPresentation(t *testing.T) {
+	for _, width := range []int{80, 100} {
+		for _, depth := range []logo.Depth{logo.NoColor, logo.Color16, logo.TrueColor} {
+			for _, hasProject := range []bool{false, true} {
+				t.Run(fmt.Sprintf("width=%d/color=%d/current=%t", width, depth, hasProject), func(t *testing.T) {
+					var b bytes.Buffer
+					style := term.New(logo.Caps{TTY: true, Color: depth, UTF8: true, Width: width})
+					w := initOutput{Writer: &b, style: style, styled: depth != logo.NoColor, utf8: true}
+					var candidates []checkCandidate
+					if hasProject {
+						candidates = []checkCandidate{{Command: "make check", Note: "Makefile: test lint"}}
+					}
+					entries := initCheckEntries(candidates, "", "", hasProject)
+					command, exhausted, err := askInitCheck(w, func(prompt, flags string) (string, error) {
+						fmt.Fprintln(w, initPrompt(w, strings.TrimSpace(prompt)))
+						return "", nil
+					}, entries)
+					if err != nil || exhausted || command != "" {
+						t.Fatalf("Enter = %q, exhausted=%v, err=%v", command, exhausted, err)
+					}
+					plain := ansi.ReplaceAllString(b.String(), "")
+					tag := "default"
+					if hasProject {
+						tag = "current"
+					}
+					if !strings.Contains(plain, "work goes straight to review; add one later  "+tag+"\n") || !strings.Contains(plain, "[-]:") {
+						t.Fatalf("wrong no-check default:\n%s", plain)
+					}
+					if depth != logo.NoColor {
+						want := "   " + style.Pointer() + style.Accent(" -") + "  " + style.Bold("no check")
+						if !strings.Contains(b.String(), want) {
+							t.Errorf("no-check row lacks the selected pointer: %q", b.String())
+						}
+					}
+					for _, line := range strings.Split(b.String(), "\n") {
+						if term.VisibleWidth(line) >= width {
+							t.Errorf("line reaches %d columns: %q", width, line)
+						}
+					}
+				})
+			}
+		}
 	}
 }

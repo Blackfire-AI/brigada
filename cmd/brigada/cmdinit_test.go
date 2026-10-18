@@ -354,9 +354,9 @@ func TestInitNoInput(t *testing.T) {
 		{"no foreman input", "", "--foreman", []string{"--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex"}},
 		{"no apply input", "", "--yes", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited"}},
 		{"no check input", "", "--check COMMAND", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--check="}},
-		// Changed: tools now follow the check, so the question remains only
-		// when no valid scope can be built; "a+b" cannot ("+" joins scopes).
-		{"no tools input", "", "--tools", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--check", "a+b", "--tools="}},
+		// A command that cannot be scoped gets file tools only and reaches
+		// the apply prompt, without asking a separate tools question.
+		{"unscopable check reaches apply", "", "--yes", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--check", "a+b", "--tools="}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
@@ -370,6 +370,9 @@ func TestInitNoInput(t *testing.T) {
 				if !strings.Contains(err, want) {
 					t.Errorf("missing %q in %q", want, err)
 				}
+			}
+			if tc.name == "unscopable check reaches apply" && (!strings.Contains(out, "\nPlan\n") || !strings.Contains(out, "claude    edit files; no commands") || strings.Contains(out, "Worker tools")) {
+				t.Fatalf("unscopable command must reach apply with file tools only:\n%s", out)
 			}
 			if strings.Contains(out, "\nPlan\n") && tc.name == "no model input" {
 				t.Fatal("treated EOF as a default model answer")
@@ -462,13 +465,13 @@ func TestInitQuestionsBeforePlan(t *testing.T) {
 	if strings.Contains(out, "Which model should claude run?") {
 		t.Fatalf("asked for a model after sign-in was declined:\n%s", out)
 	}
-	if !strings.Contains(out, "Step 3 of 3: how brigada tests the work\n") || !strings.Contains(out, "\n  Found in this repo: nothing I recognise\n  Check command:\n") || strings.Contains(out, "Check command [") {
-		t.Fatalf("check without a candidate must have no default:\n%s", out)
+	if !strings.Contains(out, "Step 3 of 3: how brigada tests the work\n") || !strings.Contains(out, "\n  Found in this repo: nothing brigada recognises.\n     -  no check  work goes straight to review; add one later  default\n  Type a command, or - for no check [-]:\n") || strings.Contains(out, "Check command [") {
+		t.Fatalf("check without a candidate must default to no check:\n%s", out)
 	}
 	if !strings.Contains(out, "  Check: true (") || strings.Contains(out, "Worker tools") {
 		t.Fatalf("typed check must set its own worker tools:\n%s", out)
 	}
-	lastQuestion := strings.Index(out, "  Check command:")
+	lastQuestion := strings.Index(out, "  Type a command, or - for no check [-]:")
 	for _, line := range []string{"\nPlan\n", "    codex     CLI default", "  Reviews:", "  Foreman: codex/CLI default\n", "  Check:", "  In the background:"} {
 		if pos := strings.Index(out, line); lastQuestion < 0 || pos <= lastQuestion {
 			t.Errorf("plan line %q preceded the last setup question:\n%s", line, out)
@@ -626,7 +629,7 @@ func TestInitBuildSuggestionOrder(t *testing.T) {
 // TestInitSuggestedCheckQuestion keeps its purpose: the check is asked after
 // the foreman menu, names where each suggestion came from, Enter accepts the
 // first and a typed command replaces it. Changed: the suggestion is now menu
-// entry 1 ("Found in this repo:" with a "Pick 1, or type a command [1]:"
+// entry 1 ("Found in this repo:" with a "Pick 1 or -, or type a command [1]:"
 // prompt, not "Check command [x]:"), and the worker tools follow the choice:
 // the candidate's own, or Bash(<typed command>:*) for a typed one.
 func TestInitSuggestedCheckQuestion(t *testing.T) {
@@ -657,7 +660,7 @@ func TestInitSuggestedCheckQuestion(t *testing.T) {
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
-			prompt := "  Found in this repo:\n     1  " + candidates[0].Command + "  " + candidates[0].Note + "  default\n  Pick 1, or type a command [1]:\n"
+			prompt := "  Found in this repo:\n     1  " + candidates[0].Command + "  " + candidates[0].Note + "  default\n     -  no check" + strings.Repeat(" ", len(candidates[0].Command)-len("no check")+2) + "work goes straight to review; add one later\n  Pick 1 or -, or type a command [1]:\n"
 			question := strings.Index(out, prompt)
 			if question <= strings.Index(out, "  Pick 1-2 [1]:") || question >= strings.Index(out, "\nPlan\n") || strings.Count(out, prompt) != 1 {
 				t.Fatalf("check question missing or out of order:\n%s", out)
@@ -751,7 +754,8 @@ func TestInitCheckStepTranscript(t *testing.T) {
      1  make check     Makefile: lint format-check type test rig-spec  default
      2  make test      Makefile: uv run pytest -q
      3  uv run pytest  pytest, from uv.lock
-  Pick 1-3, or type a command [1]:
+     -  no check       work goes straight to review; add one later
+  Pick 1-3 or -, or type a command [1]:
 
   -> change later: edit default_check in .brigada/project.yaml, then run
      brigada project import
@@ -832,35 +836,52 @@ func TestInitCheckStepAsksAgain(t *testing.T) {
 	// A number outside the menu is not a command: it is asked again, and
 	// Enter then takes entry 1.
 	code, out, errOut := initCheckStep(t, "9\n\n", "")
-	if code != 1 || errOut != "" || strings.Count(out, "  Pick 1-3, or type a command [1]:\n") != 2 ||
-		!strings.Contains(out, "  pick 1-3 or type a command; try again.\n") || !strings.Contains(out, "  Check: make check (") {
+	if code != 1 || errOut != "" || strings.Count(out, "  Pick 1-3 or -, or type a command [1]:\n") != 2 ||
+		!strings.Contains(out, "  pick 1-3 or - or type a command; try again.\n") || !strings.Contains(out, "  Check: make check (") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
 }
 
 func TestInitCheckStepNoCandidates(t *testing.T) {
-	// Nothing recognised: no default, and empty or blank answers are asked
-	// again, up to three times.
 	for _, tc := range []struct {
-		name, stdin string
-		asked       int
-		ok          bool
+		name, answer, check, permissions string
+		asked                            int
+		ok                               bool
 	}{
-		{"typed on the third try", "\n\n   \ntrue\nn\n", 3, true},
-		{"three empty answers", "\n\n\n\n", 3, false},
+		{"Enter", "", "none (work goes straight to review)", "edit files; no commands", 1, true},
+		{"blank Enter", "   ", "none (work goes straight to review)", "edit files; no commands", 1, true},
+		{"dash", "-", "none (work goes straight to review)", "edit files; no commands", 1, true},
+		{"typed on third try", "1\n2\ntrue", "true (", "edit files; run only: true", 3, true},
+		{"three invalid numbers", "1\n2\n3", "", "", 3, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
 			fakeInitPATH(t, "claude", "codex")
-			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), tc.stdin, "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring")
-			if !strings.Contains(out, "\n  Found in this repo: nothing I recognise\n  Check command:\n") || strings.Count(out, "  Check command:\n") != tc.asked || strings.Contains(out, "Check command [") {
+			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "\n"+tc.answer+"\nn\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring", "--verbose")
+			prompt := "  Type a command, or - for no check [-]:\n"
+			if !strings.Contains(out, "\n  Found in this repo: nothing brigada recognises.\n     -  no check  work goes straight to review; add one later  default\n"+prompt) || strings.Count(out, prompt) != tc.asked {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
-			if tc.ok != (code == 1 && errOut == "" && strings.Contains(out, "Declined") && strings.Contains(out, "  Check: true (")) {
-				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+			if tc.ok {
+				if code != 1 || errOut != "" || !strings.Contains(out, "Declined") || !strings.Contains(out, "  Check: "+tc.check) || !strings.Contains(out, "    claude    "+tc.permissions+"\n") {
+					t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+				}
+				if strings.HasPrefix(tc.check, "none ") && strings.Contains(out, "default_check:") {
+					t.Fatalf("no check must omit the key:\n%s", out)
+				}
+			} else if code != 1 || !strings.Contains(errOut, "--check") || strings.Contains(out, "\nPlan\n") {
+				t.Fatalf("exhausted answers must refuse with --check: %d\n%s\n%s", code, out, errOut)
 			}
-			if !tc.ok && !strings.Contains(errOut, "--check") {
-				t.Fatalf("exhausted answers must point at --check: %q", errOut)
+			if strings.Contains(out, "ready") || strings.Contains(out, "Worker tools") {
+				t.Fatalf("premature readiness or obsolete question:\n%s", out)
+			}
+			for _, line := range strings.Split(out, "\n") {
+				if term.VisibleWidth(line) >= 80 {
+					t.Errorf("line reaches 80 columns: %q", line)
+				}
+			}
+			if _, err := os.Stat(".brigada"); !os.IsNotExist(err) {
+				t.Fatalf("refusal wrote configuration: %v", err)
 			}
 		})
 	}
@@ -876,7 +897,7 @@ func TestInitRerunShowsCurrentCheckFirst(t *testing.T) {
 	}
 	for _, want := range []string{
 		"     1  custom check   from .brigada/project.yaml  current\n     2  make check     Makefile: lint",
-		"     4  uv run pytest  pytest, from uv.lock\n  Pick 1-4, or type a command [1]:\n",
+		"     4  uv run pytest  pytest, from uv.lock\n     -  no check       work goes straight to review; add one later\n  Pick 1-4 or -, or type a command [1]:\n",
 		"  Check: custom check (",
 		"    claude    edit files; no commands\n",
 	} {

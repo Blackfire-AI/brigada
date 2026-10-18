@@ -39,7 +39,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	probe := fs.Bool("probe", false, "print the plan only; write nothing and start nothing")
 	verbose := fs.Bool("verbose", false, "also print the full contents of new repository setup files")
 	limited := fs.Bool("accept-limited", false, "acknowledge fewer than two review families; reviews still require another family")
-	check := fs.String("check", "", "default check command (suggested from build files; never executed by init)")
+	check := fs.String("check", "", "default check command, or none / - for no check (never executed by init)")
 	tools := fs.String("tools", "", "worker scope in runner tools= syntax; applied only to Claude workers")
 	foreman := fs.String("foreman", "", "choose a usable resume-capable agent as harness/model")
 	noWiring := fs.Bool("no-wiring", false, "skip harness wiring (the bridge, hooks and foreman skill for mode A; in a parent folder, the coordinator's)")
@@ -576,50 +576,35 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		_ = json.Unmarshal(cfg.Values[engine.SettingDefaultCheck], &projectCheck)
 		_ = json.Unmarshal(cfg.Values[engine.SettingWorkerTools], &projectTools)
 	}
-	if *check == "" || !toolsProvided {
+	checkProvided := *check != ""
+	if *check == "none" || *check == "-" {
+		*check = ""
+	}
+	if !checkProvided || !toolsProvided {
 		candidates, err := checkCandidates(root)
 		if err != nil {
 			return fail(stderr, err)
 		}
-		entries := initCheckEntries(candidates, projectCheck, projectTools)
-		checkTools := ""
-		switch {
-		case *check != "":
-			// --check answers the step; the tools follow it unless the
-			// project already scopes tools for some other command.
-			if !initCheckKnown(*check, entries) && projectTools != "" {
-				checkTools = projectTools
+		entries := initCheckEntries(candidates, projectCheck, projectTools, exists)
+		if !checkProvided {
+			if canAsk {
+				command, exhausted, err := askInitCheck(stdout, ask, entries)
+				if err != nil {
+					return fail(stderr, err)
+				}
+				if exhausted {
+					return usagef(stderr, "--check: no usable answer; type a command or - for no check, or pass --check COMMAND")
+				}
+				*check = command
 			} else {
-				checkTools = initCheckTools(*check, entries, candidates)
+				*check = entries[initCheckDefault(entries)].Command
 			}
-		case canAsk:
-			command, exhausted, err := askInitCheck(stdout, ask, entries)
-			if err != nil {
-				return fail(stderr, err)
-			}
-			if exhausted {
-				return usagef(stderr, "--check: no usable answer; type the check command or pass --check COMMAND")
-			}
-			*check = command
-			checkTools = initCheckTools(command, entries, candidates)
-		case len(entries) > 0:
-			*check = entries[0].Command
-			checkTools = initCheckTools(*check, entries, candidates)
 		}
 		if !toolsProvided {
-			*tools = checkTools
+			*tools = initCheckTools(*check, entries, candidates)
 		}
 	}
 
-	if *tools == "" {
-		*tools, err = ask("Worker tools (required; --tools PATTERN+PATTERN or none): ", "--tools PATTERN+PATTERN or none")
-		if err != nil {
-			return fail(stderr, err)
-		}
-	}
-	if *check == "" || *tools == "" {
-		return usagef(stderr, "no build-file defaults matched; supply --check and --tools, or answer interactively")
-	}
 	proposed, err := engine.ProjectConfigDefaults(old, canon, *check, *tools)
 	if err != nil {
 		return fail(stderr, err)
@@ -641,7 +626,11 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		fmt.Fprintln(stdout)
 	}
 	printInitAgents(stdout, usable, len(families), *chosen, sources)
-	printInitWrapped(stdout, "  "+style.Bold("Check:")+" ", "    ", *check+" (init doesn't run it; change it later in .brigada/project.yaml)")
+	checkSummary := "none (work goes straight to review)"
+	if *check != "" {
+		checkSummary = *check + " (init doesn't run it; change it later in .brigada/project.yaml)"
+	}
+	printInitWrapped(stdout, "  "+style.Bold("Check:")+" ", "    ", checkSummary)
 	fmt.Fprintln(stdout, "  "+style.Bold("What workers may do:"))
 	for _, a := range adverts {
 		if !slices.Contains(a.Classes, "implement") {
@@ -679,7 +668,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	printInitWrapped(stdout, "    ", "    ", style.Accent("brigada config")+style.Dim(" shows every setting later"))
 	fmt.Fprintln(stdout)
 	if *probe {
-		fmt.Fprintln(stdout, "Probe only; nothing written or started. Re-run without --probe to confirm, or with --yes to apply.")
+		printInitWrapped(stdout, "", "  ", "Probe only; nothing written or started. Re-run without --probe to confirm, or with --yes to apply.")
 		return 0
 	}
 	if !*yes {
@@ -1065,7 +1054,7 @@ func initToolCommands(tools string) string {
 			commands = append(commands, tool)
 		}
 	}
-	return strings.Join(commands, "; ")
+	return strings.Join(commands, ", ")
 }
 
 func initAgentRoles(classes []string) string {
@@ -1245,6 +1234,11 @@ func initOrigin(ctx context.Context, root string) (string, string, error) {
 	return origin, canon, nil
 }
 
+// printInitFileLine wraps displayed file contents without normalizing whitespace.
+func printInitFileLine(w io.Writer, prefix, line string) {
+	printInitWords(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), []initWord{{text: line}})
+}
+
 func printInitDiff(w io.Writer, old, next []byte) {
 	fmt.Fprintf(w, "      Diff for %s:\n      --- existing\n      +++ proposed\n", engine.ProjectConfigPath)
 	if bytes.Equal(old, next) {
@@ -1255,10 +1249,10 @@ func printInitDiff(w io.Writer, old, next []byte) {
 	a, b := strings.Split(strings.TrimSuffix(string(old), "\n"), "\n"), strings.Split(strings.TrimSuffix(string(next), "\n"), "\n")
 	fmt.Fprintf(w, "      @@ -1,%d +1,%d @@\n", len(a), len(b))
 	for _, line := range a {
-		fmt.Fprintln(w, "      -"+line)
+		printInitFileLine(w, "      -", line)
 	}
 	for _, line := range b {
-		fmt.Fprintln(w, "      +"+line)
+		printInitFileLine(w, "      +", line)
 	}
 }
 

@@ -102,7 +102,8 @@
 
   Found in this repo:
    ▸[38;2;108;198;224m 1[0m  [1muv run pytest[0m  [38;2;138;143;152mpytest, from uv.lock[0m  [38;2;108;198;224mdefault[0m
-[1m  Pick 1, or type a command [0m[38;2;108;198;224m[1][0m[1m:[0m
+    [38;2;108;198;224m -[0m  no check       [38;2;138;143;152mwork goes straight to review; add one later[0m
+[1m  Pick 1 or -, or type a command [0m[38;2;108;198;224m[1][0m[1m:[0m
 
   [38;2;138;143;152m↺ [0m[38;2;138;143;152mchange later: edit default_check in .brigada/project.yaml, then run brigada project import[0m
 
