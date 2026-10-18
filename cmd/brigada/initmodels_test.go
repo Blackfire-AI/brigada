@@ -77,6 +77,10 @@ func TestInitClaudeModelSource(t *testing.T) {
 		{id: 2, name: "opus", value: "opus", note: "strong; uses your plan's limits faster"},
 		{id: 3, name: "haiku", value: "haiku", note: "fastest; fine for small tasks"},
 	}
+	for i := range want {
+		want[i].effortLevels = []string{"low", "medium", "high", "xhigh", "max"}
+		want[i].defaultEffort = "Claude Code's default"
+	}
 	if !reflect.DeepEqual(got.entries, want) || !got.signIn.installed || got.signIn.signedIn {
 		t.Fatalf("source = %+v", got)
 	}
@@ -110,6 +114,10 @@ func TestInitClaudeModelsFromCLIAndAccount(t *testing.T) {
 		{id: 3, name: "sonnet", value: "sonnet", note: "balanced; the usual choice"},
 		{id: 4, name: "haiku", value: "haiku", note: "fastest; fine for small tasks"},
 		{id: 5, name: "claude-fable-5-1[1m]", value: "claude-fable-5-1[1m]", note: "Fable, 1M context"},
+	}
+	for i := range want {
+		want[i].effortLevels = []string{"low", "medium", "high", "xhigh", "max"}
+		want[i].defaultEffort = "Claude Code's default"
 	}
 	if !reflect.DeepEqual(got.entries, want) || got.defaultID != 3 {
 		t.Fatalf("source = %+v", got)

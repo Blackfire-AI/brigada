@@ -20,11 +20,13 @@ import (
 // runner/foreman pairs. A CLI default keeps value "default" even when resolved.
 // An unresolved default has an empty name. Numbered menu IDs are one-based.
 type initModelEntry struct {
-	id        int
-	name      string
-	note      string
-	value     string
-	isDefault bool
+	id            int
+	name          string
+	note          string
+	value         string
+	isDefault     bool
+	effortLevels  []string // Source order; Kimi metadata is display-only.
+	defaultEffort string   // Empty if unknown; Claude uses a descriptive default.
 }
 
 type initModelSource struct {
@@ -153,7 +155,8 @@ func initClaudeModels(ctx context.Context) initModelSource {
 		if _, err := adapter.AgentFamily("claude", name); err != nil {
 			return // unidentifiable names are left out; they could not be picked
 		}
-		source.entries = append(source.entries, initModelEntry{id: len(source.entries) + 1, name: name, value: name, note: note})
+		source.entries = append(source.entries, initModelEntry{id: len(source.entries) + 1, name: name, value: name, note: note,
+			effortLevels: slices.Clone(adapter.EffortLevels("claude")), defaultEffort: "Claude Code's default"})
 	}
 	aliases := initClaudeAliases(help)
 	for _, alias := range aliases {
@@ -263,6 +266,8 @@ func initCodexModels(ctx context.Context) initModelSource {
 		}
 		seen[model.Slug] = true
 		if model.Slug == entry.name {
+			source.entries[0].effortLevels = model.efforts()
+			source.entries[0].defaultEffort = model.DefaultReasoningLevel
 			if model.Description != "" {
 				source.entries[0].note += "; " + model.Description
 			}
@@ -272,17 +277,30 @@ func initCodexModels(ctx context.Context) initModelSource {
 			source.unknownCount++
 			continue
 		}
-		source.entries = append(source.entries, initModelEntry{id: len(source.entries) + 1, name: model.Slug, value: model.Slug, note: model.Description})
+		source.entries = append(source.entries, initModelEntry{id: len(source.entries) + 1, name: model.Slug, value: model.Slug, note: model.Description,
+			effortLevels: model.efforts(), defaultEffort: model.DefaultReasoningLevel})
 	}
 	return source
 }
 
 // Decode only menu fields. Catalog metadata may contain unrelated private data.
 type initCodexModel struct {
-	Slug        string `json:"slug"`
-	Description string `json:"description"`
-	Visibility  string `json:"visibility"`
-	Priority    int    `json:"priority"`
+	Slug                     string `json:"slug"`
+	Description              string `json:"description"`
+	Visibility               string `json:"visibility"`
+	Priority                 int    `json:"priority"`
+	SupportedReasoningLevels []struct {
+		Effort string `json:"effort"`
+	} `json:"supported_reasoning_levels"`
+	DefaultReasoningLevel string `json:"default_reasoning_level"`
+}
+
+func (m initCodexModel) efforts() []string {
+	var levels []string
+	for _, level := range m.SupportedReasoningLevels {
+		levels = append(levels, level.Effort)
+	}
+	return levels
 }
 
 func readInitCodexCatalog(ctx context.Context) ([]initCodexModel, bool) {
@@ -327,16 +345,25 @@ func initKimiModels(ctx context.Context) initModelSource {
 			if model.context == 0 {
 				model.context = prev.context
 			}
+			if model.effortLevels == nil {
+				model.effortLevels = prev.effortLevels
+			}
+			if model.defaultEffort == "" {
+				model.defaultEffort = prev.defaultEffort
+			}
 		}
 		byID[model.id] = model
 	}
 	if detail := byID[name].note(); name != "" && detail != "" {
 		entries[0].note += "; " + detail
 	}
+	entries[0].effortLevels = byID[name].effortLevels
+	entries[0].defaultEffort = byID[name].defaultEffort
 	seen := map[string]bool{name: true}
 	for _, model := range models {
 		if !seen[model.id] {
-			entries = append(entries, initModelEntry{id: len(entries) + 1, name: model.id, value: model.id, note: byID[model.id].note()})
+			entries = append(entries, initModelEntry{id: len(entries) + 1, name: model.id, value: model.id, note: byID[model.id].note(),
+				effortLevels: byID[model.id].effortLevels, defaultEffort: byID[model.id].defaultEffort})
 			seen[model.id] = true
 		}
 	}
@@ -345,9 +372,11 @@ func initKimiModels(ctx context.Context) initModelSource {
 
 // initKimiModel holds the only keys read from a [models."<id>"] table.
 type initKimiModel struct {
-	id      string
-	display string
-	context int64
+	id            string
+	display       string
+	context       int64
+	effortLevels  []string
+	defaultEffort string
 }
 
 // note reads "<display_name>, <context> context", leaving out missing parts.
@@ -382,7 +411,8 @@ func initContextSize(n int64) string {
 }
 
 // Scan only the requested top-level assignment and, for Kimi, model table
-// names plus their display_name and max_context_size. Never decode a whole config into a map: other fields may be secrets.
+// names plus their display_name, max_context_size, support_efforts and
+// default_effort. Never decode a whole config into a map: other fields may be secrets.
 // Unreadable or unrecognized config is a best-effort unresolved CLI default.
 func readInitModelConfig(path, key string, tables bool) (name string, models []initKimiModel) {
 	f, err := os.Open(path)
@@ -415,7 +445,7 @@ func readInitModelConfig(path, key string, tables bool) (name string, models []i
 			continue
 		}
 		if cur >= 0 {
-			// Only these two keys of a model table are read; the rest may
+			// Only these menu keys of a model table are read; the rest may
 			// hold provider, api key or oauth details.
 			lhs, rhs, ok := strings.Cut(line, "=")
 			switch {
@@ -428,6 +458,12 @@ func readInitModelConfig(path, key string, tables bool) (name string, models []i
 				digits, _, _ := strings.Cut(rhs, "#")
 				if n, err := strconv.ParseInt(strings.ReplaceAll(strings.TrimSpace(digits), "_", ""), 10, 64); err == nil {
 					models[cur].context = n
+				}
+			case strings.TrimSpace(lhs) == "support_efforts":
+				models[cur].effortLevels = initConfigEfforts(rhs, scanner)
+			case strings.TrimSpace(lhs) == "default_effort":
+				if v, suffix, ok := initConfigString(rhs); ok && initConfigEnd(suffix) {
+					models[cur].defaultEffort = v
 				}
 			}
 			continue
@@ -488,6 +524,49 @@ func initConfigMultiline(line, delimiter string) string {
 }
 
 func initConfigEnd(s string) bool { return s == "" || strings.HasPrefix(s, "#") }
+
+// Read only a support_efforts string array, including comments, trailing commas
+// and multiline arrays. Other model/provider values are never decoded.
+func initConfigEfforts(s string, scanner *bufio.Scanner) []string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "[") {
+		return nil
+	}
+	s = s[1:]
+	levels := []string{}
+	needComma := false
+	for {
+		s = strings.TrimSpace(s)
+		if s == "" || strings.HasPrefix(s, "#") {
+			if !scanner.Scan() {
+				return nil
+			}
+			s = scanner.Text()
+			continue
+		}
+		if strings.HasPrefix(s, "]") {
+			if initConfigEnd(strings.TrimSpace(s[1:])) {
+				return levels
+			}
+			return nil
+		}
+		if needComma {
+			if !strings.HasPrefix(s, ",") {
+				return nil
+			}
+			s = s[1:]
+			needComma = false
+			continue
+		}
+		value, rest, ok := initConfigString(s)
+		if !ok {
+			return nil
+		}
+		levels = append(levels, value)
+		s = rest
+		needComma = true
+	}
+}
 
 // Only single-line TOML strings are needed for model identifiers. Ignore
 // malformed/multiline values rather than letting unrelated config leak out.
@@ -558,7 +637,8 @@ func initOpenCodeModels(ctx context.Context) initModelSource {
 					source.unknownCount++
 					continue
 				}
-				source.entries = append(source.entries, initModelEntry{id: len(source.entries) + 1, name: model, value: model, note: row.note})
+				source.entries = append(source.entries, initModelEntry{id: len(source.entries) + 1, name: model, value: model, note: row.note,
+					effortLevels: row.effortLevels})
 			}
 		}
 	}
@@ -596,19 +676,66 @@ var initVerboseFlag = regexp.MustCompile(`(?m)(?:^|[\s,\[])--verbose(?:[\s,\]=]|
 
 // initOpenCodeRow is one listed model. note is empty for the plain list.
 type initOpenCodeRow struct {
-	id     string
-	active bool
-	note   string
+	id           string
+	active       bool
+	note         string
+	effortLevels []string
 }
 
 // initOpenCodeMeta holds the only keys read from a verbose model's JSON
 // object; the decoder drops every other field.
 type initOpenCodeMeta struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
-	Limit  struct {
+	Name     string               `json:"name"`
+	Status   string               `json:"status"`
+	Variants initOpenCodeVariants `json:"variants"`
+	Limit    struct {
 		Context int64 `json:"context"`
 	} `json:"limit"`
+}
+
+// A map would discard source order and retain variant settings. Keep only keys,
+// consuming each value without storing any of its provider-specific contents.
+type initOpenCodeVariants []string
+
+func (v *initOpenCodeVariants) UnmarshalJSON(data []byte) error {
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec.UseNumber() // Ignored variant values must not depend on numeric ranges.
+	token, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	*v = nil
+	if token == nil {
+		return nil
+	}
+	if token != json.Delim('{') {
+		return fmt.Errorf("opencode variants: expected an object")
+	}
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		*v = append(*v, key.(string))
+		depth := 0
+		for {
+			token, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			switch token {
+			case json.Delim('{'), json.Delim('['):
+				depth++
+			case json.Delim('}'), json.Delim(']'):
+				depth--
+			}
+			if depth == 0 {
+				break
+			}
+		}
+	}
+	_, err = dec.Token()
+	return err
 }
 
 // note reads "<name>, <context> context", leaving out missing parts.
@@ -651,7 +778,7 @@ func parseInitOpenCodeVerbose(out string) ([]initOpenCodeRow, error) {
 		if err := dec.Decode(&meta); err != nil {
 			return nil, err
 		}
-		rows = append(rows, initOpenCodeRow{id: id, active: meta.Status == "active", note: meta.note()})
+		rows = append(rows, initOpenCodeRow{id: id, active: meta.Status == "active", note: meta.note(), effortLevels: meta.Variants})
 		rest = after[dec.InputOffset():]
 	}
 	if len(rows) == 0 {
