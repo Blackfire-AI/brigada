@@ -483,13 +483,15 @@ func TestInitExplicitAccountQuestions(t *testing.T) {
 
 func TestInitApplyPrompts(t *testing.T) {
 	for _, tc := range []struct {
-		name, prompt    string
-		exists, running bool
+		name, prompt             string
+		exists, running, differs bool
 	}{
-		{"write and start", "Write 1 file and start the runner? [y/N]", false, false},
-		{"write", "Write 1 file? [y/N]", false, true},
-		{"start", "Start the runner? [y/N]", true, false},
-		{"register", "Register the project? [y/N]", true, true},
+		{"write and start", "Write 1 file and start the runner? [y/N]", false, false, false},
+		{"write", "Write 1 file? [y/N]", false, true, false},
+		{"start", "Start the runner? [y/N]", true, false, false},
+		{"register", "Register the project? [y/N]", true, true, false},
+		{"restart", "Write 1 file and restart the runner with the new agents? [y/N]", false, true, true},
+		{"restart only", "Write 0 files and restart the runner with the new agents? [y/N]", true, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			write := importRepo(t)
@@ -508,10 +510,19 @@ func TestInitApplyPrompts(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer release()
+				if tc.differs {
+					if err := runnerstate.Publish(filepath.Join(state, "runner"),
+						nil, "harness=claude,model=opus"); err != nil {
+						t.Fatal(err)
+					}
+				}
 			}
 			code, out, err := initDo(t, state, "\nn\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--check", "true", "--tools", "none", "--no-wiring")
 			if code != 1 || err != "" || !strings.Contains(out, "\n\n"+tc.prompt+"\n") || strings.Contains(out, "\n\n\n"+tc.prompt) || !strings.Contains(out, "Declined") {
 				t.Fatalf("got %d\n%s\n%s", code, out, err)
+			}
+			if _, err := os.Stat(filepath.Join(state, "runner", "agents")); !os.IsNotExist(err) {
+				t.Fatalf("refusal saved choices: %v", err)
 			}
 		})
 	}
@@ -831,13 +842,19 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 	})
 	args := []string{"--yes", "--agent", "harness=claude,model=sonnet,account=work,effort=high", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}
 	code, out, err := initDo(t, state, "", args...)
-	if code != 0 || !strings.Contains(out, "Detached runner started") || !strings.Contains(out, "Setup ready") {
+	if code != 0 || !strings.Contains(out, "Detached runner started") ||
+		!strings.Contains(strings.Join(strings.Fields(out), " "), "Setup ready") {
 		log, _ := os.ReadFile(filepath.Join(state, "engine.log"))
 		t.Fatalf("%d\n%s\n%s\nengine log: %s", code, out, err, log)
 	}
-	for _, want := range []string{"Done: wrote ", "files (not committed). Detached runner started (pid ", "stop it with: brigada stop", "Next:\n  1. Open Claude Code here (`claude`)", "  2. Or, without a session: brigada ask", "Stop the runner: brigada stop"} {
+	for _, want := range []string{"Done: wrote ", "files (not committed). Detached runner started", "stop it with: brigada stop", "Next:\n  1. Open Claude Code here (`claude`)", "  2. Or, without a session: brigada ask", "Stop the runner: brigada stop"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if utf8.RuneCountInString(line) >= 80 {
+			t.Errorf("apply line must be under 80 columns: %q", line)
 		}
 	}
 	if strings.Contains(out, "§") {
@@ -882,32 +899,196 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 	if rec.Agents[0].Tools != "Bash(npm test:*)" || rec.Agents[1].Tools != "" || rec.Agents[0].Family != "anthropic" || rec.Agents[1].Family != "openai" {
 		t.Fatalf("wrong agents: %+v", rec.Agents)
 	}
+	assertInitSavedAgents(t, state, rec.Specs)
 	code, out, err = initDo(t, state, "", args...)
 	if code != 0 || !strings.Contains(out, "Runner already running") || !strings.Contains(out, "agents match") {
 		t.Fatalf("repeat: %d\n%s\n%s", code, out, err)
 	}
-	args[2] = "harness=claude,model=opus,account=work,effort=high"
-	code, out, err = initDo(t, state, "", args...)
-	if code != 0 || !strings.Contains(out, "agents differ") {
-		t.Fatalf("differing agents: %d\n%s\n%s", code, out, err)
-	}
 	again, live, e := runnerstate.Running(filepath.Join(state, "runner"))
 	if e != nil || !live || again.PID != rec.PID {
-		t.Fatalf("runner replaced: %+v %v", again, e)
+		t.Fatalf("unchanged runner replaced: %+v %v", again, e)
 	}
-	code, out, err = initDo(t, state, "unknown\nsonnet\n\ngpt-5\n\ny\n", "--signed-in", "claude,codex", "--no-wiring")
-	if code != 0 || strings.Count(out, "    Pick 1-3 or -, or type a model id [1]:") != 2 || !strings.Contains(out, "Runner already running") {
+	args[2] = "harness=claude,model=opus,account=work,effort=high"
+	// Refusing a restart leaves both live and durable choices alone.
+	interactive := append([]string{}, args[1:]...)
+	code, out, err = initDo(t, state, "\nn\n", interactive...)
+	if code != 1 || err != "" || !strings.Contains(out,
+		"Write 0 files and restart the runner with the new agents? [y/N]") {
+		t.Fatalf("restart prompt: %d\n%s\n%s", code, out, err)
+	}
+	assertInitSavedAgents(t, state, rec.Specs)
+	// Confirm the same prompt and exercise stop's real SIGTERM/lock wait.
+	code, out, err = initDo(t, state, "\ny\n", interactive...)
+	if code != 0 || !strings.Contains(out, "Detached runner started") {
+		t.Fatalf("differing agents: %d\n%s\n%s", code, out, err)
+	}
+	again, live, e = runnerstate.Running(filepath.Join(state, "runner"))
+	if e != nil || !live || again.PID == rec.PID ||
+		again.Agents[0].Model != "opus" {
+		t.Fatalf("runner not replaced: %+v %v", again, e)
+	}
+	assertInitSavedAgents(t, state, again.Specs)
+	code, out, err = initDo(t, state, "unknown\n\n\n\n\ny\n", "--signed-in", "claude,codex", "--no-wiring")
+	if code != 0 || strings.Count(out, "    Pick 1-3 or -, or type a model id [2]:") != 2 || !strings.Contains(out, "Runner already running") {
 		t.Fatalf("interactive retry: %d\n%s\n%s", code, out, err)
 	}
+	afterDefaults, live, e := runnerstate.Running(filepath.Join(state, "runner"))
+	if e != nil || !live || afterDefaults.PID != again.PID {
+		t.Fatalf("accepting saved defaults replaced runner: %+v %v",
+			afterDefaults, e)
+	}
+	assertInitSavedAgents(t, state, again.Specs)
 	if strings.Contains(out, "Open Claude Code here") || !strings.Contains(out, "  1. Or, without a session: brigada ask") || strings.Contains(out, "§") {
 		t.Fatalf("--no-wiring Next block:\n%s", out)
 	}
+	args[2] = "harness=claude,model=opus,account=work,effort=low"
+	code, out, err = initDo(t, state, "", args...)
+	if code != 0 || !strings.Contains(out, "Detached runner started") {
+		t.Fatalf("--yes restart: %d\n%s\n%s", code, out, err)
+	}
+	afterYes, live, e := runnerstate.Running(filepath.Join(state, "runner"))
+	if e != nil || !live || afterYes.PID == again.PID ||
+		afterYes.Agents[0].Effort != "low" {
+		t.Fatalf("--yes did not apply changed effort: %+v %v", afterYes, e)
+	}
+	assertInitSavedAgents(t, state, afterYes.Specs)
 	data, _ := os.ReadFile(calls)
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		if !strings.HasSuffix(line, " --help") {
 			t.Errorf("unexpected harness execution: %s", line)
 		}
 	}
+}
+
+func TestInitAgentsDiffer(t *testing.T) {
+	const base = "harness=claude,model=sonnet"
+	var original agentSpecs
+	if err := original.Set(base); err != nil {
+		t.Fatal(err)
+	}
+	agents := []api.Agent{{Harness: "claude", Model: "sonnet"}}
+	rec := runnerstate.Record{Agents: agents,
+		Specs: runnerSpecStrings(original.specs)}
+	for _, suffix := range []string{
+		"", ",effort=high", ",account=work", ",classes=review",
+		",tools=none", ",agent-file=/tmp/agent.yaml",
+	} {
+		t.Run(suffix, func(t *testing.T) {
+			var chosen agentSpecs
+			if err := chosen.Set(base + suffix); err != nil {
+				t.Fatal(err)
+			}
+			if got := initAgentsDiffer(rec, agents, chosen.specs); got != (suffix != "") {
+				t.Fatalf("agents differ = %v", got)
+			}
+		})
+	}
+	legacy := runnerstate.Record{Agents: agents}
+	if initAgentsDiffer(legacy, agents, original.specs) {
+		t.Fatal("matching legacy advertisements differ")
+	}
+	different := []api.Agent{{Harness: "claude", Model: "opus"}}
+	if !initAgentsDiffer(legacy, different, original.specs) {
+		t.Fatal("different legacy advertisements match")
+	}
+	if initAgentsDiffer(runnerstate.Record{}, agents, original.specs) {
+		t.Fatal("missing metadata treated as a known difference")
+	}
+}
+
+func assertInitSavedAgents(t *testing.T, state string, specs []string) {
+	t.Helper()
+	file := filepath.Join(state, "runner", "agents")
+	data, err := os.ReadFile(file)
+	if err != nil || string(data) != strings.Join(specs, "\n")+"\n" {
+		t.Fatalf("saved agents: %q, %v; want %v", data, err, specs)
+	}
+	info, err := os.Stat(file)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("saved agents mode: %v, %v", info, err)
+	}
+}
+
+func TestInitSavedDefaults(t *testing.T) {
+	for _, writes := range []bool{false, true} {
+		t.Run(fmt.Sprintf("kimi writes %v", writes), func(t *testing.T) {
+			importRepo(t)
+			fakeInitPATH(t, initHarnesses...)
+			state := testsupport.ShortStateDir(t)
+			classes := "review"
+			if writes {
+				classes = "implement+review+answer"
+			}
+			specs := []string{
+				"harness=claude,model=opus,effort=high,tools=none",
+				"harness=kimi,model=kimi-k2,classes=" + classes,
+			}
+			if err := runnerstate.SaveAgents(
+				filepath.Join(state, "runner"), specs); err != nil {
+				t.Fatal(err)
+			}
+			code, out, errs := initDo(t, state, strings.Repeat("\n", 6)+"n\n",
+				"--signed-in", strings.Join(initHarnesses, ","),
+				"--check", "true", "--tools", "none", "--no-wiring")
+			if code != 1 || errs != "" || !strings.Contains(out, "Declined") {
+				t.Fatalf("saved defaults: %d\n%s\n%s", code, out, errs)
+			}
+			for _, want := range []string{
+				"current", "Pick 1-3 or -, or type a model id [2]:",
+				"Pick 1-6 [4]:", "high     current",
+				"Pick 1 or -, or type a model id [-]:",
+				"Pick 1-2 or -, or type a model id [2]:",
+				"Pick 1-2 or -, or type provider/model [-]:",
+				"opus @high", "kimi-k2 (default)",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("missing %q:\n%s", want, out)
+				}
+			}
+			question := "Let kimi write code too, not only review? [y/N]:"
+			role := "reviews only"
+			if writes {
+				question = "Let kimi write code too, not only review? [Y/n]:"
+				role = "writes code, reviews"
+			}
+			plan := strings.Split(out, "\nPlan\n")[1]
+			kimi := strings.Split(strings.Split(plan, "kimi-k2 (default)")[1], "\n")[0]
+			if !strings.Contains(out, question) || !strings.Contains(kimi, role) {
+				t.Fatalf("kimi default lost:\n%s", out)
+			}
+			assertInitEffortOutput(t, out)
+			assertInitSavedAgents(t, state, specs)
+			if _, err := os.Stat(engine.ProjectConfigPath); !os.IsNotExist(err) {
+				t.Fatalf("refused init wrote project configuration: %v", err)
+			}
+		})
+	}
+}
+
+func TestInitSavedDefaultsOmitKimi(t *testing.T) {
+	importRepo(t)
+	fakeInitPATH(t, initHarnesses...)
+	state := testsupport.ShortStateDir(t)
+	specs := []string{
+		"harness=claude,model=sonnet,tools=none",
+		"harness=codex,model=default",
+	}
+	if err := runnerstate.SaveAgents(filepath.Join(state, "runner"), specs); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := initDo(t, state, strings.Repeat("\n", 6)+"n\n",
+		"--signed-in", strings.Join(initHarnesses, ","),
+		"--check", "true", "--tools", "none", "--no-wiring")
+	if code != 1 || errs != "" || !strings.Contains(out, "Declined") {
+		t.Fatalf("saved defaults: %d\n%s\n%s", code, out, errs)
+	}
+	kimi := strings.Split(strings.Split(out,
+		"Which model should kimi run?")[1], "opencode:")[0]
+	if !strings.Contains(kimi, "Pick 1 or -, or type a model id [-]:") ||
+		strings.Contains(kimi, "Let kimi write code") {
+		t.Fatalf("omitted kimi was offered as a default:\n%s", out)
+	}
+	assertInitSavedAgents(t, state, specs)
 }
 
 func TestInitKeepsMachineToolScope(t *testing.T) {

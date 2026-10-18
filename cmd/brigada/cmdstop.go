@@ -45,13 +45,7 @@ func runStop(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	switch {
 	case running:
-		if rec.PID <= 0 {
-			return fail(stderr, fmt.Errorf("the runner holds %s but records no pid; not signalling anything", filepath.Join(dir, "runner.lock")))
-		}
-		stopped, err := terminate(ctx, rec.PID, func() bool {
-			_, live, err := runnerstate.Running(dir)
-			return err == nil && live
-		})
+		stopped, err := terminateRunner(ctx, dir, rec)
 		if err != nil {
 			return fail(stderr, fmt.Errorf("runner (pid %d): %w", rec.PID, err))
 		}
@@ -93,6 +87,21 @@ func runStop(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "no engine running")
 	}
 	return 0
+}
+
+// terminateRunner checks both the lock and its owner before signalling.
+// Init shares stop's termination path when applying different agents.
+func terminateRunner(ctx context.Context, dir string,
+	rec runnerstate.Record) (bool, error) {
+	if rec.PID <= 0 {
+		return false, fmt.Errorf(
+			"the runner holds %s but records no pid; not signalling anything",
+			filepath.Join(dir, "runner.lock"))
+	}
+	return terminate(ctx, rec.PID, func() bool {
+		current, live, err := runnerstate.Running(dir)
+		return err == nil && live && current.PID == rec.PID
+	})
 }
 
 // terminate sends SIGTERM to pid and waits until holds reports the lock

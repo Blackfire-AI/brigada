@@ -247,6 +247,39 @@ func TestInitEffortInformationOnly(t *testing.T) {
 	}
 }
 
+func TestInitSavedEffortDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name, saved, answer, want, prompt string
+	}{
+		{"override", "high", "", "high", "Pick 1-3 [3]:"},
+		{"explicit CLI default", "low", "", "low", "Pick 1-3 [1]:"},
+		{"CLI default", "", "", "", "Pick 1-3 [1]:"},
+		{"change", "high", "2", "medium", "Pick 1-3 [3]:"},
+		{"reset", "high", "1", "", "Pick 1-3 [3]:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			entry := initModelEntry{
+				name: "gpt-5", defaultEffort: "low",
+				effortLevels: []string{"low", "medium", "high"},
+			}
+			got, err := initPickEffort(&out, "codex", entry,
+				func(prompt, flags string) (string, error) {
+					if !strings.Contains(prompt, tc.prompt) {
+						t.Errorf("prompt = %q, want %q", prompt, tc.prompt)
+					}
+					return tc.answer, nil
+				}, tc.saved)
+			if err != nil || got != tc.want {
+				t.Fatalf("effort = %q, %v; want %q", got, err, tc.want)
+			}
+			if !strings.Contains(out.String(), "current") {
+				t.Fatalf("saved effort not marked current:\n%s", out.String())
+			}
+		})
+	}
+}
+
 func TestInitExplicitEffortsSkipQuestions(t *testing.T) {
 	importRepo(t)
 	fakeInitPATH(t, "claude", "codex", "opencode")
