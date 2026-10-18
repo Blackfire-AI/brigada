@@ -1,4 +1,9 @@
-# brigada
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/logo/wordmark-on-dark.svg">
+    <img src="docs/brand/logo/wordmark-on-light.svg" alt="brigada" width="280">
+  </picture>
+</h1>
 
 **Talk to your own coding session. It splits the work into tasks; brigada gives each task to the agent with the best measured record on your repo among those with quota left, checks and cross-reviews the result, and learns from the outcome.**
 
