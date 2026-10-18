@@ -43,6 +43,9 @@ func TestCommandHelp(t *testing.T) {
 				if !strings.HasPrefix(out, "Usage: brigada "+strings.Join(path, " ")) {
 					t.Fatalf("missing command usage: %q", out)
 				}
+				if strings.Contains(out, "§") {
+					t.Errorf("help cites a design section: %q", out)
+				}
 				if len(cmd.subcommands) != 0 {
 					for sub, child := range cmd.subcommands {
 						line := fmt.Sprintf("  %-10s %s\n", sub, child.description)
@@ -101,6 +104,13 @@ func TestCommandHelp(t *testing.T) {
 		}
 	}
 	walk(nil, commands)
+}
+
+// The top-level usage is for users: no design-section citations.
+func TestUsageCitesNoDesignSection(t *testing.T) {
+	if strings.Contains(usage, "§") {
+		t.Errorf("usage cites a design section:\n%s", usage)
+	}
 }
 
 func TestHelpAfterPositional(t *testing.T) {

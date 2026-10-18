@@ -67,8 +67,8 @@ func runProjectList(ctx context.Context, args []string, stdout, stderr io.Writer
 	return 0
 }
 
-// runProjectSettings is `project set` and `project show` (§6.3): the
-// approval limit's three settings. set takes key=value pairs after the
+// runProjectSettings is `project set` and `project show` (§6.3): every
+// project setting in engine.SettingKeys. set takes key=value pairs after the
 // flags and prints the settings as they now stand; show prints every key
 // with its effective value and whether it is the default. --repo
 // defaults to the working directory's origin. Values are validated by
@@ -469,10 +469,10 @@ func runProjectForeman(ctx context.Context, args []string, stdout, stderr io.Wri
 		effort  string
 		noStart bool
 	)
-	fs.StringVar(&repo, "repo", "", "the repository URL (product §5 rule 6); empty = the origin of the working directory")
-	fs.StringVar(&harness, "harness", "", "the foreman's harness: a CLI that resumes headless (§4.1); empty = show the choice")
+	fs.StringVar(&repo, "repo", "", "the repository URL; empty = the origin of the working directory")
+	fs.StringVar(&harness, "harness", "", "the foreman's harness (claude or codex: a CLI that resumes headless); empty = show the choice")
 	fs.StringVar(&model, "model", "", "the foreman's model; goes with --harness")
-	fs.StringVar(&effort, "effort", "", "the foreman's reasoning effort, validated per harness (claude: low|medium|high|xhigh|max); goes with --harness; empty = the CLI's default")
+	fs.StringVar(&effort, "effort", "", "the foreman's reasoning effort, validated per harness (claude: low|medium|high|xhigh|max; codex: none|minimal|low|medium|high|xhigh|max|ultra); goes with --harness; empty = the CLI's default")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
