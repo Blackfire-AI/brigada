@@ -105,6 +105,7 @@ func TestInitProbeAndRefusals(t *testing.T) {
 				t.Fatal(err)
 			}
 			calls := fakeInitPATH(t, "claude", "codex", "kimi", "opencode")
+			writeInitCodexScript(t, "  debug  Diagnostic tools", "  models  Render the raw model catalog as JSON", "      --bundled  Skip refresh", initCodexCatalogCommand, initCodexCatalogCommand)
 			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
 			code, out, err := initDo(t, state, tc.stdin, tc.args...)
 			if code != tc.wantCode || !strings.Contains(out+err, tc.want) {
@@ -117,7 +118,7 @@ func TestInitProbeAndRefusals(t *testing.T) {
 			}
 			data, _ := os.ReadFile(calls)
 			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-				if !strings.HasSuffix(line, " --help") && line != "opencode models" && line != "opencode providers list" {
+				if !strings.HasSuffix(line, " --help") && line != "opencode models" && line != "opencode providers list" && line != "codex debug models" && line != "codex debug models --bundled" {
 					t.Errorf("guessed/paid invocation: %q", line)
 				}
 			}
@@ -1089,6 +1090,7 @@ func initInteractiveTranscript(t *testing.T, longModels bool) string {
 			t.Fatal(err)
 		}
 	}
+	fakeInitCodexCatalog(t)
 	opencode := filepath.Join(os.Getenv("PATH"), "opencode")
 	script, err := os.ReadFile(opencode)
 	if err != nil {
@@ -1261,6 +1263,7 @@ func TestInitOpenCodeMenuUnknownFamilies(t *testing.T) {
 func TestInitEveryNumberedModelCanBePicked(t *testing.T) {
 	importRepo(t)
 	fakeInitPATH(t, initHarnesses...)
+	fakeInitCodexCatalog(t)
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".codex", "config.toml"), "model = \"gpt-6.1-sol\"\n")
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".kimi-code", "config.toml"), `default_model = "kimi-code/k3"
 [models."kimi-code/k3-256k"]
@@ -1273,12 +1276,15 @@ func TestInitEveryNumberedModelCanBePicked(t *testing.T) {
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("baseline init = %d\n%s\n%s", code, out, errOut)
 	}
-	rowsPattern := regexp.MustCompile(`(?m)^\s+(\d+)  (\S+)  (\S+(?: \(GLM\))?)`)
+	rowsPattern := regexp.MustCompile(`(?m)^[ ]+(\d+)[ ]{2,}(\S+)[ ]{2,}(\S+(?: \(GLM\))?)`)
 	for _, harness := range initHarnesses {
 		menu := strings.Split(strings.Split(out, "Which model should "+harness+" run?\n")[1], "    Pick ")[0]
 		rows := rowsPattern.FindAllStringSubmatch(menu, -1)
 		if len(rows) == 0 {
 			t.Fatalf("no numbered entries for %s:\n%s", harness, menu)
+		}
+		if harness == "codex" && len(rows) != 3 {
+			t.Fatalf("expected the default and both listed catalog models:\n%s", menu)
 		}
 		for _, row := range rows {
 			t.Run(harness+"/"+row[1], func(t *testing.T) {
@@ -1292,7 +1298,11 @@ func TestInitEveryNumberedModelCanBePicked(t *testing.T) {
 					input.WriteString(answers[h])
 				}
 				input.WriteString("n\n")
-				code, out, errOut := initDo(t, testsupport.ShortStateDir(t), input.String(), args...)
+				pickArgs := args
+				if harness == "codex" && row[1] != "1" {
+					pickArgs = append(slices.Clone(args), "--foreman", "codex/"+row[2])
+				}
+				code, out, errOut := initDo(t, testsupport.ShortStateDir(t), input.String(), pickArgs...)
 				if code != 1 || errOut != "" || !strings.Contains(out, "Declined") || strings.Contains(out, "try again") {
 					t.Fatalf("numbered entry %s rejected: %d\n%s\n%s", row[0], code, out, errOut)
 				}
