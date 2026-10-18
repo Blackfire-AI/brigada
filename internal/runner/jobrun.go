@@ -219,7 +219,7 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 	if r.grant.Mode == string(engine.ModeSession) {
 		resume = r.grant.ResumeSessionID
 	}
-	cmd, err := ad.Command(adapter.Job{Prompt: r.grant.Prompt, Model: model, Effort: r.cfg.effortFor(r.grant), MCPConfig: r.mcpConfig, ReadOnlyRepo: r.foremanRepo}, workdir, resume)
+	cmd, err := ad.Command(adapter.Job{Prompt: r.grant.Prompt, Model: model, Review: isReviewJob(r.grant), Effort: r.cfg.effortFor(r.grant), MCPConfig: r.mcpConfig, ReadOnlyRepo: r.foremanRepo}, workdir, resume)
 	if err != nil {
 		return &noWorkerError{err}
 	}

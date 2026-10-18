@@ -274,7 +274,18 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 					fmt.Fprintf(stdout, "  %v; try again.\n", err)
 					continue
 				}
-				agents.specs = append(agents.specs, agentSpec{harness: h, model: model, classes: splitList(defaultClasses)})
+				classes := splitList(defaultClasses)
+				if h == "kimi" {
+					fmt.Fprint(stdout, "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. As a reviewer it only reads.\n")
+					answer, err := ask("    Let kimi write code too, not only review? [y/N]: ", "--agent harness=kimi,classes=review (or implement+review+answer to allow writing)")
+					if err != nil {
+						return fail(stderr, err)
+					}
+					if !strings.EqualFold(answer, "y") && !strings.EqualFold(answer, "yes") {
+						classes = []string{"review"}
+					}
+				}
+				agents.specs = append(agents.specs, agentSpec{harness: h, model: model, classes: classes})
 				break
 			}
 		}
@@ -504,6 +515,13 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			permissions = "edits files and runs commands inside codex's workspace-write sandbox"
 		case "kimi":
 			permissions = "edits files and runs commands headless, with no approval prompts"
+			if slices.Equal(a.Classes, []string{"review"}) {
+				for _, s := range usable {
+					if s.harness == "kimi" && s.agentFile == "" {
+						permissions = "reads files only; no shell"
+					}
+				}
+			}
 		case "opencode":
 			permissions = "edits files; no shell"
 		}
