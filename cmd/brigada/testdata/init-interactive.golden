@@ -38,7 +38,7 @@ Step 1 of 3: agents
     machine without asking. As a reviewer it only reads.
     Let kimi write code too, not only review? [y/N]:
 
-  opencode: signed in to 2 providers (opencode auth list)
+  opencode: signed in to 2 providers (opencode providers list)
     Which model should opencode run?
        1  zai-coding-plan/glm-5.3  Zhipu (GLM)
        2  zai-coding-plan/glm-5.2  Zhipu (GLM)

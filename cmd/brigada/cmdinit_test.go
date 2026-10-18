@@ -40,13 +40,13 @@ printf '%s %s\n' "${0##*/}" "$*" >> "$INIT_CALLS"
 case "$*" in
  --help)
    if [ "${0##*/}" = opencode ]; then
-     printf '  opencode models [provider]\n  opencode auth Manage credentials\n'
+     printf '  opencode models [provider]\n  opencode providers   manage AI providers and credentials   [aliases: auth]\n'
    else
      echo 'Commands: no verified authentication status here'
    fi
    exit 0 ;;
  models) [ "${0##*/}" = opencode ] || exit 89; printf 'fixture/gpt-5\nfixture/glm-5.3\n' ;;
- 'auth list') [ "${0##*/}" = opencode ] || exit 89; printf '┌ Credentials\n● Provider one oauth\n● Provider two api\n└ 2 credentials\n' ;;
+ 'providers list') [ "${0##*/}" = opencode ] || exit 89; printf '┌ Credentials\n● Provider one oauth\n● Provider two api\n└ 2 credentials\n' ;;
  *) echo 'unexpected harness invocation' >&2; exit 89 ;;
 esac
 `
@@ -117,7 +117,7 @@ func TestInitProbeAndRefusals(t *testing.T) {
 			}
 			data, _ := os.ReadFile(calls)
 			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-				if !strings.HasSuffix(line, " --help") && line != "opencode models" && line != "opencode auth list" {
+				if !strings.HasSuffix(line, " --help") && line != "opencode models" && line != "opencode providers list" {
 					t.Errorf("guessed/paid invocation: %q", line)
 				}
 			}
@@ -231,7 +231,7 @@ func TestInitKimiWriteOptIn(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-				if !strings.HasSuffix(line, " --help") && line != "opencode models" && line != "opencode auth list" {
+				if !strings.HasSuffix(line, " --help") && line != "opencode models" && line != "opencode providers list" {
 					t.Errorf("init ran a model or login: %q", line)
 				}
 			}
@@ -311,7 +311,7 @@ func TestInitNonTerminalPrompts(t *testing.T) {
 		"Step 1 of 3: agents",
 		"  claude: sign-in can't be checked",
 		"  kimi: init can't check sign-in. If you're not signed in, run `kimi login`\n  first, or leave kimi out.",
-		"  opencode: signed in to 2 providers (opencode auth list)",
+		"  opencode: signed in to 2 providers (opencode providers list)",
 		"Step 2 of 3: the foreman",
 		"  Reviews: 3 model families, so every task can get a reviewer of another one.",
 		"  Foreman: claude/sonnet\n",
@@ -423,7 +423,7 @@ func TestInitModelRetries(t *testing.T) {
 			}
 			data, _ := os.ReadFile(calls)
 			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-				if !strings.HasSuffix(line, " --help") && line != "opencode models" && line != "opencode auth list" {
+				if !strings.HasSuffix(line, " --help") && line != "opencode models" && line != "opencode providers list" {
 					t.Errorf("unexpected harness execution: %s", line)
 				}
 			}

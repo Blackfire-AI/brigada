@@ -222,16 +222,27 @@ func initOpenCodeModels(ctx context.Context) initModelSource {
 			}
 		}
 	}
-	// This is the known, read-only auth list path, gated by the auth command's
-	// row in root help. Never run auth itself (which can initiate a login).
-	if helpNamesHarnessCommand(string(help), "opencode", "auth") {
-		if out, err := cheapHarnessCommand(ctx, "opencode", "auth", "list"); err == nil {
+	// Read-only credential list, gated by a row in root help: current CLIs name
+	// "opencode providers" (alias auth), older ones "opencode auth". Never run
+	// login. Output is only counted, never kept or printed.
+	command := ""
+	switch {
+	case helpNamesHarnessCommand(string(help), "opencode", "providers"):
+		command = "providers"
+	case helpNamesHarnessCommand(string(help), "opencode", "auth"):
+		command = "auth"
+	}
+	if command != "" {
+		if out, err := cheapHarnessCommand(ctx, "opencode", command, "list"); err == nil {
+			ran := "opencode " + command + " list"
 			source.providerCount = initOpenCodeProviderCount(string(out))
 			source.signIn.signedIn = source.providerCount > 0
-			source.signIn.status = "not signed in"
-			source.signIn.evidence = "opencode auth list (documented by --help)"
+			source.signIn.checked = true
+			source.signIn.evidence = ran + " (documented by --help)"
 			if source.signIn.signedIn {
-				source.signIn.status = fmt.Sprintf("signed in to %d providers (opencode auth list)", source.providerCount)
+				source.signIn.status = fmt.Sprintf("signed in to %d providers (%s)", source.providerCount, ran)
+			} else {
+				source.signIn.status = "no stored provider credentials (keys may also come from your environment)"
 			}
 		} else {
 			source.entries = nil
