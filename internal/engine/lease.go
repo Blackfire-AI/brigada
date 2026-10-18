@@ -288,6 +288,13 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			// A foreman turn is placed on its pair: a runner with no agent
 			// for it, agentless included, does not get it.
 			becauseplaced := j.Kind == KindForeman || j.ExcludeFamily != "" || j.ExcludeAgent != 0 || j.RequireAgent != 0
+			if !becauseplaced && j.Kind == KindReview {
+				author, err := reviewAuthorTx(tx, j)
+				if err != nil {
+					return nil, err
+				}
+				becauseplaced = author != 0
+			}
 			if !becauseplaced {
 				var has bool
 				if has, err = runnerHasAgentsTx(tx, owner); err != nil {
@@ -671,6 +678,10 @@ func eligibleAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string) ([
 // deadline filled in: what the cooling hold (§8.1) and the queue-TTL
 // park reason read.
 func qualifyingAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
+	author, err := reviewAuthorTx(tx, j)
+	if err != nil {
+		return nil, err
+	}
 	// A foreman turn runs on the harness AND model its project chose: only
 	// an agent offering exactly that pair qualifies, and a turn whose pair
 	// cannot be resolved has no agent at all.
@@ -732,8 +743,8 @@ func qualifyingAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string, 
 		if id == j.ExcludeAgent {
 			continue
 		}
-		if j.ExcludeFamily != "" || (j.Kind == KindReview && j.ExcludeAgent != 0) {
-			if !reviewAgentQualifies(id, family, classes, j.ExcludeFamily, j.ExcludeAgent) {
+		if j.ExcludeFamily != "" || j.Kind == KindReview {
+			if !reviewAgentQualifies(id, family, classes, j.ExcludeFamily, j.ExcludeAgent, author) {
 				continue
 			}
 		}
@@ -778,12 +789,12 @@ func runnerHasAgentsTx(tx *sql.Tx, runner int64) (bool, error) {
 
 // reviewAgentQualifies is the review placement's agent test (§7, §8):
 // when a family is excluded, the agent needs a known different family;
-// it must also offer review and differ from the excluded agent. The
-// exclusions name the author's family and, on a retry, the first
+// it must also offer review and differ from the author and excluded agent.
+// The exclusions name the author, its family and, on a retry, the first
 // reviewer's agent; empty values exclude nothing.
-func reviewAgentQualifies(id int64, family, classes, excludeFamily string, excludeAgent int64) bool {
+func reviewAgentQualifies(id int64, family, classes, excludeFamily string, excludeAgent, author int64) bool {
 	switch {
-	case id == excludeAgent:
+	case id == excludeAgent || id == author:
 		return false
 	case excludeFamily != "" && (family == "" || family == excludeFamily):
 		return false

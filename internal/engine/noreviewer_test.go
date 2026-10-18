@@ -150,7 +150,9 @@ func TestQueueTTLParkReasonNamesTheMissingReviewer(t *testing.T) {
 		unknownFamily bool
 		want, wantNo  string
 	}{
-		{"unservable", false, false, "no reviewer: no agent of a family other than anthropic offers review", "queue TTL exceeded"},
+		// The sole review provider is now named as the author, rather than
+		// describing this as only a missing family.
+		{"unservable", false, false, wantAuthorOnlyReviewer, "queue TTL exceeded"},
 		{"unknown family unservable", false, true, "no reviewer: no agent of a family other than anthropic offers review", "queue TTL exceeded"},
 		{"merely waiting", true, false, "queue TTL exceeded: no runner leased the job within", "no reviewer"},
 	} {
@@ -211,7 +213,9 @@ func TestUnservableReviewNotifiesOnce(t *testing.T) {
 			bodies = append(bodies, n.Body)
 		}
 	}
-	want := fmt.Sprintf("task #%d reviewing: %s", e.task, wantNoReviewer)
+	// With only the author offering review, the notification names the
+	// author exclusion instead of the broader family exclusion.
+	want := fmt.Sprintf("task #%d reviewing: %s", e.task, wantAuthorOnlyReviewer)
 	if len(bodies) != 1 || bodies[0] != want {
 		t.Errorf("notifications = %q, want exactly %q", bodies, want)
 	}

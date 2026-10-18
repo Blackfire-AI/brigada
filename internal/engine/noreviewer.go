@@ -2,24 +2,114 @@ package engine
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
 
 // reviewUnservableTx reports whether a queued review job could never be
 // taken by any registered agent, even one ready and out of cooling: no
-// agent of a known family other than the job's ExcludeFamily, other than its
-// ExcludeAgent (the retry case), offers the review class — the test
+// agent other than the author passes ExcludeFamily and ExcludeAgent
+// (the retry case) and offers the review class — the test
 // eligibleAgentsTx applies minus health and cooling. A cooling or broken
 // agent of the right family makes the job merely wait, never
 // unservable: health is temporary, a missing structural reviewer is not.
 func reviewUnservableTx(tx *sql.Tx, j *jobRow) (bool, error) {
 	// A review that excludes nothing (an agent-less author) is taken by
 	// any runner, agent-less ones included: never structurally stuck.
-	if j.Kind != KindReview || (j.ExcludeFamily == "" && j.ExcludeAgent == 0) {
+	if j.Kind != KindReview {
 		return false, nil
 	}
-	return noReviewAgentTx(tx, j.ExcludeFamily, j.ExcludeAgent)
+	author, err := reviewAuthorTx(tx, j)
+	if err != nil {
+		return false, err
+	}
+	if j.ExcludeFamily == "" && j.ExcludeAgent == 0 && author == 0 {
+		return false, nil
+	}
+	return noReviewAgentTx(tx, j)
+}
+
+// reviewAuthorTx identifies whose work a review reads, independently of
+// the family and retry exclusions. Task reviews follow the latest work or
+// fix job; standalone reviews follow the branch's last work job. No job
+// (or an agent-less author) leaves the author exclusion open.
+func reviewAuthorTx(tx *sql.Tx, j *jobRow) (int64, error) {
+	if j.Kind != KindReview {
+		return 0, nil
+	}
+	var row *sql.Row
+	switch {
+	case j.TaskID != 0:
+		row = tx.QueryRow(`SELECT COALESCE(agent_id, 0) FROM jobs
+			WHERE task_id = ? AND kind IN ('work', 'fix') ORDER BY id DESC LIMIT 1`, j.TaskID)
+	case j.Branch != "":
+		row = tx.QueryRow(`SELECT COALESCE(agent_id, 0) FROM jobs
+			WHERE project_id = ? AND branch = ? AND kind = 'work' ORDER BY id DESC LIMIT 1`, j.ProjectID, j.Branch)
+	default:
+		return 0, nil
+	}
+	var author int64
+	if err := row.Scan(&author); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("read the author of review job %d: %w", j.ID, err)
+	}
+	return author, nil
+}
+
+// noReviewAgentTx applies lease eligibility without temporary health and
+// cooling limits. In particular, the author remains excluded on retries,
+// alongside the first reviewer's agent and the author's known family.
+func noReviewAgentTx(tx *sql.Tx, j *jobRow) (bool, error) {
+	agents, err := qualifyingAgentsTx(tx, 0, j, string(KindReview), "", true)
+	return len(agents) == 0, err
+}
+
+const noReviewerAuthor = "no reviewer: the only agent offering review is the author; offer another agent to the runner (--agent harness=…) or review by hand"
+
+// onlyAuthorReviewerTx distinguishes a missing second agent from a missing
+// family. Ignore the family rule for this explanation, but keep the harness
+// and retry exclusions: another agent offering review may still need a
+// different family, while the author can never review its own work.
+func onlyAuthorReviewerTx(tx *sql.Tx, j *jobRow) (bool, error) {
+	author, err := reviewAuthorTx(tx, j)
+	if err != nil || author == 0 {
+		return false, err
+	}
+	rows, err := tx.Query("SELECT id, family, classes FROM agents WHERE (? = '' OR harness = ?)", j.Harness, j.Harness)
+	if err != nil {
+		return false, fmt.Errorf("list the reviewers: %w", err)
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var id int64
+		var family, classes string
+		if err := rows.Scan(&id, &family, &classes); err != nil {
+			return false, fmt.Errorf("list the reviewers: %w", err)
+		}
+		if !reviewAgentQualifies(id, family, classes, "", j.ExcludeAgent, 0) {
+			continue
+		}
+		if id != author {
+			return false, nil
+		}
+		found = true
+	}
+	return found, rows.Err()
+}
+
+func noReviewerReasonTx(tx *sql.Tx, j *jobRow, entry bool) (string, error) {
+	onlyAuthor, err := onlyAuthorReviewerTx(tx, j)
+	if err != nil {
+		return "", err
+	}
+	if onlyAuthor {
+		return noReviewerAuthor, nil
+	}
+	if entry {
+		return noReviewerEntry(j.ExcludeFamily), nil
+	}
+	return noReviewerWhy(j.ExcludeFamily), nil
 }
 
 // noReviewerWhy is the one sentence for why a review job can never be
@@ -44,8 +134,8 @@ func noReviewerEntry(family string) string {
 // queuedReview is a queued review job of a task waiting for its review.
 type queuedReview struct {
 	job, project, task, plan int64
-	title, family            string
-	excludeAgent             int64
+	title                    string
+	reason                   string
 	flagged                  bool // its review_unservable event is already logged
 }
 
@@ -53,7 +143,7 @@ type queuedReview struct {
 // task order; project scopes them, 0 for all. Standalone reviews (no
 // task) are not listed: they have no task to name.
 func queuedReviewsTx(tx *sql.Tx, project int64) ([]queuedReview, error) {
-	query := `SELECT j.id, j.project_id, j.task_id, t.plan_id, t.title, j.exclude_family, COALESCE(j.exclude_agent, 0),
+	query := `SELECT j.id, j.project_id, j.task_id, t.plan_id, t.title,
 		EXISTS (SELECT 1 FROM events e WHERE e.kind = ? AND e.job_id = j.id)
 		FROM jobs j JOIN tasks t ON t.id = j.task_id
 		WHERE j.status = 'queued' AND j.kind = 'review' AND t.state = ?`
@@ -70,7 +160,7 @@ func queuedReviewsTx(tx *sql.Tx, project int64) ([]queuedReview, error) {
 	var out []queuedReview
 	for rows.Next() {
 		var q queuedReview
-		if err := rows.Scan(&q.job, &q.project, &q.task, &q.plan, &q.title, &q.family, &q.excludeAgent, &q.flagged); err != nil {
+		if err := rows.Scan(&q.job, &q.project, &q.task, &q.plan, &q.title, &q.flagged); err != nil {
 			return nil, fmt.Errorf("list the queued reviews: %w", err)
 		}
 		out = append(out, q)
@@ -87,11 +177,19 @@ func unservableReviewsTx(tx *sql.Tx, project int64) ([]queuedReview, error) {
 	}
 	var out []queuedReview
 	for _, q := range all {
-		bad, err := reviewUnservableTx(tx, &jobRow{Kind: KindReview, ExcludeFamily: q.family, ExcludeAgent: q.excludeAgent})
+		j, err := loadJobTx(tx, q.job)
+		if err != nil {
+			return nil, err
+		}
+		bad, err := reviewUnservableTx(tx, j)
 		if err != nil {
 			return nil, err
 		}
 		if bad {
+			q.reason, err = noReviewerReasonTx(tx, j, true)
+			if err != nil {
+				return nil, err
+			}
 			out = append(out, q)
 		}
 	}
@@ -112,7 +210,7 @@ func flagUnservableReviewsTx(tx *sql.Tx, now time.Time) error {
 			continue
 		}
 		if _, err := appendEventTx(tx, evReviewUnservable, q.project, q.task, q.job,
-			eventPayload{Reason: noReviewerEntry(q.family)}, now); err != nil {
+			eventPayload{Reason: q.reason}, now); err != nil {
 			return err
 		}
 	}
@@ -120,8 +218,8 @@ func flagUnservableReviewsTx(tx *sql.Tx, now time.Time) error {
 }
 
 // statusNoReviewerTx is the needs-you entries of the unservable task
-// reviews (§10): the task waits at reviewing until an agent of another
-// family registers.
+// reviews (§10): the task waits at reviewing until an eligible reviewer
+// registers.
 func statusNoReviewerTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
 	bad, err := unservableReviewsTx(tx, project)
 	if err != nil {
@@ -131,7 +229,7 @@ func statusNoReviewerTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
 	for _, q := range bad {
 		items = append(items, NeedsYouItem{
 			Kind: "task", ID: q.task, State: taskReviewing, Title: q.title, PlanID: q.plan,
-			Reason: noReviewerEntry(q.family),
+			Reason: q.reason,
 		})
 	}
 	return items, nil
