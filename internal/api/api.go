@@ -101,6 +101,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/admin/fence-epoch", s.authed([]string{roleAdmin}, s.idempotent(s.handleFenceEpoch)))
 	// The foreman's harness and model (§4.1): PUT chooses them, GET reads
 	// them back; the role sets differ per method, so the handler checks.
+	mux.HandleFunc("/v1/projects/archive", s.authed([]string{roleClient, roleAdmin}, s.handleProjectArchive))
 	mux.HandleFunc("/v1/projects/foreman", s.authed(nil, s.handleProjectForeman))
 	mux.HandleFunc("/v1/projects", s.authed([]string{roleClient, roleAdmin}, s.handleProjectList))
 	// The project's editable settings (§6.3): PUT sets, GET reads.

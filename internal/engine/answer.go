@@ -288,6 +288,9 @@ func parkedTaskTx(tx *sql.Tx, project, taskID int64) error {
 	if owner != project {
 		return fmt.Errorf("task %d belongs to project %d, not %d", taskID, owner, project)
 	}
+	if err := activeProjectTx(tx, owner); err != nil {
+		return err
+	}
 	if state != taskNeedsForeman {
 		return fmt.Errorf("task %d is %s, not parked waiting for the foreman", taskID, state)
 	}

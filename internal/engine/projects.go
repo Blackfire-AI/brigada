@@ -96,7 +96,7 @@ func (e *Engine) SetProjectForemanEffort(ctx context.Context, repoURL, harness, 
 		case err == nil:
 			// An effort change alone is no switch: the session and any
 			// limit stay, and only the next turn runs at the new level.
-			if _, err := tx.Exec("UPDATE projects SET foreman_harness = ?, foreman_model = ?, foreman_effort = ?, updated_at = ? WHERE id = ?",
+			if _, err := tx.Exec("UPDATE projects SET archived_at = NULL, foreman_harness = ?, foreman_model = ?, foreman_effort = ?, updated_at = ? WHERE id = ?",
 				harness, model, effort, fmtTime(now), project); err != nil {
 				return fmt.Errorf("set the foreman of the project of %s: %w", shown, err)
 			}
@@ -214,7 +214,7 @@ type ProjectInfo struct {
 	NeedsYou    int    `json:"needs_you"`
 }
 
-// Projects lists every project the engine has, oldest first, each with
+// Projects lists active projects, oldest first, each with
 // its foreman, its active plans and its needs-you count — the count the
 // status shows for that project alone.
 func (e *Engine) Projects(ctx context.Context) ([]ProjectInfo, error) {
@@ -226,7 +226,7 @@ func (e *Engine) Projects(ctx context.Context) ([]ProjectInfo, error) {
 		}
 		rows, err := tx.Query(`SELECT pr.id, pr.repo_url, pr.foreman_harness, pr.foreman_model,
 				(SELECT COUNT(*) FROM plans p WHERE p.project_id = pr.id AND p.state = 'active')
-			FROM projects pr ORDER BY pr.id`)
+			FROM projects pr WHERE pr.archived_at IS NULL ORDER BY pr.id`)
 		if err != nil {
 			return fmt.Errorf("list the projects: %w", err)
 		}

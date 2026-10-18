@@ -110,6 +110,9 @@ func (e *Engine) Submit(ctx context.Context, p SubmitParams) (SubmitResult, erro
 }
 
 func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResult, error) {
+	if err := activeProjectTx(tx, p.ProjectID); err != nil {
+		return SubmitResult{}, err
+	}
 	switch {
 	case p.Key == "":
 		return SubmitResult{}, fmt.Errorf("key is required")

@@ -13,6 +13,8 @@ import (
 // and the payload's vocabulary stays small: what happened, never the
 // prompts or secrets that made it happen.
 const (
+	evProjectArchived        = "project_archived"          // removal retains history but closes the work gate
+	evPlanCancelled          = "plan_cancelled"            // removal cancelled an unfinished plan
 	evPlanCreated            = "plan_created"              // CreatePlan: a plan now exists (§6.2)
 	evPlanDone               = "plan_done"                 // the plan's last open task finished (§6.2)
 	evPlanAwaitingApproval   = "plan_awaiting_approval"    // CreatePlan: the plan is over the approval limit and waits for the user's yes (§6.3)

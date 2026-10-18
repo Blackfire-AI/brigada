@@ -36,6 +36,9 @@ func (e *Engine) SubmitForemanTurn(ctx context.Context, project int64, events []
 }
 
 func (e *Engine) submitForemanTurnTx(tx *sql.Tx, project int64, inbox ForemanInbox, now time.Time) (SubmitResult, error) {
+	if err := activeProjectTx(tx, project); err != nil {
+		return SubmitResult{}, err
+	}
 	var harness, model string
 	err := tx.QueryRow("SELECT foreman_harness, foreman_model FROM projects WHERE id = ?", project).
 		Scan(&harness, &model)

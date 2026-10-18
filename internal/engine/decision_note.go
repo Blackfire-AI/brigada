@@ -23,6 +23,9 @@ func (e *Engine) DecisionNote(ctx context.Context, project int64, text string) (
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
+		if err := activeProjectTx(tx, project); err != nil {
+			return err
+		}
 		var err error
 		event, err = appendEventTx(tx, evDecisionNote, project, 0, 0,
 			eventPayload{Text: text, Source: authorInteractive}, now)

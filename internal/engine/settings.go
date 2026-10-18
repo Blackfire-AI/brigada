@@ -444,6 +444,9 @@ func (e *Engine) SetProjectSettings(ctx context.Context, repoURL string, values 
 		case err != nil:
 			return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
 		}
+		if err := activeProjectTx(tx, project); err != nil {
+			return err
+		}
 		row := map[string]json.RawMessage{}
 		if rawSettings != "" {
 			if err := json.Unmarshal([]byte(rawSettings), &row); err != nil {

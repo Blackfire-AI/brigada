@@ -108,10 +108,10 @@ type StatusInstructions struct {
 
 // statusInstructionsTx lists the projects in scope that have instructions.
 func statusInstructionsTx(tx *sql.Tx, project int64, withText bool) ([]StatusInstructions, error) {
-	query := "SELECT id, repo_url FROM projects"
+	query := "SELECT id, repo_url FROM projects WHERE archived_at IS NULL"
 	var args []any
 	if project != 0 {
-		query += " WHERE id = ?"
+		query += " AND id = ?"
 		args = append(args, project)
 	}
 	rows, err := tx.Query(query+" ORDER BY id", args...)

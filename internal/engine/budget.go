@@ -170,7 +170,7 @@ func (e *Engine) statusWakeBudgetTx(tx *sql.Tx, project int64, now time.Time) ([
 		FROM foreman_inbox i
 		JOIN events e ON e.id = i.event_id
 		JOIN projects p ON p.id = i.project_id
-		WHERE i.state = ?`
+		WHERE p.archived_at IS NULL AND i.state = ?`
 	args := []any{evUserMessage, inboxPending}
 	if project != 0 {
 		query += " AND i.project_id = ?"

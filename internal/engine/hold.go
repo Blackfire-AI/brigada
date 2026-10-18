@@ -26,6 +26,7 @@ const (
 	HoldEndLease      = "lease"      // the bridge missed its liveness lease
 	HoldEndForced     = "forced"     // the user released it (`brigada hold release`)
 	HoldEndReacquired = "reacquired" // the same bridge instance acquired again
+	HoldEndRemoved    = "removed"    // the project was archived
 )
 
 // ErrStaleHold marks a mutation the engine rejected whole because its
@@ -198,6 +199,9 @@ func (e *Engine) AcquireHold(ctx context.Context, req HoldAcquire) (HoldResult, 
 			}
 			return fmt.Errorf("read project %d: %w", req.Project, err)
 		}
+		if err := activeProjectTx(tx, req.Project); err != nil {
+			return err
+		}
 		slot, err := slotTx(tx, req.Project, now)
 		if err != nil {
 			return err
@@ -318,8 +322,8 @@ func bumpHoldFenceTx(tx *sql.Tx, project int64) (int64, error) {
 // endHoldTx ends one live interactive hold (§4.6) in the order the design
 // fixes: revoke the credential, bump the fence, THEN re-evaluate pending
 // events and messages for a wake. By the time a headless turn can be
-// submitted, the old mutation authority is dead. wake is false only for a
-// hold the same bridge replaces at once.
+// submitted, the old mutation authority is dead. wake is false when the
+// same bridge replaces the hold or the project is being removed.
 func (e *Engine) endHoldTx(tx *sql.Tx, holdID, project int64, reason string, wake bool, now time.Time) error {
 	// 1. Revoke: a credential authenticates only against a live hold.
 	r, err := tx.Exec(`UPDATE interactive_holds SET state = 'ended', end_reason = ?, ended_at = ?

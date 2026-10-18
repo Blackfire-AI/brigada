@@ -68,7 +68,7 @@ func (e *Engine) RecoverPlans(ctx context.Context, extraRepos []string) (results
 	err = e.store.Store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		for _, repo := range extraRepos {
-			_, err := LookupProjectTx(tx, repo)
+			project, err := LookupProjectTx(tx, repo)
 			switch {
 			case errors.Is(err, sql.ErrNoRows):
 				if _, err := createProjectTx(tx, repo, setupDefaultBranch, "", "", now); err != nil {
@@ -78,13 +78,17 @@ func (e *Engine) RecoverPlans(ctx context.Context, extraRepos []string) (results
 					}
 					return err
 				}
+			case err == nil:
+				if err := activeProjectTx(tx, project); err != nil {
+					return err
+				}
 			case errors.Is(err, ErrInvalidRepoURL):
 				warnings = append(warnings, fmt.Sprintf("%s: %v", RedactRepoURL(repo), err))
 			case err != nil:
 				return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repo), err)
 			}
 		}
-		rows, err := tx.Query("SELECT id, repo_url, COALESCE(NULLIF(transport_url, ''), repo_url), default_branch, settings FROM projects ORDER BY id")
+		rows, err := tx.Query("SELECT id, repo_url, COALESCE(NULLIF(transport_url, ''), repo_url), default_branch, settings FROM projects WHERE archived_at IS NULL ORDER BY id")
 		if err != nil {
 			return fmt.Errorf("list projects: %w", err)
 		}
@@ -141,6 +145,9 @@ func (e *Engine) RecoverPlans(ctx context.Context, extraRepos []string) (results
 // transaction. It checks everything it can refuse before it writes
 // anything, so a skipped plan leaves the store as it was.
 func (e *Engine) applyPlanFileTx(tx *sql.Tx, project int64, repo, defaultBranch string, p planfile.Plan, now time.Time) (action, detail string, err error) {
+	if err := activeProjectTx(tx, project); err != nil {
+		return "", "", err
+	}
 	skip := func(format string, args ...any) (string, string, error) {
 		return PlanSkipped, fmt.Sprintf(format, args...), nil
 	}

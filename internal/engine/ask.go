@@ -131,16 +131,24 @@ func askProjectTx(tx *sql.Tx, repoURL string) (int64, error) {
 		if err != nil {
 			return 0, fmt.Errorf("resolve the repo %s: %w", RedactRepoURL(repoURL), err)
 		}
-		return project, nil
+		return project, activeProjectTx(tx, project)
 	}
 	var n int
-	if err := tx.QueryRow("SELECT COUNT(*), COALESCE(MIN(id), 0) FROM projects").Scan(&n, &project); err != nil {
+	if err := tx.QueryRow("SELECT COUNT(*), COALESCE(MIN(id), 0) FROM projects WHERE archived_at IS NULL").Scan(&n, &project); err != nil {
 		return 0, fmt.Errorf("count the projects: %w", err)
 	}
 	switch n {
 	case 1:
-		return project, nil
+		return project, activeProjectTx(tx, project)
 	case 0:
+		// Keep the removal guidance for the implicit single-project call.
+		var total int
+		if err := tx.QueryRow("SELECT COUNT(*), COALESCE(MIN(id), 0) FROM projects").Scan(&total, &project); err != nil {
+			return 0, err
+		}
+		if total == 1 {
+			return project, activeProjectTx(tx, project)
+		}
 		return 0, fmt.Errorf("%w: the engine has no project yet; set one up with `brigada project foreman`", ErrNoProject)
 	default:
 		return 0, fmt.Errorf("%w: the engine has %d projects; name one by its repo URL", ErrNoProject, n)

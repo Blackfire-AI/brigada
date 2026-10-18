@@ -179,7 +179,7 @@ func (e *Engine) status(ctx context.Context, project int64, withText bool) (Stat
 		}
 		info.Pid = pid.Int64
 		info.StartedAt = started.String
-		rows, err := tx.Query("SELECT status, COUNT(*) FROM jobs GROUP BY status")
+		rows, err := tx.Query("SELECT status, COUNT(*) FROM jobs WHERE project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) GROUP BY status")
 		if err != nil {
 			return fmt.Errorf("count jobs by status: %w", err)
 		}
@@ -248,10 +248,10 @@ func (e *Engine) status(ctx context.Context, project int64, withText bool) (Stat
 // statusSlotsTx lists the foreman slot of one project, or of every
 // project with 0 (§4.6).
 func statusSlotsTx(tx *sql.Tx, project int64, now time.Time) ([]Slot, error) {
-	query := "SELECT id FROM projects"
+	query := "SELECT id FROM projects WHERE archived_at IS NULL"
 	var args []any
 	if project != 0 {
-		query += " WHERE id = ?"
+		query += " AND id = ?"
 		args = append(args, project)
 	}
 	rows, err := tx.Query(query+" ORDER BY id", args...)
@@ -287,7 +287,7 @@ func statusSlotsTx(tx *sql.Tx, project int64, now time.Time) ([]Slot, error) {
 // foreman inbox (§4.2 item 3), for one project or, with 0, every one.
 func pendingUserMessagesTx(tx *sql.Tx, project int64) (int, error) {
 	query := `SELECT COUNT(*) FROM foreman_inbox i JOIN events e ON e.id = i.event_id
-		WHERE i.state = ? AND e.kind = ?`
+		WHERE i.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) AND i.state = ? AND e.kind = ?`
 	args := []any{inboxPending, evUserMessage}
 	if project != 0 {
 		query += " AND i.project_id = ?"
@@ -308,7 +308,7 @@ func statusRunningTx(tx *sql.Tx, project int64) ([]StatusJob, error) {
 			COALESCE(a.harness, ''), COALESCE(a.model, ''), COALESCE(a.effort, ''),
 			COALESCE(j.last_leased, j.first_leased, ''), COALESCE(j.last_event, '')
 		FROM jobs j LEFT JOIN agents a ON a.id = j.agent_id
-		WHERE j.status IN (?, ?)`
+		WHERE j.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) AND j.status IN (?, ?)`
 	args := []any{statusLeased, statusRunning}
 	if project != 0 {
 		query += " AND j.project_id = ?"
@@ -342,7 +342,7 @@ func statusPlansTx(tx *sql.Tx, project int64, now time.Time) ([]StatusPlan, erro
 	cutoff := fmtTime(now.Add(-statusDoneWindow))
 	query := `SELECT p.id, pr.repo_url, p.title, p.state
 		FROM plans p JOIN projects pr ON pr.id = p.project_id
-		WHERE (p.state = 'active' OR (p.state = 'done' AND p.updated_at >= ?))`
+		WHERE pr.archived_at IS NULL AND (p.state = 'active' OR (p.state = 'done' AND p.updated_at >= ?))`
 	args := []any{cutoff}
 	if project != 0 {
 		query += " AND p.project_id = ?"
@@ -436,7 +436,7 @@ func statusWaitingOnTx(tx *sql.Tx, task int64) ([]string, error) {
 // lines of its text. A scope with no report yet reads nil.
 func statusReportTx(tx *sql.Tx, project int64) (*StatusReport, error) {
 	query := `SELECT COALESCE(project_id, 0), payload, created_at
-		FROM events WHERE kind = ?`
+		FROM events WHERE project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) AND kind = ?`
 	args := []any{evForemanReport}
 	if project != 0 {
 		query += " AND project_id = ?"
@@ -495,7 +495,7 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 			SELECT e2.id FROM events e2
 			WHERE e2.task_id = t.id AND e2.kind IN (%s)
 			ORDER BY e2.id DESC LIMIT 1)
-		WHERE t.state IN ('needs_foreman', 'needs_user')`, kinds)
+		WHERE p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) AND t.state IN ('needs_foreman', 'needs_user')`, kinds)
 	args := []any{}
 	if project != 0 {
 		query += " AND p.project_id = ?"
@@ -533,7 +533,7 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	items = append(items, noReviewer...)
 
 	pquery := `SELECT p.id, p.title, p.version, pr.repo_url FROM plans p JOIN projects pr ON pr.id = p.project_id
-		WHERE p.state = 'pending_approval'`
+		WHERE pr.archived_at IS NULL AND p.state = 'pending_approval'`
 	pargs := []any{}
 	if project != 0 {
 		pquery += " AND p.project_id = ?"
@@ -576,7 +576,7 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	// A limited foreman is waiting for the user's choice (§4.4): wait,
 	// switch it, or let approved plans run without it. A reset time that
 	// passed is not listed; the next wake clears it.
-	lquery := `SELECT id, repo_url, foreman_limited FROM projects WHERE foreman_limited IS NOT NULL`
+	lquery := `SELECT id, repo_url, foreman_limited FROM projects WHERE archived_at IS NULL AND foreman_limited IS NOT NULL`
 	largs := []any{}
 	if project != 0 {
 		lquery += " AND id = ?"

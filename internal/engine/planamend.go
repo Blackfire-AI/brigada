@@ -132,6 +132,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	if err != nil {
 		return AmendPlanResult{}, fmt.Errorf("read plan %d: %w", plan, err)
 	}
+	if err := activeProjectTx(tx, proj); err != nil {
+		return AmendPlanResult{}, err
+	}
 	if state != "active" && state != planAwaitingApproval {
 		return AmendPlanResult{}, fmt.Errorf("%w: plan %d is %s; only an active or awaiting plan is amended", ErrPlanNotLive, plan, state)
 	}

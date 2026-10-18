@@ -93,7 +93,7 @@ func capsJobTx(tx *sql.Tx, owner, agent int64, advertised int, j *jobRow, limits
 func foremanAccountsTx(tx *sql.Tx, project int64) ([]string, error) {
 	rows, err := tx.Query(`SELECT DISTINCT a.account FROM agents a
 		JOIN projects p ON p.foreman_harness = a.harness AND p.foreman_model = a.model
-		WHERE p.id = ? AND p.foreman_harness <> '' ORDER BY a.account`, project)
+		WHERE p.id = ? AND p.archived_at IS NULL AND p.foreman_harness <> '' ORDER BY a.account`, project)
 	if err != nil {
 		return nil, fmt.Errorf("list foreman accounts of project %d: %w", project, err)
 	}
