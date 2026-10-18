@@ -16,6 +16,7 @@ func TestModelFamily(t *testing.T) {
 		{"mistral-large", "mistral"}, {"codestral", "mistral"}, {"devstral-2", "mistral"},
 		{"glm-5.3", "zhipu"}, {"zai-coding-plan/glm-5.3", "zhipu"},
 		{"other/provider/GLM-5.3", "zhipu"},
+		{"fable", "anthropic"}, {"opus[1m]", "anthropic"}, {"claude-fable-5-1[1m]", "anthropic"},
 	} {
 		t.Run(tc.model, func(t *testing.T) {
 			got, err := ModelFamily(tc.model)

@@ -21,7 +21,8 @@ type harnessProbe struct {
 	signedIn  bool
 	status    string
 	evidence  string
-	checked   bool // a documented command ran and its answer is in status
+	checked   bool   // a documented command ran and its answer is in status
+	rootHelp  string // claude only: root --help, kept in memory for its model row
 }
 
 // Only known cheap status paths are candidates. Each command in the path
@@ -44,6 +45,9 @@ func probeHarness(ctx context.Context, harness string) harnessProbe {
 	for i, word := range path {
 		args := append(append([]string{}, path[:i]...), "--help")
 		out, err := cheapHarnessCommand(ctx, harness, args...)
+		if i == 0 && err == nil && harness == "claude" {
+			p.rootHelp = string(out)
+		}
 		if err != nil || !helpNamesCommand(string(out), word) {
 			return p
 		}

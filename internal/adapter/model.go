@@ -36,7 +36,7 @@ var modelFamilyPrefixes = []struct {
 	family   string
 	prefixes []string
 }{
-	{"anthropic", []string{"claude", "sonnet", "opus", "haiku"}},
+	{"anthropic", []string{"claude", "sonnet", "opus", "haiku", "fable"}},
 	{"openai", []string{"gpt", "chatgpt", "codex", "o1", "o3", "o4"}},
 	{"moonshot", []string{"kimi", "k2", "moonshot"}},
 	{"google", []string{"gemini"}},
@@ -62,6 +62,12 @@ func ModelFamily(model string) (string, error) {
 	name := strings.ToLower(model)
 	if i := strings.LastIndex(name, "/"); i >= 0 {
 		name = name[i+1:]
+	}
+	// A context suffix such as "[1m]" does not change the family.
+	if strings.HasSuffix(name, "]") {
+		if i := strings.LastIndex(name, "["); i > 0 {
+			name = name[:i]
+		}
 	}
 	var prefixes []string
 	for _, group := range modelFamilyPrefixes {

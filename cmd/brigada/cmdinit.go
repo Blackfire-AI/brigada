@@ -232,7 +232,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 					}
 					prefix += "  "
 				}
-				printInitWrapped(stdout, prefix, "          ", note)
+				printInitWrapped(stdout, prefix, strings.Repeat(" ", utf8.RuneCountInString(prefix)), note)
 			}
 			if h != "kimi" {
 				fmt.Fprintf(stdout, "       -  don't use %s\n", h)
@@ -247,6 +247,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			defaultAnswer := "-"
 			if len(entries) > 0 && h != "opencode" {
 				defaultAnswer = "1"
+				if sources[h].defaultID > 0 {
+					defaultAnswer = strconv.Itoa(sources[h].defaultID)
+				}
 			}
 			pick := initPickRange(len(entries))
 			if h != "kimi" {
