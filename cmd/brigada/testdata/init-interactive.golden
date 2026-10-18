@@ -109,7 +109,8 @@ Step 3 of 3: how brigada tests the work
 
   Found in this repo:
      1  uv run pytest  pytest, from uv.lock  default
-  Pick 1, or type a command [1]:
+     -  no check       work goes straight to review; add one later
+  Pick 1 or -, or type a command [1]:
 
   -> change later: edit default_check in .brigada/project.yaml, then run
      brigada project import

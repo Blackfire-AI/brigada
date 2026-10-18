@@ -19,28 +19,50 @@ const (
 		"  Use the command you run yourself to be sure nothing broke: tests,\n" +
 		"  lint, type checks. Claude workers may run it too before handing in.\n"
 	initCheckCurrent    = "current, from .brigada/project.yaml"
-	initCheckTypedRetry = "  type a command; try again.\n"
+	initCheckTypedRetry = "  type a command, or - for no check; try again.\n"
 )
 
 // initCheckEntries is the menu: the project's current check first when it
-// has one, then the candidates without a duplicate of it.
-func initCheckEntries(candidates []checkCandidate, current, currentTools string) []checkCandidate {
-	if current == "" {
-		return candidates
+// has one, then the candidates without a duplicate of it, then no check.
+func initCheckEntries(candidates []checkCandidate, current, currentTools string, hasProject bool) []checkCandidate {
+	var entries []checkCandidate
+	if current != "" {
+		entries = append(entries, checkCandidate{Command: current, Note: initCheckCurrent, Tools: currentTools})
 	}
-	entries := []checkCandidate{{Command: current, Note: initCheckCurrent, Tools: currentTools}}
 	for _, c := range candidates {
 		if c.Command != current {
 			entries = append(entries, c)
 		}
 	}
-	return entries
+	none := checkCandidate{}
+	if hasProject && current == "" {
+		none.Note = "current"
+	}
+	return append(entries, none)
+}
+
+func initCheckDefault(entries []checkCandidate) int {
+	for i, e := range entries {
+		if _, tags := initNoteTags(e.Note); tags == "current" {
+			return i
+		}
+	}
+	return 0
 }
 
 // initCheckTools is the worker tool scope that lets command run: the one a
 // menu entry carries (the candidate's when the entry has none), else a scope
-// for the command itself. It is empty when no valid scope can be built.
+// for the command itself. No check grants only file tools, plus the Go
+// defaults in a Go repository. An unrepresentable scope grants file tools only.
 func initCheckTools(command string, entries, candidates []checkCandidate) string {
+	if command == "" {
+		for _, c := range candidates {
+			if c.Command == "go test ./..." {
+				return c.Tools
+			}
+		}
+		return "none"
+	}
 	for _, e := range entries {
 		if e.Command != command {
 			continue
@@ -58,19 +80,9 @@ func initCheckTools(command string, entries, candidates []checkCandidate) string
 	// "+" joins scopes and parentheses end the pattern: no scope for those.
 	pattern := "Bash(" + command + ":*)"
 	if _, err := lifecycle.ParseTools(pattern); err != nil || strings.ContainsAny(command, "+()") {
-		return ""
+		return "none"
 	}
 	return pattern
-}
-
-// initCheckKnown reports whether command is a menu entry.
-func initCheckKnown(command string, entries []checkCandidate) bool {
-	for _, e := range entries {
-		if e.Command == command {
-			return true
-		}
-	}
-	return false
 }
 
 // askInitCheck prints Step 3 and asks for the check. It returns the command
@@ -79,46 +91,60 @@ func askInitCheck(w io.Writer, ask func(prompt, flags string) (string, error), e
 	fmt.Fprintln(w)
 	_, explanation, _ := strings.Cut(strings.TrimPrefix(initCheckIntro, "\n"), "\n")
 	initStep(w, 3, "how brigada tests the work", explanation)
-	prompt := "  Check command: "
-	if len(entries) == 0 {
-		fmt.Fprint(w, "\n  Found in this repo: nothing I recognise\n")
+	numbered := len(entries) - 1 // The last entry is always no check, selected with "-".
+	defaultIndex := initCheckDefault(entries)
+	defaultAnswer := "-"
+	if entries[defaultIndex].Command != "" {
+		defaultAnswer = strconv.Itoa(defaultIndex + 1)
+	}
+	prompt := "  Type a command, or - for no check [-]: "
+	if numbered == 0 {
+		fmt.Fprint(w, "\n  Found in this repo: nothing brigada recognises.\n")
 	} else {
 		header := "Found in this repo:"
-		if entries[0].Note == initCheckCurrent {
+		if entries[defaultIndex].Note == initCheckCurrent {
 			header = "Choices:"
 		}
 		fmt.Fprintf(w, "\n  %s\n", header)
-		width := 0
-		for _, e := range entries {
-			if n := term.VisibleWidth(e.Command); n > width {
-				width = n
-			}
+		prompt = fmt.Sprintf("  Pick %s or -, or type a command [%s]: ", initPickRange(numbered), defaultAnswer)
+	}
+	width := term.VisibleWidth("no check")
+	for _, e := range entries {
+		width = max(width, term.VisibleWidth(e.Command))
+	}
+	for i, e := range entries {
+		note, tags := initNoteTags(e.Note)
+		if i == defaultIndex && tags == "" {
+			tags = "default"
 		}
-		for i, e := range entries {
-			note, tags := initNoteTags(e.Note)
-			if i == 0 && tags == "" {
-				tags = "default"
+		id, name := strconv.Itoa(i+1), e.Command
+		if name == "" {
+			id, name = "-", "no check"
+			note = "work goes straight to review; add one later"
+		}
+		prefix := initMenuSymbolPrefix(w, "    ", id, name, width, i == defaultIndex) + "  "
+		if initPresentation(w).styled {
+			printInitRow(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), note, tags)
+		} else {
+			limit := initPresentation(w).style.Width() - 1
+			room := limit - term.VisibleWidth(prefix) - term.VisibleWidth(tags)
+			if note != "" && tags != "" {
+				room -= 2 // initRowNote separates the note and tag with two spaces.
 			}
-			prefix := initMenuPrefix(w, "    ", i+1, e.Command, width, i == 0) + "  "
-			if initPresentation(w).styled {
+			// Keep the no-check explanation complete, wrapping when needed.
+			if e.Command == "" {
 				printInitRow(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), note, tags)
+				continue
+			}
+			note = truncateNote(note, room)
+			row := prefix + initRowNote(w, note, tags)
+			if term.VisibleWidth(row) > limit {
+				// Long commands can leave no room even for the tag alone.
+				printInitWrapped(w, "    ", "        ", strings.TrimSpace(row))
 			} else {
-				limit := initPresentation(w).style.Width() - 1
-				room := limit - term.VisibleWidth(prefix) - term.VisibleWidth(tags)
-				if note != "" && tags != "" {
-					room -= 2 // initRowNote separates the note and tag with two spaces.
-				}
-				note = truncateNote(note, room)
-				row := prefix + initRowNote(w, note, tags)
-				if term.VisibleWidth(row) > limit {
-					// Long commands can leave no room even for the tag alone.
-					printInitWrapped(w, "    ", "        ", strings.TrimSpace(row))
-				} else {
-					fmt.Fprintln(w, row)
-				}
+				fmt.Fprintln(w, row)
 			}
 		}
-		prompt = fmt.Sprintf("  Pick %s, or type a command [1]: ", initPickRange(len(entries)))
 	}
 	for attempt := 0; attempt < 3; attempt++ {
 		answer, err := ask(prompt, "--check COMMAND")
@@ -126,19 +152,18 @@ func askInitCheck(w io.Writer, ask func(prompt, flags string) (string, error), e
 			return "", false, err
 		}
 		switch {
-		case answer == "" && len(entries) > 0:
-			command = entries[0].Command
 		case answer == "":
-			fmt.Fprint(w, initCheckTypedRetry)
-			continue
+			command = entries[defaultIndex].Command
+		case answer == "-":
+			command = ""
 		case strings.Trim(answer, "0123456789") == "":
 			n, _ := strconv.Atoi(answer)
-			if len(entries) == 0 {
+			if numbered == 0 {
 				fmt.Fprint(w, initCheckTypedRetry)
 				continue
 			}
-			if n < 1 || n > len(entries) {
-				fmt.Fprintf(w, "  pick %s or type a command; try again.\n", initPickRange(len(entries)))
+			if n < 1 || n > numbered {
+				fmt.Fprintf(w, "  pick %s or - or type a command; try again.\n", initPickRange(numbered))
 				continue
 			}
 			command = entries[n-1].Command
