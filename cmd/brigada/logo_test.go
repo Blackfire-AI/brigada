@@ -5,11 +5,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/Blackfire-AI/brigada/internal/logo"
+	"github.com/Blackfire-AI/brigada/internal/testsupport"
 	"github.com/Blackfire-AI/brigada/internal/version"
 )
 
@@ -68,6 +70,41 @@ func TestVersionBannerOnATerminal(t *testing.T) {
 			t.Errorf("version = %q, want %q", got, line)
 		}
 	})
+}
+
+// Interactive init on a terminal opens with the banner; --yes and --probe
+// runs, and init to a pipe, print none.
+func TestInitBanner(t *testing.T) {
+	caps := logo.Caps{TTY: true, Color: logo.TrueColor, UTF8: true, Width: 80}
+	banner := logo.String(logo.Banner, caps) + "\n"
+	for _, tc := range []struct {
+		name     string
+		terminal bool
+		args     []string
+		want     bool
+	}{
+		{"interactive", true, nil, true},
+		{"probe", true, []string{"--probe"}, false},
+		{"yes", true, []string{"--yes"}, false},
+		{"not a terminal", false, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			importRepo(t)
+			fakeInitPATH(t, initHarnesses...)
+			if tc.terminal {
+				asTerminal(t, caps)
+			}
+			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
+			args := append([]string{"--signed-in", "claude,codex,kimi,opencode", "--accept-limited", "--check", "true", "--tools", "none"}, tc.args...)
+			_, out, _ := initDo(t, state, "-\n-\n-\n-\n", args...)
+			if got := strings.HasPrefix(out, banner); got != tc.want {
+				t.Errorf("starts with the banner = %v, want %v:\n%s", got, tc.want, out)
+			}
+			if !tc.want && strings.Contains(out, "\x1b[") {
+				t.Errorf("escape codes without the banner:\n%q", out)
+			}
+		})
+	}
 }
 
 var ansi = regexp.MustCompile("\x1b\\[[0-9;]*m")
