@@ -608,9 +608,9 @@ func TestRunnerAgentFlag(t *testing.T) {
 			wantErr: `effort is not supported for harness "kimi"`,
 		},
 		{
-			name:    "an opencode variant brigada does not map is refused",
-			args:    []string{"runner", "--agent", "harness=opencode,effort=low", "--state-dir", state},
-			wantErr: `effort "low" is not supported for harness "opencode"; want one of minimal, high, max`,
+			name:    "a malformed opencode variant is refused",
+			args:    []string{"runner", "--agent", "harness=opencode,effort=bad level", "--state-dir", state},
+			wantErr: `effort "bad level" is not supported for harness "opencode"; want a variant matching [a-z0-9-]{1,16}`,
 		},
 	}
 	for _, tt := range bad {
