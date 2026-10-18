@@ -76,7 +76,9 @@ func TestVersionBannerOnATerminal(t *testing.T) {
 // runs, and init to a pipe, print none.
 func TestInitBanner(t *testing.T) {
 	caps := logo.Caps{TTY: true, Color: logo.TrueColor, UTF8: true, Width: 80}
-	banner := logo.String(logo.Banner, caps) + "\n"
+	plainBannerCaps := caps
+	plainBannerCaps.Color = logo.NoColor // init uses the terminal foreground, never orange.
+	banner := logo.String(logo.Banner, plainBannerCaps) + "\n"
 	for _, tc := range []struct {
 		name     string
 		terminal bool

@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,9 +22,17 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
+	"github.com/Blackfire-AI/brigada/internal/logo"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
+	"github.com/Blackfire-AI/brigada/internal/term"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
+
+// Transcript fixtures remain available after CLI tests change the process's
+// working directory, including when the whole package runs in one test binary.
+//
+//go:embed testdata/init-interactive*.golden
+var initTranscriptGoldens embed.FS
 
 func fakeInitPATH(t *testing.T, names ...string) string {
 	t.Helper()
@@ -743,15 +753,14 @@ func TestInitCheckStepTranscript(t *testing.T) {
      3  uv run pytest  pytest, from uv.lock
   Pick 1-3, or type a command [1]:
 
-  To change it later: edit default_check in .brigada/project.yaml and
-  run brigada project import, or run brigada init again.
+  -> change later: .brigada/project.yaml: default_check; brigada project import
 `
 	if !strings.Contains(out, want) {
 		t.Fatalf("step 3 transcript differs from the approved one:\n%s", out)
 	}
 	for _, want := range []string{
-		"\n  To change it later: run brigada init again.\n\nStep 2 of 3:",
-		"\n  To change it later: brigada project foreman --harness H --model M,\n  or run brigada init again.\n\nStep 3 of 3:",
+		"\n  -> change later: brigada init\n\nStep 2 of 3:",
+		"\n  -> change later: brigada project foreman --harness H --model M\n\nStep 3 of 3:",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -865,7 +874,7 @@ func TestInitRerunShowsCurrentCheckFirst(t *testing.T) {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
 	for _, want := range []string{
-		"     1  custom check   current, from .brigada/project.yaml\n     2  make check     Makefile: lint",
+		"     1  custom check   from .brigada/project.yaml current\n     2  make check     Makefile: lint",
 		"     4  uv run pytest  pytest, from uv.lock\n  Pick 1-4, or type a command [1]:\n",
 		"  Check: custom check (",
 		"    claude    edit files; no commands\n",
@@ -882,7 +891,7 @@ func TestInitRerunShowsCurrentCheckFirst(t *testing.T) {
 	}
 	// A current check that is also a candidate is listed once, as current.
 	_, out, _ = initCheckStep(t, "", "default_check: make check\nworker_tools: Bash(make check:*)\n")
-	if strings.Count(out, "make check  ") != 1 || !strings.Contains(out, "     1  make check     current, from .brigada/project.yaml\n     2  make test ") {
+	if strings.Count(out, "make check  ") != 1 || !strings.Contains(out, "     1  make check     from .brigada/project.yaml current\n     2  make test ") {
 		t.Fatalf("current check not deduplicated:\n%s", out)
 	}
 }
@@ -988,7 +997,7 @@ esac
 	}
 	for _, h := range []string{"claude", "codex"} {
 		p := probeHarness(context.Background(), h)
-		if !p.signedIn || p.status != "signed in" || !strings.Contains(p.evidence, "documented by --help") {
+		if !p.signedIn || !p.checked || p.status != "signed in" || !strings.Contains(p.evidence, "documented by --help") {
 			t.Fatalf("%s: %+v", h, p)
 		}
 		if strings.Contains(p.evidence, "never-print-me") {
@@ -1023,7 +1032,7 @@ func TestInitSignedOutStatus(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(os.Getenv("PATH"), h), []byte(script), 0755); err != nil {
 			t.Fatal(err)
 		}
-		if p := probeHarness(context.Background(), h); p.signedIn || p.status != "not signed in" {
+		if p := probeHarness(context.Background(), h); p.signedIn || !p.checked || p.status != "not signed in" {
 			t.Fatalf("%s: %+v", h, p)
 		}
 	}
@@ -1400,14 +1409,75 @@ func TestInitProbeAndRefusalsWithExistingWiring(t *testing.T) {
 
 // TestInitInteractiveTranscript replaces the probe layout assertions with a
 // golden of all three interactive steps, the complete Plan and the refusal.
+// Plain wording stays unchanged apart from tags moving to row ends and the
+// three merged change-later lines required by the terminal presentation.
 func TestInitInteractiveTranscript(t *testing.T) {
-	want, err := os.ReadFile("testdata/init-interactive.golden")
+	want, err := initTranscriptGoldens.ReadFile("testdata/init-interactive.golden")
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := initInteractiveTranscript(t, false)
 	if out != string(want) {
 		t.Fatalf("interactive transcript:\n%s\nwant:\n%s", out, want)
+	}
+}
+
+func TestInitStyledInteractiveTranscript(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		depth logo.Depth
+		utf8  bool
+	}{
+		{"truecolor", logo.TrueColor, true},
+		{"16color", logo.Color16, true},
+		{"ascii", logo.Color16, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caps := logo.Caps{TTY: true, Color: tc.depth, UTF8: tc.utf8, Width: 100}
+			want, err := initTranscriptGoldens.ReadFile("testdata/init-interactive-" + tc.name + ".golden")
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := initInteractiveTranscript(t, false, caps)
+			if out != string(want) {
+				t.Fatalf("styled transcript differs:\n%q\nwant:\n%q", out, want)
+			}
+			if !strings.Contains(out, "\x1b[") {
+				t.Fatal("styled transcript has no styles")
+			}
+		})
+	}
+}
+
+func TestInitStyledLongModels(t *testing.T) {
+	for _, width := range []int{80, 100} {
+		t.Run(strconv.Itoa(width), func(t *testing.T) {
+			initInteractiveTranscript(t, true, logo.Caps{TTY: true, Color: logo.TrueColor, UTF8: true, Width: width})
+		})
+	}
+}
+
+func TestInitPlainCapabilities(t *testing.T) {
+	for _, mode := range []string{"NO_COLOR", "dumb", "pipe"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("TERM", "xterm-256color")
+			t.Setenv("COLORTERM", "truecolor")
+			t.Setenv("NO_COLOR", "")
+			if mode == "NO_COLOR" {
+				t.Setenv("NO_COLOR", "1")
+			}
+			if mode == "dumb" {
+				t.Setenv("TERM", "dumb")
+			}
+			want, err := initTranscriptGoldens.ReadFile("testdata/init-interactive.golden")
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := initInteractiveTranscript(t, false)
+			if out != string(want) {
+				t.Fatalf("%s changed plain output:\n%s", mode, out)
+			}
+		})
 	}
 }
 
@@ -1475,8 +1545,15 @@ func TestInitAgentsVeryLongModel(t *testing.T) {
 }
 
 // Both transcript variants exercise the full interactive flow and refuse apply.
-func initInteractiveTranscript(t *testing.T, longModels bool) string {
+func initInteractiveTranscript(t *testing.T, longModels bool, forced ...logo.Caps) string {
 	t.Helper()
+	width := 80
+	if len(forced) > 0 {
+		original := initDetectCaps
+		initDetectCaps = func(io.Writer) logo.Caps { return forced[0] }
+		t.Cleanup(func() { initDetectCaps = original })
+		width = term.New(forced[0]).Width()
+	}
 	importRepo(t)
 	wireGit(t, ".", "config", "core.excludesFile", os.DevNull)
 	wireWrite(t, ".", ".gitignore", "/.claude/settings.local.json\n")
@@ -1548,8 +1625,8 @@ opencode/deepseek-v3
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
 	for _, line := range strings.Split(out, "\n") {
-		if len([]rune(line)) >= 80 {
-			t.Errorf("transcript line must be under 80 columns: %q", line)
+		if term.VisibleWidth(line) >= width {
+			t.Errorf("transcript line must be under %d columns: %q", width, line)
 		}
 	}
 	if strings.Contains(out, "ready") {

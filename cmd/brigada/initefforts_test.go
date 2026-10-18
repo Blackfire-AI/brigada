@@ -209,7 +209,7 @@ func TestInitEffortDefaultsAndRetries(t *testing.T) {
 			if effort != tc.want || (err != nil) != tc.wantErr || attempts > 3 {
 				t.Fatalf("effort = %q, err = %v, attempts = %d", effort, err, attempts)
 			}
-			if tc.defaultEffort != "" && (!strings.Contains(out.String(), "Pick 1-3 [2]:") || !strings.Contains(out.String(), "medium  codex's default for this model")) {
+			if tc.defaultEffort != "" && (!strings.Contains(out.String(), "Pick 1-3 [2]:") || !strings.Contains(out.String(), "medium  default")) {
 				t.Fatalf("known default not marked in source order:\n%s", out.String())
 			}
 		})

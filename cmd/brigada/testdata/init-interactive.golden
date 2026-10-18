@@ -22,7 +22,7 @@ Step 1 of 3: agents
     Pick 1-5 or -, or type a model id [1]:
     How hard should sonnet think? More effort gives better results on hard
     tasks and uses more of your plan's limits.
-       1  default  claude's default
+       1  default  default
        2  low
        3  medium
        4  high
@@ -32,8 +32,8 @@ Step 1 of 3: agents
 
   codex: signed in
     Which model should codex run?
-       1  gpt-6.1-sol   OpenAI  your codex default (~/.codex/config.toml);
-                                General-purpose coding model.
+       1  gpt-6.1-sol   OpenAI  (~/.codex/config.toml); General-purpose coding
+                                model. default
        2  gpt-5         OpenAI  Earlier coding model.
        3  gpt-5.4-mini  OpenAI  A smaller coding model for quick tasks, with a
                                 long description that must wrap within the menu
@@ -44,7 +44,7 @@ Step 1 of 3: agents
     Pick 1-3 or -, or type a model id [1]:
     How hard should gpt-6.1-sol think? More effort gives better results on hard
     tasks and uses more of your plan's limits.
-       1  low     codex's default for this model
+       1  low     default
        2  medium
        3  high
        4  xhigh
@@ -56,7 +56,7 @@ Step 1 of 3: agents
   first, or leave kimi out.
     Use kimi? [y/N]:
     Which model should kimi run?
-       1  kimi-code/k3                         Moonshot  your kimi default
+       1  kimi-code/k3                         Moonshot  default
        2  kimi-code/k3-256k                    Moonshot  K3, 256K context
        3  kimi-code/kimi-for-coding            Moonshot  200K context
        4  kimi-code/kimi-for-coding-highspeed  Moonshot  200K context
@@ -76,13 +76,13 @@ Step 1 of 3: agents
     Pick 1-3 or -, or type provider/model [-]:
     How hard should zai-coding-plan/glm-5.3 think? More effort gives better
     results on hard tasks and uses more of your plan's limits.
-       1  default  opencode's default
+       1  default  default
        2  low
        3  medium
        4  high
     Pick 1-4 [1]:
 
-  To change it later: run brigada init again.
+  -> change later: brigada init
 
 Step 2 of 3: the foreman
   The foreman plans the work and decides what happens when a task needs
@@ -93,8 +93,7 @@ Step 2 of 3: the foreman
     2  codex/gpt-6.1-sol
   Pick 1-2 [1]:
 
-  To change it later: brigada project foreman --harness H --model M,
-  or run brigada init again.
+  -> change later: brigada project foreman --harness H --model M
 
 Step 3 of 3: how brigada tests the work
   When an agent finishes a task, brigada runs one command in that task's
@@ -108,8 +107,7 @@ Step 3 of 3: how brigada tests the work
      1  uv run pytest  pytest, from uv.lock
   Pick 1, or type a command [1]:
 
-  To change it later: edit default_check in .brigada/project.yaml and
-  run brigada project import, or run brigada init again.
+  -> change later: .brigada/project.yaml: default_check; brigada project import
 
 Plan
   Agents:

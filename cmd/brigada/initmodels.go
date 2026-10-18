@@ -25,6 +25,7 @@ type initModelEntry struct {
 	note          string
 	value         string
 	isDefault     bool
+	isCurrent     bool     // A saved choice, displayed as a tag after the note.
 	effortLevels  []string // Source order; Kimi metadata is display-only.
 	defaultEffort string   // Empty if unknown; Claude uses a descriptive default.
 	effortNote    string   // Replaces "<harness>'s default" on the default effort row.

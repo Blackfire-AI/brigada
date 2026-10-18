@@ -14,13 +14,14 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
+	"github.com/Blackfire-AI/brigada/internal/logo"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
+	"github.com/Blackfire-AI/brigada/internal/term"
 	"github.com/mattn/go-isatty"
 )
 
@@ -72,7 +73,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		return usagef(stderr, "--yes and --probe are mutually exclusive")
 	}
 	if !*yes && !*probe {
-		printBanner(stdout)
+		printInitBanner(stdout)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -95,7 +96,22 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "brigada init: set up %s\n\n", canon)
+	caps := initDetectCaps(stdout)
+	styled := caps.TTY && caps.Color != logo.NoColor
+	if !styled {
+		// Plain text keeps its existing symbols, but terminal width still
+		// controls layout independently of color support.
+		caps.Color = logo.NoColor
+		caps.UTF8 = false
+	}
+	stdout = initOutput{Writer: stdout, style: term.New(caps), styled: styled, utf8: caps.UTF8}
+	style := initPresentation(stdout).style
+	if styled {
+		printInitWrapped(stdout, "", "  ", style.Bold("brigada init")+initSeparator(stdout)+canon)
+		fmt.Fprintln(stdout)
+	} else {
+		fmt.Fprintf(stdout, "brigada init: set up %s\n\n", canon)
+	}
 	rt, code := resolveRuntime(common, stderr)
 	if code != 0 {
 		return code
@@ -133,7 +149,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 	}
 	if canAsk {
-		fmt.Fprint(stdout, "brigada runs coding tasks on the agent CLIs you are signed in to. A foreman\n(an agent) turns your request into a plan of tasks; workers (other agents)\nwrite the code in their own git worktrees; your check command tests it; and\nan agent of a different model family reviews it. Three short steps follow.\nNothing is written or started until you confirm at the end.\n\n")
+		fmt.Fprint(stdout, initDim(stdout, "brigada runs coding tasks on the agent CLIs you are signed in to. A foreman\n(an agent) turns your request into a plan of tasks; workers (other agents)\nwrite the code in their own git worktrees; your check command tests it; and\nan agent of a different model family reviews it. Three short steps follow.\nNothing is written or started until you confirm at the end.\n\n"))
 	}
 	terminal := false
 	if f, ok := projectStdin.(*os.File); ok {
@@ -143,6 +159,10 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if !canAsk {
 			return "", nil
 		}
+		if !terminal {
+			prompt = strings.TrimRight(prompt, " \t")
+		}
+		prompt = initPrompt(stdout, prompt)
 		if terminal {
 			fmt.Fprint(stdout, prompt)
 		} else {
@@ -187,7 +207,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		probes[h] = source.signIn
 	}
 	if canAsk {
-		fmt.Fprint(stdout, "Step 1 of 3: agents\n  Each agent CLI below can work for brigada. For each one, pick the model it\n  should run, or leave it out. Reviews always go to a different model family\n  than the author's, so you need at least two families (e.g. claude + codex).\n")
+		initStep(stdout, 1, "agents", "  Each agent CLI below can work for brigada. For each one, pick the model it\n  should run, or leave it out. Reviews always go to a different model family\n  than the author's, so you need at least two families (e.g. claude + codex).\n")
 	} else {
 		fmt.Fprintln(stdout, "Agent CLIs found:")
 		for _, h := range initHarnesses {
@@ -206,6 +226,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				status = "signed in"
 			}
 			switch {
+			case styled:
+				fmt.Fprintln(stdout)
+				initCLIStatus(stdout, h, probes[h], confirmed)
 			case !confirmed && h == "kimi":
 				fmt.Fprint(stdout, "\n  kimi: init can't check sign-in. If you're not signed in, run `kimi login`\n  first, or leave kimi out.\n")
 			case !confirmed && h == "opencode" && !probes[h].checked:
@@ -242,35 +265,57 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			}
 			signedIn[h] = true
 			entries := sources[h].entries
-			fmt.Fprintf(stdout, "    Which model should %s run?\n", h)
+			fmt.Fprintln(stdout, initDim(stdout, fmt.Sprintf("    Which model should %s run?", h)))
 			width, familyWidth := 0, 0
 			familyNames := make([]string, len(entries))
 			for i, entry := range entries {
 				family, _ := initModelFamily(h, entry.value)
 				familyNames[i] = initFamilyName(family)
-				width = max(width, utf8.RuneCountInString(initMenuModelName(entry)))
-				familyWidth = max(familyWidth, utf8.RuneCountInString(familyNames[i]))
+				width = max(width, term.VisibleWidth(initMenuModelName(entry)))
+				familyWidth = max(familyWidth, term.VisibleWidth(familyNames[i]))
 			}
 			for i, entry := range entries {
-				prefix := fmt.Sprintf("      %2d  %-*s  %s", entry.id, width, initMenuModelName(entry), familyNames[i])
-				note := entry.note
-				if entry.note != "" {
+				defaultID := sources[h].defaultID
+				if defaultID == 0 {
+					defaultID = 1
+				}
+				_, wasUsed := saved[h]
+				if (h == "opencode" && !wasUsed) || (saved != nil && !wasUsed) {
+					defaultID = 0
+				}
+				prefix := initMenuPrefix(stdout, "      ", entry.id, initMenuModelName(entry), width, entry.id == defaultID) + "  " + initDim(stdout, familyNames[i])
+				note, tags := entry.note, ""
+				if entry.isCurrent {
+					tags = "current"
+				}
+				if entry.isDefault {
+					note = initDefaultNote(h, note)
+					tags = strings.TrimSpace("default " + tags)
+				}
+				if note != "" || tags != "" {
 					if home, err := os.UserHomeDir(); err == nil && home != "" {
 						note = strings.ReplaceAll(note, "("+home+string(os.PathSeparator), "(~/")
 					}
-					prefix += strings.Repeat(" ", familyWidth-utf8.RuneCountInString(familyNames[i])+2)
+					prefix += strings.Repeat(" ", familyWidth-term.VisibleWidth(familyNames[i])+2)
 				}
-				printInitWrapped(stdout, prefix, strings.Repeat(" ", utf8.RuneCountInString(prefix)), note)
+				printInitWrapped(stdout, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), initRowNote(stdout, note, tags))
 			}
 			if h != "kimi" || saved != nil {
-				fmt.Fprintf(stdout, "       -  don't use %s\n", h)
+				indent := "      "
+				_, wasUsed := saved[h]
+				name := initDim(stdout, "  don't use "+h)
+				if styled && ((h == "opencode" && !wasUsed) || (saved != nil && !wasUsed)) {
+					indent = style.Pointer() + "     "
+					name = "  " + style.Bold("don't use "+h)
+				}
+				fmt.Fprintln(stdout, indent+style.Accent(" -")+name)
 			}
 			if sources[h].unknownCount > 0 {
 				command := "opencode models"
 				if h == "codex" {
 					command = "codex debug models"
 				}
-				printInitWrapped(stdout, "    ", "    ", fmt.Sprintf("%d more from `%s` aren't listed: brigada can't tell their model family, which it needs to pick reviewers.", sources[h].unknownCount, command))
+				printInitWrapped(stdout, "    ", "    ", initDim(stdout, fmt.Sprintf("%d more from `%s` aren't listed: brigada can't tell their model family, which it needs to pick reviewers.", sources[h].unknownCount, command)))
 			}
 			defaultAnswer := "-"
 			_, wasUsed := saved[h]
@@ -331,7 +376,11 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 					return fail(stderr, err)
 				}
 				if h == "kimi" {
-					fmt.Fprint(stdout, "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. As a reviewer it only reads.\n")
+					if styled {
+						printInitWrapped(stdout, "    ", "    ", style.Warn(style.Warning()+" kimi has no sandbox: when it writes code it can run any command on this machine without asking. As a reviewer it only reads."))
+					} else {
+						fmt.Fprint(stdout, "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. As a reviewer it only reads.\n")
+					}
 					writes := hadPrevious &&
 						slices.Contains(previous.classes, "implement")
 					defaultAnswer := "y/N"
@@ -449,8 +498,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		return usagef(stderr, "--foreman must name a usable agent that resumes headless (claude/model or codex/model); none matched")
 	}
 	if canAsk {
-		fmt.Fprint(stdout, "\n  To change it later: run brigada init again.\n")
-		fmt.Fprint(stdout, "\nStep 2 of 3: the foreman\n  The foreman plans the work and decides what happens when a task needs\n  judgment. It runs whenever work finishes, so it uses that agent's quota.\n  Only claude and codex can be the foreman; it uses the model picked above\n  and its effort.\n")
+		initChangeLater(stdout, "brigada init")
+		fmt.Fprintln(stdout)
+		initStep(stdout, 2, "the foreman", "  The foreman plans the work and decides what happens when a task needs\n  judgment. It runs whenever work finishes, so it uses that agent's quota.\n  Only claude and codex can be the foreman; it uses the model picked above\n  and its effort.\n")
 		var candidates []*agentSpec
 		defaultChoice := 1
 		for _, h := range initHarnesses {
@@ -469,7 +519,12 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			fmt.Fprintf(stdout, "  Foreman: %s (the only agent that can plan)\n", initForemanName(*chosen, sources))
 		} else {
 			for i, candidate := range candidates {
-				fmt.Fprintf(stdout, "    %d  %s\n", i+1, initForemanName(*candidate, sources))
+				if styled {
+					prefix := initMenuPrefix(stdout, "   ", i+1, initForemanName(*candidate, sources), 0, i+1 == defaultChoice)
+					printInitWrapped(stdout, prefix, "        ", "")
+				} else {
+					fmt.Fprintf(stdout, "    %d  %s\n", i+1, initForemanName(*candidate, sources))
+				}
 			}
 			if *foreman == "" {
 				for attempt := 0; attempt < 3; attempt++ {
@@ -492,7 +547,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				}
 			}
 		}
-		fmt.Fprint(stdout, "\n  To change it later: brigada project foreman --harness H --model M,\n  or run brigada init again.\n")
+		initChangeLater(stdout, "brigada project foreman --harness H --model M")
 	}
 	file := filepath.Join(root, filepath.FromSlash(engine.ProjectConfigPath))
 	if err := initSafeFile(file); err != nil {
@@ -601,7 +656,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			permissions = "edit files; no commands"
 		}
 		prefix := fmt.Sprintf("    %-9s ", a.Harness)
-		printInitWrapped(stdout, prefix, strings.Repeat(" ", len(prefix)), permissions)
+		printInitWrapped(stdout, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), permissions)
 	}
 	var wiring []wireFile
 	if !*noWiring && probes["claude"].installed {
@@ -822,25 +877,16 @@ func initCurrentModel(source initModelSource, spec agentSpec) initModelSource {
 		index = len(source.entries) - 1
 	}
 	entry := &source.entries[index]
-	entry.note = initCurrentNote(entry.note)
+	entry.isCurrent = true
 	source.defaultID = entry.id
 	return source
-}
-
-// initCurrentNote puts the "current" tag first, so a note ending in a period
-// or wrapping onto another line keeps it readable.
-func initCurrentNote(note string) string {
-	if note == "" {
-		return "current"
-	}
-	return "current; " + note
 }
 
 func initPickEffort(w io.Writer, harness string, entry initModelEntry,
 	ask func(string, string) (string, error), saved ...string) (string, error) {
 	if harness == "kimi" {
 		if entry.defaultEffort != "" {
-			printInitWrapped(w, "    Effort: ", "    ", entry.defaultEffort+", kimi's own setting for this model (change it in ~/.kimi-code/config.toml; brigada can't set it per run).")
+			printInitWrapped(w, "    Effort: ", "    ", initDim(w, entry.defaultEffort+", kimi's own setting for this model (change it in ~/.kimi-code/config.toml; brigada can't set it per run)."))
 		}
 		return "", nil
 	}
@@ -862,10 +908,10 @@ func initPickEffort(w io.Writer, harness string, entry initModelEntry,
 			pickIndex = index
 		}
 	}
-	printInitWrapped(w, "    ", "    ", "How hard should "+initMenuModelName(entry)+" think? More effort gives better results on hard tasks and uses more of your plan's limits.")
+	printInitWrapped(w, "    ", "    ", initDim(w, "How hard should "+initMenuModelName(entry)+" think? More effort gives better results on hard tasks and uses more of your plan's limits."))
 	width := 0
 	for _, level := range levels {
-		width = max(width, utf8.RuneCountInString(level))
+		width = max(width, term.VisibleWidth(level))
 	}
 	for i, level := range levels {
 		note := ""
@@ -878,16 +924,25 @@ func initPickEffort(w io.Writer, harness string, entry initModelEntry,
 				note = entry.effortNote
 			}
 		}
+		tags := ""
 		if len(saved) > 0 && i == pickIndex {
-			note = initCurrentNote(note)
+			tags = "current"
 		}
-		prefix := fmt.Sprintf("      %2d  %-*s", i+1, width, level)
-		if note != "" {
+		if i == defaultIndex {
+			if entry.effortNote == "" {
+				note = ""
+			} else {
+				note = initDefaultNote(harness, note)
+			}
+			tags = strings.TrimSpace("default " + tags)
+		}
+		prefix := initMenuPrefix(w, "      ", i+1, level, width, i == pickIndex)
+		if note != "" || tags != "" {
 			prefix += "  "
 		} else {
 			prefix = strings.TrimRight(prefix, " ")
 		}
-		printInitWrapped(w, prefix, strings.Repeat(" ", 10+width+2), note)
+		printInitWrapped(w, prefix, strings.Repeat(" ", 10+width+2), initRowNote(w, note, tags))
 	}
 	flags := "--agent harness=" + harness + ",effort=LEVEL"
 	for attempt := 0; attempt < 3; attempt++ {
@@ -937,7 +992,7 @@ func initModelFamily(harness, model string) (string, error) {
 	return adapter.AgentFamily(harness, model)
 }
 
-// printInitWrapped keeps plan prose under 80 columns. Continuations either
+// printInitWrapped keeps prose within the terminal width. Continuations either
 // align with a table cell or use the paragraph's continuation indent.
 func printInitWrapped(w io.Writer, prefix, continuation, text string) {
 	var words []initWord
@@ -952,7 +1007,8 @@ func printInitWrapped(w io.Writer, prefix, continuation, text string) {
 type initWord struct{ sep, text string }
 
 func printInitWords(w io.Writer, prefix, continuation string, words []initWord) {
-	if utf8.RuneCountInString(prefix) >= 79 {
+	limit := initPresentation(w).style.Width()
+	if term.VisibleWidth(prefix) >= limit-1 {
 		printInitWrapped(w, "    ", "      ", strings.TrimSpace(prefix))
 		prefix, continuation = "      ", "      "
 	}
@@ -963,21 +1019,21 @@ func printInitWords(w io.Writer, prefix, continuation string, words []initWord) 
 		if line != prefix {
 			separator = next.sep
 		}
-		if utf8.RuneCountInString(line+separator+word) >= 80 && line != prefix {
+		if term.VisibleWidth(line+separator+word) >= limit && line != prefix {
 			fmt.Fprintln(w, line)
 			prefix, line, separator = continuation, continuation, ""
 		}
 		// Long identifiers and paths have no word boundary to wrap at.
-		for utf8.RuneCountInString(line+separator+word) >= 80 {
-			room := 79 - utf8.RuneCountInString(line+separator)
+		for term.VisibleWidth(line+separator+word) >= limit {
+			room := limit - 1 - term.VisibleWidth(line+separator)
 			if room <= 0 {
 				fmt.Fprintln(w, line)
 				prefix, line, separator = continuation, continuation, ""
 				continue
 			}
-			runes := []rune(word)
-			fmt.Fprintln(w, line+separator+string(runes[:room]))
-			word = string(runes[room:])
+			part, rest := initSplitVisible(word, room)
+			fmt.Fprintln(w, line+separator+part)
+			word = rest
 			prefix, line, separator = continuation, continuation, ""
 		}
 		line += separator + word
@@ -1090,27 +1146,27 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 		if s.effort != "" {
 			modelNames[i] = initAgentModelName(s, sources) + " @" + s.effort
 		}
-		modelWidth = max(modelWidth, utf8.RuneCountInString(modelNames[i]))
-		familyWidth = max(familyWidth, utf8.RuneCountInString(family))
+		modelWidth = max(modelWidth, term.VisibleWidth(modelNames[i]))
+		familyWidth = max(familyWidth, term.VisibleWidth(family))
 	}
 	for i, s := range agents {
 		// If the fixed columns leave no room for roles, put family and roles
 		// on a second line under the model column for every row. Very long
 		// identifiers wrap within that column, with roles on a separate line.
-		if 14+modelWidth+2+familyWidth+2 >= 79 {
+		if 14+modelWidth+2+familyWidth+2 >= initPresentation(w).style.Width()-1 {
 			indent := strings.Repeat(" ", 14)
 			printInitWrapped(w, fmt.Sprintf("    %-9s ", s.harness), indent, modelNames[i])
-			if 14+familyWidth+2 >= 79 {
+			if 14+familyWidth+2 >= initPresentation(w).style.Width()-1 {
 				printInitWrapped(w, indent, indent, familyNames[i])
 				printInitWrapped(w, indent, indent, initAgentRoles(s.classes))
 			} else {
 				prefix := fmt.Sprintf("%s%-*s  ", indent, familyWidth, familyNames[i])
-				printInitWrapped(w, prefix, strings.Repeat(" ", utf8.RuneCountInString(prefix)), initAgentRoles(s.classes))
+				printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), initAgentRoles(s.classes))
 			}
 			continue
 		}
 		prefix := fmt.Sprintf("    %-9s %-*s  %-*s  ", s.harness, modelWidth, modelNames[i], familyWidth, familyNames[i])
-		printInitWrapped(w, prefix, strings.Repeat(" ", utf8.RuneCountInString(prefix)), initAgentRoles(s.classes))
+		printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), initAgentRoles(s.classes))
 	}
 	printInitWrapped(w, "  Reviews: ", "    ", fmt.Sprintf("%d model families, so every task can get a reviewer of another one.", families))
 	printInitWrapped(w, "  Foreman: ", "    ", initForemanName(foreman, sources))

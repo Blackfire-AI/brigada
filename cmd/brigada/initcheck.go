@@ -5,9 +5,9 @@ import (
 	"io"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
+	"github.com/Blackfire-AI/brigada/internal/term"
 )
 
 const (
@@ -18,7 +18,6 @@ const (
 		"    fails            the work goes back to the agent, with the output\n" +
 		"  Use the command you run yourself to be sure nothing broke: tests,\n" +
 		"  lint, type checks. Claude workers may run it too before handing in.\n"
-	initCheckOutro      = "\n  To change it later: edit default_check in .brigada/project.yaml and\n  run brigada project import, or run brigada init again.\n"
 	initCheckCurrent    = "current, from .brigada/project.yaml"
 	initCheckTypedRetry = "  type a command; try again.\n"
 )
@@ -77,7 +76,9 @@ func initCheckKnown(command string, entries []checkCandidate) bool {
 // askInitCheck prints Step 3 and asks for the check. It returns the command
 // chosen; exhausted is true when three answers were all unusable.
 func askInitCheck(w io.Writer, ask func(prompt, flags string) (string, error), entries []checkCandidate) (command string, exhausted bool, err error) {
-	fmt.Fprint(w, initCheckIntro)
+	fmt.Fprintln(w)
+	_, explanation, _ := strings.Cut(strings.TrimPrefix(initCheckIntro, "\n"), "\n")
+	initStep(w, 3, "how brigada tests the work", explanation)
 	prompt := "  Check command: "
 	if len(entries) == 0 {
 		fmt.Fprint(w, "\n  Found in this repo: nothing I recognise\n")
@@ -89,13 +90,30 @@ func askInitCheck(w io.Writer, ask func(prompt, flags string) (string, error), e
 		fmt.Fprintf(w, "\n  %s\n", header)
 		width := 0
 		for _, e := range entries {
-			if n := utf8.RuneCountInString(e.Command); n > width {
+			if n := term.VisibleWidth(e.Command); n > width {
 				width = n
 			}
 		}
 		for i, e := range entries {
-			prefix := fmt.Sprintf("    %2d  %-*s  ", i+1, width, e.Command)
-			fmt.Fprintf(w, "%s%s\n", prefix, truncateNote(e.Note, 79-utf8.RuneCountInString(prefix)))
+			note, tags := initNoteTags(e.Note)
+			prefix := initMenuPrefix(w, "    ", i+1, e.Command, width, i == 0) + "  "
+			if initPresentation(w).styled {
+				printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), initRowNote(w, note, tags))
+			} else {
+				limit := initPresentation(w).style.Width() - 1
+				room := limit - term.VisibleWidth(prefix) - term.VisibleWidth(tags)
+				if note != "" && tags != "" {
+					room-- // initRowNote separates the note and tag with a space.
+				}
+				note = truncateNote(note, room)
+				row := prefix + initRowNote(w, note, tags)
+				if term.VisibleWidth(row) > limit {
+					// Long commands can leave no room even for the tag alone.
+					printInitWrapped(w, "    ", "        ", strings.TrimSpace(row))
+				} else {
+					fmt.Fprintln(w, row)
+				}
+			}
 		}
 		prompt = fmt.Sprintf("  Pick %s, or type a command [1]: ", initPickRange(len(entries)))
 	}
@@ -124,7 +142,7 @@ func askInitCheck(w io.Writer, ask func(prompt, flags string) (string, error), e
 		default:
 			command = answer
 		}
-		fmt.Fprint(w, initCheckOutro)
+		initChangeLater(w, ".brigada/project.yaml: default_check; brigada project import")
 		return command, false, nil
 	}
 	return "", true, nil
