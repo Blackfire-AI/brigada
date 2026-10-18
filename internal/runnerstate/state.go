@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -49,6 +50,44 @@ func Acquire(dir string) (func(), error) {
 		return nil, err
 	}
 	return func() { syscall.Flock(int(f.Fd()), syscall.LOCK_UN); f.Close() }, nil
+}
+
+// ClearStale clears a previous runner's pid and metadata only while holding
+// the runner lock. A busy lock returns the live pid and an error wrapping
+// EWOULDBLOCK/EAGAIN: a runner is starting or running, so nothing is cleared.
+// The lock file stays in place; removing it could split starters across two files.
+func ClearStale(dir string) (pid int, cleared bool, err error) {
+	path := filepath.Join(dir, "runner.lock")
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			pid := readPID(path)
+			return pid, false, fmt.Errorf("a runner is starting or running (pid %d): %w", pid, err)
+		}
+		return 0, false, err
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return 0, false, err
+	}
+	pid, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+	if err := os.Remove(filepath.Join(dir, "runner.json")); err == nil {
+		cleared = true
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return pid, false, err
+	}
+	if err := f.Truncate(0); err != nil {
+		return pid, cleared, err
+	}
+	return pid, cleared || len(data) > 0, nil
 }
 
 func Publish(dir string, agents []api.Agent, specs ...string) error {
