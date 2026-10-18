@@ -20,6 +20,15 @@ Step 1 of 3: agents
        5  claude-opus-4        Anthropic  Opus 4 · Most capable
        -  don't use claude
     Pick 1-5 or -, or type a model id [1]:
+    How hard should sonnet think? More effort gives better results on hard
+    tasks and uses more of your plan's limits.
+       1  default  claude's default
+       2  low
+       3  medium
+       4  high
+       5  xhigh
+       6  max
+    Pick 1-6 [1]:
 
   codex: signed in
     Which model should codex run?
@@ -33,6 +42,15 @@ Step 1 of 3: agents
     1 more from `codex debug models` aren't listed: brigada can't tell their
     model family, which it needs to pick reviewers.
     Pick 1-3 or -, or type a model id [1]:
+    How hard should gpt-6.1-sol think? More effort gives better results on hard
+    tasks and uses more of your plan's limits.
+       1  low     codex's default for this model
+       2  medium
+       3  high
+       4  xhigh
+       5  max
+       6  ultra
+    Pick 1-6 [1]:
 
   kimi: init can't check sign-in. If you're not signed in, run `kimi login`
   first, or leave kimi out.
@@ -43,6 +61,8 @@ Step 1 of 3: agents
        3  kimi-code/kimi-for-coding            Moonshot  200K context
        4  kimi-code/kimi-for-coding-highspeed  Moonshot  200K context
     Pick 1-4, or type a model id [1]:
+    Effort: high, kimi's own setting for this model (change it in
+    ~/.kimi-code/config.toml; brigada can't set it per run).
     kimi has no sandbox: when it writes code it can run any command on this
     machine without asking. As a reviewer it only reads.
     Let kimi write code too, not only review? [y/N]:
@@ -54,11 +74,19 @@ Step 1 of 3: agents
        3  opencode/deepseek-v3     DeepSeek     DeepSeek V3, 1M context
        -  don't use opencode
     Pick 1-3 or -, or type provider/model [-]:
+    How hard should zai-coding-plan/glm-5.3 think? More effort gives better
+    results on hard tasks and uses more of your plan's limits.
+       1  default  opencode's default
+       2  low
+       3  medium
+       4  high
+    Pick 1-4 [1]:
 
 Step 2 of 3: the foreman
   The foreman plans the work and decides what happens when a task needs
   judgment. It runs whenever work finishes, so it uses that agent's quota.
-  Only claude and codex can be the foreman; it uses the model picked above.
+  Only claude and codex can be the foreman; it uses the model picked above
+  and its effort.
     1  claude/sonnet
     2  codex/gpt-6.1-sol
   Pick 1-2 [1]:
@@ -70,10 +98,13 @@ Step 3 of 3: the check
 
 Plan
   Agents:
-    claude    sonnet                   Anthropic    writes code, reviews
-    codex     gpt-6.1-sol              OpenAI       writes code, reviews
-    kimi      kimi-code/k3             Moonshot     reviews only
-    opencode  zai-coding-plan/glm-5.3  Zhipu (GLM)  writes code, reviews
+    claude    sonnet (default)                   Anthropic    writes code,
+                                                              reviews
+    codex     gpt-6.1-sol (default)              OpenAI       writes code,
+                                                              reviews
+    kimi      kimi-code/k3 (default)             Moonshot     reviews only
+    opencode  zai-coding-plan/glm-5.3 (default)  Zhipu (GLM)  writes code,
+                                                              reviews
   Reviews: 4 model families, so every task can get a reviewer of another one.
   Foreman: claude/sonnet
   Check: uv run pytest (init doesn't run it; change it later in

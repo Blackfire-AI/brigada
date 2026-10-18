@@ -144,7 +144,7 @@ func TestInitPromptDefaultsAndSkip(t *testing.T) {
 		want        string
 	}{
 		{
-			name: "blank uses menu defaults", stdin: "\n\n\n\n\n\nn\n",
+			name: "blank uses menu defaults", stdin: "\n\n\n\n\n\n\nn\n",
 			wantAgents:  []string{"claude    sonnet", "codex     CLI default", "kimi      CLI default"},
 			wantSkipped: []string{"opencode"},
 			want:        "Declined",
@@ -277,13 +277,14 @@ func TestInitNonTerminalPrompts(t *testing.T) {
 	importRepo(t)
 	wireGit(t, ".", "config", "core.excludesFile", os.DevNull)
 	fakeInitPATH(t, initHarnesses...)
-	code, out, err := initDo(t, testsupport.ShortStateDir(t), "y\n\ny\n\ny\n\n\n\n\nn\n", "--check", "true", "--tools", "none")
+	code, out, err := initDo(t, testsupport.ShortStateDir(t), "y\n\n\ny\n\ny\n\n\n\n\nn\n", "--check", "true", "--tools", "none")
 	if code != 1 || !strings.Contains(out, "Declined") || err != "" {
 		t.Fatalf("got %d\n%s\n%s", code, out, err)
 	}
 	prompts := []string{
 		"    Are you signed in to claude? [y/N]",
 		"    Pick 1-3 or -, or type a model id [1]:",
+		"    Pick 1-6 [1]:",
 		"    Are you signed in to codex? [y/N]",
 		"    Pick 1 or -, or type a model id [1]:",
 		"    Use kimi? [y/N]:",
@@ -388,12 +389,12 @@ func TestInitModelRetries(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
 			calls := fakeInitPATH(t, "claude", "codex", "opencode")
-			answers := tc.answers + "\n-\n\nn\n"
+			answers := tc.answers + "\n\n-\n\nn\n"
 			if tc.name == "retry then skip" {
 				answers = tc.answers + "\n-\nn\n"
 			}
 			if tc.harness == "opencode" {
-				answers = "\n\n" + tc.answers + "\nn\n"
+				answers = "\n\n\n" + tc.answers + "\nn\n"
 			}
 			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
 			code, out, err := initDo(t, state, answers, "--signed-in", "claude,codex,opencode", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
@@ -599,7 +600,7 @@ func TestInitSuggestedCheckQuestion(t *testing.T) {
 				t.Fatal(err)
 			}
 			fakeInitPATH(t, "claude", "codex")
-			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "\n\n\n"+tc.answer+"\nn\n", "--signed-in", "claude,codex", "--no-wiring", "--verbose")
+			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "\n\n\n\n"+tc.answer+"\nn\n", "--signed-in", "claude,codex", "--no-wiring", "--verbose")
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
@@ -894,7 +895,7 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 	if e != nil || !live || again.PID != rec.PID {
 		t.Fatalf("runner replaced: %+v %v", again, e)
 	}
-	code, out, err = initDo(t, state, "unknown\nsonnet\ngpt-5\n\ny\n", "--signed-in", "claude,codex", "--no-wiring")
+	code, out, err = initDo(t, state, "unknown\nsonnet\n\ngpt-5\n\ny\n", "--signed-in", "claude,codex", "--no-wiring")
 	if code != 0 || strings.Count(out, "    Pick 1-3 or -, or type a model id [1]:") != 2 || !strings.Contains(out, "Runner already running") {
 		t.Fatalf("interactive retry: %d\n%s\n%s", code, out, err)
 	}
@@ -1021,7 +1022,7 @@ func TestInitInteractiveLongModels(t *testing.T) {
 			}
 		}
 	}
-	if rows != 4 || !strings.Contains(plan, "kimi-code/kimi-for-coding") || !strings.Contains(plan, "zai-coding-plan/glm-5.3-highspeed") {
+	if rows != 4 || !strings.Contains(plan, "kimi-code/kimi-for-coding") || !strings.Contains(plan, "zai-coding-plan/glm-5.3-highspeed @low") {
 		t.Fatalf("missing agent rows:\n%s", plan)
 	}
 	role := strings.Index(plan, "writes code,")
@@ -1078,6 +1079,8 @@ func initInteractiveTranscript(t *testing.T, longModels bool) string {
 	t.Setenv("HOME", testsupport.ShortStateDir(t))
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".codex", "config.toml"), "model = \"gpt-6.1-sol\"\n")
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".kimi-code", "config.toml"), `default_model = "kimi-code/k3"
+[models."kimi-code/k3"]
+default_effort = "high"
 [models."kimi-code/k3-256k"]
 display_name = "K3"
 max_context_size = 262144
@@ -1100,13 +1103,22 @@ max_context_size = 204800
 		}
 	}
 	fakeInitCodexCatalog(t)
+	codexPath := filepath.Join(os.Getenv("PATH"), "codex")
+	codexScript, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexScript = bytes.ReplaceAll(codexScript, []byte(`"slug":"gpt-6.1-sol",`), []byte(`"slug":"gpt-6.1-sol","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}],"default_reasoning_level":"low",`))
+	if err := os.WriteFile(codexPath, codexScript, 0755); err != nil {
+		t.Fatal(err)
+	}
 	model := "zai-coding-plan/glm-5.3"
 	if longModels {
 		model += "-highspeed"
 	}
 	// Include different family widths and a paid plan with zero per-token cost.
 	verbose := fmt.Sprintf(`%s
-{"name":"GLM-5.3","status":"active","cost":{"input":0,"output":0},"limit":{"context":200000}}
+{"name":"GLM-5.3","variants":{"low":{},"medium":{},"high":{}},"status":"active","cost":{"input":0,"output":0},"limit":{"context":200000}}
 zai-coding-plan/glm-5.2
 {"name":"GLM-5.2","status":"active","limit":{"context":204800}}
 opencode/deepseek-v3
@@ -1115,11 +1127,12 @@ opencode/deepseek-v3
 	fakeOpenCodeVerbose2(t, openCodeVerboseFile(t, verbose))
 	// The golden accepts defaults and leaves Kimi review-only. The long-model
 	// variant picks Haiku, a non-default Kimi model, and Codex as foreman.
-	// Both pick OpenCode model 1 and decline only the final apply.
+	// Both pick OpenCode model 1 and decline only the final apply. The long
+	// variant also picks low effort to exercise alignment with an override.
 	state := filepath.Join(os.Getenv("HOME"), ".local", "state", "brigada")
-	input := "\n\ny\n\nN\n1\n\n\nn\n"
+	input := "\n\n\n\ny\n\nN\n1\n\n\n\nn\n"
 	if longModels {
-		input = "3\n\ny\n3\nN\n1\n2\n\nn\n"
+		input = "3\n\n\n\ny\n3\nN\n1\n2\n2\n\nn\n"
 	}
 	code, out, errOut := initDo(t, state, input)
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
@@ -1191,9 +1204,9 @@ func TestInitUnconfirmedUseQuestions(t *testing.T) {
 		name, input, signedIn string
 		include, confirmed    bool
 	}{
-		{name: "Enter leaves out", input: "\n\n\n\n\nn\n", signedIn: "claude,codex"},
-		{name: "opt in and pick numbers", input: "\n\ny\n1\n\ny\n2\n\nn\n", signedIn: "claude,codex", include: true},
-		{name: "flag answers Use", input: "\n\n1\n\n2\n\nn\n", signedIn: "claude,codex,kimi,opencode", include: true, confirmed: true},
+		{name: "Enter leaves out", input: "\n\n\n\n\n\nn\n", signedIn: "claude,codex"},
+		{name: "opt in and pick numbers", input: "\n\n\ny\n1\n\ny\n2\n\nn\n", signedIn: "claude,codex", include: true},
+		{name: "flag answers Use", input: "\n\n\n1\n\n2\n\nn\n", signedIn: "claude,codex,kimi,opencode", include: true, confirmed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
@@ -1287,7 +1300,7 @@ max_context_size = 1048576
 [models."provider/gemini-2.5-pro"]
 `)
 	args := []string{"--signed-in", strings.Join(initHarnesses, ","), "--foreman", "codex/default", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring"}
-	code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "1\n1\n-\n-\nn\n", args...)
+	code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "1\n\n1\n-\n-\nn\n", args...)
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("baseline init = %d\n%s\n%s", code, out, errOut)
 	}
@@ -1308,8 +1321,11 @@ max_context_size = 1048576
 		}
 		for _, row := range rows {
 			t.Run(harness+"/"+row[1], func(t *testing.T) {
-				answers := map[string]string{"claude": "1\n", "codex": "1\n", "kimi": "-\n", "opencode": "-\n"}
+				answers := map[string]string{"claude": "1\n\n", "codex": "1\n", "kimi": "-\n", "opencode": "-\n"}
 				answers[harness] = row[1] + "\n"
+				if harness == "claude" {
+					answers[harness] += "\n" // Keep the CLI effort default.
+				}
 				if harness == "kimi" {
 					answers[harness] += "n\n" // Keep Kimi review-only.
 				}

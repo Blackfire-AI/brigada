@@ -292,6 +292,11 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 					continue
 				}
 				classes := splitList(defaultClasses)
+				entry := initPickedModel(h, model, sources)
+				effort, err := initPickEffort(stdout, h, entry, askLine)
+				if err != nil {
+					return fail(stderr, err)
+				}
 				if h == "kimi" {
 					fmt.Fprint(stdout, "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. As a reviewer it only reads.\n")
 					answer, err := ask("    Let kimi write code too, not only review? [y/N]: ", "--agent harness=kimi,classes=review (or implement+review+answer to allow writing)")
@@ -302,7 +307,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 						classes = []string{"review"}
 					}
 				}
-				agents.specs = append(agents.specs, agentSpec{harness: h, model: model, classes: classes})
+				agents.specs = append(agents.specs, agentSpec{harness: h, model: model, effort: effort, classes: classes})
 				break
 			}
 		}
@@ -377,7 +382,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	isLimited := len(families) < 2
 	if isLimited {
-		fmt.Fprintln(stdout, "LIMITED SETUP: fewer than two distinct review-capable model families. Sign in to a harness of another family, or add a model of another family with classes=review. Cross-family reviews that cannot be served will wait; inspect brigada status.")
+		printInitWrapped(stdout, "LIMITED SETUP: ", "  ", "fewer than two distinct review-capable model families. Sign in to a harness of another family, or add a model of another family with classes=review. Cross-family reviews that cannot be served will wait; inspect brigada status.")
 		if !*limited {
 			return fail(stderr, fmt.Errorf("setup stopped; add a second review family or explicitly acknowledge with --accept-limited; nothing written or started"))
 		}
@@ -394,7 +399,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		return usagef(stderr, "--foreman must name a usable agent that resumes headless (claude/model or codex/model); none matched")
 	}
 	if canAsk {
-		fmt.Fprint(stdout, "\nStep 2 of 3: the foreman\n  The foreman plans the work and decides what happens when a task needs\n  judgment. It runs whenever work finishes, so it uses that agent's quota.\n  Only claude and codex can be the foreman; it uses the model picked above.\n")
+		fmt.Fprint(stdout, "\nStep 2 of 3: the foreman\n  The foreman plans the work and decides what happens when a task needs\n  judgment. It runs whenever work finishes, so it uses that agent's quota.\n  Only claude and codex can be the foreman; it uses the model picked above\n  and its effort.\n")
 		var candidates []*agentSpec
 		defaultChoice := 1
 		for _, h := range initHarnesses {
@@ -699,6 +704,83 @@ func initMenuModelName(entry initModelEntry) string {
 	return initModelName(entry.value)
 }
 
+// A typed resolved default name has the same metadata as its menu entry.
+func initPickedModel(harness, model string, sources map[string]initModelSource) initModelEntry {
+	for _, entry := range sources[harness].entries {
+		if entry.value == model || entry.name == model {
+			return entry
+		}
+	}
+	entry := initModelEntry{value: model, name: initModelName(model)}
+	if harness == "claude" {
+		entry.effortLevels = adapter.EffortLevels(harness)
+	}
+	return entry
+}
+
+func initPickEffort(w io.Writer, harness string, entry initModelEntry, ask func(string, string) (string, error)) (string, error) {
+	if harness == "kimi" {
+		if entry.defaultEffort != "" {
+			printInitWrapped(w, "    Effort: ", "    ", entry.defaultEffort+", kimi's own setting for this model (change it in ~/.kimi-code/config.toml; brigada can't set it per run).")
+		}
+		return "", nil
+	}
+	if len(entry.effortLevels) < 2 {
+		return "", nil
+	}
+	levels := entry.effortLevels
+	defaultIndex := slices.Index(levels, entry.defaultEffort)
+	if defaultIndex < 0 {
+		levels = append([]string{"default"}, levels...)
+		defaultIndex = 0
+	}
+	printInitWrapped(w, "    ", "    ", "How hard should "+initMenuModelName(entry)+" think? More effort gives better results on hard tasks and uses more of your plan's limits.")
+	width := 0
+	for _, level := range levels {
+		width = max(width, utf8.RuneCountInString(level))
+	}
+	for i, level := range levels {
+		note := ""
+		if i == defaultIndex {
+			note = harness + "'s default"
+			if level != "default" {
+				note += " for this model"
+			}
+		}
+		prefix := fmt.Sprintf("      %2d  %-*s", i+1, width, level)
+		if note != "" {
+			prefix += "  "
+		} else {
+			prefix = strings.TrimRight(prefix, " ")
+		}
+		printInitWrapped(w, prefix, strings.Repeat(" ", 10+width+2), note)
+	}
+	flags := "--agent harness=" + harness + ",effort=LEVEL"
+	for attempt := 0; attempt < 3; attempt++ {
+		answer, err := ask(fmt.Sprintf("    Pick %s [%d]: ", initPickRange(len(levels)), defaultIndex+1), flags)
+		if err != nil {
+			return "", err
+		}
+		if answer == "" {
+			return "", nil
+		}
+		index := slices.Index(levels, answer)
+		if n, err := strconv.Atoi(answer); err == nil && n >= 1 && n <= len(levels) {
+			index = n - 1
+		}
+		if index >= 0 {
+			if index == defaultIndex {
+				return "", nil
+			}
+			return levels[index], nil
+		}
+		if attempt < 2 {
+			fmt.Fprintf(w, "    pick %s or a listed effort level; try again.\n", initPickRange(len(levels)))
+		}
+	}
+	return "", fmt.Errorf("%s: pick %s or a listed effort level", flags, initPickRange(len(levels)))
+}
+
 func initForemanName(spec agentSpec, sources map[string]initModelSource) string {
 	return agentName(spec.harness, initAgentModelName(spec, sources), spec.effort)
 }
@@ -848,11 +930,16 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 	fmt.Fprintln(w, "Plan\n  Agents:")
 	modelWidth, familyWidth := 0, 0
 	familyNames := make([]string, len(agents))
+	modelNames := make([]string, len(agents))
 	for i, s := range agents {
 		family, _ := adapter.AgentFamily(s.harness, s.model)
 		family = initFamilyName(family)
 		familyNames[i] = family
-		modelWidth = max(modelWidth, utf8.RuneCountInString(initAgentModelName(s, sources)))
+		modelNames[i] = initAgentModelName(s, sources) + " (default)"
+		if s.effort != "" {
+			modelNames[i] = initAgentModelName(s, sources) + " @" + s.effort
+		}
+		modelWidth = max(modelWidth, utf8.RuneCountInString(modelNames[i]))
 		familyWidth = max(familyWidth, utf8.RuneCountInString(family))
 	}
 	for i, s := range agents {
@@ -861,7 +948,7 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 		// identifiers wrap within that column, with roles on a separate line.
 		if 14+modelWidth+2+familyWidth+2 >= 79 {
 			indent := strings.Repeat(" ", 14)
-			printInitWrapped(w, fmt.Sprintf("    %-9s ", s.harness), indent, initAgentModelName(s, sources))
+			printInitWrapped(w, fmt.Sprintf("    %-9s ", s.harness), indent, modelNames[i])
 			if 14+familyWidth+2 >= 79 {
 				printInitWrapped(w, indent, indent, familyNames[i])
 				printInitWrapped(w, indent, indent, initAgentRoles(s.classes))
@@ -871,7 +958,7 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 			}
 			continue
 		}
-		prefix := fmt.Sprintf("    %-9s %-*s  %-*s  ", s.harness, modelWidth, initAgentModelName(s, sources), familyWidth, familyNames[i])
+		prefix := fmt.Sprintf("    %-9s %-*s  %-*s  ", s.harness, modelWidth, modelNames[i], familyWidth, familyNames[i])
 		printInitWrapped(w, prefix, strings.Repeat(" ", utf8.RuneCountInString(prefix)), initAgentRoles(s.classes))
 	}
 	printInitWrapped(w, "  Reviews: ", "    ", fmt.Sprintf("%d model families, so every task can get a reviewer of another one.", families))

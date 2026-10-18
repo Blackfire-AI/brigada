@@ -1,12 +1,17 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
 func assertInitEfforts(t *testing.T, entry initModelEntry, levels []string, defaultEffort string) {
@@ -112,4 +117,154 @@ support_efforts = []
 	assertInitEfforts(t, got.entries[2], nil, "")
 	assertInitEfforts(t, got.entries[3], []string{}, "")
 	assertInitModelPrivacy(t, got)
+}
+
+// Exercise the real model-to-effort prompt sequence and the resulting agent
+// and foreman specs without applying the plan or starting a model.
+func TestInitInteractiveEfforts(t *testing.T) {
+	for _, harness := range []string{"claude", "codex", "opencode"} {
+		for _, answer := range []string{"", "high", "number"} {
+			t.Run(harness+"/"+answer, func(t *testing.T) {
+				importRepo(t)
+				fakeInitPATH(t, harness)
+				model, pick, prompt := "sonnet", "1", "Pick 1-6 [1]:"
+				number := "4" // Claude's unknown default precedes its five levels.
+				if harness == "codex" {
+					model, number, prompt = "gpt-6.1-sol", "3", "Pick 1-3 [1]:"
+					catalog := `{"models":[{"slug":"gpt-6.1-sol","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"}],"default_reasoning_level":"low"}]}`
+					writeInitCodexScript(t, "  debug  Diagnostic tools", "  models  Render models", "", "printf '%s\\n' '"+catalog+"'", "exit 89")
+					pick = "2" // Entry 1 is the unresolved CLI model default.
+				}
+				if harness == "opencode" {
+					model, number, prompt = "fixture/gpt-5", "3", "Pick 1-3 [1]:"
+					fakeInitPATH(t, "claude", "opencode")
+					fakeOpenCodeVerbose2(t, openCodeVerboseFile(t, "fixture/gpt-5\n{\"status\":\"active\",\"variants\":{\"low\":{},\"high\":{}}}\n"))
+					pick = "1\n\n1" // Claude model, default effort, OpenCode model.
+				}
+				input := answer
+				if answer == "number" {
+					input = number
+				}
+				code, out, errOut := initDo(t, testsupport.ShortStateDir(t), pick+"\n"+input+"\nn\n", "--signed-in", "claude,codex,opencode", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
+				if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
+					t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
+				}
+				if !strings.Contains(out, "How hard should "+model+" think?") || !strings.Contains(out, prompt) {
+					t.Fatalf("missing effort question:\n%s", out)
+				}
+				suffix, effort := " @high", "high"
+				if answer == "" {
+					suffix, effort = " (default)", ""
+				}
+				plan := strings.Split(out, "\nPlan\n")[1]
+				if !strings.Contains(plan, model+suffix) {
+					t.Fatalf("wrong agent effort:\n%s", plan)
+				}
+				if harness != "opencode" && !strings.Contains(plan, "Foreman: "+agentName(harness, model, effort)+"\n") {
+					t.Fatalf("foreman lost effort:\n%s", plan)
+				}
+				assertInitEffortOutput(t, out)
+			})
+		}
+	}
+}
+
+func assertInitEffortOutput(t *testing.T, out string) {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if len([]rune(line)) >= 80 {
+			t.Errorf("line must be under 80 columns: %q", line)
+		}
+	}
+	if strings.Contains(out, "ready") {
+		t.Errorf("claimed ready before apply:\n%s", out)
+	}
+}
+
+func TestInitEffortDefaultsAndRetries(t *testing.T) {
+	for _, tc := range []struct {
+		name, defaultEffort, input, want string
+		wantErr                          bool
+	}{
+		{name: "known default Enter", defaultEffort: "medium", input: "\n"},
+		{name: "known default number", defaultEffort: "medium", input: "2\n"},
+		{name: "known default typed", defaultEffort: "medium", input: "medium\n"},
+		{name: "source order", defaultEffort: "medium", input: "1\n", want: "low"},
+		{name: "unknown default", input: "1\n"},
+		{name: "typed high", input: "high\n", want: "high"},
+		{name: "retry", input: "bogus\n8\n4\n", want: "high"},
+		{name: "retry limit", input: "bogus\n8\nLOW\n", wantErr: true},
+		{name: "EOF", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			reader := bufio.NewReader(strings.NewReader(tc.input))
+			attempts := 0
+			effort, err := initPickEffort(&out, "codex", initModelEntry{name: "gpt-5", effortLevels: []string{"low", "medium", "high"}, defaultEffort: tc.defaultEffort}, func(prompt, flags string) (string, error) {
+				attempts++
+				fmt.Fprint(&out, prompt)
+				line, err := reader.ReadString('\n')
+				return strings.TrimSuffix(line, "\n"), err
+			})
+			if effort != tc.want || (err != nil) != tc.wantErr || attempts > 3 {
+				t.Fatalf("effort = %q, err = %v, attempts = %d", effort, err, attempts)
+			}
+			if tc.defaultEffort != "" && (!strings.Contains(out.String(), "Pick 1-3 [2]:") || !strings.Contains(out.String(), "medium  codex's default for this model")) {
+				t.Fatalf("known default not marked in source order:\n%s", out.String())
+			}
+		})
+	}
+}
+
+func TestInitEffortInformationOnly(t *testing.T) {
+	for _, tc := range []struct {
+		harness, defaultEffort string
+		levels                 []string
+	}{
+		{"kimi", "high", []string{"low", "high"}},
+		{"kimi", "", []string{"low", "high"}},
+		{"opencode", "", nil},
+		{"opencode", "", []string{"high"}},
+	} {
+		t.Run(tc.harness+tc.defaultEffort+fmt.Sprint(len(tc.levels)), func(t *testing.T) {
+			var out bytes.Buffer
+			effort, err := initPickEffort(&out, tc.harness, initModelEntry{effortLevels: tc.levels, defaultEffort: tc.defaultEffort}, func(string, string) (string, error) {
+				t.Fatal("unexpected effort question")
+				return "", nil
+			})
+			if effort != "" || err != nil {
+				t.Fatalf("effort = %q, err = %v", effort, err)
+			}
+			want := ""
+			if tc.harness == "kimi" && tc.defaultEffort != "" {
+				want = "    Effort: high, kimi's own setting for this model (change it in\n    ~/.kimi-code/config.toml; brigada can't set it per run).\n"
+			}
+			if out.String() != want {
+				t.Fatalf("output = %q, want %q", out.String(), want)
+			}
+			assertInitEffortOutput(t, out.String())
+		})
+	}
+}
+
+func TestInitExplicitEffortsSkipQuestions(t *testing.T) {
+	importRepo(t)
+	fakeInitPATH(t, "claude", "codex", "opencode")
+	code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "\nn\n",
+		"--agent", "harness=claude,model=sonnet,effort=high",
+		"--agent", "harness=codex,model=gpt-5,effort=high",
+		"--agent", "harness=opencode,model=fixture/glm-5.3,effort=high",
+		"--signed-in", "claude,codex,opencode", "--check", "true", "--tools", "none", "--no-wiring")
+	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
+		t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
+	}
+	if strings.Contains(out, "How hard should") || strings.Contains(out, "Which model should") {
+		t.Fatalf("explicit agents got model or effort questions:\n%s", out)
+	}
+	for _, model := range []string{"sonnet", "gpt-5", "fixture/glm-5.3"} {
+		if !strings.Contains(out, model+" @high") {
+			t.Errorf("explicit effort missing for %s:\n%s", model, out)
+		}
+	}
+	assertInitEffortOutput(t, out)
 }
