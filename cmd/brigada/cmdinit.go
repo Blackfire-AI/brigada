@@ -287,10 +287,14 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				note, tags := entry.note, ""
 				if entry.isCurrent {
 					tags = "current"
+				} else if entry.id == defaultID {
+					tags = "default"
 				}
 				if entry.isDefault {
 					note = initDefaultNote(h, note)
-					tags = strings.TrimSpace("default " + tags)
+					if tags == "" {
+						tags = "default"
+					}
 				}
 				if note != "" || tags != "" {
 					if home, err := os.UserHomeDir(); err == nil && home != "" {
@@ -305,10 +309,14 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				_, wasUsed := saved[h]
 				name := initDim(stdout, "  don't use "+h)
 				if styled && ((h == "opencode" && !wasUsed) || (saved != nil && !wasUsed)) {
-					indent = style.Pointer() + "     "
+					indent = "     " + style.Pointer()
 					name = "  " + style.Bold("don't use "+h)
 				}
-				fmt.Fprintln(stdout, indent+style.Accent(" -")+name)
+				tag := ""
+				if (h == "opencode" && !wasUsed) || (saved != nil && !wasUsed) {
+					tag = "  " + style.Accent("default")
+				}
+				fmt.Fprintln(stdout, indent+style.Accent(" -")+name+tag)
 			}
 			if sources[h].unknownCount > 0 {
 				command := "opencode models"
@@ -498,7 +506,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		return usagef(stderr, "--foreman must name a usable agent that resumes headless (claude/model or codex/model); none matched")
 	}
 	if canAsk {
-		initChangeLater(stdout, "brigada init")
+		initChangeLater(stdout, "run brigada init again")
 		fmt.Fprintln(stdout)
 		initStep(stdout, 2, "the foreman", "  The foreman plans the work and decides what happens when a task needs\n  judgment. It runs whenever work finishes, so it uses that agent's quota.\n  Only claude and codex can be the foreman; it uses the model picked above\n  and its effort.\n")
 		var candidates []*agentSpec
@@ -519,12 +527,13 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			fmt.Fprintf(stdout, "  Foreman: %s (the only agent that can plan)\n", initForemanName(*chosen, sources))
 		} else {
 			for i, candidate := range candidates {
-				if styled {
-					prefix := initMenuPrefix(stdout, "   ", i+1, initForemanName(*candidate, sources), 0, i+1 == defaultChoice)
-					printInitWrapped(stdout, prefix, "        ", "")
-				} else {
-					fmt.Fprintf(stdout, "    %d  %s\n", i+1, initForemanName(*candidate, sources))
+				prefix := initMenuPrefix(stdout, "   ", i+1, initForemanName(*candidate, sources), 0, i+1 == defaultChoice)
+				tags := ""
+				if i+1 == defaultChoice {
+					tags = "default"
+					prefix += "  "
 				}
+				printInitWrapped(stdout, prefix, "        ", initRowNote(stdout, "", tags))
 			}
 			if *foreman == "" {
 				for attempt := 0; attempt < 3; attempt++ {
@@ -547,7 +556,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				}
 			}
 		}
-		initChangeLater(stdout, "brigada project foreman --harness H --model M")
+		initChangeLater(stdout, "brigada project foreman --harness H --model M, or run brigada init again")
 	}
 	file := filepath.Join(root, filepath.FromSlash(engine.ProjectConfigPath))
 	if err := initSafeFile(file); err != nil {
@@ -934,7 +943,9 @@ func initPickEffort(w io.Writer, harness string, entry initModelEntry,
 			} else {
 				note = initDefaultNote(harness, note)
 			}
-			tags = strings.TrimSpace("default " + tags)
+			if tags == "" {
+				tags = "default"
+			}
 		}
 		prefix := initMenuPrefix(w, "      ", i+1, level, width, i == pickIndex)
 		if note != "" || tags != "" {

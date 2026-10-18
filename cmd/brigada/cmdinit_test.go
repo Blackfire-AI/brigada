@@ -657,7 +657,7 @@ func TestInitSuggestedCheckQuestion(t *testing.T) {
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
-			prompt := "  Found in this repo:\n     1  " + candidates[0].Command + "  " + candidates[0].Note + "\n  Pick 1, or type a command [1]:\n"
+			prompt := "  Found in this repo:\n     1  " + candidates[0].Command + "  " + candidates[0].Note + " default\n  Pick 1, or type a command [1]:\n"
 			question := strings.Index(out, prompt)
 			if question <= strings.Index(out, "  Pick 1-2 [1]:") || question >= strings.Index(out, "\nPlan\n") || strings.Count(out, prompt) != 1 {
 				t.Fatalf("check question missing or out of order:\n%s", out)
@@ -748,19 +748,20 @@ func TestInitCheckStepTranscript(t *testing.T) {
   lint, type checks. Claude workers may run it too before handing in.
 
   Found in this repo:
-     1  make check     Makefile: lint format-check type test rig-spec
+     1  make check     Makefile: lint format-check type test rig-spec default
      2  make test      Makefile: uv run pytest -q
      3  uv run pytest  pytest, from uv.lock
   Pick 1-3, or type a command [1]:
 
-  -> change later: .brigada/project.yaml: default_check; brigada project import
+  -> change later: edit default_check in .brigada/project.yaml, then run
+     brigada project import
 `
 	if !strings.Contains(out, want) {
 		t.Fatalf("step 3 transcript differs from the approved one:\n%s", out)
 	}
 	for _, want := range []string{
-		"\n  -> change later: brigada init\n\nStep 2 of 3:",
-		"\n  -> change later: brigada project foreman --harness H --model M\n\nStep 3 of 3:",
+		"\n  -> change later: run brigada init again\n\nStep 2 of 3:",
+		"\n  -> change later: brigada project foreman --harness H --model M, or run\n     brigada init again\n\nStep 3 of 3:",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -786,7 +787,7 @@ func TestInitCheckStepLongNoteStaysNarrow(t *testing.T) {
 	}
 	fakeInitPATH(t, "claude", "codex")
 	code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "\n\nn\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring")
-	if code != 1 || errOut != "" || !strings.Contains(out, "     1  make check  Makefile: a-very-long-prerequisite") || !strings.Contains(out, "…\n") {
+	if code != 1 || errOut != "" || !strings.Contains(out, "     1  make check  Makefile: a-very-long-prerequisite") || !strings.Contains(out, "… default\n") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
 	before, _, _ := strings.Cut(out, "\nPlan\n")
@@ -1442,6 +1443,7 @@ func TestInitStyledInteractiveTranscript(t *testing.T) {
 				t.Fatal(err)
 			}
 			out := initInteractiveTranscript(t, false, caps)
+			assertInitMenuPointers(t, out, tc.utf8)
 			if out != string(want) {
 				t.Fatalf("styled transcript differs:\n%q\nwant:\n%q", out, want)
 			}

@@ -96,6 +96,9 @@ func askInitCheck(w io.Writer, ask func(prompt, flags string) (string, error), e
 		}
 		for i, e := range entries {
 			note, tags := initNoteTags(e.Note)
+			if i == 0 && tags == "" {
+				tags = "default"
+			}
 			prefix := initMenuPrefix(w, "    ", i+1, e.Command, width, i == 0) + "  "
 			if initPresentation(w).styled {
 				printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), initRowNote(w, note, tags))
@@ -142,7 +145,7 @@ func askInitCheck(w io.Writer, ask func(prompt, flags string) (string, error), e
 		default:
 			command = answer
 		}
-		initChangeLater(w, ".brigada/project.yaml: default_check; brigada project import")
+		initChangeLater(w, "edit default_check in .brigada/project.yaml, then run brigada project import")
 		return command, false, nil
 	}
 	return "", true, nil

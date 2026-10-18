@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Blackfire-AI/brigada/internal/logo"
+	"github.com/Blackfire-AI/brigada/internal/runnerstate"
 	"github.com/Blackfire-AI/brigada/internal/term"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
@@ -33,7 +34,7 @@ func TestInitCLIStyles(t *testing.T) {
 			var b bytes.Buffer
 			w := initOutput{Writer: &b, style: style, styled: true, utf8: true}
 			initCLIStatus(w, tc.harness, tc.probe, tc.confirmed)
-			for _, want := range append(tc.want, style.Bold(tc.harness)) {
+			for _, want := range append(tc.want, style.Bold(tc.harness)+"  ") {
 				if !strings.Contains(b.String(), want) {
 					t.Errorf("status lacks %q: %q", want, b.String())
 				}
@@ -51,7 +52,7 @@ func TestInitStyledCurrentEffortTagAtEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), style.Accent("current")+"\n") {
+	if !strings.Contains(b.String(), style.Accent("current")+"\n") || strings.Contains(b.String(), style.Accent("default")) {
 		t.Fatalf("current must end the row: %q", b.String())
 	}
 	if !strings.Contains(b.String(), style.Pointer()) || !strings.Contains(b.String(), style.Bold("low")) {
@@ -129,7 +130,7 @@ func TestInitStyledProbedAuthentication(t *testing.T) {
 				if tc.checked {
 					status = style.Bad("not signed in")
 				}
-				if !strings.Contains(out, style.Bold(h)+": "+status) {
+				if !strings.Contains(out, style.Bold(h)+"  "+status) {
 					t.Errorf("incorrect %s status: %q", h, out)
 				}
 			}
@@ -219,5 +220,139 @@ func TestInitPlainCurrentCheckWidth(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestInitMenuPointerColumn(t *testing.T) {
+	for _, utf8 := range []bool{true, false} {
+		for _, indent := range []string{"   ", "    ", "      "} {
+			for _, id := range []int{1, 10, 120} {
+				var b bytes.Buffer
+				style := term.New(logo.Caps{TTY: true, Color: logo.Color16, UTF8: utf8, Width: 100})
+				w := initOutput{Writer: &b, style: style, styled: true, utf8: utf8}
+				row := ansi.ReplaceAllString(initMenuPrefix(w, indent, id, "model", 5, true), "")
+				plain := ansi.ReplaceAllString(initMenuPrefix(w, indent, id, "model", 5, false), "")
+				number := fmt.Sprint(id)
+				column := term.VisibleWidth(row[:strings.Index(row, number)])
+				pointer := ansi.ReplaceAllString(style.Pointer(), "")
+				pointerColumn := term.VisibleWidth(row[:strings.Index(row, pointer)])
+				if pointerColumn != column-2 || column != strings.Index(plain, number) {
+					t.Errorf("pointer must be two columns before aligned number: %q (plain %q)", row, plain)
+				}
+			}
+		}
+	}
+}
+
+func assertInitMenuPointers(t *testing.T, out string, utf8 bool) {
+	t.Helper()
+	pointer := ">"
+	if utf8 {
+		pointer = "▸"
+	}
+	menus := 0
+	for _, line := range strings.Split(ansi.ReplaceAllString(out, ""), "\n") {
+		index := strings.Index(line, pointer)
+		if index < 0 {
+			continue
+		}
+		rest := line[index+len(pointer):]
+		choice := strings.TrimLeft(rest, " ")
+		if choice == "" || !strings.ContainsRune("0123456789-", rune(choice[0])) {
+			continue
+		}
+		if len(rest)-len(choice) != 1 {
+			t.Errorf("pointer must be two columns before the choice: %q", line)
+		}
+		menus++
+	}
+	if menus != 9 {
+		t.Errorf("checked %d selected rows; want all 9 model, skip, effort, foreman and check menus", menus)
+	}
+}
+
+func TestInitChangeLaterWrap(t *testing.T) {
+	for _, width := range []int{80, 100} {
+		for _, styled := range []bool{true, false} {
+			var b bytes.Buffer
+			caps := logo.Caps{Width: width}
+			if styled {
+				caps.TTY, caps.UTF8, caps.Color = true, true, logo.Color16
+			}
+			style := term.New(caps)
+			w := initOutput{Writer: &b, style: style, styled: styled, utf8: caps.UTF8}
+			how := "brigada project foreman --harness H --model M, or run brigada init again"
+			initChangeLater(w, how)
+			lines := strings.Split(strings.TrimSuffix(ansi.ReplaceAllString(b.String(), ""), "\n"), "\n")[1:]
+			column := term.VisibleWidth(lines[0][:strings.Index(lines[0], "change later:")])
+			for i, line := range lines {
+				if term.VisibleWidth(line) >= style.Width() {
+					t.Errorf("line must be under Width(): %q", line)
+				}
+				if i > 0 && len(line)-len(strings.TrimLeft(line, " ")) != column {
+					t.Errorf("continuation must align under change later: %q", line)
+				}
+			}
+			if got := strings.Join(strings.Fields(strings.Join(lines, " ")), " "); got != style.Again()+" change later: "+how {
+				t.Errorf("wrapped wording = %q", got)
+			}
+		}
+	}
+}
+
+func TestInitModelDefaultAndCurrentTags(t *testing.T) {
+	for _, styled := range []bool{false, true} {
+		for _, rerun := range []bool{false, true} {
+			t.Run(fmt.Sprintf("styled=%t/rerun=%t", styled, rerun), func(t *testing.T) {
+				importRepo(t)
+				fakeInitPATH(t, "claude", "codex")
+				state := testsupport.ShortStateDir(t)
+				if rerun {
+					if err := runnerstate.SaveAgents(filepath.Join(state, "runner"), []string{
+						"harness=claude,model=sonnet", "harness=codex,model=default",
+					}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				caps := logo.Caps{Width: 100}
+				if styled {
+					caps.TTY, caps.UTF8, caps.Color = true, true, logo.Color16
+				}
+				original := initDetectCaps
+				initDetectCaps = func(io.Writer) logo.Caps { return caps }
+				t.Cleanup(func() { initDetectCaps = original })
+				code, out, errs := initDo(t, state, strings.Repeat("\n", 10),
+					"--signed-in", "claude,codex", "--check", "true", "--tools", "none", "--no-wiring")
+				if code != 1 || errs != "" || !strings.Contains(out, "Declined") {
+					t.Fatalf("init = %d\n%s\n%s", code, out, errs)
+				}
+				tag := "default"
+				if rerun {
+					tag = "current"
+				}
+				rows := 0
+				for _, line := range strings.Split(out, "\n") {
+					plain := ansi.ReplaceAllString(line, "")
+					if strings.Contains(plain, "1  sonnet ") || strings.Contains(plain, "1  CLI default ") {
+						rows++
+						if !strings.HasSuffix(line, term.New(caps).Accent(tag)) {
+							t.Errorf("model row must end with %s tag: %q", tag, line)
+						}
+						if rerun && strings.Contains(plain, " default current") {
+							t.Errorf("current must replace default: %q", line)
+						}
+					}
+					if term.VisibleWidth(line) >= term.New(caps).Width() {
+						t.Errorf("line must be under Width(): %q", line)
+					}
+				}
+				if rows != 2 {
+					t.Errorf("checked %d model rows; want Claude and Codex", rows)
+				}
+				if strings.Contains(out, "ready") {
+					t.Fatal("claimed ready before applying")
+				}
+			})
+		}
 	}
 }
