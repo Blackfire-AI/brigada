@@ -89,10 +89,10 @@ func statusLine(ctx context.Context, common *commonFlags, stdout io.Writer) int 
 	return 0
 }
 
-// runTask is the task command's dispatch: `task submit`, the debug
-// submit path until the foreman exists (§12.1).
+// runTask is the task command's dispatch: `task submit`, the debugging
+// path that submits a task without the foreman (§12.1).
 func runTask(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	return dispatch(ctx, args, stdout, stderr, "task", "usage: brigada task submit --repo URL --base REF --spec FILE|- --check CMD [--harness claude]", "submit", taskCommands)
+	return dispatch(ctx, args, stdout, stderr, "task", "usage: brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title TITLE] [--harness HARNESS]", "submit", taskCommands)
 }
 
 // runTaskSubmit is the debug submit (§12.1): one task created whole —
@@ -114,10 +114,10 @@ func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer)
 		harness string
 		noStart bool
 	)
-	fs.StringVar(&repo, "repo", "", "the repository URL the task works in (product §5 rule 6)")
+	fs.StringVar(&repo, "repo", "", "the repository URL the task works in")
 	fs.StringVar(&base, "base", "main", "the ref the worktree starts from")
-	fs.StringVar(&spec, "spec", "", "the task spec file, verbatim (§1.4); - reads stdin")
-	fs.StringVar(&check, "check", "", "the check command the runner runs after a done (§5.5); empty = none")
+	fs.StringVar(&spec, "spec", "", "the task spec file, passed to the worker verbatim; - reads stdin")
+	fs.StringVar(&check, "check", "", "the check command the runner runs after the worker reports done; empty = none")
 	fs.StringVar(&title, "title", "", "the task's title; default is the spec's first line")
 	fs.StringVar(&harness, "harness", "", "the harness that must run the job (default: any)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")

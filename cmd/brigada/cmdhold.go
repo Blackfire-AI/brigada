@@ -20,16 +20,17 @@ func runHold(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return dispatch(ctx, args, stdout, stderr, "hold", "usage: brigada hold release --repo URL", "confirm, release or yield", holdCommands)
 }
 
-// runHoldConfirm is init's SessionStart hook (§4.6 "Identity"). The session
-// id is correlation only, never authority, and the engine has no API to
-// receive it yet: the bridge already sends the id it reads from its own
+// runHoldConfirm is the command of the old SessionStart hook (§4.6
+// "Identity"), which init no longer installs. The session id is
+// correlation only, never authority, and the engine has no API to
+// receive it: the bridge already sends the id it reads from its own
 // environment at hold_acquire. So this accepts the hook's input, changes
-// nothing and always exits zero, so the hook is installed and safe until
-// that API exists. Every failure is swallowed as in hold yield.
+// nothing and always exits zero, so an old hook stays harmless. Every
+// failure is swallowed as in hold yield.
 func runHoldConfirm(args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("hold confirm",
 		"brigada hold confirm [--session ID]",
-		"Accept SessionStart hook input for correlation; always exit successfully.")
+		"Do nothing, for compatibility with old SessionStart hooks; always exit successfully.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	fs.String("session", os.Getenv("CLAUDE_CODE_SESSION_ID"), "harness session id (correlation only)")
