@@ -15,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/Blackfire-AI/brigada/internal/logo"
 	"github.com/Blackfire-AI/brigada/internal/version"
 )
 
@@ -35,8 +36,10 @@ Commands:
 	attach          Attach to this repo's foreman and chat (what a bare
 	                brigada runs).
 	ask <message>   Send the foreman a message without attaching.
-	hold release    Release a stuck interactive hold on the foreman (--repo).
-	hold yield      Stop hook: yield only the bound bridge hold; always exits 0.
+	hold release    Release a stuck interactive hold on the foreman
+	                (--repo).
+	hold yield      Stop hook: yield only the bound bridge hold; always
+	                exits 0.
 	hold confirm    Kept for old SessionStart hooks; does nothing, exits 0.
 	review --branch <x>
 	                Review a branch with an agent of another family than
@@ -56,7 +59,8 @@ Commands:
 	                debugging path).
 	project foreman Show or set a repo's foreman harness, model and effort
 	                (--repo defaults to this repo's origin).
-	project list    List the projects: repo, foreman, active plans, needs-you.
+	project list    List the projects: repo, foreman, active plans,
+	                needs-you.
 	project set     Set project settings: key=value ... (approval limit,
 	                default_check, setup, extra_repos, hold bounds,
 	                instructions and the rest).
@@ -157,10 +161,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if len(args) > 1 {
 			return run(ctx, append(append([]string{}, args[1:]...), "--help"), stdout, stderr)
 		}
-		fmt.Fprint(stdout, usage)
+		fmt.Fprint(stdout, topHelp(stdout))
 		return 0
 	case "-h", "--help", "-help":
-		fmt.Fprint(stdout, usage)
+		fmt.Fprint(stdout, topHelp(stdout))
 		return 0
 	}
 	cmd, ok := commands[args[0]]
@@ -176,7 +180,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 }
 
 func runVersion(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("version", "brigada version", "Print the brigada version and exit.")
+	fs := newFlagSet("version", "brigada version", "Print the brigada version and exit; on a terminal, under the logo.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	if code, stop := common.parse(stdout, stderr, args); stop {
@@ -185,8 +189,29 @@ func runVersion(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if len(fs.Args()) != 0 {
 		return usagef(stderr, "version takes no positional arguments")
 	}
+	// Only a terminal gets the banner: scripts that read the version from
+	// a pipe keep the one plain line.
+	if caps := detectCaps(stdout); caps.TTY {
+		if banner := logo.String(logo.Banner, caps); banner != "" {
+			fmt.Fprint(stdout, banner+"\n")
+		}
+	}
 	fmt.Fprintf(stdout, "brigada %s\n", version.Version)
 	return 0
+}
+
+// detectCaps is logo.Detect; tests replace it to print as a terminal would.
+var detectCaps = logo.Detect
+
+// topHelp is the top-level usage, under the one-line logo when stdout is
+// a terminal.
+func topHelp(stdout io.Writer) string {
+	if caps := detectCaps(stdout); caps.TTY {
+		if mark := logo.String(logo.OneLine, caps); mark != "" {
+			return mark + "\n" + usage
+		}
+	}
+	return usage
 }
 
 func main() {
