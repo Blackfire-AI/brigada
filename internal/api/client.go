@@ -46,6 +46,12 @@ func NewClient(socketPath, token string) *Client {
 	}
 }
 
+// NewClientWithHTTPClient uses a supplied transport, including an in-process
+// handler transport. The HTTP client must route http://brigada to the API.
+func NewClientWithHTTPClient(client *http.Client, token string) *Client {
+	return &Client{http: client, token: token}
+}
+
 // Agent is one advertised agent as the client sends it (§5.1): an
 // (adapter, harness, model) combination with its family, account label
 // and the classes it can take. The account labels the login whose quota

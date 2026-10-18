@@ -31,6 +31,7 @@ Commands:
 
 	init            Set up this repository, or, in a folder that is not
 	                one, the repositories under it: probe, plan, confirm.
+	remove          Remove brigada from this repository; keep its history.
 	attach          Attach to this repo's foreman and chat (what a bare
 	                brigada runs).
 	ask <message>   Send the foreman a message without attaching.
@@ -114,6 +115,7 @@ type command struct {
 
 var commands = map[string]command{
 	"init":    {name: "init", run: runInit},
+	"remove":  {name: "remove", run: runRemove},
 	"attach":  {name: "attach", run: runAttach},
 	"ask":     {name: "ask", run: runAsk},
 	"hold":    {name: "hold", run: runHold, subcommands: holdCommands},

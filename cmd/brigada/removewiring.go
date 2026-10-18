@@ -1,0 +1,258 @@
+package main
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"github.com/Blackfire-AI/brigada/internal/engine"
+)
+
+// planRemoval reads the same paths as init, including a linked worktree's
+// shared exclude file. nil next means delete, only for this removal plan.
+func planRemoval(root string, deleteConfig bool) []wireFile {
+	files := planSteps(root, []wireStep{
+		{wiringMCPFile, removeMCPServer},
+		{wiringSettingsFile, func(d []byte, exists bool) ([]byte, string, error) {
+			return removeWiringHooks(d, exists, false)
+		}},
+		{wiringSharedSettingsFile, func(d []byte, exists bool) ([]byte, string, error) {
+			return removeWiringHooks(d, exists, true)
+		}},
+		{wiringSkillFile, func(d []byte, exists bool) ([]byte, string, error) {
+			if !exists {
+				return d, "unchanged", nil
+			}
+			if !bytes.Contains(d, []byte(wiringSkillMarker)) {
+				return nil, "", errors.New("no brigada marker; keeping your skill")
+			}
+			return nil, "removed", nil
+		}},
+		{engine.ProjectConfigPath, func(d []byte, exists bool) ([]byte, string, error) {
+			if exists && deleteConfig {
+				return nil, "removed", nil
+			}
+			return d, "unchanged", nil
+		}},
+	})
+	out, err := exec.Command("git", "-C", root, "rev-parse", "--git-path", "info/exclude").Output()
+	if err != nil {
+		return append(files, wireFile{rel: "git info/exclude", err: err})
+	}
+	path := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	exclude := planSteps(filepath.Dir(path), []wireStep{{filepath.Base(path), removeSettingsExclude}})[0]
+	exclude.rel = filepath.ToSlash(strings.TrimSpace(string(out)))
+	files = append(files, exclude)
+	return files
+}
+
+func removeSettingsExclude(d []byte, exists bool) ([]byte, string, error) {
+	var out []byte
+	for _, line := range bytes.SplitAfter(d, []byte("\n")) {
+		if string(bytes.TrimSuffix(bytes.TrimSuffix(line, []byte("\n")), []byte("\r"))) != "/"+wiringSettingsFile {
+			out = append(out, line...)
+		}
+	}
+	// Keep an existing exclude file, even if our line was its only content.
+	if out == nil {
+		out = []byte{}
+	}
+	return out, "removed", nil
+}
+
+func removeMCPServer(d []byte, exists bool) ([]byte, string, error) {
+	if !exists {
+		return d, "unchanged", nil
+	}
+	root, err := jsonRoot(d)
+	if err != nil {
+		return nil, "", err
+	}
+	mi := root.lookup("mcpServers")
+	if mi < 0 {
+		return d, "unchanged", nil
+	}
+	servers, err := jsonSub(d, root, mi, '{', "mcpServers")
+	if err != nil {
+		return nil, "", err
+	}
+	bi := servers.lookup("brigada")
+	if bi < 0 {
+		return d, "unchanged", nil
+	}
+	if len(servers.vals) == 1 {
+		if len(root.vals) == 1 {
+			return nil, "removed", nil
+		}
+		return jsonRemove(d, root, mi), "removed", nil
+	}
+	next := jsonRemove(d, servers, bi)
+	// Remove duplicate keys too: decoders would otherwise expose an old entry.
+	next, _, err = removeMCPServer(next, true)
+	return next, "removed", err
+}
+
+// removeWiringHooks uses init's exact-command migration, restricted to Stop
+// and yield for private settings. It also drops the emptied hooks wrapper.
+func removeWiringHooks(d []byte, exists, shared bool) ([]byte, string, error) {
+	if !exists {
+		return d, "unchanged", nil
+	}
+	old := d
+	for {
+		next, removed, err := removeWiringHook(d, shared)
+		if err != nil {
+			return nil, "", err
+		}
+		if !removed {
+			break
+		}
+		d = next
+	}
+	if bytes.Equal(old, d) {
+		return old, "unchanged", nil
+	}
+	root, _ := jsonRoot(d)
+	if hi := root.lookup("hooks"); hi >= 0 {
+		hooks, err := jsonSub(d, root, hi, '{', "hooks")
+		if err != nil {
+			return nil, "", err
+		}
+		if len(hooks.vals) == 0 {
+			d = jsonRemove(d, root, hi)
+		}
+	}
+	root, _ = jsonRoot(d)
+	if len(root.vals) == 0 {
+		return nil, "removed", nil
+	}
+	return d, "removed", nil
+}
+
+func removeWiringHook(d []byte, shared bool) ([]byte, bool, error) {
+	// The shared migration already removes exactly both legacy commands.
+	if shared {
+		return removeSharedHook(d)
+	}
+	root, err := jsonRoot(d)
+	if err != nil {
+		return nil, false, err
+	}
+	hi := root.lookup("hooks")
+	if hi < 0 {
+		return d, false, nil
+	}
+	hooks, err := jsonSub(d, root, hi, '{', "hooks")
+	if err != nil {
+		return nil, false, err
+	}
+	ei := hooks.lookup("Stop")
+	if ei < 0 {
+		return d, false, nil
+	}
+	list, err := jsonSub(d, hooks, ei, '[', "hooks.Stop")
+	if err != nil {
+		return nil, false, err
+	}
+	for gi, span := range list.vals {
+		if d[span.start] != '{' {
+			continue
+		}
+		group, _ := jsonParse(d, span.start)
+		ii := group.lookup("hooks")
+		if ii < 0 {
+			continue
+		}
+		inner, err := jsonSub(d, group, ii, '[', "hooks.Stop.hooks")
+		if err != nil {
+			return nil, false, err
+		}
+		for i, hook := range inner.vals {
+			if d[hook.start] != '{' {
+				continue
+			}
+			h, _ := jsonParse(d, hook.start)
+			ci := h.lookup("command")
+			if ci < 0 || !jsonEqual(d[h.vals[ci].start:h.vals[ci].end], hookYieldCommand) {
+				continue
+			}
+			if len(inner.vals) > 1 {
+				return jsonRemove(d, inner, i), true, nil
+			}
+			if len(list.vals) > 1 {
+				return jsonRemove(d, list, gi), true, nil
+			}
+			return jsonRemove(d, hooks, ei), true, nil
+		}
+	}
+	return d, false, nil
+}
+
+// Check all files before archiving or editing any file, and check each again
+// immediately before writing/deleting it, just as init does on writes.
+func checkRemoval(files []wireFile) error {
+	for _, f := range files {
+		if !f.changed() {
+			continue
+		}
+		if err := checkRemovalFile(f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkRemovalFile(f wireFile) error {
+	if f.root != "" {
+		rel, err := filepath.Rel(f.root, f.path)
+		if err != nil {
+			return err
+		}
+		if err := wiringSafePath(f.root, filepath.ToSlash(rel)); err != nil {
+			return err
+		}
+	}
+	if err := initSafeFile(f.path); err != nil {
+		return err
+	}
+	current, err := os.ReadFile(f.path)
+	if (f.exists && (err != nil || !bytes.Equal(current, f.old))) || (!f.exists && !os.IsNotExist(err)) {
+		return fmt.Errorf("%s changed after the plan was printed; rerun remove to review it", f.rel)
+	}
+	return nil
+}
+
+func applyRemoval(files []wireFile) error {
+	if err := checkRemoval(files); err != nil {
+		return err
+	}
+	for _, f := range files {
+		if !f.changed() {
+			continue
+		}
+		if err := checkRemovalFile(f); err != nil {
+			return err
+		}
+		if f.next != nil {
+			if err := writeInitFile(f.path, f.old, f.next, f.exists); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.Remove(f.path); err != nil {
+			return err
+		}
+		if f.rel == wiringSkillFile {
+			// Remove just the owned directory, and only if it is empty.
+			_ = os.Remove(filepath.Dir(f.path))
+		}
+	}
+	return nil
+}

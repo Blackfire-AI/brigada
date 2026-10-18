@@ -179,7 +179,13 @@ func (e *Engine) status(ctx context.Context, project int64, withText bool) (Stat
 		}
 		info.Pid = pid.Int64
 		info.StartedAt = started.String
-		rows, err := tx.Query("SELECT status, COUNT(*) FROM jobs WHERE project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) GROUP BY status")
+		query := "SELECT status, COUNT(*) FROM jobs WHERE project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)"
+		var args []any
+		if project != 0 {
+			query += " AND project_id = ?"
+			args = append(args, project)
+		}
+		rows, err := tx.Query(query+" GROUP BY status", args...)
 		if err != nil {
 			return fmt.Errorf("count jobs by status: %w", err)
 		}

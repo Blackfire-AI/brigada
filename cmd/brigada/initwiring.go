@@ -56,6 +56,7 @@ type hookGroup struct {
 // wireFile is one planned wiring change. err set means the file is damaged or
 // unsafe and is left alone; next is then nil.
 type wireFile struct {
+	root   string // safety boundary used when rechecking a removal
 	rel    string
 	path   string
 	old    []byte
@@ -65,7 +66,10 @@ type wireFile struct {
 	err    error
 }
 
-func (w wireFile) changed() bool { return w.err == nil && !bytes.Equal(w.old, w.next) }
+func (w wireFile) changed() bool {
+	return w.err == nil && (!bytes.Equal(w.old, w.next) ||
+		(w.exists && w.next == nil && w.state == "removed"))
+}
 
 // planWiring computes the Claude Code project-scope changes; it reads files
 // and writes nothing.
@@ -129,7 +133,7 @@ type wireStep struct {
 func planSteps(root string, steps []wireStep) []wireFile {
 	var files []wireFile
 	for _, s := range steps {
-		w := wireFile{rel: s.rel, path: filepath.Join(root, filepath.FromSlash(s.rel))}
+		w := wireFile{root: root, rel: s.rel, path: filepath.Join(root, filepath.FromSlash(s.rel))}
 		if w.err = wiringSafePath(root, s.rel); w.err == nil {
 			data, err := os.ReadFile(w.path)
 			switch {
