@@ -303,12 +303,16 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 			return "", fmt.Errorf("encode error: %w", err)
 		}
 	}
+	errorKind := ""
+	if c.Error != "" {
+		errorKind = c.ErrorKind
+	}
 	accrue := accrualFrom(job.LastLeased, now)
 	if _, err := tx.Exec(`UPDATE jobs SET status = ?, result = ?, done_lease = ?,
 		lease_expires_at = NULL, last_leased = NULL, queued_at = NULL,
 		leased_seconds = leased_seconds + ?, updated_at = ?,
-		check_result = COALESCE(NULLIF(?, ''), check_result)
-		WHERE id = ?`, status, string(result), leaseID, accrue, fmtTime(now), c.CheckResult, job.ID); err != nil {
+		check_result = COALESCE(NULLIF(?, ''), check_result), error_kind = ?
+		WHERE id = ?`, status, string(result), leaseID, accrue, fmtTime(now), c.CheckResult, errorKind, job.ID); err != nil {
 		return "", fmt.Errorf("finish job %d: %w", job.ID, err)
 	}
 	// The turn is over, and its lease-scoped foreman token with it

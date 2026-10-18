@@ -186,10 +186,11 @@ func TestReviewLimitCoolsTheReviewersAccountAndRedispatches(t *testing.T) {
 	}
 }
 
-// TestReviewLimitWithNoOtherReviewerParks: the same limit with no other
-// family's reviewer registered parks the task at needs_foreman, with the
-// limit as the reason, and the reviewer's account still cools.
-func TestReviewLimitWithNoOtherReviewerParks(t *testing.T) {
+// TestReviewLimitWithNoOtherReviewerWaits: the same limit with no other
+// family's reviewer registered requeues the review, which waits for the
+// limited account to come back; the account still cools and the task
+// stays at reviewing, since a review that could not run says nothing.
+func TestReviewLimitWithNoOtherReviewerWaits(t *testing.T) {
 	e := newEnv(t)
 	author := e.agented("author", "anthropic", "implement")
 	lone := e.agented("lone", "google", "implement", "review")
@@ -206,14 +207,24 @@ func TestReviewLimitWithNoOtherReviewerParks(t *testing.T) {
 	if _, _, cool := e.agentState(e.agentOf(lone)); cool != fmtTime(until) {
 		t.Errorf("reviewer cooling = %q, want %s", cool, fmtTime(until))
 	}
-	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
-		t.Errorf("task state = %q, want needs_foreman with no other reviewer", state)
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskReviewing {
+		t.Errorf("task state = %q, want reviewing with the review requeued", state)
 	}
-	if p, ok := e.eventPayloadOf(evReviewNoVerdict); !ok || !strings.Contains(p.Reason, "limit") {
-		t.Errorf("review_no_verdict payload = %+v (%t), want the limit named", p, ok)
+	if p, ok := e.eventPayloadOf(evReviewRetry); !ok || !strings.Contains(p.Reason, "limit") {
+		t.Errorf("review_retry payload = %+v (%t), want the limit named", p, ok)
 	}
-	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'review'", e.task); n != 1 {
-		t.Errorf("review jobs = %d, want the limited one alone", n)
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'review' AND status = 'queued'", e.task); n != 1 {
+		t.Errorf("queued review jobs = %d, want the requeued one", n)
+	}
+	// A poll while the account cools stamps the cooling hold, which keeps
+	// the queue TTL from failing the job over the wait.
+	e.clock.Advance(time.Hour)
+	if g := e.leaseAny(lone); g != nil {
+		t.Fatalf("leased %+v while the only reviewer cools", g)
+	}
+	e.clock.Advance(2 * time.Hour)
+	if g := e.leaseAny(lone); g == nil || g.Kind != KindReview {
+		t.Errorf("grant after the cooling = %+v, want the requeued review", g)
 	}
 }
 
