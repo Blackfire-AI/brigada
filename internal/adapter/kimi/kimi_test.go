@@ -47,6 +47,35 @@ func TestCommand(t *testing.T) {
 		wantArg []string // the arguments after the executable
 	}{
 		{
+			name:    "review uses the runner agent",
+			ad:      Adapter{ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
+			job:     adapter.Job{Prompt: prompt, Review: true},
+			wantExe: "kimi",
+			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--agent-file", "/runner/kimi-readonly.md"},
+		},
+		{
+			name:    "work keeps the normal agent",
+			ad:      Adapter{ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
+			job:     adapter.Job{Prompt: prompt},
+			wantExe: "kimi",
+			wantArg: []string{"-p", prompt, "--output-format", "stream-json"},
+		},
+		{
+			name:    "explicit agent wins for review",
+			ad:      Adapter{AgentFile: "custom.md", ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
+			job:     adapter.Job{Prompt: prompt, Review: true},
+			wantExe: "kimi",
+			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--agent-file", "custom.md"},
+		},
+		{
+			name:    "review resume keeps its bound agent",
+			ad:      Adapter{ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
+			job:     adapter.Job{Prompt: prompt, Review: true},
+			resume:  "review-session",
+			wantExe: "kimi",
+			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--session", "review-session"},
+		},
+		{
 			name:    "fresh run",
 			job:     adapter.Job{Prompt: prompt},
 			wantExe: "kimi",

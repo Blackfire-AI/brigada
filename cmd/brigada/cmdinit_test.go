@@ -229,7 +229,7 @@ func TestInitPromptDefaultsAndSkip(t *testing.T) {
 		want        string
 	}{
 		{
-			name: "blank uses menu defaults", stdin: "\n\n\n\n\nn\n",
+			name: "blank uses menu defaults", stdin: "\n\n\n\n\n\nn\n",
 			wantAgents:  []string{"claude    sonnet", "codex     CLI default", "kimi      CLI default"},
 			wantSkipped: []string{"opencode"},
 			want:        "Declined",
@@ -271,13 +271,93 @@ func TestInitPromptDefaultsAndSkip(t *testing.T) {
 	}
 }
 
+func TestInitKimiWriteOptIn(t *testing.T) {
+	for _, tc := range []struct {
+		name, answer string
+		write        bool
+	}{
+		{name: "Enter reviews only"},
+		{name: "no reviews only", answer: "n"},
+		{name: "yes allows writing", answer: "y", write: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			importRepo(t)
+			calls := fakeInitPATH(t, initHarnesses...)
+			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
+			// Skip Claude, pick Codex, pick Kimi, answer its writing question,
+			// then type an OpenCode model and a check. Distinct answers catch
+			// any question that consumes stdin in the wrong position.
+			input := "-\n\n\n" + tc.answer + "\nzai-coding-plan/glm-5.3\nprintf check-marker\nn\n"
+			code, out, errOut := initDo(t, state, input, "--signed-in", "claude,codex,kimi,opencode", "--tools", "none", "--no-wiring")
+			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
+				t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
+			}
+			warning := "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. As a reviewer it only reads.\n    Let kimi write code too, not only review? [y/N]:\n"
+			if !strings.Contains(out, "    Pick 1, or type a model id [1]:\n"+warning+"\n  opencode:") {
+				t.Fatalf("writing question is not right after Kimi model:\n%s", out)
+			}
+			if strings.Contains(out, "family: Moonshot (review only)") == tc.write {
+				t.Fatalf("incorrect Kimi classes after %q:\n%s", tc.answer, out)
+			}
+			for _, want := range []string{"opencode  zai-coding-plan/glm-5.3", "Check after every task: printf check-marker"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("stdin shifted; missing %q:\n%s", want, out)
+				}
+			}
+			if !tc.write && !strings.Contains(out, "kimi      reads files only; no shell") {
+				t.Errorf("missing read-only permissions:\n%s", out)
+			}
+			if strings.Contains(out, "ready") {
+				t.Errorf("claimed ready before apply:\n%s", out)
+			}
+			if _, err := os.Stat(state); !os.IsNotExist(err) {
+				t.Fatalf("declined init wrote state: %v", err)
+			}
+			data, err := os.ReadFile(calls)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+				if !strings.HasSuffix(line, " --help") && line != "opencode models" && line != "opencode auth list" {
+					t.Errorf("init ran a model or login: %q", line)
+				}
+			}
+		})
+	}
+}
+
+func TestInitExplicitKimiClassesStayAsGiven(t *testing.T) {
+	for _, classes := range []string{"", ",classes=review", ",classes=implement+answer"} {
+		t.Run(classes, func(t *testing.T) {
+			importRepo(t)
+			fakeInitPATH(t, "codex", "kimi")
+			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "n\n", "--agent", "harness=codex", "--agent", "harness=kimi"+classes, "--signed-in", "codex,kimi", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
+			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
+				t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
+			}
+			if strings.Contains(out, "Let kimi write") || strings.Contains(out, "kimi has no sandbox:") {
+				t.Fatalf("explicit agent got writing question:\n%s", out)
+			}
+			want := "family: Moonshot"
+			if classes == ",classes=review" {
+				want += " (review only)"
+			} else if classes != "" {
+				want += " (implement, answer only)"
+			}
+			if !strings.Contains(out, want+"\n") {
+				t.Errorf("explicit classes changed:\n%s", out)
+			}
+		})
+	}
+}
+
 func TestInitNonTerminalPrompts(t *testing.T) {
 	// Menus and the foreman choice replace free-form model questions; confirmed
 	// OpenCode authentication skips its Use question and Enter leaves it out.
 	importRepo(t)
 	wireGit(t, ".", "config", "core.excludesFile", os.DevNull)
 	fakeInitPATH(t, initHarnesses...)
-	code, out, err := initDo(t, testsupport.ShortStateDir(t), "y\n\ny\n\ny\n\n\n\nn\n", "--check", "true", "--tools", "none")
+	code, out, err := initDo(t, testsupport.ShortStateDir(t), "y\n\ny\n\ny\n\n\n\n\nn\n", "--check", "true", "--tools", "none")
 	if code != 1 || !strings.Contains(out, "Declined") || err != "" {
 		t.Fatalf("got %d\n%s\n%s", code, out, err)
 	}
@@ -288,6 +368,7 @@ func TestInitNonTerminalPrompts(t *testing.T) {
 		"    Pick 1 or -, or type a model id [1]:",
 		"    Use kimi? [y/N]:",
 		"    Pick 1, or type a model id [1]:",
+		"    Let kimi write code too, not only review? [y/N]:",
 		"    Pick 1-2 or -, or type provider/model [-]:",
 		"  Pick 1-2 [1]:",
 		"Write 5 files and start the runner? [y/N]",
@@ -439,7 +520,7 @@ func TestInitQuestionsBeforePlan(t *testing.T) {
 	// foreman line by its existing explanation rather than its shared label.
 	importRepo(t)
 	fakeInitPATH(t, initHarnesses...)
-	code, out, err := initDo(t, testsupport.ShortStateDir(t), "n\ny\n\ny\n\n-\ntrue\nnone\nn\n", "--no-wiring")
+	code, out, err := initDo(t, testsupport.ShortStateDir(t), "n\ny\n\ny\n\n\n-\ntrue\nnone\nn\n", "--no-wiring")
 	if code != 1 || err != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("got %d\n%s\n%s", code, out, err)
 	}
@@ -1021,7 +1102,7 @@ func TestInitInteractiveSteps(t *testing.T) {
 	}
 	// Pick Claude by number, accept CLI defaults, opt in to Kimi, leave
 	// OpenCode out by default, then accept the foreman and check suggestions.
-	code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "1\n\ny\n\n\n\n\nn\n", "--no-wiring")
+	code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "1\n\ny\n\n\n\n\n\nn\n", "--no-wiring")
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
@@ -1061,6 +1142,9 @@ Step 1 of 3: agents
        3  kimi-code/kimi-for-coding
        4  kimi-code/kimi-for-coding-highspeed
     Pick 1-4, or type a model id [1]:
+    kimi has no sandbox: when it writes code it can run any command on this
+    machine without asking. As a reviewer it only reads.
+    Let kimi write code too, not only review? [y/N]:
 
   opencode: signed in to 2 providers (opencode auth list)
     Which model should opencode run?
@@ -1151,8 +1235,8 @@ func TestInitUnconfirmedUseQuestions(t *testing.T) {
 		include, confirmed    bool
 	}{
 		{name: "Enter leaves out", input: "\n\n\n\n\nn\n", signedIn: "claude,codex"},
-		{name: "opt in and pick numbers", input: "\n\ny\n1\ny\n2\n\nn\n", signedIn: "claude,codex", include: true},
-		{name: "flag answers Use", input: "\n\n1\n2\n\nn\n", signedIn: "claude,codex,kimi,opencode", include: true, confirmed: true},
+		{name: "opt in and pick numbers", input: "\n\ny\n1\n\ny\n2\n\nn\n", signedIn: "claude,codex", include: true},
+		{name: "flag answers Use", input: "\n\n1\n\n2\n\nn\n", signedIn: "claude,codex,kimi,opencode", include: true, confirmed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)

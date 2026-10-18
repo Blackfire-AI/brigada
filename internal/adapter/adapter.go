@@ -57,6 +57,8 @@ type Adapter interface {
 type Job struct {
 	Prompt string
 	Model  string
+	// Review selects the harness's read-only review policy, where supported.
+	Review bool
 	// Effort is the reasoning-effort level for the run, one of the harness's
 	// accepted levels (ValidateEffort); empty adds nothing. An adapter whose
 	// CLI has no effort control refuses a non-empty one.

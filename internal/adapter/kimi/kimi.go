@@ -7,6 +7,7 @@ package kimi
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +35,10 @@ type Adapter struct {
 	// so the field is read only when the run is fresh.
 	AgentFile string
 
+	// ReadOnlyAgentFile is the runner-owned definition used for review jobs
+	// when AgentFile is unset. Work and fix jobs keep the CLI's normal agent.
+	ReadOnlyAgentFile string
+
 	// ExtraArgs are further flags the agent's configuration passes
 	// through, appended verbatim after the adapter's own. Empty adds
 	// nothing.
@@ -47,6 +52,13 @@ var _ adapter.Adapter = (*Adapter)(nil)
 // the agent's configuration sets no --model, and the adapter's answer
 // to it is no -m flag at all.
 const DefaultModel = "default"
+
+// ReadOnlyAgentDefinition uses Kimi Code's Markdown agent format:
+// https://moonshotai.github.io/kimi-code/en/customization/agents
+// The frontmatter includes its required description and an exact tool allowlist.
+//
+//go:embed readonly.md
+var ReadOnlyAgentDefinition string
 
 // Name implements adapter.Adapter: the harness this adapter drives,
 // which the runner's advertisement pairs it with (§5.1).
@@ -80,10 +92,14 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	if job.Model != "" && job.Model != DefaultModel {
 		args = append(args, "-m", job.Model)
 	}
+	agentFile := a.AgentFile
+	if agentFile == "" && job.Review {
+		agentFile = a.ReadOnlyAgentFile
+	}
 	if resumeSessionID != "" {
 		args = append(args, "--session", resumeSessionID)
-	} else if a.AgentFile != "" {
-		args = append(args, "--agent-file", a.AgentFile)
+	} else if agentFile != "" {
+		args = append(args, "--agent-file", agentFile)
 	}
 	args = append(args, a.ExtraArgs...)
 	cmd := exec.Command(binary, args...)

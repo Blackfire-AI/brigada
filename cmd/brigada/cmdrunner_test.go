@@ -8,15 +8,84 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Blackfire-AI/brigada/internal/adapter"
+	"github.com/Blackfire-AI/brigada/internal/adapter/kimi"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/store"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
+
+func TestRunnerKimiReviewAgentFile(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(strconv.FormatBool(explicit), func(t *testing.T) {
+			state := t.TempDir()
+			spec := agentSpec{harness: "kimi", classes: splitList(defaultClasses)}
+			if explicit {
+				spec.agentFile = filepath.Join(t.TempDir(), "custom.md")
+				if err := os.WriteFile(spec.agentFile, []byte("custom agent"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ads, _, err := resolveRunnerAgents(&runtime{stateDir: state}, []agentSpec{spec}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			file := filepath.Join(state, "runner", "kimi-readonly.md")
+			if _, err := os.Stat(file); !os.IsNotExist(err) {
+				t.Fatalf("resolving agents wrote the file: %v", err)
+			}
+			if err := writeKimiReviewAgentFiles(ads); err != nil {
+				t.Fatal(err)
+			}
+			if explicit {
+				if _, err := os.Stat(file); !os.IsNotExist(err) {
+					t.Fatalf("explicit agent caused default file write: %v", err)
+				}
+			} else {
+				data, err := os.ReadFile(file)
+				if err != nil || string(data) != kimi.ReadOnlyAgentDefinition {
+					t.Fatalf("review agent = %q, %v", data, err)
+				}
+				for _, want := range []string{"description:", "tools: [Read, Grep, Glob]", "disallowedTools: [Bash]", "You are a read-only reviewer"} {
+					if !strings.Contains(string(data), want) {
+						t.Errorf("agent missing %q", want)
+					}
+				}
+				info, err := os.Stat(file)
+				if err != nil || info.Mode().Perm() != 0600 {
+					t.Fatalf("review agent permissions: %v, %v", info, err)
+				}
+			}
+			ad := ads[0].(*kimi.Adapter)
+			ad.Binary = "/unused/kimi"
+			for _, review := range []bool{false, true} {
+				cmd, err := ad.Command(adapter.Job{Prompt: "p", Review: review}, t.TempDir(), "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				i := slices.Index(cmd.Args, "--agent-file")
+				want := spec.agentFile
+				if want == "" && review {
+					want = file
+				}
+				if want == "" {
+					if i >= 0 {
+						t.Fatalf("work got a review agent: %v", cmd.Args)
+					}
+				} else if i < 0 || i+1 >= len(cmd.Args) || cmd.Args[i+1] != want {
+					t.Fatalf("args = %v, want agent file %q", cmd.Args, want)
+				}
+			}
+		})
+	}
+}
 
 // syncBuffer is a bytes.Buffer a running goroutine writes to while the
 // test reads: the runner's startup line is read while the runner runs.

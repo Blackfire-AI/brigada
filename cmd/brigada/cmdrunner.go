@@ -93,6 +93,9 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		}
 		return usagef(stderr, "%v", err)
 	}
+	if err := writeKimiReviewAgentFiles(ads); err != nil {
+		return fail(stderr, err)
+	}
 
 	if code := ensureEngine(ctx, rt, noStart, stderr); code != 0 {
 		return code
@@ -357,7 +360,7 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 				}
 				spec.agentFile = abs
 			}
-			ad = &kimi.Adapter{AgentFile: spec.agentFile}
+			ad = &kimi.Adapter{AgentFile: spec.agentFile, ReadOnlyAgentFile: filepath.Join(runnerStateDir(rt), "kimi-readonly.md")}
 		case "codex":
 			if spec.agentFile != "" {
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the codex harness takes none")
@@ -399,6 +402,27 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 	}
 
 	return ads, adverts, nil
+}
+
+// writeKimiReviewAgentFiles runs once at runner startup, never while init is
+// displaying its plan or per job. Explicit agent files remain caller-owned.
+func writeKimiReviewAgentFiles(ads []adapter.Adapter) error {
+	for _, ad := range ads {
+		k, ok := ad.(*kimi.Adapter)
+		if !ok || k.AgentFile != "" {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(k.ReadOnlyAgentFile), 0700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(k.ReadOnlyAgentFile, []byte(kimi.ReadOnlyAgentDefinition), 0600); err != nil {
+			return err
+		}
+		if err := os.Chmod(k.ReadOnlyAgentFile, 0600); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func runnerSpecStrings(specs []agentSpec) []string {
