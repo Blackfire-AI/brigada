@@ -5,10 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -64,7 +61,15 @@ func runStop(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stdout, "no runner running")
 		}
 	default:
-		if pid, removed := removeStaleRunnerRecord(dir); removed {
+		pid, cleared, err := runnerstate.ClearStale(dir)
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			fmt.Fprintf(stdout, "a runner is starting (pid %d); run brigada stop again\n", pid)
+			return 0
+		}
+		if err != nil {
+			return fail(stderr, err)
+		}
+		if cleared {
 			fmt.Fprintf(stdout, "removed the stale runner record (pid %d); no runner running\n", pid)
 		} else {
 			fmt.Fprintln(stdout, "no runner running")
@@ -116,24 +121,4 @@ func terminate(ctx context.Context, pid int, holds func() bool) (bool, error) {
 		}
 	}
 	return true, nil
-}
-
-// removeStaleRunnerRecord clears the pid and metadata a dead runner left
-// behind. The lock file stays, emptied: removing it could split two
-// starters across two files. It reports the stale pid and whether there was
-// any record at all.
-func removeStaleRunnerRecord(dir string) (int, bool) {
-	lock := filepath.Join(dir, "runner.lock")
-	data, _ := os.ReadFile(lock)
-	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
-	removed := false
-	if err := os.Remove(filepath.Join(dir, "runner.json")); err == nil {
-		removed = true
-	}
-	if len(strings.TrimSpace(string(data))) > 0 {
-		if err := os.Truncate(lock, 0); err == nil {
-			removed = true
-		}
-	}
-	return pid, removed
 }
