@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -297,7 +298,7 @@ func TestInitCodexCatalogPicks(t *testing.T) {
 				t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 			}
 			menu := strings.Split(strings.Split(out, "Which model should codex run?\n")[1], "\nStep 2")[0]
-			if strings.Contains(out, "never-print-me") || !strings.Contains(menu, "your codex default (~/.codex/config.toml);") || !strings.Contains(menu, "1 more from `codex debug models` aren't listed:") || !strings.Contains(menu, "Pick 1-3 or -, or type a model id [1]:") {
+			if strings.Contains(out, "never-print-me") || !strings.Contains(menu, "(~/.codex/config.toml);") || !regexp.MustCompile(`(?m)default$`).MatchString(menu) || !strings.Contains(menu, "1 more from `codex debug models` aren't listed:") || !strings.Contains(menu, "Pick 1-3 or -, or type a model id [1]:") {
 				t.Fatalf("unexpected menu:\n%s", menu)
 			}
 			for _, line := range strings.Split(out, "\n") {

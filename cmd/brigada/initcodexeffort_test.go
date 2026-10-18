@@ -45,9 +45,9 @@ func TestInitCodexUserEffortDefault(t *testing.T) {
 			if err != nil || effort != "" {
 				t.Fatalf("pick = %q, %v", effort, err)
 			}
-			wantNote := "codex's default for this model"
+			wantNote := "default"
 			if tc.wantGPT5 == "high" {
-				wantNote = "your codex default (" + path + ")"
+				wantNote = "(" + path + ") default"
 			}
 			compact := strings.Join(strings.Fields(out.String()), "")
 			if want := strings.Join(strings.Fields(tc.wantGPT5+" "+wantNote), ""); !strings.Contains(compact, want) {
@@ -62,27 +62,19 @@ func TestInitCodexUserEffortDefault(t *testing.T) {
 	}
 }
 
-func TestInitCurrentTagComesFirst(t *testing.T) {
-	for _, tc := range []struct{ note, want string }{
-		{"", "current"},
-		{"Latest workhorse model for coding and everyday work.", "current; Latest workhorse model for coding and everyday work."},
-	} {
-		if got := initCurrentNote(tc.note); got != tc.want {
-			t.Errorf("initCurrentNote(%q) = %q, want %q", tc.note, got, tc.want)
-		}
-	}
+func TestInitCurrentTagMovesToRowEnd(t *testing.T) {
 	source := initModelSource{entries: []initModelEntry{
 		{id: 1, name: "a", value: "a", note: "Ends with a period."},
 		{id: 2, name: "b", value: "b"},
 	}}
 	got := initCurrentModel(source, agentSpec{harness: "claude", model: "a"})
-	if got.entries[0].note != "current; Ends with a period." || got.defaultID != 1 {
+	if got.entries[0].note != "Ends with a period." || !got.entries[0].isCurrent || got.defaultID != 1 {
 		t.Errorf("model note = %q, default %d", got.entries[0].note, got.defaultID)
 	}
-	if source.entries[0].note != "Ends with a period." {
+	if source.entries[0].note != "Ends with a period." || source.entries[0].isCurrent {
 		t.Errorf("initCurrentModel changed its input: %q", source.entries[0].note)
 	}
-	if got = initCurrentModel(source, agentSpec{harness: "claude", model: "b"}); got.entries[1].note != "current" {
+	if got = initCurrentModel(source, agentSpec{harness: "claude", model: "b"}); got.entries[1].note != "" || !got.entries[1].isCurrent {
 		t.Errorf("bare note = %q", got.entries[1].note)
 	}
 
@@ -92,7 +84,7 @@ func TestInitCurrentTagComesFirst(t *testing.T) {
 	if _, err := initPickEffort(&out, "codex", entry, ask, "high"); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"low   codex's default for this model\n", "high  current\n"} {
+	for _, want := range []string{"low   default\n", "high  current\n"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("effort menu lacks %q:\n%s", want, out.String())
 		}
@@ -101,7 +93,7 @@ func TestInitCurrentTagComesFirst(t *testing.T) {
 	if _, err := initPickEffort(&out, "codex", entry, ask, "low"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "low   current; codex's default for this model\n") {
+	if !strings.Contains(out.String(), "low   default current\n") {
 		t.Errorf("effort menu current tag:\n%s", out.String())
 	}
 }

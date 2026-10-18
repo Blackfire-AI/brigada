@@ -52,6 +52,7 @@ func probeHarness(ctx context.Context, harness string) harnessProbe {
 	if err != nil {
 		if ctx.Err() == nil && strings.Contains(strings.ToLower(string(out)), "not logged in") {
 			p.status = "not signed in"
+			p.checked = true
 		}
 		p.evidence += "; not authenticated or status unavailable; user confirmation required"
 		return p
@@ -62,6 +63,7 @@ func probeHarness(ctx context.Context, harness string) harnessProbe {
 			LoggedIn bool `json:"loggedIn"`
 		}
 		if json.Unmarshal(out, &status) == nil {
+			p.checked = true
 			p.signedIn = status.LoggedIn
 			p.status = "not signed in"
 		}
@@ -70,6 +72,7 @@ func probeHarness(ctx context.Context, harness string) harnessProbe {
 		if strings.Contains(strings.ToLower(string(out)), "not logged in") {
 			p.status = "not signed in"
 		}
+		p.checked = p.signedIn || p.status == "not signed in"
 	}
 	if p.signedIn {
 		p.status = "signed in"
