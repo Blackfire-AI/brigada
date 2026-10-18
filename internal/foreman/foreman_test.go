@@ -43,6 +43,7 @@ func TestInstructionsShipped(t *testing.T) {
 		"needs_help",
 		"## Reporting",
 		"merging is the user's, not yours",
+		"needs_foreman waits for you alone", "nothing retries it on its own",
 		"hold_acquire", "decision_note", "hold_yield", "foreman_busy", "stay read-only",
 	} {
 		if !strings.Contains(got, want) {

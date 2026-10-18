@@ -3,6 +3,7 @@ package engine
 import (
 	"database/sql"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -240,20 +241,26 @@ func TestStatusNeedsYouReasonsFromTheLatestParkingEvent(t *testing.T) {
 		reasons[it.ID] = it.Reason
 	}
 	want := map[int64]string{
-		failedTask:    "the adapter died",
-		helpTask:      "which API should the client call?",
-		checkTask:     "FAIL TestBoom the frobnicator was off",
-		changesTask:   "the task's review_rounds are spent: the frob went boom",
-		noVerdictTask: "no verdict in the review result",
-		twiceTask:     "the latest word",
+		failedTask:  "the adapter died",
+		helpTask:    "which API should the client call?",
+		checkTask:   "FAIL TestBoom the frobnicator was off",
+		changesTask: "the task's review_rounds are spent: the frob went boom",
+		twiceTask:   "the latest word",
 	}
 	for id, wantReason := range want {
 		if got := reasons[id]; got != wantReason {
 			t.Errorf("reason of task %d = %q, want %q", id, got, wantReason)
 		}
 	}
-	if len(reasons) != len(want)+1 {
-		t.Errorf("needs you holds %d entries, want %d: %v", len(reasons), len(want)+1, reasons)
+	// The spent review retry says plainly that the task is parked and
+	// waits for the foreman, and names both reviews of the cycle.
+	wantParked := "task " + strconv.FormatInt(noVerdictTask, 10) + " is parked (needs_foreman): its review retry is spent"
+	if got := reasons[noVerdictTask]; !strings.HasPrefix(got, wantParked) ||
+		!strings.Contains(got, "reviewer/google-1: thin approve") || !strings.Contains(got, "spare/meta-1: no verdict") {
+		t.Errorf("reason of the spent-retry task = %q, want it to start %q and name both reviews", got, wantParked)
+	}
+	if len(reasons) != len(want)+2 {
+		t.Errorf("needs you holds %d entries, want %d: %v", len(reasons), len(want)+2, reasons)
 	}
 	if got := reasons[longTask]; len(got) > needsYouReasonLimit || strings.Contains(got, "\n") {
 		t.Errorf("the long reason = %q (%d bytes), want one line within %d bytes", got, len(got), needsYouReasonLimit)

@@ -57,8 +57,8 @@ the worker, or leave the task whole.
 ## Answer questions soon, restart what cannot proceed
 
 A worker that cannot proceed parks its task and asks its question
-through `needs_help`; the task waits for you alone, so answer it with
-`answer` soon. The answer resumes the worker's own session verbatim.
+through `needs_help`. Any task in needs_foreman waits for you alone and
+nothing retries it on its own: act soon. `answer` resumes the worker's session verbatim.
 
 `task_restart` starts a parked task over on a new branch from its base,
 with your note (what went wrong, what to avoid) given verbatim. Use it for
