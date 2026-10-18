@@ -110,6 +110,25 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	reader := bufio.NewReader(projectStdin)
 	canAsk := !*yes && !*probe
+	var saved map[string]agentSpec
+	if canAsk && len(agents.specs) == 0 {
+		lines, err := runnerstate.LoadAgents(runnerStateDir(rt))
+		if err != nil {
+			return fail(stderr, err)
+		}
+		if lines != nil {
+			var choices agentSpecs
+			for _, line := range lines {
+				if err := choices.Set(line); err != nil {
+					return fail(stderr, fmt.Errorf("saved agents: %w", err))
+				}
+			}
+			saved = make(map[string]agentSpec)
+			for _, spec := range choices.specs {
+				saved[spec.harness] = spec
+			}
+		}
+	}
 	if canAsk {
 		fmt.Fprint(stdout, "brigada runs coding tasks on the agent CLIs you are signed in to. A foreman\n(an agent) turns your request into a plan of tasks; workers (other agents)\nwrite the code in their own git worktrees; your check command tests it; and\nan agent of a different model family reviews it. Three short steps follow.\nNothing is written or started until you confirm at the end.\n\n")
 	}
@@ -157,6 +176,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			source = initKimiModels(ctx)
 		case "opencode":
 			source = initOpenCodeModels(ctx)
+		}
+		if spec, ok := saved[h]; ok {
+			source = initCurrentModel(source, spec)
 		}
 		sources[h] = source
 		probes[h] = source.signIn
@@ -237,7 +259,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				}
 				printInitWrapped(stdout, prefix, strings.Repeat(" ", utf8.RuneCountInString(prefix)), note)
 			}
-			if h != "kimi" {
+			if h != "kimi" || saved != nil {
 				fmt.Fprintf(stdout, "       -  don't use %s\n", h)
 			}
 			if sources[h].unknownCount > 0 {
@@ -248,14 +270,16 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				printInitWrapped(stdout, "    ", "    ", fmt.Sprintf("%d more from `%s` aren't listed: brigada can't tell their model family, which it needs to pick reviewers.", sources[h].unknownCount, command))
 			}
 			defaultAnswer := "-"
-			if len(entries) > 0 && h != "opencode" {
+			_, wasUsed := saved[h]
+			if len(entries) > 0 && (h != "opencode" || wasUsed) &&
+				(saved == nil || wasUsed) {
 				defaultAnswer = "1"
 				if sources[h].defaultID > 0 {
 					defaultAnswer = strconv.Itoa(sources[h].defaultID)
 				}
 			}
 			pick := initPickRange(len(entries))
-			if h != "kimi" {
+			if h != "kimi" || saved != nil {
 				if pick != "" {
 					pick += " or "
 				}
@@ -293,21 +317,44 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				}
 				classes := splitList(defaultClasses)
 				entry := initPickedModel(h, model, sources)
-				effort, err := initPickEffort(stdout, h, entry, askLine)
+				var currentEffort []string
+				previous, hadPrevious := saved[h]
+				if hadPrevious && previous.model == model {
+					currentEffort = []string{previous.effort}
+				}
+				effort, err := initPickEffort(
+					stdout, h, entry, askLine, currentEffort...)
 				if err != nil {
 					return fail(stderr, err)
 				}
 				if h == "kimi" {
 					fmt.Fprint(stdout, "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. As a reviewer it only reads.\n")
-					answer, err := ask("    Let kimi write code too, not only review? [y/N]: ", "--agent harness=kimi,classes=review (or implement+review+answer to allow writing)")
+					writes := hadPrevious &&
+						slices.Contains(previous.classes, "implement")
+					defaultAnswer := "y/N"
+					if writes {
+						defaultAnswer = "Y/n"
+					}
+					answer, err := ask("    Let kimi write code too, not only review? ["+defaultAnswer+"]: ", "--agent harness=kimi,classes=review (or implement+review+answer to allow writing)")
 					if err != nil {
 						return fail(stderr, err)
 					}
-					if !strings.EqualFold(answer, "y") && !strings.EqualFold(answer, "yes") {
+					if answer == "" && hadPrevious {
+						classes = slices.Clone(previous.classes)
+					} else if !strings.EqualFold(answer, "y") &&
+						!strings.EqualFold(answer, "yes") {
 						classes = []string{"review"}
 					}
 				}
-				agents.specs = append(agents.specs, agentSpec{harness: h, model: model, effort: effort, classes: classes})
+				spec := agentSpec{harness: h, classes: classes}
+				if hadPrevious {
+					spec = previous
+					if h == "kimi" {
+						spec.classes = classes
+					}
+				}
+				spec.model, spec.effort = model, effort
+				agents.specs = append(agents.specs, spec)
 				break
 			}
 		}
@@ -574,8 +621,21 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				files++
 			}
 		}
-		_, running, _ := runnerstate.Running(runnerStateDir(rt))
-		apply, err := confirm(initApplyPrompt(files, running), "--yes to apply the displayed plan")
+		rec, running, err := runnerstate.Running(runnerStateDir(rt))
+		if err != nil {
+			return fail(stderr, err)
+		}
+		prompt := initApplyPrompt(files, running)
+		if running && initAgentsDiffer(rec, adverts, usable) {
+			noun := "files"
+			if files == 1 {
+				noun = "file"
+			}
+			prompt = fmt.Sprintf(
+				"Write %d %s and restart the runner with the new agents?",
+				files, noun)
+		}
+		apply, err := confirm(prompt, "--yes to apply the displayed plan")
 		if err != nil {
 			return fail(stderr, err)
 		}
@@ -594,6 +654,10 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	if err := applyWiring(wiring); err != nil {
 		return partial(err)
+	}
+	if err := runnerstate.SaveAgents(
+		runnerStateDir(rt), runnerSpecStrings(usable)); err != nil {
+		return partial(fmt.Errorf("save agent choices: %w", err))
 	}
 	written := 0
 	if !exists || !bytes.Equal(old, proposed) {
@@ -644,6 +708,22 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil {
 		return partial(fmt.Errorf("project registered and imported, but runner startup failed: %w", err))
 	}
+	if result.Existing && initAgentsDiffer(result.Record, adverts, usable) {
+		if _, err := terminateRunner(
+			ctx, runnerStateDir(rt), result.Record); err != nil {
+			return partial(fmt.Errorf("stop runner for new agents: %w", err))
+		}
+		result, err = lifecycle.EnsureRunner(ctx, lifecycle.RunnerStartOptions{
+			StateDir: rt.stateDir, ConfigPath: rt.configForStart(),
+			Binary: initBinary, Args: runnerArgs,
+		})
+		if err != nil {
+			return partial(fmt.Errorf("restart runner: %w", err))
+		}
+		if result.Existing && initAgentsDiffer(result.Record, adverts, usable) {
+			return partial(fmt.Errorf("another runner started with different agents; rerun init"))
+		}
+	}
 	agentsMatch := true
 	var done strings.Builder
 	done.WriteString("Done: ")
@@ -660,9 +740,6 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if result.Record.Agents == nil {
 			agentsMatch = false
 			difference = "existing agents unavailable; cannot compare to chosen ones"
-		} else if !sameInitAgents(result.Record.Agents, adverts) || (result.Record.Specs != nil && !sameInitSpecs(result.Record.Specs, runnerSpecStrings(usable))) {
-			agentsMatch = false
-			difference = "agents differ from the chosen ones; existing agents kept"
 		}
 		fmt.Fprintf(&done, " Runner already running (pid %d); no second runner started; %s.", result.Record.PID, difference)
 	} else {
@@ -675,11 +752,14 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	} else {
 		done.WriteString(" Project configured; inspect the existing runner agents above before sending work.")
 	}
-	fmt.Fprintln(stdout, done.String())
+	printInitWrapped(stdout, "", "  ", done.String())
 	fmt.Fprintln(stdout, "Next:")
 	step := 1
 	if !*noWiring && probes["claude"].installed {
-		fmt.Fprintf(stdout, "  %d. Open Claude Code here (`claude`), approve the brigada MCP server when asked, and say what you want built. Your session plans; you approve the plan.\n", step)
+		printInitWrapped(stdout, fmt.Sprintf("  %d. ", step), "     ",
+			"Open Claude Code here (`claude`), approve the brigada MCP server "+
+				"when asked, and say what you want built. Your session plans; "+
+				"you approve the plan.")
 		step++
 	}
 	fmt.Fprintf(stdout, "  %d. Or, without a session: brigada ask \"what you want built\"\n", step)
@@ -718,7 +798,32 @@ func initPickedModel(harness, model string, sources map[string]initModelSource) 
 	return entry
 }
 
-func initPickEffort(w io.Writer, harness string, entry initModelEntry, ask func(string, string) (string, error)) (string, error) {
+// Use the numbered menu's defaultID for saved models, including models no
+// longer returned by the CLI's catalog.
+func initCurrentModel(source initModelSource, spec agentSpec) initModelSource {
+	source.entries = slices.Clone(source.entries)
+	index := slices.IndexFunc(source.entries, func(entry initModelEntry) bool {
+		return entry.value == spec.model
+	})
+	if index < 0 {
+		entry := initPickedModel(spec.harness, spec.model,
+			map[string]initModelSource{spec.harness: source})
+		entry.value = spec.model
+		entry.id = len(source.entries) + 1
+		source.entries = append(source.entries, entry)
+		index = len(source.entries) - 1
+	}
+	entry := &source.entries[index]
+	if entry.note != "" {
+		entry.note += "; "
+	}
+	entry.note += "current"
+	source.defaultID = entry.id
+	return source
+}
+
+func initPickEffort(w io.Writer, harness string, entry initModelEntry,
+	ask func(string, string) (string, error), saved ...string) (string, error) {
 	if harness == "kimi" {
 		if entry.defaultEffort != "" {
 			printInitWrapped(w, "    Effort: ", "    ", entry.defaultEffort+", kimi's own setting for this model (change it in ~/.kimi-code/config.toml; brigada can't set it per run).")
@@ -726,6 +831,9 @@ func initPickEffort(w io.Writer, harness string, entry initModelEntry, ask func(
 		return "", nil
 	}
 	if len(entry.effortLevels) < 2 {
+		if len(saved) > 0 {
+			return saved[0], nil
+		}
 		return "", nil
 	}
 	levels := entry.effortLevels
@@ -733,6 +841,12 @@ func initPickEffort(w io.Writer, harness string, entry initModelEntry, ask func(
 	if defaultIndex < 0 {
 		levels = append([]string{"default"}, levels...)
 		defaultIndex = 0
+	}
+	pickIndex := defaultIndex
+	if len(saved) > 0 && saved[0] != "" {
+		if index := slices.Index(levels, saved[0]); index >= 0 {
+			pickIndex = index
+		}
 	}
 	printInitWrapped(w, "    ", "    ", "How hard should "+initMenuModelName(entry)+" think? More effort gives better results on hard tasks and uses more of your plan's limits.")
 	width := 0
@@ -747,6 +861,12 @@ func initPickEffort(w io.Writer, harness string, entry initModelEntry, ask func(
 				note += " for this model"
 			}
 		}
+		if len(saved) > 0 && i == pickIndex {
+			if note != "" {
+				note += "; "
+			}
+			note += "current"
+		}
 		prefix := fmt.Sprintf("      %2d  %-*s", i+1, width, level)
 		if note != "" {
 			prefix += "  "
@@ -757,11 +877,15 @@ func initPickEffort(w io.Writer, harness string, entry initModelEntry, ask func(
 	}
 	flags := "--agent harness=" + harness + ",effort=LEVEL"
 	for attempt := 0; attempt < 3; attempt++ {
-		answer, err := ask(fmt.Sprintf("    Pick %s [%d]: ", initPickRange(len(levels)), defaultIndex+1), flags)
+		answer, err := ask(fmt.Sprintf("    Pick %s [%d]: ", initPickRange(len(levels)), pickIndex+1), flags)
 		if err != nil {
 			return "", err
 		}
 		if answer == "" {
+			if len(saved) > 0 && saved[0] != "" &&
+				levels[pickIndex] == saved[0] {
+				return saved[0], nil
+			}
 			return "", nil
 		}
 		index := slices.Index(levels, answer)
@@ -1092,4 +1216,12 @@ func sameInitSpecs(a, b []string) bool {
 	slices.Sort(a)
 	slices.Sort(b)
 	return slices.Equal(a, b)
+}
+
+func initAgentsDiffer(rec runnerstate.Record, agents []api.Agent,
+	specs []agentSpec) bool {
+	if rec.Specs != nil && !sameInitSpecs(rec.Specs, runnerSpecStrings(specs)) {
+		return true
+	}
+	return rec.Agents != nil && !sameInitAgents(rec.Agents, agents)
 }
