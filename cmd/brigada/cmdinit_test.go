@@ -919,7 +919,8 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 	assertInitSavedAgents(t, state, rec.Specs)
 	// Confirm the same prompt and exercise stop's real SIGTERM/lock wait.
 	code, out, err = initDo(t, state, "\ny\n", interactive...)
-	if code != 0 || !strings.Contains(out, "Detached runner started") {
+	if code != 0 || !strings.Contains(out, "Runner restarted with the new agents") ||
+		strings.Contains(out, "Detached runner started") {
 		t.Fatalf("differing agents: %d\n%s\n%s", code, out, err)
 	}
 	again, live, e = runnerstate.Running(filepath.Join(state, "runner"))
@@ -943,7 +944,7 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 	}
 	args[2] = "harness=claude,model=opus,account=work,effort=low"
 	code, out, err = initDo(t, state, "", args...)
-	if code != 0 || !strings.Contains(out, "Detached runner started") {
+	if code != 0 || !strings.Contains(out, "Runner restarted with the new agents") {
 		t.Fatalf("--yes restart: %d\n%s\n%s", code, out, err)
 	}
 	afterYes, live, e := runnerstate.Running(filepath.Join(state, "runner"))

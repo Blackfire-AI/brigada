@@ -86,7 +86,7 @@ func TestConfigSavedAgentsAndRunningRunnerOutsideRepo(t *testing.T) {
 		"This project: run inside a repository brigada knows (brigada init)",
 		"This machine (",
 		"edit the file)",
-		"notify = none", "state_dir = file-state", "caps.global = 0",
+		"notify = none", "caps.global = 0",
 		"caps.account.work = 3", "caps.model.opus = 2", "cost.claude/opus = 2",
 		"tools.claude/sonnet = none", "idle_minutes = 30 (default)",
 		"task_auto_retry = true (default)", "headroom = true (default)",
@@ -94,7 +94,6 @@ func TestConfigSavedAgentsAndRunningRunnerOutsideRepo(t *testing.T) {
 		"snapshot_dir = none (default)", "caps.plan = no cap (default)",
 		"caps.runner = no cap (default)", "caps.account.<label> = no cap (default)",
 		"caps.model.<model> = no cap (default)", "cost.<harness>/<model> = 1 (default)",
-		"tools.claude/<model> = Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*) (default)",
 	} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -102,6 +101,12 @@ func TestConfigSavedAgentsAndRunningRunnerOutsideRepo(t *testing.T) {
 	}
 	// Long unbroken paths can wrap in the middle of an identifier.
 	compact := strings.Join(strings.Fields(out), "")
+	if want := "state_dir=" + initHomePath(state) + "(--state-dir)"; !strings.Contains(compact, want) {
+		t.Errorf("state_dir does not show the directory in use, want %q in:\n%s", want, out)
+	}
+	if strings.Contains(compact, "file-state") {
+		t.Errorf("state_dir shows the config file's value despite --state-dir:\n%s", out)
+	}
 	for _, path := range []string{filepath.Join(dir, "agents"), config} {
 		if !strings.Contains(compact, path) {
 			t.Errorf("missing location %q in:\n%s", path, out)
@@ -178,8 +183,8 @@ func TestConfigProjectProvenance(t *testing.T) {
 		"claude sonnet effort: high writes code, reviews",
 		"Foreman (change: brigada project foreman --harness H --model M [--effort E])",
 		"claude/sonnet@high", "This project (example.invalid/imported)",
-		"check: uv run pytest from .brigada/project.yaml",
-		"approval limit: 7 tasks set by hand", "setup: make setup set by hand",
+		"default_check: uv run pytest from .brigada/project.yaml",
+		"approval_max_tasks: 7 set by hand", "setup: make setup set by hand",
 		"approval_classes: implement+review+answer default",
 		"change: edit .brigada/project.yaml, then brigada project import",
 		"set by hand/local only: brigada project set key=value",
@@ -198,7 +203,7 @@ func TestConfigProjectProvenance(t *testing.T) {
 	}
 	do("project", "set", "approval_max_tasks=")
 	out = configDo(t, ctx, "--state-dir", state)
-	if !strings.Contains(out, "approval limit: 5 tasks default") {
+	if !strings.Contains(out, "approval_max_tasks: 5 default") {
 		t.Fatalf("reset approval limit did not show the default:\n%s", out)
 	}
 	if _, err := client.ArchiveProject(ctx, importOrigin, false); err != nil {
@@ -251,8 +256,8 @@ func TestConfigProjectOutput(t *testing.T) {
 	for _, want := range []string{
 		"Foreman (change: brigada project foreman --harness H --model M\n         [--effort E])\n  claude/sonnet@high\n",
 		"This project (github.com/example/app)\n",
-		"  check: uv run pytest from .brigada/project.yaml\n",
-		"  approval limit: 5 tasks default\n",
+		"  default_check: uv run pytest from .brigada/project.yaml\n",
+		"  approval_max_tasks: 5 default\n",
 		"  setup: make setup set by hand\n",
 		"  change: edit .brigada/project.yaml, then brigada project import\n",
 	} {
