@@ -106,36 +106,33 @@
 
   [90m-> change later: .brigada/project.yaml: default_check; brigada project import[0m
 
-Plan
-  Agents:
-    claude    sonnet (default)                   Anthropic    writes code, reviews
-    codex     gpt-6.1-sol (default)              OpenAI       writes code, reviews
-    kimi      kimi-code/k3 (default)             Moonshot     reviews only
-    opencode  zai-coding-plan/glm-5.3 (default)  Zhipu (GLM)  writes code, reviews
-  Reviews: 4 model families, so every task can get a reviewer of another one.
-  Foreman: claude/sonnet
-  Check: uv run pytest (init doesn't run it; change it later in .brigada/project.yaml)
-  What workers may do:
+[1m== Plan[0m
+  [1mAgents:[0m
+    claude    sonnet                   [90mAnthropic[0m    code + review
+    codex     gpt-6.1-sol              [90mOpenAI[0m       code + review
+    kimi      kimi-code/k3             [90mMoonshot[0m     review only
+    opencode  zai-coding-plan/glm-5.3  [90mZhipu (GLM)[0m  code + review
+  [1mReviews:[0m 4 model families, so every task can get a reviewer of another one.
+  [1mForeman:[0m claude/sonnet
+  [1mCheck:[0m uv run pytest (init doesn't run it; change it later in .brigada/project.yaml)
+  [1mWhat workers may do:[0m
     claude    edit files; run only: uv run pytest
     codex     edit files and run commands inside codex's sandbox
     opencode  edit files; no commands
-  Files in this repository (brigada never commits them):
-    .brigada/project.yaml                    new  the settings above
-    .mcp.json                                new  lets Claude Code here use brigada (Claude Code
-                                                  asks you to approve it)
-    .claude/settings.local.json              new  private, kept out of git: when your Claude turn
+  [1mFiles[0m in this repository (brigada never commits them):
+    [32mnew[0m  .brigada/project.yaml                    [90mthe settings above[0m
+    [32mnew[0m  .mcp.json                                [90mlets Claude Code here use brigada (Claude Code
+                                                  asks you to approve it)[0m
+    [32mnew[0m  .claude/settings.local.json              [90mprivate, kept out of git: when your Claude turn
                                                   ends, brigada's foreman picks up what happened
-                                                  meanwhile
-    .claude/skills/brigada-foreman/SKILL.md  new  rules for your Claude session
-    (show full contents: --verbose)
-  Codex, optional: to plan from your own Codex session, run once yourself:
-    codex mcp add brigada-foreman -- brigada mcp --foreman
-  In the background: a runner starts now and keeps going (log: ~/.local/state/brigada/runner.log;
-    stop it with: brigada stop). The engine starts when needed and stops after 30 idle minutes.
+                                                  meanwhile[0m
+    [32mnew[0m  .claude/skills/brigada-foreman/SKILL.md  [90mrules for your Claude session[0m
+    [90m(show full contents: --verbose)[0m
+  [1mCodex[0m, optional: to plan from your own Codex session, run once yourself:
+    [36mcodex mcp add brigada-foreman -- brigada mcp --foreman[0m
+  [1mIn the background:[0m a runner starts now and keeps going (log: ~/.local/state/brigada/runner.log;
+    stop it with: [36mbrigada stop[0m). The engine starts when needed and stops after 30 idle minutes.
+    [36mbrigada config[0m[90m shows every setting later[0m
 
-To change later: brigada init (agents, models, effort),
-  brigada project foreman (foreman), .brigada/project.yaml (check),
-  brigada config (see everything).
-
-[1mWrite 4 files and start the runner? [0m[36m[y/N][0m[1m[0m
+[1mWrite 4 files and start the runner? [0m[36m[y/N][0m
 Declined; nothing written or started.

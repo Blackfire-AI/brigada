@@ -92,12 +92,12 @@ Run `brigada init` inside a repository. (At the top of a folder that holds sever
 
 The `Plan` block then shows:
 
-- `Agents:`, with each harness, model and effort (`@high`, for example, or `(default)`), family and role phrase, such as `writes code, reviews` or `reviews only`. Configured defaults use their resolved names when available, otherwise `CLI default`. Family labels include `Anthropic`, `OpenAI`, `Moonshot` and `Zhipu (GLM)`.
+- `Agents:`, with each harness, model and effort (`@high`, for example; shown only when one is set), family and role phrase, such as `code + review` or `review only`. Configured defaults use their resolved names when available, otherwise `CLI default`. Family labels include `Anthropic`, `OpenAI`, `Moonshot` and `Zhipu (GLM)`.
 - `Reviews:`, which counts the review-capable model families and describes cross-family review. In a limited setup, reviews that need another family still wait.
 - `Foreman:`, which names the chosen agent.
 - `Check:`, which names the check and reminds you that init does not run it and that you can edit `.brigada/project.yaml`.
 - `What workers may do:`, with a row for each agent that can implement. Claude gets `edit files; run only: …`, or `edit files; no commands` for `none`. Codex can edit and run commands inside its sandbox. Kimi, if allowed to implement, can edit and run any command without asking. Opencode gets `edit files; no commands`.
-- `Files in this repository`, which lists each path, its state (`new`, `changes`, `unchanged`, or `left alone` with a reason) and its purpose. Private Claude settings have `private, kept out of git:` in their purpose text. Changes to existing files show diffs and keep other settings and comments; new files show full contents only with `--verbose`. The list covers `.brigada/project.yaml`, the harness wiring below, and any supporting migration or git exclude edit. Init never commits these files.
+- `Files in this repository`, which lists each file's state first (`new`, `changes`, `unchanged`, or `left alone`, with its reason after the path), then its path and its purpose. Private Claude settings have `private, kept out of git:` in their purpose text. Changes to existing files show diffs and keep other settings and comments; new files show full contents only with `--verbose`. The list covers `.brigada/project.yaml`, the harness wiring below, and any supporting migration or git exclude edit. Init never commits these files.
 - Optional Codex setup text, when Codex is installed and wiring is enabled. Init prints the command to run yourself and writes no Codex configuration:
 
   ```sh
@@ -105,8 +105,7 @@ The `Plan` block then shows:
   ```
 
   Codex has no verified project-scope registration, so this is user-level.
-- `In the background:`, with the persistent runner, its log, `brigada stop`, and the engine's exit after 30 idle minutes.
-- `To change later:`, with the commands for agents, the foreman, the check and the full setup view.
+- `In the background:`, with the persistent runner, its log, `brigada stop`, and the engine's exit after 30 idle minutes, then a line saying `brigada config` shows every setting later.
 
 Then, after you confirm (`y` at the prompt, or `--yes`), init:
 

@@ -154,10 +154,10 @@ func TestInitInteractiveEfforts(t *testing.T) {
 				}
 				suffix, effort := " @high", "high"
 				if answer == "" {
-					suffix, effort = " (default)", ""
+					suffix, effort = "", ""
 				}
 				plan := strings.Split(out, "\nPlan\n")[1]
-				if !strings.Contains(plan, model+suffix) {
+				if !strings.Contains(plan, model+suffix) || (effort == "" && strings.Contains(plan, model+" @")) {
 					t.Fatalf("wrong agent effort:\n%s", plan)
 				}
 				if harness != "opencode" && !strings.Contains(plan, "Foreman: "+agentName(harness, model, effort)+"\n") {

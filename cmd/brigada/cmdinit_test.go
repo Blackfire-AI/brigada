@@ -221,7 +221,7 @@ func TestInitKimiWriteOptIn(t *testing.T) {
 			if !strings.Contains(out, "    Pick 1, or type a model id [1]:\n"+warning+"\n  opencode:") {
 				t.Fatalf("writing question is not right after Kimi model:\n%s", out)
 			}
-			if strings.Contains(strings.Join(strings.Fields(out), " "), "Moonshot reviews only") == tc.write {
+			if strings.Contains(strings.Join(strings.Fields(out), " "), "Moonshot review only") == tc.write {
 				t.Fatalf("incorrect Kimi classes after %q:\n%s", tc.answer, out)
 			}
 			for _, want := range []string{"opencode  zai-coding-plan/glm-5.3", "Check: printf check-marker"} {
@@ -254,14 +254,14 @@ func TestInitKimiWriteOptIn(t *testing.T) {
 
 func TestInitExplicitKimiClassesStayAsGiven(t *testing.T) {
 	for _, tc := range []struct{ classes, role string }{
-		{"", "writes code, reviews"},
-		{",classes=review", "reviews only"},
-		{",classes=implement+answer", "writes code, answers questions"},
-		{",classes=review+answer", "reviews, answers questions"},
-		{",classes=answer", "answers questions only"},
-		{",classes=implement", "writes code only"},
-		{",classes=implement+review", "writes code, reviews"},
-		{",classes=custom", "handles custom tasks only"},
+		{"", "code + review"},
+		{",classes=review", "review only"},
+		{",classes=implement+answer", "code + answer"},
+		{",classes=review+answer", "review + answer"},
+		{",classes=answer", "answer only"},
+		{",classes=implement", "code only"},
+		{",classes=implement+review", "code + review"},
+		{",classes=custom", "custom only"},
 	} {
 		t.Run(tc.classes, func(t *testing.T) {
 			importRepo(t)
@@ -493,7 +493,7 @@ func TestInitExplicitAccountQuestions(t *testing.T) {
 	if !strings.Contains(out, "  Pick 1-2 [2]:") || !strings.Contains(out, "  Foreman: codex/CLI default\n") {
 		t.Fatalf("did not preserve flag-order foreman default:\n%s", out)
 	}
-	if !strings.Contains(strings.Join(strings.Fields(out), " "), "Anthropic reviews only") || strings.Contains(out, "(implement, review, answer only)") {
+	if !strings.Contains(strings.Join(strings.Fields(out), " "), "Anthropic review only") || strings.Contains(out, "(implement, review, answer only)") {
 		t.Fatalf("incorrect agent classes display:\n%s", out)
 	}
 }
@@ -1271,20 +1271,20 @@ func TestInitSavedDefaults(t *testing.T) {
 				"Pick 1 or -, or type a model id [-]:",
 				"Pick 1-2 or -, or type a model id [2]:",
 				"Pick 1-2 or -, or type provider/model [-]:",
-				"opus @high", "kimi-k2 (default)",
+				"opus @high", "kimi-k2",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("missing %q:\n%s", want, out)
 				}
 			}
 			question := "Let kimi write code too, not only review? [y/N]:"
-			role := "reviews only"
+			role := "review only"
 			if writes {
 				question = "Let kimi write code too, not only review? [Y/n]:"
-				role = "writes code, reviews"
+				role = "code + review"
 			}
 			plan := strings.Split(out, "\nPlan\n")[1]
-			kimi := strings.Split(strings.Split(plan, "kimi-k2 (default)")[1], "\n")[0]
+			kimi := strings.Split(strings.Split(plan, "kimi-k2")[1], "\n")[0]
 			if !strings.Contains(out, question) || !strings.Contains(kimi, role) {
 				t.Fatalf("kimi default lost:\n%s", out)
 			}
@@ -1397,7 +1397,7 @@ func TestInitProbeAndRefusalsWithExistingWiring(t *testing.T) {
 			if code != tc.code {
 				t.Fatalf("got %d, want %d\n%s\n%s", code, tc.code, out, errOut)
 			}
-			if strings.Contains(out, "ready") || !strings.Contains(strings.Join(strings.Fields(out), " "), ".claude/settings.local.json unchanged private, kept out of git:") {
+			if strings.Contains(out, "ready") || !strings.Contains(strings.Join(strings.Fields(out), " "), "unchanged .claude/settings.local.json private, kept out of git:") {
 				t.Errorf("existing wiring output:\n%s", out)
 			}
 			if wireRead(t, ".", ".claude/settings.local.json") != local {
@@ -1409,8 +1409,11 @@ func TestInitProbeAndRefusalsWithExistingWiring(t *testing.T) {
 
 // TestInitInteractiveTranscript replaces the probe layout assertions with a
 // golden of all three interactive steps, the complete Plan and the refusal.
-// Plain wording stays unchanged apart from tags moving to row ends and the
-// three merged change-later lines required by the terminal presentation.
+// Plain wording stays unchanged apart from tags moving to row ends, the
+// merged change-later lines, and the Plan's layout: role phrases ("code +
+// review", "review only"), no "(default)" after a model, file rows that start
+// with their state, no final "To change later:" block, and a dim line under
+// "In the background:".
 func TestInitInteractiveTranscript(t *testing.T) {
 	want, err := initTranscriptGoldens.ReadFile("testdata/init-interactive.golden")
 	if err != nil {
@@ -1504,13 +1507,8 @@ func TestInitInteractiveLongModels(t *testing.T) {
 	if rows != 4 || !strings.Contains(plan, "kimi-code/kimi-for-coding") || !strings.Contains(plan, "zai-coding-plan/glm-5.3-highspeed @low") {
 		t.Fatalf("missing agent rows:\n%s", plan)
 	}
-	role := strings.Index(plan, "writes code,")
-	if role < 0 {
+	if !strings.Contains(strings.Join(strings.Fields(plan), " "), "code + review") {
 		t.Fatalf("missing worker roles:\n%s", plan)
-	}
-	roleColumn := role - strings.LastIndex(plan[:role], "\n") - 1
-	if !strings.Contains(plan, "\n"+strings.Repeat(" ", roleColumn)+"reviews\n") {
-		t.Fatalf("role continuation did not stay in its column:\n%s", plan)
 	}
 }
 

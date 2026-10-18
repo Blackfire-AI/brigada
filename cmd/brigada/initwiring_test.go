@@ -212,7 +212,7 @@ func TestWiringDamagedFilesAreReportedAndLeftAlone(t *testing.T) {
 			}
 			var plan bytes.Buffer
 			printInitFiles(&plan, files, false)
-			if !strings.Contains(strings.Join(strings.Fields(plan.String()), " "), tc.rel+" left alone:") {
+			if !strings.Contains(strings.Join(strings.Fields(plan.String()), " "), "left alone "+tc.rel+" ") {
 				t.Errorf("missing damaged-file reason: %s", plan.String())
 			}
 			if err := applyWiring(files); err != nil {
@@ -256,12 +256,12 @@ func TestInitProbeListsWiringWritesNothing(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
-			for _, want := range []string{".mcp.json new lets Claude Code here use brigada", ".claude/settings.local.json new private, kept out of git:", "brigada-foreman/SKILL.md new rules for your Claude session", "codex mcp add brigada-foreman -- brigada mcp --foreman"} {
+			for _, want := range []string{"new .mcp.json lets Claude Code here use brigada", "new .claude/settings.local.json private, kept out of git:", "new .claude/skills/brigada-foreman/SKILL.md rules for your Claude session", "codex mcp add brigada-foreman -- brigada mcp --foreman"} {
 				if strings.Contains(strings.Join(strings.Fields(out), " "), want) != tc.wantWiring {
 					t.Errorf("%q present = %v, want %v\n%s", want, !tc.wantWiring, tc.wantWiring, out)
 				}
 			}
-			if !strings.Contains(out, "Files in this repository (brigada never commits them):") || !strings.Contains(strings.Join(strings.Fields(out), " "), ".brigada/project.yaml new the settings above") {
+			if !strings.Contains(out, "Files in this repository (brigada never commits them):") || !strings.Contains(strings.Join(strings.Fields(out), " "), "new .brigada/project.yaml the settings above") {
 				t.Errorf("missing repository files block:\n%s", out)
 			}
 			if strings.Contains(out, "auto_review") || strings.Contains(out, "already") || strings.Contains(out, "ready") {
@@ -463,7 +463,7 @@ func TestWiringPrivateSettingsExcludeAddedOnce(t *testing.T) {
 	files := planWiring(root)
 	var plan bytes.Buffer
 	printInitFiles(&plan, files, false)
-	if !strings.Contains(strings.Join(strings.Fields(plan.String()), " "), ".git/info/exclude changes keeps private Claude Code settings out of git") || !strings.Contains(plan.String(), "+/.claude/settings.local.json") {
+	if !strings.Contains(strings.Join(strings.Fields(plan.String()), " "), "changes .git/info/exclude keeps private Claude Code settings out of git") || !strings.Contains(plan.String(), "+/.claude/settings.local.json") {
 		t.Fatalf("exclude missing from plan:\n%s", plan.String())
 	}
 	if got := wireRead(t, root, ".git/info/exclude"); got != "# user's exclude rules" {
