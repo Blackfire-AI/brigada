@@ -73,7 +73,7 @@ func TestInitOpenCodeNoStoredCredentialsAsksUse(t *testing.T) {
 	if code != 1 || errOut != "" {
 		t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 	}
-	if !strings.Contains(out, "  opencode: no stored provider credentials (keys may also come from your environment)\n    Use opencode? [y/N]:") {
+	if !strings.Contains(out, "  opencode: no stored provider credentials (keys may also come from your\n  environment)\n    Use opencode? [y/N]:") {
 		t.Errorf("missing no-credentials status before the Use question:\n%s", out)
 	}
 	if strings.Contains(out, "init can't check sign-in. If you're not signed in, run\n  `opencode") {

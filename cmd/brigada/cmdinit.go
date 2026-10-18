@@ -166,7 +166,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	} else {
 		fmt.Fprintln(stdout, "Agent CLIs found:")
 		for _, h := range initHarnesses {
-			fmt.Fprintf(stdout, "  %-9s %s\n", h, probes[h].status)
+			printInitWrapped(stdout, fmt.Sprintf("  %-9s ", h), "  ", probes[h].status)
 		}
 		fmt.Fprintln(stdout)
 	}
@@ -186,7 +186,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			case !confirmed && h == "opencode" && !probes[h].checked:
 				fmt.Fprint(stdout, "\n  opencode: init can't check sign-in. If you're not signed in, run\n  `opencode auth login` first, or leave opencode out.\n")
 			default:
-				fmt.Fprintf(stdout, "\n  %s: %s\n", h, status)
+				fmt.Fprintln(stdout)
+				printInitWrapped(stdout, "  ", "  ", h+": "+status)
 			}
 		}
 		if confirmed {
@@ -237,7 +238,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				fmt.Fprintf(stdout, "       -  don't use %s\n", h)
 			}
 			if sources[h].unknownCount > 0 {
-				fmt.Fprintf(stdout, "    %d more from `opencode models` aren't listed: brigada can't tell their model family, which it needs to pick reviewers.\n", sources[h].unknownCount)
+				printInitWrapped(stdout, "    ", "    ", fmt.Sprintf("%d more from `opencode models` aren't listed: brigada can't tell their model family, which it needs to pick reviewers.", sources[h].unknownCount))
 			}
 			defaultAnswer := "-"
 			if len(entries) > 0 && h != "opencode" {
@@ -689,7 +690,7 @@ func initMenuModelName(entry initModelEntry) string {
 }
 
 func initForemanName(spec agentSpec, sources map[string]initModelSource) string {
-	return spec.harness + "/" + initAgentModelName(spec, sources)
+	return agentName(spec.harness, initAgentModelName(spec, sources), spec.effort)
 }
 
 func initModelName(model string) string {
@@ -839,17 +840,26 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 		familyWidth = max(familyWidth, utf8.RuneCountInString(family))
 	}
 	for i, s := range agents {
-		// Keep unusually long custom identifiers readable without making all
-		// the other rows wider than the terminal.
-		if modelWidth+familyWidth > 40 {
-			printInitWrapped(w, fmt.Sprintf("    %-9s ", s.harness), "              ", initAgentModelName(s, sources)+"  "+familyNames[i]+"  "+initAgentRoles(s.classes))
+		// If the fixed columns leave no room for roles, put family and roles
+		// on a second line under the model column for every row. Very long
+		// identifiers wrap within that column, with roles on a separate line.
+		if 14+modelWidth+2+familyWidth+2 >= 79 {
+			indent := strings.Repeat(" ", 14)
+			printInitWrapped(w, fmt.Sprintf("    %-9s ", s.harness), indent, initAgentModelName(s, sources))
+			if 14+familyWidth+2 >= 79 {
+				printInitWrapped(w, indent, indent, familyNames[i])
+				printInitWrapped(w, indent, indent, initAgentRoles(s.classes))
+			} else {
+				prefix := fmt.Sprintf("%s%-*s  ", indent, familyWidth, familyNames[i])
+				printInitWrapped(w, prefix, strings.Repeat(" ", utf8.RuneCountInString(prefix)), initAgentRoles(s.classes))
+			}
 			continue
 		}
 		prefix := fmt.Sprintf("    %-9s %-*s  %-*s  ", s.harness, modelWidth, initAgentModelName(s, sources), familyWidth, familyNames[i])
 		printInitWrapped(w, prefix, strings.Repeat(" ", utf8.RuneCountInString(prefix)), initAgentRoles(s.classes))
 	}
 	printInitWrapped(w, "  Reviews: ", "    ", fmt.Sprintf("%d model families, so every task can get a reviewer of another one.", families))
-	printInitWrapped(w, "  Foreman: ", "    ", agentName(foreman.harness, foreman.model, foreman.effort))
+	printInitWrapped(w, "  Foreman: ", "    ", initForemanName(foreman, sources))
 }
 
 func initApplyPrompt(files int, running bool) string {
