@@ -20,15 +20,15 @@ import (
 // runner/foreman pairs. A CLI default keeps value "default" even when resolved.
 // An unresolved default has an empty name. Numbered menu IDs are one-based.
 type initModelEntry struct {
-	id            int
-	name          string
-	note          string
-	value         string
-	isDefault     bool
-	isCurrent     bool     // A saved choice, displayed as a tag after the note.
-	effortLevels  []string // Source order; Kimi metadata is display-only.
-	defaultEffort string   // Empty if unknown; Claude uses a descriptive default.
-	effortNote    string   // Replaces "<harness>'s default" on the default effort row.
+	id             int
+	name           string
+	note           string
+	value          string
+	isDefault      bool
+	isCurrent      bool     // A saved choice, displayed as a tag after the note.
+	effortLevels   []string // Source order; Kimi metadata is display-only.
+	defaultEffort  string   // Empty if unknown; Claude uses a descriptive default.
+	effortFromUser bool     // The default effort comes from the user's CLI config.
 }
 
 type initModelSource struct {
@@ -187,11 +187,6 @@ func initClaudeModels(ctx context.Context) initModelSource {
 		if settings.Model != "" && entry.value == settings.Model {
 			source.defaultID = entry.id
 			entry.isDefault = true
-			if entry.note != "" {
-				entry.note = "your claude default; " + entry.note
-			} else {
-				entry.note = "your claude default"
-			}
 			return source
 		}
 	}
@@ -255,20 +250,13 @@ func codexDefaultEffort(userEffort string, levels []string, catalog string) (eff
 func initCodexModels(ctx context.Context) initModelSource {
 	path := codexConfigPath()
 	userEffort := codexUserEffort(path)
-	entry := initModelEntry{id: 1, note: "your codex default", value: "default", isDefault: true}
+	entry := initModelEntry{id: 1, value: "default", isDefault: true}
 	if path != "" {
 		entry.name, _ = readInitModelConfig(path, "model", false)
-		if entry.name != "" {
-			entry.note += " (" + path + ")"
-		}
 	}
 	setEffort := func(e *initModelEntry, model initCodexModel) {
 		e.effortLevels = model.efforts()
-		var fromUser bool
-		e.defaultEffort, fromUser = codexDefaultEffort(userEffort, e.effortLevels, model.DefaultReasoningLevel)
-		if fromUser {
-			e.effortNote = "your codex default (" + path + ")"
-		}
+		e.defaultEffort, e.effortFromUser = codexDefaultEffort(userEffort, e.effortLevels, model.DefaultReasoningLevel)
 	}
 	source := initModelSource{entries: []initModelEntry{entry}, signIn: probeHarness(ctx, "codex")}
 	if !source.signIn.installed {
@@ -304,7 +292,7 @@ func initCodexModels(ctx context.Context) initModelSource {
 		if model.Slug == entry.name {
 			setEffort(&source.entries[0], model)
 			if model.Description != "" {
-				source.entries[0].note += "; " + model.Description
+				source.entries[0].note = model.Description
 			}
 			continue
 		}
@@ -365,13 +353,21 @@ func readInitCodexCatalog(ctx context.Context) ([]initCodexModel, bool) {
 	return read("debug", "models", "--bundled")
 }
 
+func kimiConfigPath() string {
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".kimi-code", "config.toml")
+}
+
 func initKimiModels(ctx context.Context) initModelSource {
 	var name string
 	var models []initKimiModel
-	if home, err := os.UserHomeDir(); err == nil {
-		name, models = readInitModelConfig(filepath.Join(home, ".kimi-code", "config.toml"), "default_model", true)
+	if path := kimiConfigPath(); path != "" {
+		name, models = readInitModelConfig(path, "default_model", true)
 	}
-	entries := []initModelEntry{{id: 1, name: name, note: "your kimi default", value: "default", isDefault: true}}
+	entries := []initModelEntry{{id: 1, name: name, value: "default", isDefault: true}}
 	byID := map[string]initKimiModel{}
 	for _, model := range models {
 		if prev, ok := byID[model.id]; ok {
@@ -391,7 +387,7 @@ func initKimiModels(ctx context.Context) initModelSource {
 		byID[model.id] = model
 	}
 	if detail := byID[name].note(); name != "" && detail != "" {
-		entries[0].note += "; " + detail
+		entries[0].note = detail
 	}
 	entries[0].effortLevels = byID[name].effortLevels
 	entries[0].defaultEffort = byID[name].defaultEffort

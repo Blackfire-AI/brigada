@@ -47,7 +47,7 @@ func TestInitCodexUserEffortDefault(t *testing.T) {
 			}
 			wantNote := "default"
 			if tc.wantGPT5 == "high" {
-				wantNote = "(" + path + ") default"
+				wantNote = "your codex default"
 			}
 			compact := strings.Join(strings.Fields(out.String()), "")
 			if want := strings.Join(strings.Fields(tc.wantGPT5+" "+wantNote), ""); !strings.Contains(compact, want) {

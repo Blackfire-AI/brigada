@@ -121,24 +121,49 @@ func initNoteTags(note string) (string, string) {
 	return note, ""
 }
 
-func initDefaultNote(harness, note string) string {
-	note = strings.TrimPrefix(note, "your "+harness+" default")
-	return strings.TrimPrefix(strings.TrimSpace(note), "; ")
-}
-
 func initRowNote(w io.Writer, note, tags string) string {
 	out := initPresentation(w)
 	text := ""
 	if note != "" {
 		text = out.style.Dim(note)
 	}
-	for _, tag := range strings.Fields(tags) {
+	if tags != "" {
 		if text != "" {
-			text += " "
+			text += "  "
 		}
-		text += out.style.Accent(tag)
+		text += out.style.Accent(tags)
 	}
 	return text
+}
+
+// Keep a multiword tag together and preserve the two spaces before it when
+// wrapping the note. Ordinary prose wrapping normalizes spaces between words.
+func printInitRow(w io.Writer, prefix, continuation, note, tag string) {
+	var words []initWord
+	for _, word := range strings.Fields(initDim(w, note)) {
+		words = append(words, initWord{" ", word})
+	}
+	if tag != "" {
+		words = append(words, initWord{"  ", initPresentation(w).style.Accent(tag)})
+	}
+	printInitWords(w, prefix, continuation, words)
+}
+
+func initAgentChangeLater(sources map[string]initModelSource) string {
+	how := "run brigada init again"
+	for _, harness := range []string{"codex", "kimi"} {
+		if !sources[harness].signIn.installed {
+			continue
+		}
+		path := codexConfigPath()
+		if harness == "kimi" {
+			path = kimiConfigPath()
+		}
+		if path != "" {
+			how += "; your " + harness + " default: change it in " + initHomePath(path)
+		}
+	}
+	return how
 }
 
 func initChangeLater(w io.Writer, how string) {

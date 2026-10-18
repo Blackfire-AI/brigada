@@ -657,7 +657,7 @@ func TestInitSuggestedCheckQuestion(t *testing.T) {
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
-			prompt := "  Found in this repo:\n     1  " + candidates[0].Command + "  " + candidates[0].Note + " default\n  Pick 1, or type a command [1]:\n"
+			prompt := "  Found in this repo:\n     1  " + candidates[0].Command + "  " + candidates[0].Note + "  default\n  Pick 1, or type a command [1]:\n"
 			question := strings.Index(out, prompt)
 			if question <= strings.Index(out, "  Pick 1-2 [1]:") || question >= strings.Index(out, "\nPlan\n") || strings.Count(out, prompt) != 1 {
 				t.Fatalf("check question missing or out of order:\n%s", out)
@@ -748,7 +748,7 @@ func TestInitCheckStepTranscript(t *testing.T) {
   lint, type checks. Claude workers may run it too before handing in.
 
   Found in this repo:
-     1  make check     Makefile: lint format-check type test rig-spec default
+     1  make check     Makefile: lint format-check type test rig-spec  default
      2  make test      Makefile: uv run pytest -q
      3  uv run pytest  pytest, from uv.lock
   Pick 1-3, or type a command [1]:
@@ -760,7 +760,7 @@ func TestInitCheckStepTranscript(t *testing.T) {
 		t.Fatalf("step 3 transcript differs from the approved one:\n%s", out)
 	}
 	for _, want := range []string{
-		"\n  -> change later: run brigada init again\n\nStep 2 of 3:",
+		"\n  -> change later: run brigada init again; your codex default: change it in\n     ~/.codex/config.toml\n\nStep 2 of 3:",
 		"\n  -> change later: brigada project foreman --harness H --model M, or run\n     brigada init again\n\nStep 3 of 3:",
 	} {
 		if !strings.Contains(out, want) {
@@ -787,7 +787,7 @@ func TestInitCheckStepLongNoteStaysNarrow(t *testing.T) {
 	}
 	fakeInitPATH(t, "claude", "codex")
 	code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "\n\nn\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring")
-	if code != 1 || errOut != "" || !strings.Contains(out, "     1  make check  Makefile: a-very-long-prerequisite") || !strings.Contains(out, "… default\n") {
+	if code != 1 || errOut != "" || !strings.Contains(out, "     1  make check  Makefile: a-very-long-prerequisite") || !strings.Contains(out, "…  default\n") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
 	before, _, _ := strings.Cut(out, "\nPlan\n")
@@ -875,7 +875,7 @@ func TestInitRerunShowsCurrentCheckFirst(t *testing.T) {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
 	for _, want := range []string{
-		"     1  custom check   from .brigada/project.yaml current\n     2  make check     Makefile: lint",
+		"     1  custom check   from .brigada/project.yaml  current\n     2  make check     Makefile: lint",
 		"     4  uv run pytest  pytest, from uv.lock\n  Pick 1-4, or type a command [1]:\n",
 		"  Check: custom check (",
 		"    claude    edit files; no commands\n",
@@ -892,7 +892,7 @@ func TestInitRerunShowsCurrentCheckFirst(t *testing.T) {
 	}
 	// A current check that is also a candidate is listed once, as current.
 	_, out, _ = initCheckStep(t, "", "default_check: make check\nworker_tools: Bash(make check:*)\n")
-	if strings.Count(out, "make check  ") != 1 || !strings.Contains(out, "     1  make check     from .brigada/project.yaml current\n     2  make test ") {
+	if strings.Count(out, "make check  ") != 1 || !strings.Contains(out, "     1  make check     from .brigada/project.yaml  current\n     2  make test ") {
 		t.Fatalf("current check not deduplicated:\n%s", out)
 	}
 }
@@ -1563,9 +1563,11 @@ func initInteractiveTranscript(t *testing.T, longModels bool, forced ...logo.Cap
 	fakeInitPATH(t, initHarnesses...)
 	// Keep the HOME-relative state socket below the platform path limit.
 	t.Setenv("HOME", testsupport.ShortStateDir(t))
-	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".codex", "config.toml"), "model = \"gpt-6.1-sol\"\n")
+	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".codex", "config.toml"), "model = \"gpt-6.1-sol\"\nmodel_reasoning_effort = \"high\"\n")
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".kimi-code", "config.toml"), `default_model = "kimi-code/k3"
 [models."kimi-code/k3"]
+display_name = "K3"
+max_context_size = 1000000
 default_effort = "high"
 [models."kimi-code/k3-256k"]
 display_name = "K3"

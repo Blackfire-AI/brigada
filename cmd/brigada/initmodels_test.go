@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -133,7 +132,7 @@ func TestInitClaudeSettingsDefault(t *testing.T) {
 	fakeInitClaudeHelp(t)
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".claude", "settings.json"), `{"model":"opus","env":{"K":"never-print-me"}}`)
 	got := initClaudeModels(context.Background())
-	if got.defaultID != 2 || !got.entries[1].isDefault || got.entries[1].note != "your claude default; strong; uses your plan's limits faster" {
+	if got.defaultID != 2 || !got.entries[1].isDefault || got.entries[1].note != "strong; uses your plan's limits faster" {
 		t.Fatalf("source = %+v", got)
 	}
 	assertInitModelPrivacy(t, got)
@@ -193,7 +192,7 @@ model = "never-print-me"
 token = "never-print-me"
 `)
 			got := initCodexModels(context.Background())
-			want := []initModelEntry{{id: 1, name: "runtime-codex-model", value: "default", note: "your codex default (" + path + ")", isDefault: true}}
+			want := []initModelEntry{{id: 1, name: "runtime-codex-model", value: "default", isDefault: true}}
 			if !reflect.DeepEqual(got.entries, want) || !got.signIn.installed {
 				t.Fatalf("source = %+v", got)
 			}
@@ -213,12 +212,9 @@ func TestInitCodexCatalog(t *testing.T) {
 			path := filepath.Join(os.Getenv("HOME"), ".codex", "config.toml")
 			writeInitModelFixture(t, path, "model = \""+model+"\"\n")
 			got := initCodexModels(context.Background())
-			note := "your codex default"
-			if model != "" {
-				note += " (" + path + ")"
-			}
+			note := ""
 			if model == "gpt-6.1-sol" {
-				note += "; General-purpose coding model."
+				note = "General-purpose coding model."
 			}
 			want := []initModelEntry{
 				{id: 1, name: model, value: "default", isDefault: true, note: note},
@@ -267,7 +263,7 @@ func TestInitCodexDiscoverySafety(t *testing.T) {
 			writeInitCodexScript(t, tc.root, tc.debug, tc.help, tc.refresh, tc.bundled)
 			start := time.Now()
 			got := initCodexModels(context.Background())
-			want := []initModelEntry{{id: 1, value: "default", note: "your codex default", isDefault: true}}
+			want := []initModelEntry{{id: 1, value: "default", isDefault: true}}
 			if tc.wantCatalog {
 				want = append(want, initModelEntry{id: 2, name: "gpt-5", value: "gpt-5", note: "Coding model."})
 			}
@@ -298,7 +294,7 @@ func TestInitCodexCatalogPicks(t *testing.T) {
 				t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 			}
 			menu := strings.Split(strings.Split(out, "Which model should codex run?\n")[1], "\nStep 2")[0]
-			if strings.Contains(out, "never-print-me") || !strings.Contains(menu, "(~/.codex/config.toml);") || !regexp.MustCompile(`(?m)default$`).MatchString(menu) || !strings.Contains(menu, "1 more from `codex debug models` aren't listed:") || !strings.Contains(menu, "Pick 1-3 or -, or type a model id [1]:") {
+			if strings.Contains(out, "never-print-me") || strings.Contains(menu, "(~/.codex/config.toml)") || !strings.Contains(menu, "your codex default") || !strings.Contains(strings.Join(strings.Fields(menu), " "), "change it in ~/.codex/config.toml") || !strings.Contains(menu, "1 more from `codex debug models` aren't listed:") || !strings.Contains(menu, "Pick 1-3 or -, or type a model id [1]:") {
 				t.Fatalf("unexpected menu:\n%s", menu)
 			}
 			for _, line := range strings.Split(out, "\n") {
@@ -336,7 +332,7 @@ default_model = "never-print-me"
 `)
 	got := initKimiModels(context.Background())
 	want := []initModelEntry{
-		{id: 1, name: "runtime-provider/current", value: "default", note: "your kimi default", isDefault: true},
+		{id: 1, name: "runtime-provider/current", value: "default", isDefault: true},
 		{id: 2, name: "runtime-provider/first", value: "runtime-provider/first"},
 		{id: 3, name: "runtime-provider/last", value: "runtime-provider/last"},
 	}
@@ -372,7 +368,7 @@ display_name = "Only Name"
 `)
 	got := initKimiModels(context.Background())
 	want := []initModelEntry{
-		{id: 1, name: "kimi-code/k3", value: "default", note: "your kimi default; K3, 1M context", isDefault: true},
+		{id: 1, name: "kimi-code/k3", value: "default", note: "K3, 1M context", isDefault: true},
 		{id: 2, name: "kimi-code/k2.8-preview", value: "kimi-code/k2.8-preview", note: "K2.8 Preview, 256K context"},
 		{id: 3, name: "kimi-code/no-name", value: "kimi-code/no-name", note: "200K context"},
 		{id: 4, name: "kimi-code/bare", value: "kimi-code/bare"},
@@ -427,7 +423,7 @@ func TestInitModelSourceFallbacks(t *testing.T) {
 				writeInitModelFixture(t, filepath.Join(home, tc.dir, "config.toml"), tc.body)
 			}
 			got := tc.load(context.Background())
-			want := []initModelEntry{{id: 1, value: "default", note: "your " + tc.harness + " default", isDefault: true}}
+			want := []initModelEntry{{id: 1, value: "default", isDefault: true}}
 			if !reflect.DeepEqual(got.entries, want) {
 				t.Fatalf("entries = %+v", got.entries)
 			}

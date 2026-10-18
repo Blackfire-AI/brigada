@@ -13,7 +13,7 @@
 
   [1mclaude[0m  [32m✓ signed in[0m
 [90m    Which model should claude run?[0m
-     ▸[36m 1[0m  [1msonnet[0m               [90mAnthropic[0m  [90mSonnet 4 · Balanced[0m [36mdefault[0m
+     ▸[36m 1[0m  [1msonnet[0m               [90mAnthropic[0m  [90mSonnet 4 · Balanced[0m  [36mdefault[0m
       [36m 2[0m  opus                 [90mAnthropic[0m  [90mOpus 4 · Most capable[0m
       [36m 3[0m  haiku                [90mAnthropic[0m  [90mfastest; fine for small tasks[0m
       [36m 4[0m  claude-sonnet-4[1m]  [90mAnthropic[0m  [90mSonnet, 1M context[0m
@@ -22,7 +22,7 @@
 [1m    Pick 1-5 or -, or type a model id [0m[36m[1][0m[1m:[0m
     [90mHow hard should sonnet think? More effort gives better results on hard tasks and uses more of
     your plan's limits.[0m
-     ▸[36m 1[0m  [1mdefault[0m  [36mdefault[0m
+     ▸[36m 1[0m  [1mdefault[0m  [90mclaude's default[0m
       [36m 2[0m  low
       [36m 3[0m  medium
       [36m 4[0m  high
@@ -32,7 +32,7 @@
 
   [1mcodex[0m  [32m✓ signed in[0m
 [90m    Which model should codex run?[0m
-     ▸[36m 1[0m  [1mgpt-6.1-sol[0m   [90mOpenAI[0m  [90m(~/.codex/config.toml); General-purpose coding model.[0m [36mdefault[0m
+     ▸[36m 1[0m  [1mgpt-6.1-sol[0m   [90mOpenAI[0m  [90mGeneral-purpose coding model.[0m  [36myour codex default[0m
       [36m 2[0m  gpt-5         [90mOpenAI[0m  [90mEarlier coding model.[0m
       [36m 3[0m  gpt-5.4-mini  [90mOpenAI[0m  [90mA smaller coding model for quick tasks, with a long description
                                 that must wrap within the menu without losing any of its words.[0m
@@ -42,24 +42,23 @@
 [1m    Pick 1-3 or -, or type a model id [0m[36m[1][0m[1m:[0m
     [90mHow hard should gpt-6.1-sol think? More effort gives better results on hard tasks and uses more
     of your plan's limits.[0m
-     ▸[36m 1[0m  [1mlow[0m     [36mdefault[0m
+      [36m 1[0m  low
       [36m 2[0m  medium
-      [36m 3[0m  high
+     ▸[36m 3[0m  [1mhigh[0m    [36myour codex default[0m
       [36m 4[0m  xhigh
       [36m 5[0m  max
       [36m 6[0m  ultra
-[1m    Pick 1-6 [0m[36m[1][0m[1m:[0m
+[1m    Pick 1-6 [0m[36m[3][0m[1m:[0m
 
   [1mkimi[0m  [33m? sign-in can't be checked[0m[90m · sign in with [0m[36mkimi login[0m
 [1m    Use kimi? [0m[36m[y/N][0m[1m:[0m
 [90m    Which model should kimi run?[0m
-     ▸[36m 1[0m  [1mkimi-code/k3[0m                         [90mMoonshot[0m  [36mdefault[0m
+     ▸[36m 1[0m  [1mkimi-code/k3[0m                         [90mMoonshot[0m  [90mK3, 1M context[0m  [36myour kimi default[0m
       [36m 2[0m  kimi-code/k3-256k                    [90mMoonshot[0m  [90mK3, 256K context[0m
       [36m 3[0m  kimi-code/kimi-for-coding            [90mMoonshot[0m  [90m200K context[0m
       [36m 4[0m  kimi-code/kimi-for-coding-highspeed  [90mMoonshot[0m  [90m200K context[0m
 [1m    Pick 1-4, or type a model id [0m[36m[1][0m[1m:[0m
-    Effort: [90mhigh, kimi's own setting for this model (change it in ~/.kimi-code/config.toml; brigada
-    can't set it per run).[0m
+    Effort: [90mhigh, kimi's own setting for this model (brigada can't set it per run).[0m
     [33m! kimi has no sandbox: when it writes code it can run any command on this machine without
     asking. As a reviewer it only reads.[0m
 [1m    Let kimi write code too, not only review? [0m[36m[y/N][0m[1m:[0m
@@ -73,13 +72,14 @@
 [1m    Pick 1-3 or -, or type provider/model [0m[36m[-][0m[1m:[0m
     [90mHow hard should zai-coding-plan/glm-5.3 think? More effort gives better results on hard tasks
     and uses more of your plan's limits.[0m
-     ▸[36m 1[0m  [1mdefault[0m  [36mdefault[0m
+     ▸[36m 1[0m  [1mdefault[0m  [90mopencode's default[0m
       [36m 2[0m  low
       [36m 3[0m  medium
       [36m 4[0m  high
 [1m    Pick 1-4 [0m[36m[1][0m[1m:[0m
 
-  [90m↺ [0m[90mchange later: run brigada init again[0m
+  [90m↺ [0m[90mchange later: run brigada init again; your codex default: change it in ~/.codex/config.toml;
+    your kimi default: change it in ~/.kimi-code/config.toml[0m
 
 [1m━━ Step 2 of 3 · the foreman[0m
 [90m  The foreman plans the work and decides what happens when a task needs[0m
@@ -101,7 +101,7 @@
 [90m  lint, type checks. Claude workers may run it too before handing in.[0m
 
   Found in this repo:
-   ▸[36m 1[0m  [1muv run pytest[0m  [90mpytest, from uv.lock[0m [36mdefault[0m
+   ▸[36m 1[0m  [1muv run pytest[0m  [90mpytest, from uv.lock[0m  [36mdefault[0m
 [1m  Pick 1, or type a command [0m[36m[1][0m[1m:[0m
 
   [90m↺ [0m[90mchange later: edit default_check in .brigada/project.yaml, then run brigada project import[0m

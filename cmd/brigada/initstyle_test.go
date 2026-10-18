@@ -335,7 +335,11 @@ func TestInitModelDefaultAndCurrentTags(t *testing.T) {
 					plain := ansi.ReplaceAllString(line, "")
 					if strings.Contains(plain, "1  sonnet ") || strings.Contains(plain, "1  CLI default ") {
 						rows++
-						if !strings.HasSuffix(line, term.New(caps).Accent(tag)) {
+						rowTag := tag
+						if !rerun && strings.Contains(plain, "CLI default") {
+							rowTag = "your codex default"
+						}
+						if !strings.HasSuffix(line, term.New(caps).Accent(rowTag)) {
 							t.Errorf("model row must end with %s tag: %q", tag, line)
 						}
 						if rerun && strings.Contains(plain, " default current") {
@@ -354,5 +358,121 @@ func TestInitModelDefaultAndCurrentTags(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestInitConfiguredDefaultRows(t *testing.T) {
+	for _, width := range []int{80, 100} {
+		for _, styled := range []bool{false, true} {
+			for _, rerun := range []bool{false, true} {
+				t.Run(fmt.Sprintf("width=%d/styled=%t/rerun=%t", width, styled, rerun), func(t *testing.T) {
+					importRepo(t)
+					fakeInitPATH(t, "claude", "codex", "kimi")
+					writeInitCodexScript(t, "  debug  Diagnostic tools", "  models  Render models", "",
+						`printf '%s\n' '{"models":[{"slug":"gpt-6.1-sol","visibility":"list","description":"Latest workhorse model for coding and everyday work.","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"}],"default_reasoning_level":"low"}]}'`, "exit 89")
+					writeInitModelFixture(t, codexConfigPath(), "model = \"gpt-6.1-sol\"\nmodel_reasoning_effort = \"high\"\n")
+					writeInitModelFixture(t, kimiConfigPath(), "default_model = \"kimi-code/k3\"\n[models.\"kimi-code/k3\"]\ndisplay_name = \"K3\"\nmax_context_size = 1000000\n")
+					state := testsupport.ShortStateDir(t)
+					if rerun {
+						if err := runnerstate.SaveAgents(filepath.Join(state, "runner"), []string{
+							"harness=claude,model=sonnet", "harness=codex,model=default", "harness=kimi,model=default,classes=review",
+						}); err != nil {
+							t.Fatal(err)
+						}
+					}
+					caps := logo.Caps{TTY: true, Width: width}
+					if styled {
+						caps.UTF8, caps.Color = true, logo.Color16
+					}
+					original := initDetectCaps
+					initDetectCaps = func(io.Writer) logo.Caps { return caps }
+					t.Cleanup(func() { initDetectCaps = original })
+					code, out, errs := initDo(t, state, strings.Repeat("\n", 10),
+						"--signed-in", "claude,codex,kimi", "--check", "true", "--tools", "none", "--no-wiring")
+					if code != 1 || errs != "" || !strings.Contains(out, "Declined") {
+						t.Fatalf("init = %d\n%s\n%s", code, out, errs)
+					}
+					plain := ansi.ReplaceAllString(out, "")
+					// Inspect the real model and effort menus, excluding the change-later line.
+					menus, later, _ := strings.Cut(plain, "change later:")
+					compact := strings.Join(strings.Fields(menus), " ")
+					codexTag, kimiTag := "your codex default", "your kimi default"
+					if rerun {
+						codexTag, kimiTag = "current", "current"
+					}
+					for _, want := range []string{
+						"1 gpt-6.1-sol OpenAI Latest workhorse model for coding and everyday work. " + codexTag,
+						"3 high " + codexTag,
+						"1 default claude's default",
+						"1 kimi-code/k3 Moonshot K3, 1M context " + kimiTag,
+					} {
+						if !strings.Contains(compact, want) {
+							t.Errorf("menu lacks %q:\n%s", want, menus)
+						}
+					}
+					style := term.New(caps)
+					if !strings.Contains(out, style.Accent(codexTag)) || !strings.Contains(out, style.Accent(kimiTag)) {
+						t.Errorf("default/current tag must be Accent: %q", out)
+					}
+					if strings.Contains(menus, "config.toml") || strings.Contains(compact, "default claude's default current") {
+						t.Errorf("redundant tag or config path in menu:\n%s", menus)
+					}
+					later = strings.Join(strings.Fields(later), " ")
+					for _, path := range []string{"~/.codex/config.toml", "~/.kimi-code/config.toml"} {
+						if strings.Count(plain, path) != 1 || !strings.Contains(later, "change it in "+path) {
+							t.Errorf("config path must appear once in change-later guidance: %s\n%s", path, plain)
+						}
+					}
+					for _, line := range strings.Split(out, "\n") {
+						if term.VisibleWidth(line) >= width {
+							t.Errorf("line must be under Width(): %q", line)
+						}
+					}
+					if strings.Contains(out, "ready") {
+						t.Fatal("claimed ready before apply")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestInitRowTagSpacing(t *testing.T) {
+	for _, styled := range []bool{false, true} {
+		caps := logo.Caps{Width: 100}
+		if styled {
+			caps.TTY, caps.Color = true, logo.Color16
+		}
+		style := term.New(caps)
+		var b bytes.Buffer
+		w := initOutput{Writer: &b, style: style, styled: styled}
+		printInitRow(w, "  model  ", "    ", "A description.", "your codex default")
+		if want := "  model  " + style.Dim("A description.") + "  " + style.Accent("your codex default") + "\n"; b.String() != want {
+			t.Errorf("row = %q, want %q", b.String(), want)
+		}
+	}
+}
+
+func TestInitAgentChangeLaterConfigPaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, dir := range []string{filepath.Join(home, ".codex"), filepath.Join(home, "custom-codex"), t.TempDir()} {
+		t.Setenv("CODEX_HOME", dir)
+		sources := map[string]initModelSource{
+			"claude": {signIn: harnessProbe{installed: true}},
+			"codex":  {signIn: harnessProbe{installed: true}},
+			"kimi":   {signIn: harnessProbe{installed: true}},
+		}
+		wantPath := filepath.Join(dir, "config.toml")
+		if rel, err := filepath.Rel(home, dir); err == nil && !strings.HasPrefix(rel, "..") {
+			wantPath = filepath.Join("~", rel, "config.toml")
+		}
+		got := initAgentChangeLater(sources)
+		if !strings.Contains(got, "change it in "+wantPath) || !strings.Contains(got, "change it in ~/.kimi-code/config.toml") || strings.Contains(got, ".claude") {
+			t.Errorf("change later = %q", got)
+		}
+	}
+	if got := initAgentChangeLater(map[string]initModelSource{"claude": {signIn: harnessProbe{installed: true}}}); got != "run brigada init again" {
+		t.Errorf("Claude guidance = %q", got)
 	}
 }
