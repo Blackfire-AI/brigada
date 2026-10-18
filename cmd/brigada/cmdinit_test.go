@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
@@ -1267,8 +1268,12 @@ func TestInitEveryNumberedModelCanBePicked(t *testing.T) {
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".codex", "config.toml"), "model = \"gpt-6.1-sol\"\n")
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".kimi-code", "config.toml"), `default_model = "kimi-code/k3"
 [models."kimi-code/k3-256k"]
+display_name = "K3 with a deliberately long display name to force wrapping of the note"
+max_context_size = 262144
 [models."kimi-code/kimi-for-coding"]
 [models."kimi-code/kimi-for-coding-highspeed"]
+display_name = "K2.7 Code Highspeed"
+max_context_size = 1048576
 [models."provider/gemini-2.5-pro"]
 `)
 	args := []string{"--signed-in", strings.Join(initHarnesses, ","), "--foreman", "codex/default", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring"}
@@ -1279,6 +1284,11 @@ func TestInitEveryNumberedModelCanBePicked(t *testing.T) {
 	rowsPattern := regexp.MustCompile(`(?m)^[ ]+(\d+)[ ]{2,}(\S+)[ ]{2,}(\S+(?: \(GLM\))?)`)
 	for _, harness := range initHarnesses {
 		menu := strings.Split(strings.Split(out, "Which model should "+harness+" run?\n")[1], "    Pick ")[0]
+		for _, line := range strings.Split(menu, "\n") {
+			if harness == "kimi" && utf8.RuneCountInString(line) >= 80 {
+				t.Errorf("%s menu line is %d columns: %q", harness, utf8.RuneCountInString(line), line)
+			}
+		}
 		rows := rowsPattern.FindAllStringSubmatch(menu, -1)
 		if len(rows) == 0 {
 			t.Fatalf("no numbered entries for %s:\n%s", harness, menu)
