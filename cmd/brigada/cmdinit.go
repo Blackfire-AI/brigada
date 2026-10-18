@@ -218,19 +218,22 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			signedIn[h] = true
 			entries := sources[h].entries
 			fmt.Fprintf(stdout, "    Which model should %s run?\n", h)
-			width := 0
-			for _, entry := range entries {
-				width = max(width, len(initMenuModelName(entry)))
-			}
-			for _, entry := range entries {
+			width, familyWidth := 0, 0
+			familyNames := make([]string, len(entries))
+			for i, entry := range entries {
 				family, _ := initModelFamily(h, entry.value)
-				prefix := fmt.Sprintf("      %2d  %-*s  %s", entry.id, width, initMenuModelName(entry), initFamilyName(family))
+				familyNames[i] = initFamilyName(family)
+				width = max(width, utf8.RuneCountInString(initMenuModelName(entry)))
+				familyWidth = max(familyWidth, utf8.RuneCountInString(familyNames[i]))
+			}
+			for i, entry := range entries {
+				prefix := fmt.Sprintf("      %2d  %-*s  %s", entry.id, width, initMenuModelName(entry), familyNames[i])
 				note := entry.note
 				if entry.note != "" {
 					if home, err := os.UserHomeDir(); err == nil && home != "" {
 						note = strings.ReplaceAll(note, "("+home+string(os.PathSeparator), "(~/")
 					}
-					prefix += "  "
+					prefix += strings.Repeat(" ", familyWidth-utf8.RuneCountInString(familyNames[i])+2)
 				}
 				printInitWrapped(stdout, prefix, strings.Repeat(" ", utf8.RuneCountInString(prefix)), note)
 			}

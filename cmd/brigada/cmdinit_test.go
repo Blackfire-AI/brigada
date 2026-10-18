@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1078,9 +1079,16 @@ func initInteractiveTranscript(t *testing.T, longModels bool) string {
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".codex", "config.toml"), "model = \"gpt-6.1-sol\"\n")
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".kimi-code", "config.toml"), `default_model = "kimi-code/k3"
 [models."kimi-code/k3-256k"]
+display_name = "K3"
+max_context_size = 262144
 [models."kimi-code/kimi-for-coding"]
+max_context_size = 200000
 [models."kimi-code/kimi-for-coding-highspeed"]
+max_context_size = 204800
 `)
+	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".claude.json"), `{"additionalModelOptionsCache":[
+ {"value":"claude-sonnet-4[1m]","label":"Sonnet","description":"Sonnet 4 · Balanced"},
+ {"value":"claude-opus-4","label":"Opus","description":"Opus 4 · Most capable"}]}`)
 	for _, h := range []string{"claude", "codex"} {
 		parent, status := "auth", `{"loggedIn":true}`
 		if h == "codex" {
@@ -1092,20 +1100,19 @@ func initInteractiveTranscript(t *testing.T, longModels bool) string {
 		}
 	}
 	fakeInitCodexCatalog(t)
-	opencode := filepath.Join(os.Getenv("PATH"), "opencode")
-	script, err := os.ReadFile(opencode)
-	if err != nil {
-		t.Fatal(err)
-	}
 	model := "zai-coding-plan/glm-5.3"
 	if longModels {
 		model += "-highspeed"
 	}
-	script = bytes.ReplaceAll(script, []byte("fixture/gpt-5"), []byte(model))
-	script = bytes.ReplaceAll(script, []byte("fixture/glm-5.3"), []byte("zai-coding-plan/glm-5.2"))
-	if err := os.WriteFile(opencode, script, 0755); err != nil {
-		t.Fatal(err)
-	}
+	// Include different family widths and a paid plan with zero per-token cost.
+	verbose := fmt.Sprintf(`%s
+{"name":"GLM-5.3","status":"active","cost":{"input":0,"output":0},"limit":{"context":200000}}
+zai-coding-plan/glm-5.2
+{"name":"GLM-5.2","status":"active","limit":{"context":204800}}
+opencode/deepseek-v3
+{"name":"DeepSeek V3","status":"active","limit":{"context":1000000}}
+`, model)
+	fakeOpenCodeVerbose2(t, openCodeVerboseFile(t, verbose))
 	// The golden accepts defaults and leaves Kimi review-only. The long-model
 	// variant picks Haiku, a non-default Kimi model, and Codex as foreman.
 	// Both pick OpenCode model 1 and decline only the final apply.
@@ -1265,6 +1272,9 @@ func TestInitEveryNumberedModelCanBePicked(t *testing.T) {
 	importRepo(t)
 	fakeInitPATH(t, initHarnesses...)
 	fakeInitCodexCatalog(t)
+	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".claude.json"), `{"additionalModelOptionsCache":[
+ {"value":"claude-fable-5-1[1m]","label":"Fable","description":"Fable 5.1 · Most capable"},
+ {"value":"opus[2m]","label":"Opus","description":"Opus · Most capable"}]}`)
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".codex", "config.toml"), "model = \"gpt-6.1-sol\"\n")
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".kimi-code", "config.toml"), `default_model = "kimi-code/k3"
 [models."kimi-code/k3-256k"]
@@ -1285,7 +1295,7 @@ max_context_size = 1048576
 	for _, harness := range initHarnesses {
 		menu := strings.Split(strings.Split(out, "Which model should "+harness+" run?\n")[1], "    Pick ")[0]
 		for _, line := range strings.Split(menu, "\n") {
-			if harness == "kimi" && utf8.RuneCountInString(line) >= 80 {
+			if utf8.RuneCountInString(line) >= 80 {
 				t.Errorf("%s menu line is %d columns: %q", harness, utf8.RuneCountInString(line), line)
 			}
 		}
