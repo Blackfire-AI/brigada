@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
 
 // name is the resolved model shown in the menu and plan; value is recorded in
@@ -26,6 +28,7 @@ type initModelSource struct {
 	entries       []initModelEntry
 	signIn        harnessProbe
 	providerCount int // OpenCode only; no provider names or account output retained.
+	unknownCount  int // OpenCode models omitted because their family is unknown.
 }
 
 func initClaudeModels(ctx context.Context) initModelSource {
@@ -209,8 +212,12 @@ func initOpenCodeModels(ctx context.Context) initModelSource {
 				model := strings.TrimSpace(line)
 				provider, name, ok := strings.Cut(model, "/")
 				if ok && provider != "" && name != "" && validInitModelName(model) && !seen[model] {
-					source.entries = append(source.entries, initModelEntry{id: len(source.entries) + 1, name: model, value: model})
 					seen[model] = true
+					if _, err := adapter.AgentFamily("opencode", model); err != nil {
+						source.unknownCount++
+						continue
+					}
+					source.entries = append(source.entries, initModelEntry{id: len(source.entries) + 1, name: model, value: model})
 				}
 			}
 		}
@@ -228,6 +235,7 @@ func initOpenCodeModels(ctx context.Context) initModelSource {
 			}
 		} else {
 			source.entries = nil
+			source.unknownCount = 0
 		}
 	}
 	return source
