@@ -1,10 +1,10 @@
 # brigada
 
-**Talk to your own coding session. It splits the work into tasks, brigada gives each one to the agent with the best measured record on your repo among those with quota left, checks and cross-reviews the result, and learns from the outcome.**
+**Talk to your own coding session. It splits the work into tasks; brigada gives each task to the agent with the best measured record on your repo among those with quota left, checks and cross-reviews the result, and learns from the outcome.**
 
 You may pay for more than one AI coding subscription. brigada sits above their official command-line tools (Claude Code, Codex, Kimi, opencode) and uses them as workers:
 
-- a **foreman**, one of those CLIs, turns what you ask for into a plan of tasks, with dependencies between them. In the usual setup the foreman is the session you already have open in your repository;
+- the **foreman**, one of those CLIs, turns what you ask for into a plan of tasks with dependencies between them. In the usual setup the foreman is the session you already have open in your repository;
 - the **dispatcher** gives each task to the agent with the best measured record for that kind of task on *your* repo, among the agents that still have quota;
 - every task's own **check** (tests, lint, any command) runs on the result, so "done" is not taken on trust;
 - a **reviewer** from a different model family than the author reads the change;
@@ -13,48 +13,71 @@ You may pay for more than one AI coding subscription. brigada sits above their o
 
 brigada drives the vendors' **unmodified** CLIs, each signed in with your own account. It never rotates or pools credentials. See [docs/TERMS.md](docs/TERMS.md).
 
-**Alpha.** brigada is local-first: one Go binary and a SQLite store on your machine. Expect rough edges and changing behaviour. Workers run in git worktrees, not containers, and a worker can do what your user can do. Checks run with your credentials: do not point brigada at a repository you do not trust.
+> **Alpha.** brigada is local-first: one Go binary and a SQLite store on your machine. Expect rough edges and changing behaviour. Workers run in git worktrees, not containers, and a worker can do what your user can do. Checks run with your credentials: do not point brigada at a repository you do not trust.
 
 ## Install
 
-You need Go 1.27 or newer, `git`, a repository with an `origin` remote, and signed-in agent CLIs on `PATH`. Reviews need another model family than the author's, so offer review-capable agents from at least two families.
+You need:
 
-```
+- Go 1.27 or newer and `git`;
+- a repository with an `origin` remote;
+- signed-in agent CLIs on `PATH`. Reviews need a model family other than the author's, so offer review-capable agents from at least two families.
+
+```sh
 go install github.com/Blackfire-AI/brigada/cmd/brigada@latest
 brigada version
 ```
 
-The main package lives in `cmd/brigada`, so that is the install path. Make sure `$(go env GOPATH)/bin` is on your `PATH`. Prebuilt binaries are attached to tagged releases when a release has been published.
+The main package lives in `cmd/brigada`, so that is the install path. Make sure `$(go env GOPATH)/bin` is on your `PATH`. Once a release is published, prebuilt binaries are attached to its tag.
 
 ## First run: `brigada init`
 
 Sign in to each CLI with its own login flow, then run this inside your repository:
 
-```
+```sh
 brigada init
 ```
 
-Init probes which of `claude`, `codex`, `kimi` and `opencode` are installed and signed in, asks which model each account serves, checks that you have two model families for review, picks the foreman, and suggests a default check and worker tools from your build files (it never runs the check). It lists the agents, permissions and files, shows diffs for existing files (`--verbose` also shows new file contents), and writes nothing until you confirm. After you confirm it writes `.brigada/project.yaml` (yours to commit; brigada never commits or pushes it), wires Claude Code for your own session, prints the command to run for Codex, starts the engine and starts a detached runner. `brigada init --probe` shows the plan and writes nothing. Stop the runner with `brigada stop`; add `--engine` to stop the engine too. The details and every flag are in [the guide, section 1](docs/GUIDE.md#1-install-and-brigada-init).
+Init asks a few questions, shows a plan, and writes nothing until you confirm:
+
+- it probes which of `claude`, `codex`, `kimi` and `opencode` are installed and signed in, and asks which model each account serves;
+- it checks that you have two model families for review, and picks the foreman;
+- it suggests a default check and worker tools from your build files (it never runs the check);
+- it lists the agents, permissions and files, and shows a diff for every existing file it would change (`--verbose` also shows the contents of new files).
+
+After you confirm, init:
+
+- writes `.brigada/project.yaml`, which is yours to commit (brigada never commits or pushes it);
+- wires Claude Code for your own session, and prints the command to run for Codex;
+- starts the engine and a detached runner.
+
+`brigada init --probe` shows the plan and writes nothing. Stop the runner with `brigada stop`; add `--engine` to stop the engine too. Every step and flag is in [the guide, section 1](docs/GUIDE.md#1-install-and-brigada-init).
 
 ## Your own session is the foreman
 
-After init, open your harness in the repository and talk to it (mode A). It plans through brigada's tools, the runner works each task on its own branch in a worktree, runs the check and pushes the branch, and a reviewer of another family reads it. Only one interactive session holds the foreman at a time, and your session lets go of it at the end of each turn so that work finishing while you are away can wake a separate, brigada-owned headless foreman session. Decisions are handed over through short notes recorded in the engine, not through your chat. See [section 2](docs/GUIDE.md#2-your-own-session-is-the-foreman-mode-a).
+After init, open your harness in the repository and talk to it. This is **mode A**: your session is the foreman. It plans through brigada's tools; the runner works each task on its own branch in a worktree, runs the check and pushes the branch; and a reviewer of another family reads it.
+
+Only one interactive session holds the foreman at a time. Your session lets go of it at the end of each turn, so work that finishes while you are away can wake a separate, brigada-owned headless foreman. Decisions reach that headless foreman through short notes recorded in the engine, not through your chat. See [section 2](docs/GUIDE.md#2-your-own-session-is-the-foreman-mode-a).
 
 Then:
 
-```
+```sh
 brigada status              # engine, jobs, plans, what needs you
 brigada diff <task-id>      # what a task changed
 brigada land <task-id>...   # squash approved tasks onto this branch; never pushes
 ```
 
-For several repositories (a coordinator session in the parent folder), the watching commands, configuration and the command reference, read the [guide](docs/GUIDE.md).
+The [guide](docs/GUIDE.md) covers the rest: a coordinator session over several repositories (mode B), watching work as it runs, configuration, and the full command reference.
 
-`brigada help` lists commands. Use `brigada land --help` (or `brigada help land`) for a command's usage and flags, and `brigada project --help` for its subcommands. Each subcommand has help too, for example `brigada project foreman --help`.
+`brigada help` lists the commands. `brigada land --help` (or `brigada help land`) prints a command's usage and flags, and `brigada project --help` lists its subcommands. Each subcommand has help too, for example `brigada project foreman --help`.
 
 ## No telemetry
 
-brigada sends no usage data, analytics or crash reports anywhere. That is a promise about brigada, not about the CLIs it drives: each official CLI sends your prompts and the code it reads to its own model provider, as it does when you run it by hand, under your account and that vendor's terms. The runner also pushes task branches to your repository's git remote with your git credentials, and the engine mirrors plan files (titles, task states, dependencies, open questions) to the `brigada/plans` branch of that remote.
+brigada sends no usage data, analytics or crash reports anywhere. That is a promise about brigada, not about the CLIs it drives:
+
+- each official CLI sends your prompts and the code it reads to its own model provider, as it does when you run it by hand, under your account and that vendor's terms;
+- the runner pushes task branches to your repository's git remote with your git credentials;
+- the engine mirrors plan files (titles, task states, dependencies, open questions) to the `brigada/plans` branch of that remote.
 
 brigada has no API-key setting of its own. Workers inherit your environment (minus brigada's own variables), so a CLI that you have set up with an API key the way its vendor documents is driven the same way. See [docs/TERMS.md](docs/TERMS.md).
 
@@ -62,7 +85,7 @@ brigada has no API-key setting of its own. Workers inherit your environment (min
 
 Maintainers tag a version and push the tag:
 
-```
+```sh
 git tag v0.1.0
 git push origin v0.1.0
 ```
