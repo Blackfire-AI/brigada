@@ -615,6 +615,8 @@ func (e *Engine) reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now ti
 			return err
 		}
 		return e.queueFixRoundTx(tx, job, roundReview, v.Findings, v.Findings, nil, now)
+	case reviewerUnavailable(c):
+		return e.requeueReviewTx(tx, job, c, now)
 	default:
 		reason := "no verdict in the review result"
 		switch {
@@ -628,6 +630,72 @@ func (e *Engine) reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now ti
 		}
 		return e.queueReviewRetryTx(tx, job, reason, now)
 	}
+}
+
+// reviewerUnavailable reports whether a completion's failure means the
+// reviewer could not run at all — its account hit a limit, its login
+// failed, or its setup broke — rather than that it ran and answered
+// badly. Such a review says nothing about the change.
+func reviewerUnavailable(c Completion) bool {
+	if c.Error == "" {
+		return false
+	}
+	switch c.ErrorKind {
+	case "limit", "auth", ErrorKindSetup:
+		return true
+	}
+	return false
+}
+
+// requeueReviewTx puts a review whose reviewer was unavailable back in the
+// queue as a new job of the same cycle: same prompt, same exclusions, so
+// the question and who may answer it are unchanged. It spends no retry.
+// The failed agent is kept out by the account cooling and broken-agent
+// rules, and the requeued job waits under the cooling hold like any review
+// whose qualifying agents are all cooling.
+//
+// Requeue and unservable: a requeue cannot loop, since each one needs a
+// lease and a failure of its own, and when every qualifying agent is
+// broken or auth-failed the job just waits queued. When no agent at all
+// qualifies — what reviewUnservableTx tests — the review can never run,
+// so the task parks like an unusable one instead of waiting forever.
+func (e *Engine) requeueReviewTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
+	var harness, model string
+	if job.AgentID != 0 {
+		if err := tx.QueryRow("SELECT harness, model FROM agents WHERE id = ?", job.AgentID).Scan(&harness, &model); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("read agent %d: %w", job.AgentID, err)
+		}
+	}
+	reason := fmt.Sprintf("reviewer unavailable (%s): %s/%s", c.ErrorKind, harness, model)
+	requeue := &jobRow{ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindReview,
+		ExcludeFamily: job.ExcludeFamily, ExcludeAgent: job.ExcludeAgent}
+	noAgent, err := noReviewAgentTx(tx, requeue)
+	if err != nil {
+		return err
+	}
+	if noAgent {
+		return e.needsForemanTx(tx, job, evReviewNoVerdict,
+			eventPayload{Reason: boundNote(reason + "; no agent can take the review")}, now)
+	}
+	sr, err := e.submitTx(tx, SubmitParams{
+		Key:           job.Key,
+		ProjectID:     job.ProjectID,
+		TaskID:        job.TaskID,
+		Kind:          KindReview,
+		Mode:          ModeFresh,
+		Prompt:        job.Prompt,
+		ExcludeFamily: job.ExcludeFamily,
+		ExcludeAgent:  job.ExcludeAgent,
+	}, now)
+	if err != nil {
+		return err
+	}
+	if sr.Answer != AnsCreated {
+		return fmt.Errorf("requeue the review of task %d: submit %s answered %s", job.TaskID, job.Key, sr.Answer)
+	}
+	_, err = appendEventTx(tx, evReviewRetry, job.ProjectID, job.TaskID, job.ID,
+		eventPayload{Run: int64(sr.Run), Reason: boundNote(reason + "; requeued")}, now)
+	return err
 }
 
 // queueReviewRetryTx answers an unusable review with another reviewer
@@ -696,13 +764,16 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 // restart round replaced, §5.6 — is the same review asked again, not
 // another reviewer's word, so it does not count. Author jobs — work or
 // fix, including restarts — begin a new cycle with a fresh first
-// review.
+// review. A review whose reviewer could not run (error kind limit, auth
+// or setup) never gave an answer, so it is not counted either; the job
+// being judged is the unusable answer itself, the one the count adds.
 func reviewRetrySpentTx(tx *sql.Tx, job *jobRow) (bool, error) {
 	var reviews int64
 	err := tx.QueryRow(`SELECT COUNT(*) FROM jobs
 		WHERE task_id = ? AND kind = 'review' AND restart = 0
+		AND error_kind NOT IN ('limit', 'auth', ?)
 		AND id > COALESCE((SELECT MAX(id) FROM jobs WHERE task_id = ? AND kind IN ('work', 'fix')), 0)`,
-		job.TaskID, job.TaskID).Scan(&reviews)
+		job.TaskID, ErrorKindSetup, job.TaskID).Scan(&reviews)
 	if err != nil {
 		return false, fmt.Errorf("count the reviews of task %d: %w", job.TaskID, err)
 	}
