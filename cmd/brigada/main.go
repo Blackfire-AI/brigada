@@ -43,6 +43,7 @@ Commands:
 	                its author's, with no plan or task.
 	engine          Run the engine: store and API on the Unix socket.
 	runner          Run a runner: lease jobs, run workers, run checks.
+	start           Start the engine and detached runner with saved agents.
 	stop            Stop the detached runner (--engine: the engine too).
 	mcp             Serve brigada's tools over stdio: the foreman's
 	                (--foreman), the coordinator's (--coordinator) or the
@@ -122,6 +123,7 @@ var commands = map[string]command{
 	"review":  {name: "review", run: runReview},
 	"engine":  {name: "engine", run: runEngine},
 	"runner":  {name: "runner", run: runRunner},
+	"start":   {name: "start", run: runStart},
 	"stop":    {name: "stop", run: runStop},
 	"mcp":     {name: "mcp", run: runMCP},
 	"status":  {name: "status", run: runStatus},

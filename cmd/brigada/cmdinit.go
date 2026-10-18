@@ -24,8 +24,8 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
-// initBinary is empty in production (this executable); integration tests use
-// the built CLI to exercise real detached engine and runner startup.
+// initBinary is empty in production (this executable); integration tests for
+// init and start use the built CLI for real detached engine and runner startup.
 var initBinary string
 
 func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code int) {
@@ -700,11 +700,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 	}
 
-	runnerArgs := []string{}
-	for _, s := range usable {
-		runnerArgs = append(runnerArgs, "--agent", s.String())
-	}
-	result, err := lifecycle.EnsureRunner(ctx, lifecycle.RunnerStartOptions{StateDir: rt.stateDir, ConfigPath: rt.configForStart(), Binary: initBinary, Args: runnerArgs})
+	runnerSpecs := runnerSpecStrings(usable)
+	result, err := startDetachedRunner(ctx, rt, runnerSpecs)
 	if err != nil {
 		return partial(fmt.Errorf("project registered and imported, but runner startup failed: %w", err))
 	}
@@ -713,10 +710,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			ctx, runnerStateDir(rt), result.Record); err != nil {
 			return partial(fmt.Errorf("stop runner for new agents: %w", err))
 		}
-		result, err = lifecycle.EnsureRunner(ctx, lifecycle.RunnerStartOptions{
-			StateDir: rt.stateDir, ConfigPath: rt.configForStart(),
-			Binary: initBinary, Args: runnerArgs,
-		})
+		result, err = startDetachedRunner(ctx, rt, runnerSpecs)
 		if err != nil {
 			return partial(fmt.Errorf("restart runner: %w", err))
 		}
