@@ -79,13 +79,18 @@ func initPrompt(w io.Writer, prompt string) string {
 	}
 	// Keep the default's cyan independent of the surrounding bold prompt.
 	var b strings.Builder
+	bold := func(text string) {
+		if text != "" {
+			b.WriteString(out.style.Bold(text))
+		}
+	}
 	start := 0
 	for _, loc := range initPromptDefault.FindAllStringIndex(prompt, -1) {
-		b.WriteString(out.style.Bold(prompt[start:loc[0]]))
+		bold(prompt[start:loc[0]])
 		b.WriteString(out.style.Accent(prompt[loc[0]:loc[1]]))
 		start = loc[1]
 	}
-	b.WriteString(out.style.Bold(prompt[start:]))
+	bold(prompt[start:])
 	return b.String()
 }
 

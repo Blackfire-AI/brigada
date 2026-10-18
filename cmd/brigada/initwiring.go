@@ -14,6 +14,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/foreman"
+	"github.com/Blackfire-AI/brigada/internal/term"
 )
 
 // Harness wiring for mode A (design §13.1 item 7, §4.6 "What the facts
@@ -35,9 +36,11 @@ const (
 // codexWiringText is what init prints for Codex instead of writing anything:
 // no project-scope path is verified, so the user-level command is the user's
 // to run (§4.6 "What the facts allow", item 7 approvals).
-const codexWiringText = `  Codex, optional: to plan from your own Codex session, run once yourself:
-    codex mcp add brigada-foreman -- brigada mcp --foreman
-`
+func initCodexText(w io.Writer) string {
+	style := initPresentation(w).style
+	return "  " + style.Bold("Codex") + ", optional: to plan from your own Codex session, run once yourself:\n" +
+		"    " + style.Accent("codex mcp add brigada-foreman -- brigada mcp --foreman") + "\n"
+}
 
 type mcpBridge struct {
 	Command string   `json:"command"`
@@ -172,7 +175,7 @@ func wiringSafePath(root, rel string) error {
 // printInitFiles prints the repository plan, including project.yaml. Existing
 // files always show their changes; contents of new files are opt-in.
 func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
-	fmt.Fprintln(w, "  Files in this repository (brigada never commits them):")
+	fmt.Fprintln(w, "  "+initPresentation(w).style.Bold("Files")+" in this repository (brigada never commits them):")
 	// Show the setup files first, then supporting edits such as git's exclude.
 	ordered := make([]wireFile, 0, len(files))
 	primary := []string{engine.ProjectConfigPath, wiringMCPFile, wiringSettingsFile, wiringSkillFile}
@@ -188,10 +191,12 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 			ordered = append(ordered, f)
 		}
 	}
-	pathWidth := 0
+	style := initPresentation(w).style
+	pathWidth, stateWidth := 0, 0
 	for _, f := range ordered {
 		if f.exists || f.changed() || f.err != nil {
 			pathWidth = max(pathWidth, len(f.rel))
+			stateWidth = max(stateWidth, len(initFileState(f)))
 		}
 	}
 	for _, f := range ordered {
@@ -213,23 +218,25 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 		default:
 			purpose = "keeps private Claude Code settings out of git"
 		}
-		state := "unchanged"
+		state := initFileState(f)
+		var colored string
 		switch {
 		case f.err != nil:
-			state = "left alone: " + f.err.Error()
+			colored = style.Bad(state)
 		case !f.exists:
-			state = "new"
+			colored = style.OK(state)
 		case f.changed():
-			state = "changes"
+			colored = style.Warn(state)
+		default:
+			colored = style.Dim(state)
 		}
-		prefix := fmt.Sprintf("    %-*s  ", pathWidth, f.rel)
+		prefix := "    " + initPad(colored, stateWidth) + "  " + fmt.Sprintf("%-*s", pathWidth, f.rel) + "  "
 		if f.err != nil {
-			printInitWrapped(w, prefix, strings.Repeat(" ", len(prefix)), state)
-			prefix = strings.Repeat(" ", len(prefix))
-		} else {
-			prefix += state + "  "
+			// The reason takes the row's own line, where the purpose goes.
+			printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), f.err.Error())
+			prefix = strings.Repeat(" ", term.VisibleWidth(prefix))
 		}
-		printInitWrapped(w, prefix, strings.Repeat(" ", len(prefix)), purpose)
+		printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), style.Dim(purpose))
 		if f.changed() {
 			if f.exists {
 				if f.rel == engine.ProjectConfigPath {
@@ -244,7 +251,19 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 			}
 		}
 	}
-	fmt.Fprintln(w, "    (show full contents: --verbose)")
+	fmt.Fprintln(w, "    "+style.Dim("(show full contents: --verbose)"))
+}
+
+func initFileState(f wireFile) string {
+	switch {
+	case f.err != nil:
+		return "left alone"
+	case !f.exists:
+		return "new"
+	case f.changed():
+		return "changes"
+	}
+	return "unchanged"
 }
 
 // printFileDiff prints a unified-style hunk of the lines that differ plus two

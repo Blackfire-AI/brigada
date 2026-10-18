@@ -111,13 +111,10 @@ Step 3 of 3: how brigada tests the work
 
 Plan
   Agents:
-    claude    sonnet (default)                   Anthropic    writes code,
-                                                              reviews
-    codex     gpt-6.1-sol (default)              OpenAI       writes code,
-                                                              reviews
-    kimi      kimi-code/k3 (default)             Moonshot     reviews only
-    opencode  zai-coding-plan/glm-5.3 (default)  Zhipu (GLM)  writes code,
-                                                              reviews
+    claude    sonnet                   Anthropic    code + review
+    codex     gpt-6.1-sol              OpenAI       code + review
+    kimi      kimi-code/k3             Moonshot     review only
+    opencode  zai-coding-plan/glm-5.3  Zhipu (GLM)  code + review
   Reviews: 4 model families, so every task can get a reviewer of another one.
   Foreman: claude/sonnet
   Check: uv run pytest (init doesn't run it; change it later in
@@ -127,25 +124,22 @@ Plan
     codex     edit files and run commands inside codex's sandbox
     opencode  edit files; no commands
   Files in this repository (brigada never commits them):
-    .brigada/project.yaml                    new  the settings above
-    .mcp.json                                new  lets Claude Code here use
+    new  .brigada/project.yaml                    the settings above
+    new  .mcp.json                                lets Claude Code here use
                                                   brigada (Claude Code asks you
                                                   to approve it)
-    .claude/settings.local.json              new  private, kept out of git:
+    new  .claude/settings.local.json              private, kept out of git:
                                                   when your Claude turn ends,
                                                   brigada's foreman picks up
                                                   what happened meanwhile
-    .claude/skills/brigada-foreman/SKILL.md  new  rules for your Claude session
+    new  .claude/skills/brigada-foreman/SKILL.md  rules for your Claude session
     (show full contents: --verbose)
   Codex, optional: to plan from your own Codex session, run once yourself:
     codex mcp add brigada-foreman -- brigada mcp --foreman
   In the background: a runner starts now and keeps going (log:
     ~/.local/state/brigada/runner.log; stop it with: brigada stop). The engine
     starts when needed and stops after 30 idle minutes.
-
-To change later: brigada init (agents, models, effort),
-  brigada project foreman (foreman), .brigada/project.yaml (check),
-  brigada config (see everything).
+    brigada config shows every setting later
 
 Write 4 files and start the runner? [y/N]
 Declined; nothing written or started.

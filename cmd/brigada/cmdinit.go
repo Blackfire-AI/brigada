@@ -635,8 +635,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		fmt.Fprintln(stdout)
 	}
 	printInitAgents(stdout, usable, len(families), *chosen, sources)
-	printInitWrapped(stdout, "  Check: ", "    ", *check+" (init doesn't run it; change it later in .brigada/project.yaml)")
-	fmt.Fprintln(stdout, "  What workers may do:")
+	printInitWrapped(stdout, "  "+style.Bold("Check:")+" ", "    ", *check+" (init doesn't run it; change it later in .brigada/project.yaml)")
+	fmt.Fprintln(stdout, "  "+style.Bold("What workers may do:"))
 	for _, a := range adverts {
 		if !slices.Contains(a.Classes, "implement") {
 			continue
@@ -666,11 +666,11 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	printInitFiles(stdout, files, *verbose)
 	if !*noWiring {
 		if probes["codex"].installed {
-			fmt.Fprint(stdout, codexWiringText)
+			fmt.Fprint(stdout, initCodexText(stdout))
 		}
 	}
-	printInitWrapped(stdout, "  In the background: ", "    ", "a runner starts now and keeps going (log: "+initHomePath(filepath.Join(rt.stateDir, "runner.log"))+"; stop it with: brigada stop). The engine starts when needed and stops after 30 idle minutes.")
-	fmt.Fprint(stdout, "\nTo change later: brigada init (agents, models, effort),\n  brigada project foreman (foreman), .brigada/project.yaml (check),\n  brigada config (see everything).\n")
+	printInitWrapped(stdout, "  "+style.Bold("In the background:")+" ", "    ", "a runner starts now and keeps going (log: "+initHomePath(filepath.Join(rt.stateDir, "runner.log"))+"; stop it with: "+style.Accent("brigada stop")+"). The engine starts when needed and stops after 30 idle minutes.")
+	printInitWrapped(stdout, "    ", "    ", style.Accent("brigada config")+style.Dim(" shows every setting later"))
 	fmt.Fprintln(stdout)
 	if *probe {
 		fmt.Fprintln(stdout, "Probe only; nothing written or started. Re-run without --probe to confirm, or with --yes to apply.")
@@ -816,17 +816,17 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		done.WriteString(" Project configured; inspect the existing runner agents above before sending work.")
 	}
 	printInitWrapped(stdout, "", "  ", done.String())
-	fmt.Fprintln(stdout, "Next:")
+	fmt.Fprintln(stdout, style.Bold("Next:"))
 	step := 1
 	if !*noWiring && probes["claude"].installed {
 		printInitWrapped(stdout, fmt.Sprintf("  %d. ", step), "     ",
-			"Open Claude Code here (`claude`), approve the brigada MCP server "+
+			"Open Claude Code here ("+style.Accent("`claude`")+"), approve the brigada MCP server "+
 				"when asked, and say what you want built. Your session plans; "+
 				"you approve the plan.")
 		step++
 	}
-	fmt.Fprintf(stdout, "  %d. Or, without a session: brigada ask \"what you want built\"\n", step)
-	fmt.Fprintln(stdout, "  Watch progress: brigada status    Stop the runner: brigada stop")
+	fmt.Fprintf(stdout, "  %d. Or, without a session: %s\n", step, style.Accent("brigada ask \"what you want built\""))
+	fmt.Fprintln(stdout, "  Watch progress: "+style.Accent("brigada status")+"    Stop the runner: "+style.Accent("brigada stop"))
 	return 0
 }
 
@@ -1134,42 +1134,77 @@ func initFamilyName(family string) string {
 }
 
 func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agentSpec, sources map[string]initModelSource) {
-	fmt.Fprintln(w, "Plan\n  Agents:")
+	out := initPresentation(w)
+	style := out.style
+	heading := "Plan"
+	if out.styled {
+		heading = style.Rule() + " Plan"
+	}
+	fmt.Fprintln(w, style.Bold(heading))
+	fmt.Fprintln(w, "  "+style.Bold("Agents:"))
 	modelWidth, familyWidth := 0, 0
 	familyNames := make([]string, len(agents))
-	modelNames := make([]string, len(agents))
+	modelCells := make([]string, len(agents))
 	for i, s := range agents {
 		family, _ := adapter.AgentFamily(s.harness, s.model)
 		family = initFamilyName(family)
 		familyNames[i] = family
-		modelNames[i] = initAgentModelName(s, sources) + " (default)"
+		modelCells[i] = initAgentModelName(s, sources)
 		if s.effort != "" {
-			modelNames[i] = initAgentModelName(s, sources) + " @" + s.effort
+			modelCells[i] += style.Dim(" @" + s.effort)
 		}
-		modelWidth = max(modelWidth, term.VisibleWidth(modelNames[i]))
+		modelWidth = max(modelWidth, term.VisibleWidth(modelCells[i]))
 		familyWidth = max(familyWidth, term.VisibleWidth(family))
 	}
 	for i, s := range agents {
 		// If the fixed columns leave no room for roles, put family and roles
 		// on a second line under the model column for every row. Very long
 		// identifiers wrap within that column, with roles on a separate line.
-		if 14+modelWidth+2+familyWidth+2 >= initPresentation(w).style.Width()-1 {
+		if 14+modelWidth+2+familyWidth+2 >= style.Width()-1 {
 			indent := strings.Repeat(" ", 14)
-			printInitWrapped(w, fmt.Sprintf("    %-9s ", s.harness), indent, modelNames[i])
-			if 14+familyWidth+2 >= initPresentation(w).style.Width()-1 {
-				printInitWrapped(w, indent, indent, familyNames[i])
-				printInitWrapped(w, indent, indent, initAgentRoles(s.classes))
+			printInitWrapped(w, fmt.Sprintf("    %-9s ", s.harness), indent, modelCells[i])
+			if 14+familyWidth+2 >= style.Width()-1 {
+				printInitWrapped(w, indent, indent, style.Dim(familyNames[i]))
+				printInitWrapped(w, indent, indent, initPlanRoles(s.classes))
 			} else {
-				prefix := fmt.Sprintf("%s%-*s  ", indent, familyWidth, familyNames[i])
-				printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), initAgentRoles(s.classes))
+				prefix := indent + initPad(style.Dim(familyNames[i]), familyWidth) + "  "
+				printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), initPlanRoles(s.classes))
 			}
 			continue
 		}
-		prefix := fmt.Sprintf("    %-9s %-*s  %-*s  ", s.harness, modelWidth, modelNames[i], familyWidth, familyNames[i])
-		printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), initAgentRoles(s.classes))
+		prefix := fmt.Sprintf("    %-9s ", s.harness) + initPad(modelCells[i], modelWidth) + "  " + initPad(style.Dim(familyNames[i]), familyWidth) + "  "
+		printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), initPlanRoles(s.classes))
 	}
-	printInitWrapped(w, "  Reviews: ", "    ", fmt.Sprintf("%d model families, so every task can get a reviewer of another one.", families))
-	printInitWrapped(w, "  Foreman: ", "    ", initForemanName(foreman, sources))
+	printInitWrapped(w, "  "+style.Bold("Reviews:")+" ", "    ", fmt.Sprintf("%d model families, so every task can get a reviewer of another one.", families))
+	printInitWrapped(w, "  "+style.Bold("Foreman:")+" ", "    ", initForemanName(foreman, sources))
+}
+
+// initPad right-pads text, which may carry escapes, to a visible width.
+func initPad(text string, width int) string {
+	return text + strings.Repeat(" ", max(0, width-term.VisibleWidth(text)))
+}
+
+// initPlanRoles is a Plan row's role phrase: "code + review", or
+// "review only" for a single role.
+func initPlanRoles(classes []string) string {
+	if len(classes) == 3 && slices.Contains(classes, "implement") && slices.Contains(classes, "review") && slices.Contains(classes, "answer") {
+		return "code + review"
+	}
+	var roles []string
+	for _, class := range classes {
+		switch class {
+		case "implement":
+			roles = append(roles, "code")
+		case "review":
+			roles = append(roles, "review")
+		default:
+			roles = append(roles, class)
+		}
+	}
+	if len(roles) == 1 {
+		return roles[0] + " only"
+	}
+	return strings.Join(roles, " + ")
 }
 
 func initApplyPrompt(files int, running bool) string {
