@@ -4,7 +4,7 @@
 
 You may pay for more than one AI coding subscription. brigada sits above their official command-line tools (Claude Code, Codex, Kimi, opencode) and uses them as workers:
 
-- a **foreman**, one of those CLIs, turns what you ask for into a plan of tasks, with dependencies between them. In the usual setup the foreman is the session you already have open in your repository;
+- a **foreman**, a Claude or Codex session, turns what you ask for into a plan of tasks, with dependencies between them. In the usual setup the foreman is the session you already have open in your repository;
 - the **dispatcher** gives each task to the agent with the best measured record for that kind of task on *your* repo, among the agents that still have quota;
 - every task's own **check** (tests, lint, any command) runs on the result, so "done" is not taken on trust;
 - a **reviewer** from a different model family than the author reads the change;
@@ -34,7 +34,7 @@ Sign in to each CLI with its own login flow, then run this inside your repositor
 brigada init
 ```
 
-Init probes which of `claude`, `codex`, `kimi` and `opencode` are installed and signed in, asks which model each account serves, checks that you have two model families for review, picks the foreman, and suggests a default check and worker tools from your build files (it never runs the check). It lists the agents, permissions and files, shows diffs for existing files (`--verbose` also shows new file contents), and writes nothing until you confirm. After you confirm it writes `.brigada/project.yaml` (yours to commit; brigada never commits or pushes it), wires Claude Code for your own session, prints the command to run for Codex, starts the engine and starts a detached runner. `brigada init --probe` shows the plan and writes nothing. Stop the runner with `brigada stop`; add `--engine` to stop the engine too. The details and every flag are in [the guide, section 1](docs/GUIDE.md#1-install-and-brigada-init).
+Init walks through three steps: choose models from menus for installed CLIs (confirming sign-in when it cannot be checked), choose a Claude or Codex foreman when both are usable, and choose a default check suggested from your build files (it never runs the check). Kimi reviews only unless you opt into writing code; explicit `--agent` specs retain the runner's class defaults. Init requires two review-capable model families unless you pass `--accept-limited`. It lists the agents, permissions and files, shows diffs for existing files (`--verbose` also shows new file contents), and writes nothing until you confirm. After you confirm it writes `.brigada/project.yaml` (yours to commit; brigada never commits or pushes it), wires Claude Code for your own session, prints the command to run for Codex, starts the engine and starts a detached runner. With agents supplied through `--agent`, `brigada init --probe` shows the plan without prompts or writes; use `--signed-in` for authentication that probes cannot confirm. Stop the runner with `brigada stop`; add `--engine` to stop the engine too. The details and every flag are in [the guide, section 1](docs/GUIDE.md#1-install-and-brigada-init).
 
 ## Your own session is the foreman
 
