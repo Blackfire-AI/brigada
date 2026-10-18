@@ -54,6 +54,8 @@ After you confirm, init:
 
 `brigada init --probe` shows the plan and writes nothing. Stop the runner with `brigada stop`; add `--engine` to stop the engine too. Every step and flag is in [the guide, section 1](docs/GUIDE.md#1-install-and-brigada-init).
 
+`brigada remove` removes brigada's repository wiring and archives the project, keeping its history; see [the guide](docs/GUIDE.md#removing-brigada-from-a-repository).
+
 ## Your own session is the foreman
 
 After init, open your harness in the repository and talk to it. This is **mode A**: your session is the foreman. It plans through brigada's tools; the runner works each task on its own branch in a worktree, runs the check and pushes the branch; and a reviewer of another family reads it.

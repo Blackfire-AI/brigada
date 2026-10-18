@@ -154,6 +154,30 @@ If init fails after writing `project.yaml`, it says `partial init` and names the
 
 Stop checks the lock before signalling, sends SIGTERM, and waits up to 10 seconds for each process to release its lock; it reports failure if a process is still running. It clears stale runner records without signalling their old pids, and succeeds when nothing is running. Neither form starts an engine. Other commands start the engine again on demand; init starts the runner again.
 
+### Removing brigada from a repository
+
+Run `brigada remove` inside the repository. It prints a removal plan, then asks `Remove brigada from this repository? [y/N]:`. Answering no leaves everything in place and prints `Nothing removed.`. The repository is identified by its `origin`, as with init.
+
+The repository cleanup covers brigada's wiring:
+
+- the `brigada` server in `.mcp.json`;
+- the `Stop` hook (`brigada hold yield`) in `.claude/settings.local.json`, and the legacy brigada hooks in `.claude/settings.json`;
+- `.claude/skills/brigada-foreman/SKILL.md`, only when it has brigada's marker;
+- the `/.claude/settings.local.json` line in git's `info/exclude`.
+
+Other settings and hooks stay. A JSON file is deleted only if removing brigada's entries leaves nothing else in it. `.brigada/project.yaml` stays unless you pass `--delete-config`.
+
+| Flag | Meaning |
+|---|---|
+| `--yes` | Apply the displayed plan and stop an unused runner without prompting. |
+| `--cancel` | Cancel live jobs and unfinished plans when removing the project. Without it, live work makes removal fail: wait for it to finish or pass `--cancel`. |
+| `--delete-config` | Also delete this repository's `.brigada/project.yaml`. |
+| `--state-dir DIR`, `--config PATH` | As for every command. |
+
+Removal archives the project, keeping its plans, tasks, stats and history ([section 6](#6-configuring-a-project)). On success it prints `brigada removed; project history kept.`. If other projects use the runner, it keeps running. Otherwise, if the runner is running, remove asks `stop the runner? [Y/n]`; Enter stops it. `--yes` accepts that too.
+
+Remote `brigada/task-*` branches and `brigada/plans` are left alone. Remove lists them and prints `git push origin --delete` commands for you to run yourself; if the remote cannot be checked, it says so. When Codex is installed, it also prints `codex mcp remove brigada-foreman` for the optional user-level registration. Remove does not run that command.
+
 ### By hand
 
 The manual equivalents of what init applies:
@@ -392,6 +416,8 @@ A project's settings come from three places:
 - **local settings** you set with `brigada project set`, kept in this engine's store.
 
 `brigada project show [--repo URL]` prints every key with its effective value and where it comes from: `(default)`, `(set)` for a local setting, or `(imported <hash>)` for a value the last import set. `--repo` defaults to the origin of the repository you are in.
+
+`brigada remove` archives the project: plans, tasks, stats and history stay in the store, and `brigada history` still shows its history. The project disappears from `brigada project list` and `brigada status`. Run `brigada init` inside the repository to bring it back. See [section 1](#removing-brigada-from-a-repository) for removal's flags and the wiring it removes.
 
 ### `.brigada/project.yaml`, schema 1
 
@@ -901,6 +927,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada init [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories-mode-b).
 - `brigada runner [--agent SPEC]... [--labels LABELS] [--max-parallel N]`, where SPEC is `harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]`: run a runner that leases jobs, runs workers and checks, and pushes branches. See [section 8](#8-agents-quota-and-health).
 - `brigada stop [--engine]`: stop the detached runner in the selected state directory; `--engine` also stops the engine. Sends SIGTERM and waits up to 10 seconds per process; succeeds if nothing is running, and never starts the engine. See [section 1](#stopping).
+- `brigada remove [--yes] [--cancel] [--delete-config]`: remove brigada from this repository, keeping its project history. `--yes` applies the displayed plan and stops an unused runner without prompting; `--cancel` cancels live jobs and unfinished plans; `--delete-config` also deletes `.brigada/project.yaml`. See [section 1](#removing-brigada-from-a-repository).
 - `brigada mcp (--foreman [URL] | --coordinator | --client)`: serve brigada's tools over stdio. `--foreman` is the mode A bridge of your own session ([section 2](#2-your-own-session-is-the-foreman-mode-a)), `--coordinator` the mode B tools ([section 3](#3-several-repositories-mode-b)), `--client` the tools of [section 12](#from-another-harness). Only one selector at a time. Claude Code runs it from the wiring init writes. Without a selector, `--socket PATH` is the bridge a headless foreman session uses; you do not run that by hand.
 
 ### Talking
