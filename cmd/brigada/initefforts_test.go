@@ -237,7 +237,7 @@ func TestInitEffortInformationOnly(t *testing.T) {
 			}
 			want := ""
 			if tc.harness == "kimi" && tc.defaultEffort != "" {
-				want = "    Effort: high, kimi's own setting for this model (change it in\n    ~/.kimi-code/config.toml; brigada can't set it per run).\n"
+				want = "    Effort: high, kimi's own setting for this model (brigada can't set it per\n    run).\n"
 			}
 			if out.String() != want {
 				t.Fatalf("output = %q, want %q", out.String(), want)

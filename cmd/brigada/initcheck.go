@@ -101,12 +101,12 @@ func askInitCheck(w io.Writer, ask func(prompt, flags string) (string, error), e
 			}
 			prefix := initMenuPrefix(w, "    ", i+1, e.Command, width, i == 0) + "  "
 			if initPresentation(w).styled {
-				printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), initRowNote(w, note, tags))
+				printInitRow(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), note, tags)
 			} else {
 				limit := initPresentation(w).style.Width() - 1
 				room := limit - term.VisibleWidth(prefix) - term.VisibleWidth(tags)
 				if note != "" && tags != "" {
-					room-- // initRowNote separates the note and tag with a space.
+					room -= 2 // initRowNote separates the note and tag with two spaces.
 				}
 				note = truncateNote(note, room)
 				row := prefix + initRowNote(w, note, tags)

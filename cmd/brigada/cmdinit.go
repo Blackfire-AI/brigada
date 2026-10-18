@@ -285,24 +285,21 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				}
 				prefix := initMenuPrefix(stdout, "      ", entry.id, initMenuModelName(entry), width, entry.id == defaultID) + "  " + initDim(stdout, familyNames[i])
 				note, tags := entry.note, ""
+				if entry.isDefault {
+					tags = "your " + h + " default"
+				}
 				if entry.isCurrent {
 					tags = "current"
-				} else if entry.id == defaultID {
+				} else if entry.id == defaultID && tags == "" {
 					tags = "default"
 				}
-				if entry.isDefault {
-					note = initDefaultNote(h, note)
-					if tags == "" {
-						tags = "default"
-					}
+				if initMenuModelName(entry) == "default" {
+					tags = ""
 				}
 				if note != "" || tags != "" {
-					if home, err := os.UserHomeDir(); err == nil && home != "" {
-						note = strings.ReplaceAll(note, "("+home+string(os.PathSeparator), "(~/")
-					}
 					prefix += strings.Repeat(" ", familyWidth-term.VisibleWidth(familyNames[i])+2)
 				}
-				printInitWrapped(stdout, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), initRowNote(stdout, note, tags))
+				printInitRow(stdout, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), note, tags)
 			}
 			if h != "kimi" || saved != nil {
 				indent := "      "
@@ -506,7 +503,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		return usagef(stderr, "--foreman must name a usable agent that resumes headless (claude/model or codex/model); none matched")
 	}
 	if canAsk {
-		initChangeLater(stdout, "run brigada init again")
+		initChangeLater(stdout, initAgentChangeLater(sources))
 		fmt.Fprintln(stdout)
 		initStep(stdout, 2, "the foreman", "  The foreman plans the work and decides what happens when a task needs\n  judgment. It runs whenever work finishes, so it uses that agent's quota.\n  Only claude and codex can be the foreman; it uses the model picked above\n  and its effort.\n")
 		var candidates []*agentSpec
@@ -533,7 +530,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 					tags = "default"
 					prefix += "  "
 				}
-				printInitWrapped(stdout, prefix, "        ", initRowNote(stdout, "", tags))
+				printInitRow(stdout, prefix, "        ", "", tags)
 			}
 			if *foreman == "" {
 				for attempt := 0; attempt < 3; attempt++ {
@@ -895,7 +892,7 @@ func initPickEffort(w io.Writer, harness string, entry initModelEntry,
 	ask func(string, string) (string, error), saved ...string) (string, error) {
 	if harness == "kimi" {
 		if entry.defaultEffort != "" {
-			printInitWrapped(w, "    Effort: ", "    ", initDim(w, entry.defaultEffort+", kimi's own setting for this model (change it in ~/.kimi-code/config.toml; brigada can't set it per run)."))
+			printInitWrapped(w, "    Effort: ", "    ", initDim(w, entry.defaultEffort+", kimi's own setting for this model (brigada can't set it per run)."))
 		}
 		return "", nil
 	}
@@ -923,29 +920,21 @@ func initPickEffort(w io.Writer, harness string, entry initModelEntry,
 		width = max(width, term.VisibleWidth(level))
 	}
 	for i, level := range levels {
-		note := ""
+		note, tags := "", ""
 		if i == defaultIndex {
-			note = harness + "'s default"
-			if level != "default" {
-				note += " for this model"
-			}
-			if entry.effortNote != "" {
-				note = entry.effortNote
+			if level == "default" {
+				note = harness + "'s default"
+			} else if entry.effortFromUser {
+				tags = "your " + harness + " default"
+			} else {
+				tags = "default"
 			}
 		}
-		tags := ""
 		if len(saved) > 0 && i == pickIndex {
 			tags = "current"
 		}
-		if i == defaultIndex {
-			if entry.effortNote == "" {
-				note = ""
-			} else {
-				note = initDefaultNote(harness, note)
-			}
-			if tags == "" {
-				tags = "default"
-			}
+		if level == "default" {
+			tags = ""
 		}
 		prefix := initMenuPrefix(w, "      ", i+1, level, width, i == pickIndex)
 		if note != "" || tags != "" {
@@ -953,7 +942,7 @@ func initPickEffort(w io.Writer, harness string, entry initModelEntry,
 		} else {
 			prefix = strings.TrimRight(prefix, " ")
 		}
-		printInitWrapped(w, prefix, strings.Repeat(" ", 10+width+2), initRowNote(w, note, tags))
+		printInitRow(w, prefix, strings.Repeat(" ", 10+width+2), note, tags)
 	}
 	flags := "--agent harness=" + harness + ",effort=LEVEL"
 	for attempt := 0; attempt < 3; attempt++ {
