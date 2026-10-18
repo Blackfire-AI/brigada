@@ -82,6 +82,8 @@ Step 1 of 3: agents
        4  high
     Pick 1-4 [1]:
 
+  To change it later: run brigada init again.
+
 Step 2 of 3: the foreman
   The foreman plans the work and decides what happens when a task needs
   judgment. It runs whenever work finishes, so it uses that agent's quota.
@@ -91,10 +93,23 @@ Step 2 of 3: the foreman
     2  codex/gpt-6.1-sol
   Pick 1-2 [1]:
 
-Step 3 of 3: the check
-  A command that must succeed (exit 0) before a task's work is accepted.
-  Found uv.lock, so the suggestion is:
-  Check command [uv run pytest]:
+  To change it later: brigada project foreman --harness H --model M,
+  or run brigada init again.
+
+Step 3 of 3: how brigada tests the work
+  When an agent finishes a task, brigada runs one command in that task's
+  own copy of the repo (never in your working copy):
+    passes (exit 0)  the work goes on to review by another model family
+    fails            the work goes back to the agent, with the output
+  Use the command you run yourself to be sure nothing broke: tests,
+  lint, type checks. Claude workers may run it too before handing in.
+
+  Found in this repo:
+     1  uv run pytest  pytest, from uv.lock
+  Pick 1, or type a command [1]:
+
+  To change it later: edit default_check in .brigada/project.yaml and
+  run brigada project import, or run brigada init again.
 
 Plan
   Agents:

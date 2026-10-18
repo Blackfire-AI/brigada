@@ -72,18 +72,23 @@ Run `brigada init` inside a repository. (At the top of a folder that holds sever
 
 2. **The foreman.** Pick among the usable Claude and Codex agents, using the models and efforts chosen above. The foreman plans work and handles decisions, and spends that agent's quota when work finishes. With two candidates, init asks for a number. Enter picks the first usable resume-capable agent in `--agent` order, or Claude before Codex without `--agent`. With only one candidate, init names it without asking. `--foreman HARNESS/MODEL` supplies the choice and skips the question; it must name a usable Claude or Codex agent.
 
-3. **The check.** Init suggests a check and worker tools from your build files:
+3. **How brigada tests the work.** Init explains that when an agent finishes a task, brigada runs one command in that task's own copy of the repo (never in your working copy). If it passes (exit 0), the work goes on to review by another model family; if it fails, the work goes back to the agent with the output. It then lists what it found in the repo, best first, and asks `Pick 1-N, or type a command [1]:`:
 
-   | Build file | Suggested check |
+   | Source | Candidates |
    |---|---|
+   | `Makefile`, `justfile` | targets named `check`, `ci`, `test`, `lint`, `typecheck` (as `make T` or `just T`), aggregates first; the note shows the target's prerequisites or first recipe line |
+   | `package.json` scripts | `npm run check`, `npm test`, `npm run lint`, `npm run typecheck` |
    | `go.mod` | `go test ./...`, plus the Go tool scope |
-   | `package.json` with a `test` script | `npm test` |
    | `Cargo.toml` | `cargo test` |
    | `uv.lock` | `uv run pytest` |
    | `poetry.lock` | `poetry run pytest` |
    | `pyproject.toml` or `pytest.ini` | `python -m pytest` |
 
-   Values already in an existing `.brigada/project.yaml` come before these suggestions, and `--check` and `--tools` override both. Init asks for a check only if neither the project file nor `--check` supplies it. With a build-file match, it prints `Found FILE, so the suggestion is:` then asks `Check command [COMMAND]:`; Enter accepts. With no match, it asks `Check command:` with no default. If no tool scope was supplied or suggested, it also asks for worker tools. With `--yes` or `--probe`, missing values are refused instead. Init never executes the check. The tool scope applies to Claude workers only ([section 8](#8-agents-quota-and-health)).
+   A number picks that entry, Enter takes entry 1, and any other text is the command itself. With no candidates, init prints `Found in this repo: nothing I recognise` and asks `Check command:` with no default; an empty or blank answer is asked again, three tries in all. The worker tools follow the choice: the picked candidate's tools, or `Bash(COMMAND:*)` for a typed command. `--tools` and an agent's own `tools=` still win. The step ends with how to change the check later. Init never executes the check. The tool scope applies to Claude workers only ([section 8](#8-agents-quota-and-health)).
+
+   On a rerun with an existing `.brigada/project.yaml`, the step is asked again: the current `default_check` is entry 1, marked `current, from .brigada/project.yaml`, followed by the other candidates, and Enter keeps it with its tools. `--check` answers the step without a question. With `--yes` or `--probe` init asks nothing and uses the project file's check, else candidate 1.
+
+   Steps 1 and 2 each end with a line saying how to change that choice later.
 
 The `Plan` block then shows:
 
@@ -119,7 +124,7 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 | `--agent SPEC` | Repeatable. The same syntax and defaults as `brigada runner --agent` ([section 8](#8-agents-quota-and-health)): `harness=<h>[,model=<m>][,classes=…][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=…]`. Replaces the model and effort menus and Kimi's writing question. Use `classes=review` to keep Kimi reviewing only. |
 | `--signed-in HARNESS` | Confirm an installed harness is signed in (repeatable or comma-separated). Local only. |
 | `--foreman HARNESS/MODEL` | Choose a usable Claude or Codex agent as foreman; skips the foreman question. |
-| `--check CMD` | The default check, instead of the build-file suggestion. |
+| `--check CMD` | The default check; answers step 3 without a question. |
 | `--tools SCOPE` | Worker tools in runner `tools=` syntax (`Bash(npm test:*)+Bash(npx jest:*)`, or `none`). An explicit agent `tools=` wins; a `tools.claude/<model>` line in your config file is kept unless you pass `--tools`. |
 | `--accept-limited` | Go ahead with fewer than two review families. |
 | `--no-wiring` | Skip the harness wiring: no `.mcp.json`, hooks or skill, and no Codex text. |
@@ -132,12 +137,12 @@ Init still reads answers from standard input, one line per question, and prints 
 
 1. For each installed CLI in order (`claude`, `codex`, `kimi`, `opencode`): its unconfirmed sign-in or use answer, then its model choice if you agreed to use it, then its effort choice when offered. After Kimi's model, answer whether it may write code too.
 2. The foreman choice, if both Claude and Codex are usable and `--foreman` was not supplied.
-3. The check, if not already supplied, then worker tools if no scope was supplied or suggested.
+3. The check, if `--check` was not given. Worker tools are asked only when the answer gives no valid scope and `--tools` was not given.
 4. The final confirmation.
 
 Enter picks model entry 1 for Claude, Codex and Kimi. Opencode defaults to `-`, so Enter leaves it out. Claude, Codex and opencode show `-` to skip; skip Kimi with no at `Use kimi?`. With `--agent`, there are no model or effort menus or Kimi writing question; sign-in or use questions may still be asked.
 
-With `--yes` or `--probe` init asks nothing, so the agents must come from `--agent`, sign-in from the status command or `--signed-in`, and the check and tools from the project file, the build files, or `--check` and `--tools`. If a question is needed and input is at end of file, init fails and names the flag that supplies the answer.
+With `--yes` or `--probe` init asks nothing, so the agents must come from `--agent`, sign-in from the status command or `--signed-in`, and the check and tools from the project file, the first check candidate, or `--check` and `--tools`. If a question is needed and input is at end of file, init fails and names the flag that supplies the answer.
 
 The final prompt says what will happen, for example `Write 4 files and start the runner? [y/N]`. Answering no exits 1 and starts nothing. Declining one harness's sign-in only skips that harness.
 
@@ -151,7 +156,7 @@ If init fails after writing `project.yaml`, it says `partial init` and names the
 
 ### Changing your setup later
 
-Run `brigada init` again to change agents, models or effort. Its menus default to the saved agent choices, including effort and whether Kimi may write code. Pick the foreman again from the offered Claude and Codex agents. The check and worker tools default to the existing `.brigada/project.yaml`. Confirm the plan to apply changes. If the agents changed, init stops the detached runner and starts it with the new choices.
+Run `brigada init` again to change agents, models or effort. Its menus default to the saved agent choices, including effort and whether Kimi may write code. Pick the foreman again from the offered Claude and Codex agents. The check step lists the existing `.brigada/project.yaml` check first, and Enter keeps it. Confirm the plan to apply changes. If the agents changed, init stops the detached runner and starts it with the new choices.
 
 To change only the foreman, use `brigada project foreman --harness H --model M [--effort E]`. To change the check, edit `.brigada/project.yaml`, then run `brigada project import`.
 
