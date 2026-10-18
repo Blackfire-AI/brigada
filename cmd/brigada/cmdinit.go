@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -108,9 +109,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	reader := bufio.NewReader(projectStdin)
 	canAsk := !*yes && !*probe
-	asked := false
 	if canAsk {
-		fmt.Fprint(stdout, "brigada runs coding tasks on the agent CLIs you are signed in to. A foreman\n(an agent session) turns your request into a plan of tasks; a runner in the\nbackground runs each task in its own git worktree, runs your check, and has\nan agent of another model family review it. Init asks a few questions, shows\nwhat it will write and start, and changes nothing until you confirm.\n\n")
+		fmt.Fprint(stdout, "brigada runs coding tasks on the agent CLIs you are signed in to. A foreman\n(an agent) turns your request into a plan of tasks; workers (other agents)\nwrite the code in their own git worktrees; your check command tests it; and\nan agent of a different model family reviews it. Three short steps follow.\nNothing is written or started until you confirm at the end.\n\n")
 	}
 	terminal := false
 	if f, ok := projectStdin.(*os.File); ok {
@@ -120,11 +120,10 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if !canAsk {
 			return "", nil
 		}
-		asked = true
 		if terminal {
 			fmt.Fprint(stdout, prompt)
 		} else {
-			fmt.Fprintln(stdout, strings.TrimSpace(prompt))
+			fmt.Fprintln(stdout, strings.TrimRight(prompt, " \t"))
 		}
 		v, err := reader.ReadString('\n')
 		if err == io.EOF && len(v) == 0 {
@@ -145,22 +144,62 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		return v == "y" || v == "yes", err
 	}
 	probes := map[string]harnessProbe{}
-	fmt.Fprintln(stdout, "Agent CLIs found:")
+	sources := map[string]initModelSource{}
 	for _, h := range initHarnesses {
-		p := probeHarness(ctx, h)
-		probes[h] = p
-		fmt.Fprintf(stdout, "  %-9s %s\n", h, p.status)
+		var source initModelSource
+		switch h {
+		case "claude":
+			source = initClaudeModels(ctx)
+		case "codex":
+			source = initCodexModels(ctx)
+		case "kimi":
+			source = initKimiModels(ctx)
+		case "opencode":
+			source = initOpenCodeModels(ctx)
+		}
+		sources[h] = source
+		probes[h] = source.signIn
 	}
-	fmt.Fprintln(stdout)
+	if canAsk {
+		fmt.Fprint(stdout, "Step 1 of 3: agents\n  Each agent CLI below can work for brigada. For each one, pick the model it\n  should run, or leave it out. Reviews always go to a different model family\n  than the author's, so you need at least two families (e.g. claude + codex).\n")
+	} else {
+		fmt.Fprintln(stdout, "Agent CLIs found:")
+		for _, h := range initHarnesses {
+			fmt.Fprintf(stdout, "  %-9s %s\n", h, probes[h].status)
+		}
+		fmt.Fprintln(stdout)
+	}
+	shown := map[string]bool{}
 	authenticate := func(spec agentSpec) (bool, error) {
-		if probes[spec.harness].signedIn || signedIn[spec.harness] {
+		h := spec.harness
+		confirmed := probes[h].signedIn || signedIn[h]
+		if canAsk && !shown[h] {
+			shown[h] = true
+			status := probes[h].status
+			if signedIn[h] && !probes[h].signedIn {
+				status = "signed in"
+			}
+			switch {
+			case !confirmed && h == "kimi":
+				fmt.Fprint(stdout, "\n  kimi: init can't check sign-in. If you're not signed in, run `kimi login`\n  first, or leave kimi out.\n")
+			case !confirmed && h == "opencode":
+				fmt.Fprint(stdout, "\n  opencode: init can't check sign-in. If you're not signed in, run\n  `opencode auth login` first, or leave opencode out.\n")
+			default:
+				fmt.Fprintf(stdout, "\n  %s: %s\n", h, status)
+			}
+		}
+		if confirmed {
 			return true, nil
 		}
-		name := spec.harness
-		if spec.accountLabel() != spec.harness {
+		name := h
+		if spec.accountLabel() != h {
 			name += " account " + spec.accountLabel()
 		}
-		return confirm("Are you signed in to "+name+"?", "--signed-in "+spec.harness)
+		if h == "kimi" || h == "opencode" {
+			v, err := ask("    Use "+name+"? [y/N]: ", "--signed-in "+h)
+			return strings.EqualFold(v, "y") || strings.EqualFold(v, "yes"), err
+		}
+		return confirm("    Are you signed in to "+name+"?", "--signed-in "+h)
 	}
 	if len(agents.specs) == 0 && canAsk {
 		for _, h := range initHarnesses {
@@ -175,21 +214,58 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				continue
 			}
 			signedIn[h] = true
-			question := h + " model"
-			if h == "opencode" {
-				question += " as provider/model, e.g. zai-coding-plan/glm-5.3"
+			entries := sources[h].entries
+			fmt.Fprintf(stdout, "    Which model should %s run?\n", h)
+			width := 0
+			for _, entry := range entries {
+				width = max(width, len(initMenuModelName(entry)))
 			}
-			prompt := fmt.Sprintf("%s [%s] (Enter = default, - = don't use %s): ", question, initModelName(runnerDefaultModel(h)), h)
+			for _, entry := range entries {
+				fmt.Fprintf(stdout, "      %2d  %s", entry.id, initMenuModelName(entry))
+				if entry.note != "" {
+					note := entry.note
+					if home, err := os.UserHomeDir(); err == nil && home != "" {
+						note = strings.ReplaceAll(note, "("+home+string(os.PathSeparator), "(~/")
+					}
+					fmt.Fprintf(stdout, "%s%s", strings.Repeat(" ", width-len(initMenuModelName(entry))+2), note)
+				}
+				fmt.Fprintln(stdout)
+			}
+			if h != "kimi" {
+				fmt.Fprintf(stdout, "       -  don't use %s\n", h)
+			}
+			defaultAnswer := "-"
+			if len(entries) > 0 && h != "opencode" {
+				defaultAnswer = "1"
+			}
+			pick := initPickRange(len(entries))
+			if h != "kimi" {
+				if pick != "" {
+					pick += " or "
+				}
+				pick += "-"
+			}
+			identifier := "a model id"
+			if h == "opencode" {
+				identifier = "provider/model"
+			}
+			prompt := fmt.Sprintf("    Pick %s, or type %s [%s]: ", pick, identifier, defaultAnswer)
 			for attempt := 0; attempt < 3; attempt++ {
 				model, err := askLine(prompt, "--agent harness="+h+",model=MODEL")
 				if err != nil {
 					return fail(stderr, err)
 				}
+				if model == "" {
+					model = defaultAnswer
+				}
 				if model == "-" {
 					break
 				}
-				if model == "" {
-					model = runnerDefaultModel(h)
+				for _, entry := range entries {
+					if model == strconv.Itoa(entry.id) {
+						model = entry.value
+						break
+					}
 				}
 				if _, err := initModelFamily(h, model); err != nil {
 					if attempt == 2 {
@@ -289,6 +365,50 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if chosen == nil {
 		return usagef(stderr, "--foreman must name a usable agent that resumes headless (claude/model or codex/model); none matched")
 	}
+	if canAsk {
+		fmt.Fprint(stdout, "\nStep 2 of 3: the foreman\n  The foreman plans the work and decides what happens when a task needs\n  judgment. It runs whenever work finishes, so it uses that agent's quota.\n  Only claude and codex can be the foreman; it uses the model picked above.\n")
+		var candidates []*agentSpec
+		defaultChoice := 1
+		for _, h := range initHarnesses {
+			for i := range usable {
+				if usable[i].harness == h && adapter.ResumeCapable(h) {
+					candidates = append(candidates, &usable[i])
+					if chosen == &usable[i] {
+						// Preserve the first resume-capable --agent in flag order as
+						// the default, even when the CLI-ordered menu starts elsewhere.
+						defaultChoice = len(candidates)
+					}
+				}
+			}
+		}
+		if len(candidates) == 1 {
+			fmt.Fprintf(stdout, "  Foreman: %s (the only agent that can plan)\n", initForemanName(*chosen, sources))
+		} else {
+			for i, candidate := range candidates {
+				fmt.Fprintf(stdout, "    %d  %s\n", i+1, initForemanName(*candidate, sources))
+			}
+			if *foreman == "" {
+				for attempt := 0; attempt < 3; attempt++ {
+					answer, err := ask(fmt.Sprintf("  Pick %s [%d]: ", initPickRange(len(candidates)), defaultChoice), "--foreman HARNESS/MODEL")
+					if err != nil {
+						return fail(stderr, err)
+					}
+					if answer == "" {
+						answer = strconv.Itoa(defaultChoice)
+					}
+					n, err := strconv.Atoi(answer)
+					if err == nil && n >= 1 && n <= len(candidates) {
+						chosen = candidates[n-1]
+						break
+					}
+					if attempt == 2 {
+						return usagef(stderr, "--foreman: pick %s", initPickRange(len(candidates)))
+					}
+					fmt.Fprintf(stdout, "  pick %s; try again.\n", initPickRange(len(candidates)))
+				}
+			}
+		}
+	}
 	file := filepath.Join(root, filepath.FromSlash(engine.ProjectConfigPath))
 	if err := initSafeFile(file); err != nil {
 		return fail(stderr, err)
@@ -319,8 +439,14 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			return fail(stderr, err)
 		}
 		if *check == "" {
-			if canAsk && suggestion != "" {
-				answer, err := ask(fmt.Sprintf("Check to run after every task [%s] (from %s): ", suggestion, source), "--check COMMAND")
+			if canAsk {
+				fmt.Fprint(stdout, "\nStep 3 of 3: the check\n  A command that must succeed (exit 0) before a task's work is accepted.\n")
+				prompt := "  Check command: "
+				if suggestion != "" {
+					fmt.Fprintf(stdout, "  Found %s, so the suggestion is:\n", source)
+					prompt = fmt.Sprintf("  Check command [%s]: ", suggestion)
+				}
+				answer, err := ask(prompt, "--check COMMAND")
 				if err != nil {
 					return fail(stderr, err)
 				}
@@ -335,12 +461,6 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 	}
 
-	if *check == "" {
-		*check, err = ask("Default check (required; --check COMMAND): ", "--check COMMAND")
-		if err != nil {
-			return fail(stderr, err)
-		}
-	}
 	if *tools == "" {
 		*tools, err = ask("Worker tools (required; --tools PATTERN+PATTERN or none): ", "--tools PATTERN+PATTERN or none")
 		if err != nil {
@@ -367,7 +487,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil {
 		return usagef(stderr, "%v", err)
 	}
-	if asked {
+	if canAsk {
 		fmt.Fprintln(stdout)
 	}
 	printInitAgents(stdout, usable, len(families), *chosen)
@@ -537,6 +657,34 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	fmt.Fprintf(stdout, "  %d. Or, without a session: brigada ask \"what you want built\"\n", step)
 	fmt.Fprintln(stdout, "  Watch progress: brigada status    Stop the runner: brigada stop")
 	return 0
+}
+
+func initPickRange(size int) string {
+	if size == 0 {
+		return ""
+	}
+	if size == 1 {
+		return "1"
+	}
+	return fmt.Sprintf("1-%d", size)
+}
+
+func initMenuModelName(entry initModelEntry) string {
+	if entry.name != "" {
+		return entry.name
+	}
+	return initModelName(entry.value)
+}
+
+func initForemanName(spec agentSpec, sources map[string]initModelSource) string {
+	model := initModelName(spec.model)
+	for _, entry := range sources[spec.harness].entries {
+		if entry.value == spec.model {
+			model = initMenuModelName(entry)
+			break
+		}
+	}
+	return spec.harness + "/" + model
 }
 
 func initModelName(model string) string {
