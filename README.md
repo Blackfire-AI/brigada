@@ -38,17 +38,18 @@ Sign in to each CLI with its own login flow, then run this inside your repositor
 brigada init
 ```
 
-Init asks a few questions, shows a plan, and writes nothing until you confirm:
+Init walks you through three steps:
 
-- it probes which of `claude`, `codex`, `kimi` and `opencode` are installed and signed in, and asks which model each account serves;
-- it checks that you have two model families for review, and picks the foreman;
-- it suggests a default check and worker tools from your build files (it never runs the check);
-- it lists the agents, permissions and files, and shows a diff for every existing file it would change (`--verbose` also shows the contents of new files).
+1. Pick models from menus drawn from each CLI and its config. Init checks or asks about sign-in. Reviews need two model families. Kimi reviews only unless you let it write code.
+2. Pick the foreman from the usable Claude and Codex agents.
+3. Confirm the check suggested by your build files, or supply your own. Init also takes worker tools from those files. It never runs the check.
+
+Init then lists the agents, permissions and files, and shows a diff for every existing file it would change (`--verbose` also shows the contents of new files). Nothing is written or started until you confirm.
 
 After you confirm, init:
 
 - writes `.brigada/project.yaml`, which is yours to commit (brigada never commits or pushes it);
-- wires Claude Code for your own session, and prints the command to run for Codex;
+- wires Claude Code for your own session;
 - starts the engine and a detached runner.
 
 `brigada init --probe` shows the plan and writes nothing. Stop the runner with `brigada stop`; add `--engine` to stop the engine too. Every step and flag is in [the guide, section 1](docs/GUIDE.md#1-install-and-brigada-init).
