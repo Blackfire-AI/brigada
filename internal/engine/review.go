@@ -81,15 +81,9 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 		}
 		// The job record is the family's first witness (§7): the agent
 		// of the branch's newest work job.
-		var agent int64
-		err = tx.QueryRow(`SELECT COALESCE(agent_id, 0) FROM jobs
-			WHERE project_id = ? AND kind = 'work' AND branch = ? ORDER BY id DESC LIMIT 1`,
-			project, branch).Scan(&agent)
-		switch {
-		case errors.Is(err, sql.ErrNoRows):
-			return nil
-		case err != nil:
-			return fmt.Errorf("read the last work job of %s: %w", branch, err)
+		agent, err := reviewAuthorTx(tx, &jobRow{ProjectID: project, Kind: KindReview, Branch: branch})
+		if err != nil {
+			return err
 		}
 		in.family, err = agentFamilyTx(tx, agent)
 		return err
@@ -117,6 +111,7 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
+		review := &jobRow{ProjectID: in.project, Kind: KindReview, Branch: branch}
 		family, source, harness := in.family, reviewSourceJob, ""
 		if family == "" {
 			var err error
@@ -129,15 +124,30 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 		if family == "" {
 			source, harness = reviewSourceDefault, e.cfg.DefaultReviewer
 			if harness == "" {
+				onlyAuthor, err := onlyAuthorReviewerTx(tx, review)
+				if err != nil {
+					return err
+				}
+				if onlyAuthor {
+					return fmt.Errorf("%w: %s", ErrNoReviewer, noReviewerAuthor)
+				}
 				return fmt.Errorf("%w: the author's family of %s is unknown (no work job of the branch, no known Co-Authored-By trailer) and no default_reviewer is configured", ErrNoReviewer, branch)
 			}
 		}
-		cands, err := eligibleAgentsTx(tx, 0, &jobRow{ProjectID: in.project, Kind: KindReview, ExcludeFamily: family, Harness: harness},
+		review.ExcludeFamily, review.Harness = family, harness
+		cands, err := eligibleAgentsTx(tx, 0, review,
 			string(KindReview), fmtTime(now))
 		if err != nil {
 			return err
 		}
 		if len(cands) == 0 {
+			onlyAuthor, err := onlyAuthorReviewerTx(tx, review)
+			if err != nil {
+				return err
+			}
+			if onlyAuthor {
+				return fmt.Errorf("%w: %s", ErrNoReviewer, noReviewerAuthor)
+			}
 			if family != "" {
 				return fmt.Errorf("%w: no agent of a family other than %q is ready and offers the review class", ErrNoReviewer, family)
 			}

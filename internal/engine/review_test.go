@@ -192,8 +192,10 @@ func TestReviewBranchWithoutEligibleReviewerErrors(t *testing.T) {
 	branch := e.authored(author)
 
 	_, err := e.reviewBranch(branch)
-	if !errors.Is(err, ErrNoReviewer) || !strings.Contains(err.Error(), `family other than "anthropic"`) {
-		t.Fatalf("error = %v, want no eligible reviewer other than anthropic", err)
+	// The author is the only review provider, so the refusal now names
+	// self-review rather than the less specific family rule.
+	if !errors.Is(err, ErrNoReviewer) || !strings.Contains(err.Error(), wantAuthorOnlyReviewer) {
+		t.Fatalf("error = %v, want the author-only explanation", err)
 	}
 	// A broken agent of another family that offers review is no help.
 	e.exec("UPDATE agents SET classes = '[\"review\"]', health = 'broken' WHERE id = ?", e.agentOf(other))

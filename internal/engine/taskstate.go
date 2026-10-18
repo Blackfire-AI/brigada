@@ -536,7 +536,8 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 		eventPayload{Status: taskReviewing, Branch: branch}, now); err != nil {
 		return err
 	}
-	// An unknown author family leaves ExcludeFamily empty; only an explicit agent exclusion applies.
+	// An unknown author family leaves ExcludeFamily empty; review placement
+	// independently excludes the agent of the latest work or fix job.
 	exclude, err := agentFamilyTx(tx, job.AgentID)
 	if err != nil {
 		return err
@@ -643,13 +644,23 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 	if err != nil {
 		return err
 	}
-	noAgent, err := noReviewAgentTx(tx, job.ExcludeFamily, job.AgentID)
+	retry := &jobRow{ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindReview,
+		ExcludeFamily: job.ExcludeFamily, ExcludeAgent: job.AgentID}
+	noAgent, err := noReviewAgentTx(tx, retry)
 	if err != nil {
 		return err
 	}
 	if spent || noAgent {
 		if noAgent && !spent {
-			reason += "; no other agent of another family can take the retry"
+			onlyAuthor, err := onlyAuthorReviewerTx(tx, retry)
+			if err != nil {
+				return err
+			}
+			if onlyAuthor {
+				reason += "; " + noReviewerAuthor
+			} else {
+				reason += "; no other agent of another family can take the retry"
+			}
 		}
 		return e.needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: boundNote(reason)}, now)
 	}
@@ -696,31 +707,6 @@ func reviewRetrySpentTx(tx *sql.Tx, job *jobRow) (bool, error) {
 		return false, fmt.Errorf("count the reviews of task %d: %w", job.TaskID, err)
 	}
 	return reviews > 1, nil
-}
-
-// noReviewAgentTx reports whether no registered agent could take the
-// retry (§7): none passes the exclusions the job would carry — another
-// family than the author's, not the first reviewer's agent, offering
-// the review class — under the same test the lease-time pick applies
-// (§8). An agent whose runner never polls again waits out the queue TTL
-// like any queued job; this is the test for no candidate at all.
-func noReviewAgentTx(tx *sql.Tx, excludeFamily string, excludeAgent int64) (bool, error) {
-	rows, err := tx.Query("SELECT id, family, classes FROM agents")
-	if err != nil {
-		return false, fmt.Errorf("list the agents: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id int64
-		var family, classes string
-		if err := rows.Scan(&id, &family, &classes); err != nil {
-			return false, fmt.Errorf("list the agents: %w", err)
-		}
-		if reviewAgentQualifies(id, family, classes, excludeFamily, excludeAgent) {
-			return false, nil
-		}
-	}
-	return true, rows.Err()
 }
 
 // verdictBlock is the review's answer (§7): what the reviewer's final
