@@ -90,11 +90,11 @@ func TestInitProbeAndRefusals(t *testing.T) {
 		{"non claude tools", []string{"--probe", "--agent", "harness=codex,model=gpt-5,tools=none"}, "", 1, "tools="},
 		{"bad effort", []string{"--probe", "--agent", "harness=codex,model=gpt-5,effort=bogus"}, "", 1, "effort"},
 		{"incapable foreman", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=kimi,model=kimi-k2", "--signed-in", "claude,kimi", "--foreman", "kimi/kimi-k2"}, "", 1, "resumes headless"},
-		{"GLM second family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=zai-coding-plan/glm-5.3", "--signed-in", "claude,opencode"}, "", 0, "Zhipu (GLM)"},
+		{"GLM second family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=zai-coding-plan/glm-5.3", "--signed-in", "claude,opencode"}, "", 0, "Zhipu"},
 		{"runner defaults", []string{"--probe", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex"}, "", 0, "    codex     CLI default"},
-		{"codex default second family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=default", "--signed-in", "claude,codex"}, "", 0, "Review: 2 model families"},
+		{"codex default second family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=default", "--signed-in", "claude,codex"}, "", 0, "Reviews: 2 model families"},
 		{"opencode default unknown family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=default", "--signed-in", "claude,opencode"}, "", 1, "--accept-limited"},
-		{"opencode default limited acknowledged", []string{"--probe", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=default", "--signed-in", "claude,opencode"}, "", 0, "family: unknown (give provider/model to count it for review)"},
+		{"opencode default limited acknowledged", []string{"--probe", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=default", "--signed-in", "claude,opencode"}, "", 0, "unknown family"},
 		{"opencode needs provider", []string{"--probe", "--agent", "harness=opencode,model=glm"}, "", 1, "opencode needs provider/model, e.g. zai-coding-plan/glm-5.3"},
 		{"model whitespace", []string{"--probe", "--agent", "harness=claude,model=sonnet other"}, "", 1, "model must be a nonempty model identifier"},
 	} {
@@ -127,95 +127,6 @@ func TestInitProbeAndRefusals(t *testing.T) {
 				t.Errorf("noninteractive run printed the introduction: %s", out)
 			}
 		})
-	}
-}
-
-// TestInitProbePlanLayout checks the whole probe's presentation without
-// depending on temporary paths, process IDs or git's default exclude contents.
-func TestInitProbePlanLayout(t *testing.T) {
-	importRepo(t)
-	wireGit(t, ".", "config", "core.excludesFile", os.DevNull)
-	for _, name := range []string{"pyproject.toml", "uv.lock"} {
-		if err := os.WriteFile(name, nil, 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	fakeInitPATH(t, initHarnesses...)
-	code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "", "--probe",
-		"--agent", "harness=claude,model=opus", "--agent", "harness=codex", "--signed-in", "claude,codex")
-	if code != 0 || errOut != "" {
-		t.Fatalf("probe = %d\n%s\n%s", code, out, errOut)
-	}
-	wantPrefixes := []string{
-		"brigada init: set up example.invalid/imported",
-		"Agent CLIs found:",
-		"  claude    sign-in can't be checked",
-		"  codex     sign-in can't be checked",
-		"  kimi      sign-in can't be checked",
-		"  opencode  signed in to 2 providers (opencode auth list)",
-		"Plan",
-		"  Agents (each implements, reviews and answers questions):",
-		"    claude    opus",
-		"    codex     CLI default",
-		"  Review: 2 model families;",
-		"  Foreman: claude/opus ",
-		"  Check after every task: uv run pytest (",
-		"  Worker permissions:",
-		"    claude    edits files; shell limited to: Bash(uv run pytest:*)",
-		"    codex     edits files and runs commands inside codex's workspace-write sandbox",
-		"  Files in this repository (",
-		"    .brigada/project.yaml ",
-		"    .mcp.json ",
-		"    .claude/settings.local.json ",
-		"    .claude/skills/brigada-foreman/SKILL.md ",
-		"    .git/info/exclude ",
-		"    (full contents: --verbose)",
-		"  Codex (optional:",
-		"    codex mcp add brigada-foreman -- brigada mcp --foreman",
-		"    For codex exec, see the GUIDE section on the foreman's harness.",
-		"  kimi, opencode: work as workers only; nothing to set up.",
-		"  Background: the engine starts when a command needs it and exits after 30 idle minutes.",
-		"    The runner starts now and keeps running; log: ",
-		"Probe only; nothing written or started.",
-	}
-	lines := strings.Split(out, "\n")
-	next := 0
-	for _, line := range lines {
-		if next < len(wantPrefixes) && strings.HasPrefix(line, wantPrefixes[next]) {
-			next++
-		}
-	}
-	if next != len(wantPrefixes) {
-		t.Fatalf("missing or out-of-order prefix %q:\n%s", wantPrefixes[next], out)
-	}
-	plan := strings.Index(out, "\nPlan\n")
-	probe := strings.Index(out, "\nProbe only;")
-	if !strings.HasSuffix(out[:plan], "\n") || !strings.HasSuffix(out[:probe], "\n") || strings.Contains(out, "\n\n\n") {
-		t.Errorf("expected one blank line before Plan and Probe only:\n%s", out)
-	}
-	for _, line := range strings.Split(out[plan+len("\nPlan\n"):probe], "\n") {
-		if line != "" && !strings.HasPrefix(line, "  ") {
-			t.Errorf("line outside the Plan block: %q", line)
-		}
-	}
-	paths := []string{".brigada/project.yaml", ".mcp.json", ".claude/settings.local.json", ".claude/skills/brigada-foreman/SKILL.md", ".git/info/exclude"}
-	width := 0
-	for _, path := range paths {
-		width = max(width, len(path))
-	}
-	for _, path := range paths {
-		for _, line := range lines {
-			if !strings.HasPrefix(line, "    "+path+" ") {
-				continue
-			}
-			padding := strings.Repeat(" ", width-len(path)+2)
-			if !strings.HasPrefix(line, "    "+path+padding) || strings.HasPrefix(line[4+width+2:], " ") {
-				t.Errorf("file states must align two spaces after the longest path: %q", line)
-			}
-		}
-	}
-	if strings.Contains(out, "ready") {
-		t.Errorf("probe claimed ready before applying:\n%s", out)
 	}
 }
 
@@ -296,16 +207,17 @@ func TestInitKimiWriteOptIn(t *testing.T) {
 			if !strings.Contains(out, "    Pick 1, or type a model id [1]:\n"+warning+"\n  opencode:") {
 				t.Fatalf("writing question is not right after Kimi model:\n%s", out)
 			}
-			if strings.Contains(out, "family: Moonshot (review only)") == tc.write {
+			if strings.Contains(strings.Join(strings.Fields(out), " "), "Moonshot reviews only") == tc.write {
 				t.Fatalf("incorrect Kimi classes after %q:\n%s", tc.answer, out)
 			}
-			for _, want := range []string{"opencode  zai-coding-plan/glm-5.3", "Check after every task: printf check-marker"} {
+			for _, want := range []string{"opencode  zai-coding-plan/glm-5.3", "Check: printf check-marker"} {
 				if !strings.Contains(out, want) {
 					t.Errorf("stdin shifted; missing %q:\n%s", want, out)
 				}
 			}
-			if !tc.write && !strings.Contains(out, "kimi      reads files only; no shell") {
-				t.Errorf("missing read-only permissions:\n%s", out)
+			_, workers, _ := strings.Cut(out, "  What workers may do:\n")
+			if !tc.write && strings.Contains(workers, "    kimi ") {
+				t.Errorf("review-only Kimi included in worker permissions:\n%s", out)
 			}
 			if strings.Contains(out, "ready") {
 				t.Errorf("claimed ready before apply:\n%s", out)
@@ -327,24 +239,28 @@ func TestInitKimiWriteOptIn(t *testing.T) {
 }
 
 func TestInitExplicitKimiClassesStayAsGiven(t *testing.T) {
-	for _, classes := range []string{"", ",classes=review", ",classes=implement+answer"} {
-		t.Run(classes, func(t *testing.T) {
+	for _, tc := range []struct{ classes, role string }{
+		{"", "writes code, reviews"},
+		{",classes=review", "reviews only"},
+		{",classes=implement+answer", "writes code, answers questions"},
+		{",classes=review+answer", "reviews, answers questions"},
+		{",classes=answer", "answers questions only"},
+		{",classes=implement", "writes code only"},
+		{",classes=implement+review", "writes code, reviews"},
+		{",classes=custom", "handles custom tasks only"},
+	} {
+		t.Run(tc.classes, func(t *testing.T) {
 			importRepo(t)
 			fakeInitPATH(t, "codex", "kimi")
-			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "n\n", "--agent", "harness=codex", "--agent", "harness=kimi"+classes, "--signed-in", "codex,kimi", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
+			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "n\n", "--agent", "harness=codex", "--agent", "harness=kimi"+tc.classes, "--signed-in", "codex,kimi", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 				t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 			}
 			if strings.Contains(out, "Let kimi write") || strings.Contains(out, "kimi has no sandbox:") {
 				t.Fatalf("explicit agent got writing question:\n%s", out)
 			}
-			want := "family: Moonshot"
-			if classes == ",classes=review" {
-				want += " (review only)"
-			} else if classes != "" {
-				want += " (implement, answer only)"
-			}
-			if !strings.Contains(out, want+"\n") {
+			want := "Moonshot " + tc.role
+			if !strings.Contains(strings.Join(strings.Fields(out), " "), strings.Join(strings.Fields(want), " ")) {
 				t.Errorf("explicit classes changed:\n%s", out)
 			}
 		})
@@ -396,8 +312,8 @@ func TestInitNonTerminalPrompts(t *testing.T) {
 		"  kimi: init can't check sign-in. If you're not signed in, run `kimi login`\n  first, or leave kimi out.",
 		"  opencode: signed in to 2 providers (opencode auth list)",
 		"Step 2 of 3: the foreman",
-		"  Review: 3 model families; a task is always reviewed by a family other than its author's.",
-		"  Foreman: claude/sonnet (the first agent that can resume a session headless; change it with --foreman HARNESS/MODEL)",
+		"  Reviews: 3 model families, so every task can get a reviewer of another one.",
+		"  Foreman: claude/sonnet\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in %s", want, out)
@@ -531,7 +447,7 @@ func TestInitQuestionsBeforePlan(t *testing.T) {
 		t.Fatalf("check without a build-file suggestion must have no default:\n%s", out)
 	}
 	lastQuestion := strings.Index(out, "Worker tools (required;")
-	for _, line := range []string{"\nPlan\n", "    codex     CLI default", "  Review:", "  Foreman: codex/default (the first agent", "  Check after every task:", "  Background:"} {
+	for _, line := range []string{"\nPlan\n", "    codex     CLI default", "  Reviews:", "  Foreman: codex/default", "  Check:", "  In the background:"} {
 		if pos := strings.Index(out, line); lastQuestion < 0 || pos <= lastQuestion {
 			t.Errorf("plan line %q preceded the last setup question:\n%s", line, out)
 		}
@@ -552,10 +468,10 @@ func TestInitExplicitAccountQuestions(t *testing.T) {
 	if claude < 0 || codex <= claude || strings.Contains(out, "codex account codex") {
 		t.Fatalf("incorrect sign-in question wording or order:\n%s", out)
 	}
-	if !strings.Contains(out, "  Pick 1-2 [2]:") || !strings.Contains(out, "  Foreman: codex/default ") {
+	if !strings.Contains(out, "  Pick 1-2 [2]:") || !strings.Contains(out, "  Foreman: codex/default\n") {
 		t.Fatalf("did not preserve flag-order foreman default:\n%s", out)
 	}
-	if !strings.Contains(out, "family: Anthropic (review only)") || strings.Contains(out, "(implement, review, answer only)") {
+	if !strings.Contains(strings.Join(strings.Fields(out), " "), "Anthropic reviews only") || strings.Contains(out, "(implement, review, answer only)") {
 		t.Fatalf("incorrect agent classes display:\n%s", out)
 	}
 }
@@ -689,10 +605,10 @@ func TestInitSuggestedCheckQuestion(t *testing.T) {
 				t.Fatalf("check question missing or out of order:\n%s", out)
 			}
 			for _, want := range []string{
-				"Check after every task: " + tc.check + " (init does not run it; edit .brigada/project.yaml to change it)",
+				"Check: " + tc.check + " (init doesn't run it; change it later in .brigada/project.yaml)",
 				"default_check: " + strconv.Quote(tc.check),
 			} {
-				if !strings.Contains(out, want) {
+				if !strings.Contains(strings.Join(strings.Fields(out), " "), want) {
 					t.Errorf("missing %q in:\n%s", want, out)
 				}
 			}
@@ -728,7 +644,7 @@ func TestInitSkipsSuggestedCheckQuestion(t *testing.T) {
 			if tc.name == "probe" {
 				wantCode = 0
 			}
-			if code != wantCode || errOut != "" || strings.Contains(out, "Check command") || !strings.Contains(out, "Check after every task: "+tc.check+" (") {
+			if code != wantCode || errOut != "" || strings.Contains(out, "Check command") || !strings.Contains(out, "Check: "+tc.check+" (") {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
 		})
@@ -737,9 +653,9 @@ func TestInitSkipsSuggestedCheckQuestion(t *testing.T) {
 
 func TestInitWorkerPermissions(t *testing.T) {
 	for _, tc := range []struct{ tools, permissions string }{
-		{"", "edits files; shell limited to: Bash(uv run pytest:*)"},
-		{",tools=none", "edits files; no shell"},
-		{",tools=Bash(custom check:*)", "edits files; shell limited to: Bash(custom check:*)"},
+		{"", "edit files; run only: uv run pytest"},
+		{",tools=none", "edit files; no commands"},
+		{",tools=Bash(custom check:*)", "edit files; run only: custom check"},
 	} {
 		t.Run(tc.permissions, func(t *testing.T) {
 			importRepo(t)
@@ -753,11 +669,11 @@ func TestInitWorkerPermissions(t *testing.T) {
 			if code != 0 || errOut != "" {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
-			want := "  Worker permissions:\n" +
+			want := "  What workers may do:\n" +
 				"    claude    " + tc.permissions + "\n" +
-				"    codex     edits files and runs commands inside codex's workspace-write sandbox\n" +
-				"    kimi      edits files and runs commands headless, with no approval prompts\n" +
-				"    opencode  edits files; no shell\n"
+				"    codex     edit files and run commands inside codex's sandbox\n" +
+				"    kimi      edit files and run any command without asking\n" +
+				"    opencode  edit files; no commands\n"
 			if !strings.Contains(out, want) {
 				t.Errorf("permissions table missing:\n%s", out)
 			}
@@ -1002,12 +918,12 @@ func TestInitKeepsMachineToolScope(t *testing.T) {
 	args := []string{"--probe", "--config", config, "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}
 	state := testsupport.ShortStateDir(t)
 	code, out, err := initDo(t, state, "", args...)
-	if code != 0 || !strings.Contains(out, "  claude    edits files; no shell\n") {
+	if code != 0 || !strings.Contains(out, "  claude    edit files; no commands\n") {
 		t.Fatalf("%d %s %s", code, out, err)
 	}
 	args = append(args, "--tools", "Bash(go test:*)")
 	code, out, err = initDo(t, state, "", args...)
-	if code != 0 || !strings.Contains(out, "  claude    edits files; shell limited to: Bash(go test:*)\n") {
+	if code != 0 || !strings.Contains(out, "    claude    edit files; run only: go test\n") {
 		t.Fatalf("%d %s %s", code, out, err)
 	}
 	data, e := os.ReadFile(config)
@@ -1058,7 +974,7 @@ func TestInitProbeAndRefusalsWithExistingWiring(t *testing.T) {
 			if code != tc.code {
 				t.Fatalf("got %d, want %d\n%s\n%s", code, tc.code, out, errOut)
 			}
-			if strings.Contains(out, "ready") || !strings.Contains(strings.Join(strings.Fields(out), " "), ".claude/settings.local.json unchanged, private (kept out of git):") {
+			if strings.Contains(out, "ready") || !strings.Contains(strings.Join(strings.Fields(out), " "), ".claude/settings.local.json unchanged private, kept out of git:") {
 				t.Errorf("existing wiring output:\n%s", out)
 			}
 			if wireRead(t, ".", ".claude/settings.local.json") != local {
@@ -1068,12 +984,22 @@ func TestInitProbeAndRefusalsWithExistingWiring(t *testing.T) {
 	}
 }
 
-func TestInitInteractiveSteps(t *testing.T) {
+// TestInitInteractiveTranscript replaces the probe layout assertions with a
+// golden of all three interactive steps, the complete Plan and the refusal.
+func TestInitInteractiveTranscript(t *testing.T) {
+	want, err := os.ReadFile("testdata/init-interactive.golden")
+	if err != nil {
+		t.Fatal(err)
+	}
 	importRepo(t)
+	wireGit(t, ".", "config", "core.excludesFile", os.DevNull)
+	wireWrite(t, ".", ".gitignore", "/.claude/settings.local.json\n")
 	if err := os.WriteFile("uv.lock", nil, 0644); err != nil {
 		t.Fatal(err)
 	}
 	fakeInitPATH(t, initHarnesses...)
+	// Keep the HOME-relative state socket below the platform path limit.
+	t.Setenv("HOME", testsupport.ShortStateDir(t))
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".codex", "config.toml"), "model = \"gpt-6.1-sol\"\n")
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".kimi-code", "config.toml"), `default_model = "kimi-code/k3"
 [models."kimi-code/k3-256k"]
@@ -1100,87 +1026,28 @@ func TestInitInteractiveSteps(t *testing.T) {
 	if err := os.WriteFile(opencode, script, 0755); err != nil {
 		t.Fatal(err)
 	}
-	// Pick Claude by number, accept CLI defaults, opt in to Kimi, leave
-	// OpenCode out by default, then accept the foreman and check suggestions.
-	code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "1\n\ny\n\n\n\n\n\nn\n", "--no-wiring")
+	// Accept defaults, opt in to Kimi but leave it review-only, and pick
+	// OpenCode model 1. Decline only the final apply to keep the run read-only.
+	state := filepath.Join(os.Getenv("HOME"), ".local", "state", "brigada")
+	code, out, errOut := initDo(t, state, "\n\ny\n\nN\n1\n\n\nn\n")
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
-	want := `brigada init: set up example.invalid/imported
-
-brigada runs coding tasks on the agent CLIs you are signed in to. A foreman
-(an agent) turns your request into a plan of tasks; workers (other agents)
-write the code in their own git worktrees; your check command tests it; and
-an agent of a different model family reviews it. Three short steps follow.
-Nothing is written or started until you confirm at the end.
-
-Step 1 of 3: agents
-  Each agent CLI below can work for brigada. For each one, pick the model it
-  should run, or leave it out. Reviews always go to a different model family
-  than the author's, so you need at least two families (e.g. claude + codex).
-
-  claude: signed in
-    Which model should claude run?
-       1  sonnet  balanced; the usual choice
-       2  opus    strongest; uses your Claude plan's limits faster
-       3  haiku   fastest; fine for small tasks
-       -  don't use claude
-    Pick 1-3 or -, or type a model id [1]:
-
-  codex: signed in
-    Which model should codex run?
-       1  gpt-6.1-sol  your codex default (~/.codex/config.toml)
-       -  don't use codex
-    Pick 1 or -, or type a model id [1]:
-
-  kimi: init can't check sign-in. If you're not signed in, run ` + "`kimi login`" + `
-  first, or leave kimi out.
-    Use kimi? [y/N]:
-    Which model should kimi run?
-       1  kimi-code/k3                         your kimi default
-       2  kimi-code/k3-256k
-       3  kimi-code/kimi-for-coding
-       4  kimi-code/kimi-for-coding-highspeed
-    Pick 1-4, or type a model id [1]:
-    kimi has no sandbox: when it writes code it can run any command on this
-    machine without asking. As a reviewer it only reads.
-    Let kimi write code too, not only review? [y/N]:
-
-  opencode: signed in to 2 providers (opencode auth list)
-    Which model should opencode run?
-       1  zai-coding-plan/glm-5.3
-       2  zai-coding-plan/glm-5.2
-       -  don't use opencode
-    Pick 1-2 or -, or type provider/model [-]:
-
-Step 2 of 3: the foreman
-  The foreman plans the work and decides what happens when a task needs
-  judgment. It runs whenever work finishes, so it uses that agent's quota.
-  Only claude and codex can be the foreman; it uses the model picked above.
-    1  claude/sonnet
-    2  codex/gpt-6.1-sol
-  Pick 1-2 [1]:
-
-Step 3 of 3: the check
-  A command that must succeed (exit 0) before a task's work is accepted.
-  Found uv.lock, so the suggestion is:
-  Check command [uv run pytest]:
-
-`
-	before, _, found := strings.Cut(out, "Plan\n")
-	if !found || before != want {
-		t.Fatalf("interactive transcript before Plan:\n%s\nwant:\n%s", before, want)
+	if out != string(want) {
+		t.Fatalf("interactive transcript:\n%s\nwant:\n%s", out, want)
 	}
-	for _, line := range strings.Split(before, "\n") {
-		if len(line) >= 80 {
-			t.Errorf("intro/question line must be under 80 columns: %q", line)
+	for _, line := range strings.Split(out, "\n") {
+		if len([]rune(line)) >= 80 {
+			t.Errorf("transcript line must be under 80 columns: %q", line)
 		}
 	}
-	if strings.Contains(out, "ready") || strings.Contains(out, "    opencode ") {
-		t.Fatalf("refusal claimed ready or included skipped OpenCode:\n%s", out)
+	if strings.Contains(out, "ready") {
+		t.Fatalf("refusal claimed ready:\n%s", out)
 	}
-	if _, err := os.Stat(".brigada"); !os.IsNotExist(err) {
-		t.Fatalf("declined init wrote configuration: %v", err)
+	for _, path := range []string{".brigada", ".claude", ".mcp.json", state} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("declined init wrote %s: %v", path, err)
+		}
 	}
 }
 
@@ -1215,7 +1082,7 @@ func TestInitForemanQuestion(t *testing.T) {
 				}
 				return
 			}
-			if errOut != "" || !strings.Contains(out, "Declined") || !strings.Contains(out, "  Foreman: "+tc.want+" (") {
+			if errOut != "" || !strings.Contains(out, "Declined") || !strings.Contains(out, "  Foreman: "+tc.want+"\n") {
 				t.Fatalf("wrong foreman: %s\n%s", out, errOut)
 			}
 			if tc.one {

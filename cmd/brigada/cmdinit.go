@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/api"
@@ -501,31 +502,29 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if canAsk {
 		fmt.Fprintln(stdout)
 	}
-	printInitAgents(stdout, usable, len(families), *chosen)
-	fmt.Fprintf(stdout, "  Check after every task: %s (init does not run it; edit .brigada/project.yaml to change it)\n  Worker permissions:\n", *check)
+	printInitAgents(stdout, usable, len(families), *chosen, sources)
+	printInitWrapped(stdout, "  Check: ", "    ", *check+" (init doesn't run it; change it later in .brigada/project.yaml)")
+	fmt.Fprintln(stdout, "  What workers may do:")
 	for _, a := range adverts {
+		if !slices.Contains(a.Classes, "implement") {
+			continue
+		}
 		var permissions string
 		switch a.Harness {
 		case "claude":
-			permissions = "edits files; no shell"
+			permissions = "edit files; no commands"
 			if a.Tools != "none" {
-				permissions = "edits files; shell limited to: " + a.Tools
+				permissions = "edit files; run only: " + initToolCommands(a.Tools)
 			}
 		case "codex":
-			permissions = "edits files and runs commands inside codex's workspace-write sandbox"
+			permissions = "edit files and run commands inside codex's sandbox"
 		case "kimi":
-			permissions = "edits files and runs commands headless, with no approval prompts"
-			if slices.Equal(a.Classes, []string{"review"}) {
-				for _, s := range usable {
-					if s.harness == "kimi" && s.agentFile == "" {
-						permissions = "reads files only; no shell"
-					}
-				}
-			}
+			permissions = "edit files and run any command without asking"
 		case "opencode":
-			permissions = "edits files; no shell"
+			permissions = "edit files; no commands"
 		}
-		fmt.Fprintf(stdout, "    %-9s %s\n", a.Harness, permissions)
+		prefix := fmt.Sprintf("    %-9s ", a.Harness)
+		printInitWrapped(stdout, prefix, strings.Repeat(" ", len(prefix)), permissions)
 	}
 	var wiring []wireFile
 	if !*noWiring && probes["claude"].installed {
@@ -537,18 +536,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if probes["codex"].installed {
 			fmt.Fprint(stdout, codexWiringText)
 		}
-		var workers []string
-		for _, h := range []string{"kimi", "opencode"} {
-			if probes[h].installed {
-				workers = append(workers, h)
-			}
-		}
-		if len(workers) > 0 {
-			fmt.Fprintf(stdout, "  %s: work as workers only; nothing to set up.\n", strings.Join(workers, ", "))
-		}
 	}
-	fmt.Fprintln(stdout, "  Background: the engine starts when a command needs it and exits after 30 idle minutes.")
-	fmt.Fprintf(stdout, "    The runner starts now and keeps running; log: %s; stop it with: brigada stop\n", filepath.Join(rt.stateDir, "runner.log"))
+	printInitWrapped(stdout, "  In the background: ", "    ", "a runner starts now and keeps going (log: "+initHomePath(filepath.Join(rt.stateDir, "runner.log"))+"; stop it with: brigada stop). The engine starts when needed and stops after 30 idle minutes.")
 	fmt.Fprintln(stdout)
 	if *probe {
 		fmt.Fprintln(stdout, "Probe only; nothing written or started. Re-run without --probe to confirm, or with --yes to apply.")
@@ -695,14 +684,7 @@ func initMenuModelName(entry initModelEntry) string {
 }
 
 func initForemanName(spec agentSpec, sources map[string]initModelSource) string {
-	model := initModelName(spec.model)
-	for _, entry := range sources[spec.harness].entries {
-		if entry.value == spec.model {
-			model = initMenuModelName(entry)
-			break
-		}
-	}
-	return spec.harness + "/" + model
+	return spec.harness + "/" + initAgentModelName(spec, sources)
 }
 
 func initModelName(model string) string {
@@ -719,13 +701,109 @@ func initModelFamily(harness, model string) (string, error) {
 	return adapter.AgentFamily(harness, model)
 }
 
-func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agentSpec) {
-	fmt.Fprintln(w, "Plan\n  Agents (each implements, reviews and answers questions):")
-	for _, s := range agents {
+// printInitWrapped keeps plan prose under 80 columns. Continuations either
+// align with a table cell or use the paragraph's continuation indent.
+func printInitWrapped(w io.Writer, prefix, continuation, text string) {
+	if utf8.RuneCountInString(prefix) >= 79 {
+		printInitWrapped(w, "    ", "      ", strings.TrimSpace(prefix))
+		prefix, continuation = "      ", "      "
+	}
+	line := prefix
+	for _, word := range strings.Fields(text) {
+		separator := ""
+		if line != prefix {
+			separator = " "
+		}
+		if utf8.RuneCountInString(line+separator+word) >= 80 && line != prefix {
+			fmt.Fprintln(w, line)
+			prefix, line, separator = continuation, continuation, ""
+		}
+		// Long identifiers and paths have no word boundary to wrap at.
+		for utf8.RuneCountInString(line+separator+word) >= 80 {
+			room := 79 - utf8.RuneCountInString(line+separator)
+			if room <= 0 {
+				fmt.Fprintln(w, line)
+				prefix, line, separator = continuation, continuation, ""
+				continue
+			}
+			runes := []rune(word)
+			fmt.Fprintln(w, line+separator+string(runes[:room]))
+			word = string(runes[room:])
+			prefix, line, separator = continuation, continuation, ""
+		}
+		line += separator + word
+	}
+	fmt.Fprintln(w, line)
+}
+
+func initHomePath(path string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if path == home {
+			return "~"
+		}
+		if rel, ok := strings.CutPrefix(path, home+string(os.PathSeparator)); ok {
+			return filepath.Join("~", rel)
+		}
+	}
+	return path
+}
+
+// Describe command scopes without exposing Claude's Bash(...) syntax. Other
+// tool patterns retain their names so a custom scope is still visible in full.
+func initToolCommands(tools string) string {
+	var commands []string
+	for _, tool := range strings.Split(tools, "+") {
+		if command, ok := strings.CutPrefix(tool, "Bash("); ok {
+			command = strings.TrimSuffix(command, ")")
+			commands = append(commands, strings.TrimSuffix(command, ":*"))
+		} else {
+			commands = append(commands, tool)
+		}
+	}
+	return strings.Join(commands, "; ")
+}
+
+func initAgentRoles(classes []string) string {
+	if len(classes) == 3 && slices.Contains(classes, "implement") && slices.Contains(classes, "review") && slices.Contains(classes, "answer") {
+		return "writes code, reviews"
+	}
+	var roles []string
+	for _, class := range classes {
+		switch class {
+		case "implement":
+			roles = append(roles, "writes code")
+		case "review":
+			roles = append(roles, "reviews")
+		case "answer":
+			roles = append(roles, "answers questions")
+		default:
+			roles = append(roles, "handles "+class+" tasks")
+		}
+	}
+	if len(roles) == 1 {
+		return roles[0] + " only"
+	}
+	return strings.Join(roles, ", ")
+}
+
+func initAgentModelName(s agentSpec, sources map[string]initModelSource) string {
+	for _, entry := range sources[s.harness].entries {
+		if entry.value == s.model {
+			return initMenuModelName(entry)
+		}
+	}
+	return initModelName(s.model)
+}
+
+func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agentSpec, sources map[string]initModelSource) {
+	fmt.Fprintln(w, "Plan\n  Agents:")
+	modelWidth, familyWidth := 0, 0
+	familyNames := make([]string, len(agents))
+	for i, s := range agents {
 		family, _ := adapter.AgentFamily(s.harness, s.model)
 		switch family {
 		case "":
-			family = "unknown (give provider/model to count it for review)"
+			family = "unknown family"
 		case "anthropic":
 			family = "Anthropic"
 		case "openai":
@@ -733,18 +811,26 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 		case "moonshot":
 			family = "Moonshot"
 		case "zhipu":
-			family = "Zhipu (GLM)"
+			family = "Zhipu"
 		case "google":
 			family = "Google"
 		}
-		classes := ""
-		if len(s.classes) != 3 || !slices.Contains(s.classes, "implement") || !slices.Contains(s.classes, "review") || !slices.Contains(s.classes, "answer") {
-			classes = " (" + strings.Join(s.classes, ", ") + " only)"
-		}
-		fmt.Fprintf(w, "    %-9s %-25s family: %s%s\n", s.harness, initModelName(s.model), family, classes)
+		familyNames[i] = family
+		modelWidth = max(modelWidth, utf8.RuneCountInString(initAgentModelName(s, sources)))
+		familyWidth = max(familyWidth, utf8.RuneCountInString(family))
 	}
-	fmt.Fprintf(w, "  Review: %d model families; a task is always reviewed by a family other than its author's.\n", families)
-	fmt.Fprintf(w, "  Foreman: %s (the first agent that can resume a session headless; change it with --foreman HARNESS/MODEL)\n", agentName(foreman.harness, foreman.model, foreman.effort))
+	for i, s := range agents {
+		// Keep unusually long custom identifiers readable without making all
+		// the other rows wider than the terminal.
+		if modelWidth+familyWidth > 40 {
+			printInitWrapped(w, fmt.Sprintf("    %-9s ", s.harness), "              ", initAgentModelName(s, sources)+"  "+familyNames[i]+"  "+initAgentRoles(s.classes))
+			continue
+		}
+		prefix := fmt.Sprintf("    %-9s %-*s  %-*s  ", s.harness, modelWidth, initAgentModelName(s, sources), familyWidth, familyNames[i])
+		printInitWrapped(w, prefix, strings.Repeat(" ", utf8.RuneCountInString(prefix)), initAgentRoles(s.classes))
+	}
+	printInitWrapped(w, "  Reviews: ", "    ", fmt.Sprintf("%d model families, so every task can get a reviewer of another one.", families))
+	printInitWrapped(w, "  Foreman: ", "    ", agentName(foreman.harness, foreman.model, foreman.effort))
 }
 
 func initApplyPrompt(files int, running bool) string {

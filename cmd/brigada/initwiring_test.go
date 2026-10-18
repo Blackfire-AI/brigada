@@ -256,12 +256,12 @@ func TestInitProbeListsWiringWritesNothing(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
-			for _, want := range []string{".mcp.json new:", ".claude/settings.local.json new, private (kept out of git):", "brigada-foreman/SKILL.md new:", "codex mcp add brigada-foreman -- brigada mcp --foreman"} {
+			for _, want := range []string{".mcp.json new lets Claude Code here use brigada", ".claude/settings.local.json new private, kept out of git:", "brigada-foreman/SKILL.md new rules for your Claude session", "codex mcp add brigada-foreman -- brigada mcp --foreman"} {
 				if strings.Contains(strings.Join(strings.Fields(out), " "), want) != tc.wantWiring {
 					t.Errorf("%q present = %v, want %v\n%s", want, !tc.wantWiring, tc.wantWiring, out)
 				}
 			}
-			if !strings.Contains(out, "Files in this repository (brigada never commits them;") || !strings.Contains(strings.Join(strings.Fields(out), " "), ".brigada/project.yaml new:") {
+			if !strings.Contains(out, "Files in this repository (brigada never commits them):") || !strings.Contains(strings.Join(strings.Fields(out), " "), ".brigada/project.yaml new the settings above") {
 				t.Errorf("missing repository files block:\n%s", out)
 			}
 			if strings.Contains(out, "auto_review") || strings.Contains(out, "already") || strings.Contains(out, "ready") {
@@ -381,13 +381,11 @@ func TestInitWorkerOnlyWiringNotes(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
-			note := ": work as workers only; nothing to set up."
-			if len(workers) == 0 {
-				if strings.Contains(out, note) {
-					t.Errorf("worker note without installed workers:\n%s", out)
-				}
-			} else if !strings.Contains(out, strings.Join(workers, ", ")+note) {
-				t.Errorf("missing installed-worker note:\n%s", out)
+			if strings.Contains(out, "work as workers only") {
+				t.Errorf("redundant installed-worker note:\n%s", out)
+			}
+			if !strings.Contains(out, "Files in this repository (brigada never commits them):") {
+				t.Errorf("missing wiring plan:\n%s", out)
 			}
 		})
 	}
@@ -465,7 +463,7 @@ func TestWiringPrivateSettingsExcludeAddedOnce(t *testing.T) {
 	files := planWiring(root)
 	var plan bytes.Buffer
 	printInitFiles(&plan, files, false)
-	if !strings.Contains(strings.Join(strings.Fields(plan.String()), " "), ".git/info/exclude changes:") || !strings.Contains(plan.String(), "+/.claude/settings.local.json") {
+	if !strings.Contains(strings.Join(strings.Fields(plan.String()), " "), ".git/info/exclude changes keeps private Claude Code settings out of git") || !strings.Contains(plan.String(), "+/.claude/settings.local.json") {
 		t.Fatalf("exclude missing from plan:\n%s", plan.String())
 	}
 	if got := wireRead(t, root, ".git/info/exclude"); got != "# user's exclude rules" {
