@@ -344,7 +344,9 @@ func TestInitNoInput(t *testing.T) {
 		{"no foreman input", "", "--foreman", []string{"--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex"}},
 		{"no apply input", "", "--yes", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited"}},
 		{"no check input", "", "--check COMMAND", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--check="}},
-		{"no tools input", "", "--tools", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--tools="}},
+		// Changed: tools now follow the check, so the question remains only
+		// when no valid scope can be built; "a+b" cannot ("+" joins scopes).
+		{"no tools input", "", "--tools", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--check", "a+b", "--tools="}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
@@ -437,21 +439,26 @@ func TestInitModelRetries(t *testing.T) {
 
 func TestInitQuestionsBeforePlan(t *testing.T) {
 	// Claude is declined before its model menu; OpenCode is confirmed by
-	// its probe and skipped in its menu. Check/tools still precede the Plan.
+	// its probe and skipped in its menu. The check still precedes the Plan.
 	// Match the complete Plan foreman line to avoid the Step 2 notice.
+	// Changed: a typed check now sets the worker tools itself, so no "Worker
+	// tools" question follows it and the check is the last question asked.
 	importRepo(t)
 	fakeInitPATH(t, initHarnesses...)
-	code, out, err := initDo(t, testsupport.ShortStateDir(t), "n\ny\n\ny\n\n\n-\ntrue\nnone\nn\n", "--no-wiring")
+	code, out, err := initDo(t, testsupport.ShortStateDir(t), "n\ny\n\ny\n\n\n-\ntrue\nn\n", "--no-wiring")
 	if code != 1 || err != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("got %d\n%s\n%s", code, out, err)
 	}
 	if strings.Contains(out, "Which model should claude run?") {
 		t.Fatalf("asked for a model after sign-in was declined:\n%s", out)
 	}
-	if !strings.Contains(out, "Step 3 of 3: the check\n  A command that must succeed (exit 0) before a task's work is accepted.\n  Check command:\n") || strings.Contains(out, "  Found ") {
-		t.Fatalf("check without a build-file suggestion must have no default:\n%s", out)
+	if !strings.Contains(out, "Step 3 of 3: how brigada tests the work\n") || !strings.Contains(out, "\n  Found in this repo: nothing I recognise\n  Check command:\n") || strings.Contains(out, "Check command [") {
+		t.Fatalf("check without a candidate must have no default:\n%s", out)
 	}
-	lastQuestion := strings.Index(out, "Worker tools (required;")
+	if !strings.Contains(out, "  Check: true (") || strings.Contains(out, "Worker tools") {
+		t.Fatalf("typed check must set its own worker tools:\n%s", out)
+	}
+	lastQuestion := strings.Index(out, "  Check command:")
 	for _, line := range []string{"\nPlan\n", "    codex     CLI default", "  Reviews:", "  Foreman: codex/CLI default\n", "  Check:", "  In the background:"} {
 		if pos := strings.Index(out, line); lastQuestion < 0 || pos <= lastQuestion {
 			t.Errorf("plan line %q preceded the last setup question:\n%s", line, out)
@@ -528,6 +535,22 @@ func TestInitApplyPrompts(t *testing.T) {
 	}
 }
 
+// firstCheckCandidate is the entry init offers as 1 for a repository.
+func firstCheckCandidate(t *testing.T, root string) (check, tools string) {
+	t.Helper()
+	candidates, err := checkCandidates(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) == 0 {
+		return "", ""
+	}
+	return candidates[0].Command, candidates[0].Tools
+}
+
+// TestInitBuildSuggestions keeps its purpose: each build file yields the
+// check and tools init suggests, and no script is ever run. Changed: the
+// suggestion is now the first of checkCandidates, not suggestInitDefaults.
 func TestInitBuildSuggestions(t *testing.T) {
 	for _, tc := range []struct{ name, body, check, tools string }{
 		{"go.mod", "module x", "go test ./...", "Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*)"},
@@ -545,9 +568,9 @@ func TestInitBuildSuggestions(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, tc.name), []byte(tc.body), 0644); err != nil {
 				t.Fatal(err)
 			}
-			check, tools, err := suggestInitDefaults(root)
-			if err != nil || check != tc.check || tools != tc.tools {
-				t.Fatalf("got %q %q %v", check, tools, err)
+			check, tools := firstCheckCandidate(t, root)
+			if check != tc.check || tools != tc.tools {
+				t.Fatalf("got %q %q", check, tools)
 			}
 			if _, err := os.Stat(filepath.Join(root, "should-never-exist")); !os.IsNotExist(err) {
 				t.Fatal("executed test script")
@@ -556,12 +579,17 @@ func TestInitBuildSuggestions(t *testing.T) {
 	}
 }
 
+// TestInitBuildSuggestionOrder keeps its purpose: the best file wins entry 1.
+// Changed: a package.json test script is now listed ahead of go.mod's go
+// test (checkCandidates puts the repo's own scripts before language
+// defaults), so "go first" became "npm script before go".
 func TestInitBuildSuggestionOrder(t *testing.T) {
 	for _, tc := range []struct {
 		name, check string
 		files       []string
 	}{
-		{"go first", "go test ./...", []string{"go.mod", "package.json", "Cargo.toml", "uv.lock", "poetry.lock", "pyproject.toml"}},
+		{"npm script before go", "npm test", []string{"go.mod", "package.json", "Cargo.toml", "uv.lock", "poetry.lock", "pyproject.toml"}},
+		{"go before cargo", "go test ./...", []string{"go.mod", "Cargo.toml", "uv.lock", "poetry.lock", "pyproject.toml"}},
 		{"npm before cargo", "npm test", []string{"package.json", "Cargo.toml", "uv.lock", "poetry.lock"}},
 		{"cargo before python", "cargo test", []string{"Cargo.toml", "uv.lock", "poetry.lock"}},
 		{"uv before poetry and plain pytest", "uv run pytest", []string{"uv.lock", "poetry.lock", "pyproject.toml", "pytest.ini"}},
@@ -578,44 +606,48 @@ func TestInitBuildSuggestionOrder(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			check, _, err := suggestInitDefaults(root)
-			if err != nil || check != tc.check {
-				t.Fatalf("got %q, %v; want %q", check, err, tc.check)
+			if check, _ := firstCheckCandidate(t, root); check != tc.check {
+				t.Fatalf("got %q; want %q", check, tc.check)
 			}
 		})
 	}
 }
 
+// TestInitSuggestedCheckQuestion keeps its purpose: the check is asked after
+// the foreman menu, names where each suggestion came from, Enter accepts the
+// first and a typed command replaces it. Changed: the suggestion is now menu
+// entry 1 ("Found in this repo:" with a "Pick 1, or type a command [1]:"
+// prompt, not "Check command [x]:"), and the worker tools follow the choice:
+// the candidate's own, or Bash(<typed command>:*) for a typed one.
 func TestInitSuggestedCheckQuestion(t *testing.T) {
-	// The check now follows a foreman menu and names its build-file source on
-	// a separate line; Enter still accepts it and typed commands replace it.
 	for _, tc := range []struct {
-		name, source, body, answer, check string
+		name, source, body, answer, check, tools string
 	}{
-		{"go Enter", "go.mod", "module x", "", "go test ./..."},
-		{"npm Enter", "package.json", `{"scripts":{"test":"exit 99"}}`, "", "npm test"},
-		{"cargo Enter", "Cargo.toml", "[package]", "", "cargo test"},
-		{"uv Enter", "uv.lock", "", "", "uv run pytest"},
-		{"poetry Enter", "poetry.lock", "", "", "poetry run pytest"},
-		{"pyproject Enter", "pyproject.toml", "[project]", "", "python -m pytest"},
-		{"pytest Enter", "pytest.ini", "[pytest]", "", "python -m pytest"},
-		{"typed replacement", "uv.lock", "", "uv run pytest -q", "uv run pytest -q"},
+		{"go Enter", "go.mod", "module x", "", "go test ./...", "Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*)"},
+		{"npm Enter", "package.json", `{"scripts":{"test":"exit 99"}}`, "", "npm test", "Bash(npm test:*)"},
+		{"cargo Enter", "Cargo.toml", "[package]", "", "cargo test", "Bash(cargo test:*)"},
+		{"uv Enter", "uv.lock", "", "", "uv run pytest", "Bash(uv run pytest:*)"},
+		{"poetry Enter", "poetry.lock", "", "", "poetry run pytest", "Bash(poetry run pytest:*)"},
+		{"pyproject Enter", "pyproject.toml", "[project]", "", "python -m pytest", "Bash(python -m pytest:*)"},
+		{"pytest Enter", "pytest.ini", "[pytest]", "", "python -m pytest", "Bash(python -m pytest:*)"},
+		{"pick 1", "uv.lock", "", "1", "uv run pytest", "Bash(uv run pytest:*)"},
+		{"typed replacement", "uv.lock", "", "uv run pytest -q", "uv run pytest -q", "Bash(uv run pytest -q:*)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
 			if err := os.WriteFile(tc.source, []byte(tc.body), 0644); err != nil {
 				t.Fatal(err)
 			}
-			suggestion, _, err := suggestInitDefaults(".")
-			if err != nil {
-				t.Fatal(err)
+			candidates, err := checkCandidates(".")
+			if err != nil || len(candidates) != 1 {
+				t.Fatalf("candidates = %+v, %v", candidates, err)
 			}
 			fakeInitPATH(t, "claude", "codex")
 			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "\n\n\n\n"+tc.answer+"\nn\n", "--signed-in", "claude,codex", "--no-wiring", "--verbose")
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
-			prompt := "  Found " + tc.source + ", so the suggestion is:\n  Check command [" + suggestion + "]:\n"
+			prompt := "  Found in this repo:\n     1  " + candidates[0].Command + "  " + candidates[0].Note + "\n  Pick 1, or type a command [1]:\n"
 			question := strings.Index(out, prompt)
 			if question <= strings.Index(out, "  Pick 1-2 [1]:") || question >= strings.Index(out, "\nPlan\n") || strings.Count(out, prompt) != 1 {
 				t.Fatalf("check question missing or out of order:\n%s", out)
@@ -623,6 +655,7 @@ func TestInitSuggestedCheckQuestion(t *testing.T) {
 			for _, want := range []string{
 				"Check: " + tc.check + " (init doesn't run it; change it later in .brigada/project.yaml)",
 				"default_check: " + strconv.Quote(tc.check),
+				"claude edit files; run only: " + initToolCommands(tc.tools),
 			} {
 				if !strings.Contains(strings.Join(strings.Fields(out), " "), want) {
 					t.Errorf("missing %q in:\n%s", want, out)
@@ -635,13 +668,16 @@ func TestInitSuggestedCheckQuestion(t *testing.T) {
 	}
 }
 
+// TestInitSkipsSuggestedCheckQuestion keeps its purpose: the check question
+// is not asked when --check or a non-interactive run settles it. Changed: an
+// existing project.yaml no longer skips the question (see
+// TestInitRerunShowsCurrentCheckFirst), so the "project value" case is gone.
 func TestInitSkipsSuggestedCheckQuestion(t *testing.T) {
 	for _, tc := range []struct {
 		name, existing, check string
 		args                  []string
 	}{
 		{"flag", "", "flag check", []string{"--check", "flag check"}},
-		{"project value", "default_check: project check\n", "project check", nil},
 		{"flag overrides project", "default_check: project check\n", "flag check", []string{"--check", "flag check"}},
 		{"probe", "", "uv run pytest", []string{"--probe"}},
 	} {
@@ -664,6 +700,190 @@ func TestInitSkipsSuggestedCheckQuestion(t *testing.T) {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
 		})
+	}
+}
+
+const initCheckMakefile = "check: lint format-check type test rig-spec\n\ntest:\n\tuv run pytest -q\n"
+
+// initCheckStep runs an interactive init in a repository whose Makefile
+// defines check and test and which has a uv.lock, answering the foreman with
+// Enter, then the check step with answer, then declining the apply.
+func initCheckStep(t *testing.T, answer string, existing string, args ...string) (int, string, string) {
+	t.Helper()
+	write := importRepo(t)
+	if existing != "" {
+		write(projectFile(existing))
+	}
+	for name, body := range map[string]string{"Makefile": initCheckMakefile, "uv.lock": ""} {
+		if err := os.WriteFile(name, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fakeInitPATH(t, "claude", "codex")
+	args = append([]string{"--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring", "--verbose"}, args...)
+	return initDo(t, testsupport.ShortStateDir(t), "\n"+answer+"\nn\n", args...)
+}
+
+func TestInitCheckStepTranscript(t *testing.T) {
+	code, out, errOut := initCheckStep(t, "", "")
+	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
+		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+	}
+	want := `Step 3 of 3: how brigada tests the work
+  When an agent finishes a task, brigada runs one command in that task's
+  own copy of the repo (never in your working copy):
+    passes (exit 0)  the work goes on to review by another model family
+    fails            the work goes back to the agent, with the output
+  Use the command you run yourself to be sure nothing broke: tests,
+  lint, type checks. Claude workers may run it too before handing in.
+
+  Found in this repo:
+     1  make check     Makefile: lint format-check type test rig-spec
+     2  make test      Makefile: uv run pytest -q
+     3  uv run pytest  pytest, from uv.lock
+  Pick 1-3, or type a command [1]:
+
+  To change it later: edit default_check in .brigada/project.yaml and
+  run brigada project import, or run brigada init again.
+`
+	if !strings.Contains(out, want) {
+		t.Fatalf("step 3 transcript differs from the approved one:\n%s", out)
+	}
+	for _, want := range []string{
+		"\n  To change it later: run brigada init again.\n\nStep 2 of 3:",
+		"\n  To change it later: brigada project foreman --harness H --model M,\n  or run brigada init again.\n\nStep 3 of 3:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	// Every line before the Plan stays under 80 columns, notes truncated.
+	before, _, _ := strings.Cut(out, "\nPlan\n")
+	for _, line := range strings.Split(before, "\n") {
+		if n := utf8.RuneCountInString(line); n >= 80 {
+			t.Errorf("%d columns: %q", n, line)
+		}
+	}
+	if strings.Contains(before, "ready") {
+		t.Errorf("claimed ready before the apply:\n%s", before)
+	}
+}
+
+func TestInitCheckStepLongNoteStaysNarrow(t *testing.T) {
+	importRepo(t)
+	long := "check:" + strings.Repeat(" a-very-long-prerequisite", 6) + "\n"
+	if err := os.WriteFile("Makefile", []byte(long), 0644); err != nil {
+		t.Fatal(err)
+	}
+	fakeInitPATH(t, "claude", "codex")
+	code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "\n\nn\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring")
+	if code != 1 || errOut != "" || !strings.Contains(out, "     1  make check  Makefile: a-very-long-prerequisite") || !strings.Contains(out, "…\n") {
+		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+	}
+	before, _, _ := strings.Cut(out, "\nPlan\n")
+	for _, line := range strings.Split(before, "\n") {
+		if n := utf8.RuneCountInString(line); n >= 80 {
+			t.Errorf("%d columns: %q", n, line)
+		}
+	}
+}
+
+func TestInitCheckStepAnswers(t *testing.T) {
+	for _, tc := range []struct {
+		name, answer, check, tools string
+	}{
+		{"Enter picks make check", "", "make check", "make check"},
+		{"1 picks make check", "1", "make check", "make check"},
+		{"2 picks make test", "2", "make test", "make test"},
+		{"3 picks uv run pytest", "3", "uv run pytest", "uv run pytest"},
+		{"typed command sets its tools", "make lint", "make lint", "make lint"},
+		{"whitespace around a typed command is dropped", "  make lint  ", "make lint", "make lint"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out, errOut := initCheckStep(t, tc.answer, "")
+			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
+				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+			}
+			flat := strings.Join(strings.Fields(out), " ")
+			for _, want := range []string{
+				"Check: " + tc.check + " (init doesn't run it",
+				"default_check: " + strconv.Quote(tc.check),
+				"claude edit files; run only: " + tc.tools + " codex",
+			} {
+				if !strings.Contains(flat, want) {
+					t.Errorf("missing %q in:\n%s", want, out)
+				}
+			}
+		})
+	}
+}
+
+func TestInitCheckStepAsksAgain(t *testing.T) {
+	// A number outside the menu is not a command: it is asked again, and
+	// Enter then takes entry 1.
+	code, out, errOut := initCheckStep(t, "9\n\n", "")
+	if code != 1 || errOut != "" || strings.Count(out, "  Pick 1-3, or type a command [1]:\n") != 2 ||
+		!strings.Contains(out, "  pick 1-3 or type a command; try again.\n") || !strings.Contains(out, "  Check: make check (") {
+		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+	}
+}
+
+func TestInitCheckStepNoCandidates(t *testing.T) {
+	// Nothing recognised: no default, and empty or blank answers are asked
+	// again, up to three times.
+	for _, tc := range []struct {
+		name, stdin string
+		asked       int
+		ok          bool
+	}{
+		{"typed on the third try", "\n\n   \ntrue\nn\n", 3, true},
+		{"three empty answers", "\n\n\n\n", 3, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			importRepo(t)
+			fakeInitPATH(t, "claude", "codex")
+			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), tc.stdin, "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring")
+			if !strings.Contains(out, "\n  Found in this repo: nothing I recognise\n  Check command:\n") || strings.Count(out, "  Check command:\n") != tc.asked || strings.Contains(out, "Check command [") {
+				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+			}
+			if tc.ok != (code == 1 && errOut == "" && strings.Contains(out, "Declined") && strings.Contains(out, "  Check: true (")) {
+				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+			}
+			if !tc.ok && !strings.Contains(errOut, "--check") {
+				t.Fatalf("exhausted answers must point at --check: %q", errOut)
+			}
+		})
+	}
+}
+
+func TestInitRerunShowsCurrentCheckFirst(t *testing.T) {
+	// A rerun with an existing project.yaml asks the step: the current check
+	// is entry 1, the other candidates follow, Enter keeps it and its tools.
+	existing := "default_check: custom check\nworker_tools: none\n"
+	code, out, errOut := initCheckStep(t, "", existing)
+	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
+		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+	}
+	for _, want := range []string{
+		"     1  custom check   current, from .brigada/project.yaml\n     2  make check     Makefile: lint",
+		"     4  uv run pytest  pytest, from uv.lock\n  Pick 1-4, or type a command [1]:\n",
+		"  Check: custom check (",
+		"    claude    edit files; no commands\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	// Picking another entry moves the tools with it.
+	code, out, errOut = initCheckStep(t, "2", existing)
+	flat := strings.Join(strings.Fields(out), " ")
+	if code != 1 || errOut != "" || !strings.Contains(flat, "Check: make check (") || !strings.Contains(flat, "claude edit files; run only: make check codex") {
+		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+	}
+	// A current check that is also a candidate is listed once, as current.
+	_, out, _ = initCheckStep(t, "", "default_check: make check\nworker_tools: Bash(make check:*)\n")
+	if strings.Count(out, "make check  ") != 1 || !strings.Contains(out, "     1  make check     current, from .brigada/project.yaml\n     2  make test ") {
+		t.Fatalf("current check not deduplicated:\n%s", out)
 	}
 }
 
@@ -911,14 +1131,16 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 	args[2] = "harness=claude,model=opus,account=work,effort=high"
 	// Refusing a restart leaves both live and durable choices alone.
 	interactive := append([]string{}, args[1:]...)
-	code, out, err = initDo(t, state, "\nn\n", interactive...)
+	// Changed: the rerun now asks the check step too (Enter keeps the current
+	// check), so each answer list has one more Enter before the apply answer.
+	code, out, err = initDo(t, state, "\n\nn\n", interactive...)
 	if code != 1 || err != "" || !strings.Contains(out,
 		"Write 0 files and restart the runner with the new agents? [y/N]") {
 		t.Fatalf("restart prompt: %d\n%s\n%s", code, out, err)
 	}
 	assertInitSavedAgents(t, state, rec.Specs)
 	// Confirm the same prompt and exercise stop's real SIGTERM/lock wait.
-	code, out, err = initDo(t, state, "\ny\n", interactive...)
+	code, out, err = initDo(t, state, "\n\ny\n", interactive...)
 	if code != 0 || !strings.Contains(out, "Runner restarted with the new agents") ||
 		strings.Contains(out, "Detached runner started") {
 		t.Fatalf("differing agents: %d\n%s\n%s", code, out, err)
@@ -929,7 +1151,7 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 		t.Fatalf("runner not replaced: %+v %v", again, e)
 	}
 	assertInitSavedAgents(t, state, again.Specs)
-	code, out, err = initDo(t, state, "unknown\n\n\n\n\ny\n", "--signed-in", "claude,codex", "--no-wiring")
+	code, out, err = initDo(t, state, "unknown\n\n\n\n\n\ny\n", "--signed-in", "claude,codex", "--no-wiring")
 	if code != 0 || strings.Count(out, "    Pick 1-3 or -, or type a model id [2]:") != 2 || !strings.Contains(out, "Runner already running") {
 		t.Fatalf("interactive retry: %d\n%s\n%s", code, out, err)
 	}
@@ -1092,6 +1314,11 @@ func TestInitSavedDefaultsOmitKimi(t *testing.T) {
 	assertInitSavedAgents(t, state, specs)
 }
 
+// TestInitKeepsMachineToolScope keeps its purpose: a machine-level
+// tools.claude/<model> entry wins over the project's suggested tools, and
+// an explicit --tools wins over both. Changed: the suggested tools are now
+// the first check candidate's (go.mod's go test here) rather than a
+// separate suggestion; the outcome is the same.
 func TestInitKeepsMachineToolScope(t *testing.T) {
 	importRepo(t)
 	if err := os.WriteFile("go.mod", []byte("module x\n"), 0644); err != nil {

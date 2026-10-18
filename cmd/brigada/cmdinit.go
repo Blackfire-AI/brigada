@@ -449,6 +449,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		return usagef(stderr, "--foreman must name a usable agent that resumes headless (claude/model or codex/model); none matched")
 	}
 	if canAsk {
+		fmt.Fprint(stdout, "\n  To change it later: run brigada init again.\n")
 		fmt.Fprint(stdout, "\nStep 2 of 3: the foreman\n  The foreman plans the work and decides what happens when a task needs\n  judgment. It runs whenever work finishes, so it uses that agent's quota.\n  Only claude and codex can be the foreman; it uses the model picked above\n  and its effort.\n")
 		var candidates []*agentSpec
 		defaultChoice := 1
@@ -491,6 +492,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				}
 			}
 		}
+		fmt.Fprint(stdout, "\n  To change it later: brigada project foreman --harness H --model M,\n  or run brigada init again.\n")
 	}
 	file := filepath.Join(root, filepath.FromSlash(engine.ProjectConfigPath))
 	if err := initSafeFile(file); err != nil {
@@ -501,6 +503,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil && !os.IsNotExist(err) {
 		return fail(stderr, err)
 	}
+	projectCheck, projectTools := "", ""
 	if exists {
 		cfg, err := engine.ParseProjectConfig(old)
 		if err != nil {
@@ -509,38 +512,41 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if cfg.Repo != canon {
 			return fail(stderr, fmt.Errorf("project.yaml names another repository; correct it before init"))
 		}
-		if *check == "" {
-			_ = json.Unmarshal(cfg.Values[engine.SettingDefaultCheck], check)
-		}
-		if *tools == "" {
-			_ = json.Unmarshal(cfg.Values[engine.SettingWorkerTools], tools)
-		}
+		_ = json.Unmarshal(cfg.Values[engine.SettingDefaultCheck], &projectCheck)
+		_ = json.Unmarshal(cfg.Values[engine.SettingWorkerTools], &projectTools)
 	}
-	if *check == "" || *tools == "" {
-		suggestion, scope, source, err := suggestInitDefaultsWithSource(root)
+	if *check == "" || !toolsProvided {
+		candidates, err := checkCandidates(root)
 		if err != nil {
 			return fail(stderr, err)
 		}
-		if *check == "" {
-			if canAsk {
-				fmt.Fprint(stdout, "\nStep 3 of 3: the check\n  A command that must succeed (exit 0) before a task's work is accepted.\n")
-				prompt := "  Check command: "
-				if suggestion != "" {
-					fmt.Fprintf(stdout, "  Found %s, so the suggestion is:\n", source)
-					prompt = fmt.Sprintf("  Check command [%s]: ", suggestion)
-				}
-				answer, err := ask(prompt, "--check COMMAND")
-				if err != nil {
-					return fail(stderr, err)
-				}
-				if answer != "" {
-					suggestion = answer
-				}
+		entries := initCheckEntries(candidates, projectCheck, projectTools)
+		checkTools := ""
+		switch {
+		case *check != "":
+			// --check answers the step; the tools follow it unless the
+			// project already scopes tools for some other command.
+			if !initCheckKnown(*check, entries) && projectTools != "" {
+				checkTools = projectTools
+			} else {
+				checkTools = initCheckTools(*check, entries, candidates)
 			}
-			*check = suggestion
+		case canAsk:
+			command, exhausted, err := askInitCheck(stdout, ask, entries)
+			if err != nil {
+				return fail(stderr, err)
+			}
+			if exhausted {
+				return usagef(stderr, "--check: no usable answer; type the check command or pass --check COMMAND")
+			}
+			*check = command
+			checkTools = initCheckTools(command, entries, candidates)
+		case len(entries) > 0:
+			*check = entries[0].Command
+			checkTools = initCheckTools(*check, entries, candidates)
 		}
-		if *tools == "" {
-			*tools = scope
+		if !toolsProvided {
+			*tools = checkTools
 		}
 	}
 
