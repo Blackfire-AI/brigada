@@ -74,11 +74,65 @@ func TestInitClaudeModelSource(t *testing.T) {
 	got := initClaudeModels(context.Background())
 	want := []initModelEntry{
 		{id: 1, name: "sonnet", value: "sonnet", note: "balanced; the usual choice"},
-		{id: 2, name: "opus", value: "opus", note: "strongest; uses your Claude plan's limits faster"},
+		{id: 2, name: "opus", value: "opus", note: "strong; uses your plan's limits faster"},
 		{id: 3, name: "haiku", value: "haiku", note: "fastest; fine for small tasks"},
 	}
 	if !reflect.DeepEqual(got.entries, want) || !got.signIn.installed || got.signIn.signedIn {
 		t.Fatalf("source = %+v", got)
+	}
+}
+
+func fakeInitClaudeHelp(t *testing.T) {
+	t.Helper()
+	fakeInitPATH(t, "claude")
+	script := `#!/bin/sh
+printf 'claude %s\n' "$*" >> "$INIT_CALLS"
+case "$*" in
+ --help) printf '%s\n' "  --model <model>  Model for the current session. Provide an alias for the latest" "                   model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name." "  --other  something" ;;
+ *) exit 89 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(os.Getenv("PATH"), "claude"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInitClaudeModelsFromCLIAndAccount(t *testing.T) {
+	fakeInitClaudeHelp(t)
+	home := os.Getenv("HOME")
+	writeInitModelFixture(t, filepath.Join(home, ".claude.json"), `{"oauthAccount":{"token":"never-print-me"},"additionalModelOptionsCache":[
+ {"value":"claude-fable-5-1[1m]","label":"Fable","description":"Fable 5.1 · Most capable"},
+ {"value":"opus","label":"Opus","description":"already an alias"}]}`)
+	got := initClaudeModels(context.Background())
+	want := []initModelEntry{
+		{id: 1, name: "fable", value: "fable", note: "Fable 5.1 · Most capable"},
+		{id: 2, name: "opus", value: "opus", note: "already an alias"},
+		{id: 3, name: "sonnet", value: "sonnet", note: "balanced; the usual choice"},
+		{id: 4, name: "haiku", value: "haiku", note: "fastest; fine for small tasks"},
+		{id: 5, name: "claude-fable-5-1[1m]", value: "claude-fable-5-1[1m]", note: "Fable: Fable 5.1 · Most capable"},
+	}
+	if !reflect.DeepEqual(got.entries, want) || got.defaultID != 3 {
+		t.Fatalf("source = %+v", got)
+	}
+	assertInitModelPrivacy(t, got)
+	if family, err := initModelFamily("claude", got.entries[4].value); err != nil || family != "anthropic" {
+		t.Fatalf("family = %q, %v", family, err)
+	}
+}
+
+func TestInitClaudeSettingsDefault(t *testing.T) {
+	fakeInitClaudeHelp(t)
+	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".claude", "settings.json"), `{"model":"opus","env":{"K":"never-print-me"}}`)
+	got := initClaudeModels(context.Background())
+	if got.defaultID != 2 || !got.entries[1].isDefault || got.entries[1].note != "your claude default; strong; uses your plan's limits faster" {
+		t.Fatalf("source = %+v", got)
+	}
+	assertInitModelPrivacy(t, got)
+}
+
+func TestInitClaudeAliasesFallback(t *testing.T) {
+	if got := initClaudeAliases("no model row here"); !reflect.DeepEqual(got, []string{"sonnet", "opus", "haiku"}) {
+		t.Fatalf("aliases = %v", got)
 	}
 }
 

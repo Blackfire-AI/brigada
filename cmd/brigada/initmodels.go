@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,15 +32,177 @@ type initModelSource struct {
 	signIn        harnessProbe
 	providerCount int // OpenCode only; no provider names or account output retained.
 	unknownCount  int // Catalog models omitted because their family is unknown.
+	defaultID     int // Entry picked on Enter; 0 means the first.
+}
+
+// Notes for aliases live here; the CLI documents no descriptions for them.
+var initClaudeAliasNotes = map[string]string{
+	"sonnet": "balanced; the usual choice",
+	"opus":   "strong; uses your plan's limits faster",
+	"haiku":  "fastest; fine for small tasks",
+}
+
+var (
+	initClaudeModelRow = regexp.MustCompile(`^\s*(?:-\w,\s*)?--model(?:[\s<\[=]|$)`)
+	initQuotedWord     = regexp.MustCompile(`'([A-Za-z0-9][A-Za-z0-9._-]*)'`)
+)
+
+const initClaudeFileLimit = 4 << 20
+
+// initClaudeAliases reads the aliases from the --model row of claude's root
+// help, in its order, plus haiku. Without the row: sonnet, opus, haiku.
+func initClaudeAliases(help string) []string {
+	var row []string
+	lines := strings.Split(help, "\n")
+	for i, line := range lines {
+		if !initClaudeModelRow.MatchString(line) {
+			continue
+		}
+		row = append(row, line)
+		for _, next := range lines[i+1:] {
+			if t := strings.TrimSpace(next); t == "" || strings.HasPrefix(t, "-") {
+				break
+			}
+			row = append(row, next)
+		}
+		break
+	}
+	var aliases []string
+	for _, m := range initQuotedWord.FindAllStringSubmatch(strings.Join(row, " "), -1) {
+		if !slices.Contains(aliases, m[1]) {
+			aliases = append(aliases, m[1])
+		}
+	}
+	if len(aliases) == 0 {
+		return []string{"sonnet", "opus", "haiku"}
+	}
+	if !slices.Contains(aliases, "haiku") {
+		aliases = append(aliases, "haiku")
+	}
+	return aliases
+}
+
+func initClaudeConfigDir() string {
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		return dir
+	}
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".claude")
+}
+
+// readInitClaudeFile decodes a capped JSON file into v, which must declare only
+// the keys wanted: the files also hold account details. Errors are ignored.
+func readInitClaudeFile(path string, v any) {
+	if path == "" {
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, initClaudeFileLimit+1))
+	if err != nil || len(data) > initClaudeFileLimit {
+		return
+	}
+	_ = json.Unmarshal(data, v)
+}
+
+func initCleanText(s string) string {
+	return strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, s)), " ")
 }
 
 func initClaudeModels(ctx context.Context) initModelSource {
-	// These are explicit aliases, not Claude's potentially configured CLI default.
-	return initModelSource{signIn: probeHarness(ctx, "claude"), entries: []initModelEntry{
-		{id: 1, name: "sonnet", value: "sonnet", note: "balanced; the usual choice"},
-		{id: 2, name: "opus", value: "opus", note: "strongest; uses your Claude plan's limits faster"},
-		{id: 3, name: "haiku", value: "haiku", note: "fastest; fine for small tasks"},
-	}}
+	probe := probeHarness(ctx, "claude")
+	help := probe.rootHelp
+	probe.rootHelp = ""
+	source := initModelSource{signIn: probe}
+
+	var cache struct {
+		Models []struct {
+			Value       string `json:"value"`
+			Label       string `json:"label"`
+			Description string `json:"description"`
+		} `json:"additionalModelOptionsCache"`
+	}
+	dir := initClaudeConfigDir()
+	jsonPath := ""
+	if configDir := os.Getenv("CLAUDE_CONFIG_DIR"); configDir != "" {
+		jsonPath = filepath.Join(configDir, ".claude.json")
+	} else if home, err := os.UserHomeDir(); err == nil && home != "" {
+		jsonPath = filepath.Join(home, ".claude.json")
+	}
+	readInitClaudeFile(jsonPath, &cache)
+	var settings struct {
+		Model string `json:"model"`
+	}
+	if dir != "" {
+		readInitClaudeFile(filepath.Join(dir, "settings.json"), &settings)
+	}
+
+	add := func(name, note string) {
+		if _, err := adapter.AgentFamily("claude", name); err != nil {
+			return // unidentifiable names are left out; they could not be picked
+		}
+		source.entries = append(source.entries, initModelEntry{id: len(source.entries) + 1, name: name, value: name, note: note})
+	}
+	aliases := initClaudeAliases(help)
+	for _, alias := range aliases {
+		note := initClaudeAliasNotes[alias]
+		for _, m := range cache.Models {
+			if strings.EqualFold(initCleanText(m.Label), alias) {
+				if description := initCleanText(m.Description); description != "" {
+					note = description
+				}
+				break
+			}
+		}
+		add(alias, note)
+	}
+	for _, m := range cache.Models {
+		value := m.Value
+		if !validInitModelName(value) || slices.Contains(aliases, value) || slices.ContainsFunc(source.entries, func(e initModelEntry) bool { return e.value == value }) {
+			continue
+		}
+		label, description := initCleanText(m.Label), initCleanText(m.Description)
+		note := label
+		switch {
+		case label != "" && description != "":
+			note = label + ": " + description
+		case label == "":
+			note = description
+		}
+		add(value, note)
+	}
+
+	source.defaultID = 1
+	for i := range source.entries {
+		entry := &source.entries[i]
+		if settings.Model != "" && entry.value == settings.Model {
+			source.defaultID = entry.id
+			entry.isDefault = true
+			if entry.note != "" {
+				entry.note = "your claude default; " + entry.note
+			} else {
+				entry.note = "your claude default"
+			}
+			return source
+		}
+	}
+	for _, entry := range source.entries {
+		if entry.value == "sonnet" {
+			source.defaultID = entry.id
+		}
+	}
+	return source
 }
 
 func initCodexModels(ctx context.Context) initModelSource {
