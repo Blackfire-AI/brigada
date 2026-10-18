@@ -8,7 +8,7 @@ import (
 )
 
 var projectCommands = map[string]command{
-	"foreman": {name: "foreman", description: "Show or choose the foreman harness and model.", run: runProjectForeman},
+	"foreman": {name: "foreman", description: "Show or choose the foreman harness, model and effort.", run: runProjectForeman},
 	"list":    {name: "list", description: "List projects, active plans and what needs you.", run: runProjectList},
 	"set":     {name: "set", description: "Set project settings with key=value pairs.", run: projectSettingsCommand("set")},
 	"show":    {name: "show", description: "Show project settings and their sources.", run: projectSettingsCommand("show")},
@@ -25,7 +25,7 @@ var planCommands = map[string]command{
 }
 
 var holdCommands = map[string]command{
-	"confirm": {name: "confirm", description: "Accept SessionStart hook input; always exit 0.", run: func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	"confirm": {name: "confirm", description: "Do nothing; kept for old SessionStart hooks; always exit 0.", run: func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runHoldConfirm(args, stdout, stderr)
 	}},
 	"release": {name: "release", description: "Release a stuck interactive hold on the foreman.", run: runHoldRelease},

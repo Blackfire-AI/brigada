@@ -24,34 +24,42 @@ engine, runner and foreman are all this binary in different roles.
 Usage:
 
 	brigada            With no subcommand, attach to this repo's foreman
-	                   and chat (§4.2).
+	                   and chat.
 	brigada <command> [arguments]
 
 Commands:
 
-	init            Probe and confirm setup of this repository (phase 6(a)).
+	init            Set up this repository, or, in a folder that is not
+	                one, the repositories under it: probe, plan, confirm.
 	attach          Attach to this repo's foreman and chat (what a bare
 	                brigada runs).
 	ask <message>   Send the foreman a message without attaching.
 	hold release    Release a stuck interactive hold on the foreman (--repo).
 	hold yield      Stop hook: yield only the bound bridge hold; always exits 0.
-	hold confirm    SessionStart hook: accept session correlation; always exits 0.
+	hold confirm    Kept for old SessionStart hooks; does nothing, exits 0.
 	review --branch <x>
 	                Review a branch with an agent of another family than
-	                its author's, with no plan or task (§7).
+	                its author's, with no plan or task.
 	engine          Run the engine: store and API on the Unix socket.
 	runner          Run a runner: lease jobs, run workers, run checks.
 	stop            Stop the detached runner (--engine: the engine too).
-	mcp             Run the foreman's MCP bridge over stdio (§12.2).
-	status          Show the engine and its jobs by status.
-	task submit     Submit a task (debug path until the foreman exists).
-	project foreman Show or set a repo's foreman harness and model
+	mcp             Serve brigada's tools over stdio: the foreman's
+	                (--foreman), the coordinator's (--coordinator) or the
+	                client's (--client); Claude Code runs it from the
+	                wiring init writes.
+	status          Show the engine, its jobs by status, plans and what
+	                needs you (--line: one short line).
+	task submit     Submit one task directly, without the foreman (a
+	                debugging path).
+	project foreman Show or set a repo's foreman harness, model and effort
 	                (--repo defaults to this repo's origin).
 	project list    List the projects: repo, foreman, active plans, needs-you.
-	project set     Set a project's approval limit: key=value ... (§6.3).
+	project set     Set project settings: key=value ... (approval limit,
+	                default_check, setup, extra_repos, hold bounds,
+	                instructions and the rest).
 	project show    Show a project's settings and where each comes from
 	                (default, set locally, or imported).
-	project import  Import this repo's .brigada/project.yaml (§13.1); --yes
+	project import  Import this repo's .brigada/project.yaml; --yes
 	                accepts replacing hand-set values on a first import.
 	history         Show the timeline.
 	diff <task-id>  Show what a task changed: git diff base...branch, run
@@ -59,22 +67,23 @@ Commands:
 	land <task-id>...
 	                Squash approved tasks onto this branch, one commit each,
 	                rerun the default check, print the push command; never
-	                pushes (--onto, --repo, --landed, --no-check; §7.1).
+	                pushes (--onto, --repo, --landed, --no-check).
 	logs <job-id>   Show what a job's worker did: the transcript as
 	                readable lines (--check, --tail N, --follow, --task N).
-	stats           Show which agent wins which class, per repo.
+	stats           Show attempts, successes, rate and confidence per
+	                agent, class and repo.
 	agent reset <harness>/<model>
 	                Clear a broken or cooling agent.
 	plan approve <id>
-	                Approve a plan waiting over the approval limit (§6.3).
+	                Approve a plan waiting over the approval limit.
 	plan reject <id>
 	                Reject such a plan and cancel its tasks.
 	budget [--repo URL] [--wakes N]
 	                Show the project's foreman wake budget: today's use
-	                and the reset time; --wakes sets it (§4.3).
-	cancel <job>    Cancel a job.
+	                and the reset time; --wakes sets it.
+	cancel <job-id> Cancel a live job.
 	recover         Rebuild a lost store from the newest snapshot and the
-	                plan files; the engine must be stopped (§6.4).
+	                plan files; the engine must be stopped.
 	version         Print the brigada version and exit.
 	help [command [subcommand]]
 	                Print top-level or command usage and exit.
