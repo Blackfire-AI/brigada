@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="brigada" shape-rendering="crispEdges">
+<title>brigada</title>
+<rect width="32" height="32" rx="7" fill="#111111"/>
+<rect x="9" y="4" width="4" height="4" rx="0" fill="#FF5A1F"/>
+<rect x="9" y="9" width="4" height="4" rx="0" fill="#F5F5F2"/>
+<rect x="9" y="14" width="4" height="4" rx="0" fill="#F5F5F2"/>
+<rect x="14" y="14" width="4" height="4" rx="0" fill="#F5F5F2"/>
+<rect x="19" y="14" width="4" height="4" rx="0" fill="#F5F5F2"/>
+<rect x="9" y="19" width="4" height="4" rx="0" fill="#F5F5F2"/>
+<rect x="19" y="19" width="4" height="4" rx="0" fill="#F5F5F2"/>
+<rect x="9" y="24" width="4" height="4" rx="0" fill="#F5F5F2"/>
+<rect x="14" y="24" width="4" height="4" rx="0" fill="#F5F5F2"/>
+<rect x="19" y="24" width="4" height="4" rx="0" fill="#F5F5F2"/>
+</svg>
