@@ -3,10 +3,12 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -28,7 +30,7 @@ type initModelSource struct {
 	entries       []initModelEntry
 	signIn        harnessProbe
 	providerCount int // OpenCode only; no provider names or account output retained.
-	unknownCount  int // OpenCode models omitted because their family is unknown.
+	unknownCount  int // Catalog models omitted because their family is unknown.
 }
 
 func initClaudeModels(ctx context.Context) initModelSource {
@@ -56,7 +58,84 @@ func initCodexModels(ctx context.Context) initModelSource {
 			entry.note += " (" + path + ")"
 		}
 	}
-	return initModelSource{entries: []initModelEntry{entry}, signIn: probeHarness(ctx, "codex")}
+	source := initModelSource{entries: []initModelEntry{entry}, signIn: probeHarness(ctx, "codex")}
+	if !source.signIn.installed {
+		return source
+	}
+	help, err := cheapHarnessCommand(ctx, "codex", "--help")
+	if err != nil || !helpNamesHarnessCommand(string(help), "codex", "debug") {
+		return source
+	}
+	help, err = cheapHarnessCommand(ctx, "codex", "debug", "--help")
+	if err != nil || !helpNamesHarnessCommand(string(help), "codex debug", "models") {
+		return source
+	}
+	models, ok := readInitCodexCatalog(ctx)
+	if !ok {
+		return source
+	}
+	slices.SortFunc(models, func(a, b initCodexModel) int {
+		if a.Priority < b.Priority {
+			return -1
+		}
+		if a.Priority > b.Priority {
+			return 1
+		}
+		return strings.Compare(a.Slug, b.Slug)
+	})
+	seen := map[string]bool{}
+	for _, model := range models {
+		if model.Visibility != "list" || !validInitModelName(model.Slug) || seen[model.Slug] {
+			continue
+		}
+		seen[model.Slug] = true
+		if model.Slug == entry.name {
+			if model.Description != "" {
+				source.entries[0].note += "; " + model.Description
+			}
+			continue
+		}
+		if _, err := adapter.AgentFamily("codex", model.Slug); err != nil {
+			source.unknownCount++
+			continue
+		}
+		source.entries = append(source.entries, initModelEntry{id: len(source.entries) + 1, name: model.Slug, value: model.Slug, note: model.Description})
+	}
+	return source
+}
+
+// Decode only menu fields. Catalog metadata may contain unrelated private data.
+type initCodexModel struct {
+	Slug        string `json:"slug"`
+	Description string `json:"description"`
+	Visibility  string `json:"visibility"`
+	Priority    int    `json:"priority"`
+}
+
+func readInitCodexCatalog(ctx context.Context) ([]initCodexModel, bool) {
+	read := func(args ...string) ([]initCodexModel, bool) {
+		out, err := cheapHarnessCommand(ctx, "codex", args...)
+		if err != nil {
+			return nil, false
+		}
+		var catalog struct {
+			Models []initCodexModel `json:"models"`
+		}
+		if json.Unmarshal(out, &catalog) != nil || catalog.Models == nil {
+			return nil, false
+		}
+		return catalog.Models, true
+	}
+	if models, ok := read("debug", "models"); ok {
+		return models, true
+	}
+	// Refresh can fail offline. Use the bundled catalog only when this binary
+	// documents the option, and keep both attempts within the cheap timeout.
+	help, err := cheapHarnessCommand(ctx, "codex", "debug", "models", "--help")
+	if err != nil || !helpNamesCommand(string(help), "--bundled") {
+		return nil, false
+	}
+	return read("debug", "models", "--bundled")
 }
 
 func initKimiModels(ctx context.Context) initModelSource {

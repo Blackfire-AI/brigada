@@ -224,21 +224,25 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			}
 			for _, entry := range entries {
 				family, _ := initModelFamily(h, entry.value)
-				fmt.Fprintf(stdout, "      %2d  %-*s  %s", entry.id, width, initMenuModelName(entry), initFamilyName(family))
+				prefix := fmt.Sprintf("      %2d  %-*s  %s", entry.id, width, initMenuModelName(entry), initFamilyName(family))
+				note := entry.note
 				if entry.note != "" {
-					note := entry.note
 					if home, err := os.UserHomeDir(); err == nil && home != "" {
 						note = strings.ReplaceAll(note, "("+home+string(os.PathSeparator), "(~/")
 					}
-					fmt.Fprintf(stdout, "  %s", note)
+					prefix += "  "
 				}
-				fmt.Fprintln(stdout)
+				printInitWrapped(stdout, prefix, "          ", note)
 			}
 			if h != "kimi" {
 				fmt.Fprintf(stdout, "       -  don't use %s\n", h)
 			}
 			if sources[h].unknownCount > 0 {
-				printInitWrapped(stdout, "    ", "    ", fmt.Sprintf("%d more from `opencode models` aren't listed: brigada can't tell their model family, which it needs to pick reviewers.", sources[h].unknownCount))
+				command := "opencode models"
+				if h == "codex" {
+					command = "codex debug models"
+				}
+				printInitWrapped(stdout, "    ", "    ", fmt.Sprintf("%d more from `%s` aren't listed: brigada can't tell their model family, which it needs to pick reviewers.", sources[h].unknownCount, command))
 			}
 			defaultAnswer := "-"
 			if len(entries) > 0 && h != "opencode" {
