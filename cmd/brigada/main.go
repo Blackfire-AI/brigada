@@ -189,15 +189,20 @@ func runVersion(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if len(fs.Args()) != 0 {
 		return usagef(stderr, "version takes no positional arguments")
 	}
-	// Only a terminal gets the banner: scripts that read the version from
-	// a pipe keep the one plain line.
+	printBanner(stdout)
+	fmt.Fprintf(stdout, "brigada %s\n", version.Version)
+	return 0
+}
+
+// printBanner prints the logo banner and a blank line when stdout is a
+// terminal. Scripts reading stdout from a pipe or a file get nothing, so
+// what they parse is unchanged.
+func printBanner(stdout io.Writer) {
 	if caps := detectCaps(stdout); caps.TTY {
 		if banner := logo.String(logo.Banner, caps); banner != "" {
 			fmt.Fprint(stdout, banner+"\n")
 		}
 	}
-	fmt.Fprintf(stdout, "brigada %s\n", version.Version)
-	return 0
 }
 
 // detectCaps is logo.Detect; tests replace it to print as a terminal would.

@@ -71,6 +71,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if *yes && *probe {
 		return usagef(stderr, "--yes and --probe are mutually exclusive")
 	}
+	if !*yes && !*probe {
+		printBanner(stdout)
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fail(stderr, err)
