@@ -706,6 +706,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil {
 		return partial(fmt.Errorf("project registered and imported, but runner startup failed: %w", err))
 	}
+	restarted := false
 	if result.Existing && initAgentsDiffer(result.Record, adverts, usable) {
 		if _, err := terminateRunner(
 			ctx, runnerStateDir(rt), result.Record); err != nil {
@@ -715,6 +716,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if err != nil {
 			return partial(fmt.Errorf("restart runner: %w", err))
 		}
+		restarted = true
 		if result.Existing && initAgentsDiffer(result.Record, adverts, usable) {
 			return partial(fmt.Errorf("another runner started with different agents; rerun init"))
 		}
@@ -737,6 +739,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			difference = "existing agents unavailable; cannot compare to chosen ones"
 		}
 		fmt.Fprintf(&done, " Runner already running (pid %d); no second runner started; %s.", result.Record.PID, difference)
+	} else if restarted {
+		fmt.Fprintf(&done, " Runner restarted with the new agents (pid %d).", result.Record.PID)
 	} else {
 		fmt.Fprintf(&done, " Detached runner started (pid %d).", result.Record.PID)
 	}
@@ -809,12 +813,18 @@ func initCurrentModel(source initModelSource, spec agentSpec) initModelSource {
 		index = len(source.entries) - 1
 	}
 	entry := &source.entries[index]
-	if entry.note != "" {
-		entry.note += "; "
-	}
-	entry.note += "current"
+	entry.note = initCurrentNote(entry.note)
 	source.defaultID = entry.id
 	return source
+}
+
+// initCurrentNote puts the "current" tag first, so a note ending in a period
+// or wrapping onto another line keeps it readable.
+func initCurrentNote(note string) string {
+	if note == "" {
+		return "current"
+	}
+	return "current; " + note
 }
 
 func initPickEffort(w io.Writer, harness string, entry initModelEntry,
@@ -855,12 +865,12 @@ func initPickEffort(w io.Writer, harness string, entry initModelEntry,
 			if level != "default" {
 				note += " for this model"
 			}
+			if entry.effortNote != "" {
+				note = entry.effortNote
+			}
 		}
 		if len(saved) > 0 && i == pickIndex {
-			if note != "" {
-				note += "; "
-			}
-			note += "current"
+			note = initCurrentNote(note)
 		}
 		prefix := fmt.Sprintf("      %2d  %-*s", i+1, width, level)
 		if note != "" {
@@ -921,15 +931,28 @@ func initModelFamily(harness, model string) (string, error) {
 // printInitWrapped keeps plan prose under 80 columns. Continuations either
 // align with a table cell or use the paragraph's continuation indent.
 func printInitWrapped(w io.Writer, prefix, continuation, text string) {
+	var words []initWord
+	for _, word := range strings.Fields(text) {
+		words = append(words, initWord{" ", word})
+	}
+	printInitWords(w, prefix, continuation, words)
+}
+
+// initWord is text that is never split at a space, with the separator that
+// precedes it unless it starts a line.
+type initWord struct{ sep, text string }
+
+func printInitWords(w io.Writer, prefix, continuation string, words []initWord) {
 	if utf8.RuneCountInString(prefix) >= 79 {
 		printInitWrapped(w, "    ", "      ", strings.TrimSpace(prefix))
 		prefix, continuation = "      ", "      "
 	}
 	line := prefix
-	for _, word := range strings.Fields(text) {
+	for _, next := range words {
+		word := next.text
 		separator := ""
 		if line != prefix {
-			separator = " "
+			separator = next.sep
 		}
 		if utf8.RuneCountInString(line+separator+word) >= 80 && line != prefix {
 			fmt.Fprintln(w, line)

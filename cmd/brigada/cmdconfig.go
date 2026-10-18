@@ -11,7 +11,6 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
 	"github.com/Blackfire-AI/brigada/internal/engine"
-	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
 )
 
@@ -88,7 +87,7 @@ func runConfig(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if code := printConfigProject(ctx, rt, stdout, stderr); code != 0 {
 		return code
 	}
-	return printConfigMachine(rt, stdout, stderr)
+	return printConfigMachine(rt, common.stateDir, stdout, stderr)
 }
 
 func printConfigProject(ctx context.Context, rt *runtime, stdout, stderr io.Writer) int {
@@ -146,13 +145,6 @@ func printConfigProjectSettings(stdout io.Writer, settings engine.ProjectSetting
 	printInitWrapped(stdout, "  ", "    ", name)
 	printInitWrapped(stdout, "This project (", "  ", settings.RepoURL+")")
 	for _, s := range settings.Settings {
-		label, value := s.Key, s.Value
-		switch s.Key {
-		case engine.SettingDefaultCheck:
-			label = "check"
-		case engine.SettingApprovalMaxTasks:
-			label, value = "approval limit", value+" tasks"
-		}
 		source := "set by hand"
 		switch {
 		case s.Default || s.Source == engine.SourceDefault:
@@ -160,10 +152,32 @@ func printConfigProjectSettings(stdout io.Writer, settings engine.ProjectSetting
 		case s.Source == engine.SourceImported:
 			source = "from " + engine.ProjectConfigPath
 		}
-		printInitWrapped(stdout, "  "+label+": ", "    ", value+"    "+source)
+		words := append(configValueWords(s.Key, s.Value), initWord{" ", source})
+		printInitWords(stdout, "  "+s.Key+": ", "    ", words)
 	}
 	printInitWrapped(stdout, "  change: ", "    ", "edit .brigada/project.yaml, then brigada project import")
 	printInitWrapped(stdout, "  ", "    ", "set by hand/local only: brigada project set key=value")
+}
+
+// configValueWords splits a value for wrapping. A tools value joins patterns
+// with "+" and a pattern holds spaces ("Bash(go vet:*)"), so it wraps only
+// after a "+"; any other value wraps at spaces.
+func configValueWords(key, value string) []initWord {
+	var words []initWord
+	if key == engine.SettingWorkerTools || strings.HasPrefix(key, "tools.") {
+		parts := strings.Split(value, "+")
+		for i, part := range parts {
+			if i < len(parts)-1 {
+				part += "+"
+			}
+			words = append(words, initWord{"", part})
+		}
+		return words
+	}
+	for _, word := range strings.Fields(value) {
+		words = append(words, initWord{" ", word})
+	}
+	return words
 }
 
 // Read only named, non-secret CLI metadata. A saved "default" stays a CLI
@@ -181,25 +195,24 @@ func configAgentDetails(ctx context.Context, s agentSpec) (model, effort string)
 			effort = "Claude's default"
 		}
 	case "codex":
-		codexHome := os.Getenv("CODEX_HOME")
-		if codexHome == "" {
-			codexHome = filepath.Join(home, ".codex")
-		}
-		path := filepath.Join(codexHome, "config.toml")
-		if model == "default" {
+		path := codexConfigPath()
+		if model == "default" && path != "" {
 			if name, _ := readInitModelConfig(path, "model", false); name != "" {
 				model = name
 			}
 		}
 		if effort == "" {
-			level, _ := readInitModelConfig(path, "model_reasoning_effort", false)
-			if level == "" {
-				for _, entry := range initCodexModels(ctx).entries {
-					if entry.name == model || entry.value == model {
-						level = entry.defaultEffort
-						break
-					}
+			// The menu entries already hold the effort init would show as the
+			// default: the user's own value when the model offers it.
+			level := ""
+			for _, entry := range initCodexModels(ctx).entries {
+				if entry.name == model || entry.value == model {
+					level = entry.defaultEffort
+					break
 				}
+			}
+			if level == "" {
+				level = codexUserEffort(path)
 			}
 			effort = "codex's default"
 			if level != "" {
@@ -229,12 +242,21 @@ func configAgentDetails(ctx context.Context, s agentSpec) (model, effort string)
 	return model, effort
 }
 
-func printConfigMachine(rt *runtime, stdout, stderr io.Writer) int {
+// printConfigMachine lists the machine config. flagStateDir is --state-dir;
+// state_dir shows the directory in use and where it came from.
+func printConfigMachine(rt *runtime, flagStateDir string, stdout, stderr io.Writer) int {
+	stateDir, stateSource := initHomePath(absPath(rt.stateDir)), "(default)"
+	switch {
+	case flagStateDir != "":
+		stateSource = "(--state-dir)"
+	case rt.file.StateDir != "":
+		stateSource = "(config file)"
+	}
 	// Keep these in the config loader's spelling. Wildcard rows describe the
 	// fallback for unnamed accounts/models; concrete keys follow in order.
 	defaults := [][2]string{
 		{"notify", "auto"}, {"idle_minutes", "30"},
-		{"state_dir", initHomePath(lifecycle.DefaultStateDir())},
+		{"state_dir", ""},
 		{"snapshot_dir", "none"}, {"headroom", "true"},
 		{"task_auto_retry", "true"}, {"foreman_wakes_per_day", "20"},
 		{"default_reviewer", "none"},
@@ -262,6 +284,11 @@ func printConfigMachine(rt *runtime, stdout, stderr io.Writer) int {
 	printInitWrapped(stdout, "This machine (", "  ", initHomePath(rt.configPath)+"; edit the file)")
 	for _, pair := range defaults {
 		key, value := pair[0], pair[1]
+		if key == "state_dir" {
+			printInitWrapped(stdout, "  ", "    ", key+" = "+stateDir+" "+stateSource)
+			delete(values, key)
+			continue
+		}
 		if v, ok := values[key]; ok {
 			if v == "" {
 				v = "none"
@@ -269,10 +296,11 @@ func printConfigMachine(rt *runtime, stdout, stderr io.Writer) int {
 			if key == "idle_minutes" && rt.file.IdleMinutes == 0 {
 				v = "30 (default; file has 0)"
 			}
-			printInitWrapped(stdout, "  ", "    ", key+" = "+v)
+			printInitWords(stdout, "  "+key+" = ", "    ", configValueWords(key, v))
 			delete(values, key)
 		} else {
-			printInitWrapped(stdout, "  ", "    ", key+" = "+value+" (default)")
+			printInitWords(stdout, "  "+key+" = ", "    ",
+				append(configValueWords(key, value), initWord{" ", "(default)"}))
 		}
 	}
 	keys := make([]string, 0, len(values))

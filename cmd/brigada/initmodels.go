@@ -27,6 +27,7 @@ type initModelEntry struct {
 	isDefault     bool
 	effortLevels  []string // Source order; Kimi metadata is display-only.
 	defaultEffort string   // Empty if unknown; Claude uses a descriptive default.
+	effortNote    string   // Replaces "<harness>'s default" on the default effort row.
 }
 
 type initModelSource struct {
@@ -218,20 +219,54 @@ func initClaudeModelNote(value, label, description string) string {
 	return label + ": " + description
 }
 
-func initCodexModels(ctx context.Context) initModelSource {
+// codexConfigPath is the config.toml codex reads, or "" without a home.
+func codexConfigPath() string {
 	home := os.Getenv("CODEX_HOME")
 	if home == "" {
 		userHome, _ := os.UserHomeDir()
-		if userHome != "" {
-			home = filepath.Join(userHome, ".codex")
+		if userHome == "" {
+			return ""
 		}
+		home = filepath.Join(userHome, ".codex")
 	}
+	return filepath.Join(home, "config.toml")
+}
+
+// codexUserEffort is the top-level model_reasoning_effort of the codex config,
+// read with the same line reader as the model. Init and config share it.
+func codexUserEffort(path string) string {
+	if path == "" {
+		return ""
+	}
+	level, _ := readInitModelConfig(path, "model_reasoning_effort", false)
+	return level
+}
+
+// codexDefaultEffort is the effort codex runs a model at without --effort: the
+// user's config value when the model offers it, else the catalog's default.
+func codexDefaultEffort(userEffort string, levels []string, catalog string) (effort string, fromUser bool) {
+	if userEffort != "" && slices.Contains(levels, userEffort) {
+		return userEffort, true
+	}
+	return catalog, false
+}
+
+func initCodexModels(ctx context.Context) initModelSource {
+	path := codexConfigPath()
+	userEffort := codexUserEffort(path)
 	entry := initModelEntry{id: 1, note: "your codex default", value: "default", isDefault: true}
-	if home != "" {
-		path := filepath.Join(home, "config.toml")
+	if path != "" {
 		entry.name, _ = readInitModelConfig(path, "model", false)
 		if entry.name != "" {
 			entry.note += " (" + path + ")"
+		}
+	}
+	setEffort := func(e *initModelEntry, model initCodexModel) {
+		e.effortLevels = model.efforts()
+		var fromUser bool
+		e.defaultEffort, fromUser = codexDefaultEffort(userEffort, e.effortLevels, model.DefaultReasoningLevel)
+		if fromUser {
+			e.effortNote = "your codex default (" + path + ")"
 		}
 	}
 	source := initModelSource{entries: []initModelEntry{entry}, signIn: probeHarness(ctx, "codex")}
@@ -266,8 +301,7 @@ func initCodexModels(ctx context.Context) initModelSource {
 		}
 		seen[model.Slug] = true
 		if model.Slug == entry.name {
-			source.entries[0].effortLevels = model.efforts()
-			source.entries[0].defaultEffort = model.DefaultReasoningLevel
+			setEffort(&source.entries[0], model)
 			if model.Description != "" {
 				source.entries[0].note += "; " + model.Description
 			}
@@ -277,8 +311,9 @@ func initCodexModels(ctx context.Context) initModelSource {
 			source.unknownCount++
 			continue
 		}
-		source.entries = append(source.entries, initModelEntry{id: len(source.entries) + 1, name: model.Slug, value: model.Slug, note: model.Description,
-			effortLevels: model.efforts(), defaultEffort: model.DefaultReasoningLevel})
+		added := initModelEntry{id: len(source.entries) + 1, name: model.Slug, value: model.Slug, note: model.Description}
+		setEffort(&added, model)
+		source.entries = append(source.entries, added)
 	}
 	return source
 }
