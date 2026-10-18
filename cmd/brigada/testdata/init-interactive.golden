@@ -130,5 +130,9 @@ Plan
     ~/.local/state/brigada/runner.log; stop it with: brigada stop). The engine
     starts when needed and stops after 30 idle minutes.
 
+To change later: brigada init (agents, models, effort),
+  brigada project foreman (foreman), .brigada/project.yaml (check),
+  brigada config (see everything).
+
 Write 4 files and start the runner? [y/N]
 Declined; nothing written or started.

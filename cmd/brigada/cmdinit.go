@@ -606,6 +606,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 	}
 	printInitWrapped(stdout, "  In the background: ", "    ", "a runner starts now and keeps going (log: "+initHomePath(filepath.Join(rt.stateDir, "runner.log"))+"; stop it with: brigada stop). The engine starts when needed and stops after 30 idle minutes.")
+	fmt.Fprint(stdout, "\nTo change later: brigada init (agents, models, effort),\n  brigada project foreman (foreman), .brigada/project.yaml (check),\n  brigada config (see everything).\n")
 	fmt.Fprintln(stdout)
 	if *probe {
 		fmt.Fprintln(stdout, "Probe only; nothing written or started. Re-run without --probe to confirm, or with --yes to apply.")

@@ -101,12 +101,13 @@ The `Plan` block then shows:
 
   Codex has no verified project-scope registration, so this is user-level.
 - `In the background:`, with the persistent runner, its log, `brigada stop`, and the engine's exit after 30 idle minutes.
+- `To change later:`, with the commands for agents, the foreman, the check and the full setup view.
 
 Then, after you confirm (`y` at the prompt, or `--yes`), init:
 
 - writes **`.brigada/project.yaml`** ([section 6](#6-configuring-a-project)). The file is yours to commit; brigada never commits or pushes anything. The write is refused if the file is a symlink or names another repository, and a file that changed after the plan was shown is not overwritten;
 - **wires Claude Code** for [mode A](#2-your-own-session-is-the-foreman-mode-a), when `claude` is installed: the bridge in `.mcp.json`, only the `Stop` hook in private `.claude/settings.local.json`, and the foreman skill at `.claude/skills/brigada-foreman/SKILL.md`. A rerun removes brigada's old hooks from shared `.claude/settings.json`. Only brigada's entries change; the details, including the git exclude entry, are in [section 2](#2-your-own-session-is-the-foreman-mode-a);
-- starts the engine on demand, imports the project file (recording where each value came from, [section 6](#6-configuring-a-project)), registers the foreman, and starts one detached runner with the chosen agents. A runner that is already running is kept, and init reports whether its agents differ. The runner's log is `runner.log` in the state directory.
+- starts the engine on demand, imports the project file (recording where each value came from, [section 6](#6-configuring-a-project)), registers the foreman, saves the agent choices and starts one detached runner. If its agents changed, init restarts the runner with the new choices; otherwise it keeps the running one. The runner's log is `runner.log` in the state directory.
 
 ### Flags
 
@@ -148,11 +149,21 @@ brigada init --probe --agent harness=claude,model=sonnet --agent harness=codex,m
 
 If init fails after writing `project.yaml`, it says `partial init` and names the step that failed; fix the error and rerun it. Init is safe to rerun.
 
+### Changing your setup later
+
+Run `brigada init` again to change agents, models or effort. Its menus default to the saved agent choices, including effort and whether Kimi may write code. Pick the foreman again from the offered Claude and Codex agents. The check and worker tools default to the existing `.brigada/project.yaml`. Confirm the plan to apply changes. If the agents changed, init stops the detached runner and starts it with the new choices.
+
+To change only the foreman, use `brigada project foreman --harness H --model M [--effort E]`. To change the check, edit `.brigada/project.yaml`, then run `brigada project import`.
+
+After a reboot, run `brigada start`. It starts the engine and detached runner using the saved agents, without the init questions. It succeeds if the runner is already running; if there are no saved agents, it asks you to run `brigada init` first.
+
+`brigada config` shows the saved agents and runner state, this repository's foreman and every project setting with its provenance, and all machine config-file keys and defaults. Each section says how to change it. Outside a registered repository it still shows agents and machine settings, with a hint to run inside a repository brigada knows. Project reads start the engine on demand. Use `--state-dir DIR` and `--config PATH` to inspect another setup.
+
 ### Stopping
 
 `brigada stop` stops the detached runner. It applies to the whole state directory, not just the current repository. `brigada stop --engine` also stops the engine.
 
-Stop checks the lock before signalling, sends SIGTERM, and waits up to 10 seconds for each process to release its lock; it reports failure if a process is still running. It clears stale runner records without signalling their old pids, and succeeds when nothing is running. Neither form starts an engine. Other commands start the engine again on demand; init starts the runner again.
+Stop checks the lock before signalling, sends SIGTERM, and waits up to 10 seconds for each process to release its lock; it reports failure if a process is still running. It clears stale runner records without signalling their old pids, and succeeds when nothing is running. Neither form starts an engine. Other commands start the engine again on demand; `brigada start` starts the runner again with the saved agents. `brigada config` shows whether it is running. Stop keeps the saved agent choices.
 
 ### Removing brigada from a repository
 
@@ -925,6 +936,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 ### Starting
 
 - `brigada init [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories-mode-b).
+- `brigada start`: start the engine and detached runner with the agents saved by init; succeeds when the runner is already running. Use it after a reboot or `brigada stop`. See [section 1](#changing-your-setup-later).
 - `brigada runner [--agent SPEC]... [--labels LABELS] [--max-parallel N]`, where SPEC is `harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]`: run a runner that leases jobs, runs workers and checks, and pushes branches. See [section 8](#8-agents-quota-and-health).
 - `brigada stop [--engine]`: stop the detached runner in the selected state directory; `--engine` also stops the engine. Sends SIGTERM and waits up to 10 seconds per process; succeeds if nothing is running, and never starts the engine. See [section 1](#stopping).
 - `brigada remove [--yes] [--cancel] [--delete-config]`: remove brigada from this repository, keeping its project history. `--yes` applies the displayed plan and stops an unused runner without prompting; `--cancel` cancels live jobs and unfinished plans; `--delete-config` also deletes `.brigada/project.yaml`. See [section 1](#removing-brigada-from-a-repository).
@@ -938,6 +950,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 ### Watching
 
+- `brigada config`: show agents, runner state, foreman, project settings with provenance, and machine config-file values and defaults, with their locations and commands to change them. See [section 1](#changing-your-setup-later).
 - `brigada status [--line]`: the engine, jobs, plans and the needs-you queue. See [section 4](#4-while-work-runs).
 - `brigada history [--task N] [--job N] [--limit N]`: the timeline. See [section 4](#history-diffs-and-logs).
 - `brigada diff <task-id> [--stat] [--repo URL]`: what a task changed, as `git diff base...branch`; run inside the repo. See [section 4](#history-diffs-and-logs).
