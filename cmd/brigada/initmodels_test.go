@@ -161,11 +161,11 @@ func TestInitOpenCodeModelSource(t *testing.T) {
 		{id: 1, name: "fixture/gpt-5", value: "fixture/gpt-5"},
 		{id: 2, name: "fixture/glm-5.3", value: "fixture/glm-5.3"},
 	}
-	if !reflect.DeepEqual(got.entries, want) || !got.signIn.signedIn || got.providerCount != 2 || got.signIn.status != "signed in to 2 providers (opencode auth list)" {
+	if !reflect.DeepEqual(got.entries, want) || !got.signIn.signedIn || got.providerCount != 2 || got.signIn.status != "signed in to 2 providers (opencode providers list)" {
 		t.Fatalf("source = %+v", got)
 	}
 	data, err := os.ReadFile(calls)
-	if err != nil || string(data) != "opencode --help\nopencode models\nopencode auth list\n" {
+	if err != nil || string(data) != "opencode --help\nopencode models\nopencode providers list\n" {
 		t.Fatalf("unexpected calls %q: %v", data, err)
 	}
 }

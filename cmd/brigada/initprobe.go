@@ -21,6 +21,7 @@ type harnessProbe struct {
 	signedIn  bool
 	status    string
 	evidence  string
+	checked   bool // a documented command ran and its answer is in status
 }
 
 // Only known cheap status paths are candidates. Each command in the path

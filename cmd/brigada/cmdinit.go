@@ -183,7 +183,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			switch {
 			case !confirmed && h == "kimi":
 				fmt.Fprint(stdout, "\n  kimi: init can't check sign-in. If you're not signed in, run `kimi login`\n  first, or leave kimi out.\n")
-			case !confirmed && h == "opencode":
+			case !confirmed && h == "opencode" && !probes[h].checked:
 				fmt.Fprint(stdout, "\n  opencode: init can't check sign-in. If you're not signed in, run\n  `opencode auth login` first, or leave opencode out.\n")
 			default:
 				fmt.Fprintf(stdout, "\n  %s: %s\n", h, status)
