@@ -37,7 +37,15 @@ func fakeInitPATH(t *testing.T, names ...string) string {
 		script := `#!/bin/sh
 printf '%s %s\n' "${0##*/}" "$*" >> "$INIT_CALLS"
 case "$*" in
- --help) echo 'Commands: no verified authentication status here'; exit 0 ;;
+ --help)
+   if [ "${0##*/}" = opencode ]; then
+     printf '  opencode models [provider]\n  opencode auth Manage credentials\n'
+   else
+     echo 'Commands: no verified authentication status here'
+   fi
+   exit 0 ;;
+ models) [ "${0##*/}" = opencode ] || exit 89; printf 'fixture/model-one\nfixture/model-two\n' ;;
+ 'auth list') [ "${0##*/}" = opencode ] || exit 89; printf '┌ Credentials\n● Provider one oauth\n● Provider two api\n└ 2 credentials\n' ;;
  *) echo 'unexpected harness invocation' >&2; exit 89 ;;
 esac
 `
@@ -47,6 +55,7 @@ esac
 	}
 	t.Setenv("PATH", dir)
 	t.Setenv("HOME", filepath.Join(t.TempDir(), "unused-home"))
+	t.Setenv("CODEX_HOME", "")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "unused-config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "unused-state"))
 	return calls
@@ -107,7 +116,7 @@ func TestInitProbeAndRefusals(t *testing.T) {
 			}
 			data, _ := os.ReadFile(calls)
 			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-				if !strings.HasSuffix(line, " --help") {
+				if !strings.HasSuffix(line, " --help") && line != "opencode models" && line != "opencode auth list" {
 					t.Errorf("guessed/paid invocation: %q", line)
 				}
 			}
