@@ -46,7 +46,8 @@ func TestRunnerHarnessRegisters(t *testing.T) {
 	}{
 		{"kimi default", "kimi", "default", "moonshot", false},
 		{"codex default", "codex", "default", "openai", false},
-		{"opencode default", "opencode", "default", "opencode", false},
+		{"opencode default", "opencode", "default", "", false},
+		{"opencode default agent flag", "opencode", "default", "", true},
 		{"opencode model shorthand", "opencode", "provider/model", "opencode", false},
 		{"opencode model agent flag", "opencode", "provider/model", "opencode", true},
 		{"opencode GLM provider", "opencode", "zai-coding-plan/glm-5.3", "zhipu", true},
@@ -65,7 +66,8 @@ func TestResolveRunnerAgentModels(t *testing.T) {
 		{"claude", "", "sonnet", "anthropic"},
 		{"codex", "", "default", "openai"},
 		{"kimi", "", "default", "moonshot"},
-		{"opencode", "", "default", "opencode"},
+		{"opencode", "", "default", ""},
+		{"opencode", "default", "default", ""},
 		{"opencode", "zai-coding-plan/glm-5.3", "zai-coding-plan/glm-5.3", "zhipu"},
 		{"opencode", "glm-5.3", "glm-5.3", "zhipu"},
 		{"opencode", "provider/model", "provider/model", "opencode"},
@@ -166,6 +168,14 @@ func testRunnerHarnessRegisters(t *testing.T, harness, wantModel, wantFamily str
 	}
 	if line := out.String(); !strings.Contains(line, harness+" (model "+wantModel+", classes implement,review,answer)") {
 		t.Errorf("the startup line = %q, want the harness and model with the classes", line)
+	}
+	warning := harness + "/" + wantModel + ": model family unknown; it takes no review that needs another family (give provider/model to fix)\n"
+	wantWarnings := 0
+	if wantFamily == "" {
+		wantWarnings = 1
+	}
+	if got := strings.Count(out.String(), warning); got != wantWarnings {
+		t.Errorf("startup output = %q; want %d unknown-family warnings", out.String(), wantWarnings)
 	}
 
 	// The engine stops cleanly once the runner is gone.

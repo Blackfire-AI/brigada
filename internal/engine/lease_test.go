@@ -38,6 +38,34 @@ func keyOf(task int64) string {
 	return "task:" + strconv.FormatInt(task, 10)
 }
 
+func TestReviewWithoutFamilyAllowsUnknownAgent(t *testing.T) {
+	for _, excludeAgent := range []bool{false, true} {
+		t.Run(strconv.FormatBool(excludeAgent), func(t *testing.T) {
+			e := newEnv(t)
+			first := e.agented("first", "", "review")
+			second := e.agented("second", "", "review")
+			params := e.work()
+			params.Kind = KindReview
+			params.TaskID = 0 // standalone review with no author-family exclusion
+			params.Branch = "feature"
+			if excludeAgent {
+				params.ExcludeAgent = e.agentOf(first)
+			}
+			job := e.submit(params)
+			got := e.leaseAny(first)
+			if excludeAgent {
+				if got != nil {
+					t.Fatalf("excluded unknown-family agent leased %+v", got)
+				}
+				got = e.leaseAny(second)
+			}
+			if got == nil || got.JobID != job.JobID {
+				t.Errorf("unknown-family reviewer leased %+v, want job %d", got, job.JobID)
+			}
+		})
+	}
+}
+
 func TestLeaseFiltersByHarness(t *testing.T) {
 	e := newEnv(t)
 	task2 := e.addTask("{}")

@@ -115,6 +115,33 @@ func TestRegisterPersistsAdvertisement(t *testing.T) {
 	}
 }
 
+func TestRegisterClearsUnknownFamily(t *testing.T) {
+	e := newEnv(t)
+	agent := AgentAdvert{
+		Adapter: "opencode", Harness: "opencode", Model: "default",
+		Family: "opencode", Classes: []string{"implement", "review"},
+	}
+	runner, err := e.eng.Register(e.ctx, "opencode-runner", 0, []AgentAdvert{agent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := e.agentOf(runner)
+	if got := e.str("SELECT family FROM agents WHERE id = ?", id); got != "opencode" {
+		t.Fatalf("original family = %q, want opencode", got)
+	}
+	agent.Family = ""
+	again, err := e.eng.Register(e.ctx, "opencode-runner", 0, []AgentAdvert{agent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again != runner || e.agentOf(again) != id {
+		t.Fatal("re-registration replaced the runner or agent identity")
+	}
+	if got := e.str("SELECT family FROM agents WHERE id = ?", id); got != "" {
+		t.Errorf("re-registered family = %q, want unknown", got)
+	}
+}
+
 // TestRegisterStoresTheRunnerCap covers the runner layer's own half
 // (§8.1): a runner advertises its max_parallel when it registers, a
 // re-register replaces it, 0 means unset again, and a negative value is

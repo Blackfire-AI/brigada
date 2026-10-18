@@ -126,6 +126,11 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		MaxParallel: maxParallel,
 		Ready: func() {
 			fmt.Fprintf(stdout, "runner %s up on %s offering %s\n", name, rt.paths.Socket, strings.Join(parts, "; "))
+			for _, a := range adverts {
+				if a.Family == "" {
+					fmt.Fprintf(stdout, "%s/%s: model family unknown; it takes no review that needs another family (give provider/model to fix)\n", a.Harness, a.Model)
+				}
+			}
 		},
 	}); err != nil {
 		return fail(stderr, fmt.Errorf("runner: %w", err))
@@ -378,13 +383,9 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 			return nil, nil, fmt.Errorf("--agent harness=%s: %v", spec.harness, err)
 		}
 		ads = append(ads, ad)
-		// Keep support for custom aliases, using the shared harness fallback.
+		// Unknown custom aliases retain AgentFamily's harness fallback;
+		// OpenCode's CLI default stays empty because its provider is unknown.
 		family, _ := adapter.AgentFamily(spec.harness, spec.model)
-		if family == "" {
-			// OpenCode's CLI default has no known provider; retain its
-			// historical registration fallback for standalone runners.
-			family = spec.harness
-		}
 		adverts = append(adverts, api.Agent{
 			Effort:  spec.effort,
 			Adapter: ad.Name(),
