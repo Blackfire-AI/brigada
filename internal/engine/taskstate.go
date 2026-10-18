@@ -719,18 +719,23 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 		return err
 	}
 	if spent || noAgent {
+		var why string
 		if noAgent && !spent {
 			onlyAuthor, err := onlyAuthorReviewerTx(tx, retry)
 			if err != nil {
 				return err
 			}
 			if onlyAuthor {
-				reason += "; " + noReviewerAuthor
+				why = noReviewerAuthor
 			} else {
-				reason += "; no other agent of another family can take the retry"
+				why = "no other agent of another family can take the retry"
 			}
 		}
-		return e.needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: boundNote(reason)}, now)
+		text, err := reviewParkedText(tx, job, reviewOutcomeWord(reason), why)
+		if err != nil {
+			return err
+		}
+		return e.needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: text}, now)
 	}
 	sr, err := e.submitTx(tx, SubmitParams{
 		Key:           job.Key,
