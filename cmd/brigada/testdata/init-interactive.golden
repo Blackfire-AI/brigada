@@ -13,7 +13,7 @@ Step 1 of 3: agents
 
   claude: signed in
     Which model should claude run?
-       1  sonnet               Anthropic  Sonnet 4 · Balanced
+       1  sonnet               Anthropic  Sonnet 4 · Balanced default
        2  opus                 Anthropic  Opus 4 · Most capable
        3  haiku                Anthropic  fastest; fine for small tasks
        4  claude-sonnet-4[1m]  Anthropic  Sonnet, 1M context
@@ -72,7 +72,7 @@ Step 1 of 3: agents
        1  zai-coding-plan/glm-5.3  Zhipu (GLM)  GLM-5.3, 200K context
        2  zai-coding-plan/glm-5.2  Zhipu (GLM)  GLM-5.2, 200K context
        3  opencode/deepseek-v3     DeepSeek     DeepSeek V3, 1M context
-       -  don't use opencode
+       -  don't use opencode  default
     Pick 1-3 or -, or type provider/model [-]:
     How hard should zai-coding-plan/glm-5.3 think? More effort gives better
     results on hard tasks and uses more of your plan's limits.
@@ -82,18 +82,19 @@ Step 1 of 3: agents
        4  high
     Pick 1-4 [1]:
 
-  -> change later: brigada init
+  -> change later: run brigada init again
 
 Step 2 of 3: the foreman
   The foreman plans the work and decides what happens when a task needs
   judgment. It runs whenever work finishes, so it uses that agent's quota.
   Only claude and codex can be the foreman; it uses the model picked above
   and its effort.
-    1  claude/sonnet
+    1  claude/sonnet  default
     2  codex/gpt-6.1-sol
   Pick 1-2 [1]:
 
-  -> change later: brigada project foreman --harness H --model M
+  -> change later: brigada project foreman --harness H --model M, or run
+     brigada init again
 
 Step 3 of 3: how brigada tests the work
   When an agent finishes a task, brigada runs one command in that task's
@@ -104,10 +105,11 @@ Step 3 of 3: how brigada tests the work
   lint, type checks. Claude workers may run it too before handing in.
 
   Found in this repo:
-     1  uv run pytest  pytest, from uv.lock
+     1  uv run pytest  pytest, from uv.lock default
   Pick 1, or type a command [1]:
 
-  -> change later: .brigada/project.yaml: default_check; brigada project import
+  -> change later: edit default_check in .brigada/project.yaml, then run
+     brigada project import
 
 Plan
   Agents:

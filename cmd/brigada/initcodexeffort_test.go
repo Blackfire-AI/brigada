@@ -93,7 +93,7 @@ func TestInitCurrentTagMovesToRowEnd(t *testing.T) {
 	if _, err := initPickEffort(&out, "codex", entry, ask, "low"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "low   default current\n") {
+	if !strings.Contains(out.String(), "low   current\n") {
 		t.Errorf("effort menu current tag:\n%s", out.String())
 	}
 }

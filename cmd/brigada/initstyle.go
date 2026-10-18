@@ -100,7 +100,10 @@ func initMenuPrefix(w io.Writer, indent string, id int, name string, width int, 
 		return fmt.Sprintf("%s%2d  %-*s", indent, id, width, name)
 	}
 	if selected {
-		indent = out.style.Pointer() + indent[1:]
+		// Leave one space between the pointer and the first digit.
+		number := fmt.Sprintf("%2d", id)
+		column := len(indent) + len(number) - len(strings.TrimLeft(number, " ")) - 2
+		indent = indent[:column] + out.style.Pointer() + indent[column+1:]
 		name = out.style.Bold(name)
 	}
 	return indent + out.style.Accent(fmt.Sprintf("%2d", id)) + "  " + name + strings.Repeat(" ", max(0, width-term.VisibleWidth(name)))
@@ -141,7 +144,8 @@ func initRowNote(w io.Writer, note, tags string) string {
 func initChangeLater(w io.Writer, how string) {
 	out := initPresentation(w)
 	fmt.Fprintln(w)
-	printInitWrapped(w, "  ", "    ", out.style.Dim(out.style.Again()+" change later: "+how))
+	prefix := "  " + out.style.Dim(out.style.Again()+" ")
+	printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), out.style.Dim("change later: "+how))
 }
 
 func initCLIStatus(w io.Writer, harness string, probe harnessProbe, confirmed bool) {
@@ -159,7 +163,7 @@ func initCLIStatus(w io.Writer, harness string, probe harnessProbe, confirmed bo
 	case harness == "opencode" && strings.HasPrefix(probe.status, "no stored provider credentials"):
 		status = out.style.Warn(probe.status)
 	}
-	printInitWrapped(w, "  ", "    ", out.style.Bold(harness)+": "+status)
+	printInitWrapped(w, "  "+out.style.Bold(harness)+"  ", "    ", status)
 }
 
 // Split long identifiers by visible width without cutting an SGR sequence.
