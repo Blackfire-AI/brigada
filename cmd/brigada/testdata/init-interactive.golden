@@ -13,11 +13,13 @@ Step 1 of 3: agents
 
   claude: signed in
     Which model should claude run?
-       1  sonnet  Anthropic  balanced; the usual choice
-       2  opus    Anthropic  strong; uses your plan's limits faster
-       3  haiku   Anthropic  fastest; fine for small tasks
+       1  sonnet               Anthropic  Sonnet 4 · Balanced
+       2  opus                 Anthropic  Opus 4 · Most capable
+       3  haiku                Anthropic  fastest; fine for small tasks
+       4  claude-sonnet-4[1m]  Anthropic  Sonnet, 1M context
+       5  claude-opus-4        Anthropic  Opus 4 · Most capable
        -  don't use claude
-    Pick 1-3 or -, or type a model id [1]:
+    Pick 1-5 or -, or type a model id [1]:
 
   codex: signed in
     Which model should codex run?
@@ -37,9 +39,9 @@ Step 1 of 3: agents
     Use kimi? [y/N]:
     Which model should kimi run?
        1  kimi-code/k3                         Moonshot  your kimi default
-       2  kimi-code/k3-256k                    Moonshot
-       3  kimi-code/kimi-for-coding            Moonshot
-       4  kimi-code/kimi-for-coding-highspeed  Moonshot
+       2  kimi-code/k3-256k                    Moonshot  K3, 256K context
+       3  kimi-code/kimi-for-coding            Moonshot  200K context
+       4  kimi-code/kimi-for-coding-highspeed  Moonshot  200K context
     Pick 1-4, or type a model id [1]:
     kimi has no sandbox: when it writes code it can run any command on this
     machine without asking. As a reviewer it only reads.
@@ -47,10 +49,11 @@ Step 1 of 3: agents
 
   opencode: signed in to 2 providers (opencode providers list)
     Which model should opencode run?
-       1  zai-coding-plan/glm-5.3  Zhipu (GLM)
-       2  zai-coding-plan/glm-5.2  Zhipu (GLM)
+       1  zai-coding-plan/glm-5.3  Zhipu (GLM)  GLM-5.3, 200K context
+       2  zai-coding-plan/glm-5.2  Zhipu (GLM)  GLM-5.2, 200K context
+       3  opencode/deepseek-v3     DeepSeek     DeepSeek V3, 1M context
        -  don't use opencode
-    Pick 1-2 or -, or type provider/model [-]:
+    Pick 1-3 or -, or type provider/model [-]:
 
 Step 2 of 3: the foreman
   The foreman plans the work and decides what happens when a task needs

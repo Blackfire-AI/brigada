@@ -109,7 +109,7 @@ func TestInitClaudeModelsFromCLIAndAccount(t *testing.T) {
 		{id: 2, name: "opus", value: "opus", note: "already an alias"},
 		{id: 3, name: "sonnet", value: "sonnet", note: "balanced; the usual choice"},
 		{id: 4, name: "haiku", value: "haiku", note: "fastest; fine for small tasks"},
-		{id: 5, name: "claude-fable-5-1[1m]", value: "claude-fable-5-1[1m]", note: "Fable: Fable 5.1 · Most capable"},
+		{id: 5, name: "claude-fable-5-1[1m]", value: "claude-fable-5-1[1m]", note: "Fable, 1M context"},
 	}
 	if !reflect.DeepEqual(got.entries, want) || got.defaultID != 3 {
 		t.Fatalf("source = %+v", got)
@@ -128,6 +128,29 @@ func TestInitClaudeSettingsDefault(t *testing.T) {
 		t.Fatalf("source = %+v", got)
 	}
 	assertInitModelPrivacy(t, got)
+}
+
+func TestInitClaudeModelNotes(t *testing.T) {
+	for _, tc := range []struct {
+		value, label, description, want string
+	}{
+		{"fable[1m]", "Fable", "Fable 5.1 · Most capable", "Fable, 1M context"},
+		{"claude-fable-5-1[12m]", "Fable", "Fable 5.1 · Most capable", "Fable, 12M context"},
+		{"opus[2M]", "Opus", "Most capable", "Opus, 2M context"},
+		{"claude-fable-5-1", "Fable", "Fable 5.1 · Most capable", "Fable 5.1 · Most capable"},
+		{"claude-fable-5-1", "fable", "Fable 5.1", "Fable 5.1"},
+		{"claude-fable-5-1", "Fable", "Fablewood model", "Fable: Fablewood model"},
+		{"claude-fable-5-1", "Fable", "Most capable", "Fable: Most capable"},
+		{"claude-fable-5-1", "", "Most capable", "Most capable"},
+		{"claude-fable-5-1", "Fable", "", "Fable"},
+		{"claude-fable-5-1[1m]", "", "Most capable", "Most capable"},
+	} {
+		t.Run(tc.value+"/"+tc.want, func(t *testing.T) {
+			if got := initClaudeModelNote(tc.value, tc.label, tc.description); got != tc.want {
+				t.Errorf("note = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestInitClaudeAliasesFallback(t *testing.T) {
@@ -342,7 +365,7 @@ display_name = "Only Name"
 	want := []initModelEntry{
 		{id: 1, name: "kimi-code/k3", value: "default", note: "your kimi default; K3, 1M context", isDefault: true},
 		{id: 2, name: "kimi-code/k2.8-preview", value: "kimi-code/k2.8-preview", note: "K2.8 Preview, 256K context"},
-		{id: 3, name: "kimi-code/no-name", value: "kimi-code/no-name", note: "256K context"},
+		{id: 3, name: "kimi-code/no-name", value: "kimi-code/no-name", note: "200K context"},
 		{id: 4, name: "kimi-code/bare", value: "kimi-code/bare"},
 		{id: 5, name: "kimi-code/no-size", value: "kimi-code/no-size", note: "Only Name"},
 	}
@@ -354,11 +377,25 @@ display_name = "Only Name"
 
 func TestInitContextSize(t *testing.T) {
 	for n, want := range map[int64]string{
-		0: "", -5: "", 1048576: "1M", 262144: "256K", 131072: "128K", 200000: "256K",
+		0: "", -5: "", 1048576: "1M", 262144: "256K", 131072: "128K", 200000: "200K",
 		32768: "32K", 2097152: "2M", 1000: "1K", 10: "1K",
+		204800: "200K", 1000000: "1M", 999000: "999K", 1022976: "999K",
+		1024000: "1M", 2000000: "2M", 150500: "151K", 200001: "200K",
 	} {
 		if got := initContextSize(n); got != want {
 			t.Errorf("initContextSize(%d) = %q, want %q", n, got, want)
+		}
+		note := "Model"
+		if want != "" {
+			note += ", " + want + " context"
+		}
+		if got := (initKimiModel{display: "Model", context: n}).note(); got != note {
+			t.Errorf("Kimi context %d: note = %q, want %q", n, got, note)
+		}
+		meta := initOpenCodeMeta{Name: "Model"}
+		meta.Limit.Context = n
+		if got := meta.note(); got != note {
+			t.Errorf("OpenCode context %d: note = %q, want %q", n, got, note)
 		}
 	}
 }

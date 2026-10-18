@@ -22,7 +22,7 @@ const openCodeVerboseFixture = `zai-coding-plan/glm-5.3
   "status": "active",
   "provider": {"api": "never-print-me-api", "npm": "never-print-me-npm"},
   "options": {"key": "never-print-me-option"},
-  "cost": {"input": 1, "output": 3.2, "cache_read": 0},
+  "cost": {"input": 0, "output": 0, "cache_read": 0},
   "limit": {"context": 262144, "output": 32768}
 }
 opencode/mimo-v2-flash-free
@@ -93,7 +93,7 @@ func TestInitOpenCodeVerboseModels(t *testing.T) {
 	got := initOpenCodeModels(context.Background())
 	want := []initModelEntry{
 		{id: 1, name: "zai-coding-plan/glm-5.3", value: "zai-coding-plan/glm-5.3", note: "GLM-5.3, 256K context"},
-		{id: 2, name: "opencode/mimo-v2-flash-free", value: "opencode/mimo-v2-flash-free", note: "MiMo V2 Flash Free, 256K context, free"},
+		{id: 2, name: "opencode/mimo-v2-flash-free", value: "opencode/mimo-v2-flash-free", note: "MiMo V2 Flash Free, 256K context"},
 		{id: 3, name: "opencode/nemotron-3-super-free", value: "opencode/nemotron-3-super-free", note: "Nemotron 3 Super Free, 128K context"},
 	}
 	if !reflect.DeepEqual(got.entries, want) {
@@ -158,7 +158,7 @@ func TestInitOpenCodeVerboseMenu(t *testing.T) {
 	flat := strings.Join(strings.Fields(menu), " ") // rows wrap and align
 	for _, want := range []string{
 		"zai-coding-plan/glm-5.3 Zhipu (GLM) GLM-5.3 with a deliberately long display name to force the note to wrap, 256K context",
-		"opencode/mimo-v2-flash-free Xiaomi MiMo V2 Flash Free, 256K context, free",
+		"opencode/mimo-v2-flash-free Xiaomi MiMo V2 Flash Free, 256K context",
 		"opencode/nemotron-3-super-free NVIDIA Nemotron 3 Super Free, 128K context",
 		"1 more from `opencode models` aren't listed",
 	} {
@@ -169,6 +169,18 @@ func TestInitOpenCodeVerboseMenu(t *testing.T) {
 	for _, bad := range []string{"longcat", "LongCat", "beam-free", "never-print-me"} {
 		if strings.Contains(menu, bad) {
 			t.Errorf("menu shows %q:\n%s", bad, menu)
+		}
+	}
+	// Notes start in the same column even when family names have different widths.
+	noteColumn := -1
+	for _, line := range strings.Split(menu, "\n") {
+		for _, name := range []string{"GLM-5.3", "MiMo V2", "Nemotron 3"} {
+			if column := strings.Index(line, name); column >= 0 {
+				if noteColumn >= 0 && column != noteColumn {
+					t.Errorf("note column = %d, want %d: %q", column, noteColumn, line)
+				}
+				noteColumn = column
+			}
 		}
 	}
 	rows := regexp.MustCompile(`(?m)^\s+(\d+)  (\S+)  `).FindAllStringSubmatch(menu, -1)
@@ -193,7 +205,7 @@ func fakeOpenCodeVerbose2(t *testing.T, verbose string) {
 		" --help) printf '  opencode models [provider]\\n  opencode providers   manage AI providers   [aliases: auth]\\n' ;;\n" +
 		" 'models --help') printf '" + openCodeVerboseHelp + "' ;;\n" +
 		" 'models --verbose') " + verbose + " ;;\n" +
-		" 'providers list') printf '● Provider one oauth\\n' ;;\n" +
+		" 'providers list') printf '● Provider one oauth\\n● Provider two api\\n' ;;\n" +
 		" *) exit 89 ;;\nesac\n"
 	if err := os.WriteFile(filepath.Join(os.Getenv("PATH"), "opencode"), []byte(script), 0755); err != nil {
 		t.Fatal(err)

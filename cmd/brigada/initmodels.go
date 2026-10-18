@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -46,6 +45,7 @@ var initClaudeAliasNotes = map[string]string{
 var (
 	initClaudeModelRow = regexp.MustCompile(`^\s*(?:-\w,\s*)?--model(?:[\s<\[=]|$)`)
 	initQuotedWord     = regexp.MustCompile(`'([A-Za-z0-9][A-Za-z0-9._-]*)'`)
+	initClaudeContext  = regexp.MustCompile(`(?i)\[([1-9][0-9]*)m\]$`)
 )
 
 const initClaudeFileLimit = 4 << 20
@@ -173,15 +173,7 @@ func initClaudeModels(ctx context.Context) initModelSource {
 		if !validInitModelName(value) || slices.Contains(aliases, value) || slices.ContainsFunc(source.entries, func(e initModelEntry) bool { return e.value == value }) {
 			continue
 		}
-		label, description := initCleanText(m.Label), initCleanText(m.Description)
-		note := label
-		switch {
-		case label != "" && description != "":
-			note = label + ": " + description
-		case label == "":
-			note = description
-		}
-		add(value, note)
+		add(value, initClaudeModelNote(value, m.Label, m.Description))
 	}
 
 	source.defaultID = 1
@@ -204,6 +196,23 @@ func initClaudeModels(ctx context.Context) initModelSource {
 		}
 	}
 	return source
+}
+
+func initClaudeModelNote(value, label, description string) string {
+	label, description = initCleanText(label), initCleanText(description)
+	if context := initClaudeContext.FindStringSubmatch(value); context != nil && label != "" {
+		return label + ", " + context[1] + "M context"
+	}
+	if label == "" {
+		return description
+	}
+	if description == "" {
+		return label
+	}
+	if strings.EqualFold(label, strings.Fields(description)[0]) {
+		return description
+	}
+	return label + ": " + description
 }
 
 func initCodexModels(ctx context.Context) initModelSource {
@@ -353,18 +362,23 @@ func (m initKimiModel) note() string {
 	return strings.Join(parts, ", ")
 }
 
-// initContextSize writes a token count as 1M, 256K and so on, rounded to the
-// nearest power-of-two K or M. Zero or negative counts give "".
+// initContextSize accepts catalogs using either decimal or binary units. Exact
+// multiples of 1024 use binary units; other counts use decimal units. Round to
+// a whole K below 1000K and a whole M above it. Nonpositive counts give "".
 func initContextSize(n int64) string {
 	if n <= 0 {
 		return ""
 	}
-	exp := int(math.Round(math.Log2(float64(n) / 1024)))
-	exp = min(max(exp, 0), 30)
-	if exp >= 10 {
-		return strconv.Itoa(1<<(exp-10)) + "M"
+	unit := int64(1000)
+	if n%1024 == 0 {
+		unit = 1024
 	}
-	return strconv.Itoa(1<<exp) + "K"
+	// Divide before adding to avoid overflowing large catalog counts.
+	round := func(unit int64) int64 { return n/unit + (n%unit+unit/2)/unit }
+	if round(unit) >= 1000 {
+		return strconv.FormatInt(round(unit*unit), 10) + "M"
+	}
+	return strconv.FormatInt(max(round(unit), 1), 10) + "K"
 }
 
 // Scan only the requested top-level assignment and, for Kimi, model table
@@ -592,16 +606,12 @@ type initOpenCodeRow struct {
 type initOpenCodeMeta struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
-	Cost   struct {
-		Input  *float64 `json:"input"`
-		Output *float64 `json:"output"`
-	} `json:"cost"`
-	Limit struct {
+	Limit  struct {
 		Context int64 `json:"context"`
 	} `json:"limit"`
 }
 
-// note reads "<name>, <context> context[, free]", leaving out missing parts.
+// note reads "<name>, <context> context", leaving out missing parts.
 func (m initOpenCodeMeta) note() string {
 	var parts []string
 	if name := initCleanText(m.Name); name != "" {
@@ -609,9 +619,6 @@ func (m initOpenCodeMeta) note() string {
 	}
 	if c := initContextSize(m.Limit.Context); c != "" {
 		parts = append(parts, c+" context")
-	}
-	if m.Cost.Input != nil && m.Cost.Output != nil && *m.Cost.Input == 0 && *m.Cost.Output == 0 {
-		parts = append(parts, "free")
 	}
 	return strings.Join(parts, ", ")
 }
