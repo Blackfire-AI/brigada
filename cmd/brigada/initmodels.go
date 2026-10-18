@@ -518,19 +518,33 @@ func initOpenCodeModels(ctx context.Context) initModelSource {
 	}
 	// OpenCode lists fully qualified command rows, unlike the other harnesses.
 	if helpNamesHarnessCommand(string(help), "opencode", "models") {
-		if out, err := cheapHarnessCommand(ctx, "opencode", "models"); err == nil {
-			seen := map[string]bool{}
-			for line := range strings.SplitSeq(string(out), "\n") {
-				model := strings.TrimSpace(line)
-				provider, name, ok := strings.Cut(model, "/")
-				if ok && provider != "" && name != "" && validInitModelName(model) && !seen[model] {
-					seen[model] = true
-					if _, err := adapter.AgentFamily("opencode", model); err != nil {
-						source.unknownCount++
-						continue
-					}
-					source.entries = append(source.entries, initModelEntry{id: len(source.entries) + 1, name: model, value: model})
+		var rows []initOpenCodeRow
+		if modelsHelp, err := cheapHarnessCommand(ctx, "opencode", "models", "--help"); err == nil && initVerboseFlag.Match(modelsHelp) {
+			if out, err := cheapHarnessCommand(ctx, "opencode", "models", "--verbose"); err == nil {
+				rows, _ = parseInitOpenCodeVerbose(string(out))
+			}
+		}
+		if rows == nil {
+			if out, err := cheapHarnessCommand(ctx, "opencode", "models"); err == nil {
+				for line := range strings.SplitSeq(string(out), "\n") {
+					rows = append(rows, initOpenCodeRow{id: strings.TrimSpace(line), active: true})
 				}
+			}
+		}
+		seen := map[string]bool{}
+		for _, row := range rows {
+			model := row.id
+			provider, name, ok := strings.Cut(model, "/")
+			if ok && provider != "" && name != "" && validInitModelName(model) && !seen[model] {
+				seen[model] = true
+				if !row.active {
+					continue
+				}
+				if _, err := adapter.AgentFamily("opencode", model); err != nil {
+					source.unknownCount++
+					continue
+				}
+				source.entries = append(source.entries, initModelEntry{id: len(source.entries) + 1, name: model, value: model, note: row.note})
 			}
 		}
 	}
@@ -562,6 +576,81 @@ func initOpenCodeModels(ctx context.Context) initModelSource {
 		}
 	}
 	return source
+}
+
+var initVerboseFlag = regexp.MustCompile(`(?m)(?:^|[\s,\[])--verbose(?:[\s,\]=]|$)`)
+
+// initOpenCodeRow is one listed model. note is empty for the plain list.
+type initOpenCodeRow struct {
+	id     string
+	active bool
+	note   string
+}
+
+// initOpenCodeMeta holds the only keys read from a verbose model's JSON
+// object; the decoder drops every other field.
+type initOpenCodeMeta struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Cost   struct {
+		Input  *float64 `json:"input"`
+		Output *float64 `json:"output"`
+	} `json:"cost"`
+	Limit struct {
+		Context int64 `json:"context"`
+	} `json:"limit"`
+}
+
+// note reads "<name>, <context> context[, free]", leaving out missing parts.
+func (m initOpenCodeMeta) note() string {
+	var parts []string
+	if name := initCleanText(m.Name); name != "" {
+		parts = append(parts, name)
+	}
+	if c := initContextSize(m.Limit.Context); c != "" {
+		parts = append(parts, c+" context")
+	}
+	if m.Cost.Input != nil && m.Cost.Output != nil && *m.Cost.Input == 0 && *m.Cost.Output == 0 {
+		parts = append(parts, "free")
+	}
+	return strings.Join(parts, ", ")
+}
+
+// parseInitOpenCodeVerbose reads "opencode models --verbose": each
+// provider/model line followed by a JSON object. Any row without a decodable
+// object is an error, so the caller falls back to the plain list.
+func parseInitOpenCodeVerbose(out string) ([]initOpenCodeRow, error) {
+	var rows []initOpenCodeRow
+	rest := out
+	for {
+		rest = strings.TrimLeft(rest, " \t\r\n")
+		if rest == "" {
+			break
+		}
+		line, after, _ := strings.Cut(rest, "\n")
+		id := strings.TrimSpace(line)
+		// The output is combined with stderr: a line that is no model id
+		// (a shell or runtime warning) is skipped.
+		if !strings.Contains(id, "/") || !validInitModelName(id) {
+			rest = after
+			continue
+		}
+		after = strings.TrimLeft(after, " \t\r\n")
+		if !strings.HasPrefix(after, "{") {
+			return nil, fmt.Errorf("opencode models --verbose: row without metadata")
+		}
+		dec := json.NewDecoder(strings.NewReader(after))
+		var meta initOpenCodeMeta
+		if err := dec.Decode(&meta); err != nil {
+			return nil, err
+		}
+		rows = append(rows, initOpenCodeRow{id: id, active: meta.Status == "active", note: meta.note()})
+		rest = after[dec.InputOffset():]
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("opencode models --verbose: no rows")
+	}
+	return rows, nil
 }
 
 func helpNamesHarnessCommand(help, harness, command string) bool {

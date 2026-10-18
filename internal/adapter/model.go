@@ -45,6 +45,9 @@ var modelFamilyPrefixes = []struct {
 	{"meta", []string{"llama"}},
 	{"mistral", []string{"mistral", "codestral", "devstral"}},
 	{"zhipu", []string{"glm"}},
+	{"xiaomi", []string{"mimo"}},
+	{"meituan", []string{"longcat"}},
+	{"nvidia", []string{"nemotron"}},
 }
 
 func validModelIdentifier(model string) bool {
