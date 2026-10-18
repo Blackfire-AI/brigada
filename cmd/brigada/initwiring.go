@@ -35,9 +35,8 @@ const (
 // codexWiringText is what init prints for Codex instead of writing anything:
 // no project-scope path is verified, so the user-level command is the user's
 // to run (§4.6 "What the facts allow", item 7 approvals).
-const codexWiringText = `  Codex (optional: only to plan from your own Codex session). Run once yourself; it registers brigada for Codex in every project, under the name brigada-foreman so it doesn't replace another brigada server you may have:
+const codexWiringText = `  Codex, optional: to plan from your own Codex session, run once yourself:
     codex mcp add brigada-foreman -- brigada mcp --foreman
-    For codex exec, see the GUIDE section on the foreman's harness.
 `
 
 type mcpBridge struct {
@@ -169,7 +168,7 @@ func wiringSafePath(root, rel string) error {
 // printInitFiles prints the repository plan, including project.yaml. Existing
 // files always show their changes; contents of new files are opt-in.
 func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
-	fmt.Fprintln(w, "  Files in this repository (brigada never commits them; commit them to share this setup, or leave them uncommitted):")
+	fmt.Fprintln(w, "  Files in this repository (brigada never commits them):")
 	// Show the setup files first, then supporting edits such as git's exclude.
 	ordered := make([]wireFile, 0, len(files))
 	primary := []string{engine.ProjectConfigPath, wiringMCPFile, wiringSettingsFile, wiringSkillFile}
@@ -198,13 +197,13 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 		var purpose string
 		switch f.rel {
 		case engine.ProjectConfigPath:
-			purpose = "project settings: the check and worker permissions"
+			purpose = "the settings above"
 		case wiringMCPFile:
-			purpose = "lets Claude Code here talk to brigada; Claude Code asks you to approve it the first time"
+			purpose = "lets Claude Code here use brigada (Claude Code asks you to approve it)"
 		case wiringSettingsFile:
-			purpose = "a Stop hook; `brigada hold yield` frees the foreman slot when your Claude turn ends"
+			purpose = "private, kept out of git: when your Claude turn ends, brigada's foreman picks up what happened meanwhile"
 		case wiringSkillFile:
-			purpose = "the foreman rules your Claude session follows"
+			purpose = "rules for your Claude session"
 		case wiringSharedSettingsFile:
 			purpose = "removes brigada hooks moved to private settings"
 		default:
@@ -219,10 +218,14 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 		case f.changed():
 			state = "changes"
 		}
-		if f.rel == wiringSettingsFile {
-			state += ", private (kept out of git)"
+		prefix := fmt.Sprintf("    %-*s  ", pathWidth, f.rel)
+		if f.err != nil {
+			printInitWrapped(w, prefix, strings.Repeat(" ", len(prefix)), state)
+			prefix = strings.Repeat(" ", len(prefix))
+		} else {
+			prefix += state + "  "
 		}
-		fmt.Fprintf(w, "    %-*s  %s: %s\n", pathWidth, f.rel, state, purpose)
+		printInitWrapped(w, prefix, strings.Repeat(" ", len(prefix)), purpose)
 		if f.changed() {
 			if f.exists {
 				if f.rel == engine.ProjectConfigPath {
@@ -237,7 +240,7 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 			}
 		}
 	}
-	fmt.Fprintln(w, "    (full contents: --verbose)")
+	fmt.Fprintln(w, "    (show full contents: --verbose)")
 }
 
 // printFileDiff prints a unified-style hunk of the lines that differ plus two

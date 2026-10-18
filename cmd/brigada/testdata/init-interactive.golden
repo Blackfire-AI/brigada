@@ -1,0 +1,93 @@
+brigada init: set up example.invalid/imported
+
+brigada runs coding tasks on the agent CLIs you are signed in to. A foreman
+(an agent) turns your request into a plan of tasks; workers (other agents)
+write the code in their own git worktrees; your check command tests it; and
+an agent of a different model family reviews it. Three short steps follow.
+Nothing is written or started until you confirm at the end.
+
+Step 1 of 3: agents
+  Each agent CLI below can work for brigada. For each one, pick the model it
+  should run, or leave it out. Reviews always go to a different model family
+  than the author's, so you need at least two families (e.g. claude + codex).
+
+  claude: signed in
+    Which model should claude run?
+       1  sonnet  balanced; the usual choice
+       2  opus    strongest; uses your Claude plan's limits faster
+       3  haiku   fastest; fine for small tasks
+       -  don't use claude
+    Pick 1-3 or -, or type a model id [1]:
+
+  codex: signed in
+    Which model should codex run?
+       1  gpt-6.1-sol  your codex default (~/.codex/config.toml)
+       -  don't use codex
+    Pick 1 or -, or type a model id [1]:
+
+  kimi: init can't check sign-in. If you're not signed in, run `kimi login`
+  first, or leave kimi out.
+    Use kimi? [y/N]:
+    Which model should kimi run?
+       1  kimi-code/k3                         your kimi default
+       2  kimi-code/k3-256k
+       3  kimi-code/kimi-for-coding
+       4  kimi-code/kimi-for-coding-highspeed
+    Pick 1-4, or type a model id [1]:
+    kimi has no sandbox: when it writes code it can run any command on this
+    machine without asking. As a reviewer it only reads.
+    Let kimi write code too, not only review? [y/N]:
+
+  opencode: signed in to 2 providers (opencode auth list)
+    Which model should opencode run?
+       1  zai-coding-plan/glm-5.3
+       2  zai-coding-plan/glm-5.2
+       -  don't use opencode
+    Pick 1-2 or -, or type provider/model [-]:
+
+Step 2 of 3: the foreman
+  The foreman plans the work and decides what happens when a task needs
+  judgment. It runs whenever work finishes, so it uses that agent's quota.
+  Only claude and codex can be the foreman; it uses the model picked above.
+    1  claude/sonnet
+    2  codex/gpt-6.1-sol
+  Pick 1-2 [1]:
+
+Step 3 of 3: the check
+  A command that must succeed (exit 0) before a task's work is accepted.
+  Found uv.lock, so the suggestion is:
+  Check command [uv run pytest]:
+
+Plan
+  Agents:
+    claude    sonnet                   Anthropic  writes code, reviews
+    codex     gpt-6.1-sol              OpenAI     writes code, reviews
+    kimi      kimi-code/k3             Moonshot   reviews only
+    opencode  zai-coding-plan/glm-5.3  Zhipu      writes code, reviews
+  Reviews: 4 model families, so every task can get a reviewer of another one.
+  Foreman: claude/sonnet
+  Check: uv run pytest (init doesn't run it; change it later in
+    .brigada/project.yaml)
+  What workers may do:
+    claude    edit files; run only: uv run pytest
+    codex     edit files and run commands inside codex's sandbox
+    opencode  edit files; no commands
+  Files in this repository (brigada never commits them):
+    .brigada/project.yaml                    new  the settings above
+    .mcp.json                                new  lets Claude Code here use
+                                                  brigada (Claude Code asks you
+                                                  to approve it)
+    .claude/settings.local.json              new  private, kept out of git:
+                                                  when your Claude turn ends,
+                                                  brigada's foreman picks up
+                                                  what happened meanwhile
+    .claude/skills/brigada-foreman/SKILL.md  new  rules for your Claude session
+    (show full contents: --verbose)
+  Codex, optional: to plan from your own Codex session, run once yourself:
+    codex mcp add brigada-foreman -- brigada mcp --foreman
+  In the background: a runner starts now and keeps going (log:
+    ~/.local/state/brigada/runner.log; stop it with: brigada stop). The engine
+    starts when needed and stops after 30 idle minutes.
+
+Write 4 files and start the runner? [y/N]
+Declined; nothing written or started.
