@@ -314,6 +314,55 @@ default_model = "never-print-me"
 	assertInitModelPrivacy(t, got)
 }
 
+func TestInitKimiModelNotes(t *testing.T) {
+	fakeInitPATH(t, "kimi")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeInitModelFixture(t, filepath.Join(home, ".kimi-code", "config.toml"), `default_model = "kimi-code/k3"
+[providers."kimi-code"]
+api_key = "never-print-me"
+display_name = "never-print-me"
+max_context_size = 7
+[models."kimi-code/k3"]
+provider = "kimi-code"
+display_name = "K3"
+max_context_size = 1048576
+[models."kimi-code/k2.8-preview"]
+display_name = "K2.8 Preview" # shown
+max_context_size = 262144
+oauth = "never-print-me"
+[models."kimi-code/no-name"]
+max_context_size = 200000
+[models."kimi-code/bare"]
+provider = "never-print-me"
+[models."kimi-code/no-size"]
+display_name = "Only Name"
+`)
+	got := initKimiModels(context.Background())
+	want := []initModelEntry{
+		{id: 1, name: "kimi-code/k3", value: "default", note: "your kimi default; K3, 1M context", isDefault: true},
+		{id: 2, name: "kimi-code/k2.8-preview", value: "kimi-code/k2.8-preview", note: "K2.8 Preview, 256K context"},
+		{id: 3, name: "kimi-code/no-name", value: "kimi-code/no-name", note: "256K context"},
+		{id: 4, name: "kimi-code/bare", value: "kimi-code/bare"},
+		{id: 5, name: "kimi-code/no-size", value: "kimi-code/no-size", note: "Only Name"},
+	}
+	if !reflect.DeepEqual(got.entries, want) {
+		t.Fatalf("entries = %+v", got.entries)
+	}
+	assertInitModelPrivacy(t, got)
+}
+
+func TestInitContextSize(t *testing.T) {
+	for n, want := range map[int64]string{
+		0: "", -5: "", 1048576: "1M", 262144: "256K", 131072: "128K", 200000: "256K",
+		32768: "32K", 2097152: "2M", 1000: "1K", 10: "1K",
+	} {
+		if got := initContextSize(n); got != want {
+			t.Errorf("initContextSize(%d) = %q, want %q", n, got, want)
+		}
+	}
+}
+
 func TestInitModelSourceFallbacks(t *testing.T) {
 	for _, tc := range []struct {
 		harness, dir, body string

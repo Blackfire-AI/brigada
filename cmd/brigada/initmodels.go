@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -303,31 +304,80 @@ func readInitCodexCatalog(ctx context.Context) ([]initCodexModel, bool) {
 
 func initKimiModels(ctx context.Context) initModelSource {
 	var name string
-	var models []string
+	var models []initKimiModel
 	if home, err := os.UserHomeDir(); err == nil {
 		name, models = readInitModelConfig(filepath.Join(home, ".kimi-code", "config.toml"), "default_model", true)
 	}
 	entries := []initModelEntry{{id: 1, name: name, note: "your kimi default", value: "default", isDefault: true}}
+	byID := map[string]initKimiModel{}
+	for _, model := range models {
+		if prev, ok := byID[model.id]; ok {
+			if model.display == "" {
+				model.display = prev.display
+			}
+			if model.context == 0 {
+				model.context = prev.context
+			}
+		}
+		byID[model.id] = model
+	}
+	if detail := byID[name].note(); name != "" && detail != "" {
+		entries[0].note += "; " + detail
+	}
 	seen := map[string]bool{name: true}
 	for _, model := range models {
-		if !seen[model] {
-			entries = append(entries, initModelEntry{id: len(entries) + 1, name: model, value: model})
-			seen[model] = true
+		if !seen[model.id] {
+			entries = append(entries, initModelEntry{id: len(entries) + 1, name: model.id, value: model.id, note: byID[model.id].note()})
+			seen[model.id] = true
 		}
 	}
 	return initModelSource{entries: entries, signIn: probeHarness(ctx, "kimi")}
 }
 
+// initKimiModel holds the only keys read from a [models."<id>"] table.
+type initKimiModel struct {
+	id      string
+	display string
+	context int64
+}
+
+// note reads "<display_name>, <context> context", leaving out missing parts.
+func (m initKimiModel) note() string {
+	var parts []string
+	if m.display != "" {
+		parts = append(parts, m.display)
+	}
+	if c := initContextSize(m.context); c != "" {
+		parts = append(parts, c+" context")
+	}
+	return strings.Join(parts, ", ")
+}
+
+// initContextSize writes a token count as 1M, 256K and so on, rounded to the
+// nearest power-of-two K or M. Zero or negative counts give "".
+func initContextSize(n int64) string {
+	if n <= 0 {
+		return ""
+	}
+	exp := int(math.Round(math.Log2(float64(n) / 1024)))
+	exp = min(max(exp, 0), 30)
+	if exp >= 10 {
+		return strconv.Itoa(1<<(exp-10)) + "M"
+	}
+	return strconv.Itoa(1<<exp) + "K"
+}
+
 // Scan only the requested top-level assignment and, for Kimi, model table
-// names. Never decode a whole config into a map: other fields may be secrets.
+// names plus their display_name and max_context_size. Never decode a whole config into a map: other fields may be secrets.
 // Unreadable or unrecognized config is a best-effort unresolved CLI default.
-func readInitModelConfig(path, key string, tables bool) (name string, models []string) {
+func readInitModelConfig(path, key string, tables bool) (name string, models []initKimiModel) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", nil
 	}
 	defer f.Close()
 	topLevel := true
+	cur := -1 // index in models of the table being read, or -1
 	multiline := ""
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -339,11 +389,31 @@ func readInitModelConfig(path, key string, tables bool) (name string, models []s
 		}
 		if strings.HasPrefix(line, "[") {
 			topLevel = false
+			cur = -1
 			if tables {
 				if rest, ok := strings.CutPrefix(line, "[models."); ok {
 					if model, suffix, ok := initConfigString(rest); ok && strings.HasPrefix(suffix, "]") && initConfigEnd(strings.TrimSpace(suffix[1:])) && validInitModelName(model) {
-						models = append(models, model)
+						models = append(models, initKimiModel{id: model})
+						cur = len(models) - 1
 					}
+				}
+			}
+			continue
+		}
+		if cur >= 0 {
+			// Only these two keys of a model table are read; the rest may
+			// hold provider, api key or oauth details.
+			lhs, rhs, ok := strings.Cut(line, "=")
+			switch {
+			case !ok:
+			case strings.TrimSpace(lhs) == "display_name":
+				if v, suffix, ok := initConfigString(rhs); ok && initConfigEnd(suffix) {
+					models[cur].display = initCleanText(v)
+				}
+			case strings.TrimSpace(lhs) == "max_context_size":
+				digits, _, _ := strings.Cut(rhs, "#")
+				if n, err := strconv.ParseInt(strings.ReplaceAll(strings.TrimSpace(digits), "_", ""), 10, 64); err == nil {
+					models[cur].context = n
 				}
 			}
 			continue
