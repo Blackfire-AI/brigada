@@ -63,12 +63,14 @@ Run `brigada init` inside a repository. (At the top of a folder that holds sever
    - Pick a number or type a model ID. For example, Claude asks `Pick 1-3 or -, or type a model id [1]:`. Enter picks the first entry for Claude, Codex and Kimi. For opencode the default is `-`: Enter leaves it out. Claude, Codex and opencode show `-` to skip; leave Kimi out by answering no to `Use kimi?`.
    - Codex and Kimi keep the model value `default` for their first entry, even when init can display its configured name. If the config cannot be read or recognised, the entry says `CLI default`. Codex's `default` counts as OpenAI and Kimi's as Moonshot. An opencode `default` supplied through `--agent` has an unknown family and does not count toward review families.
    - An explicit opencode model must use `provider/model`, for example `zai-coding-plan/glm-5.3` (shown as `Zhipu (GLM)`); a bare `glm-5.3` is refused. Init rejects explicit models whose family it cannot identify. Kimi aliases fall back to Moonshot unless their names identify another known family.
+   - After a Claude, Codex or opencode model with two or more effort levels, init asks how hard it should think. Pick a number or type a listed level. Enter keeps the CLI default and records no `effort=` override. The levels stay in the source's order, with the default marked; an unknown default gets its own first entry. Opencode models without variants have no effort question.
+   - Kimi's configured effort is shown for information only; change it in `~/.kimi-code/config.toml`.
    - After you pick Kimi's model, init asks `Let kimi write code too, not only review? [y/N]:`. Enter or no gives it only `classes=review`. Yes also allows implementation and answers. The warning explains that Kimi has no sandbox: when writing code it can run any command on this machine without asking. As a reviewer it only reads ([section 8](#8-agents-quota-and-health)).
-   - `--agent` replaces the menus and Kimi's question. Set `classes=review` explicitly to keep Kimi reviewing only; the flag's class default is `implement+review+answer`.
+   - `--agent` replaces the model and effort menus and Kimi's question; use `effort=LEVEL` for an explicit effort. Set `classes=review` explicitly to keep Kimi reviewing only; the flag's class default is `implement+review+answer`.
 
    A reviewer must come from a different model family than the author. Init counts distinct families among usable agents whose classes include `review`; two CLIs serving the same family count once. With fewer than two, init prints `LIMITED SETUP`, stops, and writes and starts nothing, unless you pass `--accept-limited`. A limited setup still runs, but reviews that need another family wait; `brigada status` shows them.
 
-2. **The foreman.** Pick among the usable Claude and Codex agents, using the models chosen above. The foreman plans work and handles decisions, and spends that agent's quota when work finishes. With two candidates, init asks for a number. Enter picks the first usable resume-capable agent in `--agent` order, or Claude before Codex without `--agent`. With only one candidate, init names it without asking. `--foreman HARNESS/MODEL` supplies the choice and skips the question; it must name a usable Claude or Codex agent.
+2. **The foreman.** Pick among the usable Claude and Codex agents, using the models and efforts chosen above. The foreman plans work and handles decisions, and spends that agent's quota when work finishes. With two candidates, init asks for a number. Enter picks the first usable resume-capable agent in `--agent` order, or Claude before Codex without `--agent`. With only one candidate, init names it without asking. `--foreman HARNESS/MODEL` supplies the choice and skips the question; it must name a usable Claude or Codex agent.
 
 3. **The check.** Init suggests a check and worker tools from your build files:
 
@@ -85,7 +87,7 @@ Run `brigada init` inside a repository. (At the top of a folder that holds sever
 
 The `Plan` block then shows:
 
-- `Agents:`, with each harness, model, family and role phrase, such as `writes code, reviews` or `reviews only`. Configured defaults use their resolved names when available, otherwise `CLI default`. Family labels include `Anthropic`, `OpenAI`, `Moonshot` and `Zhipu (GLM)`.
+- `Agents:`, with each harness, model and effort (`@high`, for example, or `(default)`), family and role phrase, such as `writes code, reviews` or `reviews only`. Configured defaults use their resolved names when available, otherwise `CLI default`. Family labels include `Anthropic`, `OpenAI`, `Moonshot` and `Zhipu (GLM)`.
 - `Reviews:`, which counts the review-capable model families and describes cross-family review. In a limited setup, reviews that need another family still wait.
 - `Foreman:`, which names the chosen agent.
 - `Check:`, which names the check and reminds you that init does not run it and that you can edit `.brigada/project.yaml`.
@@ -113,7 +115,7 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 | `--probe` | Print the plan; write nothing and start nothing. |
 | `--verbose` | Also print the full contents of new repository setup files. Diffs for existing files are always shown. |
 | `--yes` | Apply the displayed plan without prompting. It does not confirm authentication. `--yes` and `--probe` together are a usage error. |
-| `--agent SPEC` | Repeatable. The same syntax and defaults as `brigada runner --agent` ([section 8](#8-agents-quota-and-health)): `harness=<h>[,model=<m>][,classes=…][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=…]`. Replaces the model menus and Kimi's writing question. Use `classes=review` to keep Kimi reviewing only. |
+| `--agent SPEC` | Repeatable. The same syntax and defaults as `brigada runner --agent` ([section 8](#8-agents-quota-and-health)): `harness=<h>[,model=<m>][,classes=…][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=…]`. Replaces the model and effort menus and Kimi's writing question. Use `classes=review` to keep Kimi reviewing only. |
 | `--signed-in HARNESS` | Confirm an installed harness is signed in (repeatable or comma-separated). Local only. |
 | `--foreman HARNESS/MODEL` | Choose a usable Claude or Codex agent as foreman; skips the foreman question. |
 | `--check CMD` | The default check, instead of the build-file suggestion. |
@@ -127,12 +129,12 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 
 Init still reads answers from standard input, one line per question, and prints each prompt on its own line. Supply answers only for questions that are asked, in this order:
 
-1. For each installed CLI in order (`claude`, `codex`, `kimi`, `opencode`): its unconfirmed sign-in or use answer, then its model choice if you agreed to use it. After Kimi's model, answer whether it may write code too.
+1. For each installed CLI in order (`claude`, `codex`, `kimi`, `opencode`): its unconfirmed sign-in or use answer, then its model choice if you agreed to use it, then its effort choice when offered. After Kimi's model, answer whether it may write code too.
 2. The foreman choice, if both Claude and Codex are usable and `--foreman` was not supplied.
 3. The check, if not already supplied, then worker tools if no scope was supplied or suggested.
 4. The final confirmation.
 
-Enter picks model entry 1 for Claude, Codex and Kimi. Opencode defaults to `-`, so Enter leaves it out. Claude, Codex and opencode show `-` to skip; skip Kimi with no at `Use kimi?`. With `--agent`, there are no model menus or Kimi writing question; sign-in or use questions may still be asked.
+Enter picks model entry 1 for Claude, Codex and Kimi. Opencode defaults to `-`, so Enter leaves it out. Claude, Codex and opencode show `-` to skip; skip Kimi with no at `Use kimi?`. With `--agent`, there are no model or effort menus or Kimi writing question; sign-in or use questions may still be asked.
 
 With `--yes` or `--probe` init asks nothing, so the agents must come from `--agent`, sign-in from the status command or `--signed-in`, and the check and tools from the project file, the build files, or `--check` and `--tools`. If a question is needed and input is at end of file, init fails and names the flag that supplies the answer.
 
