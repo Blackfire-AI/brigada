@@ -249,10 +249,39 @@ func applyRemoval(files []wireFile) error {
 		if err := os.Remove(f.path); err != nil {
 			return err
 		}
-		if f.rel == wiringSkillFile {
-			// Remove just the owned directory, and only if it is empty.
-			_ = os.Remove(filepath.Dir(f.path))
-		}
+		removeEmptyWiringParents(f.root, f.path)
 	}
 	return nil
+}
+
+// Prune only empty directories on the deleted file's path, stopping before
+// the repository root. Cleanup is best-effort: user content always stays.
+func removeEmptyWiringParents(root, path string) {
+	if root == "" {
+		return
+	}
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return
+	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return
+	}
+	for dir := filepath.Dir(path); ; dir = filepath.Dir(dir) {
+		rel, err := filepath.Rel(root, dir)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return
+		}
+		if err := wiringSafePath(root, filepath.ToSlash(rel)); err != nil {
+			return
+		}
+		info, err := os.Lstat(dir)
+		if err != nil || !info.IsDir() {
+			return
+		}
+		if err := os.Remove(dir); err != nil {
+			return
+		}
+	}
 }

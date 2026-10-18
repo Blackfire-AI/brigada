@@ -24,15 +24,17 @@ func removalSnapshot(t *testing.T, root string) map[string]string {
 		if err != nil {
 			return err
 		}
-		if entry.IsDir() {
-			return nil
-		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
-		// Git's internal files are unrelated, except init's exclude edit.
-		if strings.HasPrefix(filepath.ToSlash(rel), ".git/") && filepath.ToSlash(rel) != ".git/info/exclude" {
+		rel = filepath.ToSlash(rel)
+		// Git's internal entries are unrelated, except init's exclude edit.
+		if rel == "." || (strings.HasPrefix(rel, ".git/") && rel != ".git/info/exclude") {
+			return nil
+		}
+		if entry.IsDir() {
+			files[rel+"/"] = ""
 			return nil
 		}
 		data, err := os.ReadFile(path)
@@ -414,6 +416,8 @@ func TestInitThenRemoveRepositoryRoundTrip(t *testing.T) {
 			if own {
 				wireWrite(t, root, wiringMCPFile, "{ \"mcpServers\": { \"mine\": {\"command\": \"mine\"} }, \"extra\": 2 }\n")
 				wireWrite(t, root, wiringSettingsFile, "{\n  \"permissions\": {\"allow\": []},\n  \"hooks\": {\"Stop\": [{\"hooks\": [{\"command\": \"mine\"}]}]}\n}\n")
+				wireWrite(t, root, ".claude/skills/mine/SKILL.md", "my skill\n")
+				wireWrite(t, root, ".claude/skills/brigada-foreman/notes/mine.txt", "my notes\n")
 			}
 			before := removalSnapshot(t, root)
 			startStopHelper(t, "runner", state)
@@ -422,14 +426,57 @@ func TestInitThenRemoveRepositoryRoundTrip(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("init code=%d\n%s\n%s", code, out, errs)
 			}
-			code, out, errs = removeDo(t, ctx, state, "", "--yes", "--delete-config")
+			// Default removal keeps only the project config and its directory.
+			before[engine.ProjectConfigPath] = wireRead(t, root, engine.ProjectConfigPath)
+			before[filepath.ToSlash(filepath.Dir(engine.ProjectConfigPath))+"/"] = ""
+			code, out, errs = removeDo(t, ctx, state, "", "--yes")
 			if code != 0 {
 				t.Fatalf("remove code=%d\n%s\n%s", code, out, errs)
 			}
 			if after := removalSnapshot(t, root); !reflect.DeepEqual(before, after) {
 				t.Fatalf("round trip:\nbefore=%q\nafter=%q", before, after)
 			}
+			// Explicit config deletion restores the entire original tree too.
+			code, out, errs = removeDo(t, ctx, state, "", "--yes", "--delete-config")
+			if code != 0 {
+				t.Fatalf("delete config code=%d\n%s\n%s", code, out, errs)
+			}
+			delete(before, engine.ProjectConfigPath)
+			delete(before, filepath.ToSlash(filepath.Dir(engine.ProjectConfigPath))+"/")
+			if after := removalSnapshot(t, root); !reflect.DeepEqual(before, after) {
+				t.Fatalf("round trip with config deleted:\nbefore=%q\nafter=%q", before, after)
+			}
 		})
+	}
+}
+
+func TestRemovalKeepsEmptyRepositoryRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	wireWrite(t, root, wiringSkillFile, string(skillContent()))
+	files := planSteps(root, []wireStep{{wiringSkillFile, func(d []byte, exists bool) ([]byte, string, error) {
+		return nil, "removed", nil
+	}}})
+	if err := applyRemoval(files); err != nil {
+		t.Fatal(err)
+	}
+	if got := removalSnapshot(t, root); len(got) != 0 {
+		t.Fatalf("empty directories remain: %q", got)
+	}
+}
+
+func TestRemovalParentCleanupRejectsOutsidePath(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "repo")
+	// A shared prefix is insufficient to establish repository containment.
+	outside := filepath.Join(parent, "repo-other")
+	for _, dir := range []string{root, outside} {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removeEmptyWiringParents(root, filepath.Join(outside, "deleted.txt"))
+	if info, err := os.Stat(outside); err != nil || !info.IsDir() {
+		t.Fatalf("cleanup removed an outside directory: %v", err)
 	}
 }
 
