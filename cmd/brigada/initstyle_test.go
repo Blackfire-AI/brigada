@@ -192,7 +192,7 @@ func TestInitPlainCheckMenuWidth(t *testing.T) {
 			w := initOutput{Writer: &b, style: term.New(logo.Caps{TTY: true, Width: width})}
 			note := strings.Repeat("n", 72)
 			_, exhausted, err := askInitCheck(w, func(string, string) (string, error) { return "", nil },
-				initCheckEntries([]checkCandidate{{Command: "check", Note: note}}, "", "", false))
+				initCheckEntries([]checkCandidate{{Command: "check", Note: note}}, "", "", false), []checkCandidate{{Command: "check", Note: note, File: "Makefile"}})
 			if err != nil || exhausted {
 				t.Fatalf("check question: exhausted=%v, err=%v", exhausted, err)
 			}
@@ -210,7 +210,7 @@ func TestInitPlainCheckMenuWidth(t *testing.T) {
 
 func TestInitPlainCurrentCheckWidth(t *testing.T) {
 	for _, tc := range []struct{ width, commandLength int }{
-		{80, 40}, {100, 60}, // Truncated notes must leave room for " current".
+		{80, 40}, {100, 60}, // Wrapped notes must leave room for " current".
 		{80, 63}, {100, 83}, // The command leaves no room even for the tag alone.
 	} {
 		t.Run(fmt.Sprintf("width=%d/command=%d", tc.width, tc.commandLength), func(t *testing.T) {
@@ -218,7 +218,7 @@ func TestInitPlainCurrentCheckWidth(t *testing.T) {
 			w := initOutput{Writer: &b, style: term.New(logo.Caps{TTY: true, Width: tc.width})}
 			command := strings.Repeat("c", tc.commandLength)
 			got, exhausted, err := askInitCheck(w, func(string, string) (string, error) { return "", nil },
-				initCheckEntries(nil, command, "none", true))
+				initCheckEntries(nil, command, "none", true), nil)
 			if err != nil || exhausted || got != command {
 				t.Fatalf("check question = %q, exhausted=%v, err=%v", got, exhausted, err)
 			}
@@ -277,8 +277,8 @@ func assertInitMenuPointers(t *testing.T, out string, utf8 bool) {
 		}
 		menus++
 	}
-	if menus != 4 {
-		t.Errorf("checked %d selected rows; want all 4 foreman model, foreman effort, OpenCode skip and check menus", menus)
+	if menus != 3 {
+		t.Errorf("checked %d selected rows; want all 3 foreman model, foreman effort and OpenCode skip menus", menus)
 	}
 }
 
@@ -561,29 +561,26 @@ func TestInitNoCheckMenuPresentation(t *testing.T) {
 					w := initOutput{Writer: &b, style: style, styled: depth != logo.NoColor, utf8: true}
 					var candidates []checkCandidate
 					if hasProject {
-						candidates = []checkCandidate{{Command: "make check", Note: "Makefile: test lint"}}
+						candidates = []checkCandidate{{Command: "make check", Note: "Makefile: test lint", File: "Makefile"}}
 					}
 					entries := initCheckEntries(candidates, "", "", hasProject)
 					command, exhausted, err := askInitCheck(w, func(prompt, flags string) (string, error) {
 						fmt.Fprintln(w, initPrompt(w, strings.TrimSpace(prompt)))
 						return "", nil
-					}, entries)
+					}, entries, candidates)
 					if err != nil || exhausted || command != "" {
 						t.Fatalf("Enter = %q, exhausted=%v, err=%v", command, exhausted, err)
 					}
 					plain := ansi.ReplaceAllString(b.String(), "")
-					tag := "default"
+					prompt := "Check command, or - for none [-]:"
 					if hasProject {
-						tag = "current"
+						prompt = "Check command [-]:"
 					}
-					if !strings.Contains(plain, "work goes straight to review; add one later  "+tag+"\n") || !strings.Contains(plain, "[-]:") {
+					if !strings.Contains(plain, prompt) || (hasProject && !strings.Contains(plain, "no check  from .brigada/project.yaml  current\n")) {
 						t.Fatalf("wrong no-check default:\n%s", plain)
 					}
-					if depth != logo.NoColor {
-						want := "   " + style.Pointer() + style.Accent(" -") + "  " + style.Bold("no check")
-						if !strings.Contains(b.String(), want) {
-							t.Errorf("no-check row lacks the selected pointer: %q", b.String())
-						}
+					if hasProject && depth != logo.NoColor && !strings.Contains(b.String(), style.Accent("current")) {
+						t.Errorf("current no-check choice lacks its styled tag: %q", b.String())
 					}
 					for _, line := range strings.Split(b.String(), "\n") {
 						if term.VisibleWidth(line) >= width {

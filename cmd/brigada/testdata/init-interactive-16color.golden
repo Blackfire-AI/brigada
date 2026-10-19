@@ -78,18 +78,12 @@ kimi: init can't check sign-in.
   number); change any of them later with brigada config.[0m
 [1m    Tasks at once [0m[36m[4][0m[1m:[0m
 
-[1m━━ Step 4 of 4 · how brigada tests the work[0m
-[90m  When an agent finishes a task, brigada runs one command in that task's[0m
-[90m  own copy of the repo (never in your working copy):[0m
-[90m    passes (exit 0)  the work goes on to review by another model family[0m
-[90m    fails            the work goes back to the agent, with the output[0m
-[90m  Use the command you run yourself to be sure nothing broke: tests,[0m
-[90m  lint, type checks. Claude workers may run it too before handing in.[0m
+[1m━━ Step 4 of 4 · the check[0m
+[90m  A command that must succeed (exit 0) before a task's work is accepted.[0m
 
-  Found in this repo:
-   ▸[36m 1[0m  [1muv run pytest[0m  [90mpytest, from uv.lock[0m  [36mdefault[0m
-    [36m -[0m  no check       [90mwork goes straight to review; add one later[0m
-[1m  Pick 1 or -, or type a command [0m[36m[1][0m[1m:[0m
+  Found uv.lock, so the suggestion is:
+    uv run pytest  [90mpytest, from uv.lock[0m
+[1m  Check command [0m[36m[uv run pytest][0m[1m:[0m
 
   [90m↺ [0m[90mchange later: edit default_check in .brigada/project.yaml, then run brigada
     project import[0m
@@ -120,7 +114,7 @@ kimi: init can't check sign-in.
     kimi      kimi-code/kimi-for-coding
               [90mMoonshot[0m     standard  reviews only
     kimi      kimi-code/kimi-for-coding-highspeed
-              [90mMoonshot[0m     light     reviews only
+              [90mMoonshot[0m     standard  reviews only
     opencode  zai-coding-plan/glm-5.3
               [90mZhipu (GLM)[0m  standard  writes code, reviews
   [1mReviews:[0m 4 model families, so every task can get a reviewer of another one.
@@ -149,5 +143,5 @@ kimi: init can't check sign-in.
     ~/.local/state/brigada/runner.log; stop it with: [36mbrigada stop[0m). The engine
     starts when needed and stops after 30 idle minutes.
 
-[1mWrite 4 files and start the runner? [0m[36m[y/N][0m
+[1mWrite 4 files and start the runner? [0m[36m[y/N][0m[1m:[0m
 Declined; nothing written or started.

@@ -76,7 +76,7 @@ func TestInitNoCheckChoices(t *testing.T) {
 			}
 			if tc.current {
 				flat := strings.Join(strings.Fields(out), " ")
-				if !strings.Contains(flat, "- no check work goes straight to review; add one later current") || !strings.Contains(flat, "or type a command [-]:") || strings.Contains(flat, "make check Makefile: lint format-check type test rig-spec default") {
+				if !strings.Contains(flat, "no check from .brigada/project.yaml current") || !strings.Contains(flat, "Check command [-]:") || strings.Contains(flat, "make check Makefile: lint format-check type test rig-spec default") {
 					t.Fatalf("no-check must be the current default:\n%s", out)
 				}
 			}

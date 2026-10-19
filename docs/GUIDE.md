@@ -58,9 +58,9 @@ Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi
    | `claude` | The aliases `sonnet`, `opus`, `haiku` (Anthropic), plus any other models Claude Code's own cache lists. |
    | `codex` | The CLI default first (shown by the top-level `model` of `$CODEX_HOME/config.toml`, or `~/.codex/config.toml` when `CODEX_HOME` is unset; its note names that config path, and it is stored as `default`), then the catalog models from `codex debug models`. If the config cannot be read, the entry says `CLI default`. |
 
-   Models whose family init cannot tell are left out; Codex's `default` counts as OpenAI. `Pick 1-N, or type harness/model [D]:` takes a number or a typed `harness/model` that names a signed-in Claude or Codex model of a known family. `D` is the foreman saved by the last run, else the first Claude model, else the first Codex model; the saved one is marked `current`. After three bad answers init stops and names `--foreman HARNESS/MODEL`. With only one candidate, init prints `Foreman: HARNESS/MODEL (the only model that can plan)` and asks nothing.
+   Models whose family init cannot tell are left out; Codex's `default` counts as OpenAI. `Pick 1-N, or type harness/model [D]:` takes a number or a typed `harness/model` that names a signed-in Claude or Codex model of a known family. `D` is the foreman saved by the last run, else the first Claude model, else the first Codex model; the saved one is marked `current`. After three bad answers init stops and names `--foreman HARNESS/MODEL`. With only one candidate, init prints `Foreman: HARNESS/MODEL (the only model that can plan)` and skips the model question.
 
-   Then it asks once, for the foreman only, `How hard should the foreman think?`. For Claude the levels are `medium` (marked as Claude Code's default), `low`, `high`, `xhigh`, `max`. For Codex they are the model's catalog levels, its default first (tagged `your codex default` when it comes from `model_reasoning_effort` in your config, else `codex's default`), the rest in catalog order. `Pick 1-N or type a level [1]:` takes a number or a listed level; Enter records the first entry's level, or the saved one on a rerun. A model with fewer than two levels is not asked. Workers get no effort question: for each task the foreman says how hard a model should think.
+   Then it asks once, for the foreman only, `How hard should the foreman think? Higher means better plans and decisions, and slower turns that use more of the plan's limits.` For Claude the levels are `medium` (marked as Claude Code's default), `low`, `high`, `xhigh`, `max`. For Codex they are the model's catalog levels, its default first (tagged `your codex default` when it comes from `model_reasoning_effort` in your config, else `codex's default`), the rest in catalog order. `Pick 1-N or type a level [1]:` takes a number or a listed level; Enter records the first entry's level, or the saved one on a rerun. A model with fewer than two levels is not asked. Workers get no effort question: for each task the foreman says how hard a model should think.
 
    `--foreman HARNESS/MODEL[@EFFORT]` answers both questions; without `@EFFORT` an interactive run still asks the effort, and a `--yes` or `--probe` run records none. The step ends with how to change the choice later: `brigada project foreman --harness H --model M --effort E`, or run `brigada init` again.
 
@@ -79,7 +79,7 @@ Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi
 
 3. **Tasks at once.** Init names this machine's core count and asks `Tasks at once [N]:` (1–64). Enter keeps the saved choice, or defaults to half the cores, at least 1 and at most 4. `--parallel N` supplies the answer; `--yes` and `--probe` use it, else the saved choice, else that default. On apply, init writes `caps.global = N`, `caps.plan = 3` and per-account caps (Claude 3, Codex 2, Kimi 1, OpenCode 2, each no higher than N) to the local brigada config, preserving other settings. The runner uses `--max-parallel N`. Change caps later with `brigada config`. If the engine is already running, init explains how to restart it to read changed caps.
 
-4. **How brigada tests the work.** Init explains that when an agent finishes a task, brigada runs one command in that task's own copy of the repo (never in your working copy). If it passes (exit 0), the work goes on to review by another model family; if it fails, the work goes back to the agent with the output. It then lists what it found in the repo, best first, and asks `Pick 1-N or -, or type a command [1]:`:
+4. **The check.** Init explains: `A command that must succeed (exit 0) before a task's work is accepted.` It names the build files that supplied candidates: `Found uv.lock, so the suggestion is:`, for example. With several candidates it says `so the suggestions are:` and lists one line per candidate, best first, with its note. It asks `Check command [<best>]:`; Enter takes that command. The sources are:
 
    | Source | Candidates |
    |---|---|
@@ -91,9 +91,9 @@ Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi
    | `poetry.lock` | `poetry run pytest` |
    | `pyproject.toml` or `pytest.ini` | `python -m pytest` |
 
-   A number picks that entry, Enter takes entry 1, and other text is the command itself. Every menu ends with `-  no check`: pick `-` to send work straight to review and add a check later. With no candidates, init prints `Found in this repo: nothing brigada recognises.`, marks no check as the default, and asks `Type a command, or - for no check [-]:`; Enter picks no check. The worker tools follow the choice: the picked candidate's tools, or `Bash(COMMAND:*)` for a typed command (file tools only if the command cannot be represented as a tool scope). No check gives Claude file tools only (`none`), or the Go default scope (`go build`, `go test`, `go vet`, `gofmt`) in a repository with `go.mod`. `--tools` and an agent's own `tools=` still win. The step ends with how to change the check later: edit `default_check` in `.brigada/project.yaml`, then run `brigada project import`. No check leaves that key out, removing it on a rerun if needed. Init never executes the check. The tool scope applies to Claude workers only ([section 8](#8-agents-quota-and-health)).
+   Type the command itself to replace the suggestion, or `-` for no check (work goes straight to review; add a check later). Bare numbers are refused and asked again, up to three attempts. With no candidates, init prints `Found nothing brigada recognises.` and asks `Check command, or - for none [-]:`; Enter picks no check. The worker tools follow the choice: a suggested command's tools, or `Bash(COMMAND:*)` for a typed command (file tools only if the command cannot be represented as a tool scope). No check gives Claude file tools only (`none`), or the Go default scope (`go build`, `go test`, `go vet`, `gofmt`) in a repository with `go.mod`. `--tools` and an agent's own `tools=` still win. The step ends with how to change the check later: edit `default_check` in `.brigada/project.yaml`, then run `brigada project import`. No check leaves that key out, removing it on a rerun if needed. Init never executes the check. The tool scope applies to Claude workers only ([section 8](#8-agents-quota-and-health)).
 
-   On a rerun with an existing `.brigada/project.yaml`, the step is asked again: the current `default_check` is entry 1, marked `current, from .brigada/project.yaml`, followed by the other candidates, and Enter keeps it with its tools. If the project has no check, the last row, `-  no check`, is marked `current` and Enter keeps it even when candidates are found. `--check` answers the step without a question; `--check none` and `--check -` both pick no check. With `--yes` or `--probe` init asks nothing and keeps the project file's choice, else candidate 1, else no check.
+   On a rerun with an existing `.brigada/project.yaml`, the step is asked again: the prompt defaults to the current `default_check`, and Enter keeps it with its tools. That command is marked `current`; when it is also a suggestion it is listed only once. If the project has no check, `no check` is marked `current` and `Check command [-]:` keeps it even when candidates are found. `--check` answers the step without a question; `--check none` and `--check -` both pick no check. With `--yes` or `--probe` init asks nothing and keeps the project file's choice, else the best candidate, else no check.
 
    Steps 1 and 2 each end with a line saying how to change that choice later.
 
@@ -128,9 +128,9 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 | `--probe` | Print the plan; write nothing and start nothing. |
 | `--verbose` | Also print the full contents of new repository setup files. Diffs for existing files are always shown. |
 | `--yes` | Apply the displayed plan without prompting. It does not confirm authentication. `--yes` and `--probe` together are a usage error. |
-| `--agent SPEC` | Repeatable. The same syntax and defaults as `brigada runner --agent` ([section 8](#8-agents-quota-and-health)): `harness=<h>[,model=<m>][,classes=…][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=…]`. Replaces the model and effort menus and Kimi's writing question. Use `classes=review` to keep Kimi reviewing only. |
+| `--agent SPEC` | Repeatable. The same syntax and defaults as `brigada runner --agent` ([section 8](#8-agents-quota-and-health)): `harness=<h>[,model=<m>][,classes=…][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=…]`. Replaces the worker models questions and Kimi's writing question; the foreman model and effort are still chosen in step 1. Use `classes=review` to keep Kimi reviewing only. |
 | `--signed-in HARNESS` | Confirm an installed harness is signed in (repeatable or comma-separated). Local only. |
-| `--foreman HARNESS/MODEL` | Choose a usable Claude or Codex agent as foreman; skips the foreman question. |
+| `--foreman H/M@E` | Choose a signed-in Claude or Codex foreman model and effort, for example `claude/sonnet@high`. `H/M` without `@E` skips the model question but still asks for effort in an interactive run. |
 | `--parallel N` | Tasks at once (1–64); answers step 3 without a question. |
 | `--check CMD` | The default check; answers step 4 without a question. |
 | `--tools SCOPE` | Worker tools in runner `tools=` syntax (`Bash(npm test:*)+Bash(npx jest:*)`, or `none`). An explicit agent `tools=` wins; a `tools.claude/<model>` line in your config file is kept unless you pass `--tools`. |
@@ -143,17 +143,18 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 
 Init still reads answers from standard input, one line per question, and prints each prompt on its own line. Supply answers only for questions that are asked, in this order:
 
-1. For each installed CLI in order (`claude`, `codex`, `kimi`, `opencode`): its unconfirmed sign-in or use answer, then its model choice if you agreed to use it, then its effort choice when offered. After Kimi's model, answer whether it may write code too.
-2. The foreman choice, if both Claude and Codex are usable and `--foreman` was not supplied.
-3. Tasks at once, if `--parallel` was not given.
-4. The check, if `--check` was not given.
-5. The final confirmation.
+1. Any unconfirmed Claude or Codex sign-in answers, before step 1.
+2. The foreman model (a number or `harness/model`), then its effort when offered. `--foreman H/M@E` supplies both; without `@E`, effort is still asked. A single usable model needs no model answer.
+3. Workers, in CLI order: yes or no to using Claude's and Codex's models; Kimi's use answer when unconfirmed, then whether it may write code; opencode's use answer when unconfirmed, then its comma-separated model picks.
+4. Tasks at once, if `--parallel` was not given.
+5. The check command, if `--check` was not given.
+6. The final confirmation.
 
-Enter picks model entry 1 for Claude, Codex and Kimi. Opencode defaults to `-`, so Enter leaves it out. Claude, Codex and opencode show `-` to skip; skip Kimi with no at `Use kimi?`. With `--agent`, there are no model or effort menus or Kimi writing question; sign-in or use questions may still be asked.
+On a first run, Enter picks the first foreman model and its default effort, uses all offered Claude and Codex models, leaves Kimi out at `Use kimi?`, and keeps Kimi reviewing only at its writing question. Opencode defaults to `-`, so Enter leaves it out. With `--agent`, the worker models questions and Kimi writing question are skipped; the foreman questions and any unconfirmed sign-in or use questions may still be asked.
 
 With `--yes` or `--probe` init asks nothing, so the agents must come from `--agent`, sign-in from the status command or `--signed-in`, tasks at once from the saved choice or `--parallel`, and the check and tools from the project file, the first check candidate, or `--check` and `--tools`. If a question is needed and input is at end of file, init fails and names the flag that supplies the answer.
 
-The final prompt says what will happen, for example `Write 4 files and start the runner? [y/N]`. Answering no exits 1 and starts nothing. Declining one harness's sign-in only skips that harness.
+The final prompt says what will happen, for example `Write 4 files and start the runner? [y/N]:`. Answering no exits 1 and starts nothing. Declining one harness's sign-in only skips that harness.
 
 A probe without prompts or writes:
 
@@ -165,7 +166,7 @@ If init fails after writing `project.yaml`, it says `partial init` and names the
 
 ### Changing your setup later
 
-Run `brigada init` again to change the foreman, its effort or the agents. Its questions default to the saved choices: the saved foreman and its effort (marked `current`), whether each CLI had agents, whether Kimi may write code and which OpenCode models were picked. The tasks-at-once step defaults to the saved limit. The check step lists the existing `.brigada/project.yaml` check first, and Enter keeps it. Confirm the plan to apply changes. If the agents or task limit changed, init stops the detached runner and starts it with the new choices.
+Run `brigada init` again to change the foreman, its effort or the agents. Its questions default to the saved choices: the saved foreman and its effort (marked `current`), whether each CLI had agents, whether Kimi may write code and which OpenCode models were picked. The tasks-at-once step defaults to the saved limit. The check prompt defaults to the existing `.brigada/project.yaml` check, and Enter keeps it. Confirm the plan to apply changes. If the agents or task limit changed, init stops the detached runner and starts it with the new choices.
 
 To change only the foreman, use `brigada project foreman --harness H --model M [--effort E]`. To change the check, edit `.brigada/project.yaml`, then run `brigada project import`.
 
@@ -208,7 +209,7 @@ Remote `brigada/task-*` branches and `brigada/plans` are left alone. Remove list
 The manual equivalents of what init applies:
 
 ```sh
-brigada project foreman --harness claude --model sonnet
+brigada project foreman --harness claude --model sonnet --effort medium
 brigada project import               # if you wrote .brigada/project.yaml
 brigada runner --agent harness=claude,model=sonnet --agent harness=codex,model=gpt-5
 ```

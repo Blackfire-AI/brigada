@@ -315,7 +315,7 @@ func TestInitNonTerminalPrompts(t *testing.T) {
 		"    Use kimi? [y/N]:",
 		"    Let kimi write code too, not only review? [y/N]:",
 		"    Pick numbers (1,3) or -, or type provider/model [-]:",
-		"Write 5 files and start the runner? [y/N]",
+		"Write 5 files and start the runner? [y/N]:",
 	}
 	if !strings.Contains(out, "\nSigned in: opencode (2 providers, opencode providers list).\nclaude: init can't check sign-in.\ncodex: init can't check sign-in.\nkimi: init can't check sign-in.\n\n") {
 		t.Errorf("expected the signed-in line and one line per CLI that cannot be checked:\n%s", out)
@@ -479,13 +479,13 @@ func TestInitQuestionsBeforePlan(t *testing.T) {
 	if strings.Contains(out, "Use claude's models") || !strings.Contains(out, "Foreman: codex/CLI default (the only model that can plan)") {
 		t.Fatalf("offered claude after sign-in was declined:\n%s", out)
 	}
-	if !strings.Contains(out, "Step 4 of 4: how brigada tests the work\n") || !strings.Contains(out, "\n  Found in this repo: nothing brigada recognises.\n     -  no check  work goes straight to review; add one later  default\n  Type a command, or - for no check [-]:\n") || strings.Contains(out, "Check command [") {
+	if !strings.Contains(out, "Step 4 of 4: the check\n") || !strings.Contains(out, "\n  Found nothing brigada recognises.\n  Check command, or - for none [-]:\n") || strings.Contains(out, "Check command [") {
 		t.Fatalf("check without a candidate must default to no check:\n%s", out)
 	}
 	if !strings.Contains(out, "  Check: true (") || strings.Contains(out, "Worker tools") {
 		t.Fatalf("typed check must set its own worker tools:\n%s", out)
 	}
-	lastQuestion := strings.Index(out, "  Type a command, or - for no check [-]:")
+	lastQuestion := strings.Index(out, "  Check command, or - for none [-]:")
 	for _, line := range []string{"\nPlan\n", "    codex     CLI default", "  Reviews:", "  Foreman: codex/CLI default\n", "  Check:", "  In the background:"} {
 		if pos := strings.Index(out, line); lastQuestion < 0 || pos <= lastQuestion {
 			t.Errorf("plan line %q preceded the last setup question:\n%s", line, out)
@@ -520,12 +520,12 @@ func TestInitApplyPrompts(t *testing.T) {
 		name, prompt             string
 		exists, running, differs bool
 	}{
-		{"write and start", "Write 1 file and start the runner? [y/N]", false, false, false},
-		{"write", "Write 1 file? [y/N]", false, true, false},
-		{"start", "Start the runner? [y/N]", true, false, false},
-		{"register", "Register the project? [y/N]", true, true, false},
-		{"restart", "Write 1 file and restart the runner with the new agents? [y/N]", false, true, true},
-		{"restart only", "Write 0 files and restart the runner with the new agents? [y/N]", true, true, true},
+		{"write and start", "Write 1 file and start the runner? [y/N]:", false, false, false},
+		{"write", "Write 1 file? [y/N]:", false, true, false},
+		{"start", "Start the runner? [y/N]:", true, false, false},
+		{"register", "Register the project? [y/N]:", true, true, false},
+		{"restart", "Write 1 file and restart the runner with the new agents? [y/N]:", false, true, true},
+		{"restart only", "Write 0 files and restart the runner with the new agents? [y/N]:", true, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			write := importRepo(t)
@@ -643,16 +643,16 @@ func TestInitBuildSuggestionOrder(t *testing.T) {
 	}
 }
 
-// TestInitSuggestedCheckQuestion keeps its purpose: the check is asked after
-// the foreman menu, names where each suggestion came from, Enter accepts the
-// first and a typed command replaces it. Changed: the suggestion is now menu
-// entry 1 ("Found in this repo:" with a "Pick 1 or -, or type a command [1]:"
-// prompt, not "Check command [x]:"), and the worker tools follow the choice:
-// the candidate's own, or Bash(<typed command>:*) for a typed one.
+// The check follows the foreman and workers, names its source files, defaults
+// to the best suggestion on Enter, and accepts a replacement command. Worker
+// tools follow the choice: the candidate's own or a scope for the typed command.
 func TestInitSuggestedCheckQuestion(t *testing.T) {
 	for _, tc := range []struct {
 		name, source, body, answer, check, tools string
 	}{
+		{"make Enter", "Makefile", "check: test\n", "", "make check", "Bash(make check:*)"},
+		{"GNUmakefile Enter", "GNUmakefile", "check: test\n", "", "make check", "Bash(make check:*)"},
+		{"Justfile Enter", "Justfile", "check: test\n", "", "just check", "Bash(just check:*)"},
 		{"go Enter", "go.mod", "module x", "", "go test ./...", "Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*)"},
 		{"npm Enter", "package.json", `{"scripts":{"test":"exit 99"}}`, "", "npm test", "Bash(npm test:*)"},
 		{"cargo Enter", "Cargo.toml", "[package]", "", "cargo test", "Bash(cargo test:*)"},
@@ -660,7 +660,7 @@ func TestInitSuggestedCheckQuestion(t *testing.T) {
 		{"poetry Enter", "poetry.lock", "", "", "poetry run pytest", "Bash(poetry run pytest:*)"},
 		{"pyproject Enter", "pyproject.toml", "[project]", "", "python -m pytest", "Bash(python -m pytest:*)"},
 		{"pytest Enter", "pytest.ini", "[pytest]", "", "python -m pytest", "Bash(python -m pytest:*)"},
-		{"pick 1", "uv.lock", "", "1", "uv run pytest", "Bash(uv run pytest:*)"},
+		{"typed suggestion", "uv.lock", "", "uv run pytest", "uv run pytest", "Bash(uv run pytest:*)"},
 		{"typed replacement", "uv.lock", "", "uv run pytest -q", "uv run pytest -q", "Bash(uv run pytest -q:*)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -677,9 +677,9 @@ func TestInitSuggestedCheckQuestion(t *testing.T) {
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
-			prompt := "  Found in this repo:\n     1  " + candidates[0].Command + "  " + candidates[0].Note + "  default\n     -  no check" + strings.Repeat(" ", len(candidates[0].Command)-len("no check")+2) + "work goes straight to review; add one later\n  Pick 1 or -, or type a command [1]:\n"
+			prompt := "  Found " + tc.source + ", so the suggestion is:\n    " + candidates[0].Command + "  " + candidates[0].Note + "\n  Check command [" + candidates[0].Command + "]:\n"
 			question := strings.Index(out, prompt)
-			if question <= strings.Index(out, "  Pick 1-2 [1]:") || question >= strings.Index(out, "\nPlan\n") || strings.Count(out, prompt) != 1 {
+			if question <= strings.Index(out, "Step 2 of 4: workers") || question >= strings.Index(out, "\nPlan\n") || strings.Count(out, prompt) != 1 {
 				t.Fatalf("check question missing or out of order:\n%s", out)
 			}
 			for _, want := range []string{
@@ -760,26 +760,20 @@ func TestInitCheckStepTranscript(t *testing.T) {
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
-	want := `Step 4 of 4: how brigada tests the work
-  When an agent finishes a task, brigada runs one command in that task's
-  own copy of the repo (never in your working copy):
-    passes (exit 0)  the work goes on to review by another model family
-    fails            the work goes back to the agent, with the output
-  Use the command you run yourself to be sure nothing broke: tests,
-  lint, type checks. Claude workers may run it too before handing in.
+	want := `Step 4 of 4: the check
+  A command that must succeed (exit 0) before a task's work is accepted.
 
-  Found in this repo:
-     1  make check     Makefile: lint format-check type test rig-spec  default
-     2  make test      Makefile: uv run pytest -q
-     3  uv run pytest  pytest, from uv.lock
-     -  no check       work goes straight to review; add one later
-  Pick 1-3 or -, or type a command [1]:
+  Found Makefile, uv.lock, so the suggestions are:
+    make check     Makefile: lint format-check type test rig-spec
+    make test      Makefile: uv run pytest -q
+    uv run pytest  pytest, from uv.lock
+  Check command [make check]:
 
   -> change later: edit default_check in .brigada/project.yaml, then run
      brigada project import
 `
 	if !strings.Contains(out, want) {
-		t.Fatalf("step 3 transcript differs from the approved one:\n%s", out)
+		t.Fatalf("step 4 transcript differs from the approved one:\n%s", out)
 	}
 	for _, want := range []string{
 		"\n  -> change later: brigada project foreman --harness H --model M --effort E, or\n     run brigada init again\n\nStep 2 of 4: workers\n  Set by your --agent flags.\n\nStep 3 of 4:",
@@ -788,7 +782,7 @@ func TestInitCheckStepTranscript(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
-	// Every line before the Plan stays under 80 columns, notes truncated.
+	// Every line before the Plan stays under 80 columns, with long notes truncated.
 	before, _, _ := strings.Cut(out, "\nPlan\n")
 	for _, line := range strings.Split(before, "\n") {
 		if n := utf8.RuneCountInString(line); n >= 80 {
@@ -808,7 +802,7 @@ func TestInitCheckStepLongNoteStaysNarrow(t *testing.T) {
 	}
 	fakeInitPATH(t, "claude", "codex")
 	code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\n\n\nn\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring")
-	if code != 1 || errOut != "" || !strings.Contains(out, "     1  make check  Makefile: a-very-long-prerequisite") || !strings.Contains(out, "…  default\n") {
+	if code != 1 || errOut != "" || !strings.Contains(out, "    make check  Makefile: a-very-long-prerequisite") || !strings.Contains(out, "…\n") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
 	before, _, _ := strings.Cut(out, "\nPlan\n")
@@ -824,9 +818,9 @@ func TestInitCheckStepAnswers(t *testing.T) {
 		name, answer, check, tools string
 	}{
 		{"Enter picks make check", "", "make check", "make check"},
-		{"1 picks make check", "1", "make check", "make check"},
-		{"2 picks make test", "2", "make test", "make test"},
-		{"3 picks uv run pytest", "3", "uv run pytest", "uv run pytest"},
+		{"typed make check", "make check", "make check", "make check"},
+		{"typed make test", "make test", "make test", "make test"},
+		{"typed uv run pytest", "uv run pytest", "uv run pytest", "uv run pytest"},
 		{"typed command sets its tools", "make lint", "make lint", "make lint"},
 		{"whitespace around a typed command is dropped", "  make lint  ", "make lint", "make lint"},
 	} {
@@ -850,11 +844,10 @@ func TestInitCheckStepAnswers(t *testing.T) {
 }
 
 func TestInitCheckStepAsksAgain(t *testing.T) {
-	// A number outside the menu is not a command: it is asked again, and
-	// Enter then takes entry 1.
+	// A bare number is not a command: ask again, then Enter takes the best suggestion.
 	code, out, errOut := initCheckStep(t, "9\n\n", "")
-	if code != 1 || errOut != "" || strings.Count(out, "  Pick 1-3 or -, or type a command [1]:\n") != 2 ||
-		!strings.Contains(out, "  pick 1-3 or - or type a command; try again.\n") || !strings.Contains(out, "  Check: make check (") {
+	if code != 1 || errOut != "" || strings.Count(out, "  Check command [make check]:\n") != 2 ||
+		!strings.Contains(out, initCheckTypedRetry) || !strings.Contains(out, "  Check: make check (") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
 }
@@ -875,8 +868,8 @@ func TestInitCheckStepNoCandidates(t *testing.T) {
 			importRepo(t)
 			fakeInitPATH(t, "claude", "codex")
 			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\n\n"+tc.answer+"\nn\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring", "--verbose")
-			prompt := "  Type a command, or - for no check [-]:\n"
-			if !strings.Contains(out, "\n  Found in this repo: nothing brigada recognises.\n     -  no check  work goes straight to review; add one later  default\n"+prompt) || strings.Count(out, prompt) != tc.asked {
+			prompt := "  Check command, or - for none [-]:\n"
+			if !strings.Contains(out, "\n  Found nothing brigada recognises.\n"+prompt) || strings.Count(out, prompt) != tc.asked {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
 			if tc.ok {
@@ -906,15 +899,15 @@ func TestInitCheckStepNoCandidates(t *testing.T) {
 
 func TestInitRerunShowsCurrentCheckFirst(t *testing.T) {
 	// A rerun with an existing project.yaml asks the step: the current check
-	// is entry 1, the other candidates follow, Enter keeps it and its tools.
+	// is the prompt default; Enter keeps it and its tools.
 	existing := "default_check: custom check\nworker_tools: none\n"
 	code, out, errOut := initCheckStep(t, "", existing)
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
 	for _, want := range []string{
-		"     1  custom check   from .brigada/project.yaml  current\n     2  make check     Makefile: lint",
-		"     4  uv run pytest  pytest, from uv.lock\n     -  no check       work goes straight to review; add one later\n  Pick 1-4 or -, or type a command [1]:\n",
+		"    custom check  from .brigada/project.yaml  current\n  Found Makefile, uv.lock, so the suggestions are:\n    make check     Makefile: lint",
+		"    uv run pytest  pytest, from uv.lock\n  Check command [custom check]:\n",
 		"  Check: custom check (",
 		"    claude    edit files; no commands\n",
 	} {
@@ -922,15 +915,15 @@ func TestInitRerunShowsCurrentCheckFirst(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
-	// Picking another entry moves the tools with it.
-	code, out, errOut = initCheckStep(t, "2", existing)
+	// Typing another suggestion moves the tools with it.
+	code, out, errOut = initCheckStep(t, "make check", existing)
 	flat := strings.Join(strings.Fields(out), " ")
 	if code != 1 || errOut != "" || !strings.Contains(flat, "Check: make check (") || !strings.Contains(flat, "claude edit files; run only: make check codex") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
 	// A current check that is also a candidate is listed once, as current.
 	_, out, _ = initCheckStep(t, "", "default_check: make check\nworker_tools: Bash(make check:*)\n")
-	if strings.Count(out, "make check  ") != 1 || !strings.Contains(out, "     1  make check     from .brigada/project.yaml  current\n     2  make test ") {
+	if strings.Count(out, "make check  ") != 1 || !strings.Contains(out, "    make check     Makefile: lint format-check type test rig-spec  current\n    make test ") {
 		t.Fatalf("current check not deduplicated:\n%s", out)
 	}
 }
@@ -1184,7 +1177,7 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 	// The foreman is the new --agent's opus (the saved one, sonnet, is not).
 	code, out, err = initFixedParallel(t, state, "2\n\n\nn\n", interactive...)
 	if code != 1 || err != "" || !strings.Contains(out,
-		"Write 0 files and restart the runner with the new agents? [y/N]") {
+		"Write 0 files and restart the runner with the new agents? [y/N]:") {
 		t.Fatalf("restart prompt: %d\n%s\n%s", code, out, err)
 	}
 	assertInitSavedAgents(t, state, rec.Specs)
@@ -1204,7 +1197,7 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 	// offers every model of the CLIs it used: that differs from the one model
 	// each --agent named, so declining the restart keeps the runner.
 	code, out, err = initFixedParallel(t, state, "unknown\n\n\n\n\n\nn\n", "--signed-in", "claude,codex", "--no-wiring")
-	if code != 1 || err != "" || strings.Count(out, "    Pick 1-4, or type harness/model [2]:") != 2 || !strings.Contains(out, "restart the runner with the new agents? [y/N]") {
+	if code != 1 || err != "" || strings.Count(out, "    Pick 1-4, or type harness/model [2]:") != 2 || !strings.Contains(out, "restart the runner with the new agents? [y/N]:") {
 		t.Fatalf("interactive retry: %d\n%s\n%s", code, out, err)
 	}
 	afterDeclined, live, e := runnerstate.Running(filepath.Join(state, "runner"))
@@ -1467,19 +1460,15 @@ func TestInitProbeAndRefusalsWithExistingWiring(t *testing.T) {
 	}
 }
 
-// TestInitInteractiveTranscript replaces the probe layout assertions with a
-// golden of all four interactive steps, the complete Plan and the refusal.
-// Plain wording stays unchanged apart from tags moving to row ends, the
-// merged change-later lines, and the Plan's layout: role phrases ("code +
-// review", "review only"), no "(default)" after a model, file rows that start
-// with their state, no final "To change later:" block, and a dim line under
-// "In the background:".
+// The goldens cover all four steps, the complete Plan, and a declined apply.
+// Semantic assertions below keep the approved flow and table layout explicit.
 func TestInitInteractiveTranscript(t *testing.T) {
 	want, err := initTranscriptGoldens.ReadFile("testdata/init-interactive.golden")
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := initInteractiveTranscript(t, false)
+	assertInitTargetTranscript(t, out)
 	if out != string(want) {
 		t.Fatalf("interactive transcript:\n%s\nwant:\n%s", out, want)
 	}
@@ -1505,6 +1494,7 @@ func TestInitStyledInteractiveTranscript(t *testing.T) {
 			}
 			out := initInteractiveTranscript(t, false, caps)
 			assertInitMenuPointers(t, out, tc.utf8)
+			assertInitTargetTranscript(t, out)
 			if out != string(want) {
 				t.Fatalf("styled transcript differs:\n%q\nwant:\n%q", out, want)
 			}
@@ -1518,7 +1508,8 @@ func TestInitStyledInteractiveTranscript(t *testing.T) {
 func TestInitStyledLongModels(t *testing.T) {
 	for _, width := range []int{80, 100} {
 		t.Run(strconv.Itoa(width), func(t *testing.T) {
-			initInteractiveTranscript(t, true, logo.Caps{TTY: true, Color: logo.TrueColor, UTF8: true, Width: width})
+			out := initInteractiveTranscript(t, true, logo.Caps{TTY: true, Color: logo.TrueColor, UTF8: true, Width: width})
+			assertInitAgentTable(t, out, true)
 		})
 	}
 }
@@ -1553,31 +1544,116 @@ func TestInitInteractiveLongModels(t *testing.T) {
 	if !strings.Contains(out, "  Foreman: codex/gpt-6.1-sol, effort low\n") {
 		t.Fatalf("foreman did not use resolved default:\n%s", out)
 	}
-	plan := strings.Split(strings.Split(out, "foreman picks the tier per task):\n")[1], "  Reviews:")[0]
-	families := []string{"Anthropic", "OpenAI", "Moonshot", "Zhipu (GLM)"}
-	column := -1
-	rows := 0
-	for _, line := range strings.Split(plan, "\n") {
-		for _, family := range families {
+	assertInitAgentTable(t, out, true)
+}
+
+// Check the table separately from the byte-equal goldens: every fixture model
+// occurs exactly once, with its family, tier and role in aligned columns.
+func assertInitAgentTable(t *testing.T, out string, longModels bool) {
+	t.Helper()
+	plain := ansi.ReplaceAllString(out, "")
+	_, table, ok := strings.Cut(plain, "foreman picks the tier per task):\n")
+	if !ok {
+		t.Fatal("missing agents table")
+	}
+	table, _, ok = strings.Cut(table, "  Reviews:")
+	if !ok {
+		t.Fatal("missing review summary after agents")
+	}
+	kimiRole, kimiFastTier := "reviews only", "standard"
+	opencodeModel, opencodeTier := "zai-coding-plan/glm-5.3", "standard"
+	if longModels {
+		kimiRole, kimiFastTier = "writes code, reviews", "light"
+		opencodeModel, opencodeTier = opencodeModel+"-highspeed", "light"
+	}
+	want := []string{
+		"claude sonnet Anthropic standard writes code, reviews",
+		"claude opus Anthropic heavy writes code, reviews",
+		"claude haiku Anthropic light writes code, reviews",
+		"claude claude-sonnet-4[1m] Anthropic standard writes code, reviews",
+		"claude claude-opus-4 Anthropic heavy writes code, reviews",
+		"codex gpt-6.1-sol OpenAI standard writes code, reviews",
+		"codex gpt-5 OpenAI standard writes code, reviews",
+		"codex gpt-5.4-mini OpenAI light writes code, reviews",
+		"kimi kimi-code/k3 Moonshot standard " + kimiRole,
+		"kimi kimi-code/k3-256k Moonshot standard " + kimiRole,
+		"kimi kimi-code/kimi-for-coding Moonshot standard " + kimiRole,
+		"kimi kimi-code/kimi-for-coding-highspeed Moonshot " + kimiFastTier + " " + kimiRole,
+		"opencode " + opencodeModel + " Zhipu (GLM) " + opencodeTier + " writes code, reviews",
+	}
+	var rows []string
+	familyColumn, tierColumn, families := -1, -1, 0
+	rowStart := regexp.MustCompile(`^    (claude|codex|kimi|opencode)\s+`)
+	tierCell := regexp.MustCompile(`\b(heavy|standard|light)\b`)
+	for _, line := range strings.Split(table, "\n") {
+		if rowStart.MatchString(line) {
+			rows = append(rows, "")
+		}
+		if len(rows) > 0 {
+			rows[len(rows)-1] = strings.TrimSpace(rows[len(rows)-1] + " " + strings.Join(strings.Fields(line), " "))
+		}
+		for _, family := range []string{"Anthropic", "OpenAI", "Moonshot", "Zhipu (GLM)"} {
 			if offset := strings.Index(line, family); offset >= 0 {
-				if column >= 0 && offset != column {
-					t.Errorf("family column = %d, want %d: %q", offset, column, line)
+				column := term.VisibleWidth(line[:offset])
+				if familyColumn >= 0 && column != familyColumn {
+					t.Errorf("family column = %d, want %d: %q", column, familyColumn, line)
 				}
-				column = offset
-				rows++
+				familyColumn = column
+				families++
+				cell := tierCell.FindStringIndex(line[offset+len(family):])
+				if cell == nil {
+					t.Errorf("family row has no tier: %q", line)
+					continue
+				}
+				column = term.VisibleWidth(line[:offset+len(family)+cell[0]])
+				if tierColumn >= 0 && column != tierColumn {
+					t.Errorf("tier column = %d, want %d: %q", column, tierColumn, line)
+				}
+				tierColumn = column
 			}
 		}
 	}
-	// Every model of claude (5), codex (3) and kimi (4), and the one OpenCode pick.
-	if rows != 13 || !strings.Contains(plan, "kimi-code/kimi-for-coding") || !strings.Contains(plan, "zai-coding-plan/glm-5.3-highspeed") {
-		t.Fatalf("missing agent rows:\n%s", plan)
+	if !slices.Equal(rows, want) || families != len(want) {
+		t.Errorf("agent table rows:\n%s\nwant:\n%s", strings.Join(rows, "\n"), strings.Join(want, "\n"))
 	}
-	flat := strings.Join(strings.Fields(plan), " ")
-	for _, want := range []string{"Anthropic heavy writes code, reviews", "OpenAI light writes code, reviews", "Moonshot light writes code, reviews"} {
-		if !strings.Contains(flat, want) {
-			t.Fatalf("missing %q:\n%s", want, plan)
+}
+
+func assertInitTargetTranscript(t *testing.T, out string) {
+	t.Helper()
+	plain := ansi.ReplaceAllString(out, "")
+	// Styled headings use a separator in place of the plain colon.
+	plain = strings.ReplaceAll(plain, " · ", ": ")
+	plain = strings.ReplaceAll(plain, " - ", ": ")
+	ordered := []string{
+		"Four short steps follow.", "Signed in:", "Step 1 of 4", "Which model should the foreman run?",
+		"How hard should the foreman think?", "Step 2 of 4", "Use claude's models for tasks",
+		"Use codex's models for tasks", "Use kimi?", "kimi has no sandbox", "Let kimi write code too",
+		"Which models should opencode run?", "Pick numbers (1,3)", "Step 3 of 4", "Tasks at once [4]:",
+		"Step 4 of 4", "A command that must succeed (exit 0) before a task's work is accepted.",
+		"Found uv.lock, so the suggestion is:", "Check command [uv run pytest]:", "Plan\n",
+		"Foreman: claude/sonnet, effort medium", "Agents (every model", "Reviews:",
+		"At once: 4 tasks on this machine; per account: claude 3, codex 2, kimi 1,",
+		"Check:", "What workers may do:", "Files in this repository", "Codex, optional:",
+		"In the background:", "Write 4 files and start the runner? [y/N]:",
+	}
+	position := 0
+	for _, text := range ordered {
+		next := strings.Index(plain[position:], text)
+		if next < 0 {
+			t.Fatalf("missing or out-of-order %q:\n%s", text, plain)
+		}
+		position += next + len(text)
+	}
+	beforeApply, _, _ := strings.Cut(plain, "Write 4 files and start the runner?")
+	if strings.Contains(strings.ToLower(beforeApply), "ready") {
+		t.Error("claimed ready before apply")
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if term.VisibleWidth(line) >= 80 {
+			t.Errorf("line must stay under 80 columns: %q", line)
 		}
 	}
+	assertInitAgentTable(t, out, false)
 }
 
 func TestInitAgentsVeryLongModel(t *testing.T) {
@@ -1686,8 +1762,14 @@ opencode/deepseek-v3
 	// model, uses kimi review-only, picks OpenCode model 1 and declines only
 	// the final apply. The long-model variant types Codex as the foreman with
 	// its second effort, and lets Kimi write code too.
+	// The approved transcript keeps Kimi's fixture models at standard tier.
+	// Exercise the supported override for highspeed; the long-name variant
+	// retains its name-based light tier.
+	if !longModels {
+		writeInitModelFixture(t, lifecycle.DefaultConfigPath(), "tier.kimi/kimi-code/kimi-for-coding-highspeed = standard\n")
+	}
 	state := filepath.Join(os.Getenv("HOME"), ".local", "state", "brigada")
-	input := "\n\n\n\ny\nN\n1\n\n\nn\n"
+	input := "\n\n\n\ny\n\n1\n\n\nn\n"
 	if longModels {
 		input = "codex/gpt-6.1-sol\n2\n\n\ny\nY\n1\n\n\nn\n"
 	}

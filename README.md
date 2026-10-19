@@ -43,11 +43,12 @@ Sign in to each CLI with its own login flow, then run this inside your repositor
 brigada init
 ```
 
-Init walks you through three steps:
+Init walks you through four steps:
 
-1. Pick models from menus drawn from each CLI and its config. Init checks or asks about sign-in. Reviews need two model families. Kimi reviews only unless you let it write code.
-2. Pick the foreman from the usable Claude and Codex agents.
-3. Confirm the check suggested by your build files, or supply your own. Init also takes worker tools from those files. It never runs the check.
+1. Pick the foreman model from the signed-in Claude and Codex CLIs, then how hard it should think. `--foreman claude/sonnet@medium` supplies both.
+2. Choose which CLIs' models may run tasks. Opencode offers a menu with multiple picks. Reviews need two model families; Kimi reviews only unless you let it write code.
+3. Set tasks at once on this machine (or pass `--parallel N`). Enter keeps the saved limit, else half the cores, at least 1 and at most 4.
+4. Confirm the check suggested by your build files, type your own command, or enter `-` for none. Init takes worker tools from that choice and never runs the check.
 
 Init then lists the agents, permissions and files, and shows a diff for every existing file it would change (`--verbose` also shows the contents of new files). Nothing is written or started until you confirm.
 

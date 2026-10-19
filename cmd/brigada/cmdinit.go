@@ -733,7 +733,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		entries := initCheckEntries(candidates, projectCheck, projectTools, exists)
 		if !checkProvided {
 			if canAsk {
-				command, exhausted, err := askInitCheck(stdout, ask, entries)
+				command, exhausted, err := askInitCheck(stdout, ask, entries, candidates)
 				if err != nil {
 					return fail(stderr, err)
 				}
@@ -855,11 +855,11 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				"Write %d %s and restart the runner with the new agents?",
 				files, noun)
 		}
-		apply, err := confirm(prompt, "--yes to apply the displayed plan")
+		answer, err := ask(prompt+" [y/N]: ", "--yes to apply the displayed plan")
 		if err != nil {
 			return fail(stderr, err)
 		}
-		if !apply {
+		if !strings.EqualFold(answer, "y") && !strings.EqualFold(answer, "yes") {
 			fmt.Fprintln(stdout, "Declined; nothing written or started.")
 			return 1
 		}

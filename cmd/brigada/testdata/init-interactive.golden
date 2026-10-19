@@ -79,18 +79,12 @@ Step 3 of 4: tasks at once
   number); change any of them later with brigada config.
     Tasks at once [4]:
 
-Step 4 of 4: how brigada tests the work
-  When an agent finishes a task, brigada runs one command in that task's
-  own copy of the repo (never in your working copy):
-    passes (exit 0)  the work goes on to review by another model family
-    fails            the work goes back to the agent, with the output
-  Use the command you run yourself to be sure nothing broke: tests,
-  lint, type checks. Claude workers may run it too before handing in.
+Step 4 of 4: the check
+  A command that must succeed (exit 0) before a task's work is accepted.
 
-  Found in this repo:
-     1  uv run pytest  pytest, from uv.lock  default
-     -  no check       work goes straight to review; add one later
-  Pick 1 or -, or type a command [1]:
+  Found uv.lock, so the suggestion is:
+    uv run pytest  pytest, from uv.lock
+  Check command [uv run pytest]:
 
   -> change later: edit default_check in .brigada/project.yaml, then run
      brigada project import
@@ -121,7 +115,7 @@ Plan
     kimi      kimi-code/kimi-for-coding
               Moonshot     standard  reviews only
     kimi      kimi-code/kimi-for-coding-highspeed
-              Moonshot     light     reviews only
+              Moonshot     standard  reviews only
     opencode  zai-coding-plan/glm-5.3
               Zhipu (GLM)  standard  writes code, reviews
   Reviews: 4 model families, so every task can get a reviewer of another one.
@@ -150,5 +144,5 @@ Plan
     ~/.local/state/brigada/runner.log; stop it with: brigada stop). The engine
     starts when needed and stops after 30 idle minutes.
 
-Write 4 files and start the runner? [y/N]
+Write 4 files and start the runner? [y/N]:
 Declined; nothing written or started.
