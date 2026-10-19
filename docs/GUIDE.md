@@ -669,8 +669,8 @@ Each agent serves one tier, derived from its model name:
 
 | Tier | Model-name patterns |
 |---|---|
-| `heavy` | `opus` segment prefix, or whole `pro`, `max`, `ultra` segments (`-pro`, `-max`, `-ultra`). |
-| `light` | `haiku` segment prefix, or whole `mini`, `nano`, `flash`, `lite`, `highspeed`, `free` segments (`-mini`, `-nano`, `-flash`, `-lite`, `-highspeed`, `-free`). |
+| `heavy` | `opus`, `fable` segment prefixes, or whole `pro`, `max`, `ultra`, `astra` segments (`-pro`, `-max`, `-ultra`, `-astra`). |
+| `light` | `haiku` segment prefix, or whole `mini`, `nano`, `flash`, `lite`, `highspeed`, `free`, `luna` segments (`-mini`, `-nano`, `-flash`, `-lite`, `-highspeed`, `-free`, `-luna`). |
 | `standard` | Everything else, including agents configured as `model=default`. |
 
 Segments are separated by hyphens; provider prefixes and context suffixes such as `[1m]` are removed, and matching ignores case. Heavy matches win. `tier.<harness>/<model>` in the config file overrides the tier for every agent of that harness/model. The runner's startup line shows the name-based tier; stats and capacity include the engine's override.

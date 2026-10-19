@@ -55,10 +55,10 @@ var modelTierPatterns = []struct {
 	prefixes []string
 	segments []string
 }{
-	// Heavy: Opus variants and explicit high-capability model segments.
-	{TierHeavy, []string{"opus"}, []string{"pro", "max", "ultra"}},
+	// Heavy: Opus and Fable variants and explicit high-capability model segments.
+	{TierHeavy, []string{"opus", "fable"}, []string{"pro", "max", "ultra", "astra"}},
 	// Light: Haiku variants and explicit smaller, faster or free segments.
-	{TierLight, []string{"haiku"}, []string{"mini", "nano", "flash", "lite", "highspeed", "free"}},
+	{TierLight, []string{"haiku"}, []string{"mini", "nano", "flash", "lite", "highspeed", "free", "luna"}},
 }
 
 // ModelTier labels a model by its name. Heavy matches take precedence;
