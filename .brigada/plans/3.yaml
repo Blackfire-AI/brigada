@@ -1,0 +1,34 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 3
+title: "#27 Result blocks with ``` in their text; salvage no-result edits"
+repo: "github.com/Blackfire-AI/brigada"
+state: active
+created: 2026-10-19T16:09:49.394225Z
+updated: 2026-10-19T16:09:49.394225Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps, or from the
+# default branch when base is empty; merge a task after its base. States
+# are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+tasks:
+  - id: 9
+    name: "fence-parse"
+    title: "Parse result and verdict blocks whose text contains ``` (#27)"
+    class: "implement"
+    deps: []
+    base: ""
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 10
+    name: "salvage"
+    title: "Save a no-result run's edits on a salvage branch (#27)"
+    class: "implement"
+    deps: []
+    base: ""
+    state: ready
+    branch: ""
+    rounds: 0
