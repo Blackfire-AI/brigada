@@ -156,6 +156,7 @@ func printInitRow(w io.Writer, prefix, continuation, note, tag string) {
 
 func initAgentChangeLater(sources map[string]initModelSource) string {
 	how := "run brigada init again"
+	var paths []string
 	for _, harness := range []string{"codex", "kimi"} {
 		if !sources[harness].signIn.installed {
 			continue
@@ -165,8 +166,15 @@ func initAgentChangeLater(sources map[string]initModelSource) string {
 			path = kimiConfigPath()
 		}
 		if path != "" {
-			how += "; your " + harness + " default: change it in " + initHomePath(path)
+			paths = append(paths, initHomePath(path))
 		}
+	}
+	if len(paths) > 0 {
+		label := "your own default: "
+		if len(paths) > 1 {
+			label = "your own defaults: "
+		}
+		how += "\n" + label + strings.Join(paths, ", ")
 	}
 	return how
 }
@@ -175,7 +183,11 @@ func initChangeLater(w io.Writer, how string) {
 	out := initPresentation(w)
 	fmt.Fprintln(w)
 	prefix := "  " + out.style.Dim(out.style.Again()+" ")
-	printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), out.style.Dim("change later: "+how))
+	continuation := strings.Repeat(" ", term.VisibleWidth(prefix))
+	for _, line := range strings.Split("change later: "+how, "\n") {
+		printInitWrapped(w, prefix, continuation, out.style.Dim(line))
+		prefix = continuation
+	}
 }
 
 func initCLIStatus(w io.Writer, harness string, probe harnessProbe, confirmed bool) {

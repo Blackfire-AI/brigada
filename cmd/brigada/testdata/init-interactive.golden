@@ -83,9 +83,8 @@ Step 1 of 3: agents
        4  high
     Pick 1-4 [1]:
 
-  -> change later: run brigada init again; your codex default: change it in
-     ~/.codex/config.toml; your kimi default: change it in
-     ~/.kimi-code/config.toml
+  -> change later: run brigada init again
+     your own defaults: ~/.codex/config.toml, ~/.kimi-code/config.toml
 
 Step 2 of 3: the foreman
   The foreman plans the work and decides what happens when a task needs
