@@ -22,7 +22,7 @@ tasks:
     class: "implement"
     deps: []
     base: ""
-    state: reviewing
+    state: done
     branch: "brigada/task-1"
     rounds: 0
   - id: 2
@@ -31,7 +31,7 @@ tasks:
     class: "implement"
     deps: ["agents-md"]
     base: "agents-md"
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 3
@@ -40,7 +40,7 @@ tasks:
     class: "implement"
     deps: ["agents-md"]
     base: "agents-md"
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 4
@@ -50,6 +50,6 @@ tasks:
     deps: ["agents-md"]
     base: "agents-md"
     tier: light
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
