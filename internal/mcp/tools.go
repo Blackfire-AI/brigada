@@ -117,7 +117,7 @@ var tools = []Tool{
 	},
 	{
 		Name:        "plan_amend",
-		Description: "Amend a live plan (active or awaiting approval): add tasks, cancel tasks, and re-point the dependencies of a waiting task. Use it to re-plan when a task fails for good or the user's ask changes: a dependency that will never be done (a task failed or cancelled) leaves its dependents waiting forever unless you re-point them (retarget) to another task or drop the dependency (empty deps). Tasks are named by their name or id (as status shows). Validation is plan_create's: names unique, deps in the plan and never on a cancelled task, no cycle — one refusal rejects the whole amendment. Cancelling stops a task's live jobs. Waiting tasks whose dependencies are all done start in the same call. An added task may push the plan over the project's approval limit: it then waits for the user's approval and nothing new starts. A plan left with only permanently waiting tasks is closed, and its done report names what never ran.",
+		Description: "Amend a live plan (active or awaiting approval): add tasks, cancel tasks, and re-point the dependencies of a waiting task. Use it to re-plan when a task fails for good or the user's ask changes: a dependency that will never be done (a task failed or cancelled) leaves its dependents waiting forever unless you re-point them (retarget) to another task or drop the dependency (empty deps). Tasks are named by their name or id (as status shows). Validation is plan_create's: names unique, deps in the plan and never on a cancelled task, no cycle — one refusal rejects the whole amendment. Use retier to change the tier or effort of a pending, ready or needs_foreman task; a parked task still needs task_restart. Cancelling stops a task's live jobs. Waiting tasks whose dependencies are all done start in the same call. An added task may push the plan over the project's approval limit: it then waits for the user's approval and nothing new starts. A plan left with only permanently waiting tasks is closed, and its done report names what never ran.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -153,6 +153,19 @@ var tools = []Tool{
 					"type":        "array",
 					"items":       map[string]any{"type": []string{"string", "integer"}},
 					"description": "tasks to cancel, by name or id; a done task cannot be cancelled",
+				},
+				"retier": map[string]any{
+					"type":        "array",
+					"description": "waiting or parked tasks whose tier or effort you change: lower a tier brigada bumped, or raise one before a retry",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"task":   map[string]any{"type": []string{"string", "integer"}, "description": "the task, by name or id"},
+							"tier":   map[string]any{"type": "string", "enum": []string{"light", "standard", "heavy"}, "description": "new tier; omitted keeps the current tier"},
+							"effort": map[string]any{"type": "string", "enum": []string{"low", "medium", "high", "max"}, "description": "new effort; omitted keeps the current effort"},
+						},
+						"required": []string{"task"},
+					},
 				},
 				"retarget": map[string]any{
 					"type":        "array",

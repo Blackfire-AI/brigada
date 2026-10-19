@@ -44,10 +44,11 @@ const (
 	evTaskDone               = "task_done"                 // the task is finished (§6.1)
 	evTaskCheckFailed        = "task_check_failed"         // the check failed; a fix round answers it, or the task waits for the foreman (§3)
 	evTaskFixRound           = "task_fix_round"            // a fix round is queued on the author's session (§3)
-	evTaskOutOfRounds        = "task_out_of_rounds"        // the task's rounds are spent; the foreman decides (§3)
+	evTaskOutOfRounds        = "task_out_of_rounds"        // the task's rounds are spent and escalation declined; the foreman decides (§3)
 	evTaskNeedsHelp          = "task_needs_help"           // the worker asked its question; the foreman answers (§3)
 	evTaskDiscoveries        = "task_discoveries"          // a worker's result carried discoveries; they reach the foreman, no wake of their own (§4.2)
 	evTaskAnswered           = "task_answered"             // the foreman answered; the author's session resumes (§3)
+	evTaskTierBumped         = "task_tier_bumped"          // rule escalation; TierAsked is the old tier, TierServed the new tier, Reason the trigger (§8)
 	evTaskRestarted          = "task_restarted"            // a foreman or automatic restart queued a fresh work attempt (§3, §5.6)
 	evTaskFailed             = "task_failed"               // the run failed or said nothing usable; the foreman decides (§3)
 	evReviewChanges          = "review_changes"            // the reviewer wants changes; a fix round answers them (§3, §7)
@@ -130,6 +131,7 @@ type eventPayload struct {
 	Pick       string   `json:"pick,omitempty"`
 	TierAsked  string   `json:"tier_asked,omitempty"`
 	TierServed string   `json:"tier_served,omitempty"`
+	Retiered   []int64  `json:"retiered,omitempty"` // tasks whose tier or effort plan_amend changed
 	PassedOver []int64  `json:"passed_over,omitempty"`
 }
 

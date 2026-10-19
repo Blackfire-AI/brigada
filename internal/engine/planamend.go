@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
 
 // classPlan is the outcome class of the planner itself (§8, §15 phase 5):
@@ -29,13 +31,23 @@ type PlanRetarget struct {
 	Base string
 }
 
+// PlanRetier changes a waiting or parked task's tier or effort. Empty fields
+// preserve their current values; Task accepts a plan task's name or decimal id.
+type PlanRetier struct {
+	Task   string
+	Tier   string
+	Effort string
+}
+
 // PlanAmendment is what the foreman changes in a live plan (§12.2): tasks
 // to add (their Deps name tasks of the plan, old or added), tasks to
-// cancel, and waiting tasks whose dependencies are re-pointed.
+// cancel, waiting tasks whose dependencies are re-pointed, and waiting or
+// parked tasks whose tier or effort is changed.
 type PlanAmendment struct {
 	Add      []PlanTask
 	Cancel   []string
 	Retarget []PlanRetarget
+	Retier   []PlanRetier
 	// SkipApproved says the user themself approved the cancellations of
 	// this amendment: only a user's token can say so, never the foreman's
 	// own. Without it a cancelled task is an abandoned one, and the
@@ -44,7 +56,7 @@ type PlanAmendment struct {
 }
 
 // AmendPlanResult is what AmendPlan did: the plan's state after it, the
-// added tasks, the ids cancelled and re-pointed, and every task the
+// added tasks, the ids cancelled, re-pointed or retiered, and every task the
 // amendment started (a work job queued), added or not. Reasons says why
 // the plan waits for approval, when it does.
 type AmendPlanResult struct {
@@ -53,6 +65,7 @@ type AmendPlanResult struct {
 	Added      []CreatedTask
 	Cancelled  []int64
 	Retargeted []int64
+	Retiered   []int64
 	Started    []CreatedTask
 	Reasons    []string
 }
@@ -61,7 +74,8 @@ type AmendPlanResult struct {
 var ErrPlanNotLive = errors.New("plan is not live")
 
 // AmendPlan is the foreman's plan_amend (§12.2): add tasks, cancel tasks
-// and re-point a waiting task's dependencies, validated whole — names
+// re-point dependencies, and change waiting or parked tasks' tier or effort,
+// validated whole — names
 // unique, deps in the plan and live, no cycle — before anything is
 // written. Cancelling a task stops its live jobs. In the same transaction
 // the waiting state re-evaluates as creation does (a pending task whose
@@ -119,8 +133,8 @@ func (n amendNode) label() string {
 }
 
 func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, now time.Time) (AmendPlanResult, error) {
-	if len(am.Add) == 0 && len(am.Cancel) == 0 && len(am.Retarget) == 0 {
-		return AmendPlanResult{}, fmt.Errorf("nothing to amend: give tasks to add, cancel or retarget")
+	if len(am.Add) == 0 && len(am.Cancel) == 0 && len(am.Retarget) == 0 && len(am.Retier) == 0 {
+		return AmendPlanResult{}, fmt.Errorf("nothing to amend: give tasks to add, cancel, retarget or retier")
 	}
 	var proj int64
 	var state, baseRef string
@@ -261,6 +275,30 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		nodes[i].retargetedBy = true
 		retargeted = append(retargeted, i)
 	}
+	var retiered []int
+	seenRetier := map[int]bool{}
+	for _, rt := range am.Retier {
+		i, err := resolve(rt.Task)
+		if err != nil {
+			return AmendPlanResult{}, fmt.Errorf("retier: %w", err)
+		}
+		switch nodes[i].state {
+		case taskPending, taskReady, taskNeedsForeman:
+		default:
+			return AmendPlanResult{}, fmt.Errorf("retier: %s is %s; only pending, ready or needs_foreman tasks can change tier or effort", nodes[i].label(), nodes[i].state)
+		}
+		if i >= existing || seenRetier[i] {
+			return AmendPlanResult{}, fmt.Errorf("retier: %s is added or retiered twice in this amendment", nodes[i].label())
+		}
+		if err := adapter.ValidateTier(rt.Tier); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), err)
+		}
+		if err := adapter.ValidateTaskEffort(rt.Effort); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), err)
+		}
+		seenRetier[i] = true
+		retiered = append(retiered, i)
+	}
 	// Dependencies resolve after the cancels, against the whole amended
 	// node set, so a task cannot wait on one this amendment cancels.
 	// pickBase resolves a named base, which must be one of the owner's
@@ -353,6 +391,17 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			return AmendPlanResult{}, fmt.Errorf("cancel task %d: %w", nodes[i].id, err)
 		}
 		res.Cancelled = append(res.Cancelled, nodes[i].id)
+	}
+	for k, i := range retiered {
+		rt := am.Retier[k]
+		if _, err := tx.Exec(`UPDATE tasks SET
+			tier = CASE WHEN ? = '' THEN tier ELSE ? END,
+			effective_tier = CASE WHEN ? = '' THEN effective_tier ELSE ? END,
+			effort = CASE WHEN ? = '' THEN effort ELSE ? END, updated_at = ? WHERE id = ?`,
+			rt.Tier, rt.Tier, rt.Tier, rt.Tier, rt.Effort, rt.Effort, nowStr, nodes[i].id); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), err)
+		}
+		res.Retiered = append(res.Retiered, nodes[i].id)
 	}
 	setupRec, err := taskProjectSetupTx(tx, proj)
 	if err != nil {
@@ -463,14 +512,18 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		}
 		change = append(change, fmt.Sprintf("re-pointed %s to wait on %s", nodes[i].label(), strings.Join(to, ", ")))
 	}
+	if len(res.Retiered) > 0 {
+		change = append(change, "retiered "+joinIDs(res.Retiered))
+	}
 	if flipped {
 		change = append(change, "held for approval")
 	}
 	if _, err := appendEventTx(tx, evPlanAmended, proj, 0, 0, eventPayload{
-		Plan:   plan,
-		Count:  int64(len(res.Added) + len(res.Cancelled) + len(res.Retargeted)),
-		Status: newState,
-		Reason: strings.Join(change, "; "),
+		Retiered: res.Retiered,
+		Plan:     plan,
+		Count:    int64(len(res.Added) + len(res.Cancelled) + len(res.Retargeted) + len(res.Retiered)),
+		Status:   newState,
+		Reason:   strings.Join(change, "; "),
 	}, now); err != nil {
 		return AmendPlanResult{}, err
 	}

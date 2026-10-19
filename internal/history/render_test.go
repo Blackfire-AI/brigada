@@ -63,3 +63,10 @@ func TestRenderGolden(t *testing.T) {
 		t.Errorf("the rendering:\n%s\nwant the golden:\n%s", buf.String(), want)
 	}
 }
+
+func TestRenderTierBump(t *testing.T) {
+	it := Item{Type: TypeEvent, Kind: "task_tier_bumped", Payload: []byte(`{"reason":"fix_rounds spent","tier_asked":"light","tier_served":"standard"}`)}
+	if got := summary(it); got != "task tier light -> standard: fix_rounds spent" {
+		t.Errorf("summary = %q", got)
+	}
+}

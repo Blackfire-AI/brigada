@@ -108,6 +108,7 @@ func TestAmendRepointsOffFailedTask(t *testing.T) {
 	e := newEnv(t)
 	res := e.twoStep()
 	build, ship := res.Tasks[0], res.Tasks[1]
+	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE plan_id = ?", res.PlanID)
 	e.complete(e.leaseAny(e.runner1), Completion{Result: `{"status":"failed","summary":"no clone"}`})
 	// The engine parks a failed task at needs_foreman; a task that
 	// failed for good is the same row at failed.
@@ -299,6 +300,7 @@ func TestRestartedThenCancelledIsNotLaundered(t *testing.T) {
 	e := newEnv(t)
 	agent := e.addAgent(e.runner1, "claude", "sonnet", "work")
 	res := e.createPlan([]PlanTask{{Name: "solo", Spec: "do it", Class: "answer"}})
+	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE plan_id = ?", res.PlanID)
 	e.complete(e.leaseAny(e.runner1), Completion{Result: `{"status":"failed","summary":"no clone"}`})
 	if _, err := e.eng.RestartTask(e.ctx, e.project, res.TaskID, "try again"); err != nil {
 		t.Fatalf("restart: %v", err)
@@ -400,6 +402,7 @@ func TestFailedOrCancelledDependencyNamedInDoneReport(t *testing.T) {
 	agent := e.addAgent(e.runner1, "claude", "sonnet", "work")
 	res := e.twoStep()
 	g := e.leaseAny(e.runner1)
+	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE plan_id = ?", res.PlanID)
 	e.complete(g, Completion{Result: `{"status":"failed","summary":"no clone"}`})
 	if got := e.taskState(res.Tasks[0].TaskID); got != taskNeedsForeman {
 		t.Fatalf("build = %q, want parked", got)
@@ -525,6 +528,65 @@ func TestAmendValidatesTaskTierEffort(t *testing.T) {
 		}
 		if e.int("SELECT COUNT(*) FROM tasks") != before || e.int("SELECT version FROM plans WHERE id = ?", res.PlanID) != version || e.taskState(res.Tasks[0].TaskID) == taskCancelled {
 			t.Fatal("invalid amendment partially applied")
+		}
+	}
+}
+
+func TestAmendRetier(t *testing.T) {
+	e := newEnv(t)
+	res := e.twoStep()
+	build, ship := res.Tasks[0].TaskID, res.Tasks[1].TaskID
+	e.exec("UPDATE tasks SET state = 'needs_foreman', tier = 'standard', effective_tier = 'heavy', effort = 'max' WHERE id = ?", build)
+	am := e.amend(res.PlanID, PlanAmendment{Retier: []PlanRetier{{Task: "build", Tier: "light", Effort: "low"}}})
+	if len(am.Retiered) != 1 || am.Retiered[0] != build {
+		t.Fatalf("retiered = %v", am.Retiered)
+	}
+	for col, want := range map[string]string{"tier": "light", "effective_tier": "light", "effort": "low", "state": taskNeedsForeman} {
+		if got := e.str("SELECT "+col+" FROM tasks WHERE id = ?", build); got != want {
+			t.Errorf("%s = %q, want %q", col, got, want)
+		}
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ?", build); n != 1 {
+		t.Errorf("retier restarted the task: %d jobs", n)
+	}
+	if p, ok := e.eventPayloadOf(evPlanAmended); !ok || len(p.Retiered) != 1 || p.Retiered[0] != build {
+		t.Errorf("event = %+v", p)
+	}
+	// By id, effort alone preserves the foreman's and effective tiers.
+	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", build)
+	e.amend(res.PlanID, PlanAmendment{Retier: []PlanRetier{{Task: fmt.Sprint(build), Effort: "medium"}, {Task: "ship", Tier: "heavy"}}})
+	if got := e.str("SELECT tier || '|' || effective_tier || '|' || effort FROM tasks WHERE id = ?", build); got != "light|heavy|medium" {
+		t.Errorf("effort-only = %s", got)
+	}
+	if e.taskState(ship) != taskPending || e.str("SELECT tier FROM tasks WHERE id = ?", ship) != "heavy" {
+		t.Error("pending task not retiered in place")
+	}
+	// Tier alone preserves effort. A ready task can be changed as well.
+	e.exec("UPDATE tasks SET state = 'ready' WHERE id = ?", build)
+	e.amend(res.PlanID, PlanAmendment{Retier: []PlanRetier{{Task: "build", Tier: "standard"}}})
+	if got := e.str("SELECT tier || '|' || effective_tier || '|' || effort FROM tasks WHERE id = ?", build); got != "standard|standard|medium" {
+		t.Errorf("tier-only = %s", got)
+	}
+
+	for _, state := range []string{taskRunning, taskChecking, taskReviewing, taskDone, taskCancelled, taskNeedsUser, taskFailed} {
+		t.Run(state, func(t *testing.T) {
+			e.exec("UPDATE tasks SET state = ? WHERE id = ?", state, build)
+			_, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+				Retier: []PlanRetier{{Task: "ship", Tier: "light"}, {Task: "build", Tier: "light"}},
+				Add:    []PlanTask{{Name: "extra", Spec: "must not land"}},
+			})
+			if err == nil || !strings.Contains(err.Error(), "build") || !strings.Contains(err.Error(), state) {
+				t.Fatalf("refusal = %v", err)
+			}
+			if e.str("SELECT tier FROM tasks WHERE id = ?", ship) != "heavy" || e.int("SELECT COUNT(*) FROM tasks WHERE name = 'extra'") != 0 {
+				t.Error("refused amendment partially applied")
+			}
+		})
+	}
+	e.exec("UPDATE tasks SET state = 'ready' WHERE id = ?", build)
+	for _, rt := range []PlanRetier{{Task: "build", Tier: "huge"}, {Task: "build", Effort: "ultra"}, {Task: "absent", Tier: "light"}} {
+		if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Retier: []PlanRetier{rt}}); err == nil {
+			t.Errorf("bad retier accepted: %+v", rt)
 		}
 	}
 }

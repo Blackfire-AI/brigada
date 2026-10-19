@@ -263,6 +263,7 @@ func TestApprovedTaskScoresTheFinalAuthor(t *testing.T) {
 // counts the attempt and no success.
 func TestOutOfRoundsScoresTheAttemptOnly(t *testing.T) {
 	e := newEnv(t)
+	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", e.task)
 	author := e.agented("author", "anthropic", "implement")
 	e.exec("UPDATE tasks SET caps = ? WHERE id = ?", `{"fix_rounds":0}`, e.task)
 	e.submit(e.work())
@@ -480,6 +481,7 @@ func TestWorkCompletionParksTheTaskAtNeedsForeman(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)
+			e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", e.task)
 			if tc.class != "" {
 				e.exec("UPDATE tasks SET class = ? WHERE id = ?", tc.class, e.task)
 			}

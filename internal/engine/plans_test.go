@@ -399,6 +399,7 @@ func TestFailedDependencyKeepsDependentWaiting(t *testing.T) {
 	build, ship := res.Tasks[0], res.Tasks[1]
 
 	g := e.leaseAny(e.runner1)
+	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE plan_id = ?", res.PlanID)
 	e.complete(g, Completion{Result: `{"status":"failed","summary":"the repo would not clone"}`})
 	if got := e.str("SELECT state FROM tasks WHERE id = ?", build.TaskID); got != taskNeedsForeman {
 		t.Fatalf("build state = %q, want needs_foreman", got)
