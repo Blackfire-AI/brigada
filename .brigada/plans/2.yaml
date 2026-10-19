@@ -23,7 +23,7 @@ tasks:
     deps: []
     base: ""
     tier: heavy
-    state: running
+    state: reviewing
     branch: "brigada/task-5-r1"
     rounds: 2
   - id: 6
