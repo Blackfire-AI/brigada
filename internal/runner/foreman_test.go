@@ -16,6 +16,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/foreman"
+	"github.com/Blackfire-AI/brigada/internal/runnerstate"
 )
 
 // The foreman turn tests run against the same machinery as the worker
@@ -763,5 +764,24 @@ func TestRunnerForemanCheckoutGitFailure(t *testing.T) {
 				t.Errorf("CLI started without code: %v", err)
 			}
 		})
+	}
+}
+
+// An init from before the rename saved its foreman as the file
+// <state>/foreman: the scratch directory moves it aside, not fails.
+func TestForemanScratchDirMovesOldForemanFile(t *testing.T) {
+	state := t.TempDir()
+	if err := os.WriteFile(filepath.Join(state, "foreman"), []byte("claude/opus\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := ForemanScratchDir(state, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Fatalf("scratch dir: %v, %v", info, err)
+	}
+	if got, err := runnerstate.LoadForeman(state); got != "claude/opus" || err != nil {
+		t.Fatalf("saved foreman after the move: %q, %v", got, err)
 	}
 }

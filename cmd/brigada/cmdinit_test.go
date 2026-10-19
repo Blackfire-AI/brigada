@@ -24,6 +24,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/logo"
+	"github.com/Blackfire-AI/brigada/internal/runner"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
 	"github.com/Blackfire-AI/brigada/internal/term"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
@@ -1310,6 +1311,10 @@ func TestInitSavedDefaults(t *testing.T) {
 			}
 			if err := runnerstate.SaveForeman(
 				filepath.Join(state, "runner"), "claude/opus@high"); err != nil {
+				t.Fatal(err)
+			}
+			// A foreman turn has run: its scratch dir sits beside the choice.
+			if _, err := runner.ForemanScratchDir(filepath.Join(state, "runner"), 1); err != nil {
 				t.Fatal(err)
 			}
 			code, out, errs := initFixedParallel(t, state, strings.Repeat("\n", 6)+"n\n",
