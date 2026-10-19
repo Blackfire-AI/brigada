@@ -5,9 +5,9 @@
 plan: 6
 title: "Unblock reviews and quota handling: Codex reset time, long-cooling tier fallback, opencode permission exits"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-19T22:53:38.233855Z
-updated: 2026-10-19T22:53:38.233855Z
+updated: 2026-10-19T23:28:24.695694Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps, or from the
 # default branch when base is empty; merge a task after its base. States
@@ -33,7 +33,7 @@ tasks:
     deps: []
     base: ""
     effort: high
-    state: reviewing
+    state: done
     branch: "brigada/task-23"
     rounds: 1
   - id: 24
