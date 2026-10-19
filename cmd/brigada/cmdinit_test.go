@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
@@ -100,7 +101,7 @@ func TestInitProbeAndRefusals(t *testing.T) {
 		want     string
 	}{
 		{"probe", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}, "", 0, "Probe only"},
-		{"declined", []string{"--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}, "\n\nn\n", 1, "Declined"},
+		{"declined", []string{"--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}, "\n\n\nn\n", 1, "Declined"},
 		{"one family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=anthropic/claude-opus-4", "--signed-in", "claude,opencode"}, "", 1, "--accept-limited"},
 		{"limited acknowledged", []string{"--probe", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--signed-in", "claude"}, "", 0, "LIMITED SETUP"},
 		{"zero", []string{"--yes", "--agent", "harness=claude,model=sonnet"}, "", 1, "zero usable agents"},
@@ -154,27 +155,29 @@ func TestInitProbeAndRefusals(t *testing.T) {
 }
 
 func TestInitPromptDefaultsAndSkip(t *testing.T) {
-	// Enter now picks menu entry 1, except OpenCode defaults to leaving it out;
-	// two planning agents also require a foreman answer before confirmation.
+	// Enter takes the foreman's first model and effort, uses every model of
+	// claude and codex (and of a confirmed kimi, review only), and leaves
+	// OpenCode out. "n" leaves a CLI out; a kimi that is not confirmed by
+	// --signed-in is left out by Enter.
 	for _, tc := range []struct {
-		name, stdin string
-		wantAgents  []string
-		wantSkipped []string
-		want        string
+		name, stdin, signedIn string
+		wantAgents            []string
+		wantSkipped           []string
+		want                  string
 	}{
 		{
-			name: "blank uses menu defaults", stdin: "\n\n\n\n\n\n\nn\n",
-			wantAgents:  []string{"claude    sonnet", "codex     CLI default", "kimi      CLI default"},
+			name: "blank uses defaults", stdin: "\n\n\n\n\n\nn\n", signedIn: "claude,codex,kimi,opencode",
+			wantAgents:  []string{"claude    opus", "claude    sonnet", "claude    haiku", "codex     CLI default", "kimi      CLI default"},
 			wantSkipped: []string{"opencode"},
 			want:        "Declined",
 		},
 		{
-			name: "dash skips accounts", stdin: "-\n\n-\n-\nn",
+			name: "n and Enter leave CLIs out", stdin: "4\nn\n\n\n-\nn\n", signedIn: "claude,codex,opencode",
 			wantAgents: []string{"codex     CLI default"}, wantSkipped: []string{"claude", "kimi", "opencode"},
 			want: "Declined",
 		},
 		{
-			name: "all skipped", stdin: "-\n-\n-\n-\n",
+			name: "all left out", stdin: "\n\nn\nn\n\n-\n", signedIn: "claude,codex,opencode",
 			wantSkipped: initHarnesses, want: "zero usable agents",
 		},
 	} {
@@ -182,7 +185,7 @@ func TestInitPromptDefaultsAndSkip(t *testing.T) {
 			importRepo(t)
 			fakeInitPATH(t, initHarnesses...)
 			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
-			code, out, err := initFixedParallel(t, state, tc.stdin, "--signed-in", "claude,codex,kimi,opencode", "--accept-limited", "--check", "true", "--tools", "none")
+			code, out, err := initFixedParallel(t, state, tc.stdin, "--signed-in", tc.signedIn, "--accept-limited", "--check", "true", "--tools", "none")
 			if code != 1 || !strings.Contains(out+err, tc.want) {
 				t.Fatalf("got %d\n%s\n%s", code, out, err)
 			}
@@ -218,19 +221,20 @@ func TestInitKimiWriteOptIn(t *testing.T) {
 			importRepo(t)
 			calls := fakeInitPATH(t, initHarnesses...)
 			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
-			// Skip Claude, pick Codex, pick Kimi, answer its writing question,
-			// then type an OpenCode model and a check. Distinct answers catch
-			// any question that consumes stdin in the wrong position.
-			input := "-\n\n\n" + tc.answer + "\nzai-coding-plan/glm-5.3\nprintf check-marker\nn\n"
+			// Take the first foreman and effort, leave Claude out, use Codex,
+			// answer Kimi's writing question, then type an OpenCode model and a
+			// check. Distinct answers catch any question that consumes stdin in
+			// the wrong position.
+			input := "\n\nn\n\n" + tc.answer + "\nzai-coding-plan/glm-5.3\nprintf check-marker\nn\n"
 			code, out, errOut := initFixedParallel(t, state, input, "--signed-in", "claude,codex,kimi,opencode", "--tools", "none", "--no-wiring")
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 				t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 			}
 			warning := "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. As a reviewer it only reads.\n    Let kimi write code too, not only review? [y/N]:\n"
-			if !strings.Contains(out, "    Pick 1, or type a model id [1]:\n"+warning+"\n  opencode:") {
-				t.Fatalf("writing question is not right after Kimi model:\n%s", out)
+			if !strings.Contains(out, "    Use codex's models for tasks (CLI default)? [Y/n]:\n\n  kimi: signed in\n"+warning+"\n  opencode:") {
+				t.Fatalf("writing question is not right after Kimi sign-in:\n%s", out)
 			}
-			if strings.Contains(strings.Join(strings.Fields(out), " "), "Moonshot review only") == tc.write {
+			if strings.Contains(strings.Join(strings.Fields(out), " "), "Moonshot standard reviews only") == tc.write {
 				t.Fatalf("incorrect Kimi classes after %q:\n%s", tc.answer, out)
 			}
 			for _, want := range []string{"opencode  zai-coding-plan/glm-5.3", "Check: printf check-marker"} {
@@ -263,14 +267,14 @@ func TestInitKimiWriteOptIn(t *testing.T) {
 
 func TestInitExplicitKimiClassesStayAsGiven(t *testing.T) {
 	for _, tc := range []struct{ classes, role string }{
-		{"", "code + review"},
-		{",classes=review", "review only"},
-		{",classes=implement+answer", "code + answer"},
-		{",classes=review+answer", "review + answer"},
-		{",classes=answer", "answer only"},
-		{",classes=implement", "code only"},
-		{",classes=implement+review", "code + review"},
-		{",classes=custom", "custom only"},
+		{"", "writes code, reviews"},
+		{",classes=review", "reviews only"},
+		{",classes=implement+answer", "writes code, answers questions"},
+		{",classes=review+answer", "reviews, answers questions"},
+		{",classes=answer", "answers questions only"},
+		{",classes=implement", "writes code only"},
+		{",classes=implement+review", "writes code, reviews"},
+		{",classes=custom", "handles custom tasks only"},
 	} {
 		t.Run(tc.classes, func(t *testing.T) {
 			importRepo(t)
@@ -282,7 +286,7 @@ func TestInitExplicitKimiClassesStayAsGiven(t *testing.T) {
 			if strings.Contains(out, "Let kimi write") || strings.Contains(out, "kimi has no sandbox:") {
 				t.Fatalf("explicit agent got writing question:\n%s", out)
 			}
-			want := "Moonshot " + tc.role
+			want := "Moonshot standard " + tc.role
 			if !strings.Contains(strings.Join(strings.Fields(out), " "), strings.Join(strings.Fields(want), " ")) {
 				t.Errorf("explicit classes changed:\n%s", out)
 			}
@@ -291,30 +295,30 @@ func TestInitExplicitKimiClassesStayAsGiven(t *testing.T) {
 }
 
 func TestInitNonTerminalPrompts(t *testing.T) {
-	// Menus and the foreman choice replace free-form model questions; confirmed
-	// OpenCode authentication skips its Use question and Enter leaves it out.
+	// The foreman comes first (model, then effort), then each CLI's use
+	// question; confirmed OpenCode authentication skips its Use question and
+	// Enter leaves it out. Sign-in the probes cannot check is asked up front.
 	importRepo(t)
 	wireGit(t, ".", "config", "core.excludesFile", os.DevNull)
 	fakeInitPATH(t, initHarnesses...)
-	code, out, err := initFixedParallel(t, testsupport.ShortStateDir(t), "y\n\n\ny\n\ny\n\n\n\n\nn\n", "--check", "true", "--tools", "none")
+	code, out, err := initFixedParallel(t, testsupport.ShortStateDir(t), "y\ny\n\n\n\n\ny\n\n\nn\n", "--check", "true", "--tools", "none")
 	if code != 1 || !strings.Contains(out, "Declined") || err != "" {
 		t.Fatalf("got %d\n%s\n%s", code, out, err)
 	}
 	prompts := []string{
 		"    Are you signed in to claude? [y/N]",
-		"    Pick 1-3 or -, or type a model id [1]:",
-		"    Pick 1-6 [1]:",
 		"    Are you signed in to codex? [y/N]",
-		"    Pick 1 or -, or type a model id [1]:",
+		"    Pick 1-4, or type harness/model [1]:",
+		"    Pick 1-5 or type a level [1]:",
+		"    Use claude's models for tasks (opus, sonnet, haiku)? [Y/n]:",
+		"    Use codex's models for tasks (CLI default)? [Y/n]:",
 		"    Use kimi? [y/N]:",
-		"    Pick 1, or type a model id [1]:",
 		"    Let kimi write code too, not only review? [y/N]:",
-		"    Pick 1-2 or -, or type provider/model [-]:",
-		"  Pick 1-2 [1]:",
+		"    Pick numbers (1,3) or -, or type provider/model [-]:",
 		"Write 5 files and start the runner? [y/N]",
 	}
-	if !strings.Contains(out, "\n\n  claude: sign-in can't be checked\n"+prompts[0]+"\n") || strings.Contains(out, "\n\n\n  claude:") {
-		t.Errorf("expected one blank line before the CLI block:\n%s", out)
+	if !strings.Contains(out, "\nSigned in: opencode (2 providers, opencode providers list).\nclaude: init can't check sign-in.\ncodex: init can't check sign-in.\nkimi: init can't check sign-in.\n\n") {
+		t.Errorf("expected the signed-in line and one line per CLI that cannot be checked:\n%s", out)
 	}
 	previous := -1
 	for _, prompt := range prompts {
@@ -331,13 +335,13 @@ func TestInitNonTerminalPrompts(t *testing.T) {
 	for _, want := range []string{
 		"brigada init: set up example.invalid/imported",
 		"Nothing is written or started until you confirm at the end.",
-		"Step 1 of 4: agents",
-		"  claude: sign-in can't be checked",
+		"Step 1 of 4: the foreman",
+		"  claude: signed in",
+		"Step 2 of 4: workers",
 		"  kimi: init can't check sign-in. If you're not signed in, run `kimi login`\n  first, or leave kimi out.",
 		"  opencode: signed in to 2 providers (opencode providers list)",
-		"Step 2 of 4: the foreman",
 		"  Reviews: 3 model families, so every task can get a reviewer of another one.",
-		"  Foreman: claude/sonnet\n",
+		"  Foreman: claude/sonnet, effort medium\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in %s", want, out)
@@ -358,14 +362,15 @@ func TestInitNoInput(t *testing.T) {
 		args              []string
 	}{
 		{"no model input", "", "--signed-in claude", nil},
-		{"model input exhausted", "y\n", "--agent harness=claude", nil},
+		{"use input exhausted", "y\ny\n\n\n", "--agent harness=claude", nil},
+		{"foreman input exhausted", "y\ny\n", "--foreman", nil},
 		{"no authentication input", "", "--signed-in claude", []string{"--agent", "harness=claude"}},
 		{"no foreman input", "", "--foreman", []string{"--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex"}},
-		{"no apply input", "", "--yes", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited"}},
-		{"no check input", "", "--check COMMAND", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--check="}},
+		{"no apply input", "", "--yes", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--foreman", "claude/sonnet@medium"}},
+		{"no check input", "", "--check COMMAND", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--foreman", "claude/sonnet@medium", "--check="}},
 		// A command that cannot be scoped gets file tools only and reaches
 		// the apply prompt, without asking a separate tools question.
-		{"unscopable check reaches apply", "", "--yes", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--check", "a+b", "--tools="}},
+		{"unscopable check reaches apply", "", "--yes", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--foreman", "claude/sonnet@medium", "--check", "a+b", "--tools="}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
@@ -394,42 +399,45 @@ func TestInitNoInput(t *testing.T) {
 }
 
 func TestInitModelRetries(t *testing.T) {
-	// Invalid typed IDs retain the three-try limit; numeric answers now select
-	// menu entries, and surviving planning agents require a foreman answer.
+	// Invalid typed answers retain the three-try limit, for the foreman's
+	// harness/model and for OpenCode's provider/model; numbers select menu
+	// entries.
 	for _, tc := range []struct {
 		name, harness, answers, reason, model string
 		tries                                 int
 	}{
-		{"unknown then valid", "claude", "unknown\n1\n", "cannot identify the family", "sonnet", 2},
-		{"whitespace then valid", "claude", "sonnet other\nsonnet\n", "model must be a nonempty model identifier", "sonnet", 2},
-		{"spaces then valid", "claude", "   \nsonnet\n", "model must be a nonempty model identifier", "sonnet", 2},
+		{"unknown then valid", "claude", "claude/unknown\n1\n", "cannot identify the family", "sonnet", 2},
+		{"whitespace then valid", "claude", "claude/sonnet other\nclaude/sonnet\n", "model must be a nonempty model identifier", "sonnet", 2},
+		{"empty model then valid", "claude", "claude/\nclaude/sonnet\n", "model must be a nonempty model identifier", "sonnet", 2},
+		{"no slash then valid", "claude", "sonnet\nclaude/sonnet\n", "\"sonnet\" is neither a number from the menu nor harness/model", "sonnet", 2},
+		{"kimi cannot plan", "claude", "kimi/k3\nclaude/sonnet\n", "kimi/k3 is not a model of a signed-in claude or codex", "sonnet", 2},
 		{"provider then valid", "opencode", "glm\nzai-coding-plan/glm-5.3\n", "opencode needs provider/model, e.g. zai-coding-plan/glm-5.3", "zai-coding-plan/glm-5.3", 2},
 		{"unknown provider model then valid", "opencode", "opencode/beam-free\n1\n", "cannot identify the family", "fixture/gpt-5", 2},
-		{"retry then default", "claude", "unknown\n\n", "cannot identify the family", "sonnet", 2},
-		{"retry then skip", "claude", "unknown\n-\n", "cannot identify the family", "", 2},
-		{"third answer valid", "claude", "unknown\nsonnet other\nsonnet\n", "cannot identify the family", "sonnet", 3},
-		{"three invalid answers", "claude", "unknown\nunknown\nunknown\n", "cannot identify the family", "", 3},
+		{"retry then default", "claude", "claude/unknown\n\n", "cannot identify the family", "sonnet", 2},
+		{"third answer valid", "claude", "claude/unknown\nclaude/sonnet other\nclaude/sonnet\n", "cannot identify the family", "sonnet", 3},
+		{"three invalid answers", "claude", "claude/unknown\nclaude/unknown\nclaude/unknown\n", "cannot identify the family", "", 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
 			calls := fakeInitPATH(t, "claude", "codex", "opencode")
-			answers := tc.answers + "\n\n-\n\nn\n"
-			if tc.name == "retry then skip" {
-				answers = tc.answers + "\n-\nn\n"
-			}
+			// After the foreman's model: its effort, use claude, not codex,
+			// no OpenCode model, and decline the plan.
+			answers := tc.answers + "\n\nn\n\nn\n"
+			prompt, hint := "    Pick 1-4, or type harness/model [1]:", "pick a numbered entry, or type harness/model"
 			if tc.harness == "opencode" {
-				answers = "\n\n\n" + tc.answers + "\nn\n"
+				answers = "\n\nn\nn\n" + tc.answers + "n\n"
+				prompt, hint = "    Pick numbers (1,3) or -, or type provider/model [-]:", "pick a numbered entry, or type a model whose name says its family"
 			}
 			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
 			code, out, err := initFixedParallel(t, state, answers, "--signed-in", "claude,codex,opencode", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
-			if code != 1 || strings.Count(out, map[string]string{"claude": "    Pick 1-3 or -, or type a model id [1]:", "opencode": "    Pick 1-2 or -, or type provider/model [-]:"}[tc.harness]) != tc.tries {
+			if code != 1 || strings.Count(out, prompt) != tc.tries {
 				t.Fatalf("got %d\n%s\n%s", code, out, err)
 			}
-			if !strings.Contains(out, "\n  "+tc.reason) || !strings.Contains(out, "; try again.\n") || !strings.Contains(out, "pick a numbered entry, or type a model whose name says its family") {
+			if !strings.Contains(out, "\n  "+tc.reason) || !strings.Contains(out, "; try again.\n") || !strings.Contains(out, hint) {
 				t.Fatalf("missing indented retry reason:\n%s", out)
 			}
 			if tc.name == "three invalid answers" {
-				if !strings.Contains(err, "--agent claude: "+tc.reason) || !strings.Contains(err, "pick a numbered entry, or type a model whose name says its family") || strings.Contains(out, "\nPlan\n") {
+				if !strings.Contains(err, "--foreman HARNESS/MODEL: claude/unknown") && !strings.Contains(err, "--foreman HARNESS/MODEL: "+tc.reason) || !strings.Contains(err, "or type harness/model") || strings.Contains(out, "\nPlan\n") {
 					t.Fatalf("did not stop with the model error after three attempts:\n%s\n%s", out, err)
 				}
 			} else {
@@ -439,9 +447,6 @@ func TestInitModelRetries(t *testing.T) {
 				plan := out[strings.Index(out, "\nPlan\n"):]
 				if tc.model != "" && !strings.Contains(plan, tc.model) {
 					t.Fatalf("accepted model missing from plan:\n%s", plan)
-				}
-				if tc.name == "retry then skip" && strings.Contains(plan, "    claude ") {
-					t.Fatalf("skipped model in plan:\n%s", plan)
 				}
 			}
 			for _, path := range []string{state, ".brigada"} {
@@ -467,12 +472,12 @@ func TestInitQuestionsBeforePlan(t *testing.T) {
 	// tools" question follows it and the check is the last question asked.
 	importRepo(t)
 	fakeInitPATH(t, initHarnesses...)
-	code, out, err := initFixedParallel(t, testsupport.ShortStateDir(t), "n\ny\n\ny\n\n\n-\ntrue\nn\n", "--no-wiring")
+	code, out, err := initFixedParallel(t, testsupport.ShortStateDir(t), "n\ny\n\ny\n\n\ntrue\nn\n", "--no-wiring")
 	if code != 1 || err != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("got %d\n%s\n%s", code, out, err)
 	}
-	if strings.Contains(out, "Which model should claude run?") {
-		t.Fatalf("asked for a model after sign-in was declined:\n%s", out)
+	if strings.Contains(out, "Use claude's models") || !strings.Contains(out, "Foreman: codex/CLI default (the only model that can plan)") {
+		t.Fatalf("offered claude after sign-in was declined:\n%s", out)
 	}
 	if !strings.Contains(out, "Step 4 of 4: how brigada tests the work\n") || !strings.Contains(out, "\n  Found in this repo: nothing brigada recognises.\n     -  no check  work goes straight to review; add one later  default\n  Type a command, or - for no check [-]:\n") || strings.Contains(out, "Check command [") {
 		t.Fatalf("check without a candidate must default to no check:\n%s", out)
@@ -489,11 +494,11 @@ func TestInitQuestionsBeforePlan(t *testing.T) {
 }
 
 func TestInitExplicitAccountQuestions(t *testing.T) {
-	// Account confirmations stay in CLI order; the new foreman menu retains
-	// the first resume-capable --agent (codex here) as its default.
+	// Account confirmations stay in CLI order; the foreman menu then lists the
+	// models of both signed-in CLIs, whatever --agent offers.
 	importRepo(t)
 	fakeInitPATH(t, "claude", "codex")
-	code, out, err := initFixedParallel(t, testsupport.ShortStateDir(t), "y\ny\n\nn\n", "--agent", "harness=codex", "--agent", "harness=claude,account=work,classes=review", "--check", "true", "--tools", "none", "--no-wiring")
+	code, out, err := initFixedParallel(t, testsupport.ShortStateDir(t), "y\ny\n\n\nn\n", "--agent", "harness=codex", "--agent", "harness=claude,account=work,classes=review", "--check", "true", "--tools", "none", "--no-wiring")
 	if code != 1 || err != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("got %d\n%s\n%s", code, out, err)
 	}
@@ -502,10 +507,10 @@ func TestInitExplicitAccountQuestions(t *testing.T) {
 	if claude < 0 || codex <= claude || strings.Contains(out, "codex account codex") {
 		t.Fatalf("incorrect sign-in question wording or order:\n%s", out)
 	}
-	if !strings.Contains(out, "  Pick 1-2 [2]:") || !strings.Contains(out, "  Foreman: codex/CLI default\n") {
-		t.Fatalf("did not preserve flag-order foreman default:\n%s", out)
+	if !strings.Contains(out, "Pick 1-4, or type harness/model [1]:") || !strings.Contains(out, "  Foreman: claude/sonnet, effort medium\n") {
+		t.Fatalf("foreman menu did not default to the first claude model:\n%s", out)
 	}
-	if !strings.Contains(strings.Join(strings.Fields(out), " "), "Anthropic review only") || strings.Contains(out, "(implement, review, answer only)") {
+	if !strings.Contains(strings.Join(strings.Fields(out), " "), "Anthropic standard reviews only") || strings.Contains(out, "(implement, review, answer only)") {
 		t.Fatalf("incorrect agent classes display:\n%s", out)
 	}
 }
@@ -549,7 +554,7 @@ func TestInitApplyPrompts(t *testing.T) {
 					}
 				}
 			}
-			code, out, err := initFixedParallel(t, state, "\nn\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--check", "true", "--tools", "none", "--no-wiring")
+			code, out, err := initFixedParallel(t, state, "\n\nn\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--check", "true", "--tools", "none", "--no-wiring")
 			if code != 1 || err != "" || !strings.Contains(out, "\n\n"+tc.prompt+"\n") || strings.Contains(out, "\n\n\n"+tc.prompt) || !strings.Contains(out, "Declined") {
 				t.Fatalf("got %d\n%s\n%s", code, out, err)
 			}
@@ -716,7 +721,7 @@ func TestInitSkipsSuggestedCheckQuestion(t *testing.T) {
 			}
 			fakeInitPATH(t, "claude", "codex")
 			args := append([]string{"--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring"}, tc.args...)
-			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\nn\n", args...)
+			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\n\nn\n", args...)
 			wantCode := 1
 			if tc.name == "probe" {
 				wantCode = 0
@@ -731,8 +736,9 @@ func TestInitSkipsSuggestedCheckQuestion(t *testing.T) {
 const initCheckMakefile = "check: lint format-check type test rig-spec\n\ntest:\n\tuv run pytest -q\n"
 
 // initCheckStep runs an interactive init in a repository whose Makefile
-// defines check and test and which has a uv.lock, answering the foreman with
-// Enter, then the check step with answer, then declining the apply.
+// defines check and test and which has a uv.lock, answering the foreman's
+// model and effort with Enter, then the check step with answer, then
+// declining the apply.
 func initCheckStep(t *testing.T, answer string, existing string, args ...string) (int, string, string) {
 	t.Helper()
 	write := importRepo(t)
@@ -746,7 +752,7 @@ func initCheckStep(t *testing.T, answer string, existing string, args ...string)
 	}
 	fakeInitPATH(t, "claude", "codex")
 	args = append([]string{"--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring", "--verbose"}, args...)
-	return initFixedParallel(t, testsupport.ShortStateDir(t), "\n"+answer+"\nn\n", args...)
+	return initFixedParallel(t, testsupport.ShortStateDir(t), "\n\n"+answer+"\nn\n", args...)
 }
 
 func TestInitCheckStepTranscript(t *testing.T) {
@@ -776,8 +782,7 @@ func TestInitCheckStepTranscript(t *testing.T) {
 		t.Fatalf("step 3 transcript differs from the approved one:\n%s", out)
 	}
 	for _, want := range []string{
-		"\n  -> change later: run brigada init again\n     your own default: ~/.codex/config.toml\n\nStep 2 of 4:",
-		"\n  -> change later: brigada project foreman --harness H --model M, or run\n     brigada init again\n\nStep 3 of 4:",
+		"\n  -> change later: brigada project foreman --harness H --model M --effort E, or\n     run brigada init again\n\nStep 2 of 4: workers\n  Set by your --agent flags.\n\nStep 3 of 4:",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -802,7 +807,7 @@ func TestInitCheckStepLongNoteStaysNarrow(t *testing.T) {
 		t.Fatal(err)
 	}
 	fakeInitPATH(t, "claude", "codex")
-	code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\n\nn\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring")
+	code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\n\n\nn\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring")
 	if code != 1 || errOut != "" || !strings.Contains(out, "     1  make check  Makefile: a-very-long-prerequisite") || !strings.Contains(out, "…  default\n") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
@@ -869,7 +874,7 @@ func TestInitCheckStepNoCandidates(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
 			fakeInitPATH(t, "claude", "codex")
-			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\n"+tc.answer+"\nn\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring", "--verbose")
+			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\n\n"+tc.answer+"\nn\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring", "--verbose")
 			prompt := "  Type a command, or - for no check [-]:\n"
 			if !strings.Contains(out, "\n  Found in this repo: nothing brigada recognises.\n     -  no check  work goes straight to review; add one later  default\n"+prompt) || strings.Count(out, prompt) != tc.asked {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
@@ -1176,14 +1181,15 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 	interactive := append([]string{}, args[1:]...)
 	// Changed: the rerun now asks the check step too (Enter keeps the current
 	// check), so each answer list has one more Enter before the apply answer.
-	code, out, err = initFixedParallel(t, state, "\n\nn\n", interactive...)
+	// The foreman is the new --agent's opus (the saved one, sonnet, is not).
+	code, out, err = initFixedParallel(t, state, "2\n\n\nn\n", interactive...)
 	if code != 1 || err != "" || !strings.Contains(out,
 		"Write 0 files and restart the runner with the new agents? [y/N]") {
 		t.Fatalf("restart prompt: %d\n%s\n%s", code, out, err)
 	}
 	assertInitSavedAgents(t, state, rec.Specs)
 	// Confirm the same prompt and exercise stop's real SIGTERM/lock wait.
-	code, out, err = initFixedParallel(t, state, "\n\ny\n", interactive...)
+	code, out, err = initFixedParallel(t, state, "2\n\n\ny\n", interactive...)
 	if code != 0 || !strings.Contains(out, "Runner restarted with the new agents") ||
 		strings.Contains(out, "Detached runner started") {
 		t.Fatalf("differing agents: %d\n%s\n%s", code, out, err)
@@ -1194,16 +1200,29 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 		t.Fatalf("runner not replaced: %+v %v", again, e)
 	}
 	assertInitSavedAgents(t, state, again.Specs)
-	code, out, err = initFixedParallel(t, state, "unknown\n\n\n\n\n\ny\n", "--signed-in", "claude,codex", "--no-wiring")
-	if code != 0 || strings.Count(out, "    Pick 1-3 or -, or type a model id [2]:") != 2 || !strings.Contains(out, "Runner already running") {
+	// A rerun without --agent defaults to the saved foreman (opus, entry 2) and
+	// offers every model of the CLIs it used: that differs from the one model
+	// each --agent named, so declining the restart keeps the runner.
+	code, out, err = initFixedParallel(t, state, "unknown\n\n\n\n\n\nn\n", "--signed-in", "claude,codex", "--no-wiring")
+	if code != 1 || err != "" || strings.Count(out, "    Pick 1-4, or type harness/model [2]:") != 2 || !strings.Contains(out, "restart the runner with the new agents? [y/N]") {
 		t.Fatalf("interactive retry: %d\n%s\n%s", code, out, err)
 	}
-	afterDefaults, live, e := runnerstate.Running(filepath.Join(state, "runner"))
-	if e != nil || !live || afterDefaults.PID != again.PID {
-		t.Fatalf("accepting saved defaults replaced runner: %+v %v",
-			afterDefaults, e)
+	afterDeclined, live, e := runnerstate.Running(filepath.Join(state, "runner"))
+	if e != nil || !live || afterDeclined.PID != again.PID {
+		t.Fatalf("declining the restart replaced runner: %+v %v",
+			afterDeclined, e)
 	}
 	assertInitSavedAgents(t, state, again.Specs)
+	code, out, err = initFixedParallel(t, state, "unknown\n\n\n\n\n\ny\n", "--signed-in", "claude,codex", "--no-wiring")
+	if code != 0 || err != "" || !strings.Contains(out, "Runner restarted with the new agents") {
+		t.Fatalf("accepting the rerun defaults: %d\n%s\n%s", code, out, err)
+	}
+	afterDefaults, live, e := runnerstate.Running(filepath.Join(state, "runner"))
+	if e != nil || !live || afterDefaults.PID == again.PID || len(afterDefaults.Agents) != 4 {
+		t.Fatalf("rerun defaults must offer every model: %+v %v", afterDefaults, e)
+	}
+	assertInitSavedAgents(t, state, afterDefaults.Specs)
+	again = afterDefaults
 	if strings.Contains(out, "Open Claude Code here") || !strings.Contains(out, "  1. Or, without a session: brigada ask") || strings.Contains(out, "§") {
 		t.Fatalf("--no-wiring Next block:\n%s", out)
 	}
@@ -1290,10 +1309,14 @@ func TestInitSavedDefaults(t *testing.T) {
 			}
 			specs := []string{
 				"harness=claude,model=opus,effort=high,tools=none",
-				"harness=kimi,model=kimi-k2,classes=" + classes,
+				"harness=kimi,model=default,classes=" + classes,
 			}
 			if err := runnerstate.SaveAgents(
 				filepath.Join(state, "runner"), specs); err != nil {
+				t.Fatal(err)
+			}
+			if err := runnerstate.SaveForeman(
+				filepath.Join(state, "runner"), "claude/opus@high"); err != nil {
 				t.Fatal(err)
 			}
 			code, out, errs := initFixedParallel(t, state, strings.Repeat("\n", 6)+"n\n",
@@ -1303,25 +1326,25 @@ func TestInitSavedDefaults(t *testing.T) {
 				t.Fatalf("saved defaults: %d\n%s\n%s", code, out, errs)
 			}
 			for _, want := range []string{
-				"current", "Pick 1-3 or -, or type a model id [2]:",
-				"Pick 1-6 [4]:", "high     current",
-				"Pick 1 or -, or type a model id [-]:",
-				"Pick 1-2 or -, or type a model id [2]:",
-				"Pick 1-2 or -, or type provider/model [-]:",
-				"opus @high", "kimi-k2",
+				"current", "Pick 1-4, or type harness/model [2]:",
+				"Pick 1-5 or type a level [3]:", "high    current",
+				"Use claude's models for tasks (opus, sonnet, haiku)? [Y/n]:",
+				"Use codex's models for tasks (CLI default)? [y/N]:",
+				"Pick numbers (1,3) or -, or type provider/model [-]:",
+				"Foreman: claude/opus, effort high", "opus @high",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("missing %q:\n%s", want, out)
 				}
 			}
 			question := "Let kimi write code too, not only review? [y/N]:"
-			role := "review only"
+			role := "reviews only"
 			if writes {
 				question = "Let kimi write code too, not only review? [Y/n]:"
-				role = "code + review"
+				role = "writes code, reviews"
 			}
 			plan := strings.Split(out, "\nPlan\n")[1]
-			kimi := strings.Split(strings.Split(plan, "kimi-k2")[1], "\n")[0]
+			kimi := strings.Split(strings.Split(plan, "    kimi ")[1], "\n")[0]
 			if !strings.Contains(out, question) || !strings.Contains(kimi, role) {
 				t.Fatalf("kimi default lost:\n%s", out)
 			}
@@ -1346,15 +1369,15 @@ func TestInitSavedDefaultsOmitKimi(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errs := initFixedParallel(t, state, strings.Repeat("\n", 6)+"n\n",
-		"--signed-in", strings.Join(initHarnesses, ","),
+		"--signed-in", "claude,codex,opencode",
 		"--check", "true", "--tools", "none", "--no-wiring")
 	if code != 1 || errs != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("saved defaults: %d\n%s\n%s", code, out, errs)
 	}
-	kimi := strings.Split(strings.Split(out,
-		"Which model should kimi run?")[1], "opencode:")[0]
-	if !strings.Contains(kimi, "Pick 1 or -, or type a model id [-]:") ||
-		strings.Contains(kimi, "Let kimi write code") {
+	kimi := strings.Split(strings.Split(out, "kimi: init can't check")[2], "opencode:")[0]
+	if !strings.Contains(kimi, "Use kimi? [y/N]:") ||
+		strings.Contains(kimi, "Let kimi write code") ||
+		strings.Contains(out, "    kimi ") {
 		t.Fatalf("omitted kimi was offered as a default:\n%s", out)
 	}
 	assertInitSavedAgents(t, state, specs)
@@ -1416,7 +1439,7 @@ func TestInitProbeAndRefusalsWithExistingWiring(t *testing.T) {
 		code  int
 	}{
 		{"probe", []string{"--probe"}, "", 0},
-		{"refusal", nil, "\nn\n", 1},
+		{"refusal", nil, "\n\nn\n", 1},
 		{"limited", []string{"--probe", "--accept-limited"}, "", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1526,10 +1549,11 @@ func TestInitPlainCapabilities(t *testing.T) {
 
 func TestInitInteractiveLongModels(t *testing.T) {
 	out := initInteractiveTranscript(t, true)
-	if !strings.Contains(out, "  Foreman: codex/gpt-6.1-sol\n") {
+	// The second of codex's levels (its own default, high, comes first) is low.
+	if !strings.Contains(out, "  Foreman: codex/gpt-6.1-sol, effort low\n") {
 		t.Fatalf("foreman did not use resolved default:\n%s", out)
 	}
-	plan := strings.Split(strings.Split(out, "\nPlan\n  Agents:\n")[1], "  Reviews:")[0]
+	plan := strings.Split(strings.Split(out, "foreman picks the tier per task):\n")[1], "  Reviews:")[0]
 	families := []string{"Anthropic", "OpenAI", "Moonshot", "Zhipu (GLM)"}
 	column := -1
 	rows := 0
@@ -1544,11 +1568,15 @@ func TestInitInteractiveLongModels(t *testing.T) {
 			}
 		}
 	}
-	if rows != 4 || !strings.Contains(plan, "kimi-code/kimi-for-coding") || !strings.Contains(plan, "zai-coding-plan/glm-5.3-highspeed @low") {
+	// Every model of claude (5), codex (3) and kimi (4), and the one OpenCode pick.
+	if rows != 13 || !strings.Contains(plan, "kimi-code/kimi-for-coding") || !strings.Contains(plan, "zai-coding-plan/glm-5.3-highspeed") {
 		t.Fatalf("missing agent rows:\n%s", plan)
 	}
-	if !strings.Contains(strings.Join(strings.Fields(plan), " "), "code + review") {
-		t.Fatalf("missing worker roles:\n%s", plan)
+	flat := strings.Join(strings.Fields(plan), " ")
+	for _, want := range []string{"Anthropic heavy writes code, reviews", "OpenAI light writes code, reviews", "Moonshot light writes code, reviews"} {
+		if !strings.Contains(flat, want) {
+			t.Fatalf("missing %q:\n%s", want, plan)
+		}
 	}
 }
 
@@ -1564,7 +1592,7 @@ func TestInitAgentsVeryLongModel(t *testing.T) {
 				"codex": {entries: []initModelEntry{{value: "default", name: "gpt-6.1-sol"}}},
 			}
 			var out bytes.Buffer
-			printInitAgents(&out, agents, 2, foreman, sources)
+			printInitAgents(&out, agents, 2, foreman, sources, adapter.AgentTier)
 			for _, line := range strings.Split(out.String(), "\n") {
 				if len([]rune(line)) >= 80 {
 					t.Errorf("line must be under 80 columns: %q", line)
@@ -1575,7 +1603,7 @@ func TestInitAgentsVeryLongModel(t *testing.T) {
 					t.Errorf("family must start under the model column: %q\n%s", family, out.String())
 				}
 			}
-			if !strings.Contains(out.String(), "  Foreman: codex/gpt-6.1-sol@high\n") {
+			if !strings.Contains(out.String(), "  Foreman: codex/gpt-6.1-sol, effort high\n") {
 				t.Errorf("foreman lost resolved default or effort:\n%s", out.String())
 			}
 		})
@@ -1654,14 +1682,14 @@ opencode/deepseek-v3
 {"name":"DeepSeek V3","status":"active","limit":{"context":1000000}}
 `, model)
 	fakeOpenCodeVerbose2(t, openCodeVerboseFile(t, verbose))
-	// The golden accepts defaults and leaves Kimi review-only. The long-model
-	// variant picks Haiku, a non-default Kimi model, and Codex as foreman.
-	// Both pick OpenCode model 1 and decline only the final apply. The long
-	// variant also picks low effort to exercise alignment with an override.
+	// The golden takes the foreman's defaults, uses every claude and codex
+	// model, uses kimi review-only, picks OpenCode model 1 and declines only
+	// the final apply. The long-model variant types Codex as the foreman with
+	// its second effort, and lets Kimi write code too.
 	state := filepath.Join(os.Getenv("HOME"), ".local", "state", "brigada")
-	input := "\n\n\n\ny\n\nN\n1\n\n\n\n\nn\n"
+	input := "\n\n\n\ny\nN\n1\n\n\nn\n"
 	if longModels {
-		input = "3\n\n\n\ny\n3\nN\n1\n2\n2\n\n\nn\n"
+		input = "codex/gpt-6.1-sol\n2\n\n\ny\nY\n1\n\n\nn\n"
 	}
 	code, out, errOut := initDo(t, state, input)
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
@@ -1705,27 +1733,32 @@ func TestInitForemanQuestion(t *testing.T) {
 		args                   []string
 		one                    bool
 	}{
-		{name: "default", input: "\nn\n", want: "claude/sonnet"},
-		{name: "choose codex", input: "2\nn\n", want: "codex/gpt-5"},
-		{name: "flag", input: "n\n", want: "codex/gpt-5", args: []string{"--foreman", "codex/gpt-5"}},
-		{name: "only planner", input: "n\n", want: "claude/sonnet", one: true},
-		{name: "retry", input: "3\n2\nn\n", want: "codex/gpt-5"},
-		{name: "retry limit", input: "3\n0\ninvalid\n", err: "--foreman: pick 1-2"},
+		{name: "default", input: "\n\nn\n", want: "claude/sonnet, effort medium"},
+		{name: "choose by number", input: "4\nn\n", want: "codex/CLI default"},
+		{name: "typed harness/model", input: "claude/opus\n3\nn\n", want: "claude/opus, effort high"},
+		{name: "flag asks only the effort", input: "2\nn\n", want: "claude/opus, effort low", args: []string{"--foreman", "claude/opus"}},
+		{name: "flag answers both", input: "n\n", want: "claude/opus, effort max", args: []string{"--foreman", "claude/opus@max"}},
+		{name: "flag names a codex model", input: "n\n", want: "codex/gpt-5", args: []string{"--foreman", "codex/gpt-5"}},
+		{name: "only planner", input: "n\n", want: "codex/CLI default", one: true},
+		{name: "retry", input: "9\n2\n\nn\n", want: "claude/opus, effort medium"},
+		{name: "retry limit", input: "9\n0\ninvalid\n", err: "--foreman HARNESS/MODEL:"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
 			fakeInitPATH(t, "claude", "codex", "opencode")
-			second := "harness=codex,model=gpt-5"
+			signedIn := "claude,codex,opencode"
 			if tc.one {
-				second = "harness=opencode,model=zai-coding-plan/glm-5.3"
+				// Only codex can plan, and its CLI default is its only model.
+				fakeInitPATH(t, "codex", "opencode")
+				signedIn = "codex,opencode"
 			}
-			args := append([]string{"--agent", "harness=claude,model=sonnet", "--agent", second, "--signed-in", "claude,codex,opencode", "--check", "true", "--tools", "none", "--no-wiring"}, tc.args...)
+			args := append([]string{"--agent", "harness=codex,model=gpt-5", "--agent", "harness=opencode,model=zai-coding-plan/glm-5.3", "--signed-in", signedIn, "--check", "true", "--tools", "none", "--no-wiring"}, tc.args...)
 			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), tc.input, args...)
 			if code != 1 {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
 			if tc.err != "" {
-				if !strings.Contains(errOut, tc.err) || strings.Contains(out, "\nPlan\n") || strings.Count(out, "  Pick 1-2 [1]:") != 3 {
+				if !strings.Contains(errOut, tc.err) || strings.Contains(out, "\nPlan\n") || strings.Count(out, "    Pick 1-4, or type harness/model [1]:") != 3 {
 					t.Fatalf("foreman retry limit: %s\n%s", out, errOut)
 				}
 				return
@@ -1733,12 +1766,23 @@ func TestInitForemanQuestion(t *testing.T) {
 			if errOut != "" || !strings.Contains(out, "Declined") || !strings.Contains(out, "  Foreman: "+tc.want+"\n") {
 				t.Fatalf("wrong foreman: %s\n%s", out, errOut)
 			}
-			if tc.one {
-				if !strings.Contains(out, "  Foreman: claude/sonnet (the only agent that can plan)") || strings.Contains(out, "  Pick 1-2") {
+			switch {
+			case tc.one:
+				if !strings.Contains(out, "  Foreman: codex/CLI default (the only model that can plan)") || strings.Contains(out, "harness/model [") {
 					t.Fatalf("asked for the only foreman: %s", out)
 				}
-			} else if tc.name == "flag" && strings.Contains(out, "  Pick 1-2") {
-				t.Fatalf("asked for a foreman answered by the flag: %s", out)
+			case len(tc.args) > 0 && strings.Contains(tc.args[1], "@"), tc.name == "flag names a codex model":
+				if strings.Contains(out, "Pick 1-") {
+					t.Fatalf("asked a question the flag answered: %s", out)
+				}
+			case len(tc.args) > 0:
+				if strings.Contains(out, "harness/model [") || !strings.Contains(out, "Pick 1-5 or type a level [1]:") {
+					t.Fatalf("flag without an effort must ask only the effort: %s", out)
+				}
+			}
+			// A foreman outside the agents' models plans and nothing else.
+			if strings.HasPrefix(tc.want, "claude/") && !strings.Contains(out, "foreman only") {
+				t.Fatalf("a claude foreman with no claude agent must be foreman only:\n%s", out)
 			}
 		})
 	}
@@ -1750,8 +1794,8 @@ func TestInitUnconfirmedUseQuestions(t *testing.T) {
 		include, confirmed    bool
 	}{
 		{name: "Enter leaves out", input: "\n\n\n\n\n\nn\n", signedIn: "claude,codex"},
-		{name: "opt in and pick numbers", input: "\n\n\ny\n1\n\ny\n2\n\nn\n", signedIn: "claude,codex", include: true},
-		{name: "flag answers Use", input: "\n\n\n1\n\n2\n\nn\n", signedIn: "claude,codex,kimi,opencode", include: true, confirmed: true},
+		{name: "opt in and pick numbers", input: "\n\n\n\ny\n\ny\n2\nn\n", signedIn: "claude,codex", include: true},
+		{name: "flag answers Use", input: "\n\n\n\n\n2\nn\n", signedIn: "claude,codex,kimi,opencode", include: true, confirmed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
@@ -1770,7 +1814,11 @@ func TestInitUnconfirmedUseQuestions(t *testing.T) {
 				if strings.Contains(out, "    Use "+h+"? [y/N]:") == tc.confirmed {
 					t.Errorf("incorrect Use question for %s:\n%s", h, out)
 				}
-				if strings.Contains(out, "Which model should "+h+" run?") != tc.include || strings.Contains(out, "    "+h+strings.Repeat(" ", 9-len(h))) != tc.include {
+				asked := "Let kimi write code too"
+				if h == "opencode" {
+					asked = "Which models should opencode run?"
+				}
+				if strings.Contains(out, asked) != tc.include || strings.Contains(out, "\n    "+h+strings.Repeat(" ", 9-len(h))) != tc.include {
 					t.Errorf("incorrect inclusion of %s:\n%s", h, out)
 				}
 			}
@@ -1788,8 +1836,8 @@ func TestInitOpenCodeMenuUnknownFamilies(t *testing.T) {
 	for _, tc := range []struct {
 		name, models, answer, prompt string
 	}{
-		{"mixed", "opencode/beam-free\\nopencode/claude-sonnet-4\\nopencode/big-pickle\\nopencode/beam-free\\n", "1\n", "Pick 1 or -, or type provider/model [-]:"},
-		{"all unknown", "opencode/beam-free\\nopencode/big-pickle\\n", "opencode/claude-sonnet-4\n", "Pick -, or type provider/model [-]:"},
+		{"mixed", "opencode/beam-free\\nopencode/claude-sonnet-4\\nopencode/big-pickle\\nopencode/beam-free\\n", "1\n", "Pick numbers (1,3) or -, or type provider/model [-]:"},
+		{"all unknown", "opencode/beam-free\\nopencode/big-pickle\\n", "opencode/claude-sonnet-4\n", "Pick numbers (1,3) or -, or type provider/model [-]:"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
@@ -1803,18 +1851,18 @@ func TestInitOpenCodeMenuUnknownFamilies(t *testing.T) {
 			if err := os.WriteFile(path, script, 0755); err != nil {
 				t.Fatal(err)
 			}
-			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "1\n"+tc.answer+"n\n", "--signed-in", "codex", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
+			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\n"+tc.answer+"n\n", "--signed-in", "codex", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 				t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 			}
-			menu := strings.Split(strings.Split(out, "Which model should opencode run?\n")[1], "\nPlan\n")[0]
+			menu := strings.Split(strings.Split(out, "Which models should opencode run? Its list spans providers, so pick the\n    ones you pay for.\n")[1], "\nPlan\n")[0]
 			if !strings.Contains(menu, "    2 more from `opencode models` aren't listed: brigada can't tell their model\n    family, which it needs to pick reviewers.\n") || !strings.Contains(menu, tc.prompt) {
 				t.Fatalf("missing omitted count or incorrect prompt:\n%s", menu)
 			}
 			rows := regexp.MustCompile(`(?m)^\s+\d+  .*`).FindAllString(menu, -1)
 			if tc.name == "mixed" {
-				if len(rows) != 1 || strings.TrimSpace(rows[0]) != "1  opencode/claude-sonnet-4  Anthropic" {
-					t.Fatalf("numbered unknown model or missing family: %q", rows)
+				if len(rows) != 1 || strings.TrimSpace(rows[0]) != "1  opencode/claude-sonnet-4" {
+					t.Fatalf("numbered unknown model or a family column: %q", rows)
 				}
 			} else if len(rows) != 0 {
 				t.Fatalf("numbered unknown models: %q", rows)
@@ -1844,57 +1892,64 @@ display_name = "K2.7 Code Highspeed"
 max_context_size = 1048576
 [models."provider/gemini-2.5-pro"]
 `)
-	args := []string{"--signed-in", strings.Join(initHarnesses, ","), "--foreman", "codex/default", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring"}
-	code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "1\n\n1\n-\n-\nn\n", args...)
+	args := []string{"--signed-in", strings.Join(initHarnesses, ","), "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring"}
+	// Take the first foreman and its effort, every claude and codex model,
+	// review-only kimi and no OpenCode model; then decline the plan.
+	// Only a claude foreman is asked an effort: the fake codex catalog has none.
+	baseline := func(foreman, opencode string, effort bool) string {
+		answers := foreman + "\n"
+		if effort {
+			answers += "\n"
+		}
+		return answers + "\n\n\n" + opencode + "\nn\n"
+	}
+	code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), baseline("1", "-", true), args...)
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("baseline init = %d\n%s\n%s", code, out, errOut)
 	}
-	rowsPattern := regexp.MustCompile(`(?m)^[ ]+(\d+)[ ]{2,}(\S+)[ ]{2,}(\S+(?: \(GLM\))?)`)
-	for _, harness := range initHarnesses {
-		menu := strings.Split(strings.Split(out, "Which model should "+harness+" run?\n")[1], "    Pick ")[0]
+	menuRows := regexp.MustCompile(`(?m)^[ ]+(\d+)[ ]{2,}(\S+)`)
+	check := func(name, menu string) [][]string {
 		for _, line := range strings.Split(menu, "\n") {
 			if utf8.RuneCountInString(line) >= 80 {
-				t.Errorf("%s menu line is %d columns: %q", harness, utf8.RuneCountInString(line), line)
+				t.Errorf("%s menu line is %d columns: %q", name, utf8.RuneCountInString(line), line)
 			}
 		}
-		rows := rowsPattern.FindAllStringSubmatch(menu, -1)
+		rows := menuRows.FindAllStringSubmatch(menu, -1)
 		if len(rows) == 0 {
-			t.Fatalf("no numbered entries for %s:\n%s", harness, menu)
+			t.Fatalf("no numbered entries for %s:\n%s", name, menu)
 		}
-		if harness == "codex" && len(rows) != 3 {
-			t.Fatalf("expected the default and both listed catalog models:\n%s", menu)
-		}
-		for _, row := range rows {
-			t.Run(harness+"/"+row[1], func(t *testing.T) {
-				answers := map[string]string{"claude": "1\n\n", "codex": "1\n", "kimi": "-\n", "opencode": "-\n"}
-				answers[harness] = row[1] + "\n"
-				if harness == "claude" {
-					answers[harness] += "\n" // Keep the CLI effort default.
+		return rows
+	}
+	foremanMenu := strings.Split(strings.Split(out, "Which model should the foreman run?\n")[1], "    Pick ")[0]
+	rows := check("foreman", foremanMenu)
+	if len(rows) != 8 {
+		t.Fatalf("expected claude's 5 models, codex's default and both listed catalog models:\n%s", foremanMenu)
+	}
+	for _, row := range rows {
+		t.Run("foreman/"+row[1], func(t *testing.T) {
+			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), baseline(row[1], "-", strings.HasPrefix(row[2], "claude/")), args...)
+			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") || strings.Contains(out, "try again") {
+				t.Fatalf("numbered entry %s rejected: %d\n%s\n%s", row[0], code, out, errOut)
+			}
+			if !strings.Contains(out, "  Foreman: "+row[2]) {
+				t.Fatalf("picked foreman missing from plan:\n%s", out)
+			}
+		})
+	}
+	opencodeMenu := strings.Split(strings.Split(out, "ones you pay for.\n")[1], "    Pick ")[0]
+	for _, row := range check("opencode", opencodeMenu) {
+		t.Run("opencode/"+row[1], func(t *testing.T) {
+			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), baseline("1", row[1], true), args...)
+			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") || strings.Contains(out, "try again") {
+				t.Fatalf("numbered entry %s rejected: %d\n%s\n%s", row[0], code, out, errOut)
+			}
+			plan := strings.Split(out, "\nPlan\n")[1]
+			for _, line := range strings.Split(plan, "\n") {
+				if strings.HasPrefix(line, "    opencode ") && strings.Contains(line, row[2]) {
+					return
 				}
-				if harness == "kimi" {
-					answers[harness] += "n\n" // Keep Kimi review-only.
-				}
-				var input strings.Builder
-				for _, h := range initHarnesses {
-					input.WriteString(answers[h])
-				}
-				input.WriteString("n\n")
-				pickArgs := args
-				if harness == "codex" && row[1] != "1" {
-					pickArgs = append(slices.Clone(args), "--foreman", "codex/"+row[2])
-				}
-				code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), input.String(), pickArgs...)
-				if code != 1 || errOut != "" || !strings.Contains(out, "Declined") || strings.Contains(out, "try again") {
-					t.Fatalf("numbered entry %s rejected: %d\n%s\n%s", row[0], code, out, errOut)
-				}
-				plan := strings.Split(out, "\nPlan\n")[1]
-				for _, line := range strings.Split(plan, "\n") {
-					if strings.HasPrefix(line, "    "+harness+" ") && strings.Contains(line, row[2]) && strings.Contains(line, row[3]) {
-						return
-					}
-				}
-				t.Fatalf("picked entry missing model/family in plan:\n%s", plan)
-			})
-		}
+			}
+			t.Fatalf("picked entry missing model in plan:\n%s", plan)
+		})
 	}
 }

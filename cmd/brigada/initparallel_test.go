@@ -18,7 +18,7 @@ import (
 func initTasksArgs(extra ...string) []string {
 	return append([]string{
 		"--agent", "harness=claude", "--agent", "harness=codex",
-		"--signed-in", "claude,codex", "--foreman", "claude/sonnet",
+		"--signed-in", "claude,codex", "--foreman", "claude/sonnet@medium",
 		"--check", "true", "--tools", "none", "--no-wiring",
 	}, extra...)
 }

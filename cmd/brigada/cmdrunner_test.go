@@ -795,7 +795,7 @@ func TestRunnerAgentModelsAndNoClasses(t *testing.T) {
 	if err := specs.Set("harness=claude,classes="); err == nil {
 		t.Fatal("empty classes= accepted")
 	}
-	if initAgentRoles([]string{}) != "foreman only" || initPlanRoles([]string{}) != "foreman only" {
+	if initAgentRoles([]string{}) != "foreman only" {
 		t.Fatal("empty roles must render as foreman only")
 	}
 }

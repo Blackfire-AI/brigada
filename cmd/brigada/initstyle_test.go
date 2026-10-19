@@ -277,8 +277,8 @@ func assertInitMenuPointers(t *testing.T, out string, utf8 bool) {
 		}
 		menus++
 	}
-	if menus != 9 {
-		t.Errorf("checked %d selected rows; want all 9 model, skip, effort, foreman and check menus", menus)
+	if menus != 4 {
+		t.Errorf("checked %d selected rows; want all 4 foreman model, foreman effort, OpenCode skip and check menus", menus)
 	}
 }
 
@@ -292,7 +292,7 @@ func TestInitChangeLaterWrap(t *testing.T) {
 			}
 			style := term.New(caps)
 			w := initOutput{Writer: &b, style: style, styled: styled, utf8: caps.UTF8}
-			how := "brigada project foreman --harness H --model M, or run brigada init again"
+			how := "brigada project foreman --harness H --model M --effort E, or run brigada init again"
 			initChangeLater(w, how)
 			lines := strings.Split(strings.TrimSuffix(ansi.ReplaceAllString(b.String(), ""), "\n"), "\n")[1:]
 			column := term.VisibleWidth(lines[0][:strings.Index(lines[0], "change later:")])
@@ -324,6 +324,9 @@ func TestInitModelDefaultAndCurrentTags(t *testing.T) {
 					}); err != nil {
 						t.Fatal(err)
 					}
+					if err := runnerstate.SaveForeman(filepath.Join(state, "runner"), "claude/sonnet@medium"); err != nil {
+						t.Fatal(err)
+					}
 				}
 				caps := logo.Caps{Width: 100}
 				if styled {
@@ -337,24 +340,15 @@ func TestInitModelDefaultAndCurrentTags(t *testing.T) {
 				if code != 1 || errs != "" || !strings.Contains(out, "Declined") {
 					t.Fatalf("init = %d\n%s\n%s", code, out, errs)
 				}
-				tag := "default"
-				if rerun {
-					tag = "current"
-				}
+				// The saved foreman and its effort are marked current at the row
+				// end; a first run has no such tag, only the rows' own notes.
 				rows := 0
 				for _, line := range strings.Split(out, "\n") {
 					plain := ansi.ReplaceAllString(line, "")
-					if strings.Contains(plain, "1  sonnet ") || strings.Contains(plain, "1  CLI default ") {
+					if strings.Contains(plain, "1  claude/sonnet ") || strings.Contains(plain, "1  medium ") {
 						rows++
-						rowTag := tag
-						if !rerun && strings.Contains(plain, "CLI default") {
-							rowTag = "your codex default"
-						}
-						if !strings.HasSuffix(line, term.New(caps).Accent(rowTag)) {
-							t.Errorf("model row must end with %s tag: %q", tag, line)
-						}
-						if rerun && strings.Contains(plain, " default current") {
-							t.Errorf("current must replace default: %q", line)
+						if rerun != strings.HasSuffix(line, term.New(caps).Accent("current")) || (!rerun && strings.Contains(plain, "current")) {
+							t.Errorf("row must end with the current tag only on a rerun: %q", line)
 						}
 					}
 					if term.VisibleWidth(line) >= term.New(caps).Width() {
@@ -362,7 +356,7 @@ func TestInitModelDefaultAndCurrentTags(t *testing.T) {
 					}
 				}
 				if rows != 2 {
-					t.Errorf("checked %d model rows; want Claude and Codex", rows)
+					t.Errorf("checked %d rows; want the foreman's model and effort", rows)
 				}
 				if strings.Contains(out, "ready") {
 					t.Fatal("claimed ready before applying")
@@ -390,6 +384,9 @@ func TestInitConfiguredDefaultRows(t *testing.T) {
 						}); err != nil {
 							t.Fatal(err)
 						}
+						if err := runnerstate.SaveForeman(filepath.Join(state, "runner"), "codex/default@high"); err != nil {
+							t.Fatal(err)
+						}
 					}
 					caps := logo.Caps{TTY: true, Width: width}
 					if styled {
@@ -398,43 +395,53 @@ func TestInitConfiguredDefaultRows(t *testing.T) {
 					original := initDetectCaps
 					initDetectCaps = func(io.Writer) logo.Caps { return caps }
 					t.Cleanup(func() { initDetectCaps = original })
-					code, out, errs := initDo(t, state, strings.Repeat("\n", 10),
+					// A first run picks codex as the foreman (a rerun saved it).
+					input := "4\n" + strings.Repeat("\n", 9)
+					if rerun {
+						input = strings.Repeat("\n", 10)
+					}
+					code, out, errs := initDo(t, state, input,
 						"--signed-in", "claude,codex,kimi", "--check", "true", "--tools", "none", "--no-wiring")
 					if code != 1 || errs != "" || !strings.Contains(out, "Declined") {
 						t.Fatalf("init = %d\n%s\n%s", code, out, errs)
 					}
 					plain := ansi.ReplaceAllString(out, "")
 					// Inspect the real model and effort menus, excluding the change-later line.
-					menus, later, _ := strings.Cut(plain, "change later:")
+					// The foreman's model and effort menus come before its change-later line.
+					menus, _, _ := strings.Cut(plain, "change later:")
 					compact := strings.Join(strings.Fields(menus), " ")
-					codexTag, kimiTag := "your codex default", "your kimi default"
+					// The codex row names its config path; the user's own effort leads
+					// its levels. On a rerun the saved foreman's rows say current.
+					modelTag, effortTag := "", "your codex default"
 					if rerun {
-						codexTag, kimiTag = "current", "current"
+						modelTag, effortTag = " current", "current"
 					}
 					for _, want := range []string{
-						"1 gpt-6.1-sol OpenAI Latest workhorse model for coding and everyday work. " + codexTag,
-						"3 high " + codexTag,
-						"1 default claude's default",
-						"1 kimi-code/k3 Moonshot K3, 1M context " + kimiTag,
+						"4 codex/gpt-6.1-sol your codex default (~/.codex/config.toml)" + modelTag,
+						"1 high " + effortTag,
+						"2 low",
 					} {
 						if !strings.Contains(compact, want) {
 							t.Errorf("menu lacks %q:\n%s", want, menus)
 						}
 					}
 					style := term.New(caps)
-					if !strings.Contains(out, style.Accent(codexTag)) || !strings.Contains(out, style.Accent(kimiTag)) {
+					if !strings.Contains(out, style.Accent(effortTag)) {
 						t.Errorf("default/current tag must be Accent: %q", out)
 					}
-					if strings.Contains(menus, "config.toml") || strings.Contains(compact, "default claude's default current") {
-						t.Errorf("redundant tag or config path in menu:\n%s", menus)
+					if strings.Contains(compact, "your codex default (~/.codex/config.toml) your codex default") {
+						t.Errorf("redundant tag in menu:\n%s", menus)
 					}
+					_, workers, _ := strings.Cut(plain, "Step 2 of 4")
+					_, later, _ := strings.Cut(workers, "change later:")
 					indent := strings.Repeat(" ", term.VisibleWidth("  "+style.Again()+" "))
 					if !strings.HasPrefix(later, " run brigada init again\n"+indent+"your own defaults: ~/.codex/config.toml, ~/.kimi-code/config.toml\n") {
 						t.Errorf("expected config paths on a separate change-later line:\n%s", later)
 					}
-					for _, path := range []string{"~/.codex/config.toml", "~/.kimi-code/config.toml"} {
-						if strings.Count(plain, path) != 1 {
-							t.Errorf("config path must appear once in change-later guidance: %s\n%s", path, plain)
+					// The codex path is also in the foreman menu's note.
+					for path, want := range map[string]int{"~/.codex/config.toml": 2, "~/.kimi-code/config.toml": 1} {
+						if strings.Count(plain, path) != want {
+							t.Errorf("config path %s appears %d times, want %d\n%s", path, strings.Count(plain, path), want, plain)
 						}
 					}
 					for _, line := range strings.Split(out, "\n") {

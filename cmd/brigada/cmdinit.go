@@ -51,7 +51,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	limited := fs.Bool("accept-limited", false, "acknowledge fewer than two review families; reviews still require another family")
 	check := fs.String("check", "", "default check command, or none / - for no check (never executed by init)")
 	tools := fs.String("tools", "", "worker scope in runner tools= syntax; applied only to Claude workers")
-	foreman := fs.String("foreman", "", "choose a usable resume-capable agent as harness/model")
+	foreman := fs.String("foreman", "", "choose the foreman, a signed-in claude or codex model, as harness/model[@effort]; without @effort an interactive run asks for the effort")
 	noWiring := fs.Bool("no-wiring", false, "skip harness wiring (the bridge, hooks and foreman skill for mode A; in a parent folder, the coordinator's)")
 	parallel := fs.Int("parallel", 0, "tasks at once on this machine (1..64)")
 	all := fs.Bool("all", false, "in a folder that is not a repository: register every new repository found, without asking")
@@ -113,6 +113,15 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if *all {
 		return usagef(stderr, "--all selects projects in a parent folder; this is one repository")
 	}
+	foremanWant, foremanHasEffort, foremanOK := parseInitForeman(*foreman)
+	if *foreman != "" && !foremanOK {
+		return usagef(stderr, "--foreman: want HARNESS/MODEL[@EFFORT], e.g. claude/sonnet@high")
+	}
+	if foremanHasEffort {
+		if err := adapter.ValidateEffort(foremanWant.harness, foremanWant.effort); err != nil {
+			return usagef(stderr, "--foreman: %v", err)
+		}
+	}
 	// An origin must exist; a real local bare remote is valid. Multiple origin
 	// URLs with different identities are ambiguous and must be fixed by the user.
 	origin, canon, err := initOrigin(ctx, root)
@@ -170,7 +179,20 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	reader := bufio.NewReader(projectStdin)
 	canAsk := !*yes && !*probe
-	var saved map[string]agentSpec
+	// A rerun defaults to the saved foreman and to the saved agents, one spec
+	// per model. A foreman-only spec (no classes) is not a task choice.
+	var saved map[string][]agentSpec
+	var savedForeman agentSpec
+	rerun := false
+	if canAsk {
+		value, err := runnerstate.LoadForeman(runnerStateDir(rt))
+		if err != nil {
+			return fail(stderr, err)
+		}
+		if spec, _, ok := parseInitForeman(value); ok {
+			savedForeman = spec
+		}
+	}
 	if canAsk && len(agents.specs) == 0 {
 		lines, err := runnerstate.LoadAgents(runnerStateDir(rt))
 		if err != nil {
@@ -183,9 +205,12 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 					return fail(stderr, fmt.Errorf("saved agents: %w", err))
 				}
 			}
-			saved = make(map[string]agentSpec)
+			rerun = true
+			saved = make(map[string][]agentSpec)
 			for _, spec := range choices.specs {
-				saved[spec.harness] = spec
+				if len(spec.classes) > 0 {
+					saved[spec.harness] = append(saved[spec.harness], spec)
+				}
 			}
 		}
 	}
@@ -241,14 +266,22 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		case "opencode":
 			source = initOpenCodeModels(ctx)
 		}
-		if spec, ok := saved[h]; ok {
-			source = initCurrentModel(source, spec)
+		// Only OpenCode's picks are individual choices: a saved model its
+		// list no longer shows stays pickable. The other CLIs offer every model.
+		if h == "opencode" {
+			for _, spec := range saved[h] {
+				source = initCurrentModel(source, spec)
+			}
 		}
 		sources[h] = source
 		probes[h] = source.signIn
 	}
+	confirmedCLI := func(h string) bool { return probes[h].signedIn || signedIn[h] }
 	if canAsk {
-		initStep(stdout, 1, "agents", "  Each agent CLI below can work for brigada. For each one, pick the model it\n  should run, or leave it out. Reviews always go to a different model family\n  than the author's, so you need at least two families (e.g. claude + codex).\n")
+		printInitSignedIn(stdout, probes, signedIn)
+		if len(agents.specs) == 0 {
+			fmt.Fprintln(stdout)
+		}
 	} else {
 		fmt.Fprintln(stdout, "Agent CLIs found:")
 		for _, h := range initHarnesses {
@@ -257,7 +290,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		fmt.Fprintln(stdout)
 	}
 	shown := map[string]bool{}
-	authenticate := func(spec agentSpec) (bool, error) {
+	authenticate := func(spec agentSpec, defaultYes ...bool) (bool, error) {
 		h := spec.harness
 		confirmed := probes[h].signedIn || signedIn[h]
 		if canAsk && !shown[h] {
@@ -287,17 +320,123 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			name += " account " + spec.accountLabel()
 		}
 		if h == "kimi" || h == "opencode" {
+			// A rerun that used this CLI keeps using it on Enter.
+			if len(defaultYes) > 0 && defaultYes[0] {
+				v, err := ask("    Use "+name+"? [Y/n]: ", "--signed-in "+h)
+				return !strings.EqualFold(v, "n") && !strings.EqualFold(v, "no"), err
+			}
 			v, err := ask("    Use "+name+"? [y/N]: ", "--signed-in "+h)
 			return strings.EqualFold(v, "y") || strings.EqualFold(v, "yes"), err
 		}
 		return confirm("    Are you signed in to "+name+"?", "--signed-in "+h)
 	}
+	var foremanSpec agentSpec
+	foremanEffort, foremanPicked := "", false
+	// pickForeman is step 1: the foreman's model among those of the signed-in
+	// claude and codex CLIs, then its effort. The foreman is a model, so it is
+	// chosen before the workers.
+	pickForeman := func() (agentSpec, string, int) {
+		initStep(stdout, 1, "the foreman", "  The foreman plans the work and decides what happens when a task needs\n  judgment. It runs whenever work finishes, so it uses that agent's quota.\n  Only claude and codex can be the foreman.\n")
+		candidates := initForemanCandidates(sources, confirmedCLI)
+		if len(candidates) == 0 {
+			return agentSpec{}, "", fail(stderr, fmt.Errorf("no foreman: only a signed-in claude or codex can plan; sign in to one and confirm it with --signed-in; nothing written or started"))
+		}
+		defaultChoice := 1
+		for i, c := range candidates {
+			if savedForeman.harness != "" && c.matches(savedForeman.harness, savedForeman.model) {
+				defaultChoice = i + 1
+			}
+		}
+		resolve := func(answer string) (initForemanChoice, error) {
+			if n, err := strconv.Atoi(answer); err == nil && n >= 1 && n <= len(candidates) {
+				return candidates[n-1], nil
+			}
+			harness, model, ok := strings.Cut(answer, "/")
+			if !ok {
+				return initForemanChoice{}, fmt.Errorf("%q is neither a number from the menu nor harness/model", answer)
+			}
+			return initResolveForeman(candidates, sources, harness, model)
+		}
+		var choice initForemanChoice
+		switch {
+		case *foreman != "":
+			c, err := initResolveForeman(candidates, sources, foremanWant.harness, foremanWant.model)
+			if err != nil {
+				return agentSpec{}, "", usagef(stderr, "--foreman must name a usable agent that resumes headless (claude/model or codex/model); none matched")
+			}
+			choice = c
+		case len(candidates) == 1:
+			choice = candidates[0]
+			fmt.Fprintf(stdout, "  Foreman: %s (the only model that can plan)\n", choice.name())
+		default:
+			fmt.Fprintln(stdout, initDim(stdout, "    Which model should the foreman run?"))
+			printInitForemanMenu(stdout, candidates, defaultChoice, savedForeman)
+			for attempt := 0; ; attempt++ {
+				answer, err := ask(fmt.Sprintf("    Pick %s, or type harness/model [%d]: ", initPickRange(len(candidates)), defaultChoice), "--foreman HARNESS/MODEL")
+				if err != nil {
+					return agentSpec{}, "", fail(stderr, err)
+				}
+				if answer == "" {
+					answer = strconv.Itoa(defaultChoice)
+				}
+				c, err := resolve(answer)
+				if err == nil {
+					choice = c
+					break
+				}
+				if attempt == 2 {
+					return agentSpec{}, "", usagef(stderr, "--foreman HARNESS/MODEL: %v; pick %s, or type harness/model", err, initPickRange(len(candidates)))
+				}
+				fmt.Fprintf(stdout, "  %v; try again.\n", err)
+				fmt.Fprintln(stdout, "  pick a numbered entry, or type harness/model")
+			}
+		}
+		effort := foremanWant.effort
+		if !foremanHasEffort {
+			var savedEffort []string
+			if savedForeman.harness != "" && choice.matches(savedForeman.harness, savedForeman.model) {
+				savedEffort = []string{savedForeman.effort}
+			}
+			var err error
+			effort, err = initPickEffort(stdout, choice.harness, choice.entry, ask, savedEffort...)
+			if err != nil {
+				return agentSpec{}, "", fail(stderr, err)
+			}
+		}
+		initChangeLater(stdout, "brigada project foreman --harness H --model M --effort E, or run brigada init again")
+		return agentSpec{harness: choice.harness, model: choice.entry.value}, effort, 0
+	}
 	if len(agents.specs) == 0 && canAsk {
-		for _, h := range initHarnesses {
-			if !probes[h].installed {
+		asked := false
+		for _, h := range []string{"claude", "codex"} {
+			if !probes[h].installed || confirmedCLI(h) {
 				continue
 			}
-			authenticated, err := authenticate(agentSpec{harness: h})
+			asked = true
+			if probes[h].checked {
+				printInitWrapped(stdout, "", "  ", h+": "+probes[h].status+".")
+			}
+			ok, err := confirm("    Are you signed in to "+h+"?", "--signed-in "+h)
+			if err != nil {
+				return fail(stderr, err)
+			}
+			signedIn[h] = ok
+		}
+		if asked {
+			fmt.Fprintln(stdout)
+		}
+		var exit int
+		if foremanSpec, foremanEffort, exit = pickForeman(); exit != 0 {
+			return exit
+		}
+		foremanPicked = true
+		fmt.Fprintln(stdout)
+		initStep(stdout, 2, "workers", "  Each agent CLI below can run tasks. brigada offers every model the CLI\n  knows: for each task the foreman says how heavy a model it needs (light,\n  standard, heavy) and how hard it should think, and brigada picks the\n  model of that tier with the best record on this repo. Reviews always go\n  to a different model family than the author's, so you need at least two\n  families (e.g. claude + codex).\n")
+		for _, h := range initHarnesses {
+			if !probes[h].installed || ((h == "claude" || h == "codex") && !confirmedCLI(h)) {
+				continue
+			}
+			authenticated, err := authenticate(agentSpec{harness: h}, len(saved[h]) > 0)
 			if err != nil {
 				return fail(stderr, err)
 			}
@@ -305,157 +444,100 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				continue
 			}
 			signedIn[h] = true
-			entries := sources[h].entries
-			fmt.Fprintln(stdout, initDim(stdout, fmt.Sprintf("    Which model should %s run?", h)))
-			width, familyWidth := 0, 0
-			familyNames := make([]string, len(entries))
-			for i, entry := range entries {
-				family, _ := initModelFamily(h, entry.value)
-				familyNames[i] = initFamilyName(family)
-				width = max(width, term.VisibleWidth(initMenuModelName(entry)))
-				familyWidth = max(familyWidth, term.VisibleWidth(familyNames[i]))
+			entries := initEligibleEntries(h, sources[h])
+			if len(entries) == 0 && h != "opencode" {
+				continue
 			}
-			for i, entry := range entries {
-				defaultID := sources[h].defaultID
-				if defaultID == 0 {
-					defaultID = 1
+			var models []string
+			var classes []string
+			switch h {
+			case "claude", "codex":
+				names := initUseNames(h, entries, rt.file.Caps.TierOf)
+				def := !rerun || len(saved[h]) > 0
+				hint := "[Y/n]"
+				if !def {
+					hint = "[y/N]"
 				}
-				_, wasUsed := saved[h]
-				if (h == "opencode" && !wasUsed) || (saved != nil && !wasUsed) {
-					defaultID = 0
-				}
-				prefix := initMenuPrefix(stdout, "      ", entry.id, initMenuModelName(entry), width, entry.id == defaultID) + "  " + initDim(stdout, familyNames[i])
-				note, tags := entry.note, ""
-				if entry.isDefault {
-					tags = "your " + h + " default"
-				}
-				if entry.isCurrent {
-					tags = "current"
-				} else if entry.id == defaultID && tags == "" {
-					tags = "default"
-				}
-				if initMenuModelName(entry) == "default" {
-					tags = ""
-				}
-				if note != "" || tags != "" {
-					prefix += strings.Repeat(" ", familyWidth-term.VisibleWidth(familyNames[i])+2)
-				}
-				printInitRow(stdout, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), note, tags)
-			}
-			if h != "kimi" || saved != nil {
-				indent := "      "
-				_, wasUsed := saved[h]
-				name := initDim(stdout, "  don't use "+h)
-				if styled && ((h == "opencode" && !wasUsed) || (saved != nil && !wasUsed)) {
-					indent = "     " + style.Pointer()
-					name = "  " + style.Bold("don't use "+h)
-				}
-				tag := ""
-				if (h == "opencode" && !wasUsed) || (saved != nil && !wasUsed) {
-					tag = "  " + style.Accent("default")
-				}
-				fmt.Fprintln(stdout, indent+style.Accent(" -")+name+tag)
-			}
-			if sources[h].unknownCount > 0 {
-				command := "opencode models"
-				if h == "codex" {
-					command = "codex debug models"
-				}
-				printInitWrapped(stdout, "    ", "    ", initDim(stdout, fmt.Sprintf("%d more from `%s` aren't listed: brigada can't tell their model family, which it needs to pick reviewers.", sources[h].unknownCount, command)))
-			}
-			defaultAnswer := "-"
-			_, wasUsed := saved[h]
-			if len(entries) > 0 && (h != "opencode" || wasUsed) &&
-				(saved == nil || wasUsed) {
-				defaultAnswer = "1"
-				if sources[h].defaultID > 0 {
-					defaultAnswer = strconv.Itoa(sources[h].defaultID)
-				}
-			}
-			pick := initPickRange(len(entries))
-			if h != "kimi" || saved != nil {
-				if pick != "" {
-					pick += " or "
-				}
-				pick += "-"
-			}
-			identifier := "a model id"
-			if h == "opencode" {
-				identifier = "provider/model"
-			}
-			prompt := fmt.Sprintf("    Pick %s, or type %s [%s]: ", pick, identifier, defaultAnswer)
-			for attempt := 0; attempt < 3; attempt++ {
-				model, err := askLine(prompt, "--agent harness="+h+",model=MODEL")
+				answer, err := ask(fmt.Sprintf("    Use %s's models for tasks (%s)? %s: ", h, names, hint), "--agent harness="+h+",model=MODEL")
 				if err != nil {
 					return fail(stderr, err)
 				}
-				if model == "" {
-					model = defaultAnswer
+				use := def
+				switch strings.ToLower(answer) {
+				case "y", "yes":
+					use = true
+				case "n", "no":
+					use = false
 				}
-				if model == "-" {
-					break
+				if !use {
+					continue
 				}
 				for _, entry := range entries {
-					if model == strconv.Itoa(entry.id) {
-						model = entry.value
+					models = append(models, entry.value)
+				}
+			case "kimi":
+				if styled {
+					printInitWrapped(stdout, "    ", "    ", style.Warn(style.Warning()+" kimi has no sandbox: when it writes code it can run any command on this machine without asking. As a reviewer it only reads."))
+				} else {
+					fmt.Fprint(stdout, "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. As a reviewer it only reads.\n")
+				}
+				writes := len(saved[h]) > 0 && slices.Contains(saved[h][0].classes, "implement")
+				hint := "y/N"
+				if writes {
+					hint = "Y/n"
+				}
+				answer, err := ask("    Let kimi write code too, not only review? ["+hint+"]: ", "--agent harness=kimi,classes=review (or implement+review+answer to allow writing)")
+				if err != nil {
+					return fail(stderr, err)
+				}
+				classes = []string{"review"}
+				if answer == "" && len(saved[h]) > 0 {
+					classes = slices.Clone(saved[h][0].classes)
+				} else if strings.EqualFold(answer, "y") || strings.EqualFold(answer, "yes") {
+					classes = splitList(defaultClasses)
+				}
+				for _, entry := range entries {
+					models = append(models, entry.value)
+				}
+			case "opencode":
+				printInitOpenCodeMenu(stdout, entries, sources[h].unknownCount, len(saved[h]) > 0)
+				defaultAnswer := "-"
+				if ids := initCurrentIDs(entries); ids != "" {
+					defaultAnswer = ids
+				}
+				prompt := fmt.Sprintf("    Pick numbers (1,3) or -, or type provider/model [%s]: ", defaultAnswer)
+				for attempt := 0; attempt < 3; attempt++ {
+					answer, err := askLine(prompt, "--agent harness=opencode,model=PROVIDER/MODEL")
+					if err != nil {
+						return fail(stderr, err)
+					}
+					if strings.TrimSpace(answer) == "" {
+						answer = defaultAnswer
+					}
+					picks, err := parseInitOpenCodePicks(entries, answer)
+					if err == nil {
+						models = picks
 						break
 					}
-				}
-				if _, err := initModelFamily(h, model); err != nil {
 					if attempt == 2 {
 						return usagef(stderr, "--agent %s: %v; pick a numbered entry, or type a model whose name says its family", h, err)
 					}
 					fmt.Fprintf(stdout, "  %v; try again.\n", err)
 					fmt.Fprintln(stdout, "  pick a numbered entry, or type a model whose name says its family")
-					continue
 				}
-				classes := splitList(defaultClasses)
-				entry := initPickedModel(h, model, sources)
-				var currentEffort []string
-				previous, hadPrevious := saved[h]
-				if hadPrevious && previous.model == model {
-					currentEffort = []string{previous.effort}
+			}
+			for _, model := range models {
+				spec := agentSpec{harness: h, model: model, classes: splitList(defaultClasses)}
+				if i := slices.IndexFunc(saved[h], func(s agentSpec) bool { return s.model == model }); i >= 0 {
+					spec = saved[h][i]
 				}
-				effort, err := initPickEffort(
-					stdout, h, entry, askLine, currentEffort...)
-				if err != nil {
-					return fail(stderr, err)
+				if classes != nil {
+					spec.classes = slices.Clone(classes)
 				}
-				if h == "kimi" {
-					if styled {
-						printInitWrapped(stdout, "    ", "    ", style.Warn(style.Warning()+" kimi has no sandbox: when it writes code it can run any command on this machine without asking. As a reviewer it only reads."))
-					} else {
-						fmt.Fprint(stdout, "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. As a reviewer it only reads.\n")
-					}
-					writes := hadPrevious &&
-						slices.Contains(previous.classes, "implement")
-					defaultAnswer := "y/N"
-					if writes {
-						defaultAnswer = "Y/n"
-					}
-					answer, err := ask("    Let kimi write code too, not only review? ["+defaultAnswer+"]: ", "--agent harness=kimi,classes=review (or implement+review+answer to allow writing)")
-					if err != nil {
-						return fail(stderr, err)
-					}
-					if answer == "" && hadPrevious {
-						classes = slices.Clone(previous.classes)
-					} else if !strings.EqualFold(answer, "y") &&
-						!strings.EqualFold(answer, "yes") {
-						classes = []string{"review"}
-					}
-				}
-				spec := agentSpec{harness: h, classes: classes}
-				if hadPrevious {
-					spec = previous
-					if h == "kimi" {
-						spec.classes = classes
-					}
-				}
-				spec.model, spec.effort = model, effort
 				agents.specs = append(agents.specs, spec)
-				break
 			}
 		}
+		initChangeLater(stdout, initAgentChangeLater(sources))
 	}
 	var usable []agentSpec
 	var available []agentSpec
@@ -535,70 +617,44 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			return fail(stderr, fmt.Errorf("setup stopped; add a second review family or explicitly acknowledge with --accept-limited; nothing written or started"))
 		}
 	}
-	var chosen *agentSpec
-	for i := range usable {
-		s := &usable[i]
-		if adapter.ResumeCapable(s.harness) && (*foreman == "" || *foreman == s.harness+"/"+s.model) {
-			chosen = s
-			break
-		}
-	}
-	if chosen == nil {
-		return usagef(stderr, "--foreman must name a usable agent that resumes headless (claude/model or codex/model); none matched")
-	}
-	if canAsk {
-		initChangeLater(stdout, initAgentChangeLater(sources))
-		fmt.Fprintln(stdout)
-		initStep(stdout, 2, "the foreman", "  The foreman plans the work and decides what happens when a task needs\n  judgment. It runs whenever work finishes, so it uses that agent's quota.\n  Only claude and codex can be the foreman; it uses the model picked above\n  and its effort.\n")
-		var candidates []*agentSpec
-		defaultChoice := 1
-		for _, h := range initHarnesses {
-			for i := range usable {
-				if usable[i].harness == h && adapter.ResumeCapable(h) {
-					candidates = append(candidates, &usable[i])
-					if chosen == &usable[i] {
-						// Preserve the first resume-capable --agent in flag order as
-						// the default, even when the CLI-ordered menu starts elsewhere.
-						defaultChoice = len(candidates)
-					}
-				}
+	// The foreman is the model picked above, picked now when --agent skipped
+	// the worker questions, or the first agent that resumes when nothing is asked.
+	foremanIndex := -1
+	if !canAsk {
+		for i := range usable {
+			s := &usable[i]
+			if adapter.ResumeCapable(s.harness) && (*foreman == "" || foremanWant.harness+"/"+foremanWant.model == s.harness+"/"+s.model) {
+				foremanIndex = i
+				break
 			}
 		}
-		if len(candidates) == 1 {
-			fmt.Fprintf(stdout, "  Foreman: %s (the only agent that can plan)\n", initForemanName(*chosen, sources))
-		} else {
-			for i, candidate := range candidates {
-				prefix := initMenuPrefix(stdout, "   ", i+1, initForemanName(*candidate, sources), 0, i+1 == defaultChoice)
-				tags := ""
-				if i+1 == defaultChoice {
-					tags = "default"
-					prefix += "  "
-				}
-				printInitRow(stdout, prefix, "        ", "", tags)
-			}
-			if *foreman == "" {
-				for attempt := 0; attempt < 3; attempt++ {
-					answer, err := ask(fmt.Sprintf("  Pick %s [%d]: ", initPickRange(len(candidates)), defaultChoice), "--foreman HARNESS/MODEL")
-					if err != nil {
-						return fail(stderr, err)
-					}
-					if answer == "" {
-						answer = strconv.Itoa(defaultChoice)
-					}
-					n, err := strconv.Atoi(answer)
-					if err == nil && n >= 1 && n <= len(candidates) {
-						chosen = candidates[n-1]
-						break
-					}
-					if attempt == 2 {
-						return usagef(stderr, "--foreman: pick %s", initPickRange(len(candidates)))
-					}
-					fmt.Fprintf(stdout, "  pick %s; try again.\n", initPickRange(len(candidates)))
-				}
-			}
+		if foremanIndex < 0 {
+			return usagef(stderr, "--foreman must name a usable agent that resumes headless (claude/model or codex/model); none matched")
 		}
-		initChangeLater(stdout, "brigada project foreman --harness H --model M, or run brigada init again")
+		foremanEffort = usable[foremanIndex].effort
+		if foremanHasEffort {
+			foremanEffort = foremanWant.effort
+		}
+	} else {
+		if !foremanPicked {
+			fmt.Fprintln(stdout)
+			var exit int
+			if foremanSpec, foremanEffort, exit = pickForeman(); exit != 0 {
+				return exit
+			}
+			fmt.Fprintln(stdout)
+			initStep(stdout, 2, "workers", "  Set by your --agent flags.\n")
+		}
+		foremanIndex = slices.IndexFunc(usable, func(s agentSpec) bool {
+			return s.harness == foremanSpec.harness && s.model == foremanSpec.model
+		})
+		if foremanIndex < 0 {
+			// The foreman's CLI is not used for tasks: it plans and nothing else.
+			usable = append(usable, agentSpec{harness: foremanSpec.harness, model: foremanSpec.model, classes: []string{}})
+			foremanIndex = len(usable) - 1
+		}
 	}
+	chosen := &usable[foremanIndex]
 
 	if canAsk {
 		fmt.Fprintln(stdout)
@@ -714,7 +770,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if canAsk {
 		fmt.Fprintln(stdout)
 	}
-	printInitAgents(stdout, usable, len(families), *chosen, sources)
+	planForeman := *chosen
+	planForeman.effort = foremanEffort
+	printInitAgents(stdout, usable, len(families), planForeman, sources, rt.file.Caps.TierOf)
 	var accounts []string
 	seenAccounts := map[string]bool{}
 	for _, h := range initHarnesses {
@@ -733,10 +791,12 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	printInitWrapped(stdout, "  "+style.Bold("Check:")+" ", "    ", checkSummary)
 	fmt.Fprintln(stdout, "  "+style.Bold("What workers may do:"))
+	listed := map[string]bool{}
 	for _, a := range adverts {
-		if !slices.Contains(a.Classes, "implement") {
+		if !slices.Contains(a.Classes, "implement") || listed[a.Harness] {
 			continue
 		}
+		listed[a.Harness] = true
 		var permissions string
 		switch a.Harness {
 		case "claude":
@@ -766,7 +826,6 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 	}
 	printInitWrapped(stdout, "  "+style.Bold("In the background:")+" ", "    ", "a runner starts now and keeps going (log: "+initHomePath(filepath.Join(rt.stateDir, "runner.log"))+"; stop it with: "+style.Accent("brigada stop")+"). The engine starts when needed and stops after 30 idle minutes.")
-	printInitWrapped(stdout, "    ", "    ", style.Accent("brigada config")+style.Dim(" shows every setting later"))
 	fmt.Fprintln(stdout)
 	if *probe {
 		printInitWrapped(stdout, "", "  ", "Probe only; nothing written or started. Re-run without --probe to confirm, or with --yes to apply.")
@@ -832,6 +891,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		runnerStateDir(rt), runnerSpecStrings(usable)); err != nil {
 		return partial(fmt.Errorf("save agent choices: %w", err))
 	}
+	if err := runnerstate.SaveForeman(runnerStateDir(rt), agentName(chosen.harness, chosen.model, foremanEffort)); err != nil {
+		return partial(fmt.Errorf("save foreman choice: %w", err))
+	}
 	written := 0
 	if !exists || !bytes.Equal(old, proposed) {
 		written++
@@ -867,8 +929,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil {
 		return partial(fmt.Errorf("import succeeded but reading foreman failed: %w", err))
 	}
-	if currentForeman.Harness != chosen.harness || currentForeman.Model != chosen.model || currentForeman.Effort != chosen.effort {
-		if _, err := client.SetProjectForeman(ctx, origin, chosen.harness, chosen.model, chosen.effort); err != nil {
+	if currentForeman.Harness != chosen.harness || currentForeman.Model != chosen.model || currentForeman.Effort != foremanEffort {
+		if _, err := client.SetProjectForeman(ctx, origin, chosen.harness, chosen.model, foremanEffort); err != nil {
 			return partial(fmt.Errorf("import succeeded but foreman registration failed: %w", err))
 		}
 	}
@@ -991,92 +1053,6 @@ func initCurrentModel(source initModelSource, spec agentSpec) initModelSource {
 	entry.isCurrent = true
 	source.defaultID = entry.id
 	return source
-}
-
-func initPickEffort(w io.Writer, harness string, entry initModelEntry,
-	ask func(string, string) (string, error), saved ...string) (string, error) {
-	if harness == "kimi" {
-		if entry.defaultEffort != "" {
-			printInitWrapped(w, "    Effort: ", "    ", initDim(w, entry.defaultEffort+", kimi's own setting for this model (brigada can't set it per run)."))
-		}
-		return "", nil
-	}
-	if len(entry.effortLevels) < 2 {
-		if len(saved) > 0 {
-			return saved[0], nil
-		}
-		return "", nil
-	}
-	levels := entry.effortLevels
-	defaultIndex := slices.Index(levels, entry.defaultEffort)
-	if defaultIndex < 0 {
-		levels = append([]string{"default"}, levels...)
-		defaultIndex = 0
-	}
-	pickIndex := defaultIndex
-	if len(saved) > 0 && saved[0] != "" {
-		if index := slices.Index(levels, saved[0]); index >= 0 {
-			pickIndex = index
-		}
-	}
-	printInitWrapped(w, "    ", "    ", initDim(w, "How hard should "+initMenuModelName(entry)+" think? More effort gives better results on hard tasks and uses more of your plan's limits."))
-	width := 0
-	for _, level := range levels {
-		width = max(width, term.VisibleWidth(level))
-	}
-	for i, level := range levels {
-		note, tags := "", ""
-		if i == defaultIndex {
-			if level == "default" {
-				note = harness + "'s default"
-			} else if entry.effortFromUser {
-				tags = "your " + harness + " default"
-			} else {
-				tags = "default"
-			}
-		}
-		if len(saved) > 0 && i == pickIndex {
-			tags = "current"
-		}
-		if level == "default" {
-			tags = ""
-		}
-		prefix := initMenuPrefix(w, "      ", i+1, level, width, i == pickIndex)
-		if note != "" || tags != "" {
-			prefix += "  "
-		} else {
-			prefix = strings.TrimRight(prefix, " ")
-		}
-		printInitRow(w, prefix, strings.Repeat(" ", 10+width+2), note, tags)
-	}
-	flags := "--agent harness=" + harness + ",effort=LEVEL"
-	for attempt := 0; attempt < 3; attempt++ {
-		answer, err := ask(fmt.Sprintf("    Pick %s [%d]: ", initPickRange(len(levels)), pickIndex+1), flags)
-		if err != nil {
-			return "", err
-		}
-		if answer == "" {
-			if len(saved) > 0 && saved[0] != "" &&
-				levels[pickIndex] == saved[0] {
-				return saved[0], nil
-			}
-			return "", nil
-		}
-		index := slices.Index(levels, answer)
-		if n, err := strconv.Atoi(answer); err == nil && n >= 1 && n <= len(levels) {
-			index = n - 1
-		}
-		if index >= 0 {
-			if index == defaultIndex {
-				return "", nil
-			}
-			return levels[index], nil
-		}
-		if attempt < 2 {
-			fmt.Fprintf(w, "    pick %s or a listed effort level; try again.\n", initPickRange(len(levels)))
-		}
-	}
-	return "", fmt.Errorf("%s: pick %s or a listed effort level", flags, initPickRange(len(levels)))
 }
 
 func initForemanName(spec agentSpec, sources map[string]initModelSource) string {
@@ -1244,7 +1220,10 @@ func initFamilyName(family string) string {
 	}
 }
 
-func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agentSpec, sources map[string]initModelSource) {
+// printInitAgents is the Plan's foreman and agent table. The tier is what the
+// foreman asks for per task; each row names the harness, model, family, tier
+// and what the agent may do.
+func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agentSpec, sources map[string]initModelSource, tier func(harness, model string) string) {
 	out := initPresentation(w)
 	style := out.style
 	heading := "Plan"
@@ -1252,10 +1231,16 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 		heading = style.Rule() + " Plan"
 	}
 	fmt.Fprintln(w, style.Bold(heading))
-	fmt.Fprintln(w, "  "+style.Bold("Agents:"))
-	modelWidth, familyWidth := 0, 0
+	foremanText := initForemanName(agentSpec{harness: foreman.harness, model: foreman.model}, sources)
+	if foreman.effort != "" {
+		foremanText += ", effort " + foreman.effort
+	}
+	printInitWrapped(w, "  "+style.Bold("Foreman:")+" ", "    ", foremanText)
+	fmt.Fprintln(w, "  "+style.Bold("Agents (every model of each CLI; the foreman picks the tier per task):"))
+	modelWidth, familyWidth, tierWidth := 0, 0, 0
 	familyNames := make([]string, len(agents))
 	modelCells := make([]string, len(agents))
+	tiers := make([]string, len(agents))
 	for i, s := range agents {
 		family, _ := adapter.AgentFamily(s.harness, s.model)
 		family = initFamilyName(family)
@@ -1264,61 +1249,41 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 		if s.effort != "" {
 			modelCells[i] += style.Dim(" @" + s.effort)
 		}
+		tiers[i] = tier(s.harness, s.model)
 		modelWidth = max(modelWidth, term.VisibleWidth(modelCells[i]))
 		familyWidth = max(familyWidth, term.VisibleWidth(family))
+		tierWidth = max(tierWidth, term.VisibleWidth(tiers[i]))
 	}
+	// A role wraps within its column; it needs about this much room.
+	const roleRoom = 12
 	for i, s := range agents {
-		// If the fixed columns leave no room for roles, put family and roles
-		// on a second line under the model column for every row. Very long
-		// identifiers wrap within that column, with roles on a separate line.
-		if 14+modelWidth+2+familyWidth+2 >= style.Width()-1 {
+		roles := initAgentRoles(s.classes)
+		// If the fixed columns leave no room for roles, put family, tier and
+		// roles on a second line under the model column for every row. Very
+		// long identifiers wrap within that column, with the rest on separate
+		// lines.
+		if 14+modelWidth+2+familyWidth+2+tierWidth+2+roleRoom >= style.Width()-1 {
 			indent := strings.Repeat(" ", 14)
 			printInitWrapped(w, fmt.Sprintf("    %-9s ", s.harness), indent, modelCells[i])
-			if 14+familyWidth+2 >= style.Width()-1 {
+			if 14+familyWidth+2+tierWidth+2+roleRoom >= style.Width()-1 {
 				printInitWrapped(w, indent, indent, style.Dim(familyNames[i]))
-				printInitWrapped(w, indent, indent, initPlanRoles(s.classes))
+				printInitWrapped(w, indent, indent, tiers[i])
+				printInitWrapped(w, indent, indent, roles)
 			} else {
-				prefix := indent + initPad(style.Dim(familyNames[i]), familyWidth) + "  "
-				printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), initPlanRoles(s.classes))
+				prefix := indent + initPad(style.Dim(familyNames[i]), familyWidth) + "  " + initPad(tiers[i], tierWidth) + "  "
+				printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), roles)
 			}
 			continue
 		}
-		prefix := fmt.Sprintf("    %-9s ", s.harness) + initPad(modelCells[i], modelWidth) + "  " + initPad(style.Dim(familyNames[i]), familyWidth) + "  "
-		printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), initPlanRoles(s.classes))
+		prefix := fmt.Sprintf("    %-9s ", s.harness) + initPad(modelCells[i], modelWidth) + "  " + initPad(style.Dim(familyNames[i]), familyWidth) + "  " + initPad(tiers[i], tierWidth) + "  "
+		printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), roles)
 	}
 	printInitWrapped(w, "  "+style.Bold("Reviews:")+" ", "    ", fmt.Sprintf("%d model families, so every task can get a reviewer of another one.", families))
-	printInitWrapped(w, "  "+style.Bold("Foreman:")+" ", "    ", initForemanName(foreman, sources))
 }
 
 // initPad right-pads text, which may carry escapes, to a visible width.
 func initPad(text string, width int) string {
 	return text + strings.Repeat(" ", max(0, width-term.VisibleWidth(text)))
-}
-
-// initPlanRoles is a Plan row's role phrase: "code + review", or
-// "review only" for a single role.
-func initPlanRoles(classes []string) string {
-	if len(classes) == 0 {
-		return "foreman only"
-	}
-	if len(classes) == 3 && slices.Contains(classes, "implement") && slices.Contains(classes, "review") && slices.Contains(classes, "answer") {
-		return "code + review"
-	}
-	var roles []string
-	for _, class := range classes {
-		switch class {
-		case "implement":
-			roles = append(roles, "code")
-		case "review":
-			roles = append(roles, "review")
-		default:
-			roles = append(roles, class)
-		}
-	}
-	if len(roles) == 1 {
-		return roles[0] + " only"
-	}
-	return strings.Join(roles, " + ")
 }
 
 func initApplyPrompt(files int, running bool) string {

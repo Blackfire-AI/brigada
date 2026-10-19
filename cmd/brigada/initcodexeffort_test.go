@@ -38,14 +38,14 @@ func TestInitCodexUserEffortDefault(t *testing.T) {
 			}
 			assertInitModelPrivacy(t, got)
 
-			// The menu names the user's own default and picking it records none.
+			// The menu names the user's own default first, and Enter records it.
 			var out bytes.Buffer
 			ask := func(string, string) (string, error) { return "", nil }
 			effort, err := initPickEffort(&out, "codex", got.entries[0], ask)
-			if err != nil || effort != "" {
-				t.Fatalf("pick = %q, %v", effort, err)
+			if err != nil || effort != tc.wantGPT5 {
+				t.Fatalf("pick = %q, %v; want %q", effort, err, tc.wantGPT5)
 			}
-			wantNote := "default"
+			wantNote := "codex's default"
 			if tc.wantGPT5 == "high" {
 				wantNote = "your codex default"
 			}
@@ -84,7 +84,7 @@ func TestInitCurrentTagMovesToRowEnd(t *testing.T) {
 	if _, err := initPickEffort(&out, "codex", entry, ask, "high"); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"low   default\n", "high  current\n"} {
+	for _, want := range []string{"low   codex's default\n", "high  current\n"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("effort menu lacks %q:\n%s", want, out.String())
 		}

@@ -44,33 +44,38 @@ Four parts, one binary:
 
 Run `brigada init` inside a repository. (At the top of a folder that holds several repositories, init does something else: see [section 3](#3-several-repositories-mode-b).) The repository must have an `origin` remote, and all its URLs must name one repository. Init prints the canonical repository identity, then walks you through four steps. Nothing is written or started until you confirm the plan at the end.
 
-1. **Agents.** Init checks installed CLIs in order: `claude`, `codex`, `kimi`, `opencode`. For each one, it checks or asks about sign-in, then offers a numbered model menu.
+Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi`, `opencode`) and prints one `Signed in:` line naming the confirmed ones, with the probe's detail in parentheses where there is one (opencode: its provider count and the command that counted them), then one line for each installed CLI whose sign-in it cannot check, such as `kimi: init can't check sign-in.`. CLIs that are not installed are not named. With `--yes` or `--probe` the same facts print as the `Agent CLIs found:` list.
 
-   - For Claude and Codex, init runs `claude auth status` and `codex login status` if their installed help documents them. If neither the probe nor `--signed-in` confirms authentication, it asks whether you are signed in. Answering no skips that CLI and its menu.
-   - Kimi has no verified sign-in check. Init tells you to run `kimi login` first if needed, then asks `Use kimi? [y/N]:`. Answering no leaves it out.
-   - For opencode, init runs `opencode providers list` if its help documents `providers`, or `opencode auth list` on older versions. Stored provider credentials confirm sign-in. If sign-in remains unconfirmed, it asks `Use opencode? [y/N]:`. When the check is unavailable, it tells you to run `opencode auth login` first if needed. Keys may also come from your environment.
-   - `--signed-in` confirms authentication without a question. With a distinct `account=LABEL` on `--agent`, a sign-in or use question names that account. Status output is read in memory, never printed or stored. Init never runs a login command or a model.
+- For Claude and Codex, init runs `claude auth status` and `codex login status` if their installed help documents them. If neither the probe nor `--signed-in` confirms authentication, it asks `Are you signed in to claude? [y/N]` before step 1. Answering no leaves that CLI out, models and all.
+- Kimi has no verified sign-in check. Init tells you to run `kimi login` first if needed, then asks `Use kimi? [y/N]:` in step 2.
+- For opencode, init runs `opencode providers list` if its help documents `providers`, or `opencode auth list` on older versions. Stored provider credentials confirm sign-in. If sign-in remains unconfirmed, it asks `Use opencode? [y/N]:`. When the check is unavailable, it tells you to run `opencode auth login` first if needed. Keys may also come from your environment.
+- `--signed-in` confirms authentication without a question (for Kimi and opencode, that also answers the use question). With a distinct `account=LABEL` on `--agent`, a sign-in or use question names that account. Status output is read in memory, never printed or stored. Init never runs a login command or a model.
 
-   Each menu asks `Which model should HARNESS run?`. Its numbered entries show the model and family:
+1. **The foreman.** The foreman plans the work and decides what happens when a task needs judgment. It runs whenever work finishes, so it uses that agent's quota. Only Claude and Codex can be the foreman. Init asks `Which model should the foreman run?` and lists every model of the signed-in Claude and Codex CLIs, Claude first, as `harness/model` with a note:
 
-   | CLI | Menu source and choices |
+   | CLI | Models listed |
    |---|---|
-   | `claude` | The three explicit aliases `sonnet`, `opus`, `haiku` (Anthropic). `sonnet` is first; these are not a configured CLI default. |
-   | `codex` | One entry for the CLI default. Init shows the top-level `model` from `$CODEX_HOME/config.toml`, or `~/.codex/config.toml` when `CODEX_HOME` is unset. |
-   | `kimi` | The CLI default from top-level `default_model` in `~/.kimi-code/config.toml`, followed by other configured model names from `[models.…]` tables, without duplicates. |
-   | `opencode` | `provider/model` entries from `opencode models`, when its help documents the command. Only models with a recognised family are numbered. Init reports how many unknown-family models it left out. |
+   | `claude` | The aliases `sonnet`, `opus`, `haiku` (Anthropic), plus any other models Claude Code's own cache lists. |
+   | `codex` | The CLI default first (shown by the top-level `model` of `$CODEX_HOME/config.toml`, or `~/.codex/config.toml` when `CODEX_HOME` is unset; its note names that config path, and it is stored as `default`), then the catalog models from `codex debug models`. If the config cannot be read, the entry says `CLI default`. |
 
-   - Pick a number or type a model ID. For example, Claude asks `Pick 1-3 or -, or type a model id [1]:`. Enter picks the first entry for Claude, Codex and Kimi. For opencode the default is `-`: Enter leaves it out. Claude, Codex and opencode show `-` to skip; leave Kimi out by answering no to `Use kimi?`.
-   - Codex and Kimi keep the model value `default` for their first entry, even when init can display its configured name. If the config cannot be read or recognised, the entry says `CLI default`. Codex's `default` counts as OpenAI and Kimi's as Moonshot. An opencode `default` supplied through `--agent` has an unknown family and does not count toward review families.
-   - An explicit opencode model must use `provider/model`, for example `zai-coding-plan/glm-5.3` (shown as `Zhipu (GLM)`); a bare `glm-5.3` is refused. Init rejects explicit models whose family it cannot identify. Kimi aliases fall back to Moonshot unless their names identify another known family.
-   - After a Claude, Codex or opencode model with two or more effort levels, init asks how hard it should think. Pick a number or type a listed level. Enter keeps the CLI default and records no `effort=` override. The levels stay in the source's order, with the default marked; an unknown default gets its own first entry. Opencode models without variants have no effort question.
-   - Kimi's configured effort is shown for information only; change it in `~/.kimi-code/config.toml`.
-   - After you pick Kimi's model, init asks `Let kimi write code too, not only review? [y/N]:`. Enter or no gives it only `classes=review`. Yes also allows implementation and answers. The warning explains that Kimi has no sandbox: when writing code it can run any command on this machine without asking. As a reviewer it only reads ([section 8](#8-agents-quota-and-health)).
-   - `--agent` replaces the model and effort menus and Kimi's question; use `effort=LEVEL` for an explicit effort. Set `classes=review` explicitly to keep Kimi reviewing only; the flag's class default is `implement+review+answer`.
+   Models whose family init cannot tell are left out; Codex's `default` counts as OpenAI. `Pick 1-N, or type harness/model [D]:` takes a number or a typed `harness/model` that names a signed-in Claude or Codex model of a known family. `D` is the foreman saved by the last run, else the first Claude model, else the first Codex model; the saved one is marked `current`. After three bad answers init stops and names `--foreman HARNESS/MODEL`. With only one candidate, init prints `Foreman: HARNESS/MODEL (the only model that can plan)` and asks nothing.
 
-   A reviewer must come from a different model family than the author. Init counts distinct families among usable agents whose classes include `review`; two CLIs serving the same family count once. With fewer than two, init prints `LIMITED SETUP`, stops, and writes and starts nothing, unless you pass `--accept-limited`. A limited setup still runs, but reviews that need another family wait; `brigada status` shows them.
+   Then it asks once, for the foreman only, `How hard should the foreman think?`. For Claude the levels are `medium` (marked as Claude Code's default), `low`, `high`, `xhigh`, `max`. For Codex they are the model's catalog levels, its default first (tagged `your codex default` when it comes from `model_reasoning_effort` in your config, else `codex's default`), the rest in catalog order. `Pick 1-N or type a level [1]:` takes a number or a listed level; Enter records the first entry's level, or the saved one on a rerun. A model with fewer than two levels is not asked. Workers get no effort question: for each task the foreman says how hard a model should think.
 
-2. **The foreman.** Pick among the usable Claude and Codex agents, using the models and efforts chosen above. The foreman plans work and handles decisions, and spends that agent's quota when work finishes. With two candidates, init asks for a number. Enter picks the first usable resume-capable agent in `--agent` order, or Claude before Codex without `--agent`. With only one candidate, init names it without asking. `--foreman HARNESS/MODEL` supplies the choice and skips the question; it must name a usable Claude or Codex agent.
+   `--foreman HARNESS/MODEL[@EFFORT]` answers both questions; without `@EFFORT` an interactive run still asks the effort, and a `--yes` or `--probe` run records none. The step ends with how to change the choice later: `brigada project foreman --harness H --model M --effort E`, or run `brigada init` again.
+
+2. **Workers.** Each agent CLI can run tasks, and init offers every model the CLI knows. For each task the foreman says how heavy a model it needs (light, standard or heavy) and how hard it should think, and brigada picks the model of that tier with the best record on this repo. The tier comes from the model's name, unless the local config sets `tier.HARNESS/MODEL`. For each installed CLI, in order, init prints its sign-in line and then asks:
+
+   - Claude and Codex: `Use claude's models for tasks (opus, sonnet, haiku)? [Y/n]:`. The parenthesis lists the models heaviest tier first when there are at most three, else the first model and `and N more`. Enter is yes; a rerun defaults to whether that CLI had saved agents. Yes makes every model one agent.
+   - Kimi: the unchecked sign-in text and `Use kimi? [y/N]:`, then the warning that Kimi has no sandbox (when writing code it can run any command on this machine without asking; as a reviewer it only reads, [section 8](#8-agents-quota-and-health)) and `Let kimi write code too, not only review? [y/N]:`. Enter or no gives every configured Kimi model `classes=review`; yes also allows implementation and answers. A rerun defaults to the saved classes. Kimi's configured effort stays in `~/.kimi-code/config.toml`.
+   - Opencode: `Which models should opencode run?`, with the `provider/model` entries from `opencode models` (only models with a recognised family are numbered, and init reports how many it left out), a `-  don't use opencode` row, and `Pick numbers (1,3) or -, or type provider/model [-]:`. It takes several comma-separated numbers, one or more typed `provider/model` names (a bare `glm-5.3` is refused), or `-`; a bad number asks again. A rerun defaults to the saved picks.
+   - Every chosen model is one agent with the classes `implement+review+answer`, except Kimi's. A saved agent's other settings (account, tools, effort) are kept. The step ends with how to change this later: run `brigada init` again, or edit your own defaults in the CLIs' configs.
+
+   `--agent` once per model replaces these questions: use `effort=LEVEL` for an explicit agent effort, and set `classes=review` explicitly to keep Kimi reviewing only; the flag's class default is `implement+review+answer`. The foreman questions are still asked, over every model of the signed-in Claude and Codex CLIs, and a foreman model that is not among the agents is registered as an agent with `classes=none`.
+
+   A reviewer must come from a different model family than the author, so you need at least two families (for example Claude and Codex). Init counts distinct families among usable agents whose classes include `review`; two CLIs serving the same family count once. With fewer than two, init prints `LIMITED SETUP`, stops, and writes and starts nothing, unless you pass `--accept-limited`. A limited setup still runs, but reviews that need another family wait; `brigada status` shows them.
+
+   A foreman whose CLI you decline to use for tasks (`Use codex's models…` answered no) is still registered as an agent with `classes=none`, so its turns have somewhere to run. The Plan shows it as `foreman only`.
 
 3. **Tasks at once.** Init names this machine's core count and asks `Tasks at once [N]:` (1–64). Enter keeps the saved choice, or defaults to half the cores, at least 1 and at most 4. `--parallel N` supplies the answer; `--yes` and `--probe` use it, else the saved choice, else that default. On apply, init writes `caps.global = N`, `caps.plan = 3` and per-account caps (Claude 3, Codex 2, Kimi 1, OpenCode 2, each no higher than N) to the local brigada config, preserving other settings. The runner uses `--max-parallel N`. Change caps later with `brigada config`. If the engine is already running, init explains how to restart it to read changed caps.
 
@@ -94,12 +99,12 @@ Run `brigada init` inside a repository. (At the top of a folder that holds sever
 
 The `Plan` block then shows:
 
-- `Agents:`, with each harness, model and effort (`@high`, for example; shown only when one is set), family and role phrase, such as `code + review` or `review only`. Configured defaults use their resolved names when available, otherwise `CLI default`. Family labels include `Anthropic`, `OpenAI`, `Moonshot` and `Zhipu (GLM)`.
+- `Foreman:`, which names the chosen model and its effort, as `claude/sonnet, effort medium` (no effort suffix when none is recorded). Configured defaults use their resolved names when available, otherwise `CLI default`.
+- `Agents (every model of each CLI; the foreman picks the tier per task):`, with each harness, model (and `@high`, for example, when an `--agent` set an effort), family, tier and role. The tier is the model's name-based tier unless a `tier.` config key overrides it. The role is `writes code, reviews`, `reviews only` or `foreman only`; a long role wraps within its column. Family labels include `Anthropic`, `OpenAI`, `Moonshot` and `Zhipu (GLM)`.
 - `Reviews:`, which counts the review-capable model families and describes cross-family review. In a limited setup, reviews that need another family still wait.
-- `Foreman:`, which names the chosen agent.
 - `At once:`, with the machine limit and each usable account's cap.
 - `Check:`, which names the check and reminds you that init does not run it and that you can edit `.brigada/project.yaml`, or shows `none (work goes straight to review)`.
-- `What workers may do:`, with a row for each agent that can implement. Claude gets `edit files; run only: …`, or `edit files; no commands` for `none`. Codex can edit and run commands inside its sandbox. Kimi, if allowed to implement, can edit and run any command without asking. Opencode gets `edit files; no commands`.
+- `What workers may do:`, with a row for each harness that implements. Claude gets `edit files; run only: …`, or `edit files; no commands` for `none`. Codex can edit and run commands inside its sandbox. Kimi, if allowed to implement, can edit and run any command without asking. Opencode gets `edit files; no commands`.
 - `Files in this repository`, which lists each file's state first (`new`, `changes`, `unchanged`, or `left alone`, with its reason after the path), then its path and its purpose. Private Claude settings have `private, kept out of git:` in their purpose text. Changes to existing files show diffs and keep other settings and comments; new files show full contents only with `--verbose`. The list covers `.brigada/project.yaml`, the harness wiring below, and any supporting migration or git exclude edit. Init never commits these files.
 - Optional Codex setup text, when Codex is installed and wiring is enabled. Init prints the command to run yourself and writes no Codex configuration:
 
@@ -108,7 +113,7 @@ The `Plan` block then shows:
   ```
 
   Codex has no verified project-scope registration, so this is user-level.
-- `In the background:`, with the persistent runner, its log, `brigada stop`, and the engine's exit after 30 idle minutes, then a line saying `brigada config` shows every setting later.
+- `In the background:`, with the persistent runner, its log, `brigada stop`, and the engine's exit after 30 idle minutes.
 
 Then, after you confirm (`y` at the prompt, or `--yes`), init:
 
@@ -160,7 +165,7 @@ If init fails after writing `project.yaml`, it says `partial init` and names the
 
 ### Changing your setup later
 
-Run `brigada init` again to change agents, models or effort. Its menus default to the saved agent choices, including effort and whether Kimi may write code. Pick the foreman again from the offered Claude and Codex agents. The tasks-at-once step defaults to the saved limit. The check step lists the existing `.brigada/project.yaml` check first, and Enter keeps it. Confirm the plan to apply changes. If the agents or task limit changed, init stops the detached runner and starts it with the new choices.
+Run `brigada init` again to change the foreman, its effort or the agents. Its questions default to the saved choices: the saved foreman and its effort (marked `current`), whether each CLI had agents, whether Kimi may write code and which OpenCode models were picked. The tasks-at-once step defaults to the saved limit. The check step lists the existing `.brigada/project.yaml` check first, and Enter keeps it. Confirm the plan to apply changes. If the agents or task limit changed, init stops the detached runner and starts it with the new choices.
 
 To change only the foreman, use `brigada project foreman --harness H --model M [--effort E]`. To change the check, edit `.brigada/project.yaml`, then run `brigada project import`.
 
@@ -604,7 +609,7 @@ Or set a default for every task in `.brigada/project.yaml` or with `brigada proj
 
 ### Reviews
 
-After an `implement` task's check passes, a reviewer reads the diff, the spec and the check result, never the author's summary. The reviewer is an agent whose model family differs from the author's, so with a single family among your agents no review can run ([section 1](#1-install-and-brigada-init), step 1).
+After an `implement` task's check passes, a reviewer reads the diff, the spec and the check result, never the author's summary. The reviewer is an agent whose model family differs from the author's, so with a single family among your agents no review can run ([section 1](#1-install-and-brigada-init), step 2).
 
 An approve counts only with substantive findings text (80 characters or more). A thinner approve, or a review that ends without a verdict, is retried once with another reviewer, and then the task waits for the foreman. Tasks of other classes finish when the run does, without a review.
 
@@ -650,7 +655,7 @@ Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `
 
 `kimi` and `opencode` are worker-only; the foreman can be `claude` or `codex`.
 
-**Kimi reviews only by default in interactive init.** After its model choice, init asks whether it may write code too. Enter or no keeps `classes=review`; yes enables `implement+review+answer`. With `--agent` there is no such question: set `classes=review` explicitly for a review-only Kimi agent. Omitting `classes` keeps the runner's default of all three classes.
+**Kimi reviews only by default in interactive init.** After `Use kimi?`, init asks whether it may write code too. Enter or no keeps `classes=review`; yes enables `implement+review+answer`. With `--agent` there is no such question: set `classes=review` explicitly for a review-only Kimi agent. Omitting `classes` keeps the runner's default of all three classes.
 
 The runner writes a read-only Kimi agent definition to `<state-dir>/runner/kimi-readonly.md`. It allows only `Read`, `Grep` and `Glob`, with no `Bash`. Kimi reviews without their own `agent-file=` use this definition. A custom `agent-file=` takes precedence, and a resumed session keeps the definition it started with.
 
@@ -950,7 +955,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 ### Starting
 
-- `brigada init [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories-mode-b).
+- `brigada init [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL[@EFFORT]] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories-mode-b).
 - `brigada start`: start the engine and detached runner with the agents saved by init; succeeds when the runner is already running. Use it after a reboot or `brigada stop`. See [section 1](#changing-your-setup-later).
 - `brigada runner [--agent SPEC]... [--labels LABELS] [--max-parallel N]`, where SPEC is `harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]`: run a runner that leases jobs, runs workers and checks, and pushes branches. See [section 8](#8-agents-quota-and-health).
 - `brigada stop [--engine]`: stop the detached runner in the selected state directory; `--engine` also stops the engine. Sends SIGTERM and waits up to 10 seconds per process; succeeds if nothing is running, and never starts the engine. See [section 1](#stopping).

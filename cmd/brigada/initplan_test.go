@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/logo"
 	"github.com/Blackfire-AI/brigada/internal/term"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
@@ -44,18 +45,26 @@ func TestInitPlanAgentRowsFit80(t *testing.T) {
 		{harness: "opencode", model: "zai-coding-plan/glm-5.3", effort: "low", classes: []string{"implement", "review", "answer"}},
 	}
 	var b bytes.Buffer
-	printInitAgents(&b, agents, 4, agents[0], nil)
+	printInitAgents(&b, agents, 4, agents[0], nil, adapter.AgentTier)
 	rows := 0
 	for _, line := range strings.Split(b.String(), "\n") {
 		if term.VisibleWidth(line) >= 80 {
 			t.Errorf("line reaches 80 columns: %q", line)
 		}
-		if strings.HasPrefix(line, "    ") && (strings.HasSuffix(line, "code + review") || strings.HasSuffix(line, "review only")) {
-			rows++
+		// Each row starts with its harness; a long role wraps under its column.
+		for _, harness := range initHarnesses {
+			if strings.HasPrefix(line, "    "+harness+" ") {
+				rows++
+			}
 		}
 	}
-	if rows != 4 || strings.Contains(b.String(), "(default)") || !strings.Contains(b.String(), "sonnet @high") {
-		t.Errorf("agent rows are not one line each:\n%s", b.String())
+	for _, want := range []string{"sonnet @high", "standard", "reviews only"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("plan lacks %q:\n%s", want, b.String())
+		}
+	}
+	if rows != 4 || strings.Contains(b.String(), "(default)") {
+		t.Errorf("agent rows are not one per agent:\n%s", b.String())
 	}
 }
 

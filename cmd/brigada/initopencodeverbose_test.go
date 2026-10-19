@@ -145,51 +145,38 @@ func TestInitOpenCodeVerboseMenu(t *testing.T) {
 	fakeInitPATH(t, "codex", "opencode")
 	fakeOpenCodeVerbose2(t, openCodeVerboseFile(t, wide))
 	args := []string{"--signed-in", "codex", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring"}
-	code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "1\n-\nn\n", args...)
+	code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\n-\nn\n", args...)
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 	}
-	menu := strings.Split(strings.Split(out, "Which model should opencode run?\n")[1], "    Pick ")[0]
+	menu := strings.Split(strings.Split(out, "ones you pay for.\n")[1], "    Pick ")[0]
 	for _, line := range strings.Split(menu, "\n") {
 		if utf8.RuneCountInString(line) >= 80 {
 			t.Errorf("menu line is %d columns: %q", utf8.RuneCountInString(line), line)
 		}
 	}
-	flat := strings.Join(strings.Fields(menu), " ") // rows wrap and align
+	// The rows are the provider/model names alone: no family or note column.
+	flat := strings.Join(strings.Fields(menu), " ")
 	for _, want := range []string{
-		"zai-coding-plan/glm-5.3 Zhipu (GLM) GLM-5.3 with a deliberately long display name to force the note to wrap, 256K context",
-		"opencode/mimo-v2-flash-free Xiaomi MiMo V2 Flash Free, 256K context",
-		"opencode/nemotron-3-super-free NVIDIA Nemotron 3 Super Free, 128K context",
+		"1 zai-coding-plan/glm-5.3 2 opencode/mimo-v2-flash-free 3 opencode/nemotron-3-super-free - don't use opencode",
 		"1 more from `opencode models` aren't listed",
 	} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("menu lacks %q:\n%s", want, menu)
 		}
 	}
-	for _, bad := range []string{"longcat", "LongCat", "beam-free", "never-print-me"} {
+	for _, bad := range []string{"longcat", "LongCat", "beam-free", "never-print-me", "context", "Zhipu", "GLM-5.3"} {
 		if strings.Contains(menu, bad) {
 			t.Errorf("menu shows %q:\n%s", bad, menu)
 		}
 	}
-	// Notes start in the same column even when family names have different widths.
-	noteColumn := -1
-	for _, line := range strings.Split(menu, "\n") {
-		for _, name := range []string{"GLM-5.3", "MiMo V2", "Nemotron 3"} {
-			if column := strings.Index(line, name); column >= 0 {
-				if noteColumn >= 0 && column != noteColumn {
-					t.Errorf("note column = %d, want %d: %q", column, noteColumn, line)
-				}
-				noteColumn = column
-			}
-		}
-	}
-	rows := regexp.MustCompile(`(?m)^\s+(\d+)  (\S+)  `).FindAllStringSubmatch(menu, -1)
+	rows := regexp.MustCompile(`(?m)^\s+(\d+)  (\S+)$`).FindAllStringSubmatch(menu, -1)
 	if len(rows) != 3 {
 		t.Fatalf("numbered rows = %q\n%s", rows, menu)
 	}
 	for _, row := range rows {
 		t.Run(row[2], func(t *testing.T) {
-			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "1\n"+row[1]+"\nn\n", args...)
+			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\n"+row[1]+"\nn\n", args...)
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") || strings.Contains(out, "try again") {
 				t.Fatalf("numbered entry %s rejected: %d\n%s\n%s", row[1], code, out, errOut)
 			}
