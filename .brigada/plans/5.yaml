@@ -24,9 +24,9 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: reviewing
+    state: running
     branch: "brigada/task-19"
-    rounds: 0
+    rounds: 1
   - id: 20
     name: "contributing"
     title: "CONTRIBUTING.md (#3)"
