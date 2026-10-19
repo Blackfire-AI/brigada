@@ -24,7 +24,7 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: running
+    state: reviewing
     branch: "brigada/task-19"
     rounds: 1
   - id: 20
