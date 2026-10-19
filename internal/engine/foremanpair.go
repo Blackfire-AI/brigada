@@ -68,26 +68,16 @@ func foremanPairTx(tx *sql.Tx, j *jobRow) (foremanPair, error) {
 	return pair, nil
 }
 
-// pairRegisteredTx reports whether any registered agent, on any runner and
-// in any health, offers the foreman's class for the pair. An agent that is
-// busy, cooling or broken is registered: it is a different wait from no
-// agent at all.
+// pairRegisteredTx reports whether any agent of the foreman's pair is
+// registered, on any runner and in any health. The pair is the constraint:
+// foreman turns are exempt from the advertised-class filter. An agent that
+// is busy, cooling or broken is a different wait from no agent at all.
 func pairRegisteredTx(tx *sql.Tx, harness, model string) (bool, error) {
-	rows, err := tx.Query("SELECT classes FROM agents WHERE harness = ? AND model = ?", harness, model)
-	if err != nil {
-		return false, fmt.Errorf("list the agents of %s/%s: %w", harness, model, err)
+	var registered bool
+	if err := tx.QueryRow("SELECT EXISTS (SELECT 1 FROM agents WHERE harness = ? AND model = ?)", harness, model).Scan(&registered); err != nil {
+		return false, fmt.Errorf("look up the agents of %s/%s: %w", harness, model, err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var classes string
-		if err := rows.Scan(&classes); err != nil {
-			return false, fmt.Errorf("list the agents of %s/%s: %w", harness, model, err)
-		}
-		if agentOffersClass(classes, kindClass(KindForeman)) {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
+	return registered, nil
 }
 
 // holdNoPairTx stamps the no-pair hold on every queued foreman turn whose

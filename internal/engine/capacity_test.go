@@ -341,47 +341,47 @@ func TestCapacityAgentTools(t *testing.T) {
 // TestCapacityModelHoldInstance covers the queue depth's attribution by
 // the hold's stamped instance, not the harness's first agent (§12.2):
 // the first codex agent by id — the one a harness guess would pick —
-// sits on the uncapped gpt model, yet the job the full opus cap holds
-// counts at the opus layer. Guessing would credit gpt, which no layer
+// sits on the uncapped gpt model, yet the job the full sonnet cap holds
+// counts at the sonnet layer. Guessing would credit gpt, which no layer
 // entry carries, and the foreman would read queue 0 while work waits.
 func TestCapacityModelHoldInstance(t *testing.T) {
 	e := newEnvCfg(t, func(c *Config) {
-		c.Caps.Model = map[string]int{"opus": 1}
+		c.Caps.Model = map[string]int{"sonnet": 1}
 	})
 	// Ids in creation order: the gpt agent is the first codex agent by id,
-	// on runner 1; the capped opus agents sit behind it and on runner 2.
+	// on runner 1; the capped sonnet agents sit behind it and on runner 2.
 	e.addAgent(e.runner1, "codex", "gpt", "work")
-	e.addAgent(e.runner1, "codex", "opus", "work")
-	e.addAgent(e.runner2, "codex", "opus", "work")
+	e.addAgent(e.runner1, "codex", "sonnet", "work")
+	e.addAgent(e.runner2, "codex", "sonnet", "work")
 
-	// Fill the opus cap through runner 2, whose codex agent carries opus.
+	// Fill the sonnet cap through runner 2, whose codex agent carries sonnet.
 	first := e.submit(e.workHarnessed("codex"))
 	if g := e.lease(e.runner2, []string{"codex"}, nil); g == nil || g.JobID != first.JobID {
-		t.Fatalf("first lease = %+v, want job %d on runner 2's opus agent", g, first.JobID)
+		t.Fatalf("first lease = %+v, want job %d on runner 2's sonnet agent", g, first.JobID)
 	}
 
-	// Another codex job: runner 2's poll finds the opus cap full and
-	// stamps the hold with the opus instance.
+	// Another codex job: runner 2's poll finds the sonnet cap full and
+	// stamps the hold with the sonnet instance.
 	second := e.submit(e.workHarnessed("codex"))
 	if g := e.lease(e.runner2, []string{"codex"}, nil); g != nil {
-		t.Fatalf("a lease through the full opus cap took job %d", g.JobID)
+		t.Fatalf("a lease through the full sonnet cap took job %d", g.JobID)
 	}
 	e.assertHeld(second.JobID, caps.LayerModel)
-	if got := e.str("SELECT COALESCE(cap_held_key, '') FROM jobs WHERE id = ?", second.JobID); got != "opus" {
-		t.Fatalf("cap_held_key = %q, want the held instance %q", got, "opus")
+	if got := e.str("SELECT COALESCE(cap_held_key, '') FROM jobs WHERE id = ?", second.JobID); got != "sonnet" {
+		t.Fatalf("cap_held_key = %q, want the held instance %q", got, "sonnet")
 	}
 
 	snap, err := e.eng.Capacity(e.ctx, e.project)
 	if err != nil {
 		t.Fatalf("capacity: %v", err)
 	}
-	if l := snapLayer(t, snap, "model opus"); l.Queue != 1 || l.Use != 1 {
-		t.Errorf("model opus = use %d queue %d, want 1/1: the held job waits on the capped model",
+	if l := snapLayer(t, snap, "model sonnet"); l.Queue != 1 || l.Use != 1 {
+		t.Errorf("model sonnet = use %d queue %d, want 1/1: the held job waits on the capped model",
 			l.Use, l.Queue)
 	}
 	for _, l := range snap.Layers {
-		if l.Layer == caps.LayerModel && l.Model != "opus" {
-			t.Errorf("model layer %q present with queue %d, want only the capped opus carrying the hold",
+		if l.Layer == caps.LayerModel && l.Model != "sonnet" {
+			t.Errorf("model layer %q present with queue %d, want only the capped sonnet carrying the hold",
 				l.Model, l.Queue)
 		}
 	}

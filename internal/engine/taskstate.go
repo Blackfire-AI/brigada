@@ -294,7 +294,7 @@ func (e *Engine) autoRestartTaskTx(tx *sql.Tx, job *jobRow, kind, text string, n
 	}
 	// Use the dispatcher's eligibility and ranking, across runners, without
 	// a family exclusion: a work retry may use the same family.
-	cands, err := eligibleAgentsTx(tx, 0, &jobRow{
+	cands, err := eligibleAgentsTx(tx, e.cfg.Caps, 0, &jobRow{
 		ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindWork, ExcludeAgent: job.AgentID,
 	}, class, fmtTime(now))
 	if err != nil || len(cands) == 0 {

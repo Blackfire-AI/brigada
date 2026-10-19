@@ -128,6 +128,8 @@ type eventPayload struct {
 	Agent      int64    `json:"agent,omitempty"`
 	Score      float64  `json:"score,omitempty"`
 	Pick       string   `json:"pick,omitempty"`
+	TierAsked  string   `json:"tier_asked,omitempty"`
+	TierServed string   `json:"tier_served,omitempty"`
 	PassedOver []int64  `json:"passed_over,omitempty"`
 }
 
