@@ -22,8 +22,8 @@ tasks:
     class: "implement"
     deps: []
     base: ""
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-1"
     rounds: 0
   - id: 2
     name: "planfile-remote"
