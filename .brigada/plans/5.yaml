@@ -1,0 +1,51 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 5
+title: "1.0 repository hygiene: SECURITY.md, issue templates, CONTRIBUTING.md, Dependabot (#2, #3, #4, #6)"
+repo: "github.com/Blackfire-AI/brigada"
+state: active
+created: 2026-10-19T21:27:47.72639Z
+updated: 2026-10-19T21:27:47.72639Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps, or from the
+# default branch when base is empty; merge a task after its base. States
+# are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1).
+tasks:
+  - id: 19
+    name: "security"
+    title: "SECURITY.md and issue templates (#2, #4)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: light
+    effort: low
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 20
+    name: "contributing"
+    title: "CONTRIBUTING.md (#3)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: light
+    effort: medium
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 21
+    name: "dependabot"
+    title: "Dependabot for Go modules and GitHub Actions (#6)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: light
+    effort: low
+    state: ready
+    branch: ""
+    rounds: 0
