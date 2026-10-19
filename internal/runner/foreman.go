@@ -16,6 +16,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/foreman"
 	"github.com/Blackfire-AI/brigada/internal/mcp"
+	"github.com/Blackfire-AI/brigada/internal/runnerstate"
 )
 
 // runForemanTurn runs one headless foreman turn (§4.2 item 2, §4): the
@@ -109,6 +110,10 @@ func (r *jobRun) runForemanTurn(ctx context.Context) {
 // directory — an attach that ran anywhere else could not resume what
 // the turns left, so the attach calls this same function.
 func ForemanScratchDir(stateDir string, project int64) (string, error) {
+	// An init from before the rename saved its foreman as a file here.
+	if err := runnerstate.MigrateForeman(stateDir); err != nil {
+		return "", fmt.Errorf("move the saved foreman choice: %w", err)
+	}
 	dir := filepath.Join(stateDir, "foreman", strconv.FormatInt(project, 10))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("create %s: %w", dir, err)
