@@ -23,8 +23,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-22"
     rounds: 0
   - id: 23
     name: "long-cooling"
