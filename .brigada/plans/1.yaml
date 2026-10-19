@@ -40,7 +40,7 @@ tasks:
     class: "implement"
     deps: ["agents-md"]
     base: "agents-md"
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 4
