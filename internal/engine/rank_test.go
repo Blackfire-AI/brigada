@@ -124,7 +124,7 @@ func TestLeaseSkipsIneligibleAgents(t *testing.T) {
 	e := newEnv(t)
 	broken := e.addAgent(e.runner1, "claude", "sonnet", "work")
 	cooling := e.addAgent(e.runner1, "kimi", "k2", "home")
-	ready := e.addAgent(e.runner1, "gemini", "flash", "free")
+	ready := e.addAgent(e.runner1, "gemini", "gemini-2.5", "free")
 	e.exec("UPDATE agents SET health = 'broken' WHERE id = ?", broken)
 	e.exec("UPDATE agents SET cooling_until = ? WHERE id = ?", fmtTime(e.clock.Now().Add(time.Hour)), cooling)
 

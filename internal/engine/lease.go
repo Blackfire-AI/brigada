@@ -269,7 +269,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 		}
 
-		cands, err := leaseAgentsTx(tx, owner, j, nowStr)
+		cands, err := leaseAgentsTx(tx, e.cfg.Caps, owner, j, nowStr)
 		if err != nil {
 			return nil, err
 		}
@@ -312,7 +312,8 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		}
 		// The rank choice (§8): the best-scored agent, or — by the
 		// exploration share, when a next-best exists — the next-best, so a
-		// weaker agent keeps being measured.
+		// weaker agent keeps being measured. The candidates have already been
+		// filtered by tier, so exploration stays within the served tier.
 		walk, pick := cands, pickBest
 		if len(cands) > 1 && e.explore() {
 			walk = append([]agentCand{cands[1], cands[0]}, cands[2:]...)
@@ -477,7 +478,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				}
 			}
 			if _, err := appendEventTx(tx, evJobAgentPicked, j.ProjectID, j.TaskID, j.ID,
-				eventPayload{Agent: agent, Score: chosen.score, Pick: pick, PassedOver: over}, now); err != nil {
+				eventPayload{Agent: agent, Score: chosen.score, Pick: pick, PassedOver: over, TierAsked: chosen.tierAsked, TierServed: chosen.tierServed}, now); err != nil {
 				return nil, err
 			}
 		}
@@ -660,6 +661,9 @@ type agentCand struct {
 	score   float64
 	rank    int
 
+	tierAsked  string
+	tierServed string
+
 	// Filled for every lookup, but read only for the agents that cannot
 	// take the job yet (qualifyingAgentsTx): model, health, cooling_until.
 	model   string
@@ -684,15 +688,15 @@ func (e *Engine) explore() bool {
 // outright: that agent or none, never ranked against another. Empty
 // when the runner advertises no such agent — the caller then refuses
 // the lease, unless the runner advertises nothing at all.
-func leaseAgentsTx(tx *sql.Tx, runner int64, j *jobRow, now string) ([]agentCand, error) {
-	return eligibleAgentsTx(tx, runner, j, kindClass(j.Kind), now)
+func leaseAgentsTx(tx *sql.Tx, limits caps.Limits, runner int64, j *jobRow, now string) ([]agentCand, error) {
+	return eligibleAgentsTx(tx, limits, runner, j, kindClass(j.Kind), now)
 }
 
 // eligibleAgentsTx shares eligibility and ranking with automatic retries,
 // whose candidate lookup uses the task's class rather than the job kind's.
 // Runner 0 ranks all registered agents for an automatic restart's pin.
-func eligibleAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
-	return qualifyingAgentsTx(tx, runner, j, class, now, false)
+func eligibleAgentsTx(tx *sql.Tx, limits caps.Limits, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
+	return qualifyingAgentsTx(tx, limits, runner, j, class, now, false)
 }
 
 // qualifyingAgentsTx is eligibleAgentsTx's lookup. With unavailable
@@ -700,8 +704,86 @@ func eligibleAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string) ([
 // those that qualify for the job by pin, harness, class and family rule
 // but cannot take it yet — with their model, health and cooling
 // deadline filled in: what the cooling hold (§8.1) and the queue-TTL
-// park reason read.
-func qualifyingAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
+// park reason read. Unpinned task jobs are restricted to the served tier
+// before availability is checked.
+func qualifyingAgentsTx(tx *sql.Tx, limits caps.Limits, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
+	asked, served := "", ""
+	if j.TaskID != 0 && j.Kind != KindForeman {
+		if err := tx.QueryRow("SELECT effective_tier FROM tasks WHERE id = ?", j.TaskID).Scan(&asked); err != nil {
+			return nil, fmt.Errorf("read the tier of task %d: %w", j.TaskID, err)
+		}
+		if j.RequireAgent == 0 {
+			var err error
+			served, err = tierServedTx(tx, limits, j, class, asked)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	rows, err := qualifyingAgentRowsTx(tx, runner, j, class)
+	if err != nil {
+		return nil, err
+	}
+	var cands []agentCand
+	for _, c := range rows {
+		tier := limits.TierOf(c.harness, c.model)
+		if served != "" && tier != served {
+			continue
+		}
+		if !unavailable && (c.health != "ready" || c.cooling > now) {
+			continue
+		}
+		if asked != "" {
+			c.tierAsked, c.tierServed = asked, tier
+		}
+		c.rank = len(cands)
+		cands = append(cands, c)
+	}
+	return cands, nil
+}
+
+// tierServedTx considers every runner's structurally qualifying agents.
+// Cooling still counts as ready health: a cheap wait beats a heavier model.
+// Caps are applied later, after the tier is fixed.
+func tierServedTx(tx *sql.Tx, limits caps.Limits, j *jobRow, class, asked string) (string, error) {
+	agents, err := qualifyingAgentRowsTx(tx, 0, j, class)
+	if err != nil {
+		return "", err
+	}
+	hasReady := map[string]bool{}
+	for _, a := range agents {
+		if a.health == "ready" {
+			hasReady[limits.TierOf(a.harness, a.model)] = true
+		}
+	}
+	return tierServed(asked, hasReady), nil
+}
+
+// tierServed prefers the asked tier, then climbs, then steps down from
+// heavy. With no ready-health agent anywhere, retain the asked tier.
+func tierServed(asked string, hasReady map[string]bool) string {
+	tiers := []string{"light", "standard", "heavy"}
+	at := slices.Index(tiers, asked)
+	if at < 0 || hasReady[asked] {
+		return asked
+	}
+	for _, tier := range tiers[at+1:] {
+		if hasReady[tier] {
+			return tier
+		}
+	}
+	for i := at - 1; i >= 0; i-- {
+		if hasReady[tiers[i]] {
+			return tiers[i]
+		}
+	}
+	return asked
+}
+
+// qualifyingAgentRowsTx applies the shared pin, harness/model, class,
+// family and exclusion filters, without health, cooling or tier. Structural
+// reviewer checks also use it: broken or cooling reviewers still exist.
+func qualifyingAgentRowsTx(tx *sql.Tx, runner int64, j *jobRow, class string) ([]agentCand, error) {
 	author, err := reviewAuthorTx(tx, j)
 	if err != nil {
 		return nil, err
@@ -724,10 +806,6 @@ func qualifyingAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string, 
 		FROM agents a LEFT JOIN outcomes o ON o.agent_id = a.id AND o.project_id = ? AND o.class = ?
 		WHERE 1 = 1`
 	args := []any{j.ProjectID, class}
-	if !unavailable {
-		query += " AND a.health = 'ready' AND (a.cooling_until IS NULL OR a.cooling_until <= ?)"
-		args = append(args, now)
-	}
 	if runner != 0 {
 		query += " AND a.runner_id = ?"
 		args = append(args, runner)
@@ -761,7 +839,7 @@ func qualifyingAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string, 
 		// work restart already qualified against the task's class when
 		// the retry was queued; do not reject that pin for lacking implement.
 		pinnedRetry := j.Kind == KindWork && j.Restart && j.RequireAgent != 0
-		if class != "" && !pinnedRetry && !agentOffersClass(classes, class) {
+		if class != "" && j.Kind != KindForeman && !pinnedRetry && !agentOffersClass(classes, class) {
 			continue
 		}
 		if id == j.ExcludeAgent {
@@ -786,7 +864,8 @@ func qualifyingAgentsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string, 
 
 // kindClass is the dispatch class for ordinary leases (§8): work and fix
 // use implement regardless of the task's class; review and foreman jobs
-// use review and answer respectively.
+// use review and answer respectively for the outcomes join. Foreman turns
+// are exempt from the advertised-class filter: their pair is the constraint.
 func kindClass(k Kind) string {
 	switch k {
 	case KindWork, KindFix:

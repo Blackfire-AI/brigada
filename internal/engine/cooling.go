@@ -26,6 +26,10 @@ const layerCooling = "cooling"
 // lasts. When the cooling ends the hold lifts and the TTL clock
 // restarts at that moment, like the runner layer's.
 //
+// Tier fallback is resolved before this hold: a served tier whose agents
+// are all cooling waits until its reset, while a tier with only broken
+// agents is skipped in favor of a ready-health tier when one exists.
+//
 // Precedence between holds. Cooling is a precondition of the others:
 // while every qualifying agent is cooling, no poll can reach the cap gate
 // and no runner has a candidate agent, so a stale poll-stamped layer
@@ -70,7 +74,7 @@ func (e *Engine) holdCoolingTx(tx *sql.Tx, now time.Time) error {
 
 	nowStr := fmtTime(now)
 	for _, j := range queued {
-		agents, err := qualifyingAgentsTx(tx, 0, j, kindClass(j.Kind), nowStr, true)
+		agents, err := qualifyingAgentsTx(tx, e.cfg.Caps, 0, j, kindClass(j.Kind), nowStr, true)
 		if err != nil {
 			return err
 		}

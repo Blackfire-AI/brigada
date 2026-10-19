@@ -138,6 +138,36 @@ func TestForemanTurnWaitsForAnAgentOfItsPair(t *testing.T) {
 	}
 }
 
+// A class-less agent registers the foreman's pair just like a worker agent.
+// Sweeps lift the missing-pair hold and preserve a real cap hold afterwards.
+func TestForemanClasslessPairDoesNotHoldAsMissing(t *testing.T) {
+	e := newEnvCfg(t, func(c *Config) { c.Caps.Global = limitOf(0) })
+	turn := e.submit(e.foremanTurn())
+	e.mustSweep()
+	if got := e.heldLayer(turn.JobID); got != layerNoPair {
+		t.Fatalf("hold without the pair = %q, want %q", got, layerNoPair)
+	}
+
+	agent := e.addAgent(e.runner1, "claude", "sonnet", "foreman")
+	e.exec("UPDATE agents SET classes = '[]' WHERE id = ?", agent)
+	e.mustSweep()
+	if got := e.heldLayer(turn.JobID); got != "" {
+		t.Fatalf("hold with the class-less pair registered = %q, want none", got)
+	}
+
+	// A poll reaches the cap gate, and subsequent sweeps must keep that
+	// hold rather than replacing it with a missing-pair stamp.
+	if g := e.leaseClaude(e.runner1); g != nil {
+		t.Fatalf("leased %+v through a full global cap", g)
+	}
+	e.assertHeld(turn.JobID, caps.LayerGlobal)
+	e.mustSweep()
+	e.assertHeld(turn.JobID, caps.LayerGlobal)
+	if held := e.heldNow(); len(held) != 1 || held[0].ID != turn.JobID || held[0].Layer != caps.LayerGlobal {
+		t.Errorf("status held = %+v, want turn %d held at the global cap", held, turn.JobID)
+	}
+}
+
 // A registered agent that is cooling or broken is a different wait from no
 // agent at all: the choice does not warn, and the turn is not held as
 // missing a pair.
