@@ -42,7 +42,7 @@ The client, engine, runner and the MCP bridge (`brigada mcp`, §12.2) are the on
 | a dependency is done | rule | the dependent task becomes ready |
 | quota limit hit by a worker | rule | cool the account (§8); re-dispatch to another eligible agent as a **fresh** attempt (on the task's next `-r<n>` branch, §6.4) carrying the previous job's summary if it produced one, else its last progress events (a session can't move between agents), counting toward the task's attempt caps; no eligible agent in any tier (§8; proposal, 2026-10-19) → the task parks and the user is notified (§10) |
 | worker `needs_help` | **foreman** | answer → next job on the same session, or re-plan |
-| task out of rounds or retries | rule, then **foreman** | (proposal, 2026-10-19) the tier escalation of §8 first, while the task is below heavy; then the foreman: re-plan, switch agent, split, or ask the user |
+| task out of rounds or retries | rule, then **foreman** | (proposal, 2026-10-19) the tier escalation of §8 first, while the task is below heavy and its attempts are not spent; then the foreman: re-plan, switch agent, split, or ask the user |
 | worker stalled (§5.6) | **foreman** (decided 2026-10-12: always; no automatic nudge) | restart with a new instruction, switch agent, or ask the user |
 | plan above the approval limit | **user** | approve, edit or reject (§6.3) |
 | foreman limit hit (§4.4) | **user** | wait, switch foreman, or continue without it (decided 2026-10-12) |
