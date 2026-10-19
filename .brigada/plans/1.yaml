@@ -40,8 +40,8 @@ tasks:
     class: "implement"
     deps: ["agents-md"]
     base: "agents-md"
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-3-r1"
     rounds: 0
   - id: 4
     name: "rc-prerelease"
