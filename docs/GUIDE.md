@@ -739,7 +739,7 @@ brigada runner --agent 'harness=claude,tools=Bash(npm test:*)+Bash(npx jest:*)'
 - The config key `tools.claude/<model>` (same syntax) sets the default for that model's agent. `tools=` on the `--agent` wins over it, and an agent with neither keeps the Go default.
 - A pattern cannot contain a comma: the `--agent` value splits on commas.
 - The scope applies to workers only. The foreman's own tools (read-only file tools and brigada's MCP tools, no shell and no edits) never change, whatever `tools=` says.
-- `codex`, `kimi` and `opencode` refuse `tools=`. Codex workers run in the `workspace-write` sandbox. Kimi reviews use the read-only agent definition above unless you supply `agent-file=`; allowing it to write code also allows commands without asking. Opencode permits edits and denies bash headless by default.
+- `codex`, `kimi` and `opencode` refuse `tools=`. Codex workers run in the `workspace-write` sandbox. Kimi reviews use the read-only agent definition above unless you supply `agent-file=`; allowing it to write code also allows commands without asking. Opencode permits edits and denies bash headless by default, and every opencode worker also runs with `OPENCODE_PERMISSION` denying `external_directory`: a tool call that reaches outside its worktree fails with a permission error the model sees and can answer, instead of the ask a headless run auto-rejects. Should such an auto-reject still end a run without a word, the adapter reads the CLI's stderr notice and records it as the failure's reason.
 - `brigada runner` prints each claude agent's scope at startup, and the foreman's capacity read shows it as `tools=` on the agent.
 
 ### Accounts

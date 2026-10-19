@@ -1,0 +1,2 @@
+[93m[1m! [0mpermission requested: external_directory (/Users/worker/projects/.worktrees/brigada-build-bare/internal/engine/*); auto-rejecting
+! permission requested: external_directory (/Users/worker/projects/.worktrees/brigada-build-bare/internal/engine/*); auto-rejecting

@@ -99,6 +99,41 @@ func TestCommandEnv(t *testing.T) {
 	}
 }
 
+func TestWorkerPermissions(t *testing.T) {
+	const deny = `OPENCODE_PERMISSION={"external_directory":"deny"}`
+	cases := []struct {
+		name    string
+		ambient string // set when non-empty
+		want    string
+	}{
+		{"absent", "", deny},
+		{"other rules kept", `{"bash":"ask"}`, `OPENCODE_PERMISSION={"bash":"ask","external_directory":"deny"}`},
+		{"weaker rule overridden", `{"external_directory":"allow"}`, deny},
+		{"invalid replaced", "not json", deny},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stubCLI(t)
+			if tc.ambient != "" {
+				t.Setenv("OPENCODE_PERMISSION", tc.ambient)
+			}
+			cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p"}, t.TempDir(), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got string
+			for _, kv := range cmd.Env {
+				if strings.HasPrefix(kv, "OPENCODE_PERMISSION=") {
+					got = kv
+				}
+			}
+			if got != tc.want {
+				t.Errorf("env = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func parseFixture(t *testing.T, name string, parse func([]byte) (adapter.Event, bool)) []adapter.Event {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("testdata", name))
@@ -165,6 +200,62 @@ func TestFailureFixtures(t *testing.T) {
 				if !slices.Equal(failures, want) {
 					t.Errorf("failures = %+v, want %+v", failures, want)
 				}
+			}
+		})
+	}
+}
+
+func TestPermissionRejectFixture(t *testing.T) {
+	a := &Adapter{}
+	const text = "permission requested: external_directory (/Users/worker/projects/.worktrees/brigada-build-bare/internal/engine/*); auto-rejecting"
+	events := parseFixture(t, "permission-reject.txt", a.ParseErrEvent)
+	want := []adapter.Event{
+		{Kind: adapter.EvError, ErrorKind: adapter.ErrOther, Text: text},
+		{Kind: adapter.EvError, ErrorKind: adapter.ErrOther, Text: text},
+	}
+	if !slices.Equal(events, want) {
+		t.Errorf("events = %+v, want %+v", events, want)
+	}
+	// The notice rides stderr only; the JSON stream must not read it.
+	data, err := os.ReadFile(filepath.Join("testdata", "permission-reject.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		if _, ok := a.ParseEvent([]byte(line)); ok {
+			t.Errorf("ParseEvent read a stderr notice: %q", line)
+		}
+	}
+}
+
+func TestParseErrEvent(t *testing.T) {
+	const plain = "! permission requested: external_directory (/tmp/other/*); auto-rejecting"
+	cases := []struct {
+		name string
+		line string
+		want adapter.Event
+		ok   bool
+	}{
+		{"coloured", "\x1b[93m\x1b[1m! \x1b[0mpermission requested: external_directory (/tmp/other/*); auto-rejecting", adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrOther, Text: "permission requested: external_directory (/tmp/other/*); auto-rejecting"}, true},
+		{"plain", plain, adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrOther, Text: "permission requested: external_directory (/tmp/other/*); auto-rejecting"}, true},
+		{"several patterns", "! permission requested: bash (git push, rm -rf *); auto-rejecting", adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrOther, Text: "permission requested: bash (git push, rm -rf *); auto-rejecting"}, true},
+		{"other permission", "! permission requested: webfetch (https://example.invalid/*); auto-rejecting", adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrOther, Text: "permission requested: webfetch (https://example.invalid/*); auto-rejecting"}, true},
+		{"no marker", "permission requested: external_directory (/tmp/*); auto-rejecting", adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrOther, Text: "permission requested: external_directory (/tmp/*); auto-rejecting"}, true},
+		{"missing suffix", "! permission requested: external_directory (/tmp/*); approved", adapter.Event{}, false},
+		{"missing colon", "! permission requested external_directory (/tmp/*); auto-rejecting", adapter.Event{}, false},
+		{"missing patterns", "! permission requested: external_directory; auto-rejecting", adapter.Event{}, false},
+		{"prose with markers", "a permission requested: none here; auto-rejecting, says the log", adapter.Event{}, false},
+		{"noise", "warning: permission denied", adapter.Event{}, false},
+	}
+	a := &Adapter{}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := a.ParseErrEvent([]byte(tc.line))
+			if ok != tc.ok || got != tc.want {
+				t.Errorf("ParseErrEvent = (%+v, %v), want (%+v, %v)", got, ok, tc.want, tc.ok)
 			}
 		})
 	}
