@@ -135,6 +135,7 @@ func workerEnv(env []string) []string {
 // adapter reads are declared; the rest of each line is ignored where it
 // stands.
 type lineJSON struct {
+	Usage      json.RawMessage `json:"usage"`
 	Role       string          `json:"role"`
 	Type       string          `json:"type"`
 	SessionID  string          `json:"session_id"`
@@ -220,7 +221,12 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 	}
 	switch {
 	case lj.Role == "assistant":
-		return assistantEvent(lj)
+		ev, ok := assistantEvent(lj)
+		ev.Usage = adapter.ParseUsage(lj.Usage, "input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens", "")
+		if !ok && ev.Usage != nil {
+			ev.Kind, ok = adapter.EvUsage, true
+		}
+		return ev, ok
 	case lj.Role == "tool":
 		return adapter.Event{Kind: adapter.EvToolEnd, Text: lj.ToolCallID}, true
 	case lj.Role == "meta" && lj.Type == "session.resume_hint":

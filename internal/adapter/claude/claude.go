@@ -285,12 +285,14 @@ func workerEnv(env []string) []string {
 // adapter reads are declared; the rest of each line is ignored where it
 // stands.
 type lineJSON struct {
-	Type      string      `json:"type"`
-	Subtype   string      `json:"subtype"`
-	IsError   bool        `json:"is_error"`
-	Result    string      `json:"result"`
-	SessionID string      `json:"session_id"`
-	Message   messageJSON `json:"message"`
+	Usage     json.RawMessage `json:"usage"`
+	Cost      json.RawMessage `json:"total_cost_usd"`
+	Type      string          `json:"type"`
+	Subtype   string          `json:"subtype"`
+	IsError   bool            `json:"is_error"`
+	Result    string          `json:"result"`
+	SessionID string          `json:"session_id"`
+	Message   messageJSON     `json:"message"`
 }
 
 // messageJSON is the anthropic-shaped message both assistant and user
@@ -349,7 +351,9 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 	case "user":
 		return toolEnd(lj.Message.Content)
 	case "result":
-		return resultEvent(lj)
+		ev, ok := resultEvent(lj)
+		ev.Usage = resultUsage(lj)
+		return ev, ok
 	default:
 		return adapter.Event{}, false
 	}
@@ -379,6 +383,7 @@ func (a *Adapter) ParseErrEvent(line []byte) (adapter.Event, bool) {
 		switch lj.Type {
 		case "result":
 			if ev, ok := resultEvent(lj); ok && ev.Kind == adapter.EvError {
+				ev.Usage = resultUsage(lj)
 				return ev, true
 			}
 		case "error":
@@ -568,4 +573,30 @@ func (a *Adapter) ResultText(events []adapter.Event) string {
 		return result
 	}
 	return lastMessage
+}
+
+// Result usage and total_cost_usd are the CLI result envelope's fields:
+// https://code.claude.com/docs/en/agent-sdk/cost-tracking
+// Only the result is counted, never its per-message usage as well.
+func resultUsage(lj lineJSON) *adapter.Usage {
+	u := adapter.ParseUsage(lj.Usage, "input_tokens", "output_tokens", "cache_read_input_tokens", "", "")
+	cost := adapter.ParseUsage(json.RawMessage(`{"cost":`+string(lj.Cost)+`}`), "", "", "", "", "cost")
+	if u == nil {
+		u = cost
+	} else {
+		u.Add(cost)
+	}
+	// Anthropic's input_tokens excludes cache reads and cache creation.
+	creation := adapter.ParseUsage(lj.Usage, "cache_creation_input_tokens", "", "", "", "")
+	if creation != nil {
+		if u == nil {
+			u = &adapter.Usage{}
+		}
+		u.Add(creation)
+	}
+	if u != nil && u.CachedInputTokens != nil {
+		n := *u.CachedInputTokens
+		u.Add(&adapter.Usage{InputTokens: &n})
+	}
+	return u
 }

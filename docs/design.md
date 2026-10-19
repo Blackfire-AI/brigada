@@ -401,6 +401,19 @@ Today an engineer fetches each approved branch, squashes it onto the default bra
 
 ## 8. Dispatcher
 
+**Per-job usage (decided 2026-10-20).** Each job records the usage its own
+CLI invocation reports: input, output, cached input and reasoning tokens,
+and US dollars when supplied. Claude result usage is counted once, with
+cache reads and creation included in input; Codex turn usage and opencode
+step usage are summed. Missing or malformed counters stay unknown (NULL),
+distinct from reported zero. A fix round and a resumed session are separate
+jobs: totals are never carried or subtracted across jobs. Wall time is
+recorded with completion. Stats sum known counters per agent and class
+from every job, including work, fix and review, and show cost per success
+in dollars when any dollar cost is known, otherwise in tokens. Unknown
+jobs do not contribute to sums; no successes means no cost-per-success.
+These measurements do not steer dispatch yet.
+
 - **Eligible:** the adapter supports the class; family rule for reviews; agent `ready` (not `broken`, not `cooling`); account not cooling; session affinity (a resumed session stays on its agent and runner); (decided 2026-10-19; shipped) the agent's tier is the task's effective tier, with the fallback below.
 - **Cap room:** an eligible agent is picked only if every concurrency cap on its path has room (§8.1). Caps shrink the set of eligible agents with room, so a task whose best agent is cap-blocked goes to the next-best agent with room; it waits in the queue only when no eligible agent has room, and that never parks it. **Parking** means no agent is eligible with caps ignored.
 - **Score:** per (repo, class, agent): a success rate with a prior, where success = check passed and review approved within the rounds. Defaults for a cold start; an exploration share (default 10%) goes to the next-best eligible agent with room, within the task's tier (decided 2026-10-19; shipped): exploring never sends a task to a lighter tier; only the last-resort fallback below may.
@@ -506,6 +519,14 @@ JSON over HTTP; locally on a Unix socket, remotely over TLS. Bearer tokens with 
 Selecting a flag mints nothing, and a selector that the credential in hand does not match is refused. A client token never appears in the foreman set, nor a foreman credential in the other two.
 
 ### 12.3 Runner protocol
+
+**Usage completion (decided 2026-10-20).** Completion optionally carries
+`usage` with `input_tokens`, `output_tokens`, `cached_input_tokens`,
+`reasoning_tokens`, and `cost_usd`, plus `wall_seconds` for this job's elapsed
+wall time before delivery. Each usage field is optional. Older runners may
+omit usage and wall time; these remain NULL. Retries of a completion do not
+add usage again. Counters describe only the job's own CLI invocation, even
+for fix and resumed jobs, and do not steer dispatch yet.
 
 `register` · `lease` (long-poll) · `heartbeat` (progress, last activity) · `complete` (result or error; an outcome of `stalled`/`time_cap` when the runner stopped the run itself, §5.6; check result; artifacts) · `release`. Fencing as in Python v3.2.
 

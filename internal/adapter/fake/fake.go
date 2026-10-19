@@ -79,13 +79,14 @@ func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSe
 // session id, assistant messages, tool calls, a final result message
 // and an error line.
 type eventJSON struct {
-	Type      string `json:"type"`
-	Text      string `json:"text"`
-	Name      string `json:"name"`
-	SessionID string `json:"session_id"`
-	Kind      string `json:"kind"`
-	Message   string `json:"message"`
-	Until     string `json:"until"` // a limit error's reset time, RFC3339 (§4.4)
+	Usage     json.RawMessage `json:"usage"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	Name      string          `json:"name"`
+	SessionID string          `json:"session_id"`
+	Kind      string          `json:"kind"`
+	Message   string          `json:"message"`
+	Until     string          `json:"until"` // a limit error's reset time, RFC3339 (§4.4)
 }
 
 // ParseEvent implements adapter.Adapter. A line that is not one of the
@@ -114,8 +115,13 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 			name = ev.Text
 		}
 		return adapter.Event{Kind: adapter.EventKind(ev.Type), Text: name}, true
-	case "result":
-		return adapter.Event{Kind: adapter.EvMessage, Text: ev.Text}, true
+	case "result", "usage":
+		kind := adapter.EvMessage
+		if ev.Type == "usage" {
+			kind = adapter.EvUsage
+		}
+		u := adapter.ParseUsage(ev.Usage, "input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens", "cost_usd")
+		return adapter.Event{Kind: kind, Text: ev.Text, Usage: u}, true
 	case "error":
 		kind := adapter.ErrorKind(ev.Kind)
 		switch kind {

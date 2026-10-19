@@ -36,10 +36,10 @@ func TestStatsTable(t *testing.T) {
 		t.Fatalf("exit %d, stderr %q", code, errb.String())
 	}
 	want := "https://example.invalid/one.git\n" +
-		"  AGENT                TIER      CLASS      ATTEMPTS  SUCCESSES  RATE  CONFIDENCE\n" +
-		"  claude/sonnet        heavy     implement  6         5          0.79  enough\n" +
-		"  kimi/k2              standard  implement  2         1          0.50  starting\n" +
-		"  zcode/glm (stale)    light     implement  0         0          0.50  none\n" +
+		"  AGENT                TIER      CLASS      ATTEMPTS  SUCCESSES  RATE  CONFIDENCE  INPUT OUTPUT CACHED REASONING TOKENS USD WALL(s) COST/SUCCESS\n" +
+		"  claude/sonnet        heavy     implement  6         5          0.79  enough - - - - - - - -\n" +
+		"  kimi/k2              standard  implement  2         1          0.50  starting - - - - - - - -\n" +
+		"  zcode/glm (stale)    light     implement  0         0          0.50  none - - - - - - - -\n" +
 		"\n" +
 		"https://example.invalid/two.git\n" +
 		"  no agents registered\n"
@@ -90,5 +90,25 @@ func TestStatsListedInUsage(t *testing.T) {
 	}
 	if _, ok := commands["stats"]; !ok {
 		t.Errorf("stats is not in the command map")
+	}
+}
+
+func TestStatsUsageColumns(t *testing.T) {
+	input, output, cached, reasoning, tokens := int64(30), int64(12), int64(0), int64(4), int64(42)
+	dollars, wall, cost, tokenCost := 0.25, 5.0, 0.125, 21.0
+	var out bytes.Buffer
+	rows := []engine.StatsRow{
+		{Harness: "claude", Model: "sonnet", Class: "implement", Live: true, Successes: 2, InputTokens: &input, OutputTokens: &output, CachedInputTokens: &cached, ReasoningTokens: &reasoning, Tokens: &tokens, CostUSD: &dollars, WallSeconds: &wall, CostPerSuccess: &cost, CostPerSuccessUnit: "USD"},
+		{Harness: "codex", Class: "review", Live: true, Tokens: &tokens, CostPerSuccess: &tokenCost, CostPerSuccessUnit: "tokens"},
+	}
+	if err := renderStats(&out, []engine.ProjectStats{{RepoURL: "example.invalid/repo", Rows: rows}}); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(out.String(), "\n")
+	if !strings.HasSuffix(strings.Join(strings.Fields(lines[2]), " "), "30 12 0 4 42 0.2500 5.0000 0.1250 USD") {
+		t.Fatalf("dollar row: %s", lines[2])
+	}
+	if !strings.HasSuffix(strings.Join(strings.Fields(lines[3]), " "), "- - - - 42 - - 21.0000 tokens") {
+		t.Fatalf("token row: %s", lines[3])
 	}
 }

@@ -250,10 +250,11 @@ func workerEnv(env []string) []string {
 // lineJSON is one line of the CLI's --json output: one event per line.
 // Only the fields the adapter reads are declared.
 type lineJSON struct {
-	Type     string    `json:"type"`
-	ThreadID string    `json:"thread_id"`
-	Message  string    `json:"message"`
-	Item     *itemJSON `json:"item"`
+	Usage    json.RawMessage `json:"usage"`
+	Type     string          `json:"type"`
+	ThreadID string          `json:"thread_id"`
+	Message  string          `json:"message"`
+	Item     *itemJSON       `json:"item"`
 	Error    *struct {
 		Message string `json:"message"`
 	} `json:"error"`
@@ -297,8 +298,8 @@ func firstLine(command string) string {
 //	item.started mcp_tool_call       → tool start (server/tool)
 //	item.completed mcp_tool_call     → tool end, naming the error when the call failed
 //	error, turn.failed, error item    → an error event, sorted by its text
-//	turn.started, turn.completed      → ignored: the usage counters it
-//	                                    carries are no progress
+//	turn.completed                    → usage counters (not progress)
+//	turn.started                      → ignored
 //
 // Unknown event and item types and malformed lines are ignored, never
 // fatal, so a stray line cannot fail an otherwise good run.
@@ -314,6 +315,9 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 		return phraseEvent(stderrPhrases, string(trimmed))
 	}
 	switch lj.Type {
+	case "turn.completed":
+		u := adapter.ParseUsage(lj.Usage, "input_tokens", "output_tokens", "cached_input_tokens", "reasoning_output_tokens", "")
+		return adapter.Event{Kind: adapter.EvUsage, Usage: u}, u != nil
 	case "thread.started":
 		if lj.ThreadID == "" {
 			return adapter.Event{}, false

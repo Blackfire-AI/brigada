@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/history"
 )
@@ -148,6 +149,8 @@ func (c *Client) Heartbeat(ctx context.Context, jobID int64, leaseID string, pro
 // completion's to name: the runner uploads them through
 // UploadArtifact (§9), which stores them itself.
 type Completion struct {
+	Usage       *adapter.Usage
+	WallSeconds *float64
 	Result      string
 	Error       string
 	CheckResult string
@@ -165,6 +168,8 @@ type Completion struct {
 func (c *Client) Complete(ctx context.Context, jobID int64, leaseID string, comp Completion) (engine.Answer, error) {
 	req := completeRequest{
 		jobLeaseRequest: jobLeaseRequest{JobID: jobID, LeaseID: leaseID},
+		Usage:           comp.Usage,
+		WallSeconds:     comp.WallSeconds,
 		Result:          comp.Result,
 		Error:           comp.Error,
 		CheckResult:     comp.CheckResult,

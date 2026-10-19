@@ -3,6 +3,7 @@ package opencode
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -119,10 +120,12 @@ func TestNormalFixture(t *testing.T) {
 	want := []adapter.Event{
 		{Kind: adapter.EvSession, SessionID: "ses_fixture"},
 		{Kind: adapter.EvToolEnd, Text: "read"},
+		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(10), OutputTokens: usageInt(5), CachedInputTokens: usageInt(0), ReasoningTokens: usageInt(0)}},
 		{Kind: adapter.EvSession, SessionID: "ses_fixture"},
 		{Kind: adapter.EvMessage, Text: "The final answer text."},
+		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(10), OutputTokens: usageInt(5), CachedInputTokens: usageInt(0), ReasoningTokens: usageInt(0)}},
 	}
-	if !slices.Equal(events, want) {
+	if !reflect.DeepEqual(events, want) {
 		t.Errorf("events = %+v, want %+v", events, want)
 	}
 	if got := a.ResultText(events); got != "The final answer text." {

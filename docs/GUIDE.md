@@ -789,7 +789,7 @@ With `headroom = true` (the default), task workers on the account that serves yo
 `brigada stats` prints one table per repo:
 
 ```text
-AGENT  TIER  CLASS  ATTEMPTS  SUCCESSES  RATE  CONFIDENCE
+AGENT  TIER  CLASS  ATTEMPTS  SUCCESSES  RATE  CONFIDENCE  INPUT  OUTPUT  CACHED  REASONING  TOKENS  USD  WALL(s)  COST/SUCCESS
 ```
 
 - **Tier** is the model-name table label (`light`, `standard` or `heavy`), corrected by any `tier.<harness>/<model>` config override, and determines which task tier the agent serves. The record stays keyed by repo, class and agent; changing the tier label keeps the agent's existing outcomes.
@@ -800,6 +800,8 @@ AGENT  TIER  CLASS  ATTEMPTS  SUCCESSES  RATE  CONFIDENCE
   - When the foreman's plan finishes, it is counted in the class `plan` for the foreman's agent, as a success when every task was done (or cancelled with your approval). This is measured only and does not steer dispatch.
 - **Rate** is the score the dispatcher ranks by: `(successes + 0.5) / (attempts + 1)`. The prior is one pseudo-trial at 50%, so an agent with no record scores 0.50 and a single success reads 0.75, not 1.00. More attempts pull the rate toward what actually happened.
 - **Confidence** is a word for the attempts behind the score: `none` for 0, `starting` for 1 to 4, `enough` from 5 on.
+- **Input, output, cached and reasoning** sum CLI-reported tokens for the agent and class. Cached and reasoning are breakdowns; **tokens** sums input plus output. Claude input includes cache reads and cache creation. **USD** sums the dollar costs the CLI supplied; **wall(s)** sums job wall time in seconds. Work, fix and review jobs all count toward the agent that ran each job (reviews in class `review`, foreman jobs in `plan`). Each job, including a resumed session, records its own reported totals; nothing is carried between jobs.
+- **Cost/success** divides summed dollars by successes where dollars are known, otherwise summed tokens by successes. No successes or no reported usage displays `-`. Missing counters display `-`, distinct from reported zero. Sums include only known values, so mixed old and new jobs can yield partial totals. Usage does not steer dispatch yet.
 - An agent whose runner has not been seen lately is marked `(stale)`; a registered agent with no record yet shows at 0 attempts.
 
 Read it by class. For each task, the dispatcher picks the agent with the best score in the served tier among those that are ready, have quota and have room under the caps, and sends about one task in ten to the next best, so that an agent with a thin record can be measured.
