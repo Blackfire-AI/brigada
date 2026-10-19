@@ -5,9 +5,9 @@
 plan: 2
 title: "#26 Mode A: the session in the repo is the foreman after brigada init"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: pending_approval
 created: 2026-10-19T15:23:19.367636Z
-updated: 2026-10-19T20:56:09.865726Z
+updated: 2026-10-19T21:00:05.351939Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps, or from the
 # default branch when base is empty; merge a task after its base. States
@@ -30,9 +30,8 @@ tasks:
     name: "codex"
     title: "Codex parity: foreman bridge in Codex project config (#26 item 3)"
     class: "implement"
-    deps: ["router-3"]
-    base: "router-3"
-    tier: heavy
+    deps: ["router-4"]
+    base: "router-4"
     state: pending
     branch: ""
     rounds: 0
@@ -71,7 +70,18 @@ tasks:
     deps: []
     base: ""
     tier: heavy
-    state: running
+    state: cancelled
     branch: ""
     rounds: 0
     extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "brigada/task-12"]]
+  - id: 14
+    name: "router-4"
+    title: "Router block in AGENTS.md, rules in .brigada/foreman.md, retire the skill (#26 items 1, 2, 4), finish from task 12"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    state: pending
+    branch: ""
+    rounds: 0
+    extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "7bb722ae55919880567e2dbd770fb2253509a76e"]]
