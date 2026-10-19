@@ -49,19 +49,17 @@ type WorkerResult struct {
 }
 
 // parseResult reads the result block out of a worker's final message
-// (§5.4). The block is the last fenced ```json block of the message; a
-// message with no fence falls back to a JSON object that ends the
-// message. A missing, malformed or unrecognized block is a failure with
-// reason no-result, its summary carrying the tail of the final message
-// so the record names what the worker actually said.
+// (§5.4). The block is the last fenced ```json block of the message; the
+// candidates come from blockCandidates, in its order — fenced blocks by
+// the line rules, last first, then a JSON object ending the message, then
+// the old substring heuristic — and the first that decodes as a result
+// wins, so a summary quoting a fence, or an unrelated example block after
+// the result, no longer hides it. A missing, malformed or unrecognized
+// block is a failure with reason no-result, its summary carrying the tail
+// of the final message so the record names what the worker actually said.
 func parseResult(finalText string) WorkerResult {
-	if block, ok := lastFencedJSON(finalText); ok {
+	for _, block := range blockCandidates(finalText) {
 		if res, ok := decodeResult(block); ok {
-			return res
-		}
-	}
-	if tail, ok := trailingJSON(finalText); ok {
-		if res, ok := decodeResult(tail); ok {
 			return res
 		}
 	}
@@ -91,10 +89,126 @@ func decodeResult(block string) (WorkerResult, bool) {
 	}
 }
 
-// lastFencedJSON returns the content of the last fenced code block in
-// text, whatever language tag it carries. The result block arrives
-// fenced (§5.4); the language tag is the worker's choice.
-func lastFencedJSON(text string) (string, bool) {
+// blockCandidates returns the texts of a final message that may be its
+// JSON block, best first; the caller decodes each in turn and takes the
+// first that is the block it expects. Shared by the worker result (§5.4)
+// and the review verdict (§7). The attempts, in order:
+//
+//  1. Fenced code blocks by the CommonMark line rules (fencedBlocks),
+//     last first. A fence string inside a JSON string is never a fence
+//     here, so a summary quoting one no longer cuts the block in two;
+//     and a message ending with an unrelated example block still yields
+//     the result before it.
+//  2. A JSON object ending the message, after one closing-fence line is
+//     dropped from its end: the unfenced block, and the block whose
+//     fence opened mid-line after prose and so was no fence by rule 1.
+//  3. The substring heuristic of lastFenceSubstring, the parser before
+//     the line rules, kept for whatever shape it alone still reads.
+func blockCandidates(text string) []string {
+	blocks := fencedBlocks(text)
+	var out []string
+	for i := len(blocks) - 1; i >= 0; i-- {
+		out = append(out, blocks[i])
+	}
+	if tail, ok := trailingJSON(stripClosingFence(text)); ok {
+		out = append(out, tail)
+	}
+	if block, ok := lastFenceSubstring(text); ok {
+		out = append(out, block)
+	}
+	return out
+}
+
+// fencedBlocks returns the content of every fenced code block in text,
+// in order, by CommonMark's rules: an opening fence is a line of at most
+// three spaces of indent, then three or more backticks or tildes, then
+// an optional info string (the language tag); the closing fence is a
+// line of the same character, at least as long, with nothing but
+// whitespace after it. A block left open runs to the end of the text.
+// Content is trimmed; empty blocks are dropped.
+func fencedBlocks(text string) []string {
+	var blocks []string
+	var openCh byte
+	var openLen int
+	var content []string
+	inBlock := false
+	flush := func() {
+		if c := strings.TrimSpace(strings.Join(content, "\n")); c != "" {
+			blocks = append(blocks, c)
+		}
+		inBlock = false
+	}
+	for _, line := range strings.Split(text, "\n") {
+		ch, n, info, ok := fenceOf(line)
+		if inBlock {
+			if ok && ch == openCh && n >= openLen && strings.TrimSpace(info) == "" {
+				flush()
+			} else {
+				content = append(content, line)
+			}
+			continue
+		}
+		// A backtick fence's info string may not hold a backtick: such a
+		// line is inline code, not a fence.
+		if ok && !(ch == '`' && strings.Contains(info, "`")) {
+			inBlock, openCh, openLen, content = true, ch, n, nil
+		}
+	}
+	if inBlock {
+		flush()
+	}
+	return blocks
+}
+
+// fenceOf reads one line as a code fence: up to three spaces of indent,
+// then a run of three or more backticks or tildes. It returns the fence
+// character, the run's length and the rest of the line (the info string
+// of an opening fence; blank on a closing one). ok is false when the
+// line is not a fence.
+func fenceOf(line string) (ch byte, n int, info string, ok bool) {
+	line = strings.TrimRight(line, "\r")
+	i := 0
+	for i < len(line) && i < 3 && line[i] == ' ' {
+		i++
+	}
+	if i >= len(line) || (line[i] != '`' && line[i] != '~') {
+		return 0, 0, "", false
+	}
+	ch = line[i]
+	j := i
+	for j < len(line) && line[j] == ch {
+		j++
+	}
+	if n = j - i; n < 3 {
+		return 0, 0, "", false
+	}
+	return ch, n, line[j:], true
+}
+
+// stripClosingFence drops one closing-fence line from the end of text,
+// trailing whitespace included, so the trailing-object fallback sees a
+// message that ends with its object when the worker opened its fence
+// mid-line — no fence by the line rules — and closed it on a line of its
+// own. Any other ending is returned unchanged.
+func stripClosingFence(text string) string {
+	trimmed := strings.TrimRight(text, " \t\r\n")
+	i := strings.LastIndexByte(trimmed, '\n')
+	if _, _, info, ok := fenceOf(trimmed[i+1:]); !ok || strings.TrimSpace(info) != "" {
+		return text
+	}
+	if i < 0 {
+		return ""
+	}
+	return trimmed[:i]
+}
+
+// lastFenceSubstring returns what sits between the last two triple
+// backticks of text, whatever language tag the first carries. The
+// parser before the line rules, kept as the last resort: it reads a
+// fence string anywhere — inside a JSON string too, which is the failure
+// the line rules fix — so it only speaks after they and the trailing
+// object both found nothing.
+func lastFenceSubstring(text string) (string, bool) {
 	idx := strings.LastIndex(text, "```")
 	if idx <= 0 {
 		return "", false

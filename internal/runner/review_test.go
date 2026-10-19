@@ -89,6 +89,47 @@ const reviewNoVerdictResult = `echo '{"type":"result","text":"I read the diff an
 // outcome, so the engine and the test both learn what happened.
 const reviewWedgedResult = `sleep 30`
 
+// TestVerdictOf checks the verdict parser (§7) on the shapes reviewers
+// send: the fenced block, with and without prose before the fence; a
+// findings field quoting a fence (issue #27), which the old substring
+// parser cut the block at; an unrelated example block after the verdict;
+// and messages with no verdict at all, which complete empty.
+func TestVerdictOf(t *testing.T) {
+	approve := `{"verdict":"approve","findings":"` + reviewFindings + `"}`
+	quoting := `{"verdict":"changes","findings":"the README shows ` + "```sh" + ` where the code uses ` + "```bash" + `; align them"}`
+	nested := `{"verdict":"changes","findings":"the fence is wrong:\n` + "```" + `go\nfmt.Println()\n` + "```" + `\nuse json"}`
+	cases := []struct {
+		name string
+		text string
+		want string
+	}{
+		{"fenced on its own lines", "reviewed.\n```json\n" + approve + "\n```\n", approve},
+		{"fence opened mid-line after prose", "reviewed the change. ```json\n" + approve + "\n```", approve},
+		{"findings quoting a backtick fence", "```json\n" + quoting + "\n```\n", quoting},
+		{"findings quoting a tilde fence", "```json\n" + `{"verdict":"approve","findings":"~~~ fences are fine too"}` + "\n```\n", `{"verdict":"approve","findings":"~~~ fences are fine too"}`},
+		{"findings holding a whole fenced example", "```json\n" + nested + "\n```\n", nested},
+		{"mid-line fence, findings quoting a fence", "done. ```json\n" + quoting + "\n```", quoting},
+		{"verdict followed by an unrelated fenced block", "```json\n" + approve + "\n```\nfor example:\n```go\nx := 1\n```\n", approve},
+		{"four-backtick fence", "````json\n" + quoting + "\n````\n", quoting},
+		{"unfenced verdict ending the message", "my verdict: " + approve, approve},
+		{"no block", "I read the diff and it all looked fine to me", emptyVerdictBlock},
+		{"fenced block that is not a verdict", "```json\n{\"status\":\"done\"}\n```\n", emptyVerdictBlock},
+		{"empty message", "", emptyVerdictBlock},
+		// A candidate is judged as the engine will judge it — the whole
+		// block, with the verdict block's field types — so a later block
+		// the engine would reject does not beat an earlier one it accepts.
+		{"verdict followed by a block with numeric findings", "```json\n" + approve + "\n```\nnot this:\n```json\n{\"verdict\":\"changes\",\"findings\":123}\n```\n", approve},
+		{"verdict followed by a fence holding a verdict and garbage", "```json\n" + approve + "\n```\n```json\n{\"verdict\":\"changes\",\"findings\":\"x\"} oops\n```\n", approve},
+		{"only block has numeric findings", "```json\n{\"verdict\":\"changes\",\"findings\":123}\n```\n", emptyVerdictBlock},
+		{"only block is a verdict and garbage", "```json\n{\"verdict\":\"changes\",\"findings\":\"x\"} oops\n```\n", emptyVerdictBlock},
+	}
+	for _, tc := range cases {
+		if got := verdictOf(tc.text); got != tc.want {
+			t.Errorf("%s: verdictOf = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // reviewScript assembles the dual worker around one reviewer ending.
 func reviewScript(result string) string {
 	return strings.ReplaceAll(reviewWorker, "@RESULT@", result)
