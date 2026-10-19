@@ -286,3 +286,123 @@ func TestTierQueueTTLNamesAskedTier(t *testing.T) {
 		t.Errorf("park reason = %s, want the asked tier and class", got)
 	}
 }
+
+// tierReview submits a review of a task of the given tier, written by the
+// claude family, so only another family may review it (§7).
+func (e *env) tierReview(tier string) SubmitResult {
+	e.t.Helper()
+	task := e.addTask("{}")
+	e.exec("UPDATE tasks SET tier = ?, effective_tier = ? WHERE id = ?", tier, tier, task)
+	p := e.workOn(task)
+	p.Kind = KindReview
+	p.ExcludeFamily = "claude"
+	return e.submit(p)
+}
+
+// A tier whose only other-family reviewer cools for days counts like a
+// broken one: the review climbs to a standard reviewer of another family.
+func TestHeavyReviewSkipsLongCoolingReviewer(t *testing.T) {
+	e := newEnv(t)
+	e.addAgent(e.runner1, "claude", "opus", "heavy")
+	codex := e.addAgent(e.runner1, "codex", "gpt-5-pro", "codex")
+	glm := e.addAgent(e.runner1, "opencode", "glm-5", "opencode")
+	e.coolUntil(codex, 3*24*time.Hour)
+	job := e.tierReview("heavy")
+	if g := e.leaseAny(e.runner1); g == nil || g.JobID != job.JobID {
+		t.Fatalf("lease = %+v, want review %d", g, job.JobID)
+	}
+	e.assertTierPick(job.JobID, glm, "heavy", "standard")
+}
+
+// A cooling of half an hour is a wait worth having.
+func TestHeavyReviewWaitsForShortCoolingReviewer(t *testing.T) {
+	e := newEnv(t)
+	e.addAgent(e.runner1, "claude", "opus", "heavy")
+	codex := e.addAgent(e.runner1, "codex", "gpt-5-pro", "codex")
+	e.addAgent(e.runner1, "opencode", "glm-5", "opencode")
+	e.coolUntil(codex, 30*time.Minute)
+	job := e.tierReview("heavy")
+	if g := e.leaseAny(e.runner1); g != nil {
+		t.Fatalf("leased %+v while the heavy reviewer cools for 30 minutes", g)
+	}
+	e.assertHeld(job.JobID, layerCooling)
+	e.clock.Advance(31 * time.Minute)
+	if g := e.leaseAny(e.runner1); g == nil || g.JobID != job.JobID {
+		t.Fatalf("lease after reset = %+v, want review %d", g, job.JobID)
+	}
+	e.assertTierPick(job.JobID, codex, "heavy", "heavy")
+}
+
+func TestLightTaskClimbsPastLongCooling(t *testing.T) {
+	e := newEnv(t)
+	haiku := e.addAgent(e.runner1, "claude", "haiku", "light")
+	e.addAgent(e.runner1, "claude", "opus", "heavy")
+	sonnet := e.addAgent(e.runner1, "claude", "sonnet", "standard")
+	e.coolUntil(haiku, 3*24*time.Hour)
+	job := e.tierWork("light")
+	if g := e.leaseAny(e.runner1); g == nil || g.JobID != job.JobID {
+		t.Fatalf("lease = %+v, want job %d", g, job.JobID)
+	}
+	e.assertTierPick(job.JobID, sonnet, "light", "standard")
+}
+
+// With no tier available, the job waits for the earliest reset, in whichever
+// tier that is.
+func TestEveryTierLongCoolingHoldsForTheEarliestReset(t *testing.T) {
+	e := newEnv(t)
+	sonnet := e.addAgent(e.runner1, "claude", "sonnet", "standard")
+	opus := e.addAgent(e.runner1, "claude", "opus", "heavy")
+	e.coolUntil(sonnet, 5*24*time.Hour)
+	soon := e.coolUntil(opus, 2*24*time.Hour)
+	job := e.tierWork("standard")
+	if g := e.leaseAny(e.runner1); g != nil {
+		t.Fatalf("leased %+v while every agent cools", g)
+	}
+	e.assertHeld(job.JobID, layerCooling)
+	info, err := e.eng.Status(e.ctx, 0)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(info.Held) != 1 || info.Held[0].Agent != "claude/opus" || info.Held[0].Until != fmtTime(soon) {
+		t.Fatalf("status held = %+v, want claude/opus until %s", info.Held, fmtTime(soon))
+	}
+}
+
+// A pinned fix round never moves to another tier: it waits for its agent,
+// however long.
+func TestPinnedFixWaitsForLongCooling(t *testing.T) {
+	e := newEnv(t)
+	haiku := e.addAgent(e.runner1, "claude", "haiku", "light")
+	e.addAgent(e.runner1, "claude", "sonnet", "standard")
+	e.coolUntil(haiku, 3*24*time.Hour)
+	job := e.pinnedFix(haiku)
+	if g := e.leaseAny(e.runner1); g != nil {
+		t.Fatalf("leased %+v while the pinned agent cools", g)
+	}
+	e.assertHeld(job.JobID, layerCooling)
+}
+
+// A cooling hold lifts once the served tier has moved to an available agent.
+func TestCoolingHoldLiftsWhenTierMoves(t *testing.T) {
+	e := newEnv(t)
+	haiku := e.addAgent(e.runner1, "claude", "haiku", "light")
+	e.coolUntil(haiku, 40*time.Minute)
+	job := e.tierWork("light")
+	if g := e.leaseAny(e.runner1); g != nil {
+		t.Fatalf("leased %+v while the light tier cools", g)
+	}
+	e.assertHeld(job.JobID, layerCooling)
+
+	// The light agent's cooling turns out to be long, and a standard agent
+	// is there to take over.
+	sonnet := e.addAgent(e.runner1, "claude", "sonnet", "standard")
+	e.coolUntil(haiku, 3*24*time.Hour)
+	e.mustSweep()
+	if got := e.heldLayer(job.JobID); got != "" {
+		t.Fatalf("hold layer = %q after the tier moved, want it lifted", got)
+	}
+	if g := e.leaseAny(e.runner1); g == nil || g.JobID != job.JobID {
+		t.Fatalf("lease = %+v, want job %d", g, job.JobID)
+	}
+	e.assertTierPick(job.JobID, sonnet, "light", "standard")
+}
