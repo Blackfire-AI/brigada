@@ -269,7 +269,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 		}
 
-		cands, err := leaseAgentsTx(tx, e.cfg.Caps, owner, j, nowStr)
+		cands, err := leaseAgentsTx(tx, e.cfg.Caps, e.cfg.Rand, owner, j, nowStr)
 		if err != nil {
 			return nil, err
 		}
@@ -310,17 +310,12 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 			cands = []agentCand{{}} // no agent recorded
 		}
-		// The rank choice (§8): the best-scored agent, or — by the
-		// exploration share, when a next-best exists — the next-best, so a
-		// weaker agent keeps being measured. The candidates have already been
-		// filtered by tier, so exploration stays within the served tier.
-		walk, pick := cands, pickBest
-		if len(cands) > 1 && e.explore() {
-			walk = append([]agentCand{cands[1], cands[0]}, cands[2:]...)
-			pick = pickExploration
-		}
+		// The rank choice (§8): the candidates come sampled and ordered by
+		// leaseAgentsTx, within the served tier, so a weaker record keeps
+		// getting picked now and then and a costly agent less often.
+		walk := cands
 		// The cap gate (§8.1): the job starts only if every layer on its
-		// path has room. The walk takes the first agent in pick order
+		// path has room. The walk takes the first agent in rank order
 		// whose path has room, so a full account does not hold the job
 		// while a lower-ranked agent has room. A full layer on every
 		// agent holds the job in place — it stays queued and the loop
@@ -412,9 +407,16 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			if err := tx.QueryRow("SELECT effort FROM tasks WHERE id = ?", j.TaskID).Scan(&taskEffort); err != nil {
 				return nil, fmt.Errorf("read the effort of task %d: %w", j.TaskID, err)
 			}
+			// The task's effort, then the agent's own (already in its
+			// harness's vocabulary), then medium: the default is resolved
+			// in brigada's levels before the harness maps them, so a
+			// harness without that control gets nothing.
 			effort = adapter.EffortForHarness(agentHarness, taskEffort)
 			if effort == "" {
 				effort = jobEffort
+			}
+			if effort == "" && taskEffort == "" {
+				effort = adapter.EffortForHarness(agentHarness, defaultTaskEffort)
 			}
 			jobEffort = effort
 		} else if j.Kind == KindForeman && foremanEffort != "" {
@@ -461,24 +463,23 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			return nil, err
 		}
 		// Why this agent (§8): plain log, no inbox row and no wake. The
-		// agents ranked above the pick that were passed over for cap room
-		// are named; an exploration pick passed over the best on purpose,
-		// which is not a cap matter, and a walk that fell back from the
-		// explored agent to the best is a best pick.
+		// agents ranked above the pick were passed over for cap room and
+		// are named, and every candidate's weight and draw is recorded.
 		if agent != 0 && j.Kind != KindForeman {
-			var over []int64
-			if pick == pickExploration && chosen.rank != 1 {
-				pick = pickBest
-			}
-			if pick == pickBest {
+			weight := chosen.weight
+			payload := eventPayload{Agent: agent, Score: chosen.score, Pick: pickPinned, Weight: &weight,
+				TierAsked: chosen.tierAsked, TierServed: chosen.tierServed}
+			if j.RequireAgent == 0 {
+				payload.Pick, payload.Draw = pickSampled, chosen.draw
+				payload.Candidates = make([]Ranked, 0, len(cands))
 				for _, c := range cands {
 					if c.rank < chosen.rank {
-						over = append(over, c.id)
+						payload.PassedOver = append(payload.PassedOver, c.id)
 					}
+					payload.Candidates = append(payload.Candidates, Ranked{Agent: c.id, Weight: c.weight, Draw: c.draw})
 				}
 			}
-			if _, err := appendEventTx(tx, evJobAgentPicked, j.ProjectID, j.TaskID, j.ID,
-				eventPayload{Agent: agent, Score: chosen.score, Pick: pick, PassedOver: over, TierAsked: chosen.tierAsked, TierServed: chosen.tierServed}, now); err != nil {
+			if _, err := appendEventTx(tx, evJobAgentPicked, j.ProjectID, j.TaskID, j.ID, payload, now); err != nil {
 				return nil, err
 			}
 		}
@@ -644,22 +645,34 @@ func (r capReservation) layer(job caps.Job) (string, bool) {
 	return "", false
 }
 
-// The rank choices a lease records (§8).
+// The rank choices a lease records (§8): the agent came from the sampled,
+// cost-weighted ranking, or the job named it (a fix round, a pinned restart)
+// and nothing was ranked.
 const (
-	pickBest        = "best"
-	pickExploration = "exploration"
+	pickSampled = "sampled"
+	pickPinned  = "pinned"
 )
+
+// defaultTaskEffort is the effort a task job runs at when neither the task
+// nor its agent names one, in brigada's task vocabulary (§8).
+const defaultTaskEffort = "medium"
 
 // agentCand is one eligible agent of the lease's ranking (§8): its
 // harness rides beside the id so the grant can name it, its score is the
 // outcome record's for the job's (repo, class), and rank is its place in
-// the ranking, 0 the best.
+// the ranking, 0 the first to try.
 type agentCand struct {
-	id      int64
-	adapter string // the adapter the agent was registered under: with the model, its identity on its runner
-	harness string
-	score   float64
-	rank    int
+	id       int64
+	adapter  string // the adapter the agent was registered under: with the model, its identity on its runner
+	harness  string
+	score    float64
+	rank     int
+	attempts int
+	success  int
+	account  string
+	weight   int     // the configured cost weight of the agent's (harness, model)
+	draw     float64 // p, the sampled success rate the ranking used; 0 when unsampled
+	tie      float64 // the further draw that breaks exact ties
 
 	tierAsked  string
 	tierServed string
@@ -671,32 +684,61 @@ type agentCand struct {
 	cooling string
 }
 
-// explore rolls the exploration share (§8): true when this pick should
-// take the next-best agent. A share of 0 never rolls.
-func (e *Engine) explore() bool {
-	share := *e.cfg.ExploreShare
-	return share > 0 && e.cfg.Rand() < share
+// rankAgents orders the candidates for a pick (§8). Each draws p from
+// Beta(successes + 0.5, failures + 0.5), its outcome record for the job's
+// (repo, class); they rank by weight / p, lowest first. A weight of 0
+// ranks before every positive weight, and among zero weights the higher p
+// goes first. Exact ties break by a further draw, so no agent wins them by
+// id alone. A nil rnd leaves the candidates in id order, undrawn.
+func rankAgents(cands []agentCand, rnd func() float64) {
+	if rnd != nil {
+		for i := range cands {
+			c := &cands[i]
+			c.draw = betaDraw(rnd, float64(c.success)+0.5, float64(c.attempts-c.success)+0.5)
+			c.tie = rnd()
+		}
+		sort.SliceStable(cands, func(x, y int) bool { return ranksBefore(&cands[x], &cands[y]) })
+	}
+	for i := range cands {
+		cands[i].rank = i
+	}
+}
+
+// ranksBefore is rankAgents' order.
+func ranksBefore(a, b *agentCand) bool {
+	switch {
+	case (a.weight == 0) != (b.weight == 0):
+		return a.weight == 0
+	case a.weight == 0 && a.draw != b.draw:
+		return a.draw > b.draw
+	case a.weight != 0:
+		if ka, kb := float64(a.weight)/a.draw, float64(b.weight)/b.draw; ka != kb {
+			return ka < kb
+		}
+	}
+	return a.tie < b.tie
 }
 
 // leaseAgentsTx ranks the agents the lease may pick from (§8, §8.1): the
 // runner's agents matching the job's harness constraint, ready and out
 // of cooling at now, offering the job kind's class, and passing the
-// family rule's exclusions when it carries them (§7, §8) — best score
-// first for the job's (repo, class), ties in id order, so a runner with
-// no record at all ranks by id. A job that requires an agent (§3) — a
+// family rule's exclusions when it carries them (§7, §8) — sampled by
+// rankAgents from the outcome record of the job's (repo, class) and the
+// configured cost weights. A job that requires an agent (§3) — a
 // fix round resuming the author's session — has its list named
 // outright: that agent or none, never ranked against another. Empty
 // when the runner advertises no such agent — the caller then refuses
 // the lease, unless the runner advertises nothing at all.
-func leaseAgentsTx(tx *sql.Tx, limits caps.Limits, runner int64, j *jobRow, now string) ([]agentCand, error) {
-	return eligibleAgentsTx(tx, limits, runner, j, kindClass(j.Kind), now)
+func leaseAgentsTx(tx *sql.Tx, limits caps.Limits, rnd func() float64, runner int64, j *jobRow, now string) ([]agentCand, error) {
+	return eligibleAgentsTx(tx, limits, rnd, runner, j, kindClass(j.Kind), now)
 }
 
 // eligibleAgentsTx shares eligibility and ranking with automatic retries,
 // whose candidate lookup uses the task's class rather than the job kind's.
-// Runner 0 ranks all registered agents for an automatic restart's pin.
-func eligibleAgentsTx(tx *sql.Tx, limits caps.Limits, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
-	return qualifyingAgentsTx(tx, limits, runner, j, class, now, false)
+// Runner 0 ranks all registered agents for an automatic restart's pin. A
+// caller that only asks who qualifies passes a nil rnd and gets id order.
+func eligibleAgentsTx(tx *sql.Tx, limits caps.Limits, rnd func() float64, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
+	return qualifyingAgentsTx(tx, limits, rnd, runner, j, class, now, false)
 }
 
 // qualifyingAgentsTx is eligibleAgentsTx's lookup. With unavailable
@@ -706,7 +748,7 @@ func eligibleAgentsTx(tx *sql.Tx, limits caps.Limits, runner int64, j *jobRow, c
 // deadline filled in: what the cooling hold (§8.1) and the queue-TTL
 // park reason read. Unpinned task jobs are restricted to the served tier
 // before availability is checked.
-func qualifyingAgentsTx(tx *sql.Tx, limits caps.Limits, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
+func qualifyingAgentsTx(tx *sql.Tx, limits caps.Limits, rnd func() float64, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
 	asked, served := "", ""
 	if j.TaskID != 0 && j.Kind != KindForeman {
 		if err := tx.QueryRow("SELECT effective_tier FROM tasks WHERE id = ?", j.TaskID).Scan(&asked); err != nil {
@@ -736,15 +778,21 @@ func qualifyingAgentsTx(tx *sql.Tx, limits caps.Limits, runner int64, j *jobRow,
 		if asked != "" {
 			c.tierAsked, c.tierServed = asked, tier
 		}
-		c.rank = len(cands)
+		c.weight = limits.CostOf(c.harness, c.model)
 		cands = append(cands, c)
 	}
+	if j.RequireAgent != 0 {
+		rnd = nil // a pinned job names its agent: nothing to rank or draw
+	}
+	rankAgents(cands, rnd)
 	return cands, nil
 }
 
 // tierServedTx considers every runner's structurally qualifying agents.
 // Cooling still counts as ready health: a cheap wait beats a heavier model.
-// Caps are applied later, after the tier is fixed.
+// A model or account capped at exactly 0 can never take a job, so its agents
+// do not count as ready; a cap that is merely full still waits (§8). Other
+// caps are applied later, after the tier is fixed.
 func tierServedTx(tx *sql.Tx, limits caps.Limits, j *jobRow, class, asked string) (string, error) {
 	agents, err := qualifyingAgentRowsTx(tx, 0, j, class)
 	if err != nil {
@@ -752,15 +800,26 @@ func tierServedTx(tx *sql.Tx, limits caps.Limits, j *jobRow, class, asked string
 	}
 	hasReady := map[string]bool{}
 	for _, a := range agents {
-		if a.health == "ready" {
+		if a.health == "ready" && !cappedAtZero(limits, a.account, a.model) {
 			hasReady[limits.TierOf(a.harness, a.model)] = true
 		}
 	}
 	return tierServed(asked, hasReady), nil
 }
 
+// cappedAtZero reports whether the model's cap or the account's cap is
+// configured as exactly 0 (§8.1).
+func cappedAtZero(limits caps.Limits, account, model string) bool {
+	if n, ok := limits.Model[model]; ok && n == 0 {
+		return true
+	}
+	n, ok := limits.Account[account]
+	return ok && n == 0
+}
+
 // tierServed prefers the asked tier, then climbs, then steps down from
-// heavy. With no ready-health agent anywhere, retain the asked tier.
+// heavy. hasReady names the tiers with an agent that is ready and not
+// capped at 0. With none anywhere, retain the asked tier.
 func tierServed(asked string, hasReady map[string]bool) string {
 	tiers := []string{"light", "standard", "heavy"}
 	at := slices.Index(tiers, asked)
@@ -802,7 +861,7 @@ func qualifyingAgentRowsTx(tx *sql.Tx, runner int64, j *jobRow, class string) ([
 		}
 		harness, model = pair.harness, pair.model
 	}
-	query := `SELECT a.id, a.family, a.harness, a.classes, a.model, a.health, COALESCE(a.cooling_until, ''), COALESCE(o.attempts, 0), COALESCE(o.successes, 0), a.adapter
+	query := `SELECT a.id, a.family, a.harness, a.classes, a.model, a.health, COALESCE(a.cooling_until, ''), COALESCE(o.attempts, 0), COALESCE(o.successes, 0), a.adapter, a.account
 		FROM agents a LEFT JOIN outcomes o ON o.agent_id = a.id AND o.project_id = ? AND o.class = ?
 		WHERE 1 = 1`
 	args := []any{j.ProjectID, class}
@@ -831,8 +890,8 @@ func qualifyingAgentRowsTx(tx *sql.Tx, runner int64, j *jobRow, class string) ([
 	for rows.Next() {
 		var id int64
 		var attempts, successes int
-		var family, harness, classes, model, health, cooling, adapterName string
-		if err := rows.Scan(&id, &family, &harness, &classes, &model, &health, &cooling, &attempts, &successes, &adapterName); err != nil {
+		var family, harness, classes, model, health, cooling, adapterName, account string
+		if err := rows.Scan(&id, &family, &harness, &classes, &model, &health, &cooling, &attempts, &successes, &adapterName, &account); err != nil {
 			return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 		}
 		// Ordinary work and fix leases use the implement class. A pinned
@@ -850,12 +909,12 @@ func qualifyingAgentRowsTx(tx *sql.Tx, runner int64, j *jobRow, class string) ([
 				continue
 			}
 		}
-		cands = append(cands, agentCand{id: id, adapter: adapterName, harness: harness, model: model, health: health, cooling: cooling, score: Score(attempts, successes)})
+		cands = append(cands, agentCand{id: id, adapter: adapterName, harness: harness, model: model, health: health, cooling: cooling,
+			account: account, attempts: attempts, success: successes, score: Score(attempts, successes)})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 	}
-	sort.SliceStable(cands, func(x, y int) bool { return cands[x].score > cands[y].score })
 	for i := range cands {
 		cands[i].rank = i
 	}

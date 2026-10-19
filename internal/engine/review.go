@@ -135,7 +135,7 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 			}
 		}
 		review.ExcludeFamily, review.Harness = family, harness
-		cands, err := eligibleAgentsTx(tx, e.cfg.Caps, 0, review,
+		cands, err := eligibleAgentsTx(tx, e.cfg.Caps, nil, 0, review,
 			string(KindReview), fmtTime(now))
 		if err != nil {
 			return err

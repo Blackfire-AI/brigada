@@ -74,7 +74,7 @@ func (e *Engine) holdCoolingTx(tx *sql.Tx, now time.Time) error {
 
 	nowStr := fmtTime(now)
 	for _, j := range queued {
-		agents, err := qualifyingAgentsTx(tx, e.cfg.Caps, 0, j, kindClass(j.Kind), nowStr, true)
+		agents, err := qualifyingAgentsTx(tx, e.cfg.Caps, nil, 0, j, kindClass(j.Kind), nowStr, true)
 		if err != nil {
 			return err
 		}

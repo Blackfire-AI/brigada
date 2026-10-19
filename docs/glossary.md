@@ -66,7 +66,7 @@ The terms used by [product.md](product.md) and [design.md](design.md). Where a d
 
 ## Routing and limits
 
-- **Dispatcher:** the engine code that picks an agent for each task job: which agents are **eligible** (agent `ready`, meaning neither broken nor cooling, account not cooling, the class supported, the family rule for reviews, session affinity), then, among those with room under every concurrency cap, the best **score** (a success rate per repo, class and agent), with a small **exploration share** for the next-best (§8).
+- **Dispatcher:** the engine code that picks an agent for each task job: which agents are **eligible** (agent `ready`, meaning neither broken nor cooling, account not cooling, the class supported, the family rule for reviews, session affinity), then, among those with room under every concurrency cap, the first in a sampled order: each agent draws a success rate from its record per repo, class and agent (its **score** is that record's mean, shown in `stats`), and the agents rank by cost weight divided by the draw (§8).
 - **Quota:** what is left of an account's subscription window.
 - **Limit hit:** a harness error saying the account's quota is used up. It **cools** the account: no agent on it is picked until the window resets (§8). For the foreman, the engine marks it **limited** and the user decides (§4.4).
 - **Parked:** a task with no eligible agent when caps are ignored: it waits, and the user is notified (§3, §10). A task blocked only by full caps is queued instead.

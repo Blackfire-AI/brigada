@@ -197,6 +197,12 @@ func TestTaskEffortRidesTheGrant(t *testing.T) {
 		{"opencode", "low", "", "minimal"}, {"opencode", "medium", "", ""},
 		{"opencode", "medium", "high", "high"}, {"kimi", "high", "", ""},
 		{"claude", "", "max", "max"},
+		// With neither a task nor an agent effort the task default,
+		// medium, is mapped by the harness: claude and codex take it,
+		// opencode has no control for medium, kimi has none at all.
+		{"claude", "", "", "medium"}, {"codex", "", "", "medium"},
+		{"opencode", "", "", ""}, {"kimi", "", "", ""},
+		{"opencode", "", "high", "high"}, {"claude", "low", "max", "low"},
 	} {
 		t.Run(tc.harness+"/"+tc.taskEffort+"/"+tc.agentEffort, func(t *testing.T) {
 			e := newEnv(t)

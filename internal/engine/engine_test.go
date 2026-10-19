@@ -98,13 +98,13 @@ func newEnvAt(t *testing.T, path string, adjust func(*Config)) *env {
 	if err != nil {
 		t.Fatalf("seed store: %v", err)
 	}
-	// No exploration by default, so a test's pick is the ranked best; the
-	// tests of the exploration share set it themselves.
-	noExplore := 0.0
+	// A constant uniform source by default: equal records draw equal, so
+	// ties fall to id order and a better record draws higher, which keeps a
+	// test's pick fixed; the sampling tests inject their own.
 	// The fixture's project has a claude foreman, so the headroom rule
 	// (§8.2) would lower the cap of any claude account the cap suites
 	// use; it is off here, and the headroom tests turn it on.
-	cfg := Config{Now: e.clock.Now, ExploreShare: &noExplore, Caps: caps.Limits{NoHeadroom: true}}
+	cfg := Config{Now: e.clock.Now, Rand: func() float64 { return 0.5 }, Caps: caps.Limits{NoHeadroom: true}}
 	if adjust != nil {
 		adjust(&cfg)
 	}
