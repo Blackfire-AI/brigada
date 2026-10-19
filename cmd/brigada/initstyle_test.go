@@ -417,9 +417,12 @@ func TestInitConfiguredDefaultRows(t *testing.T) {
 					if strings.Contains(menus, "config.toml") || strings.Contains(compact, "default claude's default current") {
 						t.Errorf("redundant tag or config path in menu:\n%s", menus)
 					}
-					later = strings.Join(strings.Fields(later), " ")
+					indent := strings.Repeat(" ", term.VisibleWidth("  "+style.Again()+" "))
+					if !strings.HasPrefix(later, " run brigada init again\n"+indent+"your own defaults: ~/.codex/config.toml, ~/.kimi-code/config.toml\n") {
+						t.Errorf("expected config paths on a separate change-later line:\n%s", later)
+					}
 					for _, path := range []string{"~/.codex/config.toml", "~/.kimi-code/config.toml"} {
-						if strings.Count(plain, path) != 1 || !strings.Contains(later, "change it in "+path) {
+						if strings.Count(plain, path) != 1 {
 							t.Errorf("config path must appear once in change-later guidance: %s\n%s", path, plain)
 						}
 					}
@@ -468,12 +471,65 @@ func TestInitAgentChangeLaterConfigPaths(t *testing.T) {
 			wantPath = filepath.Join("~", rel, "config.toml")
 		}
 		got := initAgentChangeLater(sources)
-		if !strings.Contains(got, "change it in "+wantPath) || !strings.Contains(got, "change it in ~/.kimi-code/config.toml") || strings.Contains(got, ".claude") {
+		if want := "run brigada init again\nyour own defaults: " + wantPath + ", ~/.kimi-code/config.toml"; got != want {
 			t.Errorf("change later = %q", got)
 		}
 	}
 	if got := initAgentChangeLater(map[string]initModelSource{"claude": {signIn: harnessProbe{installed: true}}}); got != "run brigada init again" {
 		t.Errorf("Claude guidance = %q", got)
+	}
+}
+
+func TestInitAgentChangeLaterPresentation(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		codex, kimi bool
+		unknownHome bool
+		defaults    string
+	}{
+		{name: "neither installed"},
+		{name: "codex", codex: true, defaults: "your own default: ~/.codex/config.toml"},
+		{name: "kimi", kimi: true, defaults: "your own default: ~/.kimi-code/config.toml"},
+		{name: "both", codex: true, kimi: true, defaults: "your own defaults: ~/.codex/config.toml, ~/.kimi-code/config.toml"},
+		{name: "unknown paths", codex: true, kimi: true, unknownHome: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			if tc.unknownHome {
+				home = ""
+			}
+			t.Setenv("HOME", home)
+			t.Setenv("CODEX_HOME", "")
+			sources := map[string]initModelSource{
+				"claude":   {signIn: harnessProbe{installed: true}},
+				"codex":    {signIn: harnessProbe{installed: tc.codex}},
+				"kimi":     {signIn: harnessProbe{installed: tc.kimi}},
+				"opencode": {signIn: harnessProbe{installed: true}},
+			}
+			for _, styled := range []bool{false, true} {
+				caps := logo.Caps{Width: 80}
+				if styled {
+					caps.TTY, caps.UTF8, caps.Color = true, true, logo.Color16
+				}
+				style := term.New(caps)
+				var b bytes.Buffer
+				w := initOutput{Writer: &b, style: style, styled: styled, utf8: caps.UTF8}
+				initChangeLater(w, initAgentChangeLater(sources))
+				prefix := "  " + style.Dim(style.Again()+" ")
+				want := "\n" + prefix + style.Dim("change later: run brigada init again") + "\n"
+				if tc.defaults != "" {
+					want += strings.Repeat(" ", term.VisibleWidth(prefix)) + style.Dim(tc.defaults) + "\n"
+				}
+				if b.String() != want {
+					t.Errorf("styled=%t: change later = %q, want %q", styled, b.String(), want)
+				}
+				for _, line := range strings.Split(b.String(), "\n") {
+					if term.VisibleWidth(line) >= 80 {
+						t.Errorf("line must be under 80 columns: %q", line)
+					}
+				}
+			}
+		})
 	}
 }
 

@@ -78,8 +78,8 @@
       [38;2;108;198;224m 4[0m  high
 [1m    Pick 1-4 [0m[38;2;108;198;224m[1][0m[1m:[0m
 
-  [38;2;138;143;152m↺ [0m[38;2;138;143;152mchange later: run brigada init again; your codex default: change it in ~/.codex/config.toml;
-    your kimi default: change it in ~/.kimi-code/config.toml[0m
+  [38;2;138;143;152m↺ [0m[38;2;138;143;152mchange later: run brigada init again[0m
+    [38;2;138;143;152myour own defaults: ~/.codex/config.toml, ~/.kimi-code/config.toml[0m
 
 [1m━━ Step 2 of 3 · the foreman[0m
 [38;2;138;143;152m  The foreman plans the work and decides what happens when a task needs[0m

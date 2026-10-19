@@ -764,7 +764,7 @@ func TestInitCheckStepTranscript(t *testing.T) {
 		t.Fatalf("step 3 transcript differs from the approved one:\n%s", out)
 	}
 	for _, want := range []string{
-		"\n  -> change later: run brigada init again; your codex default: change it in\n     ~/.codex/config.toml\n\nStep 2 of 3:",
+		"\n  -> change later: run brigada init again\n     your own default: ~/.codex/config.toml\n\nStep 2 of 3:",
 		"\n  -> change later: brigada project foreman --harness H --model M, or run\n     brigada init again\n\nStep 3 of 3:",
 	} {
 		if !strings.Contains(out, want) {
