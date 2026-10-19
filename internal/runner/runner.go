@@ -211,11 +211,9 @@ func (cfg *Config) harnessesOffered() []string {
 
 // agentFor picks the adapter and model to run a job with (§5.1, §8):
 // the agent the lease named in the grant — never the job's own harness
-// constraint, which is the dispatcher's input, and never a fallback to
-// the first agent. A grant names its agent by harness; a foreman turn's
-// grant names the adapter and model as well, since its model is the
-// project's choice and a runner may offer several of one harness — the
-// registered agent is identified by its adapter and model. Several agents of
+// constraint, which is the dispatcher's input. Grants name the adapter
+// and model as well, since a runner may offer several of one harness.
+// Older engines may name only the harness. Several agents of
 // one adapter name (two scripted fakes) pair with that name's adapters
 // in advertisement order. A grant naming an agent this runner does not
 // offer — or naming none — is an error the job fails with.
@@ -243,10 +241,8 @@ func (cfg *Config) agentFor(grant *api.JobGrant) (adapter.Adapter, string, error
 }
 
 // agentNamed reports whether the advertised agent is the one the grant
-// names. A grant that carries the agent's adapter and model — a foreman
-// turn's, placed on the project's chosen pair — names it exactly: the
-// harness alone would take the first agent of that harness, whatever its
-// model. Every other grant names the harness only.
+// names. Adapter and model identify a registration exactly. Older engines
+// may name the harness alone.
 func agentNamed(a api.Agent, grant *api.JobGrant) bool {
 	if a.Harness != grant.Agent {
 		return false
@@ -257,13 +253,14 @@ func agentNamed(a api.Agent, grant *api.JobGrant) bool {
 	return grant.AgentAdapter == "" || a.Adapter == grant.AgentAdapter
 }
 
-// effortFor is the reasoning-effort level to run a job at: the effort of
-// the agent the lease named, except that a foreman turn whose project
-// chose a foreman effort runs at that one. Workers and reviewers keep
-// their agent's own. Empty means unset: the CLI's default.
+// effortFor uses the project's effort for foreman turns and the grant's
+// mapped effort for task jobs, falling back to the named agent's default.
 func (cfg *Config) effortFor(grant *api.JobGrant) string {
 	if grant.Kind == "foreman" && grant.ForemanEffort != "" {
 		return grant.ForemanEffort
+	}
+	if grant.Kind != "foreman" && grant.Effort != "" {
+		return grant.Effort
 	}
 	for _, a := range cfg.Agents {
 		if agentNamed(a, grant) {

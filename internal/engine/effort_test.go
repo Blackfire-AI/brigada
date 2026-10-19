@@ -81,10 +81,14 @@ func TestForemanEffortIsValidatedPerHarness(t *testing.T) {
 // The project's foreman effort rides a foreman turn's grant; with none
 // chosen the grant carries none, so the runner agent's effort stands.
 func TestForemanTurnGrantCarriesTheProjectEffort(t *testing.T) {
-	for _, effort := range []string{"", "max"} {
-		t.Run("effort="+effort, func(t *testing.T) {
+	for _, tc := range []struct{ effort, agentEffort, want string }{
+		{"", "", ""}, {"max", "", "max"}, {"", "high", "high"}, {"max", "high", "max"},
+	} {
+		t.Run("effort="+tc.effort+"/agent="+tc.agentEffort, func(t *testing.T) {
+			effort := tc.effort
 			e := newEnv(t)
 			e.offerForeman(e.runner1)
+			e.exec("UPDATE agents SET effort = ? WHERE runner_id = ?", tc.agentEffort, e.runner1)
 			if _, err := e.eng.SetProjectForemanEffort(e.ctx, effortRepo, "claude", "sonnet", effort); err != nil {
 				t.Fatalf("set the foreman: %v", err)
 			}
@@ -95,6 +99,12 @@ func TestForemanTurnGrantCarriesTheProjectEffort(t *testing.T) {
 			g := e.lease(e.runner1, []string{"claude"}, nil)
 			if g == nil || g.JobID != res.JobID {
 				t.Fatalf("the lease did not take the turn: %+v", g)
+			}
+			if got := e.str("SELECT effort FROM jobs WHERE id = ?", g.JobID); got != tc.want {
+				t.Errorf("job effort = %q, want %q", got, tc.want)
+			}
+			if g.Effort != "" {
+				t.Errorf("foreman grant effort = %q, want empty", g.Effort)
 			}
 			if g.ForemanEffort != effort {
 				t.Errorf("grant ForemanEffort = %q, want %q", g.ForemanEffort, effort)
@@ -178,5 +188,36 @@ func TestAgentEffortRegisters(t *testing.T) {
 		Account: "kimi", Classes: []string{"implement"}, Effort: "high"}}
 	if _, err := e.eng.Register(e.ctx, "runner-1", 0, bad); !errors.Is(err, ErrInvalidAgent) {
 		t.Errorf("register kimi with an effort = %v, want ErrInvalidAgent", err)
+	}
+}
+
+func TestTaskEffortRidesTheGrant(t *testing.T) {
+	for _, tc := range []struct{ harness, taskEffort, agentEffort, want string }{
+		{"claude", "high", "", "high"}, {"claude", "high", "max", "high"},
+		{"opencode", "low", "", "minimal"}, {"opencode", "medium", "", ""},
+		{"opencode", "medium", "high", "high"}, {"kimi", "high", "", ""},
+		{"claude", "", "max", "max"},
+	} {
+		t.Run(tc.harness+"/"+tc.taskEffort+"/"+tc.agentEffort, func(t *testing.T) {
+			e := newEnv(t)
+			runner, err := e.eng.Register(e.ctx, "effort-runner", 0, []AgentAdvert{{Adapter: tc.harness, Harness: tc.harness, Model: "model", Classes: []string{"implement", "review"}, Effort: tc.agentEffort}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := e.eng.CreatePlan(e.ctx, e.project, "effort plan", []PlanTask{{Name: "work", Spec: "do work", Effort: tc.taskEffort}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			g := e.lease(runner, []string{tc.harness}, nil)
+			if g == nil || g.JobID != plan.JobID {
+				t.Fatalf("grant = %+v, want job %d", g, plan.JobID)
+			}
+			if g.Effort != tc.want {
+				t.Errorf("grant effort = %q, want %q", g.Effort, tc.want)
+			}
+			if got := e.str("SELECT effort FROM jobs WHERE id = ?", g.JobID); got != tc.want {
+				t.Errorf("job effort = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

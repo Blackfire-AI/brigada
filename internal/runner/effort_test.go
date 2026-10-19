@@ -18,6 +18,9 @@ func TestEffortFor(t *testing.T) {
 		grant api.JobGrant
 		want  string
 	}{
+		{"worker takes grant effort", api.JobGrant{Kind: "work", Agent: "claude", Effort: "max"}, "max"},
+		{"review takes grant effort", api.JobGrant{Kind: "review", Agent: "claude", Effort: "high"}, "high"},
+		{"foreman ignores task effort", api.JobGrant{Kind: "foreman", Agent: "claude", Effort: "max"}, "low"},
 		{"worker keeps its agent's effort", api.JobGrant{Kind: "work", Agent: "claude"}, "low"},
 		{"worker ignores the foreman effort", api.JobGrant{Kind: "work", Agent: "claude", ForemanEffort: "max"}, "low"},
 		{"reviewer keeps its agent's effort", api.JobGrant{Kind: "review", Agent: "claude", ForemanEffort: "max"}, "low"},
