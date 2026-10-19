@@ -1,0 +1,4 @@
+schema: 1
+repo: "github.com/Blackfire-AI/brigada"
+default_check: "go test ./..."
+worker_tools: "Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*)"

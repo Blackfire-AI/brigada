@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "brigada": {
+      "command": "brigada",
+      "args": [
+        "mcp",
+        "--foreman"
+      ]
+    }
+  }
+}
