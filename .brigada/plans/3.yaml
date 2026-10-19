@@ -31,7 +31,7 @@ tasks:
     class: "implement"
     deps: []
     base: ""
-    state: reviewing
+    state: done
     branch: "brigada/task-10"
     rounds: 0
   - id: 11
