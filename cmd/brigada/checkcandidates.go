@@ -17,6 +17,7 @@ type checkCandidate struct {
 	Command string // what runs as the check
 	Note    string // where it came from, full length; see truncateNote
 	Tools   string // worker tool scope that lets the command run, "+"-joined
+	File    string // the build file that supplied this candidate
 }
 
 // checkTargetRank orders target names: aggregates first, then test, then
@@ -32,9 +33,19 @@ var targetLineRE = regexp.MustCompile(`^([A-Za-z_][\w.-]*)(\s[^:=#]*)?:(?:[^=]|$
 // best first. It only reads files; nothing is ever run.
 func checkCandidates(root string) ([]checkCandidate, error) {
 	exists := func(name string) bool { s, e := os.Stat(filepath.Join(root, name)); return e == nil && !s.IsDir() }
+	files, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	// On a case-insensitive filesystem, Stat("justfile") also finds Justfile.
+	// Use the directory's spelling so the suggestion names its actual source.
+	fileNames := map[string]bool{}
+	for _, file := range files {
+		fileNames[file.Name()] = true
+	}
 	first := func(names ...string) string {
 		for _, n := range names {
-			if exists(n) {
+			if fileNames[n] && exists(n) {
 				return n
 			}
 		}
@@ -58,8 +69,8 @@ func checkCandidates(root string) ([]checkCandidate, error) {
 		c    checkCandidate
 	}
 	var found []ranked
-	add := func(name, command, note string) {
-		found = append(found, ranked{checkTargetRank[name], len(found), checkCandidate{command, note, tools(command)}})
+	add := func(name, command, note, file string) {
+		found = append(found, ranked{checkTargetRank[name], len(found), checkCandidate{command, note, tools(command), file}})
 	}
 
 	if f := first("Makefile", "makefile", "GNUmakefile"); f != "" {
@@ -70,7 +81,7 @@ func checkCandidates(root string) ([]checkCandidate, error) {
 		targets := parseRecipeTargets(string(data), false)
 		for _, name := range checkTargetOrder {
 			if note, ok := targets[name]; ok {
-				add(name, "make "+name, "Makefile: "+note)
+				add(name, "make "+name, "Makefile: "+note, f)
 			}
 		}
 	}
@@ -82,7 +93,7 @@ func checkCandidates(root string) ([]checkCandidate, error) {
 		targets := parseRecipeTargets(string(data), true)
 		for _, name := range checkTargetOrder {
 			if note, ok := targets[name]; ok {
-				add(name, "just "+name, "justfile: "+note)
+				add(name, "just "+name, "justfile: "+note, f)
 			}
 		}
 	}
@@ -106,7 +117,7 @@ func checkCandidates(root string) ([]checkCandidate, error) {
 			if name == "test" {
 				command = "npm test"
 			}
-			add(name, command, "package.json: "+script)
+			add(name, command, "package.json: "+script, "package.json")
 		}
 	}
 	sort.SliceStable(found, func(i, j int) bool { return found[i].rank < found[j].rank })
@@ -124,13 +135,13 @@ func checkCandidates(root string) ([]checkCandidate, error) {
 	}
 
 	pytest := func(command, file string) {
-		push(checkCandidate{command, "pytest, from " + file, "Bash(" + command + ":*)"})
+		push(checkCandidate{command, "pytest, from " + file, "Bash(" + command + ":*)", file})
 	}
 	if exists("go.mod") {
-		push(checkCandidate{"go test ./...", "go test, from go.mod", goTools})
+		push(checkCandidate{"go test ./...", "go test, from go.mod", goTools, "go.mod"})
 	}
 	if exists("Cargo.toml") {
-		push(checkCandidate{"cargo test", "cargo test, from Cargo.toml", "Bash(cargo test:*)"})
+		push(checkCandidate{"cargo test", "cargo test, from Cargo.toml", "Bash(cargo test:*)", "Cargo.toml"})
 	}
 	if exists("uv.lock") {
 		pytest("uv run pytest", "uv.lock")
