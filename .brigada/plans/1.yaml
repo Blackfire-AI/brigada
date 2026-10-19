@@ -31,7 +31,7 @@ tasks:
     class: "implement"
     deps: ["agents-md"]
     base: "agents-md"
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 3
@@ -40,7 +40,7 @@ tasks:
     class: "implement"
     deps: ["agents-md"]
     base: "agents-md"
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 4
@@ -50,6 +50,6 @@ tasks:
     deps: ["agents-md"]
     base: "agents-md"
     tier: light
-    state: ready
+    state: running
     branch: ""
     rounds: 0
