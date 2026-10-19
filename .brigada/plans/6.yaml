@@ -33,9 +33,9 @@ tasks:
     deps: []
     base: ""
     effort: high
-    state: reviewing
+    state: running
     branch: "brigada/task-23"
-    rounds: 0
+    rounds: 1
   - id: 24
     name: "opencode-permission"
     title: "opencode: a rejected permission must not end the run as a no-result"
