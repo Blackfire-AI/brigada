@@ -5,9 +5,9 @@
 plan: 3
 title: "#27 Result blocks with ``` in their text; salvage no-result edits"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-19T16:09:49.394225Z
-updated: 2026-10-19T16:14:33.628578Z
+updated: 2026-10-19T16:27:06.37535Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps, or from the
 # default branch when base is empty; merge a task after its base. States
@@ -41,6 +41,6 @@ tasks:
     deps: []
     base: ""
     tier: heavy
-    state: reviewing
+    state: done
     branch: "brigada/task-11"
     rounds: 1
