@@ -1241,6 +1241,8 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 	familyNames := make([]string, len(agents))
 	modelCells := make([]string, len(agents))
 	tiers := make([]string, len(agents))
+	roles := make([]string, len(agents))
+	roleWordWidth := 0
 	for i, s := range agents {
 		family, _ := adapter.AgentFamily(s.harness, s.model)
 		family = initFamilyName(family)
@@ -1253,30 +1255,34 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 		modelWidth = max(modelWidth, term.VisibleWidth(modelCells[i]))
 		familyWidth = max(familyWidth, term.VisibleWidth(family))
 		tierWidth = max(tierWidth, term.VisibleWidth(tiers[i]))
+		roles[i] = initAgentRoles(s.classes)
+		for _, word := range strings.Fields(roles[i]) {
+			roleWordWidth = max(roleWordWidth, term.VisibleWidth(word))
+		}
 	}
-	// A role wraps within its column; it needs about this much room.
-	const roleRoom = 12
+	// Keep every row in the same layout. A role can wrap in its column as
+	// long as its longest word fits strictly within the terminal width.
+	stacked := 14+modelWidth+2+familyWidth+2+tierWidth+2+roleWordWidth >= style.Width()
 	for i, s := range agents {
-		roles := initAgentRoles(s.classes)
 		// If the fixed columns leave no room for roles, put family, tier and
 		// roles on a second line under the model column for every row. Very
 		// long identifiers wrap within that column, with the rest on separate
 		// lines.
-		if 14+modelWidth+2+familyWidth+2+tierWidth+2+roleRoom >= style.Width()-1 {
+		if stacked {
 			indent := strings.Repeat(" ", 14)
 			printInitWrapped(w, fmt.Sprintf("    %-9s ", s.harness), indent, modelCells[i])
-			if 14+familyWidth+2+tierWidth+2+roleRoom >= style.Width()-1 {
+			if 14+familyWidth+2+tierWidth+2+roleWordWidth >= style.Width() {
 				printInitWrapped(w, indent, indent, style.Dim(familyNames[i]))
 				printInitWrapped(w, indent, indent, tiers[i])
-				printInitWrapped(w, indent, indent, roles)
+				printInitWrapped(w, indent, indent, roles[i])
 			} else {
 				prefix := indent + initPad(style.Dim(familyNames[i]), familyWidth) + "  " + initPad(tiers[i], tierWidth) + "  "
-				printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), roles)
+				printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), roles[i])
 			}
 			continue
 		}
 		prefix := fmt.Sprintf("    %-9s ", s.harness) + initPad(modelCells[i], modelWidth) + "  " + initPad(style.Dim(familyNames[i]), familyWidth) + "  " + initPad(tiers[i], tierWidth) + "  "
-		printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), roles)
+		printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), roles[i])
 	}
 	printInitWrapped(w, "  "+style.Bold("Reviews:")+" ", "    ", fmt.Sprintf("%d model families, so every task can get a reviewer of another one.", families))
 }
