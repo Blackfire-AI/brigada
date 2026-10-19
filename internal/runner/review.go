@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -30,21 +31,50 @@ func isReviewJob(grant *api.JobGrant) bool {
 }
 
 // emptyVerdictBlock is what a review completes with when the reviewer's
-// final message held no fenced JSON block (§7): a completion must carry
+// final message held no verdict block (§7): a completion must carry
 // exactly one of result or error (§12.3), so an absent verdict is
 // spelled as an empty JSON object. The engine reads it as no verdict —
 // review_no_verdict — never as the run's own failure; what the reviewer
 // actually said stays in the transcript.
 const emptyVerdictBlock = "{}"
 
+// verdictFields is the shape of the verdict block (§7) as the engine
+// decodes it: a verdict and findings, both strings. The runner checks a
+// candidate against it the way the engine will — the whole block, one
+// JSON object, these field types — so a block the engine would reject
+// never beats an earlier one it would accept.
+type verdictFields struct {
+	Verdict  string `json:"verdict"`
+	Findings string `json:"findings"`
+}
+
+// verdictOf finds the verdict block in a reviewer's final message (§7):
+// the candidates of blockCandidates in its order — fenced blocks by the
+// line rules, last first, then a trailing JSON object, then the old
+// substring heuristic — and the first that decodes whole as a verdict
+// block naming a verdict wins, so findings that quote a fence no longer
+// cut the block in two, and an unrelated or malformed block after the
+// verdict does not hide it. The block is returned verbatim: the engine
+// judges the verdict itself. A message with no such block is the empty
+// verdict.
+func verdictOf(text string) string {
+	for _, block := range blockCandidates(text) {
+		var v verdictFields
+		if err := json.Unmarshal([]byte(block), &v); err == nil && v.Verdict != "" {
+			return block
+		}
+	}
+	return emptyVerdictBlock
+}
+
 // finishReview turns the dead reviewer's record into the engine's
-// completion (§7): the last fenced JSON block of the final message,
+// completion (§7): the verdict block of the final message (verdictOf),
 // delivered as the result verbatim. The engine judges the verdict
-// itself — approve, changes, or nothing usable — so nothing is decoded
-// or rewritten here, and a message without a block completes with the
-// empty verdict. As everywhere, a CLI error the stream or stderr named
-// beats whatever the reviewer said, and a command that never started is
-// the runner's own failure to report.
+// itself — approve, changes, or nothing usable — so nothing is rewritten
+// here, and a message without a block completes with the empty verdict.
+// As everywhere, a CLI error the stream or stderr named beats whatever
+// the reviewer said, and a command that never started is the runner's
+// own failure to report.
 func (r *jobRun) finishReview(ctx context.Context, ad adapter.Adapter, exitErr error) {
 	var cliErr *adapter.Event
 	r.mu.Lock()
@@ -65,11 +95,7 @@ func (r *jobRun) finishReview(ctx context.Context, ad adapter.Adapter, exitErr e
 		r.finishWithError(ctx, "start the reviewer: "+nw.err.Error())
 		return
 	}
-	verdict := emptyVerdictBlock
-	if block, ok := lastFencedJSON(ad.ResultText(r.snapshotEvents())); ok {
-		verdict = block
-	}
-	comp := api.Completion{Result: verdict, SessionID: r.sessionIDOf()}
+	comp := api.Completion{Result: verdictOf(ad.ResultText(r.snapshotEvents())), SessionID: r.sessionIDOf()}
 	if err := r.saveTranscript(ctx); err != nil {
 		r.cfg.Log.WarnContext(ctx, "save transcript", "job_id", r.grant.JobID, "err", err)
 	}
