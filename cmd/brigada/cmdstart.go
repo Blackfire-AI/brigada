@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
@@ -65,13 +66,17 @@ func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	if _, _, err := resolveRunnerAgents(rt, agents.specs, ""); err != nil {
 		return fail(stderr, fmt.Errorf("saved agents: %w", err))
 	}
+	parallel, err := runnerstate.LoadParallel(dir)
+	if err != nil {
+		return fail(stderr, err)
+	}
 	if err := lifecycle.EnsureEngine(ctx, lifecycle.StartOptions{
 		Socket: rt.paths.Socket, StateDir: rt.stateDir,
 		ConfigPath: rt.configForStart(), Binary: initBinary,
 	}); err != nil {
 		return fail(stderr, err)
 	}
-	result, err := startDetachedRunner(ctx, rt, saved)
+	result, err := startDetachedRunner(ctx, rt, saved, parallel)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -86,8 +91,8 @@ func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 
 // startDetachedRunner is shared by init and start, including init's restart
 // after changing agents. EnsureRunner serializes starts and waits for readiness.
-func startDetachedRunner(ctx context.Context, rt *runtime, specs []string) (lifecycle.RunnerStartResult, error) {
-	args := make([]string, 0, 2*len(specs))
+func startDetachedRunner(ctx context.Context, rt *runtime, specs []string, parallel int) (lifecycle.RunnerStartResult, error) {
+	args := []string{"--max-parallel", strconv.Itoa(parallel)}
 	for _, spec := range specs {
 		args = append(args, "--agent", spec)
 	}

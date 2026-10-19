@@ -5,12 +5,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -29,6 +31,14 @@ import (
 // init and start use the built CLI for real detached engine and runner startup.
 var initBinary string
 
+var initCPUCount = goruntime.NumCPU
+
+// Per-harness account defaults, displayed in initHarnesses order.
+// Every cap is clamped to tasks at once.
+var initAccountDefaults = map[string]int{
+	"claude": 3, "codex": 2, "kimi": 1, "opencode": 2,
+}
+
 func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code int) {
 	fs := newFlagSet("init",
 		"brigada init [--probe | --yes] [--verbose] [options] (inside one repository, or in a folder holding several: then --all selects them)",
@@ -43,6 +53,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	tools := fs.String("tools", "", "worker scope in runner tools= syntax; applied only to Claude workers")
 	foreman := fs.String("foreman", "", "choose a usable resume-capable agent as harness/model")
 	noWiring := fs.Bool("no-wiring", false, "skip harness wiring (the bridge, hooks and foreman skill for mode A; in a parent folder, the coordinator's)")
+	parallel := fs.Int("parallel", 0, "tasks at once on this machine (1..64)")
 	all := fs.Bool("all", false, "in a folder that is not a repository: register every new repository found, without asking")
 	agents := &agentSpecs{}
 	fs.Var(agents, "agent", "--agent once per harness and model, same complete syntax and model defaults as brigada runner")
@@ -68,6 +79,15 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			code = 1
 		}
 	}()
+	parallelProvided := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "parallel" {
+			parallelProvided = true
+		}
+	})
+	if parallelProvided && (*parallel < 1 || *parallel > 64) {
+		return usagef(stderr, "--parallel N: want an integer from 1 to 64")
+	}
 	toolsProvided := *tools != ""
 	if *yes && *probe {
 		return usagef(stderr, "--yes and --probe are mutually exclusive")
@@ -82,6 +102,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	root, err := gitRoot(cwd)
 	if err != nil {
 		// Not a repository: the parent-folder run (design §13.1, §4.6 mode B).
+		if parallelProvided {
+			return usagef(stderr, "--parallel sets up one repository; this folder is not one")
+		}
 		if *check != "" || toolsProvided || len(agents.specs) > 0 || *limited || len(signedIn) > 0 {
 			return usagef(stderr, "--check, --tools, --agent, --signed-in and --accept-limited set up one repository; this folder is not one (parent-folder init takes --all, --foreman, --yes, --probe and --no-wiring)")
 		}
@@ -127,6 +150,24 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			return fail(stderr, err)
 		}
 	}
+	configPath := rt.configPath
+	if configPath == "" {
+		configPath = lifecycle.DefaultConfigPath()
+	}
+	if err := lifecycle.CheckConfigWritePath(configPath); err != nil {
+		return fail(stderr, err)
+	}
+	cores := initCPUCount()
+	if !parallelProvided {
+		savedParallel, err := runnerstate.LoadParallel(runnerStateDir(rt))
+		if err != nil {
+			return fail(stderr, err)
+		}
+		*parallel = savedParallel
+		if *parallel == 0 {
+			*parallel = min(4, max(1, cores/2))
+		}
+	}
 	reader := bufio.NewReader(projectStdin)
 	canAsk := !*yes && !*probe
 	var saved map[string]agentSpec
@@ -149,7 +190,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 	}
 	if canAsk {
-		fmt.Fprint(stdout, initDim(stdout, "brigada runs coding tasks on the agent CLIs you are signed in to. A foreman\n(an agent) turns your request into a plan of tasks; workers (other agents)\nwrite the code in their own git worktrees; your check command tests it; and\nan agent of a different model family reviews it. Three short steps follow.\nNothing is written or started until you confirm at the end.\n\n"))
+		fmt.Fprint(stdout, initDim(stdout, "brigada runs coding tasks on the agent CLIs you are signed in to. A foreman\n(an agent) turns your request into a plan of tasks; workers (other agents)\nwrite the code in their own git worktrees; your check command tests it; and\nan agent of a different model family reviews it. Four short steps follow.\nNothing is written or started until you confirm at the end.\n\n"))
 	}
 	terminal := false
 	if f, ok := projectStdin.(*os.File); ok {
@@ -558,6 +599,51 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 		initChangeLater(stdout, "brigada project foreman --harness H --model M, or run brigada init again")
 	}
+
+	if canAsk {
+		fmt.Fprintln(stdout)
+		initStep(stdout, 3, "tasks at once", "")
+		var defaults []string
+		for _, h := range initHarnesses {
+			if probes[h].installed {
+				defaults = append(defaults, fmt.Sprintf("%s %d", h, initAccountDefaults[h]))
+			}
+		}
+		printInitWrapped(stdout, "  ", "  ", initDim(stdout,
+			fmt.Sprintf("Each running task is one agent CLI working in its own copy of the repo, plus your check command, so this is bounded by your machine. This one has %d cores. Each CLI's account also gets its own limit (%s, brigada's defaults, never above this number); change any of them later with brigada config.", cores, strings.Join(defaults, ", "))), 74)
+		if !parallelProvided {
+			for attempt := 0; attempt < 3; attempt++ {
+				answer, err := ask(fmt.Sprintf("    Tasks at once [%d]: ", *parallel), "--parallel N")
+				if err != nil {
+					return fail(stderr, err)
+				}
+				if answer == "" {
+					break
+				}
+				n, err := strconv.Atoi(answer)
+				if err == nil && n >= 1 && n <= 64 {
+					*parallel = n
+					break
+				}
+				if attempt == 2 {
+					return usagef(stderr, "--parallel N: want an integer from 1 to 64")
+				}
+				fmt.Fprintln(stdout, "    enter an integer from 1 to 64; try again.")
+			}
+		}
+	}
+	capValues := map[string]string{
+		"caps.global": strconv.Itoa(*parallel), "caps.plan": "3",
+	}
+	for _, spec := range usable {
+		key := "caps.account." + spec.accountLabel()
+		n := min(initAccountDefaults[spec.harness], *parallel)
+		if previous, ok := capValues[key]; ok {
+			old, _ := strconv.Atoi(previous)
+			n = min(n, old)
+		}
+		capValues[key] = strconv.Itoa(n)
+	}
 	file := filepath.Join(root, filepath.FromSlash(engine.ProjectConfigPath))
 	if err := initSafeFile(file); err != nil {
 		return fail(stderr, err)
@@ -629,6 +715,18 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		fmt.Fprintln(stdout)
 	}
 	printInitAgents(stdout, usable, len(families), *chosen, sources)
+	var accounts []string
+	seenAccounts := map[string]bool{}
+	for _, h := range initHarnesses {
+		for _, spec := range usable {
+			label := spec.accountLabel()
+			if spec.harness == h && !seenAccounts[label] {
+				seenAccounts[label] = true
+				accounts = append(accounts, label+" "+capValues["caps.account."+label])
+			}
+		}
+	}
+	printInitWrapped(stdout, "  "+style.Bold("At once:")+" ", "    ", fmt.Sprintf("%d tasks on this machine; per account: %s (change: brigada config)", *parallel, strings.Join(accounts, ", ")), 80)
 	checkSummary := "none (work goes straight to review)"
 	if *check != "" {
 		checkSummary = *check + " (init doesn't run it; change it later in .brigada/project.yaml)"
@@ -689,7 +787,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			return fail(stderr, err)
 		}
 		prompt := initApplyPrompt(files, running)
-		if running && initAgentsDiffer(rec, adverts, usable) {
+		if running && initAgentsDiffer(rec, adverts, usable, *parallel) {
 			noun := "files"
 			if files == 1 {
 				noun = "file"
@@ -707,6 +805,11 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			return 1
 		}
 	}
+	engineRunning := lifecycle.EngineRunning(ctx, rt.paths.Socket)
+	// Recheck before the first write, in case the path changed during prompts.
+	if err := lifecycle.CheckConfigWritePath(configPath); err != nil {
+		return fail(stderr, err)
+	}
 	// The first mutation is after the complete plan and confirmation. A
 	// concurrent edit must not be silently overwritten after the review.
 	if err := writeInitFile(file, old, proposed, exists); err != nil {
@@ -714,6 +817,13 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	partial := func(err error) int {
 		return fail(stderr, fmt.Errorf("partial init: project.yaml is in place; %w; fix the error and rerun init", err))
+	}
+	capsChanged, err := lifecycle.SetConfigValues(configPath, capValues)
+	if err != nil {
+		return partial(fmt.Errorf("save caps: %w", err))
+	}
+	if err := runnerstate.SaveParallel(runnerStateDir(rt), *parallel); err != nil {
+		return partial(fmt.Errorf("save tasks at once: %w", err))
 	}
 	if err := applyWiring(wiring); err != nil {
 		return partial(err)
@@ -764,22 +874,22 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 
 	runnerSpecs := runnerSpecStrings(usable)
-	result, err := startDetachedRunner(ctx, rt, runnerSpecs)
+	result, err := startDetachedRunner(ctx, rt, runnerSpecs, *parallel)
 	if err != nil {
 		return partial(fmt.Errorf("project registered and imported, but runner startup failed: %w", err))
 	}
 	restarted := false
-	if result.Existing && initAgentsDiffer(result.Record, adverts, usable) {
+	if result.Existing && initAgentsDiffer(result.Record, adverts, usable, *parallel) {
 		if _, err := terminateRunner(
 			ctx, runnerStateDir(rt), result.Record); err != nil {
 			return partial(fmt.Errorf("stop runner for new agents: %w", err))
 		}
-		result, err = startDetachedRunner(ctx, rt, runnerSpecs)
+		result, err = startDetachedRunner(ctx, rt, runnerSpecs, *parallel)
 		if err != nil {
 			return partial(fmt.Errorf("restart runner: %w", err))
 		}
 		restarted = true
-		if result.Existing && initAgentsDiffer(result.Record, adverts, usable) {
+		if result.Existing && initAgentsDiffer(result.Record, adverts, usable, *parallel) {
 			return partial(fmt.Errorf("another runner started with different agents; rerun init"))
 		}
 	}
@@ -814,6 +924,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		done.WriteString(" Project configured; inspect the existing runner agents above before sending work.")
 	}
 	printInitWrapped(stdout, "", "  ", done.String())
+	if engineRunning && capsChanged {
+		printInitWrapped(stdout, "", "  ", "the engine reads caps when it starts: run brigada stop --engine, then any command starts it with the new values")
+	}
 	fmt.Fprintln(stdout, style.Bold("Next:"))
 	step := 1
 	if !*noWiring && probes["claude"].installed {
@@ -986,20 +1099,23 @@ func initModelFamily(harness, model string) (string, error) {
 
 // printInitWrapped keeps prose within the terminal width. Continuations either
 // align with a table cell or use the paragraph's continuation indent.
-func printInitWrapped(w io.Writer, prefix, continuation, text string) {
+func printInitWrapped(w io.Writer, prefix, continuation, text string, maxWidth ...int) {
 	var words []initWord
 	for _, word := range strings.Fields(text) {
 		words = append(words, initWord{" ", word})
 	}
-	printInitWords(w, prefix, continuation, words)
+	printInitWords(w, prefix, continuation, words, maxWidth...)
 }
 
 // initWord is text that is never split at a space, with the separator that
 // precedes it unless it starts a line.
 type initWord struct{ sep, text string }
 
-func printInitWords(w io.Writer, prefix, continuation string, words []initWord) {
+func printInitWords(w io.Writer, prefix, continuation string, words []initWord, maxWidth ...int) {
 	limit := initPresentation(w).style.Width()
+	if len(maxWidth) > 0 {
+		limit = min(limit, maxWidth[0])
+	}
 	if term.VisibleWidth(prefix) >= limit-1 {
 		printInitWrapped(w, "    ", "      ", strings.TrimSpace(prefix))
 		prefix, continuation = "      ", "      "
@@ -1340,7 +1456,10 @@ func sameInitSpecs(a, b []string) bool {
 }
 
 func initAgentsDiffer(rec runnerstate.Record, agents []api.Agent,
-	specs []agentSpec) bool {
+	specs []agentSpec, parallel int) bool {
+	if rec.MaxParallel != parallel {
+		return true
+	}
 	if rec.Specs != nil && !sameInitSpecs(rec.Specs, runnerSpecStrings(specs)) {
 		return true
 	}

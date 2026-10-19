@@ -58,7 +58,7 @@ func TestInitNoCheckChoices(t *testing.T) {
 			if len(tc.args) > 0 { // --check skips the check question.
 				stdin = "\nn\n"
 			}
-			code, out, errs := initDo(t, testsupport.ShortStateDir(t), stdin, args...)
+			code, out, errs := initFixedParallel(t, testsupport.ShortStateDir(t), stdin, args...)
 			wantCode := 1
 			if strings.Contains(strings.Join(tc.args, " "), "--probe") {
 				wantCode = 0
@@ -126,7 +126,7 @@ func TestInitNoCheckApply(t *testing.T) {
 		{"keep no check", "", "none", nil},
 	} {
 		t.Run(step.name, func(t *testing.T) {
-			code, out, errs := initDo(t, state, "", append(append([]string{}, base...), step.args...)...)
+			code, out, errs := initFixedParallel(t, state, "", append(append([]string{}, base...), step.args...)...)
 			if code != 0 || errs != "" || !strings.Contains(strings.Join(strings.Fields(out), " "), "Setup ready") {
 				log, _ := os.ReadFile(filepath.Join(state, "engine.log"))
 				t.Fatalf("init = %d\n%s\n%s\nengine log: %s", code, out, errs, log)

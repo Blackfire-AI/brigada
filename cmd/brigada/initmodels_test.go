@@ -289,7 +289,7 @@ func TestInitCodexCatalogPicks(t *testing.T) {
 			state := testsupport.ShortStateDir(t)
 			// --foreman must exactly match the stored model, so this also verifies
 			// entry 1 keeps "default" while other picks store their catalog slug.
-			code, out, errOut := initDo(t, state, "1\n\n"+pick.answer+"\nn\n", "--foreman", "codex/"+pick.model, "--signed-in", "claude", "--check", "true", "--tools", "none", "--no-wiring")
+			code, out, errOut := initFixedParallel(t, state, "1\n\n"+pick.answer+"\nn\n", "--foreman", "codex/"+pick.model, "--signed-in", "claude", "--check", "true", "--tools", "none", "--no-wiring")
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 				t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 			}

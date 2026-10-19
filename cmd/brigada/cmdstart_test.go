@@ -85,6 +85,9 @@ func TestStartSavedAgents(t *testing.T) {
 				"harness=claude,model=sonnet,account=work,effort=high,classes=review",
 				"harness=codex,model=gpt-5,effort=low,classes=implement+answer",
 			}
+			if err := runnerstate.SaveParallel(filepath.Join(state, "runner"), 3); err != nil {
+				t.Fatal(err)
+			}
 			if err := runnerstate.SaveAgents(filepath.Join(state, "runner"), saved); err != nil {
 				t.Fatal(err)
 			}
@@ -105,7 +108,7 @@ func TestStartSavedAgents(t *testing.T) {
 				t.Fatalf("code=%d stdout=%q stderr=%q runner log=%s engine log=%s", code, out, errs, log, engineLog)
 			}
 			rec, running, err := runnerstate.Running(filepath.Join(state, "runner"))
-			if err != nil || !running || len(rec.Agents) != 2 {
+			if err != nil || !running || len(rec.Agents) != 2 || rec.MaxParallel != 3 {
 				t.Fatalf("runner=%+v live=%t err=%v", rec, running, err)
 			}
 			if out != fmt.Sprintf("runner started (pid %d); log: %s\n", rec.PID, filepath.Join(state, "runner.log")) {

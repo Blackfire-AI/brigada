@@ -3,10 +3,10 @@
 [90mbrigada runs coding tasks on the agent CLIs you are signed in to. A foreman[0m
 [90m(an agent) turns your request into a plan of tasks; workers (other agents)[0m
 [90mwrite the code in their own git worktrees; your check command tests it; and[0m
-[90man agent of a different model family reviews it. Three short steps follow.[0m
+[90man agent of a different model family reviews it. Four short steps follow.[0m
 [90mNothing is written or started until you confirm at the end.[0m
 
-[1m== Step 1 of 3 - agents[0m
+[1m== Step 1 of 4 - agents[0m
 [90m  Each agent CLI below can work for brigada. For each one, pick the model it[0m
 [90m  should run, or leave it out. Reviews always go to a different model family[0m
 [90m  than the author's, so you need at least two families (e.g. claude + codex).[0m
@@ -20,8 +20,8 @@
       [36m 5[0m  claude-opus-4        [90mAnthropic[0m  [90mOpus 4 · Most capable[0m
       [36m -[0m[90m  don't use claude[0m
 [1m    Pick 1-5 or -, or type a model id [0m[36m[1][0m[1m:[0m
-    [90mHow hard should sonnet think? More effort gives better results on hard tasks and uses more of
-    your plan's limits.[0m
+    [90mHow hard should sonnet think? More effort gives better results on hard
+    tasks and uses more of your plan's limits.[0m
      >[36m 1[0m  [1mdefault[0m  [90mclaude's default[0m
       [36m 2[0m  low
       [36m 3[0m  medium
@@ -32,16 +32,18 @@
 
   [1mcodex[0m  [32mok signed in[0m
 [90m    Which model should codex run?[0m
-     >[36m 1[0m  [1mgpt-6.1-sol[0m   [90mOpenAI[0m  [90mGeneral-purpose coding model.[0m  [36myour codex default[0m
+     >[36m 1[0m  [1mgpt-6.1-sol[0m   [90mOpenAI[0m  [90mGeneral-purpose coding model.[0m
+                                [36myour codex default[0m
       [36m 2[0m  gpt-5         [90mOpenAI[0m  [90mEarlier coding model.[0m
-      [36m 3[0m  gpt-5.4-mini  [90mOpenAI[0m  [90mA smaller coding model for quick tasks, with a long description
-                                that must wrap within the menu without losing any of its words.[0m
+      [36m 3[0m  gpt-5.4-mini  [90mOpenAI[0m  [90mA smaller coding model for quick tasks, with a
+                                long description that must wrap within the menu
+                                without losing any of its words.[0m
       [36m -[0m[90m  don't use codex[0m
-    [90m1 more from `codex debug models` aren't listed: brigada can't tell their model family, which it
-    needs to pick reviewers.[0m
+    [90m1 more from `codex debug models` aren't listed: brigada can't tell their
+    model family, which it needs to pick reviewers.[0m
 [1m    Pick 1-3 or -, or type a model id [0m[36m[1][0m[1m:[0m
-    [90mHow hard should gpt-6.1-sol think? More effort gives better results on hard tasks and uses more
-    of your plan's limits.[0m
+    [90mHow hard should gpt-6.1-sol think? More effort gives better results on hard
+    tasks and uses more of your plan's limits.[0m
       [36m 1[0m  low
       [36m 2[0m  medium
      >[36m 3[0m  [1mhigh[0m    [36myour codex default[0m
@@ -53,14 +55,16 @@
   [1mkimi[0m  [33m? sign-in can't be checked[0m[90m - sign in with [0m[36mkimi login[0m
 [1m    Use kimi? [0m[36m[y/N][0m[1m:[0m
 [90m    Which model should kimi run?[0m
-     >[36m 1[0m  [1mkimi-code/k3[0m                         [90mMoonshot[0m  [90mK3, 1M context[0m  [36myour kimi default[0m
+     >[36m 1[0m  [1mkimi-code/k3[0m                         [90mMoonshot[0m  [90mK3, 1M context[0m
+                                                         [36myour kimi default[0m
       [36m 2[0m  kimi-code/k3-256k                    [90mMoonshot[0m  [90mK3, 256K context[0m
       [36m 3[0m  kimi-code/kimi-for-coding            [90mMoonshot[0m  [90m200K context[0m
       [36m 4[0m  kimi-code/kimi-for-coding-highspeed  [90mMoonshot[0m  [90m200K context[0m
 [1m    Pick 1-4, or type a model id [0m[36m[1][0m[1m:[0m
-    Effort: [90mhigh, kimi's own setting for this model (brigada can't set it per run).[0m
-    [33m! kimi has no sandbox: when it writes code it can run any command on this machine without
-    asking. As a reviewer it only reads.[0m
+    Effort: [90mhigh, kimi's own setting for this model (brigada can't set it per
+    run).[0m
+    [33m! kimi has no sandbox: when it writes code it can run any command on this
+    machine without asking. As a reviewer it only reads.[0m
 [1m    Let kimi write code too, not only review? [0m[36m[y/N][0m[1m:[0m
 
   [1mopencode[0m  [32mok signed in[0m
@@ -70,8 +74,8 @@
       [36m 3[0m  opencode/deepseek-v3     [90mDeepSeek[0m     [90mDeepSeek V3, 1M context[0m
      >[36m -[0m  [1mdon't use opencode[0m  [36mdefault[0m
 [1m    Pick 1-3 or -, or type provider/model [0m[36m[-][0m[1m:[0m
-    [90mHow hard should zai-coding-plan/glm-5.3 think? More effort gives better results on hard tasks
-    and uses more of your plan's limits.[0m
+    [90mHow hard should zai-coding-plan/glm-5.3 think? More effort gives better
+    results on hard tasks and uses more of your plan's limits.[0m
      >[36m 1[0m  [1mdefault[0m  [90mopencode's default[0m
       [36m 2[0m  low
       [36m 3[0m  medium
@@ -81,7 +85,7 @@
   [90m-> [0m[90mchange later: run brigada init again[0m
      [90myour own defaults: ~/.codex/config.toml, ~/.kimi-code/config.toml[0m
 
-[1m== Step 2 of 3 - the foreman[0m
+[1m== Step 2 of 4 - the foreman[0m
 [90m  The foreman plans the work and decides what happens when a task needs[0m
 [90m  judgment. It runs whenever work finishes, so it uses that agent's quota.[0m
 [90m  Only claude and codex can be the foreman; it uses the model picked above[0m
@@ -90,9 +94,18 @@
    [36m 2[0m  codex/gpt-6.1-sol
 [1m  Pick 1-2 [0m[36m[1][0m[1m:[0m
 
-  [90m-> [0m[90mchange later: brigada project foreman --harness H --model M, or run brigada init again[0m
+  [90m-> [0m[90mchange later: brigada project foreman --harness H --model M, or run
+     brigada init again[0m
 
-[1m== Step 3 of 3 - how brigada tests the work[0m
+[1m== Step 3 of 4 - tasks at once[0m
+  [90mEach running task is one agent CLI working in its own copy of the repo,
+  plus your check command, so this is bounded by your machine. This one
+  has 14 cores. Each CLI's account also gets its own limit (claude 3,
+  codex 2, kimi 1, opencode 2, brigada's defaults, never above this
+  number); change any of them later with brigada config.[0m
+[1m    Tasks at once [0m[36m[4][0m[1m:[0m
+
+[1m== Step 4 of 4 - how brigada tests the work[0m
 [90m  When an agent finishes a task, brigada runs one command in that task's[0m
 [90m  own copy of the repo (never in your working copy):[0m
 [90m    passes (exit 0)  the work goes on to review by another model family[0m
@@ -105,7 +118,8 @@
     [36m -[0m  no check       [90mwork goes straight to review; add one later[0m
 [1m  Pick 1 or -, or type a command [0m[36m[1][0m[1m:[0m
 
-  [90m-> [0m[90mchange later: edit default_check in .brigada/project.yaml, then run brigada project import[0m
+  [90m-> [0m[90mchange later: edit default_check in .brigada/project.yaml, then run
+     brigada project import[0m
 
 [1m== Plan[0m
   [1mAgents:[0m
@@ -115,24 +129,30 @@
     opencode  zai-coding-plan/glm-5.3  [90mZhipu (GLM)[0m  code + review
   [1mReviews:[0m 4 model families, so every task can get a reviewer of another one.
   [1mForeman:[0m claude/sonnet
-  [1mCheck:[0m uv run pytest (init doesn't run it; change it later in .brigada/project.yaml)
+  [1mAt once:[0m 4 tasks on this machine; per account: claude 3, codex 2, kimi 1,
+    opencode 2 (change: brigada config)
+  [1mCheck:[0m uv run pytest (init doesn't run it; change it later in
+    .brigada/project.yaml)
   [1mWhat workers may do:[0m
     claude    edit files; run only: uv run pytest
     codex     edit files and run commands inside codex's sandbox
     opencode  edit files; no commands
   [1mFiles[0m in this repository (brigada never commits them):
     [32mnew[0m  .brigada/project.yaml                    [90mthe settings above[0m
-    [32mnew[0m  .mcp.json                                [90mlets Claude Code here use brigada (Claude Code
-                                                  asks you to approve it)[0m
-    [32mnew[0m  .claude/settings.local.json              [90mprivate, kept out of git: when your Claude turn
-                                                  ends, brigada's foreman picks up what happened
-                                                  meanwhile[0m
+    [32mnew[0m  .mcp.json                                [90mlets Claude Code here use
+                                                  brigada (Claude Code asks you
+                                                  to approve it)[0m
+    [32mnew[0m  .claude/settings.local.json              [90mprivate, kept out of git:
+                                                  when your Claude turn ends,
+                                                  brigada's foreman picks up
+                                                  what happened meanwhile[0m
     [32mnew[0m  .claude/skills/brigada-foreman/SKILL.md  [90mrules for your Claude session[0m
     [90m(show full contents: --verbose)[0m
   [1mCodex[0m, optional: to plan from your own Codex session, run once yourself:
     [36mcodex mcp add brigada-foreman -- brigada mcp --foreman[0m
-  [1mIn the background:[0m a runner starts now and keeps going (log: ~/.local/state/brigada/runner.log;
-    stop it with: [36mbrigada stop[0m). The engine starts when needed and stops after 30 idle minutes.
+  [1mIn the background:[0m a runner starts now and keeps going (log:
+    ~/.local/state/brigada/runner.log; stop it with: [36mbrigada stop[0m). The engine
+    starts when needed and stops after 30 idle minutes.
     [36mbrigada config[0m[90m shows every setting later[0m
 
 [1mWrite 4 files and start the runner? [0m[36m[y/N][0m

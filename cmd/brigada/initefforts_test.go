@@ -145,7 +145,7 @@ func TestInitInteractiveEfforts(t *testing.T) {
 				if answer == "number" {
 					input = number
 				}
-				code, out, errOut := initDo(t, testsupport.ShortStateDir(t), pick+"\n"+input+"\nn\n", "--signed-in", "claude,codex,opencode", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
+				code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), pick+"\n"+input+"\nn\n", "--signed-in", "claude,codex,opencode", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
 				if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 					t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 				}
@@ -283,7 +283,7 @@ func TestInitSavedEffortDefault(t *testing.T) {
 func TestInitExplicitEffortsSkipQuestions(t *testing.T) {
 	importRepo(t)
 	fakeInitPATH(t, "claude", "codex", "opencode")
-	code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "\nn\n",
+	code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\nn\n",
 		"--agent", "harness=claude,model=sonnet,effort=high",
 		"--agent", "harness=codex,model=gpt-5,effort=high",
 		"--agent", "harness=opencode,model=fixture/glm-5.3,effort=high",

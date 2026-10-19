@@ -145,7 +145,7 @@ func TestInitOpenCodeVerboseMenu(t *testing.T) {
 	fakeInitPATH(t, "codex", "opencode")
 	fakeOpenCodeVerbose2(t, openCodeVerboseFile(t, wide))
 	args := []string{"--signed-in", "codex", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring"}
-	code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "1\n-\nn\n", args...)
+	code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "1\n-\nn\n", args...)
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 	}
@@ -189,7 +189,7 @@ func TestInitOpenCodeVerboseMenu(t *testing.T) {
 	}
 	for _, row := range rows {
 		t.Run(row[2], func(t *testing.T) {
-			code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "1\n"+row[1]+"\nn\n", args...)
+			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "1\n"+row[1]+"\nn\n", args...)
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") || strings.Contains(out, "try again") {
 				t.Fatalf("numbered entry %s rejected: %d\n%s\n%s", row[1], code, out, errOut)
 			}

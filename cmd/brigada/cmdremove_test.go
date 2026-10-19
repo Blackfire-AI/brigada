@@ -422,7 +422,9 @@ func TestInitThenRemoveRepositoryRoundTrip(t *testing.T) {
 			before := removalSnapshot(t, root)
 			startStopHelper(t, "runner", state)
 			fakeInitPATH(t, "claude")
-			code, out, errs := initDo(t, state, "", "--yes", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--signed-in", "claude", "--check", "true", "--tools", "none")
+			// Keep the existing helper runner's one-task limit. Changing it
+			// would restart the helper as a real detached runner instead.
+			code, out, errs := initDo(t, state, "", "--yes", "--parallel", "1", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--signed-in", "claude", "--check", "true", "--tools", "none")
 			if code != 0 {
 				t.Fatalf("init code=%d\n%s\n%s", code, out, errs)
 			}

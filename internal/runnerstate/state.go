@@ -17,9 +17,10 @@ import (
 )
 
 type Record struct {
-	PID    int         `json:"pid"`
-	Agents []api.Agent `json:"agents"`
-	Specs  []string    `json:"specs,omitempty"`
+	MaxParallel int         `json:"max_parallel,omitempty"`
+	PID         int         `json:"pid"`
+	Agents      []api.Agent `json:"agents"`
+	Specs       []string    `json:"specs,omitempty"`
 }
 
 func Acquire(dir string) (func(), error) {
@@ -91,7 +92,12 @@ func ClearStale(dir string) (pid int, cleared bool, err error) {
 }
 
 func Publish(dir string, agents []api.Agent, specs ...string) error {
-	data, err := json.Marshal(Record{PID: os.Getpid(), Agents: agents, Specs: specs})
+	return PublishParallel(dir, agents, 1, specs...)
+}
+
+// PublishParallel records the live runner capacity beside its agents.
+func PublishParallel(dir string, agents []api.Agent, parallel int, specs ...string) error {
+	data, err := json.Marshal(Record{PID: os.Getpid(), Agents: agents, Specs: specs, MaxParallel: parallel})
 	if err != nil {
 		return err
 	}
