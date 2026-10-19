@@ -31,8 +31,8 @@ tasks:
     class: "implement"
     deps: ["agents-md"]
     base: "agents-md"
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-2"
     rounds: 0
   - id: 3
     name: "gitleaks-ci"
