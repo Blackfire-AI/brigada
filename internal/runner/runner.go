@@ -399,7 +399,7 @@ func Run(ctx context.Context, cfg Config) error {
 			}
 			// The detached starter waits for this record, rather than trusting
 			// a log line or a live pid before registration has actually succeeded.
-			if err := runnerstate.Publish(cfg.StateDir, cfg.Agents, cfg.AgentSpecs...); err != nil {
+			if err := runnerstate.PublishParallel(cfg.StateDir, cfg.Agents, max(1, cfg.MaxParallel), cfg.AgentSpecs...); err != nil {
 				return fmt.Errorf("record runner agents: %w", err)
 			}
 			registered = true

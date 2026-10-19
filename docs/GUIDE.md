@@ -42,7 +42,7 @@ Four parts, one binary:
 
 ### What init does
 
-Run `brigada init` inside a repository. (At the top of a folder that holds several repositories, init does something else: see [section 3](#3-several-repositories-mode-b).) The repository must have an `origin` remote, and all its URLs must name one repository. Init prints the canonical repository identity, then walks you through three steps. Nothing is written or started until you confirm the plan at the end.
+Run `brigada init` inside a repository. (At the top of a folder that holds several repositories, init does something else: see [section 3](#3-several-repositories-mode-b).) The repository must have an `origin` remote, and all its URLs must name one repository. Init prints the canonical repository identity, then walks you through four steps. Nothing is written or started until you confirm the plan at the end.
 
 1. **Agents.** Init checks installed CLIs in order: `claude`, `codex`, `kimi`, `opencode`. For each one, it checks or asks about sign-in, then offers a numbered model menu.
 
@@ -72,7 +72,9 @@ Run `brigada init` inside a repository. (At the top of a folder that holds sever
 
 2. **The foreman.** Pick among the usable Claude and Codex agents, using the models and efforts chosen above. The foreman plans work and handles decisions, and spends that agent's quota when work finishes. With two candidates, init asks for a number. Enter picks the first usable resume-capable agent in `--agent` order, or Claude before Codex without `--agent`. With only one candidate, init names it without asking. `--foreman HARNESS/MODEL` supplies the choice and skips the question; it must name a usable Claude or Codex agent.
 
-3. **How brigada tests the work.** Init explains that when an agent finishes a task, brigada runs one command in that task's own copy of the repo (never in your working copy). If it passes (exit 0), the work goes on to review by another model family; if it fails, the work goes back to the agent with the output. It then lists what it found in the repo, best first, and asks `Pick 1-N or -, or type a command [1]:`:
+3. **Tasks at once.** Init names this machine's core count and asks `Tasks at once [N]:` (1–64). Enter keeps the saved choice, or defaults to half the cores, at least 1 and at most 4. `--parallel N` supplies the answer; `--yes` and `--probe` use it, else the saved choice, else that default. On apply, init writes `caps.global = N`, `caps.plan = 3` and per-account caps (Claude 3, Codex 2, Kimi 1, OpenCode 2, each no higher than N) to the local brigada config, preserving other settings. The runner uses `--max-parallel N`. Change caps later with `brigada config`. If the engine is already running, init explains how to restart it to read changed caps.
+
+4. **How brigada tests the work.** Init explains that when an agent finishes a task, brigada runs one command in that task's own copy of the repo (never in your working copy). If it passes (exit 0), the work goes on to review by another model family; if it fails, the work goes back to the agent with the output. It then lists what it found in the repo, best first, and asks `Pick 1-N or -, or type a command [1]:`:
 
    | Source | Candidates |
    |---|---|
@@ -95,6 +97,7 @@ The `Plan` block then shows:
 - `Agents:`, with each harness, model and effort (`@high`, for example; shown only when one is set), family and role phrase, such as `code + review` or `review only`. Configured defaults use their resolved names when available, otherwise `CLI default`. Family labels include `Anthropic`, `OpenAI`, `Moonshot` and `Zhipu (GLM)`.
 - `Reviews:`, which counts the review-capable model families and describes cross-family review. In a limited setup, reviews that need another family still wait.
 - `Foreman:`, which names the chosen agent.
+- `At once:`, with the machine limit and each usable account's cap.
 - `Check:`, which names the check and reminds you that init does not run it and that you can edit `.brigada/project.yaml`, or shows `none (work goes straight to review)`.
 - `What workers may do:`, with a row for each agent that can implement. Claude gets `edit files; run only: …`, or `edit files; no commands` for `none`. Codex can edit and run commands inside its sandbox. Kimi, if allowed to implement, can edit and run any command without asking. Opencode gets `edit files; no commands`.
 - `Files in this repository`, which lists each file's state first (`new`, `changes`, `unchanged`, or `left alone`, with its reason after the path), then its path and its purpose. Private Claude settings have `private, kept out of git:` in their purpose text. Changes to existing files show diffs and keep other settings and comments; new files show full contents only with `--verbose`. The list covers `.brigada/project.yaml`, the harness wiring below, and any supporting migration or git exclude edit. Init never commits these files.
@@ -111,7 +114,7 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 
 - writes **`.brigada/project.yaml`** ([section 6](#6-configuring-a-project)). The file is yours to commit; brigada never commits or pushes anything. The write is refused if the file is a symlink or names another repository, and a file that changed after the plan was shown is not overwritten;
 - **wires Claude Code** for [mode A](#2-your-own-session-is-the-foreman-mode-a), when `claude` is installed: the bridge in `.mcp.json`, only the `Stop` hook in private `.claude/settings.local.json`, and the foreman skill at `.claude/skills/brigada-foreman/SKILL.md`. A rerun removes brigada's old hooks from shared `.claude/settings.json`. Only brigada's entries change; the details, including the git exclude entry, are in [section 2](#2-your-own-session-is-the-foreman-mode-a);
-- starts the engine on demand, imports the project file (recording where each value came from, [section 6](#6-configuring-a-project)), registers the foreman, saves the agent choices and starts one detached runner. If its agents changed, init restarts the runner with the new choices; otherwise it keeps the running one. The runner's log is `runner.log` in the state directory.
+- starts the engine on demand, imports the project file (recording where each value came from, [section 6](#6-configuring-a-project)), registers the foreman, saves the agent and concurrency choices and starts one detached runner. If its agents or concurrency changed, init restarts the runner with the new choices; otherwise it keeps the running one. The runner's log is `runner.log` in the state directory.
 
 ### Flags
 
@@ -123,7 +126,8 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 | `--agent SPEC` | Repeatable. The same syntax and defaults as `brigada runner --agent` ([section 8](#8-agents-quota-and-health)): `harness=<h>[,model=<m>][,classes=…][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=…]`. Replaces the model and effort menus and Kimi's writing question. Use `classes=review` to keep Kimi reviewing only. |
 | `--signed-in HARNESS` | Confirm an installed harness is signed in (repeatable or comma-separated). Local only. |
 | `--foreman HARNESS/MODEL` | Choose a usable Claude or Codex agent as foreman; skips the foreman question. |
-| `--check CMD` | The default check; answers step 3 without a question. |
+| `--parallel N` | Tasks at once (1–64); answers step 3 without a question. |
+| `--check CMD` | The default check; answers step 4 without a question. |
 | `--tools SCOPE` | Worker tools in runner `tools=` syntax (`Bash(npm test:*)+Bash(npx jest:*)`, or `none`). An explicit agent `tools=` wins; a `tools.claude/<model>` line in your config file is kept unless you pass `--tools`. |
 | `--accept-limited` | Go ahead with fewer than two review families. |
 | `--no-wiring` | Skip the harness wiring: no `.mcp.json`, hooks or skill, and no Codex text. |
@@ -136,12 +140,13 @@ Init still reads answers from standard input, one line per question, and prints 
 
 1. For each installed CLI in order (`claude`, `codex`, `kimi`, `opencode`): its unconfirmed sign-in or use answer, then its model choice if you agreed to use it, then its effort choice when offered. After Kimi's model, answer whether it may write code too.
 2. The foreman choice, if both Claude and Codex are usable and `--foreman` was not supplied.
-3. The check, if `--check` was not given. Worker tools are asked only when the answer gives no valid scope and `--tools` was not given.
-4. The final confirmation.
+3. Tasks at once, if `--parallel` was not given.
+4. The check, if `--check` was not given.
+5. The final confirmation.
 
 Enter picks model entry 1 for Claude, Codex and Kimi. Opencode defaults to `-`, so Enter leaves it out. Claude, Codex and opencode show `-` to skip; skip Kimi with no at `Use kimi?`. With `--agent`, there are no model or effort menus or Kimi writing question; sign-in or use questions may still be asked.
 
-With `--yes` or `--probe` init asks nothing, so the agents must come from `--agent`, sign-in from the status command or `--signed-in`, and the check and tools from the project file, the first check candidate, or `--check` and `--tools`. If a question is needed and input is at end of file, init fails and names the flag that supplies the answer.
+With `--yes` or `--probe` init asks nothing, so the agents must come from `--agent`, sign-in from the status command or `--signed-in`, tasks at once from the saved choice or `--parallel`, and the check and tools from the project file, the first check candidate, or `--check` and `--tools`. If a question is needed and input is at end of file, init fails and names the flag that supplies the answer.
 
 The final prompt says what will happen, for example `Write 4 files and start the runner? [y/N]`. Answering no exits 1 and starts nothing. Declining one harness's sign-in only skips that harness.
 
@@ -155,11 +160,11 @@ If init fails after writing `project.yaml`, it says `partial init` and names the
 
 ### Changing your setup later
 
-Run `brigada init` again to change agents, models or effort. Its menus default to the saved agent choices, including effort and whether Kimi may write code. Pick the foreman again from the offered Claude and Codex agents. The check step lists the existing `.brigada/project.yaml` check first, and Enter keeps it. Confirm the plan to apply changes. If the agents changed, init stops the detached runner and starts it with the new choices.
+Run `brigada init` again to change agents, models or effort. Its menus default to the saved agent choices, including effort and whether Kimi may write code. Pick the foreman again from the offered Claude and Codex agents. The tasks-at-once step defaults to the saved limit. The check step lists the existing `.brigada/project.yaml` check first, and Enter keeps it. Confirm the plan to apply changes. If the agents or task limit changed, init stops the detached runner and starts it with the new choices.
 
 To change only the foreman, use `brigada project foreman --harness H --model M [--effort E]`. To change the check, edit `.brigada/project.yaml`, then run `brigada project import`.
 
-After a reboot, run `brigada start`. It starts the engine and detached runner using the saved agents, without the init questions. It succeeds if the runner is already running; if there are no saved agents, it asks you to run `brigada init` first.
+After a reboot, run `brigada start`. It starts the engine and detached runner using the saved agents and concurrency, without the init questions. It succeeds if the runner is already running; if there are no saved agents, it asks you to run `brigada init` first.
 
 `brigada config` shows the saved agents and runner state, this repository's foreman and every project setting with its provenance, and all machine config-file keys and defaults. Each section says how to change it. Outside a registered repository it still shows agents and machine settings, with a hint to run inside a repository brigada knows. Project reads start the engine on demand. Use `--state-dir DIR` and `--config PATH` to inspect another setup.
 

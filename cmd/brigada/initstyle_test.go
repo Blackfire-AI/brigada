@@ -174,6 +174,17 @@ func TestInitPlainTerminalLayout(t *testing.T) {
 	}
 }
 
+func TestInitStyledWideTerminalLayout(t *testing.T) {
+	caps := logo.Caps{TTY: true, Color: logo.TrueColor, UTF8: true, Width: 100}
+	out := initInteractiveTranscript(t, false, caps)
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "gpt-5.4-mini") && term.VisibleWidth(line) > 80 {
+			return
+		}
+	}
+	t.Fatalf("styled TTY still wraps the model menu at 80:\n%s", out)
+}
+
 func TestInitPlainCheckMenuWidth(t *testing.T) {
 	for _, width := range []int{80, 100} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {

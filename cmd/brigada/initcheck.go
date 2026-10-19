@@ -90,7 +90,7 @@ func initCheckTools(command string, entries, candidates []checkCandidate) string
 func askInitCheck(w io.Writer, ask func(prompt, flags string) (string, error), entries []checkCandidate) (command string, exhausted bool, err error) {
 	fmt.Fprintln(w)
 	_, explanation, _ := strings.Cut(strings.TrimPrefix(initCheckIntro, "\n"), "\n")
-	initStep(w, 3, "how brigada tests the work", explanation)
+	initStep(w, 4, "how brigada tests the work", explanation)
 	numbered := len(entries) - 1 // The last entry is always no check, selected with "-".
 	defaultIndex := initCheckDefault(entries)
 	defaultAnswer := "-"

@@ -53,10 +53,10 @@ func initSeparator(w io.Writer) string {
 func initStep(w io.Writer, number int, title, explanation string) {
 	out := initPresentation(w)
 	if out.styled {
-		fmt.Fprintln(w, out.style.Bold(fmt.Sprintf("%s Step %d of 3%s%s", out.style.Rule(), number, initSeparator(w), title)))
+		fmt.Fprintln(w, out.style.Bold(fmt.Sprintf("%s Step %d of 4%s%s", out.style.Rule(), number, initSeparator(w), title)))
 		fmt.Fprint(w, initDim(w, explanation))
 	} else {
-		fmt.Fprintf(w, "Step %d of 3: %s\n%s", number, title, explanation)
+		fmt.Fprintf(w, "Step %d of 4: %s\n%s", number, title, explanation)
 	}
 }
 

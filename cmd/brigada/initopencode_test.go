@@ -69,7 +69,7 @@ func TestInitOpenCodeNoStoredCredentialsAsksUse(t *testing.T) {
 	if err := os.WriteFile(path, script, 0755); err != nil {
 		t.Fatal(err)
 	}
-	code, out, errOut := initDo(t, testsupport.ShortStateDir(t), "\n\n\n\n\n\nn\n", "--signed-in", "claude,codex", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
+	code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\n\n\n\n\n\nn\n", "--signed-in", "claude,codex", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
 	if code != 1 || errOut != "" {
 		t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 	}
