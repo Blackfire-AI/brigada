@@ -33,9 +33,9 @@ tasks:
     deps: []
     base: ""
     effort: high
-    state: reviewing
+    state: running
     branch: "brigada/task-16-r1"
-    rounds: 0
+    rounds: 1
   - id: 17
     name: "ladder"
     title: "Escalation ladder: effort first, then tier; no-result retries before a bump (#29 item 4)"
