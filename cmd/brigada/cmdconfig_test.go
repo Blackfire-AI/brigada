@@ -223,6 +223,9 @@ func TestConfigDefaultsAndLongLines(t *testing.T) {
 	if !strings.Contains(out, "no saved agents; run brigada init") || !strings.Contains(out, "notify = auto (default)") {
 		t.Fatalf("missing defaults:\n%s", out)
 	}
+	if !strings.Contains(out, "tier.<harness>/<model> = from the model name (default)") {
+		t.Fatalf("missing tier default:\n%s", out)
+	}
 	if _, err := os.Stat(filepath.Join(state, "runner")); !os.IsNotExist(err) {
 		t.Errorf("reading absent agents created runner directory: %v", err)
 	}

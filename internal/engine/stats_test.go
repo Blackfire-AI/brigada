@@ -59,6 +59,11 @@ func TestStatsJoinAndColdStart(t *testing.T) {
 	if len(rows) != 6 {
 		t.Fatalf("rows = %d, want 6: %+v", len(rows), rows)
 	}
+	for _, row := range rows {
+		if row.Tier != "standard" {
+			t.Errorf("agent %d class %s tier = %q, want standard", row.AgentID, row.Class, row.Tier)
+		}
+	}
 	find := func(agent int64, class string) StatsRow {
 		t.Helper()
 		for _, r := range rows {
@@ -98,6 +103,29 @@ func TestStatsJoinAndColdStart(t *testing.T) {
 	}
 	if len(implement) != 2 || implement[0].AgentID != claude {
 		t.Errorf("implement rows = %+v, want the better score (claude) first", implement)
+	}
+	// Changing the label carries both recorded and cold rows along with the agent.
+	e.eng.cfg.Caps.Tier = map[string]string{"claude/sonnet": "heavy"}
+	overridden, err := e.eng.Stats(e.ctx, e.project)
+	if err != nil {
+		t.Fatalf("stats with override: %v", err)
+	}
+	if len(overridden) != 1 || len(overridden[0].Rows) != len(rows) {
+		t.Fatalf("overridden stats = %+v, want the same rows", overridden)
+	}
+	for i, row := range overridden[0].Rows {
+		want := "standard"
+		if row.AgentID == claude {
+			want = "heavy"
+		}
+		if row.Tier != want {
+			t.Errorf("agent %d class %s tier = %q, want %q", row.AgentID, row.Class, row.Tier, want)
+		}
+		original := rows[i]
+		original.Tier = want
+		if row != original {
+			t.Errorf("row changed beyond its tier: got %+v, want %+v", row, original)
+		}
 	}
 }
 

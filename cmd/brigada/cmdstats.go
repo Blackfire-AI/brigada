@@ -69,7 +69,7 @@ func statsConfidence(attempts int) string {
 }
 
 // renderStats prints the stats as one aligned table per project: the
-// agent, the class, attempts, successes, the rate (the score, prior
+// agent, its tier, the class, attempts, successes, the rate (the score, prior
 // included) and the confidence word. An agent whose runner has not been
 // seen lately is marked stale; a registered agent with no record shows
 // at attempts 0, confidence none.
@@ -84,14 +84,14 @@ func renderStats(w io.Writer, stats []engine.ProjectStats) error {
 			continue
 		}
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "  AGENT\tCLASS\tATTEMPTS\tSUCCESSES\tRATE\tCONFIDENCE")
+		fmt.Fprintln(tw, "  AGENT\tTIER\tCLASS\tATTEMPTS\tSUCCESSES\tRATE\tCONFIDENCE")
 		for _, r := range p.Rows {
 			agent := agentName(r.Harness, r.Model, r.Effort)
 			if !r.Live {
 				agent += " (stale)"
 			}
-			fmt.Fprintf(tw, "  %s\t%s\t%d\t%d\t%.2f\t%s\n",
-				agent, r.Class, r.Attempts, r.Successes, r.Score, statsConfidence(r.Attempts))
+			fmt.Fprintf(tw, "  %s\t%s\t%s\t%d\t%d\t%.2f\t%s\n",
+				agent, r.Tier, r.Class, r.Attempts, r.Successes, r.Score, statsConfidence(r.Attempts))
 		}
 		if err := tw.Flush(); err != nil {
 			return err

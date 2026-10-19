@@ -5,6 +5,8 @@
 // dispatch it considers.
 package caps
 
+import "github.com/Blackfire-AI/brigada/internal/adapter"
+
 // Limits are the configured caps (§8.1): a job may start only if every
 // layer on its path has room. A nil pointer, or a missing map entry,
 // means the layer is not capped; a set limit of 0 caps the layer at
@@ -13,13 +15,17 @@ package caps
 // Cost is not a limit but is configured beside them: the relative cost
 // weight of one (harness, model) pair, which the foreman reads through
 // `capacity` (§12.2). A missing entry there is the default weight of 1.
+// Tier overrides the model-name table for every agent of a (harness, model)
+// pair. Outcome record keys stay (repo, class, agent), so records earned
+// under one label stay with the agent when an override changes its tier.
 type Limits struct {
-	Global  *int           // the engine's overall ceiling
-	Plan    *int           // max parallel tasks per plan
-	Runner  *int           // the config's runner cap; a runner may advertise its own
-	Account map[string]int // by account label
-	Model   map[string]int // by model; a per-model cap such as 1 for a heavy model
-	Cost    map[string]int // by "harness/model"
+	Global  *int              // the engine's overall ceiling
+	Plan    *int              // max parallel tasks per plan
+	Runner  *int              // the config's runner cap; a runner may advertise its own
+	Account map[string]int    // by account label
+	Model   map[string]int    // by model; a per-model cap such as 1 for a heavy model
+	Cost    map[string]int    // by "harness/model"
+	Tier    map[string]string // by "harness/model"
 
 	// NoHeadroom turns the foreman headroom rule (§8.2) off. The rule
 	// is on by default, so the zero value keeps it.
@@ -41,6 +47,14 @@ func (l Limits) CostOf(harness, model string) int {
 		return n
 	}
 	return 1
+}
+
+// TierOf is the configured tier of a (harness, model) pair, else its table tier.
+func (l Limits) TierOf(harness, model string) string {
+	if tier, ok := l.Tier[harness+"/"+model]; ok {
+		return tier
+	}
+	return adapter.AgentTier(harness, model)
 }
 
 // RunnerCap folds the config's runner cap with the cap the runner

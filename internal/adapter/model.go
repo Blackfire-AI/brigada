@@ -50,6 +50,47 @@ var modelFamilyPrefixes = []struct {
 	{"nvidia", []string{"nemotron"}},
 }
 
+var modelTierPatterns = []struct {
+	tier     string
+	prefixes []string
+	segments []string
+}{
+	// Heavy: Opus variants and explicit high-capability model segments.
+	{TierHeavy, []string{"opus"}, []string{"pro", "max", "ultra"}},
+	// Light: Haiku variants and explicit smaller, faster or free segments.
+	{TierLight, []string{"haiku"}, []string{"mini", "nano", "flash", "lite", "highspeed", "free"}},
+}
+
+// ModelTier labels a model by its name. Heavy matches take precedence;
+// names without a matching segment serve the standard tier.
+func ModelTier(model string) string {
+	segments := strings.Split(normalizedModelName(model), "-")
+	for _, group := range modelTierPatterns {
+		for _, segment := range segments {
+			for _, prefix := range group.prefixes {
+				if strings.HasPrefix(segment, prefix) {
+					return group.tier
+				}
+			}
+			for _, word := range group.segments {
+				if segment == word {
+					return group.tier
+				}
+			}
+		}
+	}
+	return TierStandard
+}
+
+// AgentTier uses the model's table tier. CLI defaults (codex, kimi and
+// opencode) are standard because their model name is not known to brigada.
+func AgentTier(harness, model string) string {
+	if model == "default" {
+		return TierStandard
+	}
+	return ModelTier(model)
+}
+
 func validModelIdentifier(model string) bool {
 	return model != "" && !strings.ContainsFunc(model, func(r rune) bool {
 		return unicode.IsSpace(r) || unicode.IsControl(r)
@@ -62,16 +103,7 @@ func ModelFamily(model string) (string, error) {
 	if !validModelIdentifier(model) {
 		return "", fmt.Errorf("model must be a nonempty model identifier")
 	}
-	name := strings.ToLower(model)
-	if i := strings.LastIndex(name, "/"); i >= 0 {
-		name = name[i+1:]
-	}
-	// A context suffix such as "[1m]" does not change the family.
-	if strings.HasSuffix(name, "]") {
-		if i := strings.LastIndex(name, "["); i > 0 {
-			name = name[:i]
-		}
-	}
+	name := normalizedModelName(model)
 	var prefixes []string
 	for _, group := range modelFamilyPrefixes {
 		prefixes = append(prefixes, group.prefixes...)
@@ -82,4 +114,18 @@ func ModelFamily(model string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("cannot identify the family of model %q: brigada recognises model names starting with %s", model, strings.Join(prefixes, ", "))
+}
+
+func normalizedModelName(model string) string {
+	name := strings.ToLower(model)
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	// A context suffix such as "[1m]" changes neither family nor tier.
+	if strings.HasSuffix(name, "]") {
+		if i := strings.LastIndex(name, "["); i > 0 {
+			name = name[:i]
+		}
+	}
+	return name
 }

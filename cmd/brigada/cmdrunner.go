@@ -110,7 +110,8 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		if a.Effort != "" {
 			model += "@" + a.Effort
 		}
-		parts[i] = fmt.Sprintf("%s (model %s, classes %s)", a.Harness, model, strings.Join(a.Classes, ","))
+		// This is the table's tier: the runner does not read the engine's override.
+		parts[i] = fmt.Sprintf("%s (model %s, tier %s, classes %s)", a.Harness, model, adapter.AgentTier(a.Harness, a.Model), strings.Join(a.Classes, ","))
 		if a.Tools != "" {
 			parts[i] += " tools " + a.Tools
 		}

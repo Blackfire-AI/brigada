@@ -105,6 +105,12 @@ func TestCapacityBody(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("capacity: %d %s, want 200", code, data)
 	}
+	raw := decode[struct {
+		Agents []map[string]any `json:"agents"`
+	}](t, data)
+	if len(raw.Agents) != 1 || raw.Agents[0]["tier"] != "standard" {
+		t.Errorf("capacity JSON has no standard tier: %s", data)
+	}
 	snap := decode[engine.CapacitySnapshot](t, data)
 	if len(snap.Agents) != 1 {
 		t.Fatalf("agents = %d, want the one seeded agent", len(snap.Agents))
@@ -112,6 +118,9 @@ func TestCapacityBody(t *testing.T) {
 	a := snap.Agents[0]
 	if a.Harness != "claude" || a.Model != "sonnet" || a.Account != "work" {
 		t.Errorf("agent = %s/%s %s, want claude/sonnet on the work account", a.Harness, a.Model, a.Account)
+	}
+	if a.Tier != "standard" {
+		t.Errorf("agent JSON tier = %q, want standard", a.Tier)
 	}
 	if a.Cap != nil || a.CapLayer != "none" {
 		t.Errorf("agent cap = %v (%s), want nil (none): the test engine caps nothing", a.Cap, a.CapLayer)

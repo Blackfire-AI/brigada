@@ -110,23 +110,24 @@ func (b *syncBuffer) String() string {
 // provider/model survives advertisement unchanged. No worker CLI is run.
 func TestRunnerHarnessRegisters(t *testing.T) {
 	for _, tc := range []struct {
-		name, harness, model, family string
-		agentForm                    bool
+		name, harness, model, family, tier string
+		agentForm                          bool
 	}{
-		{"kimi default", "kimi", "default", "moonshot", false},
-		{"codex default", "codex", "default", "openai", false},
-		{"opencode default", "opencode", "default", "", false},
-		{"opencode default agent flag", "opencode", "default", "", true},
-		{"opencode model shorthand", "opencode", "provider/model", "opencode", false},
-		{"opencode model agent flag", "opencode", "provider/model", "opencode", true},
-		{"opencode GLM provider", "opencode", "zai-coding-plan/glm-5.3", "zhipu", true},
-		{"opencode GLM bare", "opencode", "glm-5.3", "zhipu", false},
-		{"opencode mimo", "opencode", "opencode/mimo-v2-flash-free", "xiaomi", true},
-		{"opencode longcat", "opencode", "opencode/longcat-flash-chat", "meituan", false},
-		{"opencode nemotron", "opencode", "opencode/nemotron-3-super-free", "nvidia", true},
+		{"claude opus", "claude", "opus", "anthropic", "heavy", true},
+		{"kimi default", "kimi", "default", "moonshot", "standard", false},
+		{"codex default", "codex", "default", "openai", "standard", false},
+		{"opencode default", "opencode", "default", "", "standard", false},
+		{"opencode default agent flag", "opencode", "default", "", "standard", true},
+		{"opencode model shorthand", "opencode", "provider/model", "opencode", "standard", false},
+		{"opencode model agent flag", "opencode", "provider/model", "opencode", "standard", true},
+		{"opencode GLM provider", "opencode", "zai-coding-plan/glm-5.3", "zhipu", "standard", true},
+		{"opencode GLM bare", "opencode", "glm-5.3", "zhipu", "standard", false},
+		{"opencode mimo", "opencode", "opencode/mimo-v2-flash-free", "xiaomi", "light", true},
+		{"opencode longcat", "opencode", "opencode/longcat-flash-chat", "meituan", "light", false},
+		{"opencode nemotron", "opencode", "opencode/nemotron-3-super-free", "nvidia", "light", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			testRunnerHarnessRegisters(t, tc.harness, tc.model, tc.family, tc.agentForm)
+			testRunnerHarnessRegisters(t, tc.harness, tc.model, tc.family, tc.tier, tc.agentForm)
 		})
 	}
 }
@@ -160,7 +161,7 @@ func TestResolveRunnerAgentModels(t *testing.T) {
 	}
 }
 
-func testRunnerHarnessRegisters(t *testing.T, harness, wantModel, wantFamily string, agentForm bool) {
+func testRunnerHarnessRegisters(t *testing.T, harness, wantModel, wantFamily, wantTier string, agentForm bool) {
 	state := testsupport.ShortStateDir(t)
 	agentFile := filepath.Join(t.TempDir(), "worker.md")
 	if err := os.WriteFile(agentFile, []byte("# the agent\n"), 0o644); err != nil {
@@ -238,8 +239,8 @@ func testRunnerHarnessRegisters(t *testing.T, harness, wantModel, wantFamily str
 	if model != wantModel {
 		t.Errorf("the registered model = %q, want %q", model, wantModel)
 	}
-	if line := out.String(); !strings.Contains(line, harness+" (model "+wantModel+", classes implement,review,answer)") {
-		t.Errorf("the startup line = %q, want the harness and model with the classes", line)
+	if line := out.String(); !strings.Contains(line, harness+" (model "+wantModel+", tier "+wantTier+", classes implement,review,answer)") {
+		t.Errorf("the startup line = %q, want the harness and model with the tier and classes", line)
 	}
 	warning := harness + "/" + wantModel + ": model family unknown; it takes no review that needs another family (give provider/model to fix)\n"
 	wantWarnings := 0
@@ -721,8 +722,8 @@ func TestRunnerAgentFlag(t *testing.T) {
 		t.Errorf("the fake agent's classes = %s, want only review", fakeClasses)
 	}
 	line := out.String()
-	for _, want := range []string{"claude (model sonnet@high, classes implement,review,answer)", "fake (model fake-1, classes review)",
-		"claude (model sonnet@high, classes implement,review,answer) tools Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*);"} {
+	for _, want := range []string{"claude (model sonnet@high, tier standard, classes implement,review,answer)", "fake (model fake-1, tier standard, classes review)",
+		"claude (model sonnet@high, tier standard, classes implement,review,answer) tools Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*);"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("the startup line = %q, want it to list %q", line, want)
 		}

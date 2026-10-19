@@ -80,3 +80,38 @@ func TestModelFamilyUnknownErrorListsPrefixes(t *testing.T) {
 		t.Fatalf("error = %v, want %q", err, want)
 	}
 }
+
+var modelTierExamples = []struct {
+	tier   string
+	models []string
+}{
+	{TierHeavy, []string{"opus", "claude-opus-4", "anthropic/claude-opus-4[1m]", "gemini-2.5-pro", "o3-pro", "grok-4-max", "gpt-5-ultra", "provider/CLAUDE-OPUS-4[1M]", "opusnext", "mini-opus"}},
+	{TierLight, []string{"haiku", "claude-haiku-4", "gpt-5.4-mini", "o4-mini", "gemini-2.5-flash", "glm-5.3-highspeed", "zai-coding-plan/glm-5.3-highspeed", "kimi-code/kimi-for-coding-highspeed", "opencode/space-bunny-free", "qwen-3-lite", "gpt-5-nano", "haikunext", "provider/HAIKU[1m]"}},
+	{TierStandard, []string{"sonnet", "claude-sonnet-4[1m]", "gpt-6.1-sol", "gpt-5", "kimi-code/k3", "kimi-code/k3-256k", "zai-coding-plan/glm-5.3", "deepseek-v3", "default", "maximal-coder", "freedom-7", "pro/provider/gpt-5", "flash/provider/sonnet", "professional", "minify", ""}},
+}
+
+func TestModelTier(t *testing.T) {
+	for _, group := range modelTierExamples {
+		for _, model := range group.models {
+			t.Run(model, func(t *testing.T) {
+				if got := ModelTier(model); got != group.tier {
+					t.Errorf("ModelTier(%q) = %q, want %q", model, got, group.tier)
+				}
+			})
+		}
+	}
+}
+
+func TestAgentTier(t *testing.T) {
+	for _, harness := range []string{"claude", "codex", "kimi", "opencode"} {
+		for _, group := range modelTierExamples {
+			for _, model := range group.models {
+				t.Run(harness+"/"+model, func(t *testing.T) {
+					if got := AgentTier(harness, model); got != group.tier {
+						t.Errorf("AgentTier(%q, %q) = %q, want %q", harness, model, got, group.tier)
+					}
+				})
+			}
+		}
+	}
+}
