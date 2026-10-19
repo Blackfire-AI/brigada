@@ -3,11 +3,20 @@ package mcp
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/Blackfire-AI/brigada/internal/api"
+	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
+	"github.com/Blackfire-AI/brigada/internal/store"
 )
 
 // planCreateArgs is one whole plan_create call the tests make: the plan
@@ -384,5 +393,117 @@ func TestIdemKey(t *testing.T) {
 	}
 	if idemKey("plan_create", a.canonical()) == idemKey("plan_other", a.canonical()) {
 		t.Error("the key does not name its tool")
+	}
+}
+
+func TestPlanTaskTierEffortSchema(t *testing.T) {
+	for _, tool := range tools {
+		field := ""
+		switch tool.Name {
+		case "plan_create":
+			field = "tasks"
+		case "plan_amend":
+			field = "add"
+		default:
+			continue
+		}
+		props := tool.InputSchema.(map[string]any)["properties"].(map[string]any)[field].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+		for key, want := range map[string][]string{"tier": {"light", "standard", "heavy"}, "effort": {"low", "medium", "high", "max"}} {
+			got := props[key].(map[string]any)["enum"]
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("%s %s enum = %v, want %v", tool.Name, key, got, want)
+			}
+		}
+	}
+	for _, tc := range []struct{ tier, effort, want string }{
+		{"", "", ""}, {"standard", "", ""}, {"heavy", "high", " (heavy, effort high)"}, {"light", "", " (light)"}, {"standard", "max", " (standard, effort max)"},
+	} {
+		if got := taskTierEffort(tc.tier, tc.effort); got != tc.want {
+			t.Errorf("taskTierEffort(%q,%q) = %q, want %q", tc.tier, tc.effort, got, tc.want)
+		}
+	}
+	a := planCreateArgs{Tasks: []planTaskArg{{Spec: "x"}}}
+	b := planCreateArgs{Tasks: []planTaskArg{{Spec: "x", Tier: "standard"}}}
+	if idemKey("plan_create", a.canonical()) != idemKey("plan_create", b.canonical()) {
+		t.Error("omitted and standard tiers hash differently")
+	}
+}
+
+type planTransport func(*http.Request) (*http.Response, error)
+
+func (f planTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestServePlanTaskTierEffort(t *testing.T) {
+	ctx := t.Context()
+	st, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	eng := engine.New(st, engine.Config{})
+	tokenPath := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokenPath, []byte(foremanTokenFile), 0600); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := api.New(ctx, st, eng, nil, tokenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Update(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO projects (repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
+			VALUES ('https://example.invalid/tier.git', 'main', '{}', 'claude', 'sonnet', ?, ?)`, seedTS, seedTS)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := api.NewClientWithHTTPClient(&http.Client{Transport: planTransport(func(r *http.Request) (*http.Response, error) {
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, r)
+		return w.Result(), nil
+	})}, "foreman-secret-9")
+	e := &env{t: t, st: st, client: client}
+	s := start(t, e)
+	for i, tasks := range [][]any{
+		{map[string]any{"name": "build", "spec": "build", "tier": "heavy", "effort": "high"}},
+		{map[string]any{"name": "build", "spec": "build", "tier": "heavy", "effort": "high"}, map[string]any{"spec": "plain"}},
+	} {
+		a := s.call(i+1, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{"title": "sized", "tasks": tasks}})
+		text, isError := toolText(t, a)
+		if isError || !strings.Contains(text, "build (heavy, effort high)") {
+			t.Fatalf("create answer = %q, error %v", text, isError)
+		}
+	}
+	var plan int64
+	if err := e.st.View(t.Context(), func(tx *sql.Tx) error { return tx.QueryRow("SELECT MIN(id) FROM plans").Scan(&plan) }); err != nil {
+		t.Fatal(err)
+	}
+	a := s.call(3, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{"plan": plan, "add": []any{map[string]any{"name": "extra", "spec": "extra", "tier": "heavy", "effort": "high"}}}})
+	text, isError := toolText(t, a)
+	if isError || !strings.Contains(text, "extra (heavy, effort high)") {
+		t.Fatalf("amend answer = %q, error %v", text, isError)
+	}
+	var tier, effective, effort string
+	if err := e.st.View(t.Context(), func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT tier,effective_tier,effort FROM tasks WHERE name = 'extra'").Scan(&tier, &effective, &effort)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if tier != "heavy" || effective != "heavy" || effort != "high" {
+		t.Errorf("stored amendment settings = %s/%s/%s", tier, effective, effort)
+	}
+	_, err = client.CreatePlan(ctx, api.PlanCreate{Title: "bad", Tasks: []api.PlanTask{{Name: "invalid", Spec: "invalid", Tier: "big"}}}, "bad-tier")
+	var statusErr *api.StatusError
+	if !errors.As(err, &statusErr) || statusErr.Status != http.StatusBadRequest || !strings.Contains(err.Error(), "light, standard, heavy") {
+		t.Fatalf("bad tier response = %v", err)
+	}
+	tasks := make([]any, 6)
+	for i := range tasks {
+		tasks[i] = map[string]any{"spec": "plain"}
+	}
+	tasks[0] = map[string]any{"name": "large", "spec": "large", "tier": "heavy", "effort": "high"}
+	a = s.call(4, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{"title": "approval", "tasks": tasks}})
+	text, isError = toolText(t, a)
+	if isError || !strings.Contains(text, "awaiting approval") || !strings.Contains(text, "large (heavy, effort high)") {
+		t.Fatalf("held plan answer = %q, error %v", text, isError)
 	}
 }

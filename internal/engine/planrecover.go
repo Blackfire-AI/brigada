@@ -240,12 +240,12 @@ func (e *Engine) applyPlanFileTx(tx *sql.Tx, project int64, repo, defaultBranch 
 			return "", "", fmt.Errorf("read task %d: %w", t.ID, err)
 		}
 		if known {
-			_, err = tx.Exec("UPDATE tasks SET name = ?, title = ?, class = ?, state = ?, branch = NULLIF(?, ''), updated_at = ? WHERE id = ?",
-				t.Name, t.Title, t.Class, state, t.Branch, fmtTime(p.Updated), t.ID)
+			_, err = tx.Exec("UPDATE tasks SET name = ?, title = ?, class = ?, state = ?, branch = NULLIF(?, ''), tier = ?, effective_tier = ?, effort = ?, updated_at = ? WHERE id = ?",
+				t.Name, t.Title, t.Class, state, t.Branch, taskTier(t.Tier), taskTier(t.Tier), t.Effort, fmtTime(p.Updated), t.ID)
 		} else {
-			_, err = tx.Exec(`INSERT INTO tasks (id, plan_id, name, title, spec, check_cmd, class, state, base_ref, branch, caps, created_at, updated_at)
-				VALUES (?, ?, ?, ?, '', NULL, ?, ?, ?, NULLIF(?, ''), '{}', ?, ?)`,
-				t.ID, p.ID, t.Name, t.Title, t.Class, state, defaultBranch, t.Branch, fmtTime(p.Created), fmtTime(p.Updated))
+			_, err = tx.Exec(`INSERT INTO tasks (id, plan_id, name, title, spec, check_cmd, class, state, base_ref, branch, caps, tier, effective_tier, effort, created_at, updated_at)
+				VALUES (?, ?, ?, ?, '', NULL, ?, ?, ?, NULLIF(?, ''), '{}', ?, ?, ?, ?, ?)`,
+				t.ID, p.ID, t.Name, t.Title, t.Class, state, defaultBranch, t.Branch, taskTier(t.Tier), taskTier(t.Tier), t.Effort, fmtTime(p.Created), fmtTime(p.Updated))
 		}
 		if err != nil {
 			return "", "", fmt.Errorf("rebuild task %d: %w", t.ID, err)

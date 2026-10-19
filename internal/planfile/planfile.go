@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
 
 // Dir is where plan files live in the repo.
@@ -44,6 +46,8 @@ type Plan struct {
 // a named task can be depended on (§6.1); ID is the store's row id, kept
 // so an unnamed task is still identifiable.
 type Task struct {
+	Tier     string // the foreman's tier; empty means standard
+	Effort   string
 	ID       int64
 	Name     string // '' = unnamed
 	Title    string
@@ -74,7 +78,12 @@ const header = `# Brigada plan file (§6.4): a mirror of the engine's store, whi
 # and the open questions — never transcripts.
 `
 
-const tasksComment = `# §6.1: the graph. A task waits (pending) until every task named in deps is
+const taskOptionsComment = "# Optional tier (light, standard, heavy) and effort (low, medium, high, max)\n# describe the model needed and how hard it should think (§6.1).\n"
+
+// Keep the default file byte-for-byte stable; describe optional keys when used.
+const tasksComment = tasksGraphComment + taskOptionsComment
+
+const tasksGraphComment = `# §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps, or from the
 # default branch when base is empty; merge a task after its base. States
 # are the engine's (§6.1), rounds the fix and review rounds
@@ -98,7 +107,14 @@ func Render(p Plan) ([]byte, error) {
 	fmt.Fprintf(&b, "state: %s\n", p.State)
 	fmt.Fprintf(&b, "created: %s\n", p.Created.UTC().Format(time.RFC3339Nano))
 	fmt.Fprintf(&b, "updated: %s\n", p.Updated.UTC().Format(time.RFC3339Nano))
-	b.WriteString(tasksComment)
+	comment := tasksGraphComment
+	for _, t := range p.Tasks {
+		if (t.Tier != "" && t.Tier != adapter.TierStandard) || t.Effort != "" {
+			comment = tasksComment
+			break
+		}
+	}
+	b.WriteString(comment)
 	if len(p.Tasks) == 0 {
 		b.WriteString("tasks: []\n")
 		return b.Bytes(), nil
@@ -118,6 +134,18 @@ func Render(p Plan) ([]byte, error) {
 		}
 		fmt.Fprintf(&b, "    deps: [%s]\n", strings.Join(deps, ", "))
 		fmt.Fprintf(&b, "    base: %s\n", strconv.Quote(t.Base))
+		if err := adapter.ValidateTier(t.Tier); err != nil {
+			return nil, fmt.Errorf("task %d: %w", t.ID, err)
+		}
+		if err := adapter.ValidateTaskEffort(t.Effort); err != nil {
+			return nil, fmt.Errorf("task %d: %w", t.ID, err)
+		}
+		if t.Tier != "" && t.Tier != adapter.TierStandard {
+			fmt.Fprintf(&b, "    tier: %s\n", t.Tier)
+		}
+		if t.Effort != "" {
+			fmt.Fprintf(&b, "    effort: %s\n", t.Effort)
+		}
 		fmt.Fprintf(&b, "    state: %s\n", t.State)
 		fmt.Fprintf(&b, "    branch: %s\n", strconv.Quote(t.Branch))
 		fmt.Fprintf(&b, "    rounds: %d\n", t.Rounds)
@@ -317,6 +345,22 @@ func (r *reader) task() (Task, error) {
 		}
 		if t.Base != "" && !slices.Contains(t.Deps, t.Base) {
 			return Task{}, r.errf("base: %q is not one of deps", t.Base)
+		}
+	}
+	if r.peekIs(in + "tier:") {
+		if t.Tier, err = r.wordField(in, "tier"); err != nil {
+			return Task{}, err
+		}
+		if err := adapter.ValidateTier(t.Tier); err != nil {
+			return Task{}, r.errf("%v", err)
+		}
+	}
+	if r.peekIs(in + "effort:") {
+		if t.Effort, err = r.wordField(in, "effort"); err != nil {
+			return Task{}, err
+		}
+		if err := adapter.ValidateTaskEffort(t.Effort); err != nil {
+			return Task{}, r.errf("%v", err)
 		}
 	}
 	if t.State, err = r.wordField(in, "state"); err != nil {

@@ -21,13 +21,15 @@ type planCreateArgs struct {
 }
 
 type planTaskArg struct {
-	Title string   `json:"title"`
-	Name  string   `json:"name"`
-	Deps  []string `json:"deps"`
-	Base  string   `json:"base,omitempty"`
-	Spec  string   `json:"spec"`
-	Check string   `json:"check"`
-	Class string   `json:"class"`
+	Tier   string   `json:"tier,omitempty"`
+	Effort string   `json:"effort,omitempty"`
+	Title  string   `json:"title"`
+	Name   string   `json:"name"`
+	Deps   []string `json:"deps"`
+	Base   string   `json:"base,omitempty"`
+	Spec   string   `json:"spec"`
+	Check  string   `json:"check"`
+	Class  string   `json:"class"`
 	// ExtraRepos (§5.8): absent inherits the project default, a list (even
 	// []) replaces it. No omitempty, so [] and absent hash differently.
 	ExtraRepos []extraRepoArg `json:"extra_repos"`
@@ -63,6 +65,9 @@ func extraRepos(in []extraRepoArg) []engine.ExtraRepo {
 // and an omitted one mint the same key.
 func (a planCreateArgs) canonical() planCreateArgs {
 	for i := range a.Tasks {
+		if a.Tasks[i].Tier == "" {
+			a.Tasks[i].Tier = "standard"
+		}
 		if a.Tasks[i].Class == "" {
 			a.Tasks[i].Class = "implement"
 		}
@@ -80,7 +85,7 @@ func callPlanCreate(ctx context.Context, c *api.Client, args json.RawMessage) (s
 	a = a.canonical()
 	p := api.PlanCreate{Title: a.Title, Tasks: make([]api.PlanTask, len(a.Tasks))}
 	for i, t := range a.Tasks {
-		p.Tasks[i] = api.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class, ExtraRepos: extraRepos(t.ExtraRepos)}
+		p.Tasks[i] = api.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ExtraRepos: extraRepos(t.ExtraRepos)}
 	}
 	res, err := c.CreatePlan(ctx, p, idemKey("plan_create", a))
 	if err != nil {
@@ -90,8 +95,22 @@ func callPlanCreate(ctx context.Context, c *api.Client, args json.RawMessage) (s
 		// Over the approval limit (§6.3): nothing queued, and only the
 		// user's `brigada plan approve` starts it — the foreman has no
 		// tool for that. Tell the user why it waits.
-		return fmt.Sprintf("plan %d %q: awaiting approval (state pending_approval), %d tasks, no work job queued. Why: %s. Tell the user: `brigada plan approve %d` starts it, `brigada plan reject %d` cancels it.",
-			res.PlanID, a.Title, len(res.Tasks), strings.Join(res.Reasons, "; "), res.PlanID, res.PlanID), nil
+		text := fmt.Sprintf("plan %d %q: awaiting approval (state pending_approval), %d tasks, no work job queued. Why: %s. Tell the user: `brigada plan approve %d` starts it, `brigada plan reject %d` cancels it.",
+			res.PlanID, a.Title, len(res.Tasks), strings.Join(res.Reasons, "; "), res.PlanID, res.PlanID)
+		for i, t := range res.Tasks {
+			if suffix := taskTierEffort(a.Tasks[i].Tier, a.Tasks[i].Effort); suffix != "" {
+				text += fmt.Sprintf("\ntask #%d %s%s", t.TaskID, t.Name, suffix)
+			}
+		}
+		return text, nil
+	}
+	if len(res.Tasks) == 1 && taskTierEffort(a.Tasks[0].Tier, a.Tasks[0].Effort) != "" {
+		t := res.Tasks[0]
+		label := fmt.Sprintf("task %d", t.TaskID)
+		if t.Name != "" {
+			label += " " + t.Name
+		}
+		return fmt.Sprintf("plan %d %q: %s%s, work job %d %s", res.PlanID, a.Title, label, taskTierEffort(a.Tasks[0].Tier, a.Tasks[0].Effort), res.JobID, res.Answer), nil
 	}
 	if len(res.Tasks) <= 1 {
 		return fmt.Sprintf("plan %d %q: task %d, work job %d %s",
@@ -99,11 +118,12 @@ func callPlanCreate(ctx context.Context, c *api.Client, args json.RawMessage) (s
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "plan %d %q: %d tasks", res.PlanID, a.Title, len(res.Tasks))
-	for _, t := range res.Tasks {
+	for i, t := range res.Tasks {
 		label := fmt.Sprintf("task %d", t.TaskID)
 		if t.Name != "" {
 			label += " " + t.Name
 		}
+		label += taskTierEffort(a.Tasks[i].Tier, a.Tasks[i].Effort)
 		if t.JobID == 0 {
 			fmt.Fprintf(&b, "\n%s: waiting on dependencies", label)
 		} else {
@@ -148,13 +168,15 @@ type planAmendArgs struct {
 }
 
 type planAddArg struct {
-	Title string    `json:"title"`
-	Name  string    `json:"name"`
-	Deps  []taskRef `json:"deps"`
-	Base  taskRef   `json:"base,omitempty"`
-	Spec  string    `json:"spec"`
-	Check string    `json:"check"`
-	Class string    `json:"class"`
+	Tier   string    `json:"tier,omitempty"`
+	Effort string    `json:"effort,omitempty"`
+	Title  string    `json:"title"`
+	Name   string    `json:"name"`
+	Deps   []taskRef `json:"deps"`
+	Base   taskRef   `json:"base,omitempty"`
+	Spec   string    `json:"spec"`
+	Check  string    `json:"check"`
+	Class  string    `json:"class"`
 	// ExtraRepos as planTaskArg's.
 	ExtraRepos []extraRepoArg `json:"extra_repos"`
 }
@@ -180,13 +202,16 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 		return "", fmt.Errorf("plan is required: the id of the plan to amend")
 	}
 	for i := range a.Add {
+		if a.Add[i].Tier == "" {
+			a.Add[i].Tier = "standard"
+		}
 		if a.Add[i].Class == "" {
 			a.Add[i].Class = "implement"
 		}
 	}
 	am := api.PlanAmend{Cancel: refStrings(a.Cancel)}
 	for _, t := range a.Add {
-		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Spec: t.Spec, Check: t.Check, Class: t.Class, ExtraRepos: extraRepos(t.ExtraRepos)})
+		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ExtraRepos: extraRepos(t.ExtraRepos)})
 	}
 	for _, rt := range a.Retarget {
 		am.Retarget = append(am.Retarget, api.PlanRetarget{Task: string(rt.Task), Deps: refStrings(rt.Deps), Base: string(rt.Base)})
@@ -204,8 +229,8 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 		}
 		return s
 	}
-	for _, t := range res.Added {
-		fmt.Fprintf(&b, "\nadded %s", label(t))
+	for i, t := range res.Added {
+		fmt.Fprintf(&b, "\nadded %s%s", label(t), taskTierEffort(a.Add[i].Tier, a.Add[i].Effort))
 	}
 	for _, id := range res.Cancelled {
 		fmt.Fprintf(&b, "\ncancelled task %d", id)
@@ -238,4 +263,19 @@ func idemKey(tool string, args any) string {
 	}
 	sum := sha256.Sum256(canonical)
 	return tool + "-" + hex.EncodeToString(sum[:])
+}
+
+// taskTierEffort describes a task when either setting differs from defaults.
+func taskTierEffort(tier, effort string) string {
+	if tier == "" {
+		tier = "standard"
+	}
+	if tier == "standard" && effort == "" {
+		return ""
+	}
+	parts := []string{tier}
+	if effort != "" {
+		parts = append(parts, "effort "+effort)
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
 }

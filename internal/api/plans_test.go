@@ -3,7 +3,10 @@ package api
 import (
 	"database/sql"
 	"net/http"
+	"strconv"
 	"testing"
+
+	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
 // TestPlanCreateEndpoint covers /v1/plans (§6.2, §12.1): the foreman
@@ -21,7 +24,7 @@ func TestPlanCreateEndpoint(t *testing.T) {
 
 	// The foreman creates in its own project, naming no repo (§12.1:
 	// a foreman token's project is the only one it may plan in).
-	body := `{"title":"the plan","tasks":[{"title":"t","spec":"the spec","check":"go test ./..."}]}`
+	body := `{"title":"the plan","tasks":[{"title":"t","spec":"the spec","check":"go test ./...","tier":"heavy","effort":"max"}]}`
 	code, _, data := e.do(http.MethodPost, "/v1/plans", "foreman1", "plan-1", []byte(body))
 	if code != http.StatusOK {
 		t.Fatalf("foreman creates a plan: %d %s", code, data)
@@ -31,6 +34,14 @@ func TestPlanCreateEndpoint(t *testing.T) {
 		t.Fatalf("plan create = %+v, want created with plan, task and job", res)
 	}
 	planInProject(t, e, res.PlanID, e.project1)
+	code, _, data = e.do(http.MethodGet, "/v1/tasks/"+strconv.FormatInt(res.TaskID, 10), "alice", "", nil)
+	if code != http.StatusOK {
+		t.Fatalf("read task: %d %s", code, data)
+	}
+	taskInfo := decode[engine.TaskInfo](t, data)
+	if taskInfo.Tier != "heavy" || taskInfo.EffectiveTier != "heavy" || taskInfo.Effort != "max" {
+		t.Errorf("round trip = %+v", taskInfo)
+	}
 
 	// A repo URL that names another project is a mismatch: 403, the
 	// foreman's scope named.
@@ -85,6 +96,8 @@ func TestPlanCreateEndpoint(t *testing.T) {
 		"a cycle":    `{"title":"x","tasks":[{"name":"a","spec":"one","deps":["b"]},{"name":"b","spec":"two","deps":["a"]}]}`,
 		"outside":    `{"title":"x","tasks":[{"name":"a","spec":"one","deps":["zzz"]}]}`,
 		"no spec":    `{"title":"x","tasks":[{"title":"t"}]}`,
+		"bad tier":   `{"title":"x","tasks":[{"spec":"s","tier":"big"}]}`,
+		"bad effort": `{"title":"x","tasks":[{"spec":"s","effort":"ultra"}]}`,
 		"bad encode": `{"title":42}`,
 	} {
 		if code, _, data = e.do(http.MethodPost, "/v1/plans", "foreman1", "", []byte(bad)); code != http.StatusBadRequest {

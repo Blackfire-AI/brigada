@@ -169,6 +169,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		return AmendPlanResult{}, err
 	}
 	for i, t := range am.Add {
+		if err := validateTaskTierEffort(t); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("added task %d %q: %w", i+1, t.Name, err)
+		}
 		if t.Spec == "" {
 			return AmendPlanResult{}, fmt.Errorf("added task %d: spec is required: the worker's task, verbatim (§1.4)", i+1)
 		}
@@ -357,9 +360,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	}
 	for k := range am.Add {
 		i := existing + k
-		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, created_at, updated_at)
-			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', NULLIF(?, ''), NULLIF(?, ''), ?, ?)`,
-			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskPending, baseRef, setupRec, nodes[i].extraRec, nowStr, nowStr)
+		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, created_at, updated_at)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?)`,
+			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskPending, baseRef, setupRec, nodes[i].extraRec, taskTier(am.Add[k].Tier), taskTier(am.Add[k].Tier), am.Add[k].Effort, nowStr, nowStr)
 		if err != nil {
 			return AmendPlanResult{}, fmt.Errorf("create the task: %w", err)
 		}

@@ -50,3 +50,28 @@ func TestValidateEffort(t *testing.T) {
 		t.Errorf("kimi refusal = %v, want it to name the harness", err)
 	}
 }
+
+func TestTaskTierAndEffortVocabulary(t *testing.T) {
+	for _, tier := range append([]string{""}, Tiers...) {
+		if err := ValidateTier(tier); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, effort := range append([]string{""}, TaskEffortLevels...) {
+		if err := ValidateTaskEffort(effort); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ValidateTier("big"); err == nil || !strings.Contains(err.Error(), "light, standard, heavy") {
+		t.Fatalf("bad tier: %v", err)
+	}
+	for _, effort := range []string{"ultra", "xhigh", "minimal", "none"} {
+		if err := ValidateTaskEffort(effort); err == nil || !strings.Contains(err.Error(), "low, medium, high, max") {
+			t.Fatalf("bad task effort %s: %v", effort, err)
+		}
+	}
+	// Harness-only levels remain available on agents.
+	if err := ValidateEffort("codex", "ultra"); err != nil {
+		t.Fatal(err)
+	}
+}

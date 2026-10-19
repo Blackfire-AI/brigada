@@ -58,3 +58,41 @@ func ValidateEffort(harness, level string) error {
 	}
 	return fmt.Errorf("effort %q is not supported for harness %q; want one of %s", level, harness, strings.Join(levels, ", "))
 }
+
+// Task tiers describe how heavy a model a task needs.
+const (
+	TierLight    = "light"
+	TierStandard = "standard"
+	TierHeavy    = "heavy"
+)
+
+var Tiers = []string{TierLight, TierStandard, TierHeavy}
+
+// TaskEffortLevels is brigada's task vocabulary, independent of harness levels.
+var TaskEffortLevels = []string{"low", "medium", "high", "max"}
+
+// ValidateTier accepts an unset tier, which means standard.
+func ValidateTier(tier string) error {
+	if tier == "" {
+		return nil
+	}
+	for _, word := range Tiers {
+		if tier == word {
+			return nil
+		}
+	}
+	return fmt.Errorf("tier %q is invalid; want one of %s", tier, strings.Join(Tiers, ", "))
+}
+
+// ValidateTaskEffort accepts an unset effort, which uses the agent's level.
+func ValidateTaskEffort(level string) error {
+	if level == "" {
+		return nil
+	}
+	for _, word := range TaskEffortLevels {
+		if level == word {
+			return nil
+		}
+	}
+	return fmt.Errorf("task effort %q is invalid; want one of %s", level, strings.Join(TaskEffortLevels, ", "))
+}

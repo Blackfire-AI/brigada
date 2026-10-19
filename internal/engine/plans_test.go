@@ -98,6 +98,11 @@ func TestCreatePlanTaskDefaults(t *testing.T) {
 	if got := e.str("SELECT title FROM tasks WHERE id = ?", res.TaskID); got != "fix the frobnicator" {
 		t.Errorf("task title = %q, want the spec's first non-empty line", got)
 	}
+	for col, want := range map[string]string{"tier": "standard", "effective_tier": "standard", "effort": ""} {
+		if got := e.str("SELECT "+col+" FROM tasks WHERE id = ?", res.TaskID); got != want {
+			t.Errorf("%s = %q, want %q", col, got, want)
+		}
+	}
 	if class := e.str("SELECT class FROM tasks WHERE id = ?", res.TaskID); class != "review" {
 		t.Errorf("task class = %q, want review", class)
 	}
@@ -463,5 +468,49 @@ func TestCreatePlanValidates(t *testing.T) {
 	}
 	if got := e.int("SELECT COUNT(*) FROM plans"); got != 1 {
 		t.Errorf("plans after the refusals = %d, want the seeded 1", got)
+	}
+}
+
+func TestCreatePlanTaskTierEffort(t *testing.T) {
+	e := newEnv(t)
+	res, err := e.eng.CreatePlan(e.ctx, e.project, "sized plan", []PlanTask{{Name: "build", Spec: "build", Tier: "heavy", Effort: "max"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.State != "active" {
+		t.Fatalf("tier/effort triggered approval: %+v", res)
+	}
+	for col, want := range map[string]string{"tier": "heavy", "effective_tier": "heavy", "effort": "max"} {
+		if got := e.str("SELECT "+col+" FROM tasks WHERE id = ?", res.TaskID); got != want {
+			t.Errorf("%s = %q, want %q", col, got, want)
+		}
+	}
+	info, err := e.eng.Task(e.ctx, res.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Tier != "heavy" || info.EffectiveTier != "heavy" || info.Effort != "max" {
+		t.Errorf("task view = %+v", info)
+	}
+}
+
+func TestCreatePlanValidatesTaskTierEffort(t *testing.T) {
+	for _, tc := range []struct {
+		task  PlanTask
+		words string
+	}{
+		{PlanTask{Name: "bad-tier", Spec: "x", Tier: "big"}, "light, standard, heavy"},
+		{PlanTask{Name: "bad-effort", Spec: "x", Effort: "ultra"}, "low, medium, high, max"},
+	} {
+		t.Run(tc.task.Name, func(t *testing.T) {
+			e := newEnv(t)
+			_, err := e.eng.CreatePlan(e.ctx, e.project, "invalid", []PlanTask{{Spec: "valid"}, tc.task})
+			if err == nil || !strings.Contains(err.Error(), tc.task.Name) || !strings.Contains(err.Error(), tc.words) {
+				t.Fatalf("refusal = %v", err)
+			}
+			if e.int("SELECT COUNT(*) FROM tasks") != 1 || e.int("SELECT COUNT(*) FROM plans") != 1 || e.int("SELECT COUNT(*) FROM jobs") != 0 {
+				t.Fatal("invalid plan was partially inserted")
+			}
+		})
 	}
 }

@@ -1006,3 +1006,48 @@ func TestSchemaEditsMatchTheirMigrations(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskTierEffortMigrationKeepsTheRows(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := 0
+	for _, m := range migs {
+		if m.name == "task_tier_effort" {
+			before = m.version - 1
+			if m.version != 41 {
+				t.Fatalf("task_tier_effort migration = %d, want 41", m.version)
+			}
+			break
+		}
+	}
+	if before == 0 {
+		t.Fatal("0041_task_tier_effort missing from allMigrations")
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, m := range migs[:before] {
+		exec(t, db, m.sql)
+	}
+	exec(t, db, "PRAGMA user_version = "+strconv.Itoa(before))
+	project := insertProject(t, db)
+	plan := insertPlan(t, db, project)
+	task := insertTask(t, db, plan)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := openStore(t, path)
+	for col, want := range map[string]string{"tier": "standard", "effective_tier": "standard", "effort": ""} {
+		if got := queryString(t, s.db, "SELECT "+col+" FROM tasks WHERE id = ?", task); got != want {
+			t.Errorf("%s = %q, want %q", col, got, want)
+		}
+	}
+	if got := queryString(t, s.db, "SELECT title FROM tasks WHERE id = ?", task); got != "a task" {
+		t.Errorf("existing task changed: %q", got)
+	}
+}

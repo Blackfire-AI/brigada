@@ -121,7 +121,7 @@ func TestRecoverRebuildsPlanNewerThanSnapshotAndKeepsOlder(t *testing.T) {
 		ID: 40, Title: "the lost plan", State: "active",
 		Created: stored.Add(time.Hour), Updated: stored.Add(2 * time.Hour),
 		Tasks: []planfile.Task{
-			{ID: 401, Name: "api", Title: "build the api", Class: "implement", State: "done", Branch: "brigada/task-401", Rounds: 1},
+			{ID: 401, Tier: "heavy", Effort: "high", Name: "api", Title: "build the api", Class: "implement", State: "done", Branch: "brigada/task-401", Rounds: 1},
 			{ID: 402, Name: "ui", Title: "build the ui", Class: "implement", Deps: []string{"api"}, State: "needs_foreman", Question: "which palette?"},
 			{ID: 403, Title: "midflight", Class: "implement", State: "running"},
 		},
@@ -143,6 +143,11 @@ func TestRecoverRebuildsPlanNewerThanSnapshotAndKeepsOlder(t *testing.T) {
 
 	if got := r.str("SELECT title FROM plans WHERE id = ?", r.plan); got != "a plan" {
 		t.Errorf("the older file overwrote the store's plan: title %q", got)
+	}
+	for id, want := range map[int]string{401: "heavy|heavy|high", 402: "standard|standard|"} {
+		if got := r.str("SELECT tier || '|' || effective_tier || '|' || effort FROM tasks WHERE id = ?", id); got != want {
+			t.Errorf("recovered task %d settings = %q, want %q", id, got, want)
+		}
 	}
 	if got := r.str("SELECT state FROM plans WHERE id = 40"); got != "active" {
 		t.Errorf("rebuilt plan state = %q", got)
@@ -185,7 +190,7 @@ func TestRecoverUpdatesPlanWhoseFileIsNewer(t *testing.T) {
 	r.pushFile(planfile.Plan{
 		ID: r.plan, Title: "a plan", State: "done",
 		Created: stored, Updated: stored.Add(time.Hour),
-		Tasks: []planfile.Task{{ID: r.task, Title: "the task", Class: "implement", State: "done", Branch: "brigada/t"}},
+		Tasks: []planfile.Task{{ID: r.task, Tier: "light", Effort: "medium", Title: "the task", Class: "implement", State: "done", Branch: "brigada/t"}},
 	})
 	res := r.recoverPlans()
 	if len(res) != 1 || res[0].Action != PlanUpdated {
@@ -196,6 +201,9 @@ func TestRecoverUpdatesPlanWhoseFileIsNewer(t *testing.T) {
 	}
 	if got := r.str("SELECT state || '|' || branch FROM tasks WHERE id = ?", r.task); got != "done|brigada/t" {
 		t.Errorf("task = %q", got)
+	}
+	if got := r.str("SELECT tier || '|' || effective_tier || '|' || effort FROM tasks WHERE id = ?", r.task); got != "light|light|medium" {
+		t.Errorf("updated task settings = %q", got)
 	}
 	// The task's spec, which a file never carries, is untouched.
 	if got := r.str("SELECT spec FROM tasks WHERE id = ?", r.task); got != "the spec" {

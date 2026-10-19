@@ -72,6 +72,26 @@ func StatusSections(st Status) string {
 				if t.Branch != "" {
 					line += " [" + t.Branch + "]"
 				}
+				tier := t.Tier
+				if tier == "" {
+					tier = "standard"
+				}
+				effective := t.EffectiveTier
+				if effective == "" {
+					effective = tier
+				}
+				var detail []string
+				if effective != tier {
+					detail = append(detail, tier+"->"+effective)
+				} else if tier != "standard" {
+					detail = append(detail, tier)
+				}
+				if t.Effort != "" {
+					detail = append(detail, "@"+t.Effort)
+				}
+				if len(detail) > 0 {
+					line += "  " + strings.Join(detail, " ")
+				}
 				lines = append(lines, line)
 			}
 		}

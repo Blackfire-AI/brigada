@@ -311,3 +311,34 @@ func TestMirrorIsOffByDefault(t *testing.T) {
 		t.Error("marks cleared with the mirror off")
 	}
 }
+
+func TestPlanFileMirrorsForemanTierAndEffort(t *testing.T) {
+	m := newMirrorEnv(t)
+	res, err := m.eng.CreatePlan(m.ctx, m.project, "sized", []PlanTask{
+		{Name: "build", Spec: "build", Tier: "heavy", Effort: "high"},
+		{Name: "plain", Spec: "plain"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := m.mustFile("brigada/plans", res.PlanID)
+	if task := taskByName(t, p, "build"); task.Tier != "heavy" || task.Effort != "high" {
+		t.Errorf("mirrored settings = %+v", task)
+	}
+	if task := taskByName(t, p, "plain"); task.Tier != "" || task.Effort != "" {
+		t.Errorf("default settings should be omitted: %+v", task)
+	}
+	out, err := exec.Command("git", "-C", m.remote, "show", "brigada/plans:"+planfile.Path(res.PlanID)).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(out), "    tier:") != 1 || !strings.Contains(string(out), "    tier: heavy\n    effort: high\n") {
+		t.Errorf("tier/effort lines:\n%s", out)
+	}
+	// Escalation belongs to the store, not the foreman's plan file.
+	m.exec("UPDATE tasks SET tier = 'light', effective_tier = 'heavy' WHERE id = ?", res.Tasks[0].TaskID)
+	m.eng.SyncPlanFiles()
+	if task := taskByName(t, m.mustFile("brigada/plans", res.PlanID), "build"); task.Tier != "light" || task.Effort != "high" {
+		t.Errorf("foreman tier lost: %+v", task)
+	}
+}
