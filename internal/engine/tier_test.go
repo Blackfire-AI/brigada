@@ -145,21 +145,52 @@ func TestTierWaitsAtCapRoom(t *testing.T) {
 	}
 }
 
-func TestExplorationStaysInTier(t *testing.T) {
-	e := newEnvCfg(t, exploreCfg(0.1, 0.05))
+func TestSamplingStaysInTier(t *testing.T) {
+	e := newEnv(t)
 	sonnet := e.addAgent(e.runner1, "claude", "sonnet", "standard")
 	gpt := e.addAgent(e.runner1, "codex", "gpt-5", "standard")
 	opus := e.addAgent(e.runner1, "claude", "opus", "heavy")
 	e.record(opus, 8, 8)
-	e.record(sonnet, 4, 3)
+	e.record(sonnet, 4, 1)
+	e.record(gpt, 4, 4)
 	job := e.tierWork("standard")
 	if g := e.leaseAny(e.runner1); g == nil || g.JobID != job.JobID {
 		t.Fatalf("lease = %+v, want job %d", g, job.JobID)
 	}
 	e.assertTierPick(job.JobID, gpt, "standard", "standard")
-	if ev := e.pickEvents(job.JobID)[0]; ev.Pick != pickExploration {
-		t.Errorf("pick = %s, want exploration", ev.Pick)
+	if ev := e.pickEvents(job.JobID)[0]; ev.Pick != pickSampled || len(ev.Candidates) != 2 {
+		t.Errorf("pick event = %+v, want a sampled pick over the two standard agents", ev)
 	}
+}
+
+// A tier whose agents are all capped at exactly 0 serves like a tier with no
+// ready agent: the task climbs. A cap that is merely full still waits.
+func TestTierFallsBackFromZeroCap(t *testing.T) {
+	for name, adjust := range map[string]func(*Config){
+		"account": func(c *Config) { c.Caps.Account = map[string]int{"standard": 0} },
+		"model":   func(c *Config) { c.Caps.Model = map[string]int{"sonnet": 0} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnvCfg(t, adjust)
+			e.addAgent(e.runner1, "claude", "sonnet", "standard")
+			opus := e.addAgent(e.runner1, "claude", "opus", "heavy")
+			job := e.tierWork("standard")
+			if g := e.leaseAny(e.runner1); g == nil || g.JobID != job.JobID {
+				t.Fatalf("lease = %+v, want job %d", g, job.JobID)
+			}
+			e.assertTierPick(job.JobID, opus, "standard", "heavy")
+		})
+	}
+	t.Run("a zero cap on every tier waits", func(t *testing.T) {
+		e := newEnvCfg(t, func(c *Config) { c.Caps.Account = map[string]int{"standard": 0, "heavy": 0} })
+		e.addAgent(e.runner1, "claude", "sonnet", "standard")
+		e.addAgent(e.runner1, "claude", "opus", "heavy")
+		job := e.tierWork("standard")
+		if g := e.leaseAny(e.runner1); g != nil {
+			t.Fatalf("leased %+v with every account capped at 0", g)
+		}
+		e.assertHeld(job.JobID, "account")
+	})
 }
 
 func TestFixRoundPinIgnoresTier(t *testing.T) {

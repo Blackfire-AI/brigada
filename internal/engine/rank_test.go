@@ -6,14 +6,6 @@ import (
 	"time"
 )
 
-// exploreCfg pins the exploration share and its roll (§8).
-func exploreCfg(share, roll float64) func(*Config) {
-	return func(c *Config) {
-		c.ExploreShare = &share
-		c.Rand = func() float64 { return roll }
-	}
-}
-
 // leaseNew submits a fresh work job on a new task and leases it to the
 // runner, returning the grant.
 func (e *env) leaseNew(runner int64) *LeaseGrant {
@@ -65,8 +57,12 @@ func TestLeaseRanksByScore(t *testing.T) {
 	if len(evs) != 1 {
 		t.Fatalf("pick events = %v, want one", evs)
 	}
-	if ev := evs[0]; ev.Agent != a2 || ev.Pick != pickBest || ev.Score != Score(4, 4) || len(ev.PassedOver) != 0 {
-		t.Errorf("pick event = %+v, want best agent %d at score %v", ev, a2, Score(4, 4))
+	ev := evs[0]
+	if ev.Agent != a2 || ev.Pick != pickSampled || ev.Score != Score(4, 4) || len(ev.PassedOver) != 0 {
+		t.Errorf("pick event = %+v, want sampled agent %d at score %v", ev, a2, Score(4, 4))
+	}
+	if ev.Weight == nil || *ev.Weight != 1 || ev.Draw <= 0 || len(ev.Candidates) != 2 || ev.Candidates[0].Agent != a2 {
+		t.Errorf("pick event = %+v, want weight 1, a draw and both candidates, %d first", ev, a2)
 	}
 }
 
@@ -84,40 +80,57 @@ func TestLeaseColdStartKeepsIDOrder(t *testing.T) {
 	}
 }
 
-func TestLeaseExplorationPinned(t *testing.T) {
-	t.Run("share 0 always takes the best", func(t *testing.T) {
-		e := newEnvCfg(t, exploreCfg(0, 0))
-		a1 := e.addAgent(e.runner1, "claude", "sonnet", "work")
-		e.addAgent(e.runner1, "kimi", "k2", "home")
-		g := e.leaseNew(e.runner1)
-		if got := e.jobAgent(g.JobID); got != a1 {
-			t.Errorf("picked agent %d, want the best %d", got, a1)
-		}
+// Equal records, so the cost weight alone orders the two: the cheaper
+// agent goes first even though the dearer one has the lower id (§8).
+func TestLeaseRanksByCostWeight(t *testing.T) {
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Cost = map[string]int{"claude/sonnet": 5, "kimi/k2": 1}
 	})
-	t.Run("share 1 takes the next-best", func(t *testing.T) {
-		e := newEnvCfg(t, exploreCfg(1, 0.999))
-		e.addAgent(e.runner1, "claude", "sonnet", "work")
-		a2 := e.addAgent(e.runner1, "kimi", "k2", "home")
-		g := e.leaseNew(e.runner1)
-		if got := e.jobAgent(g.JobID); got != a2 {
-			t.Errorf("picked agent %d, want the next-best %d", got, a2)
-		}
-		evs := e.pickEvents(g.JobID)
-		if len(evs) != 1 || evs[0].Pick != pickExploration || evs[0].Agent != a2 {
-			t.Errorf("pick events = %+v, want an exploration pick of %d", evs, a2)
-		}
+	e.addAgent(e.runner1, "claude", "sonnet", "work")
+	a2 := e.addAgent(e.runner1, "kimi", "k2", "home")
+	g := e.leaseNew(e.runner1)
+	if got := e.jobAgent(g.JobID); got != a2 {
+		t.Errorf("picked agent %d, want the cheaper %d", got, a2)
+	}
+	evs := e.pickEvents(g.JobID)
+	if len(evs) != 1 || evs[0].Weight == nil || *evs[0].Weight != 1 || len(evs[0].Candidates) != 2 || evs[0].Candidates[1].Weight != 5 {
+		t.Errorf("pick events = %+v, want weight 1 chosen over a candidate of weight 5", evs)
+	}
+}
+
+// A weight of 0 ranks before every positive weight, whatever the records.
+func TestLeaseZeroWeightFirst(t *testing.T) {
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Cost = map[string]int{"kimi/k2": 0}
 	})
-	t.Run("share 1 with no next-best takes the best", func(t *testing.T) {
-		e := newEnvCfg(t, exploreCfg(1, 0))
-		a1 := e.addAgent(e.runner1, "claude", "sonnet", "work")
-		g := e.leaseNew(e.runner1)
-		if got := e.jobAgent(g.JobID); got != a1 {
-			t.Errorf("picked agent %d, want the only agent %d", got, a1)
-		}
-		if evs := e.pickEvents(g.JobID); len(evs) != 1 || evs[0].Pick != pickBest {
-			t.Errorf("pick events = %+v, want a best pick", evs)
-		}
+	e.addAgent(e.runner1, "claude", "sonnet", "work")
+	a2 := e.addAgent(e.runner1, "kimi", "k2", "home")
+	e.record(a2, 8, 0)
+	g := e.leaseNew(e.runner1)
+	if got := e.jobAgent(g.JobID); got != a2 {
+		t.Errorf("picked agent %d, want the free %d", got, a2)
+	}
+}
+
+// The cap walk still passes a full agent over for the next one in the
+// sampled order, and names it.
+func TestLeaseWalkSkipsFullAgentInSampledOrder(t *testing.T) {
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Account = map[string]int{"home": 1}
+		c.Caps.Cost = map[string]int{"kimi/k2": 0}
 	})
+	a1 := e.addAgent(e.runner1, "claude", "sonnet", "work")
+	a2 := e.addAgent(e.runner1, "kimi", "k2", "home")
+	if got := e.jobAgent(e.leaseNew(e.runner1).JobID); got != a2 {
+		t.Fatalf("first pick = %d, want the free agent %d", got, a2)
+	}
+	second := e.leaseNew(e.runner1)
+	if got := e.jobAgent(second.JobID); got != a1 {
+		t.Errorf("second pick = %d, want %d with the free agent's account full", got, a1)
+	}
+	if evs := e.pickEvents(second.JobID); len(evs) != 1 || !slices.Equal(evs[0].PassedOver, []int64{a2}) {
+		t.Errorf("pick events = %+v, want %d passed over", evs, a2)
+	}
 }
 
 func TestLeaseSkipsIneligibleAgents(t *testing.T) {
@@ -156,7 +169,8 @@ func TestLeaseSkipsIneligibleAgents(t *testing.T) {
 }
 
 func TestLeaseRequireAgentIgnoresRanking(t *testing.T) {
-	e := newEnv(t)
+	draws := 0
+	e := newEnvCfg(t, func(c *Config) { c.Rand = func() float64 { draws++; return 0.5 } })
 	a1 := e.addAgent(e.runner1, "claude", "sonnet", "work")
 	a2 := e.addAgent(e.runner1, "claude", "opus", "work")
 	e.record(a1, 4, 0)
@@ -173,6 +187,13 @@ func TestLeaseRequireAgentIgnoresRanking(t *testing.T) {
 	}
 	if got := e.jobAgent(g.JobID); got != a1 {
 		t.Errorf("picked agent %d, want the required %d", got, a1)
+	}
+	if draws != 0 {
+		t.Errorf("a pinned lease consumed %d random draws, want none", draws)
+	}
+	evs := e.pickEvents(g.JobID)
+	if len(evs) != 1 || evs[0].Pick != pickPinned || evs[0].Agent != a1 || evs[0].Draw != 0 || len(evs[0].Candidates) != 0 || len(evs[0].PassedOver) != 0 {
+		t.Errorf("pick events = %+v, want one pinned pick of %d with no draw or candidates", evs, a1)
 	}
 }
 

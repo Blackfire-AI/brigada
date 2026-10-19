@@ -22,7 +22,7 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 1. **Understands** your ask in conversation and asks back when it's unclear.
 2. **Plans:** splits the ask into a **task graph** (decided 2026-10-12: tasks with dependencies at launch). Each task has a spec, a **check** command, a class (implement, review, answer, …), its dependencies and (proposal, 2026-10-19) a **tier**, how heavy a model it needs, and an **effort**, how hard that model should think. The plan is also written into the repo as a file, so it survives the loss of the engine store and can be read and reviewed like code (decided 2026-10-12; details in [design.md](design.md) §6.4).
 3. **Confirms** the plan with you **only above a size or risk limit** you set (decided 2026-10-12); smaller plans start on their own.
-4. **Dispatches** each task to the best eligible agent: the best measured record for that class on this repo, among agents with quota left and healthy. With no record yet (a new user or repo) it starts from sensible defaults and keeps a small exploration share, and `stats` shows how confident each number is. Proposal (2026-10-19): the foreman says per task how heavy a model it needs (light, standard or heavy) and how hard it should think; the engine picks the best-recorded model of that tier among the CLIs you allowed, explores only within the tier, and climbs a tier when the work fails ([design.md](design.md) §6.1, §8).
+4. **Dispatches** each task to an eligible agent chosen by sampling: each agent's measured record for that class on this repo, weighed against its configured cost, among agents with quota left and healthy. With no record yet (a new user or repo) the draws are wide, so every agent gets tried, and `stats` shows how confident each number is. Proposal (2026-10-19): the foreman says per task how heavy a model it needs (light, standard or heavy) and how hard it should think; the engine samples a model of that tier among the CLIs you allowed, by record and cost, never leaving the tier by choice, and climbs a tier when the work fails ([design.md](design.md) §6.1, §8).
 5. **Runs** the agent's official CLI headless in its own git worktree, signed in with your account.
 6. **Checks** the work by running the task's check, never trusting "done".
 7. **Reviews** every change with a model from a different family. Fix rounds are capped.
@@ -122,7 +122,7 @@ Not at launch (backlog):
 |---|---|
 | The foreman splits work badly | approval above a size or risk limit; the planner's own outcomes are recorded; re-planning when a task fails |
 | The foreman's subscription hits its limit | you're notified and decide (wait, switch harness or model, or continue without it); plain commands and approved plans work without it |
-| No outcome data on a fresh install | defaults plus exploration, confidence shown in `stats`; standalone `review` seeds the record |
+| No outcome data on a fresh install | defaults plus wide draws from a thin record, confidence shown in `stats`; standalone `review` seeds the record |
 | Scope: foreman plus engine plus adapters | phase it: one task end to end first, then plans with dependencies, then failure handling and re-planning |
 | Vendor terms on headless subscription use change | official CLIs, own accounts; an API-key fallback |
 | Untrusted repo content runs with your logins | document it; containers later |

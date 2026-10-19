@@ -26,7 +26,7 @@ const (
 	evJobCapped              = "job_capped"                // submit: the task's round cap is spent
 	evJobLeased              = "job_leased"                // a runner took the job
 	evJobCapHeld             = "job_cap_held"              // a lease poll skipped the job: a cap layer has no room (§8.1)
-	evJobAgentPicked         = "job_agent_picked"          // why a task job's lease took its agent: score, best or exploration, passed over for cap room (§8)
+	evJobAgentPicked         = "job_agent_picked"          // why a task job's lease took its agent: score, weight and draws of the sampled ranking, passed over for cap room (§8)
 	evLeaseRevived           = "lease_revived"             // a heartbeat revived a lapsed lease
 	evJobReleased            = "job_released"              // the holder gave the job back
 	evJobCompleted           = "job_completed"             // done, failed, stalled, time_cap, check_failed…
@@ -118,7 +118,8 @@ type eventPayload struct {
 	Path       string `json:"path,omitempty"`    // a snapshot's file (§6.4)
 	Bytes      int64  `json:"bytes,omitempty"`   // a snapshot's size (§6.4)
 	// The agent pick's why (§8): the agent, its score, how the rank
-	// chose it (pickBest or pickExploration), and the better-ranked
+	// chose it (pickSampled), its cost weight and draw, every ranked
+	// candidate's weight and draw in rank order, and the better-ranked
 	// agents passed over because their cap path had no room.
 	// The approval limit's why (§6.3): the plan, and the classes and
 	// protected paths that put it over (Count holds the task count,
@@ -133,6 +134,17 @@ type eventPayload struct {
 	TierServed string   `json:"tier_served,omitempty"`
 	Retiered   []int64  `json:"retiered,omitempty"` // tasks whose tier or effort plan_amend changed
 	PassedOver []int64  `json:"passed_over,omitempty"`
+	Weight     *int     `json:"weight,omitempty"`
+	Draw       float64  `json:"draw,omitempty"`
+	Candidates []Ranked `json:"candidates,omitempty"`
+}
+
+// Ranked is one candidate of an agent pick (§8): its cost weight and the
+// success-rate draw the ranking sorted it by.
+type Ranked struct {
+	Agent  int64   `json:"agent"`
+	Weight int     `json:"weight"`
+	Draw   float64 `json:"draw"`
 }
 
 // appendEventTx adds one row to the event log inside the caller's

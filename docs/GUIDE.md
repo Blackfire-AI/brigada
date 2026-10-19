@@ -550,7 +550,7 @@ Each task also has two fields, set by the foreman in `plan_create` or `plan_amen
 | Field | Values | Default | Meaning |
 |---|---|---|---|
 | `tier` | `light`, `standard`, `heavy` | `standard` | How heavy a model the task needs; the dispatcher selects an agent of that tier, with fallback when needed ([section 8](#tiers)). |
-| `effort` | `low`, `medium`, `high`, `max` | the agent's effort, else the CLI default | How hard the model should think on this task, mapped to the chosen harness ([section 8](#effort)). |
+| `effort` | `low`, `medium`, `high`, `max` | the agent's effort, else `medium` | How hard the model should think on this task, mapped to the chosen harness ([section 8](#effort)). |
 
 Neither field triggers approval. The plan shown for approval includes tier and effort, and `brigada status` shows them beside tasks: `heavy @high`, for example. An unchanged standard tier is omitted; `standard->heavy` shows an automatic bump from the foreman's tier to the effective tier.
 
@@ -693,7 +693,7 @@ Letting Kimi write code is an opt-in. Init warns that Kimi has no sandbox: when 
 
 ### Tiers
 
-The dispatcher picks the best-recorded eligible agent in the task's effective tier, among the polling runner's agents with room under the caps. Exploration stays within that served tier. A tier whose eligible agents are cap-blocked or cooling waits for room or the reset time; it does not fall back just because another tier is free.
+The dispatcher picks among the eligible agents in the task's effective tier, among the polling runner's agents with room under the caps. Each agent draws a plausible success rate p from its record on this repo for the task's class (a thin record draws widely, so a newer agent still gets tried), and the agents rank by `weight / p`, lowest first, where weight is the agent's `cost.<harness>/<model>` ([section 13](#13-configuration-reference)). The first agent in that order with room under the caps takes the job. A weight of 0 ranks before every paid agent. The pick is random, so two jobs in a row can go to different agents; the decision record (`why this agent`) shows each candidate's weight and draw. Sampling stays within the served tier. A tier whose eligible agents are cap-blocked or cooling waits for room or the reset time; it does not fall back just because another tier is free. An agent whose model cap or account cap is exactly 0 can never run, so it does not count: a tier whose agents are all capped at 0 falls back like a tier with no agent. A cap that is merely full still waits.
 
 If no qualifying agent is registered in the tier, or all are broken, brigada tries higher tiers in order. If none can serve it, it steps down from heavy toward light. Selection considers agents across runners, and the decision records both the tier asked for and the tier served. If no tier can serve the task, it parks for the foreman after the queue timeout, with the reason in status and a notification when enabled. Fix rounds stay pinned to the author's session and agent.
 
@@ -721,7 +721,7 @@ A task's `effort` uses brigada's four levels and is mapped for each job:
 | `high` | `high` | `high` | `high` | none |
 | `max` | `max` | `max` | `max` | none |
 
-A nonempty mapped task level overrides the agent's effort. When mapping yields no level (including OpenCode `medium`), the agent's effort still applies, else the CLI default; Kimi has no effort control. Each job record stores the resolved level. `brigada logs` renders the CLI transcript and `brigada history` renders events and messages; neither adds a field for that stored effort level.
+A nonempty mapped task level overrides the agent's effort. When mapping yields no level (including OpenCode `medium`), the agent's effort still applies; Kimi has no effort control. A task with no effort of its own and an agent with no `effort=` runs at `medium`, resolved in the four levels above before the mapping, so Claude and Codex get `medium`, and OpenCode and Kimi get nothing and use the CLI default. Each job record stores the resolved level. `brigada logs` renders the CLI transcript and `brigada history` renders events and messages; neither adds a field for that stored effort level.
 
 Effort is not part of an agent's identity: the dispatcher, `agent reset` and the outcome record still key by `harness/model`. `status` and `stats` print `claude/opus@high` only for an agent that has an effort set. The foreman's effort is chosen separately ([section 11](#11-the-foremans-harness-claude-or-codex)).
 
@@ -778,7 +778,7 @@ Caps bound how many jobs run at once, in layers: this runner, the account, the m
 
 A foreman turn is never held back by the plan or model caps, and goes ahead of queued task jobs. While it runs it still counts as use of its account, runner, global and model caps, so it can leave a worker on the same model waiting.
 
-The foreman can look at the capacity it has when it plans (per agent: the tier, the cap, the running jobs, the quota state and the cost weight), but the engine enforces the caps whatever the foreman believes. `cost.<harness>/<model>` is a relative weight, default 1, that the foreman sees when it decides which tasks can wait for a cheaper agent.
+The foreman can look at the capacity it has when it plans (per agent: the tier, the cap, the running jobs, the quota state and the cost weight), but the engine enforces the caps whatever the foreman believes. `cost.<harness>/<model>` is a relative weight, default 1, that the foreman sees when it decides which tasks can wait for a cheaper agent. It also steers dispatch: agents of a tier rank by `weight / p` ([section 8](#tiers)), so a dearer agent is picked less often unless its record is clearly better.
 
 ### Headroom
 
@@ -952,7 +952,7 @@ The config file is optional. Its format:
 | `caps.runner` | integer, 0 or more | no cap | Most parallel jobs per runner. A runner's own `--max-parallel` also applies, and the smaller wins. |
 | `caps.account.<label>` | integer, 0 or more | no cap | Most parallel jobs on one account label ([section 8](#capacity)). |
 | `caps.model.<model>` | integer, 0 or more | no cap | Most parallel jobs on one model. |
-| `cost.<harness>/<model>` | integer, 0 or more | `1` | Relative cost weight of an agent, shown to the foreman. |
+| `cost.<harness>/<model>` | integer, 0 or more | `1` | Relative cost weight of an agent, shown to the foreman. Dispatch ranks the agents of a tier by weight / p, p being a draw from the agent's success record, so a higher weight is picked less often. `0` means free: ranked before every agent with a positive weight. |
 | `tier.<harness>/<model>` | `light`, `standard` or `heavy` | from the model name | Override the tier for every agent of this harness/model, shown in stats and capacity. |
 | `tools.claude/<model>` | `+`-separated Claude Code tool patterns, or `none` | the Go scope | Default shell scope of the claude worker agent on that model; `--agent ...,tools=` overrides it ([section 8](#worker-tools-claude)). Other harnesses are refused. |
 

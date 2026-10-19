@@ -267,7 +267,7 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (SweepR
 				if err != nil {
 					return rep, err
 				}
-				agents, err := eligibleAgentsTx(tx, e.cfg.Caps, 0, j, kindClass(j.Kind), nowStr)
+				agents, err := eligibleAgentsTx(tx, e.cfg.Caps, nil, 0, j, kindClass(j.Kind), nowStr)
 				if err != nil {
 					return rep, err
 				}
