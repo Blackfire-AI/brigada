@@ -1,0 +1,56 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 2
+title: "#26 Mode A: the session in the repo is the foreman after brigada init"
+repo: "github.com/Blackfire-AI/brigada"
+state: active
+created: 2026-10-19T15:23:19.367636Z
+updated: 2026-10-19T15:23:19.367636Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps, or from the
+# default branch when base is empty; merge a task after its base. States
+# are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1).
+tasks:
+  - id: 5
+    name: "router"
+    title: "Router block in AGENTS.md, rules in .brigada/foreman.md, retire the skill (#26 items 1, 2, 4)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 6
+    name: "codex"
+    title: "Codex parity: foreman bridge in Codex project config (#26 item 3)"
+    class: "implement"
+    deps: ["router"]
+    base: "router"
+    tier: heavy
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 7
+    name: "docs"
+    title: "Docs for mode A wiring (#26 item 5)"
+    class: "implement"
+    deps: ["codex"]
+    base: "codex"
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 8
+    name: "release-check"
+    title: "Scripted release check for mode A (#26 tests)"
+    class: "implement"
+    deps: ["codex"]
+    base: "codex"
+    state: pending
+    branch: ""
+    rounds: 0
