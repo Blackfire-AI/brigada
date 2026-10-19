@@ -191,6 +191,56 @@ func TestEnsurePushedCommitsLeftovers(t *testing.T) {
 	}
 }
 
+// A different runner may have already pushed the work and more. Only
+// work missing from that remote belongs on a salvage branch, even when
+// the checkout and the task's remote branch have diverged.
+func TestSalvageComparesAgainstRemote(t *testing.T) {
+	ctx := context.Background()
+	remote := newRemote(t)
+	ws, err := prepareWorkspace(ctx, &Config{StateDir: t.TempDir()}, &api.JobGrant{
+		JobID: 23, TaskID: 5, Attempt: 1, RepoURL: remote, BaseRef: "main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.remove(ctx)
+	git(t, ws.dir, "commit", "--allow-empty", "-m", "already saved")
+	if err := ws.ensurePushed(ctx); err != nil {
+		t.Fatal(err)
+	}
+	other := t.TempDir()
+	git(t, "", "clone", "-q", "--branch", ws.branch, remote, other)
+	git(t, other, "-c", "user.name=other", "-c", "user.email=other@brigada.invalid",
+		"commit", "--allow-empty", "-m", "later work")
+	git(t, other, "push", "-q", "origin", "HEAD")
+	before := remoteBranchCommit(t, remote, ws.branch)
+	branch := ws.branch + "-salvage-23"
+	if saved, err := ws.salvage(ctx, branch); err != nil || saved {
+		t.Fatalf("salvage already saved work = %v, %v; want no salvage", saved, err)
+	}
+	if got := remoteBranchCommit(t, remote, branch); got != "" {
+		t.Errorf("salvage branch holds %q, want no branch", got)
+	}
+	if got := remoteBranchCommit(t, remote, ws.branch); got != before {
+		t.Errorf("salvage moved the task's remote branch from %q to %q", before, got)
+	}
+	// New edits still need saving, on their own branch. Committing and
+	// pushing them must preserve the other runner's later work as well.
+	if err := os.WriteFile(filepath.Join(ws.dir, "work.txt"), []byte("leftovers\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if saved, err := ws.salvage(ctx, branch); err != nil || !saved {
+		t.Fatalf("salvage new edits = %v, %v; want saved", saved, err)
+	}
+	bare := strings.TrimPrefix(remote, "file://")
+	if got := git(t, "", "--git-dir", bare, "show", branch+":work.txt"); got != "leftovers\n" {
+		t.Errorf("salvage holds %q, want the uncommitted edit", got)
+	}
+	if got := remoteBranchCommit(t, remote, ws.branch); got != before {
+		t.Errorf("saving edits moved the task's remote branch from %q to %q", before, got)
+	}
+}
+
 // TestRedactURL checks that credentials riding a repo URL never reach
 // an error message.
 func TestRedactURL(t *testing.T) {
