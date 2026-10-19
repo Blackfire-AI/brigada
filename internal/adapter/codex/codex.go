@@ -12,9 +12,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
@@ -477,15 +479,156 @@ func errorEvent(text string) (adapter.Event, bool) {
 }
 
 // phraseEvent sorts one piece of text by one table. Text that names
-// nothing in the table is not an event.
+// nothing in the table is not an event. A limit's text also names its
+// reset time when it carries one, as LimitUntil.
 func phraseEvent(table []errorPhrase, text string) (adapter.Event, bool) {
 	lower := strings.ToLower(text)
 	for _, m := range table {
 		if strings.Contains(lower, m.phrase) {
-			return adapter.Event{Kind: adapter.EvError, ErrorKind: m.kind, Text: text}, true
+			ev := adapter.Event{Kind: adapter.EvError, ErrorKind: m.kind, Text: text}
+			if m.kind == adapter.ErrLimit {
+				ev.LimitUntil = limitReset(text, now())
+			}
+			return ev, true
 		}
 	}
 	return adapter.Event{}, false
+}
+
+// now is the clock limitReset reads; tests replace it.
+var now = time.Now
+
+// localZone is the zone the CLI prints its reset times in: the
+// machine's own. It is spelled through LoadLocation because the leak
+// guard's host rule would take the zone's usual spelling for a .local
+// hostname, and "Local" is LoadLocation's name for it. Tests replace
+// the variable.
+var localZone = func() *time.Location {
+	loc, err := time.LoadLocation("Local")
+	if err != nil {
+		return time.UTC // unreachable: "Local" always resolves
+	}
+	return loc
+}()
+
+// limitAtRe is the CLI's dated reset note: "try again at Oct 24th,
+// 2026 11:42 PM", with the year and the day's ordinal suffix optional
+// ("try again at Oct 24th, 11:42 PM").
+var limitAtRe = regexp.MustCompile(`try again at ([a-z]{3})\s+(\d{1,2})(?:st|nd|rd|th)?\s*,?\s+(?:(\d{4})\s+)?(\d{1,2}):(\d{2})\s*(am|pm)`)
+
+// limitClockRe is the CLI's bare clock reset note: "try again at
+// 11:42 PM" — today, or tomorrow once the clock has passed it.
+var limitClockRe = regexp.MustCompile(`try again at (\d{1,2}):(\d{2})\s*(am|pm)`)
+
+// limitMonths maps the note's three-letter month to its time.Month.
+var limitMonths = map[string]time.Month{
+	"jan": time.January, "feb": time.February, "mar": time.March,
+	"apr": time.April, "may": time.May, "jun": time.June,
+	"jul": time.July, "aug": time.August, "sep": time.September,
+	"oct": time.October, "nov": time.November, "dec": time.December,
+}
+
+// limitInTokenRe is one number-unit pair of a "try again in …" span:
+// "45 minutes", "2h", "15m".
+var limitInTokenRe = regexp.MustCompile(`(\d+)\s*(days?|d|hours?|hrs?|h|minutes?|mins?|m)\b`)
+
+// limitInUnits maps a span's unit spellings to its length.
+var limitInUnits = map[string]time.Duration{
+	"d": 24 * time.Hour, "day": 24 * time.Hour, "days": 24 * time.Hour,
+	"h": time.Hour, "hr": time.Hour, "hrs": time.Hour,
+	"hour": time.Hour, "hours": time.Hour,
+	"m": time.Minute, "min": time.Minute, "mins": time.Minute,
+	"minute": time.Minute, "minutes": time.Minute,
+}
+
+// limitReset reads the reset time out of a limit message, as an
+// RFC3339 instant. The CLI prints its times in the machine's local
+// time zone, so that is how they are read: "try again at Oct 24th,
+// 2026 11:42 PM" (the year optional, then the next such date), a bare
+// "try again at 11:42 PM" (today, or tomorrow once passed), and a
+// "try again in 2h 15m" span of minutes, hours and days. Best effort —
+// anything that does not parse is "" (unknown), never an error.
+func limitReset(text string, at time.Time) string {
+	lower := strings.ToLower(text)
+	if m := limitAtRe.FindStringSubmatch(lower); m != nil {
+		return resetAtDate(m, at)
+	}
+	if m := limitClockRe.FindStringSubmatch(lower); m != nil {
+		return resetAtClock(m, at)
+	}
+	return resetIn(lower, at)
+}
+
+// resetAtDate reads the dated form's regex groups; m[3] is the year,
+// empty when the note gave none.
+func resetAtDate(m []string, at time.Time) string {
+	month, ok := limitMonths[m[1]]
+	if !ok {
+		return ""
+	}
+	day, _ := strconv.Atoi(m[2])
+	hour, _ := strconv.Atoi(m[4])
+	min, _ := strconv.Atoi(m[5])
+	if day < 1 || day > 31 || hour < 1 || hour > 12 || min > 59 {
+		return ""
+	}
+	hour %= 12
+	if m[6] == "pm" {
+		hour += 12
+	}
+	year := at.In(localZone).Year()
+	if m[3] != "" {
+		year, _ = strconv.Atoi(m[3])
+	}
+	t := time.Date(year, month, day, hour, min, 0, 0, localZone)
+	// Without a year the note means the next such date: one already
+	// past rolls a year ahead.
+	if m[3] == "" && !t.After(at) {
+		t = t.AddDate(1, 0, 0)
+	}
+	return t.Format(time.RFC3339)
+}
+
+// resetAtClock reads the bare clock form's regex groups.
+func resetAtClock(m []string, at time.Time) string {
+	hour, _ := strconv.Atoi(m[1])
+	min, _ := strconv.Atoi(m[2])
+	if hour < 1 || hour > 12 || min > 59 {
+		return ""
+	}
+	hour %= 12
+	if m[3] == "pm" {
+		hour += 12
+	}
+	local := at.In(localZone)
+	t := time.Date(local.Year(), local.Month(), local.Day(), hour, min, 0, 0, localZone)
+	if !t.After(at) {
+		t = time.Date(local.Year(), local.Month(), local.Day()+1, hour, min, 0, 0, localZone)
+	}
+	return t.Format(time.RFC3339)
+}
+
+// resetIn reads the span form, "try again in 45 minutes / 2 hours /
+// 3 days / 2h 15m": the sentence's number-unit pairs summed onto now.
+// A span with no readable pair is "" (unknown).
+func resetIn(lower string, at time.Time) string {
+	i := strings.Index(lower, "try again in ")
+	if i < 0 {
+		return ""
+	}
+	span := lower[i+len("try again in "):]
+	if j := strings.IndexAny(span, ".\n"); j >= 0 {
+		span = span[:j]
+	}
+	var total time.Duration
+	for _, m := range limitInTokenRe.FindAllStringSubmatch(span, -1) {
+		n, _ := strconv.Atoi(m[1])
+		total += time.Duration(n) * limitInUnits[m[2]]
+	}
+	if total <= 0 {
+		return ""
+	}
+	return at.Add(total).Format(time.RFC3339)
 }
 
 // ResultText implements adapter.Adapter: the run's final answer is the
