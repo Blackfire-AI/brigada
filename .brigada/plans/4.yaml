@@ -33,7 +33,7 @@ tasks:
     deps: []
     base: ""
     effort: high
-    state: reviewing
+    state: done
     branch: "brigada/task-16-r1"
     rounds: 1
   - id: 17
@@ -43,7 +43,7 @@ tasks:
     deps: ["ranking"]
     base: "ranking"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 18
