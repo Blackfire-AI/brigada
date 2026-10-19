@@ -23,8 +23,8 @@ tasks:
     deps: []
     base: ""
     tier: heavy
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-5"
     rounds: 0
   - id: 6
     name: "codex"
