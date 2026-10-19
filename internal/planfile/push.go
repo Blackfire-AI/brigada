@@ -40,6 +40,11 @@ var ErrNoDefaultBranch = errors.New("the remote has no default branch yet")
 // the plan and what changed, and pushes. A file already identical on the
 // branch is not committed again. Any failure is the caller's to log: the
 // mirror is best-effort, and the next change pushes again.
+//
+// The scratch repository names the project URL as its remote "origin" and
+// talks to that name, never to the bare URL: git config scoped by remote URL
+// (includeIf "hasconfig:remote.*.url:...") and the hooks, credential helpers
+// and other settings set through it then apply here as they do in a clone.
 func Push(ctx context.Context, t Target, p Plan) error {
 	data, err := Render(p)
 	if err != nil {
@@ -61,14 +66,17 @@ func Push(ctx context.Context, t Target, p Plan) error {
 	if _, err := g("init", "-q"); err != nil {
 		return err
 	}
-	heads, err := g("ls-remote", "--heads", t.URL, "refs/heads/"+t.Branch)
+	if _, err := g("remote", "add", "origin", "--", t.URL); err != nil {
+		return err
+	}
+	heads, err := g("ls-remote", "--heads", "origin", "refs/heads/"+t.Branch)
 	if err != nil {
 		return err
 	}
 	var old *Plan
 	switch {
 	case strings.TrimSpace(heads) != "":
-		if _, err := g("fetch", "-q", "--depth=1", t.URL, "+refs/heads/"+t.Branch+":refs/remotes/mirror/"+t.Branch); err != nil {
+		if _, err := g("fetch", "-q", "--depth=1", "origin", "+refs/heads/"+t.Branch+":refs/remotes/mirror/"+t.Branch); err != nil {
 			return err
 		}
 		if _, err := g("checkout", "-q", "-B", t.Branch, "refs/remotes/mirror/"+t.Branch); err != nil {
@@ -104,7 +112,7 @@ func Push(ctx context.Context, t Target, p Plan) error {
 	if _, err := g("commit", "-q", "-m", msg); err != nil {
 		return err
 	}
-	_, err = g("push", "-q", t.URL, "HEAD:refs/heads/"+t.Branch)
+	_, err = g("push", "-q", "origin", "HEAD:refs/heads/"+t.Branch)
 	return err
 }
 

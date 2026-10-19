@@ -3,8 +3,11 @@ package planfile
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -102,6 +105,54 @@ func TestPushNeverCreatesTheDefaultBranch(t *testing.T) {
 	// A plans branch needs no default branch: it is an orphan.
 	if err := Push(context.Background(), Target{URL: remote, Branch: "brigada/plans"}, goldenPlan()); err != nil {
 		t.Errorf("push of the plans branch to an empty remote: %v", err)
+	}
+}
+
+// TestPushAppliesConfigScopedByTheRemoteURL: includeIf "hasconfig:remote.*.url"
+// config reaches the scratch repository, as it does a real clone.
+func TestPushAppliesConfigScopedByTheRemoteURL(t *testing.T) {
+	out, err := exec.Command("git", "--version").Output()
+	if err != nil {
+		t.Fatalf("git --version: %v", err)
+	}
+	m := regexp.MustCompile(`(\d+)\.(\d+)`).FindStringSubmatch(string(out))
+	if m == nil {
+		t.Skipf("cannot read the git version from %q", out)
+	}
+	major, _ := strconv.Atoi(m[1])
+	minor, _ := strconv.Atoi(m[2])
+	if major < 2 || (major == 2 && minor < 36) {
+		t.Skipf("git %s.%s is older than 2.36, which introduced hasconfig:remote.*.url", m[1], m[2])
+	}
+
+	remote := testsupport.NewGitRemote(t)
+	tmp := t.TempDir()
+	hooks := filepath.Join(tmp, "hooks")
+	marker := filepath.Join(tmp, "pre-push-ran")
+	if err := os.Mkdir(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hook := "#!/bin/sh\ntouch '" + marker + "'\n"
+	if err := os.WriteFile(filepath.Join(hooks, "pre-push"), []byte(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	included := filepath.Join(tmp, "included.gitconfig")
+	if err := os.WriteFile(included, []byte("[core]\n\thooksPath = "+hooks+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	global := filepath.Join(tmp, "global.gitconfig")
+	cfg := "[includeIf \"hasconfig:remote.*.url:" + remote + "\"]\n\tpath = " + included + "\n"
+	if err := os.WriteFile(global, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+	if err := Push(context.Background(), Target{URL: remote, Branch: "brigada/plans"}, goldenPlan()); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("the pre-push hook set through the URL-scoped config did not run: %v", err)
 	}
 }
 
