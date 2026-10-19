@@ -50,6 +50,6 @@ tasks:
     deps: ["agents-md"]
     base: "agents-md"
     tier: light
-    state: reviewing
+    state: done
     branch: "brigada/task-4"
     rounds: 0
