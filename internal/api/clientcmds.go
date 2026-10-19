@@ -279,12 +279,21 @@ func (c *Client) CreatePlan(ctx context.Context, p PlanCreate, idemKey string) (
 
 // PlanAmend is a plan_amend call as the bridge sends it (§12.2): tasks to
 // add, tasks to cancel, and waiting tasks whose dependencies are
-// re-pointed. Tasks and dependencies name tasks of the plan by name, or
+// re-pointed, plus tier or effort changes for waiting or parked tasks.
+// Tasks and dependencies name tasks of the plan by name, or
 // by id as a decimal.
 type PlanAmend struct {
 	Add      []PlanTask
 	Cancel   []string
 	Retarget []PlanRetarget
+	Retier   []PlanRetier
+}
+
+// PlanRetier changes a waiting or parked task's tier or effort; empty keeps it.
+type PlanRetier struct {
+	Task   string
+	Tier   string
+	Effort string
 }
 
 // PlanRetarget replaces one waiting task's whole dependency set.
@@ -303,6 +312,7 @@ type PlanAmendResult struct {
 	Added      []PlanCreatedTask
 	Cancelled  []int64
 	Retargeted []int64
+	Retiered   []int64
 	Started    []PlanCreatedTask
 	Reasons    []string
 }
@@ -317,12 +327,15 @@ func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey
 	for _, rt := range a.Retarget {
 		body.Retarget = append(body.Retarget, planRetargetBody{Task: rt.Task, Deps: rt.Deps, Base: rt.Base})
 	}
+	for _, rt := range a.Retier {
+		body.Retier = append(body.Retier, planRetierBody{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort})
+	}
 	var out planAmendResponse
 	path := "/v1/plans/" + strconv.FormatInt(plan, 10) + "/amend"
 	if err := c.callKeyed(ctx, http.MethodPost, path, idemKey, body, &out); err != nil {
 		return PlanAmendResult{}, err
 	}
-	res := PlanAmendResult{PlanID: out.PlanID, State: out.State, Cancelled: out.Cancelled, Retargeted: out.Retargeted, Reasons: out.Reasons}
+	res := PlanAmendResult{PlanID: out.PlanID, State: out.State, Cancelled: out.Cancelled, Retargeted: out.Retargeted, Retiered: out.Retiered, Reasons: out.Reasons}
 	for _, t := range out.Added {
 		res.Added = append(res.Added, PlanCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
 	}

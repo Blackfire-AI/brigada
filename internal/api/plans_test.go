@@ -3,10 +3,16 @@ package api
 import (
 	"database/sql"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/store"
 )
 
 // TestPlanCreateEndpoint covers /v1/plans (§6.2, §12.1): the foreman
@@ -141,4 +147,64 @@ type planCreateBody struct {
 	PlanID int64  `json:"plan_id"`
 	TaskID int64  `json:"task_id"`
 	JobID  int64  `json:"job_id"`
+}
+
+// Exercise the real request and response codecs with authenticated routes.
+func TestPlanAmendRetierRoundTrip(t *testing.T) {
+	ctx := t.Context()
+	st, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	eng := engine.New(st, engine.Config{})
+	repo := "https://example.invalid/retier.git"
+	if _, err := eng.SetProjectForeman(ctx, repo, "claude", "sonnet"); err != nil {
+		t.Fatal(err)
+	}
+	tokens := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokens, []byte(tokenFileBody), 0600); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(ctx, st, eng, nil, tokens)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := NewClientWithHTTPClient(&http.Client{Transport: holdTransport(func(r *http.Request) (*http.Response, error) {
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, r)
+		return w.Result(), nil
+	})}, "foreman-secret-1")
+	plan, err := c.CreatePlan(ctx, PlanCreate{Title: "retier", Tasks: []PlanTask{{Name: "build", Spec: "build it", Tier: "standard", Effort: "high"}}}, "retier-plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Update(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE tasks SET state = 'needs_foreman', effective_tier = 'heavy' WHERE id = ?", plan.TaskID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	am := PlanAmend{Retier: []PlanRetier{{Task: "build", Tier: "light", Effort: "low"}}}
+	res, err := c.AmendPlan(ctx, plan.PlanID, am, "retier-call")
+	if err != nil || !reflect.DeepEqual(res.Retiered, []int64{plan.TaskID}) {
+		t.Fatalf("amend = %+v (%v)", res, err)
+	}
+	again, err := c.AmendPlan(ctx, plan.PlanID, am, "retier-call")
+	if err != nil || !reflect.DeepEqual(again, res) {
+		t.Fatalf("idempotent retier = %+v (%v)", again, err)
+	}
+	var settings string
+	if err := st.View(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT tier || '|' || effective_tier || '|' || effort || '|' || state FROM tasks WHERE id = ?", plan.TaskID).Scan(&settings)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if settings != "light|light|low|needs_foreman" {
+		t.Errorf("retier = %s", settings)
+	}
+	_, err = c.AmendPlan(ctx, plan.PlanID, PlanAmend{Retier: []PlanRetier{{Task: strconv.FormatInt(plan.TaskID, 10), Effort: "ultra"}}}, "bad-retier")
+	if err == nil || !strings.Contains(err.Error(), "effort") {
+		t.Errorf("invalid effort accepted: %v", err)
+	}
 }

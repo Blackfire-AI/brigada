@@ -52,21 +52,26 @@ func summary(it Item) string {
 		return it.Content
 	}
 	var p struct {
-		Answer  string `json:"answer"`
-		Status  string `json:"status"`
-		Reason  string `json:"reason"`
-		Report  string `json:"report"`
-		Lease   string `json:"lease"`
-		Owner   int64  `json:"owner"`
-		Run     int64  `json:"run"`
-		Attempt int64  `json:"attempt"`
-		Epoch   int64  `json:"epoch"`
-		Path    string `json:"path"`
-		Bytes   int64  `json:"bytes"`
-		Branch  string `json:"branch"`
+		Answer     string `json:"answer"`
+		Status     string `json:"status"`
+		Reason     string `json:"reason"`
+		Report     string `json:"report"`
+		Lease      string `json:"lease"`
+		Owner      int64  `json:"owner"`
+		Run        int64  `json:"run"`
+		Attempt    int64  `json:"attempt"`
+		Epoch      int64  `json:"epoch"`
+		Path       string `json:"path"`
+		Bytes      int64  `json:"bytes"`
+		Branch     string `json:"branch"`
+		TierAsked  string `json:"tier_asked"`
+		TierServed string `json:"tier_served"`
 	}
 	if json.Unmarshal(it.Payload, &p) != nil {
 		return string(it.Payload)
+	}
+	if it.Kind == "task_tier_bumped" {
+		return fmt.Sprintf("task tier %s -> %s: %s", p.TierAsked, p.TierServed, p.Reason)
 	}
 	var parts []string
 	add := func(k, v string) {

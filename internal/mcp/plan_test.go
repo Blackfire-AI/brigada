@@ -491,6 +491,29 @@ func TestServePlanTaskTierEffort(t *testing.T) {
 	if tier != "heavy" || effective != "heavy" || effort != "high" {
 		t.Errorf("stored amendment settings = %s/%s/%s", tier, effective, effort)
 	}
+	// Retier travels through the MCP arguments, client and API, and its
+	// answer lists the task without restarting it.
+	a = s.call(30, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan": plan, "retier": []any{map[string]any{"task": "extra", "tier": "light", "effort": "low"}},
+	}})
+	text, isError = toolText(t, a)
+	if isError || !strings.Contains(text, "retiered task") {
+		t.Fatalf("retier answer = %q, error %v", text, isError)
+	}
+	if err := e.st.View(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT tier,effective_tier,effort FROM tasks WHERE name = 'extra'").Scan(&tier, &effective, &effort)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if tier != "light" || effective != "light" || effort != "low" {
+		t.Errorf("retier settings = %s/%s/%s", tier, effective, effort)
+	}
+	a = s.call(31, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan": plan, "retier": []any{map[string]any{"task": "extra", "tier": "invalid"}},
+	}})
+	if text, isError := toolText(t, a); !isError || !strings.Contains(text, "invalid") {
+		t.Errorf("invalid retier = %q (%v)", text, isError)
+	}
 	_, err = client.CreatePlan(ctx, api.PlanCreate{Title: "bad", Tasks: []api.PlanTask{{Name: "invalid", Spec: "invalid", Tier: "big"}}}, "bad-tier")
 	var statusErr *api.StatusError
 	if !errors.As(err, &statusErr) || statusErr.Status != http.StatusBadRequest || !strings.Contains(err.Error(), "light, standard, heavy") {
@@ -506,4 +529,25 @@ func TestServePlanTaskTierEffort(t *testing.T) {
 	if isError || !strings.Contains(text, "awaiting approval") || !strings.Contains(text, "large (heavy, effort high)") {
 		t.Fatalf("held plan answer = %q, error %v", text, isError)
 	}
+}
+
+func TestPlanAmendRetierSchema(t *testing.T) {
+	for _, tool := range tools {
+		if tool.Name != "plan_amend" {
+			continue
+		}
+		props := tool.InputSchema.(map[string]any)["properties"].(map[string]any)
+		rt, ok := props["retier"].(map[string]any)
+		if !ok {
+			t.Fatal("retier missing from schema")
+		}
+		fields := rt["items"].(map[string]any)["properties"].(map[string]any)
+		for _, field := range []string{"task", "tier", "effort"} {
+			if _, ok := fields[field]; !ok {
+				t.Errorf("retier missing %s", field)
+			}
+		}
+		return
+	}
+	t.Fatal("no plan_amend tool")
 }

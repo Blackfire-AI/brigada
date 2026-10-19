@@ -333,7 +333,7 @@ The needs-you queue lists what only you (or the foreman) can unblock:
 | Entry | What it wants |
 |---|---|
 | `plan #N pending_approval: <why>` | Your decision: `brigada plan approve N` or `brigada plan reject N` ([section 7](#7-plans-checks-and-reviews)), or the coordinator's tools ([section 3](#3-several-repositories-mode-b)). |
-| `task #N needs_foreman: <reason>` | Judgment: the worker asked a question, the check failed with no rounds left, a review wanted changes, or the task failed. The foreman is woken for these; the entry is there so you can see it and step in. |
+| `task #N needs_foreman: <reason>` | Judgment: the worker asked a question, the task spent its rounds or failed after tier escalation was exhausted, or a run stopped. The foreman is woken for these; the entry is there so you can see it and step in. |
 | `task #N needs_user: <reason>` | An answer from you, for a task parked for you directly. |
 | `foreman #N limited: <until>` | A choice: wait, switch the foreman, or let approved plans run without it ([section 8](#8-agents-quota-and-health)). |
 | `foreman #N budget_spent: wake budget spent (20/20 today, resets <UTC time>); <n> events waiting` | Raise the day's wake budget with `brigada budget --wakes N`, or send `brigada ask`: a wake that carries your message is not charged. |
@@ -605,7 +605,7 @@ An approve counts only with substantive findings text (80 characters or more). A
 
 ### Rounds
 
-A review that asks for changes, or a failed check, starts a fix round on the author's session with the findings as feedback. Fix rounds for failed checks and for review changes draw on one shared budget: by default two fix rounds in all per attempt, plus two restarts. When a cap is spent, the task parks at `needs_foreman` and the entry says which cap ran out; the foreman decides whether to re-plan, switch agent, split the task or ask you.
+A review that asks for changes, or a failed check, starts a fix round on the author's session with the findings as feedback. Fix rounds for failed checks and for review changes draw on one shared budget: by default two fix rounds in all per attempt, plus two restarts. When check or review rounds are spent, brigada raises the task’s effective tier one step (light → standard → heavy) and starts a fresh attempt on the next `-r<n>` branch, carrying the feedback and spending a restart. A worker reporting `failed` (including a missing result block) gets the same escalation. At heavy, or with no restarts left, the task parks at `needs_foreman` and the entry says why; the foreman decides whether to re-plan, switch agent, split the task or ask you. A stalled worker always goes straight to the foreman. Through `plan_amend`’s `retier`, the foreman can change a pending, ready or parked task’s tier or effort; a parked task then needs `task_restart`.
 
 ### A branch with no plan
 

@@ -121,6 +121,7 @@ func TestAnswerResumesTheAuthorsSession(t *testing.T) {
 // by the one genuine round that ran.
 func TestAnswerSpendsNoFixRound(t *testing.T) {
 	e := newEnvCfg(t, nil)
+	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", e.task)
 	e.exec("UPDATE tasks SET caps = ? WHERE id = ?", `{"fix_rounds":1}`, e.task)
 	author := e.agented("author", "anthropic", "implement")
 
@@ -227,6 +228,8 @@ func TestAnswerRefusals(t *testing.T) {
 // fix rounds counted from zero behind the restart (§14).
 func TestRestartTaskFreshAttempt(t *testing.T) {
 	e := newEnv(t)
+	// Heavy tasks retain the park path; tier escalation has its own coverage.
+	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", e.task)
 	author := e.agented("author", "anthropic", "implement")
 	stranger := e.agented("stranger", "meta", "implement")
 

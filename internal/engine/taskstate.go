@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
@@ -43,6 +44,7 @@ const classImplement = "implement"
 // block's status, so the engine reads one word either way.
 const (
 	workerDone        = "done"
+	workerFailed      = "failed"
 	workerNeedsHelp   = "needs_help"
 	workerCheckFailed = "check_failed"
 )
@@ -98,10 +100,10 @@ func taskRunningTx(tx *sql.Tx, j *jobRow, now time.Time) error {
 //   - a work or fix job of any other class that ended done finishes the
 //     task;
 //   - a failed check of an implement task with rounds left queues a fix
-//     round on the author's session (§3); without rounds, a worker's
-//     needs_help, a failed or unusable result, the task parks at
-//     needs_foreman — the rules cannot carry those forward alone, so
-//     they wait for the foreman's judgment (§3);
+//     round on the author's session (§3); spent rounds and worker failures
+//     try the next tier with a fresh attempt before parking at needs_foreman;
+//   - needs_help, stopped runs and errors the retry rules declined go
+//     straight to the foreman (§3);
 //   - a review job's verdict finishes the task, asks for a fix round,
 //     or names itself unusable and is retried once (§7).
 //
@@ -182,6 +184,15 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 		}
 		if reason == "" {
 			reason = "no result block"
+		}
+		if c.Error == "" && c.Outcome == "" && (wr.Status == workerFailed || !haveResult) {
+			why := workerFailed
+			if !haveResult {
+				why = "no-result"
+			}
+			if bumped, err := e.escalateTierTx(tx, job, why, reason, now); err != nil || bumped {
+				return err
+			}
 		}
 		return e.needsForemanTx(tx, job, evTaskFailed, eventPayload{Reason: boundNote(reason)}, now)
 	case wr.Status == workerNeedsHelp:
@@ -323,6 +334,46 @@ func (e *Engine) autoRestartTaskTx(tx *sql.Tx, job *jobRow, kind, text string, n
 	return true, e.wakeForemanTx(tx, job.ProjectID, now)
 }
 
+// escalateTierTx spends one restart on the next tier before asking the foreman.
+// Callers have not yet recorded this attempt's unsuccessful outcome. Both
+// events are rule decisions: neither creates an inbox row or wakes a turn.
+func (e *Engine) escalateTierTx(tx *sql.Tx, job *jobRow, reason, note string, now time.Time) (bool, error) {
+	var before string
+	if err := tx.QueryRow("SELECT effective_tier FROM tasks WHERE id = ?", job.TaskID).Scan(&before); err != nil {
+		return false, fmt.Errorf("read the tier of task %d: %w", job.TaskID, err)
+	}
+	var after string
+	switch before {
+	case adapter.TierLight:
+		after = adapter.TierStandard
+	case adapter.TierStandard:
+		after = adapter.TierHeavy
+	default:
+		return false, nil
+	}
+	if _, capped, err := e.roundCapReached(tx, SubmitParams{TaskID: job.TaskID, Restart: true}); err != nil || capped {
+		return false, err
+	}
+	if err := recordTaskOutcomeTx(tx, job, false, now); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec("UPDATE tasks SET effective_tier = ?, updated_at = ? WHERE id = ?", after, fmtTime(now), job.TaskID); err != nil {
+		return false, fmt.Errorf("bump the tier of task %d: %w", job.TaskID, err)
+	}
+	if _, err := appendEventTx(tx, evTaskTierBumped, job.ProjectID, job.TaskID, job.ID,
+		eventPayload{Reason: reason, TierAsked: before, TierServed: after}, now); err != nil {
+		return false, err
+	}
+	note = boundNote(fmt.Sprintf("previous attempt (tier %s) %s: %s", before, reason, note))
+	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, now)
+	if err != nil {
+		return false, err
+	}
+	_, err = appendEventTx(tx, evTaskRestarted, job.ProjectID, job.TaskID, r.JobID,
+		eventPayload{Status: taskReady, Run: int64(r.Run), Reason: reason}, now)
+	return err == nil, err
+}
+
 // queueFixRoundTx queues the task's next fix round (§3): a job of kind
 // fix on the task's own key, in session mode, so it resumes the author's
 // session on the author's agent — the required agent is the pin, the
@@ -332,7 +383,7 @@ func (e *Engine) autoRestartTaskTx(tx *sql.Tx, job *jobRow, kind, text string, n
 // failed check, the review's findings after a changes verdict. The
 // round names the budget it spends (§7): fix rounds after a failed
 // check, review rounds after changes. When the budget is spent the task
-// parks at needs_foreman with the event naming which cap ran out and
+// tries a tier bump; otherwise it parks with the event naming the cap and
 // note beside it — the check's tail or the findings, the shorter line
 // of the same matter — for the foreman's judgment (§3, §10).
 func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note string, failure *checkFailure, now time.Time) error {
@@ -389,14 +440,20 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 	}
 }
 
-// outOfRoundsTx parks a task whose rounds budget is spent (§3: "task
-// out of rounds"): the rules have carried it as far as its caps allow,
-// and what follows — re-plan, switch agent, split, ask the user — is
-// the foreman's judgment, so the event names which cap ran out and
+// outOfRoundsTx tries the next tier for a task whose rounds are spent
+// (§3). Already heavy, or out of restarts, it parks for the foreman's
+// judgment. The parking event names which cap ran out and
 // carries what asked for the round — the check's tail or the review's
 // findings, bounded — beside it: that note is the needs-you queue's
 // reason line, the foreman's first word of the matter (§10).
 func (e *Engine) outOfRoundsTx(tx *sql.Tx, job *jobRow, round, note string, failure *checkFailure, now time.Time) error {
+	feedback := note
+	if failure != nil {
+		feedback = failure.feedback()
+	}
+	if bumped, err := e.escalateTierTx(tx, job, round+" spent", feedback, now); err != nil || bumped {
+		return err
+	}
 	reason := "the task's " + round + " are spent"
 	if failure != nil {
 		// The check's command and exit code render first (needsYouReason),
@@ -445,12 +502,15 @@ func (f *checkFailure) feedback() string {
 	return checkHeadline("The check", f.Cmd, f.ExitCode, f.TimedOut) + ".\n" + out
 }
 
-// checkEventText renders a check-failure event's payload for a reader of
-// the event — the needs-you queue and the foreman's wake: the command,
+// checkEventText renders tier bumps and check failures for status and wakes.
+// A check failure names the command,
 // its exit code and its output (or "no output") first, then, for the
-// spent rounds, the reason beside them. ok is false for any other event
-// and for one that names no command.
+// spent rounds, the reason beside them. A tier bump names its old and new
+// tiers. ok is false for other events and check failures with no command.
 func checkEventText(kind string, p eventPayload) (text string, ok bool) {
+	if kind == evTaskTierBumped {
+		return fmt.Sprintf("task tier %s -> %s: %s", p.TierAsked, p.TierServed, p.Reason), true
+	}
 	if p.Check == "" || (kind != evTaskCheckFailed && kind != evTaskOutOfRounds) {
 		return "", false
 	}

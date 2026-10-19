@@ -315,6 +315,7 @@ func TestRoundsExhaustedParksTheTask(t *testing.T) {
 	} {
 		t.Run("the default two "+tc.path+" rounds", func(t *testing.T) {
 			e := newEnv(t)
+			e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", e.task)
 			author := e.agented("author", "anthropic", "implement")
 			reviewer := e.agented("reviewer", "google", "implement", "review")
 			check, verdict := failCheck, ""
@@ -369,6 +370,7 @@ func TestRoundsExhaustedParksTheTask(t *testing.T) {
 	} {
 		t.Run("cap of zero: "+tc.want, func(t *testing.T) {
 			e := newEnv(t)
+			e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", e.task)
 			author := e.agented("author", "anthropic", "implement")
 			reviewer := e.agented("reviewer", "google", "implement", "review")
 			e.exec("UPDATE tasks SET caps = ? WHERE id = ?", tc.caps, e.task)
@@ -398,6 +400,7 @@ func TestRoundsExhaustedParksTheTask(t *testing.T) {
 func TestFixRoundsShareOneCount(t *testing.T) {
 	fresh := func(t *testing.T, caps string) (*env, int64, int64) {
 		e := newEnv(t)
+		e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", e.task)
 		e.exec("UPDATE tasks SET caps = ? WHERE id = ?", caps, e.task)
 		return e, e.agented("author", "anthropic", "implement"), e.agented("reviewer", "google", "implement", "review")
 	}
@@ -672,6 +675,7 @@ func TestCheckFailFeedbackNamesAnEmptyTail(t *testing.T) {
 // exit code first, then the worker's summary.
 func TestOutOfRoundsNeedsYouNamesTheCheck(t *testing.T) {
 	e := newEnv(t)
+	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", e.task)
 	author := e.agented("author", "anthropic", "implement")
 	e.exec(`UPDATE tasks SET check_cmd = 'test -f DOES_NOT_EXIST', caps = ? WHERE id = ?`, `{"fix_rounds":0}`, e.task)
 
@@ -701,5 +705,169 @@ func TestOutOfRoundsNeedsYouNamesTheCheck(t *testing.T) {
 	raw, _ := json.Marshal(p)
 	if text := wakeEventText(evTaskOutOfRounds, string(raw)); text != want {
 		t.Errorf("wake text = %q, want %q", text, want)
+	}
+}
+
+func TestOutOfRoundsBumpsTheTier(t *testing.T) {
+	for _, path := range []string{roundFix, roundReview} {
+		t.Run(path, func(t *testing.T) {
+			e := newEnv(t)
+			author := e.agented("author", "anthropic", "implement")
+			reviewer := e.agented("reviewer", "google", "review")
+			e.exec(`UPDATE tasks SET caps = '{"fix_rounds":0,"review_rounds":0}' WHERE id = ?`, e.task)
+			e.submit(e.work())
+			if path == roundFix {
+				e.runWork(author, doneOn("", failCheck))
+			} else {
+				e.runWork(author, doneOn("", passCheck))
+				e.runReview(reviewer, changesVerdict)
+			}
+			if got := e.str("SELECT effective_tier FROM tasks WHERE id = ?", e.task); got != "heavy" {
+				t.Fatalf("effective tier = %q, want heavy", got)
+			}
+			if got := e.str("SELECT tier FROM tasks WHERE id = ?", e.task); got != "standard" {
+				t.Errorf("foreman's tier changed to %q", got)
+			}
+			p, ok := e.eventPayloadOf(evTaskTierBumped)
+			if !ok || p.TierAsked != "standard" || p.TierServed != "heavy" || !strings.Contains(p.Reason, path) {
+				t.Fatalf("bump = %+v (%t)", p, ok)
+			}
+			if got, _ := checkEventText(evTaskTierBumped, p); got != "task tier standard -> heavy: "+p.Reason {
+				t.Errorf("bump text = %q", got)
+			}
+			if e.taskState(e.task) != taskReady || e.countEvents(evTaskOutOfRounds) != 0 || e.countEvents(evTaskFailed) != 0 {
+				t.Fatalf("bumped task parked: state %s, events %v", e.taskState(e.task), e.eventKinds())
+			}
+			if n := e.int("SELECT COUNT(*) FROM foreman_inbox"); n != 0 {
+				t.Errorf("bump created %d inbox rows", n)
+			}
+			if a, s := e.outcomeOf(e.agentOf(author), "implement"); a != 1 || s != 0 {
+				t.Errorf("outcome = %d/%d, want 1/0", a, s)
+			}
+			job := e.int("SELECT id FROM jobs WHERE task_id = ? AND restart = 1", e.task)
+			feedback := e.str("SELECT prompt FROM jobs WHERE id = ?", job)
+			if !strings.Contains(feedback, "previous attempt (tier standard) "+path+" spent:") {
+				t.Errorf("restart feedback = %q", feedback)
+			}
+			if path == roundFix && !strings.Contains(feedback, "FAIL TestBoom") {
+				t.Errorf("restart lost check tail: %q", feedback)
+			}
+			if path == roundReview {
+				var v verdictBlock
+				_ = json.Unmarshal([]byte(changesVerdict), &v)
+				if !strings.Contains(feedback, v.Findings) {
+					t.Errorf("restart lost findings: %q", feedback)
+				}
+			}
+			g := e.authorLease(author)
+			if g == nil || g.JobID != job || g.Branch != fmt.Sprintf("brigada/task-%d-r1", e.task) {
+				t.Fatalf("fresh attempt = %+v", g)
+			}
+		})
+	}
+}
+
+func TestOutOfRoundsAtHeavyParks(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	e.exec(`UPDATE tasks SET effective_tier = 'heavy', caps = '{"fix_rounds":0}' WHERE id = ?`, e.task)
+	e.submit(e.work())
+	e.runWork(author, doneOn("", failCheck))
+	if e.taskState(e.task) != taskNeedsForeman || e.countEvents(evTaskTierBumped) != 0 || e.countEvents(evTaskOutOfRounds) != 1 {
+		t.Fatalf("heavy task = %s, events %v", e.taskState(e.task), e.eventKinds())
+	}
+	if a, s := e.outcomeOf(e.agentOf(author), "implement"); a != 1 || s != 0 {
+		t.Errorf("outcome = %d/%d", a, s)
+	}
+}
+
+func TestFailedResultBumpsTheTier(t *testing.T) {
+	for _, result := range []string{`{"status":"failed","summary":"could not fix the parser"}`, "no JSON block", "{}"} {
+		t.Run(result, func(t *testing.T) {
+			e := newEnv(t)
+			author := e.agented("author", "anthropic", "implement")
+			e.exec("UPDATE tasks SET tier = 'light', effective_tier = 'light' WHERE id = ?", e.task)
+			e.submit(e.work())
+			e.runWork(author, Completion{Result: result})
+			if e.taskState(e.task) != taskReady || e.str("SELECT effective_tier FROM tasks WHERE id = ?", e.task) != "standard" || e.queuedWork(e.task) != 1 {
+				t.Fatalf("failure did not bump: state %s, events %v", e.taskState(e.task), e.eventKinds())
+			}
+			p, ok := e.eventPayloadOf(evTaskTierBumped)
+			if !ok || p.TierAsked != "light" || p.TierServed != "standard" {
+				t.Fatalf("bump = %+v", p)
+			}
+			if strings.Contains(result, "parser") && !strings.Contains(e.str("SELECT prompt FROM jobs WHERE task_id = ? AND restart = 1", e.task), "could not fix the parser") {
+				t.Error("restart lost worker summary")
+			}
+			if a, s := e.outcomeOf(e.agentOf(author), "implement"); a != 1 || s != 0 {
+				t.Errorf("outcome = %d/%d", a, s)
+			}
+		})
+	}
+}
+
+func TestStalledNeverBumps(t *testing.T) {
+	for _, c := range []Completion{
+		{Result: `{"status":"failed","summary":"stalled"}`, Outcome: OutcomeStalled},
+		{Result: `{"status":"failed","summary":"time cap"}`, Outcome: OutcomeTimeCap},
+		{Result: `{"status":"stopped","summary":"stopped"}`},
+		{Result: `{"status":"needs_help","question":"help"}`},
+		{Error: "CLI failed", ErrorKind: "other"},
+	} {
+		t.Run(c.Result+c.Error, func(t *testing.T) {
+			e := newEnv(t)
+			e.exec("UPDATE tasks SET effective_tier = 'light' WHERE id = ?", e.task)
+			e.submit(e.work())
+			e.runWork(e.agented("author", "anthropic", "implement"), c)
+			if e.taskState(e.task) != taskNeedsForeman || e.countEvents(evTaskTierBumped) != 0 {
+				t.Fatalf("stopped/help/error task = %s, events %v", e.taskState(e.task), e.eventKinds())
+			}
+		})
+	}
+}
+
+func TestBumpRespectsTheRestartCap(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		t.Run(fmt.Sprint(failed), func(t *testing.T) {
+			e := newEnv(t)
+			e.exec(`UPDATE tasks SET effective_tier = 'light', caps = '{"fix_rounds":0,"restart":0}' WHERE id = ?`, e.task)
+			e.submit(e.work())
+			c := doneOn("", failCheck)
+			if failed {
+				c = Completion{Result: `{"status":"failed","summary":"cannot fix"}`}
+			}
+			e.runWork(e.agented("author", "anthropic", "implement"), c)
+			if e.taskState(e.task) != taskNeedsForeman || e.countEvents(evTaskTierBumped) != 0 || e.countEvents(evTaskRestarted) != 0 {
+				t.Fatalf("spent restart budget = %s, events %v", e.taskState(e.task), e.eventKinds())
+			}
+		})
+	}
+}
+
+func TestSecondBumpReachesHeavyThenParks(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	e.exec(`UPDATE tasks SET tier = 'light', effective_tier = 'light', caps = '{"fix_rounds":1,"restart":3}' WHERE id = ?`, e.task)
+	e.submit(e.work())
+	for i, tier := range []string{"standard", "heavy", "heavy"} {
+		// Each fresh attempt gets its own fix round before exhausting it.
+		e.runWork(author, doneOn("", failCheck))
+		e.runWork(author, doneOn("", failCheck))
+		if got := e.str("SELECT effective_tier FROM tasks WHERE id = ?", e.task); got != tier {
+			t.Fatalf("attempt %d tier = %s, want %s", i, got, tier)
+		}
+		want := taskReady
+		if i == 2 {
+			want = taskNeedsForeman
+		}
+		if e.taskState(e.task) != want {
+			t.Fatalf("attempt %d state = %s, want %s", i, e.taskState(e.task), want)
+		}
+	}
+	if e.countEvents(evTaskTierBumped) != 2 || e.countEvents(evTaskOutOfRounds) != 1 {
+		t.Fatalf("events = %v", e.eventKinds())
+	}
+	if a, s := e.outcomeOf(e.agentOf(author), "implement"); a != 3 || s != 0 {
+		t.Errorf("outcome = %d/%d, want 3/0", a, s)
 	}
 }

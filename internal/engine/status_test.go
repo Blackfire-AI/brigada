@@ -210,7 +210,7 @@ func TestStatusNeedsYouReasonsFromTheLatestParkingEvent(t *testing.T) {
 		}
 	}
 	changesTask, work := begin()
-	e.exec(`UPDATE tasks SET caps = '{"review_rounds":0}' WHERE id = ?`, changesTask)
+	e.exec(`UPDATE tasks SET effective_tier = 'heavy', caps = '{"review_rounds":0}' WHERE id = ?`, changesTask)
 	if ans := e.complete(work, doneOn("task/4-1", passCheck)); ans != AnsOK {
 		t.Fatalf("complete the work before the changes review: %s", ans)
 	}
