@@ -35,8 +35,8 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-20"
     rounds: 0
   - id: 21
     name: "dependabot"
