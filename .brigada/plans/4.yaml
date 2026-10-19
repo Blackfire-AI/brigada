@@ -43,7 +43,7 @@ tasks:
     deps: ["ranking"]
     base: "ranking"
     effort: medium
-    state: running
+    state: ready
     branch: ""
     rounds: 0
   - id: 18
