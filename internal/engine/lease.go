@@ -756,7 +756,7 @@ func qualifyingAgentsTx(tx *sql.Tx, limits caps.Limits, rnd func() float64, runn
 		}
 		if j.RequireAgent == 0 {
 			var err error
-			served, err = tierServedTx(tx, limits, j, class, asked)
+			served, err = tierServedTx(tx, limits, j, class, asked, now)
 			if err != nil {
 				return nil, err
 			}
@@ -788,21 +788,49 @@ func qualifyingAgentsTx(tx *sql.Tx, limits caps.Limits, rnd func() float64, runn
 	return cands, nil
 }
 
+// longCooling is how far off a cooling agent's reset may be and still count
+// as available for its tier (§8): a window of a few hours is worth waiting
+// out, a limit of days is not.
+const longCooling = time.Hour
+
 // tierServedTx considers every runner's structurally qualifying agents.
-// Cooling still counts as ready health: a cheap wait beats a heavier model.
+// A short cooling (ending within longCooling of now) still counts as ready: a
+// cheap wait beats a heavier model. A longer one counts like a broken agent.
 // A model or account capped at exactly 0 can never take a job, so its agents
 // do not count as ready; a cap that is merely full still waits (§8). Other
-// caps are applied later, after the tier is fixed.
-func tierServedTx(tx *sql.Tx, limits caps.Limits, j *jobRow, class, asked string) (string, error) {
+// caps are applied later, after the tier is fixed. When no tier has an
+// available agent but some agents are only cooling, the tier of the agent
+// that resets first is served, so the job waits for the earliest reset.
+func tierServedTx(tx *sql.Tx, limits caps.Limits, j *jobRow, class, asked, now string) (string, error) {
 	agents, err := qualifyingAgentRowsTx(tx, 0, j, class)
 	if err != nil {
 		return "", err
 	}
+	horizon := now
+	if t, err := parseTime(now); err == nil {
+		horizon = fmtTime(t.Add(longCooling))
+	}
 	hasReady := map[string]bool{}
+	var soonest string
+	soonestTiers := map[string]bool{}
 	for _, a := range agents {
-		if a.health == "ready" && !cappedAtZero(limits, a.account, a.model) {
-			hasReady[limits.TierOf(a.harness, a.model)] = true
+		if a.health != "ready" || cappedAtZero(limits, a.account, a.model) {
+			continue
 		}
+		tier := limits.TierOf(a.harness, a.model)
+		if a.cooling <= horizon {
+			hasReady[tier] = true
+			continue
+		}
+		switch {
+		case soonest == "" || a.cooling < soonest:
+			soonest, soonestTiers = a.cooling, map[string]bool{tier: true}
+		case a.cooling == soonest:
+			soonestTiers[tier] = true
+		}
+	}
+	if len(hasReady) == 0 {
+		hasReady = soonestTiers
 	}
 	return tierServed(asked, hasReady), nil
 }
@@ -818,8 +846,8 @@ func cappedAtZero(limits caps.Limits, account, model string) bool {
 }
 
 // tierServed prefers the asked tier, then climbs, then steps down from
-// heavy. hasReady names the tiers with an agent that is ready and not
-// capped at 0. With none anywhere, retain the asked tier.
+// heavy. hasReady names the tiers with an agent that is ready, not capped at
+// 0 and not cooling for long. With none anywhere, retain the asked tier.
 func tierServed(asked string, hasReady map[string]bool) string {
 	tiers := []string{"light", "standard", "heavy"}
 	at := slices.Index(tiers, asked)

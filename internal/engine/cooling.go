@@ -26,9 +26,16 @@ const layerCooling = "cooling"
 // lasts. When the cooling ends the hold lifts and the TTL clock
 // restarts at that moment, like the runner layer's.
 //
-// Tier fallback is resolved before this hold: a served tier whose agents
-// are all cooling waits until its reset, while a tier with only broken
-// agents is skipped in favor of a ready-health tier when one exists.
+// Tier fallback is resolved before this hold (decided 2026-10-20): a served
+// tier whose agents all cool for no more than longCooling (an hour) waits
+// until its reset: only a reset within longCooling is waited out. An agent
+// cooling for longer, such as a multi-day limit, counts like a broken one, and a tier
+// with only broken or long-cooling agents is skipped in favor of an available
+// tier when one exists (climbing, then stepping down from heavy). The hold
+// reads agents of the served tier alone, so a job whose tier has moved to an
+// available agent is not held, and a hold lifts when it does. Only when no
+// tier has an available agent does the job hold, for the tier whose agent
+// resets first. A pinned job never moves: it waits for its agent.
 //
 // Precedence between holds. Cooling is a precondition of the others:
 // while every qualifying agent is cooling, no poll can reach the cap gate
