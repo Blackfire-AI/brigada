@@ -23,7 +23,7 @@ tasks:
     deps: []
     base: ""
     tier: heavy
-    state: reviewing
+    state: needs_foreman
     branch: "brigada/task-5-r1"
     rounds: 2
   - id: 6
