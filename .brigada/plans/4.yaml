@@ -54,6 +54,6 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-18"
     rounds: 0
