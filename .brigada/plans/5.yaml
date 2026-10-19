@@ -24,10 +24,9 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: needs_foreman
+    state: ready
     branch: ""
     rounds: 0
-    question: "May I run go run ./internal/tools/guard (and a YAML parse of .github/ISSUE_TEMPLATE/*.yml) in this worktree, or approve those commands so the check can be confirmed?"
   - id: 20
     name: "contributing"
     title: "CONTRIBUTING.md (#3)"
