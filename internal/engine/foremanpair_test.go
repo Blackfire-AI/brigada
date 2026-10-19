@@ -29,7 +29,7 @@ func (e *env) heldNow() []HeldJob {
 
 // A foreman turn goes to the agent that offers the project's model, not
 // to the first agent of the harness, and the grant names that agent's
-// adapter and model for the runner to run. Workers' grants carry none.
+// adapter and model for the runner to run. Worker grants also name their agent.
 func TestForemanTurnPicksTheChosenModel(t *testing.T) {
 	e := newEnv(t)
 	e.seedAgent(e.runner1, "claude", "claude", "sonnet", "work") // the lower id
@@ -54,14 +54,14 @@ func TestForemanTurnPicksTheChosenModel(t *testing.T) {
 		t.Errorf("the turn's recorded model = %q, want opus", got)
 	}
 
-	// A worker's lease is what it was: the harness names its agent.
+	// A worker's lease names the selected registration exactly too.
 	e.submit(e.work())
 	w := e.leaseAny(e.runner1)
 	if w == nil || w.Kind != KindWork {
 		t.Fatalf("the worker was not leased: %+v", w)
 	}
-	if w.AgentAdapter != "" || w.AgentModel != "" {
-		t.Errorf("a worker grant names adapter %q model %q, want none", w.AgentAdapter, w.AgentModel)
+	if w.AgentAdapter != "claude" || w.AgentModel != "sonnet" {
+		t.Errorf("a worker grant names adapter %q model %q, want claude/sonnet", w.AgentAdapter, w.AgentModel)
 	}
 }
 

@@ -45,7 +45,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	noWiring := fs.Bool("no-wiring", false, "skip harness wiring (the bridge, hooks and foreman skill for mode A; in a parent folder, the coordinator's)")
 	all := fs.Bool("all", false, "in a folder that is not a repository: register every new repository found, without asking")
 	agents := &agentSpecs{}
-	fs.Var(agents, "agent", "repeatable, same complete syntax and model defaults as brigada runner")
+	fs.Var(agents, "agent", "--agent once per harness and model, same complete syntax and model defaults as brigada runner")
 	signedIn := map[string]bool{}
 	fs.Func("signed-in", "confirm an installed harness is authenticated (repeatable or comma-separated); local only", func(v string) error {
 		for _, h := range splitList(v) {
@@ -424,19 +424,22 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if !slices.Contains(initHarnesses, spec.harness) {
 			return usagef(stderr, "unsupported init harness %q", spec.harness)
 		}
-		if seen[spec.harness] {
-			return usagef(stderr, "harness %q is offered twice: at most one agent per harness per runner", spec.harness)
-		}
-		seen[spec.harness] = true
 		if spec.model == "" {
 			spec.model = runnerDefaultModel(spec.harness)
 		}
+		pair := spec.harness + "/" + spec.model
+		if seen[pair] {
+			return usagef(stderr, "agent %s is offered twice: one agent per harness and model per runner", pair)
+		}
+		seen[pair] = true
 		_, err := initModelFamily(spec.harness, spec.model)
 		if err != nil {
 			return usagef(stderr, "--agent %s: %v", spec.harness, err)
 		}
-		if err := engine.ValidateSettingValue(engine.SettingApprovalClasses, strings.Join(spec.classes, "+")); err != nil {
-			return usagef(stderr, "agent classes: %v", err)
+		if len(spec.classes) > 0 {
+			if err := engine.ValidateSettingValue(engine.SettingApprovalClasses, strings.Join(spec.classes, "+")); err != nil {
+				return usagef(stderr, "agent classes: %v", err)
+			}
 		}
 		if spec.agentFile != "" {
 			spec.agentFile, err = filepath.Abs(spec.agentFile)
@@ -1058,6 +1061,9 @@ func initToolCommands(tools string) string {
 }
 
 func initAgentRoles(classes []string) string {
+	if len(classes) == 0 {
+		return "foreman only"
+	}
 	if len(classes) == 3 && slices.Contains(classes, "implement") && slices.Contains(classes, "review") && slices.Contains(classes, "answer") {
 		return "writes code, reviews"
 	}
@@ -1176,6 +1182,9 @@ func initPad(text string, width int) string {
 // initPlanRoles is a Plan row's role phrase: "code + review", or
 // "review only" for a single role.
 func initPlanRoles(classes []string) string {
+	if len(classes) == 0 {
+		return "foreman only"
+	}
 	if len(classes) == 3 && slices.Contains(classes, "implement") && slices.Contains(classes, "review") && slices.Contains(classes, "answer") {
 		return "code + review"
 	}

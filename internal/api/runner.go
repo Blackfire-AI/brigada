@@ -307,8 +307,7 @@ type jobGrant struct {
 	// AgentAdapter and AgentModel name the picked agent exactly — its
 	// registration identity is its adapter and model, which the harness
 	// alone does not give. Set on a foreman turn's grant, whose model the
-	// project chose; the runner then runs that adapter and that model. Empty
-	// on every other grant, where the harness names the agent.
+	// project chose; task grants also name their picked registration exactly.
 	AgentAdapter string `json:"agent_adapter,omitempty"`
 	AgentModel   string `json:"agent_model,omitempty"`
 	RepoURL      string `json:"repo_url"`
@@ -339,6 +338,8 @@ type jobGrant struct {
 	// runner never holds a long-lived foreman token; the lease-scoped one
 	// is all it ever has).
 	ForemanToken string `json:"foreman_token,omitempty"`
+	// Effort is the task job's mapped effort, with the agent default applied.
+	Effort string `json:"effort,omitempty"`
 	// ForemanEffort is the project's chosen foreman effort level, on a
 	// foreman turn's grant only. It overrides the runner agent's effort
 	// for the turn; empty keeps the agent's.
@@ -370,6 +371,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		Attempt:         g.Attempt,
 		ResumeSessionID: g.ResumeSessionID,
 		ForemanToken:    g.ForemanToken,
+		Effort:          g.Effort,
 		ForemanEffort:   g.ForemanEffort,
 	}
 }

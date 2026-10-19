@@ -75,3 +75,17 @@ func TestTaskTierAndEffortVocabulary(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestEffortForHarness(t *testing.T) {
+	for _, tc := range []struct{ harness, effort, want string }{
+		{"claude", "high", "high"}, {"codex", "max", "max"},
+		{"opencode", "low", "minimal"}, {"opencode", "medium", ""},
+		{"opencode", "high", "high"}, {"opencode", "max", "max"},
+		{"kimi", "high", ""}, {"unknown", "max", ""},
+		{"claude", "", ""}, {"codex", "", ""}, {"opencode", "", ""}, {"kimi", "", ""},
+	} {
+		if got := EffortForHarness(tc.harness, tc.effort); got != tc.want {
+			t.Errorf("%s/%s = %q, want %q", tc.harness, tc.effort, got, tc.want)
+		}
+	}
+}

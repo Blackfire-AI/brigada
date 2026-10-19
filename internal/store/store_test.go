@@ -1051,3 +1051,37 @@ func TestTaskTierEffortMigrationKeepsTheRows(t *testing.T) {
 		t.Errorf("existing task changed: %q", got)
 	}
 }
+
+func TestJobEffortMigrationKeepsTheRows(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(migs) < 42 || migs[41].version != 42 || migs[41].name != "job_effort" {
+		t.Fatal("0042_job_effort missing from allMigrations")
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, m := range migs[:41] {
+		exec(t, db, m.sql)
+	}
+	exec(t, db, "PRAGMA user_version = 41")
+	project := insertProject(t, db)
+	plan := insertPlan(t, db, project)
+	task := insertTask(t, db, plan)
+	job := insertJob(t, db, project, task, "task:old", "queued")
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := openStore(t, path)
+	if got := queryString(t, s.db, "SELECT effort FROM jobs WHERE id = ?", job); got != "" {
+		t.Errorf("old job effort = %q, want empty", got)
+	}
+	if got := queryString(t, s.db, "SELECT prompt FROM jobs WHERE id = ?", job); got != "the prompt" {
+		t.Errorf("old job changed: %q", got)
+	}
+}

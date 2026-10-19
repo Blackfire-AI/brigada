@@ -96,3 +96,20 @@ func ValidateTaskEffort(level string) error {
 	}
 	return fmt.Errorf("task effort %q is invalid; want one of %s", level, strings.Join(TaskEffortLevels, ", "))
 }
+
+// EffortForHarness maps a task's brigada effort level to the CLI's control.
+// An empty result leaves the CLI variant or effort unspecified.
+func EffortForHarness(harness, taskEffort string) string {
+	switch harness {
+	case "claude", "codex":
+		return taskEffort
+	case "opencode":
+		switch taskEffort {
+		case "low":
+			return "minimal"
+		case "high", "max":
+			return taskEffort
+		}
+	}
+	return ""
+}

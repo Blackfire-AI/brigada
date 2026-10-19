@@ -106,6 +106,10 @@ func withReviewerAgent(cfg *Config) {
 	cfg.Agents[1].Model = "fake-2"
 	cfg.Agents[1].Family = "otherfam"
 	cfg.Agents[1].Account = "acct-2"
+	// Same-named adapters pair with agents in advertisement order, even
+	// when both agents drive the same script.
+	reviewer := *cfg.Adapters[0].(*fake.Adapter)
+	cfg.Adapters = append(cfg.Adapters, &reviewer)
 	cfg.StallAfter = 3 * time.Second
 	cfg.ClassCaps = map[string]ClassCaps{"review": {TimeCap: 8 * time.Second}}
 }

@@ -76,8 +76,9 @@ type modelRecorder struct {
 	*fake.Adapter
 	name string
 
-	mu     sync.Mutex
-	models []string
+	mu      sync.Mutex
+	models  []string
+	efforts []string
 }
 
 func (a *modelRecorder) Name() string { return a.name }
@@ -85,6 +86,7 @@ func (a *modelRecorder) Name() string { return a.name }
 func (a *modelRecorder) Command(job adapter.Job, workdir, resumeSessionID string) (*exec.Cmd, error) {
 	a.mu.Lock()
 	a.models = append(a.models, job.Model)
+	a.efforts = append(a.efforts, job.Effort)
 	a.mu.Unlock()
 	return a.Adapter.Command(job, workdir, resumeSessionID)
 }
@@ -171,5 +173,65 @@ func TestRunnerForemanTurnRunsOnTheSecondAdapter(t *testing.T) {
 	}
 	if got := first.ran(); len(got) != 0 {
 		t.Errorf("the ineligible first adapter ran %v, want nothing", got)
+	}
+}
+
+func TestWorkGrantSelectsSameNamedAdapterByModel(t *testing.T) {
+	sonnet := &modelRecorder{name: "claude"}
+	haiku := &modelRecorder{name: "claude"}
+	cfg := Config{Agents: []api.Agent{
+		{Adapter: "claude", Harness: "claude", Model: "sonnet", Effort: "low"},
+		{Adapter: "claude", Harness: "claude", Model: "haiku", Effort: "high"},
+	}, Adapters: []adapter.Adapter{sonnet, haiku}}
+	g := api.JobGrant{Kind: "work", Agent: "claude", AgentAdapter: "claude", AgentModel: "haiku"}
+	ad, model, err := cfg.agentFor(&g)
+	if err != nil || ad != haiku || model != "haiku" {
+		t.Fatalf("agentFor = %v/%s, %v; want haiku adapter", ad, model, err)
+	}
+	if got := cfg.effortFor(&g); got != "high" {
+		t.Errorf("effort = %q, want high", got)
+	}
+	g.Effort = "max"
+	if got := cfg.effortFor(&g); got != "max" {
+		t.Errorf("effort = %q, want max", got)
+	}
+}
+
+// Same-named adapters stay paired with their models through lease and execution.
+func TestRunnerWorkRunsOnTheNamedModel(t *testing.T) {
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	task := e.seedTask("", "true")
+	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE tasks SET effort = 'high' WHERE id = ?", task)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	job := e.submitWork(task, "Add work.txt.")
+	markerDir(t)
+	script := writeWorkerScript(t, happyWorker)
+	sonnet := &modelRecorder{Adapter: &fake.Adapter{Script: script}, name: "claude"}
+	haiku := &modelRecorder{Adapter: &fake.Adapter{Script: script}, name: "claude"}
+	p := e.startRunner(script, 100*time.Millisecond, func(cfg *Config) {
+		cfg.Agents = []api.Agent{
+			{Adapter: "claude", Harness: "claude", Model: "sonnet", Family: "anthropic", Account: "claude", Classes: []string{}},
+			{Adapter: "claude", Harness: "claude", Model: "haiku", Family: "anthropic", Account: "claude", Classes: []string{"implement"}, Effort: "low"},
+		}
+		cfg.Adapters = []adapter.Adapter{sonnet, haiku}
+	})
+	defer p.stop(t)
+	e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	if got := sonnet.ran(); len(got) != 0 {
+		t.Errorf("sonnet ran %v, want no jobs", got)
+	}
+	if got := haiku.ran(); len(got) != 1 || got[0] != "haiku" {
+		t.Errorf("haiku ran %v, want [haiku]", got)
+	}
+	haiku.mu.Lock()
+	defer haiku.mu.Unlock()
+	if len(haiku.efforts) != 1 || haiku.efforts[0] != "high" {
+		t.Errorf("haiku efforts = %v, want [high]", haiku.efforts)
 	}
 }

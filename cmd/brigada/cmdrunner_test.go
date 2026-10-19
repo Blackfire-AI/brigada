@@ -113,6 +113,7 @@ func TestRunnerHarnessRegisters(t *testing.T) {
 		name, harness, model, family, tier string
 		agentForm                          bool
 	}{
+		{"two claude models", "claude", "sonnet", "anthropic", "standard", true},
 		{"claude opus", "claude", "opus", "anthropic", "heavy", true},
 		{"kimi default", "kimi", "default", "moonshot", "standard", false},
 		{"codex default", "codex", "default", "openai", "standard", false},
@@ -207,12 +208,15 @@ func testRunnerHarnessRegisters(t *testing.T, harness, wantModel, wantFamily, wa
 			args = append(args, "--agent-file", agentFile)
 		}
 	}
+	if harness == "claude" && wantModel == "sonnet" {
+		args = append(args, "--agent", "harness=claude,model=haiku,classes=none")
+	}
 	go func() { runDone <- run(rctx, args, out, io.Discard) }()
 	var adapterName, family, model string
 	deadline = time.Now().Add(10 * time.Second)
 	for {
 		err := st.View(ctx, func(tx *sql.Tx) error {
-			return tx.QueryRow("SELECT adapter, family, model FROM agents WHERE harness = ?", harness).
+			return tx.QueryRow("SELECT adapter, family, model FROM agents WHERE harness = ? AND model = ?", harness, wantModel).
 				Scan(&adapterName, &family, &model)
 		})
 		if err == nil {
@@ -233,6 +237,24 @@ func testRunnerHarnessRegisters(t *testing.T, harness, wantModel, wantFamily, wa
 		t.Fatal("the runner did not stop")
 	}
 
+	if harness == "claude" && wantModel == "sonnet" {
+		var count int
+		var classes string
+		if err := st.View(ctx, func(tx *sql.Tx) error {
+			if err := tx.QueryRow("SELECT COUNT(*) FROM agents WHERE harness = 'claude'").Scan(&count); err != nil {
+				return err
+			}
+			return tx.QueryRow("SELECT classes FROM agents WHERE harness = 'claude' AND model = 'haiku'").Scan(&classes)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if count != 2 || classes != "[]" {
+			t.Errorf("claude agents = %d, haiku classes = %s; want 2 and []", count, classes)
+		}
+		if !strings.Contains(out.String(), "claude (model haiku, tier light, classes none)") {
+			t.Errorf("startup = %s", out.String())
+		}
+	}
 	if adapterName != harness || family != wantFamily {
 		t.Errorf("the registered agent = adapter %s, family %s; want %s, %s", adapterName, family, harness, wantFamily)
 	}
@@ -441,8 +463,7 @@ func TestRunnerAccountLabels(t *testing.T) {
 		}
 	})
 
-	// A runner offers one agent per harness, so two agents of one harness
-	// sharing an account live on two runners.
+	// Agents sharing an account can also live on different runners.
 	t.Run("two agents of one harness share an explicit account", func(t *testing.T) {
 		first, _ := registeredAccounts(t, []string{"claude"}, "--agent", "harness=claude,account=team")
 		second, _ := registeredAccounts(t, []string{"claude"}, "--agent", "harness=claude,model=opus,account=team")
@@ -505,7 +526,7 @@ func TestAgentSpecTools(t *testing.T) {
 
 // TestRunnerAgentFlag covers the --agent flag's rules at startup: two
 // agents register as two rows with their own models and classes, a
-// duplicate harness is a usage error, mixing --agent with the
+// duplicate harness/model is a usage error, mixing --agent with the
 // single-agent shorthand flags is a usage error, and a missing agent
 // file or an empty classes list fails at once rather than at the first
 // job.
@@ -529,9 +550,9 @@ func TestRunnerAgentFlag(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "a duplicate harness is refused",
-			args:    []string{"runner", "--agent", "harness=claude", "--agent", "harness=claude,model=opus", "--state-dir", state},
-			wantErr: `harness "claude" is offered twice`,
+			name:    "a duplicate harness/model is refused",
+			args:    []string{"runner", "--agent", "harness=claude", "--agent", "harness=claude,model=sonnet", "--state-dir", state},
+			wantErr: `agent claude/sonnet is offered twice: one agent per harness and model per runner`,
 		},
 		{
 			name:    "mixing --agent with --harness is refused",
@@ -737,5 +758,44 @@ func TestRunnerAgentFlag(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Error("the engine did not stop")
+	}
+}
+
+func TestRunnerAgentModelsAndNoClasses(t *testing.T) {
+	var specs agentSpecs
+	for _, value := range []string{"harness=claude,model=sonnet", "harness=claude,model=opus,classes=none"} {
+		if err := specs.Set(value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ads, adverts, err := resolveRunnerAgents(&runtime{}, specs.specs, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ads) != 2 || len(adverts) != 2 {
+		t.Fatalf("adapters=%d adverts=%d", len(ads), len(adverts))
+	}
+	if ads[0].Name() != "claude" || ads[1].Name() != "claude" || ads[0] == ads[1] {
+		t.Fatal("each claude model needs its own adapter")
+	}
+	if adverts[0].Model != "sonnet" || adverts[1].Model != "opus" || adverts[1].Classes == nil || len(adverts[1].Classes) != 0 {
+		t.Fatalf("adverts = %+v", adverts)
+	}
+	duplicates := []agentSpec{{harness: "claude", classes: splitList(defaultClasses)}, {harness: "claude", model: "sonnet", classes: splitList(defaultClasses)}}
+	if _, _, err := resolveRunnerAgents(&runtime{}, duplicates, ""); err == nil || err.Error() != "agent claude/sonnet is offered twice: one agent per harness and model per runner" {
+		t.Errorf("duplicate default model error = %v", err)
+	}
+	var roundtrip agentSpecs
+	if err := roundtrip.Set(specs.specs[1].String()); err != nil {
+		t.Fatal(err)
+	}
+	if roundtrip.specs[0].classes == nil || len(roundtrip.specs[0].classes) != 0 {
+		t.Fatalf("roundtrip = %+v", roundtrip)
+	}
+	if err := specs.Set("harness=claude,classes="); err == nil {
+		t.Fatal("empty classes= accepted")
+	}
+	if initAgentRoles([]string{}) != "foreman only" || initPlanRoles([]string{}) != "foreman only" {
+		t.Fatal("empty roles must render as foreman only")
 	}
 }

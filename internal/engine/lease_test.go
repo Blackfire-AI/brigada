@@ -267,6 +267,9 @@ func TestLeaseRecordsTheAgent(t *testing.T) {
 	if g == nil {
 		t.Fatal("the agented runner found nothing")
 	}
+	if g.AgentAdapter != "gemini" || g.AgentModel != "flash" {
+		t.Errorf("grant names %s/%s, want gemini/flash", g.AgentAdapter, g.AgentModel)
+	}
 	if got := e.int("SELECT COALESCE(agent_id, 0) FROM jobs WHERE id = ?", g.JobID); got != gemini {
 		t.Errorf("agent_id = %d, want the gemini agent %d", got, gemini)
 	}

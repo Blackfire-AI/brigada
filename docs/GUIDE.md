@@ -619,7 +619,7 @@ A review that asks for changes, or a failed check, starts a fix round on the aut
 
 ### What the runner offers
 
-`brigada runner` takes one `--agent` per harness, repeatable, at most one per harness:
+`brigada runner` takes `--agent` once per harness and model; several models of one harness are separate agents:
 
 ```sh
 brigada runner --agent harness=claude,model=sonnet --agent harness=codex,account=work
@@ -631,7 +631,7 @@ The fields of an `--agent` value:
 |---|---|
 | `harness` | `claude`, `kimi`, `codex` or `opencode`. |
 | `model` | Defaults to `sonnet` for claude, and to the CLI's own default for the others. For opencode, a model is `provider/model`. |
-| `classes` | A `+`-separated list; default `implement+review+answer`. |
+| `classes` | A `+`-separated list; default `implement+review+answer`. `classes=none` advertises no task classes (foreman only). |
 | `account` | The login whose quota the agent spends; defaults to the harness name (see [Accounts](#accounts)). |
 | `agent-file=<path>` | kimi only. Starts the session under your own agent definition instead of the runner's review definition. |
 | `effort=<level>` | Validated per harness (see [Effort](#effort)). |
@@ -665,6 +665,8 @@ Letting Kimi write code is an opt-in. Init warns that Kimi has no sandbox: when 
 | `kimi` | none: its CLI documents no effort option, so `effort=` is refused | — |
 
 The lists are brigada's accepted values, not a promise that every model supports every one: the CLI judges that. For codex the key is model-dependent. For opencode a variant is provider- and model-specific, and the three listed are the ones its help names, not every variant that exists. Any other level is a usage error at startup.
+
+A task can set `low`, `medium`, `high` or `max` effort per job. Claude and Codex use the same word; opencode maps `low` to `minimal`, `medium` to no variant, and keeps `high` and `max`; Kimi ignores task effort. An unspecified mapped level uses the agent's own effort, else the CLI default. Each job records the level passed.
 
 Effort is not part of an agent's identity: the dispatcher, `agent reset` and the outcome record still key by `harness/model`. `status` and `stats` print `claude/opus@high` only for an agent that has an effort set. The foreman's effort is chosen separately ([section 11](#11-the-foremans-harness-claude-or-codex)).
 
@@ -793,7 +795,7 @@ This section is about the **headless** foreman, the brigada-owned session that w
 
 ### Effort and model
 
-**Effort.** Add `--effort <level>` to choose the foreman's reasoning effort: for `claude`, `low`, `medium`, `high`, `xhigh`, `max`; for `codex`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` (the levels are explained in [section 8](#effort)). It goes with `--harness` and `--model`, and choosing again without `--effort` clears it. `project foreman --repo` shows it as `effort=<level>`. It applies to headless turns and to attach, and overrides the effort of the runner agent that serves the turn; workers and reviewers keep their own agent's effort.
+**Effort.** Add `--effort <level>` to choose the foreman's reasoning effort: for `claude`, `low`, `medium`, `high`, `xhigh`, `max`; for `codex`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` (the levels are explained in [section 8](#effort)). It goes with `--harness` and `--model`, and choosing again without `--effort` clears it. `project foreman --repo` shows it as `effort=<level>`. It applies to headless turns and to attach, and overrides the effort of the runner agent that serves the turn; workers and reviewers use the task's effort when set, otherwise their agent's effort.
 
 **The model.** A headless turn runs on the harness and model you chose. The engine leases it only to a runner agent that offers exactly that `--harness`/`--model` pair, and the turn runs on that agent's adapter and model (without `--effort`, at that agent's own effort).
 
@@ -945,7 +947,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 - `brigada init [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories-mode-b).
 - `brigada start`: start the engine and detached runner with the agents saved by init; succeeds when the runner is already running. Use it after a reboot or `brigada stop`. See [section 1](#changing-your-setup-later).
-- `brigada runner [--agent SPEC]... [--labels LABELS] [--max-parallel N]`, where SPEC is `harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]`: run a runner that leases jobs, runs workers and checks, and pushes branches. See [section 8](#8-agents-quota-and-health).
+- `brigada runner [--agent SPEC]... [--labels LABELS] [--max-parallel N]`, where SPEC is `harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]`: run a runner that leases jobs, runs workers and checks, and pushes branches. See [section 8](#8-agents-quota-and-health).
 - `brigada stop [--engine]`: stop the detached runner in the selected state directory; `--engine` also stops the engine. Sends SIGTERM and waits up to 10 seconds per process; succeeds if nothing is running, and never starts the engine. See [section 1](#stopping).
 - `brigada remove [--yes] [--cancel] [--delete-config]`: remove brigada from this repository, keeping its project history. `--yes` applies the displayed plan and stops an unused runner without prompting; `--cancel` cancels live jobs and unfinished plans; `--delete-config` also deletes `.brigada/project.yaml`. See [section 1](#removing-brigada-from-a-repository).
 - `brigada mcp (--foreman [URL] | --coordinator | --client)`: serve brigada's tools over stdio. `--foreman` is the mode A bridge of your own session ([section 2](#2-your-own-session-is-the-foreman-mode-a)), `--coordinator` the mode B tools ([section 3](#3-several-repositories-mode-b)), `--client` the tools of [section 12](#from-another-harness). Only one selector at a time. Claude Code runs it from the wiring init writes. Without a selector, `--socket PATH` is the bridge a headless foreman session uses; you do not run that by hand.

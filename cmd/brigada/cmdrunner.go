@@ -30,7 +30,7 @@ import (
 func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("runner",
 		"brigada runner [--agent SPEC]... [--harness HARNESS] [--model MODEL] [--classes CLASSES] [--agent-file PATH] [--worker-script PATH] [--labels LABELS] [--max-parallel N] [--no-start]",
-		"Run a runner that leases jobs, runs workers and checks, and pushes task branches.")
+		"Run a runner that leases jobs, runs workers and checks, and pushes task branches; --agent once per harness and model.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	var (
@@ -52,7 +52,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	fs.IntVar(&maxParallel, "max-parallel", 0, "how many concurrent jobs this runner runs, advertised at register (0 = unset, one at a time)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	agents := &agentSpecs{}
-	fs.Var(agents, "agent", "one offered agent, repeatable: harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]; account defaults to the harness name; effort is validated per harness (claude, codex, opencode; kimi has none); tools= (claude only) replaces the Go shell scope with Claude Code tool patterns, none = file tools only; replaces --harness/--model/--classes/--agent-file")
+	fs.Var(agents, "agent", "one offered agent, --agent once per harness and model: harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]; account defaults to the harness name; effort is validated per harness (claude, codex, opencode; kimi has none); tools= (claude only) replaces the Go shell scope with Claude Code tool patterns, none = file tools only; replaces --harness/--model/--classes/--agent-file")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
@@ -80,6 +80,9 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			}
 		}
 	default:
+		if len(splitList(classes)) == 0 {
+			return usagef(stderr, "the agent for harness %q takes no classes: --classes must name at least one", harness)
+		}
 		agents.specs = append(agents.specs, agentSpec{
 			harness: harness, model: model, classes: splitList(classes), agentFile: agentFile,
 		})
@@ -111,7 +114,11 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			model += "@" + a.Effort
 		}
 		// This is the table's tier: the runner does not read the engine's override.
-		parts[i] = fmt.Sprintf("%s (model %s, tier %s, classes %s)", a.Harness, model, adapter.AgentTier(a.Harness, a.Model), strings.Join(a.Classes, ","))
+		classes := strings.Join(a.Classes, ",")
+		if len(a.Classes) == 0 {
+			classes = "none"
+		}
+		parts[i] = fmt.Sprintf("%s (model %s, tier %s, classes %s)", a.Harness, model, adapter.AgentTier(a.Harness, a.Model), classes)
 		if a.Tools != "" {
 			parts[i] += " tools " + a.Tools
 		}
@@ -188,14 +195,14 @@ func (s *agentSpecs) String() string {
 	return strings.Join(out, " ")
 }
 
-// Set parses one --agent value: harness=<h>[,model=<m>][,classes=<c1>+<c2>]
+// Set parses one --agent value: harness=<h>[,model=<m>][,classes=<c1>+<c2>|none]
 // [,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]. The harness
 // is required; the
 // rest keeps its harness's default. Everything but existence is validated here, so a
 // bad agent is a startup failure, never a job's.
 func (s *agentSpecs) Set(v string) error {
 	spec := agentSpec{classes: splitList(defaultClasses)}
-	sawClasses := false
+	classesNone := false
 	for _, field := range strings.Split(v, ",") {
 		field = strings.TrimSpace(field)
 		if field == "" {
@@ -203,7 +210,7 @@ func (s *agentSpecs) Set(v string) error {
 		}
 		key, value, ok := strings.Cut(field, "=")
 		if !ok {
-			return fmt.Errorf("--agent %q: want harness=<h>[,model=<m>][,classes=<c1>+<c2>][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]", v)
+			return fmt.Errorf("--agent %q: want harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]", v)
 		}
 		switch key {
 		case "harness":
@@ -211,8 +218,12 @@ func (s *agentSpecs) Set(v string) error {
 		case "model":
 			spec.model = value
 		case "classes":
-			sawClasses = true
-			spec.classes = splitPlusList(value)
+			classesNone = value == "none"
+			if value == "none" {
+				spec.classes = []string{}
+			} else {
+				spec.classes = splitPlusList(value)
+			}
 		case "account":
 			spec.account = value
 		case "agent-file":
@@ -232,7 +243,7 @@ func (s *agentSpecs) Set(v string) error {
 	if spec.harness == "" {
 		return fmt.Errorf("--agent %q: harness=<h> is required", v)
 	}
-	if sawClasses && len(spec.classes) == 0 {
+	if !classesNone && len(spec.classes) == 0 {
 		return fmt.Errorf("--agent %q: classes is empty; name at least one, + -separated", v)
 	}
 	s.specs = append(s.specs, spec)
@@ -246,6 +257,8 @@ func (s agentSpec) String() string {
 	}
 	if len(s.classes) > 0 {
 		fields = append(fields, "classes="+strings.Join(s.classes, "+"))
+	} else {
+		fields = append(fields, "classes=none")
 	}
 	if s.account != "" {
 		fields = append(fields, "account="+s.account)
@@ -320,16 +333,14 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 	var adverts []api.Agent
 	seen := map[string]bool{}
 	for _, spec := range specs {
-		if seen[spec.harness] {
-			return nil, nil, fmt.Errorf("harness %q is offered twice: at most one agent per harness per runner", spec.harness)
-		}
-		seen[spec.harness] = true
-		if len(spec.classes) == 0 {
-			return nil, nil, fmt.Errorf("the agent for harness %q takes no classes: --classes must name at least one", spec.harness)
-		}
 		if spec.model == "" {
 			spec.model = runnerDefaultModel(spec.harness)
 		}
+		pair := spec.harness + "/" + spec.model
+		if seen[pair] {
+			return nil, nil, fmt.Errorf("agent %s is offered twice: one agent per harness and model per runner", pair)
+		}
+		seen[pair] = true
 		var ad adapter.Adapter
 		if spec.tools != nil && spec.harness != "claude" {
 			return nil, nil, fmt.Errorf("--agent tools=: %s", lifecycle.ToolsRefusal(spec.harness))
