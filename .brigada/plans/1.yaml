@@ -40,7 +40,7 @@ tasks:
     class: "implement"
     deps: ["agents-md"]
     base: "agents-md"
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
   - id: 4
