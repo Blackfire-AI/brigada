@@ -695,6 +695,26 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 				result.Status = statusCheckFail
 			}
 		}
+	} else if result.Status == statusFailed {
+		branch := fmt.Sprintf("%s-salvage-%d", ws.branch, r.grant.JobID)
+		saved, err := ws.salvage(ctx, branch)
+		if r.gone(ctx, "saving the failed run's edits") {
+			return
+		}
+		var note string
+		if err != nil {
+			r.cfg.Log.WarnContext(ctx, "salvage the failed run's edits",
+				"job_id", r.grant.JobID, "branch", branch, "err", err)
+			note = "edits could not be saved on branch " + branch + ": " + err.Error()
+		} else if saved {
+			note = "edits saved on branch " + branch
+		}
+		if note != "" {
+			if result.Summary != "" {
+				result.Summary += "; "
+			}
+			result.Summary += note
+		}
 	}
 	// The commit each extra repository resolved to is the runner's to say
 	// (§5.8); a worker's own claim is replaced.

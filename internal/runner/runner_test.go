@@ -676,6 +676,12 @@ func TestRunnerWorkerLeavesEditsUncommitted(t *testing.T) {
 	if check := e.checkResult(done); check.ExitCode != 0 || check.TimedOut {
 		t.Errorf("check = %+v, want a pass on the runner's commit", check)
 	}
+	if res.Summary != "edited work.txt" {
+		t.Errorf("done summary changed: %q", res.Summary)
+	}
+	if branch := fmt.Sprintf("%s-salvage-%d", taskBranch(task, 1), job); remoteBranchCommit(t, remote, branch) != "" {
+		t.Error("a done run pushed a salvage branch")
+	}
 	e.assertNoWorktrees()
 }
 
@@ -698,7 +704,92 @@ func TestRunnerNoResultBlock(t *testing.T) {
 	if !strings.Contains(res.Summary, "trust me") {
 		t.Errorf("the no-result summary should name what the worker said: %+v", res)
 	}
+	if branches := git(t, "", "ls-remote", "--heads", remote); strings.Count(branches, "\n") != 1 || !strings.Contains(branches, "refs/heads/main\n") {
+		t.Errorf("a no-result run without changes pushed a branch: %s", branches)
+	}
 	e.assertNoWorktrees()
+}
+
+func TestRunnerSalvagesFailedWork(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		worker     string
+		status     string
+		reason     string
+		existing   bool
+		pushed     bool
+		rejectPush bool
+		wantSaved  bool
+	}{
+		{name: "no result with edits", worker: "echo edited > work.txt\n" + noResultWorker, status: statusFailed, reason: reasonNoResult, wantSaved: true},
+		{name: "no result with commits", worker: "echo edited > work.txt\ngit add -A\ngit commit -qm work\n" + noResultWorker, status: statusFailed, reason: reasonNoResult, existing: true, wantSaved: true},
+		{name: "failed with edits", worker: "echo edited > work.txt\n" + fakeResultScript(`{"status":"failed","summary":"unfinished"}`), status: statusFailed, existing: true, wantSaved: true},
+		{name: "no result on existing branch without changes", worker: noResultWorker, status: statusFailed, reason: reasonNoResult, existing: true},
+		{name: "no result already pushed", worker: "echo edited > work.txt\ngit add -A\ngit commit -qm work\ngit push -q origin HEAD\n" + noResultWorker, status: statusFailed, reason: reasonNoResult, pushed: true},
+		{name: "needs help with edits", worker: "echo edited > work.txt\n" + fakeResultScript(`{"status":"needs_help","summary":"waiting","question":"what next?"}`), status: statusNeedsHelp, existing: true},
+		{name: "salvage push rejected", worker: "echo edited > work.txt\n" + noResultWorker, status: statusFailed, reason: reasonNoResult, existing: true, rejectPush: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			remote := newRemote(t)
+			e := newTestEnv(t, engine.Config{})
+			e.seedProject(remote)
+			task := e.seedTask("", "exit 99") // failed runs never run the check
+			branch := taskBranch(task, 1)
+			var before string
+			if tt.existing {
+				git(t, "", "--git-dir", strings.TrimPrefix(remote, "file://"), "branch", branch, "main")
+				before = remoteBranchCommit(t, remote, branch)
+			}
+			if tt.rejectPush {
+				hook := filepath.Join(strings.TrimPrefix(remote, "file://"), "hooks", "pre-receive")
+				if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			job := e.submitWork(task, "Edit work.txt.")
+			p := e.startRunner(writeWorkerScript(t, tt.worker), 100*time.Millisecond)
+			defer p.stop(t)
+			done := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
+			res := e.workerResult(done)
+			if res.Status != tt.status || res.Reason != tt.reason {
+				t.Errorf("result = %+v, want %s/%s", res, tt.status, tt.reason)
+			}
+			if len(done.CheckResult) != 0 {
+				t.Errorf("the failed run ran a check: %s", done.CheckResult)
+			}
+			salvage := fmt.Sprintf("%s-salvage-%d", branch, job)
+			if got := remoteBranchCommit(t, remote, salvage); (got != "") != tt.wantSaved {
+				t.Fatalf("salvage branch commit = %q, want saved=%v", got, tt.wantSaved)
+			}
+			if tt.wantSaved {
+				if !strings.HasSuffix(res.Summary, "edits saved on branch "+salvage) {
+					t.Errorf("summary does not name the salvage branch: %q", res.Summary)
+				}
+				clone := t.TempDir()
+				git(t, "", "clone", "-q", "--branch", salvage, remote, clone)
+				if data, err := os.ReadFile(filepath.Join(clone, "work.txt")); err != nil || string(data) != "edited\n" {
+					t.Errorf("salvage lost the worker's edit: %q (%v)", data, err)
+				}
+			} else if tt.rejectPush {
+				if !strings.Contains(res.Summary, "edits could not be saved on branch "+salvage) || !strings.Contains(res.Summary, "trust me") {
+					t.Errorf("summary does not retain the failure and rejected salvage: %q", res.Summary)
+				}
+			} else if strings.Contains(res.Summary, "edits saved") {
+				t.Errorf("summary claims a salvage with no work saved: %q", res.Summary)
+			}
+			if tt.pushed {
+				if remoteBranchCommit(t, remote, branch) == "" {
+					t.Error("the worker did not push its work")
+				}
+			} else if got := remoteBranchCommit(t, remote, branch); got != before {
+				t.Errorf("salvage moved the task's remote branch from %q to %q", before, got)
+			}
+			if res.Branch != "" {
+				t.Errorf("salvage became the task's result branch: %q", res.Branch)
+			}
+			e.assertNoWorktrees()
+		})
+	}
 }
 
 func TestRunnerCheckFailed(t *testing.T) {

@@ -383,6 +383,53 @@ func (w *workspace) ensurePushed(ctx context.Context) error {
 	return nil
 }
 
+// salvage saves a failed worker's work on a separate branch, leaving
+// the task's remote branch alone. A clean checkout with no commits
+// beyond the task's remote (or its base, if never pushed) saves nothing.
+func (w *workspace) salvage(ctx context.Context, branch string) (bool, error) {
+	if err := w.commitLeftovers(ctx); err != nil {
+		return false, err
+	}
+	head, err := w.worktreeHead(ctx)
+	if err != nil {
+		return false, err
+	}
+	remote, exists, err := w.remoteBranch(ctx, w.branch)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		if head == w.base {
+			return false, nil
+		}
+	} else {
+		if head == remote {
+			return false, nil
+		}
+		// The remote may have advanced since this checkout was built.
+		// Fetch its commit without moving any branch in the shared mirror.
+		if out, err := w.git(ctx, "-C", w.dir, "fetch", "--no-tags", "--no-write-fetch-head", w.repoURL, remote); err != nil {
+			return false, fmt.Errorf("fetch the task branch for salvage: %w", trimCmdError(out, err))
+		}
+		out, err := w.git(ctx, "-C", w.dir, "rev-list", "--max-count=1", "HEAD", "--not", remote)
+		if err != nil {
+			return false, fmt.Errorf("read the worker's unpushed commits: %w", trimCmdError(out, err))
+		}
+		if strings.TrimSpace(string(out)) == "" {
+			return false, nil
+		}
+	}
+	if out, err := w.git(ctx, "-C", w.dir, "push", w.repoURL, "HEAD:refs/heads/"+branch); err != nil {
+		return false, fmt.Errorf("push %s to %s: %w", branch, redactURL(w.repoURL), trimCmdError(out, err))
+	}
+	if remote, exists, err := w.remoteBranch(ctx, branch); err != nil {
+		return false, err
+	} else if !exists || remote != head {
+		return false, fmt.Errorf("salvage branch %s does not hold the worktree's commit after pushing it", branch)
+	}
+	return true, nil
+}
+
 // commitLeftovers commits whatever the worker left uncommitted, so a
 // done run cannot ship a branch that is missing its own edits. A clean
 // tree is left alone.
