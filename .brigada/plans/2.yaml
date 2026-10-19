@@ -61,6 +61,6 @@ tasks:
     deps: []
     base: ""
     tier: heavy
-    state: reviewing
+    state: running
     branch: "brigada/task-12"
-    rounds: 1
+    rounds: 2
