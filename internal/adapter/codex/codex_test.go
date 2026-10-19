@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -186,9 +187,10 @@ func TestParseFixtureNormal(t *testing.T) {
 	want := []adapter.Event{
 		{Kind: adapter.EvSession, SessionID: "01a140b7-6c27-7441-b9a1-1a082df4d4c9"},
 		{Kind: adapter.EvMessage, Text: "ok"},
+		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(11578), OutputTokens: usageInt(5), CachedInputTokens: usageInt(9984), ReasoningTokens: usageInt(0)}},
 	}
-	if !slices.Equal(events, want) {
-		t.Errorf("events = %+v, want %+v (usage and turn markers ignored)", events, want)
+	if !reflect.DeepEqual(events, want) {
+		t.Errorf("events = %+v, want %+v (usage recorded, turn start ignored)", events, want)
 	}
 	if got := (&Adapter{}).ResultText(events); got != "ok" {
 		t.Errorf("ResultText = %q, want ok", got)
@@ -203,8 +205,9 @@ func TestParseFixtureTools(t *testing.T) {
 		{Kind: adapter.EvToolStart, Text: cmdText},
 		{Kind: adapter.EvToolEnd, Text: cmdText},
 		{Kind: adapter.EvMessage, Text: "the note starts with a fixture heading"},
+		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(11578), OutputTokens: usageInt(5), CachedInputTokens: usageInt(9984), ReasoningTokens: usageInt(0)}},
 	}
-	if !slices.Equal(events, want) {
+	if !reflect.DeepEqual(events, want) {
 		t.Errorf("events = %+v, want %+v", events, want)
 	}
 	if got := (&Adapter{}).ResultText(events); got != "the note starts with a fixture heading" {
@@ -221,7 +224,7 @@ func TestParseFixtureMCPTools(t *testing.T) {
 		// the end event names the failure and the run may still end clean.
 		{Kind: adapter.EvToolEnd, Text: "brigada/status: bridge exploded"},
 	}
-	if !slices.Equal(events, want) {
+	if !reflect.DeepEqual(events, want) {
 		t.Errorf("events = %+v, want %+v", events, want)
 	}
 }
@@ -237,8 +240,9 @@ func TestParseFixtureMCPNullError(t *testing.T) {
 		{Kind: adapter.EvToolStart, Text: "brigada/task_restart"},
 		{Kind: adapter.EvToolEnd, Text: "brigada/task_restart: failed"},
 		{Kind: adapter.EvMessage, Text: "the restart was refused; I planned around it"},
+		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(1), OutputTokens: usageInt(1)}},
 	}
-	if !slices.Equal(events, want) {
+	if !reflect.DeepEqual(events, want) {
 		t.Errorf("events = %+v, want %+v", events, want)
 	}
 }
@@ -293,7 +297,7 @@ func TestParseEventIgnored(t *testing.T) {
 		`   `,
 		`not json at all`,
 		`{"type":"turn.started"}`,
-		`{"type":"turn.completed","usage":{"input_tokens":1}}`,
+		`{"type":"turn.completed","usage":{"input_tokens":"bad"}}`,
 		`{"type":"item.completed","item":{"id":"i","type":"reasoning","text":"hmm"}}`,
 		`{"type":"item.completed","item":{"id":"i","type":"file_change"}}`,
 		`{"type":"item.started","item":{"id":"i","type":"agent_message","text":"x"}}`,

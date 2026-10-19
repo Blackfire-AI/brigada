@@ -23,18 +23,27 @@ const statsLiveWindow = 10 * time.Minute
 // outcome row yet carries attempts 0 and the bare prior score, so a
 // cold start shows instead of staying blank.
 type StatsRow struct {
-	AgentID   int64   `json:"agent_id"`
-	Harness   string  `json:"harness"`
-	Model     string  `json:"model"`
-	Tier      string  `json:"tier"`
-	Effort    string  `json:"effort,omitempty"` // the agent's effort level; outcomes still group by harness/model
-	Account   string  `json:"account"`
-	Runner    string  `json:"runner"`
-	Live      bool    `json:"live"` // the runner was seen within the stats window
-	Class     string  `json:"class"`
-	Attempts  int     `json:"attempts"`
-	Successes int     `json:"successes"`
-	Score     float64 `json:"score"`
+	AgentID            int64    `json:"agent_id"`
+	Harness            string   `json:"harness"`
+	Model              string   `json:"model"`
+	Tier               string   `json:"tier"`
+	Effort             string   `json:"effort,omitempty"` // the agent's effort level; outcomes still group by harness/model
+	Account            string   `json:"account"`
+	Runner             string   `json:"runner"`
+	Live               bool     `json:"live"` // the runner was seen within the stats window
+	Class              string   `json:"class"`
+	Attempts           int      `json:"attempts"`
+	Successes          int      `json:"successes"`
+	Score              float64  `json:"score"`
+	InputTokens        *int64   `json:"input_tokens"`
+	OutputTokens       *int64   `json:"output_tokens"`
+	CachedInputTokens  *int64   `json:"cached_input_tokens"`
+	ReasoningTokens    *int64   `json:"reasoning_tokens"`
+	Tokens             *int64   `json:"tokens"`
+	CostUSD            *float64 `json:"cost_usd"`
+	WallSeconds        *float64 `json:"wall_seconds"`
+	CostPerSuccess     *float64 `json:"cost_per_success"`
+	CostPerSuccessUnit string   `json:"cost_per_success_unit,omitempty"`
 }
 
 // ProjectStats is one project's stats rows (§8), ordered by class and
@@ -188,6 +197,9 @@ func statsTx(tx *sql.Tx, cfg Config, project int64, now time.Time) ([]ProjectSta
 				p.Rows = append(p.Rows, row)
 			}
 		}
+		if err := usageStatsTx(tx, p, agents); err != nil {
+			return nil, err
+		}
 		sort.SliceStable(p.Rows, func(x, y int) bool {
 			a, b := p.Rows[x], p.Rows[y]
 			if a.Class != b.Class {
@@ -206,4 +218,64 @@ func statsTx(tx *sql.Tx, cfg Config, project int64, now time.Time) ([]ProjectSta
 		projects = []ProjectStats{}
 	}
 	return projects, nil
+}
+
+// Usage is summed from jobs, not outcomes: failed runs, fix rounds and
+// reviewers each spend their own agent's resources. SUM preserves NULL
+// when none of the jobs reported a counter.
+func usageStatsTx(tx *sql.Tx, p *ProjectStats, agents map[int64]*statsAgent) error {
+	rows, err := tx.Query(`SELECT j.agent_id,
+  CASE j.kind WHEN 'review' THEN 'review' WHEN 'foreman' THEN 'plan' ELSE COALESCE(t.class, 'implement') END AS class,
+  SUM(j.input_tokens), SUM(j.output_tokens), SUM(j.cached_input_tokens), SUM(j.reasoning_tokens),
+  SUM(CASE WHEN j.input_tokens IS NOT NULL OR j.output_tokens IS NOT NULL THEN COALESCE(j.input_tokens,0) + COALESCE(j.output_tokens,0) END),
+  SUM(j.cost_usd), SUM(j.wall_seconds)
+  FROM jobs j LEFT JOIN tasks t ON t.id = j.task_id
+  WHERE j.project_id = ? AND j.agent_id IS NOT NULL
+  GROUP BY 1, 2`, p.ProjectID)
+	if err != nil {
+		return fmt.Errorf("sum job usage: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var u StatsRow
+		if err := rows.Scan(&u.AgentID, &u.Class, &u.InputTokens, &u.OutputTokens, &u.CachedInputTokens, &u.ReasoningTokens, &u.Tokens, &u.CostUSD, &u.WallSeconds); err != nil {
+			return err
+		}
+		a := agents[u.AgentID]
+		if a == nil {
+			continue
+		}
+		index := -1
+		for i := range p.Rows {
+			if p.Rows[i].AgentID == u.AgentID && p.Rows[i].Class == u.Class {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			row := a.StatsRow
+			row.Class = u.Class
+			row.Score = Score(0, 0)
+			p.Rows = append(p.Rows, row)
+			index = len(p.Rows) - 1
+		}
+		row := &p.Rows[index]
+		row.InputTokens, row.OutputTokens, row.CachedInputTokens, row.ReasoningTokens = u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.ReasoningTokens
+		row.Tokens, row.CostUSD, row.WallSeconds = u.Tokens, u.CostUSD, u.WallSeconds
+		if row.Successes > 0 {
+			var cost float64
+			if row.CostUSD != nil {
+				cost = *row.CostUSD
+				row.CostPerSuccessUnit = "USD"
+			} else if row.Tokens != nil {
+				cost = float64(*row.Tokens)
+				row.CostPerSuccessUnit = "tokens"
+			} else {
+				continue
+			}
+			cost /= float64(row.Successes)
+			row.CostPerSuccess = &cost
+		}
+	}
+	return rows.Err()
 }

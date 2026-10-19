@@ -20,7 +20,7 @@ func InteractiveTools() []Tool {
 	}
 	offer = append(offer, Tool{Name: "task_cancel", Description: "Cancel a task in this project's current plan, including its live jobs.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"task": map[string]any{"type": "integer"}}, "required": []string{"task"}}, Call: callTaskCancel})
 	offer = append(offer, Tool{Name: "ask_user", Description: "Record a question for the user in the project journal. Present the question in chat and wait for the user's answer.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}, "required": []string{"text"}}, Call: callAskUser})
-	offer = append(offer, Tool{Name: "stats", Description: "The project's agent outcome statistics.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{}}, Call: callStats})
+	offer = append(offer, Tool{Name: "stats", Description: "The project's per-agent and class outcomes, CLI usage, dollars, wall time and cost per success. Usage does not steer dispatch.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{}}, Call: callStats})
 	return offer
 }
 

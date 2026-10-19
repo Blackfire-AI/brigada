@@ -109,6 +109,8 @@ const (
 	// EvToolStart is a tool call beginning; one in flight suspends the
 	// stall clock (§5.6).
 	EvToolStart EventKind = "tool_start"
+	// EvUsage reports counters without advancing the progress clock.
+	EvUsage EventKind = "usage"
 	// EvToolEnd is a tool call finishing.
 	EvToolEnd EventKind = "tool_end"
 	// EvMessage is an assistant message.
@@ -170,9 +172,10 @@ func ResumeCapable(harness string) bool {
 // message fills Text, a session id fills SessionID, an error fills
 // ErrorKind and Text.
 type Event struct {
-	Kind EventKind
-	Time time.Time // when the adapter parsed it; the runner's clock
-	Text string
+	Usage *Usage
+	Kind  EventKind
+	Time  time.Time // when the adapter parsed it; the runner's clock
+	Text  string
 	// SessionID may accompany any kind when the CLI puts its id in
 	// every envelope (including an error before a session-start event).
 	SessionID string

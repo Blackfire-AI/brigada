@@ -89,10 +89,11 @@ type lineJSON struct {
 }
 
 type partJSON struct {
-	Type  string `json:"type"`
-	Text  string `json:"text"`
-	Tool  string `json:"tool"`
-	State struct {
+	Tokens json.RawMessage `json:"tokens"`
+	Type   string          `json:"type"`
+	Text   string          `json:"text"`
+	Tool   string          `json:"tool"`
+	State  struct {
 		Status string `json:"status"`
 	} `json:"state"`
 }
@@ -117,6 +118,17 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 		return adapter.Event{}, false
 	}
 	switch lj.Type {
+	case "step_finish":
+		u := adapter.ParseUsage(lj.Part.Tokens, "input", "output", "", "reasoning", "")
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(lj.Part.Tokens, &fields)
+		cache := adapter.ParseUsage(fields["cache"], "", "", "read", "", "")
+		if u == nil {
+			u = cache
+		} else {
+			u.Add(cache)
+		}
+		return adapter.Event{Kind: adapter.EvUsage, Usage: u}, u != nil
 	case "step_start":
 		if lj.Part.Type == "step-start" && lj.SessionID != "" {
 			return adapter.Event{Kind: adapter.EvSession, SessionID: lj.SessionID}, true

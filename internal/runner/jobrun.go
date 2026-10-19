@@ -812,6 +812,11 @@ var errDropped = errors.New("run dropped during delivery")
 // listening: a bad answer there ends the retries at once, because the
 // engine would refuse the completion anyway.
 func (r *jobRun) complete(ctx context.Context, comp api.Completion) (engine.Answer, error) {
+	comp.Usage = sumUsage(r.snapshotEvents())
+	if !r.startedAt.IsZero() {
+		seconds := r.now().Sub(r.startedAt).Seconds()
+		comp.WallSeconds = &seconds
+	}
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -883,3 +888,17 @@ func (r *jobRun) saveRecord(ctx context.Context, kind, name string, data []byte)
 type noWorkerError struct{ err error }
 
 func (e *noWorkerError) Error() string { return e.err.Error() }
+
+func sumUsage(events []adapter.Event) *adapter.Usage {
+	var total *adapter.Usage
+	for _, ev := range events {
+		if ev.Usage == nil {
+			continue
+		}
+		if total == nil {
+			total = &adapter.Usage{}
+		}
+		total.Add(ev.Usage)
+	}
+	return total
+}

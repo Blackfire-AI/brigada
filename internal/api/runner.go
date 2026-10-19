@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
@@ -177,6 +178,8 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request, runnerID
 		return
 	}
 	c := engine.Completion{
+		Usage:       req.Usage,
+		WallSeconds: req.WallSeconds,
 		Result:      req.Result,
 		Error:       req.Error,
 		CheckResult: req.CheckResult,
@@ -259,6 +262,8 @@ type heartbeatRequest struct {
 }
 
 type completeRequest struct {
+	Usage       *adapter.Usage `json:"usage,omitempty"`
+	WallSeconds *float64       `json:"wall_seconds,omitempty"`
 	jobLeaseRequest
 	Result string `json:"result"`
 	Error  string `json:"error"`

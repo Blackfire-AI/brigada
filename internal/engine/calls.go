@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
 
 // Progress is what a runner's heartbeat carries besides its hold on
@@ -203,6 +205,8 @@ func recordProgressTx(tx *sql.Tx, jobID int64, prog Progress, now time.Time) err
 // — the stopped run's outcome block — and ends the job as stalled
 // rather than done.
 type Completion struct {
+	Usage       *adapter.Usage
+	WallSeconds *float64
 	Result      string
 	Error       string
 	CheckResult string
@@ -307,12 +311,18 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 	if c.Error != "" {
 		errorKind = c.ErrorKind
 	}
+	usage := c.Usage
+	if usage == nil {
+		usage = &adapter.Usage{}
+	}
 	accrue := accrualFrom(job.LastLeased, now)
 	if _, err := tx.Exec(`UPDATE jobs SET status = ?, result = ?, done_lease = ?,
 		lease_expires_at = NULL, last_leased = NULL, queued_at = NULL,
 		leased_seconds = leased_seconds + ?, updated_at = ?,
-		check_result = COALESCE(NULLIF(?, ''), check_result), error_kind = ?
-		WHERE id = ?`, status, string(result), leaseID, accrue, fmtTime(now), c.CheckResult, errorKind, job.ID); err != nil {
+		check_result = COALESCE(NULLIF(?, ''), check_result), error_kind = ?,
+		input_tokens = ?, output_tokens = ?, cached_input_tokens = ?, reasoning_tokens = ?, cost_usd = ?, wall_seconds = ?
+		WHERE id = ?`, status, string(result), leaseID, accrue, fmtTime(now), c.CheckResult, errorKind,
+		usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens, usage.ReasoningTokens, usage.CostUSD, c.WallSeconds, job.ID); err != nil {
 		return "", fmt.Errorf("finish job %d: %w", job.ID, err)
 	}
 	// The turn is over, and its lease-scoped foreman token with it

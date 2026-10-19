@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -603,7 +604,7 @@ func TestStderrFixtures(t *testing.T) {
 				events = append(events, ev)
 			}
 		}
-		if !slices.Equal(events, tc.events) {
+		if !reflect.DeepEqual(events, tc.events) {
 			t.Errorf("%s: events =\n%+v\nwant\n%+v", tc.name, events, tc.events)
 		}
 	}
@@ -662,7 +663,7 @@ func TestTranscripts(t *testing.T) {
 				{Kind: adapter.EvToolStart, Text: "Edit"},
 				{Kind: adapter.EvToolEnd, Text: "toolu-2"},
 				{Kind: adapter.EvMessage, Text: "Added work.txt."},
-				{Kind: adapter.EvSession, SessionID: "sess-1", Text: normalResult},
+				{Kind: adapter.EvSession, SessionID: "sess-1", Text: normalResult, Usage: &adapter.Usage{InputTokens: usageInt(120), OutputTokens: usageInt(80)}},
 			},
 			session:    "sess-1",
 			resultText: normalResult,
@@ -699,7 +700,7 @@ func TestTranscripts(t *testing.T) {
 				{Kind: adapter.EvMessage, Text: "Continuing the task with the review feedback."},
 				{Kind: adapter.EvToolStart, Text: "Edit"},
 				{Kind: adapter.EvToolEnd, Text: "toolu-7"},
-				{Kind: adapter.EvSession, SessionID: "sess-forked", Text: forkedResult},
+				{Kind: adapter.EvSession, SessionID: "sess-forked", Text: forkedResult, Usage: &adapter.Usage{InputTokens: usageInt(90), OutputTokens: usageInt(40)}},
 			},
 			session:    "sess-forked",
 			resultText: forkedResult,
@@ -716,7 +717,7 @@ func TestTranscripts(t *testing.T) {
 	}
 	for _, tc := range cases {
 		events := parseFixture(t, a, tc.fixture)
-		if !slices.Equal(events, tc.events) {
+		if !reflect.DeepEqual(events, tc.events) {
 			t.Errorf("%s: events =\n%+v\nwant\n%+v", tc.name, events, tc.events)
 		}
 		if got := lastSession(events); got != tc.session {
