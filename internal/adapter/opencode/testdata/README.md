@@ -20,3 +20,11 @@ The inline running-state unit test exercises the documented ToolState schema;
 it is deliberately not presented as a recorded CLI event. Step starts identify
 sessions, not tools. Provider failures can be the only event: their envelope's
 session id must survive alongside the error for write-back.
+
+`permission-reject.txt` is not a recording: it transcribes the one fixed-format
+line the headless run path prints on stderr when a permission ask goes
+unanswered — run.ts renders `"! " + "permission requested: <permission>
+(<patterns>); auto-rejecting"` through UI.println, which colours the "!" with
+TEXT_WARNING_BOLD regardless of TTY. The first line carries those SGR codes as
+the CLI emits them, the second the same text without them; the path inside is
+the shape of a worktree-external pattern, not a real checkout.
