@@ -53,16 +53,20 @@ Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi
 
 1. **The foreman.** The foreman plans the work and decides what happens when a task needs judgment. It runs whenever work finishes, so it uses that agent's quota. Only Claude and Codex can be the foreman. Init asks `Which model should the foreman run?` and lists every model of the signed-in Claude and Codex CLIs, Claude first, as `harness/model` with a note:
 
-   | CLI | Models listed |
+   The foreman menu uses the Claude and Codex rows below. Workers use every known-family model in each CLI's list; opencode offers individual picks across providers.
+
+   | CLI | Model source |
    |---|---|
    | `claude` | The aliases `sonnet`, `opus`, `haiku` (Anthropic), plus any other models Claude Code's own cache lists. |
    | `codex` | The CLI default first (shown by the top-level `model` of `$CODEX_HOME/config.toml`, or `~/.codex/config.toml` when `CODEX_HOME` is unset; its note names that config path, and it is stored as `default`), then the catalog models from `codex debug models`. If the config cannot be read, the entry says `CLI default`. |
+   | `kimi` | The CLI default and configured models from `~/.kimi-code/config.toml`; worker-only. |
+   | `opencode` | The `provider/model` list from `opencode models`; worker-only, with multiple picks in its menu. |
 
    Models whose family init cannot tell are left out; Codex's `default` counts as OpenAI. `Pick 1-N, or type harness/model [D]:` takes a number or a typed `harness/model` that names a signed-in Claude or Codex model of a known family. `D` is the foreman saved by the last run, else the first Claude model, else the first Codex model; the saved one is marked `current`. After three bad answers init stops and names `--foreman HARNESS/MODEL`. With only one candidate, init prints `Foreman: HARNESS/MODEL (the only model that can plan)` and skips the model question.
 
    Then it asks once, for the foreman only, `How hard should the foreman think? Higher means better plans and decisions, and slower turns that use more of the plan's limits.` For Claude the levels are `medium` (marked as Claude Code's default), `low`, `high`, `xhigh`, `max`. For Codex they are the model's catalog levels, its default first (tagged `your codex default` when it comes from `model_reasoning_effort` in your config, else `codex's default`), the rest in catalog order. `Pick 1-N or type a level [1]:` takes a number or a listed level; Enter records the first entry's level, or the saved one on a rerun. A model with fewer than two levels is not asked. Workers get no effort question: for each task the foreman says how hard a model should think.
 
-   `--foreman HARNESS/MODEL[@EFFORT]` answers both questions; without `@EFFORT` an interactive run still asks the effort, and a `--yes` or `--probe` run records none. The step ends with how to change the choice later: `brigada project foreman --harness H --model M --effort E`, or run `brigada init` again.
+   `--foreman HARNESS/MODEL[@EFFORT]` answers both questions; without `@EFFORT` an interactive run still asks the effort. With `--yes` or `--probe`, the foreman must be among the usable `--agent` models, and its agent effort is used unless `@EFFORT` overrides it. The step ends with how to change the choice later: `brigada project foreman --harness H --model M --effort E`, or run `brigada init` again.
 
 2. **Workers.** Each agent CLI can run tasks, and init offers every model the CLI knows. For each task the foreman says how heavy a model it needs (light, standard or heavy) and how hard it should think, and brigada picks the model of that tier with the best record on this repo. The tier comes from the model's name, unless the local config sets `tier.HARNESS/MODEL`. For each installed CLI, in order, init prints its sign-in line and then asks:
 
@@ -77,7 +81,7 @@ Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi
 
    A foreman whose CLI you decline to use for tasks (`Use codex's models…` answered no) is still registered as an agent with `classes=none`, so its turns have somewhere to run. The Plan shows it as `foreman only`.
 
-3. **Tasks at once.** Init names this machine's core count and asks `Tasks at once [N]:` (1–64). Enter keeps the saved choice, or defaults to half the cores, at least 1 and at most 4. `--parallel N` supplies the answer; `--yes` and `--probe` use it, else the saved choice, else that default. On apply, init writes `caps.global = N`, `caps.plan = 3` and per-account caps (Claude 3, Codex 2, Kimi 1, OpenCode 2, each no higher than N) to the local brigada config, preserving other settings. The runner uses `--max-parallel N`. Change caps later with `brigada config`. If the engine is already running, init explains how to restart it to read changed caps.
+3. **Tasks at once.** Init names this machine's core count and asks `Tasks at once [N]:` (1–64). Enter keeps the saved choice, or defaults to half the cores, at least 1 and at most 4. `--parallel N` supplies the answer; `--yes` and `--probe` use it, else the saved choice, else that default. On apply, init writes `caps.global = N`, `caps.plan = 3` and per-account caps (Claude 3, Codex 2, Kimi 1, OpenCode 2, each no higher than N) to the local brigada config, preserving other settings. The runner uses `--max-parallel N`. The engine reads caps when it starts. `brigada config` shows the config file to edit; after changing caps, run `brigada stop --engine`, then `brigada start` to start the engine and runner again. If the engine is already running when init changes caps, init prints the restart instructions.
 
 4. **The check.** Init explains: `A command that must succeed (exit 0) before a task's work is accepted.` It names the build files that supplied candidates: `Found uv.lock, so the suggestion is:`, for example. With several candidates it says `so the suggestions are:` and lists one line per candidate, best first, with its note. It asks `Check command [<best>]:`; Enter takes that command. The sources are:
 
@@ -128,9 +132,9 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 | `--probe` | Print the plan; write nothing and start nothing. |
 | `--verbose` | Also print the full contents of new repository setup files. Diffs for existing files are always shown. |
 | `--yes` | Apply the displayed plan without prompting. It does not confirm authentication. `--yes` and `--probe` together are a usage error. |
-| `--agent SPEC` | Repeatable. The same syntax and defaults as `brigada runner --agent` ([section 8](#8-agents-quota-and-health)): `harness=<h>[,model=<m>][,classes=…][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=…]`. Replaces the worker models questions and Kimi's writing question; the foreman model and effort are still chosen in step 1. Use `classes=review` to keep Kimi reviewing only. |
+| `--agent SPEC` | Repeat once per model. The same syntax and defaults as `brigada runner --agent` ([section 8](#8-agents-quota-and-health)): `harness=<h>[,model=<m>][,classes=…][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=…]`. Replaces the worker models questions and Kimi's writing question; the foreman model and effort are still chosen in step 1. Use `classes=review` to keep Kimi reviewing only. |
 | `--signed-in HARNESS` | Confirm an installed harness is signed in (repeatable or comma-separated). Local only. |
-| `--foreman H/M@E` | Choose a signed-in Claude or Codex foreman model and effort, for example `claude/sonnet@high`. `H/M` without `@E` skips the model question but still asks for effort in an interactive run. |
+| `--foreman HARNESS/MODEL[@EFFORT]` | Choose a signed-in Claude or Codex foreman model and effort, for example `claude/sonnet@high`. `H/M` without `@E` skips the model question but still asks for effort in an interactive run. |
 | `--parallel N` | Tasks at once (1–64); answers step 3 without a question. |
 | `--check CMD` | The default check; answers step 4 without a question. |
 | `--tools SCOPE` | Worker tools in runner `tools=` syntax (`Bash(npm test:*)+Bash(npx jest:*)`, or `none`). An explicit agent `tools=` wins; a `tools.claude/<model>` line in your config file is kept unless you pass `--tools`. |
@@ -149,6 +153,8 @@ Init still reads answers from standard input, one line per question, and prints 
 4. Tasks at once, if `--parallel` was not given.
 5. The check command, if `--check` was not given.
 6. The final confirmation.
+
+With explicit `--agent` flags, init first asks any needed authentication or use questions for those agents in CLI order, then asks the foreman model and effort; the worker model and Kimi writing questions are skipped.
 
 On a first run, Enter picks the first foreman model and its default effort, uses all offered Claude and Codex models, leaves Kimi out at `Use kimi?`, and keeps Kimi reviewing only at its writing question. Opencode defaults to `-`, so Enter leaves it out. With `--agent`, the worker models questions and Kimi writing question are skipped; the foreman questions and any unconfirmed sign-in or use questions may still be asked.
 
@@ -206,12 +212,12 @@ Remote `brigada/task-*` branches and `brigada/plans` are left alone. Remove list
 
 ### By hand
 
-The manual equivalents of what init applies:
+The manual equivalents of what init applies (repeat `--agent` for each model):
 
 ```sh
 brigada project foreman --harness claude --model sonnet --effort medium
 brigada project import               # if you wrote .brigada/project.yaml
-brigada runner --agent harness=claude,model=sonnet --agent harness=codex,model=gpt-5
+brigada runner --agent harness=claude,model=sonnet --agent harness=claude,model=opus --agent harness=codex,model=gpt-5 --max-parallel 4
 ```
 
 A runner started by hand stays in its terminal.
@@ -528,7 +534,7 @@ A project has one instruction text that brigada puts into every worker and revie
 
 ### The foreman, effort and tools on agents
 
-The project's foreman is chosen with `brigada project foreman [--repo URL] [--harness H --model M [--effort E]]` ([section 11](#11-the-foremans-harness-claude-or-codex)). An agent's `effort` and, for Claude, `tools` are set on the runner's `--agent` ([section 8](#8-agents-quota-and-health)), with `tools.claude/<model>` in the config file as the per-model default ([section 13](#13-configuration-reference)).
+The foreman's model and effort are chosen in `brigada init`, or with `brigada project foreman [--repo URL] [--harness H --model M [--effort E]]` ([section 11](#11-the-foremans-harness-claude-or-codex)). The foreman chooses each task's effort separately. An agent's `effort` and, for Claude, `tools` are set on the runner's `--agent` ([section 8](#8-agents-quota-and-health)), with `tools.claude/<model>` in the config file as the per-model default ([section 13](#13-configuration-reference)).
 
 ## 7. Plans, checks and reviews
 
@@ -536,8 +542,19 @@ You ask; the foreman turns the ask into a **plan**: a set of tasks, each with a 
 
 - A task with no dependencies is queued at once.
 - A task with dependencies waits (`pending`) until all of them are done. If one of them fails or is cancelled, the dependents keep waiting until the foreman re-points them to another task or drops the dependency.
-- The foreman can amend a live plan: add tasks, cancel tasks, re-point dependencies.
+- The foreman can amend a live plan: add tasks, cancel tasks, re-point dependencies, or change a waiting or parked task's tier and effort.
 - A plan is `done` when no live work is left. That is not the same as everything succeeding: the plan's done report names the tasks that failed, that were cancelled without your approval, and that never ran.
+
+Each task also has two fields, set by the foreman in `plan_create` or `plan_amend`:
+
+| Field | Values | Default | Meaning |
+|---|---|---|---|
+| `tier` | `light`, `standard`, `heavy` | `standard` | How heavy a model the task needs; the dispatcher selects an agent of that tier, with fallback when needed ([section 8](#tiers)). |
+| `effort` | `low`, `medium`, `high`, `max` | the agent's effort, else the CLI default | How hard the model should think on this task, mapped to the chosen harness ([section 8](#effort)). |
+
+Neither field triggers approval. The plan shown for approval includes tier and effort, and `brigada status` shows them beside tasks: `heavy @high`, for example. An unchanged standard tier is omitted; `standard->heavy` shows an automatic bump from the foreman's tier to the effective tier.
+
+The foreman can use `plan_amend`'s `retier` list, for example `[{"task":"build","tier":"light","effort":"low"}]`, to change a `pending`, `ready` or `needs_foreman` task. Omitted fields keep their values; changing the tier resets both the foreman's tier and the effective tier. A task at `needs_foreman` still needs `task_restart` to run again.
 
 ### The approval limit
 
@@ -558,7 +575,7 @@ or through the coordinator's `plan_approve` and `plan_reject` ([section 3](#3-se
 
 ### The plan file
 
-Every change to a plan is mirrored to `.brigada/plans/<plan-id>.yaml` and pushed to the `brigada/plans` branch of your remote, not to your default branch. The file holds the graph, the task states, the branches and the open questions, but no transcripts.
+Every change to a plan is mirrored to `.brigada/plans/<plan-id>.yaml` and pushed to the `brigada/plans` branch of your remote, not to your default branch. The file holds the graph, the task states, the branches, the open questions and the foreman's task tier and effort, but no transcripts. It carries the foreman's tier rather than the effective tier raised by escalation; a standard tier and an unset effort are omitted.
 
 The store is the authority, and the file is a copy that may lag: a push that fails is retried on the next change. The file exists so that `brigada recover` can rebuild plans after a lost store ([section 10](#10-backups-and-recovery)), and so you can see a plan from another machine.
 
@@ -616,7 +633,7 @@ An approve counts only with substantive findings text (80 characters or more). A
 
 ### Rounds
 
-A review that asks for changes, or a failed check, starts a fix round on the author's session with the findings as feedback. Fix rounds for failed checks and for review changes draw on one shared budget: by default two fix rounds in all per attempt, plus two restarts. When check or review rounds are spent, brigada raises the task’s effective tier one step (light → standard → heavy) and starts a fresh attempt on the next `-r<n>` branch, carrying the feedback and spending a restart. A worker reporting `failed` (including a missing result block) gets the same escalation. At heavy, or with no restarts left, the task parks at `needs_foreman` and the entry says why; the foreman decides whether to re-plan, switch agent, split the task or ask you. A stalled worker always goes straight to the foreman. Through `plan_amend`’s `retier`, the foreman can change a pending, ready or parked task’s tier or effort; a parked task then needs `task_restart`.
+A review that asks for changes, or a failed check, starts a fix round on the author's session with the findings as feedback. Fix rounds for failed checks and for review changes draw on one shared budget: by default two fix rounds in all per attempt, plus two restarts. When check or review rounds are spent, brigada raises the task’s effective tier one step (light → standard → heavy) and starts a fresh attempt on the next `-r<n>` branch, carrying the feedback and spending a restart. A worker reporting `failed` (including a missing result block) gets the same escalation. At heavy, or with no restarts left, the task parks at `needs_foreman` and the entry says why; the foreman decides whether to re-plan, switch agent, split the task or ask you. A stalled worker always goes straight to the foreman. The foreman can change the tier or effort through `plan_amend` as described above.
 
 ### A branch with no plan
 
@@ -648,10 +665,20 @@ The fields of an `--agent` value:
 | `effort=<level>` | Validated per harness (see [Effort](#effort)). |
 | `tools=<p1>+<p2>` | claude only (see [Worker tools (claude)](#worker-tools-claude)). |
 
+Each agent serves one tier, derived from its model name:
+
+| Tier | Model-name patterns |
+|---|---|
+| `heavy` | `opus` segment prefix, or whole `pro`, `max`, `ultra` segments (`-pro`, `-max`, `-ultra`). |
+| `light` | `haiku` segment prefix, or whole `mini`, `nano`, `flash`, `lite`, `highspeed`, `free` segments (`-mini`, `-nano`, `-flash`, `-lite`, `-highspeed`, `-free`). |
+| `standard` | Everything else, including agents configured as `model=default`. |
+
+Segments are separated by hyphens; provider prefixes and context suffixes such as `[1m]` are removed, and matching ignores case. Heavy matches win. `tier.<harness>/<model>` in the config file overrides the tier for every agent of that harness/model. The runner's startup line shows the name-based tier; stats and capacity include the engine's override.
+
 Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `--agent-file` describe one agent; there `--classes` is comma-separated (`implement,review`). The two forms cannot be mixed. Other flags:
 
 - `--labels`: the labels the runner offers, comma-separated;
-- `--max-parallel N`: how many concurrent jobs this runner runs; unset (`0`) means one at a time;
+- `--max-parallel N`: how many concurrent jobs this runner runs; unset (`0`) means one at a time. Init now sets it from tasks at once, and `brigada start` passes the saved number;
 - `--no-start`: fail instead of starting the engine.
 
 `kimi` and `opencode` are worker-only; the foreman can be `claude` or `codex`.
@@ -664,6 +691,14 @@ Letting Kimi write code is an opt-in. Init warns that Kimi has no sandbox: when 
 
 **Keep the runner running.** A job nobody leases within ten minutes fails. The ten minutes do not count while every runner that could take the job is full, or while every agent that qualifies for it is cooling after a usage limit (a fix round is pinned to its author's agent). `brigada status` shows such a job as held: waiting for a runner slot, or `waiting: <harness>/<model> cooling until <time>`. A job pinned to a broken agent still fails after ten minutes, and the failure names the agent and its state.
 
+### Tiers
+
+The dispatcher picks the best-recorded eligible agent in the task's effective tier, among the polling runner's agents with room under the caps. Exploration stays within that served tier. A tier whose eligible agents are cap-blocked or cooling waits for room or the reset time; it does not fall back just because another tier is free.
+
+If no qualifying agent is registered in the tier, or all are broken, brigada tries higher tiers in order. If none can serve it, it steps down from heavy toward light. Selection considers agents across runners, and the decision records both the tier asked for and the tier served. If no tier can serve the task, it parks for the foreman after the queue timeout, with the reason in status and a notification when enabled. Fix rounds stay pinned to the author's session and agent.
+
+Spent check or review rounds, or a worker result of `failed`, bump the effective tier one step (light → standard → heavy) and queue a fresh attempt, within the task's restart cap. History records `task_tier_bumped`. At heavy, or with the restart cap spent, the task goes to the foreman. Transient CLI failures use the automatic retry rules below; stalls always go straight to the foreman. The foreman can lower a tier through `plan_amend`'s `retier` before restarting the task.
+
 ### Effort
 
 `effort=<level>` on an agent sets how hard its CLI reasons; leave it out for the CLI's own default. brigada accepts these levels per harness and passes each one through one fixed flag, never a raw argument:
@@ -672,12 +707,21 @@ Letting Kimi write code is an opt-in. Init warns that Kimi has no sandbox: when 
 |---|---|---|
 | `claude` | `low`, `medium`, `high`, `xhigh`, `max` | `--effort <level>` (fresh, resume and attach) |
 | `codex` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | `-c model_reasoning_effort="<level>"` |
-| `opencode` | `minimal`, `high`, `max` | `--variant <level>` |
+| `opencode` | provider-specific variant matching `[a-z0-9-]{1,16}` | `--variant <level>` |
 | `kimi` | none: its CLI documents no effort option, so `effort=` is refused | — |
 
-The lists are brigada's accepted values, not a promise that every model supports every one: the CLI judges that. For codex the key is model-dependent. For opencode a variant is provider- and model-specific, and the three listed are the ones its help names, not every variant that exists. Any other level is a usage error at startup.
+The lists are brigada's accepted values, not a promise that every model supports every one: the CLI judges that. For codex the key is model-dependent. For opencode, variant availability depends on the provider and model. A level outside the accepted list or variant syntax is a usage error at startup.
 
-A task can set `low`, `medium`, `high` or `max` effort per job. Claude and Codex use the same word; opencode maps `low` to `minimal`, `medium` to no variant, and keeps `high` and `max`; Kimi ignores task effort. An unspecified mapped level uses the agent's own effort, else the CLI default. Each job records the level passed.
+A task's `effort` uses brigada's four levels and is mapped for each job:
+
+| Task effort | Claude | Codex | OpenCode | Kimi |
+|---|---|---|---|---|
+| `low` | `low` | `low` | `minimal` | none |
+| `medium` | `medium` | `medium` | no variant | none |
+| `high` | `high` | `high` | `high` | none |
+| `max` | `max` | `max` | `max` | none |
+
+A nonempty mapped task level overrides the agent's effort. When mapping yields no level (including OpenCode `medium`), the agent's effort still applies, else the CLI default; Kimi has no effort control. Each job record stores the resolved level. `brigada logs` renders the CLI transcript and `brigada history` renders events and messages; neither adds a field for that stored effort level.
 
 Effort is not part of an agent's identity: the dispatcher, `agent reset` and the outcome record still key by `harness/model`. `status` and `stats` print `claude/opus@high` only for an agent that has an effort set. The foreman's effort is chosen separately ([section 11](#11-the-foremans-harness-claude-or-codex)).
 
@@ -736,8 +780,6 @@ A foreman turn is never held back by the plan or model caps, and goes ahead of q
 
 The foreman can look at the capacity it has when it plans (per agent: the tier, the cap, the running jobs, the quota state and the cost weight), but the engine enforces the caps whatever the foreman believes. `cost.<harness>/<model>` is a relative weight, default 1, that the foreman sees when it decides which tasks can wait for a cheaper agent.
 
-Each agent's tier comes from the model name: an `opus` segment prefix or a whole `pro`, `max` or `ultra` segment is heavy; a `haiku` segment prefix or a whole `mini`, `nano`, `flash`, `lite`, `highspeed` or `free` segment is light; other names and CLI defaults are standard. Names are matched without provider prefixes or context suffixes such as `[1m]`, ignoring case. Heavy matches take precedence. Use `tier.<harness>/<model>` to correct the label. The runner's startup line shows the table's tier; stats and capacity include the engine's override.
-
 ### Headroom
 
 With `headroom = true` (the default), task workers on the account that serves your foreman's harness see that account's cap lowered by one (never below zero), so a slot stays free for the foreman. This is about parallel slots; it does not stop a vendor quota from running out. It acts only where a `caps.account.<label>` cap is set; with a cap of 1 on that account, task workers do not run there at all. Set `headroom = false` to let workers use every slot.
@@ -750,7 +792,7 @@ With `headroom = true` (the default), task workers on the account that serves yo
 AGENT  TIER  CLASS  ATTEMPTS  SUCCESSES  RATE  CONFIDENCE
 ```
 
-- **Tier** is the model-name table label (`light`, `standard` or `heavy`), corrected by any `tier.<harness>/<model>` config override. It is informational today; it does not change dispatch. Changing the label keeps the agent’s existing outcome record.
+- **Tier** is the model-name table label (`light`, `standard` or `heavy`), corrected by any `tier.<harness>/<model>` config override, and determines which task tier the agent serves. The record stays keyed by repo, class and agent; changing the tier label keeps the agent's existing outcomes.
 - **Attempts and successes** are counted when a task ends, for the agent that wrote the final change, in the task's class.
   - A success is a task whose check passed and, for `implement` tasks, whose review approved within the allowed rounds. Tasks of other classes succeed when the run is done with its check passed, with no review.
   - A task that runs out of rounds counts an attempt without a success.
@@ -760,7 +802,7 @@ AGENT  TIER  CLASS  ATTEMPTS  SUCCESSES  RATE  CONFIDENCE
 - **Confidence** is a word for the attempts behind the score: `none` for 0, `starting` for 1 to 4, `enough` from 5 on.
 - An agent whose runner has not been seen lately is marked `(stale)`; a registered agent with no record yet shows at 0 attempts.
 
-Read it by class. For each task, the dispatcher picks the agent with the best score among those that are ready, have quota and have room under the caps, and sends about one task in ten to the next best, so that an agent with a thin record can be measured.
+Read it by class. For each task, the dispatcher picks the agent with the best score in the served tier among those that are ready, have quota and have room under the caps, and sends about one task in ten to the next best, so that an agent with a thin record can be measured.
 
 Two limits today:
 
@@ -806,7 +848,7 @@ This section is about the **headless** foreman, the brigada-owned session that w
 
 ### Effort and model
 
-**Effort.** Add `--effort <level>` to choose the foreman's reasoning effort: for `claude`, `low`, `medium`, `high`, `xhigh`, `max`; for `codex`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` (the levels are explained in [section 8](#effort)). It goes with `--harness` and `--model`, and choosing again without `--effort` clears it. `project foreman --repo` shows it as `effort=<level>`. It applies to headless turns and to attach, and overrides the effort of the runner agent that serves the turn; workers and reviewers use the task's effort when set, otherwise their agent's effort.
+**Effort.** Choose it in init, or add `--effort <level>` to `brigada project foreman` to choose the foreman's reasoning effort: for `claude`, `low`, `medium`, `high`, `xhigh`, `max`; for `codex`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` (the levels are explained in [section 8](#effort)). It goes with `--harness` and `--model`, and choosing again without `--effort` clears it. `project foreman --repo` shows it as `effort=<level>`. It applies to headless turns and to attach, and overrides the effort of the runner agent that serves the turn; workers and reviewers use the task's effort when set, otherwise their agent's effort.
 
 **The model.** A headless turn runs on the harness and model you chose. The engine leases it only to a runner agent that offers exactly that `--harness`/`--model` pair, and the turn runs on that agent's adapter and model (without `--effort`, at that agent's own effort).
 
@@ -912,7 +954,7 @@ The config file is optional. Its format:
 | `tier.<harness>/<model>` | `light`, `standard` or `heavy` | from the model name | Override the tier for every agent of this harness/model, shown in stats and capacity. |
 | `tools.claude/<model>` | `+`-separated Claude Code tool patterns, or `none` | the Go scope | Default shell scope of the claude worker agent on that model; `--agent ...,tools=` overrides it ([section 8](#worker-tools-claude)). Other harnesses are refused. |
 
-A cap of `0` caps the layer at nothing, which is different from leaving it out.
+A cap of `0` caps the layer at nothing, which is different from leaving it out. Init writes `caps.global = N` from tasks at once, `caps.plan = 3` and `caps.account.<label>` for each usable account: Claude 3, Codex 2, Kimi 1 and OpenCode 2, each clamped to N. If harnesses share a label, the smaller cap wins. It preserves other config entries and comments, updates those cap keys, and groups newly added keys under `# set by brigada init`. The engine reads the config at startup; restart it after changing caps or tier overrides.
 
 Project settings (the approval limit, `default_check`, `setup`, the hold bounds and the rest) are not config-file keys, and the config file refuses them as unknown; they are project settings ([section 6](#6-configuring-a-project)). Effort is not a config-file key either: it is set per agent with `brigada runner --agent …,effort=<level>` ([section 8](#effort)) and per project foreman with `brigada project foreman --effort <level>` ([section 11](#11-the-foremans-harness-claude-or-codex)). `cost.*` and `tier.*` keys name `harness/model` without an effort, including a provider prefix when the model has one.
 
@@ -921,11 +963,13 @@ An example:
 ```text
 notify = none
 snapshot_dir = /home/you/backups/brigada
+# set by brigada init
 caps.global = 6
 caps.plan = 3
 caps.account.claude = 3
 caps.account.codex = 2
 cost.claude/opus = 2
+tier.codex/gpt-5 = heavy
 ```
 
 ### Project settings
@@ -956,9 +1000,9 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 ### Starting
 
-- `brigada init [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL[@EFFORT]] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories-mode-b).
-- `brigada start`: start the engine and detached runner with the agents saved by init; succeeds when the runner is already running. Use it after a reboot or `brigada stop`. See [section 1](#changing-your-setup-later).
-- `brigada runner [--agent SPEC]... [--labels LABELS] [--max-parallel N]`, where SPEC is `harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]`: run a runner that leases jobs, runs workers and checks, and pushes branches. See [section 8](#8-agents-quota-and-health).
+- `brigada init [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL[@EFFORT]] [--parallel N] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories-mode-b).
+- `brigada start`: start the engine and detached runner with the agents and tasks-at-once limit saved by init; succeeds when the runner is already running. Use it after a reboot or `brigada stop`. See [section 1](#changing-your-setup-later).
+- `brigada runner [--agent SPEC]... [--harness HARNESS] [--model MODEL] [--classes CLASSES] [--agent-file PATH] [--worker-script PATH] [--labels LABELS] [--max-parallel N]`, where SPEC is `harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]`: run a runner that leases jobs, runs workers and checks, and pushes branches. The shorthand agent flags cannot be mixed with `--agent`; `--worker-script` is for the `fake` harness used by tests. See [section 8](#8-agents-quota-and-health).
 - `brigada stop [--engine]`: stop the detached runner in the selected state directory; `--engine` also stops the engine. Sends SIGTERM and waits up to 10 seconds per process; succeeds if nothing is running, and never starts the engine. See [section 1](#stopping).
 - `brigada remove [--yes] [--cancel] [--delete-config]`: remove brigada from this repository, keeping its project history. `--yes` applies the displayed plan and stops an unused runner without prompting; `--cancel` cancels live jobs and unfinished plans; `--delete-config` also deletes `.brigada/project.yaml`. See [section 1](#removing-brigada-from-a-repository).
 - `brigada mcp (--foreman [URL] | --coordinator | --client)`: serve brigada's tools over stdio. `--foreman` is the mode A bridge of your own session ([section 2](#2-your-own-session-is-the-foreman-mode-a)), `--coordinator` the mode B tools ([section 3](#3-several-repositories-mode-b)), `--client` the tools of [section 12](#from-another-harness). Only one selector at a time. Claude Code runs it from the wiring init writes. Without a selector, `--socket PATH` is the bridge a headless foreman session uses; you do not run that by hand.
@@ -998,6 +1042,8 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada project set [--repo URL] key=value ...`, `brigada project show [--repo URL]`: set and read the project's settings and where each comes from. See [section 6](#local-only-settings).
 - `brigada project import [--repo URL] [--file PATH] [--yes]`: import `.brigada/project.yaml`. See [section 6](#importing-and-provenance).
 
+`plan_amend` is a foreman MCP tool ([section 7](#7-plans-checks-and-reviews)): it takes `plan` and optional `add`, `cancel`, `retarget` and `retier` lists. Each `retier` entry names `task` (name or id) and optionally `tier` and `effort`.
+
 ### Care
 
 - `brigada engine [--idle-minutes N]`: run the engine in the foreground. You rarely need it; commands start it on demand.
@@ -1007,6 +1053,8 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 ## 15. Known limits
 
+- Model-name tier patterns can go stale as vendors rename models; correct them with `tier.<harness>/<model>` in the config file.
+- Every tier bump spends a restart, including a second bump after the bumped attempt fails; earlier retries can exhaust the cap before a task reaches heavy.
 - The hold-only bootstrap credential is not built: the mode A bridge reaches the engine with your client token, and the hold gives it its own limited credential after `hold_acquire`.
 - `brigada status` does not show whether your session is connected but not holding (presence is not implemented).
 - The runner does not record the commit a reviewer approved, so `brigada land` only warns that the head was not compared ([section 5](#5-finishing-brigada-land)).
