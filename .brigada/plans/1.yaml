@@ -1,0 +1,55 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 1
+title: "Pre-public fixes: contributor instructions, plan-file push, gitleaks, rc prerelease"
+repo: "github.com/Blackfire-AI/brigada"
+state: active
+created: 2026-10-19T14:30:54.31574Z
+updated: 2026-10-19T14:30:54.31574Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps, or from the
+# default branch when base is empty; merge a task after its base. States
+# are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1).
+tasks:
+  - id: 1
+    name: "agents-md"
+    title: "Contributor instructions: AGENTS.md and CLAUDE.md (#1)"
+    class: "implement"
+    deps: []
+    base: ""
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 2
+    name: "planfile-remote"
+    title: "Plan-file pushes through a named remote (#10)"
+    class: "implement"
+    deps: ["agents-md"]
+    base: "agents-md"
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 3
+    name: "gitleaks-ci"
+    title: "CI: secret scanning with gitleaks (#5)"
+    class: "implement"
+    deps: ["agents-md"]
+    base: "agents-md"
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 4
+    name: "rc-prerelease"
+    title: "Release workflow: mark tags with a '-' as prereleases (#24)"
+    class: "implement"
+    deps: ["agents-md"]
+    base: "agents-md"
+    tier: light
+    state: pending
+    branch: ""
+    rounds: 0
