@@ -1,0 +1,59 @@
+name: Bug report
+description: Report something brigada does wrong
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: brigada version
+      description: Output of `brigada version`
+      placeholder: "e.g. 0.3.0"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      description: Operating system and version
+      placeholder: "e.g. macOS 15.4, Ubuntu 24.04"
+    validations:
+      required: true
+  - type: input
+    id: harness
+    attributes:
+      label: Harness and model
+      description: The agent CLI and model involved
+      placeholder: "e.g. claude/sonnet"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did
+      description: Steps to reproduce
+      placeholder: |
+        1. brigada init
+        2. brigada plan ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Output of `brigada status`
+      description: Remove anything private (hostnames, addresses, paths, tokens) before pasting.
+      render: shell
+    validations:
+      required: false
