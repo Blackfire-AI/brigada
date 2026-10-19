@@ -31,8 +31,8 @@ tasks:
     class: "implement"
     deps: []
     base: ""
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-10"
     rounds: 0
   - id: 11
     name: "fence-parse-2"
@@ -41,6 +41,6 @@ tasks:
     deps: []
     base: ""
     tier: heavy
-    state: ready
+    state: running
     branch: ""
     rounds: 0
