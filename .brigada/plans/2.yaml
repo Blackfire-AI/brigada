@@ -61,6 +61,6 @@ tasks:
     deps: []
     base: ""
     tier: heavy
-    state: ready
+    state: running
     branch: ""
     rounds: 0
