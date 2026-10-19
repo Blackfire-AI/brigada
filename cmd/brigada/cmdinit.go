@@ -1243,6 +1243,11 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 	tiers := make([]string, len(agents))
 	roles := make([]string, len(agents))
 	roleWordWidth := 0
+	// The phrases the table can print, besides the roles actually present.
+	roleNeed := 0
+	for _, role := range []string{initAgentRoles(nil), initAgentRoles([]string{"implement", "review", "answer"}), initAgentRoles([]string{"review"})} {
+		roleNeed = max(roleNeed, initRoleWidth(role, 2))
+	}
 	for i, s := range agents {
 		family, _ := adapter.AgentFamily(s.harness, s.model)
 		family = initFamilyName(family)
@@ -1256,13 +1261,14 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 		familyWidth = max(familyWidth, term.VisibleWidth(family))
 		tierWidth = max(tierWidth, term.VisibleWidth(tiers[i]))
 		roles[i] = initAgentRoles(s.classes)
+		roleNeed = max(roleNeed, initRoleWidth(roles[i], 2))
 		for _, word := range strings.Fields(roles[i]) {
 			roleWordWidth = max(roleWordWidth, term.VisibleWidth(word))
 		}
 	}
-	// Keep every row in the same layout. A role can wrap in its column as
-	// long as its longest word fits strictly within the terminal width.
-	stacked := 14+modelWidth+2+familyWidth+2+tierWidth+2+roleWordWidth >= style.Width()
+	// Keep every row in the same layout. Rows stay on one line when the
+	// role column can hold every role in at most two lines.
+	stacked := 14+modelWidth+2+familyWidth+2+tierWidth+2+roleNeed >= style.Width()
 	for i, s := range agents {
 		// If the fixed columns leave no room for roles, put family, tier and
 		// roles on a second line under the model column for every row. Very
@@ -1285,6 +1291,33 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 		printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), roles[i])
 	}
 	printInitWrapped(w, "  "+style.Bold("Reviews:")+" ", "    ", fmt.Sprintf("%d model families, so every task can get a reviewer of another one.", families))
+}
+
+// initRoleWidth is the narrowest column in which text wraps to at most lines
+// lines.
+func initRoleWidth(text string, lines int) int {
+	words := strings.Fields(text)
+	width := 0
+	for _, word := range words {
+		width = max(width, term.VisibleWidth(word))
+	}
+	for ; ; width++ {
+		used, line := 1, 0
+		for _, word := range words {
+			switch {
+			case line == 0:
+				line = term.VisibleWidth(word)
+			case line+1+term.VisibleWidth(word) <= width:
+				line += 1 + term.VisibleWidth(word)
+			default:
+				used++
+				line = term.VisibleWidth(word)
+			}
+		}
+		if used <= lines {
+			return width
+		}
+	}
 }
 
 // initPad right-pads text, which may carry escapes, to a visible width.
