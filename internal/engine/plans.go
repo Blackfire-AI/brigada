@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
@@ -18,12 +19,14 @@ import (
 // the same plan it waits for (§6.1). Caps and per-task repos arrive with
 // the plan tools of phase 3.
 type PlanTask struct {
-	Title string
-	Name  string // '' = unnamed: nothing can depend on it
-	Spec  string
-	Check string
-	Class string // '' = implement
-	Deps  []string
+	Title  string
+	Name   string // '' = unnamed: nothing can depend on it
+	Spec   string
+	Check  string
+	Class  string // '' = implement
+	Tier   string // '' = standard
+	Effort string // '' = the agent's own level
+	Deps   []string
 	// Base names the one of Deps whose result branch this task's work
 	// starts from; '' = the only dep when there is exactly one, else the
 	// project's default branch.
@@ -200,6 +203,9 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		return CreatePlanResult{}, fmt.Errorf("a plan takes at least one task")
 	}
 	for i, t := range tasks {
+		if err := validateTaskTierEffort(t); err != nil {
+			return CreatePlanResult{}, fmt.Errorf("task %d %q: %w", i+1, t.Name, err)
+		}
 		if t.Spec == "" {
 			return CreatePlanResult{}, fmt.Errorf("task %d: spec is required: the worker's task, verbatim (§1.4)", i+1)
 		}
@@ -294,9 +300,9 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		if len(deps[i]) > 0 || verdict.Needed {
 			state = taskPending
 		}
-		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, created_at, updated_at)
-			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', NULLIF(?, ''), NULLIF(?, ''), ?, ?)`,
-			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, setupRec, extraRecs[i], nowStr, nowStr)
+		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, created_at, updated_at)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?)`,
+			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, setupRec, extraRecs[i], taskTier(t.Tier), taskTier(t.Tier), t.Effort, nowStr, nowStr)
 		if err != nil {
 			return CreatePlanResult{}, fmt.Errorf("create the task: %w", err)
 		}
@@ -441,4 +447,18 @@ func (e *Engine) releaseDependentsTx(tx *sql.Tx, project, done int64, now time.T
 		}
 	}
 	return nil
+}
+
+func taskTier(tier string) string {
+	if tier == "" {
+		return adapter.TierStandard
+	}
+	return tier
+}
+
+func validateTaskTierEffort(t PlanTask) error {
+	if err := adapter.ValidateTier(t.Tier); err != nil {
+		return err
+	}
+	return adapter.ValidateTaskEffort(t.Effort)
 }

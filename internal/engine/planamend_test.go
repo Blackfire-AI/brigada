@@ -43,7 +43,7 @@ func TestAmendAddsAndCancels(t *testing.T) {
 
 	am := e.amend(res.PlanID, PlanAmendment{
 		Add: []PlanTask{
-			{Name: "lint", Spec: "lint it", Class: "answer"},
+			{Name: "lint", Spec: "lint it", Class: "answer", Tier: "light", Effort: "low"},
 			{Name: "docs", Spec: "document it", Class: "answer", Deps: []string{"build", "lint"}},
 		},
 		Cancel: []string{"ship"},
@@ -52,6 +52,11 @@ func TestAmendAddsAndCancels(t *testing.T) {
 		t.Fatalf("amendment = %+v, want 2 added, ship cancelled, plan active", am)
 	}
 	lint, docs := am.Added[0], am.Added[1]
+	for col, want := range map[string]string{"tier": "light", "effective_tier": "light", "effort": "low"} {
+		if got := e.str("SELECT "+col+" FROM tasks WHERE id = ?", lint.TaskID); got != want {
+			t.Errorf("%s = %q, want %q", col, got, want)
+		}
+	}
 	if lint.JobID == 0 || docs.JobID != 0 {
 		t.Errorf("added = %+v, want lint started and docs waiting", am.Added)
 	}
@@ -499,5 +504,27 @@ func TestPlanOutcomeLandsOnForemanAgent(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("stats = %+v, want a plan class row for the foreman", stats[0].Rows)
+	}
+}
+
+func TestAmendValidatesTaskTierEffort(t *testing.T) {
+	e := newEnv(t)
+	res := e.twoStep()
+	for _, tc := range []struct {
+		task  PlanTask
+		words string
+	}{
+		{PlanTask{Name: "invalid", Spec: "x", Tier: "big"}, "light, standard, heavy"},
+		{PlanTask{Name: "invalid", Spec: "x", Effort: "ultra"}, "low, medium, high, max"},
+	} {
+		before := e.int("SELECT COUNT(*) FROM tasks")
+		version := e.int("SELECT version FROM plans WHERE id = ?", res.PlanID)
+		_, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Add: []PlanTask{{Spec: "valid"}, tc.task}, Cancel: []string{"build"}})
+		if err == nil || !strings.Contains(err.Error(), "invalid") || !strings.Contains(err.Error(), tc.words) {
+			t.Fatalf("refusal = %v", err)
+		}
+		if e.int("SELECT COUNT(*) FROM tasks") != before || e.int("SELECT version FROM plans WHERE id = ?", res.PlanID) != version || e.taskState(res.Tasks[0].TaskID) == taskCancelled {
+			t.Fatal("invalid amendment partially applied")
+		}
 	}
 }

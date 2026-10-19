@@ -38,6 +38,11 @@ func TestSubmitTaskCreatesProjectPlanTaskAndJob(t *testing.T) {
 	if base := e.str("SELECT base_ref FROM tasks WHERE id = ?", res.TaskID); base != "main" {
 		t.Errorf("task base ref = %q", base)
 	}
+	for col, want := range map[string]string{"tier": "standard", "effective_tier": "standard", "effort": ""} {
+		if got := e.str("SELECT "+col+" FROM tasks WHERE id = ?", res.TaskID); got != want {
+			t.Errorf("debug submit %s = %q, want %q", col, got, want)
+		}
+	}
 	job := e.str("SELECT status FROM jobs WHERE id = ?", res.JobID)
 	if job != statusQueued {
 		t.Errorf("queued job status = %q, want queued", job)

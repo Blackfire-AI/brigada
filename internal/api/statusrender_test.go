@@ -85,3 +85,18 @@ func TestStatusLineCountsMessagesForTheForeman(t *testing.T) {
 		t.Errorf("StatusLine = %q", got)
 	}
 }
+
+func TestStatusSectionsTaskTierEffort(t *testing.T) {
+	st := Status{Plans: []engine.StatusPlan{{ID: 1, Tasks: []engine.StatusTask{
+		{ID: 1, Title: "plain", State: "ready", Tier: "standard", EffectiveTier: "standard"},
+		{ID: 2, Title: "build", State: "ready", Tier: "heavy", EffectiveTier: "heavy", Effort: "high"},
+		{ID: 3, Title: "bumped", State: "ready", Tier: "standard", EffectiveTier: "heavy"},
+		{ID: 4, Title: "think", State: "ready", Tier: "standard", EffectiveTier: "standard", Effort: "max"},
+	}}}}
+	got := StatusSections(st)
+	for _, want := range []string{"  task #1 ready plain\n", "  task #2 ready build  heavy @high\n", "  task #3 ready bumped  standard->heavy\n", "  task #4 ready think  @max\n"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status lacks %q:\n%s", want, got)
+		}
+	}
+}

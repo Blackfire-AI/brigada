@@ -83,6 +83,7 @@ func TestStatusListsPlansAndTasks(t *testing.T) {
 	// another state, its branch set, still belongs to it.
 	reviewing := e.addTask("{}")
 	e.exec(`UPDATE tasks SET state = ?, branch = ? WHERE id = ?`, taskReviewing, "task/2-1", reviewing)
+	e.exec("UPDATE tasks SET tier = 'heavy', effective_tier = 'heavy', effort = 'high' WHERE id = ?", reviewing)
 
 	// A task parked for the user with no parking event: it queues with no
 	// reason, and it is still one of the plan's tasks.
@@ -123,6 +124,10 @@ func TestStatusListsPlansAndTasks(t *testing.T) {
 		t.Fatalf("the active plan's tasks = %+v, want %d", active.Tasks, len(wantTasks))
 	}
 	for i, want := range wantTasks {
+		want.Tier, want.EffectiveTier = "standard", "standard"
+		if want.ID == reviewing {
+			want.Tier, want.EffectiveTier, want.Effort = "heavy", "heavy", "high"
+		}
 		if got := active.Tasks[i]; !reflect.DeepEqual(got, want) {
 			t.Errorf("task %d = %+v, want %+v", i, got, want)
 		}

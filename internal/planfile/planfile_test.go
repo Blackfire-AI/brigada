@@ -42,7 +42,8 @@ func TestRenderMatchesGolden(t *testing.T) {
 
 func TestParseInvertsRender(t *testing.T) {
 	plans := map[string]Plan{
-		"golden": goldenPlan(),
+		"golden":          goldenPlan(),
+		"tier and effort": {ID: 8, State: "active", Created: time.Unix(1, 0).UTC(), Updated: time.Unix(2, 0).UTC(), Tasks: []Task{{ID: 1, Tier: "heavy", Effort: "high", State: "ready"}, {ID: 2, Tier: "light", State: "pending"}}},
 		"no tasks": {ID: 1, Title: "", Repo: "r", State: "draft",
 			Created: time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC), Updated: time.Date(2026, 1, 2, 3, 4, 5, 7, time.UTC)},
 		"awkward text": {ID: 2, Title: "tab\there, \"quotes\", back\\slash, ünïcode, [brackets], # hash", Repo: "file:///a b/c.git",
@@ -103,6 +104,9 @@ func TestParseIsStrict(t *testing.T) {
 		{"a deps list without the space", "deps: [\"schema\", \"api\"]", "deps: [\"schema\",\"api\"]", "deps"},
 		{"deps as a bare list", "deps: [\"schema\"]", "deps: [schema]", "deps"},
 		{"a missing task key", "    branch: \"brigada/task-11\"\n", "", "branch"},
+		{"bad tier", "    state: done", "    tier: big\n    state: done", "light, standard, heavy"},
+		{"bad effort", "    state: done", "    effort: ultra\n    state: done", "low, medium, high, max"},
+		{"tier and effort out of order", "    state: done", "    effort: high\n    tier: heavy\n    state: done", "state"},
 		{"a negative rounds", "rounds: 2", "rounds: -2", "rounds"},
 		{"an unknown key", "    rounds: 2\n", "    rounds: 2\n    extra: 1\n", "extra"},
 		{"a task at the wrong indent", "  - id: 13", " - id: 13", "13"},
