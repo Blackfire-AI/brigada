@@ -43,8 +43,8 @@ tasks:
     deps: ["ranking"]
     base: "ranking"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-17-r1"
     rounds: 0
   - id: 18
     name: "foreman-rules"
