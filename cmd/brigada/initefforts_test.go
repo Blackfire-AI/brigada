@@ -119,49 +119,46 @@ support_efforts = []
 	assertInitModelPrivacy(t, got)
 }
 
-// Exercise the real model-to-effort prompt sequence and the resulting agent
-// and foreman specs without applying the plan or starting a model.
+// Exercise the real foreman model-to-effort prompt sequence and the resulting
+// foreman setting without applying the plan or starting a model. The foreman
+// is the only agent asked about effort.
 func TestInitInteractiveEfforts(t *testing.T) {
-	for _, harness := range []string{"claude", "codex", "opencode"} {
+	for _, harness := range []string{"claude", "codex"} {
 		for _, answer := range []string{"", "high", "number"} {
 			t.Run(harness+"/"+answer, func(t *testing.T) {
 				importRepo(t)
 				fakeInitPATH(t, harness)
-				model, pick, prompt := "sonnet", "1", "Pick 1-6 [1]:"
-				number := "4" // Claude's unknown default precedes its five levels.
+				// Claude's default, medium, comes first of its five levels.
+				model, pick, prompt, defaultEffort := "sonnet", "1", "Pick 1-5 or type a level [1]:", "medium"
+				number := "3"
 				if harness == "codex" {
-					model, number, prompt = "gpt-6.1-sol", "3", "Pick 1-3 [1]:"
+					model, number, prompt, defaultEffort = "gpt-6.1-sol", "3", "Pick 1-3 or type a level [1]:", "low"
 					catalog := `{"models":[{"slug":"gpt-6.1-sol","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"}],"default_reasoning_level":"low"}]}`
 					writeInitCodexScript(t, "  debug  Diagnostic tools", "  models  Render models", "", "printf '%s\\n' '"+catalog+"'", "exit 89")
 					pick = "2" // Entry 1 is the unresolved CLI model default.
-				}
-				if harness == "opencode" {
-					model, number, prompt = "fixture/gpt-5", "3", "Pick 1-3 [1]:"
-					fakeInitPATH(t, "claude", "opencode")
-					fakeOpenCodeVerbose2(t, openCodeVerboseFile(t, "fixture/gpt-5\n{\"status\":\"active\",\"variants\":{\"low\":{},\"high\":{}}}\n"))
-					pick = "1\n\n1" // Claude model, default effort, OpenCode model.
 				}
 				input := answer
 				if answer == "number" {
 					input = number
 				}
-				code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), pick+"\n"+input+"\nn\n", "--signed-in", "claude,codex,opencode", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
+				// The foreman's model and effort, then use the CLI's models.
+				code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), pick+"\n"+input+"\n\nn\n", "--signed-in", "claude,codex", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
 				if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 					t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 				}
-				if !strings.Contains(out, "How hard should "+model+" think?") || !strings.Contains(out, prompt) {
-					t.Fatalf("missing effort question:\n%s", out)
+				if strings.Count(out, "How hard should") != 1 || !strings.Contains(out, "How hard should the foreman think?") || !strings.Contains(out, prompt) {
+					t.Fatalf("want one effort question, the foreman's:\n%s", out)
 				}
-				suffix, effort := " @high", "high"
+				effort := "high"
 				if answer == "" {
-					suffix, effort = "", ""
+					effort = defaultEffort
 				}
 				plan := strings.Split(out, "\nPlan\n")[1]
-				if !strings.Contains(plan, model+suffix) || (effort == "" && strings.Contains(plan, model+" @")) {
-					t.Fatalf("wrong agent effort:\n%s", plan)
-				}
-				if harness != "opencode" && !strings.Contains(plan, "Foreman: "+agentName(harness, model, effort)+"\n") {
+				if !strings.Contains(plan, "Foreman: "+harness+"/"+model+", effort "+effort+"\n") {
 					t.Fatalf("foreman lost effort:\n%s", plan)
+				}
+				if strings.Contains(plan, " @") {
+					t.Fatalf("an agent got an effort:\n%s", plan)
 				}
 				assertInitEffortOutput(t, out)
 			})
@@ -186,13 +183,13 @@ func TestInitEffortDefaultsAndRetries(t *testing.T) {
 		name, defaultEffort, input, want string
 		wantErr                          bool
 	}{
-		{name: "known default Enter", defaultEffort: "medium", input: "\n"},
-		{name: "known default number", defaultEffort: "medium", input: "2\n"},
-		{name: "known default typed", defaultEffort: "medium", input: "medium\n"},
-		{name: "source order", defaultEffort: "medium", input: "1\n", want: "low"},
-		{name: "unknown default", input: "1\n"},
+		{name: "known default Enter", defaultEffort: "medium", input: "\n", want: "medium"},
+		{name: "known default number", defaultEffort: "medium", input: "1\n", want: "medium"},
+		{name: "known default typed", defaultEffort: "medium", input: "medium\n", want: "medium"},
+		{name: "default first, rest in source order", defaultEffort: "medium", input: "2\n", want: "low"},
+		{name: "unknown default: source order", input: "\n", want: "low"},
 		{name: "typed high", input: "high\n", want: "high"},
-		{name: "retry", input: "bogus\n8\n4\n", want: "high"},
+		{name: "retry", input: "bogus\n8\n3\n", want: "high"},
 		{name: "retry limit", input: "bogus\n8\nLOW\n", wantErr: true},
 		{name: "EOF", wantErr: true},
 	} {
@@ -209,8 +206,8 @@ func TestInitEffortDefaultsAndRetries(t *testing.T) {
 			if effort != tc.want || (err != nil) != tc.wantErr || attempts > 3 {
 				t.Fatalf("effort = %q, err = %v, attempts = %d", effort, err, attempts)
 			}
-			if tc.defaultEffort != "" && (!strings.Contains(out.String(), "Pick 1-3 [2]:") || !strings.Contains(out.String(), "medium  default")) {
-				t.Fatalf("known default not marked in source order:\n%s", out.String())
+			if tc.defaultEffort != "" && (!strings.Contains(out.String(), "Pick 1-3 or type a level [1]:") || !strings.Contains(out.String(), "1  medium  codex's default") || !strings.Contains(out.String(), "2  low")) {
+				t.Fatalf("known default not marked and first:\n%s", out.String())
 			}
 		})
 	}
@@ -235,14 +232,10 @@ func TestInitEffortInformationOnly(t *testing.T) {
 			if effort != "" || err != nil {
 				t.Fatalf("effort = %q, err = %v", effort, err)
 			}
-			want := ""
-			if tc.harness == "kimi" && tc.defaultEffort != "" {
-				want = "    Effort: high, kimi's own setting for this model (brigada can't set it per\n    run).\n"
+			// Only the foreman is asked about effort; workers print nothing.
+			if out.String() != "" {
+				t.Fatalf("output = %q, want none", out.String())
 			}
-			if out.String() != want {
-				t.Fatalf("output = %q, want %q", out.String(), want)
-			}
-			assertInitEffortOutput(t, out.String())
 		})
 	}
 }
@@ -251,11 +244,11 @@ func TestInitSavedEffortDefault(t *testing.T) {
 	for _, tc := range []struct {
 		name, saved, answer, want, prompt string
 	}{
-		{"override", "high", "", "high", "Pick 1-3 [3]:"},
-		{"explicit CLI default", "low", "", "low", "Pick 1-3 [1]:"},
-		{"CLI default", "", "", "", "Pick 1-3 [1]:"},
-		{"change", "high", "2", "medium", "Pick 1-3 [3]:"},
-		{"reset", "high", "1", "", "Pick 1-3 [3]:"},
+		{"saved level", "high", "", "high", "Pick 1-3 or type a level [3]:"},
+		{"saved codex default", "low", "", "low", "Pick 1-3 or type a level [1]:"},
+		{"nothing saved", "", "", "low", "Pick 1-3 or type a level [1]:"},
+		{"change", "high", "2", "medium", "Pick 1-3 or type a level [3]:"},
+		{"back to the default", "high", "1", "low", "Pick 1-3 or type a level [3]:"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer
@@ -273,8 +266,8 @@ func TestInitSavedEffortDefault(t *testing.T) {
 			if err != nil || got != tc.want {
 				t.Fatalf("effort = %q, %v; want %q", got, err, tc.want)
 			}
-			if !strings.Contains(out.String(), "current") {
-				t.Fatalf("saved effort not marked current:\n%s", out.String())
+			if strings.Contains(out.String(), "current") != (tc.saved != "") {
+				t.Fatalf("saved effort and the current tag disagree:\n%s", out.String())
 			}
 		})
 	}
@@ -283,7 +276,8 @@ func TestInitSavedEffortDefault(t *testing.T) {
 func TestInitExplicitEffortsSkipQuestions(t *testing.T) {
 	importRepo(t)
 	fakeInitPATH(t, "claude", "codex", "opencode")
-	code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\nn\n",
+	code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "n\n",
+		"--foreman", "claude/sonnet@high",
 		"--agent", "harness=claude,model=sonnet,effort=high",
 		"--agent", "harness=codex,model=gpt-5,effort=high",
 		"--agent", "harness=opencode,model=fixture/glm-5.3,effort=high",
@@ -291,8 +285,11 @@ func TestInitExplicitEffortsSkipQuestions(t *testing.T) {
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 	}
-	if strings.Contains(out, "How hard should") || strings.Contains(out, "Which model should") {
-		t.Fatalf("explicit agents got model or effort questions:\n%s", out)
+	if strings.Contains(out, "How hard should") || strings.Contains(out, "Which model") {
+		t.Fatalf("explicit agents and foreman got model or effort questions:\n%s", out)
+	}
+	if !strings.Contains(out, "Foreman: claude/sonnet, effort high\n") {
+		t.Fatalf("--foreman effort lost:\n%s", out)
 	}
 	for _, model := range []string{"sonnet", "gpt-5", "fixture/glm-5.3"} {
 		if !strings.Contains(out, model+" @high") {

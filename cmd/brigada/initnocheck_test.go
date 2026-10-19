@@ -54,9 +54,10 @@ func TestInitNoCheckChoices(t *testing.T) {
 			}
 			fakeInitPATH(t, "claude", "codex")
 			args := append([]string{"--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring", "--verbose"}, tc.args...)
-			stdin := "\n" + tc.answer + "\nn\n"
+			// The foreman's model and effort come first.
+			stdin := "\n\n" + tc.answer + "\nn\n"
 			if len(tc.args) > 0 { // --check skips the check question.
-				stdin = "\nn\n"
+				stdin = "\n\nn\n"
 			}
 			code, out, errs := initFixedParallel(t, testsupport.ShortStateDir(t), stdin, args...)
 			wantCode := 1

@@ -280,22 +280,25 @@ func TestInitCodexDiscoverySafety(t *testing.T) {
 }
 
 func TestInitCodexCatalogPicks(t *testing.T) {
-	for _, pick := range []struct{ answer, model string }{{"1", "default"}, {"3", "gpt-5.4-mini"}} {
+	for _, pick := range []struct{ answer, model, name string }{{"4", "default", "gpt-6.1-sol"}, {"6", "gpt-5.4-mini", "gpt-5.4-mini"}} {
 		t.Run(pick.answer, func(t *testing.T) {
 			importRepo(t)
 			fakeInitPATH(t, "claude", "codex")
 			fakeInitCodexCatalog(t)
 			writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".codex", "config.toml"), "model = \"gpt-6.1-sol\"\n")
 			state := testsupport.ShortStateDir(t)
-			// --foreman must exactly match the stored model, so this also verifies
-			// entry 1 keeps "default" while other picks store their catalog slug.
-			code, out, errOut := initFixedParallel(t, state, "1\n\n"+pick.answer+"\nn\n", "--foreman", "codex/"+pick.model, "--signed-in", "claude", "--check", "true", "--tools", "none", "--no-wiring")
+			// The foreman menu lists claude's three models, then codex's default
+			// (stored as "default") and its catalog models (stored by slug).
+			code, out, errOut := initFixedParallel(t, state, pick.answer+"\n\n\nn\n", "--signed-in", "claude,codex", "--check", "true", "--tools", "none", "--no-wiring")
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 				t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 			}
-			menu := strings.Split(strings.Split(out, "Which model should codex run?\n")[1], "\nStep 2")[0]
-			if strings.Contains(out, "never-print-me") || strings.Contains(menu, "(~/.codex/config.toml)") || !strings.Contains(menu, "your codex default") || !strings.Contains(menu, "your own default: ~/.codex/config.toml") || !strings.Contains(menu, "1 more from `codex debug models` aren't listed:") || !strings.Contains(menu, "Pick 1-3 or -, or type a model id [1]:") {
+			menu := strings.Split(strings.Split(out, "Which model should the foreman run?\n")[1], "\nStep 2")[0]
+			if strings.Contains(out, "never-print-me") || !strings.Contains(strings.Join(strings.Fields(menu), " "), "codex/gpt-6.1-sol your codex default (~/.codex/config.toml)") || !strings.Contains(menu, "Pick 1-6, or type harness/model [1]:") {
 				t.Fatalf("unexpected menu:\n%s", menu)
+			}
+			if !strings.Contains(out, "  Foreman: codex/"+pick.name+"\n") || !strings.Contains(out, "codex     "+pick.name) {
+				t.Fatalf("picked foreman missing from the plan (stored as %q):\n%s", pick.model, out)
 			}
 			for _, line := range strings.Split(out, "\n") {
 				if len([]rune(line)) >= 80 {

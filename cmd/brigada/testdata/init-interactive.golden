@@ -6,97 +6,70 @@ write the code in their own git worktrees; your check command tests it; and
 an agent of a different model family reviews it. Four short steps follow.
 Nothing is written or started until you confirm at the end.
 
-Step 1 of 4: agents
-  Each agent CLI below can work for brigada. For each one, pick the model it
-  should run, or leave it out. Reviews always go to a different model family
-  than the author's, so you need at least two families (e.g. claude + codex).
+Signed in: claude, codex, opencode (2 providers, opencode providers list).
+kimi: init can't check sign-in.
+
+Step 1 of 4: the foreman
+  The foreman plans the work and decides what happens when a task needs
+  judgment. It runs whenever work finishes, so it uses that agent's quota.
+  Only claude and codex can be the foreman.
+    Which model should the foreman run?
+      1  claude/sonnet               Sonnet 4 · Balanced
+      2  claude/opus                 Opus 4 · Most capable
+      3  claude/haiku                fastest; fine for small tasks
+      4  claude/claude-sonnet-4[1m]  Sonnet, 1M context
+      5  claude/claude-opus-4        Opus 4 · Most capable
+      6  codex/gpt-6.1-sol           your codex default (~/.codex/config.toml)
+      7  codex/gpt-5                 Earlier coding model.
+      8  codex/gpt-5.4-mini          A smaller coding model for quick tasks,
+                                     with a long description that must wrap
+                                     within the menu without losing any of its
+                                     words.
+    Pick 1-8, or type harness/model [1]:
+    How hard should the foreman think? Higher means better plans and decisions,
+    and slower turns that use more of the plan's limits.
+      1  medium  Claude Code's default
+      2  low
+      3  high
+      4  xhigh
+      5  max
+    Pick 1-5 or type a level [1]:
+
+  -> change later: brigada project foreman --harness H --model M --effort E, or
+     run brigada init again
+
+Step 2 of 4: workers
+  Each agent CLI below can run tasks. brigada offers every model the CLI
+  knows: for each task the foreman says how heavy a model it needs (light,
+  standard, heavy) and how hard it should think, and brigada picks the
+  model of that tier with the best record on this repo. Reviews always go
+  to a different model family than the author's, so you need at least two
+  families (e.g. claude + codex).
 
   claude: signed in
-    Which model should claude run?
-       1  sonnet               Anthropic  Sonnet 4 · Balanced  default
-       2  opus                 Anthropic  Opus 4 · Most capable
-       3  haiku                Anthropic  fastest; fine for small tasks
-       4  claude-sonnet-4[1m]  Anthropic  Sonnet, 1M context
-       5  claude-opus-4        Anthropic  Opus 4 · Most capable
-       -  don't use claude
-    Pick 1-5 or -, or type a model id [1]:
-    How hard should sonnet think? More effort gives better results on hard
-    tasks and uses more of your plan's limits.
-       1  default  claude's default
-       2  low
-       3  medium
-       4  high
-       5  xhigh
-       6  max
-    Pick 1-6 [1]:
+    Use claude's models for tasks (sonnet and 4 more)? [Y/n]:
 
   codex: signed in
-    Which model should codex run?
-       1  gpt-6.1-sol   OpenAI  General-purpose coding model.
-                                your codex default
-       2  gpt-5         OpenAI  Earlier coding model.
-       3  gpt-5.4-mini  OpenAI  A smaller coding model for quick tasks, with a
-                                long description that must wrap within the menu
-                                without losing any of its words.
-       -  don't use codex
-    1 more from `codex debug models` aren't listed: brigada can't tell their
-    model family, which it needs to pick reviewers.
-    Pick 1-3 or -, or type a model id [1]:
-    How hard should gpt-6.1-sol think? More effort gives better results on hard
-    tasks and uses more of your plan's limits.
-       1  low
-       2  medium
-       3  high    your codex default
-       4  xhigh
-       5  max
-       6  ultra
-    Pick 1-6 [3]:
+    Use codex's models for tasks (gpt-6.1-sol, gpt-5, gpt-5.4-mini)? [Y/n]:
 
   kimi: init can't check sign-in. If you're not signed in, run `kimi login`
   first, or leave kimi out.
     Use kimi? [y/N]:
-    Which model should kimi run?
-       1  kimi-code/k3                         Moonshot  K3, 1M context
-                                                         your kimi default
-       2  kimi-code/k3-256k                    Moonshot  K3, 256K context
-       3  kimi-code/kimi-for-coding            Moonshot  200K context
-       4  kimi-code/kimi-for-coding-highspeed  Moonshot  200K context
-    Pick 1-4, or type a model id [1]:
-    Effort: high, kimi's own setting for this model (brigada can't set it per
-    run).
     kimi has no sandbox: when it writes code it can run any command on this
     machine without asking. As a reviewer it only reads.
     Let kimi write code too, not only review? [y/N]:
 
   opencode: signed in to 2 providers (opencode providers list)
-    Which model should opencode run?
-       1  zai-coding-plan/glm-5.3  Zhipu (GLM)  GLM-5.3, 200K context
-       2  zai-coding-plan/glm-5.2  Zhipu (GLM)  GLM-5.2, 200K context
-       3  opencode/deepseek-v3     DeepSeek     DeepSeek V3, 1M context
-       -  don't use opencode  default
-    Pick 1-3 or -, or type provider/model [-]:
-    How hard should zai-coding-plan/glm-5.3 think? More effort gives better
-    results on hard tasks and uses more of your plan's limits.
-       1  default  opencode's default
-       2  low
-       3  medium
-       4  high
-    Pick 1-4 [1]:
+    Which models should opencode run? Its list spans providers, so pick the
+    ones you pay for.
+      1  zai-coding-plan/glm-5.3
+      2  zai-coding-plan/glm-5.2
+      3  opencode/deepseek-v3
+      -  don't use opencode
+    Pick numbers (1,3) or -, or type provider/model [-]:
 
   -> change later: run brigada init again
      your own defaults: ~/.codex/config.toml, ~/.kimi-code/config.toml
-
-Step 2 of 4: the foreman
-  The foreman plans the work and decides what happens when a task needs
-  judgment. It runs whenever work finishes, so it uses that agent's quota.
-  Only claude and codex can be the foreman; it uses the model picked above
-  and its effort.
-    1  claude/sonnet  default
-    2  codex/gpt-6.1-sol
-  Pick 1-2 [1]:
-
-  -> change later: brigada project foreman --harness H --model M, or run
-     brigada init again
 
 Step 3 of 4: tasks at once
   Each running task is one agent CLI working in its own copy of the repo,
@@ -123,13 +96,35 @@ Step 4 of 4: how brigada tests the work
      brigada project import
 
 Plan
-  Agents:
-    claude    sonnet                   Anthropic    code + review
-    codex     gpt-6.1-sol              OpenAI       code + review
-    kimi      kimi-code/k3             Moonshot     review only
-    opencode  zai-coding-plan/glm-5.3  Zhipu (GLM)  code + review
+  Foreman: claude/sonnet, effort medium
+  Agents (every model of each CLI; the foreman picks the tier per task):
+    claude    sonnet
+              Anthropic    standard  writes code, reviews
+    claude    opus
+              Anthropic    heavy     writes code, reviews
+    claude    haiku
+              Anthropic    light     writes code, reviews
+    claude    claude-sonnet-4[1m]
+              Anthropic    standard  writes code, reviews
+    claude    claude-opus-4
+              Anthropic    heavy     writes code, reviews
+    codex     gpt-6.1-sol
+              OpenAI       standard  writes code, reviews
+    codex     gpt-5
+              OpenAI       standard  writes code, reviews
+    codex     gpt-5.4-mini
+              OpenAI       light     writes code, reviews
+    kimi      kimi-code/k3
+              Moonshot     standard  reviews only
+    kimi      kimi-code/k3-256k
+              Moonshot     standard  reviews only
+    kimi      kimi-code/kimi-for-coding
+              Moonshot     standard  reviews only
+    kimi      kimi-code/kimi-for-coding-highspeed
+              Moonshot     light     reviews only
+    opencode  zai-coding-plan/glm-5.3
+              Zhipu (GLM)  standard  writes code, reviews
   Reviews: 4 model families, so every task can get a reviewer of another one.
-  Foreman: claude/sonnet
   At once: 4 tasks on this machine; per account: claude 3, codex 2, kimi 1,
     opencode 2 (change: brigada config)
   Check: uv run pytest (init doesn't run it; change it later in
@@ -154,7 +149,6 @@ Plan
   In the background: a runner starts now and keeps going (log:
     ~/.local/state/brigada/runner.log; stop it with: brigada stop). The engine
     starts when needed and stops after 30 idle minutes.
-    brigada config shows every setting later
 
 Write 4 files and start the runner? [y/N]
 Declined; nothing written or started.
