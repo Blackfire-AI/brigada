@@ -23,9 +23,9 @@ tasks:
     deps: []
     base: ""
     tier: heavy
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-5"
-    rounds: 1
+    rounds: 0
   - id: 6
     name: "codex"
     title: "Codex parity: foreman bridge in Codex project config (#26 item 3)"
