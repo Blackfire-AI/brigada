@@ -20,7 +20,7 @@ tasks:
     class: "implement"
     deps: []
     base: ""
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 10
