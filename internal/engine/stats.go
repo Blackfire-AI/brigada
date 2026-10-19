@@ -26,6 +26,7 @@ type StatsRow struct {
 	AgentID   int64   `json:"agent_id"`
 	Harness   string  `json:"harness"`
 	Model     string  `json:"model"`
+	Tier      string  `json:"tier"`
 	Effort    string  `json:"effort,omitempty"` // the agent's effort level; outcomes still group by harness/model
 	Account   string  `json:"account"`
 	Runner    string  `json:"runner"`
@@ -62,7 +63,7 @@ func (e *Engine) Stats(ctx context.Context, project int64) ([]ProjectStats, erro
 	out := []ProjectStats{}
 	err := e.store.View(ctx, func(tx *sql.Tx) error {
 		var err error
-		out, err = statsTx(tx, project, e.cfg.Now())
+		out, err = statsTx(tx, e.cfg, project, e.cfg.Now())
 		return err
 	})
 	if err != nil {
@@ -78,7 +79,7 @@ type statsAgent struct {
 	classes []string
 }
 
-func statsTx(tx *sql.Tx, project int64, now time.Time) ([]ProjectStats, error) {
+func statsTx(tx *sql.Tx, cfg Config, project int64, now time.Time) ([]ProjectStats, error) {
 	rows, err := tx.Query(`SELECT a.id, a.harness, a.model, a.effort, a.account, a.classes, r.name, COALESCE(r.last_seen_at, '')
 		FROM agents a JOIN runners r ON r.id = a.runner_id ORDER BY a.id`)
 	if err != nil {
@@ -93,6 +94,7 @@ func statsTx(tx *sql.Tx, project int64, now time.Time) ([]ProjectStats, error) {
 			rows.Close()
 			return nil, fmt.Errorf("list agents: %w", err)
 		}
+		a.Tier = cfg.Caps.TierOf(a.Harness, a.Model)
 		if err := json.Unmarshal([]byte(classes), &a.classes); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("agent %d: decode classes: %w", a.AgentID, err)

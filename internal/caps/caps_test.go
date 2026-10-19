@@ -1,6 +1,9 @@
 package caps
 
-import "testing"
+import (
+	"github.com/Blackfire-AI/brigada/internal/adapter"
+	"testing"
+)
 
 func limit(n int) *int { return &n }
 
@@ -146,5 +149,29 @@ func TestCostOf(t *testing.T) {
 	}
 	if got := (Limits{}).CostOf("claude", "heavy"); got != 1 {
 		t.Errorf("cost with no config = %d, want the default 1", got)
+	}
+}
+
+func TestTierOf(t *testing.T) {
+	limits := Limits{Tier: map[string]string{
+		"claude/sonnet":          adapter.TierHeavy,
+		"opencode/provider/opus": adapter.TierLight,
+	}}
+	for _, tc := range []struct{ harness, model, want string }{
+		{"claude", "sonnet", adapter.TierHeavy},
+		{"opencode", "provider/opus", adapter.TierLight},
+		{"claude", "opus", adapter.TierHeavy},
+		{"claude", "haiku", adapter.TierLight},
+		{"opencode", "sonnet", adapter.TierStandard},
+		{"codex", "default", adapter.TierStandard},
+		{"kimi", "default", adapter.TierStandard},
+		{"opencode", "default", adapter.TierStandard},
+	} {
+		if got := limits.TierOf(tc.harness, tc.model); got != tc.want {
+			t.Errorf("TierOf(%q, %q) = %q, want %q", tc.harness, tc.model, got, tc.want)
+		}
+	}
+	if got := (Limits{}).TierOf("claude", "sonnet"); got != adapter.TierStandard {
+		t.Errorf("zero Limits tier = %q, want standard", got)
 	}
 }

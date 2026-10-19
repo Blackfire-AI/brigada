@@ -262,7 +262,8 @@ func printConfigMachine(rt *runtime, flagStateDir string, stdout, stderr io.Writ
 		{"default_reviewer", "none"},
 		{"caps.global", "no cap"}, {"caps.plan", "no cap"}, {"caps.runner", "no cap"},
 		{"caps.account.<label>", "no cap"}, {"caps.model.<model>", "no cap"},
-		{"cost.<harness>/<model>", "1"}, {"tools.claude/<model>", claude.ScopeText(nil)},
+		{"cost.<harness>/<model>", "1"}, {"tier.<harness>/<model>", "from the model name"},
+		{"tools.claude/<model>", claude.ScopeText(nil)},
 	}
 	// The loader already validated this file. No accepted key holds a secret;
 	// do not read harness config or credential files into this map.

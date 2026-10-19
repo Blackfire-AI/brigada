@@ -77,7 +77,7 @@ type FileConfig struct {
 	StateDir    string
 	IdleMinutes float64     // 0 = the default
 	Notify      string      // notify = auto|none (§10); empty = auto
-	Caps        caps.Limits // the concurrency caps and cost weights (§8.1); zero = none
+	Caps        caps.Limits // concurrency caps, cost weights and tier overrides (§8.1)
 	// SnapshotDir is where the engine snapshots its store daily (§6.4):
 	// an absolute directory outside the state directory's store. Empty =
 	// no snapshots.
@@ -208,12 +208,12 @@ func loadConfigFile(path string, required bool) (FileConfig, error) {
 				err = fmt.Errorf("want an integer from 1 to %d", engine.MaxForemanWakesPerDay)
 			}
 			cfg.ForemanWakesPerDay = n
-		case strings.HasPrefix(key, "caps."), strings.HasPrefix(key, "cost."):
+		case strings.HasPrefix(key, "caps."), strings.HasPrefix(key, "cost."), strings.HasPrefix(key, "tier."):
 			err = setCap(&cfg.Caps, key, value)
 		case strings.HasPrefix(key, "tools."):
 			err = setTools(&cfg, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, snapshot_dir, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, a caps.<layer>, a cost.<harness>/<model> or a tools.claude/<model>", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, snapshot_dir, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model> or a tools.claude/<model>", path, n+1, key)
 		}
 		if err != nil {
 			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)
@@ -245,13 +245,31 @@ func setTools(cfg *FileConfig, key, value string) error {
 	return nil
 }
 
-// setCap sets one caps or cost key of §8.1 on l, mirroring the YAML
+// setCap sets one caps, cost or tier key of §8.1 on l, mirroring the YAML
 // example there in the file's flat `key = value` shape: caps.global,
 // caps.plan, caps.runner, caps.account.<label>, caps.model.<model> and
-// cost.<harness>/<model>. Every value is a non-negative integer; a key
+// cost.<harness>/<model> or tier.<harness>/<model>. Tier values are checked
+// against the tier vocabulary; other values are non-negative integers. A key
 // the file never names leaves the layer uncapped — or, for cost, the
-// weight at its default of 1.
+// weight at its default of 1, or the tier from the model-name table.
 func setCap(l *caps.Limits, key, value string) error {
+	if rest, ok := strings.CutPrefix(key, "tier."); ok {
+		harness, model, ok := strings.Cut(rest, "/")
+		if !ok || harness == "" || model == "" {
+			return fmt.Errorf("want tier.<harness>/<model>")
+		}
+		if value == "" {
+			return fmt.Errorf("want one of %s", strings.Join(adapter.Tiers, ", "))
+		}
+		if err := adapter.ValidateTier(value); err != nil {
+			return err
+		}
+		if l.Tier == nil {
+			l.Tier = map[string]string{}
+		}
+		l.Tier[harness+"/"+model] = value
+		return nil
+	}
 	n, err := strconv.Atoi(value)
 	if err != nil || n < 0 {
 		return fmt.Errorf("want a non-negative integer, got %q", value)

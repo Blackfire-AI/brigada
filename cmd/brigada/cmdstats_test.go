@@ -25,9 +25,9 @@ func (s stubStats) Stats(context.Context, int64) ([]engine.ProjectStats, error) 
 func TestStatsTable(t *testing.T) {
 	stub := stubStats{stats: []engine.ProjectStats{
 		{ProjectID: 1, RepoURL: "https://example.invalid/one.git", Rows: []engine.StatsRow{
-			{Harness: "claude", Model: "sonnet", Live: true, Class: "implement", Attempts: 6, Successes: 5, Score: engine.Score(6, 5)},
-			{Harness: "kimi", Model: "k2", Live: true, Class: "implement", Attempts: 2, Successes: 1, Score: engine.Score(2, 1)},
-			{Harness: "zcode", Model: "glm", Live: false, Class: "implement", Score: engine.Score(0, 0)},
+			{Harness: "claude", Model: "sonnet", Tier: "heavy", Live: true, Class: "implement", Attempts: 6, Successes: 5, Score: engine.Score(6, 5)},
+			{Harness: "kimi", Model: "k2", Tier: "standard", Live: true, Class: "implement", Attempts: 2, Successes: 1, Score: engine.Score(2, 1)},
+			{Harness: "zcode", Model: "glm", Tier: "light", Live: false, Class: "implement", Score: engine.Score(0, 0)},
 		}},
 		{ProjectID: 2, RepoURL: "https://example.invalid/two.git", Rows: []engine.StatsRow{}},
 	}}
@@ -36,10 +36,10 @@ func TestStatsTable(t *testing.T) {
 		t.Fatalf("exit %d, stderr %q", code, errb.String())
 	}
 	want := "https://example.invalid/one.git\n" +
-		"  AGENT                CLASS      ATTEMPTS  SUCCESSES  RATE  CONFIDENCE\n" +
-		"  claude/sonnet        implement  6         5          0.79  enough\n" +
-		"  kimi/k2              implement  2         1          0.50  starting\n" +
-		"  zcode/glm (stale)    implement  0         0          0.50  none\n" +
+		"  AGENT                TIER      CLASS      ATTEMPTS  SUCCESSES  RATE  CONFIDENCE\n" +
+		"  claude/sonnet        heavy     implement  6         5          0.79  enough\n" +
+		"  kimi/k2              standard  implement  2         1          0.50  starting\n" +
+		"  zcode/glm (stale)    light     implement  0         0          0.50  none\n" +
 		"\n" +
 		"https://example.invalid/two.git\n" +
 		"  no agents registered\n"

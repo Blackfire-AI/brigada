@@ -62,16 +62,26 @@ func TestStatsEndpoint(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("%s reads stats: %d %s, want 200", token, code, data)
 		}
+		raw := decode[[]struct {
+			Rows []map[string]any `json:"rows"`
+		}](t, data)
+		for _, project := range raw {
+			for _, row := range project.Rows {
+				if row["tier"] != "standard" {
+					t.Errorf("stats JSON has no standard tier: %s", data)
+				}
+			}
+		}
 		stats := decode[[]engine.ProjectStats](t, data)
 		if len(stats) != 2 {
 			t.Fatalf("%s reads %d projects, want both", token, len(stats))
 		}
 		rows := stats[0].Rows
 		if len(rows) != 1 || rows[0].Harness != "claude" || rows[0].Model != "sonnet" ||
-			rows[0].Attempts != 3 || rows[0].Successes != 2 {
+			rows[0].Tier != "standard" || rows[0].Attempts != 3 || rows[0].Successes != 2 {
 			t.Errorf("%s: project 1 rows = %+v, want the claude/sonnet record 2 of 3", token, rows)
 		}
-		if rows := stats[1].Rows; len(rows) != 1 || rows[0].Attempts != 0 || rows[0].Score != 0.5 {
+		if rows := stats[1].Rows; len(rows) != 1 || rows[0].Tier != "standard" || rows[0].Attempts != 0 || rows[0].Score != 0.5 {
 			t.Errorf("%s: project 2 rows = %+v, want the unrecorded agent at attempts 0", token, rows)
 		}
 	}

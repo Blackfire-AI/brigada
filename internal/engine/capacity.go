@@ -15,7 +15,7 @@ import (
 // read-only copy of what the dispatcher would see right now. Agents
 // carries one entry per advertised agent — its effective cap and the
 // layer that sets it, the jobs running on it, its quota state and its
-// cost weight. Layers carries one entry per cap layer — every runner,
+// cost weight and tier. Layers carries one entry per cap layer — every runner,
 // every account, every capped model, every active plan of the project,
 // and global — with the layer's cap, its use and its queue depth. The
 // percent-of-window quota figures §12.2 names ride on CodexBar data
@@ -46,6 +46,7 @@ type CapacityAgent struct {
 	RunnerID int64  `json:"runner_id"`
 	Harness  string `json:"harness"`
 	Model    string `json:"model"`
+	Tier     string `json:"tier"`
 	Account  string `json:"account"`
 	// Cap is the effective cap — the smallest of the runner, account
 	// and model caps on the agent's path — and CapLayer names the
@@ -281,6 +282,7 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 			RunnerID:     a.runner,
 			Harness:      a.harness,
 			Model:        a.model,
+			Tier:         cfg.Caps.TierOf(a.harness, a.model),
 			Account:      a.account,
 			Cap:          cap,
 			CapLayer:     layer,

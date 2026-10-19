@@ -154,7 +154,7 @@ func TestConfigFile(t *testing.T) {
 
 	// The §8.1 caps and cost keys, the YAML example there in flat form.
 	if err := os.WriteFile(path, []byte("caps.global = 6\ncaps.plan = 3\ncaps.runner = 4\n"+
-		"caps.account.claude = 3\ncaps.model.heavy = 1\ncost.claude/sonnet = 2\n"), 0o644); err != nil {
+		"caps.account.claude = 3\ncaps.model.heavy = 1\ncost.claude/sonnet = 2\ntier.claude/sonnet = heavy\ntier.opencode/provider/model = light\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err = LoadConfigFile(path)
@@ -173,6 +173,10 @@ func TestConfigFile(t *testing.T) {
 	}
 	if got := c.CostOf("claude", "opus"); got != 1 {
 		t.Errorf("unnamed cost = %d, want the default 1", got)
+	}
+
+	if c.Tier["claude/sonnet"] != "heavy" || c.Tier["opencode/provider/model"] != "light" {
+		t.Errorf("tier overrides = %v, want claude/sonnet heavy and opencode/provider/model light", c.Tier)
 	}
 
 	// The tools key: a +-separated scope per pair, none distinct from a
@@ -201,21 +205,27 @@ func TestConfigFile(t *testing.T) {
 	}
 
 	for name, body := range map[string]string{
-		"unknown key":        "frobnicate = 1\n",
-		"no equals":          "state_dir\n",
-		"bad number":         "idle_minutes = soon\n",
-		"negative":           "idle_minutes = -1\n",
-		"bad notify":         "notify = loud\n",
-		"unknown caps layer": "caps.middle = 2\n",
-		"bad caps value":     "caps.global = six\n",
-		"negative caps":      "caps.plan = -1\n",
-		"empty account":      "caps.account. = 2\n",
-		"cost without pair":  "cost.claude = 2\n",
-		"tools without pair": "tools.claude = none\n",
-		"tools empty":        "tools.claude/sonnet = +\n",
-		"tools for codex":    "tools.codex/gpt = none\n",
-		"tools for kimi":     "tools.kimi/default = none\n",
-		"tools for opencode": "tools.opencode/default = none\n",
+		"unknown key":          "frobnicate = 1\n",
+		"no equals":            "state_dir\n",
+		"bad number":           "idle_minutes = soon\n",
+		"negative":             "idle_minutes = -1\n",
+		"bad notify":           "notify = loud\n",
+		"unknown caps layer":   "caps.middle = 2\n",
+		"bad caps value":       "caps.global = six\n",
+		"negative caps":        "caps.plan = -1\n",
+		"empty account":        "caps.account. = 2\n",
+		"tier without pair":    "tier.claude = heavy\n",
+		"tier without harness": "tier./sonnet = heavy\n",
+		"tier without model":   "tier.claude/ = heavy\n",
+		"bad tier":             "tier.claude/sonnet = big\n",
+		"empty tier":           "tier.claude/sonnet = \n",
+		"tier wrong case":      "tier.claude/sonnet = Heavy\n",
+		"cost without pair":    "cost.claude = 2\n",
+		"tools without pair":   "tools.claude = none\n",
+		"tools empty":          "tools.claude/sonnet = +\n",
+		"tools for codex":      "tools.codex/gpt = none\n",
+		"tools for kimi":       "tools.kimi/default = none\n",
+		"tools for opencode":   "tools.opencode/default = none\n",
 	} {
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
@@ -224,6 +234,9 @@ func TestConfigFile(t *testing.T) {
 		if err == nil {
 			t.Errorf("%s: accepted, want refusal", name)
 			continue
+		}
+		if name == "unknown key" && !strings.Contains(err.Error(), "a tier.<harness>/<model>") {
+			t.Errorf("unknown-key error does not name tier: %v", err)
 		}
 		if !strings.Contains(err.Error(), "line 1") {
 			t.Errorf("%s: refusal %q does not name the line", name, err)

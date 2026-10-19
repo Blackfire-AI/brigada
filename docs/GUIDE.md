@@ -721,7 +721,9 @@ Caps bound how many jobs run at once, in layers: this runner, the account, the m
 
 A foreman turn is never held back by the plan or model caps, and goes ahead of queued task jobs. While it runs it still counts as use of its account, runner, global and model caps, so it can leave a worker on the same model waiting.
 
-The foreman can look at the capacity it has when it plans (per agent: the cap, the running jobs, the quota state and the cost weight), but the engine enforces the caps whatever the foreman believes. `cost.<harness>/<model>` is a relative weight, default 1, that the foreman sees when it decides which tasks can wait for a cheaper agent.
+The foreman can look at the capacity it has when it plans (per agent: the tier, the cap, the running jobs, the quota state and the cost weight), but the engine enforces the caps whatever the foreman believes. `cost.<harness>/<model>` is a relative weight, default 1, that the foreman sees when it decides which tasks can wait for a cheaper agent.
+
+Each agent's tier comes from the model name: an `opus` segment prefix or a whole `pro`, `max` or `ultra` segment is heavy; a `haiku` segment prefix or a whole `mini`, `nano`, `flash`, `lite`, `highspeed` or `free` segment is light; other names and CLI defaults are standard. Names are matched without provider prefixes or context suffixes such as `[1m]`, ignoring case. Heavy matches take precedence. Use `tier.<harness>/<model>` to correct the label. The runner's startup line shows the table's tier; stats and capacity include the engine's override.
 
 ### Headroom
 
@@ -732,9 +734,10 @@ With `headroom = true` (the default), task workers on the account that serves yo
 `brigada stats` prints one table per repo:
 
 ```text
-AGENT  CLASS  ATTEMPTS  SUCCESSES  RATE  CONFIDENCE
+AGENT  TIER  CLASS  ATTEMPTS  SUCCESSES  RATE  CONFIDENCE
 ```
 
+- **Tier** is the model-name table label (`light`, `standard` or `heavy`), corrected by any `tier.<harness>/<model>` config override. It is informational today; it does not change dispatch. Changing the label keeps the agent’s existing outcome record.
 - **Attempts and successes** are counted when a task ends, for the agent that wrote the final change, in the task's class.
   - A success is a task whose check passed and, for `implement` tasks, whose review approved within the allowed rounds. Tasks of other classes succeed when the run is done with its check passed, with no review.
   - A task that runs out of rounds counts an attempt without a success.
@@ -893,11 +896,12 @@ The config file is optional. Its format:
 | `caps.account.<label>` | integer, 0 or more | no cap | Most parallel jobs on one account label ([section 8](#capacity)). |
 | `caps.model.<model>` | integer, 0 or more | no cap | Most parallel jobs on one model. |
 | `cost.<harness>/<model>` | integer, 0 or more | `1` | Relative cost weight of an agent, shown to the foreman. |
+| `tier.<harness>/<model>` | `light`, `standard` or `heavy` | from the model name | Override the tier for every agent of this harness/model, shown in stats and capacity. |
 | `tools.claude/<model>` | `+`-separated Claude Code tool patterns, or `none` | the Go scope | Default shell scope of the claude worker agent on that model; `--agent ...,tools=` overrides it ([section 8](#worker-tools-claude)). Other harnesses are refused. |
 
 A cap of `0` caps the layer at nothing, which is different from leaving it out.
 
-Project settings (the approval limit, `default_check`, `setup`, the hold bounds and the rest) are not config-file keys, and the config file refuses them as unknown; they are project settings ([section 6](#6-configuring-a-project)). Effort is not a config-file key either: it is set per agent with `brigada runner --agent …,effort=<level>` ([section 8](#effort)) and per project foreman with `brigada project foreman --effort <level>` ([section 11](#11-the-foremans-harness-claude-or-codex)). `cost.*` keys name `harness/model` without an effort.
+Project settings (the approval limit, `default_check`, `setup`, the hold bounds and the rest) are not config-file keys, and the config file refuses them as unknown; they are project settings ([section 6](#6-configuring-a-project)). Effort is not a config-file key either: it is set per agent with `brigada runner --agent …,effort=<level>` ([section 8](#effort)) and per project foreman with `brigada project foreman --effort <level>` ([section 11](#11-the-foremans-harness-claude-or-codex)). `cost.*` and `tier.*` keys name `harness/model` without an effort, including a provider prefix when the model has one.
 
 An example:
 
@@ -959,7 +963,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada history [--task N] [--job N] [--limit N]`: the timeline. See [section 4](#history-diffs-and-logs).
 - `brigada diff <task-id> [--stat] [--repo URL]`: what a task changed, as `git diff base...branch`; run inside the repo. See [section 4](#history-diffs-and-logs).
 - `brigada logs <job-id> [--check] [--tail N] [--follow]`, or `brigada logs --task N`: a job's transcript as readable lines, or its check log. See [section 4](#history-diffs-and-logs).
-- `brigada stats`: attempts, successes, rate and confidence per agent, class and repo. See [section 9](#9-the-record-and-stats).
+- `brigada stats`: tier, attempts, successes, rate and confidence per agent, class and repo. See [section 9](#9-the-record-and-stats).
 
 ### Finishing
 

@@ -165,9 +165,19 @@ func TestCapacitySnapshot(t *testing.T) {
 	}
 	e.assertHeld(fifth.JobID, caps.LayerRunner)
 
+	// Add a model after leasing so its registration cannot affect this setup's dispatch.
+	haiku := e.addAgent(e.runner1, "claude", "haiku", "work")
 	snap, err := e.eng.Capacity(e.ctx, e.project)
 	if err != nil {
 		t.Fatalf("capacity: %v", err)
+	}
+	for id, want := range map[int64]string{
+		sonnet: "standard", opus: "heavy", opus2: "heavy", haiku: "light",
+		k2: "standard", cooling: "standard", broken: "standard",
+	} {
+		if got := snapAgent(t, snap, id).Tier; got != want {
+			t.Errorf("agent %d tier = %q, want %q", id, got, want)
+		}
 	}
 
 	agents := []struct {
@@ -256,6 +266,20 @@ func TestCapacitySnapshot(t *testing.T) {
 	}
 	snapLayer(t, all, fmt.Sprintf("plan %d", e.plan))
 	snapLayer(t, all, fmt.Sprintf("plan %d", plan2))
+
+	e.eng.cfg.Caps.Tier = map[string]string{"claude/sonnet": "heavy"}
+	overridden, err := e.eng.Capacity(e.ctx, e.project)
+	if err != nil {
+		t.Fatalf("capacity with override: %v", err)
+	}
+	for _, id := range []int64{sonnet, cooling, broken} {
+		if got := snapAgent(t, overridden, id).Tier; got != "heavy" {
+			t.Errorf("agent %d overridden tier = %q, want heavy", id, got)
+		}
+	}
+	if got := snapAgent(t, overridden, haiku).Tier; got != "light" {
+		t.Errorf("haiku tier after sonnet override = %q, want light", got)
+	}
 }
 
 // TestCapacityUncappedAgent covers the agent no layer caps: its cap
