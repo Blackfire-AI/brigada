@@ -96,9 +96,15 @@ func (e *Engine) agentOutcomeTx(tx *sql.Tx, job *jobRow, c Completion, now time.
 	return e.markBrokenTx(tx, job, job.AgentID, brokenFailures, now)
 }
 
+// limitResetCap bounds how far a completion's reset time may cool the
+// account: a window further out than eight days is a suspicious parse,
+// not a quota window (§8), and cools no longer than the cap.
+const limitResetCap = 8 * 24 * time.Hour
+
 // coolAccountTx cools every agent sharing the failed job's agent's
 // account label (§8 "Quota"): until the completion's reset time when it
-// lies ahead, else now plus the configured default. An account already
+// lies ahead, else now plus the configured default. A reset beyond
+// eight days out is suspect and capped there. An account already
 // cooling past that keeps its later deadline. An agent with no account
 // label shares its quota with no one and cools alone. One plain event
 // names the account and the deadline; no inbox, no wake.
@@ -113,6 +119,9 @@ func (e *Engine) coolAccountTx(tx *sql.Tx, job *jobRow, c Completion, now time.T
 	until := now.Add(e.cfg.LimitCooling)
 	if t, err := time.Parse(time.RFC3339, c.LimitUntil); err == nil && t.After(now) {
 		until = t
+		if t.Sub(now) > limitResetCap {
+			until = now.Add(limitResetCap)
+		}
 	}
 	untilStr := fmtTime(until)
 	query := `UPDATE agents SET cooling_until = ?, updated_at = ?

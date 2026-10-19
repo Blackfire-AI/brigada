@@ -111,6 +111,21 @@ func TestLimitUnknownUntilUsesTheDefault(t *testing.T) {
 	})
 }
 
+// TestLimitResetCappedAtEightDays: a reset time further out than
+// eight days is a suspicious parse, not a quota window, and cools the
+// account only to the cap.
+func TestLimitResetCappedAtEightDays(t *testing.T) {
+	e := newEnv(t)
+	a := e.addAgent(e.runner1, "claude", "sonnet", "work")
+	until := e.clock.Now().Add(12 * 24 * time.Hour)
+	e.runPinned(e.runner1, "claude", Completion{
+		Error: "worker CLI failed (limit): quota", ErrorKind: "limit", LimitUntil: until.Format(time.RFC3339)})
+	want := fmtTime(e.clock.Now().Add(8 * 24 * time.Hour))
+	if _, _, cool := e.agentState(a); cool != want {
+		t.Errorf("cooling = %q, want now+8d = %q", cool, want)
+	}
+}
+
 // TestForemanLimitCoolsNoAccount: the foreman key's limit is §4.4's;
 // the dispatcher does not cool the account for it.
 func TestForemanLimitCoolsNoAccount(t *testing.T) {

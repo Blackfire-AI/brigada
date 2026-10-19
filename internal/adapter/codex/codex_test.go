@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
@@ -367,6 +368,94 @@ func TestParseErrEvent(t *testing.T) {
 			}
 			if !ok || ev.Kind != adapter.EvError || ev.ErrorKind != tc.kind {
 				t.Errorf("ParseErrEvent(%q) = %+v, %v; want error kind %q", tc.line, ev, ok, tc.kind)
+			}
+		})
+	}
+}
+
+// TestLimitReset covers the usage-limit reset note (§8): the dated,
+// clock and span forms of "try again at/in …", as fixtures on both
+// streams, at a fixed clock and time zone. The CLI prints its times in
+// the machine's local zone, so the fixture zone is a fixed one.
+func TestLimitReset(t *testing.T) {
+	oldZone := localZone
+	localZone = time.FixedZone("fixture", 2*60*60)
+	t.Cleanup(func() { localZone = oldZone })
+	oldNow := now
+	now = func() time.Time { return time.Date(2026, 10, 20, 23, 30, 0, 0, localZone) }
+	t.Cleanup(func() { now = oldNow })
+	a := &Adapter{}
+	cases := []struct {
+		file  string
+		until string
+	}{
+		// The live message of 2026-10-20, verbatim.
+		{"limit-reset-verbatim.jsonl", "2026-10-24T23:42:00+02:00"},
+		{"limit-reset-no-year.jsonl", "2026-10-24T23:42:00+02:00"},
+		// A date already past this year rolls to the next one.
+		{"limit-reset-no-year-past.jsonl", "2027-01-05T08:15:00+02:00"},
+		{"limit-reset-clock.jsonl", "2026-10-20T23:42:00+02:00"},
+		// A clock time already passed rolls to tomorrow.
+		{"limit-reset-clock-tomorrow.jsonl", "2026-10-21T09:00:00+02:00"},
+		{"limit-reset-in-minutes.jsonl", "2026-10-21T00:15:00+02:00"},
+		{"limit-reset-in-hours.jsonl", "2026-10-21T01:30:00+02:00"},
+		{"limit-reset-in-days.jsonl", "2026-10-23T23:30:00+02:00"},
+		{"limit-reset-in-hm.jsonl", "2026-10-21T01:45:00+02:00"},
+		// No time named leaves the reset unknown.
+		{"failure-limit.jsonl", ""},
+	}
+	parsers := map[string]func([]byte) (adapter.Event, bool){"stdout": a.ParseEvent, "stderr": a.ParseErrEvent}
+	for _, tc := range cases {
+		t.Run(tc.file, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("testdata", tc.file))
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+			var limits int
+			for name, parse := range parsers {
+				sc := bufio.NewScanner(bytes.NewReader(data))
+				for sc.Scan() {
+					ev, ok := parse(sc.Bytes())
+					if !ok || ev.Kind != adapter.EvError || ev.ErrorKind != adapter.ErrLimit {
+						continue
+					}
+					limits++
+					if ev.LimitUntil != tc.until {
+						t.Errorf("%s: LimitUntil = %q, want %q", name, ev.LimitUntil, tc.until)
+					}
+				}
+			}
+			if limits == 0 {
+				t.Error("no limit error event in the fixture")
+			}
+		})
+	}
+}
+
+// TestLimitResetUnparsable: a note whose time does not parse leaves
+// LimitUntil empty, on both tables' paths, and never fails the event.
+func TestLimitResetUnparsable(t *testing.T) {
+	oldNow := now
+	now = func() time.Time { return time.Date(2026, 10, 20, 23, 30, 0, 0, time.UTC) }
+	t.Cleanup(func() { now = oldNow })
+	a := &Adapter{}
+	for _, tc := range []struct{ name, line string }{
+		{"later", `{"type":"error","message":"You've hit your usage limit. Try again later."}`},
+		{"bad month", `{"type":"error","message":"You've hit your usage limit. Try again at Xyz 24th, 2026 11:42 PM."}`},
+		{"bad hour", `{"type":"error","message":"You've hit your usage limit. Try again at 13:42 PM."}`},
+		{"empty span", `{"type":"error","message":"You've hit your usage limit. Try again in a while."}`},
+		{"prose stderr", "ERROR: You've hit your usage limit. Try again whenever."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for name, parse := range map[string]func([]byte) (adapter.Event, bool){"stdout": a.ParseEvent, "stderr": a.ParseErrEvent} {
+				ev, ok := parse([]byte(tc.line))
+				if !ok || ev.Kind != adapter.EvError || ev.ErrorKind != adapter.ErrLimit {
+					t.Errorf("%s: event = %+v, ok = %v, want a limit error", name, ev, ok)
+					continue
+				}
+				if ev.LimitUntil != "" {
+					t.Errorf("%s: LimitUntil = %q, want empty", name, ev.LimitUntil)
+				}
 			}
 		})
 	}
