@@ -76,8 +76,8 @@ func TestInitPlanRoleColumn(t *testing.T) {
 		roleColumn int
 	}{
 		{"approved names", "zai-coding-plan/glm-5.3", false, 62},
-		{"longest word fits at column 79", "zai-coding-plan/glm-" + strings.Repeat("x", 13), false, 72},
-		{"longest word reaches column 80", "zai-coding-plan/glm-" + strings.Repeat("x", 14), true, 37},
+		{"two-line role fits at column 79", "zai-coding-plan/glm-" + strings.Repeat("x", 8), false, 67},
+		{"two-line role reaches column 80", "zai-coding-plan/glm-" + strings.Repeat("x", 9), true, 37},
 		{"golden fixture width", "kimi-code/kimi-for-coding-highspeed", true, 37},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -142,6 +142,51 @@ func TestInitPlanRoleColumn(t *testing.T) {
 				t.Errorf("role phrase did not wrap within its column:\n%s", table)
 			}
 		})
+	}
+}
+
+func TestInitPlanLongModelStacks(t *testing.T) {
+	agents := []agentSpec{
+		{harness: "kimi", model: "kimi-code/kimi-for-coding-highspeed", classes: []string{"review"}},
+		{harness: "claude", model: "fable", classes: []string{"implement", "review", "answer"}},
+	}
+	var b bytes.Buffer
+	printInitAgents(&b, agents, 2, agents[1], nil, adapter.AgentTier)
+	_, table, _ := strings.Cut(b.String(), "foreman picks the tier per task):\n")
+	table, _, _ = strings.Cut(table, "  Reviews:")
+	lines := strings.Split(strings.TrimRight(table, "\n"), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("want two lines per agent:\n%s", table)
+	}
+	familyColumn, tierColumn := -1, -1
+	for i, line := range lines {
+		if term.VisibleWidth(line) >= 80 {
+			t.Errorf("line reaches 80 columns: %q", line)
+		}
+		if i%2 == 0 {
+			if !strings.HasPrefix(line, "    "+agents[i/2].harness+" ") || strings.Contains(line, "Moonshot") || strings.Contains(line, "Anthropic") {
+				t.Errorf("first line is not the model line: %q", line)
+			}
+			continue
+		}
+		family, tier := "Moonshot", "light"
+		if i == 3 {
+			family, tier = "Anthropic", "heavy"
+		}
+		f, ti := strings.Index(line, family), strings.Index(line, tier)
+		if f < 0 || ti < f {
+			t.Fatalf("second line lacks family and tier: %q", line)
+		}
+		if familyColumn < 0 {
+			familyColumn, tierColumn = f, ti
+		} else if f != familyColumn || ti != tierColumn {
+			t.Errorf("columns = %d, %d, want %d, %d: %q", f, ti, familyColumn, tierColumn, line)
+		}
+	}
+	for _, role := range []string{"reviews only", "writes code, reviews"} {
+		if !strings.Contains(table, role) {
+			t.Errorf("role %q split over lines:\n%s", role, table)
+		}
 	}
 }
 
