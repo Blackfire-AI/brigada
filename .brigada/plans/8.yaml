@@ -55,7 +55,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-33"
     rounds: 0
   - id: 34
