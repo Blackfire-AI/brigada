@@ -5,9 +5,9 @@
 plan: 9
 title: "Live telemetry in the terminal: brigada capacity and brigada top"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: pending_approval
 created: 2026-10-20T08:31:56.482366Z
-updated: 2026-10-20T08:31:56.482366Z
+updated: 2026-10-20T12:08:33.543139Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps, or from the
 # default branch when base is empty; merge a task after its base. States
@@ -34,6 +34,18 @@ tasks:
     deps: ["capacity-cli"]
     base: "capacity-cli"
     effort: medium
-    state: needs_foreman
+    state: cancelled
     branch: "brigada/task-37"
     rounds: 1
+  - id: 45
+    name: "top-2"
+    title: "brigada top: finish from task 37 and fix the dropped fetch error"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: light
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+    extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "1267a44c0c8756c359288eb8fb3a2dd9080bbdb8"]]
