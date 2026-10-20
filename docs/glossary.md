@@ -38,7 +38,7 @@ The terms used by [product.md](product.md) and [design.md](design.md). Where a d
 - **Task:** one unit of work in a plan: title, spec, check, class, dependencies, repo and base ref, caps, and the dep it continues, if any (§6.1).
 - **Spec:** the task's instructions to the task worker, passed verbatim.
 - **Class:** what kind of work a task is: `implement`, `review`, `answer`, …. Eligibility, scores, caps and the approval limit are per class.
-- **Job:** one run of a worker, leased by one runner. Its **kind** says why it exists: `work` (a task's plain run, including a retry after a transient error), `fix` (a fix round), `review`, or `foreman` (a foreman turn) (§11). A task usually has several jobs. **Task jobs** are the kinds `work`, `fix` and `review`, keyed `task:<id>`; the foreman's are keyed `foreman:<project>`.
+- **Job:** one run of a worker, leased by one runner. Its **kind** says why it exists: `work` (a task's plain run, including a retry after a transient error), `fix` (a fix round), `review`, `land` (a landing, §7.1), or `foreman` (a foreman turn) (§11). A task usually has several jobs. **Task jobs** are the kinds `work`, `fix` and `review`, keyed `task:<id>`; the foreman's are keyed `foreman:<project>`.
 - **Foreman turn:** a job of kind `foreman`: a headless resume of the foreman's session with the pending events (§4.2).
 - **Attach:** the interactive foreman: the user joining the foreman's brigada-owned session (`foreman:<project>`) through `brigada attach`, holding the key's live slot while attached; detach writes the session id back and re-evaluates waiting events for a wake (§4.2).
 - **Wake:** the engine submitting a foreman turn because a judgment event arrived and nobody is attached.
@@ -54,6 +54,8 @@ The terms used by [product.md](product.md) and [design.md](design.md). Where a d
 - **Verdict block:** the block a review job's final message ends with: the verdict (`approve` or `changes`) plus findings. An approve without substantive findings counts as `no-verdict` and is retried with another reviewer (§7).
 - **`needs_help`:** a task worker's status when it needs a decision. Its `question` carries the question or a proposed split, and the foreman decides.
 - **Outcome:** the recorded result of a task on an agent (check passed, review approved within the rounds, or not). Outcomes feed the dispatcher's scores and `brigada stats`.
+- **Gate:** one of the three points where the loop may wait for the user: `plan` (before a plan's tasks are queued), `land` (before an approved task is squashed onto the target branch), `push` (before the target is pushed). Each is `auto` or `ask` (`push` also `never`); a **rule** (a flat key in the project file, such as a protected path or a tier) turns `auto` into `ask` for the plan or task that trips it. Enforced by the engine; no foreman tool passes one (§6.3).
+- **Land job:** a job of kind `land`, with no worker: a runner squashes one approved task onto the target branch, reruns the project's default check on the result, and pushes or waits by the push gate. Created by a rule when the task is done, approved and its dependencies are landed; a conflict or a failed check parks the task for the foreman (§7.1). `brigada land` is the hand-driven form.
 
 ## Leases
 

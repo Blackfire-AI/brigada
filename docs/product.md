@@ -21,14 +21,17 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 
 1. **Understands** your ask in conversation and asks back when it's unclear.
 2. **Plans:** splits the ask into a **task graph** (decided 2026-10-12: tasks with dependencies at launch). Each task has a spec, a **check** command, a class (implement, review, answer, …), its dependencies and (decided 2026-10-19) a **tier**, how heavy a model it needs, and an **effort**, how hard that model should think. The plan is also written into the repo as a file, so it survives the loss of the engine store and can be read and reviewed like code (decided 2026-10-12; details in [design.md](design.md) §6.4).
-3. **Confirms** the plan with you **only above a size or risk limit** you set (decided 2026-10-12); smaller plans start on their own.
+3. **Confirms** the plan with you **only where your rules say so** (decided 2026-10-12 as a size or risk limit; generalized 2026-10-20 into gates and rules, [design.md](design.md) §6.3): a plan with more tasks than you allow, a class outside your list, or a path you protect waits for you; every other plan starts on its own.
 4. **Dispatches** each task to an eligible agent chosen by sampling: each agent's measured record for that class on this repo, weighed against its configured cost, among agents with quota left and healthy. With no record yet (a new user or repo) the draws are wide, so every agent gets tried, and `stats` shows how confident each number is. The foreman says per task how heavy a model it needs (light, standard or heavy) and how hard it should think (decided 2026-10-19); the engine samples a model of that tier among the CLIs you allowed, by record weighed against cost (decided 2026-10-20), never leaving the tier by choice. A failed task first retries at a higher effort, then climbs a tier (decided 2026-10-20) ([design.md](design.md) §6.1, §8).
 5. **Runs** the agent's official CLI headless in its own git worktree, signed in with your account.
 6. **Checks** the work by running the task's check, never trusting "done".
 7. **Reviews** every change with a model from a different family. Fix rounds are capped.
 8. **Handles failures:** retries, moves the task to another agent, splits it further, or asks you.
-9. **Reports** progress and results: branches, the suggested merge order, what needs you. You can **stop or cancel** a plan or a task at any time.
-10. **Learns:** every outcome feeds the record, so the next pick is better. `brigada stats` shows who wins where.
+9. **Lands** each approved task onto your branch as soon as its dependencies are landed, reruns your check on the result, and pushes (decided 2026-10-20): the mechanical end of the loop is brigada's, and you stop it only with a rule, at the plan, the landing or the push ([design.md](design.md) §6.3, §7.1). A task that your rules hold, a conflict, or a check that fails on the landed result is never resolved by a rule: it waits for you or goes back to the foreman.
+10. **Reports** progress and results: what landed, what waits at a gate, what needs you. You can **stop or cancel** a plan or a task at any time.
+11. **Learns:** every outcome feeds the record, so the next pick is better. `brigada stats` shows who wins where.
+
+**The loop is brigada's; the stops are yours** (decided 2026-10-20). Every step the check and the cross-family review have already decided — landing, the check on the result, the push — runs without you. You decide where the loop waits by writing rules into the project file, and the defaults are conservative: a plan over the size limit waits, landing is automatic, the push waits for you until you set it to go on its own. A gate is enforced by the engine, never by the foreman, which has no tool to pass one.
 
 ## 4. How it's built
 
@@ -71,7 +74,8 @@ In:
 - the foreman as an agent in a brigada-owned session: `brigada attach` for the conversation, headless turns while nobody is attached — conversation, plan with dependencies, confirm above a limit, dispatch, watch, failure handling, stop and cancel, report;
 - the coordinator session over several projects (mode B);
 - `brigada init`, which sets a repo up in one step;
-- `brigada land`, which squashes approved branches onto a local branch and stops before any push;
+- landing as a job (decided 2026-10-20, [design.md](design.md) §7.1): each approved task is squashed onto the target branch by a runner, the project's check reruns on the result, and the push follows or waits according to your rules; `brigada land` stays as the hand-driven form, which stops before any push;
+- gates and rules in `.brigada/project.yaml` (decided 2026-10-20, [design.md](design.md) §6.3): where the loop waits for you, at the plan, the landing or the push;
 - tiers and effort per task, with the escalation ladder (effort, then tier) and cost-weighted dispatch;
 - local notifications: an OS notification plus a "needs you" queue in `brigada status` (for the foreman's limit, plan approval, questions);
 - `brigada review --branch <x>` without the foreman (the author's family from the job record or the `Co-Authored-By` trailer): it seeds the record and shows value on its own;
@@ -87,7 +91,7 @@ In:
 Not at launch (backlog):
 - remote engine and runners;
 - GitHub issues as a source, notifications;
-- a web UI, containers, auto-merge (`brigada land` never pushes);
+- a web UI, containers, pull requests as the landing target (landing pushes a branch; a forge's merge flow stays in a deployment, §5);
 - the Gemini adapter;
 - connectors to chat front ends.
 
@@ -127,6 +131,7 @@ brigada is a standalone tool beside your own harness session: not a board, and n
 | Risk | Mitigation |
 |---|---|
 | The foreman splits work badly | approval above a size or risk limit; the planner's own outcomes are recorded; re-planning when a task fails |
+| A bad change lands on your branch without you | the check and the cross-family review before landing, the check again on the landed result, the push gate (`ask` by default), protected paths and tiers that hold a landing for you, a staging target branch as a setting; nothing is force-pushed and a landing never resolves a conflict |
 | The foreman's subscription hits its limit | you're notified and decide (wait, switch harness or model, or continue without it); plain commands and approved plans work without it |
 | No outcome data on a fresh install | defaults plus wide draws from a thin record, confidence shown in `stats`; standalone `review` seeds the record |
 | Scope: foreman plus engine plus adapters | phase it: one task end to end first, then plans with dependencies, then failure handling and re-planning |
@@ -144,7 +149,9 @@ Decided (2026-10-19): tiers and effort per task, an agent per model, the tier fa
 
 Decided (2026-10-20): cost-weighted dispatch, the escalation ladder of effort then tier, and the `AGENTS.md` router block with `.brigada/foreman.md`, with Codex wired through `.codex/config.toml` (that init wiring retired the same day with mode A: init writes `.brigada/project.yaml` only, design §13.1).
 
+Decided (2026-10-20, the loop): brigada runs the loop to the push; the user stops it with rules at three gates (plan, land, push), enforced by the engine ([design.md](design.md) §6.3); landing is a runner job per task, continuous, onto the default branch or a staging branch, with the check rerun on the result ([design.md](design.md) §7.1); the rules are flat keys in `.brigada/project.yaml`, the shipped `approval_*` keys among them; an `after_land` command; shipped defaults: plan `ask` on a tripped rule, land `auto`, push `ask`.
+
 Open:
-1. The size and risk limit for plan approval: how it's measured (task count, classes, files touched, protected paths).
+1. ~~The size and risk limit for plan approval: how it's measured~~ Settled 2026-10-20 as gates and rules ([design.md](design.md) §6.3): task count, classes, protected paths, tiers, a spent restart. Still open: the default task limit once landing is automatic (5 today; 12 or none proposed).
 2. ~~How the foreman learns about events while nobody is typing~~ Settled: with nobody attached the engine wakes a headless turn of the same session, and an attached chat reads `events` between replies ([design.md](design.md) §4.2).
 3. Tiers and effort ([design.md](design.md) §16 item 12): the tier table as vendors rename models, and whether the effort levels reach a CLI's extremes.
