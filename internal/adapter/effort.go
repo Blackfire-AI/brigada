@@ -20,10 +20,13 @@ import (
 //     value — the CLI judges that.
 //   - opencode: `opencode run --variant <v>` accepts provider-specific names,
 //     validated separately rather than restricted to a fixed list.
+//   - dsh: the patch file's reasoningEffort takes off, low, high, max (no
+//     medium); the adapter writes it into a per-job patch file.
 //   - kimi: the CLI documents no effort option; refused.
 var effortLevels = map[string][]string{
 	"claude": {"low", "medium", "high", "xhigh", "max"},
 	"codex":  {"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"},
+	"dsh":    {"off", "low", "high", "max"},
 }
 
 var openCodeEffort = regexp.MustCompile(`^[a-z0-9-]{1,16}$`)
@@ -108,6 +111,12 @@ func EffortForHarness(harness, taskEffort string) string {
 		case "low":
 			return "minimal"
 		case "high", "max":
+			return taskEffort
+		}
+	case "dsh":
+		// dsh has no medium: omitting the key is the provider default.
+		switch taskEffort {
+		case "low", "high", "max":
 			return taskEffort
 		}
 	}

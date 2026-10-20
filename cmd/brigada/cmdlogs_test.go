@@ -119,6 +119,21 @@ func TestLogsRendersErrorsAndUnreadableTranscripts(t *testing.T) {
 	}
 }
 
+func TestLogsRendersDshTranscript(t *testing.T) {
+	transcript := `{"type":"session","sessionId":"session-1","cwd":"/work"}
+{"type":"text","text":"checking"}
+{"type":"tool_call","callId":"c1","tool":"bash","input":{"command":"ls"}}
+{"type":"tool_result","callId":"c1","status":"completed","result":"ok"}
+stderr: dsh: AUTH: bad key
+{"type":"final","text":"done"}
+`
+	got := strings.Join(renderTranscript([]byte(transcript)), "|")
+	want := "message checking|tool_start bash|tool_end c1|error (auth) bad key|message done"
+	if got != want {
+		t.Errorf("rendered %q, want %q", got, want)
+	}
+}
+
 func TestLogsTaskPicksTheLatestJob(t *testing.T) {
 	stub := newStubLogs()
 	// The flag path resolves the task's latest job before printing.

@@ -1,0 +1,1 @@
+dsh: AUTH: Authentication Fails, Your api key: ****-key is invalid (request_id: 00000000-0000-0000-0000-000000000000)

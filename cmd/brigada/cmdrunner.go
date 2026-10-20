@@ -13,6 +13,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
 	"github.com/Blackfire-AI/brigada/internal/adapter/codex"
+	"github.com/Blackfire-AI/brigada/internal/adapter/dsh"
 	"github.com/Blackfire-AI/brigada/internal/adapter/fake"
 	"github.com/Blackfire-AI/brigada/internal/adapter/kimi"
 	"github.com/Blackfire-AI/brigada/internal/adapter/opencode"
@@ -43,8 +44,8 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		maxParallel  int
 		noStart      bool
 	)
-	fs.StringVar(&harness, "harness", "claude", "the harness this runner offers: claude, kimi, codex, opencode, or fake with --worker-script")
-	fs.StringVar(&model, "model", "", "the model to run (claude default: sonnet; kimi, codex and opencode default: the CLI's own; opencode model: provider/model; fake default: fake-1)")
+	fs.StringVar(&harness, "harness", "claude", "the harness this runner offers: claude, kimi, codex, opencode, dsh (experimental), or fake with --worker-script")
+	fs.StringVar(&model, "model", "", "the model to run (claude default: sonnet; kimi, codex and opencode default: the CLI's own; opencode model: provider/model; dsh default: deepseek-flash; fake default: fake-1)")
 	fs.StringVar(&workerScript, "worker-script", "", "with --harness fake: the scripted worker the fake adapter drives (tests)")
 	fs.StringVar(&agentFile, "agent-file", "", "with --harness kimi: the agent definition file the CLI session starts under")
 	fs.StringVar(&classes, "classes", defaultClasses, "the task classes this runner takes, comma-separated")
@@ -52,7 +53,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	fs.IntVar(&maxParallel, "max-parallel", 0, "how many concurrent jobs this runner runs, advertised at register (0 = unset, one at a time)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	agents := &agentSpecs{}
-	fs.Var(agents, "agent", "one offered agent, --agent once per harness and model: harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]; account defaults to the harness name; effort is validated per harness (claude, codex, opencode; kimi has none); tools= (claude only) replaces the Go shell scope with Claude Code tool patterns, none = file tools only; replaces --harness/--model/--classes/--agent-file")
+	fs.Var(agents, "agent", "one offered agent, --agent once per harness and model: harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]; account defaults to the harness name; effort is validated per harness (claude, codex, opencode, dsh; kimi has none); tools= (claude only) replaces the Go shell scope with Claude Code tool patterns, none = file tools only; replaces --harness/--model/--classes/--agent-file")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
@@ -320,6 +321,8 @@ func runnerDefaultModel(harness string) string {
 		return kimi.DefaultModel
 	case "opencode":
 		return opencode.DefaultModel
+	case "dsh":
+		return dsh.DefaultModel
 	case "fake":
 		return "fake-1"
 	}
@@ -383,6 +386,11 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the opencode harness takes none")
 			}
 			ad = &opencode.Adapter{}
+		case "dsh":
+			if spec.agentFile != "" {
+				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the dsh harness takes none")
+			}
+			ad = &dsh.Adapter{}
 		case "fake":
 			if spec.agentFile != "" {
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the fake harness takes none")
@@ -392,7 +400,7 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 			}
 			ad = &fake.Adapter{Script: workerScript}
 		default:
-			return nil, nil, fmt.Errorf("unknown harness %q; want claude, kimi, codex, opencode or fake", spec.harness)
+			return nil, nil, fmt.Errorf("unknown harness %q; want claude, kimi, codex, opencode, dsh or fake", spec.harness)
 		}
 		if err := adapter.ValidateEffort(spec.harness, spec.effort); err != nil {
 			return nil, nil, fmt.Errorf("--agent harness=%s: %v", spec.harness, err)
