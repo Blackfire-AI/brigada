@@ -32,7 +32,7 @@ tasks:
     class: "implement"
     deps: ["router-4"]
     base: "router-4"
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 7
