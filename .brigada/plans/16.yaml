@@ -37,7 +37,7 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-53-r3"
     rounds: 0
   - id: 54
