@@ -44,7 +44,10 @@ The client, engine, runner and the MCP bridge (`brigada mcp`, §12.2) are the on
 | worker `needs_help` | **foreman** | answer → next job on the same session, or re-plan |
 | task out of rounds or retries | rule, then **foreman** | (decided 2026-10-19; shipped) the tier escalation of §8 first, while the task is below heavy and its attempts are not spent; then the foreman: re-plan, switch agent, split, or ask the user |
 | worker stalled (§5.6) | **foreman** (decided 2026-10-12: always; no automatic nudge) | restart with a new instruction, switch agent, or ask the user |
-| plan above the approval limit | **user** | approve, edit or reject (§6.3) |
+| plan held by a rule at the plan gate | **user** | approve, edit or reject (§6.3) |
+| task approved, dependencies landed | rule | (decided 2026-10-20) a `land` job, unless a rule holds the task at the land gate → **user** (§6.3, §7.1) |
+| landed, check on the result passed | rule | push, unless the push gate is `ask` → **user**, or `never` (§6.3, §7.1) |
+| land conflict, or the check failed on the landed result | **foreman** | (decided 2026-10-20) nothing is pushed; restart the task with a note (rebase onto the new target head, resolve), re-plan, or ask the user (§7.1) |
 | foreman limit hit (§4.4) | **user** | wait, switch foreman, or continue without it (decided 2026-10-12) |
 | job finished with `discoveries` (§5.4; proposal, 2026-10-14) | **foreman** | read them on the next turn as verbatim data in delimiters (§1.4); then `plan_amend`, put the fact into the spec of a task that hasn't started, or ignore it |
 | plan done | rule | notify the user directly (§10); the foreman may add a summary on its next turn, skipped when it's `limited` or out of budget |
@@ -298,9 +301,32 @@ Task states: `pending` (deps not done) → `ready` → `running` → `checking` 
 
 `draft` (the foreman builds it) → `pending_approval` (above the limit) → `active` → `done` | `cancelled`. The foreman can amend an active plan (add, split, drop tasks); each amendment is recorded and re-checked against the approval limit.
 
-### 6.3 Approval limit
+### 6.3 Gates and rules
 
-Approval only above a limit (decided 2026-10-12). Proposed default: more than 5 tasks, any task touching protected paths (config, like a merge policy's protected class), or any task class other than `implement`/`review`/`answer`. Configurable per project.
+Approval only above a limit (decided 2026-10-12): more than 5 tasks, any task touching protected paths, or any task class other than `implement`/`review`/`answer`, configurable per project. Shipped as the three keys `approval_max_tasks`, `approval_classes` and `approval_protected_paths` (§13.1).
+
+**Generalized** (decided 2026-10-20): the loop — plan, work, check, review, land, push — is brigada's, and the user stops it with rules. The engine enforces every stop; the foreman has no tool to pass one, as it has none to approve a plan. There are three **gates**:
+
+- `plan`: before a plan's tasks are queued, today's approval;
+- `land`: before an approved task is squashed onto the target branch (§7.1);
+- `push`: before the target branch is pushed.
+
+A gate is `auto` or `ask`; `push` may also be `never`, which lands locally on the runner's clone of the target and prints the push, as the hand-driven `brigada land` does. A **rule** turns `auto` into `ask` for the one plan or task that trips it, and the needs-you entry (§10) names the rule, as the approval reasons do today: `task #45 waits to land: heavy; touches infra/**`. Rules are flat keys in `.brigada/project.yaml` (schema 1 is flat by design; no expression language), the shipped three among them:
+
+| Key | Gate it holds | Default |
+|---|---|---|
+| `gate_plan` | — | `auto`; a tripped rule holds the plan, as today |
+| `gate_land` | — | `auto` |
+| `gate_push` | — | `ask` |
+| `approval_max_tasks` | plan | `5` (the default once landing is automatic is open, §16) |
+| `approval_classes` | plan | `implement`, `review`, `answer` |
+| `approval_protected_paths` | plan **and land** | none |
+| `approval_tiers` | land | none (`heavy`: the user reads heavy diffs before they land) |
+| `approval_restarted` | land | `false` (`true`: a task that spent a restart or a tier bump waits) |
+| `land_target` | — | the project's default branch; or a staging branch such as `brigada/landed` |
+| `after_land` | — | none: a repo-relative command the runner runs after a successful land, in the user's shell like a check (product §6); its failure is reported, never undone |
+
+A gate set to `ask` holds in the needs-you queue, and `brigada plan approve` and the coordinator's `plan_approve` keep their roles for the plan gate; `brigada land approve <task>` and `brigada push approve` (names open) release the other two, and reject cancels the landing, leaving the branch. A held task blocks nothing but its dependents' landings: work on the rest of the plan goes on. `plan_amend` that adds a task is re-checked against the plan rules, as today.
 
 ### 6.4 The plan file in the repo
 
@@ -325,11 +351,20 @@ After an `implement` job is done and its check passed, the engine creates a revi
 
 Family detection: the job record; for `brigada review --branch` without a job, the `Co-Authored-By` trailer. That standalone command creates a one-task plan of class `review`: the runner runs the repo's configured check, and there are no fix rounds unless you ask. Merging is out of scope at launch: the foreman reports approved branches and the suggested merge order. The one thing brigada adds is a local step the user drives, `brigada land` (§7.1), which stops short of the remote.
 
-### 7.1 Landing approved work locally: `brigada land` (shipped, 2026-10-16)
+### 7.1 Landing approved work: the `land` job (decided 2026-10-20), and `brigada land` by hand (shipped, 2026-10-16)
 
-Today an engineer fetches each approved branch, squashes it onto the default branch, writes a message, reruns the tests and pushes, by hand, per task. `brigada land <task-id>... [--onto <local-branch>] [--repo URL] [--landed <task-id>]... [--no-check]` does the mechanical part and stops before the push. Shipped as designed below, with two gaps: the runner does not yet record the approved head with the verdict (§16 item 10), so the head check is the design's stated fallback (land warns per task and goes on); and the land-note record (see "The landing record") is not written, as the engine has no endpoint for it. The engine adds one read, `GET /v1/tasks/{id}/land` (client and admin tokens only, never the foreman's), which returns the spec, dependencies, approval, the author's summary and family; the client runs every git command.
+**Landing is a job** (decided 2026-10-20). When a task is `done` and approved and every dependency is landed, the engine creates a job of kind `land` for it, leased by a runner like any job (§12.3), with no worker: a runner that advertises git for the project's repo. In order, in a clone of the target branch under the runner's state directory: fetch the target and the task's latest result branch by exact name; squash the task's own diff (base to branch, three-way) as one commit with the message of "The commit message" below; run the project's default check on the result; then, by the push gate (§6.3), push the target, wait for the user, or stop and print the push. It runs where the runner's git credentials are, so the engine still does no git (product §5 rule 1) and a result stays a pushed branch. Landing is **continuous**: per task, not per plan, so a stack lands in dependency order as its tasks finish and the target moves with the plan; the plan's done report names what landed, what waits at a gate, and what the foreman holds.
 
-**How it squares with "brigada does not merge".** Land is a local convenience the user drives, in the user's own working repository. It writes commits on a local branch and nothing on the remote: the remote stays the user's, and the push is the user's command, which land prints. The foreman never calls it and it is in no MCP set (§12.2): it is a client command, authenticated as the user, so approval and merging stay with the person. Auto-merge stays in the backlog (product §6).
+- **Conflict:** the job stops, pushes nothing, discards its clone's attempt, and parks the task at `needs_foreman` with the conflicting files. The foreman restarts it with a note (rebase onto the target's new head, resolve), as it restarts a failed task (§5.6); the worker resolves, the check and the review run again, and the task lands on its next approval. A rule never resolves a conflict and never picks a side.
+- **The check fails on the landed result:** the same, with the check log as the job's artifact; nothing is pushed. (The case seen in dogfooding: two parallel branches adding the same migration number.)
+- **The record:** the land job's result is the landing record proposed below (`land-note`), kept by the engine without a separate post: target, commit, check, pushed or waiting. `brigada history` shows it, and the hand-driven command recognizes a landed task by the commit trailer as before.
+- **Target:** `land_target` (§6.3), the default branch unless set; a staging branch keeps the default branch for the user's own merge.
+- **`after_land`** (§6.3) runs after a push, or after the landing when the push gate is `never`.
+- **Never:** force-push, touch another branch, rewrite an existing commit, change the task's state away from `done`, or run with a foreman credential: the job is the engine's, created by a rule, and the foreman has no tool for it.
+
+**By hand.** `brigada land` stays, sharing the squash and message code with the job: for `gate_push = never`, for a branch the user wants on their own machine, and for landing a task by hand. Its design follows. Today an engineer fetches each approved branch, squashes it onto the default branch, writes a message, reruns the tests and pushes, by hand, per task. `brigada land <task-id>... [--onto <local-branch>] [--repo URL] [--landed <task-id>]... [--no-check]` does the mechanical part and stops before the push. Shipped as designed below, with two gaps: the runner does not yet record the approved head with the verdict (§16 item 10), so the head check is the design's stated fallback (land warns per task and goes on); and the land-note record (see "The landing record") is not written, as the engine has no endpoint for it. The engine adds one read, `GET /v1/tasks/{id}/land` (client and admin tokens only, never the foreman's), which returns the spec, dependencies, approval, the author's summary and family; the client runs every git command.
+
+**How it squares with "brigada does not merge".** The hand-driven land is a local convenience the user drives, in the user's own working repository. It writes commits on a local branch and nothing on the remote: the remote stays the user's, and the push is the user's command, which land prints. The foreman never calls it and it is in no MCP set (§12.2): it is a client command, authenticated as the user. Since 2026-10-20 merging is brigada's by default, through the `land` job above, and the person's by rule: the gates and rules of §6.3 are the user's, enforced by the engine, and the foreman can pass none of them.
 
 **What it does.** Run inside the project's repository, on the target branch: the project's default branch, or the local branch named with `--onto`, which must be checked out (land never switches branches; it says `git switch <branch>`). In order:
 1. **Preflight, before anything is changed.** Every named task is checked; one failure refuses the whole call and names the task and the reason.
@@ -458,7 +493,7 @@ Everything is kept and readable (decided 2026-10-12).
 
 ## 10. Notifications (launch: local)
 
-Local OS notifications plus a "needs you" queue in `brigada status`: plan approval, user-directed questions, the foreman's limit, the foreman's budget out, a broken agent, a task parked with no eligible agent, a plan done. Remote channels (webhook, Telegram) are in the backlog.
+Local OS notifications plus a "needs you" queue in `brigada status`: a plan, a landing or a push held by a rule at its gate (§6.3), user-directed questions, the foreman's limit, the foreman's budget out, a broken agent, a task parked with no eligible agent, a plan done. Remote channels (webhook, Telegram) are in the backlog. The queue holds only what a rule or the foreman gave the user; a landing or a push that went through is a report in the history, not an entry.
 
 ## 11. Data model (SQLite, one file)
 
@@ -572,7 +607,7 @@ Transformations, so nothing is lost in translation:
 7. Cross-project plans: out of scope for the coordinator (§4.6 mode B); revisit only with a use case. Today a project is one repo URL with its own foreman, and a plan belongs to one project, so a change spanning `api` and `web` is two plans the user coordinates. Either one foreman over several projects, or a plan whose tasks each name a repo. Either keeps §5 rule 6 (repos are addressed by URL, never by path or name), and either must settle whose foreman owns the plan, what the foreman token's project wall (§12.1) allows, and how a task waits on a branch of another repo. Read-only context from another repo for a task that still changes one repo is the smaller thing proposed in §5.8, and does not answer this.
 8. Setup and its cache (§5.7; shipped with 15 minutes, 30 days and 3 entries per repository, a copy per job, and no clear command yet, all open to revision): the default `timeout_minutes`; the age and size bounds and the eviction rule of the cache; whether to share an entry read-only instead of copying it per job; the name and scope of the clear command; whether the key should also cover the toolchain version.
 9. Extra repositories (§5.8): write access to one, which is a cross-repo question (item 7) and not settled by the read-only field; detecting a worker that changed a read-only checkout; credentials for a repo the runner's own cannot reach; whether to resolve a moving ref to a commit at task creation instead of at the job.
-10. Landing (§7.1): landing a whole stack in one command beyond the dependency chain given by task ids (for example `--plan <id>`, or a stack across plans); the land record ("The landing record" above, the `land-note` post, not shipped), and whether land should learn that a push followed; recording the approved head with the verdict, which the head check needs; a time bound for the check land runs; `--onto` a branch that is not checked out; the family-to-address table for the co-author trailer.
+10. Landing (§7.1): landing a whole stack in one command by hand beyond the dependency chain given by task ids (for example `--plan <id>`, or a stack across plans); recording the approved head with the verdict, which the head check needs; a time bound for the check land runs; `--onto` a branch that is not checked out; the family-to-address table for the co-author trailer. For the `land` job (decided 2026-10-20): the default `approval_max_tasks` once landing is automatic (5, 12, or none); the names of the land and push approve commands; whether a runner must advertise landing separately from its adapters; how the job's clone of the target is kept and pruned; landing by hand a task without an `approve` verdict (a hand review); whether `after_land` also runs for the hand-driven command.
 11. Project instructions (§5.9): tuning the 8192-byte bound; a bulk "apply to tasks already created"; whether the foreman should be handed the text in its wake prompt after all; whether reviewers need a text of their own.
 12. Tiers and effort (§6.1, §8, §13.1): the tier table's patterns and their staleness as vendors rename models; whether brigada's four effort levels should reach a CLI's extremes (`xhigh`, `ultra`) or those stay reachable through an agent's own `effort=` only; the per-account default caps and the tasks-at-once default; whether `--max-parallel` unset should keep meaning one job at a time once init sets it; how a tier bump should count against the restart cap when the bumped attempt fails too.
 
