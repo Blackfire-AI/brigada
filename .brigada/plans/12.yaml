@@ -5,9 +5,9 @@
 plan: 12
 title: "Fewer headless foreman wakes while an interactive session is active"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-20T12:18:12.362113Z
-updated: 2026-10-20T12:18:12.362113Z
+updated: 2026-10-20T12:55:54.411731Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps, or from the
 # default branch when base is empty; merge a task after its base. States
@@ -23,6 +23,6 @@ tasks:
     deps: []
     base: ""
     effort: high
-    state: reviewing
+    state: done
     branch: "brigada/task-47"
     rounds: 0
