@@ -23,7 +23,7 @@ tasks:
     deps: []
     base: ""
     effort: high
-    state: reviewing
+    state: done
     branch: "brigada/task-38-r2"
     rounds: 0
   - id: 39
@@ -33,6 +33,6 @@ tasks:
     deps: ["dsh-adapter"]
     base: "dsh-adapter"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
