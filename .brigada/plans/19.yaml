@@ -5,9 +5,9 @@
 plan: 19
 title: "Land init unwiring and the mode A docs on current main (tasks 54 and 55 conflict with 46/53/58)"
 repo: "github.com/Blackfire-AI/brigada"
-state: pending_approval
+state: active
 created: 2026-10-20T19:00:28.477475Z
-updated: 2026-10-20T19:00:28.477475Z
+updated: 2026-10-20T19:01:53.171422Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -16,7 +16,8 @@ updated: 2026-10-20T19:00:28.477475Z
 # States are the engine's (§6.1), rounds the fix and review rounds
 # spent (§7), question the worker's open question (§3), when it has one.
 # Optional tier (light, standard, heavy) and effort (low, medium, high, max)
-# describe the model needed and how hard it should think (§6.1); caps
+# describe the model needed and how hard it should think (§6.1);
+# review_tier and review_effort do the same for its reviews (§7, §8); caps
 # override the task's fix_rounds, review_rounds and restart budgets (§14).
 tasks:
   - id: 59
@@ -26,7 +27,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
     extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "c7faa2e4766493d3e55debb6ca4b2c552943b19c"]]
