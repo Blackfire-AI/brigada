@@ -55,8 +55,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-33"
     rounds: 0
   - id: 34
     name: "restart-cap"
