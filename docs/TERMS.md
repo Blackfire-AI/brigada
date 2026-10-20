@@ -26,4 +26,4 @@ The maintainers' position: driving the official, unmodified CLIs with the user's
 
 ## No warranty
 
-brigada is alpha software under the Apache-2.0 license (see [LICENSE](../LICENSE)). It runs agents that edit code and run commands with your user's permissions, in git worktrees and not in containers. Review what it changes before you merge it.
+brigada is licensed under the Apache-2.0 license (see [LICENSE](../LICENSE)). It runs agents that edit code and run commands with your user's permissions, in git worktrees and not in containers. Review what it changes before you merge it.
