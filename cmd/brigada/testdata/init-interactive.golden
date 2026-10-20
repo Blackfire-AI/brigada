@@ -128,15 +128,18 @@ Plan
     codex     edit files and run commands inside codex's sandbox
     opencode  edit files; no commands
   Files in this repository (brigada never commits them):
-    new  .brigada/project.yaml                    the settings above
-    new  .mcp.json                                lets Claude Code here use
-                                                  brigada (Claude Code asks you
-                                                  to approve it)
-    new  .claude/settings.local.json              private, kept out of git:
-                                                  when your Claude turn ends,
-                                                  brigada's foreman picks up
-                                                  what happened meanwhile
-    new  .claude/skills/brigada-foreman/SKILL.md  rules for your Claude session
+    new  .brigada/project.yaml        the settings above
+    new  .mcp.json                    lets Claude Code here use brigada (Claude
+                                      Code asks you to approve it)
+    new  .claude/settings.local.json  private, kept out of git: when your
+                                      Claude turn ends, brigada's foreman picks
+                                      up what happened meanwhile
+    new  .brigada/foreman.md          brigada's foreman rules for your Claude
+                                      session (brigada's own file)
+    new  AGENTS.md                    a short block that makes your Claude
+                                      session brigada's foreman
+    new  CLAUDE.md                    imports AGENTS.md, so Claude Code reads
+                                      that block
     (show full contents: --verbose)
   Codex, optional: to plan from your own Codex session, run once yourself:
     codex mcp add brigada-foreman -- brigada mcp --foreman
@@ -144,5 +147,5 @@ Plan
     ~/.local/state/brigada/runner.log; stop it with: brigada stop). The engine
     starts when needed and stops after 30 idle minutes.
 
-Write 4 files and start the runner? [y/N]:
+Write 6 files and start the runner? [y/N]:
 Declined; nothing written or started.

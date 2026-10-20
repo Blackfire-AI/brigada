@@ -67,8 +67,10 @@ func TestRemovalReversesInitWiringBytes(t *testing.T) {
 			if !reflect.DeepEqual(before, after) {
 				t.Fatalf("round trip:\nbefore %q\nafter %q", before, after)
 			}
-			if fileExists(filepath.Join(root, filepath.Dir(wiringSkillFile))) {
-				t.Error("owned skill directory remains")
+			for _, rel := range []string{wiringRulesFile, wiringAgentsFile, wiringClaudeFile} {
+				if fileExists(filepath.Join(root, rel)) {
+					t.Errorf("%s remains", rel)
+				}
 			}
 		})
 	}
@@ -114,6 +116,9 @@ func TestRemovalLeavesDamagedFilesAndUnmarkedSkill(t *testing.T) {
 		{wiringSettingsFile, ""},
 		{wiringSharedSettingsFile, `{"hooks":[]}`},
 		{wiringSkillFile, "my instructions\n"},
+		{wiringRulesFile, "my rules\n"},
+		{wiringAgentsFile, "<!-- brigada-managed: router v1 -->\nno end marker\n"},
+		{wiringClaudeFile, "<!-- /brigada-managed: import -->\n"},
 	} {
 		t.Run(tc.rel+tc.body, func(t *testing.T) {
 			root := wireRepo(t)
@@ -135,7 +140,7 @@ func TestRemovalLeavesDamagedFilesAndUnmarkedSkill(t *testing.T) {
 }
 
 func TestRemovalGuardChecksAllFilesBeforeWriting(t *testing.T) {
-	for _, rel := range []string{wiringMCPFile, wiringSettingsFile, wiringSkillFile, ".git/info/exclude", engine.ProjectConfigPath} {
+	for _, rel := range []string{wiringMCPFile, wiringSettingsFile, wiringRulesFile, wiringAgentsFile, wiringClaudeFile, ".git/info/exclude", engine.ProjectConfigPath} {
 		t.Run(rel, func(t *testing.T) {
 			root := wireRepo(t)
 			wireApply(t, root)
@@ -222,8 +227,10 @@ func TestRemoveCommandAndDeleteConfig(t *testing.T) {
 			if fileExists(engine.ProjectConfigPath) == deleteConfig {
 				t.Error("wrong config retention")
 			}
-			if fileExists(wiringMCPFile) || fileExists(wiringSettingsFile) || fileExists(wiringSkillFile) {
-				t.Error("wiring remains")
+			for _, rel := range []string{wiringMCPFile, wiringSettingsFile, wiringRulesFile, wiringAgentsFile, wiringClaudeFile} {
+				if fileExists(rel) {
+					t.Errorf("wiring remains: %s", rel)
+				}
 			}
 			projects, err := client.Projects(ctx)
 			if err != nil || len(projects) != 0 {
@@ -454,8 +461,8 @@ func TestInitThenRemoveRepositoryRoundTrip(t *testing.T) {
 
 func TestRemovalKeepsEmptyRepositoryRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "repo")
-	wireWrite(t, root, wiringSkillFile, string(skillContent()))
-	files := planSteps(root, []wireStep{{wiringSkillFile, func(d []byte, exists bool) ([]byte, string, error) {
+	wireWrite(t, root, wiringRulesFile, string(rulesContent()))
+	files := planSteps(root, []wireStep{{wiringRulesFile, func(d []byte, exists bool) ([]byte, string, error) {
 		return nil, "removed", nil
 	}}})
 	if err := applyRemoval(files); err != nil {
@@ -553,7 +560,7 @@ func TestRemovalRefusesSymlinksIncludingAfterPlan(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if !fileExists(filepath.Join(moved, "settings.local.json")) || !fileExists(filepath.Join(moved, "skills/brigada-foreman/SKILL.md")) {
+			if !fileExists(filepath.Join(moved, "settings.local.json")) {
 				t.Fatal("modified a symlink target")
 			}
 		})

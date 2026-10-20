@@ -100,9 +100,27 @@ func TestWiringFreshFilesHoldExactlyBrigadasEntries(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".claude/settings.json")); !os.IsNotExist(err) {
 		t.Errorf("fresh wiring created shared settings: %v", err)
 	}
-	skill := wireRead(t, root, ".claude/skills/brigada-foreman/SKILL.md")
-	if !strings.HasPrefix(skill, "---\nname: brigada-foreman\n") || !strings.Contains(skill, wiringSkillMarker) || !strings.Contains(skill, "hold_acquire") {
-		t.Errorf("skill = %.200s", skill)
+	rules := wireRead(t, root, wiringRulesFile)
+	if !strings.HasPrefix(rules, wiringSkillMarker+" v") || strings.Contains(rules, "---\nname:") || !strings.Contains(rules, "Brigada owns\nthis file and replaces it on \"brigada init\"") || !strings.Contains(rules, "hold_acquire") {
+		t.Errorf("rules = %.200s", rules)
+	}
+	if fileExists(filepath.Join(root, wiringSkillFile)) {
+		t.Error("init wrote the retired skill")
+	}
+	agents := wireRead(t, root, wiringAgentsFile)
+	if !strings.HasPrefix(agents, "<!-- brigada-managed: router v1; init added the file -->\n") || !strings.HasSuffix(agents, "\n<!-- /brigada-managed: router -->\n") {
+		t.Errorf("AGENTS.md = %q", agents)
+	}
+	for _, want := range []string{"\"You are a brigada worker\"", "\"You are a brigada reviewer\"", "`" + wiringRulesFile + "`", "foreman", "restart the session in this repository", "`brigada` MCP server"} {
+		if !strings.Contains(agents, want) {
+			t.Errorf("AGENTS.md lacks %q:\n%s", want, agents)
+		}
+	}
+	if strings.Contains(agents, "@"+wiringRulesFile) || strings.Contains(agents, "@AGENTS.md") || strings.Contains(agents, "hold_acquire") {
+		t.Errorf("AGENTS.md imports the rules or holds them:\n%s", agents)
+	}
+	if got, want := wireRead(t, root, wiringClaudeFile), "<!-- brigada-managed: import v1; init added the file -->\n@AGENTS.md\n<!-- /brigada-managed: import -->\n"; got != want {
+		t.Errorf("CLAUDE.md = %q, want %q", got, want)
 	}
 	for _, rel := range []string{".mcp.json", ".claude/settings.local.json"} {
 		for _, secret := range []string{"token", "secret", root} {
@@ -134,8 +152,8 @@ func TestWiringKeepsOthersAndIsIdempotent(t *testing.T) {
 	if got := wireRead(t, root, ".claude/settings.json"); got != settings {
 		t.Errorf("shared settings changed: %s", got)
 	}
-	if wireRead(t, root, "CLAUDE.md") != claudeMD {
-		t.Error("CLAUDE.md touched")
+	if got := wireRead(t, root, "CLAUDE.md"); got != claudeMD+"\n<!-- brigada-managed: import v1"+addedBlank(claudeMD)+"\n@AGENTS.md\n<!-- /brigada-managed: import -->\n" {
+		t.Errorf("CLAUDE.md = %q", got)
 	}
 	m := wireJSON(t, gotMCP).(map[string]any)
 	servers := m["mcpServers"].(map[string]any)
@@ -192,7 +210,14 @@ func TestWiringDamagedFilesAreReportedAndLeftAlone(t *testing.T) {
 		{"stop not an array", ".claude/settings.local.json", "{\"hooks\": {\"Stop\": {}}}"},
 		{"settings with comments", ".claude/settings.local.json", "{\n// no\n}"},
 		{"damaged shared settings", ".claude/settings.json", "{\"hooks\": "},
-		{"foreign skill", ".claude/skills/brigada-foreman/SKILL.md", "my own skill\n"},
+		{"foreign rules", wiringRulesFile, "my own rules\n"},
+		{"router begin without end", wiringAgentsFile, "# mine\n<!-- brigada-managed: router v1 -->\ntext\n"},
+		{"router end without begin", wiringAgentsFile, "<!-- /brigada-managed: router -->\n"},
+		{"router end before begin", wiringAgentsFile, "<!-- /brigada-managed: router -->\n<!-- brigada-managed: router v1 -->\n"},
+		{"two router blocks", wiringAgentsFile, strings.Repeat("<!-- brigada-managed: router v1 -->\n<!-- /brigada-managed: router -->\n", 2)},
+		{"two import blocks", wiringClaudeFile, strings.Repeat("<!-- brigada-managed: import v1 -->\n@AGENTS.md\n<!-- /brigada-managed: import -->\n", 2)},
+		{"unclosed fence", wiringAgentsFile, "# mine\n```sh\nmake\n"},
+		{"unclosed tilde fence", wiringClaudeFile, "~~~\ntext\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := wireRepo(t)
@@ -225,13 +250,12 @@ func TestWiringDamagedFilesAreReportedAndLeftAlone(t *testing.T) {
 	}
 }
 
-func TestWiringSkillRefreshesOnlyItsOwnFile(t *testing.T) {
+func TestWiringRulesRefreshOnlyTheirOwnFile(t *testing.T) {
 	root := wireRepo(t)
-	rel := ".claude/skills/brigada-foreman/SKILL.md"
-	wireWrite(t, root, rel, "---\nname: brigada-foreman\n---\n"+wiringSkillMarker+" v0 -->\nold text\n")
+	wireWrite(t, root, wiringRulesFile, wiringSkillMarker+" v0 -->\nold text\n")
 	wireApply(t, root)
-	if got := wireRead(t, root, rel); strings.Contains(got, "old text") || !strings.Contains(got, "hold_acquire") {
-		t.Errorf("skill not refreshed: %.200s", got)
+	if got := wireRead(t, root, wiringRulesFile); strings.Contains(got, "old text") || !strings.Contains(got, "hold_acquire") {
+		t.Errorf("rules not refreshed: %.200s", got)
 	}
 }
 
@@ -256,7 +280,7 @@ func TestInitProbeListsWiringWritesNothing(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
-			for _, want := range []string{"new .mcp.json lets Claude Code here use brigada", "new .claude/settings.local.json private, kept out of git:", "new .claude/skills/brigada-foreman/SKILL.md rules for your Claude session", "codex mcp add brigada-foreman -- brigada mcp --foreman"} {
+			for _, want := range []string{"new .mcp.json lets Claude Code here use brigada", "new .claude/settings.local.json private, kept out of git:", "new .brigada/foreman.md brigada's foreman rules for your Claude session", "new AGENTS.md a short block that makes your Claude session brigada's foreman", "new CLAUDE.md imports AGENTS.md", "codex mcp add brigada-foreman -- brigada mcp --foreman"} {
 				if strings.Contains(strings.Join(strings.Fields(out), " "), want) != tc.wantWiring {
 					t.Errorf("%q present = %v, want %v\n%s", want, !tc.wantWiring, tc.wantWiring, out)
 				}
@@ -267,7 +291,7 @@ func TestInitProbeListsWiringWritesNothing(t *testing.T) {
 			if strings.Contains(out, "auto_review") || strings.Contains(out, "already") || strings.Contains(out, "ready") {
 				t.Errorf("unexpected setup/approval claim:\n%s", out)
 			}
-			for _, rel := range []string{".mcp.json", ".claude"} {
+			for _, rel := range []string{".mcp.json", ".claude", ".brigada", wiringAgentsFile, wiringClaudeFile} {
 				if _, err := os.Stat(rel); !os.IsNotExist(err) {
 					t.Errorf("probe wrote %s: %v", rel, err)
 				}
@@ -345,7 +369,8 @@ func TestInitNewFileContentsRequireVerbose(t *testing.T) {
 				if !verbose && strings.Contains(out, "+++ b/"+f.rel) {
 					t.Errorf("new file %s printed as a diff\n%s", f.rel, out)
 				}
-				position := strings.Index(out, "    "+f.rel)
+				// The row: the state column, two spaces, the path, then padding.
+				position := strings.Index(out, "  "+f.rel+"  ")
 				if position <= previous {
 					t.Errorf("%s missing or out of order\n%s", f.rel, out)
 				}

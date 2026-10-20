@@ -20,6 +20,16 @@ const WorkerTemplateVersion = 6
 // under the same rule as the worker's (§1.4).
 const ReviewTemplateVersion = 4
 
+// WorkerOpener and ReviewerOpener are the first words of every worker
+// and reviewer prompt the engine composes. They are a contract: the
+// router block `brigada init` writes into a repository's AGENTS.md
+// carves a session out of the foreman rules by them, so a change here
+// changes what every wired repository says; prompt_test pins both.
+const (
+	WorkerOpener   = "You are a brigada worker"
+	ReviewerOpener = "You are a brigada reviewer"
+)
+
 // workerTemplate is the fixed part of every worker prompt (§5.3). It
 // tells the worker what it is, where the verbatim data begins and ends,
 // and that its final message must end with one result block (§5.4).
