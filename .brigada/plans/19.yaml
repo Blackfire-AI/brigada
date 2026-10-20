@@ -1,0 +1,43 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 19
+title: "Land init unwiring and the mode A docs on current main (tasks 54 and 55 conflict with 46/53/58)"
+repo: "github.com/Blackfire-AI/brigada"
+state: pending_approval
+created: 2026-10-20T19:00:28.477475Z
+updated: 2026-10-20T19:00:28.477475Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps — the continued
+# dep when base is empty and continue is set, else the default branch; merge a
+# task after its base. A task with continue, one of deps, starts in the
+# session of the dep's author.
+# States are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1); caps
+# override the task's fix_rounds, review_rounds and restart budgets (§14).
+tasks:
+  - id: 59
+    name: "init-unwire-port"
+    title: "brigada init writes no harness wiring: port task 54's approved work onto current main"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+    extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "c7faa2e4766493d3e55debb6ca4b2c552943b19c"]]
+  - id: 60
+    name: "docs-port"
+    title: "Docs for attach as the interactive foreman: port task 55's approved work onto current main"
+    class: "implement"
+    deps: ["init-unwire-port"]
+    base: "init-unwire-port"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+    extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "46c2c5713eee6979dbcd46f86c32e8e95f2ec2ee"]]
