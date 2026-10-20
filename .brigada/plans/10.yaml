@@ -46,7 +46,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: needs_foreman
+    state: ready
     branch: ""
     rounds: 0
     extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "brigada/task-39"]]
