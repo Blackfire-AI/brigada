@@ -37,7 +37,7 @@ tasks:
     deps: ["land-pkg"]
     base: "land-pkg"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 63
