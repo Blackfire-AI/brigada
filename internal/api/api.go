@@ -67,15 +67,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/tasks", s.authed([]string{roleAdmin}, s.idempotent(s.handleTaskSubmit)))
 	mux.HandleFunc("/v1/tasks/{id}", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.handleTaskGet))
 	mux.HandleFunc("/v1/tasks/{id}/land", s.authed([]string{roleClient, roleAdmin}, s.handleTaskLand))
-	// Foreman mutations go through the hold fence (§4.6): a mode A
-	// credential must carry its fence, and a stale call is rejected before
-	// the idempotency wrapper can record anything.
-	mux.HandleFunc("/v1/tasks/{id}/answer", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.fenced(true, s.idempotent(s.handleTaskAnswer))))
-	mux.HandleFunc("/v1/tasks/{id}/restart", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.fenced(true, s.idempotent(s.handleTaskRestart))))
-	mux.HandleFunc("/v1/plans", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.fenced(true, s.idempotent(s.handlePlanCreate))))
-	mux.HandleFunc("/v1/plans/{id}/amend", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.fenced(true, s.idempotent(s.handlePlanAmend))))
-	mux.HandleFunc("/v1/foreman/ask-user", s.authed([]string{roleForeman}, s.fenced(true, s.idempotent(s.handleAskUser))))
-	mux.HandleFunc("/v1/foreman/decision-note", s.authed([]string{roleForeman}, s.fenced(true, s.idempotent(s.handleDecisionNote))))
+	// Foreman mutations: a headless turn's lease token or an attached
+	// chat's hold token, scoped to its project, needs nothing more.
+	mux.HandleFunc("/v1/tasks/{id}/answer", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskAnswer)))
+	mux.HandleFunc("/v1/tasks/{id}/restart", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskRestart)))
+	mux.HandleFunc("/v1/plans", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handlePlanCreate)))
+	mux.HandleFunc("/v1/plans/{id}/amend", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handlePlanAmend)))
+	mux.HandleFunc("/v1/foreman/ask-user", s.authed([]string{roleForeman}, s.idempotent(s.handleAskUser)))
 	// The user's yes or no on a plan over the approval limit (§6.3): no
 	// foreman role, the foreman never confirms its own plans.
 	mux.HandleFunc("/v1/plans/{id}/approve", s.authed([]string{roleClient, roleAdmin}, s.idempotent(s.handlePlanDecision(true))))
@@ -88,16 +86,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/foreman/release", s.authed([]string{roleClient, roleAdmin}, s.handleForemanRelease))
 	mux.HandleFunc("/v1/foreman/messages", s.authed([]string{roleClient, roleAdmin}, s.idempotent(s.handleForemanAsk)))
 	mux.HandleFunc("/v1/reviews", s.authed([]string{roleClient, roleAdmin}, s.idempotent(s.handleReview)))
-	// The interactive hold (§4.6): the user's own session takes the slot
-	// with a client or admin token and then works with the credential it
-	// is given; release is the user's forced release of a stuck one.
-	mux.HandleFunc("/v1/foreman/hold/acquire", s.authed([]string{roleClient, roleAdmin}, s.handleHoldAcquire))
-	mux.HandleFunc("/v1/foreman/hold/heartbeat", s.authed([]string{roleForeman}, s.handleHoldHeartbeat))
-	mux.HandleFunc("/v1/foreman/hold/yield", s.authed([]string{roleForeman}, s.handleHoldYield))
-	mux.HandleFunc("/v1/foreman/hold/release", s.authed([]string{roleClient, roleAdmin}, s.handleHoldRelease))
-	mux.HandleFunc("/v1/events", s.authed([]string{roleForeman}, s.fenced(false, s.handleForemanEvents)))
+	mux.HandleFunc("/v1/events", s.authed([]string{roleForeman}, s.handleForemanEvents))
 	mux.HandleFunc("/v1/jobs/{id}", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleJobGet))
-	mux.HandleFunc("/v1/jobs/{id}/cancel", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.fenced(true, s.idempotent(s.handleJobCancel))))
+	mux.HandleFunc("/v1/jobs/{id}/cancel", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.idempotent(s.handleJobCancel)))
 	mux.HandleFunc("/v1/admin/fence-epoch", s.authed([]string{roleAdmin}, s.idempotent(s.handleFenceEpoch)))
 	// The foreman's harness and model (§4.1): PUT chooses them, GET reads
 	// them back; the role sets differ per method, so the handler checks.

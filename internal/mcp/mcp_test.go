@@ -450,8 +450,8 @@ func TestServeUnknownMethodAndTool(t *testing.T) {
 	if a.Error == nil || a.Error.Code != codeMethodNotFound {
 		t.Errorf("unknown method = %+v, want method not found", a.Error)
 	}
-	a = s.call(2, "tools/call", map[string]any{"name": "task_cancel", "arguments": map[string]any{}})
-	if a.Error == nil || a.Error.Code != codeInvalidParams || !strings.Contains(a.Error.Message, "task_cancel") {
+	a = s.call(2, "tools/call", map[string]any{"name": "hold_acquire", "arguments": map[string]any{}})
+	if a.Error == nil || a.Error.Code != codeInvalidParams || !strings.Contains(a.Error.Message, "hold_acquire") {
 		t.Errorf("unknown tool = %+v, want invalid params naming it", a.Error)
 	}
 }

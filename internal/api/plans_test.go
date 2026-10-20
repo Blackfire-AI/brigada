@@ -15,6 +15,32 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/store"
 )
 
+// TestForemanMutationNeedsNoHoldGuard: with mode A retired, a foreman
+// mutation is authorised by the foreman token alone — no hold, no fence
+// header — and the interactive hold's routes are gone.
+func TestForemanMutationNeedsNoHoldGuard(t *testing.T) {
+	e := newEnv(t)
+	var holds int
+	if err := e.st.View(e.ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT COUNT(*) FROM attach_holds WHERE state = 'live'").Scan(&holds)
+	}); err != nil || holds != 0 {
+		t.Fatalf("live holds = %d (%v), want none", holds, err)
+	}
+	body := `{"title":"no hold","tasks":[{"spec":"the spec"}]}`
+	code, _, data := e.do(http.MethodPost, "/v1/plans", "foreman1", "no-hold-plan", []byte(body))
+	if code != http.StatusOK {
+		t.Fatalf("foreman creates a plan without a hold: %d %s", code, data)
+	}
+	if res := decode[planCreateBody](t, data); res.Answer != "created" || res.PlanID == 0 {
+		t.Fatalf("plan create = %+v, want created", res)
+	}
+	for _, path := range []string{"/v1/foreman/hold/acquire", "/v1/foreman/hold/yield", "/v1/foreman/decision-note"} {
+		if code, _, _ := e.do(http.MethodPost, path, "foreman1", "", []byte(`{}`)); code != http.StatusNotFound {
+			t.Errorf("POST %s = %d, want 404: the route is retired", path, code)
+		}
+	}
+}
+
 // TestPlanCreateEndpoint covers /v1/plans (§6.2, §12.1): the foreman
 // creates a plan in its own project without naming it, a repo URL that
 // names another project is a 403, a client or admin must name the
@@ -170,7 +196,7 @@ func TestPlanAmendRetierRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := NewClientWithHTTPClient(&http.Client{Transport: holdTransport(func(r *http.Request) (*http.Response, error) {
+	c := NewClientWithHTTPClient(&http.Client{Transport: funcTransport(func(r *http.Request) (*http.Response, error) {
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, r)
 		return w.Result(), nil

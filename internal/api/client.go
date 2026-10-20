@@ -27,7 +27,6 @@ import (
 type Client struct {
 	http        *http.Client
 	token       string
-	fence       int64
 	readProject int64
 }
 
@@ -51,6 +50,15 @@ func NewClient(socketPath, token string) *Client {
 // handler transport. The HTTP client must route http://brigada to the API.
 func NewClientWithHTTPClient(client *http.Client, token string) *Client {
 	return &Client{http: client, token: token}
+}
+
+// ProjectReader returns a copy of the client whose reads — status,
+// history, stats — name one project, for a caller whose token is not
+// scoped to it (the coordinator's client token).
+func (c *Client) ProjectReader(project int64) *Client {
+	cp := *c
+	cp.readProject = project
+	return &cp
 }
 
 // Agent is one advertised agent as the client sends it (§5.1): an
@@ -331,9 +339,6 @@ func (c *Client) callKeyed(ctx context.Context, method, path, idemKey string, bo
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
-	if c.fence != 0 {
-		req.Header.Set(holdFenceHeader, strconv.FormatInt(c.fence, 10))
-	}
 	if idemKey != "" {
 		req.Header.Set("Idempotency-Key", idemKey)
 	}

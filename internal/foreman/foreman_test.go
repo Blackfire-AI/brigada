@@ -44,17 +44,18 @@ func TestInstructionsShipped(t *testing.T) {
 		"## Reporting",
 		"merging is the user's, not yours",
 		"needs_foreman waits for you alone", "nothing retries it on its own",
-		"hold_acquire", "decision_note", "hold_yield", "foreman_busy", "stay read-only",
+		"task_cancel", "ask_user", "stats",
+		"An attached chat polls `events` between replies", "A headless turn acts, reports and ends",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the instructions do not mention %q:\n%s", want, got)
 		}
 	}
-	// The tools that arrive later (§12.2) are no tools yet: naming one
-	// as brigada's would be a promise the bridge cannot keep.
-	for _, absent := range []string{"task_cancel", "ask_user", "stats"} {
-		if strings.Contains(got, "`"+absent+"`") {
-			t.Errorf("the instructions name %q, a tool today's bridge does not offer", absent)
+	// Mode A is retired: its tools and answers are no tools of the
+	// bridge, and naming one would be a promise it cannot keep.
+	for _, absent := range []string{"hold_acquire", "hold_yield", "decision_note", "foreman_busy", "stale_hold", "mode A"} {
+		if strings.Contains(got, absent) {
+			t.Errorf("the instructions name %q, which today's bridge does not offer", absent)
 		}
 	}
 }

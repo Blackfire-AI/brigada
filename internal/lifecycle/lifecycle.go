@@ -240,9 +240,8 @@ func Run(ctx context.Context, cfg Config) error {
 			return nil
 		case <-ticker.C:
 			// The periodic sweep keeps the store honest without a call
-			// (§13): leases lapse on time, and a quiet period that
-			// lapsed wakes the headless foreman for what waited (§4.6),
-			// with no new event to say so.
+			// (§13): leases and attach holds lapse on time, with no new
+			// event to say so.
 			if _, err := eng.Sweep(ctx); err != nil {
 				log.WarnContext(ctx, "sweep failed", "err", err)
 			}

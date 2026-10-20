@@ -34,7 +34,7 @@ func TestArchiveProjectClientAndRoles(t *testing.T) {
 	}
 	handler := srv.Handler()
 	client := func(secret string) *Client {
-		return &Client{token: secret, http: &http.Client{Transport: holdTransport(func(r *http.Request) (*http.Response, error) {
+		return &Client{token: secret, http: &http.Client{Transport: funcTransport(func(r *http.Request) (*http.Response, error) {
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, r)
 			return w.Result(), nil

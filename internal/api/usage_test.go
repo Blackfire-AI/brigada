@@ -21,7 +21,7 @@ func TestCompletionUsageProtocol(t *testing.T) {
 				comp.Usage = &adapter.Usage{InputTokens: &zero}
 				comp.WallSeconds = &wall
 			}
-			client := NewClientWithHTTPClient(&http.Client{Transport: holdTransport(func(req *http.Request) (*http.Response, error) {
+			client := NewClientWithHTTPClient(&http.Client{Transport: funcTransport(func(req *http.Request) (*http.Response, error) {
 				data, err := io.ReadAll(req.Body)
 				if err != nil {
 					t.Fatal(err)

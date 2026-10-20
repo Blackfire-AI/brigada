@@ -58,9 +58,6 @@ func (s *Server) handleForemanAttach(w http.ResponseWriter, r *http.Request, _ i
 		if res.JobID != 0 {
 			what = fmt.Sprintf("turn %d is live", res.JobID)
 		}
-		if res.InteractiveHoldID != 0 {
-			what = fmt.Sprintf("your own session holds the slot (interactive hold %d); release it with `brigada hold release`", res.InteractiveHoldID)
-		}
 		// The refusal carries what made it busy as fields, not just
 		// words: the client waits a turn out and refuses a second
 		// attach by branch, never by parsing the message.
@@ -69,8 +66,6 @@ func (s *Server) handleForemanAttach(w http.ResponseWriter, r *http.Request, _ i
 			Code:   codeConflict,
 			JobID:  res.JobID,
 			HoldID: res.HoldID,
-
-			InteractiveHoldID: res.InteractiveHoldID,
 		})
 		return
 	}
@@ -214,9 +209,6 @@ type attachConflict struct {
 	Code   string `json:"code"`
 	JobID  int64  `json:"job_id"`
 	HoldID int64  `json:"hold_id"`
-	// InteractiveHoldID is the user's own session's hold (§4.6), when
-	// that made the attach busy.
-	InteractiveHoldID int64 `json:"interactive_hold_id,omitempty"`
 }
 
 // attachResponse names what attach created: the hold, its foreman token

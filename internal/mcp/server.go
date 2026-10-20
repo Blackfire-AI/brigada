@@ -8,10 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
-	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/version"
 )
 
@@ -46,15 +44,11 @@ type Server struct {
 	Log *slog.Logger
 	// Tools is the offer: nil is the foreman's tools (§12.2); the client
 	// bridge passes ClientTools.
-	Tools       []Tool
-	Interactive *Interactive
+	Tools []Tool
 }
 
 // offer is the tool list this server serves.
 func (s *Server) offer() []Tool {
-	if s.Interactive != nil {
-		return InteractiveTools()
-	}
 	if s.Tools != nil {
 		return s.Tools
 	}
@@ -113,56 +107,34 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 		// this process was, and when it started serving.
 		s.Log.Info("brigada mcp bridge serving on stdio")
 	}
-	parentCtx := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	if s.Interactive != nil {
-		defer func() { cancel(); s.Interactive.close() }()
-		go s.Interactive.run(ctx)
-	}
 	enc := json.NewEncoder(out)
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 64<<10), 4<<20)
-	type receivedLine struct {
-		data []byte
-		at   time.Time
-	}
-	lines := make(chan receivedLine)
+	lines := make(chan []byte)
 	scanDone := make(chan error, 1)
 	go func() {
 		for sc.Scan() {
 			line := append([]byte(nil), sc.Bytes()...)
-			if s.Interactive != nil {
-				s.Interactive.incoming(line)
-			}
 			select {
-			case lines <- receivedLine{line, time.Now()}:
+			case lines <- line:
 			case <-ctx.Done():
 				return
 			}
 		}
 		scanDone <- sc.Err()
-		if s.Interactive != nil {
-			cancel()
-		}
 	}()
 	for {
-		var received receivedLine
+		var line []byte
 		select {
 		case <-ctx.Done():
-			if parentCtx.Err() == nil {
-				return <-scanDone
-			}
 			return ctx.Err()
 		case err := <-scanDone:
 			return err
-		case received = <-lines:
+		case line = <-lines:
 		}
-		line := received.data
-		resp := s.handleLine(context.WithValue(ctx, receivedKey{}, received.at), line)
-		if s.Interactive != nil {
-			s.Interactive.answered(line)
-		}
+		resp := s.handleLine(ctx, line)
 		if resp != nil {
 			if err := enc.Encode(resp); err != nil {
 				return err
@@ -239,33 +211,21 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 	var p struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
-		Meta      json.RawMessage `json:"_meta"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &rpcError{codeInvalidParams, "tools/call params: " + err.Error()}
-	}
-	if s.Interactive != nil {
-		s.Interactive.mu.Lock()
-		s.Interactive.observeFirst(ctx, p.Meta)
-		s.Interactive.mu.Unlock()
 	}
 	tool, ok := toolByName(s.offer(), p.Name)
 	if !ok {
 		return nil, &rpcError{codeInvalidParams, "unknown tool: " + p.Name}
 	}
-	if s.Client == nil && s.Interactive == nil {
+	if s.Client == nil {
 		return toolResult{
 			Content: textContent("the bridge has no engine client to call"),
 			IsError: true,
 		}, nil
 	}
-	var text string
-	var err error
-	if s.Interactive != nil {
-		text, err = s.Interactive.call(ctx, tool, p.Arguments, p.Meta)
-	} else {
-		text, err = tool.Call(ctx, s.Client, p.Arguments)
-	}
+	text, err := tool.Call(ctx, s.Client, p.Arguments)
 	if err != nil {
 		return toolResult{Content: textContent(errorText(err)), IsError: true}, nil
 	}
@@ -278,23 +238,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 func errorText(err error) string {
 	var se *api.StatusError
 	if errors.As(err, &se) {
-		text := se.APICode + ": " + se.Message + " (" + http.StatusText(se.Status) + ")"
-		var detail struct {
-			Holder *engine.Slot `json:"holder"`
-			Slot   *engine.Slot `json:"slot"`
-		}
-		if json.Unmarshal(se.Body, &detail) == nil {
-			holder := detail.Holder
-			if holder == nil {
-				holder = detail.Slot
-			}
-			if holder != nil {
-				if data, err := json.Marshal(holder); err == nil {
-					text += "\nholder: " + string(data)
-				}
-			}
-		}
-		return text
+		return se.APICode + ": " + se.Message + " (" + http.StatusText(se.Status) + ")"
 	}
 	return err.Error()
 }

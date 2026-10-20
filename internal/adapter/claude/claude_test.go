@@ -140,10 +140,10 @@ func TestCommandForemanScope(t *testing.T) {
 	const prompt = "the foreman's wake prompt"
 	const config = "/runner-state/mcp/turn-x1/config.json"
 	wantScope := []string{"--allowedTools", "Read", "Grep", "Glob",
-		"mcp__brigada__decision_note",
 		"mcp__brigada__plan_create", "mcp__brigada__plan_amend", "mcp__brigada__answer", "mcp__brigada__task_restart",
+		"mcp__brigada__task_cancel", "mcp__brigada__ask_user",
 		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__events",
-		"mcp__brigada__capacity",
+		"mcp__brigada__capacity", "mcp__brigada__stats",
 		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "Write"}
 	cases := []struct {
 		name    string
@@ -213,10 +213,10 @@ func TestAttachCommandGolden(t *testing.T) {
 	const config = "/runner-state/mcp/turn-x1/config.json"
 	const newID = "9f1d2b34-51a6-4c8e-a2d7-0b3c4d5e6f70"
 	wantScope := []string{"--allowedTools", "Read", "Grep", "Glob",
-		"mcp__brigada__decision_note",
 		"mcp__brigada__plan_create", "mcp__brigada__plan_amend", "mcp__brigada__answer", "mcp__brigada__task_restart",
+		"mcp__brigada__task_cancel", "mcp__brigada__ask_user",
 		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__events",
-		"mcp__brigada__capacity",
+		"mcp__brigada__capacity", "mcp__brigada__stats",
 		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "Write"}
 	cases := []struct {
 		name    string
@@ -387,10 +387,10 @@ func TestCommandWorkerDefaultScope(t *testing.T) {
 	wantForeman := []string{"claude", "-p", "--output-format", "stream-json", "--verbose",
 		"--permission-mode", "acceptEdits", "--mcp-config", config, "--strict-mcp-config",
 		"--allowedTools", "Read", "Grep", "Glob",
-		"mcp__brigada__decision_note",
 		"mcp__brigada__plan_create", "mcp__brigada__plan_amend", "mcp__brigada__answer", "mcp__brigada__task_restart",
+		"mcp__brigada__task_cancel", "mcp__brigada__ask_user",
 		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__events",
-		"mcp__brigada__capacity",
+		"mcp__brigada__capacity", "mcp__brigada__stats",
 		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "Write"}
 	if !slices.Equal(foreman.Args, wantForeman) {
 		t.Errorf("foreman args =\n%v\nwant\n%v", foreman.Args, wantForeman)

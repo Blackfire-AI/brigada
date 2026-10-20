@@ -144,11 +144,6 @@ func attachWithWait(ctx context.Context, client *api.Client, repo string, force 
 			}
 			continue
 		}
-		if res.InteractiveHoldID != 0 {
-			return res, fail(stderr, fmt.Errorf(
-				"your own harness session holds the foreman (interactive hold %d); it yields or lapses on its own, or release it: brigada hold release --repo %s",
-				res.InteractiveHoldID, repo))
-		}
 		return res, fail(stderr, fmt.Errorf(
 			"the foreman is already attached elsewhere (attach hold %d is live); one attached chat at a time",
 			res.HoldID))

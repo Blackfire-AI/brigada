@@ -45,17 +45,12 @@ type StatusInfo struct {
 	// or the wake cannot happen; delivered ones are not counted.
 	ForemanMessages int `json:"foreman_messages"`
 	// Slots is who holds the foreman's live slot, per project (§4.6):
-	// free, an interactive hold, a headless turn or an attach, with the
-	// holder's label and since when.
-	Slots []Slot `json:"slots"`
-	// DeferredWakes lists the projects whose headless wakes the
-	// interactive quiet period holds (§4.6): events are waiting there,
-	// and the earliest one turn may fire. Empty without the quiet or
-	// without waiters.
-	DeferredWakes []DeferredWake `json:"deferred_wakes,omitempty"`
-	Plans         []StatusPlan   `json:"plans"`
-	Report        *StatusReport  `json:"report,omitempty"`
-	NeedsYou      []NeedsYouItem `json:"needs_you"`
+	// free, a headless turn or an attach, with the holder's label and
+	// since when.
+	Slots    []Slot         `json:"slots"`
+	Plans    []StatusPlan   `json:"plans"`
+	Report   *StatusReport  `json:"report,omitempty"`
+	NeedsYou []NeedsYouItem `json:"needs_you"`
 	// Cooling lists the agents held back for quota (§8, §10): shown
 	// beside the running jobs, never in the needs-you queue.
 	Cooling []CoolingAgent `json:"cooling,omitempty"`
@@ -66,15 +61,6 @@ type StatusInfo struct {
 	// instructions (§5.9): source, version, size and digest; the text only
 	// from StatusWithInstructions.
 	Instructions []StatusInstructions `json:"instructions,omitempty"`
-}
-
-// DeferredWake is one project whose headless wakes the interactive
-// quiet period holds (§4.6): Until is the earliest a headless turn may
-// fire — with a live hold its earliest end plus the quiet minutes, else
-// the hold's end plus them — the moment `brigada status` names.
-type DeferredWake struct {
-	ProjectID int64  `json:"project_id"`
-	Until     string `json:"until"`
 }
 
 // StatusJob is one job a runner holds right now (§10): which job, for
@@ -249,9 +235,6 @@ func (e *Engine) status(ctx context.Context, project int64, withText bool) (Stat
 		if info.Slots, err = statusSlotsTx(tx, project, now); err != nil {
 			return err
 		}
-		if info.DeferredWakes, err = statusDeferredWakesTx(tx, project, now); err != nil {
-			return err
-		}
 		if info.Plans, err = statusPlansTx(tx, project, now); err != nil {
 			return err
 		}
@@ -322,49 +305,6 @@ func statusSlotsTx(tx *sql.Tx, project int64, now time.Time) ([]Slot, error) {
 		slots = append(slots, s)
 	}
 	return slots, nil
-}
-
-// statusDeferredWakesTx lists the projects in scope whose headless wakes
-// the interactive quiet period holds (§4.6): only those with something
-// waiting in the inbox, so a quiet project with no events stays quiet.
-func statusDeferredWakesTx(tx *sql.Tx, project int64, now time.Time) ([]DeferredWake, error) {
-	query := `SELECT DISTINCT i.project_id FROM foreman_inbox i
-		JOIN projects p ON p.id = i.project_id
-		WHERE i.state = ? AND p.archived_at IS NULL`
-	args := []any{inboxPending}
-	if project != 0 {
-		query += " AND i.project_id = ?"
-		args = append(args, project)
-	}
-	rows, err := tx.Query(query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list the projects with deferred wakes: %w", err)
-	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("list the projects with deferred wakes: %w", err)
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, fmt.Errorf("list the projects with deferred wakes: %w", err)
-	}
-	rows.Close()
-	out := []DeferredWake{}
-	for _, id := range ids {
-		until, _, ok, err := interactiveQuietUntilTx(tx, id, now)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			out = append(out, DeferredWake{ProjectID: id, Until: fmtTime(until)})
-		}
-	}
-	return out, nil
 }
 
 // pendingUserMessagesTx counts the user's messages still pending in the

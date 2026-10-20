@@ -40,12 +40,6 @@ type identity struct {
 	name    string
 	role    string
 	project int64 // foreman only
-	// hold is the interactive hold a mode A credential is bound to
-	// (§4.6, §12.1); 0 for every other identity. holdLive is false for
-	// a revoked credential, which authenticates only to be answered
-	// stale_hold.
-	hold     int64
-	holdLive bool
 }
 
 // mayTouchProject reports whether the identity may touch things that
@@ -203,18 +197,6 @@ func (s *Server) authenticateLeaseToken(r *http.Request, secret string) (identit
 	if ok {
 		return identity{name: fmt.Sprintf("hold:%d", hold), role: roleForeman, project: project}, true
 	}
-	// The mode A credential of an interactive hold (§4.6): it resolves
-	// even after its hold ended, so that a revoked credential is
-	// answered stale_hold and not mistaken for an unknown one.
-	project, hold, live, ok, err := s.eng.HoldCredentialScope(r.Context(), secret)
-	if err != nil {
-		s.log.ErrorContext(r.Context(), "api: resolve a hold credential failed", "err", err)
-		return identity{}, false
-	}
-	if ok {
-		return identity{name: fmt.Sprintf("ihold:%d", hold), role: roleForeman, project: project,
-			hold: hold, holdLive: live}, true
-	}
 	return identity{}, false
 }
 
@@ -235,13 +217,6 @@ func (s *Server) authed(roles []string, h handler) http.HandlerFunc {
 		if len(roles) > 0 && !slices.Contains(roles, id.role) {
 			writeError(w, http.StatusForbidden, codeForbidden,
 				fmt.Sprintf("role %q may not call this endpoint", id.role))
-			return
-		}
-		if id.hold != 0 && !id.holdLive {
-			// A revoked mode A credential is rejected whole on any route
-			// (§4.6): nothing is applied, and the rejection is never
-			// recorded for idempotency — this runs before that wrapper.
-			s.writeStale(w, r, id.hold, 0, "")
 			return
 		}
 		h(w, r, id)

@@ -8,20 +8,55 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/api"
 )
 
-func callDecisionNote(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
-	var a struct {
-		Text string `json:"text"`
-	}
-	if len(args) > 0 {
-		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("arguments: %w", err)
-		}
-	}
-	res, err := c.DecisionNote(ctx, a.Text, idemKey("decision_note", a))
+func callStats(ctx context.Context, c *api.Client, _ json.RawMessage) (string, error) {
+	stats, err := c.Stats(ctx, 0)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("decision note recorded: event %d", res.EventID), nil
+	data, err := json.Marshal(stats)
+	return string(data), err
+}
+
+// callTaskCancel uses the same atomic graph amendment as plan_amend.
+func callTaskCancel(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
+	var a struct {
+		Task int64 `json:"task"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", fmt.Errorf("arguments: %w", err)
+	}
+	status, err := c.Status(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, p := range status.Plans {
+		for _, t := range p.Tasks {
+			if t.ID == a.Task {
+				res, err := c.AmendPlan(ctx, p.ID, api.PlanAmend{Cancel: []string{fmt.Sprint(a.Task)}}, idemKey("task_cancel", a))
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("task %d cancelled: %s", a.Task, res.State), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("task %d is not in this project's current plans", a.Task)
+}
+
+// callAskUser records the foreman's question for the user: an attached
+// chat asks it there too, a headless turn reports it.
+func callAskUser(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
+	var a struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", fmt.Errorf("arguments: %w", err)
+	}
+	id, err := c.AskUser(ctx, a.Text, idemKey("ask_user", a))
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("question %d recorded: %s", id, a.Text), nil
 }
 
 // answerArgs is the answer tool's arguments (§3, §12.2): the asking

@@ -61,15 +61,12 @@ const (
 	evForemanReport          = "foreman_report"            // a done foreman turn's final message, reported to the user (§3, §10)
 	evUserMessage            = "user_message"              // the user's message to the foreman, sent without attaching (§4.2 item 3)
 	evForemanWoken           = "foreman_woken"             // a foreman turn was queued with the project's pending events (§4.2)
-	evForemanWakeDeferred    = "foreman_wake_deferred"     // a wake waited out the interactive quiet period (§4.6; Until: the quiet's end, Count: the rows waiting), once per quiet window; the sweep wakes one turn when it lapses
 	evForemanWakeBudgetSpent = "foreman_wake_budget_spent" // the day's foreman wake budget is spent (Count: the budget, Until: the window's end); the events stay pending (§4.3)
 	evForemanWakeStalled     = "foreman_wake_stalled"      // foreman turns failed consecutively on the same events; waking stops (§4.2)
 	evForemanLimited         = "foreman_limited"           // the foreman's CLI hit its subscription limit; waking stops until it resets or the user switches (§4.4)
 	evForemanAttached        = "foreman_attached"          // a hold took the foreman for an attached chat (§4.2 item 1)
 	evForemanDetached        = "foreman_detached"          // the attached chat ended; the hold released (§4.2 item 1)
 	evForemanAttachExpired   = "foreman_attach_expired"    // the hold expired unheartbeated; its rows returned pending (§4.2 item 1)
-	evHoldAcquired           = "hold_acquired"             // the user's own session took the foreman's slot (§4.6)
-	evHoldEnded              = "hold_ended"                // an interactive hold ended: yield, expiry, lost lease or forced release; the fence was bumped (§4.6)
 	evAgentCooling           = "agent_cooling"             // a task job's limit cooled its account until a time (§8 "Quota")
 	evAgentBroken            = "agent_broken"              // an agent was marked broken, with the reason (§8 "Health")
 	evAgentRecovered         = "agent_recovered"           // a runner came back; its runner-stale agents are ready again (§8 "Health")
@@ -115,7 +112,6 @@ type eventPayload struct {
 	Until      string `json:"until,omitempty"`   // a foreman limit's reset time, RFC3339; absent when unknown (§4.4)
 	Job        int64  `json:"job,omitempty"`     // a job the event names besides its own job_id column
 	Hold       int64  `json:"hold,omitempty"`    // the attach hold the event names (§4.2 item 1)
-	Fence      int64  `json:"fence,omitempty"`   // the project's hold fence after the event (§4.6)
 	Count      int64  `json:"count,omitempty"`   // how many of something the event counts (§4.2, §4.3)
 	Path       string `json:"path,omitempty"`    // a snapshot's file (§6.4)
 	Bytes      int64  `json:"bytes,omitempty"`   // a snapshot's size (§6.4)
