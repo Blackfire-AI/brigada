@@ -32,8 +32,8 @@ tasks:
     class: "implement"
     deps: ["router-4"]
     base: "router-4"
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-6"
     rounds: 0
   - id: 7
     name: "docs"
