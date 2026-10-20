@@ -27,6 +27,6 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: reviewing
+    state: needs_foreman
     branch: "brigada/task-51-r1"
     rounds: 0
