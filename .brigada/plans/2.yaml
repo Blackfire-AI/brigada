@@ -41,7 +41,7 @@ tasks:
     class: "implement"
     deps: ["codex"]
     base: "codex"
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 8
@@ -50,7 +50,7 @@ tasks:
     class: "implement"
     deps: ["codex"]
     base: "codex"
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 12
