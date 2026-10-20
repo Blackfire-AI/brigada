@@ -7,7 +7,7 @@
 
 **Talk to your own coding session. It splits the work into tasks; brigada gives each task to the agent with the best measured record on your repo among those with quota left, checks and cross-reviews the result, and learns from the outcome.**
 
-You may pay for more than one AI coding subscription. brigada sits above their official command-line tools (Claude Code, Codex, Kimi, opencode) and uses them as workers:
+You may pay for more than one AI coding subscription. brigada sits above their official command-line tools (Claude Code, Codex, Kimi, opencode; experimental: dsh) and uses them as workers:
 
 - the **foreman**, one of those CLIs, turns what you ask for into a plan of tasks with dependencies between them. In the usual setup the foreman is the session you already have open in your repository;
 - the **dispatcher** gives each task to the agent with the best measured record for that kind of task on *your* repo, among the agents that still have quota;

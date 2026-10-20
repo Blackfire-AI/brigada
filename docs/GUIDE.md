@@ -44,12 +44,13 @@ Four parts, one binary:
 
 Run `brigada init` inside a repository. (At the top of a folder that holds several repositories, init does something else: see [section 3](#3-several-repositories-mode-b).) The repository must have an `origin` remote, and all its URLs must name one repository. Init prints the canonical repository identity, then walks you through four steps. Nothing is written or started until you confirm the plan at the end.
 
-Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi`, `opencode`) and prints one `Signed in:` line naming the confirmed ones, with the probe's detail in parentheses where there is one (opencode: its provider count and the command that counted them), then one line for each installed CLI whose sign-in it cannot check, such as `kimi: init can't check sign-in.`. CLIs that are not installed are not named. With `--yes` or `--probe` the same facts print as the `Agent CLIs found:` list.
+Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi`, `opencode`, and the experimental `dsh`) and prints one `Signed in:` line naming the confirmed ones, with the probe's detail in parentheses where there is one (opencode: its provider count and the command that counted them), then one line for each installed CLI whose sign-in it cannot check, such as `kimi: init can't check sign-in.`. CLIs that are not installed are not named. With `--yes` or `--probe` the same facts print as the `Agent CLIs found:` list.
 
 - For Claude and Codex, init runs `claude auth status` and `codex login status` if their installed help documents them. If neither the probe nor `--signed-in` confirms authentication, it asks `Are you signed in to claude? [y/N]` before step 1. Answering no leaves that CLI out, models and all.
 - Kimi has no verified sign-in check. Init tells you to run `kimi login` first if needed, then asks `Use kimi? [y/N]:` in step 2.
 - For opencode, init runs `opencode providers list` if its help documents `providers`, or `opencode auth list` on older versions. Stored provider credentials confirm sign-in. If sign-in remains unconfirmed, it asks `Use opencode? [y/N]:`. When the check is unavailable, it tells you to run `opencode auth login` first if needed. Keys may also come from your environment.
-- `--signed-in` confirms authentication without a question (for Kimi and opencode, that also answers the use question). With a distinct `account=LABEL` on `--agent`, a sign-in or use question names that account. Status output is read in memory, never printed or stored. Init never runs a login command or a model.
+- dsh (experimental) is installed when `dsh` is on `PATH`; init reads only `dsh --version` and makes no model call. It cannot check sign-in, so it asks `Use dsh? [y/N]:` in step 2 and offers `deepseek-flash` and `deepseek-v4-pro`. When `DEEPSEEK_API_KEY` is not set, a one-line note says dsh needs it exported before `brigada start`, or stored through dsh's own credential store; the note never blocks init and the key is never printed.
+- `--signed-in` confirms authentication without a question (for Kimi, opencode and dsh, that also answers the use question). With a distinct `account=LABEL` on `--agent`, a sign-in or use question names that account. Status output is read in memory, never printed or stored. Init never runs a login command or a model.
 
 1. **The foreman.** The foreman plans the work and decides what happens when a task needs judgment. It runs whenever work finishes, so it uses that agent's quota. Only Claude and Codex can be the foreman. Init asks `Which model should the foreman run?` and lists every model of the signed-in Claude and Codex CLIs, Claude first, as `harness/model` with a note:
 
@@ -697,7 +698,7 @@ Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `
 
 #### dsh (experimental)
 
-`dsh` is DeepSeek Harness (`@deepseek-ai/dsh`), a developer preview whose maintainers have announced breaking changes; the adapter was checked against 0.2.1-rc.2 only and may break on a newer release. `brigada init` does not offer it yet: add it with `--agent`.
+`dsh` is DeepSeek Harness (`@deepseek-ai/dsh`), a developer preview whose maintainers have announced breaking changes; the adapter was checked against 0.2.1-rc.2 only and may break on a newer release. `brigada init` offers it, marked experimental, when `dsh` is on `PATH`.
 
 - Install: `npm i -g @deepseek-ai/dsh`, so that `dsh` is on the runner's `PATH`.
 - Key: `export DEEPSEEK_API_KEY=...` in the environment you run `brigada start` from (the runner passes it to dsh), or store it in dsh's own credential store. A missing or invalid key fails the job as an authentication error.

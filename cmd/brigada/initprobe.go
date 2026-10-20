@@ -9,7 +9,17 @@ import (
 	"time"
 )
 
-var initHarnesses = []string{"claude", "codex", "kimi", "opencode"}
+var initHarnesses = []string{"claude", "codex", "kimi", "opencode", "dsh"}
+
+// initHarnessLabel is how init names a harness in lists: dsh is experimental.
+func initHarnessLabel(harness string) string {
+	if harness == "dsh" {
+		return harness + " (experimental)"
+	}
+	return harness
+}
+
+var dshVersion = regexp.MustCompile(`\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?`)
 
 type harnessProbe struct {
 	installed bool
@@ -28,6 +38,17 @@ func probeHarness(ctx context.Context, harness string) harnessProbe {
 		return harnessProbe{status: "not installed"}
 	}
 	p := harnessProbe{installed: true, status: "sign-in can't be checked", evidence: "no verified authentication status command; user confirmation required"}
+	if harness == "dsh" {
+		// dsh keeps its key in the environment or in its own store: there is no
+		// status command to run, and init makes no model call. Only the version
+		// is read.
+		if out, err := cheapHarnessCommand(ctx, harness, "--version"); err == nil {
+			if v := dshVersion.FindString(string(out)); v != "" {
+				p.status = "version " + v + ", sign-in can't be checked"
+			}
+		}
+		return p
+	}
 	var path []string
 	switch harness {
 	case "claude":

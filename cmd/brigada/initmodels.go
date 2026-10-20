@@ -353,6 +353,18 @@ func readInitCodexCatalog(ctx context.Context) ([]initCodexModel, bool) {
 	return read("debug", "models", "--bundled")
 }
 
+// initDshModels offers dsh's two models as a static list: dsh has no cheap
+// command that lists them, and init makes no model call.
+func initDshModels(ctx context.Context) initModelSource {
+	return initModelSource{
+		entries: []initModelEntry{
+			{id: 1, name: "deepseek-flash", value: "deepseek-flash", note: "light; dsh's default"},
+			{id: 2, name: "deepseek-v4-pro", value: "deepseek-v4-pro", note: "heavy"},
+		},
+		signIn: probeHarness(ctx, "dsh"),
+	}
+}
+
 func kimiConfigPath() string {
 	home, _ := os.UserHomeDir()
 	if home == "" {

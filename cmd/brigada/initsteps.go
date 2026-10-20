@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -33,8 +34,18 @@ func printInitSignedIn(w io.Writer, probes map[string]harnessProbe, flagged map[
 		printInitWrapped(w, "", "  ", "Signed in: "+strings.Join(signedIn, ", ")+".")
 	}
 	for _, h := range unchecked {
-		fmt.Fprintf(w, "%s: init can't check sign-in.\n", h)
+		fmt.Fprintf(w, "%s: init can't check sign-in.\n", initHarnessLabel(h))
 	}
+}
+
+// printInitDshKeyNote says where dsh finds its key when the environment has
+// none. It only reads whether the variable is set, never its value, and it
+// does not block init.
+func printInitDshKeyNote(w io.Writer) {
+	if os.Getenv("DEEPSEEK_API_KEY") != "" {
+		return
+	}
+	printInitWrapped(w, "  ", "  ", initDim(w, "dsh needs DEEPSEEK_API_KEY exported before `brigada start`, or stored through dsh's own credential store."))
 }
 
 // initSignInDetail turns "signed in to 2 providers (opencode auth list)" into
