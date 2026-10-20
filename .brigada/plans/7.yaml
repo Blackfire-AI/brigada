@@ -23,7 +23,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 26
@@ -44,6 +44,6 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
