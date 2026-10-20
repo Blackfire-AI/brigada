@@ -7,7 +7,7 @@ title: "opencode reset time and project isolation; 1.0 compatibility statement (
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-10-20T00:47:38.936768Z
-updated: 2026-10-20T00:47:38.936768Z
+updated: 2026-10-20T01:38:24.673753Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps, or from the
 # default branch when base is empty; merge a task after its base. States
@@ -30,10 +30,10 @@ tasks:
     name: "opencode-project"
     title: "opencode must treat the job worktree as its project"
     class: "implement"
-    deps: ["opencode-reset"]
-    base: "opencode-reset"
+    deps: []
+    base: ""
     effort: high
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 27
