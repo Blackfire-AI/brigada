@@ -50,9 +50,9 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: running
     branch: "brigada/task-63"
-    rounds: 0
+    rounds: 1
   - id: 64
     name: "gates"
     title: "Land and push gate release, push gate, after_land, plan-done report"
