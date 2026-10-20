@@ -37,7 +37,7 @@ tasks:
     deps: ["land-pkg"]
     base: "land-pkg"
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-62"
     rounds: 1
   - id: 63
