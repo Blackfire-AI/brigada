@@ -50,8 +50,8 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-63"
     rounds: 0
   - id: 64
     name: "gates"
