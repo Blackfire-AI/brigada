@@ -228,6 +228,13 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 	// environment, whatever the adapter put there. An unset Env means
 	// inherit, so it is materialized first for the same scrub.
 	cmd.Env = scrubEnv(cmd.Env, r.cfg.GitEnv)
+	// The CLI's working directory is its worktree, and so is its PWD:
+	// the runner's own PWD points at the state directory, and a Node CLI
+	// that reads PWD before the cwd would work there.
+	if cmd.Dir == "" {
+		cmd.Dir = workdir
+	}
+	cmd.Env = withPWD(cmd.Env, cmd.Dir)
 	// The extra checkouts' paths (§5.8) ride along, after the scrub.
 	cmd.Env = withEnv(cmd.Env, r.extraEnvVars())
 	cmd.SysProcAttr = processGroup()
