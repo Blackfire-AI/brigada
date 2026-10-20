@@ -5,6 +5,10 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.0.0] - Unreleased
 
+### Fixed
+
+- dsh jobs failed at start with "unknown option '--patch'"; the adapter now passes the launcher's `--patch` before the app's `--json`.
+
 ### Added
 
 - Your own Claude Code or Codex session is the foreman after `brigada init` (mode A), wired through the `AGENTS.md` router block, `.brigada/foreman.md`, `.mcp.json` and `.codex/config.toml`.

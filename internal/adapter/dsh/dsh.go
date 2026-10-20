@@ -32,7 +32,7 @@ const DefaultModel = "deepseek-flash"
 
 func (a *Adapter) Name() string { return "dsh" }
 
-// Command runs `dsh --profile headless --json --patch <file> [--session-id
+// Command runs `dsh --profile headless --patch <file> --json [--session-id
 // <id>] -` with the prompt on stdin. Env, set on top of the ambient
 // environment (DEEPSEEK_API_KEY included; BRIGADA_* dropped):
 //
@@ -63,7 +63,7 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	if err != nil {
 		return nil, fmt.Errorf("dsh: %w", err)
 	}
-	args := []string{"--profile", "headless", "--json", "--patch", patch}
+	args := []string{"--profile", "headless", "--patch", patch, "--json"}
 	if resumeSessionID != "" {
 		args = append(args, "--session-id", resumeSessionID)
 	}
