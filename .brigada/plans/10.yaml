@@ -5,9 +5,9 @@
 plan: 10
 title: "Experimental DeepSeek Harness (dsh) adapter: worker and reviewer (#37)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-20T08:49:34.581969Z
-updated: 2026-10-20T15:10:07.563035Z
+updated: 2026-10-20T17:50:35.185604Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -46,7 +46,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-46-r1"
     rounds: 0
     extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "brigada/task-39"]]
