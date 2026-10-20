@@ -16,7 +16,8 @@ updated: 2026-10-20T15:10:05.134824Z
 # States are the engine's (§6.1), rounds the fix and review rounds
 # spent (§7), question the worker's open question (§3), when it has one.
 # Optional tier (light, standard, heavy) and effort (low, medium, high, max)
-# describe the model needed and how hard it should think (§6.1); caps
+# describe the model needed and how hard it should think (§6.1);
+# review_tier and review_effort do the same for its reviews (§7, §8); caps
 # override the task's fix_rounds, review_rounds and restart budgets (§14).
 tasks:
   - id: 36
@@ -48,8 +49,7 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: needs_foreman
+    state: ready
     branch: ""
     rounds: 0
     extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "1267a44c0c8756c359288eb8fb3a2dd9080bbdb8"]]
-    question: "Can the runner make the prior checkout (commit 1267a44c) readable from this worktree, for example by fetching that commit into this repo or allowing its path, or by giving me its absolute path with access? Then I can copy cmdtop*.go, the termios files, the internal/api changes, main.go, docs/GUIDE.md and the goldens, and apply the topFetch fix (return topModel{err: err}) plus the test that checks model.err when Projects fails."
