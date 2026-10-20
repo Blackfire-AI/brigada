@@ -74,7 +74,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
     extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "2617fd93330e5af61cba46414e75701f0c79a716"]]
