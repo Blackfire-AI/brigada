@@ -8,6 +8,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 
 - Mode A is retired: your own harness session no longer holds the foreman. The `hold` command, `brigada mcp --foreman`, the settings `hold_idle_minutes`, `hold_max_minutes` and `interactive_quiet_minutes`, and the tools `hold_acquire`, `hold_yield` and `decision_note` are gone; `brigada attach` is the interactive foreman, joining the brigada-owned session.
+- `brigada hold yield` and `hold confirm` remain as no-ops so old hooks do not block.
 
 ### Fixed
 
