@@ -71,7 +71,7 @@ func (s *Server) handlePlanCreate(w http.ResponseWriter, r *http.Request, id ide
 	}
 	tasks := make([]engine.PlanTask, len(req.Tasks))
 	for i, t := range req.Tasks {
-		tasks[i] = engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, Caps: t.Caps, ExtraRepos: t.ExtraRepos}
+		tasks[i] = engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos}
 	}
 	res, err := s.eng.CreatePlan(r.Context(), project, req.Title, tasks)
 	if err != nil {
@@ -128,12 +128,16 @@ type planCreateRequest struct {
 // title, name, spec, check, class and the names of the tasks it
 // depends on.
 type planTaskBody struct {
-	Tier   string         `json:"tier,omitempty"`
-	Effort string         `json:"effort,omitempty"`
-	Caps   map[string]int `json:"caps,omitempty"`
-	Title  string         `json:"title"`
-	Name   string         `json:"name,omitempty"`
-	Deps   []string       `json:"deps,omitempty"`
+	Tier   string `json:"tier,omitempty"`
+	Effort string `json:"effort,omitempty"`
+	// ReviewTier and ReviewEffort are the task's own tier and effort for
+	// its reviews (§7, §8); empty = the engine default.
+	ReviewTier   string         `json:"review_tier,omitempty"`
+	ReviewEffort string         `json:"review_effort,omitempty"`
+	Caps         map[string]int `json:"caps,omitempty"`
+	Title        string         `json:"title"`
+	Name         string         `json:"name,omitempty"`
+	Deps         []string       `json:"deps,omitempty"`
 	// Base names the one of Deps whose result branch the work starts
 	// from; '' = the only dep, or the continued dep when Continue names
 	// one, else the default branch.
@@ -295,13 +299,13 @@ func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id iden
 	// the foreman's own cancellations are never approved.
 	am := engine.PlanAmendment{Cancel: req.Cancel, SkipApproved: id.role != roleForeman}
 	for _, t := range req.Add {
-		am.Add = append(am.Add, engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, Caps: t.Caps, ExtraRepos: t.ExtraRepos})
+		am.Add = append(am.Add, engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos})
 	}
 	for _, rt := range req.Retarget {
 		am.Retarget = append(am.Retarget, engine.PlanRetarget{Task: rt.Task, Deps: rt.Deps, Base: rt.Base, Continue: rt.Continue})
 	}
 	for _, rt := range req.Retier {
-		am.Retier = append(am.Retier, engine.PlanRetier{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort, Caps: rt.Caps})
+		am.Retier = append(am.Retier, engine.PlanRetier{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort, ReviewTier: rt.ReviewTier, ReviewEffort: rt.ReviewEffort, Caps: rt.Caps})
 	}
 	res, err := s.eng.AmendPlan(r.Context(), project, planID, am)
 	switch {
@@ -343,10 +347,12 @@ type planAmendRequest struct {
 }
 
 type planRetierBody struct {
-	Task   string         `json:"task"`
-	Tier   string         `json:"tier,omitempty"`
-	Effort string         `json:"effort,omitempty"`
-	Caps   map[string]int `json:"caps,omitempty"`
+	Task         string         `json:"task"`
+	Tier         string         `json:"tier,omitempty"`
+	Effort       string         `json:"effort,omitempty"`
+	ReviewTier   string         `json:"review_tier,omitempty"`
+	ReviewEffort string         `json:"review_effort,omitempty"`
+	Caps         map[string]int `json:"caps,omitempty"`
 }
 
 type planRetargetBody struct {

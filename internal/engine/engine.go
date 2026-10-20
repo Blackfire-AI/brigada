@@ -142,6 +142,9 @@ type Config struct {
 	// zeros included (RoundCaps reads zero as "the default"). The config
 	// file's rounds.* keys arrive here.
 	ExactRoundCaps *RoundCaps
+	// Review is the engine-wide default tier and effort of a review (§7, §8);
+	// a task's own review_tier and review_effort win over it.
+	Review ReviewConfig
 	// TaskAutoRetry retries a transient work failure once on another ready
 	// agent (§3). Nil keeps the default, on; false parks immediately.
 	TaskAutoRetry *bool
@@ -241,6 +244,7 @@ func DefaultConfig() Config {
 			KindForeman: 30 * time.Minute,
 		},
 		RoundCaps:         RoundCaps{Fix: 2, Review: 2, Restart: 3},
+		Review:            ReviewConfig{Tier: ReviewTierBelow, Effort: defaultReviewEffort},
 		TaskAutoRetry:     &autoRetry,
 		ForemanWakeBudget: defaultForemanWakeBudget,
 		MaxArtifactBytes:  defaultMaxArtifactBytes,
@@ -330,6 +334,12 @@ func New(s *store.Store, cfg Config) *Engine {
 	}
 	if cfg.ExactRoundCaps != nil {
 		def.RoundCaps = *cfg.ExactRoundCaps
+	}
+	if cfg.Review.Tier != "" {
+		def.Review.Tier = cfg.Review.Tier
+	}
+	if cfg.Review.Effort != "" {
+		def.Review.Effort = cfg.Review.Effort
 	}
 	if cfg.TaskAutoRetry != nil {
 		def.TaskAutoRetry = cfg.TaskAutoRetry

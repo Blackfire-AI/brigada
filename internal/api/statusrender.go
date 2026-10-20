@@ -110,6 +110,14 @@ func StatusSections(st Status) string {
 				} else if t.Effort != "" {
 					detail = append(detail, "@"+t.Effort)
 				}
+				// A task's own review tier and effort (§7, §8); the engine
+				// default is left unsaid.
+				if t.ReviewTier != "" {
+					detail = append(detail, "review:"+t.ReviewTier)
+				}
+				if t.ReviewEffort != "" {
+					detail = append(detail, "review@"+t.ReviewEffort)
+				}
 				if label := engine.TaskCapsLabel(t.Caps); label != "" {
 					detail = append(detail, "("+label+")")
 				}

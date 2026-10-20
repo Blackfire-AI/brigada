@@ -35,12 +35,15 @@ type PlanRetarget struct {
 	Continue string
 }
 
-// PlanRetier changes a waiting or parked task's tier, effort or caps. Empty fields
-// preserve their current values; Task accepts a plan task's name or decimal id.
+// PlanRetier changes a waiting or parked task's tier, effort, review tier,
+// review effort or caps. Empty fields preserve their current values; Task
+// accepts a plan task's name or decimal id.
 type PlanRetier struct {
-	Task   string
-	Tier   string
-	Effort string
+	Task         string
+	Tier         string
+	Effort       string
+	ReviewTier   string
+	ReviewEffort string
 	// Caps merges key by key into the task's own caps (fix_rounds,
 	// review_rounds, restart; 0 to 10); nil changes none.
 	Caps map[string]int
@@ -307,6 +310,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if err := adapter.ValidateTaskEffort(rt.Effort); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), err)
 		}
+		if err := validateReviewTierEffort(rt.ReviewTier, rt.ReviewEffort); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), err)
+		}
 		if err := validateTaskCaps(rt.Caps); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), err)
 		}
@@ -455,8 +461,12 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			tier = CASE WHEN ? = '' THEN tier ELSE ? END,
 			effective_tier = CASE WHEN ? = '' THEN effective_tier ELSE ? END,
 			effective_effort = CASE WHEN ? <> '' THEN ? WHEN ? <> '' THEN effort ELSE effective_effort END,
-			effort = CASE WHEN ? = '' THEN effort ELSE ? END, updated_at = ? WHERE id = ?`,
-			rt.Tier, rt.Tier, rt.Tier, rt.Tier, rt.Effort, rt.Effort, rt.Tier, rt.Effort, rt.Effort, nowStr, nodes[i].id); err != nil {
+			effort = CASE WHEN ? = '' THEN effort ELSE ? END,
+			review_tier = CASE WHEN ? = '' THEN review_tier ELSE ? END,
+			review_effort = CASE WHEN ? = '' THEN review_effort ELSE ? END,
+			updated_at = ? WHERE id = ?`,
+			rt.Tier, rt.Tier, rt.Tier, rt.Tier, rt.Effort, rt.Effort, rt.Tier, rt.Effort, rt.Effort,
+			rt.ReviewTier, rt.ReviewTier, rt.ReviewEffort, rt.ReviewEffort, nowStr, nodes[i].id); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), err)
 		}
 		if len(rt.Caps) > 0 {
@@ -477,9 +487,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	}
 	for k := range am.Add {
 		i := existing + k
-		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, created_at, updated_at)
-			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?)`,
-			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskPending, baseRef, taskCapsJSON(am.Add[k].Caps), setupRec, nodes[i].extraRec, taskTier(am.Add[k].Tier), taskTier(am.Add[k].Tier), am.Add[k].Effort, am.Add[k].Effort, nowStr, nowStr)
+		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, review_tier, review_effort, created_at, updated_at)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?)`,
+			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskPending, baseRef, taskCapsJSON(am.Add[k].Caps), setupRec, nodes[i].extraRec, taskTier(am.Add[k].Tier), taskTier(am.Add[k].Tier), am.Add[k].Effort, am.Add[k].Effort, am.Add[k].ReviewTier, am.Add[k].ReviewEffort, nowStr, nowStr)
 		if err != nil {
 			return AmendPlanResult{}, fmt.Errorf("create the task: %w", err)
 		}

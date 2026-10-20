@@ -268,7 +268,7 @@ func readPlanSnapshotTx(tx *sql.Tx, planID int64) (planSnapshot, error) {
 			WHERE ev.task_id = t.id AND ev.kind = ? AND t.state IN (?, ?)
 			AND ev.id > COALESCE((SELECT MAX(a.id) FROM events a WHERE a.task_id = t.id AND a.kind IN (?, ?)), 0)
 			ORDER BY ev.id DESC LIMIT 1), ''),
-		COALESCE(t.extra_repos, ''), t.tier, t.effort, t.caps
+		COALESCE(t.extra_repos, ''), t.tier, t.effort, t.review_tier, t.review_effort, t.caps
 		FROM tasks t WHERE t.plan_id = ? ORDER BY t.id`,
 		roundFix, roundReview, evTaskNeedsHelp, taskNeedsForeman, taskNeedsUser, evTaskAnswered, evTaskRestarted, planID)
 	if err != nil {
@@ -278,7 +278,7 @@ func readPlanSnapshotTx(tx *sql.Tx, planID int64) (planSnapshot, error) {
 	for rows.Next() {
 		var t planfile.Task
 		var extraRec, capsJSON string
-		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Class, &t.State, &t.Branch, &t.Rounds, &t.Question, &extraRec, &t.Tier, &t.Effort, &capsJSON); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Class, &t.State, &t.Branch, &t.Rounds, &t.Question, &extraRec, &t.Tier, &t.Effort, &t.ReviewTier, &t.ReviewEffort, &capsJSON); err != nil {
 			rows.Close()
 			return planSnapshot{}, fmt.Errorf("read the tasks of plan %d: %w", planID, err)
 		}

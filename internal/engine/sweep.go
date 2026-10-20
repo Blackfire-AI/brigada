@@ -269,14 +269,14 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (SweepR
 				if err != nil {
 					return rep, err
 				}
-				agents, err := eligibleAgentsTx(tx, e.cfg.Caps, nil, 0, j, kindClass(j.Kind), nowStr)
+				agents, err := eligibleAgentsTx(tx, &e.cfg, nil, 0, j, kindClass(j.Kind), nowStr)
 				if err != nil {
 					return rep, err
 				}
 				if len(agents) == 0 {
-					var asked string
-					if err := tx.QueryRow("SELECT effective_tier FROM tasks WHERE id = ?", x.task).Scan(&asked); err != nil {
-						return rep, fmt.Errorf("read the tier of task %d: %w", x.task, err)
+					asked, err := jobTierTx(tx, e.cfg.Review, j)
+					if err != nil {
+						return rep, err
 					}
 					if asked != "" {
 						reason += fmt.Sprintf("; no agent of tier %s, or of any tier, offers %s", asked, kindClass(j.Kind))
