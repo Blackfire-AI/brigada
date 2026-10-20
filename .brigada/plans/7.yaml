@@ -33,9 +33,10 @@ tasks:
     deps: []
     base: ""
     effort: high
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
+    question: "Can the runner be given network access to fetch github.com/sst/opencode source at the v1.19.x tag, or a local checkout of that source readable from the worktree, so the project-root and external_directory behaviour can be read and the adapter fixed from evidence?"
   - id: 27
     name: "compat"
     title: "Compatibility statement for 1.0 (#22)"
