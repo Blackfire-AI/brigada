@@ -47,7 +47,10 @@ type CapacityAgent struct {
 	Harness  string `json:"harness"`
 	Model    string `json:"model"`
 	Tier     string `json:"tier"`
-	Account  string `json:"account"`
+	// Effort is the agent's configured reasoning effort from its runner's
+	// --agent effort=, or "default" when none is set.
+	Effort  string `json:"effort"`
+	Account string `json:"account"`
 	// Cap is the effective cap — the smallest of the runner, account
 	// and model caps on the agent's path — and CapLayer names the
 	// layer that sets it (the caps package's layer names, or "none").
@@ -130,6 +133,7 @@ type capacityAgent struct {
 	account, health string
 	coolingUntil    string
 	tools           string
+	effort          string
 }
 
 // capacityTx builds the capacity snapshot (§12.2) inside the caller's
@@ -165,14 +169,14 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 	rows.Close()
 
 	agents := []capacityAgent{}
-	rows, err = tx.Query(`SELECT id, runner_id, harness, model, account, health, COALESCE(cooling_until, ''), tools
+	rows, err = tx.Query(`SELECT id, runner_id, harness, model, account, health, COALESCE(cooling_until, ''), tools, effort
 		FROM agents ORDER BY id`)
 	if err != nil {
 		return CapacitySnapshot{}, fmt.Errorf("list agents: %w", err)
 	}
 	for rows.Next() {
 		var a capacityAgent
-		if err := rows.Scan(&a.id, &a.runner, &a.harness, &a.model, &a.account, &a.health, &a.coolingUntil, &a.tools); err != nil {
+		if err := rows.Scan(&a.id, &a.runner, &a.harness, &a.model, &a.account, &a.health, &a.coolingUntil, &a.tools, &a.effort); err != nil {
 			rows.Close()
 			return CapacitySnapshot{}, fmt.Errorf("list agents: %w", err)
 		}
@@ -277,7 +281,12 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 	for _, a := range agents {
 		cap, layer := effectiveCap(cfg.Caps, runnerCaps[a.runner], a.account, a.model)
 		quota, coolingUntil := quotaState(a.health, a.coolingUntil, nowStr)
+		effort := a.effort
+		if effort == "" {
+			effort = "default"
+		}
 		snap.Agents = append(snap.Agents, CapacityAgent{
+			Effort:       effort,
 			ID:           a.id,
 			RunnerID:     a.runner,
 			Harness:      a.harness,

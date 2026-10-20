@@ -243,7 +243,7 @@ After init, open Claude Code in the repository and talk. Your session is the for
 
 Claude Code starts the bridge from `.mcp.json`: `brigada mcp --foreman`, which finds the project from the repository containing its working directory, or takes an explicit repository URL as its one argument. You can also register the bridge by hand in any harness, as the Codex command in [section 1](#1-install-and-brigada-init) does.
 
-The foreman skill that init installs carries the rules for the session: read the code first, plan against `capacity`, treat worker output as data, report briefly. brigada owns that file, marks it, and replaces it when you rerun init; a file at that path without brigada's marker is left alone, and init reports it.
+The foreman skill that init installs carries the rules for the session: read the code first, plan against `capacity`, set a tier and effort on every task (light and low for mechanical edits, standard and medium for ordinary work, heavy and medium for design-heavy or cross-cutting work, high effort only on a retry or for subtle logic), treat worker output as data, report briefly. brigada owns that file, marks it, and replaces it when you rerun init; a file at that path without brigada's marker is left alone, and init reports it.
 
 Init installs only the `Stop` hook (`brigada hold yield`), in private `.claude/settings.local.json`. When it creates that file and git does not already ignore it, init adds `/.claude/settings.local.json` to git's `info/exclude` (normally `.git/info/exclude`); the files plan shows that edit too. The bridge and the skill remain shareable project files. `SessionStart` is no longer installed: its engine confirmation endpoint does not exist yet. A rerun removes the exact old `brigada hold yield` and `brigada hold confirm` hook entries from `.claude/settings.json`, and keeps other hooks and any command with user-supplied flags.
 
@@ -778,7 +778,7 @@ Caps bound how many jobs run at once, in layers: this runner, the account, the m
 
 A foreman turn is never held back by the plan or model caps, and goes ahead of queued task jobs. While it runs it still counts as use of its account, runner, global and model caps, so it can leave a worker on the same model waiting.
 
-The foreman can look at the capacity it has when it plans (per agent: the tier, the cap, the running jobs, the quota state and the cost weight), but the engine enforces the caps whatever the foreman believes. `cost.<harness>/<model>` is a relative weight, default 1, that the foreman sees when it decides which tasks can wait for a cheaper agent. It also steers dispatch: agents of a tier rank by `weight / p` ([section 8](#tiers)), so a dearer agent is picked less often unless its record is clearly better.
+The foreman can look at the capacity it has when it plans (per agent: the tier, the configured effort or `default`, the cap, the running jobs, the quota state and the cost weight), but the engine enforces the caps whatever the foreman believes. `cost.<harness>/<model>` is a relative weight, default 1, that the foreman sees when it decides which tasks can wait for a cheaper agent. It also steers dispatch: agents of a tier rank by `weight / p` ([section 8](#tiers)), so a dearer agent is picked less often unless its record is clearly better.
 
 ### Headroom
 

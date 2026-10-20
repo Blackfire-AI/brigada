@@ -60,7 +60,7 @@ func TestServeCallCapacity(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec("UPDATE agents SET tools = 'Bash(npm test:*)+Bash(npx jest:*)' WHERE id = ?", broken); err != nil {
+		if _, err := tx.Exec("UPDATE agents SET effort = 'high', tools = 'Bash(npm test:*)+Bash(npx jest:*)' WHERE id = ?", broken); err != nil {
 			return err
 		}
 		// The live job, recorded on the ready agent and held by the
@@ -81,9 +81,9 @@ func TestServeCallCapacity(t *testing.T) {
 		t.Fatalf("capacity errored: %s", text)
 	}
 	for _, want := range []string{
-		"agent 1 claude/sonnet tier=standard account=work cap=none running=1 quota=ready cost=1",
-		"agent 2 claude/sonnet tier=standard account=work cap=none running=0 quota=cooling until " + coolUntil + " cost=1",
-		"agent 3 claude/sonnet tier=standard account=work cap=none running=0 quota=broken cost=1 tools=Bash(npm test:*)+Bash(npx jest:*)",
+		"agent 1 claude/sonnet tier=standard effort=default account=work cap=none running=1 quota=ready cost=1",
+		"agent 2 claude/sonnet tier=standard effort=default account=work cap=none running=0 quota=cooling until " + coolUntil + " cost=1",
+		"agent 3 claude/sonnet tier=standard effort=high account=work cap=none running=0 quota=broken cost=1 tools=Bash(npm test:*)+Bash(npx jest:*)",
 		"runner 1 cap=none use=1 queue=0",
 		"account work cap=none use=1 queue=0",
 		"plan 1 cap=none use=1 queue=0",
