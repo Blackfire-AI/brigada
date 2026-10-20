@@ -361,6 +361,20 @@ func TestStatusShowsTheSlot(t *testing.T) {
 		!strings.Contains(text, fmt.Sprintf("#%d since", h.HoldID)) {
 		t.Errorf("status under a hold:\n%s", text)
 	}
+	// A waiting message under the hold defers the headless wake (§4.6):
+	// status says so, until the quiet's end.
+	if code, _, _ := e.do(http.MethodPost, "/v1/foreman/messages", "alice", "",
+		attachBody(map[string]any{"repo_url": repo1, "text": "while you hold"})); code != http.StatusOK {
+		t.Fatalf("ask under the hold = %d", code)
+	}
+	st = slotOf()
+	if len(st.DeferredWakes) != 1 || st.DeferredWakes[0].ProjectID != e.project1 {
+		t.Fatalf("deferred wakes = %+v, want project %d", st.DeferredWakes, e.project1)
+	}
+	if text = StatusSections(st); !strings.Contains(text, "headless wakes deferred until") ||
+		!strings.Contains(text, "interactive session active (project #1)") {
+		t.Errorf("status under a deferred wake:\n%s", text)
+	}
 	e.do(http.MethodPost, "/v1/foreman/hold/release", "alice", "", attachBody(map[string]any{"repo_url": repo1}))
 	turn := e.submitTurn(e.project1)
 	text = StatusSections(slotOf())

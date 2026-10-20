@@ -71,6 +71,7 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingExtraRepos, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingHoldIdleMinutes, Value: "15", Default: true, Source: SourceDefault},
 		{Key: SettingHoldMaxMinutes, Value: "240", Default: true, Source: SourceDefault},
+		{Key: SettingInteractiveQuietMinutes, Value: "10", Default: true, Source: SourceDefault},
 		{Key: SettingForemanWakesPerDay, Value: "20", Default: true, Source: SourceDefault},
 		{Key: SettingInstructions, Value: "none", Default: true, Source: SourceDefault},
 	}

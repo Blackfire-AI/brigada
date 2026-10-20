@@ -259,8 +259,9 @@ One interactive holder at a time owns the foreman's slot for a project.
 
 - **Taking it.** Your session takes the slot with `hold_acquire`, which returns a digest of the plans, their tasks, the pending events and messages, and the decision notes recorded since. While it holds, brigada starts no headless foreman turn; events and messages wait, and the session reads them through `events`.
 - **Conflicts.** If a headless turn already has the slot, your session's calls are refused with `foreman_busy`, naming the turn; the rules tell the session to say so and stay read-only until the turn ends. A second session, or `brigada attach`, is refused while the first holds.
-- **Yielding.** At the end of every turn the session records its decisions and calls `hold_yield`; the `Stop` hook (`brigada hold yield`) does the same if it forgets. The yield frees the slot and lets what piled up wake the headless foreman.
+- **Yielding.** At the end of every turn the session records its decisions and calls `hold_yield`; the `Stop` hook (`brigada hold yield`) does the same if it forgets. The yield frees the slot; what piled up wakes the headless foreman after the quiet period below.
 - **Expiry.** A hold also ends on its own: after `hold_idle_minutes` without activity (default 15), after `hold_max_minutes` whatever the activity (default 240), or when the bridge stops answering its liveness check. Both bounds are project settings ([section 6](#6-configuring-a-project)). A call made with a hold that has ended is rejected whole as `stale_hold`; the session acquires again, reads the digest and decides afresh.
+- **The quiet period.** While your session holds, or yielded less than `interactive_quiet_minutes` ago (default 10, `0` = off), events do not wake the headless foreman: it would re-judge what your session is already following and spend tokens for nothing. What happened waits for your next `hold_acquire` digest; if you do not come back, the engine wakes one headless turn for everything that waited as soon as the quiet lapses, with no new event needed. `brigada status` says so ("headless wakes deferred until 14:32: interactive session active"), and the history records the deferral. Notifications that need you — a plan awaiting approval, a task parked at needs_foreman — are not deferred.
 
 If a hold is stuck, release it yourself:
 
@@ -496,6 +497,7 @@ Some keys belong to you and this engine, not to the team. The shared file refuse
 |---|---|---|
 | `hold_idle_minutes` | `15` | The interactive hold's idle bound, in minutes ([section 2](#2-your-own-session-is-the-foreman-mode-a)). |
 | `hold_max_minutes` | `240` | The interactive hold's absolute bound, in minutes. |
+| `interactive_quiet_minutes` | `10` | How long after a yield headless wakes stay deferred while you work (`0` = never defer) ([section 2](#2-your-own-session-is-the-foreman-mode-a)). |
 | `foreman_wakes_per_day` | `20`, or the config file's value | The daily wake budget, 1 to 1000 ([section 4](#4-while-work-runs); also `brigada budget --wakes N`). |
 | `instructions` | none | A local override of the instruction text. |
 
@@ -1012,6 +1014,7 @@ Every key that `brigada project set` and `project show` know, with each default 
 | `extra_repos` | `none` | yes |
 | `hold_idle_minutes` | `15` | no, local only |
 | `hold_max_minutes` | `240` | no, local only |
+| `interactive_quiet_minutes` | `10` | no, local only |
 | `foreman_wakes_per_day` | `20`, or the config file's value | no, local only |
 | `instructions` | `none` | no, local only (the file's counterpart is `instructions_file`) |
 

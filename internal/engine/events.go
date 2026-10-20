@@ -61,6 +61,7 @@ const (
 	evForemanReport          = "foreman_report"            // a done foreman turn's final message, reported to the user (§3, §10)
 	evUserMessage            = "user_message"              // the user's message to the foreman, sent without attaching (§4.2 item 3)
 	evForemanWoken           = "foreman_woken"             // a foreman turn was queued with the project's pending events (§4.2)
+	evForemanWakeDeferred    = "foreman_wake_deferred"     // a wake waited out the interactive quiet period (§4.6; Until: the quiet's end, Count: the rows waiting), once per quiet window; the sweep wakes one turn when it lapses
 	evForemanWakeBudgetSpent = "foreman_wake_budget_spent" // the day's foreman wake budget is spent (Count: the budget, Until: the window's end); the events stay pending (§4.3)
 	evForemanWakeStalled     = "foreman_wake_stalled"      // foreman turns failed consecutively on the same events; waking stops (§4.2)
 	evForemanLimited         = "foreman_limited"           // the foreman's CLI hit its subscription limit; waking stops until it resets or the user switches (§4.4)

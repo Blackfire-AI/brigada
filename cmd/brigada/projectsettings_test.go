@@ -43,14 +43,14 @@ func startSettingsEngine(t *testing.T) (context.Context, string) {
 }
 
 // holdDefaults are the environment step's settings (§5.7, §5.8), the
-// interactive hold's two bounds (§4.6), the foreman wake budget (§4.3)
-// and the project instructions (§5.9) at their defaults, the last lines
-// of every settings print.
+// interactive hold's two bounds and its quiet period (§4.6), the foreman
+// wake budget (§4.3) and the project instructions (§5.9) at their
+// defaults, the last lines of every settings print.
 const holdDefaults = "setup=none (default)\n" + "setup_cache_key_files=none (default)\n" + "setup_timeout_minutes=15 (default)\n" +
 	"extra_repos=none (default)\n" + "hold_idle_minutes=15 (default)\n" + "hold_max_minutes=240 (default)\n" +
-	"foreman_wakes_per_day=20 (default)\n" + "instructions=none (default)\n"
+	"interactive_quiet_minutes=10 (default)\n" + "foreman_wakes_per_day=20 (default)\n" + "instructions=none (default)\n"
 
-const validSettingKeys = "approval_max_tasks, approval_classes, approval_protected_paths, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, hold_idle_minutes, hold_max_minutes, foreman_wakes_per_day, instructions"
+const validSettingKeys = "approval_max_tasks, approval_classes, approval_protected_paths, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, hold_idle_minutes, hold_max_minutes, interactive_quiet_minutes, foreman_wakes_per_day, instructions"
 
 // TestProjectSettingsGolden covers project set and show: the defaults,
 // one override, the reset, and the usage errors for a bad key and value.

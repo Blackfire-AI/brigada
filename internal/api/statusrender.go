@@ -38,6 +38,16 @@ func StatusSections(st Status) string {
 		}
 		lines = append(lines, line)
 	}
+	// A headless wake the interactive quiet period holds (§4.6): the
+	// moment it may fire, so an attended session's silence reads as a
+	// rule, not as a lost event.
+	for _, d := range st.DeferredWakes {
+		until := d.Until
+		if t, err := time.Parse(engine.TimeLayout, until); err == nil {
+			until = t.Format("15:04")
+		}
+		lines = append(lines, fmt.Sprintf("headless wakes deferred until %s: interactive session active (project #%d)", until, d.ProjectID))
+	}
 	for _, h := range st.Held {
 		what := fmt.Sprintf("job #%d", h.ID)
 		if h.TaskID != 0 {

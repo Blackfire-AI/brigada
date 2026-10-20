@@ -56,7 +56,9 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 //     TTL, and the foreman is woken, as in round 2;
 //  4. an expired attach hold returns its delivered events to pending
 //     uncounted, revokes its token, and re-evaluates the wake (§4.2
-//     item 1);
+//     item 1); an interactive hold whose clocks ran out ends the same
+//     way (§4.6), and a quiet period that lapsed after one wakes the
+//     headless foreman once for what waited (§4.6);
 //  5. the agents of a runner unseen past the stale window are marked
 //     broken("runner stale") (§8 "Health");
 //
@@ -348,6 +350,12 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (SweepR
 	// An interactive hold whose clocks ran out ends (§4.6): revoke, bump
 	// the fence, then the wake.
 	if err := e.expireInteractiveHoldsTx(tx, now); err != nil {
+		return rep, err
+	}
+
+	// A quiet period that lapsed wakes the headless foreman once for
+	// everything that waited, with no new event to do it (§4.6).
+	if err := e.sweepQuietWakesTx(tx, now); err != nil {
 		return rep, err
 	}
 

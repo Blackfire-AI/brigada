@@ -91,3 +91,13 @@ func TestRenderEffortBump(t *testing.T) {
 		t.Errorf("summary = %q", got)
 	}
 }
+
+// TestRenderDeferredWake: the quiet period's record (§4.6) names when
+// the wake may fire and how much waited.
+func TestRenderDeferredWake(t *testing.T) {
+	it := Item{Type: TypeEvent, Kind: "foreman_wake_deferred", ProjectID: 7,
+		Payload: []byte(`{"until":"2026-10-20T14:32:00.000000000Z","count":3}`)}
+	if got := summary(it); got != "headless wake deferred until=2026-10-20T14:32:00.000000000Z waiting=3" {
+		t.Errorf("summary = %q", got)
+	}
+}
