@@ -56,7 +56,7 @@ func TestJobUsageMultiLineCompletion(t *testing.T) {
 	if err := json.Unmarshal(payload["usage"], &usage); err != nil {
 		t.Fatal(err)
 	}
-	for field, want := range map[string]int64{"input_tokens": 30, "output_tokens": 12, "cached_input_tokens": 2, "reasoning_tokens": 4} {
+	for field, want := range map[string]int64{"input_tokens": 30, "output_tokens": 12, "cached_input_tokens": 2, "reasoning_tokens": 4, "model_calls": 2} {
 		if usage[field] != want {
 			t.Errorf("%s = %d, want %d", field, usage[field], want)
 		}
@@ -77,7 +77,7 @@ func TestJobUsageMultiLineCompletion(t *testing.T) {
 	if err := json.Unmarshal(payload["usage"], &usage); err != nil {
 		t.Fatal(err)
 	}
-	if len(usage) != 1 || usage["input_tokens"] != 1 {
+	if len(usage) != 2 || usage["input_tokens"] != 1 || usage["model_calls"] != 1 {
 		t.Fatalf("usage carried across jobs: %s", payload["usage"])
 	}
 	if sumUsage(nil) != nil {

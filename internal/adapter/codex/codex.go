@@ -319,6 +319,11 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 	switch lj.Type {
 	case "turn.completed":
 		u := adapter.ParseUsage(lj.Usage, "input_tokens", "output_tokens", "cached_input_tokens", "reasoning_output_tokens", "")
+		// Each turn.completed closes one model request; input_tokens
+		// already includes the cached part.
+		if u != nil {
+			u.Add(adapter.Calls(1))
+		}
 		return adapter.Event{Kind: adapter.EvUsage, Usage: u}, u != nil
 	case "thread.started":
 		if lj.ThreadID == "" {

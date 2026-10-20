@@ -320,9 +320,9 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 		lease_expires_at = NULL, last_leased = NULL, queued_at = NULL,
 		leased_seconds = leased_seconds + ?, updated_at = ?,
 		check_result = COALESCE(NULLIF(?, ''), check_result), error_kind = ?,
-		input_tokens = ?, output_tokens = ?, cached_input_tokens = ?, reasoning_tokens = ?, cost_usd = ?, wall_seconds = ?
+		input_tokens = ?, output_tokens = ?, cached_input_tokens = ?, reasoning_tokens = ?, cost_usd = ?, wall_seconds = ?, model_calls = ?
 		WHERE id = ?`, status, string(result), leaseID, accrue, fmtTime(now), c.CheckResult, errorKind,
-		usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens, usage.ReasoningTokens, usage.CostUSD, c.WallSeconds, job.ID); err != nil {
+		usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens, usage.ReasoningTokens, usage.CostUSD, c.WallSeconds, usage.ModelCalls, job.ID); err != nil {
 		return "", fmt.Errorf("finish job %d: %w", job.ID, err)
 	}
 	// The turn is over, and its lease-scoped foreman token with it

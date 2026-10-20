@@ -223,6 +223,10 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 	case lj.Role == "assistant":
 		ev, ok := assistantEvent(lj)
 		ev.Usage = adapter.ParseUsage(lj.Usage, "input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens", "")
+		// Each assistant line that reports usage is one model request.
+		if ev.Usage != nil {
+			ev.Usage.Add(adapter.Calls(1))
+		}
 		if !ok && ev.Usage != nil {
 			ev.Kind, ok = adapter.EvUsage, true
 		}

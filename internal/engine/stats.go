@@ -42,6 +42,9 @@ type StatsRow struct {
 	Tokens             *int64   `json:"tokens"`
 	CostUSD            *float64 `json:"cost_usd"`
 	WallSeconds        *float64 `json:"wall_seconds"`
+	ModelCalls         *int64   `json:"model_calls"`
+	CallsPerJob        *float64 `json:"calls_per_job"`
+	CallsPerSuccess    *float64 `json:"calls_per_success"`
 	CostPerSuccess     *float64 `json:"cost_per_success"`
 	CostPerSuccessUnit string   `json:"cost_per_success_unit,omitempty"`
 }
@@ -228,7 +231,7 @@ func usageStatsTx(tx *sql.Tx, p *ProjectStats, agents map[int64]*statsAgent) err
   CASE j.kind WHEN 'review' THEN 'review' WHEN 'foreman' THEN 'plan' ELSE COALESCE(t.class, 'implement') END AS class,
   SUM(j.input_tokens), SUM(j.output_tokens), SUM(j.cached_input_tokens), SUM(j.reasoning_tokens),
   SUM(CASE WHEN j.input_tokens IS NOT NULL OR j.output_tokens IS NOT NULL THEN COALESCE(j.input_tokens,0) + COALESCE(j.output_tokens,0) END),
-  SUM(j.cost_usd), SUM(j.wall_seconds)
+  SUM(j.cost_usd), SUM(j.wall_seconds), SUM(j.model_calls), COUNT(j.model_calls)
   FROM jobs j LEFT JOIN tasks t ON t.id = j.task_id
   WHERE j.project_id = ? AND j.agent_id IS NOT NULL
   GROUP BY 1, 2`, p.ProjectID)
@@ -238,7 +241,8 @@ func usageStatsTx(tx *sql.Tx, p *ProjectStats, agents map[int64]*statsAgent) err
 	defer rows.Close()
 	for rows.Next() {
 		var u StatsRow
-		if err := rows.Scan(&u.AgentID, &u.Class, &u.InputTokens, &u.OutputTokens, &u.CachedInputTokens, &u.ReasoningTokens, &u.Tokens, &u.CostUSD, &u.WallSeconds); err != nil {
+		var callJobs int64
+		if err := rows.Scan(&u.AgentID, &u.Class, &u.InputTokens, &u.OutputTokens, &u.CachedInputTokens, &u.ReasoningTokens, &u.Tokens, &u.CostUSD, &u.WallSeconds, &u.ModelCalls, &callJobs); err != nil {
 			return err
 		}
 		a := agents[u.AgentID]
@@ -262,6 +266,17 @@ func usageStatsTx(tx *sql.Tx, p *ProjectStats, agents map[int64]*statsAgent) err
 		row := &p.Rows[index]
 		row.InputTokens, row.OutputTokens, row.CachedInputTokens, row.ReasoningTokens = u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.ReasoningTokens
 		row.Tokens, row.CostUSD, row.WallSeconds = u.Tokens, u.CostUSD, u.WallSeconds
+		row.ModelCalls = u.ModelCalls
+		if u.ModelCalls != nil {
+			if callJobs > 0 {
+				perJob := float64(*u.ModelCalls) / float64(callJobs)
+				row.CallsPerJob = &perJob
+			}
+			if row.Successes > 0 {
+				perSuccess := float64(*u.ModelCalls) / float64(row.Successes)
+				row.CallsPerSuccess = &perSuccess
+			}
+		}
 		if row.Successes > 0 {
 			var cost float64
 			if row.CostUSD != nil {

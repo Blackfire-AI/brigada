@@ -16,8 +16,8 @@ func TestUsageFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	wants := []*adapter.Usage{&adapter.Usage{InputTokens: usageInt(10), OutputTokens: usageInt(5), CachedInputTokens: usageInt(2), ReasoningTokens: usageInt(3)},
-		&adapter.Usage{InputTokens: usageInt(0)},
+	wants := []*adapter.Usage{&adapter.Usage{InputTokens: usageInt(12), OutputTokens: usageInt(5), CachedInputTokens: usageInt(2), ReasoningTokens: usageInt(3), ModelCalls: usageInt(1)},
+		&adapter.Usage{InputTokens: usageInt(0), ModelCalls: usageInt(1)},
 		nil}
 	scanner := bufio.NewScanner(f)
 	i := 0
