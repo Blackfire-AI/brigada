@@ -71,7 +71,7 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		return nil, cmd.Err
 	}
 	cmd.Dir = workdir
-	cmd.Env = workerPermissions(workerEnv(os.Environ()))
+	cmd.Env = workerPermissions(workerEnv(os.Environ()), job.ReadDirs)
 	return cmd, nil
 }
 
@@ -116,8 +116,11 @@ func workerEnv(env []string) []string {
 // So one deny rule turns an outside-the-worktree call into a plain tool
 // error the model can answer — no ask, no auto-reject notice, no run that
 // ends wordless. An ambient value keeps its other rules; an invalid one —
-// which the CLI would discard — is replaced, never merged.
-func workerPermissions(env []string) []string {
+// which the CLI would discard — is replaced, never merged. Read dirs
+// (§5.8) switch external_directory to its per-pattern form instead: an
+// object of glob pattern to action where the last matching rule wins, so
+// a "*" deny first and one allow per directory grant exactly those paths.
+func workerPermissions(env []string, readDirs []string) []string {
 	var rules map[string]any
 	for _, kv := range env {
 		if v, ok := strings.CutPrefix(kv, "OPENCODE_PERMISSION="); ok {
@@ -128,7 +131,18 @@ func workerPermissions(env []string) []string {
 	if rules == nil {
 		rules = map[string]any{}
 	}
-	rules["external_directory"] = "deny"
+	if len(readDirs) == 0 {
+		rules["external_directory"] = "deny"
+	} else {
+		// The checkouts are read-only on disk, so allowing their patterns
+		// cannot let a write through; everything else stays denied.
+		patterns := map[string]any{"*": "deny"}
+		for _, dir := range readDirs {
+			patterns[dir] = "allow"
+			patterns[dir+"/**"] = "allow"
+		}
+		rules["external_directory"] = patterns
+	}
 	value, err := json.Marshal(rules)
 	if err != nil {
 		return env // unreachable: a map of JSON values marshals

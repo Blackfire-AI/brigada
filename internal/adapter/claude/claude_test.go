@@ -82,6 +82,21 @@ func TestCommand(t *testing.T) {
 				"--allowedTools", "Bash(git:*)", "Edit",
 				"--disallowedTools", "WebFetch"},
 		},
+		{
+			// The extra repositories' checkouts (§5.8) are readable
+			// through one --add-dir each; the cases above, with no
+			// ReadDirs, carry none.
+			name: "read dirs add one --add-dir each",
+			job: adapter.Job{Prompt: prompt, ReadDirs: []string{
+				"/runner-state/worktrees/task-9-author-s0.extra/schema",
+				"/runner-state/worktrees/task-9-author-s0.extra/live"}},
+			wantExe: "claude",
+			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose",
+				"--permission-mode", "acceptEdits",
+				"--allowedTools", "Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)",
+				"--add-dir", "/runner-state/worktrees/task-9-author-s0.extra/schema",
+				"--add-dir", "/runner-state/worktrees/task-9-author-s0.extra/live"},
+		},
 	}
 	for _, tc := range cases {
 		cmd, err := tc.ad.Command(tc.job, dir, tc.resume)

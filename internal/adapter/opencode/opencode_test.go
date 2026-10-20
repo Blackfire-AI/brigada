@@ -102,15 +102,24 @@ func TestCommandEnv(t *testing.T) {
 
 func TestWorkerPermissions(t *testing.T) {
 	const deny = `OPENCODE_PERMISSION={"external_directory":"deny"}`
+	const schema = "/runner-state/worktrees/task-9-author-s0.extra/schema"
+	const live = "/runner-state/worktrees/task-9-author-s0.extra/live"
+	// The per-pattern form sorts "*" first (json.Marshal sorts a map's
+	// keys), so the per-dir allows after it win as the last match.
+	const allowed = `OPENCODE_PERMISSION={"external_directory":{"*":"deny","` + live + `":"allow","` + live + `/**":"allow","` + schema + `":"allow","` + schema + `/**":"allow"}}`
 	cases := []struct {
-		name    string
-		ambient string // set when non-empty
-		want    string
+		name     string
+		ambient  string // set when non-empty
+		readDirs []string
+		want     string
 	}{
-		{"absent", "", deny},
-		{"other rules kept", `{"bash":"ask"}`, `OPENCODE_PERMISSION={"bash":"ask","external_directory":"deny"}`},
-		{"weaker rule overridden", `{"external_directory":"allow"}`, deny},
-		{"invalid replaced", "not json", deny},
+		{"absent", "", nil, deny},
+		{"other rules kept", `{"bash":"ask"}`, nil, `OPENCODE_PERMISSION={"bash":"ask","external_directory":"deny"}`},
+		{"weaker rule overridden", `{"external_directory":"allow"}`, nil, deny},
+		{"invalid replaced", "not json", nil, deny},
+		{"read dirs allowed, everything else denied", "", []string{schema, live}, allowed},
+		{"read dirs replace a weaker object", `{"external_directory":{"*":"allow"}}`, []string{schema},
+			`OPENCODE_PERMISSION={"external_directory":{"*":"deny","` + schema + `":"allow","` + schema + `/**":"allow"}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -118,7 +127,7 @@ func TestWorkerPermissions(t *testing.T) {
 			if tc.ambient != "" {
 				t.Setenv("OPENCODE_PERMISSION", tc.ambient)
 			}
-			cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p"}, t.TempDir(), "")
+			cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", ReadDirs: tc.readDirs}, t.TempDir(), "")
 			if err != nil {
 				t.Fatal(err)
 			}
