@@ -9,9 +9,10 @@ import (
 
 // reviewUnservableTx reports whether a queued review job could never be
 // taken by any registered agent, even one ready and out of cooling: no
-// agent other than the author passes ExcludeFamily and ExcludeAgent
-// (the retry case) and offers the review class — the test
-// qualifyingAgentRowsTx applies. A cooling or broken
+// agent other than the author passes ExcludeFamily and offers the
+// review class — and, on a retry whose exclusion lifts nowhere (the
+// excluded agent gone or of the author's family), ExcludeAgent too —
+// the test qualifyingAgentRowsTx applies. A cooling or broken
 // agent of the right family makes the job merely wait, never
 // unservable: health is temporary, a missing structural reviewer is not.
 func reviewUnservableTx(tx *sql.Tx, j *jobRow) (bool, error) {
@@ -58,9 +59,12 @@ func reviewAuthorTx(tx *sql.Tx, j *jobRow) (int64, error) {
 
 // noReviewAgentTx applies lease eligibility without temporary health and
 // cooling limits. In particular, the author remains excluded on retries,
-// alongside the first reviewer's agent and the author's known family.
+// alongside the author's known family. A retry's agent exclusion lifts
+// when no other reviewer exists structurally (decided 2026-10-20): the
+// excluded reviewer then takes the retry, so it alone is never a missing
+// reviewer.
 func noReviewAgentTx(tx *sql.Tx, j *jobRow) (bool, error) {
-	agents, err := qualifyingAgentRowsTx(tx, 0, j, string(KindReview))
+	agents, err := qualifyingAgentRowsTx(tx, 0, j, string(KindReview), "")
 	return len(agents) == 0, err
 }
 

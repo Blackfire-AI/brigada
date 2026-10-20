@@ -580,8 +580,9 @@ func TestRestartedReviewKeepsItsRetry(t *testing.T) {
 // TestNoVerdictTwiceParksTheTask: the retry is one per review cycle
 // (§7) — a second unusable verdict parks the task at needs_foreman with
 // the no-verdict event, and nothing is queued behind it. A lone
-// reviewer of another family, with no second agent to take the retry,
-// parks the task on the first unusable verdict instead.
+// reviewer of another family now takes its own retry (the lifted
+// exclusion, decided 2026-10-20) and parks the task only on that second
+// unusable verdict.
 func TestNoVerdictTwiceParksTheTask(t *testing.T) {
 	t.Run("the retry itself ends unusable", func(t *testing.T) {
 		e := newEnv(t)
@@ -607,22 +608,31 @@ func TestNoVerdictTwiceParksTheTask(t *testing.T) {
 		}
 	})
 
-	t.Run("no agent can take the retry", func(t *testing.T) {
+	t.Run("the lone reviewer takes its lifted retry once", func(t *testing.T) {
 		e := newEnv(t)
 		author := e.agented("author", "anthropic", "implement")
 		lone := e.agented("lone", "google", "implement", "review")
 		e.submit(e.work())
 		e.runWork(author, doneOn("task/1-1", passCheck))
 		e.runReview(lone, `{}`)
+		// No other reviewer exists, so the retry's exclusion lifts and
+		// queues instead of parking the task at once.
+		if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskReviewing {
+			t.Fatalf("task state = %q, want reviewing behind the lifted retry", state)
+		}
+		if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'review'", e.task); n != 2 {
+			t.Fatalf("review jobs = %d, want the first and its lifted retry", n)
+		}
+		e.runReview(lone, `{}`)
 		if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
-			t.Fatalf("task state = %q, want needs_foreman with nobody to take the retry", state)
+			t.Fatalf("task state = %q, want needs_foreman after the lifted retry's verdict", state)
 		}
 		p, ok := e.eventPayloadOf(evReviewNoVerdict)
-		if !ok || !strings.Contains(p.Reason, "no other agent") {
-			t.Errorf("no-verdict payload = %+v (%t), want the missing reviewer named", p, ok)
+		if !ok || !strings.Contains(p.Reason, "the only available reviewer twice gave no verdict") {
+			t.Errorf("no-verdict payload = %+v (%t), want the twice-no-verdict cause", p, ok)
 		}
-		if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'review'", e.task); n != 1 {
-			t.Errorf("review jobs = %d, want the lone one alone", n)
+		if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'review'", e.task); n != 2 {
+			t.Errorf("review jobs = %d, want no retry behind the lifted one", n)
 		}
 	})
 }

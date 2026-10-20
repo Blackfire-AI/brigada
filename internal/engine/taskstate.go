@@ -815,16 +815,38 @@ func (e *Engine) requeueReviewTx(tx *sql.Tx, job *jobRow, c Completion, now time
 	return err
 }
 
+// reviewOnlyReviewerTwice replaces "its review retry is spent" when the
+// review being judged ran on its own excluded agent (§7, decided
+// 2026-10-20): the exclusion was lifted because no other qualifying
+// reviewer was available, and the only available reviewer has now given
+// no verdict twice.
+const reviewOnlyReviewerTwice = "the only available reviewer twice gave no verdict"
+
 // queueReviewRetryTx answers an unusable review with another reviewer
 // (§7): a new review job, once per review cycle — a cycle being the
 // review of the change the task's latest author job produced — placed
 // on another agent of a non-author family, so the same reviewer never
 // reads its own output again. The retry asks the same question: its
 // prompt is the unusable review's own, which the engine composed from
-// the same template and the same verbatim data. When the retry is spent
-// or no agent can take it, the task parks at needs_foreman with the
-// no-verdict event, for the foreman's judgment.
+// the same template and the same verbatim data. The exclusion of the
+// first reviewer is a preference (decided 2026-10-20): when no other
+// qualifying reviewer is available the lease lifts it and the same
+// agent takes the retry — and a retry that ran on the excluded agent
+// and still ends unusable parks the task at once, the lift spent.
+// When the retry is spent or no agent can take it, the task parks at
+// needs_foreman with the no-verdict event, for the foreman's judgment.
 func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now time.Time) error {
+	// The lease lifted the exclusion because no other qualifying
+	// reviewer was available, and the same reviewer again gave no
+	// verdict: the lift is once, and no retry is left that anyone can
+	// take. The job's own agent is the witness: it is the excluded one.
+	if job.AgentID != 0 && job.AgentID == job.ExcludeAgent {
+		text, err := reviewParkedText(tx, job, reviewOutcomeWord(reason), reviewOnlyReviewerTwice)
+		if err != nil {
+			return err
+		}
+		return e.needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: text}, now)
+	}
 	spent, err := reviewRetrySpentTx(tx, job)
 	if err != nil {
 		return err

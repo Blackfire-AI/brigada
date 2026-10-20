@@ -514,7 +514,8 @@ func TestWorkCompletionParksTheTaskAtNeedsForeman(t *testing.T) {
 // TestReviewVerdicts walks §7's outcomes: a substantive approve alone
 // finishes the task; changes queues a fix round on the author's session
 // (§3, below); and every unusable verdict here parks — the reviewer is
-// the only agent of another family, so the retry has nobody to go to.
+// the only agent of another family, so its retry lifts to itself
+// (decided 2026-10-20) and the second unusable verdict is what parks.
 func TestReviewVerdicts(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -522,6 +523,7 @@ func TestReviewVerdicts(t *testing.T) {
 		state    string
 		event    string
 		outcomes bool
+		twice    bool // the answer is unusable: the lifted retry hears it again
 	}{
 		{
 			name:     "approve with substantive findings",
@@ -535,6 +537,7 @@ func TestReviewVerdicts(t *testing.T) {
 			result: `{"verdict":"approve","findings":"` + shortFindings + `"}`,
 			state:  taskNeedsForeman,
 			event:  evReviewNoVerdict,
+			twice:  true,
 		},
 		{
 			name:   "changes queues a fix round",
@@ -547,12 +550,14 @@ func TestReviewVerdicts(t *testing.T) {
 			result: `{"status":"done","summary":"I looked at it"}`,
 			state:  taskNeedsForeman,
 			event:  evReviewNoVerdict,
+			twice:  true,
 		},
 		{
 			name:   "an unknown verdict",
 			result: `{"verdict":"abstain","findings":"` + substantiveFindings + `"}`,
 			state:  taskNeedsForeman,
 			event:  evReviewNoVerdict,
+			twice:  true,
 		},
 	}
 	for _, tc := range tests {
@@ -566,6 +571,15 @@ func TestReviewVerdicts(t *testing.T) {
 			}
 			if ans := e.complete(g, Completion{Result: tc.result}); ans != AnsOK {
 				t.Fatalf("complete the review: %s", ans)
+			}
+			if tc.twice {
+				rg := e.leaseAny(reviewer)
+				if rg == nil || rg.Kind != KindReview {
+					t.Fatalf("the lifted retry was not leased to the lone reviewer: %+v", rg)
+				}
+				if ans := e.complete(rg, Completion{Result: tc.result}); ans != AnsOK {
+					t.Fatalf("complete the lifted retry: %s", ans)
+				}
 			}
 			if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != tc.state {
 				t.Fatalf("task state = %q, want %q", state, tc.state)

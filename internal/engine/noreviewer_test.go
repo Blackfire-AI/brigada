@@ -12,9 +12,11 @@ import (
 
 // TestReviewUnservable: a queued review is unservable only when no
 // registered agent could ever take it — none of another family than the
-// author's (and not the first reviewer's agent, on a retry) offers the
-// review class. Cooling or broken agents of the right family make it
-// merely wait: those are temporary, a missing reviewer is not.
+// author's offers the review class. A retry's excluded agent alone is no
+// longer a gap (decided 2026-10-20): the exclusion is a preference, and
+// with no other reviewer the excluded one takes the retry. Cooling or
+// broken agents of the right family make it merely wait: those are
+// temporary, a missing reviewer is not.
 func TestReviewUnservable(t *testing.T) {
 	type agent struct {
 		family  string
@@ -39,12 +41,14 @@ func TestReviewUnservable(t *testing.T) {
 		{"other family cooling", []agent{{family: "anthropic", classes: review}, {family: "google", classes: review, cooling: true}}, "anthropic", 0, KindReview, false},
 		{"other family broken", []agent{{family: "anthropic", classes: review}, {family: "google", classes: review, health: "broken"}}, "anthropic", 0, KindReview, false},
 		{"other family offers no review class", []agent{{family: "anthropic", classes: review}, {family: "google", classes: []string{"implement"}}}, "anthropic", 0, KindReview, true},
-		{"retry: the only other-family agent is the first reviewer", []agent{{family: "anthropic", classes: review}, {family: "google", classes: review}}, "anthropic", 2, KindReview, true},
+		// The exclusion lifts with no other reviewer: the first
+		// reviewer itself takes the retry (decided 2026-10-20).
+		{"retry: the only other-family agent is the first reviewer", []agent{{family: "anthropic", classes: review}, {family: "google", classes: review}}, "anthropic", 2, KindReview, false},
 		{"retry: a second other-family agent remains", []agent{{family: "anthropic", classes: review}, {family: "google", classes: review}, {family: "openai", classes: review}}, "anthropic", 2, KindReview, false},
 		{"no agents at all", nil, "anthropic", 0, KindReview, true},
 		{"author without a family excludes nothing", []agent{{family: "anthropic", classes: []string{"implement"}}}, "", 0, KindReview, false},
 		{"no family exclusion allows unknown family", []agent{{family: "", classes: review}}, "", 0, KindReview, false},
-		{"unknown family retry excludes only agent", []agent{{family: "", classes: review}}, "", 1, KindReview, true},
+		{"unknown family retry excludes only agent", []agent{{family: "", classes: review}}, "", 1, KindReview, false},
 		{"unknown family retry has another agent", []agent{{family: "", classes: review}, {family: "", classes: review}}, "", 1, KindReview, false},
 		{"not a review job", []agent{{family: "anthropic", classes: review}}, "anthropic", 0, KindWork, false},
 	}

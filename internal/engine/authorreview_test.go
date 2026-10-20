@@ -96,14 +96,24 @@ func TestReviewRetryDoesNotCountUnknownFamilyAuthorAsReviewer(t *testing.T) {
 	first := e.agented("first", "", "review")
 	e.runToReview(author)
 	e.runReview(first, `{}`)
+	// The author, though it offers review and shares the unknown
+	// family, is never the retry's other reviewer: with none, the
+	// exclusion lifts and the first reviewer takes the retry instead.
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskReviewing {
+		t.Fatalf("state = %s, want reviewing behind the lifted retry", state)
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'review'", e.task); n != 2 {
+		t.Fatalf("review jobs = %d, want the first and its lifted retry", n)
+	}
+	if g := e.leaseAny(author); g != nil {
+		t.Fatalf("the author leased the retry: %+v", g)
+	}
+	e.runReview(first, `{}`)
 	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
-		t.Fatalf("state = %s, want needs_foreman with nobody to take the retry", state)
+		t.Fatalf("state = %s, want needs_foreman after the lifted retry", state)
 	}
-	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'review'", e.task); n != 1 {
-		t.Fatalf("review jobs = %d, want no retry that only the author could take", n)
-	}
-	if p, ok := e.eventPayloadOf(evReviewNoVerdict); !ok || !strings.Contains(p.Reason, wantAuthorOnlyReviewer) {
-		t.Fatalf("no-verdict event = %+v (%v), want the author-only explanation", p, ok)
+	if p, ok := e.eventPayloadOf(evReviewNoVerdict); !ok || !strings.Contains(p.Reason, "the only available reviewer twice gave no verdict") {
+		t.Fatalf("no-verdict event = %+v (%v), want the twice-no-verdict cause", p, ok)
 	}
 }
 
