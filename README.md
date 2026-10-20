@@ -5,11 +5,11 @@
   </picture>
 </h1>
 
-**Talk to your own coding session. It splits the work into tasks; brigada gives each task to the agent with the best measured record on your repo among those with quota left, checks and cross-reviews the result, and learns from the outcome.**
+**Talk to the foreman. It splits the work into tasks; brigada gives each task to the agent with the best measured record on your repo among those with quota left, checks and cross-reviews the result, and learns from the outcome.**
 
 You may pay for more than one AI coding subscription. brigada sits above their official command-line tools (Claude Code, Codex, Kimi, opencode; experimental: dsh) and uses them as workers:
 
-- the **foreman**, one of those CLIs, turns what you ask for into a plan of tasks with dependencies between them. In the usual setup the foreman is the session you already have open in your repository;
+- the **foreman**, one of those CLIs, turns what you ask for into a plan of tasks with dependencies between them. It lives in a brigada-owned session: you talk to it with `brigada attach`, and it acts headless while you are away;
 - the **dispatcher** gives each task to the agent with the best measured record for that kind of task on *your* repo, among the agents that still have quota;
 - every task's own **check** (tests, lint, any command) runs on the result, so "done" is not taken on trust;
 - a **reviewer** from a different model family than the author reads the change;
@@ -54,8 +54,7 @@ Init then lists the agents, permissions and files, and shows a diff for every ex
 
 After you confirm, init:
 
-- writes `.brigada/project.yaml`, which is yours to commit (brigada never commits or pushes it);
-- wires your own session: the bridge in `.mcp.json` and `.codex/config.toml`, and the foreman rules in `.brigada/foreman.md`, reached through a short brigada-managed block in `AGENTS.md` (`CLAUDE.md` imports `AGENTS.md`). An older foreman skill is removed;
+- writes `.brigada/project.yaml`, which is yours to commit (brigada never commits or pushes it), and strips the wiring an older init left in the repository;
 - starts the engine and a detached runner.
 
 `brigada init --probe` shows the plan and writes nothing. Stop the runner with `brigada stop`; add `--engine` to stop the engine too. Every step and flag is in [the guide, section 1](docs/GUIDE.md#1-install-and-brigada-init).
@@ -64,11 +63,9 @@ Rerun `brigada init` to change agents, the foreman model and effort, or tasks at
 
 `brigada remove` removes brigada's repository wiring and archives the project, keeping its history; see [the guide](docs/GUIDE.md#removing-brigada-from-a-repository).
 
-## Your own session is the foreman
+## Talk to the foreman
 
-After init, restart your session in the repository, approve the `brigada` MCP server (Claude Code) or trust the folder (Codex), and ask it to plan. This is **mode A**: your session is the foreman. The `AGENTS.md` block only points to the rules and never imports them; workers and reviewers recognize themselves by their prompt's opener and ignore the block, so they never get the foreman rules. It plans through brigada's tools; the runner works each task on its own branch in a worktree, runs the check and pushes the branch; and a reviewer of another family reads it.
-
-Only one interactive session holds the foreman at a time. Your session lets go of it at the end of each turn, so work that finishes while you are away can wake a separate, brigada-owned headless foreman. Decisions reach that headless foreman through short notes recorded in the engine, not through your chat. See [section 2](docs/GUIDE.md#2-your-own-session-is-the-foreman-mode-a).
+After init, run `brigada attach` inside the repository. The foreman is an agent in a brigada-owned session: your attached chat and the headless turns that wake on events while you are away are one transcript, running in a reading checkout of your repository with your own harness config. It plans through brigada's tools (`--model` and `--effort` override the project's foreman choice for one chat); the runner works each task on its own branch in a worktree, runs the check and pushes the branch; and a reviewer of another family reads it. See [section 2](docs/GUIDE.md#2-talking-to-the-foreman-brigada-attach).
 
 Then:
 
