@@ -58,12 +58,20 @@ func (e *testEnv) foremanScratch() string {
 	return filepath.Join(e.stateDir, "foreman", strconv.FormatInt(e.project, 10))
 }
 
-// scratchFile reads one file the turn left in the scratch directory.
+// foremanCheckout is the reading checkout under the scratch directory,
+// the working directory of the foreman's CLI.
+func (e *testEnv) foremanCheckout() string {
+	return filepath.Join(e.foremanScratch(), "repo")
+}
+
+// scratchFile reads one file the turn left in its working directory,
+// the checkout (a refresh removes untracked files, so a file read is
+// the latest turn's).
 func (e *testEnv) scratchFile(name string) string {
 	e.t.Helper()
-	data, err := os.ReadFile(filepath.Join(e.foremanScratch(), name))
+	data, err := os.ReadFile(filepath.Join(e.foremanCheckout(), name))
 	if err != nil {
-		e.t.Fatalf("read %s from the scratch directory: %v", name, err)
+		e.t.Fatalf("read %s from the turn's working directory: %v", name, err)
 	}
 	return string(data)
 }
@@ -127,9 +135,9 @@ func TestRunnerForemanTurnRunsInScratchDir(t *testing.T) {
 	// dir (§4), not in any worktree. The worker names its working
 	// directory as the shell's pwd resolves it — on macOS /var is a
 	// symlink to /private/var — so both sides are compared resolved.
-	scratch, err := filepath.EvalSymlinks(e.foremanScratch())
+	scratch, err := filepath.EvalSymlinks(e.foremanCheckout())
 	if err != nil {
-		t.Fatalf("resolve the scratch directory: %v", err)
+		t.Fatalf("resolve the checkout: %v", err)
 	}
 	where, err := filepath.EvalSymlinks(strings.TrimSpace(e.scratchFile("where.txt")))
 	if err != nil {
@@ -191,7 +199,7 @@ func TestRunnerForemanTurnCoalescesAndResumes(t *testing.T) {
 	defer p.stop(t)
 
 	e.waitUntil("the turn to start", func() bool {
-		_, err := os.Stat(filepath.Join(e.foremanScratch(), "resume.txt"))
+		_, err := os.Stat(filepath.Join(e.foremanCheckout(), "resume.txt"))
 		return err == nil
 	})
 
@@ -443,7 +451,7 @@ func TestRunnerForemanMCPConfig(t *testing.T) {
 	// the adapter was handed, under the runner's mcp root and in no
 	// directory the worker runs in.
 	e.waitUntil("the turn to record its MCP config", func() bool {
-		_, err := os.Stat(filepath.Join(e.foremanScratch(), "mcpconfig.txt"))
+		_, err := os.Stat(filepath.Join(e.foremanCheckout(), "mcpconfig.txt"))
 		return err == nil
 	})
 	config := strings.TrimSpace(e.scratchFile("mcpconfig.txt"))
@@ -760,10 +768,57 @@ func TestRunnerForemanCheckoutGitFailure(t *testing.T) {
 			if !strings.Contains(reason, name) || !strings.Contains(reason, "does not appear to be a git repository") {
 				t.Errorf("failure = %s, want %s and the git reason", reason, name)
 			}
-			if _, err := os.Stat(filepath.Join(e.foremanScratch(), "where.txt")); !os.IsNotExist(err) {
+			if _, err := os.Stat(filepath.Join(e.foremanCheckout(), "where.txt")); !os.IsNotExist(err) {
 				t.Errorf("CLI started without code: %v", err)
 			}
 		})
+	}
+}
+
+// TestRunnerForemanTurnStartsFreshWhenResumeIsRejected: a key whose
+// recorded session the CLI no longer knows (the migration clears the old
+// ones, but a harness may also lose its own files) does not fail the
+// turn: the runner runs it again without a resume, and the fresh
+// session's id is written back.
+func TestRunnerForemanTurnStartsFreshWhenResumeIsRejected(t *testing.T) {
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject("")
+	e.setForeman("fake", "fake-1")
+	key := "foreman:" + strconv.FormatInt(e.project, 10)
+	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO sessions (key, harness_session_id, state, created_at)
+			VALUES (?, 'stale-sess', 'active', '2026-01-01T00:00:00Z')`, key)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	turn := e.submitForemanTurn("a wake after the working directory moved")
+
+	worker := `
+cat > prompt.txt
+printf '%s\n' "$BRIGADA_FAKE_RESUME" >> resumes.txt
+if [ -n "$BRIGADA_FAKE_RESUME" ]; then
+  echo "No conversation found with session ID: $BRIGADA_FAKE_RESUME" >&2
+  exit 1
+fi
+echo '{"type":"system_init","session_id":"fresh-sess"}'
+echo '{"type":"result","text":"started fresh"}'
+`
+	p := e.startRunner(writeWorkerScript(t, worker), 100*time.Millisecond)
+	defer p.stop(t)
+
+	done := e.waitJob(turn.JobID, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	if res := e.workerResult(done); res.Status != "done" || res.Summary != "started fresh" {
+		t.Errorf("turn result = %+v, want done with the fresh run's message", res)
+	}
+	if got := strings.Split(strings.TrimSuffix(e.scratchFile("resumes.txt"), "\n"), "\n"); !slices.Equal(got, []string{"stale-sess", ""}) {
+		t.Errorf("resume ids tried = %q, want the stale one, then none", got)
+	}
+	var session string
+	if err := e.st.View(e.ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT COALESCE(harness_session_id, '') FROM sessions WHERE key = ?", key).Scan(&session)
+	}); err != nil || session != "fresh-sess" {
+		t.Errorf("session write-back = %q (%v), want fresh-sess", session, err)
 	}
 }
 

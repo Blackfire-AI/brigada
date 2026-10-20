@@ -194,7 +194,8 @@ func mcpConfigArgs(path string) ([]string, error) {
 // Codex never created and falls back to a fresh run; this is the documented
 // limitation until Codex exposes a fork/session-id facility.
 //
-// A foreman reading checkout gets the same read-only sandbox and separate
+// A foreman attach (a job carrying the MCP config) runs in workdir, the
+// foreman's reading checkout, with the same read-only sandbox and separate
 // approval settings as a headless turn, without --json or approval bypass.
 // Codex has no equivalent of Claude's statusLine, so StatusLine is ignored.
 // MCPConfig is likewise not translated: Codex has no adapter-supported MCP
@@ -205,7 +206,7 @@ func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, _ str
 		binary = "codex"
 	}
 	args := make([]string, 0, 6+len(a.ExtraArgs))
-	if job.ReadOnlyRepo != "" {
+	if job.MCPConfig != "" {
 		args = append(args, foremanPermissions()...)
 	}
 	if resumeSessionID != "" {

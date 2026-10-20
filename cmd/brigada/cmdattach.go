@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -36,12 +37,14 @@ import (
 // chat ended on.
 func runAttach(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("attach",
-		"brigada attach [--force] [--no-start]",
+		"brigada attach [--force] [--no-start] [--model <model>] [--effort <level>]",
 		"Attach to this repository’s foreman and chat.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	force := fs.Bool("force", false, "cancel a live foreman turn rather than wait for it to finish")
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
+	model := fs.String("model", "", "model for this chat only, instead of the project's foreman model")
+	effort := fs.String("effort", "", "reasoning effort for this chat only, instead of the project's foreman effort")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
@@ -95,9 +98,20 @@ func runAttach(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			"the project of %s has no foreman; choose one: brigada project foreman --repo %s --harness <harness> --model <model>",
 			repo, repo))
 	}
+	// The overrides are this chat's alone: the session is the same, and
+	// the next headless turn runs on the project's own setting again.
+	if err := adapter.ValidateEffort(setting.Harness, *effort); err != nil {
+		return usagef(stderr, "%v", err)
+	}
 	res, code := attachWithWait(ctx, client, repo, *force, stdout, stderr)
 	if code != 0 {
 		return code
+	}
+	if *model != "" {
+		res.Model = *model
+	}
+	if *effort != "" {
+		res.Effort = *effort
 	}
 	return runAttachedSession(ctx, rt, client, setting.ProjectID, res, stdout, stderr)
 }
@@ -191,10 +205,12 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 		return abandon(fmt.Errorf("the %s CLI cannot be attached to: it offers no interactive session to resume; switch the foreman to a harness that does (brigada project foreman)", res.Harness))
 	}
 	stateDir := runnerStateDir(rt)
-	// The same scratch directory the runner's foreman turns use (§4):
+	// The same reading checkout the runner's foreman turns use (§4):
 	// the harness keys its sessions by working directory, so the attach
-	// must run exactly there to be the same session — ForemanScratchDir's
-	// one rule, shared.
+	// must run exactly there to be the same session — the one rule
+	// ForemanScratchDir and PrepareForemanCheckout share. The checkout
+	// is also what makes the chat feel like the user's own: the repo's
+	// CLAUDE.md, .claude/ and project memory load as in any clone.
 	scratch, err := runner.ForemanScratchDir(stateDir, project)
 	if err != nil {
 		return abandon(fmt.Errorf("make the foreman's scratch directory: %w", err))
@@ -221,21 +237,38 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 		defer removeConfig()
 		return abandon(fmt.Errorf("generate the new session id: %w", err))
 	}
-	cmd, err := inter.AttachCommand(adapter.Job{
-		Prompt: res.Prompt, Model: res.Model, Effort: res.Effort, MCPConfig: config, ReadOnlyRepo: checkout.Path,
+	job := adapter.Job{
+		Prompt: res.Prompt, Model: res.Model, Effort: res.Effort, MCPConfig: config,
 		StatusLine: statusLineCommand(rt),
-	}, scratch, res.SessionID, newSessionID)
+	}
+	// build makes the harness command resuming the given session, or
+	// starting fresh for "". The terminal's own streams, not the
+	// command's writers: the attached session is the user's, and in
+	// production the two are the same thing — the attach just never
+	// routes the harness through a buffer that could hold its output
+	// back. The one exception is a resume's stderr, copied to a small
+	// tail as well: it is where the CLI says it does not know the
+	// session, which the attach then starts fresh instead.
+	build := func(resume string) (*exec.Cmd, *tailBuffer, error) {
+		cmd, err := inter.AttachCommand(job, checkout.Path, resume, newSessionID)
+		if err != nil {
+			return nil, nil, err
+		}
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		var tail *tailBuffer
+		if resume != "" {
+			tail = &tailBuffer{}
+			cmd.Stderr = io.MultiWriter(os.Stderr, tail)
+		}
+		return cmd, tail, nil
+	}
+	cmd, tail, err := build(res.SessionID)
 	if err != nil {
 		defer removeConfig()
 		return abandon(fmt.Errorf("build the %s session: %w", res.Harness, err))
 	}
-	// The terminal's own streams, not the command's writers: the
-	// attached session is the user's, and in production the two are the
-	// same thing — the attach just never routes the harness through a
-	// buffer that could hold its output back.
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	// The interrupt trap is armed before the harness starts, so no
 	// signal can slip past it: from here to the harness's exit, the
 	// terminal's SIGINT and SIGTERM are this session's to forward.
@@ -277,12 +310,14 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 	// session alone.
 	forwardDone := make(chan struct{})
 	stopForward := sync.OnceFunc(func() { close(forwardDone) })
+	var current atomic.Pointer[exec.Cmd]
+	current.Store(cmd)
 	go func() {
 		for {
 			select {
 			case sig := <-sigs:
-				if cmd.Process != nil {
-					_ = cmd.Process.Signal(sig)
+				if c := current.Load(); c != nil && c.Process != nil {
+					_ = c.Process.Signal(sig)
 				}
 			case <-forwardDone:
 				return
@@ -291,6 +326,23 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 	}()
 
 	waitErr := cmd.Wait()
+	if waitErr != nil && tail != nil && resumeRejected(ad, tail.String()) {
+		// The CLI does not know the session the key recorded (its own
+		// files lost, or made in another working directory): the
+		// resume was a saving, not a requirement, so the chat starts a
+		// fresh session, and the release writes its id back as usual.
+		fmt.Fprintf(stderr, "brigada: the %s CLI does not know the foreman's last session (%s); starting a fresh one\n", res.Harness, res.SessionID)
+		fresh, _, err := build("")
+		if err == nil {
+			err = fresh.Start()
+		}
+		if err != nil {
+			waitErr = fmt.Errorf("start a fresh %s session: %w", res.Harness, err)
+		} else {
+			current.Store(fresh)
+			waitErr = fresh.Wait()
+		}
+	}
 	stopForward()
 	stopBeats()
 	<-beatsDone
@@ -307,6 +359,44 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 		return 0
 	}
 	return fail(stderr, waitErr)
+}
+
+// tailBuffer keeps the last bytes written to it: the end of a resumed
+// session's stderr, where a CLI that does not know the session says so.
+type tailBuffer struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+// tailKept bounds what a tailBuffer keeps.
+const tailKept = 8 << 10
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > tailKept {
+		t.buf = t.buf[len(t.buf)-tailKept:]
+	}
+	return len(p), nil
+}
+
+func (t *tailBuffer) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return string(t.buf)
+}
+
+// resumeRejected reports whether the CLI's stderr says it does not know
+// the session it was asked to resume: any line the adapter sorts as a
+// resume failure (the claude CLI's "No conversation found" class).
+func resumeRejected(ad adapter.Adapter, stderr string) bool {
+	for _, line := range strings.Split(stderr, "\n") {
+		if ev, ok := ad.ParseErrEvent([]byte(line)); ok && ev.ErrorKind == adapter.ErrResumeFailed {
+			return true
+		}
+	}
+	return false
 }
 
 // attachBeatEvery is how often the client heartbeats its attach hold
@@ -412,7 +502,7 @@ func newSessionID() (string, error) {
 // bar runs (§10): this very binary's `status --line` on the attach's own
 // state directory and config, so the bar reads the engine the foreman
 // works with. The paths are made absolute first: the bar runs in the
-// session's working directory, the foreman's scratch, not where the
+// session's working directory, the foreman's checkout, not where the
 // attach was started. Empty — no status bar — when the binary cannot
 // name its own path.
 func statusLineCommand(rt *runtime) string {

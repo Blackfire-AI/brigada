@@ -912,7 +912,7 @@ If your harness cannot host brigada's tools (Codex has no verified project scope
 
 ### Attach
 
-**Attach** is a conversation with the headless foreman. Run `brigada` (or `brigada attach`) inside the repo: the repo's `origin` URL names the project, and you are put into the foreman's own session in your terminal, in brigada's scratch directory.
+**Attach** is a conversation with the headless foreman. Run `brigada` (or `brigada attach`) inside the repo: the repo's `origin` URL names the project, and you are put into the foreman's own session in your terminal, in the foreman's reading checkout.
 
 - **One at a time.** Only one chat can be attached at a time. If the foreman is in the middle of a headless turn, attach waits for it to finish; `brigada attach --force` cancels that turn instead.
 - **Your session's hold.** If your own harness session holds the foreman ([section 2](#2-your-own-session-is-the-foreman-mode-a)), attach refuses and names the hold. Wait for the session to yield or the hold to lapse, or release it with `brigada hold release --repo <origin-url>`.
@@ -920,8 +920,10 @@ If your harness cannot host brigada's tools (Codex has no verified project scope
 - **What the foreman sees.** Its opening prompt carries the events that piled up while you were away (finished plans, parked tasks, questions) and any waiting messages; it reads new ones through its `events` tool as they arrive.
 - **When you leave**, the engine records where the session ended so the next turn continues it, and anything the foreman did not read is looked at again for a wake-up.
 - **No foreman yet.** If the project has none, attach tells you the `brigada project foreman` command to run first.
+- **`--model <model>`** runs this chat on another model than the project's foreman model; the session is the same, and the next headless turn uses the project's setting again.
+- **`--effort <level>`** does the same for the reasoning effort, checked against the foreman's harness.
 
-With `claude`, an attached foreman is the same session the headless turns resume, so the next turn continues your chat. The first attach shows Claude Code's own "trust this folder" prompt for the foreman's working directory under the state directory: choose yes. It is brigada's scratch folder, with its reading checkout under `repo`.
+With `claude`, an attached foreman is the same session the headless turns resume, so the next turn continues your chat. The first attach shows Claude Code's own "trust this folder" prompt for the foreman's working directory under the state directory: choose yes. It is the foreman's reading checkout of your repository, a clone brigada keeps under its state directory.
 
 **The Codex limits.** An attached `codex` session is Codex's own terminal interface. It does not carry brigada's tools, and Codex does not expose the thread in a form brigada can write back, so a later headless turn may start a fresh Codex thread instead of continuing the chat.
 

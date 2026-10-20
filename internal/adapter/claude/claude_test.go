@@ -230,7 +230,7 @@ func TestAttachCommandGolden(t *testing.T) {
 			ad:   Adapter{Binary: "/usr/local/bin/claude"},
 			job:  adapter.Job{Prompt: prompt, Model: "sonnet", MCPConfig: config},
 			wantArg: append([]string{prompt, "--session-id", newID, "--model", "sonnet",
-				"--mcp-config", config, "--strict-mcp-config"}, wantScope...),
+				"--mcp-config", config}, wantScope...),
 		},
 		{
 			name:   "resume forks onto the new id",
@@ -239,14 +239,21 @@ func TestAttachCommandGolden(t *testing.T) {
 			resume: "sess-first",
 			wantArg: append([]string{prompt, "--resume", "sess-first", "--fork-session",
 				"--session-id", newID, "--model", "sonnet",
-				"--mcp-config", config, "--strict-mcp-config"}, wantScope...),
+				"--mcp-config", config}, wantScope...),
+		},
+		{
+			name: "model and effort pass through",
+			ad:   Adapter{Binary: "/usr/local/bin/claude"},
+			job:  adapter.Job{Prompt: prompt, Model: "opus", Effort: "high", MCPConfig: config},
+			wantArg: append([]string{prompt, "--session-id", newID, "--model", "opus", "--effort", "high",
+				"--mcp-config", config}, wantScope...),
 		},
 		{
 			name: "a status line rides as this session's settings",
 			ad:   Adapter{Binary: "/usr/local/bin/claude"},
 			job:  adapter.Job{Prompt: prompt, MCPConfig: config, StatusLine: "'/opt/brigada' status --line"},
 			wantArg: append([]string{prompt, "--session-id", newID,
-				"--mcp-config", config, "--strict-mcp-config",
+				"--mcp-config", config,
 				"--settings", `{"statusLine":{"command":"'/opt/brigada' status --line","refreshInterval":3,"type":"command"}}`}, wantScope...),
 		},
 		{
@@ -254,7 +261,7 @@ func TestAttachCommandGolden(t *testing.T) {
 			ad:   Adapter{},
 			job:  adapter.Job{Prompt: prompt, MCPConfig: config},
 			wantArg: append([]string{prompt, "--session-id", newID,
-				"--mcp-config", config, "--strict-mcp-config"}, wantScope...),
+				"--mcp-config", config}, wantScope...),
 		},
 	}
 	for _, tc := range cases {
@@ -768,24 +775,45 @@ func TestSessionLimit(t *testing.T) {
 	}
 }
 
-func TestForemanReadingCheckout(t *testing.T) {
+// TestForemanRunsInTheCheckout: both foreman bodies run in the working
+// directory they are given — the reading checkout — with no extra
+// directory to read, no additional-CLAUDE.md switch, the edit denials
+// kept, and --strict-mcp-config only on the headless turn.
+func TestForemanRunsInTheCheckout(t *testing.T) {
 	stubCLI(t)
 	ad := &Adapter{PermissionMode: "bypassPermissions"}
-	job := adapter.Job{MCPConfig: "/runner/mcp/config.json", ReadOnlyRepo: "/runner/foreman/1/repo"}
-	headless, err := ad.Command(job, "/runner/foreman/1", "saved")
+	job := adapter.Job{MCPConfig: "/runner/mcp/config.json", Model: "opus", Effort: "high"}
+	const checkout = "/runner/foreman/1/repo"
+	headless, err := ad.Command(job, checkout, "saved")
 	if err != nil {
 		t.Fatal(err)
 	}
-	attached, err := ad.AttachCommand(job, "/runner/foreman/1", "saved", "new")
+	attached, err := ad.AttachCommand(job, checkout, "saved", "new")
 	if err != nil {
 		t.Fatal(err)
+	}
+	for name, strict := range map[string]bool{"headless": true, "attached": false} {
+		cmd := headless
+		if name == "attached" {
+			cmd = attached
+		}
+		if slices.Contains(cmd.Args, "--strict-mcp-config") != strict {
+			t.Errorf("%s: --strict-mcp-config present = %v, want %v: %v", name, !strict, strict, cmd.Args)
+		}
+		if i := slices.Index(cmd.Args, "--mcp-config"); i < 0 || cmd.Args[i+1] != job.MCPConfig {
+			t.Errorf("%s: bridge config missing: %v", name, cmd.Args)
+		}
+		for flag, want := range map[string]string{"--model": "opus", "--effort": "high"} {
+			if i := slices.Index(cmd.Args, flag); i < 0 || cmd.Args[i+1] != want {
+				t.Errorf("%s: %s %s missing: %v", name, flag, want, cmd.Args)
+			}
+		}
 	}
 	for _, cmd := range []*exec.Cmd{headless, attached} {
-		i := slices.Index(cmd.Args, "--add-dir")
-		if i < 0 || i+1 >= len(cmd.Args) || cmd.Args[i+1] != job.ReadOnlyRepo {
-			t.Errorf("missing reading scope: %v", cmd.Args)
+		if slices.Contains(cmd.Args, "--add-dir") {
+			t.Errorf("--add-dir survived: %v", cmd.Args)
 		}
-		i = slices.Index(cmd.Args, "--disallowedTools")
+		i := slices.Index(cmd.Args, "--disallowedTools")
 		if i < 0 {
 			t.Fatalf("missing edit denials: %v", cmd.Args)
 		}
@@ -794,11 +822,11 @@ func TestForemanReadingCheckout(t *testing.T) {
 				t.Errorf("%s no longer denied: %v", denied, cmd.Args)
 			}
 		}
-		if !slices.Contains(cmd.Env, "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1") {
-			t.Error("additional CLAUDE.md loading disabled")
+		if slices.Contains(cmd.Env, "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1") {
+			t.Error("additional CLAUDE.md loading still switched on")
 		}
-		if cmd.Dir != "/runner/foreman/1" {
-			t.Errorf("session cwd changed: %s", cmd.Dir)
+		if cmd.Dir != checkout {
+			t.Errorf("session cwd = %s, want the checkout %s", cmd.Dir, checkout)
 		}
 	}
 }
