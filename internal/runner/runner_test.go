@@ -922,6 +922,59 @@ func TestRunnerRejectsRepoWithoutURL(t *testing.T) {
 	e.assertNoWorktrees()
 }
 
+// sessionDirWorker plays the author across a work job and the fix round
+// that resumes it, recording where each round ran and what it resumed:
+// the fake adapter hands the resume session id to the script through
+// BRIGADA_FAKE_RESUME, empty on the fresh first round.
+var sessionDirWorker = `
+cat > /dev/null
+pwd > "$BRIGADA_TEST_MARKERS/pwd.$BRIGADA_FAKE_RESUME"
+echo "$BRIGADA_FAKE_RESUME" > "$BRIGADA_TEST_MARKERS/resume.$BRIGADA_FAKE_RESUME"
+echo '{"type":"system_init","session_id":"sess-42"}'
+echo '{"type":"tool_start","name":"Edit"}'
+if [ -n "$BRIGADA_FAKE_RESUME" ]; then echo fixed > work.txt; else echo hello > work.txt; fi
+echo '{"type":"tool_end","name":"Edit"}'
+` + fakeResultScript(`{"status":"done","summary":"round done"}`)
+
+// TestRunnerFixRoundRunsInTheWorkJobsDirectory covers the session-stable
+// worktree path end to end (§5.1, §3): a failed check queues a fix round
+// that resumes the author's session, and the round runs in the same
+// directory the work job started it in — the directory a harness session
+// is tied to (issue #42: opencode resumes only where the session was
+// created).
+func TestRunnerFixRoundRunsInTheWorkJobsDirectory(t *testing.T) {
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	markers := markerDir(t)
+	// The check fails the work round's hello and passes the fix round's
+	// fixed, so the fix round is queued and runs to its own done.
+	task := e.seedTask("", `test "$(cat work.txt)" = fixed`)
+	work := e.submitWork(task, prompt.ComposeWorkerPrompt("Write work.txt.", "", ""))
+
+	p := e.startRunner(writeWorkerScript(t, sessionDirWorker), 100*time.Millisecond)
+	defer p.stop(t)
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	fix := e.int64Of("SELECT id FROM jobs WHERE task_id = ? AND kind = 'fix'", task)
+	if fix == 0 {
+		t.Fatal("the failed check queued no fix round")
+	}
+	e.waitJob(fix, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	if resume := strings.Join(markerLines(t, markers, "resume.sess-42"), ""); resume != "sess-42" {
+		t.Fatalf("the fix round resumed %q, want the work round's sess-42", resume)
+	}
+	first := strings.Join(markerLines(t, markers, "pwd."), "")
+	resumed := strings.Join(markerLines(t, markers, "pwd.sess-42"), "")
+	if first == "" || resumed != first {
+		t.Fatalf("the fix round ran in %q, want the work job's %q", resumed, first)
+	}
+	if want := filepath.Join(e.stateDir, "worktrees", fmt.Sprintf("task-%d-author-s0", task)); resumed != want {
+		t.Errorf("the session's directory = %q, want the task's path %q", resumed, want)
+	}
+	e.assertNoWorktrees()
+}
+
 // assertRegistration verifies the advertisement was persisted (§5.1):
 // one agents row for the runner, keyed by runner, adapter and model.
 func (e *testEnv) assertRegistration() {

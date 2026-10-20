@@ -49,6 +49,11 @@ func TestRunnerFlow(t *testing.T) {
 	if g.JobID != jobID || g.LeaseID == "" || g.Kind != "work" || g.Key != fmt.Sprintf("task:%d", e.task) {
 		t.Errorf("grant = %+v, want the submitted job with a lease", g)
 	}
+	// The session generation rides the grant (§5.1): the runner names
+	// the session-stable worktree path from it.
+	if g.SessionGen != 0 {
+		t.Errorf("grant session_gen = %d, want 0 for the task's first attempt", g.SessionGen)
+	}
 
 	code, _, data = e.do(http.MethodPost, "/v1/runner/heartbeat", "r1", "",
 		[]byte(fmt.Sprintf(`{"job_id":%d,"lease_id":%q}`, g.JobID, g.LeaseID)))

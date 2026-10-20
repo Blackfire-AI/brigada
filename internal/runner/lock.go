@@ -37,21 +37,39 @@ func lockMirror(ctx context.Context, mirror string) (func(), error) {
 // author's worktree to come down. The author's completion is published
 // before its worktree is removed, so the follow-up can be leased in
 // between; this registry is what makes it wait, deterministically.
+//
+// The same registry holds the worktree directories a task's jobs share
+// (§5.1): one path per task, role and session generation, so a resumed
+// session runs where it started. A re-leased job whose lost predecessor
+// is still winding down waits for the directory instead of racing it.
+// A directory hold is keyed by the path alone: the path is unique under
+// the state directory this process locks, and no mirror path can look
+// like one (the key holds a NUL byte, which no file name does).
 var branchHolds struct {
 	mu sync.Mutex
-	m  map[string]chan struct{} // mirror + "\x00" + branch → closed on release
+	m  map[string]chan struct{} // mirror or dir key → closed on release
 }
 
 func branchHoldKey(mirror, branch string) string { return mirror + "\x00" + branch }
 
+func dirHoldKey(dir string) string { return "dir\x00" + dir }
+
 // holdBranch records that a worktree of the mirror has branch checked out.
 func holdBranch(mirror, branch string) {
+	holdKey(branchHoldKey(mirror, branch))
+}
+
+// holdWorktreeDir records that a worktree occupies dir.
+func holdWorktreeDir(dir string) {
+	holdKey(dirHoldKey(dir))
+}
+
+func holdKey(k string) {
 	branchHolds.mu.Lock()
 	defer branchHolds.mu.Unlock()
 	if branchHolds.m == nil {
 		branchHolds.m = map[string]chan struct{}{}
 	}
-	k := branchHoldKey(mirror, branch)
 	if _, ok := branchHolds.m[k]; !ok {
 		branchHolds.m[k] = make(chan struct{})
 	}
@@ -59,9 +77,17 @@ func holdBranch(mirror, branch string) {
 
 // releaseBranch ends the hold, waking whoever waits for the branch.
 func releaseBranch(mirror, branch string) {
+	releaseKey(branchHoldKey(mirror, branch))
+}
+
+// releaseWorktreeDir ends the directory's hold.
+func releaseWorktreeDir(dir string) {
+	releaseKey(dirHoldKey(dir))
+}
+
+func releaseKey(k string) {
 	branchHolds.mu.Lock()
 	defer branchHolds.mu.Unlock()
-	k := branchHoldKey(mirror, branch)
 	if ch, ok := branchHolds.m[k]; ok {
 		close(ch)
 		delete(branchHolds.m, k)
@@ -81,15 +107,39 @@ func heldBranch(mirror string, branches []string) chan struct{} {
 	return nil
 }
 
+// heldWorktreeDir returns the release channel of dir's hold, or nil
+// when no live worktree occupies it.
+func heldWorktreeDir(dir string) chan struct{} {
+	branchHolds.mu.Lock()
+	defer branchHolds.mu.Unlock()
+	return branchHolds.m[dirHoldKey(dir)]
+}
+
 // lockMirrorFor takes the mirror's lock once none of branches is checked
 // out by another live worktree, waiting for them to come down first. The
 // check is repeated under the lock, because the holder's removal needs
 // the lock too: waiting for a branch while holding it would deadlock.
 func lockMirrorFor(ctx context.Context, mirror string, branches ...string) (func(), error) {
+	return lockMirrorHolding(ctx, mirror, branches, nil)
+}
+
+// lockMirrorHolding is lockMirrorFor with worktree directories waited
+// for beside branches: a session-stable path is shared by the jobs of
+// one attempt (§5.1), so its next holder waits for the last one's
+// worktree to come down exactly as a follow-up waits for a branch.
+func lockMirrorHolding(ctx context.Context, mirror string, branches, dirs []string) (func(), error) {
 	for {
-		if ch := heldBranch(mirror, branches); ch != nil {
+		wait := heldBranch(mirror, branches)
+		if wait == nil {
+			for _, dir := range dirs {
+				if wait = heldWorktreeDir(dir); wait != nil {
+					break
+				}
+			}
+		}
+		if wait != nil {
 			select {
-			case <-ch:
+			case <-wait:
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
@@ -99,7 +149,16 @@ func lockMirrorFor(ctx context.Context, mirror string, branches ...string) (func
 		if err != nil {
 			return nil, err
 		}
-		if heldBranch(mirror, branches) == nil {
+		held := heldBranch(mirror, branches) != nil
+		if !held {
+			for _, dir := range dirs {
+				if heldWorktreeDir(dir) != nil {
+					held = true
+					break
+				}
+			}
+		}
+		if !held {
 			return unlock, nil
 		}
 		unlock()

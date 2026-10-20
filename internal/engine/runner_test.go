@@ -238,6 +238,89 @@ func TestLeaseGrantCarriesTaskFields(t *testing.T) {
 	}
 }
 
+// TestLeaseStampsTheSessionGeneration covers what the runner names the
+// session-stable worktree path from (§5.1): every job of one attempt —
+// the work job, the fix round resuming its session, the review of its
+// work — leases under one session generation, a lost lease re-taken
+// keeps it, and a restart moves it, so the resumed session's directory
+// is shared and a fresh attempt's is not.
+func TestLeaseStampsTheSessionGeneration(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+
+	e.submit(e.work())
+	g := e.authorLease(author)
+	if g.SessionGen != 0 {
+		t.Errorf("first attempt generation = %d, want 0", g.SessionGen)
+	}
+	if got := e.int("SELECT session_gen FROM jobs WHERE id = ?", g.JobID); got != 0 {
+		t.Errorf("job session_gen = %d, want it stamped like the grant", got)
+	}
+	// A lost lease re-taken stays in the attempt: the attempt counter
+	// moves, the generation does not, so the re-dispatched run keeps the
+	// session's directory.
+	e.expireLease()
+	g2 := e.authorLease(author)
+	if g2.Attempt != 2 || g2.SessionGen != 0 {
+		t.Errorf("re-lease attempt/generation = %d/%d, want 2/0", g2.Attempt, g2.SessionGen)
+	}
+	if ans := e.complete(g2, doneOnSession("task/1-1", failCheck, "hs-1")); ans != AnsOK {
+		t.Fatalf("complete the failed-check work: %s", ans)
+	}
+	fix := e.fixJob()
+	fg := e.authorLease(author)
+	if fg.JobID != fix || fg.SessionGen != 0 {
+		t.Errorf("fix round job/generation = %d/%d, want %d/0: the resumed session shares the attempt", fg.JobID, fg.SessionGen, fix)
+	}
+	if ans := e.complete(fg, doneOnSession("task/1-2", passCheck, "hs-2")); ans != AnsOK {
+		t.Fatalf("complete the fixed work: %s", ans)
+	}
+	rg := e.leaseAny(reviewer)
+	if rg == nil || rg.Kind != KindReview {
+		t.Fatalf("the review was not leased: %+v", rg)
+	}
+	if rg.SessionGen != 0 {
+		t.Errorf("review generation = %d, want the attempt's 0", rg.SessionGen)
+	}
+	// A changes verdict queues the attempt's next fix round, still of
+	// the same generation; the round asks the foreman and parks the
+	// task, which is what a restart needs.
+	if ans := e.complete(rg, Completion{Result: changesVerdict}); ans != AnsOK {
+		t.Fatalf("complete the review: %s", ans)
+	}
+	parked := e.authorLease(author)
+	if parked == nil || parked.Kind != KindFix || parked.SessionGen != 0 {
+		t.Fatalf("the changes round = %+v, want a fix round of generation 0", parked)
+	}
+	if ans := e.complete(parked, Completion{Result: `{"status":"needs_help","question":"which way?"}`}); ans != AnsOK {
+		t.Fatalf("park the task: %s", ans)
+	}
+
+	// A restart spends the generation: the fresh work job of the new
+	// attempt leases under 1 and its fix rounds follow it there.
+	if _, err := e.eng.RestartTask(e.ctx, e.project, e.task, "again"); err != nil {
+		t.Fatalf("restart the task: %v", err)
+	}
+	ng := e.leaseAny(author)
+	if ng == nil || ng.Kind != KindWork {
+		t.Fatalf("the restart's work job was not leased: %+v", ng)
+	}
+	if ng.SessionGen != 1 {
+		t.Errorf("restart generation = %d, want 1", ng.SessionGen)
+	}
+	if got := e.int("SELECT session_gen FROM jobs WHERE id = ?", ng.JobID); got != 1 {
+		t.Errorf("restart job session_gen = %d, want it stamped like the grant", got)
+	}
+	if ans := e.complete(ng, doneOnSession("task/1-r1", failCheck, "hs-3")); ans != AnsOK {
+		t.Fatalf("complete the restarted work: %s", ans)
+	}
+	rfg := e.authorLease(author)
+	if rfg == nil || rfg.Kind != KindFix || rfg.SessionGen != 1 {
+		t.Errorf("the restart's fix round = %+v, want a fix round of generation 1", rfg)
+	}
+}
+
 // TestHeartbeatRecordsProgress covers §5.6 on the engine side: an ok
 // heartbeat writes the worker's progress timestamps onto the job.
 func TestHeartbeatRecordsProgress(t *testing.T) {

@@ -343,12 +343,13 @@ func Run(ctx context.Context, cfg Config) error {
 	// runner killed mid-turn leaves its behind, token and all. The tree
 	// goes now, before any new turn's config joins it.
 	sweepMCPConfigs(ctx, cfg.StateDir, cfg.Log)
-	// Worktrees are named by lease, so a crashed run's directory is no
-	// longer reused (and replaced) by the next attempt; this runner holds
-	// the state directory's lock, so whatever is there now is dead. The
-	// mirrors' records of them are pruned by the next set-up.
-	// The extra checkouts beside them (§5.8) are read-only, so they are
-	// made writable first.
+	// Worktrees a crashed runner left behind are swept whole: this
+	// runner holds the state directory's lock, so whatever is there now
+	// is dead — its jobs' leases lapsed with the crash — and a
+	// session-stable path (§5.1) is rebuilt from its branch by the job
+	// that leases next. The mirrors' records of them are pruned by the
+	// next set-up. The extra checkouts beside them (§5.8) are read-only,
+	// so they are made writable first.
 	if err := removeAllWritableErr(filepath.Join(cfg.StateDir, "worktrees")); err != nil {
 		cfg.Log.WarnContext(ctx, "sweep the worktrees a crashed runner left", "err", err)
 	}

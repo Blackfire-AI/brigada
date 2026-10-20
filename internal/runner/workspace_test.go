@@ -53,6 +53,101 @@ func TestPrepareWorkspaceRejectsMissingURL(t *testing.T) {
 	}
 }
 
+// TestWorktreeDirNamesTheSessionStablePath pins the worktree naming
+// (§5.1): a task job's path is the task's, its role's and its session
+// generation's, so the jobs that share a session share a directory and a
+// restart's attempt does not. A job without a task keeps the per-job
+// path: nothing it runs shares the directory.
+func TestWorktreeDirNamesTheSessionStablePath(t *testing.T) {
+	dir := func(grant *api.JobGrant) string { return filepath.Base(worktreeDir("/state", grant)) }
+	work := &api.JobGrant{JobID: 1, TaskID: 7, Kind: "work", Attempt: 1}
+	fix := &api.JobGrant{JobID: 2, TaskID: 7, Kind: "fix", Attempt: 1, ResumeSessionID: "sess-1"}
+	if got, want := dir(work), "task-7-author-s0"; got != want {
+		t.Errorf("work path = %q, want %q", got, want)
+	}
+	if dir(fix) != dir(work) {
+		t.Errorf("the fix round runs at %q, want the work job's %q: a resumed session needs its directory", dir(fix), dir(work))
+	}
+	// A lost lease re-taken keeps the path: the job, its attempt counter
+	// and its path are not the same thing (§5.1).
+	refix := &api.JobGrant{JobID: 2, TaskID: 7, Kind: "fix", Attempt: 3, ResumeSessionID: "sess-1"}
+	if dir(refix) != dir(work) {
+		t.Errorf("the re-leased fix runs at %q, want the session's %q", dir(refix), dir(work))
+	}
+	// The reviewer's role is the reviewer's own: a re-review resuming the
+	// review's session runs where the review did.
+	review := &api.JobGrant{JobID: 3, TaskID: 7, Kind: "review", Attempt: 1}
+	rereview := &api.JobGrant{JobID: 4, TaskID: 7, Kind: "review", Attempt: 1, ResumeSessionID: "sess-rev"}
+	if got, want := dir(review), "task-7-review-s0"; got != want {
+		t.Errorf("review path = %q, want %q", got, want)
+	}
+	if dir(rereview) != dir(review) {
+		t.Errorf("the resumed re-review runs at %q, want the review's %q", dir(rereview), dir(review))
+	}
+	// A restart begins a new session generation and never reuses the
+	// directory of the session it does not resume.
+	restart := &api.JobGrant{JobID: 5, TaskID: 7, Kind: "work", Attempt: 1, SessionGen: 1}
+	if dir(restart) == dir(work) {
+		t.Errorf("the restart reuses %q, want its own generation's path", dir(restart))
+	}
+	if got, want := dir(restart), "task-7-author-s1"; got != want {
+		t.Errorf("restart path = %q, want %q", got, want)
+	}
+	// A fresh job without a task — a standalone review — keeps the
+	// per-job path of job id and attempt.
+	standalone := &api.JobGrant{JobID: 9, Kind: "review", Attempt: 1}
+	if got, want := dir(standalone), "job-9-a1"; got != want {
+		t.Errorf("standalone review path = %q, want %q", got, want)
+	}
+	if dir(&api.JobGrant{JobID: 9, Kind: "review", Attempt: 2}) == dir(standalone) {
+		t.Error("two attempts of a standalone review share a directory")
+	}
+}
+
+// TestSessionWorktreeRunsWhereItsSessionStarted covers the shared path
+// against a real repo: the work job's worktree and the fix round's sit
+// at one directory, one after the other, and the second finds a clean
+// checkout of the first's work — the state a harness session expects
+// when it resumes where it started.
+func TestSessionWorktreeRunsWhereItsSessionStarted(t *testing.T) {
+	ctx := context.Background()
+	remote := newRemote(t)
+	cfg := &Config{StateDir: t.TempDir()}
+
+	work, err := prepareWorkspace(ctx, cfg, &api.JobGrant{
+		JobID: 41, TaskID: 5, Kind: "work", Attempt: 1,
+		RepoURL: remote, BaseRef: "main", Branch: "brigada/task-5",
+	})
+	if err != nil {
+		t.Fatalf("prepare the work workspace: %v", err)
+	}
+	git(t, work.dir, "commit", "--allow-empty", "-m", "the work")
+	if err := work.ensurePushed(ctx); err != nil {
+		t.Fatalf("ship the work: %v", err)
+	}
+	path := work.dir
+	work.remove(ctx)
+
+	fix, err := prepareWorkspace(ctx, cfg, &api.JobGrant{
+		JobID: 42, TaskID: 5, Kind: "fix", Attempt: 1, ResumeSessionID: "sess-1",
+		RepoURL: remote, BaseRef: "main", Branch: "brigada/task-5",
+	})
+	if err != nil {
+		t.Fatalf("prepare the fix workspace: %v", err)
+	}
+	defer fix.remove(ctx)
+	if fix.dir != path {
+		t.Errorf("the fix round runs at %s, want the work job's %s", fix.dir, path)
+	}
+	if out := git(t, fix.dir, "log", "--oneline", "-1"); !strings.Contains(out, "the work") {
+		t.Errorf("the fix worktree starts at %q, want the pushed work", strings.TrimSpace(out))
+	}
+	entries, err := os.ReadDir(filepath.Join(cfg.StateDir, "worktrees"))
+	if err != nil || len(entries) != 1 {
+		t.Errorf("the task holds %d worktree directories (err %v), want the one shared path", len(entries), err)
+	}
+}
+
 // TestWorkspaceLifecycle drives the whole workspace story (§5.1) against
 // a real bare repo: the mirror is cloned, the worktree is built on the
 // branch from the base ref, a commit lands on it, the runner pushes it
@@ -89,6 +184,8 @@ func TestWorkspaceLifecycle(t *testing.T) {
 	// The remote's main moves on between the two jobs, so the second
 	// workspace proves the cached mirror was fetched, not re-cloned —
 	// and that the checked-out result branch does not block the fetch.
+	// It is another task's job: a task's worktree path is its own
+	// (§5.1), and the first task's is still live.
 	upd := filepath.Join(t.TempDir(), "upd")
 	git(t, "", "clone", "-q", remote, upd)
 	git(t, upd, "-c", "user.name=seed", "-c", "user.email=seed@brigada.invalid",
@@ -96,13 +193,13 @@ func TestWorkspaceLifecycle(t *testing.T) {
 	git(t, upd, "push", "-q", "origin", "main")
 
 	ws2, err := prepareWorkspace(ctx, cfg, &api.JobGrant{
-		JobID: 12, TaskID: 4, Attempt: 2, RepoURL: remote, BaseRef: "main",
+		JobID: 12, TaskID: 5, Attempt: 2, RepoURL: remote, BaseRef: "main",
 	})
 	if err != nil {
 		t.Fatalf("prepare the second workspace: %v", err)
 	}
 	defer ws2.remove(ctx)
-	if ws2.branch != "brigada/task-4-a2" {
+	if ws2.branch != "brigada/task-5-a2" {
 		t.Errorf("second attempt branch = %q, want the attempt suffix", ws2.branch)
 	}
 	if out := git(t, ws2.dir, "log", "--oneline", "-1"); !strings.Contains(out, "main moved on") {
