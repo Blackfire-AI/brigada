@@ -109,6 +109,11 @@ func askOutcome(res engine.AskResult) string {
 		return fmt.Sprintf("queued for the foreman of project %d: nothing was pending to wake it for", p)
 	case engine.WakeHeld:
 		return fmt.Sprintf("queued for the foreman of project %d: your own session holds it, and reads the message on its next events call", p)
+	case engine.WakeQuiet:
+		if res.QuietUntil == "" {
+			return fmt.Sprintf("queued for the foreman of project %d: the interactive quiet period holds the wake back; it fires when the quiet lapses", p)
+		}
+		return fmt.Sprintf("queued for the foreman of project %d: the interactive quiet period holds the wake back until %s", p, res.QuietUntil)
 	case engine.WakeTurnRunning:
 		return fmt.Sprintf("queued for the foreman of project %d: a foreman turn is running, and the next turn carries it", p)
 	case engine.WakeNoForeman:

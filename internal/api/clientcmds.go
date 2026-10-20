@@ -63,10 +63,14 @@ type Status struct {
 	// foreman (§4.2 item 3).
 	ForemanMessages int `json:"foreman_messages"`
 	// Slots is who holds the foreman's slot per project (§4.6).
-	Slots    []engine.Slot         `json:"slots"`
-	Plans    []engine.StatusPlan   `json:"plans"`
-	Report   *engine.StatusReport  `json:"report,omitempty"`
-	NeedsYou []engine.NeedsYouItem `json:"needs_you"`
+	Slots []engine.Slot `json:"slots"`
+	// DeferredWakes lists the projects whose headless wakes the
+	// interactive quiet period holds (§4.6), with the earliest a turn
+	// may fire.
+	DeferredWakes []engine.DeferredWake `json:"deferred_wakes,omitempty"`
+	Plans         []engine.StatusPlan   `json:"plans"`
+	Report        *engine.StatusReport  `json:"report,omitempty"`
+	NeedsYou      []engine.NeedsYouItem `json:"needs_you"`
 	// Cooling lists the agents held back for quota (§8, §10).
 	Cooling []engine.CoolingAgent `json:"cooling,omitempty"`
 	// Held lists the queued jobs a full cap layer holds (§8.1).

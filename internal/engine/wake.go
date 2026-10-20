@@ -52,6 +52,7 @@ const (
 	WakeNothing     WakeOutcome = "nothing_pending" // the inbox was empty
 	WakeAttached    WakeOutcome = "attached"        // a person is attached; the session reads the inbox through events
 	WakeHeld        WakeOutcome = "held"            // the user's own session holds the slot (§4.6); it reads the inbox through events
+	WakeQuiet       WakeOutcome = "quiet"           // the interactive quiet period holds the wake (§4.6); the next hold_acquire carries it, and the sweep wakes one turn when the quiet lapses
 	WakeTurnRunning WakeOutcome = "turn_running"    // a turn is live; its completion re-evaluates
 	WakeNoForeman   WakeOutcome = "no_foreman"      // the project names no foreman harness
 	WakeStalled     WakeOutcome = "stalled"         // failing turns carried the inbox too often
@@ -128,8 +129,29 @@ func (e *Engine) wakeOutcomeTx(tx *sql.Tx, project int64, now time.Time) (WakeOu
 	if held > 0 {
 		return WakeAttached, nil
 	}
+	// The interactive quiet period (§4.6, decided 2026-10-20): while the
+	// session holds, or held and released within
+	// interactive_quiet_minutes, an event does not wake the headless
+	// foreman — the session that is, or was just, working is the cheaper
+	// judge, and its next hold_acquire digest carries the inbox. The
+	// events wait exactly as they wait under a live hold, and the sweep
+	// wakes one turn for all of them when the quiet lapses (below). A
+	// live hold never reaches here: WakeHeld answered first, so the
+	// window the deferral records is always one that began at a hold's
+	// end. The needs-you events still notify (§10): the deferral parks
+	// a foreman turn, never the user's own banner.
+	until, endedAt, quiet, err := interactiveQuietUntilTx(tx, project, now)
+	if err != nil {
+		return "", err
+	}
+	if quiet {
+		if err := deferForemanWakeTx(tx, project, endedAt, until, pending, now); err != nil {
+			return "", err
+		}
+		return WakeQuiet, nil
+	}
 	var harness, model string
-	err := tx.QueryRow("SELECT foreman_harness, foreman_model FROM projects WHERE id = ?", project).
+	err = tx.QueryRow("SELECT foreman_harness, foreman_model FROM projects WHERE id = ?", project).
 		Scan(&harness, &model)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -271,6 +293,145 @@ func foremanWakeStalledTx(tx *sql.Tx, project int64) (bool, error) {
 		return false, fmt.Errorf("read the pending inbox of project %d: %w", project, err)
 	}
 	return least.Valid && least.Int64 >= foremanWakeStallThreshold, nil
+}
+
+// interactiveQuietUntilTx reads the project's interactive quiet period
+// (§4.6, decided 2026-10-20): with the setting at 0, or no hold ever
+// ended, ok is false. While a hold is live, until is its earliest end —
+// the idle or the absolute bound, whichever comes first — plus the
+// quiet minutes: the earliest moment a wake could fire if the session
+// goes silent now. After a hold ended, until is that end plus the quiet
+// minutes, ok holding only while now is still before it; endedAt is the
+// window's start, the hold's own end, which names the episode a
+// deferral event belongs to.
+func interactiveQuietUntilTx(tx *sql.Tx, project int64, now time.Time) (until time.Time, endedAt string, ok bool, err error) {
+	quiet, err := interactiveQuietTx(tx, project)
+	if err != nil || quiet <= 0 {
+		return time.Time{}, "", false, err
+	}
+	var idle, maxAt string
+	err = tx.QueryRow(`SELECT idle_expires_at, max_at FROM interactive_holds WHERE project_id = ? AND state = 'live'`,
+		project).Scan(&idle, &maxAt)
+	switch {
+	case err == nil:
+		end := now
+		if t, perr := parseTime(idle); perr == nil {
+			end = t
+		}
+		if t, perr := parseTime(maxAt); perr == nil && t.Before(end) {
+			end = t
+		}
+		return end.Add(quiet), "", true, nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return time.Time{}, "", false, fmt.Errorf("read the interactive holds of project %d: %w", project, err)
+	}
+	if err := tx.QueryRow(`SELECT ended_at FROM interactive_holds WHERE project_id = ? AND state = 'ended'
+		ORDER BY id DESC LIMIT 1`, project).Scan(&endedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return time.Time{}, "", false, nil
+		}
+		return time.Time{}, "", false, fmt.Errorf("read the last hold end of project %d: %w", project, err)
+	}
+	end, perr := parseTime(endedAt)
+	if perr != nil {
+		return time.Time{}, "", false, fmt.Errorf("parse the hold end %q of project %d: %w", endedAt, project, perr)
+	}
+	until = end.Add(quiet)
+	if !now.Before(until) {
+		return time.Time{}, "", false, nil // lapsed: the sweep's round below picks the wake up
+	}
+	return until, endedAt, true, nil
+}
+
+// deferForemanWakeTx records one deferred wake in the log (§4.6): the
+// quiet period held the headless turn back, Until names when it may
+// fire and Count the rows that waited. One event per quiet episode —
+// the window that began at endedAt — so a burst of events defers once,
+// like the budget's one event per window (§4.3).
+func deferForemanWakeTx(tx *sql.Tx, project int64, endedAt string, until time.Time, waiting int, now time.Time) error {
+	if endedAt == "" {
+		return nil // a live hold's own wait (WakeHeld) records nothing
+	}
+	var n int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = ? AND project_id = ? AND created_at >= ?`,
+		evForemanWakeDeferred, project, endedAt).Scan(&n); err != nil {
+		return fmt.Errorf("read the deferred wakes of project %d: %w", project, err)
+	}
+	if n > 0 {
+		return nil
+	}
+	_, err := appendEventTx(tx, evForemanWakeDeferred, project, 0, 0,
+		eventPayload{Until: fmtTime(until), Count: int64(waiting)}, now)
+	return err
+}
+
+// sweepQuietWakesTx is the sweep's quiet round (§4.6, decided
+// 2026-10-20): a quiet period that lapsed with no new hold_acquire
+// ends without an event of its own, so the sweep wakes the headless
+// foreman once for everything that waited. A project qualifies with
+// pending inbox rows, its last hold ended, the quiet minutes past, and
+// a deferral recorded in that window — something actually waited. The
+// wake itself re-evaluates everything (a live turn, the budget), and
+// the delivered rows retire the project from this query until new
+// events arrive.
+func (e *Engine) sweepQuietWakesTx(tx *sql.Tx, now time.Time) error {
+	rows, err := tx.Query(`SELECT DISTINCT i.project_id FROM foreman_inbox i
+		JOIN projects p ON p.id = i.project_id
+		WHERE i.state = ? AND p.archived_at IS NULL`, inboxPending)
+	if err != nil {
+		return fmt.Errorf("sweep deferred wakes: %w", err)
+	}
+	var projects []int64
+	for rows.Next() {
+		var p int64
+		if err := rows.Scan(&p); err != nil {
+			rows.Close()
+			return fmt.Errorf("sweep deferred wakes: %w", err)
+		}
+		projects = append(projects, p)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("sweep deferred wakes: %w", err)
+	}
+	rows.Close()
+	for _, p := range projects {
+		quiet, err := interactiveQuietTx(tx, p)
+		if err != nil {
+			return err
+		}
+		if quiet <= 0 {
+			continue
+		}
+		var endedAt string
+		err = tx.QueryRow(`SELECT ended_at FROM interactive_holds WHERE project_id = ? AND state = 'ended'
+			ORDER BY id DESC LIMIT 1`, p).Scan(&endedAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("read the last hold end of project %d: %w", p, err)
+		}
+		end, err := parseTime(endedAt)
+		if err != nil {
+			return fmt.Errorf("parse the hold end %q of project %d: %w", endedAt, p, err)
+		}
+		if now.Before(end.Add(quiet)) {
+			continue // still quiet
+		}
+		var deferred int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = ? AND project_id = ? AND created_at >= ?`,
+			evForemanWakeDeferred, p, endedAt).Scan(&deferred); err != nil {
+			return fmt.Errorf("read the deferred wakes of project %d: %w", p, err)
+		}
+		if deferred == 0 {
+			continue
+		}
+		if err := e.wakeForemanTx(tx, p, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // The foreman_inbox table's rows are judgment events and, since §4.2

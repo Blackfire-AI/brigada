@@ -41,6 +41,9 @@ type AskResult struct {
 	// (§4.4); empty when the outcome is limited and the time unknown, and
 	// for every other outcome.
 	LimitedUntil string `json:"limited_until,omitempty"`
+	// QuietUntil is when the interactive quiet period ends (RFC3339,
+	// §4.6); set only when the outcome is quiet.
+	QuietUntil string `json:"quiet_until,omitempty"`
 }
 
 // AskForeman puts the user's message in the project's foreman inbox and
@@ -104,6 +107,13 @@ func (e *Engine) AskForeman(ctx context.Context, repoURL, text, source string) (
 			if _, res.LimitedUntil, err = foremanLimitedTx(tx, project, now); err != nil {
 				return err
 			}
+		}
+		if outcome == WakeQuiet {
+			until, _, _, err := interactiveQuietUntilTx(tx, project, now)
+			if err != nil {
+				return err
+			}
+			res.QuietUntil = fmtTime(until)
 		}
 		if outcome == WakeAttached {
 			if err := tx.QueryRow(`SELECT id FROM attach_holds WHERE project_id = ? AND state = 'live' ORDER BY id DESC LIMIT 1`,

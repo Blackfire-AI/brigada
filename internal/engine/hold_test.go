@@ -180,6 +180,15 @@ func (e *env) beatUntil(h HoldResult, d time.Duration) {
 	e.slot() // run a sweep at the final instant
 }
 
+// quietLapse moves the clock past the interactive quiet period's
+// default and sweeps, the stand-in for time passing with no event: the
+// deferred wake fires here (§4.6).
+func (e *env) quietLapse() {
+	e.t.Helper()
+	e.clock.Advance(defaultQuietMinutes*time.Minute + time.Second)
+	e.mustSweep()
+}
+
 // keepActiveUntil is beatUntil with a tool call every 5 minutes, so
 // only the absolute bound can end the hold.
 func (e *env) keepActiveUntil(h HoldResult, d time.Duration) {
@@ -366,7 +375,8 @@ func TestHoldStaleNamesATurn(t *testing.T) {
 	if err := e.eng.YieldHold(e.ctx, h.HoldID, h.Fence); err != nil {
 		t.Fatal(err)
 	}
-	turn := e.wantSlot(SlotTurn) // the yield woke it
+	e.quietLapse()               // the yield's wake waited out the quiet (§4.6)
+	turn := e.wantSlot(SlotTurn) // the lapse woke it
 	s := staleReason(t, e.eng.CheckHold(e.ctx, h.HoldID, h.Fence))
 	if s.Slot.State != SlotTurn || s.Slot.HolderID != turn.HolderID || len(s.Slot.Events) != 1 {
 		t.Errorf("stale slot = %+v, want the turn %d and its event", s.Slot, turn.HolderID)
@@ -523,8 +533,9 @@ func TestHoldEndRevokesBumpsThenWakes(t *testing.T) {
 				t.Fatalf("%d foreman turns while the hold lived", n)
 			}
 			tc.end(e, h)
+			e.quietLapse() // a hold's end no longer wakes at once: the quiet holds it (§4.6)
 
-			turn := e.wantSlot(SlotTurn) // the end woke it, carrying the message
+			turn := e.wantSlot(SlotTurn) // the lapse woke it, carrying the message
 			if len(turn.Events) != 1 {
 				t.Errorf("turn events = %v, want the held message", turn.Events)
 			}
