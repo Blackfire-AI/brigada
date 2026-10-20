@@ -37,9 +37,9 @@ tasks:
     deps: ["land-pkg"]
     base: "land-pkg"
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-62"
-    rounds: 0
+    rounds: 1
   - id: 63
     name: "engine-land"
     title: "Engine: `land` job kind, the land rule, the land gate, landing record, conflict parking"
