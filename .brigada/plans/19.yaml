@@ -38,7 +38,7 @@ tasks:
     deps: ["init-unwire-port"]
     base: "init-unwire-port"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
     extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "46c2c5713eee6979dbcd46f86c32e8e95f2ec2ee"]]
