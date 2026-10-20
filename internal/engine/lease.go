@@ -86,6 +86,15 @@ type LeaseGrant struct {
 	// on (§4.2), for a session-mode job to resume; empty when the key
 	// never ran or the job is fresh.
 	ResumeSessionID string
+	// SessionGen is the task's session generation (§5.1): how many
+	// restarts the task has had at this lease, which names the attempt
+	// the job belongs to. Every job of one attempt — its work job, the
+	// fix rounds that resume the author's session, its reviews — leases
+	// under one generation, and a restart moves it, so the runner can
+	// name a worktree path the session's whole round shares: a harness
+	// session belongs to the directory it started in. 0 for a foreman
+	// turn and a task-less review, which no resume ties to a task.
+	SessionGen int64
 }
 
 // Lease hands the caller the oldest queued job it may run, or nil when
@@ -463,6 +472,24 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 			foremanToken = secret
 		}
+		// A task job's lease stamps the task's session generation (§5.1):
+		// its restarts so far, the same count that names the attempt's
+		// branch (jobBranchTx), so every job of one attempt — the work
+		// job, the fix rounds resuming its session, its reviews — runs
+		// under one generation and a restart moves it. Stamped at lease,
+		// never at submit: the generation is a property of the attempt
+		// the lease joins, and a queued job of the old attempt that a
+		// restart replaced never leases again.
+		sessionGen := int64(0)
+		if j.TaskID != 0 {
+			if err := tx.QueryRow("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1", j.TaskID).
+				Scan(&sessionGen); err != nil {
+				return nil, fmt.Errorf("count the restarts of task %d: %w", j.TaskID, err)
+			}
+			if _, err := tx.Exec("UPDATE jobs SET session_gen = ? WHERE id = ?", sessionGen, j.ID); err != nil {
+				return nil, fmt.Errorf("stamp the session generation of job %d: %w", j.ID, err)
+			}
+		}
 		if _, err := appendEventTx(tx, evJobLeased, j.ProjectID, j.TaskID, j.ID,
 			eventPayload{Lease: leasePrefix(leaseID), Owner: owner, Attempt: j.Attempts + 1}, now); err != nil {
 			return nil, err
@@ -617,6 +644,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			Branch:          jobBranch,
 			Attempt:         j.Attempts + 1,
 			ResumeSessionID: resume,
+			SessionGen:      sessionGen,
 		}, nil
 	}
 	return nil, nil // nothing this runner may take

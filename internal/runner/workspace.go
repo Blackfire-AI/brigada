@@ -64,8 +64,11 @@ type workspace struct {
 	// holdsBranch is whether branch is registered as checked out by this
 	// worktree (see holdBranch); guarded by the mirror's lock.
 	holdsBranch bool
-	repoURL     string
-	gitEnv      []string
+	// holdsDir is whether this worktree registered its directory as
+	// occupied (see holdWorktreeDir); guarded by the mirror's lock.
+	holdsDir bool
+	repoURL  string
+	gitEnv   []string
 }
 
 // prepareWorkspace materializes the workspace for a leased job (§5.1):
@@ -102,7 +105,11 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 	// down: the branches it fetches or checks out (its own result
 	// branch, the one it continues, a brigada/ base) cannot move while a
 	// live worktree holds them. The wait gives up when the job's ctx ends.
-	unlock, err := lockMirrorFor(ctx, w.mirror, w.branch, grant.Branch, brigadaRef(grant.BaseRef))
+	// The worktree's own directory is waited for the same way: the path
+	// is the task's, not the job's (§5.1), so a run whose predecessor on
+	// the path is still winding down — a lost lease re-taken, a follow-up
+	// leased before the last worktree came down — waits for it.
+	unlock, err := lockMirrorHolding(ctx, w.mirror, []string{w.branch, grant.Branch, brigadaRef(grant.BaseRef)}, []string{w.dir})
 	if err != nil {
 		return nil, err
 	}
@@ -133,17 +140,22 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 		}
 	}
 	// A worktree left behind by a crashed run of the same job would make
-	// the add below fail on the path; a job id is leased to one run at a
-	// time, so what sits at this job's own path now is dead.
+	// the add below fail on the path; the path is the task's and one
+	// live job holds its key (§14), so what sits at this path now is
+	// dead or winding down — and the winding-down was waited out above.
 	w.discardLocked(ctx)
 	if out, err := w.git(ctx, "--git-dir", w.mirror, "worktree", "add", "-B", w.branch, w.dir, start); err != nil {
 		w.discardLocked(ctx)
 		return nil, fmt.Errorf("add the worktree for %s from %s: %w", w.branch, start, trimCmdError(out, err))
 	}
 	// The branch is checked out here from now until the worktree comes
-	// down; the hold is taken under the mirror's lock, with no gap.
+	// down; the hold is taken under the mirror's lock, with no gap. So
+	// is the directory's: the path outlives this job (§5.1), and the
+	// next job on it waits for this worktree to come down first.
 	holdBranch(w.mirror, w.branch)
 	w.holdsBranch = true
+	holdWorktreeDir(w.dir)
+	w.holdsDir = true
 	// The commit the worktree starts from: what holdsWork compares the
 	// worker's HEAD against — a branch with no work on it is not a
 	// result (§5.6).
@@ -177,8 +189,11 @@ func prepareReviewWorkspace(ctx context.Context, cfg *Config, grant *api.JobGran
 		gitEnv:  cfg.GitEnv,
 	}
 	// See prepareWorkspace: the result branch is the author's, possibly
-	// still checked out in a worktree that is on its way down.
-	unlock, err := lockMirrorFor(ctx, w.mirror, grant.ReviewBranch, brigadaRef(grant.BaseRef))
+	// still checked out in a worktree that is on its way down. The
+	// directory is waited for the same way — the review path is the
+	// task's too (§5.1), shared with the re-review that resumes this
+	// one's session.
+	unlock, err := lockMirrorHolding(ctx, w.mirror, []string{grant.ReviewBranch, brigadaRef(grant.BaseRef)}, []string{w.dir})
 	if err != nil {
 		return nil, err
 	}
@@ -194,6 +209,11 @@ func prepareReviewWorkspace(ctx context.Context, cfg *Config, grant *api.JobGran
 		w.discardLocked(ctx)
 		return nil, fmt.Errorf("add the review worktree at %s: %w", w.branch, trimCmdError(out, err))
 	}
+	// The directory hold, taken under the mirror's lock like a work
+	// worktree's branch hold: a detached review moves no branch, but
+	// its path is shared with the reviews of the same attempt.
+	holdWorktreeDir(w.dir)
+	w.holdsDir = true
 	// The commit under review, kept for the record like a work
 	// worktree's base; the review path itself never pushes, so nothing
 	// compares against it.
@@ -327,15 +347,36 @@ func (w *workspace) discardLocked(ctx context.Context) {
 		w.holdsBranch = false
 		releaseBranch(w.mirror, w.branch)
 	}
+	if w.holdsDir {
+		w.holdsDir = false
+		releaseWorktreeDir(w.dir)
+	}
 }
 
-// worktreeDir is the lease's own worktree path: job id and attempt. A
-// job re-leased while the run that lost it is still winding down (its
-// heartbeats failed, a spare slot took the job again) must not share a
-// directory with it, or either attempt's set-up or cleanup could delete
-// the other's live checkout. Directories a crashed runner left behind
-// are swept at startup (see Run).
+// worktreeDir names the job's worktree path (§5.1). A task job's path
+// is the task's, its role's and its session generation's: a harness
+// session belongs to the directory it started in — opencode resumes
+// only there, while Claude Code tolerates the move — so the jobs that
+// share a session run at one directory: a work job and the fix rounds
+// that resume it, a review and the re-review that resumes it. The
+// generation is the attempt the engine counts in the task's restarts,
+// so a restart's fresh session never reuses the directory of the one it
+// does not resume. At most one live job holds the task's key (§14), so
+// two runs never share the path at once on one runner: a re-leased job
+// whose lost predecessor is still winding down is waited out by the
+// branch and directory holds, and what a crashed run left at the path
+// is discarded before the worktree is added (see prepareWorkspace). A
+// job without a task — a standalone review, which never resumes (§7: a
+// review writes no session back) — keeps the per-job path of job id
+// and attempt: nothing it runs shares the directory.
 func worktreeDir(stateDir string, grant *api.JobGrant) string {
+	if grant.TaskID != 0 {
+		role := "author"
+		if isReviewJob(grant) {
+			role = "review"
+		}
+		return filepath.Join(stateDir, "worktrees", fmt.Sprintf("task-%d-%s-s%d", grant.TaskID, role, grant.SessionGen))
+	}
 	return filepath.Join(stateDir, "worktrees", fmt.Sprintf("job-%d-a%d", grant.JobID, grant.Attempt))
 }
 

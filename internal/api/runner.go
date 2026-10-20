@@ -340,6 +340,12 @@ type jobGrant struct {
 	Branch          string `json:"branch,omitempty"`
 	Attempt         int64  `json:"attempt"`
 	ResumeSessionID string `json:"resume_session_id"`
+	// SessionGen is the task's session generation (§5.1): the attempt
+	// the lease joined, counted in the task's restarts. The runner names
+	// the worktree path a resumed session needs from it — one path per
+	// task, role and generation — so a fix round runs where its work job
+	// did. 0 on a foreman turn and a task-less review.
+	SessionGen int64 `json:"session_gen"`
 	// ForemanToken is the lease-scoped foreman token (§12.1): minted with
 	// the lease of a foreman turn, empty for every task job. This grant
 	// is the secret's only appearance on the wire — the engine stores
@@ -380,6 +386,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		Branch:          g.Branch,
 		Attempt:         g.Attempt,
 		ResumeSessionID: g.ResumeSessionID,
+		SessionGen:      g.SessionGen,
 		ForemanToken:    g.ForemanToken,
 		Effort:          g.Effort,
 		ForemanEffort:   g.ForemanEffort,

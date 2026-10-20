@@ -267,12 +267,13 @@ func TestFollowUpWaitsForTheAuthorsWorktree(t *testing.T) {
 	}
 }
 
-// TestReleasedReviewDoesNotShareTheOldAttemptsWorktree: a review whose
+// TestReLeasedReviewWaitsForTheOldAttemptsWorktree: a review whose
 // lease lapsed is leased again (attempt 2) while the first attempt's run
-// has not yet noticed. The attempts hold separate worktrees, so neither
-// the second's set-up nor the first's late cleanup touches the other's
-// live checkout.
-func TestReleasedReviewDoesNotShareTheOldAttemptsWorktree(t *testing.T) {
+// has not yet noticed. Both attempts run at the task's review path
+// (§5.1: the path is the session's, not the job's), so the second's
+// set-up waits for the first's worktree to come down instead of racing
+// it — and then gets a clean checkout at the same path.
+func TestReLeasedReviewWaitsForTheOldAttemptsWorktree(t *testing.T) {
 	ctx := context.Background()
 	cfg := &Config{StateDir: t.TempDir()}
 	remote := newRemote(t)
@@ -296,20 +297,45 @@ func TestReleasedReviewDoesNotShareTheOldAttemptsWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare the first review attempt: %v", err)
 	}
-	second, err := prepareWorkspace(ctx, cfg, review(2))
-	if err != nil {
-		t.Fatalf("prepare the second review attempt: %v", err)
+
+	// The re-leased attempt runs at the same path and must wait: the
+	// first attempt's worktree is still live on it.
+	type result struct {
+		ws  *workspace
+		err error
 	}
-	defer second.remove(ctx)
-	if first.dir == second.dir {
-		t.Fatalf("both attempts use %s", first.dir)
+	got := make(chan result, 1)
+	go func() {
+		ws, err := prepareWorkspace(ctx, cfg, review(2))
+		got <- result{ws, err}
+	}()
+	select {
+	case r := <-got:
+		if r.ws != nil {
+			r.ws.remove(ctx)
+		}
+		t.Fatalf("the second attempt was set up while the first still held the path (err %v)", r.err)
+	case <-time.After(400 * time.Millisecond):
 	}
 	if _, err := os.Stat(filepath.Join(first.dir, "README.md")); err != nil {
-		t.Fatalf("the second attempt's set-up destroyed the first's checkout: %v", err)
+		t.Fatalf("something touched the first attempt's live checkout: %v", err)
 	}
+
 	first.remove(ctx) // the first attempt finally sees it lost the lease
-	if _, err := os.Stat(filepath.Join(second.dir, "README.md")); err != nil {
-		t.Fatalf("the first attempt's cleanup destroyed the second's checkout: %v", err)
+	select {
+	case r := <-got:
+		if r.err != nil {
+			t.Fatalf("the second attempt's set-up after the first's removal: %v", r.err)
+		}
+		defer r.ws.remove(ctx)
+		if r.ws.dir != first.dir {
+			t.Errorf("the re-leased review moved to %s, want the session's own path %s", r.ws.dir, first.dir)
+		}
+		if _, err := os.Stat(filepath.Join(r.ws.dir, "README.md")); err != nil {
+			t.Errorf("the second attempt has no clean checkout: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the second attempt never got its workspace after the first's removal")
 	}
 }
 

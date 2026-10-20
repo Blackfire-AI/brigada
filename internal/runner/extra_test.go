@@ -104,8 +104,9 @@ test ! -e hack.txt`, pinned, tip)
 		t.Fatalf("check = %+v, want a pass (the checkouts at the pinned and the default ref)", res)
 	}
 	// The stable path beside the worktree, the same one for the setup, the
-	// worker and the check.
-	want := filepath.Join(e.stateDir, "worktrees", fmt.Sprintf("job-%d-a1.extra", job), "schema")
+	// worker and the check. The worktree is the task's session-stable
+	// path (§5.1), not the job's own.
+	want := filepath.Join(e.stateDir, "worktrees", fmt.Sprintf("task-%d-author-s0.extra", task), "schema")
 	for _, name := range []string{"setup-path", "worker-path", "check-path"} {
 		got := strings.Join(markerLines(t, markers, name), "")
 		if got != want {
