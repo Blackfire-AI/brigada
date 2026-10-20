@@ -106,3 +106,5 @@ The `release` workflow builds `brigada-<os>-<arch>` binaries (darwin and linux, 
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
+
+What 1.0 promises until 2.0: [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
