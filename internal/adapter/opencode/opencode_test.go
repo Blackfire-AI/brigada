@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
@@ -202,6 +203,49 @@ func TestFailureFixtures(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// fixResetClock pins the clock and the zone limitReset reads.
+func fixResetClock(t *testing.T) {
+	t.Helper()
+	oldNow, oldZone := now, localZone
+	t.Cleanup(func() { now, localZone = oldNow, oldZone })
+	now = func() time.Time { return time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC) }
+	localZone = time.FixedZone("test", 2*3600)
+}
+
+func TestLimitResetFixture(t *testing.T) {
+	fixResetClock(t)
+	a := &Adapter{}
+	const text = "Weekly/Monthly Limit Exhausted. Your limit will reset at 2026-10-20 21:32:04"
+	for name, parse := range map[string]func([]byte) (adapter.Event, bool){"stdout": a.ParseEvent, "stderr": a.ParseErrEvent} {
+		events := parseFixture(t, "failure-limit-reset.jsonl", parse)
+		want := []adapter.Event{{Kind: adapter.EvError, ErrorKind: adapter.ErrLimit, Text: text, SessionID: "ses_fixture", LimitUntil: "2026-10-20T21:32:04+02:00"}}
+		if !slices.Equal(events, want) {
+			t.Errorf("%s: events = %+v, want %+v", name, events, want)
+		}
+	}
+}
+
+func TestLimitReset(t *testing.T) {
+	fixResetClock(t)
+	for _, tc := range []struct{ text, want string }{
+		{"Your limit will reset at 2026-10-20 21:32:04", "2026-10-20T21:32:04+02:00"},
+		{"Your limit will reset at 2026-10-20 21:32", "2026-10-20T21:32:00+02:00"},
+		{"Your limit will reset at 2026-10-20T21:32:04Z.", "2026-10-20T21:32:04Z"},
+		{"Your limit will reset at 2026-10-20 21:32:04 UTC", "2026-10-20T21:32:04Z"},
+		{"Your limit will reset at 2026-10-20 21:32:04+08:00", "2026-10-20T21:32:04+08:00"},
+		{"Your limit will reset at 2026-10-20 21:32:04 -0500", "2026-10-20T21:32:04-05:00"},
+		{"Your limit will reset at 2026-10-20 07:00:00", ""}, // already past
+		{"Your limit will reset at 2026-13-20 21:32:04", ""},
+		{"Your limit will reset at 2026-02-31 21:32:04", ""},
+		{"Your limit will reset soon", ""},
+		{"", ""},
+	} {
+		if got := limitReset(tc.text); got != tc.want {
+			t.Errorf("limitReset(%q) = %q, want %q", tc.text, got, tc.want)
+		}
 	}
 }
 
