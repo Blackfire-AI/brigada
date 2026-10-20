@@ -87,6 +87,7 @@ Commands:
 	cancel <job-id> Cancel a live job.
 	recover         Rebuild a lost store from the newest snapshot and the
 	                plan files; the engine must be stopped.
+	hold yield|confirm  Kept for old hooks; does nothing, exits 0.
 	version         Print the brigada version and exit.
 	help [command [subcommand]]
 	                Print top-level or command usage and exit.
@@ -161,6 +162,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "-h", "--help", "-help":
 		fmt.Fprint(stdout, topHelp(stdout))
+		return 0
+	}
+	if runKeptHold(args) {
 		return 0
 	}
 	cmd, ok := commands[args[0]]
