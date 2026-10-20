@@ -5,9 +5,9 @@
 plan: 11
 title: "Reduce token consumption: measure, step economy, warm sessions, batching"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-20T11:06:42.957904Z
-updated: 2026-10-20T12:44:26.779385Z
+updated: 2026-10-20T13:10:09.518848Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps, or from the
 # default branch when base is empty; merge a task after its base. States
@@ -64,7 +64,7 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-44"
     rounds: 0
   - id: 48
