@@ -23,8 +23,8 @@ tasks:
     deps: []
     base: ""
     effort: high
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-38-r2"
     rounds: 0
   - id: 39
     name: "dsh-init"
