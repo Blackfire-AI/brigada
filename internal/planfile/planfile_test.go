@@ -19,7 +19,7 @@ func goldenPlan() Plan {
 		Updated: time.Date(2026, 10, 12, 12, 30, 0, 500_000_000, time.UTC),
 		Tasks: []Task{
 			{ID: 11, Name: "schema", Title: "Add the schema", Class: "implement", State: "done", Branch: "brigada/task-11"},
-			{ID: 12, Name: "api", Title: "Expose it", Class: "implement", Deps: []string{"schema"}, Base: "schema", State: "needs_foreman",
+			{ID: 12, Name: "api", Title: "Expose it", Class: "implement", Deps: []string{"schema"}, Base: "schema", Continue: "schema", State: "needs_foreman",
 				Branch: "brigada/task-12", Rounds: 2, Question: "Which \"auth\" scheme?\nbearer or basic?"},
 			{ID: 13, Name: "docs", Title: "Write the docs", Class: "answer", Deps: []string{"schema", "api"}, Base: "api", State: "pending"},
 		},

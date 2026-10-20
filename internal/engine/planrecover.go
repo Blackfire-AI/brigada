@@ -211,6 +211,12 @@ func (e *Engine) applyPlanFileTx(tx *sql.Tx, project int64, repo, defaultBranch 
 		if t.Base != "" && !slices.Contains(t.Deps, t.Base) {
 			return skip("task %d has base %q, which is not one of its deps", t.ID, t.Base)
 		}
+		if t.Continue != "" && !slices.Contains(t.Deps, t.Continue) {
+			return skip("task %d continues %q, which is not one of its deps", t.ID, t.Continue)
+		}
+		if t.Base != "" && t.Continue != "" && t.Base != t.Continue {
+			return skip("task %d has base %q but continues %q: a continuing task's base is its continued dep", t.ID, t.Base, t.Continue)
+		}
 	}
 
 	if exists {
@@ -256,8 +262,14 @@ func (e *Engine) applyPlanFileTx(tx *sql.Tx, project int64, repo, defaultBranch 
 		return "", "", fmt.Errorf("clear the edges of plan %d: %w", p.ID, err)
 	}
 	for _, t := range p.Tasks {
+		// The continued dep is the base when none is named (§6.1), so a
+		// rebuilt edge row reads as a created one does.
+		base := t.Base
+		if base == "" && t.Continue != "" {
+			base = t.Continue
+		}
 		for _, d := range t.Deps {
-			if _, err := tx.Exec("INSERT INTO task_deps (plan_id, task_id, depends_on_task_id, is_base) VALUES (?, ?, ?, ?)", p.ID, t.ID, ids[d], d == t.Base); err != nil {
+			if _, err := tx.Exec("INSERT INTO task_deps (plan_id, task_id, depends_on_task_id, is_base, is_continue) VALUES (?, ?, ?, ?, ?)", p.ID, t.ID, ids[d], d == base, d == t.Continue); err != nil {
 				return "", "", fmt.Errorf("rebuild an edge of plan %d: %w", p.ID, err)
 			}
 		}

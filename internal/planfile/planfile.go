@@ -57,6 +57,7 @@ type Task struct {
 	Class    string
 	Deps     []string
 	Base     string // the dep whose branch the work starts from; '' = the default branch
+	Continue string // the dep whose author's session the first work job resumes (§6.1); '' = fresh
 	State    string
 	Branch   string // the result branch (§6.4); '' until the task pushed one
 	Rounds   int    // fix and review rounds spent (§7)
@@ -87,9 +88,11 @@ const taskOptionsComment = "# Optional tier (light, standard, heavy) and effort 
 const tasksComment = tasksGraphComment + taskOptionsComment
 
 const tasksGraphComment = `# §6.1: the graph. A task waits (pending) until every task named in deps is
-# done; its work starts from the branch of base, one of deps, or from the
-# default branch when base is empty; merge a task after its base. States
-# are the engine's (§6.1), rounds the fix and review rounds
+# done; its work starts from the branch of base, one of deps — the continued
+# dep when base is empty and continue is set, else the default branch; merge a
+# task after its base. A task with continue, one of deps, starts in the
+# session of the dep's author.
+# States are the engine's (§6.1), rounds the fix and review rounds
 # spent (§7), question the worker's open question (§3), when it has one.
 `
 
@@ -137,6 +140,9 @@ func Render(p Plan) ([]byte, error) {
 		}
 		fmt.Fprintf(&b, "    deps: [%s]\n", strings.Join(deps, ", "))
 		fmt.Fprintf(&b, "    base: %s\n", strconv.Quote(t.Base))
+		if t.Continue != "" {
+			fmt.Fprintf(&b, "    continue: %s\n", strconv.Quote(t.Continue))
+		}
 		if err := adapter.ValidateTier(t.Tier); err != nil {
 			return nil, fmt.Errorf("task %d: %w", t.ID, err)
 		}
@@ -356,6 +362,24 @@ func (r *reader) task() (Task, error) {
 		if t.Base != "" && !slices.Contains(t.Deps, t.Base) {
 			return Task{}, r.errf("base: %q is not one of deps", t.Base)
 		}
+	}
+	// continue is absent from files written before continuing tasks, and
+	// written only when the task continues a dep.
+	if r.peekIs(in + "continue:") {
+		if t.Continue, err = r.quotedField(in, "continue"); err != nil {
+			return Task{}, err
+		}
+		if t.Continue == "" {
+			return Task{}, r.errf("continue: written only when the task continues a dep")
+		}
+		if !slices.Contains(t.Deps, t.Continue) {
+			return Task{}, r.errf("continue: %q is not one of deps", t.Continue)
+		}
+	}
+	// The continued dep is the base (§6.1): a base naming another dep
+	// is a file the engine would never write.
+	if t.Base != "" && t.Continue != "" && t.Base != t.Continue {
+		return Task{}, r.errf("base: %q but continue: %q: a continuing task's base is its continued dep", t.Base, t.Continue)
 	}
 	if r.peekIs(in + "tier:") {
 		if t.Tier, err = r.wordField(in, "tier"); err != nil {

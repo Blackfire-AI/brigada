@@ -135,6 +135,10 @@ type StatusTask struct {
 	// WaitingOn names the unfinished dependencies of a task that waits
 	// on them (§6.1): each by its plan name, or "#id" when unnamed.
 	WaitingOn []string `json:"waiting_on,omitempty"`
+	// Continues names the dependency whose author's session the task's
+	// first work job resumes (§6.1), by plan name or "#id"; empty when
+	// the task continues none.
+	Continues string `json:"continues,omitempty"`
 }
 
 // NeedsYouItem is one entry of the "needs you" queue (§10): something a
@@ -473,10 +477,12 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64) ([]StatusTask, error) {
 	}
 	rows.Close()
 	for i := range tasks {
-		if tasks[i].State != taskPending {
-			continue
+		if tasks[i].State == taskPending {
+			if tasks[i].WaitingOn, err = statusWaitingOnTx(tx, tasks[i].ID); err != nil {
+				return nil, err
+			}
 		}
-		if tasks[i].WaitingOn, err = statusWaitingOnTx(tx, tasks[i].ID); err != nil {
+		if tasks[i].Continues, err = statusContinuesTx(tx, tasks[i].ID); err != nil {
 			return nil, err
 		}
 	}
@@ -505,6 +511,25 @@ func statusWaitingOnTx(tx *sql.Tx, task int64) ([]string, error) {
 		names = append(names, name)
 	}
 	return names, rows.Err()
+}
+
+// statusContinuesTx names the dependency whose author's session the task
+// continues (§6.1), by plan name or "#id"; "" when it continues none.
+func statusContinuesTx(tx *sql.Tx, task int64) (string, error) {
+	var id int64
+	var name string
+	err := tx.QueryRow(`SELECT x.id, x.name FROM task_deps d JOIN tasks x ON x.id = d.depends_on_task_id
+		WHERE d.task_id = ? AND d.is_continue = 1`, task).Scan(&id, &name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read what task %d continues: %w", task, err)
+	}
+	if name == "" {
+		name = fmt.Sprintf("#%d", id)
+	}
+	return name, nil
 }
 
 // statusReportTx reads the latest foreman report in scope (§3, §10):

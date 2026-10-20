@@ -265,6 +265,40 @@ func TestComposeAnswerPrompt(t *testing.T) {
 	}
 }
 
+// TestComposeContinuePrompt: a continuing task's first work job (§6.1)
+// keeps the discipline — the template, the new task's spec verbatim, and
+// a follow-up section saying a new task follows in the same session,
+// the previous one approved and landed — never as instructions about how
+// to run beyond the template's own words.
+func TestComposeContinuePrompt(t *testing.T) {
+	spec := "Ship it.\nInclude tests."
+	got := ComposeContinuePrompt(spec, "go test ./...")
+
+	if !strings.HasPrefix(got, "You are a brigada worker") {
+		t.Errorf("prompt does not start with the template:\n%s", got)
+	}
+	if !strings.Contains(got, "<task-spec>\n"+spec+"\n</task-spec>") {
+		t.Errorf("the new spec is not verbatim between delimiters:\n%s", got)
+	}
+	if !strings.Contains(got, "<check-command>\ngo test ./...\n</check-command>") {
+		t.Errorf("the check is not verbatim in its section:\n%s", got)
+	}
+	if !strings.Contains(got, "A new task follows in this session") {
+		t.Errorf("the prompt does not say a new task follows in the session:\n%s", got)
+	}
+	for _, want := range []string{"approved", "landed on the base branch"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the introduction does not say the previous task is %s:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "<feedback>") {
+		t.Errorf("a continuation is no feedback round:\n%s", got)
+	}
+	if strings.Contains(got, "resuming a task that has run before") {
+		t.Errorf("a continuation is no resume of the same task:\n%s", got)
+	}
+}
+
 // TestComposeReviewPromptGolden is the review template's golden
 // rendering (§7): fixed template, spec and check result verbatim in
 // their delimiters, the diff command naming the base and the branch —

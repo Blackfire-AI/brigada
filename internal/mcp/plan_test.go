@@ -375,6 +375,97 @@ func TestPlanBaseSchemaAndCalls(t *testing.T) {
 	}
 }
 
+// TestPlanContinueSchemaAndCalls covers the optional continue of a task
+// (§6.1): plan_create's task items, plan_amend's added items and its
+// retarget items all declare it; a continued dep that is a dep is stored
+// on its edge, one that is not refuses the whole call with its reason,
+// and a retarget replaces it.
+func TestPlanContinueSchemaAndCalls(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	s := start(t, e)
+
+	a := s.call(1, "tools/list", nil)
+	var list struct {
+		Tools []toolInfo `json:"tools"`
+	}
+	if err := json.Unmarshal(a.Result, &list); err != nil {
+		t.Fatalf("decode tools/list: %v", err)
+	}
+	item := func(tool, field string) map[string]any {
+		t.Helper()
+		for _, tl := range list.Tools {
+			if tl.Name != tool {
+				continue
+			}
+			props := tl.InputSchema.(map[string]any)["properties"].(map[string]any)
+			return props[field].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+		}
+		t.Fatalf("no tool %s", tool)
+		return nil
+	}
+	for name, props := range map[string]map[string]any{
+		"plan_create tasks":   item("plan_create", "tasks"),
+		"plan_amend add":      item("plan_amend", "add"),
+		"plan_amend retarget": item("plan_amend", "retarget"),
+	} {
+		if _, ok := props["continue"]; !ok {
+			t.Errorf("%s declares no continue: %v", name, props)
+		}
+	}
+
+	a = s.call(2, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{
+		"title": "continued",
+		"tasks": []any{
+			map[string]any{"name": "a", "spec": "one"},
+			map[string]any{"name": "b", "spec": "two", "deps": []any{"a"}, "continue": "a"},
+		},
+	}})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("plan_create with a continue errored: %s", text)
+	}
+	var continueOf string
+	if err := e.st.View(t.Context(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT x.name FROM task_deps d JOIN tasks x ON x.id = d.depends_on_task_id
+			WHERE d.is_continue = 1`).Scan(&continueOf)
+	}); err != nil || continueOf != "a" {
+		t.Fatalf("stored continued dep = %q (%v), want a", continueOf, err)
+	}
+
+	a = s.call(3, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{
+		"title": "bad",
+		"tasks": []any{
+			map[string]any{"name": "a", "spec": "one"},
+			map[string]any{"name": "b", "spec": "two", "deps": []any{"a"}, "continue": "zzz"},
+		},
+	}})
+	if text, isError := toolText(t, a); !isError || !strings.Contains(text, "not one of its deps") {
+		t.Errorf("a continued dep outside deps = %q, error %v, want the refusal with its reason", text, isError)
+	}
+
+	a = s.call(4, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan":     1,
+		"add":      []any{map[string]any{"name": "c", "spec": "three", "deps": []any{"a"}}},
+		"retarget": []any{map[string]any{"task": "b", "deps": []any{"a"}, "continue": "zzz"}},
+	}})
+	if text, isError := toolText(t, a); !isError || !strings.Contains(text, "not one of its deps") {
+		t.Errorf("an amend continued dep outside deps = %q, error %v, want the refusal", text, isError)
+	}
+	a = s.call(5, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan":     1,
+		"add":      []any{map[string]any{"name": "c", "spec": "three", "deps": []any{"a", "b"}, "continue": "b"}},
+		"retarget": []any{map[string]any{"task": "b", "deps": []any{"a"}}},
+	}})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("plan_amend with a continue errored: %s", text)
+	}
+	if err := e.st.View(t.Context(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT x.name FROM task_deps d JOIN tasks x ON x.id = d.depends_on_task_id
+			WHERE d.is_continue = 1`).Scan(&continueOf)
+	}); err != nil || continueOf != "b" {
+		t.Errorf("continued dep after the amend = %q (%v), want b (the retarget dropped b's)", continueOf, err)
+	}
+}
+
 // TestIdemKey covers the key's mint (§12.1): one logical call — the
 // same arguments — mints one key; another call mints another.
 func TestIdemKey(t *testing.T) {
