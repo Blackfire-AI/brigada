@@ -47,8 +47,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: needs_foreman
+    branch: "brigada/task-54"
     rounds: 0
   - id: 55
     name: "docs-one-foreman"
