@@ -1,6 +1,6 @@
 # brigada: product brief
 
-Status: **draft v2**, 2026-10-12. It replaces a first brief written for an earlier Python implementation. Terms are defined in [glossary.md](glossary.md). The contract is [design.md](design.md); where this brief and the design disagree, the design wins until amended. Tags: **(decided, date)** is settled; **(proposal)** is open.
+Status: **v3**, 2026-10-20. It replaces a first brief written for an earlier Python implementation. Terms are defined in [glossary.md](glossary.md). The contract is [design.md](design.md); where this brief and the design disagree, the design wins until amended. Tags: **(decided, date)** is settled; **(proposal)** is open.
 
 ## 1. One line
 
@@ -20,9 +20,9 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 **The foreman is the main feature** (decided 2026-10-12). You talk to it; it resolves everything else and asks you only when it needs a decision.
 
 1. **Understands** your ask in conversation and asks back when it's unclear.
-2. **Plans:** splits the ask into a **task graph** (decided 2026-10-12: tasks with dependencies at launch). Each task has a spec, a **check** command, a class (implement, review, answer, …), its dependencies and (proposal, 2026-10-19) a **tier**, how heavy a model it needs, and an **effort**, how hard that model should think. The plan is also written into the repo as a file, so it survives the loss of the engine store and can be read and reviewed like code (decided 2026-10-12; details in [design.md](design.md) §6.4).
+2. **Plans:** splits the ask into a **task graph** (decided 2026-10-12: tasks with dependencies at launch). Each task has a spec, a **check** command, a class (implement, review, answer, …), its dependencies and (decided 2026-10-19) a **tier**, how heavy a model it needs, and an **effort**, how hard that model should think. The plan is also written into the repo as a file, so it survives the loss of the engine store and can be read and reviewed like code (decided 2026-10-12; details in [design.md](design.md) §6.4).
 3. **Confirms** the plan with you **only above a size or risk limit** you set (decided 2026-10-12); smaller plans start on their own.
-4. **Dispatches** each task to an eligible agent chosen by sampling: each agent's measured record for that class on this repo, weighed against its configured cost, among agents with quota left and healthy. With no record yet (a new user or repo) the draws are wide, so every agent gets tried, and `stats` shows how confident each number is. Proposal (2026-10-19): the foreman says per task how heavy a model it needs (light, standard or heavy) and how hard it should think; the engine samples a model of that tier among the CLIs you allowed, by record and cost, never leaving the tier by choice, and climbs a tier when the work fails ([design.md](design.md) §6.1, §8).
+4. **Dispatches** each task to an eligible agent chosen by sampling: each agent's measured record for that class on this repo, weighed against its configured cost, among agents with quota left and healthy. With no record yet (a new user or repo) the draws are wide, so every agent gets tried, and `stats` shows how confident each number is. The foreman says per task how heavy a model it needs (light, standard or heavy) and how hard it should think (decided 2026-10-19); the engine samples a model of that tier among the CLIs you allowed, by record weighed against cost (decided 2026-10-20), never leaving the tier by choice. A failed task first retries at a higher effort, then climbs a tier (decided 2026-10-20) ([design.md](design.md) §6.1, §8).
 5. **Runs** the agent's official CLI headless in its own git worktree, signed in with your account.
 6. **Checks** the work by running the task's check, never trusting "done".
 7. **Reviews** every change with a model from a different family. Fix rounds are capped.
@@ -30,7 +30,7 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 9. **Reports** progress and results: branches, the suggested merge order, what needs you. You can **stop or cancel** a plan or a task at any time.
 10. **Learns:** every outcome feeds the record, so the next pick is better. `brigada stats` shows who wins where.
 
-## 4. How it's built (proposal)
+## 4. How it's built
 
 ```
  you ⇄ foreman (an agent session: an official CLI + brigada's tools)
@@ -42,10 +42,10 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
  runner: worktree → agent CLI headless → check → branch
 ```
 
-- **The foreman is an agent, not our own model loop.** It runs in an official CLI session (configurable: claude, codex, …) with brigada's MCP tools and foreman instructions. The brigada-owned headless foreman is a worker, as every task agent is (in your own session, mode A, the foreman role is exercised by your interactive session, which brigada does not run and which is not a worker; design §4.6): an instance of a headless harness plus a model, on the same machinery, differing only in its instructions, permissions and lifecycle (decided 2026-10-13). The conversation uses that harness's own UI. Direction (decided 2026-10-16; design only, not yet built): the harness you already use is the foreman. `brigada init` sets a repo up in one step, registering brigada's tools in your harness for that repo, and you talk in your own session; one session can also coordinate several projects' foremen. While nobody is typing, the engine wakes a separate brigada-owned foreman session, and the engine journal is the handoff between the two conversations ([design.md](design.md) §4.6, §13.1). `brigada` opening the foreman in your terminal stays as the fallback for a harness that cannot host the tools.
+- **The foreman is an agent, not our own model loop.** It runs in an official CLI session (configurable: claude, codex, …) with brigada's MCP tools and foreman instructions. The brigada-owned headless foreman is a worker, as every task agent is (in your own session, mode A, the foreman role is exercised by your interactive session, which brigada does not run and which is not a worker; design §4.6): an instance of a headless harness plus a model, on the same machinery, differing only in its instructions, permissions and lifecycle (decided 2026-10-13). The conversation uses that harness's own UI. The harness you already use is the foreman (decided 2026-10-16; shipped). `brigada init` sets a repo up in one step: it registers brigada's tools in your harness (Claude Code through `.mcp.json`, Codex through `.codex/config.toml`), writes the foreman rules to `.brigada/foreman.md` and adds a short router block to `AGENTS.md` that points to them. You talk in your own session; a coordinator session in a parent folder (mode B) can also watch several projects. While nobody is typing, the engine wakes a separate brigada-owned foreman session, and the engine journal is the handoff between the two conversations ([design.md](design.md) §4.6, §13.1). `brigada` opening the foreman in your terminal stays as the fallback for a harness that cannot host the tools.
 - **The engine does the mechanics in code:** who is eligible, healthy and has quota; leases and fencing; caps and budgets; the outcome record; review routing. The foreman decides; the engine enforces.
 - **No state lives only in the foreman's session.** The plan, tasks, decisions, pending questions and outcomes are in the engine store (and the plan also in the repo), so a foreman session can end, crash or resume without losing work. Acceptance test: kill the foreman mid-plan; a fresh session rebuilds the plan, in-flight tasks and open questions from engine tools alone.
-- **You choose the foreman's harness and model** (decided 2026-10-12), e.g. Claude Code with a given model. Proposal (2026-10-19): init asks its effort too (settable per project today), and for the workers you choose only which CLIs may run tasks and how many tasks run at once; brigada offers every model those CLIs list, and the foreman chooses the tier and effort per task ([design.md](design.md) §13.1). **When it hits its subscription limit, brigada notifies you and you decide** (decided 2026-10-12): wait for the reset, switch the foreman to another harness or model (the new session rebuilds everything from the engine, per the test above), or let approved plans continue without it. Without any foreman, the plain commands still work: `brigada status`, `stats`, `cancel`, and approved plans keep running.
+- **You choose the foreman's harness and model** (decided 2026-10-12), e.g. Claude Code with a given model. Init asks its effort too (decided 2026-10-19; shipped) (settable per project today), and for the workers you choose only which CLIs may run tasks and how many tasks run at once; brigada offers every model those CLIs list, and the foreman chooses the tier and effort per task ([design.md](design.md) §13.1). **When it hits its subscription limit, brigada notifies you and you decide** (decided 2026-10-12): wait for the reset, switch the foreman to another harness or model (the new session rebuilds everything from the engine, per the test above), or let approved plans continue without it. Without any foreman, the plain commands still work: `brigada status`, `stats`, `cancel`, and approved plans keep running.
 
 ## 5. Local first, remote-ready (decided 2026-10-12)
 
@@ -65,14 +65,18 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 
 Remote later means: the engine on a server; runners on any host with logged-in CLIs; `brigada --server …` from any device; then GitHub issues as a source, notifications, and chat front ends as clients.
 
-## 6. Launch scope (proposal)
+## 6. Launch scope (decided 2026-10-20)
 
 In:
-- the foreman: conversation, plan with dependencies, confirm above a limit, dispatch, watch, failure handling, stop and cancel, report;
+- the foreman in your own harness session (mode A), wired by `brigada init` through the `AGENTS.md` router block and `.brigada/foreman.md`, with Codex wired through `.codex/config.toml`: conversation, plan with dependencies, confirm above a limit, dispatch, watch, failure handling, stop and cancel, report;
+- the coordinator session over several projects (mode B);
+- `brigada init`, which sets a repo up in one step;
+- `brigada land`, which squashes approved branches onto a local branch and stops before any push;
+- tiers and effort per task, with the escalation ladder (effort, then tier) and cost-weighted dispatch;
 - local notifications: an OS notification plus a "needs you" queue in `brigada status` (for the foreman's limit, plan approval, questions);
 - `brigada review --branch <x>` without the foreman (the author's family from the job record or the `Co-Authored-By` trailer): it seeds the record and shows value on its own;
 - the engine and a local runner;
-- adapters for claude, codex, gemini, plus one cheap or open CLI (kimi, qwen or opencode);
+- adapters for Claude Code, Codex, Kimi and opencode (Gemini waits for headless sign-in);
 - check and cross-family review;
 - the outcome record and `brigada stats`;
 - quota from CodexBar's CLI (optional) plus limit-hit errors;
@@ -83,11 +87,13 @@ In:
 Not at launch (backlog):
 - remote engine and runners;
 - GitHub issues as a source, notifications;
-- the foreman in your own harness session, a coordinator session over several projects, and one-step `brigada init` with a committed `.brigada/project.yaml` (designed 2026-10-16, [design.md](design.md) §15 phase 6; not built);
-- a web UI, containers, auto-merge (a local `brigada land` that squashes approved branches onto a local branch and stops before any push is designed, 2026-10-16, [design.md](design.md) §7.1; not built);
+- a web UI, containers, auto-merge (`brigada land` never pushes);
+- the Gemini adapter;
 - connectors to chat front ends.
 
 ## 7. Alternatives and position
+
+brigada is a standalone tool under your own harness session: not a board, and not an engine for one.
 
 | Alternative | What's missing for this user |
 |---|---|
@@ -112,7 +118,7 @@ Not at launch (backlog):
 
 ## 10. Validation and metric (proposal)
 
-- A demand check before building beyond the smallest version: a 30-second demo (the foreman splitting a real ask, plus `brigada stats`) and a problem post (HN, r/ClaudeAI, r/LocalLLaMA).
+- A quiet public release with a few users, then the launch posts: a 30-second demo (the foreman splitting a real ask, plus `brigada stats`) and a problem post (HN, r/ClaudeAI, r/LocalLLaMA).
 - Dogfood gate: continue past the smallest version only if the maintainers use it daily for their own repo work.
 - Metric: weekly active installs, and repos with 50+ recorded outcomes.
 
@@ -130,10 +136,15 @@ Not at launch (backlog):
 
 ## 12. Open decisions
 
-Decided (2026-10-12): you choose the foreman's harness and model, and decide what happens when it hits its limit; plan approval only above a size or risk limit; tasks with dependencies at launch; the plan is also written into the repo (fault tolerance); license Apache-2.0 (in the repo since c8cb5c3).
+Decided (2026-10-12): you choose the foreman's harness and model, and decide what happens when it hits its limit; plan approval only above a size or risk limit; tasks with dependencies at launch; the plan is also written into the repo (fault tolerance), at `.brigada/plans/` on the `brigada/plans` branch by default with `main` as a setting, the engine store being authoritative; license Apache-2.0 (in the repo since c8cb5c3).
+
+Decided (2026-10-16): the harness you already use is the foreman (mode A), or one session coordinates several projects (mode B); `brigada init` with a committed `.brigada/project.yaml`; `brigada land`, local only.
+
+Decided (2026-10-19): tiers and effort per task, an agent per model, the tier fallback; init's foreman-first questions and tasks at once.
+
+Decided (2026-10-20): cost-weighted dispatch, the escalation ladder of effort then tier, and the `AGENTS.md` router block with `.brigada/foreman.md`, with Codex wired through `.codex/config.toml`.
 
 Open:
 1. The size and risk limit for plan approval: how it's measured (task count, classes, files touched, protected paths).
-2. **How the foreman learns about events while nobody is typing** (interactive only, or resumed headless by the engine); see [design.md](design.md) §4. For your own session the direction is set (2026-10-16): events reach it while it holds the foreman role, and the engine wakes a separate headless foreman session otherwise (§4.6); the per-harness facts it needs are open (§16 item 4).
-3. Where the plan file lives in the repo (a path such as `.brigada/plans/`, and on which branch), and what wins if it and the engine store disagree.
-4. Tiers and effort (proposal, 2026-10-19; [design.md](design.md) §6.1, §8, §13.1): direction set, that the user configures the foreman's model and effort and the worker CLIs only, every listed model of those CLIs is an agent, the foreman sets a tier and an effort per task, and a failed task climbs a tier on its own. Open: the tier table, the default caps, and the effort extremes (design §16 item 12).
+2. **How the foreman learns about events while nobody is typing** (interactive only, or resumed headless by the engine); see [design.md](design.md) §4. For your own session the engine wakes a separate headless foreman session (§4.6); the per-harness facts it needs are open (§16 item 4).
+3. Tiers and effort ([design.md](design.md) §16 item 12): the tier table as vendors rename models, and whether the effort levels reach a CLI's extremes.
