@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -17,12 +16,15 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/term"
 )
 
-// Harness wiring for mode A (design §13.1 item 7, §4.6 "What the facts
-// allow"): the bridge in the repository's .mcp.json, the Stop hook in
-// .claude/settings.local.json, and the foreman instructions as the
-// brigada-owned rules file routed to from AGENTS.md (initrouter.go). The
-// files are edited minimally: only brigada's entries change, never the
-// rest of the user's bytes.
+// The wiring an older init left in a repository (mode A, retired): the
+// bridge in the repository's .mcp.json, the Stop hook in
+// .claude/settings.local.json, the foreman rules as .brigada/foreman.md
+// routed to from AGENTS.md (initrouter.go), and the Codex table in
+// .codex/config.toml. Init writes none of it anymore; a rerun of init and
+// brigada remove strip it (removewiring.go). The files are edited
+// minimally: only brigada's entries change, never the rest of the user's
+// bytes. The parent-folder coordinator's wiring (initparent.go) is still
+// written.
 
 const (
 	wiringMCPFile            = ".mcp.json"
@@ -34,37 +36,15 @@ const (
 	hookConfirmCommand       = "brigada hold confirm"
 
 	// wiringSkillFile is where an older init put the rules, as a skill;
-	// init now removes it when it carries brigada's marker.
+	// a rerun of init and brigada remove delete it when it carries
+	// brigada's marker.
 	wiringSkillFile = ".claude/skills/brigada-foreman/SKILL.md"
 )
 
-// initCodexText is init's closing word for Codex, after the wiring plan:
-// init has written .codex/config.toml with brigada's table
-// (planCodexWiring), which Codex loads only from a trusted folder — project
-// config since Codex 0.78.0, trust-gated since 0.88.0, verified from Codex's
-// documentation and history — so the user trusts the folder on the first
-// codex run. The user-level command remains only as the fallback for Codex
-// versions without project config.
-func initCodexText(w io.Writer) string {
-	style := initPresentation(w).style
-	return "  " + style.Bold("Codex") + ": on the first codex run here, trust this folder when Codex asks\n" +
-		"    (only a trusted folder loads .codex/config.toml), then ask Codex to plan\n" +
-		"    the first task. " + style.Dim("On Codex older than 0.78 (no project config):") + "\n" +
-		"    " + style.Accent("codex mcp add brigada-foreman -- brigada mcp --foreman") + "\n"
-}
-
+// mcpBridge is one server entry in a .mcp.json file.
 type mcpBridge struct {
 	Command string   `json:"command"`
 	Args    []string `json:"args"`
-}
-
-type hookCommand struct {
-	Type    string `json:"type"`
-	Command string `json:"command"`
-}
-
-type hookGroup struct {
-	Hooks []hookCommand `json:"hooks"`
 }
 
 // wireFile is one planned wiring change. err set means the file is damaged or
@@ -87,81 +67,12 @@ func (w wireFile) changed() bool {
 		(w.exists && w.next == nil && w.state == "removed"))
 }
 
-// planWiring computes the Claude Code project-scope changes; it reads files
-// and writes nothing.
-func planWiring(root string) []wireFile {
-	rules := rulesContent()
-	layout := planRouterLayout(root)
-	steps := []wireStep{
-		{wiringMCPFile, func(d []byte, exists bool) ([]byte, string, error) { return mergeMCPServer(d, exists) }},
-		{wiringSettingsFile, func(d []byte, exists bool) ([]byte, string, error) { return mergeHooks(d, exists) }},
-		{wiringSharedSettingsFile, removeSharedHooks},
-		{wiringRulesFile, func(d []byte, exists bool) ([]byte, string, error) {
-			return mergeSkillMarked(d, exists, rules, wiringSkillMarker)
-		}},
-		{layout.router, func(d []byte, exists bool) ([]byte, string, error) { return mergeRouter(layout.router, d, exists) }},
-	}
-	if layout.imprt != "" {
-		steps = append(steps, wireStep{layout.imprt, func(d []byte, exists bool) ([]byte, string, error) {
-			return mergeImport(layout.imprt, d, exists)
-		}})
-	}
-	steps = append(steps, wireStep{wiringSkillFile, retireSkill})
-	files := planSteps(root, steps)
-	for i := range files {
-		switch f := &files[i]; f.rel {
-		case layout.router:
-			f.purpose = "a short block that makes your Claude session brigada's foreman"
-		case wiringSkillFile:
-			if f.changed() {
-				f.purpose = "the rules of an older init; " + wiringRulesFile + " replaces it"
-			} else {
-				f.purpose = "yours (no brigada marker); left as it is"
-			}
-		}
-	}
-	if layout.link != "" {
-		files = append(files, wireFile{root: root, rel: layout.link, path: filepath.Join(root, layout.link), exists: true, state: "unchanged",
-			purpose: "a link to " + layout.router + ", which holds the block; no import needed"})
-	}
-	// Ignore the private settings before creating them. Include the exclude edit
-	// in the reviewed plan and use the same concurrent-edit guard on apply.
-	if settings := files[1]; !settings.exists && settings.changed() {
-		if exclude := planSettingsExclude(root); exclude != nil {
-			files = append([]wireFile{*exclude}, files...)
-		}
-	}
-	return files
-}
-
-func planSettingsExclude(root string) *wireFile {
-	err := exec.Command("git", "-C", root, "check-ignore", "-q", "--", wiringSettingsFile).Run()
-	if err == nil {
-		return nil
-	}
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
-		return &wireFile{rel: "git info/exclude", err: fmt.Errorf("checking private settings ignore: %w", err)}
-	}
-	out, err := exec.Command("git", "-C", root, "rev-parse", "--git-path", "info/exclude").Output()
-	if err != nil {
-		return &wireFile{rel: "git info/exclude", err: fmt.Errorf("locating exclude file: %w", err)}
-	}
-	path := strings.TrimSpace(string(out))
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(root, path)
-	}
-	files := planSteps(filepath.Dir(path), []wireStep{{filepath.Base(path), func(d []byte, exists bool) ([]byte, string, error) {
-		next := append([]byte(nil), d...)
-		if len(next) > 0 && next[len(next)-1] != '\n' {
-			next = append(next, '\n')
-		}
-		next = append(next, "/"+wiringSettingsFile+"\n"...)
-		return next, "added", nil
-	}}})
-	f := files[0]
-	f.rel = filepath.ToSlash(strings.TrimSpace(string(out)))
-	return &f
+// planLegacyWiring plans what a rerun of init strips from a repository an
+// older init wired: everything brigada remove removes, the git exclude
+// line that hid the private settings included. It reads files and writes
+// nothing.
+func planLegacyWiring(root string) []wireFile {
+	return append([]wireFile{planExcludeRemoval(root)}, planSteps(root, legacyWiringSteps(root))...)
 }
 
 // wireStep is one file a wiring plan edits: its path under the root and
@@ -171,8 +82,8 @@ type wireStep struct {
 	edit func([]byte, bool) ([]byte, string, error)
 }
 
-// planSteps reads each step's file under root and computes its edit;
-// like planWiring it writes nothing.
+// planSteps reads each step's file under root and computes its edit; it
+// writes nothing.
 func planSteps(root string, steps []wireStep) []wireFile {
 	var files []wireFile
 	for _, s := range steps {
@@ -249,19 +160,23 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 		case f.rel == engine.ProjectConfigPath:
 			purpose = "the settings above"
 		case f.rel == wiringMCPFile:
-			purpose = "lets Claude Code here use brigada (Claude Code asks you to approve it)"
+			purpose = "removes the brigada server an older init added"
 		case f.rel == wiringCodexFile:
-			purpose = "lets Codex here use brigada (Codex loads it once you trust this folder)"
+			purpose = "removes the brigada table an older init added"
 		case f.rel == wiringSettingsFile:
-			purpose = "private, kept out of git: when your Claude turn ends, brigada's foreman picks up what happened meanwhile"
-		case f.rel == wiringRulesFile:
-			purpose = "brigada's foreman rules for your Claude session (brigada's own file)"
-		case f.rel == wiringClaudeFile:
-			purpose = "imports AGENTS.md, so Claude Code reads that block"
+			purpose = "removes the Stop hook an older init added"
 		case f.rel == wiringSharedSettingsFile:
-			purpose = "removes brigada hooks moved to private settings"
+			purpose = "removes the legacy brigada hooks an older init wrote"
+		case f.rel == wiringRulesFile:
+			purpose = "deletes the foreman rules an older init wrote (brigada's own file)"
+		case f.rel == wiringAgentsFile:
+			purpose = "removes the marked router block an older init added"
+		case f.rel == wiringClaudeFile:
+			purpose = "removes the marked import an older init added"
+		case f.rel == wiringSkillFile:
+			purpose = "deletes the old skill carrying brigada's marker"
 		default:
-			purpose = "keeps private Claude Code settings out of git"
+			purpose = "removes the exclude line that hid the private Claude Code settings"
 		}
 		state := initFileState(f)
 		var colored string
@@ -360,8 +275,8 @@ func splitDiffLines(d []byte) []string {
 	return strings.Split(strings.TrimSuffix(string(d), "\n"), "\n")
 }
 
-// applyWiring writes every changed, undamaged file, and deletes the one an
-// older init left behind. A file edited since the plan was printed is
+// applyWiring writes every changed, undamaged file, and deletes the ones a
+// removal plan empties. A file edited since the plan was printed is
 // refused, never overwritten.
 func applyWiring(files []wireFile) error {
 	for _, f := range files {
@@ -407,23 +322,13 @@ func damaged(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", errDamaged, fmt.Sprintf(format, args...))
 }
 
-func renderNew(v any) ([]byte, error) {
-	out, err := json.MarshalIndent(v, "", "  ")
-	return append(out, '\n'), err
-}
-
-// mergeMCPServer adds or replaces the "brigada" server under mcpServers.
-func mergeMCPServer(d []byte, exists bool) ([]byte, string, error) {
-	return mergeMCPEntry(d, exists, "brigada", []string{"mcp", "--foreman"})
-}
-
 // mergeMCPEntry adds or replaces the server called name under mcpServers
 // with the `brigada` command and args; every other byte stays.
 func mergeMCPEntry(d []byte, exists bool, name string, args []string) ([]byte, string, error) {
 	ours := mcpBridge{Command: "brigada", Args: args}
 	if !exists {
-		out, err := renderNew(map[string]any{"mcpServers": map[string]any{name: ours}})
-		return out, "created", err
+		out, err := json.MarshalIndent(map[string]any{"mcpServers": map[string]any{name: ours}}, "", "  ")
+		return append(out, '\n'), "created", err
 	}
 	root, err := jsonRoot(d)
 	if err != nil {
@@ -449,16 +354,6 @@ func mergeMCPEntry(d []byte, exists bool, name string, args []string) ([]byte, s
 	}
 	out, err := jsonReplace(d, span, ours)
 	return out, "replaced", err
-}
-
-// mergeHooks adds or replaces brigada's Stop hook in private settings.
-func mergeHooks(d []byte, exists bool) ([]byte, string, error) {
-	if !exists {
-		hooks := map[string]any{"Stop": []hookGroup{{Hooks: []hookCommand{{Type: "command", Command: hookYieldCommand}}}}}
-		out, err := renderNew(map[string]any{"hooks": hooks})
-		return out, "created", err
-	}
-	return mergeHook(d, "Stop", hookYieldCommand)
 }
 
 // removeSharedHooks migrates only exact brigada commands out of shared
@@ -531,82 +426,6 @@ func removeSharedHook(d []byte) ([]byte, bool, error) {
 		}
 	}
 	return d, false, nil
-}
-
-func mergeHook(d []byte, event, command string) ([]byte, string, error) {
-	ours := hookCommand{Type: "command", Command: command}
-	group := hookGroup{Hooks: []hookCommand{ours}}
-	root, err := jsonRoot(d)
-	if err != nil {
-		return nil, "", err
-	}
-	hi := root.lookup("hooks")
-	if hi < 0 {
-		out, err := jsonInsert(d, root, "hooks", map[string]any{event: []hookGroup{group}})
-		return out, "added", err
-	}
-	hooks, err := jsonSub(d, root, hi, '{', "hooks")
-	if err != nil {
-		return nil, "", err
-	}
-	ei := hooks.lookup(event)
-	if ei < 0 {
-		out, err := jsonInsert(d, hooks, event, []hookGroup{group})
-		return out, "added", err
-	}
-	list, err := jsonSub(d, hooks, ei, '[', "hooks."+event)
-	if err != nil {
-		return nil, "", err
-	}
-	for _, gspan := range list.vals {
-		if d[gspan.start] != '{' {
-			continue
-		}
-		g, err := jsonParse(d, gspan.start)
-		if err != nil {
-			return nil, "", err
-		}
-		gi := g.lookup("hooks")
-		if gi < 0 || d[g.vals[gi].start] != '[' {
-			continue
-		}
-		inner, err := jsonParse(d, g.vals[gi].start)
-		if err != nil {
-			return nil, "", err
-		}
-		for _, hspan := range inner.vals {
-			if d[hspan.start] != '{' {
-				continue
-			}
-			h, err := jsonParse(d, hspan.start)
-			if err != nil {
-				return nil, "", err
-			}
-			ci := h.lookup("command")
-			if ci < 0 {
-				continue
-			}
-			var have string
-			if json.Unmarshal(d[h.vals[ci].start:h.vals[ci].end], &have) != nil {
-				continue
-			}
-			if have != command && !strings.HasPrefix(have, command+" ") {
-				continue
-			}
-			var typ string
-			if ti := h.lookup("type"); ti >= 0 {
-				_ = json.Unmarshal(d[h.vals[ti].start:h.vals[ti].end], &typ)
-			}
-			// A command the user tuned with flags of their own stays as it is.
-			if typ == "command" {
-				return d, "unchanged", nil
-			}
-			out, err := jsonReplace(d, hspan, ours)
-			return out, "replaced", err
-		}
-	}
-	out, err := jsonInsert(d, list, "", group)
-	return out, "added", err
 }
 
 // --- minimal JSON editing: offsets into the original bytes -------------

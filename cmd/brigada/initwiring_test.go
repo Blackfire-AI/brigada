@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/foreman"
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
@@ -52,13 +54,160 @@ func wireRead(t *testing.T, root, rel string) string {
 	return string(data)
 }
 
-func wireApply(t *testing.T, root string) []wireFile {
+// oldRouterBody rebuilds the router block an older init wrote between its
+// markers, so removal is tested against the real thing.
+func oldRouterBody() string {
+	return fmt.Sprintf(`If your prompt opens with %q or
+%q, you are a worker or reviewer run by brigada:
+follow that prompt; this block and the foreman rules do not apply to you.
+
+Otherwise: in this repository, code changes go through brigada, and you are
+its foreman. Read `+"`"+wiringRulesFile+"`"+` first and follow it, unless your
+prompt already gives you brigada's foreman rules. Plan work with brigada's
+tools; do not edit code yourself unless the user explicitly asks you to.
+If brigada's tools are not available in this session, say so and tell the
+user how to enable them (restart the session in this repository and approve
+the `+"`brigada`"+` MCP server) instead of doing the work by hand.`, prompt.WorkerOpener, prompt.ReviewerOpener)
+}
+
+// oldRulesContent rebuilds the rules file an older init wrote.
+func oldRulesContent() []byte {
+	return []byte(fmt.Sprintf(`%s v%d -->
+
+These are brigada's foreman rules for your own session (mode A). Brigada owns
+this file and replaces it on "brigada init"; put your own instructions elsewhere.
+
+%s`, wiringSkillMarker, foreman.InstructionsVersion, foreman.Instructions()))
+}
+
+// wireSection appends a marked section to a Markdown file the way an older
+// init did: what the record in its begin marker names is what this adds. A
+// missing file is created holding only the section; an existing empty one
+// gets no separators, as init added none.
+func wireSection(d []byte, exists bool, kind, body string) []byte {
+	render := func(record string) []byte {
+		return []byte("<!-- brigada-managed: " + kind + " v1" + record + " -->\n" + body + "\n<!-- /brigada-managed: " + kind + " -->\n")
+	}
+	if !exists {
+		return render("; init added the file")
+	}
+	record := ""
+	next := append([]byte(nil), d...)
+	if len(next) > 0 {
+		record = fmt.Sprintf("; init added a blank line after byte %d", len(d))
+		if next[len(next)-1] != '\n' {
+			record = fmt.Sprintf("; init added a newline, a blank line after byte %d", len(d))
+			next = append(next, '\n')
+		}
+		next = append(next, '\n')
+	}
+	return append(next, render(record)...)
+}
+
+// wireApply writes the mode A wiring an older init left behind — the files,
+// their markers and the records exactly as init wrote them — including the
+// git exclude line for the private settings when git does not ignore it.
+func wireApply(t *testing.T, root string) {
 	t.Helper()
-	files := planWiring(root)
-	if err := applyWiring(files); err != nil {
+	// .mcp.json: the "brigada" server, merged into any user servers with
+	// init's own byte-preserving edit.
+	mcpData, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(wiringMCPFile)))
+	exists := err == nil
+	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	return files
+	mcpNext, _, err := mergeMCPEntry(mcpData, exists, "brigada", []string{"mcp", "--foreman"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wireWrite(t, root, wiringMCPFile, string(mcpNext))
+	// The private settings: brigada's Stop hook, appended as a group of the
+	// Stop list or into a fresh file, other bytes untouched.
+	group := map[string]any{"hooks": []any{map[string]any{"type": "command", "command": hookYieldCommand}}}
+	settingsPath := filepath.Join(root, filepath.FromSlash(wiringSettingsFile))
+	settings, err := os.ReadFile(settingsPath)
+	exists = err == nil
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	var settingsNext []byte
+	if !exists {
+		settingsNext, err = json.MarshalIndent(map[string]any{"hooks": map[string]any{"Stop": []any{group}}}, "", "  ")
+		settingsNext = append(settingsNext, '\n')
+	} else {
+		doc, derr := jsonRoot(settings)
+		if derr != nil {
+			t.Fatal(derr)
+		}
+		hi := doc.lookup("hooks")
+		if hi < 0 {
+			settingsNext, err = jsonInsert(settings, doc, "hooks", map[string]any{"Stop": []any{group}})
+		} else {
+			hooks, derr := jsonSub(settings, doc, hi, '{', "hooks")
+			if derr != nil {
+				t.Fatal(derr)
+			}
+			ei := hooks.lookup("Stop")
+			if ei < 0 {
+				settingsNext, err = jsonInsert(settings, hooks, "Stop", []any{group})
+			} else {
+				list, derr := jsonSub(settings, hooks, ei, '[', "hooks.Stop")
+				if derr != nil {
+					t.Fatal(derr)
+				}
+				settingsNext, err = jsonInsert(settings, list, "", group)
+			}
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	wireWrite(t, root, wiringSettingsFile, string(settingsNext))
+	wireWrite(t, root, wiringRulesFile, string(oldRulesContent()))
+	wireWrite(t, root, wiringCodexFile, "[mcp_servers.brigada]\ncommand = \"brigada\"\nargs = [\"mcp\", \"--foreman\"]\n")
+	router, imprt := wiringAgentsFile, wiringClaudeFile
+	switch {
+	case linksTo(root, wiringAgentsFile, wiringClaudeFile) && !linksTo(root, wiringClaudeFile, wiringAgentsFile):
+		router, imprt = wiringClaudeFile, ""
+	case linksTo(root, wiringClaudeFile, wiringAgentsFile) && !linksTo(root, wiringAgentsFile, wiringClaudeFile):
+		router, imprt = wiringAgentsFile, ""
+	}
+	sections := map[string][2]string{router: {"router", oldRouterBody()}}
+	if imprt != "" {
+		sections[imprt] = [2]string{"import", "@AGENTS.md"}
+	}
+	for rel, s := range sections {
+		path := filepath.Join(root, rel)
+		data, err := os.ReadFile(path)
+		exists := err == nil
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, wireSection(data, exists, s[0], s[1]), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The exclude line for the private settings, added only when git does
+	// not ignore the file, to a linked worktree's shared exclude file too.
+	if exec.Command("git", "-C", root, "check-ignore", "-q", "--", wiringSettingsFile).Run() == nil {
+		return
+	}
+	out, err := exec.Command("git", "-C", root, "rev-parse", "--git-path", "info/exclude").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	data, _ := os.ReadFile(path)
+	next := string(data)
+	if next != "" && !strings.HasSuffix(next, "\n") {
+		next += "\n"
+	}
+	if err := os.WriteFile(path, []byte(next+"/"+wiringSettingsFile+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func wireJSON(t *testing.T, text string) any {
@@ -80,294 +229,6 @@ func keepsBytes(old, next string) bool {
 		}
 	}
 	return i == len(old)
-}
-
-func TestWiringFreshFilesHoldExactlyBrigadasEntries(t *testing.T) {
-	root := wireRepo(t)
-	wireApply(t, root)
-	wantMCP := map[string]any{"mcpServers": map[string]any{"brigada": map[string]any{"command": "brigada", "args": []any{"mcp", "--foreman"}}}}
-	if got := wireJSON(t, wireRead(t, root, ".mcp.json")); !reflect.DeepEqual(got, wantMCP) {
-		t.Errorf(".mcp.json = %v", got)
-	}
-	hook := func(cmd string) []any {
-		return []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": cmd}}}}
-	}
-	wantSettings := map[string]any{"hooks": map[string]any{"Stop": hook("brigada hold yield")}}
-	if got := wireJSON(t, wireRead(t, root, ".claude/settings.local.json")); !reflect.DeepEqual(got, wantSettings) {
-		t.Errorf("settings.local.json = %v", got)
-	}
-	if _, err := os.Stat(filepath.Join(root, ".claude/settings.json")); !os.IsNotExist(err) {
-		t.Errorf("fresh wiring created shared settings: %v", err)
-	}
-	rules := wireRead(t, root, wiringRulesFile)
-	if !strings.HasPrefix(rules, wiringSkillMarker+" v") || strings.Contains(rules, "---\nname:") || !strings.Contains(rules, "Brigada owns\nthis file and replaces it on \"brigada init\"") || !strings.Contains(rules, "plan_create") {
-		t.Errorf("rules = %.200s", rules)
-	}
-	if fileExists(filepath.Join(root, wiringSkillFile)) {
-		t.Error("init wrote the retired skill")
-	}
-	agents := wireRead(t, root, wiringAgentsFile)
-	if !strings.HasPrefix(agents, "<!-- brigada-managed: router v1; init added the file -->\n") || !strings.HasSuffix(agents, "\n<!-- /brigada-managed: router -->\n") {
-		t.Errorf("AGENTS.md = %q", agents)
-	}
-	for _, want := range []string{"\"You are a brigada worker\"", "\"You are a brigada reviewer\"", "`" + wiringRulesFile + "`", "foreman", "restart the session in this repository", "`brigada` MCP server"} {
-		if !strings.Contains(agents, want) {
-			t.Errorf("AGENTS.md lacks %q:\n%s", want, agents)
-		}
-	}
-	if strings.Contains(agents, "@"+wiringRulesFile) || strings.Contains(agents, "@AGENTS.md") || strings.Contains(agents, "hold_acquire") {
-		t.Errorf("AGENTS.md imports the rules or holds them:\n%s", agents)
-	}
-	if got, want := wireRead(t, root, wiringClaudeFile), "<!-- brigada-managed: import v1; init added the file -->\n@AGENTS.md\n<!-- /brigada-managed: import -->\n"; got != want {
-		t.Errorf("CLAUDE.md = %q, want %q", got, want)
-	}
-	for _, rel := range []string{".mcp.json", ".claude/settings.local.json"} {
-		for _, secret := range []string{"token", "secret", root} {
-			if strings.Contains(wireRead(t, root, rel), secret) {
-				t.Errorf("%s mentions %q", rel, secret)
-			}
-		}
-	}
-}
-
-func TestWiringKeepsOthersAndIsIdempotent(t *testing.T) {
-	root := wireRepo(t)
-	mcp := "{\n\t\"mcpServers\": {\n\t\t\"other\": { \"command\": \"x\", \"args\": [] }\n\t},\n\t\"extra\": [1,  2]\n}\n"
-	settings := "{\n    \"model\": \"opus\",\n    \"hooks\": {\n        \"Stop\": [\n            {\"hooks\": [{\"type\": \"command\", \"command\": \"mine\"}]}\n        ],\n        \"PreToolUse\": []\n    }\n}\n"
-	claudeMD := "# mine\n"
-	wireWrite(t, root, ".mcp.json", mcp)
-	wireWrite(t, root, ".claude/settings.local.json", settings)
-	wireWrite(t, root, ".claude/settings.json", settings)
-	wireWrite(t, root, "CLAUDE.md", claudeMD)
-	wireApply(t, root)
-
-	gotMCP, gotSettings := wireRead(t, root, ".mcp.json"), wireRead(t, root, ".claude/settings.local.json")
-	if !keepsBytes(mcp, gotMCP) || !keepsBytes(settings, gotSettings) {
-		t.Errorf("user bytes changed:\n%s\n%s", gotMCP, gotSettings)
-	}
-	if !strings.Contains(gotMCP, "\t\t\"brigada\": {") {
-		t.Errorf("entry does not follow the file's tab layout:\n%s", gotMCP)
-	}
-	if got := wireRead(t, root, ".claude/settings.json"); got != settings {
-		t.Errorf("shared settings changed: %s", got)
-	}
-	if got := wireRead(t, root, "CLAUDE.md"); got != claudeMD+"\n<!-- brigada-managed: import v1"+addedBlank(claudeMD)+"\n@AGENTS.md\n<!-- /brigada-managed: import -->\n" {
-		t.Errorf("CLAUDE.md = %q", got)
-	}
-	m := wireJSON(t, gotMCP).(map[string]any)
-	servers := m["mcpServers"].(map[string]any)
-	if len(servers) != 2 || servers["other"] == nil || servers["brigada"] == nil || m["extra"] == nil {
-		t.Errorf("servers = %v", m)
-	}
-	s := wireJSON(t, gotSettings).(map[string]any)
-	hooks := s["hooks"].(map[string]any)
-	if s["model"] != "opus" || len(hooks["Stop"].([]any)) != 2 || hooks["SessionStart"] != nil || hooks["PreToolUse"] == nil {
-		t.Errorf("settings = %v", s)
-	}
-	if !strings.HasPrefix(strings.SplitN(gotSettings, "\"Stop\"", 2)[1], ": [\n            {\"hooks\": [{\"type\": \"command\", \"command\": \"mine\"}]}") {
-		t.Errorf("the user's hook moved:\n%s", gotSettings)
-	}
-
-	again := planWiring(root)
-	for _, f := range again {
-		if f.err != nil || f.changed() || f.state != "unchanged" {
-			t.Errorf("re-run on %s: state %s err %v", f.rel, f.state, f.err)
-		}
-	}
-	if err := applyWiring(again); err != nil {
-		t.Fatal(err)
-	}
-	if wireRead(t, root, ".mcp.json") != gotMCP || wireRead(t, root, ".claude/settings.local.json") != gotSettings {
-		t.Error("re-run rewrote a file")
-	}
-}
-
-func TestWiringReplacesBrigadasEntriesInPlace(t *testing.T) {
-	root := wireRepo(t)
-	mcp := "{\"mcpServers\":{\"a\":{\"command\":\"a\"},\"brigada\":{\"command\":\"/old/brigada\"},\"z\":{\"command\":\"z\"}}}"
-	settings := "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"before\"}]},{\"hooks\":[{\"type\":\"bogus\",\"command\":\"brigada hold yield\"}]},{\"hooks\":[{\"type\":\"command\",\"command\":\"after\"}]}]}}"
-	wireWrite(t, root, ".mcp.json", mcp)
-	wireWrite(t, root, ".claude/settings.local.json", settings)
-	wireApply(t, root)
-	wantMCP := strings.Replace(mcp, "{\"command\":\"/old/brigada\"}", "{\"command\":\"brigada\",\"args\":[\"mcp\",\"--foreman\"]}", 1)
-	if got := wireRead(t, root, ".mcp.json"); got != wantMCP {
-		t.Errorf("mcp:\n%s\nwant\n%s", got, wantMCP)
-	}
-	wantSettings := strings.Replace(settings, "\"type\":\"bogus\"", "\"type\":\"command\"", 1)
-	if got := wireRead(t, root, ".claude/settings.local.json"); got != wantSettings {
-		t.Errorf("settings:\n%s\nwant\n%s", got, wantSettings)
-	}
-}
-
-func TestWiringDamagedFilesAreReportedAndLeftAlone(t *testing.T) {
-	for _, tc := range []struct{ name, rel, body string }{
-		{"truncated mcp", ".mcp.json", "{\"mcpServers\": "},
-		{"mcp servers not an object", ".mcp.json", "{\"mcpServers\": []}"},
-		{"mcp top level array", ".mcp.json", "[]"},
-		{"empty settings", ".claude/settings.local.json", ""},
-		{"hooks not an object", ".claude/settings.local.json", "{\"hooks\": []}"},
-		{"stop not an array", ".claude/settings.local.json", "{\"hooks\": {\"Stop\": {}}}"},
-		{"settings with comments", ".claude/settings.local.json", "{\n// no\n}"},
-		{"damaged shared settings", ".claude/settings.json", "{\"hooks\": "},
-		{"foreign rules", wiringRulesFile, "my own rules\n"},
-		{"router begin without end", wiringAgentsFile, "# mine\n<!-- brigada-managed: router v1 -->\ntext\n"},
-		{"router end without begin", wiringAgentsFile, "<!-- /brigada-managed: router -->\n"},
-		{"router end before begin", wiringAgentsFile, "<!-- /brigada-managed: router -->\n<!-- brigada-managed: router v1 -->\n"},
-		{"two router blocks", wiringAgentsFile, strings.Repeat("<!-- brigada-managed: router v1 -->\n<!-- /brigada-managed: router -->\n", 2)},
-		{"two import blocks", wiringClaudeFile, strings.Repeat("<!-- brigada-managed: import v1 -->\n@AGENTS.md\n<!-- /brigada-managed: import -->\n", 2)},
-		{"unclosed fence", wiringAgentsFile, "# mine\n```sh\nmake\n"},
-		{"unclosed tilde fence", wiringClaudeFile, "~~~\ntext\n"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root := wireRepo(t)
-			wireWrite(t, root, tc.rel, tc.body)
-			files := planWiring(root)
-			var hit bool
-			for _, f := range files {
-				if f.rel == tc.rel {
-					hit = true
-					if f.err == nil || f.changed() {
-						t.Errorf("%s not reported: state %s err %v", f.rel, f.state, f.err)
-					}
-				}
-			}
-			if !hit {
-				t.Fatal("file not planned")
-			}
-			var plan bytes.Buffer
-			printInitFiles(&plan, files, false)
-			if !strings.Contains(strings.Join(strings.Fields(plan.String()), " "), "left alone "+tc.rel+" ") {
-				t.Errorf("missing damaged-file reason: %s", plan.String())
-			}
-			if err := applyWiring(files); err != nil {
-				t.Fatal(err)
-			}
-			if got := wireRead(t, root, tc.rel); got != tc.body {
-				t.Errorf("damaged file rewritten: %q", got)
-			}
-		})
-	}
-}
-
-func TestWiringRulesRefreshOnlyTheirOwnFile(t *testing.T) {
-	root := wireRepo(t)
-	wireWrite(t, root, wiringRulesFile, wiringSkillMarker+" v0 -->\nold text\n")
-	wireApply(t, root)
-	if got := wireRead(t, root, wiringRulesFile); strings.Contains(got, "old text") || !strings.Contains(got, "plan_create") {
-		t.Errorf("rules not refreshed: %.200s", got)
-	}
-}
-
-func TestInitProbeListsWiringWritesNothing(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		extra      []string
-		wantWiring bool
-	}{
-		{"wiring", nil, true},
-		{"no wiring", []string{"--no-wiring"}, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			importRepo(t)
-			if err := os.WriteFile("go.mod", []byte("module example.invalid/test\n"), 0644); err != nil {
-				t.Fatal(err)
-			}
-			calls := fakeInitPATH(t, "claude", "codex")
-			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
-			args := append([]string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}, tc.extra...)
-			code, out, errOut := initDo(t, state, "", args...)
-			if code != 0 {
-				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
-			}
-			for _, want := range []string{"new .mcp.json lets Claude Code here use brigada", "new .claude/settings.local.json private, kept out of git:", "new .brigada/foreman.md brigada's foreman rules for your Claude session", "new AGENTS.md a short block that makes your Claude session brigada's foreman", "new CLAUDE.md imports AGENTS.md", "new .codex/config.toml lets Codex here use brigada", "trust this folder when Codex asks", "codex mcp add brigada-foreman -- brigada mcp --foreman"} {
-				if strings.Contains(strings.Join(strings.Fields(out), " "), want) != tc.wantWiring {
-					t.Errorf("%q present = %v, want %v\n%s", want, !tc.wantWiring, tc.wantWiring, out)
-				}
-			}
-			if !strings.Contains(out, "Files in this repository (brigada never commits them):") || !strings.Contains(strings.Join(strings.Fields(out), " "), "new .brigada/project.yaml the settings above") {
-				t.Errorf("missing repository files block:\n%s", out)
-			}
-			if strings.Contains(out, "auto_review") || strings.Contains(out, "already") || strings.Contains(out, "ready") {
-				t.Errorf("unexpected setup/approval claim:\n%s", out)
-			}
-			for _, rel := range []string{".mcp.json", ".claude", ".brigada", ".codex", wiringAgentsFile, wiringClaudeFile} {
-				if _, err := os.Stat(rel); !os.IsNotExist(err) {
-					t.Errorf("probe wrote %s: %v", rel, err)
-				}
-			}
-			data, _ := os.ReadFile(calls)
-			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-				if !strings.HasSuffix(line, " --help") {
-					t.Errorf("harness invoked beyond --help (codex command must be printed, not run): %q", line)
-				}
-			}
-		})
-	}
-}
-
-func TestInitProbeShowsDiffOfExistingWiring(t *testing.T) {
-	importRepo(t)
-	fakeInitPATH(t, "claude")
-	wireWrite(t, ".", ".mcp.json", "{\n  \"mcpServers\": {\n    \"other\": {\"command\": \"x\"}\n  }\n}\n")
-	state := filepath.Join(testsupport.ShortStateDir(t), "absent")
-	code, out, errOut := initDo(t, state, "", "--probe", "--check", "true", "--tools", "none", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--signed-in", "claude")
-	if code != 0 {
-		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
-	}
-	if !strings.Contains(out, "+++ b/.mcp.json") || !strings.Contains(out, "+        \"brigada\": {") && !strings.Contains(out, "+    \"brigada\": {") {
-		t.Errorf("no diff for .mcp.json:\n%s", out)
-	}
-	if got := wireRead(t, ".", ".mcp.json"); !strings.Contains(got, "\"other\"") || strings.Contains(got, "brigada") {
-		t.Errorf("probe changed .mcp.json: %s", got)
-	}
-}
-
-func TestInitNewFileContentsRequireVerbose(t *testing.T) {
-	for _, verbose := range []bool{false, true} {
-		t.Run(fmt.Sprint(verbose), func(t *testing.T) {
-			importRepo(t)
-			fakeInitPATH(t, "claude", "codex")
-			args := []string{"--probe", "--check", "true", "--tools", "none", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}
-			if verbose {
-				args = append(args, "--verbose")
-			}
-			code, out, errOut := initDo(t, filepath.Join(testsupport.ShortStateDir(t), "absent"), "", args...)
-			if code != 0 {
-				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
-			}
-			if !verbose {
-				for _, content := range []string{"default_check:", `"mcpServers":`, `"hooks":`, "name: brigada-foreman"} {
-					if strings.Contains(out, content) {
-						t.Errorf("new file contents shown without --verbose (%q):\n%s", content, out)
-					}
-				}
-			}
-			project, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none")
-			if err != nil {
-				t.Fatal(err)
-			}
-			files := append([]wireFile{{rel: engine.ProjectConfigPath, next: project}}, planWiring(".")...)
-			previous := -1
-			for _, f := range files {
-				if f.exists || f.err != nil || f.state == "unchanged" {
-					continue
-				}
-				full := "      " + strings.Join(splitDiffLines(f.next), "\n      ") + "\n"
-				if strings.Contains(out, full) != verbose {
-					t.Errorf("%s full contents present = %v, want %v\n%s", f.rel, !verbose, verbose, out)
-				}
-				if !verbose && strings.Contains(out, "+++ b/"+f.rel) {
-					t.Errorf("new file %s printed as a diff\n%s", f.rel, out)
-				}
-				// The row: the state column, two spaces, the path, then padding.
-				position := strings.Index(out, "  "+f.rel+"  ")
-				if position <= previous {
-					t.Errorf("%s missing or out of order\n%s", f.rel, out)
-				}
-				previous = position
-			}
-		})
-	}
 }
 
 func TestInitApplyPromptFileCounts(t *testing.T) {
@@ -406,50 +267,6 @@ func TestInitWorkerOnlyWiringNotes(t *testing.T) {
 	}
 }
 
-func TestWiringMigratesOldInstallAndStaysUnchanged(t *testing.T) {
-	root := wireRepo(t)
-	shared := `{
-  "model": "opus",
-  "hooks": {
-    "Stop": [{"matcher":"mine","hooks":[{"type":"command","command":"before"},{"type":"command","command":"brigada hold yield"},{"type":"command","command":"after"}]}],
-    "SessionStart": [{"hooks":[{"type":"command","command":"brigada hold confirm"}]}],
-    "PreToolUse": [{"hooks":[{"type":"command","command":"brigada hold yield --mine"},{"type":"command","command":"brigada hold confirm --mine"}]}]
-  },
-  "extra": [1,  2]
-}
-`
-	wireWrite(t, root, wiringSharedSettingsFile, shared)
-	files := planWiring(root)
-	var plan bytes.Buffer
-	printInitFiles(&plan, files, false)
-	if !strings.Contains(plan.String(), "--- a/"+wiringSharedSettingsFile) || !strings.Contains(plan.String(), "+++ b/"+wiringSharedSettingsFile) {
-		t.Fatalf("missing migration diff:\n%s", plan.String())
-	}
-	if got := wireRead(t, root, wiringSharedSettingsFile); got != shared {
-		t.Fatal("planning changed shared settings")
-	}
-	if err := applyWiring(files); err != nil {
-		t.Fatal(err)
-	}
-	want := strings.Replace(shared, `{"type":"command","command":"brigada hold yield"},`, "", 1)
-	want = strings.Replace(want, `"SessionStart": [{"hooks":[{"type":"command","command":"brigada hold confirm"}]}],`+"\n    ", "", 1)
-	if got := wireRead(t, root, wiringSharedSettingsFile); got != want {
-		t.Fatalf("migration:\n%s\nwant:\n%s", got, want)
-	}
-	local := wireRead(t, root, wiringSettingsFile)
-	if strings.Contains(local, hookConfirmCommand) || !strings.Contains(local, hookYieldCommand) {
-		t.Fatalf("private settings: %s", local)
-	}
-	for _, f := range wireApply(t, root) {
-		if f.err != nil || f.changed() || f.state != "unchanged" {
-			t.Errorf("rerun %s: state %s, err %v", f.rel, f.state, f.err)
-		}
-	}
-	if wireRead(t, root, wiringSharedSettingsFile) != want || wireRead(t, root, wiringSettingsFile) != local {
-		t.Fatal("rerun rewrote settings")
-	}
-}
-
 func TestWiringMigrationDropsOnlyOwnedHooks(t *testing.T) {
 	for _, tc := range []struct{ name, old, want string }{
 		{"only event", `{"hooks":{"Stop":[{"hooks":[{"command":"brigada hold yield"}]}]}}`, `{"hooks":{}}`},
@@ -471,82 +288,263 @@ func TestWiringMigrationDropsOnlyOwnedHooks(t *testing.T) {
 	}
 }
 
-func TestWiringPrivateSettingsExcludeAddedOnce(t *testing.T) {
+func TestWiringDamagedFilesAreReportedAndLeftAlone(t *testing.T) {
+	for _, tc := range []struct{ name, rel, body string }{
+		{"truncated mcp", ".mcp.json", "{\"mcpServers\": "},
+		{"mcp servers not an object", ".mcp.json", "{\"mcpServers\": []}"},
+		{"mcp top level array", ".mcp.json", "[]"},
+		{"empty settings", ".claude/settings.local.json", ""},
+		{"hooks not an object", ".claude/settings.local.json", "{\"hooks\": []}"},
+		{"stop not an array", ".claude/settings.local.json", "{\"hooks\": {\"Stop\": {}}}"},
+		{"settings with comments", ".claude/settings.local.json", "{\n// no\n}"},
+		{"damaged shared settings", ".claude/settings.json", "{\"hooks\": "},
+		{"foreign rules", wiringRulesFile, "my own rules\n"},
+		{"router begin without end", wiringAgentsFile, "# mine\n<!-- brigada-managed: router v1 -->\ntext\n"},
+		{"router end without begin", wiringAgentsFile, "<!-- /brigada-managed: router -->\n"},
+		{"router end before begin", wiringAgentsFile, "<!-- /brigada-managed: router -->\n<!-- brigada-managed: router v1 -->\n"},
+		{"two router blocks", wiringAgentsFile, strings.Repeat("<!-- brigada-managed: router v1 -->\n<!-- /brigada-managed: router -->\n", 2)},
+		{"two import blocks", wiringClaudeFile, strings.Repeat("<!-- brigada-managed: import v1 -->\n@AGENTS.md\n<!-- /brigada-managed: import -->\n", 2)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := wireRepo(t)
+			wireWrite(t, root, tc.rel, tc.body)
+			files := planLegacyWiring(root)
+			var hit bool
+			for _, f := range files {
+				if f.rel == tc.rel {
+					hit = true
+					if f.err == nil || f.changed() {
+						t.Errorf("%s not reported: state %s err %v", f.rel, f.state, f.err)
+					}
+				}
+			}
+			if !hit {
+				t.Fatal("file not planned")
+			}
+			var plan bytes.Buffer
+			printInitFiles(&plan, files, false)
+			if !strings.Contains(strings.Join(strings.Fields(plan.String()), " "), "left alone "+tc.rel+" ") {
+				t.Errorf("missing damaged-file reason: %s", plan.String())
+			}
+			if err := applyWiring(files); err != nil {
+				t.Fatal(err)
+			}
+			if got := wireRead(t, root, tc.rel); got != tc.body {
+				t.Errorf("damaged file rewritten: %q", got)
+			}
+		})
+	}
+}
+
+// A rerun of init strips everything an older init wired, exactly what
+// brigada remove removes, and leaves the user's own bytes: the shared
+// settings migration included, and the exclude line from .git/info/exclude.
+func TestInitRerunStripsOlderWiring(t *testing.T) {
 	root := wireRepo(t)
+	shared := `{
+  "model": "opus",
+  "hooks": {
+    "Stop": [{"hooks":[{"type":"command","command":"mine"},{"type":"command","command":"brigada hold yield"}]}],
+    "SessionStart": [{"hooks":[{"type":"command","command":"brigada hold confirm"}]}]
+  }
+}
+`
+	wireWrite(t, root, wiringSharedSettingsFile, shared)
 	wireWrite(t, root, ".gitignore", "# user's rules\n")
-	wireWrite(t, root, ".git/info/exclude", "# user's exclude rules")
-	files := planWiring(root)
+	wireWrite(t, root, ".git/info/exclude", "# user's exclude rules\n")
+	wireApply(t, root)
+	files := planLegacyWiring(root)
 	var plan bytes.Buffer
 	printInitFiles(&plan, files, false)
-	if !strings.Contains(strings.Join(strings.Fields(plan.String()), " "), "changes .git/info/exclude keeps private Claude Code settings out of git") || !strings.Contains(plan.String(), "+/.claude/settings.local.json") {
-		t.Fatalf("exclude missing from plan:\n%s", plan.String())
-	}
-	if got := wireRead(t, root, ".git/info/exclude"); got != "# user's exclude rules" {
-		t.Fatal("plan wrote exclude")
+	flat := strings.Join(strings.Fields(plan.String()), " ")
+	for _, want := range []string{
+		"removed .mcp.json removes the brigada server an older init added",
+		"removed .codex/config.toml removes the brigada table",
+		"removed .claude/settings.local.json removes the Stop hook",
+		"changes .claude/settings.json removes the legacy brigada hooks",
+		"removed .brigada/foreman.md deletes the foreman rules",
+		"removed AGENTS.md removes the marked router block",
+		"removed CLAUDE.md removes the marked import",
+		"changes .git/info/exclude removes the exclude line",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("plan lacks %q:\n%s", want, plan.String())
+		}
 	}
 	if err := applyWiring(files); err != nil {
 		t.Fatal(err)
 	}
-	want := "# user's exclude rules\n/.claude/settings.local.json\n"
-	if got := wireRead(t, root, ".git/info/exclude"); got != want {
-		t.Fatalf("exclude = %q, want %q", got, want)
+	for _, rel := range []string{wiringMCPFile, wiringCodexFile, wiringSettingsFile, wiringRulesFile, wiringAgentsFile, wiringClaudeFile, ".codex"} {
+		if fileExists(filepath.Join(root, rel)) {
+			t.Errorf("%s remains", rel)
+		}
 	}
-	wireGit(t, root, "check-ignore", "-q", "--", wiringSettingsFile)
-	// Re-create the private file as well as rerunning unchanged: neither should
-	// append another entry once git reports it ignored.
-	wireApply(t, root)
-	if err := os.Remove(filepath.Join(root, wiringSettingsFile)); err != nil {
-		t.Fatal(err)
+	wantShared := strings.Replace(shared, `{"type":"command","command":"mine"},{"type":"command","command":"brigada hold yield"}`, `{"type":"command","command":"mine"}`, 1)
+	wantShared = strings.Replace(wantShared, `,
+    "SessionStart": [{"hooks":[{"type":"command","command":"brigada hold confirm"}]}]`, "", 1)
+	if got := wireRead(t, root, wiringSharedSettingsFile); got != wantShared {
+		t.Fatalf("shared settings:\n%s\nwant\n%s", got, wantShared)
 	}
-	wireApply(t, root)
-	if got := wireRead(t, root, ".git/info/exclude"); got != want {
-		t.Fatalf("exclude duplicated: %q", got)
+	if got := wireRead(t, root, ".git/info/exclude"); got != "# user's exclude rules\n" {
+		t.Fatalf("exclude = %q", got)
 	}
 	if got := wireRead(t, root, ".gitignore"); got != "# user's rules\n" {
 		t.Fatalf(".gitignore changed: %q", got)
 	}
-}
-
-func TestWiringPrivateSettingsIgnoredByUser(t *testing.T) {
-	root := wireRepo(t)
-	wireWrite(t, root, ".gitignore", ".claude/settings.local.json\n")
-	exclude := wireRead(t, root, ".git/info/exclude")
-	files := wireApply(t, root)
-	for _, f := range files {
-		if strings.Contains(f.rel, "info/exclude") {
-			t.Errorf("ignored file planned exclude edit: %+v", f)
+	// Nothing is left to strip: a second rerun changes nothing.
+	for _, f := range planLegacyWiring(root) {
+		if f.err != nil || f.changed() {
+			t.Errorf("second rerun plans %s: state %s err %v", f.rel, f.state, f.err)
 		}
 	}
-	if got := wireRead(t, root, ".git/info/exclude"); got != exclude {
-		t.Fatalf("exclude changed for ignored file: %q", got)
-	}
 }
 
-func TestWiringPrivateSettingsExcludeInLinkedWorktree(t *testing.T) {
-	root := wireRepo(t)
-	wireGit(t, root, "-c", "user.name=brigada test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "initial")
-	linked := filepath.Join(t.TempDir(), "linked")
-	wireGit(t, root, "worktree", "add", "--detach", "-q", linked)
-	exclude := wireGit(t, linked, "rev-parse", "--git-path", "info/exclude")
-	old, err := os.ReadFile(exclude)
+// A repository init with --no-wiring touches no harness file at all, old
+// wiring included.
+func TestInitRerunNoWiringKeepsOldWiring(t *testing.T) {
+	_, state := startSettingsEngine(t)
+	importRepo(t)
+	root, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := wireApply(t, linked)
-	var found bool
-	for _, f := range files {
-		if f.path == exclude {
-			found = true
-		}
+	remote := t.TempDir()
+	wireGit(t, remote, "init", "--bare", "-q")
+	wireGit(t, root, "remote", "set-url", "origin", remote)
+	wireGit(t, root, "config", "core.excludesFile", os.DevNull)
+	wireApply(t, root)
+	before := removalSnapshot(t, root)
+	startStopHelper(t, "runner", state)
+	fakeInitPATH(t, "claude")
+	code, out, errs := initDo(t, state, "", "--yes", "--parallel", "1", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--signed-in", "claude", "--check", "true", "--tools", "none", "--no-wiring")
+	if code != 0 {
+		t.Fatalf("init code=%d\n%s\n%s", code, out, errs)
 	}
-	if !found {
-		t.Fatalf("worktree exclude %q not planned", exclude)
+	after := removalSnapshot(t, root)
+	want := map[string]string{}
+	for k, v := range before {
+		want[k] = v
 	}
-	got, err := os.ReadFile(exclude)
-	if err != nil || string(got) != string(old)+"/.claude/settings.local.json\n" {
-		t.Fatalf("worktree exclude = %q, %v", got, err)
+	want[engine.ProjectConfigPath] = after[engine.ProjectConfigPath]
+	if !reflect.DeepEqual(after, want) {
+		t.Fatalf("init --no-wiring changed harness files:\nbefore %q\nafter %q", before, after)
 	}
-	wireGit(t, linked, "check-ignore", "-q", "--", wiringSettingsFile)
+	if !strings.Contains(out, "no longer wires or unwires") {
+		t.Errorf("missing --no-wiring note:\n%s", out)
+	}
+}
+
+func TestInitProbeListsRemovalsWritesNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		extra       []string
+		wantRemoval bool
+	}{
+		{"lists removals", nil, true},
+		{"no wiring", []string{"--no-wiring"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			importRepo(t)
+			wireGit(t, ".", "config", "core.excludesFile", os.DevNull)
+			if err := os.WriteFile("go.mod", []byte("module example.invalid/test\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			wireApply(t, ".")
+			mcp := wireRead(t, ".", wiringMCPFile)
+			calls := fakeInitPATH(t, "claude", "codex")
+			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
+			args := append([]string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}, tc.extra...)
+			code, out, errOut := initDo(t, state, "", args...)
+			if code != 0 {
+				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+			}
+			flat := strings.Join(strings.Fields(out), " ")
+			for _, want := range []string{
+				"removed .mcp.json removes the brigada server an older init added",
+				"removed .brigada/foreman.md deletes the foreman rules",
+				"changes .git/info/exclude removes the exclude line",
+			} {
+				if strings.Contains(flat, want) != tc.wantRemoval {
+					t.Errorf("%q present = %v, want %v\n%s", want, !tc.wantRemoval, tc.wantRemoval, out)
+				}
+			}
+			if !strings.Contains(out, "Files in this repository (brigada never commits them):") || !strings.Contains(flat, "new .brigada/project.yaml the settings above") {
+				t.Errorf("missing repository files block:\n%s", out)
+			}
+			if strings.Contains(out, "auto_review") || strings.Contains(out, "already") {
+				t.Errorf("unexpected setup/approval claim:\n%s", out)
+			}
+			if got := wireRead(t, ".", wiringMCPFile); got != mcp {
+				t.Errorf("probe changed .mcp.json: %s", got)
+			}
+			data, _ := os.ReadFile(calls)
+			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+				if !strings.HasSuffix(line, " --help") {
+					t.Errorf("harness invoked beyond --help: %q", line)
+				}
+			}
+		})
+	}
+}
+
+func TestInitProbeShowsDiffOfExistingWiring(t *testing.T) {
+	importRepo(t)
+	wireGit(t, ".", "config", "core.excludesFile", os.DevNull)
+	wireWrite(t, ".", wiringMCPFile, "{\n  \"mcpServers\": {\n    \"other\": {\"command\": \"x\"}\n  }\n}\n")
+	wireApply(t, ".")
+	fakeInitPATH(t, "claude")
+	state := filepath.Join(testsupport.ShortStateDir(t), "absent")
+	code, out, errOut := initDo(t, state, "", "--probe", "--check", "true", "--tools", "none", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--signed-in", "claude")
+	if code != 0 {
+		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+	}
+	if !strings.Contains(out, "--- a/.mcp.json") || !strings.Contains(out, "-    \"brigada\"") {
+		t.Errorf("no removal diff for .mcp.json:\n%s", out)
+	}
+	if got := wireRead(t, ".", wiringMCPFile); !strings.Contains(got, "brigada") || !strings.Contains(got, "other") {
+		t.Errorf("probe changed .mcp.json: %s", got)
+	}
+}
+
+func TestInitNewFileContentsRequireVerbose(t *testing.T) {
+	for _, verbose := range []bool{false, true} {
+		t.Run(fmt.Sprint(verbose), func(t *testing.T) {
+			importRepo(t)
+			fakeInitPATH(t, "claude", "codex")
+			args := []string{"--probe", "--check", "true", "--tools", "none", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}
+			if verbose {
+				args = append(args, "--verbose")
+			}
+			code, out, errOut := initDo(t, filepath.Join(testsupport.ShortStateDir(t), "absent"), "", args...)
+			if code != 0 {
+				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+			}
+			if !verbose && strings.Contains(out, "default_check:") {
+				t.Errorf("new file contents shown without --verbose:\n%s", out)
+			}
+			project, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none")
+			if err != nil {
+				t.Fatal(err)
+			}
+			files := append([]wireFile{{rel: engine.ProjectConfigPath, next: project}}, planLegacyWiring(".")...)
+			previous := -1
+			for _, f := range files {
+				if f.exists || f.err != nil || f.state == "unchanged" {
+					continue
+				}
+				full := "      " + strings.Join(splitDiffLines(f.next), "\n      ") + "\n"
+				if strings.Contains(out, full) != verbose {
+					t.Errorf("%s full contents present = %v, want %v\n%s", f.rel, !verbose, verbose, out)
+				}
+				// The row: the state column, two spaces, the path, then padding.
+				position := strings.Index(out, "  "+f.rel+"  ")
+				if position <= previous {
+					t.Errorf("%s missing or out of order\n%s", f.rel, out)
+				}
+				previous = position
+			}
+		})
+	}
 }
 
 func TestWiringMigrationAndExcludeRefuseEditsSincePlan(t *testing.T) {
@@ -554,7 +552,8 @@ func TestWiringMigrationAndExcludeRefuseEditsSincePlan(t *testing.T) {
 		t.Run(rel, func(t *testing.T) {
 			root := wireRepo(t)
 			wireWrite(t, root, wiringSharedSettingsFile, `{"hooks":{"Stop":[{"hooks":[{"command":"brigada hold yield"}]}]}}`)
-			files := planWiring(root)
+			wireApply(t, root)
+			files := planLegacyWiring(root)
 			wireWrite(t, root, rel, "edited after plan\n")
 			if err := applyWiring(files); err == nil || !strings.Contains(err.Error(), "changed after the plan") {
 				t.Fatalf("concurrent edit not refused: %v", err)

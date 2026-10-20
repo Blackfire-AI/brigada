@@ -1,3 +1,0 @@
-[mcp_servers.brigada]
-command = "brigada"
-args = ["mcp", "--foreman"]

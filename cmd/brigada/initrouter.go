@@ -7,68 +7,22 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	"github.com/Blackfire-AI/brigada/internal/foreman"
-	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
-// The foreman rules reach a Claude Code session through three files: the
-// rules file .brigada/foreman.md, which brigada owns whole; a short router
-// block in AGENTS.md between markers brigada owns, which sends the session
-// to the rules and carves brigada's own workers and reviewers out; and a
-// marked section of CLAUDE.md that imports AGENTS.md. Nothing imports the
-// rules file: workers read the same AGENTS.md in their worktrees and must
-// never receive the foreman rules (design §4.2). The shared files are
-// edited minimally — only the bytes between brigada's markers change, and
-// the separators init adds are recorded in the begin marker with where
-// they start. Remove takes them out only while they still stand there, so
-// a file the user has not edited comes back byte for byte, and an edited
-// one keeps every byte that could be the user's.
+// The foreman rules once reached a Claude Code session through sections of
+// the shared Markdown files, between markers brigada owned: a router
+// block in AGENTS.md pointing at the rules file, and a marked import of
+// AGENTS.md in CLAUDE.md (design §4.2). Init no longer writes them; a
+// rerun of init and brigada remove strip them. Removal takes a section
+// out only while it still stands where init put it, so a file the user
+// has not edited comes back byte for byte, and an edited one keeps every
+// byte that could be the user's.
 
 const (
 	wiringRulesFile  = ".brigada/foreman.md"
 	wiringAgentsFile = "AGENTS.md"
 	wiringClaudeFile = "CLAUDE.md"
-
-	// The sections' template versions, written into their begin markers.
-	routerVersion = 1
-	importVersion = 1
 )
-
-// rulesContent is the rules file: brigada's marker with the instructions'
-// version, the ownership note, and the foreman instructions.
-func rulesContent() []byte {
-	return []byte(fmt.Sprintf(`%s v%d -->
-
-These are brigada's foreman rules for your own session (mode A). Brigada owns
-this file and replaces it on "brigada init"; put your own instructions elsewhere.
-
-%s`, wiringSkillMarker, foreman.InstructionsVersion, foreman.Instructions()))
-}
-
-// routerBody is the router block's text, between its markers. The
-// carve-out comes first and quotes the openers of the worker and reviewer
-// prompts, which internal/prompt keeps as a contract. The rules file is
-// named, never imported.
-func routerBody() string {
-	return fmt.Sprintf(`If your prompt opens with %q or
-%q, you are a worker or reviewer run by brigada:
-follow that prompt; this block and the foreman rules do not apply to you.
-
-Otherwise: in this repository, code changes go through brigada, and you are
-its foreman. Read `+"`"+wiringRulesFile+"`"+` first and follow it, unless your
-prompt already gives you brigada's foreman rules. Plan work with brigada's
-tools; do not edit code yourself unless the user explicitly asks you to.
-If brigada's tools are not available in this session, say so and tell the
-user how to enable them (restart the session in this repository and approve
-the `+"`brigada`"+` MCP server) instead of doing the work by hand.`, prompt.WorkerOpener, prompt.ReviewerOpener)
-}
-
-// importBody is the import section's text: Claude Code's import of
-// AGENTS.md. Init adds it whether or not the user already has one — a
-// redundant import at worst loads AGENTS.md twice, a missed one would
-// silently break the router — so no existing import is looked for.
-const importBody = "@" + wiringAgentsFile
 
 // sectionKind names one brigada-managed section of a shared Markdown file.
 type sectionKind string
@@ -158,12 +112,6 @@ func parseSectionRecord(marker string) sectionRecord {
 	return r
 }
 
-// renderSection is a section's full text: begin marker (kind, version,
-// record), body, end marker; no newline after the end marker.
-func renderSection(k sectionKind, version int, rec sectionRecord, body string) string {
-	return k.beginPrefix() + "v" + strconv.Itoa(version) + rec.String() + " -->\n" + body + "\n" + k.endMarker()
-}
-
 // mdLine is one line of a Markdown file: its bytes in the file, without
 // the newline, and whether it belongs to a fenced code block (fence lines
 // included).
@@ -174,13 +122,11 @@ type mdLine struct {
 }
 
 // scanMarkdown splits a file into lines and marks the ones inside a
-// fenced code block, the one piece of Markdown init reads: a fence opens
-// on a line of three or more backticks or three or more tildes, indented
-// by at most three spaces (a backtick fence's info string holds no
-// backtick, as in CommonMark), and closes only on a line of the same
-// character, at least as long, with nothing after it but whitespace.
-// open is the 1-based line of a fence still open at the end of the file,
-// else 0.
+// fenced code block: a fence opens on a line of three or more backticks
+// or three or more tildes, indented by at most three spaces (a backtick
+// fence's info string holds no backtick, as in CommonMark), and closes
+// only on a line of the same character, at least as long, with nothing
+// after it but whitespace.
 func scanMarkdown(d []byte) (lines []mdLine, open int) {
 	var fence byte
 	fenceLen := 0
@@ -276,99 +222,6 @@ func findSection(rel string, lines []mdLine, k sectionKind) (span sectionSpan, f
 	return span, true, nil
 }
 
-func fenceError(rel string, line int) error {
-	return fmt.Errorf("%s ends inside a fenced code block opened on line %d and never closed, so anything appended would be inert; close the fence, then rerun init", rel, line)
-}
-
-// mergeSection adds kind's section to a shared Markdown file, or on a
-// rerun replaces the text between its markers and nothing else. A missing
-// file is created holding only the section; an existing one gets it
-// appended after a blank line (and a newline first, when the last line is
-// unterminated), with what was added recorded in the begin marker. A file
-// that ends inside an unclosed fence is refused: the section would be
-// inert there.
-func mergeSection(rel string, d []byte, exists bool, k sectionKind, version int, body string) ([]byte, string, error) {
-	return mergeOwned(rel, d, exists, k, version, body, false)
-}
-
-// mergeOwned is mergeSection for a file that may be init's already
-// (created), which the section's record then says.
-func mergeOwned(rel string, d []byte, exists bool, k sectionKind, version int, body string, created bool) ([]byte, string, error) {
-	if !exists {
-		return []byte(renderSection(k, version, sectionRecord{created: true}, body) + "\n"), "created", nil
-	}
-	lines, open := scanMarkdown(d)
-	if open > 0 {
-		return nil, "", fenceError(rel, open)
-	}
-	span, found, err := findSection(rel, lines, k)
-	if err != nil {
-		return nil, "", err
-	}
-	if found {
-		rec := span.record
-		rec.created = rec.created || created
-		next := append([]byte(nil), d[:span.start]...)
-		next = append(next, renderSection(k, version, rec, body)...)
-		next = append(next, d[span.end:]...)
-		if bytes.Equal(next, d) {
-			return d, "unchanged", nil
-		}
-		return next, "replaced", nil
-	}
-	rec := sectionRecord{created: created, at: len(d)}
-	next := append([]byte(nil), d...)
-	if len(d) > 0 {
-		if d[len(d)-1] != '\n' {
-			rec.newline = true
-			next = append(next, '\n')
-		}
-		rec.blank = true
-		next = append(next, '\n')
-	}
-	next = append(next, renderSection(k, version, rec, body)+"\n"...)
-	return next, "added", nil
-}
-
-// mergeMoved is mergeSection for a file whose role changed with the
-// layout (initrouter.go, routerLayout): a section of the other kind that
-// an earlier init put there is cut first, so a CLAUDE.md that became the
-// shared file loses its import of itself, and an AGENTS.md that is a file
-// again loses the router its CLAUDE.md carried. The cut section's record
-// of a file init created is carried to the new section, whether or not
-// the user's content remains beside it.
-func mergeMoved(rel string, d []byte, exists bool, k sectionKind, version int, body string, stale sectionKind) ([]byte, string, error) {
-	if !exists {
-		return mergeSection(rel, d, exists, k, version, body)
-	}
-	lines, open := scanMarkdown(d)
-	if open > 0 {
-		return nil, "", fenceError(rel, open)
-	}
-	span, found, err := findSection(rel, lines, stale)
-	if err != nil {
-		return nil, "", err
-	}
-	if !found {
-		return mergeSection(rel, d, exists, k, version, body)
-	}
-	cut := cutSection(d, span)
-	created := span.record.created
-	next, _, err := mergeOwned(rel, cut, len(cut) > 0 || !created, k, version, body, created)
-	if err != nil {
-		return nil, "", err
-	}
-	return next, "replaced", nil
-}
-
-func mergeRouter(rel string, d []byte, exists bool) ([]byte, string, error) {
-	return mergeMoved(rel, d, exists, routerSection, routerVersion, routerBody(), importSection)
-}
-
-func mergeImport(rel string, d []byte, exists bool) ([]byte, string, error) {
-	return mergeMoved(rel, d, exists, importSection, importVersion, importBody, routerSection)
-}
-
 // cutSection removes a section, its end line's newline, and the
 // separators its record names, but only while they stand where init put
 // them: the section still starts right after them at the recorded offset,
@@ -448,40 +301,9 @@ func removeSections(rel string, d []byte, exists bool) ([]byte, string, error) {
 	return d, state, nil
 }
 
-// retireSkill removes the skill an older init wrote, which the rules file
-// replaces. A file there without brigada's marker is the user's and stays.
-func retireSkill(d []byte, exists bool) ([]byte, string, error) {
-	if !exists || !bytes.Contains(d, []byte(wiringSkillMarker)) {
-		return d, "unchanged", nil
-	}
-	return nil, "removed", nil
-}
-
-// routerLayout says which shared file gets the router block and which
-// imports it. When CLAUDE.md and AGENTS.md are one file — either a symlink
-// to the other, dangling or not — the block goes into the real file and
-// there is no import, which would be a self-import.
-type routerLayout struct {
-	router string // the file that gets the router block
-	imprt  string // the file that imports it; "" when the two are one file
-	link   string // the symlink of the pair pointing at router; "" when none
-}
-
-func planRouterLayout(root string) routerLayout {
-	agents := linksTo(root, wiringAgentsFile, wiringClaudeFile)
-	claude := linksTo(root, wiringClaudeFile, wiringAgentsFile)
-	switch {
-	case agents && !claude:
-		return routerLayout{router: wiringClaudeFile, link: wiringAgentsFile}
-	case claude && !agents:
-		return routerLayout{router: wiringAgentsFile, link: wiringClaudeFile}
-	}
-	// Any other symlink at either path is refused by wiringSafePath.
-	return routerLayout{router: wiringAgentsFile, imprt: wiringClaudeFile}
-}
-
 // linksTo reports whether rel is a symlink to other under root, whether
-// or not other exists.
+// or not other exists. A shared file that is a link to the other one
+// holds no section of its own: the other is the file.
 func linksTo(root, rel, other string) bool {
 	path := filepath.Join(root, rel)
 	st, err := os.Lstat(path)

@@ -463,7 +463,7 @@ func TestInitThenRemoveRepositoryRoundTrip(t *testing.T) {
 
 func TestRemovalKeepsEmptyRepositoryRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "repo")
-	wireWrite(t, root, wiringRulesFile, string(rulesContent()))
+	wireWrite(t, root, wiringRulesFile, string(oldRulesContent()))
 	files := planSteps(root, []wireStep{{wiringRulesFile, func(d []byte, exists bool) ([]byte, string, error) {
 		return nil, "removed", nil
 	}}})

@@ -52,7 +52,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	check := fs.String("check", "", "default check command, or none / - for no check (never executed by init)")
 	tools := fs.String("tools", "", "worker scope in runner tools= syntax; applied only to Claude workers")
 	foreman := fs.String("foreman", "", "choose the foreman, a signed-in claude or codex model, as harness/model[@effort]; without @effort an interactive run asks for the effort")
-	noWiring := fs.Bool("no-wiring", false, "skip harness wiring (the bridge, hooks, foreman rules and AGENTS.md/CLAUDE.md router for mode A; in a parent folder, the coordinator's)")
+	noWiring := fs.Bool("no-wiring", false, "in a parent folder, skip the coordinator's wiring; in a repository, leave the harness untouched: init writes no harness wiring, and an older init's stays")
 	parallel := fs.Int("parallel", 0, "tasks at once on this machine (1..64)")
 	all := fs.Bool("all", false, "in a folder that is not a repository: register every new repository found, without asking")
 	agents := &agentSpecs{}
@@ -825,19 +825,16 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		prefix := fmt.Sprintf("    %-9s ", a.Harness)
 		printInitWrapped(stdout, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), permissions)
 	}
+	// Init writes no harness wiring; a rerun strips the wiring an older
+	// init left behind, unless --no-wiring holds it back.
 	var wiring []wireFile
-	if !*noWiring && probes["claude"].installed {
-		wiring = planWiring(root)
-	}
-	if !*noWiring && probes["codex"].installed {
-		wiring = append(wiring, planCodexWiring(root)...)
+	if !*noWiring {
+		wiring = planLegacyWiring(root)
 	}
 	files := append([]wireFile{{rel: engine.ProjectConfigPath, old: old, next: proposed, exists: exists}}, wiring...)
 	printInitFiles(stdout, files, *verbose)
-	if !*noWiring {
-		if probes["codex"].installed {
-			fmt.Fprint(stdout, initCodexText(stdout))
-		}
+	if *noWiring {
+		printInitWrapped(stdout, "", "  ", initDim(stdout, "--no-wiring: init in a repository no longer wires or unwires the harness; the flag matters only in a parent folder"))
 	}
 	printInitWrapped(stdout, "  "+style.Bold("In the background:")+" ", "    ", "a runner starts now and keeps going (log: "+initHomePath(filepath.Join(rt.stateDir, "runner.log"))+"; stop it with: "+style.Accent("brigada stop")+"). The engine starts when needed and stops after 30 idle minutes.")
 	fmt.Fprintln(stdout)
@@ -1004,17 +1001,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		printInitWrapped(stdout, "", "  ", "the engine reads caps when it starts: run brigada stop --engine, then any command starts it with the new values")
 	}
 	fmt.Fprintln(stdout, style.Bold("Next:"))
-	step := 1
-	if !*noWiring && probes["claude"].installed {
-		printInitWrapped(stdout, fmt.Sprintf("  %d. ", step), "     ",
-			"Restart your agent session in this repository (Claude Code: "+style.Accent("`claude`")+
-				"; approve the "+style.Accent("brigada")+" MCP server when it asks).")
-		step++
-		printInitWrapped(stdout, fmt.Sprintf("  %d. ", step), "     ",
-			"Ask it to plan your first task: here it is brigada's foreman, and you approve the plan.")
-		step++
-	}
-	fmt.Fprintf(stdout, "  %d. Or, without a session: %s\n", step, style.Accent("brigada ask \"what you want built\""))
+	fmt.Fprintf(stdout, "  1. Talk to the foreman: %s\n", style.Accent("brigada attach"))
+	fmt.Fprintf(stdout, "  2. Or, without a conversation: %s\n", style.Accent("brigada ask \"what you want built\""))
 	fmt.Fprintln(stdout, "  Watch progress: "+style.Accent("brigada status")+"    Stop the runner: "+style.Accent("brigada stop"))
 	return 0
 }

@@ -134,28 +134,13 @@ Plan
     codex     edit files and run commands inside codex's sandbox
     opencode  edit files; no commands
   Files in this repository (brigada never commits them):
-    new  .brigada/project.yaml        the settings above
-    new  .mcp.json                    lets Claude Code here use brigada (Claude
-                                      Code asks you to approve it)
-    new  .codex/config.toml           lets Codex here use brigada (Codex loads
-                                      it once you trust this folder)
-    new  .claude/settings.local.json  private, kept out of git: when your
-                                      Claude turn ends, brigada's foreman picks
-                                      up what happened meanwhile
-    new  .brigada/foreman.md          brigada's foreman rules for your Claude
-                                      session (brigada's own file)
-    new  AGENTS.md                    a short block that makes your Claude
-                                      session brigada's foreman
-    new  CLAUDE.md                    imports AGENTS.md, so Claude Code reads
-                                      that block
+    new        .brigada/project.yaml  the settings above
+    unchanged  .git/info/exclude      removes the exclude line that hid the
+                                      private Claude Code settings
     (show full contents: --verbose)
-  Codex: on the first codex run here, trust this folder when Codex asks
-    (only a trusted folder loads .codex/config.toml), then ask Codex to plan
-    the first task. On Codex older than 0.78 (no project config):
-    codex mcp add brigada-foreman -- brigada mcp --foreman
   In the background: a runner starts now and keeps going (log:
     ~/.local/state/brigada/runner.log; stop it with: brigada stop). The engine
     starts when needed and stops after 30 idle minutes.
 
-Write 7 files and start the runner? [y/N]:
+Write 1 file and start the runner? [y/N]:
 Declined; nothing written or started.
