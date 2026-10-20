@@ -43,6 +43,7 @@ func TestRenderMatchesGolden(t *testing.T) {
 func TestParseInvertsRender(t *testing.T) {
 	plans := map[string]Plan{
 		"golden":          goldenPlan(),
+		"caps":            {ID: 9, State: "active", Created: time.Unix(1, 0).UTC(), Updated: time.Unix(2, 0).UTC(), Tasks: []Task{{ID: 1, State: "ready", Caps: map[string]int{"restart": 4, "fix_rounds": 0}}, {ID: 2, State: "pending"}}},
 		"tier and effort": {ID: 8, State: "active", Created: time.Unix(1, 0).UTC(), Updated: time.Unix(2, 0).UTC(), Tasks: []Task{{ID: 1, Tier: "heavy", Effort: "high", State: "ready"}, {ID: 2, Tier: "light", State: "pending"}}},
 		"no tasks": {ID: 1, Title: "", Repo: "r", State: "draft",
 			Created: time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC), Updated: time.Date(2026, 1, 2, 3, 4, 5, 7, time.UTC)},

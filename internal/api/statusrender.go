@@ -97,6 +97,9 @@ func StatusSections(st Status) string {
 				} else if t.Effort != "" {
 					detail = append(detail, "@"+t.Effort)
 				}
+				if label := engine.TaskCapsLabel(t.Caps); label != "" {
+					detail = append(detail, "("+label+")")
+				}
 				if len(detail) > 0 {
 					line += "  " + strings.Join(detail, " ")
 				}

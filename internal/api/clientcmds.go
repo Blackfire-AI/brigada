@@ -213,13 +213,16 @@ type PlanCreate struct {
 type PlanTask struct {
 	Tier   string `json:"tier,omitempty"`
 	Effort string `json:"effort,omitempty"`
-	Title  string
-	Name   string   // the handle other tasks name in Deps; '' = unnamed
-	Deps   []string // names of tasks of the same plan this one waits for
-	Base   string   // the one of Deps whose branch the work starts from; '' = the default rule
-	Spec   string
-	Check  string
-	Class  string
+	// Caps overrides the round caps (fix_rounds, review_rounds, restart);
+	// absent keys keep the engine default.
+	Caps  map[string]int `json:"caps,omitempty"`
+	Title string
+	Name  string   // the handle other tasks name in Deps; '' = unnamed
+	Deps  []string // names of tasks of the same plan this one waits for
+	Base  string   // the one of Deps whose branch the work starts from; '' = the default rule
+	Spec  string
+	Check string
+	Class string
 	// ExtraRepos are read-only repositories for the task (§5.8): nil
 	// inherits the project default, a non-nil list (even empty) replaces
 	// it.
@@ -257,7 +260,7 @@ type PlanCreatedTask struct {
 func (c *Client) CreatePlan(ctx context.Context, p PlanCreate, idemKey string) (PlanCreateResult, error) {
 	body := planCreateRequest{RepoURL: p.RepoURL, Title: p.Title, Tasks: make([]planTaskBody, len(p.Tasks))}
 	for i, t := range p.Tasks {
-		body.Tasks[i] = planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ExtraRepos: t.ExtraRepos}
+		body.Tasks[i] = planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, Caps: t.Caps, ExtraRepos: t.ExtraRepos}
 	}
 	var out planCreateResponse
 	if err := c.callKeyed(ctx, http.MethodPost, "/v1/plans", idemKey, body, &out); err != nil {
@@ -294,6 +297,7 @@ type PlanRetier struct {
 	Task   string
 	Tier   string
 	Effort string
+	Caps   map[string]int // merged key by key into the task's caps
 }
 
 // PlanRetarget replaces one waiting task's whole dependency set.
@@ -322,13 +326,13 @@ type PlanAmendResult struct {
 func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey string) (PlanAmendResult, error) {
 	body := planAmendRequest{Cancel: a.Cancel}
 	for _, t := range a.Add {
-		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ExtraRepos: t.ExtraRepos})
+		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, Caps: t.Caps, ExtraRepos: t.ExtraRepos})
 	}
 	for _, rt := range a.Retarget {
 		body.Retarget = append(body.Retarget, planRetargetBody{Task: rt.Task, Deps: rt.Deps, Base: rt.Base})
 	}
 	for _, rt := range a.Retier {
-		body.Retier = append(body.Retier, planRetierBody{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort})
+		body.Retier = append(body.Retier, planRetierBody{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort, Caps: rt.Caps})
 	}
 	var out planAmendResponse
 	path := "/v1/plans/" + strconv.FormatInt(plan, 10) + "/amend"

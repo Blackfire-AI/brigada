@@ -44,6 +44,22 @@ var extraReposSchema = map[string]any{
 	},
 }
 
+// taskCapsProperties are the keys of a task's caps object (§14): each
+// overrides one engine round budget, 0 to 10.
+var taskCapsProperties = map[string]any{
+	"fix_rounds":    map[string]any{"type": "integer", "minimum": 0, "maximum": 10, "description": "fix rounds a failed check may ask for"},
+	"review_rounds": map[string]any{"type": "integer", "minimum": 0, "maximum": 10, "description": "fix rounds a review's changes verdict may ask for"},
+	"restart":       map[string]any{"type": "integer", "minimum": 0, "maximum": 10, "description": "restarts (task_restart or automatic) the task may spend"},
+}
+
+// taskCapsSchema is the caps property of a plan task.
+var taskCapsSchema = map[string]any{
+	"type":                 "object",
+	"properties":           taskCapsProperties,
+	"additionalProperties": false,
+	"description":          "per-task round caps, any of fix_rounds, review_rounds and restart, integers 0 to 10; omitted keys keep the engine default. An unknown key or out-of-range value refuses the whole call. Raise one for a task known to need many rounds; 0 parks the task at the first such round",
+}
+
 // tools is the bridge's whole offer (§12.2), the one list a later item
 // extends: ask_user and the like each add an entry here, and ToolNames carries the addition
 // to the foreman's tool scope.
@@ -60,7 +76,7 @@ var tools = []Tool{
 	},
 	{
 		Name:        "plan_create",
-		Description: "Create a plan of one or more tasks and queue the first work job of every task with no dependencies. A task may wait on others of the same plan by name (deps); it starts when all of them are done, and stays waiting if one fails or needs you. A task with exactly one dep builds on that dep's branch (a task with several picks one with base, else starts from the default branch). A dependency cycle or a base that is not a dep refuses the plan. The plan is active at once, unless it is over the project's approval limit (many tasks, an unusual class, a protected path): then it waits for the user's approval, nothing is queued, and the answer says why — tell the user; only they can approve it.",
+		Description: "Create a plan of one or more tasks and queue the first work job of every task with no dependencies. A task may wait on others of the same plan by name (deps); it starts when all of them are done, and stays waiting if one fails or needs you. A task with exactly one dep builds on that dep's branch (a task with several picks one with base, else starts from the default branch). A dependency cycle or a base that is not a dep refuses the plan. A task's optional caps object sets its own fix_rounds, review_rounds and restart budgets (integers 0 to 10; absent keys keep the engine default); an unknown key or out-of-range value refuses the plan. The plan is active at once, unless it is over the project's approval limit (many tasks, an unusual class, a protected path): then it waits for the user's approval, nothing is queued, and the answer says why — tell the user; only they can approve it.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -105,6 +121,7 @@ var tools = []Tool{
 							},
 							"tier":        map[string]any{"type": "string", "enum": []string{"light", "standard", "heavy"}, "description": "how heavy a model the task needs: light for small, well-specified edits; standard (default) for ordinary work; heavy for design-heavy or cross-cutting work. brigada samples among the agents of that tier by their record on this repo and cost weight, so a cheaper or better-recorded agent is picked more often; a task that fails is bumped one tier up automatically"},
 							"effort":      map[string]any{"type": "string", "enum": []string{"low", "medium", "high", "max"}, "description": "how hard that model should think; default: the agent's own level, else medium"},
+							"caps":        taskCapsSchema,
 							"extra_repos": extraReposSchema,
 						},
 						"required": []string{"spec"},
@@ -117,7 +134,7 @@ var tools = []Tool{
 	},
 	{
 		Name:        "plan_amend",
-		Description: "Amend a live plan (active or awaiting approval): add tasks, cancel tasks, and re-point the dependencies of a waiting task. Use it to re-plan when a task fails for good or the user's ask changes: a dependency that will never be done (a task failed or cancelled) leaves its dependents waiting forever unless you re-point them (retarget) to another task or drop the dependency (empty deps). Tasks are named by their name or id (as status shows). Validation is plan_create's: names unique, deps in the plan and never on a cancelled task, no cycle — one refusal rejects the whole amendment. Use retier to change the tier or effort of a pending, ready or needs_foreman task; a parked task still needs task_restart. Cancelling stops a task's live jobs. Waiting tasks whose dependencies are all done start in the same call. An added task may push the plan over the project's approval limit: it then waits for the user's approval and nothing new starts. A plan left with only permanently waiting tasks is closed, and its done report names what never ran.",
+		Description: "Amend a live plan (active or awaiting approval): add tasks, cancel tasks, and re-point the dependencies of a waiting task. Use it to re-plan when a task fails for good or the user's ask changes: a dependency that will never be done (a task failed or cancelled) leaves its dependents waiting forever unless you re-point them (retarget) to another task or drop the dependency (empty deps). Tasks are named by their name or id (as status shows). Validation is plan_create's: names unique, deps in the plan and never on a cancelled task, no cycle — one refusal rejects the whole amendment. Use retier to change the tier, effort or round caps (merged key by key) of a pending, ready or needs_foreman task; a parked task still needs task_restart. Cancelling stops a task's live jobs. Waiting tasks whose dependencies are all done start in the same call. An added task may push the plan over the project's approval limit: it then waits for the user's approval and nothing new starts. A plan left with only permanently waiting tasks is closed, and its done report names what never ran.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -144,6 +161,7 @@ var tools = []Tool{
 							"class":       map[string]any{"type": "string", "description": "the task's class (default implement)"},
 							"tier":        map[string]any{"type": "string", "enum": []string{"light", "standard", "heavy"}, "description": "how heavy a model the task needs: light for small, well-specified edits; standard (default) for ordinary work; heavy for design-heavy or cross-cutting work. brigada samples among the agents of that tier by their record on this repo and cost weight, so a cheaper or better-recorded agent is picked more often; a task that fails is bumped one tier up automatically"},
 							"effort":      map[string]any{"type": "string", "enum": []string{"low", "medium", "high", "max"}, "description": "how hard that model should think; default: the agent's own level, else medium"},
+							"caps":        taskCapsSchema,
 							"extra_repos": extraReposSchema,
 						},
 						"required": []string{"spec"},
@@ -156,13 +174,14 @@ var tools = []Tool{
 				},
 				"retier": map[string]any{
 					"type":        "array",
-					"description": "waiting or parked tasks whose tier or effort you change: lower a tier brigada bumped, or raise one before a retry",
+					"description": "waiting or parked tasks whose tier, effort or round caps you change: lower a tier brigada bumped, raise one before a retry, or allow more restarts",
 					"items": map[string]any{
 						"type": "object",
 						"properties": map[string]any{
 							"task":   map[string]any{"type": []string{"string", "integer"}, "description": "the task, by name or id"},
 							"tier":   map[string]any{"type": "string", "enum": []string{"light", "standard", "heavy"}, "description": "new tier; omitted keeps the current tier"},
 							"effort": map[string]any{"type": "string", "enum": []string{"low", "medium", "high", "max"}, "description": "new effort; omitted keeps the current effort"},
+							"caps":   map[string]any{"type": "object", "properties": taskCapsProperties, "additionalProperties": false, "description": "round caps to change, merged key by key into the task's own: give a parked task more restarts before task_restart; omitted keys keep their value"},
 						},
 						"required": []string{"task"},
 					},

@@ -268,7 +268,7 @@ func readPlanSnapshotTx(tx *sql.Tx, planID int64) (planSnapshot, error) {
 			WHERE ev.task_id = t.id AND ev.kind = ? AND t.state IN (?, ?)
 			AND ev.id > COALESCE((SELECT MAX(a.id) FROM events a WHERE a.task_id = t.id AND a.kind IN (?, ?)), 0)
 			ORDER BY ev.id DESC LIMIT 1), ''),
-		COALESCE(t.extra_repos, ''), t.tier, t.effort
+		COALESCE(t.extra_repos, ''), t.tier, t.effort, t.caps
 		FROM tasks t WHERE t.plan_id = ? ORDER BY t.id`,
 		roundFix, roundReview, evTaskNeedsHelp, taskNeedsForeman, taskNeedsUser, evTaskAnswered, evTaskRestarted, planID)
 	if err != nil {
@@ -277,11 +277,12 @@ func readPlanSnapshotTx(tx *sql.Tx, planID int64) (planSnapshot, error) {
 	index := map[int64]int{}
 	for rows.Next() {
 		var t planfile.Task
-		var extraRec string
-		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Class, &t.State, &t.Branch, &t.Rounds, &t.Question, &extraRec, &t.Tier, &t.Effort); err != nil {
+		var extraRec, capsJSON string
+		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Class, &t.State, &t.Branch, &t.Rounds, &t.Question, &extraRec, &t.Tier, &t.Effort, &capsJSON); err != nil {
 			rows.Close()
 			return planSnapshot{}, fmt.Errorf("read the tasks of plan %d: %w", planID, err)
 		}
+		t.Caps = parseTaskCaps(capsJSON)
 		// The file carries the identity and ref, never the fetch URL (§5.8).
 		if spec := parseExtraReposRecord(extraRec); spec != nil {
 			for _, x := range spec.Repos {

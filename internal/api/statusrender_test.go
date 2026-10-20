@@ -94,9 +94,10 @@ func TestStatusSectionsTaskTierEffort(t *testing.T) {
 		{ID: 4, Title: "think", State: "ready", Tier: "standard", EffectiveTier: "standard", Effort: "max", EffectiveEffort: "max"},
 		{ID: 5, Title: "stepped", State: "ready", Tier: "standard", EffectiveTier: "standard", Effort: "low", EffectiveEffort: "medium"},
 		{ID: 6, Title: "default", State: "ready", Tier: "standard", EffectiveTier: "standard", EffectiveEffort: "high"},
+		{ID: 7, Title: "parked", State: "needs_foreman", Tier: "heavy", EffectiveTier: "heavy", Caps: map[string]int{"restart": 4}},
 	}}}}
 	got := StatusSections(st)
-	for _, want := range []string{"  task #1 ready plain\n", "  task #2 ready build  heavy @high\n", "  task #3 ready bumped  standard->heavy\n", "  task #4 ready think  @max\n",
+	for _, want := range []string{"  task #7 needs_foreman parked  heavy (restarts 4)\n", "  task #1 ready plain\n", "  task #2 ready build  heavy @high\n", "  task #3 ready bumped  standard->heavy\n", "  task #4 ready think  @max\n",
 		"  task #5 ready stepped  @low->medium\n", "  task #6 ready default  @default->high\n"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("status lacks %q:\n%s", want, got)

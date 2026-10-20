@@ -31,12 +31,15 @@ type PlanRetarget struct {
 	Base string
 }
 
-// PlanRetier changes a waiting or parked task's tier or effort. Empty fields
+// PlanRetier changes a waiting or parked task's tier, effort or caps. Empty fields
 // preserve their current values; Task accepts a plan task's name or decimal id.
 type PlanRetier struct {
 	Task   string
 	Tier   string
 	Effort string
+	// Caps merges key by key into the task's own caps (fix_rounds,
+	// review_rounds, restart; 0 to 10); nil changes none.
+	Caps map[string]int
 }
 
 // PlanAmendment is what the foreman changes in a live plan (§12.2): tasks
@@ -186,6 +189,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if err := validateTaskTierEffort(t); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("added task %d %q: %w", i+1, t.Name, err)
 		}
+		if err := validateTaskCaps(t.Caps); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("added task %d %q: %w", i+1, t.Name, err)
+		}
 		if t.Spec == "" {
 			return AmendPlanResult{}, fmt.Errorf("added task %d: spec is required: the worker's task, verbatim (§1.4)", i+1)
 		}
@@ -294,6 +300,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), err)
 		}
 		if err := adapter.ValidateTaskEffort(rt.Effort); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), err)
+		}
+		if err := validateTaskCaps(rt.Caps); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), err)
 		}
 		seenRetier[i] = true
@@ -405,6 +414,16 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			rt.Tier, rt.Tier, rt.Tier, rt.Tier, rt.Effort, rt.Effort, rt.Tier, rt.Effort, rt.Effort, nowStr, nodes[i].id); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), err)
 		}
+		if len(rt.Caps) > 0 {
+			var recorded string
+			if err := tx.QueryRow(`SELECT caps FROM tasks WHERE id = ?`, nodes[i].id).Scan(&recorded); err != nil {
+				return AmendPlanResult{}, fmt.Errorf("retier %s: read caps: %w", nodes[i].label(), err)
+			}
+			if _, err := tx.Exec(`UPDATE tasks SET caps = ?, updated_at = ? WHERE id = ?`,
+				mergeTaskCaps(recorded, rt.Caps), nowStr, nodes[i].id); err != nil {
+				return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), err)
+			}
+		}
 		res.Retiered = append(res.Retiered, nodes[i].id)
 	}
 	setupRec, err := taskProjectSetupTx(tx, proj)
@@ -414,8 +433,8 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	for k := range am.Add {
 		i := existing + k
 		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, created_at, updated_at)
-			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?)`,
-			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskPending, baseRef, setupRec, nodes[i].extraRec, taskTier(am.Add[k].Tier), taskTier(am.Add[k].Tier), am.Add[k].Effort, am.Add[k].Effort, nowStr, nowStr)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?)`,
+			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskPending, baseRef, taskCapsJSON(am.Add[k].Caps), setupRec, nodes[i].extraRec, taskTier(am.Add[k].Tier), taskTier(am.Add[k].Tier), am.Add[k].Effort, am.Add[k].Effort, nowStr, nowStr)
 		if err != nil {
 			return AmendPlanResult{}, fmt.Errorf("create the task: %w", err)
 		}
