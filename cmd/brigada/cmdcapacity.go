@@ -83,31 +83,41 @@ func printCapacity(ctx context.Context, client capacityClient, repo string, stdo
 // working directory's origin names it; a directory outside any repository,
 // or one whose origin is no project, shows every project's capacity.
 func capacityProjectID(ctx context.Context, client capacityClient, repo string, stderr io.Writer) (int64, int) {
+	id, err := lookupProjectID(ctx, client, repo)
+	if err != nil {
+		return 0, fail(stderr, err)
+	}
+	return id, 0
+}
+
+// lookupProjectID is capacityProjectID's answer as an error, for a caller
+// that shows the failure itself.
+func lookupProjectID(ctx context.Context, client capacityClient, repo string) (int64, error) {
 	explicit := repo != ""
 	if !explicit {
 		dir, err := os.Getwd()
 		if err != nil {
-			return 0, fail(stderr, fmt.Errorf("find the working directory: %w", err))
+			return 0, fmt.Errorf("find the working directory: %w", err)
 		}
 		origin, err := gitOriginURL(dir)
 		if err != nil {
-			return 0, 0
+			return 0, nil
 		}
 		if repo, err = projecturl.Canonical(origin); err != nil {
-			return 0, 0
+			return 0, nil
 		}
 	}
 	projects, err := client.Projects(ctx)
 	if err != nil {
-		return 0, fail(stderr, err)
+		return 0, err
 	}
 	for _, p := range projects {
 		if p.RepoURL == repo {
-			return p.ProjectID, 0
+			return p.ProjectID, nil
 		}
 	}
 	if explicit {
-		return 0, fail(stderr, fmt.Errorf("no active project for repo %s", engine.RedactRepoURL(repo)))
+		return 0, fmt.Errorf("no active project for repo %s", engine.RedactRepoURL(repo))
 	}
-	return 0, 0
+	return 0, nil
 }
