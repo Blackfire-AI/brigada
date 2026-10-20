@@ -25,8 +25,8 @@ tasks:
     tier: light
     effort: medium
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-36-r1"
+    rounds: 1
   - id: 37
     name: "top"
     title: "brigada top: a live view of agents, jobs, queue, plans and events"
