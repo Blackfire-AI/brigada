@@ -33,6 +33,6 @@ tasks:
     deps: ["dsh-adapter"]
     base: "dsh-adapter"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
