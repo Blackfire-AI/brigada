@@ -1,0 +1,60 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 8
+title: "1.0 docs and review robustness: drop Alpha, CHANGELOG, product brief v3, review-retry fallback (#21, #23, #8, #33)"
+repo: "github.com/Blackfire-AI/brigada"
+state: active
+created: 2026-10-20T08:01:57.940787Z
+updated: 2026-10-20T08:01:57.940787Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps, or from the
+# default branch when base is empty; merge a task after its base. States
+# are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1).
+tasks:
+  - id: 30
+    name: "review-fallback"
+    title: "Review retry falls back to the excluded reviewer when no other is available (#33)"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 31
+    name: "alpha"
+    title: "Drop the Alpha label for 1.0 (#21)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: light
+    effort: low
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 32
+    name: "changelog"
+    title: "CHANGELOG.md with the 1.0.0 entry (#23)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: light
+    effort: medium
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 33
+    name: "brief"
+    title: "Product brief v3 (#8)"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: ready
+    branch: ""
+    rounds: 0
