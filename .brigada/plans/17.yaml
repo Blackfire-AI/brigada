@@ -5,9 +5,9 @@
 plan: 17
 title: "dsh adapter: launcher flags before app flags (every dsh job fails with \"unknown option '--patch'\")"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-20T15:09:48.559441Z
-updated: 2026-10-20T15:09:48.559441Z
+updated: 2026-10-20T17:33:59.686701Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -27,6 +27,6 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: needs_foreman
+    state: cancelled
     branch: "brigada/task-56-r3"
     rounds: 0
