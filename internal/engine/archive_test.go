@@ -90,10 +90,6 @@ func TestArchivedProjectWorkGates(t *testing.T) {
 			_, err := e.eng.SubmitTask(e.ctx, TaskParams{RepoURL: archiveRepo, BaseRef: "main", Spec: "work"})
 			return err
 		},
-		"hold": func() error {
-			_, err := e.eng.AcquireHold(e.ctx, HoldAcquire{Project: e.project, BridgeInstance: "bridge"})
-			return err
-		},
 		"attach":       func() error { _, err := e.eng.Attach(e.ctx, e.project, true); return err },
 		"ask":          func() error { _, err := e.eng.AskForeman(e.ctx, archiveRepo, "help", "user"); return err },
 		"implicit ask": func() error { _, err := e.eng.AskForeman(e.ctx, "", "help", "user"); return err },
@@ -101,7 +97,6 @@ func TestArchivedProjectWorkGates(t *testing.T) {
 		"answer":       func() error { _, err := e.eng.Answer(e.ctx, e.project, e.task, "yes"); return err },
 		"restart":      func() error { _, err := e.eng.RestartTask(e.ctx, e.project, e.task, "retry"); return err },
 		"events":       func() error { _, err := e.eng.ForemanEvents(e.ctx, e.project); return err },
-		"note":         func() error { _, err := e.eng.DecisionNote(e.ctx, e.project, "note"); return err },
 		"wake budget":  func() error { _, err := e.eng.SetWakeBudget(e.ctx, archiveRepo, 10); return err },
 		"wake": func() error {
 			return e.st.Update(e.ctx, func(tx *sql.Tx) error { _, err := e.eng.wakeOutcomeTx(tx, e.project, e.clock.Now()); return err })
@@ -134,43 +129,20 @@ func TestArchivedProjectWorkGates(t *testing.T) {
 	}
 }
 
-func TestArchiveReleasesInteractiveAndAttachHolds(t *testing.T) {
-	t.Run("interactive", func(t *testing.T) {
-		e := newEnv(t)
-		e.exec("UPDATE plans SET state = 'done' WHERE id = ?", e.plan)
-		h := e.acquire("bridge", "session")
-		if _, err := e.eng.ArchiveProject(e.ctx, archiveRepo, false); err != nil {
-			t.Fatal(err)
-		}
-		if e.str("SELECT state FROM interactive_holds WHERE id = ?", h.HoldID) != "ended" {
-			t.Fatal("hold still live")
-		}
-		if e.int("SELECT hold_fence FROM projects WHERE id = ?", e.project) <= h.Fence {
-			t.Fatal("hold fence did not advance")
-		}
-		_, _, live, ok, err := e.eng.HoldCredentialScope(e.ctx, h.Credential)
-		if err != nil || live || !ok {
-			t.Fatalf("ended credential: live=%v ok=%v err=%v", live, ok, err)
-		}
-		if err := e.eng.CheckHold(e.ctx, h.HoldID, h.Fence); !errors.Is(err, ErrStaleHold) {
-			t.Fatalf("old hold accepted: %v", err)
-		}
-	})
-	t.Run("attach", func(t *testing.T) {
-		e := newEnv(t)
-		e.exec("UPDATE plans SET state = 'done' WHERE id = ?", e.plan)
-		h, err := e.eng.Attach(e.ctx, e.project, false)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := e.eng.ArchiveProject(e.ctx, archiveRepo, false); err != nil {
-			t.Fatal(err)
-		}
-		_, _, ok, err := e.eng.HoldTokenScope(e.ctx, h.ForemanToken)
-		if err != nil || ok {
-			t.Fatalf("attach token survived: %v %v", ok, err)
-		}
-	})
+func TestArchiveReleasesAttachHold(t *testing.T) {
+	e := newEnv(t)
+	e.exec("UPDATE plans SET state = 'done' WHERE id = ?", e.plan)
+	h, err := e.eng.Attach(e.ctx, e.project, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.eng.ArchiveProject(e.ctx, archiveRepo, false); err != nil {
+		t.Fatal(err)
+	}
+	_, _, ok, err := e.eng.HoldTokenScope(e.ctx, h.ForemanToken)
+	if err != nil || ok {
+		t.Fatalf("attach token survived: %v %v", ok, err)
+	}
 }
 
 func TestArchivedProjectVisibilityAndRegistration(t *testing.T) {
@@ -271,7 +243,9 @@ func TestArchiveHidesCompletedPlansReportsAndPendingMessages(t *testing.T) {
 	e.exec("UPDATE plans SET state = 'done' WHERE id = ?", e.plan)
 	e.exec("UPDATE tasks SET state = 'needs_foreman' WHERE id = ?", e.task)
 	e.exec(`UPDATE projects SET settings = '{"instructions":"private project guidance"}', foreman_limited = 'unknown' WHERE id = ?`, e.project)
-	e.acquire("bridge", "session")
+	if _, err := e.eng.Attach(e.ctx, e.project, false); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := e.eng.AskForeman(e.ctx, archiveRepo, "pending message", "user"); err != nil {
 		t.Fatal(err)
 	}

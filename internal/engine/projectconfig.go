@@ -91,8 +91,7 @@ var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // may carry (§13.1): the approval limit, the default check, the worker
 // tool policy, the environment step (§5.7) and the extra repositories
 // (§5.8), and nothing else. It is its own list, never SettingKeys: a
-// setting added for the local store (the mode A hold bounds, for one)
-// does not become shared-file policy by being editable.
+// setting added for the local store (the wake budget, for one) does not become shared-file policy by being editable.
 var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
 	SettingExtraRepos}

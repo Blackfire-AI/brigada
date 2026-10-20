@@ -5,6 +5,10 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.0.0] - Unreleased
 
+### Removed
+
+- Mode A is retired: your own harness session no longer holds the foreman. The `hold` command, `brigada mcp --foreman`, the settings `hold_idle_minutes`, `hold_max_minutes` and `interactive_quiet_minutes`, and the tools `hold_acquire`, `hold_yield` and `decision_note` are gone; `brigada attach` is the interactive foreman, joining the brigada-owned session.
+
 ### Fixed
 
 - dsh jobs failed at start with "unknown option '--patch'"; the adapter now passes the launcher's `--patch` before the app's `--json`.

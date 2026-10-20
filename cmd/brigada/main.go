@@ -36,11 +36,6 @@ Commands:
 	attach          Attach to this repo's foreman and chat (what a bare
 	                brigada runs).
 	ask <message>   Send the foreman a message without attaching.
-	hold release    Release a stuck interactive hold on the foreman
-	                (--repo).
-	hold yield      Stop hook: yield only the bound bridge hold; always
-	                exits 0.
-	hold confirm    Kept for old SessionStart hooks; does nothing, exits 0.
 	review --branch <x>
 	                Review a branch with an agent of another family than
 	                its author's, with no plan or task.
@@ -49,10 +44,9 @@ Commands:
 	start           Start the engine and detached runner with saved agents.
 	config          Show every setting, where it lives and how to change it.
 	stop            Stop the detached runner (--engine: the engine too).
-	mcp             Serve brigada's tools over stdio: the foreman's
-	                (--foreman), the coordinator's (--coordinator) or the
-	                client's (--client); Claude Code runs it from the
-	                wiring init writes.
+	mcp             Serve brigada's tools over stdio: the coordinator's
+	                (--coordinator), the client's (--client), or the
+	                foreman's for a turn or an attached chat (--socket).
 	status          Show the engine, its jobs by status, plans and what
 	                needs you (--line: one short line).
 	task submit     Submit one task directly, without the foreman (a
@@ -62,8 +56,8 @@ Commands:
 	project list    List the projects: repo, foreman, active plans,
 	                needs-you.
 	project set     Set project settings: key=value ... (approval limit,
-	                default_check, setup, extra_repos, hold bounds,
-	                instructions and the rest).
+	                default_check, setup, extra_repos, instructions and
+	                the rest).
 	project show    Show a project's settings and where each comes from
 	                (default, set locally, or imported).
 	project import  Import this repo's .brigada/project.yaml; --yes
@@ -126,7 +120,6 @@ var commands = map[string]command{
 	"remove":   {name: "remove", run: runRemove},
 	"attach":   {name: "attach", run: runAttach},
 	"ask":      {name: "ask", run: runAsk},
-	"hold":     {name: "hold", run: runHold, subcommands: holdCommands},
 	"review":   {name: "review", run: runReview},
 	"engine":   {name: "engine", run: runEngine},
 	"runner":   {name: "runner", run: runRunner},

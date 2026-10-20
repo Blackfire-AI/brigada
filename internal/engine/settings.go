@@ -12,7 +12,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -35,14 +34,6 @@ const (
 	SettingSetup              = "setup"
 	SettingSetupCacheKeyFiles = "setup_cache_key_files"
 	SettingSetupTimeout       = "setup_timeout_minutes"
-	// The interactive hold's two bounds (§4.6), in minutes: idle without
-	// activity, and absolute from acquire. The quiet minutes (§4.6,
-	// decided 2026-10-20) are how long after a hold's end an event still
-	// waits before it wakes the headless foreman; 0 turns it off. Local
-	// only, like the bounds.
-	SettingHoldIdleMinutes         = "hold_idle_minutes"
-	SettingHoldMaxMinutes          = "hold_max_minutes"
-	SettingInteractiveQuietMinutes = "interactive_quiet_minutes"
 	// The project's daily foreman wake budget (§4.3): headless foreman
 	// turns per UTC day. Local only — the shared project.yaml refuses
 	// it — and set through `brigada budget --wakes N`, which also
@@ -58,20 +49,10 @@ const (
 // on the day's foreman turns, so a typo cannot buy a thousand-turn day.
 const MaxForemanWakesPerDay = 1000
 
-// The hold bounds' defaults (§4.6): a starting guess, open in §16. The
-// interactive quiet default (§4.6, decided 2026-10-20) is 10 minutes:
-// long enough to cover a working session's turn gaps, short enough that
-// a lapsed session's events wait minutes, not hours.
-const (
-	defaultHoldIdleMinutes = 15
-	defaultHoldMaxMinutes  = 240
-	defaultQuietMinutes    = 10
-)
-
 // SettingKeys are the editable keys, in the order show prints them.
 var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
-	SettingExtraRepos, SettingHoldIdleMinutes, SettingHoldMaxMinutes, SettingInteractiveQuietMinutes, SettingForemanWakesPerDay, SettingInstructions}
+	SettingExtraRepos, SettingForemanWakesPerDay, SettingInstructions}
 
 // MaxInstructionsBytes bounds the project instruction text (§5.9): a
 // starting value, open in §16 item 11. Above it a set or an import is
@@ -157,8 +138,7 @@ var classWord = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 func parseSettingValue(key, value string) (json.RawMessage, error) {
 	switch key {
 	case SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths, SettingDefaultCheck, SettingWorkerTools,
-		SettingHoldIdleMinutes, SettingHoldMaxMinutes, SettingInteractiveQuietMinutes, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
-		SettingExtraRepos, SettingForemanWakesPerDay, SettingInstructions:
+		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanWakesPerDay, SettingInstructions:
 	default:
 		return nil, fmt.Errorf("%w: unknown key %q; valid keys: %s", ErrInvalidSetting, key, strings.Join(SettingKeys, ", "))
 	}
@@ -201,18 +181,10 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 		}
 		return json.RawMessage(strconv.Itoa(n)), nil
 	}
-	if key == SettingHoldIdleMinutes || key == SettingHoldMaxMinutes || key == SettingSetupTimeout {
+	if key == SettingSetupTimeout {
 		n, err := strconv.Atoi(value)
 		if err != nil || n <= 0 {
 			return nil, fmt.Errorf("%w: %s takes a positive whole number of minutes, got %q",
-				ErrInvalidSetting, key, value)
-		}
-		return json.RawMessage(strconv.Itoa(n)), nil
-	}
-	if key == SettingInteractiveQuietMinutes {
-		n, err := strconv.Atoi(value)
-		if err != nil || n < 0 {
-			return nil, fmt.Errorf("%w: %s takes a whole number of minutes (0 = headless wakes are never deferred), got %q",
 				ErrInvalidSetting, key, value)
 		}
 		return json.RawMessage(strconv.Itoa(n)), nil
@@ -303,14 +275,6 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 	if err != nil {
 		return ProjectSettings{}, err
 	}
-	idle, maxHold, err := holdBoundsTx(tx, project)
-	if err != nil {
-		return ProjectSettings{}, err
-	}
-	quiet, err := interactiveQuietTx(tx, project)
-	if err != nil {
-		return ProjectSettings{}, err
-	}
 	list := func(l []string) string {
 		if len(l) == 0 {
 			return "none"
@@ -369,12 +333,6 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 			if has {
 				sv.Value = renderSettingRaw(k, cur)
 			}
-		case SettingHoldIdleMinutes:
-			sv.Value = strconv.Itoa(int(idle / time.Minute))
-		case SettingHoldMaxMinutes:
-			sv.Value = strconv.Itoa(int(maxHold / time.Minute))
-		case SettingInteractiveQuietMinutes:
-			sv.Value = strconv.Itoa(int(quiet / time.Minute))
 		case SettingForemanWakesPerDay:
 			budget := wakeBudgetDefault
 			if n, ok := rawInt(cur); ok && n > 0 {
@@ -508,53 +466,4 @@ func (e *Engine) SetProjectSettings(ctx context.Context, repoURL string, values 
 		return ProjectSettings{}, fmt.Errorf("set the settings of the project of %s: %w", RedactRepoURL(repoURL), err)
 	}
 	return out, nil
-}
-
-// holdBoundsTx reads the project's interactive-hold bounds (§4.6): the
-// idle and the absolute limit, each its setting or the default. A value
-// that does not parse as a positive number is the default — the setting
-// path validates, so only a hand-edited row lands there.
-func holdBoundsTx(tx *sql.Tx, project int64) (idle, maxHold time.Duration, err error) {
-	var raw string
-	if err := tx.QueryRow("SELECT settings FROM projects WHERE id = ?", project).Scan(&raw); err != nil {
-		return 0, 0, fmt.Errorf("read the settings of project %d: %w", project, err)
-	}
-	minutes := map[string]int{SettingHoldIdleMinutes: defaultHoldIdleMinutes, SettingHoldMaxMinutes: defaultHoldMaxMinutes}
-	if raw != "" {
-		var present map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(raw), &present); err != nil {
-			return 0, 0, fmt.Errorf("parse the settings of project %d: %w", project, err)
-		}
-		for k := range minutes {
-			var n int
-			if v, ok := present[k]; ok && json.Unmarshal(v, &n) == nil && n > 0 {
-				minutes[k] = n
-			}
-		}
-	}
-	return time.Duration(minutes[SettingHoldIdleMinutes]) * time.Minute,
-		time.Duration(minutes[SettingHoldMaxMinutes]) * time.Minute, nil
-}
-
-// interactiveQuietTx reads the project's interactive quiet period (§4.6,
-// decided 2026-10-20): how long after a hold's end an event still waits
-// before waking the headless foreman, 0 for never. A value that does not
-// parse as a non-negative number is the default, as with the bounds.
-func interactiveQuietTx(tx *sql.Tx, project int64) (time.Duration, error) {
-	var raw string
-	if err := tx.QueryRow("SELECT settings FROM projects WHERE id = ?", project).Scan(&raw); err != nil {
-		return 0, fmt.Errorf("read the settings of project %d: %w", project, err)
-	}
-	if raw == "" {
-		return defaultQuietMinutes * time.Minute, nil
-	}
-	var present map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(raw), &present); err != nil {
-		return 0, fmt.Errorf("parse the settings of project %d: %w", project, err)
-	}
-	var n int
-	if v, ok := present[SettingInteractiveQuietMinutes]; ok && json.Unmarshal(v, &n) == nil && n >= 0 {
-		return time.Duration(n) * time.Minute, nil
-	}
-	return defaultQuietMinutes * time.Minute, nil
 }

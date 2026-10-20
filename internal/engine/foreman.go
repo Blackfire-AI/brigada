@@ -57,26 +57,13 @@ func (e *Engine) submitForemanTurnTx(tx *sql.Tx, project int64, inbox ForemanInb
 	// The harness and model are the job's placement constraint (§8): only
 	// an agent offering exactly that pair may take the turn, so it runs on
 	// the model the user chose (foremanPairTx).
-	var cursor int64
-	if err := tx.QueryRow("SELECT decision_note_cursor FROM projects WHERE id = ?", project).Scan(&cursor); err != nil {
-		return SubmitResult{}, err
-	}
-	notes, last, err := decisionNotesTx(tx, project, cursor)
-	if err != nil {
-		return SubmitResult{}, err
-	}
-	events := append(append([]string{}, inbox.Events...), notes...)
-	res, err := e.submitTx(tx, SubmitParams{
+	return e.submitTx(tx, SubmitParams{
 		Key:       fmt.Sprintf("foreman:%d", project),
 		ProjectID: project,
 		Kind:      KindForeman,
 		Mode:      ModeSession,
-		Prompt:    foreman.Instructions() + "\n" + foreman.ComposeTurnPromptWith(events, inbox.UserMessages),
+		Prompt:    foreman.Instructions() + "\n" + foreman.ComposeTurnPromptWith(inbox.Events, inbox.UserMessages),
 		Harness:   harness,
 		Model:     model,
 	}, now)
-	if err == nil && res.Answer == AnsCreated {
-		_, err = tx.Exec("UPDATE projects SET decision_note_cursor = ? WHERE id = ?", last, project)
-	}
-	return res, err
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -101,7 +100,7 @@ func TestWiringFreshFilesHoldExactlyBrigadasEntries(t *testing.T) {
 		t.Errorf("fresh wiring created shared settings: %v", err)
 	}
 	rules := wireRead(t, root, wiringRulesFile)
-	if !strings.HasPrefix(rules, wiringSkillMarker+" v") || strings.Contains(rules, "---\nname:") || !strings.Contains(rules, "Brigada owns\nthis file and replaces it on \"brigada init\"") || !strings.Contains(rules, "hold_acquire") {
+	if !strings.HasPrefix(rules, wiringSkillMarker+" v") || strings.Contains(rules, "---\nname:") || !strings.Contains(rules, "Brigada owns\nthis file and replaces it on \"brigada init\"") || !strings.Contains(rules, "plan_create") {
 		t.Errorf("rules = %.200s", rules)
 	}
 	if fileExists(filepath.Join(root, wiringSkillFile)) {
@@ -254,7 +253,7 @@ func TestWiringRulesRefreshOnlyTheirOwnFile(t *testing.T) {
 	root := wireRepo(t)
 	wireWrite(t, root, wiringRulesFile, wiringSkillMarker+" v0 -->\nold text\n")
 	wireApply(t, root)
-	if got := wireRead(t, root, wiringRulesFile); strings.Contains(got, "old text") || !strings.Contains(got, "hold_acquire") {
+	if got := wireRead(t, root, wiringRulesFile); strings.Contains(got, "old text") || !strings.Contains(got, "plan_create") {
 		t.Errorf("rules not refreshed: %.200s", got)
 	}
 }
@@ -303,15 +302,6 @@ func TestInitProbeListsWiringWritesNothing(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestHoldConfirmAlwaysExitsZero(t *testing.T) {
-	for _, args := range [][]string{{"hold", "confirm"}, {"hold", "confirm", "--session", "s1"}, {"hold", "confirm", "--bogus"}} {
-		var out, errOut strings.Builder
-		if code := run(context.Background(), args, &out, &errOut); code != 0 {
-			t.Errorf("%v exited %d: %s", args, code, errOut.String())
-		}
 	}
 }
 

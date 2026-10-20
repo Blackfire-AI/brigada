@@ -75,17 +75,6 @@ func TestStatusSectionsNamesAMissingForemanPair(t *testing.T) {
 	}
 }
 
-// TestStatusSectionsNamesADeferredWake: a headless wake the interactive
-// quiet period holds is its own line (§4.6), naming when it may fire.
-func TestStatusSectionsNamesADeferredWake(t *testing.T) {
-	until := time.Date(2026, 10, 20, 14, 32, 0, 0, time.UTC).Format(engine.TimeLayout)
-	st := Status{DeferredWakes: []engine.DeferredWake{{ProjectID: 2, Until: until}}}
-	want := "headless wakes deferred until 14:32: interactive session active (project #2)"
-	if got := StatusSections(st); !strings.Contains(got, want) {
-		t.Errorf("status sections = %q, want the line %q", got, want)
-	}
-}
-
 // TestStatusLineCountsMessagesForTheForeman: a waiting user message is
 // no idle state (§4.2 item 3): the bar counts it.
 func TestStatusLineCountsMessagesForTheForeman(t *testing.T) {

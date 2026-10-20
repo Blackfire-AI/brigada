@@ -5,11 +5,12 @@ import (
 	"testing"
 )
 
-func TestInteractiveAskUserIsDurableAndFenced(t *testing.T) {
+// TestAskUserIsDurableWithoutAHold: a foreman question needs no hold of
+// any kind — an attached chat and a headless turn ask the same way — and
+// it never wakes a competing headless turn.
+func TestAskUserIsDurableWithoutAHold(t *testing.T) {
 	e := newEnv(t)
-	h := e.acquire("interactive-bridge", "working session")
-	ctx := WithHoldGuard(e.ctx, &HoldGuard{Hold: h.HoldID, Fence: h.Fence})
-	id, err := e.eng.AskUser(ctx, e.project, "Which option should we use?")
+	id, err := e.eng.AskUser(e.ctx, e.project, "Which option should we use?")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,15 +22,6 @@ func TestInteractiveAskUserIsDurableAndFenced(t *testing.T) {
 	}
 	if e.foremanJobs() != 0 {
 		t.Fatal("a question must not create a competing headless wake")
-	}
-	if err := e.eng.YieldHold(e.ctx, h.HoldID, h.Fence); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.eng.AskUser(ctx, e.project, "stale question"); !errors.Is(err, ErrStaleHold) {
-		t.Fatalf("stale question err=%v", err)
-	}
-	if n := e.str("SELECT COUNT(*) FROM questions"); n != "1" {
-		t.Fatalf("stale question applied: %s", n)
 	}
 	for _, text := range []string{"", "   "} {
 		if _, err := e.eng.AskUser(e.ctx, e.project, text); !errors.Is(err, ErrInvalidMessage) {

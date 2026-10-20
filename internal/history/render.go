@@ -68,8 +68,6 @@ func summary(it Item) string {
 		TierServed string `json:"tier_served"`
 		EffortFrom string `json:"effort_from"`
 		EffortTo   string `json:"effort_to"`
-		Until      string `json:"until"`
-		Count      int64  `json:"count"`
 	}
 	if json.Unmarshal(it.Payload, &p) != nil {
 		return string(it.Payload)
@@ -79,11 +77,6 @@ func summary(it Item) string {
 	}
 	if it.Kind == "task_effort_bumped" {
 		return fmt.Sprintf("task effort %s -> %s: %s", p.EffortFrom, p.EffortTo, p.Reason)
-	}
-	if it.Kind == "foreman_wake_deferred" {
-		// Until is when the quiet period lapses, Count the rows that
-		// waited (§4.6): the record of a wake held back.
-		return fmt.Sprintf("headless wake deferred until=%s waiting=%d", p.Until, p.Count)
 	}
 	var parts []string
 	add := func(k, v string) {

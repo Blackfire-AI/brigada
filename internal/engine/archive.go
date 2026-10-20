@@ -41,7 +41,7 @@ func (e *archivedProjectError) Unwrap() error { return ErrProjectArchived }
 // ArchiveProject removes a repository from active service without deleting its
 // history. With cancel, live jobs and unfinished plans end through the same
 // cancellation paths used by job cancellation and plan rejection. Removal and
-// cancellation are atomic, including revoking interactive credentials.
+// cancellation are atomic, including ending a live attach hold.
 func (e *Engine) ArchiveProject(ctx context.Context, repoURL string, cancel bool) (Answer, error) {
 	var answer Answer
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
@@ -108,15 +108,6 @@ func (e *Engine) ArchiveProject(ctx context.Context, repoURL string, cancel bool
 				if _, err := e.cancelTx(tx, job, "project removed", now); err != nil {
 					return err
 				}
-			}
-		}
-		holds, err := ids("SELECT id FROM interactive_holds WHERE project_id = ? AND state = 'live'")
-		if err != nil {
-			return err
-		}
-		for _, hold := range holds {
-			if err := e.endHoldTx(tx, hold, project, HoldEndRemoved, false, now); err != nil {
-				return err
 			}
 		}
 		attaches, err := ids("SELECT id FROM attach_holds WHERE project_id = ? AND state = 'live'")

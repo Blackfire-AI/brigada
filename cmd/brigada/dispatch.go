@@ -24,14 +24,6 @@ var planCommands = map[string]command{
 	"reject":  {name: "reject", description: "Reject a plan and cancel its tasks.", run: planDecisionCommand("reject")},
 }
 
-var holdCommands = map[string]command{
-	"confirm": {name: "confirm", description: "Do nothing; kept for old SessionStart hooks; always exit 0.", run: func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-		return runHoldConfirm(args, stdout, stderr)
-	}},
-	"release": {name: "release", description: "Release a stuck interactive hold on the foreman.", run: runHoldRelease},
-	"yield":   {name: "yield", description: "Yield the bound bridge hold from a Stop hook; always exit 0.", run: runHoldYield},
-}
-
 var taskCommands = map[string]command{
 	"submit": {name: "submit", description: "Submit one task directly, without the foreman.", run: runTaskSubmit},
 }

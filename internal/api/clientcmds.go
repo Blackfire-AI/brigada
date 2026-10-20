@@ -63,14 +63,10 @@ type Status struct {
 	// foreman (§4.2 item 3).
 	ForemanMessages int `json:"foreman_messages"`
 	// Slots is who holds the foreman's slot per project (§4.6).
-	Slots []engine.Slot `json:"slots"`
-	// DeferredWakes lists the projects whose headless wakes the
-	// interactive quiet period holds (§4.6), with the earliest a turn
-	// may fire.
-	DeferredWakes []engine.DeferredWake `json:"deferred_wakes,omitempty"`
-	Plans         []engine.StatusPlan   `json:"plans"`
-	Report        *engine.StatusReport  `json:"report,omitempty"`
-	NeedsYou      []engine.NeedsYouItem `json:"needs_you"`
+	Slots    []engine.Slot         `json:"slots"`
+	Plans    []engine.StatusPlan   `json:"plans"`
+	Report   *engine.StatusReport  `json:"report,omitempty"`
+	NeedsYou []engine.NeedsYouItem `json:"needs_you"`
 	// Cooling lists the agents held back for quota (§8, §10).
 	Cooling []engine.CoolingAgent `json:"cooling,omitempty"`
 	// Held lists the queued jobs a full cap layer holds (§8.1).
@@ -520,21 +516,18 @@ func (c *Client) ForemanEvents(ctx context.Context, wait time.Duration) (engine.
 // or the live hold's id — so the caller can wait one out and refuse
 // the other without parsing words.
 type AttachResult struct {
-	Answer engine.Answer
-	HoldID int64 // the created hold; a busy answer names the live hold
-	JobID  int64 // a busy answer names the live foreman turn; 0 otherwise
-	// InteractiveHoldID is the user's own session's hold (§4.6), when
-	// that made the attach busy; 0 otherwise.
-	InteractiveHoldID int64
-	ForemanToken      string
-	RepoURL           string
-	DefaultBranch     string
-	Harness           string
-	Model             string
-	Effort            string // the foreman's reasoning-effort level; '' = unset
-	SessionID         string // the key's current harness session id; '' = none
-	Prompt            string // the opening prompt
-	ExpiresAt         time.Time
+	Answer        engine.Answer
+	HoldID        int64 // the created hold; a busy answer names the live hold
+	JobID         int64 // a busy answer names the live foreman turn; 0 otherwise
+	ForemanToken  string
+	RepoURL       string
+	DefaultBranch string
+	Harness       string
+	Model         string
+	Effort        string // the foreman's reasoning-effort level; '' = unset
+	SessionID     string // the key's current harness session id; '' = none
+	Prompt        string // the opening prompt
+	ExpiresAt     time.Time
 }
 
 // Attach takes the foreman's key for an attached chat (§4.2 item 1),
@@ -551,8 +544,7 @@ func (c *Client) Attach(ctx context.Context, repoURL string, force bool) (Attach
 		if errors.As(err, &se) && se.Status == http.StatusConflict {
 			var busy attachConflict
 			if json.Unmarshal(se.Body, &busy) == nil {
-				return AttachResult{Answer: engine.AnsBusy, JobID: busy.JobID, HoldID: busy.HoldID,
-					InteractiveHoldID: busy.InteractiveHoldID}, nil
+				return AttachResult{Answer: engine.AnsBusy, JobID: busy.JobID, HoldID: busy.HoldID}, nil
 			}
 		}
 		return AttachResult{}, err
@@ -592,13 +584,6 @@ func (c *Client) AttachHeartbeat(ctx context.Context, holdID int64) (engine.Answ
 // session id was still written; gone — ride in the return.
 func (c *Client) ReleaseAttach(ctx context.Context, holdID int64, sessionID string) (engine.Answer, error) {
 	return c.answer(ctx, "/v1/foreman/release", releaseAttachRequest{HoldID: holdID, SessionID: sessionID})
-}
-
-// ReleaseHold is the user's forced release of a project's stuck
-// interactive hold (§4.6): client authority, no credential. The answer is
-// ok, or gone when no interactive hold was live.
-func (c *Client) ReleaseHold(ctx context.Context, repoURL string) (engine.Answer, error) {
-	return c.answer(ctx, "/v1/foreman/hold/release", releaseHoldRequest{RepoURL: repoURL})
 }
 
 // HealthTimeout bounds one Health probe when a caller polls for the

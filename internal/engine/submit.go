@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+// ErrSlotHeld marks a foreman turn the engine will not submit because an
+// attached chat holds the slot (§4.2 item 1, §4.6): a headless turn only
+// ever starts from a free slot.
+var ErrSlotHeld = errors.New("the foreman slot is held by an attached chat")
+
 // SubmitParams describes the job to create for a key (§12.1, §14).
 type SubmitParams struct {
 	// Key is the queue: 'task:<id>' for worker jobs, 'foreman:<project>'
@@ -126,11 +131,11 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 	if p.Kind == KindForeman {
 		// The common foreman submission boundary (§4.6): a headless turn
 		// starts only from a free slot, whoever asks — the wake, a manual
-		// submit or the admin path.
+		// submit or the admin path — so never beside an attached chat.
 		var held int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM interactive_holds WHERE project_id = ? AND state = 'live'`,
-			p.ProjectID).Scan(&held); err != nil {
-			return SubmitResult{}, fmt.Errorf("read the interactive holds of project %d: %w", p.ProjectID, err)
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM attach_holds WHERE project_id = ? AND state = 'live' AND expires_at > ?`,
+			p.ProjectID, fmtTime(now)).Scan(&held); err != nil {
+			return SubmitResult{}, fmt.Errorf("read the attach holds of project %d: %w", p.ProjectID, err)
 		}
 		if held > 0 {
 			return SubmitResult{}, ErrSlotHeld

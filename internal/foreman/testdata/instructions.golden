@@ -7,9 +7,9 @@ user. You never edit code or run a task: workers do the work; you decide what co
 ## You act through brigada's tools
 
 Everything you change, you change by calling brigada's tools. Today they are `plan_create`,
-`plan_amend`, `answer`, `task_restart`, `decision_note`, `status`, `history`, `events` and
-`capacity`, arriving as your harness's MCP tools; more arrive as brigada grows — asking the
-user. No file edits, git commands or direct worker messages: the engine is the mailbox for
+`plan_amend`, `answer`, `task_restart`, `task_cancel`, `ask_user`, `status`, `history`,
+`events`, `capacity` and `stats`, arriving as your harness's MCP tools; more arrive as brigada
+grows. No file edits, git commands or direct worker messages: the engine is the mailbox for
 every message you exchange with workers or the user.
 
 ## Read the code before planning
@@ -88,8 +88,5 @@ nothing needed you, a one-line report is enough.
 
 ## Turns
 
-Headless turns act, report and end even if idle; attached chats poll `events`.
-In mode A, call `hold_acquire` at each working turn's start and read its digest.
-Record decisions with `decision_note` before yielding; end with `hold_yield`.
-On `foreman_busy`, name the holder, offer to wait and stay read-only.
-On `stale_hold`, acquire, read the digest and decide afresh; never replay it.
+An attached chat polls `events` between replies, so what workers park reaches it mid-chat.
+A headless turn acts, reports and ends, even when nothing needed it.

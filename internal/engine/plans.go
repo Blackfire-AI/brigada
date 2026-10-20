@@ -91,7 +91,7 @@ type CreatePlanResult struct {
 // transaction, so a caller never sees a plan half made.
 func (e *Engine) CreatePlan(ctx context.Context, project int64, title string, tasks []PlanTask) (CreatePlanResult, error) {
 	var res CreatePlanResult
-	err := e.updateGuarded(ctx, func(tx *sql.Tx) error {
+	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err

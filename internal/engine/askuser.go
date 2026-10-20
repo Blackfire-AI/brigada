@@ -14,7 +14,7 @@ func (e *Engine) AskUser(ctx context.Context, project int64, text string) (int64
 		return 0, fmt.Errorf("%w: a question must contain 1..%d bytes", ErrInvalidMessage, UserMessageLimit)
 	}
 	var id int64
-	err := e.updateGuarded(ctx, func(tx *sql.Tx) error {
+	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
