@@ -5,16 +5,19 @@
 plan: 10
 title: "Experimental DeepSeek Harness (dsh) adapter: worker and reviewer (#37)"
 repo: "github.com/Blackfire-AI/brigada"
-state: pending_approval
+state: active
 created: 2026-10-20T08:49:34.581969Z
-updated: 2026-10-20T12:10:33.653653Z
+updated: 2026-10-20T15:10:07.563035Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
-# done; its work starts from the branch of base, one of deps, or from the
-# default branch when base is empty; merge a task after its base. States
-# are the engine's (§6.1), rounds the fix and review rounds
+# done; its work starts from the branch of base, one of deps — the continued
+# dep when base is empty and continue is set, else the default branch; merge a
+# task after its base. A task with continue, one of deps, starts in the
+# session of the dep's author.
+# States are the engine's (§6.1), rounds the fix and review rounds
 # spent (§7), question the worker's open question (§3), when it has one.
 # Optional tier (light, standard, heavy) and effort (low, medium, high, max)
-# describe the model needed and how hard it should think (§6.1).
+# describe the model needed and how hard it should think (§6.1); caps
+# override the task's fix_rounds, review_rounds and restart budgets (§14).
 tasks:
   - id: 38
     name: "dsh-adapter"
@@ -43,7 +46,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
     extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "brigada/task-39"]]
