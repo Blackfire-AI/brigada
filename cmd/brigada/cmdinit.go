@@ -52,7 +52,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	check := fs.String("check", "", "default check command, or none / - for no check (never executed by init)")
 	tools := fs.String("tools", "", "worker scope in runner tools= syntax; applied only to Claude workers")
 	foreman := fs.String("foreman", "", "choose the foreman, a signed-in claude or codex model, as harness/model[@effort]; without @effort an interactive run asks for the effort")
-	noWiring := fs.Bool("no-wiring", false, "skip harness wiring (the bridge, hooks and foreman skill for mode A; in a parent folder, the coordinator's)")
+	noWiring := fs.Bool("no-wiring", false, "skip harness wiring (the bridge, hooks, foreman rules and AGENTS.md/CLAUDE.md router for mode A; in a parent folder, the coordinator's)")
 	parallel := fs.Int("parallel", 0, "tasks at once on this machine (1..64)")
 	all := fs.Bool("all", false, "in a folder that is not a repository: register every new repository found, without asking")
 	agents := &agentSpecs{}
@@ -993,9 +993,11 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	step := 1
 	if !*noWiring && probes["claude"].installed {
 		printInitWrapped(stdout, fmt.Sprintf("  %d. ", step), "     ",
-			"Open Claude Code here ("+style.Accent("`claude`")+"), approve the brigada MCP server "+
-				"when asked, and say what you want built. Your session plans; "+
-				"you approve the plan.")
+			"Restart your agent session in this repository (Claude Code: "+style.Accent("`claude`")+
+				"; approve the "+style.Accent("brigada")+" MCP server when it asks).")
+		step++
+		printInitWrapped(stdout, fmt.Sprintf("  %d. ", step), "     ",
+			"Ask it to plan your first task: here it is brigada's foreman, and you approve the plan.")
 		step++
 	}
 	fmt.Fprintf(stdout, "  %d. Or, without a session: %s\n", step, style.Accent("brigada ask \"what you want built\""))

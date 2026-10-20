@@ -15,7 +15,18 @@ import (
 // planRemoval reads the same paths as init, including a linked worktree's
 // shared exclude file. nil next means delete, only for this removal plan.
 func planRemoval(root string, deleteConfig bool) []wireFile {
-	files := planSteps(root, []wireStep{
+	owned := func(what string) func(d []byte, exists bool) ([]byte, string, error) {
+		return func(d []byte, exists bool) ([]byte, string, error) {
+			if !exists {
+				return d, "unchanged", nil
+			}
+			if !bytes.Contains(d, []byte(wiringSkillMarker)) {
+				return nil, "", errors.New("no brigada marker; keeping your " + what)
+			}
+			return nil, "removed", nil
+		}
+	}
+	steps := []wireStep{
 		{wiringMCPFile, removeMCPServer},
 		{wiringSettingsFile, func(d []byte, exists bool) ([]byte, string, error) {
 			return removeWiringHooks(d, exists, false)
@@ -23,22 +34,25 @@ func planRemoval(root string, deleteConfig bool) []wireFile {
 		{wiringSharedSettingsFile, func(d []byte, exists bool) ([]byte, string, error) {
 			return removeWiringHooks(d, exists, true)
 		}},
-		{wiringSkillFile, func(d []byte, exists bool) ([]byte, string, error) {
-			if !exists {
-				return d, "unchanged", nil
-			}
-			if !bytes.Contains(d, []byte(wiringSkillMarker)) {
-				return nil, "", errors.New("no brigada marker; keeping your skill")
-			}
+		{wiringRulesFile, owned("file")},
+		{wiringSkillFile, owned("skill")},
+	}
+	// A shared file that is a link to the other one holds no section of its
+	// own: the other is the file. Any other symlink is refused by planSteps.
+	for _, pair := range [][2]string{{wiringAgentsFile, wiringClaudeFile}, {wiringClaudeFile, wiringAgentsFile}} {
+		if rel := pair[0]; !linksTo(root, rel, pair[1]) {
+			steps = append(steps, wireStep{rel, func(d []byte, exists bool) ([]byte, string, error) {
+				return removeSections(rel, d, exists)
+			}})
+		}
+	}
+	steps = append(steps, wireStep{engine.ProjectConfigPath, func(d []byte, exists bool) ([]byte, string, error) {
+		if exists && deleteConfig {
 			return nil, "removed", nil
-		}},
-		{engine.ProjectConfigPath, func(d []byte, exists bool) ([]byte, string, error) {
-			if exists && deleteConfig {
-				return nil, "removed", nil
-			}
-			return d, "unchanged", nil
-		}},
-	})
+		}
+		return d, "unchanged", nil
+	}})
+	files := planSteps(root, steps)
 	out, err := exec.Command("git", "-C", root, "rev-parse", "--git-path", "info/exclude").Output()
 	if err != nil {
 		return append(files, wireFile{rel: "git info/exclude", err: err})
@@ -202,14 +216,16 @@ func checkRemoval(files []wireFile) error {
 		if !f.changed() {
 			continue
 		}
-		if err := checkRemovalFile(f); err != nil {
+		if err := checkRemovalFile(f, "remove"); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func checkRemovalFile(f wireFile) error {
+// checkRemovalFile refuses a file that moved behind a symlink or changed
+// since the plan was printed; command names the command to rerun.
+func checkRemovalFile(f wireFile, command string) error {
 	if f.root != "" {
 		rel, err := filepath.Rel(f.root, f.path)
 		if err != nil {
@@ -224,7 +240,7 @@ func checkRemovalFile(f wireFile) error {
 	}
 	current, err := os.ReadFile(f.path)
 	if (f.exists && (err != nil || !bytes.Equal(current, f.old))) || (!f.exists && !os.IsNotExist(err)) {
-		return fmt.Errorf("%s changed after the plan was printed; rerun remove to review it", f.rel)
+		return fmt.Errorf("%s changed after the plan was printed; rerun %s to review it", f.rel, command)
 	}
 	return nil
 }
@@ -237,7 +253,7 @@ func applyRemoval(files []wireFile) error {
 		if !f.changed() {
 			continue
 		}
-		if err := checkRemovalFile(f); err != nil {
+		if err := checkRemovalFile(f, "remove"); err != nil {
 			return err
 		}
 		if f.next != nil {

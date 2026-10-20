@@ -127,15 +127,18 @@ kimi: init can't check sign-in.
     codex     edit files and run commands inside codex's sandbox
     opencode  edit files; no commands
   [1mFiles[0m in this repository (brigada never commits them):
-    [38;2;95;215;95mnew[0m  .brigada/project.yaml                    [38;2;138;143;152mthe settings above[0m
-    [38;2;95;215;95mnew[0m  .mcp.json                                [38;2;138;143;152mlets Claude Code here use
-                                                  brigada (Claude Code asks you
-                                                  to approve it)[0m
-    [38;2;95;215;95mnew[0m  .claude/settings.local.json              [38;2;138;143;152mprivate, kept out of git:
-                                                  when your Claude turn ends,
-                                                  brigada's foreman picks up
-                                                  what happened meanwhile[0m
-    [38;2;95;215;95mnew[0m  .claude/skills/brigada-foreman/SKILL.md  [38;2;138;143;152mrules for your Claude session[0m
+    [38;2;95;215;95mnew[0m  .brigada/project.yaml        [38;2;138;143;152mthe settings above[0m
+    [38;2;95;215;95mnew[0m  .mcp.json                    [38;2;138;143;152mlets Claude Code here use brigada (Claude
+                                      Code asks you to approve it)[0m
+    [38;2;95;215;95mnew[0m  .claude/settings.local.json  [38;2;138;143;152mprivate, kept out of git: when your
+                                      Claude turn ends, brigada's foreman picks
+                                      up what happened meanwhile[0m
+    [38;2;95;215;95mnew[0m  .brigada/foreman.md          [38;2;138;143;152mbrigada's foreman rules for your Claude
+                                      session (brigada's own file)[0m
+    [38;2;95;215;95mnew[0m  AGENTS.md                    [38;2;138;143;152ma short block that makes your Claude
+                                      session brigada's foreman[0m
+    [38;2;95;215;95mnew[0m  CLAUDE.md                    [38;2;138;143;152mimports AGENTS.md, so Claude Code reads
+                                      that block[0m
     [38;2;138;143;152m(show full contents: --verbose)[0m
   [1mCodex[0m, optional: to plan from your own Codex session, run once yourself:
     [38;2;108;198;224mcodex mcp add brigada-foreman -- brigada mcp --foreman[0m
@@ -143,5 +146,5 @@ kimi: init can't check sign-in.
     ~/.local/state/brigada/runner.log; stop it with: [38;2;108;198;224mbrigada stop[0m). The engine
     starts when needed and stops after 30 idle minutes.
 
-[1mWrite 4 files and start the runner? [0m[38;2;108;198;224m[y/N][0m[1m:[0m
+[1mWrite 6 files and start the runner? [0m[38;2;108;198;224m[y/N][0m[1m:[0m
 Declined; nothing written or started.

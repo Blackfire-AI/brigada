@@ -10,27 +10,31 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
-	"github.com/Blackfire-AI/brigada/internal/foreman"
 	"github.com/Blackfire-AI/brigada/internal/term"
 )
 
 // Harness wiring for mode A (design §13.1 item 7, §4.6 "What the facts
 // allow"): the bridge in the repository's .mcp.json, the Stop hook in
-// .claude/settings.local.json, and the foreman instructions as a brigada-owned
-// skill. The files are edited minimally: only brigada's entries change,
-// never the rest of the user's bytes.
+// .claude/settings.local.json, and the foreman instructions as the
+// brigada-owned rules file routed to from AGENTS.md (initrouter.go). The
+// files are edited minimally: only brigada's entries change, never the
+// rest of the user's bytes.
 
 const (
 	wiringMCPFile            = ".mcp.json"
 	wiringSettingsFile       = ".claude/settings.local.json"
 	wiringSharedSettingsFile = ".claude/settings.json"
-	wiringSkillFile          = ".claude/skills/brigada-foreman/SKILL.md"
 	wiringSkillMarker        = "<!-- brigada-managed: foreman-instructions"
 	hookYieldCommand         = "brigada hold yield"
 	hookConfirmCommand       = "brigada hold confirm"
+
+	// wiringSkillFile is where an older init put the rules, as a skill;
+	// init now removes it when it carries brigada's marker.
+	wiringSkillFile = ".claude/skills/brigada-foreman/SKILL.md"
 )
 
 // codexWiringText is what init prints for Codex instead of writing anything:
@@ -57,16 +61,18 @@ type hookGroup struct {
 }
 
 // wireFile is one planned wiring change. err set means the file is damaged or
-// unsafe and is left alone; next is then nil.
+// unsafe and is left alone; next is then nil. An existing file with nil next
+// and state removed is deleted.
 type wireFile struct {
-	root   string // safety boundary used when rechecking a removal
-	rel    string
-	path   string
-	old    []byte
-	exists bool
-	next   []byte
-	state  string // created, added, replaced, removed, unchanged
-	err    error
+	root    string // safety boundary used when rechecking a removal
+	rel     string
+	path    string
+	old     []byte
+	exists  bool
+	next    []byte
+	state   string // created, added, replaced, removed, unchanged
+	err     error
+	purpose string // what the plan says the file is for; "" takes the path's default
 }
 
 func (w wireFile) changed() bool {
@@ -77,13 +83,40 @@ func (w wireFile) changed() bool {
 // planWiring computes the Claude Code project-scope changes; it reads files
 // and writes nothing.
 func planWiring(root string) []wireFile {
-	skill := skillContent()
-	files := planSteps(root, []wireStep{
+	rules := rulesContent()
+	layout := planRouterLayout(root)
+	steps := []wireStep{
 		{wiringMCPFile, func(d []byte, exists bool) ([]byte, string, error) { return mergeMCPServer(d, exists) }},
 		{wiringSettingsFile, func(d []byte, exists bool) ([]byte, string, error) { return mergeHooks(d, exists) }},
 		{wiringSharedSettingsFile, removeSharedHooks},
-		{wiringSkillFile, func(d []byte, exists bool) ([]byte, string, error) { return mergeSkill(d, exists, skill) }},
-	})
+		{wiringRulesFile, func(d []byte, exists bool) ([]byte, string, error) {
+			return mergeSkillMarked(d, exists, rules, wiringSkillMarker)
+		}},
+		{layout.router, func(d []byte, exists bool) ([]byte, string, error) { return mergeRouter(layout.router, d, exists) }},
+	}
+	if layout.imprt != "" {
+		steps = append(steps, wireStep{layout.imprt, func(d []byte, exists bool) ([]byte, string, error) {
+			return mergeImport(layout.imprt, d, exists)
+		}})
+	}
+	steps = append(steps, wireStep{wiringSkillFile, retireSkill})
+	files := planSteps(root, steps)
+	for i := range files {
+		switch f := &files[i]; f.rel {
+		case layout.router:
+			f.purpose = "a short block that makes your Claude session brigada's foreman"
+		case wiringSkillFile:
+			if f.changed() {
+				f.purpose = "the rules of an older init; " + wiringRulesFile + " replaces it"
+			} else {
+				f.purpose = "yours (no brigada marker); left as it is"
+			}
+		}
+	}
+	if layout.link != "" {
+		files = append(files, wireFile{root: root, rel: layout.link, path: filepath.Join(root, layout.link), exists: true, state: "unchanged",
+			purpose: "a link to " + layout.router + ", which holds the block; no import needed"})
+	}
 	// Ignore the private settings before creating them. Include the exclude edit
 	// in the reviewed plan and use the same concurrent-edit guard on apply.
 	if settings := files[1]; !settings.exists && settings.changed() {
@@ -178,7 +211,7 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 	fmt.Fprintln(w, "  "+initPresentation(w).style.Bold("Files")+" in this repository (brigada never commits them):")
 	// Show the setup files first, then supporting edits such as git's exclude.
 	ordered := make([]wireFile, 0, len(files))
-	primary := []string{engine.ProjectConfigPath, wiringMCPFile, wiringSettingsFile, wiringSkillFile}
+	primary := []string{engine.ProjectConfigPath, wiringMCPFile, wiringSettingsFile, wiringRulesFile, wiringAgentsFile, wiringClaudeFile, wiringSkillFile}
 	for _, rel := range primary {
 		for _, f := range files {
 			if f.rel == rel {
@@ -187,7 +220,7 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 		}
 	}
 	for _, f := range files {
-		if f.rel != engine.ProjectConfigPath && f.rel != wiringMCPFile && f.rel != wiringSettingsFile && f.rel != wiringSkillFile {
+		if !slices.Contains(primary, f.rel) {
 			ordered = append(ordered, f)
 		}
 	}
@@ -203,17 +236,20 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 		if !f.exists && !f.changed() && f.err == nil {
 			continue
 		}
-		var purpose string
-		switch f.rel {
-		case engine.ProjectConfigPath:
+		purpose := f.purpose
+		switch {
+		case purpose != "":
+		case f.rel == engine.ProjectConfigPath:
 			purpose = "the settings above"
-		case wiringMCPFile:
+		case f.rel == wiringMCPFile:
 			purpose = "lets Claude Code here use brigada (Claude Code asks you to approve it)"
-		case wiringSettingsFile:
+		case f.rel == wiringSettingsFile:
 			purpose = "private, kept out of git: when your Claude turn ends, brigada's foreman picks up what happened meanwhile"
-		case wiringSkillFile:
-			purpose = "rules for your Claude session"
-		case wiringSharedSettingsFile:
+		case f.rel == wiringRulesFile:
+			purpose = "brigada's foreman rules for your Claude session (brigada's own file)"
+		case f.rel == wiringClaudeFile:
+			purpose = "imports AGENTS.md, so Claude Code reads that block"
+		case f.rel == wiringSharedSettingsFile:
 			purpose = "removes brigada hooks moved to private settings"
 		default:
 			purpose = "keeps private Claude Code settings out of git"
@@ -237,7 +273,7 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 			prefix = strings.Repeat(" ", term.VisibleWidth(prefix))
 		}
 		printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), style.Dim(purpose))
-		if f.changed() {
+		if f.changed() && f.next != nil {
 			if f.exists {
 				if f.rel == engine.ProjectConfigPath {
 					printInitDiff(w, f.old, f.next)
@@ -264,6 +300,8 @@ func initFileState(f wireFile) string {
 		return "left alone"
 	case !f.exists:
 		return "new"
+	case f.changed() && f.next == nil:
+		return "removed"
 	case f.changed():
 		return "changes"
 	}
@@ -313,11 +351,22 @@ func splitDiffLines(d []byte) []string {
 	return strings.Split(strings.TrimSuffix(string(d), "\n"), "\n")
 }
 
-// applyWiring writes every changed, undamaged file. A file edited since the
-// plan was printed is refused, never overwritten.
+// applyWiring writes every changed, undamaged file, and deletes the one an
+// older init left behind. A file edited since the plan was printed is
+// refused, never overwritten.
 func applyWiring(files []wireFile) error {
 	for _, f := range files {
 		if !f.changed() {
+			continue
+		}
+		if f.next == nil {
+			if err := checkRemovalFile(f, "init"); err != nil {
+				return fmt.Errorf("wiring %s: %w", f.rel, err)
+			}
+			if err := os.Remove(f.path); err != nil {
+				return fmt.Errorf("wiring %s: %w", f.rel, err)
+			}
+			removeEmptyWiringParents(f.root, f.path)
 			continue
 		}
 		if err := writeInitFile(f.path, f.old, f.next, f.exists); err != nil {
@@ -327,33 +376,15 @@ func applyWiring(files []wireFile) error {
 	return nil
 }
 
-func skillContent() []byte {
-	return []byte(fmt.Sprintf(`---
-name: brigada-foreman
-description: Rules for acting as the brigada foreman in this repository's own session. Use when the user asks to plan, split, hand off or check work for brigada's workers, or asks about brigada plans, tasks, holds or status.
----
-%s v%d -->
-
-These are brigada's foreman rules for your own session (mode A). Brigada owns
-this file and replaces it on "brigada init"; put your own instructions elsewhere.
-
-%s`, wiringSkillMarker, foreman.InstructionsVersion, foreman.Instructions()))
-}
-
-// mergeSkill owns the whole file, but only when it carries brigada's marker;
-// any other file at the path is the user's and is left alone.
-func mergeSkill(old []byte, exists bool, want []byte) ([]byte, string, error) {
-	return mergeSkillMarked(old, exists, want, wiringSkillMarker)
-}
-
-// mergeSkillMarked is mergeSkill for a skill whose ownership marker is
-// the given one.
+// mergeSkillMarked owns the whole file, but only when it carries the given
+// ownership marker; any other file at the path is the user's and is left
+// alone.
 func mergeSkillMarked(old []byte, exists bool, want []byte, marker string) ([]byte, string, error) {
 	if !exists {
 		return want, "created", nil
 	}
 	if !bytes.Contains(old, []byte(marker)) {
-		return nil, "", errors.New("exists and is not brigada's (no brigada marker); rename it or remove it to let init manage the skill")
+		return nil, "", errors.New("exists and is not brigada's (no brigada marker); rename it or remove it to let init manage the file")
 	}
 	if bytes.Equal(old, want) {
 		return old, "unchanged", nil

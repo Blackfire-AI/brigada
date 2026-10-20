@@ -3,7 +3,60 @@ package prompt
 import (
 	"strings"
 	"testing"
+
+	"github.com/Blackfire-AI/brigada/internal/foreman"
 )
+
+// TestNonForemanPromptsOpenWithTheirOpener pins the contract the router
+// block of a wired repository's AGENTS.md relies on: every worker and
+// reviewer prompt the engine composes opens with WorkerOpener or
+// ReviewerOpener, whatever options it takes, and the foreman's prompts
+// open with neither, so a session reading the block can tell which it is.
+func TestNonForemanPromptsOpenWithTheirOpener(t *testing.T) {
+	if WorkerOpener != "You are a brigada worker" || ReviewerOpener != "You are a brigada reviewer" {
+		t.Fatalf("openers changed: %q, %q; the router block of every wired repository quotes them", WorkerOpener, ReviewerOpener)
+	}
+	instructions := WithInstructions("Use tabs.")
+	workers := map[string]string{
+		"work":                   ComposeWorkerPrompt("spec", "", ""),
+		"work with check":        ComposeWorkerPrompt("spec", "make test", ""),
+		"work with instructions": ComposeWorkerPrompt("spec", "make test", "", instructions),
+		"resume":                 ComposeWorkerPrompt("spec", "make test", "it failed"),
+		"resume with instr.":     ComposeWorkerPrompt("spec", "make test", "it failed", instructions),
+		"answer":                 ComposeAnswerPrompt("spec", "make test", "the answer"),
+		"answer with instr.":     ComposeAnswerPrompt("spec", "make test", "the answer", instructions),
+	}
+	for name, got := range workers {
+		if !strings.HasPrefix(got, WorkerOpener) {
+			t.Errorf("%s prompt does not open with %q:\n%.80s", name, WorkerOpener, got)
+		}
+	}
+	reviews := map[string]string{
+		"review":                   ComposeReviewPrompt("spec", "", "", "main", "br"),
+		"review with all":          ComposeReviewPrompt("spec", "fb", `{"exit_code":0}`, "main", "br"),
+		"review with instructions": ComposeReviewPrompt("spec", "fb", `{"exit_code":0}`, "main", "br", instructions),
+		"standalone":               ComposeStandaloneReviewPrompt("main", "br"),
+		"standalone with instr.":   ComposeStandaloneReviewPrompt("main", "br", instructions),
+	}
+	for name, got := range reviews {
+		if !strings.HasPrefix(got, ReviewerOpener) {
+			t.Errorf("%s prompt does not open with %q:\n%.80s", name, ReviewerOpener, got)
+		}
+	}
+	foremen := map[string]string{
+		"instructions":         foreman.Instructions(),
+		"idle wake":            foreman.ComposeTurnPrompt(nil),
+		"wake with events":     foreman.ComposeTurnPrompt([]string{"a result"}),
+		"wake with messages":   foreman.ComposeTurnPromptWith(nil, []foreman.UserMessage{{Text: "hi"}}),
+		"wake with checkout":   foreman.WithCheckout(foreman.ComposeTurnPrompt(nil), foreman.Checkout{Path: "/p", Branch: "main", Commit: "abc"}),
+		"instructions as data": ForemanInstructionsSection("Use tabs."),
+	}
+	for name, got := range foremen {
+		if strings.HasPrefix(got, WorkerOpener) || strings.HasPrefix(got, ReviewerOpener) {
+			t.Errorf("the foreman's %s opens like a worker or reviewer:\n%.80s", name, got)
+		}
+	}
+}
 
 // TestWorkerPromptMentionsDiscoveries checks the worker template lists
 // the optional discoveries field of the result block (§5.4).
