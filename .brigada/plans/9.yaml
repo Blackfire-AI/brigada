@@ -24,7 +24,7 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-36-r1"
     rounds: 1
   - id: 37
@@ -34,6 +34,6 @@ tasks:
     deps: ["capacity-cli"]
     base: "capacity-cli"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
