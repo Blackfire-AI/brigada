@@ -26,6 +26,6 @@ tasks:
     deps: []
     base: ""
     effort: high
-    state: ready
+    state: running
     branch: ""
     rounds: 0
