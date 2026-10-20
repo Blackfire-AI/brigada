@@ -14,11 +14,11 @@ import (
 // prompts are composed only from fixed, versioned templates plus
 // verbatim data (§1.4), so a template change is a version bump, never a
 // silent edit.
-const WorkerTemplateVersion = 6
+const WorkerTemplateVersion = 7
 
 // ReviewTemplateVersion is the review prompt template's version (§7),
 // under the same rule as the worker's (§1.4).
-const ReviewTemplateVersion = 4
+const ReviewTemplateVersion = 5
 
 // WorkerOpener and ReviewerOpener are the first words of every worker
 // and reviewer prompt the engine composes. They are a contract: the
@@ -51,6 +51,16 @@ shell, git or build tools to finish, so leave your edits in place and
 report done. Never ask for permission to commit, push or run the check.
 If your tools do let you run commands, you may build and test as you
 go, and you may commit, but never push.
+
+Work economically. Every tool call resends the whole conversation, so
+prefer a few large steps to many small ones. Plan your changes to a
+file, then make them in as few edits as the tools allow. Read a file you
+will change once, whole if it is code; for a large document, search for
+the heading you need and read only that section. Search with one
+combined pattern instead of many single ones. Run only the tests that
+cover your change (one package, -run a name): the runner runs the full
+check, so never run the whole suite or the race suite. Fetch nothing
+from the web unless the task asks for it.
 
 End your final message with exactly one JSON result block, fenced as a
 %FENCE%json code block, and nothing after it:
@@ -234,6 +244,13 @@ file is the runner's, not part of the change.
 You see the diff, the spec and the check result; you never see the
 implementer's own summary, so judge from the change, not from a
 telling of it.
+
+Work economically. Every tool call resends the whole conversation, so
+prefer a few large steps to many small ones. Read the diff first and
+open only the files it touches, each once; search a large document for
+the heading you need instead of reading it whole. Search with one
+combined pattern instead of many single ones. Fetch nothing from the
+web.
 
 End your final message with exactly one JSON verdict block, fenced as
 a %FENCE%json code block, and nothing after it:
