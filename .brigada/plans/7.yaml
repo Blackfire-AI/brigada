@@ -7,7 +7,7 @@ title: "opencode reset time and project isolation; 1.0 compatibility statement (
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-10-20T00:47:38.936768Z
-updated: 2026-10-20T01:38:24.673753Z
+updated: 2026-10-20T02:31:37.105143Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps, or from the
 # default branch when base is empty; merge a task after its base. States
@@ -33,7 +33,7 @@ tasks:
     deps: []
     base: ""
     effort: high
-    state: reviewing
+    state: cancelled
     branch: "brigada/task-26"
     rounds: 0
   - id: 27
@@ -46,4 +46,14 @@ tasks:
     effort: medium
     state: reviewing
     branch: "brigada/task-27"
+    rounds: 0
+  - id: 28
+    name: "worker-pwd"
+    title: "Set PWD to the job's worktree for every worker and reviewer command"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: ready
+    branch: ""
     rounds: 0
