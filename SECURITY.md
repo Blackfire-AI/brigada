@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-brigada is alpha software. The latest release gets security fixes. Before 1.0, only the latest pre-release gets fixes, so upgrade to it to receive them.
+The latest release of brigada gets security fixes. Upgrade to it to receive them.
 
 ## Reporting a vulnerability
 
