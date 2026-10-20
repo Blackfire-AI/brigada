@@ -53,9 +53,9 @@ tasks:
     deps: ["rereview-session"]
     base: "rereview-session"
     effort: high
-    state: reviewing
+    state: running
     branch: "brigada/task-43"
-    rounds: 0
+    rounds: 1
   - id: 44
     name: "foreman-batching"
     title: "Foreman rules: batch small edits, continue sessions in a chain"
