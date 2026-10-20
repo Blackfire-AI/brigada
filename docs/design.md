@@ -192,6 +192,7 @@ Proposals derived from the verified items above. Built so far: init's harness wi
 - Registers with a runner token and advertises its adapters: harness, models, family, account label, classes it can take (product §5 rule 5). (decided 2026-10-19; shipped) An agent is one (harness, model, account): a runner offers several models of one harness as several agents, `--agent` once per model, with each agent carrying the tier of §8.
 - Leases jobs (long-poll), heartbeats with progress, completes with a fencing token. Lease expiry plus fencing make crashes safe (Python v3.2's lease engine, ported with its tests).
 - Materializes its own workspace: clone or fetch the repo URL with its own git credentials into a per-task worktree, and push result branches to the remote (product §5 rule 6).
+- Starts each CLI with its working directory and its `PWD` set to its worktree (a foreman turn's scratch directory for a foreman turn), replacing the runner's own `PWD`, because some CLIs, opencode among them, read `PWD` before the working directory.
 
 ### 5.2 Adapters
 

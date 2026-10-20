@@ -33,6 +33,11 @@ func (a *Adapter) Name() string { return "opencode" }
 // and workerPermissions denies paths outside the worktree the same way.
 // Never pass --auto (or its permission-bypass aliases); permission rules
 // ride the environment, not the CLI's project config.
+//
+// OpenCode picks its directory as options.root ?? process.env.PWD ??
+// process.cwd() and chdirs there (packages/cli/src/run/run.ts:74,
+// run/v1.ts:29, mini.ts localDirectory), so cmd.Dir alone is not enough:
+// the runner sets PWD to the worktree on every command it starts.
 func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*exec.Cmd, error) {
 	if job.MCPConfig != "" {
 		return nil, errors.New("opencode: the CLI run path has no MCP-config flag; a job carrying an MCP config cannot run on it")

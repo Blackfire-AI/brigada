@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -54,6 +55,26 @@ func terminateGroup(cmd *exec.Cmd, grace time.Duration) {
 			_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		}
 	})
+}
+
+// withPWD sets PWD to dir (made absolute) in env, replacing any PWD it
+// holds and dropping OLDPWD. A nil env means "inherit the process's",
+// so it is materialized first.
+func withPWD(env []string, dir string) []string {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	if env == nil {
+		env = os.Environ()
+	}
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "PWD=") || strings.HasPrefix(kv, "OLDPWD=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "PWD="+dir)
 }
 
 // scrubEnv removes every variable named in drop from env. A nil env
