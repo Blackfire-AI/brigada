@@ -66,6 +66,27 @@ func TestWorkerPromptMentionsDiscoveries(t *testing.T) {
 	}
 }
 
+// TestPromptsAskForEconomy pins the "Work economically" paragraphs: the
+// worker's and the reviewer's, each ahead of its result block.
+func TestPromptsAskForEconomy(t *testing.T) {
+	worker := ComposeWorkerPrompt("spec", "", "")
+	review := ComposeReviewPrompt("spec", "", "", "main", "br")
+	for name, got := range map[string]string{"worker": worker, "reviewer": review} {
+		at, end := strings.Index(got, "Work economically."), strings.Index(got, "End your final message")
+		if at < 0 || at > end {
+			t.Errorf("the %s prompt lacks its economy paragraph before the result block:\n%s", name, got)
+		}
+	}
+	for _, want := range []string{"never run the whole suite or the race suite", "Fetch nothing\nfrom the web unless the task asks for it"} {
+		if !strings.Contains(worker, want) {
+			t.Errorf("the worker prompt lacks %q", want)
+		}
+	}
+	if !strings.Contains(review, "Read the diff first and\nopen only the files it touches") {
+		t.Errorf("the reviewer prompt lacks its diff-first rule")
+	}
+}
+
 func TestWorkerTemplateVersion(t *testing.T) {
 	if WorkerTemplateVersion <= 0 {
 		t.Errorf("WorkerTemplateVersion = %d, want a positive version", WorkerTemplateVersion)
@@ -237,6 +258,13 @@ file is the runner's, not part of the change.
 You see the diff, the spec and the check result; you never see the
 implementer's own summary, so judge from the change, not from a
 telling of it.
+
+Work economically. Every tool call resends the whole conversation, so
+prefer a few large steps to many small ones. Read the diff first and
+open only the files it touches, each once; search a large document for
+the heading you need instead of reading it whole. Search with one
+combined pattern instead of many single ones. Fetch nothing from the
+web.
 
 End your final message with exactly one JSON verdict block, fenced as
 a %FENCE%json code block, and nothing after it:

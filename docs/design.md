@@ -202,6 +202,8 @@ One per CLI: build the headless command (fresh or resume), parse the CLI's event
 
 A fixed worker template (versioned) plus the task spec verbatim, plus the answer or feedback for follow-up jobs. The template tells the worker to end with the result block (§5.4). A project may add its own instruction text, injected as verbatim data in its own delimiters after the template's contract and before the task spec (§5.9; implemented).
 
+Both templates carry a short "Work economically" paragraph (decided 2026-10-20). Measured that day, a work job's tool output totals only 100-400 KB, but it makes 60-150 tool calls and every call resends the whole conversation, so it processes 3-18M tokens. The worker paragraph says: prefer few large steps; plan edits to a file and make them in as few as the tools allow; read a file to change once, and search a large document for its heading instead of reading it in slices; use one combined search pattern; run only the tests that cover the change, never the whole or the race suite, since the runner runs the full check; fetch nothing from the web unless the task asks. The reviewer's shorter paragraph says: read the diff first and open only what it touches. The change bumped the worker template to version 7 and the review template to version 5.
+
 ### 5.4 Worker result contract
 
 The worker's final message ends with one JSON block:
