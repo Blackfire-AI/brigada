@@ -45,6 +45,9 @@ type Config struct {
 	// SnapshotDir is where the engine snapshots its store daily (§6.4);
 	// empty takes no snapshots.
 	SnapshotDir string
+	// Rounds are the config file's default round caps; unnamed keys keep
+	// the engine defaults.
+	Rounds RoundsConfig
 	// TaskAutoRetry controls transient work retries; nil keeps the default, on.
 	TaskAutoRetry *bool
 	// ForemanWakeBudget is the default daily foreman wake budget of every
@@ -132,7 +135,8 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("engine: %w", err)
 	}
 	defer st.Close()
-	eng := engine.New(st, engine.Config{Now: cfg.Now, Caps: cfg.Caps, PlanFiles: true, SnapshotDir: cfg.SnapshotDir, TaskAutoRetry: cfg.TaskAutoRetry, ForemanWakeBudget: cfg.ForemanWakeBudget, DefaultReviewer: cfg.DefaultReviewer})
+	roundCaps := cfg.Rounds.Caps()
+	eng := engine.New(st, engine.Config{Now: cfg.Now, Caps: cfg.Caps, PlanFiles: true, SnapshotDir: cfg.SnapshotDir, TaskAutoRetry: cfg.TaskAutoRetry, ForemanWakeBudget: cfg.ForemanWakeBudget, DefaultReviewer: cfg.DefaultReviewer, ExactRoundCaps: &roundCaps})
 	// Project identities are canonical repo URLs (design §13.1): rows
 	// written in an older form are rewritten once, before anything reads
 	// them. Rows that cannot be, or that name one repository twice, stay

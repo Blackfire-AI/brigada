@@ -260,6 +260,7 @@ func printConfigMachine(rt *runtime, flagStateDir string, stdout, stderr io.Writ
 		{"snapshot_dir", "none"}, {"headroom", "true"},
 		{"task_auto_retry", "true"}, {"foreman_wakes_per_day", "20"},
 		{"default_reviewer", "none"},
+		{"rounds.fix", "2"}, {"rounds.review", "2"}, {"rounds.restart", "3"},
 		{"caps.global", "no cap"}, {"caps.plan", "no cap"}, {"caps.runner", "no cap"},
 		{"caps.account.<label>", "no cap"}, {"caps.model.<model>", "no cap"},
 		{"cost.<harness>/<model>", "1"}, {"tier.<harness>/<model>", "from the model name"},

@@ -50,6 +50,7 @@ func runEngine(ctx context.Context, args []string, stdout, stderr io.Writer) int
 
 		SnapshotDir:   rt.file.SnapshotDir,
 		TaskAutoRetry: rt.file.TaskAutoRetry,
+		Rounds:        rt.file.Rounds,
 
 		ForemanWakeBudget: rt.file.ForemanWakesPerDay,
 		DefaultReviewer:   rt.file.DefaultReviewer,

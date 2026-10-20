@@ -103,7 +103,9 @@ const (
 // §14): what the run cap of the earlier implementation became. Fix caps
 // the fix rounds a failed check asks for, Review the fix rounds a
 // review's "changes" asks for — both counted as the task's fix jobs —
-// and Restart the restarts (§5.6). A task's caps JSON overrides them
+// and Restart the restarts (§5.6); the shipped caps are 2, 2 and 3, the
+// third restart being the foreman's once the escalation ladder (§8) has
+// spent two. A task's caps JSON overrides them
 // key by key (fix_rounds, review_rounds, restart).
 type RoundCaps struct {
 	Fix     int
@@ -136,6 +138,10 @@ type Config struct {
 	// RoundCaps are the default per-task round caps; a task's caps JSON
 	// (fix_rounds, review_rounds, restart) overrides them per task.
 	RoundCaps RoundCaps
+	// ExactRoundCaps, when set, replaces the default round caps as given,
+	// zeros included (RoundCaps reads zero as "the default"). The config
+	// file's rounds.* keys arrive here.
+	ExactRoundCaps *RoundCaps
 	// TaskAutoRetry retries a transient work failure once on another ready
 	// agent (§3). Nil keeps the default, on; false parks immediately.
 	TaskAutoRetry *bool
@@ -218,7 +224,7 @@ type Config struct {
 // 90 s lease, a 120 s release exclusion, three lost attempts, a 10 m
 // queue TTL, hard caps of 45 m for work and fix, 25 m for review and
 // 30 m for a foreman turn, round caps of fix 2 and review 2 (§7's
-// default), restart 2, and artifact uploads capped at 64 MiB each.
+// default), restart 3, and artifact uploads capped at 64 MiB each.
 // Retention keeps everything (§9); DataDir follows the store file.
 func DefaultConfig() Config {
 	autoRetry := true
@@ -234,7 +240,7 @@ func DefaultConfig() Config {
 			KindReview:  25 * time.Minute,
 			KindForeman: 30 * time.Minute,
 		},
-		RoundCaps:         RoundCaps{Fix: 2, Review: 2, Restart: 2},
+		RoundCaps:         RoundCaps{Fix: 2, Review: 2, Restart: 3},
 		TaskAutoRetry:     &autoRetry,
 		ForemanWakeBudget: defaultForemanWakeBudget,
 		MaxArtifactBytes:  defaultMaxArtifactBytes,
@@ -321,6 +327,9 @@ func New(s *store.Store, cfg Config) *Engine {
 	}
 	if cfg.RoundCaps.Restart > 0 {
 		def.RoundCaps.Restart = cfg.RoundCaps.Restart
+	}
+	if cfg.ExactRoundCaps != nil {
+		def.RoundCaps = *cfg.ExactRoundCaps
 	}
 	if cfg.TaskAutoRetry != nil {
 		def.TaskAutoRetry = cfg.TaskAutoRetry

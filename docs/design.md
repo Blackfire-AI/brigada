@@ -575,7 +575,7 @@ Moves over with its tests: the lease engine with fencing, one live job per key, 
 
 Transformations, so nothing is lost in translation:
 - **`trigger` human/bot is obsolete:** there are no human-submitted jobs (your input is chat, not a job). Don't port it.
-- **The run cap (bot rounds)** becomes per-task caps on fix, review and restart rounds, plus per-plan task-worker-minutes. The engine defaults can be overridden per task by the foreman through the task's `caps` (§6.1; decided 2026-10-20).
+- **The run cap (bot rounds)** becomes per-task caps on fix, review and restart rounds, plus per-plan task-worker-minutes. The shipped defaults are 2 fix, 2 review and 3 restarts (decided 2026-10-20: the escalation ladder of §8 spends a restart per step, so a cap of 2 left none for the foreman). They are set by `rounds.fix`, `rounds.review` and `rounds.restart` in the config file, and the foreman can override them per task through the task's `caps` (§6.1).
 - **The per-key budget raise** becomes `brigada budget` (§4.3).
 - **Keys:** task jobs `task:<id>`, the foreman `foreman:<project>`. One live job per key, coalescing, the follow-up flag and affinity hang off them.
 - **Session write-back and resume-fail → restart in place** (§2a) are kept for task workers and for the foreman's attach (§4.2).

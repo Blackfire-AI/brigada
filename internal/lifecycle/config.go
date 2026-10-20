@@ -78,6 +78,10 @@ type FileConfig struct {
 	IdleMinutes float64     // 0 = the default
 	Notify      string      // notify = auto|none (§10); empty = auto
 	Caps        caps.Limits // concurrency caps, cost weights and tier overrides (§8.1)
+	// Rounds are the default per-task round caps (rounds.fix,
+	// rounds.review, rounds.restart); a key the file never names stays nil
+	// and keeps the engine default.
+	Rounds RoundsConfig
 	// SnapshotDir is where the engine snapshots its store daily (§6.4):
 	// an absolute directory outside the state directory's store. Empty =
 	// no snapshots.
@@ -97,6 +101,26 @@ type FileConfig struct {
 	// non-nil list for an explicit none. A pair the file never names has
 	// no entry, which is the Go default and not none.
 	Tools map[string][]string
+}
+
+// RoundsConfig holds the round caps the config file names; nil = unnamed.
+type RoundsConfig struct {
+	Fix, Review, Restart *int
+}
+
+// Caps resolves the file's round caps over the engine defaults.
+func (r RoundsConfig) Caps() engine.RoundCaps {
+	c := engine.DefaultConfig().RoundCaps
+	if r.Fix != nil {
+		c.Fix = *r.Fix
+	}
+	if r.Review != nil {
+		c.Review = *r.Review
+	}
+	if r.Restart != nil {
+		c.Restart = *r.Restart
+	}
+	return c
 }
 
 // ParseTools parses a tool scope in its flag and config spelling: Claude
@@ -208,18 +232,40 @@ func loadConfigFile(path string, required bool) (FileConfig, error) {
 				err = fmt.Errorf("want an integer from 1 to %d", engine.MaxForemanWakesPerDay)
 			}
 			cfg.ForemanWakesPerDay = n
+		case strings.HasPrefix(key, "rounds."):
+			err = setRounds(&cfg.Rounds, key, value)
 		case strings.HasPrefix(key, "caps."), strings.HasPrefix(key, "cost."), strings.HasPrefix(key, "tier."):
 			err = setCap(&cfg.Caps, key, value)
 		case strings.HasPrefix(key, "tools."):
 			err = setTools(&cfg, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, snapshot_dir, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model> or a tools.claude/<model>", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, snapshot_dir, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, rounds.fix, rounds.review, rounds.restart, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model> or a tools.claude/<model>", path, n+1, key)
 		}
 		if err != nil {
 			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)
 		}
 	}
 	return cfg, nil
+}
+
+// setRounds sets one rounds.fix, rounds.review or rounds.restart key to a
+// non-negative integer.
+func setRounds(r *RoundsConfig, key, value string) error {
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 {
+		return fmt.Errorf("want a non-negative integer, got %q", value)
+	}
+	switch key {
+	case "rounds.fix":
+		r.Fix = &n
+	case "rounds.review":
+		r.Review = &n
+	case "rounds.restart":
+		r.Restart = &n
+	default:
+		return fmt.Errorf("unknown rounds key; want rounds.fix, rounds.review or rounds.restart")
+	}
+	return nil
 }
 
 // setTools sets one tools.<harness>/<model> key: the claude worker scope
