@@ -5,10 +5,9 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.0.0] - Unreleased
 
-### Removed
+### Changed
 
-- Mode A is retired: your own harness session no longer holds the foreman. The `hold` command, `brigada mcp --foreman`, the settings `hold_idle_minutes`, `hold_max_minutes` and `interactive_quiet_minutes`, and the tools `hold_acquire`, `hold_yield` and `decision_note` are gone; `brigada attach` is the interactive foreman, joining the brigada-owned session.
-- `brigada hold yield` and `hold confirm` remain as no-ops so old hooks do not block.
+- The interactive foreman is `brigada attach`: it joins the brigada-owned foreman session, so your chat and the headless turns are one transcript, and it runs in the foreman's reading checkout with your own harness config and user-scope MCP servers; `attach --model M --effort E` overrides the project's foreman choice for that chat alone. Mode A — your own harness session as the foreman, wired by `brigada init` — is retired: `brigada init` writes `.brigada/project.yaml` and nothing else, and a rerun or `brigada remove` strips an older init's wiring. The `hold` command, `brigada mcp --foreman`, the settings `hold_idle_minutes`, `hold_max_minutes` and `interactive_quiet_minutes`, and the tools `hold_acquire`, `hold_yield` and `decision_note` are gone; `brigada hold yield` and `hold confirm` remain as no-ops so old hooks do not block. A repository whose `.mcp.json` still carries an older init's `brigada` entry must drop it (`brigada remove`, or a rerun of `brigada init`), or the two `brigada` servers clash.
 
 ### Fixed
 
@@ -17,7 +16,6 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Your own Claude Code or Codex session is the foreman after `brigada init` (mode A), wired through the `AGENTS.md` router block, `.brigada/foreman.md`, `.mcp.json` and `.codex/config.toml`.
 - Mode B: `brigada init` in a parent folder registers several repositories under one coordinator session (`brigada-coordinator` in `.mcp.json`).
 - Plans with dependencies, created and amended by the foreman, mirrored to the `brigada/plans` branch.
 - Workers run in git worktrees on their own branches; the project's check runs after every result; fix rounds, and restarts with notes (`task_restart`).
@@ -31,10 +29,3 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Adapters for Claude Code, Codex, Kimi and opencode.
 - `brigada status`, `brigada history`, `brigada logs`, `brigada diff` and desktop notifications.
 - `docs/COMPATIBILITY.md` states what 1.0 promises until 2.0.
-- `brigada attach --model M --effort E` overrides the project's foreman model and effort for that chat only.
-
-### Changed
-
-- `brigada init` no longer wires the harness; a rerun or `brigada remove` strips an older init's wiring.
-- The headless foreman and `brigada attach` now run in the foreman's reading checkout, so the repository's own `CLAUDE.md`, `AGENTS.md`, `.claude/` and project memory load as in any clone. A harness keys its sessions by working directory, so existing foreman sessions cannot be resumed from the new one: the next turn or attach starts a fresh foreman session once, and plans, tasks and pending events are unaffected. A resume the CLI rejects as unknown starts a fresh session instead of failing the turn.
-- `brigada attach` no longer passes `--strict-mcp-config` to `claude`, so your own user-scope MCP servers load as in any session. A repository whose `.mcp.json` still has an older init's `brigada` entry (`brigada mcp --foreman`) must drop it (`brigada remove`), or the two `brigada` servers clash.

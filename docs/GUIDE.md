@@ -1,11 +1,11 @@
 # brigada: user guide
 
-This guide follows how an engineer uses brigada: install and run `brigada init` in a repository, work from your own harness session, add a coordinator over several repositories, watch the work, land it, and configure the project. The [README](../README.md) is the short version. For the terms of use, see [TERMS.md](TERMS.md).
+This guide follows how an engineer uses brigada: install and run `brigada init` in a repository, talk to the foreman with `brigada attach`, add a coordinator over several repositories, watch the work, land it, and configure the project. The [README](../README.md) is the short version. For the terms of use, see [TERMS.md](TERMS.md).
 
 Contents:
 
 1. [Install and `brigada init`](#1-install-and-brigada-init)
-2. [Your own session is the foreman (mode A)](#2-your-own-session-is-the-foreman-mode-a)
+2. [Talking to the foreman: `brigada attach`](#2-talking-to-the-foreman-brigada-attach)
 3. [Several repositories (mode B)](#3-several-repositories-mode-b)
 4. [While work runs](#4-while-work-runs)
 5. [Finishing: `brigada land`](#5-finishing-brigada-land)
@@ -15,7 +15,7 @@ Contents:
 9. [The record and stats](#9-the-record-and-stats)
 10. [Backups and recovery](#10-backups-and-recovery)
 11. [The foreman's harness: claude or codex](#11-the-foremans-harness-claude-or-codex)
-12. [Fallback: attach and ask](#12-fallback-attach-and-ask)
+12. [From another harness](#12-from-another-harness)
 13. [Configuration reference](#13-configuration-reference)
 14. [Command reference](#14-command-reference)
 15. [Known limits](#15-known-limits)
@@ -35,7 +35,7 @@ Make sure `$(go env GOPATH)/bin` is on your `PATH`.
 
 Four parts, one binary:
 
-- The **foreman** is an agent session (a `claude` or `codex` CLI) that has brigada's tools. It turns your asks into plans and decides what to do when a task needs judgment.
+- The **foreman** is an agent session (a `claude` or `codex` CLI) that has brigada's tools. It turns your asks into plans and decides what to do when a task needs judgment. You talk to it with `brigada attach` ([section 2](#2-talking-to-the-foreman-brigada-attach)); while nobody is attached, the engine wakes it headless.
 - The **engine** holds the store (one SQLite file), the rules and the dispatcher, and serves everything on one Unix socket. It runs no model. It starts on demand when any command needs it and exits after 30 idle minutes (no live jobs, no attached chat, no open requests).
 - The **runner** is the process you leave running. It offers your signed-in CLIs as agents, leases jobs from the engine, runs each worker in a git worktree, runs the task's check, and pushes the task's branch.
 - The **repo remote** is where the branches land, along with the plan files on the `brigada/plans` branch.
@@ -110,18 +110,14 @@ The `Plan` block then shows:
 - `At once:`, with the machine limit and each usable account's cap.
 - `Check:`, which names the check and reminds you that init does not run it and that you can edit `.brigada/project.yaml`, or shows `none (work goes straight to review)`.
 - `What workers may do:`, with a row for each harness that implements. Claude gets `edit files; run only: …`, or `edit files; no commands` for `none`. Codex can edit and run commands inside its sandbox. Kimi, if allowed to implement, can edit and run any command without asking. Opencode gets `edit files; no commands`.
-- `Files in this repository`, which lists each file's state first (`new`, `changes`, `unchanged`, or `left alone`, with its reason after the path), then its path and its purpose. Private Claude settings have `private, kept out of git:` in their purpose text. Changes to existing files show diffs and keep other settings and comments; new files show full contents only with `--verbose`. The list covers `.brigada/project.yaml`, the harness wiring below, and any supporting migration or git exclude edit. Init never commits these files.
-- Closing text for Codex, when Codex is installed and wiring is enabled. Init writes the bridge into the repository's `.codex/config.toml` (the files plan shows it), and the text says to trust the folder on the first `codex` run, because Codex loads a project `.codex/config.toml` only from a trusted folder (project config since Codex 0.78, trust-gated since 0.88). Only for a Codex older than 0.78, which has no project config, does it print the user-level fallback to run yourself:
-
-  ```sh
-  codex mcp add brigada-foreman -- brigada mcp --foreman
-  ```
+- `Files in this repository`, which lists each file's state first (`new`, `changes`, `unchanged`, or `left alone`, with its reason after the path), then its path and its purpose. On a first run the list is `.brigada/project.yaml` alone; on a rerun over an older init's wiring it also names the files it strips (below). Changes to existing files show diffs and keep other settings and comments; new files show full contents only with `--verbose`. Init never commits these files.
 - `In the background:`, with the persistent runner, its log, `brigada stop`, and the engine's exit after 30 idle minutes.
+- `Next:`, the closing text: talk to the foreman with `brigada attach`, or send `brigada ask "what you want built"` without a conversation, then watch `brigada status`.
 
 Then, after you confirm (`y` at the prompt, or `--yes`), init:
 
 - writes **`.brigada/project.yaml`** ([section 6](#6-configuring-a-project)). The file is yours to commit; brigada never commits or pushes anything. The write is refused if the file is a symlink or names another repository, and a file that changed after the plan was shown is not overwritten;
-- **wires your session** for [mode A](#2-your-own-session-is-the-foreman-mode-a): the bridge in `.mcp.json`, only the `Stop` hook in private `.claude/settings.local.json`, the bridge for Codex in `.codex/config.toml`, the foreman rules in `.brigada/foreman.md`, and a short brigada-managed block in `AGENTS.md` that points to those rules. `CLAUDE.md` gets a managed section that imports `AGENTS.md`; when one of the two is a link to the other, the block goes into the real file and no import is added. A rerun removes brigada's old hooks from shared `.claude/settings.json`, and removes the foreman skill `.claude/skills/brigada-foreman/SKILL.md` an older init wrote when it has brigada's marker. Only brigada's entries change; the details, including the git exclude entry, are in [section 2](#2-your-own-session-is-the-foreman-mode-a);
+- strips the wiring an older init left in the repository, unless `--no-wiring`: the `brigada` server in `.mcp.json`, the hooks in private `.claude/settings.local.json` and the legacy brigada hooks in shared `.claude/settings.json`, the `brigada` table in `.codex/config.toml`, `.brigada/foreman.md` and its block in `AGENTS.md` with `CLAUDE.md`'s import section, the old foreman skill, and the `/.claude/settings.local.json` line in git's `info/exclude`. Init writes no harness wiring; only brigada's own entries change, and a file you have not edited comes back byte for byte;
 - starts the engine on demand, imports the project file (recording where each value came from, [section 6](#6-configuring-a-project)), registers the foreman, saves the agent and concurrency choices and starts one detached runner. If its agents or concurrency changed, init restarts the runner with the new choices; otherwise it keeps the running one. The runner's log is `runner.log` in the state directory.
 
 ### Flags
@@ -138,7 +134,7 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 | `--check CMD` | The default check; answers step 4 without a question. |
 | `--tools SCOPE` | Worker tools in runner `tools=` syntax (`Bash(npm test:*)+Bash(npx jest:*)`, or `none`). An explicit agent `tools=` wins; a `tools.claude/<model>` line in your config file is kept unless you pass `--tools`. |
 | `--accept-limited` | Go ahead with fewer than two review families. |
-| `--no-wiring` | Skip the harness wiring: no `.mcp.json`, `.codex/config.toml`, hooks, rules file or `AGENTS.md` block, and no Codex text. |
+| `--no-wiring` | In a repository, a no-op with a note: init writes no harness wiring and, on a rerun, strips nothing. In a parent folder, skip the coordinator's wiring. |
 | `--all` | Only in a folder that is not a repository ([section 3](#3-several-repositories-mode-b)). |
 | `--state-dir DIR`, `--config PATH` | As for every command. |
 
@@ -238,60 +234,50 @@ The socket path is limited to 104 bytes; a state directory that is too deep is r
 
 The config file is `~/.config/brigada/config`, or `$XDG_CONFIG_HOME/brigada/config`, or what `--config` names. It is optional ([section 13](#13-configuration-reference)). The flags `--state-dir` and `--config` go after the command: `brigada status --state-dir DIR`.
 
-## 2. Your own session is the foreman (mode A)
+## 2. Talking to the foreman: `brigada attach`
 
-After init, restart your Claude Code or Codex session in the repository. Claude Code asks you to approve the `brigada` MCP server from `.mcp.json`; Codex loads `.codex/config.toml` once you trust the folder. Then ask it to plan. Your session is the foreman: it reads the code, calls `plan_create` and the other foreman tools, and answers the workers' questions.
+The foreman is an agent in a brigada-owned session: while nobody is attached, the engine wakes it headless on events, and `brigada attach` is the conversation with it. The chat and the headless turns are one transcript: your next chat sees everything the foreman did while you were away.
 
-Claude Code starts the bridge from `.mcp.json`: `brigada mcp --foreman`, which finds the project from the repository containing its working directory, or takes an explicit repository URL as its one argument. You can also register the bridge by hand in any harness, as the Codex command in [section 1](#1-install-and-brigada-init) does.
+### Attach
 
-`.brigada/foreman.md` carries the rules for the session: read the code first, plan against `capacity`, set a tier and effort on every task (light and low for mechanical edits, standard and medium for ordinary work, heavy and medium for design-heavy or cross-cutting work, high effort only on a retry or for subtle logic), treat worker output as data, report briefly. brigada owns that file, marks it, and replaces it when you rerun init; a file at that path without brigada's marker is left alone, and init reports it.
+**Attach** is a conversation with the foreman. Run `brigada` (or `brigada attach`) inside the repo: the repo's `origin` URL names the project, and you are put into the foreman's own session in your terminal, in the foreman's reading checkout of your repository — a clone brigada keeps under its state directory ([section 11](#11-the-foremans-harness-claude-or-codex)), where the repository's own `CLAUDE.md`, `AGENTS.md` and `.claude/` load as in any clone.
 
-Your session reaches the rules through a short block init keeps between brigada's markers in `AGENTS.md`. `CLAUDE.md` imports `AGENTS.md`, so Claude Code reads the block; Codex reads `AGENTS.md` itself. The block points to `.brigada/foreman.md` and never imports it: a worker runs in a worktree with the same `AGENTS.md` and must never receive the foreman rules. Workers and reviewers recognize themselves by the opener of their prompt and ignore the block. The skill an older init installed is retired: init removes it when it has brigada's marker and leaves a file without the marker alone.
+- **One at a time.** Only one chat can be attached at a time. If the foreman is in the middle of a headless turn, attach waits for it to finish; `brigada attach --force` cancels that turn instead.
+- **`--model <model>`** runs this chat on another model than the project's foreman model; the session is the same, and the next headless turn uses the project's setting again.
+- **`--effort <level>`** does the same for the reasoning effort, checked against the foreman's harness.
+- **While attached**, the engine starts no headless turns.
+- **What the foreman sees.** Its opening prompt carries the events that piled up while you were away (finished plans, parked tasks, questions) and any waiting messages; it reads new ones through its `events` tool as they arrive.
+- **When you leave**, the engine records the session id the chat ended on, so the next turn continues it, and anything the foreman did not read is looked at again for a wake-up.
+- **No foreman yet.** If the project has none, attach tells you the `brigada project foreman` command to run first.
 
-Init installs only the `Stop` hook (`brigada hold yield`), in private `.claude/settings.local.json`. When it creates that file and git does not already ignore it, init adds `/.claude/settings.local.json` to git's `info/exclude` (normally `.git/info/exclude`); the files plan shows that edit too. The bridge, the rules and the `AGENTS.md` block remain shareable project files. `SessionStart` is no longer installed: its engine confirmation endpoint does not exist yet. A rerun removes the exact old `brigada hold yield` and `brigada hold confirm` hook entries from `.claude/settings.json`, and keeps other hooks and any command with user-supplied flags.
+With `claude`, an attached foreman is the same session the headless turns resume, so the next turn continues your chat. The first attach shows Claude Code's own "trust this folder" prompt for the foreman's working directory under the state directory: choose yes. Your own user-scope MCP servers load as in any session of yours; a repository whose `.mcp.json` still carries an older init's `brigada` entry must have it removed — rerun `brigada init` or run `brigada remove` — or the two `brigada` servers clash.
 
-### The tools your session has
+**The Codex limits.** An attached `codex` session is Codex's own terminal interface. It does not carry brigada's tools, and Codex does not expose the thread in a form brigada can write back, so a later headless turn may start a fresh Codex thread instead of continuing the chat.
 
-The session's tools are `plan_create`, `plan_amend`, `answer`, `task_restart`, `task_cancel`, `decision_note`, `ask_user`, `status`, `history`, `events`, `capacity`, `stats`, `hold_acquire` and `hold_yield`. There is deliberately no tool that approves or rejects a plan: that decision is yours ([section 7](#7-plans-checks-and-reviews)).
+### What the foreman can and cannot do
 
-### The hold
+The foreman's tools are brigada's — `plan_create`, `plan_amend`, `answer`, `task_restart`, `task_cancel`, `ask_user`, `status`, `history`, `events`, `capacity`, `stats` — plus read-only file tools: on `claude` it may read and search files, with the shell and every editing tool denied; on `codex` it runs in a read-only sandbox ([section 11](#11-the-foremans-harness-claude-or-codex)). There is deliberately no tool that approves or rejects a plan: that decision is yours ([section 7](#7-plans-checks-and-reviews)).
 
-One interactive holder at a time owns the foreman's slot for a project.
+brigada enforces its own side whatever the foreman believes:
 
-- **Taking it.** Your session takes the slot with `hold_acquire`, which returns a digest of the plans, their tasks, the pending events and messages, and the decision notes recorded since. While it holds, brigada starts no headless foreman turn; events and messages wait, and the session reads them through `events`.
-- **Conflicts.** If a headless turn already has the slot, your session's calls are refused with `foreman_busy`, naming the turn; the rules tell the session to say so and stay read-only until the turn ends. A second session, or `brigada attach`, is refused while the first holds.
-- **Yielding.** At the end of every turn the session records its decisions and calls `hold_yield`; the `Stop` hook (`brigada hold yield`) does the same if it forgets. The yield frees the slot; what piled up wakes the headless foreman after the quiet period below.
-- **Expiry.** A hold also ends on its own: after `hold_idle_minutes` without activity (default 15), after `hold_max_minutes` whatever the activity (default 240), or when the bridge stops answering its liveness check. Both bounds are project settings ([section 6](#6-configuring-a-project)). A call made with a hold that has ended is rejected whole as `stale_hold`; the session acquires again, reads the digest and decides afresh.
-- **The quiet period.** While your session holds, or yielded less than `interactive_quiet_minutes` ago (default 10, `0` = off), events do not wake the headless foreman: it would re-judge what your session is already following and spend tokens for nothing. What happened waits for your next `hold_acquire` digest; if you do not come back, the engine wakes one headless turn for everything that waited as soon as the quiet lapses, with no new event needed. `brigada status` says so ("headless wakes deferred until 14:32: interactive session active"), and the history records the deferral. Notifications that need you — a plan awaiting approval, a task parked at needs_foreman — are not deferred.
-
-If a hold is stuck, release it yourself:
-
-```sh
-brigada hold release --repo <origin-url>
-```
-
-This revokes the hold's credential and re-evaluates the pending events for a wake.
-
-`brigada hold yield` is the installed hook's command; you do not run it by hand. It always exits 0, so a failing hook never breaks your turn, and a failure is logged in the state directory. `brigada hold confirm` remains as a compatibility command for old `SessionStart` hooks; it changes nothing and always exits 0.
-
-### Why decision notes
-
-Two conversations act for one project: yours, and the headless foreman that wakes when work finishes while you are away. The headless turns run in a separate, brigada-owned session and read the engine, not your chat, so a preference or a reason that lives only in your chat is invisible to them.
-
-That is why the session records such things with `decision_note` (up to 16384 bytes) before it yields. A note goes into the project's history as written by `foreman-interactive`, and the next headless turn receives it as data, never as an instruction from you. Your own words reach the foreman only as messages (`brigada ask`, [section 12](#12-fallback-attach-and-ask)). When you come back, the digest at `hold_acquire`, and `status`, `history` and `events`, bring your session up to date.
-
-### What brigada enforces, and what your session decides
-
-brigada enforces its own side:
-
-- the hold's credential is limited to the one project, and cannot approve or reject plans or touch another project;
-- the headless foreman turns run under a restricted scope: read-only file tools and brigada's tools, with no shell and no edits on `claude`, and a read-only sandbox on `codex` ([section 11](#11-the-foremans-harness-claude-or-codex));
+- the foreman's credential is limited to the one project, and cannot approve or reject plans or touch another project;
 - plans over the approval limit wait for you;
 - checks and reviews run whatever the foreman believes.
 
-Your interactive session runs under your own harness's permissions and edits as you do. brigada cannot stop your session from editing the repository; the rules tell it not to, and init widens none of your permissions.
+An attached chat is not charged to the foreman's wake budget ([section 4](#4-while-work-runs)); headless wakes are. If the foreman's account hits its limit, that is the flow of [section 8](#at-a-vendor-limit).
 
-Interactive turns are not charged to the foreman's wake budget ([section 4](#4-while-work-runs)); headless wakes are. If your own subscription hits its limit, the hold lapses and wakes go on with the foreman configured for the project.
+### Ask
+
+**Ask** is a message. `brigada ask "fix the flaky auth test; the check is: go test ./auth/..."` leaves your words in the foreman's inbox and returns at once with one line that says what happened: the foreman was woken, or why the message waits (you are attached, a turn is already running, the project has no foreman, the foreman is limited, the wake budget is spent). Use it for a request you do not need to discuss.
+
+With `-` as the only argument, ask reads the message from standard input:
+
+```sh
+git diff main | brigada ask -
+```
+
+- `--repo <origin-url>` names the project. Without it, ask works only while the engine has exactly one project; with more it refuses, and `brigada project list` shows the URLs.
+- A message you send is not charged against the foreman's daily wake budget ([section 4](#4-while-work-runs)): a wake that carries your message goes ahead even when that limit is spent.
 
 ## 3. Several repositories (mode B)
 
@@ -496,9 +482,6 @@ Some keys belong to you and this engine, not to the team. The shared file refuse
 
 | Key | Default | Meaning |
 |---|---|---|
-| `hold_idle_minutes` | `15` | The interactive hold's idle bound, in minutes ([section 2](#2-your-own-session-is-the-foreman-mode-a)). |
-| `hold_max_minutes` | `240` | The interactive hold's absolute bound, in minutes. |
-| `interactive_quiet_minutes` | `10` | How long after a yield headless wakes stay deferred while you work (`0` = never defer) ([section 2](#2-your-own-session-is-the-foreman-mode-a)). |
 | `foreman_wakes_per_day` | `20`, or the config file's value | The daily wake budget, 1 to 1000 ([section 4](#4-while-work-runs); also `brigada budget --wakes N`). |
 | `instructions` | none | A local override of the instruction text. |
 
@@ -872,7 +855,7 @@ Recovery also raises the *fence epoch*, a counter that makes every lease from be
 
 Only `claude` and `codex` can be a foreman; `kimi` and `opencode` are worker-only. Init chooses one ([section 1](#1-install-and-brigada-init)). To change it, run `brigada project foreman --repo <origin-url> --harness <h> --model <m>`; inside the repo, `--repo` can be left out. Without `--harness` and `--model`, the command shows the current choice.
 
-This section is about the **headless** foreman, the brigada-owned session that wakes on events. Your own session in mode A is whatever harness you open ([section 2](#2-your-own-session-is-the-foreman-mode-a)).
+This section is about the foreman session itself: the brigada-owned session that wakes headless and that `brigada attach` joins ([section 2](#2-talking-to-the-foreman-brigada-attach)).
 
 ### Effort and model
 
@@ -887,16 +870,16 @@ This section is about the **headless** foreman, the brigada-owned session that w
 
 ### Reading the code
 
-Headless turns and attach refresh `<state>/runner/foreman/<project>/repo` from the project's repo URL at its configured default branch. The opening prompt names the checkout's absolute path, branch and commit. The foreman reads the code and its CLAUDE.md/AGENTS.md before planning; the snapshot may lag the remote by one fetch. A clone or fetch failure fails the turn (or attach) with the git reason. The session's working directory stays the parent scratch directory, so existing sessions continue to resume.
+Headless turns and attach refresh `<state>/runner/foreman/<project>/repo` from the project's repo URL at its configured default branch. The opening prompt names the checkout's absolute path, branch and commit. The foreman reads the code and its CLAUDE.md/AGENTS.md before planning; the snapshot may lag the remote by one fetch. A clone or fetch failure fails the turn (or attach) with the git reason. The session's working directory is the checkout itself, so the repository's own instructions and project memory load as in any clone; sessions keyed to the older scratch directory start fresh once, and a resume the CLI no longer knows starts a fresh session instead of failing the turn.
 
 ### What differs between claude and codex
 
-- **claude:** `--add-dir` grants access to the checkout, and additional-directory CLAUDE.md loading is enabled. The foreman may read files (`Read`, `Grep`, `Glob`) and call brigada's tools; the shell and every editing tool (`Bash`, `Edit`, `NotebookEdit`, `Write`) remain denied.
-- **codex:** the checkout is named in the prompt, and the foreman runs with `-s read-only`. Independent config overrides keep automatic review for MCP approvals and reject sandbox and permission escalations. The `--approve-for-me` alias cannot be used here: it selects `workspace-write`, which would make the scratch's repo writable. Codex's filesystem sandbox, not instructions, is what protects the checkout from writes. Unlike claude with its explicit tool denials, codex still has shell tools.
+- **claude:** the session runs in the checkout, so its CLAUDE.md and `.claude/` load as in any clone. The foreman may read files (`Read`, `Grep`, `Glob`) and call brigada's tools; the shell and every editing tool (`Bash`, `Edit`, `NotebookEdit`, `Write`) remain denied.
+- **codex:** the checkout is named in the prompt, and the foreman runs with `-s read-only`. Independent config overrides keep automatic review for MCP approvals and reject sandbox and permission escalations. The `--approve-for-me` alias cannot be used here: it selects `workspace-write`, which would make the checkout's repo writable. Codex's filesystem sandbox, not instructions, is what protects the checkout from writes. Unlike claude with its explicit tool denials, codex still has shell tools.
 
 ### Codex exec approvals
 
-Init registers the bridge for Codex in the repository's `.codex/config.toml` ([section 1](#1-install-and-brigada-init)); `codex mcp add brigada-foreman -- brigada mcp --foreman` is only the user-level fallback for a Codex older than 0.78. For your own `codex exec` session, the approval settings are user-level Codex configuration, not entries in `.brigada/project.yaml`, and init does not write them. The headless foreman's adapter supplies exactly these settings as `-c` overrides:
+For your own `codex exec` session, the approval settings are user-level Codex configuration, not entries in `.brigada/project.yaml`, and init does not write them. The headless foreman's adapter supplies exactly these settings as `-c` overrides:
 
 ```toml
 approvals_reviewer = "auto_review"
@@ -911,43 +894,11 @@ Under `mcp_servers.<name>` the adapter emits only `command`, `args` and `env`; i
 
 Running `project foreman` again with another harness starts a fresh foreman session: a session belongs to one CLI, so the old one is dropped, and the new foreman rebuilds what it needs from the engine (the plans, the history, the pending events). A change of model or of effort on the same harness keeps the session. Switching also clears a foreman limit, as in [section 8](#at-a-vendor-limit). Nothing about plans or tasks is lost.
 
-## 12. Fallback: attach and ask
+## 12. From another harness
 
-If your harness cannot host brigada's tools (Codex has no verified project scope, and other harnesses have no wiring), you can still talk to the headless foreman.
+The conversation with the foreman — `brigada attach` and `brigada ask` — is [section 2](#2-talking-to-the-foreman-brigada-attach). This section is about another harness acting for you without hosting the foreman.
 
-### Attach
-
-**Attach** is a conversation with the headless foreman. Run `brigada` (or `brigada attach`) inside the repo: the repo's `origin` URL names the project, and you are put into the foreman's own session in your terminal, in the foreman's reading checkout.
-
-- **One at a time.** Only one chat can be attached at a time. If the foreman is in the middle of a headless turn, attach waits for it to finish; `brigada attach --force` cancels that turn instead.
-- **Your session's hold.** If your own harness session holds the foreman ([section 2](#2-your-own-session-is-the-foreman-mode-a)), attach refuses and names the hold. Wait for the session to yield or the hold to lapse, or release it with `brigada hold release --repo <origin-url>`.
-- **While attached**, the engine starts no headless turns.
-- **What the foreman sees.** Its opening prompt carries the events that piled up while you were away (finished plans, parked tasks, questions) and any waiting messages; it reads new ones through its `events` tool as they arrive.
-- **When you leave**, the engine records where the session ended so the next turn continues it, and anything the foreman did not read is looked at again for a wake-up.
-- **No foreman yet.** If the project has none, attach tells you the `brigada project foreman` command to run first.
-- **`--model <model>`** runs this chat on another model than the project's foreman model; the session is the same, and the next headless turn uses the project's setting again.
-- **`--effort <level>`** does the same for the reasoning effort, checked against the foreman's harness.
-
-With `claude`, an attached foreman is the same session the headless turns resume, so the next turn continues your chat. The first attach shows Claude Code's own "trust this folder" prompt for the foreman's working directory under the state directory: choose yes. It is the foreman's reading checkout of your repository, a clone brigada keeps under its state directory.
-
-**The Codex limits.** An attached `codex` session is Codex's own terminal interface. It does not carry brigada's tools, and Codex does not expose the thread in a form brigada can write back, so a later headless turn may start a fresh Codex thread instead of continuing the chat.
-
-### Ask
-
-**Ask** is a message. `brigada ask "fix the flaky auth test; the check is: go test ./auth/..."` leaves your words in the foreman's inbox and returns at once with one line that says what happened: the foreman was woken, or why the message waits (you or your session hold it, a turn is already running, the project has no foreman, the foreman is limited, the wake budget is spent). Use it for a request you do not need to discuss.
-
-With `-` as the only argument, ask reads the message from standard input:
-
-```sh
-git diff main | brigada ask -
-```
-
-- `--repo <origin-url>` names the project. Without it, ask works only while the engine has exactly one project; with more it refuses, and `brigada project list` shows the URLs.
-- A message you send is not charged against the foreman's daily wake budget ([section 4](#4-while-work-runs)): a wake that carries your message goes ahead even when that limit is spent.
-
-### From another harness
-
-`brigada mcp --client` is an MCP server over stdio for a harness that should act for you without hosting the foreman. It offers `ask_foreman` (`text`, and `repo_url` when the engine knows several projects), `status` and `history`. Register it with, for example:
+`brigada mcp --client` is an MCP server over stdio for exactly that. It offers `ask_foreman` (`text`, and `repo_url` when the engine knows several projects), `status` and `history`. Register it with, for example:
 
 ```sh
 claude mcp add --scope user --transport stdio brigada -- brigada mcp --client
@@ -991,7 +942,7 @@ The config file is optional. Its format:
 
 A cap of `0` caps the layer at nothing, which is different from leaving it out. Init writes `caps.global = N` from tasks at once, `caps.plan = 3` and `caps.account.<label>` for each usable account: Claude 3, Codex 2, Kimi 1 and OpenCode 2, each clamped to N. If harnesses share a label, the smaller cap wins. It preserves other config entries and comments, updates those cap keys, and groups newly added keys under `# set by brigada init`. The engine reads the config at startup; restart it after changing caps or tier overrides.
 
-Project settings (the approval limit, `default_check`, `setup`, the hold bounds and the rest) are not config-file keys, and the config file refuses them as unknown; they are project settings ([section 6](#6-configuring-a-project)). Effort is not a config-file key either: it is set per agent with `brigada runner --agent …,effort=<level>` ([section 8](#effort)) and per project foreman with `brigada project foreman --effort <level>` ([section 11](#11-the-foremans-harness-claude-or-codex)). `cost.*` and `tier.*` keys name `harness/model` without an effort, including a provider prefix when the model has one.
+Project settings (the approval limit, `default_check`, `setup` and the rest) are not config-file keys, and the config file refuses them as unknown; they are project settings ([section 6](#6-configuring-a-project)). Effort is not a config-file key either: it is set per agent with `brigada runner --agent …,effort=<level>` ([section 8](#effort)) and per project foreman with `brigada project foreman --effort <level>` ([section 11](#11-the-foremans-harness-claude-or-codex)). `cost.*` and `tier.*` keys name `harness/model` without an effort, including a provider prefix when the model has one.
 
 An example:
 
@@ -1022,17 +973,14 @@ Every key that `brigada project set` and `project show` know, with each default 
 | `setup_cache_key_files` | `none` | yes |
 | `setup_timeout_minutes` | `15` | yes |
 | `extra_repos` | `none` | yes |
-| `hold_idle_minutes` | `15` | no, local only |
-| `hold_max_minutes` | `240` | no, local only |
-| `interactive_quiet_minutes` | `10` | no, local only |
 | `foreman_wakes_per_day` | `20`, or the config file's value | no, local only |
 | `instructions` | `none` | no, local only (the file's counterpart is `instructions_file`) |
 
 ## 14. Command reference
 
-`brigada help` prints the command list. `brigada <command> --help` (also `-h` or `-help`) prints a command's usage, description and flags; `brigada help <command> [<subcommand>]` prints the same help. For the two-level commands `project`, `agent`, `plan`, `hold` and `task`, `--help` or `help` lists the subcommands; use, for example, `brigada project foreman --help` for a subcommand's flags. Help exits 0. A usage error names the relevant help command on stderr.
+`brigada help` prints the command list. `brigada <command> --help` (also `-h` or `-help`) prints a command's usage, description and flags; `brigada help <command> [<subcommand>]` prints the same help. For the two-level commands `project`, `agent`, `plan` and `task`, `--help` or `help` lists the subcommands; use, for example, `brigada project foreman --help` for a subcommand's flags. Help exits 0. A usage error names the relevant help command on stderr.
 
-A command's flags go after its name and before its positional arguments (`diff`, `logs` and `land` also accept flags after their ids). Every executable command also takes `--state-dir DIR` and `--config PATH`, and most client commands take `--no-start` (fail instead of starting the engine); the synopses below leave these out. Exit codes: 0 ok, 1 error, 2 usage. Init's setup refusals exit 1, and the hold hooks always exit 0.
+A command's flags go after its name and before its positional arguments (`diff`, `logs` and `land` also accept flags after their ids). Every executable command also takes `--state-dir DIR` and `--config PATH`, and most client commands take `--no-start` (fail instead of starting the engine); the synopses below leave these out. Exit codes: 0 ok, 1 error, 2 usage. Init's setup refusals exit 1. `brigada hold yield` and `brigada hold confirm` are no-ops that always exit 0, kept so hooks an older init installed never block a session; every other `hold` subcommand is an unknown command.
 
 ### Starting
 
@@ -1041,13 +989,12 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada runner [--agent SPEC]... [--harness HARNESS] [--model MODEL] [--classes CLASSES] [--agent-file PATH] [--worker-script PATH] [--labels LABELS] [--max-parallel N]`, where SPEC is `harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]`: run a runner that leases jobs, runs workers and checks, and pushes branches. The shorthand agent flags cannot be mixed with `--agent`; `--worker-script` is for the `fake` harness used by tests. See [section 8](#8-agents-quota-and-health).
 - `brigada stop [--engine]`: stop the detached runner in the selected state directory; `--engine` also stops the engine. Sends SIGTERM and waits up to 10 seconds per process; succeeds if nothing is running, and never starts the engine. See [section 1](#stopping).
 - `brigada remove [--yes] [--cancel] [--delete-config]`: remove brigada from this repository, keeping its project history. `--yes` applies the displayed plan and stops an unused runner without prompting; `--cancel` cancels live jobs and unfinished plans; `--delete-config` also deletes `.brigada/project.yaml`. See [section 1](#removing-brigada-from-a-repository).
-- `brigada mcp (--foreman [URL] | --coordinator | --client)`: serve brigada's tools over stdio. `--foreman` is the mode A bridge of your own session ([section 2](#2-your-own-session-is-the-foreman-mode-a)), `--coordinator` the mode B tools ([section 3](#3-several-repositories-mode-b)), `--client` the tools of [section 12](#from-another-harness). Only one selector at a time. Claude Code runs it from the wiring init writes. Without a selector, `--socket PATH` is the bridge a headless foreman session uses; you do not run that by hand.
+- `brigada mcp (--coordinator | --client | --socket PATH)`: serve brigada's tools over stdio. `--coordinator` is the mode B bridge ([section 3](#3-several-repositories-mode-b)), `--client` the tools of [section 12](#12-from-another-harness). Only one selector at a time. `--socket PATH` is the bridge a headless foreman session and an attached chat use; you do not run that by hand.
 
 ### Talking
 
-- `brigada`, `brigada attach [--force]`: chat with this repo's headless foreman. See [section 12](#attach).
-- `brigada ask [--repo URL] <message...>` (or `-` for standard input): send the foreman a message without attaching. See [section 12](#ask).
-- `brigada hold release --repo URL`: release a stuck interactive hold. `brigada hold yield` is the Stop hook's command; `brigada hold confirm` remains for compatibility with old SessionStart hooks. See [section 2](#the-hold).
+- `brigada`, `brigada attach [--force] [--model M] [--effort E]`: chat with this repo's foreman. See [section 2](#attach).
+- `brigada ask [--repo URL] <message...>` (or `-` for standard input): send the foreman a message without attaching. See [section 2](#ask).
 
 ### Watching
 
@@ -1092,11 +1039,10 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 - Model-name tier patterns can go stale as vendors rename models; correct them with `tier.<harness>/<model>` in the config file.
 - Every tier bump spends a restart, including a second bump after the bumped attempt fails; earlier retries can exhaust the cap before a task reaches heavy.
-- The hold-only bootstrap credential is not built: the mode A bridge reaches the engine with your client token, and the hold gives it its own limited credential after `hold_acquire`.
-- `brigada status` does not show whether your session is connected but not holding (presence is not implemented).
 - The runner does not record the commit a reviewer approved, so `brigada land` only warns that the head was not compared ([section 5](#5-finishing-brigada-land)).
 - Read-only extra repositories are a convention, not a sandbox ([section 7](#another-repository-to-read)).
-- Codex has no verified project-scope registration: init prints a user-level command ([section 1](#1-install-and-brigada-init)), and an attached Codex session does not carry brigada's tools ([section 12](#attach)).
+- A repository whose `.mcp.json` still carries an older init's `brigada` entry must drop it (rerun `brigada init` or run `brigada remove`), or the two `brigada` servers clash in an attached chat ([section 2](#attach)).
+- An attached Codex session does not carry brigada's tools, and Codex has no verified project-scope registration for the coordinator: init in a parent folder prints a user-level command ([section 3](#3-several-repositories-mode-b)).
 - Cross-repository plans do not exist: a plan belongs to one project ([section 3](#3-several-repositories-mode-b)).
 - `brigada cache clear` is not implemented; the setup cache expires by age and count ([section 7](#an-environment-for-checks-and-reviews)).
 - Workers run in git worktrees, not containers, and checks run with your credentials. Do not point brigada at a repository you do not trust.
