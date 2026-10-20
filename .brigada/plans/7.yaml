@@ -5,9 +5,9 @@
 plan: 7
 title: "opencode reset time and project isolation; 1.0 compatibility statement (#22)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-20T00:47:38.936768Z
-updated: 2026-10-20T02:31:37.105143Z
+updated: 2026-10-20T06:32:34.010451Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps, or from the
 # default branch when base is empty; merge a task after its base. States
@@ -44,7 +44,7 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-27"
     rounds: 1
   - id: 28
