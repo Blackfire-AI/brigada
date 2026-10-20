@@ -280,7 +280,7 @@ func TestInitProbeListsWiringWritesNothing(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 			}
-			for _, want := range []string{"new .mcp.json lets Claude Code here use brigada", "new .claude/settings.local.json private, kept out of git:", "new .brigada/foreman.md brigada's foreman rules for your Claude session", "new AGENTS.md a short block that makes your Claude session brigada's foreman", "new CLAUDE.md imports AGENTS.md", "codex mcp add brigada-foreman -- brigada mcp --foreman"} {
+			for _, want := range []string{"new .mcp.json lets Claude Code here use brigada", "new .claude/settings.local.json private, kept out of git:", "new .brigada/foreman.md brigada's foreman rules for your Claude session", "new AGENTS.md a short block that makes your Claude session brigada's foreman", "new CLAUDE.md imports AGENTS.md", "new .codex/config.toml lets Codex here use brigada", "trust this folder when Codex asks", "codex mcp add brigada-foreman -- brigada mcp --foreman"} {
 				if strings.Contains(strings.Join(strings.Fields(out), " "), want) != tc.wantWiring {
 					t.Errorf("%q present = %v, want %v\n%s", want, !tc.wantWiring, tc.wantWiring, out)
 				}
@@ -291,7 +291,7 @@ func TestInitProbeListsWiringWritesNothing(t *testing.T) {
 			if strings.Contains(out, "auto_review") || strings.Contains(out, "already") || strings.Contains(out, "ready") {
 				t.Errorf("unexpected setup/approval claim:\n%s", out)
 			}
-			for _, rel := range []string{".mcp.json", ".claude", ".brigada", wiringAgentsFile, wiringClaudeFile} {
+			for _, rel := range []string{".mcp.json", ".claude", ".brigada", ".codex", wiringAgentsFile, wiringClaudeFile} {
 				if _, err := os.Stat(rel); !os.IsNotExist(err) {
 					t.Errorf("probe wrote %s: %v", rel, err)
 				}

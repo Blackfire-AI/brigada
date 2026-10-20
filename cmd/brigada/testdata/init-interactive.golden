@@ -131,6 +131,8 @@ Plan
     new  .brigada/project.yaml        the settings above
     new  .mcp.json                    lets Claude Code here use brigada (Claude
                                       Code asks you to approve it)
+    new  .codex/config.toml           lets Codex here use brigada (Codex loads
+                                      it once you trust this folder)
     new  .claude/settings.local.json  private, kept out of git: when your
                                       Claude turn ends, brigada's foreman picks
                                       up what happened meanwhile
@@ -141,11 +143,13 @@ Plan
     new  CLAUDE.md                    imports AGENTS.md, so Claude Code reads
                                       that block
     (show full contents: --verbose)
-  Codex, optional: to plan from your own Codex session, run once yourself:
+  Codex: on the first codex run here, trust this folder when Codex asks
+    (only a trusted folder loads .codex/config.toml), then ask Codex to plan
+    the first task. On Codex older than 0.78 (no project config):
     codex mcp add brigada-foreman -- brigada mcp --foreman
   In the background: a runner starts now and keeps going (log:
     ~/.local/state/brigada/runner.log; stop it with: brigada stop). The engine
     starts when needed and stops after 30 idle minutes.
 
-Write 6 files and start the runner? [y/N]:
+Write 7 files and start the runner? [y/N]:
 Declined; nothing written or started.

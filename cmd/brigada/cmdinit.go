@@ -818,6 +818,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if !*noWiring && probes["claude"].installed {
 		wiring = planWiring(root)
 	}
+	if !*noWiring && probes["codex"].installed {
+		wiring = append(wiring, planCodexWiring(root)...)
+	}
 	files := append([]wireFile{{rel: engine.ProjectConfigPath, old: old, next: proposed, exists: exists}}, wiring...)
 	printInitFiles(stdout, files, *verbose)
 	if !*noWiring {

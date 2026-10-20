@@ -28,6 +28,7 @@ func planRemoval(root string, deleteConfig bool) []wireFile {
 	}
 	steps := []wireStep{
 		{wiringMCPFile, removeMCPServer},
+		{wiringCodexFile, removeCodexServer},
 		{wiringSettingsFile, func(d []byte, exists bool) ([]byte, string, error) {
 			return removeWiringHooks(d, exists, false)
 		}},

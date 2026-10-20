@@ -26,6 +26,7 @@ import (
 
 const (
 	wiringMCPFile            = ".mcp.json"
+	wiringCodexFile          = ".codex/config.toml"
 	wiringSettingsFile       = ".claude/settings.local.json"
 	wiringSharedSettingsFile = ".claude/settings.json"
 	wiringSkillMarker        = "<!-- brigada-managed: foreman-instructions"
@@ -37,12 +38,18 @@ const (
 	wiringSkillFile = ".claude/skills/brigada-foreman/SKILL.md"
 )
 
-// codexWiringText is what init prints for Codex instead of writing anything:
-// no project-scope path is verified, so the user-level command is the user's
-// to run (§4.6 "What the facts allow", item 7 approvals).
+// initCodexText is init's closing word for Codex, after the wiring plan:
+// init has written .codex/config.toml with brigada's table
+// (planCodexWiring), which Codex loads only from a trusted folder — project
+// config since Codex 0.78.0, trust-gated since 0.88.0, verified from Codex's
+// documentation and history — so the user trusts the folder on the first
+// codex run. The user-level command remains only as the fallback for Codex
+// versions without project config.
 func initCodexText(w io.Writer) string {
 	style := initPresentation(w).style
-	return "  " + style.Bold("Codex") + ", optional: to plan from your own Codex session, run once yourself:\n" +
+	return "  " + style.Bold("Codex") + ": on the first codex run here, trust this folder when Codex asks\n" +
+		"    (only a trusted folder loads .codex/config.toml), then ask Codex to plan\n" +
+		"    the first task. " + style.Dim("On Codex older than 0.78 (no project config):") + "\n" +
 		"    " + style.Accent("codex mcp add brigada-foreman -- brigada mcp --foreman") + "\n"
 }
 
@@ -211,7 +218,7 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 	fmt.Fprintln(w, "  "+initPresentation(w).style.Bold("Files")+" in this repository (brigada never commits them):")
 	// Show the setup files first, then supporting edits such as git's exclude.
 	ordered := make([]wireFile, 0, len(files))
-	primary := []string{engine.ProjectConfigPath, wiringMCPFile, wiringSettingsFile, wiringRulesFile, wiringAgentsFile, wiringClaudeFile, wiringSkillFile}
+	primary := []string{engine.ProjectConfigPath, wiringMCPFile, wiringCodexFile, wiringSettingsFile, wiringRulesFile, wiringAgentsFile, wiringClaudeFile, wiringSkillFile}
 	for _, rel := range primary {
 		for _, f := range files {
 			if f.rel == rel {
@@ -243,6 +250,8 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 			purpose = "the settings above"
 		case f.rel == wiringMCPFile:
 			purpose = "lets Claude Code here use brigada (Claude Code asks you to approve it)"
+		case f.rel == wiringCodexFile:
+			purpose = "lets Codex here use brigada (Codex loads it once you trust this folder)"
 		case f.rel == wiringSettingsFile:
 			purpose = "private, kept out of git: when your Claude turn ends, brigada's foreman picks up what happened meanwhile"
 		case f.rel == wiringRulesFile:
