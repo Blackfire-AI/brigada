@@ -48,7 +48,8 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
     extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "1267a44c0c8756c359288eb8fb3a2dd9080bbdb8"]]
+    question: "Can the runner make the prior checkout (commit 1267a44c) readable from this worktree, for example by fetching that commit into this repo or allowing its path, or by giving me its absolute path with access? Then I can copy cmdtop*.go, the termios files, the internal/api changes, main.go, docs/GUIDE.md and the goldens, and apply the topFetch fix (return topModel{err: err}) plus the test that checks model.err when Projects fails."
