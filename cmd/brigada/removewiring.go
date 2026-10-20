@@ -12,9 +12,10 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
-// planRemoval reads the same paths as init, including a linked worktree's
-// shared exclude file. nil next means delete, only for this removal plan.
-func planRemoval(root string, deleteConfig bool) []wireFile {
+// legacyWiringSteps lists the wiring-removal steps brigada remove and a
+// rerun of init share: strip everything an older init wired into the
+// harness, and nothing of the user's.
+func legacyWiringSteps(root string) []wireStep {
 	owned := func(what string) func(d []byte, exists bool) ([]byte, string, error) {
 		return func(d []byte, exists bool) ([]byte, string, error) {
 			if !exists {
@@ -47,16 +48,16 @@ func planRemoval(root string, deleteConfig bool) []wireFile {
 			}})
 		}
 	}
-	steps = append(steps, wireStep{engine.ProjectConfigPath, func(d []byte, exists bool) ([]byte, string, error) {
-		if exists && deleteConfig {
-			return nil, "removed", nil
-		}
-		return d, "unchanged", nil
-	}})
-	files := planSteps(root, steps)
+	return steps
+}
+
+// planExcludeRemoval plans the edit of git's exclude file that drops the
+// line ignoring brigada's private settings; a linked worktree's shared
+// exclude file is located through git.
+func planExcludeRemoval(root string) wireFile {
 	out, err := exec.Command("git", "-C", root, "rev-parse", "--git-path", "info/exclude").Output()
 	if err != nil {
-		return append(files, wireFile{rel: "git info/exclude", err: err})
+		return wireFile{rel: "git info/exclude", err: err}
 	}
 	path := strings.TrimSpace(string(out))
 	if !filepath.IsAbs(path) {
@@ -64,8 +65,19 @@ func planRemoval(root string, deleteConfig bool) []wireFile {
 	}
 	exclude := planSteps(filepath.Dir(path), []wireStep{{filepath.Base(path), removeSettingsExclude}})[0]
 	exclude.rel = filepath.ToSlash(strings.TrimSpace(string(out)))
-	files = append(files, exclude)
-	return files
+	return exclude
+}
+
+// planRemoval reads the same paths as init, including a linked worktree's
+// shared exclude file. nil next means delete, only for this removal plan.
+func planRemoval(root string, deleteConfig bool) []wireFile {
+	steps := append(legacyWiringSteps(root), wireStep{engine.ProjectConfigPath, func(d []byte, exists bool) ([]byte, string, error) {
+		if exists && deleteConfig {
+			return nil, "removed", nil
+		}
+		return d, "unchanged", nil
+	}})
+	return append(planSteps(root, steps), planExcludeRemoval(root))
 }
 
 func removeSettingsExclude(d []byte, exists bool) ([]byte, string, error) {

@@ -133,28 +133,13 @@ dsh (experimental): init can't check sign-in.
     codex     edit files and run commands inside codex's sandbox
     opencode  edit files; no commands
   [1mFiles[0m in this repository (brigada never commits them):
-    [32mnew[0m  .brigada/project.yaml        [90mthe settings above[0m
-    [32mnew[0m  .mcp.json                    [90mlets Claude Code here use brigada (Claude
-                                      Code asks you to approve it)[0m
-    [32mnew[0m  .codex/config.toml           [90mlets Codex here use brigada (Codex loads
-                                      it once you trust this folder)[0m
-    [32mnew[0m  .claude/settings.local.json  [90mprivate, kept out of git: when your
-                                      Claude turn ends, brigada's foreman picks
-                                      up what happened meanwhile[0m
-    [32mnew[0m  .brigada/foreman.md          [90mbrigada's foreman rules for your Claude
-                                      session (brigada's own file)[0m
-    [32mnew[0m  AGENTS.md                    [90ma short block that makes your Claude
-                                      session brigada's foreman[0m
-    [32mnew[0m  CLAUDE.md                    [90mimports AGENTS.md, so Claude Code reads
-                                      that block[0m
+    [32mnew[0m        .brigada/project.yaml  [90mthe settings above[0m
+    [90munchanged[0m  .git/info/exclude      [90mremoves the exclude line that hid the
+                                      private Claude Code settings[0m
     [90m(show full contents: --verbose)[0m
-  [1mCodex[0m: on the first codex run here, trust this folder when Codex asks
-    (only a trusted folder loads .codex/config.toml), then ask Codex to plan
-    the first task. [90mOn Codex older than 0.78 (no project config):[0m
-    [36mcodex mcp add brigada-foreman -- brigada mcp --foreman[0m
   [1mIn the background:[0m a runner starts now and keeps going (log:
     ~/.local/state/brigada/runner.log; stop it with: [36mbrigada stop[0m). The engine
     starts when needed and stops after 30 idle minutes.
 
-[1mWrite 7 files and start the runner? [0m[36m[y/N][0m[1m:[0m
+[1mWrite 1 file and start the runner? [0m[36m[y/N][0m[1m:[0m
 Declined; nothing written or started.

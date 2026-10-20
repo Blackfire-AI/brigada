@@ -35,5 +35,6 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `brigada init` no longer wires the harness; a rerun or `brigada remove` strips an older init's wiring.
 - The headless foreman and `brigada attach` now run in the foreman's reading checkout, so the repository's own `CLAUDE.md`, `AGENTS.md`, `.claude/` and project memory load as in any clone. A harness keys its sessions by working directory, so existing foreman sessions cannot be resumed from the new one: the next turn or attach starts a fresh foreman session once, and plans, tasks and pending events are unaffected. A resume the CLI rejects as unknown starts a fresh session instead of failing the turn.
 - `brigada attach` no longer passes `--strict-mcp-config` to `claude`, so your own user-scope MCP servers load as in any session. A repository whose `.mcp.json` still has an older init's `brigada` entry (`brigada mcp --foreman`) must drop it (`brigada remove`), or the two `brigada` servers clash.

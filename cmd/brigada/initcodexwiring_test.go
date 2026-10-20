@@ -1,103 +1,31 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func codexApply(t *testing.T, root string) []wireFile {
+// wireCodexTable appends the [mcp_servers.brigada] table an older init
+// wrote, behind the blank separator init added.
+func wireCodexTable(t *testing.T, root string) {
 	t.Helper()
-	files := planCodexWiring(root)
-	if err := applyWiring(files); err != nil {
-		t.Fatal(err)
+	base := ""
+	if data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(wiringCodexFile))); err == nil {
+		base = string(data)
 	}
-	return files
+	if base != "" && !strings.HasSuffix(base, "\n") {
+		base += "\n"
+	}
+	if strings.TrimSpace(base) != "" && !strings.HasSuffix(base, "\n\n") {
+		base += "\n"
+	}
+	base += "[mcp_servers.brigada]\ncommand = \"brigada\"\nargs = [\"mcp\", \"--foreman\"]\n"
+	wireWrite(t, root, wiringCodexFile, base)
 }
 
-func TestCodexWiringFreshThenUnchanged(t *testing.T) {
-	root := wireRepo(t)
-	if f := codexApply(t, root)[0]; f.err != nil || f.state != "created" {
-		t.Fatalf("state %s err %v", f.state, f.err)
-	}
-	want := "[mcp_servers.brigada]\ncommand = \"brigada\"\nargs = [\"mcp\", \"--foreman\"]\n"
-	if got := wireRead(t, root, wiringCodexFile); got != want {
-		t.Fatalf("file = %q, want %q", got, want)
-	}
-	for _, f := range codexApply(t, root) {
-		if f.err != nil || f.changed() || f.state != "unchanged" {
-			t.Errorf("rerun: state %s err %v", f.state, f.err)
-		}
-	}
-	if got := wireRead(t, root, wiringCodexFile); got != want {
-		t.Errorf("rerun rewrote the file: %q", got)
-	}
-}
-
-func TestCodexWiringKeepsUserBytes(t *testing.T) {
-	for _, tc := range []struct{ name, old string }{
-		{"top-level keys", "model = \"gpt-6.1-sol\"\nmodel_reasoning_effort = \"high\"\n"},
-		{"other table", "[mcp_servers.other]\ncommand = \"other\"\nargs = []\n"},
-		{"table with comments", "# my config\n[other]\nkey = \"value\" # keep\n"},
-		{"no trailing newline", "model = \"gpt-6.1-sol\""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root := wireRepo(t)
-			wireWrite(t, root, wiringCodexFile, tc.old)
-			if f := codexApply(t, root)[0]; f.err != nil || f.state != "added" {
-				t.Fatalf("state %s err %v", f.state, f.err)
-			}
-			got := wireRead(t, root, wiringCodexFile)
-			if !keepsBytes(tc.old, got) {
-				t.Errorf("user bytes changed:\n%s", got)
-			}
-			want := tc.old
-			if !strings.HasSuffix(want, "\n") {
-				want += "\n"
-			}
-			if strings.TrimSpace(want) != "" && !strings.HasSuffix(want, "\n\n") {
-				want += "\n"
-			}
-			want += "[mcp_servers.brigada]\ncommand = \"brigada\"\nargs = [\"mcp\", \"--foreman\"]\n"
-			if got != want {
-				t.Fatalf("file:\n%q\nwant:\n%q", got, want)
-			}
-		})
-	}
-}
-
-func TestCodexWiringReplacesBrigadasTableInPlace(t *testing.T) {
-	for _, tc := range []struct{ name, old string }{
-		{"stale command", "[mcp_servers.brigada]\ncommand = \"/old/brigada\"\n"},
-		{"extra entry", "[mcp_servers.brigada]\ncommand = \"brigada\"\nargs = [\"mcp\", \"--foreman\"]\nenv = { HOME = \"/x\" }\n"},
-		{"quoted header", "[mcp_servers.\"brigada\"]\ncommand = \"old\"\n"},
-		{"indented header", "  [mcp_servers.brigada]\n  command = \"old\"\n"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root := wireRepo(t)
-			tc.old += "\n[other]\nkey = 1\n"
-			wireWrite(t, root, wiringCodexFile, tc.old)
-			if f := codexApply(t, root)[0]; f.err != nil || f.state != "replaced" {
-				t.Fatalf("state %s err %v", f.state, f.err)
-			}
-			indent := ""
-			header := "[mcp_servers.brigada]"
-			if tc.name == "indented header" {
-				indent, header = "  ", "  [mcp_servers.brigada]"
-			}
-			if tc.name == "quoted header" {
-				header = "[mcp_servers.\"brigada\"]"
-			}
-			want := header + "\n" + indent + "command = \"brigada\"\n" + indent + "args = [\"mcp\", \"--foreman\"]\n" +
-				"\n[other]\nkey = 1\n"
-			if got := wireRead(t, root, wiringCodexFile); got != want {
-				t.Fatalf("file:\n%q\nwant:\n%q", got, want)
-			}
-		})
-	}
-}
-
-func TestCodexWiringDamagedFilesAreReportedAndLeftAlone(t *testing.T) {
+func TestCodexRemovalRefusesDamagedFiles(t *testing.T) {
 	for _, tc := range []struct{ name, body string }{
 		{"duplicate tables", "[mcp_servers.brigada]\ncommand = \"brigada\"\n\n[mcp_servers.brigada]\ncommand = \"brigada\"\n"},
 		{"inline root", "mcp_servers = { brigada = {} }\n"},
@@ -108,25 +36,10 @@ func TestCodexWiringDamagedFilesAreReportedAndLeftAlone(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := wireRepo(t)
 			wireWrite(t, root, wiringCodexFile, tc.body)
-			files := planCodexWiring(root)
-			f := files[0]
-			if f.err == nil || f.changed() {
-				t.Fatalf("not reported: state %s err %v", f.state, f.err)
-			}
-			if !strings.Contains(f.err.Error(), "rerun init") {
-				t.Errorf("error not actionable: %v", f.err)
-			}
-			if err := applyWiring(files); err != nil {
-				t.Fatal(err)
-			}
-			if got := wireRead(t, root, wiringCodexFile); got != tc.body {
-				t.Fatalf("damaged file rewritten: %q", got)
-			}
-			// Removal refuses the same damage instead of guessing.
 			removal := planRemoval(root, false)
 			for _, r := range removal {
 				if r.rel == wiringCodexFile && (r.err == nil || r.changed()) {
-					t.Errorf("remove not refused: state %s err %v", r.state, r.err)
+					t.Fatalf("remove not refused: state %s err %v", r.state, r.err)
 				}
 			}
 			if err := applyRemoval(removal); err != nil {
@@ -142,7 +55,7 @@ func TestCodexWiringDamagedFilesAreReportedAndLeftAlone(t *testing.T) {
 func TestCodexRemovalReversesWiring(t *testing.T) {
 	t.Run("fresh file deleted", func(t *testing.T) {
 		root := wireRepo(t)
-		codexApply(t, root)
+		wireCodexTable(t, root)
 		if err := applyRemoval(planRemoval(root, false)); err != nil {
 			t.Fatal(err)
 		}
@@ -157,7 +70,7 @@ func TestCodexRemovalReversesWiring(t *testing.T) {
 		} {
 			root := wireRepo(t)
 			wireWrite(t, root, wiringCodexFile, old)
-			codexApply(t, root)
+			wireCodexTable(t, root)
 			if err := applyRemoval(planRemoval(root, false)); err != nil {
 				t.Fatal(err)
 			}

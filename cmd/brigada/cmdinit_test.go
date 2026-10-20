@@ -322,7 +322,7 @@ func TestInitNonTerminalPrompts(t *testing.T) {
 		"    Use kimi? [y/N]:",
 		"    Let kimi write code too, not only review? [y/N]:",
 		"    Pick numbers (1,3) or -, or type provider/model [-]:",
-		"Write 8 files and start the runner? [y/N]:",
+		"Write 1 file and start the runner? [y/N]:",
 	}
 	if !strings.Contains(out, "\nSigned in: opencode (2 providers, opencode providers list).\nclaude: init can't check sign-in.\ncodex: init can't check sign-in.\nkimi: init can't check sign-in.\n\n") {
 		t.Errorf("expected the signed-in line and one line per CLI that cannot be checked:\n%s", out)
@@ -1115,7 +1115,7 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 		log, _ := os.ReadFile(filepath.Join(state, "engine.log"))
 		t.Fatalf("%d\n%s\n%s\nengine log: %s", code, out, err, log)
 	}
-	for _, want := range []string{"Done: wrote ", "files (not committed). Detached runner started", "stop it with: brigada stop", "Next:\n  1. Restart your agent session in this repository (Claude Code: `claude`;\n     approve the brigada MCP server when it asks).\n  2. Ask it to plan your first task", "  3. Or, without a session: brigada ask", "Stop the runner: brigada stop"} {
+	for _, want := range []string{"Done: wrote ", "wrote 1 file (not committed). Detached runner started", "stop it with: brigada stop", "Next:\n  1. Talk to the foreman: brigada attach\n  2. Or, without a conversation: brigada ask", "Stop the runner: brigada stop"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -1223,7 +1223,7 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 	}
 	assertInitSavedAgents(t, state, afterDefaults.Specs)
 	again = afterDefaults
-	if strings.Contains(out, "Restart your agent session") || !strings.Contains(out, "  1. Or, without a session: brigada ask") || strings.Contains(out, "§") {
+	if strings.Contains(out, "Restart your agent session") || !strings.Contains(out, "  2. Or, without a conversation: brigada ask") || strings.Contains(out, "§") {
 		t.Fatalf("--no-wiring Next block:\n%s", out)
 	}
 	args[2] = "harness=claude,model=opus,account=work,effort=low"
@@ -1435,7 +1435,7 @@ func TestInitNoInstalledAgents(t *testing.T) {
 	}
 }
 
-func TestInitProbeAndRefusalsWithExistingWiring(t *testing.T) {
+func TestInitRerunProbeAndRefusalKeepOldWiring(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		extra []string
@@ -1448,8 +1448,10 @@ func TestInitProbeAndRefusalsWithExistingWiring(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
+			wireGit(t, ".", "config", "core.excludesFile", os.DevNull)
 			wireApply(t, ".")
-			local := wireRead(t, ".", ".claude/settings.local.json")
+			mcp := wireRead(t, ".", wiringMCPFile)
+			exclude := wireRead(t, ".", ".git/info/exclude")
 			fakeInitPATH(t, "claude", "codex")
 			args := []string{"--agent", "harness=claude,model=sonnet", "--signed-in", "claude,codex", "--check", "true", "--tools", "none"}
 			if tc.name != "limited" {
@@ -1461,11 +1463,12 @@ func TestInitProbeAndRefusalsWithExistingWiring(t *testing.T) {
 			if code != tc.code {
 				t.Fatalf("got %d, want %d\n%s\n%s", code, tc.code, out, errOut)
 			}
-			if strings.Contains(out, "ready") || !strings.Contains(strings.Join(strings.Fields(out), " "), "unchanged .claude/settings.local.json private, kept out of git:") {
-				t.Errorf("existing wiring output:\n%s", out)
+			flat := strings.Join(strings.Fields(out), " ")
+			if strings.Contains(out, "ready") || !strings.Contains(flat, "removed .mcp.json removes the brigada server an older init added") {
+				t.Errorf("rerun wiring removals not listed:\n%s", out)
 			}
-			if wireRead(t, ".", ".claude/settings.local.json") != local {
-				t.Error("probe/refusal changed private settings")
+			if wireRead(t, ".", wiringMCPFile) != mcp || wireRead(t, ".", ".git/info/exclude") != exclude {
+				t.Error("probe/refusal changed old wiring")
 			}
 		})
 	}
@@ -1649,8 +1652,8 @@ func assertInitTargetTranscript(t *testing.T, out string) {
 		"Found uv.lock, so the suggestion is:", "Check command [uv run pytest]:", "Plan\n",
 		"Foreman: claude/sonnet, effort medium", "Agents (every model", "Reviews:",
 		"At once: 4 tasks on this machine; per account: claude 3, codex 2, kimi 1,",
-		"Check:", "What workers may do:", "Files in this repository", "Codex: on the first codex run here",
-		"In the background:", "Write 7 files and start the runner? [y/N]:",
+		"Check:", "What workers may do:", "Files in this repository",
+		"In the background:", "Write 1 file and start the runner? [y/N]:",
 	}
 	position := 0
 	for _, text := range ordered {
@@ -1660,7 +1663,7 @@ func assertInitTargetTranscript(t *testing.T, out string) {
 		}
 		position += next + len(text)
 	}
-	beforeApply, _, _ := strings.Cut(plain, "Write 7 files and start the runner?")
+	beforeApply, _, _ := strings.Cut(plain, "Write 1 file and start the runner?")
 	if strings.Contains(strings.ToLower(beforeApply), "ready") {
 		t.Error("claimed ready before apply")
 	}
