@@ -57,10 +57,12 @@ func pushCommit(t *testing.T, remote, file, content string) string {
 	return remoteHead(t, remote, "main")
 }
 
-// extraWorker records what the worker sees of the extra checkout, tries to
-// write to it and to push from it, then finishes.
+// extraWorker records what the worker sees of the extra checkout — the
+// prompt and the read dirs it arrived with, then the checkout itself —
+// tries to write to it and to push from it, then finishes.
 var extraWorker = `
-cat > /dev/null
+cat > "$BRIGADA_TEST_MARKERS/worker-prompt"
+printf '%s\n' "$BRIGADA_FAKE_READ_DIRS" > "$BRIGADA_TEST_MARKERS/worker-readdirs"
 echo "$BRIGADA_REPO_SCHEMA" > "$BRIGADA_TEST_MARKERS/worker-path"
 echo "$BRIGADA_REPO_LIVE" > "$BRIGADA_TEST_MARKERS/worker-live-path"
 if echo hacked > "$BRIGADA_REPO_SCHEMA/hack.txt" 2>/dev/null; then : > "$BRIGADA_TEST_MARKERS/write-ok"; else : > "$BRIGADA_TEST_MARKERS/write-denied"; fi
@@ -115,6 +117,23 @@ test ! -e hack.txt`, pinned, tip)
 	}
 	if got := strings.Join(markerLines(t, markers, "worker-live-path"), ""); got != filepath.Join(filepath.Dir(want), "live") {
 		t.Errorf("BRIGADA_REPO_LIVE = %q", got)
+	}
+
+	// The prompt names each checkout at its absolute path (§5.8), so a
+	// worker with no shell for echo or ls learns it there; and the
+	// adapter's read grant carries the same dirs, in the grant's order.
+	workerPrompt := strings.Join(markerLines(t, markers, "worker-prompt"), "\n")
+	for _, wantLine := range []string{
+		"Extra repositories, read-only",
+		"schema at " + want + " (also in $BRIGADA_REPO_SCHEMA).",
+		filepath.Join(filepath.Dir(want), "live") + " (also in $BRIGADA_REPO_LIVE).",
+	} {
+		if !strings.Contains(workerPrompt, wantLine) {
+			t.Errorf("the worker's prompt lacks %q:\n%s", wantLine, workerPrompt)
+		}
+	}
+	if got := strings.Join(markerLines(t, markers, "worker-readdirs"), "\n"); got != want+"\n"+filepath.Join(filepath.Dir(want), "live") {
+		t.Errorf("the job's read dirs = %q, want the two checkouts", got)
 	}
 
 	// A write attempt does not reach the remote: the checkout has no remote
@@ -181,6 +200,35 @@ func TestExtraRepoEnvRefusesAMalformedName(t *testing.T) {
 		if got := validExtraName(name); got != ok {
 			t.Errorf("validExtraName(%q) = %v, want %v", name, got, ok)
 		}
+	}
+}
+
+// TestRunnerWithoutExtrasKeepsThePromptPlain pins the other side of §5.8:
+// the paragraph and the read dirs exist only when the job has extra
+// repositories; a job without them sees its prompt exactly as the engine
+// composed it, and no read dir at all.
+func TestRunnerWithoutExtrasKeepsThePromptPlain(t *testing.T) {
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	markers := markerDir(t)
+	task := e.seedTask("", "true")
+	composed := prompt.ComposeWorkerPrompt("Add work.txt.", "", "")
+	job := e.submitWork(task, composed)
+
+	plainWorker := `
+cat > "$BRIGADA_TEST_MARKERS/worker-prompt"
+printf '%s\n' "$BRIGADA_FAKE_READ_DIRS" > "$BRIGADA_TEST_MARKERS/worker-readdirs"
+` + fakeResultScript(`{"status":"done","summary":"nothing to read beyond the worktree"}`)
+	p := e.startRunner(writeWorkerScript(t, plainWorker), 100*time.Millisecond)
+	defer p.stop(t)
+	e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
+
+	if got := strings.Join(markerLines(t, markers, "worker-prompt"), "\n"); got != strings.TrimSpace(composed) {
+		t.Errorf("the prompt without extras changed:\n%s", got)
+	}
+	if got := strings.Join(markerLines(t, markers, "worker-readdirs"), ""); got != "" {
+		t.Errorf("the job without extras carried read dirs: %q", got)
 	}
 }
 

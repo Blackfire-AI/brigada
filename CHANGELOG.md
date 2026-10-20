@@ -11,6 +11,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- claude and opencode workers could not read a task's extra repositories (§5.8): their read and search tools were denied outside the worktree, and their scoped Bash could not echo the `BRIGADA_REPO_<NAME>` path. The runner now grants each checkout's absolute path as a read dir (claude `--add-dir`, opencode `external_directory` allow) and names the paths in the job's prompt.
 - dsh jobs failed at start with "unknown option '--patch'"; the adapter now passes the launcher's `--patch` before the app's `--json`.
 
 ### Added

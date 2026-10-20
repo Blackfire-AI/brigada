@@ -157,6 +157,12 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	if len(disallowed) > 0 {
 		args = append(args, append([]string{"--disallowedTools"}, disallowed...)...)
 	}
+	// The extra repositories' checkouts (§5.8) sit outside the worktree
+	// the command runs in: one --add-dir per directory lets the file
+	// tools read them, and their read-only files refuse writes anyway.
+	for _, dir := range job.ReadDirs {
+		args = append(args, "--add-dir", dir)
+	}
 	cmd := exec.Command(binary, args...)
 	if cmd.Err != nil {
 		return nil, cmd.Err

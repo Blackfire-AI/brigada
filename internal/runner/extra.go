@@ -47,6 +47,7 @@ func (r *jobRun) prepareExtras(ctx context.Context) string {
 	ws := &workspace{gitEnv: r.cfg.GitEnv}
 	commits := map[string]string{}
 	var env []string
+	var dirs []string
 	for _, x := range r.grant.ExtraRepos {
 		// The engine validated these when the task was made; a grant from
 		// an engine that did not is refused here rather than trusted.
@@ -64,11 +65,13 @@ func (r *jobRun) prepareExtras(ctx context.Context) string {
 		}
 		commits[x.Name] = sha
 		env = append(env, x.EnvVar()+"="+dir)
+		dirs = append(dirs, dir)
 		r.cfg.Log.InfoContext(ctx, "extra repository checked out",
 			"job_id", r.grant.JobID, "name", x.Name, "repo", x.Repo, "ref", x.Ref, "commit", sha)
 	}
 	r.mu.Lock()
 	r.extraEnv, r.extraCommits = env, commits
+	r.extraReadDirs, r.extraPrompt = dirs, extraPromptNote(r.grant.ExtraRepos, dirs)
 	r.mu.Unlock()
 	return ""
 }
@@ -88,6 +91,42 @@ func (r *jobRun) extraEnvVars() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.extraEnv
+}
+
+// extraDirs is the checkouts' absolute paths, in the grant's order — what
+// the adapter's read grant (adapter.Job.ReadDirs) is built from; nil when
+// the job has none.
+func (r *jobRun) extraDirs() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.extraReadDirs
+}
+
+// extraPromptOf is the fixed paragraph naming the checkouts, appended to
+// the job's prompt; empty when the job has none.
+func (r *jobRun) extraPromptOf() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.extraPrompt
+}
+
+// extraPromptNote is the short fixed paragraph the runner appends to a
+// job's prompt when the job has extra repositories (§5.8): the worker may
+// have no shell for echo or ls — claude's default worker scope is the Go
+// toolchain alone — so the prompt itself must name each checkout's
+// absolute path. One sentence per repository, in the grant's order, in
+// the grant's own naming; no repositories, no paragraph, and a job
+// without them keeps its prompt unchanged.
+func extraPromptNote(repos []engine.ExtraRepo, dirs []string) string {
+	if len(repos) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\nExtra repositories, read-only, checked out beside the worktree.\nRead them as context; never write, commit or push them:\n")
+	for i := range repos {
+		fmt.Fprintf(&b, "%s at %s (also in $%s).\n", repos[i].Name, dirs[i], repos[i].EnvVar())
+	}
+	return b.String()
 }
 
 // validExtraName is the engine's name rule, checked again where the name

@@ -5,13 +5,15 @@
 //
 // The contract with the script: it runs in the worktree with the
 // composed prompt on stdin, BRIGADA_FAKE_RESUME holding the session
-// id to resume (empty for a fresh run) and BRIGADA_FAKE_MCP_CONFIG
+// id to resume (empty for a fresh run), BRIGADA_FAKE_MCP_CONFIG
 // holding the harness's MCP config path the job carried (empty when it
-// carried none); it emits one JSON event per line on stdout and edits
-// the worktree like a worker would. An attached session (§4.2 item 1)
-// runs the script with the terminal's streams — so the prompt rides in
-// BRIGADA_FAKE_PROMPT instead — and BRIGADA_FAKE_SESSION holding the
-// new session id the client generated.
+// carried none) and BRIGADA_FAKE_READ_DIRS holding the absolute
+// directories the job said the worker must be able to read, one per
+// line (empty when it named none); it emits one JSON event per line on
+// stdout and edits the worktree like a worker would. An attached
+// session (§4.2 item 1) runs the script with the terminal's streams —
+// so the prompt rides in BRIGADA_FAKE_PROMPT instead — and
+// BRIGADA_FAKE_SESSION holding the new session id the client generated.
 package fake
 
 import (
@@ -50,6 +52,7 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	cmd.Env = append(os.Environ(),
 		"BRIGADA_FAKE_RESUME="+resumeSessionID,
 		"BRIGADA_FAKE_MCP_CONFIG="+job.MCPConfig,
+		"BRIGADA_FAKE_READ_DIRS="+strings.Join(job.ReadDirs, "\n"),
 	)
 	return cmd, nil
 }

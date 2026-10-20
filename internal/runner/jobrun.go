@@ -46,9 +46,15 @@ type jobRun struct {
 
 	// extraEnv names the job's extra checkouts (§5.8), one
 	// BRIGADA_REPO_<NAME>=<path> each; extraCommits is the commit each
-	// resolved to, by name. Both are set once, before the setup runs.
-	extraEnv     []string
-	extraCommits map[string]string
+	// resolved to, by name. extraReadDirs holds the same checkouts'
+	// absolute paths, in the grant's order, for the adapter's read grant
+	// (adapter.Job.ReadDirs); extraPrompt is the fixed paragraph that
+	// names them in the job's prompt, so a worker with no shell learns
+	// the paths. All are set once, before the setup runs.
+	extraEnv      []string
+	extraCommits  map[string]string
+	extraReadDirs []string
+	extraPrompt   string
 
 	// transcriptCap bounds the transcript bytes kept in memory and
 	// uploaded; 0 keeps the 64 MiB default — the engine's upload cap's
@@ -220,7 +226,17 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 	if r.grant.Mode == string(engine.ModeSession) && !r.noResume {
 		resume = r.grant.ResumeSessionID
 	}
-	cmd, err := ad.Command(adapter.Job{Prompt: r.grant.Prompt, Model: model, Review: isReviewJob(r.grant), Effort: r.cfg.effortFor(r.grant), MCPConfig: r.mcpConfig}, workdir, resume)
+	// The extra checkouts (§5.8) are named in the prompt — the worker
+	// may have no shell to read their variables with — and granted as
+	// read-only dirs to the adapter, whatever its CLI offers for one.
+	cmd, err := ad.Command(adapter.Job{
+		Prompt:    r.grant.Prompt + r.extraPromptOf(),
+		Model:     model,
+		Review:    isReviewJob(r.grant),
+		Effort:    r.cfg.effortFor(r.grant),
+		MCPConfig: r.mcpConfig,
+		ReadDirs:  r.extraDirs(),
+	}, workdir, resume)
 	if err != nil {
 		return &noWorkerError{err}
 	}
