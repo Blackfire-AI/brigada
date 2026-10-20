@@ -480,6 +480,13 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 					payload.Candidates = append(payload.Candidates, Ranked{Agent: c.id, Weight: c.weight, Draw: c.draw})
 				}
 			}
+			// The picked agent may be the one a review retry's exclusion
+			// named: no other qualifying reviewer was available, so the
+			// preference was lifted (§7) and the excluded agent runs —
+			// history should say why.
+			if j.Kind == KindReview && j.ExcludeAgent != 0 && agent == j.ExcludeAgent {
+				payload.ExclusionLifted = true
+			}
 			if _, err := appendEventTx(tx, evJobAgentPicked, j.ProjectID, j.TaskID, j.ID, payload, now); err != nil {
 				return nil, err
 			}
@@ -748,7 +755,10 @@ func eligibleAgentsTx(tx *sql.Tx, limits caps.Limits, rnd func() float64, runner
 // but cannot take it yet — with their model, health and cooling
 // deadline filled in: what the cooling hold (§8.1) and the queue-TTL
 // park reason read. Unpinned task jobs are restricted to the served tier
-// before availability is checked.
+// before availability is checked. A review retry's agent exclusion is
+// applied as the preference it is (§7): the lift is decided inside
+// qualifyingAgentRowsTx, so the tier choice above, the candidates and
+// the hold all read the same exclusion.
 func qualifyingAgentsTx(tx *sql.Tx, limits caps.Limits, rnd func() float64, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
 	asked, served := "", ""
 	if j.TaskID != 0 && j.Kind != KindForeman {
@@ -763,7 +773,7 @@ func qualifyingAgentsTx(tx *sql.Tx, limits caps.Limits, rnd func() float64, runn
 			}
 		}
 	}
-	rows, err := qualifyingAgentRowsTx(tx, runner, j, class)
+	rows, err := qualifyingAgentRowsTx(tx, runner, j, class, now)
 	if err != nil {
 		return nil, err
 	}
@@ -803,7 +813,7 @@ const longCooling = time.Hour
 // available agent but some agents are only cooling, the tier of the agent
 // that resets first is served, so the job waits for the earliest reset.
 func tierServedTx(tx *sql.Tx, limits caps.Limits, j *jobRow, class, asked, now string) (string, error) {
-	agents, err := qualifyingAgentRowsTx(tx, 0, j, class)
+	agents, err := qualifyingAgentRowsTx(tx, 0, j, class, now)
 	if err != nil {
 		return "", err
 	}
@@ -869,12 +879,26 @@ func tierServed(asked string, hasReady map[string]bool) string {
 }
 
 // qualifyingAgentRowsTx applies the shared pin, harness/model, class,
-// family and exclusion filters, without health, cooling or tier. Structural
-// reviewer checks also use it: broken or cooling reviewers still exist.
-func qualifyingAgentRowsTx(tx *sql.Tx, runner int64, j *jobRow, class string) ([]agentCand, error) {
+// family and exclusion filters, without health, cooling or tier. A
+// review retry's agent exclusion is a preference (§7, decided
+// 2026-10-20): reviewExclusionLiftedTx decides it, so the lease's
+// candidates, the tier choice and the structural reviewer checks all
+// read the same exclusion. Structural reviewer checks also use this:
+// broken or cooling reviewers still exist.
+func qualifyingAgentRowsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
 	author, err := reviewAuthorTx(tx, j)
 	if err != nil {
 		return nil, err
+	}
+	excludeAgent := j.ExcludeAgent
+	if excludeAgent != 0 && j.Kind == KindReview {
+		lifted, err := reviewExclusionLiftedTx(tx, j, class, now)
+		if err != nil {
+			return nil, err
+		}
+		if lifted {
+			excludeAgent = 0
+		}
 	}
 	// A foreman turn runs on the harness AND model its project chose: only
 	// an agent offering exactly that pair qualifies, and a turn whose pair
@@ -930,11 +954,11 @@ func qualifyingAgentRowsTx(tx *sql.Tx, runner int64, j *jobRow, class string) ([
 		if class != "" && j.Kind != KindForeman && !pinnedRetry && !agentOffersClass(classes, class) {
 			continue
 		}
-		if id == j.ExcludeAgent {
+		if id == excludeAgent {
 			continue
 		}
 		if j.ExcludeFamily != "" || j.Kind == KindReview {
-			if !reviewAgentQualifies(id, family, classes, j.ExcludeFamily, j.ExcludeAgent, author) {
+			if !reviewAgentQualifies(id, family, classes, j.ExcludeFamily, excludeAgent, author) {
 				continue
 			}
 		}
@@ -991,6 +1015,45 @@ func reviewAgentQualifies(id int64, family, classes, excludeFamily string, exclu
 		return false
 	}
 	return agentOffersClass(classes, string(KindReview))
+}
+
+// reviewExclusionLiftedTx reports whether a review job's agent exclusion
+// gives way (§7, decided 2026-10-20): the exclusion of the first
+// reviewer is a preference, and it holds only while another qualifying
+// reviewer is available — ready, or cooling for no more than longCooling
+// — so the review never waits days behind another family's reset while
+// the excluded agent could run again. With none available the excluded
+// agent qualifies again. A now of "" asks structurally: another
+// qualifying reviewer of any health keeps the exclusion, the answer the
+// queue-time and unservable checks read. The family rule never lifts:
+// the author and its family stay closed whatever is available, and only
+// the retry exclusion is dropped to look for the other reviewer.
+func reviewExclusionLiftedTx(tx *sql.Tx, j *jobRow, class, now string) (bool, error) {
+	if j.Kind != KindReview || j.ExcludeAgent == 0 {
+		return false, nil
+	}
+	sans := *j
+	sans.ExcludeAgent = 0 // the other reviewers alone; no recursion: the lift no longer applies
+	rows, err := qualifyingAgentRowsTx(tx, 0, &sans, class, "")
+	if err != nil {
+		return false, err
+	}
+	horizon := now
+	if now != "" {
+		if t, err := parseTime(now); err == nil {
+			horizon = fmtTime(t.Add(longCooling))
+		}
+	}
+	for _, a := range rows {
+		if a.id == j.ExcludeAgent {
+			continue
+		}
+		if now != "" && (a.health != "ready" || a.cooling > horizon) {
+			continue // broken, or cooling past longCooling: not available
+		}
+		return false, nil // another qualifying reviewer: the exclusion holds
+	}
+	return true, nil
 }
 
 // agentOffersClass reports whether the agent's advertised classes (§5.1,

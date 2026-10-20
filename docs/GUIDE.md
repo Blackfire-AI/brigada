@@ -632,7 +632,7 @@ Or set a default for every task in `.brigada/project.yaml` or with `brigada proj
 
 After an `implement` task's check passes, a reviewer reads the diff, the spec and the check result, never the author's summary. The reviewer is an agent whose model family differs from the author's, so with a single family among your agents no review can run ([section 1](#1-install-and-brigada-init), step 2).
 
-An approve counts only with substantive findings text (80 characters or more). A thinner approve, or a review that ends without a verdict, is retried once with another reviewer, and then the task waits for the foreman. Tasks of other classes finish when the run does, without a review.
+An approve counts only with substantive findings text (80 characters or more). A thinner approve, or a review that ends without a verdict, is retried once with another reviewer, and then the task waits for the foreman. The retry skips the first reviewer only while another qualifying reviewer is available — ready, or cooling for at most an hour; when none is, the first reviewer takes its own retry, and a second no-verdict from it waits for the foreman. Tasks of other classes finish when the run does, without a review.
 
 ### Rounds
 

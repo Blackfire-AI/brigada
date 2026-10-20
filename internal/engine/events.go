@@ -125,21 +125,26 @@ type eventPayload struct {
 	// The approval limit's why (§6.3): the plan, and the classes and
 	// protected paths that put it over (Count holds the task count,
 	// Reason the reasons in words).
-	Plan       int64    `json:"plan,omitempty"`
-	Classes    []string `json:"classes,omitempty"`
-	Paths      []string `json:"paths,omitempty"`
-	Agent      int64    `json:"agent,omitempty"`
-	Score      float64  `json:"score,omitempty"`
-	Pick       string   `json:"pick,omitempty"`
-	TierAsked  string   `json:"tier_asked,omitempty"`
-	TierServed string   `json:"tier_served,omitempty"`
-	EffortFrom string   `json:"effort_from,omitempty"` // an effort step's old effective effort (§8)
-	EffortTo   string   `json:"effort_to,omitempty"`   // an effort step's new effective effort (§8)
-	Retiered   []int64  `json:"retiered,omitempty"`    // tasks whose tier or effort plan_amend changed
-	PassedOver []int64  `json:"passed_over,omitempty"`
-	Weight     *int     `json:"weight,omitempty"`
-	Draw       float64  `json:"draw,omitempty"`
-	Candidates []Ranked `json:"candidates,omitempty"`
+	Plan    int64    `json:"plan,omitempty"`
+	Classes []string `json:"classes,omitempty"`
+	Paths   []string `json:"paths,omitempty"`
+	Agent   int64    `json:"agent,omitempty"`
+	Score   float64  `json:"score,omitempty"`
+	Pick    string   `json:"pick,omitempty"`
+	// ExclusionLifted marks an agent pick of the very agent a review
+	// retry's exclusion named (§7, decided 2026-10-20): no other
+	// qualifying reviewer was available, so the preference was lifted
+	// and the excluded agent took the job again.
+	ExclusionLifted bool     `json:"exclusion_lifted,omitempty"`
+	TierAsked       string   `json:"tier_asked,omitempty"`
+	TierServed      string   `json:"tier_served,omitempty"`
+	EffortFrom      string   `json:"effort_from,omitempty"` // an effort step's old effective effort (§8)
+	EffortTo        string   `json:"effort_to,omitempty"`   // an effort step's new effective effort (§8)
+	Retiered        []int64  `json:"retiered,omitempty"`    // tasks whose tier or effort plan_amend changed
+	PassedOver      []int64  `json:"passed_over,omitempty"`
+	Weight          *int     `json:"weight,omitempty"`
+	Draw            float64  `json:"draw,omitempty"`
+	Candidates      []Ranked `json:"candidates,omitempty"`
 }
 
 // Ranked is one candidate of an agent pick (§8): its cost weight and the
