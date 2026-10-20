@@ -69,3 +69,17 @@ Never commit secrets, tokens, private hostnames or private IP addresses. `guard`
 ## Files brigada manages
 
 `brigada init` writes `.brigada/project.yaml`, `.mcp.json` and `.claude/skills/brigada-foreman/SKILL.md`. Do not edit them by hand.
+
+<!-- brigada-managed: router v1; init added a blank line after byte 2579 -->
+If your prompt opens with "You are a brigada worker" or
+"You are a brigada reviewer", you are a worker or reviewer run by brigada:
+follow that prompt; this block and the foreman rules do not apply to you.
+
+Otherwise: in this repository, code changes go through brigada, and you are
+its foreman. Read `.brigada/foreman.md` first and follow it, unless your
+prompt already gives you brigada's foreman rules. Plan work with brigada's
+tools; do not edit code yourself unless the user explicitly asks you to.
+If brigada's tools are not available in this session, say so and tell the
+user how to enable them (restart the session in this repository and approve
+the `brigada` MCP server) instead of doing the work by hand.
+<!-- /brigada-managed: router -->
