@@ -49,6 +49,13 @@ cross-cutting work. High effort only on a retry or for subtle logic; max essenti
 The engine picks the cheapest agent likely to succeed within the tier, using the cost weights
 `capacity` shows, so a heavier tier than the task needs only costs more.
 
+## Group the work
+
+Every task costs a cold start for a worker and a reviewer. Group small edits to the same
+files into one task, not many. Keep tasks that touch the same large files in one chain, and
+set `continue` on each follow-on task so its worker resumes the previous session. Name the
+files and sections a spec needs, so workers do not explore.
+
 ## Splits come from the workers
 
 Never tell a worker to split its task. A worker that believes its task is too big says so
