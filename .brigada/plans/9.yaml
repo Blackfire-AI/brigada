@@ -5,9 +5,9 @@
 plan: 9
 title: "Live telemetry in the terminal: brigada capacity and brigada top"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-20T08:31:56.482366Z
-updated: 2026-10-20T15:10:05.134824Z
+updated: 2026-10-20T19:18:50.061879Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -49,7 +49,7 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-45-r3"
     rounds: 0
     extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "1267a44c0c8756c359288eb8fb3a2dd9080bbdb8"]]
