@@ -64,7 +64,8 @@ func TestCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	patch := patchArg(t, cmd.Args)
-	want := []string{"dsh", "--profile", "headless", "--json", "--patch", patch, "-"}
+	// Launcher options must precede app options: dsh stops parsing its own at the first app flag.
+	want := []string{"dsh", "--profile", "headless", "--patch", patch, "--json", "-"}
 	if !reflect.DeepEqual(cmd.Args, want) {
 		t.Errorf("args = %v, want %v", cmd.Args, want)
 	}
@@ -83,7 +84,7 @@ func TestCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	patch = patchArg(t, cmd.Args)
-	want = []string{"dsh", "--profile", "headless", "--json", "--patch", patch, "--session-id", "session-1", "-"}
+	want = []string{"dsh", "--profile", "headless", "--patch", patch, "--json", "--session-id", "session-1", "-"}
 	if !reflect.DeepEqual(cmd.Args, want) {
 		t.Errorf("resume args = %v, want %v", cmd.Args, want)
 	}
