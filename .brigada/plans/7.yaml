@@ -23,8 +23,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-25"
     rounds: 0
   - id: 26
     name: "opencode-project"
