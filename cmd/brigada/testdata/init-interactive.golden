@@ -8,6 +8,7 @@ Nothing is written or started until you confirm at the end.
 
 Signed in: claude, codex, opencode (2 providers, opencode providers list).
 kimi: init can't check sign-in.
+dsh (experimental): init can't check sign-in.
 
 Step 1 of 4: the foreman
   The foreman plans the work and decides what happens when a task needs
@@ -68,6 +69,11 @@ Step 2 of 4: workers
       -  don't use opencode
     Pick numbers (1,3) or -, or type provider/model [-]:
 
+  dsh (experimental): version 0.2.1-rc.2, sign-in can't be checked
+  dsh needs DEEPSEEK_API_KEY exported before `brigada start`, or stored through
+  dsh's own credential store.
+    Use dsh? [y/N]:
+
   -> change later: run brigada init again
      your own defaults: ~/.codex/config.toml, ~/.kimi-code/config.toml
 
@@ -75,8 +81,8 @@ Step 3 of 4: tasks at once
   Each running task is one agent CLI working in its own copy of the repo,
   plus your check command, so this is bounded by your machine. This one
   has 14 cores. Each CLI's account also gets its own limit (claude 3,
-  codex 2, kimi 1, opencode 2, brigada's defaults, never above this
-  number); change any of them later with brigada config.
+  codex 2, kimi 1, opencode 2, dsh 1, brigada's defaults, never above
+  this number); change any of them later with brigada config.
     Tasks at once [4]:
 
 Step 4 of 4: the check

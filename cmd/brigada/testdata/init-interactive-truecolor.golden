@@ -8,6 +8,7 @@
 
 Signed in: claude, codex, opencode (2 providers, opencode providers list).
 kimi: init can't check sign-in.
+dsh (experimental): init can't check sign-in.
 
 [1m━━ Step 1 of 4 · the foreman[0m
 [38;2;138;143;152m  The foreman plans the work and decides what happens when a task needs[0m
@@ -67,6 +68,11 @@ kimi: init can't check sign-in.
     ▸[38;2;108;198;224m -[0m  [1mdon't use opencode[0m
 [1m    Pick numbers (1,3) or -, or type provider/model [0m[38;2;108;198;224m[-][0m[1m:[0m
 
+  [1mdsh[0m  [38;2;138;143;152mexperimental · [0m[38;2;255;215;95m? sign-in can't be checked[0m
+  [38;2;138;143;152mdsh needs DEEPSEEK_API_KEY exported before `brigada start`, or stored through
+  dsh's own credential store.[0m
+[1m    Use dsh? [0m[38;2;108;198;224m[y/N][0m[1m:[0m
+
   [38;2;138;143;152m↺ [0m[38;2;138;143;152mchange later: run brigada init again[0m
     [38;2;138;143;152myour own defaults: ~/.codex/config.toml, ~/.kimi-code/config.toml[0m
 
@@ -74,8 +80,8 @@ kimi: init can't check sign-in.
   [38;2;138;143;152mEach running task is one agent CLI working in its own copy of the repo,
   plus your check command, so this is bounded by your machine. This one
   has 14 cores. Each CLI's account also gets its own limit (claude 3,
-  codex 2, kimi 1, opencode 2, brigada's defaults, never above this
-  number); change any of them later with brigada config.[0m
+  codex 2, kimi 1, opencode 2, dsh 1, brigada's defaults, never above
+  this number); change any of them later with brigada config.[0m
 [1m    Tasks at once [0m[38;2;108;198;224m[4][0m[1m:[0m
 
 [1m━━ Step 4 of 4 · the check[0m

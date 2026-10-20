@@ -36,6 +36,10 @@ import (
 //go:embed testdata/init-interactive*.golden
 var initTranscriptGoldens embed.FS
 
+// initHarnessesNoDsh is the CLIs the older init tests install: their scripted
+// answers predate dsh's question.
+var initHarnessesNoDsh = []string{"claude", "codex", "kimi", "opencode"}
+
 func fakeInitPATH(t *testing.T, names ...string) string {
 	t.Helper()
 	git, err := exec.LookPath("git")
@@ -59,6 +63,7 @@ case "$*" in
      echo 'Commands: no verified authentication status here'
    fi
    exit 0 ;;
+ --version) [ "${0##*/}" = dsh ] || exit 89; echo 0.2.1-rc.2 ;;
  models) [ "${0##*/}" = opencode ] || exit 89; printf 'fixture/gpt-5\nfixture/glm-5.3\n' ;;
  'providers list') [ "${0##*/}" = opencode ] || exit 89; printf '┌ Credentials\n● Provider one oauth\n● Provider two api\n└ 2 credentials\n' ;;
  *) echo 'unexpected harness invocation' >&2; exit 89 ;;
@@ -71,6 +76,7 @@ esac
 	t.Setenv("PATH", dir)
 	t.Setenv("HOME", filepath.Join(t.TempDir(), "unused-home"))
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("DEEPSEEK_API_KEY", "")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "unused-config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "unused-state"))
 	return calls
@@ -184,7 +190,7 @@ func TestInitPromptDefaultsAndSkip(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
-			fakeInitPATH(t, initHarnesses...)
+			fakeInitPATH(t, initHarnessesNoDsh...)
 			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
 			code, out, err := initFixedParallel(t, state, tc.stdin, "--signed-in", tc.signedIn, "--accept-limited", "--check", "true", "--tools", "none")
 			if code != 1 || !strings.Contains(out+err, tc.want) {
@@ -220,7 +226,7 @@ func TestInitKimiWriteOptIn(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
-			calls := fakeInitPATH(t, initHarnesses...)
+			calls := fakeInitPATH(t, initHarnessesNoDsh...)
 			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
 			// Take the first foreman and effort, leave Claude out, use Codex,
 			// answer Kimi's writing question, then type an OpenCode model and a
@@ -301,7 +307,7 @@ func TestInitNonTerminalPrompts(t *testing.T) {
 	// Enter leaves it out. Sign-in the probes cannot check is asked up front.
 	importRepo(t)
 	wireGit(t, ".", "config", "core.excludesFile", os.DevNull)
-	fakeInitPATH(t, initHarnesses...)
+	fakeInitPATH(t, initHarnessesNoDsh...)
 	code, out, err := initFixedParallel(t, testsupport.ShortStateDir(t), "y\ny\n\n\n\n\ny\n\n\nn\n", "--check", "true", "--tools", "none")
 	if code != 1 || !strings.Contains(out, "Declined") || err != "" {
 		t.Fatalf("got %d\n%s\n%s", code, out, err)
@@ -472,7 +478,7 @@ func TestInitQuestionsBeforePlan(t *testing.T) {
 	// Changed: a typed check now sets the worker tools itself, so no "Worker
 	// tools" question follows it and the check is the last question asked.
 	importRepo(t)
-	fakeInitPATH(t, initHarnesses...)
+	fakeInitPATH(t, initHarnessesNoDsh...)
 	code, out, err := initFixedParallel(t, testsupport.ShortStateDir(t), "n\ny\n\ny\n\n\ntrue\nn\n", "--no-wiring")
 	if code != 1 || err != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("got %d\n%s\n%s", code, out, err)
@@ -1357,7 +1363,7 @@ func TestInitSavedDefaults(t *testing.T) {
 
 func TestInitSavedDefaultsOmitKimi(t *testing.T) {
 	importRepo(t)
-	fakeInitPATH(t, initHarnesses...)
+	fakeInitPATH(t, initHarnessesNoDsh...)
 	state := testsupport.ShortStateDir(t)
 	specs := []string{
 		"harness=claude,model=sonnet,tools=none",
@@ -1586,9 +1592,14 @@ func assertInitAgentTable(t *testing.T, out string, longModels bool) {
 		"kimi kimi-code/kimi-for-coding-highspeed Moonshot " + kimiFastTier + " " + kimiRole,
 		"opencode " + opencodeModel + " Zhipu (GLM) " + opencodeTier + " writes code, reviews",
 	}
+	if longModels {
+		want = append(want,
+			"dsh deepseek-flash DeepSeek light writes code, reviews",
+			"dsh deepseek-v4-pro DeepSeek heavy writes code, reviews")
+	}
 	var rows []string
 	familyColumn, tierColumn, families := -1, -1, 0
-	rowStart := regexp.MustCompile(`^    (claude|codex|kimi|opencode)\s+`)
+	rowStart := regexp.MustCompile(`^    (claude|codex|kimi|opencode|dsh)\s+`)
 	tierCell := regexp.MustCompile(`\b(heavy|standard|light)\b`)
 	for _, line := range strings.Split(table, "\n") {
 		if rowStart.MatchString(line) {
@@ -1597,7 +1608,7 @@ func assertInitAgentTable(t *testing.T, out string, longModels bool) {
 		if len(rows) > 0 {
 			rows[len(rows)-1] = strings.TrimSpace(rows[len(rows)-1] + " " + strings.Join(strings.Fields(line), " "))
 		}
-		for _, family := range []string{"Anthropic", "OpenAI", "Moonshot", "Zhipu (GLM)"} {
+		for _, family := range []string{"Anthropic", "OpenAI", "Moonshot", "Zhipu (GLM)", "DeepSeek"} {
 			if offset := strings.Index(line, family); offset >= 0 {
 				column := term.VisibleWidth(line[:offset])
 				if familyColumn >= 0 && column != familyColumn {
@@ -1774,9 +1785,11 @@ opencode/deepseek-v3
 		writeInitModelFixture(t, lifecycle.DefaultConfigPath(), "tier.kimi/kimi-code/kimi-for-coding-highspeed = standard\n")
 	}
 	state := filepath.Join(os.Getenv("HOME"), ".local", "state", "brigada")
-	input := "\n\n\n\ny\n\n1\n\n\nn\n"
+	// The golden leaves dsh out (Enter at "Use dsh? [y/N]"); the long-model
+	// variant uses it.
+	input := "\n\n\n\ny\n\n1\n\n\n\nn\n"
 	if longModels {
-		input = "codex/gpt-6.1-sol\n2\n\n\ny\nY\n1\n\n\nn\n"
+		input = "codex/gpt-6.1-sol\n2\n\n\ny\nY\n1\ny\n\n\nn\n"
 	}
 	code, out, errOut := initDo(t, state, input)
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
@@ -1886,7 +1899,7 @@ func TestInitUnconfirmedUseQuestions(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
-			fakeInitPATH(t, initHarnesses...)
+			fakeInitPATH(t, initHarnessesNoDsh...)
 			// A CLI with models but no documented authentication status remains
 			// unconfirmed, so init must ask rather than assume it is signed in.
 			script := "#!/bin/sh\ncase \"$*\" in\n --help) echo '  opencode models [provider]' ;;\n models) printf 'zai-coding-plan/glm-5.3\\nzai-coding-plan/glm-5.2\\n' ;;\n *) exit 89 ;;\nesac\n"

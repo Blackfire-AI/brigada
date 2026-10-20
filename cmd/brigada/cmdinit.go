@@ -36,7 +36,7 @@ var initCPUCount = goruntime.NumCPU
 // Per-harness account defaults, displayed in initHarnesses order.
 // Every cap is clamped to tasks at once.
 var initAccountDefaults = map[string]int{
-	"claude": 3, "codex": 2, "kimi": 1, "opencode": 2,
+	"claude": 3, "codex": 2, "kimi": 1, "opencode": 2, "dsh": 1,
 }
 
 func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code int) {
@@ -265,6 +265,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			source = initKimiModels(ctx)
 		case "opencode":
 			source = initOpenCodeModels(ctx)
+		case "dsh":
+			source = initDshModels(ctx)
 		}
 		// Only OpenCode's picks are individual choices: a saved model its
 		// list no longer shows stays pickable. The other CLIs offer every model.
@@ -285,7 +287,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	} else {
 		fmt.Fprintln(stdout, "Agent CLIs found:")
 		for _, h := range initHarnesses {
-			printInitWrapped(stdout, fmt.Sprintf("  %-9s ", h), "  ", probes[h].status)
+			printInitWrapped(stdout, fmt.Sprintf("  %-9s ", initHarnessLabel(h)), "  ", probes[h].status)
 		}
 		fmt.Fprintln(stdout)
 	}
@@ -309,7 +311,10 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				fmt.Fprint(stdout, "\n  opencode: init can't check sign-in. If you're not signed in, run\n  `opencode auth login` first, or leave opencode out.\n")
 			default:
 				fmt.Fprintln(stdout)
-				printInitWrapped(stdout, "  ", "  ", h+": "+status)
+				printInitWrapped(stdout, "  ", "  ", initHarnessLabel(h)+": "+status)
+			}
+			if h == "dsh" {
+				printInitDshKeyNote(stdout)
 			}
 		}
 		if confirmed {
@@ -319,7 +324,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if spec.accountLabel() != h {
 			name += " account " + spec.accountLabel()
 		}
-		if h == "kimi" || h == "opencode" {
+		if h == "kimi" || h == "opencode" || h == "dsh" {
 			// A rerun that used this CLI keeps using it on Enter.
 			if len(defaultYes) > 0 && defaultYes[0] {
 				v, err := ask("    Use "+name+"? [Y/n]: ", "--signed-in "+h)
@@ -496,6 +501,10 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				} else if strings.EqualFold(answer, "y") || strings.EqualFold(answer, "yes") {
 					classes = splitList(defaultClasses)
 				}
+				for _, entry := range entries {
+					models = append(models, entry.value)
+				}
+			case "dsh":
 				for _, entry := range entries {
 					models = append(models, entry.value)
 				}
@@ -810,6 +819,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			permissions = "edit files and run any command without asking"
 		case "opencode":
 			permissions = "edit files; no commands"
+		case "dsh":
+			permissions = "edit files and run commands inside dsh's workspace sandbox; reviews run read-only"
 		}
 		prefix := fmt.Sprintf("    %-9s ", a.Harness)
 		printInitWrapped(stdout, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), permissions)
@@ -1296,6 +1307,9 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 		printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), roles[i])
 	}
 	printInitWrapped(w, "  "+style.Bold("Reviews:")+" ", "    ", fmt.Sprintf("%d model families, so every task can get a reviewer of another one.", families))
+	if slices.ContainsFunc(agents, func(s agentSpec) bool { return s.harness == "dsh" }) {
+		printInitWrapped(w, "  ", "  ", style.Dim("dsh is experimental and may change in any release."))
+	}
 }
 
 // initRoleWidth is the narrowest column in which text wraps to at most lines

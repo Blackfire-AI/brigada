@@ -37,6 +37,7 @@ These may change in any release, including a patch release:
 - the engine's internal HTTP API;
 - the format of log output and status output;
 - the text of the prompts and the foreman's instructions;
+- the dsh adapter, which is experimental and may change in any release;
 - how the adapters handle the versions of the vendors' CLIs. The vendors own those, and brigada follows them.
 
 ## Breaking changes

@@ -29,7 +29,7 @@ func TestInitTasksAtOnce(t *testing.T) {
 	t.Cleanup(func() { initCPUCount = oldCPU })
 	t.Run("default and installed CLI order", func(t *testing.T) {
 		importRepo(t)
-		fakeInitPATH(t, initHarnesses...)
+		fakeInitPATH(t, initHarnessesNoDsh...)
 		state := filepath.Join(testsupport.ShortStateDir(t), "absent")
 		code, out, errs := initDo(t, state, "\nn\n", initTasksArgs()...)
 		flat := strings.Join(strings.Fields(out), " ")
