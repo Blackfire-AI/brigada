@@ -46,8 +46,11 @@ type Plan struct {
 // a named task can be depended on (§6.1); ID is the store's row id, kept
 // so an unnamed task is still identifiable.
 type Task struct {
-	Tier     string // the foreman's tier; empty means standard
-	Effort   string
+	Tier   string // the foreman's tier; empty means standard
+	Effort string
+	// Caps are the task's own round-cap overrides (§14), keyed
+	// fix_rounds, review_rounds and restart; nil = the engine defaults.
+	Caps     map[string]int
 	ID       int64
 	Name     string // '' = unnamed
 	Title    string
@@ -78,7 +81,7 @@ const header = `# Brigada plan file (§6.4): a mirror of the engine's store, whi
 # and the open questions — never transcripts.
 `
 
-const taskOptionsComment = "# Optional tier (light, standard, heavy) and effort (low, medium, high, max)\n# describe the model needed and how hard it should think (§6.1).\n"
+const taskOptionsComment = "# Optional tier (light, standard, heavy) and effort (low, medium, high, max)\n# describe the model needed and how hard it should think (§6.1); caps\n# override the task's fix_rounds, review_rounds and restart budgets (§14).\n"
 
 // Keep the default file byte-for-byte stable; describe optional keys when used.
 const tasksComment = tasksGraphComment + taskOptionsComment
@@ -109,7 +112,7 @@ func Render(p Plan) ([]byte, error) {
 	fmt.Fprintf(&b, "updated: %s\n", p.Updated.UTC().Format(time.RFC3339Nano))
 	comment := tasksGraphComment
 	for _, t := range p.Tasks {
-		if (t.Tier != "" && t.Tier != adapter.TierStandard) || t.Effort != "" {
+		if (t.Tier != "" && t.Tier != adapter.TierStandard) || t.Effort != "" || len(t.Caps) > 0 {
 			comment = tasksComment
 			break
 		}
@@ -145,6 +148,13 @@ func Render(p Plan) ([]byte, error) {
 		}
 		if t.Effort != "" {
 			fmt.Fprintf(&b, "    effort: %s\n", t.Effort)
+		}
+		if len(t.Caps) > 0 {
+			line, err := formatCaps(t.Caps)
+			if err != nil {
+				return nil, fmt.Errorf("task %d: %w", t.ID, err)
+			}
+			fmt.Fprintf(&b, "    caps: %s\n", line)
 		}
 		fmt.Fprintf(&b, "    state: %s\n", t.State)
 		fmt.Fprintf(&b, "    branch: %s\n", strconv.Quote(t.Branch))
@@ -363,6 +373,15 @@ func (r *reader) task() (Task, error) {
 			return Task{}, r.errf("%v", err)
 		}
 	}
+	if r.peekIs(in + "caps:") {
+		raw, err := r.field(in, "caps")
+		if err != nil {
+			return Task{}, err
+		}
+		if t.Caps, err = parseCaps(raw); err != nil {
+			return Task{}, r.errf("caps: %v", err)
+		}
+	}
 	if t.State, err = r.wordField(in, "state"); err != nil {
 		return Task{}, err
 	}
@@ -402,6 +421,52 @@ func (r *reader) task() (Task, error) {
 // parseExtraRepos reads `[["name", "repo", "ref"], ...]`, the inverse of
 // Render's extra_repos line. An empty list is refused: the line is written
 // only when there is an entry.
+// capKeys are the keys of a task's caps, in the order the file writes them.
+var capKeys = []string{"fix_rounds", "review_rounds", "restart"}
+
+const maxCap = 10
+
+// formatCaps writes caps as {fix_rounds: 3, restart: 4}, keys in capKeys
+// order; an unknown key or an out-of-range value is an error rather than a
+// file Parse would refuse.
+func formatCaps(caps map[string]int) (string, error) {
+	var parts []string
+	for _, k := range capKeys {
+		v, ok := caps[k]
+		if !ok {
+			continue
+		}
+		if v < 0 || v > maxCap {
+			return "", fmt.Errorf("caps: %s is %d; want 0 to %d", k, v, maxCap)
+		}
+		parts = append(parts, fmt.Sprintf("%s: %d", k, v))
+	}
+	if len(parts) != len(caps) {
+		return "", fmt.Errorf("caps: unknown key; want %s", strings.Join(capKeys, ", "))
+	}
+	return "{" + strings.Join(parts, ", ") + "}", nil
+}
+
+// parseCaps reads what formatCaps wrote.
+func parseCaps(s string) (map[string]int, error) {
+	if !strings.HasPrefix(s, "{") || !strings.HasSuffix(s, "}") || len(s) < 3 {
+		return nil, fmt.Errorf("want {key: n, ...}, got %q", s)
+	}
+	caps := map[string]int{}
+	for _, part := range strings.Split(s[1:len(s)-1], ", ") {
+		k, v, found := strings.Cut(part, ": ")
+		n, err := strconv.Atoi(v)
+		if !found || err != nil || !slices.Contains(capKeys, k) || n < 0 || n > maxCap {
+			return nil, fmt.Errorf("bad entry %q", part)
+		}
+		if _, dup := caps[k]; dup {
+			return nil, fmt.Errorf("%s given twice", k)
+		}
+		caps[k] = n
+	}
+	return caps, nil
+}
+
 func parseExtraRepos(s string) ([]ExtraRepo, error) {
 	if !strings.HasPrefix(s, "[") || !strings.HasSuffix(s, "]") {
 		return nil, fmt.Errorf("%q is not a [list]", s)

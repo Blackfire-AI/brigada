@@ -21,15 +21,16 @@ type planCreateArgs struct {
 }
 
 type planTaskArg struct {
-	Tier   string   `json:"tier,omitempty"`
-	Effort string   `json:"effort,omitempty"`
-	Title  string   `json:"title"`
-	Name   string   `json:"name"`
-	Deps   []string `json:"deps"`
-	Base   string   `json:"base,omitempty"`
-	Spec   string   `json:"spec"`
-	Check  string   `json:"check"`
-	Class  string   `json:"class"`
+	Tier   string         `json:"tier,omitempty"`
+	Effort string         `json:"effort,omitempty"`
+	Caps   map[string]int `json:"caps,omitempty"`
+	Title  string         `json:"title"`
+	Name   string         `json:"name"`
+	Deps   []string       `json:"deps"`
+	Base   string         `json:"base,omitempty"`
+	Spec   string         `json:"spec"`
+	Check  string         `json:"check"`
+	Class  string         `json:"class"`
 	// ExtraRepos (§5.8): absent inherits the project default, a list (even
 	// []) replaces it. No omitempty, so [] and absent hash differently.
 	ExtraRepos []extraRepoArg `json:"extra_repos"`
@@ -85,7 +86,7 @@ func callPlanCreate(ctx context.Context, c *api.Client, args json.RawMessage) (s
 	a = a.canonical()
 	p := api.PlanCreate{Title: a.Title, Tasks: make([]api.PlanTask, len(a.Tasks))}
 	for i, t := range a.Tasks {
-		p.Tasks[i] = api.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ExtraRepos: extraRepos(t.ExtraRepos)}
+		p.Tasks[i] = api.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos)}
 	}
 	res, err := c.CreatePlan(ctx, p, idemKey("plan_create", a))
 	if err != nil {
@@ -169,23 +170,25 @@ type planAmendArgs struct {
 }
 
 type planAddArg struct {
-	Tier   string    `json:"tier,omitempty"`
-	Effort string    `json:"effort,omitempty"`
-	Title  string    `json:"title"`
-	Name   string    `json:"name"`
-	Deps   []taskRef `json:"deps"`
-	Base   taskRef   `json:"base,omitempty"`
-	Spec   string    `json:"spec"`
-	Check  string    `json:"check"`
-	Class  string    `json:"class"`
+	Tier   string         `json:"tier,omitempty"`
+	Effort string         `json:"effort,omitempty"`
+	Caps   map[string]int `json:"caps,omitempty"`
+	Title  string         `json:"title"`
+	Name   string         `json:"name"`
+	Deps   []taskRef      `json:"deps"`
+	Base   taskRef        `json:"base,omitempty"`
+	Spec   string         `json:"spec"`
+	Check  string         `json:"check"`
+	Class  string         `json:"class"`
 	// ExtraRepos as planTaskArg's.
 	ExtraRepos []extraRepoArg `json:"extra_repos"`
 }
 
 type planRetierArg struct {
-	Task   taskRef `json:"task"`
-	Tier   string  `json:"tier,omitempty"`
-	Effort string  `json:"effort,omitempty"`
+	Task   taskRef        `json:"task"`
+	Tier   string         `json:"tier,omitempty"`
+	Effort string         `json:"effort,omitempty"`
+	Caps   map[string]int `json:"caps,omitempty"`
 }
 
 type planRetargetArg struct {
@@ -218,13 +221,13 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 	}
 	am := api.PlanAmend{Cancel: refStrings(a.Cancel)}
 	for _, t := range a.Add {
-		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ExtraRepos: extraRepos(t.ExtraRepos)})
+		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos)})
 	}
 	for _, rt := range a.Retarget {
 		am.Retarget = append(am.Retarget, api.PlanRetarget{Task: string(rt.Task), Deps: refStrings(rt.Deps), Base: string(rt.Base)})
 	}
 	for _, rt := range a.Retier {
-		am.Retier = append(am.Retier, api.PlanRetier{Task: string(rt.Task), Tier: rt.Tier, Effort: rt.Effort})
+		am.Retier = append(am.Retier, api.PlanRetier{Task: string(rt.Task), Tier: rt.Tier, Effort: rt.Effort, Caps: rt.Caps})
 	}
 	res, err := c.AmendPlan(ctx, a.Plan, am, idemKey("plan_amend", a))
 	if err != nil {

@@ -26,7 +26,10 @@ type PlanTask struct {
 	Class  string // '' = implement
 	Tier   string // '' = standard
 	Effort string // '' = the agent's own level
-	Deps   []string
+	// Caps overrides the engine's round caps for this task, key by key
+	// (fix_rounds, review_rounds, restart; 0 to 10); nil keeps them all.
+	Caps map[string]int
+	Deps []string
 	// Base names the one of Deps whose result branch this task's work
 	// starts from; '' = the only dep when there is exactly one, else the
 	// project's default branch.
@@ -206,6 +209,9 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		if err := validateTaskTierEffort(t); err != nil {
 			return CreatePlanResult{}, fmt.Errorf("task %d %q: %w", i+1, t.Name, err)
 		}
+		if err := validateTaskCaps(t.Caps); err != nil {
+			return CreatePlanResult{}, fmt.Errorf("task %d %q: %w", i+1, t.Name, err)
+		}
 		if t.Spec == "" {
 			return CreatePlanResult{}, fmt.Errorf("task %d: spec is required: the worker's task, verbatim (§1.4)", i+1)
 		}
@@ -301,8 +307,8 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 			state = taskPending
 		}
 		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, created_at, updated_at)
-			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?)`,
-			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, setupRec, extraRecs[i], taskTier(t.Tier), taskTier(t.Tier), t.Effort, t.Effort, nowStr, nowStr)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?)`,
+			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, taskCapsJSON(t.Caps), setupRec, extraRecs[i], taskTier(t.Tier), taskTier(t.Tier), t.Effort, t.Effort, nowStr, nowStr)
 		if err != nil {
 			return CreatePlanResult{}, fmt.Errorf("create the task: %w", err)
 		}

@@ -547,16 +547,17 @@ You ask; the foreman turns the ask into a **plan**: a set of tasks, each with a 
 - The foreman can amend a live plan: add tasks, cancel tasks, re-point dependencies, or change a waiting or parked task's tier and effort.
 - A plan is `done` when no live work is left. That is not the same as everything succeeding: the plan's done report names the tasks that failed, that were cancelled without your approval, and that never ran.
 
-Each task also has two fields, set by the foreman in `plan_create` or `plan_amend`:
+Each task also has three fields, set by the foreman in `plan_create` or `plan_amend`:
 
 | Field | Values | Default | Meaning |
 |---|---|---|---|
 | `tier` | `light`, `standard`, `heavy` | `standard` | How heavy a model the task needs; the dispatcher selects an agent of that tier, with fallback when needed ([section 8](#tiers)). |
 | `effort` | `low`, `medium`, `high`, `max` | the agent's effort, else `medium` | How hard the model should think on this task, mapped to the chosen harness ([section 8](#effort)). |
+| `caps` | an object with any of `fix_rounds`, `review_rounds`, `restart`, each an integer from 0 to 10 | the engine's defaults, per key | This task's own round budgets ([Rounds](#rounds)). An absent key keeps the default; an unknown key or a value out of range refuses the whole call. |
 
-Neither field triggers approval. The plan shown for approval includes tier and effort, and `brigada status` shows them beside tasks: `heavy @high`, for example. An unchanged standard tier is omitted; `standard->heavy` shows an automatic bump from the foreman's tier to the effective tier, and `@low->medium` an automatic effort step (`@default->high` when the task set no effort).
+None of the fields triggers approval. The plan shown for approval includes tier and effort, and `brigada status` shows them beside tasks: `heavy @high`, for example. A task with non-default caps also shows them there, as `(restarts 4)` or `(fix 3, review 1, restarts 4)`. An unchanged standard tier is omitted; `standard->heavy` shows an automatic bump from the foreman's tier to the effective tier, and `@low->medium` an automatic effort step (`@default->high` when the task set no effort).
 
-The foreman can use `plan_amend`'s `retier` list, for example `[{"task":"build","tier":"light","effort":"low"}]`, to change a `pending`, `ready` or `needs_foreman` task. Omitted fields keep their values; changing the tier resets both the foreman's tier and the effective tier, and resets the effective effort to the task's effort; changing the effort sets the effective effort too. A task at `needs_foreman` still needs `task_restart` to run again.
+The foreman can use `plan_amend`'s `retier` list, for example `[{"task":"build","tier":"light","effort":"low"}]`, to change a `pending`, `ready` or `needs_foreman` task. Omitted fields keep their values; changing the tier resets both the foreman's tier and the effective tier, and resets the effective effort to the task's effort; changing the effort sets the effective effort too. A task at `needs_foreman` still needs `task_restart` to run again. A `retier` entry may also carry `caps`, for example `[{"task":"build","caps":{"restart":4}}]`: it merges key by key into the task's caps, which is how the foreman gives a parked task more restarts before `task_restart`.
 
 ### The approval limit
 
@@ -635,7 +636,7 @@ An approve counts only with substantive findings text (80 characters or more). A
 
 ### Rounds
 
-A review that asks for changes, or a failed check, starts a fix round on the author's session with the findings as feedback. Fix rounds for failed checks and for review changes draw on one shared budget: by default two fix rounds in all per attempt, plus two restarts. When check or review rounds are spent, brigada first retries on the same tier with the effort one step higher (low → medium → high), then raises the task’s effective tier one step (light → standard → heavy) at the task's own effort; each step starts a fresh attempt on the next `-r<n>` branch, carrying the feedback and spending a restart ([section 8](#tiers)). A worker reporting `failed` gets the same escalation; a missing result block gets the effort steps but never a higher tier. At heavy and high effort, or with no restarts left, the task parks at `needs_foreman` and the entry says why; the foreman decides whether to re-plan, switch agent, split the task or ask you. A stalled worker always goes straight to the foreman. The foreman can change the tier or effort through `plan_amend` as described above.
+A review that asks for changes, or a failed check, starts a fix round on the author's session with the findings as feedback. Fix rounds for failed checks and for review changes draw on one shared budget: by default two fix rounds in all per attempt, plus two restarts. The foreman can set a task's own budgets with its `caps` (`fix_rounds` for failed checks, `review_rounds` for review changes, `restart`), each 0 to 10. When check or review rounds are spent, brigada first retries on the same tier with the effort one step higher (low → medium → high), then raises the task’s effective tier one step (light → standard → heavy) at the task's own effort; each step starts a fresh attempt on the next `-r<n>` branch, carrying the feedback and spending a restart ([section 8](#tiers)). A worker reporting `failed` gets the same escalation; a missing result block gets the effort steps but never a higher tier. At heavy and high effort, or with no restarts left, the task parks at `needs_foreman` and the entry says why; the foreman decides whether to re-plan, switch agent, split the task or ask you. A stalled worker always goes straight to the foreman. The foreman can change the tier or effort through `plan_amend` as described above.
 
 ### A branch with no plan
 
