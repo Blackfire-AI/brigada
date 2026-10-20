@@ -5,9 +5,9 @@
 plan: 4
 title: "#29 Optimal model and effort: usage, cost-aware Thompson ranking, effort ladder, foreman rules"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-19T21:14:17.910958Z
-updated: 2026-10-20T06:17:15.796033Z
+updated: 2026-10-20T06:29:49.547388Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps, or from the
 # default branch when base is empty; merge a task after its base. States
@@ -65,6 +65,6 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-29-r1"
     rounds: 0
