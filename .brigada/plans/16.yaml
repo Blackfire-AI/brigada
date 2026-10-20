@@ -47,7 +47,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-54-r1"
     rounds: 0
   - id: 55
@@ -57,7 +57,7 @@ tasks:
     deps: ["drop-mode-a-core", "drop-mode-a-init"]
     base: "drop-mode-a-init"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 58
