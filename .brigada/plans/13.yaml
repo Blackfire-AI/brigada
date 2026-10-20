@@ -23,6 +23,6 @@ tasks:
     deps: []
     base: ""
     effort: high
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-49"
     rounds: 0
