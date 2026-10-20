@@ -7,7 +7,7 @@ title: "One foreman, one memory: attach is the door; retire mode A (interactive 
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-10-20T15:04:59.234039Z
-updated: 2026-10-20T17:53:42.381791Z
+updated: 2026-10-20T18:05:06.477072Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -58,5 +58,16 @@ tasks:
     base: "drop-mode-a-init"
     effort: medium
     state: pending
+    branch: ""
+    rounds: 0
+  - id: 58
+    name: "hold-noop"
+    title: "Keep `brigada hold yield` and `hold confirm` as do-nothing commands for old hooks"
+    class: "implement"
+    deps: ["drop-mode-a-core"]
+    base: "drop-mode-a-core"
+    tier: light
+    effort: low
+    state: running
     branch: ""
     rounds: 0
