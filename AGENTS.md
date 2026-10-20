@@ -20,6 +20,8 @@ CI runs these; run them before you push:
 
 `guard` is the repository's own scanner for private addresses and similar leaks.
 
+Before a release, a person runs `bash scripts/release-check-mode-a.sh` (needs signed-in `claude` and `codex`; CI does not run it).
+
 ## Layout
 
 `cmd/brigada` is the single binary: client, engine, runner, foreman and MCP bridge. Everything else is under `internal/`:
