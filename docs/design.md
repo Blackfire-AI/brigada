@@ -408,8 +408,15 @@ Today an engineer fetches each approved branch, squashes it onto the default bra
 
 **Per-job usage (decided 2026-10-20).** Each job records the usage its own
 CLI invocation reports: input, output, cached input and reasoning tokens,
-and US dollars when supplied. Claude result usage is counted once, with
-cache reads and creation included in input; Codex turn usage and opencode
+and US dollars when supplied. Input means all input, cache reads included,
+and cached input is the cached part of it, so the columns mean the same for
+every adapter (decided 2026-10-20): Claude's result usage is counted once,
+with cache reads and creation added to its input; Codex input already
+includes the cached part; opencode reports input without cache reads, so the
+adapter adds them. Each job also records `model_calls`, the model requests
+the CLI reported: Claude's `num_turns`, one per Codex turn, one per opencode
+step and one per kimi assistant message with usage. Calls is the unit for
+plans that limit requests per time window. Codex turn usage and opencode
 step usage are summed. Missing or malformed counters stay unknown (NULL),
 distinct from reported zero. A fix round and a resumed session are separate
 jobs: totals are never carried or subtracted across jobs. Wall time is
@@ -528,7 +535,7 @@ Selecting a flag mints nothing, and a selector that the credential in hand does 
 
 **Usage completion (decided 2026-10-20).** Completion optionally carries
 `usage` with `input_tokens`, `output_tokens`, `cached_input_tokens`,
-`reasoning_tokens`, and `cost_usd`, plus `wall_seconds` for this job's elapsed
+`reasoning_tokens`, `model_calls` and `cost_usd`, plus `wall_seconds` for this job's elapsed
 wall time before delivery. Each usage field is optional. Older runners may
 omit usage and wall time; these remain NULL. Retries of a completion do not
 add usage again. Counters describe only the job's own CLI invocation, even

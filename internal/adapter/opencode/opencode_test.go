@@ -156,10 +156,10 @@ func TestNormalFixture(t *testing.T) {
 	want := []adapter.Event{
 		{Kind: adapter.EvSession, SessionID: "ses_fixture"},
 		{Kind: adapter.EvToolEnd, Text: "read"},
-		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(10), OutputTokens: usageInt(5), CachedInputTokens: usageInt(0), ReasoningTokens: usageInt(0)}},
+		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(10), OutputTokens: usageInt(5), CachedInputTokens: usageInt(0), ReasoningTokens: usageInt(0), ModelCalls: usageInt(1)}},
 		{Kind: adapter.EvSession, SessionID: "ses_fixture"},
 		{Kind: adapter.EvMessage, Text: "The final answer text."},
-		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(10), OutputTokens: usageInt(5), CachedInputTokens: usageInt(0), ReasoningTokens: usageInt(0)}},
+		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(10), OutputTokens: usageInt(5), CachedInputTokens: usageInt(0), ReasoningTokens: usageInt(0), ModelCalls: usageInt(1)}},
 	}
 	if !reflect.DeepEqual(events, want) {
 		t.Errorf("events = %+v, want %+v", events, want)

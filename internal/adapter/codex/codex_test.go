@@ -188,7 +188,7 @@ func TestParseFixtureNormal(t *testing.T) {
 	want := []adapter.Event{
 		{Kind: adapter.EvSession, SessionID: "01a140b7-6c27-7441-b9a1-1a082df4d4c9"},
 		{Kind: adapter.EvMessage, Text: "ok"},
-		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(11578), OutputTokens: usageInt(5), CachedInputTokens: usageInt(9984), ReasoningTokens: usageInt(0)}},
+		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(11578), OutputTokens: usageInt(5), CachedInputTokens: usageInt(9984), ReasoningTokens: usageInt(0), ModelCalls: usageInt(1)}},
 	}
 	if !reflect.DeepEqual(events, want) {
 		t.Errorf("events = %+v, want %+v (usage recorded, turn start ignored)", events, want)
@@ -206,7 +206,7 @@ func TestParseFixtureTools(t *testing.T) {
 		{Kind: adapter.EvToolStart, Text: cmdText},
 		{Kind: adapter.EvToolEnd, Text: cmdText},
 		{Kind: adapter.EvMessage, Text: "the note starts with a fixture heading"},
-		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(11578), OutputTokens: usageInt(5), CachedInputTokens: usageInt(9984), ReasoningTokens: usageInt(0)}},
+		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(11578), OutputTokens: usageInt(5), CachedInputTokens: usageInt(9984), ReasoningTokens: usageInt(0), ModelCalls: usageInt(1)}},
 	}
 	if !reflect.DeepEqual(events, want) {
 		t.Errorf("events = %+v, want %+v", events, want)
@@ -241,7 +241,7 @@ func TestParseFixtureMCPNullError(t *testing.T) {
 		{Kind: adapter.EvToolStart, Text: "brigada/task_restart"},
 		{Kind: adapter.EvToolEnd, Text: "brigada/task_restart: failed"},
 		{Kind: adapter.EvMessage, Text: "the restart was refused; I planned around it"},
-		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(1), OutputTokens: usageInt(1)}},
+		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(1), OutputTokens: usageInt(1), ModelCalls: usageInt(1)}},
 	}
 	if !reflect.DeepEqual(events, want) {
 		t.Errorf("events = %+v, want %+v", events, want)

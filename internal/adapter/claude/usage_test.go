@@ -16,7 +16,7 @@ func TestUsageFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	wants := []*adapter.Usage{&adapter.Usage{InputTokens: usageInt(15), OutputTokens: usageInt(5), CachedInputTokens: usageInt(2), CostUSD: usageFloat(0.25)},
+	wants := []*adapter.Usage{&adapter.Usage{InputTokens: usageInt(15), OutputTokens: usageInt(5), CachedInputTokens: usageInt(2), CostUSD: usageFloat(0.25), ModelCalls: usageInt(4)},
 		&adapter.Usage{InputTokens: usageInt(0), CostUSD: usageFloat(0)},
 		nil,
 		&adapter.Usage{OutputTokens: usageInt(7)}}

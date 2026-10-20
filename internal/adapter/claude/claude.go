@@ -286,6 +286,7 @@ func workerEnv(env []string) []string {
 // stands.
 type lineJSON struct {
 	Usage     json.RawMessage `json:"usage"`
+	NumTurns  json.RawMessage `json:"num_turns"`
 	Cost      json.RawMessage `json:"total_cost_usd"`
 	Type      string          `json:"type"`
 	Subtype   string          `json:"subtype"`
@@ -597,6 +598,15 @@ func resultUsage(lj lineJSON) *adapter.Usage {
 	if u != nil && u.CachedInputTokens != nil {
 		n := *u.CachedInputTokens
 		u.Add(&adapter.Usage{InputTokens: &n})
+	}
+	// num_turns is the CLI's own count of model requests; the assistant
+	// lines split one request into a line per content block.
+	var turns int64
+	if len(lj.NumTurns) > 0 && json.Unmarshal(lj.NumTurns, &turns) == nil && turns >= 0 {
+		if u == nil {
+			u = &adapter.Usage{}
+		}
+		u.Add(adapter.Calls(turns))
 	}
 	return u
 }

@@ -193,6 +193,16 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 		} else {
 			u.Add(cache)
 		}
+		// opencode's input excludes cache reads; fold them in so input is
+		// all input, as for the other adapters.
+		if cache != nil && cache.CachedInputTokens != nil {
+			n := *cache.CachedInputTokens
+			u.Add(&adapter.Usage{InputTokens: &n})
+		}
+		// Each step_finish that reports tokens closes one model request.
+		if u != nil {
+			u.Add(adapter.Calls(1))
+		}
 		return adapter.Event{Kind: adapter.EvUsage, Usage: u}, u != nil
 	case "step_start":
 		if lj.Part.Type == "step-start" && lj.SessionID != "" {
