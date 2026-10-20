@@ -43,8 +43,8 @@ tasks:
     deps: []
     base: ""
     effort: high
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-42"
     rounds: 0
   - id: 43
     name: "continue-session"
