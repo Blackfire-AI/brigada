@@ -126,6 +126,9 @@ func TestRunnerHarnessRegisters(t *testing.T) {
 		{"opencode mimo", "opencode", "opencode/mimo-v2-flash-free", "xiaomi", "light", true},
 		{"opencode longcat", "opencode", "opencode/longcat-flash-chat", "meituan", "light", false},
 		{"opencode nemotron", "opencode", "opencode/nemotron-3-super-free", "nvidia", "light", true},
+		{"dsh flash", "dsh", "deepseek-flash", "deepseek", "light", false},
+		{"dsh flash agent flag", "dsh", "deepseek-flash", "deepseek", "light", true},
+		{"dsh pro agent flag", "dsh", "deepseek-v4-pro", "deepseek", "heavy", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			testRunnerHarnessRegisters(t, tc.harness, tc.model, tc.family, tc.tier, tc.agentForm)
@@ -145,6 +148,8 @@ func TestResolveRunnerAgentModels(t *testing.T) {
 		{"opencode", "zai-coding-plan/glm-5.3", "zai-coding-plan/glm-5.3", "zhipu"},
 		{"opencode", "glm-5.3", "glm-5.3", "zhipu"},
 		{"opencode", "provider/model", "provider/model", "opencode"},
+		{"dsh", "", "deepseek-flash", "deepseek"},
+		{"dsh", "deepseek-v4-pro", "deepseek-v4-pro", "deepseek"},
 	} {
 		t.Run(tc.harness+"/"+tc.model, func(t *testing.T) {
 			spec := agentSpec{harness: tc.harness, model: tc.model, classes: splitList(defaultClasses)}
@@ -306,7 +311,7 @@ func TestRunnerHarnessFlags(t *testing.T) {
 			name:     "an unknown harness names all five",
 			args:     []string{"runner", "--harness", "gemini", "--state-dir", state},
 			wantCode: 2,
-			wantErr:  `unknown harness "gemini"; want claude, kimi, codex, opencode or fake`,
+			wantErr:  `unknown harness "gemini"; want claude, kimi, codex, opencode, dsh or fake`,
 		},
 		{
 			name:     "agent file with the claude harness is a usage error",
@@ -582,7 +587,7 @@ func TestRunnerAgentFlag(t *testing.T) {
 		{
 			name:    "an unknown harness names all five",
 			args:    []string{"runner", "--agent", "harness=gemini", "--state-dir", state},
-			wantErr: `unknown harness "gemini"; want claude, kimi, codex, opencode or fake`,
+			wantErr: `unknown harness "gemini"; want claude, kimi, codex, opencode, dsh or fake`,
 		},
 		{
 			name:    "an agent file under the claude harness is refused",

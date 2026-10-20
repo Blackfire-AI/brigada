@@ -1,0 +1,1 @@
+{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"error","error":{"message":"Authentication Fails, Your api key: ****-key is invalid (request_id: 00000000-0000-0000-0000-000000000000)","code":"AUTH","status":401}}}

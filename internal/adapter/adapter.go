@@ -159,6 +159,9 @@ var ResumeCapableHarnesses = map[string]bool{
 	// opencode is also worker-only although `opencode run -s <id>`
 	// resumes headless: its run path has no MCP-config flag to carry
 	// the foreman bridge. Like kimi, its adapter refuses MCP-config jobs.
+	// dsh is worker-only too: `dsh --session-id <id>` resumes headless,
+	// but no MCP-config flag is known to carry the bridge, so its adapter
+	// refuses MCP-config jobs.
 }
 
 // ResumeCapable reports whether harness's CLI can resume a session

@@ -36,6 +36,13 @@ func TestValidateEffort(t *testing.T) {
 		{"opencode", "HIGH", false},
 		{"opencode", "bad_level", false},
 		{"opencode", "high\n", false},
+		{"dsh", "", true},
+		{"dsh", "off", true},
+		{"dsh", "low", true},
+		{"dsh", "high", true},
+		{"dsh", "max", true},
+		{"dsh", "medium", false},
+		{"dsh", "xhigh", false},
 		{"kimi", "", true},
 		{"kimi", "high", false},
 		{"fake", "high", false},
@@ -81,8 +88,9 @@ func TestEffortForHarness(t *testing.T) {
 		{"claude", "high", "high"}, {"codex", "max", "max"},
 		{"opencode", "low", "minimal"}, {"opencode", "medium", ""},
 		{"opencode", "high", "high"}, {"opencode", "max", "max"},
+		{"dsh", "low", "low"}, {"dsh", "medium", ""}, {"dsh", "high", "high"}, {"dsh", "max", "max"},
 		{"kimi", "high", ""}, {"unknown", "max", ""},
-		{"claude", "", ""}, {"codex", "", ""}, {"opencode", "", ""}, {"kimi", "", ""},
+		{"claude", "", ""}, {"codex", "", ""}, {"opencode", "", ""}, {"dsh", "", ""}, {"kimi", "", ""},
 	} {
 		if got := EffortForHarness(tc.harness, tc.effort); got != tc.want {
 			t.Errorf("%s/%s = %q, want %q", tc.harness, tc.effort, got, tc.want)

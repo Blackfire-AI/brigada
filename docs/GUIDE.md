@@ -660,8 +660,8 @@ The fields of an `--agent` value:
 
 | Field | Meaning |
 |---|---|
-| `harness` | `claude`, `kimi`, `codex` or `opencode`. |
-| `model` | Defaults to `sonnet` for claude, and to the CLI's own default for the others. For opencode, a model is `provider/model`. |
+| `harness` | `claude`, `kimi`, `codex`, `opencode` or `dsh` (experimental). |
+| `model` | Defaults to `sonnet` for claude, `deepseek-flash` for dsh, and to the CLI's own default for the others. For opencode, a model is `provider/model`. |
 | `classes` | A `+`-separated list; default `implement+review+answer`. `classes=none` advertises no task classes (foreman only). |
 | `account` | The login whose quota the agent spends; defaults to the harness name (see [Accounts](#accounts)). |
 | `agent-file=<path>` | kimi only. Starts the session under your own agent definition instead of the runner's review definition. |
@@ -684,7 +684,17 @@ Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `
 - `--max-parallel N`: how many concurrent jobs this runner runs; unset (`0`) means one at a time. Init now sets it from tasks at once, and `brigada start` passes the saved number;
 - `--no-start`: fail instead of starting the engine.
 
-`kimi` and `opencode` are worker-only; the foreman can be `claude` or `codex`.
+`kimi`, `opencode` and `dsh` are worker-only; the foreman can be `claude` or `codex`.
+
+#### dsh (experimental)
+
+`dsh` is DeepSeek Harness (`@deepseek-ai/dsh`), a developer preview whose maintainers have announced breaking changes; the adapter was checked against 0.2.1-rc.2 only and may break on a newer release. `brigada init` does not offer it yet: add it with `--agent`.
+
+- Install: `npm i -g @deepseek-ai/dsh`, so that `dsh` is on the runner's `PATH`.
+- Key: `export DEEPSEEK_API_KEY=...` in the environment you run `brigada start` from (the runner passes it to dsh), or store it in dsh's own credential store. A missing or invalid key fails the job as an authentication error.
+- Run it: `brigada runner --agent harness=dsh,model=deepseek-flash`. The models are `deepseek-flash` (dsh's default, light tier) and `deepseek-v4-pro` (heavy tier).
+- Each job runs `dsh --profile headless --json` with the prompt on stdin, always with `DSH_TELEMETRY_MODE=DISABLED`, and `DSH_PERMISSION_MODE=read-only` for a review or `workspace-write` for other jobs. brigada never sets `danger-full-access`. `tools=` is refused.
+- The model and effort ride a per-job patch file in a fresh directory under the OS temp directory, outside the worktree. brigada does not remove it when the job ends.
 
 **Kimi reviews only by default in interactive init.** After `Use kimi?`, init asks whether it may write code too. Enter or no keeps `classes=review`; yes enables `implement+review+answer`. With `--agent` there is no such question: set `classes=review` explicitly for a review-only Kimi agent. Omitting `classes` keeps the runner's default of all three classes.
 
@@ -711,20 +721,21 @@ Spent check or review rounds, or a worker result of `failed`, climb an escalatio
 | `claude` | `low`, `medium`, `high`, `xhigh`, `max` | `--effort <level>` (fresh, resume and attach) |
 | `codex` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | `-c model_reasoning_effort="<level>"` |
 | `opencode` | provider-specific variant matching `[a-z0-9-]{1,16}` | `--variant <level>` |
+| `dsh` | `off`, `low`, `high`, `max` (no `medium`) | `reasoningEffort` in the job's patch file |
 | `kimi` | none: its CLI documents no effort option, so `effort=` is refused | — |
 
 The lists are brigada's accepted values, not a promise that every model supports every one: the CLI judges that. For codex the key is model-dependent. For opencode, variant availability depends on the provider and model. A level outside the accepted list or variant syntax is a usage error at startup.
 
 A task's `effort` uses brigada's four levels and is mapped for each job:
 
-| Task effort | Claude | Codex | OpenCode | Kimi |
-|---|---|---|---|---|
-| `low` | `low` | `low` | `minimal` | none |
-| `medium` | `medium` | `medium` | no variant | none |
-| `high` | `high` | `high` | `high` | none |
-| `max` | `max` | `max` | `max` | none |
+| Task effort | Claude | Codex | OpenCode | dsh | Kimi |
+|---|---|---|---|---|---|
+| `low` | `low` | `low` | `minimal` | `low` | none |
+| `medium` | `medium` | `medium` | no variant | no key | none |
+| `high` | `high` | `high` | `high` | `high` | none |
+| `max` | `max` | `max` | `max` | `max` | none |
 
-A nonempty mapped task level overrides the agent's effort. When mapping yields no level (including OpenCode `medium`), the agent's effort still applies; Kimi has no effort control. A task with no effort of its own and an agent with no `effort=` runs at `medium`, resolved in the four levels above before the mapping, so Claude and Codex get `medium`, and OpenCode and Kimi get nothing and use the CLI default. Each job record stores the resolved level. `brigada logs` renders the CLI transcript and `brigada history` renders events and messages; neither adds a field for that stored effort level.
+A nonempty mapped task level overrides the agent's effort. When mapping yields no level (including OpenCode and dsh `medium`), the agent's effort still applies; Kimi has no effort control. A task with no effort of its own and an agent with no `effort=` runs at `medium`, resolved in the four levels above before the mapping, so Claude and Codex get `medium`, and OpenCode, dsh and Kimi get nothing and use the CLI or provider default. Each job record stores the resolved level. `brigada logs` renders the CLI transcript and `brigada history` renders events and messages; neither adds a field for that stored effort level.
 
 Effort is not part of an agent's identity: the dispatcher, `agent reset` and the outcome record still key by `harness/model`. `status` and `stats` print `claude/opus@high` only for an agent that has an effort set. The foreman's effort is chosen separately ([section 11](#11-the-foremans-harness-claude-or-codex)).
 
@@ -742,7 +753,7 @@ brigada runner --agent 'harness=claude,tools=Bash(npm test:*)+Bash(npx jest:*)'
 - The config key `tools.claude/<model>` (same syntax) sets the default for that model's agent. `tools=` on the `--agent` wins over it, and an agent with neither keeps the Go default.
 - A pattern cannot contain a comma: the `--agent` value splits on commas.
 - The scope applies to workers only. The foreman's own tools (read-only file tools and brigada's MCP tools, no shell and no edits) never change, whatever `tools=` says.
-- `codex`, `kimi` and `opencode` refuse `tools=`. Codex workers run in the `workspace-write` sandbox. Kimi reviews use the read-only agent definition above unless you supply `agent-file=`; allowing it to write code also allows commands without asking. Opencode permits edits and denies bash headless by default, and every opencode worker also runs with `OPENCODE_PERMISSION` denying `external_directory`: a tool call that reaches outside its worktree fails with a permission error the model sees and can answer, instead of the ask a headless run auto-rejects. Should such an auto-reject still end a run without a word, the adapter reads the CLI's stderr notice and records it as the failure's reason.
+- `codex`, `kimi`, `opencode` and `dsh` refuse `tools=`. Dsh workers run under `DSH_PERMISSION_MODE=workspace-write` (reviews: `read-only`), an OS-level scope. Codex workers run in the `workspace-write` sandbox. Kimi reviews use the read-only agent definition above unless you supply `agent-file=`; allowing it to write code also allows commands without asking. Opencode permits edits and denies bash headless by default, and every opencode worker also runs with `OPENCODE_PERMISSION` denying `external_directory`: a tool call that reaches outside its worktree fails with a permission error the model sees and can answer, instead of the ask a headless run auto-rejects. Should such an auto-reject still end a run without a word, the adapter reads the CLI's stderr notice and records it as the failure's reason.
 - `brigada runner` prints each claude agent's scope at startup, and the foreman's capacity read shows it as `tools=` on the agent.
 
 ### Accounts

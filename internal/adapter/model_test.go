@@ -57,6 +57,8 @@ func TestAgentFamily(t *testing.T) {
 		{"opencode", "glm-5.3", "zhipu", false},
 		{"opencode", "anthropic/claude-sonnet-4", "anthropic", false},
 		{"opencode", "custom/unknown", "opencode", true},
+		{"dsh", "deepseek-flash", "deepseek", false},
+		{"dsh", "deepseek-v4-pro", "deepseek", false},
 		{"claude", "default", "claude", true},
 	} {
 		t.Run(tc.harness+"/"+tc.model, func(t *testing.T) {
@@ -85,8 +87,8 @@ var modelTierExamples = []struct {
 	tier   string
 	models []string
 }{
-	{TierHeavy, []string{"fable", "claude-fable-5-1[1m]", "fablenext", "provider/CLAUDE-FABLE-5-1[1M]", "gpt-6-astra", "gpt-6-astra-mini", "opus", "claude-opus-4", "anthropic/claude-opus-4[1m]", "gemini-2.5-pro", "o3-pro", "grok-4-max", "gpt-5-ultra", "provider/CLAUDE-OPUS-4[1M]", "opusnext", "mini-opus"}},
-	{TierLight, []string{"gpt-6-luna", "gpt-5.6-luna", "provider/GPT-6-LUNA[1M]", "haiku", "claude-haiku-4", "gpt-5.4-mini", "o4-mini", "gemini-2.5-flash", "glm-5.3-highspeed", "zai-coding-plan/glm-5.3-highspeed", "kimi-code/kimi-for-coding-highspeed", "opencode/space-bunny-free", "qwen-3-lite", "gpt-5-nano", "haikunext", "provider/HAIKU[1m]"}},
+	{TierHeavy, []string{"fable", "claude-fable-5-1[1m]", "fablenext", "provider/CLAUDE-FABLE-5-1[1M]", "gpt-6-astra", "gpt-6-astra-mini", "opus", "claude-opus-4", "anthropic/claude-opus-4[1m]", "gemini-2.5-pro", "deepseek-v4-pro", "o3-pro", "grok-4-max", "gpt-5-ultra", "provider/CLAUDE-OPUS-4[1M]", "opusnext", "mini-opus"}},
+	{TierLight, []string{"gpt-6-luna", "gpt-5.6-luna", "provider/GPT-6-LUNA[1M]", "haiku", "claude-haiku-4", "gpt-5.4-mini", "o4-mini", "gemini-2.5-flash", "deepseek-flash", "glm-5.3-highspeed", "zai-coding-plan/glm-5.3-highspeed", "kimi-code/kimi-for-coding-highspeed", "opencode/space-bunny-free", "qwen-3-lite", "gpt-5-nano", "haikunext", "provider/HAIKU[1m]"}},
 	{TierStandard, []string{"gpt-6-sol", "gpt-5.6-terra", "gpt-6-astral", "gpt-6-lunar", "astra/provider/gpt-6-sol", "luna/provider/gpt-6-sol", "sonnet", "claude-sonnet-4[1m]", "gpt-6.1-sol", "gpt-5", "kimi-code/k3", "kimi-code/k3-256k", "zai-coding-plan/glm-5.3", "deepseek-v3", "default", "maximal-coder", "freedom-7", "pro/provider/gpt-5", "flash/provider/sonnet", "professional", "minify", ""}},
 }
 
@@ -103,7 +105,7 @@ func TestModelTier(t *testing.T) {
 }
 
 func TestAgentTier(t *testing.T) {
-	for _, harness := range []string{"claude", "codex", "kimi", "opencode"} {
+	for _, harness := range []string{"claude", "codex", "kimi", "opencode", "dsh"} {
 		for _, group := range modelTierExamples {
 			for _, model := range group.models {
 				t.Run(harness+"/"+model, func(t *testing.T) {
