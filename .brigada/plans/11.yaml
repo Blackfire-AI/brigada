@@ -43,7 +43,7 @@ tasks:
     deps: []
     base: ""
     effort: high
-    state: reviewing
+    state: done
     branch: "brigada/task-42"
     rounds: 0
   - id: 43
@@ -53,7 +53,7 @@ tasks:
     deps: ["rereview-session"]
     base: "rereview-session"
     effort: high
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 44
