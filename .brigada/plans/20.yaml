@@ -50,7 +50,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: done
     branch: "brigada/task-63"
     rounds: 1
   - id: 64
@@ -61,7 +61,7 @@ tasks:
     base: "engine-land"
     continue: "engine-land"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 65
