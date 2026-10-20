@@ -68,6 +68,6 @@ tasks:
     base: "drop-mode-a-core"
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-58"
     rounds: 0
