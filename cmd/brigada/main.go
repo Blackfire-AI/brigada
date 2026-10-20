@@ -79,6 +79,8 @@ Commands:
 	                readable lines (--check, --tail N, --follow, --task N).
 	stats           Show attempts, successes, rate and confidence per
 	                agent, class and repo.
+	capacity        Show the agents' caps, quota and queues, and each
+	                cap layer's use (--project URL).
 	agent reset <harness>/<model>
 	                Clear a broken or cooling agent.
 	plan approve <id>
@@ -120,32 +122,33 @@ type command struct {
 }
 
 var commands = map[string]command{
-	"init":    {name: "init", run: runInit},
-	"remove":  {name: "remove", run: runRemove},
-	"attach":  {name: "attach", run: runAttach},
-	"ask":     {name: "ask", run: runAsk},
-	"hold":    {name: "hold", run: runHold, subcommands: holdCommands},
-	"review":  {name: "review", run: runReview},
-	"engine":  {name: "engine", run: runEngine},
-	"runner":  {name: "runner", run: runRunner},
-	"start":   {name: "start", run: runStart},
-	"config":  {name: "config", run: runConfig},
-	"stop":    {name: "stop", run: runStop},
-	"mcp":     {name: "mcp", run: runMCP},
-	"status":  {name: "status", run: runStatus},
-	"task":    {name: "task", run: runTask, subcommands: taskCommands},
-	"project": {name: "project", run: runProject, subcommands: projectCommands},
-	"history": {name: "history", run: runHistory},
-	"stats":   {name: "stats", run: runStats},
-	"cancel":  {name: "cancel", run: runCancel},
-	"agent":   {name: "agent", run: runAgent, subcommands: agentCommands},
-	"plan":    {name: "plan", run: runPlan, subcommands: planCommands},
-	"budget":  {name: "budget", run: runBudget},
-	"recover": {name: "recover", run: runRecover},
-	"diff":    {name: "diff", run: runDiff},
-	"land":    {name: "land", run: runLand},
-	"logs":    {name: "logs", run: runLogs},
-	"version": {name: "version", run: runVersion},
+	"init":     {name: "init", run: runInit},
+	"remove":   {name: "remove", run: runRemove},
+	"attach":   {name: "attach", run: runAttach},
+	"ask":      {name: "ask", run: runAsk},
+	"hold":     {name: "hold", run: runHold, subcommands: holdCommands},
+	"review":   {name: "review", run: runReview},
+	"engine":   {name: "engine", run: runEngine},
+	"runner":   {name: "runner", run: runRunner},
+	"start":    {name: "start", run: runStart},
+	"config":   {name: "config", run: runConfig},
+	"stop":     {name: "stop", run: runStop},
+	"mcp":      {name: "mcp", run: runMCP},
+	"status":   {name: "status", run: runStatus},
+	"task":     {name: "task", run: runTask, subcommands: taskCommands},
+	"project":  {name: "project", run: runProject, subcommands: projectCommands},
+	"history":  {name: "history", run: runHistory},
+	"stats":    {name: "stats", run: runStats},
+	"capacity": {name: "capacity", run: runCapacity},
+	"cancel":   {name: "cancel", run: runCancel},
+	"agent":    {name: "agent", run: runAgent, subcommands: agentCommands},
+	"plan":     {name: "plan", run: runPlan, subcommands: planCommands},
+	"budget":   {name: "budget", run: runBudget},
+	"recover":  {name: "recover", run: runRecover},
+	"diff":     {name: "diff", run: runDiff},
+	"land":     {name: "land", run: runLand},
+	"logs":     {name: "logs", run: runLogs},
+	"version":  {name: "version", run: runVersion},
 }
 
 // run is the entry point of the brigada command. It writes to stdout and
