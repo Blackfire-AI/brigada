@@ -5,9 +5,9 @@
 plan: 15
 title: "AGENTS.md: list the files brigada init manages today"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-20T14:33:11.523997Z
-updated: 2026-10-20T14:33:11.523997Z
+updated: 2026-10-20T15:05:12.154427Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -27,6 +27,6 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: needs_foreman
+    state: cancelled
     branch: "brigada/task-51-r1"
     rounds: 0
