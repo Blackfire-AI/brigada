@@ -26,7 +26,7 @@ tasks:
     deps: []
     base: ""
     effort: high
-    state: reviewing
+    state: needs_foreman
     branch: "brigada/task-52"
     rounds: 0
   - id: 53
