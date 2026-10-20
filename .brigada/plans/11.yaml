@@ -53,7 +53,7 @@ tasks:
     deps: ["rereview-session"]
     base: "rereview-session"
     effort: high
-    state: running
+    state: needs_foreman
     branch: "brigada/task-43"
     rounds: 1
   - id: 44
