@@ -11,9 +11,12 @@ import (
 )
 
 // PrepareForemanCheckout refreshes the project's reading copy for both a
-// headless turn and attach. The session stays in scratch: moving its cwd
-// would lose the harness's session identity. Only this preparation writes
-// the checkout; the foreman must receive read-only access from its harness.
+// headless turn and attach. The checkout, `<scratch>/repo`, is the one
+// working directory of the foreman's harness, headless or attached: the
+// harness keys its sessions and project memory by it, and the
+// repository's own CLAUDE.md, AGENTS.md and .claude/ load there as in
+// any clone. Only this preparation writes the checkout; the foreman must
+// receive read-only access from its harness.
 func PrepareForemanCheckout(ctx context.Context, scratch, repoURL, branch string, gitEnv []string) (foreman.Checkout, error) {
 	if repoURL == "" || branch == "" {
 		return foreman.Checkout{}, fmt.Errorf("the foreman requires a project repo URL and default branch")

@@ -104,12 +104,19 @@ func (e *attachEnv) scratch(t *testing.T) string {
 	return dir
 }
 
-// scratchFile reads one file the attached session left in the scratch
-// directory, waiting for it to appear: the session's records are the
-// test's window into what ran.
+// checkout is the foreman's reading checkout under the scratch
+// directory: the attached session's working directory.
+func (e *attachEnv) checkout(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(e.scratch(t), "repo")
+}
+
+// scratchFile reads one file the attached session left in its working
+// directory, the checkout, waiting for it to appear: the session's
+// records are the test's window into what ran.
 func (e *attachEnv) scratchFile(t *testing.T, name string) string {
 	t.Helper()
-	path := filepath.Join(e.scratch(t), name)
+	path := filepath.Join(e.checkout(t), name)
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		data, err := os.ReadFile(path)
@@ -285,18 +292,18 @@ func TestAttachRunsTheSessionAndReleases(t *testing.T) {
 		t.Errorf("the session's status line command is not this binary's status --line on %s:\n%s", e.stateDir, env)
 	}
 
-	// The session ran in the project's foreman scratch directory (§4) —
-	// the very directory the runner's turns use, by the shared rule.
+	// The session ran in the project's foreman checkout (§4) — the very
+	// directory the runner's turns use, by the shared rule.
 	where, err := filepath.EvalSymlinks(e.scratchFile(t, "where.txt"))
 	if err != nil {
 		t.Fatalf("resolve the session's working directory: %v", err)
 	}
-	scratch, err := filepath.EvalSymlinks(e.scratch(t))
+	checkout, err := filepath.EvalSymlinks(e.checkout(t))
 	if err != nil {
-		t.Fatalf("resolve the scratch directory: %v", err)
+		t.Fatalf("resolve the checkout: %v", err)
 	}
-	if where != scratch {
-		t.Errorf("the attached session ran in %q, want the scratch %q", where, scratch)
+	if where != checkout {
+		t.Errorf("the attached session ran in %q, want the checkout %q", where, checkout)
 	}
 
 	// The MCP config: written for the hold's token, 0600 in a private
@@ -806,10 +813,11 @@ func TestStatusLineCommandAbsolutePaths(t *testing.T) {
 	}
 }
 
-func TestAttachClaudeAddsReadingCheckout(t *testing.T) {
-	remote := testsupport.NewGitRemote(t)
-	cloneRemote(t, remote)
-	e := newAttachEnv(t, remote, "claude", "sonnet")
+// runClaudeAttach attaches with a claude adapter whose binary is a
+// script that records its argv and working directory, and returns the
+// argv it was given.
+func runClaudeAttach(t *testing.T, e *attachEnv, args ...string) []string {
+	t.Helper()
 	script := filepath.Join(t.TempDir(), "claude")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\0' \"$@\" > argv.txt\npwd > where.txt\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -819,7 +827,7 @@ func TestAttachClaudeAddsReadingCheckout(t *testing.T) {
 		return &claude.Adapter{Binary: script}, harness == "claude"
 	}
 	t.Cleanup(func() { adapterForAttach = orig })
-	_, errOut, done := e.runAttachCmd(t)
+	_, errOut, done := e.runAttachCmd(t, args...)
 	select {
 	case code := <-done:
 		if code != 0 {
@@ -828,12 +836,33 @@ func TestAttachClaudeAddsReadingCheckout(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("attach did not end")
 	}
-	scratch := e.scratch(t)
-	repo := filepath.Join(scratch, "repo")
-	argv := strings.Split(e.scratchFile(t, "argv.txt"), "\x00")
-	i := slices.Index(argv, "--add-dir")
-	if i < 0 || i+1 >= len(argv) || argv[i+1] != repo {
-		t.Fatalf("attach lacks --add-dir %s: %v", repo, argv)
+	return strings.Split(e.scratchFile(t, "argv.txt"), "\x00")
+}
+
+// TestAttachClaudeRunsInTheCheckout: the attached claude runs in the
+// reading checkout, with no extra directory to read, the bridge added
+// to — not replacing — the user's own MCP servers, and the project's
+// model and no effort when no override is given.
+func TestAttachClaudeRunsInTheCheckout(t *testing.T) {
+	remote := testsupport.NewGitRemote(t)
+	cloneRemote(t, remote)
+	e := newAttachEnv(t, remote, "claude", "sonnet")
+	argv := runClaudeAttach(t, e)
+	repo := e.checkout(t)
+	if slices.Contains(argv, "--add-dir") {
+		t.Errorf("attach still passes --add-dir: %v", argv)
+	}
+	if slices.Contains(argv, "--strict-mcp-config") {
+		t.Errorf("attach is strict about MCP servers: %v", argv)
+	}
+	if !slices.Contains(argv, "--mcp-config") {
+		t.Errorf("attach lacks the bridge's --mcp-config: %v", argv)
+	}
+	if i := slices.Index(argv, "--model"); i < 0 || argv[i+1] != "sonnet" {
+		t.Errorf("attach lacks the project's model: %v", argv)
+	}
+	if slices.Contains(argv, "--effort") {
+		t.Errorf("attach passes an effort nobody chose: %v", argv)
 	}
 	if !strings.Contains(argv[0], repo) || !strings.Contains(argv[0], `Branch: "main"`) {
 		t.Errorf("opening prompt lacks checkout: %s", argv[0])
@@ -845,8 +874,102 @@ func TestAttachClaudeAddsReadingCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := filepath.EvalSymlinks(scratch)
+	want, err := filepath.EvalSymlinks(repo)
 	if err != nil || where != want {
-		t.Errorf("cwd = %s, want %s: %v", where, want, err)
+		t.Errorf("cwd = %s, want the checkout %s: %v", where, want, err)
+	}
+}
+
+// TestAttachModelAndEffortOverrideThisChatOnly: --model and --effort
+// reach the harness for this chat; the project's setting is untouched.
+func TestAttachModelAndEffortOverrideThisChatOnly(t *testing.T) {
+	remote := testsupport.NewGitRemote(t)
+	cloneRemote(t, remote)
+	e := newAttachEnv(t, remote, "claude", "sonnet")
+	argv := runClaudeAttach(t, e, "--model", "opus", "--effort", "high")
+	if i := slices.Index(argv, "--model"); i < 0 || argv[i+1] != "opus" {
+		t.Errorf("attach lacks --model opus: %v", argv)
+	}
+	if i := slices.Index(argv, "--effort"); i < 0 || argv[i+1] != "high" {
+		t.Errorf("attach lacks --effort high: %v", argv)
+	}
+	if got := e.queryRow1(t, "SELECT foreman_model FROM projects WHERE id = ?", e.project); got != "sonnet" {
+		t.Errorf("the project's foreman model = %q, want it untouched", got)
+	}
+}
+
+// TestAttachRejectsUnknownEffort: an effort the foreman's harness does
+// not accept is a usage error before anything is held.
+func TestAttachRejectsUnknownEffort(t *testing.T) {
+	remote := testsupport.NewGitRemote(t)
+	cloneRemote(t, remote)
+	e := newAttachEnv(t, remote, "claude", "sonnet")
+	_, errOut, done := e.runAttachCmd(t, "--effort", "bogus")
+	select {
+	case code := <-done:
+		if code != 2 || !strings.Contains(errOut.String(), `effort "bogus"`) {
+			t.Errorf("attach exit %d, stderr %q; want a usage error naming the effort", code, errOut.String())
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("attach did not end")
+	}
+	if n := e.queryRow1(t, "SELECT COUNT(*) FROM attach_holds"); n != "0" {
+		t.Errorf("attach holds = %s, want none taken", n)
+	}
+}
+
+// TestAttachStartsFreshWhenResumeIsRejected: a recorded session the CLI
+// does not know does not end the attach: it starts a fresh session, and
+// the release writes the new id back.
+func TestAttachStartsFreshWhenResumeIsRejected(t *testing.T) {
+	remote := testsupport.NewGitRemote(t)
+	cloneRemote(t, remote)
+	e := newAttachEnv(t, remote, "fake", "fake-1")
+	key := fmt.Sprintf("foreman:%d", e.project)
+	if err := e.st.Update(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO sessions (key, harness_session_id, state, created_at)
+			VALUES (?, 'stale-sess', 'active', '2026-01-01T00:00:00Z')`, key)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(t.TempDir(), "attach.sh")
+	body := `#!/bin/sh
+printf '%s\n' "$BRIGADA_FAKE_RESUME" >> resumes.txt
+if [ -n "$BRIGADA_FAKE_RESUME" ]; then
+  echo "No conversation found with session ID: $BRIGADA_FAKE_RESUME" >&2
+  exit 1
+fi
+printf '%s' "$BRIGADA_FAKE_SESSION" > fresh.txt
+`
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	offerFakeAdapter(t, script)
+	_, errOut, done := e.runAttachCmd(t)
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("attach exit %d: %s", code, errOut.String())
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("attach did not end")
+	}
+	if !strings.Contains(errOut.String(), "starting a fresh one") {
+		t.Errorf("stderr = %q, want the fresh start said aloud", errOut.String())
+	}
+	data, err := os.ReadFile(filepath.Join(e.checkout(t), "resumes.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n"); !slices.Equal(got, []string{"stale-sess", ""}) {
+		t.Errorf("resume ids tried = %q, want the stale one, then none", got)
+	}
+	fresh := e.scratchFile(t, "fresh.txt")
+	if !uuidRe.MatchString(fresh) {
+		t.Errorf("fresh session id = %q, want a generated UUID", fresh)
+	}
+	if written := e.queryRow1(t, "SELECT COALESCE(harness_session_id, '') FROM sessions WHERE key = ?", key); written != fresh {
+		t.Errorf("the key's session id = %q, want the fresh %q", written, fresh)
 	}
 }

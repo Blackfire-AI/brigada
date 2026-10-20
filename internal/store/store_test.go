@@ -1085,3 +1085,51 @@ func TestJobEffortMigrationKeepsTheRows(t *testing.T) {
 		t.Errorf("old job changed: %q", got)
 	}
 }
+
+// TestForemanSessionCwdMigrationClearsForemanSessions builds the store of
+// a binary that predates the foreman-session-cwd migration, with a session
+// under each foreman key and one under a task key, and opens it with this
+// binary: the foreman ids are cleared — they were made in another working
+// directory — and the task's is left alone.
+func TestForemanSessionCwdMigrationClearsForemanSessions(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatalf("list migrations: %v", err)
+	}
+	var before int
+	for _, m := range migs {
+		if m.name == "foreman_session_cwd" {
+			before = m.version - 1
+			break
+		}
+	}
+	if before == 0 {
+		t.Fatal("foreman_session_cwd migration not found in allMigrations")
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("open raw store: %v", err)
+	}
+	for _, m := range migs[:before] {
+		if _, err := db.Exec(m.sql); err != nil {
+			t.Fatalf("apply %04d_%s by hand: %v", m.version, m.name, err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA user_version = " + strconv.Itoa(before)); err != nil {
+		t.Fatalf("set user_version: %v", err)
+	}
+	for key, id := range map[string]string{"foreman:1": "sess-a", "foreman:22": "sess-b", "task:5": "sess-task"} {
+		exec(t, db, "INSERT INTO sessions (key, harness_session_id, state, created_at) VALUES (?, ?, 'active', ?)", key, id, ts)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close raw store: %v", err)
+	}
+
+	s := openStore(t, path)
+	for key, want := range map[string]string{"foreman:1": "", "foreman:22": "", "task:5": "sess-task"} {
+		if got := queryString(t, s.db, "SELECT COALESCE(harness_session_id, '') FROM sessions WHERE key = ?", key); got != want {
+			t.Errorf("session %s = %q, want %q", key, got, want)
+		}
+	}
+}

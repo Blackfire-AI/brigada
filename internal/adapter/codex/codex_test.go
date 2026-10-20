@@ -521,7 +521,7 @@ func TestAttachCommandGolden(t *testing.T) {
 
 func TestAttachReadingCheckoutIsReadOnly(t *testing.T) {
 	stubCLI(t)
-	cmd, err := (&Adapter{}).AttachCommand(adapter.Job{Prompt: "read code", ReadOnlyRepo: "/state/foreman/1/repo"}, "/state/foreman/1", "saved", "new")
+	cmd, err := (&Adapter{}).AttachCommand(adapter.Job{Prompt: "read code", MCPConfig: "/state/mcp/config.json"}, "/state/foreman/1/repo", "saved", "new")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,7 +536,7 @@ func TestAttachReadingCheckoutIsReadOnly(t *testing.T) {
 			t.Errorf("unsafe flag %s: %v", bad, cmd.Args)
 		}
 	}
-	if cmd.Dir != "/state/foreman/1" {
+	if cmd.Dir != "/state/foreman/1/repo" {
 		t.Errorf("session cwd changed: %s", cmd.Dir)
 	}
 }

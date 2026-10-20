@@ -70,8 +70,9 @@ type jobRun struct {
 	// task job keeps the field empty. Read by runWorker alone, between
 	// the two, like killWorker.
 	mcpConfig string
-	// foremanRepo is the prepared reading checkout, empty for task jobs.
-	foremanRepo string
+	// noResume starts the session fresh whatever the grant says: the
+	// foreman turn sets it when the CLI rejected the resume as unknown.
+	noResume bool
 }
 
 // execute runs the job end to end. Every failure is delivered to the
@@ -216,10 +217,10 @@ func (r *jobRun) runJob(ctx context.Context, ws *workspace, kill <-chan struct{}
 // run is in the jobRun's fields.
 func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workdir string, kill <-chan struct{}) error {
 	resume := ""
-	if r.grant.Mode == string(engine.ModeSession) {
+	if r.grant.Mode == string(engine.ModeSession) && !r.noResume {
 		resume = r.grant.ResumeSessionID
 	}
-	cmd, err := ad.Command(adapter.Job{Prompt: r.grant.Prompt, Model: model, Review: isReviewJob(r.grant), Effort: r.cfg.effortFor(r.grant), MCPConfig: r.mcpConfig, ReadOnlyRepo: r.foremanRepo}, workdir, resume)
+	cmd, err := ad.Command(adapter.Job{Prompt: r.grant.Prompt, Model: model, Review: isReviewJob(r.grant), Effort: r.cfg.effortFor(r.grant), MCPConfig: r.mcpConfig}, workdir, resume)
 	if err != nil {
 		return &noWorkerError{err}
 	}

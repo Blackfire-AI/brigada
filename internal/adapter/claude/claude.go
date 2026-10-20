@@ -145,9 +145,6 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		// the agent config's — it decides through the bridge and reads
 		// the repo, and never edits code.
 		args = append(args, "--mcp-config", job.MCPConfig, "--strict-mcp-config")
-		if job.ReadOnlyRepo != "" {
-			args = append(args, "--add-dir", job.ReadOnlyRepo)
-		}
 		allowed, disallowed = foremanToolScope()
 	} else if allowed == nil {
 		// A code worker with no explicit scope gets the default (§5.2):
@@ -167,9 +164,6 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	cmd.Dir = workdir
 	cmd.Stdin = strings.NewReader(job.Prompt)
 	cmd.Env = workerEnv(os.Environ())
-	if job.ReadOnlyRepo != "" {
-		cmd.Env = append(cmd.Env, "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1")
-	}
 	return cmd, nil
 }
 
@@ -190,6 +184,16 @@ const statusLineRefreshSeconds = 3
 // The streams are the caller's to wire: an interactive session belongs
 // to the terminal, and the adapter leaves stdin, stdout and stderr
 // untouched for the client to connect.
+//
+// The session runs in workdir, the foreman's reading checkout, so the
+// repository's own CLAUDE.md, .claude/ and the project memory load as in
+// any clone. The bridge is added with --mcp-config but without
+// --strict-mcp-config, so the user's own user-scope MCP servers load as
+// in any session of theirs; the headless turn alone is strict. A
+// repository whose .mcp.json still carries an older init's `brigada`
+// entry (`brigada mcp --foreman`) must have it removed (`brigada
+// remove`, or rerun `brigada init` once the init change lands): two
+// servers named `brigada` would clash.
 func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSessionID string) (*exec.Cmd, error) {
 	if newSessionID == "" {
 		return nil, fmt.Errorf("the attach generates the new session id; an empty one cannot be named to the CLI")
@@ -224,10 +228,7 @@ func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSe
 	if job.Effort != "" {
 		args = append(args, "--effort", job.Effort)
 	}
-	args = append(args, "--mcp-config", job.MCPConfig, "--strict-mcp-config")
-	if job.ReadOnlyRepo != "" {
-		args = append(args, "--add-dir", job.ReadOnlyRepo)
-	}
+	args = append(args, "--mcp-config", job.MCPConfig)
 	if job.StatusLine != "" {
 		// The CLI's status bar runs the command on a timer as well as on
 		// the session's own events, so it stays current while the chat
@@ -255,9 +256,6 @@ func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSe
 	}
 	cmd.Dir = workdir
 	cmd.Env = workerEnv(os.Environ())
-	if job.ReadOnlyRepo != "" {
-		cmd.Env = append(cmd.Env, "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1")
-	}
 	return cmd, nil
 }
 

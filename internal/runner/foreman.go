@@ -25,7 +25,7 @@ import (
 // the same transcript — without the task worker's material side. No
 // task workspace is made: a reading checkout, no branch to push,
 // no check to run (§4: the foreman job is excluded from the runner's
-// checks). The turn runs in the project's scratch directory and is
+// checks). The turn runs in the reading checkout and is
 // exempt from the result contract (§5.4): a clean exit completes the
 // job as done, with the turn's final message as its summary.
 func (r *jobRun) runForemanTurn(ctx context.Context) {
@@ -39,9 +39,8 @@ func (r *jobRun) runForemanTurn(ctx context.Context) {
 		r.finishWithError(ctx, "prepare the foreman checkout: "+err.Error())
 		return
 	}
-	r.foremanRepo = checkout.Path
 	r.grant.Prompt = foreman.WithCheckout(r.grant.Prompt, checkout)
-	r.cfg.Log.InfoContext(ctx, "foreman turn", "job_id", r.grant.JobID, "key", r.grant.Key, "dir", dir)
+	r.cfg.Log.InfoContext(ctx, "foreman turn", "job_id", r.grant.JobID, "key", r.grant.Key, "dir", checkout.Path)
 	// The MCP config is decided before the worker starts, where the
 	// bridge's file would reach the adapter's command. A turn whose
 	// config cannot be written is a turn without brigada's tools — it
@@ -68,7 +67,19 @@ func (r *jobRun) runForemanTurn(ctx context.Context) {
 		r.finishWithError(ctx, err.Error())
 		return
 	}
-	exitErr := r.runWorker(runCtx, ad, model, dir, kill)
+	exitErr := r.runWorker(runCtx, ad, model, checkout.Path, kill)
+	if r.resumeRejected(runCtx, exitErr) {
+		// The harness no longer knows the session the key recorded (a
+		// session lost with its CLI's own files, or made in another
+		// working directory): the resume was a saving, not a
+		// requirement, so the turn starts fresh and writes the new id
+		// back as usual.
+		r.cfg.Log.WarnContext(ctx, "foreman session not known to the CLI; starting a fresh one",
+			"job_id", r.grant.JobID, "key", r.grant.Key, "session", r.grant.ResumeSessionID)
+		r.noResume = true
+		r.resetRunRecord()
+		exitErr = r.runWorker(runCtx, ad, model, checkout.Path, kill)
+	}
 	abort()
 	<-beatsDone
 	// The turn is over for the worker's side whatever comes next —
@@ -98,17 +109,54 @@ func (r *jobRun) runForemanTurn(ctx context.Context) {
 	r.finishForemanTurn(ctx, ad, exitErr)
 }
 
-// ForemanScratchDir is the foreman's working directory for a project
-// (§4): a scratch dir under the runner's state, created on demand and
-// kept between turns. The foreman never edits code, so there is no
-// worktree to make — but its harness still wants a corner of its own,
-// stable across a long-lived session's turns.
+// resumeRejected reports whether the worker just run was asked to
+// resume a session and the CLI refused it as unknown (the resume_failed
+// class of error, as the adapter sorts it): the turn then runs again
+// fresh. A turn the runner itself cut short is never rerun.
+func (r *jobRun) resumeRejected(ctx context.Context, exitErr error) bool {
+	if r.noResume || r.grant.Mode != string(engine.ModeSession) || r.grant.ResumeSessionID == "" {
+		return false
+	}
+	if ctx.Err() != nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.dropped || r.stopped != nil {
+		return false
+	}
+	if r.cliError != nil && r.cliError.ErrorKind == adapter.ErrResumeFailed {
+		return true
+	}
+	return r.stderrError != nil && r.stderrError.ErrorKind == adapter.ErrResumeFailed && exitErr != nil
+}
+
+// resetRunRecord forgets what the rejected attempt reported — its
+// events, errors and session id — so the fresh run is judged alone. The
+// transcript keeps both attempts.
+func (r *jobRun) resetRunRecord() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = nil
+	r.cliError = nil
+	r.stderrError = nil
+	r.sessionID = ""
+	r.toolInFlight = 0
+}
+
+// ForemanScratchDir is the foreman's scratch directory for a project
+// (§4): a directory under the runner's state, created on demand and kept
+// between turns. It holds the reading checkout (PrepareForemanCheckout)
+// and is not where the harness runs: the foreman never edits code, so
+// there is no worktree to make, and the harness runs in the checkout.
 //
-// The rule lives here because two processes must agree on it (§4.2 item
-// 1): the runner's headless turns and the client's attached chat are
-// the same session, and a harness keys its sessions by working
-// directory — an attach that ran anywhere else could not resume what
-// the turns left, so the attach calls this same function.
+// The checkout, not this directory, is the one working directory — a
+// rule that lives with PrepareForemanCheckout because two processes
+// must agree on it (§4.2 item 1): the runner's headless turns and the
+// client's attached chat are the same session, and a harness keys its
+// sessions by working directory — an attach that ran anywhere else could
+// not resume what the turns left, so the attach prepares the checkout
+// through the same function and runs there.
 func ForemanScratchDir(stateDir string, project int64) (string, error) {
 	// An init from before the rename saved its foreman as a file here.
 	if err := runnerstate.MigrateForeman(stateDir); err != nil {
