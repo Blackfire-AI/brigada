@@ -191,6 +191,28 @@ func TestAgentEffortRegisters(t *testing.T) {
 	}
 }
 
+// TestEffectiveEffortRidesTheGrant: the lease resolves the task's effective
+// effort — an escalation step's (§8) — before its own and the agent's.
+func TestEffectiveEffortRidesTheGrant(t *testing.T) {
+	e := newEnv(t)
+	runner, err := e.eng.Register(e.ctx, "effort-runner", 0, []AgentAdvert{{Adapter: "claude", Harness: "claude", Model: "model", Classes: []string{"implement", "review"}, Effort: "max"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := e.eng.CreatePlan(e.ctx, e.project, "effort plan", []PlanTask{{Name: "work", Spec: "do work", Effort: "low"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.str("SELECT effective_effort FROM tasks WHERE id = ?", plan.TaskID); got != "low" {
+		t.Fatalf("new task's effective effort = %q, want its own low", got)
+	}
+	e.exec("UPDATE tasks SET effective_effort = 'high' WHERE id = ?", plan.TaskID)
+	g := e.lease(runner, []string{"claude"}, nil)
+	if g == nil || g.JobID != plan.JobID || g.Effort != "high" {
+		t.Fatalf("grant = %+v, want job %d at high", g, plan.JobID)
+	}
+}
+
 func TestTaskEffortRidesTheGrant(t *testing.T) {
 	for _, tc := range []struct{ harness, taskEffort, agentEffort, want string }{
 		{"claude", "high", "", "high"}, {"claude", "high", "max", "high"},

@@ -86,7 +86,15 @@ func StatusSections(st Status) string {
 				} else if tier != "standard" {
 					detail = append(detail, tier)
 				}
-				if t.Effort != "" {
+				if t.EffectiveEffort != "" && t.EffectiveEffort != t.Effort {
+					// An effort step of the escalation ladder (§8); an empty
+					// task effort is the agent's own level.
+					from := t.Effort
+					if from == "" {
+						from = "default"
+					}
+					detail = append(detail, "@"+from+"->"+t.EffectiveEffort)
+				} else if t.Effort != "" {
 					detail = append(detail, "@"+t.Effort)
 				}
 				if len(detail) > 0 {

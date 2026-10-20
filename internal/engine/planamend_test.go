@@ -108,7 +108,7 @@ func TestAmendRepointsOffFailedTask(t *testing.T) {
 	e := newEnv(t)
 	res := e.twoStep()
 	build, ship := res.Tasks[0], res.Tasks[1]
-	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE plan_id = ?", res.PlanID)
+	e.exec("UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high' WHERE plan_id = ?", res.PlanID)
 	e.complete(e.leaseAny(e.runner1), Completion{Result: `{"status":"failed","summary":"no clone"}`})
 	// The engine parks a failed task at needs_foreman; a task that
 	// failed for good is the same row at failed.
@@ -300,7 +300,7 @@ func TestRestartedThenCancelledIsNotLaundered(t *testing.T) {
 	e := newEnv(t)
 	agent := e.addAgent(e.runner1, "claude", "sonnet", "work")
 	res := e.createPlan([]PlanTask{{Name: "solo", Spec: "do it", Class: "answer"}})
-	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE plan_id = ?", res.PlanID)
+	e.exec("UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high' WHERE plan_id = ?", res.PlanID)
 	e.complete(e.leaseAny(e.runner1), Completion{Result: `{"status":"failed","summary":"no clone"}`})
 	if _, err := e.eng.RestartTask(e.ctx, e.project, res.TaskID, "try again"); err != nil {
 		t.Fatalf("restart: %v", err)
@@ -402,7 +402,7 @@ func TestFailedOrCancelledDependencyNamedInDoneReport(t *testing.T) {
 	agent := e.addAgent(e.runner1, "claude", "sonnet", "work")
 	res := e.twoStep()
 	g := e.leaseAny(e.runner1)
-	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE plan_id = ?", res.PlanID)
+	e.exec("UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high' WHERE plan_id = ?", res.PlanID)
 	e.complete(g, Completion{Result: `{"status":"failed","summary":"no clone"}`})
 	if got := e.taskState(res.Tasks[0].TaskID); got != taskNeedsForeman {
 		t.Fatalf("build = %q, want parked", got)
@@ -541,7 +541,7 @@ func TestAmendRetier(t *testing.T) {
 	if len(am.Retiered) != 1 || am.Retiered[0] != build {
 		t.Fatalf("retiered = %v", am.Retiered)
 	}
-	for col, want := range map[string]string{"tier": "light", "effective_tier": "light", "effort": "low", "state": taskNeedsForeman} {
+	for col, want := range map[string]string{"tier": "light", "effective_tier": "light", "effort": "low", "effective_effort": "low", "state": taskNeedsForeman} {
 		if got := e.str("SELECT "+col+" FROM tasks WHERE id = ?", build); got != want {
 			t.Errorf("%s = %q, want %q", col, got, want)
 		}
@@ -555,16 +555,17 @@ func TestAmendRetier(t *testing.T) {
 	// By id, effort alone preserves the foreman's and effective tiers.
 	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", build)
 	e.amend(res.PlanID, PlanAmendment{Retier: []PlanRetier{{Task: fmt.Sprint(build), Effort: "medium"}, {Task: "ship", Tier: "heavy"}}})
-	if got := e.str("SELECT tier || '|' || effective_tier || '|' || effort FROM tasks WHERE id = ?", build); got != "light|heavy|medium" {
+	if got := e.str("SELECT tier || '|' || effective_tier || '|' || effort || '|' || effective_effort FROM tasks WHERE id = ?", build); got != "light|heavy|medium|medium" {
 		t.Errorf("effort-only = %s", got)
 	}
 	if e.taskState(ship) != taskPending || e.str("SELECT tier FROM tasks WHERE id = ?", ship) != "heavy" {
 		t.Error("pending task not retiered in place")
 	}
-	// Tier alone preserves effort. A ready task can be changed as well.
-	e.exec("UPDATE tasks SET state = 'ready' WHERE id = ?", build)
+	// Tier alone preserves effort and resets an escalated effective effort
+	// to it. A ready task can be changed as well.
+	e.exec("UPDATE tasks SET state = 'ready', effective_effort = 'high' WHERE id = ?", build)
 	e.amend(res.PlanID, PlanAmendment{Retier: []PlanRetier{{Task: "build", Tier: "standard"}}})
-	if got := e.str("SELECT tier || '|' || effective_tier || '|' || effort FROM tasks WHERE id = ?", build); got != "standard|standard|medium" {
+	if got := e.str("SELECT tier || '|' || effective_tier || '|' || effort || '|' || effective_effort FROM tasks WHERE id = ?", build); got != "standard|standard|medium|medium" {
 		t.Errorf("tier-only = %s", got)
 	}
 

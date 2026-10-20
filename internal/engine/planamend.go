@@ -394,11 +394,15 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	}
 	for k, i := range retiered {
 		rt := am.Retier[k]
+		// A new effort sets the effective effort with it; a tier change
+		// alone resets the effective effort to the task's own (§8: the
+		// escalation ladder starts over on the new tier).
 		if _, err := tx.Exec(`UPDATE tasks SET
 			tier = CASE WHEN ? = '' THEN tier ELSE ? END,
 			effective_tier = CASE WHEN ? = '' THEN effective_tier ELSE ? END,
+			effective_effort = CASE WHEN ? <> '' THEN ? WHEN ? <> '' THEN effort ELSE effective_effort END,
 			effort = CASE WHEN ? = '' THEN effort ELSE ? END, updated_at = ? WHERE id = ?`,
-			rt.Tier, rt.Tier, rt.Tier, rt.Tier, rt.Effort, rt.Effort, nowStr, nodes[i].id); err != nil {
+			rt.Tier, rt.Tier, rt.Tier, rt.Tier, rt.Effort, rt.Effort, rt.Tier, rt.Effort, rt.Effort, nowStr, nodes[i].id); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), err)
 		}
 		res.Retiered = append(res.Retiered, nodes[i].id)
@@ -409,9 +413,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	}
 	for k := range am.Add {
 		i := existing + k
-		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, created_at, updated_at)
-			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?)`,
-			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskPending, baseRef, setupRec, nodes[i].extraRec, taskTier(am.Add[k].Tier), taskTier(am.Add[k].Tier), am.Add[k].Effort, nowStr, nowStr)
+		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, created_at, updated_at)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?)`,
+			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskPending, baseRef, setupRec, nodes[i].extraRec, taskTier(am.Add[k].Tier), taskTier(am.Add[k].Tier), am.Add[k].Effort, am.Add[k].Effort, nowStr, nowStr)
 		if err != nil {
 			return AmendPlanResult{}, fmt.Errorf("create the task: %w", err)
 		}

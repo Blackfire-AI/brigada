@@ -66,12 +66,17 @@ func summary(it Item) string {
 		Branch     string `json:"branch"`
 		TierAsked  string `json:"tier_asked"`
 		TierServed string `json:"tier_served"`
+		EffortFrom string `json:"effort_from"`
+		EffortTo   string `json:"effort_to"`
 	}
 	if json.Unmarshal(it.Payload, &p) != nil {
 		return string(it.Payload)
 	}
 	if it.Kind == "task_tier_bumped" {
 		return fmt.Sprintf("task tier %s -> %s: %s", p.TierAsked, p.TierServed, p.Reason)
+	}
+	if it.Kind == "task_effort_bumped" {
+		return fmt.Sprintf("task effort %s -> %s: %s", p.EffortFrom, p.EffortTo, p.Reason)
 	}
 	var parts []string
 	add := func(k, v string) {

@@ -107,11 +107,14 @@ type StatusTask struct {
 	Tier          string `json:"tier,omitempty"`
 	EffectiveTier string `json:"effective_tier,omitempty"`
 	Effort        string `json:"effort,omitempty"`
-	ID            int64  `json:"id"`
-	Title         string `json:"title"`
-	Class         string `json:"class"`
-	State         string `json:"state"`
-	Branch        string `json:"branch"` // empty while the task has no result branch yet
+	// EffectiveEffort is the effort the escalation ladder runs the task
+	// at (§8); it equals Effort until an effort step.
+	EffectiveEffort string `json:"effective_effort,omitempty"`
+	ID              int64  `json:"id"`
+	Title           string `json:"title"`
+	Class           string `json:"class"`
+	State           string `json:"state"`
+	Branch          string `json:"branch"` // empty while the task has no result branch yet
 	// WaitingOn names the unfinished dependencies of a task that waits
 	// on them (§6.1): each by its plan name, or "#id" when unnamed.
 	WaitingOn []string `json:"waiting_on,omitempty"`
@@ -386,7 +389,7 @@ func statusPlansTx(tx *sql.Tx, project int64, now time.Time) ([]StatusPlan, erro
 
 // statusPlanTasksTx reads one status plan's tasks, in id order.
 func statusPlanTasksTx(tx *sql.Tx, plan int64) ([]StatusTask, error) {
-	rows, err := tx.Query(`SELECT id, title, class, state, COALESCE(branch, ''), tier, effective_tier, effort
+	rows, err := tx.Query(`SELECT id, title, class, state, COALESCE(branch, ''), tier, effective_tier, effort, effective_effort
 		FROM tasks WHERE plan_id = ? ORDER BY id`, plan)
 	if err != nil {
 		return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
@@ -395,7 +398,7 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64) ([]StatusTask, error) {
 	tasks := []StatusTask{}
 	for rows.Next() {
 		var t StatusTask
-		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort); err != nil {
 			return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
 		}
 		tasks = append(tasks, t)
