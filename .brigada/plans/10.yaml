@@ -5,9 +5,9 @@
 plan: 10
 title: "Experimental DeepSeek Harness (dsh) adapter: worker and reviewer (#37)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: pending_approval
 created: 2026-10-20T08:49:34.581969Z
-updated: 2026-10-20T08:49:34.581969Z
+updated: 2026-10-20T12:10:33.653653Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps, or from the
 # default branch when base is empty; merge a task after its base. States
@@ -33,6 +33,17 @@ tasks:
     deps: ["dsh-adapter"]
     base: "dsh-adapter"
     effort: medium
-    state: needs_foreman
+    state: cancelled
     branch: ""
     rounds: 0
+  - id: 46
+    name: "dsh-init-2"
+    title: "brigada init offers dsh agents (#37), finish from task 39"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+    extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "brigada/task-39"]]
