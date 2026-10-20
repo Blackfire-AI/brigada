@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
@@ -219,7 +221,11 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 			}
 			// Errors can precede step_start, so keep their envelope's id
 			// as well as the failure: the runner must not lose either.
-			return adapter.Event{Kind: adapter.EvError, Text: text, SessionID: lj.SessionID, ErrorKind: errorKind(*lj.Error)}, true
+			ev := adapter.Event{Kind: adapter.EvError, Text: text, SessionID: lj.SessionID, ErrorKind: errorKind(*lj.Error)}
+			if ev.ErrorKind == adapter.ErrLimit {
+				ev.LimitUntil = limitReset(text)
+			}
+			return ev, true
 		}
 	}
 	return adapter.Event{}, false
@@ -280,6 +286,7 @@ var errorPhrases = []errorPhrase{
 	{adapter.ErrLimit, "usage limit"},
 	{adapter.ErrLimit, "usage-limit"},
 	{adapter.ErrLimit, "quota"},
+	{adapter.ErrLimit, "limit exhausted"},
 	{adapter.ErrLimit, "too many requests"},
 	{adapter.ErrAuth, "401"},
 	{adapter.ErrAuth, "403"},
@@ -290,6 +297,71 @@ var errorPhrases = []errorPhrase{
 	{adapter.ErrAuth, "invalid key"},
 	{adapter.ErrAuth, "invalid-key"},
 	{adapter.ErrAuth, "authentication"},
+}
+
+// now is the clock limitReset reads; tests replace it.
+var now = time.Now
+
+// localZone is the zone a reset time without its own zone is read in:
+// the machine's own. That is an assumption, since the provider's text
+// names no zone; if the guess is early, the engine re-cools on the next
+// limit error. It is spelled through LoadLocation because the leak
+// guard's host rule would take the zone's usual spelling for a .local
+// hostname. Tests replace the variable.
+var localZone = func() *time.Location {
+	loc, err := time.LoadLocation("Local")
+	if err != nil {
+		return time.UTC // unreachable: "Local" always resolves
+	}
+	return loc
+}()
+
+// limitResetRe is the provider's reset note: "Your limit will reset at
+// 2026-10-20 21:32:04", seconds optional, optionally followed by a zone:
+// Z, UTC, GMT or an offset such as +08:00.
+var limitResetRe = regexp.MustCompile(`reset at (\d{4})-(\d{2})-(\d{2})[ t](\d{2}):(\d{2})(?::(\d{2}))?(?:\s*(z|utc|gmt|[+-]\d{2}(?::?\d{2})?))?(?:[^a-z0-9]|$)`)
+
+// limitReset reads the reset time out of a limit message, as an RFC3339
+// instant. Best effort — anything that does not parse, or is already
+// past, is "" (unknown), never an error.
+func limitReset(text string) string {
+	m := limitResetRe.FindStringSubmatch(strings.ToLower(text))
+	if m == nil {
+		return ""
+	}
+	var n [6]int
+	for i := range n {
+		n[i], _ = strconv.Atoi(m[i+1]) // m[6] may be empty: 0 seconds
+	}
+	loc := localZone
+	switch z := m[7]; {
+	case z == "":
+	case z[0] == 'z' || z[0] == 'u' || z[0] == 'g':
+		loc = time.UTC
+	default:
+		digits := strings.ReplaceAll(z[1:], ":", "")
+		h, _ := strconv.Atoi(digits[:2])
+		min := 0
+		if len(digits) == 4 {
+			min, _ = strconv.Atoi(digits[2:])
+		}
+		if h > 14 || min > 59 {
+			return ""
+		}
+		off := h*3600 + min*60
+		if z[0] == '-' {
+			off = -off
+		}
+		loc = time.FixedZone("", off)
+	}
+	if n[1] < 1 || n[1] > 12 || n[2] < 1 || n[2] > 31 || n[3] > 23 || n[4] > 59 || n[5] > 59 {
+		return ""
+	}
+	t := time.Date(n[0], time.Month(n[1]), n[2], n[3], n[4], n[5], 0, loc)
+	if t.Day() != n[2] || !t.After(now()) {
+		return ""
+	}
+	return t.Format(time.RFC3339)
 }
 
 func errorKind(e errorJSON) adapter.ErrorKind {
