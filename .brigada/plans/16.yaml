@@ -26,8 +26,8 @@ tasks:
     deps: []
     base: ""
     effort: high
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-52"
     rounds: 0
   - id: 53
     name: "drop-mode-a-core"
