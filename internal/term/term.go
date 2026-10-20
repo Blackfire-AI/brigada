@@ -110,5 +110,10 @@ var escape = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x0
 // rune-based wrapping; it does not measure wide glyphs or combining characters
 // in terminal columns.
 func VisibleWidth(text string) int {
-	return utf8.RuneCountInString(escape.ReplaceAllString(text, ""))
+	return utf8.RuneCountInString(StripEscapes(text))
+}
+
+// StripEscapes removes terminal escapes, leaving the text as it reads.
+func StripEscapes(text string) string {
+	return escape.ReplaceAllString(text, "")
 }

@@ -26,6 +26,12 @@ func Render(w io.Writer, items []Item) error {
 	return nil
 }
 
+// Line is one item as a single line, without its time: its kind, its
+// subject and its summary, flattened so it never spans lines.
+func Line(it Item) string {
+	return strings.Join(strings.Fields(it.Kind+" "+subject(it)+": "+summary(it)), " ")
+}
+
 // subject is what the item is about: the narrowest reference an event
 // carries — its job, else its task, else its project — and a message's
 // author, a message being someone's turn rather than a change to a row.

@@ -19,6 +19,24 @@ import (
 // supplies the colour; with a plain style the text is the same and has no
 // escapes. The last column of each table is cut to fit width.
 func CapacityTables(snap engine.CapacitySnapshot, now time.Time, style term.Style, width int) string {
+	lines := AgentsTable(snap, now, style, width)
+	lines = append(lines, "", style.Bold("LAYERS"))
+	rows := [][]capCell{capHeader(style, "LAYER", "KEY", "CAP", "USE", "QUEUE")}
+	for _, l := range snap.Layers {
+		rows = append(rows, []capCell{
+			plainCell(l.Layer),
+			plainCell(layerKey(l)),
+			plainCell(capLimit(l.Cap)),
+			plainCell(strconv.Itoa(l.Use)),
+			plainCell(strconv.Itoa(l.Queue)),
+		})
+	}
+	lines = append(lines, alignCapacity(rows, width)...)
+	return strings.Join(lines, "\n")
+}
+
+// AgentsTable is the AGENTS table of CapacityTables alone, as lines.
+func AgentsTable(snap engine.CapacitySnapshot, now time.Time, style term.Style, width int) []string {
 	var lines []string
 	lines = append(lines, style.Bold("AGENTS"))
 	if len(snap.Agents) == 0 {
@@ -37,19 +55,7 @@ func CapacityTables(snap engine.CapacitySnapshot, now time.Time, style term.Styl
 		}
 		lines = append(lines, alignCapacity(rows, width)...)
 	}
-	lines = append(lines, "", style.Bold("LAYERS"))
-	rows := [][]capCell{capHeader(style, "LAYER", "KEY", "CAP", "USE", "QUEUE")}
-	for _, l := range snap.Layers {
-		rows = append(rows, []capCell{
-			plainCell(l.Layer),
-			plainCell(layerKey(l)),
-			plainCell(capLimit(l.Cap)),
-			plainCell(strconv.Itoa(l.Use)),
-			plainCell(strconv.Itoa(l.Queue)),
-		})
-	}
-	lines = append(lines, alignCapacity(rows, width)...)
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 // capCell is one table cell: its plain text, and the style that colours

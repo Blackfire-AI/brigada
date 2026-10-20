@@ -75,6 +75,8 @@ Commands:
 	                agent, class and repo.
 	capacity        Show the agents' caps, quota and queues, and each
 	                cap layer's use (--project URL).
+	top             Watch the engine full-screen: agents, jobs, queue,
+	                plans and events (--interval, --project URL).
 	agent reset <harness>/<model>
 	                Clear a broken or cooling agent.
 	plan approve <id>
@@ -134,6 +136,7 @@ var commands = map[string]command{
 	"history":  {name: "history", run: runHistory},
 	"stats":    {name: "stats", run: runStats},
 	"capacity": {name: "capacity", run: runCapacity},
+	"top":      {name: "top", run: runTop},
 	"cancel":   {name: "cancel", run: runCancel},
 	"agent":    {name: "agent", run: runAgent, subcommands: agentCommands},
 	"plan":     {name: "plan", run: runPlan, subcommands: planCommands},
