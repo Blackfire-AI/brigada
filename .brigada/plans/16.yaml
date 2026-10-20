@@ -47,7 +47,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-54"
     rounds: 0
   - id: 55
