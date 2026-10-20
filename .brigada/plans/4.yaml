@@ -43,7 +43,7 @@ tasks:
     deps: ["ranking"]
     base: "ranking"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-17-r1"
     rounds: 0
   - id: 18
