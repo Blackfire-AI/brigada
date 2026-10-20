@@ -46,7 +46,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-46-r1"
     rounds: 0
     extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "brigada/task-39"]]
