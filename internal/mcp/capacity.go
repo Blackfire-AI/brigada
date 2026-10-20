@@ -13,7 +13,7 @@ import (
 )
 
 // callCapacity renders /v1/capacity as compact text (§12.2): one line
-// per agent — its effective cap and the layer that sets it, its running
+// per agent — its tier and configured effort, its effective cap and the layer that sets it, its running
 // jobs, its quota state and its cost weight — then one line per layer:
 // cap, use and queue depth for each runner, each account, each capped
 // model, each active plan of the project and global. That is the read
@@ -40,8 +40,8 @@ func callCapacity(ctx context.Context, c *api.Client, _ json.RawMessage) (string
 		if a.Tools != "" {
 			tools = " tools=" + a.Tools
 		}
-		fmt.Fprintf(&b, "agent %d %s/%s tier=%s account=%s cap=%s running=%d quota=%s cost=%d%s\n",
-			a.ID, a.Harness, a.Model, a.Tier, a.Account, cap, a.Running, quota, a.Cost, tools)
+		fmt.Fprintf(&b, "agent %d %s/%s tier=%s effort=%s account=%s cap=%s running=%d quota=%s cost=%d%s\n",
+			a.ID, a.Harness, a.Model, a.Tier, a.Effort, a.Account, cap, a.Running, quota, a.Cost, tools)
 	}
 	for _, l := range snap.Layers {
 		name := l.Layer
