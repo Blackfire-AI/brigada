@@ -46,6 +46,10 @@ type WorkerResult struct {
 	// by name, so the history shows what the job saw. The runner sets it;
 	// a worker's own block never carries it.
 	ExtraRepos map[string]string `json:"extra_repos,omitempty"`
+	// Head is the commit the runner pushed as the task's branch (§7), so
+	// a later re-review can ask for the fix round's diff alone. The
+	// runner sets it; a worker's own block never carries it.
+	Head string `json:"head,omitempty"`
 }
 
 // parseResult reads the result block out of a worker's final message

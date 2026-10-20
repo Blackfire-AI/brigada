@@ -712,6 +712,50 @@ func TestWriteReviewDiff(t *testing.T) {
 	})
 }
 
+// TestWriteReviewDiffSince: a re-review's diff file holds the fix round
+// alone, the commits since the head the reviewer judged; a head the branch
+// does not hold leaves the whole change under a line that says so.
+func TestWriteReviewDiffSince(t *testing.T) {
+	ctx := context.Background()
+	w := reviewDiffRepo(t, map[string]string{"first.txt": "first round\n"})
+	reviewed := strings.TrimSpace(git(t, w.dir, "rev-parse", "HEAD"))
+	if err := os.WriteFile(filepath.Join(w.dir, "fix.txt"), []byte("the fix\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, w.dir, "add", "-A")
+	git(t, w.dir, "-c", "user.name=seed", "-c", "user.email=seed@brigada.invalid", "commit", "-qm", "fix")
+	read := func() string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(w.dir, prompt.ReviewDiffFile))
+		if err != nil {
+			t.Fatalf("read the diff file: %v", err)
+		}
+		_ = os.Remove(filepath.Join(w.dir, prompt.ReviewDiffFile))
+		return string(data)
+	}
+
+	if err := w.writeReviewDiffSince(ctx, "main", reviewed); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); !strings.Contains(got, "+the fix") || strings.Contains(got, "first round") || strings.HasPrefix(got, "#") {
+		t.Errorf("diff file = %q, want the fix round alone", got)
+	}
+
+	if err := w.writeReviewDiffSince(ctx, "main", strings.Repeat("0", 40)); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); !strings.HasPrefix(got, "# The reviewed head ") || !strings.Contains(got, "+the fix") || !strings.Contains(got, "+first round") {
+		t.Errorf("diff file = %q, want the whole change under a note", got)
+	}
+
+	if err := w.writeReviewDiffSince(ctx, "main", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); !strings.Contains(got, "+first round") || strings.HasPrefix(got, "#") {
+		t.Errorf("diff file = %q, want the plain whole change", got)
+	}
+}
+
 // TestCappedBuffer: the runner keeps the first bytes of a command's
 // output up to the limit and drops the rest without ever failing the
 // write, so git runs to its end and the runner's memory stays bounded.

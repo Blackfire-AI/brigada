@@ -164,7 +164,7 @@ func (e *Engine) holdBusyRunnersTx(tx *sql.Tx, now time.Time, polling int64) err
 			if j.ReleasedBy == r.id && j.ReleasedUntil != "" && j.ReleasedUntil > nowStr {
 				continue
 			}
-			if j.Mode == ModeSession {
+			if usesKeySession(j) {
 				free, err := affinityFreeTx(tx, j.Key, r.id)
 				if err != nil {
 					return err

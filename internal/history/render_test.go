@@ -71,6 +71,20 @@ func TestRenderTierBump(t *testing.T) {
 	}
 }
 
+// TestRenderResumedReview: a re-review's task_reviewing event shows in the
+// text timeline as the reason line the engine writes for it, and a fresh
+// review after a changes verdict says why it is fresh.
+func TestRenderResumedReview(t *testing.T) {
+	resumed := Item{Type: TypeEvent, Kind: "task_reviewing", Payload: []byte(`{"status":"reviewing","branch":"brigada/task-1","pick":"resumed","agent":4,"reason":"resumed review: the previous reviewer's session on agent 4"}`)}
+	if got := summary(resumed); got != "status=reviewing reason=resumed review: the previous reviewer's session on agent 4" {
+		t.Errorf("summary = %q", got)
+	}
+	fresh := Item{Type: TypeEvent, Kind: "task_reviewing", Payload: []byte(`{"status":"reviewing","reason":"fresh review: the previous reviewer's agent is broken"}`)}
+	if got := summary(fresh); got != "status=reviewing reason=fresh review: the previous reviewer's agent is broken" {
+		t.Errorf("summary = %q", got)
+	}
+}
+
 func TestRenderEffortBump(t *testing.T) {
 	it := Item{Type: TypeEvent, Kind: "task_effort_bumped", Payload: []byte(`{"reason":"no-result","effort_from":"medium","effort_to":"high"}`)}
 	if got := summary(it); got != "task effort medium -> high: no-result" {

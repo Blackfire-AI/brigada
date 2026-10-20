@@ -124,7 +124,25 @@ const reviewGitOutputCap = 32 << 20
 // sits in the worktree untracked; nothing of a review is ever
 // committed or pushed, so it never reaches the change.
 func (w *workspace) writeReviewDiff(ctx context.Context, base string) error {
+	return w.writeReviewDiffSince(ctx, base, "")
+}
+
+// writeReviewDiffSince is writeReviewDiff for a re-review (§7) when since
+// names the head the reviewer last judged: the file then holds the fix
+// round alone, since..HEAD. A since the branch's history does not hold —
+// a rewritten branch, a commit the mirror lacks — leaves the whole change
+// in the file under a line saying so, never a diff the prompt misdescribes.
+func (w *workspace) writeReviewDiffSince(ctx context.Context, base, since string) error {
 	rng := base + "...HEAD"
+	var note string
+	if since != "" {
+		if _, err := w.git(ctx, "-C", w.dir, "merge-base", "--is-ancestor", since, "HEAD"); err == nil {
+			rng = since + "..HEAD"
+		} else {
+			note = fmt.Sprintf("# The reviewed head %s is not in the branch's history, so this is the\n"+
+				"# whole change (%s), not the fix round alone.\n\n", since, rng)
+		}
+	}
 	diffArgs := []string{"diff", "--no-color", "--no-ext-diff", "--no-textconv"}
 	diff, full, err := w.gitStdout(ctx, reviewGitOutputCap, append(diffArgs, "--function-context", rng)...)
 	if err != nil {
@@ -161,6 +179,9 @@ func (w *workspace) writeReviewDiff(ctx context.Context, base string) error {
 		b.Write(cut)
 		b.WriteString("# [cut: the rest of the diff is past the bound]\n")
 		diff = b.Bytes()
+	}
+	if note != "" {
+		diff = append([]byte(note), diff...)
 	}
 	path := filepath.Join(w.dir, prompt.ReviewDiffFile)
 	if _, err := os.Lstat(path); err == nil {

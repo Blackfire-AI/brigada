@@ -328,6 +328,10 @@ type jobGrant struct {
 	// ReviewBranch is the task's result branch a review job reviews
 	// (§7): the worktree sits at it. Empty for every other kind.
 	ReviewBranch string `json:"review_branch,omitempty"`
+	// ReviewSince is the head a re-review's previous review judged (§7):
+	// the diff file then holds the branch's commits since it. Empty for
+	// every other job.
+	ReviewSince string `json:"review_since,omitempty"`
 	// Branch is the branch the engine names a work or fix job to work
 	// on (§5.1): the worktree is built on it and the run's work is
 	// pushed to it. Empty for a review and a foreman turn — and for an
@@ -372,6 +376,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		Setup:           g.Setup,
 		ExtraRepos:      g.ExtraRepos,
 		ReviewBranch:    g.ReviewBranch,
+		ReviewSince:     g.ReviewSince,
 		Branch:          g.Branch,
 		Attempt:         g.Attempt,
 		ResumeSessionID: g.ResumeSessionID,

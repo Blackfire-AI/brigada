@@ -69,6 +69,10 @@ type LeaseGrant struct {
 	// own branch. BaseRef and ReviewBranch together name the diff the
 	// review prompt tells the reviewer to run.
 	ReviewBranch string
+	// ReviewSince is, for a re-review (§7), the head the review it
+	// resumes judged: the runner's diff file holds the commits since it.
+	// Empty for every other job.
+	ReviewSince string
 	// Branch is the branch the engine names a work or fix job to work
 	// on (§5.1): a work job makes it from the base ref, a fix round
 	// continues the task's current branch, and the runner builds and
@@ -259,7 +263,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		if j.ReleasedBy == owner && j.ReleasedUntil != "" && j.ReleasedUntil > nowStr {
 			continue
 		}
-		if j.Mode == ModeSession {
+		if usesKeySession(j) {
 			free, err := affinityFreeTx(tx, j.Key, owner)
 			if err != nil {
 				return nil, err
@@ -436,7 +440,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			return nil, fmt.Errorf("lease job %d: %w", j.ID, err)
 		}
 		usage.Add(cjob.Runner, cjob.Account, cjob.Model, cjob.Plan)
-		if j.Mode == ModeSession {
+		if usesKeySession(j) {
 			// The session now sits on this runner: later session jobs on
 			// the key are invisible to the others (§8).
 			if err := upsertSessionTx(tx, j.Key, owner, "", now); err != nil {
@@ -470,6 +474,9 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			weight := chosen.weight
 			payload := eventPayload{Agent: agent, Score: chosen.score, Pick: pickPinned, Weight: &weight,
 				TierAsked: chosen.tierAsked, TierServed: chosen.tierServed}
+			if j.Kind == KindReview && j.Mode == ModeSession {
+				payload.Pick = pickResumed // a re-review's agent is the previous review's (§7)
+			}
 			if j.RequireAgent == 0 {
 				payload.Pick, payload.Draw = pickSampled, chosen.draw
 				payload.Candidates = make([]Ranked, 0, len(cands))
@@ -546,8 +553,15 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 			extraRepos = def.repos
 		}
-		resume := ""
-		if j.Mode == ModeSession {
+		resume, reviewSince := "", ""
+		if j.Kind == KindReview && j.Mode == ModeSession && j.TaskID != 0 {
+			// A re-review (§7) resumes the session of the review it answers,
+			// not the key's, which is the author's; the runner shows it the
+			// fix round alone, since the head that review judged.
+			if resume, reviewSince, err = reReviewLeaseTx(tx, j); err != nil {
+				return nil, err
+			}
+		} else if j.Mode == ModeSession {
 			// What the key's last run ended on, if it left a session id
 			// behind (§4.2); empty for the key's first session job.
 			var sid sql.NullString
@@ -599,6 +613,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			Setup:           setup,
 			ExtraRepos:      extraRepos,
 			ReviewBranch:    reviewBranch,
+			ReviewSince:     reviewSince,
 			Branch:          jobBranch,
 			Attempt:         j.Attempts + 1,
 			ResumeSessionID: resume,
