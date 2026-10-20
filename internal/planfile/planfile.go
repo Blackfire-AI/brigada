@@ -48,6 +48,10 @@ type Plan struct {
 type Task struct {
 	Tier   string // the foreman's tier; empty means standard
 	Effort string
+	// ReviewTier and ReviewEffort are the task's own tier and effort for its
+	// reviews (§7, §8); empty = the engine default.
+	ReviewTier   string
+	ReviewEffort string
 	// Caps are the task's own round-cap overrides (§14), keyed
 	// fix_rounds, review_rounds and restart; nil = the engine defaults.
 	Caps     map[string]int
@@ -82,7 +86,7 @@ const header = `# Brigada plan file (§6.4): a mirror of the engine's store, whi
 # and the open questions — never transcripts.
 `
 
-const taskOptionsComment = "# Optional tier (light, standard, heavy) and effort (low, medium, high, max)\n# describe the model needed and how hard it should think (§6.1); caps\n# override the task's fix_rounds, review_rounds and restart budgets (§14).\n"
+const taskOptionsComment = "# Optional tier (light, standard, heavy) and effort (low, medium, high, max)\n# describe the model needed and how hard it should think (§6.1);\n# review_tier and review_effort do the same for its reviews (§7, §8); caps\n# override the task's fix_rounds, review_rounds and restart budgets (§14).\n"
 
 // Keep the default file byte-for-byte stable; describe optional keys when used.
 const tasksComment = tasksGraphComment + taskOptionsComment
@@ -115,7 +119,7 @@ func Render(p Plan) ([]byte, error) {
 	fmt.Fprintf(&b, "updated: %s\n", p.Updated.UTC().Format(time.RFC3339Nano))
 	comment := tasksGraphComment
 	for _, t := range p.Tasks {
-		if (t.Tier != "" && t.Tier != adapter.TierStandard) || t.Effort != "" || len(t.Caps) > 0 {
+		if (t.Tier != "" && t.Tier != adapter.TierStandard) || t.Effort != "" || t.ReviewTier != "" || t.ReviewEffort != "" || len(t.Caps) > 0 {
 			comment = tasksComment
 			break
 		}
@@ -154,6 +158,18 @@ func Render(p Plan) ([]byte, error) {
 		}
 		if t.Effort != "" {
 			fmt.Fprintf(&b, "    effort: %s\n", t.Effort)
+		}
+		if err := adapter.ValidateTier(t.ReviewTier); err != nil {
+			return nil, fmt.Errorf("task %d: review %w", t.ID, err)
+		}
+		if err := adapter.ValidateTaskEffort(t.ReviewEffort); err != nil {
+			return nil, fmt.Errorf("task %d: review %w", t.ID, err)
+		}
+		if t.ReviewTier != "" {
+			fmt.Fprintf(&b, "    review_tier: %s\n", t.ReviewTier)
+		}
+		if t.ReviewEffort != "" {
+			fmt.Fprintf(&b, "    review_effort: %s\n", t.ReviewEffort)
 		}
 		if len(t.Caps) > 0 {
 			line, err := formatCaps(t.Caps)
@@ -395,6 +411,22 @@ func (r *reader) task() (Task, error) {
 		}
 		if err := adapter.ValidateTaskEffort(t.Effort); err != nil {
 			return Task{}, r.errf("%v", err)
+		}
+	}
+	if r.peekIs(in + "review_tier:") {
+		if t.ReviewTier, err = r.wordField(in, "review_tier"); err != nil {
+			return Task{}, err
+		}
+		if err := adapter.ValidateTier(t.ReviewTier); err != nil {
+			return Task{}, r.errf("review %v", err)
+		}
+	}
+	if r.peekIs(in + "review_effort:") {
+		if t.ReviewEffort, err = r.wordField(in, "review_effort"); err != nil {
+			return Task{}, err
+		}
+		if err := adapter.ValidateTaskEffort(t.ReviewEffort); err != nil {
+			return Task{}, r.errf("review %v", err)
 		}
 	}
 	if r.peekIs(in + "caps:") {

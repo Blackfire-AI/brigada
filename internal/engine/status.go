@@ -124,6 +124,11 @@ type StatusTask struct {
 	// EffectiveEffort is the effort the escalation ladder runs the task
 	// at (§8); it equals Effort until an effort step.
 	EffectiveEffort string `json:"effective_effort,omitempty"`
+	// ReviewTier and ReviewEffort are the task's own tier and effort for its
+	// reviews (§7, §8); empty = the engine default (review.tier,
+	// review.effort), which status leaves unsaid.
+	ReviewTier   string `json:"review_tier,omitempty"`
+	ReviewEffort string `json:"review_effort,omitempty"`
 	// Caps are the task's own round-cap overrides (§14); absent keys run
 	// at the engine default.
 	Caps   map[string]int `json:"caps,omitempty"`
@@ -456,7 +461,7 @@ func statusPlansTx(tx *sql.Tx, project int64, now time.Time) ([]StatusPlan, erro
 
 // statusPlanTasksTx reads one status plan's tasks, in id order.
 func statusPlanTasksTx(tx *sql.Tx, plan int64) ([]StatusTask, error) {
-	rows, err := tx.Query(`SELECT id, title, class, state, COALESCE(branch, ''), tier, effective_tier, effort, effective_effort, caps
+	rows, err := tx.Query(`SELECT id, title, class, state, COALESCE(branch, ''), tier, effective_tier, effort, effective_effort, review_tier, review_effort, caps
 		FROM tasks WHERE plan_id = ? ORDER BY id`, plan)
 	if err != nil {
 		return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
@@ -466,7 +471,7 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64) ([]StatusTask, error) {
 	for rows.Next() {
 		var t StatusTask
 		var capsJSON string
-		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &capsJSON); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON); err != nil {
 			return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
 		}
 		t.Caps = parseTaskCaps(capsJSON)

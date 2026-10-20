@@ -288,11 +288,13 @@ func TestTierQueueTTLNamesAskedTier(t *testing.T) {
 }
 
 // tierReview submits a review of a task of the given tier, written by the
-// claude family, so only another family may review it (§7).
+// claude family, so only another family may review it (§7). The task's own
+// review tier pins the review to the tier under test, whatever the
+// default below-the-task's says.
 func (e *env) tierReview(tier string) SubmitResult {
 	e.t.Helper()
 	task := e.addTask("{}")
-	e.exec("UPDATE tasks SET tier = ?, effective_tier = ? WHERE id = ?", tier, tier, task)
+	e.exec("UPDATE tasks SET tier = ?, effective_tier = ?, review_tier = ? WHERE id = ?", tier, tier, tier, task)
 	p := e.workOn(task)
 	p.Kind = KindReview
 	p.ExcludeFamily = "claude"

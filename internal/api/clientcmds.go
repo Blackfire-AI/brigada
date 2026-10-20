@@ -217,6 +217,10 @@ type PlanCreate struct {
 type PlanTask struct {
 	Tier   string `json:"tier,omitempty"`
 	Effort string `json:"effort,omitempty"`
+	// ReviewTier and ReviewEffort are the task's own tier and effort for
+	// its reviews (§7, §8); empty = the engine default.
+	ReviewTier   string `json:"review_tier,omitempty"`
+	ReviewEffort string `json:"review_effort,omitempty"`
 	// Caps overrides the round caps (fix_rounds, review_rounds, restart);
 	// absent keys keep the engine default.
 	Caps  map[string]int `json:"caps,omitempty"`
@@ -267,7 +271,7 @@ type PlanCreatedTask struct {
 func (c *Client) CreatePlan(ctx context.Context, p PlanCreate, idemKey string) (PlanCreateResult, error) {
 	body := planCreateRequest{RepoURL: p.RepoURL, Title: p.Title, Tasks: make([]planTaskBody, len(p.Tasks))}
 	for i, t := range p.Tasks {
-		body.Tasks[i] = planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, Caps: t.Caps, ExtraRepos: t.ExtraRepos}
+		body.Tasks[i] = planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos}
 	}
 	var out planCreateResponse
 	if err := c.callKeyed(ctx, http.MethodPost, "/v1/plans", idemKey, body, &out); err != nil {
@@ -299,12 +303,15 @@ type PlanAmend struct {
 	Retier   []PlanRetier
 }
 
-// PlanRetier changes a waiting or parked task's tier or effort; empty keeps it.
+// PlanRetier changes a waiting or parked task's tier, effort, review tier or
+// review effort; empty keeps it.
 type PlanRetier struct {
-	Task   string
-	Tier   string
-	Effort string
-	Caps   map[string]int // merged key by key into the task's caps
+	Task         string
+	Tier         string
+	Effort       string
+	ReviewTier   string
+	ReviewEffort string
+	Caps         map[string]int // merged key by key into the task's caps
 }
 
 // PlanRetarget replaces one waiting task's whole dependency set.
@@ -336,13 +343,13 @@ type PlanAmendResult struct {
 func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey string) (PlanAmendResult, error) {
 	body := planAmendRequest{Cancel: a.Cancel}
 	for _, t := range a.Add {
-		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, Caps: t.Caps, ExtraRepos: t.ExtraRepos})
+		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos})
 	}
 	for _, rt := range a.Retarget {
 		body.Retarget = append(body.Retarget, planRetargetBody{Task: rt.Task, Deps: rt.Deps, Base: rt.Base, Continue: rt.Continue})
 	}
 	for _, rt := range a.Retier {
-		body.Retier = append(body.Retier, planRetierBody{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort, Caps: rt.Caps})
+		body.Retier = append(body.Retier, planRetierBody{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort, ReviewTier: rt.ReviewTier, ReviewEffort: rt.ReviewEffort, Caps: rt.Caps})
 	}
 	var out planAmendResponse
 	path := "/v1/plans/" + strconv.FormatInt(plan, 10) + "/amend"

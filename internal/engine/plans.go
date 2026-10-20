@@ -26,6 +26,11 @@ type PlanTask struct {
 	Class  string // '' = implement
 	Tier   string // '' = standard
 	Effort string // '' = the agent's own level
+	// ReviewTier and ReviewEffort are the task's own tier and effort for
+	// its reviews (§7, §8); '' = the engine default (review.tier,
+	// review.effort).
+	ReviewTier   string
+	ReviewEffort string
 	// Caps overrides the engine's round caps for this task, key by key
 	// (fix_rounds, review_rounds, restart; 0 to 10); nil keeps them all.
 	Caps map[string]int
@@ -332,9 +337,9 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		if len(deps[i]) > 0 || verdict.Needed {
 			state = taskPending
 		}
-		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, created_at, updated_at)
-			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?)`,
-			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, taskCapsJSON(t.Caps), setupRec, extraRecs[i], taskTier(t.Tier), taskTier(t.Tier), t.Effort, t.Effort, nowStr, nowStr)
+		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, review_tier, review_effort, created_at, updated_at)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?)`,
+			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, taskCapsJSON(t.Caps), setupRec, extraRecs[i], taskTier(t.Tier), taskTier(t.Tier), t.Effort, t.Effort, t.ReviewTier, t.ReviewEffort, nowStr, nowStr)
 		if err != nil {
 			return CreatePlanResult{}, fmt.Errorf("create the task: %w", err)
 		}
@@ -511,5 +516,20 @@ func validateTaskTierEffort(t PlanTask) error {
 	if err := adapter.ValidateTier(t.Tier); err != nil {
 		return err
 	}
-	return adapter.ValidateTaskEffort(t.Effort)
+	if err := adapter.ValidateTaskEffort(t.Effort); err != nil {
+		return err
+	}
+	return validateReviewTierEffort(t.ReviewTier, t.ReviewEffort)
+}
+
+// validateReviewTierEffort checks a task's own review tier and review
+// effort; unset keeps the engine default.
+func validateReviewTierEffort(tier, effort string) error {
+	if err := adapter.ValidateTier(tier); err != nil {
+		return fmt.Errorf("review %w", err)
+	}
+	if err := adapter.ValidateTaskEffort(effort); err != nil {
+		return fmt.Errorf("review %w", err)
+	}
+	return nil
 }

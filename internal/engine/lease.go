@@ -282,7 +282,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 		}
 
-		cands, err := leaseAgentsTx(tx, e.cfg.Caps, e.cfg.Rand, owner, j, nowStr)
+		cands, err := leaseAgentsTx(tx, &e.cfg, e.cfg.Rand, owner, j, nowStr)
 		if err != nil {
 			return nil, err
 		}
@@ -416,12 +416,12 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		}
 		effort := ""
 		if j.TaskID != 0 {
-			var taskEffort string
-			if err := tx.QueryRow("SELECT COALESCE(NULLIF(effective_effort, ''), effort) FROM tasks WHERE id = ?", j.TaskID).Scan(&taskEffort); err != nil {
-				return nil, fmt.Errorf("read the effort of task %d: %w", j.TaskID, err)
+			taskEffort, err := jobEffortTx(tx, e.cfg.Review, j)
+			if err != nil {
+				return nil, err
 			}
 			// The task's effective effort (its own, or the escalation
-			// ladder's step, §8), then the agent's own (already in its
+			// ladder's step, §8; a review's own, §7), then the agent's own (already in its
 			// harness's vocabulary), then medium: the default is resolved
 			// in brigada's levels before the harness maps them, so a
 			// harness without that control gets nothing.
@@ -780,16 +780,16 @@ func ranksBefore(a, b *agentCand) bool {
 // outright: that agent or none, never ranked against another. Empty
 // when the runner advertises no such agent — the caller then refuses
 // the lease, unless the runner advertises nothing at all.
-func leaseAgentsTx(tx *sql.Tx, limits caps.Limits, rnd func() float64, runner int64, j *jobRow, now string) ([]agentCand, error) {
-	return eligibleAgentsTx(tx, limits, rnd, runner, j, kindClass(j.Kind), now)
+func leaseAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, now string) ([]agentCand, error) {
+	return eligibleAgentsTx(tx, cfg, rnd, runner, j, kindClass(j.Kind), now)
 }
 
 // eligibleAgentsTx shares eligibility and ranking with automatic retries,
 // whose candidate lookup uses the task's class rather than the job kind's.
 // Runner 0 ranks all registered agents for an automatic restart's pin. A
 // caller that only asks who qualifies passes a nil rnd and gets id order.
-func eligibleAgentsTx(tx *sql.Tx, limits caps.Limits, rnd func() float64, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
-	return qualifyingAgentsTx(tx, limits, rnd, runner, j, class, now, false)
+func eligibleAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
+	return qualifyingAgentsTx(tx, cfg, rnd, runner, j, class, now, false)
 }
 
 // qualifyingAgentsTx is eligibleAgentsTx's lookup. With unavailable
@@ -798,18 +798,20 @@ func eligibleAgentsTx(tx *sql.Tx, limits caps.Limits, rnd func() float64, runner
 // but cannot take it yet — with their model, health and cooling
 // deadline filled in: what the cooling hold (§8.1) and the queue-TTL
 // park reason read. Unpinned task jobs are restricted to the served tier
-// before availability is checked. A review retry's agent exclusion is
+// before availability is checked: the task's effective tier for a work or
+// fix job, the review tier for a review (jobTierTx). A review retry's agent exclusion is
 // applied as the preference it is (§7): the lift is decided inside
 // qualifyingAgentRowsTx, so the tier choice above, the candidates and
 // the hold all read the same exclusion.
-func qualifyingAgentsTx(tx *sql.Tx, limits caps.Limits, rnd func() float64, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
+func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
+	limits := cfg.Caps
 	asked, served := "", ""
 	if j.TaskID != 0 && j.Kind != KindForeman {
-		if err := tx.QueryRow("SELECT effective_tier FROM tasks WHERE id = ?", j.TaskID).Scan(&asked); err != nil {
-			return nil, fmt.Errorf("read the tier of task %d: %w", j.TaskID, err)
+		var err error
+		if asked, err = jobTierTx(tx, cfg.Review, j); err != nil {
+			return nil, err
 		}
 		if j.RequireAgent == 0 {
-			var err error
 			served, err = tierServedTx(tx, limits, j, class, asked, now)
 			if err != nil {
 				return nil, err

@@ -52,6 +52,21 @@ var taskCapsProperties = map[string]any{
 	"restart":       map[string]any{"type": "integer", "minimum": 0, "maximum": 10, "description": "restarts (task_restart or automatic) the task may spend"},
 }
 
+// reviewTierSchema and reviewEffortSchema are the review_tier and
+// review_effort properties of a plan task (§7, §8).
+var (
+	reviewTierSchema = map[string]any{
+		"type":        "string",
+		"enum":        []string{"light", "standard", "heavy"},
+		"description": "the tier of the model that reviews this task; default: one tier below the task's current tier (light stays light), as the engine's review.tier says. Set it for a task whose diff is hard to judge",
+	}
+	reviewEffortSchema = map[string]any{
+		"type":        "string",
+		"enum":        []string{"low", "medium", "high", "max"},
+		"description": "how hard the reviewer should think; default: medium, as the engine's review.effort says, whatever the task's own effort",
+	}
+)
+
 // taskCapsSchema is the caps property of a plan task.
 var taskCapsSchema = map[string]any{
 	"type":                 "object",
@@ -123,10 +138,12 @@ var tools = []Tool{
 								"type":        "string",
 								"description": "the task's class (default implement)",
 							},
-							"tier":        map[string]any{"type": "string", "enum": []string{"light", "standard", "heavy"}, "description": "how heavy a model the task needs: light for small, well-specified edits; standard (default) for ordinary work; heavy for design-heavy or cross-cutting work. brigada samples among the agents of that tier by their record on this repo and cost weight, so a cheaper or better-recorded agent is picked more often; a task that fails is bumped one tier up automatically"},
-							"effort":      map[string]any{"type": "string", "enum": []string{"low", "medium", "high", "max"}, "description": "how hard that model should think; default: the agent's own level, else medium"},
-							"caps":        taskCapsSchema,
-							"extra_repos": extraReposSchema,
+							"tier":          map[string]any{"type": "string", "enum": []string{"light", "standard", "heavy"}, "description": "how heavy a model the task needs: light for small, well-specified edits; standard (default) for ordinary work; heavy for design-heavy or cross-cutting work. brigada samples among the agents of that tier by their record on this repo and cost weight, so a cheaper or better-recorded agent is picked more often; a task that fails is bumped one tier up automatically"},
+							"effort":        map[string]any{"type": "string", "enum": []string{"low", "medium", "high", "max"}, "description": "how hard that model should think; default: the agent's own level, else medium"},
+							"review_tier":   reviewTierSchema,
+							"review_effort": reviewEffortSchema,
+							"caps":          taskCapsSchema,
+							"extra_repos":   extraReposSchema,
 						},
 						"required": []string{"spec"},
 					},
@@ -159,15 +176,17 @@ var tools = []Tool{
 								"items":       map[string]any{"type": []string{"string", "integer"}},
 								"description": "tasks of this plan (new or old, by name or id) that must be done before this one starts; default none",
 							},
-							"base":        map[string]any{"type": []string{"string", "integer"}, "description": "one of its deps whose result branch the work starts from; default as plan_create's, and the continued dep when continue is set"},
-							"continue":    map[string]any{"type": []string{"string", "integer"}, "description": "one of its deps whose worker starts this task in its own session; default as plan_create's; the continued dep is the task's base"},
-							"spec":        map[string]any{"type": "string", "description": "the task spec, verbatim: what the worker is to do. Never ask the worker to run the check, commit or push"},
-							"check":       map[string]any{"type": "string", "description": "the check command the runner runs after a done; empty = none"},
-							"class":       map[string]any{"type": "string", "description": "the task's class (default implement)"},
-							"tier":        map[string]any{"type": "string", "enum": []string{"light", "standard", "heavy"}, "description": "how heavy a model the task needs: light for small, well-specified edits; standard (default) for ordinary work; heavy for design-heavy or cross-cutting work. brigada samples among the agents of that tier by their record on this repo and cost weight, so a cheaper or better-recorded agent is picked more often; a task that fails is bumped one tier up automatically"},
-							"effort":      map[string]any{"type": "string", "enum": []string{"low", "medium", "high", "max"}, "description": "how hard that model should think; default: the agent's own level, else medium"},
-							"caps":        taskCapsSchema,
-							"extra_repos": extraReposSchema,
+							"base":          map[string]any{"type": []string{"string", "integer"}, "description": "one of its deps whose result branch the work starts from; default as plan_create's, and the continued dep when continue is set"},
+							"continue":      map[string]any{"type": []string{"string", "integer"}, "description": "one of its deps whose worker starts this task in its own session; default as plan_create's; the continued dep is the task's base"},
+							"spec":          map[string]any{"type": "string", "description": "the task spec, verbatim: what the worker is to do. Never ask the worker to run the check, commit or push"},
+							"check":         map[string]any{"type": "string", "description": "the check command the runner runs after a done; empty = none"},
+							"class":         map[string]any{"type": "string", "description": "the task's class (default implement)"},
+							"tier":          map[string]any{"type": "string", "enum": []string{"light", "standard", "heavy"}, "description": "how heavy a model the task needs: light for small, well-specified edits; standard (default) for ordinary work; heavy for design-heavy or cross-cutting work. brigada samples among the agents of that tier by their record on this repo and cost weight, so a cheaper or better-recorded agent is picked more often; a task that fails is bumped one tier up automatically"},
+							"effort":        map[string]any{"type": "string", "enum": []string{"low", "medium", "high", "max"}, "description": "how hard that model should think; default: the agent's own level, else medium"},
+							"review_tier":   reviewTierSchema,
+							"review_effort": reviewEffortSchema,
+							"caps":          taskCapsSchema,
+							"extra_repos":   extraReposSchema,
 						},
 						"required": []string{"spec"},
 					},
@@ -179,14 +198,16 @@ var tools = []Tool{
 				},
 				"retier": map[string]any{
 					"type":        "array",
-					"description": "waiting or parked tasks whose tier, effort or round caps you change: lower a tier brigada bumped, raise one before a retry, or allow more restarts",
+					"description": "waiting or parked tasks whose tier, effort, review tier, review effort or round caps you change: lower a tier brigada bumped, raise one before a retry, or allow more restarts",
 					"items": map[string]any{
 						"type": "object",
 						"properties": map[string]any{
-							"task":   map[string]any{"type": []string{"string", "integer"}, "description": "the task, by name or id"},
-							"tier":   map[string]any{"type": "string", "enum": []string{"light", "standard", "heavy"}, "description": "new tier; omitted keeps the current tier"},
-							"effort": map[string]any{"type": "string", "enum": []string{"low", "medium", "high", "max"}, "description": "new effort; omitted keeps the current effort"},
-							"caps":   map[string]any{"type": "object", "properties": taskCapsProperties, "additionalProperties": false, "description": "round caps to change, merged key by key into the task's own: give a parked task more restarts before task_restart; omitted keys keep their value"},
+							"task":          map[string]any{"type": []string{"string", "integer"}, "description": "the task, by name or id"},
+							"tier":          map[string]any{"type": "string", "enum": []string{"light", "standard", "heavy"}, "description": "new tier; omitted keeps the current tier"},
+							"effort":        map[string]any{"type": "string", "enum": []string{"low", "medium", "high", "max"}, "description": "new effort; omitted keeps the current effort"},
+							"review_tier":   map[string]any{"type": "string", "enum": []string{"light", "standard", "heavy"}, "description": "new review tier; omitted keeps the current one"},
+							"review_effort": map[string]any{"type": "string", "enum": []string{"low", "medium", "high", "max"}, "description": "new review effort; omitted keeps the current one"},
+							"caps":          map[string]any{"type": "object", "properties": taskCapsProperties, "additionalProperties": false, "description": "round caps to change, merged key by key into the task's own: give a parked task more restarts before task_restart; omitted keys keep their value"},
 						},
 						"required": []string{"task"},
 					},
