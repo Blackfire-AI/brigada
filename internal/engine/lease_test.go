@@ -300,7 +300,7 @@ func TestLeaseRecordsTheAgent(t *testing.T) {
 func TestSessionAffinity(t *testing.T) {
 	e := newEnv(t)
 	// Heavy tasks retain the park path; tier escalation has its own coverage.
-	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", e.task)
+	e.exec("UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high' WHERE id = ?", e.task)
 	p := e.work()
 	p.Mode = ModeSession
 	r := e.submit(p)

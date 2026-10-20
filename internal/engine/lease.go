@@ -404,10 +404,11 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		effort := ""
 		if j.TaskID != 0 {
 			var taskEffort string
-			if err := tx.QueryRow("SELECT effort FROM tasks WHERE id = ?", j.TaskID).Scan(&taskEffort); err != nil {
+			if err := tx.QueryRow("SELECT COALESCE(NULLIF(effective_effort, ''), effort) FROM tasks WHERE id = ?", j.TaskID).Scan(&taskEffort); err != nil {
 				return nil, fmt.Errorf("read the effort of task %d: %w", j.TaskID, err)
 			}
-			// The task's effort, then the agent's own (already in its
+			// The task's effective effort (its own, or the escalation
+			// ladder's step, §8), then the agent's own (already in its
 			// harness's vocabulary), then medium: the default is resolved
 			// in brigada's levels before the harness maps them, so a
 			// harness without that control gets nothing.

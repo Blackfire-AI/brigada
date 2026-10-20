@@ -300,9 +300,9 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		if len(deps[i]) > 0 || verdict.Needed {
 			state = taskPending
 		}
-		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, created_at, updated_at)
-			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?)`,
-			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, setupRec, extraRecs[i], taskTier(t.Tier), taskTier(t.Tier), t.Effort, nowStr, nowStr)
+		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, created_at, updated_at)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, '{}', NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?)`,
+			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, setupRec, extraRecs[i], taskTier(t.Tier), taskTier(t.Tier), t.Effort, t.Effort, nowStr, nowStr)
 		if err != nil {
 			return CreatePlanResult{}, fmt.Errorf("create the task: %w", err)
 		}

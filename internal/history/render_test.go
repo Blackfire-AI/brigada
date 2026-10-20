@@ -70,3 +70,10 @@ func TestRenderTierBump(t *testing.T) {
 		t.Errorf("summary = %q", got)
 	}
 }
+
+func TestRenderEffortBump(t *testing.T) {
+	it := Item{Type: TypeEvent, Kind: "task_effort_bumped", Payload: []byte(`{"reason":"no-result","effort_from":"medium","effort_to":"high"}`)}
+	if got := summary(it); got != "task effort medium -> high: no-result" {
+		t.Errorf("summary = %q", got)
+	}
+}

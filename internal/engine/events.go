@@ -49,6 +49,7 @@ const (
 	evTaskDiscoveries        = "task_discoveries"          // a worker's result carried discoveries; they reach the foreman, no wake of their own (§4.2)
 	evTaskAnswered           = "task_answered"             // the foreman answered; the author's session resumes (§3)
 	evTaskTierBumped         = "task_tier_bumped"          // rule escalation; TierAsked is the old tier, TierServed the new tier, Reason the trigger (§8)
+	evTaskEffortBumped       = "task_effort_bumped"        // rule escalation on the same tier; EffortFrom is the old effort, EffortTo the new, Reason the trigger (§8)
 	evTaskRestarted          = "task_restarted"            // a foreman or automatic restart queued a fresh work attempt (§3, §5.6)
 	evTaskFailed             = "task_failed"               // the run failed or said nothing usable; the foreman decides (§3)
 	evReviewChanges          = "review_changes"            // the reviewer wants changes; a fix round answers them (§3, §7)
@@ -132,7 +133,9 @@ type eventPayload struct {
 	Pick       string   `json:"pick,omitempty"`
 	TierAsked  string   `json:"tier_asked,omitempty"`
 	TierServed string   `json:"tier_served,omitempty"`
-	Retiered   []int64  `json:"retiered,omitempty"` // tasks whose tier or effort plan_amend changed
+	EffortFrom string   `json:"effort_from,omitempty"` // an effort step's old effective effort (§8)
+	EffortTo   string   `json:"effort_to,omitempty"`   // an effort step's new effective effort (§8)
+	Retiered   []int64  `json:"retiered,omitempty"`    // tasks whose tier or effort plan_amend changed
 	PassedOver []int64  `json:"passed_over,omitempty"`
 	Weight     *int     `json:"weight,omitempty"`
 	Draw       float64  `json:"draw,omitempty"`

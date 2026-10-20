@@ -190,7 +190,9 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 			if !haveResult {
 				why = "no-result"
 			}
-			if bumped, err := e.escalateTierTx(tx, job, why, reason, now); err != nil || bumped {
+			// A missing result may be the runner's own fault: it climbs
+			// the effort steps but never raises the tier (§8).
+			if bumped, err := e.escalateTierTx(tx, job, why, reason, haveResult, now); err != nil || bumped {
 				return err
 			}
 		}
@@ -334,22 +336,50 @@ func (e *Engine) autoRestartTaskTx(tx *sql.Tx, job *jobRow, kind, text string, n
 	return true, e.wakeForemanTx(tx, job.ProjectID, now)
 }
 
-// escalateTierTx spends one restart on the next tier before asking the foreman.
-// Callers have not yet recorded this attempt's unsuccessful outcome. Both
-// events are rule decisions: neither creates an inbox row or wakes a turn.
-func (e *Engine) escalateTierTx(tx *sql.Tx, job *jobRow, reason, note string, now time.Time) (bool, error) {
-	var before string
-	if err := tx.QueryRow("SELECT effective_tier FROM tasks WHERE id = ?", job.TaskID).Scan(&before); err != nil {
+// escalateTierTx climbs the escalation ladder one step (§8), spending one
+// restart on it before asking the foreman: first the effective effort one
+// step up on the same tier (low -> medium -> high, an empty effort counting
+// as medium, never to max), and only from high effort the next tier, with
+// the effective effort reset to the task's own. raiseTier false keeps the
+// task on its tier: a run with no readable result may be the runner's
+// fault, so it gets the effort steps alone. Callers have not yet recorded
+// this attempt's unsuccessful outcome. The events are rule decisions: none
+// creates an inbox row or wakes a turn.
+func (e *Engine) escalateTierTx(tx *sql.Tx, job *jobRow, reason, note string, raiseTier bool, now time.Time) (bool, error) {
+	var before, effBefore string
+	if err := tx.QueryRow("SELECT effective_tier, COALESCE(NULLIF(effective_effort, ''), effort) FROM tasks WHERE id = ?", job.TaskID).
+		Scan(&before, &effBefore); err != nil {
 		return false, fmt.Errorf("read the tier of task %d: %w", job.TaskID, err)
 	}
+	// The ladder starts from the effort the lease resolved: with no task
+	// effort, the agent's explicit one when it is one of brigada's levels.
+	shownEffort := effBefore
+	if shownEffort == "" && job.AgentID != 0 {
+		var agentEffort string
+		if err := tx.QueryRow("SELECT effort FROM agents WHERE id = ?", job.AgentID).Scan(&agentEffort); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("read the effort of agent %d: %w", job.AgentID, err)
+		}
+		if adapter.ValidateTaskEffort(agentEffort) == nil {
+			shownEffort = agentEffort
+		}
+	}
+	if shownEffort == "" {
+		shownEffort = defaultTaskEffort
+	}
+	effAfter := nextEffort(shownEffort)
 	var after string
-	switch before {
-	case adapter.TierLight:
-		after = adapter.TierStandard
-	case adapter.TierStandard:
-		after = adapter.TierHeavy
-	default:
-		return false, nil
+	if effAfter == "" {
+		if !raiseTier {
+			return false, nil
+		}
+		switch before {
+		case adapter.TierLight:
+			after = adapter.TierStandard
+		case adapter.TierStandard:
+			after = adapter.TierHeavy
+		default:
+			return false, nil
+		}
 	}
 	if _, capped, err := e.roundCapReached(tx, SubmitParams{TaskID: job.TaskID, Restart: true}); err != nil || capped {
 		return false, err
@@ -357,14 +387,24 @@ func (e *Engine) escalateTierTx(tx *sql.Tx, job *jobRow, reason, note string, no
 	if err := recordTaskOutcomeTx(tx, job, false, now); err != nil {
 		return false, err
 	}
-	if _, err := tx.Exec("UPDATE tasks SET effective_tier = ?, updated_at = ? WHERE id = ?", after, fmtTime(now), job.TaskID); err != nil {
-		return false, fmt.Errorf("bump the tier of task %d: %w", job.TaskID, err)
+	if effAfter != "" {
+		if _, err := tx.Exec("UPDATE tasks SET effective_effort = ?, updated_at = ? WHERE id = ?", effAfter, fmtTime(now), job.TaskID); err != nil {
+			return false, fmt.Errorf("bump the effort of task %d: %w", job.TaskID, err)
+		}
+		if _, err := appendEventTx(tx, evTaskEffortBumped, job.ProjectID, job.TaskID, job.ID,
+			eventPayload{Reason: reason, EffortFrom: shownEffort, EffortTo: effAfter}, now); err != nil {
+			return false, err
+		}
+	} else {
+		if _, err := tx.Exec("UPDATE tasks SET effective_tier = ?, effective_effort = effort, updated_at = ? WHERE id = ?", after, fmtTime(now), job.TaskID); err != nil {
+			return false, fmt.Errorf("bump the tier of task %d: %w", job.TaskID, err)
+		}
+		if _, err := appendEventTx(tx, evTaskTierBumped, job.ProjectID, job.TaskID, job.ID,
+			eventPayload{Reason: reason, TierAsked: before, TierServed: after}, now); err != nil {
+			return false, err
+		}
 	}
-	if _, err := appendEventTx(tx, evTaskTierBumped, job.ProjectID, job.TaskID, job.ID,
-		eventPayload{Reason: reason, TierAsked: before, TierServed: after}, now); err != nil {
-		return false, err
-	}
-	note = boundNote(fmt.Sprintf("previous attempt (tier %s) %s: %s", before, reason, note))
+	note = boundNote(fmt.Sprintf("previous attempt (tier %s, effort %s) %s: %s", before, shownEffort, reason, note))
 	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, now)
 	if err != nil {
 		return false, err
@@ -372,6 +412,20 @@ func (e *Engine) escalateTierTx(tx *sql.Tx, job *jobRow, reason, note string, no
 	_, err = appendEventTx(tx, evTaskRestarted, job.ProjectID, job.TaskID, r.JobID,
 		eventPayload{Status: taskReady, Run: int64(r.Run), Reason: reason}, now)
 	return err == nil, err
+}
+
+// nextEffort is the escalation ladder's effort step (§8): low to medium,
+// medium to high. High and max have no step, so the ladder never raises
+// effort to max; "" means the tier comes next.
+func nextEffort(effort string) string {
+	switch effort {
+	case "low":
+		return "medium"
+	case "medium":
+		return "high"
+	default:
+		return ""
+	}
 }
 
 // queueFixRoundTx queues the task's next fix round (§3): a job of kind
@@ -451,7 +505,7 @@ func (e *Engine) outOfRoundsTx(tx *sql.Tx, job *jobRow, round, note string, fail
 	if failure != nil {
 		feedback = failure.feedback()
 	}
-	if bumped, err := e.escalateTierTx(tx, job, round+" spent", feedback, now); err != nil || bumped {
+	if bumped, err := e.escalateTierTx(tx, job, round+" spent", feedback, true, now); err != nil || bumped {
 		return err
 	}
 	reason := "the task's " + round + " are spent"
@@ -510,6 +564,9 @@ func (f *checkFailure) feedback() string {
 func checkEventText(kind string, p eventPayload) (text string, ok bool) {
 	if kind == evTaskTierBumped {
 		return fmt.Sprintf("task tier %s -> %s: %s", p.TierAsked, p.TierServed, p.Reason), true
+	}
+	if kind == evTaskEffortBumped {
+		return fmt.Sprintf("task effort %s -> %s: %s", p.EffortFrom, p.EffortTo, p.Reason), true
 	}
 	if p.Check == "" || (kind != evTaskCheckFailed && kind != evTaskOutOfRounds) {
 		return "", false
