@@ -549,13 +549,14 @@ You ask; the foreman turns the ask into a **plan**: a set of tasks, each with a 
 - The foreman can amend a live plan: add tasks, cancel tasks, re-point dependencies, or change a waiting or parked task's tier and effort.
 - A plan is `done` when no live work is left. That is not the same as everything succeeding: the plan's done report names the tasks that failed, that were cancelled without your approval, and that never ran.
 
-Each task also has three fields, set by the foreman in `plan_create` or `plan_amend`:
+Each task also has four fields, set by the foreman in `plan_create` or `plan_amend`:
 
 | Field | Values | Default | Meaning |
 |---|---|---|---|
 | `tier` | `light`, `standard`, `heavy` | `standard` | How heavy a model the task needs; the dispatcher selects an agent of that tier, with fallback when needed ([section 8](#tiers)). |
 | `effort` | `low`, `medium`, `high`, `max` | the agent's effort, else `medium` | How hard the model should think on this task, mapped to the chosen harness ([section 8](#effort)). |
 | `caps` | an object with any of `fix_rounds`, `review_rounds`, `restart`, each an integer from 0 to 10 | the engine's defaults, per key | This task's own round budgets ([Rounds](#rounds)). An absent key keeps the default; an unknown key or a value out of range refuses the whole call. |
+| `continue` | the name of one of the task's `deps` | none | Which dependency's worker starts this task (decided 2026-10-20): when that dep is done, this task's first work job resumes the dep author's session on its own agent, so it starts with the files it already read instead of paying the cold start a new session pays. The continued dep is the task's base: `base` defaults to it, and a `base` naming another dep refuses the whole call, as a `continue` that is not one of the task's deps does. When the session or its agent is not available — the session id is unknown, the agent is gone, broken, capped at 0, cooling for more than an hour, or outside the task's tier — the task starts fresh as usual, and a `task_restart` of it always starts fresh. `brigada status` shows `continues <dep>` beside the task. |
 
 None of the fields triggers approval. The plan shown for approval includes tier and effort, and `brigada status` shows them beside tasks: `heavy @high`, for example. A task with non-default caps also shows them there, as `(restarts 4)` or `(fix 3, review 1, restarts 4)`. An unchanged standard tier is omitted; `standard->heavy` shows an automatic bump from the foreman's tier to the effective tier, and `@low->medium` an automatic effort step (`@default->high` when the task set no effort).
 
@@ -580,7 +581,7 @@ or through the coordinator's `plan_approve` and `plan_reject` ([section 3](#3-se
 
 ### The plan file
 
-Every change to a plan is mirrored to `.brigada/plans/<plan-id>.yaml` and pushed to the `brigada/plans` branch of your remote, not to your default branch. The file holds the graph, the task states, the branches, the open questions and the foreman's task tier and effort, but no transcripts. It carries the foreman's tier rather than the effective tier raised by escalation; a standard tier and an unset effort are omitted.
+Every change to a plan is mirrored to `.brigada/plans/<plan-id>.yaml` and pushed to the `brigada/plans` branch of your remote, not to your default branch. The file holds the graph (deps, base, and a `continue` where one is set), the task states, the branches, the open questions and the foreman's task tier and effort, but no transcripts. It carries the foreman's tier rather than the effective tier raised by escalation; a standard tier and an unset effort are omitted.
 
 The store is the authority, and the file is a copy that may lag: a push that fails is retried on the next change. The file exists so that `brigada recover` can rebuild plans after a lost store ([section 10](#10-backups-and-recovery)), and so you can see a plan from another machine.
 

@@ -29,6 +29,10 @@ type PlanRetarget struct {
 	// does; '' = the default rule. The task's earlier base goes with
 	// its earlier dependencies.
 	Base string
+	// Continue names the one of Deps whose author's session the task
+	// continues, as PlanTask.Continue does; '' = the earlier continued
+	// dep goes with the earlier dependencies.
+	Continue string
 }
 
 // PlanRetier changes a waiting or parked task's tier, effort or caps. Empty fields
@@ -115,6 +119,7 @@ type amendNode struct {
 	title                   string
 	deps                    []int // indexes into the node list
 	base                    int   // the named base, an index into the node list; -1 = none named
+	cont                    int   // the named continued dep, an index into the node list; -1 = none named
 	cancelNow, retargetedBy bool
 	skipApproved            bool // a cancelled task whose skip the user approved
 	// extra is the list the task itself named (§5.8), nil when it inherits
@@ -209,7 +214,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if title == "" {
 			title = taskTitleOf(t.Spec)
 		}
-		nodes = append(nodes, amendNode{base: -1, name: t.Name, state: taskPending, spec: t.Spec, check: t.Check, class: class, title: title,
+		nodes = append(nodes, amendNode{base: -1, cont: -1, name: t.Name, state: taskPending, spec: t.Spec, check: t.Check, class: class, title: title,
 			extra: t.ExtraRepos, extraRec: addExtraRecs[i]})
 	}
 	resolve := func(ref string) (int, error) {
@@ -311,7 +316,10 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	// Dependencies resolve after the cancels, against the whole amended
 	// node set, so a task cannot wait on one this amendment cancels.
 	// pickBase resolves a named base, which must be one of the owner's
-	// deps; -1 when none is named.
+	// deps; -1 when none is named. pickContinue does the same for a
+	// named continued dep. alignContinue then applies the base rule
+	// (§6.1): the continued dep is the task's base, so a base naming
+	// another dep is refused and an unnamed base defaults to it.
 	pickBase := func(owner int, ref string) (int, error) {
 		if ref == "" {
 			return -1, nil
@@ -325,12 +333,37 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		}
 		return -1, fmt.Errorf("%s has base %q, which is not one of its deps: a base is a task it depends on", nodes[owner].label(), ref)
 	}
+	pickContinue := func(owner int, ref string) (int, error) {
+		if ref == "" {
+			return -1, nil
+		}
+		if j, err := resolve(ref); err == nil {
+			for _, d := range nodes[owner].deps {
+				if d == j {
+					return j, nil
+				}
+			}
+		}
+		return -1, fmt.Errorf("%s continues %q, which is not one of its deps: a continued dep is a task it depends on", nodes[owner].label(), ref)
+	}
+	alignContinue := func(owner, base, cont int, baseRef, contRef string) (int, error) {
+		switch {
+		case cont < 0:
+			return base, nil
+		case base < 0:
+			return cont, nil
+		case base != cont:
+			return -1, fmt.Errorf("%s has base %q but continues %q: a continuing task's base is its continued dep",
+				nodes[owner].label(), baseRef, contRef)
+		}
+		return base, nil
+	}
 	for _, i := range retargeted {
 		var refs []string
-		var base string
+		var base, cont string
 		for _, rt := range am.Retarget {
 			if j, _ := resolve(rt.Task); j == i {
-				refs, base = rt.Deps, rt.Base
+				refs, base, cont = rt.Deps, rt.Base, rt.Continue
 			}
 		}
 		deps, err := liveDeps(i, refs)
@@ -339,6 +372,12 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		}
 		nodes[i].deps = deps
 		if nodes[i].base, err = pickBase(i, base); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("retarget: %w", err)
+		}
+		if nodes[i].cont, err = pickContinue(i, cont); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("retarget: %w", err)
+		}
+		if nodes[i].base, err = alignContinue(i, nodes[i].base, nodes[i].cont, base, cont); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("retarget: %w", err)
 		}
 	}
@@ -350,6 +389,12 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		}
 		nodes[i].deps = deps
 		if nodes[i].base, err = pickBase(i, t.Base); err != nil {
+			return AmendPlanResult{}, err
+		}
+		if nodes[i].cont, err = pickContinue(i, t.Continue); err != nil {
+			return AmendPlanResult{}, err
+		}
+		if nodes[i].base, err = alignContinue(i, nodes[i].base, nodes[i].cont, t.Base, t.Continue); err != nil {
 			return AmendPlanResult{}, err
 		}
 	}
@@ -448,8 +493,8 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	}
 	writeDeps := func(i int) error {
 		for _, j := range nodes[i].deps {
-			if _, err := tx.Exec(`INSERT INTO task_deps (plan_id, task_id, depends_on_task_id, is_base) VALUES (?, ?, ?, ?)`,
-				plan, nodes[i].id, nodes[j].id, nodes[i].base == j); err != nil {
+			if _, err := tx.Exec(`INSERT INTO task_deps (plan_id, task_id, depends_on_task_id, is_base, is_continue) VALUES (?, ?, ?, ?, ?)`,
+				plan, nodes[i].id, nodes[j].id, nodes[i].base == j, nodes[i].cont == j); err != nil {
 				return fmt.Errorf("record the dependencies: %w", err)
 			}
 		}
@@ -581,7 +626,7 @@ func loadAmendNodesTx(tx *sql.Tx, plan int64) ([]amendNode, error) {
 	}
 	var nodes []amendNode
 	for rows.Next() {
-		n := amendNode{base: -1}
+		n := amendNode{base: -1, cont: -1}
 		var extraRec string
 		if err := rows.Scan(&n.id, &n.name, &n.state, &n.title, &n.spec, &n.check, &n.class, &n.skipApproved, &extraRec); err != nil {
 			rows.Close()
@@ -603,15 +648,15 @@ func loadAmendNodesTx(tx *sql.Tx, plan int64) ([]amendNode, error) {
 	for i, n := range nodes {
 		idx[n.id] = i
 	}
-	edges, err := tx.Query(`SELECT task_id, depends_on_task_id, is_base FROM task_deps WHERE plan_id = ? ORDER BY task_id, depends_on_task_id`, plan)
+	edges, err := tx.Query(`SELECT task_id, depends_on_task_id, is_base, is_continue FROM task_deps WHERE plan_id = ? ORDER BY task_id, depends_on_task_id`, plan)
 	if err != nil {
 		return nil, fmt.Errorf("read the dependencies of plan %d: %w", plan, err)
 	}
 	defer edges.Close()
 	for edges.Next() {
 		var a, b int64
-		var isBase bool
-		if err := edges.Scan(&a, &b, &isBase); err != nil {
+		var isBase, isContinue bool
+		if err := edges.Scan(&a, &b, &isBase, &isContinue); err != nil {
 			return nil, fmt.Errorf("read the dependencies of plan %d: %w", plan, err)
 		}
 		i, ok1 := idx[a]
@@ -620,6 +665,9 @@ func loadAmendNodesTx(tx *sql.Tx, plan int64) ([]amendNode, error) {
 			nodes[i].deps = append(nodes[i].deps, j)
 			if isBase {
 				nodes[i].base = j
+			}
+			if isContinue {
+				nodes[i].cont = j
 			}
 		}
 	}

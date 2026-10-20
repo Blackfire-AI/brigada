@@ -15,6 +15,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Dispatch by outcome record and cost weight within a tier (Thompson sampling); concurrency caps per runner, account, model and plan.
 - Quota cooling per account, until the vendor's reset time when the CLI gives one.
 - Tiers (`light`, `standard`, `heavy`) and effort per task, with an escalation ladder that raises effort first, then the tier.
+- A task may `continue` one of its deps: its first work job resumes the dep author's session on its own agent, saving the cold start; fresh whenever the session or its agent is not available.
 - `brigada stats`: usage per job and cost per success.
 - `brigada land` squashes approved tasks onto your branch locally; it never pushes.
 - Adapters for Claude Code, Codex, Kimi and opencode.

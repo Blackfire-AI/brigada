@@ -71,7 +71,7 @@ func (s *Server) handlePlanCreate(w http.ResponseWriter, r *http.Request, id ide
 	}
 	tasks := make([]engine.PlanTask, len(req.Tasks))
 	for i, t := range req.Tasks {
-		tasks[i] = engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, Caps: t.Caps, ExtraRepos: t.ExtraRepos}
+		tasks[i] = engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, Caps: t.Caps, ExtraRepos: t.ExtraRepos}
 	}
 	res, err := s.eng.CreatePlan(r.Context(), project, req.Title, tasks)
 	if err != nil {
@@ -134,10 +134,17 @@ type planTaskBody struct {
 	Title  string         `json:"title"`
 	Name   string         `json:"name,omitempty"`
 	Deps   []string       `json:"deps,omitempty"`
-	Base   string         `json:"base,omitempty"`
-	Spec   string         `json:"spec"`
-	Check  string         `json:"check"`
-	Class  string         `json:"class"`
+	// Base names the one of Deps whose result branch the work starts
+	// from; '' = the only dep, or the continued dep when Continue names
+	// one, else the default branch.
+	Base string `json:"base,omitempty"`
+	// Continue names the one of Deps whose author's session the task's
+	// first work job resumes (§6.1); '' = start fresh. The continued
+	// dep is the task's base: a Base naming another dep is refused.
+	Continue string `json:"continue,omitempty"`
+	Spec     string `json:"spec"`
+	Check    string `json:"check"`
+	Class    string `json:"class"`
 	// ExtraRepos (§5.8): absent or null inherits the project default; a
 	// list, even [], replaces it. No omitempty: [] must survive the trip.
 	ExtraRepos []engine.ExtraRepo `json:"extra_repos"`
@@ -288,10 +295,10 @@ func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id iden
 	// the foreman's own cancellations are never approved.
 	am := engine.PlanAmendment{Cancel: req.Cancel, SkipApproved: id.role != roleForeman}
 	for _, t := range req.Add {
-		am.Add = append(am.Add, engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, Caps: t.Caps, ExtraRepos: t.ExtraRepos})
+		am.Add = append(am.Add, engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, Caps: t.Caps, ExtraRepos: t.ExtraRepos})
 	}
 	for _, rt := range req.Retarget {
-		am.Retarget = append(am.Retarget, engine.PlanRetarget{Task: rt.Task, Deps: rt.Deps, Base: rt.Base})
+		am.Retarget = append(am.Retarget, engine.PlanRetarget{Task: rt.Task, Deps: rt.Deps, Base: rt.Base, Continue: rt.Continue})
 	}
 	for _, rt := range req.Retier {
 		am.Retier = append(am.Retier, engine.PlanRetier{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort, Caps: rt.Caps})
@@ -345,7 +352,15 @@ type planRetierBody struct {
 type planRetargetBody struct {
 	Task string   `json:"task"`
 	Deps []string `json:"deps"`
-	Base string   `json:"base,omitempty"`
+	// Base names the one of the new Deps whose result branch the work
+	// starts from; '' = the default rule: the only dep, or the continued
+	// dep when Continue names one, else the default branch.
+	Base string `json:"base,omitempty"`
+	// Continue names the one of the new Deps whose author's session the
+	// task continues (§6.1); '' = the earlier continued dep goes with the
+	// earlier dependencies. The continued dep is the task's base: a Base
+	// naming another dep is refused.
+	Continue string `json:"continue,omitempty"`
 }
 
 // planAmendResponse names what the amendment did.

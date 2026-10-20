@@ -79,6 +79,9 @@ func StatusSections(st Status) string {
 				if len(t.WaitingOn) > 0 {
 					line += " (waiting on " + strings.Join(t.WaitingOn, ", ") + ")"
 				}
+				if t.Continues != "" {
+					line += " (continues " + t.Continues + ")"
+				}
 				if t.Branch != "" {
 					line += " [" + t.Branch + "]"
 				}

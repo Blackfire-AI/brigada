@@ -76,7 +76,7 @@ var tools = []Tool{
 	},
 	{
 		Name:        "plan_create",
-		Description: "Create a plan of one or more tasks and queue the first work job of every task with no dependencies. A task may wait on others of the same plan by name (deps); it starts when all of them are done, and stays waiting if one fails or needs you. A task with exactly one dep builds on that dep's branch (a task with several picks one with base, else starts from the default branch). A dependency cycle or a base that is not a dep refuses the plan. A task's optional caps object sets its own fix_rounds, review_rounds and restart budgets (integers 0 to 10; absent keys keep the engine default); an unknown key or out-of-range value refuses the plan. The plan is active at once, unless it is over the project's approval limit (many tasks, an unusual class, a protected path): then it waits for the user's approval, nothing is queued, and the answer says why — tell the user; only they can approve it.",
+		Description: "Create a plan of one or more tasks and queue the first work job of every task with no dependencies. A task may wait on others of the same plan by name (deps); it starts when all of them are done, and stays waiting if one fails or needs you. A task with exactly one dep builds on that dep's branch (a task with several picks one with base, else its continued dep when continue is set, else starts from the default branch). A dependency cycle, a base that is not a dep, or a base naming another dep than continue refuses the plan. A task's optional caps object sets its own fix_rounds, review_rounds and restart budgets (integers 0 to 10; absent keys keep the engine default); an unknown key or out-of-range value refuses the plan. The plan is active at once, unless it is over the project's approval limit (many tasks, an unusual class, a protected path): then it waits for the user's approval, nothing is queued, and the answer says why — tell the user; only they can approve it.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -105,7 +105,11 @@ var tools = []Tool{
 							},
 							"base": map[string]any{
 								"type":        "string",
-								"description": "the name of one of this task's deps, whose result branch this task's work starts from, so it builds on that work and its review shows only its own change. Default: the only dep when there is one; with several deps and no base, the default branch. Merge a task after its base",
+								"description": "the name of one of this task's deps, whose result branch this task's work starts from, so it builds on that work and its review shows only its own change. Default: the only dep when there is one, else the continued dep when continue is set, else the default branch; a base naming another dep than continue is refused. Merge a task after its base",
+							},
+							"continue": map[string]any{
+								"type":        "string",
+								"description": "the name of one of this task's deps whose worker starts this task: when that dep is done, this task's first work job resumes the dep author's session on its own agent, so it starts warm with the files it already read. The continued dep is the task's base, so base defaults to it and a base naming another dep is refused. When the session or its agent is not available (session unknown, agent broken, capped at 0, cooling for over an hour, or outside this task's tier), the task starts fresh as usual; a restart always starts fresh",
 							},
 							"spec": map[string]any{
 								"type":        "string",
@@ -155,7 +159,8 @@ var tools = []Tool{
 								"items":       map[string]any{"type": []string{"string", "integer"}},
 								"description": "tasks of this plan (new or old, by name or id) that must be done before this one starts; default none",
 							},
-							"base":        map[string]any{"type": []string{"string", "integer"}, "description": "one of its deps whose result branch the work starts from; default as plan_create's"},
+							"base":        map[string]any{"type": []string{"string", "integer"}, "description": "one of its deps whose result branch the work starts from; default as plan_create's, and the continued dep when continue is set"},
+							"continue":    map[string]any{"type": []string{"string", "integer"}, "description": "one of its deps whose worker starts this task in its own session; default as plan_create's; the continued dep is the task's base"},
 							"spec":        map[string]any{"type": "string", "description": "the task spec, verbatim: what the worker is to do. Never ask the worker to run the check, commit or push"},
 							"check":       map[string]any{"type": "string", "description": "the check command the runner runs after a done; empty = none"},
 							"class":       map[string]any{"type": "string", "description": "the task's class (default implement)"},
@@ -198,7 +203,8 @@ var tools = []Tool{
 								"items":       map[string]any{"type": []string{"string", "integer"}},
 								"description": "its new complete dependency list; empty drops every dependency",
 							},
-							"base": map[string]any{"type": []string{"string", "integer"}, "description": "one of the new deps whose result branch the work starts from; replaces the earlier base, none = the default rule"},
+							"base":     map[string]any{"type": []string{"string", "integer"}, "description": "one of the new deps whose result branch the work starts from; replaces the earlier base, none = the default rule, which makes the continued dep the base when continue is set"},
+							"continue": map[string]any{"type": []string{"string", "integer"}, "description": "one of the new deps whose worker starts this task in its own session; replaces the earlier continued dep, none = start fresh; the continued dep is the task's base, and a base naming another dep is refused"},
 						},
 						"required": []string{"task", "deps"},
 					},

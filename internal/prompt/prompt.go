@@ -189,6 +189,16 @@ func ComposeAnswerPrompt(spec, check, answer string, opts ...Option) string {
 		neutralize(answer)+"\n</feedback>\n", collect(opts))
 }
 
+// ComposeContinuePrompt builds the prompt of a continuing task's first
+// work job (§6.1): the worker template with the new task's spec, and a
+// follow-up section saying a new task follows in this session — the
+// previous task is approved and landed on the base branch, and the spec
+// above is the new task's. The worker keeps its session and every file it
+// already read; only the task is new.
+func ComposeContinuePrompt(spec, check string, opts ...Option) string {
+	return composeWorkerPrompt(spec, check, "\nA new task follows in this session. The task you finished before is\napproved and landed on the base branch this worktree starts from. The\nspec above, between its data delimiters, is the new task's spec; finish\nit as the contract says.\n", collect(opts))
+}
+
 // composeWorkerPrompt assembles the worker prompt's shared shape: the
 // fixed template and the spec verbatim, plus the follow-up section the
 // caller composed for its own kind of round. A non-empty check adds its
