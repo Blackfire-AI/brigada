@@ -112,6 +112,8 @@ func TestRemovalLeavesDamagedFilesAndUnmarkedSkill(t *testing.T) {
 	for _, tc := range []struct{ rel, body string }{
 		{wiringMCPFile, `{"mcpServers":`},
 		{wiringMCPFile, `{"mcpServers":[]}`},
+		{wiringCodexFile, "[mcp_servers.brigada]\ncommand = \"brigada\"\n\n[mcp_servers.brigada]\ncommand = \"brigada\"\n"},
+		{wiringCodexFile, "mcp_servers = { brigada = {} }\n"},
 		{wiringSettingsFile, `{"hooks":{"Stop":{}}}`},
 		{wiringSettingsFile, ""},
 		{wiringSharedSettingsFile, `{"hooks":[]}`},

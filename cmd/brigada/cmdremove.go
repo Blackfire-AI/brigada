@@ -102,7 +102,7 @@ func runRemove(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	printRemovalPlan(stdout, repo, files, live, *cancel, others, running)
 	printRemovalRemote(ctx, stdout, root)
 	if _, err := exec.LookPath("codex"); err == nil {
-		fmt.Fprintln(stdout, "\n  Codex (if you ran it): codex mcp remove brigada-foreman")
+		fmt.Fprintln(stdout, "\n  Codex (user-level fallback only): codex mcp remove brigada-foreman")
 	}
 	if live > 0 && !*cancel {
 		return failRemoval(stderr, errors.New("live work remains; wait for it to finish or pass --cancel"))
@@ -196,6 +196,8 @@ func printRemovalPlan(w io.Writer, repo string, files []wireFile, live int, canc
 			continue
 		case f.rel == wiringMCPFile:
 			action = "remove the \"brigada\" server"
+		case f.rel == wiringCodexFile:
+			action = "remove the brigada server table"
 		case f.rel == wiringSkillFile, f.rel == wiringRulesFile:
 			action = "delete (brigada's own file)"
 		case f.rel == wiringAgentsFile, f.rel == wiringClaudeFile:
