@@ -55,7 +55,7 @@ Init then lists the agents, permissions and files, and shows a diff for every ex
 After you confirm, init:
 
 - writes `.brigada/project.yaml`, which is yours to commit (brigada never commits or pushes it);
-- wires Claude Code for your own session;
+- wires your own session: the bridge in `.mcp.json` and `.codex/config.toml`, and the foreman rules in `.brigada/foreman.md`, reached through a short brigada-managed block in `AGENTS.md` (`CLAUDE.md` imports `AGENTS.md`). An older foreman skill is removed;
 - starts the engine and a detached runner.
 
 `brigada init --probe` shows the plan and writes nothing. Stop the runner with `brigada stop`; add `--engine` to stop the engine too. Every step and flag is in [the guide, section 1](docs/GUIDE.md#1-install-and-brigada-init).
@@ -66,7 +66,7 @@ Rerun `brigada init` to change agents, the foreman model and effort, or tasks at
 
 ## Your own session is the foreman
 
-After init, open your harness in the repository and talk to it. This is **mode A**: your session is the foreman. It plans through brigada's tools; the runner works each task on its own branch in a worktree, runs the check and pushes the branch; and a reviewer of another family reads it.
+After init, restart your session in the repository, approve the `brigada` MCP server (Claude Code) or trust the folder (Codex), and ask it to plan. This is **mode A**: your session is the foreman. The `AGENTS.md` block only points to the rules and never imports them; workers and reviewers recognize themselves by their prompt's opener and ignore the block, so they never get the foreman rules. It plans through brigada's tools; the runner works each task on its own branch in a worktree, runs the check and pushes the branch; and a reviewer of another family reads it.
 
 Only one interactive session holds the foreman at a time. Your session lets go of it at the end of each turn, so work that finishes while you are away can wake a separate, brigada-owned headless foreman. Decisions reach that headless foreman through short notes recorded in the engine, not through your chat. See [section 2](docs/GUIDE.md#2-your-own-session-is-the-foreman-mode-a).
 
