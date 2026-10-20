@@ -300,22 +300,22 @@ func TestSubmitRestartRounds(t *testing.T) {
 		t.Fatal("the restart job did not run")
 	}
 
-	// One more restart fits the default cap of 2; the third is capped.
-	if r := e.submit(restart); r.Answer != AnsCreated {
-		t.Fatalf("second restart = %s; want created", r.Answer)
-	}
-	if g := e.leaseAny(e.runner1); g == nil || e.complete(g, done()) != AnsOK {
-		t.Fatal("the second restart job did not run")
+	// Two more restarts fit the default cap of 3; the fourth is capped.
+	for _, n := range []string{"second", "third"} {
+		if r := e.submit(restart); r.Answer != AnsCreated {
+			t.Fatalf("%s restart = %s; want created", n, r.Answer)
+		}
+		if g := e.leaseAny(e.runner1); g == nil || e.complete(g, done()) != AnsOK {
+			t.Fatalf("the %s restart job did not run", n)
+		}
 	}
 	if r := e.submit(restart); r.Answer != AnsCapped {
-		t.Errorf("third restart = %s, want capped against the default of 2", r.Answer)
+		t.Errorf("fourth restart = %s, want capped against the default of 3", r.Answer)
 	}
-	// The original, two restarts, and the two review jobs the restarts'
-	// done completions queued (§7) — the second restart replaced the
-	// first review job with its own, as a restart replaces whatever is
-	// live on the key (§5.6).
-	if got := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ?", e.task); got != 5 {
-		t.Errorf("task jobs = %d, want 5 (the original, two restarts and two reviews)", got)
+	// The original, three restarts, and the three review jobs the
+	// completions queued (§7).
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ?", e.task); got != 7 {
+		t.Errorf("task jobs = %d, want 7 (the original, three restarts and three reviews)", got)
 	}
 }
 
@@ -347,9 +347,10 @@ func TestSubmitRestartedFixAndReviewCountAgainstRestartCapOnly(t *testing.T) {
 			p.Restart = restart
 			return p
 		}
-		// One plain round, then restarts to the restart cap of 2: the
+		// One plain round, then restarts to the restart cap of 3: the
 		// restarts must not consume the plain rounds' budget.
 		run(e, round(false))
+		run(e, round(true))
 		run(e, round(true))
 		run(e, round(true))
 		if r := e.submit(round(true)); r.Answer != AnsCapped {
@@ -364,8 +365,8 @@ func TestSubmitRestartedFixAndReviewCountAgainstRestartCapOnly(t *testing.T) {
 		if r := e.submit(round(false)); r.Answer != AnsCapped {
 			t.Fatalf("plain fix round past the cap of 2 = %s, want capped", r.Answer)
 		}
-		if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'fix'"); got != 5 {
-			t.Errorf("fix jobs = %d, want 5 (one plain before the restarts, two restarts, two plain after)", got)
+		if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'fix'"); got != 6 {
+			t.Errorf("fix jobs = %d, want 6 (one plain before the restarts, three restarts, two plain after)", got)
 		}
 	})
 	t.Run("review", func(t *testing.T) {
@@ -385,11 +386,12 @@ func TestSubmitRestartedFixAndReviewCountAgainstRestartCapOnly(t *testing.T) {
 		run(e, round(false))
 		run(e, round(true))
 		run(e, round(true))
+		run(e, round(true))
 		if r := e.submit(round(true)); r.Answer != AnsCapped {
 			t.Fatalf("one restart too many = %s, want capped against the restart cap", r.Answer)
 		}
-		if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'review'"); got != 5 {
-			t.Errorf("review jobs = %d, want 5 (three plain and two restarts)", got)
+		if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'review'"); got != 6 {
+			t.Errorf("review jobs = %d, want 6 (three plain and three restarts)", got)
 		}
 	})
 }
