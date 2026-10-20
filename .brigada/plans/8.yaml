@@ -5,9 +5,9 @@
 plan: 8
 title: "1.0 docs and review robustness: drop Alpha, CHANGELOG, product brief v3, review-retry fallback (#21, #23, #8, #33)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-20T08:01:57.940787Z
-updated: 2026-10-20T08:14:17.07634Z
+updated: 2026-10-20T08:35:15.181978Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps, or from the
 # default branch when base is empty; merge a task after its base. States
@@ -65,7 +65,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-34"
     rounds: 1
   - id: 35
