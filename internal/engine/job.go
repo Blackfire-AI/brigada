@@ -153,6 +153,15 @@ func affinityFreeTx(tx *sql.Tx, key string, owner int64) (bool, error) {
 	return state != "active" || runner == 0 || runner == owner, nil
 }
 
+// usesKeySession reports whether a job runs in the session its key holds
+// (§8): a session-mode job does, bound to the runner the session sits on —
+// except a review. A re-review resumes its reviewer's own session, which
+// never becomes the key's (the key's is the author's, and a fix round
+// must find it where it was); the agent pin places it instead.
+func usesKeySession(j *jobRow) bool {
+	return j.Mode == ModeSession && j.Kind != KindReview
+}
+
 // upsertSessionTx records the key's session: which runner holds it and,
 // when known, the harness session id the last run ended on (§4.2, §14).
 // An empty harnessSessionID keeps what is stored: leasing does not know

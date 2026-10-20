@@ -625,8 +625,11 @@ func authorPlacementTx(tx *sql.Tx, taskID int64) (harness string, agent int64, e
 }
 
 // queueReviewTx moves an implement task into reviewing and queues its
-// review job (§7): same key, fresh session, placed on another family
-// than the author's. The engine composes the reviewer's prompt itself
+// review job (§7): same key, placed on another family than the author's,
+// in a fresh session — except the review after a fix round that answered
+// a changes verdict, which resumes that verdict's reviewer's session
+// (resumedReviewTx) and is shown the fix round alone. The engine
+// composes the reviewer's prompt itself
 // (§1.4: only the engine composes prompts) — the review template, the
 // spec and the check result verbatim, the feedback the author was given
 // for the round (the completing job's prompt is its record: a fix
@@ -645,18 +648,34 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 	if branch == "" {
 		branch = wr.Branch
 	}
-	if _, err := tx.Exec(`UPDATE tasks SET state = ?, branch = COALESCE(NULLIF(?, ''), branch), updated_at = ?
-		WHERE id = ?`, taskReviewing, branch, fmtTime(now), job.TaskID); err != nil {
-		return fmt.Errorf("move task %d to reviewing: %w", job.TaskID, err)
-	}
-	if _, err := appendEventTx(tx, evTaskReviewing, job.ProjectID, job.TaskID, job.ID,
-		eventPayload{Status: taskReviewing, Branch: branch}, now); err != nil {
-		return err
-	}
 	// An unknown author family leaves ExcludeFamily empty; review placement
 	// independently excludes the agent of the latest work or fix job.
 	exclude, err := agentFamilyTx(tx, job.AgentID)
 	if err != nil {
+		return err
+	}
+	// A fix round that answered a changes verdict is re-reviewed by the
+	// reviewer who gave it, in its own session, when that reviewer can be
+	// had; every other review is fresh (§7).
+	resumed, why, err := e.resumedReviewTx(tx, job, exclude, now)
+	if err != nil {
+		return err
+	}
+	reviewing := eventPayload{Status: taskReviewing, Branch: branch}
+	switch {
+	case resumed != nil:
+		// The history prints the reason line; the pick and the agent stay
+		// in the payload for the JSON item.
+		reviewing.Pick, reviewing.Agent = pickResumed, resumed.agent
+		reviewing.Reason = fmt.Sprintf("resumed review: the previous reviewer's session on agent %d", resumed.agent)
+	case why != "":
+		reviewing.Reason = "fresh review: " + why
+	}
+	if _, err := tx.Exec(`UPDATE tasks SET state = ?, branch = COALESCE(NULLIF(?, ''), branch), updated_at = ?
+		WHERE id = ?`, taskReviewing, branch, fmtTime(now), job.TaskID); err != nil {
+		return fmt.Errorf("move task %d to reviewing: %w", job.TaskID, err)
+	}
+	if _, err := appendEventTx(tx, evTaskReviewing, job.ProjectID, job.TaskID, job.ID, reviewing, now); err != nil {
 		return err
 	}
 	spec, base, err := taskSpecAndBaseTx(tx, job.TaskID)
@@ -671,7 +690,7 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 	// terminal earlier in this completion's transaction. A review spends
 	// none of the task's rounds (§7 caps the review loop's fix rounds,
 	// not the reviews), so nothing here answers capped.
-	_, err = e.submitTx(tx, SubmitParams{
+	params := SubmitParams{
 		Key:           job.Key,
 		ProjectID:     job.ProjectID,
 		TaskID:        job.TaskID,
@@ -679,8 +698,15 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 		Mode:          ModeFresh,
 		Prompt:        prompt.ComposeReviewPrompt(spec, prompt.WorkerFeedback(job.Prompt), checkJSON, base, branch, prompt.WithInstructions(instructions)),
 		ExcludeFamily: exclude,
-	}, now)
-	if err != nil {
+	}
+	if resumed != nil {
+		// The reviewer's session holds the spec, the findings and the
+		// diff it read: the prompt says what changed since (§7).
+		params.Mode = ModeSession
+		params.Prompt = reReviewPrompt(wr, checkJSON, base, branch, resumed.since)
+		params.Harness, params.RequireAgent = resumed.harness, resumed.agent
+	}
+	if _, err = e.submitTx(tx, params, now); err != nil {
 		return err
 	}
 	// A review nobody could ever take is flagged at once, not at the
@@ -732,7 +758,7 @@ func (e *Engine) reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now ti
 			return err
 		}
 		return e.queueFixRoundTx(tx, job, roundReview, v.Findings, v.Findings, nil, now)
-	case reviewerUnavailable(c):
+	case reviewerUnavailable(c), reReviewNotResumed(job, c):
 		return e.requeueReviewTx(tx, job, c, now)
 	default:
 		reason := "no verdict in the review result"
@@ -764,6 +790,15 @@ func reviewerUnavailable(c Completion) bool {
 	return false
 }
 
+// reReviewNotResumed reports whether a re-review failed because its
+// session could not be resumed — gone from the reviewer's CLI, or not
+// continuable. The review said nothing about the change, and the session
+// was a saving, not a requirement: it goes back as a fresh review, like an
+// unavailable reviewer's, and spends no retry.
+func reReviewNotResumed(job *jobRow, c Completion) bool {
+	return job.Mode == ModeSession && c.Error != "" && c.ErrorKind == string(adapter.ErrResumeFailed)
+}
+
 // requeueReviewTx puts a review whose reviewer was unavailable back in the
 // queue as a new job of the same cycle: same prompt, same exclusions, so
 // the question and who may answer it are unchanged. It spends no retry.
@@ -784,6 +819,9 @@ func (e *Engine) requeueReviewTx(tx *sql.Tx, job *jobRow, c Completion, now time
 		}
 	}
 	reason := fmt.Sprintf("reviewer unavailable (%s): %s/%s", c.ErrorKind, harness, model)
+	if reReviewNotResumed(job, c) {
+		reason = fmt.Sprintf("re-review could not resume its session (%s): %s/%s", c.ErrorKind, harness, model)
+	}
 	requeue := &jobRow{ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindReview,
 		ExcludeFamily: job.ExcludeFamily, ExcludeAgent: job.ExcludeAgent}
 	noAgent, err := noReviewAgentTx(tx, requeue)
@@ -794,13 +832,17 @@ func (e *Engine) requeueReviewTx(tx *sql.Tx, job *jobRow, c Completion, now time
 		return e.needsForemanTx(tx, job, evReviewNoVerdict,
 			eventPayload{Reason: boundNote(reason + "; no agent can take the review")}, now)
 	}
+	reviewPrompt, err := retryPromptTx(tx, job)
+	if err != nil {
+		return err
+	}
 	sr, err := e.submitTx(tx, SubmitParams{
 		Key:           job.Key,
 		ProjectID:     job.ProjectID,
 		TaskID:        job.TaskID,
 		Kind:          KindReview,
 		Mode:          ModeFresh,
-		Prompt:        job.Prompt,
+		Prompt:        reviewPrompt,
 		ExcludeFamily: job.ExcludeFamily,
 		ExcludeAgent:  job.ExcludeAgent,
 	}, now)
@@ -876,13 +918,17 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 		}
 		return e.needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: text}, now)
 	}
+	reviewPrompt, err := retryPromptTx(tx, job)
+	if err != nil {
+		return err
+	}
 	sr, err := e.submitTx(tx, SubmitParams{
 		Key:           job.Key,
 		ProjectID:     job.ProjectID,
 		TaskID:        job.TaskID,
 		Kind:          KindReview,
 		Mode:          ModeFresh,
-		Prompt:        job.Prompt,
+		Prompt:        reviewPrompt,
 		ExcludeFamily: job.ExcludeFamily,
 		ExcludeAgent:  job.AgentID,
 	}, now)
@@ -916,8 +962,9 @@ func reviewRetrySpentTx(tx *sql.Tx, job *jobRow) (bool, error) {
 	err := tx.QueryRow(`SELECT COUNT(*) FROM jobs
 		WHERE task_id = ? AND kind = 'review' AND restart = 0
 		AND error_kind NOT IN ('limit', 'auth', ?)
+		AND NOT (mode = 'session' AND error_kind = ?)
 		AND id > COALESCE((SELECT MAX(id) FROM jobs WHERE task_id = ? AND kind IN ('work', 'fix')), 0)`,
-		job.TaskID, ErrorKindSetup, job.TaskID).Scan(&reviews)
+		job.TaskID, ErrorKindSetup, string(adapter.ErrResumeFailed), job.TaskID).Scan(&reviews)
 	if err != nil {
 		return false, fmt.Errorf("count the reviews of task %d: %w", job.TaskID, err)
 	}

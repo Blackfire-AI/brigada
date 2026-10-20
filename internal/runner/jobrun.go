@@ -662,6 +662,7 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 		r.cfg.Log.WarnContext(ctx, "save transcript", "job_id", r.grant.JobID, "err", err)
 	}
 
+	result.Head = "" // the runner's to say, as the extra repositories' commits are
 	if result.Status == statusDone {
 		if err := ws.ensurePushed(ctx); err != nil {
 			if r.gone(ctx, "pushing the branch") {
@@ -669,6 +670,9 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 			}
 			r.finishWithError(ctx, err.Error())
 			return
+		}
+		if head, err := ws.worktreeHead(ctx); err == nil {
+			result.Head = head
 		}
 		if result.Branch == "" {
 			result.Branch = ws.branch

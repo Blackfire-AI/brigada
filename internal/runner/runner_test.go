@@ -560,6 +560,10 @@ func TestRunnerHappyPath(t *testing.T) {
 	if commit == "" {
 		t.Fatalf("branch %s was never pushed to the remote", taskBranch(task, 1))
 	}
+	// The result names the pushed head, which a re-review diffs from (§7).
+	if res.Head != commit {
+		t.Errorf("result head = %q, want the pushed commit %q", res.Head, commit)
+	}
 	clone := t.TempDir()
 	git(t, "", "clone", "-q", "--branch", taskBranch(task, 1), remote, clone)
 	if data, err := os.ReadFile(filepath.Join(clone, "work.txt")); err != nil || string(data) != "hello\n" {

@@ -203,7 +203,7 @@ func prepareReviewWorkspace(ctx context.Context, cfg *Config, grant *api.JobGran
 		return nil, fmt.Errorf("read the review worktree's commit: %w", trimCmdError(out, err))
 	}
 	w.base = strings.TrimSpace(string(out))
-	if err := w.writeReviewDiff(ctx, grant.BaseRef); err != nil {
+	if err := w.writeReviewDiffSince(ctx, grant.BaseRef, grant.ReviewSince); err != nil {
 		w.discardLocked(ctx)
 		return nil, err
 	}
