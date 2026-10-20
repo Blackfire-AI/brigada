@@ -5,9 +5,9 @@
 plan: 18
 title: "Extra repositories readable by every worker: claude --add-dir, opencode permission, absolute paths in the prompt"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-20T17:53:42.366042Z
-updated: 2026-10-20T17:53:42.366042Z
+updated: 2026-10-20T18:01:17.280819Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -26,6 +26,6 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-57"
     rounds: 0
