@@ -7,7 +7,7 @@ title: "1.0 docs and review robustness: drop Alpha, CHANGELOG, product brief v3,
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-10-20T08:01:57.940787Z
-updated: 2026-10-20T08:01:57.940787Z
+updated: 2026-10-20T08:08:45.831803Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps, or from the
 # default branch when base is empty; merge a task after its base. States
@@ -56,5 +56,15 @@ tasks:
     base: ""
     effort: medium
     state: running
+    branch: ""
+    rounds: 0
+  - id: 34
+    name: "restart-cap"
+    title: "Default restart cap 3, and round caps in the config file"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: ready
     branch: ""
     rounds: 0
