@@ -55,7 +55,7 @@ const tailDefaults = "setup=none (default)\n" + "setup_cache_key_files=none (def
 
 // gateDefaults are the gates and land rules (§6.3) at their defaults,
 // printed between the approval keys and default_check.
-const gateDefaults = "gate_plan=auto (default)\n" + "gate_land=auto (default)\n" + "gate_push=ask (default)\n" +
+const gateDefaults = "gate_plan=auto (default)\n" + "gate_land=auto (default)\n" + "gate_push=auto (default)\n" +
 	"approval_tiers=none (default)\n" + "approval_restarted=false (default)\n" +
 	"land_target=main (default)\n" + "after_land=none (default)\n"
 

@@ -56,3 +56,27 @@ func TestProjectConfigDefaultsNoCheck(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectConfigDefaultsGatePush(t *testing.T) {
+	const repo = "example.invalid/project"
+	got, err := ProjectConfigDefaults(nil, repo, "true", "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ParseProjectConfig(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw := string(cfg.Values[SettingGatePush]); raw != `"auto"` {
+		t.Fatalf("new file gate_push = %s, want auto", raw)
+	}
+	// An existing explicit value survives a rerun.
+	old := []byte("schema: 1\nrepo: example.invalid/project\ngate_push: never\n")
+	got, err = ProjectConfigDefaults(old, repo, "true", "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "gate_push: never") {
+		t.Fatalf("lost explicit gate_push: %s", got)
+	}
+}

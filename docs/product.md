@@ -137,7 +137,7 @@ brigada is a standalone tool beside your own harness session: not a board, and n
 | Risk | Mitigation |
 |---|---|
 | The foreman splits work badly | the plan gate's rules (a size limit, classes, protected paths); the planner's own outcomes are recorded; re-planning when a task fails |
-| A bad change lands on your branch without you | the check and the cross-family review before landing, the check again on the landed result, the push gate (`ask` by default), protected paths and tiers that hold a landing for you, a staging target branch as a setting; nothing is force-pushed and a landing never resolves a conflict |
+| A bad change lands on your branch without you | the check and the cross-family review before landing, the check again on the landed result, the push gate (`auto` by default), protected paths and tiers that hold a landing for you, a staging target branch as a setting; nothing is force-pushed and a landing never resolves a conflict |
 | The foreman's subscription hits its limit | you're notified and decide (wait, switch harness or model, or continue without it); plain commands and approved plans work without it |
 | No outcome data on a fresh install | defaults plus wide draws from a thin record, confidence shown in `stats`; standalone `review` seeds the record |
 | Scope: foreman plus engine plus adapters | phase it: one task end to end first, then plans with dependencies, then failure handling and re-planning |

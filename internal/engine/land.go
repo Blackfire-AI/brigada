@@ -677,7 +677,7 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 	}
 	gatePush := s.GatePush
 	if gatePush == "" {
-		gatePush = GateAsk // the design's default (§6.3), which projectApprovalTx leaves unapplied
+		gatePush = GateAuto // the design's default (§6.3), which projectApprovalTx leaves unapplied
 	}
 	return &LeaseGrant{
 		JobID:          j.ID,

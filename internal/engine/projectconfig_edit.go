@@ -6,13 +6,14 @@ import (
 	"strings"
 )
 
-// ProjectConfigDefaults proposes only init's two defaults. Existing settings,
-// comments and spelling survive; the caller shows the resulting diff and asks
-// before writing. Empty input creates the minimal schema-1 file; an empty
-// check omits or removes default_check so the project setting is unset.
+// ProjectConfigDefaults proposes init's defaults. Existing settings, comments
+// and spelling survive; the caller shows the resulting diff and asks before
+// writing. Empty input creates the minimal schema-1 file, with gate_push auto
+// spelled out; an empty check omits or removes default_check so the project
+// setting is unset.
 func ProjectConfigDefaults(content []byte, repo, check, tools string) ([]byte, error) {
 	if len(content) == 0 {
-		content = []byte(fmt.Sprintf("schema: %d\nrepo: %s\n", ProjectConfigSchema, yamlString(repo)))
+		content = []byte(fmt.Sprintf("schema: %d\nrepo: %s\n%s: %s\n", ProjectConfigSchema, yamlString(repo), SettingGatePush, GateAuto))
 	}
 	cfg, err := ParseProjectConfig(content)
 	if err != nil {

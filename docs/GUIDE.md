@@ -439,8 +439,8 @@ The loop — plan, work, check, review, land, push — runs on its own; you stop
 
 - The **land gate** holds a landing before the squash. `gate_land: ask` holds every landing; a rule holds the one task that trips it — a tier among `approval_tiers`, a changed path matching `approval_protected_paths`, or a spent restart when `approval_restarted` is `true`. A held task stays `done`, and only its dependents' landings wait on it: work on the rest of the plan goes on. The needs-you entry names the rule, as `task #N done: waits to land: heavy; touches infra/**`.
 - The **push gate** (`gate_push`) decides what follows a successful landing:
-  - `ask` (the default): the landing is recorded as waiting, and the queue shows `task #N done: waits to push: <branch>@<sha>`. The commit waits on the remote under `refs/brigada/land/<target>`, a ref outside your branches that only ever moves forward, so it outlives the runner that made it. Waiting landings stack: the next landing is squashed onto the newest waiting one, so a dependent sits on top of its dependency. `brigada push approve` releases every waiting landing of the project at once: each gets its push, no new squash, on whichever runner takes it, and the stack reaches the target in order. If the target moved outside brigada while landings waited, their push is refused as a non-fast-forward and the task parks for the foreman.
-  - `auto`: the runner pushes the target at once.
+  - `auto` (the default): the runner pushes the target at once.
+  - `ask`: the landing is recorded as waiting, and the queue shows `task #N done: waits to push: <branch>@<sha>`. The commit waits on the remote under `refs/brigada/land/<target>`, a ref outside your branches that only ever moves forward, so it outlives the runner that made it. Waiting landings stack: the next landing is squashed onto the newest waiting one, so a dependent sits on top of its dependency. `brigada push approve` releases every waiting landing of the project at once: each gets its push, no new squash, on whichever runner takes it, and the stack reaches the target in order. If the target moved outside brigada while landings waited, their push is refused as a non-fast-forward and the task parks for the foreman.
   - `never`: brigada never pushes your branches. The landing's commit waits on the remote under `refs/brigada/land/<target>` — the same durable ref a waiting landing uses — and the queue shows `task #N done: push by hand: <command>`: fetch that ref and push it to the target, from your own repository, when you choose. The entry stays in the queue until the project is archived: brigada cannot see a push you ran by hand.
 
 ```sh
@@ -516,7 +516,7 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 | `approval_protected_paths` | list of repo-relative globs | none | A task whose spec or check mentions a matching path holds the plan; at the land gate, a task whose recorded changed paths match holds the landing ([section 5](#5-finishing-the-land-job)). |
 | `gate_plan` | `auto` or `ask` | `auto` | `ask` holds every plan at the plan gate, whatever the approval rules say. |
 | `gate_land` | `auto` or `ask` | `auto` | `ask` holds every landing at the land gate; the land job runs only after you release it. |
-| `gate_push` | `auto`, `ask` or `never` | `ask` | What follows a successful landing: `auto` pushes the target, `ask` waits for `brigada push approve`, `never` leaves the push to you and records the exact command. |
+| `gate_push` | `auto`, `ask` or `never` | `auto` | What follows a successful landing: `auto` pushes the target, `ask` waits for `brigada push approve`, `never` leaves the push to you and records the exact command. |
 | `approval_tiers` | list of `light`, `standard`, `heavy` | none | Tiers whose tasks wait at the land gate. |
 | `approval_restarted` | `true` or `false` | `false` | `true`: a task that spent a restart or a tier bump waits at the land gate. |
 | `land_target` | branch name | the project's default branch | Where approved work lands: the default branch, or a staging branch such as `brigada/landed`. |
@@ -637,7 +637,7 @@ or through the coordinator's `plan_approve` and `plan_reject` ([section 3](#3-se
 
 **The land gate** holds an approved task before it is squashed onto the target: `gate_land: ask`, a tier among `approval_tiers`, a changed path matching `approval_protected_paths`, or a spent restart when `approval_restarted` is `true`. You release one held landing with `brigada land approve <task>` or cancel it with `brigada land reject <task>`.
 
-**The push gate** (`gate_push`, `ask` by default) holds the push after a successful landing; `brigada push approve` releases every waiting landing of the project. Both gates, their needs-you entries and `after_land` are described in [section 5](#5-finishing-the-land-job). A held task blocks nothing but its dependents' landings: work on the rest of the plan goes on.
+**The push gate** (`gate_push`, `auto` by default) decides what follows a successful landing: `auto` pushes the target, `ask` holds the push until `brigada push approve` releases every waiting landing of the project, and `never` leaves the push to you. Both gates, their needs-you entries and `after_land` are described in [section 5](#5-finishing-the-land-job). A held task blocks nothing but its dependents' landings: work on the rest of the plan goes on.
 
 Only you can decide: no foreman tool approves a plan or passes a gate.
 
@@ -1057,7 +1057,7 @@ Every key that `brigada project set` and `project show` know, with each default 
 | `approval_protected_paths` | `none` | yes |
 | `gate_plan` | `auto` | yes |
 | `gate_land` | `auto` | yes |
-| `gate_push` | `ask` | yes |
+| `gate_push` | `auto` | yes |
 | `approval_tiers` | `none` | yes |
 | `approval_restarted` | `false` | yes |
 | `land_target` | the project's default branch | yes |
