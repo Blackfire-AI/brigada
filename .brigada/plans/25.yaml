@@ -96,8 +96,8 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-102"
     rounds: 0
   - id: 103
     name: "commit-message-field"
