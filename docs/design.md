@@ -107,7 +107,7 @@ The runner detects the limit-hit error from the foreman's CLI. The engine marks 
 
 ### 4.5 Capacity
 
-The foreman instructions tell it to check `capacity` (§12.2) when it plans, and to use it to choose how wide the task graph is, when to sequence instead of fanning out, which tasks can wait for a cheaper agent, and to give honest time estimates ("3 tasks now, 2 after the reset at <time>"). The engine stays binding: if the foreman's view is stale, the dispatcher queues the extra tasks and never exceeds a cap (§8.1). The foreman decides; the engine enforces (§1).
+The foreman instructions tell it to check `capacity` (§12.2) when it plans, and to use it to choose how wide the task graph is, when to sequence instead of fanning out, which tasks can wait for a cheaper agent, and to give honest time estimates ("3 tasks now, 2 after the reset at <time>"). Separate areas (different files and packages) run in parallel as one chain each; unrelated work is not chained, since a chain serializes whatever the caps. The engine stays binding: if the foreman's view is stale, the dispatcher queues the extra tasks and never exceeds a cap (§8.1). The foreman decides; the engine enforces (§1).
 
 ### 4.6 The coordinator bridge
 
