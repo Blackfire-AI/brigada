@@ -101,11 +101,13 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, pro
 		return AnsStaleEpoch, time.Time{}, nil
 	}
 	// Past the hard cap the lease is lost and the job fails with the cap
-	// named (§14). The sweep at the top of this call usually gets here
-	// first; this is the same rule for a job the sweep could not fail.
-	if limit, ok := e.cfg.HardCaps[job.Kind]; ok && limit > 0 && job.FirstLeased != "" {
-		if first, err := parseTime(job.FirstLeased); err == nil && now.Sub(first) > limit {
-			accrue := accrualFrom(job.LastLeased, first.Add(limit))
+	// named (§14). The cap measures from the current lease (last_leased,
+	// issue #36), so a re-leased run gets the whole cap again. The sweep
+	// at the top of this call usually gets here first; this is the same
+	// rule for a job the sweep could not fail.
+	if limit, ok := e.cfg.HardCaps[job.Kind]; ok && limit > 0 && job.LastLeased != "" {
+		if last, err := parseTime(job.LastLeased); err == nil && now.Sub(last) > limit {
+			accrue := accrualFrom(job.LastLeased, last.Add(limit))
 			reason := capError(job.Kind, limit)
 			if err := failJobTx(tx, job.ID, reason, accrue, now); err != nil {
 				return "", time.Time{}, err

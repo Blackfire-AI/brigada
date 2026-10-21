@@ -46,6 +46,7 @@ type jobRow struct {
 	Model          string // a foreman turn's model; '' = none recorded (see foremanPairTx)
 	Labels         string
 	Restart        bool
+	Retry          bool // a fix round's retry after a transient CLI failure (§3); never a restart
 	ReleasedBy     int64
 	ReleasedUntil  string
 	ReleaseNote    string
@@ -62,7 +63,7 @@ const jobColumns = `id, project_id, COALESCE(task_id, 0), kind, key, mode, promp
 	COALESCE(fence_token, 0), followup, attempts, COALESCE(branch, ''), COALESCE(result, ''),
 	COALESCE(first_leased, ''), COALESCE(last_leased, ''), COALESCE(queued_at, ''),
 	COALESCE(cap_held_at, ''), COALESCE(cap_held_layer, ''), COALESCE(cap_held_key, ''),
-	COALESCE(leased_seconds, 0), harness, model, effort, labels, restart,
+	COALESCE(leased_seconds, 0), harness, model, effort, labels, restart, retry,
 	COALESCE(released_by, 0), COALESCE(released_until, ''), COALESCE(release_note, ''),
 	COALESCE(released_lease, ''), COALESCE(done_lease, ''), COALESCE(not_before, '')`
 
@@ -75,7 +76,7 @@ func scanJob(row interface{ Scan(dest ...any) error }) (*jobRow, error) {
 		&j.FenceToken, &j.Followup, &j.Attempts, &j.Branch, &j.Result,
 		&j.FirstLeased, &j.LastLeased, &j.QueuedAt,
 		&j.CapHeldAt, &j.CapHeldLayer, &j.CapHeldKey,
-		&j.LeasedSeconds, &j.Harness, &j.Model, &j.Effort, &j.Labels, &j.Restart,
+		&j.LeasedSeconds, &j.Harness, &j.Model, &j.Effort, &j.Labels, &j.Restart, &j.Retry,
 		&j.ReleasedBy, &j.ReleasedUntil, &j.ReleaseNote, &j.ReleasedLease,
 		&j.DoneLease, &j.NotBefore)
 	if err != nil {

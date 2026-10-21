@@ -4,11 +4,14 @@
 --
 -- Timestamps follow 0001's convention: fixed-width UTC text.
 
--- The hard caps measure from the job's first lease (§14)...
+-- The job's first lease (kept for the queue and history; the hard
+-- caps measure from the current lease, last_leased below)...
 ALTER TABLE jobs ADD COLUMN first_leased TEXT;
 -- ...and wall time accrues only while a lease is in force: last_leased
 -- is when the lease in force started, set at each lease and at each
--- revive, NULL once the lease has ended and its time is banked.
+-- revive, NULL once the lease has ended and its time is banked. The
+-- hard caps measure from it (§14, issue #36), so a re-leased job runs
+-- its next lease with the whole cap again.
 ALTER TABLE jobs ADD COLUMN last_leased TEXT;
 -- When the job last entered queued; the queue TTL measures from it, so
 -- an expired or released job waits a fresh window, not the one from its

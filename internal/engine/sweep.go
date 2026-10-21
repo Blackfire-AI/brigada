@@ -45,7 +45,9 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 //     holder can still revive or complete it — only a re-lease, which
 //     stamps a fresh id, locks them out (§12.3); its queue-TTL clock
 //     restarts at the requeue (§8.1);
-//  2. a live job past its kind's hard cap from first_leased fails with
+//  2. a live job past its kind's hard cap from last_leased — the
+//     current lease, so a job that lost a lease and was requeued runs
+//     its next lease with the whole cap again (issue #36) — fails with
 //     the cap named in the error (§14); a job with a task parks the task
 //     at needs_foreman with a task_failed event naming the cap, and the
 //     foreman is woken (needsForemanTx does both);
@@ -124,13 +126,13 @@ func (e *Engine) restartDeadlinesTx(tx *sql.Tx, now time.Time, gap time.Duration
 		leaseExpiry); err != nil {
 		return fmt.Errorf("restart the lease-token deadlines: %w", err)
 	}
-	// The hard-cap round reads every non-terminal job with first_leased
-	// set — queued ones a lapsed lease left behind included — so the cap
-	// clock must shift past the gap for that whole set, or the first
-	// wakeful tick (or the holder's first heartbeat) would hard-cap a job
-	// the sleep never ran (§14). last_leased shifts with it so the gap is
-	// not banked as leased wall time; NULL stays NULL (a queued job has
-	// no lease running).
+	// The hard-cap round reads every non-terminal job with last_leased
+	// set — a live lease — so the cap clock must shift past the gap for
+	// that set, or the first wakeful tick (or the holder's first
+	// heartbeat) would hard-cap a job the sleep never ran (§14, issue
+	// #36). first_leased shifts with it so the job's first lease also
+	// stays past the sleep; last_leased's NULL stays NULL (a queued job
+	// has no lease running, and its cap starts at its next lease).
 	rows, err := tx.Query(`SELECT id, first_leased, last_leased
 		FROM jobs WHERE status IN ('queued', 'leased', 'running') AND first_leased IS NOT NULL`)
 	if err != nil {
@@ -286,9 +288,9 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 		if !ok || limit <= 0 {
 			continue
 		}
-		rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0), COALESCE(first_leased, ''), COALESCE(last_leased, '')
+		rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0), COALESCE(last_leased, '')
 			FROM jobs
-			WHERE status IN ('queued', 'leased', 'running') AND kind = ? AND first_leased IS NOT NULL AND first_leased <= ?`,
+			WHERE status IN ('queued', 'leased', 'running') AND kind = ? AND last_leased IS NOT NULL AND last_leased <= ?`,
 			string(kind), fmtTime(now.Add(-limit)))
 		if err != nil {
 			return rep, fmt.Errorf("sweep hard caps: %w", err)
@@ -296,12 +298,12 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 		type capped struct {
 			id            int64
 			project, task int64
-			first, last   string
+			last          string
 		}
 		var cappedAll []capped
 		for rows.Next() {
 			var x capped
-			if err := rows.Scan(&x.id, &x.project, &x.task, &x.first, &x.last); err != nil {
+			if err := rows.Scan(&x.id, &x.project, &x.task, &x.last); err != nil {
 				rows.Close()
 				return rep, fmt.Errorf("sweep hard caps: %w", err)
 			}
@@ -313,9 +315,9 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 		rows.Close()
 		for _, x := range cappedAll {
 			var accrue int64
-			if first, err := parseTime(x.first); err == nil {
+			if last, err := parseTime(x.last); err == nil {
 				// the cap, not its discovery, ends the lease
-				accrue = accrualFrom(x.last, first.Add(limit))
+				accrue = accrualFrom(x.last, last.Add(limit))
 			}
 			reason := capError(kind, limit)
 			if err := failJobTx(tx, x.id, reason, accrue, now); err != nil {

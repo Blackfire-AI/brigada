@@ -106,6 +106,7 @@ func TestSweepHardCaps(t *testing.T) {
 	t.Run("foreman cap from config", func(t *testing.T) {
 		e := newEnvCfg(t, func(c *Config) {
 			c.HardCaps = map[Kind]time.Duration{KindForeman: 5 * time.Minute}
+			c.LeaseTTL = time.Hour // the cap fires, not the expiry
 		})
 		e.seedAgent(e.runner1, "claude", "claude", "sonnet", "claude") // the project's foreman pair
 		r := e.submit(e.foremanTurn())
@@ -149,6 +150,75 @@ func TestSweepHardCaps(t *testing.T) {
 			t.Errorf("later heartbeat = %s; want gone", ans)
 		}
 	})
+}
+
+// TestSweepHardCapFromCurrentLease (issue #36): the cap measures from
+// the current lease, not the first. A job requeued mid-cap — its lease
+// lapsed when a runner or the engine restarted — gets the full cap on
+// its next lease, while a job that never loses its lease is still
+// killed at the cap (TestSweepHardCaps above).
+func TestSweepHardCapFromCurrentLease(t *testing.T) {
+	cap45 := DefaultConfig().HardCaps[KindWork]
+	ttl := DefaultConfig().LeaseTTL
+	e := newEnv(t) // default 90 s LeaseTTL, 45 m work cap
+	r := e.submit(e.work())
+	e.leaseAny(e.runner1)
+	firstAt := e.str("SELECT first_leased FROM jobs WHERE id = ?", r.JobID)
+	if firstAt == "" {
+		t.Fatal("first_leased = '', want the first lease stamped")
+	}
+
+	// The 90 s lease lapses and the sweep requeues the job; it must not
+	// count the requeued job against the cap: no lease runs.
+	if rep := e.expireLease(); len(rep.HardCapped) != 0 {
+		t.Fatalf("sweep capped a job with no lease: %v", rep.HardCapped)
+	}
+	if status := e.str("SELECT status FROM jobs WHERE id = ?", r.JobID); status != statusQueued {
+		t.Fatalf("status = %q, want queued after the lease lapsed", status)
+	}
+
+	// The next lease starts the worker from scratch and gets the whole
+	// cap again, measured from the re-lease, not the first.
+	g := e.leaseAny(e.runner1)
+	if g == nil {
+		t.Fatal("nothing to lease")
+	}
+	if got := e.str("SELECT first_leased FROM jobs WHERE id = ?", r.JobID); got != firstAt {
+		t.Errorf("first_leased = %q after the re-lease, want %q kept", got, firstAt)
+	}
+	// The re-lease outlives what is left to test, so its expiry does not
+	// end it before the cap does (TestSweepHardCaps covers that side).
+	e.exec("UPDATE jobs SET lease_expires_at = ? WHERE id = ?",
+		fmtTime(e.clock.Now().Add(cap45+time.Hour)), r.JobID)
+
+	// Past the first lease's whole cap — the re-lease is 91 s in, so
+	// 44 m more is 45 m 31 s from the first lease, past its cap — but
+	// inside the re-lease's: the sweep and the heartbeat leave it alone.
+	e.elapse(44 * time.Minute)
+	if rep := e.mustSweep(); len(rep.HardCapped) != 0 {
+		t.Fatalf("sweep capped the re-leased job on the first lease's clock: %v", rep.HardCapped)
+	}
+	if ans := e.heartbeat(g); ans != AnsOK {
+		t.Errorf("heartbeat = %s; want ok: inside the re-lease's cap", ans)
+	}
+	// The beat extended the expiry again; re-pin it past the cap.
+	e.exec("UPDATE jobs SET lease_expires_at = ? WHERE id = ?",
+		fmtTime(e.clock.Now().Add(cap45)), r.JobID)
+
+	// The full cap after the re-lease still kills it, banking the
+	// lapsed lease up to its expiry and the re-lease up to the cap.
+	e.clock.Advance(2 * time.Minute) // the re-lease is 46 m in, past its 45 m cap
+	rep := e.mustSweep()
+	if !slices.Contains(rep.HardCapped, r.JobID) {
+		t.Fatalf("sweep report hard-capped = %v, want job %d", rep.HardCapped, r.JobID)
+	}
+	if status := e.str("SELECT status FROM jobs WHERE id = ?", r.JobID); status != statusFailed {
+		t.Errorf("status = %q, want failed", status)
+	}
+	want := int64(ttl.Seconds()) + int64(cap45.Seconds())
+	if secs := e.int("SELECT leased_seconds FROM jobs WHERE id = ?", r.JobID); secs != want {
+		t.Errorf("leased_seconds = %d, want %d", secs, want)
+	}
 }
 
 func TestSweepQueueTTL(t *testing.T) {
@@ -321,7 +391,7 @@ func checkSweptTaskParked(t *testing.T, e *env) {
 
 // TestSweepHardCapParksTask: a hard-capped task job parks its task.
 func TestSweepHardCapParksTask(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) { c.LeaseTTL = time.Hour }) // the cap fires, not the expiry
 	r := e.submit(e.work())
 	if g := e.leaseAny(e.runner1); g == nil {
 		t.Fatal("nothing to lease")

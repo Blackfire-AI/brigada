@@ -318,6 +318,33 @@ exit 7
 	}
 }
 
+// TestRunnerForemanSpawnFailureIsInfrastructure covers the foreman's
+// share of the spawn half of issue #39: a foreman CLI that cannot be
+// started — a script that is not there — fails the turn as the infra
+// kind before the CLI ran, and the agent is charged nothing.
+func TestRunnerForemanSpawnFailureIsInfrastructure(t *testing.T) {
+	e := newTestEnv(t, engine.Config{})
+	remote := newRemote(t)
+	e.seedProject(remote)
+	e.setForeman("fake", "fake-1")
+
+	p := e.startRunner(filepath.Join(t.TempDir(), "missing-turn.sh"), 100*time.Millisecond)
+	defer p.stop(t)
+	for i := 0; i < 2; i++ { // two failed turns would exhaust a streak of two
+		turn := e.submitForemanTurn("a turn whose CLI is not there")
+		failed := e.waitJob(turn.JobID, func(j *engine.JobInfo) bool { return j.Status == "failed" })
+		if msg := e.errorResult(failed); !strings.Contains(msg, "start the foreman CLI") {
+			t.Errorf("failure = %q, want the CLI's start named", msg)
+		}
+		if got := e.strOf("SELECT COALESCE(error_kind, '') FROM jobs WHERE id = ?", turn.JobID); got != engine.ErrorKindInfra {
+			t.Errorf("error kind of turn %d = %q, want %q", turn.JobID, got, engine.ErrorKindInfra)
+		}
+	}
+	if n := e.int64Of("SELECT COUNT(*) FROM agents WHERE health != 'ready'"); n != 0 {
+		t.Errorf("%d agents were charged for a CLI that never started", n)
+	}
+}
+
 // TestRunnerForemanLimitReachesTheEngine covers §4.4's first link: the
 // kind of the CLI's error — and the reset time its event carried —
 // rides the completion, so the engine marks the foreman limited.

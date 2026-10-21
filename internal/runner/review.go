@@ -92,7 +92,9 @@ func (r *jobRun) finishReview(ctx context.Context, ad adapter.Adapter, exitErr e
 		return
 	}
 	if nw := (&noWorkerError{}); errors.As(exitErr, &nw) {
-		r.finishWithError(ctx, "start the reviewer: "+nw.err.Error())
+		// As a worker's: the reviewer's CLI never started, so the failure
+		// is the environment's (issue #39).
+		r.finishWithInfraError(ctx, "start the reviewer: "+nw.err.Error())
 		return
 	}
 	comp := api.Completion{Result: verdictOf(ad.ResultText(r.snapshotEvents())), SessionID: r.sessionIDOf()}

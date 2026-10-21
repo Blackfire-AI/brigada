@@ -138,17 +138,12 @@ func (r *jobRun) execute(ctx context.Context) {
 			r.cfg.Log.WarnContext(context.WithoutCancel(ctx), "job set-up ended before the worktree was ready; nothing delivered",
 				"job_id", r.grant.JobID, "err", err)
 		} else {
-			// A task with no repo URL or an unbuildable worktree cannot
-			// be run by anyone; the job fails with the reason instead of
-			// bouncing between runners. A fetch that could not be done is
-			// the other kind (issue #46): the runner's own plumbing, an
-			// infrastructure failure the engine retries, capped.
-			var infra *infraError
-			if errors.As(err, &infra) {
-				r.finishWithInfraError(runCtx, err.Error())
-			} else {
-				r.finishWithError(runCtx, err.Error())
-			}
+			// The environment failed before the worker started — the
+			// mirror's fetch or clone, the worktree, the branch it builds
+			// on — never the agent (issue #39): the job fails as an
+			// infrastructure error, so the engine retries it, capped, and
+			// charges no health.
+			r.finishWithInfraError(runCtx, err.Error())
 		}
 		abort()
 		<-beatsDone
@@ -680,7 +675,10 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 		return
 	}
 	if nw := (&noWorkerError{}); errors.As(exitErr, &nw) {
-		r.finishWithError(ctx, "start the worker: "+nw.err.Error())
+		// The CLI never started — a command that could not be built or
+		// spawned is the environment's failure, not the agent's (issue
+		// #39): the infra kind, retried and charged to no health.
+		r.finishWithInfraError(ctx, "start the worker: "+nw.err.Error())
 		return
 	}
 

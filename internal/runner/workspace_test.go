@@ -2,14 +2,18 @@ package runner
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
+	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
 // TestTaskBranch pins the result branch names (§5.1): brigada, with an
@@ -599,5 +603,97 @@ func TestRemoteBranchSeparatesAbsentFromUnreachable(t *testing.T) {
 	bad := &workspace{repoURL: "file://" + filepath.Join(t.TempDir(), "missing.git")}
 	if _, ok, err := bad.remoteBranch(ctx, "brigada/task-1"); err == nil || ok {
 		t.Errorf("an unreachable remote = %t/%v, want the question's failure, not absence", ok, err)
+	}
+}
+
+// TestRunnerSpawnFailureIsInfrastructure covers the pre-CLI failure of
+// issue #39: a worker command that cannot be started — here a script
+// that is not there — fails the job as the infra kind before any CLI
+// ran, retried behind a backoff and charged to no agent.
+func TestRunnerSpawnFailureIsInfrastructure(t *testing.T) {
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	task := e.seedTask("", "true")
+	markerDir(t)
+
+	// The runner offers a worker whose script does not exist: the
+	// command cannot be spawned, so the CLI never starts.
+	p := e.startRunner(filepath.Join(t.TempDir(), "missing-worker.sh"), 100*time.Millisecond)
+	defer p.stop(t)
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
+	failed := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "failed" })
+
+	if msg := e.errorResult(failed); !strings.Contains(msg, "start the worker") {
+		t.Errorf("failure = %q, want the worker's start named", msg)
+	}
+	e.assertInfrastructureFailure(job)
+	if state := e.strOf("SELECT state FROM tasks WHERE id = ?", task); state != "ready" {
+		t.Errorf("task state = %q, want ready behind its retry", state)
+	}
+}
+
+// mustExec runs one statement the test needs against the store.
+func (e *testEnv) mustExec(query string, args ...any) {
+	e.t.Helper()
+	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(query, args...)
+		return err
+	}); err != nil {
+		e.t.Fatalf("exec %q: %v", query, err)
+	}
+}
+
+// assertInfrastructureFailure checks what every pre-CLI failure shares
+// (issue #39): the job failed with the infra error kind, so its task
+// was retried behind a backoff instead of parking, and no agent was
+// charged for the environment's failure.
+func (e *testEnv) assertInfrastructureFailure(job int64) {
+	e.t.Helper()
+	if got := e.strOf("SELECT COALESCE(error_kind, '') FROM jobs WHERE id = ?", job); got != engine.ErrorKindInfra {
+		e.t.Errorf("error kind of job %d = %q, want %q", job, got, engine.ErrorKindInfra)
+	}
+	retry := e.int64Of(`SELECT id FROM jobs WHERE restart = 1 AND status IN ('queued', 'leased', 'running')
+		AND task_id = (SELECT task_id FROM jobs WHERE id = ?)`, job)
+	if retry == 0 {
+		e.t.Errorf("no retried job followed the failure of job %d", job)
+		return
+	}
+	if until := e.strOf("SELECT COALESCE(not_before, '') FROM jobs WHERE id = ?", retry); until == "" {
+		e.t.Error("the retry carries no not-before backoff")
+	}
+	if n := e.int64Of("SELECT COUNT(*) FROM agents WHERE health != 'ready'"); n != 0 {
+		e.t.Errorf("%d agents were charged for an infrastructure failure", n)
+	}
+}
+
+// TestRunnerWorktreeFailureIsInfrastructure covers the worktree half of
+// issue #39: a worktree that cannot be built — here a base ref the
+// remote does not hold — fails the job as the infra kind before the
+// worker starts, retried behind a backoff and charged to no agent. The
+// failure is staged through an unbuildable base ref, not permissions:
+// the runner's startup sweep removes the worktrees dir, so a
+// permission-based test would never see the build fail.
+func TestRunnerWorktreeFailureIsInfrastructure(t *testing.T) {
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	task := e.seedTask("", "true")
+	// The mirror clones and fetches fine; the worktree add from a base
+	// ref nothing holds is what fails.
+	e.mustExec("UPDATE tasks SET base_ref = 'nope' WHERE id = ?", task)
+	markerDir(t)
+
+	p := e.startRunner(writeWorkerScript(t, happyWorker), 100*time.Millisecond)
+	defer p.stop(t)
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
+	failed := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "failed" })
+
+	if msg := e.errorResult(failed); !strings.Contains(msg, "add the worktree") {
+		t.Errorf("failure = %q, want the worktree add named", msg)
+	}
+	e.assertInfrastructureFailure(job)
+	if state := e.strOf("SELECT state FROM tasks WHERE id = ?", task); state != "ready" {
+		t.Errorf("task state = %q, want ready behind its retry", state)
 	}
 }

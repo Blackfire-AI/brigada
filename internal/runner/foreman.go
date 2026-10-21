@@ -317,7 +317,9 @@ func (r *jobRun) finishForemanTurn(ctx context.Context, ad adapter.Adapter, exit
 		return
 	}
 	if nw := (&noWorkerError{}); errors.As(exitErr, &nw) {
-		r.finishWithError(ctx, "start the foreman CLI: "+nw.err.Error())
+		// As a worker's: the foreman's CLI never started, so the failure
+		// is the environment's (issue #39).
+		r.finishWithInfraError(ctx, "start the foreman CLI: "+nw.err.Error())
 		return
 	}
 	if exitErr != nil {
