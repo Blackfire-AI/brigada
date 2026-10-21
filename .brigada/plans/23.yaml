@@ -103,7 +103,7 @@ tasks:
     base: "trailer-landed-deps"
     tier: heavy
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 91
