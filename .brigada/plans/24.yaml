@@ -29,7 +29,7 @@ tasks:
     tier: heavy
     effort: high
     review_tier: heavy
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 95
@@ -40,6 +40,6 @@ tasks:
     base: ""
     effort: medium
     review_tier: heavy
-    state: ready
+    state: running
     branch: ""
     rounds: 0
