@@ -78,6 +78,12 @@ restarting anything: re-point what waited on the failed task, split it, or cance
 longer wanted. A task whose dependency failed or was cancelled waits forever unless you
 re-point it. Record why in the task's restart note.
 
+## Ask the user only what no rule decides
+
+`ask_user` is for intent or product questions no rule answers. Never use it for a decision a
+rule already makes (a gate, a protected path, a tier, a spent restart, a cost limit): the engine
+holds those and the user releases them. Never ask the user to release a hold on brigada's behalf.
+
 ## Reporting
 
 End every headless turn with a short report for the user, its first line written for a
