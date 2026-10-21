@@ -275,17 +275,23 @@ func (w *workspace) materializeMirror(ctx context.Context, baseRef string) error
 	// refuses every refspec push — the runner's own, and a worker's
 	// `git push origin HEAD` if one pushes anyway — while the
 	// fetches above pass explicit refspecs and never needed it.
-	for _, kv := range [][2]string{
-		{"user.name", "brigada runner"},
-		{"user.email", "runner@brigada.invalid"},
+	for _, kv := range append(append([][2]string(nil), fallbackIdentity[:]...), [][2]string{
 		{"commit.gpgsign", "false"},
 		{"remote.origin.mirror", "false"},
-	} {
+	}...) {
 		if out, err := w.git(ctx, "--git-dir", w.mirror, "config", kv[0], kv[1]); err != nil {
 			return fmt.Errorf("set %s on the mirror: %w", kv[0], trimCmdError(out, err))
 		}
 	}
 	return nil
+}
+
+// fallbackIdentity is the git identity the runner commits under where no
+// other is configured: the mirror's, and the landing clone's when the
+// host has none.
+var fallbackIdentity = [2][2]string{
+	{"user.name", "brigada runner"},
+	{"user.email", "runner@brigada.invalid"},
 }
 
 // fetchBranch fetches one branch by name into the mirror (§5.1): a ref

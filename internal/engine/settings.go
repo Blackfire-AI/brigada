@@ -27,8 +27,8 @@ const (
 	SettingApprovalClasses        = "approval_classes"
 	SettingApprovalProtectedPaths = "approval_protected_paths"
 	// The gates and land rules (§6.3). gate_plan is enforced today: ask
-	// holds every plan at the plan-approval gate. The others are stored
-	// and shown only, until the land job reads them.
+	// holds every plan at the plan-approval gate. The land rules and
+	// gates are read by the land job (§7.1).
 	SettingGatePlan          = "gate_plan"
 	SettingGateLand          = "gate_land"
 	SettingGatePush          = "gate_push"

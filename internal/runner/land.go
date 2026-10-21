@@ -497,6 +497,16 @@ func (r *jobRun) prepareLandClone(ctx context.Context, dir, repoURL string) erro
 			return fmt.Errorf("detach the landing clone: %v", trimCmdError(out, err))
 		}
 	}
+	// The squash commits in this clone: a host with no identity of its
+	// own gets the runner's fallback, one with an identity keeps it.
+	for _, kv := range fallbackIdentity {
+		if _, err := r.landGit(ctx, dir, "config", "--get", kv[0]); err == nil {
+			continue
+		}
+		if out, err := r.landGit(ctx, dir, "config", kv[0], kv[1]); err != nil {
+			return fmt.Errorf("set %s on the landing clone: %v", kv[0], trimCmdError(out, err))
+		}
+	}
 	r.discardLandAttempt(ctx, dir)
 	return nil
 }

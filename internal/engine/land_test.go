@@ -273,7 +273,7 @@ func TestLandGateProtectedPathHolds(t *testing.T) {
 func TestLandGateTierHolds(t *testing.T) {
 	e := newEnv(t)
 	e.set(map[string]string{SettingApprovalTiers: "heavy"})
-	e.exec("UPDATE tasks SET tier = 'heavy', effective_tier = 'heavy' WHERE id = ?", e.task)
+	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", e.task)
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
 	e.runToDone(author, reviewer)
@@ -472,7 +472,7 @@ func TestLandHoldDoesNotBlockDependentsWork(t *testing.T) {
 	a := e.task // heavy: held at the land gate when it finishes
 	b := e.addTask("{}")
 	c := e.addTask("{}")
-	e.exec("UPDATE tasks SET tier = 'heavy', effective_tier = 'heavy' WHERE id = ?", a)
+	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", a)
 	e.exec("UPDATE tasks SET state = 'pending' WHERE id = ?", c)
 	e.exec("INSERT INTO task_deps (plan_id, task_id, depends_on_task_id) VALUES (?, ?, ?)", e.plan, c, a)
 	e.exec("INSERT INTO task_deps (plan_id, task_id, depends_on_task_id) VALUES (?, ?, ?)", e.plan, c, b)
