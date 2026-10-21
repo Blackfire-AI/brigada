@@ -14,6 +14,9 @@
 # Test binary, built with `go test -c`
 *.test
 
+# Local Go build/test cache
+.gocache/
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
