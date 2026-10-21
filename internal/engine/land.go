@@ -18,7 +18,7 @@ import (
 // landing record. A land-gate rule (§6.3) holds the task in the needs-you
 // queue instead, naming the rule; only its dependents' landings wait on
 // it. The foreman has no tool for any of this: the hold is the user's to
-// release (the release endpoint ships next to this, not here), and the
+// release (LandApprove and LandReject below), and the
 // job is the engine's own.
 
 // landRecord is the landing record a land job's completion carries
@@ -207,10 +207,12 @@ func landHoldReasonsTx(tx *sql.Tx, project, taskID int64) ([]string, error) {
 	// — an older runner, or a task whose work predates the recording —
 	// the same proxy the plan gate uses (§6.3).
 	var spec, check, tier, changed string
-	if err := tx.QueryRow("SELECT spec, COALESCE(check_cmd, ''), tier, COALESCE(changed_paths, '') FROM tasks WHERE id = ?", taskID).
+	if err := tx.QueryRow("SELECT spec, COALESCE(check_cmd, ''), effective_tier, COALESCE(changed_paths, '') FROM tasks WHERE id = ?", taskID).
 		Scan(&spec, &check, &tier, &changed); err != nil {
 		return nil, fmt.Errorf("read task %d: %w", taskID, err)
 	}
+	// The effective tier counts: the escalation ladder may have moved the
+	// task off the tier it was planned at.
 	if slices.Contains(s.ApprovalTiers, tier) {
 		reasons = append(reasons, tier)
 	}

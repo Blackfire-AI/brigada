@@ -20,7 +20,7 @@ CREATE INDEX idx_landings_project ON landings(project_id);
 
 -- A task held at the land gate (§6.3): gate_land is ask, or a rule
 -- tripped (a protected path, a tier, a spent restart). The user's
--- release deletes the row and re-evaluates the landing; the foreman has
+-- release deletes the row and queues the land job directly; the foreman has
 -- no tool for either (§6.3). The task stays done: only its dependents'
 -- landings wait on the hold (§7.1).
 CREATE TABLE land_holds (

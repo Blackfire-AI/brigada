@@ -722,3 +722,38 @@ func TestRunnerLandFreshTargetCreatedFromDefault(t *testing.T) {
 		t.Errorf("main moved: %s, want the seed %s", got, seed)
 	}
 }
+
+// TestRunnerLandWithoutHostIdentity: on a host with no git identity at
+// all, the landing clone commits under the runner's fallback identity
+// (the mirror's), where it used to fail with "Author identity unknown".
+func TestRunnerLandWithoutHostIdentity(t *testing.T) {
+	markerDir(t)
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	e.setProjectSettings(`{"gate_push":"auto"}`)
+	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
+	work := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", "", ""))
+	t.Setenv("BRIGADA_TEST_BRANCH", taskBranch(task, 1))
+	// No identity from anywhere: no environment, no global or system
+	// config, and no guessing from the user and host names.
+	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "EMAIL"} {
+		t.Setenv(k, "")
+		os.Unsetenv(k)
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "user.useConfigOnly")
+	t.Setenv("GIT_CONFIG_VALUE_0", "true")
+	e.startRunner(writeWorkerScript(t, reviewScript(reviewApproveResult)), 100*time.Millisecond, withReviewerAgent)
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	e.waitTaskState(task, "done")
+	commit := e.waitLanding(task, "pushed")
+	bare := strings.TrimPrefix(remote, "file://")
+	if got := strings.TrimSpace(git(t, "", "--git-dir", bare, "show", "-s", "--format=%an <%ae>", commit)); got != "brigada runner <runner@brigada.invalid>" {
+		t.Errorf("landing commit author = %q, want the fallback identity", got)
+	}
+}
