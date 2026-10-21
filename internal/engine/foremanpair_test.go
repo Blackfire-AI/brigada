@@ -293,7 +293,7 @@ func TestForemanTurnBusyRunnerCount(t *testing.T) {
 			}
 			turn := e.submit(e.foremanTurn())
 			for i := 0; i < 2; i++ {
-				e.clock.Advance(9 * time.Minute)
+				e.elapse(9 * time.Minute)
 				if ans := e.heartbeat(g); ans != AnsOK {
 					t.Fatalf("heartbeat = %s; want ok", ans)
 				}

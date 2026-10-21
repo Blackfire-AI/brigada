@@ -40,7 +40,7 @@ func TestPinnedFixWaitsForCoolingAgent(t *testing.T) {
 	fix := e.pinnedFix(codex)
 
 	for i := 0; i < 3; i++ { // 30 minutes in 10-minute steps: three TTLs
-		e.clock.Advance(10 * time.Minute)
+		e.elapse(10 * time.Minute)
 		if g := e.lease(e.runner1, nil, nil); g != nil {
 			t.Fatalf("leased job %d while its agent cools", g.JobID)
 		}
@@ -79,22 +79,22 @@ func TestPinnedFixWaitsForCoolingAgent(t *testing.T) {
 // TestCoolingHoldTTLCountsFromTheEnd: when the cooling ends and nobody
 // leases, the TTL counts from that moment, not from queued_at.
 func TestCoolingHoldTTLCountsFromTheEnd(t *testing.T) {
-	e := newEnv(t)
+	// A stale runner would break its cooling agent and lift the hold
+	// early; the test is about the cooling window alone, so the runner
+	// stays seen by the stale rule's clock.
+	e := newEnvCfg(t, func(c *Config) { c.RunnerStale = time.Hour })
 	codex := e.addAgent(e.runner1, "codex", "gpt-5", "work")
 	e.coolUntil(codex, 30*time.Minute)
 	fix := e.pinnedFix(codex)
 
-	for i := 0; i < 3; i++ {
-		e.clock.Advance(10 * time.Minute)
-		e.mustSweep()
-	}
+	e.elapse(30 * time.Minute)
 	// The cooling ended exactly now. No runner polls; a sweep lifts the hold.
 	e.clock.Advance(time.Second)
 	e.mustSweep()
 	if got := e.heldLayer(fix.JobID); got != "" {
 		t.Fatalf("hold layer after the cooling ended = %q, want it lifted", got)
 	}
-	e.clock.Advance(9*time.Minute + 58*time.Second)
+	e.elapse(9*time.Minute + 58*time.Second)
 	if rep := e.mustSweep(); slices.Contains(rep.QueueTimedOut, fix.JobID) {
 		t.Fatalf("parked 9m58s after the cooling ended (queued 40m ago): %v", rep.QueueTimedOut)
 	}
@@ -115,7 +115,7 @@ func TestAllQualifyingAgentsCoolingHolds(t *testing.T) {
 	soon := e.coolUntil(a2, 20*time.Minute)
 	job := e.submit(e.workOn(e.addTask("{}")))
 
-	e.clock.Advance(15 * time.Minute)
+	e.elapse(15 * time.Minute)
 	e.lease(e.runner1, nil, nil) // the runner polls, so it is not stale
 	if got := e.heldLayer(job.JobID); got != layerCooling {
 		t.Fatalf("hold layer = %q, want %q", got, layerCooling)
@@ -147,10 +147,9 @@ func TestPinnedJobOnBrokenAgentParksNamingIt(t *testing.T) {
 	e.exec("UPDATE agents SET health = 'broken', health_reason = 'auth' WHERE id = ?", codex)
 	fix := e.pinnedFix(codex)
 
-	e.clock.Advance(10*time.Minute + time.Second)
-	rep := e.mustSweep()
-	if !slices.Contains(rep.QueueTimedOut, fix.JobID) {
-		t.Fatalf("timed out = %v, want job %d parked", rep.QueueTimedOut, fix.JobID)
+	e.elapse(10*time.Minute + time.Second)
+	if status := e.str("SELECT status FROM jobs WHERE id = ?", fix.JobID); status != statusFailed {
+		t.Fatalf("status = %q, want failed by the queue TTL", status)
 	}
 	result := e.str("SELECT result FROM jobs WHERE id = ?", fix.JobID)
 	for _, want := range []string{"queue TTL exceeded", "pinned to codex/gpt-5", "broken", "auth"} {

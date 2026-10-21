@@ -28,38 +28,30 @@ func TestSweepKeepsExpiredLeaseID(t *testing.T) {
 	}
 }
 
-// TestSweepRequeueAfterEngineGapRestartsTTL: the engine's host slept, so
-// the sweep ran long after the lease expired. The requeue must not be
-// failed by the queue TTL in the same sweep: the clock counts from the
-// requeue, not the expiry (§8.1).
-func TestSweepRequeueAfterEngineGapRestartsTTL(t *testing.T) {
+// TestSweepSuspensionKeepsTheLease: a host sleep makes the sweep's wall
+// clock jump far past the sweep interval, so the sweep restarts the
+// lease's deadline from now instead of requeuing the still-live job
+// (§13). The suspension tests live beside the sweep; see
+// suspension_test.go for the other deadlines.
+func TestSweepSuspensionKeepsTheLease(t *testing.T) {
 	e := newEnv(t)
 	e.submit(e.work())
 	g := e.leaseAny(e.runner1)
-	e.clock.Advance(e.eng.cfg.LeaseTTL + time.Second + 11*time.Minute)
-	requeuedAt := e.clock.Now()
+
+	e.clock.Advance(time.Hour)
 	rep := e.mustSweep()
 
-	if len(rep.Expired) != 1 || rep.Expired[0] != g.JobID {
-		t.Fatalf("sweep report expired = %v, want [%d]", rep.Expired, g.JobID)
+	if len(rep.Expired) != 0 {
+		t.Fatalf("sweep report expired = %v, want none after a host sleep", rep.Expired)
 	}
-	if len(rep.QueueTimedOut) != 0 {
-		t.Fatalf("sweep report queue-timed-out = %v, want none", rep.QueueTimedOut)
+	if status := e.str("SELECT status FROM jobs WHERE id = ?", g.JobID); status != statusLeased {
+		t.Errorf("status = %q, want leased: the sleep did not end the hold", status)
 	}
-	if status := e.str("SELECT status FROM jobs WHERE id = ?", g.JobID); status != statusQueued {
-		t.Errorf("status = %q, want queued", status)
+	if expires := e.str("SELECT lease_expires_at FROM jobs WHERE id = ?", g.JobID); expires != fmtTime(e.clock.Now().Add(e.eng.cfg.LeaseTTL)) {
+		t.Errorf("lease_expires_at = %q, want %q (restarted from now)", expires, fmtTime(e.clock.Now().Add(e.eng.cfg.LeaseTTL)))
 	}
-	if queuedAt := e.str("SELECT queued_at FROM jobs WHERE id = ?", g.JobID); queuedAt != fmtTime(requeuedAt) {
-		t.Errorf("queued_at = %q, want the requeue moment %q", queuedAt, fmtTime(requeuedAt))
-	}
-
-	e.clock.Advance(10*time.Minute + 2*time.Second)
-	rep = e.mustSweep()
-	if len(rep.QueueTimedOut) != 1 || rep.QueueTimedOut[0] != g.JobID {
-		t.Fatalf("sweep report queue-timed-out = %v, want [%d]", rep.QueueTimedOut, g.JobID)
-	}
-	if status := e.str("SELECT status FROM jobs WHERE id = ?", g.JobID); status != statusFailed {
-		t.Errorf("status = %q, want failed", status)
+	if n := e.int("SELECT COUNT(*) FROM events WHERE kind = ?", evEngineSuspended); n != 1 {
+		t.Errorf("engine_suspended events = %d, want 1", n)
 	}
 }
 
@@ -85,11 +77,13 @@ func TestSweepHardCaps(t *testing.T) {
 			}
 
 			// A hair under the cap the job is untouched.
-			e.clock.Advance(tc.cap - time.Minute)
+			e.elapse(tc.cap - time.Minute)
 			if rep := e.mustSweep(); len(rep.HardCapped) != 0 {
 				t.Fatalf("sweep capped a minute early: %v", rep.HardCapped)
 			}
 
+			// One small wakeful gap past the cap, so the cap fires in this
+			// sweep rather than being read as a host sleep (§13).
 			e.clock.Advance(2 * time.Minute)
 			rep := e.mustSweep()
 			if !slices.Contains(rep.HardCapped, r.JobID) {
@@ -118,10 +112,10 @@ func TestSweepHardCaps(t *testing.T) {
 		if g := e.leaseClaude(e.runner1); g == nil {
 			t.Fatal("nothing to lease")
 		}
-		e.clock.Advance(6 * time.Minute)
-		rep := e.mustSweep()
-		if !slices.Contains(rep.HardCapped, r.JobID) {
-			t.Fatalf("sweep report hard-capped = %v, want the foreman job %d", rep.HardCapped, r.JobID)
+		e.elapse(6 * time.Minute)
+		e.mustSweep()
+		if status := e.str("SELECT status FROM jobs WHERE id = ?", r.JobID); status != statusFailed {
+			t.Fatalf("status = %q, want failed by the 5m foreman cap", status)
 		}
 		if result := e.str("SELECT result FROM jobs WHERE id = ?", r.JobID); !strings.Contains(result, "5m") {
 			t.Errorf("result = %q, want the failure to name the 5m cap", result)
@@ -129,10 +123,16 @@ func TestSweepHardCaps(t *testing.T) {
 	})
 
 	t.Run("heartbeat loses the lease its own call capped", func(t *testing.T) {
-		e := newEnv(t)
+		// The lease must outlive the wakeful run-up, so the hard cap —
+		// not the lease expiry or the queue TTL — is what the heartbeat's
+		// own sweep does.
+		e := newEnvCfg(t, func(c *Config) { c.LeaseTTL = time.Hour })
 		r := e.submit(e.work())
 		g := e.leaseAny(e.runner1)
-		e.clock.Advance(46 * time.Minute)
+		// Wakefully to just under the cap, then one small gap past it, so
+		// the cap is this heartbeat's own sweep's work, not a sleep (§13).
+		e.elapse(44 * time.Minute)
+		e.clock.Advance(2 * time.Minute)
 		ans, _, err := e.eng.Heartbeat(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, Progress{})
 		if err != nil {
 			t.Fatalf("heartbeat: %v", err)
@@ -155,7 +155,7 @@ func TestSweepQueueTTL(t *testing.T) {
 	e := newEnv(t)
 	r := e.submit(e.work())
 
-	e.clock.Advance(9*time.Minute + 59*time.Second)
+	e.elapse(9*time.Minute + 59*time.Second)
 	if rep := e.mustSweep(); len(rep.QueueTimedOut) != 0 {
 		t.Fatalf("sweep timed out at 9m59s: %v", rep.QueueTimedOut)
 	}
@@ -206,11 +206,11 @@ func testSweepQueueTTLNarrowedPoll(t *testing.T) {
 	codex := pinned("codex")
 	claude := pinned("claude")
 
-	e.clock.Advance(9 * time.Minute)
+	e.elapse(9 * time.Minute)
 	if ans := e.heartbeat(g); ans != AnsOK {
 		t.Fatalf("heartbeat = %s; want ok", ans)
 	}
-	e.clock.Advance(9 * time.Minute)
+	e.elapse(9 * time.Minute)
 	if ans := e.heartbeat(g); ans != AnsOK {
 		t.Fatalf("heartbeat = %s; want ok", ans)
 	}
@@ -246,7 +246,7 @@ func testSweepQueueTTLBusyRunner(t *testing.T) {
 	status := func(job int64) string { return e.str("SELECT status FROM jobs WHERE id = ?", job) }
 	// step moves time on with the busy runner still beating, so it is not stale.
 	step := func(d time.Duration) SweepReport {
-		e.clock.Advance(d)
+		e.elapse(d)
 		if ans := e.heartbeat(g); ans != AnsOK {
 			t.Fatalf("heartbeat = %s; want ok", ans)
 		}
@@ -285,7 +285,7 @@ func testSweepQueueTTLBusyRunner(t *testing.T) {
 	if layer := e.str("SELECT COALESCE(cap_held_layer, '') FROM jobs WHERE id = ?", waiting.JobID); layer != "" {
 		t.Errorf("hold layer after the slot freed = %q, want it lifted", layer)
 	}
-	e.clock.Advance(9*time.Minute + 59*time.Second)
+	e.elapse(9*time.Minute + 59*time.Second)
 	if rep := e.mustSweep(); slices.Contains(rep.QueueTimedOut, waiting.JobID) {
 		t.Fatalf("parked at 9m59s of a free slot: %v", rep.QueueTimedOut)
 	}
@@ -326,9 +326,9 @@ func TestSweepHardCapParksTask(t *testing.T) {
 	if g := e.leaseAny(e.runner1); g == nil {
 		t.Fatal("nothing to lease")
 	}
-	e.clock.Advance(46 * time.Minute)
-	if rep := e.mustSweep(); !slices.Contains(rep.HardCapped, r.JobID) {
-		t.Fatalf("sweep report hard-capped = %v, want job %d", rep.HardCapped, r.JobID)
+	e.elapse(46 * time.Minute)
+	if status := e.str("SELECT status FROM jobs WHERE id = ?", r.JobID); status != statusFailed {
+		t.Fatalf("status = %q, want failed by the hard cap", status)
 	}
 	checkSweptTaskParked(t, e)
 }
@@ -337,9 +337,9 @@ func TestSweepHardCapParksTask(t *testing.T) {
 func TestSweepQueueTTLParksTask(t *testing.T) {
 	e := newEnv(t)
 	r := e.submit(e.work())
-	e.clock.Advance(10*time.Minute + 2*time.Second)
-	if rep := e.mustSweep(); !slices.Contains(rep.QueueTimedOut, r.JobID) {
-		t.Fatalf("sweep report timed out = %v, want job %d", rep.QueueTimedOut, r.JobID)
+	e.elapse(10*time.Minute + 2*time.Second)
+	if status := e.str("SELECT status FROM jobs WHERE id = ?", r.JobID); status != statusFailed {
+		t.Fatalf("status = %q, want failed by the queue TTL", status)
 	}
 	checkSweptTaskParked(t, e)
 }

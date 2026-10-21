@@ -3,7 +3,6 @@ package engine
 import (
 	"database/sql"
 	"encoding/json"
-	"slices"
 	"testing"
 	"time"
 
@@ -218,7 +217,7 @@ func TestCapHeldJobSurvivesQueueTTL(t *testing.T) {
 
 	// Halfway through the TTL window the runner polls again: the hold is
 	// restamped, and the unservable job still queues unheld.
-	e.clock.Advance(e.eng.cfg.QueueTTL / 2)
+	e.elapse(e.eng.cfg.QueueTTL / 2)
 	if got := e.leaseAny(e.runner1); got != nil {
 		t.Fatalf("the held job %d leaked out mid-window", got.JobID)
 	}
@@ -232,13 +231,10 @@ func TestCapHeldJobSurvivesQueueTTL(t *testing.T) {
 
 	// Past the TTL from queued_at the unservable job fails; the held one
 	// waits, its clock having restarted at the last hold.
-	e.clock.Advance(e.eng.cfg.QueueTTL/2 + 2*time.Minute)
-	rep := e.mustSweep()
-	if !slices.Contains(rep.QueueTimedOut, unservableJob.JobID) {
-		t.Errorf("sweep timed out = %v, want the unservable job %d in it", rep.QueueTimedOut, unservableJob.JobID)
-	}
-	if slices.Contains(rep.QueueTimedOut, held.JobID) {
-		t.Errorf("sweep timed out the cap-held job %d; it waits as long as it takes (§8.1)", held.JobID)
+	e.elapse(e.eng.cfg.QueueTTL/2 + 2*time.Minute)
+	e.mustSweep()
+	if status := e.str("SELECT status FROM jobs WHERE id = ?", unservableJob.JobID); status != statusFailed {
+		t.Errorf("unservable job status = %q, want failed by the queue TTL", status)
 	}
 	if status := e.str("SELECT status FROM jobs WHERE id = ?", held.JobID); status != statusQueued {
 		t.Errorf("held job status = %q, want queued", status)

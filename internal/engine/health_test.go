@@ -407,13 +407,13 @@ func TestStaleRunnerBreaksItsAgentsAndRegisterClearsOnlyThat(t *testing.T) {
 	e.exec("UPDATE agents SET cooling_until = ? WHERE id = ?", coolUntil, cooling)
 
 	// runner2 keeps polling; runner1 goes quiet past the window.
-	e.clock.Advance(10 * time.Minute)
+	e.elapse(10 * time.Minute)
 	e.leaseAny(e.runner2)
 	e.mustSweep()
 	if h, _, _ := e.agentState(stale); h != "ready" {
 		t.Fatalf("agent health inside the window = %q, want ready", h)
 	}
-	e.clock.Advance(10 * time.Minute)
+	e.elapse(10 * time.Minute)
 	e.leaseAny(e.runner2)
 	e.mustSweep()
 
