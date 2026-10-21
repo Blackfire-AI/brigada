@@ -213,8 +213,9 @@ type Completion struct {
 	SessionID   string
 	Outcome     string
 	// ErrorKind sorts an Error — "limit" when the CLI hit its
-	// subscription limit (§4.4) — and LimitUntil is the reset time then,
-	// RFC3339, empty when unknown.
+	// subscription limit (§4.4), "setup" or "infra" when the job's own
+	// environment or plumbing failed (§5.7, §5.1) — and LimitUntil is
+	// the reset time then, RFC3339, empty when unknown.
 	ErrorKind  string
 	LimitUntil string
 }

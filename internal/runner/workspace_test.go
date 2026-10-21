@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -353,6 +354,58 @@ func TestRedactURL(t *testing.T) {
 		if got := redactURL(in); got != want {
 			t.Errorf("redactURL(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestFetchFailuresAreInfrastructureErrors pins issue #46's fix: a
+// clone or fetch of the remote that fails is the runner's plumbing —
+// the shape of a network that is not up in the seconds after a wake —
+// and completes as an infrastructure error (engine.ErrorKindInfra) the
+// engine retries, capped. A grant that cannot be run at all stays the
+// task's own failure.
+func TestFetchFailuresAreInfrastructureErrors(t *testing.T) {
+	ctx := context.Background()
+	remote := newRemote(t)
+	cfg := &Config{StateDir: t.TempDir()}
+	grant := &api.JobGrant{
+		JobID: 51, TaskID: 11, Kind: "work", Attempt: 1,
+		RepoURL: remote, BaseRef: "main", Branch: "brigada/task-11",
+	}
+	ws, err := prepareWorkspace(ctx, cfg, grant)
+	if err != nil {
+		t.Fatalf("prepare the workspace: %v", err)
+	}
+	ws.remove(ctx)
+
+	// The remote goes away, and the mirror's fetch fails as
+	// infrastructure.
+	if err := os.Rename(strings.TrimPrefix(remote, "file://"), strings.TrimPrefix(remote, "file://")+"-gone"); err != nil {
+		t.Fatal(err)
+	}
+	var infra *infraError
+	if _, err := prepareWorkspace(ctx, cfg, grant); err == nil || !errors.As(err, &infra) {
+		t.Fatalf("a failed fetch of the mirror = %v, want an infrastructure error", err)
+	} else if !strings.Contains(err.Error(), "fetch the mirror") {
+		t.Errorf("fetch failure = %q, want the mirror's fetch named", err)
+	}
+	// The branches the worktree builds on are fetched by name the same
+	// way, and fail the same way.
+	if err := ws.fetchBranch(ctx, "main"); err == nil || !errors.As(err, &infra) {
+		t.Fatalf("a failed fetch of a branch = %v, want an infrastructure error", err)
+	}
+	// The first job of a repo clones instead of fetching: the same
+	// fault, the same class.
+	if _, err := prepareWorkspace(ctx, &Config{StateDir: t.TempDir()}, grant); err == nil || !errors.As(err, &infra) {
+		t.Fatalf("a failed clone = %v, want an infrastructure error", err)
+	} else if !strings.Contains(err.Error(), "clone") {
+		t.Errorf("clone failure = %q, want the clone named", err)
+	}
+
+	// A grant that cannot be run by anyone — no repo to fetch at all —
+	// is not the runner's plumbing and stays the task's failure.
+	_, err = prepareWorkspace(ctx, cfg, &api.JobGrant{TaskID: 12, BaseRef: "main", RepoURL: ""})
+	if err == nil || errors.As(err, &infra) {
+		t.Fatalf("a task without a repo URL = %v, want the task's own failure", err)
 	}
 }
 

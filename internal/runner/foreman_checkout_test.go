@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,17 +66,26 @@ func TestPrepareForemanCheckout(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(scratch, "session.txt")); err != nil {
 		t.Fatalf("session lost: %v", err)
 	}
-	// A failed fetch cannot turn a stale snapshot into a successful refresh.
+	// A failed fetch cannot turn a stale snapshot into a successful
+	// refresh, and completes as an infrastructure error (issue #46):
+	// the network's, never the turn's own, failure.
 	remotePath := strings.TrimPrefix(remote, "file://")
 	if err := os.Rename(remotePath, remotePath+"-gone"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := PrepareForemanCheckout(ctx, scratch, remote, "trunk", nil); err == nil || !strings.Contains(err.Error(), "fetch") || !strings.Contains(err.Error(), "does not appear to be a git repository") {
+	_, err = PrepareForemanCheckout(ctx, scratch, remote, "trunk", nil)
+	if err == nil || !strings.Contains(err.Error(), "fetch") || !strings.Contains(err.Error(), "does not appear to be a git repository") {
 		t.Fatalf("fetch failure = %v", err)
+	}
+	var infra *infraError
+	if !errors.As(err, &infra) {
+		t.Errorf("foreman checkout fetch failure = %T, want an infrastructure error", err)
 	}
 	empty := t.TempDir()
 	if _, err := PrepareForemanCheckout(ctx, empty, remote, "main", nil); err == nil || !strings.Contains(err.Error(), "clone") {
 		t.Fatalf("clone failure = %v", err)
+	} else if !errors.As(err, &infra) {
+		t.Errorf("foreman checkout clone failure = %T, want an infrastructure error", err)
 	}
 	if _, err := os.Stat(filepath.Join(empty, "repo")); !os.IsNotExist(err) {
 		t.Fatalf("partial clone left behind: %v", err)
