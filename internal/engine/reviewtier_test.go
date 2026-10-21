@@ -102,6 +102,18 @@ func TestReviewDefaultsOneTierBelow(t *testing.T) {
 	}
 }
 
+// A review follows the task's effective tier after an escalation bump: a
+// task the ladder raised from light to heavy is reviewed one tier below
+// heavy (standard), not below its original light.
+func TestReviewTierFollowsEscalation(t *testing.T) {
+	e, _, standard, _ := reviewTierEnv(t, nil)
+	job := e.reviewOfTask("light", "effective_tier = ?", "heavy")
+	if g := e.leaseAny(e.runner1); g == nil || g.JobID != job.JobID {
+		t.Fatalf("lease = %+v, want review %d", g, job.JobID)
+	}
+	e.assertTierPick(job.JobID, standard, "standard", "standard")
+}
+
 // review.tier = same asks for the task's own effective tier.
 func TestReviewTierSame(t *testing.T) {
 	e, _, _, heavy := reviewTierEnv(t, func(c *Config) { c.Review.Tier = ReviewTierSame })
