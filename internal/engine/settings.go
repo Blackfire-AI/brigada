@@ -26,8 +26,18 @@ const (
 	SettingApprovalMaxTasks       = "approval_max_tasks"
 	SettingApprovalClasses        = "approval_classes"
 	SettingApprovalProtectedPaths = "approval_protected_paths"
-	SettingDefaultCheck           = "default_check"
-	SettingWorkerTools            = "worker_tools"
+	// The gates and land rules (§6.3). gate_plan is enforced today: ask
+	// holds every plan at the plan-approval gate. The others are stored
+	// and shown only, until the land job reads them.
+	SettingGatePlan          = "gate_plan"
+	SettingGateLand          = "gate_land"
+	SettingGatePush          = "gate_push"
+	SettingApprovalTiers     = "approval_tiers"
+	SettingApprovalRestarted = "approval_restarted"
+	SettingLandTarget        = "land_target"
+	SettingAfterLand         = "after_land"
+	SettingDefaultCheck      = "default_check"
+	SettingWorkerTools       = "worker_tools"
 	// The environment step (§5.7): the command, the repo-relative files
 	// whose contents key its cache, and its time bound in minutes. Schema
 	// 1 of the shared file is flat, so the three are sibling keys.
@@ -49,8 +59,17 @@ const (
 // on the day's foreman turns, so a typo cannot buy a thousand-turn day.
 const MaxForemanWakesPerDay = 1000
 
+// The values a gate takes (§6.3): auto runs on, ask waits for the user;
+// the push gate may also be never, which lands locally.
+const (
+	GateAuto  = "auto"
+	GateAsk   = "ask"
+	GateNever = "never"
+)
+
 // SettingKeys are the editable keys, in the order show prints them.
 var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
+	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
 	SettingExtraRepos, SettingForemanWakesPerDay, SettingInstructions}
 
@@ -93,6 +112,29 @@ func instructionsSummary(text string) string {
 
 // settingListSep separates the items of a list value on the command line.
 const settingListSep = "+"
+
+// validBranchName reports whether name is a branch name git takes, by
+// check-ref-format's rules spelled in Go: the engine runs no git (product
+// §5 rule 1), so the check is its own. A branch additionally cannot begin
+// with a dash, which git reads as an option.
+func validBranchName(name string) bool {
+	if name == "" || name == "@" || strings.HasPrefix(name, "-") ||
+		strings.HasSuffix(name, "/") || strings.HasSuffix(name, ".") ||
+		strings.Contains(name, "..") || strings.Contains(name, "@{") || strings.Contains(name, "//") {
+		return false
+	}
+	for _, part := range strings.Split(name, "/") {
+		if part == "" || strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock") {
+			return false
+		}
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f || strings.ContainsRune(" ~^:?*[\\", r) {
+			return false
+		}
+	}
+	return true
+}
 
 // ErrInvalidSetting marks a refusal the caller caused: an unknown key or
 // a value the key does not take. The API turns it into a 400.
@@ -137,7 +179,9 @@ var classWord = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 // Every refusal names the valid keys.
 func parseSettingValue(key, value string) (json.RawMessage, error) {
 	switch key {
-	case SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths, SettingDefaultCheck, SettingWorkerTools,
+	case SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
+		SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
+		SettingDefaultCheck, SettingWorkerTools,
 		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanWakesPerDay, SettingInstructions:
 	default:
 		return nil, fmt.Errorf("%w: unknown key %q; valid keys: %s", ErrInvalidSetting, key, strings.Join(SettingKeys, ", "))
@@ -154,8 +198,36 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 	if value == "" {
 		return nil, nil
 	}
-	if key == SettingDefaultCheck || key == SettingSetup {
+	if key == SettingDefaultCheck || key == SettingSetup || key == SettingAfterLand {
 		return json.Marshal(strings.TrimSpace(value))
+	}
+	if key == SettingGatePlan || key == SettingGateLand {
+		v := strings.TrimSpace(value)
+		if v != GateAuto && v != GateAsk {
+			return nil, fmt.Errorf("%w: %s takes %s or %s, got %q", ErrInvalidSetting, key, GateAuto, GateAsk, value)
+		}
+		return json.Marshal(v)
+	}
+	if key == SettingGatePush {
+		v := strings.TrimSpace(value)
+		if v != GateAuto && v != GateAsk && v != GateNever {
+			return nil, fmt.Errorf("%w: %s takes %s, %s or %s, got %q", ErrInvalidSetting, key, GateAuto, GateAsk, GateNever, value)
+		}
+		return json.Marshal(v)
+	}
+	if key == SettingApprovalRestarted {
+		v := strings.TrimSpace(value)
+		if v != "true" && v != "false" {
+			return nil, fmt.Errorf("%w: %s takes true or false, got %q", ErrInvalidSetting, key, value)
+		}
+		return json.Marshal(v == "true")
+	}
+	if key == SettingLandTarget {
+		v := strings.TrimSpace(value)
+		if !validBranchName(v) {
+			return nil, fmt.Errorf("%w: %s takes a branch name, got %q", ErrInvalidSetting, key, value)
+		}
+		return json.Marshal(v)
 	}
 	if key == SettingInstructions {
 		if strings.TrimSpace(value) == "" {
@@ -207,6 +279,10 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 		}
 		if key == SettingApprovalClasses && !classWord.MatchString(item) {
 			return nil, fmt.Errorf("%w: %s item %q is not a class name (letters, digits, _ . -)",
+				ErrInvalidSetting, key, item)
+		}
+		if key == SettingApprovalTiers && item != "light" && item != "standard" && item != "heavy" {
+			return nil, fmt.Errorf("%w: %s item %q is not a tier (light, standard, heavy)",
 				ErrInvalidSetting, key, item)
 		}
 		if key == SettingSetupCacheKeyFiles {
@@ -275,6 +351,11 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 	if err != nil {
 		return ProjectSettings{}, err
 	}
+	// land_target's default is the project's default branch (§6.3).
+	var defaultBranch string
+	if err := tx.QueryRow("SELECT COALESCE(NULLIF(default_branch, ''), ?) FROM projects WHERE id = ?", setupDefaultBranch, project).Scan(&defaultBranch); err != nil {
+		return ProjectSettings{}, fmt.Errorf("read the default branch of project %d: %w", project, err)
+	}
 	list := func(l []string) string {
 		if len(l) == 0 {
 			return "none"
@@ -299,6 +380,35 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 			sv.Value = list(eff.Classes)
 		case SettingApprovalProtectedPaths:
 			sv.Value = list(eff.ProtectedPaths)
+		case SettingGatePlan:
+			sv.Value = GateAuto
+			if s, ok := rawString(cur); ok && s != "" {
+				sv.Value = s
+			}
+		case SettingGateLand:
+			sv.Value = GateAuto
+			if s, ok := rawString(cur); ok && s != "" {
+				sv.Value = s
+			}
+		case SettingGatePush:
+			sv.Value = GateAsk
+			if s, ok := rawString(cur); ok && s != "" {
+				sv.Value = s
+			}
+		case SettingApprovalTiers:
+			sv.Value = list(eff.ApprovalTiers)
+		case SettingApprovalRestarted:
+			sv.Value = strconv.FormatBool(eff.ApprovalRestarted)
+		case SettingLandTarget:
+			sv.Value = defaultBranch
+			if s, ok := rawString(cur); ok && s != "" {
+				sv.Value = s
+			}
+		case SettingAfterLand:
+			sv.Value = "none"
+			if s, ok := rawString(cur); ok && s != "" {
+				sv.Value = s
+			}
 		case SettingDefaultCheck:
 			sv.Value = eff.DefaultCheck
 			if sv.Value == "" {

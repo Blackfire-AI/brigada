@@ -111,6 +111,95 @@ approval_protected_paths:
 	})
 }
 
+// The gates and land rules (§6.3) are schema-1 keys: the file's spelling
+// parses, validates and stores like the approval limit's does.
+func TestParseProjectConfigGates(t *testing.T) {
+	const all = `gate_plan: ask
+gate_land: ask
+gate_push: never
+approval_tiers: [light, heavy]
+approval_restarted: true
+land_target: brigada/landed
+after_land: make announce
+`
+	cfg, err := ParseProjectConfig(cfgFile(all))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	want := map[string]string{
+		SettingGatePlan:          `"ask"`,
+		SettingGateLand:          `"ask"`,
+		SettingGatePush:          `"never"`,
+		SettingApprovalTiers:     `["light","heavy"]`,
+		SettingApprovalRestarted: `true`,
+		SettingLandTarget:        `"brigada/landed"`,
+		SettingAfterLand:         `"make announce"`,
+	}
+	for k, w := range want {
+		if got := string(cfg.Values[k]); got != w {
+			t.Errorf("%s = %s, want %s", k, got, w)
+		}
+	}
+	for name, body := range map[string]string{
+		"gate_plan value":     "gate_plan: maybe\n",
+		"gate_land value":     "gate_land: never\n",
+		"gate_push value":     "gate_push: always\n",
+		"tier value":          "approval_tiers: [huge]\n",
+		"restarted value":     "approval_restarted: maybe\n",
+		"branch name":         "land_target: bad..name\n",
+		"branch lock suffix":  "land_target: feature/x.lock\n",
+		"gate as a list":      "gate_plan: [ask]\n",
+		"gate block open":     "gate_plan:\n",
+		"tiers with a + item": "approval_tiers: [\"light+heavy\"]\n",
+	} {
+		_, err := ParseProjectConfig(cfgFile(body))
+		if err == nil {
+			t.Errorf("%s: parse accepted %q", name, body)
+			continue
+		}
+		if !errors.Is(err, ErrInvalidSetting) {
+			t.Errorf("%s: err = %v, want ErrInvalidSetting", name, err)
+		}
+	}
+}
+
+// An import of the gate keys stores them with provenance and the plan
+// gate holds a plan; dropping the key returns it to the default.
+func TestImportGates(t *testing.T) {
+	e := newEnv(t)
+	res := e.importCfg(cfgFile("gate_plan: ask\ngate_push: never\napproval_tiers: [heavy]\napproval_restarted: true\nland_target: brigada/landed\nafter_land: make announce\n"), false)
+	if len(res.Applied) != 6 || res.NeedsConfirm {
+		t.Fatalf("result = %+v, want 6 applied", res)
+	}
+	for k, v := range map[string]string{
+		SettingGatePlan: "ask", SettingGatePush: "never", SettingApprovalTiers: "heavy",
+		SettingApprovalRestarted: "true", SettingLandTarget: "brigada/landed", SettingAfterLand: "make announce",
+	} {
+		if s := settingOf(t, *res.Settings, k); s.Value != v || s.Source != SourceImported {
+			t.Errorf("%s = %+v, want %q imported", k, s, v)
+		}
+	}
+	if s := settingOf(t, *res.Settings, SettingGateLand); s.Value != "auto" || !s.Default {
+		t.Errorf("gate_land = %+v, want the auto default", s)
+	}
+	e.assertAwaits(e.createPlan(nTasks(1)), "gate_plan is ask")
+
+	// The file drops gate_plan: the key returns to its default and a plan
+	// runs again; the keys nobody overrode follow the file.
+	res = e.importCfg(cfgFile("gate_push: never\n"), false)
+	if s := settingOf(t, *res.Settings, SettingGatePlan); !s.Default {
+		t.Errorf("gate_plan = %+v, want the default again", s)
+	}
+	e.assertRuns(e.createPlan(nTasks(1)), 1)
+
+	// A local override wins over the file, as for any key.
+	e.set(map[string]string{SettingGatePush: GateAsk})
+	res = e.importCfg(cfgFile("gate_push: never\n"), false)
+	if len(res.Conflicts) != 1 || res.Conflicts[0].Key != SettingGatePush {
+		t.Fatalf("conflicts = %+v, want gate_push", res.Conflicts)
+	}
+}
+
 func settingOf(t *testing.T, ps ProjectSettings, key string) SettingValue {
 	t.Helper()
 	for _, s := range ps.Settings {
