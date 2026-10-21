@@ -74,6 +74,7 @@ const (
 	evForemanAttached        = "foreman_attached"          // a hold took the foreman for an attached chat (§4.2 item 1)
 	evForemanDetached        = "foreman_detached"          // the attached chat ended; the hold released (§4.2 item 1)
 	evForemanAttachExpired   = "foreman_attach_expired"    // the hold expired unheartbeated; its rows returned pending (§4.2 item 1)
+	evForemanSessionRotated  = "foreman_session_rotated"   // the foreman session outgrew foreman_rotate_tokens; the next turn starts fresh (Tokens, Threshold, Gen) (§4.2)
 	evAgentCooling           = "agent_cooling"             // a task job's limit cooled its account until a time (§8 "Quota")
 	evAgentBroken            = "agent_broken"              // an agent was marked broken, with the reason (§8 "Health")
 	evAgentRecovered         = "agent_recovered"           // a runner came back; its runner-stale agents are ready again (§8 "Health")
@@ -155,6 +156,11 @@ type eventPayload struct {
 	Weight          *int     `json:"weight,omitempty"`
 	Draw            float64  `json:"draw,omitempty"`
 	Candidates      []Ranked `json:"candidates,omitempty"`
+	// A foreman session rotation's why (§4.2): the input tokens the last
+	// turn read, the threshold it crossed, and the generation it opened.
+	Tokens    int64 `json:"tokens,omitempty"`
+	Threshold int64 `json:"threshold,omitempty"`
+	Gen       int64 `json:"gen,omitempty"`
 }
 
 // Ranked is one candidate of an agent pick (§8): its cost weight and the

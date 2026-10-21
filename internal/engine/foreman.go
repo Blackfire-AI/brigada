@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/Blackfire-AI/brigada/internal/foreman"
 )
 
 // SubmitForemanTurn queues one headless foreman turn for the project
@@ -54,6 +52,15 @@ func (e *Engine) submitForemanTurnTx(tx *sql.Tx, project int64, inbox ForemanInb
 		// `brigada project foreman` is the command that records it.
 		return SubmitResult{}, fmt.Errorf("the project has no foreman harness; set it with `brigada project foreman`")
 	}
+	// A session grown past the project's threshold starts over before
+	// this turn (§4.2); the turn's prompt then carries the digest.
+	if _, err := e.rotateForemanSessionTx(tx, project, now); err != nil {
+		return SubmitResult{}, err
+	}
+	prompt, err := foremanPromptTx(tx, project, inbox, now)
+	if err != nil {
+		return SubmitResult{}, err
+	}
 	// The harness and model are the job's placement constraint (§8): only
 	// an agent offering exactly that pair may take the turn, so it runs on
 	// the model the user chose (foremanPairTx).
@@ -62,7 +69,7 @@ func (e *Engine) submitForemanTurnTx(tx *sql.Tx, project int64, inbox ForemanInb
 		ProjectID: project,
 		Kind:      KindForeman,
 		Mode:      ModeSession,
-		Prompt:    foreman.Instructions() + "\n" + foreman.ComposeTurnPromptWith(inbox.Events, inbox.UserMessages),
+		Prompt:    prompt,
 		Harness:   harness,
 		Model:     model,
 	}, now)

@@ -500,6 +500,7 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 | `setup_cache_key_files` | list of repo-relative files | none (no cache) | Files whose contents key the setup cache. |
 | `setup_timeout_minutes` | positive integer | `15` | How long `setup` may run. |
 | `extra_repos` | list of `"name repo ref"` strings | none | Other repositories checked out read-only beside every task ([section 7](#7-plans-checks-and-reviews)). |
+| `foreman_rotate_tokens` | non-negative integer | `400000` | Input tokens on one foreman turn past which the next turn starts a fresh session; `0` never rotates ([section 11](#session-size-and-rotation)). |
 | `instructions_file` | repo-relative path | none | A text file whose contents become the project's instructions for every worker and reviewer, at most 8192 bytes (see [Project instructions](#project-instructions)). |
 
 An example:
@@ -948,6 +949,14 @@ Under `mcp_servers.<name>` the adapter emits only `command`, `args` and `env`; i
 
 Running `project foreman` again with another harness starts a fresh foreman session: a session belongs to one CLI, so the old one is dropped, and the new foreman rebuilds what it needs from the engine (the plans, the history, the pending events). A change of model or of effort on the same harness keeps the session. Switching also clears a foreman limit, as in [section 8](#at-a-vendor-limit). Nothing about plans or tasks is lost.
 
+### Session size and rotation
+
+Every headless turn and every attach resumes the same session, so its context only grows, and each turn rereads all of it. When the last finished turn of the session read more input tokens (input plus cached, as the adapter reports them) than the project's `foreman_rotate_tokens`, brigada rotates before the next turn or attach: it starts a fresh session, exactly as a harness switch does, and logs a `foreman_session_rotated` event with the token count and the threshold. It never rotates while a turn is running or you are attached, and never when the adapter reported no usage. The fresh session's first prompt carries a short digest the engine writes: the active plans and those awaiting approval with their tasks' states, what needs you and why, and the last ten history events; the foreman calls `status` and `history` for more. Later turns of the same session do not repeat it.
+
+- The default is `400000`. Tune it with `brigada project set foreman_rotate_tokens=<n>` or in `.brigada/project.yaml`; `0` never rotates. `brigada project show` prints the value in effect.
+- Switching the model or effort on the same harness keeps the session; only a harness switch or a rotation starts a new one.
+- A cheap everyday setting is `brigada project foreman --harness claude --model sonnet` for the headless turns, with `brigada attach --model <model>` for a heavy chat: the override applies to that chat alone.
+
 ## 12. From another harness
 
 The conversation with the foreman — `brigada attach` and `brigada ask` — is [section 2](#2-talking-to-the-foreman-brigada-attach). This section is about another harness acting for you without hosting the foreman.
@@ -1034,6 +1043,7 @@ Every key that `brigada project set` and `project show` know, with each default 
 | `setup_cache_key_files` | `none` | yes |
 | `setup_timeout_minutes` | `15` | yes |
 | `extra_repos` | `none` | yes |
+| `foreman_rotate_tokens` | `400000` | yes |
 | `foreman_wakes_per_day` | `20`, or the config file's value | no, local only |
 | `instructions` | `none` | no, local only (the file's counterpart is `instructions_file`) |
 
