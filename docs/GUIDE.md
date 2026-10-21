@@ -268,7 +268,29 @@ An attached chat is not charged to the foreman's wake budget ([section 4](#4-whi
 
 ### Ask
 
-**Ask** is a message. `brigada ask "fix the flaky auth test; the check is: go test ./auth/..."` leaves your words in the foreman's inbox and returns at once with one line that says what happened: the foreman was woken, or why the message waits (you are attached, a turn is already running, the project has no foreman, the foreman is limited, the wake budget is spent). Use it for a request you do not need to discuss.
+**Ask** is a message. `brigada ask "fix the flaky auth test; the check is: go test ./auth/..."` leaves your words in the foreman's inbox and returns at once with one line that says what happened: the foreman was woken, or why the message waits (you are attached, a turn is already running so it waits for the next one, the project has no foreman, the foreman is limited). The daily wake budget does not hold back a message: a wake that carries it goes ahead. Use it for a request you do not need to discuss.
+
+**From your own harness.** A plain Claude session can reach the foreman without you leaving it, through the coordinator bridge, `brigada mcp --coordinator`. Add it to your own MCP configuration at user scope, and only if you want it: it is opt-in, and it is not repository wiring. `brigada init` does not add it to a repository's `.mcp.json` or to your settings. For Claude Code:
+
+```sh
+claude mcp add --scope user --transport stdio brigada-coordinator -- brigada mcp --coordinator
+```
+
+or the same entry by hand in `~/.claude.json` under `mcpServers` (the `brigada` command must be on `PATH`):
+
+```json
+{
+  "mcpServers": {
+    "brigada-coordinator": {
+      "type": "stdio",
+      "command": "brigada",
+      "args": ["mcp", "--coordinator"]
+    }
+  }
+}
+```
+
+It bears the state directory's client token, so it reaches every project of that engine, and it carries no foreman credential: it cannot plan or edit, only ask, read and carry your plan decisions. Its `ask_foreman` tool takes a `repo_url` (as `list_projects` shows it) and the `text`. Two replies to a parked task work through it as plain messages: `answer task N: <answer>` and `restart task N with this note: <note>`. The foreman receives your words as they are and acts on them with its own tools; the reply of `ask_foreman` is one line only: the foreman was woken (`waking up`), the message is queued for the next turn because one is running, or it waits, and why (an attached chat, no foreman, the foreman limited). The daily wake budget bounds the foreman's own headless wakes; it does not block a message you send, so a wake that carries your message goes ahead even when the budget is spent. It does not carry the foreman's report. Read that with `status` and `history` after the foreman's turn, which is when the answer or restart shows up in the timeline.
 
 With `-` as the only argument, ask reads the message from standard input:
 

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
+	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
 // startCoordinator runs the coordinator bridge (§12.2, `brigada mcp
@@ -284,5 +285,56 @@ func TestPlanVersionBumpsOnAmend(t *testing.T) {
 	}
 	if v := version(); v != 3 {
 		t.Fatalf("version after a cancel-only amendment = %d, want 3", v)
+	}
+}
+
+// TestCoordinatorAskForemanAnswersAndRestarts: the two foreman replies a
+// user sends through ask_foreman reach the project's foreman as the
+// user's words, unaltered. The first call submits the foreman's turn
+// (nobody is attached), and that turn's prompt carries its message. The
+// second call finds the turn running and waits in the inbox for the next
+// turn, which carries it. Each reply is one line; the foreman's report
+// comes back later, through status and history, not in the reply.
+func TestCoordinatorAskForemanAnswersAndRestarts(t *testing.T) {
+	e := newEnv(t)
+	s := startCoordinator(t, e)
+	call := func(id int, args map[string]any) (string, bool) {
+		t.Helper()
+		return toolText(t, s.call(id, "tools/call", map[string]any{"name": "ask_foreman", "arguments": args}))
+	}
+	texts := []string{
+		"answer task 3: the staging database is the one in the fixtures",
+		"restart task 3 with this note: the fixture moved to testdata/v2",
+	}
+	for i, text := range texts {
+		reply, isErr := call(20+i, map[string]any{"repo_url": coordRepo, "text": text})
+		if i == 0 && (isErr || !strings.Contains(reply, "waking up")) {
+			t.Errorf("ask_foreman %q = %q (error %v), want the foreman woken", text, reply, isErr)
+		}
+		if i == 1 && (isErr || !strings.Contains(reply, "a foreman turn is running") || !strings.Contains(reply, "next turn")) {
+			t.Errorf("ask_foreman %q = %q (error %v), want it queued for the next turn", text, reply, isErr)
+		}
+	}
+	// The woken turn is the newest foreman job (the seeded one is older):
+	// its prompt must carry the first message, so a turn submitted without
+	// it fails here.
+	var prompt string
+	err := e.st.View(t.Context(), func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT prompt FROM jobs WHERE kind = ? ORDER BY id DESC LIMIT 1", engine.KindForeman).Scan(&prompt)
+	})
+	if err != nil {
+		t.Fatalf("read the foreman's turn: %v", err)
+	}
+	if !strings.Contains(prompt, texts[0]) {
+		t.Errorf("the foreman's turn prompt lacks the user's message %q:\n%s", texts[0], prompt)
+	}
+	history, isErr := toolText(t, s.call(30, "tools/call", map[string]any{"name": "history", "arguments": map[string]any{"repo_url": coordRepo}}))
+	if isErr {
+		t.Fatalf("history = %q", history)
+	}
+	for _, text := range texts {
+		if !strings.Contains(history, text) {
+			t.Errorf("the foreman's history lacks the user's message %q:\n%s", text, history)
+		}
 	}
 }
