@@ -279,8 +279,17 @@ func (e *Engine) holdLandTx(tx *sql.Tx, project, taskID int64, reasons []string,
 // queueLandJobTx creates the task's land job (§7.1): kind land on the
 // task's own key, so the one-live-job-per-key rule makes a repeat
 // coalesce. No worker and no agent; the git label is what a runner
-// offers to take it.
+// offers to take it. A task that already has a landing record — its own
+// land job landed it, or a detected trailer did — has nothing left to
+// squash, so no land job is queued for it.
 func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, now time.Time) error {
+	var have int
+	if err := tx.QueryRow("SELECT COUNT(*) FROM landings WHERE task_id = ?", taskID).Scan(&have); err != nil {
+		return fmt.Errorf("read the landing of task %d: %w", taskID, err)
+	}
+	if have > 0 {
+		return nil
+	}
 	sr, err := e.submitTx(tx, SubmitParams{
 		Key:       fmt.Sprintf("task:%d", taskID),
 		ProjectID: project,

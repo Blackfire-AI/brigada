@@ -142,3 +142,121 @@ func TestPlanDoneReportLeavesLandedOutOfWaiting(t *testing.T) {
 		t.Errorf("plan_done report = %q, the landed task %d must be left out of the waiting list", p.Reason, first)
 	}
 }
+
+// TestRecordLandedChainNoLandJobs: a chain whose head and tail are both
+// landed by hand — each trailer on the default branch, reported in one
+// detection — records both landings and queues no land job for either:
+// the tail's landing row is written before the head's landing releases
+// it, so the rule never hands a land job to a task already on the
+// branch.
+func TestRecordLandedChainNoLandJobs(t *testing.T) {
+	e := newEnv(t)
+	e.set(map[string]string{SettingApprovalTiers: "heavy"})
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+
+	head := e.task
+	tail := e.addTask("{}")
+	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", head)
+	e.exec("UPDATE tasks SET state = 'pending' WHERE id = ?", tail)
+	e.exec("INSERT INTO task_deps (plan_id, task_id, depends_on_task_id) VALUES (?, ?, ?)", e.plan, tail, head)
+
+	// The head finishes and is held at the land gate — no land job. The
+	// head's done releases the tail's work, which runs to done; its
+	// dependency has no landing, so it queues no land job either.
+	e.runToDone(author, reviewer)
+	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ? AND state = 'held'", head); n != 1 {
+		t.Fatalf("head land holds = %d, want 1", n)
+	}
+	g := e.leaseAny(author)
+	if g == nil {
+		t.Fatal("the tail's work job was not leased")
+	}
+	if ans := e.complete(g, doneOn("task/1-1", passCheck)); ans != AnsOK {
+		t.Fatalf("complete the tail's work: %s", ans)
+	}
+	e.runReview(reviewer, `{"verdict":"approve","findings":"`+substantiveFindings+`"}`)
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'", tail); n != 0 {
+		t.Fatalf("tail land jobs before the detection = %d, want none", n)
+	}
+
+	// Both landed by hand: the default branch carries both trailers.
+	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",
+		[]LandedCommit{{TaskID: head, Commit: "h1"}, {TaskID: tail, Commit: "t1"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'", head); n != 0 {
+		t.Errorf("head land jobs = %d, want none", n)
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'", tail); n != 0 {
+		t.Errorf("tail land jobs = %d, want none", n)
+	}
+	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id IN (?, ?)", head, tail); n != 2 {
+		t.Errorf("landing rows = %d, want 2 (head and tail by trailer)", n)
+	}
+}
+
+// TestRecordLandedRejectedHoldStaysRejected: a task held at the land
+// gate and rejected is later found on the default branch by its trailer:
+// the landing is recorded, the hold stays rejected, and no needs-you
+// line is raised — the user's no already decided the landing.
+func TestRecordLandedRejectedHoldStaysRejected(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.landGateRun(author, reviewer, GateAsk)
+
+	res, err := e.eng.LandReject(e.ctx, e.project, e.task)
+	if err != nil {
+		t.Fatalf("LandReject: %v", err)
+	}
+	if res.Released {
+		t.Fatalf("LandReject = %+v, want not released", res)
+	}
+
+	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",
+		[]LandedCommit{{TaskID: e.task, Commit: "abc123"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ? AND source = 'trailer'", e.task); n != 1 {
+		t.Errorf("landing rows by trailer = %d, want 1", n)
+	}
+	if state := e.str("SELECT state FROM land_holds WHERE task_id = ?", e.task); state != "rejected" {
+		t.Errorf("land_holds.state after the detection = %q, want rejected", state)
+	}
+	if it, ok := e.needsYouTask(e.task); ok {
+		t.Errorf("needs-you entry = %+v, want none for a rejected landing recorded by trailer", it)
+	}
+}
+
+// TestLandApproveTrailerLandedQueuesNothing: a task held at the land
+// gate that the trailer detection then finds on the default branch is
+// already landed; the user's approval releases the hold but queues no
+// land job for a task whose landing is recorded.
+func TestLandApproveTrailerLandedQueuesNothing(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.landGateRun(author, reviewer, GateAsk)
+
+	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",
+		[]LandedCommit{{TaskID: e.task, Commit: "abc123"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := e.eng.LandApprove(e.ctx, e.project, e.task)
+	if err != nil {
+		t.Fatalf("LandApprove: %v", err)
+	}
+	if !res.Released {
+		t.Errorf("LandApprove = %+v, want released", res)
+	}
+	if n := e.landJobs(); n != 0 {
+		t.Errorf("land jobs after approve = %d, want none for a task already landed by trailer", n)
+	}
+	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ?", e.task); n != 0 {
+		t.Errorf("land_holds rows after approve = %d, want none", n)
+	}
+}
