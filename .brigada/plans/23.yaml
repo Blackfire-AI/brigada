@@ -92,8 +92,8 @@ tasks:
     base: "hardcap-lease"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-89"
     rounds: 0
   - id: 90
     name: "review-tier"
