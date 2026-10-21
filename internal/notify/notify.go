@@ -1,11 +1,13 @@
 // Package notify is §10's local notifications: the OS notifier, the
 // mapping from engine event kinds to a short title and one-line body,
-// and the delivery loop that walks the event log once per event.
+// the delivery loop that walks the event log once per event, and the
+// optional webhook (notify.webhook) that POSTs the same moments as
+// plain JSON.
 //
 // The package is deliberately generic — nothing here knows how events
-// are produced, only how the log's rows read. Remote channels (webhook,
-// Telegram) are backlog; the Notifier interface is the seam they'd plug
-// into.
+// are produced, only how the log's rows read. Further remote channels
+// (Telegram and the like) ride the relay a webhook already covers: the
+// POST is plain JSON, with no per-service adapters.
 package notify
 
 import (

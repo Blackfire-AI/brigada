@@ -42,6 +42,11 @@ type Config struct {
 	// the OS tool on PATH, notify.ModeNone silences notifications; the
 	// empty value keeps auto.
 	Notify string
+	// NotifyWebhook is the optional webhook URL (§10): one JSON POST
+	// per delivered notification, beside the OS banner. Empty = none.
+	// The URL may carry a token, so it is never logged and never
+	// reaches the status or the history.
+	NotifyWebhook string
 	// SnapshotDir is where the engine snapshots its store daily (§6.4);
 	// empty takes no snapshots.
 	SnapshotDir string
@@ -189,10 +194,13 @@ func Run(ctx context.Context, cfg Config) error {
 	// own FlushNotifications still wins, the tests inject one.
 	notifier := notify.Resolve(cfg.Notify)
 	nloop := notify.NewLoop(st, notifier, log)
+	if cfg.NotifyWebhook != "" {
+		nloop = nloop.WithWebhook(&notify.Webhook{URL: cfg.NotifyWebhook})
+	}
 	if cfg.FlushNotifications == nil {
 		cfg.FlushNotifications = nloop.Flush
 	}
-	log.InfoContext(ctx, "notifications", "notifier", notify.NameOf(notifier))
+	log.InfoContext(ctx, "notifications", "notifier", notify.NameOf(notifier), "webhook", cfg.NotifyWebhook != "")
 
 	// Serving stops when stopServe is called; Listen then removes the
 	// socket it owns. The context is deliberately WithoutCancel: the

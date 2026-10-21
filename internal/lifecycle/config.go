@@ -75,9 +75,14 @@ func CheckSocketPath(path string) error {
 // silently tune nothing.
 type FileConfig struct {
 	StateDir    string
-	IdleMinutes float64     // 0 = the default
-	Notify      string      // notify = auto|none (§10); empty = auto
-	Caps        caps.Limits // concurrency caps, cost weights and tier overrides (§8.1)
+	IdleMinutes float64 // 0 = the default
+	Notify      string  // notify = auto|none (§10); empty = auto
+	// NotifyWebhook is the optional webhook URL (notify.webhook, §10):
+	// one JSON POST per delivered notification. Empty = none. The URL
+	// may carry a token, so it lives in this file alone — never in a
+	// project's own files — and never reaches a log, status or error.
+	NotifyWebhook string
+	Caps          caps.Limits // concurrency caps, cost weights and tier overrides (§8.1)
 	// Rounds are the default per-task round caps (rounds.fix,
 	// rounds.review, rounds.restart); a key the file never names stays nil
 	// and keeps the engine default.
@@ -214,6 +219,11 @@ func loadConfigFile(path string, required bool) (FileConfig, error) {
 			default:
 				err = fmt.Errorf("want %s or %s", notify.ModeAuto, notify.ModeNone)
 			}
+		case key == "notify.webhook":
+			err = notify.ValidWebhookURL(value)
+			if err == nil {
+				cfg.NotifyWebhook = value
+			}
 		case key == "snapshot_dir":
 			if value != "" && !filepath.IsAbs(value) {
 				err = fmt.Errorf("want an absolute directory, got %q", value)
@@ -254,7 +264,7 @@ func loadConfigFile(path string, required bool) (FileConfig, error) {
 		case strings.HasPrefix(key, "tools."):
 			err = setTools(&cfg, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, snapshot_dir, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, rounds.fix, rounds.review, rounds.restart, review.tier, review.effort, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model> or a tools.claude/<model>", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, notify.webhook, snapshot_dir, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, rounds.fix, rounds.review, rounds.restart, review.tier, review.effort, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model> or a tools.claude/<model>", path, n+1, key)
 		}
 		if err != nil {
 			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)

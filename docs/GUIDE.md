@@ -386,6 +386,8 @@ The default for projects that have not set a budget comes from `foreman_wakes_pe
 
 When `notify` is `auto` (the default), the engine also raises a desktop notification for the same kinds of moments: a plan done, a plan waiting for approval, a task parked, the foreman's report, a limited foreman, a spent wake budget, a broken agent.
 
+`notify.webhook` in the config file carries the same moments to one URL: every notification is also POSTed there as a small plain-JSON document — project, kind, the one-line text, the task and plan ids, the time — fit for ntfy, Slack or a Telegram bot relay, with no per-service adapters. The URL may carry a token, so it lives in the config file alone, never in a project's files. Delivery is fire-and-forget: a short timeout bounds each attempt, one retry follows a failure, and a failing webhook is logged without the URL and never slows the engine.
+
 ### History, diffs and logs
 
 `brigada history` prints the timeline, oldest first: events and messages together. `--task N` and `--job N` narrow it to one task or one job. `--limit N` (1 to 500, default 100) sets how many entries are fetched per request; the command fetches every page, so the output is always the whole timeline.
@@ -1009,6 +1011,7 @@ The config file is optional. Its format:
 | `state_dir` | path | `$XDG_STATE_HOME/brigada`, else `~/.local/state/brigada` | The state directory. `--state-dir` overrides it. |
 | `idle_minutes` | number, 0 or more | `30` | The engine exits after this many minutes with no live jobs, no attached chat and no open requests. `0` means the default. `brigada engine --idle-minutes` overrides it. |
 | `notify` | `auto` or `none` | `auto` | `auto` raises desktop notifications with the OS tool when found; `none` turns them off. |
+| `notify.webhook` | URL | none (off) | One URL that receives every notification as a JSON POST ([section 4](#4-while-work-runs)). It may carry a token, so it lives in this file alone. |
 | `snapshot_dir` | absolute path | none (no snapshots) | Where the daily store snapshots go; the last seven are kept ([section 10](#10-backups-and-recovery)). |
 | `headroom` | `true` or `false` | `true` | Keep one slot free for the foreman on its account ([section 8](#headroom)). |
 | `task_auto_retry` | `true` or `false` | `true` | One automatic restart on another agent after a transient worker failure ([section 8](#automatic-retry)). |
@@ -1036,6 +1039,7 @@ An example:
 
 ```text
 notify = none
+notify.webhook = https://ntfy.example.com/brigada
 snapshot_dir = /home/you/backups/brigada
 # set by brigada init
 caps.global = 6

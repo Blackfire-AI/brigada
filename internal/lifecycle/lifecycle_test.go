@@ -148,6 +148,26 @@ func TestConfigFile(t *testing.T) {
 	if cfg.StateDir != "/elsewhere" || cfg.IdleMinutes != 1.5 || cfg.Notify != "none" {
 		t.Errorf("cfg = %+v, want the file's values", cfg)
 	}
+
+	// The webhook key (§10): one http or https URL, kept verbatim; any
+	// other shape is refused where the file is read.
+	if err := os.WriteFile(path, []byte("notify = auto\nnotify.webhook = https://ntfy.example.com/d/brigada\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadConfigFile(path)
+	if err != nil {
+		t.Fatalf("load webhook: %v", err)
+	}
+	if cfg.NotifyWebhook != "https://ntfy.example.com/d/brigada" {
+		t.Errorf("NotifyWebhook = %q, want the file's URL", cfg.NotifyWebhook)
+	}
+	if err := os.WriteFile(path, []byte("notify.webhook = send them somewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfigFile(path); err == nil || !strings.Contains(err.Error(), "notify.webhook") {
+		t.Errorf("a non-URL webhook = %v, want refusal naming the key", err)
+	}
+
 	if cfg.Caps.Global != nil || cfg.Caps.Account != nil {
 		t.Errorf("caps without keys = %+v, want none", cfg.Caps)
 	}

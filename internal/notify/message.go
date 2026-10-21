@@ -54,6 +54,12 @@ type Event struct {
 	TaskID    int64 // 0 when the event names no task
 	PlanID    int64 // 0 when the event names no plan
 	PlanTitle string
+	// Project is the event's project repo URL — the log's own project
+	// reference first, else the plan its task or payload names. Empty
+	// when no referent survives; the webhook carries it as-is.
+	Project string
+	// At is the log's created_at stamp: the time the webhook reports.
+	At string
 	// Reason is the payload's words for why the user is woken — the
 	// check's tail, the worker's question, the review's findings —
 	// already picked for the kind and flattened to one line, except a
