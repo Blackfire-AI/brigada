@@ -39,8 +39,8 @@ tasks:
     continue: "prep-classify"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-84"
     rounds: 0
   - id: 85
     name: "hardcap-lease"
