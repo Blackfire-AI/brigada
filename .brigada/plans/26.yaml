@@ -5,9 +5,9 @@
 plan: 26
 title: "Foreman instructions: separate areas run in parallel chains"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-21T19:32:56.560759Z
-updated: 2026-10-21T19:32:56.560759Z
+updated: 2026-10-21T20:27:29.924344Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
