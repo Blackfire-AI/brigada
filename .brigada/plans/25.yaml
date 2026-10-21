@@ -51,7 +51,7 @@ tasks:
     continue: "amend-judged-on-additions"
     tier: heavy
     effort: medium
-    state: ready
+    state: running
     branch: "brigada/task-98-r2"
     rounds: 0
   - id: 99
