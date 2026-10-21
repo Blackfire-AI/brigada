@@ -91,6 +91,12 @@ func (e *testEnv) landTest(t *testing.T, remote, settings, taskSpec, taskCheck, 
 	task = e.seedTask("", taskCheck)
 	work = e.submitWork(task, prompt.ComposeWorkerPrompt(taskSpec, "", ""))
 	t.Setenv("BRIGADA_TEST_BRANCH", taskBranch(task, 1))
+	// The landing clone commits with the host's identity, and a CI host
+	// has none.
+	for _, k := range []string{"GIT_AUTHOR", "GIT_COMMITTER"} {
+		t.Setenv(k+"_NAME", "land test")
+		t.Setenv(k+"_EMAIL", "land@brigada.invalid")
+	}
 	e.startRunner(writeWorkerScript(t, workerScript), 100*time.Millisecond, withReviewerAgent, withGitLabel)
 	return task, work
 }
