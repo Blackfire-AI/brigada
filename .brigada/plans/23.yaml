@@ -27,8 +27,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-83"
     rounds: 0
   - id: 84
     name: "fix-round-retry"
