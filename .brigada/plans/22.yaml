@@ -63,8 +63,8 @@ tasks:
     base: "land-lost-close"
     continue: "land-lost-close"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-74"
     rounds: 0
   - id: 75
     name: "land-env-target"
