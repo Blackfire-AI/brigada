@@ -93,7 +93,7 @@ tasks:
     deps: ["status-top"]
     base: "status-top"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 68
