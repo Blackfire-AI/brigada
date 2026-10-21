@@ -83,7 +83,7 @@ tasks:
     base: "runner-land-2"
     tier: light
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 67
@@ -103,6 +103,6 @@ tasks:
     deps: ["gates"]
     base: "gates"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-68"
     rounds: 0
