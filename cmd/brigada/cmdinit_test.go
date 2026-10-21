@@ -1218,6 +1218,8 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 		t.Fatalf("accepting the rerun defaults: %d\n%s\n%s", code, out, err)
 	}
 	afterDefaults, live, e := runnerstate.Running(filepath.Join(state, "runner"))
+	// Every model of the CLIs it used; the asked questions replace those
+	// CLIs' saved lines, so the old codex/gpt-5 is gone.
 	if e != nil || !live || afterDefaults.PID == again.PID || len(afterDefaults.Agents) != 4 {
 		t.Fatalf("rerun defaults must offer every model: %+v %v", afterDefaults, e)
 	}
@@ -2054,5 +2056,306 @@ max_context_size = 1048576
 			}
 			t.Fatalf("picked entry missing model in plan:\n%s", plan)
 		})
+	}
+}
+
+// initApplyCleanup stops a detached engine and runner an applied init
+// started, the way TestInitApplyDetachedAndRepeat does.
+func initApplyCleanup(t *testing.T, state string) {
+	t.Helper()
+	t.Cleanup(func() {
+		if rec, running, _ := runnerstate.Running(filepath.Join(state, "runner")); running {
+			_ = syscall.Kill(rec.PID, syscall.SIGTERM)
+		}
+		data, _ := os.ReadFile(lifecycle.PathsOf(state).Lock)
+		pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+		if pid > 0 {
+			_ = syscall.Kill(pid, syscall.SIGTERM)
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			_, live, _ := runnerstate.Running(filepath.Join(state, "runner"))
+			if !live && !lifecycle.EngineRunning(context.Background(), lifecycle.PathsOf(state).Socket) {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Error("detached children did not stop")
+	})
+}
+
+// writeInitUserConfig puts an existing config where init's default lookup
+// finds it, standing in for settings an earlier run or the user wrote.
+func writeInitUserConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := lifecycle.DefaultConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func readInitFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestInitRerunKeepsCapsAndSavedAgentLines(t *testing.T) {
+	binary := testsupport.BuildBrigada(t)
+	oldBinary, oldCPU := initBinary, initCPUCount
+	initBinary = binary
+	initCPUCount = func() int { return 16 }
+	t.Cleanup(func() { initBinary, initCPUCount = oldBinary, oldCPU })
+	importRepo(t)
+	fakeInitPATH(t, "claude", "codex")
+	state := testsupport.ShortStateDir(t)
+	initApplyCleanup(t, state)
+	config := writeInitUserConfig(t, "notify = none\n"+
+		"caps.global = 2\ncaps.plan = 2\ncaps.account.claude = 1\n"+
+		"caps.account.dsh = 1\n")
+	if err := runnerstate.SaveAgents(filepath.Join(state, "runner"), []string{
+		"harness=claude,model=sonnet,tools=none",
+		"harness=claude,model=opus,classes=review",
+		"harness=dsh,model=deepseek-flash,classes=review",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// No --parallel: the default of 4 is not an explicit answer, so the
+	// config's caps stay, each reported in the plan. The claude/opus and
+	// dsh lines are not chosen and stay; the runner serves them too.
+	code, out, err := initDo(t, state, "", "--yes",
+		"--agent", "harness=claude,model=sonnet",
+		"--agent", "harness=codex,model=gpt-5",
+		"--signed-in", "claude,codex", "--check", "true", "--tools", "none")
+	if code != 0 {
+		t.Fatalf("rerun = %d\n%s\n%s", code, out, err)
+	}
+	for _, want := range []string{
+		"caps.global stays 2; this run would set 4",
+		"caps.plan stays 2; this run would set 3",
+		"caps.account.claude stays 1; this run would set 3",
+		"kept saved agents this run does not offer: claude/opus, dsh/deepseek-flash",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	if data := readInitFile(t, config); data != "notify = none\ncaps.global = 2\ncaps.plan = 2\n"+
+		"caps.account.claude = 1\ncaps.account.dsh = 1\n"+
+		"# set by brigada init\ncaps.account.codex = 2\n" {
+		t.Fatalf("config after rerun:\n%s", data)
+	}
+	rec, live, e := runnerstate.Running(filepath.Join(state, "runner"))
+	if e != nil || !live || len(rec.Agents) != 4 {
+		t.Fatalf("runner after rerun = %+v, %v, %v", rec, live, e)
+	}
+	assertInitSavedAgents(t, state, rec.Specs)
+	// --overwrite-config replaces every cap and the saved agent lines.
+	code, out, err = initDo(t, state, "", "--yes", "--overwrite-config",
+		"--agent", "harness=claude,model=sonnet",
+		"--agent", "harness=codex,model=gpt-5",
+		"--signed-in", "claude,codex", "--check", "true", "--tools", "none")
+	if code != 0 {
+		t.Fatalf("overwrite rerun = %d\n%s\n%s", code, out, err)
+	}
+	if strings.Contains(out, "stays ") || strings.Contains(out, "kept saved agents") {
+		t.Fatalf("overwrite run still reports kept values:\n%s", out)
+	}
+	if data := readInitFile(t, config); data != "notify = none\ncaps.global = 4\ncaps.plan = 3\n"+
+		"caps.account.claude = 3\ncaps.account.dsh = 1\n"+
+		"# set by brigada init\ncaps.account.codex = 2\n" {
+		t.Fatalf("config after overwrite:\n%s", data)
+	}
+	rec, live, e = runnerstate.Running(filepath.Join(state, "runner"))
+	if e != nil || !live || len(rec.Agents) != 2 {
+		t.Fatalf("runner after overwrite = %+v, %v, %v", rec, live, e)
+	}
+	assertInitSavedAgents(t, state, rec.Specs)
+}
+
+func TestInitSecondRepoKeepsCapsAndSavedAgentLines(t *testing.T) {
+	binary := testsupport.BuildBrigada(t)
+	oldBinary := initBinary
+	initBinary = binary
+	t.Cleanup(func() { initBinary = oldBinary })
+	importRepo(t)
+	fakeInitPATH(t, "claude", "codex")
+	state := testsupport.ShortStateDir(t)
+	initApplyCleanup(t, state)
+	// Caps an earlier init wrote, with the user's own caps.plan and an
+	// account cap this run will not set, plus saved dsh agents.
+	config := writeInitUserConfig(t, "# set by brigada init\n"+
+		"caps.global = 4\ncaps.plan = 2\n"+
+		"caps.account.claude = 3\ncaps.account.codex = 2\n"+
+		"caps.account.opencode = 1\n")
+	if err := runnerstate.SaveParallel(filepath.Join(state, "runner"), 4); err != nil {
+		t.Fatal(err)
+	}
+	if err := runnerstate.SaveAgents(filepath.Join(state, "runner"), []string{
+		"harness=claude,model=sonnet,classes=implement+review+answer,tools=none",
+		"harness=codex,model=gpt-5,classes=implement+review+answer",
+		"harness=dsh,model=deepseek-flash,classes=review",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, out, err := initDo(t, state, "", "--yes",
+		"--agent", "harness=claude,model=sonnet",
+		"--agent", "harness=codex,model=gpt-5",
+		"--signed-in", "claude,codex", "--check", "true", "--tools", "none")
+	if code != 0 || !strings.Contains(out, "caps.plan stays 2; this run would set 3") {
+		t.Fatalf("first repo = %d\n%s\n%s", code, out, err)
+	}
+	first, live, e := runnerstate.Running(filepath.Join(state, "runner"))
+	if e != nil || !live || len(first.Agents) != 3 {
+		t.Fatalf("runner after first repo = %+v, %v, %v", first, live, e)
+	}
+	assertInitSavedAgents(t, state, first.Specs)
+	// A second repository, claude only: every cap stays and the codex and
+	// dsh agent lines stay; the runner keeps serving them.
+	dir := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"remote", "add", "origin", "https://example.invalid/second.git"}} {
+		if output, e := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); e != nil {
+			t.Skipf("git %v: %v: %s", args, e, output)
+		}
+	}
+	t.Chdir(dir)
+	code, out, err = initDo(t, state, "", "--yes", "--accept-limited",
+		"--agent", "harness=claude,model=sonnet",
+		"--signed-in", "claude", "--check", "true", "--tools", "none")
+	if code != 0 {
+		t.Fatalf("second repo = %d\n%s\n%s", code, out, err)
+	}
+	for _, want := range []string{
+		"caps.plan stays 2; this run would set 3",
+		"kept saved agents this run does not offer: codex/gpt-5, dsh/deepseek-flash",
+		"agents match",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	if data := readInitFile(t, config); data != "# set by brigada init\ncaps.global = 4\ncaps.plan = 2\n"+
+		"caps.account.claude = 3\ncaps.account.codex = 2\ncaps.account.opencode = 1\n" {
+		t.Fatalf("config after second repo:\n%s", data)
+	}
+	second, live, e := runnerstate.Running(filepath.Join(state, "runner"))
+	if e != nil || !live || second.PID != first.PID || len(second.Agents) != 3 {
+		t.Fatalf("runner after second repo = %+v, %v, %v", second, live, e)
+	}
+	assertInitSavedAgents(t, state, second.Specs)
+	if agents := readInitFile(t, filepath.Join(state, "runner", "agents")); agents !=
+		"harness=claude,model=sonnet,classes=implement+review+answer,tools=none\n"+
+			"harness=codex,model=gpt-5,classes=implement+review+answer\n"+
+			"harness=dsh,model=deepseek-flash,classes=review\n" {
+		t.Fatalf("agents after second repo:\n%s", agents)
+	}
+}
+
+func TestInitChangedAnswerKeepsOldCapUnlessFlag(t *testing.T) {
+	binary := testsupport.BuildBrigada(t)
+	oldBinary, oldCPU := initBinary, initCPUCount
+	initBinary = binary
+	initCPUCount = func() int { return 16 }
+	t.Cleanup(func() { initBinary, initCPUCount = oldBinary, oldCPU })
+	importRepo(t)
+	fakeInitPATH(t, "claude", "codex")
+	state := testsupport.ShortStateDir(t)
+	initApplyCleanup(t, state)
+	config := writeInitUserConfig(t, "caps.global = 2\n")
+	// With --agent the questions are the foreman model, its effort, tasks
+	// at once and the apply confirmation. Enter keeps the config's 2.
+	code, out, err := initDo(t, state, "\n\n\ny\n",
+		"--agent", "harness=claude,model=sonnet",
+		"--agent", "harness=codex,model=gpt-5",
+		"--signed-in", "claude,codex", "--check", "true", "--tools", "none")
+	if code != 0 || !strings.Contains(out, "caps.global stays 2; this run would set 4") {
+		t.Fatalf("enter answer = %d\n%s\n%s", code, out, err)
+	}
+	if data := readInitFile(t, config); !strings.Contains(data, "caps.global = 2\n") {
+		t.Fatalf("config after Enter:\n%s", data)
+	}
+	// A typed number is an explicit answer, reported, and replaces the value.
+	code, out, err = initDo(t, state, "\n\n6\ny\n",
+		"--agent", "harness=claude,model=sonnet",
+		"--agent", "harness=codex,model=gpt-5",
+		"--signed-in", "claude,codex", "--check", "true", "--tools", "none")
+	if code != 0 || strings.Contains(out, "caps.global stays") {
+		t.Fatalf("typed answer = %d\n%s\n%s", code, out, err)
+	}
+	if !strings.Contains(out, "caps.global changes from 2 to 6") {
+		t.Fatalf("typed answer not reported as a change:\n%s", out)
+	}
+	if data := readInitFile(t, config); !strings.Contains(data, "caps.global = 6\n") {
+		t.Fatalf("config after typed answer:\n%s", data)
+	}
+	// --overwrite-config replaces values the answers do not set explicitly.
+	writeInitUserConfig(t, "caps.global = 2\ncaps.plan = 2\n")
+	code, out, err = initDo(t, state, "\n\n\ny\n", "--overwrite-config",
+		"--agent", "harness=claude,model=sonnet",
+		"--agent", "harness=codex,model=gpt-5",
+		"--signed-in", "claude,codex", "--check", "true", "--tools", "none")
+	if code != 0 || strings.Contains(out, "stays ") {
+		t.Fatalf("overwrite answers = %d\n%s\n%s", code, out, err)
+	}
+	for _, want := range []string{"caps.global changes from 2 to 6", "caps.plan changes from 2 to 3"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("overwrite change %q not reported:\n%s", want, out)
+		}
+	}
+	data := readInitFile(t, config)
+	if !strings.Contains(data, "caps.global = 6\n") || !strings.Contains(data, "caps.plan = 3\n") {
+		t.Fatalf("config after overwrite:\n%s", data)
+	}
+}
+
+func TestInitInteractiveDeclineDropsSavedAgentLines(t *testing.T) {
+	binary := testsupport.BuildBrigada(t)
+	oldBinary, oldCPU := initBinary, initCPUCount
+	initBinary = binary
+	initCPUCount = func() int { return 16 }
+	t.Cleanup(func() { initBinary, initCPUCount = oldBinary, oldCPU })
+	importRepo(t)
+	fakeInitPATH(t, "claude", "codex", "kimi")
+	state := testsupport.ShortStateDir(t)
+	initApplyCleanup(t, state)
+	if err := runnerstate.SaveAgents(filepath.Join(state, "runner"), []string{
+		"harness=claude,model=sonnet,classes=implement+review+answer,tools=none",
+		"harness=kimi,model=kimi-k2,classes=review",
+		"harness=dsh,model=deepseek-flash,classes=review",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Foreman model, foreman effort, claude use (Enter), codex use, kimi
+	// use declined, tasks at once, apply. The kimi answer drops kimi's
+	// saved line from the file and the runner; dsh is never asked about
+	// and its line stays, served.
+	code, out, err := initDo(t, state, "\n\n\ny\nn\n\ny\n",
+		"--signed-in", "claude,codex", "--check", "true", "--tools", "none")
+	if code != 0 {
+		t.Fatalf("interactive decline = %d\n%s\n%s", code, out, err)
+	}
+	if !strings.Contains(out, "kept saved agents this run does not offer: dsh/deepseek-flash") {
+		t.Fatalf("kept note missing dsh:\n%s", out)
+	}
+	rec, live, e := runnerstate.Running(filepath.Join(state, "runner"))
+	if e != nil || !live || len(rec.Agents) != 5 {
+		t.Fatalf("runner after decline = %+v, %v, %v", rec, live, e)
+	}
+	assertInitSavedAgents(t, state, rec.Specs)
+	saved := append(slices.Clone(rec.Specs), readInitFile(t, filepath.Join(state, "runner", "agents")))
+	for _, s := range saved {
+		if strings.Contains(s, "kimi") {
+			t.Fatalf("declined kimi still saved or served: %v", saved)
+		}
+	}
+	if !slices.ContainsFunc(saved, func(s string) bool { return strings.Contains(s, "harness=dsh,") }) {
+		t.Fatalf("unasked dsh line lost: %v", saved)
 	}
 }

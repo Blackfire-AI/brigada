@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/api"
+	"github.com/Blackfire-AI/brigada/internal/caps"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/logo"
@@ -55,6 +57,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	noWiring := fs.Bool("no-wiring", false, "in a parent folder, skip the coordinator's wiring; in a repository, leave the harness untouched: init writes no harness wiring, and an older init's stays")
 	parallel := fs.Int("parallel", 0, "tasks at once on this machine (1..64)")
 	all := fs.Bool("all", false, "in a folder that is not a repository: register every new repository found, without asking")
+	overwrite := fs.Bool("overwrite-config", false, "replace config caps and saved agent lines that already hold another value; without it init adds only missing keys and reports each value it keeps and changes")
 	agents := &agentSpecs{}
 	fs.Var(agents, "agent", "--agent once per harness and model, same complete syntax and model defaults as brigada runner")
 	signedIn := map[string]bool{}
@@ -73,6 +76,10 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if len(fs.Args()) != 0 {
 		return usagef(stderr, "init takes no positional arguments; run it inside one repository")
 	}
+	// askedHarness names every harness whose worker questions this run
+	// asks; an interactive answer replaces every saved line of an asked
+	// harness, while a run that does not ask keeps lines per pair below.
+	askedHarness := map[string]bool{}
 	// Setup refusals retain init’s exit code 1; flag and argument errors above use 2.
 	defer func() {
 		if code != 0 {
@@ -80,6 +87,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 	}()
 	parallelProvided := false
+	parallelAnswered := false
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "parallel" {
 			parallelProvided = true
@@ -418,6 +426,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				continue
 			}
 			asked = true
+			askedHarness[h] = true
 			if probes[h].checked {
 				printInitWrapped(stdout, "", "  ", h+": "+probes[h].status+".")
 			}
@@ -445,6 +454,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			if err != nil {
 				return fail(stderr, err)
 			}
+			askedHarness[h] = true
 			if !authenticated {
 				continue
 			}
@@ -664,6 +674,35 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 	}
 	chosen := &usable[foremanIndex]
+	// A saved agent line stays unless this run's answers replace it: an
+	// interactive answer about a CLI replaces every saved line of that
+	// harness (declining drops it), and anywhere a chosen harness and
+	// model pair replaces its line. Kept lines stay in the runner's
+	// agents file and the runner serves them; --overwrite-config replaces
+	// the whole file with this run's choices.
+	var keptAgents []string
+	var keptSpecs []agentSpec
+	if !*overwrite {
+		lines, err := runnerstate.LoadAgents(runnerStateDir(rt))
+		if err != nil {
+			return fail(stderr, err)
+		}
+		chosenPairs := map[string]bool{}
+		for _, spec := range usable {
+			chosenPairs[spec.harness+"/"+spec.model] = true
+		}
+		for _, line := range lines {
+			var one agentSpecs
+			if err := one.Set(line); err == nil {
+				spec := one.specs[0]
+				if askedHarness[spec.harness] || chosenPairs[spec.harness+"/"+spec.model] {
+					continue
+				}
+				keptSpecs = append(keptSpecs, spec)
+			}
+			keptAgents = append(keptAgents, line)
+		}
+	}
 
 	if canAsk {
 		fmt.Fprintln(stdout)
@@ -688,6 +727,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				n, err := strconv.Atoi(answer)
 				if err == nil && n >= 1 && n <= 64 {
 					*parallel = n
+					parallelAnswered = true
 					break
 				}
 				if attempt == 2 {
@@ -708,6 +748,25 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			n = min(n, old)
 		}
 		capValues[key] = strconv.Itoa(n)
+	}
+	// A cap the config file already names keeps its value: init adds only
+	// missing keys, so a rerun or a second repository never resets a cap
+	// the user tuned. An explicit tasks-at-once answer (--parallel or a
+	// typed number) replaces caps.global; --overwrite-config replaces
+	// every existing cap. The plan reports each kept and each changed
+	// value.
+	var capNotes []string
+	for _, key := range slices.Sorted(maps.Keys(capValues)) {
+		old, ok := initExistingCap(rt.file.Caps, key)
+		if !ok || strconv.Itoa(old) == capValues[key] {
+			continue
+		}
+		if *overwrite || (key == "caps.global" && (parallelProvided || parallelAnswered)) {
+			capNotes = append(capNotes, fmt.Sprintf("%s changes from %d to %s", key, old, capValues[key]))
+			continue
+		}
+		capNotes = append(capNotes, fmt.Sprintf("%s stays %d; this run would set %s (--overwrite-config replaces it)", key, old, capValues[key]))
+		capValues[key] = strconv.Itoa(old)
 	}
 	file := filepath.Join(root, filepath.FromSlash(engine.ProjectConfigPath))
 	if err := initSafeFile(file); err != nil {
@@ -776,6 +835,21 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil {
 		return usagef(stderr, "%v", err)
 	}
+	// The runner serves the kept saved agents too, and the restart
+	// comparison must see them, so an already-running runner is neither
+	// restarted without them nor left serving a narrower set than the
+	// saved file. A kept line that no longer resolves stays in the file
+	// alone; the runner cannot serve it.
+	runnerAgents := slices.Clone(usable)
+	runnerAdverts := slices.Clone(adverts)
+	for _, spec := range keptSpecs {
+		_, keptAdverts, err := resolveRunnerAgents(rt, []agentSpec{spec}, "")
+		if err != nil {
+			continue
+		}
+		runnerAgents = append(runnerAgents, spec)
+		runnerAdverts = append(runnerAdverts, keptAdverts...)
+	}
 	if canAsk {
 		fmt.Fprintln(stdout)
 	}
@@ -794,6 +868,20 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 	}
 	printInitWrapped(stdout, "  "+style.Bold("At once:")+" ", "    ", fmt.Sprintf("%d tasks on this machine; per account: %s (change: brigada config)", *parallel, strings.Join(accounts, ", ")), 80)
+	for _, note := range capNotes {
+		printInitWrapped(stdout, "  ", "    ", note)
+	}
+	if len(keptAgents) > 0 {
+		names := make([]string, len(keptAgents))
+		for i, line := range keptAgents {
+			names[i] = line
+			var one agentSpecs
+			if one.Set(line) == nil && one.specs[0].model != "" {
+				names[i] = one.specs[0].harness + "/" + one.specs[0].model
+			}
+		}
+		printInitWrapped(stdout, "  ", "    ", fmt.Sprintf("kept saved agents this run does not offer: %s (--overwrite-config replaces them)", strings.Join(names, ", ")))
+	}
 	checkSummary := "none (work goes straight to review)"
 	if *check != "" {
 		checkSummary = *check + " (init doesn't run it; change it later in .brigada/project.yaml)"
@@ -857,7 +945,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			return fail(stderr, err)
 		}
 		prompt := initApplyPrompt(files, running)
-		if running && initAgentsDiffer(rec, adverts, usable, *parallel) {
+		if running && initAgentsDiffer(rec, runnerAdverts, runnerAgents, *parallel) {
 			noun := "files"
 			if files == 1 {
 				noun = "file"
@@ -898,8 +986,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err := applyWiring(wiring); err != nil {
 		return partial(err)
 	}
+	savedSpecs := append(runnerSpecStrings(usable), keptAgents...)
 	if err := runnerstate.SaveAgents(
-		runnerStateDir(rt), runnerSpecStrings(usable)); err != nil {
+		runnerStateDir(rt), savedSpecs); err != nil {
 		return partial(fmt.Errorf("save agent choices: %w", err))
 	}
 	if err := runnerstate.SaveForeman(runnerStateDir(rt), agentName(chosen.harness, chosen.model, foremanEffort)); err != nil {
@@ -946,13 +1035,13 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 	}
 
-	runnerSpecs := runnerSpecStrings(usable)
+	runnerSpecs := runnerSpecStrings(runnerAgents)
 	result, err := startDetachedRunner(ctx, rt, runnerSpecs, *parallel)
 	if err != nil {
 		return partial(fmt.Errorf("project registered and imported, but runner startup failed: %w", err))
 	}
 	restarted := false
-	if result.Existing && initAgentsDiffer(result.Record, adverts, usable, *parallel) {
+	if result.Existing && initAgentsDiffer(result.Record, runnerAdverts, runnerAgents, *parallel) {
 		if _, err := terminateRunner(
 			ctx, runnerStateDir(rt), result.Record); err != nil {
 			return partial(fmt.Errorf("stop runner for new agents: %w", err))
@@ -962,7 +1051,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			return partial(fmt.Errorf("restart runner: %w", err))
 		}
 		restarted = true
-		if result.Existing && initAgentsDiffer(result.Record, adverts, usable, *parallel) {
+		if result.Existing && initAgentsDiffer(result.Record, runnerAdverts, runnerAgents, *parallel) {
 			return partial(fmt.Errorf("another runner started with different agents; rerun init"))
 		}
 	}
@@ -1475,4 +1564,26 @@ func initAgentsDiffer(rec runnerstate.Record, agents []api.Agent,
 		return true
 	}
 	return rec.Agents != nil && !sameInitAgents(rec.Agents, agents)
+}
+
+// initExistingCap reads one caps key from the loaded config file; false
+// when the file does not name the layer.
+func initExistingCap(l caps.Limits, key string) (int, bool) {
+	rest, _ := strings.CutPrefix(key, "caps.")
+	switch rest {
+	case "global":
+		if l.Global != nil {
+			return *l.Global, true
+		}
+	case "plan":
+		if l.Plan != nil {
+			return *l.Plan, true
+		}
+	}
+	if label, ok := strings.CutPrefix(rest, "account."); ok {
+		if n, ok := l.Account[label]; ok {
+			return n, true
+		}
+	}
+	return 0, false
 }
