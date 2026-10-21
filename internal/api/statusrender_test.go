@@ -65,6 +65,20 @@ func TestStatusSectionsRunning(t *testing.T) {
 	}
 }
 
+// TestStatusSectionsShowGateHolds: a task held at the land gate or
+// waiting at the push gate is a needs-you line naming its task id and
+// the rule that tripped.
+func TestStatusSectionsShowGateHolds(t *testing.T) {
+	st := Status{NeedsYou: []engine.NeedsYouItem{
+		{Kind: "task", ID: 8, State: "done", Reason: "waits to land: gate_land is ask"},
+		{Kind: "task", ID: 9, State: "done", Reason: "waits to push: task/9-1@abc123"},
+	}}
+	want := "needs you:\ntask #8 done: waits to land: gate_land is ask\ntask #9 done: waits to push: task/9-1@abc123"
+	if got := StatusSections(st); !strings.HasSuffix(got, want) {
+		t.Errorf("status sections end %q, want the needs-you block %q", got, want)
+	}
+}
+
 // TestStatusSectionsNamesAMissingForemanPair: a foreman turn held because
 // no runner offers its harness/model says so, naming the pair.
 func TestStatusSectionsNamesAMissingForemanPair(t *testing.T) {
