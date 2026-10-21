@@ -49,6 +49,11 @@ const (
 	// it — and set through `brigada budget --wakes N`, which also
 	// re-evaluates the waiting wake.
 	SettingForemanWakesPerDay = "foreman_wakes_per_day"
+	// The foreman session's rotation threshold (§4.2): when the last
+	// completed turn of the current session generation read more input
+	// tokens (input plus cached) than this, the next turn or attach starts
+	// a fresh session. 0 never rotates.
+	SettingForemanRotateTokens = "foreman_rotate_tokens"
 	// The project's instruction text for every worker and reviewer
 	// (§5.9). Stored as the text itself: the client reads the file named
 	// by project.yaml's instructions_file and sends the content.
@@ -71,7 +76,7 @@ const (
 var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
-	SettingExtraRepos, SettingForemanWakesPerDay, SettingInstructions}
+	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingInstructions}
 
 // MaxInstructionsBytes bounds the project instruction text (§5.9): a
 // starting value, open in §16 item 11. Above it a set or an import is
@@ -182,7 +187,7 @@ func parseSettingValue(key, value string) (json.RawMessage, error) {
 	case SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
 		SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
 		SettingDefaultCheck, SettingWorkerTools,
-		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanWakesPerDay, SettingInstructions:
+		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingInstructions:
 	default:
 		return nil, fmt.Errorf("%w: unknown key %q; valid keys: %s", ErrInvalidSetting, key, strings.Join(SettingKeys, ", "))
 	}
@@ -257,6 +262,14 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 		n, err := strconv.Atoi(value)
 		if err != nil || n <= 0 {
 			return nil, fmt.Errorf("%w: %s takes a positive whole number of minutes, got %q",
+				ErrInvalidSetting, key, value)
+		}
+		return json.RawMessage(strconv.Itoa(n)), nil
+	}
+	if key == SettingForemanRotateTokens {
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("%w: %s takes a whole number of input tokens (0 = never rotate), got %q",
 				ErrInvalidSetting, key, value)
 		}
 		return json.RawMessage(strconv.Itoa(n)), nil
@@ -442,6 +455,12 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 			sv.Value = "none"
 			if has {
 				sv.Value = renderSettingRaw(k, cur)
+			}
+		case SettingForemanRotateTokens:
+			// 0 is a value of its own (never rotate), not the default.
+			sv.Value = strconv.Itoa(defaultForemanRotateTokens)
+			if n, ok := rawInt(cur); has && ok {
+				sv.Value = strconv.Itoa(n)
 			}
 		case SettingForemanWakesPerDay:
 			budget := wakeBudgetDefault

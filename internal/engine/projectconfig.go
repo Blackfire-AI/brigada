@@ -89,14 +89,15 @@ var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // configSettingKeys are the project settings schema 1 of the shared file
 // may carry (§13.1): the approval limit, the gates and land rules (§6.3),
-// the default check, the worker tool policy, the environment step (§5.7)
-// and the extra repositories (§5.8), and nothing else. It is its own
+// the default check, the worker tool policy, the environment step (§5.7),
+// the extra repositories (§5.8) and the foreman session's rotation
+// threshold (§4.2), and nothing else. It is its own
 // list, never SettingKeys: a setting added for the local store (the wake
 // budget, for one) does not become shared-file policy by being editable.
 var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
-	SettingExtraRepos}
+	SettingExtraRepos, SettingForemanRotateTokens}
 
 // ParseProjectConfig parses and validates a project.yaml. Anything but
 // schema 1's keys is refused with the key named: an unknown key, an
@@ -227,7 +228,7 @@ func settingText(key string, v yamlValue) (string, error) {
 		return "", configErr("%s (line %d) has no value; omit the key to leave it at its default", key, v.line)
 	}
 	switch key {
-	case SettingApprovalMaxTasks, SettingSetupTimeout:
+	case SettingApprovalMaxTasks, SettingSetupTimeout, SettingForemanRotateTokens:
 		if v.isList || v.quoted {
 			return "", configErr("%s (line %d) must be an integer", key, v.line)
 		}

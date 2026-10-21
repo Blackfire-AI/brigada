@@ -92,6 +92,7 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingSetupCacheKeyFiles, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingSetupTimeout, Value: "15", Default: true, Source: SourceDefault},
 		{Key: SettingExtraRepos, Value: "none", Default: true, Source: SourceDefault},
+		{Key: SettingForemanRotateTokens, Value: "400000", Default: true, Source: SourceDefault},
 		{Key: SettingForemanWakesPerDay, Value: "20", Default: true, Source: SourceDefault},
 		{Key: SettingInstructions, Value: "none", Default: true, Source: SourceDefault},
 	}

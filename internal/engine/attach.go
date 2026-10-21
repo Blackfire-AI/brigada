@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/Blackfire-AI/brigada/internal/foreman"
 )
 
 // attachHoldTTL is how long an attach hold lives without a heartbeat
@@ -115,6 +113,12 @@ func (e *Engine) attachTx(tx *sql.Tx, project int64, force bool, now time.Time) 
 			return AttachResult{}, err
 		}
 	}
+	// A session grown past the project's threshold starts over before the
+	// chat (§4.2), ahead of the session id read below, so the chat never
+	// resumes the old one; the opening prompt then carries the digest.
+	if _, err := e.rotateForemanSessionTx(tx, project, now); err != nil {
+		return AttachResult{}, err
+	}
 	res := AttachResult{
 		Answer:        AnsCreated,
 		RepoURL:       repo,
@@ -166,7 +170,9 @@ func (e *Engine) attachTx(tx *sql.Tx, project int64, force bool, now time.Time) 
 	if err != nil {
 		return AttachResult{}, err
 	}
-	res.Prompt = foreman.Instructions() + "\n" + foreman.ComposeTurnPromptWith(inbox.Events, inbox.UserMessages)
+	if res.Prompt, err = foremanPromptTx(tx, project, inbox, now); err != nil {
+		return AttachResult{}, err
+	}
 	if _, err := tx.Exec(`UPDATE foreman_inbox SET state = ?, hold_id = ?, job_id = NULL WHERE project_id = ? AND state = ?`,
 		inboxDelivered, res.HoldID, project, inboxPending); err != nil {
 		return AttachResult{}, fmt.Errorf("deliver the inbox of project %d to hold %d: %w", project, res.HoldID, err)
