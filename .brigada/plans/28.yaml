@@ -5,9 +5,9 @@
 plan: 28
 title: "CI race job, non-clobbering init, spec edits in plan_amend"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-21T19:45:06.883743Z
-updated: 2026-10-21T19:45:06.883743Z
+updated: 2026-10-21T21:05:26.552875Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
