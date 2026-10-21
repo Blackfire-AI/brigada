@@ -28,8 +28,8 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-111"
     rounds: 0
   - id: 112
     name: "notify-webhook"
