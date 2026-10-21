@@ -10,6 +10,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/caps"
 	"github.com/Blackfire-AI/brigada/internal/store"
+	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
 // seedTS is the fixed moment the seeded rows carry; the schema treats
@@ -61,19 +62,27 @@ func newEnvCfg(t *testing.T, adjust func(*Config)) *env {
 	return newEnvAt(t, ":memory:", adjust)
 }
 
-// newEnvAt builds an env over the store at path. ":memory:" is the
-// usual single-connection store; a temp file is for the tests that need
-// the pool to really hand several connections to one database.
+// newEnvAt builds an env over the store at path. ":memory:" asks for
+// the usual test store: a copy of testsupport's already-migrated
+// template, so a suite of hundreds of tests does not re-run every
+// migration under the race detector. A temp file is for the tests that
+// need the store at a path of their own.
 func newEnvAt(t *testing.T, path string, adjust func(*Config)) *env {
 	t.Helper()
 	ctx := context.Background()
-	st, err := store.Open(ctx, path)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
+	var st *store.Store
+	if path == ":memory:" {
+		st = testsupport.OpenStore(t)
+	} else {
+		var err error
+		st, err = store.Open(ctx, path)
+		if err != nil {
+			t.Fatalf("open store: %v", err)
+		}
+		t.Cleanup(func() { st.Close() })
 	}
-	t.Cleanup(func() { st.Close() })
 	e := &env{t: t, ctx: ctx, clock: newFakeClock(), st: st}
-	err = st.Update(ctx, func(tx *sql.Tx) error {
+	err := st.Update(ctx, func(tx *sql.Tx) error {
 		id := func(query string, args ...any) int64 {
 			t.Helper()
 			res, err := tx.Exec(query, args...)
