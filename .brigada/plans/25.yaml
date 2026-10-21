@@ -39,7 +39,7 @@ tasks:
     base: "stale-hold-cleared"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-97"
     rounds: 0
   - id: 98
@@ -51,7 +51,7 @@ tasks:
     continue: "amend-judged-on-additions"
     tier: heavy
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 99
