@@ -737,9 +737,10 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	}
 	items = append(items, dups...)
 
-	// A broken agent takes nothing until a person fixes it and resets it
-	// (§8 "Health"). Agents belong to no project, so only the unscoped
-	// view lists them. Cooling is not here: it waits for a clock.
+	// A broken agent takes nothing until it is cleared — a repeated
+	// failure's probe, a runner's return, or the user's reset (§8
+	// "Health"). Agents belong to no project, so only the unscoped view
+	// lists them. Cooling is not here: it waits for a clock.
 	if project == 0 {
 		brows, err := tx.Query(`SELECT id, harness, model, health_reason FROM agents WHERE health = 'broken' ORDER BY id`)
 		if err != nil {

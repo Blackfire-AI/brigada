@@ -190,6 +190,12 @@ type Config struct {
 	// RunnerStale is how long a runner may go unseen before the sweep
 	// marks its agents broken (§8 "Health"); zero keeps 15 minutes.
 	RunnerStale time.Duration
+	// ProbeDelay is how long an agent broken by repeated failures waits
+	// before its first probe (§8 "Health"); zero keeps 5 minutes.
+	ProbeDelay time.Duration
+	// ProbeMaxDelay caps the growing delay between probes after failed
+	// ones (§8 "Health"); zero keeps 1 hour.
+	ProbeMaxDelay time.Duration
 	// SweepInterval is how often the engine sweeps when the lifecycle's
 	// idle ticker drives it (§13): the tick interval the sweep's
 	// suspension check measures a gap against. Zero keeps the default,
@@ -261,6 +267,8 @@ func DefaultConfig() Config {
 		LimitCooling:      defaultLimitCooling,
 		FailureStreak:     defaultFailureStreak,
 		RunnerStale:       defaultRunnerStale,
+		ProbeDelay:        defaultProbeDelay,
+		ProbeMaxDelay:     defaultProbeMaxDelay,
 		SweepInterval:     defaultSweepInterval,
 		PlanFileRetry:     defaultPlanFileRetry,
 		PlanFileTimeout:   defaultPlanFileTimeout,
@@ -399,6 +407,12 @@ func New(s *store.Store, cfg Config) *Engine {
 	}
 	if cfg.RunnerStale > 0 {
 		def.RunnerStale = cfg.RunnerStale
+	}
+	if cfg.ProbeDelay > 0 {
+		def.ProbeDelay = cfg.ProbeDelay
+	}
+	if cfg.ProbeMaxDelay > 0 {
+		def.ProbeMaxDelay = cfg.ProbeMaxDelay
 	}
 	if cfg.SweepInterval > 0 {
 		def.SweepInterval = cfg.SweepInterval

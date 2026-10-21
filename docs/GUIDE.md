@@ -348,7 +348,7 @@ The needs-you queue lists what only you (or the foreman) can unblock:
 | `task #N needs_user: <reason>` | An answer from you, for a task parked for you directly. |
 | `foreman #N limited: <until>` | A choice: wait, switch the foreman, or let approved plans run without it ([section 8](#8-agents-quota-and-health)). |
 | `foreman #N budget_spent: wake budget spent (20/20 today, resets <UTC time>); <n> events waiting` | Raise the day's wake budget with `brigada budget --wakes N`, or send `brigada ask`: a wake that carries your message is not charged. |
-| `agent <harness>/<model> broken: <reason>` | A fix, then `brigada agent reset <harness>/<model>` ([section 8](#8-agents-quota-and-health)). |
+| `agent <harness>/<model> broken: <reason>` | A fix, then `brigada agent reset <harness>/<model>`; repeated failures also recover by themselves ([section 8](#8-agents-quota-and-health)). |
 
 ### The wake budget
 
@@ -828,7 +828,7 @@ An agent is taken out of dispatch as broken when:
 2. its last two jobs both failed (a limit hit is quota, not a failure, and does not count); or
 3. its runner has not been heard from for 15 minutes.
 
-The first two stay broken until you fix the cause (log the CLI in again, fix what made it fail) and run `brigada agent reset <harness>/<model>`. The third is not a verdict on the agent: the agent comes back by itself as soon as its runner polls again.
+The auth failure stays broken until you log the CLI in again and run `brigada agent reset <harness>/<model>`; it is never probed. The failure streak comes back by itself: a few minutes after it was marked broken the runner probes the CLI, a passing probe clears it, and a failing one waits longer (a growing delay) before the next probe — `brigada agent reset <harness>/<model>` still clears it at once when you know the CLI is fixed. The third is not a verdict on the agent: the agent comes back by itself as soon as its runner polls again.
 
 Broken agents are listed in the needs-you queue with the reason, and raise a notification. `agent reset` prints how many agents matched. The name is the `harness/model` pair that `status` and `stats` print, and the reset applies to every runner's copy of that agent.
 

@@ -4,6 +4,7 @@
 package opencode
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,17 @@ var _ adapter.Adapter = (*Adapter)(nil)
 const DefaultModel = "default"
 
 func (a *Adapter) Name() string { return "opencode" }
+
+// ProbeCommand implements adapter.Adapter: `opencode --version`, a cheap
+// command that answers when the CLI is well (§8 "Health"), bound to ctx
+// so a hung CLI is killed and reads as a failing probe.
+func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
+	binary := a.Binary
+	if binary == "" {
+		binary = "opencode"
+	}
+	return exec.CommandContext(ctx, binary, "--version")
+}
 
 // Command passes the prompt as one positional argument after --. OpenCode
 // permits edits and denies bash headless by default, matching worker policy,

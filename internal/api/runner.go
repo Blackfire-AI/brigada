@@ -214,6 +214,61 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request, runnerID 
 	writeJSON(w, http.StatusOK, answerBody{Answer: string(ans)})
 }
 
+// handleProbes lists the runner's due broken-agent probes (§8 "Health"):
+// the agents broken by repeated failures whose next probe is due, for
+// the runner to probe and report.
+func (s *Server) handleProbes(w http.ResponseWriter, r *http.Request, runnerID int64) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	probes, err := s.eng.DueProbes(r.Context(), runnerID)
+	if err != nil {
+		s.writeInternal(w, r, "list broken-agent probes", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Probes []engine.Probe `json:"probes"`
+	}{nonNilProbes(probes)})
+}
+
+// handleProbeReport delivers one probe's result (§8 "Health"): whether
+// the agent's CLI answered. A passing probe clears the agent; a failing
+// one backs the next probe off.
+func (s *Server) handleProbeReport(w http.ResponseWriter, r *http.Request, runnerID int64) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var req struct {
+		AgentID int64 `json:"agent_id"`
+		OK      bool  `json:"ok"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.AgentID == 0 {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "agent_id is required")
+		return
+	}
+	if err := s.eng.ReportProbe(r.Context(), runnerID, req.AgentID, req.OK); err != nil {
+		if errors.Is(err, engine.ErrNoAgent) {
+			writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+			return
+		}
+		s.writeInternal(w, r, fmt.Sprintf("report probe for agent %d", req.AgentID), err)
+		return
+	}
+	writeJSON(w, http.StatusOK, answerBody{Answer: string(engine.AnsOK)})
+}
+
+// nonNilProbes returns an empty list for a nil probe list, so the JSON
+// carries [] rather than null.
+func nonNilProbes(v []engine.Probe) []engine.Probe {
+	if v == nil {
+		return []engine.Probe{}
+	}
+	return v
+}
+
 // advertiseRequest is what a runner tells the engine about itself: the
 // harnesses and labels it offers (§8) and, in a register, the agents it
 // advertises (§5.1) and its own cap on parallel jobs (§8.1). In a lease

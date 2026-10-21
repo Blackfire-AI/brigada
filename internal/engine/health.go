@@ -29,6 +29,12 @@ const (
 	// defaultRunnerStale is how long a runner may go unseen before its
 	// agents are marked broken.
 	defaultRunnerStale = 15 * time.Minute
+	// defaultProbeDelay is how long an agent broken by repeated failures
+	// waits before its first probe (§8 "Health").
+	defaultProbeDelay = 5 * time.Minute
+	// defaultProbeMaxDelay caps the growing delay between probes after
+	// failed ones (§8 "Health").
+	defaultProbeMaxDelay = 1 * time.Hour
 )
 
 // ErrNoAgent is the reset's refusal when no registered agent matches
@@ -147,7 +153,10 @@ func (e *Engine) coolAccountTx(tx *sql.Tx, job *jobRow, c Completion, now time.T
 // appends the plain event. An agent already broken for a lasting reason
 // stays as it is; one broken only for a stale runner takes a lasting
 // reason over, so the runner's return does not clear what the agent's
-// own failures earned.
+// own failures earned. A failure streak also schedules the probe that
+// may bring the agent back by itself (§8 "Health"): the first probe is
+// ProbeDelay out, and the schedule stays empty for auth and stale
+// reasons, which never probe.
 func (e *Engine) markBrokenTx(tx *sql.Tx, job *jobRow, agent int64, reason string, now time.Time) error {
 	var harness, model, health, why string
 	if err := tx.QueryRow("SELECT harness, model, health, health_reason FROM agents WHERE id = ?", agent).
@@ -160,8 +169,14 @@ func (e *Engine) markBrokenTx(tx *sql.Tx, job *jobRow, agent int64, reason strin
 	if health == quotaBroken && (why != brokenStale || reason == brokenStale) {
 		return nil
 	}
-	if _, err := tx.Exec("UPDATE agents SET health = 'broken', health_reason = ?, updated_at = ? WHERE id = ?",
-		reason, fmtTime(now), agent); err != nil {
+	probeAt := ""
+	probeDelay := 0
+	if reason == brokenFailures {
+		probeAt = fmtTime(now.Add(e.cfg.ProbeDelay))
+		probeDelay = int(e.cfg.ProbeDelay / time.Second)
+	}
+	if _, err := tx.Exec("UPDATE agents SET health = 'broken', health_reason = ?, probe_at = ?, probe_delay = ?, updated_at = ? WHERE id = ?",
+		reason, probeAt, probeDelay, fmtTime(now), agent); err != nil {
 		return fmt.Errorf("mark agent %d broken: %w", agent, err)
 	}
 	var project, task, jobID int64
@@ -270,7 +285,8 @@ func (e *Engine) ResetAgents(ctx context.Context, harness, model string) (int, e
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
-		res, err := tx.Exec(`UPDATE agents SET health = 'ready', health_reason = '', cooling_until = NULL, updated_at = ?
+		res, err := tx.Exec(`UPDATE agents SET health = 'ready', health_reason = '', cooling_until = NULL,
+			probe_at = '', probe_delay = 0, updated_at = ?
 			WHERE harness = ? AND model = ?`, fmtTime(now), harness, model)
 		if err != nil {
 			return fmt.Errorf("reset agents: %w", err)
@@ -291,6 +307,101 @@ func (e *Engine) ResetAgents(ctx context.Context, harness, model string) (int, e
 		return 0, err
 	}
 	return n, nil
+}
+
+// Probe is one agent a runner should probe (§8 "Health"): a
+// failure-broken agent whose next probe is due. The runner runs the
+// agent's cheap CLI probe and reports whether it passed.
+type Probe struct {
+	AgentID int64  `json:"agent_id"`
+	Adapter string `json:"adapter"`
+	Harness string `json:"harness"`
+	Model   string `json:"model"`
+}
+
+// DueProbes lists the runner's agents broken by repeated failures whose
+// next probe is due (§8 "Health"), for the runner to probe and report.
+// An auth-broken agent — which waits for the user's reset — is never
+// listed, and neither is a failure-broken one whose probe time has not
+// arrived.
+func (e *Engine) DueProbes(ctx context.Context, runner int64) ([]Probe, error) {
+	var out []Probe
+	err := e.store.View(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.Query(`SELECT id, adapter, harness, model FROM agents
+			WHERE runner_id = ? AND health = 'broken' AND health_reason = ?
+			AND probe_at <> '' AND probe_at <= ? ORDER BY id`,
+			runner, brokenFailures, fmtTime(e.cfg.Now()))
+		if err != nil {
+			return fmt.Errorf("list the probes of runner %d: %w", runner, err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var p Probe
+			if err := rows.Scan(&p.AgentID, &p.Adapter, &p.Harness, &p.Model); err != nil {
+				return fmt.Errorf("list the probes of runner %d: %w", runner, err)
+			}
+			out = append(out, p)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ReportProbe delivers one probe's result (§8 "Health"). A passing
+// probe clears the broken state with a recovered event; a failing one
+// grows the delay to the next probe — doubled, capped at ProbeMaxDelay —
+// and one plain event names the next attempt. A report for an agent that
+// is not this runner's, or not broken by repeated failures (an
+// auth-broken agent, or one already reset), changes nothing.
+func (e *Engine) ReportProbe(ctx context.Context, runner, agent int64, ok bool) error {
+	return e.store.Update(ctx, func(tx *sql.Tx) error {
+		now := e.cfg.Now()
+		if _, err := e.sweepTx(tx, now); err != nil {
+			return err
+		}
+		var owner int64
+		var harness, model, health, reason string
+		var probeDelay int
+		if err := tx.QueryRow(`SELECT runner_id, harness, model, health, health_reason, probe_delay
+			FROM agents WHERE id = ?`, agent).
+			Scan(&owner, &harness, &model, &health, &reason, &probeDelay); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("report probe: %w", ErrNoAgent)
+			}
+			return fmt.Errorf("read agent %d: %w", agent, err)
+		}
+		if owner != runner || health != quotaBroken || reason != brokenFailures {
+			return nil // not this runner's, or not a failure-broken agent: nothing to say
+		}
+		if ok {
+			if _, err := tx.Exec(`UPDATE agents SET health = 'ready', health_reason = '',
+				probe_at = '', probe_delay = 0, updated_at = ? WHERE id = ?`, fmtTime(now), agent); err != nil {
+				return fmt.Errorf("clear agent %d: %w", agent, err)
+			}
+			_, err := appendEventTx(tx, evAgentRecovered, 0, 0, 0,
+				eventPayload{Agent: agent, Harness: harness, Model: model, Reason: brokenFailures}, now)
+			return err
+		}
+		delay := time.Duration(probeDelay) * time.Second
+		if delay <= 0 {
+			delay = e.cfg.ProbeDelay
+		}
+		delay *= 2
+		if delay > e.cfg.ProbeMaxDelay {
+			delay = e.cfg.ProbeMaxDelay
+		}
+		next := fmtTime(now.Add(delay))
+		if _, err := tx.Exec("UPDATE agents SET probe_at = ?, probe_delay = ?, updated_at = ? WHERE id = ?",
+			next, int(delay/time.Second), fmtTime(now), agent); err != nil {
+			return fmt.Errorf("reschedule the probe of agent %d: %w", agent, err)
+		}
+		_, err := appendEventTx(tx, evAgentProbeFailed, 0, 0, 0,
+			eventPayload{Agent: agent, Harness: harness, Model: model, Until: next}, now)
+		return err
+	})
 }
 
 // CoolingAgent is one agent the dispatcher is holding back for quota

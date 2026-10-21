@@ -17,6 +17,7 @@
 package fake
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -29,6 +30,10 @@ import (
 // Adapter drives the scripted fake CLI at Script.
 type Adapter struct {
 	Script string
+	// ProbeScript is the executable the broken-agent probe runs (§8
+	// "Health"): its exit code is the probe's answer, 0 passing. Empty
+	// means a passing no-op, so a test that never probes is unaffected.
+	ProbeScript string
 }
 
 var _ adapter.Adapter = (*Adapter)(nil)
@@ -40,6 +45,16 @@ var _ adapter.Interactive = (*Adapter)(nil)
 // Name implements adapter.Adapter: the fake adapter's identifier, the
 // name a runner's advertisement pairs with it (§5.1).
 func (a *Adapter) Name() string { return "fake" }
+
+// ProbeCommand implements adapter.Adapter: run ProbeScript — its exit
+// code is the probe's answer — or a passing no-op when none is set,
+// bound to ctx so a hung script is killed and reads as a failing probe.
+func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
+	if a.ProbeScript == "" {
+		return exec.CommandContext(ctx, "true")
+	}
+	return exec.CommandContext(ctx, a.ProbeScript)
+}
 
 // Command implements adapter.Adapter: run the script in workdir with
 // the prompt on stdin. The resume session id and the MCP config path

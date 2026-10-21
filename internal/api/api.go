@@ -61,6 +61,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/runner/complete", s.authed([]string{roleRunner}, s.withRunner(s.handleComplete)))
 	mux.HandleFunc("/v1/runner/release", s.authed([]string{roleRunner}, s.withRunner(s.handleRelease)))
 	mux.HandleFunc("/v1/runner/artifacts", s.authed([]string{roleRunner}, s.withRunner(s.handleArtifactUpload)))
+	mux.HandleFunc("/v1/runner/probes", s.authed([]string{roleRunner}, s.withRunner(s.handleProbes)))
+	mux.HandleFunc("/v1/runner/probes/report", s.authed([]string{roleRunner}, s.withRunner(s.handleProbeReport)))
 	mux.HandleFunc("/v1/history", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleHistory))
 	mux.HandleFunc("/v1/artifacts/{id}", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleArtifactGet))
 	mux.HandleFunc("/v1/jobs", s.authed([]string{roleAdmin}, s.idempotent(s.handleSubmit)))
