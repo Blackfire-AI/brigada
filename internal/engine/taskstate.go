@@ -143,16 +143,16 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 	// Retry only classified CLI errors or terminal runner loss. A result
 	// contract failure, stopped run or failed check belongs to its own path.
 	if c.Error != "" {
-		switch c.ErrorKind {
-		case ErrorKindSetup:
+		switch {
+		case c.ErrorKind == ErrorKindSetup:
 			if retried, err := e.retrySetupFailureTx(tx, job, c, now); err != nil || retried {
 				return err
 			}
-		case ErrorKindInfra:
+		case c.ErrorKind == ErrorKindInfra:
 			if retried, err := e.retryInfraFailureTx(tx, job, c, now); err != nil || retried {
 				return err
 			}
-		case "limit", "auth", "other", "runner_lost":
+		case transientCLIError(c.ErrorKind):
 			if retried, err := e.autoRestartTaskTx(tx, job, c.ErrorKind, c.Error, now); err != nil || retried {
 				return err
 			}
@@ -392,14 +392,44 @@ func infraRetryCountTx(tx *sql.Tx, taskID int64) (int, error) {
 	return n, nil
 }
 
-// autoRestartTaskTx spends the first restart, at most once, on a different
-// ready agent (§3, §8). Fix jobs and reviews keep their existing policies.
-// Decide before emitting task_failed: the restart is the inbox's single
-// judgment event for this failure, with its kind and text in the reason.
+// transientCLIError reports whether a completion's error kind is a
+// transient CLI failure (§3): the worker's CLI could not run the job
+// through no fault of the work — a quota limit, a failed login, a
+// server error, a lost runner. This is the one set the automatic retry
+// carries, for a work job and a fix round alike.
+func transientCLIError(kind string) bool {
+	switch kind {
+	case "limit", "auth", "other", "runner_lost":
+		return true
+	}
+	return false
+}
+
+// autoRestartTaskTx carries a classified transient CLI failure (§3): a
+// work job's failure spends the first restart on another ready agent; a
+// fix round's failure retries the round once on the author's session or
+// another agent (issue #41). Both are gated by TaskAutoRetry, need the
+// failed agent recorded, and are decided before task_failed is emitted:
+// the retry is the completion's single answer to the failure, with its
+// kind and text in the reason.
 func (e *Engine) autoRestartTaskTx(tx *sql.Tx, job *jobRow, kind, text string, now time.Time) (bool, error) {
-	if !*e.cfg.TaskAutoRetry || job.Kind != KindWork || job.AgentID == 0 {
+	if !*e.cfg.TaskAutoRetry || job.AgentID == 0 {
 		return false, nil
 	}
+	switch job.Kind {
+	case KindWork:
+		return e.autoRestartWorkTx(tx, job, kind, text, now)
+	case KindFix:
+		return e.autoRetryFixTx(tx, job, kind, text, now)
+	}
+	return false, nil
+}
+
+// autoRestartWorkTx spends the first restart, at most once, on a
+// different ready agent (§3, §8). Reviews keep their existing policy.
+// Decide before emitting task_failed: the restart is the inbox's single
+// judgment event for this failure, with its kind and text in the reason.
+func (e *Engine) autoRestartWorkTx(tx *sql.Tx, job *jobRow, kind, text string, now time.Time) (bool, error) {
 	var restarts int
 	if err := tx.QueryRow("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1", job.TaskID).Scan(&restarts); err != nil {
 		return false, fmt.Errorf("count the restarts of task %d: %w", job.TaskID, err)
@@ -445,6 +475,86 @@ func (e *Engine) autoRestartTaskTx(tx *sql.Tx, job *jobRow, kind, text string, n
 		return false, err
 	}
 	return true, e.wakeForemanTx(tx, job.ProjectID, now)
+}
+
+// autoRetryFixTx retries a fix round whose CLI failed transiently (§3,
+// issue #41): once, resuming the author's session on the author's agent
+// when that agent can still take it, else on a fresh session on another
+// eligible agent of the tier, with the round's feedback in the prompt.
+// The retry keeps the task's branch and spends no round — the round was
+// never attempted — and it is counted like the first-job retry: the
+// retry flag marks it, the restart budget gates it, and a second
+// transient failure parks, as a non-transient one does at once.
+func (e *Engine) autoRetryFixTx(tx *sql.Tx, job *jobRow, kind, text string, now time.Time) (bool, error) {
+	// A retry's own failure is the park, not another retry.
+	if job.Retry {
+		return false, nil
+	}
+	// Counted like the first-job retry: the same restart budget.
+	if _, capped, err := e.roundCapReached(tx, SubmitParams{TaskID: job.TaskID, Restart: true}); err != nil || capped {
+		return false, err
+	}
+	// The author's placement: resume the same session on the author's
+	// agent when it can still take the job — ready and not cooling — and
+	// the failure was not a lost runner, whose agent's runner is gone.
+	sameAgent := kind != "runner_lost"
+	if sameAgent {
+		cands, err := eligibleAgentsTx(tx, &e.cfg, nil, 0, &jobRow{
+			ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindFix,
+			Harness: job.Harness, RequireAgent: job.AgentID,
+		}, classImplement, fmtTime(now))
+		if err != nil {
+			return false, err
+		}
+		sameAgent = len(cands) > 0
+	}
+	mode, harness, agent := ModeSession, job.Harness, job.AgentID
+	if !sameAgent {
+		// Another eligible agent of the tier, on a fresh session. The
+		// round's feedback is the job's own prompt, carried verbatim; the
+		// branch stays the task's, named at the retry's lease.
+		cands, err := eligibleAgentsTx(tx, &e.cfg, e.cfg.Rand, 0, &jobRow{
+			ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindFix, ExcludeAgent: job.AgentID,
+		}, classImplement, fmtTime(now))
+		if err != nil || len(cands) == 0 {
+			return false, err
+		}
+		mode, harness, agent = ModeFresh, "", cands[0].id
+	}
+	sr, err := e.submitTx(tx, SubmitParams{
+		Key:          job.Key,
+		ProjectID:    job.ProjectID,
+		TaskID:       job.TaskID,
+		Kind:         KindFix,
+		Mode:         mode,
+		Prompt:       job.Prompt,
+		Harness:      harness,
+		RequireAgent: agent,
+		Round:        roundNone,
+		NotBefore:    now.Add(retryDelayFor(1)),
+	}, now)
+	if err != nil {
+		return false, err
+	}
+	if sr.Answer != AnsCreated {
+		// The failed fix round freed the key earlier in this transaction,
+		// so no live job can hold this submit and roundNone spends no
+		// budget. An event without its job would log a retry that was
+		// never queued.
+		return false, fmt.Errorf("queue the fix retry of task %d: submit %s answered %s", job.TaskID, job.Key, sr.Answer)
+	}
+	// Mark the retry: a fix round's retry is not a restart — it keeps
+	// the task's branch and spends no round — and the flag is what lets
+	// a second transient failure park instead of retrying again. The
+	// submit's not-before backoff holds it out of leasing for the
+	// retry's short pause (§3): the CLI that just failed is not hit
+	// again at once.
+	if _, err := tx.Exec(`UPDATE jobs SET retry = 1 WHERE id = ?`, sr.JobID); err != nil {
+		return false, fmt.Errorf("mark the fix retry of task %d: %w", job.TaskID, err)
+	}
+	_, err = appendEventTx(tx, evTaskFixRetry, job.ProjectID, job.TaskID, sr.JobID,
+		eventPayload{Run: int64(sr.Run), Reason: boundNote(fmt.Sprintf("%s: %s", kind, text))}, now)
+	return err == nil, err
 }
 
 // escalateTierTx climbs the escalation ladder one step (§8), spending one

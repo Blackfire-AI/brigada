@@ -44,6 +44,7 @@ const (
 	evTaskDone               = "task_done"                 // the task is finished (§6.1)
 	evTaskCheckFailed        = "task_check_failed"         // the check failed; a fix round answers it, or the task waits for the foreman (§3)
 	evTaskFixRound           = "task_fix_round"            // a fix round is queued on the author's session (§3)
+	evTaskFixRetry           = "task_fix_retry"            // a fix round's transient CLI failure was retried, on the author's session or another agent (§3)
 	evTaskOutOfRounds        = "task_out_of_rounds"        // the task's rounds are spent and escalation declined; the foreman decides (§3)
 	evTaskNeedsHelp          = "task_needs_help"           // the worker asked its question; the foreman answers (§3)
 	evTaskDiscoveries        = "task_discoveries"          // a worker's result carried discoveries; they reach the foreman, no wake of their own (§4.2)

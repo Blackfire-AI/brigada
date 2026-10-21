@@ -134,8 +134,8 @@ type Config struct {
 	// fails, so it cannot wedge its key forever.
 	QueueTTL time.Duration
 	// HardCaps is the wall-time cap per job kind, measured from the
-	// job's first lease (§14). Entries here override the defaults for
-	// their kind only.
+	// job's current lease (§14, issue #36). Entries here override the
+	// defaults for their kind only.
 	HardCaps map[Kind]time.Duration
 	// RoundCaps are the default per-task round caps; a task's caps JSON
 	// (fix_rounds, review_rounds, restart) overrides them per task.

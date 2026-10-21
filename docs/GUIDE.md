@@ -841,7 +841,7 @@ An agent's account is the login whose quota it spends. The account label default
 
 ### Automatic retry
 
-When a worker's CLI fails for a transient reason (a quota error, an authentication error, a lost runner), a task's first work job gets one automatic restart on another ready agent, with a fresh session and a new branch, carrying the failed job's last progress. Failures in fix rounds and reviews are not restarted this way. If no other agent can take it, or the restart was already used, the task parks for the foreman. Set `task_auto_retry = false` to park such failures at once.
+When a worker's CLI fails for a transient reason (a quota error, an authentication error, a server error, a lost runner), a task's first work job gets one automatic restart on another ready agent, with a fresh session and a new branch, carrying the failed job's last progress. A fix round that fails the same way is retried once instead of restarted: the author's session resumes on the author's agent when it can still take it, else the round runs fresh on another agent of the tier with the round's feedback (the check output or the review findings) in its prompt and the task's branch under it. A second failure, or a failure that is not transient, parks the task for the foreman. Set `task_auto_retry = false` to park transient failures at once.
 
 ### Broken agents
 
