@@ -7,7 +7,7 @@ title: "Cheaper foreman sessions: compact status, automatic session rotation wit
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-10-21T07:02:35.587275Z
-updated: 2026-10-21T07:02:35.587275Z
+updated: 2026-10-21T10:43:50.873446Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -27,7 +27,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: needs_foreman
+    state: cancelled
     branch: "brigada/task-69-r1"
     rounds: 1
   - id: 70
