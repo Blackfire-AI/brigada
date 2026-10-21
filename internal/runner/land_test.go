@@ -82,6 +82,14 @@ func (e *testEnv) landTest(t *testing.T, remote, settings, taskSpec, taskCheck, 
 	task = e.seedTask("", taskCheck)
 	work = e.submitWork(task, prompt.ComposeWorkerPrompt(taskSpec, "", ""))
 	t.Setenv("BRIGADA_TEST_BRANCH", taskBranch(task, 1))
+	e.startLandRunner(t, workerScript, adjust...)
+	return task, work
+}
+
+// startLandRunner starts the land-capable dual-agent runner on the
+// scripted worker, and returns it for the tests that stop it.
+func (e *testEnv) startLandRunner(t *testing.T, workerScript string, adjust ...func(*Config)) *runnerProc {
+	e.t.Helper()
 	// The landing clone commits with the host's identity, and a CI host
 	// has none.
 	for _, k := range []string{"GIT_AUTHOR", "GIT_COMMITTER"} {
@@ -89,8 +97,97 @@ func (e *testEnv) landTest(t *testing.T, remote, settings, taskSpec, taskCheck, 
 		t.Setenv(k+"_EMAIL", "land@brigada.invalid")
 	}
 	adjust = append(adjust, withReviewerAgent)
-	e.startRunner(writeWorkerScript(t, workerScript), 100*time.Millisecond, adjust...)
-	return task, work
+	return e.startRunner(writeWorkerScript(t, workerScript), 100*time.Millisecond, adjust...)
+}
+
+// addDep records that task depends on dep (§6.1), as a plan's edge.
+func (e *testEnv) addDep(task, dep int64) {
+	e.t.Helper()
+	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO task_deps (plan_id, task_id, depends_on_task_id, is_base, is_continue)
+			VALUES ((SELECT plan_id FROM tasks WHERE id = ?), ?, ?, 0, 0)`, task, task, dep)
+		return err
+	})
+	if err != nil {
+		e.t.Fatalf("add the dependency of task %d on %d: %v", task, dep, err)
+	}
+}
+
+// remoteRefCommit returns the commit the remote holds for the full ref
+// name, or "" when it has none.
+func remoteRefCommit(t *testing.T, remote, ref string) string {
+	t.Helper()
+	fields := strings.Fields(git(t, "", "ls-remote", remote, ref))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+// parentOf returns the first parent of commit in the remote.
+func parentOf(t *testing.T, remote, commit string) string {
+	t.Helper()
+	return strings.TrimSpace(git(t, "", "--git-dir", strings.TrimPrefix(remote, "file://"), "rev-parse", commit+"^"))
+}
+
+// stackReviewWorker is the dual worker whose implementer writes a file
+// named for its own branch — task-N.txt — so the tasks of one test
+// change different files and their landings stack without a conflict.
+var stackReviewWorker = strings.ReplaceAll(
+	strings.Replace(reviewWorker, "echo hello > work.txt", `echo hello > "$(basename "$(git rev-parse --abbrev-ref HEAD)").txt"`, 1),
+	"@RESULT@", reviewApproveResult)
+
+// stackSpec and stackCheck are the stack tests' task: the file named
+// for the task, holding hello. A task's worktree holds its own file
+// alone, so the glob names one.
+const (
+	stackSpec  = "Add a file named for the task with hello in it."
+	stackCheck = `test "$(cat task-*.txt)" = hello`
+)
+
+// assertStackPushed checks the two waiting landings bottom and top, of
+// tasks bottomTask and topTask — top squashed onto bottom, bottom onto
+// the seed, the waiting ref at top, main unmoved — then releases the
+// push gate and checks that both push, each its recorded commit: main
+// ends at top, the seed and the two squashes alone, each task's file
+// there.
+func (e *testEnv) assertStackPushed(t *testing.T, remote, seed string, bottomTask, topTask int64, bottom, top string) {
+	t.Helper()
+	if got := parentOf(t, remote, top); got != bottom {
+		t.Fatalf("the later landing %s sits on %s, want the earlier landing %s", top, got, bottom)
+	}
+	if got := parentOf(t, remote, bottom); got != seed {
+		t.Fatalf("the earlier landing %s sits on %s, want the seed %s", bottom, got, seed)
+	}
+	if got := remoteRefCommit(t, remote, landWaitRef("main")); got != top {
+		t.Errorf("the waiting ref = %q, want the top of the stack %s", got, top)
+	}
+	if got := remoteBranchCommit(t, remote, "main"); got != seed {
+		t.Fatalf("main moved while the pushes waited: %s, want the seed %s", got, seed)
+	}
+	ures, err := e.eng.PushApprove(e.ctx, remote)
+	if err != nil || ures.Released != 2 {
+		t.Fatalf("PushApprove = %+v, %v; want 2 released", ures, err)
+	}
+	if got := e.waitLanding(bottomTask, "pushed"); got != bottom {
+		t.Errorf("task %d pushed %s, want its recorded commit %s", bottomTask, got, bottom)
+	}
+	if got := e.waitLanding(topTask, "pushed"); got != top {
+		t.Errorf("task %d pushed %s, want its recorded commit %s", topTask, got, top)
+	}
+	if got := remoteBranchCommit(t, remote, "main"); got != top {
+		t.Errorf("main after the pushes = %s, want the top of the stack %s (no new squash)", got, top)
+	}
+	bare := strings.TrimPrefix(remote, "file://")
+	if out := strings.TrimSpace(git(t, "", "--git-dir", bare, "rev-list", "--count", "main")); out != "3" {
+		t.Errorf("commits on main = %s, want the seed and the two squashes alone", out)
+	}
+	for _, task := range []int64{bottomTask, topTask} {
+		file := "main:task-" + strconv.FormatInt(task, 10) + ".txt"
+		if got := git(t, "", "--git-dir", bare, "show", file); got != "hello\n" {
+			t.Errorf("%s = %q, want hello", file, got)
+		}
+	}
 }
 
 // pushToMain pushes one commit on the remote's main from a scratch
@@ -214,9 +311,13 @@ func TestRunnerLandGateAskWaitsThenPushes(t *testing.T) {
 	if got := remoteBranchCommit(t, remote, "main"); got != seed {
 		t.Fatalf("main moved while the push waited: %s, want the seed %s", got, seed)
 	}
+	// The commit waits on the remote, on no branch of the user's.
+	if got := remoteRefCommit(t, remote, landWaitRef("main")); got != commit {
+		t.Errorf("the waiting ref = %q, want the recorded commit %s", got, commit)
+	}
 
-	// The user releases the push gate (§6.3); the push phase runs on the
-	// same runner that squashed, where the recorded commit lives.
+	// The user releases the push gate (§6.3); the push phase pushes the
+	// recorded commit.
 	ures, err := e.eng.PushApprove(e.ctx, remote)
 	if err != nil || ures.Released != 1 {
 		t.Fatalf("PushApprove = %+v, %v; want 1 released", ures, err)
@@ -231,6 +332,94 @@ func TestRunnerLandGateAskWaitsThenPushes(t *testing.T) {
 	// One commit landed, once: the seed and the squash alone.
 	if out := strings.TrimSpace(git(t, "", "--git-dir", strings.TrimPrefix(remote, "file://"), "rev-list", "--count", "main")); out != "2" {
 		t.Errorf("commits on main = %s, want the seed and the squash alone", out)
+	}
+}
+
+// TestRunnerLandGateAskStacksTwoLandings: two independent landings that
+// wait at the push gate stack on the waiting ref — the later squashed
+// onto the earlier, not onto the unmoved target — and one push approve
+// releases both, each pushed as its recorded commit, no new squash.
+func TestRunnerLandGateAskStacksTwoLandings(t *testing.T) {
+	markerDir(t)
+	remote := newRemote(t)
+	seed := remoteBranchCommit(t, remote, "main")
+	e := newTestEnv(t, engine.Config{})
+	first, work := e.landTest(t, remote, `{"gate_push":"ask"}`, stackSpec, stackCheck, stackReviewWorker)
+	second := e.seedTask("", stackCheck)
+	e.submitWork(second, prompt.ComposeWorkerPrompt(stackSpec, "", ""))
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	a := e.waitLanding(first, "waiting")
+	b := e.waitLanding(second, "waiting")
+	// Nothing orders the two: whichever landed first is the bottom.
+	if parentOf(t, remote, a) == b {
+		e.assertStackPushed(t, remote, seed, second, first, b, a)
+		return
+	}
+	e.assertStackPushed(t, remote, seed, first, second, a, b)
+}
+
+// TestRunnerLandGateAskStackLandsInDependencyOrder: a dependent whose
+// dependency waits at the push gate lands on top of the dependency's
+// commit, not on a target that lacks it, and the release pushes the
+// stack in dependency order.
+func TestRunnerLandGateAskStackLandsInDependencyOrder(t *testing.T) {
+	markerDir(t)
+	remote := newRemote(t)
+	seed := remoteBranchCommit(t, remote, "main")
+	e := newTestEnv(t, engine.Config{})
+	dep, work := e.landTest(t, remote, `{"gate_push":"ask"}`, stackSpec, stackCheck, stackReviewWorker)
+	dependent := e.seedTask("", stackCheck)
+	e.addDep(dependent, dep)
+	e.submitWork(dependent, prompt.ComposeWorkerPrompt(stackSpec, "", ""))
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	a := e.waitLanding(dep, "waiting")
+	b := e.waitLanding(dependent, "waiting")
+	e.assertStackPushed(t, remote, seed, dep, dependent, a, b)
+}
+
+// TestRunnerLandPushPhaseOnAnotherRunner: the push phase needs nothing
+// of the runner that squashed. That runner stops and loses its state
+// directory; a second runner leases the push, fetches the recorded
+// commit from the waiting ref and pushes it.
+func TestRunnerLandPushPhaseOnAnotherRunner(t *testing.T) {
+	markerDir(t)
+	remote := newRemote(t)
+	seed := remoteBranchCommit(t, remote, "main")
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	e.setProjectSettings(`{"gate_push":"ask"}`)
+	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
+	work := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", "", ""))
+	t.Setenv("BRIGADA_TEST_BRANCH", taskBranch(task, 1))
+	script := reviewScript(reviewApproveResult)
+	squasher := e.startLandRunner(t, script)
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	commit := e.waitLanding(task, "waiting")
+	squasher.stop(t)
+	if err := os.RemoveAll(e.stateDir); err != nil {
+		t.Fatal(err)
+	}
+	if got := remoteBranchCommit(t, remote, "main"); got != seed {
+		t.Fatalf("main moved while the push waited: %s, want the seed %s", got, seed)
+	}
+
+	other := e.startLandRunner(t, script, func(c *Config) {
+		c.Token = e.secrets["r2"]
+		c.StateDir = filepath.Join(t.TempDir(), "runner-state")
+	})
+	defer other.stop(t)
+	ures, err := e.eng.PushApprove(e.ctx, remote)
+	if err != nil || ures.Released != 1 {
+		t.Fatalf("PushApprove = %+v, %v; want 1 released", ures, err)
+	}
+	if got := e.waitLanding(task, "pushed"); got != commit {
+		t.Errorf("the pushed landing names %s, want the recorded commit %s", got, commit)
+	}
+	if got := remoteBranchCommit(t, remote, "main"); got != commit {
+		t.Errorf("main after the push = %s, want the recorded commit %s (no new squash)", got, commit)
 	}
 }
 
