@@ -127,7 +127,7 @@ tasks:
     continue: "port-39-41-36"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-92-r1"
     rounds: 0
   - id: 93
@@ -140,6 +140,6 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
