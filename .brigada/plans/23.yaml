@@ -70,9 +70,9 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-87"
-    rounds: 0
+    rounds: 1
   - id: 88
     name: "coordinator-docs"
     title: "#43 Document the coordinator bridge for ordinary sessions; check ask_foreman"
