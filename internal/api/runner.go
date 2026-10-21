@@ -341,6 +341,9 @@ type jobGrant struct {
 	// LandTarget is, for a land job (§7.1), the branch the task's diff
 	// is squashed onto. Empty for every other kind.
 	LandTarget string `json:"land_target,omitempty"`
+	// DefaultBranch is, for a land job (§7.1), the branch a missing land
+	// target is created from. Empty for every other kind.
+	DefaultBranch string `json:"default_branch,omitempty"`
 	// LandCommit is, for a land job's push phase (§7.1), the commit the
 	// landing already recorded: the runner pushes exactly it, no new
 	// squash. Empty for the squash phase and every other kind.
@@ -408,6 +411,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		ReviewSince:     g.ReviewSince,
 		Branch:          g.Branch,
 		LandTarget:      g.LandTarget,
+		DefaultBranch:   g.DefaultBranch,
 		LandCommit:      g.LandCommit,
 		Push:            g.Push,
 		GatePush:        g.GatePush,

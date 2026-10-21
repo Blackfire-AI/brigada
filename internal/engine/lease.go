@@ -77,6 +77,10 @@ type LeaseGrant struct {
 	// squashed onto: land_target, or the project's default branch. Empty
 	// for every other kind.
 	LandTarget string
+	// DefaultBranch is, for a land job (§7.1), the project's default
+	// branch: the runner creates a land_target the remote does not have
+	// yet from it. Empty for every other kind.
+	DefaultBranch string
 	// LandMessage is, for a land job's squash phase (§7.1), the task
 	// data the squash commit message is built from, as the hand-driven
 	// land builds it from the API. nil for the push phase and every
