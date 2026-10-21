@@ -119,8 +119,8 @@ tasks:
     continue: "net-infra"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-79"
     rounds: 0
   - id: 80
     name: "backoff"
