@@ -29,7 +29,7 @@ tasks:
     tier: heavy
     effort: high
     review_tier: heavy
-    state: reviewing
+    state: running
     branch: "brigada/task-94"
     rounds: 1
   - id: 95
