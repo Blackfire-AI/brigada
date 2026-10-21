@@ -28,7 +28,7 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: reviewing
+    state: done
     branch: "brigada/task-96"
     rounds: 1
   - id: 97
@@ -39,7 +39,7 @@ tasks:
     base: "stale-hold-cleared"
     tier: heavy
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 98
