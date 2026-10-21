@@ -27,8 +27,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-69-r1"
     rounds: 0
   - id: 70
     name: "foreman-rotate"
