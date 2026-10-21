@@ -40,8 +40,8 @@ tasks:
     continue: "git-label"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-72-r1"
     rounds: 0
   - id: 73
     name: "land-lost-close"
