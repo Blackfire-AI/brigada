@@ -28,7 +28,7 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-71"
     rounds: 1
   - id: 72
@@ -40,7 +40,7 @@ tasks:
     continue: "git-label"
     tier: heavy
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 73
