@@ -14,25 +14,13 @@ import (
 )
 
 // The land jobs on the runner (§7.1), end to end against the real
-// engine: the dual-agent runner of the review tests plus the git label
-// a land job's placement asks for, one local bare repo as the remote,
-// and the review-scripted worker driving the task to the approval a
-// landing reads. The landing itself runs in a clone under the runner's
-// state directory — never a worktree of the mirror — and what each
-// test judges is the remote's main and the landing record the engine
-// kept.
-
-// withGitLabel widens the runner's labels with the git one a land job
-// requires (§7.1): the promise that this runner's git works for the
-// repo.
-func withGitLabel(cfg *Config) {
-	for _, l := range cfg.Labels {
-		if l == "git" {
-			return
-		}
-	}
-	cfg.Labels = append(cfg.Labels, "git")
-}
+// engine: the dual-agent runner of the review tests, which offers the
+// git label a land job's placement asks for by default, one local bare
+// repo as the remote, and the review-scripted worker driving the task
+// to the approval a landing reads. The landing itself runs in a clone
+// under the runner's state directory — never a worktree of the mirror —
+// and what each test judges is the remote's main and the landing record
+// the engine kept.
 
 // setProjectSettings replaces the project's settings JSON: how the
 // land tests set the push gates, the default check and after_land.
@@ -84,7 +72,10 @@ func (e *testEnv) landJobID(task int64) int64 {
 // landTest drives one task through work and an approving review on the
 // land-capable runner, and returns nothing: the state the tests wait
 // for — the landing, the hold, the park — is the land job's own doing.
-func (e *testEnv) landTest(t *testing.T, remote, settings, taskSpec, taskCheck, workerScript string) (task int64, work int64) {
+// The runner is built the normal way — no git-label helper — so the
+// default that every runner offers git (§7.1) is what takes the land
+// job.
+func (e *testEnv) landTest(t *testing.T, remote, settings, taskSpec, taskCheck, workerScript string, adjust ...func(*Config)) (task int64, work int64) {
 	e.t.Helper()
 	e.seedProject(remote)
 	e.setProjectSettings(settings)
@@ -97,7 +88,8 @@ func (e *testEnv) landTest(t *testing.T, remote, settings, taskSpec, taskCheck, 
 		t.Setenv(k+"_NAME", "land test")
 		t.Setenv(k+"_EMAIL", "land@brigada.invalid")
 	}
-	e.startRunner(writeWorkerScript(t, workerScript), 100*time.Millisecond, withReviewerAgent, withGitLabel)
+	adjust = append(adjust, withReviewerAgent)
+	e.startRunner(writeWorkerScript(t, workerScript), 100*time.Millisecond, adjust...)
 	return task, work
 }
 
@@ -184,6 +176,24 @@ func TestRunnerLandJobPushes(t *testing.T) {
 		}
 	}
 	e.assertNoWorktrees()
+}
+
+// TestRunnerDefaultLabelsLeaseLandJob: a runner built the normal way —
+// the shape init and start pass when --labels names nothing, with no
+// label offered at all — still leases and completes a land job, because
+// the runner itself offers the git label the job needs (§7.1). No
+// withGitLabel helper widens its labels here.
+func TestRunnerDefaultLabelsLeaseLandJob(t *testing.T) {
+	markerDir(t)
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	task, work := e.landTest(t, remote, `{"gate_push":"auto"}`,
+		"Add work.txt with hello in it.", `test "$(cat work.txt)" = hello`,
+		reviewScript(reviewApproveResult), func(c *Config) { c.Labels = nil })
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	e.waitTaskState(task, "done")
+	e.waitLanding(task, "pushed")
 }
 
 // TestRunnerLandGateAskWaitsThenPushes: gate_push ask records the

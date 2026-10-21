@@ -48,7 +48,9 @@ type Config struct {
 	// Adapters are the adapter implementations the runner can drive;
 	// each agent's Adapter names one of them.
 	Adapters []adapter.Adapter
-	// Labels are offered on every lease poll (§8).
+	// Labels are offered on every lease poll (§8). The git label is
+	// added by defaults when absent (§7.1), so a land job — which needs
+	// no agent, only the git label — can always be leased.
 	Labels []string
 	// MaxParallel is the runner's own cap on parallel jobs (§8.1),
 	// advertised at register; 0 means unset.
@@ -125,6 +127,11 @@ func (cfg *Config) defaults() error {
 	if cfg.CheckTimeout <= 0 {
 		cfg.CheckTimeout = defaultCheckTimeout
 	}
+	// Every runner offers git (§7.1): a land job needs no agent, only
+	// the git label, and the runner's own git always drives it. The
+	// label is added rather than required, so an explicit --labels list
+	// is widened, never replaced.
+	cfg.Labels = appendLabel(cfg.Labels, "git")
 	if cfg.StallAfter == 0 {
 		cfg.StallAfter = defaultStallAfter
 	}
@@ -195,6 +202,15 @@ func mergeClassCaps(configured map[string]ClassCaps) map[string]ClassCaps {
 		out[kind] = merged
 	}
 	return out
+}
+
+// appendLabel returns labels with want appended when it is absent, so
+// the caller's list keeps its order and never doubles a label.
+func appendLabel(labels []string, want string) []string {
+	if slices.Contains(labels, want) {
+		return labels
+	}
+	return append(labels, want)
 }
 
 // harnessesOffered is the distinct set of harnesses the advertisement

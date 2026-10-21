@@ -724,11 +724,11 @@ Segments are separated by hyphens; provider prefixes and context suffixes such a
 
 Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `--agent-file` describe one agent; there `--classes` is comma-separated (`implement,review`). The two forms cannot be mixed. Other flags:
 
-- `--labels`: the labels the runner offers, comma-separated;
+- `--labels`: the labels the runner offers, comma-separated; `git` is always added when the list lacks it (see below), so a land job can always be leased;
 - `--max-parallel N`: how many concurrent jobs this runner runs; unset (`0`) means one at a time. Init now sets it from tasks at once, and `brigada start` passes the saved number;
 - `--no-start`: fail instead of starting the engine.
 
-A `land` job (see [section 5](#5-finishing-the-land-job)) carries the single label `git` and no agent: any runner that offers the `git` label — that is, whose git credentials work for the repo — may take it, wherever it runs. The landing happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker.
+A `land` job (see [section 5](#5-finishing-the-land-job)) carries the single label `git` and no agent. Every runner offers the `git` label — its own git does the landing, and the label is the promise that those git credentials work for the repo — so any runner may take it, wherever it runs. The landing happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker.
 
 `kimi`, `opencode` and `dsh` are worker-only; the foreman can be `claude` or `codex`.
 
