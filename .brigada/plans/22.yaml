@@ -85,7 +85,7 @@ tasks:
     base: "land-env-target"
     continue: "land-env-target"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-76"
     rounds: 0
   - id: 77
@@ -96,7 +96,7 @@ tasks:
     base: "land-misc"
     tier: heavy
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 78
