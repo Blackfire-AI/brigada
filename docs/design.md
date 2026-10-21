@@ -292,7 +292,7 @@ A gate is `auto` or `ask`; `push` may also be `never`, which never pushes the ta
 | `land_target` | — | the project's default branch; or a staging branch such as `brigada/landed` |
 | `after_land` | — | none: a repo-relative command the runner runs after a successful land, in the user's shell like a check (product §6); its failure is reported, never undone |
 
-A gate set to `ask` holds in the needs-you queue, and `brigada plan approve` and the coordinator's `plan_approve` keep their roles for the plan gate; `brigada land approve <task>` and `brigada push approve` release the other two, and reject cancels the landing, leaving the branch. A held task blocks nothing but its dependents' landings: work on the rest of the plan goes on. `plan_amend` that adds a task is re-checked against the plan rules.
+A gate set to `ask` holds in the needs-you queue, and `brigada plan approve` and the coordinator's `plan_approve` keep their roles for the plan gate; `brigada land approve <task>` and `brigada push approve` release the other two, and reject cancels the landing, leaving the branch. A held task blocks nothing but its dependents' landings: work on the rest of the plan goes on. A landing recorded for a held task — by its trailer on the default branch, or by its land job — clears the hold and its needs-you line. `plan_amend` that adds a task is re-checked against the plan rules.
 
 ### 6.4 The plan file in the repo
 
