@@ -358,6 +358,7 @@ The foreman is woken headless on events: a plan done, a task parked, a question.
 - `brigada budget --wakes N` (1 to 1000) sets the budget for the project, and at once wakes whatever the spent budget had parked.
 - `--repo URL` names the project; without it, the engine's only project is used.
 - A message you send with `brigada ask` goes ahead even when the budget is spent.
+- The budget limits headless wakes only. While you are attached, the needs-you entry is not shown and the chat reads waiting events with its `events` tool.
 
 The default for projects that have not set a budget comes from `foreman_wakes_per_day` in the config file ([section 13](#13-configuration-reference)).
 

@@ -162,7 +162,9 @@ func (e *Engine) SetWakeBudget(ctx context.Context, repoURL string, wakes int) (
 // message among them — a wake that carries one is not charged, so it
 // goes ahead and nothing waits on the budget. The entry disappears on
 // its own: the moment nothing waits, or the budget is raised or the day
-// resets, the query below finds no row to list.
+// resets, the query below finds no row to list. While an attach holds the
+// foreman's slot the entry is not listed at all: the budget limits
+// headless wakes only.
 func (e *Engine) statusWakeBudgetTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem, error) {
 	dayStart, dayEnd := wakeDayBounds(now)
 	query := `SELECT i.project_id, p.repo_url, COUNT(*),
@@ -218,6 +220,17 @@ func (e *Engine) statusWakeBudgetTx(tx *sql.Tx, project int64, now time.Time) ([
 			return nil, err
 		}
 		if wakes < budget {
+			continue
+		}
+		// The budget limits headless wakes only: while a live attach
+		// holds the foreman's slot, its chat reads the waiting events
+		// with `events` and nothing waits on the budget.
+		var held int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM attach_holds WHERE project_id = ? AND state = 'live' AND expires_at > ?`,
+			w.project, fmtTime(now)).Scan(&held); err != nil {
+			return nil, fmt.Errorf("read the attach holds of project %d: %w", w.project, err)
+		}
+		if held > 0 {
 			continue
 		}
 		items = append(items, NeedsYouItem{
