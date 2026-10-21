@@ -5,9 +5,9 @@
 plan: 23
 title: "Backlog after plan 22: #39 gaps, #41, #36, #40, #44, #43, #45, #34"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: pending_approval
 created: 2026-10-21T13:18:36.059521Z
-updated: 2026-10-21T15:33:25.843354Z
+updated: 2026-10-21T15:35:29.707942Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -99,8 +99,8 @@ tasks:
     name: "review-tier"
     title: "#34 Review jobs choose their tier and effort apart from the task's"
     class: "implement"
-    deps: ["port-45"]
-    base: "port-45"
+    deps: ["trailer-landed-deps"]
+    base: "trailer-landed-deps"
     tier: heavy
     effort: medium
     state: pending
@@ -127,6 +127,19 @@ tasks:
     continue: "port-39-41-36"
     tier: heavy
     effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 93
+    name: "trailer-landed-deps"
+    title: "#45 follow-up: trailer-landed tasks never get a land job; dependents released safely"
+    class: "implement"
+    deps: ["port-45"]
+    base: "port-45"
+    continue: "port-45"
+    tier: heavy
+    effort: medium
+    review_tier: heavy
     state: pending
     branch: ""
     rounds: 0
