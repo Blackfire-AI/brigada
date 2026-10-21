@@ -50,8 +50,8 @@ tasks:
     base: "fix-round-retry"
     continue: "fix-round-retry"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-85"
     rounds: 0
   - id: 86
     name: "flaky-tests"
