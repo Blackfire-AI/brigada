@@ -96,9 +96,9 @@ tasks:
     base: "land-misc"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-77"
-    rounds: 1
+    rounds: 2
   - id: 78
     name: "net-infra"
     title: "#46.B Network failures in job prep are infrastructure failures"
