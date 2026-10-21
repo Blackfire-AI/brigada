@@ -5,9 +5,9 @@
 plan: 20
 title: "Loop decision 2026-10-20: gates, rules and the land job (design §6.3, §7.1)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: pending_approval
 created: 2026-10-20T20:22:58.420145Z
-updated: 2026-10-21T05:13:20.455555Z
+updated: 2026-10-21T05:23:55.884604Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -72,15 +72,15 @@ tasks:
     deps: ["gates"]
     base: "gates"
     effort: medium
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 66
     name: "status-top"
     title: "`brigada status` and `brigada top`: held gates and land jobs"
     class: "implement"
-    deps: ["runner-land"]
-    base: "runner-land"
+    deps: ["runner-land-2"]
+    base: "runner-land-2"
     tier: light
     effort: medium
     state: pending
@@ -92,6 +92,16 @@ tasks:
     class: "implement"
     deps: ["status-top"]
     base: "status-top"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 68
+    name: "runner-land-2"
+    title: "Runner: execute the land job in a clone of the target branch, and record changed paths"
+    class: "implement"
+    deps: ["gates"]
+    base: "gates"
     effort: medium
     state: pending
     branch: ""
