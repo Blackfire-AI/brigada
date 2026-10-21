@@ -57,9 +57,9 @@ func reviewCycleLinesTx(tx *sql.Tx, job *jobRow, outcome string) ([]string, erro
 	rows, err := tx.Query(`SELECT j.result, j.error_kind, COALESCE(a.harness, j.harness), COALESCE(a.model, j.model)
 		FROM jobs j LEFT JOIN agents a ON a.id = j.agent_id
 		WHERE j.task_id = ? AND j.kind = 'review' AND j.restart = 0 AND j.id <> ?
-		AND j.error_kind NOT IN ('limit', 'auth', ?)
+		AND j.error_kind NOT IN ('limit', 'auth', ?, ?)
 		AND j.id > COALESCE((SELECT MAX(id) FROM jobs WHERE task_id = ? AND kind IN ('work', 'fix')), 0)
-		ORDER BY j.id`, job.TaskID, job.ID, ErrorKindSetup, job.TaskID)
+		ORDER BY j.id`, job.TaskID, job.ID, ErrorKindSetup, ErrorKindInfra, job.TaskID)
 	if err != nil {
 		return nil, fmt.Errorf("read the reviews of task %d: %w", job.TaskID, err)
 	}

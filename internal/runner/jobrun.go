@@ -140,8 +140,15 @@ func (r *jobRun) execute(ctx context.Context) {
 		} else {
 			// A task with no repo URL or an unbuildable worktree cannot
 			// be run by anyone; the job fails with the reason instead of
-			// bouncing between runners.
-			r.finishWithError(runCtx, err.Error())
+			// bouncing between runners. A fetch that could not be done is
+			// the other kind (issue #46): the runner's own plumbing, an
+			// infrastructure failure the engine retries, capped.
+			var infra *infraError
+			if errors.As(err, &infra) {
+				r.finishWithInfraError(runCtx, err.Error())
+			} else {
+				r.finishWithError(runCtx, err.Error())
+			}
 		}
 		abort()
 		<-beatsDone
@@ -809,6 +816,21 @@ func (r *jobRun) finishWithSetupError(ctx context.Context, msg string) {
 		Error:     msg,
 		SessionID: r.sessionIDOf(),
 		ErrorKind: engine.ErrorKindSetup,
+	})
+}
+
+// finishWithInfraError completes the job with a failure of its own
+// plumbing: a fetch of the repository's remote that could not be done
+// (issue #46 — right after a wake the network is not up for a few
+// seconds, and the host does not resolve). Sorted as infrastructure, as
+// a failed setup is (§5.7), so the engine retries the job as a
+// transient error, capped, and neither the agent nor a round is
+// charged.
+func (r *jobRun) finishWithInfraError(ctx context.Context, msg string) {
+	r.deliverError(ctx, api.Completion{
+		Error:     msg,
+		SessionID: r.sessionIDOf(),
+		ErrorKind: engine.ErrorKindInfra,
 	})
 }
 

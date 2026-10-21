@@ -61,6 +61,15 @@ const (
 // waits for the foreman like any other unusable review.
 const minSubstantiveFindings = 80
 
+// ErrorKindInfra sorts a completion's Error as an infrastructure
+// failure of the job's own plumbing (§3's transient error, the class a
+// failed setup holds, §5.7): the runner could not fetch the
+// repository's remote — the network not up yet in the seconds after a
+// wake, a host that will not resolve (issue #46) — so the engine
+// retries the job, capped, and neither the agent nor a round is
+// charged.
+const ErrorKindInfra = "infra"
+
 // taskRunningTx moves a task off ready when one of its jobs is leased
 // (§6.1): running while the work happens. A fix round's lease also takes
 // the task back out of reviewing (§3): the review asked for changes, the
@@ -137,6 +146,10 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 		switch c.ErrorKind {
 		case ErrorKindSetup:
 			if retried, err := e.retrySetupFailureTx(tx, job, c, now); err != nil || retried {
+				return err
+			}
+		case ErrorKindInfra:
+			if retried, err := e.retryInfraFailureTx(tx, job, c, now); err != nil || retried {
 				return err
 			}
 		case "limit", "auth", "other", "runner_lost":
@@ -302,6 +315,59 @@ func (e *Engine) retrySetupFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 	_, err = appendEventTx(tx, evTaskRestarted, job.ProjectID, job.TaskID, r.JobID,
 		eventPayload{Status: taskReady, Run: int64(r.Run), Reason: reason}, now)
 	return err == nil, err
+}
+
+// infraRetries is how many times an infrastructure failure — a fetch of
+// the remote that could not be done — requeues the task's work before
+// the task goes to the foreman (§3: retried like a transient error,
+// capped, as a failed setup is §5.7).
+const infraRetries = 2
+
+// retryInfraFailureTx answers an infrastructure failure of the job's
+// own plumbing (§3's transient error) as a failed setup is answered
+// (§5.7): the work job is queued again, up to infraRetries times, on
+// any eligible agent — the network or the remote failed, not the
+// agent, and no fix round or agent health is charged. A fix job, or a
+// task whose retries are spent, falls through to the foreman's park
+// with the failure as its reason.
+func (e *Engine) retryInfraFailureTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) (bool, error) {
+	if job.Kind != KindWork {
+		return false, nil
+	}
+	failed, err := infraRetryCountTx(tx, job.TaskID)
+	if err != nil {
+		return false, err
+	}
+	if failed > infraRetries {
+		return false, nil
+	}
+	// A spent restart budget cannot take the retry's submit: the task
+	// goes to the foreman instead, as for any retry that cannot be
+	// queued.
+	if _, capped, err := e.roundCapReached(tx, SubmitParams{TaskID: job.TaskID, Restart: true}); err != nil || capped {
+		return false, err
+	}
+	reason := boundNote(c.Error)
+	note := reason + "\nThe job failed before any work was judged; nothing of the previous attempt is lost or to be fixed."
+	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, now)
+	if err != nil {
+		return false, err
+	}
+	_, err = appendEventTx(tx, evTaskRestarted, job.ProjectID, job.TaskID, r.JobID,
+		eventPayload{Status: taskReady, Run: int64(r.Run), Reason: reason}, now)
+	return err == nil, err
+}
+
+// infraRetryCountTx counts the task's jobs that failed on the
+// infrastructure, by the error kind the runner set on them.
+func infraRetryCountTx(tx *sql.Tx, taskID int64) (int, error) {
+	var n int
+	err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE task_id = ? AND status = 'failed'
+		AND error_kind = ?`, taskID, ErrorKindInfra).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count the infrastructure failures of task %d: %w", taskID, err)
+	}
+	return n, nil
 }
 
 // autoRestartTaskTx spends the first restart, at most once, on a different
@@ -800,14 +866,15 @@ func (e *Engine) reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now ti
 
 // reviewerUnavailable reports whether a completion's failure means the
 // reviewer could not run at all — its account hit a limit, its login
-// failed, or its setup broke — rather than that it ran and answered
-// badly. Such a review says nothing about the change.
+// failed, its setup broke or its checkout could not be fetched —
+// rather than that it ran and answered badly. Such a review says
+// nothing about the change.
 func reviewerUnavailable(c Completion) bool {
 	if c.Error == "" {
 		return false
 	}
 	switch c.ErrorKind {
-	case "limit", "auth", ErrorKindSetup:
+	case "limit", "auth", ErrorKindSetup, ErrorKindInfra:
 		return true
 	}
 	return false
@@ -977,17 +1044,18 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 // restart round replaced, §5.6 — is the same review asked again, not
 // another reviewer's word, so it does not count. Author jobs — work or
 // fix, including restarts — begin a new cycle with a fresh first
-// review. A review whose reviewer could not run (error kind limit, auth
-// or setup) never gave an answer, so it is not counted either; the job
-// being judged is the unusable answer itself, the one the count adds.
+// review. A review whose reviewer could not run (error kind limit,
+// auth, setup or infra) never gave an answer, so it is not counted
+// either; the job being judged is the unusable answer itself, the one
+// the count adds.
 func reviewRetrySpentTx(tx *sql.Tx, job *jobRow) (bool, error) {
 	var reviews int64
 	err := tx.QueryRow(`SELECT COUNT(*) FROM jobs
 		WHERE task_id = ? AND kind = 'review' AND restart = 0
-		AND error_kind NOT IN ('limit', 'auth', ?)
+		AND error_kind NOT IN ('limit', 'auth', ?, ?)
 		AND NOT (mode = 'session' AND error_kind = ?)
 		AND id > COALESCE((SELECT MAX(id) FROM jobs WHERE task_id = ? AND kind IN ('work', 'fix')), 0)`,
-		job.TaskID, ErrorKindSetup, string(adapter.ErrResumeFailed), job.TaskID).Scan(&reviews)
+		job.TaskID, ErrorKindSetup, ErrorKindInfra, string(adapter.ErrResumeFailed), job.TaskID).Scan(&reviews)
 	if err != nil {
 		return false, fmt.Errorf("count the reviews of task %d: %w", job.TaskID, err)
 	}

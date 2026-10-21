@@ -278,8 +278,10 @@ type completeRequest struct {
 	Outcome     string `json:"outcome,omitempty"`
 	CheckResult string `json:"check_result"`
 	SessionID   string `json:"session_id"`
-	// ErrorKind and LimitUntil ride with an error: the CLI failure's kind
-	// and, for a limit, its reset time (§4.4).
+	// ErrorKind and LimitUntil ride with an error: the failure's kind —
+	// the CLI's own, or the job's infrastructure (a failed setup §5.7,
+	// a fetch that could not be done §5.1) — and, for a limit, its
+	// reset time (§4.4).
 	ErrorKind  string `json:"error_kind,omitempty"`
 	LimitUntil string `json:"limit_until,omitempty"`
 }

@@ -230,6 +230,19 @@ func prepareReviewWorkspace(ctx context.Context, cfg *Config, grant *api.JobGran
 	return w, nil
 }
 
+// infraError marks a failure of the job's own plumbing: a fetch or
+// clone of the repository's remote that could not be done — the
+// network not up yet in the seconds after a wake (issue #46: `Could
+// not resolve host`), a remote that will not answer. The job completes
+// with it as an infrastructure error, engine.ErrorKindInfra, the class
+// a failed setup completes under (§5.7): the engine retries the job,
+// capped, and the task is never parked on it while retries remain.
+type infraError struct{ err error }
+
+func (e *infraError) Error() string { return e.err.Error() }
+
+func (e *infraError) Unwrap() error { return e.err }
+
 // materializeMirror clones or fetches the repo's cached mirror (§5.1)
 // and pins its fallback identity, fetching baseRef by name when it
 // lives in the runners' own brigada/ namespace.
@@ -243,7 +256,7 @@ func (w *workspace) materializeMirror(ctx context.Context, baseRef string) error
 		// negative refspec keeps them out of pruning too.
 		if out, err := w.git(ctx, "--git-dir", w.mirror, "fetch", "--prune", "origin",
 			"+refs/heads/*:refs/heads/*", "^refs/heads/brigada/*"); err != nil {
-			return fmt.Errorf("fetch the mirror of %s: %w", redactURL(w.repoURL), trimCmdError(out, err))
+			return &infraError{fmt.Errorf("fetch the mirror of %s: %w", redactURL(w.repoURL), trimCmdError(out, err))}
 		}
 		// A follow-up job may build on an earlier attempt's result
 		// branch (§5.3: feedback rounds resume the work). The fetch
@@ -266,7 +279,7 @@ func (w *workspace) materializeMirror(ctx context.Context, baseRef string) error
 			// A clone cut short (the job's lease lost, the runner stopping)
 			// must not leave a half mirror the next job would fetch into.
 			_ = os.RemoveAll(w.mirror)
-			return fmt.Errorf("clone %s: %w", redactURL(w.repoURL), trimCmdError(out, err))
+			return &infraError{fmt.Errorf("clone %s: %w", redactURL(w.repoURL), trimCmdError(out, err))}
 		}
 	}
 	// A fallback identity and no signing, so a fresh worktree can commit
@@ -301,7 +314,7 @@ var fallbackIdentity = [2][2]string{
 func (w *workspace) fetchBranch(ctx context.Context, branch string) error {
 	if out, err := w.git(ctx, "--git-dir", w.mirror, "fetch", "origin",
 		"+refs/heads/"+branch+":refs/heads/"+branch); err != nil {
-		return fmt.Errorf("fetch the branch %s from %s: %w", branch, redactURL(w.repoURL), trimCmdError(out, err))
+		return &infraError{fmt.Errorf("fetch the branch %s from %s: %w", branch, redactURL(w.repoURL), trimCmdError(out, err))}
 	}
 	return nil
 }

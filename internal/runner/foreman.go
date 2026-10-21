@@ -36,7 +36,15 @@ func (r *jobRun) runForemanTurn(ctx context.Context) {
 	}
 	checkout, err := PrepareForemanCheckout(ctx, dir, r.grant.RepoURL, r.grant.BaseRef, r.cfg.GitEnv)
 	if err != nil {
-		r.finishWithError(ctx, "prepare the foreman checkout: "+err.Error())
+		// A fetch that could not be done is the turn's own plumbing
+		// (issue #46): an infrastructure failure the engine keeps for
+		// the record, while the next wake tries the checkout again.
+		var infra *infraError
+		if errors.As(err, &infra) {
+			r.finishWithInfraError(ctx, "prepare the foreman checkout: "+err.Error())
+		} else {
+			r.finishWithError(ctx, "prepare the foreman checkout: "+err.Error())
+		}
 		return
 	}
 	r.grant.Prompt = foreman.WithCheckout(r.grant.Prompt, checkout)

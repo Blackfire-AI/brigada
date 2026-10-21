@@ -44,7 +44,7 @@ func PrepareForemanCheckout(ctx context.Context, scratch, repoURL, branch string
 		}
 		defer os.RemoveAll(tmp)
 		if _, err := git("clone", "--no-checkout", "--", repoURL, tmp); err != nil {
-			return foreman.Checkout{}, fmt.Errorf("clone %s: %w", redactURL(repoURL), err)
+			return foreman.Checkout{}, &infraError{fmt.Errorf("clone %s: %w", redactURL(repoURL), err)}
 		}
 		if err := os.Rename(tmp, dir); err != nil {
 			return foreman.Checkout{}, err
@@ -64,7 +64,7 @@ func PrepareForemanCheckout(ctx context.Context, scratch, repoURL, branch string
 	}
 	remoteRef := "refs/remotes/origin/" + branch
 	if _, err := git("-C", dir, "fetch", "--no-tags", "--prune", "origin", "+refs/heads/"+branch+":"+remoteRef); err != nil {
-		return foreman.Checkout{}, fmt.Errorf("fetch %s branch %s: %w", redactURL(repoURL), branch, err)
+		return foreman.Checkout{}, &infraError{fmt.Errorf("fetch %s branch %s: %w", redactURL(repoURL), branch, err)}
 	}
 	if _, err := git("-C", dir, "checkout", "--force", "-B", branch, remoteRef, "--"); err != nil {
 		return foreman.Checkout{}, fmt.Errorf("reset the foreman checkout to %s: %w", branch, err)
