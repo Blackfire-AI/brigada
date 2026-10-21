@@ -91,3 +91,23 @@ func TestRenderEffortBump(t *testing.T) {
 		t.Errorf("summary = %q", got)
 	}
 }
+
+// TestRenderLanding: the landing events show the record — the target
+// branch, the resulting commit, the push state the gate made, the exact
+// push command of gate_push never, and an after_land failure reported
+// and never undone (§6.3, §7.1).
+func TestRenderLanding(t *testing.T) {
+	landed := Item{Type: TypeEvent, Kind: "task_landed", Payload: []byte(`{"status":"done","branch":"main","commit":"9f21ab3","pushed":"local",` +
+		`"push_cmd":"git fetch origin refs/brigada/land/main && git push origin FETCH_HEAD:refs/heads/main",` +
+		`"after_land_error":"exit 3: after-land boom"}`)}
+	want := "branch=main status=done commit=9f21ab3 pushed=local" +
+		" push_cmd=git fetch origin refs/brigada/land/main && git push origin FETCH_HEAD:refs/heads/main" +
+		" after_land_error=exit 3: after-land boom"
+	if got := summary(landed); got != want {
+		t.Errorf("task_landed summary = %q, want %q", got, want)
+	}
+	pushed := Item{Type: TypeEvent, Kind: "task_pushed", Payload: []byte(`{"status":"done","branch":"main","commit":"9f21ab3","pushed":"pushed"}`)}
+	if got := summary(pushed); got != "branch=main status=done commit=9f21ab3 pushed=pushed" {
+		t.Errorf("task_pushed summary = %q", got)
+	}
+}

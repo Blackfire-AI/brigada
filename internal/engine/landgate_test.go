@@ -150,7 +150,8 @@ func TestPushGateAskWaitsThenApproves(t *testing.T) {
 }
 
 // TestPushGateNeverRecordsThePushCmd: gate_push never records the landing
-// as local with the exact push command, and queues no push job.
+// as local with the exact push command, queues no push job, and lists
+// the command in the needs-you queue: the push is the user's.
 func TestPushGateNeverRecordsThePushCmd(t *testing.T) {
 	e := newEnv(t)
 	e.set(map[string]string{SettingGatePush: GateNever})
@@ -165,20 +166,25 @@ func TestPushGateNeverRecordsThePushCmd(t *testing.T) {
 	if g.GatePush != GateNever {
 		t.Errorf("land grant gate_push = %q, want never", g.GatePush)
 	}
-	if ans := e.complete(g, Completion{Result: `{"target_branch":"main","commit":"abc123","check_passed":true,"pushed":"local","push_cmd":"git push origin main"}`}); ans != AnsOK {
+	cmd := "git fetch origin refs/brigada/land/main && git push origin FETCH_HEAD:refs/heads/main"
+	if ans := e.complete(g, Completion{Result: `{"target_branch":"main","commit":"abc123","check_passed":true,"pushed":"local","push_cmd":"` + cmd + `"}`}); ans != AnsOK {
 		t.Fatalf("complete the land job: %s", ans)
 	}
 	if pushed := e.str("SELECT pushed FROM landings WHERE task_id = ?", e.task); pushed != "local" {
 		t.Errorf("landing pushed = %q, want local", pushed)
 	}
-	if cmd := e.str("SELECT push_cmd FROM landings WHERE task_id = ?", e.task); cmd != "git push origin main" {
-		t.Errorf("landing push_cmd = %q, want the exact push command", cmd)
+	if got := e.str("SELECT push_cmd FROM landings WHERE task_id = ?", e.task); got != cmd {
+		t.Errorf("landing push_cmd = %q, want the exact push command", got)
 	}
 	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'", e.task); n != 1 {
 		t.Errorf("land jobs = %d, want only the squash job (no push)", n)
 	}
-	if p, ok := e.eventPayloadOf(evTaskLanded); !ok || p.Pushed != "local" || p.PushCmd != "git push origin main" {
+	if p, ok := e.eventPayloadOf(evTaskLanded); !ok || p.Pushed != "local" || p.PushCmd != cmd {
 		t.Errorf("task_landed event = %+v (%t), want local with the push command", p, ok)
+	}
+	it, ok := e.needsYouTask(e.task)
+	if !ok || !strings.Contains(it.Reason, "push by hand: "+cmd) {
+		t.Fatalf("needs-you entry = %+v (%t), want the exact push command", it, ok)
 	}
 }
 

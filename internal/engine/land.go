@@ -921,3 +921,38 @@ func statusPushWaitsTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
 	}
 	return items, rows.Err()
 }
+
+// statusLocalLandsTx is the needs-you entries of the landings gate_push
+// never recorded as local (§6.3, §10): the push is the user's alone, so
+// the entry carries the exact recorded command — fetch the durable ref,
+// push it to the target — for the user to run by hand. The task stays
+// done; nothing of brigada's waits.
+func statusLocalLandsTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
+	query := `SELECT l.task_id, t.title, t.plan_id, t.state, l.push_cmd
+		FROM landings l JOIN tasks t ON t.id = l.task_id JOIN plans p ON p.id = t.plan_id
+		WHERE l.pushed = 'local' AND l.push_cmd != '' AND p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
+	args := []any{}
+	if project != 0 {
+		query += " AND p.project_id = ?"
+		args = append(args, project)
+	}
+	query += " ORDER BY l.task_id"
+	rows, err := tx.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list the local landings: %w", err)
+	}
+	defer rows.Close()
+	var items []NeedsYouItem
+	for rows.Next() {
+		var it NeedsYouItem
+		var state, cmd string
+		if err := rows.Scan(&it.ID, &it.Title, &it.PlanID, &state, &cmd); err != nil {
+			return nil, fmt.Errorf("list the local landings: %w", err)
+		}
+		it.Kind = "task"
+		it.State = state
+		it.Reason = "push by hand: " + cmd
+		items = append(items, it)
+	}
+	return items, rows.Err()
+}

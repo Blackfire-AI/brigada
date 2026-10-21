@@ -14,6 +14,9 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/logo"
 )
 
+// Tests can exercise the real authenticated API handler without a listener.
+var connectClient = connect
+
 // runStatus is the client's status (§13, §10): the engine — which
 // process, up how long — the jobs by status, then the plans with their
 // tasks and the "needs you" queue, plain text, one line each, the
@@ -42,7 +45,7 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if code != 0 {
 		return code
 	}
-	client, code := connect(ctx, rt, "client", *noStart, stderr)
+	client, code := connectClient(ctx, rt, "client", *noStart, stderr)
 	if code != 0 {
 		return code
 	}
@@ -234,7 +237,7 @@ func runHistory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if code != 0 {
 		return code
 	}
-	client, code := connect(ctx, rt, "client", noStart, stderr)
+	client, code := connectClient(ctx, rt, "client", noStart, stderr)
 	if code != 0 {
 		return code
 	}

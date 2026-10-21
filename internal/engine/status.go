@@ -642,6 +642,15 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	}
 	items = append(items, pushWaits...)
 
+	// A landing gate_push never recorded as local stays done too; its
+	// push is the user's alone, so the queue carries the exact command
+	// (§6.3).
+	localLands, err := statusLocalLandsTx(tx, project)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, localLands...)
+
 	pquery := `SELECT p.id, p.title, p.version, pr.repo_url FROM plans p JOIN projects pr ON pr.id = p.project_id
 		WHERE pr.archived_at IS NULL AND p.state = 'pending_approval'`
 	pargs := []any{}
