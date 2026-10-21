@@ -48,6 +48,6 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-110-r2"
     rounds: 1
