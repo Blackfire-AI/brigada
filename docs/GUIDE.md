@@ -411,7 +411,7 @@ A task moves through these states, as `brigada status` shows them next to the ta
 2. `ready`: queued for an agent. A task can also wait here because every cap that applies is full ([section 8](#8-agents-quota-and-health)); it starts when a slot frees.
 3. `running`: a worker has the job. The runner's check also happens while the task is `running`; there is no separate `checking` state in the output.
 4. `reviewing`: for `implement` tasks whose check passed, a reviewer of another family reads the change ([section 7](#7-plans-checks-and-reviews)). A review that asks for changes sends the task back to `running` for a fix round.
-5. `done`.
+5. `done`. A `done` task whose landing is recorded — by the land job, or by a `Brigada-Task: <id>` trailer detected on the default branch ([section 5](#5-finishing-the-land-job)) — is shown as `landed` beside its state, so you can tell it from an approved task that has not merged yet.
 
 Off this path are `needs_foreman` and `needs_user` (parked, see the queue above), `failed`, and `cancelled`.
 
@@ -430,6 +430,8 @@ Job ids are not task ids. `status` shows a running job as `task #N …`; find it
 Landing is brigada's. When a task is `done` and approved (an `approve` verdict on its last review) and every dependency of class `implement` has landed, the engine queues a **land job** for it. A runner with git for your repo — no worker, no model — squashes the task's own diff onto the target branch as one commit, reruns the project's default check on the result, and then pushes by the push gate. The commit message is built from the task's title, spec and the worker's summary, with `Brigada-Task`, `Brigada-Branch` and `Co-Authored-By` trailers.
 
 Landing is per task, not per plan: a stack lands in dependency order as its tasks finish, and the target moves with the plan. It happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker ([section 8](#8-agents-quota-and-health)). Where approved work lands is `land_target` ([section 6](#6-configuring-a-project)): the project's default branch, or a staging branch such as `brigada/landed`.
+
+Whether you land by hand or the land job does it, the engine learns the task landed: whenever the runner refreshes the project's default branch — a headless foreman turn, or `brigada attach` — it scans the branch for `Brigada-Task: <id>` trailers and records each task it finds as landed with its commit. So `brigada status` and the foreman show `landed` for a task you merged by hand, and a plan whose tasks all landed says so in its done report — the foreman no longer mistakes "already merged" for "waiting to merge".
 
 ### Gates and holds
 

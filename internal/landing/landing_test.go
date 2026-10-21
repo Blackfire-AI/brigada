@@ -286,3 +286,48 @@ func TestMessageBoundsAndFamilies(t *testing.T) {
 		t.Errorf("the trailer names the model alone:\n%s", msg)
 	}
 }
+
+// TestLandedCommits: a branch's history maps each task id a commit
+// carries as a Brigada-Task trailer to that commit's full sha — the
+// engine's way to recognize tasks landed outside the land job.
+func TestLandedCommits(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "a.txt", "a\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "task seven\n\nBrigada-Task: 7")
+	seven := head(t, dir)
+	write(t, dir, "b.txt", "b\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "task nine\n\nBrigada-Task: 9")
+	nine := head(t, dir)
+	write(t, dir, "c.txt", "c\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "no trailer")
+
+	got, err := LandedCommits(context.Background(), dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[7] != seven {
+		t.Errorf("task 7 = %q, want %q", got[7], seven)
+	}
+	if got[9] != nine {
+		t.Errorf("task 9 = %q, want %q", got[9], nine)
+	}
+	if len(got) != 2 {
+		t.Errorf("LandedCommits = %v, want exactly tasks 7 and 9", got)
+	}
+}
+
+// TestLandedCommitsNoHistory: a ref with no commits maps nothing.
+func TestLandedCommitsNoHistory(t *testing.T) {
+	dir := t.TempDir()
+	git(t, dir, "init", "-q", ".")
+	got, err := LandedCommits(context.Background(), dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("LandedCommits on an unborn branch = %v, want none", got)
+	}
+}

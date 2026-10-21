@@ -199,6 +199,19 @@ func (c *Client) Release(ctx context.Context, jobID int64, leaseID, reason strin
 	return c.answer(ctx, "/v1/runner/release", req)
 }
 
+// RecordLanded reports landings detected from the project's default
+// branch (§7.1): each entry names a task whose Brigada-Task trailer sits
+// on a commit of branch, landed outside the land job. The engine records
+// the ones that belong to repoURL's project and have no landing yet.
+func (c *Client) RecordLanded(ctx context.Context, repoURL, branch string, landed []engine.LandedCommit) error {
+	body := struct {
+		RepoURL string                `json:"repo_url"`
+		Branch  string                `json:"branch"`
+		Landed  []engine.LandedCommit `json:"landed"`
+	}{repoURL, branch, landed}
+	return c.call(ctx, http.MethodPost, "/v1/landed", body, nil)
+}
+
 // DueProbes lists the runner's due broken-agent probes (§8 "Health"):
 // the failure-broken agents whose next probe is due, for the runner to
 // probe and report.

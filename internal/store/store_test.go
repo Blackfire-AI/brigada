@@ -1038,6 +1038,29 @@ func TestLandJobMigration(t *testing.T) {
 	}
 }
 
+// TestLandingSourceMigration pins what 0056_landing_source added (§7.1):
+// a landing record names how it was made — 'job' by default, 'trailer'
+// for one detected from the default branch — and no other word.
+func TestLandingSourceMigration(t *testing.T) {
+	f := newFixture(t)
+	exec(t, f.db, `INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, created_at)
+		VALUES (?, ?, 'main', 'abc123', 'pushed', ?)`, f.task, f.project, ts)
+	if got := queryString(t, f.db, "SELECT source FROM landings WHERE task_id = ?", f.task); got != "job" {
+		t.Errorf("default source = %q, want job", got)
+	}
+	exec(t, f.db, `DELETE FROM landings WHERE task_id = ?`, f.task)
+	exec(t, f.db, `INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, source, created_at)
+		VALUES (?, ?, 'main', 'abc123', 'pushed', 'trailer', ?)`, f.task, f.project, ts)
+	if got := queryString(t, f.db, "SELECT source FROM landings WHERE task_id = ?", f.task); got != "trailer" {
+		t.Errorf("trailer source = %q, want trailer", got)
+	}
+	exec(t, f.db, `DELETE FROM landings WHERE task_id = ?`, f.task)
+	if _, err := f.db.Exec(`INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, source, created_at)
+		VALUES (?, ?, 'main', 'def456', 'pushed', 'bogus', ?)`, f.task, f.project, ts); err == nil || !strings.Contains(err.Error(), "CHECK") {
+		t.Errorf("landing with a bogus source: err = %v; want a CHECK failure", err)
+	}
+}
+
 func TestTaskTierEffortMigrationKeepsTheRows(t *testing.T) {
 	migs, err := allMigrations()
 	if err != nil {

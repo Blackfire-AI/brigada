@@ -63,6 +63,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/runner/artifacts", s.authed([]string{roleRunner}, s.withRunner(s.handleArtifactUpload)))
 	mux.HandleFunc("/v1/runner/probes", s.authed([]string{roleRunner}, s.withRunner(s.handleProbes)))
 	mux.HandleFunc("/v1/runner/probes/report", s.authed([]string{roleRunner}, s.withRunner(s.handleProbeReport)))
+	// Landings detected from the default branch's trailers (§7.1): the
+	// runner's headless foreman turn and the client's attach both refresh
+	// the checkout and report here, so the runner and client roles share
+	// it; the foreman runs no git (product §5 rule 1).
+	mux.HandleFunc("/v1/landed", s.authed([]string{roleRunner, roleClient, roleAdmin}, s.handleLanded))
 	mux.HandleFunc("/v1/history", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleHistory))
 	mux.HandleFunc("/v1/artifacts/{id}", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleArtifactGet))
 	mux.HandleFunc("/v1/jobs", s.authed([]string{roleAdmin}, s.idempotent(s.handleSubmit)))

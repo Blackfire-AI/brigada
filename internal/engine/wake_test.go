@@ -306,7 +306,7 @@ func TestPlanDoneWakesTheForeman(t *testing.T) {
 		t.Errorf("inbox after plan_done = %v, want the plan_done row delivered", e.inboxStates())
 	}
 	// The landing ran before the plan closed, so the report names it.
-	want := "<event>\n" + e.wakeLine(evPlanDone, "the plan is done; landed: task 1 (main@abc123)") + "\n</event>"
+	want := "<event>\n" + e.wakeLine(evPlanDone, "the plan is done; all tasks landed") + "\n</event>"
 	if prompt := e.str("SELECT prompt FROM jobs WHERE id = ?", job); !strings.Contains(prompt, want) {
 		t.Errorf("wake prompt = %q, want it to carry the plan_done event verbatim:\n%s", prompt, want)
 	}

@@ -829,11 +829,13 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 	if err := recordPlanOutcomeTx(tx, project, len(failed) == 0 && len(waiting) == 0, now); err != nil {
 		return false, err
 	}
-	// What landed, and what waits at a gate (§7.1): a done task with a
-	// landing record landed — or waits at the push gate when its landing
-	// is recorded waiting — and a land_holds row holds one at the land
-	// gate. The done report names both, beside what failed and never ran.
-	var landed, gated []string
+	// What landed, and what waits (§7.1): a done task with a landing
+	// record landed — or waits at the push gate when its landing is
+	// recorded waiting — and a land_holds row holds one at the land gate.
+	// A done, approved task with neither is not yet landed; a class that
+	// never lands is not named. The done report names all of it, beside
+	// what failed and never ran.
+	var landed, gated, notLanded []string
 	for _, n := range nodes {
 		if n.state != taskDone {
 			continue
@@ -852,22 +854,42 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 		err := tx.QueryRow(`SELECT reason FROM land_holds WHERE task_id = ? AND state = 'held'`, n.id).Scan(&reason)
 		if err == nil {
 			gated = append(gated, fmt.Sprintf("%s (%s)", n.label(), reason))
+			continue
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return false, fmt.Errorf("read the land hold of task %d: %w", n.id, err)
 		}
+		// Done with no record and no hold: only a landable task that is
+		// approved is "not yet landed" — another class never lands.
+		if n.class != classImplement {
+			continue
+		}
+		approved, err := taskApprovedTx(tx, n.id)
+		if err != nil {
+			return false, err
+		}
+		if approved {
+			notLanded = append(notLanded, n.label())
+		}
 	}
 	var report []string
-	if len(landed) > 0 {
-		report = append(report, "landed: "+strings.Join(landed, ", "))
-	}
-	if len(gated) > 0 {
-		report = append(report, "waits at a gate: "+strings.Join(gated, "; "))
-	}
-	if len(failed) > 0 {
-		report = append(report, "failed: "+strings.Join(failed, ", "))
-	}
-	if len(waiting) > 0 {
-		report = append(report, "never ran: "+strings.Join(waiting, "; "))
+	if len(failed) == 0 && len(waiting) == 0 && len(gated) == 0 && len(notLanded) == 0 && len(landed) > 0 {
+		report = append(report, "all tasks landed")
+	} else {
+		if len(landed) > 0 {
+			report = append(report, "landed: "+strings.Join(landed, ", "))
+		}
+		if len(notLanded) > 0 {
+			report = append(report, "not yet landed: "+strings.Join(notLanded, ", "))
+		}
+		if len(gated) > 0 {
+			report = append(report, "waits at a gate: "+strings.Join(gated, "; "))
+		}
+		if len(failed) > 0 {
+			report = append(report, "failed: "+strings.Join(failed, ", "))
+		}
+		if len(waiting) > 0 {
+			report = append(report, "never ran: "+strings.Join(waiting, "; "))
+		}
 	}
 	if err := inboxEventTx(tx, evPlanDone, project, task, job,
 		eventPayload{Status: planDone, Plan: plan, Reason: strings.Join(report, "; ")}, now); err != nil {
