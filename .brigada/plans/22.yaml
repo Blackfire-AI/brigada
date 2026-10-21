@@ -63,7 +63,7 @@ tasks:
     base: "land-lost-close"
     continue: "land-lost-close"
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-74"
     rounds: 1
   - id: 75
