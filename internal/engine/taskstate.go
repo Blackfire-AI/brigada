@@ -308,7 +308,7 @@ func (e *Engine) retrySetupFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 	}
 	reason := boundNote(c.Error)
 	note := reason + "\nThe environment failed before any work was judged; nothing of the previous attempt is lost or to be fixed."
-	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, now)
+	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, now.Add(retryDelayFor(failed)), now)
 	if err != nil {
 		return false, err
 	}
@@ -322,6 +322,28 @@ func (e *Engine) retrySetupFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 // the task goes to the foreman (§3: retried like a transient error,
 // capped, as a failed setup is §5.7).
 const infraRetries = 2
+
+// retryDelays is the growing pause a retried job must wait out before it
+// may be leased again, indexed by the consecutive failure (1 = first):
+// a network that is not up in the seconds after a wake needs time to
+// come back, and a longer outage must not be hammered every second
+// (issue #46). The sequence tops out at a couple of minutes, long enough
+// to cover a wake.
+var retryDelays = []time.Duration{5 * time.Second, 15 * time.Second, 45 * time.Second, 2 * time.Minute}
+
+// retryDelayFor is the pause before the consecutive-th retry: 5s after
+// the first failure, then 15s, 45s and 2m, capped at 2m. A count of zero
+// or less — no failure yet — is no pause.
+func retryDelayFor(consecutive int) time.Duration {
+	if consecutive <= 0 {
+		return 0
+	}
+	i := consecutive - 1
+	if i >= len(retryDelays) {
+		i = len(retryDelays) - 1
+	}
+	return retryDelays[i]
+}
 
 // retryInfraFailureTx answers an infrastructure failure of the job's
 // own plumbing (§3's transient error) as a failed setup is answered
@@ -349,7 +371,7 @@ func (e *Engine) retryInfraFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 	}
 	reason := boundNote(c.Error)
 	note := reason + "\nThe job failed before any work was judged; nothing of the previous attempt is lost or to be fixed."
-	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, now)
+	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, now.Add(retryDelayFor(failed)), now)
 	if err != nil {
 		return false, err
 	}
@@ -414,7 +436,7 @@ func (e *Engine) autoRestartTaskTx(tx *sql.Tx, job *jobRow, kind, text string, n
 	if lastEvent != "" {
 		note += "\nLast progress: " + boundNote(lastEvent)
 	}
-	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, agent, now)
+	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, agent, time.Time{}, now)
 	if err != nil {
 		return false, err
 	}
@@ -494,7 +516,7 @@ func (e *Engine) escalateTierTx(tx *sql.Tx, job *jobRow, reason, note string, ra
 		}
 	}
 	note = boundNote(fmt.Sprintf("previous attempt (tier %s, effort %s) %s: %s", before, shownEffort, reason, note))
-	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, now)
+	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, time.Time{}, now)
 	if err != nil {
 		return false, err
 	}

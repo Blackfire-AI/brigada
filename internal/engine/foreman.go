@@ -23,7 +23,7 @@ func (e *Engine) SubmitForemanTurn(ctx context.Context, project int64, events []
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
-		r, err := e.submitForemanTurnTx(tx, project, ForemanInbox{Events: events}, now)
+		r, err := e.submitForemanTurnTx(tx, project, ForemanInbox{Events: events}, time.Time{}, now)
 		if err != nil {
 			return fmt.Errorf("submit foreman turn for project %d: %w", project, err)
 		}
@@ -33,7 +33,7 @@ func (e *Engine) SubmitForemanTurn(ctx context.Context, project int64, events []
 	return res, err
 }
 
-func (e *Engine) submitForemanTurnTx(tx *sql.Tx, project int64, inbox ForemanInbox, now time.Time) (SubmitResult, error) {
+func (e *Engine) submitForemanTurnTx(tx *sql.Tx, project int64, inbox ForemanInbox, notBefore time.Time, now time.Time) (SubmitResult, error) {
 	if err := activeProjectTx(tx, project); err != nil {
 		return SubmitResult{}, err
 	}
@@ -72,5 +72,6 @@ func (e *Engine) submitForemanTurnTx(tx *sql.Tx, project int64, inbox ForemanInb
 		Prompt:    prompt,
 		Harness:   harness,
 		Model:     model,
+		NotBefore: notBefore,
 	}, now)
 }

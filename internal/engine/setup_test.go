@@ -162,6 +162,8 @@ func TestSetupFailureIsRetriedAsInfrastructure(t *testing.T) {
 		if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskReady {
 			t.Fatalf("after setup failure %d: task state = %s, want ready (retried)", i, state)
 		}
+		// The retry waits out the growing delay before it may be leased.
+		e.clock.Advance(retryDelayFor(i))
 	}
 	if n := e.countEvents(evTaskFailed); n != 0 {
 		t.Errorf("task_failed events = %d, want none while retries remain", n)

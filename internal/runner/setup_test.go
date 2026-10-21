@@ -170,7 +170,8 @@ func TestRunnerSetupCacheNeverSharedAcrossRepositories(t *testing.T) {
 
 func TestRunnerFailedSetupIsAnInfrastructureFailure(t *testing.T) {
 	remote := newRemote(t)
-	e := newTestEnv(t, engine.Config{})
+	clk := newManualClock()
+	e := newTestEnv(t, engine.Config{Now: clk.Now})
 	e.seedProject(remote)
 	task := e.seedTask("", `echo check >> "$BRIGADA_TEST_MARKERS/order.log"`)
 	e.setTaskSetup(task, engine.SetupSpec{Command: "echo setup-boom; exit 7", TimeoutMinutes: 5})
@@ -201,14 +202,21 @@ func TestRunnerFailedSetupIsAnInfrastructureFailure(t *testing.T) {
 
 	// Not a failed check, not a worker failure: the task is retried like
 	// a transient error, capped, and then parked for the foreman; the
-	// agent is not charged with any of it.
-	e.waitUntil("the task to park after its retries", func() bool {
-		var state string
-		e.st.View(e.ctx, func(tx *sql.Tx) error {
-			return tx.QueryRow("SELECT state FROM tasks WHERE id = ?", task).Scan(&state)
-		})
-		return state == "needs_foreman"
-	})
+	// agent is not charged with any of it. The retries wait a growing
+	// engine-clock delay (§3, issue #46): step the clock forward so the
+	// two retries become leasable without sleeping the test for the real
+	// 5s + 15s.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if e.strOf("SELECT state FROM tasks WHERE id = ?", task) == "needs_foreman" {
+			break
+		}
+		clk.Advance(5 * time.Second)
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the task to park after its retries")
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
 	if n := e.int64Of("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND status = 'failed'", task); n != 3 {
 		t.Errorf("failed jobs = %d, want the first run and two retries", n)
 	}

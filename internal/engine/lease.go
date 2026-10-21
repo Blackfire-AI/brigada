@@ -194,7 +194,11 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(`SELECT ` + jobColumns + ` FROM jobs WHERE status = 'queued' ORDER BY id`)
+	// A job queued for later (§3, §4.2) is invisible to leasing until its
+	// not-before time arrives; the sweep's TTL and the wake's live-job
+	// check still see it queued, so it keeps its place in line.
+	rows, err := tx.Query(`SELECT `+jobColumns+` FROM jobs
+		WHERE status = 'queued' AND (not_before IS NULL OR not_before <= ?) ORDER BY id`, fmtTime(now))
 	if err != nil {
 		return nil, fmt.Errorf("list queued jobs: %w", err)
 	}

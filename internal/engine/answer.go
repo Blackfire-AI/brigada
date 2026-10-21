@@ -188,7 +188,7 @@ func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note string, n
 		return RestartResult{}, fmt.Errorf(
 			"the task's restart budget is spent; the task stays parked at needs_foreman")
 	}
-	r, err := e.queueTaskRestartTx(tx, project, taskID, note, 0, now)
+	r, err := e.queueTaskRestartTx(tx, project, taskID, note, 0, time.Time{}, now)
 	if err != nil {
 		return RestartResult{}, err
 	}
@@ -202,7 +202,9 @@ func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note string, n
 // queueTaskRestartTx is shared by the foreman's restart and the automatic
 // retry (§3, §5.6). The caller checks the budget and records the decision;
 // an automatic retry pins the new attempt to a different eligible agent.
-func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note string, agent int64, now time.Time) (RestartResult, error) {
+// notBefore, when non-zero, holds the new job out of leasing until then
+// (§3: a retry's growing delay).
+func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note string, agent int64, notBefore time.Time, now time.Time) (RestartResult, error) {
 	spec, err := taskSpecTx(tx, taskID)
 	if err != nil {
 		return RestartResult{}, err
@@ -225,6 +227,7 @@ func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note stri
 		Prompt:       prompt.ComposeWorkerPrompt(spec, check, note, prompt.WithInstructions(instructions)),
 		Restart:      true,
 		RequireAgent: agent,
+		NotBefore:    notBefore,
 	}, now)
 	if err != nil {
 		return RestartResult{}, err

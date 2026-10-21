@@ -31,6 +31,8 @@ func TestInfraFailureIsRetriedAsInfrastructure(t *testing.T) {
 		if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskReady {
 			t.Fatalf("after infrastructure failure %d: task state = %s, want ready (retried)", i, state)
 		}
+		// The retry waits out the growing delay before it may be leased.
+		e.clock.Advance(retryDelayFor(i))
 	}
 	if n := e.countEvents(evTaskFailed); n != 0 {
 		t.Errorf("task_failed events = %d, want none while retries remain", n)
@@ -80,6 +82,8 @@ func TestForemanInfraPrepFailuresDoNotBreakTheAgent(t *testing.T) {
 		if h := e.str("SELECT health FROM agents WHERE id = ?", agent); h != "ready" {
 			t.Fatalf("foreman agent after %d infra prep failure(s): health = %s, want ready", i+1, h)
 		}
+		// The re-wake waits out the growing delay before the next lease.
+		e.clock.Advance(retryDelayFor(i + 1))
 	}
 	if n := e.countEvents(evAgentBroken); n != 0 {
 		t.Errorf("agent_broken events = %d, want none", n)
@@ -88,6 +92,118 @@ func TestForemanInfraPrepFailuresDoNotBreakTheAgent(t *testing.T) {
 	// next attempt, not wedged behind a broken agent.
 	if n := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'foreman' AND status = 'queued'"); n != 1 {
 		t.Errorf("queued foreman turns after two infra prep failures = %d, want 1", n)
+	}
+}
+
+// TestInfraFailureRetryWaitsForTheDelay pins issue #46's fix D: the
+// retry the classification (§8) queues is not leasable at once — the
+// network is not up in the second after the failure — but only once the
+// first growing delay has passed.
+func TestInfraFailureRetryWaitsForTheDelay(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "fam", "implement")
+	e.submit(e.work())
+	g := e.leaseAny(author)
+	if g == nil {
+		t.Fatal("nothing to lease")
+	}
+	if ans := e.complete(g, Completion{
+		Error:     "fetch the mirror of https://github.com/org/repo.git: exit status 128: fatal: unable to access 'https://github.com/org/repo.git/': Could not resolve host: github.com",
+		ErrorKind: ErrorKindInfra,
+	}); ans != AnsOK {
+		t.Fatalf("complete = %s", ans)
+	}
+	// The retry is queued for now + 5s, and a lease before then is empty.
+	if nb := e.str("SELECT not_before FROM jobs WHERE task_id = ? AND restart = 1", e.task); nb != fmtTime(e.clock.Now().Add(retryDelayFor(1))) {
+		t.Errorf("retry not_before = %s, want %s (now + 5s)", nb, fmtTime(e.clock.Now().Add(retryDelayFor(1))))
+	}
+	if g := e.leaseAny(author); g != nil {
+		t.Fatalf("leased %+v before the retry delay elapsed, want nothing", g)
+	}
+	e.clock.Advance(retryDelayFor(1))
+	if g := e.leaseAny(author); g == nil || g.Kind != KindWork {
+		t.Errorf("grant after the delay = %+v, want the retried work", g)
+	}
+}
+
+// TestInfraRetryDelayGrowsPerConsecutiveFailure pins the growing pause:
+// the first infrastructure failure waits 5s, the next 15s — a longer
+// outage is not hammered every second.
+func TestInfraRetryDelayGrowsPerConsecutiveFailure(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "fam", "implement")
+	e.submit(e.work())
+	fail := func() {
+		t.Helper()
+		g := e.leaseAny(author)
+		if g == nil {
+			t.Fatal("nothing to lease")
+		}
+		if ans := e.complete(g, Completion{
+			Error:     "fetch the mirror: Could not resolve host: github.com",
+			ErrorKind: ErrorKindInfra,
+		}); ans != AnsOK {
+			t.Fatalf("complete = %s", ans)
+		}
+	}
+	fail()
+	if nb := e.str("SELECT not_before FROM jobs WHERE task_id = ? AND restart = 1 ORDER BY id DESC LIMIT 1", e.task); nb != fmtTime(e.clock.Now().Add(retryDelayFor(1))) {
+		t.Errorf("first retry not_before = %s, want now + 5s", nb)
+	}
+	e.clock.Advance(retryDelayFor(1))
+	fail()
+	if nb := e.str("SELECT not_before FROM jobs WHERE task_id = ? AND restart = 1 ORDER BY id DESC LIMIT 1", e.task); nb != fmtTime(e.clock.Now().Add(retryDelayFor(2))) {
+		t.Errorf("second retry not_before = %s, want now + 15s", nb)
+	}
+}
+
+// TestForemanWakeWaitsAfterAFailedTurnAndResetsAfterASuccess pins the
+// foreman side of fix D (§4.2): a failed turn's re-wake waits a growing
+// delay instead of firing at once, and a done turn resets the streak so
+// the next failure waits 5s again.
+func TestForemanWakeWaitsAfterAFailedTurnAndResetsAfterASuccess(t *testing.T) {
+	e := newEnv(t)
+	e.park("which file?")
+	if nb := e.str("SELECT not_before FROM jobs WHERE kind = 'foreman' AND status = 'queued'"); nb != "" {
+		t.Fatalf("fresh wake not_before = %q, want none", nb)
+	}
+	g := e.leaseForemanRaw()
+	runner := e.int("SELECT id FROM runners WHERE name = 'runner-foreman'")
+	infra := Completion{Error: "prepare the foreman checkout: could not resolve host", ErrorKind: ErrorKindInfra}
+	if ans := e.complete(g, infra); ans != AnsOK {
+		t.Fatalf("complete = %s", ans)
+	}
+	if nb := e.str("SELECT not_before FROM jobs WHERE kind = 'foreman' AND status = 'queued'"); nb != fmtTime(e.clock.Now().Add(retryDelayFor(1))) {
+		t.Errorf("re-wake not_before = %s, want now + 5s", nb)
+	}
+	if got := e.lease(runner, []string{"claude"}, nil); got != nil {
+		t.Fatalf("leased %+v before the re-wake delay, want nothing", got)
+	}
+	// The delay grows across consecutive failed turns.
+	e.clock.Advance(retryDelayFor(1))
+	g = e.leaseForemanRaw()
+	if ans := e.complete(g, infra); ans != AnsOK {
+		t.Fatalf("complete the second failure = %s", ans)
+	}
+	if nb := e.str("SELECT not_before FROM jobs WHERE kind = 'foreman' AND status = 'queued'"); nb != fmtTime(e.clock.Now().Add(retryDelayFor(2))) {
+		t.Errorf("second re-wake not_before = %s, want now + 15s", nb)
+	}
+	// A done turn consumes the events and resets the streak.
+	e.clock.Advance(retryDelayFor(2))
+	g = e.leaseForemanRaw()
+	if ans := e.complete(g, Completion{Result: "judged", SessionID: "fs-1"}); ans != AnsOK {
+		t.Fatalf("complete the done turn = %s", ans)
+	}
+	e.park("and now?")
+	if nb := e.str("SELECT not_before FROM jobs WHERE kind = 'foreman' AND status = 'queued'"); nb != "" {
+		t.Errorf("fresh wake after the reset not_before = %q, want none", nb)
+	}
+	g = e.leaseForemanRaw()
+	if ans := e.complete(g, infra); ans != AnsOK {
+		t.Fatalf("complete after the reset = %s", ans)
+	}
+	if nb := e.str("SELECT not_before FROM jobs WHERE kind = 'foreman' AND status = 'queued'"); nb != fmtTime(e.clock.Now().Add(retryDelayFor(1))) {
+		t.Errorf("re-wake after the reset = %s, want now + 5s", nb)
 	}
 }
 
