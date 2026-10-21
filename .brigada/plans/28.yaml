@@ -28,8 +28,8 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-108"
     rounds: 0
   - id: 109
     name: "init-no-clobber"
