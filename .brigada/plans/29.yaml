@@ -5,9 +5,9 @@
 plan: 29
 title: "Busy-loop detection and webhook notifications"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-21T19:46:59.741088Z
-updated: 2026-10-21T19:46:59.741088Z
+updated: 2026-10-21T21:09:23.56229Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
