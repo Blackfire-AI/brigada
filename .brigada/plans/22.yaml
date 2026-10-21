@@ -154,6 +154,6 @@ tasks:
     base: "self-heal"
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-82"
     rounds: 0
