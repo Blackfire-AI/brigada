@@ -411,15 +411,18 @@ func cutLine(text string, width int) string {
 	return text
 }
 
-// The plain ANSI of the full-screen view: the alternate screen, the
-// hidden cursor and the clear-and-home redraw, all restored on close —
-// including on SIGINT and SIGTERM, which end the loop's context.
+// The plain ANSI of the full-screen view: the alternate screen and the
+// hidden cursor, restored on close — including on SIGINT and SIGTERM,
+// which end the loop's context. Each frame redraws in place: home, then
+// every line erased to its end, then erase below.
 const (
-	topEnterAlt    = "\x1b[?1049h"
-	topLeaveAlt    = "\x1b[?1049l"
-	topHideCursor  = "\x1b[?25l"
-	topShowCursor  = "\x1b[?25h"
-	topClearScreen = "\x1b[H\x1b[2J"
+	topEnterAlt   = "\x1b[?1049h"
+	topLeaveAlt   = "\x1b[?1049l"
+	topHideCursor = "\x1b[?25l"
+	topShowCursor = "\x1b[?25h"
+	topHome       = "\x1b[H"
+	topEraseLine  = "\x1b[K"
+	topEraseBelow = "\x1b[J"
 )
 
 // topScreen owns stdout for the loop: it enters the alternate screen
@@ -440,11 +443,15 @@ func (s *topScreen) close() {
 
 func (s *topScreen) draw(lines []string) {
 	var b strings.Builder
-	b.WriteString(topClearScreen)
-	for _, line := range lines {
+	b.WriteString(topHome)
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteString("\r\n")
+		}
 		b.WriteString(line)
-		b.WriteString("\r\n")
+		b.WriteString(topEraseLine)
 	}
+	b.WriteString(topEraseBelow)
 	fmt.Fprint(s.w, b.String())
 }
 

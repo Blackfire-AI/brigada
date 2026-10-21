@@ -236,3 +236,33 @@ func TestTopTakesNoArguments(t *testing.T) {
 		t.Errorf("exit %d, want 2 for a zero interval", code)
 	}
 }
+
+func TestTopScreenDrawRedrawsInPlace(t *testing.T) {
+	var out bytes.Buffer
+	screen := newTopScreen(&out)
+	out.Reset()
+	screen.draw([]string{"one", "two", "three"})
+	got := out.String()
+	if n := strings.Count(got, "\r\n"); n != 2 {
+		t.Errorf("frame has %d line breaks, want 2:\n%q", n, got)
+	}
+	if !strings.HasPrefix(got, "\x1b[H") {
+		t.Errorf("frame does not start with home: %q", got)
+	}
+	if !strings.HasSuffix(got, "\x1b[J") {
+		t.Errorf("frame does not end with erase below: %q", got)
+	}
+	if strings.Contains(got, "\x1b[2J") {
+		t.Errorf("frame clears by scrolling: %q", got)
+	}
+}
+
+func TestRenderTopTallerThanScreenKeepsHeader(t *testing.T) {
+	lines := renderTop(busyTopModel(), 60, 5, topNow, term.New(logo.Caps{}))
+	if len(lines) != 5 {
+		t.Fatalf("got %d lines, want 5", len(lines))
+	}
+	if !strings.Contains(lines[0], "brigada top") {
+		t.Errorf("first line is %q, want the header", lines[0])
+	}
+}
