@@ -59,6 +59,7 @@ const (
 	evReviewUnservable       = "review_unservable"         // a task's queued review can never be taken: no agent of another family offers review (§7, §10)
 	evReviewRetry            = "review_retry"              // an unusable verdict goes to another reviewer (§7)
 	evTaskLandHeld           = "task_land_held"            // the task waits at the land gate (§6.3); Reason names the rule
+	evTaskPlanHeld           = "task_plan_held"            // an amendment's added task tripped a plan rule and waits at the plan gate (§6.3); Reason names the rule
 	evTaskLandReleased       = "task_land_released"        // the user released the land gate; the landing re-evaluates (§6.3)
 	evTaskLandRejected       = "task_land_rejected"        // the user rejected the landing; the branch stays, nothing recorded (§6.3)
 	evTaskLanded             = "task_landed"               // the task's landing succeeded (§7.1); Branch, Commit and Pushed name it

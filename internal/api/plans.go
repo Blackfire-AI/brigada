@@ -333,6 +333,9 @@ func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id iden
 	for _, t := range res.Started {
 		out.Started = append(out.Started, planCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
 	}
+	for _, h := range res.Held {
+		out.Held = append(out.Held, planHeldTask{TaskID: h.TaskID, Name: h.Name, Reason: h.Reason})
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -378,7 +381,15 @@ type planAmendResponse struct {
 	Retargeted []int64           `json:"retargeted,omitempty"`
 	Retiered   []int64           `json:"retiered,omitempty"`
 	Started    []planCreatedTask `json:"started,omitempty"`
+	Held       []planHeldTask    `json:"held,omitempty"`
 	Reasons    []string          `json:"reasons,omitempty"`
+}
+
+// planHeldTask is one added task a plan rule held, with the rule's name.
+type planHeldTask struct {
+	TaskID int64  `json:"task_id"`
+	Name   string `json:"name,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // planCreatedTask is one task the plan made: its id, name and work job

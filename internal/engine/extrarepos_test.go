@@ -262,7 +262,7 @@ func TestExtraReposAmendment(t *testing.T) {
 	e.assertRuns(res, 1)
 
 	// An added task inheriting the default adds nothing to ask about; one
-	// that names a repository outside it holds the plan.
+	// that names a repository outside it is held alone, the plan active.
 	e.set(map[string]string{SettingExtraRepos: "schema " + schemaSSH})
 	plain := e.amend(res.PlanID, PlanAmendment{Add: []PlanTask{{Spec: "b"}}})
 	if plain.State != "active" {
@@ -272,8 +272,8 @@ func TestExtraReposAmendment(t *testing.T) {
 		t.Errorf("amend-added record = %+v, want the project default", spec)
 	}
 	held := e.amend(res.PlanID, PlanAmendment{Add: []PlanTask{{Spec: "c", ExtraRepos: []ExtraRepo{{Name: "tools", Repo: toolsHTTPS, Ref: "v1"}}}}})
-	if held.State != planAwaitingApproval || !strings.Contains(strings.Join(held.Reasons, ";"), "tools ("+toolsCan+", ref v1, not a commit)") {
-		t.Fatalf("held = %s %v, want the plan held for the repository outside the default", held.State, held.Reasons)
+	if held.State != "active" || len(held.Held) != 1 || !strings.Contains(held.Held[0].Reason, "tools ("+toolsCan+", ref v1, not a commit)") {
+		t.Fatalf("held = %s %+v, want the added task held for the repository outside the default", held.State, held.Held)
 	}
 	if spec := e.extraRecord(held.Added[0].TaskID); spec == nil || spec.Source != ExtraSourceTask || spec.Repos[0].Repo != toolsCan {
 		t.Errorf("amend-added record = %+v", spec)

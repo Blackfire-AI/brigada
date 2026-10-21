@@ -243,6 +243,45 @@ func (s approvalSettings) evaluate(tasks []PlanTask) approvalVerdict {
 	return v
 }
 
+// taskHoldReasons names the plan rules one added task trips (§6.3),
+// empty when it trips none: a class outside approval_classes, a
+// protected path its spec or check mentions, or an extra repository
+// outside the project's default. The whole-plan triggers — the task
+// count and gate_plan — are the plan's, not one task's, and never hold
+// an amendment of an active plan.
+func (s approvalSettings) taskHoldReasons(t PlanTask) []string {
+	var out []string
+	class := t.Class
+	if class == "" {
+		class = classImplement
+	}
+	allowed := map[string]bool{}
+	for _, c := range s.Classes {
+		allowed[c] = true
+	}
+	if !allowed[class] {
+		out = append(out, fmt.Sprintf("class %s outside %s", class, strings.Join(s.Classes, ",")))
+	}
+	for _, p := range matchProtected(s.ProtectedPaths, t.Spec+"\n"+t.Check) {
+		out = append(out, "touches "+p)
+	}
+	inDefault := map[string]bool{}
+	for _, x := range s.ExtraRepos {
+		inDefault[x.Repo] = true
+	}
+	var extras []string
+	for _, x := range t.ExtraRepos {
+		if inDefault[x.Repo] {
+			continue
+		}
+		extras = append(extras, extraRepoDescription(x))
+	}
+	if len(extras) > 0 {
+		out = append(out, "extra repositories outside the project default: "+strings.Join(extras, ", "))
+	}
+	return out
+}
+
 // matchProtected returns the patterns that match a path the text
 // mentions. The documented choice, per pattern:
 //

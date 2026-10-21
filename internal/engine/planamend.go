@@ -65,10 +65,20 @@ type PlanAmendment struct {
 	SkipApproved bool
 }
 
+// HeldTask is one task the amendment added that a plan rule held (§6.3):
+// it parks at needs_foreman with Reason — the rule's name — while the
+// plan stays active and the rest runs on.
+type HeldTask struct {
+	TaskID int64
+	Name   string
+	Reason string
+}
+
 // AmendPlanResult is what AmendPlan did: the plan's state after it, the
 // added tasks, the ids cancelled, re-pointed or retiered, and every task the
 // amendment started (a work job queued), added or not. Reasons says why
-// the plan waits for approval, when it does.
+// the plan waits for approval, when it does; Held names the added tasks a
+// plan rule held.
 type AmendPlanResult struct {
 	PlanID     int64
 	State      string
@@ -77,6 +87,7 @@ type AmendPlanResult struct {
 	Retargeted []int64
 	Retiered   []int64
 	Started    []CreatedTask
+	Held       []HeldTask
 	Reasons    []string
 }
 
@@ -177,11 +188,11 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			byName[n.name] = i
 		}
 	}
-	approval, err := projectApprovalTx(tx, proj)
+	settings, err := projectApprovalTx(tx, proj)
 	if err != nil {
 		return AmendPlanResult{}, err
 	}
-	am.Add = approval.withDefaultCheck(am.Add)
+	am.Add = settings.withDefaultCheck(am.Add)
 	// The extra repositories (§5.8) of an added task resolve now, as the
 	// default check does.
 	extraDef, err := projectExtraReposTx(tx, proj)
@@ -420,23 +431,32 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		return AmendPlanResult{}, fmt.Errorf("dependency cycle: %s", strings.Join(names, " -> "))
 	}
 
-	// The approval limit (§6.3) over the plan as amended, the cancelled
-	// tasks left out.
-	settings, err := projectApprovalTx(tx, proj)
-	if err != nil {
-		return AmendPlanResult{}, err
-	}
+	// The approval rules (§6.3) over the amendment. An active plan is
+	// judged by what it adds: only the added tasks are checked against
+	// the per-task rules — a class outside the allowed set, a protected
+	// path, an extra repository — and one that trips is held alone, its
+	// own needs-you line naming the rule, while the plan stays active.
+	// The whole-plan triggers (the task count, gate_plan) do not apply to
+	// a plan already running. An awaiting plan is re-evaluated whole, as
+	// at creation, and stays awaiting.
 	var kept []PlanTask
 	for _, n := range nodes {
 		if n.state != taskCancelled {
 			kept = append(kept, PlanTask{Spec: n.spec, Check: n.check, Class: n.class, ExtraRepos: n.extra})
 		}
 	}
-	verdict := settings.evaluate(kept)
 	newState := state
-	flipped := state == "active" && len(am.Add) > 0 && verdict.Needed
-	if flipped {
-		newState = planAwaitingApproval
+	var verdict approvalVerdict
+	addedHold := make([]string, len(am.Add)) // per added task, the hold reasons joined; "" when none
+	if state == "active" {
+		for k := range am.Add {
+			n := nodes[existing+k]
+			if reasons := settings.taskHoldReasons(PlanTask{Spec: n.spec, Check: n.check, Class: n.class, ExtraRepos: n.extra}); len(reasons) > 0 {
+				addedHold[k] = strings.Join(reasons, "; ")
+			}
+		}
+	} else {
+		verdict = settings.evaluate(kept)
 	}
 
 	// Write. Cancels first: a cancelled task's live jobs stop with it.
@@ -487,9 +507,13 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	}
 	for k := range am.Add {
 		i := existing + k
+		taskState := taskPending
+		if addedHold[k] != "" {
+			taskState = taskNeedsForeman
+		}
 		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, review_tier, review_effort, created_at, updated_at)
 			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?)`,
-			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskPending, baseRef, taskCapsJSON(am.Add[k].Caps), setupRec, nodes[i].extraRec, taskTier(am.Add[k].Tier), taskTier(am.Add[k].Tier), am.Add[k].Effort, am.Add[k].Effort, am.Add[k].ReviewTier, am.Add[k].ReviewEffort, nowStr, nowStr)
+			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskState, baseRef, taskCapsJSON(am.Add[k].Caps), setupRec, nodes[i].extraRec, taskTier(am.Add[k].Tier), taskTier(am.Add[k].Tier), am.Add[k].Effort, am.Add[k].Effort, am.Add[k].ReviewTier, am.Add[k].ReviewEffort, nowStr, nowStr)
 		if err != nil {
 			return AmendPlanResult{}, fmt.Errorf("create the task: %w", err)
 		}
@@ -498,6 +522,13 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		}
 		if err := stampTaskInstructionsTx(tx, proj, nodes[i].id, now); err != nil {
 			return AmendPlanResult{}, err
+		}
+		if addedHold[k] != "" {
+			if _, err := appendEventTx(tx, evTaskPlanHeld, proj, nodes[i].id, 0,
+				eventPayload{Status: taskNeedsForeman, Reason: addedHold[k]}, now); err != nil {
+				return AmendPlanResult{}, err
+			}
+			res.Held = append(res.Held, HeldTask{TaskID: nodes[i].id, Name: nodes[i].name, Reason: addedHold[k]})
 		}
 		res.Added = append(res.Added, CreatedTask{TaskID: nodes[i].id, Name: nodes[i].name})
 	}
@@ -593,8 +624,12 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	if len(res.Retiered) > 0 {
 		change = append(change, "retiered "+joinIDs(res.Retiered))
 	}
-	if flipped {
-		change = append(change, "held for approval")
+	for _, h := range res.Held {
+		label := fmt.Sprintf("task %d", h.TaskID)
+		if h.Name != "" {
+			label += " " + h.Name
+		}
+		change = append(change, fmt.Sprintf("held %s for approval: %s", label, h.Reason))
 	}
 	if _, err := appendEventTx(tx, evPlanAmended, proj, 0, 0, eventPayload{
 		Retiered: res.Retiered,

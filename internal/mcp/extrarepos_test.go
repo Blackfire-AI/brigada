@@ -120,8 +120,8 @@ func TestServePlanAmendExtraRepos(t *testing.T) {
 	if isError {
 		t.Fatalf("plan_amend errored: %s", text)
 	}
-	if !strings.Contains(text, "awaiting approval") || !strings.Contains(text, "gen (example.invalid/org/gen, commit 0123456789abcdef0123456789abcdef01234567)") {
-		t.Errorf("answer = %q, want the plan held for the repository, with its commit", text)
+	if !strings.Contains(text, "held at the plan gate") || !strings.Contains(text, "gen (example.invalid/org/gen, commit 0123456789abcdef0123456789abcdef01234567)") {
+		t.Errorf("answer = %q, want the added task held for the repository, with its commit", text)
 	}
 	if spec := extraRecordOf(t, e, "added spec"); spec == nil || spec.Repos[0].Name != "gen" {
 		t.Errorf("amend-added record = %+v", spec)
