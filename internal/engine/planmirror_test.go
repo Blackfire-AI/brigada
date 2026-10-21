@@ -126,6 +126,7 @@ func TestPlanCreationPushesTheFileToANewPlansBranch(t *testing.T) {
 }
 
 func TestPlanChangesPushAgain(t *testing.T) {
+	t.Parallel()
 	m := newMirrorEnv(t)
 	res, err := m.eng.CreatePlan(m.ctx, m.project, "big", nTasks(6))
 	if err != nil {
@@ -206,6 +207,7 @@ func TestPlanFileCountsRoundsSpent(t *testing.T) {
 }
 
 func TestPlanFileFailureIsAWarningAndTheNextChangePushesAgain(t *testing.T) {
+	t.Parallel()
 	m := newMirrorEnv(t)
 	m.setRepo(filepath.Join(t.TempDir(), "gone.git"))
 
@@ -259,6 +261,7 @@ func TestMissingDefaultBranchIsAWarning(t *testing.T) {
 }
 
 func TestPlanFileBranchSettingMovesTheTarget(t *testing.T) {
+	t.Parallel()
 	m := newMirrorEnv(t)
 	m.setSettings(`{"plan_file_branch": "mirrors/plans"}`)
 	res, err := m.eng.CreatePlan(m.ctx, m.project, "elsewhere", []PlanTask{{Name: "a", Spec: "x"}})
@@ -313,6 +316,7 @@ func TestMirrorIsOffByDefault(t *testing.T) {
 }
 
 func TestPlanFileMirrorsForemanTierAndEffort(t *testing.T) {
+	t.Parallel()
 	m := newMirrorEnv(t)
 	res, err := m.eng.CreatePlan(m.ctx, m.project, "sized", []PlanTask{
 		{Name: "build", Spec: "build", Tier: "heavy", Effort: "high"},
