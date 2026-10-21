@@ -28,9 +28,9 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-71"
-    rounds: 0
+    rounds: 1
   - id: 72
     name: "stack-durable"
     title: "#47.2+3 Stacked pushes and durable landing commit"
