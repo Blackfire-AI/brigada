@@ -28,8 +28,8 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-71"
     rounds: 0
   - id: 72
     name: "stack-durable"
