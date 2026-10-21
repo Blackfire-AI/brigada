@@ -96,7 +96,7 @@ tasks:
     base: "land-misc"
     tier: heavy
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-77"
     rounds: 2
   - id: 78
