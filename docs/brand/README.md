@@ -16,7 +16,9 @@ the product name and `BY BLACKFIRE AI`.
 | `icon/app-icon.svg`, `icon/app-icon-light.svg` | App icon tiles: ink tile with a paper flame; white tile with an ink flame |
 | `icon/favicon-32.svg`, `icon/favicon-16.svg` | Favicons (the ink tile) |
 | `icon/avatar.svg` | Circular avatar: ink flame, paper core on hi-vis |
-| `cli/*.txt` | Terminal forms (see [Terminal](#terminal)) |
+| `cli/banner.txt` | Terminal banner: flame and pixel wordmark, 36 × 5 characters |
+| `cli/mark.txt` | The flame alone, 7 × 5 characters |
+| `cli/oneline.txt`, `cli/ascii.txt` | One-line form; ASCII fallback |
 | `tokens.json` | Colors, type and ANSI codes |
 
 The lockups have their text converted to paths, so they render without the
@@ -54,33 +56,36 @@ On a hi-vis ground the flame is ink and the core is paper.
 
 ## Terminal
 
-The terminal keeps the earlier pixel wordmark: a flame doesn't draw well in
-character cells, and `internal/logo` prints these files byte for byte. The
-one hi-vis cell stands for the flame core.
+The banner is the flame beside the pixel wordmark, drawn with half blocks
+so each character holds two square cells, one above the other. The flame
+is 7 × 5 characters, the wordmark 27 × 4; the banner is 36 × 5.
 
 ```text
-█       ▀            █
-█▀█ █▀▀ █ █▀█ █▀█  █▀█ █▀█
-▀▀▀ ▀   ▀ ▀▀█ ▀▀▀▀ ▀▀▀ ▀▀▀▀
-          ▀▀▀
+   ▄█
+▄  ███   █       ▀            █
+██▄▀███  █▀█ █▀▀ █ █▀█ █▀█  █▀█ █▀█
+██   ██  ▀▀▀ ▀   ▀ ▀▀█ ▀▀▀▀ ▀▀▀ ▀▀▀▀
+▀█▄▄▄█▀            ▀▀▀
 ```
 
-Each character holds two cells, one above the other (half blocks), so
-the cells stay square in a terminal.
-
-- **Foreman cell:** print the first character of the banner and the mark
-  as `▄` on an orange background. Its lower half takes the terminal's own
-  foreground, so it reads on light and dark themes.
-  `ESC[48;2;255;90;31m▄ESC[0m` (truecolor), `ESC[48;5;202m` (256 colors),
-  `ESC[41m` (16 colors).
+- **Flame core:** the cells left blank in `cli/banner.txt` and
+  `cli/mark.txt` (`▀` on line 3, three blanks on line 4, `▄▄▄` on line 5)
+  print on an orange background. The half blocks keep the terminal's own
+  foreground for the flame body, so the flame reads on light and dark
+  themes. `ESC[48;2;255;90;31m` (truecolor), `ESC[48;5;202m` (256 colors),
+  `ESC[41m` (16 colors), each span closed with `ESC[0m`.
 - **One-line form:** `▙ brigada`, with `▙` in `ESC[38;2;255;90;31m`,
   `ESC[38;5;202m` or `ESC[31m`.
 - **Every other cell:** the terminal's default foreground, with no color
   code.
-- **`NO_COLOR` set or output not a terminal:** no escape codes; the
-  foreman cell prints as `█`.
-- **Locale not UTF-8, or `TERM=dumb`:** print `cli/ascii.txt`.
-- **Narrower than 28 columns:** use the one-line form only.
+- **`NO_COLOR` set or output not a terminal:** no escape codes; the core
+  stays blank, as in the one-color logo.
+- **Locale not UTF-8, or `TERM=dumb`:** print `cli/ascii.txt` (the
+  wordmark only).
+- **Narrower than 37 columns:** use the one-line form only.
+
+`internal/logo` holds byte-for-byte copies of these files; a test checks
+that they match.
 
 ## License and trademark
 
