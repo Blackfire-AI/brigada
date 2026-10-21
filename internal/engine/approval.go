@@ -42,11 +42,34 @@ var defaultApprovalClasses = []string{"implement", "review", "answer"}
 //	approval_protected_paths    list of glob patterns; a task whose spec
 //	                            or check mentions a matching path needs
 //	                            approval. Absent = none.
+//	gate_plan                   auto or ask; ask holds every plan at the
+//	                            plan gate (§6.3). Absent = auto.
+//	gate_land, gate_push        the land and push gates; stored and shown
+//	                            only until the land job reads them.
+//	                            gate_push also takes never. Absent:
+//	                            auto and ask.
+//	approval_tiers              list of tiers whose tasks would wait at
+//	                            the land gate. Absent = none. Stored only.
+//	approval_restarted          bool; a task that spent a restart would
+//	                            wait at the land gate. Absent = false.
+//	                            Stored only.
+//	land_target, after_land     the landing target branch and the command
+//	                            after a land. Absent = the default branch,
+//	                            none. Stored only.
 type approvalSettings struct {
 	MaxTasks       *int       `json:"approval_max_tasks"`
 	Classes        stringList `json:"approval_classes"`
 	ProtectedPaths stringList `json:"approval_protected_paths"`
-	DefaultCheck   string     `json:"default_check"`
+	GatePlan       string     `json:"gate_plan"`
+	GateLand       string     `json:"gate_land"`
+	GatePush       string     `json:"gate_push"`
+	ApprovalTiers  stringList `json:"approval_tiers"`
+	// ApprovalRestarted and the two land keys below are stored and
+	// shown only (§6.3); the land job reads them when it ships.
+	ApprovalRestarted bool   `json:"approval_restarted"`
+	LandTarget        string `json:"land_target"`
+	AfterLand         string `json:"after_land"`
+	DefaultCheck      string `json:"default_check"`
 	// ExtraRepos is the project's default list (§5.8): a repository a task
 	// names outside it needs approval.
 	ExtraRepos []ExtraRepo `json:"extra_repos"`
@@ -100,12 +123,13 @@ func (l *stringList) UnmarshalJSON(b []byte) error {
 // approvalVerdict is what the limit made of a plan: Needed, and the
 // reasons it gives — the task count when it is over the limit, the
 // classes outside the allowed set, the protected paths its specs and
-// checks mention.
+// checks mention, and the plan gate set to ask (§6.3).
 type approvalVerdict struct {
 	Needed  bool
 	Tasks   int
 	Limit   int
 	Always  bool // the limit is 0: every plan waits
+	Gate    bool // gate_plan is ask: every plan waits
 	Classes []string
 	Paths   []string
 	// Extras describes each extra repository a task names outside the
@@ -116,6 +140,9 @@ type approvalVerdict struct {
 // reasons renders the verdict as short phrases, one per reason.
 func (v approvalVerdict) reasons(allowed []string) []string {
 	var out []string
+	if v.Gate {
+		out = append(out, "gate_plan is "+GateAsk)
+	}
 	if v.Always {
 		out = append(out, "every plan needs approval in this project (approval_max_tasks 0)")
 	} else if v.Limit >= 0 && v.Tasks > v.Limit {
@@ -159,6 +186,11 @@ func projectApprovalTx(tx *sql.Tx, project int64) (approvalSettings, error) {
 // evaluate applies the limit to a plan's tasks (§6.3).
 func (s approvalSettings) evaluate(tasks []PlanTask) approvalVerdict {
 	v := approvalVerdict{Tasks: len(tasks), Limit: *s.MaxTasks}
+	if s.GatePlan == GateAsk {
+		// The plan gate itself (§6.3): ask holds every plan, the rules
+		// below only add their reasons.
+		v.Needed, v.Gate = true, true
+	}
 	if v.Limit < 0 {
 		return v // approval disabled: everything runs
 	}

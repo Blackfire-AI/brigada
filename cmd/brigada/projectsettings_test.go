@@ -48,7 +48,13 @@ func startSettingsEngine(t *testing.T) (context.Context, string) {
 const tailDefaults = "setup=none (default)\n" + "setup_cache_key_files=none (default)\n" + "setup_timeout_minutes=15 (default)\n" +
 	"extra_repos=none (default)\n" + "foreman_wakes_per_day=20 (default)\n" + "instructions=none (default)\n"
 
-const validSettingKeys = "approval_max_tasks, approval_classes, approval_protected_paths, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_wakes_per_day, instructions"
+// gateDefaults are the gates and land rules (§6.3) at their defaults,
+// printed between the approval keys and default_check.
+const gateDefaults = "gate_plan=auto (default)\n" + "gate_land=auto (default)\n" + "gate_push=ask (default)\n" +
+	"approval_tiers=none (default)\n" + "approval_restarted=false (default)\n" +
+	"land_target=main (default)\n" + "after_land=none (default)\n"
+
+const validSettingKeys = "approval_max_tasks, approval_classes, approval_protected_paths, gate_plan, gate_land, gate_push, approval_tiers, approval_restarted, land_target, after_land, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_wakes_per_day, instructions"
 
 // TestProjectSettingsGolden covers project set and show: the defaults,
 // one override, the reset, and the usage errors for a bad key and value.
@@ -77,6 +83,7 @@ func TestProjectSettingsGolden(t *testing.T) {
 	want := "approval_max_tasks=5 (default)\n" +
 		"approval_classes=implement+review+answer (default)\n" +
 		"approval_protected_paths=infra/**+db/*.sql (set)\n" +
+		gateDefaults +
 		"default_check=none (default)\n" +
 		"worker_tools=agent default (default)\n" + tailDefaults
 	if stdout != want {
@@ -93,6 +100,7 @@ func TestProjectSettingsGolden(t *testing.T) {
 	want = "approval_max_tasks=0 (set)\n" +
 		"approval_classes=implement (set)\n" +
 		"approval_protected_paths=infra/**+db/*.sql (set)\n" +
+		gateDefaults +
 		"default_check=none (default)\n" +
 		"worker_tools=agent default (default)\n" + tailDefaults
 	if code != 0 || stdout != want {
@@ -104,6 +112,7 @@ func TestProjectSettingsGolden(t *testing.T) {
 	want = "approval_max_tasks=5 (default)\n" +
 		"approval_classes=implement+review+answer (default)\n" +
 		"approval_protected_paths=none (default)\n" +
+		gateDefaults +
 		"default_check=none (default)\n" +
 		"worker_tools=agent default (default)\n" + tailDefaults
 	if code != 0 || stdout != want {
@@ -135,6 +144,64 @@ func TestProjectSettingsGolden(t *testing.T) {
 	}
 	if code, _, stderr = do("project", "set", "--repo", repo); code != 2 || !strings.Contains(stderr, "valid keys: approval_max_tasks") {
 		t.Fatalf("no pairs = %d %q", code, stderr)
+	}
+}
+
+// TestProjectSettingsGates covers the gate and land keys (§6.3): a set
+// and show round-trip, the reset, and the refusals for bad values.
+func TestProjectSettingsGates(t *testing.T) {
+	ctx, state := startSettingsEngine(t)
+	repo := "https://example.invalid/gates.git"
+	do := func(args ...string) (int, string, string) {
+		var stdout, stderr bytes.Buffer
+		full := append([]string{args[0], args[1], "--state-dir", state}, args[2:]...)
+		code := run(ctx, full, &stdout, &stderr)
+		return code, stdout.String(), stderr.String()
+	}
+
+	code, stdout, stderr := do("project", "set", "--repo", repo,
+		"gate_plan=ask", "gate_land=ask", "gate_push=never",
+		"approval_tiers=light+heavy", "approval_restarted=true",
+		"land_target=brigada/landed", "after_land=make announce")
+	if code != 0 {
+		t.Fatalf("set exit = %d, stderr = %q", code, stderr)
+	}
+	for _, line := range []string{
+		"gate_plan=ask (set)\n", "gate_land=ask (set)\n", "gate_push=never (set)\n",
+		"approval_tiers=light+heavy (set)\n", "approval_restarted=true (set)\n",
+		"land_target=brigada/landed (set)\n", "after_land=make announce (set)\n",
+	} {
+		if !strings.Contains(stdout, line) {
+			t.Errorf("set printed %q, want the line %q", stdout, line)
+		}
+	}
+	if code, stdout, _ = do("project", "show", "--repo", repo); code != 0 || !strings.Contains(stdout, "gate_push=never (set)") {
+		t.Fatalf("show = %d %q", code, stdout)
+	}
+
+	// An empty value resets each key to its default.
+	if code, stdout, stderr = do("project", "set", "--repo", repo,
+		"gate_plan=", "gate_land=", "gate_push=", "approval_tiers=",
+		"approval_restarted=", "land_target=", "after_land="); code != 0 {
+		t.Fatalf("reset = %d %q", code, stderr)
+	}
+	for _, line := range strings.Split(gateDefaults, "\n") {
+		if line == "" {
+			continue
+		}
+		if !strings.Contains(stdout, line) {
+			t.Errorf("reset printed %q, want the default line %q", stdout, line)
+		}
+	}
+
+	// Bad values are usage errors naming what the key takes.
+	for _, pair := range []string{
+		"gate_plan=maybe", "gate_land=never", "gate_push=always",
+		"approval_tiers=huge", "approval_restarted=maybe", "land_target=bad..name",
+	} {
+		if code, _, stderr = do("project", "set", "--repo", repo, pair); code != 2 || !strings.Contains(stderr, "invalid project setting") {
+			t.Fatalf("set %s = %d %q, want a usage refusal", pair, code, stderr)
+		}
 	}
 }
 

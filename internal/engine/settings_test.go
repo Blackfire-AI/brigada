@@ -47,6 +47,22 @@ func TestApprovalReadsWrittenSettings(t *testing.T) {
 		e.set(map[string]string{SettingApprovalProtectedPaths: "infra/**+db/*.sql"})
 		e.assertAwaits(e.createPlan([]PlanTask{{Spec: "edit infra/main.tf"}}), "protected paths: infra/**")
 	})
+	t.Run("the plan gate holds every plan", func(t *testing.T) {
+		e := newEnv(t)
+		e.set(map[string]string{SettingGatePlan: GateAsk})
+		e.assertAwaits(e.createPlan(nTasks(1)), "gate_plan is ask")
+	})
+	t.Run("the plan gate holds with the limit off", func(t *testing.T) {
+		e := newEnv(t)
+		e.set(map[string]string{SettingApprovalMaxTasks: "-1", SettingGatePlan: GateAsk})
+		e.assertAwaits(e.createPlan(nTasks(1)), "gate_plan is ask")
+	})
+	t.Run("the plan gate reset", func(t *testing.T) {
+		e := newEnv(t)
+		e.set(map[string]string{SettingGatePlan: GateAsk})
+		e.set(map[string]string{SettingGatePlan: ""})
+		e.assertRuns(e.createPlan(nTasks(1)), 1)
+	})
 	t.Run("reset restores the default", func(t *testing.T) {
 		e := newEnv(t)
 		e.set(map[string]string{SettingApprovalMaxTasks: "0"})
@@ -63,6 +79,13 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingApprovalMaxTasks, Value: "3", Source: SourceLocal},
 		{Key: SettingApprovalClasses, Value: "implement+review+answer", Default: true, Source: SourceDefault},
 		{Key: SettingApprovalProtectedPaths, Value: "infra/**", Source: SourceLocal},
+		{Key: SettingGatePlan, Value: "auto", Default: true, Source: SourceDefault},
+		{Key: SettingGateLand, Value: "auto", Default: true, Source: SourceDefault},
+		{Key: SettingGatePush, Value: "ask", Default: true, Source: SourceDefault},
+		{Key: SettingApprovalTiers, Value: "none", Default: true, Source: SourceDefault},
+		{Key: SettingApprovalRestarted, Value: "false", Default: true, Source: SourceDefault},
+		{Key: SettingLandTarget, Value: "main", Default: true, Source: SourceDefault},
+		{Key: SettingAfterLand, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingDefaultCheck, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingWorkerTools, Value: "agent default", Default: true, Source: SourceDefault},
 		{Key: SettingSetup, Value: "none", Default: true, Source: SourceDefault},
@@ -102,6 +125,14 @@ func TestSetProjectSettingsRefusals(t *testing.T) {
 		{SettingApprovalClasses: "has space"},
 		{SettingApprovalProtectedPaths: "bad[glob"},
 		{SettingApprovalMaxTasks: "2", "nope": "1"},
+		{SettingGatePlan: "maybe"},
+		{SettingGateLand: "never"},
+		{SettingGatePush: "always"},
+		{SettingApprovalTiers: "huge"},
+		{SettingApprovalTiers: "light+premium"},
+		{SettingApprovalRestarted: "maybe"},
+		{SettingLandTarget: "bad..name"},
+		{SettingLandTarget: "feature/x.lock"},
 		{SettingForemanWakesPerDay: "0"},
 		{SettingForemanWakesPerDay: strconv.Itoa(MaxForemanWakesPerDay + 1)},
 	} {
@@ -114,5 +145,51 @@ func TestSetProjectSettingsRefusals(t *testing.T) {
 	}
 	if raw := e.str("SELECT settings FROM projects WHERE id = ?", e.project); raw != "{}" {
 		t.Errorf("settings = %s after refusals, want {}", raw)
+	}
+}
+
+// land_target's default (§6.3) is the project's default branch, whatever
+// that branch is named.
+func TestLandTargetDefaultBranch(t *testing.T) {
+	e := newEnv(t)
+	e.exec("UPDATE projects SET default_branch = 'trunk' WHERE id = ?", e.project)
+	got, err := e.eng.ProjectSettings(e.ctx, envRepo)
+	if err != nil || got == nil {
+		t.Fatalf("read: %+v %v", got, err)
+	}
+	if s := settingOf(t, *got, SettingLandTarget); s.Value != "trunk" || !s.Default {
+		t.Errorf("land_target = %+v, want trunk at the default", s)
+	}
+}
+
+// The gate and land keys (§6.3) round-trip: what SetProjectSettings
+// accepts is what the view shows and the settings row stores, in the
+// shape approvalSettings reads back.
+func TestGateLandSettingsRoundTrip(t *testing.T) {
+	e := newEnv(t)
+	values := map[string]string{
+		SettingGatePlan:          GateAsk,
+		SettingGateLand:          GateAsk,
+		SettingGatePush:          GateNever,
+		SettingApprovalTiers:     "light+heavy",
+		SettingApprovalRestarted: "true",
+		SettingLandTarget:        "brigada/landed",
+		SettingAfterLand:         "make announce",
+	}
+	got := e.set(values)
+	for k, v := range values {
+		if s := settingOf(t, got, k); s.Value != v || s.Default || s.Source != SourceLocal {
+			t.Errorf("%s = %+v, want %q local", k, s, v)
+		}
+	}
+	raw := e.str("SELECT settings FROM projects WHERE id = ?", e.project)
+	for _, want := range []string{
+		`"gate_plan":"ask"`, `"gate_land":"ask"`, `"gate_push":"never"`,
+		`"approval_tiers":["light","heavy"]`, `"approval_restarted":true`,
+		`"land_target":"brigada/landed"`, `"after_land":"make announce"`,
+	} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("stored settings %s lacks %s", raw, want)
+		}
 	}
 }

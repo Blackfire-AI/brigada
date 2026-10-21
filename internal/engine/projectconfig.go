@@ -88,11 +88,13 @@ type yamlValue struct {
 var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // configSettingKeys are the project settings schema 1 of the shared file
-// may carry (§13.1): the approval limit, the default check, the worker
-// tool policy, the environment step (§5.7) and the extra repositories
-// (§5.8), and nothing else. It is its own list, never SettingKeys: a
-// setting added for the local store (the wake budget, for one) does not become shared-file policy by being editable.
+// may carry (§13.1): the approval limit, the gates and land rules (§6.3),
+// the default check, the worker tool policy, the environment step (§5.7)
+// and the extra repositories (§5.8), and nothing else. It is its own
+// list, never SettingKeys: a setting added for the local store (the wake
+// budget, for one) does not become shared-file policy by being editable.
 var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
+	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
 	SettingExtraRepos}
 
@@ -230,7 +232,8 @@ func settingText(key string, v yamlValue) (string, error) {
 			return "", configErr("%s (line %d) must be an integer", key, v.line)
 		}
 		return nonEmpty(key, v, v.scalar)
-	case SettingDefaultCheck, SettingWorkerTools, SettingSetup:
+	case SettingDefaultCheck, SettingWorkerTools, SettingSetup,
+		SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand:
 		if v.isList {
 			return "", configErr("%s (line %d) must be a string, not a list", key, v.line)
 		}

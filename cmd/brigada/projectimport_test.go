@@ -157,6 +157,54 @@ func TestProjectImportFirstOverHandSetAsks(t *testing.T) {
 	}
 }
 
+// TestProjectImportGates covers the gate and land keys (§6.3) in the
+// shared file: an import applies them with provenance, a bad value is
+// refused before the engine is asked, and a local override conflicts.
+func TestProjectImportGates(t *testing.T) {
+	ctx, state := startSettingsEngine(t)
+	write := importRepo(t)
+	do := func(stdin string, args ...string) (int, string, string) {
+		return runWithStdin(t, ctx, state, stdin, args)
+	}
+
+	write(projectFile("gate_plan: ask\ngate_push: never\napproval_tiers: [heavy]\napproval_restarted: true\nland_target: brigada/landed\nafter_land: make announce\n"))
+	code, stdout, stderr := do("", "project", "import")
+	if code != 0 || !strings.Contains(stdout, "imported .brigada/project.yaml") ||
+		!strings.Contains(stdout, "gate_plan: default -> ask") {
+		t.Fatalf("import = %d %q (stderr %q)", code, stdout, stderr)
+	}
+	code, stdout, stderr = do("", "project", "show")
+	if code != 0 {
+		t.Fatalf("show = %d %q", code, stderr)
+	}
+	for _, want := range []string{
+		"gate_plan=ask (imported ", "gate_push=never (imported ",
+		"approval_tiers=heavy (imported ", "approval_restarted=true (imported ",
+		"land_target=brigada/landed (imported ", "after_land=make announce (imported ",
+		"gate_land=auto (default)",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("show lacks %q:\n%s", want, stdout)
+		}
+	}
+
+	// A bad value is refused before the engine is asked.
+	write(projectFile("gate_plan: maybe\n"))
+	if code, _, stderr = do("", "project", "import"); code != 1 || !strings.Contains(stderr, "gate_plan takes auto or ask") {
+		t.Fatalf("bad value = %d %q, want a refusal", code, stderr)
+	}
+
+	// A local override wins on re-import, with the conflict printed.
+	if code, _, stderr = do("", "project", "set", "gate_push=ask"); code != 0 {
+		t.Fatalf("set = %d %q", code, stderr)
+	}
+	write(projectFile("gate_plan: ask\ngate_push: never\n"))
+	code, stdout, stderr = do("", "project", "import")
+	if code != 0 || !strings.Contains(stdout, "conflict: gate_push: local override ask kept, file has never") {
+		t.Fatalf("re-import = %d %q (stderr %q)", code, stdout, stderr)
+	}
+}
+
 // runWithStdin runs one command against the engine of state, answering
 // its questions from stdin. --state-dir goes right after the command
 // words, before any key=value or flag of the call.

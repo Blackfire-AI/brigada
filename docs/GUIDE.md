@@ -454,6 +454,13 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 | `approval_max_tasks` | integer | `5` | A plan with more tasks waits for you. `0`: every plan waits. Negative: no limit. |
 | `approval_classes` | list of class names | `implement`, `review`, `answer` | A task of a class outside the list holds the plan. |
 | `approval_protected_paths` | list of repo-relative globs | none | A task whose spec or check mentions a matching path holds the plan. |
+| `gate_plan` | `auto` or `ask` | `auto` | `ask` holds every plan at the plan gate, whatever the approval rules say. |
+| `gate_land` | `auto` or `ask` | `auto` | The land gate. Stored and shown; the land job enforces it when it ships. |
+| `gate_push` | `auto`, `ask` or `never` | `ask` | The push gate after a land. Stored and shown; the land job enforces it when it ships. |
+| `approval_tiers` | list of `light`, `standard`, `heavy` | none | Tiers whose tasks would wait at the land gate. Stored and shown. |
+| `approval_restarted` | `true` or `false` | `false` | `true`: a task that spent a restart would wait at the land gate. Stored and shown. |
+| `land_target` | branch name | the project's default branch | Where approved work lands: the default branch, or a staging branch such as `brigada/landed`. Stored and shown. |
+| `after_land` | command | none | A repo-relative command the runner runs after a successful land. Stored and shown. |
 | `setup` | command | none | The environment step run before the worker and the check ([section 7](#7-plans-checks-and-reviews)). |
 | `setup_cache_key_files` | list of repo-relative files | none (no cache) | Files whose contents key the setup cache. |
 | `setup_timeout_minutes` | positive integer | `15` | How long `setup` may run. |
@@ -492,7 +499,7 @@ brigada project show [--repo URL]
 
 - `project set` accepts every key in the two tables above except `schema`, `repo` and `instructions_file`, so a local value can also override an imported one.
 - Flags go before the `key=value` pairs.
-- On the command line, list values are joined with `+`: `approval_classes=implement+review`, `approval_protected_paths=infra/**+db/*.sql`.
+- On the command line, list values are joined with `+`: `approval_classes=implement+review`, `approval_protected_paths=infra/**+db/*.sql`, `approval_tiers=light+heavy`.
 - An empty value (`approval_max_tasks=`) puts the key back to its default.
 - An unknown key, or a value the key does not take, is refused with a usage error that names the valid keys, and nothing is stored.
 - `project set` creates the project if the repository has none yet, and prints the same listing as `show`.
@@ -550,13 +557,13 @@ The foreman can use `plan_amend`'s `retier` list, for example `[{"task":"build",
 
 ### The approval limit
 
-A plan starts on its own unless it trips one of three triggers, each set per project ([section 6](#6-configuring-a-project)):
+A plan starts on its own unless it trips one of three triggers, each set per project ([section 6](#6-configuring-a-project)), or the plan gate holds it: `gate_plan: ask` ([section 6](#6-configuring-a-project)) waits every plan, with no trigger tripped:
 
 - more tasks than `approval_max_tasks` (default 5);
 - a task class outside `approval_classes` (default `implement`, `review`, `answer`);
 - a task whose spec or check mentions a path that matches one of `approval_protected_paths` (default none).
 
-A plan that trips one waits in `pending_approval`, and nothing is queued. The needs-you entry gives the reasons, for example `7 tasks, over the limit of 5`. An amendment that adds tasks is checked against the limit again. You decide:
+A held plan waits in `pending_approval`, and nothing is queued. The needs-you entry gives the reasons, for example `7 tasks, over the limit of 5` or `gate_plan is ask`. An amendment that adds tasks is checked against the limit again. You decide:
 
 ```sh
 brigada plan approve 7    # queues the tasks; prints each task's job
@@ -969,6 +976,13 @@ Every key that `brigada project set` and `project show` know, with each default 
 | `approval_max_tasks` | `5` | yes |
 | `approval_classes` | `implement+review+answer` | yes |
 | `approval_protected_paths` | `none` | yes |
+| `gate_plan` | `auto` | yes |
+| `gate_land` | `auto` | yes |
+| `gate_push` | `ask` | yes |
+| `approval_tiers` | `none` | yes |
+| `approval_restarted` | `false` | yes |
+| `land_target` | the project's default branch | yes |
+| `after_land` | `none` | yes |
 | `default_check` | `none` | yes |
 | `worker_tools` | `agent default` | yes |
 | `setup` | `none` | yes |
