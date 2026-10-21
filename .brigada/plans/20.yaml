@@ -93,9 +93,9 @@ tasks:
     deps: ["status-top"]
     base: "status-top"
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-67"
-    rounds: 1
+    rounds: 2
   - id: 68
     name: "runner-land-2"
     title: "Runner: execute the land job in a clone of the target branch, and record changed paths"
