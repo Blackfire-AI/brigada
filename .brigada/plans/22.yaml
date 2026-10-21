@@ -63,9 +63,9 @@ tasks:
     base: "land-lost-close"
     continue: "land-lost-close"
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-74"
-    rounds: 0
+    rounds: 1
   - id: 75
     name: "land-env-target"
     title: "#47.5+8 Land check gets setup and extra-repo env; fresh land_target is created"
