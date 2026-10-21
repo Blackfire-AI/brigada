@@ -96,8 +96,8 @@ tasks:
     base: "land-misc"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-77"
     rounds: 0
   - id: 78
     name: "net-infra"
