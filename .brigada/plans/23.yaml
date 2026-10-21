@@ -103,8 +103,8 @@ tasks:
     base: "trailer-landed-deps"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-90"
     rounds: 0
   - id: 91
     name: "port-39-41-36"
