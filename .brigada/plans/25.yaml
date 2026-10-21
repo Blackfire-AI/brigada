@@ -51,7 +51,7 @@ tasks:
     continue: "amend-judged-on-additions"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-98-r1"
     rounds: 1
   - id: 99
@@ -63,7 +63,7 @@ tasks:
     continue: "cost-rule"
     tier: heavy
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 100
