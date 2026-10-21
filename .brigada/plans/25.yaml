@@ -52,8 +52,8 @@ tasks:
     tier: heavy
     effort: medium
     caps: {restart: 9}
-    state: running
-    branch: "brigada/task-98-r6"
+    state: reviewing
+    branch: "brigada/task-98-r7"
     rounds: 0
   - id: 99
     name: "answer-changes-rule"
