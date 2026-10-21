@@ -224,7 +224,23 @@ func (e *Engine) wakeOutcomeTx(tx *sql.Tx, project int64, now time.Time) (WakeOu
 	if err != nil {
 		return "", err
 	}
-	res, err := e.submitForemanTurnTx(tx, project, inbox, now)
+	// A re-wake after a failed turn waits a growing delay before the next
+	// turn may be leased (§4.2, issue #46): the network is not up in the
+	// seconds after a wake, and an instant re-wake would fail the same
+	// way. The delay follows the longest-running pending event — the
+	// attempts a failed turn adds (§5.6) — so it grows with consecutive
+	// failures and starts over once a done turn consumes its events. A
+	// fresh wake (attempts zero) is not delayed.
+	var attempts int64
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(attempts), 0) FROM foreman_inbox WHERE project_id = ? AND state = ?`,
+		project, inboxPending).Scan(&attempts); err != nil {
+		return "", fmt.Errorf("read the pending inbox attempts of project %d: %w", project, err)
+	}
+	var notBefore time.Time
+	if attempts > 0 {
+		notBefore = now.Add(retryDelayFor(int(attempts)))
+	}
+	res, err := e.submitForemanTurnTx(tx, project, inbox, notBefore, now)
 	if err != nil {
 		return "", err
 	}

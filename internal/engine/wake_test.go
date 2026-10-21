@@ -219,6 +219,10 @@ func TestThreeFailedTurnsStallTheWake(t *testing.T) {
 		if got := e.foremanJobs(); got != want {
 			t.Fatalf("foreman turns after failure %d = %d, want %d", i+1, got, want)
 		}
+		if i < 2 {
+			// The re-wake waits out the growing delay before the next lease.
+			e.clock.Advance(retryDelayFor(i + 1))
+		}
 	}
 	if got := e.countEvents(evForemanWakeStalled); got != 1 {
 		t.Errorf("foreman_wake_stalled events = %d, want 1", got)
@@ -421,6 +425,10 @@ func TestAFreshEventAfterAStallStallsAgainInItsOwnRight(t *testing.T) {
 	e.park("which file?")
 	for i := 0; i < 3; i++ {
 		e.complete(e.leaseForeman(), Completion{Error: fmt.Sprintf("boom %d", i)})
+		if i < 2 {
+			// The re-wake waits out the growing delay before the next lease.
+			e.clock.Advance(retryDelayFor(i + 1))
+		}
 	}
 	if got := e.countEvents(evForemanWakeStalled); got != 1 {
 		t.Fatalf("foreman_wake_stalled events after three failures = %d, want 1", got)
@@ -439,12 +447,17 @@ func TestAFreshEventAfterAStallStallsAgainInItsOwnRight(t *testing.T) {
 	if got := e.foremanJobs(); got != 4 {
 		t.Fatalf("foreman turns after the fresh park = %d, want 4", got)
 	}
+	// The stalled events keep the delay growing: the fresh wake waits 45s.
+	e.clock.Advance(retryDelayFor(3))
 	// The fresh event needs its own three failures: the turns after the
 	// first two wake again, and the third stalls the wake a second time.
 	for i, want := range []int64{5, 6, 6} {
 		e.complete(e.leaseForeman(), Completion{Error: "boom again"})
 		if got := e.foremanJobs(); got != want {
 			t.Fatalf("foreman turns after failure %d of the new episode = %d, want %d", i+1, got, want)
+		}
+		if i < 2 {
+			e.clock.Advance(retryDelayFor(4)) // the cap: a longer outage stays at 2m
 		}
 	}
 	if got := e.countEvents(evForemanWakeStalled); got != 2 {
@@ -470,6 +483,10 @@ func TestStalledTurnsCountTowardTheStall(t *testing.T) {
 		e.complete(e.leaseForeman(), Completion{Result: "a partial answer", Outcome: OutcomeStalled})
 		if got := e.foremanJobs(); got != want {
 			t.Fatalf("foreman turns after stalled turn %d = %d, want %d", i+1, got, want)
+		}
+		if i < 2 {
+			// The re-wake waits out the growing delay before the next lease.
+			e.clock.Advance(retryDelayFor(i + 1))
 		}
 	}
 	if got := e.countEvents(evForemanWakeStalled); got != 1 {

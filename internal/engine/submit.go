@@ -69,6 +69,11 @@ type SubmitParams struct {
 	// job whose branch the submit names, since no task row holds it. The
 	// engine names the branch of every other job at its first lease.
 	Branch string
+	// NotBefore is the time before which the queued job may not be
+	// leased (§3, §4.2): the engine's retry and re-wake delays write it
+	// so a job does not fire again while the network is still down. The
+	// zero value means the job is leasable at once.
+	NotBefore time.Time
 }
 
 // branch is the branch the submit names, for the job_created event: only
@@ -183,12 +188,16 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 	if p.TaskID == 0 && p.Branch != "" {
 		branch = p.Branch
 	}
+	var notBefore any
+	if !p.NotBefore.IsZero() {
+		notBefore = fmtTime(p.NotBefore)
+	}
 	res, err := tx.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status,
-		harness, model, labels, restart, round, exclude_family, exclude_agent, require_agent, branch, queued_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		harness, model, labels, restart, round, exclude_family, exclude_agent, require_agent, branch, queued_at, not_before, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ProjectID, nullIfZero(p.TaskID), string(p.Kind), p.Key, string(p.Mode), p.Prompt,
 		p.Harness, p.Model, string(labelsJSON), boolInt(p.Restart), round, p.ExcludeFamily, nullIfZero(p.ExcludeAgent),
-		nullIfZero(p.RequireAgent), branch, nowStr, nowStr, nowStr)
+		nullIfZero(p.RequireAgent), branch, nowStr, notBefore, nowStr, nowStr)
 	if err != nil {
 		if !isUniqueViolation(err) {
 			return SubmitResult{}, fmt.Errorf("create job: %w", err)

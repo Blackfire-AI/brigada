@@ -167,7 +167,8 @@ test ! -e hack.txt`, pinned, tip)
 
 func TestRunnerExtraRepoThatCannotBeFetchedIsAnInfrastructureFailure(t *testing.T) {
 	remote := newRemote(t)
-	e := newTestEnv(t, engine.Config{})
+	clk := newManualClock()
+	e := newTestEnv(t, engine.Config{Now: clk.Now})
 	e.seedProject(remote)
 	markers := markerDir(t)
 	task := e.seedTask("", "true")
@@ -185,10 +186,21 @@ func TestRunnerExtraRepoThatCannotBeFetchedIsAnInfrastructureFailure(t *testing.
 		t.Error("the worker started without its extra repository")
 	}
 	// Handled like a failed setup (§5.7): retried, then parked for the
-	// foreman, with no agent charged.
-	e.waitUntil("the task to park after its retries", func() bool {
-		return e.strOf("SELECT state FROM tasks WHERE id = ?", task) == "needs_foreman"
-	})
+	// foreman, with no agent charged. The retries wait a growing
+	// engine-clock delay (§3, issue #46): step the clock forward so the
+	// two retries become leasable without sleeping the test for the real
+	// 5s + 15s.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if e.strOf("SELECT state FROM tasks WHERE id = ?", task) == "needs_foreman" {
+			break
+		}
+		clk.Advance(5 * time.Second)
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the task to park after its retries")
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
 	if n := e.int64Of("SELECT COUNT(*) FROM agents WHERE health != 'ready'"); n != 0 {
 		t.Errorf("%d agents were marked unhealthy", n)
 	}

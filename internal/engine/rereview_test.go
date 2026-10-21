@@ -227,7 +227,7 @@ func TestReReviewIsFreshAfterARestart(t *testing.T) {
 	f := changesRound(t, nil)
 	e := f.e
 	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
-		_, err := e.eng.queueTaskRestartTx(tx, e.project, e.task, "start over", 0, e.clock.Now())
+		_, err := e.eng.queueTaskRestartTx(tx, e.project, e.task, "start over", 0, time.Time{}, e.clock.Now())
 		return err
 	})
 	if err != nil {
