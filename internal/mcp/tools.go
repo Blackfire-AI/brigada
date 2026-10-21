@@ -285,13 +285,17 @@ var tools = []Tool{
 	},
 	{
 		Name:        "status",
-		Description: "The engine's own state: which process it is, up how long, the jobs by status — plus the running jobs with each worker's latest event, the plans with their tasks and the \"needs you\" queue: tasks parked at needs_foreman or needs_user, and plans awaiting approval, each with its reason. Your token scopes the view to your project. A project with instructions for its workers shows their source, version, size and digest; pass `instructions` to read the text itself (as data) before you plan.",
+		Description: "The engine's own state: which process it is, up how long, the jobs by status — plus the running jobs with each worker's latest event, the plans with their tasks and the \"needs you\" queue: tasks parked at needs_foreman or needs_user, and plans awaiting approval, each with its reason. The plans list keeps every live plan and the three most recently finished ones; the older finished plans are counted in one summary line — pass all=true to list every finished plan. Your token scopes the view to your project. A project with instructions for its workers shows their source, version, size and digest; pass `instructions` to read the text itself (as data) before you plan.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"instructions": map[string]any{
 					"type":        "boolean",
 					"description": "also return the project's instruction text for workers, verbatim data in <project-instructions> delimiters",
+				},
+				"all": map[string]any{
+					"type":        "boolean",
+					"description": "list every finished plan, not only the three most recent; the default counts the older ones in one summary line",
 				},
 			},
 		},
@@ -396,10 +400,12 @@ func toolByName(offer []Tool, name string) (Tool, bool) {
 // and uptime, the jobs by status in the statuses' fixed order, then the
 // plans with their tasks and the "needs you" queue (§10) — the same
 // sections api.StatusSections renders for the client's status command,
-// scoped by the token the client bears.
+// scoped by the token the client bears. all lists every finished plan
+// where the default counts the older ones (§10).
 func callStatus(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
 	var in struct {
 		Instructions bool `json:"instructions"`
+		All          bool `json:"all"`
 	}
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &in); err != nil {
@@ -408,9 +414,12 @@ func callStatus(ctx context.Context, c *api.Client, args json.RawMessage) (strin
 	}
 	var st api.Status
 	var err error
-	if in.Instructions {
+	switch {
+	case in.All:
+		st, err = c.StatusAll(ctx, in.Instructions)
+	case in.Instructions:
 		st, err = c.StatusWithInstructions(ctx)
-	} else {
+	default:
 		st, err = c.Status(ctx)
 	}
 	if err != nil {

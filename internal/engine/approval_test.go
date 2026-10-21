@@ -276,9 +276,13 @@ func TestAwaitingPlanInNeedsYouWithReasons(t *testing.T) {
 			t.Errorf("reason %q lacks %q", got.Reason, want)
 		}
 	}
-	// The awaiting plan is not an active plan: only the seeded one lists.
-	if len(st.Plans) != 1 || st.Plans[0].ID != e.plan {
-		t.Errorf("plans = %+v, want only the seeded active plan", st.Plans)
+	// The awaiting plan lists in full beside the seeded active one:
+	// every live plan shows, awaiting approval or not.
+	if len(st.Plans) != 2 || st.Plans[0].ID != e.plan || st.Plans[1].ID != res.PlanID {
+		t.Errorf("plans = %+v, want the seeded active plan and the awaiting one", st.Plans)
+	}
+	if awaiting := st.Plans[1]; awaiting.State != planAwaitingApproval || len(awaiting.Tasks) != 6 {
+		t.Errorf("the awaiting plan = %+v, want its six tasks listed", awaiting)
 	}
 	// The event payload is the source: it carries the structure too.
 	payload := e.str("SELECT payload FROM events WHERE kind = 'plan_awaiting_approval'")

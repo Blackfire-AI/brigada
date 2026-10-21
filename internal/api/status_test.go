@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
@@ -144,6 +145,48 @@ func TestStatusEndpointPlansAndNeedsYou(t *testing.T) {
 	if fst.Report == nil || fst.Report.ProjectID != e.project1 ||
 		fst.Report.Text != "woke for the question of task 1; parked for you" {
 		t.Errorf("the foreman's report = %+v, want its own project's with its text", fst.Report)
+	}
+}
+
+// TestStatusEndpointTrimsFinishedPlans covers /v1/status's plans bound
+// (§10): the default lists the newest finished plans only and counts
+// the rest in hidden_finished_plans; `all` lists every finished plan.
+func TestStatusEndpointTrimsFinishedPlans(t *testing.T) {
+	e := newEnv(t)
+	now := e.clock.Now()
+	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		for i := 0; i < 4; i++ {
+			at := now.Add(-time.Duration(i+1) * time.Hour).UTC().Format(engine.TimeLayout)
+			if _, err := tx.Exec(`INSERT INTO plans (project_id, title, state, created_at, updated_at)
+				VALUES (?, ?, 'done', ?, ?)`, e.project1, fmt.Sprintf("done %d", i), at, at); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("seed the finished plans: %v", err)
+	}
+
+	read := func(path string) engine.StatusInfo {
+		t.Helper()
+		code, _, data := e.do(http.MethodGet, path, "alice", "", nil)
+		if code != http.StatusOK {
+			t.Fatalf("read %s: %d %s", path, code, data)
+		}
+		return decode[engine.StatusInfo](t, data)
+	}
+
+	st := read("/v1/status")
+	// The fixture's active plan plus the three newest done ones; the
+	// oldest done plan hides behind the count.
+	if len(st.Plans) != 4 || st.HiddenFinishedPlans != 1 {
+		t.Fatalf("plans = %+v hidden %d, want the active and three done plans, one hidden", st.Plans, st.HiddenFinishedPlans)
+	}
+
+	all := read("/v1/status?all=1")
+	if len(all.Plans) != 5 || all.HiddenFinishedPlans != 0 {
+		t.Fatalf("all plans = %+v hidden %d, want every plan, none hidden", all.Plans, all.HiddenFinishedPlans)
 	}
 }
 

@@ -18,14 +18,17 @@ import (
 // process, up how long — the jobs by status, then the plans with their
 // tasks and the "needs you" queue, plain text, one line each, the
 // sections rendered by api.StatusSections like the foreman's MCP tool.
+// The plans list keeps the newest finished plans only; --all lists
+// every finished plan, the MCP tool's all=true.
 func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("status",
-		"brigada status [--line] [--no-start]",
+		"brigada status [--line] [--all] [--no-start]",
 		"Show the engine, jobs, plans and what needs your attention.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
 	line := fs.Bool("line", false, "print one short line for a terminal status bar; never starts the engine")
+	all := fs.Bool("all", false, "list every finished plan, not only the three most recent")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
@@ -43,7 +46,13 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if code != 0 {
 		return code
 	}
-	st, err := client.Status(ctx)
+	var st api.Status
+	var err error
+	if *all {
+		st, err = client.StatusAll(ctx, false)
+	} else {
+		st, err = client.Status(ctx)
+	}
 	if err != nil {
 		return fail(stderr, err)
 	}

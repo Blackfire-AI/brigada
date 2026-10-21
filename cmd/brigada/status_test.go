@@ -19,11 +19,12 @@ import (
 // TestStatusGolden runs `brigada status` against a real engine started
 // in-process (§13), over a store seeded with plans in every listed
 // state: the plans print with their tasks indented beneath them, the
-// stale and pending plans stay out of the plans section, the latest
-// foreman report shows beneath the plans with its time and first lines,
-// and the needs-you queue names each entry with its reason — one line
-// per entry, the sections exactly as the foreman's MCP tool renders
-// them.
+// finished plans trim to the three newest with one count line for the
+// rest, the pending plan lists with its tasks, the latest foreman
+// report shows beneath the plans with its time and first lines, and
+// the needs-you queue names each entry with its reason — one line per
+// entry, the sections exactly as the foreman's MCP tool renders them.
+// A second run with --all lists every finished plan and counts none.
 func TestStatusGolden(t *testing.T) {
 	state := testsupport.ShortStateDir(t)
 
@@ -55,6 +56,10 @@ func TestStatusGolden(t *testing.T) {
 			VALUES (1, 'fresh work', 'done', ?, ?)`, at(-2*time.Hour), at(-time.Hour))
 		exec(`INSERT INTO plans (project_id, title, state, created_at, updated_at)
 			VALUES (1, 'roll out v2', 'pending_approval', ?, ?)`, at(0), at(0))
+		exec(`INSERT INTO plans (project_id, title, state, created_at, updated_at)
+			VALUES (1, 'ancient work', 'done', ?, ?)`, at(-72*time.Hour), at(-30*time.Hour))
+		exec(`INSERT INTO plans (project_id, title, state, created_at, updated_at)
+			VALUES (1, 'roll back v1', 'cancelled', ?, ?)`, at(-3*time.Hour), at(-2*time.Hour))
 		exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, base_ref, caps, created_at, updated_at)
 			VALUES (1, 'the frobnicator', 'the spec', 'go test ./...', 'implement', 'ready', 'main', '{}', ?, ?)`, at(0), at(0))
 		exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, branch, base_ref, caps, created_at, updated_at)
@@ -105,16 +110,22 @@ func TestStatusGolden(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	var stdout, stderr bytes.Buffer
-	code := run(ctx, []string{"status", "--state-dir", state, "--no-start"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("status exit = %d, stderr = %q", code, stderr.String())
+	// runStatus runs `brigada status` with the given extra flags and
+	// returns its whole stdout.
+	runStatus := func(extra ...string) string {
+		t.Helper()
+		args := append([]string{"status", "--state-dir", state, "--no-start"}, extra...)
+		var stdout, stderr bytes.Buffer
+		if code := run(ctx, args, &stdout, &stderr); code != 0 {
+			t.Fatalf("status %v exit = %d, stderr = %q", extra, code, stderr.String())
+		}
+		return stdout.String()
 	}
 
 	// The first two lines name the engine and count the jobs; their
 	// values vary (a real pid, a real uptime), their shape does not.
 	// The running section follows, empty: no runner holds a job.
-	out := stdout.String()
+	out := runStatus()
 	lines := strings.SplitN(out, "plans:\n", 2)
 	if len(lines) != 2 {
 		t.Fatalf("status printed %q, want a plans section in it", out)
@@ -130,17 +141,21 @@ func TestStatusGolden(t *testing.T) {
 		t.Errorf("the jobs line = %q, want %q", head[1], want)
 	}
 
-	// The sections: the golden, exactly — the active plan with both its
-	// tasks, the plan done inside the window, the stale one out, the
-	// latest foreman report under the plans, the pending plan only in
-	// the queue.
+	// The default sections: the active plan with its tasks, the pending
+	// plan with its tasks, the three newest finished plans — done or
+	// cancelled — and one count line for the ancient one, then the
+	// report and the queue.
 	want := fmt.Sprintf(`plans:
 #1 active fix the frobnicator
   task #1 ready the frobnicator
   task #2 needs_foreman wire the sprocket [task/2-1]
   task #4 reviewing review the gadget [task/4-1]
+#2 done stale work
 #3 done fresh work
   task #3 done tidy the docs [task/3-1]
+#4 pending_approval roll out v2
+#6 cancelled roll back v1
+1 older finished plans hidden; pass all=true
 foreman report:
 %s project #1: plan 3 done: merge task/3-1
   nothing else needs you
@@ -151,5 +166,34 @@ plan #4 pending_approval
 `, at(-30*time.Minute))
 	if got := "plans:\n" + lines[1]; got != want {
 		t.Errorf("status sections =\n%s\nwant the golden:\n%s", got, want)
+	}
+
+	// The --all view: every finished plan, the ancient one included, and
+	// no count line.
+	allLines := strings.SplitN(runStatus("--all"), "plans:\n", 2)
+	if len(allLines) != 2 {
+		t.Fatal("status --all printed no plans section")
+	}
+	wantAll := fmt.Sprintf(`plans:
+#1 active fix the frobnicator
+  task #1 ready the frobnicator
+  task #2 needs_foreman wire the sprocket [task/2-1]
+  task #4 reviewing review the gadget [task/4-1]
+#2 done stale work
+#3 done fresh work
+  task #3 done tidy the docs [task/3-1]
+#4 pending_approval roll out v2
+#5 done ancient work
+#6 cancelled roll back v1
+foreman report:
+%s project #1: plan 3 done: merge task/3-1
+  nothing else needs you
+needs you:
+task #2 needs_foreman: should the sprocket be blue?
+task #4 reviewing: no reviewer: needs a reviewer of another family than the author (claude); offer an agent of another family to the runner (--agent harness=…) or review by hand
+plan #4 pending_approval
+`, at(-30*time.Minute))
+	if got := "plans:\n" + allLines[1]; got != wantAll {
+		t.Errorf("status --all sections =\n%s\nwant the golden:\n%s", got, wantAll)
 	}
 }

@@ -38,10 +38,15 @@ var ClientTools = []Tool{
 	},
 	{
 		Name:        "status",
-		Description: "The engine's state across every project: the running jobs with each worker's latest event, the plans with their tasks and branches, the foreman's latest report, messages still waiting for the foreman, and the \"needs you\" queue.",
+		Description: "The engine's state across every project: the running jobs with each worker's latest event, the plans with their tasks and branches, the foreman's latest report, messages still waiting for the foreman, and the \"needs you\" queue. The plans list keeps every live plan and the three most recently finished ones; the older finished plans are counted in one summary line — pass all=true to list every finished plan.",
 		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
+			"type": "object",
+			"properties": map[string]any{
+				"all": map[string]any{
+					"type":        "boolean",
+					"description": "list every finished plan, not only the three most recent; the default counts the older ones in one summary line",
+				},
+			},
 		},
 		Call: callStatus,
 	},

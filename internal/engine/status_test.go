@@ -2,6 +2,7 @@ package engine
 
 import (
 	"database/sql"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -90,25 +91,30 @@ func TestStatusListsPlansAndTasks(t *testing.T) {
 	userTask := e.addTask("{}")
 	e.exec(`UPDATE tasks SET state = ? WHERE id = ?`, taskNeedsUser, userTask)
 
-	// The done window: one plan finished an hour ago, one a day and an
-	// hour ago; a plan waiting for approval and a cancelled one.
+	// The finished plans: one done an hour ago, one a day and an hour
+	// ago, one cancelled — three finished, all of them kept, the list
+	// trims only beyond the newest three. A plan waiting for approval
+	// is live: it lists with its tasks too.
 	recent := e.addPlanState(e.project, "freshly done", planDone, now.Add(-time.Hour))
 	e.addTaskToPlan(recent, "the finished task", taskDone)
-	e.addPlanState(e.project, "stale done", planDone, now.Add(-statusDoneWindow-time.Hour))
+	stale := e.addPlanState(e.project, "stale done", planDone, now.Add(-25*time.Hour))
 	approval := e.addPlanState(e.project, "a big plan", "pending_approval", now)
-	e.addPlanState(e.project, "a cancelled plan", "cancelled", now)
+	cancelled := e.addPlanState(e.project, "a cancelled plan", planCancelled, now.Add(-2*time.Hour))
 
 	st, err := e.eng.Status(e.ctx, 0)
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
 
-	// The plans: the active one and the recently done one, in id order;
-	// the stale, pending and cancelled plans stay out.
-	if len(st.Plans) != 2 {
-		t.Fatalf("plans = %d, want the active and the recent done: %+v", len(st.Plans), st.Plans)
+	// The plans: every one of them, in id order — the active one, the
+	// finished ones (three, so none hidden yet) and the pending one.
+	if len(st.Plans) != 5 {
+		t.Fatalf("plans = %d, want the active, three finished and the pending one: %+v", len(st.Plans), st.Plans)
 	}
-	active, done := st.Plans[0], st.Plans[1]
+	if st.HiddenFinishedPlans != 0 {
+		t.Errorf("hidden finished plans = %d, want none: three finished, three kept", st.HiddenFinishedPlans)
+	}
+	active, done, done2, pending, gone := st.Plans[0], st.Plans[1], st.Plans[2], st.Plans[3], st.Plans[4]
 	if active.ID != e.plan || active.State != "active" || active.Title != "a plan" {
 		t.Errorf("first plan = %+v, want the seeded active plan", active)
 	}
@@ -138,6 +144,15 @@ func TestStatusListsPlansAndTasks(t *testing.T) {
 	if len(done.Tasks) != 1 || done.Tasks[0].State != taskDone {
 		t.Errorf("the done plan's tasks = %+v, want its one done task", done.Tasks)
 	}
+	if done2.ID != stale || done2.State != planDone {
+		t.Errorf("third plan = %+v, want the stale done one, kept while fewer than four finished exist", done2)
+	}
+	if pending.ID != approval || pending.State != "pending_approval" || len(pending.Tasks) != 0 {
+		t.Errorf("fourth plan = %+v, want the pending one, listed in full", pending)
+	}
+	if gone.ID != cancelled || gone.State != planCancelled {
+		t.Errorf("fifth plan = %+v, want the cancelled one among the newest finished", gone)
+	}
 
 	// The needs-you queue: the user's task with no reason, then the plan
 	// awaiting approval — in id order.
@@ -149,6 +164,79 @@ func TestStatusListsPlansAndTasks(t *testing.T) {
 	}
 	if got := st.NeedsYou[1]; got.Kind != "plan" || got.ID != approval || got.State != "pending_approval" || got.Reason != "" {
 		t.Errorf("the plan entry = %+v, want the pending_approval plan, unreasoned", got)
+	}
+}
+
+// TestStatusTrimsFinishedPlans covers the default view's bound (§10):
+// with more than statusFinishedKeep finished plans, the list keeps the
+// newest ones — done or cancelled, by when they finished — and counts
+// the rest; StatusAll lists every one. The live plans and the
+// needs-you queue are never trimmed.
+func TestStatusTrimsFinishedPlans(t *testing.T) {
+	e := newEnv(t)
+	now := e.clock.Now()
+
+	// Five finished plans: finished in id order, so the newest three
+	// are the last two done and the cancelled one.
+	var oldest int64
+	for i := 0; i < 4; i++ {
+		id := e.addPlanState(e.project, fmt.Sprintf("done %d", i), planDone, now.Add(-time.Duration(5-i)*time.Hour))
+		if i == 0 {
+			oldest = id
+		}
+	}
+	e.addPlanState(e.project, "cancelled lately", planCancelled, now.Add(-time.Minute))
+	approval := e.addPlanState(e.project, "a big plan", "pending_approval", now)
+
+	st, err := e.eng.Status(e.ctx, 0)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	// The seeded active plan, the three newest finished (done 2, done 3
+	// and the cancelled one) and the pending one; the two oldest done
+	// plans hide behind the count.
+	if len(st.Plans) != 5 {
+		t.Fatalf("plans = %+v, want the active, three finished and the pending one", st.Plans)
+	}
+	if st.HiddenFinishedPlans != 2 {
+		t.Errorf("hidden finished plans = %d, want the two oldest done ones", st.HiddenFinishedPlans)
+	}
+	for _, p := range st.Plans {
+		if p.ID == oldest {
+			t.Errorf("the oldest done plan %+v listed, want it hidden behind the count", p)
+		}
+	}
+	if last := st.Plans[len(st.Plans)-1]; last.ID != approval {
+		t.Errorf("the pending plan = %+v, want it listed last, never trimmed", last)
+	}
+	// The needs-you queue still carries the pending plan in full.
+	found := false
+	for _, it := range st.NeedsYou {
+		if it.Kind == "plan" && it.ID == approval {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("needs you = %+v, want the pending plan among them", st.NeedsYou)
+	}
+
+	// The all view lists every finished plan and hides none.
+	all, err := e.eng.StatusAll(e.ctx, 0, false)
+	if err != nil {
+		t.Fatalf("status all: %v", err)
+	}
+	if len(all.Plans) != 7 { // active + five finished + pending
+		t.Fatalf("all plans = %+v, want every one of the seven", all.Plans)
+	}
+	if all.HiddenFinishedPlans != 0 {
+		t.Errorf("all view hides %d, want none", all.HiddenFinishedPlans)
+	}
+	listed := map[int64]bool{}
+	for _, p := range all.Plans {
+		listed[p.ID] = true
+	}
+	if !listed[oldest] {
+		t.Errorf("the all view lacks the oldest done plan %d", oldest)
 	}
 }
 

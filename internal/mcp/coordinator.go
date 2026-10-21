@@ -47,13 +47,17 @@ var CoordinatorTools = []Tool{
 	},
 	{
 		Name:        "status",
-		Description: "The engine's state: the running jobs with each worker's latest event, the plans with their tasks, messages still waiting for a foreman and the \"needs you\" queue, with each plan awaiting approval in full (its id, version, tasks and why it waits). Across every project, or for one with repo_url.",
+		Description: "The engine's state: the running jobs with each worker's latest event, the plans with their tasks, messages still waiting for a foreman and the \"needs you\" queue, with each plan awaiting approval named with its id, version and why it waits (its tasks sit in the plans section). The plans list keeps every live plan — active or awaiting approval — and the three most recently finished ones; the older finished plans are counted in one summary line — pass all=true to list every finished plan. Across every project, or for one with repo_url.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"repo_url": map[string]any{
 					"type":        "string",
 					"description": "one project's canonical repo URL; omit for every project",
+				},
+				"all": map[string]any{
+					"type":        "boolean",
+					"description": "list every finished plan, not only the three most recent; the default counts the older ones in one summary line",
 				},
 			},
 		},
@@ -191,6 +195,7 @@ func callCoordinatorAsk(ctx context.Context, c *api.Client, args json.RawMessage
 func callCoordinatorStatus(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
 	var a struct {
 		RepoURL string `json:"repo_url"`
+		All     bool   `json:"all"`
 	}
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &a); err != nil {
@@ -201,7 +206,12 @@ func callCoordinatorStatus(ctx context.Context, c *api.Client, args json.RawMess
 	if err != nil {
 		return "", err
 	}
-	st, err := sc.Status(ctx)
+	var st api.Status
+	if a.All {
+		st, err = sc.StatusAll(ctx, false)
+	} else {
+		st, err = sc.Status(ctx)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -214,15 +224,12 @@ func callCoordinatorStatus(ctx context.Context, c *api.Client, args json.RawMess
 		if b.Len() == 0 {
 			b.WriteString("\n\nplans awaiting approval (the user decides; show each one in full and wait for their explicit yes or no):")
 		}
+		// The plans section above already lists the plan with its
+		// tasks; this block adds what a decision quotes (§4.6): the
+		// version and why it waits.
 		fmt.Fprintf(&b, "\nplan %d version %d of %s: %q", n.ID, n.Version, n.RepoURL, n.Title)
 		if n.Reason != "" {
 			fmt.Fprintf(&b, "\n  why it waits: %s", n.Reason)
-		}
-		for _, t := range n.Tasks {
-			fmt.Fprintf(&b, "\n  task %d [%s] %s", t.ID, t.Class, t.Title)
-			if len(t.WaitingOn) > 0 {
-				fmt.Fprintf(&b, " (waits on %s)", strings.Join(t.WaitingOn, ", "))
-			}
 		}
 	}
 	return text + b.String(), nil
