@@ -28,7 +28,7 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 97
@@ -85,7 +85,7 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 102
@@ -106,7 +106,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 104
