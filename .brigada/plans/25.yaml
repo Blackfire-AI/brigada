@@ -85,8 +85,8 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-101"
     rounds: 0
   - id: 102
     name: "foreman-no-ask-rules"
