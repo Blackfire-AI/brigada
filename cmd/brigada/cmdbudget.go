@@ -28,7 +28,7 @@ func runBudget(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		wakes   int
 		noStart bool
 	)
-	fs.StringVar(&repo, "repo", "", "the repository URL (default: the engine's only project, like ask)")
+	fs.StringVar(&repo, "repo", "", "the repository URL (default: the engine's only project)")
 	fs.IntVar(&wakes, "wakes", 0, "set the project's daily foreman wake budget, 1 to "+strconv.Itoa(engine.MaxForemanWakesPerDay)+"; omitted = show it alone")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	if code, stop := common.parse(stdout, stderr, args); stop {

@@ -298,7 +298,7 @@ With `-` as the only argument, ask reads the message from standard input:
 git diff main | brigada ask -
 ```
 
-- `--repo <origin-url>` names the project. Without it, ask works only while the engine has exactly one project; with more it refuses, and `brigada project list` shows the URLs.
+- `--repo <origin-url>` names the project. Without it, ask takes the project that the working directory's origin names. Outside a repository, or in one with no origin, it takes the engine's only project; when the engine has several and none is named, it refuses, and `brigada project list` shows the URLs.
 - A message you send is not charged against the foreman's daily wake budget ([section 4](#4-while-work-runs)): a wake that carries your message goes ahead even when that limit is spent.
 
 ## 3. Several repositories
