@@ -684,6 +684,8 @@ Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `
 - `--max-parallel N`: how many concurrent jobs this runner runs; unset (`0`) means one at a time. Init now sets it from tasks at once, and `brigada start` passes the saved number;
 - `--no-start`: fail instead of starting the engine.
 
+A `land` job (see [section 5](#5-finishing-brigada-land)) carries the single label `git` and no agent: any runner that offers the `git` label — that is, whose git credentials work for the repo — may take it, wherever it runs. The landing happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker.
+
 `kimi`, `opencode` and `dsh` are worker-only; the foreman can be `claude` or `codex`.
 
 #### dsh (experimental)

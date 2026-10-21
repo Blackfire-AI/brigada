@@ -340,9 +340,29 @@ type jobGrant struct {
 	Branch string `json:"branch,omitempty"`
 	// LandTarget is, for a land job (§7.1), the branch the task's diff
 	// is squashed onto. Empty for every other kind.
-	LandTarget      string `json:"land_target,omitempty"`
-	Attempt         int64  `json:"attempt"`
-	ResumeSessionID string `json:"resume_session_id"`
+	LandTarget string `json:"land_target,omitempty"`
+	// LandCommit is, for a land job's push phase (§7.1), the commit the
+	// landing already recorded: the runner pushes exactly it, no new
+	// squash. Empty for the squash phase and every other kind.
+	LandCommit string `json:"land_commit,omitempty"`
+	// Push is true for a land job's push phase (§7.1): the squash and
+	// the check already happened, and the runner pushes the recorded
+	// commit, then runs after_land.
+	Push bool `json:"push,omitempty"`
+	// GatePush is the project's push gate a land job obeys (§6.3): auto
+	// pushes, ask records waiting for the user, never records the exact
+	// push command without pushing. Empty for every other kind.
+	GatePush string `json:"gate_push,omitempty"`
+	// AfterLand is the repo-relative command a land job runs after the
+	// push, or after the landing when the gate is never (§6.3). Empty =
+	// none.
+	AfterLand string `json:"after_land,omitempty"`
+	// LandMessage is, for a land job's squash phase (§7.1), the task
+	// data the squash commit message is built from. nil for the push
+	// phase and every other kind.
+	LandMessage     *engine.LandMessage `json:"land_message,omitempty"`
+	Attempt         int64               `json:"attempt"`
+	ResumeSessionID string              `json:"resume_session_id"`
 	// SessionGen is the task's session generation (§5.1): the attempt
 	// the lease joined, counted in the task's restarts. The runner names
 	// the worktree path a resumed session needs from it — one path per
@@ -388,6 +408,11 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		ReviewSince:     g.ReviewSince,
 		Branch:          g.Branch,
 		LandTarget:      g.LandTarget,
+		LandCommit:      g.LandCommit,
+		Push:            g.Push,
+		GatePush:        g.GatePush,
+		AfterLand:       g.AfterLand,
+		LandMessage:     g.LandMessage,
 		Attempt:         g.Attempt,
 		ResumeSessionID: g.ResumeSessionID,
 		SessionGen:      g.SessionGen,

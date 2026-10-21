@@ -500,6 +500,27 @@ func (w *workspace) worktreeHead(ctx context.Context) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// changedPaths is the task's own diff's paths, base...HEAD (§6.3,
+// §7.1): what the land gate's protected-path rule matches, recorded
+// with the work job's result so the rule reads the real paths the work
+// touched, not the spec's words.
+func (w *workspace) changedPaths(ctx context.Context, base string) ([]string, error) {
+	if base == "" {
+		return nil, fmt.Errorf("no base ref to diff the task's paths from")
+	}
+	out, err := w.git(ctx, "-C", w.dir, "diff", "--name-only", base+"...HEAD")
+	if err != nil {
+		return nil, trimCmdError(out, err)
+	}
+	var paths []string
+	for _, l := range strings.Split(string(out), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			paths = append(paths, l)
+		}
+	}
+	return paths, nil
+}
+
 // remoteBranch is the commit the remote holds for one branch: false
 // when the remote answers cleanly that it has no such ref, and an
 // error when the question itself failed — the remote could not be
