@@ -40,6 +40,6 @@ tasks:
     base: ""
     effort: medium
     review_tier: heavy
-    state: running
+    state: reviewing
     branch: "brigada/task-95"
     rounds: 1
