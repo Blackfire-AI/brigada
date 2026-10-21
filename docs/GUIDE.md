@@ -6,7 +6,7 @@ Contents:
 
 1. [Install and `brigada init`](#1-install-and-brigada-init)
 2. [Talking to the foreman: `brigada attach`](#2-talking-to-the-foreman-brigada-attach)
-3. [Several repositories (mode B)](#3-several-repositories-mode-b)
+3. [Several repositories](#3-several-repositories)
 4. [While work runs](#4-while-work-runs)
 5. [Finishing: the land job](#5-finishing-the-land-job)
 6. [Configuring a project](#6-configuring-a-project)
@@ -42,7 +42,7 @@ Four parts, one binary:
 
 ### What init does
 
-Run `brigada init` inside a repository. (At the top of a folder that holds several repositories, init does something else: see [section 3](#3-several-repositories-mode-b).) The repository must have an `origin` remote, and all its URLs must name one repository. Init prints the canonical repository identity, then walks you through four steps. Nothing is written or started until you confirm the plan at the end.
+Run `brigada init` inside a repository. (At the top of a folder that holds several repositories, init does something else: see [section 3](#3-several-repositories).) The repository must have an `origin` remote, and all its URLs must name one repository. Init prints the canonical repository identity, then walks you through four steps. Nothing is written or started until you confirm the plan at the end.
 
 Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi`, `opencode`, and the experimental `dsh`) and prints one `Signed in:` line naming the confirmed ones, with the probe's detail in parentheses where there is one (opencode: its provider count and the command that counted them), then one line for each installed CLI whose sign-in it cannot check, such as `kimi: init can't check sign-in.`. CLIs that are not installed are not named. With `--yes` or `--probe` the same facts print as the `Agent CLIs found:` list.
 
@@ -135,7 +135,7 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 | `--tools SCOPE` | Worker tools in runner `tools=` syntax (`Bash(npm test:*)+Bash(npx jest:*)`, or `none`). An explicit agent `tools=` wins; a `tools.claude/<model>` line in your config file is kept unless you pass `--tools`. |
 | `--accept-limited` | Go ahead with fewer than two review families. |
 | `--no-wiring` | In a repository, a no-op with a note: init writes no harness wiring and, on a rerun, strips nothing. In a parent folder, skip the coordinator's wiring. |
-| `--all` | Only in a folder that is not a repository ([section 3](#3-several-repositories-mode-b)). |
+| `--all` | Only in a folder that is not a repository ([section 3](#3-several-repositories)). |
 | `--state-dir DIR`, `--config PATH` | As for every command. |
 
 ### Without a terminal
@@ -301,7 +301,7 @@ git diff main | brigada ask -
 - `--repo <origin-url>` names the project. Without it, ask works only while the engine has exactly one project; with more it refuses, and `brigada project list` shows the URLs.
 - A message you send is not charged against the foreman's daily wake budget ([section 4](#4-while-work-runs)): a wake that carries your message goes ahead even when that limit is spent.
 
-## 3. Several repositories (mode B)
+## 3. Several repositories
 
 A **project** is one repository URL (the canonical form of `origin`). Each project has its own foreman session, plans, history and stats, all served by one engine and the same runners. A monorepo is one project.
 
@@ -363,7 +363,7 @@ The needs-you queue lists what only you (or the foreman) can unblock:
 
 | Entry | What it wants |
 |---|---|
-| `plan #N pending_approval: <why>` | Your decision: `brigada plan approve N` or `brigada plan reject N` ([section 7](#gates-and-rules)), or the coordinator's tools ([section 3](#3-several-repositories-mode-b)). |
+| `plan #N pending_approval: <why>` | Your decision: `brigada plan approve N` or `brigada plan reject N` ([section 7](#gates-and-rules)), or the coordinator's tools ([section 3](#3-several-repositories)). |
 | `task #N done: waits to land: <rule>` | Your decision on a landing held at the land gate: `brigada land approve N` releases it, `brigada land reject N` cancels it ([section 5](#5-finishing-the-land-job)). |
 | `task #N done: waits to push: <branch>@<sha>` | The push gate holds it; `brigada push approve` releases every waiting push of the project ([section 5](#5-finishing-the-land-job)). |
 | `task #N needs_foreman: <reason>` | Judgment: the worker asked a question, the task spent its rounds or failed after tier escalation was exhausted, or a run stopped. The foreman is woken for these; the entry is there so you can see it and step in. |
@@ -431,7 +431,7 @@ Landing is brigada's. When a task is `done` and approved (an `approve` verdict o
 
 Landing is per task, not per plan: a stack lands in dependency order as its tasks finish, and the target moves with the plan. It happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker ([section 8](#8-agents-quota-and-health)). Where approved work lands is `land_target` ([section 6](#6-configuring-a-project)): the project's default branch, or a staging branch such as `brigada/landed`.
 
-Whether you land by hand or the land job does it, the engine learns the task landed: whenever the runner refreshes the project's default branch — a headless foreman turn, or `brigada attach` — it scans the branch for `Brigada-Task: <id>` trailers and records each task it finds as landed with its commit. So `brigada status` and the foreman show `landed` for a task you merged by hand, and a plan whose tasks all landed says so in its done report — the foreman no longer mistakes "already merged" for "waiting to merge".
+Whether you land by hand or the land job does it, the engine learns the task landed: whenever the runner refreshes the project's default branch — a headless foreman turn, or `brigada attach` — it scans the branch for `Brigada-Task: <id>` trailers and records each task it finds as landed with its commit. So `brigada status` and the foreman show `landed` for a task you merged by hand, and a plan whose tasks all landed says so in its done report.
 
 ### Gates and holds
 
@@ -487,7 +487,7 @@ Run it inside the repository; `--repo` says which URL the directory stands for w
 
 On a conflict, land stops, names the files and leaves the tree for you to resolve; commit with the printed `git commit -F` and rerun land for the rest. A check that fails leaves the commits in place and prints the `git reset --hard` that undoes them.
 
-One limit: the runner does not yet record the head commit the reviewer approved, so land cannot compare it with the branch's head. It prints a warning per task saying the head was not checked against what was reviewed. Look at `brigada diff <task-id>` before you push.
+One limit: the runner does not record the head commit the reviewer approved, so land cannot compare it with the branch's head. It prints a warning per task saying the head was not checked against what was reviewed. Look at `brigada diff <task-id>` before you push.
 
 ## 6. Configuring a project
 
@@ -607,10 +607,10 @@ Each task also has these fields, set by the foreman in `plan_create` or `plan_am
 |---|---|---|---|
 | `tier` | `light`, `standard`, `heavy` | `standard` | How heavy a model the task needs; the dispatcher selects an agent of that tier, with fallback when needed ([section 8](#tiers)). |
 | `effort` | `low`, `medium`, `high`, `max` | the agent's effort, else `medium` | How hard the model should think on this task, mapped to the chosen harness ([section 8](#effort)). |
-| `review_tier` | `light`, `standard`, `heavy` | the config's `review.tier`: one tier below the task's | The tier of the model that reviews this task (decided 2026-10-20), taken as given, not as a step from the task's tier ([Reviews](#reviews)). |
+| `review_tier` | `light`, `standard`, `heavy` | the config's `review.tier`: one tier below the task's | The tier of the model that reviews this task, taken as given, not as a step from the task's tier ([Reviews](#reviews)). |
 | `review_effort` | `low`, `medium`, `high`, `max` | the config's `review.effort`, `medium` | How hard the reviewer should think, whatever effort the task itself runs at ([Reviews](#reviews)). |
 | `caps` | an object with any of `fix_rounds`, `review_rounds`, `restart`, each an integer from 0 to 10 | the engine's defaults, per key | This task's own round budgets ([Rounds](#rounds)). An absent key keeps the default; an unknown key or a value out of range refuses the whole call. |
-| `continue` | the name of one of the task's `deps` | none | Which dependency's worker starts this task (decided 2026-10-20): when that dep is done, this task's first work job resumes the dep author's session on its own agent, so it starts with the files it already read instead of paying the cold start a new session pays. The continued dep is the task's base: `base` defaults to it, and a `base` naming another dep refuses the whole call, as a `continue` that is not one of the task's deps does. When the session or its agent is not available — the session id is unknown, the agent is gone, broken, capped at 0, cooling for more than an hour, or outside the task's tier — the task starts fresh as usual, and a `task_restart` of it always starts fresh. `brigada status` shows `continues <dep>` beside the task. |
+| `continue` | the name of one of the task's `deps` | none | Which dependency's worker starts this task: when that dep is done, this task's first work job resumes the dep author's session on its own agent, so it starts with the files it already read instead of paying the cold start a new session pays. The continued dep is the task's base: `base` defaults to it, and a `base` naming another dep refuses the whole call, as a `continue` that is not one of the task's deps does. When the session or its agent is not available — the session id is unknown, the agent is gone, broken, capped at 0, cooling for more than an hour, or outside the task's tier — the task starts fresh as usual, and a `task_restart` of it always starts fresh. `brigada status` shows `continues <dep>` beside the task. |
 
 None of the fields triggers approval. The plan shown for approval includes tier and effort, and `brigada status` shows them beside tasks: `heavy @high`, for example. A task with non-default caps also shows them there, as `(restarts 4)` or `(fix 3, review 1, restarts 4)`. A task's own review tier and review effort show as `review:heavy` and `review@high`; the config defaults are left unsaid. An unchanged standard tier is omitted; `standard->heavy` shows an automatic bump from the foreman's tier to the effective tier, and `@low->medium` an automatic effort step (`@default->high` when the task set no effort).
 
@@ -633,7 +633,7 @@ brigada plan approve 7    # queues the tasks; prints each task's job
 brigada plan reject 7     # cancels the plan's tasks
 ```
 
-or through the coordinator's `plan_approve` and `plan_reject` ([section 3](#3-several-repositories-mode-b)), which name the plan version you were shown.
+or through the coordinator's `plan_approve` and `plan_reject` ([section 3](#3-several-repositories)), which name the plan version you were shown.
 
 **The land gate** holds an approved task before it is squashed onto the target: `gate_land: ask`, a tier among `approval_tiers`, a changed path matching `approval_protected_paths`, or a spent restart when `approval_restarted` is `true`. You release one held landing with `brigada land approve <task>` or cancel it with `brigada land reject <task>`.
 
@@ -697,11 +697,11 @@ Or set a default for every task in `.brigada/project.yaml` or with `brigada proj
 
 After an `implement` task's check passes, a reviewer reads the diff, the spec and the check result, never the author's summary (a reviewer coming back after a fix round is the one exception, below). The reviewer is an agent whose model family differs from the author's, so with a single family among your agents no review can run ([section 1](#1-install-and-brigada-init), step 2).
 
-A review is dispatched on its own tier and effort, not the task's (decided 2026-10-20), because reading a diff usually takes less than writing it. By default it asks for one tier below the task's effective tier (a heavy task is reviewed at standard, a standard task at light, a light task stays at light) at medium effort, even when the escalation ladder has pushed the task to high effort. Set `review.tier = same` and `review.effort` in the config file to change the defaults for every task, or give one task a `review_tier` and `review_effort`, which win over them. The usual rules apply on top of the tier asked: the reviewer is still of another family, and when that tier has no available other-family reviewer the review climbs to the next tier up, as a work job does ([section 8](#tiers)). The history's `job_agent_picked` event records the tier asked and the tier served. Retries and re-reviews use the same review tier and effort; fix rounds and work are unchanged.
+A review is dispatched on its own tier and effort, not the task's, because reading a diff usually takes less than writing it. By default it asks for one tier below the task's effective tier (a heavy task is reviewed at standard, a standard task at light, a light task stays at light) at medium effort, even when the escalation ladder has pushed the task to high effort. Set `review.tier = same` and `review.effort` in the config file to change the defaults for every task, or give one task a `review_tier` and `review_effort`, which win over them. The usual rules apply on top of the tier asked: the reviewer is still of another family, and when that tier has no available other-family reviewer the review climbs to the next tier up, as a work job does ([section 8](#tiers)). The history's `job_agent_picked` event records the tier asked and the tier served. Retries and re-reviews use the same review tier and effort; fix rounds and work are unchanged.
 
 An approve counts only with substantive findings text (80 characters or more). A thinner approve, or a review that ends without a verdict, is retried once with another reviewer, and then the task waits for the foreman. The retry skips the first reviewer only while another qualifying reviewer is available — ready, or cooling for at most an hour; when none is, the first reviewer takes its own retry, and a second no-verdict from it waits for the foreman. Tasks of other classes finish when the run does, without a review.
 
-After a review asked for changes and a fix round answered them (decided 2026-10-20), the next review goes back to the reviewer that asked: brigada resumes that reviewer's session on the same agent, so it does not read the repository and the whole diff again. It is shown the fix round's summary and the fix round's diff alone, and its verdict still covers the whole change; the verdict block is unchanged. This saves tokens, and it is only a preference: when that reviewer's session or agent is not available (the agent is gone, broken or cooling for more than an hour, or no longer passes the family rule), or the task was restarted, the review is a fresh one by any qualifying reviewer, and the `task_reviewing` event in the history says why. A retry after an unusable review is always fresh. A resumed review shows in the history as the pick `resumed`.
+After a review asked for changes and a fix round answered them, the next review goes back to the reviewer that asked: brigada resumes that reviewer's session on the same agent, so it does not read the repository and the whole diff again. It is shown the fix round's summary and the fix round's diff alone, and its verdict still covers the whole change; the verdict block is unchanged. This saves tokens, and it is only a preference: when that reviewer's session or agent is not available (the agent is gone, broken or cooling for more than an hour, or no longer passes the family rule), or the task was restarted, the review is a fresh one by any qualifying reviewer, and the `task_reviewing` event in the history says why. A retry after an unusable review is always fresh. A resumed review shows in the history as the pick `resumed`.
 
 ### Rounds
 
@@ -750,7 +750,7 @@ Segments are separated by hyphens; provider prefixes and context suffixes such a
 Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `--agent-file` describe one agent; there `--classes` is comma-separated (`implement,review`). The two forms cannot be mixed. Other flags:
 
 - `--labels`: the labels the runner offers, comma-separated; `git` is always added when the list lacks it (see below), so a land job can always be leased;
-- `--max-parallel N`: how many concurrent jobs this runner runs; unset (`0`) means one at a time. Init now sets it from tasks at once, and `brigada start` passes the saved number;
+- `--max-parallel N`: how many concurrent jobs this runner runs; unset (`0`) means one at a time. Init sets it from tasks at once, and `brigada start` passes the saved number;
 - `--no-start`: fail instead of starting the engine.
 
 A `land` job (see [section 5](#5-finishing-the-land-job)) carries the single label `git` and no agent. Every runner offers the `git` label — its own git does the landing, and the label is the promise that those git credentials work for the repo — so any runner may take it, wherever it runs. The landing happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker. A landing that waits at the push gate — or lands under `gate_push: never`, whose push is yours — is kept on the remote (`refs/brigada/land/<target>`), not in that clone, so its push may run on another runner, or on your machine.
@@ -890,15 +890,15 @@ AGENT  TIER  CLASS  ATTEMPTS  SUCCESSES  RATE  CONFIDENCE  INPUT  OUTPUT  CACHED
 - **Rate** is the score the dispatcher ranks by: `(successes + 0.5) / (attempts + 1)`. The prior is one pseudo-trial at 50%, so an agent with no record scores 0.50 and a single success reads 0.75, not 1.00. More attempts pull the rate toward what actually happened.
 - **Confidence** is a word for the attempts behind the score: `none` for 0, `starting` for 1 to 4, `enough` from 5 on.
 - **Input, output, cached and reasoning** sum CLI-reported tokens for the agent and class. **Input** is all input, cache reads included, for every harness; **cached** is the cached part of it and reasoning is a breakdown of output, so **tokens** (input plus output) compares across agents. **Calls** counts the model requests the CLI reported; **calls/job** and **calls/success** divide it by the jobs that reported calls and by successes. Calls, not tokens, is the unit for plans that limit requests per time window. **USD** sums the dollar costs the CLI supplied; **wall(s)** sums job wall time in seconds. Work, fix and review jobs all count toward the agent that ran each job (reviews in class `review`, foreman jobs in `plan`). Each job, including a resumed session, records its own reported totals; nothing is carried between jobs.
-- **Cost/success** divides summed dollars by successes where dollars are known, otherwise summed tokens by successes. No successes or no reported usage displays `-`. Missing counters display `-`, distinct from reported zero. Sums include only known values, so mixed old and new jobs can yield partial totals. Usage does not steer dispatch yet.
+- **Cost/success** divides summed dollars by successes where dollars are known, otherwise summed tokens by successes. No successes or no reported usage displays `-`. Missing counters display `-`, distinct from reported zero. Sums include only known values, so mixed old and new jobs can yield partial totals. Usage does not steer dispatch.
 - An agent whose runner has not been seen lately is marked `(stale)`; a registered agent with no record yet shows at 0 attempts.
 
 Read it by class. For each task, the dispatcher picks the agent with the best score in the served tier among those that are ready, have quota and have room under the caps, and sends about one task in ten to the next best, so that an agent with a thin record can be measured.
 
-Two limits today:
+Two limits:
 
 - the ranking is among the agents of the runner that is asking for work;
-- ordinary work and fix jobs are ranked on the `implement` score whatever the task's class, so scores in other classes do not yet steer how those tasks are dispatched (reviews are ranked on `review`).
+- ordinary work and fix jobs are ranked on the `implement` score whatever the task's class, so scores in other classes do not steer how those tasks are dispatched (reviews are ranked on `review`).
 
 Scores are per repo and per class: an agent that wins `implement` on one repo says nothing about another repo or about `review`. On a fresh install the table is mostly priors; trust it as the `enough` rows appear.
 
@@ -950,7 +950,7 @@ This section is about the foreman session itself: the brigada-owned session that
 
 ### Reading the code
 
-Headless turns and attach refresh `<state>/runner/foreman/<project>/repo` from the project's repo URL at its configured default branch. The opening prompt names the checkout's absolute path, branch and commit. The foreman reads the code and its CLAUDE.md/AGENTS.md before planning; the snapshot may lag the remote by one fetch. A clone or fetch failure fails the turn (or attach) with the git reason. The session's working directory is the checkout itself, so the repository's own instructions and project memory load as in any clone; sessions keyed to the older scratch directory start fresh once, and a resume the CLI no longer knows starts a fresh session instead of failing the turn.
+Headless turns and attach refresh `<state>/runner/foreman/<project>/repo` from the project's repo URL at its configured default branch. The opening prompt names the checkout's absolute path, branch and commit. The foreman reads the code and its CLAUDE.md/AGENTS.md before planning; the snapshot may lag the remote by one fetch. A clone or fetch failure fails the turn (or attach) with the git reason. The session's working directory is the checkout itself, so the repository's own instructions and project memory load as in any clone; a session recorded against another directory resumes as unknown, and a resume the CLI does not know starts a fresh session instead of failing the turn.
 
 ### What differs between claude and codex
 
@@ -1017,7 +1017,7 @@ The config file is optional. Its format:
 | `rounds.fix` | integer, 0 or more | `2` | Default fix rounds per attempt for failed checks ([section 7](#7-plans-checks-and-reviews)). A task's own caps override it. |
 | `rounds.review` | integer, 0 or more | `2` | Default fix rounds per attempt that a review's requested changes ask for. |
 | `rounds.restart` | integer, 0 or more | `3` | Default restarts per task, escalation steps included. |
-| `review.tier` | `below` or `same` | `below` | The tier a task's reviews ask for (decided 2026-10-20): `below` is one tier under the task's effective tier (heavy → standard, standard → light, light stays light), `same` is the task's own. A task's `review_tier` overrides it ([section 7](#reviews)). |
+| `review.tier` | `below` or `same` | `below` | The tier a task's reviews ask for: `below` is one tier under the task's effective tier (heavy → standard, standard → light, light stays light), `same` is the task's own. A task's `review_tier` overrides it ([section 7](#reviews)). |
 | `review.effort` | `low`, `medium`, `high` or `max` | `medium` | The effort reviews run at, whatever effort the task itself runs at. A task's `review_effort` overrides it. |
 | `caps.global` | integer, 0 or more | no cap | Most parallel jobs in the whole engine. |
 | `caps.plan` | integer, 0 or more | no cap | Most parallel tasks per plan. |
@@ -1080,12 +1080,12 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 ### Starting
 
-- `brigada init [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL[@EFFORT]] [--parallel N] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories-mode-b).
+- `brigada init [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL[@EFFORT]] [--parallel N] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories).
 - `brigada start`: start the engine and detached runner with the agents and tasks-at-once limit saved by init; succeeds when the runner is already running. Use it after a reboot or `brigada stop`. See [section 1](#changing-your-setup-later).
 - `brigada runner [--agent SPEC]... [--harness HARNESS] [--model MODEL] [--classes CLASSES] [--agent-file PATH] [--worker-script PATH] [--labels LABELS] [--max-parallel N]`, where SPEC is `harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]`: run a runner that leases jobs, runs workers and checks, and pushes branches. The shorthand agent flags cannot be mixed with `--agent`; `--worker-script` is for the `fake` harness used by tests. See [section 8](#8-agents-quota-and-health).
 - `brigada stop [--engine]`: stop the detached runner in the selected state directory; `--engine` also stops the engine. Sends SIGTERM and waits up to 10 seconds per process; succeeds if nothing is running, and never starts the engine. See [section 1](#stopping).
 - `brigada remove [--yes] [--cancel] [--delete-config]`: remove brigada from this repository, keeping its project history. `--yes` applies the displayed plan and stops an unused runner without prompting; `--cancel` cancels live jobs and unfinished plans; `--delete-config` also deletes `.brigada/project.yaml`. See [section 1](#removing-brigada-from-a-repository).
-- `brigada mcp (--coordinator | --client | --socket PATH)`: serve brigada's tools over stdio. `--coordinator` is the mode B bridge ([section 3](#3-several-repositories-mode-b)), `--client` the tools of [section 12](#12-from-another-harness). Only one selector at a time. `--socket PATH` is the bridge a headless foreman session and an attached chat use; you do not run that by hand.
+- `brigada mcp (--coordinator | --client | --socket PATH)`: serve brigada's tools over stdio. `--coordinator` is the coordinator bridge ([section 3](#3-several-repositories)), `--client` the tools of [section 12](#12-from-another-harness). Only one selector at a time. `--socket PATH` is the bridge a headless foreman session and an attached chat use; you do not run that by hand.
 
 ### Talking
 
@@ -1121,7 +1121,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 ### Projects
 
 - `brigada project foreman [--repo URL] [--harness H --model M [--effort E]]`: show the repo's foreman (`claude` or `codex`) and its effort, or set them with `--harness` and `--model`; `--repo` defaults to the origin of the working directory. See [section 11](#11-the-foremans-harness-claude-or-codex).
-- `brigada project list`: every project with its foreman, active plans and needs-you count. See [section 3](#3-several-repositories-mode-b).
+- `brigada project list`: every project with its foreman, active plans and needs-you count. See [section 3](#3-several-repositories).
 - `brigada project set [--repo URL] key=value ...`, `brigada project show [--repo URL]`: set and read the project's settings and where each comes from. See [section 6](#local-only-settings).
 - `brigada project import [--repo URL] [--file PATH] [--yes]`: import `.brigada/project.yaml`. See [section 6](#importing-and-provenance).
 
@@ -1141,9 +1141,9 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - The runner does not record the commit a reviewer approved, so `brigada land` only warns that the head was not compared ([section 5](#5-finishing-the-land-job)).
 - Read-only extra repositories are a convention, not a sandbox ([section 7](#another-repository-to-read)).
 - A repository whose `.mcp.json` still carries an older init's `brigada` entry must drop it (rerun `brigada init` or run `brigada remove`), or the two `brigada` servers clash in an attached chat ([section 2](#attach)).
-- An attached Codex session does not carry brigada's tools, and Codex has no verified project-scope registration for the coordinator: init in a parent folder prints a user-level command ([section 3](#3-several-repositories-mode-b)).
-- Cross-repository plans do not exist: a plan belongs to one project ([section 3](#3-several-repositories-mode-b)).
-- `brigada cache clear` is not implemented; the setup cache expires by age and count ([section 7](#an-environment-for-checks-and-reviews)).
+- An attached Codex session does not carry brigada's tools, and Codex has no verified project-scope registration for the coordinator: init in a parent folder prints a user-level command ([section 3](#3-several-repositories)).
+- Cross-repository plans do not exist: a plan belongs to one project ([section 3](#3-several-repositories)).
+- There is no `brigada cache clear` command; the setup cache expires by age and count ([section 7](#an-environment-for-checks-and-reviews)).
 - Workers run in git worktrees, not containers, and checks run with your credentials. Do not point brigada at a repository you do not trust.
 
 Back to the [README](../README.md).
