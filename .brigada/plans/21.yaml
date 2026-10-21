@@ -27,9 +27,9 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-69-r1"
-    rounds: 0
+    rounds: 1
   - id: 70
     name: "foreman-rotate"
     title: "Automatic foreman session rotation when the session gets big, with an engine-written digest"
