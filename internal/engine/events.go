@@ -53,6 +53,7 @@ const (
 	evTaskEffortBumped       = "task_effort_bumped"        // rule escalation on the same tier; EffortFrom is the old effort, EffortTo the new, Reason the trigger (§8)
 	evTaskRestarted          = "task_restarted"            // a foreman or automatic restart queued a fresh work attempt (§3, §5.6)
 	evTaskFailed             = "task_failed"               // the run failed or said nothing usable; the foreman decides (§3)
+	evTaskLoop               = "task_loop"                 // the worker repeats itself: the same check failure across fix rounds, or the same tool call in a window; the foreman decides (§5.6)
 	evReviewChanges          = "review_changes"            // the reviewer wants changes; a fix round answers them (§3, §7)
 	evReviewNoVerdict        = "review_no_verdict"         // the review ended without a usable verdict; the retry is spent or impossible (§7)
 	evReviewVerdict          = "review_verdict"            // a standalone review (no task) ended: approve, changes or no verdict, with the findings and the branch (§7)

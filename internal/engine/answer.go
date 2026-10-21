@@ -22,7 +22,7 @@ import (
 // the task under task_out_of_rounds rather than its own changes event.
 // Answer reads the set to learn what parked the task it was given.
 var parkingEventKinds = []string{
-	evTaskNeedsHelp, evTaskFailed, evTaskCheckFailed, evTaskOutOfRounds, evReviewNoVerdict, evTaskLandFailed,
+	evTaskNeedsHelp, evTaskFailed, evTaskCheckFailed, evTaskOutOfRounds, evTaskLoop, evReviewNoVerdict, evTaskLandFailed,
 }
 
 // AnswerResult is what Answer did: the questions row it filled — the

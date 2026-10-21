@@ -183,12 +183,12 @@ func TestParseEvent(t *testing.T) {
 		ok   bool
 	}{
 		{"tool call starts", `{"role":"assistant","tool_calls":[{"type":"function","id":"tool_a","function":{"name":"Read","arguments":"{\"path\":\"README.md\"}"}}]}`,
-			adapter.Event{Kind: adapter.EvToolStart, Text: "Read"}, true},
+			adapter.Event{Kind: adapter.EvToolStart, Text: "Read", Args: `{"path":"README.md"}`}, true},
 		// A line that both speaks and calls tools is its tool call: the
 		// prose riding beside a call is mid-turn narration, which
 		// ResultText never reads as the answer.
 		{"text beside a call yields the call", `{"role":"assistant","content":"Now let me look at the tests:","tool_calls":[{"type":"function","id":"tool_b","function":{"name":"Grep","arguments":"{}"}}]}`,
-			adapter.Event{Kind: adapter.EvToolStart, Text: "Grep"}, true},
+			adapter.Event{Kind: adapter.EvToolStart, Text: "Grep", Args: "{}"}, true},
 		{"tool result ends by id", `{"role":"tool","tool_call_id":"tool_a","content":"1\t# the repository"}`,
 			adapter.Event{Kind: adapter.EvToolEnd, Text: "tool_a"}, true},
 		{"tool result with parts content", `{"role":"tool","tool_call_id":"tool_b","content":[{"type":"text","text":"two matches"}]}`,
@@ -437,12 +437,12 @@ func TestTranscripts(t *testing.T) {
 			name:    "a normal run with tool calls",
 			fixture: "normal.jsonl",
 			events: []adapter.Event{
-				{Kind: adapter.EvToolStart, Text: "Read"},
+				{Kind: adapter.EvToolStart, Text: "Read", Args: `{"path":"README.md"}`},
 				{Kind: adapter.EvToolEnd, Text: "tool_a"},
 				// The mid-turn text riding beside the Grep call never
 				// became a message; only the answer after the last tool
 				// call did.
-				{Kind: adapter.EvToolStart, Text: "Grep"},
+				{Kind: adapter.EvToolStart, Text: "Grep", Args: `{"pattern":"adapter"}`},
 				{Kind: adapter.EvToolEnd, Text: "tool_b"},
 				{Kind: adapter.EvMessage, Text: "The final answer text."},
 				{Kind: adapter.EvSession, SessionID: "session_1f08abcd"},
@@ -458,9 +458,9 @@ func TestTranscripts(t *testing.T) {
 			fixture: "parts.jsonl",
 			events: []adapter.Event{
 				{Kind: adapter.EvMessage, Text: "I will inspect the repository first."},
-				{Kind: adapter.EvToolStart, Text: "Glob"},
+				{Kind: adapter.EvToolStart, Text: "Glob", Args: `{"pattern":"**/*.go"}`},
 				{Kind: adapter.EvToolEnd, Text: "tool_c"},
-				{Kind: adapter.EvToolStart, Text: "Grep"},
+				{Kind: adapter.EvToolStart, Text: "Grep", Args: `{"pattern":"ToolStart"}`},
 				{Kind: adapter.EvToolEnd, Text: "tool_d"},
 				{Kind: adapter.EvMessage, Text: finalParts},
 				{Kind: adapter.EvSession, SessionID: "session_2b91cdef"},

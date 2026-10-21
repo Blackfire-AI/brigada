@@ -123,7 +123,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request, runnerI
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	prog := engine.Progress{Events: nonNil(req.Events)}
+	prog := engine.Progress{Events: nonNil(req.Events), Loop: req.Loop, LoopCall: req.LoopCall}
 	if t, err := parseAPITime(req.LastProgressAt); err == nil {
 		prog.LastProgressAt = t
 	} else if req.LastProgressAt != "" {
@@ -307,13 +307,16 @@ type jobLeaseRequest struct {
 }
 
 // heartbeatRequest is a jobLeaseRequest plus the worker's progress
-// (§5.6): when it last made progress, the last sign of life, and the
-// last few progress events. The times are RFC 3339.
+// (§5.6): when it last made progress, the last sign of life, the last
+// few progress events, and the loop signal once the runner's watch has
+// tripped. The times are RFC 3339.
 type heartbeatRequest struct {
 	jobLeaseRequest
 	LastProgressAt string   `json:"last_progress_at"`
 	LastActivityAt string   `json:"last_activity_at"`
 	Events         []string `json:"events"`
+	Loop           bool     `json:"loop,omitempty"`
+	LoopCall       string   `json:"loop_call,omitempty"`
 }
 
 type completeRequest struct {

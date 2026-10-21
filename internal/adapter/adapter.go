@@ -1,7 +1,9 @@
 package adapter
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os/exec"
 	"time"
 )
@@ -194,6 +196,11 @@ type Event struct {
 	Kind  EventKind
 	Time  time.Time // when the adapter parsed it; the runner's clock
 	Text  string
+	// Args is a tool call's arguments as the CLI's stream carried them,
+	// empty for a CLI that prints none (or a kind that has none): with
+	// Text it names the call, so the runner's loop watch (§5.6) tells
+	// two calls of one tool apart.
+	Args string
 	// SessionID may accompany any kind when the CLI puts its id in
 	// every envelope (including an error before a session-start event).
 	SessionID string
@@ -226,4 +233,20 @@ func ProgressEvents(events []Event) []string {
 		out = append(out, line)
 	}
 	return out
+}
+
+// ToolArgs renders a tool call's arguments for an Event's Args: the
+// raw JSON the CLI's stream carried, compacted so two identical calls
+// read identical whatever whitespace the stream put between them.
+// Empty input, or input that is not JSON, renders empty — no arguments
+// identifiable, nothing to compare.
+func ToolArgs(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var buf bytes.Buffer
+	if json.Compact(&buf, raw) != nil {
+		return ""
+	}
+	return buf.String()
 }

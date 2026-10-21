@@ -69,9 +69,9 @@ task in needs_foreman waits for you alone and nothing retries it on its own: act
 `answer` resumes the worker's session verbatim.
 
 `task_restart` starts a parked task over on a new branch from its base, with your note (what
-went wrong, what to avoid) given verbatim. Use it for a failed task, spent rounds or a review
-that keeps asking for changes, not `answer`. Each spends one of the task's restarts; the
-attempt's rounds reset.
+went wrong, what to avoid) given verbatim. Use it for a failed task, spent rounds, a review
+that keeps asking for changes or a task_loop (a worker repeating itself), not `answer`. Each
+spends one of the task's restarts; the attempt's rounds reset.
 
 When a task fails for good, or the user's ask changes, re-plan with `plan_amend` before
 restarting anything: re-point what waited on the failed task, split it, or cancel what is no

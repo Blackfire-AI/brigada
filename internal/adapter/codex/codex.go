@@ -280,19 +280,36 @@ type lineJSON struct {
 // and error;
 // every other type (reasoning, file changes, …) is ignored.
 type itemJSON struct {
-	Type    string          `json:"type"`
-	Text    string          `json:"text"`
-	Message string          `json:"message"`
-	Command string          `json:"command"`
-	Server  string          `json:"server"`
-	Tool    string          `json:"tool"`
-	Status  string          `json:"status"`
-	Error   json.RawMessage `json:"error"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	Message   string          `json:"message"`
+	Command   string          `json:"command"`
+	Server    string          `json:"server"`
+	Tool      string          `json:"tool"`
+	Arguments json.RawMessage `json:"arguments"`
+	Status    string          `json:"status"`
+	Error     json.RawMessage `json:"error"`
 }
 
 // maxToolText bounds a command's text in a tool event: a heredoc can
 // run to kilobytes, and the event is a progress line.
 const maxToolText = 200
+
+// maxToolArgs bounds a call's arguments in a tool event: the whole
+// command, heredoc included, so two calls of one tool stay told apart
+// (§5.6) — but bounded, so a runaway argument blob cannot ride the
+// event's fields without end.
+const maxToolArgs = 2000
+
+// boundedArgs is the call's arguments as the event carries them (§5.6):
+// a command's whole text, or an MCP call's arguments JSON, cut to
+// maxToolArgs runes.
+func boundedArgs(args string) string {
+	if r := []rune(args); len(r) > maxToolArgs {
+		return string(r[:maxToolArgs])
+	}
+	return args
+}
 
 // firstLine is the command's first line, cut to maxToolText runes.
 func firstLine(command string) string {
@@ -371,14 +388,15 @@ func itemEvent(lj lineJSON) (adapter.Event, bool) {
 		return adapter.Event{Kind: adapter.EvMessage, Text: lj.Item.Text}, true
 	case "command_execution":
 		kind := adapter.EvToolEnd
+		args := boundedArgs(lj.Item.Command)
 		if started {
 			kind = adapter.EvToolStart
 		}
-		return adapter.Event{Kind: kind, Text: firstLine(lj.Item.Command)}, true
+		return adapter.Event{Kind: kind, Text: firstLine(lj.Item.Command), Args: args}, true
 	case "mcp_tool_call":
 		text := firstLine(lj.Item.Server + "/" + lj.Item.Tool)
 		if started {
-			return adapter.Event{Kind: adapter.EvToolStart, Text: text}, true
+			return adapter.Event{Kind: adapter.EvToolStart, Text: text, Args: adapter.ToolArgs(lj.Item.Arguments)}, true
 		}
 		// A failed call is the tool's outcome, not the CLI's: the model
 		// reads the failure and answers around it, and the run may still

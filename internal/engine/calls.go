@@ -21,6 +21,11 @@ type Progress struct {
 	LastProgressAt time.Time
 	LastActivityAt time.Time
 	Events         []string
+	// Loop reports the runner's loop watch tripped (§5.6): the worker
+	// repeats the same tool call. LoopCall names the call. The signal
+	// routes to the foreman like a stall; the run is not stopped.
+	Loop     bool
+	LoopCall string
 }
 
 // heartbeatDeadline bounds one heartbeat's transaction, which does not
@@ -128,6 +133,15 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, pro
 	expires := now.Add(e.cfg.LeaseTTL)
 	if err := recordProgressTx(tx, job.ID, prog, now); err != nil {
 		return "", time.Time{}, err
+	}
+	// The loop report routes to the foreman like a stall (§5.6), once
+	// per job: the signal rides every beat from the trip until the run
+	// ends, and one event is the whole of it. The run is not stopped —
+	// the foreman decides.
+	if prog.Loop && job.TaskID != 0 {
+		if err := e.workerLoopTx(tx, job, prog.LoopCall, now); err != nil {
+			return "", time.Time{}, err
+		}
 	}
 	if job.Status == statusQueued {
 		// The lease expired and nobody re-leased: revive it. last_leased
