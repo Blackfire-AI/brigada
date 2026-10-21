@@ -83,7 +83,7 @@ tasks:
     base: "runner-land-2"
     tier: light
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 67
