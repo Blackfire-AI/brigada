@@ -18,7 +18,7 @@ updated: 2026-10-21T19:45:06.883743Z
 # Optional tier (light, standard, heavy) and effort (low, medium, high, max)
 # describe the model needed and how hard it should think (§6.1);
 # review_tier and review_effort do the same for its reviews (§7, §8); caps
-# override the task's fix_rounds, review_rounds and restart budgets (§14).
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1).
 tasks:
   - id: 108
     name: "ci-race-job"
@@ -38,9 +38,9 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-109"
-    rounds: 1
+    rounds: 2
   - id: 110
     name: "amend-edit-spec"
     title: "plan_amend can edit a pending task's spec"
