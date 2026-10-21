@@ -40,7 +40,7 @@ tasks:
     continue: "git-label"
     tier: heavy
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 73
