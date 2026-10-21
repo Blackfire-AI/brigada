@@ -60,8 +60,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-86"
     rounds: 0
   - id: 87
     name: "wake-budget-attached"
