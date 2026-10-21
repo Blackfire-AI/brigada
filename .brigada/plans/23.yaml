@@ -60,7 +60,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-86"
     rounds: 0
   - id: 87
