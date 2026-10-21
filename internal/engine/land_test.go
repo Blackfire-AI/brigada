@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 // land helpers for the tests below.
@@ -69,6 +70,113 @@ func (e *env) maybeLand(task int64) {
 		return e.eng.maybeLandTaskTx(tx, task, e.clock.Now())
 	}); err != nil {
 		e.t.Fatal(err)
+	}
+}
+
+// landPushed leases the fixture task's land job and completes it with a
+// pushed landing of commit abc123 on main.
+func (e *env) landPushed(owner int64) {
+	e.t.Helper()
+	g := e.leaseGit(owner)
+	if g == nil || g.Kind != KindLand {
+		e.t.Fatalf("the land job was not leased: %+v", g)
+	}
+	if ans := e.complete(g, Completion{Result: `{"target_branch":"main","commit":"abc123","check_passed":true,"pushed":"pushed"}`}); ans != AnsOK {
+		e.t.Fatalf("complete the land job: %s", ans)
+	}
+}
+
+// TestLandJobLostParks: a land job that loses its runner MaxAttempts
+// times parks the task at needs_foreman with a land failure — the
+// reason, the needs-you entry and the foreman's wake — as the queue-TTL
+// path does, instead of leaving it done with no landing.
+func TestLandJobLostParks(t *testing.T) {
+	e := newEnvCfg(t, func(c *Config) { c.MaxAttempts = 1 })
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+	turns := e.foremanJobs()
+
+	if g := e.leaseGit(author); g == nil || g.Kind != KindLand {
+		t.Fatalf("the land job was not leased: %+v", g)
+	}
+	e.clock.Advance(e.eng.cfg.LeaseTTL + time.Second)
+	if rep := e.mustSweep(); len(rep.Expired) != 1 {
+		t.Fatalf("the sweep requeued nothing: %+v", rep)
+	}
+	if g := e.leaseGit(author); g != nil {
+		t.Fatalf("the land job was offered past its attempt cap: %+v", g)
+	}
+	if status := e.str("SELECT status FROM jobs WHERE task_id = ? AND kind = 'land'", e.task); status != statusFailed {
+		t.Errorf("land job status = %q, want failed", status)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+		t.Errorf("task state = %q, want needs_foreman", state)
+	}
+	if p, ok := e.eventPayloadOf(evTaskLandFailed); !ok || !strings.Contains(p.Reason, "runner lost") {
+		t.Errorf("task_land_failed event = %+v (%t), want the lost-runner reason", p, ok)
+	}
+	if it, ok := e.needsYouTask(e.task); !ok || it.State != taskNeedsForeman {
+		t.Errorf("needs-you entry = %+v (%t), want the parked task", it, ok)
+	}
+	if got := e.foremanJobs(); got <= turns {
+		t.Errorf("foreman turns = %d, want a wake beyond the %d before", got, turns)
+	}
+	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", e.task); n != 0 {
+		t.Errorf("landing records = %d, want none", n)
+	}
+}
+
+// TestPlanWaitsForItsLastLandJob: the plan's last task done with its
+// land job queued does not close the plan; the landing does, and the
+// done report names what landed.
+func TestPlanWaitsForItsLastLandJob(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+
+	if n := e.landJobs(); n != 1 {
+		t.Fatalf("land jobs = %d, want 1 queued at the task's done", n)
+	}
+	if state := e.str("SELECT state FROM plans WHERE id = ?", e.plan); state != "active" {
+		t.Errorf("plan state with its land job queued = %q, want active", state)
+	}
+	if _, ok := e.eventPayloadOf(evPlanDone); ok {
+		t.Error("plan_done written before the land job ran")
+	}
+
+	e.landPushed(author)
+	if state := e.str("SELECT state FROM plans WHERE id = ?", e.plan); state != planDone {
+		t.Errorf("plan state after the landing = %q, want done", state)
+	}
+	p, ok := e.eventPayloadOf(evPlanDone)
+	if !ok || !strings.Contains(p.Reason, "landed:") || !strings.Contains(p.Reason, "main@abc123") {
+		t.Errorf("plan_done = %+v (%t), want the report to name the landing", p, ok)
+	}
+}
+
+// TestPlanStaysOpenWhenItsLandingFails: a landing that fails parks the
+// task, so the plan does not close as a success before the foreman
+// acts on it.
+func TestPlanStaysOpenWhenItsLandingFails(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+
+	g := e.leaseGit(author)
+	if g == nil {
+		t.Fatal("the land job was not leased")
+	}
+	if ans := e.complete(g, Completion{Result: `{"target_branch":"main","commit":"","check_passed":false,"conflict_files":["a.go"]}`}); ans != AnsOK {
+		t.Fatalf("complete the land job: %s", ans)
+	}
+	if state := e.str("SELECT state FROM plans WHERE id = ?", e.plan); state != "active" {
+		t.Errorf("plan state after a failed landing = %q, want active", state)
+	}
+	if n := e.int("SELECT COUNT(*) FROM outcomes WHERE class = 'plan'"); n != 0 {
+		t.Errorf("plan outcome rows = %d, want none before the plan closes", n)
 	}
 }
 

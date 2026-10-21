@@ -119,6 +119,11 @@ func (e *Engine) taskAfterCompletionTx(tx *sql.Tx, job *jobRow, c Completion, no
 		return e.workCompletedTx(tx, job, c, class, now)
 	case KindReview:
 		return e.reviewCompletedTx(tx, job, c, now)
+	case KindLand:
+		// A land job that ended without a record — lost to its runner too
+		// many times (§3) — parks the task like any failed landing: the
+		// reason, the needs-you entry and the foreman's wake.
+		return e.landCompletedTx(tx, job, c, now)
 	default:
 		return nil // a foreman turn belongs to no task (§4)
 	}

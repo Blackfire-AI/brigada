@@ -295,6 +295,8 @@ func TestChangesFixRoundSecondReviewApproves(t *testing.T) {
 	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskDone {
 		t.Errorf("task state after the second review = %q, want done", state)
 	}
+	// The plan closes once the task's land job has its outcome (§7.1).
+	e.landPushed(author)
 	if state := e.str("SELECT state FROM plans WHERE id = ?", e.plan); state != planDone {
 		t.Errorf("plan state = %q, want done", state)
 	}
