@@ -65,7 +65,7 @@ tasks:
     continue: "cost-rule"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-99-r1"
     rounds: 1
   - id: 100
@@ -76,7 +76,7 @@ tasks:
     base: "answer-changes-rule"
     continue: "answer-changes-rule"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 101
