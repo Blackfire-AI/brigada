@@ -103,7 +103,7 @@ tasks:
     base: "trailer-landed-deps"
     tier: heavy
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 91
@@ -140,6 +140,6 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: done
     branch: "brigada/task-93-r1"
     rounds: 1
