@@ -251,6 +251,10 @@ type workerResultFields struct {
 	Reason   string `json:"reason,omitempty"`
 	// Discoveries is what the worker learned beyond its task (§5.4, §9).
 	Discoveries string `json:"discoveries,omitempty"`
+	// CommitMessage is the commit message the worker wrote for the land
+	// job (§5.4), subject and body in the repo's own style; it stays with
+	// the result message like the rest of the block.
+	CommitMessage string `json:"commit_message,omitempty"`
 }
 
 // workerResultMessage renders a completion's result as the message the

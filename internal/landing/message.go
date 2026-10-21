@@ -33,15 +33,25 @@ type Task struct {
 	Head    string // the result branch's fetched head sha
 	Spec    string
 	Summary string // the worker's summary, which is data, never executed
-	Family  string // the authoring model family
-	Model   string
+	// CommitMessage is the worker's own commit message (§5.4): subject
+	// and body in the repo's style, data only. Present (not blank), it
+	// is the message's subject and body in place of the fields below;
+	// the trailers stay land's own either way.
+	CommitMessage string
+	Family        string
+	Model         string
 }
 
 // Message builds the squash commit message (§7.1): subject, indented
-// spec summary and worker summary, then the trailers. The second result
-// names a known family whose address brigada lacks; empty when none.
+// spec summary and worker summary, then the trailers. The worker's own
+// commit_message (§5.4), when the task carries one, takes the subject
+// and body's place — the subject its first line, the body indented like
+// the spec and summary parts, so no line of it can read as a trailer —
+// and the message otherwise keeps this shape. The second result names a
+// known family whose address brigada lacks; empty when none.
 func Message(t Task) (string, string) {
 	subject := Subject(t.Title, t.ID)
+	workerSubject, workerBody := splitCommitMessage(t.CommitMessage)
 	var trailers []string
 	trailers = append(trailers,
 		fmt.Sprintf("Brigada-Task: %d", t.ID),
@@ -65,14 +75,21 @@ func Message(t Task) (string, string) {
 	tr := strings.Join(trailers, "\n")
 	spec := sanitize(firstParagraph(t.Spec))
 	summary := sanitize(t.Summary)
-	build := func(summaryMax int) string {
+	build := func(bodyMax int) string {
 		var b strings.Builder
-		b.WriteString(subject + "\n")
-		if spec != "" {
-			b.WriteString("\nSpec:\n" + indent(truncate(spec, SpecBytes)) + "\n")
-		}
-		if summary != "" {
-			b.WriteString("\nWorker summary:\n" + indent(truncate(summary, summaryMax)) + "\n")
+		if workerSubject != "" {
+			b.WriteString(workerSubject + "\n")
+			if workerBody != "" {
+				b.WriteString("\n" + indent(truncate(workerBody, bodyMax)) + "\n")
+			}
+		} else {
+			b.WriteString(subject + "\n")
+			if spec != "" {
+				b.WriteString("\nSpec:\n" + indent(truncate(spec, SpecBytes)) + "\n")
+			}
+			if summary != "" {
+				b.WriteString("\nWorker summary:\n" + indent(truncate(summary, bodyMax)) + "\n")
+			}
 		}
 		b.WriteString("\n" + tr + "\n")
 		return b.String()
@@ -87,6 +104,27 @@ func Message(t Task) (string, string) {
 		msg = build(max)
 	}
 	return msg, noAddr
+}
+
+// splitCommitMessage splits the worker's commit message (§5.4) into its
+// subject and body: the first line, cut to the subject bound, and the
+// rest, sanitized like the summary. A message that is blank, or whose
+// first line says nothing, counts as absent: the caller then builds
+// today's format.
+func splitCommitMessage(msg string) (subject, body string) {
+	msg = strings.ReplaceAll(msg, "\r\n", "\n")
+	if i := strings.Index(msg, "\n"); i >= 0 {
+		subject, body = msg[:i], msg[i+1:]
+	} else {
+		subject = msg
+	}
+	subject = cleanLine(subject)
+	if subject == "" {
+		return "", ""
+	}
+	// The subject bound is the one every subject holds (§7.1); id 0
+	// never appears, for the empty line was refused above.
+	return Subject(subject, 0), sanitize(body)
 }
 
 // Subject is the task title on one line, at most 72 characters.

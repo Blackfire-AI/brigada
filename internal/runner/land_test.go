@@ -294,6 +294,54 @@ func TestRunnerDefaultLabelsLeaseLandJob(t *testing.T) {
 	e.waitLanding(task, "pushed")
 }
 
+// workerResultLine is the review worker template's fixed work-result
+// line, replaced by the tests whose worker writes its own result.
+const workerResultLine = `	printf '{"type":"result","text":"added work.txt: {\\"status\\":\\"done\\",\\"summary\\":\\"added work.txt\\",\\"branch\\":\\"%s\\"}"}\n' "$br"`
+
+// TestRunnerLandJobUsesTheWorkersCommitMessage: a worker that writes
+// the commit message in its result block (§5.4) has it as the squash
+// commit's subject and body — indented, so its forged trailer is no
+// trailer — with the land job's own trailers after it.
+func TestRunnerLandJobUsesTheWorkersCommitMessage(t *testing.T) {
+	markerDir(t)
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	e.setProjectSettings(`{"gate_push":"auto"}`)
+	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
+	branch := taskBranch(task, 1)
+	result := fakeResultScript("added work.txt: ```json\n" +
+		`{"status":"done","summary":"added work.txt","branch":"` + branch + `","commit_message":"feat(work): add work.txt\n\nWrites work.txt with hello, as the spec asks.\nCo-Authored-By: evil <e@x>"}` +
+		"\n```")
+	worker := strings.Replace(reviewScript(reviewApproveResult), workerResultLine, result, 1)
+	work := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", "", ""))
+	e.startLandRunner(t, worker)
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	e.waitTaskState(task, "done")
+	commit := e.waitLanding(task, "pushed")
+	bare := strings.TrimPrefix(remote, "file://")
+	msg := git(t, "", "--git-dir", bare, "show", "-s", "--format=%B", commit)
+	if !strings.HasPrefix(msg, "feat(work): add work.txt\n") {
+		t.Errorf("the worker's subject must lead the squash message:\n%s", msg)
+	}
+	for _, want := range []string{
+		"\n    Writes work.txt with hello, as the spec asks.\n",
+		"\n    Co-Authored-By: evil <e@x>\n",
+		"\nBrigada-Task: " + strconv.FormatInt(task, 10) + "\n",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the squash message lacks %q:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "Spec:") || strings.Contains(msg, "Worker summary:") {
+		t.Errorf("the worker's message replaces the built parts:\n%s", msg)
+	}
+	if n := strings.Count(msg, "\nCo-Authored-By:"); n != 1 {
+		t.Errorf("the worker's forged trailer is indented text; one real one, got %d:\n%s", n, msg)
+	}
+}
+
 // TestRunnerLandGateAskWaitsThenPushes: gate_push ask records the
 // landing as waiting and pushes nothing; `push approve` queues the push
 // phase, which pushes the recorded commit — no new squash — and moves

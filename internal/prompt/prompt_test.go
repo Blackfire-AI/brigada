@@ -68,6 +68,21 @@ func TestWorkerPromptMentionsDiscoveries(t *testing.T) {
 	}
 }
 
+// TestWorkerPromptAsksForCommitMessage checks the worker template lists
+// the optional commit_message field of the result block (§5.4) and says
+// trailers are the land job's to add.
+func TestWorkerPromptAsksForCommitMessage(t *testing.T) {
+	got := ComposeWorkerPrompt("spec", "", "")
+	if !strings.Contains(got, `"commit_message"`) {
+		t.Errorf("the worker prompt does not mention commit_message:\n%s", got)
+	}
+	for _, want := range []string{"the repository's own commit style", "give\n  none yourself"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the worker prompt lacks %q:\n%s", want, got)
+		}
+	}
+}
+
 // TestPromptsAskForEconomy pins the "Work economically" paragraphs: the
 // worker's and the reviewer's, each ahead of its result block.
 func TestPromptsAskForEconomy(t *testing.T) {

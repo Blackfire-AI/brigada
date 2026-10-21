@@ -146,6 +146,36 @@ func TestLandStackedTasksAsTwoCommits(t *testing.T) {
 	}
 }
 
+// TestLandUsesTheWorkersCommitMessage: a task whose last author job
+// wrote a commit_message (§5.4) lands with it as the squash commit's
+// subject and body; the trailers stay land's own, and the worker's
+// forged trailer is indented text.
+func TestLandUsesTheWorkersCommitMessage(t *testing.T) {
+	_, clone, f := landFixture(t)
+	li := f.land[1]
+	li.CommitMessage = "feat(a): add a.txt\n\nWrites a.txt with alpha.\nCo-Authored-By: evil <e@x>"
+	f.land[1] = li
+	code, out, errs := land(t, f, clone, landOptions{ids: []int64{1}})
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, out, errs)
+	}
+	msg := gitIn(t, clone, "log", "-1", "--format=%B", "main")
+	if !strings.HasPrefix(msg, "feat(a): add a.txt\n") {
+		t.Errorf("the worker's subject must lead the message:\n%s", msg)
+	}
+	for _, want := range []string{"\n    Writes a.txt with alpha.\n", "\n    Co-Authored-By: evil <e@x>\n", "\nBrigada-Task: 1\n"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the message lacks %q:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "Spec:") || strings.Contains(msg, "Worker summary:") {
+		t.Errorf("the worker's message replaces the built parts:\n%s", msg)
+	}
+	if n := strings.Count(msg, "\nCo-Authored-By:"); n != 1 {
+		t.Errorf("the worker's forged trailer is indented text; one real one, got %d:\n%s", n, msg)
+	}
+}
+
 func TestLandRefusals(t *testing.T) {
 	cases := []struct {
 		name  string

@@ -252,17 +252,20 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 	}
 	if len(patch) > 0 {
 		// The message the hand-driven land builds (§7.1), from the data
-		// the grant carries; the head is the fetched one, the runner's
-		// to say.
+		// the grant carries — the worker's own commit_message (§5.4)
+		// included, which Message puts in place of the built subject and
+		// body when the worker wrote one; the head is the fetched one,
+		// the runner's to say.
 		msg, _ := landing.Message(landing.Task{
-			ID:      grant.TaskID,
-			Title:   grant.LandMessage.Title,
-			Branch:  grant.Branch,
-			Head:    strings.TrimSpace(head),
-			Spec:    grant.LandMessage.Spec,
-			Summary: grant.LandMessage.Summary,
-			Family:  grant.LandMessage.Family,
-			Model:   grant.LandMessage.Model,
+			ID:            grant.TaskID,
+			Title:         grant.LandMessage.Title,
+			Branch:        grant.Branch,
+			Head:          strings.TrimSpace(head),
+			Spec:          grant.LandMessage.Spec,
+			Summary:       grant.LandMessage.Summary,
+			CommitMessage: grant.LandMessage.CommitMessage,
+			Family:        grant.LandMessage.Family,
+			Model:         grant.LandMessage.Model,
 		})
 		res, err := landing.Squash(ctx, dir, grant.TaskID, msg, patch, io.Discard)
 		if err != nil {

@@ -30,6 +30,11 @@ type TaskLandInfo struct {
 	// Summary is the worker's summary (§5.4) from the task's last author
 	// job: model output, data only.
 	Summary string `json:"summary,omitempty"`
+	// CommitMessage is the commit message (§5.4) the task's last author
+	// job's worker wrote for the land job (§7.1): subject and body in the
+	// repo's own style, model output, data only. Empty when the worker
+	// gave none, and land then builds the message itself.
+	CommitMessage string `json:"commit_message,omitempty"`
 	// Family and Model are the authoring agent's, from the job record
 	// (§7); empty when the job has no agent or the agent is gone.
 	Family string `json:"family,omitempty"`
@@ -74,7 +79,11 @@ func (e *Engine) TaskLand(ctx context.Context, id int64) (*TaskLandInfo, error) 
 		case err != nil:
 			return fmt.Errorf("read the last author job of task %d: %w", id, err)
 		default:
-			t.Summary = jobResultSummary(authorResult)
+			wr, ok := parseWorkerResult(jobResultText(authorResult))
+			if ok {
+				t.Summary = wr.Summary
+				t.CommitMessage = wr.CommitMessage
+			}
 			if agent != 0 {
 				err := tx.QueryRow(`SELECT family, model FROM agents WHERE id = ?`, agent).Scan(&t.Family, &t.Model)
 				if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -116,13 +125,4 @@ func jobResultText(stored string) string {
 		return ""
 	}
 	return w.Result
-}
-
-// jobResultSummary is the summary field of a worker's result block.
-func jobResultSummary(stored string) string {
-	wr, ok := parseWorkerResult(jobResultText(stored))
-	if !ok {
-		return ""
-	}
-	return wr.Summary
 }

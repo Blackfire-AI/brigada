@@ -14,7 +14,7 @@ import (
 // prompts are composed only from fixed, versioned templates plus
 // verbatim data (§1.4), so a template change is a version bump, never a
 // silent edit.
-const WorkerTemplateVersion = 7
+const WorkerTemplateVersion = 8
 
 // ReviewTemplateVersion is the review prompt template's version (§7),
 // under the same rule as the worker's (§1.4).
@@ -70,7 +70,8 @@ End your final message with exactly one JSON result block, fenced as a
 %FENCE%json code block, and nothing after it:
 
 {"status": "done" | "needs_help" | "failed", "summary": "...",
- "question": "...", "branch": "...", "discoveries": "..."}
+ "question": "...", "branch": "...", "discoveries": "...",
+ "commit_message": "..."}
 
 - "done": the work is finished and left in the worktree. "summary"
   says what changed and why; "branch", if you give it, is the branch
@@ -82,6 +83,12 @@ End your final message with exactly one JSON result block, fenced as a
   task (an API quirk, a flaky test, a wrong assumption in the plan,
   something a later task will trip over). Leave it out when there are
   none.
+- "commit_message" is optional: the commit message the land job commits
+  your work with — one subject line, a blank line, then the body, in
+  the repository's own commit style, which its instructions and its git
+  log show. Trailers (Brigada-Task and its kin) are added for you; give
+  none yourself. Leave the field out when the repo has no style to
+  follow.
 
 Never loosen, skip or delete a test or check to make a review pass. If
 a fix genuinely requires changing one, say so in the result's summary.
