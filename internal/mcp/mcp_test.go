@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http/httptest"
@@ -384,6 +385,51 @@ func TestServeCallStatusPlansAndNeedsYou(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("status text = %q, want it to contain %q", text, want)
 		}
+	}
+}
+
+// TestServeCallStatusAll covers the status tool's all parameter (§10):
+// the default lists the three newest finished plans and counts the
+// older ones in one summary line; all=true lists every finished plan.
+func TestServeCallStatusAll(t *testing.T) {
+	e := newEnv(t)
+	err := e.st.Update(context.Background(), func(tx *sql.Tx) error {
+		for i := 0; i < 4; i++ {
+			if _, err := tx.Exec(`INSERT INTO plans (project_id, title, state, created_at, updated_at)
+				VALUES (1, ?, 'done', ?, ?)`,
+				fmt.Sprintf("done %d", i), seedTS, seedTS); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("seed the finished plans: %v", err)
+	}
+
+	s := start(t, e)
+	a := s.call(3, "tools/call", map[string]any{"name": "status", "arguments": map[string]any{}})
+	text, isError := toolText(t, a)
+	if isError {
+		t.Fatalf("status errored: %s", text)
+	}
+	if !strings.Contains(text, "#4 done done 3\n") || !strings.Contains(text, "#2 done done 1\n") {
+		t.Errorf("status text = %q, want the three newest finished plans in it", text)
+	}
+	if !strings.Contains(text, "1 older finished plans hidden; pass all=true") {
+		t.Errorf("status text = %q, want the hidden count line", text)
+	}
+
+	a = s.call(4, "tools/call", map[string]any{"name": "status", "arguments": map[string]any{"all": true}})
+	text, isError = toolText(t, a)
+	if isError {
+		t.Fatalf("status all errored: %s", text)
+	}
+	if !strings.Contains(text, "#1 done done 0\n") {
+		t.Errorf("status all text = %q, want every finished plan listed", text)
+	}
+	if strings.Contains(text, "hidden") {
+		t.Errorf("status all text = %q, want no hidden line", text)
 	}
 }
 

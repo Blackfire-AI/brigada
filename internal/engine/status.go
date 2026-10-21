@@ -6,14 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
 
-// statusDoneWindow is how long a finished plan stays in status's plans
-// list (§10): a day is long enough to see what landed, short enough to
-// keep the list readable.
-const statusDoneWindow = 24 * time.Hour
+// statusFinishedKeep is how many finished plans the default status
+// lists (§10): the newest done or cancelled ones — enough to see what
+// landed lately — while the rest stay behind the all view, counted in
+// one summary line. A foreman's session is resumed on every wake, so
+// an unbounded list would grow its transcript without end.
+const statusFinishedKeep = 3
 
 // needsYouReasonLimit is the most a needs-you entry's reason line
 // carries (§10): one line, about this many bytes, never a paragraph.
@@ -47,10 +50,16 @@ type StatusInfo struct {
 	// Slots is who holds the foreman's live slot, per project (§4.6):
 	// free, a headless turn or an attach, with the holder's label and
 	// since when.
-	Slots    []Slot         `json:"slots"`
-	Plans    []StatusPlan   `json:"plans"`
-	Report   *StatusReport  `json:"report,omitempty"`
-	NeedsYou []NeedsYouItem `json:"needs_you"`
+	Slots []Slot       `json:"slots"`
+	Plans []StatusPlan `json:"plans"`
+	// HiddenFinishedPlans counts the finished plans — done or
+	// cancelled — the plans list left out (§10): the default keeps the
+	// newest statusFinishedKeep, the all view lists every one. The
+	// status views render it as the one summary line that says the
+	// rest exist.
+	HiddenFinishedPlans int            `json:"hidden_finished_plans,omitempty"`
+	Report              *StatusReport  `json:"report,omitempty"`
+	NeedsYou            []NeedsYouItem `json:"needs_you"`
 	// Cooling lists the agents held back for quota (§8, §10): shown
 	// beside the running jobs, never in the needs-you queue.
 	Cooling []CoolingAgent `json:"cooling,omitempty"`
@@ -91,9 +100,10 @@ type StatusReport struct {
 }
 
 // StatusPlan is one plan the status lists (§6.1, §6.2, §10): every
-// active plan, and every plan that went done inside the last day. The
-// repo URL names whose plan it is; the tasks are the plan's, each with
-// the state and branch the graph is in.
+// live plan — active, or waiting for the user's approval — and the
+// newest finished ones, done or cancelled. The repo URL names whose
+// plan it is; the tasks are the plan's, each with the state and branch
+// the graph is in.
 type StatusPlan struct {
 	ID      int64        `json:"id"`
 	RepoURL string       `json:"repo_url"`
@@ -167,19 +177,29 @@ var JobStatuses = []string{
 // dead runner left is expired here, not counted as work. project scopes
 // the plans and the needs-you queue to one project; 0 names every
 // project — the API passes a foreman caller's own project, and client or
-// admin callers read all of them.
+// admin callers read all of them. The plans list carries every live plan
+// and only the newest statusFinishedKeep finished ones; StatusAll lists
+// every finished one.
 func (e *Engine) Status(ctx context.Context, project int64) (StatusInfo, error) {
-	return e.status(ctx, project, false)
+	return e.status(ctx, project, false, false)
 }
 
 // StatusWithInstructions is Status with the full project instruction text
 // in StatusInfo.Instructions (§5.9): the foreman reads it as data before
 // it plans. Plain Status names source, version, size and digest only.
 func (e *Engine) StatusWithInstructions(ctx context.Context, project int64) (StatusInfo, error) {
-	return e.status(ctx, project, true)
+	return e.status(ctx, project, true, false)
 }
 
-func (e *Engine) status(ctx context.Context, project int64, withText bool) (StatusInfo, error) {
+// StatusAll is Status with every finished plan listed, not only the
+// newest statusFinishedKeep (§10): the status tools' all view — the
+// MCP status tool's all parameter, `brigada status --all`. withText is
+// StatusWithInstructions's flag.
+func (e *Engine) StatusAll(ctx context.Context, project int64, withText bool) (StatusInfo, error) {
+	return e.status(ctx, project, withText, true)
+}
+
+func (e *Engine) status(ctx context.Context, project int64, withText, all bool) (StatusInfo, error) {
 	var info StatusInfo
 	info.Running = []StatusJob{}
 	info.Plans = []StatusPlan{}
@@ -235,7 +255,7 @@ func (e *Engine) status(ctx context.Context, project int64, withText bool) (Stat
 		if info.Slots, err = statusSlotsTx(tx, project, now); err != nil {
 			return err
 		}
-		if info.Plans, err = statusPlansTx(tx, project, now); err != nil {
+		if info.Plans, info.HiddenFinishedPlans, err = statusPlansTx(tx, project, all); err != nil {
 			return err
 		}
 		if info.Report, err = statusReportTx(tx, project); err != nil {
@@ -359,42 +379,69 @@ func statusRunningTx(tx *sql.Tx, project int64) ([]StatusJob, error) {
 }
 
 // statusPlansTx lists the plans the status shows (§6.1, §6.2, §10):
-// every active plan — its tasks are live work — and every plan that
-// went done inside the last day. A done plan's updated_at is the
-// moment it went done: nothing else writes a done plan after.
-func statusPlansTx(tx *sql.Tx, project int64, now time.Time) ([]StatusPlan, error) {
-	cutoff := fmtTime(now.Add(-statusDoneWindow))
-	query := `SELECT p.id, pr.repo_url, p.title, p.state
-		FROM plans p JOIN projects pr ON pr.id = p.project_id
-		WHERE pr.archived_at IS NULL AND (p.state = 'active' OR (p.state = 'done' AND p.updated_at >= ?))`
-	args := []any{cutoff}
+// every live plan — active, or waiting for the user's approval — and
+// the newest statusFinishedKeep finished ones, done or cancelled, by
+// their updated_at: a finished plan's updated_at is the moment it
+// finished, nothing else writes one after. all lists every finished
+// plan instead; the second return is how many finished plans the list
+// left out, the default view's one summary line.
+func statusPlansTx(tx *sql.Tx, project int64, all bool) ([]StatusPlan, int, error) {
+	scope := "pr.archived_at IS NULL"
+	args := []any{}
 	if project != 0 {
-		query += " AND p.project_id = ?"
+		scope += " AND p.project_id = ?"
 		args = append(args, project)
 	}
-	query += " ORDER BY p.id"
+	var finished int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM plans p JOIN projects pr ON pr.id = p.project_id
+		WHERE `+scope+` AND p.state IN ('done', 'cancelled')`, args...).Scan(&finished); err != nil {
+		return nil, 0, fmt.Errorf("count the finished plans: %w", err)
+	}
+	finishedQuery := `SELECT p.id, pr.repo_url, p.title, p.state
+		FROM plans p JOIN projects pr ON pr.id = p.project_id
+		WHERE ` + scope + ` AND p.state IN ('done', 'cancelled')
+		ORDER BY p.updated_at DESC, p.id DESC`
+	if !all {
+		finishedQuery += fmt.Sprintf(" LIMIT %d", statusFinishedKeep)
+	}
+	fin, err := statusPlanRows(tx, finishedQuery, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	live, err := statusPlanRows(tx, `SELECT p.id, pr.repo_url, p.title, p.state
+		FROM plans p JOIN projects pr ON pr.id = p.project_id
+		WHERE `+scope+` AND p.state IN ('active', 'pending_approval') ORDER BY p.id`, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	plans := append(fin, live...)
+	sort.Slice(plans, func(i, j int) bool { return plans[i].ID < plans[j].ID })
+	for i := range plans {
+		if plans[i].Tasks, err = statusPlanTasksTx(tx, plans[i].ID); err != nil {
+			return nil, 0, err
+		}
+	}
+	return plans, finished - len(fin), nil
+}
+
+// statusPlanRows reads the plan rows a status query selects, in the
+// query's own order; the tasks are the caller's to load.
+func statusPlanRows(tx *sql.Tx, query string, args ...any) ([]StatusPlan, error) {
 	rows, err := tx.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list the status plans: %w", err)
 	}
+	defer rows.Close()
 	plans := []StatusPlan{}
 	for rows.Next() {
 		var p StatusPlan
 		if err := rows.Scan(&p.ID, &p.RepoURL, &p.Title, &p.State); err != nil {
-			rows.Close()
 			return nil, fmt.Errorf("list the status plans: %w", err)
 		}
 		plans = append(plans, p)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
 		return nil, fmt.Errorf("list the status plans: %w", err)
-	}
-	rows.Close()
-	for i := range plans {
-		if plans[i].Tasks, err = statusPlanTasksTx(tx, plans[i].ID); err != nil {
-			return nil, err
-		}
 	}
 	return plans, nil
 }

@@ -13,7 +13,8 @@ import (
 // project (§12.1): the token's project is the scope the engine filters
 // by, and a client or admin reads every project. One of the two places
 // a client learns the engine is alive besides /v1/health, and the one
-// with content.
+// with content. The plans list keeps every live plan and the newest
+// finished ones; `all` lists every finished plan (§10).
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id identity) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
@@ -29,10 +30,15 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id identit
 		}
 		project = id.project
 	}
+	withText := r.URL.Query().Get("instructions") != ""
+	all := r.URL.Query().Get("all") != ""
 	var st engine.StatusInfo
-	if r.URL.Query().Get("instructions") != "" {
+	switch {
+	case all:
+		st, err = s.eng.StatusAll(r.Context(), project, withText)
+	case withText:
 		st, err = s.eng.StatusWithInstructions(r.Context(), project)
-	} else {
+	default:
 		st, err = s.eng.Status(r.Context(), project)
 	}
 	if err != nil {

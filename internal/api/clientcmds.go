@@ -97,10 +97,14 @@ type Status struct {
 	// foreman (§4.2 item 3).
 	ForemanMessages int `json:"foreman_messages"`
 	// Slots is who holds the foreman's slot per project (§4.6).
-	Slots    []engine.Slot         `json:"slots"`
-	Plans    []engine.StatusPlan   `json:"plans"`
-	Report   *engine.StatusReport  `json:"report,omitempty"`
-	NeedsYou []engine.NeedsYouItem `json:"needs_you"`
+	Slots []engine.Slot       `json:"slots"`
+	Plans []engine.StatusPlan `json:"plans"`
+	// HiddenFinishedPlans counts the finished plans the plans list left
+	// out (§10): the default keeps the newest few, `all` lists every
+	// one. Rendered as the one summary line.
+	HiddenFinishedPlans int                   `json:"hidden_finished_plans,omitempty"`
+	Report              *engine.StatusReport  `json:"report,omitempty"`
+	NeedsYou            []engine.NeedsYouItem `json:"needs_you"`
 	// Cooling lists the agents held back for quota (§8, §10).
 	Cooling []engine.CoolingAgent `json:"cooling,omitempty"`
 	// Held lists the queued jobs a full cap layer holds (§8.1).
@@ -111,18 +115,27 @@ type Status struct {
 }
 
 // Status reads the engine's own state (§13): which process it is, since
-// when, and the jobs by status.
+// when, and the jobs by status. The plans list keeps every live plan
+// and the newest finished ones only.
 func (c *Client) Status(ctx context.Context) (Status, error) {
-	return c.status(ctx, false)
+	return c.status(ctx, false, false)
 }
 
 // StatusWithInstructions is Status with the full project instruction
 // text (§5.9), for the foreman's status tool.
 func (c *Client) StatusWithInstructions(ctx context.Context) (Status, error) {
-	return c.status(ctx, true)
+	return c.status(ctx, true, false)
 }
 
-func (c *Client) status(ctx context.Context, withText bool) (Status, error) {
+// StatusAll is Status with every finished plan listed, not only the
+// newest few (§10): `all` on /v1/status — the MCP status tool's all
+// parameter, `brigada status --all`. withText is
+// StatusWithInstructions's flag.
+func (c *Client) StatusAll(ctx context.Context, withText bool) (Status, error) {
+	return c.status(ctx, withText, true)
+}
+
+func (c *Client) status(ctx context.Context, withText, all bool) (Status, error) {
 	var st Status
 	path := "/v1/status"
 	sep := "?"
@@ -132,6 +145,10 @@ func (c *Client) status(ctx context.Context, withText bool) (Status, error) {
 	}
 	if withText {
 		path += sep + "instructions=1"
+		sep = "&"
+	}
+	if all {
+		path += sep + "all=1"
 	}
 	if err := c.call(ctx, http.MethodGet, path, nil, &st); err != nil {
 		return Status{}, err

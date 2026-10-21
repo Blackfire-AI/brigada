@@ -313,7 +313,7 @@ Open your harness in the parent folder. The coordinator session has six tools ov
 
 - `list_projects`: every project by repository URL, with its foreman, active plans and how many things need you;
 - `ask_foreman`: send one project's foreman a message as you (`repo_url`, `text`);
-- `status` and `history`: across every project, or one with `repo_url`; `status` shows each plan awaiting approval in full, with its id and version;
+- `status` and `history`: across every project, or one with `repo_url`; `status` shows each plan awaiting approval with its id, version and why it waits, its tasks in the plans list (which trims finished plans like `brigada status`, `all=true` for every one);
 - `plan_approve` and `plan_reject`: your decision on a plan over the approval limit, naming the project, the plan id and the **plan version you were shown**. A plan amended since is refused, and the coordinator must read `status` and show you the plan again. These tools act for you: the coordinator is told to call them only after you said an explicit yes or no in the chat.
 
 The coordinator never plans and never edits a task graph: it has no `plan_create`, `plan_amend` or task tool. Each project's own foreman plans.
@@ -332,6 +332,8 @@ Out of scope: a plan whose tasks span repositories (a plan belongs to one projec
 - the plans with their tasks, and the foreman's latest report;
 - how many messages wait for the foreman;
 - the **needs you** queue.
+
+The plans list keeps every live plan — active or awaiting approval — and the three most recently finished ones (done or cancelled); older finished plans are one count line, `N older finished plans hidden; pass all=true`. `brigada status --all` lists them all. The foreman's `status` tool does the same by default; its `all` parameter is `--all`'s twin. The needs-you queue and the running jobs are never trimmed.
 
 `brigada status --line` prints one short line for a terminal status bar; it never starts the engine.
 
@@ -1058,7 +1060,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 ### Watching
 
 - `brigada config`: show agents, runner state, foreman, project settings with provenance, and machine config-file values and defaults, with their locations and commands to change them. See [section 1](#changing-your-setup-later).
-- `brigada status [--line]`: the engine, jobs, plans and the needs-you queue. See [section 4](#4-while-work-runs).
+- `brigada status [--line] [--all]`: the engine, jobs, plans and the needs-you queue. See [section 4](#4-while-work-runs).
 - `brigada history [--task N] [--job N] [--limit N]`: the timeline. See [section 4](#history-diffs-and-logs).
 - `brigada diff <task-id> [--stat] [--repo URL]`: what a task changed, as `git diff base...branch`; run inside the repo. See [section 4](#history-diffs-and-logs).
 - `brigada logs <job-id> [--check] [--tail N] [--follow]`, or `brigada logs --task N`: a job's transcript as readable lines, or its check log. See [section 4](#history-diffs-and-logs).

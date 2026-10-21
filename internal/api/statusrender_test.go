@@ -118,3 +118,17 @@ func TestStatusSectionsTaskTierEffort(t *testing.T) {
 		}
 	}
 }
+
+// TestStatusSectionsCountsHiddenFinishedPlans: the trimmed plans list
+// says in one line, after the plans, how many older finished plans it
+// left out and what lists them (§10); nothing is said when none hide.
+func TestStatusSectionsCountsHiddenFinishedPlans(t *testing.T) {
+	st := Status{Plans: []engine.StatusPlan{{ID: 3, State: "done"}}, HiddenFinishedPlans: 5}
+	want := "#3 done \n5 older finished plans hidden; pass all=true\n"
+	if got := StatusSections(st); !strings.Contains(got, want) {
+		t.Errorf("status sections = %q, want the hidden count after the last plan:\n%s", got, want)
+	}
+	if got := StatusSections(Status{Plans: []engine.StatusPlan{{ID: 3, State: "done"}}}); strings.Contains(got, "hidden") {
+		t.Errorf("status sections = %q, want no hidden line when nothing hides", got)
+	}
+}

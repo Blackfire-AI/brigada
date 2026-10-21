@@ -18,7 +18,9 @@ import (
 // `needs you:` queue, "nothing" when it is empty. The client's status
 // command and the MCP bridge's status tool share this rendering, so a
 // user and the foreman read the same lines; a task's branch rides in
-// brackets only once it has one.
+// brackets only once it has one. The plans list the engine trimmed
+// says so in one summary line (§10): the older finished plans counted,
+// the all view (`--all`, all=true) listing them.
 func StatusSections(st Status) string {
 	lines := runningLines(st.Running, time.Now())
 	for _, a := range st.Cooling {
@@ -117,6 +119,11 @@ func StatusSections(st Status) string {
 				lines = append(lines, line)
 			}
 		}
+	}
+	// What the engine trimmed (§10): the older finished plans counted
+	// in one line, the all view listing them.
+	if st.HiddenFinishedPlans > 0 {
+		lines = append(lines, fmt.Sprintf("%d older finished plans hidden; pass all=true", st.HiddenFinishedPlans))
 	}
 	if st.Report == nil {
 		lines = append(lines, "foreman report: none")

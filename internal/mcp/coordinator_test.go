@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -159,11 +160,13 @@ func TestCoordinatorApproveRefusals(t *testing.T) {
 	}
 	plan := waitingPlan(t, e, "a")
 
-	// The status the coordinator shows the user carries the plan, its
-	// version and its tasks.
+	// The status the coordinator shows the user lists the waiting plan
+	// once: its tasks in the plans section, its version and why it
+	// waits in the approval block.
 	text, isErr := call(1, "status", map[string]any{})
-	if isErr || !strings.Contains(text, "plans awaiting approval") || !strings.Contains(text, "version 1 of https://example.invalid/x.git") || !strings.Contains(text, "[deploy] deploy") {
-		t.Fatalf("status = %q (error %v), want the waiting plan with its version and tasks", text, isErr)
+	if isErr || !strings.Contains(text, "plans awaiting approval") || !strings.Contains(text, "version 1 of https://example.invalid/x.git") ||
+		!strings.Contains(text, "pending_approval ship it a") || !strings.Contains(text, " pending deploy") {
+		t.Fatalf("status = %q (error %v), want the waiting plan with its version, and its tasks in the plans section", text, isErr)
 	}
 
 	for i, tc := range []struct {
@@ -223,6 +226,27 @@ func TestCoordinatorApproveRefusals(t *testing.T) {
 	}
 	if st := planStateOf(t, e, other); st != "cancelled" {
 		t.Errorf("rejected plan %d = %s, want cancelled", other, st)
+	}
+
+	// The coordinator's status trims finished plans like the foreman's
+	// (§10): with four finished, the default counts the oldest behind
+	// one summary line; all=true lists every finished plan.
+	for i := 0; i < 3; i++ {
+		if err := e.st.Update(t.Context(), func(tx *sql.Tx) error {
+			_, err := tx.Exec(`INSERT INTO plans (project_id, title, state, created_at, updated_at)
+				VALUES (1, ?, 'done', ?, ?)`, fmt.Sprintf("older %d", i), seedTS, seedTS)
+			return err
+		}); err != nil {
+			t.Fatalf("seed the finished plans: %v", err)
+		}
+	}
+	text, _ = call(106, "status", map[string]any{})
+	if !strings.Contains(text, "1 older finished plans hidden; pass all=true") {
+		t.Errorf("status with four finished plans = %q, want the hidden count line", text)
+	}
+	text, _ = call(107, "status", map[string]any{"all": true})
+	if strings.Contains(text, "hidden") || !strings.Contains(text, " done older 0") {
+		t.Errorf("status all = %q, want every finished plan listed and no hidden line", text)
 	}
 }
 
