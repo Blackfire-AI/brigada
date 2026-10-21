@@ -65,9 +65,9 @@ tasks:
     continue: "cost-rule"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-99-r1"
-    rounds: 0
+    rounds: 1
   - id: 100
     name: "wording-held-by-rule"
     title: "Needs-you wording names the rule and how to release or change it"
