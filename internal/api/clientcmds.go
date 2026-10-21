@@ -373,7 +373,8 @@ type PlanRetarget struct {
 
 // PlanAmendResult names what the amendment did: the plan's state after it,
 // the added tasks, the ids cancelled and re-pointed, the tasks it started
-// (a work job queued), and why the plan waits for approval, if it does.
+// (a work job queued), the added tasks a plan rule held, and why the plan
+// waits for approval, if it does.
 type PlanAmendResult struct {
 	PlanID     int64
 	State      string
@@ -382,7 +383,15 @@ type PlanAmendResult struct {
 	Retargeted []int64
 	Retiered   []int64
 	Started    []PlanCreatedTask
+	Held       []PlanHeldTask
 	Reasons    []string
+}
+
+// PlanHeldTask is one added task a plan rule held, with the rule's name.
+type PlanHeldTask struct {
+	TaskID int64
+	Name   string
+	Reason string
 }
 
 // AmendPlan amends a live plan (§12.2). idemKey is the call's
@@ -409,6 +418,9 @@ func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey
 	}
 	for _, t := range out.Started {
 		res.Started = append(res.Started, PlanCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
+	}
+	for _, h := range out.Held {
+		res.Held = append(res.Held, PlanHeldTask{TaskID: h.TaskID, Name: h.Name, Reason: h.Reason})
 	}
 	return res, nil
 }

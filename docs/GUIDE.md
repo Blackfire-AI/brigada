@@ -626,7 +626,7 @@ The loop — plan, work, check, review, land, push — is brigada's; you stop it
 - a task class outside `approval_classes` (default `implement`, `review`, `answer`);
 - a task whose spec or check mentions a path that matches one of `approval_protected_paths` (default none).
 
-A held plan waits in `pending_approval`, and nothing is queued. The needs-you entry gives the reasons, for example `7 tasks, over the limit of 5` or `gate_plan is ask`. An amendment that adds tasks is checked against the limit again. You decide:
+A held plan waits in `pending_approval`, and nothing is queued. The needs-you entry gives the reasons, for example `7 tasks, over the limit of 5` or `gate_plan is ask`. An amendment of an already-active plan is judged by what it adds: each added task is checked on its own against the per-task rules — its class, the protected paths its spec or check mentions, its extra repositories — and one that trips a rule is held alone, parked with a needs-you line naming the rule, while the plan stays active and the rest runs on. The task count and `gate_plan` never hold an amendment of a running plan, and cancelling, re-pointing or retiering never holds. You decide:
 
 ```sh
 brigada plan approve 7    # queues the tasks; prints each task's job

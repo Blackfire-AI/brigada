@@ -195,11 +195,10 @@ func TestAmendCycleRefusesWhole(t *testing.T) {
 	}
 }
 
-// TestAmendPastApprovalLimitReawaits: an amendment that grows an active
-// plan past the limit holds it for the user — nothing new starts, and
-// approving starts the held tasks — and an awaiting plan stays awaiting,
-// its reasons evaluated again.
-func TestAmendPastApprovalLimitReawaits(t *testing.T) {
+// TestAmendJudgesAddedTasks: an amendment of an active plan is judged by
+// what it adds. Growing the plan past approval_max_tasks no longer holds
+// the whole plan: it stays active and the added tasks run as usual.
+func TestAmendJudgesAddedTasks(t *testing.T) {
 	e := newEnv(t)
 	e.setSettings(`{"approval_max_tasks": 3}`)
 	res := e.createPlan([]PlanTask{
@@ -212,38 +211,121 @@ func TestAmendPastApprovalLimitReawaits(t *testing.T) {
 		{Name: "c", Spec: "c", Class: "answer"},
 		{Name: "d", Spec: "d", Class: "answer", Deps: []string{"a"}},
 	}})
-	if am.State != planAwaitingApproval || len(am.Reasons) == 0 || !strings.Contains(am.Reasons[0], "4 tasks, over the limit of 3") {
-		t.Fatalf("amendment = %+v, want the plan held with the task count why", am)
+	if am.State != "active" || len(am.Held) != 0 || len(am.Reasons) != 0 {
+		t.Fatalf("amendment = %+v, want active with nothing held and no reasons", am)
 	}
-	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planAwaitingApproval {
-		t.Errorf("plan state = %q, want pending_approval", got)
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
+		t.Errorf("plan state = %q, want active", got)
 	}
-	if got := e.int("SELECT COUNT(*) FROM events WHERE kind = 'plan_awaiting_approval' AND project_id = ?", e.project); got != 1 {
-		t.Errorf("plan_awaiting_approval events = %d, want 1", got)
+	if got := e.int("SELECT COUNT(*) FROM events WHERE kind = 'plan_awaiting_approval'"); got != 0 {
+		t.Errorf("plan_awaiting_approval events = %d, want none", got)
 	}
-	for _, c := range am.Added {
-		if c.JobID != 0 || e.taskState(c.TaskID) != taskPending {
-			t.Errorf("added task %+v = %q, want pending with no job", c, e.taskState(c.TaskID))
+	// c waits for nothing and starts at once; d waits on a.
+	if got := e.taskState(am.Added[0].TaskID); got != taskReady || am.Added[0].JobID == 0 {
+		t.Errorf("c = %q job %d, want ready with a job", got, am.Added[0].JobID)
+	}
+	if got := e.taskState(am.Added[1].TaskID); got != taskPending || am.Added[1].JobID != 0 {
+		t.Errorf("d = %q job %d, want pending with no job", got, am.Added[1].JobID)
+	}
+}
+
+// TestAmendHoldsTrippingAddedTask: an added task that trips a plan rule
+// is held alone — parked at needs_foreman with a needs-you line naming
+// the rule — while the plan stays active and the rest runs on.
+func TestAmendHoldsTrippingAddedTask(t *testing.T) {
+	e := newEnv(t)
+	e.setSettings(`{"approval_protected_paths": ["go.mod"]}`)
+	res := e.createPlan([]PlanTask{{Name: "a", Spec: "a", Class: "answer"}})
+	e.assertRuns(res, 1)
+
+	am := e.amend(res.PlanID, PlanAmendment{Add: []PlanTask{
+		{Name: "touch", Spec: "edit go.mod", Class: "answer"},
+		{Name: "clean", Spec: "do something else", Class: "answer"},
+	}})
+	if am.State != "active" || len(am.Held) != 1 {
+		t.Fatalf("amendment = %+v, want active with one held task", am)
+	}
+	held := am.Held[0]
+	if held.Name != "touch" || !strings.Contains(held.Reason, "touches go.mod") {
+		t.Errorf("held = %+v, want the touch task with the protected-path reason", held)
+	}
+	if got := e.taskState(held.TaskID); got != taskNeedsForeman {
+		t.Errorf("held task state = %q, want needs_foreman", got)
+	}
+	if got := e.queuedWork(held.TaskID); got != 0 {
+		t.Errorf("held task has %d queued jobs, want none", got)
+	}
+	// The clean task runs on.
+	clean := am.Added[1]
+	if got := e.taskState(clean.TaskID); got != taskReady || clean.JobID == 0 {
+		t.Errorf("clean task = %q job %d, want ready with a job", got, clean.JobID)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
+		t.Errorf("plan state = %q, want active", got)
+	}
+	if p, ok := e.eventPayloadOf(evTaskPlanHeld); !ok || !strings.Contains(p.Reason, "touches go.mod") {
+		t.Errorf("task_plan_held event = %+v, want the rule named", p)
+	}
+
+	// The needs-you queue names the held task and the rule.
+	st, err := e.eng.Status(e.ctx, e.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, it := range st.NeedsYou {
+		if it.Kind == "task" && it.ID == held.TaskID {
+			found = true
+			if it.State != taskNeedsForeman || !strings.Contains(it.Reason, "touches go.mod") {
+				t.Errorf("needs-you entry = %+v, want needs_foreman naming the rule", it)
+			}
 		}
 	}
-	// Completing a held plan's task releases nothing while it waits.
-	g := e.leaseAny(e.runner1)
-	e.complete(g, done())
-	if got := e.queuedWork(am.Added[1].TaskID); got != 0 {
-		t.Errorf("d has %d queued jobs in a plan awaiting approval", got)
+	if !found {
+		t.Errorf("needs-you entries = %+v, want the held task", st.NeedsYou)
 	}
-	// Still awaiting after another amendment, reasons re-evaluated.
-	again := e.amend(res.PlanID, PlanAmendment{Add: []PlanTask{{Spec: "e", Class: "answer"}}})
-	if again.State != planAwaitingApproval || !strings.Contains(strings.Join(again.Reasons, ";"), "5 tasks") {
-		t.Errorf("second amendment = %+v, want still awaiting at 5 tasks", again)
+
+	// A class outside approval_classes trips the same way.
+	e2 := newEnv(t)
+	e2.setSettings(`{"approval_classes": ["implement"]}`)
+	res2 := e2.createPlan([]PlanTask{{Name: "a", Spec: "a", Class: "implement"}})
+	am2 := e2.amend(res2.PlanID, PlanAmendment{Add: []PlanTask{{Name: "deploy", Spec: "deploy it", Class: "deploy"}}})
+	if am2.State != "active" || len(am2.Held) != 1 || !strings.Contains(am2.Held[0].Reason, "class deploy outside") {
+		t.Fatalf("amendment = %+v, want active with the deploy task held for its class", am2)
 	}
-	dec, err := e.eng.ApprovePlan(e.ctx, 0, res.PlanID)
-	if err != nil {
-		t.Fatalf("approve: %v", err)
+	if got := e2.taskState(am2.Held[0].TaskID); got != taskNeedsForeman {
+		t.Errorf("deploy task state = %q, want needs_foreman", got)
 	}
-	// d's dependency a is done by now, so approval starts it with c and e.
-	if dec.State != "active" || len(dec.Tasks) != 3 {
-		t.Errorf("approval started %+v, want c, d and e", dec.Tasks)
+}
+
+// TestAmendCancellingRepointingRetieringNeverHolds: the per-task rules
+// apply only to tasks the amendment adds; cancelling, re-pointing or
+// retiering an existing task never holds it, whatever it trips.
+func TestAmendCancellingRepointingRetieringNeverHolds(t *testing.T) {
+	e := newEnv(t)
+	e.setSettings(`{"approval_classes": ["implement"]}`)
+	// A plan full of answer tasks would be held at creation, so build one
+	// with an allowed class and then amend its tasks in place.
+	res := e.createPlan([]PlanTask{
+		{Name: "a", Spec: "a", Class: "implement"},
+		{Name: "b", Spec: "b", Class: "implement", Deps: []string{"a"}},
+	})
+	am := e.amend(res.PlanID, PlanAmendment{
+		Retarget: []PlanRetarget{{Task: "b", Deps: nil}},
+		Retier:   []PlanRetier{{Task: "a", Tier: "heavy"}},
+	})
+	if am.State != "active" || len(am.Held) != 0 {
+		t.Fatalf("amendment = %+v, want active with nothing held", am)
+	}
+	if got := e.taskState(res.Tasks[1].TaskID); got != taskReady {
+		t.Errorf("b state = %q, want ready after the re-point", got)
+	}
+	if got := e.str("SELECT tier FROM tasks WHERE id = ?", res.Tasks[0].TaskID); got != "heavy" {
+		t.Errorf("a tier = %q, want heavy", got)
+	}
+	am = e.amend(res.PlanID, PlanAmendment{Cancel: []string{"a"}})
+	if am.State != "active" || len(am.Held) != 0 {
+		t.Fatalf("cancelling amendment = %+v, want active with nothing held", am)
 	}
 }
 

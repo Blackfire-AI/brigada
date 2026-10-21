@@ -268,6 +268,13 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 	for _, t := range res.Started {
 		fmt.Fprintf(&b, "\n%s: work job %d queued", label(t), t.JobID)
 	}
+	for _, h := range res.Held {
+		heldLabel := fmt.Sprintf("task %d", h.TaskID)
+		if h.Name != "" {
+			heldLabel += " " + h.Name
+		}
+		fmt.Fprintf(&b, "\n%s held at the plan gate: %s", heldLabel, h.Reason)
+	}
 	switch {
 	case res.State == "pending_approval":
 		fmt.Fprintf(&b, "\nawaiting approval, no new work queued. Why: %s. Tell the user: `brigada plan approve %d` starts it, `brigada plan reject %d` cancels it.",
