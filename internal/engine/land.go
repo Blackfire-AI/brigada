@@ -276,6 +276,17 @@ func (e *Engine) holdLandTx(tx *sql.Tx, project, taskID int64, reasons []string,
 	return err
 }
 
+// clearLandHoldTx drops a held land-gate hold of the task once its landing
+// is recorded, by trailer or by the land job (§6.3): the landing is done,
+// so the needs-you line that waited on it goes too. A rejected row stays,
+// as LandReject leaves it, so the rule never re-holds the task.
+func clearLandHoldTx(tx *sql.Tx, taskID int64) error {
+	if _, err := tx.Exec(`DELETE FROM land_holds WHERE task_id = ? AND state = 'held'`, taskID); err != nil {
+		return fmt.Errorf("clear the land hold of task %d: %w", taskID, err)
+	}
+	return nil
+}
+
 // queueLandJobTx creates the task's land job (§7.1): kind land on the
 // task's own key, so the one-live-job-per-key rule makes a repeat
 // coalesce. No worker and no agent; the git label is what a runner
@@ -472,6 +483,9 @@ func (e *Engine) landSucceededTx(tx *sql.Tx, job *jobRow, rec landRecord, now ti
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.TaskID, job.ProjectID, rec.TargetBranch, rec.Commit, pushed, rec.PushCmd, rec.AfterLandErr, fmtTime(now)); err != nil {
 		return fmt.Errorf("record the landing of task %d: %w", job.TaskID, err)
+	}
+	if err := clearLandHoldTx(tx, job.TaskID); err != nil {
+		return err
 	}
 	if _, err := appendEventTx(tx, evTaskLanded, job.ProjectID, job.TaskID, job.ID,
 		eventPayload{Status: taskDone, Branch: rec.TargetBranch, Commit: rec.Commit, Pushed: pushed,

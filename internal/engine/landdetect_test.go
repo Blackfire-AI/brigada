@@ -233,8 +233,8 @@ func TestRecordLandedRejectedHoldStaysRejected(t *testing.T) {
 
 // TestLandApproveTrailerLandedQueuesNothing: a task held at the land
 // gate that the trailer detection then finds on the default branch is
-// already landed; the user's approval releases the hold but queues no
-// land job for a task whose landing is recorded.
+// already landed; the recorded landing clears the hold, so the user has
+// nothing to approve, and no land job is queued for the landed task.
 func TestLandApproveTrailerLandedQueuesNothing(t *testing.T) {
 	e := newEnv(t)
 	author := e.agented("author", "anthropic", "implement")
@@ -246,12 +246,10 @@ func TestLandApproveTrailerLandedQueuesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := e.eng.LandApprove(e.ctx, e.project, e.task)
-	if err != nil {
-		t.Fatalf("LandApprove: %v", err)
-	}
-	if !res.Released {
-		t.Errorf("LandApprove = %+v, want released", res)
+	// The recorded landing cleared the hold, so there is nothing for the
+	// user to approve, and no land job is queued for the landed task.
+	if _, err := e.eng.LandApprove(e.ctx, e.project, e.task); err == nil {
+		t.Errorf("LandApprove after the trailer landing: want an error, the landing is no longer held")
 	}
 	if n := e.landJobs(); n != 0 {
 		t.Errorf("land jobs after approve = %d, want none for a task already landed by trailer", n)

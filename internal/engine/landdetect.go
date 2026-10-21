@@ -70,6 +70,11 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 		if taskProject != project {
 			continue // the trailer names another project's task
 		}
+		// A landing on the branch clears a held hold even when a record
+		// already exists: a hold left beside a record must not survive.
+		if err := clearLandHoldTx(tx, lc.TaskID); err != nil {
+			return err
+		}
 		// Idempotent: a task the land job landed already has a record, and
 		// one recorded by an earlier detection has one too.
 		var have int
