@@ -354,7 +354,8 @@ Out of scope: a plan whose tasks span repositories (a plan belongs to one projec
 - any agents cooling down;
 - the plans with their tasks, and the foreman's latest report;
 - how many messages wait for the foreman;
-- the **needs you** queue.
+- the **needs you** queue;
+- one hint line when your CLIs offer models no agent registers ([section 8](#models-added-later)).
 
 The plans list keeps every live plan — active or awaiting approval — and the three most recently finished ones (done or cancelled); older finished plans are one count line, `N older finished plans hidden; pass all=true`. `brigada status --all` lists them all. The foreman's `status` tool does the same by default; its `all` parameter is `--all`'s twin. The needs-you queue and the running jobs are never trimmed.
 
@@ -778,6 +779,16 @@ Letting Kimi write code is an opt-in. Init warns that Kimi has no sandbox: when 
 
 **Keep the runner running.** A job nobody leases within ten minutes fails. The ten minutes do not count while every runner that could take the job is full, or while every agent that qualifies for it is cooling after a usage limit (a fix round is pinned to its author's agent). `brigada status` shows such a job as held: waiting for a runner slot, or `waiting: <harness>/<model> cooling until <time>`. A job pinned to a broken agent still fails after ten minutes, and the failure names the agent and its state.
 
+### Models added later
+
+The agents file (`runner/agents` in the state directory) is written by `brigada init`, one `--agent` line per agent. A model a CLI starts offering afterwards is not registered, and nothing registers it for you: a new model can spend a paid account.
+
+`brigada agents` is read-only. It runs the same cheap model listings init uses (the claude, codex and opencode CLIs; none makes a model call) and compares them with the agents file. It prints the models offered but not registered, each with the tier its name gives and the account it would share, and the registered agents whose model the CLI no longer lists. A model is reported as gone only when the CLI's list is whole: claude's aliases are not a complete list, so claude agents are never reported as gone, and a codex or opencode list that left out a model of unknown family reports none. The tier printed is a guess from the name: correct a wrong one with `tier.<harness>/<model>` in the config file (for example a `-highspeed` model is a faster serving of the same model, not a light one).
+
+`brigada agents add <harness>/<model> [--classes CLASSES] [--effort LEVEL]` appends one line to the agents file and keeps every other line, comments included. For opencode, the model is `provider/model`, so `brigada agents add opencode/zai-coding-plan/glm-5.3-flash` names the harness before the first slash. `--classes` is comma-separated (default `implement,review,answer`; `none` for a foreman-only agent). The line carries the account the harness's registered agents use when that is not the harness name, so the agent shares the account the report named. The line is checked as the runner checks it at startup, so an unknown harness, an unsupported effort or a duplicate is refused and the file stays as it was. A model already registered is refused. The running runner is not touched: run `brigada stop` and `brigada start` to serve the new agent.
+
+`brigada status` and `brigada top` show one hint line when the last listing found unregistered models. The listing is cached in `runner/models-offered.json` in the state directory with its time; `status` lists again only when the cache is missing or older than 12 hours, and `top` reads the cache on each redraw and refreshes a stale one once, in the background. Nothing runs the CLIs when no agents file exists, and `brigada agents` always lists afresh.
+
 ### Tiers
 
 The dispatcher picks among the eligible agents in the task's effective tier, among the polling runner's agents with room under the caps. Each agent draws a plausible success rate p from its record on this repo for the task's class (a thin record draws widely, so a newer agent still gets tried), and the agents rank by `weight / p`, lowest first, where weight is the agent's `cost.<harness>/<model>` ([section 13](#13-configuration-reference)). The first agent in that order with room under the caps takes the job. A weight of 0 ranks before every paid agent. The pick is random, so two jobs in a row can go to different agents; the decision record (`why this agent`) shows each candidate's weight and draw. Sampling stays within the served tier. A tier whose eligible agents are cap-blocked waits for room, and one whose agents are cooling for at most an hour waits for the reset time; it does not fall back just because another tier is free. An agent cooling for more than an hour, such as under a limit of days, counts like a broken one. An agent whose model cap or account cap is exactly 0 can never run, so it does not count: a tier whose agents are all capped at 0 falls back like a tier with no agent. A cap that is merely full still waits.
@@ -868,7 +879,7 @@ A foreman turn is never held back by the plan or model caps, and goes ahead of q
 
 `brigada capacity` prints the same snapshot as two tables. AGENTS lists each agent with its tier, effort, cost weight, running jobs against its cap (with the layer that sets it) and quota: `ready`, `cooling until` a local time, or `broken`. LAYERS lists each cap layer with its key, cap, use and queue. It shows the project of the repository you are in; `--project URL` names another, and outside a repository it shows every project's.
 
-`brigada top` is a live view of the engine: every `--interval` (default 2s) it redraws the agents table, the running jobs, the queue and held jobs, the active plans with their stuck tasks, the needs-you queue and the newest events. `q` quits and `p` pauses the refresh. When the engine cannot be reached the view keeps the last data and shows the error on a line while it retries; `--no-start` stops it starting an engine. When the output is not a terminal it prints one plain snapshot and exits.
+`brigada top` is a live view of the engine: every `--interval` (default 2s) it redraws the agents table, the running jobs, the queue and held jobs, the active plans with their stuck tasks, the needs-you queue and the newest events. `q` quits and `p` pauses the refresh. When the engine cannot be reached the view keeps the last data and shows the error on a line while it retries; `--no-start` stops it starting an engine. When the output is not a terminal it prints one plain snapshot and exits. The same hint line as `status` sits under the header when your CLIs offer unregistered models; `top` only reads the cached listing on each redraw ([section 8](#models-added-later)).
 
 The foreman can look at the capacity it has when it plans (per agent: the tier, the configured effort or `default`, the cap, the running jobs, the quota state and the cost weight), but the engine enforces the caps whatever the foreman believes. `cost.<harness>/<model>` is a relative weight, default 1, that the foreman sees when it decides which tasks can wait for a cheaper agent. It also steers dispatch: agents of a tier rank by `weight / p` ([section 8](#tiers)), so a dearer agent is picked less often unless its record is clearly better.
 
@@ -1100,12 +1111,14 @@ A command's flags go after its name and before its positional arguments (`diff`,
 ### Watching
 
 - `brigada config`: show agents, runner state, foreman, project settings with provenance, and machine config-file values and defaults, with their locations and commands to change them. See [section 1](#changing-your-setup-later).
-- `brigada status [--line] [--all]`: the engine, jobs, plans and the needs-you queue. See [section 4](#4-while-work-runs).
+- `brigada status [--line] [--all]`: the engine, jobs, plans and the needs-you queue, plus a hint when your CLIs offer unregistered models. See [section 4](#4-while-work-runs).
+- `brigada agents`: the models your CLIs offer that no agent registers, with their name-based tier and account, and registered models a CLI no longer lists; read-only. See [section 8](#models-added-later).
+- `brigada agents add <harness>/<model> [--classes CLASSES] [--effort LEVEL]`: register one model by appending its line to the agents file; restart the runner to serve it. See [section 8](#models-added-later).
 - `brigada history [--task N] [--job N] [--limit N]`: the timeline. See [section 4](#history-diffs-and-logs).
 - `brigada diff <task-id> [--stat] [--repo URL]`: what a task changed, as `git diff base...branch`; run inside the repo. See [section 4](#history-diffs-and-logs).
 - `brigada logs <job-id> [--check] [--tail N] [--follow]`, or `brigada logs --task N`: a job's transcript as readable lines, or its check log. See [section 4](#history-diffs-and-logs).
 - `brigada stats`: tier, attempts, successes, rate and confidence per agent, class and repo. See [section 9](#9-the-record-and-stats).
-- `brigada top [--interval D] [--project URL] [--no-start]`: the engine full-screen; one plain snapshot when piped. See [section 8](#capacity).
+- `brigada top [--interval D] [--project URL] [--no-start]`: the engine full-screen, with the same unregistered-models hint as `status`; one plain snapshot when piped. See [section 8](#capacity).
 - `brigada capacity [--project URL]`: each agent's tier, effort, cost, running jobs against its cap, and quota; each cap layer's cap, use and queue. See [section 8](#capacity).
 
 ### Finishing
