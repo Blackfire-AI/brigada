@@ -52,8 +52,8 @@ tasks:
     continue: "stack-durable"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-73"
     rounds: 0
   - id: 74
     name: "land-output"
