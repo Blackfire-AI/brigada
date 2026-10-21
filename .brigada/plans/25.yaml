@@ -52,7 +52,7 @@ tasks:
     tier: heavy
     effort: medium
     caps: {restart: 5}
-    state: ready
+    state: running
     branch: "brigada/task-98-r2"
     rounds: 0
   - id: 99
