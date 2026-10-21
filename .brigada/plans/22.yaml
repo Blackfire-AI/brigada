@@ -143,9 +143,9 @@ tasks:
     continue: "backoff"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-81-r1"
-    rounds: 0
+    rounds: 1
   - id: 82
     name: "fast-engine-tests"
     title: "Make the slow internal/engine tests faster"
