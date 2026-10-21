@@ -38,8 +38,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-109"
     rounds: 0
   - id: 110
     name: "amend-edit-spec"
