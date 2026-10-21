@@ -51,9 +51,10 @@ tasks:
     continue: "amend-judged-on-additions"
     tier: heavy
     effort: medium
-    state: running
+    state: needs_foreman
     branch: "brigada/task-98-r2"
     rounds: 0
+    question: "Can you either allow git and go in Bash for this worktree (git fetch/show/status and go test, with GOCACHE/GOMODCACHE set to local paths), or put the previous round's cost-rule commit back on brigada/task-98-r3? The worktree has none of the code the feedback says to keep."
   - id: 99
     name: "answer-changes-rule"
     title: "An answer to a hold can change the rule"
