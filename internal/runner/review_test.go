@@ -313,8 +313,13 @@ func TestRunnerRunsReviewJobToEnd(t *testing.T) {
 		t.Fatal("no review job was queued for the done work")
 	}
 	e.waitTaskState(task, "done")
-	if state := e.planStateOf(task); state != "done" {
-		t.Errorf("plan state = %q, want done with its task", state)
+	// The plan closes once the task's land job has its outcome (§7.1):
+	// under the default push gate, the landing recorded waiting.
+	e.waitUntil("the plan to close with its landing", func() bool {
+		return e.planStateOf(task) == "done"
+	})
+	if n := e.int64Of("SELECT COUNT(*) FROM landings WHERE task_id = ?", task); n != 1 {
+		t.Errorf("landing records at the plan's close = %d, want 1", n)
 	}
 	want := `{"verdict":"approve","findings":"` + reviewFindings + `"}`
 	if got := e.reviewResultOf(t, review); got != want {

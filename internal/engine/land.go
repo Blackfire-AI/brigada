@@ -467,7 +467,33 @@ func (e *Engine) landSucceededTx(tx *sql.Tx, job *jobRow, rec landRecord, now ti
 			PushCmd: rec.PushCmd, AfterLandError: rec.AfterLandErr}, now); err != nil {
 		return err
 	}
-	return e.releaseDependentLandsTx(tx, job.TaskID, now)
+	if err := e.releaseDependentLandsTx(tx, job.TaskID, now); err != nil {
+		return err
+	}
+	return e.finishLandPlanTx(tx, job, now)
+}
+
+// liveLandJobTx reports whether the task has a land job queued, leased
+// or running (§7.1): a landing, or its push, still under way.
+func liveLandJobTx(tx *sql.Tx, taskID int64) (bool, error) {
+	var n int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'
+		AND status IN ('queued', 'leased', 'running')`, taskID).Scan(&n); err != nil {
+		return false, fmt.Errorf("read the land jobs of task %d: %w", taskID, err)
+	}
+	return n > 0, nil
+}
+
+// finishLandPlanTx closes the task's plan once its land job has an
+// outcome (§6.2, §7.1): a live land job kept the plan open, so the
+// landing's completion is where the plan's done report is written.
+func (e *Engine) finishLandPlanTx(tx *sql.Tx, job *jobRow, now time.Time) error {
+	var plan int64
+	if err := tx.QueryRow("SELECT plan_id FROM tasks WHERE id = ?", job.TaskID).Scan(&plan); err != nil {
+		return fmt.Errorf("read the plan of task %d: %w", job.TaskID, err)
+	}
+	_, err := e.finishPlanIfClosedTx(tx, job.ProjectID, plan, job.TaskID, job.ID, now)
+	return err
 }
 
 // pushCompletedTx applies a push phase's completion (§7.1): the landing
@@ -497,7 +523,7 @@ func (e *Engine) pushCompletedTx(tx *sql.Tx, job *jobRow, existing *landingRow, 
 			AfterLandError: pr.AfterLandErr}, now); err != nil {
 		return err
 	}
-	return nil
+	return e.finishLandPlanTx(tx, job, now)
 }
 
 // landConflictTx parks a task whose diff no longer applies to the target

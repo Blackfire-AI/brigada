@@ -273,6 +273,12 @@ func TestPlanDoneWakesTheForeman(t *testing.T) {
 		t.Fatal("the review job was not leased by the reviewer")
 	}
 	e.complete(g, Completion{Result: `{"verdict":"approve","findings":"` + substantiveFindings + `"}`})
+	// The plan closes once the task's land job has its outcome (§7.1):
+	// no plan_done, and no turn, while it is queued.
+	if got := e.foremanJobs(); got != 0 {
+		t.Fatalf("foreman turns while the land job is queued = %d, want 0", got)
+	}
+	e.landPushed(author)
 	if got := e.foremanJobs(); got != 1 {
 		t.Fatalf("foreman turns after plan_done = %d, want 1", got)
 	}
@@ -280,7 +286,8 @@ func TestPlanDoneWakesTheForeman(t *testing.T) {
 	if want := []string{"delivered:" + fmt.Sprint(job)}; !equalStrings(e.inboxStates(), want) {
 		t.Errorf("inbox after plan_done = %v, want the plan_done row delivered", e.inboxStates())
 	}
-	want := "<event>\n" + e.wakeLine(evPlanDone, "the plan is done") + "\n</event>"
+	// The landing ran before the plan closed, so the report names it.
+	want := "<event>\n" + e.wakeLine(evPlanDone, "the plan is done; landed: task 1 (main@abc123)") + "\n</event>"
 	if prompt := e.str("SELECT prompt FROM jobs WHERE id = ?", job); !strings.Contains(prompt, want) {
 		t.Errorf("wake prompt = %q, want it to carry the plan_done event verbatim:\n%s", prompt, want)
 	}

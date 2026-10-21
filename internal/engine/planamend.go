@@ -791,6 +791,16 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 	for _, n := range nodes {
 		switch n.state {
 		case taskDone:
+			// A done task whose land job is queued or running is still
+			// live work (§7.1): the plan closes when the landing has an
+			// outcome, so the done report names it and a failed landing
+			// counts against the plan. A hold at the land gate has no job
+			// and lets the plan close, named under "waits at a gate".
+			if live, err := liveLandJobTx(tx, n.id); err != nil {
+				return false, err
+			} else if live {
+				return false, nil
+			}
 		case taskCancelled:
 			// Only a skip the user approved is a skip: the foreman's own
 			// cancellation is an abandoned task, whatever state it was in
