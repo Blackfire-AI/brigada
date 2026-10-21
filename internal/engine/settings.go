@@ -404,7 +404,7 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 				sv.Value = s
 			}
 		case SettingGatePush:
-			sv.Value = GateAsk
+			sv.Value = GateAuto
 			if s, ok := rawString(cur); ok && s != "" {
 				sv.Value = s
 			}

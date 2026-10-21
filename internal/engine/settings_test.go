@@ -81,7 +81,7 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingApprovalProtectedPaths, Value: "infra/**", Source: SourceLocal},
 		{Key: SettingGatePlan, Value: "auto", Default: true, Source: SourceDefault},
 		{Key: SettingGateLand, Value: "auto", Default: true, Source: SourceDefault},
-		{Key: SettingGatePush, Value: "ask", Default: true, Source: SourceDefault},
+		{Key: SettingGatePush, Value: "auto", Default: true, Source: SourceDefault},
 		{Key: SettingApprovalTiers, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingApprovalRestarted, Value: "false", Default: true, Source: SourceDefault},
 		{Key: SettingLandTarget, Value: "main", Default: true, Source: SourceDefault},

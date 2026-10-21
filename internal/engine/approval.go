@@ -50,7 +50,7 @@ var defaultApprovalClasses = []string{"implement", "review", "answer"}
 //	                            enforces (§6.3, §7.1): gate_land ask
 //	                            holds every landing, gate_push decides
 //	                            the push after it and also takes never.
-//	                            Absent: auto and ask.
+//	                            Absent: auto for both.
 //	approval_tiers              list of tiers whose tasks wait at the
 //	                            land gate (§6.3). Absent = none.
 //	approval_restarted          bool; a task that spent a restart or a

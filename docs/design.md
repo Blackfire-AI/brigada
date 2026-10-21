@@ -281,7 +281,7 @@ A gate is `auto` or `ask`; `push` may also be `never`, which never pushes the ta
 |---|---|---|
 | `gate_plan` | — | `auto`; a tripped rule holds the plan |
 | `gate_land` | — | `auto` |
-| `gate_push` | — | `ask` |
+| `gate_push` | — | `auto` |
 | `approval_max_tasks` | plan | `5` (the default once landing is automatic is open, §16) |
 | `approval_classes` | plan | `implement`, `review`, `answer` |
 | `approval_protected_paths` | plan **and land** | none |

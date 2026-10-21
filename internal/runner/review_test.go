@@ -314,7 +314,7 @@ func TestRunnerRunsReviewJobToEnd(t *testing.T) {
 	}
 	e.waitTaskState(task, "done")
 	// The plan closes once the task's land job has its outcome (§7.1):
-	// under the default push gate, the landing recorded waiting.
+	// the landing has its record under the push gate.
 	e.waitUntil("the plan to close with its landing", func() bool {
 		return e.planStateOf(task) == "done"
 	})
