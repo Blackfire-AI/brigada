@@ -47,6 +47,13 @@ func (r *jobRun) runForemanTurn(ctx context.Context) {
 		}
 		return
 	}
+	// The checkout just fetched the project's default branch: scan it for
+	// tasks landed outside the land job (§7.1) before the foreman reads
+	// status, so it can tell "already merged" from "waiting to merge". A
+	// failed report is a warning, never a turn failure.
+	if err := ReportLanded(ctx, r.client, r.grant.RepoURL, r.grant.BaseRef, checkout); err != nil {
+		r.cfg.Log.WarnContext(ctx, "report landed tasks", "job_id", r.grant.JobID, "err", err)
+	}
 	r.grant.Prompt = foreman.WithCheckout(r.grant.Prompt, checkout)
 	r.cfg.Log.InfoContext(ctx, "foreman turn", "job_id", r.grant.JobID, "key", r.grant.Key, "dir", checkout.Path)
 	// The MCP config is decided before the worker starts, where the

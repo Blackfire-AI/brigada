@@ -214,6 +214,13 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 	if err != nil {
 		return abandon(fmt.Errorf("prepare the foreman checkout: %w", err))
 	}
+	// The checkout just fetched the default branch: report tasks landed
+	// outside the land job (§7.1) before the foreman reads status, so it
+	// can tell "already merged" from "waiting to merge". A failed report
+	// is a warning, never an attach failure.
+	if err := runner.ReportLanded(ctx, client, res.RepoURL, res.DefaultBranch, checkout); err != nil {
+		fmt.Fprintf(stderr, "brigada: warning: report landed tasks: %v\n", err)
+	}
 	res.Prompt = foreman.WithCheckout(res.Prompt, checkout)
 	// The MCP config for the hold's token (§12.2): the bridge is this
 	// own binary, the token reaches the file and the bridge alone, and

@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -109,6 +110,38 @@ func Landed(ctx context.Context, dir string, id int64) (bool, error) {
 		return false, err
 	}
 	return strings.TrimSpace(out) != "", nil
+}
+
+// LandedCommits maps each task id a commit in ref's history carries as a
+// Brigada-Task trailer to that commit's full sha (§7.1): how the engine
+// recognizes tasks landed outside the land job — a hand squash, or a
+// brigada land in the user's clone. It is Landed's match run once for
+// every task at once: the same -E grep over Brigada-Task, the value read
+// from git's own trailer format, so the two stay one rule. A ref with no
+// history maps nothing.
+func LandedCommits(ctx context.Context, dir, ref string) (map[int64]string, error) {
+	out, err := text(ctx, dir, "log", "--format=%H%x00%(trailers:key=Brigada-Task,valueonly)",
+		"-E", "--grep=^Brigada-Task: [0-9]+$", ref)
+	if err != nil {
+		// An unborn branch has no history to carry a trailer.
+		if !succeeds(ctx, dir, "rev-parse", "--verify", "--quiet", ref) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	landed := map[int64]string{}
+	for _, line := range strings.Split(out, "\n") {
+		sha, val, ok := strings.Cut(line, "\x00")
+		if !ok {
+			continue
+		}
+		id, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64)
+		if err != nil || id <= 0 {
+			continue
+		}
+		landed[id] = strings.TrimSpace(sha)
+	}
+	return landed, nil
 }
 
 // apply3way applies a patch three-way to the index and the tree.

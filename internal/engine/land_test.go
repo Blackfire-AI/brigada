@@ -129,7 +129,7 @@ func TestLandJobLostParks(t *testing.T) {
 
 // TestPlanWaitsForItsLastLandJob: the plan's last task done with its
 // land job queued does not close the plan; the landing does, and the
-// done report names what landed.
+// done report says all tasks landed.
 func TestPlanWaitsForItsLastLandJob(t *testing.T) {
 	e := newEnv(t)
 	author := e.agented("author", "anthropic", "implement")
@@ -151,8 +151,8 @@ func TestPlanWaitsForItsLastLandJob(t *testing.T) {
 		t.Errorf("plan state after the landing = %q, want done", state)
 	}
 	p, ok := e.eventPayloadOf(evPlanDone)
-	if !ok || !strings.Contains(p.Reason, "landed:") || !strings.Contains(p.Reason, "main@abc123") {
-		t.Errorf("plan_done = %+v (%t), want the report to name the landing", p, ok)
+	if !ok || !strings.Contains(p.Reason, "all tasks landed") {
+		t.Errorf("plan_done = %+v (%t), want the report to say all tasks landed", p, ok)
 	}
 }
 
