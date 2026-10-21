@@ -8,7 +8,7 @@ Contents:
 2. [Talking to the foreman: `brigada attach`](#2-talking-to-the-foreman-brigada-attach)
 3. [Several repositories (mode B)](#3-several-repositories-mode-b)
 4. [While work runs](#4-while-work-runs)
-5. [Finishing: `brigada land`](#5-finishing-brigada-land)
+5. [Finishing: the land job](#5-finishing-the-land-job)
 6. [Configuring a project](#6-configuring-a-project)
 7. [Plans, checks and reviews](#7-plans-checks-and-reviews)
 8. [Agents, quota and health](#8-agents-quota-and-health)
@@ -256,7 +256,7 @@ With `claude`, an attached foreman is the same session the headless turns resume
 
 ### What the foreman can and cannot do
 
-The foreman's tools are brigada's — `plan_create`, `plan_amend`, `answer`, `task_restart`, `task_cancel`, `ask_user`, `status`, `history`, `events`, `capacity`, `stats` — plus read-only file tools: on `claude` it may read and search files, with the shell and every editing tool denied; on `codex` it runs in a read-only sandbox ([section 11](#11-the-foremans-harness-claude-or-codex)). There is deliberately no tool that approves or rejects a plan: that decision is yours ([section 7](#7-plans-checks-and-reviews)).
+The foreman's tools are brigada's — `plan_create`, `plan_amend`, `answer`, `task_restart`, `task_cancel`, `ask_user`, `status`, `history`, `events`, `capacity`, `stats` — plus read-only file tools: on `claude` it may read and search files, with the shell and every editing tool denied; on `codex` it runs in a read-only sandbox ([section 11](#11-the-foremans-harness-claude-or-codex)). There is deliberately no tool that approves or rejects a plan, or that passes a gate: those decisions are yours ([section 7](#gates-and-rules)).
 
 brigada enforces its own side whatever the foreman believes:
 
@@ -339,7 +339,9 @@ The needs-you queue lists what only you (or the foreman) can unblock:
 
 | Entry | What it wants |
 |---|---|
-| `plan #N pending_approval: <why>` | Your decision: `brigada plan approve N` or `brigada plan reject N` ([section 7](#7-plans-checks-and-reviews)), or the coordinator's tools ([section 3](#3-several-repositories-mode-b)). |
+| `plan #N pending_approval: <why>` | Your decision: `brigada plan approve N` or `brigada plan reject N` ([section 7](#gates-and-rules)), or the coordinator's tools ([section 3](#3-several-repositories-mode-b)). |
+| `task #N done: waits to land: <rule>` | Your decision on a landing held at the land gate: `brigada land approve N` releases it, `brigada land reject N` cancels it ([section 5](#5-finishing-the-land-job)). |
+| `task #N done: waits to push: <branch>@<sha>` | The push gate holds it; `brigada push approve` releases every waiting push of the project ([section 5](#5-finishing-the-land-job)). |
 | `task #N needs_foreman: <reason>` | Judgment: the worker asked a question, the task spent its rounds or failed after tier escalation was exhausted, or a run stopped. The foreman is woken for these; the entry is there so you can see it and step in. |
 | `task #N needs_user: <reason>` | An answer from you, for a task parked for you directly. |
 | `foreman #N limited: <until>` | A choice: wait, switch the foreman, or let approved plans run without it ([section 8](#8-agents-quota-and-health)). |
@@ -398,9 +400,41 @@ It cancels that job only: not the task, not the plan, and it is not an approval 
 
 Job ids are not task ids. `status` shows a running job as `task #N …`; find its job id with `brigada history --task N`.
 
-## 5. Finishing: `brigada land`
+## 5. Finishing: the land job
 
-Each task's work is a branch on your remote. Merging and pushing stay yours. `brigada land` does the local part:
+Landing is brigada's. When a task is `done` and approved (an `approve` verdict on its last review) and every dependency of class `implement` has landed, the engine queues a **land job** for it. A runner with git for your repo — no worker, no model — squashes the task's own diff onto the target branch as one commit, reruns the project's default check on the result, and then pushes by the push gate. The commit message is built from the task's title, spec and the worker's summary, with `Brigada-Task`, `Brigada-Branch` and `Co-Authored-By` trailers.
+
+Landing is per task, not per plan: a stack lands in dependency order as its tasks finish, and the target moves with the plan. It happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker ([section 8](#8-agents-quota-and-health)). Where approved work lands is `land_target` ([section 6](#6-configuring-a-project)): the project's default branch, or a staging branch such as `brigada/landed`.
+
+### Gates and holds
+
+The loop — plan, work, check, review, land, push — runs on its own; you stop it with gates and rules ([section 7](#gates-and-rules)). Two matter here:
+
+- The **land gate** holds a landing before the squash. `gate_land: ask` holds every landing; a rule holds the one task that trips it — a tier among `approval_tiers`, a changed path matching `approval_protected_paths`, or a spent restart when `approval_restarted` is `true`. A held task stays `done`, and only its dependents' landings wait on it: work on the rest of the plan goes on. The needs-you entry names the rule, as `task #N done: waits to land: heavy; touches infra/**`.
+- The **push gate** (`gate_push`) decides what follows a successful landing:
+  - `ask` (the default): the landing is recorded as waiting, and the queue shows `task #N done: waits to push: <branch>@<sha>`. `brigada push approve` releases every waiting landing of the project at once: each gets its push, no new squash.
+  - `auto`: the runner pushes the target at once.
+  - `never`: nothing is pushed. The landing lands on the runner's clone of the target, and brigada prints the exact `git push` command for you.
+
+```sh
+brigada land approve 45   # release one held landing: its land job is queued
+brigada land reject 45    # cancel it: the branch is left as it is, nothing recorded
+brigada push approve      # release the push gate for every waiting landing
+```
+
+Only you can say these: the foreman has no tool to pass a gate.
+
+### Conflicts and failed checks
+
+A landing never resolves a conflict and never picks a side. When the task's diff no longer applies onto the target, or the check fails on the landed result, nothing is pushed: the task parks at `needs_foreman` with the conflicting files or the check log, and the foreman restarts it with a note (rebase onto the target's new head, resolve). The check and the review run again, and the task lands on its next approval.
+
+### `after_land`
+
+`after_land`, when set, is a repo-relative command the runner runs after a successful land: after the push, or after the landing when the push gate is `never`. Its failure is reported — in the landing record and `brigada history` — and never undoes the landing.
+
+### By hand: `brigada land`
+
+`brigada land` is the hand-driven form of the same squash, sharing the code and the commit message with the job: for `gate_push = never`, for a branch you want on your own machine, and for landing a task by hand. It works in your own repository and stops before the push:
 
 ```sh
 brigada land <task-id>... [--onto BRANCH] [--repo URL] [--landed ID]... [--no-check]
@@ -410,7 +444,6 @@ Land puts approved work into your own repository, on the checked-out branch: the
 
 - Each task becomes one commit holding only its own diff against its own base, so a stacked task lands as just its work.
 - Tasks go in dependency order. A dependency must be in the same call, already landed (found by its `Brigada-Task:` trailer), or named with `--landed`.
-- The commit message is built from the task's title, spec and the worker's summary, with `Brigada-Task`, `Brigada-Branch` and `Co-Authored-By` trailers.
 - Then the project's default check runs once on the result.
 - Land prints `git push origin <branch>` and stops: it never pushes and never touches the remote's branches.
 
@@ -449,18 +482,18 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 |---|---|---|---|
 | `schema` | `1` | required | The file format version. |
 | `repo` | canonical URL, e.g. `github.com/org/app` | required | The repository this file belongs to, in its canonical form (`host[:port]/path`, or `file:<absolute path>` for a file remote). Import refuses a file that names another repository. |
-| `default_check` | command | none | The check a task runs when its spec names none, and the one `brigada land` reruns. |
+| `default_check` | command | none | The check a task runs when its spec names none; the land job reruns it on the landed result, and the hand-driven `brigada land` on the squashed tree. |
 | `worker_tools` | `+`-separated Claude Code tool patterns, or `none` | the agent's own scope | The shell scope of Claude workers on this project ([section 8](#8-agents-quota-and-health)). |
 | `approval_max_tasks` | integer | `5` | A plan with more tasks waits for you. `0`: every plan waits. Negative: no limit. |
 | `approval_classes` | list of class names | `implement`, `review`, `answer` | A task of a class outside the list holds the plan. |
-| `approval_protected_paths` | list of repo-relative globs | none | A task whose spec or check mentions a matching path holds the plan. |
+| `approval_protected_paths` | list of repo-relative globs | none | A task whose spec or check mentions a matching path holds the plan; at the land gate, a task whose recorded changed paths match holds the landing ([section 5](#5-finishing-the-land-job)). |
 | `gate_plan` | `auto` or `ask` | `auto` | `ask` holds every plan at the plan gate, whatever the approval rules say. |
-| `gate_land` | `auto` or `ask` | `auto` | The land gate. Stored and shown; the land job enforces it when it ships. |
-| `gate_push` | `auto`, `ask` or `never` | `ask` | The push gate after a land. Stored and shown; the land job enforces it when it ships. |
-| `approval_tiers` | list of `light`, `standard`, `heavy` | none | Tiers whose tasks would wait at the land gate. Stored and shown. |
-| `approval_restarted` | `true` or `false` | `false` | `true`: a task that spent a restart would wait at the land gate. Stored and shown. |
-| `land_target` | branch name | the project's default branch | Where approved work lands: the default branch, or a staging branch such as `brigada/landed`. Stored and shown. |
-| `after_land` | command | none | A repo-relative command the runner runs after a successful land. Stored and shown. |
+| `gate_land` | `auto` or `ask` | `auto` | `ask` holds every landing at the land gate; the land job runs only after you release it. |
+| `gate_push` | `auto`, `ask` or `never` | `ask` | What follows a successful landing: `auto` pushes the target, `ask` waits for `brigada push approve`, `never` lands locally and prints the push command. |
+| `approval_tiers` | list of `light`, `standard`, `heavy` | none | Tiers whose tasks wait at the land gate. |
+| `approval_restarted` | `true` or `false` | `false` | `true`: a task that spent a restart or a tier bump waits at the land gate. |
+| `land_target` | branch name | the project's default branch | Where approved work lands: the default branch, or a staging branch such as `brigada/landed`. |
+| `after_land` | command | none | A repo-relative command the runner runs after a successful land; its failure is reported, never undone. |
 | `setup` | command | none | The environment step run before the worker and the check ([section 7](#7-plans-checks-and-reviews)). |
 | `setup_cache_key_files` | list of repo-relative files | none (no cache) | Files whose contents key the setup cache. |
 | `setup_timeout_minutes` | positive integer | `15` | How long `setup` may run. |
@@ -538,7 +571,7 @@ You ask; the foreman turns the ask into a **plan**: a set of tasks, each with a 
 - A task with no dependencies is queued at once.
 - A task with dependencies waits (`pending`) until all of them are done. If one of them fails or is cancelled, the dependents keep waiting until the foreman re-points them to another task or drops the dependency.
 - The foreman can amend a live plan: add tasks, cancel tasks, re-point dependencies, or change a waiting or parked task's tier and effort.
-- A plan is `done` when no live work is left. That is not the same as everything succeeding: the plan's done report names the tasks that failed, that were cancelled without your approval, and that never ran.
+- A plan is `done` when no live work is left. That is not the same as everything succeeding: the plan's done report names the tasks that failed, that were cancelled without your approval, and that never ran, and what landed and what waits at a gate ([section 5](#5-finishing-the-land-job)).
 
 Each task also has these fields, set by the foreman in `plan_create` or `plan_amend`:
 
@@ -555,9 +588,11 @@ None of the fields triggers approval. The plan shown for approval includes tier 
 
 The foreman can use `plan_amend`'s `retier` list, for example `[{"task":"build","tier":"light","effort":"low"}]`, to change a `pending`, `ready` or `needs_foreman` task; the entry may carry `review_tier` and `review_effort` too, which change only how the task is reviewed. Omitted fields keep their values; changing the tier resets both the foreman's tier and the effective tier, and resets the effective effort to the task's effort; changing the effort sets the effective effort too. A task at `needs_foreman` still needs `task_restart` to run again. A `retier` entry may also carry `caps`, for example `[{"task":"build","caps":{"restart":4}}]`: it merges key by key into the task's caps, which is how the foreman gives a parked task more restarts before `task_restart`.
 
-### The approval limit
+### Gates and rules
 
-A plan starts on its own unless it trips one of three triggers, each set per project ([section 6](#6-configuring-a-project)), or the plan gate holds it: `gate_plan: ask` ([section 6](#6-configuring-a-project)) waits every plan, with no trigger tripped:
+The loop — plan, work, check, review, land, push — is brigada's; you stop it with gates and rules, all keys of `.brigada/project.yaml` ([section 6](#6-configuring-a-project)). The engine enforces every stop; the foreman has no tool to pass one. A gate set to `ask` holds in the needs-you queue, and a rule turns `auto` into `ask` for the one plan or task that trips it, naming the rule.
+
+**The plan gate.** A plan starts on its own unless it trips one of three triggers, or `gate_plan: ask` holds every plan:
 
 - more tasks than `approval_max_tasks` (default 5);
 - a task class outside `approval_classes` (default `implement`, `review`, `answer`);
@@ -570,7 +605,13 @@ brigada plan approve 7    # queues the tasks; prints each task's job
 brigada plan reject 7     # cancels the plan's tasks
 ```
 
-or through the coordinator's `plan_approve` and `plan_reject` ([section 3](#3-several-repositories-mode-b)), which name the plan version you were shown. Only you can decide: no foreman tool approves a plan.
+or through the coordinator's `plan_approve` and `plan_reject` ([section 3](#3-several-repositories-mode-b)), which name the plan version you were shown.
+
+**The land gate** holds an approved task before it is squashed onto the target: `gate_land: ask`, a tier among `approval_tiers`, a changed path matching `approval_protected_paths`, or a spent restart when `approval_restarted` is `true`. You release one held landing with `brigada land approve <task>` or cancel it with `brigada land reject <task>`.
+
+**The push gate** (`gate_push`, `ask` by default) holds the push after a successful landing; `brigada push approve` releases every waiting landing of the project. Both gates, their needs-you entries and `after_land` are described in [section 5](#5-finishing-the-land-job). A held task blocks nothing but its dependents' landings: work on the rest of the plan goes on.
+
+Only you can decide: no foreman tool approves a plan or passes a gate.
 
 ### The plan file
 
@@ -684,7 +725,7 @@ Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `
 - `--max-parallel N`: how many concurrent jobs this runner runs; unset (`0`) means one at a time. Init now sets it from tasks at once, and `brigada start` passes the saved number;
 - `--no-start`: fail instead of starting the engine.
 
-A `land` job (see [section 5](#5-finishing-brigada-land)) carries the single label `git` and no agent: any runner that offers the `git` label — that is, whose git credentials work for the repo — may take it, wherever it runs. The landing happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker.
+A `land` job (see [section 5](#5-finishing-the-land-job)) carries the single label `git` and no agent: any runner that offers the `git` label — that is, whose git credentials work for the repo — may take it, wherever it runs. The landing happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker.
 
 `kimi`, `opencode` and `dsh` are worker-only; the foreman can be `claude` or `codex`.
 
@@ -953,7 +994,7 @@ The config file is optional. Its format:
 
 A cap of `0` caps the layer at nothing, which is different from leaving it out. Init writes `caps.global = N` from tasks at once, `caps.plan = 3` and `caps.account.<label>` for each usable account: Claude 3, Codex 2, Kimi 1 and OpenCode 2, each clamped to N. If harnesses share a label, the smaller cap wins. It preserves other config entries and comments, updates those cap keys, and groups newly added keys under `# set by brigada init`. The engine reads the config at startup; restart it after changing caps or tier overrides.
 
-Project settings (the approval limit, `default_check`, `setup` and the rest) are not config-file keys, and the config file refuses them as unknown; they are project settings ([section 6](#6-configuring-a-project)). Effort is not a config-file key either: it is set per agent with `brigada runner --agent …,effort=<level>` ([section 8](#effort)) and per project foreman with `brigada project foreman --effort <level>` ([section 11](#11-the-foremans-harness-claude-or-codex)). `cost.*` and `tier.*` keys name `harness/model` without an effort, including a provider prefix when the model has one.
+Project settings (gates and approval rules, `default_check`, `setup` and the rest) are not config-file keys, and the config file refuses them as unknown; they are project settings ([section 6](#6-configuring-a-project)). Effort is not a config-file key either: it is set per agent with `brigada runner --agent …,effort=<level>` ([section 8](#effort)) and per project foreman with `brigada project foreman --effort <level>` ([section 11](#11-the-foremans-harness-claude-or-codex)). `cost.*` and `tier.*` keys name `harness/model` without an effort, including a provider prefix when the model has one.
 
 An example:
 
@@ -1027,11 +1068,13 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 ### Finishing
 
-- `brigada land <task-id>... [--onto BRANCH] [--repo URL] [--landed ID]... [--no-check]`: squash approved tasks onto the checked-out branch, one commit each, in dependency order; rerun the default check; print the push command and stop. See [section 5](#5-finishing-brigada-land).
+- `brigada land <task-id>... [--onto BRANCH] [--repo URL] [--landed ID]... [--no-check]`: the hand-driven squash of approved tasks onto the checked-out branch, one commit each, in dependency order; rerun the default check; print the push command and stop. See [section 5](#5-finishing-the-land-job).
+- `brigada land approve <task>`, `brigada land reject <task>`: your decision on a landing held at the land gate; approve queues its land job, reject cancels the landing and leaves the branch. See [section 5](#gates-and-holds).
+- `brigada push approve [--repo URL]`: release the push gate; every waiting landing of the project gets its push queued. See [section 5](#gates-and-holds).
 
 ### Deciding
 
-- `brigada plan approve <id>`, `brigada plan reject <id>`: your answer on a plan over the approval limit. See [section 7](#the-approval-limit).
+- `brigada plan approve <id>`, `brigada plan reject <id>`: your answer on a plan held at the plan gate. See [section 7](#gates-and-rules).
 - `brigada budget [--repo URL] [--wakes N]`: show the project's foreman wake budget, with today's use and the UTC reset time; `--wakes N` (1 to 1000) sets it. See [section 4](#the-wake-budget).
 - `brigada agent reset <harness>/<model>`: clear a broken or cooling agent. See [section 8](#broken-agents).
 - `brigada cancel <job-id>`: stop one live job. See [section 4](#cancelling).
@@ -1058,7 +1101,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 - Model-name tier patterns can go stale as vendors rename models; correct them with `tier.<harness>/<model>` in the config file.
 - Every tier bump spends a restart, including a second bump after the bumped attempt fails; earlier retries can exhaust the cap before a task reaches heavy.
-- The runner does not record the commit a reviewer approved, so `brigada land` only warns that the head was not compared ([section 5](#5-finishing-brigada-land)).
+- The runner does not record the commit a reviewer approved, so `brigada land` only warns that the head was not compared ([section 5](#5-finishing-the-land-job)).
 - Read-only extra repositories are a convention, not a sandbox ([section 7](#another-repository-to-read)).
 - A repository whose `.mcp.json` still carries an older init's `brigada` entry must drop it (rerun `brigada init` or run `brigada remove`), or the two `brigada` servers clash in an attached chat ([section 2](#attach)).
 - An attached Codex session does not carry brigada's tools, and Codex has no verified project-scope registration for the coordinator: init in a parent folder prints a user-level command ([section 3](#3-several-repositories-mode-b)).

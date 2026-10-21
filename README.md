@@ -14,7 +14,7 @@ You may pay for more than one AI coding subscription. brigada sits above their o
 - every task's own **check** (tests, lint, any command) runs on the result, so "done" is not taken on trust;
 - a **reviewer** from a different model family than the author reads the change;
 - the **outcome** of every task is recorded locally, and `brigada stats` shows which agent actually wins where;
-- **you** land and push: `brigada land` squashes approved work onto your branch locally and stops before any push.
+- **landing is brigada's**: each approved task is squashed onto the target branch, your check reruns on the result, and the push follows your push gate (`ask` by default); `brigada land` stays as the hand-driven form, and gates hold anything you want to see first.
 
 brigada drives the vendors' **unmodified** CLIs, each signed in with your own account. It never rotates or pools credentials. See [docs/TERMS.md](docs/TERMS.md).
 
@@ -72,7 +72,7 @@ Then:
 ```sh
 brigada status              # engine, jobs, plans, what needs you
 brigada diff <task-id>      # what a task changed
-brigada land <task-id>...   # squash approved tasks onto this branch; never pushes
+brigada land <task-id>...   # land approved tasks by hand (the land job does it by rule)
 ```
 
 The [guide](docs/GUIDE.md) covers the rest: a coordinator session over several repositories (mode B), watching work as it runs, configuration, and the full command reference.
