@@ -11,10 +11,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/landing"
 )
 
 // landClient is what land asks the engine (§7.1): reads only. The engine
@@ -34,21 +33,14 @@ type landOptions struct {
 	noCheck bool
 }
 
-// Bounds of the commit message (§7.1).
+// Bounds of the commit message (§7.1), kept by internal/landing.
 const (
-	landSubjectRunes  = 72
-	landSpecBytes     = 600
-	landSummaryBytes  = 2000
-	landMessageBytes  = 4096
-	landTruncatedMark = " [truncated]"
+	landSubjectRunes  = landing.SubjectRunes
+	landSpecBytes     = landing.SpecBytes
+	landSummaryBytes  = landing.SummaryBytes
+	landMessageBytes  = landing.MessageBytes
+	landTruncatedMark = landing.TruncatedMark
 )
-
-// landAddresses is the family-to-address table of the Co-Authored-By
-// trailer (§7.1, open in §16 item 10): a known family whose address
-// brigada does not have gets the model name alone, and is reported.
-var landAddresses = map[string]string{
-	"anthropic": "noreply@anthropic.com",
-}
 
 // idList is a repeatable integer flag.
 type idList []int64
@@ -239,7 +231,7 @@ func landTasks(ctx context.Context, client landClient, dir string, opts landOpti
 		if t == nil {
 			continue
 		}
-		if sameTrailer, err := trailerOnTarget(ctx, dir, id); err != nil {
+		if sameTrailer, err := landing.Landed(ctx, dir, id); err != nil {
 			return fail(stderr, err)
 		} else if sameTrailer {
 			t.done = true
@@ -267,7 +259,7 @@ func landTasks(ctx context.Context, client landClient, dir string, opts landOpti
 			if inCall[dep] || landedByHand[dep] {
 				continue
 			}
-			on, err := trailerOnTarget(ctx, dir, dep)
+			on, err := landing.Landed(ctx, dir, dep)
 			if err != nil {
 				return fail(stderr, err)
 			}
@@ -370,33 +362,23 @@ func landTasks(ctx context.Context, client landClient, dir string, opts landOpti
 		if noAddr != "" {
 			unaddressed = append(unaddressed, noAddr)
 		}
-		patch := &bytes.Buffer{}
-		if err := runGit(ctx, dir, patch, stderr, "--no-pager", "diff", "--binary", t.base+"..."+t.branch); err != nil {
+		patch, err := landing.Diff(ctx, dir, t.base, t.branch, stderr)
+		if err != nil {
 			return landStopped(stdout, stderr, start, commits, t, "", fmt.Errorf("diff %s...%s: %w", t.info.BaseRef, t.info.Branch, err))
 		}
-		if patch.Len() == 0 {
-			empties = append(empties, strconv.FormatInt(t.id, 10))
-			continue
-		}
-		msgPath, err := writeLandMessage(ctx, dir, t.id, msg)
+		res, err := landing.Squash(ctx, dir, t.id, msg, patch, stderr)
 		if err != nil {
-			return fail(stderr, err)
+			var conflict *landing.Conflict
+			if errors.As(err, &conflict) {
+				return landConflict(stdout, stderr, start, commits, t, res.MsgPath, conflict.Files, conflict.Err)
+			}
+			return landStopped(stdout, stderr, start, commits, t, res.MsgPath, err)
 		}
-		if err := applyPatch(ctx, dir, patch.Bytes()); err != nil {
-			files := conflictFiles(ctx, dir)
-			return landConflict(stdout, stderr, start, commits, t, msgPath, files, err)
-		}
-		if gitSucceeds(ctx, dir, "diff", "--cached", "--quiet") {
-			os.Remove(msgPath)
+		if res.Empty {
 			empties = append(empties, strconv.FormatInt(t.id, 10))
 			continue
 		}
-		if err := runGit(ctx, dir, nil, stderr, "commit", "--quiet", "-F", msgPath); err != nil {
-			return landStopped(stdout, stderr, start, commits, t, msgPath, fmt.Errorf("commit: %w", err))
-		}
-		sha, _ := gitText(ctx, dir, "rev-parse", "--short", "HEAD")
-		commits = append(commits, fmt.Sprintf("task %d  %s  %s", t.id, strings.TrimSpace(sha), subjectOf(msg)))
-		os.Remove(msgPath)
+		commits = append(commits, fmt.Sprintf("task %d  %s  %s", t.id, res.SHA, subjectOf(msg)))
 	}
 
 	// 4. Report; the check runs once, after the last commit.
@@ -477,37 +459,6 @@ func landOrder(ids []int64, tasks map[int64]*landTask, inCall map[int64]bool) []
 	return out
 }
 
-// applyPatch applies a patch three-way to the index and the tree.
-func applyPatch(ctx context.Context, dir string, patch []byte) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "apply", "--3way", "--index", "-")
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	cmd.Stdin = bytes.NewReader(patch)
-	var errb bytes.Buffer
-	cmd.Stderr = &errb
-	if err := cmd.Run(); err != nil {
-		if msg := strings.TrimSpace(errb.String()); msg != "" {
-			return errors.New(msg)
-		}
-		return err
-	}
-	return nil
-}
-
-// conflictFiles names the unmerged paths.
-func conflictFiles(ctx context.Context, dir string) []string {
-	out, err := gitText(ctx, dir, "diff", "--name-only", "--diff-filter=U")
-	if err != nil {
-		return nil
-	}
-	var files []string
-	for _, l := range strings.Split(out, "\n") {
-		if l = strings.TrimSpace(l); l != "" {
-			files = append(files, l)
-		}
-	}
-	return files
-}
-
 // landConflict reports a stop at a conflict: files named, the tree left
 // alone, the way back printed and never run.
 func landConflict(stdout, stderr io.Writer, start string, commits []string, t *landTask, msgPath string, files []string, cause error) int {
@@ -544,145 +495,20 @@ func landLeft(w io.Writer, start string, commits []string, t *landTask, msgPath 
 	fmt.Fprintf(w, "to undo everything land did (not run by land): git reset --hard %s\n", start)
 }
 
-// writeLandMessage writes the prepared message inside .git and returns
-// its path.
-func writeLandMessage(ctx context.Context, dir string, id int64, msg string) (string, error) {
-	gitDir, err := gitText(ctx, dir, "rev-parse", "--absolute-git-dir")
-	if err != nil {
-		return "", err
-	}
-	path := filepath.Join(strings.TrimSpace(gitDir), fmt.Sprintf("BRIGADA_LAND_MSG_%d", id))
-	if err := os.WriteFile(path, []byte(msg), 0o600); err != nil {
-		return "", fmt.Errorf("write the commit message: %w", err)
-	}
-	return path, nil
-}
-
-// landMessage builds the commit message from API data alone (§7.1). The
-// second result names a known family whose address brigada lacks.
+// landMessage builds the commit message from API data alone (§7.1),
+// through internal/landing. The second result names a known family
+// whose address brigada lacks.
 func landMessage(t *landTask) (string, string) {
-	subject := landSubject(t.land.Title, t.id)
-	var trailers []string
-	trailers = append(trailers,
-		fmt.Sprintf("Brigada-Task: %d", t.id),
-		fmt.Sprintf("Brigada-Branch: %s@%s", cleanLine(t.info.Branch), t.head))
-	noAddr := ""
-	switch {
-	case t.land.Family == "":
-		trailers = append(trailers, "Brigada-Author: unknown")
-	default:
-		name := cleanLine(t.land.Model)
-		if name == "" {
-			name = cleanLine(t.land.Family)
-		}
-		if addr, ok := landAddresses[t.land.Family]; ok {
-			trailers = append(trailers, fmt.Sprintf("Co-Authored-By: %s <%s>", name, addr))
-		} else {
-			trailers = append(trailers, "Co-Authored-By: "+name)
-			noAddr = name
-		}
-	}
-	tr := strings.Join(trailers, "\n")
-	spec := landSanitize(firstParagraph(t.land.Spec))
-	summary := landSanitize(t.land.Summary)
-	build := func(summaryMax int) string {
-		var b strings.Builder
-		b.WriteString(subject + "\n")
-		if spec != "" {
-			b.WriteString("\nSpec:\n" + landIndent(truncBytes(spec, landSpecBytes)) + "\n")
-		}
-		if summary != "" {
-			b.WriteString("\nWorker summary:\n" + landIndent(truncBytes(summary, summaryMax)) + "\n")
-		}
-		b.WriteString("\n" + tr + "\n")
-		return b.String()
-	}
-	max := landSummaryBytes
-	msg := build(max)
-	for len(msg) > landMessageBytes && max > 64 {
-		max -= len(msg) - landMessageBytes + 16
-		if max < 64 {
-			max = 64
-		}
-		msg = build(max)
-	}
-	return msg, noAddr
-}
-
-// landSubject is the task title on one line, at most 72 characters.
-func landSubject(title string, id int64) string {
-	s := cleanLine(title)
-	if s == "" {
-		s = fmt.Sprintf("task %d", id)
-	}
-	if utf8.RuneCountInString(s) > landSubjectRunes {
-		r := []rune(s)
-		s = strings.TrimRight(string(r[:landSubjectRunes-1]), " ") + "…"
-	}
-	return s
-}
-
-// cleanLine folds text to one line with no control characters.
-func cleanLine(s string) string {
-	s = strings.ToValidUTF8(s, "")
-	s = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return ' '
-		}
-		return r
-	}, s)
-	return strings.Join(strings.Fields(s), " ")
-}
-
-// landSanitize strips control characters other than newline and tab
-// (NUL and CR included).
-func landSanitize(s string) string {
-	s = strings.ToValidUTF8(s, "")
-	return strings.TrimSpace(strings.Map(func(r rune) rune {
-		if r == '\n' || r == '\t' {
-			return r
-		}
-		if unicode.IsControl(r) {
-			return -1
-		}
-		return r
-	}, s))
-}
-
-// firstParagraph is the text up to the first blank line.
-func firstParagraph(s string) string {
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = strings.TrimSpace(s)
-	if i := strings.Index(s, "\n\n"); i >= 0 {
-		s = s[:i]
-	}
-	return s
-}
-
-// landIndent indents every line four spaces, so none can read as a
-// trailer or a # comment.
-func landIndent(s string) string {
-	lines := strings.Split(s, "\n")
-	for i, l := range lines {
-		lines[i] = "    " + l
-	}
-	return strings.Join(lines, "\n")
-}
-
-// truncBytes cuts s to at most max bytes at a character boundary, marking
-// the cut.
-func truncBytes(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	cut := max - len(landTruncatedMark)
-	if cut < 0 {
-		cut = 0
-	}
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + landTruncatedMark
+	return landing.Message(landing.Task{
+		ID:      t.id,
+		Title:   t.land.Title,
+		Branch:  t.info.Branch,
+		Head:    t.head,
+		Spec:    t.land.Spec,
+		Summary: t.land.Summary,
+		Family:  t.land.Family,
+		Model:   t.land.Model,
+	})
 }
 
 func subjectOf(msg string) string {
@@ -711,21 +537,6 @@ func gitText(ctx context.Context, dir string, args ...string) (string, error) {
 // gitSucceeds reports whether git exits 0.
 func gitSucceeds(ctx context.Context, dir string, args ...string) bool {
 	return exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Run() == nil
-}
-
-// trailerOnTarget reports whether a commit in the checked-out branch's
-// history carries Brigada-Task: <id>.
-func trailerOnTarget(ctx context.Context, dir string, id int64) (bool, error) {
-	out, err := gitText(ctx, dir, "log", "-n1", "--format=%H", "-E",
-		fmt.Sprintf("--grep=^Brigada-Task: %d$", id), "HEAD")
-	if err != nil {
-		// An unborn branch has no history to carry a trailer.
-		if !gitSucceeds(ctx, dir, "rev-parse", "--verify", "--quiet", "HEAD") {
-			return false, nil
-		}
-		return false, err
-	}
-	return strings.TrimSpace(out) != "", nil
 }
 
 // defaultBranch is the origin's default branch: origin/HEAD when the
