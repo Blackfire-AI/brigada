@@ -85,8 +85,8 @@ tasks:
     base: "land-env-target"
     continue: "land-env-target"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-76"
     rounds: 0
   - id: 77
     name: "sleep-aware"
