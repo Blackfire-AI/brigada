@@ -176,14 +176,17 @@ var newRemovalTestClient = removeTestClient
 
 func removeTestRepo(t *testing.T) (context.Context, string, *api.Client, string) {
 	t.Helper()
+	// The engine's plan-file mirror pushes git into the remote, so the
+	// remote's temp dir outlives the engine: created first, its cleanup
+	// runs after the engine's, which waits the mirror's push out.
+	remote := t.TempDir()
+	wireGit(t, remote, "init", "--bare", "-q")
 	ctx, state := startRemovalTestEngine(t)
 	importRepo(t)
 	root, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	remote := t.TempDir()
-	wireGit(t, remote, "init", "--bare", "-q")
 	wireGit(t, root, "remote", "set-url", "origin", remote)
 	wireGit(t, root, "config", "core.excludesFile", os.DevNull)
 	client := newRemovalTestClient(t, ctx, state)
@@ -288,13 +291,19 @@ func TestRemoveLiveWorkRefusesThenCancels(t *testing.T) {
 func TestRemoveConfirmationAndRunner(t *testing.T) {
 	for _, answer := range []string{"decline", "stop", "keep", "yes", "other project"} {
 		t.Run(answer, func(t *testing.T) {
+			// Creating a project needs a fetchable transport URL, not
+			// a canonical host/path identity. Use a real local remote
+			// so plan mirroring also stays independent of the network.
+			// Like removeTestRepo's own remote, it is made before the
+			// engine starts: the engine's cleanup, which waits the
+			// mirror's push out, runs before the temp dir is removed.
+			var otherRemote string
+			if answer == "other project" {
+				otherRemote = t.TempDir()
+				wireGit(t, otherRemote, "init", "--bare", "-q")
+			}
 			ctx, state, client, _ := removeTestRepo(t)
 			if answer == "other project" {
-				// Creating a project needs a fetchable transport URL, not
-				// a canonical host/path identity. Use a real local remote
-				// so plan mirroring also stays independent of the network.
-				otherRemote := t.TempDir()
-				wireGit(t, otherRemote, "init", "--bare", "-q")
 				if _, err := client.SubmitTask(ctx, api.TaskSubmit{RepoURL: otherRemote, BaseRef: "main", Spec: "other project's live work"}); err != nil {
 					t.Fatal(err)
 				}
@@ -412,14 +421,16 @@ func TestRemoveCommandGuardPrecedesArchive(t *testing.T) {
 func TestInitThenRemoveRepositoryRoundTrip(t *testing.T) {
 	for _, own := range []bool{false, true} {
 		t.Run(map[bool]string{false: "fresh", true: "user files"}[own], func(t *testing.T) {
+			// Before the engine, like removeTestRepo: the mirror pushes
+			// into the remote, so its cleanup must follow the engine's.
+			remote := t.TempDir()
+			wireGit(t, remote, "init", "--bare", "-q")
 			ctx, state := startSettingsEngine(t)
 			importRepo(t)
 			root, err := os.Getwd()
 			if err != nil {
 				t.Fatal(err)
 			}
-			remote := t.TempDir()
-			wireGit(t, remote, "init", "--bare", "-q")
 			wireGit(t, root, "remote", "set-url", "origin", remote)
 			wireGit(t, root, "config", "core.excludesFile", os.DevNull)
 			if own {

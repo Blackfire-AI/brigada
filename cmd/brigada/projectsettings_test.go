@@ -22,12 +22,17 @@ func startSettingsEngine(t *testing.T) (context.Context, string) {
 	go func() { done <- lifecycle.Run(ctx, lifecycle.Config{StateDir: state, Idle: time.Minute}) }()
 	t.Cleanup(func() {
 		cancel()
+		// Run returns only after its plan-file mirror's in-flight git
+		// push has ended, so waiting here keeps that git clear of the
+		// temp dirs removed after this cleanup. The ceiling is loose:
+		// a loaded machine takes its time, and a stuck engine is still
+		// reported.
 		select {
 		case err := <-done:
 			if err != nil {
 				t.Errorf("the engine stopped with an error: %v", err)
 			}
-		case <-time.After(10 * time.Second):
+		case <-time.After(30 * time.Second):
 			t.Error("the engine did not stop")
 		}
 	})
