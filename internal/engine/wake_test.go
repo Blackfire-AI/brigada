@@ -38,6 +38,22 @@ func (e *env) liveForeman() int64 {
 // pair the project has chosen by now, for the answer class only: the
 // seeded runners stay agentless for the worker leases these tests make.
 func (e *env) leaseForeman() *LeaseGrant {
+	return e.leaseForemanRun(true)
+}
+
+// leaseForemanRaw is leaseForeman without the health reset: the caller
+// watches the agent's health across the turns it leases (§8), as the
+// infra-failure tests do.
+func (e *env) leaseForemanRaw() *LeaseGrant {
+	return e.leaseForemanRun(false)
+}
+
+// leaseForemanRun leases the project's live foreman turn on the shared
+// runner-foreman and its claude/sonnet agent, and, when reset is set,
+// puts the agent back to ready first — the wake tests stage failed turns
+// on purpose, and the streak must not take the helper's agent out from
+// under the next lease.
+func (e *env) leaseForemanRun(reset bool) *LeaseGrant {
 	e.t.Helper()
 	var harness, model string
 	if err := e.st.View(e.ctx, func(tx *sql.Tx) error {
@@ -52,10 +68,9 @@ func (e *env) leaseForeman() *LeaseGrant {
 		SELECT ?, ?, ?, ?, ?, ?, '["answer"]', ?, ?
 		WHERE NOT EXISTS (SELECT 1 FROM agents WHERE runner_id = ? AND adapter = ? AND model = ?)`,
 		runner, harness, harness, model, harness, harness, seedTS, seedTS, runner, harness, model)
-	// These tests are about the wake, not the agent's health: a streak of
-	// failed turns (which they stage on purpose) must not take the helper's
-	// agent out from under the next lease.
-	e.exec("UPDATE agents SET health = 'ready', health_reason = '' WHERE runner_id = ?", runner)
+	if reset {
+		e.exec("UPDATE agents SET health = 'ready', health_reason = '' WHERE runner_id = ?", runner)
+	}
 	g := e.lease(runner, []string{harness}, nil)
 	if g == nil {
 		e.t.Fatal("the foreman turn was not leased")
