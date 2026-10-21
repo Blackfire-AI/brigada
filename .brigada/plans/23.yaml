@@ -127,7 +127,7 @@ tasks:
     continue: "port-39-41-36"
     tier: heavy
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 93
