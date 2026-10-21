@@ -5,9 +5,9 @@
 plan: 25
 title: "User defines the rules; #48 landing rough edges; faster engine tests"
 repo: "github.com/Blackfire-AI/brigada"
-state: pending_approval
+state: active
 created: 2026-10-21T18:41:16.36427Z
-updated: 2026-10-21T18:41:16.36427Z
+updated: 2026-10-21T19:06:35.739893Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -28,7 +28,7 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 97
@@ -85,7 +85,7 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 102
@@ -96,7 +96,7 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 103
@@ -106,7 +106,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 104
@@ -117,7 +117,7 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 105
@@ -127,6 +127,6 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
