@@ -1,0 +1,32 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 30
+title: "brigada agents: notice models the runner does not register (#49)"
+repo: "github.com/Blackfire-AI/brigada"
+state: active
+created: 2026-10-21T20:27:45.06478Z
+updated: 2026-10-21T20:27:45.06478Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps — the continued
+# dep when base is empty and continue is set, else the default branch; merge a
+# task after its base. A task with continue, one of deps, starts in the
+# session of the dep's author.
+# States are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1);
+# review_tier and review_effort do the same for its reviews (§7, §8); caps
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1).
+tasks:
+  - id: 113
+    name: "agents-cmd"
+    title: "brigada agents: list and add models the runner does not register"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: ready
+    branch: ""
+    rounds: 0
