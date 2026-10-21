@@ -5,9 +5,9 @@
 plan: 22
 title: "Land job gaps (#47), laptop sleep and network blips (#46), faster engine tests"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-21T10:47:05.113947Z
-updated: 2026-10-21T10:52:10.929701Z
+updated: 2026-10-21T14:50:14.623903Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -154,6 +154,6 @@ tasks:
     base: "self-heal"
     tier: light
     effort: low
-    state: reviewing
+    state: done
     branch: "brigada/task-82"
     rounds: 0
