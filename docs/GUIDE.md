@@ -414,7 +414,7 @@ The loop — plan, work, check, review, land, push — runs on its own; you stop
 
 - The **land gate** holds a landing before the squash. `gate_land: ask` holds every landing; a rule holds the one task that trips it — a tier among `approval_tiers`, a changed path matching `approval_protected_paths`, or a spent restart when `approval_restarted` is `true`. A held task stays `done`, and only its dependents' landings wait on it: work on the rest of the plan goes on. The needs-you entry names the rule, as `task #N done: waits to land: heavy; touches infra/**`.
 - The **push gate** (`gate_push`) decides what follows a successful landing:
-  - `ask` (the default): the landing is recorded as waiting, and the queue shows `task #N done: waits to push: <branch>@<sha>`. `brigada push approve` releases every waiting landing of the project at once: each gets its push, no new squash.
+  - `ask` (the default): the landing is recorded as waiting, and the queue shows `task #N done: waits to push: <branch>@<sha>`. The commit waits on the remote under `refs/brigada/land/<target>`, a ref outside your branches that only ever moves forward, so it outlives the runner that made it. Waiting landings stack: the next landing is squashed onto the newest waiting one, so a dependent sits on top of its dependency. `brigada push approve` releases every waiting landing of the project at once: each gets its push, no new squash, on whichever runner takes it, and the stack reaches the target in order. If the target moved outside brigada while landings waited, their push is refused as a non-fast-forward and the task parks for the foreman.
   - `auto`: the runner pushes the target at once.
   - `never`: nothing is pushed. The landing lands on the runner's clone of the target, and brigada prints the exact `git push` command for you.
 
@@ -728,7 +728,7 @@ Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `
 - `--max-parallel N`: how many concurrent jobs this runner runs; unset (`0`) means one at a time. Init now sets it from tasks at once, and `brigada start` passes the saved number;
 - `--no-start`: fail instead of starting the engine.
 
-A `land` job (see [section 5](#5-finishing-the-land-job)) carries the single label `git` and no agent. Every runner offers the `git` label — its own git does the landing, and the label is the promise that those git credentials work for the repo — so any runner may take it, wherever it runs. The landing happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker.
+A `land` job (see [section 5](#5-finishing-the-land-job)) carries the single label `git` and no agent. Every runner offers the `git` label — its own git does the landing, and the label is the promise that those git credentials work for the repo — so any runner may take it, wherever it runs. The landing happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker. A landing that waits at the push gate is kept on the remote (`refs/brigada/land/<target>`), not in that clone, so its push may run on another runner.
 
 `kimi`, `opencode` and `dsh` are worker-only; the foreman can be `claude` or `codex`.
 

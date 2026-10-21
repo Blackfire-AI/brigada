@@ -151,7 +151,10 @@ func taskApprovedTx(tx *sql.Tx, taskID int64) (bool, error) {
 // depsLandedTx reports whether every dependency of taskID is landed
 // (§7.1): a dependency with a landing record, or a dependency of a class
 // that never lands — only implement tasks are landable, so another
-// class's dependency has nothing to wait for.
+// class's dependency has nothing to wait for. A landing that waits at
+// the push gate counts: the runner squashes the dependent onto the
+// remote's waiting ref, on top of the dependency's commit, so the stack
+// keeps its order when the gate releases it.
 func depsLandedTx(tx *sql.Tx, taskID int64) (bool, error) {
 	rows, err := tx.Query("SELECT depends_on_task_id FROM task_deps WHERE task_id = ?", taskID)
 	if err != nil {
@@ -587,7 +590,8 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 	}
 	// The push phase reuses the land job: the landing record exists, so
 	// the grant is the push's alone — the repo to push to, the target
-	// and the recorded commit.
+	// and the recorded commit. No runner affinity: the commit waits on
+	// the remote's waiting ref, where any runner fetches it.
 	if existing, err := landingTx(tx, j.TaskID); err != nil {
 		return nil, err
 	} else if existing != nil {
@@ -763,8 +767,11 @@ type PushApproveResult struct {
 // (§6.3): each landing recorded as waiting gets a push job — the land job
 // reused, its push phase — which a runner leases and completes by
 // pushing the recorded commit, no new squash. The foreman has no tool
-// for it: the gate is the user's. repoURL names the project, as every
-// client command does.
+// for it: the gate is the user's. The waiting landings stack on the
+// remote's waiting ref, each on the one before, so their pushes are
+// fast-forwards in any order and on any runner: a push whose commit a
+// later landing already carried is pushed already. repoURL names the
+// project, as every client command does.
 func (e *Engine) PushApprove(ctx context.Context, repoURL string) (PushApproveResult, error) {
 	if repoURL == "" {
 		return PushApproveResult{}, fmt.Errorf("repo URL is required (product §5 rule 6: repos are addressed by URL)")

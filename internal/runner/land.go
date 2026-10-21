@@ -26,8 +26,13 @@ import (
 // result; then by the push gate push, record waiting, or record the
 // push command; after_land after the push, or after the landing when
 // the gate is never. Never a force-push, never another branch touched.
-// A push phase — the land job reused once the gate is released —
-// pushes the recorded commit, no new squash.
+// Under the ask gate a landing waits on the remote, not in the clone:
+// its commit is pushed, fast-forward only, to the target's waiting ref
+// (landWaitRef), and the next landing squashes onto that ref while it
+// is ahead of the target, so the waiting landings form one stack — a
+// dependent on top of its dependency — that any runner can push. A
+// push phase — the land job reused once the gate is released — pushes
+// the recorded commit, no new squash.
 
 // landRecordJSON is the landing record a land job's completion carries
 // (§7.1), the shape the engine keeps: the target branch, the resulting
@@ -109,9 +114,9 @@ func (r *jobRun) runLandSquashPhase(ctx context.Context) {
 		return
 	}
 	if out.pushRejected {
-		// The target moved under the push (§7.1): fetch and retry the
-		// squash once, then a second rejection is a conflict-like
-		// failure.
+		// The target — or, under the ask gate, the waiting ref — moved
+		// under the push (§7.1): fetch and retry the squash once, then a
+		// second rejection is a conflict-like failure.
 		r.cfg.Log.WarnContext(ctx, "the landing push was rejected; retrying once from a fresh fetch",
 			"job_id", grant.JobID, "err", out.pushErr)
 		out, err = r.landAttempt(ctx, dir)
@@ -172,11 +177,33 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 	if err := r.landFetch(ctx, dir, refs...); err != nil {
 		return nil, err
 	}
-	// The landing clone sits detached at the fetched target: no branch
-	// of its own is ever checked out, so the fetches move no ref under
-	// a checkout and the squash commits ride a detached HEAD.
-	if out, err := r.landGit(ctx, dir, "checkout", "--quiet", "--force", "--detach", "refs/heads/"+grant.LandTarget); err != nil {
-		return nil, fmt.Errorf("check out the target %s: %v", grant.LandTarget, trimCmdError(out, err))
+	onto := "refs/heads/" + grant.LandTarget
+	if grant.GatePush == engine.GateAsk {
+		// Landings that wait at the push gate stack (§7.1): while the
+		// waiting ref is ahead of the target — some landing still waits
+		// for its push — this one squashes onto it, so it lands after
+		// them and on top of any dependency among them. Once the target
+		// holds the ref, the target is the base again.
+		if err := r.landFetchWaiting(ctx, dir); err != nil {
+			return nil, err
+		}
+		wait := landWaitRef(grant.LandTarget)
+		if r.landHasCommit(ctx, dir, wait) {
+			pushed, err := r.landIsAncestor(ctx, dir, wait, onto)
+			if err != nil {
+				return nil, fmt.Errorf("compare the waiting landings with %s: %v", grant.LandTarget, err)
+			}
+			if !pushed {
+				onto = wait
+			}
+		}
+	}
+	// The landing clone sits detached at the fetched target, or at the
+	// waiting ref: no branch of its own is ever checked out, so the
+	// fetches move no ref under a checkout and the squash commits ride a
+	// detached HEAD.
+	if out, err := r.landGit(ctx, dir, "checkout", "--quiet", "--force", "--detach", onto); err != nil {
+		return nil, fmt.Errorf("check out %s: %v", onto, trimCmdError(out, err))
 	}
 	head, err := r.landText(ctx, dir, "rev-parse", "refs/heads/"+grant.Branch)
 	if err != nil {
@@ -230,7 +257,8 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 			o.commit = strings.TrimSpace(commit)
 		}
 		// An empty patch made no commit (§7.1): the record names the
-		// target's own head, for the landing is already entirely there.
+		// head it was squashed onto, for the landing is already entirely
+		// there.
 	}
 	if grant.CheckCmd != "" {
 		check := runCheck(ctx, dir, grant.CheckCmd, r.cfg.CheckTimeout)
@@ -254,7 +282,16 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 	case engine.GateAsk:
 		// §6.3: the landing waits at the push gate; the push phase,
 		// queued by the user's release, pushes the recorded commit and
-		// runs after_land.
+		// runs after_land. The commit waits on the remote's waiting ref,
+		// fast-forward only, so it outlives this clone and any runner can
+		// push it; a rejection means another landing moved the ref first,
+		// and the caller retries once from a fresh fetch and squash.
+		if out, err := r.landGit(ctx, dir, "push", "--quiet", "origin", "HEAD:"+landWaitRef(grant.LandTarget)); err != nil {
+			r.discardLandAttempt(ctx, dir)
+			o.pushRejected = true
+			o.pushErr = trimCmdError(out, err).Error()
+			return o, nil
+		}
 		o.pushed = "waiting"
 	case engine.GateNever:
 		// §6.3: brigada never pushes; the exact command is recorded for
@@ -280,9 +317,11 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 // runLandPushPhase performs the push phase of an already-recorded
 // landing (§7.1): the push gate was released, and the runner pushes
 // the recorded commit — no new squash — then runs after_land. The
-// commit lives in the landing clone the squash phase made; a phase
-// that reaches a runner whose clone never saw it reports that, rather
-// than re-making what the record already names.
+// commit waits on the remote's waiting ref (landWaitRef), so whichever
+// runner leases the phase fetches it there, its own clone fresh or not;
+// a commit found on neither is reported, never re-made. The waiting
+// landings form one stack, so pushing a later one pushes the earlier
+// ones with it: a commit the target already holds is pushed already.
 func (r *jobRun) runLandPushPhase(ctx context.Context) {
 	grant := r.grant
 	switch {
@@ -302,20 +341,45 @@ func (r *jobRun) runLandPushPhase(ctx context.Context) {
 		r.finishWithError(ctx, err.Error())
 		return
 	}
+	if err := r.landFetchWaiting(ctx, dir); err != nil {
+		r.finishWithError(ctx, err.Error())
+		return
+	}
 	// The recorded commit, exactly (§7.1): verified present, checked
 	// out, pushed.
 	if out, err := r.landGit(ctx, dir, "cat-file", "-e", grant.LandCommit+"^{commit}"); err != nil {
-		r.finishWithError(ctx, fmt.Sprintf("the recorded landing commit %s is not in this runner's landing clone: %v",
-			grant.LandCommit, trimCmdError(out, err)))
+		r.finishWithError(ctx, fmt.Sprintf("the recorded landing commit %s is neither on %s nor in this runner's landing clone: %v",
+			grant.LandCommit, landWaitRef(grant.LandTarget), trimCmdError(out, err)))
 		return
 	}
 	if out, err := r.landGit(ctx, dir, "checkout", "--quiet", "--force", "--detach", grant.LandCommit); err != nil {
 		r.finishWithError(ctx, fmt.Sprintf("check out the recorded commit %s: %v", grant.LandCommit, trimCmdError(out, err)))
 		return
 	}
-	if out, err := r.landGit(ctx, dir, "push", "--quiet", "origin", "HEAD:refs/heads/"+grant.LandTarget); err != nil {
-		r.finishWithError(ctx, fmt.Sprintf("push %s to %s: %v", grant.LandCommit, grant.LandTarget, trimCmdError(out, err)))
-		return
+	// Two tries: the stack's pushes run at once, so a rejection may be a
+	// later landing's push that already carried this commit — the fresh
+	// fetch tells, and only a target that still lacks it is a failure.
+	for try := 1; ; try++ {
+		landed, err := r.landIsAncestor(ctx, dir, grant.LandCommit, "refs/heads/"+grant.LandTarget)
+		if err != nil {
+			r.finishWithError(ctx, fmt.Sprintf("compare %s with %s: %v", grant.LandCommit, grant.LandTarget, err))
+			return
+		}
+		if landed {
+			break
+		}
+		out, err := r.landGit(ctx, dir, "push", "--quiet", "origin", "HEAD:refs/heads/"+grant.LandTarget)
+		if err == nil {
+			break
+		}
+		if try == 2 {
+			r.finishWithError(ctx, fmt.Sprintf("push %s to %s: %v", grant.LandCommit, grant.LandTarget, trimCmdError(out, err)))
+			return
+		}
+		if err := r.landFetch(ctx, dir, grant.LandTarget); err != nil {
+			r.finishWithError(ctx, err.Error())
+			return
+		}
 	}
 	r.finishLand(ctx, pushRecordJSON{
 		TargetBranch: grant.LandTarget,
@@ -412,6 +476,47 @@ func (r *jobRun) landFetch(ctx context.Context, dir string, refs ...string) erro
 		return fmt.Errorf("fetch %s from %s: %v", strings.Join(refs, ", "), redactURL(r.grant.RepoURL), trimCmdError(out, err))
 	}
 	return nil
+}
+
+// landWaitRef names the remote ref the target's waiting landings sit on
+// (§7.1, §6.3): the newest landing that waits at the push gate, with
+// every earlier one beneath it. Outside refs/heads, so it is no branch
+// of the user's, and moved only by fast-forward pushes, so no waiting
+// commit ever drops off it.
+func landWaitRef(target string) string {
+	return "refs/brigada/land/" + target
+}
+
+// landFetchWaiting fetches the waiting refs into the landing clone
+// (§7.1), pruning the ones the remote no longer has. A remote with none
+// is no failure: the glob then matches nothing.
+func (r *jobRun) landFetchWaiting(ctx context.Context, dir string) error {
+	if out, err := r.landGit(ctx, dir, "fetch", "--quiet", "--no-tags", "--prune", "origin",
+		"+refs/brigada/land/*:refs/brigada/land/*"); err != nil {
+		return fmt.Errorf("fetch the waiting landings from %s: %v", redactURL(r.grant.RepoURL), trimCmdError(out, err))
+	}
+	return nil
+}
+
+// landHasCommit reports whether ref names a commit in the landing clone.
+func (r *jobRun) landHasCommit(ctx context.Context, dir, ref string) bool {
+	_, err := r.landGit(ctx, dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	return err == nil
+}
+
+// landIsAncestor reports whether commit is reachable from ref in the
+// landing clone: git's own answer, an error only when git could not
+// give one.
+func (r *jobRun) landIsAncestor(ctx context.Context, dir, commit, ref string) (bool, error) {
+	out, err := r.landGit(ctx, dir, "merge-base", "--is-ancestor", commit, ref)
+	if err == nil {
+		return true, nil
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, trimCmdError(out, err)
 }
 
 // landGit runs one git command in the landing clone with the runner's
