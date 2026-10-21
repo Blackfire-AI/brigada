@@ -440,7 +440,9 @@ Everything is kept and readable.
 
 ## 10. Notifications
 
-Local OS notifications plus a "needs you" queue in `brigada status`: a plan, a landing or a push held by a rule at its gate (§6.3), user-directed questions, the foreman's limit, the foreman's budget out, a broken agent, a task parked with no eligible agent, a plan done. Remote channels (webhook, Telegram) are in the backlog. The queue holds only what a rule or the foreman gave the user; a landing or a push that went through is a report in the history, not an entry.
+Local OS notifications plus a "needs you" queue in `brigada status`: a plan, a landing or a push held by a rule at its gate (§6.3), user-directed questions, the foreman's limit, the foreman's budget out, a broken agent, a task parked with no eligible agent, a plan done. The queue holds only what a rule or the foreman gave the user; a landing or a push that went through is a report in the history, not an entry.
+
+`notify.webhook` in the user config file adds one optional webhook URL — never `.brigada/project.yaml` or the KB, which others may read, for the URL may carry a token. The same moments the desktop notification fires are also one small JSON POST: project, kind, the banner's one-line text, the task and plan ids, the time. The JSON is plain, so ntfy, Slack or a Telegram bot relay can take it; there are no per-service adapters. Delivery is fire-and-forget: a short timeout bounds each attempt, a failed attempt is retried once, and a failing webhook is logged — never with the URL — and never blocks the engine: the posts leave the engine's tick on their own bounded queue, so a slow relay delays nothing but its own backlog. The URL appears nowhere else: not in the status, the history or an error.
 
 ## 11. Data model (SQLite, one file)
 

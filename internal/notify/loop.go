@@ -28,6 +28,13 @@ const maxPasses = 25
 // for the sum of those hangs.
 const passBudget = 30 * time.Second
 
+// webhookQueue bounds the posts waiting for the webhook worker: room
+// for a burst of notifications, small enough that a dead relay's
+// backlog is dropped with a log line instead of growing without end.
+// The queue is what keeps the webhook off the engine's tick — a full
+// one costs the post, never the tick.
+const webhookQueue = 32
+
 // eventPayload is the slice of the engine's event payload the mapper
 // reads: the reason words for the kinds that notify. Defined here,
 // not imported from the engine, to keep this package's reading of the
@@ -45,6 +52,13 @@ type eventPayload struct {
 	Count    int64  `json:"count,omitempty"`
 }
 
+// hookPost is one notification waiting for its webhook turn: the event
+// as the log read it, and the one-line text the banner already showed.
+type hookPost struct {
+	ev   Event
+	body string
+}
+
 // Loop is the delivery loop (§13): it polls the event log for rows
 // past a persisted cursor and notifies each mapped event once. The
 // cursor lives in the store's meta row, so a restart resumes exactly
@@ -54,6 +68,8 @@ type eventPayload struct {
 type Loop struct {
 	st  *store.Store
 	n   Notifier
+	h   *Webhook
+	hq  chan hookPost
 	log *slog.Logger
 }
 
@@ -64,6 +80,36 @@ func NewLoop(st *store.Store, n Notifier, log *slog.Logger) *Loop {
 		log = slog.Default()
 	}
 	return &Loop{st: st, n: n, log: log}
+}
+
+// WithWebhook adds the optional webhook sink (§10): every notification
+// the banner fires is also queued for one small JSON POST to the URL,
+// beside the OS notification, never instead of it. nil h keeps the loop
+// local-only. The posts ride a background worker on their own context,
+// not the engine's tick: the loop queues and moves on, so a relay that
+// hangs, fails or backs up never delays the sweep, the snapshot or the
+// idle exit — fire and forget.
+func (l *Loop) WithWebhook(h *Webhook) *Loop {
+	l.h = h
+	l.hq = make(chan hookPost, webhookQueue)
+	go l.serveWebhook()
+	return l
+}
+
+// serveWebhook drains the queue one post at a time, each attempt
+// bounded by the webhook's own short timeout and its one retry. A
+// failing post is logged — the error's text carries no URL — and
+// dropped: the cursor has already advanced past its event, and
+// fire-and-forget means no post holds a pass, a tick or the engine's
+// exit hostage. What is still queued or in flight when the process
+// stops is lost with it.
+func (l *Loop) serveWebhook() {
+	for p := range l.hq {
+		if err := l.h.Post(context.Background(), p.ev, p.body); err != nil {
+			l.log.Warn("webhook post failed; dropping it",
+				"event", p.ev.ID, "kind", p.ev.Kind, "err", err)
+		}
+	}
 }
 
 // Flush delivers everything pending, in passes of batch events: read
@@ -136,6 +182,20 @@ func (l *Loop) flushOnce(ctx context.Context) (bool, error) {
 				l.log.WarnContext(ctx, "notification failed; skipping and advancing",
 					"event", ev.ID, "kind", ev.Kind, "err", err)
 			}
+			if l.h != nil {
+				// The post leaves the pass here: the worker runs it on
+				// its own context, so a hung relay delays neither the
+				// cursor nor the tick, and a shutdown may cut posts
+				// queued or in flight — fire-and-forget accepts that. A
+				// full queue drops the post with a log line rather
+				// than wait.
+				select {
+				case l.hq <- hookPost{ev: ev, body: body}:
+				default:
+					l.log.WarnContext(ctx, "webhook queue full; dropping the post",
+						"event", ev.ID, "kind", ev.Kind)
+				}
+			}
 		}
 		// The cursor advances past the tool's own failures and ignored
 		// kinds alike — they never notify — and past each event before
@@ -163,16 +223,20 @@ func (l *Loop) advance(ctx context.Context, id int64) error {
 
 // eventsAfterTx reads at most limit events with id strictly after the
 // cursor, oldest first, resolving each event's task and plan so the
-// mapper has titles without a second query. Events whose referents are
-// gone still read: LEFT JOINs keep the log readable, and the mapper
-// renders what it has.
+// mapper has titles without a second query, and its project's repo URL
+// for the webhook. Events whose referents are gone still read: LEFT
+// JOINs keep the log readable, and the mapper renders what it has.
 func eventsAfterTx(tx *sql.Tx, after, limit int64) ([]Event, error) {
 	rows, err := tx.Query(`SELECT e.id, e.kind, COALESCE(e.task_id, 0),
-		COALESCE(t.plan_id, pp.id, 0), COALESCE(p.title, pp.title, ''), e.payload
+		COALESCE(t.plan_id, pp.id, 0), COALESCE(p.title, pp.title, ''),
+		COALESCE(ep.repo_url, tp.repo_url, ppj.repo_url, ''), e.created_at, e.payload
 		FROM events e
 		LEFT JOIN tasks t ON t.id = e.task_id
 		LEFT JOIN plans p ON p.id = t.plan_id
+		LEFT JOIN projects ep ON ep.id = e.project_id
+		LEFT JOIN projects tp ON tp.id = p.project_id
 		LEFT JOIN plans pp ON pp.id = CASE WHEN json_valid(e.payload) THEN json_extract(e.payload, '$.plan') END
+		LEFT JOIN projects ppj ON ppj.id = pp.project_id
 		WHERE e.id > ?
 		ORDER BY e.id
 		LIMIT ?`, after, limit)
@@ -184,7 +248,7 @@ func eventsAfterTx(tx *sql.Tx, after, limit int64) ([]Event, error) {
 	for rows.Next() {
 		var ev Event
 		var payload string
-		if err := rows.Scan(&ev.ID, &ev.Kind, &ev.TaskID, &ev.PlanID, &ev.PlanTitle, &payload); err != nil {
+		if err := rows.Scan(&ev.ID, &ev.Kind, &ev.TaskID, &ev.PlanID, &ev.PlanTitle, &ev.Project, &ev.At, &payload); err != nil {
 			return nil, fmt.Errorf("read events after %d: %w", after, err)
 		}
 		ev.Reason = reasonOf(ev.Kind, payload)
