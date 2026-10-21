@@ -106,6 +106,14 @@ func (r *jobRun) execute(ctx context.Context) {
 		return
 	}
 
+	// A land job has no worker, no worktree and no setup (§7.1): the
+	// runner's own git, in a clone of the target branch under its state
+	// directory.
+	if isLandJob(r.grant) {
+		r.runLandJob(ctx)
+		return
+	}
+
 	// The worker's kill switch exists before any goroutine that may
 	// fire it: the heartbeat loop (a stall) closes the channel, the
 	// worker's killer goroutine receives it — the field is written once,
@@ -680,6 +688,7 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 	}
 
 	result.Head = "" // the runner's to say, as the extra repositories' commits are
+	result.ChangedPaths = nil
 	if result.Status == statusDone {
 		if err := ws.ensurePushed(ctx); err != nil {
 			if r.gone(ctx, "pushing the branch") {
@@ -690,6 +699,15 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 		}
 		if head, err := ws.worktreeHead(ctx); err == nil {
 			result.Head = head
+		}
+		// The task's changed paths (§6.3, §7.1) are the runner's to say
+		// too: recorded so the land gate's protected-path rule matches
+		// what the work really touched. A failure to read them is a
+		// warning, never the job's — the gate falls back to its proxy.
+		if paths, err := ws.changedPaths(ctx, r.grant.BaseRef); err != nil {
+			r.cfg.Log.WarnContext(ctx, "record the task's changed paths", "job_id", r.grant.JobID, "err", err)
+		} else {
+			result.ChangedPaths = paths
 		}
 		if result.Branch == "" {
 			result.Branch = ws.branch

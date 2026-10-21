@@ -196,24 +196,30 @@ func landHoldReasonsTx(tx *sql.Tx, project, taskID int64) ([]string, error) {
 	if s.GateLand == GateAsk {
 		reasons = append(reasons, "gate_land is "+GateAsk)
 	}
-	var spec, check, tier string
-	if err := tx.QueryRow("SELECT spec, COALESCE(check_cmd, ''), tier FROM tasks WHERE id = ?", taskID).
-		Scan(&spec, &check, &tier); err != nil {
+	// The protected-path rule matches the paths the task changed. The
+	// engine runs no git (product §5 rule 1), so the runner records the
+	// task's real changed paths (`git diff --name-only base...branch`)
+	// with the work job's result and they are what the rule matches;
+	// the spec and check text stand in only when no paths are recorded
+	// — an older runner, or a task whose work predates the recording —
+	// the same proxy the plan gate uses (§6.3).
+	var spec, check, tier, changed string
+	if err := tx.QueryRow("SELECT spec, COALESCE(check_cmd, ''), tier, COALESCE(changed_paths, '') FROM tasks WHERE id = ?", taskID).
+		Scan(&spec, &check, &tier, &changed); err != nil {
 		return nil, fmt.Errorf("read task %d: %w", taskID, err)
 	}
 	if slices.Contains(s.ApprovalTiers, tier) {
 		reasons = append(reasons, tier)
 	}
-	// The protected-path rule matches the paths the task changed. The
-	// engine runs no git (product §5 rule 1), and the work job's result
-	// block does not yet carry the changed paths (§7.1's approved-head
-	// gap, §16 item 10), so until the runner records them the spec and
-	// check text stand in — the same proxy the plan gate uses (§6.3). A
-	// task that changes infra/** without mentioning it therefore lands
-	// without a hold for now; the runner that reports the paths closes
-	// this gap.
+	paths := spec + "\n" + check
+	if changed != "" {
+		var real []string
+		if json.Unmarshal([]byte(changed), &real) == nil {
+			paths = strings.Join(real, "\n")
+		}
+	}
 	seen := map[string]bool{}
-	for _, p := range matchProtected(s.ProtectedPaths, spec+"\n"+check) {
+	for _, p := range matchProtected(s.ProtectedPaths, paths) {
 		if !seen[p] {
 			seen[p] = true
 			reasons = append(reasons, "touches "+p)
@@ -516,6 +522,50 @@ func (e *Engine) landCheckFailedTx(tx *sql.Tx, job *jobRow, rec landRecord, now 
 	}, now)
 }
 
+// LandMessage is the task data a land job's squash commit message is
+// built from (§7.1): the fields of internal/landing's Task the engine
+// knows without running git — what the hand-driven land reads through
+// the API, read here from the task, its last author job and that job's
+// agent. The runner adds the branch and its fetched head.
+type LandMessage struct {
+	Title   string `json:"title"`
+	Spec    string `json:"spec"`
+	Summary string `json:"summary"`
+	Family  string `json:"family"`
+	Model   string `json:"model"`
+}
+
+// landMessageTx reads a task's squash-message data (§7.1): the title
+// and spec from the task, the worker's summary from its last done
+// author job, and that job's agent family and model. A task with no
+// done author job keeps the empty fields; none can reach a land job.
+func landMessageTx(tx *sql.Tx, taskID int64) (*LandMessage, error) {
+	m := &LandMessage{}
+	if err := tx.QueryRow("SELECT title, spec FROM tasks WHERE id = ?", taskID).
+		Scan(&m.Title, &m.Spec); err != nil {
+		return nil, fmt.Errorf("read task %d: %w", taskID, err)
+	}
+	var agent int64
+	var authorResult string
+	err := tx.QueryRow(`SELECT COALESCE(agent_id, 0), COALESCE(result, '') FROM jobs
+		WHERE task_id = ? AND kind IN ('work', 'fix') AND status = 'done' ORDER BY id DESC LIMIT 1`, taskID).
+		Scan(&agent, &authorResult)
+	if errors.Is(err, sql.ErrNoRows) {
+		return m, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read the last author job of task %d: %w", taskID, err)
+	}
+	m.Summary = jobResultSummary(authorResult)
+	if agent != 0 {
+		err := tx.QueryRow("SELECT family, model FROM agents WHERE id = ?", agent).Scan(&m.Family, &m.Model)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("read agent %d: %w", agent, err)
+		}
+	}
+	return m, nil
+}
+
 // landLeaseGrant builds the grant a land job's lease hands the runner
 // (§7.1): the repo, the task's result branch to squash and its base for
 // the diff, the target branch, the project's default check to rerun on
@@ -536,10 +586,15 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		}
 	}
 	// The push phase reuses the land job: the landing record exists, so
-	// the grant is the push's alone.
+	// the grant is the push's alone — the repo to push to, the target
+	// and the recorded commit.
 	if existing, err := landingTx(tx, j.TaskID); err != nil {
 		return nil, err
 	} else if existing != nil {
+		repo, _, _, _, err := taskInfoTx(tx, j)
+		if err != nil {
+			return nil, err
+		}
 		return &LeaseGrant{
 			JobID:          j.ID,
 			LeaseOwner:     owner,
@@ -550,6 +605,7 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 			Key:            j.Key,
 			LeaseID:        leaseID,
 			LeaseExpiresAt: expires,
+			RepoURL:        repo,
 			LandTarget:     existing.TargetBranch,
 			LandCommit:     existing.Commit,
 			Push:           true,
@@ -558,6 +614,10 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		}, nil
 	}
 	repo, baseRef, _, branch, err := taskInfoTx(tx, j)
+	if err != nil {
+		return nil, err
+	}
+	msg, err := landMessageTx(tx, j.TaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -580,6 +640,7 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		CheckCmd:       s.DefaultCheck,
 		Branch:         branch,
 		LandTarget:     target,
+		LandMessage:    msg,
 		GatePush:       gatePush,
 		AfterLand:      s.AfterLand,
 		Attempt:        j.Attempts + 1,

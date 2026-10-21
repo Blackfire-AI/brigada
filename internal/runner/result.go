@@ -50,6 +50,11 @@ type WorkerResult struct {
 	// a later re-review can ask for the fix round's diff alone. The
 	// runner sets it; a worker's own block never carries it.
 	Head string `json:"head,omitempty"`
+	// ChangedPaths is the task's real changed paths, base...branch
+	// (§6.3, §7.1): what the land gate's protected-path rule matches,
+	// recorded with the work job's result. The runner sets it; a
+	// worker's own block never carries it.
+	ChangedPaths []string `json:"changed_paths,omitempty"`
 }
 
 // parseResult reads the result block out of a worker's final message

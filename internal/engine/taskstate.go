@@ -169,6 +169,24 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 			return fmt.Errorf("record the branch of task %d: %w", job.TaskID, err)
 		}
 	}
+	// The task's real changed paths (§6.3, §7.1) follow the work that
+	// shipped: recorded when the runner reported them, so the land
+	// gate's protected-path rule matches the paths the work touched,
+	// not the spec's words. A later round of the same attempt reports
+	// them again, its done overwriting the earlier set whole.
+	if haveResult {
+		var cp struct {
+			ChangedPaths []string `json:"changed_paths"`
+		}
+		if json.Unmarshal([]byte(c.Result), &cp) == nil && cp.ChangedPaths != nil {
+			if b, err := json.Marshal(cp.ChangedPaths); err == nil {
+				if _, err := tx.Exec(`UPDATE tasks SET changed_paths = ?, updated_at = ? WHERE id = ?`,
+					string(b), fmtTime(now), job.TaskID); err != nil {
+					return fmt.Errorf("record the changed paths of task %d: %w", job.TaskID, err)
+				}
+			}
+		}
+	}
 	switch {
 	case !haveResult || (wr.Status != workerDone && wr.Status != workerCheckFailed && wr.Status != workerNeedsHelp):
 		// A failure the retry policy could not carry, a stopped run, or
