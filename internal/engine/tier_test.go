@@ -110,7 +110,7 @@ func TestTierWaitsWhileCooling(t *testing.T) {
 	e.coolUntil(sonnet, 31*time.Minute)
 	job := e.tierWork("standard")
 	for i := 0; i < 3; i++ {
-		e.clock.Advance(10 * time.Minute)
+		e.elapse(10 * time.Minute)
 		if g := e.leaseAny(e.runner1); g != nil {
 			t.Fatalf("leased %+v while standard tier cools", g)
 		}
@@ -280,7 +280,7 @@ func TestTierOverrideInDispatch(t *testing.T) {
 func TestTierQueueTTLNamesAskedTier(t *testing.T) {
 	e := newEnv(t)
 	job := e.tierWork("heavy")
-	e.clock.Advance(11 * time.Minute)
+	e.elapse(11 * time.Minute)
 	e.mustSweep()
 	if got := e.str("SELECT result FROM jobs WHERE id = ?", job.JobID); !strings.Contains(got, "no agent of tier heavy, or of any tier, offers implement") {
 		t.Errorf("park reason = %s, want the asked tier and class", got)

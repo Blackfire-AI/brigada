@@ -79,6 +79,7 @@ const (
 	evAgentBroken            = "agent_broken"              // an agent was marked broken, with the reason (§8 "Health")
 	evAgentRecovered         = "agent_recovered"           // a runner came back; its runner-stale agents are ready again (§8 "Health")
 	evAgentReset             = "agent_reset"               // the user cleared broken and cooling on the agents of a harness and model (§8)
+	evEngineSuspended        = "engine_suspended"          // the engine's host slept; the sweep restarted every wall-clock deadline (§13)
 )
 
 // eventPayload is the small JSON an event row carries: the fields the
@@ -161,6 +162,9 @@ type eventPayload struct {
 	Tokens    int64 `json:"tokens,omitempty"`
 	Threshold int64 `json:"threshold,omitempty"`
 	Gen       int64 `json:"gen,omitempty"`
+	// SuspendedFor is the wall-clock gap an engine_suspended event names
+	// (§13): how long the host slept, in whole seconds.
+	SuspendedFor int64 `json:"suspended_for,omitempty"`
 }
 
 // Ranked is one candidate of an agent pick (§8): its cost weight and the

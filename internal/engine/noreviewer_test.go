@@ -175,10 +175,9 @@ func TestQueueTTLParkReasonNamesTheMissingReviewer(t *testing.T) {
 				// Even cooling cannot hold a review this agent cannot take.
 				e.exec("UPDATE agents SET cooling_until = ? WHERE runner_id = ?", fmtTime(e.clock.Now().Add(time.Hour)), runner)
 			}
-			e.clock.Advance(11 * time.Minute)
-			rep := e.mustSweep()
-			if len(rep.QueueTimedOut) != 1 || rep.QueueTimedOut[0] != review {
-				t.Fatalf("queue timeouts = %v, want the review job %d", rep.QueueTimedOut, review)
+			e.elapse(11 * time.Minute)
+			if status := e.str("SELECT status FROM jobs WHERE id = ?", review); status != statusFailed {
+				t.Fatalf("review job status = %q, want failed by the queue TTL", status)
 			}
 			p, ok := e.eventPayloadOf(evTaskFailed)
 			if !ok {

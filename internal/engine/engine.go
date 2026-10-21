@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -189,6 +190,11 @@ type Config struct {
 	// RunnerStale is how long a runner may go unseen before the sweep
 	// marks its agents broken (§8 "Health"); zero keeps 15 minutes.
 	RunnerStale time.Duration
+	// SweepInterval is how often the engine sweeps when the lifecycle's
+	// idle ticker drives it (§13): the tick interval the sweep's
+	// suspension check measures a gap against. Zero keeps the default,
+	// the lifecycle's idle tick.
+	SweepInterval time.Duration
 	// PlanFiles turns the plan-file mirror on (§6.4): after each plan
 	// change the engine pushes the plan's file to the project's remote.
 	// Off by default — the mirror runs git against the project's repo URL —
@@ -255,6 +261,7 @@ func DefaultConfig() Config {
 		LimitCooling:      defaultLimitCooling,
 		FailureStreak:     defaultFailureStreak,
 		RunnerStale:       defaultRunnerStale,
+		SweepInterval:     defaultSweepInterval,
 		PlanFileRetry:     defaultPlanFileRetry,
 		PlanFileTimeout:   defaultPlanFileTimeout,
 		SnapshotEvery:     defaultSnapshotEvery,
@@ -262,6 +269,12 @@ func DefaultConfig() Config {
 		Warnf:             log.Printf,
 	}
 }
+
+// defaultSweepInterval is the engine's assumed sweep cadence (§13): the
+// lifecycle's idle tick sweeps this often, so a gap between sweep ticks
+// far past it means the host slept, not that the engine was merely busy
+// or slow.
+const defaultSweepInterval = 30 * time.Second
 
 // defaultMaxArtifactBytes is the artifact upload cap (§9): room for a
 // long session's transcript or check log, not for a runaway stream.
@@ -299,6 +312,12 @@ type Engine struct {
 	// beforeHeartbeatSweep, when set by a test, runs inside a heartbeat's
 	// transaction just before its sweep, to play a slow sweep out.
 	beforeHeartbeatSweep func()
+
+	// sweepMu guards lastSweep, the wall-clock time of the previous sweep
+	// tick (§13): the suspension check reads the gap from it, and engine
+	// calls may sweep concurrently.
+	sweepMu   sync.Mutex
+	lastSweep time.Time
 }
 
 // New returns an engine over s. Zero fields of cfg keep their defaults.
@@ -380,6 +399,9 @@ func New(s *store.Store, cfg Config) *Engine {
 	}
 	if cfg.RunnerStale > 0 {
 		def.RunnerStale = cfg.RunnerStale
+	}
+	if cfg.SweepInterval > 0 {
+		def.SweepInterval = cfg.SweepInterval
 	}
 	def.PlanFiles = cfg.PlanFiles
 	if cfg.PlanFileRetry > 0 {

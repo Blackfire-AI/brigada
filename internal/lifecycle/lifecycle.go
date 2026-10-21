@@ -139,7 +139,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	defer st.Close()
 	roundCaps := cfg.Rounds.Caps()
-	eng := engine.New(st, engine.Config{Now: cfg.Now, Caps: cfg.Caps, PlanFiles: true, SnapshotDir: cfg.SnapshotDir, TaskAutoRetry: cfg.TaskAutoRetry, ForemanWakeBudget: cfg.ForemanWakeBudget, DefaultReviewer: cfg.DefaultReviewer, ExactRoundCaps: &roundCaps, Review: cfg.Review})
+	eng := engine.New(st, engine.Config{Now: cfg.Now, SweepInterval: cfg.IdleTick, Caps: cfg.Caps, PlanFiles: true, SnapshotDir: cfg.SnapshotDir, TaskAutoRetry: cfg.TaskAutoRetry, ForemanWakeBudget: cfg.ForemanWakeBudget, DefaultReviewer: cfg.DefaultReviewer, ExactRoundCaps: &roundCaps, Review: cfg.Review})
 	// Project identities are canonical repo URLs (design §13.1): rows
 	// written in an older form are rewritten once, before anything reads
 	// them. Rows that cannot be, or that name one repository twice, stay

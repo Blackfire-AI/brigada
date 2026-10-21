@@ -66,12 +66,167 @@ func (e *Engine) sweepTx(tx *sql.Tx, now time.Time) (SweepReport, error) {
 	return e.sweepPolledTx(tx, now, 0)
 }
 
+// suspensionFactor is how many sweep intervals a gap between two sweep
+// ticks must exceed to count as a suspension (§13): the wall clock
+// jumped minutes or hours in one gap, so the host slept — "far larger
+// than the tick interval", as one number.
+const suspensionFactor = 4
+
+// suspensionGap is the gap the sweep reads as a suspension (§13): a few
+// sweep intervals. Tests drive the injected clock past it to play a host
+// sleep, and short of it to play a wakeful engine's deadlines.
+func suspensionGap(interval time.Duration) time.Duration {
+	return suspensionFactor * interval
+}
+
+// sweepGap reads the wall-clock gap from the previous sweep tick (§13)
+// without recording this one. The first tick has no gap to measure.
+func (e *Engine) sweepGap(now time.Time) (gap time.Duration, suspended bool) {
+	e.sweepMu.Lock()
+	defer e.sweepMu.Unlock()
+	if e.lastSweep.IsZero() {
+		return 0, false
+	}
+	gap = now.Sub(e.lastSweep)
+	return gap, gap > suspensionGap(e.cfg.SweepInterval)
+}
+
+// recordSweep records a sweep tick at now (§13): the next sweep measures
+// its gap from here. It is called only once a sweep has done its work,
+// so a sweep that fails and rolls back does not consume the gap — the
+// retry still sees the pre-sleep jump and re-detects the suspension.
+func (e *Engine) recordSweep(now time.Time) {
+	e.sweepMu.Lock()
+	e.lastSweep = now
+	e.sweepMu.Unlock()
+}
+
+// restartDeadlinesTx restarts the wall-clock deadlines the sweep acts on
+// (§13): after a suspension the engine's own wall clock jumped, so a
+// deadline that lapsed during the gap means nothing about the runner or
+// the client — they slept too. Each deadline moves to now plus its
+// window (or past the gap), and no expiry, stale, attach-expiry, hard-cap
+// or queue-TTL event is written for the gap. gap is how far the wall
+// clock jumped between the sweep ticks, the best measure of the sleep.
+func (e *Engine) restartDeadlinesTx(tx *sql.Tx, now time.Time, gap time.Duration) error {
+	nowStr := fmtTime(now)
+	leaseExpiry := fmtTime(now.Add(e.cfg.LeaseTTL))
+	// Live leases: the runner slept with the engine, so its lease is
+	// restarted, not requeued (§13). The lease-scoped foreman token moves
+	// with the lease.
+	if _, err := tx.Exec(`UPDATE jobs SET lease_expires_at = ?, updated_at = ?
+		WHERE status IN ('leased', 'running') AND lease_expires_at IS NOT NULL`,
+		leaseExpiry, nowStr); err != nil {
+		return fmt.Errorf("restart the lease deadlines: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE lease_tokens SET expires_at = ?
+		WHERE job_id IN (SELECT id FROM jobs WHERE status IN ('leased', 'running') AND lease_expires_at IS NOT NULL)`,
+		leaseExpiry); err != nil {
+		return fmt.Errorf("restart the lease-token deadlines: %w", err)
+	}
+	// The hard-cap round reads every non-terminal job with first_leased
+	// set — queued ones a lapsed lease left behind included — so the cap
+	// clock must shift past the gap for that whole set, or the first
+	// wakeful tick (or the holder's first heartbeat) would hard-cap a job
+	// the sleep never ran (§14). last_leased shifts with it so the gap is
+	// not banked as leased wall time; NULL stays NULL (a queued job has
+	// no lease running).
+	rows, err := tx.Query(`SELECT id, first_leased, last_leased
+		FROM jobs WHERE status IN ('queued', 'leased', 'running') AND first_leased IS NOT NULL`)
+	if err != nil {
+		return fmt.Errorf("read the hard-cap clocks to restart them: %w", err)
+	}
+	type clockShift struct {
+		id    int64
+		first string
+		last  sql.NullString
+	}
+	var shifts []clockShift
+	for rows.Next() {
+		var s clockShift
+		if err := rows.Scan(&s.id, &s.first, &s.last); err != nil {
+			rows.Close()
+			return fmt.Errorf("read the hard-cap clocks to restart them: %w", err)
+		}
+		shifts = append(shifts, s)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("read the hard-cap clocks to restart them: %w", err)
+	}
+	rows.Close()
+	for _, s := range shifts {
+		first := s.first
+		if t, err := parseTime(first); err == nil {
+			first = fmtTime(t.Add(gap))
+		}
+		var last any
+		if s.last.Valid {
+			if t, err := parseTime(s.last.String); err == nil {
+				last = fmtTime(t.Add(gap))
+			} else {
+				last = s.last.String
+			}
+		}
+		if _, err := tx.Exec(`UPDATE jobs SET first_leased = ?, last_leased = ? WHERE id = ?`,
+			first, last, s.id); err != nil {
+			return fmt.Errorf("restart the hard-cap and accrual clocks of job %d: %w", s.id, err)
+		}
+	}
+	// Queued jobs: the wait during the gap was not a wait at all (§8.1),
+	// so the queue-TTL clock restarts from now — queued_at and the hold
+	// stamp cap_held_at together.
+	if _, err := tx.Exec(`UPDATE jobs SET queued_at = ?, cap_held_at = ?, updated_at = ?
+		WHERE status = 'queued'`, nowStr, nowStr, nowStr); err != nil {
+		return fmt.Errorf("restart the queue-TTL clocks: %w", err)
+	}
+	// Attach holds: a terminal that slept with the engine keeps its hold,
+	// and its hold-scoped token moves with it.
+	holdExpiry := fmtTime(now.Add(attachHoldTTL))
+	if _, err := tx.Exec(`UPDATE attach_holds SET expires_at = ? WHERE state = 'live'`, holdExpiry); err != nil {
+		return fmt.Errorf("restart the attach-hold deadlines: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE hold_tokens SET expires_at = ?
+		WHERE hold_id IN (SELECT id FROM attach_holds WHERE state = 'live')`, holdExpiry); err != nil {
+		return fmt.Errorf("restart the hold-token deadlines: %w", err)
+	}
+	// Runners: a missing heartbeat while the engine slept proves nothing
+	// (§8 "Health"), so the stale window restarts from now.
+	if _, err := tx.Exec(`UPDATE runners SET last_seen_at = ? WHERE last_seen_at IS NOT NULL`, nowStr); err != nil {
+		return fmt.Errorf("restart the runner-stale clocks: %w", err)
+	}
+	return nil
+}
+
 // sweepPolledTx is sweepTx run for a lease poll by runner polling (0 for
 // any other call): a runner asking for work has a free slot, which the
 // busy-runner rule of the queue TTL takes into account.
-func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (SweepReport, error) {
-	var rep SweepReport
+func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep SweepReport, err error) {
 	nowStr := fmtTime(now)
+
+	// Record the tick only once the sweep's own work has succeeded: a
+	// sweep that fails rolls its work back, and the next tick must still
+	// see the pre-sleep gap to re-detect the suspension (§13).
+	defer func() {
+		if err == nil {
+			e.recordSweep(now)
+		}
+	}()
+
+	// A suspension (§13): the wall clock jumped far past the sweep
+	// interval between ticks, so the engine itself slept. Deadlines are
+	// restarted from now instead of acted on, and one event records the
+	// detection.
+	if gap, suspended := e.sweepGap(now); suspended {
+		if err := e.restartDeadlinesTx(tx, now, gap); err != nil {
+			return rep, err
+		}
+		if _, err := appendEventTx(tx, evEngineSuspended, 0, 0, 0,
+			eventPayload{SuspendedFor: int64(gap / time.Second)}, now); err != nil {
+			return rep, err
+		}
+		return rep, nil
+	}
 
 	rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0), COALESCE(lease_id, ''),
 		COALESCE(last_leased, ''), COALESCE(lease_expires_at, '')

@@ -309,6 +309,28 @@ func (e *env) expireLease() SweepReport {
 	return e.mustSweep()
 }
 
+// elapse advances the clock in sweep-interval steps, sweeping at each
+// one, the way the idle engine's ticker would (§13): the sweep's
+// suspension check never trips, so wall-clock deadlines fire on their
+// natural schedule instead of reading one jump as a host sleep. A test
+// that means "the host slept" advances the clock in one jump instead.
+func (e *env) elapse(d time.Duration) {
+	e.t.Helper()
+	step := e.eng.cfg.SweepInterval
+	if step <= 0 {
+		step = defaultSweepInterval
+	}
+	for d > 0 {
+		s := step
+		if d < s {
+			s = d
+		}
+		e.clock.Advance(s)
+		e.mustSweep()
+		d -= s
+	}
+}
+
 // done is the standard successful completion.
 func done() Completion {
 	return Completion{Result: `{"status":"done","summary":"finished"}`}
