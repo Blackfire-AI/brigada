@@ -39,8 +39,8 @@ tasks:
     base: "stale-hold-cleared"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-97"
     rounds: 0
   - id: 98
     name: "cost-rule"
