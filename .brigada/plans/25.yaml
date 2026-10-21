@@ -96,7 +96,7 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: reviewing
+    state: done
     branch: "brigada/task-102"
     rounds: 0
   - id: 103
