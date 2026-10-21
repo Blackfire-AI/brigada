@@ -107,8 +107,8 @@ tasks:
     base: "sleep-aware"
     continue: "sleep-aware"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-78"
     rounds: 0
   - id: 79
     name: "net-streak"
