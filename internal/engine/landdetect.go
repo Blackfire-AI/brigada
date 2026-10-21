@@ -47,6 +47,13 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 	if err != nil {
 		return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
 	}
+	// Every landing the detection reports is written before any
+	// dependent is released: a chain landed together by hand — head and
+	// tail both on the default branch, each by its own trailer — must
+	// have the tail's row written before the head's landing re-runs the
+	// rule on the tail, or the rule would queue a land job for a task
+	// that is already on the branch.
+	var newLanded []int64
 	for _, lc := range landed {
 		if lc.TaskID <= 0 || lc.Commit == "" {
 			continue
@@ -77,9 +84,12 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 			lc.TaskID, project, branch, lc.Commit, fmtTime(now)); err != nil {
 			return fmt.Errorf("record the landing of task %d: %w", lc.TaskID, err)
 		}
+		newLanded = append(newLanded, lc.TaskID)
+	}
+	for _, id := range newLanded {
 		// A dependent that waited on this task's landing now has it
 		// landed, so its own landing may proceed (§7.1).
-		if err := e.releaseDependentLandsTx(tx, lc.TaskID, now); err != nil {
+		if err := e.releaseDependentLandsTx(tx, id, now); err != nil {
 			return err
 		}
 	}
