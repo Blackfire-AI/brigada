@@ -38,9 +38,9 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-109"
-    rounds: 0
+    rounds: 1
   - id: 110
     name: "amend-edit-spec"
     title: "plan_amend can edit a pending task's spec"
