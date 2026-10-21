@@ -28,7 +28,7 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: running
+    state: reviewing
     branch: "brigada/task-96"
     rounds: 1
   - id: 97
@@ -119,7 +119,7 @@ tasks:
     effort: low
     state: reviewing
     branch: "brigada/task-104"
-    rounds: 0
+    rounds: 1
   - id: 105
     name: "engine-tests-fast"
     title: "Make the internal/engine tests fast under -race"
