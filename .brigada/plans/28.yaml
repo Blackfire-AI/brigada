@@ -48,6 +48,6 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-110"
     rounds: 0
