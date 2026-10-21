@@ -57,6 +57,9 @@ const (
 	evReviewVerdict          = "review_verdict"            // a standalone review (no task) ended: approve, changes or no verdict, with the findings and the branch (§7)
 	evReviewUnservable       = "review_unservable"         // a task's queued review can never be taken: no agent of another family offers review (§7, §10)
 	evReviewRetry            = "review_retry"              // an unusable verdict goes to another reviewer (§7)
+	evTaskLandHeld           = "task_land_held"            // the task waits at the land gate (§6.3); Reason names the rule
+	evTaskLanded             = "task_landed"               // the task's landing succeeded (§7.1); Branch, Commit and Pushed name it
+	evTaskLandFailed         = "task_land_failed"          // a conflict or a failed check on the landed result; the task parks (§7.1)
 	evProjectForemanSet      = "project_foreman_set"       // setup: the project's foreman harness and model were chosen (§4.1)
 	evForemanReport          = "foreman_report"            // a done foreman turn's final message, reported to the user (§3, §10)
 	evUserMessage            = "user_message"              // the user's message to the foreman, sent without attaching (§4.2 item 3)
@@ -95,6 +98,8 @@ type eventPayload struct {
 	TimedOut    bool   `json:"timed_out,omitempty"`
 	CheckOutput string `json:"check_output,omitempty"`
 	Branch      string `json:"branch,omitempty"`   // the task's result branch (§6.4)
+	Commit      string `json:"commit,omitempty"`   // a landing's resulting commit (§7.1)
+	Pushed      string `json:"pushed,omitempty"`   // a landing's push state: pushed, waiting or local (§7.1)
 	Question    string `json:"question,omitempty"` // the worker's question (§5.4)
 	// Discoveries is what a worker learned beyond its own task (§4.2).
 	Discoveries string `json:"discoveries,omitempty"`

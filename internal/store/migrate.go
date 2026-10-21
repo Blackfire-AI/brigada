@@ -152,6 +152,7 @@ func userVersionTx(ctx context.Context, tx *sql.Tx) (int, error) {
 var schemaEdits = map[int]func(ctx context.Context, tx *sql.Tx) error{
 	23: relaxJobsTaskCheck,
 	36: widenArtifactKinds,
+	50: widenJobKinds,
 }
 
 // jobsPairingCheck is the CHECK 0001 put on jobs: foreman jobs have no
@@ -183,6 +184,20 @@ const (
 // same in-place edit.
 func widenArtifactKinds(ctx context.Context, tx *sql.Tx) error {
 	return editTableCheck(ctx, tx, "artifacts", artifactKindCheck, artifactKindCheckSetup)
+}
+
+// The jobs kind CHECK 0001 put on the table, and the one that also
+// admits the land job (§7.1).
+const (
+	jobsKindCheck     = "CHECK (kind IN ('work', 'fix', 'review', 'foreman'))"
+	jobsKindCheckLand = "CHECK (kind IN ('work', 'fix', 'review', 'foreman', 'land'))"
+)
+
+// widenJobKinds lets the jobs table hold a land job, by the same in-place
+// edit. The pairing CHECK 0023 relaxed stays as it is: a land job always
+// belongs to a task, so the pairing holds for it without change.
+func widenJobKinds(ctx context.Context, tx *sql.Tx) error {
+	return editTableCheck(ctx, tx, "jobs", jobsKindCheck, jobsKindCheckLand)
 }
 
 // editTableCheck replaces one constraint's text in a table's stored sql.

@@ -338,9 +338,11 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 	if err != nil {
 		return "", err
 	}
-	if c.Result != "" {
+	if c.Result != "" && job.Kind != KindLand {
 		// The run's answer is a conversation item too (§9): what the
-		// worker ended saying, kept with the event that ended the job.
+		// worker ended saying, kept with the event that ended the job. A
+		// land job has no worker; its landing record is the job's result
+		// and the events below, never a worker's words.
 		if err := appendMessageTx(tx, job.ProjectID, eventID, msgKindWorkerResult,
 			authorWorker, workerResultMessage(c.Result), now); err != nil {
 			return "", err
@@ -389,6 +391,11 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 		// The turn's events are consumed by its completion, never before
 		// (§4.2), and the next wake is evaluated in this same transaction.
 		return AnsOK, e.foremanFinishedTx(tx, job, status, now)
+	}
+	if job.Kind == KindLand {
+		// A landing (§7.1): the completion's payload is the landing
+		// record, and the task lands or parks on its outcome.
+		return AnsOK, e.landCompletedTx(tx, job, c, now)
 	}
 	if job.TaskID == 0 && job.Kind == KindReview {
 		// A standalone review has no task to move (§7): its verdict goes
