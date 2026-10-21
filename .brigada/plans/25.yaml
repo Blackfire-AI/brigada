@@ -76,7 +76,7 @@ tasks:
     base: "answer-changes-rule"
     continue: "answer-changes-rule"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 101
