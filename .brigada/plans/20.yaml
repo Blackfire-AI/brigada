@@ -7,7 +7,7 @@ title: "Loop decision 2026-10-20: gates, rules and the land job (design §6.3, �
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-10-20T20:22:58.420145Z
-updated: 2026-10-20T20:24:16.710532Z
+updated: 2026-10-21T05:13:20.455555Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -60,6 +60,7 @@ tasks:
     deps: ["engine-land"]
     base: "engine-land"
     continue: "engine-land"
+    tier: heavy
     effort: medium
     state: needs_foreman
     branch: ""
