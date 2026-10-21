@@ -171,6 +171,13 @@ type planAmendArgs struct {
 	Cancel   []taskRef         `json:"cancel"`
 	Retarget []planRetargetArg `json:"retarget"`
 	Retier   []planRetierArg   `json:"retier"`
+	Respec   []planRespecArg   `json:"respec"`
+}
+
+type planRespecArg struct {
+	Task taskRef `json:"task"`
+	Spec string  `json:"spec"`
+	Mode string  `json:"mode,omitempty"`
 }
 
 type planAddArg struct {
@@ -240,6 +247,9 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 	for _, rt := range a.Retier {
 		am.Retier = append(am.Retier, api.PlanRetier{Task: string(rt.Task), Tier: rt.Tier, Effort: rt.Effort, ReviewTier: rt.ReviewTier, ReviewEffort: rt.ReviewEffort, Caps: rt.Caps})
 	}
+	for _, rs := range a.Respec {
+		am.Respec = append(am.Respec, api.PlanRespec{Task: string(rs.Task), Spec: rs.Spec, Mode: rs.Mode})
+	}
 	res, err := c.AmendPlan(ctx, a.Plan, am, idemKey("plan_amend", a))
 	if err != nil {
 		return "", err
@@ -264,6 +274,9 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 	}
 	for _, id := range res.Retiered {
 		fmt.Fprintf(&b, "\nretiered task %d", id)
+	}
+	for _, id := range res.Respecced {
+		fmt.Fprintf(&b, "\nrespecified task %d", id)
 	}
 	for _, t := range res.Started {
 		fmt.Fprintf(&b, "\n%s: work job %d queued", label(t), t.JobID)

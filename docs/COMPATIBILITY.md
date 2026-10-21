@@ -11,7 +11,7 @@ What brigada 1.0 promises until 2.0.
 **The foreman's MCP tools.** The `brigada mcp` bridge offers these tools to the foreman — the same set for a headless turn and an attached chat — with these arguments:
 
 - `plan_create`: `title` and `tasks` (both required). Each task takes `spec` (required), and may take `title`, `name`, `deps`, `base`, `continue`, `check`, `class`, `tier`, `effort`, `caps` and `extra_repos`.
-- `plan_amend`: `plan` (required). It may take `add`, `cancel`, `retier` and `retarget`, which take the same task fields as `plan_create` or small lists of task references.
+- `plan_amend`: `plan` (required). It may take `add`, `cancel`, `retier`, `respec` and `retarget`. `add` takes the same task fields as `plan_create`; `cancel` is a list of task references; `retier`, `retarget` and `respec` are lists of entries naming a `task` (`respec` entries are `{task, spec, mode}`, `mode` being `replace` or `append`).
 - `answer`: `task` and `text` (both required).
 - `task_restart`: `task` (required) and `note`.
 - `task_cancel`: `task` (required).

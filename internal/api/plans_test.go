@@ -175,6 +175,72 @@ type planCreateBody struct {
 	JobID  int64  `json:"job_id"`
 }
 
+// A respec round-trips through the codecs: the spec of a pending task is
+// appended to and replaced, and a task that has started is refused.
+func TestPlanAmendRespecRoundTrip(t *testing.T) {
+	ctx := t.Context()
+	st, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	eng := engine.New(st, engine.Config{})
+	if _, err := eng.SetProjectForeman(ctx, "https://example.invalid/respec.git", "claude", "sonnet"); err != nil {
+		t.Fatal(err)
+	}
+	tokens := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokens, []byte(tokenFileBody), 0600); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(ctx, st, eng, nil, tokens)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := NewClientWithHTTPClient(&http.Client{Transport: funcTransport(func(r *http.Request) (*http.Response, error) {
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, r)
+		return w.Result(), nil
+	})}, "foreman-secret-1")
+	plan, err := c.CreatePlan(ctx, PlanCreate{Title: "respec", Tasks: []PlanTask{
+		{Name: "build", Spec: "build it"},
+		{Name: "ship", Spec: "ship it", Deps: []string{"build"}},
+	}}, "respec-plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := func(name string) string {
+		var s string
+		if err := st.View(ctx, func(tx *sql.Tx) error {
+			return tx.QueryRow("SELECT spec FROM tasks WHERE name = ?", name).Scan(&s)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	am := PlanAmend{Respec: []PlanRespec{{Task: "ship", Spec: "and tag it", Mode: "append"}}}
+	res, err := c.AmendPlan(ctx, plan.PlanID, am, "respec-call")
+	if err != nil || len(res.Respecced) != 1 {
+		t.Fatalf("amend = %+v (%v)", res, err)
+	}
+	again, err := c.AmendPlan(ctx, plan.PlanID, am, "respec-call")
+	if err != nil || !reflect.DeepEqual(again, res) {
+		t.Fatalf("idempotent respec = %+v (%v)", again, err)
+	}
+	if got := spec("ship"); got != "ship it\n\nand tag it" {
+		t.Errorf("appended spec = %q", got)
+	}
+	if _, err := c.AmendPlan(ctx, plan.PlanID, PlanAmend{Respec: []PlanRespec{{Task: "ship", Spec: "new"}}}, "respec-replace"); err != nil {
+		t.Fatal(err)
+	}
+	if got := spec("ship"); got != "new" {
+		t.Errorf("replaced spec = %q", got)
+	}
+	_, err = c.AmendPlan(ctx, plan.PlanID, PlanAmend{Respec: []PlanRespec{{Task: "build", Spec: "x"}}}, "respec-started")
+	if err == nil || !strings.Contains(err.Error(), "follow-up task") {
+		t.Errorf("started task err = %v, want the follow-up advice", err)
+	}
+}
+
 // Exercise the real request and response codecs with authenticated routes.
 func TestPlanAmendRetierRoundTrip(t *testing.T) {
 	ctx := t.Context()

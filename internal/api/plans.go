@@ -307,6 +307,9 @@ func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id iden
 	for _, rt := range req.Retier {
 		am.Retier = append(am.Retier, engine.PlanRetier{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort, ReviewTier: rt.ReviewTier, ReviewEffort: rt.ReviewEffort, Caps: rt.Caps})
 	}
+	for _, rs := range req.Respec {
+		am.Respec = append(am.Respec, engine.PlanRespec{Task: rs.Task, Spec: rs.Spec, Mode: rs.Mode})
+	}
 	res, err := s.eng.AmendPlan(r.Context(), project, planID, am)
 	switch {
 	case errors.Is(err, engine.ErrNoPlan):
@@ -325,6 +328,7 @@ func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id iden
 		Cancelled:  res.Cancelled,
 		Retargeted: res.Retargeted,
 		Retiered:   res.Retiered,
+		Respecced:  res.Respecced,
 		Reasons:    res.Reasons,
 	}
 	for _, t := range res.Added {
@@ -347,6 +351,13 @@ type planAmendRequest struct {
 	Cancel   []string           `json:"cancel,omitempty"`
 	Retarget []planRetargetBody `json:"retarget,omitempty"`
 	Retier   []planRetierBody   `json:"retier,omitempty"`
+	Respec   []planRespecBody   `json:"respec,omitempty"`
+}
+
+type planRespecBody struct {
+	Task string `json:"task"`
+	Spec string `json:"spec"`
+	Mode string `json:"mode,omitempty"`
 }
 
 type planRetierBody struct {
@@ -380,12 +391,13 @@ type planAmendResponse struct {
 	Cancelled  []int64           `json:"cancelled,omitempty"`
 	Retargeted []int64           `json:"retargeted,omitempty"`
 	Retiered   []int64           `json:"retiered,omitempty"`
+	Respecced  []int64           `json:"respecced,omitempty"`
 	Started    []planCreatedTask `json:"started,omitempty"`
 	Held       []planHeldTask    `json:"held,omitempty"`
 	Reasons    []string          `json:"reasons,omitempty"`
 }
 
-// planHeldTask is one added task a plan rule held, with the rule's name.
+// planHeldTask is one added or respecified task a plan rule held, with the rule's name.
 type planHeldTask struct {
 	TaskID int64  `json:"task_id"`
 	Name   string `json:"name,omitempty"`

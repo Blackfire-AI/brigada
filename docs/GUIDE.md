@@ -601,7 +601,7 @@ You ask; the foreman turns the ask into a **plan**: a set of tasks, each with a 
 
 - A task with no dependencies is queued at once.
 - A task with dependencies waits (`pending`) until all of them are done. If one of them fails or is cancelled, the dependents keep waiting until the foreman re-points them to another task or drops the dependency.
-- The foreman can amend a live plan: add tasks, cancel tasks, re-point dependencies, or change a waiting or parked task's tier and effort.
+- The foreman can amend a live plan: add tasks, cancel tasks, re-point dependencies, change a waiting or parked task's tier and effort, or replace or append to a pending task's spec (`respec`).
 - A plan is `done` when no live work is left. That is not the same as everything succeeding: the plan's done report names the tasks that failed, that were cancelled without your approval, and that never ran, and what landed and what waits at a gate ([section 5](#5-finishing-the-land-job)).
 
 Each task also has these fields, set by the foreman in `plan_create` or `plan_amend`:
@@ -629,7 +629,7 @@ The loop — plan, work, check, review, land, push — is brigada's; you stop it
 - a task class outside `approval_classes` (default `implement`, `review`, `answer`);
 - a task whose spec or check mentions a path that matches one of `approval_protected_paths` (default none).
 
-A held plan waits in `pending_approval`, and nothing is queued. The needs-you entry gives the reasons, for example `7 tasks, over the limit of 5` or `gate_plan is ask`. An amendment of an already-active plan is judged by what it adds: each added task is checked on its own against the per-task rules — its class, the protected paths its spec or check mentions, its extra repositories — and one that trips a rule is held alone, parked with a needs-you line naming the rule, while the plan stays active and the rest runs on. The task count and `gate_plan` never hold an amendment of a running plan, and cancelling, re-pointing or retiering never holds. You decide:
+A held plan waits in `pending_approval`, and nothing is queued. The needs-you entry gives the reasons, for example `7 tasks, over the limit of 5` or `gate_plan is ask`. An amendment of an already-active plan is judged by what it adds: each added task is checked on its own against the per-task rules — its class, the protected paths its spec or check mentions, its extra repositories — and one that trips a rule is held alone, parked with a needs-you line naming the rule, while the plan stays active and the rest runs on. The task count and `gate_plan` never hold an amendment of a running plan, and cancelling, re-pointing or retiering never holds. A `respec` edit is judged on the text it adds, with the same per-task hold. You decide:
 
 ```sh
 brigada plan approve 7    # queues the tasks; prints each task's job
@@ -1130,7 +1130,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada project set [--repo URL] key=value ...`, `brigada project show [--repo URL]`: set and read the project's settings and where each comes from. See [section 6](#local-only-settings).
 - `brigada project import [--repo URL] [--file PATH] [--yes]`: import `.brigada/project.yaml`. See [section 6](#importing-and-provenance).
 
-`plan_amend` is a foreman MCP tool ([section 7](#7-plans-checks-and-reviews)): it takes `plan` and optional `add`, `cancel`, `retarget` and `retier` lists. Each `retier` entry names `task` (name or id) and optionally `tier` and `effort`.
+`plan_amend` is a foreman MCP tool ([section 7](#7-plans-checks-and-reviews)): it takes `plan` and optional `add`, `cancel`, `retarget`, `retier` and `respec` lists. Each `retier` entry names `task` (name or id) and optionally `tier` and `effort`. Each `respec` entry names `task`, the `spec` text and a `mode` of `replace` (the default) or `append`; it edits a `pending` task, one with no job yet, and is refused for a task that has started, where a follow-up task is the way. An edit that trips a plan rule (a protected path in the new text, the task's class) holds that task at `needs_foreman` while the plan stays active.
 
 ### Care
 

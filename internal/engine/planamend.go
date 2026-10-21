@@ -49,15 +49,32 @@ type PlanRetier struct {
 	Caps map[string]int
 }
 
+// Spec edit modes of a PlanRespec.
+const (
+	RespecReplace = "replace"
+	RespecAppend  = "append"
+)
+
+// PlanRespec edits the spec of a pending task, one with no job yet: Mode
+// replace (the default) swaps the whole spec for Spec, append adds Spec
+// after the current one. Task accepts a plan task's name or decimal id.
+type PlanRespec struct {
+	Task string
+	Spec string
+	Mode string
+}
+
 // PlanAmendment is what the foreman changes in a live plan (§12.2): tasks
 // to add (their Deps name tasks of the plan, old or added), tasks to
-// cancel, waiting tasks whose dependencies are re-pointed, and waiting or
-// parked tasks whose tier or effort is changed.
+// cancel, waiting tasks whose dependencies are re-pointed, waiting or
+// parked tasks whose tier or effort is changed, and pending tasks whose
+// spec is edited.
 type PlanAmendment struct {
 	Add      []PlanTask
 	Cancel   []string
 	Retarget []PlanRetarget
 	Retier   []PlanRetier
+	Respec   []PlanRespec
 	// SkipApproved says the user themself approved the cancellations of
 	// this amendment: only a user's token can say so, never the foreman's
 	// own. Without it a cancelled task is an abandoned one, and the
@@ -65,7 +82,7 @@ type PlanAmendment struct {
 	SkipApproved bool
 }
 
-// HeldTask is one task the amendment added that a plan rule held (§6.3):
+// HeldTask is one task the amendment added or respecified that a plan rule held (§6.3):
 // it parks at needs_foreman with Reason — the rule's name — while the
 // plan stays active and the rest runs on.
 type HeldTask struct {
@@ -77,8 +94,9 @@ type HeldTask struct {
 // AmendPlanResult is what AmendPlan did: the plan's state after it, the
 // added tasks, the ids cancelled, re-pointed or retiered, and every task the
 // amendment started (a work job queued), added or not. Reasons says why
-// the plan waits for approval, when it does; Held names the added tasks a
-// plan rule held.
+// the plan waits for approval, when it does; Held names the added or
+// respecified tasks a plan rule held. Respecced lists the tasks whose spec
+// was edited.
 type AmendPlanResult struct {
 	PlanID     int64
 	State      string
@@ -86,6 +104,7 @@ type AmendPlanResult struct {
 	Cancelled  []int64
 	Retargeted []int64
 	Retiered   []int64
+	Respecced  []int64
 	Started    []CreatedTask
 	Held       []HeldTask
 	Reasons    []string
@@ -95,8 +114,8 @@ type AmendPlanResult struct {
 var ErrPlanNotLive = errors.New("plan is not live")
 
 // AmendPlan is the foreman's plan_amend (§12.2): add tasks, cancel tasks
-// re-point dependencies, and change waiting or parked tasks' tier or effort,
-// validated whole — names
+// re-point dependencies, change waiting or parked tasks' tier or effort, and
+// replace or append to a pending task's spec, validated whole — names
 // unique, deps in the plan and live, no cycle — before anything is
 // written. Cancelling a task stops its live jobs. In the same transaction
 // the waiting state re-evaluates as creation does (a pending task whose
@@ -155,8 +174,8 @@ func (n amendNode) label() string {
 }
 
 func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, now time.Time) (AmendPlanResult, error) {
-	if len(am.Add) == 0 && len(am.Cancel) == 0 && len(am.Retarget) == 0 && len(am.Retier) == 0 {
-		return AmendPlanResult{}, fmt.Errorf("nothing to amend: give tasks to add, cancel, retarget or retier")
+	if len(am.Add) == 0 && len(am.Cancel) == 0 && len(am.Retarget) == 0 && len(am.Retier) == 0 && len(am.Respec) == 0 {
+		return AmendPlanResult{}, fmt.Errorf("nothing to amend: give tasks to add, cancel, retarget, retier or respec")
 	}
 	var proj int64
 	var state, baseRef string
@@ -330,6 +349,38 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		seenRetier[i] = true
 		retiered = append(retiered, i)
 	}
+	// A spec edit takes a task that has no job yet: only a pending one.
+	// respecText is what the edit adds, which is all the plan rules judge.
+	var respecced []int
+	respecText := map[int]string{}
+	for _, rs := range am.Respec {
+		i, err := resolve(rs.Task)
+		if err != nil {
+			return AmendPlanResult{}, fmt.Errorf("respec: %w", err)
+		}
+		if i >= existing {
+			return AmendPlanResult{}, fmt.Errorf("respec: %s is added by this same amendment; give its final spec in add", nodes[i].label())
+		}
+		if nodes[i].state != taskPending {
+			return AmendPlanResult{}, fmt.Errorf("respec: %s is %s; only a pending task, with no job yet, has its spec changed: for a task that has started, add a follow-up task", nodes[i].label(), nodes[i].state)
+		}
+		if _, dup := respecText[i]; dup {
+			return AmendPlanResult{}, fmt.Errorf("respec: %s is respecified twice in this amendment", nodes[i].label())
+		}
+		if strings.TrimSpace(rs.Spec) == "" {
+			return AmendPlanResult{}, fmt.Errorf("respec %s: spec is required", nodes[i].label())
+		}
+		switch rs.Mode {
+		case "", RespecReplace:
+			nodes[i].spec = rs.Spec
+		case RespecAppend:
+			nodes[i].spec = strings.TrimRight(nodes[i].spec, "\n") + "\n\n" + rs.Spec
+		default:
+			return AmendPlanResult{}, fmt.Errorf("respec %s: mode %q is not replace or append", nodes[i].label(), rs.Mode)
+		}
+		respecText[i] = rs.Spec
+		respecced = append(respecced, i)
+	}
 	// Dependencies resolve after the cancels, against the whole amended
 	// node set, so a task cannot wait on one this amendment cancels.
 	// pickBase resolves a named base, which must be one of the owner's
@@ -432,9 +483,10 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	}
 
 	// The approval rules (§6.3) over the amendment. An active plan is
-	// judged by what it adds: only the added tasks are checked against
-	// the per-task rules — a class outside the allowed set, a protected
-	// path, an extra repository — and one that trips is held alone, its
+	// judged by what it adds: only the added tasks and the text a respec
+	// adds are checked against the per-task rules — a class outside the
+	// allowed set, a protected path, an extra repository (added tasks
+	// only) — and one that trips is held alone, its
 	// own needs-you line naming the rule, while the plan stays active.
 	// The whole-plan triggers (the task count, gate_plan) do not apply to
 	// a plan already running. An awaiting plan is re-evaluated whole, as
@@ -448,7 +500,13 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	newState := state
 	var verdict approvalVerdict
 	addedHold := make([]string, len(am.Add)) // per added task, the hold reasons joined; "" when none
+	respecHold := map[int]string{}           // per respecified task, likewise
 	if state == "active" {
+		for _, i := range respecced {
+			if reasons := settings.taskHoldReasons(PlanTask{Spec: respecText[i], Class: nodes[i].class}); len(reasons) > 0 {
+				respecHold[i] = strings.Join(reasons, "; ")
+			}
+		}
 		for k := range am.Add {
 			n := nodes[existing+k]
 			if reasons := settings.taskHoldReasons(PlanTask{Spec: n.spec, Check: n.check, Class: n.class, ExtraRepos: n.extra}); len(reasons) > 0 {
@@ -500,6 +558,24 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			}
 		}
 		res.Retiered = append(res.Retiered, nodes[i].id)
+	}
+	for _, i := range respecced {
+		taskState := taskPending
+		if respecHold[i] != "" {
+			taskState = taskNeedsForeman
+		}
+		if _, err := tx.Exec(`UPDATE tasks SET spec = ?, state = ?, updated_at = ? WHERE id = ?`,
+			nodes[i].spec, taskState, nowStr, nodes[i].id); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("respec %s: %w", nodes[i].label(), err)
+		}
+		if respecHold[i] != "" {
+			if _, err := appendEventTx(tx, evTaskPlanHeld, proj, nodes[i].id, 0,
+				eventPayload{Status: taskNeedsForeman, Reason: respecHold[i]}, now); err != nil {
+				return AmendPlanResult{}, err
+			}
+			res.Held = append(res.Held, HeldTask{TaskID: nodes[i].id, Name: nodes[i].name, Reason: respecHold[i]})
+		}
+		res.Respecced = append(res.Respecced, nodes[i].id)
 	}
 	setupRec, err := taskProjectSetupTx(tx, proj)
 	if err != nil {
@@ -624,6 +700,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	if len(res.Retiered) > 0 {
 		change = append(change, "retiered "+joinIDs(res.Retiered))
 	}
+	if len(res.Respecced) > 0 {
+		change = append(change, "respecified "+joinIDs(res.Respecced))
+	}
 	for _, h := range res.Held {
 		label := fmt.Sprintf("task %d", h.TaskID)
 		if h.Name != "" {
@@ -634,7 +713,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	if _, err := appendEventTx(tx, evPlanAmended, proj, 0, 0, eventPayload{
 		Retiered: res.Retiered,
 		Plan:     plan,
-		Count:    int64(len(res.Added) + len(res.Cancelled) + len(res.Retargeted) + len(res.Retiered)),
+		Count:    int64(len(res.Added) + len(res.Cancelled) + len(res.Retargeted) + len(res.Retiered) + len(res.Respecced)),
 		Status:   newState,
 		Reason:   strings.Join(change, "; "),
 	}, now); err != nil {

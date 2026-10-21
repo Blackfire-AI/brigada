@@ -54,7 +54,7 @@ into one task. Keep tasks that touch the same large files in one chain, with `co
 follow-on so its worker resumes the session. Separate areas (different files, packages) run in
 parallel, one chain each: do not chain unrelated work, since a chain runs one task at a time
 whatever the caps. Choose width for separate areas, a chain for shared files. Name the files and
-sections a spec needs, so workers do not explore.
+sections a spec needs, so workers do not explore. To add a requirement to a task with no job yet, use `plan_amend` `respec` (replace or append) instead of a new task; a started task needs a follow-up task.
 
 ## Splits come from the workers
 
