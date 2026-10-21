@@ -141,7 +141,7 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 	}
 	// A worktree left behind by a crashed run of the same job would make
 	// the add below fail on the path; the path is the task's and one
-	// live job holds its key (§14), so what sits at this path now is
+	// live job holds its key (§12.1), so what sits at this path now is
 	// dead or winding down — and the winding-down was waited out above.
 	w.discardLocked(ctx)
 	if out, err := w.git(ctx, "--git-dir", w.mirror, "worktree", "add", "-B", w.branch, w.dir, start); err != nil {
@@ -380,7 +380,7 @@ func (w *workspace) discardLocked(ctx context.Context) {
 // that resume it, a review and the re-review that resumes it. The
 // generation is the attempt the engine counts in the task's restarts,
 // so a restart's fresh session never reuses the directory of the one it
-// does not resume. At most one live job holds the task's key (§14), so
+// does not resume. At most one live job holds the task's key (§12.1), so
 // two runs never share the path at once on one runner: a re-leased job
 // whose lost predecessor is still winding down is waited out by the
 // branch and directory holds, and what a crashed run left at the path

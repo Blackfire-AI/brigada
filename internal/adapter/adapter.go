@@ -152,8 +152,7 @@ const (
 	// ErrResumeFailed is a resume that could not happen: the session the
 	// command was told to resume is gone or its conversation cannot be
 	// continued. What answers it is not another resume but a fresh run in
-	// place, carrying the previous attempt's context in its prompt (§5.6,
-	// §14) — a session cannot be rebuilt from its id alone.
+	// place, carrying the previous attempt's context in its prompt (§5.6) — a session cannot be rebuilt from its id alone.
 	ErrResumeFailed ErrorKind = "resume_failed"
 	ErrOther        ErrorKind = "other"
 )

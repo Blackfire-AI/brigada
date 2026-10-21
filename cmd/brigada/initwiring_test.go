@@ -104,7 +104,7 @@ func wireSection(d []byte, exists bool, kind, body string) []byte {
 	return append(next, render(record)...)
 }
 
-// wireApply writes the mode A wiring an older init left behind — the files,
+// wireApply writes the wiring an older init left behind — the files,
 // their markers and the records exactly as init wrote them — including the
 // git exclude line for the private settings when git does not ignore it.
 func wireApply(t *testing.T, root string) {

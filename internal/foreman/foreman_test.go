@@ -52,8 +52,8 @@ func TestInstructionsShipped(t *testing.T) {
 			t.Errorf("the instructions do not mention %q:\n%s", want, got)
 		}
 	}
-	// Mode A is retired: its tools and answers are no tools of the
-	// bridge, and naming one would be a promise it cannot keep.
+	// The bridge offers no hold tools, and naming one would be a promise
+	// it cannot keep.
 	for _, absent := range []string{"hold_acquire", "hold_yield", "decision_note", "foreman_busy", "stale_hold", "mode A"} {
 		if strings.Contains(got, absent) {
 			t.Errorf("the instructions name %q, which today's bridge does not offer", absent)
@@ -249,7 +249,7 @@ func TestPromptCheckout(t *testing.T) {
 }
 
 // TestCoordinatorInstructionsShipped checks the coordinator text says
-// what mode B needs (§4.6) and stays short: its tools, no plan tool, and
+// what the coordinator bridge needs (§4.6) and stays short: its tools, no plan tool, and
 // the user's explicit yes before any approval.
 func TestCoordinatorInstructionsShipped(t *testing.T) {
 	if CoordinatorInstructionsVersion <= 0 {

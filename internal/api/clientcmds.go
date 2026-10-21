@@ -435,7 +435,7 @@ func (c *Client) RejectPlan(ctx context.Context, plan int64) (PlanDecisionResult
 }
 
 // ApprovePlanVersion is ApprovePlan for the plan version the user was
-// shown (§4.6 mode B): the plan must belong to repoURL's project and
+// shown (§4.6): the plan must belong to repoURL's project and
 // still be at version, else the API refuses with its stale_plan 409 and
 // nothing is applied.
 func (c *Client) ApprovePlanVersion(ctx context.Context, repoURL string, plan, version int64) (PlanDecisionResult, error) {

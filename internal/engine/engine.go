@@ -31,7 +31,7 @@ const (
 	KindLand    Kind = "land" // a landing (§7.1): no worker, a runner with git
 )
 
-// Mode is how the runner starts the job (§14): a fresh session, or a
+// Mode is how the runner starts the job (§5.6): a fresh session, or a
 // resume of the key's session with its context kept.
 type Mode string
 
@@ -102,7 +102,7 @@ const (
 )
 
 // RoundCaps are the per-task caps on feedback rounds and restarts (§7,
-// §14): what the run cap of the earlier implementation became. Fix caps
+// §6.1). Fix caps
 // the fix rounds a failed check asks for, Review the fix rounds a
 // review's "changes" asks for — both counted as the task's fix jobs —
 // and Restart the restarts (§5.6); the shipped caps are 2, 2 and 3, the
@@ -134,7 +134,7 @@ type Config struct {
 	// fails, so it cannot wedge its key forever.
 	QueueTTL time.Duration
 	// HardCaps is the wall-time cap per job kind, measured from the
-	// job's current lease (§14, issue #36). Entries here override the
+	// job's current lease (§5.6). Entries here override the
 	// defaults for their kind only.
 	HardCaps map[Kind]time.Duration
 	// RoundCaps are the default per-task round caps; a task's caps JSON
@@ -236,7 +236,7 @@ type Config struct {
 	Warnf func(format string, args ...any)
 }
 
-// DefaultConfig returns the shipped settings (design §14 and §5.1): a
+// DefaultConfig returns the shipped settings (design §5.6 and §6.1): a
 // 90 s lease, a 120 s release exclusion, three lost attempts, a 10 m
 // queue TTL, hard caps of 45 m for work and fix, 25 m for review and
 // 30 m for a foreman turn, round caps of fix 2 and review 2 (§7's
@@ -305,7 +305,7 @@ func newLeaseID(owner int64) (string, error) {
 	return strconv.FormatInt(owner, 10) + "-" + hex.EncodeToString(b[:]), nil
 }
 
-// Engine is the lease engine (design §12.3, §14, §6.4): the rules of
+// Engine is the lease engine (design §12.3, §6.4): the rules of
 // the job queue — one live job per key, leases with fencing, coalescing
 // submits, and the caps that keep a lost runner from wedging a key.
 // Every operation is one transaction on the store and begins with a
@@ -469,7 +469,7 @@ func capText(d time.Duration) string {
 	return strings.TrimSuffix(d.String(), "0s")
 }
 
-// capError is the failure a hard cap writes, naming the cap (§14).
+// capError is the failure a hard cap writes, naming the cap (§5.6).
 func capError(kind Kind, limit time.Duration) string {
 	return fmt.Sprintf("hard cap exceeded: %s jobs are capped at %s", kind, capText(limit))
 }

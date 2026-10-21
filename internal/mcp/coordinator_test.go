@@ -73,7 +73,7 @@ func planStateOf(t *testing.T, e *env, plan int64) string {
 }
 
 // TestCoordinatorBridgeOffer: the coordinator offers its six tools and
-// nothing that plans or edits (§4.6 mode B, §12.2): no plan_create, no
+// nothing that plans or edits (§4.6, §12.2): no plan_create, no
 // plan_amend, no task mutation, no foreman answer, no hold tool. A call
 // to any of them is the protocol's unknown-tool refusal.
 func TestCoordinatorBridgeOffer(t *testing.T) {

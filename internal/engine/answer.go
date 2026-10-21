@@ -148,7 +148,7 @@ func (e *Engine) answerTx(tx *sql.Tx, project, taskID int64, text string, now ti
 // attempt, fresh mode, its worktree built anew from the task's base —
 // flagged restart, spending one of the task's restart budget. The new
 // attempt carries its rounds unspent: the fix-round count is scoped to
-// the fix jobs after the task's latest restart (§14), so the restart
+// the fix jobs after the task's latest restart (§6.1), so the restart
 // resets it. The foreman's note rides the prompt verbatim as the
 // worker's feedback when there is one (§1.4, §5.3) and nothing rides
 // when there is not. With the restart budget spent the call refuses and

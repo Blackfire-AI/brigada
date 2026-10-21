@@ -184,7 +184,7 @@ func (s *Server) handlePlanDecision(approve bool) handler {
 		}
 		// The body is optional: the CLI sends none that matters. A
 		// coordinator names the project and the plan version the user was
-		// shown (§4.6 mode B).
+		// shown (§4.6).
 		var req planDecisionRequest
 		body, ok := readBody(w, r)
 		if !ok {
@@ -241,7 +241,7 @@ func (s *Server) handlePlanDecision(approve bool) handler {
 	}
 }
 
-// planDecisionRequest is the optional approve/reject body (§4.6 mode B):
+// planDecisionRequest is the optional approve/reject body (§4.6):
 // the project the plan must belong to and the plan version the user was
 // shown. A version that is not the plan's current one is refused whole
 // (code stale_plan); both omitted checks nothing, as the CLI does.

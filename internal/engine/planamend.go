@@ -12,7 +12,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
 
-// classPlan is the outcome class of the planner itself (§8, §15 phase 5):
+// classPlan is the outcome class of the planner itself (§8):
 // each plan's completion counts one attempt on it for the project's
 // foreman agent. It is measurement only — no dispatch behavior keys off
 // it yet: the lease ranks agents by the class of the task's own jobs, and

@@ -15,7 +15,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/store"
 )
 
-// TestForemanMutationNeedsNoHoldGuard: with mode A retired, a foreman
+// TestForemanMutationNeedsNoHoldGuard: a foreman
 // mutation is authorised by the foreman token alone — no hold, no fence
 // header — and the interactive hold's routes are gone.
 func TestForemanMutationNeedsNoHoldGuard(t *testing.T) {

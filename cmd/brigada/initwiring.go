@@ -16,7 +16,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/term"
 )
 
-// The wiring an older init left in a repository (mode A, retired): the
+// The wiring an older init left in a repository: the
 // bridge in the repository's .mcp.json, the Stop hook in
 // .claude/settings.local.json, the foreman rules as .brigada/foreman.md
 // routed to from AGENTS.md (initrouter.go), and the Codex table in

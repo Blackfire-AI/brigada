@@ -473,7 +473,7 @@ func TestWorkerTimeAccrual(t *testing.T) {
 		t.Errorf("job C leased_seconds = %d, want %d", secs, 90+30)
 	}
 
-	// The per-plan worker budget reads exactly this sum (§14).
+	// The plan's worker time reads exactly this sum.
 	got, err := e.eng.PlanWorkerSeconds(e.ctx, e.plan)
 	if err != nil {
 		t.Fatalf("plan worker seconds: %v", err)

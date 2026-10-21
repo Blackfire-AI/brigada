@@ -125,7 +125,7 @@ type StatusTask struct {
 	// review.effort), which status leaves unsaid.
 	ReviewTier   string `json:"review_tier,omitempty"`
 	ReviewEffort string `json:"review_effort,omitempty"`
-	// Caps are the task's own round-cap overrides (§14); absent keys run
+	// Caps are the task's own round-cap overrides (§6.1); absent keys run
 	// at the engine default.
 	Caps   map[string]int `json:"caps,omitempty"`
 	ID     int64          `json:"id"`
@@ -160,7 +160,7 @@ type NeedsYouItem struct {
 	Reason string `json:"reason,omitempty"`
 	PlanID int64  `json:"plan_id,omitempty"` // the task's plan, when the entry is a task
 	// A plan awaiting approval also carries what a coordinator shows the
-	// user and quotes back (§4.6 mode B): the project's repo URL, the
+	// user and quotes back (§4.6): the project's repo URL, the
 	// plan's version — an amendment bumps it — and its tasks.
 	RepoURL string       `json:"repo_url,omitempty"`
 	Version int64        `json:"version,omitempty"`

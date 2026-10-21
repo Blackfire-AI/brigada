@@ -44,7 +44,7 @@ var extraReposSchema = map[string]any{
 	},
 }
 
-// taskCapsProperties are the keys of a task's caps object (§14): each
+// taskCapsProperties are the keys of a task's caps object (§6.1): each
 // overrides one engine round budget, 0 to 10.
 var taskCapsProperties = map[string]any{
 	"fix_rounds":    map[string]any{"type": "integer", "minimum": 0, "maximum": 10, "description": "fix rounds a failed check may ask for"},

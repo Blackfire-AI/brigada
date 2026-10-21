@@ -6,7 +6,7 @@ The terms used by [product.md](product.md) and [design.md](design.md). Where a d
 
 - **User** ("you"): the person who runs brigada, talks to the foreman, and owns the subscriptions and accounts the workers use.
 - **Foreman:** the worker that plans and decides for one project. It talks with the user, creates and amends plans, answers task workers' questions, and handles judgment events (those the table in §3 routes to it). It has the foreman instructions, the `foreman` token and one long-lived brigada-owned session per project (§4), which the user joins interactively through `brigada attach` (§4.2).
-- **Mode A / mode B:** mode A — the user's own harness session as one project's foreman — was decided 2026-10-16, shipped, and retired 2026-10-20 (§4.6); `brigada attach` (§4.2) is the interactive foreman. Mode B, unchanged, is a **coordinator** session over several projects, with the client tool set plus `list_projects` and plan approve/reject, never plan mechanics (§4.6, §12.2).
+- **Coordinator bridge:** `brigada mcp --coordinator`, a session over several projects: the client tool set plus `list_projects`, `plan_approve` and `plan_reject`, never plan mechanics. It carries a client token, never a foreman credential (§4.6, §12.2).
 - **Task worker:** a worker that runs jobs for one task (implement, review, answer, …). It has the worker instructions and ends each job with a result block (§5.3, §5.4).
 
 ## Execution
@@ -16,7 +16,7 @@ The terms used by [product.md](product.md) and [design.md](design.md). Where a d
 - **Family:** the vendor lineage of a model (Claude, GPT, Gemini, Kimi, GLM, …). Cross-family review means the reviewer's family differs from the author's (§7).
 - **Account:** the user's sign-in for a harness: one subscription with its own quota window. Several agents can share one account.
 - **Agent:** a harness plus a model plus an account, registered by a runner, that the dispatcher can pick (§8, §11). It is a configuration, not a running process. Outside these docs' technical sections, "AI agent" can mean any LLM agent in the everyday sense; the product brief uses it that way for the user's subscriptions.
-- **Worker:** an instance of a headless harness plus a model, running for brigada (decided 2026-10-13). A task worker runs on the agent the dispatcher picked; the foreman on the harness and model the user chose. What it does comes from its instructions, permissions and lifecycle; the foreman and task workers are both workers. Its continuity is its session; each run of it is a job. brigada runs a worker; an attached chat is the user joining one, not a second worker.
+- **Worker:** an instance of a headless harness plus a model, running for brigada. A task worker runs on the agent the dispatcher picked; the foreman on the harness and model the user chose. What it does comes from its instructions, permissions and lifecycle; the foreman and task workers are both workers. Its continuity is its session; each run of it is a job. brigada runs a worker; an attached chat is the user joining one, not a second worker.
 - **Adapter:** the code for one harness: it builds the headless command (fresh or resume), parses the harness's event stream into progress events, detects limit and auth errors, and finds the session id (§5.2).
 - **Runner:** the process that leases jobs from the engine, prepares the workspace, starts workers through adapters, runs checks and reports results (§5.1).
 - **Engine:** the background process with the API, the store, the rules, the dispatcher and foreman wake-ups. No LLM runs in it (§2).
@@ -26,7 +26,7 @@ The terms used by [product.md](product.md) and [design.md](design.md). Where a d
 ## Sessions
 
 - **Session:** a harness conversation that brigada can resume. A worker's memory lives in it, so several jobs (fix rounds, foreman turns) can continue one session. The user joins the foreman's session through `brigada attach`; it stays brigada-owned, and the headless turns resume it between chats (§4.2).
-- **Session key:** brigada's stable name for one task's work or the foreman's: `task:<id>` for task jobs, `foreman:<project>` for the foreman (§14). One live job per key. A task's key can hold several sessions in turn, such as the author's and a cross-family reviewer's, one live at a time.
+- **Session key:** brigada's stable name for one task's work or the foreman's: `task:<id>` for task jobs, `foreman:<project>` for the foreman (§12.1). One live job per key. A task's key can hold several sessions in turn, such as the author's and a cross-family reviewer's, one live at a time.
 - **Harness session id:** the harness's own id for the conversation. It can change on every resume (a resume may fork it), so the runner, and the client after an attach, write the current id back (§4.2).
 - **Resume / fresh:** a job either continues the key's current session (resume) or starts a new one, carrying the previous context in its prompt (fresh). A resume that fails restarts fresh in place (§5.6).
 
@@ -44,8 +44,8 @@ The terms used by [product.md](product.md) and [design.md](design.md). Where a d
 - **Wake:** the engine submitting a foreman turn because a judgment event arrived and nobody is attached.
 - **Bridge:** the `brigada mcp` stdio process a harness starts; it exposes one tool set (project foreman, ordinary client, or coordinator, §12.2).
 - **Canonical repo URL:** the normalized `host[:port]/path` that names a project (§13.1).
-- **Project config:** the committed, nonsecret `.brigada/project.yaml` (the file is decided 2026-10-16; schema and import are proposals, not implemented); the store keeps the effective settings (§13.1).
-- **Default check:** a project's check that a task may inherit by omitting its own; copied into the task when it is created (proposal, §6.1).
+- **Project config:** the committed, nonsecret `.brigada/project.yaml` (schema 1 with explicit import); the store keeps the effective settings (§13.1).
+- **Default check:** a project's check that a task may inherit by omitting its own; copied into the task when it is created (§6.1).
 - **Round:** one more job on the same task and session in answer to feedback: a fix round after a failed check or a review that asked for changes.
 - **Attempt:** a new try at a task other than a feedback round, decided by the foreman, the user, the quota rule or `brigada recover` (§6.4): a restart (either mode) or a re-dispatch to another agent. A resumed restart continues the old session; a fresh restart or a re-dispatch starts a new one. Rounds and attempts both count toward the task's caps.
 - **Check:** the task's command (tests, lint, a script) that the runner runs after the worker reports `done`. Its exit code decides, not the worker (§5.5).
@@ -78,8 +78,8 @@ The terms used by [product.md](product.md) and [design.md](design.md). Where a d
 - **Concurrency cap:** a limit on parallel jobs at one layer: runner, account, model, plan or global. A job starts only if every layer has room; a task blocked only by full caps is queued and does not park; a pending foreman turn outranks queued task jobs (§8.1).
 - **Capacity:** what the foreman sees through the `capacity` tool: per agent, the effective cap, running jobs, quota state and cost weight; per layer, cap, use and queue depth (§12.2).
 - **Cost weight:** a relative cost per agent that the user sets (default 1), so the foreman can let tasks wait for a cheaper agent (§8.1).
-- **Foreman headroom:** a reserve on the foreman's account (a quota threshold, or a slot kept free) so task workers don't leave the foreman limited mid-plan (§8.2).
-- **Budget:** a spending bound the user can raise: per project, foreman wake-ups per day; per plan, task-worker-minutes (§4.3).
+- **Foreman headroom:** a slot kept free on the foreman's account so task workers don't leave the foreman limited mid-plan (§8.2).
+- **Budget:** a spending bound the user can raise: per project, foreman wake-ups per day (§4.3).
 
 ## Events and history
 

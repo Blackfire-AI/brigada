@@ -101,7 +101,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	root, err := gitRoot(cwd)
 	if err != nil {
-		// Not a repository: the parent-folder run (design §13.1, §4.6 mode B).
+		// Not a repository: the parent-folder run (design §13.1, §4.6).
 		if parallelProvided {
 			return usagef(stderr, "--parallel sets up one repository; this folder is not one")
 		}

@@ -203,7 +203,7 @@ func TestRunnerForemanTurnCoalescesAndResumes(t *testing.T) {
 		return err == nil
 	})
 
-	// The second wake coalesces (§12.1, §14): pending behind the live
+	// The second wake coalesces (§12.1): pending behind the live
 	// turn, the flag set, and no second job.
 	second := e.submitForemanTurn("second wake while the first runs")
 	if second.Answer != engine.AnsPending || second.JobID != first.JobID {

@@ -46,6 +46,8 @@ CI runs these; run them before you push:
 
 For the design, read `docs/design.md`, `docs/product.md` and `docs/glossary.md`.
 
+The docs under `docs/` describe the system as it is on main, in the present tense. A change that alters behaviour updates the section it touches in the same commit. No dates, decision or status markers, issue numbers or history: git log, CHANGELOG.md and docs/COMPATIBILITY.md keep those.
+
 ## Conventions
 
 - Match the surrounding code: its comment density and naming.

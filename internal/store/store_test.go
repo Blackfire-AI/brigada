@@ -920,7 +920,7 @@ func TestAtMostOneLiveJobPerKey(t *testing.T) {
 		}
 	}
 
-	// A finished job frees the key for a new live one (§14: the fix and
+	// A finished job frees the key for a new live one (§12.1: the fix and
 	// review rounds follow the work job on the same key).
 	exec(t, f.db, "UPDATE jobs SET status = 'done' WHERE id = ?", f.job)
 	live := insertJob(t, f.db, f.project, f.task, key, "queued")

@@ -152,7 +152,7 @@ func (cfg *Config) defaults() error {
 	return nil
 }
 
-// The stall policy's defaults (§5.6, §14): a worker silent for 10
+// The stall policy's defaults (§5.6): a worker silent for 10
 // minutes is stalled, one tool call may stay open for 30, and a killed
 // tree has 10 seconds between the term and the kill.
 const (
@@ -164,7 +164,7 @@ const (
 // ClassCaps are one job class's own bounds (§5.6): how long a single
 // tool call may stay open — the bound on the suspension it buys the
 // stall clock — and how long the whole run may wall. The shipped
-// defaults sit just under the engine's hard caps (§14: 45 m work and
+// defaults sit just under the engine's hard caps (§5.6: 45 m work and
 // fix, 25 m review, 30 m foreman), so a runner that reaches its cap
 // completes the job with a useful result instead of racing the engine's
 // cap to a lost lease. A negative ToolCap leaves an in-flight call

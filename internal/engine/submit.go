@@ -14,7 +14,7 @@ import (
 // ever starts from a free slot.
 var ErrSlotHeld = errors.New("the foreman slot is held by an attached chat")
 
-// SubmitParams describes the job to create for a key (§12.1, §14).
+// SubmitParams describes the job to create for a key (§12.1).
 type SubmitParams struct {
 	// Key is the queue: 'task:<id>' for worker jobs, 'foreman:<project>'
 	// for the foreman's turns. At most one live job exists per key.
@@ -51,7 +51,7 @@ type SubmitParams struct {
 	// eligible agent instead. A runner not offering the agent cannot
 	// lease the job at all.
 	RequireAgent int64
-	// Round names the task's rounds budget this job spends (§7, §14):
+	// Round names the task's rounds budget this job spends (§7, §6.1):
 	// roundFix for a fix round a failed check asked for, roundReview
 	// for one a review's changes asked for — both counted as the task's
 	// fix jobs — and roundRestart for a restart. Empty spends nothing
@@ -97,7 +97,7 @@ type SubmitResult struct {
 }
 
 // Submit creates a queued job for the key, or coalesces behind the live
-// one (§12.1, §14): while a live job holds the key, nothing is created,
+// one (§12.1): while a live job holds the key, nothing is created,
 // the live job's follow-up flag is set and the caller learns which job
 // to wait for. A submit past the task's round cap creates nothing and
 // answers capped. Losing the one-live-job-per-key race to a concurrent
@@ -273,7 +273,7 @@ func taskSpecAndBaseTx(tx *sql.Tx, taskID int64) (spec, base string, err error) 
 	return spec, base, nil
 }
 
-// The rounds budgets a task carries (§7, §14), named as the keys of the
+// The rounds budgets a task carries (§7, §6.1), named as the keys of the
 // task's caps JSON: a fix round after a failed check spends a fix_rounds
 // budget, a fix round after a review's changes spends a review_rounds
 // budget — both are the task's fix jobs, one count against two caps —
@@ -288,7 +288,7 @@ const (
 	roundNone    = "none"
 )
 
-// spentRound names the rounds budget p spends (§7, §14): the restart
+// spentRound names the rounds budget p spends (§7, §6.1): the restart
 // budget when the submit is a restart — whatever Round said, a restart
 // is its own budget — Round when the engine names one, a fix round for
 // a plain fix submit, and nothing for the rest. Rounds belong to tasks,
@@ -311,7 +311,7 @@ func spentRound(p SubmitParams) string {
 }
 
 // roundCapReached counts the rounds the task has already spent against
-// the cap this submit would consume (§7, §14), and names the budget it
+// the cap this submit would consume (§7, §6.1), and names the budget it
 // checked: the spent round, which is also what the created job's row
 // carries. A work or review job, a foreman turn and the answer's
 // no-round resume spend nothing and are never capped here. A task's
@@ -337,7 +337,7 @@ func (e *Engine) roundCapReached(tx *sql.Tx, p SubmitParams) (string, bool, erro
 		}
 		return round, count >= limit, nil
 	}
-	// The count is scoped to the task's latest attempt (§5.6, §14): a
+	// The count is scoped to the task's latest attempt (§5.6): a
 	// restart begins a new attempt from the base, and the new attempt
 	// carries its rounds unspent — so the fix jobs before the task's
 	// latest restart never count against the rounds after it. Without a
