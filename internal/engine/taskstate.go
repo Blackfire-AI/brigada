@@ -1088,6 +1088,13 @@ func (e *Engine) taskDoneTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 	if err := tx.QueryRow("SELECT plan_id FROM tasks WHERE id = ?", job.TaskID).Scan(&plan); err != nil {
 		return fmt.Errorf("read the plan of task %d: %w", job.TaskID, err)
 	}
+	// The land rule (§7.1): a done, approved, dependencies-landed task
+	// gets its land job — or holds at the land gate. A hold leaves the
+	// task done, so it runs after the release of the task's dependents and
+	// does not disturb the plan-closed check below.
+	if err := e.maybeLandTaskTx(tx, job.TaskID, now); err != nil {
+		return err
+	}
 	_, err := e.finishPlanIfClosedTx(tx, job.ProjectID, plan, job.TaskID, job.ID, now)
 	return err
 }

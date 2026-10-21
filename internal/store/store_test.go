@@ -168,7 +168,7 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 	}
 	want := []string{
 		"agents", "artifacts", "attach_holds", "events", "foreman_inbox", "hold_tokens",
-		"idempotency", "jobs", "lease_tokens", "messages", "meta", "outcomes", "plan_mirror_dirty", "plans",
+		"idempotency", "jobs", "land_holds", "landings", "lease_tokens", "messages", "meta", "outcomes", "plan_mirror_dirty", "plans",
 		"projects", "questions", "runners", "sessions", "task_deps", "tasks", "tokens",
 	}
 	got := queryStrings(t, s.db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
@@ -981,6 +981,7 @@ func TestSchemaEditsMatchTheirMigrations(t *testing.T) {
 	want := map[int]string{
 		23: "review_without_task",
 		36: "task_setup",
+		50: "land_job",
 	}
 	migs, err := allMigrations()
 	if err != nil {
@@ -1004,6 +1005,36 @@ func TestSchemaEditsMatchTheirMigrations(t *testing.T) {
 		if _, ok := schemaEdits[v]; !ok {
 			t.Errorf("schemaEdits has no edit for migration %d (%s)", v, want[v])
 		}
+	}
+}
+
+// TestLandJobMigration pins what 0050_land_job added (§7.1): the jobs
+// kind CHECK admits land, and the landings and land_holds tables hold the
+// landing record and the gate hold.
+func TestLandJobMigration(t *testing.T) {
+	f := newFixture(t)
+	// A land job always belongs to a task, so the pairing CHECK holds for
+	// it without change; a land job without a task is refused.
+	exec(t, f.db, `INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
+		VALUES (?, ?, 'land', 'land-key', 'fresh', '', 'queued', ?, ?)`, f.project, f.task, ts, ts)
+	if _, err := f.db.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
+		VALUES (?, NULL, 'land', 'land-without-task', 'fresh', '', 'queued', ?, ?)`, f.project, ts, ts); err == nil || !strings.Contains(err.Error(), "CHECK") {
+		t.Errorf("land job without a task: err = %v; want a CHECK failure", err)
+	}
+
+	exec(t, f.db, `INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, created_at)
+		VALUES (?, ?, 'main', 'abc123', 'pushed', ?)`, f.task, f.project, ts)
+	if got := queryInt(t, f.db, "SELECT COUNT(*) FROM landings WHERE task_id = ?", f.task); got != 1 {
+		t.Errorf("landings rows = %d, want 1", got)
+	}
+	if _, err := f.db.Exec(`INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, created_at)
+		VALUES (?, ?, 'main', 'def456', 'bogus', ?)`, f.task, f.project, ts); err == nil || !strings.Contains(err.Error(), "CHECK") {
+		t.Errorf("landing with a bogus push state: err = %v; want a CHECK failure", err)
+	}
+
+	exec(t, f.db, `INSERT INTO land_holds (task_id, reason, created_at) VALUES (?, 'heavy', ?)`, f.task, ts)
+	if got := queryInt(t, f.db, "SELECT COUNT(*) FROM land_holds WHERE task_id = ?", f.task); got != 1 {
+		t.Errorf("land_holds rows = %d, want 1", got)
 	}
 }
 

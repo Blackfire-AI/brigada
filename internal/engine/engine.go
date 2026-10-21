@@ -27,6 +27,7 @@ const (
 	KindFix     Kind = "fix"
 	KindReview  Kind = "review"
 	KindForeman Kind = "foreman"
+	KindLand    Kind = "land" // a landing (§7.1): no worker, a runner with git
 )
 
 // Mode is how the runner starts the job (§14): a fresh session, or a

@@ -262,7 +262,7 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (SweepR
 						harness, model, state, capText(e.cfg.QueueTTL))
 				}
 			}
-			if x.task != 0 && x.requireAgent == 0 {
+			if x.task != 0 && x.requireAgent == 0 && x.kind != string(KindLand) {
 				j, err := loadJobTx(tx, x.id)
 				if err != nil {
 					return rep, err

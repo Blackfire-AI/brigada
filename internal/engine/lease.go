@@ -73,6 +73,10 @@ type LeaseGrant struct {
 	// resumes judged: the runner's diff file holds the commits since it.
 	// Empty for every other job.
 	ReviewSince string
+	// LandTarget is, for a land job (§7.1), the branch the task's diff is
+	// squashed onto: land_target, or the project's default branch. Empty
+	// for every other kind.
+	LandTarget string
 	// Branch is the branch the engine names a work or fix job to work
 	// on (§5.1): a work job makes it from the base ref, a fix round
 	// continues the task's current branch, and the runner builds and
@@ -282,46 +286,54 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 		}
 
-		cands, err := leaseAgentsTx(tx, &e.cfg, e.cfg.Rand, owner, j, nowStr)
-		if err != nil {
-			return nil, err
-		}
-		// The agent rules (§3, §7, §8): a job that excludes a family or
-		// an agent needs one of this runner's agents that passes the
-		// exclusions, review-capable; a job that requires an agent — a
-		// fix round on the author's session — needs that one. A runner
-		// with none — no agents at all, only the author's family, only
-		// the excluded reviewer, not the author's agent, no agent that
-		// takes the job's class, or none ready and out of cooling — does
-		// not get the job. That is an unmet placement, not a cap hold:
-		// nothing is stamped, and the queue TTL measures the job's wait
-		// like any other's. A runner with no agents at all is the
-		// exception, and only for a job that carries no placement of its
-		// own: it leases with nothing recorded, as before — a class
-		// filter over an empty advertisement would leave such a runner
-		// nothing ever.
-		if len(cands) == 0 {
-			// A foreman turn is placed on its pair: a runner with no agent
-			// for it, agentless included, does not get it.
-			becauseplaced := j.Kind == KindForeman || j.ExcludeFamily != "" || j.ExcludeAgent != 0 || j.RequireAgent != 0
-			if !becauseplaced && j.Kind == KindReview {
-				author, err := reviewAuthorTx(tx, j)
-				if err != nil {
-					return nil, err
+		var cands []agentCand
+		if j.Kind == KindLand {
+			// A land job has no worker and no agent (§7.1): the label
+			// check above is the whole placement, and the runner records
+			// no agent.
+			cands = []agentCand{{}}
+		} else {
+			cands, err = leaseAgentsTx(tx, &e.cfg, e.cfg.Rand, owner, j, nowStr)
+			if err != nil {
+				return nil, err
+			}
+			// The agent rules (§3, §7, §8): a job that excludes a family or
+			// an agent needs one of this runner's agents that passes the
+			// exclusions, review-capable; a job that requires an agent — a
+			// fix round on the author's session — needs that one. A runner
+			// with none — no agents at all, only the author's family, only
+			// the excluded reviewer, not the author's agent, no agent that
+			// takes the job's class, or none ready and out of cooling — does
+			// not get the job. That is an unmet placement, not a cap hold:
+			// nothing is stamped, and the queue TTL measures the job's wait
+			// like any other's. A runner with no agents at all is the
+			// exception, and only for a job that carries no placement of its
+			// own: it leases with nothing recorded, as before — a class
+			// filter over an empty advertisement would leave such a runner
+			// nothing ever.
+			if len(cands) == 0 {
+				// A foreman turn is placed on its pair: a runner with no agent
+				// for it, agentless included, does not get it.
+				becauseplaced := j.Kind == KindForeman || j.ExcludeFamily != "" || j.ExcludeAgent != 0 || j.RequireAgent != 0
+				if !becauseplaced && j.Kind == KindReview {
+					author, err := reviewAuthorTx(tx, j)
+					if err != nil {
+						return nil, err
+					}
+					becauseplaced = author != 0
 				}
-				becauseplaced = author != 0
-			}
-			if !becauseplaced {
-				var has bool
-				if has, err = runnerHasAgentsTx(tx, owner); err != nil {
-					return nil, err
+				if !becauseplaced {
+					var has bool
+					if has, err = runnerHasAgentsTx(tx, owner); err != nil {
+						return nil, err
+					}
+					becauseplaced = has
 				}
-				becauseplaced = has
+				if becauseplaced {
+					continue
+				}
+				cands = []agentCand{{}} // no agent recorded
 			}
-			if becauseplaced {
-				continue
-			}
-			cands = []agentCand{{}} // no agent recorded
 		}
 		// The rank choice (§8): the candidates come sampled and ordered by
 		// leaseAgentsTx, within the served tier, so a weaker record keeps
@@ -415,7 +427,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 		}
 		effort := ""
-		if j.TaskID != 0 {
+		if j.TaskID != 0 && j.Kind != KindLand {
 			taskEffort, err := jobEffortTx(tx, e.cfg.Review, j)
 			if err != nil {
 				return nil, err
@@ -531,6 +543,12 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			if err := taskRunningTx(tx, j, now); err != nil {
 				return nil, err
 			}
+		}
+		if j.Kind == KindLand {
+			// A land grant carries no worker, agent or session; the target
+			// branch, the task's result branch and the project's default
+			// check are all the runner needs (§7.1).
+			return e.landLeaseGrantTx(tx, j, owner, leaseID, expires)
 		}
 		repo, baseRef, checkCmd, branch, err := taskInfoTx(tx, j)
 		if err != nil {

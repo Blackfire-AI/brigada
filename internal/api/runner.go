@@ -337,7 +337,10 @@ type jobGrant struct {
 	// pushed to it. Empty for a review and a foreman turn — and for an
 	// engine that does not name branches, where the runner falls back
 	// to its own naming.
-	Branch          string `json:"branch,omitempty"`
+	Branch string `json:"branch,omitempty"`
+	// LandTarget is, for a land job (§7.1), the branch the task's diff
+	// is squashed onto. Empty for every other kind.
+	LandTarget      string `json:"land_target,omitempty"`
 	Attempt         int64  `json:"attempt"`
 	ResumeSessionID string `json:"resume_session_id"`
 	// SessionGen is the task's session generation (§5.1): the attempt
@@ -384,6 +387,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		ReviewBranch:    g.ReviewBranch,
 		ReviewSince:     g.ReviewSince,
 		Branch:          g.Branch,
+		LandTarget:      g.LandTarget,
 		Attempt:         g.Attempt,
 		ResumeSessionID: g.ResumeSessionID,
 		SessionGen:      g.SessionGen,

@@ -526,7 +526,7 @@ func firstLines(s string, max int) string {
 // fix round then answered (§3); the queue reads them only for a task
 // already parked, whose latest of these kinds they may still be.
 var needsYouEventKinds = []string{
-	evTaskCheckFailed, evTaskNeedsHelp, evTaskFailed, evTaskOutOfRounds, evReviewChanges, evReviewNoVerdict,
+	evTaskCheckFailed, evTaskNeedsHelp, evTaskFailed, evTaskOutOfRounds, evReviewChanges, evReviewNoVerdict, evTaskLandFailed,
 }
 
 // statusNeedsYouTx lists the "needs you" queue (§10): the tasks parked
@@ -578,6 +578,14 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 		return nil, err
 	}
 	items = append(items, noReviewer...)
+
+	// A task held at the land gate stays done; the hold's row is what
+	// names it in the queue (§6.3).
+	landHolds, err := statusLandHoldsTx(tx, project)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, landHolds...)
 
 	pquery := `SELECT p.id, p.title, p.version, pr.repo_url FROM plans p JOIN projects pr ON pr.id = p.project_id
 		WHERE pr.archived_at IS NULL AND p.state = 'pending_approval'`
