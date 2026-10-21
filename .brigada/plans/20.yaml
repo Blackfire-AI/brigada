@@ -83,8 +83,8 @@ tasks:
     base: "runner-land-2"
     tier: light
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-66"
     rounds: 0
   - id: 67
     name: "docs"
