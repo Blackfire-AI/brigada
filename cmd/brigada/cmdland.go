@@ -55,11 +55,22 @@ func (l *idList) Set(s string) error {
 	return nil
 }
 
-// runLand is `brigada land <task-id>... [--onto BRANCH] [--repo URL]
+// runLand dispatches `brigada land` (§7.1): the hand-driven squash of
+// approved tasks, or the user's decision on a land-gate hold (§6.3) with
+// `land approve <task>` / `land reject <task>`. A task id is always a
+// positive integer, so the subcommand words never collide with it.
+func runLand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && (args[0] == "approve" || args[0] == "reject") {
+		return runLandDecision(ctx, args[0], args[1:], stdout, stderr)
+	}
+	return runLandByHand(ctx, args, stdout, stderr)
+}
+
+// runLandByHand is `brigada land <task-id>... [--onto BRANCH] [--repo URL]
 // [--landed ID]... [--no-check]` (§7.1): approved tasks squashed onto the
 // checked-out branch of the user's own repository, one commit each, the
 // default check rerun, and the push command printed, never run.
-func runLand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+func runLandByHand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("land",
 		"brigada land [--onto BRANCH] [--repo URL] [--landed ID]... [--no-check] [--no-start] <task-id>...",
 		"Squash approved tasks onto the checked-out branch, rerun the check and print the push command.")
@@ -570,4 +581,65 @@ func sameCanonicalRepo(a, b string) bool {
 	}
 	cb, err := engine.Canonicalize(b)
 	return err == nil && ca == cb
+}
+
+// landDecider is the two calls the land-gate decision commands need from
+// the API client; tests stub it.
+type landDecider interface {
+	LandApprove(ctx context.Context, id int64) (engine.LandDecision, error)
+	LandReject(ctx context.Context, id int64) (engine.LandDecision, error)
+}
+
+// runLandDecision is the user's yes or no on a land-gate hold (§6.3):
+// approve releases the hold and queues the landing, reject cancels the
+// landing and leaves the branch. Only the client token can say it: the
+// foreman has no way to pass the gate.
+func runLandDecision(ctx context.Context, verb string, args []string, stdout, stderr io.Writer) int {
+	description := "Release a task's land-gate hold and queue its landing."
+	if verb == "reject" {
+		description = "Cancel a task's landing; its branch is left as it is."
+	}
+	fs := newFlagSet("land "+verb, "brigada land "+verb+" [--no-start] <task>", description)
+	stderr = commandStderr(stderr, fs.Name())
+	common := addCommon(fs)
+	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
+	if code, stop := common.parse(stdout, stderr, args); stop {
+		return code
+	}
+	rest := fs.Args()
+	if len(rest) != 1 {
+		return usagef(stderr, "usage: brigada land %s <task>", verb)
+	}
+	id, ok := parseID(stderr, "task id", rest[0])
+	if !ok {
+		return 2
+	}
+	rt, code := resolveRuntime(common, stderr)
+	if code != 0 {
+		return code
+	}
+	client, code := connect(ctx, rt, "client", *noStart, stderr)
+	if code != 0 {
+		return code
+	}
+	return printLandDecision(ctx, client, verb, id, stdout, stderr)
+}
+
+func printLandDecision(ctx context.Context, client landDecider, verb string, id int64, stdout, stderr io.Writer) int {
+	var res engine.LandDecision
+	var err error
+	if verb == "approve" {
+		res, err = client.LandApprove(ctx, id)
+	} else {
+		res, err = client.LandReject(ctx, id)
+	}
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if verb == "approve" {
+		fmt.Fprintf(stdout, "landing for task #%d approved: the land job is queued\n", res.TaskID)
+		return 0
+	}
+	fmt.Fprintf(stdout, "landing for task #%d cancelled; its branch is left as it is\n", res.TaskID)
+	return 0
 }

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -23,14 +24,31 @@ import (
 // landRecord is the landing record a land job's completion carries
 // (§7.1): the target branch, the resulting commit, whether the check on
 // the landed result passed, the push state, and — when the landing
-// failed — the conflicting files or the check log.
+// failed — the conflicting files or the check log. For gate_push never
+// it also carries the exact push command, printed for the user; for a
+// run whose after_land failed it carries that failure, reported and
+// never undone (§6.3).
 type landRecord struct {
 	TargetBranch  string   `json:"target_branch"`
 	Commit        string   `json:"commit"`
 	CheckPassed   bool     `json:"check_passed"`
 	Pushed        string   `json:"pushed"` // 'pushed', 'waiting' or 'local'
+	PushCmd       string   `json:"push_cmd,omitempty"`
+	AfterLandErr  string   `json:"after_land_error,omitempty"`
 	ConflictFiles []string `json:"conflict_files,omitempty"`
 	CheckLog      string   `json:"check_log,omitempty"`
+}
+
+// pushRecord is a push phase's completion (§7.1): the land job, reused
+// for the push after `brigada push approve`, reports the push's outcome
+// on the landing record that already exists — the commit was squashed
+// once and is not re-made. AfterLandErr carries the after_land failure
+// that follows the push, reported and never undone (§6.3).
+type pushRecord struct {
+	TargetBranch string `json:"target_branch"`
+	Commit       string `json:"commit"`
+	Pushed       string `json:"pushed"` // 'pushed' on success
+	AfterLandErr string `json:"after_land_error,omitempty"`
 }
 
 // maybeLandTaskTx runs the land rule for one task (§7.1). A task that is
@@ -74,6 +92,11 @@ func (e *Engine) maybeLandTaskTx(tx *sql.Tx, taskID int64, now time.Time) error 
 	if have > 0 {
 		return nil
 	}
+	// A land_holds row of any state — held at the gate, or rejected — means
+	// the landing is already decided for this task: the rule never re-holds
+	// or re-queues it. The user's release deletes the row and queues the
+	// land job directly (§6.3), so a released task does not re-trip the
+	// gate here.
 	var held int
 	if err := tx.QueryRow("SELECT COUNT(*) FROM land_holds WHERE task_id = ?", taskID).Scan(&held); err != nil {
 		return fmt.Errorf("read the land hold of task %d: %w", taskID, err)
@@ -303,7 +326,7 @@ func (e *Engine) releaseDependentLandsTx(tx *sql.Tx, landed int64, now time.Time
 func statusLandHoldsTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
 	query := `SELECT h.task_id, t.title, t.plan_id, t.state, h.reason
 		FROM land_holds h JOIN tasks t ON t.id = h.task_id JOIN plans p ON p.id = t.plan_id
-		WHERE p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
+		WHERE h.state = 'held' AND p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
 	args := []any{}
 	if project != 0 {
 		query += " AND p.project_id = ?"
@@ -348,7 +371,9 @@ func (r landRecord) validate() error {
 }
 
 // landCompletedTx applies a land job's completion (§7.1): the landing
-// record the runner reported. A conflict or a failed check on the landed
+// record the runner reported, or — when the task already has a landing
+// waiting at the push gate — the push phase's completion, which updates
+// that same record in place. A conflict or a failed check on the landed
 // result parks the task at needs_foreman with the files or the check log,
 // nothing pushed, and the foreman restarts it with a note. Success keeps
 // the task done and marks it landed.
@@ -357,6 +382,18 @@ func (e *Engine) landCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time
 		// The runner could not attempt the landing at all (git failed):
 		// the task waits for the foreman like any failure.
 		return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: boundNote(c.Error)}, now)
+	}
+	// The push phase reuses the land job (§7.1): the landing record
+	// already exists — pushed = waiting — and this completion is the
+	// push's, decoded and applied to that record, never re-squashed.
+	if existing, err := landingTx(tx, job.TaskID); err != nil {
+		return err
+	} else if existing != nil {
+		var pr pushRecord
+		if err := json.Unmarshal([]byte(c.Result), &pr); err != nil {
+			return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: "unreadable push record"}, now)
+		}
+		return e.pushCompletedTx(tx, job, existing, pr, now)
 	}
 	var rec landRecord
 	if err := json.Unmarshal([]byte(c.Result), &rec); err != nil {
@@ -375,24 +412,83 @@ func (e *Engine) landCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time
 	}
 }
 
+// landingRow is one landings row as the engine reads it (§7.1): the
+// landing record the land job wrote, and the push phase updates.
+type landingRow struct {
+	TaskID         int64
+	TargetBranch   string
+	Commit         string
+	Pushed         string
+	PushCmd        string
+	AfterLandError string
+}
+
+// landingTx reads the task's landing record; nil, nil when it has none.
+func landingTx(tx *sql.Tx, taskID int64) (*landingRow, error) {
+	l := &landingRow{TaskID: taskID}
+	err := tx.QueryRow(`SELECT target_branch, commit_sha, pushed, push_cmd, after_land_error
+		FROM landings WHERE task_id = ?`, taskID).
+		Scan(&l.TargetBranch, &l.Commit, &l.Pushed, &l.PushCmd, &l.AfterLandError)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read the landing of task %d: %w", taskID, err)
+	}
+	return l, nil
+}
+
 // landSucceededTx marks the task landed (§7.1): the landing record is
-// written — the engine's "landed" mark — and the dependents' landings are
-// re-evaluated. The task stays done.
+// written — the engine's "landed" mark, carrying the push state the
+// gate made (pushed, waiting at the push gate, or local with the exact
+// push command) and any after_land failure — and the dependents'
+// landings are re-evaluated. The task stays done.
 func (e *Engine) landSucceededTx(tx *sql.Tx, job *jobRow, rec landRecord, now time.Time) error {
 	pushed := rec.Pushed
 	if pushed == "" {
 		pushed = "waiting"
 	}
-	if _, err := tx.Exec(`INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		job.TaskID, job.ProjectID, rec.TargetBranch, rec.Commit, pushed, fmtTime(now)); err != nil {
+	if _, err := tx.Exec(`INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, push_cmd, after_land_error, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		job.TaskID, job.ProjectID, rec.TargetBranch, rec.Commit, pushed, rec.PushCmd, rec.AfterLandErr, fmtTime(now)); err != nil {
 		return fmt.Errorf("record the landing of task %d: %w", job.TaskID, err)
 	}
 	if _, err := appendEventTx(tx, evTaskLanded, job.ProjectID, job.TaskID, job.ID,
-		eventPayload{Status: taskDone, Branch: rec.TargetBranch, Commit: rec.Commit, Pushed: pushed}, now); err != nil {
+		eventPayload{Status: taskDone, Branch: rec.TargetBranch, Commit: rec.Commit, Pushed: pushed,
+			PushCmd: rec.PushCmd, AfterLandError: rec.AfterLandErr}, now); err != nil {
 		return err
 	}
 	return e.releaseDependentLandsTx(tx, job.TaskID, now)
+}
+
+// pushCompletedTx applies a push phase's completion (§7.1): the landing
+// record's push state moves from waiting to pushed — the squash is never
+// re-made — and the after_land failure that followed the push is reported
+// in the record and the history, never undone, never changing the task's
+// state. A malformed or failed push leaves the record waiting.
+func (e *Engine) pushCompletedTx(tx *sql.Tx, job *jobRow, existing *landingRow, pr pushRecord, now time.Time) error {
+	if pr.TargetBranch == "" {
+		pr.TargetBranch = existing.TargetBranch
+	}
+	if pr.Commit == "" {
+		pr.Commit = existing.Commit
+	}
+	if pr.TargetBranch != existing.TargetBranch || pr.Commit != existing.Commit {
+		return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: "the push names a landing other than the recorded one"}, now)
+	}
+	if pr.Pushed != "pushed" {
+		return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: "the push did not push"}, now)
+	}
+	if _, err := tx.Exec(`UPDATE landings SET pushed = 'pushed', after_land_error = ? WHERE task_id = ?`,
+		pr.AfterLandErr, job.TaskID); err != nil {
+		return fmt.Errorf("record the push of task %d: %w", job.TaskID, err)
+	}
+	if _, err := appendEventTx(tx, evTaskPushed, job.ProjectID, job.TaskID, job.ID,
+		eventPayload{Status: taskDone, Branch: pr.TargetBranch, Commit: pr.Commit, Pushed: "pushed",
+			AfterLandError: pr.AfterLandErr}, now); err != nil {
+		return err
+	}
+	return nil
 }
 
 // landConflictTx parks a task whose diff no longer applies to the target
@@ -422,13 +518,13 @@ func (e *Engine) landCheckFailedTx(tx *sql.Tx, job *jobRow, rec landRecord, now 
 
 // landLeaseGrant builds the grant a land job's lease hands the runner
 // (§7.1): the repo, the task's result branch to squash and its base for
-// the diff, the target branch, and the project's default check to rerun
-// on the result. No worker, no agent, no prompt.
+// the diff, the target branch, the project's default check to rerun on
+// the result, the push gate the runner obeys, and the after_land command
+// it runs after the push (or after the landing when the gate is never).
+// No worker, no agent, no prompt. A land job whose task already has a
+// landing record is the push phase (§7.1): the grant carries the target
+// and the recorded commit alone, and the runner pushes — no new squash.
 func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID string, expires time.Time) (*LeaseGrant, error) {
-	repo, baseRef, _, branch, err := taskInfoTx(tx, j)
-	if err != nil {
-		return nil, err
-	}
 	s, err := projectApprovalTx(tx, j.ProjectID)
 	if err != nil {
 		return nil, err
@@ -438,6 +534,36 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		if err := tx.QueryRow("SELECT default_branch FROM projects WHERE id = ?", j.ProjectID).Scan(&target); err != nil {
 			return nil, fmt.Errorf("read the default branch of project %d: %w", j.ProjectID, err)
 		}
+	}
+	// The push phase reuses the land job: the landing record exists, so
+	// the grant is the push's alone.
+	if existing, err := landingTx(tx, j.TaskID); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return &LeaseGrant{
+			JobID:          j.ID,
+			LeaseOwner:     owner,
+			ProjectID:      j.ProjectID,
+			TaskID:         j.TaskID,
+			Kind:           j.Kind,
+			Mode:           j.Mode,
+			Key:            j.Key,
+			LeaseID:        leaseID,
+			LeaseExpiresAt: expires,
+			LandTarget:     existing.TargetBranch,
+			LandCommit:     existing.Commit,
+			Push:           true,
+			AfterLand:      s.AfterLand,
+			Attempt:        j.Attempts + 1,
+		}, nil
+	}
+	repo, baseRef, _, branch, err := taskInfoTx(tx, j)
+	if err != nil {
+		return nil, err
+	}
+	gatePush := s.GatePush
+	if gatePush == "" {
+		gatePush = GateAsk // the design's default (§6.3), which projectApprovalTx leaves unapplied
 	}
 	return &LeaseGrant{
 		JobID:          j.ID,
@@ -454,6 +580,250 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		CheckCmd:       s.DefaultCheck,
 		Branch:         branch,
 		LandTarget:     target,
+		GatePush:       gatePush,
+		AfterLand:      s.AfterLand,
 		Attempt:        j.Attempts + 1,
 	}, nil
+}
+
+// LandDecision is what releasing or cancelling a land-gate hold did
+// (§6.3): the task, and whether the landing now runs (Released) or is
+// cancelled — the branch left alone, the hold row kept as rejected so the
+// rule never re-holds a landing the user refused.
+type LandDecision struct {
+	TaskID   int64 `json:"task_id"`
+	Released bool  `json:"released"` // true for an approval, false for a rejection
+}
+
+// LandApprove releases a task held at the land gate (§6.3): the hold's
+// row is deleted, the event names the release, and the land job is queued
+// directly — the user's yes overrides the gate, which would otherwise
+// re-hold the task. The foreman has no tool for it: the gate is the
+// user's.
+func (e *Engine) LandApprove(ctx context.Context, project, taskID int64) (LandDecision, error) {
+	return e.landDecision(ctx, project, taskID, true)
+}
+
+// LandReject cancels the landing of a task held at the land gate (§6.3):
+// the hold's row is kept, marked rejected, and the event records the
+// cancellation. The task stays done and its branch is left alone —
+// nothing is squashed, nothing is pushed, and the landing is never
+// recorded.
+func (e *Engine) LandReject(ctx context.Context, project, taskID int64) (LandDecision, error) {
+	return e.landDecision(ctx, project, taskID, false)
+}
+
+func (e *Engine) landDecision(ctx context.Context, project, taskID int64, approve bool) (LandDecision, error) {
+	var res LandDecision
+	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+		now := e.cfg.Now()
+		if _, err := e.sweepTx(tx, now); err != nil {
+			return err
+		}
+		r, err := e.landDecisionTx(tx, project, taskID, approve, now)
+		if err != nil {
+			return fmt.Errorf("decide the landing of task %d: %w", taskID, err)
+		}
+		res = r
+		return nil
+	})
+	return res, err
+}
+
+// landDecisionTx applies the user's decision on a land-gate hold (§6.3).
+func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve bool, now time.Time) (LandDecision, error) {
+	reason, err := landHoldTaskTx(tx, project, taskID)
+	if err != nil {
+		return LandDecision{}, err
+	}
+	if approve {
+		if _, err := tx.Exec(`DELETE FROM land_holds WHERE task_id = ?`, taskID); err != nil {
+			return LandDecision{}, fmt.Errorf("release the land hold of task %d: %w", taskID, err)
+		}
+		if _, err := appendEventTx(tx, evTaskLandReleased, project, taskID, 0,
+			eventPayload{Status: taskDone, Reason: boundNote(reason)}, now); err != nil {
+			return LandDecision{}, err
+		}
+		// The user passed the gate: queue the land job directly. Running
+		// the land rule again would re-hold the same task, since the gate
+		// still trips — the user's yes is what overrides it (§6.3). The
+		// rule checked the dependencies before it held, so they are still
+		// landed.
+		if err := e.queueLandJobTx(tx, project, taskID, now); err != nil {
+			return LandDecision{}, err
+		}
+		return LandDecision{TaskID: taskID, Released: true}, nil
+	}
+	// Reject keeps the row, marked rejected: the landing is cancelled,
+	// the branch stays, and the rule never re-holds what the user refused.
+	if _, err := tx.Exec(`UPDATE land_holds SET state = 'rejected' WHERE task_id = ?`, taskID); err != nil {
+		return LandDecision{}, fmt.Errorf("reject the landing of task %d: %w", taskID, err)
+	}
+	if _, err := appendEventTx(tx, evTaskLandRejected, project, taskID, 0,
+		eventPayload{Status: taskDone, Reason: boundNote(reason)}, now); err != nil {
+		return LandDecision{}, err
+	}
+	return LandDecision{TaskID: taskID, Released: false}, nil
+}
+
+// landHoldTaskTx validates the task the land decision acts on (§6.3): a
+// task of project with a live land-gate hold. It returns the hold's
+// reason.
+func landHoldTaskTx(tx *sql.Tx, project, taskID int64) (string, error) {
+	var reason string
+	var proj int64
+	err := tx.QueryRow(`SELECT COALESCE(h.reason, ''), p.project_id
+		FROM tasks t JOIN plans p ON p.id = t.plan_id
+		LEFT JOIN land_holds h ON h.task_id = t.id AND h.state = 'held'
+		WHERE t.id = ?`, taskID).Scan(&reason, &proj)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && project != 0 && proj != project) {
+		return "", fmt.Errorf("no such task %d", taskID)
+	}
+	if err != nil {
+		return "", fmt.Errorf("read the land hold of task %d: %w", taskID, err)
+	}
+	if err := activeProjectTx(tx, proj); err != nil {
+		return "", err
+	}
+	if reason == "" {
+		return "", fmt.Errorf("task %d is not held at the land gate", taskID)
+	}
+	return reason, nil
+}
+
+// PushApproveResult is what releasing the push gate did (§6.3): how many
+// waiting landings now have a push job queued.
+type PushApproveResult struct {
+	// Released counts the landings moved from waiting to a queued push.
+	Released int `json:"released"`
+}
+
+// PushApprove releases the push gate for the project's waiting landings
+// (§6.3): each landing recorded as waiting gets a push job — the land job
+// reused, its push phase — which a runner leases and completes by
+// pushing the recorded commit, no new squash. The foreman has no tool
+// for it: the gate is the user's. repoURL names the project, as every
+// client command does.
+func (e *Engine) PushApprove(ctx context.Context, repoURL string) (PushApproveResult, error) {
+	if repoURL == "" {
+		return PushApproveResult{}, fmt.Errorf("repo URL is required (product §5 rule 6: repos are addressed by URL)")
+	}
+	var res PushApproveResult
+	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+		now := e.cfg.Now()
+		if _, err := e.sweepTx(tx, now); err != nil {
+			return err
+		}
+		var project int64
+		err := lookupProjectTx(tx, repoURL, "id", &project)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("no project for repo %s", RedactRepoURL(repoURL))
+		}
+		if err != nil {
+			return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
+		}
+		if err := activeProjectTx(tx, project); err != nil {
+			return err
+		}
+		r, err := e.pushApproveTx(tx, project, now)
+		if err != nil {
+			return err
+		}
+		res = r
+		return nil
+	})
+	if err != nil {
+		return PushApproveResult{}, fmt.Errorf("approve the push: %w", err)
+	}
+	return res, nil
+}
+
+func (e *Engine) pushApproveTx(tx *sql.Tx, project int64, now time.Time) (PushApproveResult, error) {
+	query := `SELECT l.task_id, l.project_id
+		FROM landings l JOIN tasks t ON t.id = l.task_id JOIN plans p ON p.id = t.plan_id
+		WHERE l.pushed = 'waiting' AND p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
+		  AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.task_id = l.task_id AND j.kind = 'land' AND j.status IN ('queued', 'leased', 'running'))`
+	args := []any{}
+	if project != 0 {
+		query += " AND p.project_id = ?"
+		args = append(args, project)
+	}
+	query += " ORDER BY l.task_id"
+	rows, err := tx.Query(query, args...)
+	if err != nil {
+		return PushApproveResult{}, fmt.Errorf("list the waiting landings: %w", err)
+	}
+	defer rows.Close()
+	type wait struct {
+		task, project int64
+	}
+	var waits []wait
+	for rows.Next() {
+		var w wait
+		if err := rows.Scan(&w.task, &w.project); err != nil {
+			return PushApproveResult{}, fmt.Errorf("list the waiting landings: %w", err)
+		}
+		waits = append(waits, w)
+	}
+	if err := rows.Err(); err != nil {
+		return PushApproveResult{}, fmt.Errorf("list the waiting landings: %w", err)
+	}
+	rows.Close()
+	for _, w := range waits {
+		// The push job reuses the land job's key, kind and git label, so
+		// a repeat approve coalesces behind a live push (§7.1).
+		if _, err := e.submitTx(tx, SubmitParams{
+			Key:       fmt.Sprintf("task:%d", w.task),
+			ProjectID: w.project,
+			TaskID:    w.task,
+			Kind:      KindLand,
+			Mode:      ModeFresh,
+			Prompt:    "", // no worker
+			Labels:    []string{"git"},
+		}, now); err != nil {
+			return PushApproveResult{}, err
+		}
+	}
+	if len(waits) > 0 {
+		if _, err := appendEventTx(tx, evPushApproved, project, 0, 0,
+			eventPayload{Count: int64(len(waits))}, now); err != nil {
+			return PushApproveResult{}, err
+		}
+	}
+	return PushApproveResult{Released: len(waits)}, nil
+}
+
+// statusPushWaitsTx is the needs-you entries of the landings waiting at
+// the push gate (§6.3, §10): a landing recorded as waiting, with no live
+// push job on the task's key — a queued or running push is on its way,
+// not waiting for the user. The task stays done; only its push waits.
+func statusPushWaitsTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
+	query := `SELECT l.task_id, t.title, t.plan_id, t.state, l.target_branch, l.commit_sha
+		FROM landings l JOIN tasks t ON t.id = l.task_id JOIN plans p ON p.id = t.plan_id
+		WHERE l.pushed = 'waiting' AND p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
+		  AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.task_id = l.task_id AND j.kind = 'land' AND j.status IN ('queued', 'leased', 'running'))`
+	args := []any{}
+	if project != 0 {
+		query += " AND p.project_id = ?"
+		args = append(args, project)
+	}
+	query += " ORDER BY l.task_id"
+	rows, err := tx.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list the push-gate waits: %w", err)
+	}
+	defer rows.Close()
+	var items []NeedsYouItem
+	for rows.Next() {
+		var it NeedsYouItem
+		var state, branch, sha string
+		if err := rows.Scan(&it.ID, &it.Title, &it.PlanID, &state, &branch, &sha); err != nil {
+			return nil, fmt.Errorf("list the push-gate waits: %w", err)
+		}
+		it.Kind = "task"
+		it.State = state
+		it.Reason = "waits to push: " + branch + "@" + sha
+		items = append(items, it)
+	}
+	return items, rows.Err()
 }

@@ -587,6 +587,14 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	}
 	items = append(items, landHolds...)
 
+	// A landing recorded as waiting stays done too; it waits at the push
+	// gate until `brigada push approve` (§6.3).
+	pushWaits, err := statusPushWaitsTx(tx, project)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, pushWaits...)
+
 	pquery := `SELECT p.id, p.title, p.version, pr.repo_url FROM plans p JOIN projects pr ON pr.id = p.project_id
 		WHERE pr.archived_at IS NULL AND p.state = 'pending_approval'`
 	pargs := []any{}

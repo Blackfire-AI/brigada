@@ -819,7 +819,40 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 	if err := recordPlanOutcomeTx(tx, project, len(failed) == 0 && len(waiting) == 0, now); err != nil {
 		return false, err
 	}
+	// What landed, and what waits at a gate (§7.1): a done task with a
+	// landing record landed — or waits at the push gate when its landing
+	// is recorded waiting — and a land_holds row holds one at the land
+	// gate. The done report names both, beside what failed and never ran.
+	var landed, gated []string
+	for _, n := range nodes {
+		if n.state != taskDone {
+			continue
+		}
+		if l, err := landingTx(tx, n.id); err != nil {
+			return false, err
+		} else if l != nil {
+			if l.Pushed == "waiting" {
+				gated = append(gated, fmt.Sprintf("%s (waits to push)", n.label()))
+			} else {
+				landed = append(landed, fmt.Sprintf("%s (%s@%s)", n.label(), l.TargetBranch, l.Commit))
+			}
+			continue
+		}
+		var reason string
+		err := tx.QueryRow(`SELECT reason FROM land_holds WHERE task_id = ? AND state = 'held'`, n.id).Scan(&reason)
+		if err == nil {
+			gated = append(gated, fmt.Sprintf("%s (%s)", n.label(), reason))
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("read the land hold of task %d: %w", n.id, err)
+		}
+	}
 	var report []string
+	if len(landed) > 0 {
+		report = append(report, "landed: "+strings.Join(landed, ", "))
+	}
+	if len(gated) > 0 {
+		report = append(report, "waits at a gate: "+strings.Join(gated, "; "))
+	}
 	if len(failed) > 0 {
 		report = append(report, "failed: "+strings.Join(failed, ", "))
 	}

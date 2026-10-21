@@ -69,6 +69,13 @@ Commands:
 	                Squash approved tasks onto this branch, one commit each,
 	                rerun the default check, print the push command; never
 	                pushes (--onto, --repo, --landed, --no-check).
+	land approve <task>
+	                Release a task's land-gate hold and queue its landing.
+	land reject <task>
+	                Cancel a task's landing; its branch is left as it is.
+	push approve [--repo URL]
+	                Release the push gate and queue the waiting landings'
+	                pushes.
 	logs <job-id>   Show what a job's worker did: the transcript as
 	                readable lines (--check, --tail N, --follow, --task N).
 	stats           Show attempts, successes, rate and confidence per
@@ -144,6 +151,7 @@ var commands = map[string]command{
 	"recover":  {name: "recover", run: runRecover},
 	"diff":     {name: "diff", run: runDiff},
 	"land":     {name: "land", run: runLand},
+	"push":     {name: "push", run: runPush, subcommands: pushCommands},
 	"logs":     {name: "logs", run: runLogs},
 	"version":  {name: "version", run: runVersion},
 }
