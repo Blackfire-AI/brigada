@@ -3,6 +3,7 @@ package runner
 import (
 	"database/sql"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -424,8 +425,10 @@ func TestRunnerLandPushPhaseOnAnotherRunner(t *testing.T) {
 }
 
 // TestRunnerLandGateNeverRecordsThePushCmd: gate_push never records the
-// landing as local with the exact push command, pushes nothing, and
-// runs after_land after the landing.
+// landing as local with the exact push command, pushes no branch of the
+// user's — the commit waits on the remote's waiting ref, so the command
+// runs from the user's own repository, which the test runs verbatim —
+// and runs after_land after the landing.
 func TestRunnerLandGateNeverRecordsThePushCmd(t *testing.T) {
 	remote := newRemote(t)
 	seed := remoteBranchCommit(t, remote, "main")
@@ -436,12 +439,28 @@ func TestRunnerLandGateNeverRecordsThePushCmd(t *testing.T) {
 
 	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
 	e.waitTaskState(task, "done")
-	e.waitLanding(task, "local")
-	if cmd := e.strOf("SELECT push_cmd FROM landings WHERE task_id = ?", task); cmd != "git push origin main" {
-		t.Errorf("landing push_cmd = %q, want the exact push command", cmd)
+	commit := e.waitLanding(task, "local")
+	cmd := "git fetch origin refs/brigada/land/main && git push origin FETCH_HEAD:refs/heads/main"
+	if got := e.strOf("SELECT push_cmd FROM landings WHERE task_id = ?", task); got != cmd {
+		t.Errorf("landing push_cmd = %q, want %q", got, cmd)
 	}
 	if got := remoteBranchCommit(t, remote, "main"); got != seed {
 		t.Errorf("main moved under gate_push never: %s, want the seed %s", got, seed)
+	}
+	// The commit is durable on the waiting ref, and the recorded command
+	// pushes it from a clone of the user's own, verbatim.
+	if got := remoteRefCommit(t, remote, landWaitRef("main")); got != commit {
+		t.Errorf("the waiting ref = %q, want the recorded commit %s", got, commit)
+	}
+	user := t.TempDir()
+	git(t, "", "clone", "-q", "--branch", "main", remote, user)
+	push := exec.Command("sh", "-c", cmd)
+	push.Dir = user
+	if err := push.Run(); err != nil {
+		t.Fatalf("run the recorded push command in the user's clone: %v", err)
+	}
+	if got := remoteBranchCommit(t, remote, "main"); got != commit {
+		t.Errorf("main after the user's push = %s, want the recorded commit %s", got, commit)
 	}
 	e.waitUntil("after_land to run after the landing", func() bool {
 		data, err := os.ReadFile(filepath.Join(markers, "after-land"))

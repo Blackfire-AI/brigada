@@ -416,7 +416,7 @@ The loop — plan, work, check, review, land, push — runs on its own; you stop
 - The **push gate** (`gate_push`) decides what follows a successful landing:
   - `ask` (the default): the landing is recorded as waiting, and the queue shows `task #N done: waits to push: <branch>@<sha>`. The commit waits on the remote under `refs/brigada/land/<target>`, a ref outside your branches that only ever moves forward, so it outlives the runner that made it. Waiting landings stack: the next landing is squashed onto the newest waiting one, so a dependent sits on top of its dependency. `brigada push approve` releases every waiting landing of the project at once: each gets its push, no new squash, on whichever runner takes it, and the stack reaches the target in order. If the target moved outside brigada while landings waited, their push is refused as a non-fast-forward and the task parks for the foreman.
   - `auto`: the runner pushes the target at once.
-  - `never`: nothing is pushed. The landing lands on the runner's clone of the target, and brigada prints the exact `git push` command for you.
+  - `never`: brigada never pushes your branches. The landing's commit waits on the remote under `refs/brigada/land/<target>` — the same durable ref a waiting landing uses — and the queue shows `task #N done: push by hand: <command>`: fetch that ref and push it to the target, from your own repository, when you choose. The entry stays in the queue until the project is archived: brigada cannot see a push you ran by hand.
 
 ```sh
 brigada land approve 45   # release one held landing: its land job is queued
@@ -491,7 +491,7 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 | `approval_protected_paths` | list of repo-relative globs | none | A task whose spec or check mentions a matching path holds the plan; at the land gate, a task whose recorded changed paths match holds the landing ([section 5](#5-finishing-the-land-job)). |
 | `gate_plan` | `auto` or `ask` | `auto` | `ask` holds every plan at the plan gate, whatever the approval rules say. |
 | `gate_land` | `auto` or `ask` | `auto` | `ask` holds every landing at the land gate; the land job runs only after you release it. |
-| `gate_push` | `auto`, `ask` or `never` | `ask` | What follows a successful landing: `auto` pushes the target, `ask` waits for `brigada push approve`, `never` lands locally and prints the push command. |
+| `gate_push` | `auto`, `ask` or `never` | `ask` | What follows a successful landing: `auto` pushes the target, `ask` waits for `brigada push approve`, `never` leaves the push to you and records the exact command. |
 | `approval_tiers` | list of `light`, `standard`, `heavy` | none | Tiers whose tasks wait at the land gate. |
 | `approval_restarted` | `true` or `false` | `false` | `true`: a task that spent a restart or a tier bump waits at the land gate. |
 | `land_target` | branch name | the project's default branch | Where approved work lands: the default branch, or a staging branch such as `brigada/landed`. |
@@ -728,7 +728,7 @@ Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `
 - `--max-parallel N`: how many concurrent jobs this runner runs; unset (`0`) means one at a time. Init now sets it from tasks at once, and `brigada start` passes the saved number;
 - `--no-start`: fail instead of starting the engine.
 
-A `land` job (see [section 5](#5-finishing-the-land-job)) carries the single label `git` and no agent. Every runner offers the `git` label — its own git does the landing, and the label is the promise that those git credentials work for the repo — so any runner may take it, wherever it runs. The landing happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker. A landing that waits at the push gate is kept on the remote (`refs/brigada/land/<target>`), not in that clone, so its push may run on another runner.
+A `land` job (see [section 5](#5-finishing-the-land-job)) carries the single label `git` and no agent. Every runner offers the `git` label — its own git does the landing, and the label is the promise that those git credentials work for the repo — so any runner may take it, wherever it runs. The landing happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker. A landing that waits at the push gate — or lands under `gate_push: never`, whose push is yours — is kept on the remote (`refs/brigada/land/<target>`), not in that clone, so its push may run on another runner, or on your machine.
 
 `kimi`, `opencode` and `dsh` are worker-only; the foreman can be `claude` or `codex`.
 

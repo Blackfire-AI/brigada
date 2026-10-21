@@ -70,6 +70,10 @@ func summary(it Item) string {
 		Path       string `json:"path"`
 		Bytes      int64  `json:"bytes"`
 		Branch     string `json:"branch"`
+		Commit     string `json:"commit"`
+		Pushed     string `json:"pushed"`
+		PushCmd    string `json:"push_cmd"`
+		AfterLand  string `json:"after_land_error"`
 		TierAsked  string `json:"tier_asked"`
 		TierServed string `json:"tier_served"`
 		EffortFrom string `json:"effort_from"`
@@ -96,12 +100,23 @@ func summary(it Item) string {
 		}
 	}
 	// Only a standalone review's events name their branch: it is the one
-	// job with no task row to say where it reads.
-	if it.Kind == "job_created" || it.Kind == "review_verdict" {
+	// job with no task row to say where it reads. A landing's events —
+	// task_landed, task_pushed — name their target branch too, and what
+	// the gate made of the push: the resulting commit, the push state,
+	// the exact push command of gate_push never, and an after_land
+	// failure, reported and never undone (§6.3, §7.1).
+	if it.Kind == "job_created" || it.Kind == "review_verdict" ||
+		it.Kind == "task_landed" || it.Kind == "task_pushed" {
 		add("branch", p.Branch)
 	}
 	add("answer", p.Answer)
 	add("status", p.Status)
+	if it.Kind == "task_landed" || it.Kind == "task_pushed" {
+		add("commit", p.Commit)
+		add("pushed", p.Pushed)
+		add("push_cmd", p.PushCmd)
+		add("after_land_error", p.AfterLand)
+	}
 	add("reason", p.Reason)
 	add("report", p.Report)
 	add("lease", p.Lease)
