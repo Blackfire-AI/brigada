@@ -109,6 +109,28 @@ func TestRenderTopSections(t *testing.T) {
 	}
 }
 
+// TestRenderTopShowsGateHoldsAndLandJobs: a land job a runner holds is
+// a running line like any job, and the land-gate and push-gate holds
+// sit in NEEDS YOU with the rule that tripped and the task id.
+func TestRenderTopShowsGateHoldsAndLandJobs(t *testing.T) {
+	model := busyTopModel()
+	leased := topNow.Add(-100 * time.Second).UTC().Format(engine.TimeLayout)
+	model.status.Running = append(model.status.Running,
+		engine.StatusJob{ID: 10, TaskID: 9, Kind: "land", Status: "running", LeasedAt: leased})
+	model.status.NeedsYou = append(model.status.NeedsYou,
+		engine.NeedsYouItem{Kind: "task", ID: 8, State: "done", Title: "ship the gizmo", Reason: "waits to land: gate_land is ask"},
+		engine.NeedsYouItem{Kind: "task", ID: 9, State: "done", Title: "push the widget", Reason: "waits to push: task/9-1@abc123"})
+	got := plainTop(model, 100, 0)
+	for _, want := range []string{
+		"job #10 task #9 land 1m40s",
+		"NEEDS YOU\n  task #2 needs_foreman: should the sprocket be blue?\n  task #8 done: waits to land: gate_land is ask\n  task #9 done: waits to push: task/9-1@abc123",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("view lacks %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestRenderTopFitsSize(t *testing.T) {
 	lines := renderTop(busyTopModel(), 40, 10, topNow, term.New(logo.Caps{}))
 	if len(lines) != 10 {
