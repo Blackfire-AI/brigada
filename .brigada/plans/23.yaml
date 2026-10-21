@@ -115,9 +115,9 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: running
     branch: "brigada/task-91"
-    rounds: 0
+    rounds: 1
   - id: 92
     name: "port-45"
     title: "Port #45 landed-by-trailer onto the #39/#41/#36 port (replaces task 89)"
