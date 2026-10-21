@@ -70,8 +70,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-87"
     rounds: 0
   - id: 88
     name: "coordinator-docs"
