@@ -405,7 +405,7 @@ Each agent also carries a **cost weight** (default 1), a relative cost the user 
 
 **Effort and caps.** A task's effort (§6.1) is not a layer: a `max` job and a `low` job on one agent share that agent's caps. A high effort drains the account's window faster per job.
 
-**Defaults set by init.** Init asks one number, tasks at once (§13.1), and writes it as `caps.global` and the runner's `--max-parallel`; the account caps come from a per-harness default table (claude 3, codex 2, kimi 1, opencode 2), each clamped to that number and shown in init's plan block; `caps.plan` is set to 3. Unset `--max-parallel` still means one job at a time. `brigada config` shows the config file to edit afterwards; the engine reads caps when it starts.
+**Defaults set by init.** Init asks one number, tasks at once (§13.1), and writes it as `caps.global` and the runner's `--max-parallel`; the account caps come from a per-harness default table (claude 3, codex 2, kimi 1, opencode 2), each clamped to that number and shown in init's plan block; `caps.plan` is set to 3. A cap key the config already names keeps its value — the plan names each kept and each changed value — unless the tasks-at-once answer was explicit or `--overwrite-config` is passed. A saved agent line the run's answers do not replace stays and the runner serves it: an interactive run's questions replace every saved line of each CLI asked about, while `--agent` replaces the harness and model pairs it names. Unset `--max-parallel` still means one job at a time. `brigada config` shows the config file to edit afterwards; the engine reads caps when it starts.
 
 **Config example.** Conservative per-adapter defaults are set in the engine's config file:
 
