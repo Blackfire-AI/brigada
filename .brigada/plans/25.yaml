@@ -52,10 +52,9 @@ tasks:
     tier: heavy
     effort: medium
     caps: {restart: 5}
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-98-r2"
     rounds: 0
-    question: "Can the runner's permission mode allow Bash for go build/test/vet/gofmt, go run ./internal/tools/guard and read-only git and ls commands, so the next round can check the highest migration on main, build and run the AGENTS.md checks?"
   - id: 99
     name: "answer-changes-rule"
     title: "An answer to a hold can change the rule"
