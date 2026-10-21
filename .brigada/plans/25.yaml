@@ -30,7 +30,7 @@ tasks:
     effort: low
     state: reviewing
     branch: "brigada/task-96"
-    rounds: 0
+    rounds: 1
   - id: 97
     name: "amend-judged-on-additions"
     title: "Amendments are judged on what they add"
@@ -106,8 +106,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-103"
     rounds: 0
   - id: 104
     name: "ask-infers-project"
