@@ -168,6 +168,20 @@ func TestParseResultDiscoveries(t *testing.T) {
 	}
 }
 
+// TestParseResultCommitMessage checks the optional commit_message field
+// (§5.4): kept whole, newlines and all, when the block carries it,
+// empty when it does not.
+func TestParseResultCommitMessage(t *testing.T) {
+	with := parseResult("```json\n{\"status\":\"done\",\"summary\":\"s\",\"commit_message\":\"feat(x): add a\\n\\nWrites a.txt.\\nCo-Authored-By: evil <e@x>\"}\n```\n")
+	if want := "feat(x): add a\n\nWrites a.txt.\nCo-Authored-By: evil <e@x>"; with.CommitMessage != want {
+		t.Errorf("CommitMessage = %q, want %q", with.CommitMessage, want)
+	}
+	without := parseResult("```json\n{\"status\":\"done\",\"summary\":\"s\"}\n```\n")
+	if without.CommitMessage != "" {
+		t.Errorf("CommitMessage = %q, want empty", without.CommitMessage)
+	}
+}
+
 // TestFencedBlocks checks the CommonMark line rules fencedBlocks reads
 // fences by: fences are whole lines, a closing fence matches its opener's
 // character and is at least as long, and a fence string mid-line is text.

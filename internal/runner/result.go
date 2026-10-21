@@ -37,6 +37,12 @@ type WorkerResult struct {
 	// task (§5.4); the runner keeps it so the engine can hand it to the
 	// foreman (§4.2).
 	Discoveries string `json:"discoveries,omitempty"`
+	// CommitMessage is the commit message the worker wrote for the land
+	// job (§5.4): subject and body in the repo's own style, which the
+	// worker reads from the project's instructions and the log. The land
+	// job uses it when it is there and falls back to its own format when
+	// it is not (§7.1); the runner passes it on untouched.
+	CommitMessage string `json:"commit_message,omitempty"`
 	// Progress is the last progress events, attached when the runner
 	// ends a stalled or time-capped run (§5.6) so what the worker was
 	// doing rides with the outcome. A worker's own block never carries

@@ -507,18 +507,20 @@ func landLeft(w io.Writer, start string, commits []string, t *landTask, msgPath 
 }
 
 // landMessage builds the commit message from API data alone (§7.1),
-// through internal/landing. The second result names a known family
-// whose address brigada lacks.
+// through internal/landing. The worker's own commit_message (§5.4), when
+// the task's last job carries one, takes the message's subject and body.
+// The second result names a known family whose address brigada lacks.
 func landMessage(t *landTask) (string, string) {
 	return landing.Message(landing.Task{
-		ID:      t.id,
-		Title:   t.land.Title,
-		Branch:  t.info.Branch,
-		Head:    t.head,
-		Spec:    t.land.Spec,
-		Summary: t.land.Summary,
-		Family:  t.land.Family,
-		Model:   t.land.Model,
+		ID:            t.id,
+		Title:         t.land.Title,
+		Branch:        t.info.Branch,
+		Head:          t.head,
+		Spec:          t.land.Spec,
+		Summary:       t.land.Summary,
+		CommitMessage: t.land.CommitMessage,
+		Family:        t.land.Family,
+		Model:         t.land.Model,
 	})
 }
 

@@ -208,6 +208,35 @@ func TestLandRuleCreatesOneLandJob(t *testing.T) {
 	}
 }
 
+// TestLandGrantCarriesTheWorkersCommitMessage: the commit message the
+// worker's result block wrote (§5.4) rides the land job's grant, so the
+// runner's squash uses the repo's own style; without one the grant's
+// field stays empty and the runner builds today's format.
+func TestLandGrantCarriesTheWorkersCommitMessage(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+
+	e.submit(e.work())
+	g := e.leaseAny(author)
+	if g == nil {
+		e.t.Fatal("the work job was not leased")
+	}
+	res := `{"status":"done","summary":"s","branch":"task/1-1","commit_message":"feat(x): do it\n\nThe body."}`
+	if ans := e.complete(g, Completion{Result: res, CheckResult: passCheck}); ans != AnsOK {
+		e.t.Fatalf("complete the work: %s", ans)
+	}
+	e.runReview(reviewer, `{"verdict":"approve","findings":"`+substantiveFindings+`"}`)
+
+	lg := e.leaseGit(author)
+	if lg == nil {
+		e.t.Fatal("the land job was not leased")
+	}
+	if lg.LandMessage == nil || lg.LandMessage.CommitMessage != "feat(x): do it\n\nThe body." {
+		t.Errorf("the grant's commit message = %+v, want the worker's", lg.LandMessage)
+	}
+}
+
 // TestLandRuleIsIdempotent: re-running the rule — what a dependency
 // landing or a hold release does — does not queue a second land job.
 func TestLandRuleIsIdempotent(t *testing.T) {

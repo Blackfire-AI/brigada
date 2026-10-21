@@ -22,7 +22,7 @@ func TestTaskLandReadsTheRealStore(t *testing.T) {
 			VALUES (?, ?, ?, ?, 'fresh', 'p', 'done', NULLIF(?, 0), ?, ?, ?)`,
 			e.project, e.task, kind, key, agentID, result, seedTS, seedTS)
 	}
-	worker := `{"result":"{\"status\":\"done\",\"summary\":\"did the work\"}"}`
+	worker := `{"result":"{\"status\":\"done\",\"summary\":\"did the work\",\"commit_message\":\"feat(x): do it\\n\\nThe body.\"}"}`
 	job("work", "w1", worker, agent)
 	findings := strings.Repeat("substantive ", 40)
 	approve := fmt.Sprintf(`{"result":"{\"verdict\":\"approve\",\"findings\":\"%s\"}"}`, findings)
@@ -40,6 +40,9 @@ func TestTaskLandReadsTheRealStore(t *testing.T) {
 	}
 	if got.Summary != "did the work" || got.Family != "claude" || got.Model != "sonnet" {
 		t.Errorf("summary/family/model = %q/%q/%q", got.Summary, got.Family, got.Model)
+	}
+	if want := "feat(x): do it\n\nThe body."; got.CommitMessage != want {
+		t.Errorf("commit message = %q, want %q", got.CommitMessage, want)
 	}
 
 	// A later author job starts a new cycle: the old approve no longer counts.

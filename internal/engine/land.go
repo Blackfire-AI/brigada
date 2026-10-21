@@ -566,19 +566,23 @@ func (e *Engine) landCheckFailedTx(tx *sql.Tx, job *jobRow, rec landRecord, now 
 // built from (§7.1): the fields of internal/landing's Task the engine
 // knows without running git — what the hand-driven land reads through
 // the API, read here from the task, its last author job and that job's
-// agent. The runner adds the branch and its fetched head.
+// agent. The runner adds the branch and its fetched head. CommitMessage
+// carries the worker's own commit message (§5.4) when it wrote one;
+// empty means the runner builds today's format.
 type LandMessage struct {
-	Title   string `json:"title"`
-	Spec    string `json:"spec"`
-	Summary string `json:"summary"`
-	Family  string `json:"family"`
-	Model   string `json:"model"`
+	Title         string `json:"title"`
+	Spec          string `json:"spec"`
+	Summary       string `json:"summary"`
+	CommitMessage string `json:"commit_message,omitempty"`
+	Family        string `json:"family"`
+	Model         string `json:"model"`
 }
 
 // landMessageTx reads a task's squash-message data (§7.1): the title
-// and spec from the task, the worker's summary from its last done
-// author job, and that job's agent family and model. A task with no
-// done author job keeps the empty fields; none can reach a land job.
+// and spec from the task, the worker's summary and commit message from
+// its last done author job, and that job's agent family and model. A
+// task with no done author job keeps the empty fields; none can reach
+// a land job.
 func landMessageTx(tx *sql.Tx, taskID int64) (*LandMessage, error) {
 	m := &LandMessage{}
 	if err := tx.QueryRow("SELECT title, spec FROM tasks WHERE id = ?", taskID).
@@ -596,7 +600,10 @@ func landMessageTx(tx *sql.Tx, taskID int64) (*LandMessage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read the last author job of task %d: %w", taskID, err)
 	}
-	m.Summary = jobResultSummary(authorResult)
+	if wr, ok := parseWorkerResult(jobResultText(authorResult)); ok {
+		m.Summary = wr.Summary
+		m.CommitMessage = wr.CommitMessage
+	}
 	if agent != 0 {
 		err := tx.QueryRow("SELECT family, model FROM agents WHERE id = ?", agent).Scan(&m.Family, &m.Model)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
