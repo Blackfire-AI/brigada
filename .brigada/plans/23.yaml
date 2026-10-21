@@ -1,0 +1,108 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 23
+title: "Backlog after plan 22: #39 gaps, #41, #36, #40, #44, #43, #45, #34"
+repo: "github.com/Blackfire-AI/brigada"
+state: pending_approval
+created: 2026-10-21T13:18:36.059521Z
+updated: 2026-10-21T13:18:36.059521Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps — the continued
+# dep when base is empty and continue is set, else the default branch; merge a
+# task after its base. A task with continue, one of deps, starts in the
+# session of the dep's author.
+# States are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1);
+# review_tier and review_effort do the same for its reviews (§7, §8); caps
+# override the task's fix_rounds, review_rounds and restart budgets (§14).
+tasks:
+  - id: 83
+    name: "prep-classify"
+    title: "#39 Pre-CLI failures are setup-kind and a failed fetch is retried once (close gaps left by plan 22)"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 84
+    name: "fix-round-retry"
+    title: "#41 Retry a fix round once after a transient CLI failure"
+    class: "implement"
+    deps: ["prep-classify"]
+    base: "prep-classify"
+    continue: "prep-classify"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 85
+    name: "hardcap-lease"
+    title: "#36 Measure the job hard cap from the current lease"
+    class: "implement"
+    deps: ["fix-round-retry"]
+    base: "fix-round-retry"
+    continue: "fix-round-retry"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 86
+    name: "flaky-tests"
+    title: "#40 Fix the flaky TestRemoveConfirmationAndRunner and TestRunnerStallKillsChildAfterLeaderExits"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 87
+    name: "wake-budget-attached"
+    title: "#44 An attached foreman does not report the spent wake budget as a blocker"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 88
+    name: "coordinator-docs"
+    title: "#43 Document the coordinator bridge for ordinary sessions; check ask_foreman"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: light
+    effort: low
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 89
+    name: "landed-by-trailer"
+    title: "#45 Mark a task landed by its Brigada-Task trailer on the default branch"
+    class: "implement"
+    deps: ["hardcap-lease"]
+    base: "hardcap-lease"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 90
+    name: "review-tier"
+    title: "#34 Review jobs choose their tier and effort apart from the task's"
+    class: "implement"
+    deps: ["landed-by-trailer"]
+    base: "landed-by-trailer"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
