@@ -28,6 +28,6 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: ready
+    state: running
     branch: ""
     rounds: 0
