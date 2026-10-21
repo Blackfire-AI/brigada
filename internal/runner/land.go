@@ -17,9 +17,11 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/landing"
 )
 
-// A land job's execution (§7.1): no worker, no worktree, no setup —
-// the runner's own git, in a clone of the target branch under its
-// state directory. In order: fetch the target and the task's result
+// A land job's execution (§7.1): no worker, no worktree — the runner's
+// own git, in a clone of the target branch under its state directory;
+// the task's setup and extra checkouts serve the check alone. In order:
+// fetch the target (cut from the default branch when the remote has
+// none yet) and the task's result
 // branch by exact name; squash the task's own diff (base...branch,
 // three-way) as one commit through internal/landing, with the message
 // the hand-driven land builds; run the project's default check on the
@@ -110,9 +112,19 @@ func (r *jobRun) runLandSquashPhase(ctx context.Context) {
 		r.finishWithError(ctx, err.Error())
 		return
 	}
+	// The landing check sees what a work's check sees (§5.7, §5.8): the
+	// extra checkouts, then the setup, run in the clone before the check.
+	defer r.cleanupSetup()
+	defer r.cleanupExtras()
+	if why := r.prepareExtras(ctx); why != "" {
+		if !r.gone(ctx, "checking out the extra repositories") {
+			r.finishWithSetupError(ctx, why)
+		}
+		return
+	}
 	out, err := r.landAttempt(ctx, dir)
 	if err != nil {
-		r.finishWithError(ctx, err.Error())
+		r.finishLandErr(ctx, err)
 		return
 	}
 	if out.pushRejected {
@@ -124,7 +136,7 @@ func (r *jobRun) runLandSquashPhase(ctx context.Context) {
 			"job_id", grant.JobID, "err", out.pushErr)
 		out, err = r.landAttempt(ctx, dir)
 		if err != nil {
-			r.finishWithError(ctx, err.Error())
+			r.finishLandErr(ctx, err)
 			return
 		}
 		if out.pushRejected {
@@ -133,6 +145,22 @@ func (r *jobRun) runLandSquashPhase(ctx context.Context) {
 		}
 	}
 	r.finishLand(ctx, out.record())
+}
+
+// landSetupError is a failed setup before the landing check: an
+// infrastructure failure of the job (§5.7), delivered like a work job's.
+type landSetupError struct{ why string }
+
+func (e *landSetupError) Error() string { return e.why }
+
+// finishLandErr completes the land job with an attempt's error.
+func (r *jobRun) finishLandErr(ctx context.Context, err error) {
+	var setup *landSetupError
+	if errors.As(err, &setup) {
+		r.finishWithSetupError(ctx, setup.why)
+		return
+	}
+	r.finishWithError(ctx, err.Error())
 }
 
 // landOutcome is one squash attempt's result (§7.1): the landing
@@ -265,7 +293,16 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 		// there.
 	}
 	if grant.CheckCmd != "" {
-		check := runCheck(ctx, dir, grant.CheckCmd, r.cfg.CheckTimeout)
+		if why := r.runSetup(ctx, dir, false); why != "" {
+			if r.gone(ctx, "running the setup before the landing check") {
+				return nil, errors.New("the run was no longer ours while the landing setup ran")
+			}
+			return nil, &landSetupError{why}
+		}
+		if r.gone(ctx, "running the setup before the landing check") {
+			return nil, errors.New("the run was no longer ours while the landing setup ran")
+		}
+		check := runCheck(ctx, dir, grant.CheckCmd, r.cfg.CheckTimeout, r.extraEnvVars()...)
 		if r.gone(ctx, "running the landing check") {
 			return nil, errors.New("the run was no longer ours while the landing check ran")
 		}
@@ -477,7 +514,33 @@ func (r *jobRun) discardLandAttempt(ctx context.Context, dir string) {
 // landFetch fetches refs into the landing clone by exact name (§7.1),
 // as the hand-driven land fetches: no tags, no prune, nothing but the
 // named branches, forced only into the clone's own local refs.
+//
+// A land target the remote does not have yet — a fresh staging branch —
+// is created from the default branch on first use: the clone's own ref
+// is cut from the default branch, and the landing's push creates it on
+// the remote.
 func (r *jobRun) landFetch(ctx context.Context, dir string, refs ...string) error {
+	target := r.grant.LandTarget
+	fresh := false
+	for i, ref := range refs {
+		if ref != target || target == "" {
+			continue
+		}
+		out, err := r.landGit(ctx, dir, "ls-remote", "--heads", "origin", "refs/heads/"+target)
+		if err != nil {
+			return fmt.Errorf("look for %s on %s: %v", target, redactURL(r.grant.RepoURL), trimCmdError(out, err))
+		}
+		if strings.TrimSpace(string(out)) != "" {
+			break
+		}
+		if r.grant.DefaultBranch == "" || r.grant.DefaultBranch == target {
+			return fmt.Errorf("%s does not exist on %s and there is no default branch to create it from", target, redactURL(r.grant.RepoURL))
+		}
+		fresh = true
+		refs = append(append([]string(nil), refs[:i]...), refs[i+1:]...)
+		refs = append(refs, r.grant.DefaultBranch)
+		break
+	}
 	args := []string{"fetch", "--quiet", "--no-tags", "origin"}
 	for _, ref := range refs {
 		if ref == "" {
@@ -487,6 +550,11 @@ func (r *jobRun) landFetch(ctx context.Context, dir string, refs ...string) erro
 	}
 	if out, err := r.landGit(ctx, dir, args...); err != nil {
 		return fmt.Errorf("fetch %s from %s: %v", strings.Join(refs, ", "), redactURL(r.grant.RepoURL), trimCmdError(out, err))
+	}
+	if fresh {
+		if out, err := r.landGit(ctx, dir, "update-ref", "refs/heads/"+target, "refs/heads/"+r.grant.DefaultBranch); err != nil {
+			return fmt.Errorf("create %s from %s: %v", target, r.grant.DefaultBranch, trimCmdError(out, err))
+		}
 	}
 	return nil
 }

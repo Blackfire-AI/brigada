@@ -660,3 +660,65 @@ func TestRunnerRecordsChangedPathsMatchedByLandGate(t *testing.T) {
 		t.Errorf("main moved by a held landing: %s, want the seed %s", got, seed)
 	}
 }
+
+// TestRunnerLandCheckRunsSetupAndSeesExtraRepos: the landing check runs
+// after the task's recorded setup, in the landing clone, with the task's
+// extra checkouts named (§5.7, §5.8): a default_check that needs either
+// passes though the clone is another directory than the work's.
+func TestRunnerLandCheckRunsSetupAndSeesExtraRepos(t *testing.T) {
+	markers := markerDir(t)
+	remote := newRemote(t)
+	extra := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	e.setProjectSettings(`{"gate_push":"auto","default_check":"grep -qx \"$PWD\" \"$BRIGADA_TEST_MARKERS/setup-dirs\" && test -f \"$BRIGADA_REPO_TOOLS/README.md\""}`)
+	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
+	setup := `{"command":"echo \"$PWD\" >> \"$BRIGADA_TEST_MARKERS/setup-dirs\"","timeout_minutes":5}`
+	extras := `{"repos":[{"name":"tools","repo":"example.invalid/tools","url":"` + extra + `"}],"source":"task"}`
+	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE tasks SET setup = ?, extra_repos = ? WHERE id = ?", setup, extras, task)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", "", ""))
+	t.Setenv("BRIGADA_TEST_BRANCH", taskBranch(task, 1))
+	e.startLandRunner(t, reviewScript(reviewApproveResult))
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	e.waitTaskState(task, "done")
+	commit := e.waitLanding(task, "pushed")
+	if got := remoteBranchCommit(t, remote, "main"); got != commit {
+		t.Errorf("remote main = %s, want the landing commit %s", got, commit)
+	}
+	data, _ := os.ReadFile(filepath.Join(markers, "setup-dirs"))
+	if !strings.Contains(string(data), filepath.Join("lands", "task-"+strconv.FormatInt(task, 10))) {
+		t.Errorf("setup never ran in the landing clone:\n%s", data)
+	}
+}
+
+// TestRunnerLandFreshTargetCreatedFromDefault: a land_target the remote
+// does not have yet is created from the default branch by the first
+// landing, which pushes onto it; main is left alone.
+func TestRunnerLandFreshTargetCreatedFromDefault(t *testing.T) {
+	markerDir(t)
+	remote := newRemote(t)
+	seed := remoteBranchCommit(t, remote, "main")
+	e := newTestEnv(t, engine.Config{})
+	task, work := e.landTest(t, remote, `{"gate_push":"auto","land_target":"brigada/landed"}`,
+		"Add work.txt with hello in it.", `test "$(cat work.txt)" = hello`, reviewScript(reviewApproveResult))
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	e.waitTaskState(task, "done")
+	commit := e.waitLanding(task, "pushed")
+	if got := remoteBranchCommit(t, remote, "brigada/landed"); got != commit {
+		t.Errorf("remote brigada/landed = %q, want the landing commit %s", got, commit)
+	}
+	if got := parentOf(t, remote, commit); got != seed {
+		t.Errorf("the landing's parent = %s, want the default branch's head %s", got, seed)
+	}
+	if got := remoteBranchCommit(t, remote, "main"); got != seed {
+		t.Errorf("main moved: %s, want the seed %s", got, seed)
+	}
+}

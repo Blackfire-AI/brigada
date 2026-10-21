@@ -608,11 +608,13 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 	if err != nil {
 		return nil, err
 	}
+	var defaultBranch string
+	if err := tx.QueryRow("SELECT default_branch FROM projects WHERE id = ?", j.ProjectID).Scan(&defaultBranch); err != nil {
+		return nil, fmt.Errorf("read the default branch of project %d: %w", j.ProjectID, err)
+	}
 	target := s.LandTarget
 	if target == "" {
-		if err := tx.QueryRow("SELECT default_branch FROM projects WHERE id = ?", j.ProjectID).Scan(&target); err != nil {
-			return nil, fmt.Errorf("read the default branch of project %d: %w", j.ProjectID, err)
-		}
+		target = defaultBranch
 	}
 	// The push phase reuses the land job: the landing record exists, so
 	// the grant is the push's alone — the repo to push to, the target
@@ -637,6 +639,7 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 			LeaseExpiresAt: expires,
 			RepoURL:        repo,
 			LandTarget:     existing.TargetBranch,
+			DefaultBranch:  defaultBranch,
 			LandCommit:     existing.Commit,
 			Push:           true,
 			AfterLand:      s.AfterLand,
@@ -648,6 +651,16 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		return nil, err
 	}
 	msg, err := landMessageTx(tx, j.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	// The landing check runs as a work's does (§5.7, §5.8): after the
+	// task's recorded setup, with its extra checkouts named.
+	setup, err := taskSetupTx(tx, j.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	extraRepos, err := taskExtraReposTx(tx, j.TaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -668,8 +681,11 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		RepoURL:        repo,
 		BaseRef:        baseRef,
 		CheckCmd:       s.DefaultCheck,
+		Setup:          setup,
+		ExtraRepos:     extraRepos,
 		Branch:         branch,
 		LandTarget:     target,
+		DefaultBranch:  defaultBranch,
 		LandMessage:    msg,
 		GatePush:       gatePush,
 		AfterLand:      s.AfterLand,
