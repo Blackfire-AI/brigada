@@ -34,6 +34,28 @@ func spendTheBudget(e *env) {
 	}
 }
 
+// TestAttachHoldHidesTheBudgetSpentEntry: the wake budget limits headless
+// wakes only, so while an attach holds the slot the needs-you queue has
+// no budget_spent entry.
+func TestAttachHoldHidesTheBudgetSpentEntry(t *testing.T) {
+	e := newEnvCfg(t, func(c *Config) { c.ForemanWakeBudget = 1 })
+	spendTheBudget(e)
+	if e.budgetEntry() == nil {
+		t.Fatal("the needs-you queue holds no budget_spent entry without an attach")
+	}
+	e.attach(false)
+	// The attach delivered the first event; a new one stays pending under
+	// the live hold, so the budget_spent query has a row to evaluate.
+	e.park("again?")
+	states := e.inboxStates()
+	if len(states) == 0 || !strings.HasPrefix(states[len(states)-1], "pending") {
+		t.Fatalf("inbox states = %v, want the last event pending under the hold", states)
+	}
+	if it := e.budgetEntry(); it != nil {
+		t.Errorf("the budget_spent entry = %+v, want none while an attach holds the slot", it)
+	}
+}
+
 // TestWakeBudgetSpentIsVisibleOncePerWindow is §4.3's visibility: a
 // skipped wake records one event per project per budget window — the
 // budget in Count, the window's end in Until — and the needs-you queue

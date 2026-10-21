@@ -90,4 +90,5 @@ needed you, a one-line report is enough.
 ## Turns
 
 An attached chat polls `events` between replies, so what workers park reaches it mid-chat.
+A spent wake budget does not apply to an attached chat; read waiting events with `events`.
 A headless turn acts, reports and ends, even when nothing needed it.

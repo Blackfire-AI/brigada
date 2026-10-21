@@ -46,7 +46,7 @@ func TestInstructionsShipped(t *testing.T) {
 		"Merging is brigada's by rule",
 		"needs_foreman waits for you alone", "nothing retries it on its own",
 		"task_cancel", "ask_user", "stats",
-		"An attached chat polls `events` between replies", "A headless turn acts, reports and ends",
+		"An attached chat polls `events` between replies", "A spent wake budget does not apply to an attached chat", "A headless turn acts, reports and ends",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the instructions do not mention %q:\n%s", want, got)
