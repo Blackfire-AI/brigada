@@ -30,7 +30,7 @@ func Instructions() string { return instructions }
 var coordinatorInstructions string
 
 // CoordinatorInstructionsVersion is the coordinator instructions'
-// version (§4.6 mode B): the text `brigada init` installs in a parent
+// version (§4.6): the text `brigada init` installs in a parent
 // folder for a session over several projects. Editing coordinator.md
 // means bumping this.
 const CoordinatorInstructionsVersion = 1

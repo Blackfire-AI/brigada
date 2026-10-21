@@ -299,7 +299,7 @@ var (
 	ErrNoPlan          = errors.New("no such plan")
 	ErrPlanNotAwaiting = errors.New("plan is not awaiting approval")
 	// ErrPlanVersionStale marks a decision that names a plan version the
-	// plan has moved past (§4.6 mode B): an amendment landed after the
+	// plan has moved past (§4.6): an amendment landed after the
 	// user looked, so nothing is applied and the plan must be shown again.
 	ErrPlanVersionStale = errors.New("plan changed since it was shown")
 )
@@ -323,7 +323,7 @@ func (e *Engine) ApprovePlan(ctx context.Context, project, plan int64) (PlanDeci
 }
 
 // ApprovePlanVersion is ApprovePlan for the plan version the user was
-// shown (§4.6 mode B): a plan amended since is refused whole with
+// shown (§4.6): a plan amended since is refused whole with
 // ErrPlanVersionStale. Version 0 names no version and checks nothing.
 func (e *Engine) ApprovePlanVersion(ctx context.Context, project, plan, version int64) (PlanDecision, error) {
 	var res PlanDecision

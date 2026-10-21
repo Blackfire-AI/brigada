@@ -459,7 +459,7 @@ type errorPhrase struct {
 // error event is the CLI's own verdict, so its text can afford loose
 // phrases.
 var errorPhrases = []errorPhrase{
-	// A resume the CLI cannot do: the thread is gone (§5.6, §14), and
+	// A resume the CLI cannot do: the thread is gone (§5.6), and
 	// the answer is a fresh run in place, not another resume.
 	{adapter.ErrResumeFailed, "no saved session found"},
 	{adapter.ErrResumeFailed, "session not found"},

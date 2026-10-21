@@ -97,7 +97,7 @@ func loadJobTx(tx *sql.Tx, id int64) (*jobRow, error) {
 	return j, nil
 }
 
-// liveJobTx reads the live job holding the key, if any (§14: at most
+// liveJobTx reads the live job holding the key, if any (§12.1: at most
 // one live job per key).
 func liveJobTx(tx *sql.Tx, key string) (*jobRow, error) {
 	j, err := scanJob(tx.QueryRow(`SELECT `+jobColumns+`
@@ -141,7 +141,7 @@ func labelsCover(offered, required []string) bool {
 }
 
 // affinityFreeTx reports whether a session-mode job for key is visible
-// to owner: a live session pinned to another runner hides it (§8, §14).
+// to owner: a live session pinned to another runner hides it (§8, §12.1).
 func affinityFreeTx(tx *sql.Tx, key string, owner int64) (bool, error) {
 	var runner int64
 	var state string
@@ -165,7 +165,7 @@ func usesKeySession(j *jobRow) bool {
 }
 
 // upsertSessionTx records the key's session: which runner holds it and,
-// when known, the harness session id the last run ended on (§4.2, §14).
+// when known, the harness session id the last run ended on (§4.2).
 // An empty harnessSessionID keeps what is stored: leasing does not know
 // it, completing does. A runner of 0 names no runner — the attach
 // release's write-back, whose chat ran in the user's own terminal — and
@@ -244,7 +244,7 @@ func boolInt(b bool) int {
 }
 
 // isUniqueViolation reports whether err is a unique index refusing a
-// write — for Submit, the one-live-job-per-key index (§14).
+// write — for Submit, the one-live-job-per-key index (§12.1).
 func isUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE")
 }

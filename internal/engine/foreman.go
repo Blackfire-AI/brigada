@@ -14,7 +14,7 @@ import (
 // harness the user chose for the project, with a prompt composed from
 // the versioned foreman instructions and wake template plus the events
 // verbatim (§1.4). The one-live-job-per-key rule does the coalescing
-// (§12.1, §14): a wake while a turn runs sets the live job's follow-up
+// (§12.1): a wake while a turn runs sets the live job's follow-up
 // flag and answers pending.
 func (e *Engine) SubmitForemanTurn(ctx context.Context, project int64, events []string) (SubmitResult, error) {
 	var res SubmitResult

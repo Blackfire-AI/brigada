@@ -52,7 +52,7 @@ type Task struct {
 	// reviews (§7, §8); empty = the engine default.
 	ReviewTier   string
 	ReviewEffort string
-	// Caps are the task's own round-cap overrides (§14), keyed
+	// Caps are the task's own round-cap overrides (§6.1), keyed
 	// fix_rounds, review_rounds and restart; nil = the engine defaults.
 	Caps     map[string]int
 	ID       int64
@@ -86,7 +86,7 @@ const header = `# Brigada plan file (§6.4): a mirror of the engine's store, whi
 # and the open questions — never transcripts.
 `
 
-const taskOptionsComment = "# Optional tier (light, standard, heavy) and effort (low, medium, high, max)\n# describe the model needed and how hard it should think (§6.1);\n# review_tier and review_effort do the same for its reviews (§7, §8); caps\n# override the task's fix_rounds, review_rounds and restart budgets (§14).\n"
+const taskOptionsComment = "# Optional tier (light, standard, heavy) and effort (low, medium, high, max)\n# describe the model needed and how hard it should think (§6.1);\n# review_tier and review_effort do the same for its reviews (§7, §8); caps\n# override the task's fix_rounds, review_rounds and restart budgets (§6.1).\n"
 
 // Keep the default file byte-for-byte stable; describe optional keys when used.
 const tasksComment = tasksGraphComment + taskOptionsComment

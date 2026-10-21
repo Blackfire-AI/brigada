@@ -47,8 +47,8 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 //     restarts at the requeue (§8.1);
 //  2. a live job past its kind's hard cap from last_leased — the
 //     current lease, so a job that lost a lease and was requeued runs
-//     its next lease with the whole cap again (issue #36) — fails with
-//     the cap named in the error (§14); a job with a task parks the task
+//     its next lease with the whole cap again — fails with
+//     the cap named in the error (§5.6); a job with a task parks the task
 //     at needs_foreman with a task_failed event naming the cap, and the
 //     foreman is woken (needsForemanTx does both);
 //  3. a queued job nobody leased within the queue TTL fails, so it
@@ -129,8 +129,7 @@ func (e *Engine) restartDeadlinesTx(tx *sql.Tx, now time.Time, gap time.Duration
 	// The hard-cap round reads every non-terminal job with last_leased
 	// set — a live lease — so the cap clock must shift past the gap for
 	// that set, or the first wakeful tick (or the holder's first
-	// heartbeat) would hard-cap a job the sleep never ran (§14, issue
-	// #36). first_leased shifts with it so the job's first lease also
+	// heartbeat) would hard-cap a job the sleep never ran (§5.6). first_leased shifts with it so the job's first lease also
 	// stays past the sleep; last_leased's NULL stays NULL (a queued job
 	// has no lease running, and its cap starts at its next lease).
 	rows, err := tx.Query(`SELECT id, first_leased, last_leased

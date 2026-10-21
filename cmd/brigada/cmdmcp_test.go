@@ -14,7 +14,7 @@ func TestMCPSelectorsMutuallyExclusive(t *testing.T) {
 	}
 }
 
-// TestMCPForemanSelectorIsRetired: mode A is gone, so `brigada mcp
+// TestMCPForemanSelectorIsRetired: `brigada mcp
 // --foreman` is a usage error, not a bridge for the user's own session.
 func TestMCPForemanSelectorIsRetired(t *testing.T) {
 	var out, errout bytes.Buffer

@@ -19,7 +19,7 @@ import (
 )
 
 // Init in a folder that is not a repository (design §13.1 "Parent folder",
-// §4.6 mode B): scan the direct children, print what is there, register
+// §4.6): scan the direct children, print what is there, register
 // only what the user selects, and wire the coordinator in the folder's own
 // project scope. Nothing is written into a child repository.
 
@@ -142,7 +142,7 @@ description: Rules for coordinating several repositories through brigada from th
 ---
 %s v%d -->
 
-These are brigada's coordinator rules for your own session (mode B). Brigada
+These are brigada's coordinator rules for your own session. Brigada
 owns this file and replaces it on "brigada init"; put your own instructions
 elsewhere.
 
@@ -165,7 +165,7 @@ func planCoordinatorWiring(dir string) []wireFile {
 }
 
 func printCoordinatorWiringPlan(w io.Writer, files []wireFile) {
-	fmt.Fprintln(w, "Coordinator wiring (mode B; the folder's own project scope, written only on apply, never committed or pushed):")
+	fmt.Fprintln(w, "Coordinator wiring (the folder's own project scope, written only on apply, never committed or pushed):")
 	for _, f := range files {
 		switch {
 		case f.err != nil:
@@ -355,7 +355,7 @@ func runInitParent(ctx context.Context, dir string, opts parentOptions, common *
 			fmt.Fprintf(stdout, "Registered %s\n", c.canon)
 		}
 	}
-	fmt.Fprintln(stdout, "Coordinator ready: open your harness in this folder. Registered projects have no runner agents from this command: run `brigada init` inside a repository for those (it also wires that repository for mode A).")
+	fmt.Fprintln(stdout, "Coordinator ready: open your harness in this folder. Registered projects have no runner agents from this command: run `brigada init` inside a repository for those.")
 	return 0
 }
 

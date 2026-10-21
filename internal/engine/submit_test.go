@@ -319,7 +319,7 @@ func TestSubmitRestartRounds(t *testing.T) {
 	}
 }
 
-// A restart is its own budget (§14): a restarted fix or review counts
+// A restart is its own budget (§6.1): a restarted fix or review counts
 // against the restart cap alone, never against the rounds budget of the
 // kind it restarts, and the fix budget starts afresh after the
 // restarts — the count is scoped to the fix rounds of the task's latest

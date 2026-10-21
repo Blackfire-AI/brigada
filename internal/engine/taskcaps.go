@@ -8,7 +8,7 @@ import (
 )
 
 // maxTaskCap is the largest value a task's caps JSON may hold for any of
-// its keys (§14).
+// its keys (§6.1).
 const maxTaskCap = 10
 
 // validateTaskCaps checks a per-task caps override as the foreman names

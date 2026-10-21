@@ -152,7 +152,7 @@ func TestAnswerSpendsNoFixRound(t *testing.T) {
 		t.Errorf("answer job round = %q, want none spent", round)
 	}
 	// The next failed check finds the budget spent by the one round that
-	// ran — the answer's resume never counted against it (§14).
+	// ran — the answer's resume never counted against it (§6.1).
 	if ans := e.complete(e.authorLease(author), doneOn("task/1-2", failCheck)); ans != AnsOK {
 		t.Fatalf("complete the answer's job: %s", ans)
 	}
@@ -225,7 +225,7 @@ func TestAnswerRefusals(t *testing.T) {
 // fresh mode, flagged restart, no placement pin so any eligible agent
 // may take it, the note verbatim as the worker's feedback — the task
 // back to ready with a task_restarted event, and the fresh attempt's
-// fix rounds counted from zero behind the restart (§14).
+// fix rounds counted from zero behind the restart (§6.1).
 func TestRestartTaskFreshAttempt(t *testing.T) {
 	e := newEnv(t)
 	// Heavy tasks retain the park path; tier escalation has its own coverage.
@@ -287,7 +287,7 @@ func TestRestartTaskFreshAttempt(t *testing.T) {
 		t.Fatalf("the stranger leased %+v, want the restart job %d", g, work)
 	}
 
-	// The fresh attempt's rounds are counted afresh (§14): the check
+	// The fresh attempt's rounds are counted afresh (§6.1): the check
 	// fails again and a fix round still fits, though the task spent its
 	// two behind the restart.
 	if ans := e.complete(g, doneOn("task/1-1", failCheck)); ans != AnsOK {

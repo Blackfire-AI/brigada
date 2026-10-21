@@ -101,8 +101,8 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, pro
 		return AnsStaleEpoch, time.Time{}, nil
 	}
 	// Past the hard cap the lease is lost and the job fails with the cap
-	// named (§14). The cap measures from the current lease (last_leased,
-	// issue #36), so a re-leased run gets the whole cap again. The sweep
+	// named (§5.6). The cap measures from the current lease (last_leased),
+	// so a re-leased run gets the whole cap again. The sweep
 	// at the top of this call usually gets here first; this is the same
 	// rule for a job the sweep could not fail.
 	if limit, ok := e.cfg.HardCaps[job.Kind]; ok && limit > 0 && job.LastLeased != "" {
@@ -633,7 +633,7 @@ func (e *Engine) dispatchHeldTx(tx *sql.Tx, now time.Time) (bool, error) {
 }
 
 // PlanWorkerSeconds sums the leased wall time the plan's jobs have
-// banked: the number the per-plan worker-minutes budget caps (§14).
+// banked, the plan's worker time.
 // Foreman turns belong to no task, so they are not worker time.
 func (e *Engine) PlanWorkerSeconds(ctx context.Context, planID int64) (time.Duration, error) {
 	var secs int64

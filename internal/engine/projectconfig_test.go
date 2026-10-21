@@ -40,9 +40,9 @@ approval_protected_paths:
 		{"unknown key", string(cfgFile("agents: [claude]\n")), `unknown key "agents"`},
 		{"secret-bearing key", string(cfgFile("api_token: abc\n")), `unknown key "api_token"`},
 		{"local path key", string(cfgFile("state_dir: /home/me/.state\n")), `unknown key "state_dir"`},
-		// A key of the retired mode A (hold bounds, quiet window) in an
+		// A hold key of the removed wiring (hold bounds, quiet window) in an
 		// existing file is reported as unknown, never a crash.
-		{"retired mode A key", string(cfgFile("hold_idle_minutes: 20\n")), `unknown key "hold_idle_minutes"`},
+		{"removed hold key", string(cfgFile("hold_idle_minutes: 20\n")), `unknown key "hold_idle_minutes"`},
 		{"retired quiet key", string(cfgFile("interactive_quiet_minutes: 5\n")), `unknown key "interactive_quiet_minutes"`},
 		{"local-only wake budget", string(cfgFile("foreman_wakes_per_day: 30\n")), `foreman_wakes_per_day (line 3) is a local-only setting`},
 		{"duplicate key", string(cfgFile("default_check: a\ndefault_check: b\n")), `key "default_check" appears twice`},

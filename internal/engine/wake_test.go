@@ -524,7 +524,7 @@ func TestACancelledTurnDoesNotRewakeAtOnce(t *testing.T) {
 }
 
 // TestAHeartbeatHardCapReturnsTheInbox is the heartbeat's own hard-cap
-// rule (§14 beside §4.2): a foreman turn capped there — a job the sweep
+// rule (§5.6): a foreman turn capped there — a job the sweep
 // could not fail — fails with the cap named, its delivered events return
 // to pending a carried attempt the poorer, and the wake re-evaluates.
 // The sweep at the top of a real Heartbeat fails a capped job first (and

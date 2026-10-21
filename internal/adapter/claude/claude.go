@@ -472,7 +472,7 @@ type errorPhrase struct {
 // error result is the CLI's own verdict on the whole run, so its text
 // can afford loose phrases.
 var errorPhrases = []errorPhrase{
-	// A resume the CLI cannot do: the session is gone (§5.6, §14), and
+	// A resume the CLI cannot do: the session is gone (§5.6), and
 	// the answer is a fresh run in place, not another resume.
 	{adapter.ErrResumeFailed, "no conversation found"},
 	{adapter.ErrResumeFailed, "conversation not found"},

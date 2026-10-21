@@ -75,7 +75,7 @@ brigada diff <task-id>      # what a task changed
 brigada land <task-id>...   # land approved tasks by hand (the land job does it by rule)
 ```
 
-The [guide](docs/GUIDE.md) covers the rest: a coordinator session over several repositories (mode B), watching work as it runs, configuration, and the full command reference.
+The [guide](docs/GUIDE.md) covers the rest: a coordinator session over several repositories, watching work as it runs, configuration, and the full command reference.
 
 `brigada help` lists the commands. `brigada land --help` (or `brigada help land`) prints a command's usage and flags, and `brigada project --help` lists its subcommands. Each subcommand has help too, for example `brigada project foreman --help`.
 

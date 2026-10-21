@@ -110,7 +110,7 @@ func TestSweepSuspensionKeepsLeasePastHardCap(t *testing.T) {
 // lapsed wakefully — requeued keeping its lease id and first_leased —
 // must not be hard-capped after a later sleep. The cap clock shifts past
 // the gap for queued jobs too, so the holder's first heartbeat after
-// wake revives the lease instead of answering lost (§13, §14).
+// wake revives the lease instead of answering lost (§13, §5.6).
 func TestSweepSuspensionKeepsQueuedLeasePastHardCap(t *testing.T) {
 	e := newEnv(t) // work jobs are hard-capped at 45m
 	e.submit(e.work())
