@@ -28,8 +28,8 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-96"
     rounds: 0
   - id: 97
     name: "amend-judged-on-additions"
