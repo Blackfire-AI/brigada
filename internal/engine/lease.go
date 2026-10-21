@@ -77,6 +77,23 @@ type LeaseGrant struct {
 	// squashed onto: land_target, or the project's default branch. Empty
 	// for every other kind.
 	LandTarget string
+	// LandCommit is, for a land job's push phase (§7.1), the commit the
+	// landing already recorded: the runner pushes exactly it, no new
+	// squash. Empty for the squash phase and every other kind.
+	LandCommit string
+	// Push is true for a land job's push phase (§7.1): the squash and
+	// check already happened, and the runner pushes the recorded commit,
+	// then runs after_land. False for the squash phase and every other
+	// kind.
+	Push bool
+	// GatePush is the project's push gate a land job reads (§6.3): auto
+	// pushes, ask records waiting for the user, never records the exact
+	// push command without pushing. Empty for every other kind.
+	GatePush string
+	// AfterLand is the repo-relative command the runner runs after the
+	// push, or after the landing when gate_push is never (§6.3). Empty =
+	// none.
+	AfterLand string
 	// Branch is the branch the engine names a work or fix job to work
 	// on (§5.1): a work job makes it from the base ref, a fix round
 	// continues the task's current branch, and the runner builds and

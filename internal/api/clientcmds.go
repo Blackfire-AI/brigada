@@ -38,6 +38,40 @@ func (c *Client) TaskLand(ctx context.Context, id int64) (engine.TaskLandInfo, e
 	return t, nil
 }
 
+// LandApprove releases a task's land-gate hold (§6.3): the landing is
+// re-evaluated and, when nothing else trips, its land job queues.
+func (c *Client) LandApprove(ctx context.Context, id int64) (engine.LandDecision, error) {
+	var out engine.LandDecision
+	path := "/v1/tasks/" + strconv.FormatInt(id, 10) + "/land/approve"
+	if err := c.call(ctx, http.MethodPost, path, struct{}{}, &out); err != nil {
+		return engine.LandDecision{}, err
+	}
+	return out, nil
+}
+
+// LandReject cancels a task's landing (§6.3): the branch stays, nothing
+// is squashed or pushed, and the rejection is recorded.
+func (c *Client) LandReject(ctx context.Context, id int64) (engine.LandDecision, error) {
+	var out engine.LandDecision
+	path := "/v1/tasks/" + strconv.FormatInt(id, 10) + "/land/reject"
+	if err := c.call(ctx, http.MethodPost, path, struct{}{}, &out); err != nil {
+		return engine.LandDecision{}, err
+	}
+	return out, nil
+}
+
+// PushApprove releases the push gate for the repo's waiting landings
+// (§6.3): each gets a push job, the land job reused as its push phase.
+func (c *Client) PushApprove(ctx context.Context, repoURL string) (engine.PushApproveResult, error) {
+	var out engine.PushApproveResult
+	if err := c.call(ctx, http.MethodPost, "/v1/push/approve", struct {
+		RepoURL string `json:"repo_url"`
+	}{repoURL}, &out); err != nil {
+		return engine.PushApproveResult{}, err
+	}
+	return out, nil
+}
+
 // Job reads one job (§12.1): its status, and the ids of its transcript
 // and check log artifacts. A job that is not there is a *StatusError
 // with 404.

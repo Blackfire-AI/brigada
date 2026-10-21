@@ -58,7 +58,11 @@ const (
 	evReviewUnservable       = "review_unservable"         // a task's queued review can never be taken: no agent of another family offers review (§7, §10)
 	evReviewRetry            = "review_retry"              // an unusable verdict goes to another reviewer (§7)
 	evTaskLandHeld           = "task_land_held"            // the task waits at the land gate (§6.3); Reason names the rule
+	evTaskLandReleased       = "task_land_released"        // the user released the land gate; the landing re-evaluates (§6.3)
+	evTaskLandRejected       = "task_land_rejected"        // the user rejected the landing; the branch stays, nothing recorded (§6.3)
 	evTaskLanded             = "task_landed"               // the task's landing succeeded (§7.1); Branch, Commit and Pushed name it
+	evTaskPushed             = "task_pushed"               // the push phase pushed a waiting landing (§7.1)
+	evPushApproved           = "push_approved"             // the user released the push gate for waiting landings (§6.3)
 	evTaskLandFailed         = "task_land_failed"          // a conflict or a failed check on the landed result; the task parks (§7.1)
 	evProjectForemanSet      = "project_foreman_set"       // setup: the project's foreman harness and model were chosen (§4.1)
 	evForemanReport          = "foreman_report"            // a done foreman turn's final message, reported to the user (§3, §10)
@@ -100,7 +104,11 @@ type eventPayload struct {
 	Branch      string `json:"branch,omitempty"`   // the task's result branch (§6.4)
 	Commit      string `json:"commit,omitempty"`   // a landing's resulting commit (§7.1)
 	Pushed      string `json:"pushed,omitempty"`   // a landing's push state: pushed, waiting or local (§7.1)
-	Question    string `json:"question,omitempty"` // the worker's question (§5.4)
+	PushCmd     string `json:"push_cmd,omitempty"` // the exact push command for gate_push never (§7.1)
+	// AfterLandError is an after_land command's failure, reported in the
+	// record and the history, never undone (§6.3).
+	AfterLandError string `json:"after_land_error,omitempty"`
+	Question       string `json:"question,omitempty"` // the worker's question (§5.4)
 	// Discoveries is what a worker learned beyond its own task (§4.2).
 	Discoveries string `json:"discoveries,omitempty"`
 	// QuestionID names the questions row an answer filled (§3, §11):
