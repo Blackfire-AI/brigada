@@ -63,7 +63,7 @@ tasks:
     continue: "cost-rule"
     tier: heavy
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 100
