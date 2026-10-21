@@ -18,7 +18,7 @@ updated: 2026-10-21T19:06:35.739893Z
 # Optional tier (light, standard, heavy) and effort (low, medium, high, max)
 # describe the model needed and how hard it should think (§6.1);
 # review_tier and review_effort do the same for its reviews (§7, §8); caps
-# override the task's fix_rounds, review_rounds and restart budgets (§14).
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1).
 tasks:
   - id: 96
     name: "stale-hold-cleared"
@@ -51,9 +51,9 @@ tasks:
     continue: "amend-judged-on-additions"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-98-r1"
-    rounds: 0
+    rounds: 1
   - id: 99
     name: "answer-changes-rule"
     title: "An answer to a hold can change the rule"
