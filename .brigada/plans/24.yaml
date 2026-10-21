@@ -31,7 +31,7 @@ tasks:
     review_tier: heavy
     state: reviewing
     branch: "brigada/task-94"
-    rounds: 0
+    rounds: 1
   - id: 95
     name: "docs-product-guide"
     title: "Rewrite docs/product.md and clean docs/GUIDE.md as the present design"
@@ -40,6 +40,6 @@ tasks:
     base: ""
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: done
     branch: "brigada/task-95"
     rounds: 1
