@@ -295,14 +295,17 @@ func TestLegacyPlanRetiresAnOlderInitsSkill(t *testing.T) {
 }
 
 func TestInitWritesNoHarnessFiles(t *testing.T) {
+	// The remote is made before the engine: the plan-file mirror pushes
+	// into it, and the engine's cleanup waits that push out, so the temp
+	// dir must be removed after the engine is stopped.
+	remote := t.TempDir()
+	wireGit(t, remote, "init", "--bare", "-q")
 	_, state := startSettingsEngine(t)
 	importRepo(t)
 	root, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	remote := t.TempDir()
-	wireGit(t, remote, "init", "--bare", "-q")
 	wireGit(t, root, "remote", "set-url", "origin", remote)
 	wireGit(t, root, "config", "core.excludesFile", os.DevNull)
 	startStopHelper(t, "runner", state)

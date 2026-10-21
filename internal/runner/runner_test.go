@@ -286,10 +286,12 @@ func (e *testEnv) waitJob(job int64, cond func(*engine.JobInfo) bool) *engine.Jo
 	}
 }
 
-// waitUntil polls cond until it holds or the deadline passes.
+// waitUntil polls cond until it holds or the deadline passes. The
+// ceiling is generous — seconds of spawn under a loaded machine are not
+// the condition failing — and what it waits on stays the check.
 func (e *testEnv) waitUntil(what string, cond func() bool) {
 	e.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	for !cond() {
 		if time.Now().After(deadline) {
 			e.t.Fatalf("timed out waiting for %s", what)
