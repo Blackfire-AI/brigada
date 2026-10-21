@@ -75,6 +75,9 @@ type Config struct {
 	// KillGrace is how long a stopped worker's process tree has between
 	// the runner's SIGTERM and its SIGKILL (§5.6); zero keeps 10 s.
 	KillGrace time.Duration
+	// ProbeEvery is how often the runner asks the engine for due
+	// broken-agent probes (§8 "Health"); zero keeps 1 minute.
+	ProbeEvery time.Duration
 	// Clock is the runner's time (§5.6): the wall the activity clock
 	// reads and the tickers the heartbeats beat on. Nil is real time;
 	// tests inject a manual one so no test sleeps minutes.
@@ -137,6 +140,9 @@ func (cfg *Config) defaults() error {
 	}
 	if cfg.KillGrace <= 0 {
 		cfg.KillGrace = killGrace
+	}
+	if cfg.ProbeEvery <= 0 {
+		cfg.ProbeEvery = probeEvery
 	}
 	cfg.Clock.fill()
 	cfg.ClassCaps = mergeClassCaps(cfg.ClassCaps)
@@ -383,6 +389,13 @@ func Run(ctx context.Context, cfg Config) error {
 	// its own jobRun.
 	slots := make(chan struct{}, max(cfg.MaxParallel, 1))
 	var jobs sync.WaitGroup
+	// The broken-agent probe loop (§8 "Health") starts once the runner
+	// is registered, and keeps asking the engine for due probes for the
+	// runner's whole life: an engine that restarts answers "unknown
+	// runner" until the lease loop re-registers, which is no reason to
+	// stop probing.
+	var probes sync.WaitGroup
+	probesStarted := false
 	// However Run ends, the jobs end with it: the context they run
 	// under is cancelled and waited out, so a lease the runner stops
 	// serving lapses (§5.6) and no job outlives the runner's lock.
@@ -390,6 +403,7 @@ func Run(ctx context.Context, cfg Config) error {
 	defer func() {
 		stopJobs()
 		jobs.Wait()
+		probes.Wait()
 	}()
 
 	for {
@@ -422,6 +436,14 @@ func Run(ctx context.Context, cfg Config) error {
 			registered = true
 			backoff = leaseBackoffMin
 			cfg.Log.InfoContext(ctx, "runner registered", "socket", cfg.Socket, "agents", len(cfg.Agents))
+			if !probesStarted {
+				probesStarted = true
+				probes.Add(1)
+				go func() {
+					defer probes.Done()
+					probeLoop(runCtx, &cfg, client)
+				}()
+			}
 		}
 
 		// Poll only while a slot is free; a full runner waits here for

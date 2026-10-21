@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"context"
 	"os/exec"
 	"time"
 )
@@ -48,6 +49,16 @@ type Adapter interface {
 	// ResultText returns the worker's final message from the events it
 	// parsed: the text the result contract (§5.4) is read from.
 	ResultText(events []Event) string
+
+	// ProbeCommand builds the cheap probe of the CLI for the
+	// broken-agent recovery (§8 "Health"): a command bound to ctx — a
+	// version or status check — that exits 0 when the CLI answers. The
+	// runner runs it against an agent broken by repeated failures with a
+	// short deadline; a passing probe clears the agent, a failing one
+	// backs the next probe off. The command is built with ctx so the
+	// deadline kills it: a hung CLI reads as a failing probe, never a
+	// stuck runner.
+	ProbeCommand(ctx context.Context) *exec.Cmd
 }
 
 // Job is what an adapter needs to build one headless run (§5.2): the

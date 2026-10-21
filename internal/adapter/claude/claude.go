@@ -7,6 +7,7 @@ package claude
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -101,6 +102,17 @@ var _ adapter.Interactive = (*Adapter)(nil)
 // Name implements adapter.Adapter: the harness this adapter drives,
 // which the runner's advertisement pairs it with (§5.1).
 func (a *Adapter) Name() string { return "claude" }
+
+// ProbeCommand implements adapter.Adapter: `claude --version`, a cheap
+// command that answers when the CLI is well (§8 "Health"), bound to ctx
+// so a hung CLI is killed and reads as a failing probe.
+func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
+	binary := a.Binary
+	if binary == "" {
+		binary = "claude"
+	}
+	return exec.CommandContext(ctx, binary, "--version")
+}
 
 // Command implements adapter.Adapter: the fresh or resume invocation of
 // the CLI, running in workdir. The prompt travels on stdin — argv is

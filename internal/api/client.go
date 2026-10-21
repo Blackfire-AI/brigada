@@ -199,6 +199,29 @@ func (c *Client) Release(ctx context.Context, jobID int64, leaseID, reason strin
 	return c.answer(ctx, "/v1/runner/release", req)
 }
 
+// DueProbes lists the runner's due broken-agent probes (§8 "Health"):
+// the failure-broken agents whose next probe is due, for the runner to
+// probe and report.
+func (c *Client) DueProbes(ctx context.Context) ([]engine.Probe, error) {
+	var out struct {
+		Probes []engine.Probe `json:"probes"`
+	}
+	if err := c.call(ctx, http.MethodPost, "/v1/runner/probes", struct{}{}, &out); err != nil {
+		return nil, err
+	}
+	return out.Probes, nil
+}
+
+// ReportProbe delivers one probe's result (§8 "Health"): ok is whether
+// the agent's CLI answered.
+func (c *Client) ReportProbe(ctx context.Context, agentID int64, ok bool) error {
+	req := struct {
+		AgentID int64 `json:"agent_id"`
+		OK      bool  `json:"ok"`
+	}{agentID, ok}
+	return c.call(ctx, http.MethodPost, "/v1/runner/probes/report", req, nil)
+}
+
 // UploadArtifact uploads one artifact blob of a run the caller holds
 // (§9, §12.3): the session's transcript or the check's log, keyed by
 // job and lease and fenced like a complete. The engine caps the blob

@@ -77,7 +77,8 @@ const (
 	evForemanSessionRotated  = "foreman_session_rotated"   // the foreman session outgrew foreman_rotate_tokens; the next turn starts fresh (Tokens, Threshold, Gen) (§4.2)
 	evAgentCooling           = "agent_cooling"             // a task job's limit cooled its account until a time (§8 "Quota")
 	evAgentBroken            = "agent_broken"              // an agent was marked broken, with the reason (§8 "Health")
-	evAgentRecovered         = "agent_recovered"           // a runner came back; its runner-stale agents are ready again (§8 "Health")
+	evAgentRecovered         = "agent_recovered"           // a broken agent is ready again: a runner's return (runner stale) or a passing probe (repeated failures) (§8 "Health")
+	evAgentProbeFailed       = "agent_probe_failed"        // a broken agent's probe failed; the next probe is Until (§8 "Health")
 	evAgentReset             = "agent_reset"               // the user cleared broken and cooling on the agents of a harness and model (§8)
 	evEngineSuspended        = "engine_suspended"          // the engine's host slept; the sweep restarted every wall-clock deadline (§13)
 )
@@ -124,7 +125,7 @@ type eventPayload struct {
 	Model      string `json:"model,omitempty"`
 	Effort     string `json:"effort,omitempty"`  // a foreman setting's reasoning-effort level
 	Account    string `json:"account,omitempty"` // the quota account a cooling names (§8)
-	Until      string `json:"until,omitempty"`   // a foreman limit's reset time, RFC3339; absent when unknown (§4.4)
+	Until      string `json:"until,omitempty"`   // a deadline, RFC3339: a foreman limit's reset, a probe's next attempt; absent when unknown (§4.4)
 	Job        int64  `json:"job,omitempty"`     // a job the event names besides its own job_id column
 	Hold       int64  `json:"hold,omitempty"`    // the attach hold the event names (§4.2 item 1)
 	Count      int64  `json:"count,omitempty"`   // how many of something the event counts (§4.2, §4.3)
