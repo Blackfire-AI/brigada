@@ -86,6 +86,12 @@ Commands:
 	                plans and events (--interval, --project URL).
 	agent reset <harness>/<model>
 	                Clear a broken or cooling agent.
+	agents          Show the models your CLIs offer that no agent
+	                registers, and registered models a CLI no longer
+	                lists; read-only.
+	agents add <harness>/<model>
+	                Register one such model as an agent (--classes,
+	                --effort); restart the runner to serve it.
 	plan approve <id>
 	                Approve a plan waiting over the approval limit.
 	plan reject <id>
@@ -146,6 +152,7 @@ var commands = map[string]command{
 	"top":      {name: "top", run: runTop},
 	"cancel":   {name: "cancel", run: runCancel},
 	"agent":    {name: "agent", run: runAgent, subcommands: agentCommands},
+	"agents":   {name: "agents", run: runAgents},
 	"plan":     {name: "plan", run: runPlan, subcommands: planCommands},
 	"budget":   {name: "budget", run: runBudget},
 	"recover":  {name: "recover", run: runRecover},

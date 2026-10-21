@@ -81,7 +81,13 @@ func runTop(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if code != 0 {
 			return code
 		}
-		return printTopSnapshot(ctx, client, repo, stdout, stderr)
+		if code := printTopSnapshot(ctx, client, repo, stdout, stderr); code != 0 {
+			return code
+		}
+		if hint := agentsHint(ctx, rt, true); hint != "" {
+			fmt.Fprintln(stdout, hint)
+		}
+		return 0
 	}
 	return topLoop(ctx, rt, repo, interval, noStart, stdout)
 }
@@ -111,6 +117,8 @@ type topModel struct {
 	err error
 	// paused says the loop froze the refresh (the p key).
 	paused bool
+	// hint is the unregistered-models line of the cached listing, or "".
+	hint string
 }
 
 // topFetch gathers one tick's model: the project the repo names, then
@@ -233,6 +241,9 @@ func topHeader(model topModel, now time.Time, style term.Style, width int) []str
 	lines := []string{cutLine(line, width)}
 	if model.err != nil {
 		lines = append(lines, style.Bad(cutLine("engine: "+model.err.Error(), width)))
+	}
+	if model.hint != "" {
+		lines = append(lines, cutLine(model.hint, width))
 	}
 	return lines
 }
@@ -507,7 +518,11 @@ func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Durati
 			fetched = fetched.keepPrevious(model)
 		}
 		model = fetched
+		// Each tick reads the cached listing; no CLI runs on a tick.
+		model.hint = agentsHint(ctx, rt, false)
 	}
+	// A stale listing is refreshed once, off the draw path.
+	go refreshAgentsCacheIfStale(ctx, rt)
 	draw := func() {
 		width, height := terminalSize(stdout)
 		screen.draw(renderTop(model, width, height, time.Now(), term.New(detectCaps(stdout))))

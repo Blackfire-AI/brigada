@@ -71,3 +71,19 @@ func TestSavedAgents(t *testing.T) {
 		}
 	}
 }
+
+func TestAppendAgentKeepsEveryLine(t *testing.T) {
+	dir := t.TempDir()
+	kept := []string{"# mine", "harness=claude,model=sonnet", "", "not an agent line"}
+	if err := runnerstate.SaveAgents(dir, kept); err != nil {
+		t.Fatal(err)
+	}
+	if err := runnerstate.AppendAgent(dir, "harness=codex,model=gpt-5"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := runnerstate.LoadAgents(dir)
+	want := append(append([]string{}, kept...), "harness=codex,model=gpt-5")
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("lines = %q, %v; want %q", got, err, want)
+	}
+}

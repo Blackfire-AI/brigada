@@ -22,6 +22,16 @@ func LoadAgents(dir string) ([]string, error) {
 	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n"), nil
 }
 
+// AppendAgent adds one line to the agents file and keeps every line already
+// in it, comments and lines it does not understand included.
+func AppendAgent(dir, line string) error {
+	lines, err := LoadAgents(dir)
+	if err != nil {
+		return err
+	}
+	return SaveAgents(dir, append(lines, line))
+}
+
 // SaveAgents atomically replaces the private, durable runner choices. The
 // live runner.json record is published separately by the runner itself.
 func SaveAgents(dir string, specs []string) error {
