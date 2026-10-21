@@ -52,7 +52,7 @@ tasks:
     tier: heavy
     effort: medium
     caps: {restart: 9}
-    state: needs_foreman
+    state: running
     branch: "brigada/task-98-r6"
     rounds: 0
   - id: 99
