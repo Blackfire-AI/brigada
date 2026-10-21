@@ -143,7 +143,7 @@ tasks:
     continue: "backoff"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-81-r1"
     rounds: 1
   - id: 82
@@ -154,6 +154,6 @@ tasks:
     base: "self-heal"
     tier: light
     effort: low
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
