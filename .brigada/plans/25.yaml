@@ -51,9 +51,9 @@ tasks:
     continue: "amend-judged-on-additions"
     tier: heavy
     effort: medium
-    state: needs_foreman
+    state: running
     branch: "brigada/task-98-r1"
-    rounds: 1
+    rounds: 0
   - id: 99
     name: "answer-changes-rule"
     title: "An answer to a hold can change the rule"
