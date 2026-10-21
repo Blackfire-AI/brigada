@@ -41,35 +41,36 @@ var defaultApprovalClasses = []string{"implement", "review", "answer"}
 //	                            or empty = implement,review,answer.
 //	approval_protected_paths    list of glob patterns; a task whose spec
 //	                            or check mentions a matching path needs
-//	                            approval. Absent = none.
+//	                            approval, and at the land gate a task
+//	                            whose recorded changed paths match holds
+//	                            the landing (§6.3, §7.1). Absent = none.
 //	gate_plan                   auto or ask; ask holds every plan at the
 //	                            plan gate (§6.3). Absent = auto.
-//	gate_land, gate_push        the land and push gates; stored and shown
-//	                            only until the land job reads them.
-//	                            gate_push also takes never. Absent:
-//	                            auto and ask.
-//	approval_tiers              list of tiers whose tasks would wait at
-//	                            the land gate. Absent = none. Stored only.
-//	approval_restarted          bool; a task that spent a restart would
-//	                            wait at the land gate. Absent = false.
-//	                            Stored only.
+//	gate_land, gate_push        the land and push gates the land job
+//	                            enforces (§6.3, §7.1): gate_land ask
+//	                            holds every landing, gate_push decides
+//	                            the push after it and also takes never.
+//	                            Absent: auto and ask.
+//	approval_tiers              list of tiers whose tasks wait at the
+//	                            land gate (§6.3). Absent = none.
+//	approval_restarted          bool; a task that spent a restart or a
+//	                            tier bump waits at the land gate
+//	                            (§6.3). Absent = false.
 //	land_target, after_land     the landing target branch and the command
-//	                            after a land. Absent = the default branch,
-//	                            none. Stored only.
+//	                            the runner runs after a successful land
+//	                            (§7.1). Absent: the default branch, none.
 type approvalSettings struct {
-	MaxTasks       *int       `json:"approval_max_tasks"`
-	Classes        stringList `json:"approval_classes"`
-	ProtectedPaths stringList `json:"approval_protected_paths"`
-	GatePlan       string     `json:"gate_plan"`
-	GateLand       string     `json:"gate_land"`
-	GatePush       string     `json:"gate_push"`
-	ApprovalTiers  stringList `json:"approval_tiers"`
-	// ApprovalRestarted and the two land keys below are stored and
-	// shown only (§6.3); the land job reads them when it ships.
-	ApprovalRestarted bool   `json:"approval_restarted"`
-	LandTarget        string `json:"land_target"`
-	AfterLand         string `json:"after_land"`
-	DefaultCheck      string `json:"default_check"`
+	MaxTasks          *int       `json:"approval_max_tasks"`
+	Classes           stringList `json:"approval_classes"`
+	ProtectedPaths    stringList `json:"approval_protected_paths"`
+	GatePlan          string     `json:"gate_plan"`
+	GateLand          string     `json:"gate_land"`
+	GatePush          string     `json:"gate_push"`
+	ApprovalTiers     stringList `json:"approval_tiers"`
+	ApprovalRestarted bool       `json:"approval_restarted"`
+	LandTarget        string     `json:"land_target"`
+	AfterLand         string     `json:"after_land"`
+	DefaultCheck      string     `json:"default_check"`
 	// ExtraRepos is the project's default list (§5.8): a repository a task
 	// names outside it needs approval.
 	ExtraRepos []ExtraRepo `json:"extra_repos"`

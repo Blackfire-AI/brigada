@@ -4,7 +4,7 @@ What brigada 1.0 promises until 2.0.
 
 ## What is covered
 
-**The CLI commands and flags.** The top-level commands are `init`, `remove`, `attach`, `ask`, `review`, `engine`, `runner`, `start`, `config`, `stop`, `mcp`, `status`, `task`, `project`, `history`, `stats`, `cancel`, `agent`, `plan`, `budget`, `recover`, `diff`, `land`, `logs`, `version` and `help`. Their names, their subcommands and their documented flags keep working.
+**The CLI commands and flags.** The top-level commands are `init`, `remove`, `attach`, `ask`, `review`, `engine`, `runner`, `start`, `config`, `stop`, `mcp`, `status`, `task`, `project`, `history`, `stats`, `top`, `cancel`, `agent`, `plan`, `budget`, `recover`, `diff`, `land`, `push`, `logs`, `version` and `help`. Their names, their subcommands and their documented flags keep working.
 
 **The project file, `.brigada/project.yaml`, schema 1.** The file starts with `schema: 1`. The engine reads only that version. A file with any other schema number is refused with an error that names the version, so an old binary never guesses at a newer file. Within schema 1, new keys are added as optional keys. A file that worked before keeps working, and a key that is absent means the same as before.
 

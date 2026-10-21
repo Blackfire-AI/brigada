@@ -16,6 +16,8 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Landing is a job (§7.1): a task that is done, approved and whose dependencies are landed is squashed by a runner onto `land_target` as one commit, the default check reruns on the result, and the push follows the push gate — `auto` pushes, `ask` (the default) waits for `brigada push approve`, `never` lands locally and prints the push. Landing is per task, so a stack lands in dependency order; a conflict or a failed check on the landed result parks the task for the foreman, nothing pushed. `after_land` runs after a successful land; its failure is reported, never undone.
+- Gates and rules (§6.3): the loop is brigada's and you stop it with flat keys in `.brigada/project.yaml` — `gate_plan`, `gate_land`, `gate_push`, `approval_tiers`, `approval_restarted` and `land_target` join `approval_max_tasks`, `approval_classes` and `approval_protected_paths`, which now also holds at the land gate. Held landings and pushes appear in the needs-you queue; `brigada land approve <task>` and `brigada land reject <task>` decide a held landing, `brigada push approve` releases every waiting push. The foreman has no tool to pass a gate.
 - Mode B: `brigada init` in a parent folder registers several repositories under one coordinator session (`brigada-coordinator` in `.mcp.json`).
 - Plans with dependencies, created and amended by the foreman, mirrored to the `brigada/plans` branch.
 - Workers run in git worktrees on their own branches; the project's check runs after every result; fix rounds, and restarts with notes (`task_restart`).
@@ -25,7 +27,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Tiers (`light`, `standard`, `heavy`) and effort per task, with an escalation ladder that raises effort first, then the tier.
 - A task may `continue` one of its deps: its first work job resumes the dep author's session on its own agent, saving the cold start; fresh whenever the session or its agent is not available.
 - `brigada stats`: usage per job and cost per success.
-- `brigada land` squashes approved tasks onto your branch locally; it never pushes.
+- `brigada land`, the hand-driven form of the land job: squashes approved tasks onto your branch locally; it never pushes.
 - Adapters for Claude Code, Codex, Kimi and opencode.
 - `brigada status`, `brigada history`, `brigada logs`, `brigada diff` and desktop notifications.
 - `docs/COMPATIBILITY.md` states what 1.0 promises until 2.0.
