@@ -20,7 +20,7 @@ func runAsk(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		"Send the foreman a message, or read it from standard input with -.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
-	repo := fs.String("repo", "", "the project's repo URL; empty names the engine's only project")
+	repo := fs.String("repo", "", "the project's repo URL; empty takes the working directory's origin")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
@@ -38,6 +38,10 @@ func runAsk(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		text = string(data)
 	}
+	projectRepo, err := askRepo(*repo)
+	if err != nil {
+		return fail(stderr, err)
+	}
 	rt, code := resolveRuntime(common, stderr)
 	if code != 0 {
 		return code
@@ -47,7 +51,7 @@ func runAsk(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return code
 	}
 	// A command typed by a person is deliberate each time: no key.
-	res, err := client.AskForeman(ctx, *repo, text, "")
+	res, err := client.AskForeman(ctx, projectRepo, text, "")
 	if err != nil {
 		if isNotFound(err) {
 			if hint := knownProjectsHint(ctx, client); hint != "" {
@@ -58,4 +62,23 @@ func runAsk(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, mcp.AskOutcomeLine(res))
 	return 0
+}
+
+// askRepo names the project an ask goes to: the --repo URL when given,
+// else the working directory's origin, as attach and project foreman
+// take it. Outside a repository, or in one with no origin, it is empty,
+// which the engine answers with its only project.
+func askRepo(repo string) (string, error) {
+	if repo != "" {
+		return repo, nil
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("find the working directory: %w", err)
+	}
+	origin, err := gitOriginURL(dir)
+	if err != nil {
+		return "", nil
+	}
+	return origin, nil
 }
