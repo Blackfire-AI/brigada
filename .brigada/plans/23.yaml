@@ -81,8 +81,8 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-88"
     rounds: 0
   - id: 89
     name: "landed-by-trailer"
