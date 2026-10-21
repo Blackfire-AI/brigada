@@ -140,6 +140,6 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: running
     branch: "brigada/task-93-r1"
-    rounds: 0
+    rounds: 1
