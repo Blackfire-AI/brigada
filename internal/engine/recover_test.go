@@ -113,6 +113,7 @@ func (r *recoverEnv) recoverPlans() []PlanRecovery {
 }
 
 func TestRecoverRebuildsPlanNewerThanSnapshotAndKeepsOlder(t *testing.T) {
+	t.Parallel()
 	r := newRecoverEnv(t)
 	stored := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC) // seedTS: what the snapshot holds of r.plan
 
