@@ -207,10 +207,10 @@ func TestWorkRunFixture(t *testing.T) {
 	want := []adapter.Event{
 		{Kind: adapter.EvSession, SessionID: "session-249eec6f-212d-4f7d-87ca-1b3721617152"},
 		{Kind: adapter.EvMessage, Text: "I'll start by checking the current state of the working directory and hello.txt."},
-		{Kind: adapter.EvToolStart, Text: "bash"},
+		{Kind: adapter.EvToolStart, Text: "bash", Args: `{"command":"pwd && ls -la && echo \"---hello.txt---\" && cat hello.txt","description":"Inspect directory and hello.txt"}`},
 		{Kind: adapter.EvToolEnd, Text: "call_00_ET_5UZCrHdfqMiFkqnUalcZ0841"},
 		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: n64(5787), OutputTokens: n64(90), CachedInputTokens: n64(0)}},
-		{Kind: adapter.EvToolStart, Text: "bash"},
+		{Kind: adapter.EvToolStart, Text: "bash", Args: `{"command":"xxd hello.txt","description":"Check trailing newline in hello.txt"}`},
 		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: n64(166 + 6272), OutputTokens: n64(58), CachedInputTokens: n64(6272)}},
 		{Kind: adapter.EvMessage, Text: "Done. Appended world to hello.txt."},
 	}

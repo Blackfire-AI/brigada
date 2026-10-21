@@ -43,6 +43,13 @@ type jobRun struct {
 	workerLive   bool
 	dropped      bool
 	stopped      *stop
+	// The loop watch (§5.6) beside the activity clock: what the tool
+	// calls were, so a busy loop is told from progress. loopTrip holds
+	// the repeated call's line once the watch trips, and rides every
+	// heartbeat from then on; the run itself is not stopped — the
+	// foreman decides.
+	loop     loopWatch
+	loopTrip string
 
 	// extraEnv names the job's extra checkouts (§5.8), one
 	// BRIGADA_REPO_<NAME>=<path> each; extraCommits is the commit each
@@ -464,6 +471,14 @@ func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte, fromStderr bool) {
 		r.toolInFlight++
 		r.lastProgress = ev.Time
 		r.lastActivity = ev.Time
+		// The loop watch counts the call (§5.6); a start with no
+		// arguments to identify it counts nothing, and the first key to
+		// trip the watch is the loop the signal names, whatever follows.
+		if key := loopKey(ev); key != "" {
+			if n := r.loop.record(loopKeyHash(key), ev.Time); n >= loopCalls && r.loopTrip == "" {
+				r.loopTrip = loopCallText(ev)
+			}
+		}
 	case adapter.EvToolEnd:
 		if r.toolInFlight > 0 {
 			r.toolInFlight--
@@ -478,7 +493,8 @@ func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte, fromStderr bool) {
 
 // progress is the heartbeat's payload (§5.6): when the worker last made
 // progress, when it was last active — the worker's start, until its
-// first progress event — and the last few progress events. Times the
+// first progress event — the last few progress events, and the loop
+// signal with the repeated call once the watch has tripped. Times the
 // run has not reached yet stay zero, and the client leaves them out: a
 // beat before any activity reports a hold, not a fake timestamp.
 func (r *jobRun) progress() api.Progress {
@@ -498,6 +514,8 @@ func (r *jobRun) progress() api.Progress {
 		LastProgressAt: r.lastProgress,
 		LastActivityAt: r.lastActivity,
 		Events:         adapter.ProgressEvents(recent),
+		Loop:           r.loopTrip != "",
+		LoopCall:       r.loopTrip,
 	}
 }
 

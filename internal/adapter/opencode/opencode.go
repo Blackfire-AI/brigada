@@ -185,7 +185,8 @@ type partJSON struct {
 	Text   string          `json:"text"`
 	Tool   string          `json:"tool"`
 	State  struct {
-		Status string `json:"status"`
+		Status string          `json:"status"`
+		Input  json.RawMessage `json:"input"`
 	} `json:"state"`
 }
 
@@ -244,7 +245,7 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 		}
 		switch lj.Part.State.Status {
 		case "running":
-			return adapter.Event{Kind: adapter.EvToolStart, Text: lj.Part.Tool}, true
+			return adapter.Event{Kind: adapter.EvToolStart, Text: lj.Part.Tool, Args: adapter.ToolArgs(lj.Part.State.Input)}, true
 		case "completed", "error":
 			// A tool failure is a finished call, not a provider failure.
 			return adapter.Event{Kind: adapter.EvToolEnd, Text: lj.Part.Tool}, true

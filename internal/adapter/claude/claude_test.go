@@ -461,6 +461,10 @@ func TestParseEvent(t *testing.T) {
 		// rides beside it.
 		{"assistant tool use wins", `{"type":"assistant","message":{"content":[{"type":"text","text":"let me look"},{"type":"tool_use","name":"Read","id":"toolu-1"}]}}`,
 			adapter.Event{Kind: adapter.EvToolStart, Text: "Read"}, true},
+		// The call's arguments ride along when the stream carries
+		// them: with the name they identify the call (§5.6).
+		{"tool use with input", `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"toolu-1","input":{"file_path":"README.md"}}]}}`,
+			adapter.Event{Kind: adapter.EvToolStart, Text: "Read", Args: `{"file_path":"README.md"}`}, true},
 		{"assistant without content", `{"type":"assistant","message":{"role":"assistant"}}`, adapter.Event{}, false},
 		{"tool result ends by id", `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu-1","is_error":false}]}}`,
 			adapter.Event{Kind: adapter.EvToolEnd, Text: "toolu-1"}, true},
@@ -680,9 +684,9 @@ func TestTranscripts(t *testing.T) {
 			events: []adapter.Event{
 				{Kind: adapter.EvSession, SessionID: "sess-1"},
 				{Kind: adapter.EvMessage, Text: "Reading the task, then adding the file."},
-				{Kind: adapter.EvToolStart, Text: "Read"},
+				{Kind: adapter.EvToolStart, Text: "Read", Args: `{"file_path":"README.md"}`},
 				{Kind: adapter.EvToolEnd, Text: "toolu-1"},
-				{Kind: adapter.EvToolStart, Text: "Edit"},
+				{Kind: adapter.EvToolStart, Text: "Edit", Args: `{"file_path":"work.txt"}`},
 				{Kind: adapter.EvToolEnd, Text: "toolu-2"},
 				{Kind: adapter.EvMessage, Text: "Added work.txt."},
 				{Kind: adapter.EvSession, SessionID: "sess-1", Text: normalResult, Usage: &adapter.Usage{InputTokens: usageInt(120), OutputTokens: usageInt(80)}},
@@ -720,7 +724,7 @@ func TestTranscripts(t *testing.T) {
 			events: []adapter.Event{
 				{Kind: adapter.EvSession, SessionID: "sess-first"},
 				{Kind: adapter.EvMessage, Text: "Continuing the task with the review feedback."},
-				{Kind: adapter.EvToolStart, Text: "Edit"},
+				{Kind: adapter.EvToolStart, Text: "Edit", Args: `{"file_path":"work.txt"}`},
 				{Kind: adapter.EvToolEnd, Text: "toolu-7"},
 				{Kind: adapter.EvSession, SessionID: "sess-forked", Text: forkedResult, Usage: &adapter.Usage{InputTokens: usageInt(90), OutputTokens: usageInt(40)}},
 			},

@@ -152,9 +152,10 @@ type lineJSON struct {
 		Kind  string     `json:"kind"`
 		Error *errorJSON `json:"error"`
 	} `json:"reason"`
-	Text   string `json:"text"`
-	Tool   string `json:"tool"`
-	CallID string `json:"callId"`
+	Text   string          `json:"text"`
+	Tool   string          `json:"tool"`
+	CallID string          `json:"callId"`
+	Input  json.RawMessage `json:"input"`
 }
 
 type errorJSON struct {
@@ -200,7 +201,7 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 		}
 	case "tool_call":
 		if lj.Tool != "" {
-			return adapter.Event{Kind: adapter.EvToolStart, Text: lj.Tool}, true
+			return adapter.Event{Kind: adapter.EvToolStart, Text: lj.Tool, Args: adapter.ToolArgs(lj.Input)}, true
 		}
 	case "tool_result":
 		// A tool failure is a finished call, not a provider failure.

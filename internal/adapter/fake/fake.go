@@ -101,6 +101,7 @@ type eventJSON struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text"`
 	Name      string          `json:"name"`
+	Args      string          `json:"args"`
 	SessionID string          `json:"session_id"`
 	Kind      string          `json:"kind"`
 	Message   string          `json:"message"`
@@ -132,7 +133,7 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 		if name == "" {
 			name = ev.Text
 		}
-		return adapter.Event{Kind: adapter.EventKind(ev.Type), Text: name}, true
+		return adapter.Event{Kind: adapter.EventKind(ev.Type), Text: name, Args: ev.Args}, true
 	case "result", "usage":
 		kind := adapter.EvMessage
 		if ev.Type == "usage" {

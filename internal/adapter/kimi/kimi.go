@@ -270,7 +270,8 @@ func (a *Adapter) ParseErrEvent(line []byte) (adapter.Event, bool) {
 // not an event.
 func assistantEvent(lj lineJSON) (adapter.Event, bool) {
 	if len(lj.ToolCalls) > 0 {
-		return adapter.Event{Kind: adapter.EvToolStart, Text: lj.ToolCalls[0].Function.Name}, true
+		return adapter.Event{Kind: adapter.EvToolStart, Text: lj.ToolCalls[0].Function.Name,
+			Args: lj.ToolCalls[0].Function.Arguments}, true
 	}
 	if text := contentText(lj.Content); text != "" {
 		return adapter.Event{Kind: adapter.EvMessage, Text: text}, true

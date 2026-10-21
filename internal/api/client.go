@@ -128,6 +128,8 @@ func (c *Client) Heartbeat(ctx context.Context, jobID int64, leaseID string, pro
 	req := heartbeatRequest{
 		jobLeaseRequest: jobLeaseRequest{JobID: jobID, LeaseID: leaseID},
 		Events:          prog.Events,
+		Loop:            prog.Loop,
+		LoopCall:        prog.LoopCall,
 	}
 	if !prog.LastProgressAt.IsZero() {
 		req.LastProgressAt = prog.LastProgressAt.UTC().Format(time.RFC3339Nano)
@@ -315,6 +317,11 @@ type Progress struct {
 	LastProgressAt time.Time
 	LastActivityAt time.Time
 	Events         []string
+	// Loop reports the worker repeating the same tool call (§5.6);
+	// LoopCall names the call. The signal rides every beat once it
+	// trips; nothing is stopped for it.
+	Loop     bool
+	LoopCall string
 }
 
 // StatusError is the API refusing a call: the transport worked, the

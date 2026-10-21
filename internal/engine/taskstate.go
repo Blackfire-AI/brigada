@@ -669,6 +669,22 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 	if capped {
 		return e.outOfRoundsTx(tx, job, round, note, failure, now)
 	}
+	// A failure repeated across the fix rounds is a loop (§5.6): with
+	// rounds to spend and nothing changed, another round of the same
+	// feedback would answer nothing, so the task parks for the foreman
+	// like a stalled run — same route, the loop as the reason — and the
+	// attempt counts as a spent round's. The spent rounds keep the
+	// escalation ladder (§8); a restart begins a fresh chain.
+	if round == roundFix && failure != nil {
+		if loop, why, err := e.checkLoopTx(tx, job, failure.Output); err != nil {
+			return err
+		} else if loop {
+			if err := recordTaskOutcomeTx(tx, job, false, now); err != nil {
+				return err
+			}
+			return e.needsForemanTx(tx, job, evTaskLoop, failure.payload(why), now)
+		}
+	}
 	spec, err := taskSpecTx(tx, job.TaskID)
 	if err != nil {
 		return err

@@ -203,8 +203,8 @@ func TestParseFixtureTools(t *testing.T) {
 	const cmdText = `/bin/zsh -lc "sed -n '1p' note.md"`
 	want := []adapter.Event{
 		{Kind: adapter.EvSession, SessionID: "01a140b7-6c27-7441-b9a1-1a082df4d4c9"},
-		{Kind: adapter.EvToolStart, Text: cmdText},
-		{Kind: adapter.EvToolEnd, Text: cmdText},
+		{Kind: adapter.EvToolStart, Text: cmdText, Args: cmdText},
+		{Kind: adapter.EvToolEnd, Text: cmdText, Args: cmdText},
 		{Kind: adapter.EvMessage, Text: "the note starts with a fixture heading"},
 		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(11578), OutputTokens: usageInt(5), CachedInputTokens: usageInt(9984), ReasoningTokens: usageInt(0), ModelCalls: usageInt(1)}},
 	}
@@ -219,7 +219,7 @@ func TestParseFixtureTools(t *testing.T) {
 func TestParseFixtureMCPTools(t *testing.T) {
 	events := parseFixture(t, "mcp_tools.jsonl")
 	want := []adapter.Event{
-		{Kind: adapter.EvToolStart, Text: "brigada/plan_create"},
+		{Kind: adapter.EvToolStart, Text: "brigada/plan_create", Args: "{}"},
 		{Kind: adapter.EvToolEnd, Text: "brigada/plan_create"},
 		// A failed call is the tool's outcome, not a fatal CLI error:
 		// the end event names the failure and the run may still end clean.
@@ -238,7 +238,7 @@ func TestParseFixtureMCPNullError(t *testing.T) {
 	events := parseFixture(t, "mcp_null_error.jsonl")
 	want := []adapter.Event{
 		{Kind: adapter.EvSession, SessionID: "01a140f9-97d3-79c3-ae80-1b9bf2ad6c49"},
-		{Kind: adapter.EvToolStart, Text: "brigada/task_restart"},
+		{Kind: adapter.EvToolStart, Text: "brigada/task_restart", Args: "{}"},
 		{Kind: adapter.EvToolEnd, Text: "brigada/task_restart: failed"},
 		{Kind: adapter.EvMessage, Text: "the restart was refused; I planned around it"},
 		{Kind: adapter.EvUsage, Usage: &adapter.Usage{InputTokens: usageInt(1), OutputTokens: usageInt(1), ModelCalls: usageInt(1)}},
@@ -318,6 +318,12 @@ func TestToolTextIsBounded(t *testing.T) {
 	ev, ok := (&Adapter{}).ParseEvent([]byte(line))
 	if !ok || ev.Kind != adapter.EvToolStart || ev.Text != "echo hi" {
 		t.Errorf("event = %+v, want tool start with the first line", ev)
+	}
+	// The arguments keep the whole command (§5.6): two calls that share
+	// a first line — heredocs above all — stay told apart, bounded only
+	// by maxToolArgs.
+	if want := "echo hi\n" + long; ev.Args != want {
+		t.Errorf("args length = %d, want the whole command", len(ev.Args))
 	}
 	line = `{"type":"item.started","item":{"id":"i","type":"command_execution","command":"` + long + `"}}`
 	ev, _ = (&Adapter{}).ParseEvent([]byte(line))

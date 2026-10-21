@@ -322,11 +322,12 @@ type messageJSON struct {
 // (assistant prose), "tool_use" (a call starting, named, with the id the
 // matching tool_result ends) and "tool_result".
 type blockJSON struct {
-	Type      string `json:"type"`
-	Text      string `json:"text"`
-	Name      string `json:"name"`
-	ID        string `json:"id"`
-	ToolUseID string `json:"tool_use_id"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	Name      string          `json:"name"`
+	ID        string          `json:"id"`
+	Input     json.RawMessage `json:"input"`
+	ToolUseID string          `json:"tool_use_id"`
 }
 
 // ParseEvent implements adapter.Adapter: one line of the CLI's
@@ -418,7 +419,7 @@ func (a *Adapter) ParseErrEvent(line []byte) (adapter.Event, bool) {
 func assistantEvent(blocks []blockJSON) (adapter.Event, bool) {
 	for _, b := range blocks {
 		if b.Type == "tool_use" {
-			return adapter.Event{Kind: adapter.EvToolStart, Text: b.Name}, true
+			return adapter.Event{Kind: adapter.EvToolStart, Text: b.Name, Args: adapter.ToolArgs(b.Input)}, true
 		}
 	}
 	for _, b := range blocks {
