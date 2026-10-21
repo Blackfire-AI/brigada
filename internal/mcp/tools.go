@@ -145,7 +145,7 @@ var tools = []Tool{
 	},
 	{
 		Name:        "plan_amend",
-		Description: "Amend a live plan (active or awaiting approval): add tasks, cancel tasks, and re-point the dependencies of a waiting task. Use it to re-plan when a task fails for good or the user's ask changes: a dependency that will never be done (a task failed or cancelled) leaves its dependents waiting forever unless you re-point them (retarget) to another task or drop the dependency (empty deps). Tasks are named by their name or id (as status shows). Validation is plan_create's: names unique, deps in the plan and never on a cancelled task, no cycle — one refusal rejects the whole amendment. Use retier to change the tier, effort or round caps (merged key by key) of a pending, ready or needs_foreman task; a parked task still needs task_restart. Cancelling stops a task's live jobs. Waiting tasks whose dependencies are all done start in the same call. An added task is judged on its own against the plan rules (a class outside approval_classes, a protected path, an extra repository): one that trips a rule is held at the plan gate with a needs-you line naming the rule, while the plan stays active and the rest runs on. A plan left with only permanently waiting tasks is closed, and its done report names what never ran.",
+		Description: "Amend a live plan (active or awaiting approval): add tasks, cancel tasks, and re-point the dependencies of a waiting task. Use it to re-plan when a task fails for good or the user's ask changes: a dependency that will never be done (a task failed or cancelled) leaves its dependents waiting forever unless you re-point them (retarget) to another task or drop the dependency (empty deps). Tasks are named by their name or id (as status shows). Validation is plan_create's: names unique, deps in the plan and never on a cancelled task, no cycle — one refusal rejects the whole amendment. Use retier to change the tier, effort or round caps (merged key by key) of a pending, ready or needs_foreman task; a parked task still needs task_restart. Use respec to replace or append to the spec of a pending task (one with no job yet) when a requirement is missing: it costs no cold start; a task that has started is refused, and then a follow-up task is the way. The edit is judged like an added task: one that trips a rule is held alone. Cancelling stops a task's live jobs. Waiting tasks whose dependencies are all done start in the same call. An added task is judged on its own against the plan rules (a class outside approval_classes, a protected path, an extra repository): one that trips a rule is held at the plan gate with a needs-you line naming the rule, while the plan stays active and the rest runs on. A plan left with only permanently waiting tasks is closed, and its done report names what never ran.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -200,6 +200,19 @@ var tools = []Tool{
 							"caps":          map[string]any{"type": "object", "properties": taskCapsProperties, "additionalProperties": false, "description": "round caps to change, merged key by key into the task's own: give a parked task more restarts before task_restart; omitted keys keep their value"},
 						},
 						"required": []string{"task"},
+					},
+				},
+				"respec": map[string]any{
+					"type":        "array",
+					"description": "pending tasks (no job yet) whose spec you change; refused for a task that has started",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"task": map[string]any{"type": []string{"string", "integer"}, "description": "the pending task, by name or id"},
+							"spec": map[string]any{"type": "string", "description": "the new spec (replace) or the text to add after the current one (append), verbatim as for a worker"},
+							"mode": map[string]any{"type": "string", "enum": []string{"replace", "append"}, "description": "replace (default) swaps the whole spec; append adds spec after the current one"},
+						},
+						"required": []string{"task", "spec"},
 					},
 				},
 				"retarget": map[string]any{

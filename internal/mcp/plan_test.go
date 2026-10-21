@@ -622,6 +622,68 @@ func TestServePlanTaskTierEffort(t *testing.T) {
 	}
 }
 
+// TestServeCallPlanAmendRespec: plan_amend's respec edits a pending task's
+// spec end to end and the text says so; a started task is refused.
+func TestServeCallPlanAmendRespec(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	s := start(t, e)
+	a := s.call(1, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{
+		"title": "two steps",
+		"tasks": []any{
+			map[string]any{"name": "a", "spec": "one"},
+			map[string]any{"name": "b", "spec": "two", "deps": []any{"a"}},
+		},
+	}})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("plan_create errored: %s", text)
+	}
+	a = s.call(2, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan":   1,
+		"respec": []any{map[string]any{"task": "b", "spec": "three", "mode": "append"}},
+	}})
+	text, isError := toolText(t, a)
+	if isError || !strings.Contains(text, "respecified task 2") {
+		t.Fatalf("respec = %q, error %v", text, isError)
+	}
+	var spec string
+	if err := e.st.View(t.Context(), func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT spec FROM tasks WHERE name = 'b'").Scan(&spec)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if spec != "two\n\nthree" {
+		t.Errorf("spec = %q", spec)
+	}
+	a = s.call(3, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan":   1,
+		"respec": []any{map[string]any{"task": "a", "spec": "x"}},
+	}})
+	if text, isError = toolText(t, a); !isError || !strings.Contains(text, "follow-up task") {
+		t.Errorf("started task = %q, error %v, want the follow-up advice", text, isError)
+	}
+}
+
+func TestPlanAmendRespecSchema(t *testing.T) {
+	for _, tool := range tools {
+		if tool.Name != "plan_amend" {
+			continue
+		}
+		props := tool.InputSchema.(map[string]any)["properties"].(map[string]any)
+		rs, ok := props["respec"].(map[string]any)
+		if !ok {
+			t.Fatal("respec missing from schema")
+		}
+		fields := rs["items"].(map[string]any)["properties"].(map[string]any)
+		for _, field := range []string{"task", "spec", "mode"} {
+			if _, ok := fields[field]; !ok {
+				t.Errorf("respec missing %s", field)
+			}
+		}
+		return
+	}
+	t.Fatal("no plan_amend tool")
+}
+
 func TestPlanAmendRetierSchema(t *testing.T) {
 	for _, tool := range tools {
 		if tool.Name != "plan_amend" {
