@@ -62,8 +62,8 @@ tasks:
     continue: "engine-land"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-64-r1"
     rounds: 0
   - id: 65
     name: "runner-land"
