@@ -103,6 +103,6 @@ tasks:
     deps: ["gates"]
     base: "gates"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-68"
     rounds: 0
