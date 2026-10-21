@@ -107,7 +107,7 @@ tasks:
     base: "sleep-aware"
     continue: "sleep-aware"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 79
