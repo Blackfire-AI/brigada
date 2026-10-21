@@ -5,9 +5,9 @@
 plan: 20
 title: "Loop decision 2026-10-20: gates, rules and the land job (design §6.3, §7.1)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-20T20:22:58.420145Z
-updated: 2026-10-21T05:25:03.502474Z
+updated: 2026-10-21T06:50:49.948652Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -93,7 +93,7 @@ tasks:
     deps: ["status-top"]
     base: "status-top"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-67"
     rounds: 2
   - id: 68
