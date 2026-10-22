@@ -7,7 +7,7 @@ title: "Fix first public CI run (39825296139): lease tx misuse/SQLITE_BUSY and p
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-10-22T18:00:07.136203Z
-updated: 2026-10-22T18:04:41.857656Z
+updated: 2026-10-22T18:05:01.570095Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
