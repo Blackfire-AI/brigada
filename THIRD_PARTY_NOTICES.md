@@ -7,7 +7,8 @@
 # Third-party notices
 
 brigada embeds the third-party Go modules listed below, as reported by
-go-licenses for `./cmd/brigada`. Each entry names the module, its
+go-licenses for `./cmd/brigada` on every platform the release
+workflow builds. Each entry names the module, its
 version, its licence, and the full licence text. The generator refuses
 to write this file if any licence is not compatible with brigada's
 Apache-2.0 licence ([LICENSE](LICENSE)).
