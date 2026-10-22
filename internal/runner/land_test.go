@@ -1055,9 +1055,11 @@ func TestRunnerLandWithoutHostIdentity(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "user.useConfigOnly")
-	t.Setenv("GIT_CONFIG_VALUE_0", "true")
+	// TestMain already set GIT_CONFIG entries 0 and 1 (gc.auto and
+	// maintenance.auto); append rather than overwrite them.
+	t.Setenv("GIT_CONFIG_COUNT", "3")
+	t.Setenv("GIT_CONFIG_KEY_2", "user.useConfigOnly")
+	t.Setenv("GIT_CONFIG_VALUE_2", "true")
 	e.startRunner(writeWorkerScript(t, reviewScript(reviewApproveResult)), 100*time.Millisecond, withReviewerAgent)
 
 	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })

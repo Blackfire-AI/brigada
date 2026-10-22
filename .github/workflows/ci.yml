@@ -12,6 +12,15 @@ permissions:
   contents: read
 
 jobs:
+  # The plain test step below may reuse Go's test cache: a cached pass is
+  # valid because the result depends only on inputs Go tracks (the files,
+  # env vars and flags the test reads), so an unchanged tree skips work.
+  # The race shards may not: they run -count=1 on purpose, re-running
+  # timing- and race-sensitive tests every time, since a cached pass would
+  # hide flakes and races. CI=true is read by the test step; Go keys the
+  # test cache on env vars the test reads, so it stays correct.
+  # Cache is setup-go's built-in one (GOCACHE and GOMODCACHE), keyed on
+  # runner OS, Go version and hashes of go.sum and this workflow file.
   build:
     runs-on: ubuntu-latest
     permissions:
@@ -21,6 +30,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: 1.27.x
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/ci.yml
       - name: gofmt
         run: test -z "$(gofmt -l .)"
       - name: guard
@@ -59,18 +72,59 @@ jobs:
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
-  race:
+  race-shard:
+    name: race-shard (${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: 1.27.x
+          # No cache: -race and -count=1 builds would only bloat it.
+          cache: false
       - name: race
-        run: CGO_ENABLED=1 go test -race -count=1 ./...
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          mod="$(go list -m)"
+          case "$SHARD" in
+            1) pkgs="$(go list ./... | grep -E "^${mod}/internal/(engine|store)(/|\$)" || true)" ;;
+            2) pkgs="$(go list ./... | grep -E "^${mod}/internal/(runner|api)(/|\$)" || true)" ;;
+            3) pkgs="$(go list ./... | grep -Ev "^${mod}/internal/(engine|store|runner|api)(/|\$)" || true)" ;;
+            *) echo "unknown shard $SHARD" >&2; exit 1 ;;
+          esac
+          if [ -z "$pkgs" ]; then
+            echo "shard $SHARD has no packages" >&2
+            exit 1
+          fi
+          echo "$pkgs"
+          # shellcheck disable=SC2086
+          CGO_ENABLED=1 go test -race -count=1 $pkgs
+
+  # Aggregator: the required check name `race` must keep existing, but the
+  # work is split across race-shard matrix jobs, so this one reports for them.
+  race:
+    name: race
+    needs: [race-shard]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: all shards passed
+        env:
+          RESULT: ${{ needs.race-shard.result }}
+        run: |
+          if [ "$RESULT" != "success" ]; then
+            echo "race-shard result: $RESULT" >&2
+            exit 1
+          fi
 
   gitleaks:
     runs-on: ubuntu-latest
