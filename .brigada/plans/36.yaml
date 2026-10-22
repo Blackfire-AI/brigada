@@ -7,7 +7,7 @@ title: "Pre-public review phase 2: fix the findings of #55 (B1, B2, B3, B6–B12
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-10-22T12:54:31.824979Z
-updated: 2026-10-22T15:34:38.328535Z
+updated: 2026-10-22T15:34:50.468965Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
