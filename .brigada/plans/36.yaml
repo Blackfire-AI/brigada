@@ -102,8 +102,8 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: running
-    branch: "brigada/task-140"
+    state: reviewing
+    branch: "brigada/task-140-r1"
     rounds: 0
   - id: 141
     name: "compat-doc"
