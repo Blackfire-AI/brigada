@@ -608,7 +608,10 @@ func runLandDecision(ctx context.Context, verb string, args []string, stdout, st
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
-	stopAsking := fs.Bool("and-stop-asking", false, "also change the rule that held the landing, the way `brigada project set` does, so the same question is not asked twice")
+	stopAsking := new(bool)
+	if verb == "approve" {
+		fs.BoolVar(stopAsking, "and-stop-asking", false, "also change the rule that held the landing, the way brigada project set does, so the same question is not asked twice")
+	}
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}

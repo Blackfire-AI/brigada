@@ -129,6 +129,42 @@ func TestHelpAfterPositional(t *testing.T) {
 	}
 }
 
+// --and-stop-asking changes a rule only on approve; its help line must
+// name no argument (a backquoted phrase would become one) and reject
+// must not offer it.
+func TestStopAskingHelpLine(t *testing.T) {
+	for _, args := range [][]string{{"plan", "approve"}, {"land", "approve"}} {
+		out := helpOutput(t, append(args, "--help")...)
+		if !strings.Contains(out, "  -and-stop-asking\n") || strings.Contains(out, "-and-stop-asking brigada") {
+			t.Errorf("%v help has a bad stop-asking line:\n%s", args, out)
+		}
+	}
+	for _, args := range [][]string{{"plan", "reject"}, {"land", "reject"}} {
+		if out := helpOutput(t, append(args, "--help")...); strings.Contains(out, "and-stop-asking") {
+			t.Errorf("%v help lists --and-stop-asking, which it ignores:\n%s", args, out)
+		}
+	}
+}
+
+// A bare dispatcher prints its usage line once, with no brigada: prefix
+// in front of it, then the hint.
+func TestBareDispatcherUsageOnce(t *testing.T) {
+	want := map[string]string{
+		"plan": "usage: brigada plan approve [--and-stop-asking] <id> | brigada plan reject <id>",
+		"push": "usage: brigada push approve [--repo URL] [--no-start]",
+	}
+	for cmd, line := range want {
+		var out, err bytes.Buffer
+		if code := run(context.Background(), []string{cmd}, &out, &err); code != 2 {
+			t.Fatalf("%s: code=%d stderr=%q", cmd, code, err.String())
+		}
+		wantErr := line + "\nRun 'brigada " + cmd + " --help' for usage.\n"
+		if err.String() != wantErr {
+			t.Errorf("%s: stderr=%q, want %q", cmd, err.String(), wantErr)
+		}
+	}
+}
+
 func TestUsageErrorHelpHint(t *testing.T) {
 	for _, args := range [][]string{
 		{"land", "--bad-flag"}, {"init", "--bad-flag"}, {"init", "--config"},

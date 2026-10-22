@@ -420,8 +420,14 @@ func TestRunnerStallKillsProcessTree(t *testing.T) {
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
 	markers := markerDir(t)
 
+	// The activity clock is the manual one: it moves only on Advance, so
+	// the silence window cannot expire before the markers below exist,
+	// however long the shell takes under load. KillGrace stays on real
+	// time, so the group kill itself is unchanged.
+	clk := newManualClock()
 	p := e.startRunner(writeWorkerScript(t, termProofWorker), 100*time.Millisecond,
 		func(c *Config) {
+			c.Clock = clk.Clock()
 			c.StallAfter = 300 * time.Millisecond
 			c.KillGrace = 400 * time.Millisecond
 		})
@@ -435,7 +441,15 @@ func TestRunnerStallKillsProcessTree(t *testing.T) {
 	parent := readMarkerPID(t, markers, "parent")
 	child := readMarkerPID(t, markers, "child")
 
-	stopped := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == statusStalled })
+	// Advanced until the job stalls, as the manual-clock test does: the
+	// first advance may land before the run counts the worker as watched.
+	stopped := e.waitJob(job, func(j *engine.JobInfo) bool {
+		if j.Status == statusStalled {
+			return true
+		}
+		clk.Advance(time.Minute)
+		return false
+	})
 	if res := e.workerResult(stopped); res.Status != statusStalled {
 		t.Fatalf("worker result = %+v, want status %q", res, statusStalled)
 	}
