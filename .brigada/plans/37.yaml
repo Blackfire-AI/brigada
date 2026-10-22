@@ -29,7 +29,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: done
     branch: "brigada/task-147-r1"
     rounds: 0
   - id: 148
