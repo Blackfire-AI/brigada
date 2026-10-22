@@ -79,9 +79,9 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: reviewing
+    state: ready
     branch: "brigada/task-138"
-    rounds: 2
+    rounds: 0
   - id: 139
     name: "functionality-fixes"
     title: "Help-text bugs and flaky TestRunnerStallKillsProcessTree"
@@ -137,7 +137,7 @@ tasks:
     effort: low
     state: reviewing
     branch: "brigada/task-143"
-    rounds: 0
+    rounds: 1
   - id: 144
     name: "pin-actions"
     title: "SHA-pin the workflow actions; ci.yml stops firing on tag pushes"
