@@ -49,6 +49,25 @@ func projectSetupTx(tx *sql.Tx, project int64) (*SetupSpec, error) {
 	return setupFromSettings(raw, rawProv, project)
 }
 
+// projectWorkerToolsTx is the project's worker_tools in its stored text
+// ("+"-joined Claude patterns, or "none"); "" when the project sets none,
+// which leaves the harness's default scope.
+func projectWorkerToolsTx(tx *sql.Tx, project int64) (string, error) {
+	var raw string
+	if err := tx.QueryRow("SELECT settings FROM projects WHERE id = ?", project).Scan(&raw); err != nil {
+		return "", fmt.Errorf("read the settings of project %d: %w", project, err)
+	}
+	if raw == "" {
+		return "", nil
+	}
+	var present map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &present); err != nil {
+		return "", fmt.Errorf("parse the settings of project %d: %w", project, err)
+	}
+	s, _ := rawString(present[SettingWorkerTools])
+	return strings.TrimSpace(s), nil
+}
+
 func setupFromSettings(raw, rawProv string, project int64) (*SetupSpec, error) {
 	if raw == "" {
 		return nil, nil

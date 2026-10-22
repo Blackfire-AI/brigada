@@ -151,7 +151,7 @@ func ToolsRefusal(harness string) string {
 	case "kimi":
 		return "the kimi harness takes no tools scope: workers run headless with -p, which takes no approval prompts, so brigada has no tool list to narrow"
 	case "opencode":
-		return "the opencode harness takes no tools scope: headless `opencode run` permits edits and denies bash by default, and brigada passes it no permission flags"
+		return "the opencode harness takes no tools scope: headless `opencode run` permits edits, and brigada sets its bash permission from the project's worker_tools, so an agent's own tools= has no effect"
 	default:
 		return fmt.Sprintf("the %s harness takes no tools scope: only the claude harness has a tool list", harness)
 	}

@@ -378,6 +378,9 @@ type jobGrant struct {
 	RepoURL      string `json:"repo_url"`
 	BaseRef      string `json:"base_ref"`
 	CheckCmd     string `json:"check_cmd"`
+	// WorkerTools is the project's worker tool scope (Claude spelling,
+	// "+"-joined, or "none"); empty when unset.
+	WorkerTools string `json:"worker_tools,omitempty"`
 	// Setup is the environment step (§5.7) the runner runs before the
 	// worker and again before the check; absent when the task has none.
 	Setup *engine.SetupSpec `json:"setup,omitempty"`
@@ -465,6 +468,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		RepoURL:         g.RepoURL,
 		BaseRef:         g.BaseRef,
 		CheckCmd:        g.CheckCmd,
+		WorkerTools:     g.WorkerTools,
 		Setup:           g.Setup,
 		ExtraRepos:      g.ExtraRepos,
 		ReviewBranch:    g.ReviewBranch,

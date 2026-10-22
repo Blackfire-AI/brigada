@@ -55,6 +55,11 @@ func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
 //     the OS level and refuses escalation headless; workspace-write allows
 //     the working directory and the temp directory and denies elsewhere.
 //     danger-full-access is never set.
+//   - For work and fix jobs, GOCACHE in a brigada directory under the temp
+//     directory, shared across jobs, because the sandbox denies new entries
+//     in the user's go-build cache; and GIT_OPTIONAL_LOCKS=0, so git status
+//     and diff take no index.lock, which the sandbox denies in the runner
+//     mirror's gitdir.
 //
 // The model and the reasoning effort ride a per-job patch file in a fresh
 // temporary directory outside the worktree. The Adapter interface has no
@@ -131,14 +136,21 @@ func workerEnv(env []string, review bool) []string {
 	if review {
 		mode = "read-only"
 	}
-	out := make([]string, 0, len(env)+2)
+	out := make([]string, 0, len(env)+4)
 	for _, kv := range env {
 		if strings.HasPrefix(kv, "BRIGADA_") || strings.HasPrefix(kv, "DSH_TELEMETRY_MODE=") || strings.HasPrefix(kv, "DSH_PERMISSION_MODE=") {
 			continue
 		}
+		if !review && (strings.HasPrefix(kv, "GOCACHE=") || strings.HasPrefix(kv, "GIT_OPTIONAL_LOCKS=")) {
+			continue
+		}
 		out = append(out, kv)
 	}
-	return append(out, "DSH_TELEMETRY_MODE=DISABLED", "DSH_PERMISSION_MODE="+mode)
+	out = append(out, "DSH_TELEMETRY_MODE=DISABLED", "DSH_PERMISSION_MODE="+mode)
+	if !review {
+		out = append(out, "GOCACHE="+filepath.Join(os.TempDir(), "brigada-gocache"), "GIT_OPTIONAL_LOCKS=0")
+	}
+	return out
 }
 
 // The JSONL envelope is what the 0.2.1-rc.2 spike printed. Declare only

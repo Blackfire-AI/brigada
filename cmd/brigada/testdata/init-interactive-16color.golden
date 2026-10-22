@@ -131,7 +131,7 @@ dsh (experimental): init can't check sign-in.
   [1mWhat workers may do:[0m
     claude    edit files; run only: uv run pytest
     codex     edit files and run commands inside codex's sandbox
-    opencode  edit files; no commands
+    opencode  edit files; run only the commands of the worker tools scope
   [1mFiles[0m in this repository (brigada never commits them):
     [32mnew[0m        .brigada/project.yaml  [90mthe settings above[0m
     [90munchanged[0m  .git/info/exclude      [90mremoves the exclude line that hid the
