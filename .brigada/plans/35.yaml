@@ -61,8 +61,8 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: done
+    branch: "brigada/task-127"
     rounds: 0
   - id: 128
     name: "s3-repo-security"
@@ -71,7 +71,7 @@ tasks:
     deps: ["s4-runtime-security"]
     base: "s4-runtime-security"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 129
