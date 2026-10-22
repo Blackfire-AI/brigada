@@ -70,7 +70,7 @@ tasks:
     effort: medium
     state: running
     branch: "brigada/task-137"
-    rounds: 0
+    rounds: 1
   - id: 138
     name: "legal-notices"
     title: "NOTICE and third-party notices generated from go-licenses (B10)"
