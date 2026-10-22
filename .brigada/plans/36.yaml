@@ -124,9 +124,9 @@ tasks:
     continue: "legal-notices"
     tier: light
     effort: low
-    state: reviewing
+    state: running
     branch: "brigada/task-142-r2"
-    rounds: 0
+    rounds: 1
   - id: 143
     name: "foreman-check-text"
     title: "Foreman instructions: omit check so default_check applies"
