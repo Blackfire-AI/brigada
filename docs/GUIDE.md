@@ -515,7 +515,8 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 | `repo` | canonical URL, e.g. `github.com/org/app` | required | The repository this file belongs to, in its canonical form (`host[:port]/path`, or `file:<absolute path>` for a file remote). Import refuses a file that names another repository. |
 | `default_check` | command | none | The check a task runs when its spec names none; the land job reruns it on the landed result, and the hand-driven `brigada land` on the squashed tree. |
 | `worker_tools` | `+`-separated Claude Code tool patterns, or `none` | the agent's own scope | The shell scope of Claude workers on this project ([section 8](#8-agents-quota-and-health)). |
-| `approval_max_tasks` | integer | `5` | A plan with more tasks waits for you. `0`: every plan waits. Negative: no limit. |
+| `approval_max_tasks` | integer | `0` | A plan with more tasks than this waits for you. `0`, the default, turns the count rule off; negative turns every approval rule off (use `gate_plan: ask` to hold every plan). |
+| `approval_budget` | a whole number of tokens, a `$` amount, or both joined with `+` | none | The plan budget, the approval rule on by default: a plan whose recorded spend passes it holds its new jobs mid-run ([Gates and rules](#gates-and-rules)). |
 | `approval_classes` | list of class names | `implement`, `review`, `answer` | A task of a class outside the list holds the plan. |
 | `approval_protected_paths` | list of repo-relative globs | none | A task whose spec or check mentions a matching path holds the plan; at the land gate, a task whose recorded changed paths match holds the landing ([section 5](#5-finishing-the-land-job)). |
 | `gate_plan` | `auto` or `ask` | `auto` | `ask` holds every plan at the plan gate, whatever the approval rules say. |
@@ -624,11 +625,12 @@ The foreman can use `plan_amend`'s `retier` list, for example `[{"task":"build",
 
 The loop — plan, work, check, review, land, push — is brigada's; you stop it with gates and rules, all keys of `.brigada/project.yaml` ([section 6](#6-configuring-a-project)). The engine enforces every stop; the foreman has no tool to pass one. A gate set to `ask` holds in the needs-you queue, and a rule turns `auto` into `ask` for the one plan or task that trips it, naming the rule.
 
-**The plan gate.** A plan starts on its own unless it trips one of three triggers, or `gate_plan: ask` holds every plan:
+**The plan gate.** A plan starts on its own unless it trips one of the per-task rules, or `gate_plan: ask` holds every plan:
 
-- more tasks than `approval_max_tasks` (default 5);
+- more tasks than `approval_max_tasks`, when you set one (default `0`: the count rule is off);
 - a task class outside `approval_classes` (default `implement`, `review`, `answer`);
-- a task whose spec or check mentions a path that matches one of `approval_protected_paths` (default none).
+- a task whose spec or check mentions a path that matches one of `approval_protected_paths` (default none);
+- a task naming an extra repository outside the project's default `extra_repos` ([section 7](#7-plans-checks-and-reviews)).
 
 A held plan waits in `pending_approval`, and nothing is queued. The needs-you entry gives the reasons, for example `7 tasks, over the limit of 5` or `gate_plan is ask`. An amendment of an already-active plan is judged by what it adds: each added task is checked on its own against the per-task rules — its class, the protected paths its spec or check mentions, its extra repositories — and one that trips a rule is held alone, parked with a needs-you line naming the rule, while the plan stays active and the rest runs on. The task count and `gate_plan` never hold an amendment of a running plan, and cancelling, re-pointing or retiering never holds. A `respec` edit is judged on the text it adds, with the same per-task hold. You decide:
 
@@ -638,6 +640,8 @@ brigada plan reject 7     # cancels the plan's tasks
 ```
 
 or through the coordinator's `plan_approve` and `plan_reject` ([section 3](#3-several-repositories)), which name the plan version you were shown.
+
+**The plan budget** (`approval_budget`, none by default) is the cost rule that stands in the task count's place: a whole number of tokens, a `$` amount, or both joined with `+`, for example `2000000+$5`. A plan's spend is the usage the engine records per job — input plus output tokens, and dollars when the CLI reported them — summed over the plan's jobs, unknown counters left out. When the spend passes the budget, the engine holds the plan's new jobs: every task that would newly start, a freed dependent or an amendment's addition alike, parks at the plan gate with a needs-you line naming the rule and the spend, and no job is queued; work already running goes on, with its fix rounds, reviews and landings. Only the claude CLI reports dollars; codex, opencode, kimi and dsh report tokens, so on a subscription harness without a price the budget counts tokens and a `$` side never trips. Raise the budget (`brigada project set approval_budget=...`) and have the foreman `task_restart` the held tasks to release them.
 
 **The land gate** holds an approved task before it is squashed onto the target: `gate_land: ask`, a tier among `approval_tiers`, a changed path matching `approval_protected_paths`, or a spent restart when `approval_restarted` is `true`. You release one held landing with `brigada land approve <task>` or cancel it with `brigada land reject <task>`.
 
@@ -1068,7 +1072,8 @@ Every key that `brigada project set` and `project show` know, with each default 
 
 | Key | Default | In `project.yaml`? |
 |---|---|---|
-| `approval_max_tasks` | `5` | yes |
+| `approval_max_tasks` | `0` | yes |
+| `approval_budget` | `none` | yes |
 | `approval_classes` | `implement+review+answer` | yes |
 | `approval_protected_paths` | `none` | yes |
 | `gate_plan` | `auto` | yes |

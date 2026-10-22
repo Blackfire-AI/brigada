@@ -24,8 +24,10 @@ const planAwaitingApproval = "pending_approval"
 // Plan states the user's decision sets.
 const planCancelled = "cancelled"
 
-// The shipped approval limit (§6.3's proposal).
-const defaultApprovalMaxTasks = 5
+// The shipped approval limit (§6.3): the task count is off unless the
+// project sets one; the cost rule that stands in its place by default is
+// the plan budget (planbudget.go).
+const defaultApprovalMaxTasks = 0
 
 var defaultApprovalClasses = []string{"implement", "review", "answer"}
 
@@ -33,9 +35,14 @@ var defaultApprovalClasses = []string{"implement", "review", "answer"}
 // per project"):
 //
 //	approval_max_tasks          int; more tasks than this need approval.
-//	                            Absent = 5. 0 approvals every plan (never
-//	                            runs on its own); negative disables the
-//	                            approval entirely (everything runs).
+//	                            Absent = 0, off: no count rule. Negative
+//	                            disables the approval rules entirely
+//	                            (everything runs; gate_plan still holds).
+//	approval_budget             the plan budget, the cost rule on by
+//	                            default: a whole number of tokens, a $
+//	                            amount, or both joined with "+". Absent =
+//	                            none. A plan whose recorded spend passes
+//	                            it holds its new jobs (planbudget.go).
 //	approval_classes            list of classes (or a comma-separated
 //	                            string) that run without approval. Absent
 //	                            or empty = implement,review,answer.
@@ -61,6 +68,7 @@ var defaultApprovalClasses = []string{"implement", "review", "answer"}
 //	                            (§7.1). Absent: the default branch, none.
 type approvalSettings struct {
 	MaxTasks          *int       `json:"approval_max_tasks"`
+	Budget            string     `json:"approval_budget"`
 	Classes           stringList `json:"approval_classes"`
 	ProtectedPaths    stringList `json:"approval_protected_paths"`
 	GatePlan          string     `json:"gate_plan"`
@@ -122,14 +130,13 @@ func (l *stringList) UnmarshalJSON(b []byte) error {
 }
 
 // approvalVerdict is what the limit made of a plan: Needed, and the
-// reasons it gives — the task count when it is over the limit, the
-// classes outside the allowed set, the protected paths its specs and
-// checks mention, and the plan gate set to ask (§6.3).
+// reasons it gives — the task count when one is set and the plan is over
+// it, the classes outside the allowed set, the protected paths its specs
+// and checks mention, and the plan gate set to ask (§6.3).
 type approvalVerdict struct {
 	Needed  bool
 	Tasks   int
 	Limit   int
-	Always  bool // the limit is 0: every plan waits
 	Gate    bool // gate_plan is ask: every plan waits
 	Classes []string
 	Paths   []string
@@ -144,9 +151,7 @@ func (v approvalVerdict) reasons(allowed []string) []string {
 	if v.Gate {
 		out = append(out, "gate_plan is "+GateAsk)
 	}
-	if v.Always {
-		out = append(out, "every plan needs approval in this project (approval_max_tasks 0)")
-	} else if v.Limit >= 0 && v.Tasks > v.Limit {
+	if v.Limit > 0 && v.Tasks > v.Limit {
 		out = append(out, fmt.Sprintf("%d tasks, over the limit of %d", v.Tasks, v.Limit))
 	}
 	if len(v.Classes) > 0 {
@@ -193,11 +198,9 @@ func (s approvalSettings) evaluate(tasks []PlanTask) approvalVerdict {
 		v.Needed, v.Gate = true, true
 	}
 	if v.Limit < 0 {
-		return v // approval disabled: everything runs
+		return v // the approval rules off: everything runs
 	}
-	if v.Limit == 0 {
-		v.Needed, v.Always = true, true
-	} else if v.Tasks > v.Limit {
+	if v.Limit > 0 && v.Tasks > v.Limit {
 		v.Needed = true
 	}
 	allowed := map[string]bool{}
@@ -248,7 +251,8 @@ func (s approvalSettings) evaluate(tasks []PlanTask) approvalVerdict {
 // protected path its spec or check mentions, or an extra repository
 // outside the project's default. The whole-plan triggers — the task
 // count and gate_plan — are the plan's, not one task's, and never hold
-// an amendment of an active plan.
+// an amendment of an active plan; the plan budget is not per task but
+// holds any task about to start, an added one included (planbudget.go).
 func (s approvalSettings) taskHoldReasons(t PlanTask) []string {
 	var out []string
 	class := t.Class
@@ -380,8 +384,9 @@ func (e *Engine) ApprovePlanVersion(ctx context.Context, project, plan, version 
 		}
 		// The first wave: the pending tasks waiting for nothing open (a
 		// plan an amendment held may have tasks whose dependencies are
-		// already done).
-		first, err := e.readyPlanTasksTx(tx, proj, plan, now)
+		// already done). A plan's spend cannot have passed its budget
+		// yet — an awaiting plan has queued nothing — so nothing parks.
+		first, _, err := e.readyPlanTasksTx(tx, proj, plan, now)
 		if err != nil {
 			return err
 		}

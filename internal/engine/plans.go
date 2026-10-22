@@ -464,9 +464,10 @@ func resolveBaseTx(tx *sql.Tx, taskID int64, now time.Time) error {
 // transaction. A dependent with another dependency still open keeps
 // waiting, and so does one whose dependency failed or parked at
 // needs_foreman: that dependency never reaches done, and the foreman
-// decides the dependent's fate.
+// decides the dependent's fate. A dependent of a plan whose spend passed
+// its budget parks instead, at the plan gate (§6.3, planbudget.go).
 func (e *Engine) releaseDependentsTx(tx *sql.Tx, project, done int64, now time.Time) error {
-	rows, err := tx.Query(`SELECT t.id, t.spec FROM task_deps d JOIN tasks t ON t.id = d.task_id
+	rows, err := tx.Query(`SELECT t.id, t.spec, p.id FROM task_deps d JOIN tasks t ON t.id = d.task_id
 		JOIN plans p ON p.id = t.plan_id AND p.state = 'active'
 		WHERE d.depends_on_task_id = ? AND t.state = ?
 		AND NOT EXISTS (SELECT 1 FROM task_deps o JOIN tasks x ON x.id = o.depends_on_task_id
@@ -478,11 +479,12 @@ func (e *Engine) releaseDependentsTx(tx *sql.Tx, project, done int64, now time.T
 	type freed struct {
 		id   int64
 		spec string
+		plan int64
 	}
 	var free []freed
 	for rows.Next() {
 		var f freed
-		if err := rows.Scan(&f.id, &f.spec); err != nil {
+		if err := rows.Scan(&f.id, &f.spec, &f.plan); err != nil {
 			rows.Close()
 			return fmt.Errorf("read the dependents of task %d: %w", done, err)
 		}
@@ -494,6 +496,15 @@ func (e *Engine) releaseDependentsTx(tx *sql.Tx, project, done int64, now time.T
 	}
 	rows.Close()
 	for _, f := range free {
+		gate, err := planBudgetGateTx(tx, project, f.plan)
+		if err != nil {
+			return err
+		}
+		if held, err := gate.parkTx(tx, project, f.id, now); err != nil {
+			return err
+		} else if held {
+			continue
+		}
 		if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
 			taskReady, fmtTime(now), f.id); err != nil {
 			return fmt.Errorf("ready task %d: %w", f.id, err)

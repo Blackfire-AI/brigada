@@ -176,6 +176,12 @@ func TestServeCallPlanCreateRefusesCycle(t *testing.T) {
 // approve it.
 func TestServeCallPlanCreateAwaitsApproval(t *testing.T) {
 	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	if err := e.st.Update(t.Context(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE projects SET settings = ?`, `{"approval_max_tasks": 5}`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	s := start(t, e)
 	var tasks []any
 	for _, spec := range []string{"a", "b", "c", "d", "e", "f"} {
@@ -542,7 +548,7 @@ func TestServePlanTaskTierEffort(t *testing.T) {
 	}
 	if err := st.Update(ctx, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`INSERT INTO projects (repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
-			VALUES ('https://example.invalid/tier.git', 'main', '{}', 'claude', 'sonnet', ?, ?)`, seedTS, seedTS)
+			VALUES ('https://example.invalid/tier.git', 'main', '{"approval_max_tasks": 5}', 'claude', 'sonnet', ?, ?)`, seedTS, seedTS)
 		return err
 	}); err != nil {
 		t.Fatal(err)

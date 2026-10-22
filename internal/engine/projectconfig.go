@@ -88,13 +88,14 @@ type yamlValue struct {
 var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // configSettingKeys are the project settings schema 1 of the shared file
-// may carry (§13.1): the approval limit, the gates and land rules (§6.3),
+// may carry (§13.1): the approval rules (the task count, the plan budget,
+// the classes and protected paths), the gates and land rules (§6.3),
 // the default check, the worker tool policy, the environment step (§5.7),
 // the extra repositories (§5.8) and the foreman session's rotation
 // threshold (§4.2), and nothing else. It is its own
 // list, never SettingKeys: a setting added for the local store (the wake
 // budget, for one) does not become shared-file policy by being editable.
-var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
+var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
 	SettingExtraRepos, SettingForemanRotateTokens}
@@ -234,7 +235,8 @@ func settingText(key string, v yamlValue) (string, error) {
 		}
 		return nonEmpty(key, v, v.scalar)
 	case SettingDefaultCheck, SettingWorkerTools, SettingSetup,
-		SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand:
+		SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
+		SettingApprovalBudget:
 		if v.isList {
 			return "", configErr("%s (line %d) must be a string, not a list", key, v.line)
 		}

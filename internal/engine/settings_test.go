@@ -22,12 +22,17 @@ func (e *env) set(values map[string]string) ProjectSettings {
 // The approval limit reads what SetProjectSettings wrote: every value
 // the CLI's parser accepts is one the limit understands.
 func TestApprovalReadsWrittenSettings(t *testing.T) {
-	t.Run("zero waits every plan", func(t *testing.T) {
+	t.Run("zero is off, the default", func(t *testing.T) {
 		e := newEnv(t)
 		e.set(map[string]string{SettingApprovalMaxTasks: "0"})
-		e.assertAwaits(e.createPlan(nTasks(1)), "every plan needs approval")
+		e.assertRuns(e.createPlan(nTasks(9)), 9)
 	})
-	t.Run("negative switches the limit off", func(t *testing.T) {
+	t.Run("a budget holds by spend", func(t *testing.T) {
+		e := newEnv(t)
+		e.set(map[string]string{SettingApprovalBudget: "1000000"})
+		e.assertRuns(e.createPlan(nTasks(1)), 1) // a new plan has spent nothing
+	})
+	t.Run("negative switches the rules off", func(t *testing.T) {
 		e := newEnv(t)
 		e.set(map[string]string{SettingApprovalMaxTasks: "-1"})
 		e.assertRuns(e.createPlan(nTasks(9)), 9)
@@ -65,9 +70,15 @@ func TestApprovalReadsWrittenSettings(t *testing.T) {
 	})
 	t.Run("reset restores the default", func(t *testing.T) {
 		e := newEnv(t)
-		e.set(map[string]string{SettingApprovalMaxTasks: "0"})
+		e.set(map[string]string{SettingApprovalMaxTasks: "1"})
 		e.set(map[string]string{SettingApprovalMaxTasks: ""})
 		e.assertRuns(e.createPlan(nTasks(5)), 5)
+	})
+	t.Run("a budget reset", func(t *testing.T) {
+		e := newEnv(t)
+		e.set(map[string]string{SettingApprovalBudget: "$5+2000000"})
+		e.set(map[string]string{SettingApprovalBudget: ""})
+		e.assertRuns(e.createPlan(nTasks(1)), 1)
 	})
 }
 
@@ -77,6 +88,7 @@ func TestProjectSettingsView(t *testing.T) {
 	got := e.set(map[string]string{SettingApprovalProtectedPaths: "infra/**"})
 	want := []SettingValue{
 		{Key: SettingApprovalMaxTasks, Value: "3", Source: SourceLocal},
+		{Key: SettingApprovalBudget, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingApprovalClasses, Value: "implement+review+answer", Default: true, Source: SourceDefault},
 		{Key: SettingApprovalProtectedPaths, Value: "infra/**", Source: SourceLocal},
 		{Key: SettingGatePlan, Value: "auto", Default: true, Source: SourceDefault},
@@ -122,6 +134,13 @@ func TestSetProjectSettingsRefusals(t *testing.T) {
 		{"nope": "1"},
 		{SettingApprovalMaxTasks: "many"},
 		{SettingApprovalMaxTasks: "1.5"},
+		{SettingApprovalBudget: "0"},
+		{SettingApprovalBudget: "-3"},
+		{SettingApprovalBudget: "$0"},
+		{SettingApprovalBudget: "many"},
+		{SettingApprovalBudget: "1000+2000"},
+		{SettingApprovalBudget: "$5+$6"},
+		{SettingApprovalBudget: "1+$2+$3"},
 		{SettingApprovalClasses: "a++b"},
 		{SettingApprovalClasses: "has space"},
 		{SettingApprovalProtectedPaths: "bad[glob"},
@@ -140,7 +159,7 @@ func TestSetProjectSettingsRefusals(t *testing.T) {
 		_, err := e.eng.SetProjectSettings(e.ctx, envRepo, values)
 		if !errors.Is(err, ErrInvalidSetting) {
 			t.Errorf("set %v: err = %v, want ErrInvalidSetting", values, err)
-		} else if !strings.Contains(err.Error(), "valid keys: approval_max_tasks, approval_classes, approval_protected_paths") {
+		} else if !strings.Contains(err.Error(), "valid keys: approval_max_tasks, approval_budget, approval_classes") {
 			t.Errorf("set %v: err = %v, want it to name the valid keys", values, err)
 		}
 	}

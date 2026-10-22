@@ -657,13 +657,16 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	}
 
 	// The waiting state re-evaluates as creation does: in an active plan,
-	// every pending task whose dependencies are all done starts.
+	// every pending task whose dependencies are all done starts — unless
+	// the plan's spend has passed its budget, when it parks at the plan
+	// gate like a rule-held addition.
 	if newState == "active" {
-		started, err := e.readyPlanTasksTx(tx, proj, plan, now)
+		started, held, err := e.readyPlanTasksTx(tx, proj, plan, now)
 		if err != nil {
 			return AmendPlanResult{}, err
 		}
 		res.Started = started
+		res.Held = append(res.Held, held...)
 		for k := range res.Added {
 			for _, s := range started {
 				if s.TaskID == res.Added[k].TaskID {
@@ -836,15 +839,17 @@ func (e *Engine) cancelTaskJobsTx(tx *sql.Tx, task int64, now time.Time) error {
 
 // readyPlanTasksTx starts every pending task of an active plan whose
 // dependencies are all done — none counts — turning it ready with its
-// first work job queued, as creation and approval do.
-func (e *Engine) readyPlanTasksTx(tx *sql.Tx, project, plan int64, now time.Time) ([]CreatedTask, error) {
+// first work job queued, as creation and approval do. A task of a plan
+// whose spend passed its budget parks instead, at the plan gate (§6.3,
+// planbudget.go), and is returned among the held.
+func (e *Engine) readyPlanTasksTx(tx *sql.Tx, project, plan int64, now time.Time) ([]CreatedTask, []HeldTask, error) {
 	rows, err := tx.Query(`SELECT t.id, t.name, t.spec FROM tasks t
 		WHERE t.plan_id = ? AND t.state = ?
 		AND NOT EXISTS (SELECT 1 FROM task_deps o JOIN tasks x ON x.id = o.depends_on_task_id
 			WHERE o.task_id = t.id AND x.state <> ?)
 		ORDER BY t.id`, plan, taskPending, taskDone)
 	if err != nil {
-		return nil, fmt.Errorf("read the ready tasks of plan %d: %w", plan, err)
+		return nil, nil, fmt.Errorf("read the ready tasks of plan %d: %w", plan, err)
 	}
 	type wave struct {
 		id         int64
@@ -855,28 +860,39 @@ func (e *Engine) readyPlanTasksTx(tx *sql.Tx, project, plan int64, now time.Time
 		var w wave
 		if err := rows.Scan(&w.id, &w.name, &w.spec); err != nil {
 			rows.Close()
-			return nil, fmt.Errorf("read the ready tasks of plan %d: %w", plan, err)
+			return nil, nil, fmt.Errorf("read the ready tasks of plan %d: %w", plan, err)
 		}
 		first = append(first, w)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return nil, fmt.Errorf("read the ready tasks of plan %d: %w", plan, err)
+		return nil, nil, fmt.Errorf("read the ready tasks of plan %d: %w", plan, err)
 	}
 	rows.Close()
+	gate, err := planBudgetGateTx(tx, project, plan)
+	if err != nil {
+		return nil, nil, err
+	}
 	var out []CreatedTask
+	var held []HeldTask
 	for _, w := range first {
+		if h, err := gate.parkTx(tx, project, w.id, now); err != nil {
+			return nil, nil, err
+		} else if h {
+			held = append(held, HeldTask{TaskID: w.id, Name: w.name, Reason: gate.heldReason})
+			continue
+		}
 		if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
 			taskReady, fmtTime(now), w.id); err != nil {
-			return nil, fmt.Errorf("ready task %d: %w", w.id, err)
+			return nil, nil, fmt.Errorf("ready task %d: %w", w.id, err)
 		}
 		sr, err := e.queueTaskWorkTx(tx, project, w.id, w.spec, now)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		out = append(out, CreatedTask{TaskID: w.id, Name: w.name, JobID: sr.JobID})
 	}
-	return out, nil
+	return out, held, nil
 }
 
 // finishPlanIfClosedTx finishes an active plan with no live work left

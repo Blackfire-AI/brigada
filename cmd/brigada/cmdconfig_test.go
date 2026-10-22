@@ -205,7 +205,7 @@ func TestConfigProjectProvenance(t *testing.T) {
 	}
 	do("project", "set", "approval_max_tasks=")
 	out = configDo(t, ctx, "--state-dir", state)
-	if !strings.Contains(out, "approval_max_tasks: 5 default") {
+	if !strings.Contains(out, "approval_max_tasks: 0 default") {
 		t.Fatalf("reset approval limit did not show the default:\n%s", out)
 	}
 	if _, err := client.ArchiveProject(ctx, importOrigin, false); err != nil {
