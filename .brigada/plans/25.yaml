@@ -64,7 +64,7 @@ tasks:
     continue: "cost-rule"
     tier: heavy
     effort: medium
-    state: ready
+    state: running
     branch: "brigada/task-99-r1"
     rounds: 0
   - id: 100
