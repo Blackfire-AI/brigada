@@ -75,7 +75,7 @@ tasks:
     base: "answer-changes-rule"
     continue: "answer-changes-rule"
     effort: medium
-    state: done
+    state: needs_foreman
     branch: "brigada/task-100"
     rounds: 1
   - id: 101
