@@ -28,6 +28,10 @@ jobs:
       - name: vet
         run: go vet ./...
       - name: test
+        # CI=true makes the notices freshness test fail rather than skip
+        # when go-licenses, the module cache or the network is missing.
+        env:
+          CI: "true"
         run: go test ./...
 
   test-macos:
