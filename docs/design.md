@@ -131,6 +131,12 @@ Approval is the user's act. `plan_approve` and `plan_reject` use client authorit
 
 One per CLI: build the headless command (fresh or resume), parse the CLI's event stream into progress events, detect limit-hit and auth errors, find the session id for resume. The adapters reuse Apache-2.0 code from Orchestrator.inc, keeping upstream license headers, carrying their NOTICE and marking modified files. The claude adapter's default worker scope allows exactly `go build`, `go test`, `go vet` and `gofmt` — the worker compiles and tests its own work as it goes; the runner still runs the check, so no new code reaches execution — and an agent config's explicit tool scope replaces the default.
 
+A headless run does not take its configuration from the repository it works on. Claude runs with `--setting-sources user` and `--strict-mcp-config`, so the repository's `.claude/settings.json` (hooks, permission allows) and `.mcp.json` are not loaded; opencode runs with `OPENCODE_DISABLE_PROJECT_CONFIG=1`, so `opencode.json`, `.opencode/` and the project's instruction files (`AGENTS.md`, `CLAUDE.md`) are skipped while the user's global config and provider credentials stay.
+
+A review, a plan review included, is read-only in every harness: claude gets the file-reading tools and git's read commands, with the editing tools denied and edits not auto-accepted; codex runs `-s read-only`; opencode denies edit, bash and webfetch; kimi runs under the read-only agent definition even when the agent names its own agent file; dsh runs `read-only`.
+
+The foreman's token never appears in a command line. Claude reads the prompt from stdin, and so does codex (`codex exec -`); codex receives the bridge's environment through its own process environment and forwards it to the bridge by name (`env_vars`). Kimi and opencode take the prompt as an argument, which other local users can read in the process list.
+
 ### 5.3 The worker prompt
 
 A fixed worker template (versioned) plus the task spec verbatim, plus the answer or feedback for follow-up jobs. The template tells the worker to end with the result block (§5.4). A project may add its own instruction text, injected as verbatim data in its own delimiters after the template's contract and before the task spec (§5.9).

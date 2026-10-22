@@ -61,11 +61,11 @@ func TestCommand(t *testing.T) {
 			wantArg: []string{"-p", prompt, "--output-format", "stream-json"},
 		},
 		{
-			name:    "explicit agent wins for review",
+			name:    "read-only agent wins for review",
 			ad:      Adapter{AgentFile: "custom.md", ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
 			job:     adapter.Job{Prompt: prompt, Review: true},
 			wantExe: "kimi",
-			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--agent-file", "custom.md"},
+			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--agent-file", "/runner/kimi-readonly.md"},
 		},
 		{
 			name:    "review resume keeps its bound agent",

@@ -70,9 +70,9 @@ func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
 // The worker's sandbox lets it edit inside its worktree without approval,
 // while the CLI's default keeps the network off. No --skip-git-repo-check:
 // a worker's directory is a worktree, which is a git repo. The prompt is
-// the positional after `--`, argv
-// and no shell, verbatim — the engine's product (§1.4), not the
-// adapter's to edit, and a prompt that starts with a dash stays one.
+// piped on stdin (the `-` positional), verbatim — the engine's product
+// (§1.4), not the adapter's to edit, and out of argv. A review runs
+// `-s read-only`.
 // For a foreman, use the read-only sandbox and independent approval settings.
 // --approve-for-me selects workspace-write and conflicts with -s. Automatic
 // review remains available to MCP; sandbox and permission escalations are
@@ -85,13 +85,20 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		binary = "codex"
 	}
 	args := []string{"exec", "--json"}
+	var forwarded []string
 	if job.MCPConfig == "" {
-		args = append(args, "-s", "workspace-write")
+		sandbox := "workspace-write"
+		if job.Review {
+			// A review, plan reviews included, only reads.
+			sandbox = "read-only"
+		}
+		args = append(args, "-s", sandbox)
 	} else {
-		configArgs, err := mcpConfigArgs(job.MCPConfig)
+		configArgs, env, err := mcpConfigArgs(job.MCPConfig)
 		if err != nil {
 			return nil, err
 		}
+		forwarded = env
 		args = append(args, foremanPermissions()...)
 		args = append(args, configArgs...)
 		// A foreman turn runs in the runner's scratch directory, which
@@ -111,13 +118,16 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	if resumeSessionID != "" {
 		args = append(args, "resume", resumeSessionID)
 	}
-	args = append(args, "--", job.Prompt)
+	// "-" makes the CLI read the prompt from stdin: argv is public to
+	// anyone listing processes.
+	args = append(args, "-")
 	cmd := exec.Command(binary, args...)
 	if cmd.Err != nil {
 		return nil, cmd.Err
 	}
 	cmd.Dir = workdir
-	cmd.Env = workerEnv(os.Environ())
+	cmd.Stdin = strings.NewReader(job.Prompt)
+	cmd.Env = append(workerEnv(os.Environ()), forwarded...)
 	return cmd, nil
 }
 
@@ -155,17 +165,21 @@ type mcpServer struct {
 	Env     *map[string]string `json:"env"`
 }
 
-func mcpConfigArgs(path string) ([]string, error) {
+// mcpConfigArgs turns the harness MCP config into -c overrides. The
+// server's env values are secrets (the foreman token): the overrides name
+// the variables only (env_vars), and the returned KEY=value pairs belong in
+// the codex process's own environment, which codex forwards by name.
+func mcpConfigArgs(path string) ([]string, []string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("codex: read MCP config %q: %w", path, err)
+		return nil, nil, fmt.Errorf("codex: read MCP config %q: %w", path, err)
 	}
 	var cfg mcpConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("codex: decode MCP config %q: %w", path, err)
+		return nil, nil, fmt.Errorf("codex: decode MCP config %q: %w", path, err)
 	}
 	if len(cfg.Servers) != 1 {
-		return nil, fmt.Errorf("codex: MCP config must name exactly one server, got %d", len(cfg.Servers))
+		return nil, nil, fmt.Errorf("codex: MCP config must name exactly one server, got %d", len(cfg.Servers))
 	}
 	var name string
 	var srv mcpServer
@@ -173,7 +187,7 @@ func mcpConfigArgs(path string) ([]string, error) {
 		break
 	}
 	if name == "" || srv.Command == nil || srv.Args == nil || srv.Env == nil || *srv.Command == "" {
-		return nil, errors.New("codex: MCP config server is missing command, args, or env")
+		return nil, nil, errors.New("codex: MCP config server is missing command, args, or env")
 	}
 	quotedArgs := make([]string, len(*srv.Args))
 	for i, value := range *srv.Args {
@@ -184,16 +198,18 @@ func mcpConfigArgs(path string) ([]string, error) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	quotedEnv := make([]string, 0, len(keys))
+	quotedKeys := make([]string, 0, len(keys))
+	env := make([]string, 0, len(keys))
 	for _, key := range keys {
-		quotedEnv = append(quotedEnv, key+"="+strconv.Quote((*srv.Env)[key]))
+		quotedKeys = append(quotedKeys, strconv.Quote(key))
+		env = append(env, key+"="+(*srv.Env)[key])
 	}
 	prefix := "mcp_servers." + name
 	return []string{
 		"-c", prefix + ".command=" + strconv.Quote(*srv.Command),
 		"-c", prefix + ".args=[" + strings.Join(quotedArgs, ",") + "]",
-		"-c", prefix + ".env={" + strings.Join(quotedEnv, ",") + "}",
-	}, nil
+		"-c", prefix + ".env_vars=[" + strings.Join(quotedKeys, ",") + "]",
+	}, env, nil
 }
 
 // AttachCommand implements adapter.Interactive: Codex's own terminal UI is

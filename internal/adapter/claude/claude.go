@@ -63,6 +63,15 @@ func foremanToolScope() (allowed, disallowed []string) {
 	return allowed, []string{"Bash", "Edit", "NotebookEdit", "Write"}
 }
 
+// reviewToolScope is a reviewer's tool scope: the read-only file tools and
+// git's read commands, with the editing tools denied by name. The agent
+// config's scope never applies to a review.
+func reviewToolScope() (allowed, disallowed []string) {
+	return []string{"Read", "Grep", "Glob",
+			"Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git status:*)"},
+		[]string{"Edit", "NotebookEdit", "Write"}
+}
+
 // workerToolScope is the code worker's default tool scope (§5.2): the Go
 // toolchain's build, test, vet and format commands, and nothing else of
 // the shell. The worker verifies its own work as it goes; the runner
@@ -131,6 +140,11 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		"-p", // headless print mode; the prompt itself arrives on stdin
 		"--output-format", "stream-json",
 		"--verbose", // print mode only streams its JSON with it
+		// A headless run never loads the repository's own settings (hooks,
+		// permission allows) or its .mcp.json: the repository is the
+		// change's, not the run's to configure.
+		"--setting-sources", "user",
+		"--strict-mcp-config",
 	}
 	if job.Model != "" {
 		args = append(args, "--model", job.Model)
@@ -148,15 +162,23 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	if mode == "" {
 		mode = workerPermissionMode
 	}
+	review := job.Review && job.MCPConfig == ""
+	if review {
+		// Edits are not auto-accepted for a reviewer, and no configured
+		// mode lifts the deny rules below.
+		mode = "default"
+	}
 	args = append(args, "--permission-mode", mode)
 	allowed, disallowed := a.AllowedTools, a.DisallowedTools
-	if job.MCPConfig != "" {
+	if review {
+		allowed, disallowed = reviewToolScope()
+	} else if job.MCPConfig != "" {
 		// A job that carries an MCP config is a foreman turn (§12.2): the
 		// bridge is the turn's own, and the CLI offers no other server
 		// beside it. The foreman's tool scope is brigada's too (§4), not
 		// the agent config's — it decides through the bridge and reads
 		// the repo, and never edits code.
-		args = append(args, "--mcp-config", job.MCPConfig, "--strict-mcp-config")
+		args = append(args, "--mcp-config", job.MCPConfig)
 		allowed, disallowed = foremanToolScope()
 	} else if allowed == nil {
 		// A code worker with no explicit scope gets the default (§5.2):

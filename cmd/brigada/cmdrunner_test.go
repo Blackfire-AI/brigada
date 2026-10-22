@@ -44,11 +44,7 @@ func TestRunnerKimiReviewAgentFile(t *testing.T) {
 			if err := writeKimiReviewAgentFiles(ads); err != nil {
 				t.Fatal(err)
 			}
-			if explicit {
-				if _, err := os.Stat(file); !os.IsNotExist(err) {
-					t.Fatalf("explicit agent caused default file write: %v", err)
-				}
-			} else {
+			{
 				data, err := os.ReadFile(file)
 				if err != nil || string(data) != kimi.ReadOnlyAgentDefinition {
 					t.Fatalf("review agent = %q, %v", data, err)
@@ -72,7 +68,7 @@ func TestRunnerKimiReviewAgentFile(t *testing.T) {
 				}
 				i := slices.Index(cmd.Args, "--agent-file")
 				want := spec.agentFile
-				if want == "" && review {
+				if review {
 					want = file
 				}
 				if want == "" {

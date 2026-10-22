@@ -4,9 +4,10 @@ import "encoding/json"
 
 // EnvToken is the environment variable the bridge reads its engine
 // token from (§12.2): never a flag — flags are public to anyone listing
-// processes — and never the harness's own environment: the harness's
-// MCP config names it in the server's env, which the harness passes to
-// the bridge process alone.
+// processes. The harness's MCP config names it in the server's env,
+// which the harness passes to the bridge process alone. Codex takes no
+// env values on its command line either: it gets the token in its own
+// process environment and forwards it to the bridge by name (env_vars).
 const EnvToken = "BRIGADA_TOKEN"
 
 // harnessConfig is the harness's MCP config file as a foreman's harness

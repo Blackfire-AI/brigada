@@ -425,11 +425,12 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 }
 
 // writeKimiReviewAgentFiles runs once at runner startup, never while init is
-// displaying its plan or per job. Explicit agent files remain caller-owned.
+// displaying its plan or per job. Reviews use it even when the agent names
+// its own agent file, which stays the work jobs' definition.
 func writeKimiReviewAgentFiles(ads []adapter.Adapter) error {
 	for _, ad := range ads {
 		k, ok := ad.(*kimi.Adapter)
-		if !ok || k.AgentFile != "" {
+		if !ok {
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(k.ReadOnlyAgentFile), 0700); err != nil {

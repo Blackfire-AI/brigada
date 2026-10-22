@@ -96,6 +96,9 @@ func TestCommandEnv(t *testing.T) {
 			t.Errorf("runner secret reached the worker: %s", kv)
 		}
 	}
+	if !slices.Contains(cmd.Env, "OPENCODE_DISABLE_PROJECT_CONFIG=1") {
+		t.Error("the repository's opencode config is not disabled")
+	}
 	if !slices.Contains(cmd.Env, "OPENCODE_AMBIENT=keep-me") {
 		t.Error("CLI ambient environment was lost")
 	}
@@ -156,7 +159,8 @@ func TestCommandCarriesJobTools(t *testing.T) {
 	}{
 		{"project scope", []string{"Bash(npm test:*)"}, false, `"bash":{"*":"deny","npm test":"allow","npm test *":"allow"}`},
 		{"none", []string{}, false, `"bash":"deny"`},
-		{"review", []string{"Bash(npm test:*)"}, true, `"bash":"deny"`},
+		{"review", []string{"Bash(npm test:*)"}, true, `"bash":"deny","edit":"deny"`},
+		{"review fetch", nil, true, `"webfetch":"deny"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
