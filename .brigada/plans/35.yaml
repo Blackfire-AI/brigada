@@ -50,8 +50,8 @@ tasks:
     base: "s1-docs"
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: done
+    branch: "brigada/task-126"
     rounds: 0
   - id: 127
     name: "s4-runtime-security"
