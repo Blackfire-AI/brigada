@@ -124,9 +124,10 @@ tasks:
     continue: "legal-notices"
     tier: light
     effort: low
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
+    question: "May I run 'git fetch origin review/third-party-licenses-2026-10-22' and 'git show FETCH_HEAD:third_party/...' in this worktree (or grant Bash approval for these)?"
   - id: 143
     name: "foreman-check-text"
     title: "Foreman instructions: omit check so default_check applies"
