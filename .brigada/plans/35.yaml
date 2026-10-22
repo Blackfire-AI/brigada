@@ -71,8 +71,8 @@ tasks:
     deps: ["s4-runtime-security"]
     base: "s4-runtime-security"
     effort: medium
-    state: running
-    branch: ""
+    state: done
+    branch: "brigada/task-128"
     rounds: 0
   - id: 129
     name: "s5-legal"
@@ -81,7 +81,7 @@ tasks:
     deps: ["s3-repo-security"]
     base: "s3-repo-security"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 130
