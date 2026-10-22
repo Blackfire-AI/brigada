@@ -17,6 +17,7 @@ func TestParseProjectConfigTable(t *testing.T) {
 	const all = `default_check: go vet ./... && go test ./...  # the gate
 worker_tools: Bash(go test:*)+Bash(go vet:*)
 approval_max_tasks: 3
+approval_budget: 2000000+$5
 approval_classes: [implement, "review"]
 approval_protected_paths:
   - infra/**
@@ -53,6 +54,10 @@ approval_protected_paths:
 		{"max tasks not an integer", string(cfgFile("approval_max_tasks: many\n")), "approval_max_tasks takes an integer"},
 		{"max tasks quoted", string(cfgFile("approval_max_tasks: \"3\"\n")), "approval_max_tasks (line 3) must be an integer"},
 		{"max tasks list", string(cfgFile("approval_max_tasks: [3]\n")), "must be an integer"},
+		{"budget accepted", string(cfgFile("approval_budget: $5+2000000\n")), ""},
+		{"budget junk", string(cfgFile("approval_budget: cheap\n")), "approval_budget takes a whole number of tokens"},
+		{"budget zero", string(cfgFile("approval_budget: 0\n")), "approval_budget takes a whole number of tokens"},
+		{"budget list", string(cfgFile("approval_budget: [2000000]\n")), "must be a string"},
 		{"default check list", string(cfgFile("default_check: [a, b]\n")), "must be a string"},
 		{"default check empty", string(cfgFile("default_check:\n")), "has no value"},
 		{"worker tools empty scope", string(cfgFile("worker_tools: \"+\"\n")), "worker_tools"},

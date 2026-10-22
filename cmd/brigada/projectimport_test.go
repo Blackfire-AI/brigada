@@ -131,7 +131,7 @@ func TestProjectImportFirstOverHandSetAsks(t *testing.T) {
 		t.Fatalf("declined import = %d %q", code, stdout)
 	}
 	_, stdout, _ = do("", "project", "show")
-	if !strings.Contains(stdout, "default_check=hand check (set)") || !strings.Contains(stdout, "approval_max_tasks=5 (default)") {
+	if !strings.Contains(stdout, "default_check=hand check (set)") || !strings.Contains(stdout, "approval_max_tasks=0 (default)") {
 		t.Fatalf("a declined import changed the store: %q", stdout)
 	}
 	// No answer at all (EOF) is no either.

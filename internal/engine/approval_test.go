@@ -62,16 +62,23 @@ func (e *env) assertAwaits(res CreatePlanResult, want string) {
 	}
 }
 
+// The count rule is off unless the project sets a count: with 5 set,
+// five tasks run and six await; with nothing set, six run.
 func TestApprovalFiveTasksRunSixAwait(t *testing.T) {
 	e := newEnv(t)
+	e.setSettings(`{"approval_max_tasks": 5}`)
 	e.assertRuns(e.createPlan(nTasks(5)), 5)
 
 	e = newEnv(t)
+	e.setSettings(`{"approval_max_tasks": 5}`)
 	res := e.createPlan(nTasks(6))
 	e.assertAwaits(res, "6 tasks, over the limit of 5")
 	if got := e.int("SELECT COUNT(*) FROM events WHERE kind = 'plan_awaiting_approval'"); got != 1 {
 		t.Errorf("plan_awaiting_approval events = %d, want 1", got)
 	}
+
+	e = newEnv(t)
+	e.assertRuns(e.createPlan(nTasks(6)), 6)
 }
 
 func TestApprovalClasses(t *testing.T) {
@@ -115,9 +122,10 @@ func TestApprovalProtectedPaths(t *testing.T) {
 }
 
 func TestApprovalLimitZeroAndNegative(t *testing.T) {
+	// 0 is the default and means off: the count rule holds nothing.
 	e := newEnv(t)
 	e.setSettings(`{"approval_max_tasks": 0}`)
-	e.assertAwaits(e.createPlan(nTasks(1)), "every plan needs approval")
+	e.assertRuns(e.createPlan(nTasks(9)), 9)
 
 	e = newEnv(t)
 	e.setSettings(`{"approval_max_tasks": -1, "approval_protected_paths": ["go.mod"]}`)
@@ -137,9 +145,9 @@ func TestApprovalLimitZeroAndNegative(t *testing.T) {
 // Version 0 names none and checks nothing (the CLI's decisions).
 func TestPlanDecisionVersion(t *testing.T) {
 	e := newEnv(t)
-	e.setSettings(`{"approval_max_tasks": 0}`)
+	e.setSettings(`{"gate_plan": "ask"}`)
 	res := e.createPlan(nTasks(1))
-	e.assertAwaits(res, "approval_max_tasks 0")
+	e.assertAwaits(res, "gate_plan is ask")
 	if got := e.int("SELECT version FROM plans WHERE id = ?", res.PlanID); got != 1 {
 		t.Fatalf("new plan version = %d, want 1", got)
 	}
@@ -172,13 +180,13 @@ func TestPlanDecisionVersion(t *testing.T) {
 
 func TestApprovePlanQueuesFirstWaveOnly(t *testing.T) {
 	e := newEnv(t)
-	e.setSettings(`{"approval_max_tasks": 0}`)
+	e.setSettings(`{"gate_plan": "ask"}`)
 	res := e.createPlan([]PlanTask{
 		{Name: "a", Spec: "first"},
 		{Name: "b", Spec: "second", Deps: []string{"a"}},
 		{Name: "c", Spec: "third"},
 	})
-	e.assertAwaits(res, "approval_max_tasks 0")
+	e.assertAwaits(res, "gate_plan is ask")
 
 	dec, err := e.eng.ApprovePlan(e.ctx, 0, res.PlanID)
 	if err != nil {
@@ -254,7 +262,7 @@ func TestRejectPlanCancelsTasks(t *testing.T) {
 
 func TestAwaitingPlanInNeedsYouWithReasons(t *testing.T) {
 	e := newEnv(t)
-	e.setSettings(`{"approval_protected_paths": ["go.mod"]}`)
+	e.setSettings(`{"approval_max_tasks": 5, "approval_protected_paths": ["go.mod"]}`)
 	tasks := nTasks(6)
 	tasks[2].Class = "deploy"
 	tasks[3].Check = "git diff go.mod"

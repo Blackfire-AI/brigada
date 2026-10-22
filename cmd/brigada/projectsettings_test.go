@@ -59,7 +59,7 @@ const gateDefaults = "gate_plan=auto (default)\n" + "gate_land=auto (default)\n"
 	"approval_tiers=none (default)\n" + "approval_restarted=false (default)\n" +
 	"land_target=main (default)\n" + "after_land=none (default)\n"
 
-const validSettingKeys = "approval_max_tasks, approval_classes, approval_protected_paths, gate_plan, gate_land, gate_push, approval_tiers, approval_restarted, land_target, after_land, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, instructions"
+const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes, approval_protected_paths, gate_plan, gate_land, gate_push, approval_tiers, approval_restarted, land_target, after_land, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, instructions"
 
 // TestProjectSettingsGolden covers project set and show: the defaults,
 // one override, the reset, and the usage errors for a bad key and value.
@@ -85,7 +85,8 @@ func TestProjectSettingsGolden(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("set exit = %d, stderr = %q", code, stderr)
 	}
-	want := "approval_max_tasks=5 (default)\n" +
+	want := "approval_max_tasks=0 (default)\n" +
+		"approval_budget=none (default)\n" +
 		"approval_classes=implement+review+answer (default)\n" +
 		"approval_protected_paths=infra/**+db/*.sql (set)\n" +
 		gateDefaults +
@@ -101,9 +102,10 @@ func TestProjectSettingsGolden(t *testing.T) {
 	}
 
 	// Two keys at once; an unnamed key keeps its value.
-	code, stdout, stderr = do("project", "set", "--repo", repo, "approval_max_tasks=0", "approval_classes=implement")
-	want = "approval_max_tasks=0 (set)\n" +
-		"approval_classes=implement (set)\n" +
+	code, stdout, stderr = do("project", "set", "--repo", repo, "approval_max_tasks=5", "approval_budget=2000000+$5.50")
+	want = "approval_max_tasks=5 (set)\n" +
+		"approval_budget=2000000+$5.5 (set)\n" +
+		"approval_classes=implement+review+answer (default)\n" +
 		"approval_protected_paths=infra/**+db/*.sql (set)\n" +
 		gateDefaults +
 		"default_check=none (default)\n" +
@@ -113,8 +115,9 @@ func TestProjectSettingsGolden(t *testing.T) {
 	}
 
 	// An empty value resets to the default.
-	code, stdout, stderr = do("project", "set", "--repo", repo, "approval_max_tasks=", "approval_classes=", "approval_protected_paths=")
-	want = "approval_max_tasks=5 (default)\n" +
+	code, stdout, stderr = do("project", "set", "--repo", repo, "approval_max_tasks=", "approval_budget=", "approval_classes=", "approval_protected_paths=")
+	want = "approval_max_tasks=0 (default)\n" +
+		"approval_budget=none (default)\n" +
 		"approval_classes=implement+review+answer (default)\n" +
 		"approval_protected_paths=none (default)\n" +
 		gateDefaults +
@@ -133,7 +136,7 @@ func TestProjectSettingsGolden(t *testing.T) {
 
 	// A bad value is a usage error naming what the key takes and the help command.
 	code, _, stderr = do("project", "set", "--repo", repo, "approval_max_tasks=many")
-	wantErr = `brigada: invalid project setting: approval_max_tasks takes an integer (0 = every plan waits, negative = off), got "many"; valid keys: ` + validSettingKeys + "\nRun 'brigada project set --help' for usage.\n"
+	wantErr = `brigada: invalid project setting: approval_max_tasks takes an integer (0 = off, the default; negative = every approval rule off), got "many"; valid keys: ` + validSettingKeys + "\nRun 'brigada project set --help' for usage.\n"
 	if code != 2 || stderr != wantErr {
 		t.Fatalf("bad value = %d %q, want 2 %q", code, stderr, wantErr)
 	}

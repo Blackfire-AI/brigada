@@ -425,7 +425,7 @@ func TestCancellationThenOtherTaskCompletes(t *testing.T) {
 func TestApproveFinishesAnEmptiedPlan(t *testing.T) {
 	e := newEnv(t)
 	agent := e.addAgent(e.runner1, "claude", "sonnet", "work")
-	e.setSettings(`{"approval_max_tasks": 0}`)
+	e.setSettings(`{"gate_plan": "ask"}`)
 	res := e.createPlan([]PlanTask{{Name: "a", Spec: "a"}, {Name: "b", Spec: "b", Deps: []string{"a"}}})
 	e.amend(res.PlanID, PlanAmendment{Cancel: []string{"a", "b"}, SkipApproved: true})
 	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planAwaitingApproval {
@@ -562,7 +562,7 @@ func TestPlanOutcomeLandsOnForemanAgent(t *testing.T) {
 	}
 
 	// A rejected plan is a failure too.
-	e.setSettings(`{"approval_max_tasks": 0}`)
+	e.setSettings(`{"gate_plan": "ask"}`)
 	held := e.createPlan(nTasks(1))
 	if _, err := e.eng.RejectPlan(e.ctx, 0, held.PlanID); err != nil {
 		t.Fatalf("reject: %v", err)

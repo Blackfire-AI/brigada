@@ -128,6 +128,7 @@ func TestPlanCreationPushesTheFileToANewPlansBranch(t *testing.T) {
 func TestPlanChangesPushAgain(t *testing.T) {
 	t.Parallel()
 	m := newMirrorEnv(t)
+	m.setSettings(`{"approval_max_tasks": 5}`)
 	res, err := m.eng.CreatePlan(m.ctx, m.project, "big", nTasks(6))
 	if err != nil {
 		t.Fatal(err)

@@ -24,6 +24,7 @@ import (
 // one the limit understands.
 const (
 	SettingApprovalMaxTasks       = "approval_max_tasks"
+	SettingApprovalBudget         = "approval_budget"
 	SettingApprovalClasses        = "approval_classes"
 	SettingApprovalProtectedPaths = "approval_protected_paths"
 	// The gates and land rules (§6.3). gate_plan is enforced today: ask
@@ -73,7 +74,7 @@ const (
 )
 
 // SettingKeys are the editable keys, in the order show prints them.
-var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
+var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
 	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingInstructions}
@@ -184,7 +185,7 @@ var classWord = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 // Every refusal names the valid keys.
 func parseSettingValue(key, value string) (json.RawMessage, error) {
 	switch key {
-	case SettingApprovalMaxTasks, SettingApprovalClasses, SettingApprovalProtectedPaths,
+	case SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
 		SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
 		SettingDefaultCheck, SettingWorkerTools,
 		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingInstructions:
@@ -253,10 +254,17 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 	if key == SettingApprovalMaxTasks {
 		n, err := strconv.Atoi(value)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s takes an integer (0 = every plan waits, negative = off), got %q",
+			return nil, fmt.Errorf("%w: %s takes an integer (0 = off, the default; negative = every approval rule off), got %q",
 				ErrInvalidSetting, key, value)
 		}
 		return json.RawMessage(strconv.Itoa(n)), nil
+	}
+	if key == SettingApprovalBudget {
+		norm, _, _, err := parseBudgetValue(key, strings.TrimSpace(value))
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(norm)
 	}
 	if key == SettingSetupTimeout {
 		n, err := strconv.Atoi(value)
@@ -389,6 +397,11 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 		switch k {
 		case SettingApprovalMaxTasks:
 			sv.Value = strconv.Itoa(*eff.MaxTasks)
+		case SettingApprovalBudget:
+			sv.Value = "none"
+			if s, ok := rawString(cur); ok && s != "" {
+				sv.Value = s
+			}
 		case SettingApprovalClasses:
 			sv.Value = list(eff.Classes)
 		case SettingApprovalProtectedPaths:
