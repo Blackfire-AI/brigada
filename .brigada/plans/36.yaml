@@ -1,0 +1,117 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 36
+title: "Pre-public review phase 2: fix the findings of #55 (B1, B2, B3, B6–B12 and should-fix items)"
+repo: "github.com/Blackfire-AI/brigada"
+state: active
+created: 2026-10-22T12:54:31.824979Z
+updated: 2026-10-22T12:54:31.824979Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps — the continued
+# dep when base is empty and continue is set, else the default branch; merge a
+# task after its base. A task with continue, one of deps, starts in the
+# session of the dep's author.
+# States are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1);
+# review_tier and review_effort do the same for its reviews (§7, §8); caps
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1).
+tasks:
+  - id: 133
+    name: "engine-rules"
+    title: "Engine rules: check/setup hold rule (B2); gate_push ask→auto re-land (B12) and land.go/approval.go should-fixes"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    state: running
+    branch: ""
+    rounds: 0
+  - id: 134
+    name: "adapters-hardening"
+    title: "Adapters: codex token out of argv, headless config isolation, read-only reviewers"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 135
+    name: "runtime-hardening"
+    title: "Runtime: wire GitEnv scrub and scrubbed check/setup env, token-file errors, history fence, git add guard, webhook, snapshots"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 136
+    name: "plan-mirror-switch"
+    title: "plan_files project setting to switch the plan mirror off (B1)"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 137
+    name: "supply-chain"
+    title: "Supply chain: govulncheck in CI, gated release.yml, notes from CHANGELOG, SHA-pinned actions (B6, B7)"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 138
+    name: "legal-notices"
+    title: "NOTICE and third-party notices generated from go-licenses (B10)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: light
+    effort: low
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 139
+    name: "functionality-fixes"
+    title: "Help-text bugs and flaky TestRunnerStallKillsProcessTree"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: light
+    effort: low
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 140
+    name: "docs-sweep"
+    title: "Docs: remote TLS API as backlog, README/TERMS/AGENTS wording, stale text"
+    class: "implement"
+    deps: ["engine-rules", "adapters-hardening", "runtime-hardening", "plan-mirror-switch"]
+    base: ""
+    tier: light
+    effort: low
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 141
+    name: "compat-doc"
+    title: "COMPATIBILITY.md: schema-1 keys, MCP tool sets, commands, flags, experimental marks"
+    class: "implement"
+    deps: ["engine-rules", "adapters-hardening", "runtime-hardening", "plan-mirror-switch"]
+    base: ""
+    tier: light
+    effort: low
+    state: pending
+    branch: ""
+    rounds: 0
