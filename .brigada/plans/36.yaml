@@ -49,8 +49,8 @@ tasks:
     base: ""
     effort: medium
     caps: {restart: 4}
-    state: running
-    branch: "brigada/task-135-r3"
+    state: reviewing
+    branch: "brigada/task-135-r4"
     rounds: 0
   - id: 136
     name: "plan-mirror-switch"
