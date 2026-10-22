@@ -28,9 +28,9 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-118-r2"
-    rounds: 0
+    rounds: 1
   - id: 119
     name: "runner"
     title: "Runner and prompt: execute plan_review jobs"
