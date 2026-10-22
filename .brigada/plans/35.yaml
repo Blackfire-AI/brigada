@@ -39,8 +39,8 @@ tasks:
     base: "s2-functionality"
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: done
+    branch: "brigada/task-125"
     rounds: 0
   - id: 126
     name: "s7-compat"
@@ -50,7 +50,7 @@ tasks:
     base: "s1-docs"
     tier: light
     effort: low
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 127
