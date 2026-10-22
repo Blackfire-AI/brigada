@@ -5,9 +5,9 @@
 plan: 41
 title: "Speed up CI: shard race, cache plain tests, manual clocks in slow suites"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-10-22T21:23:42.086564Z
-updated: 2026-10-22T21:27:32.083225Z
+updated: 2026-10-22T22:08:01.148025Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -50,6 +50,36 @@ tasks:
     base: ""
     tier: heavy
     effort: high
-    state: needs_foreman
+    state: cancelled
+    branch: ""
+    rounds: 0
+  - id: 156
+    name: "fast-engine"
+    title: "Speed up internal/engine tests under -race (manual clocks / shorter intervals)"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 157
+    name: "fast-runner"
+    title: "Speed up internal/runner tests under -race (manual clocks / shorter intervals)"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 158
+    name: "fast-cli-api"
+    title: "Speed up cmd/brigada and internal/api tests under -race"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
     branch: ""
     rounds: 0
