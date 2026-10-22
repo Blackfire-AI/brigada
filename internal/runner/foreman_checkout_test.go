@@ -10,6 +10,7 @@ import (
 )
 
 func TestPrepareForemanCheckout(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := newRemote(t)
 	scratch := t.TempDir()

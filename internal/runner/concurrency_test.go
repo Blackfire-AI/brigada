@@ -38,7 +38,7 @@ echo ok > work.txt
 var logWorker = `
 cat > /dev/null
 echo S >> "$BRIGADA_TEST_MARKERS/log"
-sleep 0.4
+sleep 0.15
 echo E >> "$BRIGADA_TEST_MARKERS/log"
 echo ok > work.txt
 ` + fakeResultScript(`{"status":"done","summary":"logged"}`)
@@ -59,6 +59,7 @@ func countMarkers(t *testing.T, dir, prefix string) int {
 }
 
 func TestRunnerMaxParallelRunsJobsConcurrently(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -83,6 +84,7 @@ func TestRunnerMaxParallelRunsJobsConcurrently(t *testing.T) {
 }
 
 func TestRunnerMaxParallelOneIsSequential(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -209,6 +211,7 @@ func (e *testEnv) str1(job int64, col string) string {
 // must wait for that worktree to come down — not fail against the
 // checked-out branch — and then succeed.
 func TestFollowUpWaitsForTheAuthorsWorktree(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"review", "fix"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := context.Background()
@@ -247,7 +250,7 @@ func TestFollowUpWaitsForTheAuthorsWorktree(t *testing.T) {
 					r.ws.remove(ctx)
 				}
 				t.Fatalf("the %s was set up while the author's worktree still held the branch (err %v)", kind, r.err)
-			case <-time.After(400 * time.Millisecond):
+			case <-time.After(100 * time.Millisecond):
 			}
 
 			author.remove(ctx) // the author's completion is published; its worktree comes down
@@ -274,6 +277,7 @@ func TestFollowUpWaitsForTheAuthorsWorktree(t *testing.T) {
 // set-up waits for the first's worktree to come down instead of racing
 // it — and then gets a clean checkout at the same path.
 func TestReLeasedReviewWaitsForTheOldAttemptsWorktree(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cfg := &Config{StateDir: t.TempDir()}
 	remote := newRemote(t)
@@ -315,7 +319,7 @@ func TestReLeasedReviewWaitsForTheOldAttemptsWorktree(t *testing.T) {
 			r.ws.remove(ctx)
 		}
 		t.Fatalf("the second attempt was set up while the first still held the path (err %v)", r.err)
-	case <-time.After(400 * time.Millisecond):
+	case <-time.After(100 * time.Millisecond):
 	}
 	if _, err := os.Stat(filepath.Join(first.dir, "README.md")); err != nil {
 		t.Fatalf("something touched the first attempt's live checkout: %v", err)
@@ -344,6 +348,7 @@ func TestReLeasedReviewWaitsForTheOldAttemptsWorktree(t *testing.T) {
 // with no mirror yet: without the per-mirror lock the first clones race
 // each other and the worktree adds and prunes race the records.
 func TestWorkspacesOfOneRepoDoNotRaceTheMirror(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cfg := &Config{StateDir: t.TempDir()}
 	remote := newRemote(t)

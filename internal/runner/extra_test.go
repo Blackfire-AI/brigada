@@ -72,6 +72,7 @@ echo hello > work.txt
 ` + fakeResultScript(`{"status":"done","summary":"edited"}`)
 
 func TestRunnerExtraReposCheckedOutForSetupWorkerAndCheck(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	extra := newRemote(t)
 	pinned := remoteHead(t, extra, "main")
@@ -166,6 +167,7 @@ test ! -e hack.txt`, pinned, tip)
 }
 
 func TestRunnerExtraRepoThatCannotBeFetchedIsAnInfrastructureFailure(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	clk := newManualClock()
 	e := newTestEnv(t, engine.Config{Now: clk.Now})
@@ -220,6 +222,7 @@ func TestExtraRepoEnvRefusesAMalformedName(t *testing.T) {
 // repositories; a job without them sees its prompt exactly as the engine
 // composed it, and no read dir at all.
 func TestRunnerWithoutExtrasKeepsThePromptPlain(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)

@@ -45,6 +45,7 @@ func TestTaskBranch(t *testing.T) {
 }
 
 func TestPrepareWorkspaceRejectsMissingURL(t *testing.T) {
+	t.Parallel()
 	cfg := &Config{StateDir: t.TempDir()}
 	grant := &api.JobGrant{TaskID: 3, BaseRef: "main", RepoURL: ""}
 	_, err := prepareWorkspace(context.Background(), cfg, grant)
@@ -115,6 +116,7 @@ func TestWorktreeDirNamesTheSessionStablePath(t *testing.T) {
 // checkout of the first's work — the state a harness session expects
 // when it resumes where it started.
 func TestSessionWorktreeRunsWhereItsSessionStarted(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := newRemote(t)
 	cfg := &Config{StateDir: t.TempDir()}
@@ -159,6 +161,7 @@ func TestSessionWorktreeRunsWhereItsSessionStarted(t *testing.T) {
 // when the worker did not, the remote ends up with the branch, and the
 // worktree comes down while the mirror stays cached.
 func TestWorkspaceLifecycle(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cfg := &Config{StateDir: t.TempDir()}
 	remote := newRemote(t)
@@ -228,6 +231,7 @@ func TestWorkspaceLifecycle(t *testing.T) {
 // the remote, but it does not hold the worktree's commit, and the
 // runner must push the real one instead of trusting the name.
 func TestEnsurePushedRejectsStaleRemoteBranch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := newRemote(t)
 	ws, err := prepareWorkspace(ctx, &Config{StateDir: t.TempDir()}, &api.JobGrant{
@@ -265,6 +269,7 @@ func TestEnsurePushedRejectsStaleRemoteBranch(t *testing.T) {
 // with uncommitted edits: without a commit, pushing HEAD would ship the
 // base commit and the run's branch would be empty of the work.
 func TestEnsurePushedCommitsLeftovers(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := newRemote(t)
 	ws, err := prepareWorkspace(ctx, &Config{StateDir: t.TempDir()}, &api.JobGrant{
@@ -297,6 +302,7 @@ func TestEnsurePushedCommitsLeftovers(t *testing.T) {
 // work missing from that remote belongs on a salvage branch, even when
 // the checkout and the task's remote branch have diverged.
 func TestSalvageComparesAgainstRemote(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := newRemote(t)
 	ws, err := prepareWorkspace(ctx, &Config{StateDir: t.TempDir()}, &api.JobGrant{
@@ -369,6 +375,7 @@ func TestRedactURL(t *testing.T) {
 // engine retries, capped. A grant that cannot be run at all stays the
 // task's own failure.
 func TestFetchFailuresAreInfrastructureErrors(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := newRemote(t)
 	cfg := &Config{StateDir: t.TempDir()}
@@ -450,6 +457,7 @@ func git(t *testing.T, dir string, args ...string) string {
 // skips the brigada/ namespace, so the base branch is fetched by name —
 // and a runner that never ran the earlier attempt still gets its ref.
 func TestWorkspaceBaseOnResultBranch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := newRemote(t)
 	cfg := &Config{StateDir: t.TempDir()}
@@ -493,6 +501,7 @@ func TestWorkspaceBaseOnResultBranch(t *testing.T) {
 // remote holds it, so the round's work builds on the work before it and
 // its push is a fast-forward of the branch, never a force.
 func TestFixJobContinuesTheBranch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := newRemote(t)
 	cfg := &Config{StateDir: t.TempDir()}
@@ -558,6 +567,7 @@ func TestFixJobContinuesTheBranch(t *testing.T) {
 // starts at the base ref like a work job's, and the round's push brings
 // the branch its start.
 func TestFixJobWithoutAPushedBranch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := newRemote(t)
 	fix, err := prepareWorkspace(ctx, &Config{StateDir: t.TempDir()}, &api.JobGrant{
@@ -583,6 +593,7 @@ func TestFixJobWithoutAPushedBranch(t *testing.T) {
 // back to the base ref, the second fails the job rather than silently
 // rebuild from the base — so the two must not fold into one boolean.
 func TestRemoteBranchSeparatesAbsentFromUnreachable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	w := &workspace{repoURL: newRemote(t)}
 
@@ -612,6 +623,7 @@ func TestRemoteBranchSeparatesAbsentFromUnreachable(t *testing.T) {
 // that is not there — fails the job as the infra kind before any CLI
 // ran, retried behind a backoff and charged to no agent.
 func TestRunnerSpawnFailureIsInfrastructure(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -676,6 +688,7 @@ func (e *testEnv) assertInfrastructureFailure(job int64) {
 // the runner's startup sweep removes the worktrees dir, so a
 // permission-based test would never see the build fail.
 func TestRunnerWorktreeFailureIsInfrastructure(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)

@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -61,10 +62,7 @@ func newTestEnv(t *testing.T, engCfg engine.Config) *testEnv {
 	t.Helper()
 	ctx := context.Background()
 	tmp := t.TempDir()
-	st, err := store.Open(ctx, filepath.Join(tmp, "store.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
+	st := openFreshStore(t, filepath.Join(tmp, "store.db"))
 	t.Cleanup(func() { st.Close() })
 	tokenFile := filepath.Join(tmp, "tokens")
 	if err := os.WriteFile(tokenFile, []byte(e2eTokens), 0o600); err != nil {
@@ -159,7 +157,7 @@ func (e *testEnv) seedTask(repoURL, checkCmd string) int64 {
 	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
 		res, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, repo_url, base_ref, caps, created_at, updated_at)
 			VALUES ((SELECT id FROM plans WHERE project_id = ?), 'a task', 'the task spec', ?, 'implement', 'ready', NULLIF(?, ''), 'main', '{}', ?, ?)`,
-			e.project, checkCmd, repoURL, e2eSeedTS, e2eSeedTS)
+			e.project, e.sub(checkCmd), repoURL, e2eSeedTS, e2eSeedTS)
 		if err != nil {
 			return err
 		}
@@ -249,6 +247,7 @@ func (p *runnerProc) stop(t *testing.T) {
 func (e *testEnv) startRunner(script string, heartbeatEvery time.Duration, adjust ...func(*Config)) *runnerProc {
 	e.t.Helper()
 	ad := &fake.Adapter{Script: script}
+	testName := e.t.Name()
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &runnerProc{cancel: cancel, done: make(chan error, 1)}
 	go func() {
@@ -267,6 +266,9 @@ func (e *testEnv) startRunner(script string, heartbeatEvery time.Duration, adjus
 		for _, fn := range adjust {
 			fn(&cfg)
 		}
+		for i, a := range cfg.Adapters {
+			cfg.Adapters[i] = envAdapter{a, testName}
+		}
 		p.done <- Run(ctx, cfg)
 	}()
 	return p
@@ -275,7 +277,7 @@ func (e *testEnv) startRunner(script string, heartbeatEvery time.Duration, adjus
 // waitJob polls the job until cond holds, failing with the last state.
 func (e *testEnv) waitJob(job int64, cond func(*engine.JobInfo) bool) *engine.JobInfo {
 	e.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second) // generous: parallel tests share the machine
 	for {
 		jobInfo, err := e.eng.Job(e.ctx, job)
 		if err != nil {
@@ -482,7 +484,7 @@ echo '{"type":"system_init","session_id":"sess-42"}'
 # a word of progress before the pause, so the runner's heartbeats
 # carry a last_progress_at that is real, not just the start
 echo '{"type":"assistant","text":"reading the task"}'
-sleep 0.4
+sleep 0.15
 echo '{"type":"tool_start","name":"Edit"}'
 echo hello > work.txt
 git add -A
@@ -536,17 +538,101 @@ while [ $i -lt 200 ]; do sleep 0.1; i=$((i+1)); done
 ` + fakeResultScript(`{"status":"done","summary":"finally done"}`) + `: > "$BRIGADA_TEST_MARKERS/finished"
 `
 
+// The per-test variables: what a test used to put in the process
+// environment with t.Setenv (the markers directory, the task's branch)
+// and so could never run in parallel. They are kept per test instead and
+// reach the scripts two ways: the worker's environment (envAdapter) and,
+// for checks and setup commands, which run without the runner's
+// brigada-prefixed variables (§5.8), a literal substitution of
+// $TEST_MARKERS_DIR in the command text (testEnv.sub).
+var (
+	testVarsMu sync.Mutex
+	testVars   = map[string]map[string]string{}
+)
+
+// setTestVar sets one per-test variable for the worker scripts of t and
+// its subtests.
+func setTestVar(t testing.TB, key, val string) {
+	t.Helper()
+	name := t.Name()
+	testVarsMu.Lock()
+	defer testVarsMu.Unlock()
+	if testVars[name] == nil {
+		testVars[name] = map[string]string{}
+		t.Cleanup(func() {
+			testVarsMu.Lock()
+			defer testVarsMu.Unlock()
+			delete(testVars, name)
+		})
+	}
+	testVars[name][key] = val
+}
+
+// testVarsOf returns the variables set for the test named name or the
+// nearest parent of it, as KEY=value pairs.
+func testVarsOf(name string) []string {
+	testVarsMu.Lock()
+	defer testVarsMu.Unlock()
+	merged := map[string]string{}
+	for {
+		for k, v := range testVars[name] {
+			if _, ok := merged[k]; !ok {
+				merged[k] = v
+			}
+		}
+		i := strings.LastIndex(name, "/")
+		if i < 0 {
+			break
+		}
+		name = name[:i]
+	}
+	out := make([]string, 0, len(merged))
+	for k, v := range merged {
+		out = append(out, k+"="+v)
+	}
+	return out
+}
+
+// envAdapter adds a test's variables to the environment of every
+// command its inner adapter builds.
+type envAdapter struct {
+	adapter.Adapter
+	test string
+}
+
+func (a envAdapter) Command(job adapter.Job, workdir, resume string) (*exec.Cmd, error) {
+	cmd, err := a.Adapter.Command(job, workdir, resume)
+	if err != nil || cmd == nil {
+		return cmd, err
+	}
+	if cmd.Env == nil {
+		cmd.Env = os.Environ()
+	}
+	cmd.Env = append(cmd.Env, testVarsOf(a.test)...)
+	return cmd, nil
+}
+
+// sub replaces $TEST_MARKERS_DIR in a command the runner will run as a
+// check or a setup with the test's markers directory.
+func (e *testEnv) sub(cmd string) string {
+	for _, kv := range testVarsOf(e.t.Name()) {
+		if v, ok := strings.CutPrefix(kv, "TEST_MARKERS_DIR="); ok {
+			return strings.ReplaceAll(cmd, "$TEST_MARKERS_DIR", v)
+		}
+	}
+	return cmd
+}
+
 func markerDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv("BRIGADA_TEST_MARKERS", dir)
-	// Checks and setup commands run without the runner's brigada-prefixed
-	// variables (§5.8), so they reach the directory by this name.
-	t.Setenv("TEST_MARKERS_DIR", dir)
+	setTestVar(t, "BRIGADA_TEST_MARKERS", dir)
+	setTestVar(t, "TEST_MARKERS_DIR", dir)
 	return dir
 }
 
 func TestRunnerHappyPath(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -637,6 +723,7 @@ func TestRunnerHappyPath(t *testing.T) {
 // it to push) and the runner's ls-remote check finds the branch already
 // there.
 func TestRunnerWorkerPushesItself(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -665,6 +752,7 @@ func TestRunnerWorkerPushesItself(t *testing.T) {
 // now describes (§5.3): it edits, commits nothing, names no branch, and
 // the runner still commits, pushes, names the branch and runs the check.
 func TestRunnerWorkerLeavesEditsUncommitted(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -701,6 +789,7 @@ func TestRunnerWorkerLeavesEditsUncommitted(t *testing.T) {
 }
 
 func TestRunnerNoResultBlock(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -726,6 +815,7 @@ func TestRunnerNoResultBlock(t *testing.T) {
 }
 
 func TestRunnerSalvagesFailedWork(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name       string
 		worker     string
@@ -808,6 +898,7 @@ func TestRunnerSalvagesFailedWork(t *testing.T) {
 }
 
 func TestRunnerCheckFailed(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -836,6 +927,7 @@ func TestRunnerCheckFailed(t *testing.T) {
 }
 
 func TestRunnerHeartbeatCancelledKillsWorker(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -913,6 +1005,7 @@ func TestRunnerLeaseLostMidRun(t *testing.T) {
 }
 
 func TestRunnerRejectsRepoWithoutURL(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject("") // a project with no repo URL
 	task := e.seedTask("", "true")
@@ -954,6 +1047,7 @@ echo '{"type":"tool_end","name":"Edit"}'
 // is tied to (issue #42: opencode resumes only where the session was
 // created).
 func TestRunnerFixRoundRunsInTheWorkJobsDirectory(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -1011,6 +1105,7 @@ func (e *testEnv) assertRegistration() {
 // be found, printed before any JSON — still fails the run as that
 // error, and the line rides the uploaded transcript.
 func TestRunnerStderrOnlyFailure(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -1053,6 +1148,7 @@ exit 1
 // error sorted from it fails the run only when the CLI did not end
 // clean — a warning beside a good result never does.
 func TestRunnerStderrErrorWeighsAgainstTheExit(t *testing.T) {
+	t.Parallel()
 	t.Run("an error beside a clean exit and a good result", func(t *testing.T) {
 		remote := newRemote(t)
 		e := newTestEnv(t, engine.Config{})
@@ -1109,6 +1205,7 @@ exit 1
 // content-addressed on the engine's own disk — and the history reads
 // the job's timeline: events and messages merged, oldest first.
 func TestRunnerHistoryEndToEnd(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -1205,14 +1302,14 @@ func TestRunnerHistoryEndToEnd(t *testing.T) {
 // than the check by design.
 func TestRunnerLongCheckKeepsLease(t *testing.T) {
 	remote := newRemote(t)
-	e := newTestEnv(t, engine.Config{LeaseTTL: 800 * time.Millisecond})
+	e := newTestEnv(t, engine.Config{LeaseTTL: 400 * time.Millisecond})
 	e.seedProject(remote)
 	// A check that crosses several lease windows, then passes.
-	task := e.seedTask("", "sleep 1.5 && echo check-ok")
+	task := e.seedTask("", "sleep 1.2 && echo check-ok")
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
 	markerDir(t)
 
-	p := e.startRunner(writeWorkerScript(t, happyWorker), 150*time.Millisecond)
+	p := e.startRunner(writeWorkerScript(t, happyWorker), 100*time.Millisecond)
 	defer p.stop(t)
 
 	done := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
@@ -1231,6 +1328,7 @@ func TestRunnerLongCheckKeepsLease(t *testing.T) {
 // answers cancelled, the check's process group is killed — not left to
 // finish — and nothing is completed.
 func TestRunnerCancelDuringCheckKillsCheck(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -1281,6 +1379,7 @@ func TestRunnerCancelDuringCheckKillsCheck(t *testing.T) {
 // its store live on; only the socket blinks, which is what a restart
 // looks like from outside.
 func TestRunnerSurvivesSocketBlink(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -1290,17 +1389,18 @@ func TestRunnerSurvivesSocketBlink(t *testing.T) {
 	// The runner starts with the socket already down: its first
 	// registration fails and must be retried, not returned.
 	e.stopAPI()
-	p := e.startRunner(writeWorkerScript(t, happyWorker), 100*time.Millisecond)
+	p := e.startRunner(writeWorkerScript(t, happyWorker), 100*time.Millisecond,
+		func(c *Config) { c.BackoffMin, c.BackoffMax = 20*time.Millisecond, 100*time.Millisecond })
 	defer p.stop(t)
 
 	e.startAPI() // back within the first backoff window
 	// Let the runner register and settle into an empty long-poll…
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	// …then blink the socket mid-poll: the in-flight lease fails, the
 	// next round re-registers (the engine may have a fresh store) and
 	// polls again.
 	e.stopAPI()
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	e.startAPI()
 
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
@@ -1322,6 +1422,7 @@ func TestRunnerSurvivesSocketBlink(t *testing.T) {
 // (GitEnv) reach the runner's pushes but never the worker's
 // environment.
 func TestRunnerScrubsGitEnvFromWorker(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
