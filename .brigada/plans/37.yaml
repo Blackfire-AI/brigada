@@ -41,6 +41,6 @@ tasks:
     tier: light
     effort: medium
     review_tier: standard
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-148"
     rounds: 0
