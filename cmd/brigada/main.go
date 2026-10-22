@@ -247,7 +247,12 @@ func main() {
 
 // usagef prints a usage error and returns exit code 2.
 func usagef(stderr io.Writer, format string, args ...any) int {
-	fmt.Fprintf(stderr, "brigada: "+format+"\n", args...)
+	return usageLine(stderr, fmt.Sprintf("brigada: "+format, args...))
+}
+
+// usageLine prints a usage line as given, then the hint to the command's help.
+func usageLine(stderr io.Writer, line string) int {
+	fmt.Fprintln(stderr, line)
 	name := ""
 	if w, ok := stderr.(commandErrorWriter); ok {
 		name = " " + w.name

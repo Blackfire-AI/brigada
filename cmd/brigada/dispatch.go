@@ -44,7 +44,7 @@ func planDecisionCommand(verb string) func(context.Context, []string, io.Writer,
 func dispatch(ctx context.Context, args []string, stdout, stderr io.Writer, name, missing, want string, subcommands map[string]command) int {
 	stderr = commandStderr(stderr, name)
 	if len(args) == 0 {
-		return usagef(stderr, "%s", missing)
+		return usageLine(stderr, missing)
 	}
 	names := make([]string, 0, len(subcommands))
 	for sub := range subcommands {
