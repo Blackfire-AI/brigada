@@ -124,8 +124,8 @@ tasks:
     continue: "legal-notices"
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-142-r2"
     rounds: 0
   - id: 143
     name: "foreman-check-text"
