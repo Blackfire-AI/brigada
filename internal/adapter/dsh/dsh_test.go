@@ -140,6 +140,8 @@ func TestCommandEnv(t *testing.T) {
 	t.Setenv("BRIGADA_TOKEN", "secret")
 	t.Setenv("DSH_TELEMETRY_MODE", "ENABLED")
 	t.Setenv("DSH_PERMISSION_MODE", "danger-full-access")
+	t.Setenv("GOCACHE", "/ambient/go-build")
+	t.Setenv("GIT_OPTIONAL_LOCKS", "1")
 	for _, tc := range []struct {
 		review bool
 		mode   string
@@ -165,6 +167,23 @@ func TestCommandEnv(t *testing.T) {
 		}
 		if slices.Contains(cmd.Env, "DSH_PERMISSION_MODE=danger-full-access") {
 			t.Errorf("review=%v: danger-full-access survived", tc.review)
+		}
+		cache, _ := envValue(cmd.Env, "GOCACHE")
+		locks, _ := envValue(cmd.Env, "GIT_OPTIONAL_LOCKS")
+		if tc.review {
+			if cache != "/ambient/go-build" || locks != "1" {
+				t.Errorf("review: GOCACHE=%q GIT_OPTIONAL_LOCKS=%q, want the ambient values", cache, locks)
+			}
+			continue
+		}
+		if want := filepath.Join(os.TempDir(), "brigada-gocache"); cache != want {
+			t.Errorf("work: GOCACHE = %q, want %q", cache, want)
+		}
+		if locks != "0" {
+			t.Errorf("work: GIT_OPTIONAL_LOCKS = %q, want 0", locks)
+		}
+		if n := countKey(cmd.Env, "GOCACHE") + countKey(cmd.Env, "GIT_OPTIONAL_LOCKS"); n != 2 {
+			t.Errorf("work: %d GOCACHE/GIT_OPTIONAL_LOCKS entries, want one each", n)
 		}
 	}
 }

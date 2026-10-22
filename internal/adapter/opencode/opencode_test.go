@@ -1,6 +1,7 @@
 package opencode
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -101,12 +102,14 @@ func TestCommandEnv(t *testing.T) {
 }
 
 func TestWorkerPermissions(t *testing.T) {
-	const deny = `OPENCODE_PERMISSION={"external_directory":"deny"}`
+	// The Go default scope maps to these bash rules ("*" sorts first).
+	const goBash = `{"*":"deny","go build":"allow","go build *":"allow","go test":"allow","go test *":"allow","go vet":"allow","go vet *":"allow","gofmt":"allow","gofmt *":"allow"}`
+	const deny = `OPENCODE_PERMISSION={"bash":` + goBash + `,"external_directory":"deny"}`
 	const schema = "/runner-state/worktrees/task-9-author-s0.extra/schema"
 	const live = "/runner-state/worktrees/task-9-author-s0.extra/live"
 	// The per-pattern form sorts "*" first (json.Marshal sorts a map's
 	// keys), so the per-dir allows after it win as the last match.
-	const allowed = `OPENCODE_PERMISSION={"external_directory":{"*":"deny","` + live + `":"allow","` + live + `/**":"allow","` + schema + `":"allow","` + schema + `/**":"allow"}}`
+	const allowed = `OPENCODE_PERMISSION={"bash":` + goBash + `,"external_directory":{"*":"deny","` + live + `":"allow","` + live + `/**":"allow","` + schema + `":"allow","` + schema + `/**":"allow"}}`
 	cases := []struct {
 		name     string
 		ambient  string // set when non-empty
@@ -114,12 +117,12 @@ func TestWorkerPermissions(t *testing.T) {
 		want     string
 	}{
 		{"absent", "", nil, deny},
-		{"other rules kept", `{"bash":"ask"}`, nil, `OPENCODE_PERMISSION={"bash":"ask","external_directory":"deny"}`},
+		{"other rules kept, bash replaced", `{"bash":"ask","edit":"allow"}`, nil, `OPENCODE_PERMISSION={"bash":` + goBash + `,"edit":"allow","external_directory":"deny"}`},
 		{"weaker rule overridden", `{"external_directory":"allow"}`, nil, deny},
 		{"invalid replaced", "not json", nil, deny},
 		{"read dirs allowed, everything else denied", "", []string{schema, live}, allowed},
 		{"read dirs replace a weaker object", `{"external_directory":{"*":"allow"}}`, []string{schema},
-			`OPENCODE_PERMISSION={"external_directory":{"*":"deny","` + schema + `":"allow","` + schema + `/**":"allow"}}`},
+			`OPENCODE_PERMISSION={"bash":` + goBash + `,"external_directory":{"*":"deny","` + schema + `":"allow","` + schema + `/**":"allow"}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -139,6 +142,65 @@ func TestWorkerPermissions(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Errorf("env = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCommandCarriesJobTools(t *testing.T) {
+	cases := []struct {
+		name   string
+		tools  []string
+		review bool
+		want   string
+	}{
+		{"project scope", []string{"Bash(npm test:*)"}, false, `"bash":{"*":"deny","npm test":"allow","npm test *":"allow"}`},
+		{"none", []string{}, false, `"bash":"deny"`},
+		{"review", []string{"Bash(npm test:*)"}, true, `"bash":"deny"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stubCLI(t)
+			cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Tools: tc.tools, Review: tc.review}, t.TempDir(), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got string
+			for _, kv := range cmd.Env {
+				if strings.HasPrefix(kv, "OPENCODE_PERMISSION=") {
+					got = kv
+				}
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("env = %q, want it to hold %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBashRules(t *testing.T) {
+	cases := []struct {
+		name   string
+		tools  []string
+		review bool
+		want   string
+	}{
+		{"default scope", nil, false, `{"*":"deny","go build":"allow","go build *":"allow","go test":"allow","go test *":"allow","go vet":"allow","go vet *":"allow","gofmt":"allow","gofmt *":"allow"}`},
+		{"project scope", []string{"Bash(npm test:*)", "Bash(git log:*)"}, false, `{"*":"deny","git log":"allow","git log *":"allow","npm test":"allow","npm test *":"allow"}`},
+		{"unmappable left out", []string{"Read", "Bash(*)", "Bash(rm -rf *:*)", "Bash(go test)", "Bash(a;b:*)", "Bash(:*)", "Bash(go test:*)"}, false, `{"*":"deny","go test":"allow","go test *":"allow"}`},
+		{"nothing maps", []string{"Read", "WebFetch"}, false, `"deny"`},
+		{"explicit none", []string{}, false, `"deny"`},
+		{"review", []string{"Bash(go test:*)"}, true, `"deny"`},
+		{"review default", nil, true, `"deny"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := json.Marshal(bashRules(tc.tools, tc.review))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("bashRules = %s, want %s", got, tc.want)
 			}
 		})
 	}

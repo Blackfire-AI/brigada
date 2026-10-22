@@ -132,7 +132,7 @@ Plan
   What workers may do:
     claude    edit files; run only: uv run pytest
     codex     edit files and run commands inside codex's sandbox
-    opencode  edit files; no commands
+    opencode  edit files; run only the commands of the worker tools scope
   Files in this repository (brigada never commits them):
     new        .brigada/project.yaml  the settings above
     unchanged  .git/info/exclude      removes the exclude line that hid the

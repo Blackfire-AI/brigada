@@ -52,7 +52,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	verbose := fs.Bool("verbose", false, "also print the full contents of new repository setup files")
 	limited := fs.Bool("accept-limited", false, "acknowledge fewer than two review families; reviews still require another family")
 	check := fs.String("check", "", "default check command, or none / - for no check (never executed by init)")
-	tools := fs.String("tools", "", "worker scope in runner tools= syntax; applied only to Claude workers")
+	tools := fs.String("tools", "", "worker scope in runner tools= syntax; scopes claude's tool list and opencode's bash commands")
 	foreman := fs.String("foreman", "", "choose the foreman, a signed-in claude or codex model, as harness/model[@effort]; without @effort an interactive run asks for the effort")
 	noWiring := fs.Bool("no-wiring", false, "in a parent folder, skip the coordinator's wiring; in a repository, leave the harness untouched: init writes no harness wiring, and an older init's stays")
 	parallel := fs.Int("parallel", 0, "tasks at once on this machine (1..64)")
@@ -906,7 +906,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		case "kimi":
 			permissions = "edit files and run any command without asking"
 		case "opencode":
-			permissions = "edit files; no commands"
+			permissions = "edit files; run only the commands of the worker tools scope"
 		case "dsh":
 			permissions = "edit files and run commands inside dsh's workspace sandbox; reviews run read-only"
 		}

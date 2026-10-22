@@ -89,6 +89,11 @@ type Job struct {
 	// allow reads outside the workspace, and kimi has no directory
 	// flag, so those adapters ignore it. Empty adds nothing.
 	ReadDirs []string
+	// Tools is the worker's tool scope in Claude's spelling
+	// (`Bash(go test:*)`), for a harness that maps it onto its own
+	// permission rules; nil is the Go default scope. Claude takes its
+	// scope from its adapter's config instead and ignores this.
+	Tools []string
 	// StatusLine is a shell command whose one line of output an
 	// interactive session shows in its status bar, re-run every few
 	// seconds (§10): the attach sets it to `brigada status --line`, so

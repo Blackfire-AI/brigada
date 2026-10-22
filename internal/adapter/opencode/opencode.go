@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
+	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
 )
 
 // Adapter drives the opencode CLI. Its zero value resolves opencode on PATH.
@@ -43,8 +44,9 @@ func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
 }
 
 // Command passes the prompt as one positional argument after --. OpenCode
-// permits edits and denies bash headless by default, matching worker policy,
-// and workerPermissions denies paths outside the worktree the same way.
+// permits edits headless by default, matching worker policy, and
+// workerPermissions limits bash to the job's mapped tool scope (none for a
+// review) and denies paths outside the worktree.
 // Never pass --auto (or its permission-bypass aliases); permission rules
 // ride the environment, not the CLI's project config.
 //
@@ -83,7 +85,7 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		return nil, cmd.Err
 	}
 	cmd.Dir = workdir
-	cmd.Env = workerPermissions(workerEnv(os.Environ()), job.ReadDirs)
+	cmd.Env = workerPermissions(workerEnv(os.Environ()), job.ReadDirs, job.Tools, job.Review)
 	return cmd, nil
 }
 
@@ -132,7 +134,12 @@ func workerEnv(env []string) []string {
 // (§5.8) switch external_directory to its per-pattern form instead: an
 // object of glob pattern to action where the last matching rule wins, so
 // a "*" deny first and one allow per directory grant exactly those paths.
-func workerPermissions(env []string, readDirs []string) []string {
+//
+// bash is a per-command pattern object too, the last match winning, and
+// the CLI checks each part of a compound command (a && b, a; b, $(...))
+// and refuses it unless every part is allowed. bashRules maps the job's
+// tool scope onto it; a review gets none.
+func workerPermissions(env []string, readDirs []string, tools []string, review bool) []string {
 	var rules map[string]any
 	for _, kv := range env {
 		if v, ok := strings.CutPrefix(kv, "OPENCODE_PERMISSION="); ok {
@@ -155,6 +162,7 @@ func workerPermissions(env []string, readDirs []string) []string {
 		}
 		rules["external_directory"] = patterns
 	}
+	rules["bash"] = bashRules(tools, review)
 	value, err := json.Marshal(rules)
 	if err != nil {
 		return env // unreachable: a map of JSON values marshals
@@ -166,6 +174,56 @@ func workerPermissions(env []string, readDirs []string) []string {
 		}
 	}
 	return append(env, "OPENCODE_PERMISSION="+string(value))
+}
+
+// bashRules maps a Claude-spelled tool scope onto opencode's bash
+// permission: "deny" for a review, else an object with "*" denied first
+// and `Bash(X:*)` allowing both "X" and "X *". A nil scope is the Go
+// default; anything that does not map (other tools, odd forms, a
+// wildcard in X) is left out, so it stays denied.
+func bashRules(tools []string, review bool) any {
+	if review {
+		return "deny"
+	}
+	if tools == nil {
+		tools = claude.DefaultWorkerTools()
+	}
+	rules := map[string]any{}
+	for _, t := range tools {
+		rest, ok := strings.CutPrefix(t, "Bash(")
+		if !ok {
+			continue
+		}
+		cmd, ok := strings.CutSuffix(rest, ":*)")
+		if !ok || !bashCommandOK(cmd) {
+			continue
+		}
+		rules[cmd] = "allow"
+		rules[cmd+" *"] = "allow"
+	}
+	if len(rules) == 0 {
+		return "deny"
+	}
+	rules["*"] = "deny" // sorts before every allowed command, so it is read first
+	return rules
+}
+
+// bashCommandOK accepts a plain command prefix: it starts with a letter,
+// digit, dot or slash and holds only letters, digits and . / _ - and
+// spaces, so no wildcard, quote or shell metacharacter gets through.
+func bashCommandOK(cmd string) bool {
+	if cmd == "" || cmd != strings.TrimSpace(cmd) {
+		return false
+	}
+	for i, r := range cmd {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '/':
+		case i > 0 && (r == '_' || r == '-' || r == ' '):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // The JSONL envelope is defined by the v1.19.0 CLI's cli/cmd/run.ts;
