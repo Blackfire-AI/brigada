@@ -68,9 +68,10 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
+    state: needs_foreman
     branch: "brigada/task-137"
     rounds: 1
+    question: "What are the full commit SHAs for actions/checkout v5 and actions/setup-go v6 (or may I use network access to resolve them)? I will pin every uses: line with a trailing version comment."
   - id: 138
     name: "legal-notices"
     title: "NOTICE and third-party notices generated from go-licenses (B10)"
