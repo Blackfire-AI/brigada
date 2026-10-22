@@ -7,7 +7,7 @@ title: "Plan 37 follow-up: SQLITE_BUSY on read paths under -race (PR #58 race jo
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-10-22T18:57:49.933659Z
-updated: 2026-10-22T19:00:08.790843Z
+updated: 2026-10-22T19:00:26.769977Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
