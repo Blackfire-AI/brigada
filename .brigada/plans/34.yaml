@@ -30,7 +30,7 @@ tasks:
     effort: medium
     state: running
     branch: "brigada/task-118-r2"
-    rounds: 1
+    rounds: 2
   - id: 119
     name: "runner"
     title: "Runner and prompt: execute plan_review jobs"
