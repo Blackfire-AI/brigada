@@ -435,7 +435,7 @@ Landing is brigada's. When a task is `done` and approved (an `approve` verdict o
 
 Landing is per task, not per plan: a stack lands in dependency order as its tasks finish, and the target moves with the plan. It happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker ([section 8](#8-agents-quota-and-health)). Where approved work lands is `land_target` ([section 6](#6-configuring-a-project)): the project's default branch, or a staging branch such as `brigada/landed`.
 
-Whether you land by hand or the land job does it, the engine learns the task landed: whenever the runner refreshes the project's default branch — a headless foreman turn, or `brigada attach` — it scans the branch for `Brigada-Task: <id>` trailers and records each task it finds as landed with its commit. So `brigada status` and the foreman show `landed` for a task you merged by hand, and a plan whose tasks all landed says so in its done report.
+Whether you land by hand or the land job does it, the engine learns the task landed: whenever the runner refreshes the project's default branch — a headless foreman turn, or `brigada attach` — it scans the branch for `Brigada-Task: <id>` trailers and records each task it finds as landed with its commit. So `brigada status` and the foreman show `landed` for a task you merged by hand, and a plan whose tasks all landed says so in its done report. A task parked for a land conflict or a rejected push, or whose push waits for approval, that you then landed by hand returns to `done` and leaves the needs-you queue.
 
 ### Gates and holds
 

@@ -410,6 +410,16 @@ func (r landRecord) validate() error {
 // the task done and marks it landed.
 func (e *Engine) landCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	if c.Error != "" {
+		// A push rejected because the target moved, for a task whose
+		// landing is already recorded as pushed — by its trailer on the
+		// default branch — leaves nothing for the foreman.
+		if existing, err := landingTx(tx, job.TaskID); err != nil {
+			return err
+		} else if existing != nil && existing.Pushed == "pushed" && pushRejected(c.Error) {
+			// The trailer scan may have settled the task while this job
+			// was live, leaving the plan open; the job's end closes it.
+			return e.finishLandPlanTx(tx, job, now)
+		}
 		// The runner could not attempt the landing at all (git failed):
 		// the task waits for the foreman like any failure.
 		return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: boundNote(c.Error)}, now)
@@ -467,6 +477,53 @@ func landingTx(tx *sql.Tx, taskID int64) (*landingRow, error) {
 		return nil, fmt.Errorf("read the landing of task %d: %w", taskID, err)
 	}
 	return l, nil
+}
+
+// relandStaleWaitingTx forgets the other landings of the target that
+// waited at the push gate on a waiting ref the runner has just deleted
+// as stale (§7.1): their commits are gone from the remote, so they stop
+// showing "waits to push" and the land rule queues each task again. A
+// landing with a live land job — its push already released — is left
+// for that job, as the push approval leaves it.
+func (e *Engine) relandStaleWaitingTx(tx *sql.Tx, job *jobRow, target string, now time.Time) error {
+	rows, err := tx.Query(`SELECT l.task_id FROM landings l WHERE l.project_id = ? AND l.target_branch = ?
+		AND l.pushed = 'waiting' AND l.task_id <> ?
+		AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.task_id = l.task_id AND j.kind = 'land'
+			AND j.status IN ('queued', 'leased', 'running'))
+		ORDER BY l.task_id`, job.ProjectID, target, job.TaskID)
+	if err != nil {
+		return fmt.Errorf("list the landings on the stale waiting ref: %w", err)
+	}
+	var tasks []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("list the landings on the stale waiting ref: %w", err)
+		}
+		tasks = append(tasks, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return fmt.Errorf("list the landings on the stale waiting ref: %w", err)
+	}
+	for _, id := range tasks {
+		if _, err := tx.Exec("DELETE FROM landings WHERE task_id = ?", id); err != nil {
+			return fmt.Errorf("forget the stale landing of task %d: %w", id, err)
+		}
+		if err := e.maybeLandTaskTx(tx, id, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pushRejected reports whether a land job's error is git rejecting a push
+// because the target moved.
+func pushRejected(msg string) bool {
+	msg = strings.ToLower(msg)
+	return strings.Contains(msg, "rejected") || strings.Contains(msg, "non-fast-forward")
 }
 
 // landSucceededTx marks the task landed (§7.1): the landing record is

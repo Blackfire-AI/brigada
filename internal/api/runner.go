@@ -187,6 +187,8 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request, runnerID
 		Outcome:     req.Outcome,
 		ErrorKind:   req.ErrorKind,
 		LimitUntil:  req.LimitUntil,
+
+		StaleDropped: req.StaleDropped,
 	}
 	ans, err := s.eng.Complete(r.Context(), runnerID, req.JobID, req.LeaseID, c)
 	if err != nil {
@@ -342,6 +344,9 @@ type completeRequest struct {
 	// reset time (§4.4).
 	ErrorKind  string `json:"error_kind,omitempty"`
 	LimitUntil string `json:"limit_until,omitempty"`
+	// StaleDropped names the target whose stale waiting ref a land job
+	// deleted (§7.1).
+	StaleDropped string `json:"stale_dropped,omitempty"`
 }
 
 type releaseRequest struct {

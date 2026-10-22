@@ -172,6 +172,9 @@ type Completion struct {
 	// empty means unknown.
 	ErrorKind  string
 	LimitUntil string
+	// StaleDropped names the target whose stale waiting ref a land job
+	// deleted.
+	StaleDropped string
 }
 
 // Complete delivers the run's outcome (§12.3).
@@ -187,6 +190,7 @@ func (c *Client) Complete(ctx context.Context, jobID int64, leaseID string, comp
 		Outcome:         comp.Outcome,
 		ErrorKind:       comp.ErrorKind,
 		LimitUntil:      comp.LimitUntil,
+		StaleDropped:    comp.StaleDropped,
 	}
 	return c.answer(ctx, "/v1/runner/complete", req)
 }

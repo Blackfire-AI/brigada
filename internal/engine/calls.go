@@ -234,6 +234,9 @@ type Completion struct {
 	// the reset time then, RFC3339, empty when unknown.
 	ErrorKind  string
 	LimitUntil string
+	// StaleDropped names the target branch whose stale waiting ref a
+	// land job deleted (§7.1): the landings that waited on it land again.
+	StaleDropped string
 }
 
 // Complete finishes a job as done or failed — or, when the completion
@@ -302,6 +305,14 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 	}
 	if job.LeaseEpoch < epoch {
 		return AnsStaleEpoch, nil
+	}
+
+	// A land job that deleted the target's stale waiting ref says so on
+	// whatever completion it ends with, an error included.
+	if job.Kind == KindLand && c.StaleDropped != "" {
+		if err := e.relandStaleWaitingTx(tx, job, c.StaleDropped, now); err != nil {
+			return "", err
+		}
 	}
 
 	status := statusDone

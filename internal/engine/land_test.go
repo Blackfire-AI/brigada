@@ -529,6 +529,47 @@ func TestLandHoldDoesNotBlockDependentsWork(t *testing.T) {
 	}
 }
 
+// TestStaleDroppedForgetsOtherWaitingLandings: a land job that deleted the
+// target's stale waiting ref says so on its completion; the other
+// landing that waited at the push gate is forgotten and its task's land
+// job is queued again, while the completing job's own landing stays.
+func TestStaleDroppedForgetsOtherWaitingLandings(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	a := e.task
+	b := e.addTask("{}")
+
+	e.runTaskToDone(a, author, reviewer)
+	g := e.leaseGit(author)
+	if g == nil {
+		t.Fatal("A's land job was not leased")
+	}
+	if ans := e.complete(g, Completion{Result: `{"target_branch":"main","commit":"aaa111","check_passed":true,"pushed":"waiting"}`}); ans != AnsOK {
+		t.Fatalf("complete A's land job: %s", ans)
+	}
+	e.runTaskToDone(b, author, reviewer)
+	g = e.leaseGit(author)
+	if g == nil {
+		t.Fatal("B's land job was not leased")
+	}
+	if ans := e.complete(g, Completion{
+		Result:       `{"target_branch":"main","commit":"bbb222","check_passed":true,"pushed":"waiting"}`,
+		StaleDropped: "main",
+	}); ans != AnsOK {
+		t.Fatalf("complete B's land job: %s", ans)
+	}
+	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", a); n != 0 {
+		t.Errorf("A's stale landing records = %d, want it forgotten", n)
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land' AND status = 'queued'", a); n != 1 {
+		t.Errorf("A's queued land jobs = %d, want 1", n)
+	}
+	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", b); n != 1 {
+		t.Errorf("B's landing records = %d, want its own kept", n)
+	}
+}
+
 // TestLandFailedNeedsYouReason: a task parked by a land conflict shows the
 // conflict's own reason in the needs-you queue, not an older event's.
 func TestLandFailedNeedsYouReason(t *testing.T) {
