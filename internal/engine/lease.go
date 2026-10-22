@@ -166,8 +166,19 @@ func (e *Engine) Lease(ctx context.Context, owner int64, harnesses, labels []str
 	// the failed transaction rolled back, grant included.
 	err := store.RetryBusy(tctx, func() error {
 		grant = nil
-		return e.store.Update(tctx, func(tx *sql.Tx) error {
-			now := e.cfg.Now()
+		now := e.cfg.Now()
+		// The poll runs in two short write transactions, not one long
+		// one: first the runner's arrival — seen, its offer recorded,
+		// the sweep run with both in effect — then the queue walk. Each
+		// holds the write lock only for its own work, so a poll never
+		// sits on the lock through the walk while a heartbeat or an
+		// upload waits. The lease semantics are unchanged: the arrival
+		// still lands atomically with the sweep that reads it, the walk
+		// still sees the sweep's requeues committed, and every state the
+		// walk reads it reads fresh under the write lock — the same
+		// contract two concurrent polls already keep between each other,
+		// now also between one poll's own halves.
+		if err := e.store.Update(tctx, func(tx *sql.Tx) error {
 			// A poll shows the runner is here, before the sweep can call it
 			// stale (§8 "Health").
 			if err := e.runnerSeenTx(tx, owner, now); err != nil {
@@ -195,9 +206,12 @@ func (e *Engine) Lease(ctx context.Context, owner int64, harnesses, labels []str
 				string(labelsJSON), string(harnessesJSON), owner); err != nil {
 				return fmt.Errorf("record the offer of runner %d: %w", owner, err)
 			}
-			if _, err := e.sweepPolledTx(tx, now, owner); err != nil {
-				return err
-			}
+			_, err = e.sweepPolledTx(tx, now, owner)
+			return err
+		}); err != nil {
+			return err
+		}
+		return e.store.Update(tctx, func(tx *sql.Tx) error {
 			g, err := e.leaseTx(tx, owner, harnesses, labels, now)
 			if err != nil {
 				return fmt.Errorf("lease for runner %d: %w", owner, err)

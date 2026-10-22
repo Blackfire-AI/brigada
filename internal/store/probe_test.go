@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -15,6 +16,11 @@ import (
 // on. Before this, every read began immediate too and took SQLite's
 // single write lock, so a reader could starve writers past the busy
 // timeout and a long writer could fail every concurrent reader.
+//
+// The writer starts from inside the View callback, so the read
+// transaction is provably open while the writer commits: had View begun
+// immediate, the writer's own immediate begin would sit on the lock
+// until the view closed.
 func TestViewDoesNotHoldTheWriteLock(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "view.db")
@@ -33,39 +39,40 @@ func TestViewDoesNotHoldTheWriteLock(t *testing.T) {
 	defer other.Close()
 	s := &Store{db: db, path: path}
 
+	started := make(chan struct{})
+	writer := make(chan error, 1)
+	go func() {
+		<-started
+		tx, err := other.BeginTx(ctx, nil) // the DSN begins it immediate
+		if err != nil {
+			writer <- err
+			return
+		}
+		if _, err := tx.Exec("INSERT INTO t (v) VALUES ('w')"); err != nil {
+			tx.Rollback()
+			writer <- err
+			return
+		}
+		writer <- tx.Commit()
+	}()
+
 	err = s.View(ctx, func(tx *sql.Tx) error {
 		var n int
 		if err := tx.QueryRow("SELECT COUNT(*) FROM t").Scan(&n); err != nil {
 			return err
 		}
-		// A second statement keeps the read transaction open while the
-		// writer below commits.
-		return tx.QueryRow("SELECT COUNT(*) FROM t").Scan(&n)
+		// The read transaction is open here: the writer begins now, and
+		// it may commit before this View closes only if the view holds
+		// no write lock.
+		close(started)
+		select {
+		case err := <-writer:
+			return err
+		case <-time.After(2 * time.Second):
+			return fmt.Errorf("the writer is still waiting after 2s: the open view holds the write lock")
+		}
 	})
 	if err != nil {
-		t.Fatalf("view: %v", err)
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		tx, err := other.BeginTx(ctx, nil) // the DSN begins it immediate
-		if err != nil {
-			done <- err
-			return
-		}
-		if _, err := tx.Exec("INSERT INTO t (v) VALUES ('w')"); err != nil {
-			tx.Rollback()
-			done <- err
-			return
-		}
-		done <- tx.Commit()
-	}()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("writer locked out by the open view: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("writer still waiting after 2s: the view holds the write lock")
+		t.Fatalf("view with a concurrent writer: %v", err)
 	}
 }
