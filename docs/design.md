@@ -277,6 +277,8 @@ Task states: `pending` (deps not done) → `ready` → `running` → `checking` 
 
 Approval holds a plan that trips a rule: a task class other than `implement`/`review`/`answer`, a task touching a protected path, a task naming an extra repository outside the project default — or, mid-run, a spend past the plan budget. The keys `approval_budget`, `approval_classes`, `approval_protected_paths` and `approval_max_tasks` (§13.1) set them; the budget is the rule on by default, the task count is off unless the project sets one.
 
+The plan review (§6.2, §7.2) runs before these rules. Its verdict decides whether the plan reaches them; the rules still decide what the user sees: a plan the review approves is judged by the plan gate's rules as an unreviewed plan is, so it can still wait for the user's yes, and a task that trips a rule is held as it would be without a review.
+
 The loop — plan, work, check, review, land, push — is brigada's, and the user stops it with rules. The engine enforces every stop; the foreman has no tool to pass one, as it has none to approve a plan. There are three **gates**:
 
 - `plan`: before a plan's tasks are queued;
@@ -377,6 +379,31 @@ Family detection: the job record; for `brigada review --branch` without a job, t
 **What it never does.** Never pushes; never force-updates anything; never touches the remote's branches (no delete, no push, no `fetch --prune`); never rewrites commits that existed before the call; never changes the engine's task state, which stays `done`.
 
 **The landing record.** The hand-driven `brigada land` writes no record itself, but the engine sees a landing made outside the land job: wherever the project's default branch is freshly fetched — the runner's foreman checkout refresh, on a headless turn or at attach — the runner scans the branch for `Brigada-Task: <id>` trailers and reports each to the engine (`POST /v1/landed`, runner or client token), which records it as the task's landing with the commit that carries the trailer. A task the land job landed is already recorded; either record counts, and the read is idempotent. This is what lets `brigada status`, the plan listing and the plan's done report tell "already merged" from "not yet landed". The record also settles a task the land job left unfinished: a task parked at needs_foreman by a land failure (a conflict, a failed check, a rejected push) returns to done and its needs-you lines clear, a landing waiting at the push gate, or left to the user under `gate_push = never`, becomes pushed at the commit that carries the trailer, and the task's dependents are released as a finished task's are. A push rejected as non-fast-forward for a task already recorded landed raises nothing. A waiting ref `refs/brigada/land/<target>` that the target no longer fast-forwards to — the target moved past it by a hand landing or a cherry-pick — and that no longer holds the target's history is deleted by the next landing job before it stacks, and the other landings that waited on it are forgotten and land again; a ref the target can still fast-forward to is untouched.
+
+### 7.2 Reviewing plans and specs
+
+A plan's tasks are not queued until the plan has been reviewed (§6.2). The review is a `plan_review` job with no task. It is placed on an agent of a **different family** than the foreman's, at the project's `plan_review.tier` (default `standard`) and `plan_review.effort` (default `medium`), so its tier and effort are its own, as a task review's are. The reviewer runs read-only in a worktree at the head of the default branch.
+
+Its input is the plan, every task with its spec verbatim, check, class, tier, effort and place in the graph, and a summary of the project's other active plans' tasks and branches. The prompt (`internal/prompt`) asks six checks, each finding citing evidence from the checkout:
+
+- (a) work already on the default branch or in another active plan;
+- (b) specs that contradict the code or docs/design.md;
+- (c) tasks or plans touching the same files;
+- (d) the dependency shape and its width;
+- (e) tier and effort that do not fit the task's difficulty;
+- (f) a missing or vague check or acceptance criterion.
+
+The verdict block (§7) ends the job: `approve`, or `changes` with findings. `approve` runs the approval rules (§6.3) as a no-review plan does. `changes` keeps the plan `reviewing` and reaches the foreman as a `plan_reviewed` event with the findings verbatim; the foreman's amendment starts the next round. A plan has at most two rounds. The second `changes` proceeds through the same evaluation as `approve`, with its findings recorded and shown.
+
+**Amendments.** An amendment of an active plan that adds tasks or respecs a pending task is reviewed; the round covers only the added and edited tasks. An amendment of a plan awaiting the user's yes is not reviewed: the approval rules judge the whole plan and the user's yes covers it. Cancelling, re-pointing and retiering are never reviewed.
+
+**A reviewer that gives no verdict** (an error, a limit, no block, a malformed block, or an approve without substantive findings) is retried once on another agent, the failed agent excluded, as a task review is (§7). If the retry also gives no verdict, or no other agent can take it, the plan stays `reviewing` with the verdict recorded as `no_verdict` and the reason sent to the foreman (`plan_reviewed`, with a wake). The foreman's amendment answers it: one that adds or respecs tasks starts another round while one is left; one that adds and respecs none (a cancel, a retier) lets the plan proceed through the approve evaluation.
+
+**A reviewer that cannot be had** proceeds through the same evaluation, with the reason recorded: no agent of another family offers the review class, the job is never leased (the queue TTL), it runs past its hard cap, or it loses its runner `MaxAttempts` times. `brigada recover` requeues the review round of a plan it restores as `reviewing` (§6.4); if no reviewer can take it, the plan proceeds.
+
+**Skipped.** A plan is not reviewed when `plan_review` is off for the project, or when it is exactly one task of the `review` class (the `brigada review --branch` plan).
+
+Events: `plan_review_queued` when a round or its retry is queued, `plan_reviewed` when a round ends. Status shows a reviewing plan's round as `reviewing (round N)`.
 
 ## 8. Dispatcher
 
