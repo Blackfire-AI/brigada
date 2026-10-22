@@ -38,7 +38,7 @@ tasks:
     deps: ["engine"]
     base: "engine"
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-119"
     rounds: 1
   - id: 120
