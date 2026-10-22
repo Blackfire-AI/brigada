@@ -30,6 +30,6 @@ tasks:
     effort: high
     review_tier: heavy
     caps: {fix_rounds: 4, review_rounds: 4}
-    state: ready
+    state: running
     branch: ""
     rounds: 0
