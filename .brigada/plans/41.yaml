@@ -27,7 +27,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-152"
     rounds: 0
   - id: 153
@@ -39,7 +39,7 @@ tasks:
     continue: "shard-race"
     tier: light
     effort: low
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 154
