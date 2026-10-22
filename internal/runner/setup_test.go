@@ -57,15 +57,15 @@ echo '{"type":"tool_end","name":"Edit"}'
 
 // cacheProbe is a setup command that notes whether its cache directory
 // already held what a previous run left there.
-const cacheProbe = `if [ -f "$BRIGADA_CACHE_DIR/stamp" ]; then echo hit; else echo miss; : > "$BRIGADA_CACHE_DIR/stamp"; fi >> "$BRIGADA_TEST_MARKERS/cache.log"`
+const cacheProbe = `if [ -f "$BRIGADA_CACHE_DIR/stamp" ]; then echo hit; else echo miss; : > "$BRIGADA_CACHE_DIR/stamp"; fi >> "$TEST_MARKERS_DIR/cache.log"`
 
 func TestRunnerSetupRunsBeforeWorkerAndCheck(t *testing.T) {
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
-	task := e.seedTask("", `echo check >> "$BRIGADA_TEST_MARKERS/order.log"`)
+	task := e.seedTask("", `echo check >> "$TEST_MARKERS_DIR/order.log"`)
 	e.setTaskSetup(task, engine.SetupSpec{
-		Command:        `echo "setup: $(ls | tr '\n' ' ')" >> "$BRIGADA_TEST_MARKERS/order.log"`,
+		Command:        `echo "setup: $(ls | tr '\n' ' ')" >> "$TEST_MARKERS_DIR/order.log"`,
 		TimeoutMinutes: 5,
 	})
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
@@ -173,7 +173,7 @@ func TestRunnerFailedSetupIsAnInfrastructureFailure(t *testing.T) {
 	clk := newManualClock()
 	e := newTestEnv(t, engine.Config{Now: clk.Now})
 	e.seedProject(remote)
-	task := e.seedTask("", `echo check >> "$BRIGADA_TEST_MARKERS/order.log"`)
+	task := e.seedTask("", `echo check >> "$TEST_MARKERS_DIR/order.log"`)
 	e.setTaskSetup(task, engine.SetupSpec{Command: "echo setup-boom; exit 7", TimeoutMinutes: 5})
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
 	markers := markerDir(t)
@@ -234,7 +234,7 @@ func TestRunnerSetupTimeoutKillsTheTree(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
-	e.setTaskSetup(task, engine.SetupSpec{Command: `(sleep 30; : > "$BRIGADA_TEST_MARKERS/straggler") & sleep 30`, TimeoutMinutes: 5})
+	e.setTaskSetup(task, engine.SetupSpec{Command: `(sleep 30; : > "$TEST_MARKERS_DIR/straggler") & sleep 30`, TimeoutMinutes: 5})
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
 	markerDir(t)
 

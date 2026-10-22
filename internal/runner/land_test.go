@@ -698,7 +698,7 @@ func TestRunnerLandGateNeverRecordsThePushCmd(t *testing.T) {
 	seed := remoteBranchCommit(t, remote, "main")
 	e := newTestEnv(t, engine.Config{})
 	markers := markerDir(t)
-	task, work := e.landTest(t, remote, `{"gate_push":"never","after_land":"echo after-land >> \"$BRIGADA_TEST_MARKERS/after-land\""}`,
+	task, work := e.landTest(t, remote, `{"gate_push":"never","after_land":"echo after-land >> '`+markers+`/after-land'"}`,
 		"Add work.txt with hello in it.", `test "$(cat work.txt)" = hello`, reviewScript(reviewApproveResult))
 
 	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
@@ -974,9 +974,9 @@ func TestRunnerLandCheckRunsSetupAndSeesExtraRepos(t *testing.T) {
 	extra := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
-	e.setProjectSettings(`{"gate_push":"auto","default_check":"grep -qx \"$PWD\" \"$BRIGADA_TEST_MARKERS/setup-dirs\" && test -f \"$BRIGADA_REPO_TOOLS/README.md\""}`)
+	e.setProjectSettings(`{"gate_push":"auto","default_check":"grep -qx \"$PWD\" \"$TEST_MARKERS_DIR/setup-dirs\" && test -f \"$BRIGADA_REPO_TOOLS/README.md\""}`)
 	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
-	setup := `{"command":"echo \"$PWD\" >> \"$BRIGADA_TEST_MARKERS/setup-dirs\"","timeout_minutes":5}`
+	setup := `{"command":"echo \"$PWD\" >> \"$TEST_MARKERS_DIR/setup-dirs\"","timeout_minutes":5}`
 	extras := `{"repos":[{"name":"tools","repo":"example.invalid/tools","url":"` + extra + `"}],"source":"task"}`
 	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
 		_, err := tx.Exec("UPDATE tasks SET setup = ?, extra_repos = ? WHERE id = ?", setup, extras, task)

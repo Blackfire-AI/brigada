@@ -16,7 +16,7 @@ brigada coordinates AI coding CLIs that you already have. These are the rules it
 
 If a vendor's terms do not allow what you want to do with a subscription login, the fallback is to use that vendor's API with your own key instead.
 
-brigada has no API-key setting of its own yet. Today the adapters start each CLI with your environment (minus brigada's own variables) and leave its authentication alone, so a CLI that you have configured for API-key use, the way its vendor documents, is driven just the same. A dedicated per-adapter API-key mode is planned, not shipped. API use is billed by the vendor under its own terms, separately from any subscription.
+brigada has no API-key setting of its own yet. Today the adapters start each CLI with your environment (minus brigada's own variables and your git-forge, cloud and registry credentials; the vendors' own `ANTHROPIC_*` and `OPENAI_*` variables stay) and leave its authentication alone, so a CLI that you have configured for API-key use, the way its vendor documents, is driven just the same. A dedicated per-adapter API-key mode is planned, not shipped. API use is billed by the vendor under its own terms, separately from any subscription.
 
 ## Vendor terms
 

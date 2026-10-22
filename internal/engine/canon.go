@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/Blackfire-AI/brigada/internal/projecturl"
 )
 
 // ErrInvalidRepoURL marks a repo URL the engine will not take: empty,
@@ -70,18 +72,7 @@ func Canonicalize(rawURL string) (string, error) {
 // userinfo (everything up to the last '@', so a password holding '/' or
 // ':' goes too) and any query or fragment.
 func RedactRepoURL(raw string) string {
-	s := strings.TrimSpace(raw)
-	if i := strings.IndexAny(s, "?#"); i >= 0 {
-		s = s[:i]
-	}
-	prefix := ""
-	if i := strings.Index(s, "://"); i >= 0 {
-		prefix, s = s[:i+3], s[i+3:]
-	}
-	if at := strings.LastIndex(s, "@"); at >= 0 {
-		s = "***@" + s[at+1:]
-	}
-	return prefix + s
+	return projecturl.Redact(raw)
 }
 
 func parseRepo(rawURL string) (repoParts, error) {

@@ -8,12 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/projecturl"
 )
 
 // A runner's workspace (§5.1, product rule 6): a per-repo mirror cache
@@ -504,6 +504,13 @@ func (w *workspace) commitLeftovers(ctx context.Context) error {
 	if strings.TrimSpace(string(out)) == "" {
 		return nil
 	}
+	if out, err := w.git(ctx, "-C", w.dir, "status", "--porcelain=v1", "-z", "--untracked-files=all"); err != nil {
+		return fmt.Errorf("read the worktree's status: %w", trimCmdError(out, err))
+	} else if bad := suspectLeftovers(string(out)); len(bad) > 0 {
+		return fmt.Errorf("the worker left files that look like credentials or hidden configuration, "+
+			"which the runner will not commit and push: %s; remove them or add them to .gitignore",
+			listPaths(bad, maxListedPaths))
+	}
 	if out, err := w.git(ctx, "-C", w.dir, "add", "-A"); err != nil {
 		return fmt.Errorf("stage the worker's uncommitted changes: %w", trimCmdError(out, err))
 	}
@@ -580,7 +587,9 @@ func (w *workspace) remoteBranchSHA(ctx context.Context) (string, bool) {
 // prompt). Both streams come back: git names its failures on stderr.
 func (w *workspace) git(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Env = append(os.Environ(), w.gitEnv...)
+	// A remote that wants credentials the runner lacks fails at once
+	// instead of waiting on a prompt nobody will answer.
+	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0"), w.gitEnv...)
 	var combined strings.Builder
 	cmd.Stdout = &combined
 	cmd.Stderr = &combined
@@ -613,20 +622,11 @@ func trimCmdError(out []byte, err error) error {
 	return fmt.Errorf("%w: %s", err, detail)
 }
 
-// credURLRe matches the userinfo of a URL: scheme://user:pass@. The
-// user and password parts cannot contain '/', ':' before the separator
-// or '@', so the pattern stays anchored at the authority.
-var credURLRe = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@:\s]+:[^/@\s]+@`)
-
-// redactURL replaces any user:password in a URL with ***: git mostly
-// redacts credentials itself, but the runner quotes URLs and git output
-// in its errors, and one leak through a job record is one too many.
+// redactURL replaces any userinfo in the URLs a text quotes with ***:
+// git mostly redacts credentials itself, but the runner quotes URLs and
+// git output in its errors, and one leak through a job record is one too
+// many. A lone token (https://<token>@host) goes with a user:password
+// pair, through the same redaction the engine uses for repo URLs.
 func redactURL(s string) string {
-	s = credURLRe.ReplaceAllString(s, "$1***@")
-	return scpCredRe.ReplaceAllString(s, "${1}***@")
+	return projecturl.RedactText(s)
 }
-
-// scpCredRe matches the userinfo of a scheme-less URL whose password
-// holds a ':' or '/', such as user:1234/secret@host:org/repo: a run of
-// non-space characters, with a ':' and then a '/', that ends in '@'.
-var scpCredRe = regexp.MustCompile(`(^|[\s'"(])[^\s'"@/:]+:[^\s'"@/][^\s'"@]*/[^\s'"@]*@`)

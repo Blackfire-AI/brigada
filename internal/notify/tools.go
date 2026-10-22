@@ -83,7 +83,8 @@ func (n NotifySend) Notify(ctx context.Context, title, body string) error {
 }
 
 // notifySendArgs builds the argv for one banner: the title and body
-// are whole arguments, never joined into a command line.
+// are whole arguments, never joined into a command line, and follow a
+// `--` so a body that begins with a dash is text and never an option.
 func notifySendArgs(title, body string) []string {
-	return []string{title, body}
+	return []string{"--", title, body}
 }

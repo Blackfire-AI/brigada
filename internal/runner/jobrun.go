@@ -268,11 +268,12 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 	if err != nil {
 		return &noWorkerError{err}
 	}
-	// The worker never sees the runner's own git credentials (§5.1):
-	// whatever variables GitEnv names are stripped from the command's
-	// environment, whatever the adapter put there. An unset Env means
-	// inherit, so it is materialized first for the same scrub.
-	cmd.Env = scrubEnv(cmd.Env, r.cfg.GitEnv)
+	// The worker never sees the runner's own git credentials (§5.1) or
+	// the user's ambient ones (§5.8): whatever variables GitEnv names and
+	// the credential set of scrubWorkerEnv names are stripped from the
+	// command's environment, whatever the adapter put there. An unset Env
+	// means inherit, so it is materialized first for the same scrub.
+	cmd.Env = scrubWorkerEnv(cmd.Env, r.cfg.GitEnv)
 	// The CLI's working directory is its worktree, and so is its PWD:
 	// the runner's own PWD points at the state directory, and a Node CLI
 	// that reads PWD before the cwd would work there.
@@ -760,7 +761,7 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 			if r.gone(ctx, "running the setup before the check") {
 				return
 			}
-			check := runCheck(ctx, ws.dir, r.grant.CheckCmd, r.cfg.CheckTimeout, r.extraEnvVars()...)
+			check := runCheckIn(ctx, ws.dir, r.grant.CheckCmd, r.cfg.CheckTimeout, r.cfg.commandEnv(r.extraEnvVars()...))
 			if r.gone(ctx, "running the check") {
 				// The check was cut short by the run ending, not by the
 				// check: a killed check's exit code says nothing.
@@ -961,10 +962,19 @@ func (r *jobRun) saveTranscript(ctx context.Context) error {
 func (r *jobRun) saveRecord(ctx context.Context, kind, name string, data []byte) error {
 	data = compactTranscript(data, r.uploadCap())
 	dir := filepath.Join(r.cfg.StateDir, "records")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
+	// MkdirAll and WriteFile keep the mode of what already exists, so a
+	// directory or record an older runner made open is narrowed here.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
 		return err
 	}
 	ans, _, err := r.client.UploadArtifact(ctx, r.grant.JobID, r.grant.LeaseID, kind, data)

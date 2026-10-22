@@ -363,7 +363,7 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 		if r.gone(ctx, "running the setup before the landing check") {
 			return nil, errors.New("the run was no longer ours while the landing setup ran")
 		}
-		check := runCheck(ctx, dir, grant.CheckCmd, r.cfg.CheckTimeout, r.extraEnvVars()...)
+		check := runCheckIn(ctx, dir, grant.CheckCmd, r.cfg.CheckTimeout, r.cfg.commandEnv(r.extraEnvVars()...))
 		if r.gone(ctx, "running the landing check") {
 			return nil, errors.New("the run was no longer ours while the landing check ran")
 		}
@@ -501,14 +501,15 @@ func (r *jobRun) runLandPushPhase(ctx context.Context) {
 }
 
 // runAfterLand runs the after_land command (§6.3) in the landing
-// clone, in the user's shell like a check: its failure is reported —
+// clone, under the environment of a check (credentials and brigada's
+// variables scrubbed, §5.8): its failure is reported —
 // in the record and the history — and never undone, never a change to
 // what landed. "" when none ran or it passed.
 func (r *jobRun) runAfterLand(ctx context.Context, dir string) string {
 	if r.grant.AfterLand == "" {
 		return ""
 	}
-	res := runCheck(ctx, dir, r.grant.AfterLand, r.cfg.CheckTimeout)
+	res := runCheckIn(ctx, dir, r.grant.AfterLand, r.cfg.CheckTimeout, r.cfg.commandEnv())
 	if !res.Failed() {
 		return ""
 	}

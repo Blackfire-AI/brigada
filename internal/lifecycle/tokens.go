@@ -99,7 +99,7 @@ func TokenForRole(path, role string) (name, secret string, err error) {
 		}
 		fields := strings.Fields(line)
 		if len(fields) != 3 {
-			return "", "", fmt.Errorf("token file %s: line %d: want `name role[:project] secret`, got %q", path, n+1, line)
+			return "", "", fmt.Errorf("token file %s: line %d: want `name role[:project] secret`, got %d fields", path, n+1, len(fields))
 		}
 		if fields[1] == role {
 			return fields[0], fields[2], nil

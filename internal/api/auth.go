@@ -75,7 +75,7 @@ func loadTokenFile(path string) ([]token, error) {
 		}
 		fields := strings.Fields(line)
 		if len(fields) != 3 {
-			return nil, fmt.Errorf("token file %s: line %d: want `name role[:project] secret`, got %q", path, n+1, line)
+			return nil, fmt.Errorf("token file %s: line %d: want `name role[:project] secret`, got %d fields", path, n+1, len(fields))
 		}
 		name, roleSpec, secret := fields[0], fields[1], fields[2]
 		if seenName[name] {
@@ -86,7 +86,7 @@ func loadTokenFile(path string) ([]token, error) {
 			tok.role = roleForeman
 			id, err := strconv.ParseInt(scope, 10, 64)
 			if err != nil || id <= 0 {
-				return nil, fmt.Errorf("token file %s: line %d: a foreman token is scoped as `foreman:<project id>`, got %q", path, n+1, roleSpec)
+				return nil, fmt.Errorf("token file %s: line %d: a foreman token is scoped as `foreman:<project id>`", path, n+1)
 			}
 			tok.project = id
 		} else {
@@ -96,7 +96,7 @@ func loadTokenFile(path string) ([]token, error) {
 			case roleForeman:
 				return nil, fmt.Errorf("token file %s: line %d: a foreman token is scoped as `foreman:<project id>`", path, n+1)
 			default:
-				return nil, fmt.Errorf("token file %s: line %d: unknown role %q; want client, foreman:<project id>, runner or admin", path, n+1, roleSpec)
+				return nil, fmt.Errorf("token file %s: line %d: unknown role; want client, foreman:<project id>, runner or admin", path, n+1)
 			}
 		}
 		if seenHash[tok.sha] {

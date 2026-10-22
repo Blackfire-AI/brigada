@@ -69,6 +69,11 @@ func newRelay(t *testing.T) *relay {
 	return r
 }
 
+// roundTripFunc is an http.RoundTripper made of a function.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
 // hook is r's webhook, pointed at the relay's URL.
 func (r *relay) hook() *Webhook {
 	return &Webhook{URL: r.srv.URL + "/hook"}
@@ -102,7 +107,7 @@ func TestWebhookPayloadForEachKind(t *testing.T) {
 		{KindPlanAwaitingApproval, 0, 1, `{"plan":1,"reason":"2 tasks at once"}`,
 			"plan #1 needs your approval: 2 tasks at once: `brigada plan approve 1` or `brigada plan reject 1`"},
 		{KindPlanDone, 0, 1, `{"plan":1,"status":"done"}`, "plan #1 done: Ship it"},
-		{KindTaskCheckFailed, 1, 1, `{"status":"needs_foreman","reason":"exit 1"}`, "task #1 needs you: exit 1"},
+		{KindTaskCheckFailed, 1, 1, `{"status":"needs_foreman","reason":"exit 1"}`, "task #1 needs you: its check failed"},
 		{KindTaskNeedsHelp, 1, 1, `{"status":"needs_foreman","question":"which way?"}`, "task #1 needs you: which way?"},
 		{KindTaskFailed, 1, 1, `{"status":"needs_foreman","reason":"boom"}`, "task #1 needs you: boom"},
 		{KindReviewChanges, 1, 1, `{"status":"needs_foreman","findings":"the retry loop"}`, "task #1 needs you: the retry loop"},
@@ -233,7 +238,15 @@ func TestWebhookTimeoutDoesNotBlock(t *testing.T) {
 	r := newRelay(t)
 	r.delay = 500 * time.Millisecond
 	hook := r.hook()
-	hook.Timeout = 20 * time.Millisecond
+	hook.Timeout = 100 * time.Millisecond
+	// Attempts are counted where they start, in the client: an attempt
+	// whose connect the timeout cut never reaches the relay's handler,
+	// so counting there would make the test depend on the machine's load.
+	var attempts atomic.Int32
+	hook.Client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		attempts.Add(1)
+		return http.DefaultTransport.RoundTrip(req)
+	})}
 
 	start := time.Now()
 	if err := NewLoop(st, None{}, nil).WithWebhook(hook).Flush(ctx); err != nil {
@@ -243,7 +256,7 @@ func TestWebhookTimeoutDoesNotBlock(t *testing.T) {
 		t.Fatalf("flush took %v, want it back at once with the post queued", elapsed)
 	}
 	waitFor(t, "the attempt and its one retry", func() bool {
-		return len(r.received()) >= 2
+		return attempts.Load() >= 2
 	})
 	if got := cursorOf(t, ctx, st); got == 0 {
 		t.Fatal("cursor did not advance past the timed-out event")
@@ -263,14 +276,14 @@ func TestWebhookHungRelayDoesNotDelayTheTick(t *testing.T) {
 	const events = 6
 	var last int64
 	for i := 0; i < events; i++ {
-		last = appendEvent(t, ctx, st, KindTaskCheckFailed, 1, 1,
+		last = appendEvent(t, ctx, st, KindTaskFailed, 1, 1,
 			fmt.Sprintf(`{"status":"needs_foreman","reason":"failure %d"}`, i+1))
 	}
 
 	r := newRelay(t)
-	r.delay = 300 * time.Millisecond // every answer outlives the attempt
+	r.delay = 600 * time.Millisecond // every answer outlives the attempt
 	hook := r.hook()
-	hook.Timeout = 50 * time.Millisecond
+	hook.Timeout = 150 * time.Millisecond
 
 	start := time.Now()
 	if err := NewLoop(st, None{}, nil).WithWebhook(hook).Flush(ctx); err != nil {

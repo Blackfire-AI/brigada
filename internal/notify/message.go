@@ -142,6 +142,19 @@ func Message(ev Event) (t, body string, ok bool) {
 	return "", "", false
 }
 
+// hookText is the text the webhook posts for an event whose banner text
+// is body: the same line, except that a failed check's own output never
+// leaves the machine — the relay is a third party's, and a check's tail
+// can carry whatever the command printed (§10). Every other kind, a
+// task out of fix rounds with its reason included, posts the banner's
+// line.
+func hookText(ev Event, body string) string {
+	if ev.Kind == KindTaskCheckFailed {
+		return oneLine(fmt.Sprintf("task #%d needs you: its check failed", ev.TaskID), bodyLimit)
+	}
+	return body
+}
+
 // firstLine keeps s up to its first newline: the line of a report a
 // banner shows, the rest left for `brigada status` and the history.
 func firstLine(s string) string {

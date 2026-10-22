@@ -61,6 +61,10 @@ func (s *Store) Backup(ctx context.Context, dst string) error {
 		}
 		return copyAll(bk)
 	})
+	if err == nil {
+		// The copy holds the whole store: owner-only, whatever the umask.
+		err = os.Chmod(dst, 0o600)
+	}
 	if err != nil {
 		os.Remove(dst)
 		return fmt.Errorf("backup %s: %w", dst, err)
@@ -100,6 +104,9 @@ func Restore(ctx context.Context, snapshot, dst string) error {
 		}
 		return copyAll(bk)
 	})
+	if err == nil {
+		err = os.Chmod(dst, 0o600)
+	}
 	if err != nil {
 		conn.Close()
 		db.Close()

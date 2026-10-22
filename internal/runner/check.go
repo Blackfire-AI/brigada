@@ -60,7 +60,17 @@ func (c CheckResult) JSON() string {
 // is killed — killing only sh would leave the check's grandchildren
 // (a build, a test binary) holding the output pipe and the run hanging
 // — and the last checkTailBytes of its combined output are kept.
+//
+// The command inherits the runner's whole environment, with env added;
+// a task's check goes through runCheckIn with the scrubbed one.
 func runCheck(ctx context.Context, dir, command string, timeout time.Duration, env ...string) CheckResult {
+	return runCheckIn(ctx, dir, command, timeout, withEnv(nil, env))
+}
+
+// runCheckIn is runCheck with the command's complete environment given:
+// the credential-scrubbed one a repository's own check runs under
+// (Config.commandEnv, §5.8).
+func runCheckIn(ctx context.Context, dir, command string, timeout time.Duration, env []string) CheckResult {
 	if command == "" {
 		return CheckResult{}
 	}
@@ -71,8 +81,7 @@ func runCheck(ctx context.Context, dir, command string, timeout time.Duration, e
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = dir
-	// The extra checkouts' variables (§5.8) join the inherited environment.
-	cmd.Env = withEnv(nil, env)
+	cmd.Env = env
 	cmd.SysProcAttr = processGroup()
 	// The context's cancel kills the group, not just sh; WaitDelay
 	// bounds the wait for the pipes the killed tree can no longer

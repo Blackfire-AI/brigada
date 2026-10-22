@@ -18,7 +18,7 @@ You may pay for more than one AI coding subscription. brigada sits above their o
 
 brigada drives the vendors' **unmodified** CLIs, each signed in with your own account. It never rotates or pools credentials. See [docs/TERMS.md](docs/TERMS.md).
 
-> **Before you start.** brigada is local-first: one Go binary and a SQLite store on your machine. Workers run in git worktrees, not containers, and a worker can do what your user can do. Checks run with your credentials: do not point brigada at a repository you do not trust.
+> **Before you start.** brigada is local-first: one Go binary and a SQLite store on your machine. Workers run in git worktrees, not containers, and a worker can do what your user can do. Checks run as you, in your account, though without your forge and cloud credentials (`GH_TOKEN`, `SSH_AUTH_SOCK` and the like): do not point brigada at a repository you do not trust.
 
 ## Install
 
@@ -87,7 +87,7 @@ brigada sends no usage data, analytics or crash reports anywhere. That is a prom
 - the runner pushes task branches to your repository's git remote with your git credentials;
 - the engine mirrors plan files (titles, task states, dependencies, branches, open questions, extra repositories) to the `brigada/plans` branch of that remote; `brigada project set plan_files=off` turns that off.
 
-brigada has no API-key setting of its own. Workers inherit your environment (minus brigada's own variables), so a CLI that you have set up with an API key the way its vendor documents is driven the same way. See [docs/TERMS.md](docs/TERMS.md).
+brigada has no API-key setting of its own. Workers inherit your environment (minus brigada's own variables and your git-forge, cloud and registry credentials, such as `GH_TOKEN` or `AWS_SECRET_ACCESS_KEY`), so a CLI that you have set up with an API key the way its vendor documents is driven the same way. See [docs/TERMS.md](docs/TERMS.md).
 
 ## Releasing
 

@@ -190,7 +190,7 @@ func (l *Loop) flushOnce(ctx context.Context) (bool, error) {
 				// full queue drops the post with a log line rather
 				// than wait.
 				select {
-				case l.hq <- hookPost{ev: ev, body: body}:
+				case l.hq <- hookPost{ev: ev, body: hookText(ev, body)}:
 				default:
 					l.log.WarnContext(ctx, "webhook queue full; dropping the post",
 						"event", ev.ID, "kind", ev.Kind)

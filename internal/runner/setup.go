@@ -136,7 +136,7 @@ func (r *jobRun) runSetup(ctx context.Context, dir string, first bool) string {
 	defer cancel()
 	cmd := exec.CommandContext(cctx, "sh", "-c", spec.Command)
 	cmd.Dir = dir
-	cmd.Env = append(append(os.Environ(), cacheEnv+"="+cache), r.extraEnvVars()...)
+	cmd.Env = r.cfg.commandEnv(append([]string{cacheEnv + "=" + cache}, r.extraEnvVars()...)...)
 	cmd.SysProcAttr = processGroup()
 	// A timeout or an abort kills the whole tree, not just sh; WaitDelay
 	// bounds the wait for pipes a straggler holds open (as for the check).

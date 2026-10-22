@@ -80,7 +80,7 @@ func TestRunnerExtraReposCheckedOutForSetupWorkerAndCheck(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	markers := markerDir(t)
-	check := fmt.Sprintf(`echo "$BRIGADA_REPO_SCHEMA" > "$BRIGADA_TEST_MARKERS/check-path" &&
+	check := fmt.Sprintf(`echo "$BRIGADA_REPO_SCHEMA" > "$TEST_MARKERS_DIR/check-path" &&
 test "$(git -C "$BRIGADA_REPO_SCHEMA" rev-parse HEAD)" = %s &&
 test ! -f "$BRIGADA_REPO_SCHEMA/second.txt" &&
 test "$(git -C "$BRIGADA_REPO_LIVE" rev-parse HEAD)" = %s &&
@@ -89,7 +89,7 @@ test -z "$(git -C "$BRIGADA_REPO_SCHEMA" remote)" &&
 test ! -e hack.txt`, pinned, tip)
 	task := e.seedTask("", check)
 	e.setTaskSetup(task, engine.SetupSpec{
-		Command:        `echo "$BRIGADA_REPO_SCHEMA" > "$BRIGADA_TEST_MARKERS/setup-path"`,
+		Command:        `echo "$BRIGADA_REPO_SCHEMA" > "$TEST_MARKERS_DIR/setup-path"`,
 		TimeoutMinutes: 5,
 	})
 	e.setTaskExtra(task,

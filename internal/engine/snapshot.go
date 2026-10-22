@@ -148,6 +148,11 @@ func (e *Engine) snapshot(ctx context.Context, dir string, now time.Time) (strin
 	if err := e.store.Store.Backup(ctx, tmp); err != nil {
 		return "", err
 	}
+	// A snapshot holds the whole store: owner-only, whatever the umask.
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
 	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
 		return "", err

@@ -9,6 +9,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/foreman"
 	"github.com/Blackfire-AI/brigada/internal/history"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
@@ -500,16 +501,32 @@ func callHistory(ctx context.Context, c *api.Client, args json.RawMessage) (stri
 	if err != nil {
 		return "", err
 	}
-	var b strings.Builder
-	if err := history.Render(&b, page.Items); err != nil {
+	if len(page.Items) == 0 {
+		return "(no history items)", nil
+	}
+	text, err := fencedHistory(page.Items)
+	if err != nil {
 		return "", err
 	}
-	switch {
-	case len(page.Items) == 0:
-		return "(no history items)", nil
-	case page.NextCursor != "":
-		fmt.Fprintln(&b)
-		fmt.Fprint(&b, "… older items precede this page")
+	if page.NextCursor != "" {
+		text += "\n… older items precede this page"
 	}
-	return b.String(), nil
+	return text, nil
+}
+
+// fencedHistory renders the timeline for the foreman the way its events
+// are read (§4.2, §1.4): each item in its own <event> data delimiters
+// with any delimiter inside it defused. Reasons, reports, questions and
+// messages in it are worker and user text, so they reach the foreman as
+// data, never as instructions.
+func fencedHistory(items []history.Item) (string, error) {
+	blocks := make([]string, 0, len(items))
+	for _, it := range items {
+		var b strings.Builder
+		if err := history.Render(&b, []history.Item{it}); err != nil {
+			return "", err
+		}
+		blocks = append(blocks, strings.TrimRight(b.String(), "\n"))
+	}
+	return foreman.EventsAnswer(blocks, nil), nil
 }

@@ -23,7 +23,7 @@ We aim to acknowledge reports within a few days.
 brigada runs agent CLIs (Claude Code, Codex, Kimi, opencode) with your own credentials.
 
 - Workers run in git worktrees, not containers. A worker can do what your user can do.
-- Checks run with your credentials.
+- Checks and setup commands run as you, in your account, though without your forge and cloud credentials (`GH_TOKEN`, `SSH_AUTH_SOCK` and the like) and without brigada's own variables. The runner's own git commands keep the credentials they need to fetch and push.
 - Do not point brigada at a repository you do not trust.
 
 The README carries the same warning. Vulnerabilities in the vendor CLIs themselves belong to their vendors, and should be reported to them.

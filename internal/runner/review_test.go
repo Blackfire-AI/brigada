@@ -296,7 +296,7 @@ func TestRunnerRunsReviewJobToEnd(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	markers := markerDir(t)
-	task := e.seedTask("", `echo check >> "$BRIGADA_TEST_MARKERS/checks"; test "$(cat work.txt)" = hello`)
+	task := e.seedTask("", `echo check >> "$TEST_MARKERS_DIR/checks"; test "$(cat work.txt)" = hello`)
 	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", "", ""))
 
 	p := e.startReviewRunner(t, taskBranch(task, 1), reviewScript(reviewApproveResult))
@@ -473,7 +473,7 @@ func TestRunnerReviewWithoutAVerdictBlock(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	markers := markerDir(t)
-	task := e.seedTask("", `echo check >> "$BRIGADA_TEST_MARKERS/checks"; test "$(cat work.txt)" = hello`)
+	task := e.seedTask("", `echo check >> "$TEST_MARKERS_DIR/checks"; test "$(cat work.txt)" = hello`)
 	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", "", ""))
 
 	p := e.startReviewRunner(t, taskBranch(task, 1), reviewScript(reviewNoVerdictResult))
@@ -516,7 +516,7 @@ func TestRunnerWedgedReviewFailsFast(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	markers := markerDir(t)
-	task := e.seedTask("", `echo check >> "$BRIGADA_TEST_MARKERS/checks"; test "$(cat work.txt)" = hello`)
+	task := e.seedTask("", `echo check >> "$TEST_MARKERS_DIR/checks"; test "$(cat work.txt)" = hello`)
 	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", "", ""))
 
 	p := e.startReviewRunner(t, taskBranch(task, 1), reviewScript(reviewWedgedResult))

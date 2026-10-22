@@ -202,7 +202,7 @@ func (w *workspace) writeReviewDiffSince(ctx context.Context, base, since string
 // on a full pipe and the runner never holds it.
 func (w *workspace) gitStdout(ctx context.Context, limit int, args ...string) (out []byte, full bool, err error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", w.dir}, args...)...)
-	cmd.Env = append(os.Environ(), w.gitEnv...)
+	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0"), w.gitEnv...)
 	stdout := &cappedBuffer{limit: limit}
 	stderr := &cappedBuffer{limit: 4 << 10}
 	cmd.Stdout = stdout

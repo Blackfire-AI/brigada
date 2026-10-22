@@ -540,6 +540,9 @@ func markerDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("BRIGADA_TEST_MARKERS", dir)
+	// Checks and setup commands run without the runner's brigada-prefixed
+	// variables (§5.8), so they reach the directory by this name.
+	t.Setenv("TEST_MARKERS_DIR", dir)
 	return dir
 }
 
@@ -1232,7 +1235,7 @@ func TestRunnerCancelDuringCheckKillsCheck(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	markers := markerDir(t)
-	check := `touch "$BRIGADA_TEST_MARKERS/check-started" && sleep 5 && touch "$BRIGADA_TEST_MARKERS/check-finished" && exit 0`
+	check := `touch "$TEST_MARKERS_DIR/check-started" && sleep 5 && touch "$TEST_MARKERS_DIR/check-finished" && exit 0`
 	task := e.seedTask("", check)
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
 

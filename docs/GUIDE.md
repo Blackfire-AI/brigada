@@ -388,7 +388,7 @@ The default for projects that have not set a budget comes from `foreman_wakes_pe
 
 When `notify` is `auto` (the default), the engine also raises a desktop notification for the same kinds of moments: a plan done, a plan waiting for approval, a task parked, the foreman's report, a limited foreman, a spent wake budget, a broken agent.
 
-`notify.webhook` in the config file carries the same moments to one URL: every notification is also POSTed there as a small plain-JSON document — project, kind, the one-line text, the task and plan ids, the time — fit for ntfy, Slack or a Telegram bot relay, with no per-service adapters. The URL may carry a token, so it lives in the config file alone, never in a project's files. Delivery is fire-and-forget: a short timeout bounds each attempt, one retry follows a failure, and a failing webhook is logged without the URL and never slows the engine.
+`notify.webhook` in the config file carries the same moments to one URL: every notification is also POSTed there as a small plain-JSON document — project, kind, the one-line text, the task and plan ids, the time — fit for ntfy, Slack or a Telegram bot relay, with no per-service adapters. The URL must be https (plain http is accepted only for localhost and other loopback addresses), and a redirect is never followed. For a failed check the text says only that the check failed, not what it printed. The URL may carry a token, so it lives in the config file alone, never in a project's files. Delivery is fire-and-forget: a short timeout bounds each attempt, one retry follows a failure, and a failing webhook is logged without the URL and never slows the engine.
 
 ### History, diffs and logs
 
@@ -643,7 +643,7 @@ The loop — plan, work, check, review, land, push — is brigada's; you stop it
 - a task class outside `approval_classes` (default `implement`, `review`, `answer`);
 - a task whose spec or check mentions a path that matches one of `approval_protected_paths` (default none);
 - a task naming an extra repository outside the project's default `extra_repos` ([section 7](#7-plans-checks-and-reviews));
-- a task whose check is not the project's `default_check` (the rule `check_command`): the runner runs a check with your credentials, so a command you did not set waits for your yes. A task that names no check takes the default, so it never trips the rule; with no default, only a task that names a check does. Tasks have no setup of their own — they record the project's — so a setup never differs.
+- a task whose check is not the project's `default_check` (the rule `check_command`): the runner runs a check as itself, in your account and without your forge and cloud credentials, so a command you did not set waits for your yes. A task that names no check takes the default, so it never trips the rule; with no default, only a task that names a check does. Tasks have no setup of their own — they record the project's — so a setup never differs.
 
 A held plan waits in `pending_approval`, and nothing is queued. The needs-you entry gives the reasons, for example `7 tasks, over the limit of 5`, `gate_plan is ask` or `check_command: check "make release" differs from default_check "go test ./..."`, with how to release or change it. An amendment of an already-active plan is judged by what it adds: each added task is checked on its own against the per-task rules — its class, the protected paths its spec or check mentions, its extra repositories, its check against `default_check` — and one that trips a rule is held alone, parked with a needs-you line naming the rule, while the plan stays active and the rest runs on. The task count and `gate_plan` never hold an amendment of a running plan, and cancelling, re-pointing or retiering never holds. A `respec` edit is judged on the text it adds and the task's check, with the same per-task hold. You decide:
 
@@ -678,7 +678,7 @@ If the check of an `implement` task fails and fix rounds are left, the worker ge
 
 ### An environment for checks and reviews
 
-A worktree is a fresh clone, with no `node_modules` or virtualenv. Set a `setup` command in `.brigada/project.yaml` (or with `brigada project set`), and the runner runs it in the worktree before the worker starts and again before the check. It runs as the runner itself, not under the worker's tool scope. A review job gets the same environment before the reviewer starts.
+A worktree is a fresh clone, with no `node_modules` or virtualenv. Set a `setup` command in `.brigada/project.yaml` (or with `brigada project set`), and the runner runs it in the worktree before the worker starts and again before the check. It runs as the runner itself, not under the worker's tool scope, with your environment less credentials such as `GH_TOKEN`, `SSH_AUTH_SOCK` and the cloud providers' keys, and without brigada's own variables; checks and the project's `after_land` command run the same way. A review job gets the same environment before the reviewer starts.
 
 The keys are flat in schema 1:
 
@@ -1042,7 +1042,7 @@ The config file is optional. Its format:
 | `state_dir` | path | `$XDG_STATE_HOME/brigada`, else `~/.local/state/brigada` | The state directory. `--state-dir` overrides it. |
 | `idle_minutes` | number, 0 or more | `30` | The engine exits after this many minutes with no live jobs, no attached chat and no open requests. `0` means the default. `brigada engine --idle-minutes` overrides it. |
 | `notify` | `auto` or `none` | `auto` | `auto` raises desktop notifications with the OS tool when found; `none` turns them off. |
-| `notify.webhook` | URL | none (off) | One URL that receives every notification as a JSON POST ([section 4](#4-while-work-runs)). It may carry a token, so it lives in this file alone. |
+| `notify.webhook` | URL | none (off) | One https URL (http only on a loopback host) that receives every notification as a JSON POST ([section 4](#4-while-work-runs)). It may carry a token, so it lives in this file alone. |
 | `snapshot_dir` | absolute path | none (no snapshots) | Where the daily store snapshots go; the last seven are kept ([section 10](#10-backups-and-recovery)). |
 | `headroom` | `true` or `false` | `true` | Keep one slot free for the foreman on its account ([section 8](#headroom)). |
 | `task_auto_retry` | `true` or `false` | `true` | One automatic restart on another agent after a transient worker failure ([section 8](#automatic-retry)). |
@@ -1186,6 +1186,6 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - An attached Codex session does not carry brigada's tools, and Codex has no verified project-scope registration for the coordinator: init in a parent folder prints a user-level command ([section 3](#3-several-repositories)).
 - Cross-repository plans do not exist: a plan belongs to one project ([section 3](#3-several-repositories)).
 - There is no `brigada cache clear` command; the setup cache expires by age and count ([section 7](#an-environment-for-checks-and-reviews)).
-- Workers run in git worktrees, not containers, and checks run with your credentials. Do not point brigada at a repository you do not trust.
+- Workers run in git worktrees, not containers, and checks run as you, in your account, though without your forge and cloud credentials (`GH_TOKEN`, `SSH_AUTH_SOCK` and the like). Do not point brigada at a repository you do not trust.
 
 Back to the [README](../README.md).

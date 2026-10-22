@@ -76,35 +76,3 @@ func withPWD(env []string, dir string) []string {
 	}
 	return append(out, "PWD="+dir)
 }
-
-// scrubEnv removes every variable named in drop from env. A nil env
-// means "inherit the process's", so it is materialized first — the
-// scrub applies either way. This is how the runner's git credentials
-// (Config.GitEnv) are kept out of the worker's environment (§5.1):
-// adapters may build on the ambient environment for the CLI's own login
-// state, but the runner strips what is only its.
-func scrubEnv(env []string, drop []string) []string {
-	if len(drop) == 0 {
-		if env == nil {
-			return nil
-		}
-		return env
-	}
-	dropKeys := make(map[string]bool, len(drop))
-	for _, kv := range drop {
-		if k, _, ok := strings.Cut(kv, "="); ok && k != "" {
-			dropKeys[k] = true
-		}
-	}
-	if env == nil {
-		env = os.Environ()
-	}
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		if k, _, ok := strings.Cut(kv, "="); ok && dropKeys[k] {
-			continue
-		}
-		out = append(out, kv)
-	}
-	return out
-}

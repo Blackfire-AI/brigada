@@ -50,7 +50,7 @@ func TestOsascriptArgsGolden(t *testing.T) {
 
 func TestNotifySendArgsGolden(t *testing.T) {
 	got := notifySendArgs(hostileTitle, hostileBody)
-	want := []string{hostileTitle, hostileBody}
+	want := []string{"--", hostileTitle, hostileBody}
 	if len(got) != len(want) {
 		t.Fatalf("notifySendArgs = %q, want %q", got, want)
 	}

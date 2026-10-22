@@ -165,7 +165,7 @@ func uploadArtifactTx(tx *sql.Tx, cfg Config, owner, jobID int64, leaseID, kind 
 	// only an orphan a later upload of the same content adopts — content
 	// addressing makes the two interchangeable.
 	path, _ := blobPath(cfg.DataDir, sha)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return uploadResult{}, fmt.Errorf("make the artifact directory: %w", err)
 	}
 	if err := writeBlob(path, data); err != nil {
@@ -302,7 +302,7 @@ func writeBlob(path string, data []byte) error {
 		os.Remove(name)
 		return err
 	}
-	if err := os.Chmod(name, 0o644); err != nil {
+	if err := os.Chmod(name, 0o600); err != nil {
 		os.Remove(name)
 		return err
 	}

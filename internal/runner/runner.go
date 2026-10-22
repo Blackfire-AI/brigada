@@ -84,7 +84,10 @@ type Config struct {
 	Clock Clock
 	// GitEnv is extra environment for the runner's own git commands —
 	// where its credentials ride when they come from config (§5.1).
-	// They never reach the worker's argv or prompt.
+	// They never reach the worker's argv or prompt, and the variables they
+	// name are stripped from a worker's, a setup command's and a check's
+	// environment. The ambient credentials of scrub.go go whether or not
+	// this is set; the command line leaves it empty.
 	GitEnv []string
 	// Ready, when set, runs once the runner holds its state directory's
 	// lock and its configuration has passed — the moment it is up. The

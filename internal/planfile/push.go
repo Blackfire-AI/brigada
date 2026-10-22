@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/Blackfire-AI/brigada/internal/projecturl"
 )
 
 // The identity the mirror commits under: stable, so the plans branch
@@ -91,7 +93,7 @@ func Push(ctx context.Context, t Target, p Plan) error {
 			}
 		}
 	case t.Default:
-		return fmt.Errorf("%w: branch %s of %s", ErrNoDefaultBranch, t.Branch, t.URL)
+		return fmt.Errorf("%w: branch %s of %s", ErrNoDefaultBranch, t.Branch, projecturl.Redact(t.URL))
 	default:
 		if _, err := g("checkout", "-q", "--orphan", t.Branch); err != nil {
 			return err
@@ -142,7 +144,8 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
+		// git quotes the remote's URL in its failures, userinfo and all.
+		return "", fmt.Errorf("git %s: %w: %s", args[0], err, projecturl.RedactText(strings.TrimSpace(stderr.String())))
 	}
 	return stdout.String(), nil
 }

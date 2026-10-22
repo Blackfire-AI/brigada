@@ -91,7 +91,7 @@ In:
 - quota learned from the CLIs' own limit errors: an account that hits its limit cools until the reset time;
 - an MCP bridge so other harnesses can call brigada.
 
-**What local gives up:** worktrees instead of containers, so review jobs aren't enforced read-only, there's no per-job credential injection or egress restriction, and checks run in the user's shell with their credentials. No worse than running the CLI by hand, and said plainly in the docs.
+**What local gives up:** worktrees instead of containers, so review jobs aren't enforced read-only, there's no per-job credential injection or egress restriction, and checks run as the user, in their account, without their forge and cloud credentials. No worse than running the CLI by hand, and said plainly in the docs.
 
 Backlog:
 

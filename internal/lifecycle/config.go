@@ -199,7 +199,7 @@ func loadConfigFile(path string, required bool) (FileConfig, error) {
 		}
 		key, value, ok := strings.Cut(line, "=")
 		if !ok {
-			return FileConfig{}, fmt.Errorf("config %s: line %d: want `key = value`, got %q", path, n+1, line)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: want `key = value`, got no `=`", path, n+1)
 		}
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)

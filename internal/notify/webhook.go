@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -52,15 +53,36 @@ type Webhook struct {
 	Timeout time.Duration
 }
 
-// ValidWebhookURL reports whether raw is an http or https URL with a
-// host — the shape a relay publishes. The config reader refuses
-// anything else, so a typo cannot point notifications nowhere.
+// ValidWebhookURL reports whether raw is an https URL with a host — the
+// shape a relay publishes — or an http one on a loopback host, where
+// nothing crosses a network. The URL may carry a token, so plain http
+// is refused anywhere else. The config reader refuses anything else, so
+// a typo cannot point notifications nowhere.
 func ValidWebhookURL(raw string) error {
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "http" && u.Scheme != "https" || u.Host == "" {
-		return fmt.Errorf("want an http or https URL")
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("want an https URL")
 	}
-	return nil
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if isLoopbackHost(u.Hostname()) {
+			return nil
+		}
+		return fmt.Errorf("want an https URL (http is allowed only on a loopback host)")
+	}
+	return fmt.Errorf("want an https URL")
+}
+
+// isLoopbackHost reports whether host names this machine: localhost or
+// a loopback IP literal.
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // Post delivers one notification's JSON for ev, body being the same
@@ -79,10 +101,18 @@ func (w *Webhook) Post(ctx context.Context, ev Event, body string) error {
 	if err != nil {
 		return fmt.Errorf("webhook: %w", err)
 	}
-	client := w.Client
-	if client == nil {
-		client = http.DefaultClient
+	if err := ValidWebhookURL(w.URL); err != nil {
+		return fmt.Errorf("webhook: %w", err)
 	}
+	base := w.Client
+	if base == nil {
+		base = http.DefaultClient
+	}
+	// A redirect would carry the post — and the URL's token, to a host
+	// the config never named — on to somewhere else: the first answer is
+	// the answer.
+	client := *base
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	timeout := w.Timeout
 	if timeout <= 0 {
 		timeout = webhookTimeout
@@ -93,7 +123,7 @@ func (w *Webhook) Post(ctx context.Context, ev Event, body string) error {
 			return scrubURL(err)
 		}
 		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
-		err := w.postOnce(attemptCtx, client, buf)
+		err := w.postOnce(attemptCtx, &client, buf)
 		cancel()
 		if err == nil {
 			return nil
