@@ -5,9 +5,9 @@
 plan: 36
 title: "Pre-public review phase 2: fix the findings of #55 (B1, B2, B3, B6–B12 and should-fix items)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-10-22T12:54:31.824979Z
-updated: 2026-10-22T13:35:37.125223Z
+updated: 2026-10-22T13:59:18.867743Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -122,6 +122,17 @@ tasks:
     deps: ["legal-notices"]
     base: "legal-notices"
     continue: "legal-notices"
+    tier: light
+    effort: low
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 143
+    name: "foreman-check-text"
+    title: "Foreman instructions: omit check so default_check applies"
+    class: "implement"
+    deps: ["engine-rules"]
+    base: "engine-rules"
     tier: light
     effort: low
     state: pending
