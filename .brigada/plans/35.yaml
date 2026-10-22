@@ -101,8 +101,8 @@ tasks:
     deps: ["s6-supply-chain"]
     base: "s6-supply-chain"
     effort: medium
-    state: running
-    branch: ""
+    state: done
+    branch: "brigada/task-131"
     rounds: 0
   - id: 132
     name: "s9-posthoc"
@@ -112,6 +112,6 @@ tasks:
     base: "s8-code-health"
     tier: light
     effort: low
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
