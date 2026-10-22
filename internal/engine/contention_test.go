@@ -1,13 +1,11 @@
 package engine
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/store"
 )
@@ -30,21 +28,19 @@ func TestLeasePollsReadersAndUploadsShareTheStore(t *testing.T) {
 	e.submit(e.work())
 	g := e.leaseAny(e.runner1)
 
-	ctx, stop := context.WithTimeout(e.ctx, 500*time.Millisecond)
-	defer stop()
-
-	// The calls run on the env's context, not the loop's deadline: the
-	// deadline only ends the loop, so no call is cancelled mid-transaction
-	// at shutdown (a cancelled context rolls a running transaction back
-	// under its statements' feet, which is the tx-after-end failure this
-	// test is not about).
+	// Each worker makes a fixed number of calls, not a timed burst: the
+	// load is the same on a fast machine and a slow one, and no call is
+	// cancelled mid-transaction at shutdown (a cancelled context rolls a
+	// running transaction back under its statements' feet, which is the
+	// tx-after-end failure this test is not about).
+	const calls = 150
 	var wg sync.WaitGroup
 	errs := make(chan error, 32)
 	worker := func(name string, fn func() error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for ctx.Err() == nil {
+			for range calls {
 				if err := fn(); err != nil {
 					errs <- fmt.Errorf("%s: %w", name, err)
 					return

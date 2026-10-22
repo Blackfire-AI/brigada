@@ -9,7 +9,7 @@ import (
 // wall clock jump far past the sweep interval between two ticks, so the
 // sweep restarts every wall-clock deadline from now instead of acting on
 // it. These tests play a sleep as one clock jump and a wakeful engine as
-// a series of sweep-interval steps (e.elapse).
+// a series of steps just short of the suspension gap (e.elapse).
 
 // TestSweepSuspensionRestartsQueueTTL: a queued job's wait did not
 // include the sleep, so the queue-TTL clock restarts from now.
@@ -135,8 +135,8 @@ func TestSweepSuspensionKeepsQueuedLeasePastHardCap(t *testing.T) {
 	}
 }
 
-// TestSweepRealExpiryStillExpires: time passing through several sweep
-// ticks, with no single jump, is not a suspension, so a lapsed lease is
+// TestSweepRealExpiryStillExpires: time passing through sweep
+// ticks no wider than the suspension gap, with no jump past it, is not a suspension, so a lapsed lease is
 // requeued as ever (§13).
 func TestSweepRealExpiryStillExpires(t *testing.T) {
 	e := newEnv(t)
