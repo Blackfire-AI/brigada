@@ -26,7 +26,7 @@ func TestLandApproveReleasesTheHold(t *testing.T) {
 	if n := e.landJobs(); n != 0 {
 		t.Fatalf("land jobs = %d, want none while held", n)
 	}
-	res, err := e.eng.LandApprove(e.ctx, e.project, e.task)
+	res, err := e.eng.LandApprove(e.ctx, e.project, e.task, false)
 	if err != nil {
 		t.Fatalf("LandApprove: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestLandRejectCancelsTheLanding(t *testing.T) {
 // at the land gate refuses.
 func TestLandApproveRefusesANonHold(t *testing.T) {
 	e := newEnv(t)
-	if _, err := e.eng.LandApprove(e.ctx, e.project, e.task); err == nil || !strings.Contains(err.Error(), "not held") {
+	if _, err := e.eng.LandApprove(e.ctx, e.project, e.task, false); err == nil || !strings.Contains(err.Error(), "not held") {
 		t.Errorf("LandApprove on a task with no hold = %v, want a not-held refusal", err)
 	}
 }

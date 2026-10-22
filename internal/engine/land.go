@@ -184,20 +184,19 @@ func depsLandedTx(tx *sql.Tx, taskID int64) (bool, error) {
 	return true, rows.Err()
 }
 
-// landHoldReasonsTx names the rules that hold a task at the land gate
-// (§6.3), empty when the landing runs on: gate_land is ask; the task's
-// tier among approval_tiers; a protected path the task changed; or
-// approval_restarted with a task that spent a restart or a tier bump.
-// The reasons order matches the needs-you line's example — "heavy;
-// touches infra/**" — tier before paths.
-func landHoldReasonsTx(tx *sql.Tx, project, taskID int64) ([]string, error) {
+// landHoldAsksTx names the rules that hold a task at the land gate
+// (§6.3) as hold asks (approval_stop.go), empty when the landing runs
+// on: gate_land is ask; the task's tier among approval_tiers; a
+// protected path the task changed; or approval_restarted with a task
+// that spent a restart or a tier bump.
+func landHoldAsksTx(tx *sql.Tx, project, taskID int64) ([]holdAsk, error) {
 	s, err := projectApprovalTx(tx, project)
 	if err != nil {
 		return nil, err
 	}
-	var reasons []string
+	var asks []holdAsk
 	if s.GateLand == GateAsk {
-		reasons = append(reasons, "gate_land is "+GateAsk)
+		asks = append(asks, holdAsk{kind: holdGateLand})
 	}
 	// The protected-path rule matches the paths the task changed. The
 	// engine runs no git (product §5 rule 1), so the runner records the
@@ -214,7 +213,7 @@ func landHoldReasonsTx(tx *sql.Tx, project, taskID int64) ([]string, error) {
 	// The effective tier counts: the escalation ladder may have moved the
 	// task off the tier it was planned at.
 	if slices.Contains(s.ApprovalTiers, tier) {
-		reasons = append(reasons, tier)
+		asks = append(asks, holdAsk{kind: holdTier, item: tier})
 	}
 	paths := spec + "\n" + check
 	if changed != "" {
@@ -227,7 +226,7 @@ func landHoldReasonsTx(tx *sql.Tx, project, taskID int64) ([]string, error) {
 	for _, p := range matchProtected(s.ProtectedPaths, paths) {
 		if !seen[p] {
 			seen[p] = true
-			reasons = append(reasons, "touches "+p)
+			asks = append(asks, holdAsk{kind: holdPath, item: p})
 		}
 	}
 	if s.ApprovalRestarted {
@@ -236,8 +235,23 @@ func landHoldReasonsTx(tx *sql.Tx, project, taskID int64) ([]string, error) {
 			return nil, err
 		}
 		if restarted {
-			reasons = append(reasons, "restarted")
+			asks = append(asks, holdAsk{kind: holdRestart})
 		}
+	}
+	return asks, nil
+}
+
+// landHoldReasonsTx words the land-gate rules that hold a task (§6.3),
+// in the needs-you line's order — "heavy; touches infra/**" — tier
+// before paths.
+func landHoldReasonsTx(tx *sql.Tx, project, taskID int64) ([]string, error) {
+	asks, err := landHoldAsksTx(tx, project, taskID)
+	if err != nil {
+		return nil, err
+	}
+	reasons := make([]string, len(asks))
+	for i, a := range asks {
+		reasons[i] = a.word()
 	}
 	return reasons, nil
 }
@@ -783,21 +797,25 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 }
 
 // LandDecision is what releasing or cancelling a land-gate hold did
-// (§6.3): the task, and whether the landing now runs (Released) or is
+// (§6.3): the task, whether the landing now runs (Released) or is
 // cancelled — the branch left alone, the hold row kept as rejected so the
-// rule never re-holds a landing the user refused.
+// rule never re-holds a landing the user refused — and the key=value
+// pairs an approval that stops asking changed.
 type LandDecision struct {
-	TaskID   int64 `json:"task_id"`
-	Released bool  `json:"released"` // true for an approval, false for a rejection
+	TaskID   int64    `json:"task_id"`
+	Released bool     `json:"released"` // true for an approval, false for a rejection
+	Settings []string `json:"settings_changed,omitempty"`
 }
 
 // LandApprove releases a task held at the land gate (§6.3): the hold's
 // row is deleted, the event names the release, and the land job is queued
 // directly — the user's yes overrides the gate, which would otherwise
-// re-hold the task. The foreman has no tool for it: the gate is the
-// user's.
-func (e *Engine) LandApprove(ctx context.Context, project, taskID int64) (LandDecision, error) {
-	return e.landDecision(ctx, project, taskID, true)
+// re-hold the task. stopAsking also changes, through the
+// `brigada project set` path, the one setting each hold reason maps to
+// (§6.3), so the same question is not asked twice. The foreman has no
+// tool for it: the gate is the user's.
+func (e *Engine) LandApprove(ctx context.Context, project, taskID int64, stopAsking bool) (LandDecision, error) {
+	return e.landDecision(ctx, project, taskID, true, stopAsking)
 }
 
 // LandReject cancels the landing of a task held at the land gate (§6.3):
@@ -806,17 +824,17 @@ func (e *Engine) LandApprove(ctx context.Context, project, taskID int64) (LandDe
 // nothing is squashed, nothing is pushed, and the landing is never
 // recorded.
 func (e *Engine) LandReject(ctx context.Context, project, taskID int64) (LandDecision, error) {
-	return e.landDecision(ctx, project, taskID, false)
+	return e.landDecision(ctx, project, taskID, false, false)
 }
 
-func (e *Engine) landDecision(ctx context.Context, project, taskID int64, approve bool) (LandDecision, error) {
+func (e *Engine) landDecision(ctx context.Context, project, taskID int64, approve, stopAsking bool) (LandDecision, error) {
 	var res LandDecision
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
-		r, err := e.landDecisionTx(tx, project, taskID, approve, now)
+		r, err := e.landDecisionTx(tx, project, taskID, approve, stopAsking, now)
 		if err != nil {
 			return fmt.Errorf("decide the landing of task %d: %w", taskID, err)
 		}
@@ -827,12 +845,27 @@ func (e *Engine) landDecision(ctx context.Context, project, taskID int64, approv
 }
 
 // landDecisionTx applies the user's decision on a land-gate hold (§6.3).
-func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve bool, now time.Time) (LandDecision, error) {
+func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve, stopAsking bool, now time.Time) (LandDecision, error) {
 	reason, err := landHoldTaskTx(tx, project, taskID)
 	if err != nil {
 		return LandDecision{}, err
 	}
 	if approve {
+		var changed []string
+		if stopAsking {
+			s, err := projectApprovalTx(tx, project)
+			if err != nil {
+				return LandDecision{}, err
+			}
+			asks, err := landHoldAsksTx(tx, project, taskID)
+			if err != nil {
+				return LandDecision{}, err
+			}
+			changed, err = e.stopAskingTx(tx, project, s, asks, now)
+			if err != nil {
+				return LandDecision{}, fmt.Errorf("stop the land gate asking: %w", err)
+			}
+		}
 		if _, err := tx.Exec(`DELETE FROM land_holds WHERE task_id = ?`, taskID); err != nil {
 			return LandDecision{}, fmt.Errorf("release the land hold of task %d: %w", taskID, err)
 		}
@@ -848,7 +881,7 @@ func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve bool,
 		if err := e.queueLandJobTx(tx, project, taskID, now); err != nil {
 			return LandDecision{}, err
 		}
-		return LandDecision{TaskID: taskID, Released: true}, nil
+		return LandDecision{TaskID: taskID, Released: true, Settings: changed}, nil
 	}
 	// Reject keeps the row, marked rejected: the landing is cancelled,
 	// the branch stays, and the rule never re-holds what the user refused.

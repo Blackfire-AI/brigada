@@ -337,7 +337,7 @@ Open your harness in the parent folder. The coordinator session has six tools ov
 - `list_projects`: every project by repository URL, with its foreman, active plans and how many things need you;
 - `ask_foreman`: send one project's foreman a message as you (`repo_url`, `text`);
 - `status` and `history`: across every project, or one with `repo_url`; `status` shows each plan awaiting approval with its id, version and why it waits, its tasks in the plans list (which trims finished plans like `brigada status`, `all=true` for every one);
-- `plan_approve` and `plan_reject`: your decision on a plan over the approval limit, naming the project, the plan id and the **plan version you were shown**. A plan amended since is refused, and the coordinator must read `status` and show you the plan again. These tools act for you: the coordinator is told to call them only after you said an explicit yes or no in the chat.
+- `plan_approve` and `plan_reject`: your decision on a plan over the approval limit, naming the project, the plan id and the **plan version you were shown**. A plan amended since is refused, and the coordinator must read `status` and show you the plan again. `plan_approve` also takes `and_stop_asking`, which changes the rule that held the plan the way `brigada project set` would ([section 7](#gates-and-rules)). These tools act for you: the coordinator is told to call them only after you said an explicit yes or no in the chat.
 
 The coordinator never plans and never edits a task graph: it has no `plan_create`, `plan_amend` or task tool. Each project's own foreman plans.
 
@@ -365,8 +365,8 @@ The needs-you queue lists what only you (or the foreman) can unblock:
 
 | Entry | What it wants |
 |---|---|
-| `plan #N pending_approval: <why>` | Your decision: `brigada plan approve N` or `brigada plan reject N` ([section 7](#gates-and-rules)), or the coordinator's tools ([section 3](#3-several-repositories)). |
-| `task #N done: waits to land: <rule>` | Your decision on a landing held at the land gate: `brigada land approve N` releases it, `brigada land reject N` cancels it ([section 5](#5-finishing-the-land-job)). |
+| `plan #N pending_approval: <why>` | Your decision: `brigada plan approve N` or `brigada plan reject N` ([section 7](#gates-and-rules)), or the coordinator's tools ([section 3](#3-several-repositories)); `--and-stop-asking` also changes the rule that held it. |
+| `task #N done: waits to land: <rule>` | Your decision on a landing held at the land gate: `brigada land approve N` releases it, `brigada land reject N` cancels it ([section 5](#5-finishing-the-land-job)); `--and-stop-asking` also changes the rule that held it. |
 | `task #N done: waits to push: <branch>@<sha>` | The push gate holds it; `brigada push approve` releases every waiting push of the project ([section 5](#5-finishing-the-land-job)). |
 | `task #N needs_foreman: <reason>` | Judgment: the worker asked a question, the task spent its rounds or failed after tier escalation was exhausted, or a run stopped. The foreman is woken for these; the entry is there so you can see it and step in. |
 | `task #N needs_user: <reason>` | An answer from you, for a task parked for you directly. |
@@ -641,9 +641,11 @@ brigada plan reject 7     # cancels the plan's tasks
 
 or through the coordinator's `plan_approve` and `plan_reject` ([section 3](#3-several-repositories)), which name the plan version you were shown.
 
+**Stop asking.** Add `--and-stop-asking` to an approval — `brigada plan approve --and-stop-asking 7`, `brigada land approve --and-stop-asking <task>`; the coordinator's `plan_approve` takes `and_stop_asking: true` — and the approval also changes the rule that held the plan or the landing, through the same code path as `brigada project set` and recorded in the history, so the same question is not asked twice. Every hold reason maps to exactly one setting: a class joins `approval_classes`, a protected path leaves `approval_protected_paths`, an extra repository joins the project's `extra_repos`, the task count raises `approval_max_tasks`, a tier leaves `approval_tiers`, a spent restart sets `approval_restarted` to `false`, and a gate held at `ask` returns to `auto`. Each rule moves just far enough that the hold it answers no longer trips: a count rises to the plan's own task count, nothing wider. Without the option the approval only releases the hold, as it always has.
+
 **The plan budget** (`approval_budget`, none by default) is the cost rule that stands in the task count's place: a whole number of tokens, a `$` amount, or both joined with `+`, for example `2000000+$5`. A plan's spend is the usage the engine records per job — input plus output tokens, and dollars when the CLI reported them — summed over the plan's jobs, unknown counters left out. When the spend passes the budget, the engine holds the plan's new jobs: every task that would newly start, a freed dependent or an amendment's addition alike, parks at the plan gate with a needs-you line naming the rule and the spend, and no job is queued; work already running goes on, with its fix rounds, reviews and landings. Only the claude CLI reports dollars; codex, opencode, kimi and dsh report tokens, so on a subscription harness without a price the budget counts tokens and a `$` side never trips. Raise the budget (`brigada project set approval_budget=...`) and have the foreman `task_restart` the held tasks to release them.
 
-**The land gate** holds an approved task before it is squashed onto the target: `gate_land: ask`, a tier among `approval_tiers`, a changed path matching `approval_protected_paths`, or a spent restart when `approval_restarted` is `true`. You release one held landing with `brigada land approve <task>` or cancel it with `brigada land reject <task>`.
+**The land gate** holds an approved task before it is squashed onto the target: `gate_land: ask`, a tier among `approval_tiers`, a changed path matching `approval_protected_paths`, or a spent restart when `approval_restarted` is `true`. You release one held landing with `brigada land approve <task>` or cancel it with `brigada land reject <task>`; `--and-stop-asking` also changes the rules that held it, as above.
 
 **The push gate** (`gate_push`, `auto` by default) decides what follows a successful landing: `auto` pushes the target, `ask` holds the push until `brigada push approve` releases every waiting landing of the project, and `never` leaves the push to you. Both gates, their needs-you entries and `after_land` are described in [section 5](#5-finishing-the-land-job). A held task blocks nothing but its dependents' landings: work on the rest of the plan goes on.
 
@@ -1129,12 +1131,12 @@ A command's flags go after its name and before its positional arguments (`diff`,
 ### Finishing
 
 - `brigada land <task-id>... [--onto BRANCH] [--repo URL] [--landed ID]... [--no-check]`: the hand-driven squash of approved tasks onto the checked-out branch, one commit each, in dependency order; rerun the default check; print the push command and stop. See [section 5](#5-finishing-the-land-job).
-- `brigada land approve <task>`, `brigada land reject <task>`: your decision on a landing held at the land gate; approve queues its land job, reject cancels the landing and leaves the branch. See [section 5](#gates-and-holds).
+- `brigada land approve <task>`, `brigada land reject <task>`: your decision on a landing held at the land gate; approve queues its land job, reject cancels the landing and leaves the branch; `--and-stop-asking` also changes the rule that held it. See [section 5](#gates-and-holds).
 - `brigada push approve [--repo URL]`: release the push gate; every waiting landing of the project gets its push queued. See [section 5](#gates-and-holds).
 
 ### Deciding
 
-- `brigada plan approve <id>`, `brigada plan reject <id>`: your answer on a plan held at the plan gate. See [section 7](#gates-and-rules).
+- `brigada plan approve <id>`, `brigada plan reject <id>`: your answer on a plan held at the plan gate; `--and-stop-asking` also changes the rule that held it. See [section 7](#gates-and-rules).
 - `brigada budget [--repo URL] [--wakes N]`: show the project's foreman wake budget, with today's use and the UTC reset time; `--wakes N` (1 to 1000) sets it. See [section 4](#the-wake-budget).
 - `brigada agent reset <harness>/<model>`: clear a broken or cooling agent. See [section 8](#broken-agents).
 - `brigada cancel <job-id>`: stop one live job. See [section 4](#cancelling).

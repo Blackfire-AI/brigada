@@ -155,7 +155,7 @@ func TestPlanDecisionVersion(t *testing.T) {
 	if got := e.int("SELECT version FROM plans WHERE id = ?", res.PlanID); got != 2 {
 		t.Fatalf("version after an amendment = %d, want 2", got)
 	}
-	if _, err := e.eng.ApprovePlanVersion(e.ctx, 0, res.PlanID, 1); !errors.Is(err, ErrPlanVersionStale) {
+	if _, err := e.eng.ApprovePlanVersion(e.ctx, 0, res.PlanID, 1, false); !errors.Is(err, ErrPlanVersionStale) {
 		t.Fatalf("approve at the old version: %v, want ErrPlanVersionStale", err)
 	}
 	if _, err := e.eng.RejectPlanVersion(e.ctx, 0, res.PlanID, 1); !errors.Is(err, ErrPlanVersionStale) {
@@ -167,7 +167,7 @@ func TestPlanDecisionVersion(t *testing.T) {
 	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'work'"); got != 0 {
 		t.Fatalf("a stale decision queued %d work jobs", got)
 	}
-	dec, err := e.eng.ApprovePlanVersion(e.ctx, e.project, res.PlanID, 2)
+	dec, err := e.eng.ApprovePlanVersion(e.ctx, e.project, res.PlanID, 2, false)
 	if err != nil || dec.State != "active" {
 		t.Fatalf("approve at the current version: %+v, %v", dec, err)
 	}

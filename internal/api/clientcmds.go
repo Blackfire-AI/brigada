@@ -40,13 +40,21 @@ func (c *Client) TaskLand(ctx context.Context, id int64) (engine.TaskLandInfo, e
 
 // LandApprove releases a task's land-gate hold (§6.3): the landing is
 // re-evaluated and, when nothing else trips, its land job queues.
-func (c *Client) LandApprove(ctx context.Context, id int64) (engine.LandDecision, error) {
+// andStopAsking also changes the one setting each hold reason maps to,
+// through the `brigada project set` path.
+func (c *Client) LandApprove(ctx context.Context, id int64, andStopAsking bool) (engine.LandDecision, error) {
 	var out engine.LandDecision
 	path := "/v1/tasks/" + strconv.FormatInt(id, 10) + "/land/approve"
-	if err := c.call(ctx, http.MethodPost, path, struct{}{}, &out); err != nil {
+	if err := c.call(ctx, http.MethodPost, path, landDecisionRequest{AndStopAsking: andStopAsking}, &out); err != nil {
 		return engine.LandDecision{}, err
 	}
 	return out, nil
+}
+
+// landDecisionRequest is the land decision body (§6.3): the and_stop_asking
+// an approval may carry.
+type landDecisionRequest struct {
+	AndStopAsking bool `json:"and_stop_asking,omitempty"`
 }
 
 // LandReject cancels a task's landing (§6.3): the branch stays, nothing
@@ -440,19 +448,22 @@ func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey
 }
 
 // PlanDecisionResult is what approving or rejecting a plan did (§6.3):
-// the plan's new state and, for an approval, the first wave's tasks
-// with their queued work jobs.
+// the plan's new state, for an approval the first wave's tasks with
+// their queued work jobs, and the key=value pairs a stop-asking
+// approval changed.
 type PlanDecisionResult struct {
-	PlanID int64
-	State  string
-	Tasks  []PlanCreatedTask
+	PlanID   int64
+	State    string
+	Tasks    []PlanCreatedTask
+	Settings []string
 }
 
 // ApprovePlan is the user's yes (§6.3): the plan's first wave queues.
-// A plan that is not there is the API's not-found error, one not
-// awaiting approval its conflict.
-func (c *Client) ApprovePlan(ctx context.Context, plan int64) (PlanDecisionResult, error) {
-	return c.decidePlan(ctx, plan, "approve")
+// andStopAsking also changes the one setting each hold reason maps to,
+// through the `brigada project set` path. A plan that is not there is
+// the API's not-found error, one not awaiting approval its conflict.
+func (c *Client) ApprovePlan(ctx context.Context, plan int64, andStopAsking bool) (PlanDecisionResult, error) {
+	return c.decidePlanBody(ctx, plan, "approve", planDecisionRequest{AndStopAsking: andStopAsking})
 }
 
 // RejectPlan is the user's no (§6.3): the plan's tasks are cancelled.
@@ -463,9 +474,9 @@ func (c *Client) RejectPlan(ctx context.Context, plan int64) (PlanDecisionResult
 // ApprovePlanVersion is ApprovePlan for the plan version the user was
 // shown (§4.6): the plan must belong to repoURL's project and
 // still be at version, else the API refuses with its stale_plan 409 and
-// nothing is applied.
-func (c *Client) ApprovePlanVersion(ctx context.Context, repoURL string, plan, version int64) (PlanDecisionResult, error) {
-	return c.decidePlanBody(ctx, plan, "approve", planDecisionRequest{RepoURL: repoURL, Version: version})
+// nothing is applied. andStopAsking is ApprovePlan's.
+func (c *Client) ApprovePlanVersion(ctx context.Context, repoURL string, plan, version int64, andStopAsking bool) (PlanDecisionResult, error) {
+	return c.decidePlanBody(ctx, plan, "approve", planDecisionRequest{RepoURL: repoURL, Version: version, AndStopAsking: andStopAsking})
 }
 
 // RejectPlanVersion is RejectPlan for the plan version the user was
@@ -484,7 +495,7 @@ func (c *Client) decidePlanBody(ctx context.Context, plan int64, verb string, bo
 	if err := c.call(ctx, http.MethodPost, path, body, &out); err != nil {
 		return PlanDecisionResult{}, err
 	}
-	res := PlanDecisionResult{PlanID: out.PlanID, State: out.State}
+	res := PlanDecisionResult{PlanID: out.PlanID, State: out.State, Settings: out.Settings}
 	for _, t := range out.Tasks {
 		res.Tasks = append(res.Tasks, PlanCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
 	}

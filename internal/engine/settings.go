@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -539,14 +540,6 @@ func (e *Engine) SetProjectSettings(ctx context.Context, repoURL string, values 
 	if cerr != nil {
 		return ProjectSettings{}, fmt.Errorf("%w: %v", ErrInvalidSetting, cerr)
 	}
-	parsed := map[string]json.RawMessage{}
-	for k, v := range values {
-		raw, err := parseSettingValue(k, v)
-		if err != nil {
-			return ProjectSettings{}, err
-		}
-		parsed[k] = raw
-	}
 	var out ProjectSettings
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
@@ -554,58 +547,98 @@ func (e *Engine) SetProjectSettings(ctx context.Context, repoURL string, values 
 			return err
 		}
 		var project int64
-		var rawSettings, rawProv, shownRepo string
-		err := lookupProjectTx(tx, repoURL, "id, settings, settings_prov, repo_url", &project, &rawSettings, &rawProv, &shownRepo)
+		var shownRepo string
+		err := lookupProjectTx(tx, repoURL, "id, repo_url", &project, &shownRepo)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			project, err = createProjectTx(tx, repoURL, setupDefaultBranch, "", "", now)
 			if err != nil {
 				return err
 			}
-			rawSettings, rawProv, shownRepo = "", "", canon
+			shownRepo = canon
 		case err != nil:
 			return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
 		}
 		if err := activeProjectTx(tx, project); err != nil {
 			return err
 		}
-		row := map[string]json.RawMessage{}
-		if rawSettings != "" {
-			if err := json.Unmarshal([]byte(rawSettings), &row); err != nil {
-				return fmt.Errorf("parse the settings of project %d: %w", project, err)
-			}
-		}
-		prov, err := parseProv(rawProv)
-		if err != nil {
-			return fmt.Errorf("parse the provenance of project %d: %w", project, err)
-		}
-		for k, raw := range parsed {
-			// A key set here is a local override from now on, even when it
-			// holds the value the import set; a reset returns it to the
-			// default, which no import owns either.
-			delete(prov.Imported, k)
-			if raw == nil {
-				delete(row, k)
-			} else {
-				row[k] = raw
-			}
-		}
-		b, err := json.Marshal(row)
-		if err != nil {
-			return fmt.Errorf("encode the settings of project %d: %w", project, err)
-		}
-		pb, err := prov.encode()
-		if err != nil {
-			return fmt.Errorf("encode the provenance of project %d: %w", project, err)
-		}
-		if _, err := tx.Exec("UPDATE projects SET settings = ?, settings_prov = ?, updated_at = ? WHERE id = ?", string(b), pb, fmtTime(now), project); err != nil {
-			return fmt.Errorf("store the settings of project %d: %w", project, err)
+		if err := e.applySettingsTx(tx, project, values, now); err != nil {
+			return err
 		}
 		out, err = settingsViewTx(tx, project, shownRepo, e.cfg.ForemanWakeBudget)
 		return err
 	})
 	if err != nil {
+		if errors.Is(err, ErrInvalidSetting) {
+			return ProjectSettings{}, err
+		}
 		return ProjectSettings{}, fmt.Errorf("set the settings of the project of %s: %w", RedactRepoURL(repoURL), err)
 	}
 	return out, nil
+}
+
+// applySettingsTx validates key=value pairs and applies them to the
+// project's settings row (§6.3): the one write path every setting change
+// takes — `brigada project set` and an approve that stops asking — with
+// the change recorded in the history. An empty value resets the key to
+// its default.
+func (e *Engine) applySettingsTx(tx *sql.Tx, project int64, values map[string]string, now time.Time) error {
+	parsed := map[string]json.RawMessage{}
+	for k, v := range values {
+		raw, err := parseSettingValue(k, v)
+		if err != nil {
+			return err
+		}
+		parsed[k] = raw
+	}
+	var rawSettings, rawProv string
+	if err := tx.QueryRow("SELECT settings, settings_prov FROM projects WHERE id = ?", project).Scan(&rawSettings, &rawProv); err != nil {
+		return fmt.Errorf("read the settings of project %d: %w", project, err)
+	}
+	if err := applySettingsRowTx(tx, project, rawSettings, rawProv, parsed, now); err != nil {
+		return err
+	}
+	_, err := appendEventTx(tx, evProjectSettingSet, project, 0, 0,
+		eventPayload{Reason: strings.Join(settingPairs(values), "; ")}, now)
+	return err
+}
+
+// applySettingsRowTx merges parsed values into the project's settings
+// row, keeping the keys the call does not name and clearing the
+// provenance of the ones it sets: a key set here is a local override
+// from now on.
+func applySettingsRowTx(tx *sql.Tx, project int64, rawSettings, rawProv string, parsed map[string]json.RawMessage, now time.Time) error {
+	row := map[string]json.RawMessage{}
+	if rawSettings != "" {
+		if err := json.Unmarshal([]byte(rawSettings), &row); err != nil {
+			return fmt.Errorf("parse the settings of project %d: %w", project, err)
+		}
+	}
+	prov, err := parseProv(rawProv)
+	if err != nil {
+		return fmt.Errorf("parse the provenance of project %d: %w", project, err)
+	}
+	for k, raw := range parsed {
+		// A key set here is a local override from now on, even when it
+		// holds the value the import set; a reset returns it to the
+		// default, which no import owns either.
+		delete(prov.Imported, k)
+		if raw == nil {
+			delete(row, k)
+		} else {
+			row[k] = raw
+		}
+	}
+	b, err := json.Marshal(row)
+	if err != nil {
+		return fmt.Errorf("encode the settings of project %d: %w", project, err)
+	}
+	pb, err := prov.encode()
+	if err != nil {
+		return fmt.Errorf("encode the provenance of project %d: %w", project, err)
+	}
+	if _, err := tx.Exec("UPDATE projects SET settings = ?, settings_prov = ?, updated_at = ? WHERE id = ?", string(b), pb, fmtTime(now), project); err != nil {
+		return fmt.Errorf("store the settings of project %d: %w", project, err)
+	}
+	return nil
 }

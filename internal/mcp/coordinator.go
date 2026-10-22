@@ -87,7 +87,7 @@ var CoordinatorTools = []Tool{
 	},
 	{
 		Name:        "plan_approve",
-		Description: "Approve a plan awaiting approval: its first wave of work starts. This is the USER's decision, never yours: call it only after you showed the user the plan (status shows it) and they said an explicit yes in this chat. \"Awaiting approval\" is a result to present, not a permission. Name the plan's id and the version you showed; a plan amended since is refused, then read status again and show it anew.",
+		Description: "Approve a plan awaiting approval: its first wave of work starts. This is the USER's decision, never yours: call it only after you showed the user the plan (status shows it) and they said an explicit yes in this chat. \"Awaiting approval\" is a result to present, not a permission. Name the plan's id and the version you showed; a plan amended since is refused, then read status again and show it anew. With and_stop_asking true, the approval also changes the rule that held the plan — the one setting each hold reason maps to — the way `brigada project set` would, so the same question is not asked twice; use it only when the user said to change the rule, and show them what changed.",
 		InputSchema: planDecisionSchema,
 		Call:        callPlanApprove,
 	},
@@ -100,7 +100,8 @@ var CoordinatorTools = []Tool{
 }
 
 // planDecisionSchema is plan_approve's and plan_reject's arguments: the
-// project, the plan and the plan version the user was shown (§4.6).
+// project, the plan and the plan version the user was shown (§4.6);
+// plan_approve also takes and_stop_asking (§6.3).
 var planDecisionSchema = map[string]any{
 	"type": "object",
 	"properties": map[string]any{
@@ -115,6 +116,10 @@ var planDecisionSchema = map[string]any{
 		"version": map[string]any{
 			"type":        "integer",
 			"description": "the plan version the user was shown, as status shows it",
+		},
+		"and_stop_asking": map[string]any{
+			"type":        "boolean",
+			"description": "also change the rule that held the plan, the way `brigada project set` would, so the same question is not asked twice; only with the user's say-so",
 		},
 	},
 	"required": []string{"repo_url", "plan", "version"},
@@ -253,9 +258,10 @@ func callCoordinatorHistory(ctx context.Context, c *api.Client, args json.RawMes
 
 // planDecisionArgs is plan_approve's and plan_reject's arguments.
 type planDecisionArgs struct {
-	RepoURL string `json:"repo_url"`
-	Plan    int64  `json:"plan"`
-	Version int64  `json:"version"`
+	RepoURL       string `json:"repo_url"`
+	Plan          int64  `json:"plan"`
+	Version       int64  `json:"version"`
+	AndStopAsking bool   `json:"and_stop_asking"`
 }
 
 func readPlanDecision(args json.RawMessage) (planDecisionArgs, error) {
@@ -279,13 +285,16 @@ func callPlanApprove(ctx context.Context, c *api.Client, args json.RawMessage) (
 	if err != nil {
 		return "", err
 	}
-	res, err := c.ApprovePlanVersion(ctx, a.RepoURL, a.Plan, a.Version)
+	res, err := c.ApprovePlanVersion(ctx, a.RepoURL, a.Plan, a.Version, a.AndStopAsking)
 	if err != nil {
 		return "", err
 	}
 	text := fmt.Sprintf("plan %d approved (state %s): %d tasks queued", res.PlanID, res.State, len(res.Tasks))
 	for _, t := range res.Tasks {
 		text += fmt.Sprintf("\n  task %d: work job %d", t.TaskID, t.JobID)
+	}
+	for _, s := range res.Settings {
+		text += fmt.Sprintf("\n  rule changed: %s", s)
 	}
 	return text, nil
 }
