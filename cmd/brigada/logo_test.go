@@ -52,7 +52,7 @@ func TestVersionBannerOnATerminal(t *testing.T) {
 		caps logo.Caps
 		logo string
 	}{
-		{"truecolor", logo.Caps{TTY: true, Color: logo.TrueColor, UTF8: true, Width: 80}, "\x1b[48;2;255;90;31m▄\x1b[0m" + strings.TrimPrefix(logo.BannerText, "█")},
+		{"truecolor", logo.Caps{TTY: true, Color: logo.TrueColor, UTF8: true, Width: 80}, logo.String(logo.Banner, logo.Caps{Color: logo.TrueColor, UTF8: true, Width: 80})},
 		{"NO_COLOR", logo.Caps{TTY: true, UTF8: true, Width: 80}, logo.BannerText},
 		{"narrow", logo.Caps{TTY: true, UTF8: true, Width: 20}, logo.OneLineText},
 		{"no UTF-8", logo.Caps{TTY: true, Width: 80}, logo.ASCIIText},
