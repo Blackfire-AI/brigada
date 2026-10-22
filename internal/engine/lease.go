@@ -276,6 +276,15 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			if err := e.foremanFinishedTx(tx, j, statusFailed, now); err != nil {
 				return nil, err
 			}
+			if j.Kind == KindPlanReview {
+				// A plan review that kept losing its runner (§6.2) never
+				// gives a verdict: the plan proceeds as approve would take
+				// it, as a capped or never-taken review does, instead of
+				// waiting in reviewing with no live job.
+				if err := e.planReviewUnrunnableTx(tx, j.ProjectID, planReviewOfJobTx(j), reason, now); err != nil {
+					return nil, err
+				}
+			}
 			if j.TaskID != 0 {
 				if err := e.taskAfterCompletionTx(tx, j, Completion{Error: reason, ErrorKind: "runner_lost"}, now); err != nil {
 					return nil, err
