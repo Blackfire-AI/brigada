@@ -62,7 +62,7 @@ tasks:
     effort: medium
     state: reviewing
     branch: "brigada/task-156"
-    rounds: 0
+    rounds: 1
   - id: 157
     name: "fast-runner"
     title: "Speed up internal/runner tests under -race (manual clocks / shorter intervals)"
@@ -70,8 +70,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-157"
     rounds: 0
   - id: 158
     name: "fast-cli-api"
