@@ -79,9 +79,10 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
+    question: "Approve the sandbox commands (go-licenses@latest run, go list, go env, module cache read) and give the copyright owner line for NOTICE (e.g. 'Copyright 2026 <holder>')?"
   - id: 139
     name: "functionality-fixes"
     title: "Help-text bugs and flaky TestRunnerStallKillsProcessTree"
