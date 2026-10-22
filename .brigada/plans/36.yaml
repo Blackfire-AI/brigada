@@ -49,9 +49,9 @@ tasks:
     base: ""
     effort: medium
     caps: {restart: 4}
-    state: needs_foreman
+    state: running
     branch: "brigada/task-135-r3"
-    rounds: 2
+    rounds: 0
   - id: 136
     name: "plan-mirror-switch"
     title: "plan_files project setting to switch the plan mirror off (B1)"
