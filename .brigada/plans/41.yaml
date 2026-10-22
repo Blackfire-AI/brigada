@@ -60,7 +60,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: ready
+    state: running
     branch: "brigada/task-156"
     rounds: 0
   - id: 157
@@ -70,7 +70,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-157"
     rounds: 2
   - id: 158
