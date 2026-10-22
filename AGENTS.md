@@ -30,12 +30,13 @@ CI runs these; run them before you push:
 
 `cmd/brigada` is the single binary: client, engine, runner, foreman and MCP bridge. Everything else is under `internal/`:
 
-- `adapter`: one adapter per agent CLI (claude, codex, kimi, opencode, and a fake for tests)
-- `api`: the engine's JSON HTTP API, on a Unix socket locally and TLS remotely
+- `adapter`: one adapter per agent CLI (claude, codex, kimi, opencode, dsh, and a fake for tests)
+- `api`: the engine's JSON HTTP API, on a Unix socket (remote TLS is backlog)
 - `caps`: the concurrency-caps model
 - `engine`: the mailbox, job creation from ready tasks, and the routine rules
 - `foreman`: the foreman's fixed instructions and wake template
 - `history`: the per-project timeline of what happened
+- `landing`: the git side of landing an approved task (§7.1)
 - `lifecycle`: the engine's life as a process: lock, start on demand, idle exit
 - `mcp`: the `brigada mcp` stdio bridge offering brigada's tools to the foreman
 - `notify`: local notifications

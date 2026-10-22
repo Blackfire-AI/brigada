@@ -6,7 +6,7 @@ What brigada 1.0 promises until 2.0.
 
 ## What is covered
 
-**The CLI commands and their subcommands.** The top-level commands are `init`, `remove`, `attach`, `ask`, `review`, `engine`, `runner`, `start`, `config`, `stop`, `mcp`, `status`, `task`, `project`, `history`, `stats`, `capacity`, `top`, `cancel`, `agent`, `agents`, `plan`, `budget`, `recover`, `diff`, `land`, `push`, `logs`, `version` and `help`. The subcommands are `task submit`; `project foreman`, `project list`, `project set`, `project show` and `project import`; `agent reset`; `agents add`; `plan approve` and `plan reject`; `land approve` and `land reject`; `push approve`; and `hold yield` and `hold confirm`, which stay as no-ops that always exit 0 so hooks an older init installed never block a session. A bare `brigada` is `attach`. Their names and subcommand names keep working.
+**The CLI commands and their subcommands.** The top-level commands are `init`, `remove`, `attach`, `ask`, `review`, `engine`, `runner`, `start`, `config`, `stop`, `mcp`, `status`, `task`, `project`, `history`, `stats`, `capacity`, `top`, `cancel`, `agent`, `agents`, `plan`, `budget`, `recover`, `diff`, `land`, `push`, `logs`, `version` and `help`. The subcommands are `task submit`; `project foreman`, `project list`, `project set`, `project show` and `project import`; `agent reset`; `agents add`; `plan approve` and `plan reject`; `land approve` and `land reject`; `push approve`; and `hold yield` and `hold confirm`, which stay as no-ops that always exit 0. A bare `brigada` is `attach`. Their names and subcommand names keep working.
 
 **The CLI flags.** Every command takes `--state-dir DIR` and `--config PATH`. A command's other flags are frozen only where they are listed here; anything else its `--help` prints may change. The frozen flags:
 
@@ -80,8 +80,6 @@ Within schema 1, new keys are added as optional keys. A file that worked before 
 - `history`: `repo_url`, `task` and `limit`.
 - `plan_approve`: `repo_url`, `plan` and `version` (all required), and `and_stop_asking`.
 - `plan_reject`: `repo_url`, `plan` and `version` (all required).
-
-Mode A — the user's own harness session as the foreman — and with it the `hold` command, the `hold_acquire`, `hold_yield` and `decision_note` tools, the settings `hold_idle_minutes`, `hold_max_minutes` and `interactive_quiet_minutes`, and `brigada mcp --foreman` were removed before 1.0 was released, so they were never part of this promise.
 
 **The engine's on-disk store.** The store is SQLite and is migrated forward only. A newer binary opens an older store and applies the missing migrations on start. An older binary refuses a store that a newer binary has migrated, with an error that says to upgrade.
 

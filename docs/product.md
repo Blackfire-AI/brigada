@@ -85,7 +85,7 @@ In:
 - local notifications: an OS notification plus a "needs you" queue in `brigada status` (for the foreman's limit, plan approval, questions);
 - `brigada review --branch <x>` without the foreman (the author's family from the job record or the `Co-Authored-By` trailer): it seeds the record and shows value on its own;
 - the engine and a local runner;
-- adapters for Claude Code, Codex, Kimi and opencode, plus an experimental adapter for dsh (Gemini has no adapter);
+- adapters for Claude Code, Codex, Kimi and opencode, plus an experimental adapter for dsh ([GUIDE](GUIDE.md#dsh-experimental), [COMPATIBILITY](COMPATIBILITY.md)) (Gemini has no adapter);
 - check and cross-family review;
 - the outcome record and `brigada stats`;
 - quota learned from the CLIs' own limit errors: an account that hits its limit cools until the reset time;
@@ -119,7 +119,7 @@ brigada is a standalone tool beside your own harness session: not a board, and n
 ## 8. Terms of use
 
 - Official CLIs only, unmodified, signed in by the user through the vendor's own flow. Anthropic's Claude Code legal page ("Authentication and credential use") allows an end user to sign in to the unmodified binary with their own subscription, including where it is hosted. Recheck every vendor's terms before launch.
-- No account rotation, no credential pooling, no reselling, no telemetry: the outcome record and everything else stay on your machine (or your server, later).
+- No credential pooling; accounts are yours, one login each, and a rate-limited account hands work to another configured one; no reselling, no telemetry: the outcome record and everything else stay on your machine (or your server, later).
 - An API-key mode per adapter as a fallback.
 
 ## 9. Stack

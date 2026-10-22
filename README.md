@@ -7,18 +7,20 @@
 
 **Talk to the foreman. It splits the work into tasks; brigada gives each task to the agent with the best measured record on your repo among those with quota left, checks and cross-reviews the result, and learns from the outcome.**
 
-You may pay for more than one AI coding subscription. brigada sits above their official command-line tools (Claude Code, Codex, Kimi, opencode; experimental: dsh) and uses them as workers:
+You may pay for more than one AI coding subscription. brigada sits above their official command-line tools (Claude Code, Codex CLI, Kimi CLI, opencode, and dsh, DeepSeek's CLI) and uses them as workers:
 
-- the **foreman**, one of those CLIs, turns what you ask for into a plan of tasks with dependencies between them. It lives in a brigada-owned session: you talk to it with `brigada attach`, and it acts headless while you are away;
+- the **foreman**, one of those CLIs (claude or codex; [GUIDE section 11](docs/GUIDE.md#11-the-foremans-harness-claude-or-codex) lists what a foreman harness must do), turns what you ask for into a plan of tasks with dependencies between them. It lives in a brigada-owned session: you talk to it with `brigada attach`, and it acts headless while you are away;
 - the **dispatcher** gives each task to the agent with the best measured record for that kind of task on *your* repo, among the agents that still have quota;
 - every task's own **check** (tests, lint, any command) runs on the result, so "done" is not taken on trust;
 - a **reviewer** from a different model family than the author reads the change;
 - the **outcome** of every task is recorded locally, and `brigada stats` shows which agent actually wins where;
 - **landing is brigada's**: each approved task is squashed onto the target branch, your check reruns on the result, and the push follows your push gate (`auto` by default); `brigada land` stays as the hand-driven form, and gates hold anything you want to see first.
 
-brigada drives the vendors' **unmodified** CLIs, each signed in with your own account. It never rotates or pools credentials. See [docs/TERMS.md](docs/TERMS.md).
+dsh support is experimental: it was checked against one developer-preview release, needs an API key rather than a subscription, and may change in any brigada release ([docs/COMPATIBILITY.md](docs/COMPATIBILITY.md); the dsh section of [docs/GUIDE.md](docs/GUIDE.md#dsh-experimental)).
 
-> **Before you start.** brigada is local-first: one Go binary and a SQLite store on your machine. Workers run in git worktrees, not containers, and a worker can do what your user can do. Checks run as you, in your account, though without your forge and cloud credentials (`GH_TOKEN`, `SSH_AUTH_SOCK` and the like): do not point brigada at a repository you do not trust.
+brigada drives the vendors' **unmodified** CLIs, each signed in with your own account. It uses the accounts you configure, one login per account, and when one is rate-limited it dispatches to another configured account. See [docs/TERMS.md](docs/TERMS.md).
+
+> **Before you start.** brigada is local-first: one Go binary and a SQLite store on your machine. Workers run in git worktrees, not containers, each under its CLI's own permission scope: claude edits under `acceptEdits` with a tool allowlist (the file tools and the Go toolchain by default), codex and dsh run in an OS-level workspace-write sandbox, opencode is scoped by `OPENCODE_PERMISSION`, kimi work jobs carry no scope from brigada, and every review is read-only. The scope per harness is in [GUIDE section 8](docs/GUIDE.md#scope-per-harness). Workers inherit your environment minus the credential scrub, so a check command, a test run or a kimi worker can still reach your credentials and network. Do not point brigada at a repository you do not trust ([design §5.7](docs/design.md#57-an-environment-for-checks-and-reviews)).
 
 ## Install
 
@@ -33,7 +35,7 @@ go install github.com/Blackfire-AI/brigada/cmd/brigada@latest
 brigada version
 ```
 
-The main package lives in `cmd/brigada`, so that is the install path. Make sure `$(go env GOPATH)/bin` is on your `PATH`. Once a release is published, prebuilt binaries are attached to its tag.
+The main package lives in `cmd/brigada`, so that is the install path. Make sure `$(go env GOPATH)/bin` is on your `PATH`. Each release tag also has prebuilt binaries attached on its GitHub release (see [Releasing](#releasing)).
 
 ## First run: `brigada init`
 
@@ -54,7 +56,7 @@ Init then lists the agents, permissions and files, and shows a diff for every ex
 
 After you confirm, init:
 
-- writes `.brigada/project.yaml`, which is yours to commit (brigada never commits or pushes it), and strips the wiring an older init left in the repository;
+- writes `.brigada/project.yaml`, which is yours to commit (brigada never commits or pushes it), and strips brigada's repository wiring (MCP and hook entries, the foreman files and the git exclude line), unless `--no-wiring`;
 - starts the engine and a detached runner.
 
 `brigada init --probe` shows the plan and writes nothing. Stop the runner with `brigada stop`; add `--engine` to stop the engine too. Every step and flag is in [the guide, section 1](docs/GUIDE.md#1-install-and-brigada-init).
@@ -94,9 +96,11 @@ brigada has no API-key setting of its own. Workers inherit your environment (min
 Maintainers tag a version and push the tag:
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1.0.0-rc.1
+git push origin v1.0.0-rc.1
 ```
+
+A tag with a suffix such as `-rc.1` is published as a prerelease.
 
 The `release` workflow builds `brigada-<os>-<arch>` binaries (darwin and linux, amd64 and arm64) with the tag as the version, plus a `.tar.gz` of each and `SHA256SUMS`, and attaches them to a new GitHub release. `brigada version` prints the tag without its leading `v`; a plain `go build` prints `0.0.0-dev`.
 

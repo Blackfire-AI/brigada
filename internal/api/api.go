@@ -14,7 +14,7 @@ import (
 )
 
 // Server is the engine's HTTP API (design §12.1, §12.3): JSON over a
-// Unix socket locally (Listen), the same handler behind TLS remotely.
+// Unix socket (Listen). A remote TLS listener is backlog.
 // Clients, the foreman's MCP tools and runners reach the engine only
 // through here, authenticating with bearer tokens in the roles of
 // client, foreman (scoped to one project), runner and admin.
@@ -47,7 +47,7 @@ func New(ctx context.Context, st *store.Store, eng *engine.Engine, log *slog.Log
 }
 
 // Handler returns the API's routes behind authentication, so the same
-// mux can serve a Unix socket (Listen) or TLS (§12.1).
+// mux is served on a Unix socket (Listen).
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/health", s.handleHealth)

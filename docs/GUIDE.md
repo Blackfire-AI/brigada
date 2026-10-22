@@ -44,15 +44,15 @@ Four parts, one binary:
 
 Run `brigada init` inside a repository. (At the top of a folder that holds several repositories, init does something else: see [section 3](#3-several-repositories).) The repository must have an `origin` remote, and all its URLs must name one repository. Init prints the canonical repository identity, then walks you through four steps. Nothing is written or started until you confirm the plan at the end.
 
-Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi`, `opencode`, and the experimental `dsh`) and prints one `Signed in:` line naming the confirmed ones, with the probe's detail in parentheses where there is one (opencode: its provider count and the command that counted them), then one line for each installed CLI whose sign-in it cannot check, such as `kimi: init can't check sign-in.`. CLIs that are not installed are not named. With `--yes` or `--probe` the same facts print as the `Agent CLIs found:` list.
+Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi`, `opencode`, and [`dsh`](#dsh-experimental)) and prints one `Signed in:` line naming the confirmed ones, with the probe's detail in parentheses where there is one (opencode: its provider count and the command that counted them), then one line for each installed CLI whose sign-in it cannot check, such as `kimi: init can't check sign-in.`. CLIs that are not installed are not named. With `--yes` or `--probe` the same facts print as the `Agent CLIs found:` list.
 
 - For Claude and Codex, init runs `claude auth status` and `codex login status` if their installed help documents them. If neither the probe nor `--signed-in` confirms authentication, it asks `Are you signed in to claude? [y/N]` before step 1. Answering no leaves that CLI out, models and all.
 - Kimi has no verified sign-in check. Init tells you to run `kimi login` first if needed, then asks `Use kimi? [y/N]:` in step 2.
 - For opencode, init runs `opencode providers list` if its help documents `providers`, or `opencode auth list` on older versions. Stored provider credentials confirm sign-in. If sign-in remains unconfirmed, it asks `Use opencode? [y/N]:`. When the check is unavailable, it tells you to run `opencode auth login` first if needed. Keys may also come from your environment.
-- dsh (experimental) is installed when `dsh` is on `PATH`; init reads only `dsh --version` and makes no model call. It cannot check sign-in, so it asks `Use dsh? [y/N]:` in step 2 and offers `deepseek-flash` and `deepseek-v4-pro`. When `DEEPSEEK_API_KEY` is not set, a one-line note says dsh needs it exported before `brigada start`, or stored through dsh's own credential store; the note never blocks init and the key is never printed.
+- dsh is installed when `dsh` is on `PATH`; init reads only `dsh --version` and makes no model call. It cannot check sign-in, so it asks `Use dsh? [y/N]:` in step 2 and offers `deepseek-flash` and `deepseek-v4-pro`. When `DEEPSEEK_API_KEY` is not set, a one-line note says dsh needs it exported before `brigada start`, or stored through dsh's own credential store; the note never blocks init and the key is never printed.
 - `--signed-in` confirms authentication without a question (for Kimi, opencode and dsh, that also answers the use question). With a distinct `account=LABEL` on `--agent`, a sign-in or use question names that account. Status output is read in memory, never printed or stored. Init never runs a login command or a model.
 
-1. **The foreman.** The foreman plans the work and decides what happens when a task needs judgment. It runs whenever work finishes, so it uses that agent's quota. Only Claude and Codex can be the foreman. Init asks `Which model should the foreman run?` and lists every model of the signed-in Claude and Codex CLIs, Claude first, as `harness/model` with a note:
+1. **The foreman.** The foreman plans the work and decides what happens when a task needs judgment. It runs whenever work finishes, so it uses that agent's quota. Only Claude and Codex can be the foreman ([section 11](#11-the-foremans-harness-claude-or-codex) states why). Init asks `Which model should the foreman run?` and lists every model of the signed-in Claude and Codex CLIs, Claude first, as `harness/model` with a note:
 
    The foreman menu uses the Claude and Codex rows below. Workers use every known-family model in each CLI's list; opencode offers individual picks across providers.
 
@@ -117,7 +117,7 @@ The `Plan` block then shows:
 Then, after you confirm (`y` at the prompt, or `--yes`), init:
 
 - writes **`.brigada/project.yaml`** ([section 6](#6-configuring-a-project)). The file is yours to commit; brigada never commits or pushes anything. The write is refused if the file is a symlink or names another repository, and a file that changed after the plan was shown is not overwritten;
-- strips the wiring an older init left in the repository, unless `--no-wiring`: the `brigada` server in `.mcp.json`, the hooks in private `.claude/settings.local.json` and the legacy brigada hooks in shared `.claude/settings.json`, the `brigada` table in `.codex/config.toml`, `.brigada/foreman.md` and its block in `AGENTS.md` with `CLAUDE.md`'s import section, the old foreman skill, and the `/.claude/settings.local.json` line in git's `info/exclude`. Init writes no harness wiring; only brigada's own entries change, and a file you have not edited comes back byte for byte;
+- strips brigada's wiring from the repository, unless `--no-wiring`: the `brigada` server in `.mcp.json`, the hooks in private `.claude/settings.local.json` and the legacy brigada hooks in shared `.claude/settings.json`, the `brigada` table in `.codex/config.toml`, `.brigada/foreman.md` and its block in `AGENTS.md` with `CLAUDE.md`'s import section, the old foreman skill, and the `/.claude/settings.local.json` line in git's `info/exclude`. Init writes no harness wiring; only brigada's own entries change, and a file you have not edited comes back byte for byte;
 - starts the engine on demand, imports the project file (recording where each value came from, [section 6](#6-configuring-a-project)), registers the foreman, saves the agent and concurrency choices and starts one detached runner. The answers replace what they cover — an interactive run's questions replace every saved line of each CLI asked about, so declining a CLI removes its lines, while `--agent` replaces the harness and model pairs it names — and every other saved agent line stays in the agents file and the runner serves it, unless `--overwrite-config` is passed. If its agents or concurrency changed, init restarts the runner with the new choices; otherwise it keeps the running one. The runner's log is `runner.log` in the state directory.
 
 ### Flags
@@ -516,7 +516,7 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 | `schema` | `1` | required | The file format version. |
 | `repo` | canonical URL, e.g. `github.com/org/app` | required | The repository this file belongs to, in its canonical form (`host[:port]/path`, or `file:<absolute path>` for a file remote). Import refuses a file that names another repository. |
 | `default_check` | command | none | The check a task runs when its spec names none; the land job reruns it on the landed result, and the hand-driven `brigada land` on the squashed tree. A task whose check is another command waits for you at the plan gate ([Gates and rules](#gates-and-rules)). |
-| `worker_tools` | `+`-separated Claude Code tool patterns, or `none` | the agent's own scope | The shell scope of Claude and opencode workers on this project ([section 8](#8-agents-quota-and-health)). |
+| `worker_tools` | `+`-separated Claude Code tool patterns, or `none` | the agent's own scope | The shell scope of opencode workers on this project (claude workers take their scope from the agent, not from this setting) ([section 8](#8-agents-quota-and-health)). |
 | `approval_max_tasks` | integer | `0` | A plan with more tasks than this waits for you. `0`, the default, turns the count rule off, and so does a negative value; the other approval rules still apply. |
 | `approval_budget` | a whole number of tokens, a `$` amount, or both joined with `+` | none | The plan budget, the approval rule on by default: a plan whose recorded spend passes it holds its new jobs mid-run ([Gates and rules](#gates-and-rules)). |
 | `approval_classes` | list of class names | `implement`, `review`, `answer` | A task of a class outside the list holds the plan. |
@@ -752,7 +752,7 @@ The fields of an `--agent` value:
 
 | Field | Meaning |
 |---|---|
-| `harness` | `claude`, `kimi`, `codex`, `opencode` or `dsh` (experimental). |
+| `harness` | `claude`, `kimi`, `codex`, `opencode` or [`dsh`](#dsh-experimental) (experimental; see also [COMPATIBILITY](COMPATIBILITY.md)). |
 | `model` | Defaults to `sonnet` for claude, `deepseek-flash` for dsh, and to the CLI's own default for the others. For opencode, a model is `provider/model`. |
 | `classes` | A `+`-separated list; default `implement+review+answer`. `classes=none` advertises no task classes (foreman only). |
 | `account` | The login whose quota the agent spends; defaults to the harness name (see [Accounts](#accounts)). |
@@ -778,7 +778,7 @@ Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `
 
 A `land` job (see [section 5](#5-finishing-the-land-job)) carries the single label `git` and no agent. Every runner offers the `git` label — its own git does the landing, and the label is the promise that those git credentials work for the repo — so any runner may take it, wherever it runs. The landing happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker. A landing that waits at the push gate — or lands under `gate_push: never`, whose push is yours — is kept on the remote (`refs/brigada/land/<target>`), not in that clone, so its push may run on another runner, or on your machine.
 
-`kimi`, `opencode` and `dsh` are worker-only; the foreman can be `claude` or `codex`.
+`kimi`, `opencode` and `dsh` are worker-only; the foreman can be `claude` or `codex`. [Section 11](#11-the-foremans-harness-claude-or-codex) lists what a foreman harness must do and where each harness stands.
 
 #### dsh (experimental)
 
@@ -857,8 +857,22 @@ brigada runner --agent 'harness=claude,tools=Bash(npm test:*)+Bash(npx jest:*)'
 - The config key `tools.claude/<model>` (same syntax) sets the default for that model's agent. `tools=` on the `--agent` wins over it, and an agent with neither keeps the Go default.
 - A pattern cannot contain a comma: the `--agent` value splits on commas.
 - The scope applies to workers only. The foreman's own tools (read-only file tools and brigada's MCP tools, no shell and no edits) never change, whatever `tools=` says.
-- `codex`, `kimi`, `opencode` and `dsh` refuse `tools=`. Dsh workers run under `DSH_PERMISSION_MODE=workspace-write` (reviews: `read-only`), an OS-level scope. Codex workers run in the `workspace-write` sandbox, codex reviews in `read-only`. A claude review gets only the file-reading tools and git's read commands, whatever the agent's scope or permission mode says, and an opencode review also denies edit and webfetch. Headless claude runs ignore the repository's own `.claude/settings.json` and `.mcp.json`, and opencode runs ignore its `opencode.json`, `.opencode/` and the project's own instruction files (`AGENTS.md`, `CLAUDE.md`); brigada's prompt carries the instructions. Kimi reviews always use the read-only agent definition above; an `agent-file=` applies to work and fix jobs, which then may also run commands without asking. What each harness's worker may run: claude, the `tools=` scope, else the project's `worker_tools`; opencode, bash commands mapped from the project's `worker_tools` (the Go default scope when unset): `Bash(X:*)` allows `X` and `X *`, any pattern that does not map stays denied, and a compound command runs only if every part is allowed; a review runs none; dsh, bash sandboxed to writing the worktree and the temp directories, with `GOCACHE` set to a brigada directory under the temp directory and `GIT_OPTIONAL_LOCKS=0` for work and fix jobs. Every opencode worker also runs with `OPENCODE_PERMISSION` denying `external_directory`: a tool call that reaches outside its worktree fails with a permission error the model sees and can answer, instead of the ask a headless run auto-rejects. Should such an auto-reject still end a run without a word, the adapter reads the CLI's stderr notice and records it as the failure's reason.
+- `codex`, `kimi`, `opencode` and `dsh` refuse `tools=`. Dsh workers run under `DSH_PERMISSION_MODE=workspace-write` (reviews: `read-only`), an OS-level scope. Codex workers run in the `workspace-write` sandbox, codex reviews in `read-only`. A claude review gets only the file-reading tools and git's read commands, whatever the agent's scope or permission mode says, and an opencode review also denies edit and webfetch. Headless claude runs ignore the repository's own `.claude/settings.json` and `.mcp.json`, and opencode runs ignore its `opencode.json`, `.opencode/` and the project's own instruction files (`AGENTS.md`, `CLAUDE.md`); brigada's prompt carries the instructions. Kimi reviews always use the read-only agent definition above; an `agent-file=` applies to work and fix jobs, which then may also run commands without asking. What each harness's worker may run: claude, the agent's `tools=` scope (or `tools.claude/<model>`), else the Go default; the project's `worker_tools` is not read by claude; opencode, bash commands mapped from the project's `worker_tools` (the Go default scope when unset): `Bash(X:*)` allows `X` and `X *`, any pattern that does not map stays denied, and a compound command runs only if every part is allowed; a review runs none; dsh, bash sandboxed to writing the worktree and the temp directories, with `GOCACHE` set to a brigada directory under the temp directory and `GIT_OPTIONAL_LOCKS=0` for work and fix jobs. Every opencode worker also runs with `OPENCODE_PERMISSION` denying `external_directory`: a tool call that reaches outside its worktree fails with a permission error the model sees and can answer, instead of the ask a headless run auto-rejects. Should such an auto-reject still end a run without a word, the adapter reads the CLI's stderr notice and records it as the failure's reason.
 - `brigada runner` prints each claude agent's scope at startup, and the foreman's capacity read shows it as `tools=` on the agent.
+
+### Scope per harness
+
+What a worker or reviewer may do is set by its CLI's own permission scope, not by a container. Work and fix jobs and reviews differ:
+
+| Harness | Work and fix jobs | Reviews | Foreman |
+|---|---|---|---|
+| claude | `acceptEdits` with a tool allowlist: file tools and `go build`, `go test`, `go vet`, `gofmt` by default; `tools=` replaces the shell allowlist | file-reading tools and git's read commands; editing tools denied | `Read`, `Grep`, `Glob` and brigada's MCP tools; `Bash`, `Edit`, `NotebookEdit`, `Write` denied |
+| codex | `workspace-write` sandbox | `read-only` sandbox | `read-only` sandbox, with MCP approvals decided by a model |
+| kimi | no scope from brigada; the CLI's own permissions apply. `agent-file=` replaces the agent definition | the runner's read-only agent file, which disallows `Bash` | not available |
+| opencode | `OPENCODE_PERMISSION` rules, with external directories denied unless a checkout is named | also denies edit and webfetch | not available |
+| dsh | OS-level `workspace-write` (`DSH_PERMISSION_MODE`) | OS-level `read-only` | not available |
+
+Every harness runs in a git worktree on your machine. Workers inherit your environment minus the credential scrub ([design §5.7](design.md#57-an-environment-for-checks-and-reviews)), so none of these scopes keeps a check command, a test run or a kimi worker away from your remaining credentials or the network.
 
 ### Accounts
 
@@ -966,9 +980,28 @@ Recovery also raises the *fence epoch*, a counter that makes every lease from be
 
 ## 11. The foreman's harness: claude or codex
 
-Only `claude` and `codex` can be a foreman; `kimi` and `opencode` are worker-only. Init chooses one ([section 1](#1-install-and-brigada-init)). To change it, run `brigada project foreman --repo <origin-url> --harness <h> --model <m>`; inside the repo, `--repo` can be left out. Without `--harness` and `--model`, the command shows the current choice.
+Only `claude` and `codex` can be a foreman; `kimi`, `opencode` and `dsh` are worker-only, for the reasons in [what a foreman harness must do](#what-a-foreman-harness-must-do). Init chooses one ([section 1](#1-install-and-brigada-init)). To change it, run `brigada project foreman --repo <origin-url> --harness <h> --model <m>`; inside the repo, `--repo` can be left out. Without `--harness` and `--model`, the command shows the current choice.
 
 This section is about the foreman session itself: the brigada-owned session that wakes headless and that `brigada attach` joins ([section 2](#2-talking-to-the-foreman-brigada-attach)).
+
+### What a foreman harness must do
+
+A foreman harness must meet four requirements, and the runner and `brigada attach` depend on each:
+
+- **(a)** resume one long-lived session headless, so every wake continues the same conversation;
+- **(b)** take brigada's MCP server per run from a config the runner writes, in a strict mode so the repository's own MCP servers do not load;
+- **(c)** let `brigada attach` join that same session interactively;
+- **(d)** accept a read-only tool scope with no shell and no edits, since the foreman plans and never writes code.
+
+Setup checks (a), and that the harness can carry the bridge, through `ResumeCapableHarnesses` in `internal/adapter/adapter.go`, and refuses any other harness. The strictness in (b) is not checked. Status per harness, as the code has it:
+
+- **claude** meets all four. A headless turn runs `--mcp-config` with `--strict-mcp-config`; attach resumes the same session with the bridge added but not strict, so the user's own user-scope servers load as in any session; the scope is the foreman tool set in [scope per harness](#scope-per-harness).
+- **codex** has (a). It has (b) only in part: a headless turn carries the bridge as `-c` overrides, but Codex has no strict switch, so brigada does not keep the repository's own MCP servers out (Codex reads `.codex/config.toml` from the project). It has (d)'s no-edits part, through the `read-only` sandbox, but Codex's shell tools stay available there, so the no-shell part is unmet. It lacks (c) in practice: `brigada attach` resumes the thread by id, but detach writes back the id brigada minted, which is not a Codex thread, so the next resume starts fresh; and an attached Codex session gets no MCP config, so brigada's tools are missing from it ([section 15](#15-known-limits)).
+- **kimi** lacks (b), since the CLI has no MCP-config flag and the adapter refuses such jobs, and (c), since it has no attach command. It has (a), and a read-only agent file for reviews gives it (d) there only.
+- **opencode** lacks (b), since its run path has no MCP-config flag and the adapter refuses such jobs, and (c), since it has no attach command. It has (a), and its review scope denies edit, bash and webfetch.
+- **dsh** lacks (b), since no MCP-config flag is known for its headless profile and the adapter refuses such jobs, and (c), since it has no attach command. It has (a) (`--session-id`). Its read-only mode is OS-level and denies writes, bash writes included, so it has the no-edits part of (d), but bash still runs there, so the no-shell part is unmet.
+
+These are current limits of the CLIs, not design choices. A harness that offers (a) to (d) could be a foreman. DeepSeek's dsh, for one, could qualify once its CLI carries an MCP config, an attachable session and a read-only mode with no shell.
 
 ### Effort and model
 
@@ -1116,7 +1149,7 @@ Every key that `brigada project set` and `project show` know, with each default 
 
 `brigada help` prints the command list. `brigada <command> --help` (also `-h` or `-help`) prints a command's usage, description and flags; `brigada help <command> [<subcommand>]` prints the same help. For the two-level commands `project`, `agent`, `plan` and `task`, `--help` or `help` lists the subcommands; use, for example, `brigada project foreman --help` for a subcommand's flags. Help exits 0. A usage error names the relevant help command on stderr.
 
-A command's flags go after its name and before its positional arguments (`diff`, `logs` and `land` also accept flags after their ids). Every executable command also takes `--state-dir DIR` and `--config PATH`, and most client commands take `--no-start` (fail instead of starting the engine); the synopses below leave these out. Exit codes: 0 ok, 1 error, 2 usage. Init's setup refusals exit 1. `brigada hold yield` and `brigada hold confirm` are no-ops that always exit 0, kept so hooks an older init installed never block a session; every other `hold` subcommand is an unknown command.
+A command's flags go after its name and before its positional arguments (`diff`, `logs` and `land` also accept flags after their ids). Every executable command also takes `--state-dir DIR` and `--config PATH`, and most client commands take `--no-start` (fail instead of starting the engine); the synopses below leave these out. Exit codes: 0 ok, 1 error, 2 usage. Init's setup refusals exit 1. `brigada hold yield` and `brigada hold confirm` are no-ops that always exit 0; every other `hold` subcommand is an unknown command.
 
 ### Starting
 
