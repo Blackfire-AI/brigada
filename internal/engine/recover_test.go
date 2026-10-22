@@ -185,6 +185,38 @@ func TestRecoverRebuildsPlanNewerThanSnapshotAndKeepsOlder(t *testing.T) {
 	}
 }
 
+// TestRecoverRequeuesAReviewingPlansReview: a plan the file shows
+// reviewing has no plan_review job in the restored store; recovery queues
+// its round again, so the plan does not wait in reviewing forever.
+func TestRecoverRequeuesAReviewingPlansReview(t *testing.T) {
+	r := &recoverEnv{env: newEnvCfg(t, func(c *Config) { c.PlanReview = nil }), remote: testsupport.NewGitRemote(t)}
+	r.exec("UPDATE projects SET repo_url = ? WHERE id = ?", r.remote, r.project)
+	r.offerForeman(r.runner1)
+	r.offerReviewer()
+	stored := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	r.pushFile(planfile.Plan{
+		ID: 50, Title: "the plan under review", State: "reviewing",
+		Created: stored.Add(time.Hour), Updated: stored.Add(2 * time.Hour),
+		Tasks: []planfile.Task{
+			{ID: 501, Name: "a", Title: "build a", Class: "implement", State: "pending"},
+			{ID: 502, Name: "b", Title: "build b", Class: "implement", State: "pending"},
+		},
+	})
+	res := r.recoverPlans()
+	if len(res) != 1 || res[0].Action != PlanRebuilt {
+		t.Fatalf("results = %+v, want plan 50 rebuilt", res)
+	}
+	if got := r.str("SELECT state FROM plans WHERE id = 50"); got != planReviewing {
+		t.Fatalf("plan state = %q, want %s", got, planReviewing)
+	}
+	if got := r.int("SELECT COUNT(*) FROM jobs WHERE key = ? AND status = 'queued'", planReviewKey(50)); got != 1 {
+		t.Errorf("queued plan_review jobs = %d, want the round requeued", got)
+	}
+	if got := r.int("SELECT review_round FROM plans WHERE id = 50"); got != 1 {
+		t.Errorf("review round = %d, want 1", got)
+	}
+}
+
 func TestRecoverUpdatesPlanWhoseFileIsNewer(t *testing.T) {
 	r := newRecoverEnv(t)
 	stored := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)

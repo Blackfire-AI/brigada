@@ -25,7 +25,8 @@ import (
 // What a file cannot carry stays lost: a rebuilt task has no spec and no
 // check command, and a task the file shows mid-flight (running, checking,
 // reviewing) has no job anymore, so it waits at needs_foreman for the
-// foreman to decide.
+// foreman to decide. A plan the file shows reviewing has its review round
+// queued again, or proceeds when no reviewer can run it.
 
 // Plan recovery's per-plan outcomes.
 const (
@@ -292,6 +293,15 @@ func (e *Engine) applyPlanFileTx(tx *sql.Tx, project int64, repo, defaultBranch 
 			continue
 		}
 		if _, err := appendEventTx(tx, evTaskNeedsHelp, project, t.ID, 0, eventPayload{Question: t.Question}, now); err != nil {
+			return "", "", err
+		}
+	}
+
+	// A plan restored reviewing has no plan_review job in the restored
+	// store: its round is queued again, or the plan proceeds when no
+	// reviewer can run it (§6.2).
+	if p.State == planReviewing {
+		if err := e.planReviewRecoveredTx(tx, project, p.ID, now); err != nil {
 			return "", "", err
 		}
 	}

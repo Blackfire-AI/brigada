@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -664,5 +665,172 @@ func TestPlanReviewAmendmentRoundTwoKeepsTheBatch(t *testing.T) {
 		if got := e.str("SELECT state FROM tasks WHERE plan_id = ? AND name = ?", res.PlanID, name); got != taskNeedsForeman {
 			t.Errorf("task %s = %s, want held at %s by the deploy class", name, got, taskNeedsForeman)
 		}
+	}
+}
+
+// offerSecondReviewer seeds, on runner 2, a kimi-family agent offering
+// the review class: another reviewer for a plan review's retry.
+func (e *env) offerSecondReviewer() {
+	e.t.Helper()
+	e.exec(`INSERT INTO agents (runner_id, adapter, harness, model, family, account, classes, created_at, updated_at)
+		VALUES (?, 'kimi', 'kimi', 'kimi-k2', 'kimi', 'kimi', '["review"]', ?, ?)`, e.runner2, seedTS, seedTS)
+}
+
+// TestPlanReviewFailedRetriesThenHolds: a plan reviewer that runs and
+// gives no verdict is retried once on another reviewer, the first one
+// excluded; a retry that gives none either keeps the plan reviewing and
+// wakes the foreman with the reason, and the foreman's amendment that
+// respecifies a task starts the next round.
+func TestPlanReviewFailedRetriesThenHolds(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	e.offerSecondReviewer()
+	res := e.createPlan([]PlanTask{{Name: "a", Spec: "do a"}, {Name: "b", Spec: "do b"}})
+
+	g1 := e.lease(e.runner2, nil, nil)
+	if g1 == nil || g1.Kind != KindPlanReview {
+		t.Fatalf("lease = %+v, want the plan review", g1)
+	}
+	first := e.int("SELECT agent_id FROM jobs WHERE id = ?", g1.JobID)
+	e.complete(g1, Completion{Result: "I looked at it and it seems fine."})
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planReviewing {
+		t.Fatalf("plan state after a malformed review = %q, want %s (retried)", got, planReviewing)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'plan_review' AND status = 'queued'"); got != 1 {
+		t.Fatalf("queued plan_review jobs = %d, want the retry", got)
+	}
+	if got := e.int("SELECT exclude_agent FROM jobs WHERE kind = 'plan_review' AND status = 'queued'"); got != first {
+		t.Errorf("retry excludes agent %d, want the first reviewer %d", got, first)
+	}
+	if got := e.int("SELECT COUNT(*) FROM events WHERE kind = ? AND payload LIKE '%retried on another reviewer%'", evPlanReviewQueued); got != 1 {
+		t.Errorf("retry events = %d, want one", got)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'work'"); got != 0 {
+		t.Errorf("work jobs = %d, want none while the retry runs", got)
+	}
+
+	g2 := e.lease(e.runner2, nil, nil)
+	if g2 == nil || g2.Kind != KindPlanReview {
+		t.Fatalf("lease = %+v, want the retry", g2)
+	}
+	if got := e.int("SELECT agent_id FROM jobs WHERE id = ?", g2.JobID); got == first {
+		t.Fatalf("the retry ran on the first reviewer %d", got)
+	}
+	e.complete(g2, Completion{Error: "worker CLI failed", ErrorKind: "other"})
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planReviewing {
+		t.Fatalf("plan state after the failed retry = %q, want %s (held for the foreman)", got, planReviewing)
+	}
+	if got := e.str("SELECT review_verdict FROM plans WHERE id = ?", res.PlanID); got != planReviewNoRun {
+		t.Errorf("recorded verdict = %q, want %s", got, planReviewNoRun)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'plan_review' AND status IN ('queued', 'leased', 'running')"); got != 0 {
+		t.Errorf("live plan_review jobs = %d, want none past the retry", got)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'work'"); got != 0 {
+		t.Errorf("work jobs = %d, want none: the plan did not proceed", got)
+	}
+	prompt := e.str("SELECT prompt FROM jobs WHERE kind = 'foreman' ORDER BY id DESC")
+	for _, want := range []string{"worker CLI failed", "gave no verdict either", "stays reviewing"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("the woken turn's prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+		Respec: []PlanRespec{{Task: "a", Spec: "do a, smaller"}},
+	}); err != nil {
+		t.Fatalf("answer the held review: %v", err)
+	}
+	if got := e.int("SELECT review_round FROM plans WHERE id = ?", res.PlanID); got != 2 {
+		t.Errorf("review round = %d, want 2", got)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'plan_review' AND status = 'queued' AND exclude_agent IS NULL"); got != 1 {
+		t.Errorf("round 2 plan_review jobs = %d, want one, no agent excluded", got)
+	}
+}
+
+// TestPlanReviewFailedNoOtherReviewerHolds: a reviewer that gives no
+// verdict with no other agent to take the retry holds the plan for the
+// foreman at once; a cancel-only answer lets it proceed.
+func TestPlanReviewFailedNoOtherReviewerHolds(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	res := e.createPlan([]PlanTask{{Name: "a", Spec: "do a"}, {Name: "b", Spec: "do b"}})
+	e.complete(e.lease(e.runner2, nil, nil), Completion{Error: "usage limit reached", ErrorKind: "other"})
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planReviewing {
+		t.Fatalf("plan state = %q, want %s", got, planReviewing)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'plan_review'"); got != 1 {
+		t.Errorf("plan_review jobs = %d, want no retry", got)
+	}
+	prompt := e.str("SELECT prompt FROM jobs WHERE kind = 'foreman' ORDER BY id DESC")
+	if !strings.Contains(prompt, "no other agent can take the retry") {
+		t.Errorf("the woken turn's prompt lacks the reason:\n%s", prompt)
+	}
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: []string{"b"}}); err != nil {
+		t.Fatalf("cancel-only answer: %v", err)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
+		t.Fatalf("plan state after a cancel-only answer = %q, want active", got)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'work'"); got != 1 {
+		t.Errorf("work jobs = %d, want task a's one", got)
+	}
+}
+
+// TestPlanReviewLostRunnerProceeds: a plan review that lost its runner
+// MaxAttempts times fails at the lease, and the plan proceeds instead of
+// waiting in reviewing with no live job.
+func TestPlanReviewLostRunnerProceeds(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	res := e.createPlan(nTasks(2))
+	e.exec("UPDATE jobs SET attempts = 3 WHERE kind = 'plan_review'")
+	e.lease(e.runner2, nil, nil)
+	if got := e.str("SELECT status FROM jobs WHERE kind = 'plan_review'"); got != statusFailed {
+		t.Errorf("plan_review job = %s, want failed", got)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
+		t.Fatalf("plan state = %q, want active after the lost review", got)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'work'"); got != 2 {
+		t.Errorf("work jobs = %d, want the first wave's two", got)
+	}
+}
+
+// TestPlanReviewRecoveredRoundRequeued: a reviewing plan with no live
+// review job — what a recovered store holds — gets its round queued
+// again, and proceeds when no reviewer can run it.
+func TestPlanReviewRecoveredRoundRequeued(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	res := e.createPlan(nTasks(2))
+	e.exec("UPDATE jobs SET status = 'failed' WHERE kind = 'plan_review'")
+	recovered := func(plan int64) {
+		t.Helper()
+		if err := e.eng.store.Store.Update(e.ctx, func(tx *sql.Tx) error {
+			return e.eng.planReviewRecoveredTx(tx, e.project, plan, e.clock.Now())
+		}); err != nil {
+			t.Fatalf("recover the review: %v", err)
+		}
+	}
+	recovered(res.PlanID)
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE key = ? AND status = 'queued'", planReviewKey(res.PlanID)); got != 1 {
+		t.Fatalf("queued plan_review jobs = %d, want the round requeued", got)
+	}
+	recovered(res.PlanID) // a live round stays the plan's review
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'plan_review' AND status = 'queued'"); got != 1 {
+		t.Errorf("queued plan_review jobs = %d, want the one round", got)
+	}
+
+	e.exec("UPDATE jobs SET status = 'failed' WHERE kind = 'plan_review'")
+	e.exec("UPDATE agents SET family = 'claude' WHERE family = 'codex'")
+	recovered(res.PlanID)
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
+		t.Fatalf("plan state = %q, want active with no reviewer to be had", got)
 	}
 }

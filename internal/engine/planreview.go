@@ -12,8 +12,8 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
 
-// The plan review (§6.2): a plan — and an amendment that adds or
-// edits tasks — is reviewed by an agent of a family other than the
+// The plan review (§6.2): a plan — and an amendment of an active plan
+// that adds or edits tasks — is reviewed by an agent of a family other than the
 // foreman's before any of its work is queued. The plan waits in
 // planReviewing with all its tasks pending and one plan_review job on
 // the key plan_review:<plan>; the verdict is the reviewer's result block
@@ -23,7 +23,11 @@ import (
 // round. At most two rounds: the second changes verdict proceeds through
 // the same evaluation as approve, the findings recorded and shown. A
 // reviewer that cannot be had — no agent of another family offers the
-// review class, or the job never runs — proceeds the same way.
+// review class, or the job never runs, runs past its hard cap or loses
+// its runner too often — proceeds the same way. A reviewer that runs and
+// gives no verdict is retried once on another agent, as a task review is
+// (§7); a second run with no verdict keeps the plan reviewing and wakes
+// the foreman, whose amendment answers it.
 
 // maxPlanReviewRounds is the plan review's round cap (§6.2): the
 // creation's review, and one more round after a changes verdict the
@@ -509,8 +513,9 @@ func (e *Engine) planReviewAnswerTx(tx *sql.Tx, project, plan int64, batch []int
 // the findings to the foreman and waits for its amendment, unless the
 // rounds are spent, when the plan proceeds with the findings recorded;
 // anything else — no block, a malformed one, an approve without
-// substantive findings, a run that ended in an error — is no verdict, and like a reviewer that cannot be run the plan
-// proceeds through the same evaluation as approve.
+// substantive findings, a run that ended in an error or a limit — is no
+// verdict, retried once on another reviewer and then held for the
+// foreman (planReviewFailedTx).
 func (e *Engine) planReviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	plan := planReviewOfJobTx(job)
 	if plan == 0 {
@@ -544,8 +549,115 @@ func (e *Engine) planReviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, no
 		case haveVerdict:
 			reason = "approve without substantive findings"
 		}
-		return e.planReviewConcludedTx(tx, job.ProjectID, plan, planReviewNoRun, "", reason, now, true)
+		return e.planReviewFailedTx(tx, job, plan, reason, now)
 	}
+}
+
+// planReviewFailedTx answers a plan review that ran and gave no verdict
+// as a task review's unusable answer is answered (§7): once, with
+// another reviewer — the same question on the plan's key, the failed
+// agent excluded — and when that retry also gives none, or no other
+// agent can take it, the plan stays reviewing and the foreman is woken
+// with the reason (planReviewHeldTx). The retry is the job whose
+// ExcludeAgent is set: a plan_review job is never leased by an
+// agent-less runner, so a first run always names its agent.
+func (e *Engine) planReviewFailedTx(tx *sql.Tx, job *jobRow, plan int64, reason string, now time.Time) error {
+	if job.ExcludeAgent != 0 || job.AgentID == 0 {
+		return e.planReviewHeldTx(tx, job.ProjectID, plan, reason+"; the retry on another reviewer gave no verdict either", now)
+	}
+	retry := &jobRow{ProjectID: job.ProjectID, Kind: KindPlanReview, ExcludeFamily: job.ExcludeFamily, ExcludeAgent: job.AgentID}
+	noAgent, err := noReviewAgentTx(tx, retry)
+	if err != nil {
+		return err
+	}
+	if noAgent {
+		return e.planReviewHeldTx(tx, job.ProjectID, plan, reason+"; no other agent can take the retry", now)
+	}
+	sr, err := e.submitTx(tx, SubmitParams{
+		Key:           job.Key,
+		ProjectID:     job.ProjectID,
+		Kind:          KindPlanReview,
+		Mode:          ModeFresh,
+		Prompt:        job.Prompt,
+		ExcludeFamily: job.ExcludeFamily,
+		ExcludeAgent:  job.AgentID,
+	}, now)
+	if err != nil {
+		return err
+	}
+	if sr.Answer != AnsCreated {
+		// The failed run freed the key earlier in this transaction: no
+		// answer but a created job is expected.
+		return fmt.Errorf("queue the review retry of plan %d: submit %s answered %s", plan, job.Key, sr.Answer)
+	}
+	var round int64
+	if err := tx.QueryRow("SELECT review_round FROM plans WHERE id = ?", plan).Scan(&round); err != nil {
+		return fmt.Errorf("read the review round of plan %d: %w", plan, err)
+	}
+	_, err = appendEventTx(tx, evPlanReviewQueued, job.ProjectID, 0, sr.JobID,
+		eventPayload{Plan: plan, Run: round, Reason: boundNote(reason + "; retried on another reviewer")}, now)
+	return err
+}
+
+// planReviewHeldTx keeps a plan whose review gave no verdict reviewing
+// (§6.2): the verdict is recorded as no verdict, and the reason reaches
+// the foreman with a wake. Its amendment answers: one that adds or
+// respecifies tasks starts the next round while one is left, and one that
+// adds and respecifies none — a cancel, a retier — lets the plan proceed.
+func (e *Engine) planReviewHeldTx(tx *sql.Tx, project, plan int64, reason string, now time.Time) error {
+	var round int64
+	if err := tx.QueryRow("SELECT review_round FROM plans WHERE id = ?", plan).Scan(&round); err != nil {
+		return fmt.Errorf("read the review round of plan %d: %w", plan, err)
+	}
+	if _, err := tx.Exec(`UPDATE plans SET review_verdict = ?, review_findings = '', updated_at = ? WHERE id = ?`,
+		planReviewNoRun, fmtTime(now), plan); err != nil {
+		return fmt.Errorf("record the review verdict of plan %d: %w", plan, err)
+	}
+	note := reason + "; the plan stays reviewing: amend it to answer — adding or respecifying tasks starts another round, " +
+		"an amendment that adds and respecifies none (a cancel, a retier) lets the plan proceed"
+	if err := inboxEventTx(tx, evPlanReviewed, project, 0, 0,
+		eventPayload{Plan: plan, Status: planReviewNoRun, Reason: boundNote(note), Run: round}, now); err != nil {
+		return err
+	}
+	return e.wakeForemanTx(tx, project, now)
+}
+
+// planReviewRecoveredTx requeues the review round of a plan recovery
+// restored as reviewing (§6.4): the restored store holds no job for it,
+// so without one the plan would wait forever. A live round is left as it
+// is; a verdict the snapshot holds is older than the file and is not
+// waited on — the round is asked again. A project whose review is now
+// off proceeds at once, and a round no reviewer can take proceeds as
+// queuePlanReviewRoundTx decides.
+func (e *Engine) planReviewRecoveredTx(tx *sql.Tx, project, plan int64, now time.Time) error {
+	live, err := liveJobTx(tx, planReviewKey(plan))
+	if err != nil {
+		return err
+	}
+	if live != nil {
+		return nil
+	}
+	var round int64
+	if err := tx.QueryRow("SELECT review_round FROM plans WHERE id = ?", plan).Scan(&round); err != nil {
+		return fmt.Errorf("read the review round of plan %d: %w", plan, err)
+	}
+	round = max(round, 1)
+	batch, err := planReviewBatchTx(tx, plan)
+	if err != nil {
+		return err
+	}
+	settings, err := projectApprovalTx(tx, project)
+	if err != nil {
+		return err
+	}
+	if !e.planReview(settings).On {
+		if _, err := tx.Exec(`UPDATE plans SET review_round = ?, updated_at = ? WHERE id = ?`, round, fmtTime(now), plan); err != nil {
+			return fmt.Errorf("record the review round of plan %d: %w", plan, err)
+		}
+		return e.planReviewConcludedTx(tx, project, plan, planReviewSkipped, "",
+			"the project's plan review is off; the recovered plan proceeds", now, true)
+	}
+	return e.queuePlanReviewRoundTx(tx, project, plan, round, batch, now)
 }
 
 // planReviewOfJobTx reads the plan a plan_review job's key names; 0 when
