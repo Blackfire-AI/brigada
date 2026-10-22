@@ -101,7 +101,7 @@ tasks:
     deps: ["s6-supply-chain"]
     base: "s6-supply-chain"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 132
