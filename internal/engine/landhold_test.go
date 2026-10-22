@@ -32,14 +32,14 @@ func TestRecordLandedClearsHoldBesideLanding(t *testing.T) {
 
 // TestRecordLandedClearsHeldHold: a task held at the land gate whose
 // landing the trailer detection then records loses its hold, so no
-// needs-you line "waits to land" remains for a task already on the branch.
+// needs-you line "held by rule" remains for a task already on the branch.
 func TestRecordLandedClearsHeldHold(t *testing.T) {
 	e := newEnv(t)
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
 	e.landGateRun(author, reviewer, GateAsk)
-	if it, ok := e.needsYouTask(e.task); !ok || !strings.Contains(it.Reason, "waits to land") {
-		t.Fatalf("before the detection: needs-you = %+v, ok %v, want a waits-to-land line", it, ok)
+	if it, ok := e.needsYouTask(e.task); !ok || !strings.Contains(it.Reason, "held by rule") {
+		t.Fatalf("before the detection: needs-you = %+v, ok %v, want a held-by-rule line", it, ok)
 	}
 
 	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",

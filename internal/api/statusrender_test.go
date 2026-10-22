@@ -70,10 +70,10 @@ func TestStatusSectionsRunning(t *testing.T) {
 // the rule that tripped.
 func TestStatusSectionsShowGateHolds(t *testing.T) {
 	st := Status{NeedsYou: []engine.NeedsYouItem{
-		{Kind: "task", ID: 8, State: "done", Reason: "waits to land: gate_land is ask"},
+		{Kind: "task", ID: 8, State: "done", Reason: "held by rule gate_land: gate_land is ask; release: brigada land approve 8; change the rule: brigada land approve --and-stop-asking 8"},
 		{Kind: "task", ID: 9, State: "done", Reason: "waits to push: task/9-1@abc123"},
 	}}
-	want := "needs you:\ntask #8 done: waits to land: gate_land is ask\ntask #9 done: waits to push: task/9-1@abc123"
+	want := "needs you:\ntask #8 done: held by rule gate_land: gate_land is ask; release: brigada land approve 8; change the rule: brigada land approve --and-stop-asking 8\ntask #9 done: waits to push: task/9-1@abc123"
 	if got := StatusSections(st); !strings.HasSuffix(got, want) {
 		t.Errorf("status sections end %q, want the needs-you block %q", got, want)
 	}
