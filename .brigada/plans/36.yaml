@@ -169,6 +169,6 @@ tasks:
     continue: "legal-notices-final"
     tier: light
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
