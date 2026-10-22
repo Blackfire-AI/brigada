@@ -75,9 +75,9 @@ tasks:
     base: "answer-changes-rule"
     continue: "answer-changes-rule"
     effort: medium
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-100"
-    rounds: 1
+    rounds: 0
   - id: 101
     name: "gate-push-auto"
     title: "gate_push defaults to auto"
