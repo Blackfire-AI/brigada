@@ -28,8 +28,8 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-118-r2"
     rounds: 0
   - id: 119
     name: "runner"
