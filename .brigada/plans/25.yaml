@@ -75,7 +75,7 @@ tasks:
     base: "answer-changes-rule"
     continue: "answer-changes-rule"
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-100"
     rounds: 0
   - id: 101
