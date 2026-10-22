@@ -5,23 +5,35 @@ on:
     tags:
       - "v*"
 
-# Creating the release and uploading assets needs contents:write. If the
-# repository's default workflow permissions are read-only, this block still
-# grants it to this workflow's token.
+# Jobs grant themselves what they need; the workflow default is read-only.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  # The checks CI runs: gofmt, guard, vet, test, race, govulncheck, gitleaks.
+  checks:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   release:
+    needs: checks
     runs-on: ubuntu-latest
+    # Creating the release and uploading assets needs contents:write.
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: 1.27.x
+      # Fails when the tag has no CHANGELOG section.
+      - name: notes
+        run: go run ./internal/tools/relnotes CHANGELOG.md "$GITHUB_REF_NAME" > release-notes.md
       # modernc.org/sqlite is pure Go and the module has no cgo files or build
       # constraints, so CGO_ENABLED=0 cross-compiles every target from this
-      # one runner.
+      # one runner. -trimpath, -buildvcs=false and an empty build id keep the
+      # binary independent of paths, VCS state and the build cache.
       - name: build
         env:
           CGO_ENABLED: "0"
@@ -33,12 +45,15 @@ jobs:
             os="${target%/*}"
             arch="${target#*/}"
             name="brigada-${os}-${arch}"
-            GOOS="$os" GOARCH="$arch" go build -trimpath \
-              -ldflags "-s -w -X github.com/Blackfire-AI/brigada/internal/version.Version=${version}" \
+            GOOS="$os" GOARCH="$arch" go build -trimpath -buildvcs=false \
+              -ldflags "-s -w -buildid= -X github.com/Blackfire-AI/brigada/internal/version.Version=${version}" \
               -o "stage/brigada" ./cmd/brigada
             # Raw binary (curl-able) and a tarball holding the same binary.
             cp stage/brigada "dist/${name}"
-            tar -C stage -czf "dist/${name}.tar.gz" brigada
+            # Fixed order, owner and mtime and no gzip header name or time, so
+            # the tarball is as reproducible as the binary.
+            tar -C stage --sort=name --owner=0 --group=0 --numeric-owner \
+              --mtime=@0 -cf - brigada | gzip -n > "dist/${name}.tar.gz"
           done
           cd dist
           sha256sum brigada-* > SHA256SUMS
@@ -47,7 +62,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          release_args=(--title "$GITHUB_REF_NAME" --generate-notes --verify-tag)
+          release_args=(--title "$GITHUB_REF_NAME" --notes-file release-notes.md --verify-tag)
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
             release_args+=(--prerelease)
           fi
