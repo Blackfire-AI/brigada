@@ -79,10 +79,9 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-138"
     rounds: 2
-    question: "Can you approve the fetch of origin review/third-party-licenses-2026-10-22 here, or copy its third_party/ directory into this worktree, so I can build THIRD_PARTY_NOTICES.md from the maintainer's output?"
   - id: 139
     name: "functionality-fixes"
     title: "Help-text bugs and flaky TestRunnerStallKillsProcessTree"
