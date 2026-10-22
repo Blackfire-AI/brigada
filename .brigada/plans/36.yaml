@@ -79,9 +79,10 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: running
+    state: needs_foreman
     branch: "brigada/task-138"
     rounds: 2
+    question: "NOTICE no longer has the copyright line. Should I restore 'Copyright 2026 Blackfire AI' as the foreman's answer requires?"
   - id: 139
     name: "functionality-fixes"
     title: "Help-text bugs and flaky TestRunnerStallKillsProcessTree"
