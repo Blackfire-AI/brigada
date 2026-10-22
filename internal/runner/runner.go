@@ -60,6 +60,12 @@ type Config struct {
 	HeartbeatEvery time.Duration
 	LeaseWait      time.Duration
 	CheckTimeout   time.Duration
+	// BackoffMin and BackoffMax bound the wait between lease attempts
+	// after a failure; zero keeps leaseBackoffMin and leaseBackoffMax.
+	// A test shortens them so a burst of transient failures on a loaded
+	// host costs milliseconds, not the minute the defaults add up to.
+	BackoffMin time.Duration
+	BackoffMax time.Duration
 	// SetupTimeout, when set, replaces the time bound a task's recorded
 	// setup carries (§5.7); zero keeps the recorded one.
 	SetupTimeout time.Duration
@@ -129,6 +135,12 @@ func (cfg *Config) defaults() error {
 	}
 	if cfg.LeaseWait <= 0 {
 		cfg.LeaseWait = leaseWait
+	}
+	if cfg.BackoffMin <= 0 {
+		cfg.BackoffMin = leaseBackoffMin
+	}
+	if cfg.BackoffMax <= 0 {
+		cfg.BackoffMax = leaseBackoffMax
 	}
 	if cfg.CheckTimeout <= 0 {
 		cfg.CheckTimeout = defaultCheckTimeout
@@ -383,7 +395,7 @@ func Run(ctx context.Context, cfg Config) error {
 	removeAllWritable(setupJobsRoot(cfg.StateDir))
 	client := api.NewClient(cfg.Socket, cfg.Token)
 	registered := false
-	backoff := leaseBackoffMin
+	backoff := cfg.BackoffMin
 
 	// The slot semaphore (§8.1): one token per job the runner may run at
 	// once, --max-parallel of them, one when unset. The loop takes a
@@ -429,7 +441,7 @@ func Run(ctx context.Context, cfg Config) error {
 				if !sleepBackoff(ctx, backoff) {
 					return ctx.Err()
 				}
-				backoff = min(backoff*2, leaseBackoffMax)
+				backoff = min(backoff*2, cfg.BackoffMax)
 				continue
 			}
 			// The detached starter waits for this record, rather than trusting
@@ -438,7 +450,7 @@ func Run(ctx context.Context, cfg Config) error {
 				return fmt.Errorf("record runner agents: %w", err)
 			}
 			registered = true
-			backoff = leaseBackoffMin
+			backoff = cfg.BackoffMin
 			cfg.Log.InfoContext(ctx, "runner registered", "socket", cfg.Socket, "agents", len(cfg.Agents))
 			if !probesStarted {
 				probesStarted = true
@@ -476,10 +488,10 @@ func Run(ctx context.Context, cfg Config) error {
 			if !sleepBackoff(ctx, backoff) {
 				return ctx.Err()
 			}
-			backoff = min(backoff*2, leaseBackoffMax)
+			backoff = min(backoff*2, cfg.BackoffMax)
 			continue
 		}
-		backoff = leaseBackoffMin
+		backoff = cfg.BackoffMin
 		if grant == nil {
 			continue // the wait ran out with nothing to do
 		}
