@@ -48,6 +48,7 @@ type attachEnv struct {
 func newAttachEnv(t *testing.T, repo, harness, model string) *attachEnv {
 	t.Helper()
 	state := testsupport.ShortStateDir(t)
+	seedMigratedStore(t, lifecycle.PathsOf(state).Store)
 	st, err := store.Open(context.Background(), lifecycle.PathsOf(state).Store)
 	if err != nil {
 		t.Fatalf("open the store: %v", err)

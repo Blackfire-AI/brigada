@@ -234,6 +234,7 @@ func TestInitCodexCatalog(t *testing.T) {
 
 func TestInitCodexDiscoverySafety(t *testing.T) {
 	t.Chdir(t.TempDir())
+	shortenHarnessTimeout(t)
 	const root = "  debug  Diagnostic tools"
 	const debug = "  models  Render the raw model catalog as JSON"
 	const bundledHelp = "      --bundled  Skip refresh"
@@ -503,7 +504,17 @@ func TestInitOpenCodeDiscoverySafety(t *testing.T) {
 	}
 }
 
+// shortenHarnessTimeout makes a discovery call that hangs give up at once:
+// the fixtures answer in milliseconds, so only the deliberate hang meets it.
+func shortenHarnessTimeout(t *testing.T) {
+	t.Helper()
+	old := harnessCommandTimeout
+	harnessCommandTimeout = 500 * time.Millisecond
+	t.Cleanup(func() { harnessCommandTimeout = old })
+}
+
 func TestInitOpenCodeDiscoveryTimeout(t *testing.T) {
+	shortenHarnessTimeout(t)
 	for _, command := range []string{"models", "auth list"} {
 		t.Run(command, func(t *testing.T) {
 			fakeInitPATH(t, "opencode")

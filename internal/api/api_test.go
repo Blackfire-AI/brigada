@@ -94,10 +94,7 @@ func newEnvTokens(t *testing.T, tokens string) *env {
 	t.Helper()
 	ctx := context.Background()
 	tmp := t.TempDir()
-	st, err := store.Open(ctx, filepath.Join(tmp, "store.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
+	st := openFreshStore(t, filepath.Join(tmp, "store.db"))
 	t.Cleanup(func() { st.Close() })
 	e := &env{
 		t: t, ctx: ctx, st: st, clock: newFakeClock(),
@@ -107,7 +104,7 @@ func newEnvTokens(t *testing.T, tokens string) *env {
 			"foreman1": "foreman-secret-1",
 		},
 	}
-	err = st.Update(ctx, func(tx *sql.Tx) error {
+	err := st.Update(ctx, func(tx *sql.Tx) error {
 		id := func(query string, args ...any) int64 {
 			t.Helper()
 			res, err := tx.Exec(query, args...)
@@ -523,9 +520,5 @@ func TestTokenFile(t *testing.T) {
 
 func storeMustOpen(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.Open(context.Background(), ":memory:")
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	return st
+	return openFreshStore(t, filepath.Join(t.TempDir(), "store.db"))
 }

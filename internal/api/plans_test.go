@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
-	"github.com/Blackfire-AI/brigada/internal/store"
 )
 
 // TestForemanMutationNeedsNoHoldGuard: a foreman
@@ -186,10 +185,7 @@ type planCreateBody struct {
 // appended to and replaced, and a task that has started is refused.
 func TestPlanAmendRespecRoundTrip(t *testing.T) {
 	ctx := t.Context()
-	st, err := store.Open(ctx, ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := openFreshStore(t, filepath.Join(t.TempDir(), "store.db"))
 	t.Cleanup(func() { st.Close() })
 	eng := engine.New(st, engine.Config{PlanReview: &planReviewOff})
 	if _, err := eng.SetProjectForeman(ctx, "https://example.invalid/respec.git", "claude", "sonnet"); err != nil {
@@ -251,10 +247,7 @@ func TestPlanAmendRespecRoundTrip(t *testing.T) {
 // Exercise the real request and response codecs with authenticated routes.
 func TestPlanAmendRetierRoundTrip(t *testing.T) {
 	ctx := t.Context()
-	st, err := store.Open(ctx, ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := openFreshStore(t, filepath.Join(t.TempDir(), "store.db"))
 	t.Cleanup(func() { st.Close() })
 	eng := engine.New(st, engine.Config{PlanReview: &planReviewOff})
 	repo := "https://example.invalid/retier.git"

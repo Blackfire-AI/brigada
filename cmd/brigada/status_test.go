@@ -30,6 +30,7 @@ func TestStatusGolden(t *testing.T) {
 
 	// Seed the store the engine will open: the golden's rows, written
 	// before the engine starts.
+	seedMigratedStore(t, lifecycle.PathsOf(state).Store)
 	st, err := store.Open(context.Background(), lifecycle.PathsOf(state).Store)
 	if err != nil {
 		t.Fatalf("open the seeded store: %v", err)
