@@ -49,9 +49,9 @@ tasks:
     base: "runner2"
     tier: light
     effort: low
-    state: reviewing
+    state: running
     branch: "brigada/task-120"
-    rounds: 0
+    rounds: 1
   - id: 121
     name: "engine-amend"
     title: "Engine: amendments trigger plan review; visibility; sweep/cancel"
