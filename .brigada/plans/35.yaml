@@ -28,8 +28,8 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: done
+    branch: "brigada/task-124"
     rounds: 0
   - id: 125
     name: "s1-docs"
@@ -39,7 +39,7 @@ tasks:
     base: "s2-functionality"
     tier: light
     effort: low
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 126
