@@ -39,7 +39,7 @@ tasks:
     continue: "shard-race"
     tier: light
     effort: low
-    state: reviewing
+    state: done
     branch: "brigada/task-153"
     rounds: 0
   - id: 154
