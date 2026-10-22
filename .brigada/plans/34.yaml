@@ -28,7 +28,7 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-118-r2"
     rounds: 2
   - id: 119
@@ -38,7 +38,7 @@ tasks:
     deps: ["engine"]
     base: "engine"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 120
@@ -60,6 +60,6 @@ tasks:
     base: "engine"
     tier: heavy
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
