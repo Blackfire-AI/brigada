@@ -39,8 +39,8 @@ tasks:
     base: ""
     effort: medium
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-134"
+    rounds: 1
   - id: 135
     name: "runtime-hardening"
     title: "Runtime: wire GitEnv scrub and scrubbed check/setup env, token-file errors, history fence, git add guard, webhook, snapshots"
