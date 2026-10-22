@@ -316,7 +316,7 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 
 	res := CreatePlanResult{PlanID: planID, State: planState, Tasks: make([]CreatedTask, len(tasks))}
 	if !reviewWanted && verdict.Needed {
-		res.Reasons = verdict.reasons(settings.Classes)
+		res.Reasons = verdict.reasons(settings.Classes, settings.DefaultCheck)
 		if _, err := appendEventTx(tx, evPlanAwaitingApproval, project, 0, 0, eventPayload{
 			Plan:    planID,
 			Count:   int64(len(tasks)),
@@ -379,7 +379,7 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		if err := e.planReviewBeginTx(tx, project, planID, nil, now); err != nil {
 			return CreatePlanResult{}, err
 		}
-		return reviewedCreationTx(tx, res, verdict.reasons(settings.Classes))
+		return reviewedCreationTx(tx, res, verdict.reasons(settings.Classes, settings.DefaultCheck))
 	}
 	if verdict.Needed {
 		return res, nil

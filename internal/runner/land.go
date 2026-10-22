@@ -245,6 +245,13 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 	if err != nil {
 		return nil, fmt.Errorf("read the fetched head of %s: %v", grant.Branch, err)
 	}
+	// The head that lands is the head that was approved (§7.1): a branch
+	// that moved after the approving review is refused, nothing squashed
+	// or pushed, and the task waits for the foreman.
+	if grant.ApprovedHead != "" && strings.TrimSpace(head) != grant.ApprovedHead {
+		return nil, fmt.Errorf("%s is at %s, not the approved head %s: the branch moved after its review; nothing landed",
+			grant.Branch, strings.TrimSpace(head), grant.ApprovedHead)
+	}
 	commit, err := r.landText(ctx, dir, "rev-parse", "HEAD")
 	if err != nil {
 		return nil, err

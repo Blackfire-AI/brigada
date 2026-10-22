@@ -643,7 +643,14 @@ func printLandDecision(ctx context.Context, client landDecider, verb string, id 
 		return fail(stderr, err)
 	}
 	if verb == "approve" {
-		fmt.Fprintf(stdout, "landing for task #%d approved: the land job is queued\n", res.TaskID)
+		switch {
+		case res.Queued:
+			fmt.Fprintf(stdout, "landing for task #%d approved: land job #%d is queued\n", res.TaskID, res.JobID)
+		case res.JobID != 0:
+			fmt.Fprintf(stdout, "landing for task #%d approved: no land job queued, job #%d already holds the task\n", res.TaskID, res.JobID)
+		default:
+			fmt.Fprintf(stdout, "landing for task #%d approved: no land job queued\n", res.TaskID)
+		}
 		for _, s := range res.Settings {
 			fmt.Fprintf(stdout, "rule changed: %s\n", s)
 		}

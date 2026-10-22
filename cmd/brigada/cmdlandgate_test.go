@@ -66,6 +66,26 @@ func TestLandDecision(t *testing.T) {
 	}
 }
 
+// TestLandApproveSaysWhatQueued: the approval prints the land job it
+// queued, or the live job that held the task's key instead (§6.3).
+func TestLandApproveSaysWhatQueued(t *testing.T) {
+	for _, c := range []struct {
+		res  engine.LandDecision
+		want string
+	}{
+		{engine.LandDecision{TaskID: 4, Released: true, Queued: true, JobID: 12}, "land job #12 is queued"},
+		{engine.LandDecision{TaskID: 4, Released: true, JobID: 9}, "no land job queued, job #9 already holds the task"},
+	} {
+		var out, errb bytes.Buffer
+		if code := printLandDecision(context.Background(), &stubLand{res: c.res}, "approve", 4, false, &out, &errb); code != 0 {
+			t.Fatalf("exit %d, stderr %q", code, errb.String())
+		}
+		if !strings.Contains(out.String(), c.want) {
+			t.Errorf("stdout %q lacks %q", out.String(), c.want)
+		}
+	}
+}
+
 // TestLandApproveStopAsking: the flag reaches the client and the changed
 // rules print, one line each (§6.3).
 func TestLandApproveStopAsking(t *testing.T) {

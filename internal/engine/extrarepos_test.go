@@ -249,11 +249,12 @@ func TestExtraReposApproval(t *testing.T) {
 		t.Error("the plan_awaiting_approval event does not name the repository")
 	}
 
-	// The limit being off (a negative max) is the user's choice to run
-	// everything.
+	// The count rule being off (a negative max) leaves the repository
+	// rule on.
 	e = newEnv(t)
 	e.set(map[string]string{SettingApprovalMaxTasks: "-1"})
-	e.assertRuns(e.createPlan([]PlanTask{{Spec: "a", ExtraRepos: []ExtraRepo{{Name: "tools", Repo: toolsHTTPS}}}}), 1)
+	e.assertAwaits(e.createPlan([]PlanTask{{Spec: "a", ExtraRepos: []ExtraRepo{{Name: "tools", Repo: toolsHTTPS}}}}),
+		"extra repositories outside the project default")
 }
 
 func TestExtraReposAmendment(t *testing.T) {
@@ -287,9 +288,12 @@ func TestExtraReposAmendment(t *testing.T) {
 
 func TestExtraReposReachTheLeaseGrant(t *testing.T) {
 	e := newEnv(t)
-	e.set(map[string]string{SettingApprovalMaxTasks: "-1", SettingExtraRepos: "schema " + schemaSSH + " v1"})
+	e.set(map[string]string{SettingExtraRepos: "schema " + schemaSSH + " v1"})
 	author := e.agented("author", "fam", "implement")
 	own := e.createPlan([]PlanTask{{Spec: "own", ExtraRepos: []ExtraRepo{{Name: "tools", Repo: toolsHTTPS}}}})
+	if _, err := e.eng.ApprovePlan(e.ctx, 0, own.PlanID); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
 	g := e.leaseAny(author)
 	if g == nil || g.TaskID != own.Tasks[0].TaskID || len(g.ExtraRepos) != 1 || g.ExtraRepos[0].Name != "tools" ||
 		g.ExtraRepos[0].URL == "" || g.ExtraRepos[0].Repo != toolsCan {

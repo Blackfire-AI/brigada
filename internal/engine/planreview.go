@@ -755,7 +755,7 @@ func (e *Engine) planReviewAppliedTx(tx *sql.Tx, project, plan int64, batch []in
 		}
 		verdict := settings.evaluate(tasks)
 		if verdict.Needed {
-			reasons := verdict.reasons(settings.Classes)
+			reasons := verdict.reasons(settings.Classes, settings.DefaultCheck)
 			if _, err := tx.Exec(`UPDATE plans SET state = ?, updated_at = ? WHERE id = ?`,
 				planAwaitingApproval, nowStr, plan); err != nil {
 				return "", fmt.Errorf("hold plan %d for approval: %w", plan, err)

@@ -10,6 +10,7 @@ import (
 
 func TestCreatePlanOneTask(t *testing.T) {
 	e := newEnv(t)
+	e.setSettings(`{"default_check": "go test ./..."}`)
 
 	res, err := e.eng.CreatePlan(e.ctx, e.project, "fix the frobnicator", []PlanTask{{
 		Title: "the frobnicator",

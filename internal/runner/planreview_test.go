@@ -63,6 +63,7 @@ func newPlanReviewFixture(t *testing.T, result string) *planReviewFixture {
 	on := true
 	e := newTestEnv(t, engine.Config{PlanReview: &on})
 	e.seedProject(remote)
+	e.setProjectSettings(`{"default_check": "go test ./..."}`) // task a's check: the plan gate passes it
 	e.setForeman("fake", "fake-1")
 	markers := markerDir(t)
 	main := remoteBranchCommit(t, remote, "main")

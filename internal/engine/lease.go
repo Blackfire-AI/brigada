@@ -113,8 +113,13 @@ type LeaseGrant struct {
 	// at the job's first lease, and kept by every later lease of the
 	// same job. Empty for a review, which reads ReviewBranch and moves
 	// nothing, and for a foreman turn, which belongs to no task.
-	Branch  string
-	Attempt int64 // leases taken on the job, this one included
+	Branch string
+	// ApprovedHead is, for a land job's squash phase (§7.1), the head of
+	// Branch the approving review judged, as the author job's result
+	// recorded it: the runner refuses to land any other. Empty when the
+	// result recorded none.
+	ApprovedHead string
+	Attempt      int64 // leases taken on the job, this one included
 	// ResumeSessionID is the harness session the key's last run ended
 	// on (§4.2), for a session-mode job to resume; empty when the key
 	// never ran or the job is fresh.

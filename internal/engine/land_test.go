@@ -570,6 +570,126 @@ func TestStaleDroppedForgetsOtherWaitingLandings(t *testing.T) {
 	}
 }
 
+// staleReland lands the fixture's task A with the given push state, then
+// a second task B whose land job reports the target's waiting ref
+// dropped as stale, so A's landing is forgotten and its land job queued
+// again. between runs after A's landing and before B's, after runs once
+// A's land job is queued; each may switch the push gate. It returns the
+// grant of A's re-made land job.
+func (e *env) staleReland(pushed string, between, after func()) *LeaseGrant {
+	e.t.Helper()
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	a := e.task
+	b := e.addTask("{}")
+	e.runTaskToDone(a, author, reviewer)
+	g := e.leaseGit(author)
+	if g == nil {
+		e.t.Fatal("A's land job was not leased")
+	}
+	rec := `{"target_branch":"main","commit":"aaa111","check_passed":true,"pushed":"` + pushed + `"`
+	if pushed == "local" {
+		rec += `,"push_cmd":"git fetch origin refs/brigada/land/main && git push origin FETCH_HEAD:refs/heads/main"`
+	}
+	if ans := e.complete(g, Completion{Result: rec + "}"}); ans != AnsOK {
+		e.t.Fatalf("complete A's land job: %s", ans)
+	}
+	between()
+	e.runTaskToDone(b, author, reviewer)
+	g = e.leaseGit(author)
+	if g == nil || g.TaskID != b {
+		e.t.Fatalf("B's land job was not leased: %+v", g)
+	}
+	if ans := e.complete(g, Completion{
+		Result:       `{"target_branch":"main","commit":"bbb222","check_passed":true,"pushed":"pushed"}`,
+		StaleDropped: "main",
+	}); ans != AnsOK {
+		e.t.Fatalf("complete B's land job: %s", ans)
+	}
+	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", a); n != 0 {
+		e.t.Fatalf("A's stale landing records = %d, want it forgotten", n)
+	}
+	after()
+	g = e.leaseGit(author)
+	if g == nil || g.TaskID != a || g.Kind != KindLand || g.Push {
+		e.t.Fatalf("A's re-made land job was not leased: %+v", g)
+	}
+	return g
+}
+
+// TestStaleRelandKeepsWaitingForTheYes (§6.3, §7.1): a landing that
+// waited at the push gate and is re-made after its waiting ref went stale
+// never pushes without the user's yes, whichever comes first — the switch
+// of gate_push from ask to auto, or the drop of the stale ref. A landing
+// left to the user under never is re-made too, so its push command names
+// a ref that exists, and a switch to auto does not push it either.
+func TestStaleRelandKeepsWaitingForTheYes(t *testing.T) {
+	toAuto := func(e *env) func() {
+		return func() { e.set(map[string]string{SettingGatePush: GateAuto}) }
+	}
+	none := func() {}
+	for _, c := range []struct {
+		name   string
+		pushed string
+		gate   string
+		run    func(e *env) *LeaseGrant
+		want   string
+	}{
+		{"switch then drop", "waiting", GateAsk, func(e *env) *LeaseGrant { return e.staleReland("waiting", toAuto(e), none) }, GateAsk},
+		{"drop then switch", "waiting", GateAsk, func(e *env) *LeaseGrant { return e.staleReland("waiting", none, toAuto(e)) }, GateAsk},
+		{"still ask", "waiting", GateAsk, func(e *env) *LeaseGrant { return e.staleReland("waiting", none, none) }, GateAsk},
+		{"local under never", "local", GateNever, func(e *env) *LeaseGrant { return e.staleReland("local", none, none) }, GateNever},
+		{"local, then auto", "local", GateNever, func(e *env) *LeaseGrant { return e.staleReland("local", none, toAuto(e)) }, GateAsk},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.set(map[string]string{SettingGatePush: c.gate})
+			if g := c.run(e); g.GatePush != c.want {
+				t.Errorf("re-made landing's push gate = %q, want %q", g.GatePush, c.want)
+			}
+		})
+	}
+
+	// A task that never waited lands under auto as auto.
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+	if g := e.leaseGit(author); g == nil || g.GatePush != GateAuto {
+		t.Errorf("first landing grant = %+v, want gate_push auto", g)
+	}
+}
+
+// TestLandGrantCarriesTheApprovedHead (§7.1): the land job's grant names
+// the head the approving review judged, from the author job's result, so
+// the runner lands that head or nothing; the hand-driven land reads the
+// same head.
+func TestLandGrantCarriesTheApprovedHead(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.submit(e.work())
+	g := e.leaseAny(author)
+	if g == nil {
+		t.Fatal("no work job to lease")
+	}
+	if ans := e.complete(g, Completion{
+		Result:      `{"status":"done","summary":"added the thing","branch":"task/1-1","head":"head-approved"}`,
+		CheckResult: passCheck,
+	}); ans != AnsOK {
+		t.Fatalf("complete the work: %s", ans)
+	}
+	e.runReview(reviewer, `{"verdict":"approve","findings":"`+substantiveFindings+`"}`)
+	g = e.leaseGit(author)
+	if g == nil || g.ApprovedHead != "head-approved" {
+		t.Fatalf("land grant = %+v, want the approved head", g)
+	}
+	info, err := e.eng.TaskLand(e.ctx, e.task)
+	if err != nil || info == nil || info.ApprovedHead != "head-approved" {
+		t.Errorf("TaskLand = %+v, %v; want the approved head", info, err)
+	}
+}
+
 // TestLandFailedNeedsYouReason: a task parked by a land conflict shows the
 // conflict's own reason in the needs-you queue, not an older event's.
 func TestLandFailedNeedsYouReason(t *testing.T) {

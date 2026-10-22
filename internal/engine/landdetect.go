@@ -94,10 +94,19 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 			}
 			continue
 		}
-		if _, err := tx.Exec(`INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, source, created_at)
-			VALUES (?, ?, ?, ?, 'pushed', 'trailer', ?)`,
-			lc.TaskID, project, branch, lc.Commit, fmtTime(now)); err != nil {
+		// The read above saw no record; the conflict clause keeps the
+		// write idempotent all the same, and a row it did not write is
+		// someone else's landing, settled by whoever wrote it.
+		r, err := tx.Exec(`INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, source, created_at)
+			VALUES (?, ?, ?, ?, 'pushed', 'trailer', ?) ON CONFLICT (task_id) DO NOTHING`,
+			lc.TaskID, project, branch, lc.Commit, fmtTime(now))
+		if err != nil {
 			return fmt.Errorf("record the landing of task %d: %w", lc.TaskID, err)
+		}
+		if n, err := r.RowsAffected(); err != nil {
+			return fmt.Errorf("record the landing of task %d: %w", lc.TaskID, err)
+		} else if n == 0 {
+			continue
 		}
 		if _, err := e.settleLandedTx(tx, lc.TaskID, lc.Commit, false, now); err != nil {
 			return err

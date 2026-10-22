@@ -67,7 +67,8 @@ func TestLandJobClearsHeldHold(t *testing.T) {
 	}
 
 	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
-		return e.eng.queueLandJobTx(tx, e.project, e.task, e.clock.Now())
+		_, err := e.eng.queueLandJobTx(tx, e.project, e.task, e.clock.Now())
+		return err
 	}); err != nil {
 		t.Fatal(err)
 	}

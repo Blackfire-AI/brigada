@@ -406,6 +406,10 @@ type jobGrant struct {
 	// engine that does not name branches, where the runner falls back
 	// to its own naming.
 	Branch string `json:"branch,omitempty"`
+	// ApprovedHead is, for a land job's squash phase (§7.1), the head of
+	// Branch the approving review judged: the runner lands that head or
+	// nothing. Empty when the author's result recorded none.
+	ApprovedHead string `json:"approved_head,omitempty"`
 	// LandTarget is, for a land job (§7.1), the branch the task's diff
 	// is squashed onto. Empty for every other kind.
 	LandTarget string `json:"land_target,omitempty"`
@@ -479,6 +483,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		ReviewBranch:    g.ReviewBranch,
 		ReviewSince:     g.ReviewSince,
 		Branch:          g.Branch,
+		ApprovedHead:    g.ApprovedHead,
 		LandTarget:      g.LandTarget,
 		DefaultBranch:   g.DefaultBranch,
 		LandCommit:      g.LandCommit,

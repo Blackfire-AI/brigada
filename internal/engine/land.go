@@ -116,7 +116,8 @@ func (e *Engine) maybeLandTaskTx(tx *sql.Tx, taskID int64, now time.Time) error 
 	if reason != "" {
 		return e.holdLandTx(tx, project, taskID, reason, now)
 	}
-	return e.queueLandJobTx(tx, project, taskID, now)
+	_, err = e.queueLandJobTx(tx, project, taskID, now)
+	return err
 }
 
 // taskApprovedTx reports whether the task's last review, after its last
@@ -309,16 +310,18 @@ func clearLandHoldTx(tx *sql.Tx, taskID int64) error {
 // coalesce. No worker and no agent; the git label is what a runner
 // offers to take it. A task that already has a landing record — its own
 // land job landed it, or a detected trailer did — has nothing left to
-// squash, so no land job is queued for it.
-func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, now time.Time) error {
+// squash, so no land job is queued for it. The submit's answer says
+// what happened: created with the new job, pending behind the live job
+// that holds the key, or the zero answer for a task already landed.
+func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, now time.Time) (SubmitResult, error) {
 	var have int
 	if err := tx.QueryRow("SELECT COUNT(*) FROM landings WHERE task_id = ?", taskID).Scan(&have); err != nil {
-		return fmt.Errorf("read the landing of task %d: %w", taskID, err)
+		return SubmitResult{}, fmt.Errorf("read the landing of task %d: %w", taskID, err)
 	}
 	if have > 0 {
-		return nil
+		return SubmitResult{}, nil
 	}
-	sr, err := e.submitTx(tx, SubmitParams{
+	return e.submitTx(tx, SubmitParams{
 		Key:       fmt.Sprintf("task:%d", taskID),
 		ProjectID: project,
 		TaskID:    taskID,
@@ -327,15 +330,6 @@ func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, now time.Time
 		Prompt:    "", // no worker: nothing is composed (§1.4)
 		Labels:    []string{"git"},
 	}, now)
-	if err != nil {
-		return err
-	}
-	if sr.Answer != AnsCreated {
-		// A live job already holds the key: the land job exists. Nothing
-		// to do — idempotent.
-		return nil
-	}
-	return nil
 }
 
 // releaseDependentLandsTx re-runs the land rule for the tasks that depend
@@ -498,14 +492,18 @@ func landingTx(tx *sql.Tx, taskID int64) (*landingRow, error) {
 }
 
 // relandStaleWaitingTx forgets the other landings of the target that
-// waited at the push gate on a waiting ref the runner has just deleted
-// as stale (§7.1): their commits are gone from the remote, so they stop
-// showing "waits to push" and the land rule queues each task again. A
-// landing with a live land job — its push already released — is left
-// for that job, as the push approval leaves it.
+// sat on a waiting ref the runner has just deleted as stale (§7.1) —
+// waiting at the push gate, or left to the user under gate_push never
+// with a push command that fetches that ref: their commits are gone
+// from the remote, so they stop showing "waits to push" or "push by
+// hand" and the land rule queues each task again. The landing that
+// follows never pushes without the user's yes: its grant keeps the push
+// gate at ask while the gate is auto (heldPushTx). A landing with a live
+// land job — its push already released — is left for that job, as the
+// push approval leaves it.
 func (e *Engine) relandStaleWaitingTx(tx *sql.Tx, job *jobRow, target string, now time.Time) error {
 	rows, err := tx.Query(`SELECT l.task_id FROM landings l WHERE l.project_id = ? AND l.target_branch = ?
-		AND l.pushed = 'waiting' AND l.task_id <> ?
+		AND l.pushed IN ('waiting', 'local') AND l.task_id <> ?
 		AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.task_id = l.task_id AND j.kind = 'land'
 			AND j.status IN ('queued', 'leased', 'running'))
 		ORDER BY l.task_id`, job.ProjectID, target, job.TaskID)
@@ -775,6 +773,22 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 	if gatePush == "" {
 		gatePush = GateAuto // the design's default (§6.3), which projectApprovalTx leaves unapplied
 	}
+	if gatePush == GateAuto {
+		// A landing re-made after its waiting ref went stale was waiting
+		// for the user's yes, or left to the user under never: a switch
+		// of the gate to auto since never pushes it unasked (§6.3).
+		held, err := heldPushTx(tx, j.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		if held {
+			gatePush = GateAsk
+		}
+	}
+	approvedHead, err := approvedHeadTx(tx, j.TaskID)
+	if err != nil {
+		return nil, err
+	}
 	return &LeaseGrant{
 		JobID:          j.ID,
 		LeaseOwner:     owner,
@@ -791,6 +805,7 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		Setup:          setup,
 		ExtraRepos:     extraRepos,
 		Branch:         branch,
+		ApprovedHead:   approvedHead,
 		LandTarget:     target,
 		DefaultBranch:  defaultBranch,
 		LandMessage:    msg,
@@ -800,14 +815,64 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 	}, nil
 }
 
+// heldPushTx reports whether the task's last landing, since forgotten,
+// was never pushed by brigada with the user's yes (§6.3, §7.1): its
+// latest task_landed event recorded it waiting at the push gate, or
+// local under gate_push never, and no task_pushed followed. Such a
+// landing is re-made only when its waiting ref went stale
+// (relandStaleWaitingTx), and the re-made landing waits at ask again.
+func heldPushTx(tx *sql.Tx, taskID int64) (bool, error) {
+	var kind, payload string
+	err := tx.QueryRow(`SELECT kind, payload FROM events WHERE task_id = ? AND kind IN (?, ?)
+		ORDER BY id DESC LIMIT 1`, taskID, evTaskLanded, evTaskPushed).Scan(&kind, &payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the last landing of task %d: %w", taskID, err)
+	}
+	if kind != evTaskLanded {
+		return false, nil
+	}
+	var p eventPayload
+	if json.Unmarshal([]byte(payload), &p) != nil {
+		return false, nil
+	}
+	return p.Pushed == "waiting" || p.Pushed == "local", nil
+}
+
+// approvedHeadTx reads the head the task's approving review judged
+// (§7.1): the head its last done author job pushed, as that job's
+// result recorded it. "" when the result names none.
+func approvedHeadTx(tx *sql.Tx, taskID int64) (string, error) {
+	var authored string
+	err := tx.QueryRow(`SELECT COALESCE(result, '') FROM jobs
+		WHERE task_id = ? AND kind IN ('work', 'fix') AND status = 'done' ORDER BY id DESC LIMIT 1`, taskID).Scan(&authored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read the last author job of task %d: %w", taskID, err)
+	}
+	var head headField
+	_ = json.Unmarshal([]byte(jobResultText(authored)), &head)
+	return strings.TrimSpace(head.Head), nil
+}
+
 // LandDecision is what releasing or cancelling a land-gate hold did
 // (§6.3): the task, whether the landing now runs (Released) or is
 // cancelled — the branch left alone, the hold row kept as rejected so the
 // rule never re-holds a landing the user refused — and the key=value
 // pairs an approval that stops asking changed.
+//
+// For an approval, Queued says whether the land job was queued, with
+// its id in JobID; a live job already on the task's key queues nothing,
+// and JobID then names that job.
 type LandDecision struct {
 	TaskID   int64    `json:"task_id"`
 	Released bool     `json:"released"` // true for an approval, false for a rejection
+	Queued   bool     `json:"queued,omitempty"`
+	JobID    int64    `json:"job_id,omitempty"`
 	Settings []string `json:"settings_changed,omitempty"`
 }
 
@@ -881,11 +946,24 @@ func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve, stop
 		// the land rule again would re-hold the same task, since the gate
 		// still trips — the user's yes is what overrides it (§6.3). The
 		// rule checked the dependencies before it held, so they are still
-		// landed.
-		if err := e.queueLandJobTx(tx, project, taskID, now); err != nil {
+		// landed. A live job on the task's key queues nothing: the
+		// decision names that job instead of a land job it did not queue.
+		res := LandDecision{TaskID: taskID, Released: true, Settings: changed}
+		live, err := liveJobTx(tx, fmt.Sprintf("task:%d", taskID))
+		if err != nil {
 			return LandDecision{}, err
 		}
-		return LandDecision{TaskID: taskID, Released: true, Settings: changed}, nil
+		if live != nil {
+			res.JobID = live.ID
+			return res, nil
+		}
+		sr, err := e.queueLandJobTx(tx, project, taskID, now)
+		if err != nil {
+			return LandDecision{}, err
+		}
+		res.Queued = sr.Answer == AnsCreated
+		res.JobID = sr.JobID
+		return res, nil
 	}
 	// Reject keeps the row, marked rejected: the landing is cancelled,
 	// the branch stays, and the rule never re-holds what the user refused.

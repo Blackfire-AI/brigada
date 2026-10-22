@@ -98,7 +98,7 @@ func TestApprovalClasses(t *testing.T) {
 
 func TestApprovalProtectedPaths(t *testing.T) {
 	e := newEnv(t)
-	e.setSettings(`{"approval_protected_paths": ["internal/store/migrations/*", ".github/**", "go.mod"]}`)
+	e.setSettings(`{"approval_protected_paths": ["internal/store/migrations/*", ".github/**", "go.mod"], "default_check": "go test ./internal/engine"}`)
 	e.assertRuns(e.createPlan([]PlanTask{{Spec: "touch internal/engine/plans.go", Check: "go test ./internal/engine"}}), 1)
 
 	for name, task := range map[string]PlanTask{
@@ -121,10 +121,101 @@ func TestApprovalProtectedPaths(t *testing.T) {
 	e.assertRuns(e.createPlan([]PlanTask{{Spec: "see internal/store/migrations/deep/x.sql"}}), 1)
 }
 
+// TestApprovalCheckRule (§6.3): a task whose check is not the project's
+// default_check holds the plan, naming the rule; an omitted check, or one
+// equal to the default, holds nothing.
+func TestApprovalCheckRule(t *testing.T) {
+	e := newEnv(t)
+	e.assertRuns(e.createPlan([]PlanTask{{Spec: "x"}}), 1)
+
+	e = newEnv(t)
+	e.assertAwaits(e.createPlan([]PlanTask{{Spec: "x", Check: "make lint"}}),
+		`check_command: check "make lint" differs from default_check none`)
+
+	e = newEnv(t)
+	e.setSettings(`{"default_check": "go test ./..."}`)
+	e.assertRuns(e.createPlan([]PlanTask{{Spec: "x"}, {Spec: "y", Check: "go test ./..."}}), 2)
+
+	e = newEnv(t)
+	e.setSettings(`{"default_check": "go test ./..."}`)
+	res := e.createPlan([]PlanTask{{Spec: "x"}, {Spec: "y", Check: "make release"}})
+	e.assertAwaits(res, `check_command: check "make release" differs from default_check "go test ./..."`)
+
+	// A negative approval_max_tasks leaves the rule on.
+	e = newEnv(t)
+	e.setSettings(`{"default_check": "go test ./...", "approval_max_tasks": -1}`)
+	e.assertAwaits(e.createPlan([]PlanTask{{Spec: "y", Check: "make release"}}), "check_command")
+}
+
+// TestAmendHoldsAddedTaskWithOtherCheck (§6.3): an amendment of an active
+// plan whose added task carries a check other than default_check holds
+// that task alone at the plan gate, its needs-you line naming the rule,
+// while the plan stays active and the rest runs on. A respec of a pending
+// task with such a check holds it the same way.
+func TestAmendHoldsAddedTaskWithOtherCheck(t *testing.T) {
+	e := newEnv(t)
+	e.setSettings(`{"default_check": "go test ./..."}`)
+	res := e.createPlan([]PlanTask{{Name: "a", Spec: "a"}})
+	e.assertRuns(res, 1)
+
+	am := e.amend(res.PlanID, PlanAmendment{Add: []PlanTask{
+		{Name: "plain", Spec: "b"},
+		{Name: "same", Spec: "c", Check: "go test ./..."},
+		{Name: "other", Spec: "d", Check: "make release"},
+	}})
+	if am.State != "active" || len(am.Held) != 1 || am.Held[0].Name != "other" ||
+		!strings.Contains(am.Held[0].Reason, `check_command: check "make release"`) {
+		t.Fatalf("amendment = %+v, want active with the other-check task held", am)
+	}
+	if got := e.taskState(am.Held[0].TaskID); got != taskNeedsForeman {
+		t.Errorf("held task state = %q, want needs_foreman", got)
+	}
+	for _, c := range am.Added[:2] {
+		if got := e.taskState(c.TaskID); got != taskReady || c.JobID == 0 {
+			t.Errorf("task %s = %q job %d, want ready with a job", c.Name, got, c.JobID)
+		}
+	}
+	st, err := e.eng.Status(e.ctx, e.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, it := range st.NeedsYou {
+		if it.Kind == "task" && it.ID == am.Held[0].TaskID {
+			found = true
+			if !strings.Contains(it.Reason, "check_command") || !strings.Contains(it.Reason, "release:") {
+				t.Errorf("needs-you entry = %+v, want the rule and how to release it", it)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("needs-you entries = %+v, want the held task", st.NeedsYou)
+	}
+
+	// A respec of a pending task whose check is not the default holds it.
+	e = newEnv(t)
+	e.setSettings(`{"default_check": "go test ./..."}`)
+	res = e.createPlan([]PlanTask{{Name: "a", Spec: "a"}, {Name: "b", Spec: "b", Check: "make release", Deps: []string{"a"}}})
+	e.assertAwaits(res, "check_command")
+	if _, err := e.eng.ApprovePlan(e.ctx, 0, res.PlanID); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	re := e.amend(res.PlanID, PlanAmendment{Respec: []PlanRespec{{Task: "b", Spec: "b, and more", Mode: RespecReplace}}})
+	if re.State != "active" || len(re.Held) != 1 || !strings.Contains(re.Held[0].Reason, "check_command") {
+		t.Fatalf("respec = %+v, want the task held for its check", re)
+	}
+}
+
 func TestApprovalLimitZeroAndNegative(t *testing.T) {
 	// 0 is the default and means off: the count rule holds nothing.
 	e := newEnv(t)
 	e.setSettings(`{"approval_max_tasks": 0}`)
+	e.assertRuns(e.createPlan(nTasks(9)), 9)
+
+	// A negative limit is off as well, for the count rule alone: the
+	// per-task rules still hold.
+	e = newEnv(t)
+	e.setSettings(`{"approval_max_tasks": -1}`)
 	e.assertRuns(e.createPlan(nTasks(9)), 9)
 
 	e = newEnv(t)
@@ -132,7 +223,9 @@ func TestApprovalLimitZeroAndNegative(t *testing.T) {
 	tasks := nTasks(9)
 	tasks[0].Class = "deploy"
 	tasks[1].Spec = "edit go.mod"
-	e.assertRuns(e.createPlan(tasks), 9)
+	res := e.createPlan(tasks)
+	e.assertAwaits(res, "class deploy")
+	e.assertAwaits(res, "protected paths: go.mod")
 
 	e = newEnv(t)
 	e.setSettings(`{"approval_max_tasks": 2}`)

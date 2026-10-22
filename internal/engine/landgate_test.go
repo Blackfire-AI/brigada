@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -30,8 +31,8 @@ func TestLandApproveReleasesTheHold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LandApprove: %v", err)
 	}
-	if !res.Released {
-		t.Errorf("LandApprove = %+v, want released", res)
+	if !res.Released || !res.Queued || res.JobID == 0 {
+		t.Errorf("LandApprove = %+v, want released with its land job queued", res)
 	}
 	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ? AND state = 'held'", e.task); n != 0 {
 		t.Errorf("held land_holds rows after approve = %d, want none", n)
@@ -41,6 +42,31 @@ func TestLandApproveReleasesTheHold(t *testing.T) {
 	}
 	if p, ok := e.eventPayloadOf(evTaskLandReleased); !ok || p.Status != taskDone {
 		t.Errorf("task_land_released event = %+v (%t), want a done release", p, ok)
+	}
+}
+
+// TestLandApproveBehindALiveJob: an approval while a live job holds the
+// task's key queues nothing and says so, naming that job instead of
+// reporting a land job it did not queue (§6.3).
+func TestLandApproveBehindALiveJob(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.landGateRun(author, reviewer, GateAsk)
+	live := e.submit(SubmitParams{Key: fmt.Sprintf("task:%d", e.task), ProjectID: e.project, TaskID: e.task,
+		Kind: KindLand, Mode: ModeFresh, Labels: []string{"git"}})
+	if live.Answer != AnsCreated {
+		t.Fatalf("seed the live job: %+v", live)
+	}
+	res, err := e.eng.LandApprove(e.ctx, e.project, e.task, false)
+	if err != nil {
+		t.Fatalf("LandApprove: %v", err)
+	}
+	if !res.Released || res.Queued || res.JobID != live.JobID {
+		t.Errorf("LandApprove = %+v, want released, nothing queued, job %d named", res, live.JobID)
+	}
+	if n := e.landJobs(); n != 1 {
+		t.Errorf("land jobs = %d, want the live one alone", n)
 	}
 }
 
