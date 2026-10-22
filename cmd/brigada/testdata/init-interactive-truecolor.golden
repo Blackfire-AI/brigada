@@ -4,6 +4,10 @@
 [38;2;138;143;152m(an agent) turns your request into a plan of tasks; workers (other agents)[0m
 [38;2;138;143;152mwrite the code in their own git worktrees; your check command tests it; and[0m
 [38;2;138;143;152man agent of a different model family reviews it. Four short steps follow.[0m
+[38;2;138;143;152mThe engine mirrors plan files (titles, task states, dependencies,[0m
+[38;2;138;143;152mbranches, open questions, extra repositories) to the brigada/plans[0m
+[38;2;138;143;152mbranch of your remote; turn that off with[0m
+[38;2;138;143;152m`brigada project set plan_files=off`.[0m
 [38;2;138;143;152mNothing is written or started until you confirm at the end.[0m
 
 Signed in: claude, codex, opencode (2 providers, opencode providers list).

@@ -109,6 +109,7 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingExtraRepos, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingForemanRotateTokens, Value: "400000", Default: true, Source: SourceDefault},
 		{Key: SettingForemanWakesPerDay, Value: "20", Default: true, Source: SourceDefault},
+		{Key: SettingPlanFiles, Value: "on", Default: true, Source: SourceDefault},
 		{Key: SettingInstructions, Value: "none", Default: true, Source: SourceDefault},
 	}
 	if len(got.Settings) != len(want) {

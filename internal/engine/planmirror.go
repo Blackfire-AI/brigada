@@ -49,8 +49,12 @@ const (
 //	                   branch instead (§6.4's option); the engine never
 //	                   creates that branch, so a remote without it is a
 //	                   warning until the repo has one.
+//	plan_files         on (default) or off. Off writes and pushes
+//	                   nothing: a plan's mark stays owed, so turning it
+//	                   on again catches the plans up.
 type planFileSettings struct {
 	Branch string `json:"plan_file_branch"`
+	Files  string `json:"plan_files"`
 }
 
 // planFileTarget resolves the setting against the project's repo.
@@ -203,6 +207,9 @@ func (e *Engine) pushPlanFile(ctx context.Context, planID int64) error {
 	case err != nil:
 		return err
 	}
+	if snap.off {
+		return nil // the mark stays: turning the mirror on again catches the plan up
+	}
 	pushCtx, cancel := context.WithTimeout(ctx, e.cfg.PlanFileTimeout)
 	defer cancel()
 	if err := planfile.Push(pushCtx, snap.target, snap.plan); err != nil {
@@ -226,6 +233,7 @@ type planSnapshot struct {
 	plan   planfile.Plan
 	target planfile.Target
 	seq    int64
+	off    bool // the project's plan_files is off
 }
 
 // readPlanSnapshotTx reads a plan, its tasks, their edges, rounds and open
@@ -253,6 +261,7 @@ func readPlanSnapshotTx(tx *sql.Tx, planID int64) (planSnapshot, error) {
 		}
 	}
 	s.target = planFileTarget(transport, defaultBranch, cfg.Branch)
+	s.off = cfg.Files == PlanFilesOff
 	if err := tx.QueryRow("SELECT COALESCE((SELECT seq FROM plan_mirror_dirty WHERE plan_id = ?), 0)", planID).Scan(&s.seq); err != nil {
 		return planSnapshot{}, fmt.Errorf("read the mirror mark of plan %d: %w", planID, err)
 	}
