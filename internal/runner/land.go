@@ -220,6 +220,9 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 			return nil, err
 		}
 		wait := landWaitRef(grant.LandTarget)
+		if err := r.landDropStaleWaiting(ctx, dir, grant.LandTarget); err != nil {
+			return nil, err
+		}
 		if r.landHasCommit(ctx, dir, wait) {
 			pushed, err := r.landIsAncestor(ctx, dir, wait, onto)
 			if err != nil {
@@ -629,6 +632,46 @@ func (r *jobRun) landFetchWaiting(ctx context.Context, dir string) error {
 		"+refs/brigada/land/*:refs/brigada/land/*"); err != nil {
 		return fmt.Errorf("fetch the waiting landings from %s: %v", redactURL(r.grant.RepoURL), trimCmdError(out, err))
 	}
+	return nil
+}
+
+// landDropStaleWaiting deletes the target's waiting ref from the remote
+// when the target no longer fast-forwards to it (§7.1): the target moved
+// past the waiting landings by another route — a hand landing, a
+// cherry-pick — so nothing can push them, and stacking on the ref would
+// carry a dead history. A ref the target can still fast-forward to is
+// left alone. The local copy goes too, so the stack check that follows
+// sees none.
+func (r *jobRun) landDropStaleWaiting(ctx context.Context, dir, target string) error {
+	wait := landWaitRef(target)
+	head := "refs/heads/" + target
+	if !r.landHasCommit(ctx, dir, wait) || !r.landHasCommit(ctx, dir, head) {
+		return nil
+	}
+	ff, err := r.landIsAncestor(ctx, dir, head, wait)
+	if err != nil {
+		return fmt.Errorf("compare %s with the waiting landings: %v", target, err)
+	}
+	if ff {
+		return nil
+	}
+	// A ref the target already holds is not stale: nothing waits on it,
+	// and the stack check treats it as pushed.
+	held, err := r.landIsAncestor(ctx, dir, wait, head)
+	if err != nil {
+		return fmt.Errorf("compare the waiting landings with %s: %v", target, err)
+	}
+	if held {
+		return nil
+	}
+	if out, err := r.landGit(ctx, dir, "push", "--quiet", "origin", ":"+wait); err != nil {
+		return fmt.Errorf("drop the stale waiting ref %s: %v", wait, trimCmdError(out, err))
+	}
+	if out, err := r.landGit(ctx, dir, "update-ref", "-d", wait); err != nil {
+		return fmt.Errorf("drop the local %s: %v", wait, trimCmdError(out, err))
+	}
+	r.staleDropped = target
+	r.cfg.Log.WarnContext(ctx, "dropped a stale waiting ref the target moved past", "ref", wait)
 	return nil
 }
 

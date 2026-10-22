@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -77,17 +78,29 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 		}
 		// Idempotent: a task the land job landed already has a record, and
 		// one recorded by an earlier detection has one too.
-		var have int
-		if err := tx.QueryRow("SELECT COUNT(*) FROM landings WHERE task_id = ?", lc.TaskID).Scan(&have); err != nil {
-			return fmt.Errorf("read the landing of task %d: %w", lc.TaskID, err)
+		existing, err := landingTx(tx, lc.TaskID)
+		if err != nil {
+			return err
 		}
-		if have > 0 {
+		if existing != nil {
+			// The commit is on the branch, so a push still waiting for
+			// its gate, or a task parked after a rejected push, is done.
+			freed, err := e.settleLandedTx(tx, lc.TaskID, lc.Commit, existing.Pushed != "pushed", now)
+			if err != nil {
+				return err
+			}
+			if freed {
+				newLanded = append(newLanded, lc.TaskID)
+			}
 			continue
 		}
 		if _, err := tx.Exec(`INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, source, created_at)
 			VALUES (?, ?, ?, ?, 'pushed', 'trailer', ?)`,
 			lc.TaskID, project, branch, lc.Commit, fmtTime(now)); err != nil {
 			return fmt.Errorf("record the landing of task %d: %w", lc.TaskID, err)
+		}
+		if _, err := e.settleLandedTx(tx, lc.TaskID, lc.Commit, false, now); err != nil {
+			return err
 		}
 		newLanded = append(newLanded, lc.TaskID)
 	}
@@ -99,4 +112,53 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 		}
 	}
 	return nil
+}
+
+// settleLandedTx brings a task whose commit is on the default branch to
+// its landed end state (§7.1): a landing not yet pushed — waiting at the
+// push gate, or left to the user under gate_push never — becomes pushed
+// at the commit that carries the trailer, and a task parked at needs_foreman by a failed landing
+// or push returns to done with its needs-you line gone, its dependents
+// released as a finished task's are. It reports whether anything changed,
+// so the caller re-runs the land rule for the dependents.
+func (e *Engine) settleLandedTx(tx *sql.Tx, taskID int64, commit string, unpushed bool, now time.Time) (bool, error) {
+	changed := false
+	if unpushed {
+		if _, err := tx.Exec(`UPDATE landings SET pushed = 'pushed', commit_sha = ?, push_cmd = '' WHERE task_id = ? AND pushed <> 'pushed'`,
+			commit, taskID); err != nil {
+			return false, fmt.Errorf("record the push of task %d: %w", taskID, err)
+		}
+		changed = true
+	}
+	var state string
+	var project, plan int64
+	if err := tx.QueryRow(`SELECT t.state, p.project_id, t.plan_id FROM tasks t JOIN plans p ON p.id = t.plan_id WHERE t.id = ?`,
+		taskID).Scan(&state, &project, &plan); err != nil {
+		return false, fmt.Errorf("read task %d: %w", taskID, err)
+	}
+	if state != taskNeedsForeman {
+		return changed, nil
+	}
+	// Only a parking by a failed landing moves: a task parked for any
+	// other reason is the foreman's still.
+	kinds := "'" + strings.Join(needsYouEventKinds, "', '") + "'"
+	var kind string
+	err := tx.QueryRow(`SELECT kind FROM events WHERE task_id = ? AND kind IN (`+kinds+`) ORDER BY id DESC LIMIT 1`,
+		taskID).Scan(&kind)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && kind != evTaskLandFailed) {
+		return changed, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the parking of task %d: %w", taskID, err)
+	}
+	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`, taskDone, fmtTime(now), taskID); err != nil {
+		return false, fmt.Errorf("finish task %d: %w", taskID, err)
+	}
+	if err := e.releaseDependentsTx(tx, project, taskID, now); err != nil {
+		return false, err
+	}
+	if _, err := e.finishPlanIfClosedTx(tx, project, plan, taskID, 0, now); err != nil {
+		return false, err
+	}
+	return true, nil
 }

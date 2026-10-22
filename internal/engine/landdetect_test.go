@@ -92,6 +92,156 @@ func TestRecordLandedShownInStatus(t *testing.T) {
 	}
 }
 
+// TestRecordLandedClearsLandConflict: a task parked at needs_foreman by a
+// land conflict whose Brigada-Task trailer then appears on the default
+// branch returns to done, its needs-you line gone, and a landing recorded.
+func TestRecordLandedClearsLandConflict(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+	g := e.leaseGit(author)
+	if g == nil {
+		t.Fatal("the land job was not leased")
+	}
+	if ans := e.complete(g, Completion{Result: `{"target_branch":"main","commit":"","check_passed":false,"conflict_files":["a.go"]}`}); ans != AnsOK {
+		t.Fatalf("complete the land job: %s", ans)
+	}
+	if _, ok := e.needsYouTask(e.task); !ok {
+		t.Fatal("the conflict raised no needs-you line")
+	}
+
+	if err := e.eng.RecordLanded(e.ctx, "https://example.invalid/brigada.git", "main",
+		[]LandedCommit{{TaskID: e.task, Commit: "abc123"}}); err != nil {
+		t.Fatal(err)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskDone {
+		t.Errorf("task state = %q, want done", state)
+	}
+	if it, ok := e.needsYouTask(e.task); ok {
+		t.Errorf("needs-you line left after the landing: %+v", it)
+	}
+	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", e.task); n != 1 {
+		t.Errorf("landings rows = %d, want 1", n)
+	}
+}
+
+// TestRecordLandedClearsRejectedPush: a landing waiting at the push gate,
+// whose push was rejected and parked the task, is pushed and done once its
+// trailer is on the branch; neither the park nor "waits to push" remains.
+func TestRecordLandedClearsRejectedPush(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+	g := e.leaseGit(author)
+	if g == nil {
+		t.Fatal("the land job was not leased")
+	}
+	if ans := e.complete(g, Completion{Result: `{"target_branch":"main","commit":"e7db0c2","check_passed":true,"pushed":"waiting"}`}); ans != AnsOK {
+		t.Fatalf("complete the land job: %s", ans)
+	}
+	if _, err := e.eng.PushApprove(e.ctx, "https://example.invalid/brigada.git"); err != nil {
+		t.Fatal(err)
+	}
+	g = e.leaseGit(author)
+	if g == nil {
+		t.Fatal("the push job was not leased")
+	}
+	if ans := e.complete(g, Completion{Error: "push e7db0c2 to main: ! [rejected] (non-fast-forward)"}); ans != AnsOK {
+		t.Fatalf("complete the push job: %s", ans)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+		t.Fatalf("task state = %q, want needs_foreman after the rejected push", state)
+	}
+
+	if err := e.eng.RecordLanded(e.ctx, "https://example.invalid/brigada.git", "main",
+		[]LandedCommit{{TaskID: e.task, Commit: "f00dcafe"}}); err != nil {
+		t.Fatal(err)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskDone {
+		t.Errorf("task state = %q, want done", state)
+	}
+	if got := e.str("SELECT pushed FROM landings WHERE task_id = ?", e.task); got != "pushed" {
+		t.Errorf("pushed = %q, want pushed", got)
+	}
+	if got := e.str("SELECT commit_sha FROM landings WHERE task_id = ?", e.task); got != "f00dcafe" {
+		t.Errorf("commit = %q, want the trailer's commit f00dcafe", got)
+	}
+	st, err := e.eng.Status(e.ctx, e.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range st.NeedsYou {
+		if it.Kind == "task" && it.ID == e.task {
+			t.Errorf("needs-you line left after the landing: %+v", it)
+		}
+	}
+}
+
+// TestRecordLandedSettlesLocalLanding: a gate_push never landing whose
+// trailer shows on the branch is pushed, and its push command leaves the
+// needs-you queue.
+func TestRecordLandedSettlesLocalLanding(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+	g := e.leaseGit(author)
+	if g == nil {
+		t.Fatal("the land job was not leased")
+	}
+	if ans := e.complete(g, Completion{Result: `{"target_branch":"main","commit":"e7db0c2","check_passed":true,"pushed":"local","push_cmd":"git push"}`}); ans != AnsOK {
+		t.Fatalf("complete the land job: %s", ans)
+	}
+	if it, ok := e.needsYouTask(e.task); !ok || !strings.Contains(it.Reason, "git push") {
+		t.Fatalf("needs-you entry = %+v (%t), want the push command", it, ok)
+	}
+	if err := e.eng.RecordLanded(e.ctx, "https://example.invalid/brigada.git", "main",
+		[]LandedCommit{{TaskID: e.task, Commit: "f00dcafe"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.str("SELECT pushed FROM landings WHERE task_id = ?", e.task); got != "pushed" {
+		t.Errorf("pushed = %q, want pushed", got)
+	}
+	if it, ok := e.needsYouTask(e.task); ok {
+		t.Errorf("needs-you line left after the landing: %+v", it)
+	}
+}
+
+// TestRejectedPushOfLandedTaskRaisesNothing: a push rejected as
+// non-fast-forward, for a task already recorded landed by its trailer,
+// parks nothing and raises no land failure.
+func TestRejectedPushOfLandedTaskRaisesNothing(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+	g := e.leaseGit(author)
+	if g == nil {
+		t.Fatal("the land job was not leased")
+	}
+	if err := e.eng.RecordLanded(e.ctx, "https://example.invalid/brigada.git", "main",
+		[]LandedCommit{{TaskID: e.task, Commit: "abc123"}}); err != nil {
+		t.Fatal(err)
+	}
+	if ans := e.complete(g, Completion{Error: "push e7db0c2 to main: ! [rejected] (non-fast-forward)"}); ans != AnsOK {
+		t.Fatalf("complete the land job: %s", ans)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskDone {
+		t.Errorf("task state = %q, want done", state)
+	}
+	if _, ok := e.eventPayloadOf(evTaskLandFailed); ok {
+		t.Error("a task_land_failed event was raised for a landed task")
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", e.plan); got != "done" {
+		t.Errorf("plan state = %q, want done once the land job ended", got)
+	}
+	if it, ok := e.needsYouTask(e.task); ok {
+		t.Errorf("needs-you line raised: %+v", it)
+	}
+}
+
 // TestPlanDoneReportLeavesLandedOutOfWaiting: a done plan whose tasks are
 // landed and one is still waiting names the landed one in "landed" and
 // the waiting one in "not yet landed", never the other way around.

@@ -25,6 +25,10 @@ type jobRun struct {
 	client *api.Client
 	grant  *api.JobGrant
 
+	// staleDropped names the target whose stale waiting ref a land job
+	// deleted; every completion of the job carries it.
+	staleDropped string
+
 	mu           sync.Mutex
 	events       []adapter.Event
 	transcript   []byte
@@ -869,6 +873,7 @@ func (r *jobRun) deliverError(ctx context.Context, comp api.Completion) {
 // stale_epoch mean the result is not ours to deliver anymore, and it is
 // dropped — never retried into someone else's job.
 func (r *jobRun) deliver(ctx context.Context, comp api.Completion) {
+	comp.StaleDropped = r.staleDropped
 	ans, err := r.complete(ctx, comp)
 	if err != nil {
 		if errors.Is(err, errDropped) {
