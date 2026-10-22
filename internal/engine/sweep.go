@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -282,37 +283,57 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 		rep.Expired = append(rep.Expired, x.id)
 	}
 
+	// One query covers every kind's cap instead of one per kind: the
+	// sweep runs on every engine call, and the common case — nothing
+	// past any cap — should cost one statement, not five. The rows are
+	// grouped per kind and handled in the same fixed kind order the
+	// per-kind queries used, so the events land in the same order.
+	type capped struct {
+		id            int64
+		project, task int64
+		last          string
+	}
+	var (
+		cappedKinds []Kind
+		cappedConds []string
+		cappedArgs  []any
+	)
 	for _, kind := range []Kind{KindWork, KindFix, KindReview, KindForeman, KindPlanReview} {
 		limit, ok := e.cfg.HardCaps[kind]
 		if !ok || limit <= 0 {
 			continue
 		}
-		rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0), COALESCE(last_leased, '')
+		cappedKinds = append(cappedKinds, kind)
+		cappedConds = append(cappedConds, "(kind = ? AND last_leased <= ?)")
+		cappedArgs = append(cappedArgs, string(kind), fmtTime(now.Add(-limit)))
+	}
+	cappedByKind := make(map[Kind][]capped)
+	if len(cappedKinds) > 0 {
+		rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0), kind, COALESCE(last_leased, '')
 			FROM jobs
-			WHERE status IN ('queued', 'leased', 'running') AND kind = ? AND last_leased IS NOT NULL AND last_leased <= ?`,
-			string(kind), fmtTime(now.Add(-limit)))
+			WHERE status IN ('queued', 'leased', 'running') AND last_leased IS NOT NULL
+			AND (`+strings.Join(cappedConds, " OR ")+`)`, cappedArgs...)
 		if err != nil {
 			return rep, fmt.Errorf("sweep hard caps: %w", err)
 		}
-		type capped struct {
-			id            int64
-			project, task int64
-			last          string
-		}
-		var cappedAll []capped
 		for rows.Next() {
 			var x capped
-			if err := rows.Scan(&x.id, &x.project, &x.task, &x.last); err != nil {
+			var kind Kind
+			if err := rows.Scan(&x.id, &x.project, &x.task, &kind, &x.last); err != nil {
 				rows.Close()
 				return rep, fmt.Errorf("sweep hard caps: %w", err)
 			}
-			cappedAll = append(cappedAll, x)
+			cappedByKind[kind] = append(cappedByKind[kind], x)
 		}
 		if err := rows.Err(); err != nil {
+			rows.Close()
 			return rep, fmt.Errorf("sweep hard caps: %w", err)
 		}
 		rows.Close()
-		for _, x := range cappedAll {
+	}
+	for _, kind := range cappedKinds {
+		limit := e.cfg.HardCaps[kind]
+		for _, x := range cappedByKind[kind] {
 			var accrue int64
 			if last, err := parseTime(x.last); err == nil {
 				// the cap, not its discovery, ends the lease

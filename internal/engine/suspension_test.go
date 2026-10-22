@@ -14,7 +14,10 @@ import (
 // TestSweepSuspensionRestartsQueueTTL: a queued job's wait did not
 // include the sleep, so the queue-TTL clock restarts from now.
 func TestSweepSuspensionRestartsQueueTTL(t *testing.T) {
-	e := newEnv(t)
+	// A 30 s interval, as the shipped engine's: the 40 m jump below is
+	// the suspension this test plays. The suite's default test interval
+	// (10 m) would need a jump past 40 m to trip the same rule.
+	e := newEnvCfg(t, func(c *Config) { c.SweepInterval = 30 * time.Second })
 	r := e.submit(e.work())
 
 	e.clock.Advance(40 * time.Minute)
@@ -139,7 +142,10 @@ func TestSweepSuspensionKeepsQueuedLeasePastHardCap(t *testing.T) {
 // ticks, with no single jump, is not a suspension, so a lapsed lease is
 // requeued as ever (§13).
 func TestSweepRealExpiryStillExpires(t *testing.T) {
-	e := newEnv(t)
+	// The default test interval (10 m) would cross the 91 s lapse in one
+	// step; a 30 s interval keeps it several small wakeful ticks, which
+	// is the point: no single jump, no suspension.
+	e := newEnvCfg(t, func(c *Config) { c.SweepInterval = 30 * time.Second })
 	e.submit(e.work())
 	g := e.leaseAny(e.runner1)
 

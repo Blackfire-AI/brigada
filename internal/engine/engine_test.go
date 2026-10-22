@@ -120,6 +120,18 @@ func newEnvAt(t *testing.T, path string, adjust func(*Config)) *env {
 	if adjust != nil {
 		adjust(&cfg)
 	}
+	if cfg.SweepInterval == 0 {
+		// elapse steps the clock one sweep interval at a time, so a
+		// wider interval means fewer sweeps per elapse and the same
+		// deadlines: each still fires on the first tick past it, only
+		// coarser. Ten minutes keeps every deadline in this suite on
+		// its own tick while an hour-long elapse costs six sweeps, not
+		// a hundred and twenty. The suspension rule reads the same
+		// gap as "far past the interval" (4×) as ever; the tests that
+		// play a sleep smaller than 4×10m, or that want many small
+		// wakeful ticks, set their own interval.
+		cfg.SweepInterval = 10 * time.Minute
+	}
 	e.eng = New(st, cfg)
 	return e
 }

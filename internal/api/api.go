@@ -25,6 +25,12 @@ type Server struct {
 	tokens    []token
 	idemLocks keyLocks
 	inFlight  atomic.Int64
+
+	// pollEvery overrides how often the long polls (lease, events)
+	// re-ask the engine; zero keeps the 200 ms production pace. Tests
+	// shrink it so a queued job or a fresh event is noticed in
+	// milliseconds instead of a poll interval of wall time.
+	pollEvery time.Duration
 }
 
 // New builds the API server: it loads the token file — refusing one
@@ -286,6 +292,26 @@ func parseJobID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 
 // pollInterval is how often a long-polling lease re-asks the engine.
 const pollInterval = 200 * time.Millisecond
+
+// pollPace is this server's long-poll re-ask interval: the override a
+// test set, else the production constant.
+func (s *Server) pollPace() time.Duration {
+	if s.pollEvery > 0 {
+		return s.pollEvery
+	}
+	return pollInterval
+}
+
+// SetPollInterval sets how often the long polls re-ask the engine. It
+// is a test seam: the default pace is production's, and only tests that
+// need a handoff in milliseconds shrink it. d <= 0 restores the default.
+func (s *Server) SetPollInterval(d time.Duration) {
+	if d <= 0 {
+		s.pollEvery = 0
+		return
+	}
+	s.pollEvery = d
+}
 
 // maxLeaseWait caps the client-given lease wait (§12.3).
 const maxLeaseWait = 30 * time.Second

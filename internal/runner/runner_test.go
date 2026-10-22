@@ -61,11 +61,10 @@ func newTestEnv(t *testing.T, engCfg engine.Config) *testEnv {
 	t.Helper()
 	ctx := context.Background()
 	tmp := t.TempDir()
-	st, err := store.Open(ctx, filepath.Join(tmp, "store.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { st.Close() })
+	// The migrated template, not a fresh file: store.Open applies every
+	// migration on a fresh one, which under the race detector was most
+	// of this suite's time.
+	st := testsupport.OpenStore(t)
 	tokenFile := filepath.Join(tmp, "tokens")
 	if err := os.WriteFile(tokenFile, []byte(e2eTokens), 0o600); err != nil {
 		t.Fatalf("write token file: %v", err)
@@ -81,6 +80,10 @@ func newTestEnv(t *testing.T, engCfg engine.Config) *testEnv {
 	if err != nil {
 		t.Fatalf("build api server: %v", err)
 	}
+	// Lease handoffs in milliseconds, not the 200 ms production poll:
+	// every job the tests hand the runner is noticed at once, which is
+	// what the waits measure anyway.
+	srv.SetPollInterval(10 * time.Millisecond)
 	e := &testEnv{
 		t: t, ctx: ctx, st: st, eng: eng,
 		secrets:  map[string]string{"root": "root-secret-9", "r1": "r1-secret-9", "r2": "r2-secret-9"},

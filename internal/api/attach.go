@@ -178,7 +178,7 @@ func (s *Server) handleForemanEvents(w http.ResponseWriter, r *http.Request, id 
 			return
 		}
 		if remain := time.Until(deadline); remain > 0 {
-			timer := time.NewTimer(min(pollInterval, remain))
+			timer := time.NewTimer(min(s.pollPace(), remain))
 			select {
 			case <-r.Context().Done(): // the caller went away
 				timer.Stop()

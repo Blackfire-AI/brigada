@@ -94,11 +94,10 @@ func newEnvTokens(t *testing.T, tokens string) *env {
 	t.Helper()
 	ctx := context.Background()
 	tmp := t.TempDir()
-	st, err := store.Open(ctx, filepath.Join(tmp, "store.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { st.Close() })
+	// The migrated template, not a fresh file: store.Open applies
+	// every migration on a fresh one, and under the race detector that
+	// parse was most of every test's time.
+	st := testsupport.OpenStore(t)
 	e := &env{
 		t: t, ctx: ctx, st: st, clock: newFakeClock(),
 		secrets: map[string]string{
@@ -107,7 +106,7 @@ func newEnvTokens(t *testing.T, tokens string) *env {
 			"foreman1": "foreman-secret-1",
 		},
 	}
-	err = st.Update(ctx, func(tx *sql.Tx) error {
+	err := st.Update(ctx, func(tx *sql.Tx) error {
 		id := func(query string, args ...any) int64 {
 			t.Helper()
 			res, err := tx.Exec(query, args...)
@@ -146,6 +145,10 @@ func newEnvTokens(t *testing.T, tokens string) *env {
 	if err != nil {
 		t.Fatalf("build api server: %v", err)
 	}
+	// Long polls re-ask in milliseconds, so a test's handoffs (an event
+	// arriving, a job queuing) are noticed at once rather than a 200 ms
+	// production poll later.
+	api.SetPollInterval(10 * time.Millisecond)
 	e.api = api
 
 	// Not under t.TempDir(): its name carries the test's, and on the

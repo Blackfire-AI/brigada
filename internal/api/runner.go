@@ -93,7 +93,7 @@ func (s *Server) handleLease(w http.ResponseWriter, r *http.Request, runnerID in
 			return
 		}
 		if remain := time.Until(deadline); remain > 0 {
-			pause := min(pollInterval, remain)
+			pause := min(s.pollPace(), remain)
 			timer := time.NewTimer(pause)
 			select {
 			case <-r.Context().Done(): // the runner went away
