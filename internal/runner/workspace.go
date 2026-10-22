@@ -175,6 +175,9 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 // general fetch skips the runners' brigada/ namespace, and the runner
 // that reviews the work may never have run it.
 func prepareReviewWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*workspace, error) {
+	if isPlanReviewJob(grant) {
+		return preparePlanReviewWorkspace(ctx, cfg, grant)
+	}
 	if grant.RepoURL == "" {
 		return nil, fmt.Errorf("task %d: no repo URL; a review must name a repo to read", grant.TaskID)
 	}

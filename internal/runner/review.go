@@ -27,7 +27,7 @@ import (
 // isReviewJob reports whether the grant is a review job (§7): the one
 // worker kind whose run reads a change instead of making one.
 func isReviewJob(grant *api.JobGrant) bool {
-	return engine.Kind(grant.Kind) == engine.KindReview
+	return engine.Kind(grant.Kind) == engine.KindReview || isPlanReviewJob(grant)
 }
 
 // emptyVerdictBlock is what a review completes with when the reviewer's

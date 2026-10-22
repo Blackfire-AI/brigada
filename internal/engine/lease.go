@@ -1253,7 +1253,7 @@ func holdKey(layer string, job caps.Job) string {
 // no task; its reading checkout uses the project repo and default branch.
 func taskInfoTx(tx *sql.Tx, j *jobRow) (repoURL, baseRef, checkCmd, branch string, err error) {
 	if j.TaskID == 0 {
-		if j.Kind == KindForeman {
+		if j.Kind == KindForeman || j.Kind == KindPlanReview {
 			repoURL, baseRef, err = standaloneReviewInfoTx(tx, j)
 			return repoURL, baseRef, "", "", err
 		}

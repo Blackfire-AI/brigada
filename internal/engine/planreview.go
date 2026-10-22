@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
 // The plan review (§6.2): a plan — and an amendment of an active plan
@@ -412,13 +413,13 @@ func (e *Engine) queuePlanReviewRoundTx(tx *sql.Tx, project, plan, round int64, 
 			return fmt.Errorf("read the review of plan %d: %w", plan, err)
 		}
 	}
-	prompt := composePlanReviewInput(int(round), view, others, prevVerdict, prevFindings)
+	text := prompt.ComposePlanReviewPrompt(composePlanReviewInput(int(round), view, others, prevVerdict, prevFindings))
 	sr, err := e.submitTx(tx, SubmitParams{
 		Key:           planReviewKey(plan),
 		ProjectID:     project,
 		Kind:          KindPlanReview,
 		Mode:          ModeFresh,
-		Prompt:        prompt,
+		Prompt:        text,
 		ExcludeFamily: family,
 	}, now)
 	if err != nil {
