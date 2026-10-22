@@ -49,7 +49,7 @@ tasks:
     base: "runner2"
     tier: light
     effort: low
-    state: reviewing
+    state: done
     branch: "brigada/task-120"
     rounds: 1
   - id: 121
