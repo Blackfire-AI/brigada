@@ -124,7 +124,7 @@ tasks:
     continue: "legal-notices"
     tier: light
     effort: low
-    state: running
+    state: reviewing
     branch: "brigada/task-142-r2"
     rounds: 1
   - id: 143
