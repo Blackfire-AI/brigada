@@ -223,7 +223,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 	}
 	if canAsk {
-		fmt.Fprint(stdout, initDim(stdout, "brigada runs coding tasks on the agent CLIs you are signed in to. A foreman\n(an agent) turns your request into a plan of tasks; workers (other agents)\nwrite the code in their own git worktrees; your check command tests it; and\nan agent of a different model family reviews it. Four short steps follow.\nNothing is written or started until you confirm at the end.\n\n"))
+		fmt.Fprint(stdout, initDim(stdout, "brigada runs coding tasks on the agent CLIs you are signed in to. A foreman\n(an agent) turns your request into a plan of tasks; workers (other agents)\nwrite the code in their own git worktrees; your check command tests it; and\nan agent of a different model family reviews it. Four short steps follow.\nThe engine mirrors plan files (titles, task states, dependencies,\nbranches, open questions, extra repositories) to the brigada/plans\nbranch of your remote; turn that off with\n`brigada project set plan_files=off`.\nNothing is written or started until you confirm at the end.\n\n"))
 	}
 	terminal := false
 	if f, ok := projectStdin.(*os.File); ok {

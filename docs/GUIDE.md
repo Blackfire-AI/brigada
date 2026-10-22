@@ -531,6 +531,7 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 | `setup_timeout_minutes` | positive integer | `15` | How long `setup` may run. |
 | `extra_repos` | list of `"name repo ref"` strings | none | Other repositories checked out read-only beside every task ([section 7](#7-plans-checks-and-reviews)). |
 | `foreman_rotate_tokens` | non-negative integer | `400000` | Input tokens on one foreman turn past which the next turn starts a fresh session; `0` never rotates ([section 11](#session-size-and-rotation)). |
+| `plan_files` | `on` or `off` | `on` | `off` stops the plan-file mirror: no plan file is written or pushed ([The plan file](#the-plan-file)). |
 | `instructions_file` | repo-relative path | none | A text file whose contents become the project's instructions for every worker and reviewer, at most 8192 bytes (see [Project instructions](#project-instructions)). |
 
 An example:
@@ -662,7 +663,7 @@ Only you can decide: no foreman tool approves a plan or passes a gate.
 
 ### The plan file
 
-Every change to a plan is mirrored to `.brigada/plans/<plan-id>.yaml` and pushed to the `brigada/plans` branch of your remote, not to your default branch. The file holds the graph (deps, base, and a `continue` where one is set), the task states, the branches, the open questions and the foreman's task tier and effort, but no transcripts. It carries the foreman's tier rather than the effective tier raised by escalation; a standard tier and an unset effort are omitted.
+Every change to a plan is mirrored to `.brigada/plans/<plan-id>.yaml` and pushed to the `brigada/plans` branch of your remote, not to your default branch. The file holds the graph (deps, base, and a `continue` where one is set), the task states, the branches, the open questions and the foreman's task tier and effort, but no transcripts; the setting `plan_files: off` stops the mirror, and then nothing is written or pushed. It carries the foreman's tier rather than the effective tier raised by escalation; a standard tier and an unset effort are omitted.
 
 The store is the authority, and the file is a copy that may lag: a push that fails is retried on the next change. The file exists so that `brigada recover` can rebuild plans after a lost store ([section 10](#10-backups-and-recovery)), and so you can see a plan from another machine.
 
@@ -1105,6 +1106,7 @@ Every key that `brigada project set` and `project show` know, with each default 
 | `extra_repos` | `none` | yes |
 | `foreman_rotate_tokens` | `400000` | yes |
 | `foreman_wakes_per_day` | `20`, or the config file's value | no, local only |
+| `plan_files` | `on` | yes |
 | `instructions` | `none` | no, local only (the file's counterpart is `instructions_file`) |
 
 ## 14. Command reference

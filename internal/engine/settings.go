@@ -67,6 +67,15 @@ const (
 	// (§5.9). Stored as the text itself: the client reads the file named
 	// by project.yaml's instructions_file and sends the content.
 	SettingInstructions = "instructions"
+	// The plan-file mirror (§6.4): on (default) pushes each plan's file to
+	// the repo's remote; off writes and pushes nothing.
+	SettingPlanFiles = "plan_files"
+)
+
+// The values plan_files takes.
+const (
+	PlanFilesOn  = "on"
+	PlanFilesOff = "off"
 )
 
 // MaxForemanWakesPerDay bounds a set wake budget (§4.3): a sane ceiling
@@ -86,7 +95,7 @@ var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, Setti
 	SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
 	SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
-	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingInstructions}
+	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingInstructions}
 
 // MaxInstructionsBytes bounds the project instruction text (§5.9): a
 // starting value, open in §16 item 11. Above it a set or an import is
@@ -198,7 +207,7 @@ func parseSettingValue(key, value string) (json.RawMessage, error) {
 		SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
 		SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
 		SettingDefaultCheck, SettingWorkerTools,
-		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingInstructions:
+		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingInstructions:
 	default:
 		return nil, fmt.Errorf("%w: unknown key %q; valid keys: %s", ErrInvalidSetting, key, strings.Join(SettingKeys, ", "))
 	}
@@ -244,6 +253,13 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 			return nil, fmt.Errorf("%w: %s takes true or false, got %q", ErrInvalidSetting, key, value)
 		}
 		return json.Marshal(v == "true")
+	}
+	if key == SettingPlanFiles {
+		v := strings.TrimSpace(value)
+		if v != PlanFilesOn && v != PlanFilesOff {
+			return nil, fmt.Errorf("%w: %s takes %s or %s, got %q", ErrInvalidSetting, key, PlanFilesOn, PlanFilesOff, value)
+		}
+		return json.Marshal(v)
 	}
 	if key == SettingPlanReviewTier {
 		v := strings.TrimSpace(value)
@@ -458,6 +474,11 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 				if b, err := strconv.ParseBool(string(cur)); err == nil {
 					sv.Value = strconv.FormatBool(b)
 				}
+			}
+		case SettingPlanFiles:
+			sv.Value = PlanFilesOn
+			if s, ok := rawString(cur); ok && s != "" {
+				sv.Value = s
 			}
 		case SettingPlanReviewTier:
 			sv.Value = adapter.TierStandard

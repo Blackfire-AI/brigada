@@ -125,6 +125,59 @@ func TestPlanCreationPushesTheFileToANewPlansBranch(t *testing.T) {
 	}
 }
 
+// plan_files off: nothing is pushed and no warning or retry follows; the
+// mark stays owed, and turning the setting back on pushes the plan with
+// the next change, without a restart.
+func TestPlanFilesOffPushesNothing(t *testing.T) {
+	t.Parallel()
+	m := newMirrorEnv(t)
+	if _, err := m.eng.SetProjectSettings(m.ctx, m.remote, map[string]string{SettingPlanFiles: PlanFilesOff}); err != nil {
+		t.Fatalf("set plan_files=off: %v", err)
+	}
+	res, err := m.eng.CreatePlan(m.ctx, m.project, "kept local", []PlanTask{{Name: "a", Spec: "x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m.file("brigada/plans", res.PlanID); ok {
+		t.Error("the plan file was pushed with plan_files off")
+	}
+	if out, err := exec.Command("git", "-C", m.remote, "branch", "--list", "brigada/plans").Output(); err != nil || len(out) != 0 {
+		t.Errorf("remote branches = %q, %v; want no brigada/plans branch", out, err)
+	}
+	if w := m.warnings(); len(w) != 0 {
+		t.Errorf("warnings = %v, want none", w)
+	}
+	if got := m.int("SELECT COUNT(*) FROM plan_mirror_dirty WHERE plan_id = ?", res.PlanID); got != 1 {
+		t.Errorf("marks of the plan = %d, want it kept for when plan_files is on again", got)
+	}
+
+	if _, err := m.eng.SetProjectSettings(m.ctx, m.remote, map[string]string{SettingPlanFiles: PlanFilesOn}); err != nil {
+		t.Fatalf("set plan_files=on: %v", err)
+	}
+	if _, err := m.eng.CreatePlan(m.ctx, m.project, "shared", []PlanTask{{Name: "b", Spec: "y"}}); err != nil {
+		t.Fatal(err)
+	}
+	m.mustFile("brigada/plans", res.PlanID)
+}
+
+// plan_files takes on or off and refuses anything else.
+func TestPlanFilesSettingParse(t *testing.T) {
+	for _, v := range []string{PlanFilesOn, PlanFilesOff} {
+		raw, err := parseSettingValue(SettingPlanFiles, v)
+		if err != nil || strings.Trim(string(raw), `"`) != v {
+			t.Errorf("parse plan_files=%s = %s, %v", v, raw, err)
+		}
+	}
+	for _, v := range []string{"true", "maybe", "OFF"} {
+		if _, err := parseSettingValue(SettingPlanFiles, v); err == nil {
+			t.Errorf("parse plan_files=%q accepted, want a refusal", v)
+		}
+	}
+	if raw, err := parseSettingValue(SettingPlanFiles, ""); err != nil || raw != nil {
+		t.Errorf("empty plan_files = %s, %v; want a reset", raw, err)
+	}
+}
+
 func TestPlanChangesPushAgain(t *testing.T) {
 	t.Parallel()
 	m := newMirrorEnv(t)

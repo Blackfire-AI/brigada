@@ -4,6 +4,10 @@ brigada runs coding tasks on the agent CLIs you are signed in to. A foreman
 (an agent) turns your request into a plan of tasks; workers (other agents)
 write the code in their own git worktrees; your check command tests it; and
 an agent of a different model family reviews it. Four short steps follow.
+The engine mirrors plan files (titles, task states, dependencies,
+branches, open questions, extra repositories) to the brigada/plans
+branch of your remote; turn that off with
+`brigada project set plan_files=off`.
 Nothing is written or started until you confirm at the end.
 
 Signed in: claude, codex, opencode (2 providers, opencode providers list).

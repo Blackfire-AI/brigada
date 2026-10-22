@@ -85,7 +85,7 @@ brigada sends no usage data, analytics or crash reports anywhere. That is a prom
 
 - each official CLI sends your prompts and the code it reads to its own model provider, as it does when you run it by hand, under your account and that vendor's terms;
 - the runner pushes task branches to your repository's git remote with your git credentials;
-- the engine mirrors plan files (titles, task states, dependencies, open questions) to the `brigada/plans` branch of that remote.
+- the engine mirrors plan files (titles, task states, dependencies, branches, open questions, extra repositories) to the `brigada/plans` branch of that remote; `brigada project set plan_files=off` turns that off.
 
 brigada has no API-key setting of its own. Workers inherit your environment (minus brigada's own variables), so a CLI that you have set up with an API key the way its vendor documents is driven the same way. See [docs/TERMS.md](docs/TERMS.md).
 

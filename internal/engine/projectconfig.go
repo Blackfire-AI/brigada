@@ -98,7 +98,7 @@ var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
-	SettingExtraRepos, SettingForemanRotateTokens}
+	SettingExtraRepos, SettingForemanRotateTokens, SettingPlanFiles}
 
 // ParseProjectConfig parses and validates a project.yaml. Anything but
 // schema 1's keys is refused with the key named: an unknown key, an
@@ -236,7 +236,7 @@ func settingText(key string, v yamlValue) (string, error) {
 		return nonEmpty(key, v, v.scalar)
 	case SettingDefaultCheck, SettingWorkerTools, SettingSetup,
 		SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
-		SettingApprovalBudget:
+		SettingApprovalBudget, SettingPlanFiles:
 		if v.isList {
 			return "", configErr("%s (line %d) must be a string, not a list", key, v.line)
 		}
