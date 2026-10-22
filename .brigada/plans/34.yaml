@@ -40,7 +40,7 @@ tasks:
     effort: medium
     state: reviewing
     branch: "brigada/task-119"
-    rounds: 0
+    rounds: 1
   - id: 120
     name: "docs"
     title: "Docs: design §6/§7 and GUIDE for plan review"
@@ -60,6 +60,6 @@ tasks:
     base: "engine"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-121"
-    rounds: 0
+    rounds: 1
