@@ -70,8 +70,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: "brigada/task-157"
+    state: reviewing
+    branch: "brigada/task-157-r1"
     rounds: 0
   - id: 158
     name: "fast-cli-api"
