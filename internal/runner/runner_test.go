@@ -484,7 +484,7 @@ echo '{"type":"system_init","session_id":"sess-42"}'
 # a word of progress before the pause, so the runner's heartbeats
 # carry a last_progress_at that is real, not just the start
 echo '{"type":"assistant","text":"reading the task"}'
-sleep 0.4
+sleep 0.1
 echo '{"type":"tool_start","name":"Edit"}'
 echo hello > work.txt
 git add -A
@@ -1207,14 +1207,15 @@ func TestRunnerHistoryEndToEnd(t *testing.T) {
 // than the check by design.
 func TestRunnerLongCheckKeepsLease(t *testing.T) {
 	remote := newRemote(t)
-	e := newTestEnv(t, engine.Config{LeaseTTL: 800 * time.Millisecond})
+	e := newTestEnv(t, engine.Config{LeaseTTL: 200 * time.Millisecond})
 	e.seedProject(remote)
-	// A check that crosses several lease windows, then passes.
-	task := e.seedTask("", "sleep 1.5 && echo check-ok")
+	// A check that crosses several lease windows (five 100ms steps
+	// against a 200ms TTL), then passes.
+	task := e.seedTask("", "sleep 0.1 && sleep 0.1 && sleep 0.1 && sleep 0.1 && sleep 0.1 && echo check-ok")
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
 	markerDir(t)
 
-	p := e.startRunner(writeWorkerScript(t, happyWorker), 150*time.Millisecond)
+	p := e.startRunner(writeWorkerScript(t, happyWorker), 40*time.Millisecond)
 	defer p.stop(t)
 
 	done := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
@@ -1292,17 +1293,22 @@ func TestRunnerSurvivesSocketBlink(t *testing.T) {
 	// The runner starts with the socket already down: its first
 	// registration fails and must be retried, not returned.
 	e.stopAPI()
-	p := e.startRunner(writeWorkerScript(t, happyWorker), 100*time.Millisecond)
+	// A long lease wait keeps the empty poll in flight when the socket
+	// blinks.
+	p := e.startRunner(writeWorkerScript(t, happyWorker), 100*time.Millisecond,
+		func(c *Config) { c.LeaseWait = 300 * time.Millisecond })
 	defer p.stop(t)
 
-	e.startAPI() // back within the first backoff window
-	// Let the runner register and settle into an empty long-poll…
-	time.Sleep(100 * time.Millisecond)
+	e.startAPI() // the runner's retry backoff finds it back
+	// Wait for the runner to register and settle into an empty
+	// long-poll…
+	e.waitUntil("the runner to register", func() bool {
+		return e.int64Of("SELECT COUNT(*) FROM runners") > 0
+	})
 	// …then blink the socket mid-poll: the in-flight lease fails, the
 	// next round re-registers (the engine may have a fresh store) and
 	// polls again.
 	e.stopAPI()
-	time.Sleep(60 * time.Millisecond)
 	e.startAPI()
 
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))

@@ -38,7 +38,7 @@ echo ok > work.txt
 var logWorker = `
 cat > /dev/null
 echo S >> "$BRIGADA_TEST_MARKERS/log"
-sleep 0.4
+sleep 0.1
 echo E >> "$BRIGADA_TEST_MARKERS/log"
 echo ok > work.txt
 ` + fakeResultScript(`{"status":"done","summary":"logged"}`)

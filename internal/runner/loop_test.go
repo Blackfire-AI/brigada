@@ -110,7 +110,8 @@ while [ $i -lt 8 ]; do
   i=$((i+1))
 done
 : > "$BRIGADA_TEST_MARKERS/started"
-sleep 1
+i=0
+while [ ! -f "$BRIGADA_TEST_MARKERS/reported" ] && [ $i -lt 1000 ]; do sleep 0.02; i=$((i+1)); done
 br=$(git rev-parse --abbrev-ref HEAD)
 printf '{"type":"result","text":"done looping: {\\"status\\":\\"done\\",\\"summary\\":\\"looped then finished\\",\\"branch\\":\\"%s\\"}"}\n' "$br"
 : > "$BRIGADA_TEST_MARKERS/finished"
@@ -144,6 +145,15 @@ func TestRunnerReportsToolLoopWithoutKilling(t *testing.T) {
 
 	p := e.startRunner(writeWorkerScript(t, loopingWorker), 100*time.Millisecond)
 	defer p.stop(t)
+
+	// The worker holds its finish until the loop report has reached the
+	// engine, so the run is still alive when the report lands.
+	e.waitUntil("the loop report", func() bool {
+		return e.int64Of("SELECT COUNT(*) FROM events WHERE kind = 'task_loop' AND job_id = ?", job) > 0
+	})
+	if err := os.WriteFile(filepath.Join(markers, "reported"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	done := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
 	res := e.workerResult(done)

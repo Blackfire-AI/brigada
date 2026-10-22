@@ -224,7 +224,13 @@ func pushToMain(t *testing.T, remote, file, content string) string {
 // template by hand — reviewScript rebuilds from the template itself,
 // so it cannot take an edited one.)
 var conflictReviewWorker = strings.Replace(reviewWorker, "@RESULT@",
-	`i=0; while [ ! -f "$BRIGADA_TEST_MARKERS/moved" ] && [ $i -lt 1000 ]; do sleep 0.02; i=$((i+1)); done`+"\n\t"+reviewApproveResult, 1)
+	`i=0
+	while [ ! -f "$BRIGADA_TEST_MARKERS/moved" ]; do
+		[ $i -lt 1000 ] || exit 1
+		echo '{"type":"assistant","text":"waiting for the remote to move"}'
+		sleep 0.02; i=$((i+1))
+	done
+	`+reviewApproveResult, 1)
 
 // releaseReviewer lets a conflictReviewWorker reviewer go on, once the
 // test has moved the remote under it. markerDir must be in force.
