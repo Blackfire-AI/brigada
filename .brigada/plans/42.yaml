@@ -5,9 +5,9 @@
 plan: 42
 title: "Keep git auto-gc/maintenance out of every test git via process env"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-10-22T21:27:28.203078Z
-updated: 2026-10-22T21:27:28.203078Z
+updated: 2026-10-22T21:30:24.33224Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -28,6 +28,6 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
