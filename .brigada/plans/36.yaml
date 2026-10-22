@@ -7,7 +7,7 @@ title: "Pre-public review phase 2: fix the findings of #55 (B1, B2, B3, B6–B12
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-10-22T12:54:31.824979Z
-updated: 2026-10-22T14:17:41.22203Z
+updated: 2026-10-22T14:17:57.569698Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -135,6 +135,28 @@ tasks:
     base: "engine-rules"
     tier: light
     effort: low
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 144
+    name: "pin-actions"
+    title: "SHA-pin the workflow actions; ci.yml stops firing on tag pushes"
+    class: "implement"
+    deps: ["supply-chain"]
+    base: "supply-chain"
+    continue: "supply-chain"
+    effort: low
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 145
+    name: "deps-landed-push-gate"
+    title: "Verify and fix: depsLandedTx treats a dependency waiting at the push gate as landed"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: light
+    effort: medium
     state: pending
     branch: ""
     rounds: 0
