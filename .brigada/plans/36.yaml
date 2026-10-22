@@ -68,10 +68,9 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: needs_foreman
+    state: ready
     branch: ""
     rounds: 0
-    question: "Can you allow `go run golang.org/x/vuln/cmd/govulncheck@latest ./...` (network and approval), or paste its output, so I can finish B6/B7?"
   - id: 138
     name: "legal-notices"
     title: "NOTICE and third-party notices generated from go-licenses (B10)"
