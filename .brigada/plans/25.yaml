@@ -75,10 +75,9 @@ tasks:
     base: "answer-changes-rule"
     continue: "answer-changes-rule"
     effort: medium
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-100"
     rounds: 0
-    question: "Run `git reset --hard main` on branch brigada/task-100-r1 (main is at 7be5dcd), or give me approval to run it. Then I redo the needs-you wording change on that tip: \"held by rule <key>: <reason>\" plus the release command and --and-stop-asking, in needs-you lines, status and top, with tests and docs/design §6.3 and GUIDE updated. Current wording sites on main: internal/engine/holdstop.go (landHoldPrefix), cmd/brigada/cmdtop_test.go, internal/api/statusrender_test.go, internal/engine/land_test.go"
   - id: 101
     name: "gate-push-auto"
     title: "gate_push defaults to auto"
