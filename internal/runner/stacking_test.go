@@ -27,6 +27,7 @@ printf '{"type":"result","text":"done: {\\"status\\":\\"done\\",\\"summary\\":\\
 // branch, so it holds the dependency's file, and the branch it pushes
 // differs from the base by its own change alone.
 func TestRunnerStacksADependentOnItsBase(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)

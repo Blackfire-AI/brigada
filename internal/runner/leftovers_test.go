@@ -54,6 +54,7 @@ func TestSuspectLeftoversReadsOnlyNewFiles(t *testing.T) {
 // what the worker left, so a stray env file or key must stop the push and
 // be named, while a tracked file's edit and an ordinary new file go.
 func TestEnsurePushedRefusesCredentialLookingLeftovers(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote := newRemote(t)
 	ws, err := prepareWorkspace(ctx, &Config{StateDir: t.TempDir()}, &api.JobGrant{

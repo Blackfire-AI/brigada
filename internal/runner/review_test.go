@@ -158,10 +158,11 @@ func withReviewerAgent(cfg *Config) {
 // startReviewRunner runs the dual-agent runner on the scripted worker,
 // with the task's result branch named for the reviewer through the
 // environment.
-func (e *testEnv) startReviewRunner(t *testing.T, branch, script string) *runnerProc {
+func (e *testEnv) startReviewRunner(t *testing.T, branch, script string, adjust ...func(*Config)) *runnerProc {
 	e.t.Helper()
-	t.Setenv("BRIGADA_TEST_BRANCH", branch)
-	return e.startRunner(writeWorkerScript(t, script), 100*time.Millisecond, withReviewerAgent)
+	setTestVar(t, "BRIGADA_TEST_BRANCH", branch)
+	return e.startRunner(writeWorkerScript(t, script), 100*time.Millisecond,
+		append([]func(*Config){withReviewerAgent}, adjust...)...)
 }
 
 // waitTaskState polls the task's state until it holds.
@@ -292,6 +293,7 @@ func remoteRefs(t *testing.T, remote string) []string {
 // check and pushes nothing; its verdict reaches the engine, which
 // finishes the task and the plan with it.
 func TestRunnerRunsReviewJobToEnd(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -350,6 +352,7 @@ func TestRunnerRunsReviewJobToEnd(t *testing.T) {
 // errors: limits carry their reset time to account cooling, and auth
 // failures break the reviewer immediately with the auth reason.
 func TestRunnerReviewCLIErrorReachesTheEngine(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"limit", "auth"} {
 		for _, source := range []string{"stdout", "stderr"} {
 			t.Run(kind+"/"+source, func(t *testing.T) {
@@ -405,6 +408,7 @@ func TestRunnerReviewCLIErrorReachesTheEngine(t *testing.T) {
 // limit does not extend an earlier review failure's streak. Standalone
 // reviews let both jobs use one agent without a task's retry exclusion.
 func TestRunnerReviewLimitAfterFailureCoolsInsteadOfBreaking(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(newRemote(t))
 	markerDir(t)
@@ -469,6 +473,7 @@ exit 1
 // and the engine records review_no_verdict and parks the task for the
 // foreman (§7; the retry with another reviewer is F1d3's).
 func TestRunnerReviewWithoutAVerdictBlock(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -519,7 +524,11 @@ func TestRunnerWedgedReviewFailsFast(t *testing.T) {
 	task := e.seedTask("", `echo check >> "$TEST_MARKERS_DIR/checks"; test "$(cat work.txt)" = hello`)
 	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", "", ""))
 
-	p := e.startReviewRunner(t, taskBranch(task, 1), reviewScript(reviewWedgedResult))
+	// The silence that ends the review is shorter than withReviewerAgent's
+	// default; the work round and the reviewer's reading report within
+	// milliseconds, far under it.
+	p := e.startReviewRunner(t, taskBranch(task, 1), reviewScript(reviewWedgedResult),
+		func(c *Config) { c.StallAfter = 1500 * time.Millisecond })
 	defer p.stop(t)
 
 	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
@@ -566,7 +575,7 @@ func TestRunnerRunsTheAgentTheLeaseNamed(t *testing.T) {
 	markers := markerDir(t)
 	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
 	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", "", ""))
-	t.Setenv("BRIGADA_TEST_BRANCH", taskBranch(task, 1))
+	setTestVar(t, "BRIGADA_TEST_BRANCH", taskBranch(task, 1))
 
 	workBody := "echo implement-ran > \"$BRIGADA_TEST_MARKERS/work-by\"\n" + happyWorker
 	reviewBody := "echo review-ran > \"$BRIGADA_TEST_MARKERS/review-by\"\n" + reviewScript(reviewApproveResult)

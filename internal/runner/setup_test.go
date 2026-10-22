@@ -17,6 +17,7 @@ import (
 // task's creation (§5.7).
 func (e *testEnv) setTaskSetup(task int64, spec engine.SetupSpec) {
 	e.t.Helper()
+	spec.Command = e.sub(spec.Command)
 	b, err := json.Marshal(spec)
 	if err != nil {
 		e.t.Fatal(err)
@@ -60,16 +61,17 @@ echo '{"type":"tool_end","name":"Edit"}'
 const cacheProbe = `if [ -f "$BRIGADA_CACHE_DIR/stamp" ]; then echo hit; else echo miss; : > "$BRIGADA_CACHE_DIR/stamp"; fi >> "$TEST_MARKERS_DIR/cache.log"`
 
 func TestRunnerSetupRunsBeforeWorkerAndCheck(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
+	markers := markerDir(t)
 	task := e.seedTask("", `echo check >> "$TEST_MARKERS_DIR/order.log"`)
 	e.setTaskSetup(task, engine.SetupSpec{
 		Command:        `echo "setup: $(ls | tr '\n' ' ')" >> "$TEST_MARKERS_DIR/order.log"`,
 		TimeoutMinutes: 5,
 	})
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
-	markers := markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, setupWorker), 100*time.Millisecond)
 	defer p.stop(t)
@@ -101,6 +103,7 @@ func TestRunnerSetupRunsBeforeWorkerAndCheck(t *testing.T) {
 }
 
 func TestRunnerSetupCacheReusedAndRebuilt(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -142,6 +145,7 @@ func TestRunnerSetupCacheReusedAndRebuilt(t *testing.T) {
 }
 
 func TestRunnerSetupCacheNeverSharedAcrossRepositories(t *testing.T) {
+	t.Parallel()
 	remoteA, remoteB := newRemote(t), newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remoteA)
@@ -169,14 +173,15 @@ func TestRunnerSetupCacheNeverSharedAcrossRepositories(t *testing.T) {
 }
 
 func TestRunnerFailedSetupIsAnInfrastructureFailure(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	clk := newManualClock()
 	e := newTestEnv(t, engine.Config{Now: clk.Now})
 	e.seedProject(remote)
+	markers := markerDir(t)
 	task := e.seedTask("", `echo check >> "$TEST_MARKERS_DIR/order.log"`)
 	e.setTaskSetup(task, engine.SetupSpec{Command: "echo setup-boom; exit 7", TimeoutMinutes: 5})
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
-	markers := markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, setupWorker), 100*time.Millisecond)
 	defer p.stop(t)

@@ -76,7 +76,7 @@ func TestRunnerSetsPWDToTheWorktree(t *testing.T) {
 	task := e.seedTask("", "true")
 	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", "", ""))
 
-	t.Setenv("BRIGADA_TEST_BRANCH", taskBranch(task, 1))
+	setTestVar(t, "BRIGADA_TEST_BRANCH", taskBranch(task, 1))
 	p := e.startRunner(writeWorkerScript(t, reviewScript(reviewApproveResult)), 100*time.Millisecond, withReviewerAgent,
 		func(c *Config) {
 			for i, ad := range c.Adapters {
