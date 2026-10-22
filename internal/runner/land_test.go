@@ -98,7 +98,15 @@ func (e *testEnv) startLandRunner(t *testing.T, workerScript string, adjust ...f
 		t.Setenv(k+"_NAME", "land test")
 		t.Setenv(k+"_EMAIL", "land@brigada.invalid")
 	}
-	adjust = append(adjust, withReviewerAgent)
+	// A lease or register that fails on a loaded host (the race job's
+	// two cores) retries on the default 1s..30s backoff, which sums to a
+	// minute after six failures — the whole of a test's wait. Short
+	// backoffs keep a transient failure from costing the test.
+	shortBackoff := func(c *Config) {
+		c.BackoffMin = 10 * time.Millisecond
+		c.BackoffMax = 100 * time.Millisecond
+	}
+	adjust = append([]func(*Config){shortBackoff}, append(adjust, withReviewerAgent)...)
 	return e.startRunner(writeWorkerScript(t, workerScript), 100*time.Millisecond, adjust...)
 }
 
