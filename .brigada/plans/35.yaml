@@ -50,7 +50,7 @@ tasks:
     base: "s1-docs"
     tier: light
     effort: low
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 127
