@@ -68,10 +68,9 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-137"
     rounds: 0
-    question: "Can the runner allow network-dependent commands (go run golang.org/x/vuln/cmd/govulncheck@latest ./... and git ls-remote https://github.com/actions/<name> for resolving action SHAs), or can the previous round's branch state (relnotes tool, ci.yml govulncheck@v1.1.4 job, release.yml gating, CHANGELOG [1.0.0-rc.1]) be restored into this worktree? Otherwise, please supply the govulncheck output and the full commit SHAs for actions/checkout v5, actions/setup-go v6 and any other actions used."
   - id: 138
     name: "legal-notices"
     title: "NOTICE and third-party notices generated from go-licenses (B10)"
