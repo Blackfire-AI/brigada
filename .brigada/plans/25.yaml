@@ -5,9 +5,9 @@
 plan: 25
 title: "User defines the rules; #48 landing rough edges; faster engine tests"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-21T18:41:16.36427Z
-updated: 2026-10-21T23:13:50.620632Z
+updated: 2026-10-22T08:50:50.608531Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -52,7 +52,7 @@ tasks:
     tier: heavy
     effort: medium
     caps: {restart: 9}
-    state: needs_foreman
+    state: done
     branch: "brigada/task-98-r7"
     rounds: 0
   - id: 99
@@ -64,7 +64,7 @@ tasks:
     continue: "cost-rule"
     tier: heavy
     effort: medium
-    state: needs_foreman
+    state: done
     branch: "brigada/task-99-r2"
     rounds: 1
   - id: 100
@@ -128,6 +128,6 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: needs_foreman
+    state: done
     branch: "brigada/task-105-r2"
     rounds: 0
