@@ -79,10 +79,9 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-138"
     rounds: 2
-    question: "Can the sandbox read ~/go/pkg/mod and run go run github.com/google/go-licenses (network), so I can generate the manifest from real output? Also, who is the copyright holder for NOTICE?"
   - id: 139
     name: "functionality-fixes"
     title: "Help-text bugs and flaky TestRunnerStallKillsProcessTree"
