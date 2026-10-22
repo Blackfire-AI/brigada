@@ -28,8 +28,8 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-133-r1"
     rounds: 0
   - id: 134
     name: "adapters-hardening"
