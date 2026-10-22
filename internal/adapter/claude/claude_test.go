@@ -55,7 +55,7 @@ func TestCommand(t *testing.T) {
 			ad:      Adapter{Binary: "/usr/local/bin/claude"},
 			job:     adapter.Job{Prompt: prompt, Model: "sonnet"},
 			wantExe: "/usr/local/bin/claude",
-			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose",
+			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
 				"--model", "sonnet", "--permission-mode", "acceptEdits",
 				"--allowedTools", "Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)"},
 		},
@@ -64,7 +64,7 @@ func TestCommand(t *testing.T) {
 			job:     adapter.Job{Prompt: prompt},
 			resume:  "sess-9",
 			wantExe: "claude",
-			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose",
+			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
 				"--resume", "sess-9", "--permission-mode", "acceptEdits",
 				"--allowedTools", "Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)"},
 		},
@@ -77,7 +77,7 @@ func TestCommand(t *testing.T) {
 			},
 			job:     adapter.Job{Prompt: prompt},
 			wantExe: "claude",
-			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose",
+			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
 				"--permission-mode", "bypassPermissions",
 				"--allowedTools", "Bash(git:*)", "Edit",
 				"--disallowedTools", "WebFetch"},
@@ -91,7 +91,7 @@ func TestCommand(t *testing.T) {
 				"/runner-state/worktrees/task-9-author-s0.extra/schema",
 				"/runner-state/worktrees/task-9-author-s0.extra/live"}},
 			wantExe: "claude",
-			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose",
+			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
 				"--permission-mode", "acceptEdits",
 				"--allowedTools", "Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)",
 				"--add-dir", "/runner-state/worktrees/task-9-author-s0.extra/schema",
@@ -168,9 +168,9 @@ func TestCommandForemanScope(t *testing.T) {
 		{
 			name: "bare adapter",
 			ad:   Adapter{Binary: "/usr/local/bin/claude"},
-			wantArg: append([]string{"-p", "--output-format", "stream-json", "--verbose",
+			wantArg: append([]string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
 				"--permission-mode", "acceptEdits",
-				"--mcp-config", config, "--strict-mcp-config"}, wantScope...),
+				"--mcp-config", config}, wantScope...),
 		},
 		{
 			name: "the foreman scope replaces the agent config's",
@@ -179,9 +179,9 @@ func TestCommandForemanScope(t *testing.T) {
 				AllowedTools:    []string{"Bash(git:*)", "Edit"},
 				DisallowedTools: []string{"WebFetch"},
 			},
-			wantArg: append([]string{"-p", "--output-format", "stream-json", "--verbose",
+			wantArg: append([]string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
 				"--permission-mode", "bypassPermissions",
-				"--mcp-config", config, "--strict-mcp-config"}, wantScope...),
+				"--mcp-config", config}, wantScope...),
 		},
 	}
 	for _, tc := range cases {
@@ -335,7 +335,7 @@ func TestCommandWorkerPathUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build command: %v", err)
 	}
-	want := []string{"claude", "-p", "--output-format", "stream-json", "--verbose",
+	want := []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
 		"--model", "sonnet", "--resume", "sess-9", "--permission-mode", "acceptEdits",
 		"--allowedTools", "Bash(git:*)"}
 	if !slices.Equal(cmd.Args, want) {
@@ -399,8 +399,8 @@ func TestCommandWorkerDefaultScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build foreman command: %v", err)
 	}
-	wantForeman := []string{"claude", "-p", "--output-format", "stream-json", "--verbose",
-		"--permission-mode", "acceptEdits", "--mcp-config", config, "--strict-mcp-config",
+	wantForeman := []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
+		"--permission-mode", "acceptEdits", "--mcp-config", config,
 		"--allowedTools", "Read", "Grep", "Glob",
 		"mcp__brigada__plan_create", "mcp__brigada__plan_amend", "mcp__brigada__answer", "mcp__brigada__task_restart",
 		"mcp__brigada__task_cancel", "mcp__brigada__ask_user",
@@ -794,6 +794,28 @@ func TestSessionLimit(t *testing.T) {
 	}
 }
 
+// TestCommandReviewIsReadOnly: a reviewer gets no edit tool, no go
+// toolchain and no auto-accepted edits, whatever the agent config says.
+func TestCommandReviewIsReadOnly(t *testing.T) {
+	stubCLI(t)
+	ad := &Adapter{PermissionMode: "bypassPermissions", AllowedTools: []string{"Bash(go test:*)", "Edit"}}
+	cmd, err := ad.Command(adapter.Job{Prompt: "p", Review: true}, t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(cmd.Args, " ")
+	for _, want := range []string{"--permission-mode default", "--allowedTools Read Grep Glob Bash(git diff:*)", "--disallowedTools Edit NotebookEdit Write", "--setting-sources user", "--strict-mcp-config"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("missing %q: %s", want, args)
+		}
+	}
+	for _, bad := range []string{"acceptEdits", "bypassPermissions", "go test"} {
+		if strings.Contains(args, bad) {
+			t.Errorf("review args carry %q: %s", bad, args)
+		}
+	}
+}
+
 // TestForemanRunsInTheCheckout: both foreman bodies run in the working
 // directory they are given — the reading checkout — with no extra
 // directory to read, no additional-CLAUDE.md switch, the edit denials
@@ -811,7 +833,7 @@ func TestForemanRunsInTheCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, strict := range map[string]bool{"headless": true, "attached": false} {
+	for name, strict := range map[string]bool{"headless": true, "attached": false} { // attach loads the user's own servers
 		cmd := headless
 		if name == "attached" {
 			cmd = attached

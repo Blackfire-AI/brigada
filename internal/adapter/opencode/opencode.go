@@ -90,14 +90,17 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 }
 
 // Keep the CLI's ambient login state, but never the runner's secrets (§5.1).
+// OPENCODE_DISABLE_PROJECT_CONFIG makes the CLI skip the repository's
+// opencode.json and .opencode/ (plugins, agents, commands): the user's
+// global config and provider credentials stay in force.
 func workerEnv(env []string) []string {
-	out := make([]string, 0, len(env))
+	out := make([]string, 0, len(env)+1)
 	for _, kv := range env {
-		if !strings.HasPrefix(kv, "BRIGADA_") {
+		if !strings.HasPrefix(kv, "BRIGADA_") && !strings.HasPrefix(kv, "OPENCODE_DISABLE_PROJECT_CONFIG=") {
 			out = append(out, kv)
 		}
 	}
-	return out
+	return append(out, "OPENCODE_DISABLE_PROJECT_CONFIG=1")
 }
 
 // workerPermissions sets OPENCODE_PERMISSION so the CLI denies, rather than
@@ -163,6 +166,11 @@ func workerPermissions(env []string, readDirs []string, tools []string, review b
 		rules["external_directory"] = patterns
 	}
 	rules["bash"] = bashRules(tools, review)
+	if review {
+		// A reviewer only reads: no edits, no network fetches.
+		rules["edit"] = "deny"
+		rules["webfetch"] = "deny"
+	}
 	value, err := json.Marshal(rules)
 	if err != nil {
 		return env // unreachable: a map of JSON values marshals

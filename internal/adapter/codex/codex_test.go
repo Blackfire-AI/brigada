@@ -3,6 +3,7 @@ package codex
 import (
 	"bufio"
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -56,34 +57,34 @@ func TestCommand(t *testing.T) {
 			name:    "fresh run",
 			job:     adapter.Job{Prompt: prompt},
 			wantExe: "codex",
-			wantArg: append(slices.Clone(base), "--", prompt),
+			wantArg: append(slices.Clone(base), "-"),
 		},
 		{
 			name:    "fresh run with model",
 			ad:      Adapter{Binary: "/usr/local/bin/codex"},
 			job:     adapter.Job{Prompt: prompt, Model: "gpt-5"},
 			wantExe: "/usr/local/bin/codex",
-			wantArg: append(slices.Clone(base), "-m", "gpt-5", "--", prompt),
+			wantArg: append(slices.Clone(base), "-m", "gpt-5", "-"),
 		},
 		{
 			name:    "resume names the thread",
 			job:     adapter.Job{Prompt: prompt},
 			resume:  "01a140b7-6c27-7441-b9a1-1a082df4d4c9",
 			wantExe: "codex",
-			wantArg: append(slices.Clone(base), "resume", "01a140b7-6c27-7441-b9a1-1a082df4d4c9", "--", prompt),
+			wantArg: append(slices.Clone(base), "resume", "01a140b7-6c27-7441-b9a1-1a082df4d4c9", "-"),
 		},
 		{
 			name:    "the default model names none",
 			job:     adapter.Job{Prompt: prompt, Model: DefaultModel},
 			wantExe: "codex",
-			wantArg: append(slices.Clone(base), "--", prompt),
+			wantArg: append(slices.Clone(base), "-"),
 		},
 		{
 			name:    "extra args pass through",
 			ad:      Adapter{ExtraArgs: []string{"-c", "x=1"}},
 			job:     adapter.Job{Prompt: prompt},
 			wantExe: "codex",
-			wantArg: append(slices.Clone(base), "-c", "x=1", "--", prompt),
+			wantArg: append(slices.Clone(base), "-c", "x=1", "-"),
 		},
 	}
 	for _, tc := range cases {
@@ -121,8 +122,41 @@ func TestCommandMCPConfig(t *testing.T) {
 		t.Fatalf("Command: %v", err)
 	}
 	args := strings.Join(cmd.Args[1:], " ")
-	if strings.Contains(args, "--approve-for-me") || !strings.Contains(args, "--skip-git-repo-check") || !strings.Contains(args, "-s read-only") || !strings.Contains(args, `approvals_reviewer="auto_review"`) || !strings.Contains(args, "sandbox_approval=false") || !strings.Contains(args, "request_permissions=false") || !strings.Contains(args, "mcp_elicitations=true") || !strings.Contains(args, `mcp_servers.brigada.command="/bin/brigada"`) || !strings.Contains(args, `mcp_servers.brigada.args=["mcp","--socket","/tmp/sock"]`) || !strings.Contains(args, `mcp_servers.brigada.env={BRIGADA_TOKEN="secret"}`) {
+	if strings.Contains(args, "--approve-for-me") || !strings.Contains(args, "--skip-git-repo-check") || !strings.Contains(args, "-s read-only") || !strings.Contains(args, `approvals_reviewer="auto_review"`) || !strings.Contains(args, "sandbox_approval=false") || !strings.Contains(args, "request_permissions=false") || !strings.Contains(args, "mcp_elicitations=true") || !strings.Contains(args, `mcp_servers.brigada.command="/bin/brigada"`) || !strings.Contains(args, `mcp_servers.brigada.args=["mcp","--socket","/tmp/sock"]`) || !strings.Contains(args, `mcp_servers.brigada.env_vars=["BRIGADA_TOKEN"]`) {
 		t.Errorf("foreman args = %q", args)
+	}
+	if strings.Contains(args, "secret") {
+		t.Errorf("the token is in argv: %q", args)
+	}
+	if !slices.Contains(cmd.Env, "BRIGADA_TOKEN=secret") {
+		t.Errorf("the token is not in the process env")
+	}
+}
+
+func TestCommandPromptOnStdin(t *testing.T) {
+	stubCLI(t)
+	cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "the private prompt"}, t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(cmd.Args, " "), "private") {
+		t.Errorf("prompt in argv: %q", cmd.Args)
+	}
+	b, _ := io.ReadAll(cmd.Stdin)
+	if string(b) != "the private prompt" {
+		t.Errorf("stdin = %q", b)
+	}
+}
+
+func TestCommandReviewIsReadOnly(t *testing.T) {
+	stubCLI(t)
+	cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Review: true}, t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(cmd.Args, " ")
+	if !strings.Contains(args, "-s read-only") || strings.Contains(args, "workspace-write") {
+		t.Errorf("review args = %q", args)
 	}
 }
 

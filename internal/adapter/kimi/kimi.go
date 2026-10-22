@@ -36,8 +36,8 @@ type Adapter struct {
 	// so the field is read only when the run is fresh.
 	AgentFile string
 
-	// ReadOnlyAgentFile is the runner-owned definition used for review jobs
-	// when AgentFile is unset. Work and fix jobs keep the CLI's normal agent.
+	// ReadOnlyAgentFile is the runner-owned definition used for review jobs,
+	// whether or not AgentFile is set. Work and fix jobs keep the CLI's normal agent.
 	ReadOnlyAgentFile string
 
 	// ExtraArgs are further flags the agent's configuration passes
@@ -105,7 +105,8 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		args = append(args, "-m", job.Model)
 	}
 	agentFile := a.AgentFile
-	if agentFile == "" && job.Review {
+	if job.Review && a.ReadOnlyAgentFile != "" {
+		// A reviewer is read-only whatever agent the configuration names.
 		agentFile = a.ReadOnlyAgentFile
 	}
 	if resumeSessionID != "" {
