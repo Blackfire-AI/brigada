@@ -223,7 +223,17 @@ func pushToMain(t *testing.T, remote, file, content string) string {
 // target that no longer takes the task's diff cleanly. (Built on the
 // template by hand — reviewScript rebuilds from the template itself,
 // so it cannot take an edited one.)
-var conflictReviewWorker = strings.Replace(reviewWorker, "@RESULT@", "sleep 1\n\t"+reviewApproveResult, 1)
+var conflictReviewWorker = strings.Replace(reviewWorker, "@RESULT@",
+	`i=0; while [ ! -f "$BRIGADA_TEST_MARKERS/moved" ] && [ $i -lt 1000 ]; do sleep 0.02; i=$((i+1)); done`+"\n\t"+reviewApproveResult, 1)
+
+// releaseReviewer lets a conflictReviewWorker reviewer go on, once the
+// test has moved the remote under it. markerDir must be in force.
+func releaseReviewer(t *testing.T) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(os.Getenv("BRIGADA_TEST_MARKERS"), "moved"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // infraReviewWorker is the dual worker whose implementer writes a file
 // under infra/: the changed paths the runner records, which the land
@@ -759,6 +769,7 @@ func TestRunnerLandJobConflict(t *testing.T) {
 	if moved == seed {
 		t.Fatal("the conflicting push never moved main")
 	}
+	releaseReviewer(t)
 	e.waitTaskState(task, "needs_foreman")
 	if _, _, _, _, ok := e.landing(task); ok {
 		t.Error("a conflicting landing was recorded")
@@ -797,6 +808,7 @@ func TestRunnerLandRefusesAMovedHead(t *testing.T) {
 	git(t, scratch, "add", "-A")
 	git(t, scratch, "-c", "user.name=other", "-c", "user.email=other@brigada.invalid", "commit", "-qm", "after the review")
 	git(t, scratch, "push", "-q", "origin", branch)
+	releaseReviewer(t)
 
 	e.waitTaskState(task, "needs_foreman")
 	if _, _, _, _, ok := e.landing(task); ok {

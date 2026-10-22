@@ -260,7 +260,9 @@ func (e *testEnv) startRunner(script string, heartbeatEvery time.Duration, adjus
 			Adapters:       []adapter.Adapter{ad},
 			Labels:         []string{"test"},
 			HeartbeatEvery: heartbeatEvery,
-			LeaseWait:      300 * time.Millisecond,
+			LeaseWait:      50 * time.Millisecond,
+			BackoffMin:     10 * time.Millisecond,
+			BackoffMax:     100 * time.Millisecond,
 			CheckTimeout:   10 * time.Second,
 			Log:            slog.New(slog.NewTextHandler(io.Discard, nil)),
 		}
@@ -1295,12 +1297,12 @@ func TestRunnerSurvivesSocketBlink(t *testing.T) {
 
 	e.startAPI() // back within the first backoff window
 	// Let the runner register and settle into an empty long-poll…
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	// …then blink the socket mid-poll: the in-flight lease fails, the
 	// next round re-registers (the engine may have a fresh store) and
 	// polls again.
 	e.stopAPI()
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(60 * time.Millisecond)
 	e.startAPI()
 
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
