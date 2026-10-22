@@ -49,7 +49,7 @@ tasks:
     base: "runner2"
     tier: light
     effort: low
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 121
