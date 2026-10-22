@@ -32,6 +32,15 @@ type Progress struct {
 // follow its request's cancellation.
 const heartbeatDeadline = 30 * time.Second
 
+// writeDeadline bounds one runner call's store transaction that does not
+// follow its request's cancellation either (heartbeatDeadline's twin for
+// complete, release, an artifact upload and a register): a request that
+// gives up mid-call must not roll the store back while its statements
+// still run — every later step would fail on a transaction already
+// ended — while the deadline keeps a wedged store from holding the call
+// forever.
+const writeDeadline = 30 * time.Second
+
 // Heartbeat reports the runner is still on the job and returns ok with
 // a new expiry, or why not (§12.3): cancelled first, then gone for a
 // job that ended (lost, not gone, when this very call's sweep just
@@ -262,6 +271,11 @@ func (e *Engine) Complete(ctx context.Context, owner, jobID int64, leaseID strin
 		}
 	}
 	var ans Answer
+	// A completion that began is finished on a context of its own, like a
+	// heartbeat: a request that gives up mid-call must not roll the
+	// transaction back while its statements still run.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeDeadline)
+	defer cancel()
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
@@ -459,6 +473,10 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 // lease id.
 func (e *Engine) Release(ctx context.Context, owner, jobID int64, leaseID, reason string) (Answer, error) {
 	var ans Answer
+	// As a completion: a release that began is finished on a context of
+	// its own, so the request's end cannot roll it back mid-write.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeDeadline)
+	defer cancel()
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {

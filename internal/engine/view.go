@@ -44,13 +44,20 @@ type JobInfo struct {
 
 // Job reads one job by id (§12.1); nil when there is none. Like every
 // engine call it sweeps first, so the status is the rules' current word
-// on the job, not a row as it happens to sit.
+// on the job, not a row as it happens to sit. The sweep runs in its own
+// short transaction and the read in a read-only one, so the read half of
+// a status poll holds no write lock while a lease poll or an upload
+// runs; a writer that lands between the two can only make what the read
+// sees newer, never staler.
 func (e *Engine) Job(ctx context.Context, id int64) (*JobInfo, error) {
+	if err := e.store.Update(ctx, func(tx *sql.Tx) error {
+		_, err := e.sweepTx(tx, e.cfg.Now())
+		return err
+	}); err != nil {
+		return nil, fmt.Errorf("read job %d: %w", id, err)
+	}
 	var info *JobInfo
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		if _, err := e.sweepTx(tx, e.cfg.Now()); err != nil {
-			return err
-		}
+	err := e.store.View(ctx, func(tx *sql.Tx) error {
 		j, err := loadJobTx(tx, id)
 		if err != nil {
 			return err

@@ -94,6 +94,12 @@ func (e *Engine) UploadArtifact(ctx context.Context, owner, jobID int64, leaseID
 
 	var ans Answer
 	var info *ArtifactInfo
+	// An upload that began is finished on a context of its own, like a
+	// heartbeat: a request that gives up mid-sweep must not roll the
+	// transaction back while its statements still run — every later
+	// step of the sweep would fail on a transaction already ended.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeDeadline)
+	defer cancel()
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
