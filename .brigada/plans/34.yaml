@@ -60,6 +60,6 @@ tasks:
     base: "engine"
     tier: heavy
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-121"
     rounds: 1
