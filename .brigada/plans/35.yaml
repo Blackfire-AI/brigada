@@ -1,0 +1,117 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 35
+title: "Pre-public review of v1.0.0-rc.1, phase 1: findings only (#55)"
+repo: "github.com/Blackfire-AI/brigada"
+state: active
+created: 2026-10-22T12:23:26.999125Z
+updated: 2026-10-22T12:23:26.999125Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps — the continued
+# dep when base is empty and continue is set, else the default branch; merge a
+# task after its base. A task with continue, one of deps, starts in the
+# session of the dep's author.
+# States are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1);
+# review_tier and review_effort do the same for its reviews (§7, §8); caps
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1).
+tasks:
+  - id: 124
+    name: "s2-functionality"
+    title: "Review 2: functionality, cold start and help texts"
+    class: "answer"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 125
+    name: "s1-docs"
+    title: "Review 1: documentation"
+    class: "answer"
+    deps: ["s2-functionality"]
+    base: "s2-functionality"
+    tier: light
+    effort: low
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 126
+    name: "s7-compat"
+    title: "Review 7: compatibility promise"
+    class: "answer"
+    deps: ["s1-docs"]
+    base: "s1-docs"
+    tier: light
+    effort: low
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 127
+    name: "s4-runtime-security"
+    title: "Review 4: security at runtime, data flows"
+    class: "answer"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 128
+    name: "s3-repo-security"
+    title: "Review 3: security of the repository contents and history"
+    class: "answer"
+    deps: ["s4-runtime-security"]
+    base: "s4-runtime-security"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 129
+    name: "s5-legal"
+    title: "Review 5: legal"
+    class: "answer"
+    deps: ["s3-repo-security"]
+    base: "s3-repo-security"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 130
+    name: "s6-supply-chain"
+    title: "Review 6: supply chain and release engineering"
+    class: "answer"
+    deps: []
+    base: ""
+    effort: medium
+    state: ready
+    branch: ""
+    rounds: 0
+  - id: 131
+    name: "s8-code-health"
+    title: "Review 8: code health"
+    class: "answer"
+    deps: ["s6-supply-chain"]
+    base: "s6-supply-chain"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 132
+    name: "s9-posthoc"
+    title: "Review 9: post-hoc review of design decisions landed directly on main"
+    class: "answer"
+    deps: ["s8-code-health"]
+    base: "s8-code-health"
+    tier: light
+    effort: low
+    state: pending
+    branch: ""
+    rounds: 0
