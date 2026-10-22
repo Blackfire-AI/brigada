@@ -59,6 +59,7 @@ func countMarkers(t *testing.T, dir, prefix string) int {
 }
 
 func TestRunnerMaxParallelRunsJobsConcurrently(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -83,6 +84,7 @@ func TestRunnerMaxParallelRunsJobsConcurrently(t *testing.T) {
 }
 
 func TestRunnerMaxParallelOneIsSequential(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -209,6 +211,7 @@ func (e *testEnv) str1(job int64, col string) string {
 // must wait for that worktree to come down — not fail against the
 // checked-out branch — and then succeed.
 func TestFollowUpWaitsForTheAuthorsWorktree(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"review", "fix"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := context.Background()
@@ -274,6 +277,7 @@ func TestFollowUpWaitsForTheAuthorsWorktree(t *testing.T) {
 // set-up waits for the first's worktree to come down instead of racing
 // it — and then gets a clean checkout at the same path.
 func TestReLeasedReviewWaitsForTheOldAttemptsWorktree(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cfg := &Config{StateDir: t.TempDir()}
 	remote := newRemote(t)
@@ -344,6 +348,7 @@ func TestReLeasedReviewWaitsForTheOldAttemptsWorktree(t *testing.T) {
 // with no mirror yet: without the per-mirror lock the first clones race
 // each other and the worktree adds and prunes race the records.
 func TestWorkspacesOfOneRepoDoNotRaceTheMirror(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cfg := &Config{StateDir: t.TempDir()}
 	remote := newRemote(t)

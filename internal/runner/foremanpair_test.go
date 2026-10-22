@@ -113,6 +113,7 @@ func twoFakeAgents(script, modelA, modelB string) ([]api.Agent, []adapter.Adapte
 // One runner advertising two models of one harness runs the foreman's
 // turn on the model the project chose: the command receives it.
 func TestRunnerForemanTurnRunsOnTheChosenModel(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject("")
 	e.setForeman("fake", "fake-2")
@@ -141,6 +142,7 @@ func TestRunnerForemanTurnRunsOnTheChosenModel(t *testing.T) {
 // Two registrations may share the harness and model and differ in
 // adapter: when the first is ineligible the second executes.
 func TestRunnerForemanTurnRunsOnTheSecondAdapter(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject("")
 	e.setForeman("fake", "fake-1")
@@ -199,6 +201,7 @@ func TestWorkGrantSelectsSameNamedAdapterByModel(t *testing.T) {
 
 // Same-named adapters stay paired with their models through lease and execution.
 func TestRunnerWorkRunsOnTheNamedModel(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)

@@ -142,7 +142,7 @@ cat > /dev/null
 echo '{"type":"assistant","text":"starting"}'
 echo '{"type":"tool_start","name":"Bash"}'
 : > "$BRIGADA_TEST_MARKERS/started"
-sleep 0.9
+sleep 0.6
 echo '{"type":"tool_end","name":"Bash"}'
 echo hello > work.txt
 git add -A

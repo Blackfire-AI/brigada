@@ -29,7 +29,7 @@ import (
 func (e *testEnv) setProjectSettings(settings string) {
 	e.t.Helper()
 	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
-		_, err := tx.Exec("UPDATE projects SET settings = ? WHERE id = ?", settings, e.project)
+		_, err := tx.Exec("UPDATE projects SET settings = ? WHERE id = ?", e.sub(settings), e.project)
 		return err
 	})
 	if err != nil {
@@ -83,7 +83,7 @@ func (e *testEnv) landTest(t *testing.T, remote, settings, taskSpec, taskCheck, 
 	e.setProjectSettings(settings)
 	task = e.seedTask("", taskCheck)
 	work = e.submitWork(task, prompt.ComposeWorkerPrompt(taskSpec, "", ""))
-	t.Setenv("BRIGADA_TEST_BRANCH", taskBranch(task, 1))
+	setTestVar(t, "BRIGADA_TEST_BRANCH", taskBranch(task, 1))
 	e.startLandRunner(t, workerScript, adjust...)
 	return task, work
 }
@@ -94,10 +94,13 @@ func (e *testEnv) startLandRunner(t *testing.T, workerScript string, adjust ...f
 	e.t.Helper()
 	// The landing clone commits with the host's identity, and a CI host
 	// has none.
+	// It rides Config.GitEnv, not the process environment, so land tests
+	// can run in parallel.
+	var identity []string
 	for _, k := range []string{"GIT_AUTHOR", "GIT_COMMITTER"} {
-		t.Setenv(k+"_NAME", "land test")
-		t.Setenv(k+"_EMAIL", "land@brigada.invalid")
+		identity = append(identity, k+"_NAME=land test", k+"_EMAIL=land@brigada.invalid")
 	}
+	adjust = append([]func(*Config){func(c *Config) { c.GitEnv = append(c.GitEnv, identity...) }}, adjust...)
 	// A lease or register that fails on a loaded host (the race job's
 	// two cores) retries on the default 1s..30s backoff, which sums to a
 	// minute after six failures — the whole of a test's wait. Short
@@ -246,6 +249,7 @@ var infraReviewWorker = strings.ReplaceAll(
 // pushed, the remote's main holds exactly the seed and the squash, and
 // the message is the one the hand-driven land builds.
 func TestRunnerLandJobPushes(t *testing.T) {
+	t.Parallel()
 	markerDir(t)
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
@@ -300,6 +304,7 @@ func TestRunnerLandJobPushes(t *testing.T) {
 // the runner itself offers the git label the job needs (§7.1). No
 // withGitLabel helper widens its labels here.
 func TestRunnerDefaultLabelsLeaseLandJob(t *testing.T) {
+	t.Parallel()
 	markerDir(t)
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
@@ -321,6 +326,7 @@ const workerResultLine = `	printf '{"type":"result","text":"added work.txt: {\\"
 // commit's subject and body — indented, so its forged trailer is no
 // trailer — with the land job's own trailers after it.
 func TestRunnerLandJobUsesTheWorkersCommitMessage(t *testing.T) {
+	t.Parallel()
 	markerDir(t)
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
@@ -365,6 +371,7 @@ func TestRunnerLandJobUsesTheWorkersCommitMessage(t *testing.T) {
 // phase, which pushes the recorded commit — no new squash — and moves
 // the record to pushed.
 func TestRunnerLandGateAskWaitsThenPushes(t *testing.T) {
+	t.Parallel()
 	markerDir(t)
 	remote := newRemote(t)
 	seed := remoteBranchCommit(t, remote, "main")
@@ -407,6 +414,7 @@ func TestRunnerLandGateAskWaitsThenPushes(t *testing.T) {
 // onto the earlier, not onto the unmoved target — and one push approve
 // releases both, each pushed as its recorded commit, no new squash.
 func TestRunnerLandGateAskStacksTwoLandings(t *testing.T) {
+	t.Parallel()
 	markerDir(t)
 	remote := newRemote(t)
 	seed := remoteBranchCommit(t, remote, "main")
@@ -431,6 +439,7 @@ func TestRunnerLandGateAskStacksTwoLandings(t *testing.T) {
 // commit, not on a target that lacks it, and the release pushes the
 // stack in dependency order.
 func TestRunnerLandGateAskStackLandsInDependencyOrder(t *testing.T) {
+	t.Parallel()
 	markerDir(t)
 	remote := newRemote(t)
 	seed := remoteBranchCommit(t, remote, "main")
@@ -453,6 +462,7 @@ func TestRunnerLandGateAskStackLandsInDependencyOrder(t *testing.T) {
 // lands on, so the patch holds the task's own files alone instead of
 // every change the target made since the stale merge-base (§7.1).
 func TestRunnerLandRebuiltDependentDiffsAgainstTheTarget(t *testing.T) {
+	t.Parallel()
 	markerDir(t)
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
@@ -479,7 +489,7 @@ func TestRunnerLandRebuiltDependentDiffsAgainstTheTarget(t *testing.T) {
 		t.Fatalf("seed the dependent: %v", err)
 	}
 	e.addDep(dependent, dep)
-	t.Setenv("BRIGADA_TEST_BRANCH", branch)
+	setTestVar(t, "BRIGADA_TEST_BRANCH", branch)
 	work := e.submitWork(dependent, prompt.ComposeWorkerPrompt(stackSpec, "", ""))
 
 	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
@@ -519,6 +529,7 @@ func TestRunnerLandRebuiltDependentDiffsAgainstTheTarget(t *testing.T) {
 // in the very files the task touched; the tree diff against the squash
 // base carries the task's change alone (§7.1).
 func TestRunnerLandStackedOnLandedDependencyDiffsTheTree(t *testing.T) {
+	t.Parallel()
 	markerDir(t)
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
@@ -555,7 +566,7 @@ func TestRunnerLandStackedOnLandedDependencyDiffsTheTree(t *testing.T) {
 		t.Fatalf("seed the dependent: %v", err)
 	}
 	e.addDep(dependent, dep)
-	t.Setenv("BRIGADA_TEST_BRANCH", branch)
+	setTestVar(t, "BRIGADA_TEST_BRANCH", branch)
 	work = e.submitWork(dependent, prompt.ComposeWorkerPrompt(depSpec, "", ""))
 
 	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
@@ -605,6 +616,7 @@ func TestRunnerLandStackedOnLandedDependencyDiffsTheTree(t *testing.T) {
 // dependency's branch and lands with its own change alone, the other
 // task's work intact on the target (§7.1).
 func TestRunnerLandStackedOnLandedDependencyDoesNotRevertLaterLandings(t *testing.T) {
+	t.Parallel()
 	markerDir(t)
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
@@ -630,7 +642,7 @@ func TestRunnerLandStackedOnLandedDependencyDoesNotRevertLaterLandings(t *testin
 		t.Fatalf("seed the dependent: %v", err)
 	}
 	e.addDep(dependent, dep)
-	t.Setenv("BRIGADA_TEST_BRANCH", branch)
+	setTestVar(t, "BRIGADA_TEST_BRANCH", branch)
 	work = e.submitWork(dependent, prompt.ComposeWorkerPrompt(stackSpec, "", ""))
 
 	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
@@ -666,6 +678,7 @@ func TestRunnerLandStackedOnLandedDependencyDoesNotRevertLaterLandings(t *testin
 // directory; a second runner leases the push, fetches the recorded
 // commit from the waiting ref and pushes it.
 func TestRunnerLandPushPhaseOnAnotherRunner(t *testing.T) {
+	t.Parallel()
 	markerDir(t)
 	remote := newRemote(t)
 	seed := remoteBranchCommit(t, remote, "main")
@@ -674,7 +687,7 @@ func TestRunnerLandPushPhaseOnAnotherRunner(t *testing.T) {
 	e.setProjectSettings(`{"gate_push":"ask"}`)
 	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
 	work := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", "", ""))
-	t.Setenv("BRIGADA_TEST_BRANCH", taskBranch(task, 1))
+	setTestVar(t, "BRIGADA_TEST_BRANCH", taskBranch(task, 1))
 	script := reviewScript(reviewApproveResult)
 	squasher := e.startLandRunner(t, script)
 
@@ -711,6 +724,7 @@ func TestRunnerLandPushPhaseOnAnotherRunner(t *testing.T) {
 // runs from the user's own repository, which the test runs verbatim —
 // and runs after_land after the landing.
 func TestRunnerLandGateNeverRecordsThePushCmd(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	seed := remoteBranchCommit(t, remote, "main")
 	e := newTestEnv(t, engine.Config{})
@@ -753,6 +767,7 @@ func TestRunnerLandGateNeverRecordsThePushCmd(t *testing.T) {
 // stops the landing — nothing pushed, no record, the conflicting files
 // in the job's completion — and the task parks for the foreman.
 func TestRunnerLandJobConflict(t *testing.T) {
+	t.Parallel()
 	markers := markerDir(t)
 	remote := newRemote(t)
 	seed := remoteBranchCommit(t, remote, "main")
@@ -787,6 +802,7 @@ func TestRunnerLandJobConflict(t *testing.T) {
 // pushed, no record — and the task parks for the foreman, the reason
 // naming the head that was approved.
 func TestRunnerLandRefusesAMovedHead(t *testing.T) {
+	t.Parallel()
 	markers := markerDir(t)
 	remote := newRemote(t)
 	seed := remoteBranchCommit(t, remote, "main")
@@ -827,6 +843,7 @@ func TestRunnerLandRefusesAMovedHead(t *testing.T) {
 // pushed. The work round's own check passes — the project's default
 // check is what the landing runs (§7.1).
 func TestRunnerLandJobCheckFailure(t *testing.T) {
+	t.Parallel()
 	markerDir(t)
 	remote := newRemote(t)
 	seed := remoteBranchCommit(t, remote, "main")
@@ -856,6 +873,7 @@ func TestRunnerLandJobCheckFailure(t *testing.T) {
 // record and the history — reported, never undone — and the landing it
 // followed stays pushed.
 func TestRunnerLandAfterLandFailure(t *testing.T) {
+	t.Parallel()
 	markerDir(t)
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
@@ -879,12 +897,23 @@ func TestRunnerLandAfterLandFailure(t *testing.T) {
 // the work round's own — pass untouched.
 func landHookRemote(t *testing.T, reject int) string {
 	t.Helper()
+	// The hook runs under the runner's git push, whose environment no
+	// longer carries the test's markers directory: the path is baked in.
+	markers := ""
+	for _, kv := range testVarsOf(t.Name()) {
+		if v, ok := strings.CutPrefix(kv, "BRIGADA_TEST_MARKERS="); ok {
+			markers = v
+		}
+	}
+	if markers == "" {
+		t.Fatal("landHookRemote needs markerDir(t) first")
+	}
 	remote := newRemote(t)
 	hook := filepath.Join(strings.TrimPrefix(remote, "file://"), "hooks", "pre-receive")
 	script := `#!/bin/sh
 while read old new ref; do
 	if [ "$ref" = "refs/heads/main" ]; then
-		f="$BRIGADA_TEST_MARKERS/pushes"
+		f="` + markers + `/pushes"
 		n=$(($(cat "$f" 2>/dev/null || echo 0)+1))
 		echo $n >"$f"
 		if [ "$n" -le ` + strconv.Itoa(reject) + ` ]; then exit 1; fi
@@ -902,6 +931,7 @@ exit 0
 // retried once from a fresh fetch and squash, and the retry's push
 // lands.
 func TestRunnerLandPushRejectedRetriesOnce(t *testing.T) {
+	t.Parallel()
 	markers := markerDir(t)
 	remote := landHookRemote(t, 1)
 	e := newTestEnv(t, engine.Config{})
@@ -924,6 +954,7 @@ func TestRunnerLandPushRejectedRetriesOnce(t *testing.T) {
 // after the one retry fails the landing like a conflict — nothing
 // pushed, no record, the task parked for the foreman.
 func TestRunnerLandPushRejectedTwiceFails(t *testing.T) {
+	t.Parallel()
 	markerDir(t)
 	remote := landHookRemote(t, 2)
 	seed := remoteBranchCommit(t, remote, "main")
@@ -950,6 +981,7 @@ func TestRunnerLandPushRejectedTwiceFails(t *testing.T) {
 // protected-path rule matches: a task that touched infra/** holds at
 // the gate though its spec never says so, and nothing is pushed.
 func TestRunnerRecordsChangedPathsMatchedByLandGate(t *testing.T) {
+	t.Parallel()
 	markerDir(t)
 	remote := newRemote(t)
 	seed := remoteBranchCommit(t, remote, "main")
@@ -988,6 +1020,7 @@ func TestRunnerRecordsChangedPathsMatchedByLandGate(t *testing.T) {
 // extra checkouts named (§5.7, §5.8): a default_check that needs either
 // passes though the clone is another directory than the work's.
 func TestRunnerLandCheckRunsSetupAndSeesExtraRepos(t *testing.T) {
+	t.Parallel()
 	markers := markerDir(t)
 	remote := newRemote(t)
 	extra := newRemote(t)
@@ -998,14 +1031,14 @@ func TestRunnerLandCheckRunsSetupAndSeesExtraRepos(t *testing.T) {
 	setup := `{"command":"echo \"$PWD\" >> \"$TEST_MARKERS_DIR/setup-dirs\"","timeout_minutes":5}`
 	extras := `{"repos":[{"name":"tools","repo":"example.invalid/tools","url":"` + extra + `"}],"source":"task"}`
 	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
-		_, err := tx.Exec("UPDATE tasks SET setup = ?, extra_repos = ? WHERE id = ?", setup, extras, task)
+		_, err := tx.Exec("UPDATE tasks SET setup = ?, extra_repos = ? WHERE id = ?", e.sub(setup), extras, task)
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	work := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", "", ""))
-	t.Setenv("BRIGADA_TEST_BRANCH", taskBranch(task, 1))
+	setTestVar(t, "BRIGADA_TEST_BRANCH", taskBranch(task, 1))
 	e.startLandRunner(t, reviewScript(reviewApproveResult))
 
 	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
@@ -1024,6 +1057,7 @@ func TestRunnerLandCheckRunsSetupAndSeesExtraRepos(t *testing.T) {
 // does not have yet is created from the default branch by the first
 // landing, which pushes onto it; main is left alone.
 func TestRunnerLandFreshTargetCreatedFromDefault(t *testing.T) {
+	t.Parallel()
 	markerDir(t)
 	remote := newRemote(t)
 	seed := remoteBranchCommit(t, remote, "main")
@@ -1056,7 +1090,7 @@ func TestRunnerLandWithoutHostIdentity(t *testing.T) {
 	e.setProjectSettings(`{"gate_push":"auto"}`)
 	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
 	work := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", "", ""))
-	t.Setenv("BRIGADA_TEST_BRANCH", taskBranch(task, 1))
+	setTestVar(t, "BRIGADA_TEST_BRANCH", taskBranch(task, 1))
 	// No identity from anywhere: no environment, no global or system
 	// config, and no guessing from the user and host names.
 	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "EMAIL"} {

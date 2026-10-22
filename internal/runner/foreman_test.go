@@ -98,6 +98,7 @@ echo '{"type":"result","text":"answered the worker; the plan stands"}'
 // A clean exit without any result block completes the job as done with the final
 // message as its summary.
 func TestRunnerForemanTurnRunsInScratchDir(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, engine.Config{})
 	remote := newRemote(t)
 	git(t, "", "--git-dir", strings.TrimPrefix(remote, "file://"), "branch", "project-default", "main")
@@ -189,6 +190,7 @@ func TestRunnerForemanTurnRunsInScratchDir(t *testing.T) {
 // id the first turn ended on is written back, so the next turn resumes
 // the same conversation.
 func TestRunnerForemanTurnCoalescesAndResumes(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject("")
 	e.setForeman("fake", "fake-1")
@@ -256,6 +258,7 @@ func TestRunnerForemanTurnCoalescesAndResumes(t *testing.T) {
 // is the runner's rule (nothing spoken, nothing recorded), not a lost
 // transcript.
 func TestRunnerForemanTurnTimeCapped(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject("") // setForeman supplies the reading repo
 	e.setForeman("fake", "fake-1")
@@ -291,6 +294,7 @@ while [ ! -f "$BRIGADA_TEST_MARKERS/release" ]; do sleep 0.1; done
 // that exits non-zero fails the turn (§5.4's exemption cuts both ways —
 // there is no result block to outweigh the exit), with the error kept.
 func TestRunnerForemanTurnFails(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject("")
 	e.setForeman("fake", "fake-1")
@@ -323,6 +327,7 @@ exit 7
 // started — a script that is not there — fails the turn as the infra
 // kind before the CLI ran, and the agent is charged nothing.
 func TestRunnerForemanSpawnFailureIsInfrastructure(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, engine.Config{})
 	remote := newRemote(t)
 	e.seedProject(remote)
@@ -349,6 +354,7 @@ func TestRunnerForemanSpawnFailureIsInfrastructure(t *testing.T) {
 // kind of the CLI's error — and the reset time its event carried —
 // rides the completion, so the engine marks the foreman limited.
 func TestRunnerForemanLimitReachesTheEngine(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject("")
 	e.setForeman("fake", "fake-1")
@@ -459,6 +465,7 @@ func (a *recordingAdapter) carries(s string) bool {
 // anything the worker itself sees. Whatever ends the turn, the file is
 // gone when it ends.
 func TestRunnerForemanMCPConfig(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, engine.Config{NewLeaseToken: func() (string, error) { return fixedLeaseToken, nil }})
 	e.seedProject("")
 	e.setForeman("fake", "fake-1")
@@ -576,6 +583,7 @@ func TestRunnerForemanMCPConfig(t *testing.T) {
 // and the engine hears why instead of a silent tool-less turn — with
 // no debris of the failed attempt left behind.
 func TestRunnerForemanMCPConfigFailsTheTurn(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("a read-only directory does not stop root; this failure path needs a non-root user")
 	}
@@ -634,6 +642,7 @@ func TestRunnerForemanMCPConfigFailsTheTurn(t *testing.T) {
 // — each holding a token, revoked with its lease but a secret on disk
 // all the same — are removed whole before any new turn adds one.
 func TestRunnerSweepsStaleMCPConfigs(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject("")
 	stale := filepath.Join(e.stateDir, "mcp", "turn-stale")
@@ -659,6 +668,7 @@ func TestRunnerSweepsStaleMCPConfigs(t *testing.T) {
 // never the scratch directory, a record, the transcript or any other
 // file under the runner's or the engine's state.
 func TestRunnerKeepsForemanTokenInMemory(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, engine.Config{NewLeaseToken: func() (string, error) { return fixedLeaseToken, nil }})
 	e.seedProject("")
 	e.setForeman("fake", "fake-1")
@@ -716,6 +726,7 @@ func TestRunnerKeepsForemanTokenInMemory(t *testing.T) {
 }
 
 func TestRunnerForemanCheckoutRefreshes(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, engine.Config{})
 	remote := newRemote(t)
 	e.seedProject(remote)
@@ -765,6 +776,7 @@ func TestRunnerForemanCheckoutRefreshes(t *testing.T) {
 }
 
 func TestRunnerForemanCheckoutGitFailure(t *testing.T) {
+	t.Parallel()
 	for _, fetch := range []bool{false, true} {
 		name := "clone"
 		if fetch {
@@ -808,6 +820,7 @@ func TestRunnerForemanCheckoutGitFailure(t *testing.T) {
 // turn: the runner runs it again without a resume, and the fresh
 // session's id is written back.
 func TestRunnerForemanTurnStartsFreshWhenResumeIsRejected(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject("")
 	e.setForeman("fake", "fake-1")

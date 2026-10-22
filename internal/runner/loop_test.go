@@ -110,7 +110,7 @@ while [ $i -lt 8 ]; do
   i=$((i+1))
 done
 : > "$BRIGADA_TEST_MARKERS/started"
-sleep 0.3
+sleep 0.15
 br=$(git rev-parse --abbrev-ref HEAD)
 printf '{"type":"result","text":"done looping: {\\"status\\":\\"done\\",\\"summary\\":\\"looped then finished\\",\\"branch\\":\\"%s\\"}"}\n' "$br"
 : > "$BRIGADA_TEST_MARKERS/finished"
@@ -135,6 +135,7 @@ printf '{"type":"result","text":"done reading: {\\"status\\":\\"done\\",\\"summa
 // report, the engine wakes the foreman with the task_loop event — and
 // the worker runs on to its done, killed by nothing.
 func TestRunnerReportsToolLoopWithoutKilling(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
@@ -163,6 +164,7 @@ func TestRunnerReportsToolLoopWithoutKilling(t *testing.T) {
 // arguments are eight different calls (§5.6): no report, no event, a
 // run that simply finishes.
 func TestRunnerVariedCallsAreNoLoop(t *testing.T) {
+	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
