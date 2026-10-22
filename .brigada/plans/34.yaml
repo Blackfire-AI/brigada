@@ -38,7 +38,7 @@ tasks:
     deps: ["engine"]
     base: "engine"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 120
@@ -60,6 +60,6 @@ tasks:
     base: "engine"
     tier: heavy
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
