@@ -81,7 +81,7 @@ tasks:
     deps: ["s3-repo-security"]
     base: "s3-repo-security"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 130
