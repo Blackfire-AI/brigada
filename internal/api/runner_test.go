@@ -264,7 +264,7 @@ func TestLeaseLongPoll(t *testing.T) {
 		}
 		answered <- reply{code, data}
 	}()
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	e.submitWork()
 	select {
 	case r := <-answered:
