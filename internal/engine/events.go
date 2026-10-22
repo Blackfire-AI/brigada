@@ -14,6 +14,7 @@ import (
 // prompts or secrets that made it happen.
 const (
 	evProjectArchived        = "project_archived"          // removal retains history but closes the work gate
+	evProjectSettingSet      = "project_setting_set"       // a project setting changed — `brigada project set` or an approve that stops asking (§6.3); Reason lists key=value
 	evPlanCancelled          = "plan_cancelled"            // removal cancelled an unfinished plan
 	evPlanCreated            = "plan_created"              // CreatePlan: a plan now exists (§6.2)
 	evPlanDone               = "plan_done"                 // the plan's last open task finished (§6.2)

@@ -70,7 +70,8 @@ Commands:
 	                rerun the default check, print the push command; never
 	                pushes (--onto, --repo, --landed, --no-check).
 	land approve <task>
-	                Release a task's land-gate hold and queue its landing.
+	                Release a task's land-gate hold and queue its landing
+	                (--and-stop-asking changes the rule that held it).
 	land reject <task>
 	                Cancel a task's landing; its branch is left as it is.
 	push approve [--repo URL]
@@ -93,7 +94,8 @@ Commands:
 	                Register one such model as an agent (--classes,
 	                --effort); restart the runner to serve it.
 	plan approve <id>
-	                Approve a plan waiting over the approval limit.
+	                Approve a plan waiting over the approval limit
+	                (--and-stop-asking changes the rule that held it).
 	plan reject <id>
 	                Reject such a plan and cancel its tasks.
 	budget [--repo URL] [--wakes N]

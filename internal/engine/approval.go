@@ -349,11 +349,13 @@ var (
 
 // PlanDecision is what approving or rejecting a plan did: the plan's
 // new state and, for an approval, the first wave's tasks with the work
-// job queued for each.
+// job queued for each. Settings holds the key=value pairs an approval
+// that stops asking changed (§6.3).
 type PlanDecision struct {
-	PlanID int64
-	State  string
-	Tasks  []CreatedTask
+	PlanID   int64
+	State    string
+	Tasks    []CreatedTask
+	Settings []string
 }
 
 // ApprovePlan is the user's yes (§6.3): the plan turns active and its
@@ -362,14 +364,18 @@ type PlanDecision struct {
 // one transaction. project scopes the plan to one project; 0 names any.
 // The foreman never calls it: confirmation is the user's.
 func (e *Engine) ApprovePlan(ctx context.Context, project, plan int64) (PlanDecision, error) {
-	return e.ApprovePlanVersion(ctx, project, plan, 0)
+	return e.ApprovePlanVersion(ctx, project, plan, 0, false)
 }
 
 // ApprovePlanVersion is ApprovePlan for the plan version the user was
 // shown (§4.6): a plan amended since is refused whole with
 // ErrPlanVersionStale. Version 0 names no version and checks nothing.
-func (e *Engine) ApprovePlanVersion(ctx context.Context, project, plan, version int64) (PlanDecision, error) {
+// stopAsking also changes, through the `brigada project set` path, the
+// one setting each hold reason maps to (§6.3), so the same question is
+// not asked twice; without it the approval behaves as it always has.
+func (e *Engine) ApprovePlanVersion(ctx context.Context, project, plan, version int64, stopAsking bool) (PlanDecision, error) {
 	var res PlanDecision
+	var changed []string
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
@@ -378,6 +384,16 @@ func (e *Engine) ApprovePlanVersion(ctx context.Context, project, plan, version 
 		proj, err := awaitingPlanTx(tx, project, plan, version)
 		if err != nil {
 			return err
+		}
+		if stopAsking {
+			s, asks, err := planHoldAsksTx(tx, proj, plan)
+			if err != nil {
+				return err
+			}
+			changed, err = e.stopAskingTx(tx, proj, s, asks, now)
+			if err != nil {
+				return fmt.Errorf("stop the plan gate asking: %w", err)
+			}
 		}
 		if _, err := tx.Exec(`UPDATE plans SET state = 'active', updated_at = ? WHERE id = ?`, fmtTime(now), plan); err != nil {
 			return fmt.Errorf("activate plan %d: %w", plan, err)
@@ -390,7 +406,7 @@ func (e *Engine) ApprovePlanVersion(ctx context.Context, project, plan, version 
 		if err != nil {
 			return err
 		}
-		res = PlanDecision{PlanID: plan, State: "active", Tasks: first}
+		res = PlanDecision{PlanID: plan, State: "active", Tasks: first, Settings: changed}
 		if err := inboxEventTx(tx, evPlanApproved, proj, 0, 0,
 			eventPayload{Plan: plan, Status: "active", Count: int64(len(first))}, now); err != nil {
 			return err

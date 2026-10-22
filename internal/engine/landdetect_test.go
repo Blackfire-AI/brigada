@@ -398,7 +398,7 @@ func TestLandApproveTrailerLandedQueuesNothing(t *testing.T) {
 
 	// The recorded landing cleared the hold, so there is nothing for the
 	// user to approve, and no land job is queued for the landed task.
-	if _, err := e.eng.LandApprove(e.ctx, e.project, e.task); err == nil {
+	if _, err := e.eng.LandApprove(e.ctx, e.project, e.task, false); err == nil {
 		t.Errorf("LandApprove after the trailer landing: want an error, the landing is no longer held")
 	}
 	if n := e.landJobs(); n != 0 {

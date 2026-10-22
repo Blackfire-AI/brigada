@@ -14,12 +14,14 @@ import (
 // tests (§6.3).
 type stubLand struct {
 	approved, rejected int64
+	stopAsking         bool
 	res                engine.LandDecision
 	err                error
 }
 
-func (s *stubLand) LandApprove(_ context.Context, id int64) (engine.LandDecision, error) {
+func (s *stubLand) LandApprove(_ context.Context, id int64, andStopAsking bool) (engine.LandDecision, error) {
 	s.approved = id
+	s.stopAsking = andStopAsking
 	return s.res, s.err
 }
 
@@ -42,22 +44,44 @@ func (s *stubPush) PushApprove(_ context.Context, repoURL string) (engine.PushAp
 func TestLandDecision(t *testing.T) {
 	stub := &stubLand{res: engine.LandDecision{TaskID: 4, Released: true}}
 	var out, errb bytes.Buffer
-	if code := printLandDecision(context.Background(), stub, "approve", 4, &out, &errb); code != 0 {
+	if code := printLandDecision(context.Background(), stub, "approve", 4, false, &out, &errb); code != 0 {
 		t.Fatalf("approve: exit %d, stderr %q", code, errb.String())
 	}
 	if stub.approved != 4 || !strings.Contains(out.String(), "landing for task #4 approved") {
 		t.Errorf("approve: called with %d, stdout %q", stub.approved, out.String())
 	}
+	if stub.stopAsking {
+		t.Error("approve without the flag asked the client to stop asking")
+	}
 	out.Reset()
-	if code := printLandDecision(context.Background(), stub, "reject", 4, &out, &errb); code != 0 {
+	if code := printLandDecision(context.Background(), stub, "reject", 4, false, &out, &errb); code != 0 {
 		t.Fatalf("reject: exit %d, stderr %q", code, errb.String())
 	}
 	if stub.rejected != 4 || !strings.Contains(out.String(), "landing for task #4 cancelled") {
 		t.Errorf("reject: called with %d, stdout %q", stub.rejected, out.String())
 	}
 	stub.err = errors.New("task 4 is not held at the land gate")
-	if code := printLandDecision(context.Background(), stub, "approve", 4, &out, &errb); code != 1 {
+	if code := printLandDecision(context.Background(), stub, "approve", 4, false, &out, &errb); code != 1 {
 		t.Errorf("exit %d on a client error, want 1", code)
+	}
+}
+
+// TestLandApproveStopAsking: the flag reaches the client and the changed
+// rules print, one line each (§6.3).
+func TestLandApproveStopAsking(t *testing.T) {
+	stub := &stubLand{res: engine.LandDecision{TaskID: 6, Released: true,
+		Settings: []string{"approval_tiers=", "gate_land=auto"}}}
+	var out, errb bytes.Buffer
+	if code := printLandDecision(context.Background(), stub, "approve", 6, true, &out, &errb); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, errb.String())
+	}
+	if !stub.stopAsking {
+		t.Error("the flag did not reach the client")
+	}
+	for _, want := range []string{"rule changed: approval_tiers=", "rule changed: gate_land=auto"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("stdout %q lacks %q", out.String(), want)
+		}
 	}
 }
 

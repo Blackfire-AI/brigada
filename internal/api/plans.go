@@ -215,7 +215,7 @@ func (s *Server) handlePlanDecision(approve bool) handler {
 		}
 		var res engine.PlanDecision
 		if approve {
-			res, err = s.eng.ApprovePlanVersion(r.Context(), project, planID, req.Version)
+			res, err = s.eng.ApprovePlanVersion(r.Context(), project, planID, req.Version, req.AndStopAsking)
 		} else {
 			res, err = s.eng.RejectPlanVersion(r.Context(), project, planID, req.Version)
 		}
@@ -233,7 +233,7 @@ func (s *Server) handlePlanDecision(approve bool) handler {
 			s.writeInternal(w, r, "decide the plan", err)
 			return
 		}
-		out := planDecisionResponse{PlanID: res.PlanID, State: res.State}
+		out := planDecisionResponse{PlanID: res.PlanID, State: res.State, Settings: res.Settings}
 		for _, t := range res.Tasks {
 			out.Tasks = append(out.Tasks, planCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
 		}
@@ -245,17 +245,22 @@ func (s *Server) handlePlanDecision(approve bool) handler {
 // the project the plan must belong to and the plan version the user was
 // shown. A version that is not the plan's current one is refused whole
 // (code stale_plan); both omitted checks nothing, as the CLI does.
+// AndStopAsking (approve only) also changes the one setting each hold
+// reason maps to (§6.3), through the `brigada project set` path.
 type planDecisionRequest struct {
-	RepoURL string `json:"repo_url,omitempty"`
-	Version int64  `json:"version,omitempty"`
+	RepoURL       string `json:"repo_url,omitempty"`
+	Version       int64  `json:"version,omitempty"`
+	AndStopAsking bool   `json:"and_stop_asking,omitempty"`
 }
 
 // planDecisionResponse names the plan's new state and, for an approval,
-// the first wave's tasks with their queued jobs.
+// the first wave's tasks with their queued jobs and the key=value pairs
+// a stop-asking approval changed.
 type planDecisionResponse struct {
-	PlanID int64             `json:"plan_id"`
-	State  string            `json:"state"`
-	Tasks  []planCreatedTask `json:"tasks,omitempty"`
+	PlanID   int64             `json:"plan_id"`
+	State    string            `json:"state"`
+	Tasks    []planCreatedTask `json:"tasks,omitempty"`
+	Settings []string          `json:"settings_changed,omitempty"`
 }
 
 // handlePlanAmend is the foreman's plan_amend behind the API (§12.2):

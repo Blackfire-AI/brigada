@@ -31,6 +31,10 @@ awaiting approval, with its id, its version and its tasks.
   something else, or your own judgment that the plan looks fine is not a yes.
 - Only then call `plan_approve` with the plan's id and the version you
   showed. To say no, call `plan_reject` the same way after the user's no.
+- `plan_approve` also takes `and_stop_asking`: it changes the rule that
+  held the plan, the way `brigada project set` would, so the same
+  question is not asked twice. Pass it only when the user said to change
+  the rule, and show them what changed in your report.
 - "Awaiting approval" is a result to present, not a permission. Never
   approve to get unstuck, and never approve a plan you did not show.
 - If a call is refused because the plan changed, it was amended after the

@@ -588,14 +588,17 @@ func sameCanonicalRepo(a, b string) bool {
 // landDecider is the two calls the land-gate decision commands need from
 // the API client; tests stub it.
 type landDecider interface {
-	LandApprove(ctx context.Context, id int64) (engine.LandDecision, error)
+	LandApprove(ctx context.Context, id int64, andStopAsking bool) (engine.LandDecision, error)
 	LandReject(ctx context.Context, id int64) (engine.LandDecision, error)
 }
 
 // runLandDecision is the user's yes or no on a land-gate hold (§6.3):
 // approve releases the hold and queues the landing, reject cancels the
-// landing and leaves the branch. Only the client token can say it: the
-// foreman has no way to pass the gate.
+// landing and leaves the branch. --and-stop-asking (approve only) also
+// changes the one setting each hold reason maps to, the way
+// `brigada project set` does, so the same question is not asked twice.
+// Only the client token can say it: the foreman has no way to pass the
+// gate.
 func runLandDecision(ctx context.Context, verb string, args []string, stdout, stderr io.Writer) int {
 	description := "Release a task's land-gate hold and queue its landing."
 	if verb == "reject" {
@@ -605,6 +608,7 @@ func runLandDecision(ctx context.Context, verb string, args []string, stdout, st
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
+	stopAsking := fs.Bool("and-stop-asking", false, "also change the rule that held the landing, the way `brigada project set` does, so the same question is not asked twice")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
@@ -624,14 +628,14 @@ func runLandDecision(ctx context.Context, verb string, args []string, stdout, st
 	if code != 0 {
 		return code
 	}
-	return printLandDecision(ctx, client, verb, id, stdout, stderr)
+	return printLandDecision(ctx, client, verb, id, *stopAsking, stdout, stderr)
 }
 
-func printLandDecision(ctx context.Context, client landDecider, verb string, id int64, stdout, stderr io.Writer) int {
+func printLandDecision(ctx context.Context, client landDecider, verb string, id int64, stopAsking bool, stdout, stderr io.Writer) int {
 	var res engine.LandDecision
 	var err error
 	if verb == "approve" {
-		res, err = client.LandApprove(ctx, id)
+		res, err = client.LandApprove(ctx, id, stopAsking)
 	} else {
 		res, err = client.LandReject(ctx, id)
 	}
@@ -640,6 +644,9 @@ func printLandDecision(ctx context.Context, client landDecider, verb string, id 
 	}
 	if verb == "approve" {
 		fmt.Fprintf(stdout, "landing for task #%d approved: the land job is queued\n", res.TaskID)
+		for _, s := range res.Settings {
+			fmt.Fprintf(stdout, "rule changed: %s\n", s)
+		}
 		return 0
 	}
 	fmt.Fprintf(stdout, "landing for task #%d cancelled; its branch is left as it is\n", res.TaskID)
