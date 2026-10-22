@@ -96,20 +96,32 @@ func TestOutputFitsWidth(t *testing.T) {
 	}
 }
 
-func TestForemanCell(t *testing.T) {
-	rest := strings.TrimPrefix(BannerText, "█")
+func TestFlameCore(t *testing.T) {
+	// The core is ▀ on line 2, three blanks on line 3 and ▄▄▄ on line 4,
+	// each on the hi-vis background; nothing else is colored.
+	paint := func(bg string) string {
+		lines := strings.Split(BannerText, "\n")
+		lines[2] = "██▄" + bg + "▀" + "\x1b[0m" + "███" + strings.TrimPrefix(lines[2], "██▄▀███")
+		lines[3] = "██" + bg + "   " + "\x1b[0m" + "██" + strings.TrimPrefix(lines[3], "██   ██")
+		lines[4] = "▀█" + bg + "▄▄▄" + "\x1b[0m" + "█▀" + strings.TrimPrefix(lines[4], "▀█▄▄▄█▀")
+		return strings.Join(lines, "\n")
+	}
 	for depth, want := range map[Depth]string{
-		TrueColor: "\x1b[48;2;255;90;31m▄\x1b[0m" + rest,
-		Color256:  "\x1b[48;5;202m▄\x1b[0m" + rest,
-		Color16:   "\x1b[41m▄\x1b[0m" + rest,
+		TrueColor: paint("\x1b[48;2;255;90;31m"),
+		Color256:  paint("\x1b[48;5;202m"),
+		Color16:   paint("\x1b[41m"),
 		NoColor:   BannerText,
 	} {
 		if got := String(Banner, Caps{Color: depth, UTF8: true, Width: 80}); got != want {
 			t.Errorf("banner at depth %d = %q, want %q", depth, got, want)
 		}
 	}
-	if got, want := String(Mark, Caps{Color: Color256, UTF8: true}), "\x1b[48;5;202m▄\x1b[0m"+strings.TrimPrefix(MarkText, "█"); got != want {
-		t.Errorf("mark = %q, want %q", got, want)
+	mark := String(Mark, Caps{Color: Color256, UTF8: true})
+	if got := escape.ReplaceAllString(mark, ""); got != MarkText {
+		t.Errorf("mark without escapes = %q, want %q", got, MarkText)
+	}
+	if got := strings.Count(mark, "\x1b[48;5;202m"); got != 3 {
+		t.Errorf("mark paints %d core spans, want 3: %q", got, mark)
 	}
 	for depth, want := range map[Depth]string{
 		TrueColor: "\x1b[38;2;255;90;31m▙\x1b[0m brigada\n",
@@ -130,7 +142,7 @@ func TestFallbacks(t *testing.T) {
 		caps Caps
 		want string
 	}{
-		{"no color keeps the full block", Banner, Caps{UTF8: true, Width: 80}, BannerText},
+		{"no color leaves the core blank", Banner, Caps{UTF8: true, Width: 80}, BannerText},
 		{"unknown width is wide", Banner, Caps{UTF8: true}, BannerText},
 		{"no UTF-8 prints ASCII", Banner, Caps{Color: TrueColor, Width: 80}, ASCIIText},
 		{"no UTF-8 mark prints ASCII", Mark, Caps{Width: 80}, ASCIIText},

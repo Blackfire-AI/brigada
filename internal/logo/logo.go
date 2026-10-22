@@ -1,8 +1,8 @@
-// Package logo prints the brigada pixel logo in a terminal: the banner,
-// the compact mark and the one-line form from docs/brand/cli, with the
-// foreman cell in hi-vis orange where the terminal can show it, and the
-// fallbacks docs/brand/README.md sets for no color, no UTF-8 and narrow
-// terminals.
+// Package logo prints the brigada logo in a terminal: the banner (the
+// Blackfire flame beside the pixel wordmark), the flame alone and the
+// one-line form from docs/brand/cli, with the flame core in hi-vis orange
+// where the terminal can show it, and the fallbacks docs/brand/README.md
+// sets for no color, no UTF-8 and narrow terminals.
 //
 // Render is pure: it prints what the given Caps allow. Detect reads the
 // environment and the terminal to fill those Caps.
@@ -17,16 +17,20 @@ import (
 // The texts below are copies of docs/brand/cli/*.txt, byte for byte (a
 // test checks it). go:embed cannot reach docs/ from this package.
 const (
-	// BannerText is cli/banner.txt: the wordmark, 27 × 4 characters.
-	BannerText = `█       ▀            █
-█▀█ █▀▀ █ █▀█ █▀█  █▀█ █▀█
-▀▀▀ ▀   ▀ ▀▀█ ▀▀▀▀ ▀▀▀ ▀▀▀▀
-          ▀▀▀
+	// BannerText is cli/banner.txt: the flame and the wordmark, 36 × 5
+	// characters. Without color the flame core is left blank.
+	BannerText = `   ▄█
+▄  ███   █       ▀            █
+██▄▀███  █▀█ █▀▀ █ █▀█ █▀█  █▀█ █▀█
+██   ██  ▀▀▀ ▀   ▀ ▀▀█ ▀▀▀▀ ▀▀▀ ▀▀▀▀
+▀█▄▄▄█▀            ▀▀▀
 `
-	// MarkText is cli/mark.txt: the b alone, 3 × 3 characters.
-	MarkText = `█
-█▀█
-▀▀▀
+	// MarkText is cli/mark.txt: the flame alone, 7 × 5 characters.
+	MarkText = `   ▄█
+▄  ███
+██▄▀███
+██   ██
+▀█▄▄▄█▀
 `
 	// OneLineText is cli/oneline.txt, for status lines and logs.
 	OneLineText = "▙ brigada\n"
@@ -39,13 +43,13 @@ const (
 
 // Widths of the texts in terminal columns.
 const (
-	BannerWidth  = 27
-	MarkWidth    = 3
+	BannerWidth  = 36
+	MarkWidth    = 7
 	OneLineWidth = 9
 	ASCIIWidth   = 25
 	// MinWidth is the narrowest terminal that gets the banner or the mark;
 	// a narrower one gets the one-line form.
-	MinWidth = 28
+	MinWidth = 37
 )
 
 // Form is the shape of the logo to print.
@@ -82,15 +86,15 @@ type Caps struct {
 
 const reset = "\x1b[0m"
 
-// foremanBackground and foremanForeground are the hi-vis escapes per depth,
+// coreBackground and coreForeground are the hi-vis escapes per depth,
 // from docs/brand/tokens.json.
 var (
-	foremanBackground = map[Depth]string{
+	coreBackground = map[Depth]string{
 		TrueColor: "\x1b[48;2;255;90;31m",
 		Color256:  "\x1b[48;5;202m",
 		Color16:   "\x1b[41m",
 	}
-	foremanForeground = map[Depth]string{
+	coreForeground = map[Depth]string{
 		TrueColor: "\x1b[38;2;255;90;31m",
 		Color256:  "\x1b[38;5;202m",
 		Color16:   "\x1b[31m",
@@ -104,11 +108,12 @@ var (
 //     ASCII version, prints nothing;
 //   - narrower than MinWidth, the banner and the mark print as the
 //     one-line form;
-//   - with color, the foreman cell (the first character of the banner and
-//     the mark) prints as ▄ on a hi-vis background, so its lower half takes
-//     the terminal's own foreground, and the ▙ of the one-line form prints
-//     in hi-vis; every other cell keeps the default foreground;
-//   - with NoColor, the texts print as they are, the foreman cell as █.
+//   - with color, the flame core (coreCells in the banner and the mark)
+//     prints on a hi-vis background: the half blocks there keep the
+//     terminal's own foreground for the flame body and show orange in their
+//     other half, and the blanks turn orange; the ▙ of the one-line form
+//     prints in hi-vis; every other cell keeps the default foreground;
+//   - with NoColor, the texts print as they are, the core left blank.
 func Render(w io.Writer, form Form, caps Caps) error {
 	_, err := io.WriteString(w, render(form, caps))
 	return err
@@ -134,11 +139,29 @@ func render(form Form, caps Caps) string {
 	if caps.Color == NoColor {
 		return text
 	}
-	_, size := utf8.DecodeRuneInString(text)
 	if form == OneLine {
-		return foremanForeground[caps.Color] + text[:size] + reset + text[size:]
+		_, size := utf8.DecodeRuneInString(text)
+		return coreForeground[caps.Color] + text[:size] + reset + text[size:]
 	}
-	return foremanBackground[caps.Color] + "▄" + reset + text[size:]
+	return paintCore(text, coreBackground[caps.Color])
+}
+
+// coreCells are the cells of the flame core, the same in the banner and
+// the mark: on each line, the first and the last column (in characters).
+var coreCells = []struct{ line, from, to int }{
+	{2, 3, 3},
+	{3, 2, 4},
+	{4, 2, 4},
+}
+
+// paintCore puts the flame core of text on the background bg.
+func paintCore(text, bg string) string {
+	lines := strings.Split(text, "\n")
+	for _, c := range coreCells {
+		r := []rune(lines[c.line])
+		lines[c.line] = string(r[:c.from]) + bg + string(r[c.from:c.to+1]) + reset + string(r[c.to+1:])
+	}
+	return strings.Join(lines, "\n")
 }
 
 // String returns what Render would write.

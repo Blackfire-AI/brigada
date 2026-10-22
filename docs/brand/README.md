@@ -1,97 +1,91 @@
 # brigada brand
 
-The logo is a pixel wordmark: every letter of `brigada` is built from the
-same square cells. A brigada is a work crew, and each cell stands for one
-agent in it. The top cell of the `b` is the foreman, the one cell drawn in
-hi-vis orange.
-
-The same grid serves the graphic logo and the terminal, so the CLI banner
-and the SVG wordmark are one design.
+brigada uses the Blackfire AI mark: the Blackfire flame, an ink body with a
+hi-vis core. Blackfire AI products don't get symbols of their own. They
+differ by name and descriptor only, so every product lockup is the flame,
+the product name and `BY BLACKFIRE AI`.
 
 ## Files
 
 | Path | What |
 |------|------|
-| `logo/wordmark-on-light.svg` | Primary logo: ink cells, for light grounds |
-| `logo/wordmark-on-dark.svg` | Primary logo: paper cells, for dark grounds |
-| `logo/wordmark-mono.svg` | One color (`currentColor`), no foreman accent |
-| `logo/mark-*.svg` | The `b` alone, in the same three variants |
-| `icon/app-icon.svg`, `icon/app-icon-light.svg` | App icon tiles |
-| `icon/favicon-32.svg`, `icon/favicon-16.svg` | Favicons, drawn for their size |
-| `icon/avatar.svg` | Circular avatar on hi-vis |
-| `cli/banner.txt` | Terminal banner, 27 × 4 cells |
-| `cli/mark.txt` | Compact terminal mark, 3 × 3 cells |
-| `cli/oneline.txt` | One-line form for status lines and logs |
-| `cli/ascii.txt` | ASCII fallback |
-| `tokens.json` | Colors, grid and ANSI codes |
+| `logo/lockup-on-light.svg` | Primary logo: flame + **brigada** / BY BLACKFIRE AI, for light grounds |
+| `logo/lockup-on-dark.svg` | The same for dark grounds (paper flame and name) |
+| `logo/lockup-mono.svg` | One color (`currentColor`), the core cut out of the flame |
+| `logo/mark-*.svg` | The flame alone, in the same three variants |
+| `icon/app-icon.svg`, `icon/app-icon-light.svg` | App icon tiles: ink tile with a paper flame; white tile with an ink flame |
+| `icon/favicon-32.svg`, `icon/favicon-16.svg` | Favicons (the ink tile) |
+| `icon/avatar.svg` | Circular avatar: ink flame, paper core on hi-vis |
+| `cli/banner.txt` | Terminal banner: flame and pixel wordmark, 36 × 5 characters |
+| `cli/mark.txt` | The flame alone, 7 × 5 characters |
+| `cli/oneline.txt`, `cli/ascii.txt` | One-line form; ASCII fallback |
+| `tokens.json` | Colors, type and ANSI codes |
 
-## Grid
+The lockups have their text converted to paths, so they render without the
+font installed.
 
-The wordmark is 27 columns by 7 rows (`X` = cell). Rows 0–1 hold
-ascenders, rows 2–4 the x-height, and row 4 sits on the baseline. Rows
-5–6 hold the descender of the `g`. The cell at row 0, column 0 is the
-foreman.
+## Lockup
 
-```text
-X.......X............X.....
-X....................X.....
-XXX.XXX.X.XXX.XXX..XXX.XXX.
-X.X.X...X.X.X.X.X..X.X.X.X.
-XXX.X...X.XXX.XXXX.XXX.XXXX
-............X..............
-..........XXX..............
-```
+- **Name:** Space Grotesk 700, lower case, tracking −0.035 em.
+- **Descriptor:** `BY BLACKFIRE AI` in Space Grotesk 500, caps, tracking
+  +0.42 em, at one fifth of the name size, in Steel.
+- **Flame:** as tall as the name plus descriptor, to the left of the name,
+  with a gap of about a quarter of its height.
 
-The mark is columns 0–2 of rows 0–4. In the SVGs a cell is 6 units, the
-gap 1 unit, and the corner radius 1 unit. On the favicons the radius
-drops to 0, and at 16 px the gap does too, so the mark stays sharp.
+The Blackfire AI lockup is built the same way, with `blackfire` and
+`AI INFRASTRUCTURE`.
 
 ## Colors
 
 | Token | Hex | Use |
 |-------|-----|-----|
-| Ink | `#111111` | Cells on light grounds; dark grounds |
-| Paper | `#F5F5F2` | Cells on dark grounds; light grounds |
-| Hi-vis | `#FF5A1F` | The foreman cell, and only that |
-| Steel | `#5E626A` | Secondary text on paper |
+| Ink | `#111111` | Flame and name on light grounds; dark grounds |
+| Paper | `#F5F5F2` | Flame and name on dark grounds; light grounds |
+| Hi-vis | `#FF5A1F` | The flame core, and only that |
+| Steel | `#555555` | The descriptor on light grounds (`#A3A7AE` on dark) |
 
-On a hi-vis ground the cells are ink and the foreman cell is paper.
+On a hi-vis ground the flame is ink and the core is paper.
 
 ## Usage
 
-- Clear space on every side: two cells.
-- Minimum size: the wordmark 96 px wide, the mark 16 px tall
-  (use `favicon-16.svg` there).
-- Never set the wordmark in a typeface, and never pair the pixel `b` with
-  typeset letters. The logo works because every letter is made of cells.
-- Don't recolor cells other than the foreman, add effects, or change the
-  spacing of the grid.
+- Clear space on every side: the height of the flame core.
+- Minimum size: the lockup 120 px wide, the flame 16 px tall (use the
+  favicon tile below 24 px).
+- Don't set the lockup in another typeface, recolor the flame or its core,
+  add effects, or draw a separate brigada symbol.
 
 ## Terminal
 
+The banner is the flame beside the pixel wordmark, drawn with half blocks
+so each character holds two square cells, one above the other. The flame
+is 7 × 5 characters, the wordmark 27 × 4; the banner is 36 × 5.
+
 ```text
-█       ▀            █
-█▀█ █▀▀ █ █▀█ █▀█  █▀█ █▀█
-▀▀▀ ▀   ▀ ▀▀█ ▀▀▀▀ ▀▀▀ ▀▀▀▀
-          ▀▀▀
+   ▄█
+▄  ███   █       ▀            █
+██▄▀███  █▀█ █▀▀ █ █▀█ █▀█  █▀█ █▀█
+██   ██  ▀▀▀ ▀   ▀ ▀▀█ ▀▀▀▀ ▀▀▀ ▀▀▀▀
+▀█▄▄▄█▀            ▀▀▀
 ```
 
-Each character holds two cells, one above the other (half blocks), so
-the cells stay square in a terminal.
-
-- **Foreman cell:** print the first character of the banner and the mark
-  as `▄` on an orange background. Its lower half takes the terminal's own
-  foreground, so it reads on light and dark themes.
-  `ESC[48;2;255;90;31m▄ESC[0m` (truecolor), `ESC[48;5;202m` (256 colors),
-  `ESC[41m` (16 colors).
+- **Flame core:** the cells left blank in `cli/banner.txt` and
+  `cli/mark.txt` (`▀` on line 3, three blanks on line 4, `▄▄▄` on line 5)
+  print on an orange background. The half blocks keep the terminal's own
+  foreground for the flame body, so the flame reads on light and dark
+  themes. `ESC[48;2;255;90;31m` (truecolor), `ESC[48;5;202m` (256 colors),
+  `ESC[41m` (16 colors), each span closed with `ESC[0m`.
 - **One-line form:** `▙ brigada`, with `▙` in `ESC[38;2;255;90;31m`,
   `ESC[38;5;202m` or `ESC[31m`.
 - **Every other cell:** the terminal's default foreground, with no color
   code.
-- **`NO_COLOR` set or output not a terminal:** no escape codes; the
-  foreman cell prints as `█`.
-- **Locale not UTF-8, or `TERM=dumb`:** print `cli/ascii.txt`.
-- **Narrower than 28 columns:** use the one-line form only.
+- **`NO_COLOR` set or output not a terminal:** no escape codes; the core
+  stays blank, as in the one-color logo.
+- **Locale not UTF-8, or `TERM=dumb`:** print `cli/ascii.txt` (the
+  wordmark only).
+- **Narrower than 37 columns:** use the one-line form only.
+
+`internal/logo` holds byte-for-byte copies of these files; a test checks
+that they match.
 
 ## License and trademark
 
@@ -101,8 +95,8 @@ The files in this directory are covered by the repository's
 The license covers the files, not the name. As section 6 of the license
 says, it grants no right to use the brigada name or logo as a trademark,
 except as required for reasonable and customary use in describing the
-origin of the work. "brigada" and the pixel wordmark are trademarks of
-Blackfire AI.
+origin of the work. "Blackfire AI", "brigada" and the flame mark are
+trademarks of Blackfire AI.
 
 The rules below are trademark guidance. They don't change what the
 Apache license lets you do with the files themselves.
