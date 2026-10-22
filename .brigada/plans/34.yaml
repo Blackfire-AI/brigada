@@ -38,7 +38,7 @@ tasks:
     deps: ["engine"]
     base: "engine"
     effort: medium
-    state: done
+    state: needs_foreman
     branch: "brigada/task-119"
     rounds: 2
   - id: 120
