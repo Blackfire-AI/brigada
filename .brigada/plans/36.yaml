@@ -113,9 +113,9 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: reviewing
+    state: running
     branch: "brigada/task-141"
-    rounds: 0
+    rounds: 1
   - id: 142
     name: "legal-notices-final"
     title: "NOTICE holder line and third-party notices from the generated licence texts"
