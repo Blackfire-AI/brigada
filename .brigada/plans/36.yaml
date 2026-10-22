@@ -146,7 +146,7 @@ tasks:
     base: "supply-chain"
     continue: "supply-chain"
     effort: low
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 145
