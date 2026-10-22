@@ -58,8 +58,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-136"
     rounds: 0
   - id: 137
     name: "supply-chain"
