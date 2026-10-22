@@ -60,6 +60,6 @@ tasks:
     base: "engine"
     tier: heavy
     effort: medium
-    state: done
+    state: needs_foreman
     branch: "brigada/task-121"
     rounds: 1
