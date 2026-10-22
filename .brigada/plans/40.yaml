@@ -5,9 +5,9 @@
 plan: 40
 title: "Deflake TestRunnerLandPushPhaseOnAnotherRunner under -race"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-22T21:08:49.656267Z
-updated: 2026-10-22T21:11:21.334646Z
+updated: 2026-10-22T21:23:59.532177Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
