@@ -29,8 +29,8 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: running
-    branch: "brigada/task-147"
+    state: reviewing
+    branch: "brigada/task-147-r1"
     rounds: 0
   - id: 148
     name: "notices-platform"
