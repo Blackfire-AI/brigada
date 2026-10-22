@@ -330,9 +330,8 @@ func inboxRowsTx(tx *sql.Tx, project int64, state string, job int64) (ForemanInb
 			continue
 		}
 		text := "the plan is done"
-		if kind != evPlanDone {
-			text = wakeEventText(kind, payload)
-		} else {
+		switch kind {
+		case evPlanDone:
 			// The finished plan by its own id and title — a completion
 			// an amendment or an approval caused names no task — and
 			// the done report's account of what never ran or failed.
@@ -342,6 +341,30 @@ func inboxRowsTx(tx *sql.Tx, project int64, state string, job int64) (ForemanInb
 			if why := wakeEventText(kind, payload); why != kind {
 				text += "; " + why
 			}
+		case evPlanReviewed:
+			// The plan review's verdict (§6.2): a changes verdict
+			// is the foreman's to answer with an amendment, and a plan
+			// the rules now hold waits for the user's yes, which the
+			// foreman relays.
+			var p eventPayload
+			parsed := json.Unmarshal([]byte(payload), &p) == nil
+			text = "the plan's review round came back"
+			if parsed && p.Status != "" {
+				text += " " + p.Status
+			}
+			if plan != 0 && task == 0 {
+				text += fmt.Sprintf(" (plan %d %q)", plan, strings.Join(strings.Fields(planTitle), " "))
+			}
+			if parsed {
+				if p.Findings != "" {
+					text += "; findings: " + p.Findings
+				}
+				if p.Reason != "" {
+					text += "; " + p.Reason
+				}
+			}
+		default:
+			text = wakeEventText(kind, payload)
 		}
 		inbox.Events = append(inbox.Events, fmt.Sprintf("%s task %d %s: %s",
 			kind, task, strings.Join(strings.Fields(title), " "), text))

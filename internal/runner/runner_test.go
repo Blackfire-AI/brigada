@@ -70,6 +70,12 @@ func newTestEnv(t *testing.T, engCfg engine.Config) *testEnv {
 	if err := os.WriteFile(tokenFile, []byte(e2eTokens), 0o600); err != nil {
 		t.Fatalf("write token file: %v", err)
 	}
+	// The plan review (§6.2) stays off in this suite's creations;
+	// the plan review has its own tests.
+	off := false
+	if engCfg.PlanReview == nil {
+		engCfg.PlanReview = &off
+	}
 	eng := engine.New(st, engCfg)
 	srv, err := api.New(ctx, st, eng, nil, tokenFile)
 	if err != nil {

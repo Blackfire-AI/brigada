@@ -184,7 +184,7 @@ func TestPlanAmendRespecRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	eng := engine.New(st, engine.Config{})
+	eng := engine.New(st, engine.Config{PlanReview: &planReviewOff})
 	if _, err := eng.SetProjectForeman(ctx, "https://example.invalid/respec.git", "claude", "sonnet"); err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestPlanAmendRetierRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	eng := engine.New(st, engine.Config{})
+	eng := engine.New(st, engine.Config{PlanReview: &planReviewOff})
 	repo := "https://example.invalid/retier.git"
 	if _, err := eng.SetProjectForeman(ctx, repo, "claude", "sonnet"); err != nil {
 		t.Fatal(err)

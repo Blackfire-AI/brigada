@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
 )
@@ -130,5 +131,27 @@ func TestStatusSectionsCountsHiddenFinishedPlans(t *testing.T) {
 	}
 	if got := StatusSections(Status{Plans: []engine.StatusPlan{{ID: 3, State: "done"}}}); strings.Contains(got, "hidden") {
 		t.Errorf("status sections = %q, want no hidden line when nothing hides", got)
+	}
+}
+
+// TestOneLineCutsOnARune: a cut that falls inside a multi-byte character,
+// on its lead byte or after it, backs off to the character's start, so
+// the line stays valid UTF-8.
+func TestOneLineCutsOnARune(t *testing.T) {
+	for _, tc := range []struct {
+		s    string
+		max  int
+		want string
+	}{
+		{"abécd", 3, "ab"},  // é is 2 bytes: the cut falls after its lead byte
+		{"ab€cd", 3, "ab"},  // € is 3 bytes: the cut falls after its lead byte
+		{"ab€cd", 4, "ab"},  // inside €, after a continuation byte
+		{"ab€cd", 5, "ab€"}, // right after €
+		{"a  b\n c", 10, "a b c"},
+	} {
+		got := oneLine(tc.s, tc.max)
+		if got != tc.want || !utf8.ValidString(got) {
+			t.Errorf("oneLine(%q, %d) = %q, want %q", tc.s, tc.max, got, tc.want)
+		}
 	}
 }

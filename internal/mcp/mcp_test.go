@@ -44,6 +44,10 @@ type env struct {
 	st     *store.Store
 }
 
+// planReviewOff keeps the fixture's plan creations on the no-review path
+// (§6.2); the plan review has its own tests.
+var planReviewOff = false
+
 func newEnv(t *testing.T) *env {
 	return newEnvToken(t, tokenFileBody, "client-secret-9")
 }
@@ -63,7 +67,7 @@ func newEnvToken(t *testing.T, tokens, secret string) *env {
 	if err := os.WriteFile(tokenPath, []byte(tokens), 0o600); err != nil {
 		t.Fatalf("write token file: %v", err)
 	}
-	srv, err := api.New(ctx, st, engine.New(st, engine.Config{}), nil, tokenPath)
+	srv, err := api.New(ctx, st, engine.New(st, engine.Config{PlanReview: &planReviewOff}), nil, tokenPath)
 	if err != nil {
 		t.Fatalf("build api server: %v", err)
 	}

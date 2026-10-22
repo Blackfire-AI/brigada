@@ -56,6 +56,10 @@ type CreatedTask struct {
 	TaskID int64
 	Name   string
 	JobID  int64
+	// answer and run are the queued job's own submit answer and run
+	// number, kept for the caller that reports the first of them.
+	answer Answer
+	run    int
 }
 
 // CreatePlanResult is what CreatePlan did: the plan, its tasks, and the
@@ -264,12 +268,17 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 	}
 	nowStr := fmtTime(now)
 
-	// The approval limit (§6.3), after validation and before any work
-	// is queued.
+	// The plan review (§6.2) comes first: a plan the project has it
+	// on — everything but one task of the review class — is created in
+	// reviewing, its tasks pending, no work queued and one plan_review
+	// job, and the approval rules (§6.3) wait for the verdict. The
+	// approval limit otherwise, after validation and before any work is
+	// queued.
 	settings, err := projectApprovalTx(tx, project)
 	if err != nil {
 		return CreatePlanResult{}, err
 	}
+	reviewWanted := planReviewWanted(e.planReview(settings), tasks)
 	tasks = settings.withDefaultCheck(tasks)
 	// The extra repositories (§5.8) resolve once, here: each task's own
 	// list canonicalized, the effective list (its own or the project
@@ -284,7 +293,10 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 	}
 	verdict := settings.evaluate(tasks)
 	planState := "active"
-	if verdict.Needed {
+	switch {
+	case reviewWanted:
+		planState = planReviewing
+	case verdict.Needed:
 		planState = planAwaitingApproval
 	}
 
@@ -303,7 +315,7 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 	}
 
 	res := CreatePlanResult{PlanID: planID, State: planState, Tasks: make([]CreatedTask, len(tasks))}
-	if verdict.Needed {
+	if !reviewWanted && verdict.Needed {
 		res.Reasons = verdict.reasons(settings.Classes)
 		if _, err := appendEventTx(tx, evPlanAwaitingApproval, project, 0, 0, eventPayload{
 			Plan:    planID,
@@ -316,10 +328,12 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		}
 	}
 
-	// The tasks (§6.1): ready at once when they wait for nothing, on the
-	// project's repo and base ref; pending while a dependency is open —
-	// and, in a plan awaiting approval, all pending: the approval readies
-	// the first wave.
+	// The tasks (§6.1): pending on the project's repo and base ref; the
+	// first wave — the tasks waiting for nothing — turns ready with its
+	// work jobs queued below, unless the plan awaits approval or reviews,
+	// when every task stays pending for the user's yes or the verdict.
+	// readyPlanTasksTx is the same code the approval and the plan
+	// review's verdict ready a held plan's wave with.
 	setupRec, err := taskProjectSetupTx(tx, project)
 	if err != nil {
 		return CreatePlanResult{}, err
@@ -333,10 +347,7 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		if taskTitle == "" {
 			taskTitle = taskTitleOf(t.Spec)
 		}
-		state := taskReady
-		if len(deps[i]) > 0 || verdict.Needed {
-			state = taskPending
-		}
+		state := taskPending
 		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, review_tier, review_effort, created_at, updated_at)
 			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?)`,
 			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, taskCapsJSON(t.Caps), setupRec, extraRecs[i], taskTier(t.Tier), taskTier(t.Tier), t.Effort, t.Effort, t.ReviewTier, t.ReviewEffort, nowStr, nowStr)
@@ -361,25 +372,68 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		}
 	}
 
+	if reviewWanted {
+		// One plan_review job, no work (§6.2): the verdict runs the
+		// approval rules and readies the first wave, or carries the
+		// findings back to the foreman.
+		if err := e.planReviewBeginTx(tx, project, planID, nil, now); err != nil {
+			return CreatePlanResult{}, err
+		}
+		return reviewedCreationTx(tx, res, verdict.reasons(settings.Classes))
+	}
 	if verdict.Needed {
 		return res, nil
 	}
 
-	// The first work job of every ready task (§1.4). The first of them
-	// answers for the plan.
-	first := true
-	for i, t := range tasks {
-		if len(deps[i]) > 0 {
-			continue
+	// The first work job of every ready task (§1.4), the same code the
+	// approval and the plan review's verdict ready a held plan's wave
+	// with. The first of them answers for the plan.
+	first, _, err := e.readyPlanTasksTx(tx, project, planID, now)
+	if err != nil {
+		return CreatePlanResult{}, err
+	}
+	byID := make(map[int64]int, len(first))
+	for i := range first {
+		byID[first[i].TaskID] = i
+	}
+	for i := range res.Tasks {
+		if j, ok := byID[res.Tasks[i].TaskID]; ok {
+			res.Tasks[i].JobID = first[j].JobID
 		}
-		sr, err := e.queueTaskWorkTx(tx, project, res.Tasks[i].TaskID, t.Spec, now)
-		if err != nil {
-			return CreatePlanResult{}, err
-		}
-		res.Tasks[i].JobID = sr.JobID
-		if first {
-			first = false
-			res.Answer, res.TaskID, res.JobID, res.Run = sr.Answer, res.Tasks[i].TaskID, sr.JobID, sr.Run
+	}
+	if len(first) > 0 {
+		res.Answer, res.TaskID, res.JobID, res.Run = first[0].answer, first[0].TaskID, first[0].JobID, first[0].run
+	}
+	return res, nil
+}
+
+// reviewedCreationTx is a reviewed creation's result as the plan stands
+// after its review began (§6.2): still reviewing, or — a reviewer that
+// cannot be had concludes the review at once — active with its first
+// wave queued, or awaiting the user's yes with the rules' reasons.
+func reviewedCreationTx(tx *sql.Tx, res CreatePlanResult, reasons []string) (CreatePlanResult, error) {
+	if err := tx.QueryRow("SELECT state FROM plans WHERE id = ?", res.PlanID).Scan(&res.State); err != nil {
+		return CreatePlanResult{}, fmt.Errorf("read plan %d: %w", res.PlanID, err)
+	}
+	switch res.State {
+	case planAwaitingApproval:
+		res.Reasons = reasons
+	case "active":
+		for i := range res.Tasks {
+			var job int64
+			err := tx.QueryRow("SELECT id FROM jobs WHERE task_id = ? AND kind = ? ORDER BY id LIMIT 1",
+				res.Tasks[i].TaskID, KindWork).Scan(&job)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return CreatePlanResult{}, fmt.Errorf("read the work job of task %d: %w", res.Tasks[i].TaskID, err)
+			}
+			res.Tasks[i].JobID = job
+			if res.JobID == 0 {
+				// A new task's first job: created, the key's first run.
+				res.Answer, res.TaskID, res.JobID, res.Run = AnsCreated, res.Tasks[i].TaskID, job, 1
+			}
 		}
 	}
 	return res, nil

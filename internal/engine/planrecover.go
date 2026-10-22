@@ -44,7 +44,7 @@ type PlanRecovery struct {
 }
 
 var (
-	planStates = map[string]bool{"draft": true, "pending_approval": true, "active": true, "done": true, "cancelled": true}
+	planStates = map[string]bool{"draft": true, "pending_approval": true, "reviewing": true, "active": true, "done": true, "cancelled": true}
 	taskStates = map[string]bool{"pending": true, "ready": true, "running": true, "checking": true, "reviewing": true,
 		"done": true, "needs_foreman": true, "needs_user": true, "failed": true, "cancelled": true}
 )

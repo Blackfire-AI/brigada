@@ -109,6 +109,19 @@ func callPlanCreate(ctx context.Context, c *api.Client, args json.RawMessage) (s
 		}
 		return text, nil
 	}
+	if res.State == "reviewing" {
+		// The plan review (§6.2): one plan_review job, no work
+		// queued. The verdict starts the plan, holds it for the user,
+		// or comes back as changes the foreman answers with plan_amend.
+		text := fmt.Sprintf("plan %d %q: reviewing (round 1), %d tasks, no work job queued; a plan_review job reviews the plan before any work starts. The plan_reviewed event carries the verdict: on changes, amend the plan to answer the findings.",
+			res.PlanID, a.Title, len(res.Tasks))
+		for i, t := range res.Tasks {
+			if suffix := taskTierEffort(a.Tasks[i].Tier, a.Tasks[i].Effort); suffix != "" {
+				text += fmt.Sprintf("\ntask #%d %s%s", t.TaskID, t.Name, suffix)
+			}
+		}
+		return text, nil
+	}
 	if len(res.Tasks) == 1 && taskTierEffort(a.Tasks[0].Tier, a.Tasks[0].Effort) != "" {
 		t := res.Tasks[0]
 		label := fmt.Sprintf("task %d", t.TaskID)
@@ -292,6 +305,11 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 	case res.State == "pending_approval":
 		fmt.Fprintf(&b, "\nawaiting approval, no new work queued. Why: %s. Tell the user: `brigada plan approve %d` starts it, `brigada plan reject %d` cancels it.",
 			strings.Join(res.Reasons, "; "), res.PlanID, res.PlanID)
+	case res.State == "reviewing":
+		// The amendment's plan review (§6.2): the added and edited
+		// tasks wait pending for the verdict; on changes the next
+		// plan_reviewed event carries the findings to answer.
+		b.WriteString("\nthe amendment is under plan review: the added and edited tasks stay pending until the verdict, no work queued for them")
 	case res.State == "done":
 		b.WriteString("\nthe amendment closed the plan; its done report follows in your events")
 	}

@@ -376,13 +376,15 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 			return "", err
 		}
 	}
-	if c.SessionID != "" && job.Kind != KindReview {
+	if c.SessionID != "" && job.Kind != KindReview && job.Kind != KindPlanReview {
 		// A review's session is never the key's resume target (§7): the
 		// key holds several sessions in turn — the author's, a
 		// cross-family reviewer's — and the fix round a changes verdict
 		// queues must resume the author's, whose runner the session's
 		// affinity also pins (§8). Writing the reviewer's id here would
-		// send that fix round to the reviewer's session instead.
+		// send that fix round to the reviewer's session instead. A plan
+		// review's session is nobody's resume target either (§6.2):
+		// its key holds the plan's review rounds alone.
 		// A foreman turn that ran on another harness than the project's
 		// current one (the project switched while it ran) must not leave
 		// its session behind: the new foreman would resume the old CLI's.
@@ -424,6 +426,11 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 		// A landing (§7.1): the completion's payload is the landing
 		// record, and the task lands or parks on its outcome.
 		return AnsOK, e.landCompletedTx(tx, job, c, now)
+	}
+	if job.Kind == KindPlanReview {
+		// A plan review (§6.2): the verdict block moves the plan,
+		// its amendment rounds or its approval-rule evaluation.
+		return AnsOK, e.planReviewCompletedTx(tx, job, c, now)
 	}
 	if job.TaskID == 0 && job.Kind == KindReview {
 		// A standalone review has no task to move (§7): its verdict goes

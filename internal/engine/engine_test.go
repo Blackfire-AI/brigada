@@ -112,8 +112,11 @@ func newEnvAt(t *testing.T, path string, adjust func(*Config)) *env {
 	// test's pick fixed; the sampling tests inject their own.
 	// The fixture's project has a claude foreman, so the headroom rule
 	// (§8.2) would lower the cap of any claude account the cap suites
-	// use; it is off here, and the headroom tests turn it on.
-	cfg := Config{Now: e.clock.Now, Rand: func() float64 { return 0.5 }, Caps: caps.Limits{NoHeadroom: true}}
+	// use; it is off here, and the headroom tests turn it on. The plan
+	// review (§6.2) is off too: the tests of the no-review paths
+	// keep their creation behaviour, and planreview_test.go turns it on.
+	off := false
+	cfg := Config{Now: e.clock.Now, Rand: func() float64 { return 0.5 }, Caps: caps.Limits{NoHeadroom: true}, PlanReview: &off}
 	if adjust != nil {
 		adjust(&cfg)
 	}

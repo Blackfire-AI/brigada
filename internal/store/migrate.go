@@ -153,6 +153,7 @@ var schemaEdits = map[int]func(ctx context.Context, tx *sql.Tx) error{
 	23: relaxJobsTaskCheck,
 	36: widenArtifactKinds,
 	50: widenJobKinds,
+	58: widenPlanReviewChecks,
 }
 
 // jobsPairingCheck is the CHECK 0001 put on jobs: foreman jobs have no
@@ -198,6 +199,44 @@ const (
 // belongs to a task, so the pairing holds for it without change.
 func widenJobKinds(ctx context.Context, tx *sql.Tx) error {
 	return editTableCheck(ctx, tx, "jobs", jobsKindCheck, jobsKindCheckLand)
+}
+
+// The checks 0058 widens for the plan review: the jobs kind CHECK and its
+// pairing CHECK admit a plan_review job (no task, like a standalone
+// review), and the plans state CHECK admits the reviewing state a plan
+// under review sits in.
+const (
+	jobsKindCheckPlanReview    = "CHECK (kind IN ('work', 'fix', 'review', 'foreman', 'land', 'plan_review'))"
+	jobsPairingCheckPlanReview = "CHECK ((kind = 'foreman') = (task_id IS NULL) OR kind IN ('review', 'plan_review'))"
+	plansStateCheck            = "CHECK (state IN ('draft', 'pending_approval', 'active', 'done', 'cancelled'))"
+	plansStateCheckReviewing   = "CHECK (state IN ('draft', 'pending_approval', 'reviewing', 'active', 'done', 'cancelled'))"
+)
+
+// widenPlanReviewChecks lets the jobs table hold a plan_review job and
+// the plans table hold a reviewing plan, by the same in-place edits.
+// Each jobs edit replaces whichever wording the store holds: a store
+// this binary migrated carries the earlier edits' (0023's, 0050's),
+// while one whose earlier migrations were applied by their SQL alone —
+// a test fixture, a jumped version — still holds 0001's original CHECK.
+func widenPlanReviewChecks(ctx context.Context, tx *sql.Tx) error {
+	if err := editTableCheckEither(ctx, tx, "jobs", []string{jobsKindCheckLand, jobsKindCheck}, jobsKindCheckPlanReview); err != nil {
+		return err
+	}
+	if err := editTableCheckEither(ctx, tx, "jobs", []string{jobsPairingCheckRelaxed, jobsPairingCheck}, jobsPairingCheckPlanReview); err != nil {
+		return err
+	}
+	return editTableCheck(ctx, tx, "plans", plansStateCheck, plansStateCheckReviewing)
+}
+
+// editTableCheckEither is editTableCheck over the wordings an earlier
+// edit may or may not have left: the first found is replaced.
+func editTableCheckEither(ctx context.Context, tx *sql.Tx, table string, froms []string, to string) error {
+	for _, from := range froms {
+		if err := editTableCheck(ctx, tx, table, from, to); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("edit the %s table: none of the earlier CHECK wordings was found", table)
 }
 
 // editTableCheck replaces one constraint's text in a table's stored sql.

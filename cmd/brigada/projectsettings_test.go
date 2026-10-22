@@ -53,13 +53,15 @@ func startSettingsEngine(t *testing.T) (context.Context, string) {
 const tailDefaults = "setup=none (default)\n" + "setup_cache_key_files=none (default)\n" + "setup_timeout_minutes=15 (default)\n" +
 	"extra_repos=none (default)\n" + "foreman_rotate_tokens=400000 (default)\n" + "foreman_wakes_per_day=20 (default)\n" + "instructions=none (default)\n"
 
-// gateDefaults are the gates and land rules (§6.3) at their defaults,
-// printed between the approval keys and default_check.
+// gateDefaults are the gates and land rules (§6.3) and the plan review
+// (§6.2) at their defaults, printed between the approval keys and
+// default_check.
 const gateDefaults = "gate_plan=auto (default)\n" + "gate_land=auto (default)\n" + "gate_push=auto (default)\n" +
+	"plan_review=true (default)\n" + "plan_review.tier=standard (default)\n" + "plan_review.effort=medium (default)\n" +
 	"approval_tiers=none (default)\n" + "approval_restarted=false (default)\n" +
 	"land_target=main (default)\n" + "after_land=none (default)\n"
 
-const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes, approval_protected_paths, gate_plan, gate_land, gate_push, approval_tiers, approval_restarted, land_target, after_land, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, instructions"
+const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes, approval_protected_paths, gate_plan, gate_land, gate_push, plan_review, plan_review.tier, plan_review.effort, approval_tiers, approval_restarted, land_target, after_land, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, instructions"
 
 // TestProjectSettingsGolden covers project set and show: the defaults,
 // one override, the reset, and the usage errors for a bad key and value.

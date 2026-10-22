@@ -105,11 +105,17 @@ type StatusReport struct {
 // plan it is; the tasks are the plan's, each with the state and branch
 // the graph is in.
 type StatusPlan struct {
-	ID      int64        `json:"id"`
-	RepoURL string       `json:"repo_url"`
-	Title   string       `json:"title"`
-	State   string       `json:"state"`
-	Tasks   []StatusTask `json:"tasks"`
+	ID      int64  `json:"id"`
+	RepoURL string `json:"repo_url"`
+	Title   string `json:"title"`
+	State   string `json:"state"`
+	// ReviewRound, ReviewVerdict and ReviewFindings are the plan review's
+	// state (§6.2): the round under way while the plan reviews, and
+	// the latest verdict and findings once a round has ended.
+	ReviewRound    int          `json:"review_round,omitempty"`
+	ReviewVerdict  string       `json:"review_verdict,omitempty"`
+	ReviewFindings string       `json:"review_findings,omitempty"`
+	Tasks          []StatusTask `json:"tasks"`
 }
 
 // StatusTask is one task of a status plan (§6.1).
@@ -383,8 +389,9 @@ func statusRunningTx(tx *sql.Tx, project int64) ([]StatusJob, error) {
 }
 
 // statusPlansTx lists the plans the status shows (§6.1, §6.2, §10):
-// every live plan — active, or waiting for the user's approval — and
-// the newest statusFinishedKeep finished ones, done or cancelled, by
+// every live plan — active, reviewing (§6.2), or waiting for the
+// user's approval — and the newest statusFinishedKeep finished ones,
+// done or cancelled, by
 // their updated_at: a finished plan's updated_at is the moment it
 // finished, nothing else writes one after. all lists every finished
 // plan instead; the second return is how many finished plans the list
@@ -401,7 +408,7 @@ func statusPlansTx(tx *sql.Tx, project int64, all bool) ([]StatusPlan, int, erro
 		WHERE `+scope+` AND p.state IN ('done', 'cancelled')`, args...).Scan(&finished); err != nil {
 		return nil, 0, fmt.Errorf("count the finished plans: %w", err)
 	}
-	finishedQuery := `SELECT p.id, pr.repo_url, p.title, p.state
+	finishedQuery := `SELECT p.id, pr.repo_url, p.title, p.state, p.review_round, p.review_verdict, p.review_findings
 		FROM plans p JOIN projects pr ON pr.id = p.project_id
 		WHERE ` + scope + ` AND p.state IN ('done', 'cancelled')
 		ORDER BY p.updated_at DESC, p.id DESC`
@@ -412,9 +419,9 @@ func statusPlansTx(tx *sql.Tx, project int64, all bool) ([]StatusPlan, int, erro
 	if err != nil {
 		return nil, 0, err
 	}
-	live, err := statusPlanRows(tx, `SELECT p.id, pr.repo_url, p.title, p.state
+	live, err := statusPlanRows(tx, `SELECT p.id, pr.repo_url, p.title, p.state, p.review_round, p.review_verdict, p.review_findings
 		FROM plans p JOIN projects pr ON pr.id = p.project_id
-		WHERE `+scope+` AND p.state IN ('active', 'pending_approval') ORDER BY p.id`, args...)
+		WHERE `+scope+` AND p.state IN ('active', 'reviewing', 'pending_approval') ORDER BY p.id`, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -439,7 +446,7 @@ func statusPlanRows(tx *sql.Tx, query string, args ...any) ([]StatusPlan, error)
 	plans := []StatusPlan{}
 	for rows.Next() {
 		var p StatusPlan
-		if err := rows.Scan(&p.ID, &p.RepoURL, &p.Title, &p.State); err != nil {
+		if err := rows.Scan(&p.ID, &p.RepoURL, &p.Title, &p.State, &p.ReviewRound, &p.ReviewVerdict, &p.ReviewFindings); err != nil {
 			return nil, fmt.Errorf("list the status plans: %w", err)
 		}
 		plans = append(plans, p)
