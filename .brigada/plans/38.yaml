@@ -30,6 +30,7 @@ tasks:
     effort: high
     review_tier: heavy
     caps: {fix_rounds: 4, review_rounds: 4}
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
+    question: "Please recreate or rebase this worktree's branch onto brigada/landed (which contains task 147's store.RetryBusy, store.IsBusy and Engine.Lease WithoutCancel changes) so I can build on it, or push brigada/landed somewhere my worktree can reach."
