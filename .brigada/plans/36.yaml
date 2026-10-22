@@ -102,9 +102,9 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-140"
-    rounds: 1
+    rounds: 0
   - id: 141
     name: "compat-doc"
     title: "COMPATIBILITY.md: schema-1 keys, MCP tool sets, commands, flags, experimental marks"
