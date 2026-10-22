@@ -36,6 +36,32 @@ func staleWaitFixture(t *testing.T) (r *jobRun, dir, remote, waiting string) {
 	return r, dir, remote, waiting
 }
 
+// TestLandBaseTaskID covers the branch names the landing reads a
+// dependency's task id from: the engine's first-attempt, restart and
+// re-lease names, and the names that are none of them.
+func TestLandBaseTaskID(t *testing.T) {
+	for _, tc := range []struct {
+		ref string
+		id  int64
+		ok  bool
+	}{
+		{"brigada/task-12", 12, true},
+		{"brigada/task-12-r1", 12, true},
+		{"brigada/task-12-r3", 12, true},
+		{"brigada/task-12-a2", 12, true},
+		{"main", 0, false},
+		{"brigada/landed", 0, false},
+		{"brigada/task-x", 0, false},
+		{"task-12", 0, false},
+		{"", 0, false},
+	} {
+		id, ok := landBaseTaskID(tc.ref)
+		if id != tc.id || ok != tc.ok {
+			t.Errorf("landBaseTaskID(%q) = %d, %t; want %d, %t", tc.ref, id, ok, tc.id, tc.ok)
+		}
+	}
+}
+
 // TestLandDropStaleWaitingKeepsLiveRef: a waiting ref the target can still
 // fast-forward to is left on the remote.
 func TestLandDropStaleWaitingKeepsLiveRef(t *testing.T) {

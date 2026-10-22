@@ -55,6 +55,23 @@ func Diff(ctx context.Context, dir, base, branch string, stderr io.Writer) ([]by
 	return out.Bytes(), nil
 }
 
+// TreeDiff is the tree diff of branch against base (§7.1):
+// `git diff --binary base branch`, no merge-base — the patch that,
+// applied onto base's own tree, reproduces the branch's tree exactly.
+// The landing's choice for a branch whose recorded base is a dependency
+// that has already landed: its work is on the base the squash lands on,
+// and the branch — still descending from the dependency's old lineage —
+// diffs against that base directly, so the patch holds the task's own
+// changes alone instead of every change the base made since the stale
+// merge-base.
+func TreeDiff(ctx context.Context, dir, base, branch string, stderr io.Writer) ([]byte, error) {
+	var out bytes.Buffer
+	if err := run(ctx, dir, &out, stderr, "--no-pager", "diff", "--binary", base, branch); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
 // Squash applies patch three-way to dir's index and tree and commits it
 // as one commit with msg, on whatever branch is checked out. The
 // message is written to a file inside .git and committed with -F, never

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -258,20 +259,47 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 	// target made since, conflicting in files the task never touched. A
 	// base the branch no longer sits on gives way to the base the squash
 	// lands on, whose merge-base with the branch is the task's own point
-	// of departure; a branch still stacked on its dependency's keeps it,
-	// for the base below (the target, or the waiting stack) already
-	// carries the dependency's work.
+	// of departure; a branch still stacked on its dependency's keeps it
+	// while the base below (the target, or the waiting stack) lacks the
+	// dependency's work. A dependency that has landed — its Brigada-Task
+	// trailer on the history the squash lands on — makes the branch's
+	// own base stale all the same: the branch may descend from the
+	// dependency's old lineage while its tree was rebuilt on that
+	// history's content, and the three-dot diff from the stale lineage
+	// conflicts in the very files the task touched. The patch is then
+	// the tree diff against the base the squash lands on — but only
+	// while the branch's tree still contains that base's whole content,
+	// for a branch that lacks the base's later changes (another task's
+	// landing between the dependency's and this one's) would otherwise
+	// carry their reverse; such a branch keeps its three-dot diff, which
+	// holds its own change alone.
 	diffBase := onto
+	treePatched := false
 	if grant.BaseRef == grant.LandTarget || grant.BaseRef == grant.Branch {
 		diffBase = "refs/heads/" + grant.BaseRef
 	} else if stacked, err := r.landIsAncestor(ctx, dir, "refs/heads/"+grant.BaseRef, "refs/heads/"+grant.Branch); err != nil {
 		return nil, fmt.Errorf("compare %s with %s: %v", grant.BaseRef, grant.Branch, err)
 	} else if stacked {
 		diffBase = "refs/heads/" + grant.BaseRef
+		if id, ok := landBaseTaskID(grant.BaseRef); ok {
+			landed, err := landing.Landed(ctx, dir, id)
+			if err != nil {
+				return nil, fmt.Errorf("read the landed mark of task %d: %v", id, err)
+			}
+			treePatched = landed && r.landBranchEncodes(ctx, dir, onto, grant.Branch)
+		}
 	}
-	patch, err := landing.Diff(ctx, dir, diffBase, grant.Branch, io.Discard)
-	if err != nil {
-		return nil, fmt.Errorf("diff %s...%s: %v", diffBase, grant.Branch, err)
+	var patch []byte
+	if treePatched {
+		patch, err = landing.TreeDiff(ctx, dir, onto, grant.Branch, io.Discard)
+		if err != nil {
+			return nil, fmt.Errorf("diff %s %s: %v", onto, grant.Branch, err)
+		}
+	} else {
+		patch, err = landing.Diff(ctx, dir, diffBase, grant.Branch, io.Discard)
+		if err != nil {
+			return nil, fmt.Errorf("diff %s...%s: %v", diffBase, grant.Branch, err)
+		}
 	}
 	if len(patch) > 0 {
 		// The message the hand-driven land builds (§7.1), from the data
@@ -595,6 +623,26 @@ func (r *jobRun) landFetch(ctx context.Context, dir string, refs ...string) erro
 	return nil
 }
 
+// landBaseTaskID reads the task id a brigada result branch name carries
+// (brigada/task-<id>, with -r<n> after a restart or -a<n> after a
+// re-lease): the dependency a dependent's recorded base names, whose
+// landing the landing clone asks for by its Brigada-Task trailer.
+// false when the name is not one of the engine's branch names.
+func landBaseTaskID(ref string) (int64, bool) {
+	rest, ok := strings.CutPrefix(ref, "brigada/task-")
+	if !ok {
+		return 0, false
+	}
+	if s, _, found := strings.Cut(rest, "-"); found {
+		rest = s
+	}
+	id, err := strconv.ParseInt(rest, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
+
 // landWaitRef names the remote ref the target's waiting landings sit on
 // (§7.1, §6.3): the newest landing that waits at the push gate, with
 // every earlier one beneath it. Outside refs/heads, so it is no branch
@@ -694,6 +742,42 @@ func (r *jobRun) landIsAncestor(ctx context.Context, dir, commit, ref string) (b
 		return false, nil
 	}
 	return false, trimCmdError(out, err)
+}
+
+// landBranchEncodes reports whether branch's tree already holds every
+// change base made since their merge-base (§7.1): the base's content is
+// contained in the branch — a branch rebuilt on it — so the tree diff
+// against the base carries the task's own changes alone and reverses
+// nothing. Decided by the trivial three-way merge of the two over their
+// merge-base: it must resolve without a conflict and its result must be
+// the branch's own tree, so a change of the base the branch lacks —
+// another task's landing between the dependency's and this one's, on a
+// branch never rebuilt — keeps the three-dot diff from the dependency's
+// branch, and so does an edit the trivial merge cannot resolve. The
+// index the merge writes is reset; the working tree is never touched.
+func (r *jobRun) landBranchEncodes(ctx context.Context, dir, base, branch string) bool {
+	mb, err := r.landText(ctx, dir, "merge-base", base, "refs/heads/"+branch)
+	if err != nil {
+		return false
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		_, _ = r.landGit(ctx, dir, "reset", "--quiet", "--mixed", "HEAD")
+	}()
+	if _, err := r.landGit(ctx, dir, "read-tree", "-m",
+		strings.TrimSpace(mb), base, "refs/heads/"+branch); err != nil {
+		return false
+	}
+	merged, err := r.landText(ctx, dir, "write-tree")
+	if err != nil {
+		return false
+	}
+	tree, err := r.landText(ctx, dir, "rev-parse", "refs/heads/"+branch+"^{tree}")
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(merged) == strings.TrimSpace(tree)
 }
 
 // landGit runs one git command in the landing clone with the runner's
