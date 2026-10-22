@@ -60,9 +60,9 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-156"
-    rounds: 1
+    rounds: 2
   - id: 157
     name: "fast-runner"
     title: "Speed up internal/runner tests under -race (manual clocks / shorter intervals)"
