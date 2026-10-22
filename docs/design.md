@@ -281,7 +281,7 @@ The loop — plan, work, check, review, land, push — is brigada's, and the use
 - `land`: before an approved task is squashed onto the target branch (§7.1);
 - `push`: before the target branch is pushed.
 
-A gate is `auto` or `ask`; `push` may also be `never`, which never pushes the target: the commit waits on the remote's waiting ref as a push-gated landing's does, and the exact fetch-and-push command — runnable from the user's own repository — is recorded and printed, as the hand-driven `brigada land` prints its push. A **rule** turns `auto` into `ask` for the one plan or task that trips it, and the needs-you entry (§10) names the rule: `heavy; touches infra/**`. The rules are flat keys in `.brigada/project.yaml` (schema 1 is flat by design; no expression language):
+A gate is `auto` or `ask`; `push` may also be `never`, which never pushes the target: the commit waits on the remote's waiting ref as a push-gated landing's does, and the exact fetch-and-push command — runnable from the user's own repository — is recorded and printed, as the hand-driven `brigada land` prints its push. A **rule** turns `auto` into `ask` for the one plan or task that trips it, and the needs-you entry (§10) names the rule. A task held at the land gate reads `held by rule approval_tiers, approval_protected_paths: heavy; touches infra/**`, the setting keys first and the reasons after, followed by the command that releases the hold and the one that also changes the rule (`--and-stop-asking`); `brigada status` and `brigada top` show the same line. The rules are flat keys in `.brigada/project.yaml` (schema 1 is flat by design; no expression language):
 
 | Key | Gate it holds | Default |
 |---|---|---|

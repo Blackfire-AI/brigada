@@ -268,11 +268,11 @@ func TestLandGateAskHolds(t *testing.T) {
 	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskDone {
 		t.Errorf("task state = %q, want done while held", state)
 	}
-	if reason := e.str("SELECT reason FROM land_holds WHERE task_id = ?", e.task); !strings.Contains(reason, "gate_land is ask") {
+	if reason := e.str("SELECT reason FROM land_holds WHERE task_id = ?", e.task); !strings.Contains(reason, "held by rule gate_land: gate_land is ask") {
 		t.Errorf("land hold reason = %q, want the gate_land rule", reason)
 	}
 	it, ok := e.needsYouTask(e.task)
-	if !ok || !strings.Contains(it.Reason, "waits to land") || !strings.Contains(it.Reason, "gate_land is ask") {
+	if !ok || !strings.Contains(it.Reason, "held by rule gate_land: gate_land is ask") || !strings.Contains(it.Reason, "brigada land approve --and-stop-asking") {
 		t.Errorf("needs-you entry = %+v (%t), want a land-gate reason", it, ok)
 	}
 }

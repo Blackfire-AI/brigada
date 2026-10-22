@@ -109,12 +109,12 @@ func (e *Engine) maybeLandTaskTx(tx *sql.Tx, taskID int64, now time.Time) error 
 	} else if live != nil {
 		return nil // the land job (or another of the task's jobs) already holds the key
 	}
-	reasons, err := landHoldReasonsTx(tx, project, taskID)
+	reason, err := landHoldReasonTx(tx, project, taskID)
 	if err != nil {
 		return err
 	}
-	if len(reasons) > 0 {
-		return e.holdLandTx(tx, project, taskID, reasons, now)
+	if reason != "" {
+		return e.holdLandTx(tx, project, taskID, reason, now)
 	}
 	return e.queueLandJobTx(tx, project, taskID, now)
 }
@@ -241,19 +241,23 @@ func landHoldAsksTx(tx *sql.Tx, project, taskID int64) ([]holdAsk, error) {
 	return asks, nil
 }
 
-// landHoldReasonsTx words the land-gate rules that hold a task (§6.3),
-// in the needs-you line's order — "heavy; touches infra/**" — tier
-// before paths.
-func landHoldReasonsTx(tx *sql.Tx, project, taskID int64) ([]string, error) {
+// landHoldReasonTx words the land-gate rules that hold a task (§6.3),
+// empty when none does: the settings that hold it, then the reasons in
+// the needs-you line's order, tier before paths — "held by rule
+// approval_tiers, approval_protected_paths: heavy; touches infra/**".
+func landHoldReasonTx(tx *sql.Tx, project, taskID int64) (string, error) {
 	asks, err := landHoldAsksTx(tx, project, taskID)
-	if err != nil {
-		return nil, err
+	if err != nil || len(asks) == 0 {
+		return "", err
 	}
-	reasons := make([]string, len(asks))
-	for i, a := range asks {
-		reasons[i] = a.word()
+	var keys, words []string
+	for _, a := range asks {
+		if k := holdSettingOf[a.kind]; !slices.Contains(keys, k) {
+			keys = append(keys, k)
+		}
+		words = append(words, a.word())
 	}
-	return reasons, nil
+	return "held by rule " + strings.Join(keys, ", ") + ": " + strings.Join(words, "; "), nil
 }
 
 // taskSpentRestartTx reports whether the task spent a restart or a tier
@@ -279,8 +283,7 @@ func taskSpentRestartTx(tx *sql.Tx, taskID int64) (bool, error) {
 // dependents' landings wait on it — and the event names the rule for the
 // history and the needs-you queue. The foreman has no tool to release or
 // pass the gate; the user's release deletes the row (next to this).
-func (e *Engine) holdLandTx(tx *sql.Tx, project, taskID int64, reasons []string, now time.Time) error {
-	reason := "waits to land: " + strings.Join(reasons, "; ")
+func (e *Engine) holdLandTx(tx *sql.Tx, project, taskID int64, reason string, now time.Time) error {
 	if _, err := tx.Exec(`INSERT INTO land_holds (task_id, reason, created_at) VALUES (?, ?, ?)`,
 		taskID, reason, fmtTime(now)); err != nil {
 		return fmt.Errorf("hold task %d at the land gate: %w", taskID, err)
@@ -392,7 +395,8 @@ func statusLandHoldsTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
 		}
 		it.Kind = "task"
 		it.State = state
-		it.Reason = reason
+		it.Reason = fmt.Sprintf("%s; release: brigada land approve %d; change the rule: brigada land approve --and-stop-asking %d",
+			reason, it.ID, it.ID)
 		items = append(items, it)
 	}
 	return items, rows.Err()
