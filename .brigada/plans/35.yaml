@@ -81,8 +81,8 @@ tasks:
     deps: ["s3-repo-security"]
     base: "s3-repo-security"
     effort: medium
-    state: running
-    branch: ""
+    state: done
+    branch: "brigada/task-129"
     rounds: 0
   - id: 130
     name: "s6-supply-chain"
