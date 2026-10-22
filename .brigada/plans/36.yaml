@@ -113,7 +113,7 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: reviewing
+    state: done
     branch: "brigada/task-141"
     rounds: 1
   - id: 142
