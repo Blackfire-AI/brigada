@@ -169,6 +169,6 @@ tasks:
     continue: "legal-notices-final"
     tier: light
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-146-r1"
     rounds: 0
