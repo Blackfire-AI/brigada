@@ -49,7 +49,7 @@ tasks:
     base: "runner2"
     tier: light
     effort: low
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 121
@@ -82,6 +82,6 @@ tasks:
     base: "engine-amend2"
     continue: "engine-amend2"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-123"
     rounds: 0
