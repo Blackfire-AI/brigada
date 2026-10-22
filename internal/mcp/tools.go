@@ -122,7 +122,7 @@ var tools = []Tool{
 							},
 							"check": map[string]any{
 								"type":        "string",
-								"description": "the check command the runner runs after a done, in the task's worktree; empty = the project's default_check, or none. A check other than the project's default_check sends the plan to the user for approval. The worker never runs it",
+								"description": "the check command the runner runs after a done, in the task's worktree; omit check so the project default applies (none when the project sets none) — a different one holds the plan for the user. The worker never runs it",
 							},
 							"class": map[string]any{
 								"type":        "string",
@@ -169,7 +169,7 @@ var tools = []Tool{
 							"base":          map[string]any{"type": []string{"string", "integer"}, "description": "one of its deps whose result branch the work starts from; default as plan_create's, and the continued dep when continue is set"},
 							"continue":      map[string]any{"type": []string{"string", "integer"}, "description": "one of its deps whose worker starts this task in its own session; default as plan_create's; the continued dep is the task's base"},
 							"spec":          map[string]any{"type": "string", "description": "the task spec, verbatim: what the worker is to do. Never ask the worker to run the check, commit or push"},
-							"check":         map[string]any{"type": "string", "description": "the check command the runner runs after a done; empty = the project's default_check, or none. A check other than default_check holds the task for the user"},
+							"check":         map[string]any{"type": "string", "description": "the check command the runner runs after a done; omit check so the project default applies (none when the project sets none) — a different one holds the task for the user"},
 							"class":         map[string]any{"type": "string", "description": "the task's class (default implement)"},
 							"tier":          map[string]any{"type": "string", "enum": []string{"light", "standard", "heavy"}, "description": "how heavy a model the task needs: light for small, well-specified edits; standard (default) for ordinary work; heavy for design-heavy or cross-cutting work. brigada samples among the agents of that tier by their record on this repo and cost weight, so a cheaper or better-recorded agent is picked more often; a task that fails is bumped one tier up automatically"},
 							"effort":        map[string]any{"type": "string", "enum": []string{"low", "medium", "high", "max"}, "description": "how hard that model should think; default: the agent's own level, else medium"},
