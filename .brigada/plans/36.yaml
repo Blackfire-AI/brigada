@@ -79,9 +79,10 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
+    question: "Who is the copyright holder for NOTICE (exact line, e.g. 'Copyright 2026 <holder>'), and can the sandbox run go-licenses (or allow reads of ~/go/pkg/mod) so the licence list can be generated?"
   - id: 139
     name: "functionality-fixes"
     title: "Help-text bugs and flaky TestRunnerStallKillsProcessTree"
