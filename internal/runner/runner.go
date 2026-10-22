@@ -179,10 +179,11 @@ type ClassCaps struct {
 // defaultClassCaps is what a class gets when nothing overrides it.
 func defaultClassCaps() map[string]ClassCaps {
 	return map[string]ClassCaps{
-		"work":    {ToolCap: defaultToolCap, TimeCap: 40 * time.Minute},
-		"fix":     {ToolCap: defaultToolCap, TimeCap: 40 * time.Minute},
-		"review":  {ToolCap: defaultToolCap, TimeCap: 20 * time.Minute},
-		"foreman": {ToolCap: defaultToolCap, TimeCap: 25 * time.Minute},
+		"work":        {ToolCap: defaultToolCap, TimeCap: 40 * time.Minute},
+		"fix":         {ToolCap: defaultToolCap, TimeCap: 40 * time.Minute},
+		"review":      {ToolCap: defaultToolCap, TimeCap: 20 * time.Minute},
+		"plan_review": {ToolCap: defaultToolCap, TimeCap: 20 * time.Minute},
+		"foreman":     {ToolCap: defaultToolCap, TimeCap: 25 * time.Minute},
 	}
 }
 
