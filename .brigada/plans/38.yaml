@@ -30,6 +30,6 @@ tasks:
     effort: high
     review_tier: heavy
     caps: {fix_rounds: 4, review_rounds: 4}
-    state: reviewing
+    state: done
     branch: "brigada/task-149-r2"
     rounds: 1
