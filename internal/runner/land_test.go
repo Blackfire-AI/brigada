@@ -492,6 +492,158 @@ func TestRunnerLandRebuiltDependentDiffsAgainstTheTarget(t *testing.T) {
 	}
 }
 
+// TestRunnerLandStackedOnLandedDependencyDiffsTheTree: a dependent whose
+// recorded base is its dependency's branch, and whose branch still
+// descends from that branch while its tree was rebuilt on the target's
+// content, lands clean once the dependency has landed — by the land job
+// or by hand, its Brigada-Task trailer on the base the squash lands on.
+// The three-dot diff from the dependency's stale lineage would add, as
+// new, files the target made its own since the merge-base, conflicting
+// in the very files the task touched; the tree diff against the squash
+// base carries the task's change alone (§7.1).
+func TestRunnerLandStackedOnLandedDependencyDiffsTheTree(t *testing.T) {
+	markerDir(t)
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	// One worker for both tasks: it merges main first — a no-op for the
+	// dependency, which starts there; for the dependent, whose worktree
+	// starts at the dependency's branch, the merge brings the target's
+	// content into a branch that still descends from the dependency's
+	// lineage — the rebuild by hand the bug's shape is. Both write the
+	// file named for their own branch; the dependent also rewrites the
+	// file the target moved after the dependency's branch was cut.
+	mergeWorker := strings.Replace(reviewWorker, "echo hello > work.txt",
+		`git merge -q --no-edit main
+	echo hello > "$(basename "$(git rev-parse --abbrev-ref HEAD)").txt"
+	if [ -f shared.txt ]; then printf 'shared rewritten by the dependent\n' > shared.txt; fi`, 1)
+	mergeWorker = strings.Replace(mergeWorker, "@RESULT@", reviewApproveResult, 1)
+	depSpec := "Add a file named for the task with hello in it, and rewrite shared.txt in your own words."
+	dep, work := e.landTest(t, remote, `{"gate_push":"auto"}`, depSpec, stackCheck, mergeWorker)
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	e.waitLanding(dep, "pushed")
+
+	// The dependency landed as a squash its branch's history never
+	// joins; the target then moves a file of its own, which the
+	// dependent's feature rewrites on top of the merged content.
+	moved := pushToMain(t, remote, "shared.txt", "shared rewritten by main\n")
+
+	dependent := e.seedTask("", `test "$(cat shared.txt)" = "shared rewritten by the dependent"`)
+	branch := taskBranch(dependent, 1)
+	depBranch := taskBranch(dep, 1)
+	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE tasks SET base_ref = ? WHERE id = ?`, depBranch, dependent)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed the dependent: %v", err)
+	}
+	e.addDep(dependent, dep)
+	t.Setenv("BRIGADA_TEST_BRANCH", branch)
+	work = e.submitWork(dependent, prompt.ComposeWorkerPrompt(depSpec, "", ""))
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	e.waitTaskState(dependent, "done")
+	commit := e.waitLanding(dependent, "pushed")
+
+	// The premise holds: the dependent's branch still descends from its
+	// dependency's — the merge-base is the dependency's tip — so the
+	// diff from that branch is the bug's shape.
+	bare := strings.TrimPrefix(remote, "file://")
+	depHead := remoteBranchCommit(t, remote, depBranch)
+	if mb := strings.TrimSpace(git(t, "", "--git-dir", bare, "merge-base", depBranch, branch)); mb != depHead {
+		t.Fatalf("merge-base(%s, %s) = %s, want the dependency's tip %s: the test stacked nothing", depBranch, branch, mb, depHead)
+	}
+	// The landing is clean and carries the dependent's change alone:
+	// its squash sits on the target's moved head, main holds the seed
+	// and one commit per landing, and the diff of the landing is the
+	// task's own files.
+	if got := parentOf(t, remote, commit); got != moved {
+		t.Errorf("the dependent's squash sits on %s, want the target's head %s", got, moved)
+	}
+	if out := strings.TrimSpace(git(t, "", "--git-dir", bare, "rev-list", "--count", "main")); out != "4" {
+		t.Errorf("commits on main = %s, want the seed, the dependency's squash, the move and the dependent's squash", out)
+	}
+	for _, f := range []string{"main:shared.txt", "main:task-" + strconv.FormatInt(dependent, 10) + ".txt"} {
+		want := "hello\n"
+		if f == "main:shared.txt" {
+			want = "shared rewritten by the dependent\n"
+		}
+		if got := git(t, "", "--git-dir", bare, "show", f); got != want {
+			t.Errorf("%s = %q, want %q", f, got, want)
+		}
+	}
+	files := strings.Fields(git(t, "", "--git-dir", bare, "diff", "--name-only", moved, commit))
+	want := []string{"shared.txt", "task-" + strconv.FormatInt(dependent, 10) + ".txt"}
+	if len(files) != 2 || files[0] != want[0] || files[1] != want[1] {
+		t.Errorf("the landing's diff = %v, want exactly the task's own files %v", files, want)
+	}
+}
+
+// TestRunnerLandStackedOnLandedDependencyDoesNotRevertLaterLandings: the
+// tree diff replaces the three-dot one only while the branch's tree
+// holds the base's whole content. A dependent never rebuilt after
+// another task landed on the target between its dependency's landing
+// and its own — its tree lacks that landing, so the tree diff would
+// carry the landing's reverse — keeps the three-dot diff from its
+// dependency's branch and lands with its own change alone, the other
+// task's work intact on the target (§7.1).
+func TestRunnerLandStackedOnLandedDependencyDoesNotRevertLaterLandings(t *testing.T) {
+	markerDir(t)
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	dep, work := e.landTest(t, remote, `{"gate_push":"auto"}`, stackSpec, stackCheck, stackReviewWorker)
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	e.waitLanding(dep, "pushed")
+
+	// Another task lands on the target after the dependency's landing;
+	// the dependent's worktree, built from the dependency's branch, is
+	// never rebuilt on it.
+	moved := pushToMain(t, remote, "other.txt", "another task landed\n")
+
+	dependent := e.seedTask("", "")
+	file := "task-" + strconv.FormatInt(dependent, 10) + ".txt"
+	branch := taskBranch(dependent, 1)
+	depBranch := taskBranch(dep, 1)
+	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE tasks SET base_ref = ?, check_cmd = ? WHERE id = ?`,
+			depBranch, fmt.Sprintf("test \"$(cat %s)\" = hello", file), dependent)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed the dependent: %v", err)
+	}
+	e.addDep(dependent, dep)
+	t.Setenv("BRIGADA_TEST_BRANCH", branch)
+	work = e.submitWork(dependent, prompt.ComposeWorkerPrompt(stackSpec, "", ""))
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	e.waitTaskState(dependent, "done")
+	commit := e.waitLanding(dependent, "pushed")
+
+	// The premise holds: the dependent's branch still descends from its
+	// dependency's, and its tree lacks the target's later landing.
+	bare := strings.TrimPrefix(remote, "file://")
+	depHead := remoteBranchCommit(t, remote, depBranch)
+	if mb := strings.TrimSpace(git(t, "", "--git-dir", bare, "merge-base", depBranch, branch)); mb != depHead {
+		t.Fatalf("merge-base(%s, %s) = %s, want the dependency's tip %s: the test stacked nothing", depBranch, branch, mb, depHead)
+	}
+	// The landing is clean and carries the dependent's change alone:
+	// its squash sits on the target's moved head, the other task's work
+	// is intact, and the diff of the landing is the task's own file.
+	if got := parentOf(t, remote, commit); got != moved {
+		t.Errorf("the dependent's squash sits on %s, want the target's head %s", got, moved)
+	}
+	if out := strings.TrimSpace(git(t, "", "--git-dir", bare, "rev-list", "--count", "main")); out != "4" {
+		t.Errorf("commits on main = %s, want the seed, the dependency's squash, the other task's landing and the dependent's squash", out)
+	}
+	if got := git(t, "", "--git-dir", bare, "show", "main:other.txt"); got != "another task landed\n" {
+		t.Errorf("main's other.txt = %q, want the other task's landing intact", got)
+	}
+	if files := strings.Fields(git(t, "", "--git-dir", bare, "diff", "--name-only", moved, commit)); len(files) != 1 || files[0] != file {
+		t.Errorf("the landing's diff = %v, want exactly the task's own file [%s]", files, file)
+	}
+}
+
 // TestRunnerLandPushPhaseOnAnotherRunner: the push phase needs nothing
 // of the runner that squashed. That runner stops and loses its state
 // directory; a second runner leases the push, fetches the recorded
