@@ -246,9 +246,29 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 		return nil, err
 	}
 	o.commit = strings.TrimSpace(commit)
-	patch, err := landing.Diff(ctx, dir, grant.BaseRef, grant.Branch, io.Discard)
+	// The task's own diff, base...branch (§7.1). The recorded base can
+	// be a dependency's branch, and once that dependency landed as a
+	// squash — its branch never joining the target's history — or the
+	// task's own branch was rebuilt on the target, the base is no longer
+	// an ancestor of the branch: diffed against it, the three-dot diff
+	// would start at the stale merge-base and carry every change the
+	// target made since, conflicting in files the task never touched. A
+	// base the branch no longer sits on gives way to the base the squash
+	// lands on, whose merge-base with the branch is the task's own point
+	// of departure; a branch still stacked on its dependency's keeps it,
+	// for the base below (the target, or the waiting stack) already
+	// carries the dependency's work.
+	diffBase := onto
+	if grant.BaseRef == grant.LandTarget || grant.BaseRef == grant.Branch {
+		diffBase = "refs/heads/" + grant.BaseRef
+	} else if stacked, err := r.landIsAncestor(ctx, dir, "refs/heads/"+grant.BaseRef, "refs/heads/"+grant.Branch); err != nil {
+		return nil, fmt.Errorf("compare %s with %s: %v", grant.BaseRef, grant.Branch, err)
+	} else if stacked {
+		diffBase = "refs/heads/" + grant.BaseRef
+	}
+	patch, err := landing.Diff(ctx, dir, diffBase, grant.Branch, io.Discard)
 	if err != nil {
-		return nil, fmt.Errorf("diff %s...%s: %v", grant.BaseRef, grant.Branch, err)
+		return nil, fmt.Errorf("diff %s...%s: %v", diffBase, grant.Branch, err)
 	}
 	if len(patch) > 0 {
 		// The message the hand-driven land builds (§7.1), from the data

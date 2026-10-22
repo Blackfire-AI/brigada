@@ -16,6 +16,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The wall-time hard cap measured from a job's first lease, so a job that lost its lease and was re-leased could be cut short partway into its next lease (issue #36); the cap now measures from the current lease, so a re-leased job gets the whole cap again.
 - claude and opencode workers could not read a task's extra repositories (§5.8): their read and search tools were denied outside the worktree, and their scoped Bash could not echo the `BRIGADA_REPO_<NAME>` path. The runner now grants each checkout's absolute path as a read dir (claude `--add-dir`, opencode `external_directory` allow) and names the paths in the job's prompt.
 - dsh jobs failed at start with "unknown option '--patch'"; the adapter now passes the launcher's `--patch` before the app's `--json`.
+- A land job diffed a task whose recorded base was its dependency's branch against that branch even after the dependency landed as a squash and the task's branch was rebuilt on the target, so the patch carried every change the target made since the stale merge-base: bogus conflicts in files the task never touched, different ones each attempt. The land diff now starts a branch that no longer descends from its recorded base at the merge-base with the base it lands on, so the patch holds the task's own changes alone.
 
 ### Added
 
