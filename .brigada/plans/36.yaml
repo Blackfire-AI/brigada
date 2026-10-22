@@ -146,8 +146,8 @@ tasks:
     base: "supply-chain"
     continue: "supply-chain"
     effort: low
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-144"
     rounds: 0
   - id: 145
     name: "deps-landed-push-gate"
