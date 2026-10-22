@@ -26,6 +26,10 @@ const (
 	holdTier     = "tier"      // a tier of approval_tiers
 	holdRestart  = "restart"   // a spent restart under approval_restarted
 	holdExtras   = "extras"    // an extra repository outside the project default
+	// holdCheck: a task check other than default_check. No answer stops
+	// it asking: moving default_check to one task's command would change
+	// the check of every task after it, so stop-asking leaves it alone.
+	holdCheck = "check_command"
 )
 
 // holdSettingOf maps every hold reason to the one setting whose change
@@ -40,6 +44,7 @@ var holdSettingOf = map[string]string{
 	holdTier:     SettingApprovalTiers,
 	holdRestart:  SettingApprovalRestarted,
 	holdExtras:   SettingExtraRepos,
+	holdCheck:    SettingDefaultCheck,
 }
 
 // holdAsk is one hold reason in the structured form the setting change

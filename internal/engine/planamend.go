@@ -502,7 +502,8 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	// judged by what it adds: only the added tasks and the text a respec
 	// adds are checked against the per-task rules — a class outside the
 	// allowed set, a protected path, an extra repository (added tasks
-	// only) — and one that trips is held alone, its
+	// only), a check other than the project's default_check — and one
+	// that trips is held alone, its
 	// own needs-you line naming the rule, while the plan stays active.
 	// The whole-plan triggers (the task count, gate_plan) do not apply to
 	// a plan already running. An awaiting plan is re-evaluated whole, as
@@ -528,7 +529,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		newState = planReviewing
 	case state == "active":
 		for _, i := range respecced {
-			if reasons := settings.taskHoldReasons(PlanTask{Spec: respecText[i], Class: nodes[i].class}); len(reasons) > 0 {
+			if reasons := settings.taskHoldReasons(PlanTask{Spec: respecText[i], Check: nodes[i].check, Class: nodes[i].class}); len(reasons) > 0 {
 				respecHold[i] = strings.Join(reasons, "; ")
 			}
 		}
@@ -671,7 +672,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		return AmendPlanResult{}, fmt.Errorf("touch plan %d: %w", plan, err)
 	}
 	if newState == planAwaitingApproval && verdict.Needed {
-		res.Reasons = verdict.reasons(settings.Classes)
+		res.Reasons = verdict.reasons(settings.Classes, settings.DefaultCheck)
 		if _, err := appendEventTx(tx, evPlanAwaitingApproval, proj, 0, 0, eventPayload{
 			Plan:    plan,
 			Count:   int64(len(kept)),

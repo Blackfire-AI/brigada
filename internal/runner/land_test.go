@@ -764,6 +764,45 @@ func TestRunnerLandJobConflict(t *testing.T) {
 	}
 }
 
+// TestRunnerLandRefusesAMovedHead (§7.1): a result branch that moved
+// after its approving review is refused — nothing squashed, nothing
+// pushed, no record — and the task parks for the foreman, the reason
+// naming the head that was approved.
+func TestRunnerLandRefusesAMovedHead(t *testing.T) {
+	markerDir(t)
+	remote := newRemote(t)
+	seed := remoteBranchCommit(t, remote, "main")
+	e := newTestEnv(t, engine.Config{})
+	task, work := e.landTest(t, remote, `{"gate_push":"auto"}`,
+		"Add work.txt with hello in it.", `test "$(cat work.txt)" = hello`, conflictReviewWorker)
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	branch := taskBranch(task, 1)
+	approved := remoteBranchCommit(t, remote, branch)
+	// While the reviewer takes its second, the branch gains a commit the
+	// review never saw.
+	scratch := t.TempDir()
+	git(t, "", "clone", "-q", "--branch", branch, remote, scratch)
+	if err := os.WriteFile(filepath.Join(scratch, "extra.txt"), []byte("unreviewed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, scratch, "add", "-A")
+	git(t, scratch, "-c", "user.name=other", "-c", "user.email=other@brigada.invalid", "commit", "-qm", "after the review")
+	git(t, scratch, "push", "-q", "origin", branch)
+
+	e.waitTaskState(task, "needs_foreman")
+	if _, _, _, _, ok := e.landing(task); ok {
+		t.Error("a landing of a moved head was recorded")
+	}
+	if got := remoteBranchCommit(t, remote, "main"); got != seed {
+		t.Errorf("main moved: %s, want the seed %s", got, seed)
+	}
+	why := e.strOf("SELECT payload FROM events WHERE task_id = ? AND kind = 'task_land_failed' ORDER BY id DESC LIMIT 1", task)
+	if !strings.Contains(why, "not the approved head "+approved) {
+		t.Errorf("the land failure = %s, want it to name the approved head %s", why, approved)
+	}
+}
+
 // TestRunnerLandJobCheckFailure: a check that fails on the landed
 // result parks the task with the log as the job's artifact, nothing
 // pushed. The work round's own check passes — the project's default

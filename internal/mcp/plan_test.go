@@ -92,6 +92,7 @@ func assertOneActivePlan(t *testing.T, e *env, plan, task, job int64) {
 // bridge's minted idempotency key (§12.1): no second plan.
 func TestServeCallPlanCreate(t *testing.T) {
 	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	setProjectDefault(t, e, `{"default_check": "go test ./..."}`) // the call's check: the plan gate passes it
 	s := start(t, e)
 	a := s.call(1, "tools/call", map[string]any{"name": "plan_create", "arguments": planCreateCall})
 	text, isError := toolText(t, a)

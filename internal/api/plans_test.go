@@ -56,6 +56,13 @@ func TestPlanCreateEndpoint(t *testing.T) {
 
 	// The foreman creates in its own project, naming no repo (§12.1:
 	// a foreman token's project is the only one it may plan in).
+	// The task's check is the project's default, so the plan gate passes it.
+	if err := e.st.Update(t.Context(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE projects SET settings = '{"default_check": "go test ./..."}' WHERE id = ?`, e.project1)
+		return err
+	}); err != nil {
+		t.Fatalf("set the default check: %v", err)
+	}
 	body := `{"title":"the plan","tasks":[{"title":"t","spec":"the spec","check":"go test ./...","tier":"heavy","effort":"max"}]}`
 	code, _, data := e.do(http.MethodPost, "/v1/plans", "foreman1", "plan-1", []byte(body))
 	if code != http.StatusOK {

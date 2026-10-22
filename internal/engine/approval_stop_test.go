@@ -13,7 +13,7 @@ import (
 func TestEveryHoldReasonHasASetting(t *testing.T) {
 	for _, kind := range []string{
 		holdGatePlan, holdGateLand, holdMaxTasks, holdBudget,
-		holdClass, holdPath, holdTier, holdRestart, holdExtras,
+		holdClass, holdPath, holdTier, holdRestart, holdExtras, holdCheck,
 	} {
 		key, ok := holdSettingOf[kind]
 		if !ok {
@@ -85,7 +85,7 @@ func TestStopAskingValues(t *testing.T) {
 // the same plan shape runs without asking again (§6.3).
 func TestApprovePlanStopAskingChangesTheRules(t *testing.T) {
 	e := newEnv(t)
-	e.setSettings(`{"approval_max_tasks": 1, "approval_protected_paths": ["go.mod"], "gate_plan": "ask"}`)
+	e.setSettings(`{"approval_max_tasks": 1, "approval_protected_paths": ["go.mod"], "gate_plan": "ask", "default_check": "git diff go.mod"}`)
 	tasks := []PlanTask{
 		{Spec: "first"},
 		{Spec: "second", Class: "deploy", Check: "git diff go.mod"},

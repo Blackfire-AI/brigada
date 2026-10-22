@@ -43,8 +43,7 @@ var defaultApprovalClasses = []string{"implement", "review", "answer"}
 //
 //	approval_max_tasks          int; more tasks than this need approval.
 //	                            Absent = 0, off: no count rule. Negative
-//	                            disables the approval rules entirely
-//	                            (everything runs; gate_plan still holds).
+//	                            is off too; the other rules still apply.
 //	approval_budget             the plan budget, the cost rule on by
 //	                            default: a whole number of tokens, a $
 //	                            amount, or both joined with "+". Absent =
@@ -157,13 +156,16 @@ type approvalVerdict struct {
 	Gate    bool // gate_plan is ask: every plan waits
 	Classes []string
 	Paths   []string
+	// Checks are the task checks other than the project's default_check
+	// (§6.3), each once.
+	Checks []string
 	// Extras describes each extra repository a task names outside the
 	// project's default list (§5.8), with its ref.
 	Extras []string
 }
 
 // reasons renders the verdict as short phrases, one per reason.
-func (v approvalVerdict) reasons(allowed []string) []string {
+func (v approvalVerdict) reasons(allowed []string, defaultCheck string) []string {
 	var out []string
 	if v.Gate {
 		out = append(out, "gate_plan is "+GateAsk)
@@ -176,6 +178,9 @@ func (v approvalVerdict) reasons(allowed []string) []string {
 	}
 	if len(v.Paths) > 0 {
 		out = append(out, "protected paths: "+strings.Join(v.Paths, ", "))
+	}
+	for _, c := range v.Checks {
+		out = append(out, checkHoldReason(c, defaultCheck))
 	}
 	if len(v.Extras) > 0 {
 		out = append(out, "extra repositories outside the project default: "+strings.Join(v.Extras, ", "))
@@ -251,9 +256,8 @@ func (s approvalSettings) evaluate(tasks []PlanTask) approvalVerdict {
 		// below only add their reasons.
 		v.Needed, v.Gate = true, true
 	}
-	if v.Limit < 0 {
-		return v // the approval rules off: everything runs
-	}
+	// A negative limit is off, as 0 is: it turns off the count rule
+	// alone, and the per-task rules below still apply.
 	if v.Limit > 0 && v.Tasks > v.Limit {
 		v.Needed = true
 	}
@@ -261,7 +265,7 @@ func (s approvalSettings) evaluate(tasks []PlanTask) approvalVerdict {
 	for _, c := range s.Classes {
 		allowed[c] = true
 	}
-	seenClass, seenPath, seenExtra := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	seenClass, seenPath, seenExtra, seenCheck := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	inDefault := map[string]bool{}
 	for _, x := range s.ExtraRepos {
 		inDefault[x.Repo] = true
@@ -296,14 +300,63 @@ func (s approvalSettings) evaluate(tasks []PlanTask) approvalVerdict {
 				v.Needed = true
 			}
 		}
+		if c := strings.TrimSpace(t.Check); s.checkDiffers(c) && !seenCheck[c] {
+			seenCheck[c] = true
+			v.Checks = append(v.Checks, c)
+			v.Needed = true
+		}
 	}
 	return v
 }
 
+// checkDiffers reports whether a task's check is a command other than
+// the project's default_check (§6.3): the runner runs it with the user's
+// credentials, so a command the project did not set needs the user's
+// yes. The check is compared as the task stores it, after an omitted one
+// took the default (withDefaultCheck), so an empty check against no
+// default is no difference. A task names no setup of its own — it
+// records the project's (§5.7) — so its setup never differs.
+func (s approvalSettings) checkDiffers(check string) bool {
+	return strings.TrimSpace(check) != strings.TrimSpace(s.DefaultCheck)
+}
+
+// checkHoldReason words the check rule's hold of a plan (§6.3): the
+// rule's name, the check and the default it differs from, and how to
+// release or change it.
+func checkHoldReason(check, defaultCheck string) string {
+	return checkHoldHead(check, defaultCheck) +
+		" (release: brigada plan approve; change it: cancel the task and add it again with the default check, or set default_check)"
+}
+
+// checkTaskHoldReason is checkHoldReason for one task an amendment
+// added or respecified, held alone while its plan runs on.
+func checkTaskHoldReason(check, defaultCheck string) string {
+	return checkHoldHead(check, defaultCheck) +
+		" (release: task_restart once the user agrees; change it: cancel the task and add it again with the default check, or set default_check)"
+}
+
+func checkHoldHead(check, defaultCheck string) string {
+	def := "none"
+	if strings.TrimSpace(defaultCheck) != "" {
+		def = fmt.Sprintf("%q", boundCheck(defaultCheck))
+	}
+	return fmt.Sprintf("%s: check %q differs from default_check %s", holdCheck, boundCheck(check), def)
+}
+
+// boundCheck shortens a check command for a hold reason.
+func boundCheck(check string) string {
+	check = strings.TrimSpace(check)
+	if r := []rune(check); len(r) > 120 {
+		return string(r[:120]) + "…"
+	}
+	return check
+}
+
 // taskHoldReasons names the plan rules one added task trips (§6.3),
 // empty when it trips none: a class outside approval_classes, a
-// protected path its spec or check mentions, or an extra repository
-// outside the project's default. The whole-plan triggers — the task
+// protected path its spec or check mentions, a check other than the
+// project's default_check, or an extra repository outside the
+// project's default. The whole-plan triggers — the task
 // count and gate_plan — are the plan's, not one task's, and never hold
 // an amendment of an active plan; the plan budget is not per task but
 // holds any task about to start, an added one included (planbudget.go).
@@ -322,6 +375,9 @@ func (s approvalSettings) taskHoldReasons(t PlanTask) []string {
 	}
 	for _, p := range matchProtected(s.ProtectedPaths, t.Spec+"\n"+t.Check) {
 		out = append(out, "touches "+p)
+	}
+	if s.checkDiffers(t.Check) {
+		out = append(out, checkTaskHoldReason(t.Check, s.DefaultCheck))
 	}
 	inDefault := map[string]bool{}
 	for _, x := range s.ExtraRepos {

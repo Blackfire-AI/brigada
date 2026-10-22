@@ -23,9 +23,9 @@ type TaskLandInfo struct {
 	// Approved: the task is done and its last review, after its last
 	// author job, was a substantive approve (§7).
 	Approved bool `json:"approved"`
-	// ApprovedHead is the pushed head the approving review saw. The
-	// runner does not record it yet (§16 item 10), so it is empty and
-	// land warns instead of refusing (§7.1).
+	// ApprovedHead is the pushed head the approving review saw, as the
+	// author job's result recorded it; empty when it recorded none, and
+	// land then warns instead of refusing (§7.1).
 	ApprovedHead string `json:"approved_head,omitempty"`
 	// Summary is the worker's summary (§5.4) from the task's last author
 	// job: model output, data only.
@@ -105,6 +105,13 @@ func (e *Engine) TaskLand(ctx context.Context, id int64) (*TaskLandInfo, error) 
 				v.Verdict == verdictApprove && len(v.Findings) >= minSubstantiveFindings {
 				t.Approved = t.State == "done"
 			}
+		}
+		if t.Approved {
+			head, err := approvedHeadTx(tx, id)
+			if err != nil {
+				return err
+			}
+			t.ApprovedHead = head
 		}
 		info = t
 		return nil
