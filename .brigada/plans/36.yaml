@@ -58,9 +58,9 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-136"
-    rounds: 0
+    rounds: 1
   - id: 137
     name: "supply-chain"
     title: "Supply chain: govulncheck in CI, gated release.yml, notes from CHANGELOG, SHA-pinned actions (B6, B7)"
