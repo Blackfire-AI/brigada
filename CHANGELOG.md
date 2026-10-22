@@ -3,7 +3,7 @@
 The format of this file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0-rc.1] - Unreleased
+## [1.0.0-rc.1] - 2026-10-22
 
 First release candidate of 1.0.0. The changes are listed under 1.0.0 below.
 
