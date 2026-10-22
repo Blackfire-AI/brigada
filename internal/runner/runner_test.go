@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -16,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1278,6 +1280,24 @@ func TestRunnerCancelDuringCheckKillsCheck(t *testing.T) {
 	}
 }
 
+// syncBuffer is a log sink a test can read while the runner writes.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // TestRunnerSurvivesSocketBlink covers the loop's answer to an engine
 // that goes away and comes back: a registration or lease failure costs
 // a backoff and a re-register, not the runner's life. The engine and
@@ -1293,22 +1313,30 @@ func TestRunnerSurvivesSocketBlink(t *testing.T) {
 	// The runner starts with the socket already down: its first
 	// registration fails and must be retried, not returned.
 	e.stopAPI()
-	// A long lease wait keeps the empty poll in flight when the socket
-	// blinks.
+	logs := &syncBuffer{}
 	p := e.startRunner(writeWorkerScript(t, happyWorker), 100*time.Millisecond,
-		func(c *Config) { c.LeaseWait = 300 * time.Millisecond })
+		func(c *Config) {
+			c.LeaseWait = 300 * time.Millisecond
+			c.Log = slog.New(slog.NewTextHandler(logs, nil))
+		})
 	defer p.stop(t)
 
-	e.startAPI() // the runner's retry backoff finds it back
-	// Wait for the runner to register and settle into an empty
-	// long-poll…
+	// Back up only once the runner has logged the failed registration.
+	e.waitUntil("the first registration to fail", func() bool {
+		return strings.Contains(logs.String(), "register failed; retrying")
+	})
+	e.startAPI()
 	e.waitUntil("the runner to register", func() bool {
 		return e.int64Of("SELECT COUNT(*) FROM runners") > 0
 	})
-	// …then blink the socket mid-poll: the in-flight lease fails, the
-	// next round re-registers (the engine may have a fresh store) and
-	// polls again.
+	// Blink the socket: stopAPI returns once the in-flight empty poll has
+	// ended, and the runner's next lease finds the socket down. Back up
+	// only after that failure is logged; the next round re-registers (the
+	// engine may have a fresh store) and polls again.
 	e.stopAPI()
+	e.waitUntil("a lease to fail on the dead socket", func() bool {
+		return strings.Contains(logs.String(), "lease failed; retrying")
+	})
 	e.startAPI()
 
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))

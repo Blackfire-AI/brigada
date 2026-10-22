@@ -226,7 +226,7 @@ func pushToMain(t *testing.T, remote, file, content string) string {
 var conflictReviewWorker = strings.Replace(reviewWorker, "@RESULT@",
 	`i=0
 	while [ ! -f "$BRIGADA_TEST_MARKERS/moved" ]; do
-		[ $i -lt 1000 ] || exit 1
+		[ $i -lt 250 ] || exit 1
 		echo '{"type":"assistant","text":"waiting for the remote to move"}'
 		sleep 0.02; i=$((i+1))
 	done

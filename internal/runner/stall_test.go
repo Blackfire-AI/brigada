@@ -142,7 +142,8 @@ cat > /dev/null
 echo '{"type":"assistant","text":"starting"}'
 echo '{"type":"tool_start","name":"Bash"}'
 : > "$BRIGADA_TEST_MARKERS/started"
-sleep 1.2
+i=0
+while [ ! -f "$BRIGADA_TEST_MARKERS/release" ] && [ $i -lt 1500 ]; do sleep 0.02; i=$((i+1)); done
 echo '{"type":"tool_end","name":"Bash"}'
 echo hello > work.txt
 git add -A
@@ -288,13 +289,31 @@ func TestRunnerToolCallSuspendsStallClock(t *testing.T) {
 	e.seedProject(remote)
 	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", "", ""))
-	markerDir(t)
+	markers := markerDir(t)
 
-	// The stall window is a third of the call: without the suspension
-	// the run would be stopped mid-call.
+	// The activity clock is the manual one: the silence inside the call
+	// runs for many stall windows (the test advances it) before the
+	// worker is released; without the suspension the run would be
+	// stopped mid-call.
+	clk := newManualClock()
 	p := e.startRunner(writeWorkerScript(t, longToolWorker), 100*time.Millisecond,
-		func(c *Config) { c.StallAfter = 400 * time.Millisecond })
+		func(c *Config) {
+			c.Clock = clk.Clock()
+			c.StallAfter = 400 * time.Millisecond
+		})
 	defer p.stop(t)
+
+	e.waitUntil("the worker to open its tool call", func() bool {
+		_, err := os.Stat(filepath.Join(markers, "started"))
+		return err == nil
+	})
+	for i := 0; i < 5; i++ {
+		clk.Advance(time.Minute)
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := os.WriteFile(filepath.Join(markers, "release"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	done := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
 	res := e.workerResult(done)
