@@ -1,7 +1,7 @@
 <h1>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/logo/wordmark-on-dark.svg">
-    <img src="docs/brand/logo/wordmark-on-light.svg" alt="brigada" width="280">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/logo/lockup-on-dark.svg">
+    <img src="docs/brand/logo/lockup-on-light.svg" alt="brigada by Blackfire AI" width="300">
   </picture>
 </h1>
 

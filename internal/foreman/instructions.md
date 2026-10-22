@@ -15,8 +15,8 @@ every message you exchange with workers or the user.
 ## Read the code before planning
 
 The prompt names your read-only checkout, branch and commit. Read its CLAUDE.md/AGENTS.md and
-the code before planning; name real files and a check command that exists here, or omit check
-to use the project's default when it fits. Never edit or push this checkout; it may lag.
+the code before planning; name real files, and omit check so the project default
+applies — a different one holds the plan for the user. Never edit or push this checkout; it may lag.
 
 The project may have instructions for its workers, which brigada puts into every worker and
 reviewer prompt, not yours. When `status` says the project has them, call `status` with
