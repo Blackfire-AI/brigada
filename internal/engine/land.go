@@ -152,10 +152,14 @@ func taskApprovedTx(tx *sql.Tx, taskID int64) (bool, error) {
 // depsLandedTx reports whether every dependency of taskID is landed
 // (§7.1): a dependency with a landing record, or a dependency of a class
 // that never lands — only implement tasks are landable, so another
-// class's dependency has nothing to wait for. A landing that waits at
-// the push gate counts: the runner squashes the dependent onto the
-// remote's waiting ref, on top of the dependency's commit, so the stack
-// keeps its order when the gate releases it.
+// class's dependency has nothing to wait for. A landing whose push
+// reached the target counts, and so does one whose push was released —
+// the push job the user's approval queued is on its way. A landing
+// still waiting at the push gate counts only where the dependent's own
+// landing stacks onto the remote's waiting ref, on top of the
+// dependency's commit, so the stack keeps its order (§7.1): the ask and
+// never gates. Under auto the dependent would squash onto the target
+// without the dependency's work, so it waits for the dependency's push.
 func depsLandedTx(tx *sql.Tx, taskID int64) (bool, error) {
 	rows, err := tx.Query("SELECT depends_on_task_id FROM task_deps WHERE task_id = ?", taskID)
 	if err != nil {
@@ -174,15 +178,70 @@ func depsLandedTx(tx *sql.Tx, taskID int64) (bool, error) {
 		if class != classImplement {
 			continue
 		}
-		var n int
-		if err := tx.QueryRow("SELECT COUNT(*) FROM landings WHERE task_id = ?", dep).Scan(&n); err != nil {
+		var pushed string
+		err := tx.QueryRow("SELECT pushed FROM landings WHERE task_id = ?", dep).Scan(&pushed)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
 			return false, fmt.Errorf("read the landing of dependency %d: %w", dep, err)
 		}
-		if n == 0 {
+		switch pushed {
+		case "pushed":
+			// The dependency's work is on the target.
+		case "waiting", "local":
+			released, err := depPushReleasedTx(tx, dep)
+			if err != nil {
+				return false, err
+			}
+			if released {
+				continue
+			}
+			stacks, err := dependentStacksTx(tx, taskID)
+			if err != nil {
+				return false, err
+			}
+			if !stacks {
+				return false, nil
+			}
+		default:
 			return false, nil
 		}
 	}
 	return true, rows.Err()
+}
+
+// depPushReleasedTx reports whether a dependency's push was released
+// (§6.3): a live land job on its key, which a task with a landing
+// record holds only as the push phase brigada push approve queued.
+func depPushReleasedTx(tx *sql.Tx, dep int64) (bool, error) {
+	var n int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'
+		AND status IN ('queued', 'leased', 'running')`, dep).Scan(&n); err != nil {
+		return false, fmt.Errorf("read the land jobs of dependency %d: %w", dep, err)
+	}
+	return n > 0, nil
+}
+
+// dependentStacksTx reports whether the task's own landing would stack
+// onto the waiting ref (§7.1): its project's push gate is ask or never,
+// the gates whose landings wait on the ref — the dependent's squash
+// then lands on top of a waiting dependency's commit.
+func dependentStacksTx(tx *sql.Tx, taskID int64) (bool, error) {
+	var project int64
+	if err := tx.QueryRow(`SELECT p.project_id FROM tasks t JOIN plans p ON p.id = t.plan_id
+		WHERE t.id = ?`, taskID).Scan(&project); err != nil {
+		return false, fmt.Errorf("read the project of task %d: %w", taskID, err)
+	}
+	s, err := projectApprovalTx(tx, project)
+	if err != nil {
+		return false, err
+	}
+	gate := s.GatePush
+	if gate == "" {
+		gate = GateAuto // the design's default (§6.3)
+	}
+	return gate == GateAsk || gate == GateNever, nil
 }
 
 // landHoldAsksTx names the rules that hold a task at the land gate
@@ -1095,6 +1154,12 @@ func (e *Engine) pushApproveTx(tx *sql.Tx, project int64, now time.Time) (PushAp
 			Prompt:    "", // no worker
 			Labels:    []string{"git"},
 		}, now); err != nil {
+			return PushApproveResult{}, err
+		}
+		// The release unblocks the landing's dependents under auto
+		// (depsLandedTx): their rule runs again here, as a landing runs
+		// it for its own dependents (§7.1).
+		if err := e.releaseDependentLandsTx(tx, w.task, now); err != nil {
 			return PushApproveResult{}, err
 		}
 	}
