@@ -26,8 +26,9 @@ type Store struct {
 // dsn builds the connection string for path. The pragmas ride in the DSN
 // so every pooled connection gets them, not just the first: write-ahead
 // logging, enforced foreign keys and the busy timeout. Transactions begin
-// immediately, which serializes writers up front instead of deadlocking
-// them mid-transaction.
+// immediately — the lock a writer takes up front instead of deadlocking
+// mid-transaction — while readers opt out of it at begin time (View), so
+// under write-ahead logging they never hold the write lock at all.
 func dsn(path string) string {
 	return fmt.Sprintf("%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)",
 		path, busyTimeout.Milliseconds())
@@ -87,10 +88,23 @@ func (s *Store) Update(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	return s.withTx(ctx, fn)
 }
 
-// View is Update named for reads: fn runs in the same single immediate
-// transaction, so what it sees is one consistent snapshot of the store.
+// View runs fn in one read-only transaction on the store: the begin is
+// deferred, not immediate, so under write-ahead logging a reader holds
+// no write lock — a long writer (a lease poll, an upload) cannot lock
+// it out and it cannot hold a writer up. What fn sees is still one
+// consistent snapshot of the store. fn must only read: a write inside
+// a deferred transaction would try to upgrade its lock mid-transaction
+// and can meet busy where an Update would have waited up front.
 func (s *Store) View(ctx context.Context, fn func(tx *sql.Tx) error) error {
-	return s.withTx(ctx, fn)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	if err := fn(tx); err != nil {
+		tx.Rollback() // a no-op once nothing was written
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) withTx(ctx context.Context, fn func(tx *sql.Tx) error) error {

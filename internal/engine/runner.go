@@ -89,6 +89,11 @@ func (e *Engine) Register(ctx context.Context, name string, maxParallel int, age
 		}
 	}
 	var id int64
+	// A register that began is finished on a context of its own, like a
+	// heartbeat: a request that gives up mid-call must not roll the
+	// advertisement back while its statements still run.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeDeadline)
+	defer cancel()
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		nowStr := fmtTime(e.cfg.Now())
 		err := tx.QueryRow("SELECT id FROM runners WHERE name = ?", name).Scan(&id)
