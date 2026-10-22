@@ -68,7 +68,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-137"
     rounds: 1
   - id: 138
@@ -146,7 +146,7 @@ tasks:
     base: "supply-chain"
     continue: "supply-chain"
     effort: low
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 145
