@@ -11,6 +11,9 @@
 # The brigada binary built at the repository root
 /brigada
 
+# The licenses tool built inside its nested module
+/internal/tools/licenses/licenses
+
 # Test binary, built with `go test -c`
 *.test
 

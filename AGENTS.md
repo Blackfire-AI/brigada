@@ -21,7 +21,7 @@ CI runs these; run them before you push:
 
 `guard` is the repository's own scanner for private addresses and similar leaks.
 
-`THIRD_PARTY_NOTICES.md` comes from the nested module in `internal/tools/licenses` (its own `go.mod`), which keeps go-licenses out of the main `go.mod` and makes the notices reproducible. Do not fold it into the main module. Locally, `TestThirdPartyNoticesFresh` skips when the generator cannot run; CI sets `CI=true` and fails instead. To regenerate after a dependency change:
+`THIRD_PARTY_NOTICES.md` comes from the nested module in `internal/tools/licenses` (its own `go.mod`), which keeps go-licenses out of the main `go.mod` and makes the notices reproducible. The generator runs go-licenses once per platform the release workflow builds and unions the module sets, so the file is identical on every host. Do not fold it into the main module. Locally, `TestThirdPartyNoticesFresh` skips when the generator cannot run; CI sets `CI=true` and fails instead. To regenerate after a dependency change:
 
     cd internal/tools/licenses
     go test -count=1 -run TestThirdPartyNoticesGolden -update .

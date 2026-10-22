@@ -13,6 +13,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/caps"
+	"github.com/Blackfire-AI/brigada/internal/store"
 )
 
 // LeaseGrant is a job plus the lease that took it: what a runner needs
@@ -145,46 +146,65 @@ type LeaseGrant struct {
 // foreman turn outranks every queued task job (§8.1): turns come
 // first, oldest first among themselves, and the layers a held turn
 // waits on are closed to task jobs for the rest of the call.
+// leaseDeadline bounds one lease poll's transaction, which does not
+// follow its request's cancellation (heartbeatDeadline's twin).
+const leaseDeadline = 30 * time.Second
+
 func (e *Engine) Lease(ctx context.Context, owner int64, harnesses, labels []string) (*LeaseGrant, error) {
 	var grant *LeaseGrant
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		now := e.cfg.Now()
-		// A poll shows the runner is here, before the sweep can call it
-		// stale (§8 "Health").
-		if err := e.runnerSeenTx(tx, owner, now); err != nil {
-			return err
-		}
-		// What it offers is what the sweep's busy-runner rule reads to
-		// tell whether it could take a labelled job.
-		offered := labels
-		if offered == nil {
-			offered = []string{}
-		}
-		labelsJSON, err := json.Marshal(offered)
-		if err != nil {
-			return fmt.Errorf("encode labels: %w", err)
-		}
-		offeredHarnesses := harnesses
-		if offeredHarnesses == nil {
-			offeredHarnesses = []string{}
-		}
-		harnessesJSON, err := json.Marshal(offeredHarnesses)
-		if err != nil {
-			return fmt.Errorf("encode harnesses: %w", err)
-		}
-		if _, err := tx.Exec("UPDATE runners SET labels = ?, harnesses = ? WHERE id = ?",
-			string(labelsJSON), string(harnessesJSON), owner); err != nil {
-			return fmt.Errorf("record the offer of runner %d: %w", owner, err)
-		}
-		if _, err := e.sweepPolledTx(tx, now, owner); err != nil {
-			return err
-		}
-		g, err := e.leaseTx(tx, owner, harnesses, labels, now)
-		if err != nil {
-			return fmt.Errorf("lease for runner %d: %w", owner, err)
-		}
-		grant = g
-		return nil
+	// A poll that began is finished on a context of its own: a request
+	// that gives up mid-poll — a client timeout under load, a caller
+	// shutting down — must not roll the transaction back while its
+	// statements still run, or every later step of the poll fails on a
+	// transaction already ended. The deadline keeps a wedged store from
+	// holding the call forever.
+	tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), leaseDeadline)
+	defer cancel()
+	// Under load, polls and writes cross: the store's busy timeout waits
+	// one crossing out, and this bounded backoff rides out the rest
+	// instead of failing the runner's poll. A retried poll starts clean:
+	// the failed transaction rolled back, grant included.
+	err := store.RetryBusy(tctx, func() error {
+		grant = nil
+		return e.store.Update(tctx, func(tx *sql.Tx) error {
+			now := e.cfg.Now()
+			// A poll shows the runner is here, before the sweep can call it
+			// stale (§8 "Health").
+			if err := e.runnerSeenTx(tx, owner, now); err != nil {
+				return err
+			}
+			// What it offers is what the sweep's busy-runner rule reads to
+			// tell whether it could take a labelled job.
+			offered := labels
+			if offered == nil {
+				offered = []string{}
+			}
+			labelsJSON, err := json.Marshal(offered)
+			if err != nil {
+				return fmt.Errorf("encode labels: %w", err)
+			}
+			offeredHarnesses := harnesses
+			if offeredHarnesses == nil {
+				offeredHarnesses = []string{}
+			}
+			harnessesJSON, err := json.Marshal(offeredHarnesses)
+			if err != nil {
+				return fmt.Errorf("encode harnesses: %w", err)
+			}
+			if _, err := tx.Exec("UPDATE runners SET labels = ?, harnesses = ? WHERE id = ?",
+				string(labelsJSON), string(harnessesJSON), owner); err != nil {
+				return fmt.Errorf("record the offer of runner %d: %w", owner, err)
+			}
+			if _, err := e.sweepPolledTx(tx, now, owner); err != nil {
+				return err
+			}
+			g, err := e.leaseTx(tx, owner, harnesses, labels, now)
+			if err != nil {
+				return fmt.Errorf("lease for runner %d: %w", owner, err)
+			}
+			grant = g
+			return nil
+		})
 	})
 	return grant, err
 }
