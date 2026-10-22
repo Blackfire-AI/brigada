@@ -488,6 +488,95 @@ func TestLandWaitsForDependency(t *testing.T) {
 	}
 }
 
+// landWaitingDepAndChild builds the plan the push-gate dependency tests
+// run on: the fixture task as the dependency, a second task depending on
+// it, both driven to done. It leaves the dependency's landing waiting at
+// the push gate and returns the two task ids.
+func (e *env) landWaitingDepAndChild(author, reviewer int64) (dep, child int64) {
+	e.t.Helper()
+	dep = e.task
+	child = e.addTask("{}")
+	e.exec("UPDATE tasks SET state = 'pending' WHERE id = ?", child)
+	e.exec("INSERT INTO task_deps (plan_id, task_id, depends_on_task_id) VALUES (?, ?, ?)", e.plan, child, dep)
+
+	// The dependency runs to done: its land job queues, and the
+	// dependent is released to run its own work.
+	e.runTaskToDone(dep, author, reviewer)
+
+	// The dependent runs to done, then the dependency's landing
+	// completes as waiting at the push gate, which re-runs the
+	// dependent's land rule with its dependency waiting.
+	g := e.leaseAny(author)
+	if g == nil || g.TaskID != child {
+		e.t.Fatalf("the dependent's work job was not leased: %+v", g)
+	}
+	if ans := e.complete(g, doneOn("task/1-1", passCheck)); ans != AnsOK {
+		e.t.Fatalf("complete the dependent's work: %s", ans)
+	}
+	e.runReview(reviewer, `{"verdict":"approve","findings":"`+substantiveFindings+`"}`)
+
+	g = e.leaseGit(author)
+	if g == nil || g.TaskID != dep || g.Kind != KindLand {
+		e.t.Fatalf("the dependency's land job was not leased: %+v", g)
+	}
+	if ans := e.complete(g, Completion{Result: `{"target_branch":"main","commit":"abc123","check_passed":true,"pushed":"waiting"}`}); ans != AnsOK {
+		e.t.Fatalf("complete the dependency's land: %s", ans)
+	}
+	return dep, child
+}
+
+// TestLandWaitsForDependencyWaitingAtThePushGate: a dependency whose
+// landing waits at the push gate holds a dependent's landing under
+// gate_push auto — the dependent's squash would land on the target
+// without the dependency's work — while under ask and never the
+// dependent stacks onto the waiting ref and lands (§6.3, §7.1).
+func TestLandWaitsForDependencyWaitingAtThePushGate(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		gate string
+		want int64
+	}{
+		{"auto waits for the dependency's push", GateAuto, 0},
+		{"ask stacks onto the waiting ref", GateAsk, 1},
+		{"never stacks onto the waiting ref", GateNever, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.set(map[string]string{SettingGatePush: c.gate})
+			author := e.agented("author", "anthropic", "implement")
+			reviewer := e.agented("reviewer", "google", "implement", "review")
+			_, child := e.landWaitingDepAndChild(author, reviewer)
+
+			if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'", child); n != c.want {
+				t.Errorf("dependent land jobs with its dependency waiting = %d, want %d", n, c.want)
+			}
+		})
+	}
+
+	// Under auto the user's release of the dependency's push lets the
+	// dependent land: the release re-runs the dependent's land rule.
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	dep, child := e.landWaitingDepAndChild(author, reviewer)
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'", child); n != 0 {
+		t.Fatalf("dependent land jobs before the release = %d, want 0", n)
+	}
+	res, err := e.eng.PushApprove(e.ctx, envRepo)
+	if err != nil {
+		t.Fatalf("PushApprove: %v", err)
+	}
+	if res.Released != 1 {
+		t.Fatalf("PushApprove released = %d, want 1", res.Released)
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land' AND status = 'queued'", dep); n != 1 {
+		t.Errorf("dependency push jobs after the release = %d, want 1", n)
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'", child); n != 1 {
+		t.Errorf("dependent land jobs after the release = %d, want 1", n)
+	}
+}
+
 // TestLandHoldDoesNotBlockDependentsWork: a held task stays done, so a
 // task depending on it and another task is released when that other
 // finishes — the hold blocks only the dependent's landing, never its work
