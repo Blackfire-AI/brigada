@@ -90,8 +90,8 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-139"
     rounds: 0
   - id: 140
     name: "docs-sweep"
