@@ -49,7 +49,7 @@ tasks:
     base: ""
     effort: medium
     caps: {restart: 4}
-    state: reviewing
+    state: done
     branch: "brigada/task-135-r4"
     rounds: 1
   - id: 136
@@ -102,7 +102,7 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 141
@@ -113,7 +113,7 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 142
