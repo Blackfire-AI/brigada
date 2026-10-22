@@ -79,8 +79,8 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: running
-    branch: "brigada/task-138"
+    state: reviewing
+    branch: "brigada/task-138-r1"
     rounds: 0
   - id: 139
     name: "functionality-fixes"
