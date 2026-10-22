@@ -1,6 +1,7 @@
 package testsupport
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -86,7 +87,8 @@ func buildGitRemoteTemplate() {
 	work := filepath.Join(dir, "work")
 	git := func(dir string, args ...string) {
 		cmd := exec.Command("git", append([]string{"-c", "user.name=brigada test",
-			"-c", "user.email=test@brigada.invalid", "-c", "commit.gpgsign=false"}, args...)...)
+			"-c", "user.email=test@brigada.invalid", "-c", "commit.gpgsign=false",
+			"-c", "gc.auto=0", "-c", "maintenance.auto=false"}, args...)...)
 		cmd.Dir = dir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			gitRemoteErr = &gitError{args: args, dir: dir, err: err, out: out}
@@ -94,6 +96,18 @@ func buildGitRemoteTemplate() {
 		}
 	}
 	git("", "init", "-q", "--bare", remote)
+	if gitRemoteErr != nil {
+		return
+	}
+	// Background maintenance and auto-gc transiently create and remove
+	// files (objects/maintenance.lock) inside the remote while its tree
+	// is captured; turn both off in the remote so later commands
+	// inherit the quiet config.
+	git(remote, "config", "gc.auto", "0")
+	if gitRemoteErr != nil {
+		return
+	}
+	git(remote, "config", "maintenance.auto", "false")
 	if gitRemoteErr != nil {
 		return
 	}
@@ -121,27 +135,50 @@ func buildGitRemoteTemplate() {
 	if gitRemoteErr != nil {
 		return
 	}
-	gitRemoteDirs, gitRemoteTree = nil, map[string][]byte{}
-	gitRemoteErr = filepath.WalkDir(remote, func(path string, d fs.DirEntry, err error) error {
+	gitRemoteDirs, gitRemoteTree, gitRemoteErr = captureTree(remote)
+}
+
+// captureTree walks root and captures every directory by slash path and
+// every file by slash path to its contents. A file that vanishes between
+// the walk and the read is skipped: git's background maintenance can
+// transiently create and remove objects/maintenance.lock inside a live
+// repository mid-walk. Other errors are returned.
+func captureTree(root string) (dirs []string, tree map[string][]byte, err error) {
+	dirs, tree = nil, map[string][]byte{}
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
 			return err
 		}
-		rel, err := filepath.Rel(remote, path)
+		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			gitRemoteDirs = append(gitRemoteDirs, filepath.ToSlash(rel))
+			dirs = append(dirs, filepath.ToSlash(rel))
 			return nil
+		}
+		if captureTreeReadHook != nil {
+			captureTreeReadHook(path)
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
 			return err
 		}
-		gitRemoteTree[filepath.ToSlash(rel)] = data
+		tree[filepath.ToSlash(rel)] = data
 		return nil
 	})
+	return dirs, tree, err
 }
+
+// captureTreeReadHook, nil outside tests, runs before each file read so
+// a test can make a file vanish between the walk and the read.
+var captureTreeReadHook func(path string)
 
 // gitError carries the failing git run out of the template builder.
 type gitError struct {
