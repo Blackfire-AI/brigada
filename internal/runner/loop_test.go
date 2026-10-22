@@ -110,7 +110,7 @@ while [ $i -lt 8 ]; do
   i=$((i+1))
 done
 : > "$BRIGADA_TEST_MARKERS/started"
-sleep 1
+sleep 0.3
 br=$(git rev-parse --abbrev-ref HEAD)
 printf '{"type":"result","text":"done looping: {\\"status\\":\\"done\\",\\"summary\\":\\"looped then finished\\",\\"branch\\":\\"%s\\"}"}\n' "$br"
 : > "$BRIGADA_TEST_MARKERS/finished"

@@ -158,10 +158,11 @@ func withReviewerAgent(cfg *Config) {
 // startReviewRunner runs the dual-agent runner on the scripted worker,
 // with the task's result branch named for the reviewer through the
 // environment.
-func (e *testEnv) startReviewRunner(t *testing.T, branch, script string) *runnerProc {
+func (e *testEnv) startReviewRunner(t *testing.T, branch, script string, adjust ...func(*Config)) *runnerProc {
 	e.t.Helper()
 	t.Setenv("BRIGADA_TEST_BRANCH", branch)
-	return e.startRunner(writeWorkerScript(t, script), 100*time.Millisecond, withReviewerAgent)
+	return e.startRunner(writeWorkerScript(t, script), 100*time.Millisecond,
+		append([]func(*Config){withReviewerAgent}, adjust...)...)
 }
 
 // waitTaskState polls the task's state until it holds.
@@ -519,7 +520,11 @@ func TestRunnerWedgedReviewFailsFast(t *testing.T) {
 	task := e.seedTask("", `echo check >> "$TEST_MARKERS_DIR/checks"; test "$(cat work.txt)" = hello`)
 	work := e.submitWork(task, prompt.ComposeWorkerPrompt("the task spec", "", ""))
 
-	p := e.startReviewRunner(t, taskBranch(task, 1), reviewScript(reviewWedgedResult))
+	// The silence that ends the review is shorter than withReviewerAgent's
+	// default; the work round and the reviewer's reading report within
+	// milliseconds, far under it.
+	p := e.startReviewRunner(t, taskBranch(task, 1), reviewScript(reviewWedgedResult),
+		func(c *Config) { c.StallAfter = 1500 * time.Millisecond })
 	defer p.stop(t)
 
 	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })

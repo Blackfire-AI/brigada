@@ -217,13 +217,22 @@ func pushToMain(t *testing.T, remote, file, content string) string {
 	return remoteBranchCommit(t, remote, "main")
 }
 
-// conflictReviewWorker is the review tests' dual worker with a slow
-// reviewer: the test moves the remote's main in the second the
-// reviewer takes, so the landing that follows the approval fetches a
-// target that no longer takes the task's diff cleanly. (Built on the
-// template by hand — reviewScript rebuilds from the template itself,
-// so it cannot take an edited one.)
-var conflictReviewWorker = strings.Replace(reviewWorker, "@RESULT@", "sleep 1\n\t"+reviewApproveResult, 1)
+// conflictReviewWorker is the review tests' dual worker with a held
+// reviewer: it waits for the test's release marker, so the test moves
+// the remote while the reviewer is still reading and the landing that
+// follows the approval fetches a target that no longer takes the task's
+// diff cleanly. (Built on the template by hand — reviewScript rebuilds
+// from the template itself, so it cannot take an edited one.)
+var conflictReviewWorker = strings.Replace(reviewWorker, "@RESULT@",
+	`while [ ! -f "$BRIGADA_TEST_MARKERS/release" ]; do sleep 0.05; done`+"\n\t"+reviewApproveResult, 1)
+
+// releaseReviewer lets a conflictReviewWorker reviewer finish.
+func releaseReviewer(t *testing.T, markers string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(markers, "release"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // infraReviewWorker is the dual worker whose implementer writes a file
 // under infra/: the changed paths the runner records, which the land
@@ -744,7 +753,7 @@ func TestRunnerLandGateNeverRecordsThePushCmd(t *testing.T) {
 // stops the landing — nothing pushed, no record, the conflicting files
 // in the job's completion — and the task parks for the foreman.
 func TestRunnerLandJobConflict(t *testing.T) {
-	markerDir(t)
+	markers := markerDir(t)
 	remote := newRemote(t)
 	seed := remoteBranchCommit(t, remote, "main")
 	e := newTestEnv(t, engine.Config{})
@@ -759,6 +768,7 @@ func TestRunnerLandJobConflict(t *testing.T) {
 	if moved == seed {
 		t.Fatal("the conflicting push never moved main")
 	}
+	releaseReviewer(t, markers)
 	e.waitTaskState(task, "needs_foreman")
 	if _, _, _, _, ok := e.landing(task); ok {
 		t.Error("a conflicting landing was recorded")
@@ -777,7 +787,7 @@ func TestRunnerLandJobConflict(t *testing.T) {
 // pushed, no record — and the task parks for the foreman, the reason
 // naming the head that was approved.
 func TestRunnerLandRefusesAMovedHead(t *testing.T) {
-	markerDir(t)
+	markers := markerDir(t)
 	remote := newRemote(t)
 	seed := remoteBranchCommit(t, remote, "main")
 	e := newTestEnv(t, engine.Config{})
@@ -797,6 +807,7 @@ func TestRunnerLandRefusesAMovedHead(t *testing.T) {
 	git(t, scratch, "add", "-A")
 	git(t, scratch, "-c", "user.name=other", "-c", "user.email=other@brigada.invalid", "commit", "-qm", "after the review")
 	git(t, scratch, "push", "-q", "origin", branch)
+	releaseReviewer(t, markers)
 
 	e.waitTaskState(task, "needs_foreman")
 	if _, _, _, _, ok := e.landing(task); ok {

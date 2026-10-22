@@ -38,7 +38,7 @@ echo ok > work.txt
 var logWorker = `
 cat > /dev/null
 echo S >> "$BRIGADA_TEST_MARKERS/log"
-sleep 0.4
+sleep 0.15
 echo E >> "$BRIGADA_TEST_MARKERS/log"
 echo ok > work.txt
 ` + fakeResultScript(`{"status":"done","summary":"logged"}`)
@@ -247,7 +247,7 @@ func TestFollowUpWaitsForTheAuthorsWorktree(t *testing.T) {
 					r.ws.remove(ctx)
 				}
 				t.Fatalf("the %s was set up while the author's worktree still held the branch (err %v)", kind, r.err)
-			case <-time.After(400 * time.Millisecond):
+			case <-time.After(100 * time.Millisecond):
 			}
 
 			author.remove(ctx) // the author's completion is published; its worktree comes down
@@ -315,7 +315,7 @@ func TestReLeasedReviewWaitsForTheOldAttemptsWorktree(t *testing.T) {
 			r.ws.remove(ctx)
 		}
 		t.Fatalf("the second attempt was set up while the first still held the path (err %v)", r.err)
-	case <-time.After(400 * time.Millisecond):
+	case <-time.After(100 * time.Millisecond):
 	}
 	if _, err := os.Stat(filepath.Join(first.dir, "README.md")); err != nil {
 		t.Fatalf("something touched the first attempt's live checkout: %v", err)
