@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -326,6 +327,12 @@ type Engine struct {
 	// beforeHeartbeatSweep, when set by a test, runs inside a heartbeat's
 	// transaction just before its sweep, to play a slow sweep out.
 	beforeHeartbeatSweep func()
+
+	// inLeaseTx, when set by a test, runs inside a lease poll's
+	// transaction just before its first statement; the contention test
+	// cancels the poll's request context there, mid-transaction, the
+	// way a runner walking away mid-poll does.
+	inLeaseTx func(tx *sql.Tx)
 
 	// sweepMu guards lastSweep, the wall-clock time of the previous sweep
 	// tick (§13): the suspension check reads the gap from it, and engine

@@ -70,6 +70,21 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// IsBusy reports whether err is SQLite's SQLITE_BUSY — "database is
+// locked" — the error a writer meets when another writer held the
+// database past the busy timeout the DSN already waits with. A caller
+// whose whole transaction can safely run again may back off and retry;
+// the failed transaction rolled back whole, so the retry starts clean.
+// The check reads the message, not a driver type, so it keeps working
+// through every wrapping the error passes through.
+func IsBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "SQLITE_BUSY") || strings.Contains(msg, "database is locked")
+}
+
 // Path is the store file's path as opened — ":memory:" for a private
 // in-memory store — so callers can place the engine's other files
 // (artifact blobs, §9) beside the one database.

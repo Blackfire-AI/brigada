@@ -13,6 +13,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/caps"
+	"github.com/Blackfire-AI/brigada/internal/store"
 )
 
 // LeaseGrant is a job plus the lease that took it: what a runner needs
@@ -135,6 +136,17 @@ type LeaseGrant struct {
 	SessionGen int64
 }
 
+// The lease poll's retry on a busy store (§12.3, §11): a poll that met
+// SQLITE_BUSY has already waited out the store's busy timeout and still
+// lost the write lock to heavier writers, so it backs off and runs
+// again — the failed transaction rolled back whole, so the retry starts
+// clean — a few times with a doubling pause instead of handing a slow
+// runner's load back as an error.
+const (
+	leaseBusyRetries = 4
+	leaseBusyBackoff = 20 * time.Millisecond
+)
+
 // Lease hands the caller the oldest queued job it may run, or nil when
 // there is none (§12.3, §8). A job is offered to owner only if the
 // owner offers its harness and all its labels, is not the runner that
@@ -146,46 +158,69 @@ type LeaseGrant struct {
 // first, oldest first among themselves, and the layers a held turn
 // waits on are closed to task jobs for the rest of the call.
 func (e *Engine) Lease(ctx context.Context, owner int64, harnesses, labels []string) (*LeaseGrant, error) {
+	// The poll's transaction must end by its own code, never by the
+	// request's context: a runner that walks away mid-poll cancels it,
+	// database/sql rolls the transaction back under the poll's feet,
+	// and every statement after that point — wherever the cancellation
+	// happens to land among the poll's steps — fails with "sql:
+	// transaction has already been committed or rolled back", the
+	// lease-path errors of the first public-main CI run. WithoutCancel
+	// drops only the cancellation, never the values; the handler's
+	// long-poll loop still watches the request's Done between attempts,
+	// so a gone runner stops polling, and an in-flight transaction is
+	// short and ends — commits or rolls back whole — on its own.
+	ctx = context.WithoutCancel(ctx)
 	var grant *LeaseGrant
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		now := e.cfg.Now()
-		// A poll shows the runner is here, before the sweep can call it
-		// stale (§8 "Health").
-		if err := e.runnerSeenTx(tx, owner, now); err != nil {
-			return err
+	var err error
+	for attempt := 0; ; attempt++ {
+		grant = nil
+		err = e.store.Update(ctx, func(tx *sql.Tx) error {
+			if e.inLeaseTx != nil {
+				e.inLeaseTx(tx)
+			}
+			now := e.cfg.Now()
+			// A poll shows the runner is here, before the sweep can call it
+			// stale (§8 "Health").
+			if err := e.runnerSeenTx(tx, owner, now); err != nil {
+				return err
+			}
+			// What it offers is what the sweep's busy-runner rule reads to
+			// tell whether it could take a labelled job.
+			offered := labels
+			if offered == nil {
+				offered = []string{}
+			}
+			labelsJSON, err := json.Marshal(offered)
+			if err != nil {
+				return fmt.Errorf("encode labels: %w", err)
+			}
+			offeredHarnesses := harnesses
+			if offeredHarnesses == nil {
+				offeredHarnesses = []string{}
+			}
+			harnessesJSON, err := json.Marshal(offeredHarnesses)
+			if err != nil {
+				return fmt.Errorf("encode harnesses: %w", err)
+			}
+			if _, err := tx.Exec("UPDATE runners SET labels = ?, harnesses = ? WHERE id = ?",
+				string(labelsJSON), string(harnessesJSON), owner); err != nil {
+				return fmt.Errorf("record the offer of runner %d: %w", owner, err)
+			}
+			if _, err := e.sweepPolledTx(tx, now, owner); err != nil {
+				return err
+			}
+			g, err := e.leaseTx(tx, owner, harnesses, labels, now)
+			if err != nil {
+				return fmt.Errorf("lease for runner %d: %w", owner, err)
+			}
+			grant = g
+			return nil
+		})
+		if err == nil || !store.IsBusy(err) || attempt >= leaseBusyRetries {
+			break
 		}
-		// What it offers is what the sweep's busy-runner rule reads to
-		// tell whether it could take a labelled job.
-		offered := labels
-		if offered == nil {
-			offered = []string{}
-		}
-		labelsJSON, err := json.Marshal(offered)
-		if err != nil {
-			return fmt.Errorf("encode labels: %w", err)
-		}
-		offeredHarnesses := harnesses
-		if offeredHarnesses == nil {
-			offeredHarnesses = []string{}
-		}
-		harnessesJSON, err := json.Marshal(offeredHarnesses)
-		if err != nil {
-			return fmt.Errorf("encode harnesses: %w", err)
-		}
-		if _, err := tx.Exec("UPDATE runners SET labels = ?, harnesses = ? WHERE id = ?",
-			string(labelsJSON), string(harnessesJSON), owner); err != nil {
-			return fmt.Errorf("record the offer of runner %d: %w", owner, err)
-		}
-		if _, err := e.sweepPolledTx(tx, now, owner); err != nil {
-			return err
-		}
-		g, err := e.leaseTx(tx, owner, harnesses, labels, now)
-		if err != nil {
-			return fmt.Errorf("lease for runner %d: %w", owner, err)
-		}
-		grant = g
-		return nil
-	})
+		time.Sleep(leaseBusyBackoff << uint(attempt))
+	}
 	return grant, err
 }
 
@@ -220,6 +255,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		queued = append(queued, j)
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return nil, fmt.Errorf("list queued jobs: %w", err)
 	}
 	rows.Close()
