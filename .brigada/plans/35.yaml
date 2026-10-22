@@ -71,7 +71,7 @@ tasks:
     deps: ["s4-runtime-security"]
     base: "s4-runtime-security"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 129
