@@ -112,6 +112,6 @@ tasks:
     base: "s8-code-health"
     tier: light
     effort: low
-    state: ready
+    state: running
     branch: ""
     rounds: 0
