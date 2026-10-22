@@ -29,7 +29,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-147"
     rounds: 0
   - id: 148
