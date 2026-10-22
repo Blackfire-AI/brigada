@@ -71,6 +71,6 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
