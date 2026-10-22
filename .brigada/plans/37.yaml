@@ -41,7 +41,6 @@ tasks:
     tier: light
     effort: medium
     review_tier: standard
-    state: needs_foreman
+    state: ready
     branch: ""
     rounds: 0
-    question: "Can you delete the stray build artifact internal/tools/licenses/licenses (rm or git clean) before committing, since file removal is denied for every agent in this session?"
