@@ -5,9 +5,9 @@
 plan: 36
 title: "Pre-public review phase 2: fix the findings of #55 (B1, B2, B3, B6–B12 and should-fix items)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-10-22T12:54:31.824979Z
-updated: 2026-10-22T15:07:49.16723Z
+updated: 2026-10-22T15:27:28.523028Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -159,4 +159,16 @@ tasks:
     effort: medium
     state: done
     branch: "brigada/task-145"
+    rounds: 0
+  - id: 146
+    name: "notices-test-skip"
+    title: "Third-party notices: freshness test skips when generator cannot run; document regeneration"
+    class: "implement"
+    deps: ["legal-notices-final"]
+    base: "legal-notices-final"
+    continue: "legal-notices-final"
+    tier: light
+    effort: medium
+    state: pending
+    branch: ""
     rounds: 0
