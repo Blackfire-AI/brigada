@@ -7,7 +7,7 @@ title: "Speed up CI: shard race, cache plain tests, manual clocks in slow suites
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-10-22T21:23:42.086564Z
-updated: 2026-10-22T21:25:34.694701Z
+updated: 2026-10-22T21:25:47.839605Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -38,7 +38,7 @@ tasks:
     base: "shard-race"
     continue: "shard-race"
     tier: light
-    effort: medium
+    effort: low
     state: pending
     branch: ""
     rounds: 0
@@ -46,8 +46,8 @@ tasks:
     name: "manual-clocks"
     title: "Manual clocks / shortened intervals in the slow suites (engine, runner, cmd/brigada, api)"
     class: "implement"
-    deps: ["ci-cache"]
-    base: "ci-cache"
+    deps: []
+    base: ""
     tier: heavy
     effort: high
     state: pending
