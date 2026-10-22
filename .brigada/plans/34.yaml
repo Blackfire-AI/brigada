@@ -49,8 +49,8 @@ tasks:
     base: "runner2"
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-120"
     rounds: 0
   - id: 121
     name: "engine-amend"
