@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
 
 // The approval limit (§6.3): a plan the user has not pre-approved starts
@@ -23,6 +25,11 @@ const planAwaitingApproval = "pending_approval"
 
 // Plan states the user's decision sets.
 const planCancelled = "cancelled"
+
+// planReviewing is the plan state of a plan under review (§6.2):
+// its plan_review job is queued or running, no work job of the plan is,
+// and the approval rules wait for the verdict.
+const planReviewing = "reviewing"
 
 // The shipped approval limit (§6.3): the task count is off unless the
 // project sets one; the cost rule that stands in its place by default is
@@ -53,6 +60,13 @@ var defaultApprovalClasses = []string{"implement", "review", "answer"}
 //	                            the landing (§6.3, §7.1). Absent = none.
 //	gate_plan                   auto or ask; ask holds every plan at the
 //	                            plan gate (§6.3). Absent = auto.
+//	plan_review                 bool; the plan review before a plan's (or
+//	                            an amendment's) tasks queue (§6.2).
+//	                            Absent = the engine default, on.
+//	plan_review.tier            the reviewer's tier: light, standard or
+//	                            heavy. Absent = standard.
+//	plan_review.effort          the reviewer's effort: low, medium, high
+//	                            or max. Absent = medium.
 //	gate_land, gate_push        the land and push gates the land job
 //	                            enforces (§6.3, §7.1): gate_land ask
 //	                            holds every landing, gate_push decides
@@ -74,6 +88,9 @@ type approvalSettings struct {
 	GatePlan          string     `json:"gate_plan"`
 	GateLand          string     `json:"gate_land"`
 	GatePush          string     `json:"gate_push"`
+	PlanReview        *bool      `json:"plan_review"`
+	PlanReviewTier    string     `json:"plan_review.tier"`
+	PlanReviewEffort  string     `json:"plan_review.effort"`
 	ApprovalTiers     stringList `json:"approval_tiers"`
 	ApprovalRestarted bool       `json:"approval_restarted"`
 	LandTarget        string     `json:"land_target"`
@@ -187,6 +204,43 @@ func projectApprovalTx(tx *sql.Tx, project int64) (approvalSettings, error) {
 		s.Classes = defaultApprovalClasses
 	}
 	return s, nil
+}
+
+// planReviewSettings is the plan review's resolved settings (§6.2):
+// on or off, and the reviewer's tier and effort. The project's
+// plan_review keys set them; the engine-wide default (Config.PlanReview,
+// on when unset) fills the on/off a project never set, and standard and
+// medium the tier and effort.
+type planReviewSettings struct {
+	On     bool
+	Tier   string
+	Effort string
+}
+
+// planReview resolves the settings over the engine's own default: a
+// project that set plan_review wins, else the default the engine was
+// built with. The tier and effort default to standard and medium.
+func (e *Engine) planReview(s approvalSettings) planReviewSettings {
+	return planReviewOf(&e.cfg, s)
+}
+
+// planReviewOf is planReview over a config, for the lease paths that
+// hold the config without an engine.
+func planReviewOf(cfg *Config, s approvalSettings) planReviewSettings {
+	pr := planReviewSettings{On: true, Tier: adapter.TierStandard, Effort: defaultTaskEffort}
+	if cfg.PlanReview != nil {
+		pr.On = *cfg.PlanReview
+	}
+	if s.PlanReview != nil {
+		pr.On = *s.PlanReview
+	}
+	if s.PlanReviewTier != "" {
+		pr.Tier = s.PlanReviewTier
+	}
+	if s.PlanReviewEffort != "" {
+		pr.Effort = s.PlanReviewEffort
+	}
+	return pr
 }
 
 // evaluate applies the limit to a plan's tasks (§6.3).
@@ -487,6 +541,10 @@ func awaitingPlanTx(tx *sql.Tx, project, plan, version int64) (int64, error) {
 
 // cancelPlanTx shares task/job cancellation and outcome accounting with rejection.
 func (e *Engine) cancelPlanTx(tx *sql.Tx, proj, plan int64, eventKind string, now time.Time) error {
+	// The plan's pending review job stops with the plan (§6.2).
+	if err := e.cancelPlanReviewTx(tx, plan, now); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`UPDATE plans SET state = ?, updated_at = ? WHERE id = ?`, planCancelled, fmtTime(now), plan); err != nil {
 		return fmt.Errorf("cancel plan %d: %w", plan, err)
 	}

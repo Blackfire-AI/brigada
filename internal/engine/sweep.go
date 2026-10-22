@@ -282,7 +282,7 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 		rep.Expired = append(rep.Expired, x.id)
 	}
 
-	for _, kind := range []Kind{KindWork, KindFix, KindReview, KindForeman} {
+	for _, kind := range []Kind{KindWork, KindFix, KindReview, KindForeman, KindPlanReview} {
 		limit, ok := e.cfg.HardCaps[kind]
 		if !ok || limit <= 0 {
 			continue
@@ -328,6 +328,18 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 			}
 			if err := e.sweptForemanFinishedTx(tx, x.id, x.project, now); err != nil {
 				return rep, err
+			}
+			if kind == KindPlanReview {
+				// A plan review past its cap (§6.2) never gives a
+				// verdict: the plan proceeds as approve would take it,
+				// instead of waiting in reviewing with no live job.
+				j, err := loadJobTx(tx, x.id)
+				if err != nil {
+					return rep, err
+				}
+				if err := e.planReviewUnrunnableTx(tx, x.project, planReviewOfJobTx(j), reason, now); err != nil {
+					return rep, err
+				}
 			}
 			if x.task != 0 {
 				if err := e.needsForemanTx(tx, &jobRow{ID: x.id, ProjectID: x.project, TaskID: x.task},
@@ -463,6 +475,19 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 			}
 			if err := e.sweptForemanFinishedTx(tx, x.id, x.project, now); err != nil {
 				return rep, err
+			}
+			if x.kind == string(KindPlanReview) {
+				// A plan review no runner ever took (§6.2): the
+				// reviewer cannot be run, and the plan proceeds through
+				// the same evaluation as approve instead of waiting in
+				// reviewing forever.
+				j, err := loadJobTx(tx, x.id)
+				if err != nil {
+					return rep, err
+				}
+				if err := e.planReviewUnrunnableTx(tx, x.project, planReviewOfJobTx(j), reason, now); err != nil {
+					return rep, err
+				}
 			}
 			if x.task != 0 {
 				if err := e.needsForemanTx(tx, &jobRow{ID: x.id, ProjectID: x.project, TaskID: x.task},

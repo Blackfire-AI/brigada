@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
 )
@@ -65,7 +66,22 @@ func StatusSections(st Status) string {
 	} else {
 		lines = append(lines, "plans:")
 		for _, p := range st.Plans {
-			lines = append(lines, fmt.Sprintf("#%d %s %s", p.ID, p.State, p.Title))
+			// A reviewing plan names its round (§6.2): `plan 12
+			// reviewing (round 1)`.
+			state := p.State
+			if state == "reviewing" {
+				state = fmt.Sprintf("reviewing (round %d)", p.ReviewRound)
+			}
+			lines = append(lines, fmt.Sprintf("#%d %s %s", p.ID, state, p.Title))
+			// The review's latest verdict and findings, so the foreman
+			// reads what the reviewer said through the status tool.
+			if p.ReviewVerdict != "" || p.ReviewFindings != "" {
+				review := "  review: " + p.ReviewVerdict
+				if p.ReviewFindings != "" {
+					review += ", findings: " + oneLine(p.ReviewFindings, 200)
+				}
+				lines = append(lines, review)
+			}
 			for _, t := range p.Tasks {
 				line := fmt.Sprintf("  task #%d %s %s", t.ID, t.State, t.Title)
 				if t.Landed {
@@ -179,6 +195,19 @@ func shortVersion(h string) string {
 		return h[:12]
 	}
 	return h
+}
+
+// oneLine flattens s to a single line of at most about max bytes, the
+// cut backing off to a complete rune.
+func oneLine(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) <= max {
+		return s
+	}
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
+	}
+	return s[:max]
 }
 
 // runningLines renders the jobs a runner holds (§10), one line each:

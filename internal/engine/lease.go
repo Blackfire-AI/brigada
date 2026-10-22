@@ -478,6 +478,15 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				effort = adapter.EffortForHarness(agentHarness, defaultTaskEffort)
 			}
 			jobEffort = effort
+		} else if j.Kind == KindPlanReview {
+			// A plan review (§6.2) runs at the project's
+			// plan_review.effort, mapped for the harness as any task
+			// effort is; medium when the project set none.
+			if settings, serr := projectApprovalTx(tx, j.ProjectID); serr != nil {
+				return nil, serr
+			} else if effort = adapter.EffortForHarness(agentHarness, planReviewOf(&e.cfg, settings).Effort); effort != "" {
+				jobEffort = effort
+			}
 		} else if j.Kind == KindForeman && foremanEffort != "" {
 			jobEffort = foremanEffort
 		}
@@ -621,7 +630,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			if extraRepos, err = taskExtraReposTx(tx, j.TaskID); err != nil {
 				return nil, err
 			}
-		case j.Kind == KindReview:
+		case j.Kind == KindReview || j.Kind == KindPlanReview:
 			if setup, err = projectSetupTx(tx, j.ProjectID); err != nil {
 				return nil, err
 			}
@@ -875,6 +884,18 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 				return nil, err
 			}
 		}
+	} else if j.Kind == KindPlanReview {
+		// A plan review (§6.2) has no task to name a tier: the
+		// project's plan_review.tier asks, and the tier fallback below
+		// serves, as a task review's does.
+		var err error
+		if asked, err = planReviewTierTx(tx, cfg, j); err != nil {
+			return nil, err
+		}
+		served, err = tierServedTx(tx, limits, j, class, asked, now)
+		if err != nil {
+			return nil, err
+		}
 	}
 	rows, err := qualifyingAgentRowsTx(tx, runner, j, class, now)
 	if err != nil {
@@ -1060,7 +1081,7 @@ func qualifyingAgentRowsTx(tx *sql.Tx, runner int64, j *jobRow, class, now strin
 		if id == excludeAgent {
 			continue
 		}
-		if j.ExcludeFamily != "" || j.Kind == KindReview {
+		if j.ExcludeFamily != "" || j.Kind == KindReview || j.Kind == KindPlanReview {
 			if !reviewAgentQualifies(id, family, classes, j.ExcludeFamily, excludeAgent, author) {
 				continue
 			}
@@ -1079,13 +1100,14 @@ func qualifyingAgentRowsTx(tx *sql.Tx, runner int64, j *jobRow, class, now strin
 
 // kindClass is the dispatch class for ordinary leases (§8): work and fix
 // use implement regardless of the task's class; review and foreman jobs
-// use review and answer respectively for the outcomes join. Foreman turns
-// are exempt from the advertised-class filter: their pair is the constraint.
+// use review and answer respectively for the outcomes join. A plan
+// review (§6.2) is placed like a review. Foreman turns are exempt
+// from the advertised-class filter: their pair is the constraint.
 func kindClass(k Kind) string {
 	switch k {
 	case KindWork, KindFix:
 		return "implement"
-	case KindReview:
+	case KindReview, KindPlanReview:
 		return string(KindReview)
 	case KindForeman:
 		return "answer"

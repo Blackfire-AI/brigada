@@ -24,11 +24,12 @@ import (
 type Kind string
 
 const (
-	KindWork    Kind = "work"
-	KindFix     Kind = "fix"
-	KindReview  Kind = "review"
-	KindForeman Kind = "foreman"
-	KindLand    Kind = "land" // a landing (§7.1): no worker, a runner with git
+	KindWork       Kind = "work"
+	KindFix        Kind = "fix"
+	KindReview     Kind = "review"
+	KindForeman    Kind = "foreman"
+	KindLand       Kind = "land"        // a landing (§7.1): no worker, a runner with git
+	KindPlanReview Kind = "plan_review" // a plan review (§6.2): no task, an agent of a family other than the foreman's
 )
 
 // Mode is how the runner starts the job (§5.6): a fresh session, or a
@@ -150,6 +151,10 @@ type Config struct {
 	// TaskAutoRetry retries a transient work failure once on another ready
 	// agent (§3). Nil keeps the default, on; false parks immediately.
 	TaskAutoRetry *bool
+	// PlanReview is the engine-wide default of the plan review (§6.2):
+	// nil keeps the default, on. A project's plan_review setting
+	// overrides it per project.
+	PlanReview *bool
 	// ForemanWakeBudget is how many foreman turns a project may be woken
 	// into per UTC day (§4.3); zero — the default — keeps
 	// defaultForemanWakeBudget. The count is of the project's foreman
@@ -251,10 +256,11 @@ func DefaultConfig() Config {
 		MaxAttempts:    3,
 		QueueTTL:       10 * time.Minute,
 		HardCaps: map[Kind]time.Duration{
-			KindWork:    45 * time.Minute,
-			KindFix:     45 * time.Minute,
-			KindReview:  25 * time.Minute,
-			KindForeman: 30 * time.Minute,
+			KindWork:       45 * time.Minute,
+			KindFix:        45 * time.Minute,
+			KindReview:     25 * time.Minute,
+			KindForeman:    30 * time.Minute,
+			KindPlanReview: 25 * time.Minute,
 		},
 		RoundCaps:         RoundCaps{Fix: 2, Review: 2, Restart: 3},
 		Review:            ReviewConfig{Tier: ReviewTierBelow, Effort: defaultReviewEffort},
@@ -371,6 +377,9 @@ func New(s *store.Store, cfg Config) *Engine {
 	}
 	if cfg.TaskAutoRetry != nil {
 		def.TaskAutoRetry = cfg.TaskAutoRetry
+	}
+	if cfg.PlanReview != nil {
+		def.PlanReview = cfg.PlanReview
 	}
 	if cfg.ForemanWakeBudget > 0 {
 		def.ForemanWakeBudget = cfg.ForemanWakeBudget

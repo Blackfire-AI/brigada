@@ -537,7 +537,7 @@ func TestServePlanTaskTierEffort(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	eng := engine.New(st, engine.Config{})
+	eng := engine.New(st, engine.Config{PlanReview: &planReviewOff})
 	tokenPath := filepath.Join(t.TempDir(), "tokens")
 	if err := os.WriteFile(tokenPath, []byte(foremanTokenFile), 0600); err != nil {
 		t.Fatal(err)

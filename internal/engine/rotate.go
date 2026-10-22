@@ -198,7 +198,7 @@ func foremanDigestTx(tx *sql.Tx, project int64, now time.Time) (string, error) {
 		id           int64
 		title, state string
 	}
-	rows, err := tx.Query(`SELECT id, title, state FROM plans WHERE project_id = ? AND state IN ('active', 'pending_approval') ORDER BY id`, project)
+	rows, err := tx.Query(`SELECT id, title, state FROM plans WHERE project_id = ? AND state IN ('active', 'reviewing', 'pending_approval') ORDER BY id`, project)
 	if err != nil {
 		return "", fmt.Errorf("list the digest plans of project %d: %w", project, err)
 	}
@@ -217,7 +217,7 @@ func foremanDigestTx(tx *sql.Tx, project int64, now time.Time) (string, error) {
 	}
 	rows.Close()
 	add("")
-	add("Plans active or awaiting approval: %d", len(plans))
+	add("Plans active, reviewing or awaiting approval: %d", len(plans))
 	for i, p := range plans {
 		if i == digestMaxPlans {
 			add("- %d more plans omitted", len(plans)-digestMaxPlans)

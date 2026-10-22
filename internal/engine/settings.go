@@ -31,9 +31,16 @@ const (
 	// The gates and land rules (§6.3). gate_plan is enforced today: ask
 	// holds every plan at the plan-approval gate. The land rules and
 	// gates are read by the land job (§7.1).
-	SettingGatePlan          = "gate_plan"
-	SettingGateLand          = "gate_land"
-	SettingGatePush          = "gate_push"
+	SettingGatePlan = "gate_plan"
+	SettingGateLand = "gate_land"
+	SettingGatePush = "gate_push"
+	// The plan review (§6.2): plan_review turns it on and off
+	// (default on), plan_review.tier and plan_review.effort set the
+	// reviewer's tier (default standard) and effort (default medium).
+	// Local only — the shared project.yaml's keys cannot carry a dot.
+	SettingPlanReview        = "plan_review"
+	SettingPlanReviewTier    = "plan_review.tier"
+	SettingPlanReviewEffort  = "plan_review.effort"
 	SettingApprovalTiers     = "approval_tiers"
 	SettingApprovalRestarted = "approval_restarted"
 	SettingLandTarget        = "land_target"
@@ -76,7 +83,8 @@ const (
 
 // SettingKeys are the editable keys, in the order show prints them.
 var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
-	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
+	SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
+	SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
 	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingInstructions}
 
@@ -187,7 +195,8 @@ var classWord = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 func parseSettingValue(key, value string) (json.RawMessage, error) {
 	switch key {
 	case SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
-		SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
+		SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
+		SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
 		SettingDefaultCheck, SettingWorkerTools,
 		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingInstructions:
 	default:
@@ -228,6 +237,27 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 			return nil, fmt.Errorf("%w: %s takes true or false, got %q", ErrInvalidSetting, key, value)
 		}
 		return json.Marshal(v == "true")
+	}
+	if key == SettingPlanReview {
+		v := strings.TrimSpace(value)
+		if v != "true" && v != "false" {
+			return nil, fmt.Errorf("%w: %s takes true or false, got %q", ErrInvalidSetting, key, value)
+		}
+		return json.Marshal(v == "true")
+	}
+	if key == SettingPlanReviewTier {
+		v := strings.TrimSpace(value)
+		if err := adapter.ValidateTier(v); err != nil {
+			return nil, fmt.Errorf("%w: %s: %v", ErrInvalidSetting, key, err)
+		}
+		return json.Marshal(v)
+	}
+	if key == SettingPlanReviewEffort {
+		v := strings.TrimSpace(value)
+		if err := adapter.ValidateTaskEffort(v); err != nil {
+			return nil, fmt.Errorf("%w: %s: %v", ErrInvalidSetting, key, err)
+		}
+		return json.Marshal(v)
 	}
 	if key == SettingLandTarget {
 		v := strings.TrimSpace(value)
@@ -419,6 +449,23 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 			}
 		case SettingGatePush:
 			sv.Value = GateAuto
+			if s, ok := rawString(cur); ok && s != "" {
+				sv.Value = s
+			}
+		case SettingPlanReview:
+			sv.Value = "true"
+			if has {
+				if b, err := strconv.ParseBool(string(cur)); err == nil {
+					sv.Value = strconv.FormatBool(b)
+				}
+			}
+		case SettingPlanReviewTier:
+			sv.Value = adapter.TierStandard
+			if s, ok := rawString(cur); ok && s != "" {
+				sv.Value = s
+			}
+		case SettingPlanReviewEffort:
+			sv.Value = defaultTaskEffort
 			if s, ok := rawString(cur); ok && s != "" {
 				sv.Value = s
 			}

@@ -46,6 +46,10 @@ type fakeClock struct {
 	now time.Time
 }
 
+// planReviewOff keeps the fixture's plan creations on the no-review path
+// (§6.2); the plan review has its own tests.
+var planReviewOff = false
+
 func newFakeClock() *fakeClock {
 	return &fakeClock{now: time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)}
 }
@@ -137,7 +141,7 @@ func newEnvTokens(t *testing.T, tokens string) *env {
 	if err := os.WriteFile(tokenFile, []byte(tokens), 0o600); err != nil {
 		t.Fatalf("write token file: %v", err)
 	}
-	e.eng = engine.New(st, engine.Config{Now: e.clock.Now})
+	e.eng = engine.New(st, engine.Config{Now: e.clock.Now, PlanReview: &planReviewOff})
 	api, err := New(ctx, st, e.eng, nil, tokenFile)
 	if err != nil {
 		t.Fatalf("build api server: %v", err)

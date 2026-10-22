@@ -557,6 +557,9 @@ Some keys belong to you and this engine, not to the team. The shared file refuse
 |---|---|---|
 | `foreman_wakes_per_day` | `20`, or the config file's value | The daily wake budget, 1 to 1000 ([section 4](#4-while-work-runs); also `brigada budget --wakes N`). |
 | `instructions` | none | A local override of the instruction text. |
+| `plan_review` | `true` | The plan review before a plan's (or an amendment's) tasks queue: a `plan_review` job, an agent of a family other than the foreman's, whose verdict starts the plan or sends findings back to the foreman ([section 7](#gates-and-rules)). |
+| `plan_review.tier` | `standard` | The plan reviewer's tier: `light`, `standard` or `heavy`. |
+| `plan_review.effort` | `medium` | The plan reviewer's effort: `low`, `medium`, `high` or `max`. |
 
 ```sh
 brigada project set [--repo URL] key=value ...
@@ -624,6 +627,8 @@ The foreman can use `plan_amend`'s `retier` list, for example `[{"task":"build",
 ### Gates and rules
 
 The loop — plan, work, check, review, land, push — is brigada's; you stop it with gates and rules, all keys of `.brigada/project.yaml` ([section 6](#6-configuring-a-project)). The engine enforces every stop; the foreman has no tool to pass one. A gate set to `ask` holds in the needs-you queue, and a rule turns `auto` into `ask` for the one plan or task that trips it, naming the rule.
+
+**The plan review** (local setting `plan_review`, on by default) runs before the plan gate: a new plan — everything but one task of the `review` class — and each amendment that adds tasks or edits a pending task's spec is first reviewed by an agent of a family other than the foreman's (`plan_review.tier`, default `standard`; `plan_review.effort`, default `medium`). The plan waits in `reviewing` (`brigada status` shows `plan 12 reviewing (round 1)`), no work queued; the reviewer's `approve` verdict then runs the plan gate's rules below, and a `changes` verdict sends the findings to the foreman as a `plan_reviewed` event, which it answers by amending the plan — at most two rounds, the second `changes` proceeding through the same rules with the findings recorded. The user rules always have the last word: review first, rules after.
 
 **The plan gate.** A plan starts on its own unless it trips one of the per-task rules, or `gate_plan: ask` holds every plan:
 
@@ -1081,6 +1086,9 @@ Every key that `brigada project set` and `project show` know, with each default 
 | `gate_plan` | `auto` | yes |
 | `gate_land` | `auto` | yes |
 | `gate_push` | `auto` | yes |
+| `plan_review` | `true` | no, local only |
+| `plan_review.tier` | `standard` | no, local only |
+| `plan_review.effort` | `medium` | no, local only |
 | `approval_tiers` | `none` | yes |
 | `approval_restarted` | `false` | yes |
 | `land_target` | the project's default branch | yes |

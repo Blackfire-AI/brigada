@@ -982,6 +982,7 @@ func TestSchemaEditsMatchTheirMigrations(t *testing.T) {
 		23: "review_without_task",
 		36: "task_setup",
 		50: "land_job",
+		58: "plan_review",
 	}
 	migs, err := allMigrations()
 	if err != nil {

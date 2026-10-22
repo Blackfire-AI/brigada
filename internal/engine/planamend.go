@@ -113,6 +113,10 @@ type AmendPlanResult struct {
 // ErrPlanNotLive refuses an amendment of a plan that is done or cancelled.
 var ErrPlanNotLive = errors.New("plan is not live")
 
+// ErrPlanReviewRunning refuses an amendment that adds or respecifies
+// tasks while the plan's review round runs (§6.2).
+var ErrPlanReviewRunning = errors.New("plan review is running")
+
 // AmendPlan is the foreman's plan_amend (§12.2): add tasks, cancel tasks
 // re-point dependencies, change waiting or parked tasks' tier or effort, and
 // replace or append to a pending task's spec, validated whole — names
@@ -190,8 +194,20 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	if err := activeProjectTx(tx, proj); err != nil {
 		return AmendPlanResult{}, err
 	}
-	if state != "active" && state != planAwaitingApproval {
-		return AmendPlanResult{}, fmt.Errorf("%w: plan %d is %s; only an active or awaiting plan is amended", ErrPlanNotLive, plan, state)
+	if state != "active" && state != planAwaitingApproval && state != planReviewing {
+		return AmendPlanResult{}, fmt.Errorf("%w: plan %d is %s; only an active, awaiting or reviewing plan is amended", ErrPlanNotLive, plan, state)
+	}
+	if state == planReviewing && (len(am.Add) > 0 || len(am.Respec) > 0) {
+		// A running review round reads the plan as it was queued
+		// (§6.2): tasks added or respecified under it would start at its
+		// verdict unreviewed, so they wait for the verdict instead.
+		live, err := liveJobTx(tx, planReviewKey(plan))
+		if err != nil {
+			return AmendPlanResult{}, err
+		}
+		if live != nil {
+			return AmendPlanResult{}, fmt.Errorf("%w: plan %d's review round is running; add or respecify tasks after its verdict", ErrPlanReviewRunning, plan)
+		}
 	}
 
 	nodes, err := loadAmendNodesTx(tx, plan)
@@ -490,7 +506,13 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	// own needs-you line naming the rule, while the plan stays active.
 	// The whole-plan triggers (the task count, gate_plan) do not apply to
 	// a plan already running. An awaiting plan is re-evaluated whole, as
-	// at creation, and stays awaiting.
+	// at creation, and stays awaiting. An active plan the project reviews
+	// (§6.2) holds its added and respecified tasks pending instead:
+	// the plan turns reviewing, the per-task rules wait for the verdict,
+	// and a reviewing plan amended is the foreman's answer to a changes
+	// verdict, which starts the next round.
+	review := e.planReview(settings)
+	amendReview := review.On && state == "active" && (len(am.Add) > 0 || len(respecced) > 0)
 	var kept []PlanTask
 	for _, n := range nodes {
 		if n.state != taskCancelled {
@@ -501,7 +523,10 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	var verdict approvalVerdict
 	addedHold := make([]string, len(am.Add)) // per added task, the hold reasons joined; "" when none
 	respecHold := map[int]string{}           // per respecified task, likewise
-	if state == "active" {
+	switch {
+	case amendReview:
+		newState = planReviewing
+	case state == "active":
 		for _, i := range respecced {
 			if reasons := settings.taskHoldReasons(PlanTask{Spec: respecText[i], Class: nodes[i].class}); len(reasons) > 0 {
 				respecHold[i] = strings.Join(reasons, "; ")
@@ -513,8 +538,10 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 				addedHold[k] = strings.Join(reasons, "; ")
 			}
 		}
-	} else {
-		verdict = settings.evaluate(kept)
+	default:
+		if state == planAwaitingApproval {
+			verdict = settings.evaluate(kept)
+		}
 	}
 
 	// Write. Cancels first: a cancelled task's live jobs stop with it.
@@ -656,6 +683,45 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		}
 	}
 
+	// The plan review (§6.2): an active plan the amendment gives
+	// tasks to turns reviewing over its added and respecified tasks,
+	// which stay pending until the verdict; a reviewing plan's amendment
+	// is the foreman's answer to a changes verdict, and starts the next
+	// round over the tasks it names.
+	if amendReview || state == planReviewing {
+		var batch []int64
+		for _, i := range respecced {
+			batch = append(batch, nodes[i].id)
+		}
+		for _, a := range res.Added {
+			batch = append(batch, a.TaskID)
+		}
+		var err error
+		if amendReview {
+			err = e.planReviewBeginTx(tx, proj, plan, batch, now)
+		} else {
+			err = e.planReviewAnswerTx(tx, proj, plan, batch, now)
+		}
+		if err != nil {
+			return AmendPlanResult{}, err
+		}
+		// A review that concluded at once — no reviewer to be had, the
+		// rounds spent, an answer with no task to review — moved the
+		// plan on already: the result reads the state it reached and the
+		// work its conclusion started.
+		if err := tx.QueryRow("SELECT state FROM plans WHERE id = ?", plan).Scan(&newState); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("read plan %d: %w", plan, err)
+		}
+		res.State = newState
+		if newState == "active" {
+			started, err := startedWorkTx(tx, plan, now)
+			if err != nil {
+				return AmendPlanResult{}, err
+			}
+			res.Started = started
+		}
+	}
+
 	// The waiting state re-evaluates as creation does: in an active plan,
 	// every pending task whose dependencies are all done starts — unless
 	// the plan's spend has passed its budget, when it parks at the plan
@@ -665,10 +731,10 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if err != nil {
 			return AmendPlanResult{}, err
 		}
-		res.Started = started
+		res.Started = append(res.Started, started...)
 		res.Held = append(res.Held, held...)
 		for k := range res.Added {
-			for _, s := range started {
+			for _, s := range res.Started {
 				if s.TaskID == res.Added[k].TaskID {
 					res.Added[k].JobID = s.JobID
 				}
@@ -837,6 +903,27 @@ func (e *Engine) cancelTaskJobsTx(tx *sql.Tx, task int64, now time.Time) error {
 	return nil
 }
 
+// startedWorkTx lists the work jobs of the plan's tasks queued at now:
+// those this transaction's review conclusion started, which readied the
+// tasks before the caller could see them.
+func startedWorkTx(tx *sql.Tx, plan int64, now time.Time) ([]CreatedTask, error) {
+	rows, err := tx.Query(`SELECT t.id, t.name, j.id FROM jobs j JOIN tasks t ON t.id = j.task_id
+		WHERE t.plan_id = ? AND j.kind = ? AND j.created_at = ? ORDER BY j.id`, plan, KindWork, fmtTime(now))
+	if err != nil {
+		return nil, fmt.Errorf("read the started work of plan %d: %w", plan, err)
+	}
+	defer rows.Close()
+	var out []CreatedTask
+	for rows.Next() {
+		var c CreatedTask
+		if err := rows.Scan(&c.TaskID, &c.Name, &c.JobID); err != nil {
+			return nil, fmt.Errorf("read the started work of plan %d: %w", plan, err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // readyPlanTasksTx starts every pending task of an active plan whose
 // dependencies are all done — none counts — turning it ready with its
 // first work job queued, as creation and approval do. A task of a plan
@@ -890,7 +977,7 @@ func (e *Engine) readyPlanTasksTx(tx *sql.Tx, project, plan int64, now time.Time
 		if err != nil {
 			return nil, nil, err
 		}
-		out = append(out, CreatedTask{TaskID: w.id, Name: w.name, JobID: sr.JobID})
+		out = append(out, CreatedTask{TaskID: w.id, Name: w.name, JobID: sr.JobID, answer: sr.Answer, run: sr.Run})
 	}
 	return out, held, nil
 }
