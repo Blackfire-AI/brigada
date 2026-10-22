@@ -82,6 +82,6 @@ tasks:
     base: "engine-amend2"
     continue: "engine-amend2"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
