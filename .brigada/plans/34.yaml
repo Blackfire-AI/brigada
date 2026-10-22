@@ -7,7 +7,7 @@ title: "Review plans and specs before their tasks are queued (#50)"
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-10-22T09:18:21.019711Z
-updated: 2026-10-22T11:12:44.082246Z
+updated: 2026-10-22T11:57:21.9945Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -45,7 +45,7 @@ tasks:
     name: "docs"
     title: "Docs: design §6/§7 and GUIDE for plan review"
     class: "implement"
-    deps: ["runner", "engine-amend"]
+    deps: ["runner", "engine-amend2"]
     base: "runner"
     tier: light
     effort: low
@@ -60,6 +60,17 @@ tasks:
     base: "engine"
     tier: heavy
     effort: medium
-    state: needs_foreman
+    state: cancelled
     branch: "brigada/task-121"
     rounds: 1
+  - id: 122
+    name: "engine-amend2"
+    title: "Engine follow-ups to the plan review, rebuilt on main"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    state: ready
+    branch: ""
+    rounds: 0
