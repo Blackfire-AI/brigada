@@ -326,11 +326,20 @@ func (e *env) expireLease() SweepReport {
 // suspension check never trips, so wall-clock deadlines fire on their
 // natural schedule instead of reading one jump as a host sleep. A test
 // that means "the host slept" advances the clock in one jump instead.
+// elapseMinStep is the coarsest sweep cadence elapse falls back to.
+const elapseMinStep = 2 * time.Minute
+
 func (e *env) elapse(d time.Duration) {
 	e.t.Helper()
 	step := e.eng.cfg.SweepInterval
 	if step <= 0 {
 		step = defaultSweepInterval
+	}
+	// A sweep per interval is cadence the tests do not need: each sweep
+	// reads the manual clock, so coarser steps reach the same states
+	// with far fewer store sweeps.
+	if step < elapseMinStep {
+		step = elapseMinStep
 	}
 	for d > 0 {
 		s := step

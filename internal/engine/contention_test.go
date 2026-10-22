@@ -30,7 +30,7 @@ func TestLeasePollsReadersAndUploadsShareTheStore(t *testing.T) {
 	e.submit(e.work())
 	g := e.leaseAny(e.runner1)
 
-	ctx, stop := context.WithTimeout(e.ctx, 2*time.Second)
+	ctx, stop := context.WithTimeout(e.ctx, 500*time.Millisecond)
 	defer stop()
 
 	// The calls run on the env's context, not the loop's deadline: the
