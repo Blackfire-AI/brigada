@@ -135,8 +135,8 @@ tasks:
     base: "engine-rules"
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-143"
     rounds: 0
   - id: 144
     name: "pin-actions"
