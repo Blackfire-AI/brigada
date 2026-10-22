@@ -68,9 +68,9 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: ready
     branch: "brigada/task-137"
-    rounds: 2
+    rounds: 0
   - id: 138
     name: "legal-notices"
     title: "NOTICE and third-party notices generated from go-licenses (B10)"
