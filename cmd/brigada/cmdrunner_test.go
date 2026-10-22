@@ -172,6 +172,7 @@ func testRunnerHarnessRegisters(t *testing.T, harness, wantModel, wantFamily, wa
 
 	// The store handle the test polls: opened before the engine starts,
 	// read while it runs — one reader beside the engine's writer.
+	seedMigratedStore(t, lifecycle.PathsOf(state).Store)
 	st, err := store.Open(context.Background(), lifecycle.PathsOf(state).Store)
 	if err != nil {
 		t.Fatalf("open the store: %v", err)
@@ -369,6 +370,7 @@ func TestRunnerHarnessFlags(t *testing.T) {
 func registeredAccounts(t *testing.T, harnesses []string, args ...string) (accounts map[string]string, runnerName string) {
 	t.Helper()
 	state := testsupport.ShortStateDir(t)
+	seedMigratedStore(t, lifecycle.PathsOf(state).Store)
 	st, err := store.Open(context.Background(), lifecycle.PathsOf(state).Store)
 	if err != nil {
 		t.Fatalf("open the store: %v", err)
@@ -651,6 +653,7 @@ func TestRunnerAgentFlag(t *testing.T) {
 
 	// Two agents against a real engine: both register, each with its
 	// own model and classes, and the startup line lists them both.
+	seedMigratedStore(t, lifecycle.PathsOf(state).Store)
 	st, err := store.Open(context.Background(), lifecycle.PathsOf(state).Store)
 	if err != nil {
 		t.Fatalf("open the store: %v", err)

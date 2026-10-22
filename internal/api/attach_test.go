@@ -273,7 +273,7 @@ func TestEventsLongPollReturnsWhenAnEventArrives(t *testing.T) {
 			attachBody(map[string]any{"wait_seconds": 10}))
 		ch <- result{code, data, err, time.Since(start)}
 	}()
-	time.Sleep(400 * time.Millisecond) // let the long-poll take hold
+	time.Sleep(50 * time.Millisecond) // let the long-poll take hold
 	e.parkNeedsHelp("which file?")
 
 	select {
@@ -380,7 +380,7 @@ func TestEventsCallThatGoesAwayConsumesNothing(t *testing.T) {
 		}
 		done <- err
 	}()
-	time.Sleep(300 * time.Millisecond) // let the long-poll take hold
+	time.Sleep(50 * time.Millisecond) // let the long-poll take hold
 	cancel()
 	if err := <-done; err == nil {
 		t.Fatal("the cancelled call was answered, want the connection broken")

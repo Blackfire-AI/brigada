@@ -110,8 +110,11 @@ func helpNamesCommand(help, command string) bool {
 	return regexp.MustCompile(`(?m)^[ \t]{2,}` + regexp.QuoteMeta(command) + `(?:\s|\[)`).MatchString(help)
 }
 
+// harnessCommandTimeout bounds one cheap discovery call; tests shorten it.
+var harnessCommandTimeout = 3 * time.Second
+
 func cheapHarnessCommand(ctx context.Context, harness string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, harnessCommandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, harness, args...)
 	cmd.WaitDelay = 500 * time.Millisecond

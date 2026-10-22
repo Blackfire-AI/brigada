@@ -11,17 +11,13 @@ import (
 	"testing"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
-	"github.com/Blackfire-AI/brigada/internal/store"
 )
 
 // Exercise the real authenticated routes and client codec in process: these
 // calls need no listener, and the same handler serves the client socket.
 func TestArchiveProjectClientAndRoles(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(ctx, ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := openFreshStore(t, filepath.Join(t.TempDir(), "store.db"))
 	t.Cleanup(func() { st.Close() })
 	eng := engine.New(st, engine.Config{})
 	tokenFile := filepath.Join(t.TempDir(), "tokens")

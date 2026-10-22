@@ -18,6 +18,7 @@ import (
 // command's failure.
 func TestProjectForemanGolden(t *testing.T) {
 	state := testsupport.ShortStateDir(t)
+	seedMigratedStore(t, lifecycle.PathsOf(state).Store)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- lifecycle.Run(ctx, lifecycle.Config{StateDir: state, Idle: time.Minute}) }()

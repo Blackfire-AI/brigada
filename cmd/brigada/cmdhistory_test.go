@@ -14,7 +14,6 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
-	"github.com/Blackfire-AI/brigada/internal/store"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
@@ -37,12 +36,9 @@ func (h historyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 func TestHistoryShowsTheLandingRecord(t *testing.T) {
 	ctx := context.Background()
 	state := testsupport.ShortStateDir(t)
-	st, err := store.Open(ctx, ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
 	paths := lifecycle.PathsOf(state)
+	st := openFreshStore(t, paths.Store)
+	t.Cleanup(func() { st.Close() })
 	if err := lifecycle.EnsureTokenFile(paths.Tokens); err != nil {
 		t.Fatal(err)
 	}
