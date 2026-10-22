@@ -39,8 +39,8 @@ tasks:
     continue: "shard-race"
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-153"
     rounds: 0
   - id: 154
     name: "manual-clocks"
