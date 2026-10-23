@@ -150,10 +150,11 @@ func TestSubmitForemanTurnCoalesces(t *testing.T) {
 // TestForemanTurnReportsToTheUser covers the report a foreman turn
 // leaves behind (§3, §10): a done turn's final message becomes the
 // project's foreman_report event — the text a notification and
-// `brigada status` read, bounded like any event's words and carrying no
-// prompt — while an empty final message, a failed turn and a stalled
-// one report nothing: their words were not an answer for the user, and
-// the stalled or failed turn's events return to pending instead (§4.2).
+// `brigada status` read, whole within its own about-4 KB bound
+// (boundReport) and carrying no prompt — while an empty final message,
+// a failed turn and a stalled one report nothing: their words were not
+// an answer for the user, and the stalled or failed turn's events
+// return to pending instead (§4.2).
 func TestForemanTurnReportsToTheUser(t *testing.T) {
 	e := newEnv(t)
 	e.offerForeman(e.runner1)
@@ -200,12 +201,17 @@ func TestForemanTurnReportsToTheUser(t *testing.T) {
 		t.Errorf("foreman_report events = %d, want the one done turn's alone", got)
 	}
 
-	// A report longer than any event's words is bounded where it lands.
-	turn(Completion{Result: `{"status":"done","summary":"` + strings.Repeat("long ", 200) + `"}`})
+	// A report of three kilobytes — past the old note bound the report
+	// once shared — survives whole in the event: only its own about-4 KB
+	// bound (boundReport) cuts it, and the short views cut their takes
+	// at render time (§10).
+	long := strings.Repeat("report line. ", 231)
+	turn(Completion{Result: `{"status":"done","summary":"` + long + `"}`})
 	if got := reports(); got != 2 {
 		t.Fatalf("foreman_report events = %d, want 2", got)
 	}
-	if payload := e.str("SELECT payload FROM events WHERE kind = ? ORDER BY id DESC LIMIT 1", evForemanReport); len(payload) > 512+len(`{"report":""}`) {
-		t.Errorf("the long report's payload runs %d bytes, want it bounded near 500", len(payload))
+	wantLong := `{"report":"` + long + `"}`
+	if payload := e.str("SELECT payload FROM events WHERE kind = ? ORDER BY id DESC LIMIT 1", evForemanReport); payload != wantLong {
+		t.Errorf("the 3 KB report's payload runs %d bytes, want the report whole in the event:\n%.120s…", len(payload), payload)
 	}
 }

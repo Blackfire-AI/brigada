@@ -23,6 +23,13 @@ import (
 type Adapter struct {
 	Binary string // empty means "opencode"
 	Agent  string // optional --agent preset
+
+	// model remembers the job's model from Command: limitReset reads a
+	// Z.ai model's zone-less reset time in the provider's own zone, and
+	// ParseEvent learns the model no other way. One adapter instance
+	// serves one run at a time (a review runs a copy of the worker's
+	// adapter), so the field is never shared between runs.
+	model string
 }
 
 var _ adapter.Adapter = (*Adapter)(nil)
@@ -84,6 +91,7 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	if cmd.Err != nil {
 		return nil, cmd.Err
 	}
+	a.model = job.Model
 	cmd.Dir = workdir
 	cmd.Env = workerPermissions(workerEnv(os.Environ()), job.ReadDirs, job.Tools, job.Review)
 	return cmd, nil
@@ -326,7 +334,7 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 			// as well as the failure: the runner must not lose either.
 			ev := adapter.Event{Kind: adapter.EvError, Text: text, SessionID: lj.SessionID, ErrorKind: errorKind(*lj.Error)}
 			if ev.ErrorKind == adapter.ErrLimit {
-				ev.LimitUntil = limitReset(text)
+				ev.LimitUntil = limitReset(text, a.model)
 			}
 			return ev, true
 		}
@@ -419,15 +427,58 @@ var localZone = func() *time.Location {
 	return loc
 }()
 
+// zaiZone is the zone a Z.ai reset time without its own zone is read in:
+// the provider's message is Beijing wall-clock (UTC+8), whatever the
+// machine's zone.
+var zaiZone = time.FixedZone("UTC+8", 8*3600)
+
+// zaiModel reports whether the opencode model id is served by Z.ai: the
+// coding-plan routes and the zhipuai ones. Their limit messages print a
+// zone-less reset time in Beijing wall-clock.
+func zaiModel(model string) bool {
+	return strings.HasPrefix(model, "zai-coding-plan/") || strings.HasPrefix(model, "zhipuai")
+}
+
 // limitResetRe is the provider's reset note: "Your limit will reset at
 // 2026-10-20 21:32:04", seconds optional, optionally followed by a zone:
 // Z, UTC, GMT or an offset such as +08:00.
 var limitResetRe = regexp.MustCompile(`reset at (\d{4})-(\d{2})-(\d{2})[ t](\d{2}):(\d{2})(?::(\d{2}))?(?:\s*(z|utc|gmt|[+-]\d{2}(?::?\d{2})?))?(?:[^a-z0-9]|$)`)
 
+// limitWindowRe is a window a limit message names: "for 5 hour",
+// "for 30 minute", "for 2 day".
+var limitWindowRe = regexp.MustCompile(`for (\d+) (second|minute|hour|day)s?\b`)
+
+// limitWindow reads the window a limit message names, as a duration;
+// false when it names none.
+func limitWindow(text string) (time.Duration, bool) {
+	m := limitWindowRe.FindStringSubmatch(strings.ToLower(text))
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	switch strings.TrimSuffix(m[2], "s") {
+	case "second":
+		return time.Duration(n) * time.Second, true
+	case "minute":
+		return time.Duration(n) * time.Minute, true
+	case "day":
+		return time.Duration(n) * 24 * time.Hour, true
+	default: // "hour"
+		return time.Duration(n) * time.Hour, true
+	}
+}
+
 // limitReset reads the reset time out of a limit message, as an RFC3339
 // instant. Best effort — anything that does not parse, or is already
-// past, is "" (unknown), never an error.
-func limitReset(text string) string {
+// past, is "" (unknown), never an error. A zone-less time is read in the
+// machine's zone, except on a Z.ai model, whose provider prints Beijing
+// wall-clock. When the message names a window ("for 5 hour"), a reset
+// further away than that window is clamped to now + window: the window,
+// not the wall clock, is what the provider enforces.
+func limitReset(text, model string) string {
 	m := limitResetRe.FindStringSubmatch(strings.ToLower(text))
 	if m == nil {
 		return ""
@@ -437,6 +488,9 @@ func limitReset(text string) string {
 		n[i], _ = strconv.Atoi(m[i+1]) // m[6] may be empty: 0 seconds
 	}
 	loc := localZone
+	if m[7] == "" && zaiModel(model) {
+		loc = zaiZone
+	}
 	switch z := m[7]; {
 	case z == "":
 	case z[0] == 'z' || z[0] == 'u' || z[0] == 'g':
@@ -460,9 +514,15 @@ func limitReset(text string) string {
 	if n[1] < 1 || n[1] > 12 || n[2] < 1 || n[2] > 31 || n[3] > 23 || n[4] > 59 || n[5] > 59 {
 		return ""
 	}
+	clock := now()
 	t := time.Date(n[0], time.Month(n[1]), n[2], n[3], n[4], n[5], 0, loc)
-	if t.Day() != n[2] || !t.After(now()) {
+	if t.Day() != n[2] || !t.After(clock) {
 		return ""
+	}
+	if w, ok := limitWindow(text); ok {
+		if limit := clock.Add(w); t.After(limit) {
+			t = limit
+		}
 	}
 	return t.Format(time.RFC3339)
 }

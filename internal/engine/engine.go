@@ -488,6 +488,13 @@ func boundNote(s string) string {
 	return cutRune(s, 500)
 }
 
+// boundReport keeps a foreman report to about 4 KB (§3, §10): the event
+// carries the whole report — the history's record — while the short
+// views cut their take at render time and point here.
+func boundReport(s string) string {
+	return cutRune(s, 4096)
+}
+
 // cutRune keeps s within max bytes. The cut backs off to a complete
 // rune: it may not land inside one, nor on a lead byte whose
 // continuation was cut off.

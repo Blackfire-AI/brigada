@@ -352,8 +352,8 @@ func TestLandMessageBounds(t *testing.T) {
 	if len(msg) > landMessageBytes {
 		t.Errorf("message is %d bytes, over %d", len(msg), landMessageBytes)
 	}
-	if subject := subjectOf(msg); len([]rune(subject)) > landSubjectRunes || !strings.HasSuffix(subject, "…") {
-		t.Errorf("subject %q must be cut to %d characters with an ellipsis", subject, landSubjectRunes)
+	if subject := subjectOf(msg); subject != long {
+		t.Errorf("subject %q must be the whole title, not cut", subject)
 	}
 	if !strings.Contains(msg, "[truncated]") || strings.ContainsAny(msg, "\x00\r\x1b") {
 		t.Errorf("fields over a bound are marked, control characters stripped:\n%q", msg)

@@ -229,7 +229,8 @@ func (l *Loop) advance(ctx context.Context, id int64) error {
 func eventsAfterTx(tx *sql.Tx, after, limit int64) ([]Event, error) {
 	rows, err := tx.Query(`SELECT e.id, e.kind, COALESCE(e.task_id, 0),
 		COALESCE(t.plan_id, pp.id, 0), COALESCE(p.title, pp.title, ''),
-		COALESCE(ep.repo_url, tp.repo_url, ppj.repo_url, ''), e.created_at, e.payload
+		COALESCE(ep.repo_url, tp.repo_url, ppj.repo_url, ''), e.created_at, e.payload,
+		COALESCE(e.job_id, 0)
 		FROM events e
 		LEFT JOIN tasks t ON t.id = e.task_id
 		LEFT JOIN plans p ON p.id = t.plan_id
@@ -248,7 +249,7 @@ func eventsAfterTx(tx *sql.Tx, after, limit int64) ([]Event, error) {
 	for rows.Next() {
 		var ev Event
 		var payload string
-		if err := rows.Scan(&ev.ID, &ev.Kind, &ev.TaskID, &ev.PlanID, &ev.PlanTitle, &ev.Project, &ev.At, &payload); err != nil {
+		if err := rows.Scan(&ev.ID, &ev.Kind, &ev.TaskID, &ev.PlanID, &ev.PlanTitle, &ev.Project, &ev.At, &payload, &ev.JobID); err != nil {
 			return nil, fmt.Errorf("read events after %d: %w", after, err)
 		}
 		ev.Reason = reasonOf(ev.Kind, payload)
@@ -286,8 +287,9 @@ func parkedBy(payload string) bool {
 // "needs you" queue makes: the worker's question for a needs_help, the
 // review's findings for review changes, the named reason — the check's
 // tail, the failure's words — for the rest, flattened to one line. A
-// foreman report is its payload's own field, kept to its first line —
-// the line the banner shows. A payload that names nothing yields the
+// foreman report is its payload's own field, whole: the mapper cuts it
+// to the first line — the line the banner shows — and ends a cut with
+// the pointer to the history. A payload that names nothing yields the
 // empty string and Message falls back to the kind itself.
 func reasonOf(kind, payload string) string {
 	if payload == "" {
@@ -298,7 +300,7 @@ func reasonOf(kind, payload string) string {
 		return ""
 	}
 	if kind == KindForemanReport {
-		return firstLine(p.Report)
+		return p.Report
 	}
 	if kind == KindForemanLimited {
 		return p.Until
