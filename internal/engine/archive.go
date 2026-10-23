@@ -78,7 +78,7 @@ func (e *Engine) ArchiveProject(ctx context.Context, repoURL string, cancel bool
 			}
 			return out, rows.Err()
 		}
-		plans, err := ids("SELECT id FROM plans WHERE project_id = ? AND state IN ('draft', 'pending_approval', 'reviewing', 'active') ORDER BY id")
+		plans, err := ids("SELECT id FROM plans WHERE project_id = ? AND state IN ('draft', 'pending_approval', 'reviewing', 'needs_foreman', 'active') ORDER BY id")
 		if err != nil {
 			return err
 		}

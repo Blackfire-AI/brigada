@@ -511,6 +511,24 @@ type TaskAnswerResult struct {
 	Run        int
 }
 
+// AcceptPlan accepts a plan its review parked at needs_foreman as
+// reviewed, with the reason recorded (§6.2, §12.2); the plan proceeds as
+// a spent round's verdict does. idemKey is the call's idempotency key,
+// minted per logical call by the bridge (§12.1). A plan that is not
+// there is the API's not-found error, one not parked its conflict.
+func (c *Client) AcceptPlan(ctx context.Context, plan int64, reason, idemKey string) (PlanDecisionResult, error) {
+	var out planDecisionResponse
+	path := "/v1/plans/" + strconv.FormatInt(plan, 10) + "/accept"
+	if err := c.callKeyed(ctx, http.MethodPost, path, idemKey, planAcceptRequest{Reason: reason}, &out); err != nil {
+		return PlanDecisionResult{}, err
+	}
+	res := PlanDecisionResult{PlanID: out.PlanID, State: out.State}
+	for _, t := range out.Tasks {
+		res.Tasks = append(res.Tasks, PlanCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
+	}
+	return res, nil
+}
+
 // Answer answers a task worker's question (§3, §12.1, §12.2): the task
 // must be parked at needs_foreman by its question; the answer resumes
 // the author's session, verbatim. idemKey is the call's idempotency

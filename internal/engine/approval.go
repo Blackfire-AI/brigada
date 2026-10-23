@@ -31,6 +31,14 @@ const planCancelled = "cancelled"
 // and the approval rules wait for the verdict.
 const planReviewing = "reviewing"
 
+// planNeedsForeman is the plan state of a plan its review parked (§6.2):
+// a changes verdict with a round left leaves the plan here, findings
+// recorded, no work queued and no review job running — the foreman's to
+// answer with an amendment (the next round) or plan_accept (accepted as
+// reviewed, with a reason). As a task's needs_foreman, it never
+// auto-retries: nothing moves until the foreman or the user acts.
+const planNeedsForeman = "needs_foreman"
+
 // The shipped approval limit (§6.3): the task count is off unless the
 // project sets one; the cost rule that stands in its place by default is
 // the plan budget (planbudget.go).
@@ -451,6 +459,9 @@ func matchProtected(patterns []string, text string) []string {
 var (
 	ErrNoPlan          = errors.New("no such plan")
 	ErrPlanNotAwaiting = errors.New("plan is not awaiting approval")
+	// ErrPlanNotParked refuses a plan_accept on a plan not parked at
+	// needs_foreman by a changes verdict (§6.2).
+	ErrPlanNotParked = errors.New("plan is not parked at needs_foreman")
 	// ErrPlanVersionStale marks a decision that names a plan version the
 	// plan has moved past (§4.6): an amendment landed after the
 	// user looked, so nothing is applied and the plan must be shown again.

@@ -495,6 +495,18 @@ func boundReport(s string) string {
 	return cutRune(s, 4096)
 }
 
+// maxPlanReviewFindings is the most a plan review's findings carry (§6.2,
+// issue #70): a verdict's findings reach the foreman whole under their
+// own review-sized bound — not a note's 500 bytes — so a multi-KB
+// verdict stays readable in the wake and the next round's prompt; the
+// short views cut them at render time and point to the history.
+const maxPlanReviewFindings = 16 * 1024
+
+// boundPlanReviewFindings keeps a plan review's findings to about 16 KB.
+func boundPlanReviewFindings(s string) string {
+	return cutRune(s, maxPlanReviewFindings)
+}
+
 // cutRune keeps s within max bytes. The cut backs off to a complete
 // rune: it may not land inside one, nor on a lead byte whose
 // continuation was cut off.

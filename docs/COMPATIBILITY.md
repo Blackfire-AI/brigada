@@ -56,6 +56,7 @@ Within schema 1, new keys are added as optional keys. A file that worked before 
 
 - `plan_create`: `title` and `tasks` (both required). Each task takes `spec` (required), and may take `title`, `name`, `deps`, `base`, `continue`, `check`, `class`, `tier`, `effort`, `review_tier`, `review_effort`, `caps` and `extra_repos`.
 - `plan_amend`: `plan` (required). It may take `add`, `cancel`, `retier`, `respec` and `retarget`. `add` takes the same task fields as `plan_create`; `cancel` is a list of task references (by name or id); `retier` (experimental) is a list of entries naming a `task`, each of which may set `tier`, `effort`, `review_tier`, `review_effort` and `caps` (merged key by key); `respec` (experimental) is a list of entries naming a `task` with a `spec` and a `mode` (`replace` or `append`); `retarget` is a list of entries naming a `task` with its new `deps`, and may set `base` and `continue`.
+- `plan_accept` (experimental): `plan` and `reason` (both required). It accepts a plan the plan review parked at `needs_foreman` as reviewed, and the plan proceeds as a spent round's verdict does.
 - `answer`: `task` and `text` (both required).
 - `task_restart`: `task` (required) and `note`.
 - `task_cancel`: `task` (required).

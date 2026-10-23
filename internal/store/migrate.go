@@ -154,6 +154,7 @@ var schemaEdits = map[int]func(ctx context.Context, tx *sql.Tx) error{
 	36: widenArtifactKinds,
 	50: widenJobKinds,
 	58: widenPlanReviewChecks,
+	59: widenPlanNeedsForemanCheck,
 }
 
 // jobsPairingCheck is the CHECK 0001 put on jobs: foreman jobs have no
@@ -211,6 +212,17 @@ const (
 	plansStateCheck            = "CHECK (state IN ('draft', 'pending_approval', 'active', 'done', 'cancelled'))"
 	plansStateCheckReviewing   = "CHECK (state IN ('draft', 'pending_approval', 'reviewing', 'active', 'done', 'cancelled'))"
 )
+
+// The CHECK 0059 widens for the parked plan: the plans state CHECK also
+// admits needs_foreman, where a plan-review changes verdict with a round
+// left waits for the foreman's answer (§6.2).
+const plansStateCheckNeedsForeman = "CHECK (state IN ('draft', 'pending_approval', 'reviewing', 'needs_foreman', 'active', 'done', 'cancelled'))"
+
+// widenPlanNeedsForemanCheck lets the plans table hold a parked plan, by
+// the same in-place edit 0058 used for reviewing.
+func widenPlanNeedsForemanCheck(ctx context.Context, tx *sql.Tx) error {
+	return editTableCheck(ctx, tx, "plans", plansStateCheckReviewing, plansStateCheckNeedsForeman)
+}
 
 // widenPlanReviewChecks lets the jobs table hold a plan_review job and
 // the plans table hold a reviewing plan, by the same in-place edits.

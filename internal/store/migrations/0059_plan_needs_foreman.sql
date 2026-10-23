@@ -1,0 +1,6 @@
+-- 0059_plan_needs_foreman: a plan-review changes verdict with a round
+-- left parks the plan (§6.2) at needs_foreman — the foreman's to answer
+-- with an amendment (the next round) or plan_accept — instead of
+-- leaving it in reviewing with no job running. The plans state CHECK
+-- admits the state; the edit migrate.go runs beside this file widens
+-- the CHECK in place, as 0058 did for reviewing.

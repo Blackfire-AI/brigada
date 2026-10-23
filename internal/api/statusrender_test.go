@@ -134,6 +134,37 @@ func TestStatusSectionsCountsHiddenFinishedPlans(t *testing.T) {
 	}
 }
 
+// TestStatusSectionsPlanReviewFindings: a parked or reviewing plan names
+// its round, and its review line cuts long findings at render time,
+// ending with the pointer to the review job's history (§6.2, §9); short
+// findings show whole, with no pointer.
+func TestStatusSectionsPlanReviewFindings(t *testing.T) {
+	long := strings.Repeat("the findings go on and on. ", 40) // well past the line's 200-byte bound
+	st := Status{Plans: []engine.StatusPlan{
+		{ID: 7, Title: "parked", State: "needs_foreman", ReviewRound: 1, ReviewVerdict: "changes", ReviewFindings: long, ReviewJob: 12},
+		{ID: 8, Title: "short", State: "reviewing", ReviewRound: 2, ReviewVerdict: "changes", ReviewFindings: "split the storage layer out"},
+	}}
+	got := StatusSections(st)
+	for _, want := range []string{
+		"#7 needs_foreman (round 1) parked",
+		"#8 reviewing (round 2) short",
+		"… (full: brigada history --job 12)",
+		"findings: split the storage layer out\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status sections lack %q:\n%s", want, got)
+		}
+	}
+	cut := strings.Index(got, "findings: the findings go on")
+	pointer := strings.Index(got, "… (full: brigada history --job 12)")
+	if cut < 0 || pointer < cut || pointer-cut > 400 {
+		t.Errorf("the long findings are not cut just before the pointer (cut %d, pointer %d):\n%s", cut, pointer, got)
+	}
+	if strings.Count(got, "(full: brigada history") != 1 {
+		t.Errorf("short findings grew a pointer:\n%s", got)
+	}
+}
+
 // TestOneLineCutsOnARune: a cut that falls inside a multi-byte character,
 // on its lead byte or after it, backs off to the character's start, so
 // the line stays valid UTF-8.
