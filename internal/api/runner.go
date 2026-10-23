@@ -39,7 +39,16 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request, id ident
 			Effort: a.Effort, Tools: a.Tools,
 		}
 	}
-	runnerID, err := s.eng.Register(r.Context(), id.name, req.MaxParallel, agents)
+	var startedAt time.Time
+	if req.StartedAt != "" {
+		t, err := time.Parse(time.RFC3339Nano, req.StartedAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, codeBadRequest, "started_at must be an RFC 3339 time: "+err.Error())
+			return
+		}
+		startedAt = t
+	}
+	runnerID, err := s.eng.RegisterStarted(r.Context(), id.name, startedAt, req.MaxParallel, agents)
 	if err != nil {
 		// An advertisement the engine refuses is the caller's mistake;
 		// anything else — the store, the engine's own bookkeeping — is
@@ -299,7 +308,8 @@ func nonNilProbes(v []engine.Probe) []engine.Probe {
 // seconds (§12.3).
 type advertiseRequest struct {
 	WaitSeconds float64       `json:"wait"`
-	MaxParallel int           `json:"max_parallel"` // the runner's own cap; 0 = unset (§8.1)
+	StartedAt   string        `json:"started_at,omitempty"` // the runner process's start, RFC 3339; register only
+	MaxParallel int           `json:"max_parallel"`         // the runner's own cap; 0 = unset (§8.1)
 	Harnesses   []string      `json:"harnesses"`
 	Labels      []string      `json:"labels"`
 	Agents      []agentAdvert `json:"agents"`

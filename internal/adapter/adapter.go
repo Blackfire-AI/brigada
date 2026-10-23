@@ -186,6 +186,18 @@ var ResumeCapableHarnesses = map[string]bool{
 	// refuses MCP-config jobs.
 }
 
+// CredentialEnv names the environment variable a harness's credential
+// comes from, or "" when the harness logs in some other way (a stored
+// login, an OAuth session). A runner started without the variable cannot
+// authenticate that harness, which the needs-you line for an auth break
+// says.
+func CredentialEnv(harness string) string {
+	if harness == "dsh" {
+		return "DEEPSEEK_API_KEY"
+	}
+	return ""
+}
+
 // ResumeCapable reports whether harness's CLI can resume a session
 // headless (§4.1), which the foreman's harness must.
 func ResumeCapable(harness string) bool {

@@ -1,0 +1,1 @@
+ALTER TABLE runners ADD COLUMN started_at TEXT NOT NULL DEFAULT '';

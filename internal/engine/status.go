@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
 
 // statusFinishedKeep is how many finished plans the default status
@@ -817,17 +819,19 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	// "Health"). Agents belong to no project, so only the unscoped view
 	// lists them. Cooling is not here: it waits for a clock.
 	if project == 0 {
-		brows, err := tx.Query(`SELECT id, harness, model, health_reason FROM agents WHERE health = 'broken' ORDER BY id`)
+		brows, err := tx.Query(`SELECT a.id, a.harness, a.model, a.health_reason, r.started_at
+			FROM agents a JOIN runners r ON r.id = a.runner_id WHERE a.health = 'broken' ORDER BY a.id`)
 		if err != nil {
 			return nil, fmt.Errorf("list the broken agents: %w", err)
 		}
 		defer brows.Close()
 		for brows.Next() {
 			var it NeedsYouItem
-			var harness, model string
-			if err := brows.Scan(&it.ID, &harness, &model, &it.Reason); err != nil {
+			var harness, model, started string
+			if err := brows.Scan(&it.ID, &harness, &model, &it.Reason, &started); err != nil {
 				return nil, fmt.Errorf("list the broken agents: %w", err)
 			}
+			it.Reason = brokenReason(it.Reason, harness, started)
 			it.Kind = "agent"
 			it.State = "broken"
 			it.Title = harness + "/" + model
@@ -838,6 +842,22 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 		}
 	}
 	return items, nil
+}
+
+// brokenReason is the needs-you reason for a broken agent. An auth break
+// on a harness whose credential comes from the environment names the
+// variable and the time the runner process started, so a runner started
+// without the variable shows; every other reason is unchanged.
+func brokenReason(reason, harness, started string) string {
+	env := adapter.CredentialEnv(harness)
+	if reason != brokenAuth || env == "" {
+		return reason
+	}
+	out := reason + ": " + env + " is read from the runner's environment"
+	if started != "" {
+		out += "; the runner started " + started
+	}
+	return out
 }
 
 // awaitingReasonTx reads the reasons the plan's latest
