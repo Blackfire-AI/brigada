@@ -183,11 +183,13 @@ func TestStatusSectionsPlanReviewFindings(t *testing.T) {
 	st := Status{Plans: []engine.StatusPlan{
 		{ID: 7, Title: "parked", State: "needs_foreman", ReviewRound: 1, ReviewVerdict: "changes", ReviewFindings: long, ReviewJob: 12},
 		{ID: 8, Title: "short", State: "reviewing", ReviewRound: 2, ReviewVerdict: "changes", ReviewFindings: "split the storage layer out"},
+		{ID: 9, Title: "amended", State: "reviewing", ReviewRound: 1, WaitingAmendment: true},
 	}}
 	got := StatusSections(st)
 	for _, want := range []string{
 		"#7 needs_foreman (round 1) parked",
 		"#8 reviewing (round 2) short",
+		"#9 reviewing (round 1) amended\n  amendment waits for the review round\n",
 		"… (full: brigada history --job 12)",
 		"findings: split the storage layer out\n",
 	} {

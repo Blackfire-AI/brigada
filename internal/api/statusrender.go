@@ -94,6 +94,13 @@ func StatusSections(st Status) string {
 				}
 				lines = append(lines, review)
 			}
+			// Waiting amendment work (§6.2): tasks an amendment added
+			// or respecified under the running round, pending the
+			// verdict that queues the next round over them — never
+			// invisible in the status.
+			if p.WaitingAmendment {
+				lines = append(lines, "  amendment waits for the review round")
+			}
 			for _, t := range p.Tasks {
 				line := fmt.Sprintf("  task #%d %s %s", t.ID, t.State, t.Title)
 				if t.Landed {
