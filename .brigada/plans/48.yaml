@@ -5,9 +5,9 @@
 plan: 48
 title: "v1.0.0-rc.3: #78 TempDir flake, #75 runner restart and env secrets, #71 infra retries"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-10-23T13:04:54.455142Z
-updated: 2026-10-23T14:20:57.145526Z
+updated: 2026-10-23T14:21:08.721411Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -111,9 +111,8 @@ tasks:
     name: "codex-warning"
     title: "#82 codex: an error item before turn.started is a warning, turn.failed names the failure"
     class: "implement"
-    deps: ["infra-class"]
-    base: "infra-class"
-    continue: "infra-class"
+    deps: ["amend-during-review"]
+    base: "amend-during-review"
     effort: medium
     state: pending
     branch: ""
@@ -122,8 +121,8 @@ tasks:
     name: "amend-during-review"
     title: "#84 plan_amend accepts additions and respecs while a plan review round runs"
     class: "implement"
-    deps: ["infra-retry"]
-    base: "infra-retry"
+    deps: ["infra-show"]
+    base: "infra-show"
     tier: heavy
     effort: medium
     state: pending
