@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
@@ -77,6 +78,15 @@ func (a AgentAdvert) classesJSON() (string, error) {
 // every lease the runner takes references, so a runner must register
 // before it can lease.
 func (e *Engine) Register(ctx context.Context, name string, maxParallel int, agents []AgentAdvert) (int64, error) {
+	return e.RegisterStarted(ctx, name, time.Time{}, maxParallel, agents)
+}
+
+// RegisterStarted is Register for a runner that reports when its process
+// started. The engine keeps that time as the runner's started_at and
+// moves it only when the reported time differs from the stored one: a
+// re-poll of the same process leaves it, a restarted process sets it. A
+// zero startedAt reports nothing and leaves the stored time alone.
+func (e *Engine) RegisterStarted(ctx context.Context, name string, startedAt time.Time, maxParallel int, agents []AgentAdvert) (int64, error) {
 	if name == "" {
 		return 0, fmt.Errorf("register runner: name is required")
 	}
@@ -96,11 +106,20 @@ func (e *Engine) Register(ctx context.Context, name string, maxParallel int, age
 	defer cancel()
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		nowStr := fmtTime(e.cfg.Now())
+		startedStr := ""
+		if !startedAt.IsZero() {
+			startedStr = fmtTime(startedAt)
+		}
 		err := tx.QueryRow("SELECT id FROM runners WHERE name = ?", name).Scan(&id)
 		switch {
 		case err == nil:
 			if _, err := tx.Exec("UPDATE runners SET max_parallel = ? WHERE id = ?", maxParallel, id); err != nil {
 				return fmt.Errorf("touch: %w", err)
+			}
+			if startedStr != "" {
+				if _, err := tx.Exec("UPDATE runners SET started_at = ? WHERE id = ? AND started_at <> ?", startedStr, id, startedStr); err != nil {
+					return fmt.Errorf("record start: %w", err)
+				}
 			}
 			// The runner is back: its seen time moves and the agents
 			// broken only for being stale come back (§8 "Health").
@@ -108,8 +127,8 @@ func (e *Engine) Register(ctx context.Context, name string, maxParallel int, age
 				return err
 			}
 		case errors.Is(err, sql.ErrNoRows):
-			res, err := tx.Exec("INSERT INTO runners (name, max_parallel, created_at, last_seen_at) VALUES (?, ?, ?, ?)",
-				name, maxParallel, nowStr, nowStr)
+			res, err := tx.Exec("INSERT INTO runners (name, max_parallel, created_at, last_seen_at, started_at) VALUES (?, ?, ?, ?, ?)",
+				name, maxParallel, nowStr, nowStr, startedStr)
 			if err != nil {
 				return fmt.Errorf("insert: %w", err)
 			}
