@@ -834,3 +834,96 @@ func TestPlanReviewRecoveredRoundRequeued(t *testing.T) {
 		t.Fatalf("plan state = %q, want active with no reviewer to be had", got)
 	}
 }
+
+// TestPlanReviewInfraFailureRequeuesOnTheBackoff pins the plan review's
+// infra retry (§5.1): a round whose fetch or CLI connection failed is
+// requeued on the plan's key under the infra backoff — the same
+// question, the same exclusions, no retry round spent and no foreman
+// wake — and the retried round ends as any round does.
+func TestPlanReviewInfraFailureRequeuesOnTheBackoff(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	res := e.createPlan(nTasks(2))
+	key := planReviewKey(res.PlanID)
+	leaseRound := func() *LeaseGrant {
+		t.Helper()
+		g := e.lease(e.runner2, nil, nil)
+		if g == nil || g.Kind != KindPlanReview {
+			t.Fatalf("plan review lease = %+v", g)
+		}
+		return g
+	}
+	if ans := e.complete(leaseRound(), Completion{Error: "Cannot connect to API", ErrorKind: ErrorKindInfra}); ans != AnsOK {
+		t.Fatalf("complete the infra failure: %s", ans)
+	}
+	retry := e.int("SELECT id FROM jobs WHERE key = ? AND status = 'queued'", key)
+	if retry == 0 {
+		t.Fatal("no infra retry of the plan review queued")
+	}
+	if nb := e.str("SELECT not_before FROM jobs WHERE id = ?", retry); nb != fmtTime(e.clock.Now().Add(infraDelayFor(1))) {
+		t.Errorf("retry not_before = %s, want now + %s", nb, infraDelayFor(1))
+	}
+	if exclude := e.str("SELECT exclude_family FROM jobs WHERE id = ?", retry); exclude != "claude" {
+		t.Errorf("retry exclude_family = %q, want the foreman's family kept", exclude)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planReviewing {
+		t.Fatalf("plan state = %q, want reviewing through the retry", got)
+	}
+	if got := e.foremanJobs(); got != 0 {
+		t.Errorf("foreman turns = %d, want none while the window lasts", got)
+	}
+	if got := e.countEvents(evPlanReviewed); got != 0 {
+		t.Errorf("plan_reviewed events = %d, want none through the retry", got)
+	}
+	// The retry runs after the backoff and its verdict moves the plan.
+	e.elapse(infraDelayFor(1))
+	if ans := e.reviewVerdict(leaseRound(), verdictApprove, theFindings); ans != AnsOK {
+		t.Fatalf("complete the retried round: %s", ans)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
+		t.Errorf("plan state after the retried round = %q, want active", got)
+	}
+}
+
+// TestPlanReviewInfraWindowSpentHoldsThePlan: an outage that outlasts
+// the infra retry window holds the plan for the foreman with the outage
+// named (§5.1) — the round never ran, so the plan stays reviewing and
+// the foreman reads why in its wake.
+func TestPlanReviewInfraWindowSpentHoldsThePlan(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	res := e.createPlan(nTasks(2))
+	key := planReviewKey(res.PlanID)
+	start := e.clock.Now()
+	for {
+		g := e.lease(e.runner2, nil, nil)
+		if g == nil || g.Kind != KindPlanReview {
+			t.Fatal("no plan review round to lease")
+		}
+		if ans := e.complete(g, Completion{Error: "Cannot connect to API", ErrorKind: ErrorKindInfra}); ans != AnsOK {
+			t.Fatalf("complete = %s", ans)
+		}
+		if e.countEvents(evPlanReviewed) > 0 {
+			break
+		}
+		if e.clock.Now().Sub(start) > infraRetryWindow+30*time.Minute {
+			t.Fatal("the outage outlasted the window but the plan was never held")
+		}
+		e.waitOutInfraRetry(key)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planReviewing {
+		t.Fatalf("plan state = %q, want reviewing: held for the foreman", got)
+	}
+	if got := e.str("SELECT review_verdict FROM plans WHERE id = ?", res.PlanID); got != planReviewNoRun {
+		t.Errorf("recorded verdict = %q, want %s", got, planReviewNoRun)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE key = ? AND status IN ('queued', 'leased', 'running')", key); got != 0 {
+		t.Errorf("live plan_review jobs = %d, want none past the window", got)
+	}
+	prompt := e.str("SELECT prompt FROM jobs WHERE kind = 'foreman' ORDER BY id DESC")
+	if !strings.Contains(prompt, "the network outage outlasted the "+capText(infraRetryWindow)+" infra retry window") {
+		t.Errorf("the woken turn's prompt lacks the outage:\n%s", prompt)
+	}
+}

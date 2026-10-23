@@ -555,8 +555,56 @@ func (e *Engine) planReviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, no
 		case haveVerdict:
 			reason = "approve without substantive findings"
 		}
+		if c.ErrorKind == ErrorKindInfra {
+			if handled, err := e.retryPlanReviewInfraTx(tx, job, plan, c, now); handled || err != nil {
+				return err
+			}
+		}
 		return e.planReviewFailedTx(tx, job, plan, reason, now)
 	}
+}
+
+// retryPlanReviewInfraTx answers a plan review that failed on the
+// job's own plumbing (§5.1) as a task job's infra failure is answered:
+// the same question is requeued on the plan's key — the same
+// exclusions, held out of leasing for the infra backoff's not-before —
+// until the streak fills the retry window, spending no retry round and
+// waking nobody. A spent window holds the plan for the foreman with the
+// outage named, as an unusable review holds it (§6.2).
+func (e *Engine) retryPlanReviewInfraTx(tx *sql.Tx, job *jobRow, plan int64, c Completion, now time.Time) (bool, error) {
+	streak, began, err := infraStreakTx(tx, job.Key)
+	if err != nil {
+		return false, err
+	}
+	if streak == 0 || infraStreakSpent(began, now) {
+		return true, e.planReviewHeldTx(tx, job.ProjectID, plan, infraOutageText(c.Error), now)
+	}
+	// The completing job freed the key earlier in this transaction, so
+	// no live job can hold this submit; any answer but a created job
+	// would lose the round silently.
+	sr, err := e.submitTx(tx, SubmitParams{
+		Key:           job.Key,
+		ProjectID:     job.ProjectID,
+		Kind:          KindPlanReview,
+		Mode:          ModeFresh,
+		Prompt:        job.Prompt,
+		ExcludeFamily: job.ExcludeFamily,
+		ExcludeAgent:  job.ExcludeAgent,
+		NotBefore:     now.Add(infraDelayFor(streak)),
+	}, now)
+	if err != nil {
+		return false, err
+	}
+	if sr.Answer != AnsCreated {
+		return false, fmt.Errorf("queue the infra retry of plan %d: submit %s answered %s", plan, job.Key, sr.Answer)
+	}
+	var round int64
+	if err := tx.QueryRow("SELECT review_round FROM plans WHERE id = ?", plan).Scan(&round); err != nil {
+		return false, fmt.Errorf("read the review round of plan %d: %w", plan, err)
+	}
+	_, err = appendEventTx(tx, evPlanReviewQueued, job.ProjectID, 0, sr.JobID,
+		eventPayload{Plan: plan, Run: round, Reason: boundNote(infraOutageText(c.Error) + "; requeued after the infra failure")}, now)
+	return true, err
 }
 
 // planReviewFailedTx answers a plan review that ran and gave no verdict
