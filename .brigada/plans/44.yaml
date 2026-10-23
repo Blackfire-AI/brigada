@@ -39,9 +39,9 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-163"
-    rounds: 0
+    rounds: 1
   - id: 164
     name: "land-commit-message"
     title: "#48 items 1+2: land commit message from worker result; landed task leaves needs-you"
