@@ -30,7 +30,7 @@ tasks:
     effort: medium
     review_tier: heavy
     caps: {restart: 8}
-    state: reviewing
+    state: done
     branch: "brigada/task-159-r4"
     rounds: 0
   - id: 160
@@ -42,7 +42,7 @@ tasks:
     continue: "landtarget-engine"
     effort: medium
     review_tier: standard
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 161
