@@ -82,7 +82,7 @@ tasks:
     base: "infra-class"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-175"
     rounds: 1
   - id: 176
@@ -93,7 +93,7 @@ tasks:
     base: "infra-retry"
     continue: "infra-retry"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 177
