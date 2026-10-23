@@ -618,10 +618,10 @@ func TestRemoteBranchSeparatesAbsentFromUnreachable(t *testing.T) {
 	}
 }
 
-// TestRunnerSpawnFailureIsInfrastructure covers the pre-CLI failure of
-// issue #39: a worker command that cannot be started — here a script
-// that is not there — fails the job as the infra kind before any CLI
-// ran, retried behind a backoff and charged to no agent.
+// TestRunnerSpawnFailureIsInfrastructure covers the pre-CLI failure:
+// a worker command that cannot be started — here a script that is not
+// there — fails the job as the infra kind before any CLI ran, retried
+// on the infra backoff and charged to no agent.
 func TestRunnerSpawnFailureIsInfrastructure(t *testing.T) {
 	t.Parallel()
 	remote := newRemote(t)
@@ -641,8 +641,8 @@ func TestRunnerSpawnFailureIsInfrastructure(t *testing.T) {
 		t.Errorf("failure = %q, want the worker's start named", msg)
 	}
 	e.assertInfrastructureFailure(job)
-	if state := e.strOf("SELECT state FROM tasks WHERE id = ?", task); state != "ready" {
-		t.Errorf("task state = %q, want ready behind its retry", state)
+	if state := e.strOf("SELECT state FROM tasks WHERE id = ?", task); state != "running" {
+		t.Errorf("task state = %q, want running: the task keeps its state behind the retry", state)
 	}
 }
 
@@ -657,16 +657,17 @@ func (e *testEnv) mustExec(query string, args ...any) {
 	}
 }
 
-// assertInfrastructureFailure checks what every pre-CLI failure shares
-// (issue #39): the job failed with the infra error kind, so its task
-// was retried behind a backoff instead of parking, and no agent was
+// assertInfrastructureFailure checks what every pre-CLI failure shares:
+// the job failed with the infra error kind, so its task was retried on
+// the infra backoff instead of parking — a plain work job on the task's
+// key, not a restart, the task keeping its state — and no agent was
 // charged for the environment's failure.
 func (e *testEnv) assertInfrastructureFailure(job int64) {
 	e.t.Helper()
 	if got := e.strOf("SELECT COALESCE(error_kind, '') FROM jobs WHERE id = ?", job); got != engine.ErrorKindInfra {
 		e.t.Errorf("error kind of job %d = %q, want %q", job, got, engine.ErrorKindInfra)
 	}
-	retry := e.int64Of(`SELECT id FROM jobs WHERE restart = 1 AND status IN ('queued', 'leased', 'running')
+	retry := e.int64Of(`SELECT id FROM jobs WHERE kind = 'work' AND restart = 0 AND status IN ('queued', 'leased', 'running')
 		AND task_id = (SELECT task_id FROM jobs WHERE id = ?)`, job)
 	if retry == 0 {
 		e.t.Errorf("no retried job followed the failure of job %d", job)
@@ -680,13 +681,13 @@ func (e *testEnv) assertInfrastructureFailure(job int64) {
 	}
 }
 
-// TestRunnerWorktreeFailureIsInfrastructure covers the worktree half of
-// issue #39: a worktree that cannot be built — here a base ref the
-// remote does not hold — fails the job as the infra kind before the
-// worker starts, retried behind a backoff and charged to no agent. The
-// failure is staged through an unbuildable base ref, not permissions:
-// the runner's startup sweep removes the worktrees dir, so a
-// permission-based test would never see the build fail.
+// TestRunnerWorktreeFailureIsInfrastructure covers the worktree half:
+// a worktree that cannot be built — here a base ref the remote does not
+// hold — fails the job as the infra kind before the worker starts,
+// retried on the infra backoff and charged to no agent. The failure is
+// staged through an unbuildable base ref, not permissions: the runner's
+// startup sweep removes the worktrees dir, so a permission-based test
+// would never see the build fail.
 func TestRunnerWorktreeFailureIsInfrastructure(t *testing.T) {
 	t.Parallel()
 	// An empty remote: the missing base falls back to the default branch,
@@ -712,7 +713,7 @@ func TestRunnerWorktreeFailureIsInfrastructure(t *testing.T) {
 		t.Errorf("failure = %q, want the worktree add named", msg)
 	}
 	e.assertInfrastructureFailure(job)
-	if state := e.strOf("SELECT state FROM tasks WHERE id = ?", task); state != "ready" {
-		t.Errorf("task state = %q, want ready behind its retry", state)
+	if state := e.strOf("SELECT state FROM tasks WHERE id = ?", task); state != "running" {
+		t.Errorf("task state = %q, want running: the task keeps its state behind the retry", state)
 	}
 }
