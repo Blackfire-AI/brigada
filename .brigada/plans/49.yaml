@@ -73,9 +73,9 @@ tasks:
     continue: "lr-runner"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-184-r1"
-    rounds: 0
+    rounds: 1
   - id: 185
     name: "lr-docs"
     title: "#87 (4/4) land-ready.sh, docs, changelog"
