@@ -3,6 +3,8 @@ package api
 import (
 	"strings"
 	"testing"
+
+	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
 // TestClientRegisterRecordsProcessStartAndRendersAuthLine runs the wire
@@ -16,9 +18,9 @@ func TestClientRegisterRecordsProcessStartAndRendersAuthLine(t *testing.T) {
 	if err := c.Register(e.ctx, agents, 0); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	want := processStart.UTC().Format("2006-01-02T15:04:05Z")
+	want := processStart.UTC().Format(engine.TimeLayout)
 	got := e.str("SELECT started_at FROM runners")
-	if got == "" || !strings.HasPrefix(got, want[:10]) {
+	if got != want {
 		t.Fatalf("started_at = %q, want the process start (%s)", got, want)
 	}
 	// A re-register of the same process leaves the stored start alone.

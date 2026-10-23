@@ -40,6 +40,16 @@ func TestAuthLineNamesEnvVariableAndRunnerStart(t *testing.T) {
 	}
 }
 
+func TestAuthLineSaysWhenTheRunnerReportedNoStart(t *testing.T) {
+	e := newEnv(t)
+	got := e.authReason("old-runner", "dsh", time.Time{})
+	for _, want := range []string{"auth", "DEEPSEEK_API_KEY", "has not reported its start"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("reason %q lacks %q", got, want)
+		}
+	}
+}
+
 func TestAuthLineKeepsPlainFormForOtherHarnesses(t *testing.T) {
 	e := newEnv(t)
 	if got := e.authReason("claude-runner", "claude", time.Now()); got != "auth" {
