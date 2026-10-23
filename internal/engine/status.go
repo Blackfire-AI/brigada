@@ -854,10 +854,10 @@ func brokenReason(reason, harness, started string) string {
 		return reason
 	}
 	out := reason + ": " + env + " is read from the runner's environment"
-	if started != "" {
-		out += "; the runner started " + started
+	if started == "" {
+		return out + "; the runner has not reported its start"
 	}
-	return out
+	return out + "; the runner started " + started
 }
 
 // awaitingReasonTx reads the reasons the plan's latest

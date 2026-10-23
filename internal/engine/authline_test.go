@@ -66,6 +66,10 @@ func TestRegisterRecordsStartOnlyWhenItChanges(t *testing.T) {
 	if got := read(); got != fmtTime(first) {
 		t.Errorf("started_at after silent register = %q", got)
 	}
+	reg(first) // the same process re-polling leaves it
+	if got := read(); got != fmtTime(first) {
+		t.Errorf("started_at after same-start register = %q", got)
+	}
 	reg(second)
 	if got := read(); got != fmtTime(second) {
 		t.Errorf("started_at after restart = %q, want %q", got, fmtTime(second))
