@@ -145,6 +145,9 @@ const (
 	// EvError is the CLI reporting a failure whose kind sorts what the
 	// engine does with it (§8: quota, auth, the rest).
 	EvError EventKind = "error"
+	// EvWarning is a CLI notice that is not a failure: the run goes on,
+	// and the runner does not take it for the run's error.
+	EvWarning EventKind = "warning"
 )
 
 // ErrorKind sorts an error event: a quota limit hit (the account cools
@@ -255,6 +258,24 @@ type Event struct {
 	// LimitUntil is a limit error's reset time, RFC3339, when the CLI's
 	// text carried one machine-readably; empty when unknown (§4.4).
 	LimitUntil string
+	// Final marks an error event as the CLI's closing verdict on the run
+	// (codex's turn.failed): it names the failure over any earlier error
+	// event of the same stream.
+	Final bool
+	// Notice marks an error event that is only a warning while the
+	// turn has not started (codex's startup notices): the runner, which
+	// tracks each job's turn through TurnMarker, downgrades it to a
+	// warning until then.
+	Notice bool
+}
+
+// TurnMarker is the optional adapter interface for a CLI whose stream
+// opens the turn with a line of its own. The adapter itself is shared by
+// concurrent jobs and keeps no stream state; the runner asks it of each
+// stdout line and keeps the job's turn.
+type TurnMarker interface {
+	// StartsTurn reports whether the stdout line opens the turn.
+	StartsTurn(line []byte) bool
 }
 
 // IsProgress reports whether the event is progress in the sense of
