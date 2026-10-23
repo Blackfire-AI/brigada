@@ -227,6 +227,12 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	if err != nil {
 		return AmendPlanResult{}, err
 	}
+	// A task the amendment adds starts from the project's land target
+	// when one is set (§6.1, §6.3), as a created task does; the default
+	// branch read above is the fallback.
+	if t := settings.LandTarget; t != "" {
+		baseRef = t
+	}
 	am.Add = settings.withDefaultCheck(am.Add)
 	// The extra repositories (§5.8) of an added task resolve now, as the
 	// default check does.
@@ -278,13 +284,25 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		return 0, fmt.Errorf("%q names no task of plan %d", ref, plan)
 	}
 	// liveDeps resolves a dependency list; a dependency that ended failed
-	// or cancelled will never be done and is refused.
+	// or cancelled will never be done and is refused. A ref naming no
+	// task of the plan may name a landed task of another plan (§6.1):
+	// already satisfied, so no edge waits on it.
 	liveDeps := func(owner int, refs []string) ([]int, error) {
 		var out []int
 		seen := map[int]bool{}
 		for _, ref := range refs {
 			j, err := resolve(ref)
 			if err != nil {
+				sat, why, cerr := crossPlanDepTx(tx, proj, ref)
+				if cerr != nil {
+					return nil, cerr
+				}
+				if sat {
+					continue
+				}
+				if why != "" {
+					return nil, fmt.Errorf("%s depends on %q: %s", nodes[owner].label(), ref, why)
+				}
 				return nil, fmt.Errorf("%s depends on %w", nodes[owner].label(), err)
 			}
 			if j == owner {
