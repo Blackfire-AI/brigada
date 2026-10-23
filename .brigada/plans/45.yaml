@@ -29,7 +29,7 @@ tasks:
     effort: medium
     review_tier: heavy
     review_effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-166"
     rounds: 0
   - id: 167
@@ -40,6 +40,6 @@ tasks:
     base: "operator"
     tier: light
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
