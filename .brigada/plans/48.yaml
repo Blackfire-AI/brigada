@@ -27,10 +27,9 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-170-r2"
     rounds: 2
-    question: "Please apply the commit_message below to branch tip 09812023 on brigada/task-170-r2 (reword only; keep the code), or grant this session git-commit permission so I can amend, then re-run the review."
   - id: 171
     name: "drain"
     title: "#75 a runner restart drains first; --now forces it"
