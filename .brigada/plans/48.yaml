@@ -114,7 +114,7 @@ tasks:
     deps: ["amend-during-review"]
     base: "amend-during-review"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 179
@@ -125,6 +125,6 @@ tasks:
     base: "infra-show"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-179"
     rounds: 0
