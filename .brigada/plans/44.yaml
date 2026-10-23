@@ -7,7 +7,7 @@ title: "v1.0.0 batch 2: #54 Z.ai reset zone, #52 report bound, #48 land commit m
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-10-23T06:18:10.852723Z
-updated: 2026-10-23T06:22:11.992116Z
+updated: 2026-10-23T06:22:48.265718Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
