@@ -5,9 +5,9 @@
 plan: 49
 title: "Urgent: fix TestBP8aExit on Linux (waitGroupGone zombies), CI red on brigada/landed"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-10-23T19:25:20.158311Z
-updated: 2026-10-23T19:30:10.958331Z
+updated: 2026-10-23T19:32:13.669273Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -28,5 +28,17 @@ tasks:
     base: ""
     effort: medium
     state: running
+    branch: ""
+    rounds: 0
+  - id: 181
+    name: "land-ready"
+    title: "#87 land_ready: a project command the land job runs before landing"
+    class: "implement"
+    deps: ["fix-waitgroupgone"]
+    base: "fix-waitgroupgone"
+    continue: "fix-waitgroupgone"
+    tier: heavy
+    effort: medium
+    state: pending
     branch: ""
     rounds: 0
