@@ -84,9 +84,10 @@ tasks:
     base: "lr-engine"
     continue: "lr-engine"
     effort: medium
-    state: running
+    state: needs_foreman
     branch: "brigada/task-185-r1"
     rounds: 2
+    question: "Reviewer requires scripts/land-ready.sh recorded as 100755 but the runner cannot chmod and the foreman said to keep 644 with a documented post-landing chmod: which should stand, and if 100755, who sets the mode bit (e.g. `git update-index --chmod=+x` by the foreman/land job)?"
   - id: 186
     name: "flaky-restart-tests"
     title: "#75 de-flake the runner restart handoff tests under -race on Linux"
