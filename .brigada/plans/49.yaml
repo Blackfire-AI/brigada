@@ -84,7 +84,7 @@ tasks:
     base: "lr-engine"
     continue: "lr-engine"
     effort: medium
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
   - id: 186
