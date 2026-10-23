@@ -322,7 +322,7 @@ func TestInitNonTerminalPrompts(t *testing.T) {
 		"    Use kimi? [y/N]:",
 		"    Let kimi write code too, not only review? [y/N]:",
 		"    Pick numbers (1,3) or -, or type provider/model [-]:",
-		"Write 1 file and start the runner? [y/N]:",
+		"Write 2 files and start the runner? [y/N]:",
 	}
 	if !strings.Contains(out, "\nSigned in: opencode (2 providers, opencode providers list).\nclaude: init can't check sign-in.\ncodex: init can't check sign-in.\nkimi: init can't check sign-in.\n\n") {
 		t.Errorf("expected the signed-in line and one line per CLI that cannot be checked:\n%s", out)
@@ -527,12 +527,12 @@ func TestInitApplyPrompts(t *testing.T) {
 		name, prompt             string
 		exists, running, differs bool
 	}{
-		{"write and start", "Write 1 file and start the runner? [y/N]:", false, false, false},
-		{"write", "Write 1 file? [y/N]:", false, true, false},
-		{"start", "Start the runner? [y/N]:", true, false, false},
-		{"register", "Register the project? [y/N]:", true, true, false},
-		{"restart", "Write 1 file and restart the runner with the new agents? [y/N]:", false, true, true},
-		{"restart only", "Write 0 files and restart the runner with the new agents? [y/N]:", true, true, true},
+		{"write and start", "Write 2 files and start the runner? [y/N]:", false, false, false},
+		{"write", "Write 2 files? [y/N]:", false, true, false},
+		{"start", "Write 1 file and start the runner? [y/N]:", true, false, false},
+		{"register", "Write 1 file? [y/N]:", true, true, false},
+		{"restart", "Write 2 files and restart the runner with the new agents? [y/N]:", false, true, true},
+		{"restart only", "Write 1 file and restart the runner with the new agents? [y/N]:", true, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			write := importRepo(t)
@@ -1115,7 +1115,7 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 		log, _ := os.ReadFile(filepath.Join(state, "engine.log"))
 		t.Fatalf("%d\n%s\n%s\nengine log: %s", code, out, err, log)
 	}
-	for _, want := range []string{"Done: wrote ", "wrote 1 file (not committed). Detached runner started", "stop it with: brigada stop", "Next:\n  1. Talk to the foreman: brigada attach\n  2. Or, without a conversation: brigada ask", "Stop the runner: brigada stop"} {
+	for _, want := range []string{"Done: wrote ", "wrote 2 files (not committed). Detached runner started", "stop it with: brigada stop", "Next:\n  1. Talk to the foreman: brigada attach\n  2. Or, without a conversation: brigada ask", "Stop the runner: brigada stop"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -1655,7 +1655,7 @@ func assertInitTargetTranscript(t *testing.T, out string) {
 		"Foreman: claude/sonnet, effort medium", "Agents (every model", "Reviews:",
 		"At once: 4 tasks on this machine; per account: claude 3, codex 2, kimi 1,",
 		"Check:", "What workers may do:", "Files in this repository",
-		"In the background:", "Write 1 file and start the runner? [y/N]:",
+		"In the background:", "Write 2 files and start the runner? [y/N]:",
 	}
 	position := 0
 	for _, text := range ordered {
@@ -1665,7 +1665,7 @@ func assertInitTargetTranscript(t *testing.T, out string) {
 		}
 		position += next + len(text)
 	}
-	beforeApply, _, _ := strings.Cut(plain, "Write 1 file and start the runner?")
+	beforeApply, _, _ := strings.Cut(plain, "Write 2 files and start the runner?")
 	if strings.Contains(strings.ToLower(beforeApply), "ready") {
 		t.Error("claimed ready before apply")
 	}

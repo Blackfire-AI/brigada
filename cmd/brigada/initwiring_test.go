@@ -429,6 +429,11 @@ func TestInitRerunNoWiringKeepsOldWiring(t *testing.T) {
 		want[k] = v
 	}
 	want[engine.ProjectConfigPath] = after[engine.ProjectConfigPath]
+	// The operator guide is not harness wiring: --no-wiring still writes it.
+	if after[operatorFile] != operatorGuide {
+		t.Errorf("init --no-wiring did not write %s", operatorFile)
+	}
+	want[operatorFile] = after[operatorFile]
 	if !reflect.DeepEqual(after, want) {
 		t.Fatalf("init --no-wiring changed harness files:\nbefore %q\nafter %q", before, after)
 	}

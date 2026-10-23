@@ -56,26 +56,31 @@ Init then lists the agents, permissions and files, and shows a diff for every ex
 
 After you confirm, init:
 
-- writes `.brigada/project.yaml`, which is yours to commit (brigada never commits or pushes it), and strips brigada's repository wiring (MCP and hook entries, the foreman files and the git exclude line), unless `--no-wiring`;
+- writes `.brigada/project.yaml`, which is yours to commit (brigada never commits or pushes it), and `.brigada/operator.md`, a generated guide that tells your own coding agent how to work with brigada (init overwrites it on a rerun, `--no-wiring` does not skip it, and `brigada remove` deletes it). Unless `--no-wiring`, it also strips brigada's repository wiring (MCP and hook entries, the foreman files and the git exclude line); it does not touch `AGENTS.md` or `CLAUDE.md` except to remove an older init's marked block;
 - starts the engine and a detached runner.
 
 `brigada init --probe` shows the plan and writes nothing. Stop the runner with `brigada stop`; add `--engine` to stop the engine too. Every step and flag is in [the guide, section 1](docs/GUIDE.md#1-install-and-brigada-init).
 
 Rerun `brigada init` to change agents, the foreman model and effort, or tasks at once; use `brigada start` after a reboot and `brigada config` to see every setting and how to change it.
 
-`brigada remove` removes brigada's repository wiring and archives the project, keeping its history; see [the guide](docs/GUIDE.md#removing-brigada-from-a-repository).
+`brigada remove` removes brigada's repository wiring and `.brigada/operator.md` and archives the project, keeping its history; see [the guide](docs/GUIDE.md#removing-brigada-from-a-repository).
 
-## Talk to the foreman
+## The first five minutes
 
-After init, run `brigada attach` inside the repository. The foreman is an agent in a brigada-owned session: your attached chat and the headless turns that wake on events while you are away are one transcript, running in a reading checkout of your repository with your own harness config. It plans through brigada's tools (`--model` and `--effort` override the project's foreman choice for one chat); the runner works each task on its own branch in a worktree, runs the check and pushes the branch; and a reviewer of another family reads it. See [section 2](docs/GUIDE.md#2-talking-to-the-foreman-brigada-attach).
-
-Then:
+1. Install brigada (above) and run `brigada init` in your repository (above).
+2. Open your coding agent in the repository and tell it to read `.brigada/operator.md`. Then tell it, for example, "ask brigada to fix #12". Your agent is the operator: it passes the request to the foreman through the CLI and reports back; it approves nothing.
+3. Watch `brigada top`: your live view of agents, jobs, queue, plans and events.
+4. Approve what the needs-you queue holds. A plan over your size limit, a landing a rule holds, and a push wait for you, with `brigada plan approve`, `brigada land approve` and `brigada push approve`; the operator tells you when something waits, and the decision is yours.
 
 ```sh
 brigada status              # engine, jobs, plans, what needs you
 brigada diff <task-id>      # what a task changed
 brigada land <task-id>...   # land approved tasks by hand (the land job does it by rule)
 ```
+
+## Talking to the foreman yourself
+
+You can also skip the operator and talk to the foreman directly: run `brigada attach` inside the repository. The foreman is an agent in a brigada-owned session: your attached chat and the headless turns that wake on events while you are away are one transcript, running in a reading checkout of your repository with your own harness config. It plans through brigada's tools (`--model` and `--effort` override the project's foreman choice for one chat); the runner works each task on its own branch in a worktree, runs the check and pushes the branch; and a reviewer of another family reads it. See [section 2](docs/GUIDE.md#2-talking-to-the-foreman-brigada-attach).
 
 The [guide](docs/GUIDE.md) covers the rest: a coordinator session over several repositories, watching work as it runs, configuration, and the full command reference.
 
