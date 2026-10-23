@@ -104,8 +104,8 @@ tasks:
     base: "codex-warning"
     continue: "codex-warning"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-177"
     rounds: 0
   - id: 178
     name: "codex-warning"
