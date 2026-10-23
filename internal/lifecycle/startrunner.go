@@ -79,10 +79,15 @@ func EnsureRunner(ctx context.Context, o RunnerStartOptions) (RunnerStartResult,
 	if running {
 		// The handoff runs under the same start gate: the request is
 		// written, the runner honoured it, and the fresh start follows
-		// with no second starter in between.
+		// with no second starter in between. The readiness wait starts
+		// over, wider: the handoff itself may have waited out the
+		// window taken at entry, and the machine may still be busy
+		// with the old runner's teardown.
 		if err := handoffRunner(ctx, dir, o.Restart); err != nil {
 			return result, err
 		}
+		wait = max(wait, restartStartWait)
+		deadline = time.Now().Add(wait)
 	}
 	binary := o.Binary
 	if binary == "" {
@@ -173,10 +178,12 @@ func runnerStartPause(ctx context.Context, deadline time.Time) error {
 // restartDrainWait how long a drain may take: a drain never falls back
 // — no running job is cut by a restart that did not ask for --now — so
 // the wait spans a job's whole run and the caller's ctx is the only
-// earlier way out.
+// earlier way out. restartStartWait is the readiness window the start
+// after a handoff gets, wider than a cold start's.
 var (
 	restartNowWait   = 30 * time.Second
 	restartDrainWait = time.Hour
+	restartStartWait = 30 * time.Second
 )
 
 // handoffRunner hands a running runner the restart request and waits

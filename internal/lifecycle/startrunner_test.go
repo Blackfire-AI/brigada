@@ -168,14 +168,16 @@ func TestEnsureRunnerRestartHandoff(t *testing.T) {
 	}
 	defer syscall.Kill(first.Record.PID, syscall.SIGTERM)
 
-	// The drain blocks while the runner's running job has not ended.
+	// The drain blocks while the runner's running job has not ended —
+	// longer, here, than the whole readiness wait the call was given:
+	// the wait must restart after the handoff, not expire with it.
 	type start struct {
 		result RunnerStartResult
 		err    error
 	}
 	drained := make(chan start, 1)
 	go func() {
-		r, err := EnsureRunner(ctx, RunnerStartOptions{StateDir: state, Binary: binary, Restart: runnerstate.RestartDrain})
+		r, err := EnsureRunner(ctx, RunnerStartOptions{StateDir: state, Binary: binary, Wait: 200 * time.Millisecond, Restart: runnerstate.RestartDrain})
 		drained <- start{r, err}
 	}()
 	select {
@@ -186,7 +188,9 @@ func TestEnsureRunnerRestartHandoff(t *testing.T) {
 	if _, running, _ := runnerstate.Running(dir); !running {
 		t.Fatal("the drain replaced a runner without waiting for its exit")
 	}
-	// The job ends; the drain completes into a fresh runner.
+	// The job ends — after the readiness window the call came with —
+	// and the drain completes into a fresh runner anyway.
+	time.Sleep(400 * time.Millisecond)
 	if err := os.WriteFile(filepath.Join(dir, "release"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
