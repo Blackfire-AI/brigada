@@ -71,6 +71,10 @@ type StatusInfo struct {
 	StartedAt string         `json:"started_at"`
 	Jobs      map[string]int `json:"jobs"`
 	Running   []StatusJob    `json:"running"`
+	// RunnerDraining is true while a runner has a restart drain pending
+	// (§5.1): it finishes its running jobs and exits, and the status
+	// renders the restart that waits behind them.
+	RunnerDraining bool `json:"runner_draining,omitempty"`
 	// ForemanMessages counts the user's messages waiting in the foreman
 	// inbox (§4.2 item 3): queued while a chat is attached, a turn runs,
 	// or the wake cannot happen; delivered ones are not counted.
@@ -331,6 +335,9 @@ func (e *Engine) status(ctx context.Context, project int64, withText, all bool) 
 	if err != nil {
 		return StatusInfo{}, fmt.Errorf("read status: %w", err)
 	}
+	// The drain mark is the engine's memory, not store state (§5.1), so
+	// it is read beside the store's answer, after it.
+	info.RunnerDraining = e.runnerDraining()
 	return info, nil
 }
 

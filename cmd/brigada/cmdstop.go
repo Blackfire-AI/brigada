@@ -90,7 +90,6 @@ func runStop(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 }
 
 // terminateRunner checks both the lock and its owner before signalling.
-// Init shares stop's termination path when applying different agents.
 func terminateRunner(ctx context.Context, dir string,
 	rec runnerstate.Record) (bool, error) {
 	if rec.PID <= 0 {

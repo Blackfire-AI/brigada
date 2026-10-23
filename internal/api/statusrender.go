@@ -24,6 +24,11 @@ import (
 // the all view (`--all`, all=true) listing them.
 func StatusSections(st Status) string {
 	lines := runningLines(st.Running, time.Now())
+	// A restart drain pending (§5.1): the runner finishes the running
+	// jobs above and exits, and its restart waits behind them.
+	if st.RunnerDraining && len(st.Running) > 0 {
+		lines = append(lines, drainLine(len(st.Running)))
+	}
 	for _, a := range st.Cooling {
 		lines = append(lines, fmt.Sprintf("cooling: %s/%s until %s (account %s)", a.Harness, a.Model, a.Until, a.Account))
 	}
@@ -224,6 +229,16 @@ func oneLine(s string, max int) string {
 		max--
 	}
 	return s[:max]
+}
+
+// drainLine is the status's word for a pending restart drain (§5.1):
+// the runner restarts once the running jobs it waits out have finished.
+func drainLine(n int) string {
+	noun := "jobs"
+	if n == 1 {
+		noun = "job"
+	}
+	return fmt.Sprintf("runner restarting after %d running %s", n, noun)
 }
 
 // runningLines renders the jobs a runner holds (§10), one line each:

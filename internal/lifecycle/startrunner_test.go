@@ -39,9 +39,25 @@ func TestDetachedRunnerHelper(t *testing.T) {
 	if err := runnerstate.Publish(dir, []api.Agent{{Harness: "claude", Model: "sonnet"}}); err != nil {
 		os.Exit(12)
 	}
-	// Parent test terminates us; the OS releases the lock.
+	// A restart request is honoured the way the real runner honours one:
+	// `now` exits at once, a drain only once its running job ended —
+	// here, when the parent writes the release marker. Parent test
+	// terminates us otherwise; the OS releases the lock.
 	for {
-		time.Sleep(time.Hour)
+		mode, ok := runnerstate.RestartRequested(dir)
+		if !ok {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		if mode == runnerstate.RestartNow {
+			os.Exit(0)
+		}
+		for {
+			if _, err := os.Stat(filepath.Join(dir, "release")); err == nil {
+				os.Exit(0)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 }
 
@@ -135,5 +151,77 @@ func TestEnsureRunnerStartupFailure(t *testing.T) {
 	_, err := EnsureRunner(context.Background(), RunnerStartOptions{StateDir: t.TempDir(), Binary: binary, Wait: time.Second})
 	if err == nil {
 		t.Fatal("reported a failed runner as started")
+	}
+}
+
+// TestEnsureRunnerRestartHandoff covers the restart modes a starter can
+// ask for: a drain waits out the runner's running job before the fresh
+// start, and `now` makes way at once.
+func TestEnsureRunnerRestartHandoff(t *testing.T) {
+	binary := helperRunnerBinary(t)
+	state := t.TempDir()
+	dir := filepath.Join(state, "runner")
+	ctx := context.Background()
+	first, err := EnsureRunner(ctx, RunnerStartOptions{StateDir: state, Binary: binary})
+	if err != nil {
+		t.Fatalf("start the first runner: %v", err)
+	}
+	defer syscall.Kill(first.Record.PID, syscall.SIGTERM)
+
+	// The drain blocks while the runner's running job has not ended.
+	type start struct {
+		result RunnerStartResult
+		err    error
+	}
+	drained := make(chan start, 1)
+	go func() {
+		r, err := EnsureRunner(ctx, RunnerStartOptions{StateDir: state, Binary: binary, Restart: runnerstate.RestartDrain})
+		drained <- start{r, err}
+	}()
+	select {
+	case r := <-drained:
+		t.Fatalf("the drain restarted the runner before its job ended: %+v %v", r.result, r.err)
+	case <-time.After(400 * time.Millisecond):
+	}
+	if _, running, _ := runnerstate.Running(dir); !running {
+		t.Fatal("the drain replaced a runner without waiting for its exit")
+	}
+	// The job ends; the drain completes into a fresh runner.
+	if err := os.WriteFile(filepath.Join(dir, "release"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-drained:
+		if r.err != nil {
+			t.Fatalf("the drain restart: %v", r.err)
+		}
+		if r.result.Existing || r.result.Record.PID == first.Record.PID {
+			t.Fatalf("the drain restart = %+v, want a fresh runner", r.result)
+		}
+		defer syscall.Kill(r.result.Record.PID, syscall.SIGTERM)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the drain restart never finished")
+	}
+	if _, ok := runnerstate.RestartRequested(dir); ok {
+		t.Error("a consumed restart request was left behind")
+	}
+
+	// `now` makes way at once, with no job to wait out.
+	now := make(chan start, 1)
+	go func() {
+		r, err := EnsureRunner(ctx, RunnerStartOptions{StateDir: state, Binary: binary, Restart: runnerstate.RestartNow})
+		now <- start{r, err}
+	}()
+	select {
+	case r := <-now:
+		if r.err != nil {
+			t.Fatalf("the --now restart: %v", r.err)
+		}
+		if r.result.Existing {
+			t.Fatalf("the --now restart = %+v, want a fresh runner", r.result)
+		}
+		syscall.Kill(r.result.Record.PID, syscall.SIGTERM)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the --now restart never finished")
 	}
 }

@@ -129,7 +129,46 @@ func (e *Engine) Register(ctx context.Context, name string, maxParallel int, age
 	if err != nil {
 		return 0, fmt.Errorf("register runner %q: %w", name, err)
 	}
+	// The runner is back, so any drain it reported is over: the mark
+	// lives only while the runner it names is on its way out.
+	e.clearDraining(id)
 	return id, nil
+}
+
+// MarkDraining records that the runner has a restart drain pending
+// (§5.1): it takes no new lease and exits once its running jobs
+// finish. The mark is the engine's memory of a runner's own report —
+// not store state — because it can only be true while that engine
+// lives: a restarted engine meets either the draining runner's next
+// report or its replacement's register, and the drain itself needs no
+// engine at all.
+func (e *Engine) MarkDraining(ctx context.Context, runner int64) error {
+	if runner <= 0 {
+		return fmt.Errorf("mark the runner draining: no such runner")
+	}
+	e.drainMu.Lock()
+	defer e.drainMu.Unlock()
+	if e.draining == nil {
+		e.draining = map[int64]bool{}
+	}
+	e.draining[runner] = true
+	return nil
+}
+
+// clearDraining ends a runner's drain mark; its register is one way,
+// the engine's death the other.
+func (e *Engine) clearDraining(runner int64) {
+	e.drainMu.Lock()
+	defer e.drainMu.Unlock()
+	delete(e.draining, runner)
+}
+
+// runnerDraining reports whether any runner has a restart drain
+// pending, for the status's restarting line.
+func (e *Engine) runnerDraining() bool {
+	e.drainMu.Lock()
+	defer e.drainMu.Unlock()
+	return len(e.draining) > 0
 }
 
 // advertiseTx replaces the runner's agents with adverts, keyed by

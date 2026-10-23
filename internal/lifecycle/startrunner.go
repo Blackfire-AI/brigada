@@ -21,6 +21,12 @@ type RunnerStartOptions struct {
 	Binary     string
 	Args       []string
 	Wait       time.Duration
+	// Restart, when "drain" or "now", makes a running runner make way
+	// for the start: "drain" hands it a request it honours between
+	// jobs — it takes no new lease and exits once its running jobs
+	// finish — while "now" has it exit at once, cutting them. Empty
+	// keeps a running runner running and only reports it.
+	Restart string
 }
 
 type RunnerStartResult struct {
@@ -67,8 +73,16 @@ func EnsureRunner(ctx context.Context, o RunnerStartOptions) (RunnerStartResult,
 	if err != nil {
 		return result, err
 	}
-	if running {
+	if running && o.Restart == "" {
 		return RunnerStartResult{Existing: true, Record: rec}, nil
+	}
+	if running {
+		// The handoff runs under the same start gate: the request is
+		// written, the runner honoured it, and the fresh start follows
+		// with no second starter in between.
+		if err := handoffRunner(ctx, dir, o.Restart); err != nil {
+			return result, err
+		}
 	}
 	binary := o.Binary
 	if binary == "" {
@@ -151,5 +165,72 @@ func runnerStartPause(ctx context.Context, deadline time.Time) error {
 		return ctx.Err()
 	case <-time.After(startPoll):
 		return nil
+	}
+}
+
+// restartNowWait is how long a --now handoff waits for the runner to
+// honour the request before it falls back to the signal, and
+// restartDrainWait how long a drain may take: a drain never falls back
+// — no running job is cut by a restart that did not ask for --now — so
+// the wait spans a job's whole run and the caller's ctx is the only
+// earlier way out.
+var (
+	restartNowWait   = 30 * time.Second
+	restartDrainWait = time.Hour
+)
+
+// handoffRunner hands a running runner the restart request and waits
+// for it to exit (§5.1): `drain` waits out its running jobs, `now`
+// stops it at once. A `now` the runner does not honour in time — an
+// older binary, a stuck process — falls back to SIGTERM, like stop; a
+// drain never signals, it reports and leaves the runner running.
+func handoffRunner(ctx context.Context, dir, mode string) error {
+	switch mode {
+	case runnerstate.RestartDrain, runnerstate.RestartNow:
+	default:
+		return fmt.Errorf("restart the runner: unknown mode %q; want %s or %s", mode, runnerstate.RestartDrain, runnerstate.RestartNow)
+	}
+	if err := runnerstate.RequestRestart(dir, mode); err != nil {
+		return fmt.Errorf("restart the runner: %w", err)
+	}
+	wait := restartNowWait
+	if mode == runnerstate.RestartDrain {
+		wait = restartDrainWait
+	}
+	deadline := time.Now().Add(wait)
+	signalled := false
+	for {
+		rec, running, err := runnerstate.Running(dir)
+		if err != nil {
+			return err
+		}
+		if !running {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if mode == runnerstate.RestartNow && !signalled && !time.Now().Before(deadline) {
+			// The runner did not make way in time: the request could be
+			// one its binary predates. Stop asks the same of it here.
+			if err := syscall.Kill(rec.PID, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+				return fmt.Errorf("signal the runner (pid %d): %w", rec.PID, err)
+			}
+			signalled = true
+			deadline = time.Now().Add(10 * time.Second)
+			continue
+		}
+		if time.Now().After(deadline) {
+			if mode == runnerstate.RestartDrain {
+				return fmt.Errorf("the runner (pid %d) still holds running jobs after %s; no restart was forced; rerun with --now to cut them",
+					rec.PID, wait)
+			}
+			return fmt.Errorf("the runner (pid %d) still runs %s after SIGTERM", rec.PID, 10*time.Second)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(startPoll):
+		}
 	}
 }
