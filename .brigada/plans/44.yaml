@@ -39,7 +39,7 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-163"
     rounds: 1
   - id: 164
