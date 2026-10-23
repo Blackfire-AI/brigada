@@ -37,18 +37,18 @@ func TestResolve(t *testing.T) {
 		{
 			name: "ldflags left at the default falls through to the tag",
 			info: info("v1.2.3"),
-			want: "v1.2.3",
+			want: "1.2.3",
 		},
 		{
 			name: "tagged release from go install",
 			info: info("v1.0.0",
 				debug.BuildSetting{Key: "vcs.revision", Value: rev(1)}),
-			want: "v1.0.0",
+			want: "1.0.0",
 		},
 		{
 			name: "tagged prerelease release",
 			info: info("v1.0.0-rc.1"),
-			want: "v1.0.0-rc.1",
+			want: "1.0.0-rc.1",
 		},
 		{
 			name: "tagged release without the leading v",
@@ -130,6 +130,7 @@ func TestIsRelease(t *testing.T) {
 		{"1.0.0", true},
 		{"v1.0.0-rc.1", true},
 		{"v1.0.0+build.5", true},
+		{"v1.0.0-20261023000000", true},
 		{"(devel)", false},
 		{"", false},
 		{"v0.0.0-20261023000000-abcdefabcdef", false},
