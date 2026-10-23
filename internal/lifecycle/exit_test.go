@@ -1,7 +1,6 @@
 package lifecycle_test
 
 import (
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -84,7 +83,7 @@ func startRunnerProc(t *testing.T, bin, state, script string) *exec.Cmd {
 				<-done
 			}
 		}
-		waitGroupGone(t, pgid)
+		waitGroupGone(t, pgid, "runner")
 		logFile.Close()
 		if data, err := os.ReadFile(logPath); err == nil {
 			t.Logf("runner log:\n%s", data)
@@ -98,23 +97,18 @@ func startRunnerProc(t *testing.T, bin, state, script string) *exec.Cmd {
 // can still write into the remote when TempDir cleanup runs. Jobs the
 // runner puts in groups of their own are outside it. Stragglers get a
 // SIGKILL after five seconds; a group still alive five seconds after
-// that fails the test instead of hanging it. Darwin answers EPERM for a
-// group holding only zombies, such as an engine the runner started and
-// never reaped; no live process is left in it, so that counts as gone.
-func waitGroupGone(t *testing.T, pgid int) {
+// that fails the test instead of hanging it. A group holding only
+// zombies, such as an engine the runner started and never reaped, counts
+// as gone (testsupport.GroupGone): the test cannot reap them itself.
+// who names the process checked, for the failure message.
+func waitGroupGone(t *testing.T, pgid int, who string) {
 	t.Helper()
 	start := time.Now()
 	killed := false
-	for {
-		if err := syscall.Kill(-pgid, 0); err != nil {
-			if !errors.Is(err, syscall.ESRCH) && !errors.Is(err, syscall.EPERM) {
-				t.Errorf("probe the process group %d: %v", pgid, err)
-			}
-			return
-		}
+	for !testsupport.GroupGone(pgid) {
 		switch elapsed := time.Since(start); {
 		case elapsed > 10*time.Second:
-			t.Errorf("the runner's process group %d survived SIGKILL", pgid)
+			t.Errorf("the %s's process group %d survived SIGKILL", who, pgid)
 			return
 		case elapsed > 5*time.Second && !killed:
 			syscall.Kill(-pgid, syscall.SIGKILL)
