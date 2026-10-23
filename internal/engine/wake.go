@@ -155,6 +155,47 @@ func (e *Engine) wakeOutcomeTx(tx *sql.Tx, project int64, now time.Time) (WakeOu
 	if err != nil {
 		return "", err
 	}
+	// A foreman turn that failed on the infrastructure keeps the wake
+	// armed (§5.1): the outage is waited out on the infra backoff, so
+	// the stall's three attempts do not count it while the retry window
+	// lasts. A streak that filled the window is the one thing that stops
+	// the wake on its own: one needs-you event names the outage (§10)
+	// and the events the failing turns carried stay pending like any
+	// stalled wake's. A fresh event — one no failing turn has carried —
+	// still wakes a turn, so an outage that ends is answered without a
+	// person: the turn succeeds and the streak is over.
+	streak, began, err := infraStreakTx(tx, key)
+	if err != nil {
+		return "", err
+	}
+	if streak > 0 && infraStreakSpent(began, now) {
+		// Named once per episode of the outage, like the stall's own
+		// event: the wake a later evaluation would announce again is
+		// the one already sitting in the log.
+		var lastSpent sql.NullInt64
+		if err := tx.QueryRow(`SELECT MAX(id) FROM events WHERE kind = ? AND project_id = ?`,
+			evForemanOutageSpent, project).Scan(&lastSpent); err != nil {
+			return "", fmt.Errorf("read the last outage event of project %d: %w", project, err)
+		}
+		var woke int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = ? AND project_id = ? AND id > ?`,
+			evForemanWoken, project, lastSpent.Int64).Scan(&woke); err != nil {
+			return "", fmt.Errorf("read the woken events of project %d: %w", project, err)
+		}
+		if woke > 0 || !lastSpent.Valid {
+			if _, err := appendEventTx(tx, evForemanOutageSpent, project, 0, 0,
+				eventPayload{Count: int64(streak), Reason: infraOutageText("the foreman's turns could not reach their remote")}, now); err != nil {
+				return "", err
+			}
+		}
+		if stalled {
+			return WakeStalled, nil
+		}
+	} else if stalled && streak > 0 {
+		// The last failure was infra and the window still has room:
+		// the wake answers, the stall does not count it.
+		stalled = false
+	}
 	if stalled {
 		// Named once per episode of failures: the wake a later evaluation
 		// would announce again is the one already sitting in the log. A
@@ -239,6 +280,12 @@ func (e *Engine) wakeOutcomeTx(tx *sql.Tx, project int64, now time.Time) (WakeOu
 	var notBefore time.Time
 	if attempts > 0 {
 		notBefore = now.Add(retryDelayFor(int(attempts)))
+	}
+	if streak > 0 {
+		// The re-wake after an infra failure waits the infra backoff
+		// (§5.1), not the short table: minutes, so an outage is not
+		// hammered every few seconds for hours.
+		notBefore = now.Add(infraDelayFor(streak))
 	}
 	res, err := e.submitForemanTurnTx(tx, project, inbox, notBefore, now)
 	if err != nil {

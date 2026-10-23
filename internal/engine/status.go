@@ -806,6 +806,40 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	}
 	lrows.Close()
 
+	// A foreman whose turns failed on the infrastructure until the retry
+	// window was spent (§5.1) waits for a person: the wake gave up and
+	// the queue names the outage. A turn woken since — the outage over,
+	// a user's ask — retires the entry.
+	orows, err := tx.Query(`SELECT pr.id, pr.repo_url, e.payload FROM projects pr
+		JOIN events e ON e.id = (
+			SELECT MAX(e2.id) FROM events e2 WHERE e2.kind = ? AND e2.project_id = pr.id)
+		WHERE pr.archived_at IS NULL
+		AND NOT EXISTS (SELECT 1 FROM events e3
+			WHERE e3.kind = ? AND e3.project_id = pr.id AND e3.id > e.id)`,
+		evForemanOutageSpent, evForemanWoken)
+	if err != nil {
+		return nil, fmt.Errorf("list the foremen outspent by an outage: %w", err)
+	}
+	defer orows.Close()
+	for orows.Next() {
+		var it NeedsYouItem
+		var payload string
+		if err := orows.Scan(&it.ID, &it.Title, &payload); err != nil {
+			return nil, fmt.Errorf("list the foremen outspent by an outage: %w", err)
+		}
+		it.Kind = "foreman"
+		it.State = "outage"
+		var p eventPayload
+		if json.Unmarshal([]byte(payload), &p) == nil {
+			it.Reason = oneLine(p.Reason, needsYouReasonLimit)
+		}
+		items = append(items, it)
+	}
+	if err := orows.Err(); err != nil {
+		return nil, fmt.Errorf("list the foremen outspent by an outage: %w", err)
+	}
+	orows.Close()
+
 	// Two projects that name one repository were left apart at startup
 	// (design §13.1); a person decides which stays.
 	dups, err := duplicateProjectItemsTx(tx, project)
