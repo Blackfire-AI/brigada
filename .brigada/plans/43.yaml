@@ -42,9 +42,9 @@ tasks:
     continue: "landtarget-engine"
     effort: medium
     review_tier: standard
-    state: reviewing
+    state: running
     branch: "brigada/task-160"
-    rounds: 0
+    rounds: 1
   - id: 161
     name: "planreview-parks"
     title: "#66: plan-review changes verdict parks the plan at needs_foreman; accept-as-reviewed tool"
