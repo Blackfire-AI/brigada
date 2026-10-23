@@ -192,7 +192,7 @@ func newInitializeResult() initializeResult {
 	return initializeResult{
 		ProtocolVersion: protocolVersion,
 		Capabilities:    map[string]any{"tools": map[string]any{}},
-		ServerInfo:      serverInfo{Name: ServerName, Version: version.Version},
+		ServerInfo:      serverInfo{Name: ServerName, Version: version.String()},
 	}
 }
 

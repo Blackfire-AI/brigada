@@ -210,7 +210,7 @@ func runVersion(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return usagef(stderr, "version takes no positional arguments")
 	}
 	printBanner(stdout)
-	fmt.Fprintf(stdout, "brigada %s\n", version.Version)
+	fmt.Fprintf(stdout, "brigada %s\n", version.String())
 	return 0
 }
 
