@@ -26,6 +26,15 @@ const heartbeatEvery = 20 * time.Second
 // API's 30 s cap, so one poll cannot outlive it.
 const leaseWait = 25 * time.Second
 
+// leaseCheckEvery caps how long one lease poll may wait before the loop
+// comes around to re-check the restart request: a restart finds the
+// runner between two polls, never after its whole long-poll window.
+const leaseCheckEvery = 5 * time.Second
+
+// restartPollEvery is how often a runner whose slots are full — one
+// waiting for a job to end — looks for a restart request.
+const restartPollEvery = 500 * time.Millisecond
+
 // Config is what a runner needs to run (§5.1). The zero value is not
 // usable; Run fills the defaults for the tuning fields and refuses the
 // rest.
@@ -346,6 +355,13 @@ const (
 	leaseBackoffMax = 30 * time.Second
 )
 
+// inflightJobs counts the jobs this runner is running right now, so a
+// drain can tell "every job ended" from "one still runs" while it waits.
+type inflightJobs struct {
+	mu sync.Mutex
+	n  int
+}
+
 // Run is the runner (§5.1): it registers the runner and its
 // advertisement, then long-polls leases and runs up to MaxParallel jobs
 // at once (one when unset), each in its own goroutine — workspace,
@@ -405,6 +421,10 @@ func Run(ctx context.Context, cfg Config) error {
 	// its own jobRun.
 	slots := make(chan struct{}, max(cfg.MaxParallel, 1))
 	var jobs sync.WaitGroup
+	// The jobs in flight, beside the WaitGroup: a drain watches the
+	// count until the last running job ends; the WaitGroup itself
+	// belongs to Run's exit, which waits for the same jobs its own way.
+	var inflight inflightJobs
 	// The broken-agent probe loop (§8 "Health") starts once the runner
 	// is registered, and keeps asking the engine for due probes for the
 	// runner's whole life: an engine that restarts answers "unknown
@@ -425,6 +445,13 @@ func Run(ctx context.Context, cfg Config) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		// A restart request a client left in the state directory is
+		// honoured between jobs (§5.1): the runner takes no new lease,
+		// finishes its running jobs, then exits — or, with `now`, exits
+		// at once and cuts them.
+		if mode, ok := runnerstate.RestartRequested(cfg.StateDir); ok {
+			return restartExit(ctx, &cfg, client, &inflight, mode, backoff)
 		}
 		if !registered {
 			if err := client.Register(ctx, cfg.Agents, cfg.MaxParallel); err != nil {
@@ -463,13 +490,25 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 
 		// Poll only while a slot is free; a full runner waits here for
-		// a job to end, or for shutdown.
+		// a job to end, or for shutdown. The wait stays interruptible:
+		// a restart request is looked for between polls, so a busy
+		// runner honours one without first freeing a slot.
+		restartWatch := time.NewTicker(restartPollEvery)
 		select {
 		case slots <- struct{}{}:
 		case <-ctx.Done():
+			restartWatch.Stop()
 			return ctx.Err()
+		case <-restartWatch.C:
+			restartWatch.Stop()
+			continue
 		}
-		grant, err := client.Lease(ctx, cfg.LeaseWait, cfg.harnessesOffered(), cfg.Labels)
+		restartWatch.Stop()
+		wait := cfg.LeaseWait
+		if wait > leaseCheckEvery {
+			wait = leaseCheckEvery
+		}
+		grant, err := client.Lease(ctx, wait, cfg.harnessesOffered(), cfg.Labels)
 		if err != nil || grant == nil {
 			<-slots
 		}
@@ -496,15 +535,77 @@ func Run(ctx context.Context, cfg Config) error {
 			continue // the wait ran out with nothing to do
 		}
 		r := &jobRun{cfg: &cfg, client: client, grant: grant}
+		inflight.mu.Lock()
+		inflight.n++
+		inflight.mu.Unlock()
 		jobs.Add(1)
 		go func() {
 			defer func() {
 				<-slots
 				jobs.Done()
+				inflight.mu.Lock()
+				inflight.n--
+				inflight.mu.Unlock()
 			}()
 			r.execute(runCtx)
 		}()
 	}
+}
+
+// restartExit is the runner's answer to a restart request (§5.1): `now`
+// returns at once — the deferred cancellation kills the running jobs —
+// while drain first tells the engine, so status can say the runner is
+// restarting, then waits out the running jobs and returns; no lease is
+// taken in between. The request file is cleared either way: the starter
+// waits for the exit and starts the next runner.
+func restartExit(ctx context.Context, cfg *Config, client *api.Client, inflight *inflightJobs, mode string, backoff time.Duration) error {
+	switch mode {
+	case runnerstate.RestartNow:
+		cfg.Log.InfoContext(ctx, "restart requested (--now); stopping at once")
+		if err := runnerstate.ClearRestart(cfg.StateDir); err != nil {
+			cfg.Log.WarnContext(ctx, "clear the restart request", "err", err)
+		}
+		return nil
+	case runnerstate.RestartDrain:
+	default:
+		return nil // a mode the runner does not know is not its exit
+	}
+	cfg.Log.InfoContext(ctx, "restart requested; draining before exit")
+	// Tell the engine, best effort: the drain proceeds whether or not
+	// the report lands — an engine that is down loses only the status
+	// line, never the restart.
+	for try := 0; try < 5; try++ {
+		err := client.Draining(ctx)
+		if err == nil {
+			break
+		}
+		if callerMistake(err) != nil || ctx.Err() != nil {
+			break
+		}
+		if !sleepBackoff(ctx, backoff) {
+			return ctx.Err()
+		}
+		backoff = min(backoff*2, cfg.BackoffMax)
+	}
+	for {
+		inflight.mu.Lock()
+		n := inflight.n
+		inflight.mu.Unlock()
+		if n == 0 {
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			// A drain stopped from outside (SIGTERM) cancels the jobs
+			// on its way out, like any other exit.
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	cfg.Log.InfoContext(ctx, "restart: the running jobs finished; exiting")
+	if err := runnerstate.ClearRestart(cfg.StateDir); err != nil {
+		cfg.Log.WarnContext(ctx, "clear the restart request", "err", err)
+	}
+	return nil
 }
 
 // callerMistake filters an API error for the ones retrying cannot fix:

@@ -66,6 +66,35 @@ func TestStatusSectionsRunning(t *testing.T) {
 	}
 }
 
+// TestStatusSectionsRunnerDraining: a pending restart drain (§5.1) is
+// one line after the running jobs it waits out — plural and singular —
+// and nothing is said when nothing runs or no runner drains.
+func TestStatusSectionsRunnerDraining(t *testing.T) {
+	st := Status{
+		Running: []engine.StatusJob{
+			{ID: 6, TaskID: 4, Kind: "review", Harness: "kimi"},
+			{ID: 7, TaskID: 5, Kind: "work", Harness: "claude"},
+		},
+		RunnerDraining: true,
+	}
+	if got := StatusSections(st); !strings.Contains(got, "runner restarting after 2 running jobs\n") {
+		t.Errorf("status sections = %q, want the drain's line after the running jobs", got)
+	}
+	st.Running = st.Running[:1]
+	if got := StatusSections(st); !strings.Contains(got, "runner restarting after 1 running job\n") {
+		t.Errorf("status sections = %q, want the singular drain line", got)
+	}
+	st.Running = nil
+	if got := StatusSections(st); strings.Contains(got, "runner restarting") {
+		t.Errorf("status sections = %q, want no drain line once nothing runs", got)
+	}
+	st.RunnerDraining = false
+	st.Running = []engine.StatusJob{{ID: 6, TaskID: 4, Kind: "review", Harness: "kimi"}}
+	if got := StatusSections(st); strings.Contains(got, "runner restarting") {
+		t.Errorf("status sections = %q, want no drain line while no runner drains", got)
+	}
+}
+
 // TestStatusSectionsShowGateHolds: a task held at the land gate or
 // waiting at the push gate is a needs-you line naming its task id and
 // the rule that tripped.

@@ -99,6 +99,13 @@ func (c *Client) Register(ctx context.Context, agents []Agent, maxParallel int) 
 	return c.call(ctx, http.MethodPost, "/v1/runner/register", body, &out)
 }
 
+// Draining tells the engine the runner has a restart drain pending: it
+// takes no new lease and exits once its running jobs finish, so the
+// status can say the runner is restarting (§5.1).
+func (c *Client) Draining(ctx context.Context) error {
+	return c.call(ctx, http.MethodPost, "/v1/runner/draining", struct{}{}, nil)
+}
+
 // Lease long-polls for a job the runner may take (§12.3): one whose
 // harness constraint it satisfies — every harness in harnesses is
 // offered — and whose labels it covers. nil comes back when the wait

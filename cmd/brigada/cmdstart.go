@@ -76,7 +76,7 @@ func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}); err != nil {
 		return fail(stderr, err)
 	}
-	result, err := startDetachedRunner(ctx, rt, saved, parallel)
+	result, err := startDetachedRunner(ctx, rt, saved, parallel, "")
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -89,15 +89,17 @@ func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	return 0
 }
 
-// startDetachedRunner is shared by init and start, including init's restart
-// after changing agents. EnsureRunner serializes starts and waits for readiness.
-func startDetachedRunner(ctx context.Context, rt *runtime, specs []string, parallel int) (lifecycle.RunnerStartResult, error) {
+// startDetachedRunner is shared by init, start and agents add, including
+// init's restart after changing agents. A restart mode of "drain" or
+// "now" hands a running runner the request first. EnsureRunner serializes
+// starts and waits for readiness.
+func startDetachedRunner(ctx context.Context, rt *runtime, specs []string, parallel int, restart string) (lifecycle.RunnerStartResult, error) {
 	args := []string{"--max-parallel", strconv.Itoa(parallel)}
 	for _, spec := range specs {
 		args = append(args, "--agent", spec)
 	}
 	return lifecycle.EnsureRunner(ctx, lifecycle.RunnerStartOptions{
 		StateDir: rt.stateDir, ConfigPath: rt.configForStart(),
-		Binary: initBinary, Args: args,
+		Binary: initBinary, Args: args, Restart: restart,
 	})
 }

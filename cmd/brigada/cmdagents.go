@@ -321,17 +321,19 @@ func agentsAccount(registered []agentSpec, harness string) string {
 	return harness
 }
 
-// runAgentsAdd appends one agent line to the agents file. It validates the
-// line the way the runner does at startup and never touches the running
-// runner: the new line is served after a restart.
+// runAgentsAdd appends one agent line to the agents file. It validates
+// the line the way the runner does at startup, then hands the running
+// runner a restart request it honours between jobs — the new line is
+// served by the fresh runner — or starts one when none runs.
 func runAgentsAdd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("agents add",
-		"brigada agents add [--classes CLASSES] [--effort LEVEL] <harness>/<model>",
-		"Register one model as an agent: append its line to the agents file, keeping every other line.")
+		"brigada agents add [--classes CLASSES] [--effort LEVEL] [--now] <harness>/<model>",
+		"Register one model as an agent: append its line to the agents file, keeping every other line, and restart the runner to serve it.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	classes := fs.String("classes", defaultClasses, "the task classes the agent takes, comma-separated, or none for a foreman-only agent")
 	effort := fs.String("effort", "", "the agent's effort level, validated per harness (default: the CLI's own)")
+	now := fs.Bool("now", false, "restart the runner at once, cutting its running jobs; without it the restart waits out running jobs")
 	// The model and the flags may interleave; the flag package stops at the
 	// first positional, so parse again after each one.
 	var rest []string
@@ -409,6 +411,52 @@ func runAgentsAdd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 	fmt.Fprintf(stdout, "registered %s (tier %s, classes %s)\n", pair, adapter.AgentTier(harness, model), classesText)
 	fmt.Fprintf(stdout, "added to %s: %s\n", initHomePath(filepath.Join(dir, "agents")), line)
-	fmt.Fprintln(stdout, "Restart the runner to serve it: brigada stop, then brigada start.")
+	// A running runner is handed a restart request it honours between
+	// jobs, so no running job is cut — unless --now asked for exactly
+	// that. Without one there is nothing to restart; the line serves
+	// from the next start.
+	if _, running, err := runnerstate.Running(dir); err != nil {
+		return fail(stderr, err)
+	} else if !running {
+		fmt.Fprintln(stdout, "No runner running; brigada start serves it.")
+		return 0
+	}
+	saved, err := runnerstate.LoadAgents(dir)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	// The runner takes the lines it parses, as it does at its own
+	// startup; a comment or a line of a newer format stays in the file
+	// and is simply not offered.
+	var specs []string
+	for _, line := range saved {
+		var one agentSpecs
+		if one.Set(line) == nil {
+			specs = append(specs, line)
+		}
+	}
+	if len(specs) == 0 {
+		return fail(stderr, fmt.Errorf("no agent the runner can serve; run brigada init in a repository first"))
+	}
+	parallel, err := runnerstate.LoadParallel(dir)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	mode := runnerstate.RestartDrain
+	if *now {
+		mode = runnerstate.RestartNow
+	}
+	if !*now {
+		fmt.Fprintln(stdout, "runner restarting: it finishes its running jobs first; --now cuts them")
+	}
+	result, err := startDetachedRunner(ctx, rt, specs, parallel, mode)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if result.Existing {
+		fmt.Fprintf(stdout, "runner already running (pid %d); the new line serves after its next restart\n", result.Record.PID)
+	} else {
+		fmt.Fprintf(stdout, "runner restarted (pid %d)\n", result.Record.PID)
+	}
 	return 0
 }

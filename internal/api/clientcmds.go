@@ -101,6 +101,10 @@ type Status struct {
 	StartedAt string             `json:"started_at"`
 	Jobs      map[string]int     `json:"jobs"`
 	Running   []engine.StatusJob `json:"running"`
+	// RunnerDraining is true while a runner has a restart drain pending
+	// (§5.1): it finishes its running jobs and exits, and the rendered
+	// status says the runner is restarting behind them.
+	RunnerDraining bool `json:"runner_draining,omitempty"`
 	// ForemanMessages counts the user's messages waiting for the
 	// foreman (§4.2 item 3).
 	ForemanMessages int `json:"foreman_messages"`

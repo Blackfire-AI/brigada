@@ -216,6 +216,26 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request, runnerID 
 	writeJSON(w, http.StatusOK, answerBody{Answer: string(ans)})
 }
 
+// handleDraining records that the runner has a restart drain pending
+// (§5.1): it takes no new lease and exits once its running jobs
+// finish. The mark lives until the runner registers again — the fresh
+// runner's register is what clears it — so the status can say the
+// runner is restarting through the whole drain.
+func (s *Server) handleDraining(w http.ResponseWriter, r *http.Request, runnerID int64) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var req struct{} // the body carries references only; a drain has none
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.eng.MarkDraining(r.Context(), runnerID); err != nil {
+		s.writeInternal(w, r, "mark the runner draining", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, answerBody{Answer: string(engine.AnsOK)})
+}
+
 // handleProbes lists the runner's due broken-agent probes (§8 "Health"):
 // the agents broken by repeated failures whose next probe is due, for
 // the runner to probe and report.

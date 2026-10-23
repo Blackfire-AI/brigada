@@ -122,6 +122,7 @@ Approval is the user's act. `plan_approve` and `plan_reject` use client authorit
 ### 5.1 Runner
 
 - Registers with a runner token and advertises its adapters: harness, models, family, account label, classes it can take (product §5 rule 5). An agent is one (harness, model, account): a runner offers several models of one harness as several agents, `--agent` once per model, with each agent carrying the tier of §8.
+- Restarts drain. A client that restarts the runner — `brigada init` with changed agents, `brigada agents add` — leaves a restart request in the state directory, which the runner honours between jobs: it takes no new lease, tells the engine it is draining, finishes its running jobs and exits, and the starter starts the next runner. No running job is cut; `--now` is the one restart that cuts them, exiting at once. While a drain waits, status shows `runner restarting after N running jobs`.
 - Leases jobs (long-poll), heartbeats with progress, completes with a fencing token. Lease expiry plus fencing make crashes safe.
 - Materializes its own workspace: clone or fetch the repo URL with its own git credentials into a per-task worktree, and push result branches to the remote (product §5 rule 6).
 - A fetch of the remote that fails — the mirror's, the worktree's own (a base or result branch fetched by name), the foreman checkout's — completes the job with an error of kind `infra`: right after a wake the network is not up for a few seconds, and `Could not resolve host` is the runner's plumbing, never the task's failure nor the worker's. The engine retries it as a transient error (§3), capped, charging neither a round nor the agent's health, as a failed setup is retried (§5.7); a foreman turn that fails this way is tried again by its next wake.
@@ -544,7 +545,7 @@ Selecting a flag mints nothing, and a selector that the credential in hand does 
 
 **Usage completion.** Completion optionally carries `usage` with `input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_tokens`, `model_calls` and `cost_usd`, plus `wall_seconds` for this job's elapsed wall time before delivery. Each usage field is optional. Older runners may omit usage and wall time; these remain NULL. Retries of a completion do not add usage again. Counters describe only the job's own CLI invocation, even for fix and resumed jobs, and do not steer dispatch.
 
-`register` · `lease` (long-poll) · `heartbeat` (progress, last activity) · `complete` (result or error; an outcome of `stalled`/`time_cap` when the runner stopped the run itself, §5.6; check result; artifacts) · `release`. Fencing as described in the glossary.
+`register` · `lease` (long-poll) · `heartbeat` (progress, last activity) · `complete` (result or error; an outcome of `stalled`/`time_cap` when the runner stopped the run itself, §5.6; check result; artifacts) · `release` · `draining` (a restart drain pending, §5.1: the runner exits once its running jobs finish, and status renders the wait). Fencing as described in the glossary.
 
 ## 13. Engine lifecycle
 
