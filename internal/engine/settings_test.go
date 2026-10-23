@@ -101,6 +101,7 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingApprovalRestarted, Value: "false", Default: true, Source: SourceDefault},
 		{Key: SettingLandTarget, Value: "main", Default: true, Source: SourceDefault},
 		{Key: SettingAfterLand, Value: "none", Default: true, Source: SourceDefault},
+		{Key: SettingLandReady, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingDefaultCheck, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingWorkerTools, Value: "agent default", Default: true, Source: SourceDefault},
 		{Key: SettingSetup, Value: "none", Default: true, Source: SourceDefault},
@@ -199,6 +200,7 @@ func TestGateLandSettingsRoundTrip(t *testing.T) {
 		SettingApprovalRestarted: "true",
 		SettingLandTarget:        "brigada/landed",
 		SettingAfterLand:         "make announce",
+		SettingLandReady:         ".brigada/land-ready.sh",
 	}
 	got := e.set(values)
 	for k, v := range values {
@@ -211,9 +213,29 @@ func TestGateLandSettingsRoundTrip(t *testing.T) {
 		`"gate_plan":"ask"`, `"gate_land":"ask"`, `"gate_push":"never"`,
 		`"approval_tiers":["light","heavy"]`, `"approval_restarted":true`,
 		`"land_target":"brigada/landed"`, `"after_land":"make announce"`,
+		`"land_ready":".brigada/land-ready.sh"`,
 	} {
 		if !strings.Contains(raw, want) {
 			t.Errorf("stored settings %s lacks %s", raw, want)
 		}
+	}
+	// Unset returns land_ready to its default.
+	got = e.set(map[string]string{SettingLandReady: ""})
+	if s := settingOf(t, got, SettingLandReady); s.Value != "none" || !s.Default {
+		t.Errorf("land_ready after unset = %+v, want none at the default", s)
+	}
+}
+
+// land_ready is a repo-relative path: an absolute path or one that
+// escapes the repository is refused.
+func TestLandReadyValidation(t *testing.T) {
+	for _, v := range []string{"/bin/ready", "../ready.sh", "a/../../ready.sh", ".."} {
+		if _, err := parseSettingValue(SettingLandReady, v); !errors.Is(err, ErrInvalidSetting) {
+			t.Errorf("land_ready %q: err = %v, want ErrInvalidSetting", v, err)
+		}
+	}
+	raw, err := parseSettingValue(SettingLandReady, " .brigada/land-ready.sh ")
+	if err != nil || string(raw) != `".brigada/land-ready.sh"` {
+		t.Errorf("land_ready valid = %s, %v", raw, err)
 	}
 }

@@ -167,7 +167,7 @@ func TestProjectImportGates(t *testing.T) {
 		return runWithStdin(t, ctx, state, stdin, args)
 	}
 
-	write(projectFile("gate_plan: ask\ngate_push: never\napproval_tiers: [heavy]\napproval_restarted: true\nland_target: brigada/landed\nafter_land: make announce\n"))
+	write(projectFile("gate_plan: ask\ngate_push: never\napproval_tiers: [heavy]\napproval_restarted: true\nland_target: brigada/landed\nafter_land: make announce\nland_ready: .brigada/land-ready.sh\n"))
 	code, stdout, stderr := do("", "project", "import")
 	if code != 0 || !strings.Contains(stdout, "imported .brigada/project.yaml") ||
 		!strings.Contains(stdout, "gate_plan: default -> ask") {
@@ -181,6 +181,7 @@ func TestProjectImportGates(t *testing.T) {
 		"gate_plan=ask (imported ", "gate_push=never (imported ",
 		"approval_tiers=heavy (imported ", "approval_restarted=true (imported ",
 		"land_target=brigada/landed (imported ", "after_land=make announce (imported ",
+		"land_ready=.brigada/land-ready.sh (imported ",
 		"gate_land=auto (default)",
 	} {
 		if !strings.Contains(stdout, want) {

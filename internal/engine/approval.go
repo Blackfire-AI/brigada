@@ -102,6 +102,7 @@ type approvalSettings struct {
 	ApprovalRestarted bool       `json:"approval_restarted"`
 	LandTarget        string     `json:"land_target"`
 	AfterLand         string     `json:"after_land"`
+	LandReady         string     `json:"land_ready"`
 	DefaultCheck      string     `json:"default_check"`
 	// ExtraRepos is the project's default list (§5.8): a repository a task
 	// names outside it needs approval.

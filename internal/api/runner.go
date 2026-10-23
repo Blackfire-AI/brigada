@@ -462,6 +462,9 @@ type jobGrant struct {
 	// push, or after the landing when the gate is never (§6.3). Empty =
 	// none.
 	AfterLand string `json:"after_land,omitempty"`
+	// LandReady is the repo-relative command a land job runs before
+	// landing (issue #87). Empty = none.
+	LandReady string `json:"land_ready,omitempty"`
 	// LandMessage is, for a land job's squash phase (§7.1), the task
 	// data the squash commit message is built from. nil for the push
 	// phase and every other kind.
@@ -520,6 +523,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		Push:            g.Push,
 		GatePush:        g.GatePush,
 		AfterLand:       g.AfterLand,
+		LandReady:       g.LandReady,
 		LandMessage:     g.LandMessage,
 		Attempt:         g.Attempt,
 		ResumeSessionID: g.ResumeSessionID,

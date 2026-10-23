@@ -60,9 +60,9 @@ const tailDefaults = "setup=none (default)\n" + "setup_cache_key_files=none (def
 const gateDefaults = "gate_plan=auto (default)\n" + "gate_land=auto (default)\n" + "gate_push=auto (default)\n" +
 	"plan_review=true (default)\n" + "plan_review.tier=standard (default)\n" + "plan_review.effort=medium (default)\n" +
 	"approval_tiers=none (default)\n" + "approval_restarted=false (default)\n" +
-	"land_target=main (default)\n" + "after_land=none (default)\n"
+	"land_target=main (default)\n" + "after_land=none (default)\n" + "land_ready=none (default)\n"
 
-const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes, approval_protected_paths, gate_plan, gate_land, gate_push, plan_review, plan_review.tier, plan_review.effort, approval_tiers, approval_restarted, land_target, after_land, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, plan_files, instructions"
+const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes, approval_protected_paths, gate_plan, gate_land, gate_push, plan_review, plan_review.tier, plan_review.effort, approval_tiers, approval_restarted, land_target, after_land, land_ready, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, plan_files, instructions"
 
 // TestProjectSettingsGolden covers project set and show: the defaults,
 // one override, the reset, and the usage errors for a bad key and value.
@@ -173,7 +173,7 @@ func TestProjectSettingsGates(t *testing.T) {
 	code, stdout, stderr := do("project", "set", "--repo", repo,
 		"gate_plan=ask", "gate_land=ask", "gate_push=never",
 		"approval_tiers=light+heavy", "approval_restarted=true",
-		"land_target=brigada/landed", "after_land=make announce")
+		"land_target=brigada/landed", "after_land=make announce", "land_ready=.brigada/land-ready.sh")
 	if code != 0 {
 		t.Fatalf("set exit = %d, stderr = %q", code, stderr)
 	}
@@ -181,6 +181,7 @@ func TestProjectSettingsGates(t *testing.T) {
 		"gate_plan=ask (set)\n", "gate_land=ask (set)\n", "gate_push=never (set)\n",
 		"approval_tiers=light+heavy (set)\n", "approval_restarted=true (set)\n",
 		"land_target=brigada/landed (set)\n", "after_land=make announce (set)\n",
+		"land_ready=.brigada/land-ready.sh (set)\n",
 	} {
 		if !strings.Contains(stdout, line) {
 			t.Errorf("set printed %q, want the line %q", stdout, line)
@@ -193,7 +194,7 @@ func TestProjectSettingsGates(t *testing.T) {
 	// An empty value resets each key to its default.
 	if code, stdout, stderr = do("project", "set", "--repo", repo,
 		"gate_plan=", "gate_land=", "gate_push=", "approval_tiers=",
-		"approval_restarted=", "land_target=", "after_land="); code != 0 {
+		"approval_restarted=", "land_target=", "after_land=", "land_ready="); code != 0 {
 		t.Fatalf("reset = %d %q", code, stderr)
 	}
 	for _, line := range strings.Split(gateDefaults, "\n") {

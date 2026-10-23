@@ -928,6 +928,7 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		LandMessage:    msg,
 		GatePush:       gatePush,
 		AfterLand:      s.AfterLand,
+		LandReady:      s.LandReady,
 		Attempt:        j.Attempts + 1,
 	}, nil
 }
