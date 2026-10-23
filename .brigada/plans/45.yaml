@@ -29,8 +29,8 @@ tasks:
     effort: medium
     review_tier: heavy
     review_effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-166"
     rounds: 0
   - id: 167
     name: "addresses"
