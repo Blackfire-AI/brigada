@@ -185,7 +185,7 @@ func (e *Engine) coolAccountTx(tx *sql.Tx, job *jobRow, c Completion, now time.T
 // reason over, so the runner's return does not clear what the agent's
 // own failures earned. A failure streak also schedules the probe that
 // may bring the agent back by itself (§8 "Health"): the first probe is
-// ProbeDelay out, and the schedule stays empty for auth and stale
+// ProbeDelay out, and the schedule stays empty for auth, rejected-model and stale
 // reasons, which never probe.
 func (e *Engine) markBrokenTx(tx *sql.Tx, job *jobRow, agent int64, reason string, now time.Time) error {
 	var harness, model, health, why string
