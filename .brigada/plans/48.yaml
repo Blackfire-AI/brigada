@@ -39,8 +39,8 @@ tasks:
     tier: heavy
     effort: medium
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-171"
+    rounds: 1
   - id: 172
     name: "authnote"
     title: "#75 name the environment variable and the runner start time in an auth needs-you line"
