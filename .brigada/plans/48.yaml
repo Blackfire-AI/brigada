@@ -27,7 +27,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: ready
+    state: running
     branch: "brigada/task-170"
     rounds: 0
   - id: 171
