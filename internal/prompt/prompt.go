@@ -400,7 +400,7 @@ var reReviewTemplate = strings.NewReplacer(reviewDiffVar, ReviewDiffFile).Replac
 
 // PlanReviewTemplateVersion is the plan review prompt's version (§7),
 // under the same rule as the worker's (§1.4).
-const PlanReviewTemplateVersion = 1
+const PlanReviewTemplateVersion = 2
 
 // planReviewTemplateSrc is the fixed part of a plan review prompt: a
 // reviewer reads a plan, not a change, against a checkout of the default
@@ -438,7 +438,10 @@ Check:
       after another, dependent work set to run in parallel;
   (e) tier and effort that do not fit the task's difficulty;
   (f) a missing or vague check or acceptance criterion: a check that
-      cannot fail, or a spec whose finished state is a matter of taste.
+      cannot fail, or a spec whose finished state is a matter of taste;
+  (g) task too big for one job: a task is about 30 minutes of work,
+      about 5 numbered spec items or about 15 files; one well over that is
+      to be split into a chain of tasks.
 
 Work economically. Every tool call resends the whole conversation, so
 prefer a few large steps to many small ones. Search with one combined

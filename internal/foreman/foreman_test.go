@@ -85,6 +85,21 @@ func TestInstructionsGolden(t *testing.T) {
 	}
 }
 
+// TestInstructionsTaskSize: the foreman is told the task size guide the
+// plan review's check (g) also applies, the same wording in both.
+func TestInstructionsTaskSize(t *testing.T) {
+	got := Instructions()
+	for _, want := range []string{
+		"about 30 minutes of work",
+		"about 5 numbered spec items",
+		"about 15 files",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the foreman instructions lack the task size guide %q", want)
+		}
+	}
+}
+
 // TestComposeTurnPrompt checks the composition's discipline by hand;
 // the goldens below hold the exact rendering.
 func TestComposeTurnPrompt(t *testing.T) {
