@@ -481,7 +481,21 @@ A landing never resolves a conflict and never picks a side. When the task's diff
 
 ### `land_ready`
 
-`land_ready`, when set, is a repo-relative command path inside the repository — for example `.brigada/land-ready.sh` — that a land job runs in its landing clone before anything lands, and the push phase runs again before it pushes: the gate the landing must pass. It runs under the environment of a check, bounded by the check timeout. Exit `0` lands; exit `1` holds the landing with the command's first output line as the reason — nothing squashed, pushed or recorded — the needs-you line reading `held by rule land_ready: <reason>`, released by `brigada land approve`, which re-queues the landing without re-running the command; any other exit, a command that could not start, or a timeout is `not ready` — nothing lands, and the landing is requeued on a growing backoff (5 s, then 15 s, 45 s and 2 minutes, capped there), so a gate that says "not yet" (a release in flight, a CI window closed) is asked again rather than parking the task. `brigada status` shows the task's landing target state as `ready`, `held by rule land_ready: <reason>`, or `waiting (retry at <time>, last exit <n>)`.
+`land_ready`, when set, is a repo-relative command path inside the repository — for example `scripts/land-ready.sh` — that a land job runs in its landing clone before anything lands, and the push phase runs again before it pushes: the gate the landing must pass. It runs under the environment of a check, bounded by the check timeout. Exit `0` lands; exit `1` holds the landing with the command's first output line as the reason — nothing squashed, pushed or recorded — the needs-you line reading `held by rule land_ready: <reason>`, released by `brigada land approve`, which re-queues the landing without re-running the command; any other exit, a command that could not start, or a timeout is `not ready` — nothing lands, and the landing is requeued on a growing backoff (5 s, then 15 s, 45 s and 2 minutes, capped there), so a gate that says "not yet" (a release in flight, a CI window closed) is asked again rather than parking the task. `brigada status` shows the task's landing target state as `ready`, `held by rule land_ready: <reason>`, or `waiting (retry at <time>, last exit <n>)`.
+
+| Exit | Meaning | What happens |
+|---|---|---|
+| `0` | ready | The landing proceeds. |
+| `1` | held | The landing holds on the first output line; release it with `brigada land approve <task>` (the command is not run again for that landing). |
+| `2`, any other code, a command that could not start, a timeout | not ready | Wait and retry: the landing is requeued on the backoff, with no failure and no restart spent. |
+
+The repository ships `scripts/land-ready.sh`, a gate on the staging branch's CI: it reads the newest `gh run list` run on `brigada/landed` and exits `0` when that run succeeded or the branch has no runs, `1` when it finished without success — failed, cancelled, skipped or timed out (the first output line is the run's URL), and `2` while it is queued or in progress, or when `gh` itself fails. It is not enabled by default. The file is committed without its executable bit; make it executable once, then enable it:
+
+```sh
+chmod +x scripts/land-ready.sh
+git add --chmod=+x scripts/land-ready.sh && git commit -m "make land-ready.sh executable"
+brigada project set land_ready scripts/land-ready.sh
+```
 
 ### By hand: `brigada land`
 
@@ -546,6 +560,7 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 | `approval_restarted` | `true` or `false` | `false` | `true`: a task that spent a restart or a tier bump waits at the land gate. |
 | `land_target` | branch name | the project's default branch | Where approved work lands: the default branch, or a staging branch such as `brigada/landed`. A new task's work builds on it too ([section 5](#5-finishing-the-land-job)). |
 | `after_land` | command | none | A repo-relative command the runner runs after a successful land; its failure is reported, never undone. |
+| `land_ready` | command | none | A repo-relative command path the land job runs before landing and the push phase runs before its push: exit 0 lands, exit 1 holds (`brigada land approve`), anything else waits and retries. `scripts/land-ready.sh` is one for the staging branch's CI. |
 | `setup` | command | none | The environment step run before the worker and the check ([section 7](#7-plans-checks-and-reviews)). |
 | `setup_cache_key_files` | list of repo-relative files | none (no cache) | Files whose contents key the setup cache. |
 | `setup_timeout_minutes` | positive integer | `15` | How long `setup` may run. |
