@@ -64,8 +64,8 @@ func startRunnerProc(t *testing.T, bin, state, script string) *exec.Cmd {
 		t.Fatalf("open the runner log: %v", err)
 	}
 	cmd.Stdout, cmd.Stderr = logFile, logFile
-	// Its own process group: the cleanup waits for every git child the
-	// runner started (a push's receive-pack and index-pack write into the
+	// Its own process group: the cleanup waits for the runner's direct
+	// git children (a push's receive-pack and index-pack write into the
 	// remote's objects) to be gone before TempDir removal runs.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
@@ -84,7 +84,7 @@ func startRunnerProc(t *testing.T, bin, state, script string) *exec.Cmd {
 				<-done
 			}
 		}
-		waitGroupGone(pgid)
+		waitGroupGone(t, pgid)
 		logFile.Close()
 		if data, err := os.ReadFile(logPath); err == nil {
 			t.Logf("runner log:\n%s", data)
@@ -94,17 +94,29 @@ func startRunnerProc(t *testing.T, bin, state, script string) *exec.Cmd {
 }
 
 // waitGroupGone returns once no process of group pgid is left, so no
-// git child of the runner can still write into the remote when TempDir
-// cleanup runs. Stragglers get a SIGKILL after five seconds.
-func waitGroupGone(pgid int) {
-	deadline := time.Now().Add(5 * time.Second)
+// git child the runner started in its own group (a push's receive-pack)
+// can still write into the remote when TempDir cleanup runs. Jobs the
+// runner puts in groups of their own are outside it. Stragglers get a
+// SIGKILL after five seconds; a group still alive five seconds after
+// that fails the test instead of hanging it.
+func waitGroupGone(t *testing.T, pgid int) {
+	t.Helper()
+	start := time.Now()
+	killed := false
 	for {
-		if err := syscall.Kill(-pgid, 0); errors.Is(err, syscall.ESRCH) {
+		if err := syscall.Kill(-pgid, 0); err != nil {
+			if !errors.Is(err, syscall.ESRCH) {
+				t.Errorf("probe the runner's process group %d: %v", pgid, err)
+			}
 			return
 		}
-		if time.Now().After(deadline) {
+		switch elapsed := time.Since(start); {
+		case elapsed > 10*time.Second:
+			t.Errorf("the runner's process group %d survived SIGKILL", pgid)
+			return
+		case elapsed > 5*time.Second && !killed:
 			syscall.Kill(-pgid, syscall.SIGKILL)
-			deadline = time.Now().Add(5 * time.Second)
+			killed = true
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
