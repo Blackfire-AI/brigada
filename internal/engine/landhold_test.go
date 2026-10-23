@@ -90,3 +90,23 @@ func TestLandJobClearsHeldHold(t *testing.T) {
 		t.Errorf("needs-you entry = %+v, want none for a landed task", it)
 	}
 }
+
+// TestLandedTaskStaleHoldNotListed: a held row that outlives its task's
+// landing record never shows in the needs-you queue.
+func TestLandedTaskStaleHoldNotListed(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.landGateRun(author, reviewer, GateAsk)
+	if _, ok := e.needsYouTask(e.task); !ok {
+		t.Fatal("held task missing from needs-you before landing")
+	}
+	e.exec("INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, source, created_at) VALUES (?, ?, 'main', 'abc123', 'pushed', 'trailer', ?)",
+		e.task, e.project, fmtTime(e.clock.Now()))
+	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ? AND state = 'held'", e.task); n != 1 {
+		t.Fatalf("held rows = %d, want the stale row kept", n)
+	}
+	if it, ok := e.needsYouTask(e.task); ok {
+		t.Errorf("needs-you entry = %+v, want none for a landed task", it)
+	}
+}

@@ -35,7 +35,6 @@ type landOptions struct {
 
 // Bounds of the commit message (§7.1), kept by internal/landing.
 const (
-	landSubjectRunes  = landing.SubjectRunes
 	landSpecBytes     = landing.SpecBytes
 	landSummaryBytes  = landing.SummaryBytes
 	landMessageBytes  = landing.MessageBytes

@@ -293,15 +293,15 @@ func TestMessageWorkerCommitMessage(t *testing.T) {
 		}
 	}
 
-	// The subject holds the same bound as the built one.
+	// A long subject is kept whole, never ellipsized.
 	long := "feat(landing): " + strings.Repeat("s", 100)
 	msg, _ = Message(Task{ID: 11, Title: "Edit readme", CommitMessage: long + "\n\nbody"})
 	subject := msg
 	if i := strings.Index(msg, "\n"); i >= 0 {
 		subject = msg[:i]
 	}
-	if len([]rune(subject)) > SubjectRunes || !strings.HasSuffix(subject, "…") {
-		t.Errorf("subject %q must be cut to %d characters with an ellipsis", subject, SubjectRunes)
+	if subject != long {
+		t.Errorf("subject %q must be the whole first line %q", subject, long)
 	}
 	if len(msg) > MessageBytes {
 		t.Errorf("message is %d bytes, over %d", len(msg), MessageBytes)
@@ -322,8 +322,8 @@ func TestMessageBoundsAndFamilies(t *testing.T) {
 	if i := strings.Index(msg, "\n"); i >= 0 {
 		subject = msg[:i]
 	}
-	if len([]rune(subject)) > SubjectRunes || !strings.HasSuffix(subject, "…") {
-		t.Errorf("subject %q must be cut to %d characters with an ellipsis", subject, SubjectRunes)
+	if subject != long {
+		t.Errorf("subject %q must be the whole title, not cut", subject)
 	}
 	if !strings.Contains(msg, "[truncated]") || strings.ContainsAny(msg, "\x00\r\x1b") {
 		t.Errorf("fields over a bound are marked, control characters stripped:\n%q", msg)

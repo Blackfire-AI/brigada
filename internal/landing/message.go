@@ -9,7 +9,6 @@ import (
 
 // Bounds of the commit message (§7.1).
 const (
-	SubjectRunes  = 72
 	SpecBytes     = 600
 	SummaryBytes  = 2000
 	MessageBytes  = 4096
@@ -107,7 +106,7 @@ func Message(t Task) (string, string) {
 }
 
 // splitCommitMessage splits the worker's commit message (§5.4) into its
-// subject and body: the first line, cut to the subject bound, and the
+// subject and body: the first line, kept whole, and the
 // rest, sanitized like the summary. A message that is blank, or whose
 // first line says nothing, counts as absent: the caller then builds
 // today's format.
@@ -122,20 +121,14 @@ func splitCommitMessage(msg string) (subject, body string) {
 	if subject == "" {
 		return "", ""
 	}
-	// The subject bound is the one every subject holds (§7.1); id 0
-	// never appears, for the empty line was refused above.
-	return Subject(subject, 0), sanitize(body)
+	return subject, sanitize(body)
 }
 
-// Subject is the task title on one line, at most 72 characters.
+// Subject is the task title on one line, never cut or ellipsized.
 func Subject(title string, id int64) string {
 	s := cleanLine(title)
 	if s == "" {
 		s = fmt.Sprintf("task %d", id)
-	}
-	if utf8.RuneCountInString(s) > SubjectRunes {
-		r := []rune(s)
-		s = strings.TrimRight(string(r[:SubjectRunes-1]), " ") + "…"
 	}
 	return s
 }

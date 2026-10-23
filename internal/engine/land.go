@@ -427,7 +427,8 @@ func (e *Engine) releaseDependentLandsTx(tx *sql.Tx, landed int64, now time.Time
 func statusLandHoldsTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
 	query := `SELECT h.task_id, t.title, t.plan_id, t.state, h.reason
 		FROM land_holds h JOIN tasks t ON t.id = h.task_id JOIN plans p ON p.id = t.plan_id
-		WHERE h.state = 'held' AND p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
+		WHERE h.state = 'held' AND NOT EXISTS (SELECT 1 FROM landings l WHERE l.task_id = h.task_id)
+			AND p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
 	args := []any{}
 	if project != 0 {
 		query += " AND p.project_id = ?"
