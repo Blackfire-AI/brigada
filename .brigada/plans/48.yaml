@@ -49,8 +49,8 @@ tasks:
     base: "drain"
     continue: "drain"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-172"
     rounds: 0
   - id: 173
     name: "secrets"
