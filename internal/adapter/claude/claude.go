@@ -546,6 +546,9 @@ func phraseEvent(table []errorPhrase, text string) (adapter.Event, bool) {
 			return ev, true
 		}
 	}
+	if adapter.IsInfraText(text) {
+		return adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrInfra, Text: text}, true
+	}
 	return adapter.Event{}, false
 }
 

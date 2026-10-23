@@ -277,6 +277,9 @@ func errorKind(e errorJSON) adapter.ErrorKind {
 			return adapter.ErrLimit
 		}
 	}
+	if adapter.IsInfraText(e.Message) {
+		return adapter.ErrInfra
+	}
 	return adapter.ErrOther
 }
 

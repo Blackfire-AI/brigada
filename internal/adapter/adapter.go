@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -162,7 +163,36 @@ const (
 	// place, carrying the previous attempt's context in its prompt (§5.6) — a session cannot be rebuilt from its id alone.
 	ErrResumeFailed ErrorKind = "resume_failed"
 	ErrOther        ErrorKind = "other"
+	// ErrInfra is the CLI failing to reach its provider at all: the
+	// connection or the name lookup failed before the run produced
+	// anything. The environment's failure, never the agent's: the job is
+	// retried as a transient error and no health strike is charged.
+	ErrInfra ErrorKind = "infra"
 )
+
+// infraPhrases are the words a CLI's connection or DNS failure carries,
+// lowercase: what a network that is down or not yet up looks like.
+var infraPhrases = []string{
+	"cannot connect to api",
+	"could not resolve host",
+	"connection refused",
+	"connection reset",
+	"getaddrinfo",
+}
+
+// IsInfraText reports whether a failure's text names a connection or DNS
+// failure. The words alone prove nothing about when they were said: the
+// runner keeps the infra kind only for a run that produced no output
+// before it.
+func IsInfraText(text string) bool {
+	lower := strings.ToLower(text)
+	for _, p := range infraPhrases {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
+}
 
 // ResumeCapableHarnesses is the set of harnesses a foreman may run on
 // (design §4.1): the foreman's turns wake headless and resume the
