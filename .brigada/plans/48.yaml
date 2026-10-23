@@ -114,9 +114,9 @@ tasks:
     deps: ["amend-during-review"]
     base: "amend-during-review"
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-178"
-    rounds: 0
+    rounds: 1
   - id: 179
     name: "amend-during-review"
     title: "#84 plan_amend accepts additions and respecs while a plan review round runs"
