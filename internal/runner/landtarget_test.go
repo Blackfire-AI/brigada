@@ -2,11 +2,64 @@ package runner
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
+	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
+
+// TestRunnerLandOntoExistingTarget: a land_target the remote already holds
+// with an earlier landing on it is the task's base (§6.1): the worktree is
+// built on it, and the landing squashes onto its head with a patch that is
+// the task's own change alone — not carrying, or reverting, what the
+// target holds beyond the default branch.
+func TestRunnerLandOntoExistingTarget(t *testing.T) {
+	t.Parallel()
+	markerDir(t)
+	remote := newRemote(t)
+	clone := t.TempDir()
+	git(t, clone, "clone", remote, ".")
+	git(t, clone, "checkout", "-b", "staging")
+	if err := os.WriteFile(filepath.Join(clone, "prior.txt"), []byte("earlier landing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, clone, "add", "-A")
+	git(t, clone, "-c", "user.name=s", "-c", "user.email=s@brigada.invalid", "commit", "-m", "earlier landing")
+	git(t, clone, "push", "origin", "staging")
+	targetHead := remoteBranchCommit(t, remote, "staging")
+	mainHead := remoteBranchCommit(t, remote, "main")
+
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	e.setProjectSettings(`{"gate_push":"auto","land_target":"staging"}`)
+	task := e.seedTask("", `test "$(cat work.txt)" = hello && test -f prior.txt`)
+	e.mustExec("UPDATE tasks SET base_ref = 'staging' WHERE id = ?", task)
+	work := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", "", ""))
+	setTestVar(t, "BRIGADA_TEST_BRANCH", taskBranch(task, 1))
+	e.startLandRunner(t, reviewScript(reviewApproveResult))
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	e.waitTaskState(task, "done")
+	commit := e.waitLanding(task, "pushed")
+	if got := remoteBranchCommit(t, remote, "staging"); got != commit {
+		t.Errorf("remote staging = %s, want the landing commit %s", got, commit)
+	}
+	if got := parentOf(t, remote, commit); got != targetHead {
+		t.Errorf("the landing's parent = %s, want the target's head %s", got, targetHead)
+	}
+	bare := strings.TrimPrefix(remote, "file://")
+	files := strings.Fields(git(t, "", "--git-dir", bare, "diff-tree", "--no-commit-id", "--name-status", "-r", commit))
+	if strings.Join(files, " ") != "A work.txt" {
+		t.Errorf("the landing's patch = %v, want only the added work.txt", files)
+	}
+	if got := remoteBranchCommit(t, remote, "main"); got != mainHead {
+		t.Errorf("main moved: %s, want %s", got, mainHead)
+	}
+}
 
 // TestWorkspaceBasesOnLandTarget covers a project with land_target set
 // (§6.1): the engine hands the target as the base ref, and the worktree
