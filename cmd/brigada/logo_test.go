@@ -35,7 +35,7 @@ func runOut(t *testing.T, args ...string) string {
 // Scripts read `brigada version` from a pipe: they get the one plain line,
 // whatever color the environment offers.
 func TestVersionPlainWhenNotATerminal(t *testing.T) {
-	want := fmt.Sprintf("brigada %s\n", version.Version)
+	want := fmt.Sprintf("brigada %s\n", version.String())
 	if got := runOut(t, "version"); got != want {
 		t.Errorf("version to a buffer = %q, want %q", got, want)
 	}
@@ -46,7 +46,7 @@ func TestVersionPlainWhenNotATerminal(t *testing.T) {
 }
 
 func TestVersionBannerOnATerminal(t *testing.T) {
-	line := fmt.Sprintf("brigada %s\n", version.Version)
+	line := fmt.Sprintf("brigada %s\n", version.String())
 	for _, tc := range []struct {
 		name string
 		caps logo.Caps

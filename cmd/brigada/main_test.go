@@ -45,7 +45,7 @@ func TestRun(t *testing.T) {
 			name:     "version prints the binary version",
 			args:     []string{"version"},
 			wantCode: 0,
-			wantOut:  fmt.Sprintf("brigada %s\n", version.Version),
+			wantOut:  fmt.Sprintf("brigada %s\n", version.String()),
 		},
 		{
 			name:     "unknown command prints usage to stderr",

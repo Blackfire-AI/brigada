@@ -37,6 +37,13 @@ brigada version
 
 The main package lives in `cmd/brigada`, so that is the install path. Make sure `$(go env GOPATH)/bin` is on your `PATH`. Each release tag also has prebuilt binaries attached on its GitHub release (see [Releasing](#releasing)).
 
+### What `brigada version` prints
+
+- A release binary from the GitHub release: the tag without its leading `v`, for example `1.0.0`.
+- `go install github.com/Blackfire-AI/brigada/cmd/brigada@v1.0.0` (or `@latest` on a tagged release): the tag as recorded in the build, for example `v1.0.0`.
+- `go install ./cmd/brigada` of your checkout, or a plain `go build`: `0.0.0-dev+<rev12>` — `0.0.0-dev`, `+`, and the first 12 characters of the git commit — with `-modified` appended when the tree had uncommitted changes, for example `0.0.0-dev+3f9c2ab1d4e7-modified`.
+- A build that carries no version information at all: `0.0.0-dev`.
+
 ## First run: `brigada init`
 
 Sign in to each CLI with its own login flow, then run this inside your repository:
@@ -107,7 +114,7 @@ git push origin v1.0.0-rc.1
 
 A tag with a suffix such as `-rc.1` is published as a prerelease.
 
-The `release` workflow builds `brigada-<os>-<arch>` binaries (darwin and linux, amd64 and arm64) with the tag as the version, plus a `.tar.gz` of each and `SHA256SUMS`, and attaches them to a new GitHub release. `brigada version` prints the tag without its leading `v`; a plain `go build` prints `0.0.0-dev`.
+The `release` workflow builds `brigada-<os>-<arch>` binaries (darwin and linux, amd64 and arm64) with the tag as the version, plus a `.tar.gz` of each and `SHA256SUMS`, and attaches them to a new GitHub release. `brigada version` prints the tag without its leading `v`; a source build prints `0.0.0-dev+<rev12>` (see [Install](#install)).
 
 ## License
 
