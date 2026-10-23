@@ -160,6 +160,27 @@ func TestStatusSectionsTaskTierEffort(t *testing.T) {
 	}
 }
 
+// TestStatusSectionsLandReadyStates: the land_ready gate's target state
+// (issue #87) rides the task line — ready, the hold, and the not-ready
+// backoff's wait.
+func TestStatusSectionsLandReadyStates(t *testing.T) {
+	st := Status{Plans: []engine.StatusPlan{{ID: 1, Tasks: []engine.StatusTask{
+		{ID: 1, Title: "clear", State: "done", LandReady: "ready"},
+		{ID: 2, Title: "held", State: "done", LandReady: "held by rule land_ready: the release window is closed"},
+		{ID: 3, Title: "waiting", State: "done", LandReady: "waiting (retry at 2026-10-12T12:00:05.000000000Z, last exit 2)"},
+	}}}}
+	got := StatusSections(st)
+	for _, want := range []string{
+		"  task #1 done clear ready\n",
+		"  task #2 done held held by rule land_ready: the release window is closed\n",
+		"  task #3 done waiting waiting (retry at 2026-10-12T12:00:05.000000000Z, last exit 2)\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status sections lack %q:\n%s", want, got)
+		}
+	}
+}
+
 // TestStatusSectionsCountsHiddenFinishedPlans: the trimmed plans list
 // says in one line, after the plans, how many older finished plans it
 // left out and what lists them (§10); nothing is said when none hide.

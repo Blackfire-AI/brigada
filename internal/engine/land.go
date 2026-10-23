@@ -134,7 +134,7 @@ func (e *Engine) maybeLandTaskTx(tx *sql.Tx, taskID int64, now time.Time) error 
 	if reason != "" {
 		return e.holdLandTx(tx, project, taskID, reason, now)
 	}
-	_, err = e.queueLandJobTx(tx, project, taskID, now)
+	_, err = e.queueLandJobTx(tx, project, taskID, false, now)
 	return err
 }
 
@@ -438,15 +438,26 @@ func clearLandHoldTx(tx *sql.Tx, taskID int64) error {
 	return nil
 }
 
+// landReadyHold reports whether a land-gate hold's reason is the
+// land_ready rule's (issue #87): the gate's exit 1, whose release by an
+// approval re-queues the landing with the gate skipped rather than
+// re-running the command. Every other hold releases as it always has.
+func landReadyHold(reason string) bool {
+	return strings.HasPrefix(reason, "held by rule land_ready")
+}
+
 // queueLandJobTx creates the task's land job (§7.1): kind land on the
 // task's own key, so the one-live-job-per-key rule makes a repeat
 // coalesce. No worker and no agent; the git label is what a runner
 // offers to take it. A task that already has a landing record — its own
 // land job landed it, or a detected trailer did — has nothing left to
-// squash, so no land job is queued for it. The submit's answer says
-// what happened: created with the new job, pending behind the live job
-// that holds the key, or the zero answer for a task already landed.
-func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, now time.Time) (SubmitResult, error) {
+// squash, so no land job is queued for it. skipLandReady marks the job
+// an approval of the land_ready gate's hold queues (issue #87): its
+// grant carries the gate as skipped, so the runner lands without
+// re-running the command. The submit's answer says what happened:
+// created with the new job, pending behind the live job that holds the
+// key, or the zero answer for a task already landed.
+func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, skipLandReady bool, now time.Time) (SubmitResult, error) {
 	var have int
 	if err := tx.QueryRow("SELECT COUNT(*) FROM landings WHERE task_id = ?", taskID).Scan(&have); err != nil {
 		return SubmitResult{}, fmt.Errorf("read the landing of task %d: %w", taskID, err)
@@ -455,13 +466,32 @@ func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, now time.Time
 		return SubmitResult{}, nil
 	}
 	return e.submitTx(tx, SubmitParams{
-		Key:       fmt.Sprintf("task:%d", taskID),
-		ProjectID: project,
-		TaskID:    taskID,
-		Kind:      KindLand,
-		Mode:      ModeFresh,
-		Prompt:    "", // no worker: nothing is composed (§1.4)
-		Labels:    []string{"git"},
+		Key:           fmt.Sprintf("task:%d", taskID),
+		ProjectID:     project,
+		TaskID:        taskID,
+		Kind:          KindLand,
+		Mode:          ModeFresh,
+		Prompt:        "", // no worker: nothing is composed (§1.4)
+		Labels:        []string{"git"},
+		SkipLandReady: skipLandReady,
+	}, now)
+}
+
+// queuePushJobTx creates the push phase's land job (§7.1): the land job
+// reused for a landing already recorded — the squash happened once, so
+// the grant carries the recorded commit and pushes, no new squash.
+// skipLandReady marks the job an approval of the push-phase land_ready
+// hold queues (issue #87): the runner runs no command and pushes.
+func (e *Engine) queuePushJobTx(tx *sql.Tx, project, taskID int64, skipLandReady bool, now time.Time) (SubmitResult, error) {
+	return e.submitTx(tx, SubmitParams{
+		Key:           fmt.Sprintf("task:%d", taskID),
+		ProjectID:     project,
+		TaskID:        taskID,
+		Kind:          KindLand,
+		Mode:          ModeFresh,
+		Prompt:        "", // no worker
+		Labels:        []string{"git"},
+		SkipLandReady: skipLandReady,
 	}, now)
 }
 
@@ -501,7 +531,7 @@ func (e *Engine) releaseDependentLandsTx(tx *sql.Tx, landed int64, now time.Time
 func statusLandHoldsTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
 	query := `SELECT h.task_id, t.title, t.plan_id, t.state, h.reason
 		FROM land_holds h JOIN tasks t ON t.id = h.task_id JOIN plans p ON p.id = t.plan_id
-		WHERE h.state = 'held' AND NOT EXISTS (SELECT 1 FROM landings l WHERE l.task_id = h.task_id)
+		WHERE h.state = 'held' AND NOT EXISTS (SELECT 1 FROM landings l WHERE l.task_id = h.task_id AND l.pushed IN ('pushed', 'local'))
 			AND p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
 	args := []any{}
 	if project != 0 {
@@ -791,15 +821,24 @@ func (e *Engine) landCheckFailedTx(tx *sql.Tx, job *jobRow, rec landRecord, now 
 
 // landHeldTx answers the land_ready gate's hold (issue #87): the command
 // refused the landing with its own words — exit 1 — so nothing is
-// squashed, pushed or recorded, and the task parks for the foreman with
-// the command's first output line as the reason.
+// squashed, pushed or recorded, and the task holds at the land gate with
+// the command's first output line as the reason, exactly as a land-gate
+// rule holds it (§6.3). The hold is the user's to release — `brigada
+// land approve` — which re-queues the landing with the gate skipped. In
+// the push phase the landing is already recorded waiting; the same hold
+// then sits on the push, and the approval re-queues the push instead.
+// The hold has no job, so the plan closes here, named under "waits at a
+// gate" (§7.1).
 func (e *Engine) landHeldTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
-	reason := "land_ready held the landing"
+	reason := "held by rule land_ready"
 	var rec landHeldRecord
 	if json.Unmarshal([]byte(c.Result), &rec) == nil && rec.Line != "" {
 		reason += ": " + boundNote(rec.Line)
 	}
-	return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: reason}, now)
+	if err := e.holdLandTx(tx, job.ProjectID, job.TaskID, reason, now); err != nil {
+		return err
+	}
+	return e.finishLandPlanTx(tx, job, now)
 }
 
 // landNotReadyTx answers the land_ready gate's not ready (issue #87):
@@ -975,6 +1014,7 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 			Push:           true,
 			AfterLand:      s.AfterLand,
 			LandReady:      s.LandReady,
+			SkipLandReady:  j.SkipLandReady,
 			Attempt:        j.Attempts + 1,
 		}, nil
 	}
@@ -1039,6 +1079,7 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		GatePush:       gatePush,
 		AfterLand:      s.AfterLand,
 		LandReady:      s.LandReady,
+		SkipLandReady:  j.SkipLandReady,
 		Attempt:        j.Attempts + 1,
 	}, nil
 }
@@ -1147,6 +1188,10 @@ func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve, stop
 	if err != nil {
 		return LandDecision{}, err
 	}
+	// The land_ready gate's hold (issue #87) releases with the gate
+	// skipped: the user's yes replaces the command, which already spoke,
+	// so the re-queued landing runs no command and lands.
+	skip := landReadyHold(reason)
 	if approve {
 		var changed []string
 		if stopAsking {
@@ -1185,7 +1230,21 @@ func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve, stop
 			res.JobID = live.ID
 			return res, nil
 		}
-		sr, err := e.queueLandJobTx(tx, project, taskID, now)
+		// A hold beside a landing record is the push phase's (issue #87):
+		// the gate refused the push of a commit already squashed and
+		// waiting, so the release re-queues the push — not a new squash —
+		// with the gate skipped. A hold with no landing is the squash
+		// phase's, and the landing is re-queued whole.
+		existing, err := landingTx(tx, taskID)
+		if err != nil {
+			return LandDecision{}, err
+		}
+		var sr SubmitResult
+		if existing != nil {
+			sr, err = e.queuePushJobTx(tx, project, taskID, skip, now)
+		} else {
+			sr, err = e.queueLandJobTx(tx, project, taskID, skip, now)
+		}
 		if err != nil {
 			return LandDecision{}, err
 		}
@@ -1349,7 +1408,8 @@ func statusPushWaitsTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
 	query := `SELECT l.task_id, t.title, t.plan_id, t.state, l.target_branch, l.commit_sha
 		FROM landings l JOIN tasks t ON t.id = l.task_id JOIN plans p ON p.id = t.plan_id
 		WHERE l.pushed = 'waiting' AND p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
-		  AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.task_id = l.task_id AND j.kind = 'land' AND j.status IN ('queued', 'leased', 'running'))`
+		  AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.task_id = l.task_id AND j.kind = 'land' AND j.status IN ('queued', 'leased', 'running'))
+		  AND NOT EXISTS (SELECT 1 FROM land_holds h WHERE h.task_id = l.task_id AND h.state = 'held')`
 	args := []any{}
 	if project != 0 {
 		query += " AND p.project_id = ?"
