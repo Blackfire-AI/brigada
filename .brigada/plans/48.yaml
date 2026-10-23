@@ -71,7 +71,7 @@ tasks:
     base: "secrets"
     continue: "secrets"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-174-r1"
     rounds: 0
   - id: 175
@@ -82,7 +82,7 @@ tasks:
     base: "infra-class"
     tier: heavy
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 176
