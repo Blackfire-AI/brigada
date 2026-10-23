@@ -159,8 +159,9 @@ func killEngineAt(t *testing.T, stateDir string) {
 		t.Fatalf("kill the engine pid %d: %v", pid, err)
 	}
 	// The group id is the engine's pid only while the engine leads one; a
-	// pid that leads no group answers ESRCH.
-	if err := syscall.Kill(-int(pid), syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+	// pid that leads no group answers ESRCH, and darwin answers EPERM for
+	// a group holding only zombies (see waitGroupGone).
+	if err := syscall.Kill(-int(pid), syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) && !errors.Is(err, syscall.EPERM) {
 		t.Fatalf("kill the engine's process group %d: %v", pid, err)
 	}
 	waitFor(t, "the killed engine's lock to come free", func() bool {
