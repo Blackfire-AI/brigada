@@ -110,6 +110,9 @@ type FileConfig struct {
 	// non-nil list for an explicit none. A pair the file never names has
 	// no entry, which is the Go default and not none.
 	Tools map[string][]string
+	// Env holds the references of env.<harness>.<VAR> (§5.1), harness then
+	// variable: keychain:<item> or file:<path>. Never a value.
+	Env map[string]map[string]string
 }
 
 // RoundsConfig holds the round caps the config file names; nil = unnamed.
@@ -263,8 +266,10 @@ func loadConfigFile(path string, required bool) (FileConfig, error) {
 			err = setCap(&cfg.Caps, key, value)
 		case strings.HasPrefix(key, "tools."):
 			err = setTools(&cfg, key, value)
+		case strings.HasPrefix(key, "env."):
+			err = setEnvRef(&cfg, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, notify.webhook, snapshot_dir, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, rounds.fix, rounds.review, rounds.restart, review.tier, review.effort, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model> or a tools.claude/<model>", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, notify.webhook, snapshot_dir, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, rounds.fix, rounds.review, rounds.restart, review.tier, review.effort, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model>, a tools.claude/<model> or an env.<harness>.<VAR>", path, n+1, key)
 		}
 		if err != nil {
 			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)

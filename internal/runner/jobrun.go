@@ -283,6 +283,9 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 	cmd.Env = withPWD(cmd.Env, cmd.Dir)
 	// The extra checkouts' paths (§5.8) ride along, after the scrub.
 	cmd.Env = withEnv(cmd.Env, r.extraEnvVars())
+	// The harness's own configured variables (§5.1) ride last, over any
+	// ambient value; another harness's job never gets them.
+	cmd.Env = withEnv(cmd.Env, r.cfg.HarnessEnv[r.grant.Agent])
 	cmd.SysProcAttr = processGroup()
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

@@ -124,6 +124,16 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			parts[i] += " tools " + a.Tools
 		}
 	}
+	// The configured env.<harness>.<VAR> references resolve here, at every
+	// runner start, whoever started it; a refused reference stops the start.
+	offered := make([]string, len(adverts))
+	for i, a := range adverts {
+		offered[i] = a.Harness
+	}
+	harnessEnv, err := lifecycle.ResolveHarnessEnv(rt.file.Env, offered, nil)
+	if err != nil {
+		return fail(stderr, err)
+	}
 	// The startup line prints from inside Run, once the runner holds its
 	// state directory's lock: printed here, a second process on the same
 	// state directory would announce itself up and then be refused.
@@ -136,6 +146,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		Adapters:    ads,
 		Labels:      splitList(labels),
 		MaxParallel: maxParallel,
+		HarnessEnv:  harnessEnv,
 		Ready: func() {
 			fmt.Fprintf(stdout, "runner %s up on %s offering %s\n", name, rt.paths.Socket, strings.Join(parts, "; "))
 			for _, a := range adverts {

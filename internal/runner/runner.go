@@ -104,6 +104,10 @@ type Config struct {
 	// environment. The ambient credentials of scrub.go go whether or not
 	// this is set; the command line leaves it empty.
 	GitEnv []string
+	// HarnessEnv is resolved environment per harness, "VAR=value" entries
+	// (§5.1): a job's worker gets the entries of its own harness and no
+	// other's. It is never logged, stored or put in an error.
+	HarnessEnv map[string][]string
 	// Ready, when set, runs once the runner holds its state directory's
 	// lock and its configuration has passed — the moment it is up. The
 	// caller's startup line belongs here: printed before Run, a second
