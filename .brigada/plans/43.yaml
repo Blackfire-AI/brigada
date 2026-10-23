@@ -42,8 +42,8 @@ tasks:
     continue: "landtarget-engine"
     effort: medium
     review_tier: standard
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-160"
     rounds: 0
   - id: 161
     name: "planreview-parks"
