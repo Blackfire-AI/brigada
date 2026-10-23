@@ -39,8 +39,8 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-163"
     rounds: 0
   - id: 164
     name: "land-commit-message"
