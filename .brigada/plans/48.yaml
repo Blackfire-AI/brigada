@@ -93,8 +93,8 @@ tasks:
     base: "infra-retry"
     continue: "infra-retry"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-176"
     rounds: 0
   - id: 177
     name: "model-rejected"
