@@ -93,20 +93,22 @@ func startRunnerProc(t *testing.T, bin, state, script string) *exec.Cmd {
 	return cmd
 }
 
-// waitGroupGone returns once no process of group pgid is left, so no
-// git child the runner started in its own group (a push's receive-pack)
+// waitGroupGone returns once no live process of group pgid is left, so
+// no git child of the runner or of an engine (a push's receive-pack)
 // can still write into the remote when TempDir cleanup runs. Jobs the
 // runner puts in groups of their own are outside it. Stragglers get a
 // SIGKILL after five seconds; a group still alive five seconds after
-// that fails the test instead of hanging it.
+// that fails the test instead of hanging it. Darwin answers EPERM for a
+// group holding only zombies, such as an engine the runner started and
+// never reaped; no live process is left in it, so that counts as gone.
 func waitGroupGone(t *testing.T, pgid int) {
 	t.Helper()
 	start := time.Now()
 	killed := false
 	for {
 		if err := syscall.Kill(-pgid, 0); err != nil {
-			if !errors.Is(err, syscall.ESRCH) {
-				t.Errorf("probe the runner's process group %d: %v", pgid, err)
+			if !errors.Is(err, syscall.ESRCH) && !errors.Is(err, syscall.EPERM) {
+				t.Errorf("probe the process group %d: %v", pgid, err)
 			}
 			return
 		}
@@ -264,12 +266,9 @@ func TestBP8aExit(t *testing.T) {
 	if enginePid <= 0 {
 		t.Fatalf("no engine pid to kill (lock %s)", lock)
 	}
-	if err := syscall.Kill(enginePid, syscall.SIGKILL); err != nil {
-		t.Fatalf("SIGKILL the engine pid %d: %v", enginePid, err)
-	}
-	waitFor(t, "the killed engine's lock to come free", func() bool {
-		return lifecycle.EnginePid(lock) == 0
-	})
+	// SIGKILL the engine and its process group: a plan-file push in flight
+	// must not outlive the engine and write into the remote.
+	killEngineAt(t, state)
 
 	// The restart rides the same on-demand path a client takes (§13).
 	_, stderr, code = runBrigada(t, bin, "status", "--state-dir", state)
