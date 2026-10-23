@@ -16,10 +16,15 @@ const (
 )
 
 // Addresses is the family-to-address table of the Co-Authored-By
-// trailer (§7.1, open in §16 item 10): a known family whose address
-// brigada does not have gets the model name alone, and is reported.
+// trailer (§7.1, open in §16 item 10): the five shipped families, each
+// with the vendor's conventional noreply address. A family outside
+// them gets the model name alone, and is reported.
 var Addresses = map[string]string{
 	"anthropic": "noreply@anthropic.com",
+	"openai":    "noreply@openai.com",
+	"moonshot":  "noreply@moonshot.cn",
+	"deepseek":  "noreply@deepseek.com",
+	"zhipu":     "noreply@zhipuai.com",
 }
 
 // Task is the plain data a squash commit message is built from (§7.1),

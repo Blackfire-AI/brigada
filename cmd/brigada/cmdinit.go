@@ -919,8 +919,10 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if !*noWiring {
 		wiring = planLegacyWiring(root)
 	}
-	files := append([]wireFile{{rel: engine.ProjectConfigPath, old: old, next: proposed, exists: exists}}, wiring...)
+	operator := planOperatorFile(root)
+	files := append([]wireFile{{rel: engine.ProjectConfigPath, old: old, next: proposed, exists: exists}, operator}, wiring...)
 	printInitFiles(stdout, files, *verbose)
+	printInitOperatorNote(stdout)
 	if *noWiring {
 		printInitWrapped(stdout, "", "  ", initDim(stdout, "--no-wiring: init in a repository no longer wires or unwires the harness; the flag matters only in a parent folder"))
 	}
@@ -933,6 +935,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if !*yes {
 		files := 0
 		if !exists || !bytes.Equal(old, proposed) {
+			files++
+		}
+		if operator.changed() {
 			files++
 		}
 		for _, f := range wiring {
@@ -983,7 +988,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err := runnerstate.SaveParallel(runnerStateDir(rt), *parallel); err != nil {
 		return partial(fmt.Errorf("save tasks at once: %w", err))
 	}
-	if err := applyWiring(wiring); err != nil {
+	if err := applyWiring(append([]wireFile{operator}, wiring...)); err != nil {
 		return partial(err)
 	}
 	savedSpecs := append(runnerSpecStrings(usable), keptAgents...)
@@ -996,6 +1001,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	written := 0
 	if !exists || !bytes.Equal(old, proposed) {
+		written++
+	}
+	if operator.changed() {
 		written++
 	}
 	for _, f := range wiring {

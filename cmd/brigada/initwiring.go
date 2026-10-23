@@ -129,7 +129,7 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 	fmt.Fprintln(w, "  "+initPresentation(w).style.Bold("Files")+" in this repository (brigada never commits them):")
 	// Show the setup files first, then supporting edits such as git's exclude.
 	ordered := make([]wireFile, 0, len(files))
-	primary := []string{engine.ProjectConfigPath, wiringMCPFile, wiringCodexFile, wiringSettingsFile, wiringRulesFile, wiringAgentsFile, wiringClaudeFile, wiringSkillFile}
+	primary := []string{engine.ProjectConfigPath, operatorFile, wiringMCPFile, wiringCodexFile, wiringSettingsFile, wiringRulesFile, wiringAgentsFile, wiringClaudeFile, wiringSkillFile}
 	for _, rel := range primary {
 		for _, f := range files {
 			if f.rel == rel {
@@ -159,6 +159,8 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 		case purpose != "":
 		case f.rel == engine.ProjectConfigPath:
 			purpose = "the settings above"
+		case f.rel == operatorFile:
+			purpose = "tells your own coding agent how to work with brigada"
 		case f.rel == wiringMCPFile:
 			purpose = "removes the brigada server an older init added"
 		case f.rel == wiringCodexFile:

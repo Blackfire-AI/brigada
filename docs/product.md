@@ -20,6 +20,8 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 
 **The user's role, as the product's stance:** the user is not a gate; the user is the person who defines the rules. Brigada runs the whole loop — plan, work, check, review, land, push. The user writes rules about the change: which paths are protected, which tier may not land unheard, what a spent restart means, what a change may cost. The engine holds a plan or a task only when a rule names it. When a rule holds something, the user's answer can also change the rule, so the same question is not asked twice. The foreman never asks the user what a rule already decides; it asks only intent or product questions no rule answers. Stop and cancel stay the user's, at any time, on any plan or task.
 
+**Three roles.** The **user** writes the rules and decides at the gates: approves plans, landings and pushes, changes rules, cuts tags and releases, and can stop or cancel anything. The **operator agent** is the user's own coding agent, outside brigada: it passes the user's requests to the foreman with `brigada ask`, watches with `status`, `history` and `diff`, merges a staging pull request whose CI is green, and restarts the engine and runner after their code lands; it approves nothing, and `.brigada/operator.md`, written by `brigada init`, tells it how. The **foreman** is brigada's own agent: it plans, answers workers and re-plans, and asks the user only what no rule decides; it has no tool to pass a gate or land anything.
+
 **The foreman is the main feature.** You talk to it; it resolves everything else and asks you only when it needs a decision.
 
 1. **Understands** your ask in conversation and asks back when it's unclear.

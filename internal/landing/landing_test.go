@@ -341,6 +341,48 @@ func TestMessageBoundsAndFamilies(t *testing.T) {
 	}
 }
 
+// TestMessageAuthorAddresses: the five shipped families carry the
+// vendor's conventional noreply address, the trailer named by the
+// model id, or by the family when the job record names no model; a
+// family the table does not list gets the model name alone, reported.
+func TestMessageAuthorAddresses(t *testing.T) {
+	for _, c := range []struct{ family, addr string }{
+		{"anthropic", "noreply@anthropic.com"},
+		{"openai", "noreply@openai.com"},
+		{"moonshot", "noreply@moonshot.cn"},
+		{"deepseek", "noreply@deepseek.com"},
+		{"zhipu", "noreply@zhipuai.com"},
+	} {
+		model := c.family + "-3"
+		msg, noAddr := Message(Task{ID: 3, Title: "Add a", Family: c.family, Model: model})
+		if noAddr != "" {
+			t.Errorf("family %s has an address, got noAddr %q", c.family, noAddr)
+		}
+		want := "Co-Authored-By: " + model + " <" + c.addr + ">\n"
+		if !strings.Contains(msg, want) {
+			t.Errorf("the trailer lacks %q:\n%s", want, msg)
+		}
+	}
+
+	// No model in the job record: the family stands in.
+	msg, noAddr := Message(Task{ID: 4, Title: "Add a", Family: "deepseek"})
+	if noAddr != "" {
+		t.Errorf("deepseek has an address, got noAddr %q", noAddr)
+	}
+	if !strings.Contains(msg, "Co-Authored-By: deepseek <noreply@deepseek.com>\n") {
+		t.Errorf("the trailer names the family alone:\n%s", msg)
+	}
+
+	// An unlisted family: the model name alone, reported.
+	msg, noAddr = Message(Task{ID: 5, Title: "Add a", Family: "google", Model: "gemini-3"})
+	if noAddr != "gemini-3" {
+		t.Errorf("an unlisted family is reported, got noAddr %q", noAddr)
+	}
+	if !strings.Contains(msg, "Co-Authored-By: gemini-3\n") || strings.Contains(msg, "<") {
+		t.Errorf("the trailer names the model alone:\n%s", msg)
+	}
+}
+
 // TestLandedCommits: a branch's history maps each task id a commit
 // carries as a Brigada-Task trailer to that commit's full sha — the
 // engine's way to recognize tasks landed outside the land job.
