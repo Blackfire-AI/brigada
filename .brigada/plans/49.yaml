@@ -73,8 +73,8 @@ tasks:
     continue: "lr-runner"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-184-r1"
     rounds: 0
   - id: 185
     name: "lr-docs"
