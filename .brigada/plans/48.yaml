@@ -49,9 +49,9 @@ tasks:
     base: "drain"
     continue: "drain"
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-172"
-    rounds: 1
+    rounds: 2
   - id: 173
     name: "secrets"
     title: "#75 secrets by reference: env.<harness>.<VAR> = keychain:/file:"
