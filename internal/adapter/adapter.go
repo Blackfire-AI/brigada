@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -171,7 +172,32 @@ const (
 	// anything. The environment's failure, never the agent's: the job is
 	// retried as a transient error and no health strike is charged.
 	ErrInfra ErrorKind = "infra"
+	// ErrModel is the provider rejecting the model itself: the account
+	// has no access to it, or it does not exist (a 400
+	// invalid_request_error). The agent cannot work until the user
+	// fixes its model or the account, so it stays out like an auth break
+	// and no probe clears it.
+	ErrModel ErrorKind = "model"
 )
+
+// modelRejectedRe matches a provider refusing the model by name: "The
+// 'x' model is not supported when using Codex with a ChatGPT account",
+// "The model `x` does not exist", "Model not found: x", "There's an
+// issue with the selected model". The word "model" must come before the
+// refusal on the same sentence, so a session or tool that is "not found"
+// is not taken for it.
+var modelRejectedRe = regexp.MustCompile(`(?i)\bmodels?\b[^.\n]{0,100}?(not exist|is not supported|not supported|not found|is unsupported|is not available)|invalid model|issue with the selected model`)
+
+// IsModelRejectedText reports whether a failure's text says the provider
+// rejected the model: unsupported for the account, or nonexistent.
+func IsModelRejectedText(text string) bool {
+	// "Model metadata for x not found" is a codex notice that the run
+	// goes on past, not a refusal.
+	if strings.Contains(strings.ToLower(text), "metadata") {
+		return false
+	}
+	return modelRejectedRe.MatchString(text)
+}
 
 // infraPhrases are the words a CLI's connection or DNS failure carries,
 // lowercase: what a network that is down or not yet up looks like.

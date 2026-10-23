@@ -5,14 +5,20 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
 
 // The reasons an agent is broken (§8 "Health"). The runner-stale one is
-// the only one the runner's return clears; the other two wait for the
-// user's reset.
+// the only one the runner's return clears, and repeated failures the only
+// one a probe clears; auth and a rejected model wait for the user's
+// reset. A rejected model's reason carries the provider's words after
+// the constant.
 const (
 	brokenAuth     = "auth"
+	brokenModel    = "model rejected"
 	brokenFailures = "repeated failures"
 	brokenStale    = "runner stale"
 )
@@ -36,6 +42,28 @@ const (
 	// failed ones (§8 "Health").
 	defaultProbeMaxDelay = 1 * time.Hour
 )
+
+// maxModelReason bounds the provider's words kept in a model-rejected
+// agent's reason.
+const maxModelReason = 200
+
+// modelReason is the broken reason of an agent whose model the provider
+// rejected: the constant, then the error's first line, cut short.
+func modelReason(errText string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(errText), "\n")
+	if r := []rune(line); len(r) > maxModelReason {
+		line = string(r[:maxModelReason])
+	}
+	if line == "" {
+		return brokenModel
+	}
+	return brokenModel + ": " + line
+}
+
+// isModelReason reports whether a broken reason is a rejected model's.
+func isModelReason(reason string) bool {
+	return reason == brokenModel || strings.HasPrefix(reason, brokenModel+": ")
+}
 
 // ErrNoAgent is the reset's refusal when no registered agent matches
 // the harness and model named.
@@ -64,6 +92,8 @@ func (e *Engine) agentOutcomeTx(tx *sql.Tx, job *jobRow, c Completion, now time.
 		return e.coolAccountTx(tx, job, c, now)
 	case "auth":
 		return e.markBrokenTx(tx, job, job.AgentID, brokenAuth, now)
+	case string(adapter.ErrModel):
+		return e.markBrokenTx(tx, job, job.AgentID, modelReason(c.Error), now)
 	case ErrorKindSetup, ErrorKindInfra:
 		// The environment or the runner's own plumbing failed, not the
 		// agent (§5.7, §5.1): the failure is neither quota nor health,
