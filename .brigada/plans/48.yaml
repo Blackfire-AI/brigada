@@ -60,8 +60,8 @@ tasks:
     base: "authnote"
     continue: "authnote"
     effort: medium
-    state: running
-    branch: "brigada/task-173-r1"
+    state: reviewing
+    branch: "brigada/task-173-r2"
     rounds: 0
   - id: 174
     name: "infra-class"
