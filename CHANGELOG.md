@@ -3,6 +3,10 @@
 The format of this file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.2] - 2026-10-23
+
+Second release candidate of 1.0.0. Since rc.1: with `land_target` set, new tasks start from the land target and may depend on landed tasks of other plans (#59); a plan review's `changes` verdict parks the plan at `needs_foreman` and its findings are kept whole (#66, #70); a Z.ai limit reset is read in its own zone (#54); the foreman's report is no longer cut at 500 bytes (#52); a landed commit's subject comes from the worker's commit message (#48) and its `Co-Authored-By` trailer carries every shipped family's address (#74); the foreman's task size guide and the plan review's size check (#50); `brigada init` writes `.brigada/operator.md`, the guide for your own coding agent (#73); CI runs the race tests in shards. The changes are listed under 1.0.0 below.
+
 ## [1.0.0-rc.1] - 2026-10-22
 
 First release candidate of 1.0.0. The changes are listed under 1.0.0 below.
