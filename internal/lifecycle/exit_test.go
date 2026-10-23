@@ -1,6 +1,7 @@
 package lifecycle_test
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,29 +64,50 @@ func startRunnerProc(t *testing.T, bin, state, script string) *exec.Cmd {
 		t.Fatalf("open the runner log: %v", err)
 	}
 	cmd.Stdout, cmd.Stderr = logFile, logFile
+	// Its own process group: the cleanup waits for every git child the
+	// runner started (a push's receive-pack and index-pack write into the
+	// remote's objects) to be gone before TempDir removal runs.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start the runner: %v", err)
 	}
 	t.Cleanup(func() {
-		if cmd.ProcessState != nil {
-			logFile.Close()
-			return
+		pgid := cmd.Process.Pid
+		if cmd.ProcessState == nil {
+			syscall.Kill(-pgid, syscall.SIGTERM)
+			done := make(chan struct{})
+			go func() { cmd.Wait(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				syscall.Kill(-pgid, syscall.SIGKILL)
+				<-done
+			}
 		}
-		cmd.Process.Signal(syscall.SIGTERM)
-		done := make(chan struct{})
-		go func() { cmd.Wait(); close(done) }()
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			cmd.Process.Kill()
-			<-done
-		}
+		waitGroupGone(pgid)
 		logFile.Close()
 		if data, err := os.ReadFile(logPath); err == nil {
 			t.Logf("runner log:\n%s", data)
 		}
 	})
 	return cmd
+}
+
+// waitGroupGone returns once no process of group pgid is left, so no
+// git child of the runner can still write into the remote when TempDir
+// cleanup runs. Stragglers get a SIGKILL after five seconds.
+func waitGroupGone(pgid int) {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := syscall.Kill(-pgid, 0); errors.Is(err, syscall.ESRCH) {
+			return
+		}
+		if time.Now().After(deadline) {
+			syscall.Kill(-pgid, syscall.SIGKILL)
+			deadline = time.Now().Add(5 * time.Second)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // lsRemoteCount runs `git ls-remote --heads` with one ref pattern and
