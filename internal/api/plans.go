@@ -320,7 +320,7 @@ func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id iden
 	case errors.Is(err, engine.ErrNoPlan):
 		writeError(w, http.StatusNotFound, codeNotFound, err.Error())
 		return
-	case errors.Is(err, engine.ErrPlanNotLive), errors.Is(err, engine.ErrPlanReviewRunning):
+	case errors.Is(err, engine.ErrPlanNotLive):
 		writeError(w, http.StatusConflict, codeConflict, err.Error())
 		return
 	case err != nil:

@@ -165,11 +165,16 @@ type StatusPlan struct {
 	// the latest verdict and findings once a round has ended. The
 	// findings are the event's whole text; the short views that render
 	// them cut at their own bound and point to ReviewJob's history.
-	ReviewRound    int          `json:"review_round,omitempty"`
-	ReviewVerdict  string       `json:"review_verdict,omitempty"`
-	ReviewFindings string       `json:"review_findings,omitempty"`
-	ReviewJob      int64        `json:"review_job,omitempty"`
-	Tasks          []StatusTask `json:"tasks"`
+	ReviewRound    int    `json:"review_round,omitempty"`
+	ReviewVerdict  string `json:"review_verdict,omitempty"`
+	ReviewFindings string `json:"review_findings,omitempty"`
+	ReviewJob      int64  `json:"review_job,omitempty"`
+	// WaitingAmendment is true while the plan reviews with waiting
+	// amendment work (§6.2): tasks an amendment added or respecified
+	// under the running round, pending its verdict, which queues the
+	// next round over them.
+	WaitingAmendment bool         `json:"waiting_amendment,omitempty"`
+	Tasks            []StatusTask `json:"tasks"`
 }
 
 // StatusTask is one task of a status plan (§6.1).
@@ -507,7 +512,8 @@ func statusPlansTx(tx *sql.Tx, project int64, all bool) ([]StatusPlan, int, erro
 	// The review's latest job is where the history holds the verdict
 	// whole (§9): the short views that cut the findings point at it.
 	planCols := `p.id, pr.repo_url, p.title, p.state, p.review_round, p.review_verdict, p.review_findings,
-		COALESCE((SELECT j.id FROM jobs j WHERE j.key = 'plan_review:' || p.id ORDER BY j.id DESC LIMIT 1), 0)`
+		COALESCE((SELECT j.id FROM jobs j WHERE j.key = 'plan_review:' || p.id ORDER BY j.id DESC LIMIT 1), 0),
+		COALESCE(p.amend_batch, '')`
 	finishedQuery := `SELECT ` + planCols + `
 		FROM plans p JOIN projects pr ON pr.id = p.project_id
 		WHERE ` + scope + ` AND p.state IN ('done', 'cancelled')
@@ -546,9 +552,11 @@ func statusPlanRows(tx *sql.Tx, query string, args ...any) ([]StatusPlan, error)
 	plans := []StatusPlan{}
 	for rows.Next() {
 		var p StatusPlan
-		if err := rows.Scan(&p.ID, &p.RepoURL, &p.Title, &p.State, &p.ReviewRound, &p.ReviewVerdict, &p.ReviewFindings, &p.ReviewJob); err != nil {
+		var amendBatch string
+		if err := rows.Scan(&p.ID, &p.RepoURL, &p.Title, &p.State, &p.ReviewRound, &p.ReviewVerdict, &p.ReviewFindings, &p.ReviewJob, &amendBatch); err != nil {
 			return nil, fmt.Errorf("list the status plans: %w", err)
 		}
+		p.WaitingAmendment = amendBatch != ""
 		plans = append(plans, p)
 	}
 	if err := rows.Err(); err != nil {

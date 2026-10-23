@@ -2,7 +2,6 @@ package engine
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -536,23 +535,175 @@ func TestPlanReviewAmendedCreationRunsWholePlanRules(t *testing.T) {
 	}
 }
 
-// TestPlanReviewAmendDuringLiveRoundRefused: tasks added or respecified
-// while a review round runs would start at its verdict unreviewed, so
-// the amendment is refused; a cancel goes through.
-func TestPlanReviewAmendDuringLiveRoundRefused(t *testing.T) {
+// TestPlanReviewAmendDuringLiveRoundWaits: tasks added or respecified
+// while a review round runs are accepted as waiting amendment work
+// (§6.2): the running round keeps judging the plan as it was queued,
+// the tasks stay pending with no work queued, `status` shows the
+// waiting amendment, and the round's approve verdict queues the next
+// round over them instead of starting work. A verdict past the round
+// cap folds the waiting tasks into the batch it applies over.
+func TestPlanReviewAmendDuringLiveRoundWaits(t *testing.T) {
 	e := newPlanReviewEnv(t)
 	e.offerForeman(e.runner1)
 	e.offerReviewer()
 	res := e.createPlan([]PlanTask{{Name: "a", Spec: "do a"}, {Name: "b", Spec: "do b"}})
-	_, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Add: []PlanTask{{Name: "c", Spec: "do c"}}})
-	if !errors.Is(err, ErrPlanReviewRunning) {
-		t.Fatalf("add during a live round: err = %v, want ErrPlanReviewRunning", err)
+	g := e.lease(e.runner2, nil, nil)
+	if g == nil || g.Kind != KindPlanReview {
+		t.Fatalf("lease = %+v, want the running round", g)
 	}
-	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: []string{"b"}}); err != nil {
-		t.Fatalf("cancel during a live round: %v", err)
+	am, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+		Add:    []PlanTask{{Name: "c", Spec: "do c too"}},
+		Respec: []PlanRespec{{Task: "a", Spec: "do a, and only a"}},
+		Cancel: []string{"b"},
+	})
+	if err != nil {
+		t.Fatalf("amend under a live round: %v", err)
+	}
+	if am.State != planReviewing {
+		t.Fatalf("amend result state = %q, want %s (the round still runs)", am.State, planReviewing)
 	}
 	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planReviewing {
-		t.Errorf("plan state = %q, want reviewing (the round still runs)", got)
+		t.Errorf("plan state = %q, want reviewing", got)
+	}
+	if got := e.str("SELECT state FROM tasks WHERE plan_id = ? AND name = 'c'", res.PlanID); got != taskPending {
+		t.Errorf("added task c = %s, want pending until the verdict", got)
+	}
+	if got := e.str("SELECT state FROM tasks WHERE plan_id = ? AND name = 'b'", res.PlanID); got != taskCancelled {
+		t.Errorf("cancelled task b = %s, want cancelled under the round too", got)
+	}
+	if got := e.str("SELECT spec FROM tasks WHERE plan_id = ? AND name = 'a'", res.PlanID); got != "do a, and only a" {
+		t.Errorf("respec under the round: spec = %q, want the new one", got)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'work'"); got != 0 {
+		t.Errorf("work jobs = %d, want none under the round", got)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'plan_review'"); got != 1 {
+		t.Errorf("plan_review jobs = %d, want the running round only", got)
+	}
+	// The waiting amendment work is recorded — the respec and the
+	// addition, in that order — and shows in the status.
+	waiting := fmt.Sprintf("[%d,%d]",
+		e.int("SELECT id FROM tasks WHERE plan_id = ? AND name = 'a'", res.PlanID),
+		am.Added[0].TaskID)
+	if got := e.str("SELECT amend_batch FROM plans WHERE id = ?", res.PlanID); got != waiting {
+		t.Errorf("amend_batch = %q, want %s", got, waiting)
+	}
+	st, err := e.eng.Status(e.ctx, e.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range st.Plans {
+		if st.Plans[i].ID == res.PlanID && !st.Plans[i].WaitingAmendment {
+			t.Errorf("status plan = %+v, want the waiting amendment shown", st.Plans[i])
+		}
+	}
+
+	// The round's approve verdict queues round 2 over the waiting
+	// amendment instead of starting work: the plan keeps reviewing,
+	// nothing starts, and no foreman turn is woken — the amendment is
+	// already in the engine's hands.
+	e.reviewVerdict(g, verdictApprove, theFindings)
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planReviewing {
+		t.Fatalf("plan state after the approve = %q, want %s (round 2 queued)", got, planReviewing)
+	}
+	if got := e.int("SELECT review_round FROM plans WHERE id = ?", res.PlanID); got != 2 {
+		t.Fatalf("review round after the approve = %d, want 2", got)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'work'"); got != 0 {
+		t.Errorf("work jobs after the approve = %d, want none: round 2 reviews the amendment", got)
+	}
+	if got := e.str("SELECT state FROM tasks WHERE plan_id = ? AND name = 'c'", res.PlanID); got != taskPending {
+		t.Errorf("added task c after the approve = %s, want still pending", got)
+	}
+	if got := e.str("SELECT state FROM tasks WHERE plan_id = ? AND name = 'a'", res.PlanID); got != taskPending {
+		t.Errorf("respecified task a after the approve = %s, want still pending", got)
+	}
+	if got := e.foremanJobs(); got != 0 {
+		t.Errorf("foreman turns = %d, want none: nothing waits on the foreman", got)
+	}
+	if got := e.int("SELECT COUNT(*) FROM events WHERE kind = ?", evPlanReviewed); got != 1 {
+		t.Errorf("plan_reviewed events = %d, want the deferred verdict's one", got)
+	}
+	// Round 2 covers the waiting amendment and carries round 1's
+	// verdict and findings over.
+	prompt := e.str("SELECT prompt FROM jobs WHERE kind = 'plan_review' ORDER BY id DESC")
+	for _, want := range []string{"round 2 of 2", "do c too", "do a, and only a", theFindings} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("round 2 input lacks %q:\n%s", want, prompt)
+		}
+	}
+
+	// A second amendment under round 2 waits the same way, and round
+	// 2's verdict — the cap spent — folds the waiting tasks into the
+	// batch it applies over, so the whole plan starts at once.
+	g2 := e.lease(e.runner2, nil, nil)
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+		Add: []PlanTask{{Name: "d", Spec: "do d as well"}},
+	}); err != nil {
+		t.Fatalf("amend under round 2: %v", err)
+	}
+	e.reviewVerdict(g2, verdictApprove, theFindings)
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
+		t.Fatalf("plan state after round 2's approve = %q, want active (the rounds are spent)", got)
+	}
+	for _, name := range []string{"a", "c", "d"} {
+		if got := e.str("SELECT state FROM tasks WHERE plan_id = ? AND name = ?", res.PlanID, name); got != taskReady {
+			t.Errorf("task %s = %s, want ready with its work queued", name, got)
+		}
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'work'"); got != 3 {
+		t.Errorf("work jobs = %d, want the three tasks' one each", got)
+	}
+	if got := e.str("SELECT amend_batch FROM plans WHERE id = ?", res.PlanID); got != "" {
+		t.Errorf("amend_batch = %q, want cleared at the conclusion", got)
+	}
+}
+
+// TestPlanReviewAmendDuringLiveRoundChangesDefers: a changes verdict
+// over waiting amendment work defers like an approve does (§6.2): the
+// plan does not park, the next round is queued over the amendment with
+// the findings carried to it, and its verdict concludes the review.
+func TestPlanReviewAmendDuringLiveRoundChangesDefers(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	res := e.createPlan([]PlanTask{{Name: "a", Spec: "do a"}, {Name: "b", Spec: "do b"}})
+	g := e.lease(e.runner2, nil, nil)
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+		Add:      []PlanTask{{Name: "c", Spec: "do c too"}},
+		Retarget: []PlanRetarget{{Task: "b", Deps: []string{"a"}}},
+	}); err != nil {
+		t.Fatalf("amend under a live round: %v", err)
+	}
+	if got := e.str("SELECT state FROM tasks WHERE plan_id = ? AND name = 'b'", res.PlanID); got != taskPending {
+		t.Errorf("retargeted task b = %s, want pending behind a under the round too", got)
+	}
+	e.reviewVerdict(g, verdictChanges, theFindings)
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planReviewing {
+		t.Fatalf("plan state after the changes = %q, want %s (round 2 queued, no park)", got, planReviewing)
+	}
+	if got := e.int("SELECT review_round FROM plans WHERE id = ?", res.PlanID); got != 2 {
+		t.Fatalf("review round = %d, want 2", got)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'work'"); got != 0 {
+		t.Errorf("work jobs = %d, want none", got)
+	}
+	if got := e.foremanJobs(); got != 0 {
+		t.Errorf("foreman turns = %d, want none: the engine answers itself", got)
+	}
+	prompt := e.str("SELECT prompt FROM jobs WHERE kind = 'plan_review' ORDER BY id DESC")
+	if !strings.Contains(prompt, "round 2 of 2") || !strings.Contains(prompt, theFindings) || !strings.Contains(prompt, "do c too") {
+		t.Errorf("round 2 input lacks the round, the findings or the added spec:\n%s", prompt)
+	}
+	e.reviewVerdict(e.lease(e.runner2, nil, nil), verdictApprove, theFindings)
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
+		t.Fatalf("plan state after round 2's approve = %q, want active", got)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'work'"); got != 2 {
+		t.Errorf("work jobs = %d, want a's and c's (b waits on a)", got)
+	}
+	if got := e.str("SELECT state FROM tasks WHERE plan_id = ? AND name = 'b'", res.PlanID); got != taskPending {
+		t.Errorf("task b = %s, want pending behind a", got)
 	}
 }
 
