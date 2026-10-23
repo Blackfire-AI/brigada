@@ -104,7 +104,7 @@ tasks:
     base: "codex-warning"
     continue: "codex-warning"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 178
