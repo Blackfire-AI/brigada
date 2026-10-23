@@ -61,7 +61,7 @@ tasks:
     continue: "lr-setting"
     tier: heavy
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 184
@@ -94,6 +94,6 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
