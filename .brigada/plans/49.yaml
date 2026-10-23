@@ -5,9 +5,9 @@
 plan: 49
 title: "Urgent: fix TestBP8aExit on Linux (waitGroupGone zombies), CI red on brigada/landed"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: needs_foreman
 created: 2026-10-23T19:25:20.158311Z
-updated: 2026-10-23T19:51:55.862271Z
+updated: 2026-10-23T19:55:05.305417Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
