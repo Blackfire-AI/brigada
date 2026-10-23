@@ -61,7 +61,7 @@ tasks:
     continue: "lr-setting"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-183"
     rounds: 0
   - id: 184
@@ -73,7 +73,7 @@ tasks:
     continue: "lr-runner"
     tier: heavy
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 185
