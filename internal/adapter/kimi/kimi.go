@@ -389,7 +389,13 @@ func errorFromText(text string) (adapter.Event, bool) {
 		return adapter.Event{}, false
 	}
 	kind := adapter.ErrOther
+	if adapter.IsModelRejectedText(text) {
+		kind = adapter.ErrModel
+	}
 	for _, m := range errorPhrases {
+		if kind != adapter.ErrOther {
+			break
+		}
 		if strings.Contains(lower, m.phrase) {
 			kind = m.kind
 			break

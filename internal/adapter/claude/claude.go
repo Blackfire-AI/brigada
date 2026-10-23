@@ -536,6 +536,9 @@ var stderrPhrases = []errorPhrase{
 // phraseEvent sorts one piece of text by one table. Text that names
 // nothing in the table is not an event.
 func phraseEvent(table []errorPhrase, text string) (adapter.Event, bool) {
+	if adapter.IsModelRejectedText(text) {
+		return adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrModel, Text: text}, true
+	}
 	lower := strings.ToLower(text)
 	for _, m := range table {
 		if strings.Contains(lower, m.phrase) {

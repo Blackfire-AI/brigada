@@ -941,8 +941,13 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 // brokenReason is the needs-you reason for a broken agent. An auth break
 // on a harness whose credential comes from the environment names the
 // variable and the time the runner process started, so a runner started
-// without the variable shows; every other reason is unchanged.
+// without the variable shows; a rejected model's reason points at
+// `brigada agents`; every other reason is unchanged.
 func brokenReason(reason, harness, started string) string {
+	if isModelReason(reason) {
+		// The user checks whether the model is still offered.
+		return reason + "; check the model is still offered: `brigada agents`"
+	}
 	env := adapter.CredentialEnv(harness)
 	if reason != brokenAuth || env == "" {
 		return reason

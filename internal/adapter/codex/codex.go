@@ -566,6 +566,9 @@ func errorEvent(text string) (adapter.Event, bool) {
 // nothing in the table is not an event. A limit's text also names its
 // reset time when it carries one, as LimitUntil.
 func phraseEvent(table []errorPhrase, text string) (adapter.Event, bool) {
+	if adapter.IsModelRejectedText(text) {
+		return adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrModel, Text: text}, true
+	}
 	lower := strings.ToLower(text)
 	for _, m := range table {
 		if strings.Contains(lower, m.phrase) {

@@ -271,6 +271,9 @@ func errorKind(e errorJSON) adapter.ErrorKind {
 	if e.Status == 429 || e.Status == 402 {
 		return adapter.ErrLimit
 	}
+	if adapter.IsModelRejectedText(e.Message) {
+		return adapter.ErrModel
+	}
 	lower := strings.ToLower(e.Message)
 	for _, phrase := range limitPhrases {
 		if strings.Contains(lower, phrase) {

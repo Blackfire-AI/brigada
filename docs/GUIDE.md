@@ -905,17 +905,18 @@ An agent's account is the login whose quota it spends. The account label default
 
 ### Automatic retry
 
-When a worker's CLI fails for a transient reason (a quota error, an authentication error, a server error, a lost runner), a task's first work job gets one automatic restart on another ready agent, with a fresh session and a new branch, carrying the failed job's last progress. A fix round that fails the same way is retried once instead of restarted: the author's session resumes on the author's agent when it can still take it, else the round runs fresh on another agent of the tier with the round's feedback (the check output or the review findings) in its prompt and the task's branch under it. A second failure, or a failure that is not transient, parks the task for the foreman. Set `task_auto_retry = false` to park transient failures at once.
+When a worker's CLI fails for a transient reason (a quota error, an authentication error, a rejected model, a server error, a lost runner), a task's first work job gets one automatic restart on another ready agent, with a fresh session and a new branch, carrying the failed job's last progress. A fix round that fails the same way is retried once instead of restarted: the author's session resumes on the author's agent when it can still take it, else the round runs fresh on another agent of the tier with the round's feedback (the check output or the review findings) in its prompt and the task's branch under it. A second failure, or a failure that is not transient, parks the task for the foreman. Set `task_auto_retry = false` to park transient failures at once.
 
 ### Broken agents
 
 An agent is taken out of dispatch as broken when:
 
 1. its CLI reports an authentication failure;
-2. its last two jobs both failed (a limit hit is quota, not a failure, and does not count); or
-3. its runner has not been heard from for 15 minutes.
+2. its provider rejects the agent's model, saying the account cannot use it or that it does not exist;
+3. its last two jobs both failed (a limit hit is quota, not a failure, and does not count); or
+4. its runner has not been heard from for 15 minutes.
 
-The auth failure stays broken until you log the CLI in again and run `brigada agent reset <harness>/<model>`; it is never probed. The failure streak comes back by itself: a few minutes after it was marked broken the runner probes the CLI, a passing probe clears it, and a failing one waits longer (a growing delay) before the next probe — `brigada agent reset <harness>/<model>` still clears it at once when you know the CLI is fixed. The third is not a verdict on the agent: the agent comes back by itself as soon as its runner polls again.
+The auth failure stays broken until you log the CLI in again and run `brigada agent reset <harness>/<model>`; it is never probed. A rejected model stays out the same way, until you reset the agent or remove it: its needs-you line reads `model rejected: <the provider's words>` and always points you at `brigada agents`, where you see whether the CLI still offers the model. The failure streak comes back by itself: a few minutes after it was marked broken the runner probes the CLI, a passing probe clears it, and a failing one waits longer (a growing delay) before the next probe — `brigada agent reset <harness>/<model>` still clears it at once when you know the CLI is fixed. The fourth is not a verdict on the agent: the agent comes back by itself as soon as its runner polls again.
 
 Broken agents are listed in the needs-you queue with the reason, and raise a notification. `agent reset` prints how many agents matched. The name is the `harness/model` pair that `status` and `stats` print, and the reset applies to every runner's copy of that agent.
 

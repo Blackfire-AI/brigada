@@ -492,7 +492,7 @@ func (e *Engine) retryInfraFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 // carries, for a work job and a fix round alike.
 func transientCLIError(kind string) bool {
 	switch kind {
-	case "limit", "auth", "other", "runner_lost":
+	case "limit", "auth", string(adapter.ErrModel), "other", "runner_lost":
 		return true
 	}
 	return false
@@ -1115,7 +1115,7 @@ func reviewerUnavailable(c Completion) bool {
 		return false
 	}
 	switch c.ErrorKind {
-	case "limit", "auth", ErrorKindSetup, ErrorKindInfra:
+	case "limit", "auth", string(adapter.ErrModel), ErrorKindSetup, ErrorKindInfra:
 		return true
 	}
 	return false
@@ -1286,14 +1286,14 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 // another reviewer's word, so it does not count. Author jobs — work or
 // fix, including restarts — begin a new cycle with a fresh first
 // review. A review whose reviewer could not run (error kind limit,
-// auth, setup or infra) never gave an answer, so it is not counted
+// auth, model, setup or infra) never gave an answer, so it is not counted
 // either; the job being judged is the unusable answer itself, the one
 // the count adds.
 func reviewRetrySpentTx(tx *sql.Tx, job *jobRow) (bool, error) {
 	var reviews int64
 	err := tx.QueryRow(`SELECT COUNT(*) FROM jobs
 		WHERE task_id = ? AND kind = 'review' AND restart = 0
-		AND error_kind NOT IN ('limit', 'auth', ?, ?)
+		AND error_kind NOT IN ('limit', 'auth', 'model', ?, ?)
 		AND NOT (mode = 'session' AND error_kind = ?)
 		AND id > COALESCE((SELECT MAX(id) FROM jobs WHERE task_id = ? AND kind IN ('work', 'fix')), 0)`,
 		job.TaskID, ErrorKindSetup, ErrorKindInfra, string(adapter.ErrResumeFailed), job.TaskID).Scan(&reviews)
