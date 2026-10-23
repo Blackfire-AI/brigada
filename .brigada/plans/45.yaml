@@ -5,9 +5,9 @@
 plan: 45
 title: "Batch 3 for v1.0.0-rc.2: #73 operator onboarding, #74 trailer addresses for every family"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-23T10:52:07.547118Z
-updated: 2026-10-23T10:57:00.128888Z
+updated: 2026-10-23T11:23:52.592177Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
