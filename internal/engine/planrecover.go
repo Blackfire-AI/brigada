@@ -26,7 +26,9 @@ import (
 // check command, and a task the file shows mid-flight (running, checking,
 // reviewing) has no job anymore, so it waits at needs_foreman for the
 // foreman to decide. A plan the file shows reviewing has its review round
-// queued again, or proceeds when no reviewer can run it.
+// queued again, or proceeds when no reviewer can run it; a plan the file
+// shows parked at needs_foreman (§6.2) stays parked: its review is done
+// and nothing auto-retries, so the foreman answers it as before.
 
 // Plan recovery's per-plan outcomes.
 const (
@@ -45,7 +47,7 @@ type PlanRecovery struct {
 }
 
 var (
-	planStates = map[string]bool{"draft": true, "pending_approval": true, "reviewing": true, "active": true, "done": true, "cancelled": true}
+	planStates = map[string]bool{"draft": true, "pending_approval": true, "reviewing": true, "needs_foreman": true, "active": true, "done": true, "cancelled": true}
 	taskStates = map[string]bool{"pending": true, "ready": true, "running": true, "checking": true, "reviewing": true,
 		"done": true, "needs_foreman": true, "needs_user": true, "failed": true, "cancelled": true}
 )

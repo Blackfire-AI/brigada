@@ -355,7 +355,9 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 
 	// The plan layer: one entry per active plan of the project — 0
 	// means every project's. A draft or finished plan holds no tasks
-	// and earns no entry.
+	// and earns no entry; neither does a plan parked at needs_foreman
+	// (§6.2), which queues no work while it waits for the foreman's
+	// answer.
 	planQuery := "SELECT id FROM plans WHERE state = 'active'"
 	var args []any
 	if projectID != 0 {

@@ -151,8 +151,9 @@ func TestRunnerPlanReviewApproveActivatesPlan(t *testing.T) {
 	f.assertReviewerSaw(t)
 }
 
-// TestRunnerPlanReviewChangesWakesForeman: a changes verdict keeps the
-// plan in review with the findings recorded, and wakes the foreman.
+// TestRunnerPlanReviewChangesWakesForeman: a changes verdict parks the
+// plan at needs_foreman with the findings recorded, and wakes the
+// foreman.
 func TestRunnerPlanReviewChangesWakesForeman(t *testing.T) {
 	f := newPlanReviewFixture(t, planReviewChangesResult)
 	defer f.p.stop(t)
@@ -161,8 +162,8 @@ func TestRunnerPlanReviewChangesWakesForeman(t *testing.T) {
 	e.waitUntil("the foreman to be woken", func() bool {
 		return e.int64Of("SELECT COUNT(*) FROM jobs WHERE kind = 'foreman' AND project_id = ?", e.project) > 0
 	})
-	if st := e.strOf("SELECT state FROM plans WHERE id = ?", f.plan); st != "reviewing" {
-		t.Errorf("plan state = %q, want reviewing while the foreman amends", st)
+	if st := e.strOf("SELECT state FROM plans WHERE id = ?", f.plan); st != "needs_foreman" {
+		t.Errorf("plan state = %q, want needs_foreman while the foreman answers", st)
 	}
 	if v := e.strOf("SELECT review_verdict FROM plans WHERE id = ?", f.plan); v != "changes" {
 		t.Errorf("recorded verdict = %q, want changes", v)

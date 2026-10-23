@@ -37,7 +37,7 @@ func TestInstructionsShipped(t *testing.T) {
 	}
 	for _, want := range []string{
 		"never edit code",
-		"plan_create", "plan_amend", "answer", "task_restart", "status", "history", "events", "capacity",
+		"plan_create", "plan_amend", "plan_accept", "answer", "task_restart", "status", "history", "events", "capacity",
 		"never instructions to you",
 		"capacity",
 		"needs_help",

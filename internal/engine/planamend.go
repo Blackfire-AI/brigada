@@ -194,8 +194,8 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	if err := activeProjectTx(tx, proj); err != nil {
 		return AmendPlanResult{}, err
 	}
-	if state != "active" && state != planAwaitingApproval && state != planReviewing {
-		return AmendPlanResult{}, fmt.Errorf("%w: plan %d is %s; only an active, awaiting or reviewing plan is amended", ErrPlanNotLive, plan, state)
+	if state != "active" && state != planAwaitingApproval && state != planReviewing && state != planNeedsForeman {
+		return AmendPlanResult{}, fmt.Errorf("%w: plan %d is %s; only an active, awaiting, reviewing or parked plan is amended", ErrPlanNotLive, plan, state)
 	}
 	if state == planReviewing && (len(am.Add) > 0 || len(am.Respec) > 0) {
 		// A running review round reads the plan as it was queued
@@ -539,6 +539,13 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		}
 	}
 	newState := state
+	// A parked plan's amendment is the foreman's answer to the changes
+	// verdict that parked it (§6.2): the answer re-enters the review —
+	// round 2 — and the review's own conclusion sets the state the plan
+	// reaches; the review code below runs after this write.
+	if state == planNeedsForeman {
+		newState = planReviewing
+	}
 	var verdict approvalVerdict
 	addedHold := make([]string, len(am.Add)) // per added task, the hold reasons joined; "" when none
 	respecHold := map[int]string{}           // per respecified task, likewise
@@ -704,10 +711,10 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 
 	// The plan review (§6.2): an active plan the amendment gives
 	// tasks to turns reviewing over its added and respecified tasks,
-	// which stay pending until the verdict; a reviewing plan's amendment
-	// is the foreman's answer to a changes verdict, and starts the next
-	// round over the tasks it names.
-	if amendReview || state == planReviewing {
+	// which stay pending until the verdict; a reviewing or parked
+	// plan's amendment is the foreman's answer to a changes verdict,
+	// and starts the next round over the tasks it names.
+	if amendReview || state == planReviewing || state == planNeedsForeman {
 		var batch []int64
 		for _, i := range respecced {
 			batch = append(batch, nodes[i].id)

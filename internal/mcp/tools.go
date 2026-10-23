@@ -146,7 +146,7 @@ var tools = []Tool{
 	},
 	{
 		Name:        "plan_amend",
-		Description: "Amend a live plan (active or awaiting approval): add tasks, cancel tasks, and re-point the dependencies of a waiting task. Use it to re-plan when a task fails for good or the user's ask changes: a dependency that will never be done (a task failed or cancelled) leaves its dependents waiting forever unless you re-point them (retarget) to another task or drop the dependency (empty deps). Tasks are named by their name or id (as status shows). Validation is plan_create's: names unique, deps in the plan — or the id of a landed task of another plan of the project, its work on the land target, already satisfied — and never on a cancelled task, no cycle — one refusal rejects the whole amendment. Use retier to change the tier, effort or round caps (merged key by key) of a pending, ready or needs_foreman task; a parked task still needs task_restart. Use respec to replace or append to the spec of a pending task (one with no job yet) when a requirement is missing: it costs no cold start; a task that has started is refused, and then a follow-up task is the way. The edit is judged like an added task: one that trips a rule is held alone. Cancelling stops a task's live jobs. Waiting tasks whose dependencies are all done start in the same call. An added task is judged on its own against the plan rules (a class outside approval_classes, a protected path, an extra repository, a check other than the project's default_check): one that trips a rule is held at the plan gate with a needs-you line naming the rule, while the plan stays active and the rest runs on. The plan budget holds the same way once the plan's spend has passed the project's approval_budget: any task about to start, an added one included, parks at the plan gate instead of queueing. A plan left with only permanently waiting tasks is closed, and its done report names what never ran.",
+		Description: "Amend a live plan (active, awaiting approval, reviewing, or parked at needs_foreman by its review — the answer its changes verdict waited for): add tasks, cancel tasks, and re-point the dependencies of a waiting task. Use it to re-plan when a task fails for good or the user's ask changes: a dependency that will never be done (a task failed or cancelled) leaves its dependents waiting forever unless you re-point them (retarget) to another task or drop the dependency (empty deps). Tasks are named by their name or id (as status shows). Validation is plan_create's: names unique, deps in the plan — or the id of a landed task of another plan of the project, its work on the land target, already satisfied — and never on a cancelled task, no cycle — one refusal rejects the whole amendment. Use retier to change the tier, effort or round caps (merged key by key) of a pending, ready or needs_foreman task; a parked task still needs task_restart. Use respec to replace or append to the spec of a pending task (one with no job yet) when a requirement is missing: it costs no cold start; a task that has started is refused, and then a follow-up task is the way. The edit is judged like an added task: one that trips a rule is held alone. Cancelling stops a task's live jobs. Waiting tasks whose dependencies are all done start in the same call. An added task is judged on its own against the plan rules (a class outside approval_classes, a protected path, an extra repository, a check other than the project's default_check): one that trips a rule is held at the plan gate with a needs-you line naming the rule, while the plan stays active and the rest runs on. The plan budget holds the same way once the plan's spend has passed the project's approval_budget: any task about to start, an added one included, parks at the plan gate instead of queueing. A plan left with only permanently waiting tasks is closed, and its done report names what never ran.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -238,6 +238,25 @@ var tools = []Tool{
 			"required": []string{"plan"},
 		},
 		Call: callPlanAmend,
+	},
+	{
+		Name:        "plan_accept",
+		Description: "Accept a plan the plan review parked at needs_foreman as reviewed, with your reason recorded; the plan proceeds exactly as a spent round's verdict does — its tasks start, or it waits for the user's yes when an approval rule holds it, which the answer names. Use it when the review's changes are not worth another round. To answer the findings instead, amend the plan with plan_amend: the added and edited tasks go to the next review round. The reason is required and reaches the plan's history.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"plan": map[string]any{
+					"type":        "integer",
+					"description": "the parked plan's id, as status shows",
+				},
+				"reason": map[string]any{
+					"type":        "string",
+					"description": "why the plan is accepted as reviewed, despite the findings; recorded with the plan's history",
+				},
+			},
+			"required": []string{"plan", "reason"},
+		},
+		Call: callPlanAccept,
 	},
 	{
 		Name:        "answer",

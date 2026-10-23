@@ -39,8 +39,9 @@ const (
 	statusReportBytes = 500
 )
 
-// reportPointer is what a cut view of a foreman report ends with: the
-// command that shows the whole text (§9).
+// reportPointer is what a cut view of a long text ends with — a foreman
+// report, a review's findings: the command that shows the whole of it
+// (§9).
 func reportPointer(job int64) string {
 	return fmt.Sprintf("… (full: brigada history --job %d)", job)
 }
@@ -130,10 +131,10 @@ type StatusReport struct {
 }
 
 // StatusPlan is one plan the status lists (§6.1, §6.2, §10): every
-// live plan — active, or waiting for the user's approval — and the
-// newest finished ones, done or cancelled. The repo URL names whose
-// plan it is; the tasks are the plan's, each with the state and branch
-// the graph is in.
+// live plan — active, reviewing, parked for the foreman, or waiting for
+// the user's approval — and the newest finished ones, done or
+// cancelled. The repo URL names whose plan it is; the tasks are the
+// plan's, each with the state and branch the graph is in.
 type StatusPlan struct {
 	ID      int64  `json:"id"`
 	RepoURL string `json:"repo_url"`
@@ -141,10 +142,13 @@ type StatusPlan struct {
 	State   string `json:"state"`
 	// ReviewRound, ReviewVerdict and ReviewFindings are the plan review's
 	// state (§6.2): the round under way while the plan reviews, and
-	// the latest verdict and findings once a round has ended.
+	// the latest verdict and findings once a round has ended. The
+	// findings are the event's whole text; the short views that render
+	// them cut at their own bound and point to ReviewJob's history.
 	ReviewRound    int          `json:"review_round,omitempty"`
 	ReviewVerdict  string       `json:"review_verdict,omitempty"`
 	ReviewFindings string       `json:"review_findings,omitempty"`
+	ReviewJob      int64        `json:"review_job,omitempty"`
 	Tasks          []StatusTask `json:"tasks"`
 }
 
@@ -183,9 +187,10 @@ type StatusTask struct {
 }
 
 // NeedsYouItem is one entry of the "needs you" queue (§10): something a
-// person must look at — a task parked at needs_foreman or needs_user, or
-// a plan waiting for approval. Kind is "task" or "plan"; Reason is what
-// the parked task's latest event said, flattened to one short line —
+// person must look at — a task parked at needs_foreman or needs_user, a
+// plan waiting for approval, or a plan its review parked for the
+// foreman (§6.2). Kind is "task" or "plan"; Reason is what the parked
+// task's latest event said, flattened to one short line —
 // the worker's question for a needs_help, the review's findings for
 // review changes, the check's tail or the failure's words for the rest.
 type NeedsYouItem struct {
@@ -419,9 +424,9 @@ func statusRunningTx(tx *sql.Tx, project int64) ([]StatusJob, error) {
 }
 
 // statusPlansTx lists the plans the status shows (§6.1, §6.2, §10):
-// every live plan — active, reviewing (§6.2), or waiting for the
-// user's approval — and the newest statusFinishedKeep finished ones,
-// done or cancelled, by
+// every live plan — active, reviewing, parked for the foreman (§6.2),
+// or waiting for the user's approval — and the newest
+// statusFinishedKeep finished ones, done or cancelled, by
 // their updated_at: a finished plan's updated_at is the moment it
 // finished, nothing else writes one after. all lists every finished
 // plan instead; the second return is how many finished plans the list
@@ -438,7 +443,11 @@ func statusPlansTx(tx *sql.Tx, project int64, all bool) ([]StatusPlan, int, erro
 		WHERE `+scope+` AND p.state IN ('done', 'cancelled')`, args...).Scan(&finished); err != nil {
 		return nil, 0, fmt.Errorf("count the finished plans: %w", err)
 	}
-	finishedQuery := `SELECT p.id, pr.repo_url, p.title, p.state, p.review_round, p.review_verdict, p.review_findings
+	// The review's latest job is where the history holds the verdict
+	// whole (§9): the short views that cut the findings point at it.
+	planCols := `p.id, pr.repo_url, p.title, p.state, p.review_round, p.review_verdict, p.review_findings,
+		COALESCE((SELECT j.id FROM jobs j WHERE j.key = 'plan_review:' || p.id ORDER BY j.id DESC LIMIT 1), 0)`
+	finishedQuery := `SELECT ` + planCols + `
 		FROM plans p JOIN projects pr ON pr.id = p.project_id
 		WHERE ` + scope + ` AND p.state IN ('done', 'cancelled')
 		ORDER BY p.updated_at DESC, p.id DESC`
@@ -449,9 +458,9 @@ func statusPlansTx(tx *sql.Tx, project int64, all bool) ([]StatusPlan, int, erro
 	if err != nil {
 		return nil, 0, err
 	}
-	live, err := statusPlanRows(tx, `SELECT p.id, pr.repo_url, p.title, p.state, p.review_round, p.review_verdict, p.review_findings
+	live, err := statusPlanRows(tx, `SELECT `+planCols+`
 		FROM plans p JOIN projects pr ON pr.id = p.project_id
-		WHERE `+scope+` AND p.state IN ('active', 'reviewing', 'pending_approval') ORDER BY p.id`, args...)
+		WHERE `+scope+` AND p.state IN ('active', 'reviewing', 'needs_foreman', 'pending_approval') ORDER BY p.id`, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -476,7 +485,7 @@ func statusPlanRows(tx *sql.Tx, query string, args ...any) ([]StatusPlan, error)
 	plans := []StatusPlan{}
 	for rows.Next() {
 		var p StatusPlan
-		if err := rows.Scan(&p.ID, &p.RepoURL, &p.Title, &p.State, &p.ReviewRound, &p.ReviewVerdict, &p.ReviewFindings); err != nil {
+		if err := rows.Scan(&p.ID, &p.RepoURL, &p.Title, &p.State, &p.ReviewRound, &p.ReviewVerdict, &p.ReviewFindings, &p.ReviewJob); err != nil {
 			return nil, fmt.Errorf("list the status plans: %w", err)
 		}
 		plans = append(plans, p)
@@ -697,8 +706,8 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	}
 	items = append(items, localLands...)
 
-	pquery := `SELECT p.id, p.title, p.version, pr.repo_url FROM plans p JOIN projects pr ON pr.id = p.project_id
-		WHERE pr.archived_at IS NULL AND p.state = 'pending_approval'`
+	pquery := `SELECT p.id, p.title, p.version, pr.repo_url, p.state FROM plans p JOIN projects pr ON pr.id = p.project_id
+		WHERE pr.archived_at IS NULL AND p.state IN ('pending_approval', 'needs_foreman')`
 	pargs := []any{}
 	if project != 0 {
 		pquery += " AND p.project_id = ?"
@@ -707,25 +716,38 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	pquery += " ORDER BY p.id"
 	prows, err := tx.Query(pquery, pargs...)
 	if err != nil {
-		return nil, fmt.Errorf("list the plans awaiting approval: %w", err)
+		return nil, fmt.Errorf("list the plans awaiting a decision: %w", err)
 	}
 	defer prows.Close()
 	for prows.Next() {
 		var it NeedsYouItem
-		if err := prows.Scan(&it.ID, &it.Title, &it.Version, &it.RepoURL); err != nil {
-			return nil, fmt.Errorf("list the plans awaiting approval: %w", err)
+		if err := prows.Scan(&it.ID, &it.Title, &it.Version, &it.RepoURL, &it.State); err != nil {
+			return nil, fmt.Errorf("list the plans awaiting a decision: %w", err)
 		}
 		it.Kind = "plan"
-		it.State = "pending_approval"
 		items = append(items, it)
 	}
 	if err := prows.Err(); err != nil {
-		return nil, fmt.Errorf("list the plans awaiting approval: %w", err)
+		return nil, fmt.Errorf("list the plans awaiting a decision: %w", err)
 	}
 	prows.Close()
-	// Why each waits (§6.3): the plan_awaiting_approval event's words.
+	// Why each waits (§6.3, §6.2): the awaiting plan's
+	// plan_awaiting_approval event's words; the parked plan's findings,
+	// cut to the queue's one line and, when the cut landed, pointing at
+	// the history that holds them whole.
 	for i := range items {
 		if items[i].Kind != "plan" {
+			continue
+		}
+		if items[i].State == planNeedsForeman {
+			reason, job, err := parkedPlanReasonTx(tx, items[i].ID)
+			if err != nil {
+				return nil, err
+			}
+			items[i].Reason = oneLine(reason, needsYouReasonLimit)
+			if flat := strings.Join(strings.Fields(reason), " "); job > 0 && len(flat) > needsYouReasonLimit {
+				items[i].Reason += reportPointer(job)
+			}
 			continue
 		}
 		reason, err := awaitingReasonTx(tx, items[i].ID)
@@ -831,6 +853,36 @@ func awaitingReasonTx(tx *sql.Tx, plan int64) (string, error) {
 		}
 	}
 	return "", rows.Err()
+}
+
+// parkedPlanReasonTx reads why a plan its review parked waits (§6.2):
+// the findings of its latest plan_reviewed event, else the event's own
+// reason, with the job whose history holds the verdict whole.
+func parkedPlanReasonTx(tx *sql.Tx, plan int64) (reason string, job int64, err error) {
+	var payload string
+	var jobID sql.NullInt64
+	err = tx.QueryRow(`SELECT payload, job_id FROM events
+		WHERE kind = ? AND json_extract(payload, '$.plan') = ? ORDER BY id DESC LIMIT 1`,
+		evPlanReviewed, plan).Scan(&payload, &jobID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", 0, nil
+	}
+	if err != nil {
+		return "", 0, fmt.Errorf("read why plan %d is parked: %w", plan, err)
+	}
+	var p eventPayload
+	if json.Unmarshal([]byte(payload), &p) != nil {
+		return "", jobID.Int64, nil
+	}
+	job = jobID.Int64
+	if job == 0 {
+		job = p.Job
+	}
+	reason = p.Findings
+	if reason == "" {
+		reason = p.Reason
+	}
+	return reason, job, nil
 }
 
 // needsYouReason renders one parked task's reason from its latest

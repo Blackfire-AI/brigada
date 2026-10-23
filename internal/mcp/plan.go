@@ -112,8 +112,9 @@ func callPlanCreate(ctx context.Context, c *api.Client, args json.RawMessage) (s
 	if res.State == "reviewing" {
 		// The plan review (§6.2): one plan_review job, no work
 		// queued. The verdict starts the plan, holds it for the user,
-		// or comes back as changes the foreman answers with plan_amend.
-		text := fmt.Sprintf("plan %d %q: reviewing (round 1), %d tasks, no work job queued; a plan_review job reviews the plan before any work starts. The plan_reviewed event carries the verdict: on changes, amend the plan to answer the findings.",
+		// or comes back as changes the foreman answers with plan_amend
+		// (round 2) or plan_accept (as reviewed, with a reason).
+		text := fmt.Sprintf("plan %d %q: reviewing (round 1), %d tasks, no work job queued; a plan_review job reviews the plan before any work starts. The plan_reviewed event carries the verdict: on changes, the plan parks at needs_foreman — amend it to answer the findings, or accept it as reviewed with plan_accept and a reason.",
 			res.PlanID, a.Title, len(res.Tasks))
 		for i, t := range res.Tasks {
 			if suffix := taskTierEffort(a.Tasks[i].Tier, a.Tasks[i].Effort); suffix != "" {
@@ -314,6 +315,52 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 		b.WriteString("\nthe amendment closed the plan; its done report follows in your events")
 	}
 	return b.String(), nil
+}
+
+// planAcceptArgs is the plan_accept tool's arguments (§6.2, §12.2): the
+// parked plan and the required reason.
+type planAcceptArgs struct {
+	Plan   int64  `json:"plan"`
+	Reason string `json:"reason"`
+}
+
+// callPlanAccept runs the plan_accept tool (§6.2, §12.2): a plan its
+// review parked at needs_foreman is accepted as reviewed through
+// /v1/plans/{id}/accept, rendered as text naming the plan, the state it
+// reached and the work its acceptance started. The idempotency key is
+// minted from the arguments, as plan_amend's is.
+func callPlanAccept(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
+	var a planAcceptArgs
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &a); err != nil {
+			return "", fmt.Errorf("arguments: %w", err)
+		}
+	}
+	if a.Plan == 0 {
+		return "", fmt.Errorf("plan is required: the id of the parked plan")
+	}
+	if strings.TrimSpace(a.Reason) == "" {
+		return "", fmt.Errorf("reason is required: say why the plan is accepted as reviewed")
+	}
+	res, err := c.AcceptPlan(ctx, a.Plan, a.Reason, idemKey("plan_accept", a))
+	if err != nil {
+		return "", err
+	}
+	text := fmt.Sprintf("plan %d accepted as reviewed: state %s", res.PlanID, res.State)
+	for _, t := range res.Tasks {
+		label := fmt.Sprintf("task %d", t.TaskID)
+		if t.Name != "" {
+			label += " " + t.Name
+		}
+		text += fmt.Sprintf("\n%s: work job %d queued", label, t.JobID)
+	}
+	switch res.State {
+	case "pending_approval":
+		text += fmt.Sprintf("\nthe approval rules hold the plan for the user's yes. Tell the user: `brigada plan approve %d` starts it, `brigada plan reject %d` cancels it.", res.PlanID, res.PlanID)
+	case "done":
+		text += "\nthe acceptance closed the plan; its done report follows in your events"
+	}
+	return text, nil
 }
 
 // idemKey mints one logical call's idempotency key (§12.1): the tool's

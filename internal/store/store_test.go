@@ -983,6 +983,7 @@ func TestSchemaEditsMatchTheirMigrations(t *testing.T) {
 		36: "task_setup",
 		50: "land_job",
 		58: "plan_review",
+		59: "plan_needs_foreman",
 	}
 	migs, err := allMigrations()
 	if err != nil {
@@ -1036,6 +1037,18 @@ func TestLandJobMigration(t *testing.T) {
 	exec(t, f.db, `INSERT INTO land_holds (task_id, reason, created_at) VALUES (?, 'heavy', ?)`, f.task, ts)
 	if got := queryInt(t, f.db, "SELECT COUNT(*) FROM land_holds WHERE task_id = ?", f.task); got != 1 {
 		t.Errorf("land_holds rows = %d, want 1", got)
+	}
+}
+
+// TestPlanNeedsForemanMigration pins what 0059_plan_needs_foreman added
+// (§6.2): the plans state CHECK admits needs_foreman, where a plan-review
+// changes verdict with a round left parks for the foreman's answer.
+func TestPlanNeedsForemanMigration(t *testing.T) {
+	f := newFixture(t)
+	plan := insertID(t, f.db, `INSERT INTO plans (project_id, title, state, created_at, updated_at)
+		VALUES (?, 'the parked plan', 'needs_foreman', ?, ?)`, f.project, ts, ts)
+	if got := queryString(t, f.db, "SELECT state FROM plans WHERE id = ?", plan); got != "needs_foreman" {
+		t.Errorf("parked plan state = %q, want needs_foreman", got)
 	}
 }
 
