@@ -5,9 +5,9 @@
 plan: 49
 title: "Urgent: fix TestBP8aExit on Linux (waitGroupGone zombies), CI red on brigada/landed"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-10-23T19:25:20.158311Z
-updated: 2026-10-23T19:38:11.046852Z
+updated: 2026-10-23T19:51:55.862271Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -83,6 +83,16 @@ tasks:
     deps: ["lr-engine"]
     base: "lr-engine"
     continue: "lr-engine"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 186
+    name: "flaky-restart-tests"
+    title: "#75 de-flake the runner restart handoff tests under -race on Linux"
+    class: "implement"
+    deps: []
+    base: ""
     effort: medium
     state: pending
     branch: ""
