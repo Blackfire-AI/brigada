@@ -5,9 +5,9 @@
 plan: 48
 title: "v1.0.0-rc.3: #78 TempDir flake, #75 runner restart and env secrets, #71 infra retries"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-10-23T13:04:54.455142Z
-updated: 2026-10-23T13:53:24.507654Z
+updated: 2026-10-23T13:53:47.519576Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -67,8 +67,9 @@ tasks:
     name: "infra-class"
     title: "#71 class connection and DNS failures of a CLI as infra"
     class: "implement"
-    deps: ["drain"]
-    base: "drain"
+    deps: ["secrets"]
+    base: "secrets"
+    continue: "secrets"
     effort: medium
     state: pending
     branch: ""
@@ -98,6 +99,17 @@ tasks:
   - id: 177
     name: "model-rejected"
     title: "#82 codex pre-turn error is a warning; a rejected model gets its own error kind"
+    class: "implement"
+    deps: ["codex-warning"]
+    base: "codex-warning"
+    continue: "codex-warning"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 178
+    name: "codex-warning"
+    title: "#82 codex: an error item before turn.started is a warning, turn.failed names the failure"
     class: "implement"
     deps: ["infra-class"]
     base: "infra-class"
