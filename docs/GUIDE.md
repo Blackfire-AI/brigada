@@ -489,7 +489,7 @@ A landing never resolves a conflict and never picks a side. When the task's diff
 | `1` | Held: the first output line is the reason; `brigada land approve` releases it. |
 | `2`, any other exit, a spawn failure, a timeout | Not ready: wait and retry on the backoff. |
 
-The repository ships `scripts/land-ready.sh`, which checks the latest `gh run list` run on `brigada/landed`: `0` when it succeeded or the branch has no runs, `1` with the run's URL when it failed, `2` when it is queued or in progress or `gh` fails. Enable it with `brigada project set land_ready scripts/land-ready.sh`.
+The repository ships `scripts/land-ready.sh`, which checks the latest `gh run list` run on `brigada/landed`: `0` when it succeeded or the branch has no runs, `1` with the run's URL when it failed, `2` when it is queued or in progress or `gh` fails. It lands as a normal file, not executable: once it has landed, make it executable and commit that (`chmod +x scripts/land-ready.sh && git add --chmod=+x scripts/land-ready.sh`), then enable it with `brigada project set land_ready scripts/land-ready.sh`. Without the executable bit the command fails with exit 126 and the landing waits on the backoff.
 
 ### By hand: `brigada land`
 
