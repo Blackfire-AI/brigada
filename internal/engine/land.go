@@ -52,6 +52,23 @@ type pushRecord struct {
 	AfterLandErr string `json:"after_land_error,omitempty"`
 }
 
+// landHeldRecord is the payload a land job's held outcome carries
+// (issue #87): the land_ready command's own hold — exit 1 — with its
+// first output line as the reason.
+type landHeldRecord struct {
+	Outcome string `json:"outcome"` // 'held'
+	Line    string `json:"line"`    // the command's first output line
+}
+
+// landNotReadyRecord is the payload a land job's not-ready outcome
+// carries (issue #87): the command's last exit and a short reason — a
+// timeout, a spawn failure — empty when the exit alone speaks.
+type landNotReadyRecord struct {
+	Outcome string `json:"outcome"` // 'not ready'
+	Exit    int    `json:"exit"`    // the command's last exit
+	Reason  string `json:"reason,omitempty"`
+}
+
 // maybeLandTaskTx runs the land rule for one task (§7.1). A task that is
 // done, implement, approved and whose dependencies are all landed gets
 // its land job queued; a land-gate rule that trips holds it instead. The
@@ -538,6 +555,12 @@ func (r landRecord) validate() error {
 // nothing pushed, and the foreman restarts it with a note. Success keeps
 // the task done and marks it landed.
 func (e *Engine) landCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
+	switch c.Outcome {
+	case OutcomeLandHeld:
+		return e.landHeldTx(tx, job, c, now)
+	case OutcomeLandNotReady:
+		return e.landNotReadyTx(tx, job, c, now)
+	}
 	if c.Error != "" {
 		// A push rejected because the target moved, for a task whose
 		// landing is already recorded as pushed — by its trailer on the
@@ -766,6 +789,92 @@ func (e *Engine) landCheckFailedTx(tx *sql.Tx, job *jobRow, rec landRecord, now 
 	}, now)
 }
 
+// landHeldTx answers the land_ready gate's hold (issue #87): the command
+// refused the landing with its own words — exit 1 — so nothing is
+// squashed, pushed or recorded, and the task parks for the foreman with
+// the command's first output line as the reason.
+func (e *Engine) landHeldTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
+	reason := "land_ready held the landing"
+	var rec landHeldRecord
+	if json.Unmarshal([]byte(c.Result), &rec) == nil && rec.Line != "" {
+		reason += ": " + boundNote(rec.Line)
+	}
+	return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: reason}, now)
+}
+
+// landNotReadyTx answers the land_ready gate's not ready (issue #87):
+// the command could not say yes — exit 2, another exit, a spawn failure,
+// a timeout — so the landing did not happen and tries again. The job
+// completes without failure, no restart is spent, and a fresh land job
+// is queued under the not-before backoff (retryDelayFor, §3), its delay
+// grown by the run of consecutive not-ready answers. The next try time
+// and the last exit land on the task for the status to read.
+func (e *Engine) landNotReadyTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
+	var rec landNotReadyRecord
+	if err := json.Unmarshal([]byte(c.Result), &rec); err != nil {
+		return e.needsForemanTx(tx, job, evTaskLandFailed,
+			eventPayload{Reason: "unreadable not-ready record"}, now)
+	}
+	streak, err := landNotReadyStreakTx(tx, job.Key)
+	if err != nil {
+		return err
+	}
+	notBefore := now.Add(retryDelayFor(streak))
+	// The completing job freed the key earlier in this transaction, so
+	// the submit cannot sit behind a live job; an answer but a created
+	// job is an error, not a silent loss of the retry.
+	sr, err := e.submitTx(tx, SubmitParams{
+		Key:       job.Key,
+		ProjectID: job.ProjectID,
+		TaskID:    job.TaskID,
+		Kind:      KindLand,
+		Mode:      ModeFresh,
+		Prompt:    "", // no worker: nothing is composed (§1.4)
+		Labels:    []string{"git"},
+		NotBefore: notBefore,
+	}, now)
+	if err != nil {
+		return err
+	}
+	if sr.Answer != AnsCreated {
+		return fmt.Errorf("queue the land retry of task %d: submit %s answered %s", job.TaskID, job.Key, sr.Answer)
+	}
+	if _, err := tx.Exec(`UPDATE tasks SET land_retry_at = ?, land_ready_exit = ?, updated_at = ? WHERE id = ?`,
+		fmtTime(notBefore), rec.Exit, fmtTime(now), job.TaskID); err != nil {
+		return fmt.Errorf("record the land retry of task %d: %w", job.TaskID, err)
+	}
+	_, err = appendEventTx(tx, evTaskLandNotReady, job.ProjectID, job.TaskID, sr.JobID,
+		eventPayload{ExitCode: rec.Exit, Reason: boundNote(rec.Reason), Until: fmtTime(notBefore)}, now)
+	return err
+}
+
+// landNotReadyStreakTx measures a key's current run of consecutive
+// not-ready land jobs (issue #87), newest first — the completing job
+// included, for its result is already written — so the backoff grows
+// with each retry the gate refuses again. Zero when the key's latest
+// land job ended any other way.
+func landNotReadyStreakTx(tx *sql.Tx, key string) (int, error) {
+	rows, err := tx.Query(`SELECT COALESCE(result, '') FROM jobs
+		WHERE key = ? AND kind = 'land' ORDER BY id DESC`, key)
+	if err != nil {
+		return 0, fmt.Errorf("read the land jobs of key %s: %w", key, err)
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var stored string
+		if err := rows.Scan(&stored); err != nil {
+			return 0, fmt.Errorf("read the land jobs of key %s: %w", key, err)
+		}
+		var rec landNotReadyRecord
+		if json.Unmarshal([]byte(jobResultText(stored)), &rec) != nil || rec.Outcome != OutcomeLandNotReady {
+			break
+		}
+		n++
+	}
+	return n, rows.Err()
+}
+
 // LandMessage is the task data a land job's squash commit message is
 // built from (§7.1): the fields of internal/landing's Task the engine
 // knows without running git — what the hand-driven land reads through
@@ -865,6 +974,7 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 			LandCommit:     existing.Commit,
 			Push:           true,
 			AfterLand:      s.AfterLand,
+			LandReady:      s.LandReady,
 			Attempt:        j.Attempts + 1,
 		}, nil
 	}

@@ -479,6 +479,10 @@ A landing never resolves a conflict and never picks a side. When the task's diff
 
 `after_land`, when set, is a repo-relative command the runner runs after a successful land: after the push, or after the landing when the push gate is `never`. Its failure is reported — in the landing record and `brigada history` — and never undoes the landing.
 
+### `land_ready`
+
+`land_ready`, when set, is a repo-relative command path inside the repository — for example `.brigada/land-ready.sh` — that a land job runs in its landing clone before anything lands, and the push phase runs again before it pushes: the gate the landing must pass. It runs under the environment of a check, bounded by the check timeout. Exit `0` lands; exit `1` holds the landing with the command's first output line as the reason — nothing squashed, pushed or recorded; any other exit, a command that could not start, or a timeout is `not ready` — nothing lands, and the landing is requeued on a growing backoff (5 s, then 15 s, 45 s and 2 minutes, capped there), so a gate that says "not yet" (a release in flight, a CI window closed) is asked again rather than parking the task.
+
 ### By hand: `brigada land`
 
 `brigada land` is the hand-driven form of the same squash, sharing the code and the commit message with the job: for `gate_push = never`, for a branch you want on your own machine, and for landing a task by hand. It works in your own repository and stops before the push:

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
@@ -21,7 +22,9 @@ import (
 // A land job's execution (§7.1): no worker, no worktree — the runner's
 // own git, in a clone of the target branch under its state directory;
 // the task's setup and extra checkouts serve the check alone. In order:
-// fetch the target (cut from the default branch when the remote has
+// the land_ready gate, when the project has one, runs first and decides
+// whether anything lands at all (issue #87); then fetch the target
+// (cut from the default branch when the remote has
 // none yet) and the task's result
 // branch by exact name; squash the task's own diff (base...branch,
 // three-way) as one commit through internal/landing, with the message
@@ -62,6 +65,23 @@ type pushRecordJSON struct {
 	Commit       string `json:"commit"`
 	Pushed       string `json:"pushed"` // 'pushed'
 	AfterLandErr string `json:"after_land_error,omitempty"`
+}
+
+// landHeldJSON is the record a land job's held outcome carries
+// (issue #87): the land_ready command's own hold — exit 1 — with its
+// first output line as the reason.
+type landHeldJSON struct {
+	Outcome string `json:"outcome"` // 'held'
+	Line    string `json:"line"`    // the command's first output line
+}
+
+// landNotReadyJSON is the record a land job's not-ready outcome carries
+// (issue #87): the command's last exit and a short reason — a timeout,
+// a spawn failure — empty when the exit alone speaks.
+type landNotReadyJSON struct {
+	Outcome string `json:"outcome"` // 'not ready'
+	Exit    int    `json:"exit"`    // the command's last exit
+	Reason  string `json:"reason,omitempty"`
 }
 
 // isLandJob reports whether the grant is a land job (§7.1): no worker
@@ -111,6 +131,11 @@ func (r *jobRun) runLandSquashPhase(ctx context.Context) {
 	dir := landCloneDir(r.cfg.StateDir, grant)
 	if err := r.prepareLandClone(ctx, dir, grant.RepoURL); err != nil {
 		r.finishWithError(ctx, err.Error())
+		return
+	}
+	// The land_ready gate (issue #87) runs before anything lands; its
+	// answer completes the job here and the landing never starts.
+	if !r.runLandReady(ctx, dir) {
 		return
 	}
 	// The landing check sees what a work's check sees (§5.7, §5.8): the
@@ -467,6 +492,12 @@ func (r *jobRun) runLandPushPhase(ctx context.Context) {
 		r.finishWithError(ctx, fmt.Sprintf("check out the recorded commit %s: %v", grant.LandCommit, trimCmdError(out, err)))
 		return
 	}
+	// The land_ready gate (issue #87) guards the push as it guarded the
+	// landing: the released commit reaches the target only when the
+	// command says yes.
+	if !r.runLandReady(ctx, dir) {
+		return
+	}
 	// Two tries: the stack's pushes run at once, so a rejection may be a
 	// later landing's push that already carried this commit — the fresh
 	// fetch tells, and only a target that still lacks it is a failure.
@@ -498,6 +529,86 @@ func (r *jobRun) runLandPushPhase(ctx context.Context) {
 		Pushed:       "pushed",
 		AfterLandErr: r.runAfterLand(ctx, dir),
 	})
+}
+
+// runLandReady runs the land_ready gate (issue #87) in the landing
+// clone before anything lands or pushes: the repo-relative command the
+// grant carries, under the environment of a check (§5.8: credentials
+// and brigada's variables scrubbed) and the after_land timeout
+// convention (§6.3) — but as a gate, which after_land never is: it runs
+// after the landing and reports, this runs before and decides. Its
+// answers:
+//
+//   - exit 0: the landing proceeds;
+//   - exit 1: held — the command's own hold; the job completes with the
+//     outcome held and the command's first output line;
+//   - exit 2, any other exit, a spawn failure or a timeout: not ready —
+//     the job completes with the outcome not ready, the command's last
+//     exit and a short reason, and the engine requeues the landing on
+//     its not-before backoff.
+//
+// A grant that says SkipLandReady — the engine's mark that an approval
+// already released the gate's hold — runs nothing. false when the gate
+// completed the job; the caller lands nothing.
+func (r *jobRun) runLandReady(ctx context.Context, dir string) bool {
+	grant := r.grant
+	if grant.LandReady == "" || grant.SkipLandReady {
+		return true
+	}
+	timeout := r.cfg.CheckTimeout
+	if timeout <= 0 {
+		timeout = defaultCheckTimeout
+	}
+	res := runCheckIn(ctx, dir, grant.LandReady, timeout, r.cfg.commandEnv())
+	if !res.Failed() {
+		return true
+	}
+	if res.ExitCode == 1 && !res.TimedOut {
+		r.finishLandOutcome(ctx, outcomeLandHeld, landHeldJSON{
+			Outcome: outcomeLandHeld,
+			Line:    firstLineOf(res.Output),
+		})
+		return false
+	}
+	reason := ""
+	switch {
+	case res.TimedOut:
+		reason = "timed out after " + timeout.String()
+	case res.ExitCode < 0:
+		reason = "the command did not run"
+	}
+	r.finishLandOutcome(ctx, outcomeLandNotReady, landNotReadyJSON{
+		Outcome: outcomeLandNotReady,
+		Exit:    res.ExitCode,
+		Reason:  reason,
+	})
+	return false
+}
+
+// finishLandOutcome completes the land job with a land_ready gate
+// outcome (issue #87) and its record.
+func (r *jobRun) finishLandOutcome(ctx context.Context, outcome string, rec any) {
+	b, err := json.Marshal(rec)
+	if err != nil {
+		r.finishWithError(ctx, "encode the land_ready record: "+err.Error())
+		return
+	}
+	r.deliver(ctx, api.Completion{Result: string(b), Outcome: outcome})
+}
+
+// firstLineOf returns s's first line, trimmed and bounded, so a held
+// record carries the gate's own words without its whole output.
+func firstLineOf(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	line = strings.TrimSpace(strings.TrimRight(line, "\r"))
+	if len(line) > 400 {
+		cut := 400
+		for cut > 0 && !utf8.RuneStart(line[cut]) {
+			cut--
+		}
+		line = line[:cut]
+	}
+	return line
 }
 
 // runAfterLand runs the after_land command (§6.3) in the landing
