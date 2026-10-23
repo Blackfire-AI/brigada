@@ -7,7 +7,7 @@ title: "Issues #59 (land_target bases) and #66 (plan-review changes parks at nee
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-10-23T06:12:56.198882Z
-updated: 2026-10-23T09:14:18.909931Z
+updated: 2026-10-23T09:14:22.468083Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -29,7 +29,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    caps: {restart: 3}
+    caps: {restart: 8}
     state: needs_foreman
     branch: ""
     rounds: 0
