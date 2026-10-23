@@ -40,6 +40,6 @@ tasks:
     base: "operator"
     tier: light
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
