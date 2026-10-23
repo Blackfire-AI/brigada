@@ -145,6 +145,9 @@ const (
 	// EvError is the CLI reporting a failure whose kind sorts what the
 	// engine does with it (§8: quota, auth, the rest).
 	EvError EventKind = "error"
+	// EvWarning is a CLI notice that is not a failure: the run goes on,
+	// and the runner does not take it for the run's error.
+	EvWarning EventKind = "warning"
 )
 
 // ErrorKind sorts an error event: a quota limit hit (the account cools
@@ -255,6 +258,10 @@ type Event struct {
 	// LimitUntil is a limit error's reset time, RFC3339, when the CLI's
 	// text carried one machine-readably; empty when unknown (§4.4).
 	LimitUntil string
+	// Final marks an error event as the CLI's closing verdict on the run
+	// (codex's turn.failed): it names the failure over any earlier error
+	// event of the same stream.
+	Final bool
 }
 
 // IsProgress reports whether the event is progress in the sense of

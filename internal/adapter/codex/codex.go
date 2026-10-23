@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -36,6 +37,14 @@ type Adapter struct {
 	// through, appended verbatim after the adapter's own, before the
 	// prompt. Empty adds nothing.
 	ExtraArgs []string
+
+	// mu guards preTurn: whether the stream being read has opened its
+	// thread but not yet started a turn. The runner reads one job's
+	// lines in order, so the flag follows the stream: thread.started
+	// sets it, turn.started clears it. A stream that never showed
+	// thread.started has no known phase, and its errors stay errors.
+	mu      sync.Mutex
+	preTurn bool
 }
 
 var _ adapter.Adapter = (*Adapter)(nil)
@@ -345,7 +354,9 @@ func firstLine(command string) string {
 //	item.completed command_execution  → tool end (the same text)
 //	item.started mcp_tool_call       → tool start (server/tool)
 //	item.completed mcp_tool_call     → tool end, naming the error when the call failed
-//	error, turn.failed, error item    → an error event, sorted by its text
+//	error, error item                 → an error event, sorted by its text;
+//	                                    a warning before turn.started
+//	turn.failed                       → the final error event, sorted by its text
 //	turn.completed                    → usage counters (not progress)
 //	turn.started                      → ignored
 //
@@ -363,6 +374,12 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 		return phraseEvent(stderrPhrases, string(trimmed))
 	}
 	switch lj.Type {
+	case "thread.started":
+		a.setPreTurn(true)
+	case "turn.started":
+		a.setPreTurn(false)
+	}
+	switch lj.Type {
 	case "turn.completed":
 		u := adapter.ParseUsage(lj.Usage, "input_tokens", "output_tokens", "cached_input_tokens", "reasoning_output_tokens", "")
 		// Each turn.completed closes one model request; input_tokens
@@ -377,21 +394,45 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 		}
 		return adapter.Event{Kind: adapter.EvSession, SessionID: lj.ThreadID}, true
 	case "item.started", "item.completed":
-		return itemEvent(lj)
+		return a.itemEvent(lj)
 	case "error":
-		return errorEvent(lj.Message)
+		return a.streamError(lj.Message)
 	case "turn.failed":
-		if lj.Error == nil {
-			return errorEvent("")
+		msg := ""
+		if lj.Error != nil {
+			msg = lj.Error.Message
 		}
-		return errorEvent(lj.Error.Message)
+		ev, ok := errorEvent(msg)
+		ev.Final = true
+		return ev, ok
 	default:
 		return adapter.Event{}, false
 	}
 }
 
+func (a *Adapter) setPreTurn(v bool) {
+	a.mu.Lock()
+	a.preTurn = v
+	a.mu.Unlock()
+}
+
+// streamError is an error event or error item. Before turn.started the
+// CLI is still starting up and its error is a notice (a model-metadata
+// or reconnect warning): a warning event, never the run's error — a
+// turn.failed that follows names the failure. From turn.started on it is
+// the run's error.
+func (a *Adapter) streamError(text string) (adapter.Event, bool) {
+	a.mu.Lock()
+	pre := a.preTurn
+	a.mu.Unlock()
+	if pre {
+		return adapter.Event{Kind: adapter.EvWarning, Text: text}, true
+	}
+	return errorEvent(text)
+}
+
 // itemEvent reads one item event.
-func itemEvent(lj lineJSON) (adapter.Event, bool) {
+func (a *Adapter) itemEvent(lj lineJSON) (adapter.Event, bool) {
 	if lj.Item == nil {
 		return adapter.Event{}, false
 	}
@@ -431,7 +472,7 @@ func itemEvent(lj lineJSON) (adapter.Event, bool) {
 		if started {
 			return adapter.Event{}, false
 		}
-		return errorEvent(lj.Item.Message)
+		return a.streamError(lj.Item.Message)
 	default:
 		return adapter.Event{}, false
 	}
@@ -473,7 +514,10 @@ func (a *Adapter) ParseErrEvent(line []byte) (adapter.Event, bool) {
 	var lj lineJSON
 	if err := json.Unmarshal(trimmed, &lj); err == nil && lj.Type != "" {
 		switch lj.Type {
-		case "error", "turn.failed":
+		case "error":
+			// Stderr has no turn order of its own: its error stays one.
+			return errorEvent(lj.Message)
+		case "turn.failed":
 			return a.ParseEvent(trimmed)
 		}
 		return adapter.Event{}, false

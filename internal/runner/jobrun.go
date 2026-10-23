@@ -475,7 +475,7 @@ func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte, fromStderr bool) {
 				e := ev
 				r.stderrError = &e
 			}
-		} else if r.cliError == nil {
+		} else if r.cliError == nil || (ev.Final && !r.cliError.Final) {
 			e := ev
 			r.cliError = &e
 		}

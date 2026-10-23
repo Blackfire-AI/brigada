@@ -141,6 +141,8 @@ A review, a plan review included, is read-only in every harness: claude gets the
 
 The foreman's token never appears in a command line. Claude reads the prompt from stdin, and so does codex (`codex exec -`); codex receives the bridge's environment through its own process environment and forwards it to the bridge by name (`env_vars`). Kimi and opencode take the prompt as an argument, which other local users can read in the process list.
 
+A run's error is the CLI's own verdict. In codex's stream an `error` event or item before `turn.started` is a warning, a startup notice that does not fail the run; from `turn.started` on it is the run's error. `turn.failed` is the closing verdict and names the failure over any error that came before it.
+
 ### 5.3 The worker prompt
 
 A fixed worker template (versioned) plus the task spec verbatim, plus the answer or feedback for follow-up jobs. The template tells the worker to end with the result block (§5.4). A project may add its own instruction text, injected as verbatim data in its own delimiters after the template's contract and before the task spec (§5.9).

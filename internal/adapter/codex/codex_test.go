@@ -580,3 +580,43 @@ func TestAttachReadingCheckoutIsReadOnly(t *testing.T) {
 		t.Errorf("session cwd changed: %s", cmd.Dir)
 	}
 }
+
+// TestPreTurnErrorIsWarning: an error before turn.started is a notice,
+// never the run's error; turn.failed names the failure, and an error
+// after turn.started still counts.
+func TestPreTurnErrorIsWarning(t *testing.T) {
+	errorsOf := func(events []adapter.Event) (errs []adapter.Event) {
+		for _, ev := range events {
+			if ev.Kind == adapter.EvError {
+				errs = append(errs, ev)
+			}
+		}
+		return errs
+	}
+	t.Run("then success", func(t *testing.T) {
+		events := parseFixture(t, "preturn-error-ok.jsonl")
+		if errs := errorsOf(events); len(errs) != 0 {
+			t.Errorf("errors = %+v, want none", errs)
+		}
+		if !slices.ContainsFunc(events, func(e adapter.Event) bool { return e.Kind == adapter.EvWarning }) {
+			t.Error("no warning event")
+		}
+	})
+	t.Run("then turn.failed", func(t *testing.T) {
+		errs := errorsOf(parseFixture(t, "preturn-error-failed.jsonl"))
+		if len(errs) != 1 || !errs[0].Final || errs[0].ErrorKind != adapter.ErrLimit ||
+			!strings.Contains(errs[0].Text, "usage limit") {
+			t.Errorf("errors = %+v, want the one turn.failed limit error", errs)
+		}
+	})
+	t.Run("after turn.started", func(t *testing.T) {
+		a := &Adapter{}
+		for _, l := range []string{`{"type":"thread.started","thread_id":"t"}`, `{"type":"turn.started"}`} {
+			a.ParseEvent([]byte(l))
+		}
+		ev, ok := a.ParseEvent([]byte(`{"type":"item.completed","item":{"type":"error","message":"something odd"}}`))
+		if !ok || ev.Kind != adapter.EvError || ev.ErrorKind != adapter.ErrOther || ev.Final {
+			t.Errorf("error item after turn.started = %+v, %v; want a plain error", ev, ok)
+		}
+	})
+}
