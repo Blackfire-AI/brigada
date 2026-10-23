@@ -73,7 +73,7 @@ tasks:
     continue: "lr-runner"
     tier: heavy
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-184-r1"
     rounds: 1
   - id: 185
