@@ -1151,6 +1151,7 @@ Every key that `brigada project set` and `project show` know, with each default 
 | `approval_restarted` | `false` | yes |
 | `land_target` | the project's default branch | yes |
 | `after_land` | `none` | yes |
+| `land_ready` | `none` | yes |
 | `default_check` | `none` | yes |
 | `worker_tools` | `agent default` | yes |
 | `setup` | `none` | yes |

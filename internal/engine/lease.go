@@ -107,6 +107,9 @@ type LeaseGrant struct {
 	// push, or after the landing when gate_push is never (§6.3). Empty =
 	// none.
 	AfterLand string
+	// LandReady is the repo-relative command the runner runs before
+	// landing (issue #87). Empty = none.
+	LandReady string
 	// Branch is the branch the engine names a work or fix job to work
 	// on (§5.1): a work job makes it from the base ref, a fix round
 	// continues the task's current branch, and the runner builds and
