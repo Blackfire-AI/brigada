@@ -61,8 +61,8 @@ tasks:
     continue: "lr-setting"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-183"
     rounds: 0
   - id: 184
     name: "lr-engine"
