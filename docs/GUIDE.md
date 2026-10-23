@@ -433,7 +433,7 @@ Job ids are not task ids. `status` shows a running job as `task #N …`; find it
 
 Landing is brigada's. When a task is `done` and approved (an `approve` verdict on its last review) and every dependency of class `implement` has landed, the engine queues a **land job** for it. A runner with git for your repo — no worker, no model — squashes the task's own diff onto the target branch as one commit, reruns the project's default check on the result, and then pushes by the push gate. The commit message is built from the task's title, spec and the worker's summary, with `Brigada-Task`, `Brigada-Branch` and `Co-Authored-By` trailers. When the worker's result block carries a `commit_message`, written in the repo's own commit style (the one its AGENTS.md asks for and its git log shows), its subject and body become the message instead; the trailers stay brigada's.
 
-Landing is per task, not per plan: a stack lands in dependency order as its tasks finish, and the target moves with the plan. It happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker ([section 8](#8-agents-quota-and-health)). Where approved work lands is `land_target` ([section 6](#6-configuring-a-project)): the project's default branch, or a staging branch such as `brigada/landed`.
+Landing is per task, not per plan: a stack lands in dependency order as its tasks finish, and the target moves with the plan. It happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker ([section 8](#8-agents-quota-and-health)). Where approved work lands is `land_target` ([section 6](#6-configuring-a-project)): the project's default branch, or a staging branch such as `brigada/landed`. A new task's work starts from there too: its worktree is built on the land target, and the land job's diff is taken against that base.
 
 Whether you land by hand or the land job does it, the engine learns the task landed: whenever the runner refreshes the project's default branch — a headless foreman turn, or `brigada attach` — it scans the branch for `Brigada-Task: <id>` trailers and records each task it finds as landed with its commit. So `brigada status` and the foreman show `landed` for a task you merged by hand, and a plan whose tasks all landed says so in its done report. A task parked for a land conflict or a rejected push, or whose push waits for approval, that you then landed by hand returns to `done` and leaves the needs-you queue.
 
@@ -526,7 +526,7 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 | `gate_push` | `auto`, `ask` or `never` | `auto` | What follows a successful landing: `auto` pushes the target, `ask` waits for `brigada push approve`, `never` leaves the push to you and records the exact command. |
 | `approval_tiers` | list of `light`, `standard`, `heavy` | none | Tiers whose tasks wait at the land gate. |
 | `approval_restarted` | `true` or `false` | `false` | `true`: a task that spent a restart or a tier bump waits at the land gate. |
-| `land_target` | branch name | the project's default branch | Where approved work lands: the default branch, or a staging branch such as `brigada/landed`. |
+| `land_target` | branch name | the project's default branch | Where approved work lands: the default branch, or a staging branch such as `brigada/landed`. A new task's work builds on it too ([section 5](#5-finishing-the-land-job)). |
 | `after_land` | command | none | A repo-relative command the runner runs after a successful land; its failure is reported, never undone. |
 | `setup` | command | none | The environment step run before the worker and the check ([section 7](#7-plans-checks-and-reviews)). |
 | `setup_cache_key_files` | list of repo-relative files | none (no cache) | Files whose contents key the setup cache. |
@@ -609,6 +609,7 @@ You ask; the foreman turns the ask into a **plan**: a set of tasks, each with a 
 
 - A task with no dependencies is queued at once.
 - A task with dependencies waits (`pending`) until all of them are done. If one of them fails or is cancelled, the dependents keep waiting until the foreman re-points them to another task or drops the dependency.
+- A dependency may instead name, by id, a landed task of another plan of the project — one whose work is already on the land target, done and pushed there. It counts as done from the start; nothing waits on it. One that landed on another branch, or has not landed, is refused, and so is one belonging to another project.
 - The foreman can amend a live plan: add tasks, cancel tasks, re-point dependencies, change a waiting or parked task's tier and effort, or replace or append to a pending task's spec (`respec`).
 - A plan is `done` when no live work is left. That is not the same as everything succeeding: the plan's done report names the tasks that failed, that were cancelled without your approval, and that never ran, and what landed and what waits at a gate ([section 5](#5-finishing-the-land-job)).
 

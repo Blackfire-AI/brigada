@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -209,6 +210,62 @@ func depsLandedTx(tx *sql.Tx, taskID int64) (bool, error) {
 		}
 	}
 	return true, rows.Err()
+}
+
+// crossPlanDepTx checks a dependency ref that names no task of the plan
+// (§6.1): the id of a task of another plan counts when its work is on
+// the project's land target — the task done, with a landing pushed to
+// the branch land_target names, or the default branch when none is set —
+// because a task of this plan builds on that branch and so starts from
+// the dep's work. Such a dep is already satisfied: no edge row is
+// written for it, so the plan file and recovery stay within the plan
+// (§6.4). ok says it counts; why, with ok false, says why a ref that
+// names a task still does not; ok false with an empty why says the ref
+// is no id of any task, and the caller refuses it as it refuses a name.
+func crossPlanDepTx(tx *sql.Tx, project int64, ref string) (ok bool, why string, err error) {
+	id, perr := strconv.ParseInt(ref, 10, 64)
+	if perr != nil || id <= 0 {
+		return false, "", nil
+	}
+	var owner int64
+	var state string
+	var target, pushed sql.NullString
+	qerr := tx.QueryRow(`SELECT p.project_id, t.state, l.target_branch, l.pushed
+		FROM tasks t JOIN plans p ON p.id = t.plan_id
+		LEFT JOIN landings l ON l.task_id = t.id
+		WHERE t.id = ?`, id).Scan(&owner, &state, &target, &pushed)
+	if errors.Is(qerr, sql.ErrNoRows) {
+		return false, "", nil
+	}
+	if qerr != nil {
+		return false, "", fmt.Errorf("read task %d as a dependency: %w", id, qerr)
+	}
+	if owner != project {
+		return false, fmt.Sprintf("task %d belongs to another project", id), nil
+	}
+	if state != taskDone {
+		return false, fmt.Sprintf("task %d is %s, not landed", id, state), nil
+	}
+	if !pushed.Valid {
+		return false, fmt.Sprintf("task %d has not landed", id), nil
+	}
+	if pushed.String != "pushed" {
+		return false, fmt.Sprintf("task %d has not pushed to the target yet", id), nil
+	}
+	s, err := projectApprovalTx(tx, project)
+	if err != nil {
+		return false, "", err
+	}
+	want := s.LandTarget
+	if want == "" {
+		if err := tx.QueryRow("SELECT default_branch FROM projects WHERE id = ?", project).Scan(&want); err != nil {
+			return false, "", fmt.Errorf("read the default branch of project %d: %w", project, err)
+		}
+	}
+	if target.String != want {
+		return false, fmt.Sprintf("task %d landed on %s, not the project's land target %s", id, target.String, want), nil
+	}
+	return true, "", nil
 }
 
 // depPushReleasedTx reports whether a dependency's push was released

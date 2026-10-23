@@ -118,8 +118,11 @@ func (e *Engine) CreatePlan(ctx context.Context, project int64, title string, ta
 // continued dep is one of the task's own deps; the continued dep is the
 // task's base (§6.1): a base naming another dep is refused, and a base
 // none names defaults to the continued dep; the graph has no cycle, the
-// refusal naming the cycle's tasks.
-func validatePlanGraph(tasks []PlanTask) ([][]int, []int, []int, error) {
+// refusal naming the cycle's tasks. crossDep, when not nil, checks a dep
+// that names no task of the plan (§6.1): one it accepts — the id of a
+// landed task of another plan — is already satisfied, so no edge is
+// written for it and nothing waits on it.
+func validatePlanGraph(tasks []PlanTask, crossDep func(ref string) (bool, string, error)) ([][]int, []int, []int, error) {
 	byName := map[string]int{}
 	for i, t := range tasks {
 		if t.Name == "" {
@@ -145,10 +148,25 @@ func validatePlanGraph(tasks []PlanTask) ([][]int, []int, []int, error) {
 		seen := map[int]bool{}
 		for _, d := range t.Deps {
 			j, ok := byName[d]
-			switch {
-			case !ok:
+			if !ok {
+				// A dep naming no task of the plan may name a landed
+				// task of another plan (§6.1): already satisfied, so
+				// no edge waits on it.
+				if crossDep != nil {
+					sat, why, err := crossDep(d)
+					if err != nil {
+						return nil, nil, nil, err
+					}
+					if sat {
+						continue
+					}
+					if why != "" {
+						return nil, nil, nil, fmt.Errorf("%s depends on %q: %s", label(i), d, why)
+					}
+				}
 				return nil, nil, nil, fmt.Errorf("%s depends on %q, which names no task of this plan", label(i), d)
-			case j == i:
+			}
+			if j == i {
 				return nil, nil, nil, fmt.Errorf("%s depends on itself", label(i))
 			}
 			if !seen[j] {
@@ -251,15 +269,17 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 			return CreatePlanResult{}, fmt.Errorf("task %d: spec is required: the worker's task, verbatim (§1.4)", i+1)
 		}
 	}
-	deps, bases, continues, err := validatePlanGraph(tasks)
+	deps, bases, continues, err := validatePlanGraph(tasks, func(ref string) (bool, string, error) {
+		return crossPlanDepTx(tx, project, ref)
+	})
 	if err != nil {
 		return CreatePlanResult{}, err
 	}
-	// The worktree starts from the project's default branch: a plan's
-	// tasks work the project's repo (§6.1), and per-task repos are the
-	// plan phase's to add.
-	var baseRef string
-	err = tx.QueryRow("SELECT default_branch FROM projects WHERE id = ?", project).Scan(&baseRef)
+	// The worktree's fallback base is the project's default branch; the
+	// land target below is the branch the plan's tasks build on when one
+	// is set (§6.1, §6.3).
+	var defaultBranch string
+	err = tx.QueryRow("SELECT default_branch FROM projects WHERE id = ?", project).Scan(&defaultBranch)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return CreatePlanResult{}, fmt.Errorf("no such project %d", project)
@@ -277,6 +297,16 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 	settings, err := projectApprovalTx(tx, project)
 	if err != nil {
 		return CreatePlanResult{}, err
+	}
+	// The worktree starts from the project's land target — land_target
+	// when set (§6.3), else the default branch — the branch approved
+	// work lands on (§7.1): the runner materializes that branch (§5.1)
+	// and the land job's diff is taken against the same base. A task
+	// stacked on a dependency moves to that dependency's branch when
+	// its work is queued (resolveBaseTx below).
+	baseRef := defaultBranch
+	if t := settings.LandTarget; t != "" {
+		baseRef = t
 	}
 	reviewWanted := planReviewWanted(e.planReview(settings), tasks)
 	tasks = settings.withDefaultCheck(tasks)
