@@ -40,6 +40,6 @@ tasks:
     base: "operator"
     tier: light
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-167"
     rounds: 0
