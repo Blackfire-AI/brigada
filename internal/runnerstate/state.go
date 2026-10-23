@@ -232,6 +232,23 @@ func Running(dir string) (Record, bool, error) {
 	}
 	return Record{PID: pid}, true, nil
 }
+
+// StalePIDs returns the pids a previous owner left in dir: the one in
+// runner.lock and the one in runner.json. They are stale only while no
+// fresh runner has cleared them, so a starter reads them before its own
+// child can.
+func StalePIDs(dir string) []int {
+	var pids []int
+	if pid := readPID(filepath.Join(dir, "runner.lock")); pid > 0 {
+		pids = append(pids, pid)
+	}
+	var rec Record
+	if data, err := os.ReadFile(filepath.Join(dir, "runner.json")); err == nil && json.Unmarshal(data, &rec) == nil && rec.PID > 0 {
+		pids = append(pids, rec.PID)
+	}
+	return pids
+}
+
 func readPID(path string) int {
 	data, _ := os.ReadFile(path)
 	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
