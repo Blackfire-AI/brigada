@@ -114,9 +114,10 @@ tasks:
     deps: ["amend-during-review"]
     base: "amend-during-review"
     effort: medium
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
+    question: "Please paste the codex stream from issue #82, and say which design to use: (a) add a per-run parser to the adapter interface (e.g. optional adapter.Stateful with NewParser()) that the runner calls per job, touching internal/runner; or (b) make the runner's cliError prefer a later turn.failed over an earlier error event, with the codex adapter emitting pre-turn.started errors as a non-fatal kind."
   - id: 179
     name: "amend-during-review"
     title: "#84 plan_amend accepts additions and respecs while a plan review round runs"
