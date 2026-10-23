@@ -143,7 +143,11 @@ func (p *engineProc) waitExit(t *testing.T, within time.Duration) int {
 
 // killEngineAt kills whatever engine holds the lock of stateDir — the
 // detached engines a client started on demand, which are no one's
-// children here — and waits for the lock to come free.
+// children here — and waits for the lock to come free and for the
+// engine's process group to be gone. A detached engine leads its own
+// session, so its group holds the git push of its plan-file mirror: a
+// push still in flight when only the engine dies would go on writing
+// into the remote after the test returns, racing the TempDir removal.
 func killEngineAt(t *testing.T, stateDir string) {
 	t.Helper()
 	lock := lifecycle.PathsOf(stateDir).Lock
@@ -154,9 +158,16 @@ func killEngineAt(t *testing.T, stateDir string) {
 	if err := syscall.Kill(int(pid), syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("kill the engine pid %d: %v", pid, err)
 	}
+	// The group id is the engine's pid only while the engine leads one; a
+	// pid that leads no group answers ESRCH, and darwin answers EPERM for
+	// a group holding only zombies (see waitGroupGone).
+	if err := syscall.Kill(-int(pid), syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) && !errors.Is(err, syscall.EPERM) {
+		t.Fatalf("kill the engine's process group %d: %v", pid, err)
+	}
 	waitFor(t, "the killed engine's lock to come free", func() bool {
 		return lifecycle.EnginePid(lock) == 0
 	})
+	waitGroupGone(t, int(pid))
 }
 
 // killEngineOnCleanup detaches a killer for the engine that will hold
