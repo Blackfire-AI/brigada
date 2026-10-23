@@ -84,8 +84,8 @@ tasks:
     base: "lr-engine"
     continue: "lr-engine"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-185-r1"
     rounds: 0
   - id: 186
     name: "flaky-restart-tests"
