@@ -5,9 +5,9 @@
 plan: 49
 title: "Urgent: fix TestBP8aExit on Linux (waitGroupGone zombies), CI red on brigada/landed"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-10-23T19:25:20.158311Z
-updated: 2026-10-23T19:35:23.729505Z
+updated: 2026-10-23T19:36:02.186178Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -38,6 +38,51 @@ tasks:
     base: "fix-waitgroupgone"
     continue: "fix-waitgroupgone"
     tier: heavy
+    effort: medium
+    state: cancelled
+    branch: ""
+    rounds: 0
+  - id: 182
+    name: "lr-setting"
+    title: "#87 (1/4) land_ready project setting"
+    class: "implement"
+    deps: ["fix-waitgroupgone"]
+    base: "fix-waitgroupgone"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 183
+    name: "lr-runner"
+    title: "#87 (2/4) runner runs land_ready; three outcomes"
+    class: "implement"
+    deps: ["lr-setting"]
+    base: "lr-setting"
+    continue: "lr-setting"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 184
+    name: "lr-engine"
+    title: "#87 (3/4) land_ready hold, approve and status"
+    class: "implement"
+    deps: ["lr-runner"]
+    base: "lr-runner"
+    continue: "lr-runner"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 185
+    name: "lr-docs"
+    title: "#87 (4/4) land-ready.sh, docs, changelog"
+    class: "implement"
+    deps: ["lr-engine"]
+    base: "lr-engine"
+    continue: "lr-engine"
     effort: medium
     state: pending
     branch: ""
