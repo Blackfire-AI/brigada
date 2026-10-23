@@ -119,6 +119,17 @@ func TestStatusSectionsNamesAMissingForemanPair(t *testing.T) {
 	}
 }
 
+// TestStatusSectionsShowsAnInfraRetry: a job waiting out an infra
+// backoff reads as the retry with its wait and the failure's words.
+func TestStatusSectionsShowsAnInfraRetry(t *testing.T) {
+	nb := time.Now().Add(5 * time.Minute).UTC().Format(engine.TimeLayout)
+	st := Status{Retries: []engine.InfraRetry{{ID: 9, TaskID: 4, Kind: "work", NotBefore: nb, Reason: "could not resolve github.com"}}}
+	want := "waiting: task #4 work: retry in 5m: could not resolve github.com"
+	if got := StatusSections(st); !strings.Contains(got, want) {
+		t.Errorf("status sections = %q, want the line %q", got, want)
+	}
+}
+
 // TestStatusLineCountsMessagesForTheForeman: a waiting user message is
 // no idle state (§4.2 item 3): the bar counts it.
 func TestStatusLineCountsMessagesForTheForeman(t *testing.T) {

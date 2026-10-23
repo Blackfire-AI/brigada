@@ -121,6 +121,9 @@ type Status struct {
 	Cooling []engine.CoolingAgent `json:"cooling,omitempty"`
 	// Held lists the queued jobs a full cap layer holds (§8.1).
 	Held []engine.HeldJob `json:"held,omitempty"`
+	// Retries lists the queued jobs waiting out an infrastructure
+	// backoff (§5.1): rendered as `retry in 5m: <failure>`.
+	Retries []engine.InfraRetry `json:"retries,omitempty"`
 	// Instructions names the projects with project instructions (§5.9):
 	// source, version, size and digest; the text only when asked for.
 	Instructions []engine.StatusInstructions `json:"instructions,omitempty"`

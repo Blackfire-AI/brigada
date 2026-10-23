@@ -1239,4 +1239,8 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - There is no `brigada cache clear` command; the setup cache expires by age and count ([section 7](#an-environment-for-checks-and-reviews)).
 - Workers run in git worktrees, not containers, and checks run as you, in your account, though without your forge and cloud credentials (`GH_TOKEN`, `SSH_AUTH_SOCK` and the like). Do not point brigada at a repository you do not trust.
 
+### Infrastructure outages
+
+A failure of brigada's own plumbing, such as a host that cannot resolve `github.com` or a remote that cannot be fetched, is the infra class. It is not a failed task: the work or fix job is queued again on the same key and no restart, round or foreman wake is spent. The retry waits out a growing backoff of 1 minute, then 2, 5 and 15 minutes, staying at 15 minutes while the window lasts. A waiting retry shows in `brigada status` and in the QUEUE section of `brigada top` as `task #4 work: retry in 5m: could not resolve github.com`, with the time left and the failure's words. A run of infra failures that fills a 3-hour window from its first failure is spent: the next one parks the task for the foreman, and the needs-you entry names the outage. A foreman turn that fails this way waits out the same backoff and window.
+
 Back to the [README](../README.md).
