@@ -581,42 +581,50 @@ func TestAttachReadingCheckoutIsReadOnly(t *testing.T) {
 	}
 }
 
-// TestPreTurnErrorIsWarning: an error before turn.started is a notice,
-// never the run's error; turn.failed names the failure, and an error
-// after turn.started still counts.
-func TestPreTurnErrorIsWarning(t *testing.T) {
-	errorsOf := func(events []adapter.Event) (errs []adapter.Event) {
-		for _, ev := range events {
-			if ev.Kind == adapter.EvError {
-				errs = append(errs, ev)
-			}
+// TestNoticeAndFinalMarks: the adapter is stateless, so it marks what
+// the runner's per-job turn decides on — the error event and item carry
+// Notice, turn.failed carries Final, stderr JSON errors carry neither —
+// and StartsTurn spots turn.started.
+func TestNoticeAndFinalMarks(t *testing.T) {
+	a := &Adapter{}
+	for _, line := range []string{
+		`{"type":"error","message":"Reconnecting... 1/5"}`,
+		`{"type":"item.completed","item":{"type":"error","message":"Model metadata not found"}}`,
+	} {
+		ev, ok := a.ParseEvent([]byte(line))
+		if !ok || ev.Kind != adapter.EvError || !ev.Notice || ev.Final {
+			t.Errorf("ParseEvent(%s) = %+v, %v; want a Notice error", line, ev, ok)
 		}
-		return errs
 	}
-	t.Run("then success", func(t *testing.T) {
-		events := parseFixture(t, "preturn-error-ok.jsonl")
-		if errs := errorsOf(events); len(errs) != 0 {
-			t.Errorf("errors = %+v, want none", errs)
+	ev, ok := a.ParseEvent([]byte(`{"type":"turn.failed","error":{"message":"boom"}}`))
+	if !ok || ev.Kind != adapter.EvError || ev.Notice || !ev.Final || ev.Text != "boom" {
+		t.Errorf("turn.failed = %+v, %v; want a Final error", ev, ok)
+	}
+	ev, ok = a.ParseErrEvent([]byte(`{"type":"error","message":"boom"}`))
+	if !ok || ev.Notice {
+		t.Errorf("stderr error = %+v, %v; want no Notice", ev, ok)
+	}
+	if !a.StartsTurn([]byte(`{"type":"turn.started"}`)) || a.StartsTurn([]byte(`{"type":"turn.failed"}`)) || a.StartsTurn([]byte(`junk`)) {
+		t.Error("StartsTurn must be true for turn.started alone")
+	}
+}
+
+// TestPreTurnFixtures: the streams parse to the marks the runner needs.
+func TestPreTurnFixtures(t *testing.T) {
+	failed := parseFixture(t, "preturn-error-failed.jsonl")
+	var notices, finals int
+	for _, ev := range failed {
+		if ev.Kind == adapter.EvError && ev.Notice {
+			notices++
 		}
-		if !slices.ContainsFunc(events, func(e adapter.Event) bool { return e.Kind == adapter.EvWarning }) {
-			t.Error("no warning event")
+		if ev.Kind == adapter.EvError && ev.Final && ev.ErrorKind == adapter.ErrLimit && strings.Contains(ev.Text, "usage limit") {
+			finals++
 		}
-	})
-	t.Run("then turn.failed", func(t *testing.T) {
-		errs := errorsOf(parseFixture(t, "preturn-error-failed.jsonl"))
-		if len(errs) != 1 || !errs[0].Final || errs[0].ErrorKind != adapter.ErrLimit ||
-			!strings.Contains(errs[0].Text, "usage limit") {
-			t.Errorf("errors = %+v, want the one turn.failed limit error", errs)
-		}
-	})
-	t.Run("after turn.started", func(t *testing.T) {
-		a := &Adapter{}
-		for _, l := range []string{`{"type":"thread.started","thread_id":"t"}`, `{"type":"turn.started"}`} {
-			a.ParseEvent([]byte(l))
-		}
-		ev, ok := a.ParseEvent([]byte(`{"type":"item.completed","item":{"type":"error","message":"something odd"}}`))
-		if !ok || ev.Kind != adapter.EvError || ev.ErrorKind != adapter.ErrOther || ev.Final {
-			t.Errorf("error item after turn.started = %+v, %v; want a plain error", ev, ok)
-		}
-	})
+	}
+	if notices != 1 || finals != 1 {
+		t.Errorf("failed stream: %d notices, %d finals; want 1 and 1 (%+v)", notices, finals, failed)
+	}
+	if !slices.ContainsFunc(parseFixture(t, "preturn-error-ok.jsonl"), func(e adapter.Event) bool { return e.Notice }) {
+		t.Error("ok stream: no Notice error")
+	}
 }

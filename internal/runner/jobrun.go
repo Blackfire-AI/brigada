@@ -37,6 +37,10 @@ type jobRun struct {
 	toolOpenedAt time.Time
 	sessionID    string
 	cliError     *adapter.Event
+	// turnStarted is set when the stdout stream shows its turn.started
+	// (adapter.TurnMarker): errors the adapter marks Notice are warnings
+	// until then.
+	turnStarted bool
 	// stderrError is the first error the adapter sorted from stderr,
 	// kept apart from the stream's own cliError: stderr also carries
 	// the CLI's warnings, so finish weighs it against the exit, not
@@ -451,6 +455,9 @@ func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte, fromStderr bool) {
 	if len(r.transcript) > 2*r.uploadCap() {
 		r.transcript = compactTranscript(r.transcript, r.uploadCap())
 	}
+	if tm, isTM := ad.(adapter.TurnMarker); isTM && !fromStderr && !r.turnStarted && tm.StartsTurn(line) {
+		r.turnStarted = true
+	}
 	var ev adapter.Event
 	var ok bool
 	if fromStderr {
@@ -462,6 +469,10 @@ func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte, fromStderr bool) {
 		return
 	}
 	ev.Time = r.now()
+	if ev.Kind == adapter.EvError && ev.Notice && !fromStderr && !r.turnStarted {
+		// A startup notice, not the run's error (see Event.Notice).
+		ev.Kind = adapter.EvWarning
+	}
 	r.events = append(r.events, ev)
 	if ev.SessionID != "" {
 		r.sessionID = ev.SessionID

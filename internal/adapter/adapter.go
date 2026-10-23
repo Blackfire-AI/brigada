@@ -262,6 +262,20 @@ type Event struct {
 	// (codex's turn.failed): it names the failure over any earlier error
 	// event of the same stream.
 	Final bool
+	// Notice marks an error event that is only a warning while the
+	// turn has not started (codex's startup notices): the runner, which
+	// tracks each job's turn through TurnMarker, downgrades it to a
+	// warning until then.
+	Notice bool
+}
+
+// TurnMarker is the optional adapter interface for a CLI whose stream
+// opens the turn with a line of its own. The adapter itself is shared by
+// concurrent jobs and keeps no stream state; the runner asks it of each
+// stdout line and keeps the job's turn.
+type TurnMarker interface {
+	// StartsTurn reports whether the stdout line opens the turn.
+	StartsTurn(line []byte) bool
 }
 
 // IsProgress reports whether the event is progress in the sense of

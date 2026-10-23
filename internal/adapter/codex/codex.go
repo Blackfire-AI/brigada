@@ -17,7 +17,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -37,14 +36,6 @@ type Adapter struct {
 	// through, appended verbatim after the adapter's own, before the
 	// prompt. Empty adds nothing.
 	ExtraArgs []string
-
-	// mu guards preTurn: whether the stream being read has opened its
-	// thread but not yet started a turn. The runner reads one job's
-	// lines in order, so the flag follows the stream: thread.started
-	// sets it, turn.started clears it. A stream that never showed
-	// thread.started has no known phase, and its errors stay errors.
-	mu      sync.Mutex
-	preTurn bool
 }
 
 var _ adapter.Adapter = (*Adapter)(nil)
@@ -355,7 +346,7 @@ func firstLine(command string) string {
 //	item.started mcp_tool_call       → tool start (server/tool)
 //	item.completed mcp_tool_call     → tool end, naming the error when the call failed
 //	error, error item                 → an error event, sorted by its text;
-//	                                    a warning before turn.started
+//	                                    marked Notice: a warning until turn.started
 //	turn.failed                       → the final error event, sorted by its text
 //	turn.completed                    → usage counters (not progress)
 //	turn.started                      → ignored
@@ -372,12 +363,6 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 		// Not the CLI's JSON: noise, or a failure printed as prose.
 		// Prose sorts by the strict table only.
 		return phraseEvent(stderrPhrases, string(trimmed))
-	}
-	switch lj.Type {
-	case "thread.started":
-		a.setPreTurn(true)
-	case "turn.started":
-		a.setPreTurn(false)
 	}
 	switch lj.Type {
 	case "turn.completed":
@@ -410,25 +395,28 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 	}
 }
 
-func (a *Adapter) setPreTurn(v bool) {
-	a.mu.Lock()
-	a.preTurn = v
-	a.mu.Unlock()
+// StartsTurn implements adapter.TurnMarker: the line is the stream's
+// turn.started. The adapter keeps no stream state (one adapter serves
+// concurrent jobs); the runner tracks each job's turn and downgrades the
+// errors marked Notice that precede it.
+func (a *Adapter) StartsTurn(line []byte) bool {
+	var lj struct {
+		Type string `json:"type"`
+	}
+	return json.Unmarshal(bytes.TrimSpace(line), &lj) == nil && lj.Type == "turn.started"
 }
 
+var _ adapter.TurnMarker = (*Adapter)(nil)
+
 // streamError is an error event or error item. Before turn.started the
-// CLI is still starting up and its error is a notice (a model-metadata
-// or reconnect warning): a warning event, never the run's error — a
-// turn.failed that follows names the failure. From turn.started on it is
-// the run's error.
+// CLI is still starting up and its error is only a notice (a
+// model-metadata or reconnect warning): it carries Notice, so the runner
+// takes it for a warning, not the run's error, until the turn starts. A
+// turn.failed that follows names the failure.
 func (a *Adapter) streamError(text string) (adapter.Event, bool) {
-	a.mu.Lock()
-	pre := a.preTurn
-	a.mu.Unlock()
-	if pre {
-		return adapter.Event{Kind: adapter.EvWarning, Text: text}, true
-	}
-	return errorEvent(text)
+	ev, ok := errorEvent(text)
+	ev.Notice = true
+	return ev, ok
 }
 
 // itemEvent reads one item event.
