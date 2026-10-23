@@ -409,19 +409,21 @@ func wakeEventText(kind, payload string) string {
 // (§3, §10): the final message the turn ended saying, kept as the event
 // a notification and `brigada status` read — the turn spoke to the user,
 // and the log is where the user's side hears it (§9). The payload holds
-// the report alone, bounded like any event's words and never a prompt;
-// the turn's own prompt stays on its job. An empty final message is no
-// report. A turn that ended any other way — failed, stalled, cancelled
-// — reports nothing: its words were not an answer, and its events
-// return to pending instead (§4.2). The report is no judgment event, so
-// it never lands in the inbox and wakes nothing.
+// the report alone, bounded to its own about-4 KB (boundReport) so a
+// long report survives whole in the event; the short views cut it at
+// render time. It is never a prompt; the turn's own prompt stays on
+// its job. An empty final message is no report. A turn that ended any
+// other way — failed, stalled, cancelled — reports nothing: its words
+// were not an answer, and its events return to pending instead (§4.2).
+// The report is no judgment event, so it never lands in the inbox and
+// wakes nothing.
 func foremanReportTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	wr, ok := parseWorkerResult(c.Result)
 	if !ok || wr.Summary == "" {
 		return nil
 	}
 	_, err := appendEventTx(tx, evForemanReport, job.ProjectID, 0, job.ID,
-		eventPayload{Report: boundNote(wr.Summary)}, now)
+		eventPayload{Report: boundReport(wr.Summary)}, now)
 	return err
 }
 

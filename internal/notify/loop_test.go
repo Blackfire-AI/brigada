@@ -150,6 +150,33 @@ func TestLoopDeliversForemanReport(t *testing.T) {
 	}
 }
 
+// TestLoopReportEndsWithTheHistoryPointer covers the pointer a cut
+// report view ends with (§9, §10): the banner keeps the report's first
+// line and names the job whose history holds the whole text.
+func TestLoopReportEndsWithTheHistoryPointer(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t, ctx, filepath.Join(t.TempDir(), "store.db"))
+	defer st.Close()
+	seedProject(t, ctx, st)
+
+	// The report's event names the foreman job that wrote it, the way
+	// the engine's own writes do.
+	execSQL(t, st, `INSERT INTO jobs (id, project_id, kind, key, mode, prompt, status, created_at, updated_at)
+		VALUES (9, 1, 'foreman', 'report:9', 'fresh', '', 'done', '2026-10-13T00:00:00Z', '2026-10-13T00:00:00Z')`)
+	execSQL(t, st, `INSERT INTO events (kind, project_id, job_id, payload, created_at)
+		VALUES ('`+KindForemanReport+`', 1, 9, '{"report":"plan #1 done: merge task/1-1 then task/2-1\nnothing else needs you"}', '2026-10-13T00:00:00Z')`)
+
+	fake := &Fake{}
+	if err := NewLoop(st, fake, nil).Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	notes := fake.Notes()
+	want := "plan #1 done: merge task/1-1 then task/2-1… (full: brigada history --job 9)"
+	if len(notes) != 1 || notes[0] != (Note{foremanTitle, want}) {
+		t.Fatalf("notes %v, want the first line with the pointer to job 9", notes)
+	}
+}
+
 func TestLoopNoneNotifierStillAdvances(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t, ctx, filepath.Join(t.TempDir(), "store.db"))

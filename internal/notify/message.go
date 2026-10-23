@@ -41,6 +41,13 @@ const title = "brigada"
 // word and not another of the engine's alerts.
 const foremanTitle = "brigada foreman"
 
+// reportPointer is what a cut view of a foreman report ends with: the
+// command that shows the whole text (§9). Mirrored by the engine's
+// status view, so every short view points the same way.
+func reportPointer(jobID int64) string {
+	return fmt.Sprintf("… (full: brigada history --job %d)", jobID)
+}
+
 // bodyLimit bounds a notification's body line: a check's tail or a
 // review's findings can be long; a banner is not the place for them.
 const bodyLimit = 200
@@ -54,6 +61,9 @@ type Event struct {
 	TaskID    int64 // 0 when the event names no task
 	PlanID    int64 // 0 when the event names no plan
 	PlanTitle string
+	// JobID is the foreman job a foreman_report names (§9): the id the
+	// pointer to the whole text names. 0 when the event names no job.
+	JobID int64
 	// Project is the event's project repo URL — the log's own project
 	// reference first, else the plan its task or payload names. Empty
 	// when no referent survives; the webhook carries it as-is.
@@ -96,12 +106,22 @@ func Message(ev Event) (t, body string, ok bool) {
 		// A report is the foreman speaking, so its banner carries the
 		// foreman's name; the body is the report's first line — written
 		// for exactly this banner — never the lines after it (§3, §10).
-		// No parked gate: a report is not a task waiting.
+		// A cut body — more lines followed, or the line itself ran past
+		// the limit — ends with the pointer to the whole text in the
+		// history (§9), the line cut to leave the pointer room. No
+		// parked gate: a report is not a task waiting.
 		body := firstLine(ev.Reason)
+		flat := oneLine(body, bodyLimit)
+		if cut := flat != body || strings.TrimSpace(ev.Reason[len(body):]) != ""; cut && ev.JobID > 0 {
+			ptr := reportPointer(ev.JobID)
+			body = oneLine(body, bodyLimit-len(ptr)) + ptr
+		} else {
+			body = flat
+		}
 		if body == "" {
 			body = ev.Kind
 		}
-		return foremanTitle, oneLine(body, bodyLimit), true
+		return foremanTitle, body, true
 	case ev.Kind == KindForemanLimited:
 		// Reason is the reset time, empty when the error named none: the
 		// user chooses to wait, switch the foreman, or go on without it.

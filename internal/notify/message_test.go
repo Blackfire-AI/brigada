@@ -28,17 +28,24 @@ func TestMessage(t *testing.T) {
 			ok:    true,
 		},
 		{
-			name:  "foreman report reads its first line",
-			ev:    Event{Kind: KindForemanReport, Reason: "plan #2 done: merge task/6-1 then task/7-1\nthe rest waits for you"},
+			name:  "foreman report reads its first line, with the pointer to the rest",
+			ev:    Event{Kind: KindForemanReport, JobID: 12, Reason: "plan #2 done: merge task/6-1 then task/7-1\nthe rest waits for you"},
 			title: "brigada foreman",
-			body:  "plan #2 done: merge task/6-1 then task/7-1",
+			body:  "plan #2 done: merge task/6-1 then task/7-1… (full: brigada history --job 12)",
 			ok:    true,
 		},
 		{
-			name:  "foreman report needs no park",
-			ev:    Event{Kind: KindForemanReport, Reason: "all quiet; nothing needs you"},
+			name:  "a one-line report carries no pointer",
+			ev:    Event{Kind: KindForemanReport, JobID: 12, Reason: "all quiet; nothing needs you"},
 			title: "brigada foreman",
 			body:  "all quiet; nothing needs you",
+			ok:    true,
+		},
+		{
+			name:  "a report whose job is unknown carries no pointer",
+			ev:    Event{Kind: KindForemanReport, Reason: "plan #2 done: merge task/6-1 then task/7-1\nthe rest waits for you"},
+			title: "brigada foreman",
+			body:  "plan #2 done: merge task/6-1 then task/7-1",
 			ok:    true,
 		},
 		{
@@ -166,8 +173,9 @@ func TestMessageBodyLimit(t *testing.T) {
 	}
 
 	// A report's banner is bounded the same way: its first line alone,
-	// cut at the limit, the lines after it never joined in.
-	report := Event{Kind: KindForemanReport, Reason: strings.Repeat("y", bodyLimit*2) + "\nsecond line"}
+	// cut at the limit with room left for the pointer, the lines after
+	// it never joined in.
+	report := Event{Kind: KindForemanReport, JobID: 3, Reason: strings.Repeat("y", bodyLimit*2) + "\nsecond line"}
 	title, body, ok := Message(report)
 	if !ok {
 		t.Fatal("a long report must still notify")
@@ -180,6 +188,26 @@ func TestMessageBodyLimit(t *testing.T) {
 	}
 	if strings.Contains(body, "second line") {
 		t.Errorf("report body = %q, want the first line alone", body)
+	}
+	if !strings.HasSuffix(body, reportPointer(3)) {
+		t.Errorf("report body = %q, want it to end with the pointer to the history", body)
+	}
+
+	// A report of one long line is cut too, and the cut still ends
+	// with the pointer, never silently.
+	oneline := Event{Kind: KindForemanReport, JobID: 3, Reason: strings.Repeat("z", bodyLimit*2)}
+	_, body, ok = Message(oneline)
+	if !ok {
+		t.Fatal("a long one-line report must still notify")
+	}
+	if len(body) > bodyLimit {
+		t.Errorf("one-line report body is %d bytes, want it bounded at %d", len(body), bodyLimit)
+	}
+	if !strings.HasPrefix(body, "z") {
+		t.Errorf("one-line report body = %q, want the line's own bytes first", body)
+	}
+	if !strings.HasSuffix(body, reportPointer(3)) {
+		t.Errorf("one-line report body = %q, want it to end with the pointer to the history", body)
 	}
 }
 
@@ -216,8 +244,8 @@ func TestReasonOf(t *testing.T) {
 			`{"question":"how deep?\nnow","reason":"tail"}`, "how deep? now"},
 		{"findings win for review changes", KindReviewChanges,
 			`{"findings":"off by one","reason":"tail"}`, "off by one"},
-		{"a report keeps its first line", KindForemanReport,
-			`{"report":"plan #3 done: merge task/4-1\nthen task/5-1"}`, "plan #3 done: merge task/4-1"},
+		{"a report keeps its whole text for the mapper to cut", KindForemanReport,
+			`{"report":"plan #3 done: merge task/4-1\nthen task/5-1"}`, "plan #3 done: merge task/4-1\nthen task/5-1"},
 		{"a report that names nothing yields nothing", KindForemanReport, `{"reason":"tail"}`, ""},
 		{"the budget spent reads count and window end", KindForemanWakeBudgetSpent,
 			`{"count":20,"until":"2026-10-17T00:00:00.000000000Z"}`, "20/20 today, resets 2026-10-17T00:00:00.000000000Z"},
