@@ -477,6 +477,24 @@ func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, skipLandReady
 	}, now)
 }
 
+// queuePushJobTx creates the push phase's land job (§7.1): the land job
+// reused for a landing already recorded — the squash happened once, so
+// the grant carries the recorded commit and pushes, no new squash.
+// skipLandReady marks the job an approval of the push-phase land_ready
+// hold queues (issue #87): the runner runs no command and pushes.
+func (e *Engine) queuePushJobTx(tx *sql.Tx, project, taskID int64, skipLandReady bool, now time.Time) (SubmitResult, error) {
+	return e.submitTx(tx, SubmitParams{
+		Key:           fmt.Sprintf("task:%d", taskID),
+		ProjectID:     project,
+		TaskID:        taskID,
+		Kind:          KindLand,
+		Mode:          ModeFresh,
+		Prompt:        "", // no worker
+		Labels:        []string{"git"},
+		SkipLandReady: skipLandReady,
+	}, now)
+}
+
 // releaseDependentLandsTx re-runs the land rule for the tasks that depend
 // on a task that just landed (§7.1): a dependent that waited on this
 // dependency now has it landed, so its own landing may proceed.
@@ -513,7 +531,7 @@ func (e *Engine) releaseDependentLandsTx(tx *sql.Tx, landed int64, now time.Time
 func statusLandHoldsTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
 	query := `SELECT h.task_id, t.title, t.plan_id, t.state, h.reason
 		FROM land_holds h JOIN tasks t ON t.id = h.task_id JOIN plans p ON p.id = t.plan_id
-		WHERE h.state = 'held' AND NOT EXISTS (SELECT 1 FROM landings l WHERE l.task_id = h.task_id)
+		WHERE h.state = 'held' AND NOT EXISTS (SELECT 1 FROM landings l WHERE l.task_id = h.task_id AND l.pushed IN ('pushed', 'local'))
 			AND p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
 	args := []any{}
 	if project != 0 {
@@ -806,8 +824,10 @@ func (e *Engine) landCheckFailedTx(tx *sql.Tx, job *jobRow, rec landRecord, now 
 // squashed, pushed or recorded, and the task holds at the land gate with
 // the command's first output line as the reason, exactly as a land-gate
 // rule holds it (§6.3). The hold is the user's to release — `brigada
-// land approve`, which re-queues the landing with the gate skipped. The
-// hold has no job, so the plan closes here, named under "waits at a
+// land approve` — which re-queues the landing with the gate skipped. In
+// the push phase the landing is already recorded waiting; the same hold
+// then sits on the push, and the approval re-queues the push instead.
+// The hold has no job, so the plan closes here, named under "waits at a
 // gate" (§7.1).
 func (e *Engine) landHeldTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	reason := "held by rule land_ready"
@@ -994,6 +1014,7 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 			Push:           true,
 			AfterLand:      s.AfterLand,
 			LandReady:      s.LandReady,
+			SkipLandReady:  j.SkipLandReady,
 			Attempt:        j.Attempts + 1,
 		}, nil
 	}
@@ -1209,7 +1230,21 @@ func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve, stop
 			res.JobID = live.ID
 			return res, nil
 		}
-		sr, err := e.queueLandJobTx(tx, project, taskID, skip, now)
+		// A hold beside a landing record is the push phase's (issue #87):
+		// the gate refused the push of a commit already squashed and
+		// waiting, so the release re-queues the push — not a new squash —
+		// with the gate skipped. A hold with no landing is the squash
+		// phase's, and the landing is re-queued whole.
+		existing, err := landingTx(tx, taskID)
+		if err != nil {
+			return LandDecision{}, err
+		}
+		var sr SubmitResult
+		if existing != nil {
+			sr, err = e.queuePushJobTx(tx, project, taskID, skip, now)
+		} else {
+			sr, err = e.queueLandJobTx(tx, project, taskID, skip, now)
+		}
 		if err != nil {
 			return LandDecision{}, err
 		}
@@ -1373,7 +1408,8 @@ func statusPushWaitsTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
 	query := `SELECT l.task_id, t.title, t.plan_id, t.state, l.target_branch, l.commit_sha
 		FROM landings l JOIN tasks t ON t.id = l.task_id JOIN plans p ON p.id = t.plan_id
 		WHERE l.pushed = 'waiting' AND p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
-		  AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.task_id = l.task_id AND j.kind = 'land' AND j.status IN ('queued', 'leased', 'running'))`
+		  AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.task_id = l.task_id AND j.kind = 'land' AND j.status IN ('queued', 'leased', 'running'))
+		  AND NOT EXISTS (SELECT 1 FROM land_holds h WHERE h.task_id = l.task_id AND h.state = 'held')`
 	args := []any{}
 	if project != 0 {
 		query += " AND p.project_id = ?"

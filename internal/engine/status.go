@@ -629,9 +629,17 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, err
 // not done, not implement, already landed, or held by another rule —
 // whose needs-you entry names it — or still waiting on a dependency.
 func landReadyState(tx *sql.Tx, taskID int64, state, class, pushed, retryAt, holdReason string, exit sql.NullInt64, now time.Time) (string, error) {
-	if state != taskDone || class != classImplement || pushed != "" {
+	if state != taskDone || class != classImplement {
 		return "", nil
 	}
+	// A landed task (pushed or local) has no live hold: any row beside it
+	// is stale, and the needs-you queue leaves it out too.
+	if pushed == "pushed" || pushed == "local" {
+		return "", nil
+	}
+	// The hold comes before the landing record: the gate's exit 1 holds
+	// both the squash phase — no landing yet — and the push phase, whose
+	// landing already waits at the push gate.
 	if holdReason != "" {
 		if landReadyHold(holdReason) {
 			return holdReason, nil
@@ -642,6 +650,12 @@ func landReadyState(tx *sql.Tx, taskID int64, state, class, pushed, retryAt, hol
 		if t, err := parseTime(retryAt); err == nil && t.After(now) {
 			return fmt.Sprintf("waiting (retry at %s, last exit %d)", retryAt, exit.Int64), nil
 		}
+	}
+	// A landing waiting at the push gate with no land_ready hold or
+	// backoff has its own needs-you line ("waits to push"); nothing of
+	// the land_ready gate names it here.
+	if pushed == "waiting" {
+		return "", nil
 	}
 	// A land job queued or running is the landing in flight; without one
 	// the task still waits on a dependency and has no target state yet.

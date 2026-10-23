@@ -279,6 +279,78 @@ func TestStatusShowsTheLandReadyState(t *testing.T) {
 	}
 }
 
+// TestLandApproveThroughThePushHold: the gate's exit 1 in the push phase
+// — the landing already recorded waiting — holds the push, and
+// `land approve` releases it by re-queueing the push with the gate
+// skipped, so the recorded commit is pushed without re-running the
+// command.
+func TestLandApproveThroughThePushHold(t *testing.T) {
+	e := newEnv(t)
+	e.set(map[string]string{SettingGatePush: GateAsk, SettingLandReady: ".brigada/land-ready.sh"})
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+
+	// The landing passes the gate and waits at the push gate.
+	g := e.leaseGit(author)
+	if g == nil || g.Kind != KindLand {
+		t.Fatalf("the land job was not leased: %+v", g)
+	}
+	if ans := e.complete(g, Completion{Result: `{"target_branch":"main","commit":"abc123","check_passed":true,"pushed":"waiting"}`}); ans != AnsOK {
+		t.Fatalf("complete the land job: %s", ans)
+	}
+
+	// The push phase re-runs the gate; its exit 1 holds the push.
+	if _, err := e.eng.PushApprove(e.ctx, envRepo); err != nil {
+		t.Fatalf("PushApprove: %v", err)
+	}
+	pg := e.leaseGit(author)
+	if pg == nil || !pg.Push {
+		t.Fatalf("the push job was not leased: %+v", pg)
+	}
+	if ans := e.complete(pg, landHeld("the release window is closed")); ans != AnsOK {
+		t.Fatalf("complete the held push job: %s", ans)
+	}
+	if pushed := e.str("SELECT pushed FROM landings WHERE task_id = ?", e.task); pushed != "waiting" {
+		t.Errorf("landing pushed = %q, want waiting: the gate held the push", pushed)
+	}
+	if reason := e.str("SELECT reason FROM land_holds WHERE task_id = ? AND state = 'held'", e.task); reason != "held by rule land_ready: the release window is closed" {
+		t.Errorf("land hold reason = %q, want the land_ready rule and line", reason)
+	}
+	it, ok := e.needsYouTask(e.task)
+	if !ok || !strings.Contains(it.Reason, "held by rule land_ready") {
+		t.Fatalf("needs-you entry = %+v (%t), want the push-phase hold", it, ok)
+	}
+	if strings.Contains(it.Reason, "waits to push") {
+		t.Errorf("needs-you entry = %q, want the hold, not the plain push wait", it.Reason)
+	}
+	if got := e.statusTaskLandReady(e.task); got != "held by rule land_ready: the release window is closed" {
+		t.Errorf("land_ready state while the push holds = %q, want the hold", got)
+	}
+
+	// The approval releases the hold by re-queueing the push, skipped.
+	res, err := e.eng.LandApprove(e.ctx, e.project, e.task, false)
+	if err != nil {
+		t.Fatalf("LandApprove: %v", err)
+	}
+	if !res.Released || !res.Queued || res.JobID == 0 {
+		t.Fatalf("LandApprove = %+v, want released with its push job queued", res)
+	}
+	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ? AND state = 'held'", e.task); n != 0 {
+		t.Errorf("held land_holds rows after approve = %d, want none", n)
+	}
+	pg2 := e.leaseGit(author)
+	if pg2 == nil || !pg2.Push || !pg2.SkipLandReady {
+		t.Fatalf("the re-queued push grant = %+v, want a push with the gate skipped", pg2)
+	}
+	if ans := e.complete(pg2, Completion{Result: `{"target_branch":"main","commit":"abc123","pushed":"pushed"}`}); ans != AnsOK {
+		t.Fatalf("complete the released push: %s", ans)
+	}
+	if pushed := e.str("SELECT pushed FROM landings WHERE task_id = ?", e.task); pushed != "pushed" {
+		t.Errorf("landing pushed = %q, want pushed", pushed)
+	}
+}
+
 // TestLandOutcomeBelongsToALandJob: the gate's outcomes pass the
 // completion contract's validation, but only a land job may carry them;
 // a work job completing with one is a caller's mistake, refused without
