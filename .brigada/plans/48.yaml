@@ -60,9 +60,9 @@ tasks:
     base: "authnote"
     continue: "authnote"
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-173-r1"
-    rounds: 0
+    rounds: 1
   - id: 174
     name: "infra-class"
     title: "#71 class connection and DNS failures of a CLI as infra"
