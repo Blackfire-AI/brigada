@@ -133,6 +133,9 @@ func TestConfigEnvKeys(t *testing.T) {
 		"env.dsh.PWD = keychain:x",
 		"env.dsh.DSH_PERMISSION_MODE = keychain:x",
 		"env.dsh.BRIGADA_TOKEN = keychain:x",
+		"env.dsh.DSH_TELEMETRY_MODE = keychain:x",
+		"env.opencode.OPENCODE_PERMISSION = keychain:x",
+		"env.opencode.OPENCODE_DISABLE_PROJECT_CONFIG = keychain:x",
 	} {
 		_, err := LoadConfigFile(write(line))
 		if err == nil {

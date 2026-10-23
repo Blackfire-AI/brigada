@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -17,8 +18,6 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter/fake"
 	"github.com/Blackfire-AI/brigada/internal/adapter/kimi"
 	"github.com/Blackfire-AI/brigada/internal/adapter/opencode"
-	"slices"
-
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/runner"

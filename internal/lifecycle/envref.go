@@ -63,7 +63,7 @@ func setEnvRef(cfg *FileConfig, key, value string) error {
 // pins of the sandboxed harnesses.
 func envReserved(name string) bool {
 	switch name {
-	case "PWD", "DSH_PERMISSION_MODE", "DSH_TELEMETRY_MODE", "OPENCODE_PERMISSION":
+	case "PWD", "DSH_PERMISSION_MODE", "DSH_TELEMETRY_MODE", "OPENCODE_PERMISSION", "OPENCODE_DISABLE_PROJECT_CONFIG":
 		return true
 	}
 	return strings.HasPrefix(name, "BRIGADA_")
