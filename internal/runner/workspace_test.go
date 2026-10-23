@@ -689,12 +689,17 @@ func (e *testEnv) assertInfrastructureFailure(job int64) {
 // permission-based test would never see the build fail.
 func TestRunnerWorktreeFailureIsInfrastructure(t *testing.T) {
 	t.Parallel()
-	remote := newRemote(t)
+	// An empty remote: the missing base falls back to the default branch,
+	// which holds no commit either.
+	bare := filepath.Join(t.TempDir(), "empty.git")
+	git(t, t.TempDir(), "init", "--bare", "-b", "main", bare)
+	remote := "file://" + bare
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
 	// The mirror clones and fetches fine; the worktree add from a base
-	// ref nothing holds is what fails.
+	// ref nothing holds, with no default branch to fall back on, is what
+	// fails.
 	e.mustExec("UPDATE tasks SET base_ref = 'nope' WHERE id = ?", task)
 	markerDir(t)
 
