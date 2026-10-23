@@ -1,20 +1,18 @@
 package runner
 
 import (
-	"bytes"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
+	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
 // The stalled-worker tests (§5.6, BP8a-4b). The timings are real but
@@ -458,7 +456,7 @@ func TestRunnerStallKillsProcessTree(t *testing.T) {
 	// trapped the SIGTERM, died to the post-grace SIGKILL.
 	for name, pid := range map[string]int{"worker": parent, "child": child} {
 		deadline := time.Now().Add(10 * time.Second)
-		for !procGone(pid) {
+		for !testsupport.ProcGone(pid) {
 			if time.Now().After(deadline) {
 				t.Fatalf("the %s (pid %d) survived the group kill", name, pid)
 			}
@@ -507,7 +505,7 @@ func TestRunnerStallKillsChildAfterLeaderExits(t *testing.T) {
 	// The child — alive in the group after its leader was reaped — dies
 	// to the post-grace SIGKILL, not before it: it ignored the term.
 	deadline := time.Now().Add(10 * time.Second)
-	for !procGone(child) {
+	for !testsupport.ProcGone(child) {
 		if time.Now().After(deadline) {
 			t.Fatalf("the orphaned child (pid %d) survived the group kill", child)
 		}
@@ -528,27 +526,6 @@ func readMarkerPID(t *testing.T, markers, name string) int {
 		t.Fatalf("the %s marker holds no pid: %q", name, data)
 	}
 	return pid
-}
-
-// procGone reports whether pid is out of the process table — dead, or
-// a zombie awaiting its reaper, which is as gone as a killed tree's
-// members ever look from outside. Where /proc cannot be read, the kill
-// syscall alone decides; the run completing above is what proves the
-// tree died there, for a live straggler would hold the worker's pipe
-// and the run could not have finished.
-func procGone(pid int) bool {
-	if err := syscall.Kill(pid, 0); err != nil {
-		return true
-	}
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if err != nil {
-		return true
-	}
-	// The state letter follows the comm field in parentheses.
-	if i := bytes.LastIndexByte(data, ')'); i >= 0 && i+2 < len(data) {
-		return data[i+2] == 'Z'
-	}
-	return false
 }
 
 // manualClock is a Clock whose time moves only when the test advances

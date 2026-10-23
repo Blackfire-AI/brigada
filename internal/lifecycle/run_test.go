@@ -167,7 +167,7 @@ func killEngineAt(t *testing.T, stateDir string) {
 	waitFor(t, "the killed engine's lock to come free", func() bool {
 		return lifecycle.EnginePid(lock) == 0
 	})
-	waitGroupGone(t, int(pid))
+	waitGroupGone(t, int(pid), "engine")
 }
 
 // killEngineOnCleanup detaches a killer for the engine that will hold
