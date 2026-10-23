@@ -30,7 +30,7 @@ tasks:
     effort: medium
     review_tier: heavy
     caps: {restart: 8}
-    state: needs_foreman
+    state: running
     branch: ""
     rounds: 0
   - id: 160
