@@ -262,9 +262,9 @@ func (e *Engine) Complete(ctx context.Context, owner, jobID int64, leaseID strin
 		return "", fmt.Errorf("complete job %d: exactly one of result or error is required", jobID)
 	}
 	if c.Outcome != "" {
-		if !isStopOutcome(c.Outcome) {
-			return "", fmt.Errorf("complete job %d: outcome must be %s or %s when set, not %q",
-				jobID, OutcomeStalled, OutcomeTimeCap, c.Outcome)
+		if !isStopOutcome(c.Outcome) && !isLandOutcome(c.Outcome) {
+			return "", fmt.Errorf("complete job %d: outcome must be %s, %s, %s or %s when set, not %q",
+				jobID, OutcomeStalled, OutcomeTimeCap, OutcomeLandHeld, OutcomeLandNotReady, c.Outcome)
 		}
 		if c.Error != "" {
 			return "", fmt.Errorf("complete job %d: an outcome names a stopped run's result, not an error", jobID)
@@ -321,6 +321,12 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 		return AnsStaleEpoch, nil
 	}
 
+	// The land_ready gate's outcomes (issue #87) belong to a land job
+	// alone; anything else completing with one is a caller's mistake.
+	if isLandOutcome(c.Outcome) && job.Kind != KindLand {
+		return "", fmt.Errorf("complete job %d: the %s outcome belongs to a land job", jobID, c.Outcome)
+	}
+
 	// A land job that deleted the target's stale waiting ref says so on
 	// whatever completion it ends with, an error included.
 	if job.Kind == KindLand && c.StaleDropped != "" {
@@ -329,9 +335,11 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 		}
 	}
 
+	// A stop outcome ends the job as stalled (§5.6); the land_ready
+	// gate's outcomes (issue #87) end it done, for the gate answered.
 	status := statusDone
-	if c.Outcome != "" {
-		status = statusStalled // both stop outcomes end the job as stalled (§5.6)
+	if isStopOutcome(c.Outcome) {
+		status = statusStalled
 	}
 	result, err := json.Marshal(struct {
 		Result    string `json:"result"`

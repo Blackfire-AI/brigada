@@ -181,9 +181,10 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request, runnerID
 		return
 	}
 	if req.Outcome != "" &&
-		(req.Outcome != engine.OutcomeStalled && req.Outcome != engine.OutcomeTimeCap || req.Error != "") {
+		(req.Outcome != engine.OutcomeStalled && req.Outcome != engine.OutcomeTimeCap &&
+			req.Outcome != engine.OutcomeLandHeld && req.Outcome != engine.OutcomeLandNotReady || req.Error != "") {
 		writeError(w, http.StatusBadRequest, codeBadRequest,
-			"outcome must be stalled or time_cap, with a result")
+			"outcome must be stalled, time_cap, held or not ready, with a result")
 		return
 	}
 	c := engine.Completion{
@@ -465,6 +466,10 @@ type jobGrant struct {
 	// LandReady is the repo-relative command a land job runs before
 	// landing (issue #87). Empty = none.
 	LandReady string `json:"land_ready,omitempty"`
+	// SkipLandReady tells a land job to run no land_ready command
+	// (issue #87): the engine sets it when an approval already released
+	// the gate's hold.
+	SkipLandReady bool `json:"skip_land_ready,omitempty"`
 	// LandMessage is, for a land job's squash phase (§7.1), the task
 	// data the squash commit message is built from. nil for the push
 	// phase and every other kind.
@@ -524,6 +529,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		GatePush:        g.GatePush,
 		AfterLand:       g.AfterLand,
 		LandReady:       g.LandReady,
+		SkipLandReady:   g.SkipLandReady,
 		LandMessage:     g.LandMessage,
 		Attempt:         g.Attempt,
 		ResumeSessionID: g.ResumeSessionID,

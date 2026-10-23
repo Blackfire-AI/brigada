@@ -166,9 +166,10 @@ func (c *Client) Heartbeat(ctx context.Context, jobID int64, leaseID string, pro
 // exactly one of Result or Error, the check result when the runner ran
 // the task's check, and the harness session the run ended on. Outcome,
 // when set to stalled or time_cap, names a run the runner stopped
-// itself (§5.6) and rides with the Result. Artifacts are not the
-// completion's to name: the runner uploads them through
-// UploadArtifact (§9), which stores them itself.
+// itself (§5.6); held or not ready are the land_ready gate's answers
+// (issue #87), a land job's alone. Either way it rides with the Result.
+// Artifacts are not the completion's to name: the runner uploads them
+// through UploadArtifact (§9), which stores them itself.
 type Completion struct {
 	Usage       *adapter.Usage
 	WallSeconds *float64

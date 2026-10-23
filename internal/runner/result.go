@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
 // The worker result contract (§5.4): the worker's final message ends
@@ -21,6 +23,14 @@ const (
 	statusStalled   = "stalled"
 	statusTimeCap   = "time_cap"
 	reasonNoResult  = "no-result"
+)
+
+// The land_ready gate's outcome kinds (issue #87), mirroring the
+// engine's: a land job completes with one when the gate's command held
+// the landing (exit 1) or could not say yes (anything but 0).
+const (
+	outcomeLandHeld     = engine.OutcomeLandHeld
+	outcomeLandNotReady = engine.OutcomeLandNotReady
 )
 
 // WorkerResult is the parsed result block of a worker's final message
