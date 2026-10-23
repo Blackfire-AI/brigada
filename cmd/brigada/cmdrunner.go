@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -124,6 +125,12 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			parts[i] += " tools " + a.Tools
 		}
 	}
+	// The configured env.<harness>.<VAR> references resolve here, at every
+	// runner start, whoever started it; a refused reference stops the start.
+	harnessEnv, err := resolveRunnerHarnessEnv(rt.file.Env, adverts, nil)
+	if err != nil {
+		return fail(stderr, err)
+	}
 	// The startup line prints from inside Run, once the runner holds its
 	// state directory's lock: printed here, a second process on the same
 	// state directory would announce itself up and then be refused.
@@ -136,6 +143,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		Adapters:    ads,
 		Labels:      splitList(labels),
 		MaxParallel: maxParallel,
+		HarnessEnv:  harnessEnv,
 		Ready: func() {
 			fmt.Fprintf(stdout, "runner %s up on %s offering %s\n", name, rt.paths.Socket, strings.Join(parts, "; "))
 			for _, a := range adverts {
@@ -148,6 +156,18 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		return fail(stderr, fmt.Errorf("runner: %w", err))
 	}
 	return 0
+}
+
+// resolveRunnerHarnessEnv resolves the env references of the harnesses the
+// runner offers, each harness once however many models it offers.
+func resolveRunnerHarnessEnv(refs map[string]map[string]string, adverts []api.Agent, run lifecycle.SecretCommand) (map[string][]string, error) {
+	var offered []string
+	for _, a := range adverts {
+		if !slices.Contains(offered, a.Harness) {
+			offered = append(offered, a.Harness)
+		}
+	}
+	return lifecycle.ResolveHarnessEnv(refs, offered, run)
 }
 
 // agentSpec is one offered agent as the --agent flag describes it.
