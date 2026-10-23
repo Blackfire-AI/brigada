@@ -27,8 +27,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-180"
     rounds: 0
   - id: 181
     name: "land-ready"
