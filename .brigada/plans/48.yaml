@@ -5,9 +5,9 @@
 plan: 48
 title: "v1.0.0-rc.3: #78 TempDir flake, #75 runner restart and env secrets, #71 infra retries"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-10-23T13:04:54.455142Z
-updated: 2026-10-23T13:11:48.843541Z
+updated: 2026-10-23T13:12:01.844872Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -45,8 +45,9 @@ tasks:
     name: "authnote"
     title: "#75 name the environment variable and the runner start time in an auth needs-you line"
     class: "implement"
-    deps: []
-    base: ""
+    deps: ["drain"]
+    base: "drain"
+    continue: "drain"
     effort: medium
     state: pending
     branch: ""
@@ -55,8 +56,9 @@ tasks:
     name: "secrets"
     title: "#75 secrets by reference: env.<harness>.<VAR> = keychain:/file:"
     class: "implement"
-    deps: []
-    base: ""
+    deps: ["authnote"]
+    base: "authnote"
+    continue: "authnote"
     effort: medium
     state: pending
     branch: ""
@@ -65,8 +67,8 @@ tasks:
     name: "infra-class"
     title: "#71 class connection and DNS failures of a CLI as infra"
     class: "implement"
-    deps: []
-    base: ""
+    deps: ["drain"]
+    base: "drain"
     effort: medium
     state: pending
     branch: ""
