@@ -135,7 +135,7 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 | `--check CMD` | The default check; answers step 4 without a question. |
 | `--tools SCOPE` | Worker tools in runner `tools=` syntax (`Bash(npm test:*)+Bash(npx jest:*)`, or `none`). An explicit agent `tools=` wins; a `tools.claude/<model>` line in your config file is kept unless you pass `--tools`. |
 | `--accept-limited` | Go ahead with fewer than two review families. |
-| `--no-wiring` | In a repository, a no-op with a note: init writes no harness wiring and, on a rerun, strips nothing. In a parent folder, skip the coordinator's wiring. |
+| `--no-wiring` | In a repository, a no-op with a note: init writes no harness wiring and, on a rerun, strips nothing; it still writes `.brigada/operator.md`, which is not wiring. In a parent folder, skip the coordinator's wiring. |
 | `--all` | Only in a folder that is not a repository ([section 3](#3-several-repositories)). |
 | `--state-dir DIR`, `--config PATH` | As for every command. |
 
@@ -193,7 +193,8 @@ The repository cleanup covers brigada's wiring:
 - the `brigada` table in `.codex/config.toml`;
 - `.brigada/foreman.md`, and any `.claude/skills/brigada-foreman/SKILL.md` an older init left, each only when it has brigada's marker;
 - brigada's managed block in `AGENTS.md` and its import section in `CLAUDE.md`: only the bytes between the markers go, with the separators init itself added, so a file you have not edited comes back byte for byte and a file init created is deleted;
-- the `/.claude/settings.local.json` line in git's `info/exclude`.
+- the `/.claude/settings.local.json` line in git's `info/exclude`;
+- `.brigada/operator.md`, the operator guide init writes, when it still has init's generated header.
 
 Other settings and hooks stay. A JSON file is deleted only if removing brigada's entries leaves nothing else in it. `.brigada/project.yaml` stays unless you pass `--delete-config`.
 
@@ -254,6 +255,17 @@ The foreman is an agent in a brigada-owned session: while nobody is attached, th
 With `claude`, an attached foreman is the same session the headless turns resume, so the next turn continues your chat. The first attach shows Claude Code's own "trust this folder" prompt for the foreman's working directory under the state directory: choose yes. Your own user-scope MCP servers load as in any session of yours; a repository whose `.mcp.json` still carries an older init's `brigada` entry must have it removed — rerun `brigada init` or run `brigada remove` — or the two `brigada` servers clash.
 
 **The Codex limits.** An attached `codex` session is Codex's own terminal interface. It does not carry brigada's tools, and Codex does not expose the thread in a form brigada can write back, so a later headless turn may start a fresh Codex thread instead of continuing the chat.
+
+### The operator flow
+
+The usual way in is through your own coding agent, the operator. `brigada init` writes `.brigada/operator.md`, a generated, harness-agnostic guide (init overwrites it on a rerun, `--no-wiring` does not skip it, `brigada remove` deletes it). Open your agent in the repository, have it read that file, and tell it, for example, "ask brigada to fix #12". The operator:
+
+- **asks** with `brigada ask -`, pointing at issues and document sections, the build order, tier hints and cooling accounts;
+- **watches** with `brigada status`, `brigada history --task N`, `brigada history --job N` (a job's full verdict) and `brigada diff --stat N`; you watch the same work live in `brigada top`;
+- **follows a landing**: merges the staging pull request with a merge commit once CI is green, and restarts the engine and runner when their own code landed and nothing pending needs the old behaviour;
+- **recovers** after an outage by asking again: an ask re-wakes the foreman.
+
+The operator has no approval authority. Plan approval, land approval, push approval, `--and-stop-asking`, tags and releases, and rule changes stay yours; the operator tells you what waits. `brigada attach` below is the other way in: your own conversation with the foreman.
 
 ### What the foreman can and cannot do
 
