@@ -84,7 +84,7 @@ tasks:
     base: "lr-engine"
     continue: "lr-engine"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-185-r3"
     rounds: 2
   - id: 186
