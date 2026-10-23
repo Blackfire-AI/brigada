@@ -49,7 +49,7 @@ tasks:
     deps: ["fix-waitgroupgone"]
     base: "fix-waitgroupgone"
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-182"
     rounds: 1
   - id: 183
