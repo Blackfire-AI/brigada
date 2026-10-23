@@ -49,9 +49,9 @@ tasks:
     deps: ["fix-waitgroupgone"]
     base: "fix-waitgroupgone"
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-182"
-    rounds: 1
+    rounds: 2
   - id: 183
     name: "lr-runner"
     title: "#87 (2/4) runner runs land_ready; three outcomes"
