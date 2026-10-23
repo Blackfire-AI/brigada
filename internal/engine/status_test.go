@@ -363,13 +363,19 @@ func TestStatusNeedsYouReasonsFromTheLatestParkingEvent(t *testing.T) {
 // TestStatusShowsTheLatestForemanReport covers the report the status
 // carries (§3, §10): the scope's latest foreman_report — the moment it
 // landed and the first lines of its text, the rest left to the history
-// — or nothing at all when no turn has reported yet.
+// and named by the pointer a cut text ends with (§9) — or nothing at
+// all when no turn has reported yet.
 func TestStatusShowsTheLatestForemanReport(t *testing.T) {
 	e := newEnv(t)
-	addReport := func(project int64, text string) {
+	addReport := func(project, job int64, text string) {
 		e.t.Helper()
-		e.exec(`INSERT INTO events (kind, project_id, payload, created_at)
-			VALUES (?, ?, ?, ?)`, evForemanReport, project,
+		// The report's event names the foreman job that wrote it; the
+		// job row is what the id points at.
+		e.exec(`INSERT INTO jobs (id, project_id, kind, key, mode, prompt, status, created_at, updated_at)
+			VALUES (?, ?, 'foreman', ?, 'fresh', '', 'done', ?, ?)`,
+			job, project, fmt.Sprintf("report:%d", job), fmtTime(e.clock.Now()), fmtTime(e.clock.Now()))
+		e.exec(`INSERT INTO events (kind, project_id, job_id, payload, created_at)
+			VALUES (?, ?, ?, ?, ?)`, evForemanReport, project, job,
 			`{"report":`+mustJSON(text)+`}`, fmtTime(e.clock.Now()))
 	}
 
@@ -377,12 +383,12 @@ func TestStatusShowsTheLatestForemanReport(t *testing.T) {
 	// a scoped read shows the project's latest, an unscoped one the
 	// latest of them all, and a scope without reports shows none.
 	other := e.addProject("https://example.invalid/other.git")
-	addReport(other, "their first turn ended quietly")
+	addReport(other, 31, "their first turn ended quietly")
 	e.clock.Advance(time.Minute)
-	addReport(e.project, "woke for the question of task 4; answered it")
+	addReport(e.project, 32, "woke for the question of task 4; answered it")
 	e.clock.Advance(time.Minute)
 	at := fmtTime(e.clock.Now())
-	addReport(e.project, "plan 2 done: every task approved\nmerge task/6-1\nthen task/7-1\nthen task/8-1\nthen task/9-1\nthen task/10-1")
+	addReport(e.project, 33, "plan 2 done: every task approved\nmerge task/6-1\nthen task/7-1\nthen task/8-1\nthen task/9-1\nthen task/10-1")
 
 	st, err := e.eng.Status(e.ctx, e.project)
 	if err != nil {
@@ -395,17 +401,21 @@ func TestStatusShowsTheLatestForemanReport(t *testing.T) {
 		t.Errorf("the report = project %d at %s, want project %d at %s (the latest, not the first)",
 			st.Report.ProjectID, st.Report.CreatedAt, e.project, at)
 	}
-	// The first few lines show; the sixth stays for the history.
-	want := "plan 2 done: every task approved\nmerge task/6-1\nthen task/7-1\nthen task/8-1\nthen task/9-1"
+	if st.Report.JobID != 33 {
+		t.Errorf("the report's job = %d, want the turn's own 33", st.Report.JobID)
+	}
+	// The first few lines show; the sixth stays for the history, and
+	// the cut text ends with the pointer to it (§9).
+	want := "plan 2 done: every task approved\nmerge task/6-1\nthen task/7-1\nthen task/8-1\nthen task/9-1" + reportPointer(33)
 	if st.Report.Text != want {
-		t.Errorf("the report text = %q, want the first %d lines:\n%q", st.Report.Text, statusReportLines, want)
+		t.Errorf("the report text = %q, want the first %d lines with the pointer:\n%q", st.Report.Text, statusReportLines, want)
 	}
 
 	all, err := e.eng.Status(e.ctx, 0)
 	if err != nil {
 		t.Fatalf("status of every project: %v", err)
 	}
-	if all.Report == nil || all.Report.ProjectID != e.project || all.Report.CreatedAt != at {
+	if all.Report == nil || all.Report.ProjectID != e.project || all.Report.CreatedAt != at || all.Report.JobID != 33 {
 		t.Errorf("the unscoped report = %+v, want the latest of all the projects", all.Report)
 	}
 
@@ -413,8 +423,10 @@ func TestStatusShowsTheLatestForemanReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status of the other project: %v", err)
 	}
-	if theirs.Report == nil || theirs.Report.ProjectID != other || theirs.Report.Text != "their first turn ended quietly" {
-		t.Errorf("the other project's report = %+v, want its own", theirs.Report)
+	// A report the view did not cut carries no pointer.
+	if theirs.Report == nil || theirs.Report.ProjectID != other || theirs.Report.JobID != 31 ||
+		theirs.Report.Text != "their first turn ended quietly" {
+		t.Errorf("the other project's report = %+v, want its own, whole", theirs.Report)
 	}
 
 	// A project whose foreman never reported shows nothing, not an

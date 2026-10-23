@@ -27,9 +27,29 @@ const needsYouReasonLimit = 160
 const lastEventLimit = 120
 
 // statusReportLines is how much of the latest foreman report the status
-// shows (§10): the first few lines, the rest kept for the history. The
-// payload itself is already bounded where the engine wrote it.
+// shows (§10): the first few lines, the rest left to the history. The
+// event keeps the report whole within its own bound (boundReport); the
+// cut happens here, at render time, and a cut text ends with the
+// pointer to the history (§9).
 const statusReportLines = 5
+
+// reportPointer is what a cut view of a foreman report ends with: the
+// command that shows the whole text (§9).
+func reportPointer(job int64) string {
+	return fmt.Sprintf("… (full: brigada history --job %d)", job)
+}
+
+// statusReportView cuts the report to its first statusReportLines lines
+// and, when it cut and the report names its job, ends the text with the
+// pointer to the history (§9): the status block stays short while the
+// event keeps the whole report.
+func statusReportView(report string, job int64) string {
+	text := firstLines(report, statusReportLines)
+	if text != report && job > 0 {
+		return text + reportPointer(job)
+	}
+	return text
+}
 
 // StatusInfo is the engine's own state as the API shows it (§13): which
 // process is the engine, since when, the jobs by status — and the plans
@@ -90,11 +110,14 @@ type StatusJob struct {
 
 // StatusReport is the latest foreman report the status shows (§3, §10):
 // the final message of the project's last done foreman turn — when it
-// ended, and the first lines of what it said. The foreman token's scope
+// ended, and the first lines of what it said. A cut Text ends with
+// `… (full: brigada history --job N)`, the job whose history holds the
+// whole report (§9). The foreman token's scope
 // is one project; a caller reading every project sees the latest report
 // among them, the project named by its id.
 type StatusReport struct {
 	ProjectID int64  `json:"project_id"`
+	JobID     int64  `json:"job_id"`
 	CreatedAt string `json:"created_at"`
 	Text      string `json:"text"`
 }
@@ -545,7 +568,7 @@ func statusContinuesTx(tx *sql.Tx, task int64) (string, error) {
 // when the caller reads all — with the moment it landed and the first
 // lines of its text. A scope with no report yet reads nil.
 func statusReportTx(tx *sql.Tx, project int64) (*StatusReport, error) {
-	query := `SELECT COALESCE(project_id, 0), payload, created_at
+	query := `SELECT COALESCE(project_id, 0), COALESCE(job_id, 0), payload, created_at
 		FROM events WHERE project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) AND kind = ?`
 	args := []any{evForemanReport}
 	if project != 0 {
@@ -555,7 +578,7 @@ func statusReportTx(tx *sql.Tx, project int64) (*StatusReport, error) {
 	query += " ORDER BY id DESC LIMIT 1"
 	var rep StatusReport
 	var payload string
-	err := tx.QueryRow(query, args...).Scan(&rep.ProjectID, &payload, &rep.CreatedAt)
+	err := tx.QueryRow(query, args...).Scan(&rep.ProjectID, &rep.JobID, &payload, &rep.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -564,7 +587,7 @@ func statusReportTx(tx *sql.Tx, project int64) (*StatusReport, error) {
 	}
 	var p eventPayload
 	if json.Unmarshal([]byte(payload), &p) == nil {
-		rep.Text = firstLines(p.Report, statusReportLines)
+		rep.Text = statusReportView(p.Report, rep.JobID)
 	}
 	return &rep, nil
 }

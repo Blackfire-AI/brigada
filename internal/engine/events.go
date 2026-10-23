@@ -124,7 +124,7 @@ type eventPayload struct {
 	// the task_answered event's own reference to the exchange it made.
 	QuestionID int64  `json:"question_id,omitempty"`
 	Findings   string `json:"findings,omitempty"` // the review's findings (§7)
-	Report     string `json:"report,omitempty"`   // a foreman turn's final message, its report to the user (§3, §10)
+	Report     string `json:"report,omitempty"`   // a foreman turn's final message, its report to the user, bounded to about 4 KB (boundReport) (§3, §10)
 	Text       string `json:"text,omitempty"`     // a user message's words (§4.2 item 3)
 	Source     string `json:"source,omitempty"`   // the client token label a user message came from (§12.2)
 	Harness    string `json:"harness,omitempty"`
