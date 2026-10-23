@@ -65,6 +65,8 @@ The docs under `docs/` describe the system as it is on main, in the present tens
 
 Conventional Commits with a scope, as in `git log`: `fix(init): ...`, `feat(engine): ...`, `docs: ...`. The subject describes the change in the log's plain style.
 
+A commit that completes a GitHub issue ends its body with a line of its own, `Closes #N`, before any trailers; a commit that does part of one says `Refs #N` instead. `(issue #N)` in prose, as CHANGELOG.md writes it, closes nothing. The pull request that takes landed work to main repeats each `Closes #N` line, so merging it closes the issue.
+
 ## Review
 
 Every change is reviewed by a model from a different family than its author's: `brigada review --branch <branch>`.
