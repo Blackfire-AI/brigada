@@ -5,9 +5,9 @@
 plan: 48
 title: "v1.0.0-rc.3: #78 TempDir flake, #75 runner restart and env secrets, #71 infra retries"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-10-23T13:04:54.455142Z
-updated: 2026-10-23T13:53:47.519576Z
+updated: 2026-10-23T13:55:40.512352Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
