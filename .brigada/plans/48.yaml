@@ -60,7 +60,7 @@ tasks:
     base: "authnote"
     continue: "authnote"
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-173-r1"
     rounds: 1
   - id: 174
