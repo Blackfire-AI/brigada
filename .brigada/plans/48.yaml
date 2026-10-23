@@ -49,7 +49,7 @@ tasks:
     base: "drain"
     continue: "drain"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-172"
     rounds: 2
   - id: 173
@@ -60,7 +60,7 @@ tasks:
     base: "authnote"
     continue: "authnote"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 174
