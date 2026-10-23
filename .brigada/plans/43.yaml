@@ -30,8 +30,8 @@ tasks:
     effort: medium
     review_tier: heavy
     caps: {restart: 8}
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-159-r4"
     rounds: 0
   - id: 160
     name: "landtarget-runner"
