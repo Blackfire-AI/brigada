@@ -134,7 +134,7 @@ func (e *Engine) maybeLandTaskTx(tx *sql.Tx, taskID int64, now time.Time) error 
 	if reason != "" {
 		return e.holdLandTx(tx, project, taskID, reason, now)
 	}
-	_, err = e.queueLandJobTx(tx, project, taskID, now)
+	_, err = e.queueLandJobTx(tx, project, taskID, false, now)
 	return err
 }
 
@@ -438,15 +438,26 @@ func clearLandHoldTx(tx *sql.Tx, taskID int64) error {
 	return nil
 }
 
+// landReadyHold reports whether a land-gate hold's reason is the
+// land_ready rule's (issue #87): the gate's exit 1, whose release by an
+// approval re-queues the landing with the gate skipped rather than
+// re-running the command. Every other hold releases as it always has.
+func landReadyHold(reason string) bool {
+	return strings.HasPrefix(reason, "held by rule land_ready")
+}
+
 // queueLandJobTx creates the task's land job (§7.1): kind land on the
 // task's own key, so the one-live-job-per-key rule makes a repeat
 // coalesce. No worker and no agent; the git label is what a runner
 // offers to take it. A task that already has a landing record — its own
 // land job landed it, or a detected trailer did — has nothing left to
-// squash, so no land job is queued for it. The submit's answer says
-// what happened: created with the new job, pending behind the live job
-// that holds the key, or the zero answer for a task already landed.
-func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, now time.Time) (SubmitResult, error) {
+// squash, so no land job is queued for it. skipLandReady marks the job
+// an approval of the land_ready gate's hold queues (issue #87): its
+// grant carries the gate as skipped, so the runner lands without
+// re-running the command. The submit's answer says what happened:
+// created with the new job, pending behind the live job that holds the
+// key, or the zero answer for a task already landed.
+func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, skipLandReady bool, now time.Time) (SubmitResult, error) {
 	var have int
 	if err := tx.QueryRow("SELECT COUNT(*) FROM landings WHERE task_id = ?", taskID).Scan(&have); err != nil {
 		return SubmitResult{}, fmt.Errorf("read the landing of task %d: %w", taskID, err)
@@ -455,13 +466,14 @@ func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, now time.Time
 		return SubmitResult{}, nil
 	}
 	return e.submitTx(tx, SubmitParams{
-		Key:       fmt.Sprintf("task:%d", taskID),
-		ProjectID: project,
-		TaskID:    taskID,
-		Kind:      KindLand,
-		Mode:      ModeFresh,
-		Prompt:    "", // no worker: nothing is composed (§1.4)
-		Labels:    []string{"git"},
+		Key:           fmt.Sprintf("task:%d", taskID),
+		ProjectID:     project,
+		TaskID:        taskID,
+		Kind:          KindLand,
+		Mode:          ModeFresh,
+		Prompt:        "", // no worker: nothing is composed (§1.4)
+		Labels:        []string{"git"},
+		SkipLandReady: skipLandReady,
 	}, now)
 }
 
@@ -791,15 +803,22 @@ func (e *Engine) landCheckFailedTx(tx *sql.Tx, job *jobRow, rec landRecord, now 
 
 // landHeldTx answers the land_ready gate's hold (issue #87): the command
 // refused the landing with its own words — exit 1 — so nothing is
-// squashed, pushed or recorded, and the task parks for the foreman with
-// the command's first output line as the reason.
+// squashed, pushed or recorded, and the task holds at the land gate with
+// the command's first output line as the reason, exactly as a land-gate
+// rule holds it (§6.3). The hold is the user's to release — `brigada
+// land approve`, which re-queues the landing with the gate skipped. The
+// hold has no job, so the plan closes here, named under "waits at a
+// gate" (§7.1).
 func (e *Engine) landHeldTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
-	reason := "land_ready held the landing"
+	reason := "held by rule land_ready"
 	var rec landHeldRecord
 	if json.Unmarshal([]byte(c.Result), &rec) == nil && rec.Line != "" {
 		reason += ": " + boundNote(rec.Line)
 	}
-	return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: reason}, now)
+	if err := e.holdLandTx(tx, job.ProjectID, job.TaskID, reason, now); err != nil {
+		return err
+	}
+	return e.finishLandPlanTx(tx, job, now)
 }
 
 // landNotReadyTx answers the land_ready gate's not ready (issue #87):
@@ -1039,6 +1058,7 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		GatePush:       gatePush,
 		AfterLand:      s.AfterLand,
 		LandReady:      s.LandReady,
+		SkipLandReady:  j.SkipLandReady,
 		Attempt:        j.Attempts + 1,
 	}, nil
 }
@@ -1147,6 +1167,10 @@ func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve, stop
 	if err != nil {
 		return LandDecision{}, err
 	}
+	// The land_ready gate's hold (issue #87) releases with the gate
+	// skipped: the user's yes replaces the command, which already spoke,
+	// so the re-queued landing runs no command and lands.
+	skip := landReadyHold(reason)
 	if approve {
 		var changed []string
 		if stopAsking {
@@ -1185,7 +1209,7 @@ func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve, stop
 			res.JobID = live.ID
 			return res, nil
 		}
-		sr, err := e.queueLandJobTx(tx, project, taskID, now)
+		sr, err := e.queueLandJobTx(tx, project, taskID, skip, now)
 		if err != nil {
 			return LandDecision{}, err
 		}

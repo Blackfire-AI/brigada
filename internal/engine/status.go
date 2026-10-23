@@ -202,6 +202,14 @@ type StatusTask struct {
 	// at the push gate (§7.1): the land job squashed it, or a Brigada-Task
 	// trailer on the default branch was detected and recorded.
 	Landed bool `json:"landed,omitempty"`
+	// LandReady is the land_ready gate's target state for a done task
+	// (issue #87): "ready" when its land job is queued or running,
+	// "held by rule land_ready: <line>" when the gate's exit 1 held the
+	// landing, and "waiting (retry at <time>, last exit <n>)" when the
+	// gate answered not ready and the landing is requeued on the backoff.
+	// Empty when the task is not done, not implement, already landed, or
+	// held by another rule.
+	LandReady string `json:"land_ready,omitempty"`
 	// WaitingOn names the unfinished dependencies of a task that waits
 	// on them (§6.1): each by its plan name, or "#id" when unnamed.
 	WaitingOn []string `json:"waiting_on,omitempty"`
@@ -325,7 +333,7 @@ func (e *Engine) status(ctx context.Context, project int64, withText, all bool) 
 		if info.Slots, err = statusSlotsTx(tx, project, now); err != nil {
 			return err
 		}
-		if info.Plans, info.HiddenFinishedPlans, err = statusPlansTx(tx, project, all); err != nil {
+		if info.Plans, info.HiddenFinishedPlans, err = statusPlansTx(tx, project, all, now); err != nil {
 			return err
 		}
 		if info.Report, err = statusReportTx(tx, project); err != nil {
@@ -497,7 +505,7 @@ func statusRunningTx(tx *sql.Tx, project int64) ([]StatusJob, error) {
 // finished, nothing else writes one after. all lists every finished
 // plan instead; the second return is how many finished plans the list
 // left out, the default view's one summary line.
-func statusPlansTx(tx *sql.Tx, project int64, all bool) ([]StatusPlan, int, error) {
+func statusPlansTx(tx *sql.Tx, project int64, all bool, now time.Time) ([]StatusPlan, int, error) {
 	scope := "pr.archived_at IS NULL"
 	args := []any{}
 	if project != 0 {
@@ -534,7 +542,7 @@ func statusPlansTx(tx *sql.Tx, project int64, all bool) ([]StatusPlan, int, erro
 	plans := append(fin, live...)
 	sort.Slice(plans, func(i, j int) bool { return plans[i].ID < plans[j].ID })
 	for i := range plans {
-		if plans[i].Tasks, err = statusPlanTasksTx(tx, plans[i].ID); err != nil {
+		if plans[i].Tasks, err = statusPlanTasksTx(tx, plans[i].ID, now); err != nil {
 			return nil, 0, err
 		}
 	}
@@ -566,9 +574,11 @@ func statusPlanRows(tx *sql.Tx, query string, args ...any) ([]StatusPlan, error)
 }
 
 // statusPlanTasksTx reads one status plan's tasks, in id order.
-func statusPlanTasksTx(tx *sql.Tx, plan int64) ([]StatusTask, error) {
-	rows, err := tx.Query(`SELECT t.id, t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, '')
-		FROM tasks t LEFT JOIN landings l ON l.task_id = t.id
+func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, error) {
+	rows, err := tx.Query(`SELECT t.id, t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, '')
+		FROM tasks t
+		LEFT JOIN landings l ON l.task_id = t.id
+		LEFT JOIN land_holds h ON h.task_id = t.id AND h.state = 'held'
 		WHERE t.plan_id = ? ORDER BY t.id`, plan)
 	if err != nil {
 		return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
@@ -577,8 +587,9 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64) ([]StatusTask, error) {
 	tasks := []StatusTask{}
 	for rows.Next() {
 		var t StatusTask
-		var capsJSON, pushed string
-		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed); err != nil {
+		var capsJSON, pushed, retryAt, holdReason string
+		var exit sql.NullInt64
+		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &retryAt, &exit, &holdReason); err != nil {
 			return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
 		}
 		t.Caps = parseTaskCaps(capsJSON)
@@ -586,6 +597,10 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64) ([]StatusTask, error) {
 		// landed (§7.1); every other landing record — pushed or local, by
 		// the land job or a detected trailer — marks the task landed.
 		t.Landed = pushed != "" && pushed != "waiting"
+		t.LandReady, err = landReadyState(tx, t.ID, t.State, t.Class, pushed, retryAt, holdReason, exit, now)
+		if err != nil {
+			return nil, err
+		}
 		tasks = append(tasks, t)
 	}
 	if err := rows.Err(); err != nil {
@@ -603,6 +618,41 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64) ([]StatusTask, error) {
 		}
 	}
 	return tasks, nil
+}
+
+// landReadyState words the land_ready gate's target state for one done
+// implement task (issue #87): "ready" when its land job is queued or
+// running, "held by rule land_ready: <line>" when the gate's exit 1 held
+// the landing (the hold's stored reason), and "waiting (retry at <time>,
+// last exit <n>)" when the gate answered not ready and the requeued
+// landing still waits out its not-before backoff. "" when the task is
+// not done, not implement, already landed, or held by another rule —
+// whose needs-you entry names it — or still waiting on a dependency.
+func landReadyState(tx *sql.Tx, taskID int64, state, class, pushed, retryAt, holdReason string, exit sql.NullInt64, now time.Time) (string, error) {
+	if state != taskDone || class != classImplement || pushed != "" {
+		return "", nil
+	}
+	if holdReason != "" {
+		if landReadyHold(holdReason) {
+			return holdReason, nil
+		}
+		return "", nil
+	}
+	if exit.Valid && retryAt != "" {
+		if t, err := parseTime(retryAt); err == nil && t.After(now) {
+			return fmt.Sprintf("waiting (retry at %s, last exit %d)", retryAt, exit.Int64), nil
+		}
+	}
+	// A land job queued or running is the landing in flight; without one
+	// the task still waits on a dependency and has no target state yet.
+	live, err := liveLandJobTx(tx, taskID)
+	if err != nil {
+		return "", err
+	}
+	if live {
+		return "ready", nil
+	}
+	return "", nil
 }
 
 // statusWaitingOnTx names the dependencies of a task that are not done
@@ -824,7 +874,7 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 			return nil, err
 		}
 		items[i].Reason = oneLine(reason, needsYouReasonLimit)
-		if items[i].Tasks, err = statusPlanTasksTx(tx, items[i].ID); err != nil {
+		if items[i].Tasks, err = statusPlanTasksTx(tx, items[i].ID, now); err != nil {
 			return nil, err
 		}
 	}

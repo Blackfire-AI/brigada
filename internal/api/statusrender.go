@@ -106,6 +106,9 @@ func StatusSections(st Status) string {
 				if t.Landed {
 					line += " landed"
 				}
+				if t.LandReady != "" {
+					line += " " + t.LandReady
+				}
 				if len(t.WaitingOn) > 0 {
 					line += " (waiting on " + strings.Join(t.WaitingOn, ", ") + ")"
 				}

@@ -224,7 +224,7 @@ func foremanDigestTx(tx *sql.Tx, project int64, now time.Time) (string, error) {
 			break
 		}
 		add("- plan %d %q: %s", p.id, title(p.title), p.state)
-		tasks, err := statusPlanTasksTx(tx, p.id)
+		tasks, err := statusPlanTasksTx(tx, p.id, now)
 		if err != nil {
 			return "", err
 		}
