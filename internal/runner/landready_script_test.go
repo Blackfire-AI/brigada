@@ -9,41 +9,64 @@ import (
 	"testing"
 )
 
-// TestLandReadyScript runs scripts/land-ready.sh against a fake gh that
-// answers with the line the script's --jq filter would print, and checks
-// the exit-code table the land_ready gate reads (issue #87).
+// fakeGH stands in for gh: it records its arguments, applies the --jq
+// filter with the real jq to the JSON it is given, as gh does, and
+// prints the result. It fails when the script asks for anything but the
+// newest run of brigada/landed.
+const fakeGH = `#!/bin/sh
+printf '%s\n' "$*" > "$FAKE_GH_ARGS"
+[ "$FAKE_GH_EXIT" = 0 ] || exit "$FAKE_GH_EXIT"
+filter=
+while [ $# -gt 0 ]; do
+  case $1 in
+  --jq) filter=$2; shift ;;
+  esac
+  shift
+done
+printf '%s' "$FAKE_GH_JSON" | jq -r "$filter"
+`
+
+// TestLandReadyScript runs scripts/land-ready.sh against a fake gh and
+// checks the invocation and the exit-code table the land_ready gate reads
+// (issue #87).
 func TestLandReadyScript(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not installed")
+	}
 	script, err := filepath.Abs("../../scripts/land-ready.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
+	run := func(status, conclusion, url string) string {
+		return `[{"status":"` + status + `","conclusion":"` + conclusion + `","url":"` + url + `"}]`
+	}
 	cases := []struct {
 		name     string
-		out      string
+		json     string
 		ghExit   string
 		wantExit int
 		wantLine string
 	}{
-		{"no runs", "none", "0", 0, ""},
-		{"empty answer", "", "0", 0, ""},
-		{"success", "completed|success|https://x/runs/1", "0", 0, ""},
-		{"failure", "completed|failure|https://x/runs/2", "0", 1, "https://x/runs/2"},
-		{"cancelled", "completed|cancelled|https://x/runs/3", "0", 1, "https://x/runs/3"},
-		{"in progress", "in_progress||https://x/runs/4", "0", 2, ""},
-		{"queued", "queued||https://x/runs/5", "0", 2, ""},
-		{"gh fails", "", "1", 2, ""},
+		{"no runs", `[]`, "0", 0, ""},
+		{"success", run("completed", "success", "https://x/runs/1"), "0", 0, ""},
+		{"failure", run("completed", "failure", "https://x/runs/2"), "0", 1, "https://x/runs/2"},
+		{"cancelled", run("completed", "cancelled", "https://x/runs/3"), "0", 1, "https://x/runs/3"},
+		{"skipped", run("completed", "skipped", "https://x/runs/6"), "0", 1, "https://x/runs/6"},
+		{"in progress", run("in_progress", "", "https://x/runs/4"), "0", 2, ""},
+		{"queued", run("queued", "", "https://x/runs/5"), "0", 2, ""},
+		{"gh fails", `[]`, "1", 2, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			bin := t.TempDir()
-			fake := "#!/bin/sh\nprintf '%s\\n' \"$FAKE_GH_OUT\"\nexit \"$FAKE_GH_EXIT\"\n"
-			if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(fake), 0o755); err != nil {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(fakeGH), 0o755); err != nil {
 				t.Fatal(err)
 			}
+			argsFile := filepath.Join(dir, "args")
 			cmd := exec.Command("sh", script)
 			cmd.Env = append(os.Environ(),
-				"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
-				"FAKE_GH_OUT="+c.out, "FAKE_GH_EXIT="+c.ghExit)
+				"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"FAKE_GH_ARGS="+argsFile, "FAKE_GH_JSON="+c.json, "FAKE_GH_EXIT="+c.ghExit)
 			out, err := cmd.Output()
 			code := 0
 			var ee *exec.ExitError
@@ -59,6 +82,15 @@ func TestLandReadyScript(t *testing.T) {
 				first, _, _ := strings.Cut(string(out), "\n")
 				if first != c.wantLine {
 					t.Fatalf("first line = %q, want %q", first, c.wantLine)
+				}
+			}
+			args, err := os.ReadFile(argsFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"run list", "--branch brigada/landed", "--limit 1", "--json status,conclusion,url", "--jq "} {
+				if !strings.Contains(string(args), want) {
+					t.Fatalf("gh args %q lack %q", args, want)
 				}
 			}
 		})

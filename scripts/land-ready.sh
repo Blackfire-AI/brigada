@@ -7,8 +7,9 @@
 #
 #   exit 0  the latest run succeeded, or the branch has no runs / does
 #           not exist: the landing proceeds
-#   exit 1  the latest run failed: the landing is held, and the first
-#           output line is the failing run's URL
+#   exit 1  the latest run finished without success (failure, cancelled,
+#           skipped, timed out, ...): the landing is held, and the first
+#           output line is the run's URL
 #   exit 2  the latest run is queued or in progress, or gh itself failed:
 #           not ready, the landing is retried on the backoff
 #
@@ -33,7 +34,7 @@ if [ "$status" != completed ]; then
   exit 2
 fi
 case $conclusion in
-success | skipped | neutral)
+success)
   exit 0
   ;;
 *)
