@@ -54,6 +54,6 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: ready
+    state: running
     branch: ""
     rounds: 0
