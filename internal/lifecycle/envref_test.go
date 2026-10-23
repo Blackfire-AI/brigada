@@ -130,6 +130,9 @@ func TestConfigEnvKeys(t *testing.T) {
 		"env.nobody.SOME_VAR = keychain:x",
 		"env.dsh.bad-name = keychain:x",
 		"env.dsh.SOME_VAR = file:",
+		"env.dsh.PWD = keychain:x",
+		"env.dsh.DSH_PERMISSION_MODE = keychain:x",
+		"env.dsh.BRIGADA_TOKEN = keychain:x",
 	} {
 		_, err := LoadConfigFile(write(line))
 		if err == nil {

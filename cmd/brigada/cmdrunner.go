@@ -17,6 +17,8 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter/fake"
 	"github.com/Blackfire-AI/brigada/internal/adapter/kimi"
 	"github.com/Blackfire-AI/brigada/internal/adapter/opencode"
+	"slices"
+
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/runner"
@@ -126,11 +128,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	}
 	// The configured env.<harness>.<VAR> references resolve here, at every
 	// runner start, whoever started it; a refused reference stops the start.
-	offered := make([]string, len(adverts))
-	for i, a := range adverts {
-		offered[i] = a.Harness
-	}
-	harnessEnv, err := lifecycle.ResolveHarnessEnv(rt.file.Env, offered, nil)
+	harnessEnv, err := resolveRunnerHarnessEnv(rt.file.Env, adverts, nil)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -159,6 +157,18 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		return fail(stderr, fmt.Errorf("runner: %w", err))
 	}
 	return 0
+}
+
+// resolveRunnerHarnessEnv resolves the env references of the harnesses the
+// runner offers, each harness once however many models it offers.
+func resolveRunnerHarnessEnv(refs map[string]map[string]string, adverts []api.Agent, run lifecycle.SecretCommand) (map[string][]string, error) {
+	var offered []string
+	for _, a := range adverts {
+		if !slices.Contains(offered, a.Harness) {
+			offered = append(offered, a.Harness)
+		}
+	}
+	return lifecycle.ResolveHarnessEnv(refs, offered, run)
 }
 
 // agentSpec is one offered agent as the --agent flag describes it.

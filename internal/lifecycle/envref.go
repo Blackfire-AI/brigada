@@ -33,6 +33,9 @@ func setEnvRef(cfg *FileConfig, key, value string) error {
 	if !ok || !envKnownHarnesses[harness] || !envVarName.MatchString(name) {
 		return fmt.Errorf("want env.<harness>.<VAR> with a harness of claude, codex, kimi, opencode or dsh")
 	}
+	if envReserved(name) {
+		return fmt.Errorf("%s is set by the runner or the adapter and cannot be configured", name)
+	}
 	var target string
 	switch {
 	case strings.HasPrefix(value, envRefKeychain):
@@ -53,6 +56,17 @@ func setEnvRef(cfg *FileConfig, key, value string) error {
 	}
 	cfg.Env[harness][name] = value
 	return nil
+}
+
+// envReserved names the variables the runner and the adapters pin: the
+// worktree's PWD, brigada's own variables and the permission and telemetry
+// pins of the sandboxed harnesses.
+func envReserved(name string) bool {
+	switch name {
+	case "PWD", "DSH_PERMISSION_MODE", "DSH_TELEMETRY_MODE", "OPENCODE_PERMISSION":
+		return true
+	}
+	return strings.HasPrefix(name, "BRIGADA_")
 }
 
 // SecretCommand runs a program and returns its standard output. It is the
@@ -79,7 +93,10 @@ func ResolveHarnessEnv(refs map[string]map[string]string, harnesses []string, ru
 		run = runSecretCommand
 	}
 	out := map[string][]string{}
-	for _, h := range harnesses {
+	for i, h := range harnesses {
+		if slices.Contains(harnesses[:i], h) {
+			continue
+		}
 		names := make([]string, 0, len(refs[h]))
 		for name := range refs[h] {
 			names = append(names, name)

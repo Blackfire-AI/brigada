@@ -1,7 +1,9 @@
 package runner
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +32,13 @@ func TestHarnessEnvScopedToHarness(t *testing.T) {
 			}
 			cfg := &Config{HarnessEnv: map[string][]string{"dsh": {"HARNESS_TEST_VAR=from-config"}}}
 			cfg.Clock.fill()
+			var logs bytes.Buffer
+			cfg.Log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			defer func() {
+				if strings.Contains(logs.String(), "from-config") {
+					t.Errorf("the runner's log carries the value:\n%s", logs.String())
+				}
+			}()
 			r := &jobRun{cfg: cfg, grant: &api.JobGrant{Kind: "work", Agent: tc.agent, Prompt: "p"}}
 			_ = r.runWorker(context.Background(), &fake.Adapter{Script: script}, "m", dir, nil)
 			got, err := os.ReadFile(filepath.Join(dir, "seen"))
