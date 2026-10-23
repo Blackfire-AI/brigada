@@ -29,7 +29,7 @@ tasks:
     effort: medium
     review_tier: heavy
     review_effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 167
