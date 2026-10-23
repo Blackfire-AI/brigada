@@ -28,8 +28,8 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-162"
     rounds: 0
   - id: 163
     name: "report-bound"
