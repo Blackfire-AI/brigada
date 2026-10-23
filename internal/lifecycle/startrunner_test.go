@@ -190,6 +190,12 @@ func TestEnsureRunnerRestartHandoff(t *testing.T) {
 	}
 	// The job ends — after the readiness window the call came with —
 	// and the drain completes into a fresh runner anyway.
+	// The request is pending for the whole of it; the pause only lets
+	// the call's own 200ms readiness window lapse, nothing to poll for.
+	waitFor(t, "the drain request to be pending", func() bool {
+		mode, ok := runnerstate.RestartRequested(dir)
+		return ok && mode == runnerstate.RestartDrain
+	})
 	time.Sleep(400 * time.Millisecond)
 	if err := os.WriteFile(filepath.Join(dir, "release"), nil, 0600); err != nil {
 		t.Fatal(err)
@@ -206,9 +212,18 @@ func TestEnsureRunnerRestartHandoff(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the drain restart never finished")
 	}
-	if _, ok := runnerstate.RestartRequested(dir); ok {
-		t.Error("a consumed restart request was left behind")
-	}
+	// The fresh runner clears the request that ended the old one, and
+	// the old one is out of the process table (a zombie counts), before
+	// the next restart is asked for.
+	waitFor(t, "the consumed restart request to be cleared", func() bool {
+		_, ok := runnerstate.RestartRequested(dir)
+		return !ok
+	})
+	waitFor(t, "the first runner to be gone", func() bool { return procGone(first.Record.PID) })
+	waitFor(t, "the fresh runner to publish its state", func() bool {
+		rec, running, _ := runnerstate.Running(dir)
+		return running && rec.PID != first.Record.PID && rec.Agents != nil
+	})
 
 	// `now` makes way at once, with no job to wait out.
 	now := make(chan start, 1)
@@ -227,5 +242,63 @@ func TestEnsureRunnerRestartHandoff(t *testing.T) {
 		syscall.Kill(r.result.Record.PID, syscall.SIGTERM)
 	case <-time.After(10 * time.Second):
 		t.Fatal("the --now restart never finished")
+	}
+}
+
+// waitFor polls cond every 10ms until it holds, failing the test after a
+// generous deadline.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// procGone reports whether pid is out of the process table — dead, or a
+// zombie awaiting its reaper. Where /proc cannot be read, the kill
+// syscall alone decides.
+func procGone(pid int) bool {
+	if err := syscall.Kill(pid, 0); err != nil {
+		return true
+	}
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return false
+	}
+	// The state letter follows the comm field in parentheses.
+	i := strings.LastIndexByte(string(data), ')')
+	return i >= 0 && i+2 < len(data) && data[i+2] == 'Z'
+}
+
+// A fresh runner holds the lock a moment before it clears the last
+// owner's runner.json and pid: a record naming a runner that held the
+// lock before the start is that stale advertisement, not a runner that
+// won the race.
+func TestRunnerReadyIgnoresStaleRecord(t *testing.T) {
+	agents := []api.Agent{{Harness: "claude", Model: "sonnet"}}
+	stale := []int{100, 200}
+	for _, tc := range []struct {
+		name    string
+		rec     runnerstate.Record
+		running bool
+		want    bool
+	}{
+		{"lock free", runnerstate.Record{PID: 300, Agents: agents}, false, false},
+		{"no agents yet", runnerstate.Record{PID: 300}, true, false},
+		{"old runner's record under the new lock", runnerstate.Record{PID: 100, Agents: agents}, true, false},
+		{"old runner's second pid", runnerstate.Record{PID: 200, Agents: agents}, true, false},
+		{"own child", runnerstate.Record{PID: 300, Agents: agents}, true, true},
+		{"manual runner that won the race", runnerstate.Record{PID: 400, Agents: agents}, true, true},
+	} {
+		if got := runnerReady(tc.rec, tc.running, 300, stale); got != tc.want {
+			t.Errorf("%s: ready = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	if !runnerReady(runnerstate.Record{PID: 100, Agents: agents}, true, 100, stale) {
+		t.Error("a child that reuses a stale pid must count as ready")
 	}
 }
