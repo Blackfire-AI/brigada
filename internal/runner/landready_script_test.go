@@ -11,8 +11,7 @@ import (
 
 // fakeGH stands in for gh: it records its arguments, applies the --jq
 // filter with the real jq to the JSON it is given, as gh does, and
-// prints the result. It fails when the script asks for anything but the
-// newest run of brigada/landed.
+// prints the result. The test asserts the recorded arguments afterwards.
 const fakeGH = `#!/bin/sh
 printf '%s\n' "$*" > "$FAKE_GH_ARGS"
 [ "$FAKE_GH_EXIT" = 0 ] || exit "$FAKE_GH_EXIT"
