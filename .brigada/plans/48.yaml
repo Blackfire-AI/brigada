@@ -49,7 +49,7 @@ tasks:
     base: "drain"
     continue: "drain"
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-172"
     rounds: 1
   - id: 173
