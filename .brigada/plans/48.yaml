@@ -83,8 +83,8 @@ tasks:
     tier: heavy
     effort: medium
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-175"
+    rounds: 1
   - id: 176
     name: "infra-show"
     title: "#71 show an infra retry in status and top; GUIDE troubleshooting"
