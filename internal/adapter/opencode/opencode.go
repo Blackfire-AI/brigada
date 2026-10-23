@@ -543,6 +543,9 @@ func errorKind(e errorJSON) adapter.ErrorKind {
 			return p.kind
 		}
 	}
+	if adapter.IsInfraText(e.Data.Message) {
+		return adapter.ErrInfra
+	}
 	return adapter.ErrOther
 }
 

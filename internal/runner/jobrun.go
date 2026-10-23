@@ -812,6 +812,21 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 	r.deliver(ctx, comp)
 }
 
+// producedOutput reports whether the CLI said or did anything before it
+// failed: a message or a tool call. A session id or usage counters come
+// with the CLI starting up and prove nothing reached the provider.
+func (r *jobRun) producedOutput() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, ev := range r.events {
+		switch ev.Kind {
+		case adapter.EvMessage, adapter.EvToolStart, adapter.EvToolEnd:
+			return true
+		}
+	}
+	return false
+}
+
 // sessionIDOf reads the session id the worker's stream carried.
 func (r *jobRun) sessionIDOf() string {
 	r.mu.Lock()
@@ -829,10 +844,16 @@ func (r *jobRun) finishWithError(ctx context.Context, msg string) {
 // reported: the error's kind rides with the completion, and a limit's
 // reset time when the adapter found one (§4.4).
 func (r *jobRun) finishWithCLIError(ctx context.Context, msg string, cliErr *adapter.Event) {
+	kind := cliErr.ErrorKind
+	if kind == adapter.ErrInfra && r.producedOutput() {
+		// A connection failure after real output is the run's own
+		// failure, not a network that was never up.
+		kind = adapter.ErrOther
+	}
 	r.deliverError(ctx, api.Completion{
 		Error:      msg,
 		SessionID:  r.sessionIDOf(),
-		ErrorKind:  string(cliErr.ErrorKind),
+		ErrorKind:  string(kind),
 		LimitUntil: cliErr.LimitUntil,
 	})
 }

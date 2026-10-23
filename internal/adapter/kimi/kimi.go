@@ -395,6 +395,9 @@ func errorFromText(text string) (adapter.Event, bool) {
 			break
 		}
 	}
+	if kind == adapter.ErrOther && adapter.IsInfraText(text) {
+		kind = adapter.ErrInfra
+	}
 	ev := adapter.Event{Kind: adapter.EvError, ErrorKind: kind, Text: text}
 	if kind == adapter.ErrLimit {
 		ev.LimitUntil = limitReset(text, now())

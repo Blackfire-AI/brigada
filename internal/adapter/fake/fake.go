@@ -144,7 +144,7 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 	case "error":
 		kind := adapter.ErrorKind(ev.Kind)
 		switch kind {
-		case adapter.ErrLimit, adapter.ErrAuth:
+		case adapter.ErrLimit, adapter.ErrAuth, adapter.ErrInfra:
 		default:
 			kind = adapter.ErrOther
 		}
