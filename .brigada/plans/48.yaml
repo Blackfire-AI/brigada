@@ -71,8 +71,8 @@ tasks:
     base: "secrets"
     continue: "secrets"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-174-r1"
     rounds: 0
   - id: 175
     name: "infra-retry"
