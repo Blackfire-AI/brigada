@@ -93,6 +93,28 @@ func TestInfraFailureIsRetriedAsInfrastructure(t *testing.T) {
 	}
 }
 
+// TestStatusListsTheInfraRetry: the queued retry shows in the status
+// with its not-before and the failure's words until the delay passes.
+func TestStatusListsTheInfraRetry(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "fam", "implement")
+	e.submit(e.work())
+	infraFail(e, author)
+	st, err := e.eng.Status(e.ctx, e.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Retries) != 1 || st.Retries[0].TaskID != e.task || st.Retries[0].Kind != string(KindWork) ||
+		st.Retries[0].NotBefore != fmtTime(e.clock.Now().Add(infraDelayFor(1))) ||
+		!strings.Contains(st.Retries[0].Reason, "Could not resolve host") {
+		t.Errorf("retries = %+v, want the work retry with its not-before and reason", st.Retries)
+	}
+	e.elapse(infraDelayFor(1))
+	if st, err = e.eng.Status(e.ctx, e.project); err != nil || len(st.Retries) != 0 {
+		t.Errorf("retries after the delay = %+v (%v), want none", st.Retries, err)
+	}
+}
+
 // TestInfraFailureRetryWaitsForTheDelay pins the not-before hold: the
 // retry the classification queues is not leasable at once — the network
 // is not up in the minute after the failure — but only once the first

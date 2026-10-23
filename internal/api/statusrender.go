@@ -66,6 +66,9 @@ func StatusSections(st Status) string {
 		}
 		lines = append(lines, fmt.Sprintf("held: %s %s: %s", what, h.Kind, wait))
 	}
+	for _, r := range st.Retries {
+		lines = append(lines, "waiting: "+RetryLine(r, time.Now()))
+	}
 	if len(st.Plans) == 0 {
 		lines = append(lines, "plans: none")
 	} else {
@@ -196,6 +199,31 @@ func StatusSections(st Status) string {
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// RetryLine words one job waiting on an infra retry (§5.1) for the
+// status and top views: "task #4 work: retry in 5m: could not resolve
+// github.com" — the job or task, its kind, the time left to its
+// not-before and the failure's words.
+func RetryLine(r engine.InfraRetry, now time.Time) string {
+	what := fmt.Sprintf("job #%d", r.ID)
+	if r.TaskID != 0 {
+		what = fmt.Sprintf("task #%d", r.TaskID)
+	}
+	var left time.Duration
+	if t, err := time.Parse(engine.TimeLayout, r.NotBefore); err == nil && t.After(now) {
+		left = t.Sub(now)
+	}
+	// Whole minutes round up, so a wait never reads shorter than it is.
+	wait := left.Truncate(time.Second).String()
+	if left >= time.Minute {
+		wait = fmt.Sprintf("%dm", int((left+time.Minute-1)/time.Minute))
+	}
+	line := fmt.Sprintf("%s %s: retry in %s", what, r.Kind, wait)
+	if r.Reason != "" {
+		line += ": " + r.Reason
+	}
+	return line
 }
 
 // shortVersion is the first 12 characters of an import hash.

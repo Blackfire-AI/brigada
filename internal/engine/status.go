@@ -100,10 +100,24 @@ type StatusInfo struct {
 	// Held lists the queued jobs a full cap layer holds (§8.1); the
 	// runner layer's are jobs waiting for a runner slot.
 	Held []HeldJob `json:"held,omitempty"`
+	// Retries lists the queued jobs waiting out an infrastructure
+	// backoff (§5.1): the job's not-before and the failure's words.
+	Retries []InfraRetry `json:"retries,omitempty"`
 	// Instructions lists the projects in scope that have project
 	// instructions (§5.9): source, version, size and digest; the text only
 	// from StatusWithInstructions.
 	Instructions []StatusInstructions `json:"instructions,omitempty"`
+}
+
+// InfraRetry is one queued work or fix job held out of leasing by the
+// infra backoff (§5.1): NotBefore is when it may be leased, Reason the
+// infrastructure failure's words, flattened to one line.
+type InfraRetry struct {
+	ID        int64  `json:"id"`
+	TaskID    int64  `json:"task_id,omitempty"`
+	Kind      string `json:"kind"`
+	NotBefore string `json:"not_before"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // StatusJob is one job a runner holds right now (§10): which job, for
@@ -329,6 +343,9 @@ func (e *Engine) status(ctx context.Context, project int64, withText, all bool) 
 		if info.Held, err = statusHeldTx(tx, project); err != nil {
 			return err
 		}
+		if info.Retries, err = statusRetriesTx(tx, project, now); err != nil {
+			return err
+		}
 		if info.Instructions, err = statusInstructionsTx(tx, project, withText); err != nil {
 			return err
 		}
@@ -341,6 +358,41 @@ func (e *Engine) status(ctx context.Context, project int64, withText, all bool) 
 	// it is read beside the store's answer, after it.
 	info.RunnerDraining = e.runnerDraining()
 	return info, nil
+}
+
+// statusRetriesTx lists the queued jobs still inside an infra backoff
+// (§5.1), oldest first: each is the retry retryInfraFailureTx queued, so
+// its task_infra_retry event carries the failure's words. A job whose
+// not-before has passed is leasable and not listed.
+func statusRetriesTx(tx *sql.Tx, project int64, now time.Time) ([]InfraRetry, error) {
+	query := `SELECT j.id, COALESCE(j.task_id, 0), j.kind, j.not_before, e.payload
+		FROM jobs j JOIN events e ON e.job_id = j.id AND e.kind = ?
+		WHERE j.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
+		AND j.status = 'queued' AND j.not_before > ?`
+	args := []any{evTaskInfraRetry, fmtTime(now)}
+	if project != 0 {
+		query += " AND j.project_id = ?"
+		args = append(args, project)
+	}
+	rows, err := tx.Query(query+" ORDER BY j.id", args...)
+	if err != nil {
+		return nil, fmt.Errorf("list the infra retries: %w", err)
+	}
+	defer rows.Close()
+	out := []InfraRetry{}
+	for rows.Next() {
+		var r InfraRetry
+		var payload string
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.Kind, &r.NotBefore, &payload); err != nil {
+			return nil, fmt.Errorf("list the infra retries: %w", err)
+		}
+		var p eventPayload
+		if json.Unmarshal([]byte(payload), &p) == nil {
+			r.Reason = oneLine(p.Reason, needsYouReasonLimit)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // statusSlotsTx lists the foreman slot of one project, or of every

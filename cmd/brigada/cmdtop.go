@@ -191,7 +191,7 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 		topHeader(model, now, style, width),
 		api.AgentsTable(model.capacity, now, style, width),
 		topRunning(model.status, now, style, width),
-		topQueue(model.status, style, width),
+		topQueue(model.status, now, style, width),
 		topPlans(model.status, style, width),
 		topNeedsYou(model.status, style, width),
 		topEvents(model.events, now, style, width),
@@ -303,10 +303,10 @@ func topRunning(st api.Status, now time.Time, style term.Style, width int) []str
 
 // topQueue counts the queued jobs and lists the held ones with the
 // layer that holds each.
-func topQueue(st api.Status, style term.Style, width int) []string {
+func topQueue(st api.Status, now time.Time, style term.Style, width int) []string {
 	lines := []string{style.Bold("QUEUE")}
 	queued := st.Jobs["queued"]
-	if queued == 0 && len(st.Held) == 0 {
+	if queued == 0 && len(st.Held) == 0 && len(st.Retries) == 0 {
 		return append(lines, "  empty")
 	}
 	if queued > 0 {
@@ -318,6 +318,9 @@ func topQueue(st api.Status, style term.Style, width int) []string {
 			line += " (" + h.Agent + ")"
 		}
 		lines = append(lines, "  "+cutLine(line, width-2))
+	}
+	for _, r := range st.Retries {
+		lines = append(lines, "  "+cutLine("waiting: "+api.RetryLine(r, now), width-2))
 	}
 	return lines
 }
