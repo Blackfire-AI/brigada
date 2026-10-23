@@ -106,15 +106,17 @@ func Message(ev Event) (t, body string, ok bool) {
 		// A report is the foreman speaking, so its banner carries the
 		// foreman's name; the body is the report's first line — written
 		// for exactly this banner — never the lines after it (§3, §10).
-		// A report of more lines ends the line with the pointer to the
-		// whole text in the history (§9), the line cut to leave the
-		// pointer room. No parked gate: a report is not a task waiting.
+		// A cut body — more lines followed, or the line itself ran past
+		// the limit — ends with the pointer to the whole text in the
+		// history (§9), the line cut to leave the pointer room. No
+		// parked gate: a report is not a task waiting.
 		body := firstLine(ev.Reason)
-		if rest := strings.TrimSpace(ev.Reason[len(body):]); rest != "" && ev.JobID > 0 {
+		flat := oneLine(body, bodyLimit)
+		if cut := flat != body || strings.TrimSpace(ev.Reason[len(body):]) != ""; cut && ev.JobID > 0 {
 			ptr := reportPointer(ev.JobID)
 			body = oneLine(body, bodyLimit-len(ptr)) + ptr
 		} else {
-			body = oneLine(body, bodyLimit)
+			body = flat
 		}
 		if body == "" {
 			body = ev.Kind

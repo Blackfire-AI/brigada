@@ -27,11 +27,17 @@ const needsYouReasonLimit = 160
 const lastEventLimit = 120
 
 // statusReportLines is how much of the latest foreman report the status
-// shows (§10): the first few lines, the rest left to the history. The
-// event keeps the report whole within its own bound (boundReport); the
-// cut happens here, at render time, and a cut text ends with the
-// pointer to the history (§9).
-const statusReportLines = 5
+// shows (§10): the first few lines, the rest left to the history.
+// statusReportBytes is the most report text the block carries: about
+// what the event's old shared 500-byte bound kept, so even a report of
+// one long line stays as short as it always was. The event keeps the
+// report whole within its own bound (boundReport); the cut happens
+// here, at render time, and a cut text ends with the pointer to the
+// history (§9).
+const (
+	statusReportLines = 5
+	statusReportBytes = 500
+)
 
 // reportPointer is what a cut view of a foreman report ends with: the
 // command that shows the whole text (§9).
@@ -40,11 +46,12 @@ func reportPointer(job int64) string {
 }
 
 // statusReportView cuts the report to its first statusReportLines lines
-// and, when it cut and the report names its job, ends the text with the
-// pointer to the history (§9): the status block stays short while the
-// event keeps the whole report.
+// and about statusReportBytes — one long line is cut too — and, when it
+// cut and the report names its job, ends the text with the pointer to
+// the history (§9): the status block stays short while the event keeps
+// the whole report.
 func statusReportView(report string, job int64) string {
-	text := firstLines(report, statusReportLines)
+	text := cutRune(firstLines(report, statusReportLines), statusReportBytes)
 	if text != report && job > 0 {
 		return text + reportPointer(job)
 	}
@@ -111,10 +118,10 @@ type StatusJob struct {
 // StatusReport is the latest foreman report the status shows (§3, §10):
 // the final message of the project's last done foreman turn — when it
 // ended, and the first lines of what it said. A cut Text ends with
-// `… (full: brigada history --job N)`, the job whose history holds the
-// whole report (§9). The foreman token's scope
-// is one project; a caller reading every project sees the latest report
-// among them, the project named by its id.
+// `… (full: brigada history --job N)`, naming the job whose history
+// holds the whole report (§9). The foreman token's scope is one
+// project; a caller reading every project sees the latest report among
+// them, the project named by its id.
 type StatusReport struct {
 	ProjectID int64  `json:"project_id"`
 	JobID     int64  `json:"job_id"`

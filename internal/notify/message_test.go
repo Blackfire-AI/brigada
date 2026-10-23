@@ -192,6 +192,23 @@ func TestMessageBodyLimit(t *testing.T) {
 	if !strings.HasSuffix(body, reportPointer(3)) {
 		t.Errorf("report body = %q, want it to end with the pointer to the history", body)
 	}
+
+	// A report of one long line is cut too, and the cut still ends
+	// with the pointer, never silently.
+	oneline := Event{Kind: KindForemanReport, JobID: 3, Reason: strings.Repeat("z", bodyLimit*2)}
+	_, body, ok = Message(oneline)
+	if !ok {
+		t.Fatal("a long one-line report must still notify")
+	}
+	if len(body) > bodyLimit {
+		t.Errorf("one-line report body is %d bytes, want it bounded at %d", len(body), bodyLimit)
+	}
+	if !strings.HasPrefix(body, "z") {
+		t.Errorf("one-line report body = %q, want the line's own bytes first", body)
+	}
+	if !strings.HasSuffix(body, reportPointer(3)) {
+		t.Errorf("one-line report body = %q, want it to end with the pointer to the history", body)
+	}
 }
 
 func TestParkedBy(t *testing.T) {

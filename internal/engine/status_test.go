@@ -441,6 +441,35 @@ func TestStatusShowsTheLatestForemanReport(t *testing.T) {
 	}
 }
 
+// TestStatusCutsALongSingleLineReport covers the byte cut of the status
+// report (§10): a report of one long line — whole in the event, well
+// past the bytes the block carries — shows cut, ending with the pointer
+// to the history (§9).
+func TestStatusCutsALongSingleLineReport(t *testing.T) {
+	e := newEnv(t)
+	e.exec(`INSERT INTO jobs (id, project_id, kind, key, mode, prompt, status, created_at, updated_at)
+		VALUES (?, ?, 'foreman', 'report:41', 'fresh', '', 'done', ?, ?)`,
+		41, e.project, fmtTime(e.clock.Now()), fmtTime(e.clock.Now()))
+	e.exec(`INSERT INTO events (kind, project_id, job_id, payload, created_at)
+		VALUES (?, ?, 41, ?, ?)`, evForemanReport, e.project,
+		`{"report":`+mustJSON(strings.Repeat("x", 3000))+`}`, fmtTime(e.clock.Now()))
+
+	st, err := e.eng.Status(e.ctx, e.project)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if st.Report == nil {
+		t.Fatal("the status carries no report, want the long one")
+	}
+	want := strings.Repeat("x", statusReportBytes) + reportPointer(41)
+	if st.Report.Text != want {
+		t.Errorf("the report text runs %d bytes, want %d cut plus the pointer:\n%q", len(st.Report.Text), statusReportBytes, st.Report.Text)
+	}
+	if st.Report.JobID != 41 {
+		t.Errorf("the report's job = %d, want 41", st.Report.JobID)
+	}
+}
+
 func TestStatusScopesToTheCallersProject(t *testing.T) {
 	e := newEnv(t)
 
