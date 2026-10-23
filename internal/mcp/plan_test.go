@@ -711,3 +711,78 @@ func TestPlanAmendRetierSchema(t *testing.T) {
 	}
 	t.Fatal("no plan_amend tool")
 }
+
+// TestServeCallPlanAccept: the plan_accept tool accepts a plan its
+// review parked at needs_foreman, with the reason required — the plan
+// turns active with its first work job queued (§6.2, §12.2) — and a
+// call without a reason is the tool's own error.
+func TestServeCallPlanAccept(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	s := start(t, e)
+	var plan int64
+	err := e.st.Update(t.Context(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO plans (project_id, title, state, review_round, review_verdict, created_at, updated_at)
+			VALUES (1, 'the parked plan', 'needs_foreman', 1, 'changes', ?, ?)`, seedTS, seedTS)
+		if err != nil {
+			return err
+		}
+		plan, err = res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, class, state, base_ref, caps, created_at, updated_at)
+			VALUES (?, 'a', 'do a', 'do a', 'implement', 'pending', 'main', '{}', ?, ?)`, plan, seedTS, seedTS)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed the parked plan: %v", err)
+	}
+
+	a := s.call(1, "tools/call", map[string]any{"name": "plan_accept", "arguments": map[string]any{"plan": plan}})
+	if text, isError := toolText(t, a); !isError || !strings.Contains(text, "reason is required") {
+		t.Fatalf("accept without a reason = %q, error %v, want the refusal", text, isError)
+	}
+	a = s.call(2, "tools/call", map[string]any{"name": "plan_accept", "arguments": map[string]any{
+		"plan": plan, "reason": "the findings name follow-up work, not blockers",
+	}})
+	text, isError := toolText(t, a)
+	if isError {
+		t.Fatalf("plan_accept errored: %s", text)
+	}
+	for _, want := range []string{
+		"accepted as reviewed",
+		"state active",
+		"work job",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("plan_accept text = %q, want it to name %s", text, want)
+		}
+	}
+	if err := e.st.View(t.Context(), func(tx *sql.Tx) error {
+		var state string
+		var jobs int
+		if err := tx.QueryRow("SELECT state FROM plans WHERE id = ?", plan).Scan(&state); err != nil {
+			return err
+		}
+		if state != "active" {
+			t.Errorf("stored plan state = %q, want active", state)
+		}
+		if err := tx.QueryRow("SELECT COUNT(*) FROM jobs j JOIN tasks ts ON ts.id = j.task_id WHERE ts.plan_id = ? AND j.kind = 'work'", plan).Scan(&jobs); err != nil {
+			return err
+		}
+		if jobs != 1 {
+			t.Errorf("work jobs = %d, want the first wave's one", jobs)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A plan not parked is refused, the tool's own error again.
+	a = s.call(3, "tools/call", map[string]any{"name": "plan_accept", "arguments": map[string]any{
+		"plan": plan, "reason": "once more",
+	}})
+	if text, isError := toolText(t, a); !isError || !strings.Contains(text, "not parked") {
+		t.Errorf("accept an active plan = %q, error %v, want the refusal", text, isError)
+	}
+}

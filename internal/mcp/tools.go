@@ -82,7 +82,7 @@ var taskCapsSchema = map[string]any{
 var tools = []Tool{
 	{
 		Name:        "plan_create",
-		Description: "Create a plan of one or more tasks and queue the first work job of every task with no dependencies. A task may wait on others of the same plan by name (deps); it starts when all of them are done, and stays waiting if one fails or needs you. A task with exactly one dep builds on that dep's branch (a task with several picks one with base, else its continued dep when continue is set, else starts from the default branch). A dependency cycle, a base that is not a dep, or a base naming another dep than continue refuses the plan. A task's optional caps object sets its own fix_rounds, review_rounds and restart budgets (integers 0 to 10; absent keys keep the engine default); an unknown key or out-of-range value refuses the plan. The plan is active at once, unless it trips the project's approval rules (an unusual class, a protected path, an extra repository, a check other than the project's default_check; a task count only when the project sets one): then it waits for the user's approval, nothing is queued, and the answer says why — tell the user; only they can approve it.",
+		Description: "Create a plan of one or more tasks and queue the first work job of every task with no dependencies. A task may wait on others of the same plan by name (deps); it starts when all of them are done, and stays waiting if one fails or needs you. A dep may also be the id of a landed task of another plan of the project — one whose work is on the land target, done and pushed there — and then counts as done from the start; nothing waits on it. A task with exactly one dep builds on that dep's branch (a task with several picks one with base, else its continued dep when continue is set, else starts from the land target, the default branch when none is set). A dependency cycle, a base that is not a dep, or a base naming another dep than continue refuses the plan. A task's optional caps object sets its own fix_rounds, review_rounds and restart budgets (integers 0 to 10; absent keys keep the engine default); an unknown key or out-of-range value refuses the plan. The plan is active at once, unless it trips the project's approval rules (an unusual class, a protected path, an extra repository, a check other than the project's default_check; a task count only when the project sets one): then it waits for the user's approval, nothing is queued, and the answer says why — tell the user; only they can approve it.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -107,11 +107,11 @@ var tools = []Tool{
 							"deps": map[string]any{
 								"type":        "array",
 								"items":       map[string]any{"type": "string"},
-								"description": "names of tasks of this same plan that must be done before this one starts; default none",
+								"description": "names of tasks of this same plan that must be done before this one starts, or the id of a landed task of another plan of the project (its work on the land target: done and pushed there), which counts as done from the start; default none",
 							},
 							"base": map[string]any{
 								"type":        "string",
-								"description": "the name of one of this task's deps, whose result branch this task's work starts from, so it builds on that work and its review shows only its own change. Default: the only dep when there is one, else the continued dep when continue is set, else the default branch; a base naming another dep than continue is refused. Merge a task after its base",
+								"description": "the name of one of this task's deps, whose result branch this task's work starts from, so it builds on that work and its review shows only its own change. Default: the only dep when there is one, else the continued dep when continue is set, else the land target (the default branch when none is set); a base naming another dep than continue is refused. Merge a task after its base",
 							},
 							"continue": map[string]any{
 								"type":        "string",
@@ -146,7 +146,7 @@ var tools = []Tool{
 	},
 	{
 		Name:        "plan_amend",
-		Description: "Amend a live plan (active or awaiting approval): add tasks, cancel tasks, and re-point the dependencies of a waiting task. Use it to re-plan when a task fails for good or the user's ask changes: a dependency that will never be done (a task failed or cancelled) leaves its dependents waiting forever unless you re-point them (retarget) to another task or drop the dependency (empty deps). Tasks are named by their name or id (as status shows). Validation is plan_create's: names unique, deps in the plan and never on a cancelled task, no cycle — one refusal rejects the whole amendment. Use retier to change the tier, effort or round caps (merged key by key) of a pending, ready or needs_foreman task; a parked task still needs task_restart. Use respec to replace or append to the spec of a pending task (one with no job yet) when a requirement is missing: it costs no cold start; a task that has started is refused, and then a follow-up task is the way. The edit is judged like an added task: one that trips a rule is held alone. Cancelling stops a task's live jobs. Waiting tasks whose dependencies are all done start in the same call. An added task is judged on its own against the plan rules (a class outside approval_classes, a protected path, an extra repository, a check other than the project's default_check): one that trips a rule is held at the plan gate with a needs-you line naming the rule, while the plan stays active and the rest runs on. The plan budget holds the same way once the plan's spend has passed the project's approval_budget: any task about to start, an added one included, parks at the plan gate instead of queueing. A plan left with only permanently waiting tasks is closed, and its done report names what never ran.",
+		Description: "Amend a live plan (active, awaiting approval, reviewing, or parked at needs_foreman by its review — the answer its changes verdict waited for): add tasks, cancel tasks, and re-point the dependencies of a waiting task. Use it to re-plan when a task fails for good or the user's ask changes: a dependency that will never be done (a task failed or cancelled) leaves its dependents waiting forever unless you re-point them (retarget) to another task or drop the dependency (empty deps). Tasks are named by their name or id (as status shows). Validation is plan_create's: names unique, deps in the plan — or the id of a landed task of another plan of the project, its work on the land target, already satisfied — and never on a cancelled task, no cycle — one refusal rejects the whole amendment. Use retier to change the tier, effort or round caps (merged key by key) of a pending, ready or needs_foreman task; a parked task still needs task_restart. Use respec to replace or append to the spec of a pending task (one with no job yet) when a requirement is missing: it costs no cold start; a task that has started is refused, and then a follow-up task is the way. The edit is judged like an added task: one that trips a rule is held alone. Cancelling stops a task's live jobs. Waiting tasks whose dependencies are all done start in the same call. An added task is judged on its own against the plan rules (a class outside approval_classes, a protected path, an extra repository, a check other than the project's default_check): one that trips a rule is held at the plan gate with a needs-you line naming the rule, while the plan stays active and the rest runs on. The plan budget holds the same way once the plan's spend has passed the project's approval_budget: any task about to start, an added one included, parks at the plan gate instead of queueing. A plan left with only permanently waiting tasks is closed, and its done report names what never ran.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -165,7 +165,7 @@ var tools = []Tool{
 							"deps": map[string]any{
 								"type":        "array",
 								"items":       map[string]any{"type": []string{"string", "integer"}},
-								"description": "tasks of this plan (new or old, by name or id) that must be done before this one starts; default none",
+								"description": "tasks of this plan (new or old, by name or id) that must be done before this one starts, or the id of a landed task of another plan of the project (its work on the land target), which counts as done from the start; default none",
 							},
 							"base":          map[string]any{"type": []string{"string", "integer"}, "description": "one of its deps whose result branch the work starts from; default as plan_create's, and the continued dep when continue is set"},
 							"continue":      map[string]any{"type": []string{"string", "integer"}, "description": "one of its deps whose worker starts this task in its own session; default as plan_create's; the continued dep is the task's base"},
@@ -238,6 +238,25 @@ var tools = []Tool{
 			"required": []string{"plan"},
 		},
 		Call: callPlanAmend,
+	},
+	{
+		Name:        "plan_accept",
+		Description: "Accept a plan the plan review parked at needs_foreman as reviewed, with your reason recorded; the plan proceeds exactly as a spent round's verdict does — its tasks start, or it waits for the user's yes when an approval rule holds it, which the answer names. Use it when the review's changes are not worth another round. To answer the findings instead, amend the plan with plan_amend: the added and edited tasks go to the next review round. The reason is required and reaches the plan's history.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"plan": map[string]any{
+					"type":        "integer",
+					"description": "the parked plan's id, as status shows",
+				},
+				"reason": map[string]any{
+					"type":        "string",
+					"description": "why the plan is accepted as reviewed, despite the findings; recorded with the plan's history",
+				},
+			},
+			"required": []string{"plan", "reason"},
+		},
+		Call: callPlanAccept,
 	},
 	{
 		Name:        "answer",

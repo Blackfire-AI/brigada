@@ -157,8 +157,8 @@ func TestPlanReviewApproveActivatesAndQueues(t *testing.T) {
 }
 
 // TestPlanReviewChangesWakesForeman: a changes verdict with a round left
-// keeps the plan reviewing and carries the findings to the foreman
-// verbatim, its turn woken.
+// parks the plan at needs_foreman and carries the findings to the
+// foreman verbatim, its turn woken.
 func TestPlanReviewChangesWakesForeman(t *testing.T) {
 	e := newPlanReviewEnv(t)
 	e.offerForeman(e.runner1)
@@ -166,8 +166,8 @@ func TestPlanReviewChangesWakesForeman(t *testing.T) {
 	res := e.createPlan(nTasks(2))
 	g := e.lease(e.runner2, nil, nil)
 	e.reviewVerdict(g, verdictChanges, theFindings)
-	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planReviewing {
-		t.Fatalf("plan state after changes = %q, want %s (the foreman amends)", got, planReviewing)
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planNeedsForeman {
+		t.Fatalf("plan state after changes = %q, want %s (the foreman amends or accepts)", got, planNeedsForeman)
 	}
 	if got := e.str("SELECT review_verdict FROM plans WHERE id = ?", res.PlanID); got != verdictChanges {
 		t.Errorf("recorded verdict = %q, want changes", got)
@@ -459,8 +459,8 @@ func TestPlanReviewStatusShowsRoundAndVerdict(t *testing.T) {
 			plan = &st.Plans[i]
 		}
 	}
-	if plan.State != planReviewing || plan.ReviewRound != 1 || plan.ReviewVerdict != verdictChanges || plan.ReviewFindings != theFindings {
-		t.Fatalf("status plan after changes = %+v, want the verdict and findings kept", plan)
+	if plan.State != planNeedsForeman || plan.ReviewRound != 1 || plan.ReviewVerdict != verdictChanges || plan.ReviewFindings != theFindings {
+		t.Fatalf("status plan after changes = %+v, want parked with the verdict and findings kept", plan)
 	}
 }
 

@@ -53,7 +53,7 @@ func TestArchiveProjectRefusesLiveWorkAndCancelsAtomically(t *testing.T) {
 }
 
 func TestArchiveProjectRefusesUnfinishedPlansWithoutJobs(t *testing.T) {
-	for _, state := range []string{"draft", "pending_approval", "active"} {
+	for _, state := range []string{"draft", "pending_approval", "reviewing", "needs_foreman", "active"} {
 		t.Run(state, func(t *testing.T) {
 			e := newEnv(t)
 			e.exec("UPDATE plans SET state = ? WHERE id = ?", state, e.plan)

@@ -67,18 +67,22 @@ func StatusSections(st Status) string {
 		lines = append(lines, "plans:")
 		for _, p := range st.Plans {
 			// A reviewing plan names its round (§6.2): `plan 12
-			// reviewing (round 1)`.
+			// reviewing (round 1)`; a plan its review parked for the
+			// foreman names its round the same way.
 			state := p.State
-			if state == "reviewing" {
-				state = fmt.Sprintf("reviewing (round %d)", p.ReviewRound)
+			if state == "reviewing" || state == "needs_foreman" {
+				state = fmt.Sprintf("%s (round %d)", state, p.ReviewRound)
 			}
 			lines = append(lines, fmt.Sprintf("#%d %s %s", p.ID, state, p.Title))
 			// The review's latest verdict and findings, so the foreman
-			// reads what the reviewer said through the status tool.
+			// reads what the reviewer said through the status tool. The
+			// findings are the event's whole text; the line cuts at its
+			// own bound and, when the cut landed, points at the review
+			// job's history, which holds them whole (§6.2).
 			if p.ReviewVerdict != "" || p.ReviewFindings != "" {
 				review := "  review: " + p.ReviewVerdict
 				if p.ReviewFindings != "" {
-					review += ", findings: " + oneLine(p.ReviewFindings, 200)
+					review += ", findings: " + findingsLine(p.ReviewFindings, p.ReviewJob)
 				}
 				lines = append(lines, review)
 			}
@@ -195,6 +199,18 @@ func shortVersion(h string) string {
 		return h[:12]
 	}
 	return h
+}
+
+// findingsLine renders a plan review's findings for the status's plan
+// line: one line of at most about 200 bytes, and — when the findings
+// are longer and their review job is known — ending with the pointer to
+// the history that holds them whole (§6.2, §9).
+func findingsLine(findings string, job int64) string {
+	line := oneLine(findings, 200)
+	if flat := strings.Join(strings.Fields(findings), " "); job > 0 && len(flat) > 200 {
+		line += fmt.Sprintf("… (full: brigada history --job %d)", job)
+	}
+	return line
 }
 
 // oneLine flattens s to a single line of at most about max bytes, the

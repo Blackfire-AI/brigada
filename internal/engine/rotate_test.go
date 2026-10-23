@@ -256,7 +256,7 @@ func TestForemanDigestBounded(t *testing.T) {
 	if len(digest) > digestMaxBytes {
 		t.Errorf("digest is %d bytes, over %d", len(digest), digestMaxBytes)
 	}
-	for _, want := range []string{"Plans active, reviewing or awaiting approval: 16", "more tasks omitted", "omitted"} {
+	for _, want := range []string{"Plans active, reviewing, parked or awaiting approval: 16", "more tasks omitted", "omitted"} {
 		if !strings.Contains(digest, want) {
 			t.Errorf("digest lacks %q:\n%s", want, digest)
 		}

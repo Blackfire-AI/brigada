@@ -114,10 +114,11 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 		return nil, err
 	}
 	defer unlock()
-	if err := w.materializeMirror(ctx, grant.BaseRef); err != nil {
+	baseRef, err := w.materializeWithBase(ctx, cfg, grant)
+	if err != nil {
 		return nil, err
 	}
-	start := grant.BaseRef
+	start := baseRef
 	if isFixJob(grant) && grant.Branch != "" {
 		// The round continues the task's branch (§3): the worktree
 		// starts at the branch's head as the remote holds it, fetched by
@@ -168,6 +169,51 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 	return w, nil
 }
 
+// materializeWithBase materializes the mirror and returns the ref the
+// job's worktree (or review diff) is based on: grant.BaseRef, which the
+// engine sets to the project's land target when one is set (§6.1), fresh
+// after the mirror's fetch. The land target may not exist on the remote
+// yet — the runner creates it at land time (§7.1) — and then neither the
+// by-name fetch of a brigada/ branch nor the worktree add could resolve
+// it. Such a base falls back to the remote's default branch (the mirror's
+// HEAD), the branch the land job creates the target from, and the
+// fallback is logged. A remote that cannot be asked at all fails the job
+// as an infrastructure error instead of reading as absence.
+func (w *workspace) materializeWithBase(ctx context.Context, cfg *Config, grant *api.JobGrant) (string, error) {
+	base := grant.BaseRef
+	fetchBase := base
+	if brigadaRef(base) != "" {
+		if _, holds, err := w.remoteBranch(ctx, base); err != nil {
+			return "", &infraError{err}
+		} else if !holds {
+			fetchBase = "" // nothing to fetch by name; judged below
+		}
+	}
+	if err := w.materializeMirror(ctx, fetchBase); err != nil {
+		return "", err
+	}
+	if w.refExists(ctx, "refs/heads/"+base) || (brigadaRef(base) == "" && w.refExists(ctx, base)) {
+		return base, nil
+	}
+	out, err := w.git(ctx, "--git-dir", w.mirror, "symbolic-ref", "--short", "HEAD")
+	def := strings.TrimSpace(string(out))
+	if err != nil || def == "" {
+		return "", fmt.Errorf("base %s is not on %s and its default branch is unknown: %w",
+			base, redactURL(w.repoURL), trimCmdError(out, err))
+	}
+	if cfg != nil && cfg.Log != nil {
+		cfg.Log.WarnContext(ctx, "base ref is not on the remote yet (an unlanded land target?); building on the default branch",
+			"job_id", grant.JobID, "task_id", grant.TaskID, "base_ref", base, "default_branch", def)
+	}
+	return def, nil
+}
+
+// refExists reports whether ref resolves to a commit in the mirror.
+func (w *workspace) refExists(ctx context.Context, ref string) bool {
+	_, err := w.git(ctx, "--git-dir", w.mirror, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	return err == nil
+}
+
 // prepareReviewWorkspace materializes the reviewer's checkout (§7): the
 // worktree sits at the task's result branch exactly as the remote holds
 // it, on a detached HEAD — no branch is created, moved or pushed, for
@@ -201,7 +247,8 @@ func prepareReviewWorkspace(ctx context.Context, cfg *Config, grant *api.JobGran
 		return nil, err
 	}
 	defer unlock()
-	if err := w.materializeMirror(ctx, grant.BaseRef); err != nil {
+	baseRef, err := w.materializeWithBase(ctx, cfg, grant)
+	if err != nil {
 		return nil, err
 	}
 	if err := w.fetchBranch(ctx, grant.ReviewBranch); err != nil {
@@ -226,7 +273,7 @@ func prepareReviewWorkspace(ctx context.Context, cfg *Config, grant *api.JobGran
 		return nil, fmt.Errorf("read the review worktree's commit: %w", trimCmdError(out, err))
 	}
 	w.base = strings.TrimSpace(string(out))
-	if err := w.writeReviewDiffSince(ctx, grant.BaseRef, grant.ReviewSince); err != nil {
+	if err := w.writeReviewDiffSince(ctx, baseRef, grant.ReviewSince); err != nil {
 		w.discardLocked(ctx)
 		return nil, err
 	}

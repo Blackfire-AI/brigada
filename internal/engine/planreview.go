@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -20,9 +21,11 @@ import (
 // the key plan_review:<plan>; the verdict is the reviewer's result block
 // (§7's verdict block), approve or changes with findings. Approve runs
 // the approval rules (§6.3) as a no-review creation does; changes
-// carries the findings to the foreman, whose amendment starts the next
-// round. At most two rounds: the second changes verdict proceeds through
-// the same evaluation as approve, the findings recorded and shown. A
+// parks the plan at needs_foreman with the findings delivered to the
+// foreman, whose amendment starts the next round or whose plan_accept
+// accepts the plan as reviewed with a recorded reason. At most two
+// rounds: the second changes verdict proceeds through the same
+// evaluation as approve, the findings recorded and shown. A
 // reviewer that cannot be had — no agent of another family offers the
 // review class, or the job never runs, runs past its hard cap or loses
 // its runner too often — proceeds the same way. A reviewer that runs and
@@ -396,7 +399,7 @@ func (e *Engine) queuePlanReviewRoundTx(tx *sql.Tx, project, plan, round int64, 
 		if family == "" {
 			reason = "no agent offers the review class"
 		}
-		return e.planReviewConcludedTx(tx, project, plan, planReviewSkipped, "", reason, now, true)
+		return e.planReviewConcludedTx(tx, project, plan, 0, planReviewSkipped, "", reason, now, true)
 	}
 	view, err := planReviewPlanTx(tx, plan)
 	if err != nil {
@@ -439,11 +442,13 @@ func (e *Engine) queuePlanReviewRoundTx(tx *sql.Tx, project, plan, round int64, 
 	return err
 }
 
-// The plan review's verdict words: the reviewer's own (§7), and the
-// engine's word for a round that never ran.
+// The plan review's verdict words: the reviewer's own (§7), the
+// engine's word for a round that never ran, and the word an acceptance
+// records (§6.2): the foreman took the plan as reviewed.
 const (
-	planReviewSkipped = "skipped"
-	planReviewNoRun   = "no_verdict"
+	planReviewSkipped  = "skipped"
+	planReviewNoRun    = "no_verdict"
+	planReviewAccepted = "accepted"
 )
 
 // planReviewBeginTx starts the plan's review at round 1 over a batch of
@@ -477,11 +482,11 @@ func (e *Engine) planReviewAnswerTx(tx *sql.Tx, project, plan int64, batch []int
 		return fmt.Errorf("read the review round of plan %d: %w", plan, err)
 	}
 	if round >= maxPlanReviewRounds {
-		return e.planReviewConcludedTx(tx, project, plan, planReviewSkipped, "",
+		return e.planReviewConcludedTx(tx, project, plan, 0, planReviewSkipped, "",
 			"the plan review's rounds are spent; the plan proceeds", now, true)
 	}
 	if len(batch) == 0 {
-		return e.planReviewConcludedTx(tx, project, plan, planReviewSkipped, "",
+		return e.planReviewConcludedTx(tx, project, plan, 0, planReviewSkipped, "",
 			"the amendment added or respecified no task; the plan proceeds", now, true)
 	}
 	reviewed, err := planReviewBatchTx(tx, plan)
@@ -539,9 +544,9 @@ func (e *Engine) planReviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, no
 		if err := recordOutcomeTx(tx, job, now); err != nil {
 			return err
 		}
-		return e.planReviewConcludedTx(tx, job.ProjectID, plan, verdictApprove, v.Findings, "", now, false)
+		return e.planReviewConcludedTx(tx, job.ProjectID, plan, job.ID, verdictApprove, v.Findings, "", now, false)
 	case haveVerdict && v.Verdict == verdictChanges:
-		return e.planReviewConcludedTx(tx, job.ProjectID, plan, verdictChanges, v.Findings, "", now, false)
+		return e.planReviewConcludedTx(tx, job.ProjectID, plan, job.ID, verdictChanges, v.Findings, "", now, false)
 	default:
 		reason := "no verdict in the plan review result"
 		switch {
@@ -655,7 +660,7 @@ func (e *Engine) planReviewRecoveredTx(tx *sql.Tx, project, plan int64, now time
 		if _, err := tx.Exec(`UPDATE plans SET review_round = ?, updated_at = ? WHERE id = ?`, round, fmtTime(now), plan); err != nil {
 			return fmt.Errorf("record the review round of plan %d: %w", plan, err)
 		}
-		return e.planReviewConcludedTx(tx, project, plan, planReviewSkipped, "",
+		return e.planReviewConcludedTx(tx, project, plan, 0, planReviewSkipped, "",
 			"the project's plan review is off; the recovered plan proceeds", now, true)
 	}
 	return e.queuePlanReviewRoundTx(tx, project, plan, round, batch, now)
@@ -673,34 +678,46 @@ func planReviewOfJobTx(job *jobRow) int64 {
 
 // planReviewConcludedTx records a verdict with its findings and applies
 // it (§6.2): the plan leaves reviewing through the approval rules'
-// evaluation, or — for a changes verdict with a round left — stays
-// reviewing with the findings delivered to the foreman and a wake. The
-// plan_reviewed event lands in the foreman's inbox whenever the foreman
-// has a judgment to read: the findings it must answer, or a plan that
-// now waits for the user's yes.
-func (e *Engine) planReviewConcludedTx(tx *sql.Tx, project, plan int64, verdict, findings, note string, now time.Time, force bool) error {
+// evaluation, or — for a changes verdict with a round left — parks at
+// needs_foreman with the findings delivered to the foreman and a wake,
+// the foreman's to answer with an amendment (the next round) or
+// plan_accept. reviewJob names the plan_review job whose verdict this
+// is, 0 when no job ran; the plan_reviewed event carries it, so the
+// history's --job view holds the verdict beside the findings. The
+// event lands in the foreman's inbox whenever the foreman has a
+// judgment to read: the findings it must answer, or a plan that now
+// waits for the user's yes.
+func (e *Engine) planReviewConcludedTx(tx *sql.Tx, project, plan, reviewJob int64, verdict, findings, note string, now time.Time, force bool) error {
 	var round int64
 	if err := tx.QueryRow("SELECT review_round FROM plans WHERE id = ?", plan).Scan(&round); err != nil {
 		return fmt.Errorf("read the review round of plan %d: %w", plan, err)
 	}
-	findings = boundNote(findings)
+	findings = boundPlanReviewFindings(findings)
 	if verdict == verdictChanges && note == "" && round >= maxPlanReviewRounds && !force {
 		note = "the review rounds are spent; the plan proceeds"
+	}
+	if verdict == verdictChanges && !force && round < maxPlanReviewRounds && note == "" {
+		note = "the plan parks at needs_foreman for your answer: amend it to answer the findings (the next round reviews the change), or accept it as reviewed with plan_accept and a reason"
 	}
 	if _, err := tx.Exec(`UPDATE plans SET review_verdict = ?, review_findings = ?, updated_at = ? WHERE id = ?`,
 		verdict, findings, fmtTime(now), plan); err != nil {
 		return fmt.Errorf("record the review verdict of plan %d: %w", plan, err)
 	}
-	payload := eventPayload{Plan: plan, Status: verdict, Findings: findings, Reason: note, Run: round}
+	payload := eventPayload{Plan: plan, Status: verdict, Findings: findings, Reason: note, Run: round, Job: reviewJob}
 	settings, err := projectApprovalTx(tx, project)
 	if err != nil {
 		return err
 	}
 	// A changes verdict with a round left is the foreman's to answer:
-	// the plan stays reviewing, the findings reach it, and its
-	// amendment starts the next round. Everything else concludes.
+	// the plan parks at needs_foreman — the needs-you queue shows it
+	// with its findings — and its amendment (the next round) or
+	// plan_accept moves it on. Everything else concludes.
 	if verdict == verdictChanges && !force && round < maxPlanReviewRounds {
-		if err := inboxEventTx(tx, evPlanReviewed, project, 0, 0, payload, now); err != nil {
+		if _, err := tx.Exec(`UPDATE plans SET state = ?, updated_at = ? WHERE id = ?`,
+			planNeedsForeman, fmtTime(now), plan); err != nil {
+			return fmt.Errorf("park plan %d at %s: %w", plan, planNeedsForeman, err)
+		}
+		if err := inboxEventTx(tx, evPlanReviewed, project, 0, reviewJob, payload, now); err != nil {
 			return err
 		}
 		return e.wakeForemanTx(tx, project, now)
@@ -718,12 +735,12 @@ func (e *Engine) planReviewConcludedTx(tx *sql.Tx, project, plan int64, verdict,
 		// starts the plan: a changes it must answer or that proceeded
 		// over spent rounds, a skipped or unusable review, and a plan
 		// the rules now hold for the user's yes.
-		if err := inboxEventTx(tx, evPlanReviewed, project, 0, 0, payload, now); err != nil {
+		if err := inboxEventTx(tx, evPlanReviewed, project, 0, reviewJob, payload, now); err != nil {
 			return err
 		}
 		return e.wakeForemanTx(tx, project, now)
 	}
-	_, err = appendEventTx(tx, evPlanReviewed, project, 0, 0, payload, now)
+	_, err = appendEventTx(tx, evPlanReviewed, project, 0, reviewJob, payload, now)
 	return err
 }
 
@@ -821,6 +838,95 @@ func (e *Engine) planReviewAppliedTx(tx *sql.Tx, project, plan int64, batch []in
 	return "active", nil
 }
 
+// AcceptPlan is the foreman's plan_accept (§6.2, §12.2): a plan its
+// review parked at needs_foreman is accepted as reviewed, with the
+// reason recorded — and the plan proceeds exactly as a spent round's
+// verdict does (planReviewAppliedTx): active with its first wave
+// queued, or awaiting the user's yes when the approval rules hold it,
+// the foreman told which. The reason is required, bounded like other
+// notes; a plan not parked is refused whole. project scopes the plan to
+// one project; 0 names any.
+func (e *Engine) AcceptPlan(ctx context.Context, project, plan int64, reason string) (PlanDecision, error) {
+	if strings.TrimSpace(reason) == "" {
+		return PlanDecision{}, fmt.Errorf("reason is required: say why the plan is accepted as reviewed")
+	}
+	var res PlanDecision
+	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+		now := e.cfg.Now()
+		if _, err := e.sweepTx(tx, now); err != nil {
+			return err
+		}
+		r, err := e.acceptPlanTx(tx, project, plan, reason, now)
+		if err != nil {
+			return err
+		}
+		res = r
+		return nil
+	})
+	if err != nil {
+		return PlanDecision{}, fmt.Errorf("accept plan %d: %w", plan, err)
+	}
+	return res, nil
+}
+
+// acceptPlanTx is AcceptPlan's own transaction: it clears the parked
+// state through the same evaluation a spent round's verdict runs,
+// records the plan_reviewed event with the reason, and returns what the
+// acceptance started.
+func (e *Engine) acceptPlanTx(tx *sql.Tx, project, plan int64, reason string, now time.Time) (PlanDecision, error) {
+	var proj int64
+	var state string
+	err := tx.QueryRow("SELECT project_id, state FROM plans WHERE id = ?", plan).Scan(&proj, &state)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && project != 0 && proj != project) {
+		return PlanDecision{}, fmt.Errorf("%w: %d", ErrNoPlan, plan)
+	}
+	if err != nil {
+		return PlanDecision{}, fmt.Errorf("read plan %d: %w", plan, err)
+	}
+	if err := activeProjectTx(tx, proj); err != nil {
+		return PlanDecision{}, err
+	}
+	if state != planNeedsForeman {
+		return PlanDecision{}, fmt.Errorf("%w: plan %d is %s; only a plan its review parked is accepted", ErrPlanNotParked, plan, state)
+	}
+	settings, err := projectApprovalTx(tx, proj)
+	if err != nil {
+		return PlanDecision{}, err
+	}
+	batch, err := planReviewBatchTx(tx, plan)
+	if err != nil {
+		return PlanDecision{}, err
+	}
+	var round int64
+	if err := tx.QueryRow("SELECT review_round FROM plans WHERE id = ?", plan).Scan(&round); err != nil {
+		return PlanDecision{}, fmt.Errorf("read the review round of plan %d: %w", plan, err)
+	}
+	reached, err := e.planReviewAppliedTx(tx, proj, plan, batch, settings, now)
+	if err != nil {
+		return PlanDecision{}, err
+	}
+	res := PlanDecision{PlanID: plan, State: reached}
+	if reached == "active" {
+		if res.Tasks, err = startedWorkTx(tx, plan, now); err != nil {
+			return PlanDecision{}, err
+		}
+	}
+	payload := eventPayload{Plan: plan, Status: planReviewAccepted,
+		Reason: boundNote("accepted as reviewed: " + reason), Run: round}
+	if reached == "active" {
+		// The foreman itself accepted: no wake of its own, the event is
+		// the log's record, as a clean approve's is.
+		_, err = appendEventTx(tx, evPlanReviewed, proj, 0, 0, payload, now)
+		return res, err
+	}
+	// A plan the rules now hold waits for the user's yes: the foreman
+	// reads the acceptance's outcome and relays it.
+	if err := inboxEventTx(tx, evPlanReviewed, proj, 0, 0, payload, now); err != nil {
+		return PlanDecision{}, err
+	}
+	return res, e.wakeForemanTx(tx, proj, now)
+}
+
 // planReviewUnrunnableTx concludes the review of the plan a failed
 // plan_review job names (§6.2): a job the queue TTL failed — no
 // runner ever took it — means the reviewer cannot be run, and the plan
@@ -837,7 +943,7 @@ func (e *Engine) planReviewUnrunnableTx(tx *sql.Tx, project int64, plan int64, r
 	if state != planReviewing {
 		return nil
 	}
-	return e.planReviewConcludedTx(tx, project, plan, planReviewSkipped, "", reason, now, true)
+	return e.planReviewConcludedTx(tx, project, plan, 0, planReviewSkipped, "", reason, now, true)
 }
 
 // cancelPlanReviewTx stops the plan's live plan_review job, as a

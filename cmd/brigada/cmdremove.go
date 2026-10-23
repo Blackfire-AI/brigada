@@ -84,7 +84,7 @@ func runRemove(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			live += st.Jobs[state]
 		}
 		for _, p := range st.Plans {
-			if p.State == "draft" || p.State == "pending_approval" || p.State == "reviewing" || p.State == "active" {
+			if p.State == "draft" || p.State == "pending_approval" || p.State == "reviewing" || p.State == "needs_foreman" || p.State == "active" {
 				live++
 			}
 		}

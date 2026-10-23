@@ -409,6 +409,67 @@ type planHeldTask struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// handlePlanAccept is the foreman's plan_accept behind the API (§6.2,
+// §12.2): a plan its review parked at needs_foreman is accepted as
+// reviewed, with the required reason recorded, and proceeds as a spent
+// round's verdict does. A plan that is not there is a 404, one not
+// parked a 409, a missing reason a 400.
+func (s *Server) handlePlanAccept(w http.ResponseWriter, r *http.Request, id identity) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	planID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "plan id must be an integer")
+		return
+	}
+	var req planAcceptRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	var project int64
+	err = s.st.View(r.Context(), func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT project_id FROM plans WHERE id = ?", planID).Scan(&project)
+	})
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		writeError(w, http.StatusNotFound, codeNotFound, "no such plan "+strconv.FormatInt(planID, 10))
+		return
+	case err != nil:
+		s.writeInternal(w, r, "resolve the plan", err)
+		return
+	}
+	if !id.mayTouchProject(project) {
+		writeError(w, http.StatusForbidden, codeForbidden,
+			"foreman token is scoped to project "+strconv.FormatInt(id.project, 10))
+		return
+	}
+	res, err := s.eng.AcceptPlan(r.Context(), project, planID, req.Reason)
+	switch {
+	case errors.Is(err, engine.ErrNoPlan):
+		writeError(w, http.StatusNotFound, codeNotFound, err.Error())
+		return
+	case errors.Is(err, engine.ErrPlanNotParked):
+		writeError(w, http.StatusConflict, codeConflict, err.Error())
+		return
+	case err != nil:
+		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+		return
+	}
+	out := planDecisionResponse{PlanID: res.PlanID, State: res.State}
+	for _, t := range res.Tasks {
+		out.Tasks = append(out.Tasks, planCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// planAcceptRequest is the plan_accept body (§12.2): the reason the
+// foreman accepts the plan as reviewed, required and bounded like other
+// notes.
+type planAcceptRequest struct {
+	Reason string `json:"reason"`
+}
+
 // planCreatedTask is one task the plan made: its id, name and work job
 // (0 while it waits on dependencies).
 type planCreatedTask struct {
