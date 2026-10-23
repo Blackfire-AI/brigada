@@ -84,9 +84,9 @@ tasks:
     base: "lr-engine"
     continue: "lr-engine"
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-185-r1"
-    rounds: 1
+    rounds: 2
   - id: 186
     name: "flaky-restart-tests"
     title: "#75 de-flake the runner restart handoff tests under -race on Linux"
