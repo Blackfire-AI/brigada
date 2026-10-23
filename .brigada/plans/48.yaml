@@ -1,0 +1,95 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 48
+title: "v1.0.0-rc.3: #78 TempDir flake, #75 runner restart and env secrets, #71 infra retries"
+repo: "github.com/Blackfire-AI/brigada"
+state: reviewing
+created: 2026-10-23T13:04:54.455142Z
+updated: 2026-10-23T13:04:54.455142Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps — the continued
+# dep when base is empty and continue is set, else the default branch; merge a
+# task after its base. A task with continue, one of deps, starts in the
+# session of the dep's author.
+# States are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1);
+# review_tier and review_effort do the same for its reviews (§7, §8); caps
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1).
+tasks:
+  - id: 170
+    name: "flake"
+    title: "#78 TestBP8aExit: stop writes into remote.git/objects after the runner exits"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 171
+    name: "drain"
+    title: "#75 a runner restart drains first; --now forces it"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 172
+    name: "authnote"
+    title: "#75 name the environment variable and the runner start time in an auth needs-you line"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 173
+    name: "secrets"
+    title: "#75 secrets by reference: env.<harness>.<VAR> = keychain:/file:"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 174
+    name: "infra-class"
+    title: "#71 class connection and DNS failures of a CLI as infra"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 175
+    name: "infra-retry"
+    title: "#71 the infra retry outlives an outage"
+    class: "implement"
+    deps: ["infra-class"]
+    base: "infra-class"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 176
+    name: "infra-show"
+    title: "#71 show an infra retry in status and top; GUIDE troubleshooting"
+    class: "implement"
+    deps: ["infra-retry"]
+    base: "infra-retry"
+    continue: "infra-retry"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
