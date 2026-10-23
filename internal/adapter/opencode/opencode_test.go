@@ -303,23 +303,75 @@ func TestLimitResetFixture(t *testing.T) {
 	}
 }
 
+// TestLimitResetZoneFixture replays limit messages through adapters
+// whose Command named the job's model: a Z.ai model's zone-less reset is
+// read in Beijing wall-clock (UTC+8) whatever the machine's zone (the
+// test zone is +02:00), a reset further away than the window the message
+// names is clamped to now + window, and a non-Z.ai model keeps today's
+// machine-zone read.
+func TestLimitResetZoneFixture(t *testing.T) {
+	fixResetClock(t)
+	stubCLI(t)
+	for _, tc := range []struct {
+		name, model, file, text, want string
+	}{
+		{"zai zone-less is UTC+8", "zai-coding-plan/glm-4.6", "failure-limit-reset-zai.jsonl",
+			"Weekly/Monthly Limit Exhausted. Your limit will reset at 2026-10-20 21:32:04",
+			"2026-10-20T21:32:04+08:00"},
+		{"zai reset beyond the window clamped", "zai-coding-plan/glm-4.6", "failure-limit-reset-zai-window.jsonl",
+			"Weekly/Monthly Limit Exhausted. Your limit will reset at 2026-10-21 05:32:04 for 5 hour",
+			"2026-10-20T14:00:00Z"},
+		{"zhipuai zone-less is UTC+8", "zhipuai/glm-5", "failure-limit-reset-zai.jsonl",
+			"Weekly/Monthly Limit Exhausted. Your limit will reset at 2026-10-20 21:32:04",
+			"2026-10-20T21:32:04+08:00"},
+		{"non-Z.ai model unchanged", "anthropic/claude-opus-4.6", "failure-limit-reset.jsonl",
+			"Weekly/Monthly Limit Exhausted. Your limit will reset at 2026-10-20 21:32:04",
+			"2026-10-20T21:32:04+02:00"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &Adapter{}
+			if _, err := a.Command(adapter.Job{Prompt: "p", Model: tc.model}, t.TempDir(), ""); err != nil {
+				t.Fatal(err)
+			}
+			events := parseFixture(t, tc.file, a.ParseEvent)
+			want := []adapter.Event{{Kind: adapter.EvError, ErrorKind: adapter.ErrLimit, Text: tc.text, SessionID: "ses_fixture", LimitUntil: tc.want}}
+			if !slices.Equal(events, want) {
+				t.Errorf("events = %+v, want %+v", events, want)
+			}
+		})
+	}
+}
+
 func TestLimitReset(t *testing.T) {
 	fixResetClock(t)
-	for _, tc := range []struct{ text, want string }{
-		{"Your limit will reset at 2026-10-20 21:32:04", "2026-10-20T21:32:04+02:00"},
-		{"Your limit will reset at 2026-10-20 21:32", "2026-10-20T21:32:00+02:00"},
-		{"Your limit will reset at 2026-10-20T21:32:04Z.", "2026-10-20T21:32:04Z"},
-		{"Your limit will reset at 2026-10-20 21:32:04 UTC", "2026-10-20T21:32:04Z"},
-		{"Your limit will reset at 2026-10-20 21:32:04+08:00", "2026-10-20T21:32:04+08:00"},
-		{"Your limit will reset at 2026-10-20 21:32:04 -0500", "2026-10-20T21:32:04-05:00"},
-		{"Your limit will reset at 2026-10-20 07:00:00", ""}, // already past
-		{"Your limit will reset at 2026-13-20 21:32:04", ""},
-		{"Your limit will reset at 2026-02-31 21:32:04", ""},
-		{"Your limit will reset soon", ""},
-		{"", ""},
+	const zai = "zai-coding-plan/glm-4.6"
+	for _, tc := range []struct{ text, model, want string }{
+		{"Your limit will reset at 2026-10-20 21:32:04", "", "2026-10-20T21:32:04+02:00"},
+		{"Your limit will reset at 2026-10-20 21:32", "", "2026-10-20T21:32:00+02:00"},
+		{"Your limit will reset at 2026-10-20T21:32:04Z.", "", "2026-10-20T21:32:04Z"},
+		{"Your limit will reset at 2026-10-20 21:32:04 UTC", "", "2026-10-20T21:32:04Z"},
+		{"Your limit will reset at 2026-10-20 21:32:04+08:00", "", "2026-10-20T21:32:04+08:00"},
+		{"Your limit will reset at 2026-10-20 21:32:04 -0500", "", "2026-10-20T21:32:04-05:00"},
+		{"Your limit will reset at 2026-10-20 07:00:00", "", ""}, // already past
+		{"Your limit will reset at 2026-13-20 21:32:04", "", ""},
+		{"Your limit will reset at 2026-02-31 21:32:04", "", ""},
+		{"Your limit will reset soon", "", ""},
+		{"", "", ""},
+		// A Z.ai model's zone-less reset is Beijing wall-clock (UTC+8);
+		// an explicit zone keeps its own, and other models are unchanged.
+		{"Your limit will reset at 2026-10-20 21:32:04", zai, "2026-10-20T21:32:04+08:00"},
+		{"Your limit will reset at 2026-10-20 21:32:04+08:00", zai, "2026-10-20T21:32:04+08:00"},
+		{"Your limit will reset at 2026-10-20T21:32:04Z", zai, "2026-10-20T21:32:04Z"},
+		{"Your limit will reset at 2026-10-20 21:32:04", "zhipuai/glm-5", "2026-10-20T21:32:04+08:00"},
+		{"Your limit will reset at 2026-10-20 21:32:04", "anthropic/claude-opus-4.6", "2026-10-20T21:32:04+02:00"},
+		// A reset further away than the window the message names is
+		// clamped to now + window.
+		{"Your limit will reset at 2026-10-21 05:32:04 for 5 hour", zai, "2026-10-20T14:00:00Z"},
+		{"Your limit will reset at 2026-10-20 20:30:00 for 5 hour", zai, "2026-10-20T20:30:00+08:00"}, // inside the window: kept
+		{"Your limit will reset at 2026-10-20 21:32:04 for 5 hour", "", "2026-10-20T14:00:00Z"},
 	} {
-		if got := limitReset(tc.text); got != tc.want {
-			t.Errorf("limitReset(%q) = %q, want %q", tc.text, got, tc.want)
+		if got := limitReset(tc.text, tc.model); got != tc.want {
+			t.Errorf("limitReset(%q, %q) = %q, want %q", tc.text, tc.model, got, tc.want)
 		}
 	}
 }
