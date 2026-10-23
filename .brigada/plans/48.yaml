@@ -27,9 +27,9 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-170-r2"
-    rounds: 1
+    rounds: 2
   - id: 171
     name: "drain"
     title: "#75 a runner restart drains first; --now forces it"
