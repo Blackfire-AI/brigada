@@ -66,6 +66,35 @@ func TestStatusSectionsRunning(t *testing.T) {
 	}
 }
 
+// TestStatusSectionsRunnerDraining: a pending restart drain (§5.1) is
+// one line after the running jobs it waits out — plural and singular —
+// and nothing is said when nothing runs or no runner drains.
+func TestStatusSectionsRunnerDraining(t *testing.T) {
+	st := Status{
+		Running: []engine.StatusJob{
+			{ID: 6, TaskID: 4, Kind: "review", Harness: "kimi"},
+			{ID: 7, TaskID: 5, Kind: "work", Harness: "claude"},
+		},
+		RunnerDraining: true,
+	}
+	if got := StatusSections(st); !strings.Contains(got, "runner restarting after 2 running jobs\n") {
+		t.Errorf("status sections = %q, want the drain's line after the running jobs", got)
+	}
+	st.Running = st.Running[:1]
+	if got := StatusSections(st); !strings.Contains(got, "runner restarting after 1 running job\n") {
+		t.Errorf("status sections = %q, want the singular drain line", got)
+	}
+	st.Running = nil
+	if got := StatusSections(st); strings.Contains(got, "runner restarting") {
+		t.Errorf("status sections = %q, want no drain line once nothing runs", got)
+	}
+	st.RunnerDraining = false
+	st.Running = []engine.StatusJob{{ID: 6, TaskID: 4, Kind: "review", Harness: "kimi"}}
+	if got := StatusSections(st); strings.Contains(got, "runner restarting") {
+		t.Errorf("status sections = %q, want no drain line while no runner drains", got)
+	}
+}
+
 // TestStatusSectionsShowGateHolds: a task held at the land gate or
 // waiting at the push gate is a needs-you line naming its task id and
 // the rule that tripped.
@@ -85,6 +114,17 @@ func TestStatusSectionsShowGateHolds(t *testing.T) {
 func TestStatusSectionsNamesAMissingForemanPair(t *testing.T) {
 	st := Status{Held: []engine.HeldJob{{ID: 9, Kind: "foreman", Layer: "no_pair", Agent: "claude/opus"}}}
 	want := "held: job #9 foreman: foreman turn waiting: no runner offers claude/opus"
+	if got := StatusSections(st); !strings.Contains(got, want) {
+		t.Errorf("status sections = %q, want the line %q", got, want)
+	}
+}
+
+// TestStatusSectionsShowsAnInfraRetry: a job waiting out an infra
+// backoff reads as the retry with its wait and the failure's words.
+func TestStatusSectionsShowsAnInfraRetry(t *testing.T) {
+	nb := time.Now().Add(5 * time.Minute).UTC().Format(engine.TimeLayout)
+	st := Status{Retries: []engine.InfraRetry{{ID: 9, TaskID: 4, Kind: "work", NotBefore: nb, Reason: "could not resolve github.com"}}}
+	want := "waiting: task #4 work: retry in 5m: could not resolve github.com"
 	if got := StatusSections(st); !strings.Contains(got, want) {
 		t.Errorf("status sections = %q, want the line %q", got, want)
 	}
@@ -143,11 +183,13 @@ func TestStatusSectionsPlanReviewFindings(t *testing.T) {
 	st := Status{Plans: []engine.StatusPlan{
 		{ID: 7, Title: "parked", State: "needs_foreman", ReviewRound: 1, ReviewVerdict: "changes", ReviewFindings: long, ReviewJob: 12},
 		{ID: 8, Title: "short", State: "reviewing", ReviewRound: 2, ReviewVerdict: "changes", ReviewFindings: "split the storage layer out"},
+		{ID: 9, Title: "amended", State: "reviewing", ReviewRound: 1, WaitingAmendment: true},
 	}}
 	got := StatusSections(st)
 	for _, want := range []string{
 		"#7 needs_foreman (round 1) parked",
 		"#8 reviewing (round 2) short",
+		"#9 reviewing (round 1) amended\n  amendment waits for the review round\n",
 		"… (full: brigada history --job 12)",
 		"findings: split the storage layer out\n",
 	} {

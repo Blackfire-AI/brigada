@@ -138,7 +138,7 @@ func TestAgentsAdd(t *testing.T) {
 	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, want) {
 		t.Fatalf("lines = %q, want %q", got, want)
 	}
-	for _, text := range []string{"registered claude/opus (tier heavy, classes review,answer)", line, "Restart the runner"} {
+	for _, text := range []string{"registered claude/opus (tier heavy, classes review,answer)", line, "No runner running; brigada start serves it."} {
 		if !strings.Contains(out, text) {
 			t.Errorf("output lacks %q:\n%s", text, out)
 		}

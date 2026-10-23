@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"os/exec"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -144,6 +146,9 @@ const (
 	// EvError is the CLI reporting a failure whose kind sorts what the
 	// engine does with it (§8: quota, auth, the rest).
 	EvError EventKind = "error"
+	// EvWarning is a CLI notice that is not a failure: the run goes on,
+	// and the runner does not take it for the run's error.
+	EvWarning EventKind = "warning"
 )
 
 // ErrorKind sorts an error event: a quota limit hit (the account cools
@@ -162,7 +167,61 @@ const (
 	// place, carrying the previous attempt's context in its prompt (§5.6) — a session cannot be rebuilt from its id alone.
 	ErrResumeFailed ErrorKind = "resume_failed"
 	ErrOther        ErrorKind = "other"
+	// ErrInfra is the CLI failing to reach its provider at all: the
+	// connection or the name lookup failed before the run produced
+	// anything. The environment's failure, never the agent's: the job is
+	// retried as a transient error and no health strike is charged.
+	ErrInfra ErrorKind = "infra"
+	// ErrModel is the provider rejecting the model itself: the account
+	// has no access to it, or it does not exist (a 400
+	// invalid_request_error). The agent cannot work until the user
+	// fixes its model or the account, so it stays out like an auth break
+	// and no probe clears it.
+	ErrModel ErrorKind = "model"
 )
+
+// modelRejectedRe matches a provider refusing the model by name: "The
+// 'x' model is not supported when using Codex with a ChatGPT account",
+// "The model `x` does not exist", "Model not found: x", "There's an
+// issue with the selected model". The word "model" must come before the
+// refusal on the same sentence, so a session or tool that is "not found"
+// is not taken for it.
+var modelRejectedRe = regexp.MustCompile(`(?i)\bmodels?\b[^.\n]{0,100}?(not exist|is not supported|not supported|not found|is unsupported|is not available)|invalid model|issue with the selected model`)
+
+// IsModelRejectedText reports whether a failure's text says the provider
+// rejected the model: unsupported for the account, or nonexistent.
+func IsModelRejectedText(text string) bool {
+	// "Model metadata for x not found" is a codex notice that the run
+	// goes on past, not a refusal.
+	if strings.Contains(strings.ToLower(text), "metadata") {
+		return false
+	}
+	return modelRejectedRe.MatchString(text)
+}
+
+// infraPhrases are the words a CLI's connection or DNS failure carries,
+// lowercase: what a network that is down or not yet up looks like.
+var infraPhrases = []string{
+	"cannot connect to api",
+	"could not resolve host",
+	"connection refused",
+	"connection reset",
+	"getaddrinfo",
+}
+
+// IsInfraText reports whether a failure's text names a connection or DNS
+// failure. The words alone prove nothing about when they were said: the
+// runner keeps the infra kind only for a run that produced no output
+// before it.
+func IsInfraText(text string) bool {
+	lower := strings.ToLower(text)
+	for _, p := range infraPhrases {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
+}
 
 // ResumeCapableHarnesses is the set of harnesses a foreman may run on
 // (design §4.1): the foreman's turns wake headless and resume the
@@ -184,6 +243,18 @@ var ResumeCapableHarnesses = map[string]bool{
 	// dsh is worker-only too: `dsh --session-id <id>` resumes headless,
 	// but no MCP-config flag is known to carry the bridge, so its adapter
 	// refuses MCP-config jobs.
+}
+
+// CredentialEnv names the environment variable a harness's credential
+// comes from, or "" when the harness logs in some other way (a stored
+// login, an OAuth session). A runner started without the variable cannot
+// authenticate that harness, which the needs-you line for an auth break
+// says.
+func CredentialEnv(harness string) string {
+	if harness == "dsh" {
+		return "DEEPSEEK_API_KEY"
+	}
+	return ""
 }
 
 // ResumeCapable reports whether harness's CLI can resume a session
@@ -213,6 +284,24 @@ type Event struct {
 	// LimitUntil is a limit error's reset time, RFC3339, when the CLI's
 	// text carried one machine-readably; empty when unknown (§4.4).
 	LimitUntil string
+	// Final marks an error event as the CLI's closing verdict on the run
+	// (codex's turn.failed): it names the failure over any earlier error
+	// event of the same stream.
+	Final bool
+	// Notice marks an error event that is only a warning while the
+	// turn has not started (codex's startup notices): the runner, which
+	// tracks each job's turn through TurnMarker, downgrades it to a
+	// warning until then.
+	Notice bool
+}
+
+// TurnMarker is the optional adapter interface for a CLI whose stream
+// opens the turn with a line of its own. The adapter itself is shared by
+// concurrent jobs and keeps no stream state; the runner asks it of each
+// stdout line and keeps the job's turn.
+type TurnMarker interface {
+	// StartsTurn reports whether the stdout line opens the turn.
+	StartsTurn(line []byte) bool
 }
 
 // IsProgress reports whether the event is progress in the sense of

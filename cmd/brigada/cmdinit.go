@@ -43,11 +43,12 @@ var initAccountDefaults = map[string]int{
 
 func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code int) {
 	fs := newFlagSet("init",
-		"brigada init [--probe | --yes] [--verbose] [options] (inside one repository, or in a folder holding several: then --all selects them)",
+		"brigada init [--probe | --yes] [--verbose] [--now] [options] (inside one repository, or in a folder holding several: then --all selects them)",
 		"Probe and confirm setup of one repository or a folder of repositories.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	yes := fs.Bool("yes", false, "apply the displayed plan without prompting (does not confirm authentication)")
+	now := fs.Bool("now", false, "restart the runner at once when its agents change, cutting its running jobs; without it the restart waits out running jobs")
 	probe := fs.Bool("probe", false, "print the plan only; write nothing and start nothing")
 	verbose := fs.Bool("verbose", false, "also print the full contents of new repository setup files")
 	limited := fs.Bool("accept-limited", false, "acknowledge fewer than two review families; reviews still require another family")
@@ -1044,17 +1045,23 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 
 	runnerSpecs := runnerSpecStrings(runnerAgents)
-	result, err := startDetachedRunner(ctx, rt, runnerSpecs, *parallel)
+	result, err := startDetachedRunner(ctx, rt, runnerSpecs, *parallel, "")
 	if err != nil {
 		return partial(fmt.Errorf("project registered and imported, but runner startup failed: %w", err))
 	}
 	restarted := false
 	if result.Existing && initAgentsDiffer(result.Record, runnerAdverts, runnerAgents, *parallel) {
-		if _, err := terminateRunner(
-			ctx, runnerStateDir(rt), result.Record); err != nil {
-			return partial(fmt.Errorf("stop runner for new agents: %w", err))
+		// The handoff is the runner's own protocol: init leaves a
+		// restart request it honours between jobs, so no running job is
+		// cut — unless --now asked for exactly that.
+		mode := runnerstate.RestartDrain
+		if *now {
+			mode = runnerstate.RestartNow
 		}
-		result, err = startDetachedRunner(ctx, rt, runnerSpecs, *parallel)
+		if result.Existing && !*now {
+			fmt.Fprintln(stdout, "runner restarting: it finishes its running jobs first; --now cuts them")
+		}
+		result, err = startDetachedRunner(ctx, rt, runnerSpecs, *parallel, mode)
 		if err != nil {
 			return partial(fmt.Errorf("restart runner: %w", err))
 		}

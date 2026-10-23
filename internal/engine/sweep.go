@@ -383,10 +383,12 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 		// The TTL is for jobs no runner can serve (§8.1); a job held only
 		// by a full cap layer, or waiting for its cooling agent, waits as
 		// long as it takes, so the clock counts from the later of
-		// queued_at and the last hold.
+		// queued_at and the last hold. A job waiting out its own retry
+		// backoff (§3, §5.1) is the same: not_before is a hold the
+		// engine itself placed, so the clock counts from it too.
 		rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0), kind, COALESCE(require_agent, 0) FROM jobs
 			WHERE status = 'queued' AND queued_at IS NOT NULL
-			AND max(queued_at, COALESCE(cap_held_at, queued_at)) <= ?`, fmtTime(now.Add(-e.cfg.QueueTTL)))
+			AND max(queued_at, COALESCE(cap_held_at, queued_at), COALESCE(not_before, queued_at)) <= ?`, fmtTime(now.Add(-e.cfg.QueueTTL)))
 		if err != nil {
 			return rep, fmt.Errorf("sweep queue TTL: %w", err)
 		}

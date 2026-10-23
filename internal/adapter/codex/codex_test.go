@@ -580,3 +580,51 @@ func TestAttachReadingCheckoutIsReadOnly(t *testing.T) {
 		t.Errorf("session cwd changed: %s", cmd.Dir)
 	}
 }
+
+// TestNoticeAndFinalMarks: the adapter is stateless, so it marks what
+// the runner's per-job turn decides on — the error event and item carry
+// Notice, turn.failed carries Final, stderr JSON errors carry neither —
+// and StartsTurn spots turn.started.
+func TestNoticeAndFinalMarks(t *testing.T) {
+	a := &Adapter{}
+	for _, line := range []string{
+		`{"type":"error","message":"Reconnecting... 1/5"}`,
+		`{"type":"item.completed","item":{"type":"error","message":"Model metadata not found"}}`,
+	} {
+		ev, ok := a.ParseEvent([]byte(line))
+		if !ok || ev.Kind != adapter.EvError || !ev.Notice || ev.Final {
+			t.Errorf("ParseEvent(%s) = %+v, %v; want a Notice error", line, ev, ok)
+		}
+	}
+	ev, ok := a.ParseEvent([]byte(`{"type":"turn.failed","error":{"message":"boom"}}`))
+	if !ok || ev.Kind != adapter.EvError || ev.Notice || !ev.Final || ev.Text != "boom" {
+		t.Errorf("turn.failed = %+v, %v; want a Final error", ev, ok)
+	}
+	ev, ok = a.ParseErrEvent([]byte(`{"type":"error","message":"boom"}`))
+	if !ok || ev.Notice {
+		t.Errorf("stderr error = %+v, %v; want no Notice", ev, ok)
+	}
+	if !a.StartsTurn([]byte(`{"type":"turn.started"}`)) || a.StartsTurn([]byte(`{"type":"turn.failed"}`)) || a.StartsTurn([]byte(`junk`)) {
+		t.Error("StartsTurn must be true for turn.started alone")
+	}
+}
+
+// TestPreTurnFixtures: the streams parse to the marks the runner needs.
+func TestPreTurnFixtures(t *testing.T) {
+	failed := parseFixture(t, "preturn-error-failed.jsonl")
+	var notices, finals int
+	for _, ev := range failed {
+		if ev.Kind == adapter.EvError && ev.Notice {
+			notices++
+		}
+		if ev.Kind == adapter.EvError && ev.Final && ev.ErrorKind == adapter.ErrLimit && strings.Contains(ev.Text, "usage limit") {
+			finals++
+		}
+	}
+	if notices != 1 || finals != 1 {
+		t.Errorf("failed stream: %d notices, %d finals; want 1 and 1 (%+v)", notices, finals, failed)
+	}
+	if !slices.ContainsFunc(parseFixture(t, "preturn-error-ok.jsonl"), func(e adapter.Event) bool { return e.Notice }) {
+		t.Error("ok stream: no Notice error")
+	}
+}

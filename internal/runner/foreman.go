@@ -156,6 +156,7 @@ func (r *jobRun) resetRunRecord() {
 	r.cliError = nil
 	r.stderrError = nil
 	r.sessionID = ""
+	r.turnStarted = false
 	r.toolInFlight = 0
 }
 

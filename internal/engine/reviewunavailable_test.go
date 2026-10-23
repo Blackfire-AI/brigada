@@ -77,6 +77,28 @@ func TestAuthFailureReviewIsRequeued(t *testing.T) {
 	}
 }
 
+// TestModelRejectedThenNoVerdictRetryIsQueuedNotParked: a review whose
+// reviewer's model was rejected never answered, so it does not use up
+// the cycle's one no-verdict retry.
+func TestModelRejectedThenNoVerdictRetryIsQueuedNotParked(t *testing.T) {
+	e, rev := reviewStack(t)
+	e.complete(e.leaseAny(rev[0]), Completion{Error: "The 'x' model is not supported for this account", ErrorKind: "model"})
+	if p, ok := e.eventPayloadOf(evReviewRetry); !ok || !strings.Contains(p.Reason, "reviewer unavailable (model)") {
+		t.Fatalf("retry event = %+v, %v", p, ok)
+	}
+	g2 := e.leaseAny(rev[1])
+	if g2 == nil || g2.Kind != KindReview {
+		t.Fatalf("requeued grant = %+v, want a review", g2)
+	}
+	e.complete(g2, Completion{Result: "{}"})
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskReviewing {
+		t.Fatalf("task state = %s, want reviewing with the retry queued", state)
+	}
+	if n := e.countEvents(evReviewNoVerdict); n != 0 {
+		t.Errorf("review_no_verdict events = %d, want none", n)
+	}
+}
+
 func TestSetupFailureReviewIsRequeued(t *testing.T) {
 	e, rev := reviewStack(t)
 	e.complete(e.leaseAny(rev[0]), Completion{Error: "setup failed", ErrorKind: ErrorKindSetup})

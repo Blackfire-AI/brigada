@@ -345,7 +345,9 @@ func firstLine(command string) string {
 //	item.completed command_execution  → tool end (the same text)
 //	item.started mcp_tool_call       → tool start (server/tool)
 //	item.completed mcp_tool_call     → tool end, naming the error when the call failed
-//	error, turn.failed, error item    → an error event, sorted by its text
+//	error, error item                 → an error event, sorted by its text;
+//	                                    marked Notice: a warning until turn.started
+//	turn.failed                       → the final error event, sorted by its text
 //	turn.completed                    → usage counters (not progress)
 //	turn.started                      → ignored
 //
@@ -377,21 +379,48 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 		}
 		return adapter.Event{Kind: adapter.EvSession, SessionID: lj.ThreadID}, true
 	case "item.started", "item.completed":
-		return itemEvent(lj)
+		return a.itemEvent(lj)
 	case "error":
-		return errorEvent(lj.Message)
+		return a.streamError(lj.Message)
 	case "turn.failed":
-		if lj.Error == nil {
-			return errorEvent("")
+		msg := ""
+		if lj.Error != nil {
+			msg = lj.Error.Message
 		}
-		return errorEvent(lj.Error.Message)
+		ev, ok := errorEvent(msg)
+		ev.Final = true
+		return ev, ok
 	default:
 		return adapter.Event{}, false
 	}
 }
 
+// StartsTurn implements adapter.TurnMarker: the line is the stream's
+// turn.started. The adapter keeps no stream state (one adapter serves
+// concurrent jobs); the runner tracks each job's turn and downgrades the
+// errors marked Notice that precede it.
+func (a *Adapter) StartsTurn(line []byte) bool {
+	var lj struct {
+		Type string `json:"type"`
+	}
+	return json.Unmarshal(bytes.TrimSpace(line), &lj) == nil && lj.Type == "turn.started"
+}
+
+var _ adapter.TurnMarker = (*Adapter)(nil)
+
+// streamError is an error event or error item. Before turn.started the
+// CLI is still starting up and its error is only a notice (a
+// model-metadata or reconnect warning): it carries Notice, so the runner
+// takes it for a warning, not the run's error, until the turn starts. A
+// turn.failed that follows names the failure.
+func (a *Adapter) streamError(text string) (adapter.Event, bool) {
+	ev, ok := errorEvent(text)
+	ev.Notice = true
+	return ev, ok
+}
+
 // itemEvent reads one item event.
-func itemEvent(lj lineJSON) (adapter.Event, bool) {
+func (a *Adapter) itemEvent(lj lineJSON) (adapter.Event, bool) {
 	if lj.Item == nil {
 		return adapter.Event{}, false
 	}
@@ -431,7 +460,7 @@ func itemEvent(lj lineJSON) (adapter.Event, bool) {
 		if started {
 			return adapter.Event{}, false
 		}
-		return errorEvent(lj.Item.Message)
+		return a.streamError(lj.Item.Message)
 	default:
 		return adapter.Event{}, false
 	}
@@ -473,7 +502,10 @@ func (a *Adapter) ParseErrEvent(line []byte) (adapter.Event, bool) {
 	var lj lineJSON
 	if err := json.Unmarshal(trimmed, &lj); err == nil && lj.Type != "" {
 		switch lj.Type {
-		case "error", "turn.failed":
+		case "error":
+			// Stderr has no turn order of its own: its error stays one.
+			return errorEvent(lj.Message)
+		case "turn.failed":
 			return a.ParseEvent(trimmed)
 		}
 		return adapter.Event{}, false
@@ -534,6 +566,9 @@ func errorEvent(text string) (adapter.Event, bool) {
 // nothing in the table is not an event. A limit's text also names its
 // reset time when it carries one, as LimitUntil.
 func phraseEvent(table []errorPhrase, text string) (adapter.Event, bool) {
+	if adapter.IsModelRejectedText(text) {
+		return adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrModel, Text: text}, true
+	}
 	lower := strings.ToLower(text)
 	for _, m := range table {
 		if strings.Contains(lower, m.phrase) {
@@ -543,6 +578,9 @@ func phraseEvent(table []errorPhrase, text string) (adapter.Event, bool) {
 			}
 			return ev, true
 		}
+	}
+	if adapter.IsInfraText(text) {
+		return adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrInfra, Text: text}, true
 	}
 	return adapter.Event{}, false
 }

@@ -389,11 +389,20 @@ func errorFromText(text string) (adapter.Event, bool) {
 		return adapter.Event{}, false
 	}
 	kind := adapter.ErrOther
+	if adapter.IsModelRejectedText(text) {
+		kind = adapter.ErrModel
+	}
 	for _, m := range errorPhrases {
+		if kind != adapter.ErrOther {
+			break
+		}
 		if strings.Contains(lower, m.phrase) {
 			kind = m.kind
 			break
 		}
+	}
+	if kind == adapter.ErrOther && adapter.IsInfraText(text) {
+		kind = adapter.ErrInfra
 	}
 	ev := adapter.Event{Kind: adapter.EvError, ErrorKind: kind, Text: text}
 	if kind == adapter.ErrLimit {

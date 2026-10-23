@@ -332,6 +332,13 @@ type Engine struct {
 	// calls may sweep concurrently.
 	sweepMu   sync.Mutex
 	lastSweep time.Time
+
+	// drainMu guards draining, the runners that reported a restart
+	// drain pending (§5.1): each takes no new lease and exits once its
+	// running jobs finish. A register from the same runner clears its
+	// mark — the fresh runner is up — and the engine's death clears all.
+	drainMu  sync.Mutex
+	draining map[int64]bool
 }
 
 // New returns an engine over s. Zero fields of cfg keep their defaults.

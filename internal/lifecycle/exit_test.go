@@ -63,29 +63,59 @@ func startRunnerProc(t *testing.T, bin, state, script string) *exec.Cmd {
 		t.Fatalf("open the runner log: %v", err)
 	}
 	cmd.Stdout, cmd.Stderr = logFile, logFile
+	// Its own process group: the cleanup waits for the runner's git
+	// children (a push's receive-pack and index-pack write into the
+	// remote's objects) to be gone before TempDir removal runs.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start the runner: %v", err)
 	}
 	t.Cleanup(func() {
-		if cmd.ProcessState != nil {
-			logFile.Close()
-			return
+		pgid := cmd.Process.Pid
+		if cmd.ProcessState == nil {
+			syscall.Kill(-pgid, syscall.SIGTERM)
+			done := make(chan struct{})
+			go func() { cmd.Wait(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				syscall.Kill(-pgid, syscall.SIGKILL)
+				<-done
+			}
 		}
-		cmd.Process.Signal(syscall.SIGTERM)
-		done := make(chan struct{})
-		go func() { cmd.Wait(); close(done) }()
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			cmd.Process.Kill()
-			<-done
-		}
+		waitGroupGone(t, pgid, "runner")
 		logFile.Close()
 		if data, err := os.ReadFile(logPath); err == nil {
 			t.Logf("runner log:\n%s", data)
 		}
 	})
 	return cmd
+}
+
+// waitGroupGone returns once no live process of group pgid is left, so
+// no git child of the runner or of an engine (a push's receive-pack)
+// can still write into the remote when TempDir cleanup runs. Jobs the
+// runner puts in groups of their own are outside it. Stragglers get a
+// SIGKILL after five seconds; a group still alive five seconds after
+// that fails the test instead of hanging it. A group holding only
+// zombies, such as an engine the runner started and never reaped, counts
+// as gone (testsupport.GroupGone): the test cannot reap them itself.
+// who names the process checked, for the failure message.
+func waitGroupGone(t *testing.T, pgid int, who string) {
+	t.Helper()
+	start := time.Now()
+	killed := false
+	for !testsupport.GroupGone(pgid) {
+		switch elapsed := time.Since(start); {
+		case elapsed > 10*time.Second:
+			t.Errorf("the %s's process group %d survived SIGKILL", who, pgid)
+			return
+		case elapsed > 5*time.Second && !killed:
+			syscall.Kill(-pgid, syscall.SIGKILL)
+			killed = true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // lsRemoteCount runs `git ls-remote --heads` with one ref pattern and
@@ -230,12 +260,9 @@ func TestBP8aExit(t *testing.T) {
 	if enginePid <= 0 {
 		t.Fatalf("no engine pid to kill (lock %s)", lock)
 	}
-	if err := syscall.Kill(enginePid, syscall.SIGKILL); err != nil {
-		t.Fatalf("SIGKILL the engine pid %d: %v", enginePid, err)
-	}
-	waitFor(t, "the killed engine's lock to come free", func() bool {
-		return lifecycle.EnginePid(lock) == 0
-	})
+	// SIGKILL the engine and its process group: a plan-file push in flight
+	// must not outlive the engine and write into the remote.
+	killEngineAt(t, state)
 
 	// The restart rides the same on-demand path a client takes (§13).
 	_, stderr, code = runBrigada(t, bin, "status", "--state-dir", state)

@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
 
 // statusFinishedKeep is how many finished plans the default status
@@ -71,6 +73,10 @@ type StatusInfo struct {
 	StartedAt string         `json:"started_at"`
 	Jobs      map[string]int `json:"jobs"`
 	Running   []StatusJob    `json:"running"`
+	// RunnerDraining is true while a runner has a restart drain pending
+	// (§5.1): it finishes its running jobs and exits, and the status
+	// renders the restart that waits behind them.
+	RunnerDraining bool `json:"runner_draining,omitempty"`
 	// ForemanMessages counts the user's messages waiting in the foreman
 	// inbox (§4.2 item 3): queued while a chat is attached, a turn runs,
 	// or the wake cannot happen; delivered ones are not counted.
@@ -94,10 +100,24 @@ type StatusInfo struct {
 	// Held lists the queued jobs a full cap layer holds (§8.1); the
 	// runner layer's are jobs waiting for a runner slot.
 	Held []HeldJob `json:"held,omitempty"`
+	// Retries lists the queued jobs waiting out an infrastructure
+	// backoff (§5.1): the job's not-before and the failure's words.
+	Retries []InfraRetry `json:"retries,omitempty"`
 	// Instructions lists the projects in scope that have project
 	// instructions (§5.9): source, version, size and digest; the text only
 	// from StatusWithInstructions.
 	Instructions []StatusInstructions `json:"instructions,omitempty"`
+}
+
+// InfraRetry is one queued work or fix job held out of leasing by the
+// infra backoff (§5.1): NotBefore is when it may be leased, Reason the
+// infrastructure failure's words, flattened to one line.
+type InfraRetry struct {
+	ID        int64  `json:"id"`
+	TaskID    int64  `json:"task_id,omitempty"`
+	Kind      string `json:"kind"`
+	NotBefore string `json:"not_before"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // StatusJob is one job a runner holds right now (§10): which job, for
@@ -145,11 +165,16 @@ type StatusPlan struct {
 	// the latest verdict and findings once a round has ended. The
 	// findings are the event's whole text; the short views that render
 	// them cut at their own bound and point to ReviewJob's history.
-	ReviewRound    int          `json:"review_round,omitempty"`
-	ReviewVerdict  string       `json:"review_verdict,omitempty"`
-	ReviewFindings string       `json:"review_findings,omitempty"`
-	ReviewJob      int64        `json:"review_job,omitempty"`
-	Tasks          []StatusTask `json:"tasks"`
+	ReviewRound    int    `json:"review_round,omitempty"`
+	ReviewVerdict  string `json:"review_verdict,omitempty"`
+	ReviewFindings string `json:"review_findings,omitempty"`
+	ReviewJob      int64  `json:"review_job,omitempty"`
+	// WaitingAmendment is true while the plan reviews with waiting
+	// amendment work (§6.2): tasks an amendment added or respecified
+	// under the running round, pending its verdict, which queues the
+	// next round over them.
+	WaitingAmendment bool         `json:"waiting_amendment,omitempty"`
+	Tasks            []StatusTask `json:"tasks"`
 }
 
 // StatusTask is one task of a status plan (§6.1).
@@ -323,6 +348,9 @@ func (e *Engine) status(ctx context.Context, project int64, withText, all bool) 
 		if info.Held, err = statusHeldTx(tx, project); err != nil {
 			return err
 		}
+		if info.Retries, err = statusRetriesTx(tx, project, now); err != nil {
+			return err
+		}
 		if info.Instructions, err = statusInstructionsTx(tx, project, withText); err != nil {
 			return err
 		}
@@ -331,7 +359,45 @@ func (e *Engine) status(ctx context.Context, project int64, withText, all bool) 
 	if err != nil {
 		return StatusInfo{}, fmt.Errorf("read status: %w", err)
 	}
+	// The drain mark is the engine's memory, not store state (§5.1), so
+	// it is read beside the store's answer, after it.
+	info.RunnerDraining = e.runnerDraining()
 	return info, nil
+}
+
+// statusRetriesTx lists the queued jobs still inside an infra backoff
+// (§5.1), oldest first: each is the retry retryInfraFailureTx queued, so
+// its task_infra_retry event carries the failure's words. A job whose
+// not-before has passed is leasable and not listed.
+func statusRetriesTx(tx *sql.Tx, project int64, now time.Time) ([]InfraRetry, error) {
+	query := `SELECT j.id, COALESCE(j.task_id, 0), j.kind, j.not_before, e.payload
+		FROM jobs j JOIN events e ON e.job_id = j.id AND e.kind = ?
+		WHERE j.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
+		AND j.status = 'queued' AND j.not_before > ?`
+	args := []any{evTaskInfraRetry, fmtTime(now)}
+	if project != 0 {
+		query += " AND j.project_id = ?"
+		args = append(args, project)
+	}
+	rows, err := tx.Query(query+" ORDER BY j.id", args...)
+	if err != nil {
+		return nil, fmt.Errorf("list the infra retries: %w", err)
+	}
+	defer rows.Close()
+	out := []InfraRetry{}
+	for rows.Next() {
+		var r InfraRetry
+		var payload string
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.Kind, &r.NotBefore, &payload); err != nil {
+			return nil, fmt.Errorf("list the infra retries: %w", err)
+		}
+		var p eventPayload
+		if json.Unmarshal([]byte(payload), &p) == nil {
+			r.Reason = oneLine(p.Reason, needsYouReasonLimit)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // statusSlotsTx lists the foreman slot of one project, or of every
@@ -446,7 +512,8 @@ func statusPlansTx(tx *sql.Tx, project int64, all bool) ([]StatusPlan, int, erro
 	// The review's latest job is where the history holds the verdict
 	// whole (§9): the short views that cut the findings point at it.
 	planCols := `p.id, pr.repo_url, p.title, p.state, p.review_round, p.review_verdict, p.review_findings,
-		COALESCE((SELECT j.id FROM jobs j WHERE j.key = 'plan_review:' || p.id ORDER BY j.id DESC LIMIT 1), 0)`
+		COALESCE((SELECT j.id FROM jobs j WHERE j.key = 'plan_review:' || p.id ORDER BY j.id DESC LIMIT 1), 0),
+		COALESCE(p.amend_batch, '')`
 	finishedQuery := `SELECT ` + planCols + `
 		FROM plans p JOIN projects pr ON pr.id = p.project_id
 		WHERE ` + scope + ` AND p.state IN ('done', 'cancelled')
@@ -485,9 +552,11 @@ func statusPlanRows(tx *sql.Tx, query string, args ...any) ([]StatusPlan, error)
 	plans := []StatusPlan{}
 	for rows.Next() {
 		var p StatusPlan
-		if err := rows.Scan(&p.ID, &p.RepoURL, &p.Title, &p.State, &p.ReviewRound, &p.ReviewVerdict, &p.ReviewFindings, &p.ReviewJob); err != nil {
+		var amendBatch string
+		if err := rows.Scan(&p.ID, &p.RepoURL, &p.Title, &p.State, &p.ReviewRound, &p.ReviewVerdict, &p.ReviewFindings, &p.ReviewJob, &amendBatch); err != nil {
 			return nil, fmt.Errorf("list the status plans: %w", err)
 		}
+		p.WaitingAmendment = amendBatch != ""
 		plans = append(plans, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -797,6 +866,40 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	}
 	lrows.Close()
 
+	// A foreman whose turns failed on the infrastructure until the retry
+	// window was spent (§5.1) waits for a person: the wake gave up and
+	// the queue names the outage. A turn woken since — the outage over,
+	// a user's ask — retires the entry.
+	orows, err := tx.Query(`SELECT pr.id, pr.repo_url, e.payload FROM projects pr
+		JOIN events e ON e.id = (
+			SELECT MAX(e2.id) FROM events e2 WHERE e2.kind = ? AND e2.project_id = pr.id)
+		WHERE pr.archived_at IS NULL
+		AND NOT EXISTS (SELECT 1 FROM events e3
+			WHERE e3.kind = ? AND e3.project_id = pr.id AND e3.id > e.id)`,
+		evForemanOutageSpent, evForemanWoken)
+	if err != nil {
+		return nil, fmt.Errorf("list the foremen outspent by an outage: %w", err)
+	}
+	defer orows.Close()
+	for orows.Next() {
+		var it NeedsYouItem
+		var payload string
+		if err := orows.Scan(&it.ID, &it.Title, &payload); err != nil {
+			return nil, fmt.Errorf("list the foremen outspent by an outage: %w", err)
+		}
+		it.Kind = "foreman"
+		it.State = "outage"
+		var p eventPayload
+		if json.Unmarshal([]byte(payload), &p) == nil {
+			it.Reason = oneLine(p.Reason, needsYouReasonLimit)
+		}
+		items = append(items, it)
+	}
+	if err := orows.Err(); err != nil {
+		return nil, fmt.Errorf("list the foremen outspent by an outage: %w", err)
+	}
+	orows.Close()
+
 	// Two projects that name one repository were left apart at startup
 	// (design §13.1); a person decides which stays.
 	dups, err := duplicateProjectItemsTx(tx, project)
@@ -810,17 +913,19 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 	// "Health"). Agents belong to no project, so only the unscoped view
 	// lists them. Cooling is not here: it waits for a clock.
 	if project == 0 {
-		brows, err := tx.Query(`SELECT id, harness, model, health_reason FROM agents WHERE health = 'broken' ORDER BY id`)
+		brows, err := tx.Query(`SELECT a.id, a.harness, a.model, a.health_reason, r.started_at
+			FROM agents a JOIN runners r ON r.id = a.runner_id WHERE a.health = 'broken' ORDER BY a.id`)
 		if err != nil {
 			return nil, fmt.Errorf("list the broken agents: %w", err)
 		}
 		defer brows.Close()
 		for brows.Next() {
 			var it NeedsYouItem
-			var harness, model string
-			if err := brows.Scan(&it.ID, &harness, &model, &it.Reason); err != nil {
+			var harness, model, started string
+			if err := brows.Scan(&it.ID, &harness, &model, &it.Reason, &started); err != nil {
 				return nil, fmt.Errorf("list the broken agents: %w", err)
 			}
+			it.Reason = brokenReason(it.Reason, harness, started)
 			it.Kind = "agent"
 			it.State = "broken"
 			it.Title = harness + "/" + model
@@ -831,6 +936,27 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 		}
 	}
 	return items, nil
+}
+
+// brokenReason is the needs-you reason for a broken agent. An auth break
+// on a harness whose credential comes from the environment names the
+// variable and the time the runner process started, so a runner started
+// without the variable shows; a rejected model's reason points at
+// `brigada agents`; every other reason is unchanged.
+func brokenReason(reason, harness, started string) string {
+	if isModelReason(reason) {
+		// The user checks whether the model is still offered.
+		return reason + "; check the model is still offered: `brigada agents`"
+	}
+	env := adapter.CredentialEnv(harness)
+	if reason != brokenAuth || env == "" {
+		return reason
+	}
+	out := reason + ": " + env + " is read from the runner's environment"
+	if started == "" {
+		return out + "; the runner has not reported its start"
+	}
+	return out + "; the runner started " + started
 }
 
 // awaitingReasonTx reads the reasons the plan's latest

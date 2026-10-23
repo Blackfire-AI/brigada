@@ -118,7 +118,7 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 
 - writes **`.brigada/project.yaml`** ([section 6](#6-configuring-a-project)). The file is yours to commit; brigada never commits or pushes anything. The write is refused if the file is a symlink or names another repository, and a file that changed after the plan was shown is not overwritten;
 - strips brigada's wiring from the repository, unless `--no-wiring`: the `brigada` server in `.mcp.json`, the hooks in private `.claude/settings.local.json` and the legacy brigada hooks in shared `.claude/settings.json`, the `brigada` table in `.codex/config.toml`, `.brigada/foreman.md` and its block in `AGENTS.md` with `CLAUDE.md`'s import section, the old foreman skill, and the `/.claude/settings.local.json` line in git's `info/exclude`. Init writes no harness wiring; only brigada's own entries change, and a file you have not edited comes back byte for byte;
-- starts the engine on demand, imports the project file (recording where each value came from, [section 6](#6-configuring-a-project)), registers the foreman, saves the agent and concurrency choices and starts one detached runner. The answers replace what they cover — an interactive run's questions replace every saved line of each CLI asked about, so declining a CLI removes its lines, while `--agent` replaces the harness and model pairs it names — and every other saved agent line stays in the agents file and the runner serves it, unless `--overwrite-config` is passed. If its agents or concurrency changed, init restarts the runner with the new choices; otherwise it keeps the running one. The runner's log is `runner.log` in the state directory.
+- starts the engine on demand, imports the project file (recording where each value came from, [section 6](#6-configuring-a-project)), registers the foreman, saves the agent and concurrency choices and starts one detached runner. The answers replace what they cover — an interactive run's questions replace every saved line of each CLI asked about, so declining a CLI removes its lines, while `--agent` replaces the harness and model pairs it names — and every other saved agent line stays in the agents file and the runner serves it, unless `--overwrite-config` is passed. If its agents or concurrency changed, init restarts the runner with the new choices; otherwise it keeps the running one. The restart waits out the runner's running jobs — no job is cut — and `--now` restarts at once instead, cutting them. The runner's log is `runner.log` in the state directory.
 
 ### Flags
 
@@ -127,6 +127,7 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 | `--probe` | Print the plan; write nothing and start nothing. |
 | `--verbose` | Also print the full contents of new repository setup files. Diffs for existing files are always shown. |
 | `--yes` | Apply the displayed plan without prompting. It does not confirm authentication. `--yes` and `--probe` together are a usage error. |
+| `--now` | Restart a running runner at once when its agents or concurrency changed, cutting its running jobs; without it the restart waits out running jobs. |
 | `--agent SPEC` | Repeat once per model. The same syntax and defaults as `brigada runner --agent` ([section 8](#8-agents-quota-and-health)): `harness=<h>[,model=<m>][,classes=…][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=…]`. Replaces the worker models questions and Kimi's writing question; the foreman model and effort are still chosen in step 1. Use `classes=review` to keep Kimi reviewing only. |
 | `--signed-in HARNESS` | Confirm an installed harness is signed in (repeatable or comma-separated). Local only. |
 | `--foreman HARNESS/MODEL[@EFFORT]` | Choose a signed-in Claude or Codex foreman model and effort, for example `claude/sonnet@high`. `H/M` without `@E` skips the model question but still asks for effort in an interactive run. |
@@ -363,6 +364,7 @@ Out of scope: a plan whose tasks span repositories (a plan belongs to one projec
 
 - the engine (pid, uptime) and the job counts by status;
 - the jobs a runner holds right now, with the worker's last move;
+- `runner restarting after N running jobs` while a restart waits out those jobs (`--now` on init or `agents add` cuts them instead);
 - any agents cooling down;
 - the plans with their tasks, and the foreman's latest report;
 - how many messages wait for the foreman;
@@ -384,7 +386,7 @@ The needs-you queue lists what only you (or the foreman) can unblock:
 | `task #N needs_user: <reason>` | An answer from you, for a task parked for you directly. |
 | `foreman #N limited: <until>` | A choice: wait, switch the foreman, or let approved plans run without it ([section 8](#8-agents-quota-and-health)). |
 | `foreman #N budget_spent: wake budget spent (20/20 today, resets <UTC time>); <n> events waiting` | Raise the day's wake budget with `brigada budget --wakes N`, or send `brigada ask`: a wake that carries your message is not charged. |
-| `agent <harness>/<model> broken: <reason>` | A fix, then `brigada agent reset <harness>/<model>`; repeated failures also recover by themselves ([section 8](#8-agents-quota-and-health)). |
+| `agent <harness>/<model> broken: <reason>` | A fix, then `brigada agent reset <harness>/<model>`; repeated failures also recover by themselves ([section 8](#8-agents-quota-and-health)). For an `auth` break on a harness that reads its credential from the environment (dsh: `DEEPSEEK_API_KEY`), the reason names the variable and when the runner started, so you can see a runner that started without it; a runner that has not reported its start says so instead of a time. |
 
 ### The wake budget
 
@@ -798,7 +800,7 @@ A `land` job (see [section 5](#5-finishing-the-land-job)) carries the single lab
 `dsh` is DeepSeek Harness (`@deepseek-ai/dsh`), a developer preview whose maintainers have announced breaking changes; the adapter was checked against 0.2.1-rc.2 only and may break on a newer release. `brigada init` offers it, marked experimental, when `dsh` is on `PATH`.
 
 - Install: `npm i -g @deepseek-ai/dsh`, so that `dsh` is on the runner's `PATH`.
-- Key: `export DEEPSEEK_API_KEY=...` in the environment you run `brigada start` from (the runner passes it to dsh), or store it in dsh's own credential store. A missing or invalid key fails the job as an authentication error.
+- Key: set `env.dsh.DEEPSEEK_API_KEY = keychain:<item>` or `env.dsh.DEEPSEEK_API_KEY = file:<path>` in the config file. The runner resolves it at every start, whoever starts it, and passes it to dsh jobs only; a file must be mode 0600, else the start is refused. Without that key, `export DEEPSEEK_API_KEY=...` in the environment you run `brigada start` from (the runner passes it to dsh) still works, and so does dsh's own credential store. A missing or invalid key fails the job as an authentication error.
 - Run it: `brigada runner --agent harness=dsh,model=deepseek-flash`. The models are `deepseek-flash` (dsh's default, light tier) and `deepseek-v4-pro` (heavy tier).
 - Each job runs `dsh --profile headless --json` with the prompt on stdin, always with `DSH_TELEMETRY_MODE=DISABLED`, and `DSH_PERMISSION_MODE=read-only` for a review or `workspace-write` for other jobs. brigada never sets `danger-full-access`. `tools=` is refused.
 - The model and effort ride a per-job patch file in a fresh directory under the OS temp directory, outside the worktree. brigada does not remove it when the job ends.
@@ -817,7 +819,7 @@ The agents file (`runner/agents` in the state directory) is written by `brigada 
 
 `brigada agents` is read-only. It runs the same cheap model listings init uses (the claude, codex and opencode CLIs; none makes a model call) and compares them with the agents file. It prints the models offered but not registered, each with the tier its name gives and the account it would share, and the registered agents whose model the CLI no longer lists. A model is reported as gone only when the CLI's list is whole: claude's aliases are not a complete list, so claude agents are never reported as gone, and a codex or opencode list that left out a model of unknown family reports none. The tier printed is a guess from the name: correct a wrong one with `tier.<harness>/<model>` in the config file (for example a `-highspeed` model is a faster serving of the same model, not a light one).
 
-`brigada agents add <harness>/<model> [--classes CLASSES] [--effort LEVEL]` appends one line to the agents file and keeps every other line, comments included. For opencode, the model is `provider/model`, so `brigada agents add opencode/zai-coding-plan/glm-5.3-flash` names the harness before the first slash. `--classes` is comma-separated (default `implement,review,answer`; `none` for a foreman-only agent). The line carries the account the harness's registered agents use when that is not the harness name, so the agent shares the account the report named. The line is checked as the runner checks it at startup, so an unknown harness, an unsupported effort or a duplicate is refused and the file stays as it was. A model already registered is refused. The running runner is not touched: run `brigada stop` and `brigada start` to serve the new agent.
+`brigada agents add <harness>/<model> [--classes CLASSES] [--effort LEVEL] [--now]` appends one line to the agents file and keeps every other line, comments included. For opencode, the model is `provider/model`, so `brigada agents add opencode/zai-coding-plan/glm-5.3-flash` names the harness before the first slash. `--classes` is comma-separated (default `implement,review,answer`; `none` for a foreman-only agent). The line carries the account the harness's registered agents use when that is not the harness name, so the agent shares the account the report named. The line is checked as the runner checks it at startup, so an unknown harness, an unsupported effort or a duplicate is refused and the file stays as it was. A model already registered is refused. A running runner is handed a restart request it honours between jobs: it finishes its running jobs, exits, and the fresh runner serves the new agent — no job is cut. `--now` cuts the running jobs instead, and with no runner running `brigada start` serves the line.
 
 `brigada status` and `brigada top` show one hint line when the last listing found unregistered models. The listing is cached in `runner/models-offered.json` in the state directory with its time; `status` lists again only when the cache is missing or older than 12 hours, and `top` reads the cache on each redraw and refreshes a stale one once, in the background. Nothing runs the CLIs when no agents file exists, and `brigada agents` always lists afresh.
 
@@ -903,17 +905,18 @@ An agent's account is the login whose quota it spends. The account label default
 
 ### Automatic retry
 
-When a worker's CLI fails for a transient reason (a quota error, an authentication error, a server error, a lost runner), a task's first work job gets one automatic restart on another ready agent, with a fresh session and a new branch, carrying the failed job's last progress. A fix round that fails the same way is retried once instead of restarted: the author's session resumes on the author's agent when it can still take it, else the round runs fresh on another agent of the tier with the round's feedback (the check output or the review findings) in its prompt and the task's branch under it. A second failure, or a failure that is not transient, parks the task for the foreman. Set `task_auto_retry = false` to park transient failures at once.
+When a worker's CLI fails for a transient reason (a quota error, an authentication error, a rejected model, a server error, a lost runner), a task's first work job gets one automatic restart on another ready agent, with a fresh session and a new branch, carrying the failed job's last progress. A fix round that fails the same way is retried once instead of restarted: the author's session resumes on the author's agent when it can still take it, else the round runs fresh on another agent of the tier with the round's feedback (the check output or the review findings) in its prompt and the task's branch under it. A second failure, or a failure that is not transient, parks the task for the foreman. Set `task_auto_retry = false` to park transient failures at once.
 
 ### Broken agents
 
 An agent is taken out of dispatch as broken when:
 
 1. its CLI reports an authentication failure;
-2. its last two jobs both failed (a limit hit is quota, not a failure, and does not count); or
-3. its runner has not been heard from for 15 minutes.
+2. its provider rejects the agent's model, saying the account cannot use it or that it does not exist;
+3. its last two jobs both failed (a limit hit is quota, not a failure, and does not count); or
+4. its runner has not been heard from for 15 minutes.
 
-The auth failure stays broken until you log the CLI in again and run `brigada agent reset <harness>/<model>`; it is never probed. The failure streak comes back by itself: a few minutes after it was marked broken the runner probes the CLI, a passing probe clears it, and a failing one waits longer (a growing delay) before the next probe — `brigada agent reset <harness>/<model>` still clears it at once when you know the CLI is fixed. The third is not a verdict on the agent: the agent comes back by itself as soon as its runner polls again.
+The auth failure stays broken until you log the CLI in again and run `brigada agent reset <harness>/<model>`; it is never probed. A rejected model stays out the same way, until you reset the agent or remove it: its needs-you line reads `model rejected: <the provider's words>` and always points you at `brigada agents`, where you see whether the CLI still offers the model. The failure streak comes back by itself: a few minutes after it was marked broken the runner probes the CLI, a passing probe clears it, and a failing one waits longer (a growing delay) before the next probe — `brigada agent reset <harness>/<model>` still clears it at once when you know the CLI is fixed. The fourth is not a verdict on the agent: the agent comes back by itself as soon as its runner polls again.
 
 Broken agents are listed in the needs-you queue with the reason, and raise a notification. `agent reset` prints how many agents matched. The name is the `harness/model` pair that `status` and `stats` print, and the reset applies to every runner's copy of that agent.
 
@@ -1107,6 +1110,7 @@ The config file is optional. Its format:
 | `cost.<harness>/<model>` | integer, 0 or more | `1` | Relative cost weight of an agent, shown to the foreman. Dispatch ranks the agents of a tier by weight / p, p being a draw from the agent's success record, so a higher weight is picked less often. `0` means free: ranked before every agent with a positive weight. |
 | `tier.<harness>/<model>` | `light`, `standard` or `heavy` | from the model name | Override the tier for every agent of this harness/model, shown in stats and capacity. |
 | `tools.claude/<model>` | `+`-separated Claude Code tool patterns, or `none` | the Go scope | Default shell scope of the claude worker agent on that model; `--agent ...,tools=` overrides it ([section 8](#worker-tools-claude)). Other harnesses are refused. |
+| `env.<harness>.<VAR>` | `keychain:<item>` or `file:<path>` | the ambient variable | A variable for that harness's jobs only, resolved when the runner starts: `keychain:` reads the macOS keychain item through `security find-generic-password -w -s <item>`, `file:` reads a file that must be mode 0600. The config holds the reference, never the value, and the value never reaches a log, the store, status or an error. `PWD`, `BRIGADA_*`, `DSH_PERMISSION_MODE`, `DSH_TELEMETRY_MODE`, `OPENCODE_PERMISSION` and `OPENCODE_DISABLE_PROJECT_CONFIG` are set by the runner and refused as `<VAR>`. See [dsh](#dsh-experimental). |
 
 A cap of `0` caps the layer at nothing, which is different from leaving it out. Init writes `caps.global = N` from tasks at once, `caps.plan = 3` and `caps.account.<label>` for each usable account: Claude 3, Codex 2, Kimi 1 and OpenCode 2, each clamped to N. If harnesses share a label, the smaller cap wins. It preserves other config entries and comments, adds a cap key only when it is absent, and groups newly added keys under `# set by brigada init`. An existing cap keeps its value — the plan names each value it keeps and each one it changes — unless the tasks-at-once answer was explicit (`--parallel N` or a typed number, which sets `caps.global`) or `--overwrite-config` is passed. The engine reads the config at startup; restart it after changing caps or tier overrides.
 
@@ -1183,7 +1187,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada config`: show agents, runner state, foreman, project settings with provenance, and machine config-file values and defaults, with their locations and commands to change them. See [section 1](#changing-your-setup-later).
 - `brigada status [--line] [--all]`: the engine, jobs, plans and the needs-you queue, plus a hint when your CLIs offer unregistered models. See [section 4](#4-while-work-runs).
 - `brigada agents`: the models your CLIs offer that no agent registers, with their name-based tier and account, and registered models a CLI no longer lists; read-only. See [section 8](#models-added-later).
-- `brigada agents add <harness>/<model> [--classes CLASSES] [--effort LEVEL]`: register one model by appending its line to the agents file; restart the runner to serve it. See [section 8](#models-added-later).
+- `brigada agents add <harness>/<model> [--classes CLASSES] [--effort LEVEL] [--now]`: register one model by appending its line to the agents file; restart a running runner to serve it, waiting out its running jobs, or cutting them with `--now`. See [section 8](#models-added-later).
 - `brigada history [--task N] [--job N] [--limit N]`: the timeline. See [section 4](#history-diffs-and-logs).
 - `brigada diff <task-id> [--stat] [--repo URL]`: what a task changed, as `git diff base...branch`; run inside the repo. See [section 4](#history-diffs-and-logs).
 - `brigada logs <job-id> [--check] [--tail N] [--follow]`, or `brigada logs --task N`: a job's transcript as readable lines, or its check log. See [section 4](#history-diffs-and-logs).
@@ -1235,5 +1239,9 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - Cross-repository plans do not exist: a plan belongs to one project ([section 3](#3-several-repositories)).
 - There is no `brigada cache clear` command; the setup cache expires by age and count ([section 7](#an-environment-for-checks-and-reviews)).
 - Workers run in git worktrees, not containers, and checks run as you, in your account, though without your forge and cloud credentials (`GH_TOKEN`, `SSH_AUTH_SOCK` and the like). Do not point brigada at a repository you do not trust.
+
+### Infrastructure outages
+
+A failure of brigada's own plumbing, such as a host that cannot resolve `github.com` or a remote that cannot be fetched, is the infra class. It is not a failed task: the work or fix job is queued again on the same key and no restart, round or foreman wake is spent. The retry waits out a growing backoff of 1 minute, then 2, 5 and 15 minutes, staying at 15 minutes while the window lasts. A waiting retry shows in `brigada status` and in the QUEUE section of `brigada top` as `task #4 work: retry in 5m: could not resolve github.com`, with the time left and the failure's words. A run of infra failures that fills a 3-hour window from its first failure is spent: the next one parks the task for the foreman, and the needs-you entry names the outage. A foreman turn that fails this way waits out the same backoff and window.
 
 Back to the [README](../README.md).

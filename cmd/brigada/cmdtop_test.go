@@ -131,6 +131,17 @@ func TestRenderTopShowsGateHoldsAndLandJobs(t *testing.T) {
 	}
 }
 
+func TestRenderTopShowsAnInfraRetry(t *testing.T) {
+	model := busyTopModel()
+	nb := topNow.Add(5 * time.Minute).UTC().Format(engine.TimeLayout)
+	model.status.Retries = []engine.InfraRetry{{ID: 9, TaskID: 4, Kind: "work", NotBefore: nb, Reason: "could not resolve github.com"}}
+	got := plainTop(model, 200, 0)
+	want := "waiting: task #4 work: retry in 5m: could not resolve github.com"
+	if !strings.Contains(got, want) {
+		t.Errorf("view lacks %q:\n%s", want, got)
+	}
+}
+
 func TestRenderTopFitsSize(t *testing.T) {
 	lines := renderTop(busyTopModel(), 40, 10, topNow, term.New(logo.Caps{}))
 	if len(lines) != 10 {

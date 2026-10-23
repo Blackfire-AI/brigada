@@ -73,7 +73,7 @@ The terms used by [product.md](product.md) and [design.md](design.md). Where a d
 - **Limit hit:** a harness error saying the account's quota is used up. It **cools** the account: no agent on it is picked until the window resets (§8). For the foreman, the engine marks it **limited** and the user decides (§4.4).
 - **Parked:** a task with no eligible agent when caps are ignored: it waits, and the user is notified (§3, §10). A task blocked only by full caps is queued instead.
 - **Queued:** a task whose next job cannot start because some concurrency cap is full. It starts when a slot frees, oldest first, and notifies nobody (§8.1).
-- **Broken:** an agent taken out of dispatch after repeated failures, auth errors or a dead runner, until a probe passes or the user resets it (§8).
+- **Broken:** an agent taken out of dispatch after repeated failures, auth errors, a model the provider rejects or a dead runner, until a probe passes (repeated failures only), the runner returns (a dead runner) or the user resets it (§8).
 - **Stall:** a worker alive but with no activity for `stall_minutes` (default 10). The runner kills it and completes the job as `stalled` (§5.6).
 - **Cap:** a hard bound on rounds, attempts, time or parallel jobs: per-task round caps, the class time cap, `tool_call_cap_minutes`, the concurrency caps.
 - **Concurrency cap:** a limit on parallel jobs at one layer: runner, account, model, plan or global. A job starts only if every layer has room; a task blocked only by full caps is queued and does not park; a pending foreman turn outranks queued task jobs (§8.1).

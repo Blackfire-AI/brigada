@@ -537,11 +537,17 @@ func errorKind(e errorJSON) adapter.ErrorKind {
 	if e.Name == "ProviderAuthError" {
 		return adapter.ErrAuth
 	}
+	if adapter.IsModelRejectedText(e.Data.Message) {
+		return adapter.ErrModel
+	}
 	lower := strings.ToLower(e.Data.Message)
 	for _, p := range errorPhrases {
 		if strings.Contains(lower, p.phrase) {
 			return p.kind
 		}
+	}
+	if adapter.IsInfraText(e.Data.Message) {
+		return adapter.ErrInfra
 	}
 	return adapter.ErrOther
 }

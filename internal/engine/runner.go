@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
@@ -77,6 +78,15 @@ func (a AgentAdvert) classesJSON() (string, error) {
 // every lease the runner takes references, so a runner must register
 // before it can lease.
 func (e *Engine) Register(ctx context.Context, name string, maxParallel int, agents []AgentAdvert) (int64, error) {
+	return e.RegisterStarted(ctx, name, time.Time{}, maxParallel, agents)
+}
+
+// RegisterStarted is Register for a runner that reports when its process
+// started. The engine keeps that time as the runner's started_at and
+// moves it only when the reported time differs from the stored one: a
+// re-poll of the same process leaves it, a restarted process sets it. A
+// zero startedAt reports nothing and leaves the stored time alone.
+func (e *Engine) RegisterStarted(ctx context.Context, name string, startedAt time.Time, maxParallel int, agents []AgentAdvert) (int64, error) {
 	if name == "" {
 		return 0, fmt.Errorf("register runner: name is required")
 	}
@@ -96,11 +106,20 @@ func (e *Engine) Register(ctx context.Context, name string, maxParallel int, age
 	defer cancel()
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		nowStr := fmtTime(e.cfg.Now())
+		startedStr := ""
+		if !startedAt.IsZero() {
+			startedStr = fmtTime(startedAt)
+		}
 		err := tx.QueryRow("SELECT id FROM runners WHERE name = ?", name).Scan(&id)
 		switch {
 		case err == nil:
 			if _, err := tx.Exec("UPDATE runners SET max_parallel = ? WHERE id = ?", maxParallel, id); err != nil {
 				return fmt.Errorf("touch: %w", err)
+			}
+			if startedStr != "" {
+				if _, err := tx.Exec("UPDATE runners SET started_at = ? WHERE id = ? AND started_at <> ?", startedStr, id, startedStr); err != nil {
+					return fmt.Errorf("record start: %w", err)
+				}
 			}
 			// The runner is back: its seen time moves and the agents
 			// broken only for being stale come back (§8 "Health").
@@ -108,8 +127,8 @@ func (e *Engine) Register(ctx context.Context, name string, maxParallel int, age
 				return err
 			}
 		case errors.Is(err, sql.ErrNoRows):
-			res, err := tx.Exec("INSERT INTO runners (name, max_parallel, created_at, last_seen_at) VALUES (?, ?, ?, ?)",
-				name, maxParallel, nowStr, nowStr)
+			res, err := tx.Exec("INSERT INTO runners (name, max_parallel, created_at, last_seen_at, started_at) VALUES (?, ?, ?, ?, ?)",
+				name, maxParallel, nowStr, nowStr, startedStr)
 			if err != nil {
 				return fmt.Errorf("insert: %w", err)
 			}
@@ -129,7 +148,46 @@ func (e *Engine) Register(ctx context.Context, name string, maxParallel int, age
 	if err != nil {
 		return 0, fmt.Errorf("register runner %q: %w", name, err)
 	}
+	// The runner is back, so any drain it reported is over: the mark
+	// lives only while the runner it names is on its way out.
+	e.clearDraining(id)
 	return id, nil
+}
+
+// MarkDraining records that the runner has a restart drain pending
+// (§5.1): it takes no new lease and exits once its running jobs
+// finish. The mark is the engine's memory of a runner's own report —
+// not store state — because it can only be true while that engine
+// lives: a restarted engine meets either the draining runner's next
+// report or its replacement's register, and the drain itself needs no
+// engine at all.
+func (e *Engine) MarkDraining(ctx context.Context, runner int64) error {
+	if runner <= 0 {
+		return fmt.Errorf("mark the runner draining: no such runner")
+	}
+	e.drainMu.Lock()
+	defer e.drainMu.Unlock()
+	if e.draining == nil {
+		e.draining = map[int64]bool{}
+	}
+	e.draining[runner] = true
+	return nil
+}
+
+// clearDraining ends a runner's drain mark; its register is one way,
+// the engine's death the other.
+func (e *Engine) clearDraining(runner int64) {
+	e.drainMu.Lock()
+	defer e.drainMu.Unlock()
+	delete(e.draining, runner)
+}
+
+// runnerDraining reports whether any runner has a restart drain
+// pending, for the status's restarting line.
+func (e *Engine) runnerDraining() bool {
+	e.drainMu.Lock()
+	defer e.drainMu.Unlock()
+	return len(e.draining) > 0
 }
 
 // advertiseTx replaces the runner's agents with adverts, keyed by

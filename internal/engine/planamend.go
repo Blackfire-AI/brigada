@@ -113,10 +113,6 @@ type AmendPlanResult struct {
 // ErrPlanNotLive refuses an amendment of a plan that is done or cancelled.
 var ErrPlanNotLive = errors.New("plan is not live")
 
-// ErrPlanReviewRunning refuses an amendment that adds or respecifies
-// tasks while the plan's review round runs (§6.2).
-var ErrPlanReviewRunning = errors.New("plan review is running")
-
 // AmendPlan is the foreman's plan_amend (§12.2): add tasks, cancel tasks
 // re-point dependencies, change waiting or parked tasks' tier or effort, and
 // replace or append to a pending task's spec, validated whole — names
@@ -197,17 +193,17 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	if state != "active" && state != planAwaitingApproval && state != planReviewing && state != planNeedsForeman {
 		return AmendPlanResult{}, fmt.Errorf("%w: plan %d is %s; only an active, awaiting, reviewing or parked plan is amended", ErrPlanNotLive, plan, state)
 	}
+	// A running review round reads the plan as it was queued (§6.2):
+	// tasks added or respecified under it stay pending and wait for the
+	// round's verdict, which queues the next round over them — approve
+	// included — instead of starting their work.
+	reviewRoundLive := false
 	if state == planReviewing && (len(am.Add) > 0 || len(am.Respec) > 0) {
-		// A running review round reads the plan as it was queued
-		// (§6.2): tasks added or respecified under it would start at its
-		// verdict unreviewed, so they wait for the verdict instead.
 		live, err := liveJobTx(tx, planReviewKey(plan))
 		if err != nil {
 			return AmendPlanResult{}, err
 		}
-		if live != nil {
-			return AmendPlanResult{}, fmt.Errorf("%w: plan %d's review round is running; add or respecify tasks after its verdict", ErrPlanReviewRunning, plan)
-		}
+		reviewRoundLive = live != nil
 	}
 
 	nodes, err := loadAmendNodesTx(tx, plan)
@@ -713,7 +709,23 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	// tasks to turns reviewing over its added and respecified tasks,
 	// which stay pending until the verdict; a reviewing or parked
 	// plan's amendment is the foreman's answer to a changes verdict,
-	// and starts the next round over the tasks it names.
+	// and starts the next round over the tasks it names. Tasks the
+	// amendment adds or respecifies under a round still running are
+	// recorded as the plan's waiting amendment work instead: the round
+	// keeps judging the plan as it was queued, and its verdict —
+	// approve included — queues the next round over them.
+	if reviewRoundLive {
+		var waiting []int64
+		for _, i := range respecced {
+			waiting = append(waiting, nodes[i].id)
+		}
+		for _, a := range res.Added {
+			waiting = append(waiting, a.TaskID)
+		}
+		if err := addAmendBatchTx(tx, plan, waiting, now); err != nil {
+			return AmendPlanResult{}, err
+		}
+	}
 	if amendReview || state == planReviewing || state == planNeedsForeman {
 		var batch []int64
 		for _, i := range respecced {

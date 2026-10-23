@@ -80,12 +80,16 @@ type Agent struct {
 	Tools string `json:"tools,omitempty"`
 }
 
+// processStart is when this process began: Register reports it, so the
+// engine can tell a restarted runner from a re-poll of the same process.
+var processStart = time.Now()
+
 // Register registers the runner under its token's name with its
 // advertised agents (§5.1, §12.3) and its own cap on parallel jobs
 // (§8.1); maxParallel 0 means the runner advertised none. A re-register
 // replaces the runner's set.
 func (c *Client) Register(ctx context.Context, agents []Agent, maxParallel int) error {
-	body := advertiseRequest{MaxParallel: maxParallel, Agents: make([]agentAdvert, len(agents))}
+	body := advertiseRequest{MaxParallel: maxParallel, StartedAt: processStart.UTC().Format(time.RFC3339Nano), Agents: make([]agentAdvert, len(agents))}
 	for i, a := range agents {
 		body.Agents[i] = agentAdvert{
 			Adapter: a.Adapter, Harness: a.Harness, Model: a.Model,
@@ -97,6 +101,13 @@ func (c *Client) Register(ctx context.Context, agents []Agent, maxParallel int) 
 		RunnerID int64 `json:"runner_id"`
 	}
 	return c.call(ctx, http.MethodPost, "/v1/runner/register", body, &out)
+}
+
+// Draining tells the engine the runner has a restart drain pending: it
+// takes no new lease and exits once its running jobs finish, so the
+// status can say the runner is restarting (§5.1).
+func (c *Client) Draining(ctx context.Context) error {
+	return c.call(ctx, http.MethodPost, "/v1/runner/draining", struct{}{}, nil)
 }
 
 // Lease long-polls for a job the runner may take (§12.3): one whose

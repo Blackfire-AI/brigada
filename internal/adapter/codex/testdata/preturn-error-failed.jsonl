@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a140f9-97d3-79c3-ae80-1b9bf2ad6c49"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for the requested model not found. Defaulting to fallback metadata."}}
+{"type":"turn.started"}
+{"type":"turn.failed","error":{"message":"You've hit your usage limit. Try again later."}}

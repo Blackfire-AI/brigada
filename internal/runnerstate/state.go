@@ -23,6 +23,80 @@ type Record struct {
 	Specs       []string    `json:"specs,omitempty"`
 }
 
+// The restart request modes: RestartDrain has the runner take no new
+// lease and exit once its running jobs finish; RestartNow has it exit
+// at once, cutting them.
+const (
+	RestartDrain = "drain"
+	RestartNow   = "now"
+)
+
+// RequestRestart leaves a restart request for the runner in dir: a
+// small JSON file it honours between jobs — drain finishes its running
+// jobs first, now stops at once. A runner already draining ignores a
+// second request; the fresh starter clears what it finds.
+func RequestRestart(dir, mode string) error {
+	switch mode {
+	case RestartDrain, RestartNow:
+	default:
+		return fmt.Errorf("restart request: unknown mode %q; want %s or %s", mode, RestartDrain, RestartNow)
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	data, err := json.Marshal(struct {
+		Mode string `json:"mode"`
+	}{mode})
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".restart-*.json")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err = f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), filepath.Join(dir, "restart.json"))
+}
+
+// RestartRequested reads the pending restart request: its mode, and
+// whether one is pending at all. A file that cannot be read or parsed
+// counts as none — the runner never exits on a request it cannot
+// understand.
+func RestartRequested(dir string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(dir, "restart.json"))
+	if err != nil {
+		return "", false
+	}
+	var req struct {
+		Mode string `json:"mode"`
+	}
+	if json.Unmarshal(data, &req) != nil {
+		return "", false
+	}
+	switch req.Mode {
+	case RestartDrain, RestartNow:
+		return req.Mode, true
+	default:
+		return "", false
+	}
+}
+
+// ClearRestart removes the restart request: the runner that honoured
+// it, and the starter of the next one, leave nothing pending behind.
+func ClearRestart(dir string) error {
+	if err := os.Remove(filepath.Join(dir, "restart.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 func Acquire(dir string) (func(), error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
@@ -38,7 +112,9 @@ func Acquire(dir string) (func(), error) {
 	}
 	// Clear a previous owner's metadata before publishing this pid. Even pid
 	// reuse must not make a stale advertisement look like startup readiness.
-	if err := os.Remove(filepath.Join(dir, "runner.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+	// The restart request goes with it: this runner starts because the last
+	// one made way, so it must not honour the request that ended it.
+	if err := clearRunnerFiles(dir); err != nil {
 		f.Close()
 		return nil, err
 	}
@@ -51,6 +127,17 @@ func Acquire(dir string) (func(), error) {
 		return nil, err
 	}
 	return func() { syscall.Flock(int(f.Fd()), syscall.LOCK_UN); f.Close() }, nil
+}
+
+// clearRunnerFiles removes a previous owner's runner.json and any
+// restart request left for it, under the lock Acquire holds.
+func clearRunnerFiles(dir string) error {
+	for _, name := range []string{"runner.json", "restart.json"} {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
 }
 
 // ClearStale clears a previous runner's pid and metadata only while holding

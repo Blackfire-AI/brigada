@@ -60,6 +60,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/runner/heartbeat", s.authed([]string{roleRunner}, s.withRunner(s.handleHeartbeat)))
 	mux.HandleFunc("/v1/runner/complete", s.authed([]string{roleRunner}, s.withRunner(s.handleComplete)))
 	mux.HandleFunc("/v1/runner/release", s.authed([]string{roleRunner}, s.withRunner(s.handleRelease)))
+	mux.HandleFunc("/v1/runner/draining", s.authed([]string{roleRunner}, s.withRunner(s.handleDraining)))
 	mux.HandleFunc("/v1/runner/artifacts", s.authed([]string{roleRunner}, s.withRunner(s.handleArtifactUpload)))
 	mux.HandleFunc("/v1/runner/probes", s.authed([]string{roleRunner}, s.withRunner(s.handleProbes)))
 	mux.HandleFunc("/v1/runner/probes/report", s.authed([]string{roleRunner}, s.withRunner(s.handleProbeReport)))

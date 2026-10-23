@@ -39,7 +39,16 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request, id ident
 			Effort: a.Effort, Tools: a.Tools,
 		}
 	}
-	runnerID, err := s.eng.Register(r.Context(), id.name, req.MaxParallel, agents)
+	var startedAt time.Time
+	if req.StartedAt != "" {
+		t, err := time.Parse(time.RFC3339Nano, req.StartedAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, codeBadRequest, "started_at must be an RFC 3339 time: "+err.Error())
+			return
+		}
+		startedAt = t
+	}
+	runnerID, err := s.eng.RegisterStarted(r.Context(), id.name, startedAt, req.MaxParallel, agents)
 	if err != nil {
 		// An advertisement the engine refuses is the caller's mistake;
 		// anything else — the store, the engine's own bookkeeping — is
@@ -216,6 +225,26 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request, runnerID 
 	writeJSON(w, http.StatusOK, answerBody{Answer: string(ans)})
 }
 
+// handleDraining records that the runner has a restart drain pending
+// (§5.1): it takes no new lease and exits once its running jobs
+// finish. The mark lives until the runner registers again — the fresh
+// runner's register is what clears it — so the status can say the
+// runner is restarting through the whole drain.
+func (s *Server) handleDraining(w http.ResponseWriter, r *http.Request, runnerID int64) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var req struct{} // the body carries references only; a drain has none
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.eng.MarkDraining(r.Context(), runnerID); err != nil {
+		s.writeInternal(w, r, "mark the runner draining", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, answerBody{Answer: string(engine.AnsOK)})
+}
+
 // handleProbes lists the runner's due broken-agent probes (§8 "Health"):
 // the agents broken by repeated failures whose next probe is due, for
 // the runner to probe and report.
@@ -279,7 +308,8 @@ func nonNilProbes(v []engine.Probe) []engine.Probe {
 // seconds (§12.3).
 type advertiseRequest struct {
 	WaitSeconds float64       `json:"wait"`
-	MaxParallel int           `json:"max_parallel"` // the runner's own cap; 0 = unset (§8.1)
+	StartedAt   string        `json:"started_at,omitempty"` // the runner process's start, RFC 3339; register only
+	MaxParallel int           `json:"max_parallel"`         // the runner's own cap; 0 = unset (§8.1)
 	Harnesses   []string      `json:"harnesses"`
 	Labels      []string      `json:"labels"`
 	Agents      []agentAdvert `json:"agents"`

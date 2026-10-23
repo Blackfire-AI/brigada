@@ -37,6 +37,10 @@ type jobRun struct {
 	toolOpenedAt time.Time
 	sessionID    string
 	cliError     *adapter.Event
+	// turnStarted is set when the stdout stream shows its turn.started
+	// (adapter.TurnMarker): errors the adapter marks Notice are warnings
+	// until then.
+	turnStarted bool
 	// stderrError is the first error the adapter sorted from stderr,
 	// kept apart from the stream's own cliError: stderr also carries
 	// the CLI's warnings, so finish weighs it against the exit, not
@@ -283,6 +287,9 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 	cmd.Env = withPWD(cmd.Env, cmd.Dir)
 	// The extra checkouts' paths (§5.8) ride along, after the scrub.
 	cmd.Env = withEnv(cmd.Env, r.extraEnvVars())
+	// The harness's own configured variables (§5.1) ride last, over any
+	// ambient value; another harness's job never gets them.
+	cmd.Env = withEnv(cmd.Env, r.cfg.HarnessEnv[r.grant.Agent])
 	cmd.SysProcAttr = processGroup()
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -448,6 +455,9 @@ func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte, fromStderr bool) {
 	if len(r.transcript) > 2*r.uploadCap() {
 		r.transcript = compactTranscript(r.transcript, r.uploadCap())
 	}
+	if tm, isTM := ad.(adapter.TurnMarker); isTM && !fromStderr && !r.turnStarted && tm.StartsTurn(line) {
+		r.turnStarted = true
+	}
 	var ev adapter.Event
 	var ok bool
 	if fromStderr {
@@ -459,6 +469,10 @@ func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte, fromStderr bool) {
 		return
 	}
 	ev.Time = r.now()
+	if ev.Kind == adapter.EvError && ev.Notice && !fromStderr && !r.turnStarted {
+		// A startup notice, not the run's error (see Event.Notice).
+		ev.Kind = adapter.EvWarning
+	}
 	r.events = append(r.events, ev)
 	if ev.SessionID != "" {
 		r.sessionID = ev.SessionID
@@ -472,7 +486,7 @@ func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte, fromStderr bool) {
 				e := ev
 				r.stderrError = &e
 			}
-		} else if r.cliError == nil {
+		} else if r.cliError == nil || (ev.Final && !r.cliError.Final) {
 			e := ev
 			r.cliError = &e
 		}
@@ -809,6 +823,21 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 	r.deliver(ctx, comp)
 }
 
+// producedOutput reports whether the CLI said or did anything before it
+// failed: a message or a tool call. A session id or usage counters come
+// with the CLI starting up and prove nothing reached the provider.
+func (r *jobRun) producedOutput() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, ev := range r.events {
+		switch ev.Kind {
+		case adapter.EvMessage, adapter.EvToolStart, adapter.EvToolEnd:
+			return true
+		}
+	}
+	return false
+}
+
 // sessionIDOf reads the session id the worker's stream carried.
 func (r *jobRun) sessionIDOf() string {
 	r.mu.Lock()
@@ -826,10 +855,16 @@ func (r *jobRun) finishWithError(ctx context.Context, msg string) {
 // reported: the error's kind rides with the completion, and a limit's
 // reset time when the adapter found one (§4.4).
 func (r *jobRun) finishWithCLIError(ctx context.Context, msg string, cliErr *adapter.Event) {
+	kind := cliErr.ErrorKind
+	if kind == adapter.ErrInfra && r.producedOutput() {
+		// A connection failure after real output is the run's own
+		// failure, not a network that was never up.
+		kind = adapter.ErrOther
+	}
 	r.deliverError(ctx, api.Completion{
 		Error:      msg,
 		SessionID:  r.sessionIDOf(),
-		ErrorKind:  string(cliErr.ErrorKind),
+		ErrorKind:  string(kind),
 		LimitUntil: cliErr.LimitUntil,
 	})
 }

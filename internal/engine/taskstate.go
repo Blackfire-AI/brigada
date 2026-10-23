@@ -65,8 +65,9 @@ const minSubstantiveFindings = 80
 // failure of the job's own plumbing (§3's transient error, the class a
 // failed setup holds, §5.7): the runner could not fetch the
 // repository's remote — the network not up yet in the seconds after a
-// wake, a host that will not resolve (issue #46) — so the engine
-// retries the job, capped, and neither the agent nor a round is
+// wake, a host that will not resolve, an outage of hours — or its CLI
+// could not be built, started or connected. The engine retries the job
+// on the infra backoff (§5.1), and neither the agent nor a round is
 // charged.
 const ErrorKindInfra = "infra"
 
@@ -221,6 +222,11 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 		if reason == "" {
 			reason = "no result block"
 		}
+		if c.ErrorKind == ErrorKindInfra {
+			// The infra retries are spent (§5.1): the outage, not the
+			// work, is what the foreman and the needs-you queue read.
+			reason = infraOutageText(c.Error)
+		}
 		if c.Error == "" && c.Outcome == "" && (wr.Status == workerFailed || !haveResult) {
 			why := workerFailed
 			if !haveResult {
@@ -317,18 +323,14 @@ func (e *Engine) retrySetupFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 	return err == nil, err
 }
 
-// infraRetries is how many times an infrastructure failure — a fetch of
-// the remote that could not be done — requeues the task's work before
-// the task goes to the foreman (§3: retried like a transient error,
-// capped, as a failed setup is §5.7).
-const infraRetries = 2
-
 // retryDelays is the growing pause a retried job must wait out before it
 // may be leased again, indexed by the consecutive failure (1 = first):
 // a network that is not up in the seconds after a wake needs time to
 // come back, and a longer outage must not be hammered every second
 // (issue #46). The sequence tops out at a couple of minutes, long enough
-// to cover a wake.
+// to cover a wake. Setup retries (§5.7), transient CLI retries and the
+// foreman's re-wake (§4.2) wait on this table; infrastructure failures
+// wait on their own, minutes-scale one above (§5.1).
 var retryDelays = []time.Duration{5 * time.Second, 15 * time.Second, 45 * time.Second, 2 * time.Minute}
 
 // retryDelayFor is the pause before the consecutive-th retry: 5s after
@@ -345,51 +347,142 @@ func retryDelayFor(consecutive int) time.Duration {
 	return retryDelays[i]
 }
 
-// retryInfraFailureTx answers an infrastructure failure of the job's
-// own plumbing (§3's transient error) as a failed setup is answered
-// (§5.7): the work job is queued again, up to infraRetries times, on
-// any eligible agent — the network or the remote failed, not the
-// agent, and no fix round or agent health is charged. A fix job, or a
-// task whose retries are spent, falls through to the foreman's park
-// with the failure as its reason.
-func (e *Engine) retryInfraFailureTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) (bool, error) {
-	if job.Kind != KindWork {
-		return false, nil
+// infraRetryDelays is the growing pause an infrastructure failure waits
+// out before its retry may be leased, indexed by the consecutive
+// failure (1 = first). Minutes, not seconds: an outage — a host that
+// slept, a network down for an hour — outlasts any seconds-scale table,
+// so the infra class has a table of its own, separate from the short
+// 5s..2m one (§5.7), and the sequence tops out at 15m and stays there
+// while the retry window (§5.1) lasts.
+var infraRetryDelays = []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute, 15 * time.Minute}
+
+// infraRetryWindow bounds the infra retries by elapsed time (§5.1): a
+// run of infra failures that has filled this window from its first
+// failure is spent, and the next one goes to the foreman with the
+// outage as its reason. Hours, because an outage that outlasts it is an
+// outage a person should hear of.
+const infraRetryWindow = 3 * time.Hour
+
+// infraDelayFor is the pause before the consecutive-th infra retry: 1m
+// after the first failure, then 2m, 5m and 15m, capped at 15m. A count
+// of zero or less — no failure yet — is no pause.
+func infraDelayFor(consecutive int) time.Duration {
+	if consecutive <= 0 {
+		return 0
 	}
-	failed, err := infraRetryCountTx(tx, job.TaskID)
-	if err != nil {
-		return false, err
+	i := consecutive - 1
+	if i >= len(infraRetryDelays) {
+		i = len(infraRetryDelays) - 1
 	}
-	if failed > infraRetries {
-		return false, nil
-	}
-	// A spent restart budget cannot take the retry's submit: the task
-	// goes to the foreman instead, as for any retry that cannot be
-	// queued.
-	if _, capped, err := e.roundCapReached(tx, SubmitParams{TaskID: job.TaskID, Restart: true}); err != nil || capped {
-		return false, err
-	}
-	reason := boundNote(c.Error)
-	note := reason + "\nThe job failed before any work was judged; nothing of the previous attempt is lost or to be fixed."
-	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, now.Add(retryDelayFor(failed)), now)
-	if err != nil {
-		return false, err
-	}
-	_, err = appendEventTx(tx, evTaskRestarted, job.ProjectID, job.TaskID, r.JobID,
-		eventPayload{Status: taskReady, Run: int64(r.Run), Reason: reason}, now)
-	return err == nil, err
+	return infraRetryDelays[i]
 }
 
-// infraRetryCountTx counts the task's jobs that failed on the
-// infrastructure, by the error kind the runner set on them.
-func infraRetryCountTx(tx *sql.Tx, taskID int64) (int, error) {
-	var n int
-	err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE task_id = ? AND status = 'failed'
-		AND error_kind = ?`, taskID, ErrorKindInfra).Scan(&n)
+// infraStreakTx measures a key's current run of consecutive
+// infrastructure failures (§5.1): how many of the key's jobs, newest
+// first, ended failed on the infra kind before a job that ended any
+// other way, and when the run began (the creation of its oldest
+// member). The completing failure is already written, so the streak
+// counts it. Zero when the key's latest job did not fail on the
+// infrastructure.
+func infraStreakTx(tx *sql.Tx, key string) (n int, began string, err error) {
+	rows, err := tx.Query(`SELECT status, COALESCE(error_kind, ''), created_at FROM jobs
+		WHERE key = ? ORDER BY id DESC`, key)
 	if err != nil {
-		return 0, fmt.Errorf("count the infrastructure failures of task %d: %w", taskID, err)
+		return 0, "", fmt.Errorf("read the jobs of key %s: %w", key, err)
 	}
-	return n, nil
+	defer rows.Close()
+	for rows.Next() {
+		var status, kind, created string
+		if err := rows.Scan(&status, &kind, &created); err != nil {
+			return 0, "", fmt.Errorf("read the jobs of key %s: %w", key, err)
+		}
+		if status != statusFailed || kind != ErrorKindInfra {
+			break
+		}
+		n++
+		began = created
+	}
+	return n, began, rows.Err()
+}
+
+// infraStreakSpent reports whether an infra streak has filled the retry
+// window (§5.1): the time elapsed since its first failure is past
+// infraRetryWindow, so the failure being answered is not retried again.
+// An empty began — no streak — is never spent.
+func infraStreakSpent(began string, now time.Time) bool {
+	if began == "" {
+		return false
+	}
+	first, err := parseTime(began)
+	if err != nil {
+		return false
+	}
+	return now.Sub(first) > infraRetryWindow
+}
+
+// infraOutageText words the park of an infra streak the retry window
+// gave up on (§5.1): the outage, its bound, and the failure's own words
+// — the needs-you queue's line names the outage, not a task failure
+// (§10).
+func infraOutageText(text string) string {
+	return fmt.Sprintf("the network outage outlasted the %s infra retry window: %s",
+		capText(infraRetryWindow), boundNote(text))
+}
+
+// retryInfraFailureTx answers an infrastructure failure of the job's
+// own plumbing (§5.1): a work or fix job is queued again on the same
+// key — the same question, the same placement, held out of leasing for
+// the infra backoff's not-before — until the streak fills the retry
+// window. The network or the remote failed, not the work: the task
+// keeps its state, no restart, round or foreman wake is spent, and the
+// agent's health is not charged. A spent window, or a kind with no
+// infra retry of its own, falls through to the foreman's park with the
+// outage as its reason.
+func (e *Engine) retryInfraFailureTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) (bool, error) {
+	switch job.Kind {
+	case KindWork, KindFix:
+	default:
+		return false, nil
+	}
+	streak, began, err := infraStreakTx(tx, job.Key)
+	if err != nil {
+		return false, err
+	}
+	if streak == 0 || infraStreakSpent(began, now) {
+		return false, nil
+	}
+	p := SubmitParams{
+		Key:           job.Key,
+		ProjectID:     job.ProjectID,
+		TaskID:        job.TaskID,
+		Kind:          job.Kind,
+		Mode:          job.Mode,
+		Prompt:        job.Prompt,
+		Harness:       job.Harness,
+		Labels:        jobLabels(job),
+		ExcludeFamily: job.ExcludeFamily,
+		ExcludeAgent:  job.ExcludeAgent,
+		RequireAgent:  job.RequireAgent,
+		NotBefore:     now.Add(infraDelayFor(streak)),
+	}
+	if job.Kind == KindFix {
+		// The round was never attempted, so the retry spends none of
+		// the task's rounds (§3), like the transient CLI retry.
+		p.Round = roundNone
+	}
+	// The completing job freed the key earlier in this transaction, so
+	// no live job can hold this submit; an answer but a created job is
+	// an error, not a silent loss of the retry.
+	sr, err := e.submitTx(tx, p, now)
+	if err != nil {
+		return false, err
+	}
+	if sr.Answer != AnsCreated {
+		return false, fmt.Errorf("queue the infra retry of task %d: submit %s answered %s", job.TaskID, job.Key, sr.Answer)
+	}
+	_, err = appendEventTx(tx, evTaskInfraRetry, job.ProjectID, job.TaskID, sr.JobID,
+		eventPayload{Run: int64(sr.Run), Reason: boundNote(c.Error)}, now)
+	return err == nil, err
 }
 
 // transientCLIError reports whether a completion's error kind is a
@@ -399,7 +492,7 @@ func infraRetryCountTx(tx *sql.Tx, taskID int64) (int, error) {
 // carries, for a work job and a fix round alike.
 func transientCLIError(kind string) bool {
 	switch kind {
-	case "limit", "auth", "other", "runner_lost":
+	case "limit", "auth", string(adapter.ErrModel), "other", "runner_lost":
 		return true
 	}
 	return false
@@ -1022,7 +1115,7 @@ func reviewerUnavailable(c Completion) bool {
 		return false
 	}
 	switch c.ErrorKind {
-	case "limit", "auth", ErrorKindSetup, ErrorKindInfra:
+	case "limit", "auth", string(adapter.ErrModel), ErrorKindSetup, ErrorKindInfra:
 		return true
 	}
 	return false
@@ -1193,14 +1286,14 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 // another reviewer's word, so it does not count. Author jobs — work or
 // fix, including restarts — begin a new cycle with a fresh first
 // review. A review whose reviewer could not run (error kind limit,
-// auth, setup or infra) never gave an answer, so it is not counted
+// auth, model, setup or infra) never gave an answer, so it is not counted
 // either; the job being judged is the unusable answer itself, the one
 // the count adds.
 func reviewRetrySpentTx(tx *sql.Tx, job *jobRow) (bool, error) {
 	var reviews int64
 	err := tx.QueryRow(`SELECT COUNT(*) FROM jobs
 		WHERE task_id = ? AND kind = 'review' AND restart = 0
-		AND error_kind NOT IN ('limit', 'auth', ?, ?)
+		AND error_kind NOT IN ('limit', 'auth', 'model', ?, ?)
 		AND NOT (mode = 'session' AND error_kind = ?)
 		AND id > COALESCE((SELECT MAX(id) FROM jobs WHERE task_id = ? AND kind IN ('work', 'fix')), 0)`,
 		job.TaskID, ErrorKindSetup, ErrorKindInfra, string(adapter.ErrResumeFailed), job.TaskID).Scan(&reviews)

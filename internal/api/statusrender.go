@@ -24,6 +24,11 @@ import (
 // the all view (`--all`, all=true) listing them.
 func StatusSections(st Status) string {
 	lines := runningLines(st.Running, time.Now())
+	// A restart drain pending (§5.1): the runner finishes the running
+	// jobs above and exits, and its restart waits behind them.
+	if st.RunnerDraining && len(st.Running) > 0 {
+		lines = append(lines, drainLine(len(st.Running)))
+	}
 	for _, a := range st.Cooling {
 		lines = append(lines, fmt.Sprintf("cooling: %s/%s until %s (account %s)", a.Harness, a.Model, a.Until, a.Account))
 	}
@@ -61,6 +66,9 @@ func StatusSections(st Status) string {
 		}
 		lines = append(lines, fmt.Sprintf("held: %s %s: %s", what, h.Kind, wait))
 	}
+	for _, r := range st.Retries {
+		lines = append(lines, "waiting: "+RetryLine(r, time.Now()))
+	}
 	if len(st.Plans) == 0 {
 		lines = append(lines, "plans: none")
 	} else {
@@ -85,6 +93,13 @@ func StatusSections(st Status) string {
 					review += ", findings: " + findingsLine(p.ReviewFindings, p.ReviewJob)
 				}
 				lines = append(lines, review)
+			}
+			// Waiting amendment work (§6.2): tasks an amendment added
+			// or respecified under the running round, pending the
+			// verdict that queues the next round over them — never
+			// invisible in the status.
+			if p.WaitingAmendment {
+				lines = append(lines, "  amendment waits for the review round")
 			}
 			for _, t := range p.Tasks {
 				line := fmt.Sprintf("  task #%d %s %s", t.ID, t.State, t.Title)
@@ -193,6 +208,31 @@ func StatusSections(st Status) string {
 	return strings.Join(lines, "\n")
 }
 
+// RetryLine words one job waiting on an infra retry (§5.1) for the
+// status and top views: "task #4 work: retry in 5m: could not resolve
+// github.com" — the job or task, its kind, the time left to its
+// not-before and the failure's words.
+func RetryLine(r engine.InfraRetry, now time.Time) string {
+	what := fmt.Sprintf("job #%d", r.ID)
+	if r.TaskID != 0 {
+		what = fmt.Sprintf("task #%d", r.TaskID)
+	}
+	var left time.Duration
+	if t, err := time.Parse(engine.TimeLayout, r.NotBefore); err == nil && t.After(now) {
+		left = t.Sub(now)
+	}
+	// Whole minutes round up, so a wait never reads shorter than it is.
+	wait := left.Truncate(time.Second).String()
+	if left >= time.Minute {
+		wait = fmt.Sprintf("%dm", int((left+time.Minute-1)/time.Minute))
+	}
+	line := fmt.Sprintf("%s %s: retry in %s", what, r.Kind, wait)
+	if r.Reason != "" {
+		line += ": " + r.Reason
+	}
+	return line
+}
+
 // shortVersion is the first 12 characters of an import hash.
 func shortVersion(h string) string {
 	if len(h) > 12 {
@@ -224,6 +264,16 @@ func oneLine(s string, max int) string {
 		max--
 	}
 	return s[:max]
+}
+
+// drainLine is the status's word for a pending restart drain (§5.1):
+// the runner restarts once the running jobs it waits out have finished.
+func drainLine(n int) string {
+	noun := "jobs"
+	if n == 1 {
+		noun = "job"
+	}
+	return fmt.Sprintf("runner restarting after %d running %s", n, noun)
 }
 
 // runningLines renders the jobs a runner holds (§10), one line each:

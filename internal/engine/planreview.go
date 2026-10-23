@@ -360,14 +360,73 @@ func planReviewBatchTx(tx *sql.Tx, plan int64) ([]int64, error) {
 	if err := tx.QueryRow("SELECT review_batch FROM plans WHERE id = ?", plan).Scan(&raw); err != nil {
 		return nil, fmt.Errorf("read the review batch of plan %d: %w", plan, err)
 	}
+	return parseIDBatch(raw, plan, "review batch")
+}
+
+// planAmendBatchTx reads the waiting amendment work of a plan: the
+// tasks an amendment added or respecified under the running round,
+// which that round's verdict sends to the next round (§6.2) instead of
+// starting them.
+func planAmendBatchTx(tx *sql.Tx, plan int64) ([]int64, error) {
+	var raw string
+	if err := tx.QueryRow("SELECT amend_batch FROM plans WHERE id = ?", plan).Scan(&raw); err != nil {
+		return nil, fmt.Errorf("read the amendment batch of plan %d: %w", plan, err)
+	}
+	return parseIDBatch(raw, plan, "amendment batch")
+}
+
+// parseIDBatch decodes a plans row's JSON id list; "" is nil, the whole
+// plan for a review batch and no waiting work for an amendment batch.
+func parseIDBatch(raw string, plan int64, what string) ([]int64, error) {
 	if raw == "" {
 		return nil, nil
 	}
 	var ids []int64
 	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
-		return nil, fmt.Errorf("parse the review batch of plan %d: %w", plan, err)
+		return nil, fmt.Errorf("parse the %s of plan %d: %w", what, plan, err)
 	}
 	return ids, nil
+}
+
+// addAmendBatchTx adds ids to the plan's waiting amendment work (§6.2):
+// tasks an amendment added or respecified under the running round.
+func addAmendBatchTx(tx *sql.Tx, plan int64, ids []int64, now time.Time) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	waiting, err := planAmendBatchTx(tx, plan)
+	if err != nil {
+		return err
+	}
+	merged := unionIDs(waiting, ids)
+	if _, err := tx.Exec(`UPDATE plans SET amend_batch = ?, updated_at = ? WHERE id = ?`,
+		planReviewBatchJSON(merged), fmtTime(now), plan); err != nil {
+		return fmt.Errorf("record the waiting amendment of plan %d: %w", plan, err)
+	}
+	return nil
+}
+
+// unionIDs merges two id lists, each id once, in order.
+func unionIDs(a, b []int64) []int64 {
+	seen := make(map[int64]bool, len(a)+len(b))
+	var out []int64
+	for _, id := range append(a, b...) {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// foldWaitingBatch widens a round's batch with the plan's waiting
+// amendment work (§6.2). A nil batch names the whole plan, which the
+// waiting tasks are already part of, so it stays nil.
+func foldWaitingBatch(batch, waiting []int64) []int64 {
+	if batch == nil {
+		return nil
+	}
+	return unionIDs(batch, waiting)
 }
 
 // queuePlanReviewRoundTx queues the plan's review round (§6.2): one
@@ -375,8 +434,16 @@ func planReviewBatchTx(tx *sql.Tx, plan int64) ([]int64, error) {
 // than the foreman's, carrying the input composed from the plan and the
 // project's other active plans. The one-live-job-per-key rule keeps a
 // plan from being reviewed twice concurrently: a submit that coalesced
-// behind a live review queues nothing and changes nothing.
+// behind a live review queues nothing and changes nothing. A round
+// covers the batch it is given widened by the plan's waiting amendment
+// work — tasks an amendment added or respecified under the round before
+// — which the round then holds for its own verdict.
 func (e *Engine) queuePlanReviewRoundTx(tx *sql.Tx, project, plan, round int64, batch []int64, now time.Time) error {
+	waiting, err := planAmendBatchTx(tx, plan)
+	if err != nil {
+		return err
+	}
+	batch = foldWaitingBatch(batch, waiting)
 	family, err := foremanFamilyTx(tx, project)
 	if err != nil {
 		return err
@@ -391,7 +458,7 @@ func (e *Engine) queuePlanReviewRoundTx(tx *sql.Tx, project, plan, round int64, 
 		// The round and its batch are written first, so the evaluation
 		// judges what this round covers — an amendment's tasks alone,
 		// or the whole plan — not an earlier round's batch.
-		if _, err := tx.Exec(`UPDATE plans SET review_round = ?, review_batch = ?, updated_at = ? WHERE id = ?`,
+		if _, err := tx.Exec(`UPDATE plans SET review_round = ?, review_batch = ?, amend_batch = '', updated_at = ? WHERE id = ?`,
 			round, planReviewBatchJSON(batch), fmtTime(now), plan); err != nil {
 			return fmt.Errorf("record the review round of plan %d: %w", plan, err)
 		}
@@ -433,7 +500,7 @@ func (e *Engine) queuePlanReviewRoundTx(tx *sql.Tx, project, plan, round int64, 
 		// change — the running round is the plan's review.
 		return nil
 	}
-	if _, err := tx.Exec(`UPDATE plans SET review_round = ?, review_verdict = '', review_findings = '', review_batch = ?, updated_at = ?
+	if _, err := tx.Exec(`UPDATE plans SET review_round = ?, review_verdict = '', review_findings = '', review_batch = ?, amend_batch = '', updated_at = ?
 		WHERE id = ?`, round, planReviewBatchJSON(batch), fmtTime(now), plan); err != nil {
 		return fmt.Errorf("record the review round of plan %d: %w", plan, err)
 	}
@@ -466,8 +533,8 @@ func (e *Engine) planReviewBeginTx(tx *sql.Tx, project, plan int64, batch []int6
 // amendment that adds and respecifies none — a cancel, a re-point, a
 // retier — asks for no review, and the plan proceeds through the same
 // evaluation as approve, as it does past the round cap; a round still
-// running stays the plan's review (amendPlanTx refuses new tasks or
-// specs while it runs).
+// running stays the plan's review, and the tasks the amendment added or
+// respecified under it wait for its verdict (amendPlanTx records them).
 func (e *Engine) planReviewAnswerTx(tx *sql.Tx, project, plan int64, batch []int64, now time.Time) error {
 	var live int
 	if err := tx.QueryRow("SELECT COUNT(*) FROM jobs WHERE key = ? AND status IN ('queued', 'leased', 'running')",
@@ -493,22 +560,13 @@ func (e *Engine) planReviewAnswerTx(tx *sql.Tx, project, plan int64, batch []int
 	if err != nil {
 		return err
 	}
-	switch {
-	case reviewed == nil:
+	if reviewed == nil {
 		batch = nil // a creation's review: the whole plan, as amended
-	default:
+	} else {
 		// An amendment's review covers every task its rounds held,
 		// the earlier round's with the answer's, so none starts at
 		// the verdict without its per-task rules.
-		seen := make(map[int64]bool, len(reviewed)+len(batch))
-		var union []int64
-		for _, id := range append(reviewed, batch...) {
-			if !seen[id] {
-				seen[id] = true
-				union = append(union, id)
-			}
-		}
-		batch = union
+		batch = unionIDs(reviewed, batch)
 	}
 	return e.queuePlanReviewRoundTx(tx, project, plan, round+1, batch, now)
 }
@@ -555,8 +613,56 @@ func (e *Engine) planReviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, no
 		case haveVerdict:
 			reason = "approve without substantive findings"
 		}
+		if c.ErrorKind == ErrorKindInfra {
+			if handled, err := e.retryPlanReviewInfraTx(tx, job, plan, c, now); handled || err != nil {
+				return err
+			}
+		}
 		return e.planReviewFailedTx(tx, job, plan, reason, now)
 	}
+}
+
+// retryPlanReviewInfraTx answers a plan review that failed on the
+// job's own plumbing (§5.1) as a task job's infra failure is answered:
+// the same question is requeued on the plan's key — the same
+// exclusions, held out of leasing for the infra backoff's not-before —
+// until the streak fills the retry window, spending no retry round and
+// waking nobody. A spent window holds the plan for the foreman with the
+// outage named, as an unusable review holds it (§6.2).
+func (e *Engine) retryPlanReviewInfraTx(tx *sql.Tx, job *jobRow, plan int64, c Completion, now time.Time) (bool, error) {
+	streak, began, err := infraStreakTx(tx, job.Key)
+	if err != nil {
+		return false, err
+	}
+	if streak == 0 || infraStreakSpent(began, now) {
+		return true, e.planReviewHeldTx(tx, job.ProjectID, plan, infraOutageText(c.Error), now)
+	}
+	// The completing job freed the key earlier in this transaction, so
+	// no live job can hold this submit; any answer but a created job
+	// would lose the round silently.
+	sr, err := e.submitTx(tx, SubmitParams{
+		Key:           job.Key,
+		ProjectID:     job.ProjectID,
+		Kind:          KindPlanReview,
+		Mode:          ModeFresh,
+		Prompt:        job.Prompt,
+		ExcludeFamily: job.ExcludeFamily,
+		ExcludeAgent:  job.ExcludeAgent,
+		NotBefore:     now.Add(infraDelayFor(streak)),
+	}, now)
+	if err != nil {
+		return false, err
+	}
+	if sr.Answer != AnsCreated {
+		return false, fmt.Errorf("queue the infra retry of plan %d: submit %s answered %s", plan, job.Key, sr.Answer)
+	}
+	var round int64
+	if err := tx.QueryRow("SELECT review_round FROM plans WHERE id = ?", plan).Scan(&round); err != nil {
+		return false, fmt.Errorf("read the review round of plan %d: %w", plan, err)
+	}
+	_, err = appendEventTx(tx, evPlanReviewQueued, job.ProjectID, 0, sr.JobID,
+		eventPayload{Plan: plan, Run: round, Reason: boundNote(infraOutageText(c.Error) + "; requeued after the infra failure")}, now)
+	return true, err
 }
 
 // planReviewFailedTx answers a plan review that ran and gave no verdict
@@ -681,7 +787,11 @@ func planReviewOfJobTx(job *jobRow) int64 {
 // evaluation, or — for a changes verdict with a round left — parks at
 // needs_foreman with the findings delivered to the foreman and a wake,
 // the foreman's to answer with an amendment (the next round) or
-// plan_accept. reviewJob names the plan_review job whose verdict this
+// plan_accept. Waiting amendment work — tasks an amendment added or
+// respecified under the round — defers both while a round is left: the
+// verdict is recorded and the next round is queued over the waiting
+// tasks, so no work starts at this verdict unreviewed.
+// reviewJob names the plan_review job whose verdict this
 // is, 0 when no job ran; the plan_reviewed event carries it, so the
 // history's --job view holds the verdict beside the findings. The
 // event lands in the foreman's inbox whenever the foreman has a
@@ -708,6 +818,28 @@ func (e *Engine) planReviewConcludedTx(tx *sql.Tx, project, plan, reviewJob int6
 	if err != nil {
 		return err
 	}
+	// Waiting amendment work (§6.2): tasks an amendment added or
+	// respecified under the round this verdict ends. A verdict with a
+	// round left concludes nothing — approve included — but queues the
+	// next round over them, the verdict and its findings carried to it,
+	// so no task starts unreviewed and nothing waits on the foreman.
+	// A forced conclusion or a spent round cap folds them into the
+	// batch the verdict applies over instead.
+	waiting, err := planAmendBatchTx(tx, plan)
+	if err != nil {
+		return err
+	}
+	if len(waiting) > 0 && !force && round < maxPlanReviewRounds {
+		payload.Reason = boundNote("an amendment added or respecified tasks under this round; the next round reviews them, this verdict and its findings carried over")
+		if _, err := appendEventTx(tx, evPlanReviewed, project, 0, reviewJob, payload, now); err != nil {
+			return err
+		}
+		reviewed, err := planReviewBatchTx(tx, plan)
+		if err != nil {
+			return err
+		}
+		return e.queuePlanReviewRoundTx(tx, project, plan, round+1, reviewed, now)
+	}
 	// A changes verdict with a round left is the foreman's to answer:
 	// the plan parks at needs_foreman — the needs-you queue shows it
 	// with its findings — and its amendment (the next round) or
@@ -726,6 +858,7 @@ func (e *Engine) planReviewConcludedTx(tx *sql.Tx, project, plan, reviewJob int6
 	if err != nil {
 		return err
 	}
+	batch = foldWaitingBatch(batch, waiting)
 	state, err := e.planReviewAppliedTx(tx, project, plan, batch, settings, now)
 	if err != nil {
 		return err
@@ -754,7 +887,7 @@ func (e *Engine) planReviewConcludedTx(tx *sql.Tx, project, plan, reviewJob int6
 // on. Returns the state the plan reached.
 func (e *Engine) planReviewAppliedTx(tx *sql.Tx, project, plan int64, batch []int64, settings approvalSettings, now time.Time) (string, error) {
 	nowStr := fmtTime(now)
-	if _, err := tx.Exec(`UPDATE plans SET state = ?, review_batch = '', updated_at = ? WHERE id = ?`, "active", nowStr, plan); err != nil {
+	if _, err := tx.Exec(`UPDATE plans SET state = ?, review_batch = '', amend_batch = '', updated_at = ? WHERE id = ?`, "active", nowStr, plan); err != nil {
 		return "", fmt.Errorf("activate plan %d: %w", plan, err)
 	}
 	if len(batch) == 0 {

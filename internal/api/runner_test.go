@@ -389,6 +389,41 @@ func TestRegisterPersistsAgents(t *testing.T) {
 	}
 }
 
+// TestHandleDraining covers the drain report (§5.1): a registered
+// runner's POST marks it draining, the status carries the mark for the
+// whole drain, the fresh runner's register clears it, and no other
+// role may leave it.
+func TestHandleDraining(t *testing.T) {
+	e := newEnv(t)
+	e.register("r1")
+	code, _, data := e.do(http.MethodPost, "/v1/runner/draining", "r1", "", []byte(`{}`))
+	if code != http.StatusOK {
+		t.Fatalf("report the drain: %d %s", code, data)
+	}
+	readDraining := func() bool {
+		t.Helper()
+		code, _, data := e.do(http.MethodGet, "/v1/status", "alice", "", nil)
+		if code != http.StatusOK {
+			t.Fatalf("read status: %d %s", code, data)
+		}
+		return decode[struct {
+			RunnerDraining bool `json:"runner_draining"`
+		}](t, data).RunnerDraining
+	}
+	if !readDraining() {
+		t.Error("the status does not carry the drain the runner reported")
+	}
+	// The fresh runner is up: its register ends the drain.
+	e.register("r1")
+	if readDraining() {
+		t.Error("the status still carries the drain after the runner registered again")
+	}
+	// The drain report is the runner's alone.
+	if code, _, _ := e.do(http.MethodPost, "/v1/runner/draining", "alice", "", []byte(`{}`)); code != http.StatusForbidden {
+		t.Errorf("a client's drain report answered %d, want 403", code)
+	}
+}
+
 // TestClientRunnerProtocol runs the client side of §12.3 — the same
 // code the runner uses — against the server over the socket: register,
 // lease, heartbeat with progress, release.
