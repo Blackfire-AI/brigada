@@ -1,6 +1,7 @@
 package lifecycle_test
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,29 +64,62 @@ func startRunnerProc(t *testing.T, bin, state, script string) *exec.Cmd {
 		t.Fatalf("open the runner log: %v", err)
 	}
 	cmd.Stdout, cmd.Stderr = logFile, logFile
+	// Its own process group: the cleanup waits for the runner's git
+	// children (a push's receive-pack and index-pack write into the
+	// remote's objects) to be gone before TempDir removal runs.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start the runner: %v", err)
 	}
 	t.Cleanup(func() {
-		if cmd.ProcessState != nil {
-			logFile.Close()
-			return
+		pgid := cmd.Process.Pid
+		if cmd.ProcessState == nil {
+			syscall.Kill(-pgid, syscall.SIGTERM)
+			done := make(chan struct{})
+			go func() { cmd.Wait(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				syscall.Kill(-pgid, syscall.SIGKILL)
+				<-done
+			}
 		}
-		cmd.Process.Signal(syscall.SIGTERM)
-		done := make(chan struct{})
-		go func() { cmd.Wait(); close(done) }()
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			cmd.Process.Kill()
-			<-done
-		}
+		waitGroupGone(t, pgid)
 		logFile.Close()
 		if data, err := os.ReadFile(logPath); err == nil {
 			t.Logf("runner log:\n%s", data)
 		}
 	})
 	return cmd
+}
+
+// waitGroupGone returns once no process of group pgid is left, so no
+// git child the runner started in its own group (a push's receive-pack)
+// can still write into the remote when TempDir cleanup runs. Jobs the
+// runner puts in groups of their own are outside it. Stragglers get a
+// SIGKILL after five seconds; a group still alive five seconds after
+// that fails the test instead of hanging it.
+func waitGroupGone(t *testing.T, pgid int) {
+	t.Helper()
+	start := time.Now()
+	killed := false
+	for {
+		if err := syscall.Kill(-pgid, 0); err != nil {
+			if !errors.Is(err, syscall.ESRCH) {
+				t.Errorf("probe the runner's process group %d: %v", pgid, err)
+			}
+			return
+		}
+		switch elapsed := time.Since(start); {
+		case elapsed > 10*time.Second:
+			t.Errorf("the runner's process group %d survived SIGKILL", pgid)
+			return
+		case elapsed > 5*time.Second && !killed:
+			syscall.Kill(-pgid, syscall.SIGKILL)
+			killed = true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // lsRemoteCount runs `git ls-remote --heads` with one ref pattern and
