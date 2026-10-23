@@ -27,8 +27,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: "brigada/task-170"
+    state: reviewing
+    branch: "brigada/task-170-r1"
     rounds: 0
   - id: 171
     name: "drain"
