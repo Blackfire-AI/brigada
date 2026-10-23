@@ -232,7 +232,7 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 		if v == "" {
 			return nil, nil
 		}
-		if filepath.IsAbs(v) || strings.HasPrefix(v, "/") || strings.HasPrefix(v, `\`) || !filepath.IsLocal(v) {
+		if filepath.IsAbs(v) || strings.HasPrefix(v, "/") || strings.ContainsAny(v, `\`) || strings.HasPrefix(v, "~") || !filepath.IsLocal(v) {
 			return nil, fmt.Errorf("%w: %s takes a repo-relative command path inside the repository, got %q", ErrInvalidSetting, key, value)
 		}
 		return json.Marshal(v)

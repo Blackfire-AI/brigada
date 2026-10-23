@@ -229,7 +229,7 @@ func TestGateLandSettingsRoundTrip(t *testing.T) {
 // land_ready is a repo-relative path: an absolute path or one that
 // escapes the repository is refused.
 func TestLandReadyValidation(t *testing.T) {
-	for _, v := range []string{"/bin/ready", "../ready.sh", "a/../../ready.sh", ".."} {
+	for _, v := range []string{"/bin/ready", "../ready.sh", "a/../../ready.sh", "..", "~/land-ready.sh", `.brigada\ready.sh`} {
 		if _, err := parseSettingValue(SettingLandReady, v); !errors.Is(err, ErrInvalidSetting) {
 			t.Errorf("land_ready %q: err = %v, want ErrInvalidSetting", v, err)
 		}
