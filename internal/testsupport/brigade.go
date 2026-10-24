@@ -12,13 +12,15 @@ import (
 
 // brigadaBin is the once-built binary all tests share: one build per
 // test binary, in a directory of its own under the system temp dir, so
-// no test's cleanup takes another's binary away.
+// no test's cleanup takes another's binary away. TestMain removes the
+// directory through RemoveBuiltBrigada once every test has run.
 var brigadaBin = sync.OnceValues(func() (string, error) {
 	root := repoRoot()
 	out, err := os.MkdirTemp("", "brigada-test-bin-")
 	if err != nil {
 		return "", fmt.Errorf("make the test bin dir: %w", err)
 	}
+	builtDir = out
 	bin := filepath.Join(out, "brigada")
 	cmd := exec.Command("go", "build", "-o", bin, "./cmd/brigada")
 	cmd.Dir = root
@@ -27,6 +29,19 @@ var brigadaBin = sync.OnceValues(func() (string, error) {
 	}
 	return bin, nil
 })
+
+// builtDir is the directory brigadaBin made, empty until it runs.
+var builtDir string
+
+// RemoveBuiltBrigada removes the directory BuildBrigada built into, if a
+// test built one. A package whose tests call BuildBrigada calls it from
+// TestMain after m.Run; nothing else removes the directory, and each
+// test binary would otherwise leave one behind in the system temp dir.
+func RemoveBuiltBrigada() {
+	if builtDir != "" {
+		os.RemoveAll(builtDir)
+	}
+}
 
 // BuildBrigada builds the brigada binary once per test binary and returns
 // its path, failing the test when the build does. The lifecycle and CLI
