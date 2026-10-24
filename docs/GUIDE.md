@@ -492,7 +492,7 @@ A landing never resolves a conflict and never picks a side. When the task's diff
 The repository ships `scripts/land-ready.sh`, a gate on the staging branch's CI: it reads the newest `gh run list` run on `brigada/landed` and exits `0` when that run succeeded or the branch has no runs, `1` when it finished without success — failed, cancelled, skipped or timed out (the first output line is the run's URL), and `2` while it is queued or in progress, or when `gh` itself fails. It is not enabled by default; enable it with:
 
 ```sh
-brigada project set land_ready scripts/land-ready.sh
+brigada project set land_ready=scripts/land-ready.sh
 ```
 
 ### By hand: `brigada land`
