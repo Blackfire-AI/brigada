@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"time"
 
@@ -76,6 +77,13 @@ func EnsureRunner(ctx context.Context, o RunnerStartOptions) (RunnerStartResult,
 	if running && o.Restart == "" {
 		return RunnerStartResult{Existing: true, Record: rec}, nil
 	}
+	// Pids of runners that held the lock before this start (the one
+	// about to hand off included). Their metadata can outlive them for
+	// an instant: a fresh runner holds the lock a moment before it
+	// clears the last owner's runner.json and pid, so the readiness
+	// check below must not take such a record for a runner that won
+	// the race.
+	stale := runnerstate.StalePIDs(dir)
 	if running {
 		// The handoff runs under the same start gate: the request is
 		// written, the runner honoured it, and the fresh start follows
@@ -135,7 +143,7 @@ func EnsureRunner(ctx context.Context, o RunnerStartOptions) (RunnerStartResult,
 		if err != nil {
 			return result, err
 		}
-		if running && rec.Agents != nil {
+		if runnerReady(rec, running, cmd.Process.Pid, stale) {
 			// A manual runner won the race. Stop our child before it can
 			// acquire the lock later and silently replace the reported agents.
 			acknowledged = rec.PID == cmd.Process.Pid
@@ -159,6 +167,18 @@ func EnsureRunner(ctx context.Context, o RunnerStartOptions) (RunnerStartResult,
 			return result, fmt.Errorf("runner startup: %w; see %s", err, logPath)
 		}
 	}
+}
+
+// runnerReady reports whether rec is a live runner's own advertisement:
+// the lock is held, the record carries agents, and it does not name a
+// runner that held the lock before this start (a stale record the fresh
+// holder has not yet cleared). A stale pid equal to the child's own is a
+// reused pid, not a stale record.
+func runnerReady(rec runnerstate.Record, running bool, child int, stale []int) bool {
+	if !running || rec.Agents == nil {
+		return false
+	}
+	return rec.PID == child || !slices.Contains(stale, rec.PID)
 }
 
 func runnerStartPause(ctx context.Context, deadline time.Time) error {

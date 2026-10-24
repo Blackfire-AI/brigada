@@ -76,10 +76,29 @@ const (
 	OutcomeTimeCap = "time_cap"
 )
 
+// The land_ready gate's outcomes (issue #87): the answers of the
+// repo-relative command a land job runs before landing. held is the
+// command's own hold — exit 1, its first output line the reason — and
+// nothing lands until the user releases it; not ready is every other
+// way it could not say yes — exit 2, another exit, a spawn failure, a
+// timeout — and the landing is requeued on the not-before backoff.
+// Both ride with a Result — the gate's record — never an Error, and
+// end the job done: they are the gate's answers, not failures.
+const (
+	OutcomeLandHeld     = "held"
+	OutcomeLandNotReady = "not ready"
+)
+
 // isStopOutcome reports whether outcome is one the runner may complete
 // a run with (§5.6).
 func isStopOutcome(outcome string) bool {
 	return outcome == OutcomeStalled || outcome == OutcomeTimeCap
+}
+
+// isLandOutcome reports whether outcome is one of the land_ready
+// gate's (issue #87), a land job's alone to complete with.
+func isLandOutcome(outcome string) bool {
+	return outcome == OutcomeLandHeld || outcome == OutcomeLandNotReady
 }
 
 // Answer is how an engine call went. Errors are reserved for the store

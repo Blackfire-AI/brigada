@@ -126,6 +126,7 @@ approval_tiers: [light, heavy]
 approval_restarted: true
 land_target: brigada/landed
 after_land: make announce
+land_ready: .brigada/land-ready.sh
 `
 	cfg, err := ParseProjectConfig(cfgFile(all))
 	if err != nil {
@@ -139,6 +140,7 @@ after_land: make announce
 		SettingApprovalRestarted: `true`,
 		SettingLandTarget:        `"brigada/landed"`,
 		SettingAfterLand:         `"make announce"`,
+		SettingLandReady:         `".brigada/land-ready.sh"`,
 	}
 	for k, w := range want {
 		if got := string(cfg.Values[k]); got != w {
@@ -155,6 +157,8 @@ after_land: make announce
 		"branch lock suffix":  "land_target: feature/x.lock\n",
 		"gate as a list":      "gate_plan: [ask]\n",
 		"gate block open":     "gate_plan:\n",
+		"land_ready absolute": "land_ready: /bin/ready\n",
+		"land_ready escape":   "land_ready: ../ready.sh\n",
 		"tiers with a + item": "approval_tiers: [\"light+heavy\"]\n",
 	} {
 		_, err := ParseProjectConfig(cfgFile(body))
@@ -172,13 +176,14 @@ after_land: make announce
 // gate holds a plan; dropping the key returns it to the default.
 func TestImportGates(t *testing.T) {
 	e := newEnv(t)
-	res := e.importCfg(cfgFile("gate_plan: ask\ngate_push: never\napproval_tiers: [heavy]\napproval_restarted: true\nland_target: brigada/landed\nafter_land: make announce\n"), false)
-	if len(res.Applied) != 6 || res.NeedsConfirm {
-		t.Fatalf("result = %+v, want 6 applied", res)
+	res := e.importCfg(cfgFile("gate_plan: ask\ngate_push: never\napproval_tiers: [heavy]\napproval_restarted: true\nland_target: brigada/landed\nafter_land: make announce\nland_ready: .brigada/land-ready.sh\n"), false)
+	if len(res.Applied) != 7 || res.NeedsConfirm {
+		t.Fatalf("result = %+v, want 7 applied", res)
 	}
 	for k, v := range map[string]string{
 		SettingGatePlan: "ask", SettingGatePush: "never", SettingApprovalTiers: "heavy",
 		SettingApprovalRestarted: "true", SettingLandTarget: "brigada/landed", SettingAfterLand: "make announce",
+		SettingLandReady: ".brigada/land-ready.sh",
 	} {
 		if s := settingOf(t, *res.Settings, k); s.Value != v || s.Source != SourceImported {
 			t.Errorf("%s = %+v, want %q imported", k, s, v)

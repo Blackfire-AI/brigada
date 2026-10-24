@@ -71,6 +71,7 @@ const (
 	evTaskPushed             = "task_pushed"               // the push phase pushed a waiting landing (§7.1)
 	evPushApproved           = "push_approved"             // the user released the push gate for waiting landings (§6.3)
 	evTaskLandFailed         = "task_land_failed"          // a conflict or a failed check on the landed result; the task parks (§7.1)
+	evTaskLandNotReady       = "task_land_not_ready"       // the land_ready gate answered not ready (issue #87); the landing is requeued after the backoff, Until names the next try
 	evProjectForemanSet      = "project_foreman_set"       // setup: the project's foreman harness and model were chosen (§4.1)
 	evForemanReport          = "foreman_report"            // a done foreman turn's final message, reported to the user (§3, §10)
 	evUserMessage            = "user_message"              // the user's message to the foreman, sent without attaching (§4.2 item 3)

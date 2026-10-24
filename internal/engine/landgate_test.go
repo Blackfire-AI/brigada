@@ -219,7 +219,7 @@ func TestPushGateNeverRecordsThePushCmd(t *testing.T) {
 // state or the landing.
 func TestAfterLandFailureReportedNeverUndone(t *testing.T) {
 	e := newEnv(t)
-	e.set(map[string]string{SettingAfterLand: "go run ./cmd/post-land"})
+	e.set(map[string]string{SettingAfterLand: "go run ./cmd/post-land", SettingLandReady: ".brigada/land-ready.sh"})
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
 	e.runToDone(author, reviewer)
@@ -230,6 +230,9 @@ func TestAfterLandFailureReportedNeverUndone(t *testing.T) {
 	}
 	if g.AfterLand != "go run ./cmd/post-land" {
 		t.Errorf("land grant after_land = %q, want the command", g.AfterLand)
+	}
+	if g.LandReady != ".brigada/land-ready.sh" {
+		t.Errorf("land grant land_ready = %q, want the command", g.LandReady)
 	}
 	if ans := e.complete(g, Completion{Result: `{"target_branch":"main","commit":"abc123","check_passed":true,"pushed":"pushed","after_land_error":"exit 1: boom"}`}); ans != AnsOK {
 		t.Fatalf("complete the land job: %s", ans)

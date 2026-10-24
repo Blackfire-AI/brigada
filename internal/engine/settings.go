@@ -45,6 +45,7 @@ const (
 	SettingApprovalRestarted = "approval_restarted"
 	SettingLandTarget        = "land_target"
 	SettingAfterLand         = "after_land"
+	SettingLandReady         = "land_ready"
 	SettingDefaultCheck      = "default_check"
 	SettingWorkerTools       = "worker_tools"
 	// The environment step (§5.7): the command, the repo-relative files
@@ -93,7 +94,7 @@ const (
 // SettingKeys are the editable keys, in the order show prints them.
 var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
-	SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
+	SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
 	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingInstructions}
 
@@ -205,7 +206,7 @@ func parseSettingValue(key, value string) (json.RawMessage, error) {
 	switch key {
 	case SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
 		SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
-		SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand,
+		SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
 		SettingDefaultCheck, SettingWorkerTools,
 		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingInstructions:
 	default:
@@ -225,6 +226,16 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 	}
 	if key == SettingDefaultCheck || key == SettingSetup || key == SettingAfterLand {
 		return json.Marshal(strings.TrimSpace(value))
+	}
+	if key == SettingLandReady {
+		v := strings.TrimSpace(value)
+		if v == "" {
+			return nil, nil
+		}
+		if filepath.IsAbs(v) || strings.HasPrefix(v, "/") || strings.ContainsAny(v, `\`) || strings.HasPrefix(v, "~") || !filepath.IsLocal(v) {
+			return nil, fmt.Errorf("%w: %s takes a repo-relative command path inside the repository, got %q", ErrInvalidSetting, key, value)
+		}
+		return json.Marshal(v)
 	}
 	if key == SettingGatePlan || key == SettingGateLand {
 		v := strings.TrimSpace(value)
@@ -499,7 +510,7 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 			if s, ok := rawString(cur); ok && s != "" {
 				sv.Value = s
 			}
-		case SettingAfterLand:
+		case SettingAfterLand, SettingLandReady:
 			sv.Value = "none"
 			if s, ok := rawString(cur); ok && s != "" {
 				sv.Value = s

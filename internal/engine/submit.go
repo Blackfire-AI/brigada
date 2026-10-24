@@ -74,6 +74,10 @@ type SubmitParams struct {
 	// so a job does not fire again while the network is still down. The
 	// zero value means the job is leasable at once.
 	NotBefore time.Time
+	// SkipLandReady marks the land job an approval queues to release the
+	// land_ready gate's hold (issue #87): the runner runs no command and
+	// lands. False on every other job.
+	SkipLandReady bool
 }
 
 // branch is the branch the submit names, for the job_created event: only
@@ -193,11 +197,11 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 		notBefore = fmtTime(p.NotBefore)
 	}
 	res, err := tx.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status,
-		harness, model, labels, restart, round, exclude_family, exclude_agent, require_agent, branch, queued_at, not_before, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		harness, model, labels, restart, round, exclude_family, exclude_agent, require_agent, branch, queued_at, not_before, skip_land_ready, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ProjectID, nullIfZero(p.TaskID), string(p.Kind), p.Key, string(p.Mode), p.Prompt,
 		p.Harness, p.Model, string(labelsJSON), boolInt(p.Restart), round, p.ExcludeFamily, nullIfZero(p.ExcludeAgent),
-		nullIfZero(p.RequireAgent), branch, nowStr, notBefore, nowStr, nowStr)
+		nullIfZero(p.RequireAgent), branch, nowStr, notBefore, boolInt(p.SkipLandReady), nowStr, nowStr)
 	if err != nil {
 		if !isUniqueViolation(err) {
 			return SubmitResult{}, fmt.Errorf("create job: %w", err)
