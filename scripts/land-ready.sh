@@ -14,7 +14,6 @@
 #           not ready, the landing is retried on the backoff
 #
 # Enable it with: brigada project set land_ready scripts/land-ready.sh
-# The file must be executable: chmod +x scripts/land-ready.sh
 set -u
 branch=brigada/landed
 run=$(gh run list --branch "$branch" --limit 1 --json status,conclusion,url \

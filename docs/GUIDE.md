@@ -489,11 +489,9 @@ A landing never resolves a conflict and never picks a side. When the task's diff
 | `1` | held | The landing holds on the first output line; release it with `brigada land approve <task>` (the command is not run again for that landing). |
 | `2`, any other code, a command that could not start, a timeout | not ready | Wait and retry: the landing is requeued on the backoff, with no failure and no restart spent. |
 
-The repository ships `scripts/land-ready.sh`, a gate on the staging branch's CI: it reads the newest `gh run list` run on `brigada/landed` and exits `0` when that run succeeded or the branch has no runs, `1` when it finished without success — failed, cancelled, skipped or timed out (the first output line is the run's URL), and `2` while it is queued or in progress, or when `gh` itself fails. It is not enabled by default. The file is committed without its executable bit; make it executable once, then enable it:
+The repository ships `scripts/land-ready.sh`, a gate on the staging branch's CI: it reads the newest `gh run list` run on `brigada/landed` and exits `0` when that run succeeded or the branch has no runs, `1` when it finished without success — failed, cancelled, skipped or timed out (the first output line is the run's URL), and `2` while it is queued or in progress, or when `gh` itself fails. It is not enabled by default; enable it with:
 
 ```sh
-chmod +x scripts/land-ready.sh
-git add --chmod=+x scripts/land-ready.sh && git commit -m "make land-ready.sh executable"
 brigada project set land_ready scripts/land-ready.sh
 ```
 
