@@ -42,10 +42,17 @@ func TestDetachedRunnerHelper(t *testing.T) {
 	// A restart request is honoured the way the real runner honours one:
 	// `now` exits at once, a drain only once its running job ended —
 	// here, when the parent writes the release marker. Parent test
-	// terminates us otherwise; the OS releases the lock.
+	// terminates us otherwise; the OS releases the lock. A parent killed
+	// before it could terminate us leaves us reparented, so we exit then
+	// too rather than poll forever.
+	parent := os.Getppid()
+	orphaned := func() bool { return os.Getppid() != parent }
 	for {
 		mode, ok := runnerstate.RestartRequested(dir)
 		if !ok {
+			if orphaned() {
+				os.Exit(13)
+			}
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
@@ -55,6 +62,9 @@ func TestDetachedRunnerHelper(t *testing.T) {
 		for {
 			if _, err := os.Stat(filepath.Join(dir, "release")); err == nil {
 				os.Exit(0)
+			}
+			if orphaned() {
+				os.Exit(13)
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
