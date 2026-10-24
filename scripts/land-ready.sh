@@ -13,7 +13,7 @@
 #   exit 2  the latest run is queued or in progress, or gh itself failed:
 #           not ready, the landing is retried on the backoff
 #
-# Enable it with: brigada project set land_ready scripts/land-ready.sh
+# Enable it with: brigada project set land_ready=scripts/land-ready.sh
 set -u
 branch=brigada/landed
 run=$(gh run list --branch "$branch" --limit 1 --json status,conclusion,url \
