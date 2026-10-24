@@ -44,8 +44,12 @@ func TestDetachedRunnerHelper(t *testing.T) {
 	// here, when the parent writes the release marker. Parent test
 	// terminates us otherwise; the OS releases the lock. A parent killed
 	// before it could terminate us leaves us reparented, so we exit then
-	// too rather than poll forever.
-	parent := os.Getppid()
+	// too rather than poll forever. The parent's pid comes from the test
+	// that made us, so a parent killed before we ran is caught as well.
+	parent, err := strconv.Atoi(os.Getenv("BRIGADA_RUNNER_PARENT"))
+	if err != nil {
+		os.Exit(14)
+	}
 	orphaned := func() bool { return os.Getppid() != parent }
 	for {
 		mode, ok := runnerstate.RestartRequested(dir)
@@ -85,6 +89,7 @@ func helperRunnerBinary(t *testing.T) string {
 		t.Fatal(err)
 	}
 	t.Setenv("BRIGADA_RUNNER_HELPER", "1")
+	t.Setenv("BRIGADA_RUNNER_PARENT", strconv.Itoa(os.Getpid()))
 	return binary
 }
 func shellTestQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
