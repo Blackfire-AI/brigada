@@ -212,7 +212,7 @@ mv argv.tmp argv.txt
 mv where.tmp where.txt
 mv env.tmp env.txt
 mv prompt.tmp prompt.txt
-while [ ! -f "$BRIGADA_TEST_MARKERS/release" ]; do sleep 0.05; done
+` + testsupport.AwaitRelease + `
 `
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatalf("write the attach script: %v", err)
@@ -474,6 +474,9 @@ func TestAttachReleasesWhateverTheExit(t *testing.T) {
 func TestAttachForwardsTheTerminalsInterrupt(t *testing.T) {
 	remote := testsupport.NewGitRemote(t)
 	cloneRemote(t, remote)
+	// Never released: the SIGINT ends the script. The directory is what
+	// ends it when the signal does not arrive.
+	markerDir(t)
 	e := newAttachEnv(t, remote, "fake", "fake-1")
 	// The script traps INT to record it, then re-raises INT on itself
 	// with the trap aside, so it dies of the signal the way a harness
@@ -485,7 +488,7 @@ func TestAttachForwardsTheTerminalsInterrupt(t *testing.T) {
 trap 'echo sigint > signal.txt; trap - INT; kill -INT $$' INT
 env > env.tmp
 mv env.tmp env.txt
-while [ ! -f "$BRIGADA_TEST_MARKERS/release" ]; do sleep 0.05; done
+` + testsupport.AwaitRelease + `
 `
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatalf("write the attach script: %v", err)
