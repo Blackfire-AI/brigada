@@ -27,7 +27,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-188"
     rounds: 0
   - id: 189
@@ -38,7 +38,7 @@ tasks:
     base: "brew-tap"
     continue: "brew-tap"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 190
