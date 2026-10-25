@@ -28,7 +28,6 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: needs_foreman
+    state: ready
     branch: ""
     rounds: 0
-    question: "Please provide the text of issue #92 (including comments if relevant), so I can make the specified README.md and docs/product.md edits."
