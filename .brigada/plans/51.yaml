@@ -5,9 +5,9 @@
 plan: 51
 title: "v1.0.0 distribution and guards: #85 Homebrew tap, #86 install.sh, #96 attestations, #95 compatibility test"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-25T17:42:31.352317Z
-updated: 2026-10-25T17:46:13.773405Z
+updated: 2026-10-25T18:11:11.500172Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
