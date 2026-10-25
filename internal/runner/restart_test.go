@@ -9,6 +9,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
+	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
 // The restart request's runner side (§5.1): a drain takes no new lease
@@ -22,7 +23,7 @@ var gatingWorker = `
 cat > /dev/null
 echo '{"type":"assistant","text":"starting"}'
 : > "$BRIGADA_TEST_MARKERS/started"
-while [ ! -f "$BRIGADA_TEST_MARKERS/release" ]; do sleep 0.05; done
+` + testsupport.AwaitRelease + `
 echo '{"type":"tool_start","name":"Edit"}'
 echo hello > work.txt
 echo '{"type":"tool_end","name":"Edit"}'

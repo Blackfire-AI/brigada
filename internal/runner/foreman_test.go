@@ -17,6 +17,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/foreman"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
+	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
 // The foreman turn tests run against the same machinery as the worker
@@ -88,7 +89,7 @@ pwd > where.txt
 printf '%s\n' "$BRIGADA_FAKE_RESUME" > resume.txt
 echo '{"type":"system_init","session_id":"foreman-sess-1"}'
 echo '{"type":"assistant","text":"reading the events"}'
-while [ ! -f "$BRIGADA_TEST_MARKERS/release" ]; do sleep 0.05; done
+` + testsupport.AwaitRelease + `
 echo '{"type":"result","text":"answered the worker; the plan stands"}'
 `
 
@@ -269,7 +270,7 @@ func TestRunnerForemanTurnTimeCapped(t *testing.T) {
 echo '{"type":"system_init","session_id":"foreman-sess-4"}'
 echo '{"type":"assistant","text":"thinking"}'
 cat > /dev/null
-while [ ! -f "$BRIGADA_TEST_MARKERS/release" ]; do sleep 0.1; done
+` + testsupport.AwaitRelease + `
 `
 	p := e.startRunner(writeWorkerScript(t, worker), 100*time.Millisecond,
 		func(c *Config) { c.ClassCaps = map[string]ClassCaps{"foreman": {TimeCap: 300 * time.Millisecond}} })
@@ -406,7 +407,7 @@ env > env.tmp && mv env.tmp env.txt
 printf '%s\n' "$BRIGADA_FAKE_MCP_CONFIG" > mcpconfig.tmp && mv mcpconfig.tmp mcpconfig.txt
 echo '{"type":"system_init","session_id":"foreman-sess-5"}'
 echo '{"type":"assistant","text":"checking my tools"}'
-while [ ! -f "$BRIGADA_TEST_MARKERS/release" ]; do sleep 0.05; done
+` + testsupport.AwaitRelease + `
 echo '{"type":"result","text":"answered with the bridge"}'
 `
 

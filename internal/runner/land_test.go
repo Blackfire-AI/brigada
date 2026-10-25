@@ -13,6 +13,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
+	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
 // The land jobs on the runner (§7.1), end to end against the real
@@ -227,7 +228,7 @@ func pushToMain(t *testing.T, remote, file, content string) string {
 // diff cleanly. (Built on the template by hand — reviewScript rebuilds
 // from the template itself, so it cannot take an edited one.)
 var conflictReviewWorker = strings.Replace(reviewWorker, "@RESULT@",
-	`while [ ! -f "$BRIGADA_TEST_MARKERS/release" ]; do sleep 0.05; done`+"\n\t"+reviewApproveResult, 1)
+	testsupport.AwaitRelease+"\n\t"+reviewApproveResult, 1)
 
 // releaseReviewer lets a conflictReviewWorker reviewer finish.
 func releaseReviewer(t *testing.T, markers string) {
