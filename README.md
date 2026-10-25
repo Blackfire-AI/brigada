@@ -13,6 +13,7 @@ You may pay for more than one AI coding subscription. brigada sits above their o
 - the **dispatcher** gives each task to the agent with the best measured record for that kind of task on *your* repo, among the agents that still have quota;
 - every task's own **check** (tests, lint, any command) runs on the result, so "done" is not taken on trust;
 - a **reviewer** from a different model family than the author reads the change;
+- Independent review catches problems that checks can miss: in brigada's own development, reviewers asked for changes on 69 of 165 tasks, and every one had already passed its check. In a planted-bug exercise, reviewers caught 37 of 40 spec-breaking bugs, with each family missing exactly one; on a small sample of real backlog work, results showed no family advantage either way. Cross-family routing also spreads reviews across subscriptions, so they do not wait on or spend the author's quota.
 - the **outcome** of every task is recorded locally, and `brigada stats` shows which agent actually wins where;
 - **landing is brigada's**: each approved task is squashed onto the target branch, your check reruns on the result, and the push follows your push gate (`auto` by default); `brigada land` stays as the hand-driven form, and gates hold anything you want to see first.
 
@@ -24,18 +25,64 @@ brigada drives the vendors' **unmodified** CLIs, each signed in with your own ac
 
 ## Install
 
-You need:
+Supported platforms are macOS and Linux, on amd64 and arm64. Windows is not supported. Homebrew, the install script, and prebuilt binaries need no Go toolchain.
 
-- Go 1.27 or newer and `git`;
-- a repository with an `origin` remote;
-- signed-in agent CLIs on `PATH`. Reviews need a model family other than the author's, so offer review-capable agents from at least two families.
+With Homebrew:
 
 ```sh
-go install github.com/Blackfire-AI/brigada/cmd/brigada@latest
+brew install blackfire-ai/tap/brigada
 brigada version
 ```
 
-The main package lives in `cmd/brigada`, so that is the install path. Make sure `$(go env GOPATH)/bin` is on your `PATH`. Each release tag also has prebuilt binaries attached on its GitHub release (see [Releasing](#releasing)).
+Or use the install script (requires curl or wget, tar, and sha256sum or shasum):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Blackfire-AI/brigada/main/install.sh | sh
+```
+
+The script verifies the release tarball against `SHA256SUMS`, installs into `~/.local/bin` without sudo, and prints the installed version. It tells you if the directory is missing from `PATH`. Set `BRIGADA_VERSION` to pin a release (for example `1.0.0`) and `BRIGADA_INSTALL_DIR` to choose another directory; pass these variables to `sh` when using the pipeline.
+
+To use `go install` or build from source, you need Go 1.27 or newer:
+
+```sh
+go install github.com/Blackfire-AI/brigada/cmd/brigada@latest
+```
+
+The main package lives in `cmd/brigada`, so that is the install path. Make sure `$(go env GOPATH)/bin` is on your `PATH`.
+
+Prebuilt binaries and tarballs are also attached to each [GitHub release](https://github.com/Blackfire-AI/brigada/releases) with `SHA256SUMS` (see [Releasing](#releasing)). To download and verify a tarball manually instead of piping a script to `sh`, choose a release version and your platform (`darwin` or `linux`, `amd64` or `arm64`):
+
+```sh
+version=1.0.0
+os=linux
+arch=amd64
+asset="brigada-${os}-${arch}.tar.gz"
+base="https://github.com/Blackfire-AI/brigada/releases/download/v${version}"
+curl -fsSL -o "$asset" "$base/$asset"
+curl -fsSL -o SHA256SUMS "$base/SHA256SUMS"
+grep "  ${asset}\$" SHA256SUMS > selected-checksum
+# Stop if the checksum is missing or verification fails.
+test -s selected-checksum && sha256sum -c selected-checksum &&
+  tar -xzf "$asset" brigada &&
+  mkdir -p "$HOME/.local/bin" &&
+  mv brigada "$HOME/.local/bin/brigada" &&
+  "$HOME/.local/bin/brigada" version
+```
+
+On macOS, use `shasum -a 256 -c selected-checksum` instead of `sha256sum -c selected-checksum`. Add `~/.local/bin` to `PATH` if it is not already there.
+
+To check that a tarball was built by this repository's release workflow, install the [GitHub CLI](https://cli.github.com/) and run this in the directory with the downloaded tarball:
+
+```sh
+gh attestation verify brigada-<os>-<arch>.tar.gz --repo Blackfire-AI/brigada
+```
+
+Replace `<os>` and `<arch>` with your platform, for example `brigada-linux-amd64.tar.gz`.
+
+To use brigada, you need:
+
+- `git` and a repository with an `origin` remote;
+- signed-in agent CLIs on `PATH`. Reviews need a model family other than the author's, so offer review-capable agents from at least two families.
 
 ### What `brigada version` prints
 
@@ -112,9 +159,9 @@ git tag v1.0.0-rc.1
 git push origin v1.0.0-rc.1
 ```
 
-A tag with a suffix such as `-rc.1` is published as a prerelease.
+A tag with a suffix such as `-rc.1` is published as a prerelease and does not update Homebrew. A release tag without a suffix also updates `Formula/brigada.rb` in [Blackfire-AI/homebrew-tap](https://github.com/Blackfire-AI/homebrew-tap). The maintainer creates that repository and configures the `HOMEBREW_TAP_TOKEN` secret with write access to its contents before releasing.
 
-The `release` workflow builds `brigada-<os>-<arch>` binaries (darwin and linux, amd64 and arm64) with the tag as the version, plus a `.tar.gz` of each and `SHA256SUMS`, and attaches them to a new GitHub release. `brigada version` prints the tag without its leading `v`; a source build prints `0.0.0-dev+<rev12>` (see [Install](#install)).
+The `release` workflow builds `brigada-<os>-<arch>` binaries (darwin and linux, amd64 and arm64) with the tag as the version, plus a `.tar.gz` of each and `SHA256SUMS`, and attaches them to a new GitHub release. For tags without a suffix, it then generates the complete Homebrew formula from the release checksums and commits and pushes it to the tap. Verify `brew audit` by hand after the release. `brigada version` prints the tag without its leading `v`; a source build prints `0.0.0-dev+<rev12>` (see [Install](#install)).
 
 ## License
 
