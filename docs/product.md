@@ -30,7 +30,7 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 4. **Dispatches** each task to an eligible agent chosen by sampling: each agent's measured record for that class on this repo, weighed against its configured cost, among agents with quota left and healthy. With no record yet (a new user or repo) the draws are wide, so every agent gets tried, and `stats` shows how confident each number is. The foreman says per task how heavy a model it needs (light, standard or heavy) and how hard it should think; the engine samples a model of that tier among the CLIs you allowed, by record weighed against cost, never leaving the tier by choice. A failed task first retries at a higher effort, then climbs a tier ([design.md](design.md) §6.1, §8).
 5. **Runs** the agent's official CLI headless in its own git worktree, signed in with your account.
 6. **Checks** the work by running the task's check, never trusting "done".
-7. **Reviews** every change with a model from a different family. Fix rounds are capped.
+7. **Reviews** every change independently, using a model from a different family. Review catches real problems even after work passes its check, and cross-family routing spreads the work across subscriptions so a review does not wait on or spend the author's quota. Fix rounds are capped.
 8. **Handles failures:** retries at a higher effort, then a higher tier, moves the task to another agent, or parks it for the foreman, which re-plans, splits it, or asks you.
 9. **Lands** each approved task onto your branch as soon as its dependencies are landed, reruns your check on the result, and pushes ([design.md](design.md) §7.1): the mechanical end of the loop is brigada's, and you stop it only with a rule, at the plan, the landing or the push ([design.md](design.md) §6.3). A task that your rules hold, a conflict, or a check that fails on the landed result is never resolved by a rule: it waits for you or goes back to the foreman.
 10. **Reports** progress and results: what landed, what waits at a gate, what needs you. You can **stop or cancel** a plan or a task at any time.
@@ -116,7 +116,7 @@ brigada is a standalone tool beside your own harness session: not a board, and n
 | Gas Town, Symphony, vibe-kanban, claude-squad | orchestration without outcome routing |
 | CodexBar (22k★) | shows quota only; brigada uses it as a source |
 
-**Edge:** a foreman that routes by measured outcomes, runs checks, enforces cross-family review, works headless, and sends no telemetry. No tool in this landscape routes by per-repo outcomes.
+**Edge:** a foreman that routes by measured outcomes, runs checks, and enforces independent cross-family review to catch problems beyond the check and spread review work across subscriptions; it works headless and sends no telemetry. No tool in this landscape routes by per-repo outcomes.
 
 ## 8. Terms of use
 
