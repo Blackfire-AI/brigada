@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -99,8 +100,20 @@ func TestAwaitReleaseEndsWhenItsParentDies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pid file %q: %v", data, err)
 	}
+	// Not ProcGone alone: without /proc (darwin) it counts a live pid as
+	// gone. The kill decides; /proc, where there is one, adds a zombie
+	// awaiting a reaper that is not this process.
+	gone := func() bool {
+		if syscall.Kill(pid, 0) != nil {
+			return true
+		}
+		if _, err := os.Stat("/proc/self/stat"); err != nil {
+			return false
+		}
+		return ProcGone(pid)
+	}
 	deadline := time.Now().Add(5 * time.Second)
-	for !ProcGone(pid) {
+	for !gone() {
 		if time.Now().After(deadline) {
 			if p, err := os.FindProcess(pid); err == nil {
 				p.Kill()
