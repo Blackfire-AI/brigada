@@ -24,13 +24,10 @@ import (
 // fails with the section's name rather than comparing empty lists.
 
 // compatDoc is absolute, resolved at start: other tests change directory.
-var compatDoc = func() string {
-	p, err := filepath.Abs("../../docs/COMPATIBILITY.md")
-	if err != nil {
-		panic(err)
-	}
-	return p
-}()
+// A failure is kept, not panicked on: helper processes re-run this binary
+// from a directory a test may have removed, where Linux fails Getwd, and
+// they never read the document.
+var compatDoc, compatDocErr = filepath.Abs("../../docs/COMPATIBILITY.md")
 
 const (
 	secCommands    = "**The CLI commands and their subcommands.**"
@@ -285,6 +282,9 @@ func diffSets(scope string, documented, defined, allowed []string) []string {
 
 func readCompatDoc(t *testing.T) string {
 	t.Helper()
+	if compatDocErr != nil {
+		t.Fatal(compatDocErr)
+	}
 	b, err := os.ReadFile(compatDoc)
 	if err != nil {
 		t.Fatal(err)
