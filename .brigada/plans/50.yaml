@@ -7,7 +7,7 @@ title: "#92 docs: state what cross-family review is measured to do"
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-10-25T17:05:41.858849Z
-updated: 2026-10-25T17:06:42.81558Z
+updated: 2026-10-25T17:41:59.900445Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -26,7 +26,8 @@ tasks:
     class: "implement"
     deps: []
     base: ""
-    effort: medium
+    tier: light
+    effort: low
     state: needs_foreman
     branch: ""
     rounds: 0
