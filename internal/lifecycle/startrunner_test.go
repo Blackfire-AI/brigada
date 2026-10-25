@@ -42,10 +42,21 @@ func TestDetachedRunnerHelper(t *testing.T) {
 	// A restart request is honoured the way the real runner honours one:
 	// `now` exits at once, a drain only once its running job ended —
 	// here, when the parent writes the release marker. Parent test
-	// terminates us otherwise; the OS releases the lock.
+	// terminates us otherwise; the OS releases the lock. A parent killed
+	// before it could terminate us leaves us reparented, so we exit then
+	// too rather than poll forever. The parent's pid comes from the test
+	// that made us, so a parent killed before we ran is caught as well.
+	parent, err := strconv.Atoi(os.Getenv("BRIGADA_RUNNER_PARENT"))
+	if err != nil {
+		os.Exit(14)
+	}
+	orphaned := func() bool { return os.Getppid() != parent }
 	for {
 		mode, ok := runnerstate.RestartRequested(dir)
 		if !ok {
+			if orphaned() {
+				os.Exit(13)
+			}
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
@@ -55,6 +66,9 @@ func TestDetachedRunnerHelper(t *testing.T) {
 		for {
 			if _, err := os.Stat(filepath.Join(dir, "release")); err == nil {
 				os.Exit(0)
+			}
+			if orphaned() {
+				os.Exit(13)
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
@@ -75,6 +89,7 @@ func helperRunnerBinary(t *testing.T) string {
 		t.Fatal(err)
 	}
 	t.Setenv("BRIGADA_RUNNER_HELPER", "1")
+	t.Setenv("BRIGADA_RUNNER_PARENT", strconv.Itoa(os.Getpid()))
 	return binary
 }
 func shellTestQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
