@@ -24,18 +24,25 @@ brigada drives the vendors' **unmodified** CLIs, each signed in with your own ac
 
 ## Install
 
-You need:
-
-- Go 1.27 or newer and `git`;
-- a repository with an `origin` remote;
-- signed-in agent CLIs on `PATH`. Reviews need a model family other than the author's, so offer review-capable agents from at least two families.
+Install on macOS or Linux (amd64 or arm64) with Homebrew:
 
 ```sh
-go install github.com/Blackfire-AI/brigada/cmd/brigada@latest
+brew install blackfire-ai/tap/brigada
 brigada version
 ```
 
-The main package lives in `cmd/brigada`, so that is the install path. Make sure `$(go env GOPATH)/bin` is on your `PATH`. Each release tag also has prebuilt binaries attached on its GitHub release (see [Releasing](#releasing)).
+To build from source, you need Go 1.27 or newer:
+
+```sh
+go install github.com/Blackfire-AI/brigada/cmd/brigada@latest
+```
+
+The main package lives in `cmd/brigada`, so that is the install path. Make sure `$(go env GOPATH)/bin` is on your `PATH`. Prebuilt binaries are also attached to each [GitHub release](https://github.com/Blackfire-AI/brigada/releases) with `SHA256SUMS` (see [Releasing](#releasing)).
+
+To use brigada, you need:
+
+- `git` and a repository with an `origin` remote;
+- signed-in agent CLIs on `PATH`. Reviews need a model family other than the author's, so offer review-capable agents from at least two families.
 
 ### What `brigada version` prints
 
@@ -112,9 +119,9 @@ git tag v1.0.0-rc.1
 git push origin v1.0.0-rc.1
 ```
 
-A tag with a suffix such as `-rc.1` is published as a prerelease.
+A tag with a suffix such as `-rc.1` is published as a prerelease and does not update Homebrew. A release tag without a suffix also updates `Formula/brigada.rb` in [Blackfire-AI/homebrew-tap](https://github.com/Blackfire-AI/homebrew-tap). The maintainer creates that repository and configures the `HOMEBREW_TAP_TOKEN` secret with write access to its contents before releasing.
 
-The `release` workflow builds `brigada-<os>-<arch>` binaries (darwin and linux, amd64 and arm64) with the tag as the version, plus a `.tar.gz` of each and `SHA256SUMS`, and attaches them to a new GitHub release. `brigada version` prints the tag without its leading `v`; a source build prints `0.0.0-dev+<rev12>` (see [Install](#install)).
+The `release` workflow builds `brigada-<os>-<arch>` binaries (darwin and linux, amd64 and arm64) with the tag as the version, plus a `.tar.gz` of each and `SHA256SUMS`, and attaches them to a new GitHub release. For tags without a suffix, it then generates the complete Homebrew formula from the release checksums and commits and pushes it to the tap. Verify `brew audit` by hand after the release. `brigada version` prints the tag without its leading `v`; a source build prints `0.0.0-dev+<rev12>` (see [Install](#install)).
 
 ## License
 
