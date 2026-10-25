@@ -50,8 +50,8 @@ tasks:
     continue: "install-sh"
     tier: light
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-190"
     rounds: 0
   - id: 191
     name: "compat-test"
