@@ -38,8 +38,8 @@ tasks:
     base: "brew-tap"
     continue: "brew-tap"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-189"
     rounds: 0
   - id: 190
     name: "attest"
