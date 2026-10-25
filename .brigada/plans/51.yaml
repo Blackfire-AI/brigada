@@ -50,7 +50,7 @@ tasks:
     continue: "install-sh"
     tier: light
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-190"
     rounds: 0
   - id: 191
