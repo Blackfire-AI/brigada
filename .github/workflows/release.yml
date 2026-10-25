@@ -19,9 +19,14 @@ jobs:
   release:
     needs: checks
     runs-on: ubuntu-latest
-    # Creating the release and uploading assets needs contents:write.
+    # Creating the release and uploading assets needs contents:write. The
+    # attestation needs id-token:write to get a signing identity from GitHub
+    # and attestations:write plus artifact-metadata:write to store it.
     permissions:
       contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -58,6 +63,13 @@ jobs:
           cd dist
           sha256sum brigada-* > SHA256SUMS
           ls -l
+      # Signs a provenance attestation for every checksum in SHA256SUMS, which
+      # lists each file the release publishes. Users check it with
+      # `gh attestation verify`.
+      - name: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
       - name: publish
         env:
           GH_TOKEN: ${{ github.token }}

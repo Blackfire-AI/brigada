@@ -71,6 +71,14 @@ test -s selected-checksum && sha256sum -c selected-checksum &&
 
 On macOS, use `shasum -a 256 -c selected-checksum` instead of `sha256sum -c selected-checksum`. Add `~/.local/bin` to `PATH` if it is not already there.
 
+To check that a tarball was built by this repository's release workflow, install the [GitHub CLI](https://cli.github.com/) and run this in the directory with the downloaded tarball:
+
+```sh
+gh attestation verify brigada-<os>-<arch>.tar.gz --repo Blackfire-AI/brigada
+```
+
+Replace `<os>` and `<arch>` with your platform, for example `brigada-linux-amd64.tar.gz`.
+
 To use brigada, you need:
 
 - `git` and a repository with an `origin` remote;
