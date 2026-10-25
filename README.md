@@ -13,6 +13,7 @@ You may pay for more than one AI coding subscription. brigada sits above their o
 - the **dispatcher** gives each task to the agent with the best measured record for that kind of task on *your* repo, among the agents that still have quota;
 - every task's own **check** (tests, lint, any command) runs on the result, so "done" is not taken on trust;
 - a **reviewer** from a different model family than the author reads the change;
+- Independent review catches problems that checks can miss: in brigada's own development, reviewers asked for changes on 69 of 165 tasks, and every one had already passed its check. In a planted-bug exercise, reviewers caught 37 of 40 spec-breaking bugs, with each family missing exactly one; on a small sample of real backlog work, results showed no family advantage either way. Cross-family routing also spreads reviews across subscriptions, so they do not wait on or spend the author's quota.
 - the **outcome** of every task is recorded locally, and `brigada stats` shows which agent actually wins where;
 - **landing is brigada's**: each approved task is squashed onto the target branch, your check reruns on the result, and the push follows your push gate (`auto` by default); `brigada land` stays as the hand-driven form, and gates hold anything you want to see first.
 
