@@ -38,7 +38,7 @@ tasks:
     base: "brew-tap"
     continue: "brew-tap"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-189"
     rounds: 0
   - id: 190
@@ -50,7 +50,7 @@ tasks:
     continue: "install-sh"
     tier: light
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 191
