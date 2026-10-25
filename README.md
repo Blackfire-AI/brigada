@@ -24,20 +24,51 @@ brigada drives the vendors' **unmodified** CLIs, each signed in with your own ac
 
 ## Install
 
-Install on macOS or Linux (amd64 or arm64) with Homebrew:
+Supported platforms are macOS and Linux, on amd64 and arm64. Windows is not supported. Homebrew, the install script, and prebuilt binaries need no Go toolchain.
+
+With Homebrew:
 
 ```sh
 brew install blackfire-ai/tap/brigada
 brigada version
 ```
 
-To build from source, you need Go 1.27 or newer:
+Or use the install script (requires curl or wget, tar, and sha256sum or shasum):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Blackfire-AI/brigada/main/install.sh | sh
+```
+
+The script verifies the release tarball against `SHA256SUMS`, installs into `~/.local/bin` without sudo, and prints the installed version. It tells you if the directory is missing from `PATH`. Set `BRIGADA_VERSION` to pin a release (for example `1.0.0`) and `BRIGADA_INSTALL_DIR` to choose another directory; pass these variables to `sh` when using the pipeline.
+
+To use `go install` or build from source, you need Go 1.27 or newer:
 
 ```sh
 go install github.com/Blackfire-AI/brigada/cmd/brigada@latest
 ```
 
-The main package lives in `cmd/brigada`, so that is the install path. Make sure `$(go env GOPATH)/bin` is on your `PATH`. Prebuilt binaries are also attached to each [GitHub release](https://github.com/Blackfire-AI/brigada/releases) with `SHA256SUMS` (see [Releasing](#releasing)).
+The main package lives in `cmd/brigada`, so that is the install path. Make sure `$(go env GOPATH)/bin` is on your `PATH`.
+
+Prebuilt binaries and tarballs are also attached to each [GitHub release](https://github.com/Blackfire-AI/brigada/releases) with `SHA256SUMS` (see [Releasing](#releasing)). To download and verify a tarball manually instead of piping a script to `sh`, choose a release version and your platform (`darwin` or `linux`, `amd64` or `arm64`):
+
+```sh
+version=1.0.0
+os=linux
+arch=amd64
+asset="brigada-${os}-${arch}.tar.gz"
+base="https://github.com/Blackfire-AI/brigada/releases/download/v${version}"
+curl -fsSL -o "$asset" "$base/$asset"
+curl -fsSL -o SHA256SUMS "$base/SHA256SUMS"
+grep "  ${asset}\$" SHA256SUMS > selected-checksum
+# Stop if the checksum is missing or verification fails.
+test -s selected-checksum && sha256sum -c selected-checksum &&
+  tar -xzf "$asset" brigada &&
+  mkdir -p "$HOME/.local/bin" &&
+  mv brigada "$HOME/.local/bin/brigada" &&
+  "$HOME/.local/bin/brigada" version
+```
+
+On macOS, use `shasum -a 256 -c selected-checksum` instead of `sha256sum -c selected-checksum`. Add `~/.local/bin` to `PATH` if it is not already there.
 
 To use brigada, you need:
 
