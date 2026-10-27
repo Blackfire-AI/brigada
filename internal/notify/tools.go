@@ -12,6 +12,13 @@ import (
 // loop or the engine's idle exit.
 const execTimeout = 10 * time.Second
 
+// execKillGrace bounds the wait for a killed tool's output (Cmd.WaitDelay,
+// beside execTimeout): the context's kill reaps the tool itself, but a
+// grandchild that inherited the pipes can hold them open, and CombinedOutput
+// would wait for its EOF forever. Notify returns this long after the kill
+// at the latest, whatever is still holding the pipes.
+const execKillGrace = 2 * time.Second
+
 // Osascript is the macOS notifier: it asks osascript to display a
 // notification. Title and body reach the script only as the run
 // handler's argv — after `--`, as whole arguments — never interpolated
@@ -27,8 +34,9 @@ type Osascript struct {
 func (o Osascript) Name() string { return "osascript" }
 
 // Notify displays one banner through osascript. The attempt is bounded
-// by the caller's context, capped at execTimeout — a shutdown never
-// waits on the exec past the hook's grace.
+// by the caller's context, capped at execTimeout, and cut execKillGrace
+// past the kill — a shutdown never waits on the exec past the hook's
+// grace, even when the tool's own children hold the pipes open.
 func (o Osascript) Notify(ctx context.Context, title, body string) error {
 	tool := o.Tool
 	if tool == "" {
@@ -36,7 +44,9 @@ func (o Osascript) Notify(ctx context.Context, title, body string) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, execTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, tool, osascriptArgs(title, body)...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, tool, osascriptArgs(title, body)...)
+	cmd.WaitDelay = execKillGrace
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("osascript: %w: %s", err, oneLine(string(out), 200))
 	}
@@ -67,7 +77,8 @@ type NotifySend struct {
 func (n NotifySend) Name() string { return "notify-send" }
 
 // Notify displays one banner through notify-send. The attempt is
-// bounded by the caller's context, capped at execTimeout.
+// bounded by the caller's context, capped at execTimeout, and cut
+// execKillGrace past the kill, as osascript's is.
 func (n NotifySend) Notify(ctx context.Context, title, body string) error {
 	tool := n.Tool
 	if tool == "" {
@@ -75,7 +86,9 @@ func (n NotifySend) Notify(ctx context.Context, title, body string) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, execTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, tool, notifySendArgs(title, body)...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, tool, notifySendArgs(title, body)...)
+	cmd.WaitDelay = execKillGrace
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("notify-send: %w: %s", err, oneLine(string(out), 200))
 	}

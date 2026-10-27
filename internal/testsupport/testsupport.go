@@ -3,8 +3,12 @@
 package testsupport
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -39,4 +43,46 @@ func ShortSocketPath(t testing.TB) string {
 // build under base: MkdirTemp's random suffix runs about ten bytes.
 func longestPathUnder(base string) string {
 	return filepath.Join(base, "bs0000000000", "s.sock")
+}
+
+// WriteScript writes one executable #!/bin/sh script and returns its
+// path: the scripted CLI a test drives in place of a real tool. A
+// script that backgrounds children leaves their pids in files and the
+// test's cleanup kills them with ReadPid and KillPids, so no orphan
+// process outlives the test.
+func WriteScript(t testing.TB, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "script.sh")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatalf("write script %s: %v", path, err)
+	}
+	return path
+}
+
+// ReadPid reads the pid a script wrote to path; 0 when the file is
+// missing, unreadable or holds no pid.
+func ReadPid(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		return 0
+	}
+	return pid
+}
+
+// KillPids kills each pid that is still live, ignoring the ones already
+// gone, so a scripted CLI's leftover children never outlive the test.
+func KillPids(t testing.TB, pids ...int) {
+	t.Helper()
+	for _, pid := range pids {
+		if pid <= 0 {
+			continue
+		}
+		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+			t.Errorf("kill pid %d: %v", pid, err)
+		}
+	}
 }

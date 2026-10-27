@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
@@ -22,6 +23,92 @@ const defaultIdle = 30 * time.Minute
 // is the §10 work's to fill in; whatever it does, it cannot hold the
 // engine's exit hostage.
 const flushGrace = 10 * time.Second
+
+// flushDispatch runs the tick's notification flush off the main loop
+// (§10, §13): at most one delivery in flight at a time, and a tick that
+// finds one still running skips its own flush — the sweep, the snapshot
+// and the idle check go on regardless. Shutdown cancels the in-flight
+// delivery's context and waits for it only within the flush grace.
+type flushDispatch struct {
+	mu sync.Mutex
+	// done is non-nil while a delivery may still be running; it is
+	// closed when that delivery returns.
+	done chan struct{}
+	// cancel ends the in-flight delivery's context.
+	cancel context.CancelFunc
+}
+
+// start launches fn in its own goroutine, unless a delivery it launched
+// earlier is still running: then it reports false and nothing is queued
+// — the next tick tries again, and the cursor is what remembers the
+// undelivered events either way.
+func (d *flushDispatch) start(ctx context.Context, fn func(context.Context) error, log *slog.Logger) bool {
+	d.mu.Lock()
+	if d.done != nil {
+		select {
+		case <-d.done:
+			// The earlier delivery finished; its slot is free again.
+			d.done, d.cancel = nil, nil
+		default:
+			d.mu.Unlock()
+			return false
+		}
+	}
+	dctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	d.done, d.cancel = done, cancel
+	d.mu.Unlock()
+	go func() {
+		defer close(done)
+		defer cancel()
+		if err := fn(dctx); err != nil && dctx.Err() == nil {
+			// A flush the shutdown itself cut is not a failure; only
+			// one that fails on its own is said so.
+			log.WarnContext(dctx, "deliver notifications failed", "err", err)
+		}
+	}()
+	return true
+}
+
+// stop cancels the in-flight delivery, if any, and waits at most grace
+// for it: a delivery that outlives the grace — a flush that ignores its
+// context — is abandoned with a log line, never waited on.
+func (d *flushDispatch) stop(ctx context.Context, log *slog.Logger, grace time.Duration) {
+	d.mu.Lock()
+	done, cancel := d.done, d.cancel
+	d.mu.Unlock()
+	if done == nil {
+		return
+	}
+	cancel()
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		log.WarnContext(ctx, "notification delivery abandoned at shutdown: it outlasted the grace", "grace", grace)
+	}
+}
+
+// flushBounded runs the shutdown flush within grace, whatever the flush
+// function does with its context (§13): one that ignores cancellation is
+// abandoned with a log line instead of holding the engine's exit.
+func flushBounded(ctx context.Context, log *slog.Logger, grace time.Duration, fn func(context.Context) error) {
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), grace)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- fn(fctx) }()
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		if err != nil {
+			log.WarnContext(ctx, "flush notifications at shutdown failed", "err", err)
+		}
+	case <-timer.C:
+		log.WarnContext(ctx, "notification flush abandoned at shutdown: it outlasted the grace", "grace", grace)
+	}
+}
 
 // Config is the engine role's own settings (§13): where its state lives
 // and when it may idle out. Paths left zero derive from StateDir.
@@ -75,6 +162,10 @@ type Config struct {
 	// exit with unsent notifications to deliver; nil is "nothing to
 	// flush yet".
 	FlushNotifications func(ctx context.Context) error
+	// FlushGrace bounds every wait on the notification delivery at
+	// shutdown (§13): the tick's in-flight flush and the pre-exit hook
+	// are each abandoned after it. Zero keeps flushGrace.
+	FlushGrace time.Duration
 	// Log is the engine's logger; nil uses slog's default.
 	Log *slog.Logger
 }
@@ -104,6 +195,9 @@ func (c *Config) resolve() (Paths, error) {
 	}
 	if c.IdleTick <= 0 {
 		c.IdleTick = min(max(c.Idle/4, 200*time.Millisecond), 30*time.Second)
+	}
+	if c.FlushGrace <= 0 {
+		c.FlushGrace = flushGrace
 	}
 	if c.Now == nil {
 		c.Now = func() time.Time { return time.Now().UTC() }
@@ -233,12 +327,20 @@ func Run(ctx context.Context, cfg Config) error {
 	mon := newIdleMonitor(cfg.Idle, busy, started)
 	ticker := time.NewTicker(cfg.IdleTick)
 	defer ticker.Stop()
+	// §10's delivery runs off the main loop: one flush in flight at
+	// most, skipped — never queued — while one runs, and abandoned at
+	// shutdown after the grace rather than waited on.
+	delivery := &flushDispatch{}
 
 	log.InfoContext(ctx, "engine up", "pid", os.Getpid(), "socket", p.Socket, "store", p.Store, "idle_after", cfg.Idle)
 	for {
 		select {
 		case <-ctx.Done():
 			log.InfoContext(ctx, "engine shutting down")
+			delivery.stop(ctx, log, cfg.FlushGrace)
+			if cfg.FlushNotifications != nil {
+				flushBounded(ctx, log, cfg.FlushGrace, cfg.FlushNotifications)
+			}
 			return stopEngine(stopServe, serveErr)
 		case err := <-serveErr:
 			stopServe()
@@ -250,11 +352,11 @@ func Run(ctx context.Context, cfg Config) error {
 			// The periodic sweep keeps the store honest without a call
 			// (§13): leases and attach holds lapse on time, with no new
 			// event to say so.
+			if !delivery.start(ctx, nloop.Flush, log) {
+				log.DebugContext(ctx, "notification delivery still in flight; skipping this tick's flush")
+			}
 			if _, err := eng.Sweep(ctx); err != nil {
 				log.WarnContext(ctx, "sweep failed", "err", err)
-			}
-			if err := nloop.Flush(ctx); err != nil {
-				log.WarnContext(ctx, "deliver notifications failed", "err", err)
 			}
 			if path, err := eng.SnapshotIfDue(ctx); err != nil {
 				log.WarnContext(ctx, "store snapshot failed", "err", err)
@@ -267,12 +369,9 @@ func Run(ctx context.Context, cfg Config) error {
 				continue
 			}
 			log.InfoContext(ctx, "engine idle; shutting down", "idle_for", now.Sub(mon.lastBusy).Round(time.Second))
+			delivery.stop(ctx, log, cfg.FlushGrace)
 			if cfg.FlushNotifications != nil {
-				flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), flushGrace)
-				if err := cfg.FlushNotifications(flushCtx); err != nil {
-					log.WarnContext(ctx, "flush notifications at shutdown failed", "err", err)
-				}
-				cancel()
+				flushBounded(ctx, log, cfg.FlushGrace, cfg.FlushNotifications)
 			}
 			return stopEngine(stopServe, serveErr)
 		}
