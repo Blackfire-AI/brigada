@@ -264,7 +264,7 @@ With `claude`, an attached foreman is the same session the headless turns resume
 
 The usual way in is through your own coding agent, the operator. `brigada init` writes `.brigada/operator.md`, a generated, harness-agnostic guide (init overwrites it on a rerun, `--no-wiring` does not skip it, `brigada remove` deletes it). For Claude Code, init also writes the same text as the skill `.claude/skills/brigada-operator/SKILL.md`. Open your agent in the repository, have it read that file, and tell it, for example, "ask brigada to fix #12". The operator:
 
-- **asks** with `brigada ask -`, putting the content of an issue into the ask (the foreman cannot read a tracker; issue numbers stay as references for `Closes` and `Refs` trailers), naming files and document sections, the build order, tier hints and cooling accounts;
+- **asks** with `brigada ask -`: with a `tracker` set ([section 6](#6-configuring-a-project)) it points at issue numbers and the foreman reads them; with none, it puts the content of an issue into the ask (the foreman cannot read a tracker then; issue numbers stay as references for `Closes` and `Refs` trailers). It also names files and document sections, the build order, tier hints and cooling accounts;
 - **watches** with `brigada status`, `brigada history --task N`, `brigada history --job N` (a job's full verdict) and `brigada diff --stat N`; you watch the same work live in `brigada top`;
 - **follows a landing**: merges the staging pull request with a merge commit once CI is green (when `land_target` is the default branch and `after_land` is none, there is no pull request to merge), and restarts the engine and runner when their own code landed and nothing pending needs the old behaviour;
 - **recovers** after an outage by asking again: an ask re-wakes the foreman.
@@ -273,7 +273,7 @@ The operator has no approval authority. Plan approval, land approval, push appro
 
 ### What the foreman can and cannot do
 
-The foreman's tools are brigada's — `plan_create`, `plan_amend`, `plan_accept`, `answer`, `task_restart`, `task_cancel`, `ask_user`, `status`, `history`, `events`, `capacity`, `stats` — plus read-only file tools: on `claude` it may read and search files, with the shell and every editing tool denied; on `codex` it runs in a read-only sandbox ([section 11](#11-the-foremans-harness-claude-or-codex)). There is deliberately no tool that approves or rejects a plan, or that passes a gate: those decisions are yours ([section 7](#gates-and-rules)).
+The foreman's tools are brigada's — `plan_create`, `plan_amend`, `plan_accept`, `answer`, `task_restart`, `task_cancel`, `ask_user`, `status`, `history`, `events`, `capacity`, `stats`, `issue_read` (one issue of the project's tracker, when `tracker` names one) — plus read-only file tools: on `claude` it may read and search files, with the shell and every editing tool denied; on `codex` it runs in a read-only sandbox ([section 11](#11-the-foremans-harness-claude-or-codex)). There is deliberately no tool that approves or rejects a plan, or that passes a gate: those decisions are yours ([section 7](#gates-and-rules)).
 
 brigada enforces its own side whatever the foreman believes:
 
@@ -568,6 +568,8 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 | `extra_repos` | list of `"name repo ref"` strings | none | Other repositories checked out read-only beside every task ([section 7](#7-plans-checks-and-reviews)). |
 | `foreman_rotate_tokens` | non-negative integer | `400000` | Input tokens on one foreman turn past which the next turn starts a fresh session; `0` never rotates ([section 11](#session-size-and-rotation)). |
 | `plan_files` | `on` or `off` | `on` | `off` stops the plan-file mirror: no plan file is written or pushed ([The plan file](#the-plan-file)). |
+| `tracker` | `github`, `gitea` or `none` | `github` for a `github.com` repository, else `none` | The issue tracker the foreman reads with `issue_read`: the GitHub API, or the Gitea API that self-hosted forges of that family serve. `none` leaves issues to the operator, who puts their content into the ask. |
+| `tracker_url` | URL | `https://api.github.com` for `tracker: github` | The tracker's base address, e.g. `https://git.example.com` for a self-hosted forge; the owner and repository come from `repo`. An address only: the token is the config file's `tracker.<host>.token`. |
 | `instructions_file` | repo-relative path | none | A text file whose contents become the project's instructions for every worker and reviewer, at most 8192 bytes (see [Project instructions](#project-instructions)). |
 
 An example:
@@ -1131,6 +1133,7 @@ The config file is optional. Its format:
 | `tier.<harness>/<model>` | `light`, `standard` or `heavy` | from the model name | Override the tier for every agent of this harness/model, shown in stats and capacity. |
 | `tools.claude/<model>` | `+`-separated Claude Code tool patterns, or `none` | the Go scope | Default shell scope of the claude worker agent on that model; `--agent ...,tools=` overrides it ([section 8](#worker-tools-claude)). Other harnesses are refused. |
 | `env.<harness>.<VAR>` | `keychain:<item>` or `file:<path>` | the ambient variable | A variable for that harness's jobs only, resolved when the runner starts: `keychain:` reads the macOS keychain item through `security find-generic-password -w -s <item>`, `file:` reads a file that must be mode 0600. The config holds the reference, never the value, and the value never reaches a log, the store, status or an error. `PWD`, `BRIGADA_*`, `DSH_PERMISSION_MODE`, `DSH_TELEMETRY_MODE`, `OPENCODE_PERMISSION` and `OPENCODE_DISABLE_PROJECT_CONFIG` are set by the runner and refused as `<VAR>`. See [dsh](#dsh-experimental). |
+| `tracker.<host>.token` | `keychain:<item>` or `file:<path>` | none (unauthenticated) | The token `issue_read` sends to the project's tracker at `<host>` (the host of `tracker_url`, with any non-default port), shared by every project on that host. Same reference rules as `env.<harness>.<VAR>`; the bridge resolves it per call, and it never reaches a job's environment, a log, the store, status or an error. Use a read-only token. |
 
 A cap of `0` caps the layer at nothing, which is different from leaving it out. Init writes `caps.global = N` from tasks at once, `caps.plan = 3` and `caps.account.<label>` for each usable account: Claude 3, Codex 2, Kimi 1 and OpenCode 2, each clamped to N. If harnesses share a label, the smaller cap wins. It preserves other config entries and comments, adds a cap key only when it is absent, and groups newly added keys under `# set by brigada init`. An existing cap keeps its value — the plan names each value it keeps and each one it changes — unless the tasks-at-once answer was explicit (`--parallel N` or a typed number, which sets `caps.global`) or `--overwrite-config` is passed. The engine reads the config at startup; restart it after changing caps or tier overrides.
 
@@ -1181,6 +1184,8 @@ Every key that `brigada project set` and `project show` know, with each default 
 | `foreman_rotate_tokens` | `400000` | yes |
 | `foreman_wakes_per_day` | `20`, or the config file's value | no, local only |
 | `plan_files` | `on` | yes |
+| `tracker` | `github` for a `github.com` repository, else `none` | yes |
+| `tracker_url` | `https://api.github.com` for `github` | yes |
 | `instructions` | `none` | no, local only (the file's counterpart is `instructions_file`) |
 
 ## 14. Command reference
