@@ -607,7 +607,7 @@ var localZone = func() *time.Location {
 var limitAtRe = regexp.MustCompile(`try again at ([a-z]{3})\s+(\d{1,2})(?:st|nd|rd|th)?\s*,?\s+(?:(\d{4})\s+)?(\d{1,2}):(\d{2})\s*(am|pm)`)
 
 // limitClockRe is the CLI's bare clock reset note: "try again at
-// 11:42 PM" — today, or tomorrow once the clock has passed it.
+// 11:42 PM" — today, or tomorrow once the clock has passed it by the grace.
 var limitClockRe = regexp.MustCompile(`try again at (\d{1,2}):(\d{2})\s*(am|pm)`)
 
 // limitMonths maps the note's three-letter month to its time.Month.
@@ -631,11 +631,17 @@ var limitInUnits = map[string]time.Duration{
 	"minute": time.Minute, "minutes": time.Minute,
 }
 
+// resetGrace allows for minute precision and clock skew in printed times.
+const resetGrace = 15 * time.Minute
+
+// resetRetry delays a retry when the printed reset is at or just before now.
+const resetRetry = 2 * time.Minute
+
 // limitReset reads the reset time out of a limit message, as an
 // RFC3339 instant. The CLI prints its times in the machine's local
 // time zone, so that is how they are read: "try again at Oct 24th,
-// 2026 11:42 PM" (the year optional, then the next such date), a bare
-// "try again at 11:42 PM" (today, or tomorrow once passed), and a
+// 2026 11:42 PM" (the year optional), a bare
+// "try again at 11:42 PM", and a
 // "try again in 2h 15m" span of minutes, hours and days. Best effort —
 // anything that does not parse is "" (unknown), never an error.
 func limitReset(text string, at time.Time) string {
@@ -671,9 +677,9 @@ func resetAtDate(m []string, at time.Time) string {
 		year, _ = strconv.Atoi(m[3])
 	}
 	t := time.Date(year, month, day, hour, min, 0, 0, localZone)
-	// Without a year the note means the next such date: one already
-	// past rolls a year ahead.
-	if m[3] == "" && !t.After(at) {
+	if !t.After(at) && at.Sub(t) <= resetGrace {
+		t = at.Add(resetRetry)
+	} else if m[3] == "" && !t.After(at) {
 		t = t.AddDate(1, 0, 0)
 	}
 	return t.Format(time.RFC3339)
@@ -692,7 +698,9 @@ func resetAtClock(m []string, at time.Time) string {
 	}
 	local := at.In(localZone)
 	t := time.Date(local.Year(), local.Month(), local.Day(), hour, min, 0, 0, localZone)
-	if !t.After(at) {
+	if !t.After(at) && at.Sub(t) <= resetGrace {
+		t = at.Add(resetRetry)
+	} else if !t.After(at) {
 		t = time.Date(local.Year(), local.Month(), local.Day()+1, hour, min, 0, 0, localZone)
 	}
 	return t.Format(time.RFC3339)

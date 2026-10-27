@@ -256,8 +256,8 @@ func TestReReviewIsFreshWhenTheReviewerCannotBeHad(t *testing.T) {
 		{name: "agent broken", break_: func(f *reReviewFixture) {
 			f.e.exec("UPDATE agents SET health = 'broken' WHERE id = ?", f.e.agentOf(f.reviewer))
 		}, why: "is broken"},
-		{name: "cooling beyond longCooling", break_: func(f *reReviewFixture) {
-			f.e.exec("UPDATE agents SET cooling_until = ? WHERE id = ?", fmtTime(f.e.clock.Now().Add(longCooling+time.Minute)), f.e.agentOf(f.reviewer))
+		{name: "cooling", break_: func(f *reReviewFixture) {
+			f.e.exec("UPDATE agents SET cooling_until = ? WHERE id = ?", fmtTime(f.e.clock.Now().Add(30*time.Minute)), f.e.agentOf(f.reviewer))
 		}, why: "is cooling until"},
 		{name: "agent gone", break_: func(f *reReviewFixture) {
 			f.e.exec("DELETE FROM agents WHERE id = ?", f.e.agentOf(f.reviewer))
@@ -283,22 +283,15 @@ func TestReReviewIsFreshWhenTheReviewerCannotBeHad(t *testing.T) {
 	}
 }
 
-// TestReReviewResumesThroughAShortCooling: a cooling within longCooling
-// still counts as ready (§8), and the re-review waits it out.
-func TestReReviewResumesThroughAShortCooling(t *testing.T) {
+// TestReReviewIsFreshWhenTheReviewerCools: any cooling makes the
+// reviewer unavailable, however short, so the next review starts fresh
+// by any qualifying reviewer.
+func TestReReviewIsFreshWhenTheReviewerCools(t *testing.T) {
 	f := changesRound(t, nil)
+	f.e.agented("other", "moonshot", "review")
 	f.e.exec("UPDATE agents SET cooling_until = ? WHERE id = ?", fmtTime(f.e.clock.Now().Add(30*time.Minute)), f.e.agentOf(f.reviewer))
 	f.fixDone("h2")
-	if j := f.secondReview(); j.Mode != ModeSession {
-		t.Fatalf("review mode = %s, want session through a short cooling", j.Mode)
-	}
-	if g := f.reviewerLease(); g != nil {
-		t.Fatalf("leased %+v while the reviewer cools", g)
-	}
-	f.e.clock.Advance(time.Hour)
-	if g := f.reviewerLease(); g == nil || g.Mode != ModeSession {
-		t.Errorf("grant after the cooling = %+v, want the re-review", g)
-	}
+	f.wantFresh("is cooling until")
 }
 
 // TestReReviewFamilyRuleStillApplies: a fix round whose author is now of

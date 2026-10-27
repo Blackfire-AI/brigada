@@ -108,7 +108,7 @@ type resumedReview struct {
 // is a re-review (§7). It is when the job is a fix round and a changes
 // verdict stands before it, and the reviewer of that verdict can still be
 // had: its session id and the head it judged are known, its agent is
-// ready or cooling for no more than longCooling, and it still passes the
+// ready and not cooling, and it still passes the
 // review rules against the author of this round — a different family, the
 // review class, not the author itself. why says, for the fresh review that
 // results when a verdict stood but the reviewer could not be had, what
@@ -142,7 +142,7 @@ func (e *Engine) resumedReviewTx(tx *sql.Tx, job *jobRow, excludeFamily string, 
 	switch {
 	case health != "ready":
 		return nil, "the previous reviewer's agent is " + health, nil
-	case cooling > fmtTime(now.Add(longCooling)):
+	case cooling > fmtTime(now):
 		return nil, "the previous reviewer's agent is cooling until " + cooling, nil
 	case !reviewAgentQualifies(prior.agent, family, classes, excludeFamily, 0, job.AgentID):
 		return nil, "the previous reviewer's agent no longer qualifies for this change", nil

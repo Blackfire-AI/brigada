@@ -115,7 +115,7 @@ var tools = []Tool{
 							},
 							"continue": map[string]any{
 								"type":        "string",
-								"description": "the name of one of this task's deps whose worker starts this task: when that dep is done, this task's first work job resumes the dep author's session on its own agent, so it starts warm with the files it already read. The continued dep is the task's base, so base defaults to it and a base naming another dep is refused. When the session or its agent is not available (session unknown, agent broken, capped at 0, cooling for over an hour, or outside this task's tier), the task starts fresh as usual; a restart always starts fresh",
+								"description": "the name of one of this task's deps whose worker starts this task: when that dep is done, this task's first work job resumes the dep author's session on its own agent, so it starts warm with the files it already read. The continued dep is the task's base, so base defaults to it and a base naming another dep is refused. When the session or its agent is not available (session unknown, agent broken, capped at 0, cooling, or outside this task's tier), the task starts fresh as usual; a restart always starts fresh",
 							},
 							"spec": map[string]any{
 								"type":        "string",

@@ -90,8 +90,14 @@ func (s *Server) handleLease(w http.ResponseWriter, r *http.Request, runnerID in
 	}
 	deadline := time.Now().Add(wait)
 	for {
+		if r.Context().Err() != nil {
+			return // the runner went away
+		}
 		grant, err := s.eng.Lease(r.Context(), runnerID, req.Harnesses, req.Labels)
 		if err != nil {
+			if r.Context().Err() != nil {
+				return // the runner went away mid-poll; no grant was kept
+			}
 			s.writeInternal(w, r, "lease", err)
 			return
 		}
