@@ -242,7 +242,15 @@ func printRemovalRemote(ctx context.Context, w io.Writer, root string) {
 	fmt.Fprintln(w, "\n  On the remote (not touched; remove them yourself if you like):")
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "-C", root, "ls-remote", "origin", "refs/heads/brigada/*")
+	remote := "origin"
+	if u, err := gitOriginURL(root); err == nil {
+		if id, err := engine.Canonicalize(u); err == nil {
+			if r, err := projectRemote(ctx, root, id); err == nil {
+				remote = r
+			}
+		}
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "ls-remote", remote, "refs/heads/brigada/*")
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.Output()
 	if err != nil {
@@ -275,7 +283,7 @@ func printRemovalRemote(ctx context.Context, w io.Writer, root string) {
 	if len(branches) > 0 {
 		// One command per branch keeps the printed commands copyable and short.
 		for _, branch := range branches {
-			printInitWrapped(w, "    ", "      ", "git push origin --delete "+branch)
+			printInitWrapped(w, "    ", "      ", "git push "+remote+" --delete "+branch)
 		}
 	}
 }
