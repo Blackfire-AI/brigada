@@ -17,6 +17,7 @@ var credentialEnvNames = map[string]bool{
 	"GH_TOKEN": true, "GITHUB_TOKEN": true, "GH_ENTERPRISE_TOKEN": true, "GITHUB_ENTERPRISE_TOKEN": true,
 	"GITLAB_TOKEN": true, "GITLAB_PRIVATE_TOKEN": true, "GL_TOKEN": true, "CI_JOB_TOKEN": true,
 	"BITBUCKET_TOKEN": true, "BITBUCKET_APP_PASSWORD": true,
+	"GITEA_TOKEN": true, "GITEA_ACCESS_TOKEN": true, "FORGEJO_TOKEN": true, "TEA_TOKEN": true,
 	"GIT_ASKPASS": true, "SSH_ASKPASS": true, "SSH_AUTH_SOCK": true,
 	"GIT_SSH": true, "GIT_SSH_COMMAND": true, "GIT_CONFIG_COUNT": true,
 	// cloud providers
