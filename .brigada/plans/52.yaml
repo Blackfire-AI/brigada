@@ -48,8 +48,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-194"
     rounds: 0
   - id: 195
     name: "network"
