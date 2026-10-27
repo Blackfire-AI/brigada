@@ -5,6 +5,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
 // hostile text: quotes both ways, a shell/AppleScript-looking fragment,
@@ -127,5 +130,32 @@ func TestNoneAndFake(t *testing.T) {
 	notes := f.Notes()
 	if len(notes) != 2 || notes[0] != (Note{"one", "1"}) || notes[1] != (Note{"two", "2"}) {
 		t.Errorf("Fake recorded %v, want both notifications in order", notes)
+	}
+}
+
+// TestToolsNotifyBoundedAgainstHostileTool pins the exec bound (§10):
+// a tool that traps the kill and parks a grandchild holding stdout —
+// a Notify that would never return — still returns within its bounds,
+// so a hung banner tool cannot stall the delivery loop or the engine's
+// exit. The testsupport script's cleanup kills the grandchild, so no
+// process outlives the test.
+func TestToolsNotifyBoundedAgainstHostileTool(t *testing.T) {
+	tool := testsupport.HostileToolScript(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	notifiers := map[string]Notifier{
+		"osascript":   Osascript{Tool: tool},
+		"notify-send": NotifySend{Tool: tool},
+	}
+	for name, n := range notifiers {
+		t.Run(name, func(t *testing.T) {
+			start := time.Now()
+			if err := n.Notify(ctx, "title", "body"); err == nil {
+				t.Error("the hostile tool reported success")
+			}
+			if took := time.Since(start); took > 5*time.Second {
+				t.Errorf("Notify returned after %v, want it bounded past the kill", took)
+			}
+		})
 	}
 }
