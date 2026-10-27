@@ -5,9 +5,9 @@
 plan: 53
 title: "#104 notification delivery off the engine's main loop"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-27T12:38:01.533592Z
-updated: 2026-10-27T12:40:04.234894Z
+updated: 2026-10-27T13:22:16.902046Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
