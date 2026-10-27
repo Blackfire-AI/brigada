@@ -19,13 +19,19 @@ func TestOperatorGuideContent(t *testing.T) {
 	for _, want := range []string{
 		"brigada ask -", "brigada status", "brigada history --task N",
 		"brigada history --job N", "brigada diff --stat N", "brigada top",
-		"merge it with a merge\n  commit", "brigada stop --engine", "brigada start",
+		"merge that pull request with a merge commit", "after_land is none",
+		"cannot read an issue tracker", "brigada stop --engine", "brigada start",
 		"re-wakes the foreman", "brigada plan approve", "brigada land approve",
 		"brigada push approve", "--and-stop-asking", "tags and releases",
 		"brigada agent reset <harness>/<model>",
 	} {
 		if !strings.Contains(operatorGuide, want) {
 			t.Errorf("guide lacks %q", want)
+		}
+	}
+	for _, old := range []string{"see gh issue", "Point at issues"} {
+		if strings.Contains(operatorGuide, old) {
+			t.Errorf("guide still says %q", old)
 		}
 	}
 }

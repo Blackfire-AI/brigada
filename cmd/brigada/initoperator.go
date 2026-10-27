@@ -30,11 +30,14 @@ hold no approval authority.
 Send the foreman a request with ` + "`brigada ask -`" + `, the message on stdin:
 
     brigada ask - <<'EOF'
-    Fix #12: see gh issue 12 and docs/design.md section 4.
+    Fix the login timeout (issue #12). The issue says: <its text>.
+    Relevant code: auth/session.go. Closes #12 in the commit.
     EOF
 
-- Point at issues and document sections instead of retyping them; the
-  foreman reads the repository.
+- The foreman has no shell and cannot read an issue tracker. Read the
+  issue yourself and put what it says into the ask; keep the number
+  only as a reference for ` + "`Closes`" + ` or ` + "`Refs`" + ` trailers.
+- Name files and document sections; the foreman reads the repository.
 - Say the build order when tasks depend on each other.
 - Hint a tier when a task is easy (light) or risky (heavy); the foreman
   decides.
@@ -53,8 +56,12 @@ Send the foreman a request with ` + "`brigada ask -`" + `, the message on stdin:
 
 ## After a landing
 
-- When the staging pull request's CI is green, merge it with a merge
-  commit.
+- If the project's land_target is a staging branch and after_land opens
+  a pull request, merge that pull request with a merge commit once its
+  CI is green.
+- If land_target is the default branch and after_land is none, the
+  landing is already on the default branch: there is no pull request
+  to merge.
 - If the engine's or the runner's own code landed and nothing pending
   needs the old behaviour, restart them: ` + "`brigada stop --engine`" + `, then
   ` + "`brigada start`" + `.
