@@ -472,6 +472,40 @@ func TestLimitReset(t *testing.T) {
 	}
 }
 
+func TestLimitResetGrace(t *testing.T) {
+	oldZone := localZone
+	localZone = time.FixedZone("fixture", 2*60*60)
+	t.Cleanup(func() { localZone = oldZone })
+
+	for _, form := range []struct {
+		name, message, rollover string
+	}{
+		{"clock", "try again at 6:16 PM", "2026-10-21T18:16:00+02:00"},
+		{"date", "try again at Oct 20, 6:16 PM", "2027-10-20T18:16:00+02:00"},
+	} {
+		for _, tc := range []struct {
+			name, at, want string
+		}{
+			{"same minute", "2026-10-20T18:16:00+02:00", "2026-10-20T18:18:00+02:00"},
+			{"seconds after", "2026-10-20T18:16:06+02:00", "2026-10-20T18:18:06+02:00"},
+			{"inside grace", "2026-10-20T18:30:59+02:00", "2026-10-20T18:32:59+02:00"},
+			{"at grace", "2026-10-20T18:31:00+02:00", "2026-10-20T18:33:00+02:00"},
+			{"past grace", "2026-10-20T18:31:01+02:00", form.rollover},
+			{"future", "2026-10-20T18:15:59+02:00", "2026-10-20T18:16:00+02:00"},
+		} {
+			t.Run(form.name+"/"+tc.name, func(t *testing.T) {
+				at, err := time.Parse(time.RFC3339, tc.at)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := limitReset(form.message, at); got != tc.want {
+					t.Errorf("limitReset(%q, %s) = %q, want %q", form.message, tc.at, got, tc.want)
+				}
+			})
+		}
+	}
+}
+
 // TestLimitResetUnparsable: a note whose time does not parse leaves
 // LimitUntil empty, on both tables' paths, and never fails the event.
 func TestLimitResetUnparsable(t *testing.T) {
