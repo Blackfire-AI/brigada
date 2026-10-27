@@ -21,7 +21,7 @@ type taskReader interface {
 // runDiff is `brigada diff <task-id> [--stat] [--repo URL]`: the task's
 // change as git shows it, base...branch, on stdout so it pipes to a
 // pager. It runs inside the project's repository, fetches the two refs
-// from origin (refs only, no checkout) and diffs them locally.
+// from the project's remote (refs only, no checkout) and diffs them locally.
 func runDiff(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("diff",
 		"brigada diff [--stat] [--repo URL] [--no-start] <task-id>",
@@ -115,9 +115,13 @@ func printDiff(ctx context.Context, client taskReader, dir string, id int64, rep
 	// without touching the user's own branches or checkout.
 	baseRef := fmt.Sprintf("refs/brigada/diff/%d/base", id)
 	branchRef := fmt.Sprintf("refs/brigada/diff/%d/branch", id)
-	if err := runGit(ctx, dir, nil, stderr, "fetch", "--quiet", "origin",
+	remote, err := projectRemote(ctx, dir, here)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if err := runGit(ctx, dir, nil, stderr, "fetch", "--quiet", remote,
 		"+"+task.BaseRef+":"+baseRef, "+"+task.Branch+":"+branchRef); err != nil {
-		return fail(stderr, fmt.Errorf("fetch %s and %s from origin: %w", task.BaseRef, task.Branch, err))
+		return fail(stderr, fmt.Errorf("fetch %s and %s from %s: %w", task.BaseRef, task.Branch, remote, err))
 	}
 	gitArgs := []string{"--no-pager", "diff"}
 	if stat {

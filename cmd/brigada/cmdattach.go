@@ -489,6 +489,49 @@ func gitOriginURL(dir string) (string, error) {
 	return raw, nil
 }
 
+// projectRemote names the git remote of dir that stands for the project
+// with the given canonical identity: the remotes whose URL (after the
+// SSH alias resolution gitOriginURL applies) canonicalizes to it, origin
+// preferred among several. When none matches (the --repo escape for a
+// mirror or a fork) it falls back to origin, else the only remote, else
+// an error naming --repo.
+func projectRemote(ctx context.Context, dir, identity string) (string, error) {
+	remotes, err := listGitRemotes(ctx, dir)
+	if err != nil {
+		return "", fmt.Errorf("find the project's git remote in %s: %w", dir, err)
+	}
+	if len(remotes) == 0 {
+		return "", fmt.Errorf("%s has no git remote; pass --repo to name its project", dir)
+	}
+	matched := ""
+	hasOrigin := false
+	for _, r := range remotes {
+		if r.name == "origin" {
+			hasOrigin = true
+		}
+		for _, raw := range r.urls {
+			if sel, err := initOriginURL(ctx, raw); err == nil && sel.alias != "" {
+				raw = sel.transport
+			}
+			if c, err := engine.Canonicalize(raw); err == nil && c == identity {
+				if matched == "" || r.name == "origin" {
+					matched = r.name
+				}
+				break
+			}
+		}
+	}
+	switch {
+	case matched != "":
+		return matched, nil
+	case hasOrigin:
+		return "origin", nil
+	case len(remotes) == 1:
+		return remotes[0].name, nil
+	}
+	return "", fmt.Errorf("%s has several remotes, none named origin and none matching %s; pass --repo to name its project", dir, identity)
+}
+
 // newSessionID generates the harness session id for an attached chat
 // (§4.2 item 1): a random UUID, minted by the client so it knows the
 // id the chat forks onto — the CLI names it --session-id, and the
