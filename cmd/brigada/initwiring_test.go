@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -434,6 +435,15 @@ func TestInitRerunNoWiringKeepsOldWiring(t *testing.T) {
 		t.Errorf("init --no-wiring did not write %s", operatorFile)
 	}
 	want[operatorFile] = after[operatorFile]
+	if after[operatorSkillFile] != operatorSkill {
+		t.Errorf("init --no-wiring did not write %s", operatorSkillFile)
+	}
+	want[operatorSkillFile] = after[operatorSkillFile]
+	for dir := path.Dir(operatorSkillFile); dir != "."; dir = path.Dir(dir) {
+		if _, ok := before[dir+"/"]; !ok {
+			want[dir+"/"] = ""
+		}
+	}
 	if !reflect.DeepEqual(after, want) {
 		t.Fatalf("init --no-wiring changed harness files:\nbefore %q\nafter %q", before, after)
 	}

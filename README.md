@@ -110,14 +110,14 @@ Init then lists the agents, permissions and files, and shows a diff for every ex
 
 After you confirm, init:
 
-- writes `.brigada/project.yaml`, which is yours to commit (brigada never commits or pushes it), and `.brigada/operator.md`, a generated guide that tells your own coding agent how to work with brigada (init overwrites it on a rerun, `--no-wiring` does not skip it, and `brigada remove` deletes it). Unless `--no-wiring`, it also strips brigada's repository wiring (MCP and hook entries, the foreman files and the git exclude line); it does not touch `AGENTS.md` or `CLAUDE.md` except to remove an older init's marked block;
+- writes `.brigada/project.yaml`, which is yours to commit (brigada never commits or pushes it), `.brigada/operator.md`, a generated guide that tells your own coding agent how to work with brigada, and the same guide as a Claude Code skill, `.claude/skills/brigada-operator/SKILL.md` (init overwrites both on a rerun, `--no-wiring` does not skip them, and `brigada remove` deletes them). Unless `--no-wiring`, it also strips brigada's repository wiring (MCP and hook entries, the foreman files and the git exclude line); it does not touch `AGENTS.md` or `CLAUDE.md` except to remove an older init's marked block;
 - starts the engine and a detached runner.
 
 `brigada init --probe` shows the plan and writes nothing. Stop the runner with `brigada stop`; add `--engine` to stop the engine too. Every step and flag is in [the guide, section 1](docs/GUIDE.md#1-install-and-brigada-init).
 
 Rerun `brigada init` to change agents, the foreman model and effort, or tasks at once; use `brigada start` after a reboot and `brigada config` to see every setting and how to change it.
 
-`brigada remove` removes brigada's repository wiring and `.brigada/operator.md` and archives the project, keeping its history; see [the guide](docs/GUIDE.md#removing-brigada-from-a-repository).
+`brigada remove` removes brigada's repository wiring, `.brigada/operator.md` and the operator skill, and archives the project, keeping its history; see [the guide](docs/GUIDE.md#removing-brigada-from-a-repository).
 
 ## The first five minutes
 

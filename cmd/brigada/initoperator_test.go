@@ -105,3 +105,72 @@ func TestOperatorGuideRemoveKeepsUsersFile(t *testing.T) {
 		t.Fatalf("remove touched a file that is not brigada's: %q", got)
 	}
 }
+
+func TestOperatorSkillSharesGuideText(t *testing.T) {
+	if !strings.HasPrefix(operatorSkill, "---\nname: brigada-operator\ndescription: ") {
+		t.Errorf("skill must open with its frontmatter:\n%s", operatorSkill)
+	}
+	if !strings.HasSuffix(operatorSkill, operatorGuide) {
+		t.Error("skill must end with the exact guide text")
+	}
+	for _, line := range strings.Split(operatorSkill, "\n") {
+		if len(line) > 72 {
+			t.Errorf("skill line over 72 columns: %q", line)
+		}
+	}
+}
+
+func TestOperatorSkillInitRerunAndRemove(t *testing.T) {
+	root := wireRepo(t)
+	path := filepath.Join(root, filepath.FromSlash(operatorSkillFile))
+
+	files := planOperatorFiles(root)
+	if len(files) != 2 || files[1].rel != operatorSkillFile || !files[1].changed() {
+		t.Fatalf("fresh plan = %+v", files)
+	}
+	if err := applyWiring(files); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != operatorSkill {
+		t.Fatalf("written skill = %q, %v", got, err)
+	}
+	if countChanged(planOperatorFiles(root)) != 0 {
+		t.Fatal("rerun plans changes to an up-to-date skill")
+	}
+
+	// A rerun rewrites an edited skill.
+	if err := os.WriteFile(path, []byte("my edits\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyWiring(planOperatorFiles(root)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != operatorSkill {
+		t.Fatalf("rerun did not rewrite: %q", got)
+	}
+
+	// Remove deletes the skill and its emptied directory.
+	if err := applyRemoval(planRemoval(root, false)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatalf("remove left the skill directory: %v", err)
+	}
+}
+
+func TestOperatorSkillRemoveKeepsUsersFile(t *testing.T) {
+	root := wireRepo(t)
+	path := filepath.Join(root, filepath.FromSlash(operatorSkillFile))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyRemoval(planRemoval(root, false)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "# mine\n" {
+		t.Fatalf("remove touched a file that is not brigada's: %q", got)
+	}
+}
