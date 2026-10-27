@@ -137,11 +137,16 @@ dsh (experimental): init can't check sign-in.
     codex     edit files and run commands inside codex's sandbox
     opencode  edit files; run only the commands of the worker tools scope
   [1mFiles[0m in this repository (brigada never commits them):
-    [38;2;95;215;95mnew[0m        .brigada/project.yaml  [38;2;138;143;152mthe settings above[0m
-    [38;2;95;215;95mnew[0m        .brigada/operator.md   [38;2;138;143;152mtells your own coding agent how to work
-                                      with brigada[0m
-    [38;2;138;143;152munchanged[0m  .git/info/exclude      [38;2;138;143;152mremoves the exclude line that hid the
-                                      private Claude Code settings[0m
+    [38;2;95;215;95mnew[0m        .brigada/project.yaml                     [38;2;138;143;152mthe settings above[0m
+    [38;2;95;215;95mnew[0m        .brigada/operator.md                      [38;2;138;143;152mtells your own coding
+                                                         agent how to work with
+                                                         brigada[0m
+    [38;2;95;215;95mnew[0m        .claude/skills/brigada-operator/SKILL.md  [38;2;138;143;152mthe same guide as a
+                                                         Claude Code skill[0m
+    [38;2;138;143;152munchanged[0m  .git/info/exclude                         [38;2;138;143;152mremoves the exclude
+                                                         line that hid the
+                                                         private Claude Code
+                                                         settings[0m
     [38;2;138;143;152m(show full contents: --verbose)[0m
 Operator guide: .brigada/operator.md tells your own coding agent how to work
   with brigada; have it read that file.
@@ -149,5 +154,5 @@ Operator guide: .brigada/operator.md tells your own coding agent how to work
     ~/.local/state/brigada/runner.log; stop it with: [38;2;108;198;224mbrigada stop[0m). The engine
     starts when needed and stops after 30 idle minutes.
 
-[1mWrite 2 files and start the runner? [0m[38;2;108;198;224m[y/N][0m[1m:[0m
+[1mWrite 3 files and start the runner? [0m[38;2;108;198;224m[y/N][0m[1m:[0m
 Declined; nothing written or started.

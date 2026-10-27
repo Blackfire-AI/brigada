@@ -955,8 +955,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if !*noWiring {
 		wiring = planLegacyWiring(root)
 	}
-	operator := planOperatorFile(root)
-	files := append([]wireFile{{rel: engine.ProjectConfigPath, old: old, next: proposed, exists: exists}, operator}, wiring...)
+	operator := planOperatorFiles(root)
+	files := append(append([]wireFile{{rel: engine.ProjectConfigPath, old: old, next: proposed, exists: exists}}, operator...), wiring...)
 	printInitFiles(stdout, files, *verbose)
 	printInitOperatorNote(stdout)
 	if *noWiring {
@@ -973,9 +973,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if !exists || !bytes.Equal(old, proposed) {
 			files++
 		}
-		if operator.changed() {
-			files++
-		}
+		files += countChanged(operator)
 		for _, f := range wiring {
 			if f.changed() {
 				files++
@@ -1024,7 +1022,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err := runnerstate.SaveParallel(runnerStateDir(rt), *parallel); err != nil {
 		return partial(fmt.Errorf("save tasks at once: %w", err))
 	}
-	if err := applyWiring(append([]wireFile{operator}, wiring...)); err != nil {
+	if err := applyWiring(append(slices.Clone(operator), wiring...)); err != nil {
 		return partial(err)
 	}
 	savedSpecs := append(runnerSpecStrings(usable), keptAgents...)
@@ -1039,9 +1037,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if !exists || !bytes.Equal(old, proposed) {
 		written++
 	}
-	if operator.changed() {
-		written++
-	}
+	written += countChanged(operator)
 	for _, f := range wiring {
 		if f.changed() {
 			written++
