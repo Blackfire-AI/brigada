@@ -50,6 +50,33 @@ func TestInitAliasResolution(t *testing.T) {
 	}
 }
 
+func TestInitNonSSHSingleWordHostDoesNotResolve(t *testing.T) {
+	old := initSSHConfig
+	calls := 0
+	initSSHConfig = func(context.Context, string) ([]byte, error) {
+		calls++
+		return []byte("hostname example.com\nport 22\n"), nil
+	}
+	t.Cleanup(func() { initSSHConfig = old })
+	for _, origin := range []string{
+		"https://gitserver/org/repo",
+		"http://gitserver/org/repo",
+		"git://gitserver/org/repo",
+		"file://gitserver/org/repo",
+		"other://gitserver/org/repo",
+	} {
+		t.Run(origin, func(t *testing.T) {
+			_, err := selectInitOrigin(t.Context(), initAliasRepo(t, origin), "")
+			if err == nil || !strings.Contains(err.Error(), "--repo") {
+				t.Fatalf("non-SSH origin %q: %v", origin, err)
+			}
+		})
+	}
+	if calls != 0 {
+		t.Fatalf("ssh -G called %d times for non-SSH origins", calls)
+	}
+}
+
 func TestInitAliasRefusalAndOverride(t *testing.T) {
 	root := initAliasRepo(t, "git@build:org/repo")
 	old := initSSHConfig
@@ -218,8 +245,11 @@ func TestInitRegistrationTransportStored(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg, err := engine.ParseProjectConfig(content)
-			if err != nil || cfg.Repo != "example.com/org/repo" {
+			if err != nil {
 				t.Fatalf("project.yaml repo: %+v %v", cfg, err)
+			}
+			if cfg.Repo != "example.com/org/repo" {
+				t.Fatalf("project.yaml repo = %q, want canonical identity", cfg.Repo)
 			}
 			st, err := store.Open(t.Context(), filepath.Join(state, "store.db"))
 			if err != nil {
@@ -230,8 +260,14 @@ func TestInitRegistrationTransportStored(t *testing.T) {
 			err = st.View(t.Context(), func(tx *sql.Tx) error {
 				return tx.QueryRow("SELECT repo_url, transport_url FROM projects").Scan(&identity, &transport)
 			})
-			if err != nil || identity != "example.com/org/repo" || transport != tc.want {
-				t.Fatalf("stored identity=%q transport=%q err=%v", identity, transport, err)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if identity != "example.com/org/repo" {
+				t.Fatalf("stored repo_url = %q, want canonical identity", identity)
+			}
+			if transport != tc.want {
+				t.Fatalf("stored transport_url = %q, want %q", transport, tc.want)
 			}
 			if id, err := engine.Canonicalize(transport); err != nil || id != identity {
 				t.Fatalf("transport canonicalizes to %q: %v", id, err)
@@ -302,7 +338,13 @@ func TestParentAliasRegistrationStored(t *testing.T) {
 	err = st.View(t.Context(), func(tx *sql.Tx) error {
 		return tx.QueryRow("SELECT repo_url, transport_url FROM projects").Scan(&identity, &transport)
 	})
-	if err != nil || identity != "example.com:2222/org/repo" || transport != "ssh://git@example.com:2222/org/repo" {
-		t.Fatalf("stored identity=%q transport=%q err=%v", identity, transport, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity != "example.com:2222/org/repo" {
+		t.Fatalf("stored repo_url = %q, want canonical identity", identity)
+	}
+	if transport != "ssh://git@example.com:2222/org/repo" {
+		t.Fatalf("stored transport_url = %q", transport)
 	}
 }
