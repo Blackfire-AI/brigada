@@ -5,9 +5,9 @@
 plan: 58
 title: "#114 codex reset parsing: a just-passed reset means now, not tomorrow"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-10-27T16:02:13.063898Z
-updated: 2026-10-27T16:02:13.063898Z
+updated: 2026-10-27T16:02:39.476564Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -27,6 +27,6 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
