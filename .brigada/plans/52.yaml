@@ -27,9 +27,10 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
+    question: "May this task extend the engine/API to accept a canonical identity together with a separate Git transport URL?"
   - id: 193
     name: "remote"
     title: "#102 (2/2) remote choice by URL, --remote, client commands find the remote by identity"
