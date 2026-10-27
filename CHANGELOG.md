@@ -28,6 +28,8 @@ First release candidate of 1.0.0. The changes are listed under 1.0.0 below.
 
 ### Fixed
 
+- `brigada init` resolves SSH origin aliases through `ssh -G` after confirmation and accepts `--repo` as a full URL or, with an SSH origin, a canonical identity (issue #102). Registration stores the canonical identity and a usable transport.
+
 - A model the provider rejects for the account, or that does not exist (a 400 `invalid_request_error`), was retried and probed as if the agent were flaky (issue #82). It now has the error kind `model`: the engine marks the agent broken with the provider's words, never probes it, and only `brigada agent reset` or removing the agent clears it; the needs-you line names the model and points at `brigada agents`, and a review whose reviewer's model was rejected is requeued without spending its no-verdict retry. An error codex prints before `turn.started` is a startup notice and reads as a warning, not the job's error; `turn.failed` stays the final verdict.
 - An amendment sent while a plan review round ran was refused, and an `approve` verdict woke nobody, so the change was lost until you asked again (issue #84). `plan_amend` now accepts it: the running round judges the plan as it was queued, the added and respecified tasks wait as the plan's amendment work, and the round's verdict — `approve` included — queues the next review round over them. `brigada status` shows the waiting amendment under the plan.
 - An authentication break on dsh, whose key comes from the environment, read as a bare auth failure; it now names the variable (`DEEPSEEK_API_KEY`) and the time the runner process started, so a runner started without the key shows (issue #75).

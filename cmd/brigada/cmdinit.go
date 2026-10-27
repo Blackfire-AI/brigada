@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,6 +54,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	verbose := fs.Bool("verbose", false, "also print the full contents of new repository setup files")
 	limited := fs.Bool("accept-limited", false, "acknowledge fewer than two review families; reviews still require another family")
 	check := fs.String("check", "", "default check command, or none / - for no check (never executed by init)")
+	repo := fs.String("repo", "", "repository URL or canonical identity to register instead of origin")
 	tools := fs.String("tools", "", "worker scope in runner tools= syntax; scopes claude's tool list and opencode's bash commands")
 	foreman := fs.String("foreman", "", "choose the foreman, a signed-in claude or codex model, as harness/model[@effort]; without @effort an interactive run asks for the effort")
 	noWiring := fs.Bool("no-wiring", false, "in a parent folder, skip the coordinator's wiring; in a repository, leave the harness untouched: init writes no harness wiring, and an older init's stays")
@@ -114,8 +116,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if parallelProvided {
 			return usagef(stderr, "--parallel sets up one repository; this folder is not one")
 		}
-		if *check != "" || toolsProvided || len(agents.specs) > 0 || *limited || len(signedIn) > 0 {
-			return usagef(stderr, "--check, --tools, --agent, --signed-in and --accept-limited set up one repository; this folder is not one (parent-folder init takes --all, --foreman, --yes, --probe and --no-wiring)")
+		if *repo != "" || *check != "" || toolsProvided || len(agents.specs) > 0 || *limited || len(signedIn) > 0 {
+			return usagef(stderr, "--repo, --check, --tools, --agent, --signed-in and --accept-limited set up one repository; this folder is not one (parent-folder init takes --all, --foreman, --yes, --probe and --no-wiring)")
 		}
 		return runInitParent(ctx, cwd, parentOptions{yes: *yes, probe: *probe, all: *all, noWiring: *noWiring, foreman: *foreman}, common, bufio.NewReader(projectStdin), stdout, stderr)
 	}
@@ -133,9 +135,18 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	// An origin must exist; a real local bare remote is valid. Multiple origin
 	// URLs with different identities are ambiguous and must be fixed by the user.
-	origin, canon, err := initOrigin(ctx, root)
+	reader := bufio.NewReader(projectStdin)
+	selection, err := selectInitOrigin(ctx, root, *repo)
 	if err != nil {
 		return fail(stderr, err)
+	}
+	origin, canon := selection.transport, selection.canon
+	accepted, err := confirmInitSelection(selection, *yes, *probe, reader, stdout)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if !accepted {
+		return 1
 	}
 	caps := initDetectCaps(stdout)
 	styled := caps.TTY && caps.Color != logo.NoColor
@@ -186,7 +197,6 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			*parallel = min(4, max(1, cores/2))
 		}
 	}
-	reader := bufio.NewReader(projectStdin)
 	canAsk := !*yes && !*probe
 	// A rerun defaults to the saved foreman and to the saved agents, one spec
 	// per model. A foreman-only spec (no classes) is not a task choice.
@@ -1453,25 +1463,182 @@ func initApplyPrompt(files int, running bool) string {
 	}
 }
 
+type initRepoSelection struct {
+	transport string
+	canon     string
+	alias     string
+	override  bool
+}
+
+func confirmInitSelection(s initRepoSelection, yes, probe bool, reader *bufio.Reader, out io.Writer) (bool, error) {
+	if s.alias == "" && !s.override {
+		return true, nil
+	}
+	if s.alias != "" {
+		fmt.Fprintf(out, "SSH alias %s resolves to %s; registration transport: %s\n", s.alias, s.canon, s.transport)
+	} else {
+		fmt.Fprintf(out, "--repo selects %s; registration transport: %s\n", s.canon, engine.RedactRepoURL(s.transport))
+	}
+	if yes || probe {
+		return true, nil
+	}
+	fmt.Fprint(out, "Use this repository? [y/N]: ")
+	answer, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return false, err
+	}
+	if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
+		fmt.Fprintln(out, "Declined; nothing written or started.")
+		return false, nil
+	}
+	return true, nil
+}
+
+// initSSHConfig is replaced in tests; only hostname and port are read.
+var initSSHConfig = func(ctx context.Context, alias string) ([]byte, error) {
+	return exec.CommandContext(ctx, "ssh", "-G", alias).Output()
+}
+
 func initOrigin(ctx context.Context, root string) (string, string, error) {
+	s, err := selectInitOrigin(ctx, root, "")
+	return s.transport, s.canon, err
+}
+
+func selectInitOrigin(ctx context.Context, root, override string) (initRepoSelection, error) {
 	out, err := exec.CommandContext(ctx, "git", "-C", root, "remote", "get-url", "--all", "origin").Output()
 	if err != nil || len(bytes.TrimSpace(out)) == 0 {
-		return "", "", fmt.Errorf("no origin: configure an origin remote before init; a repository without a remote is unsupported")
+		return initRepoSelection{}, fmt.Errorf("no origin: configure an origin remote before init; a repository without a remote is unsupported")
 	}
-	var origin, canon string
-	for _, raw := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		id, err := engine.Canonicalize(raw)
+	raws := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if override != "" {
+		id, err := engine.Canonicalize(override)
 		if err != nil {
-			return "", "", fmt.Errorf("origin is ambiguous or invalid: %w; configure an unambiguous origin URL before init", err)
+			return initRepoSelection{}, fmt.Errorf("--repo: %w", err)
 		}
-		if canon != "" && canon != id {
-			return "", "", fmt.Errorf("origin has multiple canonical identities; select one origin URL before init")
+		transport := override
+		if id == override && !strings.Contains(override, "://") && !strings.HasPrefix(override, "/") && !strings.HasPrefix(override, "file:") {
+			user, _, _, ok := initSSHOrigin(raws[0])
+			if !ok {
+				return initRepoSelection{}, fmt.Errorf("--repo: a bare identity needs an ssh-like origin; give a full URL")
+			}
+			transport = initSSHTransport(user, id)
+			if strings.HasSuffix(id, ".git") {
+				transport += ".git"
+			}
 		}
-		if canon == "" {
-			origin, canon = raw, id
+		if err := checkInitTransport(transport, id); err != nil {
+			return initRepoSelection{}, fmt.Errorf("--repo: %w", err)
+		}
+		return initRepoSelection{transport: transport, canon: id, override: true}, nil
+	}
+	var selected initRepoSelection
+	for _, raw := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		s, err := initOriginURL(ctx, raw)
+		if err != nil {
+			return initRepoSelection{}, fmt.Errorf("origin is ambiguous or invalid: %w; use --repo with a full URL or canonical identity", err)
+		}
+		if selected.canon != "" && selected.canon != s.canon {
+			return initRepoSelection{}, fmt.Errorf("origin has multiple canonical identities; use --repo to select one")
+		}
+		if selected.canon == "" {
+			selected = s
 		}
 	}
-	return origin, canon, nil
+	return selected, nil
+}
+
+func initOriginURL(ctx context.Context, raw string) (initRepoSelection, error) {
+	user, host, path, sshLike := initSSHOrigin(raw)
+	if sshLike && !strings.Contains(host, ".") && host != "localhost" {
+		out, err := initSSHConfig(ctx, host)
+		if err != nil {
+			return initRepoSelection{}, fmt.Errorf("SSH alias %s could not be resolved; give --repo", host)
+		}
+		hostname, port := "", "22"
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) != 2 {
+				continue
+			}
+			switch strings.ToLower(fields[0]) {
+			case "hostname":
+				hostname = fields[1]
+			case "port":
+				port = fields[1]
+			}
+		}
+		if hostname == "" || !strings.Contains(hostname, ".") {
+			return initRepoSelection{}, fmt.Errorf("SSH alias %s did not resolve to a full hostname; give --repo", host)
+		}
+		portNumber, err := strconv.Atoi(port)
+		if err != nil || portNumber < 1 || portNumber > 65535 {
+			return initRepoSelection{}, fmt.Errorf("SSH alias %s has an invalid port; give --repo", host)
+		}
+		hp := hostname
+		if portNumber != 22 {
+			hp += ":" + strconv.Itoa(portNumber)
+		}
+		transport := initSSHTransport(user, hp+"/"+strings.TrimLeft(path, "/"))
+		id, err := engine.Canonicalize(transport)
+		if err != nil {
+			return initRepoSelection{}, fmt.Errorf("SSH alias %s: %w; give --repo", host, err)
+		}
+		if err := checkInitTransport(transport, id); err != nil {
+			return initRepoSelection{}, err
+		}
+		return initRepoSelection{transport: transport, canon: id, alias: host}, nil
+	}
+	id, err := engine.Canonicalize(raw)
+	if err != nil {
+		return initRepoSelection{}, err
+	}
+	if id == raw && !strings.Contains(raw, "://") && !strings.HasPrefix(raw, "file:") {
+		return initRepoSelection{}, fmt.Errorf("origin names an identity without a transport; give --repo with a full URL")
+	}
+	return initRepoSelection{transport: raw, canon: id}, nil
+}
+
+func initSSHOrigin(raw string) (user, host, path string, ok bool) {
+	if strings.HasPrefix(strings.ToLower(raw), "file:") {
+		return "", "", "", false
+	}
+	if strings.HasPrefix(strings.ToLower(raw), "ssh://") {
+		u, err := url.Parse(raw)
+		if err != nil || u.Hostname() == "" || u.RawQuery != "" || u.Fragment != "" {
+			return "", "", "", false
+		}
+		if u.User != nil {
+			user = u.User.Username()
+		}
+		return user, u.Hostname(), u.Path, true
+	}
+	if strings.Contains(raw, "://") {
+		return "", "", "", false
+	}
+	rest := raw
+	if before, after, found := strings.Cut(raw, "@"); found {
+		user, rest = before, after
+	}
+	host, path, ok = strings.Cut(rest, ":")
+	return user, host, path, ok && host != "" && !strings.ContainsAny(host, "/[]") && !strings.HasPrefix(path, "/")
+}
+
+func initSSHTransport(user, identity string) string {
+	if user != "" {
+		return "ssh://" + user + "@" + identity
+	}
+	return "ssh://" + identity
+}
+
+func checkInitTransport(transport, identity string) error {
+	id, err := engine.Canonicalize(transport)
+	if err != nil {
+		return err
+	}
+	if id != identity {
+		return fmt.Errorf("transport resolves to %s instead of %s", id, identity)
+	}
+	return nil
 }
 
 // printInitFileLine wraps displayed file contents without normalizing whitespace.

@@ -39,8 +39,9 @@ const codexCoordinatorText = `  codex: no verified project scope; init writes no
 type parentChild struct {
 	name   string
 	path   string
-	origin string // the origin URL as configured; never printed (it may hold a token)
+	origin string // registration transport; never printed for ordinary remotes (it may hold a token)
 	canon  string
+	alias  string
 	skip   string // why the child is not a candidate; empty = a candidate
 	known  bool
 }
@@ -54,6 +55,10 @@ type parentChild struct {
 // second child with a canonical URL already seen is a duplicate of the
 // first, never a second project.
 func scanParent(ctx context.Context, dir string) ([]parentChild, error) {
+	return scanParentWithAliases(ctx, dir, false)
+}
+
+func scanParentWithAliases(ctx context.Context, dir string, acceptAliases bool) ([]parentChild, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -72,7 +77,7 @@ func scanParent(ctx context.Context, dir string) ([]parentChild, error) {
 		case !e.IsDir():
 			continue
 		default:
-			classifyChild(ctx, &c)
+			classifyChildWithAliases(ctx, &c, acceptAliases)
 		}
 		if c.skip == "" {
 			if other, dup := first[c.canon]; dup {
@@ -89,6 +94,10 @@ func scanParent(ctx context.Context, dir string) ([]parentChild, error) {
 // classifyChild decides whether a directory child is a repository with a
 // usable origin, setting skip when it is not.
 func classifyChild(ctx context.Context, c *parentChild) {
+	classifyChildWithAliases(ctx, c, false)
+}
+
+func classifyChildWithAliases(ctx context.Context, c *parentChild, acceptAliases bool) {
 	st, err := os.Lstat(filepath.Join(c.path, ".git"))
 	switch {
 	case err != nil:
@@ -103,14 +112,18 @@ func classifyChild(ctx context.Context, c *parentChild) {
 		c.skip = "not a git repository (not descended into)"
 		return
 	}
-	origin, canon, err := initOrigin(ctx, c.path)
+	selection, err := selectInitOrigin(ctx, c.path, "")
 	switch {
 	case err == nil:
-		c.origin, c.canon = origin, canon
+		if selection.alias != "" && !acceptAliases {
+			c.skip = "SSH alias " + selection.alias + " resolves to " + selection.canon + "; use --yes to accept or --repo inside the repository"
+			return
+		}
+		c.origin, c.canon, c.alias = selection.transport, selection.canon, selection.alias
 	case strings.HasPrefix(err.Error(), "no origin"):
 		c.skip = "no origin remote"
 	default:
-		c.skip = "ambiguous origin"
+		c.skip = "ambiguous origin; use --repo inside the repository"
 	}
 }
 
@@ -189,7 +202,7 @@ func runInitParent(ctx context.Context, dir string, opts parentOptions, common *
 	if err != nil {
 		return fail(stderr, err)
 	}
-	children, err := scanParent(ctx, dir)
+	children, err := scanParentWithAliases(ctx, dir, opts.yes)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -255,6 +268,9 @@ func runInitParent(ctx context.Context, dir string, opts parentOptions, common *
 				state = "unknown (engine not running), treated as new"
 			}
 			fmt.Fprintf(stdout, "  [%d] %s  %s  %s\n", len(register), c.path, c.canon, state)
+			if c.alias != "" {
+				fmt.Fprintf(stdout, "      SSH alias %s; registration transport: %s\n", c.alias, c.origin)
+			}
 		}
 	}
 	if len(children) == 0 {
