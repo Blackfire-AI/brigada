@@ -81,6 +81,40 @@ func TestScrubWorkerEnvDropsAmbientCredentials(t *testing.T) {
 	}
 }
 
+// TestScrubWorkerEnvDropsSelfHostedForgeTokens: the ambient tokens of the
+// self-hosted forges leave a worker's environment and a command's, like the
+// rest of the forge credentials (§5.8). The values are not real.
+func TestScrubWorkerEnvDropsSelfHostedForgeTokens(t *testing.T) {
+	names := []string{
+		"GITEA_TOKEN", "GITEA_ACCESS_TOKEN",
+		"FORGEJO_TOKEN", "TEA_TOKEN",
+	}
+	fake := "fake-" + strings.Repeat("x", 6)
+	for _, n := range names {
+		t.Setenv(n, fake)
+	}
+
+	envs := []struct {
+		kind string
+		kvs  []string
+	}{
+		{"worker", scrubWorkerEnv(nil, nil)},
+		{"command", scrubCommandEnv(nil, nil)},
+	}
+	for _, n := range names {
+		for _, env := range envs {
+			if slices.ContainsFunc(env.kvs, func(kv string) bool { return strings.HasPrefix(kv, n+"=") }) {
+				t.Errorf("%s reached the %s's environment", n, env.kind)
+			}
+		}
+	}
+	for _, env := range envs {
+		if !slices.ContainsFunc(env.kvs, func(kv string) bool { return strings.HasPrefix(kv, "PATH=") }) {
+			t.Errorf("the scrub wiped the %s's whole environment", env.kind)
+		}
+	}
+}
+
 // TestCommandEnvScrubsChecksAndSetup: a check or a setup command runs
 // with the worker's scrub plus no brigada variables, and still has PATH,
 // HOME, the Go caches and the job's own extra variables (§5.8).
