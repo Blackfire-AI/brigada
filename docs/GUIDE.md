@@ -138,7 +138,7 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 | `--check CMD` | The default check; answers step 4 without a question. |
 | `--tools SCOPE` | Worker tools in runner `tools=` syntax (`Bash(npm test:*)+Bash(npx jest:*)`, or `none`). An explicit agent `tools=` wins; a `tools.claude/<model>` line in your config file is kept unless you pass `--tools`. |
 | `--accept-limited` | Go ahead with fewer than two review families. |
-| `--no-wiring` | In a repository, a no-op with a note: init writes no harness wiring and, on a rerun, strips nothing; it still writes `.brigada/operator.md`, which is not wiring. In a parent folder, skip the coordinator's wiring. |
+| `--no-wiring` | In a repository, a no-op with a note: init writes no harness wiring and, on a rerun, strips nothing; it still writes `.brigada/operator.md` and the operator skill, which are not wiring. In a parent folder, skip the coordinator's wiring. |
 | `--all` | Only in a folder that is not a repository ([section 3](#3-several-repositories)). |
 | `--state-dir DIR`, `--config PATH` | As for every command. |
 
@@ -198,6 +198,7 @@ The repository cleanup covers brigada's wiring:
 - brigada's managed block in `AGENTS.md` and its import section in `CLAUDE.md`: only the bytes between the markers go, with the separators init itself added, so a file you have not edited comes back byte for byte and a file init created is deleted;
 - the `/.claude/settings.local.json` line in git's `info/exclude`;
 - `.brigada/operator.md`, the operator guide init writes, when it still has init's generated header.
+- `.claude/skills/brigada-operator/SKILL.md`, the same guide as a Claude Code skill, when it still has init's generated header; an emptied `brigada-operator` directory goes with it.
 
 Other settings and hooks stay. A JSON file is deleted only if removing brigada's entries leaves nothing else in it. `.brigada/project.yaml` stays unless you pass `--delete-config`.
 
@@ -261,11 +262,11 @@ With `claude`, an attached foreman is the same session the headless turns resume
 
 ### The operator flow
 
-The usual way in is through your own coding agent, the operator. `brigada init` writes `.brigada/operator.md`, a generated, harness-agnostic guide (init overwrites it on a rerun, `--no-wiring` does not skip it, `brigada remove` deletes it). Open your agent in the repository, have it read that file, and tell it, for example, "ask brigada to fix #12". The operator:
+The usual way in is through your own coding agent, the operator. `brigada init` writes `.brigada/operator.md`, a generated, harness-agnostic guide (init overwrites it on a rerun, `--no-wiring` does not skip it, `brigada remove` deletes it). For Claude Code, init also writes the same text as the skill `.claude/skills/brigada-operator/SKILL.md`. Open your agent in the repository, have it read that file, and tell it, for example, "ask brigada to fix #12". The operator:
 
-- **asks** with `brigada ask -`, pointing at issues and document sections, the build order, tier hints and cooling accounts;
+- **asks** with `brigada ask -`, putting the content of an issue into the ask (the foreman cannot read a tracker; issue numbers stay as references for `Closes` and `Refs` trailers), naming files and document sections, the build order, tier hints and cooling accounts;
 - **watches** with `brigada status`, `brigada history --task N`, `brigada history --job N` (a job's full verdict) and `brigada diff --stat N`; you watch the same work live in `brigada top`;
-- **follows a landing**: merges the staging pull request with a merge commit once CI is green, and restarts the engine and runner when their own code landed and nothing pending needs the old behaviour;
+- **follows a landing**: merges the staging pull request with a merge commit once CI is green (when `land_target` is the default branch and `after_land` is none, there is no pull request to merge), and restarts the engine and runner when their own code landed and nothing pending needs the old behaviour;
 - **recovers** after an outage by asking again: an ask re-wakes the foreman.
 
 The operator has no approval authority. Plan approval, land approval, push approval, `--and-stop-asking`, tags and releases, and rule changes stay yours; the operator tells you what waits. `brigada attach` below is the other way in: your own conversation with the foreman.

@@ -71,7 +71,7 @@ func planExcludeRemoval(root string) wireFile {
 // planRemoval reads the same paths as init, including a linked worktree's
 // shared exclude file. nil next means delete, only for this removal plan.
 func planRemoval(root string, deleteConfig bool) []wireFile {
-	steps := append(legacyWiringSteps(root), wireStep{operatorFile, removeOperatorFile}, wireStep{engine.ProjectConfigPath, func(d []byte, exists bool) ([]byte, string, error) {
+	steps := append(legacyWiringSteps(root), wireStep{operatorFile, removeOperatorFile}, wireStep{operatorSkillFile, removeOperatorSkill}, wireStep{engine.ProjectConfigPath, func(d []byte, exists bool) ([]byte, string, error) {
 		if exists && deleteConfig {
 			return nil, "removed", nil
 		}
