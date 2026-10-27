@@ -59,7 +59,7 @@ tasks:
     base: "remote"
     continue: "remote"
     effort: medium
-    state: running
+    state: ready
     branch: ""
     rounds: 0
   - id: 196
