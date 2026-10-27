@@ -48,9 +48,9 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-194"
-    rounds: 0
+    rounds: 1
   - id: 195
     name: "network"
     title: "#102 (3/3) diff, land and remove use the project's remote"
