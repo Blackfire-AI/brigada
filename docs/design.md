@@ -388,7 +388,7 @@ Family detection: the job record; for `brigada review --branch` without a job, t
 - a result branch whose fetched head differs from the head the verdict approved (the runner records the pushed head with the result; where no head is recorded, land warns and goes on);
 - a dirty working tree (tracked changes, or untracked files that are not ignored), or a merge, rebase, cherry-pick or revert in progress;
 - a target branch that is behind or has diverged from its remote counterpart (pull first; being ahead is fine), or that is not the checked-out branch;
-- a working directory none of whose remotes canonicalizes (§13.1 item 1) to the task's project, with `--repo` as the same escape `brigada diff` has. The project's remote is the one whose URL matches, `origin` preferred; with no match (`--repo` naming a mirror or fork), `origin`, else the only remote;
+- a working directory whose selected remote (`origin`, else the only remote) does not canonicalize (§13.1 item 1) to the task's project, with `--repo` as the same escape `brigada diff` has; with `--repo`, the project's remote is the one whose URL matches it, `origin` preferred, and with no match (a mirror or fork) `origin`, else the only remote;
 - a dependency that is neither landed nor in the same call (below);
 - no default check, unless `--no-check` is given, the same "never run unchecked" rule as §6.1; `--no-check` is shown in the final report.
 

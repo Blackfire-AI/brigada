@@ -210,7 +210,7 @@ Other settings and hooks stay. A JSON file is deleted only if removing brigada's
 
 Removal archives the project, keeping its plans, tasks, stats and history ([section 6](#6-configuring-a-project)). On success it prints `brigada removed; project history kept.`. If other projects use the runner, it keeps running. Otherwise, if the runner is running, remove asks `stop the runner? [Y/n]`; Enter stops it. `--yes` accepts that too.
 
-Remote `brigada/task-*` branches and `brigada/plans` are left alone. Remove lists them and prints `git push <remote> --delete` commands, naming the remote it checked (the one whose URL matches the project, `origin` preferred), for you to run yourself; if the remote cannot be checked, it says so. When Codex is installed, it also prints `codex mcp remove brigada-foreman` for the user-level registration that only the pre-0.78 fallback creates. Remove does not run that command.
+Remote `brigada/task-*` branches and `brigada/plans` are left alone. Remove lists them and prints `git push <remote> --delete` commands, naming the remote it checked (the one the project is named by: `origin`, else the only remote), for you to run yourself; if the remote cannot be checked, it says so. When Codex is installed, it also prints `codex mcp remove brigada-foreman` for the user-level registration that only the pre-0.78 fallback creates. Remove does not run that command.
 
 ### By hand
 
@@ -517,7 +517,7 @@ Land refuses, changing nothing:
 - a dirty tree;
 - a task that is not approved;
 - a local branch behind its remote;
-- a directory whose selected remote is not the task's project;
+- a directory whose selected remote (`origin`, else the only remote) is not the task's project, unless `--repo` names it;
 - a dependency that is not landed;
 - a missing default check (unless `--no-check`).
 

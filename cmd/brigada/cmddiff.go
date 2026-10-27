@@ -21,7 +21,7 @@ type taskReader interface {
 // runDiff is `brigada diff <task-id> [--stat] [--repo URL]`: the task's
 // change as git shows it, base...branch, on stdout so it pipes to a
 // pager. It runs inside the project's repository, fetches the two refs
-// from origin (refs only, no checkout) and diffs them locally.
+// from the project's remote (refs only, no checkout) and diffs them locally.
 func runDiff(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("diff",
 		"brigada diff [--stat] [--repo URL] [--no-start] <task-id>",

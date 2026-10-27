@@ -78,11 +78,17 @@ func TestLandUsesTheProjectsRemote(t *testing.T) {
 	t.Run("only remote is not origin", func(t *testing.T) {
 		_, clone, f := landFixture(t)
 		gitIn(t, clone, "remote", "rename", "origin", "upstream")
+		// The tracking ref names a branch the remote's own HEAD does not
+		// (the remote's HEAD is main): the tracking ref is read first.
+		gitIn(t, clone, "branch", "-q", "trunk", "main")
+		gitIn(t, clone, "push", "-q", "upstream", "trunk")
+		gitIn(t, clone, "remote", "set-head", "upstream", "trunk")
+		gitIn(t, clone, "switch", "-q", "trunk")
 		code, out, errs := land(t, f, clone, landOptions{ids: []int64{1}})
 		if code != 0 {
 			t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, out, errs)
 		}
-		if !strings.Contains(out, "git push upstream main") {
+		if !strings.Contains(out, "git push upstream trunk") {
 			t.Errorf("the push command must name upstream:\n%s", out)
 		}
 	})
@@ -116,6 +122,28 @@ func TestLandUsesTheProjectsRemote(t *testing.T) {
 			t.Errorf("the push command must name origin:\n%s", out)
 		}
 	})
+}
+
+func TestProjectRemoteSingleUnmatchedAndAlias(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitIn(t, dir, "init", "-q")
+	gitIn(t, dir, "remote", "add", "mirror", "https://example.com/team/mirror.git")
+	if got, err := projectRemote(ctx, dir, "example.com/team/repo"); err != nil || got != "mirror" {
+		t.Errorf("single unmatched remote: got %q, %v, want mirror", got, err)
+	}
+
+	// An SSH alias resolves through the configured hostname before matching.
+	old := initSSHConfig
+	initSSHConfig = func(context.Context, string) ([]byte, error) {
+		return []byte("hostname example.com\nport 22\n"), nil
+	}
+	t.Cleanup(func() { initSSHConfig = old })
+	gitIn(t, dir, "remote", "add", "other", "https://example.com/team/other.git")
+	gitIn(t, dir, "remote", "add", "build", "git@build:team/repo.git")
+	if got, err := projectRemote(ctx, dir, "example.com/team/repo"); err != nil || got != "build" {
+		t.Errorf("aliased remote: got %q, %v, want build", got, err)
+	}
 }
 
 func TestRemovalRemotePlanNamesTheOnlyRemote(t *testing.T) {
