@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -29,7 +28,7 @@ import (
 
 // runAttach is the client's attach (§4.2 item 1): the user's own chat
 // with the foreman, and what a bare `brigada` runs. The project is the
-// one the working directory's git origin names — the way every caller
+// one the working directory's chosen git remote names — the way every caller
 // names a project by its repo URL (§12.1) — the attach takes the
 // foreman's key (waiting out a live turn, or cancelling it with
 // --force), and the attached session runs on the terminal until the
@@ -463,26 +462,31 @@ func releaseAttach(ctx context.Context, client *api.Client, holdID int64, sessio
 	}
 }
 
-// gitOriginURL reads the origin remote's URL of the repository at dir:
-// the name a project goes by everywhere (§12.1), and the attach's only
-// way to find which foreman the working directory belongs to.
+// gitOriginURL reads the project's remote URL: origin when present, or
+// the only remote otherwise. All client commands use this default.
 func gitOriginURL(dir string) (string, error) {
-	cmd := exec.Command("git", "-C", dir, "remote", "get-url", "origin")
-	var errb bytes.Buffer
-	cmd.Stderr = &errb
-	out, err := cmd.Output()
+	remotes, err := listGitRemotes(context.Background(), dir)
 	if err != nil {
-		detail := strings.TrimSpace(errb.String())
-		if detail == "" {
-			detail = err.Error()
+		return "", fmt.Errorf("the working directory %s has no origin URL to name its project by (%v); attach runs inside a project's repository", dir, err)
+	}
+	chosen, err := chooseGitRemote(remotes, "")
+	if err != nil {
+		if errors.Is(err, errChooseGitRemote) {
+			return "", fmt.Errorf("the working directory %s has several remotes and none named origin; pass --repo to name its project", dir)
 		}
-		return "", fmt.Errorf("the working directory %s has no origin URL to name its project by (%s); attach runs inside a project's repository", dir, detail)
+		return "", fmt.Errorf("the working directory %s has no remote and no origin URL to name its project by; attach runs inside a project's repository", dir)
 	}
-	url := strings.TrimSpace(string(out))
-	if url == "" {
-		return "", fmt.Errorf("the origin remote of %s carries no URL; attach names the project by the repo's origin URL", dir)
+	if len(chosen.urls) == 0 {
+		if chosen.name == "origin" {
+			return "", fmt.Errorf("the origin remote of %s carries no URL; attach names the project by the repo's origin URL", dir)
+		}
+		return "", fmt.Errorf("git remote %q of %s carries no URL", chosen.name, dir)
 	}
-	return url, nil
+	raw := chosen.urls[0]
+	if selection, err := initOriginURL(context.Background(), raw); err == nil && selection.alias != "" {
+		return selection.transport, nil
+	}
+	return raw, nil
 }
 
 // newSessionID generates the harness session id for an attached chat
