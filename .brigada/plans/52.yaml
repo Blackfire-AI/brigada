@@ -7,7 +7,7 @@ title: "#102 init: SSH-alias origins and non-origin remote names"
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-10-27T10:15:56.710278Z
-updated: 2026-10-27T10:18:34.256645Z
+updated: 2026-10-27T10:18:45.820871Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -47,6 +47,17 @@ tasks:
     class: "implement"
     deps: []
     base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 195
+    name: "network"
+    title: "#102 (3/3) diff, land and remove use the project's remote"
+    class: "implement"
+    deps: ["remote"]
+    base: "remote"
+    continue: "remote"
     effort: medium
     state: pending
     branch: ""
