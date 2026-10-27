@@ -59,9 +59,9 @@ tasks:
     base: "remote"
     continue: "remote"
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-195-r1"
-    rounds: 0
+    rounds: 1
   - id: 196
     name: "alias-fix"
     title: "#102 (1b/3) alias resolution only for ssh-style origins; project.yaml keeps canonical identity"
