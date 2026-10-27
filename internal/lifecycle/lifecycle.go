@@ -75,6 +75,13 @@ type Config struct {
 	// exit with unsent notifications to deliver; nil is "nothing to
 	// flush yet".
 	FlushNotifications func(ctx context.Context) error
+	// FlushGrace bounds every shutdown wait on the notification flush
+	// and on a delivery still in flight (§13): past it the engine
+	// leaves without the wait, with a log line. Zero keeps 10s.
+	FlushGrace time.Duration
+	// Notifier overrides the notifier the notify mode resolves (§10):
+	// the tests inject one; production leaves it nil.
+	Notifier notify.Notifier
 	// Log is the engine's logger; nil uses slog's default.
 	Log *slog.Logger
 }
@@ -101,6 +108,9 @@ func (c *Config) resolve() (Paths, error) {
 	}
 	if c.Idle <= 0 {
 		c.Idle = defaultIdle
+	}
+	if c.FlushGrace <= 0 {
+		c.FlushGrace = flushGrace
 	}
 	if c.IdleTick <= 0 {
 		c.IdleTick = min(max(c.Idle/4, 200*time.Millisecond), 30*time.Second)
@@ -193,6 +203,9 @@ func Run(ctx context.Context, cfg Config) error {
 	// (§13) flushes whatever a tick has not delivered yet; a caller's
 	// own FlushNotifications still wins, the tests inject one.
 	notifier := notify.Resolve(cfg.Notify)
+	if cfg.Notifier != nil {
+		notifier = cfg.Notifier
+	}
 	nloop := notify.NewLoop(st, notifier, log)
 	if cfg.NotifyWebhook != "" {
 		nloop = nloop.WithWebhook(&notify.Webhook{URL: cfg.NotifyWebhook})
@@ -235,13 +248,51 @@ func Run(ctx context.Context, cfg Config) error {
 	defer ticker.Stop()
 
 	log.InfoContext(ctx, "engine up", "pid", os.Getpid(), "socket", p.Socket, "store", p.Store, "idle_after", cfg.Idle)
+
+	// §10's delivery runs off the main loop: a tick starts at most one
+	// flush in its own goroutine, and a tick that finds one still
+	// running skips it — no queue, no second concurrent flush — so a
+	// notifier that never returns cannot stall the sweep, the snapshot
+	// or the idle exit. Shutdown cancels the goroutine's context and
+	// waits for it only within the grace.
+	var (
+		deliverStop context.CancelFunc
+		deliverDone chan struct{}
+	)
+	startDelivery := func() {
+		dctx, stop := context.WithCancel(ctx)
+		done := make(chan struct{})
+		deliverStop, deliverDone = stop, done
+		go func() {
+			defer close(done)
+			if err := nloop.Flush(dctx); err != nil && dctx.Err() == nil {
+				log.Warn("deliver notifications failed", "err", err)
+			}
+		}()
+	}
+	// stopDelivery cancels an in-flight delivery and waits for it only
+	// within the grace: a notifier that ignores its context cannot hold
+	// the exit — the goroutine is abandoned with a log line.
+	stopDelivery := func() {
+		if deliverDone == nil {
+			return
+		}
+		deliverStop()
+		select {
+		case <-deliverDone:
+		case <-time.After(cfg.FlushGrace):
+			log.Warn("notification delivery still in flight at shutdown; abandoning it")
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			log.InfoContext(ctx, "engine shutting down")
+			stopDelivery()
 			return stopEngine(stopServe, serveErr)
 		case err := <-serveErr:
 			stopServe()
+			stopDelivery()
 			if err != nil {
 				return fmt.Errorf("engine: %w", err)
 			}
@@ -250,11 +301,23 @@ func Run(ctx context.Context, cfg Config) error {
 			// The periodic sweep keeps the store honest without a call
 			// (§13): leases and attach holds lapse on time, with no new
 			// event to say so.
+			if deliverDone != nil {
+				select {
+				case <-deliverDone:
+					// The last delivery finished; reap it and start a
+					// fresh one below.
+					deliverStop()
+					deliverStop, deliverDone = nil, nil
+				default:
+				}
+			}
+			if deliverDone != nil {
+				log.DebugContext(ctx, "a notification delivery is still in flight; skipping this flush")
+			} else {
+				startDelivery()
+			}
 			if _, err := eng.Sweep(ctx); err != nil {
 				log.WarnContext(ctx, "sweep failed", "err", err)
-			}
-			if err := nloop.Flush(ctx); err != nil {
-				log.WarnContext(ctx, "deliver notifications failed", "err", err)
 			}
 			if path, err := eng.SnapshotIfDue(ctx); err != nil {
 				log.WarnContext(ctx, "store snapshot failed", "err", err)
@@ -267,10 +330,22 @@ func Run(ctx context.Context, cfg Config) error {
 				continue
 			}
 			log.InfoContext(ctx, "engine idle; shutting down", "idle_for", now.Sub(mon.lastBusy).Round(time.Second))
+			stopDelivery()
 			if cfg.FlushNotifications != nil {
-				flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), flushGrace)
-				if err := cfg.FlushNotifications(flushCtx); err != nil {
-					log.WarnContext(ctx, "flush notifications at shutdown failed", "err", err)
+				// The hook runs in its own goroutine and the engine
+				// stops waiting at the grace: a flush that ignores its
+				// context is abandoned with a log line, never an exit
+				// held hostage (§13).
+				flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.FlushGrace)
+				done := make(chan error, 1)
+				go func() { done <- cfg.FlushNotifications(flushCtx) }()
+				select {
+				case err := <-done:
+					if err != nil {
+						log.WarnContext(ctx, "flush notifications at shutdown failed", "err", err)
+					}
+				case <-time.After(cfg.FlushGrace):
+					log.WarnContext(ctx, "flush notifications at shutdown outlived the grace; abandoning it")
 				}
 				cancel()
 			}

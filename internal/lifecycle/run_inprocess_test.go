@@ -112,7 +112,7 @@ func seedNotifyEvent(t *testing.T, ctx context.Context, st *store.Store) {
 			return err
 		}
 		_, err := tx.Exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
-			VALUES ('task_check_failed', 1, 1, NULL, '{"reason":"exit 1"}', '2026-10-13T00:00:00Z')`)
+			VALUES ('task_check_failed', 1, 1, NULL, '{"status":"needs_foreman","reason":"exit 1"}', '2026-10-13T00:00:00Z')`)
 		return err
 	})
 	if err != nil {

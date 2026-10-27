@@ -12,6 +12,12 @@ import (
 // loop or the engine's idle exit.
 const execTimeout = 10 * time.Second
 
+// execWaitDelay bounds the wait past the context's kill: a tool that
+// ignores the kill, a child that cannot be reaped, or a grandchild
+// holding the pipes open still returns its Notify within a couple of
+// seconds past the kill — never an unbounded wait on the exec.
+const execWaitDelay = 2 * time.Second
+
 // Osascript is the macOS notifier: it asks osascript to display a
 // notification. Title and body reach the script only as the run
 // handler's argv — after `--`, as whole arguments — never interpolated
@@ -27,8 +33,9 @@ type Osascript struct {
 func (o Osascript) Name() string { return "osascript" }
 
 // Notify displays one banner through osascript. The attempt is bounded
-// by the caller's context, capped at execTimeout — a shutdown never
-// waits on the exec past the hook's grace.
+// by the caller's context, capped at execTimeout, and by the exec's
+// own wait delay past the kill — a shutdown never waits on the exec
+// past the hook's grace.
 func (o Osascript) Notify(ctx context.Context, title, body string) error {
 	tool := o.Tool
 	if tool == "" {
@@ -36,7 +43,9 @@ func (o Osascript) Notify(ctx context.Context, title, body string) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, execTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, tool, osascriptArgs(title, body)...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, tool, osascriptArgs(title, body)...)
+	cmd.WaitDelay = execWaitDelay
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("osascript: %w: %s", err, oneLine(string(out), 200))
 	}
@@ -67,7 +76,8 @@ type NotifySend struct {
 func (n NotifySend) Name() string { return "notify-send" }
 
 // Notify displays one banner through notify-send. The attempt is
-// bounded by the caller's context, capped at execTimeout.
+// bounded by the caller's context, capped at execTimeout, and by the
+// exec's own wait delay past the kill.
 func (n NotifySend) Notify(ctx context.Context, title, body string) error {
 	tool := n.Tool
 	if tool == "" {
@@ -75,7 +85,9 @@ func (n NotifySend) Notify(ctx context.Context, title, body string) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, execTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, tool, notifySendArgs(title, body)...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, tool, notifySendArgs(title, body)...)
+	cmd.WaitDelay = execWaitDelay
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("notify-send: %w: %s", err, oneLine(string(out), 200))
 	}
