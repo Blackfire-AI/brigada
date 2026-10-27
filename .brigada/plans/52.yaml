@@ -38,7 +38,7 @@ tasks:
     base: "alias-fix"
     continue: "alias-fix"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 194
@@ -70,6 +70,6 @@ tasks:
     base: "alias2"
     continue: "alias2"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-196"
     rounds: 0
