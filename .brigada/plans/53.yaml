@@ -28,6 +28,6 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: ready
+    state: running
     branch: "brigada/task-197"
     rounds: 0
