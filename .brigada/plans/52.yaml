@@ -70,6 +70,6 @@ tasks:
     base: "alias2"
     continue: "alias2"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-196"
     rounds: 0
