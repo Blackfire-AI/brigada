@@ -60,8 +60,8 @@ Send the foreman a request with ` + "`brigada ask -`" + `, the message on stdin:
   a pull request, merge that pull request with a merge commit once its
   CI is green.
 - If land_target is the default branch and after_land is none, the
-  landing is already on the default branch: there is no pull request
-  to merge.
+  landing went straight to the default branch: there is no pull
+  request to merge.
 - If the engine's or the runner's own code landed and nothing pending
   needs the old behaviour, restart them: ` + "`brigada stop --engine`" + `, then
   ` + "`brigada start`" + `.
