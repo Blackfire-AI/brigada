@@ -38,8 +38,8 @@ tasks:
     base: "alias-fix"
     continue: "alias-fix"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-193"
     rounds: 0
   - id: 194
     name: "alias2"
