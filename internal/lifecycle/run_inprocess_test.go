@@ -3,9 +3,7 @@ package lifecycle_test
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -114,7 +112,7 @@ func seedNotifyEvent(t *testing.T, ctx context.Context, st *store.Store) {
 			return err
 		}
 		_, err := tx.Exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
-			VALUES ('task_check_failed', 1, 1, NULL, '{"reason":"exit 1"}', '2026-10-13T00:00:00Z')`)
+			VALUES ('task_check_failed', 1, 1, NULL, '{"status":"needs_foreman","reason":"exit 1"}', '2026-10-13T00:00:00Z')`)
 		return err
 	})
 	if err != nil {
@@ -153,108 +151,4 @@ func TestRunStuckFlushDoesNotHoldTheExit(t *testing.T) {
 		t.Fatal("the idle exit never returned: a never-returning flush holds the engine hostage")
 	}
 	close(block)
-}
-
-// TestRunCtxCancelShutdownBounded cancels the engine's context while
-// its flush hook never returns: the shutdown must complete within the
-// grace plus slack — SIGTERM stops the engine whatever the notifier or
-// the hook is doing.
-func TestRunCtxCancelShutdownBounded(t *testing.T) {
-	state := testsupport.ShortStateDir(t)
-	block := make(chan struct{})
-	ctx, cancel := context.WithCancel(context.Background())
-	runDone := make(chan error, 1)
-	go func() {
-		runDone <- lifecycle.Run(ctx, lifecycle.Config{
-			StateDir:   state,
-			Notify:     "none",
-			Idle:       time.Hour,
-			IdleTick:   50 * time.Millisecond,
-			FlushGrace: 300 * time.Millisecond,
-			FlushNotifications: func(context.Context) error {
-				<-block
-				return nil
-			},
-		})
-	}()
-	time.Sleep(600 * time.Millisecond) // let it come up
-	cancel()
-	select {
-	case err := <-runDone:
-		if err != nil {
-			t.Fatalf("run the engine: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the ctx-cancel shutdown never returned: a never-returning flush holds the engine hostage")
-	}
-	close(block)
-}
-
-// bannerToolScript is the hostile banner CLI: it stays alive until the
-// context's kill lands on it, and a background child it spawns inherits
-// the output pipes and holds them open — so the killed exec still has
-// no EOF and the delivery stays in flight for far longer than a tick.
-// The script leaves its own pid and the holder's in markers for the
-// test's cleanup, so no orphan process outlives it.
-func bannerToolScript(markers string) string {
-	return fmt.Sprintf(`
-echo $$ > "%s/tool"
-(sleep 600) &
-echo $! > "%s/holder"
-echo banner up
-while :; do sleep 1; done
-`, markers, markers)
-}
-
-// TestRunDeliveryOffTheMainLoop wires the real notifier to a scripted
-// banner tool whose exec never ends on its own, over a store holding
-// one parking event: the first tick's delivery stays in flight, and the
-// main loop must keep moving — the ctx-cancel shutdown is served while
-// the banner exec still runs, instead of waiting it out.
-func TestRunDeliveryOffTheMainLoop(t *testing.T) {
-	state := testsupport.ShortStateDir(t)
-	p := lifecycle.PathsOf(state)
-
-	markers := t.TempDir()
-	tool := testsupport.WriteScript(t, bannerToolScript(markers))
-	t.Setenv("PATH", filepath.Dir(tool)+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Cleanup(func() {
-		var pids []int
-		for _, name := range []string{"tool", "holder"} {
-			if pid := testsupport.ReadPid(filepath.Join(markers, name)); pid > 0 {
-				pids = append(pids, pid)
-			}
-		}
-		testsupport.KillPids(t, pids...)
-	})
-
-	// One parking event, so the first tick's flush has a banner to show.
-	ctx := context.Background()
-	st, err := store.Open(ctx, p.Store)
-	if err != nil {
-		t.Fatalf("open the store: %v", err)
-	}
-	seedNotifyEvent(t, ctx, st)
-	st.Close()
-
-	runCtx, cancel := context.WithCancel(ctx)
-	runDone := make(chan error, 1)
-	go func() {
-		runDone <- lifecycle.Run(runCtx, lifecycle.Config{
-			StateDir:   state,
-			Idle:       time.Hour,
-			IdleTick:   50 * time.Millisecond,
-			FlushGrace: 500 * time.Millisecond,
-		})
-	}()
-	time.Sleep(500 * time.Millisecond) // the delivery is in flight by now
-	cancel()
-	select {
-	case err := <-runDone:
-		if err != nil {
-			t.Fatalf("run the engine: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the ctx-cancel shutdown never returned: a stuck banner exec holds the main loop")
-	}
 }

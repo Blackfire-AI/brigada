@@ -70,35 +70,52 @@ func (d *flushDispatch) start(ctx context.Context, fn func(context.Context) erro
 	return true
 }
 
-// stop cancels the in-flight delivery, if any, and waits at most grace
-// for it: a delivery that outlives the grace — a flush that ignores its
-// context — is abandoned with a log line, never waited on.
-func (d *flushDispatch) stop(ctx context.Context, log *slog.Logger, grace time.Duration) {
+// stopBy cancels the in-flight delivery, if any, and waits only until
+// the deadline: a delivery that outlives it — one that ignores its
+// context — is abandoned with a log line, never waited on. It reports
+// whether the delivery had ended by the deadline.
+func (d *flushDispatch) stopBy(ctx context.Context, log *slog.Logger, deadline time.Time) bool {
 	d.mu.Lock()
 	done, cancel := d.done, d.cancel
 	d.mu.Unlock()
 	if done == nil {
-		return
+		return true
 	}
 	cancel()
-	timer := time.NewTimer(grace)
+	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
 	select {
 	case <-done:
+		return true
 	case <-timer.C:
-		log.WarnContext(ctx, "notification delivery abandoned at shutdown: it outlasted the grace", "grace", grace)
+		log.WarnContext(ctx, "notification delivery abandoned at shutdown: it outlasted the grace")
+		return false
 	}
 }
 
-// flushBounded runs the shutdown flush within grace, whatever the flush
-// function does with its context (§13): one that ignores cancellation is
-// abandoned with a log line instead of holding the engine's exit.
-func flushBounded(ctx context.Context, log *slog.Logger, grace time.Duration, fn func(context.Context) error) {
-	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), grace)
+// flushAtExit ends the notification story within one grace (§13): the
+// in-flight delivery is cancelled and waited on until a single shared
+// deadline, then the pre-exit hook runs within what remains of it. A
+// wait that outlives the deadline is abandoned with a log line, and a
+// hook whose grace the delivery already spent is skipped with one — the
+// undelivered events stay past the cursor for the next run, so nothing
+// is lost and nothing is waited on past the grace.
+func flushAtExit(ctx context.Context, log *slog.Logger, grace time.Duration, delivery *flushDispatch, fn func(context.Context) error) {
+	deadline := time.Now().Add(grace)
+	if !delivery.stopBy(ctx, log, deadline) {
+		log.WarnContext(ctx, "pre-exit notification flush skipped: the in-flight delivery outlasted the grace")
+		return
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		log.WarnContext(ctx, "notification flush abandoned at shutdown: the delivery spent the grace")
+		return
+	}
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), remaining)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- fn(fctx) }()
-	timer := time.NewTimer(grace)
+	timer := time.NewTimer(remaining)
 	defer timer.Stop()
 	select {
 	case err := <-done:
@@ -106,7 +123,7 @@ func flushBounded(ctx context.Context, log *slog.Logger, grace time.Duration, fn
 			log.WarnContext(ctx, "flush notifications at shutdown failed", "err", err)
 		}
 	case <-timer.C:
-		log.WarnContext(ctx, "notification flush abandoned at shutdown: it outlasted the grace", "grace", grace)
+		log.WarnContext(ctx, "notification flush abandoned at shutdown: it outlasted the grace")
 	}
 }
 
@@ -337,10 +354,7 @@ func Run(ctx context.Context, cfg Config) error {
 		select {
 		case <-ctx.Done():
 			log.InfoContext(ctx, "engine shutting down")
-			delivery.stop(ctx, log, cfg.FlushGrace)
-			if cfg.FlushNotifications != nil {
-				flushBounded(ctx, log, cfg.FlushGrace, cfg.FlushNotifications)
-			}
+			delivery.stopBy(ctx, log, time.Now().Add(cfg.FlushGrace))
 			return stopEngine(stopServe, serveErr)
 		case err := <-serveErr:
 			stopServe()
@@ -369,10 +383,7 @@ func Run(ctx context.Context, cfg Config) error {
 				continue
 			}
 			log.InfoContext(ctx, "engine idle; shutting down", "idle_for", now.Sub(mon.lastBusy).Round(time.Second))
-			delivery.stop(ctx, log, cfg.FlushGrace)
-			if cfg.FlushNotifications != nil {
-				flushBounded(ctx, log, cfg.FlushGrace, cfg.FlushNotifications)
-			}
+			flushAtExit(ctx, log, cfg.FlushGrace, delivery, cfg.FlushNotifications)
 			return stopEngine(stopServe, serveErr)
 		}
 	}

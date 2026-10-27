@@ -54,8 +54,8 @@ func TestFlushDispatchSkipsWhileInFlight(t *testing.T) {
 }
 
 // TestFlushDispatchStopBoundedByGrace: a delivery that ignores its
-// context cannot hold stop past the grace — it is abandoned, and the
-// wait ends at the grace.
+// context cannot hold stopBy past the deadline — it is abandoned, and
+// the wait ends there.
 func TestFlushDispatchStopBoundedByGrace(t *testing.T) {
 	log := slog.Default()
 	d := &flushDispatch{}
@@ -70,9 +70,70 @@ func TestFlushDispatchStopBoundedByGrace(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	begin := time.Now()
-	d.stop(context.Background(), log, 50*time.Millisecond)
+	if d.stopBy(context.Background(), log, begin.Add(50*time.Millisecond)) {
+		t.Error("stopBy reports the delivery ended, want it abandoned")
+	}
 	if elapsed := time.Since(begin); elapsed > 2*time.Second {
-		t.Fatalf("stop waited %v on a delivery that ignores its context, want the grace plus slack", elapsed)
+		t.Fatalf("stopBy waited %v on a delivery that ignores its context, want the grace plus slack", elapsed)
+	}
+	close(block)
+}
+
+// TestFlushAtExitSkipsTheHookWhenDeliveryAteTheGrace pins the single
+// shared deadline (§13): a delivery that outlives the grace consumes it
+// whole, the pre-exit hook is skipped — never given a second grace
+// beside the first — and the return comes within one grace.
+func TestFlushAtExitSkipsTheHookWhenDeliveryAteTheGrace(t *testing.T) {
+	log := slog.Default()
+	d := &flushDispatch{}
+	deliveryRunning := make(chan struct{})
+	blockDelivery := make(chan struct{})
+	delivery := func(context.Context) error {
+		close(deliveryRunning)
+		<-blockDelivery
+		return nil
+	}
+	if !d.start(context.Background(), delivery, log) {
+		t.Fatal("start refused with nothing in flight")
+	}
+	<-deliveryRunning
+
+	var hooked atomic.Bool
+	blockHook := make(chan struct{})
+	hook := func(context.Context) error {
+		hooked.Store(true)
+		<-blockHook
+		return nil
+	}
+
+	begin := time.Now()
+	flushAtExit(context.Background(), log, 100*time.Millisecond, d, hook)
+	if elapsed := time.Since(begin); elapsed > time.Second {
+		t.Fatalf("flushAtExit took %v, want at most one grace plus slack", elapsed)
+	}
+	if hooked.Load() {
+		t.Error("the pre-exit hook ran after the delivery spent the grace, want it skipped")
+	}
+	close(blockDelivery)
+	close(blockHook)
+}
+
+// TestFlushAtExitAbandonsTheHook: with no delivery in flight, the hook
+// gets the whole grace and one that ignores its context is abandoned at
+// its end.
+func TestFlushAtExitAbandonsTheHook(t *testing.T) {
+	log := slog.Default()
+	d := &flushDispatch{}
+	block := make(chan struct{})
+	hook := func(context.Context) error {
+		<-block
+		return nil
+	}
+
+	begin := time.Now()
+	flushAtExit(context.Background(), log, 100*time.Millisecond, d, hook)
+	if elapsed := time.Since(begin); elapsed > time.Second {
+		t.Fatalf("flushAtExit took %v on a hook that ignores its context, want the grace plus slack", elapsed)
 	}
 	close(block)
 }

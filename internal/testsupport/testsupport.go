@@ -52,7 +52,14 @@ func longestPathUnder(base string) string {
 // process outlives the test.
 func WriteScript(t testing.TB, body string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "script.sh")
+	return WriteNamedScript(t, "script.sh", body)
+}
+
+// WriteNamedScript is WriteScript under the name given — a fake
+// osascript or notify-send a test puts first on PATH, say.
+func WriteNamedScript(t testing.TB, name, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
 		t.Fatalf("write script %s: %v", path, err)
 	}
