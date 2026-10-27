@@ -569,7 +569,7 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 | `foreman_rotate_tokens` | non-negative integer | `400000` | Input tokens on one foreman turn past which the next turn starts a fresh session; `0` never rotates ([section 11](#session-size-and-rotation)). |
 | `plan_files` | `on` or `off` | `on` | `off` stops the plan-file mirror: no plan file is written or pushed ([The plan file](#the-plan-file)). |
 | `tracker` | `github`, `gitea` or `none` | `github` for a `github.com` repository, else `none` | The issue tracker the foreman reads with `issue_read`: the GitHub API, or the Gitea API that self-hosted forges of that family serve. `none` leaves issues to the operator, who puts their content into the ask. |
-| `tracker_url` | URL | `https://api.github.com` for `tracker: github` | The tracker's base address, e.g. `https://git.example.com` for a self-hosted forge; the owner and repository come from `repo`. An address only: the token is the config file's `tracker.<host>.token`. |
+| `tracker_url` | URL | `https://api.github.com` for `tracker: github` | The tracker's base address, required for `tracker: gitea`, e.g. `https://git.example.com` for a self-hosted forge; the owner and repository come from `repo`. An address only: the token is the config file's `tracker.<host>.token`. |
 | `instructions_file` | repo-relative path | none | A text file whose contents become the project's instructions for every worker and reviewer, at most 8192 bytes (see [Project instructions](#project-instructions)). |
 
 An example:
