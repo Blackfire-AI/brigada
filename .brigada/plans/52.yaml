@@ -5,9 +5,9 @@
 plan: 52
 title: "#102 init: SSH-alias origins and non-origin remote names"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-10-27T10:15:56.710278Z
-updated: 2026-10-27T10:20:05.428938Z
+updated: 2026-10-27T10:20:25.336001Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -34,9 +34,9 @@ tasks:
     name: "remote"
     title: "#102 (2/2) remote choice by URL, --remote, client commands find the remote by identity"
     class: "implement"
-    deps: ["alias2"]
-    base: "alias2"
-    continue: "alias2"
+    deps: ["alias-fix"]
+    base: "alias-fix"
+    continue: "alias-fix"
     effort: medium
     state: pending
     branch: ""
@@ -58,6 +58,17 @@ tasks:
     deps: ["remote"]
     base: "remote"
     continue: "remote"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 196
+    name: "alias-fix"
+    title: "#102 (1b/3) alias resolution only for ssh-style origins; project.yaml keeps canonical identity"
+    class: "implement"
+    deps: ["alias2"]
+    base: "alias2"
+    continue: "alias2"
     effort: medium
     state: pending
     branch: ""
