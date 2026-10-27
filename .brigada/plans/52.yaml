@@ -70,6 +70,6 @@ tasks:
     base: "alias2"
     continue: "alias2"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
