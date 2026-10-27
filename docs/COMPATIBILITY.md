@@ -10,7 +10,7 @@ What brigada 1.0 promises until 2.0.
 
 **The CLI flags.** Every command takes `--state-dir DIR` and `--config PATH`. A command's other flags are frozen only where they are listed here; anything else its `--help` prints may change. The frozen flags:
 
-- `init`: `--yes`, `--probe`, `--verbose`, `--accept-limited`, `--check`, `--tools`, `--foreman`, `--agent` (repeatable), `--no-wiring`, `--parallel`, `--all`, `--overwrite-config`, `--signed-in`, `--now`.
+- `init`: `--repo`, `--remote`, `--yes`, `--probe`, `--verbose`, `--accept-limited`, `--check`, `--tools`, `--foreman`, `--agent` (repeatable), `--no-wiring`, `--parallel`, `--all`, `--overwrite-config`, `--signed-in`, `--now`.
 - `remove`: `--yes`, `--cancel`, `--delete-config`.
 - `attach`: `--force`, `--no-start`, `--model`, `--effort`.
 - `ask`: `--repo`.
