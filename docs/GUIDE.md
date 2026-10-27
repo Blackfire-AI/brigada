@@ -22,7 +22,7 @@ Contents:
 
 ## 1. Install and `brigada init`
 
-You need Go 1.27 or newer, `git`, a repository with an `origin` remote, and signed-in agent CLIs on `PATH`.
+You need Go 1.27 or newer, `git`, a repository with a git remote, and signed-in agent CLIs on `PATH`.
 
 ```sh
 go install github.com/Blackfire-AI/brigada/cmd/brigada@latest
@@ -42,7 +42,7 @@ Four parts, one binary:
 
 ### What init does
 
-Run `brigada init` inside a repository. (At the top of a folder that holds several repositories, init does something else: see [section 3](#3-several-repositories).) The repository must have an `origin` remote, and all its URLs must name one repository. Init prints the canonical repository identity, then walks you through four steps. An SSH origin using a single-word alias is resolved with `ssh -G`; init shows the alias, resolved identity and SSH registration transport and asks you to confirm (`--yes` accepts). If resolution fails, use `--repo` to give a full URL. `--repo` also accepts a canonical `host[:port]/path` identity when origin is SSH-like and builds its SSH transport using origin's URL user; for other origins, give a full URL. Give a full URL for a repository path ending in `.git` as well. Init shows the selected identity and transport and asks for confirmation (`--yes` accepts). The registered transport uses the real hostname, so SSH settings configured only for the alias in `~/.ssh/config`, such as a dedicated key, do not follow it. Nothing is written or started until you confirm the plan at the end.
+Run `brigada init` inside a repository. (At the top of a folder that holds several repositories, init does something else: see [section 3](#3-several-repositories).) The repository must have a git remote. Init uses its sole remote whatever the name; with several, it prefers `origin`. With several and no `origin`, it asks which one to use; pass `--remote NAME` for a non-interactive run. All URLs of the selected remote must name one repository. Init prints the canonical repository identity, then walks you through four steps. An SSH remote using a single-word alias is resolved with `ssh -G`; init shows the alias, resolved identity and SSH registration transport and asks you to confirm (`--yes` accepts). If resolution fails, use `--repo` to give a full URL. `--repo` also accepts a canonical `host[:port]/path` identity when the selected remote is SSH-like and builds its SSH transport using the selected remote's URL user; for other remotes, give a full URL. Give a full URL for a repository path ending in `.git` as well. Init shows the selected identity and transport and asks for confirmation (`--yes` accepts). The registered transport uses the real hostname, so SSH settings configured only for the alias in `~/.ssh/config`, such as a dedicated key, do not follow it. Nothing is written or started until you confirm the plan at the end.
 
 Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi`, `opencode`, and [`dsh`](#dsh-experimental)) and prints one `Signed in:` line naming the confirmed ones, with the probe's detail in parentheses where there is one (opencode: its provider count and the command that counted them), then one line for each installed CLI whose sign-in it cannot check, such as `kimi: init can't check sign-in.`. CLIs that are not installed are not named. With `--yes` or `--probe` the same facts print as the `Agent CLIs found:` list.
 
@@ -124,7 +124,8 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 
 | Flag | Meaning |
 |---|---|
-| `--repo URL` | Register the given full URL, or a canonical `host[:port]/path` identity when origin is SSH-like; init shows and confirms the identity and transport. |
+| `--repo URL` | Register the given full URL, or a canonical `host[:port]/path` identity when the selected remote is SSH-like; init shows and confirms the identity and transport. |
+| `--remote NAME` | Choose a git remote; needed without `origin` when the repo has several remotes and init cannot ask. |
 | `--probe` | Print the plan; write nothing and start nothing. |
 | `--verbose` | Also print the full contents of new repository setup files. Diffs for existing files are always shown. |
 | `--yes` | Apply the displayed plan without prompting. It does not confirm authentication. `--yes` and `--probe` together are a usage error. |
@@ -145,7 +146,7 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 
 Init still reads answers from standard input, one line per question, and prints each prompt on its own line. Supply answers only for questions that are asked, in this order:
 
-1. Any unconfirmed Claude or Codex sign-in answers, before step 1.
+1. The git remote name when the repo has several remotes and none named `origin`, unless `--remote` supplies it. Then any unconfirmed Claude or Codex sign-in answers, before step 1.
 2. The foreman model (a number or `harness/model`), then its effort when offered. `--foreman H/M@E` supplies both; without `@E`, effort is still asked. A single usable model needs no model answer.
 3. Workers, in CLI order: yes or no to using Claude's and Codex's models; Kimi's use answer when unconfirmed, then whether it may write code; opencode's use answer when unconfirmed, then its comma-separated model picks.
 4. Tasks at once, if `--parallel` was not given.
@@ -186,7 +187,7 @@ Stop checks the lock before signalling, sends SIGTERM, and waits up to 10 second
 
 ### Removing brigada from a repository
 
-Run `brigada remove` inside the repository. It prints a removal plan, then asks `Remove brigada from this repository? [y/N]:`. Answering no leaves everything in place and prints `Nothing removed.`. The repository is identified by its `origin`, as with init.
+Run `brigada remove` inside the repository. It prints a removal plan, then asks `Remove brigada from this repository? [y/N]:`. Answering no leaves everything in place and prints `Nothing removed.`. The repository is identified by its chosen remote, as with init.
 
 The repository cleanup covers brigada's wiring:
 
@@ -244,7 +245,7 @@ The foreman is an agent in a brigada-owned session: while nobody is attached, th
 
 ### Attach
 
-**Attach** is a conversation with the foreman. Run `brigada` (or `brigada attach`) inside the repo: the repo's `origin` URL names the project, and you are put into the foreman's own session in your terminal, in the foreman's reading checkout of your repository — a clone brigada keeps under its state directory ([section 11](#11-the-foremans-harness-claude-or-codex)), where the repository's own `CLAUDE.md`, `AGENTS.md` and `.claude/` load as in any clone.
+**Attach** is a conversation with the foreman. Run `brigada` (or `brigada attach`) inside the repo: the repo's `origin` URL, or its sole remote when it has no `origin`, names the project, and you are put into the foreman's own session in your terminal, in the foreman's reading checkout of your repository — a clone brigada keeps under its state directory ([section 11](#11-the-foremans-harness-claude-or-codex)), where the repository's own `CLAUDE.md`, `AGENTS.md` and `.claude/` load as in any clone.
 
 - **One at a time.** Only one chat can be attached at a time. If the foreman is in the middle of a headless turn, attach waits for it to finish; `brigada attach --force` cancels that turn instead.
 - **`--model <model>`** runs this chat on another model than the project's foreman model; the session is the same, and the next headless turn uses the project's setting again.
@@ -313,12 +314,12 @@ With `-` as the only argument, ask reads the message from standard input:
 git diff main | brigada ask -
 ```
 
-- `--repo <origin-url>` names the project. Without it, ask takes the project that the working directory's origin names. Outside a repository, or in one with no origin, it takes the engine's only project; when the engine has several and none is named, it refuses, and `brigada project list` shows the URLs.
+- `--repo <origin-url>` names the project. Without it, ask takes the project that the working directory's chosen remote names. Outside a repository, or in one with no remote, it takes the engine's only project; when the engine has several and none is named, it refuses, and `brigada project list` shows the URLs.
 - A message you send is not charged against the foreman's daily wake budget ([section 4](#4-while-work-runs)): a wake that carries your message goes ahead even when that limit is spent.
 
 ## 3. Several repositories
 
-A **project** is one repository URL (the canonical form of `origin`). Each project has its own foreman session, plans, history and stats, all served by one engine and the same runners. A monorepo is one project.
+A **project** is one repository URL (the canonical form of the selected remote). Each project has its own foreman session, plans, history and stats, all served by one engine and the same runners. A monorepo is one project.
 
 To work across several, run `brigada init` in the parent folder, not in a repository:
 
@@ -330,7 +331,7 @@ brigada init
 In a parent folder, init:
 
 - lists the direct children only: hidden directories are skipped, symlinks are not followed, and repositories are not descended into;
-- marks each child new, known (the engine already has the project), or skipped with the reason (not a repository, no origin, ambiguous origin, a duplicate of another child);
+- marks each child new, known (the engine already has the project), or skipped with the reason (not a repository, no remote, ambiguous URL, several remotes without `origin`, a duplicate of another child);
 - lets you pick which new ones to register, by number, `all`, or blank for none; `--all` registers every new one without asking;
 - gives each registered project a foreman: `--foreman harness/model` if given, otherwise the foreman of an existing project; with neither, init stops;
 - writes nothing into the child repositories;
@@ -340,7 +341,7 @@ In a parent folder, init:
   codex mcp add brigada-coordinator -- brigada mcp --coordinator
   ```
 
-The flags that apply here are `--all`, `--foreman`, `--yes`, `--probe`, `--no-wiring`, `--state-dir` and `--config`. `--repo`, `--check`, `--tools`, `--agent`, `--signed-in` and `--accept-limited` describe one repository and are a usage error here.
+The flags that apply here are `--all`, `--foreman`, `--yes`, `--probe`, `--no-wiring`, `--state-dir` and `--config`. `--remote`, `--repo`, `--check`, `--tools`, `--agent`, `--signed-in` and `--accept-limited` describe one repository and are a usage error here.
 
 Registering a project this way gives it a foreman but no runner agents: run `brigada init` inside each repository to wire it and get its runner.
 
@@ -411,7 +412,7 @@ When `notify` is `auto` (the default), the engine also raises a desktop notifica
 
 `brigada diff <task-id> [--stat] [--repo URL]` prints what a task changed, as `git diff <base>...<branch>` between the task's base ref and its latest result branch (`-r<n>` included).
 
-- Run it inside the project's repository. The working directory's origin must be the task's repo, or diff refuses and names both; `--repo` says which URL the directory stands for when its origin is a mirror or fork.
+- Run it inside the project's repository. The working directory's selected remote must be the task's repo, or diff refuses and names both; `--repo` says which URL the directory stands for when its selected remote is a mirror or fork.
 - It fetches the two refs from origin, with no checkout, and prints to stdout, so it pipes to a pager.
 - A task with no result branch yet says so.
 
@@ -516,11 +517,11 @@ Land refuses, changing nothing:
 - a dirty tree;
 - a task that is not approved;
 - a local branch behind its remote;
-- a directory whose origin is not the task's project;
+- a directory whose selected remote is not the task's project;
 - a dependency that is not landed;
 - a missing default check (unless `--no-check`).
 
-Run it inside the repository; `--repo` says which URL the directory stands for when its origin is a mirror or fork.
+Run it inside the repository; `--repo` says which URL the directory stands for when its selected remote is a mirror or fork.
 
 On a conflict, land stops, names the files and leaves the tree for you to resolve; commit with the printed `git commit -F` and rerun land for the rest. A check that fails leaves the commits in place and prints the `git reset --hard` that undoes them.
 
@@ -534,7 +535,7 @@ A project's settings come from three places:
 - the committed file **`.brigada/project.yaml`**, which `brigada init` writes and `brigada project import` reads;
 - **local settings** you set with `brigada project set`, kept in this engine's store.
 
-`brigada project show [--repo URL]` prints every key with its effective value and where it comes from: `(default)`, `(set)` for a local setting, or `(imported <hash>)` for a value the last import set. `--repo` defaults to the origin of the repository you are in.
+`brigada project show [--repo URL]` prints every key with its effective value and where it comes from: `(default)`, `(set)` for a local setting, or `(imported <hash>)` for a value the last import set. `--repo` defaults to the chosen remote of the repository you are in.
 
 `brigada remove` archives the project: plans, tasks, stats and history stay in the store, and `brigada history` still shows its history. The project disappears from `brigada project list` and `brigada status`. Run `brigada init` inside the repository to bring it back. See [section 1](#removing-brigada-from-a-repository) for removal's flags and the wiring it removes.
 
@@ -1189,7 +1190,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 ### Starting
 
-- `brigada init [--repo URL] [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL[@EFFORT]] [--parallel N] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories).
+- `brigada init [--repo URL] [--remote NAME] [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL[@EFFORT]] [--parallel N] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories).
 - `brigada start`: start the engine and detached runner with the agents and tasks-at-once limit saved by init; succeeds when the runner is already running. Use it after a reboot or `brigada stop`. See [section 1](#changing-your-setup-later).
 - `brigada runner [--agent SPEC]... [--harness HARNESS] [--model MODEL] [--classes CLASSES] [--agent-file PATH] [--worker-script PATH] [--labels LABELS] [--max-parallel N]`, where SPEC is `harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]`: run a runner that leases jobs, runs workers and checks, and pushes branches. The shorthand agent flags cannot be mixed with `--agent`; `--worker-script` is for the `fake` harness used by tests. See [section 8](#8-agents-quota-and-health).
 - `brigada stop [--engine]`: stop the detached runner in the selected state directory; `--engine` also stops the engine. Sends SIGTERM and waits up to 10 seconds per process; succeeds if nothing is running, and never starts the engine. See [section 1](#stopping).
@@ -1231,7 +1232,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 ### Projects
 
-- `brigada project foreman [--repo URL] [--harness H --model M [--effort E]]`: show the repo's foreman (`claude` or `codex`) and its effort, or set them with `--harness` and `--model`; `--repo` defaults to the origin of the working directory. See [section 11](#11-the-foremans-harness-claude-or-codex).
+- `brigada project foreman [--repo URL] [--harness H --model M [--effort E]]`: show the repo's foreman (`claude` or `codex`) and its effort, or set them with `--harness` and `--model`; `--repo` defaults to the chosen remote of the working directory. See [section 11](#11-the-foremans-harness-claude-or-codex).
 - `brigada project list`: every project with its foreman, active plans and needs-you count. See [section 3](#3-several-repositories).
 - `brigada project set [--repo URL] key=value ...`, `brigada project show [--repo URL]`: set and read the project's settings and where each comes from. See [section 6](#local-only-settings).
 - `brigada project import [--repo URL] [--file PATH] [--yes]`: import `.brigada/project.yaml`. See [section 6](#importing-and-provenance).

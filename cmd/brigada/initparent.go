@@ -42,6 +42,7 @@ type parentChild struct {
 	origin string // registration transport; never printed for ordinary remotes (it may hold a token)
 	canon  string
 	alias  string
+	remote string
 	skip   string // why the child is not a candidate; empty = a candidate
 	known  bool
 }
@@ -112,16 +113,18 @@ func classifyChildWithAliases(ctx context.Context, c *parentChild, acceptAliases
 		c.skip = "not a git repository (not descended into)"
 		return
 	}
-	selection, err := selectInitOrigin(ctx, c.path, "")
+	selection, remote, err := selectInitOriginWithRemote(ctx, c.path, "", "", nil)
 	switch {
 	case err == nil:
 		if selection.alias != "" && !acceptAliases {
 			c.skip = "SSH alias " + selection.alias + " resolves to " + selection.canon + "; use --yes to accept or --repo inside the repository"
 			return
 		}
-		c.origin, c.canon, c.alias = selection.transport, selection.canon, selection.alias
-	case strings.HasPrefix(err.Error(), "no origin"):
+		c.origin, c.canon, c.alias, c.remote = selection.transport, selection.canon, selection.alias, remote
+	case strings.HasPrefix(err.Error(), "no remote"):
 		c.skip = "no origin remote"
+	case strings.Contains(err.Error(), "--remote"):
+		c.skip = "several remotes without origin; run init inside the repository with --remote NAME"
 	default:
 		c.skip = "ambiguous origin; use --repo inside the repository"
 	}
@@ -268,6 +271,9 @@ func runInitParent(ctx context.Context, dir string, opts parentOptions, common *
 				state = "unknown (engine not running), treated as new"
 			}
 			fmt.Fprintf(stdout, "  [%d] %s  %s  %s\n", len(register), c.path, c.canon, state)
+			if c.remote != "origin" {
+				fmt.Fprintf(stdout, "      git remote: %s\n", c.remote)
+			}
 			if c.alias != "" {
 				fmt.Fprintf(stdout, "      SSH alias %s; registration transport: %s\n", c.alias, engine.RedactRepoURL(c.origin))
 			}

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -55,7 +56,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	verbose := fs.Bool("verbose", false, "also print the full contents of new repository setup files")
 	limited := fs.Bool("accept-limited", false, "acknowledge fewer than two review families; reviews still require another family")
 	check := fs.String("check", "", "default check command, or none / - for no check (never executed by init)")
-	repo := fs.String("repo", "", "repository URL or canonical identity to register instead of origin")
+	repo := fs.String("repo", "", "repository URL or canonical identity to register instead of the selected remote")
+	remote := fs.String("remote", "", "git remote to use as the project's repository")
 	tools := fs.String("tools", "", "worker scope in runner tools= syntax; scopes claude's tool list and opencode's bash commands")
 	foreman := fs.String("foreman", "", "choose the foreman, a signed-in claude or codex model, as harness/model[@effort]; without @effort an interactive run asks for the effort")
 	noWiring := fs.Bool("no-wiring", false, "in a parent folder, skip the coordinator's wiring; in a repository, leave the harness untouched: init writes no harness wiring, and an older init's stays")
@@ -117,8 +119,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if parallelProvided {
 			return usagef(stderr, "--parallel sets up one repository; this folder is not one")
 		}
-		if *repo != "" || *check != "" || toolsProvided || len(agents.specs) > 0 || *limited || len(signedIn) > 0 {
-			return usagef(stderr, "--repo, --check, --tools, --agent, --signed-in and --accept-limited set up one repository; this folder is not one (parent-folder init takes --all, --foreman, --yes, --probe and --no-wiring)")
+		if *repo != "" || *remote != "" || *check != "" || toolsProvided || len(agents.specs) > 0 || *limited || len(signedIn) > 0 {
+			return usagef(stderr, "--repo, --remote, --check, --tools, --agent, --signed-in and --accept-limited set up one repository; this folder is not one (parent-folder init takes --all, --foreman, --yes, --probe and --no-wiring)")
 		}
 		return runInitParent(ctx, cwd, parentOptions{yes: *yes, probe: *probe, all: *all, noWiring: *noWiring, foreman: *foreman}, common, bufio.NewReader(projectStdin), stdout, stderr)
 	}
@@ -134,12 +136,34 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			return usagef(stderr, "--foreman: %v", err)
 		}
 	}
-	// An origin must exist; a real local bare remote is valid. Multiple origin
-	// URLs with different identities are ambiguous and must be fixed by the user.
+	// A remote must exist; a real local bare remote is valid. Multiple URLs
+	// of the chosen remote must still name one identity.
 	reader := bufio.NewReader(projectStdin)
-	selection, err := selectInitOrigin(ctx, root, *repo)
+	var askRemote func([]gitRemote) (string, error)
+	if !*yes && !*probe {
+		askRemote = func(remotes []gitRemote) (string, error) {
+			fmt.Fprintln(stdout, "Choose the repository's remote:")
+			for _, r := range remotes {
+				shown := "(no URL)"
+				if len(r.urls) > 0 {
+					shown = engine.RedactRepoURL(r.urls[0])
+				}
+				fmt.Fprintf(stdout, "  %s  %s\n", r.name, shown)
+			}
+			fmt.Fprint(stdout, "Remote name (--remote NAME): ")
+			answer, err := reader.ReadString('\n')
+			if err != nil && err != io.EOF {
+				return "", err
+			}
+			return strings.TrimSpace(answer), nil
+		}
+	}
+	selection, selectedRemote, err := selectInitOriginWithRemote(ctx, root, *repo, *remote, askRemote)
 	if err != nil {
 		return fail(stderr, err)
+	}
+	if selectedRemote != "origin" || *remote != "" {
+		fmt.Fprintf(stdout, "Using git remote %s\n", selectedRemote)
 	}
 	origin, canon := selection.transport, selection.canon
 	accepted, err := confirmInitSelection(selection, *yes, *probe, reader, stdout)
@@ -1500,52 +1524,132 @@ var initSSHConfig = func(ctx context.Context, alias string) ([]byte, error) {
 	return exec.CommandContext(ctx, "ssh", "-G", alias).Output()
 }
 
+type gitRemote struct {
+	name string
+	urls []string
+}
+
+var (
+	errNoGitRemote     = errors.New("no git remote")
+	errChooseGitRemote = errors.New("several git remotes without origin")
+)
+
+func listGitRemotes(ctx context.Context, root string) ([]gitRemote, error) {
+	out, err := exec.CommandContext(ctx, "git", "-C", root, "remote").Output()
+	if err != nil {
+		return nil, fmt.Errorf("list git remotes: %w", err)
+	}
+	var remotes []gitRemote
+	for _, name := range strings.Fields(string(out)) {
+		r := gitRemote{name: name}
+		urls, err := exec.CommandContext(ctx, "git", "-C", root, "remote", "get-url", "--all", name).Output()
+		if err == nil {
+			for _, raw := range strings.Split(strings.TrimSpace(string(urls)), "\n") {
+				if raw != "" {
+					r.urls = append(r.urls, raw)
+				}
+			}
+		}
+		remotes = append(remotes, r)
+	}
+	return remotes, nil
+}
+
+func chooseGitRemote(remotes []gitRemote, requested string) (gitRemote, error) {
+	if requested != "" {
+		for _, r := range remotes {
+			if r.name == requested {
+				return r, nil
+			}
+		}
+		return gitRemote{}, fmt.Errorf("--remote %q does not name a git remote", requested)
+	}
+	for _, r := range remotes {
+		if r.name == "origin" {
+			return r, nil
+		}
+	}
+	switch len(remotes) {
+	case 0:
+		return gitRemote{}, errNoGitRemote
+	case 1:
+		return remotes[0], nil
+	default:
+		return gitRemote{}, errChooseGitRemote
+	}
+}
+
 func initOrigin(ctx context.Context, root string) (string, string, error) {
 	s, err := selectInitOrigin(ctx, root, "")
 	return s.transport, s.canon, err
 }
 
 func selectInitOrigin(ctx context.Context, root, override string) (initRepoSelection, error) {
-	out, err := exec.CommandContext(ctx, "git", "-C", root, "remote", "get-url", "--all", "origin").Output()
-	if err != nil || len(bytes.TrimSpace(out)) == 0 {
-		return initRepoSelection{}, fmt.Errorf("no origin: configure an origin remote before init; a repository without a remote is unsupported")
+	s, _, err := selectInitOriginWithRemote(ctx, root, override, "", nil)
+	return s, err
+}
+
+func selectInitOriginWithRemote(ctx context.Context, root, override, requested string, ask func([]gitRemote) (string, error)) (initRepoSelection, string, error) {
+	remotes, err := listGitRemotes(ctx, root)
+	if err != nil {
+		return initRepoSelection{}, "", err
 	}
-	raws := strings.Split(strings.TrimSpace(string(out)), "\n")
+	chosenRemote, err := chooseGitRemote(remotes, requested)
+	if errors.Is(err, errChooseGitRemote) && ask != nil {
+		answer, askErr := ask(remotes)
+		if askErr != nil {
+			return initRepoSelection{}, "", askErr
+		}
+		chosenRemote, err = chooseGitRemote(remotes, answer)
+	}
+	if err != nil {
+		if errors.Is(err, errNoGitRemote) {
+			return initRepoSelection{}, "", fmt.Errorf("no remote: configure a git remote before init; a repository without a remote is unsupported")
+		}
+		if errors.Is(err, errChooseGitRemote) {
+			return initRepoSelection{}, "", fmt.Errorf("several git remotes and none named origin; choose one with --remote NAME")
+		}
+		return initRepoSelection{}, "", err
+	}
+	if len(chosenRemote.urls) == 0 {
+		return initRepoSelection{}, "", fmt.Errorf("git remote %q has no URL; configure it before init", chosenRemote.name)
+	}
+	raws := chosenRemote.urls
 	if override != "" {
 		id, err := engine.Canonicalize(override)
 		if err != nil {
-			return initRepoSelection{}, fmt.Errorf("--repo: %w", err)
+			return initRepoSelection{}, "", fmt.Errorf("--repo: %w", err)
 		}
 		transport := override
 		if initBareIdentity(override) {
 			user, _, _, ok := initSSHOrigin(raws[0])
 			if !ok {
-				return initRepoSelection{}, fmt.Errorf("--repo: a bare identity needs an ssh-like origin; give a full URL")
+				return initRepoSelection{}, "", fmt.Errorf("--repo: a bare identity needs an ssh-like remote; give a full URL")
 			}
 			if strings.HasSuffix(id, ".git") {
-				return initRepoSelection{}, fmt.Errorf("--repo: a bare identity ending in .git cannot keep its path in an SSH transport; give a full URL")
+				return initRepoSelection{}, "", fmt.Errorf("--repo: a bare identity ending in .git cannot keep its path in an SSH transport; give a full URL")
 			}
 			transport = initSSHTransport(user, id)
 		}
 		if err := checkInitTransport(transport, id); err != nil {
-			return initRepoSelection{}, fmt.Errorf("--repo: %w", err)
+			return initRepoSelection{}, "", fmt.Errorf("--repo: %w", err)
 		}
-		return initRepoSelection{transport: transport, canon: id, override: true}, nil
+		return initRepoSelection{transport: transport, canon: id, override: true}, chosenRemote.name, nil
 	}
 	var selected initRepoSelection
-	for _, raw := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, raw := range raws {
 		s, err := initOriginURL(ctx, raw)
 		if err != nil {
-			return initRepoSelection{}, fmt.Errorf("origin is ambiguous or invalid: %w; use --repo with a full URL or canonical identity", err)
+			return initRepoSelection{}, "", fmt.Errorf("remote %q is ambiguous or invalid: %w; use --repo with a full URL or canonical identity", chosenRemote.name, err)
 		}
 		if selected.canon != "" && selected.canon != s.canon {
-			return initRepoSelection{}, fmt.Errorf("origin has multiple canonical identities; use --repo to select one")
+			return initRepoSelection{}, "", fmt.Errorf("remote %q has multiple canonical identities; use --repo to select one", chosenRemote.name)
 		}
 		if selected.canon == "" {
 			selected = s
 		}
 	}
-	return selected, nil
+	return selected, chosenRemote.name, nil
 }
 
 func initOriginURL(ctx context.Context, raw string) (initRepoSelection, error) {
