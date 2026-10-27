@@ -42,7 +42,7 @@ Four parts, one binary:
 
 ### What init does
 
-Run `brigada init` inside a repository. (At the top of a folder that holds several repositories, init does something else: see [section 3](#3-several-repositories).) The repository must have an `origin` remote, and all its URLs must name one repository. Init prints the canonical repository identity, then walks you through four steps. An SSH origin using a single-word alias is resolved with `ssh -G`; init shows the alias, resolved identity and SSH registration transport and asks you to confirm (`--yes` accepts). If resolution fails, use `--repo` to give a full URL. `--repo` also accepts a canonical `host[:port]/path` identity when origin is SSH-like and builds its SSH transport using origin's URL user; for other origins, give a full URL. Init shows the selected identity and transport and asks for confirmation (`--yes` accepts). The registered transport uses the real hostname, so SSH settings configured only for the alias in `~/.ssh/config`, such as a dedicated key, do not follow it. Nothing is written or started until you confirm the plan at the end.
+Run `brigada init` inside a repository. (At the top of a folder that holds several repositories, init does something else: see [section 3](#3-several-repositories).) The repository must have an `origin` remote, and all its URLs must name one repository. Init prints the canonical repository identity, then walks you through four steps. An SSH origin using a single-word alias is resolved with `ssh -G`; init shows the alias, resolved identity and SSH registration transport and asks you to confirm (`--yes` accepts). If resolution fails, use `--repo` to give a full URL. `--repo` also accepts a canonical `host[:port]/path` identity when origin is SSH-like and builds its SSH transport using origin's URL user; for other origins, give a full URL. Give a full URL for a repository path ending in `.git` as well. Init shows the selected identity and transport and asks for confirmation (`--yes` accepts). The registered transport uses the real hostname, so SSH settings configured only for the alias in `~/.ssh/config`, such as a dedicated key, do not follow it. Nothing is written or started until you confirm the plan at the end.
 
 Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi`, `opencode`, and [`dsh`](#dsh-experimental)) and prints one `Signed in:` line naming the confirmed ones, with the probe's detail in parentheses where there is one (opencode: its provider count and the command that counted them), then one line for each installed CLI whose sign-in it cannot check, such as `kimi: init can't check sign-in.`. CLIs that are not installed are not named. With `--yes` or `--probe` the same facts print as the `Agent CLIs found:` list.
 
@@ -124,6 +124,7 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 
 | Flag | Meaning |
 |---|---|
+| `--repo URL` | Register the given full URL, or a canonical `host[:port]/path` identity when origin is SSH-like; init shows and confirms the identity and transport. |
 | `--probe` | Print the plan; write nothing and start nothing. |
 | `--verbose` | Also print the full contents of new repository setup files. Diffs for existing files are always shown. |
 | `--yes` | Apply the displayed plan without prompting. It does not confirm authentication. `--yes` and `--probe` together are a usage error. |
@@ -339,7 +340,7 @@ In a parent folder, init:
   codex mcp add brigada-coordinator -- brigada mcp --coordinator
   ```
 
-The flags that apply here are `--all`, `--foreman`, `--yes`, `--probe`, `--no-wiring`, `--state-dir` and `--config`. `--check`, `--tools`, `--agent`, `--signed-in` and `--accept-limited` describe one repository and are a usage error here.
+The flags that apply here are `--all`, `--foreman`, `--yes`, `--probe`, `--no-wiring`, `--state-dir` and `--config`. `--repo`, `--check`, `--tools`, `--agent`, `--signed-in` and `--accept-limited` describe one repository and are a usage error here.
 
 Registering a project this way gives it a foreman but no runner agents: run `brigada init` inside each repository to wire it and get its runner.
 
@@ -1188,7 +1189,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 ### Starting
 
-- `brigada init [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL[@EFFORT]] [--parallel N] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories).
+- `brigada init [--repo URL] [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL[@EFFORT]] [--parallel N] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories).
 - `brigada start`: start the engine and detached runner with the agents and tasks-at-once limit saved by init; succeeds when the runner is already running. Use it after a reboot or `brigada stop`. See [section 1](#changing-your-setup-later).
 - `brigada runner [--agent SPEC]... [--harness HARNESS] [--model MODEL] [--classes CLASSES] [--agent-file PATH] [--worker-script PATH] [--labels LABELS] [--max-parallel N]`, where SPEC is `harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]`: run a runner that leases jobs, runs workers and checks, and pushes branches. The shorthand agent flags cannot be mixed with `--agent`; `--worker-script` is for the `fake` harness used by tests. See [section 8](#8-agents-quota-and-health).
 - `brigada stop [--engine]`: stop the detached runner in the selected state directory; `--engine` also stops the engine. Sends SIGTERM and waits up to 10 seconds per process; succeeds if nothing is running, and never starts the engine. See [section 1](#stopping).

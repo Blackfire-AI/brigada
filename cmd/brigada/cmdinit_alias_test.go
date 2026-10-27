@@ -75,7 +75,8 @@ func TestInitAliasRefusalAndOverride(t *testing.T) {
 		{"https://example.com/org/repo", "https://example.com/org/repo", "example.com/org/repo"},
 		{"example.com/org/repo", "ssh://git@example.com/org/repo", "example.com/org/repo"},
 		{"example.com:2222/org/repo", "ssh://git@example.com:2222/org/repo", "example.com:2222/org/repo"},
-		{"example.com/org/repo.git", "ssh://git@example.com/org/repo.git.git", "example.com/org/repo.git"},
+		{"Example.com/org/repo", "ssh://git@example.com/org/repo", "example.com/org/repo"},
+		{"example.com/org/repo/", "ssh://git@example.com/org/repo", "example.com/org/repo"},
 	} {
 		t.Run(tc.value, func(t *testing.T) {
 			got, err := selectInitOrigin(t.Context(), root, tc.value)
@@ -85,8 +86,13 @@ func TestInitAliasRefusalAndOverride(t *testing.T) {
 		})
 	}
 	https := initAliasRepo(t, "https://example.com/org/repo")
-	if _, err := selectInitOrigin(t.Context(), https, "example.com/org/repo"); err == nil || !strings.Contains(err.Error(), "full URL") {
-		t.Fatalf("bare https override: %v", err)
+	for _, value := range []string{"example.com/org/repo", "Example.com/org/repo", "example.com/org/repo/"} {
+		if _, err := selectInitOrigin(t.Context(), https, value); err == nil || !strings.Contains(err.Error(), "full URL") {
+			t.Fatalf("bare https override %q: %v", value, err)
+		}
+	}
+	if _, err := selectInitOrigin(t.Context(), root, "example.com/org/repo.git"); err == nil || !strings.Contains(err.Error(), "full URL") {
+		t.Fatalf("bare .git identity: %v", err)
 	}
 	ssh := initAliasRepo(t, "ssh://git@build/old/path")
 	if got, err := selectInitOrigin(t.Context(), ssh, "example.com/org/repo"); err != nil || got.transport != "ssh://git@example.com/org/repo" {
@@ -100,10 +106,20 @@ func TestInitAliasRefusalAndOverride(t *testing.T) {
 			}
 		})
 	}
+	for _, origin := range []string{"Example.com/org/repo", "example.com/org/repo/"} {
+		if _, err := selectInitOrigin(t.Context(), initAliasRepo(t, origin), ""); err == nil || !strings.Contains(err.Error(), "--repo") {
+			t.Fatalf("transportless origin %q: %v", origin, err)
+		}
+	}
 	fileOrigin := "file:" + filepath.Join(t.TempDir(), "remote.git")
 	got, err := selectInitOrigin(t.Context(), initAliasRepo(t, fileOrigin), "")
 	if err != nil || got.transport != fileOrigin || got.alias != "" {
 		t.Fatalf("file origin = %+v, %v", got, err)
+	}
+	for _, origin := range []string{"user:s3cr3t@build:org/repo", "ssh://user:s3cr3t@build/org/repo"} {
+		if _, err := selectInitOrigin(t.Context(), initAliasRepo(t, origin), ""); err == nil || strings.Contains(err.Error(), "s3cr3t") {
+			t.Fatalf("credential-like origin %q: %v", engine.RedactRepoURL(origin), err)
+		}
 	}
 }
 
@@ -145,7 +161,7 @@ func TestConfirmInitSelection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer
 			got, err := confirmInitSelection(selection, tc.yes, tc.probe, bufio.NewReader(strings.NewReader(tc.answer)), &out)
-			if err != nil || got != tc.want || !strings.Contains(out.String(), selection.transport) || !strings.Contains(out.String(), selection.canon) || !strings.Contains(out.String(), selection.alias) {
+			if err != nil || got != tc.want || !strings.Contains(out.String(), engine.RedactRepoURL(selection.transport)) || !strings.Contains(out.String(), selection.canon) || !strings.Contains(out.String(), selection.alias) {
 				t.Fatalf("accepted=%v, err=%v, output=%q", got, err, out.String())
 			}
 		})
@@ -167,28 +183,49 @@ func TestConfirmInitRepoOverride(t *testing.T) {
 }
 
 func TestInitRegistrationTransportStored(t *testing.T) {
+	binary := testsupport.BuildBrigada(t)
+	oldBinary := initBinary
+	initBinary = binary
+	t.Cleanup(func() { initBinary = oldBinary })
 	for _, tc := range []struct{ name, origin, override, want string }{
 		{"alias", "git@build:org/repo.git", "", "ssh://git@example.com/org/repo.git"},
 		{"repo identity", "git@build:org/repo.git", "example.com/org/repo", "ssh://git@example.com/org/repo"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := initAliasRepo(t, tc.origin)
+			t.Chdir(root)
 			old := initSSHConfig
 			initSSHConfig = func(context.Context, string) ([]byte, error) { return []byte("hostname example.com\nport 22\n"), nil }
 			t.Cleanup(func() { initSSHConfig = old })
-			selection, err := selectInitOrigin(t.Context(), root, tc.override)
+			fakeInitPATH(t, "claude", "codex")
+			state := testsupport.ShortStateDir(t)
+			t.Cleanup(func() {
+				var out, stderr bytes.Buffer
+				if code := run(context.Background(), []string{"stop", "--engine", "--state-dir", state}, &out, &stderr); code != 0 {
+					t.Errorf("stop init processes: %d %s %s", code, out.String(), stderr.String())
+				}
+			})
+			args := []string{"--yes", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex", "--foreman", "claude/sonnet@high", "--check", "none", "--tools", "none"}
+			if tc.override != "" {
+				args = append(args, "--repo", tc.override)
+			}
+			code, out, stderr := initFixedParallel(t, state, "", args...)
+			if code != 0 {
+				t.Fatalf("init: %d\n%s\n%s", code, out, stderr)
+			}
+			content, err := os.ReadFile(engine.ProjectConfigPath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			st, err := store.Open(t.Context(), ":memory:")
+			cfg, err := engine.ParseProjectConfig(content)
+			if err != nil || cfg.Repo != "example.com/org/repo" {
+				t.Fatalf("project.yaml repo: %+v %v", cfg, err)
+			}
+			st, err := store.Open(t.Context(), filepath.Join(state, "store.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer st.Close()
-			eng := engine.New(st, engine.Config{})
-			if _, err := eng.SetProjectForeman(t.Context(), selection.transport, "claude", "sonnet"); err != nil {
-				t.Fatal(err)
-			}
 			var identity, transport string
 			err = st.View(t.Context(), func(tx *sql.Tx) error {
 				return tx.QueryRow("SELECT repo_url, transport_url FROM projects").Scan(&identity, &transport)
@@ -204,7 +241,7 @@ func TestInitRegistrationTransportStored(t *testing.T) {
 				t.Fatalf("bare repo: %v: %s", err, out)
 			}
 			script := filepath.Join(t.TempDir(), "ssh")
-			if err := os.WriteFile(script, []byte(fmt.Sprintf("#!/bin/sh\nexec git-upload-pack %q\n", bare)), 0755); err != nil {
+			if err := os.WriteFile(script, []byte(fmt.Sprintf("#!/bin/sh\nexec git upload-pack %q\n", bare)), 0755); err != nil {
 				t.Fatal(err)
 			}
 			cmd := exec.Command("git", "ls-remote", transport)
@@ -231,5 +268,41 @@ func TestInitAliasConfirmationKeepsLaterInput(t *testing.T) {
 		"--check", "none", "--tools", "none")
 	if code != 1 || !strings.Contains(out, "SSH alias build resolves") || !strings.Contains(out, "Declined; nothing written or started.") || stderr != "" {
 		t.Fatalf("code=%d output=%q stderr=%q", code, out, stderr)
+	}
+}
+
+func TestParentAliasRegistrationStored(t *testing.T) {
+	binary := testsupport.BuildBrigada(t)
+	oldBinary := initBinary
+	initBinary = binary
+	t.Cleanup(func() { initBinary = oldBinary })
+	parent := t.TempDir()
+	parentRepo(t, parent, "child", "git@build:org/repo")
+	t.Chdir(parent)
+	old := initSSHConfig
+	initSSHConfig = func(context.Context, string) ([]byte, error) { return []byte("hostname example.com\nport 2222\n"), nil }
+	t.Cleanup(func() { initSSHConfig = old })
+	state := testsupport.ShortStateDir(t)
+	t.Cleanup(func() {
+		var out, stderr bytes.Buffer
+		if code := run(context.Background(), []string{"stop", "--engine", "--state-dir", state}, &out, &stderr); code != 0 {
+			t.Errorf("stop parent engine: %d %s %s", code, out.String(), stderr.String())
+		}
+	})
+	code, out, stderr := initDo(t, state, "", "--all", "--yes", "--no-wiring", "--foreman", "claude/sonnet")
+	if code != 0 {
+		t.Fatalf("parent init: %d\n%s\n%s", code, out, stderr)
+	}
+	st, err := store.Open(t.Context(), filepath.Join(state, "store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	var identity, transport string
+	err = st.View(t.Context(), func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT repo_url, transport_url FROM projects").Scan(&identity, &transport)
+	})
+	if err != nil || identity != "example.com:2222/org/repo" || transport != "ssh://git@example.com:2222/org/repo" {
+		t.Fatalf("stored identity=%q transport=%q err=%v", identity, transport, err)
 	}
 }

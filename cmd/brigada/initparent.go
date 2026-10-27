@@ -269,7 +269,7 @@ func runInitParent(ctx context.Context, dir string, opts parentOptions, common *
 			}
 			fmt.Fprintf(stdout, "  [%d] %s  %s  %s\n", len(register), c.path, c.canon, state)
 			if c.alias != "" {
-				fmt.Fprintf(stdout, "      SSH alias %s; registration transport: %s\n", c.alias, c.origin)
+				fmt.Fprintf(stdout, "      SSH alias %s; registration transport: %s\n", c.alias, engine.RedactRepoURL(c.origin))
 			}
 		}
 	}

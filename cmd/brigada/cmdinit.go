@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	goruntime "runtime"
 	"slices"
 	"strconv"
@@ -1475,7 +1476,7 @@ func confirmInitSelection(s initRepoSelection, yes, probe bool, reader *bufio.Re
 		return true, nil
 	}
 	if s.alias != "" {
-		fmt.Fprintf(out, "SSH alias %s resolves to %s; registration transport: %s\n", s.alias, s.canon, s.transport)
+		fmt.Fprintf(out, "SSH alias %s resolves to %s; registration transport: %s\n", s.alias, s.canon, engine.RedactRepoURL(s.transport))
 	} else {
 		fmt.Fprintf(out, "--repo selects %s; registration transport: %s\n", s.canon, engine.RedactRepoURL(s.transport))
 	}
@@ -1516,15 +1517,15 @@ func selectInitOrigin(ctx context.Context, root, override string) (initRepoSelec
 			return initRepoSelection{}, fmt.Errorf("--repo: %w", err)
 		}
 		transport := override
-		if id == override && !strings.Contains(override, "://") && !strings.HasPrefix(override, "/") && !strings.HasPrefix(override, "file:") {
+		if initBareIdentity(override) {
 			user, _, _, ok := initSSHOrigin(raws[0])
 			if !ok {
 				return initRepoSelection{}, fmt.Errorf("--repo: a bare identity needs an ssh-like origin; give a full URL")
 			}
-			transport = initSSHTransport(user, id)
 			if strings.HasSuffix(id, ".git") {
-				transport += ".git"
+				return initRepoSelection{}, fmt.Errorf("--repo: a bare identity ending in .git cannot keep its path in an SSH transport; give a full URL")
 			}
+			transport = initSSHTransport(user, id)
 		}
 		if err := checkInitTransport(transport, id); err != nil {
 			return initRepoSelection{}, fmt.Errorf("--repo: %w", err)
@@ -1592,11 +1593,38 @@ func initOriginURL(ctx context.Context, raw string) (initRepoSelection, error) {
 	if err != nil {
 		return initRepoSelection{}, err
 	}
-	if id == raw && !strings.Contains(raw, "://") && !strings.HasPrefix(raw, "file:") {
+	if initBareIdentity(raw) {
 		return initRepoSelection{}, fmt.Errorf("origin names an identity without a transport; give --repo with a full URL")
 	}
 	return initRepoSelection{transport: raw, canon: id}, nil
 }
+
+// initBareIdentity recognizes the host/path and host:port/path forms,
+// including spellings that Canonicalize normalizes.
+func initBareIdentity(raw string) bool {
+	if strings.Contains(raw, "://") || strings.HasPrefix(raw, "/") || strings.HasPrefix(strings.ToLower(raw), "file:") || strings.Contains(raw, "@") {
+		return false
+	}
+	before, _, slash := strings.Cut(raw, "/")
+	if !slash {
+		return false
+	}
+	_, port, colon := strings.Cut(before, ":")
+	if !colon {
+		return true
+	}
+	if port == "" {
+		return false
+	}
+	for _, c := range port {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+var initSSHUserRe = regexp.MustCompile(`^[A-Za-z0-9._~%+-]+$`)
 
 func initSSHOrigin(raw string) (user, host, path string, ok bool) {
 	if strings.HasPrefix(strings.ToLower(raw), "file:") {
@@ -1608,7 +1636,13 @@ func initSSHOrigin(raw string) (user, host, path string, ok bool) {
 			return "", "", "", false
 		}
 		if u.User != nil {
+			if _, password := u.User.Password(); password {
+				return "", "", "", false
+			}
 			user = u.User.Username()
+			if !initSSHUserRe.MatchString(user) {
+				return "", "", "", false
+			}
 		}
 		return user, u.Hostname(), u.Path, true
 	}
@@ -1618,6 +1652,9 @@ func initSSHOrigin(raw string) (user, host, path string, ok bool) {
 	rest := raw
 	if before, after, found := strings.Cut(raw, "@"); found {
 		user, rest = before, after
+		if !initSSHUserRe.MatchString(user) || strings.Contains(rest, "@") {
+			return "", "", "", false
+		}
 	}
 	host, path, ok = strings.Cut(rest, ":")
 	return user, host, path, ok && host != "" && !strings.ContainsAny(host, "/[]") && !strings.HasPrefix(path, "/")
