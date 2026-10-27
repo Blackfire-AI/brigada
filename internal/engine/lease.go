@@ -223,6 +223,14 @@ func (e *Engine) Lease(ctx context.Context, owner int64, harnesses, labels []str
 			if err != nil {
 				return fmt.Errorf("lease for runner %d: %w", owner, err)
 			}
+			// A caller that is gone takes no grant: the response would go
+			// nowhere, and the job would sit leased to a runner that is not
+			// listening until its lease lapsed. Failing here rolls the grant
+			// back with the transaction, so the job stays queued for the
+			// runners that are still polling.
+			if g != nil && ctx.Err() != nil {
+				return ctx.Err()
+			}
 			grant = g
 			return nil
 		})

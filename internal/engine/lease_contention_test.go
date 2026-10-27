@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -11,29 +12,28 @@ import (
 // TestLeaseFinishesOnACancelledRequest covers the poll's transaction
 // living past its request: a runner that goes away mid-poll, or a
 // caller cancelled before the poll began, must not roll the
-// transaction back with statements still to run — the poll runs to its
-// commit, or every later step of it fails on a transaction already
-// ended ("sql: transaction has already been committed or rolled
-// back", as the first public CI run saw across the lease path).
+// transaction back with statements still to run — the poll runs its
+// statements to the end, or every later step of it fails on a
+// transaction already ended ("sql: transaction has already been
+// committed or rolled back", as the first public CI run saw across
+// the lease path). It then ends with the cancellation, the grant
+// rolled back cleanly: a caller that is gone takes no job.
 func TestLeaseFinishesOnACancelledRequest(t *testing.T) {
 	e := newEnv(t)
-	e.submit(e.work())
+	job := e.submit(e.work()).JobID
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	g, err := e.eng.Lease(ctx, e.runner1, nil, nil)
-	if err != nil {
-		t.Fatalf("lease on a cancelled request: %v", err)
+	if g != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("lease on a cancelled request = %+v, %v; want no grant and the cancellation", g, err)
 	}
-	if g == nil || g.JobID == 0 {
-		t.Fatalf("no grant on a cancelled request: %+v", g)
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE status = 'leased'"); n != 0 {
+		t.Fatalf("%d jobs leased, want none: the grant rolled back", n)
 	}
-	if n := e.int("SELECT COUNT(*) FROM jobs WHERE status = 'leased'"); n != 1 {
-		t.Fatalf("%d jobs leased, want the one grant the poll committed", n)
-	}
-	// The store stays consistent behind the committed grant: a live
-	// poll finds nothing queued and hands nothing out.
-	if g := e.leaseAny(e.runner1); g != nil {
-		t.Fatalf("a live poll leased %+v behind the committed grant", g)
+	// The store stays consistent behind the rolled-back grant: a live
+	// poll leases the job.
+	if g := e.leaseAny(e.runner1); g == nil || g.JobID != job {
+		t.Fatalf("a live poll leased %+v, want job %d", g, job)
 	}
 }
 

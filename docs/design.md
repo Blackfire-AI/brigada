@@ -552,7 +552,7 @@ Selecting a flag mints nothing, and a selector that the credential in hand does 
 
 **Usage completion.** Completion optionally carries `usage` with `input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_tokens`, `model_calls` and `cost_usd`, plus `wall_seconds` for this job's elapsed wall time before delivery. Each usage field is optional. Older runners may omit usage and wall time; these remain NULL. Retries of a completion do not add usage again. Counters describe only the job's own CLI invocation, even for fix and resumed jobs, and do not steer dispatch.
 
-`register` · `lease` (long-poll) · `heartbeat` (progress, last activity) · `complete` (result or error; an outcome of `stalled`/`time_cap` when the runner stopped the run itself, §5.6; check result; artifacts) · `release` · `draining` (a restart drain pending, §5.1: the runner exits once its running jobs finish, and status renders the wait). Fencing as described in the glossary.
+`register` · `lease` (long-poll; a poll whose caller has gone away takes no grant, so a job is never left leased to a runner that is not listening) · `heartbeat` (progress, last activity) · `complete` (result or error; an outcome of `stalled`/`time_cap` when the runner stopped the run itself, §5.6; check result; artifacts) · `release` · `draining` (a restart drain pending, §5.1: the runner exits once its running jobs finish, and status renders the wait). Fencing as described in the glossary.
 
 ## 13. Engine lifecycle
 
