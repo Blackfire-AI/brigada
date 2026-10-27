@@ -210,7 +210,7 @@ Other settings and hooks stay. A JSON file is deleted only if removing brigada's
 
 Removal archives the project, keeping its plans, tasks, stats and history ([section 6](#6-configuring-a-project)). On success it prints `brigada removed; project history kept.`. If other projects use the runner, it keeps running. Otherwise, if the runner is running, remove asks `stop the runner? [Y/n]`; Enter stops it. `--yes` accepts that too.
 
-Remote `brigada/task-*` branches and `brigada/plans` are left alone. Remove lists them and prints `git push origin --delete` commands for you to run yourself; if the remote cannot be checked, it says so. When Codex is installed, it also prints `codex mcp remove brigada-foreman` for the user-level registration that only the pre-0.78 fallback creates. Remove does not run that command.
+Remote `brigada/task-*` branches and `brigada/plans` are left alone. Remove lists them and prints `git push <remote> --delete` commands, naming the remote it checked (the one whose URL matches the project, `origin` preferred), for you to run yourself; if the remote cannot be checked, it says so. When Codex is installed, it also prints `codex mcp remove brigada-foreman` for the user-level registration that only the pre-0.78 fallback creates. Remove does not run that command.
 
 ### By hand
 
@@ -413,7 +413,7 @@ When `notify` is `auto` (the default), the engine also raises a desktop notifica
 `brigada diff <task-id> [--stat] [--repo URL]` prints what a task changed, as `git diff <base>...<branch>` between the task's base ref and its latest result branch (`-r<n>` included).
 
 - Run it inside the project's repository. The working directory's selected remote must be the task's repo, or diff refuses and names both; `--repo` says which URL the directory stands for when its selected remote is a mirror or fork.
-- It fetches the two refs from origin, with no checkout, and prints to stdout, so it pipes to a pager.
+- It fetches the two refs from the project's remote (the one whose URL matches the task's repo, `origin` preferred; with `--repo` and no match, `origin`, else the only remote), with no checkout, and prints to stdout, so it pipes to a pager.
 - A task with no result branch yet says so.
 
 `brigada logs <job-id>` prints what a job's worker did, from its transcript, as readable lines: messages, tool starts and ends, errors.
@@ -510,7 +510,7 @@ Land puts approved work into your own repository, on the checked-out branch: the
 - Each task becomes one commit holding only its own diff against its own base, so a stacked task lands as just its work.
 - Tasks go in dependency order. A dependency must be in the same call, already landed (found by its `Brigada-Task:` trailer), or named with `--landed`.
 - Then the project's default check runs once on the result.
-- Land prints `git push origin <branch>` and stops: it never pushes and never touches the remote's branches.
+- Land prints `git push <remote> <branch>`, naming the remote it fetched from, and stops: it never pushes and never touches the remote's branches.
 
 Land refuses, changing nothing:
 
@@ -521,7 +521,7 @@ Land refuses, changing nothing:
 - a dependency that is not landed;
 - a missing default check (unless `--no-check`).
 
-Run it inside the repository; `--repo` says which URL the directory stands for when its selected remote is a mirror or fork.
+Run it inside the repository; `--repo` says which URL the directory stands for when its selected remote is a mirror or fork. Land fetches from the remote matching that URL, else from `origin`, else from the only remote.
 
 On a conflict, land stops, names the files and leaves the tree for you to resolve; commit with the printed `git commit -F` and rerun land for the rest. A check that fails leaves the commits in place and prints the `git reset --hard` that undoes them.
 

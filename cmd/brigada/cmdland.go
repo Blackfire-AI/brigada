@@ -189,13 +189,22 @@ func landTasks(ctx context.Context, client landClient, dir string, opts landOpti
 		here = origin
 	}
 
+	identity, err := engine.Canonicalize(here)
+	if err != nil {
+		return fail(stderr, fmt.Errorf("canonicalize this directory's repository URL: %w", err))
+	}
+	remote, err := projectRemote(ctx, dir, identity)
+	if err != nil {
+		return fail(stderr, err)
+	}
+
 	// The target: the checked-out branch, which must be the project's
 	// default branch or the one named with --onto.
 	current, _ := gitText(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
 	current = strings.TrimSpace(current)
 	target := opts.onto
 	if target == "" {
-		def, err := defaultBranch(ctx, dir)
+		def, err := defaultBranch(ctx, dir, remote)
 		if err != nil {
 			return fail(stderr, err)
 		}
@@ -321,9 +330,9 @@ func landTasks(ctx context.Context, client landClient, dir string, opts landOpti
 		}
 		t.base = fmt.Sprintf("%s/%d/base", privRefs, id)
 		t.branch = fmt.Sprintf("%s/%d/branch", privRefs, id)
-		if err := runGit(ctx, dir, nil, stderr, "fetch", "--quiet", "--no-tags", "origin",
+		if err := runGit(ctx, dir, nil, stderr, "fetch", "--quiet", "--no-tags", remote,
 			"+"+t.info.BaseRef+":"+t.base, "+"+t.info.Branch+":"+t.branch); err != nil {
-			refuse("task %d: fetch %s and %s from origin: %v", id, t.info.BaseRef, t.info.Branch, err)
+			refuse("task %d: fetch %s and %s from %s: %v", id, t.info.BaseRef, t.info.Branch, remote, err)
 			continue
 		}
 		head, err := gitText(ctx, dir, "rev-parse", t.branch)
@@ -338,14 +347,14 @@ func landTasks(ctx context.Context, client landClient, dir string, opts landOpti
 		}
 	}
 	targetRef := privRefs + "/target"
-	if err := runGit(ctx, dir, nil, stderr, "fetch", "--quiet", "--no-tags", "origin", "+refs/heads/"+target+":"+targetRef); err != nil {
+	if err := runGit(ctx, dir, nil, stderr, "fetch", "--quiet", "--no-tags", remote, "+refs/heads/"+target+":"+targetRef); err != nil {
 		if opts.onto == "" {
-			refuse("fetch %s from origin: %v", target, err)
+			refuse("fetch %s from %s: %v", target, remote, err)
 		} else {
-			warnings = append(warnings, fmt.Sprintf("%s has no counterpart on origin; the behind check was skipped", target))
+			warnings = append(warnings, fmt.Sprintf("%s has no counterpart on %s; the behind check was skipped", target, remote))
 		}
 	} else if !gitSucceeds(ctx, dir, "merge-base", "--is-ancestor", targetRef, "HEAD") {
-		refuse("%s is behind or has diverged from origin/%s; pull first", target, target)
+		refuse("%s is behind or has diverged from %s/%s; pull first", target, remote, target)
 	}
 	if len(problems) > 0 {
 		return finish()
@@ -428,7 +437,7 @@ func landTasks(ctx context.Context, client landClient, dir string, opts landOpti
 		}
 		fmt.Fprintln(stdout, "check: passed")
 	}
-	fmt.Fprintf(stdout, "to publish, when you are ready (land never pushes):\n  git push origin %s\n", target)
+	fmt.Fprintf(stdout, "to publish, when you are ready (land never pushes):\n  git push %s %s\n", remote, target)
 	return 0
 }
 
@@ -551,15 +560,15 @@ func gitSucceeds(ctx context.Context, dir string, args ...string) bool {
 	return exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Run() == nil
 }
 
-// defaultBranch is the origin's default branch: origin/HEAD when the
-// clone has it, else what origin says (a read, nothing is changed).
-func defaultBranch(ctx context.Context, dir string) (string, error) {
-	if out, err := gitText(ctx, dir, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
-		if b := strings.TrimPrefix(strings.TrimSpace(out), "origin/"); b != "" {
+// defaultBranch is the remote's default branch: <remote>/HEAD when the
+// clone has it, else what the remote says (a read, nothing is changed).
+func defaultBranch(ctx context.Context, dir, remote string) (string, error) {
+	if out, err := gitText(ctx, dir, "symbolic-ref", "--quiet", "--short", "refs/remotes/"+remote+"/HEAD"); err == nil {
+		if b := strings.TrimPrefix(strings.TrimSpace(out), remote+"/"); b != "" {
 			return b, nil
 		}
 	}
-	out, err := gitText(ctx, dir, "ls-remote", "--symref", "origin", "HEAD")
+	out, err := gitText(ctx, dir, "ls-remote", "--symref", remote, "HEAD")
 	if err == nil {
 		for _, l := range strings.Split(out, "\n") {
 			if rest, ok := strings.CutPrefix(l, "ref: refs/heads/"); ok {
@@ -569,7 +578,7 @@ func defaultBranch(ctx context.Context, dir string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("cannot tell origin's default branch; name the branch with --onto")
+	return "", fmt.Errorf("cannot tell %s's default branch; name the branch with --onto", remote)
 }
 
 // sameCanonicalRepo reports whether two repository URLs name one project,

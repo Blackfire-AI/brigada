@@ -378,17 +378,17 @@ Family detection: the job record; for `brigada review --branch` without a job, t
 
 **What it does.** Run inside the project's repository, on the target branch: the project's default branch, or the local branch named with `--onto`, which must be checked out (land never switches branches; it says `git switch <branch>`). In order:
 1. **Preflight, before anything is changed.** Every named task is checked; one failure refuses the whole call and names the task and the reason.
-2. **Fetch refs only,** as `brigada diff` does (a fetch from `origin` of each ref by exact name, no tags, no prune, no checkout): each task's base ref, its latest result branch (`-r<n>` included) and the target's remote counterpart.
+2. **Fetch refs only,** as `brigada diff` does (a fetch from the project's remote of each ref by exact name, no tags, no prune, no checkout): each task's base ref, its latest result branch (`-r<n>` included) and the target's remote counterpart.
 3. **Squash in dependency order,** one commit per task, on the target branch (below).
 4. **Rerun the project's default check** (§13.1, §6.1) on the result, once, after the last commit, under the environment of any check (§5.8; product §6, "what local gives up").
-5. **Stop,** print what it did and the push command (`git push origin <branch>`), and exit. It never runs it.
+5. **Stop,** print what it did and the push command (`git push <remote> <branch>`, naming the project's remote), and exit. It never runs it.
 
 **What it refuses.**
 - a task that is not `done`, or is not approved: an `implement` task needs an `approve` verdict on its last review (§7); other classes carry no review and no branch worth squashing, so they are not landable;
 - a result branch whose fetched head differs from the head the verdict approved (the runner records the pushed head with the result; where no head is recorded, land warns and goes on);
 - a dirty working tree (tracked changes, or untracked files that are not ignored), or a merge, rebase, cherry-pick or revert in progress;
 - a target branch that is behind or has diverged from its remote counterpart (pull first; being ahead is fine), or that is not the checked-out branch;
-- a working directory whose `origin` does not canonicalize (§13.1 item 1) to the task's project, with `--repo` as the same escape `brigada diff` has;
+- a working directory none of whose remotes canonicalizes (§13.1 item 1) to the task's project, with `--repo` as the same escape `brigada diff` has. The project's remote is the one whose URL matches, `origin` preferred; with no match (`--repo` naming a mirror or fork), `origin`, else the only remote;
 - a dependency that is neither landed nor in the same call (below);
 - no default check, unless `--no-check` is given, the same "never run unchecked" rule as §6.1; `--no-check` is shown in the final report.
 
