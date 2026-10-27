@@ -59,7 +59,7 @@ tasks:
     base: "remote"
     continue: "remote"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-195-r1"
     rounds: 1
   - id: 196
