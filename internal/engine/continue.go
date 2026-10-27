@@ -32,7 +32,7 @@ type continuedPlacement struct {
 // session (§6.1), in the caller's transaction: nil when the task
 // continues nothing, and nil with no error for every fallback too — the
 // unknown session id, the author with no agent, the agent gone, broken,
-// capped at 0 or cooling beyond longCooling (§8), and the agent outside
+// capped at 0 or cooling (§8), and the agent outside
 // the task's effective tier. The checks are the dispatcher's own words
 // for an agent that cannot take the job now, so a continuation never
 // waits on an agent the fresh work job would not have been pinned to.
@@ -86,7 +86,7 @@ func (e *Engine) continuePlacementTx(tx *sql.Tx, taskID int64, now time.Time) (*
 		return nil, nil
 	case cappedAtZero(e.cfg.Caps, account, model):
 		return nil, nil
-	case cooling > fmtTime(now.Add(longCooling)):
+	case cooling > fmtTime(now):
 		return nil, nil
 	case e.cfg.Caps.TierOf(harness, model) != tier:
 		return nil, nil

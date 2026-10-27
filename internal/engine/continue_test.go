@@ -3,6 +3,7 @@ package engine
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
@@ -110,7 +111,7 @@ func TestContinueResumesDepAuthorSession(t *testing.T) {
 // TestContinueFallsBackFresh covers every way the continuation cannot be
 // had: the dep ended with no session id, its author ran with no agent,
 // the agent has since been dropped, is broken, is capped at exactly 0,
-// is cooling beyond longCooling — a short cooling still continues — or
+// is cooling — any cooling, however short — or
 // is outside the task's tier. The state is in place before the dep
 // completes, because the decision falls when the dependent starts, in
 // the completion's own transaction. Each leaves the dependent's first
@@ -121,28 +122,28 @@ func TestContinueFallsBackFresh(t *testing.T) {
 		// mutate runs while the dep's work job is leased, before its
 		// completion readies the dependent.
 		mutate    func(t *testing.T, e *env)
-		session   string // the session the dep's run ends on
+		session   string // "" leaves the dep's run without a session id
 		agentLess bool   // lease the dep as an agent-less runner
 	}{
-		{name: "no session id"},
-		{name: "agent-less author", agentLess: true},
-		{name: "agent dropped", mutate: func(t *testing.T, e *env) {
+		{name: "no session id", session: ""},
+		{name: "agent-less author", session: "hs-build-1", agentLess: true},
+		{name: "agent dropped", session: "hs-build-1", mutate: func(t *testing.T, e *env) {
 			e.exec("DELETE FROM agents")
 		}},
-		{name: "agent broken", mutate: func(t *testing.T, e *env) {
+		{name: "agent broken", session: "hs-build-1", mutate: func(t *testing.T, e *env) {
 			e.exec("UPDATE agents SET health = 'broken', health_reason = 'auth'")
 		}},
-		{name: "cooling beyond longCooling", mutate: func(t *testing.T, e *env) {
-			e.exec("UPDATE agents SET cooling_until = ?", fmtTime(e.clock.Now().Add(2*longCooling)))
+		{name: "cooling", session: "hs-build-1", mutate: func(t *testing.T, e *env) {
+			e.exec("UPDATE agents SET cooling_until = ?", fmtTime(e.clock.Now().Add(2*time.Hour)))
 		}},
-		{name: "capped at 0", mutate: func(t *testing.T, e *env) {
+		{name: "cooling for minutes", session: "hs-build-1", mutate: func(t *testing.T, e *env) {
+			e.exec("UPDATE agents SET cooling_until = ?", fmtTime(e.clock.Now().Add(5*time.Minute)))
+		}},
+		{name: "capped at 0", session: "hs-build-1", mutate: func(t *testing.T, e *env) {
 			e.eng.cfg.Caps.Account = map[string]int{"claude": 0}
 		}},
-		{name: "agent outside the task's tier", mutate: func(t *testing.T, e *env) {
+		{name: "agent outside the task's tier", session: "hs-build-1", mutate: func(t *testing.T, e *env) {
 			e.eng.cfg.Caps.Tier = map[string]string{"author/claude-1": "heavy"}
-		}},
-		{name: "cooling shortly still continues", session: "hs-build-1", mutate: func(t *testing.T, e *env) {
-			e.exec("UPDATE agents SET cooling_until = ?", fmtTime(e.clock.Now().Add(longCooling/2)))
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -167,15 +168,14 @@ func TestContinueFallsBackFresh(t *testing.T) {
 				t.Fatalf("complete build: %s", ans)
 			}
 			job := e.shipJob(res)
-			continueJob := tc.name == "cooling shortly still continues"
-			if got := e.str("SELECT mode FROM jobs WHERE id = ?", job); continueJob != (got == string(ModeSession)) {
-				t.Errorf("mode = %q, want session=%t", got, continueJob)
+			if got := e.str("SELECT mode FROM jobs WHERE id = ?", job); got != string(ModeFresh) {
+				t.Errorf("mode = %q, want fresh", got)
 			}
-			if agent := e.int("SELECT COALESCE(require_agent, 0) FROM jobs WHERE id = ?", job); continueJob != (agent != 0) {
-				t.Errorf("required agent = %d, want a pin=%t", agent, continueJob)
+			if agent := e.int("SELECT COALESCE(require_agent, 0) FROM jobs WHERE id = ?", job); agent != 0 {
+				t.Errorf("required agent = %d, want none", agent)
 			}
-			if got := e.str("SELECT prompt FROM jobs WHERE id = ?", job); continueJob != strings.Contains(got, "A new task follows in this session") {
-				t.Errorf("prompt says continue=%t, want %t", strings.Contains(got, "A new task follows in this session"), continueJob)
+			if got := e.str("SELECT prompt FROM jobs WHERE id = ?", job); strings.Contains(got, "A new task follows in this session") {
+				t.Errorf("prompt says a new task follows, want the fresh work prompt")
 			}
 		})
 	}

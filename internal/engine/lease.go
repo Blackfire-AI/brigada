@@ -978,15 +978,11 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 	return cands, nil
 }
 
-// longCooling is how far off a cooling agent's reset may be and still count
-// as available for its tier (§8): a window of a few hours is worth waiting
-// out, a limit of days is not.
-const longCooling = time.Hour
-
 // tierServedTx considers every runner's structurally qualifying agents.
-// A short cooling (ending within longCooling of now) still counts as ready: a
-// cheap wait beats a heavier model. A longer one counts like a broken agent.
-// A model or account capped at exactly 0 can never take a job, so its agents
+// An agent counts as available for its tier only when it is ready and not
+// cooling at all: an agent whose cooling_until is ahead of now, whatever
+// the distance to the reset, is unavailable, like a broken one. A model or
+// account capped at exactly 0 can never take a job, so its agents
 // do not count as ready; a cap that is merely full still waits (§8). Other
 // caps are applied later, after the tier is fixed. When no tier has an
 // available agent but some agents are only cooling, the tier of the agent
@@ -996,10 +992,6 @@ func tierServedTx(tx *sql.Tx, limits caps.Limits, j *jobRow, class, asked, now s
 	if err != nil {
 		return "", err
 	}
-	horizon := now
-	if t, err := parseTime(now); err == nil {
-		horizon = fmtTime(t.Add(longCooling))
-	}
 	hasReady := map[string]bool{}
 	var soonest string
 	soonestTiers := map[string]bool{}
@@ -1008,7 +1000,7 @@ func tierServedTx(tx *sql.Tx, limits caps.Limits, j *jobRow, class, asked, now s
 			continue
 		}
 		tier := limits.TierOf(a.harness, a.model)
-		if a.cooling <= horizon {
+		if a.cooling <= now {
 			hasReady[tier] = true
 			continue
 		}
@@ -1037,7 +1029,7 @@ func cappedAtZero(limits caps.Limits, account, model string) bool {
 
 // tierServed prefers the asked tier, then climbs, then steps down from
 // heavy. hasReady names the tiers with an agent that is ready, not capped at
-// 0 and not cooling for long. With none anywhere, retain the asked tier.
+// 0 and not cooling. With none anywhere, retain the asked tier.
 func tierServed(asked string, hasReady map[string]bool) string {
 	tiers := []string{"light", "standard", "heavy"}
 	at := slices.Index(tiers, asked)
@@ -1200,9 +1192,9 @@ func reviewAgentQualifies(id int64, family, classes, excludeFamily string, exclu
 // reviewExclusionLiftedTx reports whether a review job's agent exclusion
 // gives way (§7, decided 2026-10-20): the exclusion of the first
 // reviewer is a preference, and it holds only while another qualifying
-// reviewer is available — ready, or cooling for no more than longCooling
-// — so the review never waits days behind another family's reset while
-// the excluded agent could run again. With none available the excluded
+// reviewer is available — ready and not cooling, whatever the distance
+// to the reset — so the review never waits behind another family's
+// reset while the excluded agent could run again. With none available the excluded
 // agent qualifies again. A now of "" asks structurally: another
 // qualifying reviewer of any health keeps the exclusion, the answer the
 // queue-time and unservable checks read. The family rule never lifts:
@@ -1218,18 +1210,12 @@ func reviewExclusionLiftedTx(tx *sql.Tx, j *jobRow, class, now string) (bool, er
 	if err != nil {
 		return false, err
 	}
-	horizon := now
-	if now != "" {
-		if t, err := parseTime(now); err == nil {
-			horizon = fmtTime(t.Add(longCooling))
-		}
-	}
 	for _, a := range rows {
 		if a.id == j.ExcludeAgent {
 			continue
 		}
-		if now != "" && (a.health != "ready" || a.cooling > horizon) {
-			continue // broken, or cooling past longCooling: not available
+		if now != "" && (a.health != "ready" || a.cooling > now) {
+			continue // broken or cooling: not available
 		}
 		return false, nil // another qualifying reviewer: the exclusion holds
 	}
