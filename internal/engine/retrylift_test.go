@@ -32,11 +32,11 @@ func TestRetryExclusionHoldsWhileAnotherReviewerIsReady(t *testing.T) {
 	}
 }
 
-// TestRetryExclusionLiftsWhenTheOnlyOtherReviewerCoolsLong: with the
-// only other qualifying reviewer cooling past longCooling, the excluded
+// TestRetryExclusionLiftsWhenTheOnlyOtherReviewerCools: with the
+// only other qualifying reviewer cooling, the excluded
 // reviewer qualifies again, takes the retry at once, and its pick event
 // records the lifted exclusion.
-func TestRetryExclusionLiftsWhenTheOnlyOtherReviewerCoolsLong(t *testing.T) {
+func TestRetryExclusionLiftsWhenTheOnlyOtherReviewerCools(t *testing.T) {
 	e := newEnv(t)
 	author := e.agented("author", "anthropic", "implement")
 	first := e.agented("first", "google", "review")
@@ -45,7 +45,7 @@ func TestRetryExclusionLiftsWhenTheOnlyOtherReviewerCoolsLong(t *testing.T) {
 	e.runReview(first, `{}`)
 	retry := e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review' ORDER BY id DESC LIMIT 1", e.task)
 
-	e.coolUntil(e.agentOf(second), 4*24*time.Hour) // far past longCooling
+	e.coolUntil(e.agentOf(second), 4*24*time.Hour) // a multi-day limit
 	if g := e.leaseAny(second); g != nil {
 		t.Fatalf("the cooling reviewer leased the retry: %+v", g)
 	}
@@ -61,10 +61,11 @@ func TestRetryExclusionLiftsWhenTheOnlyOtherReviewerCoolsLong(t *testing.T) {
 	}
 }
 
-// TestRetryExclusionLiftsOnlyPastLongCooling: another reviewer cooling
-// within longCooling still counts as available, so the exclusion holds
-// and the retry waits for that reviewer, held on its cooling.
-func TestRetryExclusionLiftsOnlyPastLongCooling(t *testing.T) {
+// TestRetryExclusionLiftsOnAShortCoolingReviewer: another reviewer
+// cooling for minutes is unavailable too, so the exclusion lifts at
+// once and the excluded reviewer takes its retry without waiting for
+// the reset.
+func TestRetryExclusionLiftsOnAShortCoolingReviewer(t *testing.T) {
 	e := newEnv(t)
 	author := e.agented("author", "anthropic", "implement")
 	first := e.agented("first", "google", "review")
@@ -73,28 +74,16 @@ func TestRetryExclusionLiftsOnlyPastLongCooling(t *testing.T) {
 	e.runReview(first, `{}`)
 	retry := e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review' ORDER BY id DESC LIMIT 1", e.task)
 
-	until := e.coolUntil(e.agentOf(second), longCooling-time.Minute)
-	if g := e.leaseAny(first); g != nil {
-		t.Fatalf("the excluded reviewer leased past a short-cooling other reviewer: %+v", g)
+	e.coolUntil(e.agentOf(second), 5*time.Minute)
+	if g := e.leaseAny(second); g != nil {
+		t.Fatalf("the cooling reviewer leased the retry: %+v", g)
 	}
-	e.mustSweep()
-	if got := e.heldLayer(retry); got != layerCooling {
-		t.Fatalf("hold layer = %q, want %q", got, layerCooling)
-	}
-	info, err := e.eng.Status(e.ctx, 0)
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	if len(info.Held) != 1 || info.Held[0].ID != retry ||
-		info.Held[0].Agent != "second/moonshot-1" || info.Held[0].Until != fmtTime(until) {
-		t.Fatalf("status held = %+v, want job %d cooling on second/moonshot-1 until %s",
-			info.Held, retry, fmtTime(until))
-	}
-
-	e.clock.Advance(longCooling)
-	g := e.leaseAny(second)
+	g := e.leaseAny(first)
 	if g == nil || g.JobID != retry {
-		t.Fatalf("the short-cooling reviewer leased %+v, want the retry %d after its reset", g, retry)
+		t.Fatalf("the excluded reviewer leased %+v, want its lifted retry %d", g, retry)
+	}
+	if evs := e.pickEvents(retry); len(evs) != 1 || !evs[0].ExclusionLifted {
+		t.Errorf("pick events = %+v, want one lift recorded", evs)
 	}
 }
 
