@@ -3,6 +3,12 @@
 The format of this file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `.brigada/operator.md` tells the operator to put an issue's content into the ask, since the foreman cannot read a tracker, and covers a landing on the default branch with no pull request.
+
 ## [1.0.0-rc.4] - 2026-10-25
 
 Fourth release candidate of 1.0.0. The binary is unchanged from rc.3; this candidate runs the new release steps once before 1.0.0. Since rc.3: each release file carries a build provenance attestation, checked with `gh attestation verify` (#96); `install.sh` installs a verified release binary without sudo (#86), and a release tag without a suffix updates the Homebrew tap, `brew install blackfire-ai/tap/brigada` (#85), which a release candidate such as this one leaves alone; a test holds `docs/COMPATIBILITY.md` to the binary, and `--now` on `init` and `agents add` is frozen (#95); the README says what the cross-family review is measured to do (#92); test helpers no longer outlive a test binary that timed out or was killed. The changes are listed under 1.0.0 below.

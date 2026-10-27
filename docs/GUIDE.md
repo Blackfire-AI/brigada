@@ -263,9 +263,9 @@ With `claude`, an attached foreman is the same session the headless turns resume
 
 The usual way in is through your own coding agent, the operator. `brigada init` writes `.brigada/operator.md`, a generated, harness-agnostic guide (init overwrites it on a rerun, `--no-wiring` does not skip it, `brigada remove` deletes it). Open your agent in the repository, have it read that file, and tell it, for example, "ask brigada to fix #12". The operator:
 
-- **asks** with `brigada ask -`, pointing at issues and document sections, the build order, tier hints and cooling accounts;
+- **asks** with `brigada ask -`, putting the content of an issue into the ask (the foreman cannot read a tracker; issue numbers stay as references for `Closes` and `Refs` trailers), naming files and document sections, the build order, tier hints and cooling accounts;
 - **watches** with `brigada status`, `brigada history --task N`, `brigada history --job N` (a job's full verdict) and `brigada diff --stat N`; you watch the same work live in `brigada top`;
-- **follows a landing**: merges the staging pull request with a merge commit once CI is green, and restarts the engine and runner when their own code landed and nothing pending needs the old behaviour;
+- **follows a landing**: merges the staging pull request with a merge commit once CI is green (when `land_target` is the default branch and `after_land` is none, there is no pull request to merge), and restarts the engine and runner when their own code landed and nothing pending needs the old behaviour;
 - **recovers** after an outage by asking again: an ask re-wakes the foreman.
 
 The operator has no approval authority. Plan approval, land approval, push approval, `--and-stop-asking`, tags and releases, and rule changes stay yours; the operator tells you what waits. `brigada attach` below is the other way in: your own conversation with the foreman.
