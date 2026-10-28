@@ -23,5 +23,5 @@ tasks:
     deps: []
     base: ""
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-219"
+    rounds: 1
