@@ -16,19 +16,26 @@ import (
 // caller's to insert before the returned handle is closed and reopened.
 func openBeforeRoleInstructions(t *testing.T) (string, *sql.DB) {
 	t.Helper()
+	return openBeforeMigration(t, "role_instructions")
+}
+
+// openBeforeMigration builds the store a binary that predates the named
+// migration would leave behind, as openBeforeRoleInstructions does.
+func openBeforeMigration(t *testing.T, name string) (string, *sql.DB) {
+	t.Helper()
 	migs, err := allMigrations()
 	if err != nil {
 		t.Fatalf("list migrations: %v", err)
 	}
 	var before int
 	for _, m := range migs {
-		if m.name == "role_instructions" {
+		if m.name == name {
 			before = m.version - 1
 			break
 		}
 	}
 	if before == 0 {
-		t.Fatal("role_instructions migration not found in allMigrations")
+		t.Fatalf("%s migration not found in allMigrations", name)
 	}
 	path := t.TempDir() + "/store.db"
 	db, err := sql.Open("sqlite", dsn(path))

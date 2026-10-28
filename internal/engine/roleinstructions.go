@@ -119,44 +119,51 @@ func (e *Engine) RoleInstructions(ctx context.Context, repoURL, role string) (*R
 		if err != nil {
 			return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
 		}
-		var text, rawMeta string
-		err = tx.QueryRow("SELECT text, meta FROM role_instructions WHERE project_id = ? AND role = ?", project, role).Scan(&text, &rawMeta)
-		switch {
-		case errors.Is(err, sql.ErrNoRows):
-			// Not configured: no row, so the live embedded default
-			// applies (§5.9).
-			live, err := defaults.LiveRoleText(role)
-			if err != nil {
-				return err
-			}
-			out = &RoleInstructions{Role: role, State: RoleTextNotConfigured, Text: live, Source: SourceDefault,
-				Version: defaults.Version, Bytes: len(live), Digest: instructionsDigest(live)}
-			return nil
-		case err != nil:
-			return fmt.Errorf("read the %s instructions of project %d: %w", role, project, err)
-		}
-		var meta roleTextMeta
-		if rawMeta != "" {
-			if err := json.Unmarshal([]byte(rawMeta), &meta); err != nil {
-				return fmt.Errorf("parse the %s instructions of project %d: %w", role, project, err)
-			}
-		}
-		out = &RoleInstructions{Role: role, Text: text, Source: meta.Source, Version: meta.Version, Bytes: meta.Bytes, Digest: meta.Digest}
-		switch {
-		case strings.HasPrefix(meta.Source, store.RoleSourceSeededPrefix),
-			meta.Source == "" && text == "":
-			// The upgrade's seed is no user value: the role is not
-			// configured, and the seeded default stays in effect.
-			out.State = RoleTextNotConfigured
-		case text == "":
-			out.State = RoleTextEmptyByChoice
-		default:
-			out.State = RoleTextFile
-		}
-		return nil
+		out, err = roleInstructionsTx(tx, project, role)
+		return err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("read the %s instructions of the project of %s: %w", role, RedactRepoURL(repoURL), err)
+	}
+	return out, nil
+}
+
+// roleInstructionsTx reads one role's effective instruction text for a
+// project, with its state and provenance: the stored row, or the live
+// embedded default when the project has none.
+func roleInstructionsTx(tx *sql.Tx, project int64, role string) (*RoleInstructions, error) {
+	var text, rawMeta string
+	err := tx.QueryRow("SELECT text, meta FROM role_instructions WHERE project_id = ? AND role = ?", project, role).Scan(&text, &rawMeta)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		// Not configured: no row, so the live embedded default
+		// applies (§5.9).
+		live, err := defaults.LiveRoleText(role)
+		if err != nil {
+			return nil, err
+		}
+		return &RoleInstructions{Role: role, State: RoleTextNotConfigured, Text: live, Source: SourceDefault,
+			Version: defaults.Version, Bytes: len(live), Digest: instructionsDigest(live)}, nil
+	case err != nil:
+		return nil, fmt.Errorf("read the %s instructions of project %d: %w", role, project, err)
+	}
+	var meta roleTextMeta
+	if rawMeta != "" {
+		if err := json.Unmarshal([]byte(rawMeta), &meta); err != nil {
+			return nil, fmt.Errorf("parse the %s instructions of project %d: %w", role, project, err)
+		}
+	}
+	out := &RoleInstructions{Role: role, Text: text, Source: meta.Source, Version: meta.Version, Bytes: meta.Bytes, Digest: meta.Digest}
+	switch {
+	case strings.HasPrefix(meta.Source, store.RoleSourceSeededPrefix),
+		meta.Source == "" && text == "":
+		// The upgrade's seed is no user value: the role is not
+		// configured, and the seeded default stays in effect.
+		out.State = RoleTextNotConfigured
+	case text == "":
+		out.State = RoleTextEmptyByChoice
+	default:
+		out.State = RoleTextFile
 	}
 	return out, nil
 }
