@@ -5,9 +5,9 @@
 plan: 74
 title: "brigada diff --name-only: the paths a task changed"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-28T14:58:38.102915Z
-updated: 2026-10-28T14:58:38.102915Z
+updated: 2026-10-28T18:31:47.82955Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -22,6 +22,6 @@ tasks:
     class: "implement"
     deps: []
     base: ""
-    state: needs_foreman
+    state: cancelled
     branch: "brigada/task-220"
     rounds: 0
