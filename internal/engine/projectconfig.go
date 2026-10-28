@@ -36,7 +36,23 @@ const (
 	// client reads at import (§5.9); the engine stores its text under
 	// SettingInstructions and never the path to read.
 	configKeyInstructionsFile = "instructions_file"
+	// configKeyInstructions is the nested map of per-role instruction
+	// files {foreman, plan_review, worker, reviewer} (§5.9); a role key
+	// absent from it is not configured. instructions_file is the 1.0
+	// alias of its worker entry.
+	configKeyInstructions = "instructions"
+	// configKeySkillsDir names the repo-relative directory of task skills.
+	configKeySkillsDir = "skills_dir"
 )
+
+// DefaultSkillsDir is skills_dir's path when the key is written empty.
+const DefaultSkillsDir = ".brigada/skills"
+
+// DefaultRoleFile is the path a role's file has when its key is written
+// with no value: .brigada/instructions/<role>.md.
+func DefaultRoleFile(role string) string {
+	return ".brigada/instructions/" + role + ".md"
+}
 
 // ConfigHash is the hash of a project.yaml's bytes, as the store records
 // it for an import and as a client compares it for status.
@@ -64,6 +80,13 @@ type ProjectConfig struct {
 	// instructions_file, "" when it sets none. The client reads it; the
 	// text rides beside the file's bytes at import.
 	InstructionsFile string
+	// RoleFiles maps a role to the repo-relative path the nested
+	// instructions map names for it; a role absent is not configured.
+	// The 1.0 alias instructions_file stays in InstructionsFile.
+	RoleFiles map[string]string
+	// SkillsDir is the repo-relative skills directory skills_dir names,
+	// "" when the key is absent.
+	SkillsDir string
 	// Values holds the stored JSON of each setting the file sets.
 	Values map[string]json.RawMessage
 }
@@ -83,6 +106,10 @@ type yamlValue struct {
 	flow bool
 	// blockOpen: "key:" with nothing after it, so a block list may follow.
 	blockOpen bool
+	// sub holds the entries of a nested map (only instructions may nest),
+	// in subOrder; nil for every other value.
+	sub      map[string]yamlValue
+	subOrder []string
 }
 
 var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -128,7 +155,10 @@ func ParseProjectConfig(content []byte) (ProjectConfig, error) {
 	if ver != ProjectConfigSchema {
 		return ProjectConfig{}, configErr("unknown %s version %d; this brigada reads %s %d", configKeySchema, ver, configKeySchema, ProjectConfigSchema)
 	}
-	valid := append([]string{configKeySchema, configKeyRepo, configKeyInstructionsFile}, configSettingKeys...)
+	valid := append([]string{configKeySchema, configKeyRepo, configKeyInstructionsFile, configKeySkillsDir}, configSettingKeys...)
+	if iv, ok := entries[configKeyInstructions]; ok && (iv.sub != nil || iv.blockOpen) {
+		valid = append(valid, configKeyInstructions)
+	}
 	for _, k := range order {
 		if slicesContains(valid, k) {
 			continue
@@ -170,6 +200,49 @@ func ParseProjectConfig(content []byte) (ProjectConfig, error) {
 			return ProjectConfig{}, configErr("%s (line %d): %v", configKeyInstructionsFile, iv.line, err)
 		}
 		cfg.InstructionsFile = iv.scalar
+	}
+	if iv, ok := entries[configKeyInstructions]; ok {
+		if len(iv.subOrder) == 0 {
+			return ProjectConfig{}, configErr("%s (line %d) names no role; want a map of %s, or omit the key", configKeyInstructions, iv.line, strings.Join(Roles, ", "))
+		}
+		cfg.RoleFiles = map[string]string{}
+		for _, role := range iv.subOrder {
+			rv := iv.sub[role]
+			if !slicesContains(Roles, role) {
+				return ProjectConfig{}, configErr("%s (line %d): unknown role %q; valid roles: %s", configKeyInstructions, rv.line, role, strings.Join(Roles, ", "))
+			}
+			path := rv.scalar
+			if rv.quoted && strings.TrimSpace(path) == "" {
+				return ProjectConfig{}, configErr("%s.%s (line %d) must be a repo-relative path string", configKeyInstructions, role, rv.line)
+			}
+			if path == "" {
+				path = DefaultRoleFile(role)
+			}
+			if err := checkInstructionsPath(path); err != nil {
+				return ProjectConfig{}, configErr("%s.%s (line %d): %v", configKeyInstructions, role, rv.line, err)
+			}
+			cfg.RoleFiles[role] = path
+		}
+		if _, both := cfg.RoleFiles[RoleWorker]; both && cfg.InstructionsFile != "" {
+			return ProjectConfig{}, configErr("%s and %s.%s are both set; %s is the 1.0 alias of %s.%s, keep one", configKeyInstructionsFile, configKeyInstructions, RoleWorker,
+				configKeyInstructionsFile, configKeyInstructions, RoleWorker)
+		}
+	}
+	if sv, ok := entries[configKeySkillsDir]; ok {
+		if sv.isList {
+			return ProjectConfig{}, configErr("%s (line %d) must be a repo-relative path string", configKeySkillsDir, sv.line)
+		}
+		dir := sv.scalar
+		if sv.blockOpen || dir == "" {
+			dir = DefaultSkillsDir
+		}
+		if strings.TrimSpace(dir) == "" {
+			return ProjectConfig{}, configErr("%s (line %d) must be a repo-relative path string", configKeySkillsDir, sv.line)
+		}
+		if err := checkInstructionsPath(dir); err != nil {
+			return ProjectConfig{}, configErr("%s (line %d): %v", configKeySkillsDir, sv.line, err)
+		}
+		cfg.SkillsDir = dir
 	}
 	for _, k := range configSettingKeys {
 		v, ok := entries[k]
@@ -303,7 +376,7 @@ func parseYAMLSubset(text string) (map[string]yamlValue, []string, error) {
 				return nil, nil, configErr("line %d: a list item outside a key", n)
 			}
 			v := entries[cur]
-			if v.flow || (!v.blockOpen && !v.isList) {
+			if v.flow || v.sub != nil || (!v.blockOpen && !v.isList) {
 				return nil, nil, configErr("line %d: key %q already has a value; a list item cannot follow it", n, cur)
 			}
 			v.blockOpen, v.isList = false, true
@@ -316,7 +389,33 @@ func parseYAMLSubset(text string) (map[string]yamlValue, []string, error) {
 			continue
 		}
 		if line[0] == ' ' {
-			return nil, nil, configErr("line %d: nested structures are not supported; schema %d is flat", n, ProjectConfigSchema)
+			// Only the instructions key nests, one level of role: path.
+			if cur != configKeyInstructions || !entries[cur].blockOpen {
+				return nil, nil, configErr("line %d: nested structures are not supported except under %s; schema %d is flat", n, configKeyInstructions, ProjectConfigSchema)
+			}
+			k, rest, ok := strings.Cut(trim, ":")
+			if !ok || !yamlKeyRe.MatchString(k) || (rest != "" && rest[0] != ' ') {
+				return nil, nil, configErr("line %d: want `role: path`", n)
+			}
+			v := entries[cur]
+			if v.sub == nil {
+				v.sub = map[string]yamlValue{}
+			}
+			if _, dup := v.sub[k]; dup {
+				return nil, nil, configErr("key %q appears twice (line %d)", k, n)
+			}
+			sv := yamlValue{line: n}
+			if rest = strings.TrimSpace(rest); rest != "" {
+				sc, q, err := parseYAMLScalar(rest, n)
+				if err != nil {
+					return nil, nil, err
+				}
+				sv.scalar, sv.quoted = sc, q
+			}
+			v.sub[k] = sv
+			v.subOrder = append(v.subOrder, k)
+			entries[cur] = v
+			continue
 		}
 		key, rest, ok := strings.Cut(trim, ":")
 		if !ok || !yamlKeyRe.MatchString(key) || (rest != "" && rest[0] != ' ') {

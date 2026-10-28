@@ -97,6 +97,20 @@ func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request, _ i
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	for _, role := range engine.Roles {
+		if text, ok := req.Roles[role]; ok {
+			if err := engine.ValidateRoleText(role, text); err != nil {
+				writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+				return
+			}
+		}
+	}
+	for role := range req.Roles {
+		if err := engine.ValidateRoleText(role, ""); err != nil {
+			writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+			return
+		}
+	}
 	got, err := s.eng.ImportProjectConfigWith(r.Context(), req.RepoURL, req.Content, req.Instructions, req.Accept)
 	if err != nil {
 		if errors.Is(err, engine.ErrInvalidSetting) || errors.Is(err, engine.ErrInvalidRepoURL) {
@@ -105,6 +119,25 @@ func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request, _ i
 		}
 		s.writeInternal(w, r, "import the project configuration", err)
 		return
+	}
+	if !got.NeedsConfirm {
+		for _, role := range engine.Roles {
+			text, ok := req.Roles[role]
+			if !ok {
+				continue
+			}
+			_, err := s.eng.ImportRoleFile(r.Context(), req.RepoURL, role, text)
+			switch {
+			case errors.Is(err, engine.ErrRoleTextKept):
+				got.Conflicts = append(got.Conflicts, engine.ConfigChange{Key: "instructions." + role, Old: "local override", New: "file"})
+			case errors.Is(err, engine.ErrInvalidSetting):
+				writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+				return
+			case err != nil:
+				s.writeInternal(w, r, "import the role instructions", err)
+				return
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, got)
 }
@@ -119,6 +152,10 @@ type importRequest struct {
 	// Instructions is the text of the file project.yaml's instructions_file
 	// names, read by the client (§5.9); nil when the file names none.
 	Instructions *string `json:"instructions,omitempty"`
+	// Roles holds the text of each role file the nested instructions map
+	// names, read by the client (§5.9). A role absent is not configured;
+	// an empty text is empty by choice.
+	Roles map[string]string `json:"roles,omitempty"`
 }
 
 // ImportProjectConfig sends a project.yaml's content for import. With
@@ -131,8 +168,15 @@ func (c *Client) ImportProjectConfig(ctx context.Context, repoURL string, conten
 // ImportProjectConfigWith is ImportProjectConfig for a file that names an
 // instructions_file: instructions is the text the client read from it.
 func (c *Client) ImportProjectConfigWith(ctx context.Context, repoURL string, content []byte, instructions *string, accept bool) (engine.ImportResult, error) {
+	return c.ImportProjectConfigRoles(ctx, repoURL, content, instructions, nil, accept)
+}
+
+// ImportProjectConfigRoles is ImportProjectConfigWith for a file whose
+// nested instructions map names role files: roles holds the text the
+// client read for each (§5.9).
+func (c *Client) ImportProjectConfigRoles(ctx context.Context, repoURL string, content []byte, instructions *string, roles map[string]string, accept bool) (engine.ImportResult, error) {
 	var out engine.ImportResult
-	if err := c.call(ctx, http.MethodPut, "/v1/projects/import", importRequest{RepoURL: repoURL, Content: content, Accept: accept, Instructions: instructions}, &out); err != nil {
+	if err := c.call(ctx, http.MethodPut, "/v1/projects/import", importRequest{RepoURL: repoURL, Content: content, Accept: accept, Instructions: instructions, Roles: roles}, &out); err != nil {
 		return engine.ImportResult{}, err
 	}
 	return out, nil

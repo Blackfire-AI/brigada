@@ -234,6 +234,66 @@ func readInstructionsFile(root, rel string) (string, error) {
 	return string(b), nil
 }
 
+// readRoleFile reads the file the nested instructions map names for a
+// role (§5.9), by the rules of readInstructionsFile: inside the
+// repository after symlinks, a regular file, bounded at
+// engine.MaxRoleTextBytes before the engine checks it again. Every
+// refusal names the key and the path. An empty file returns "": empty by
+// choice.
+func readRoleFile(root, role, rel string) (string, error) {
+	label := "instructions." + role + " " + rel
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("%s: resolve the repository root: %w", label, err)
+	}
+	full, err := filepath.EvalSymlinks(filepath.Join(realRoot, filepath.FromSlash(rel)))
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", label, err)
+	}
+	if inside, err := filepath.Rel(realRoot, full); err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%s resolves outside the repository", label)
+	}
+	st, err := os.Stat(full)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", label, err)
+	}
+	if !st.Mode().IsRegular() {
+		return "", fmt.Errorf("%s is not a regular file", label)
+	}
+	if st.Size() > engine.MaxRoleTextBytes {
+		return "", fmt.Errorf("%s is %d bytes, over the %d byte limit; shorten it (nothing is truncated)", label, st.Size(), engine.MaxRoleTextBytes)
+	}
+	b, err := os.ReadFile(full)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", label, err)
+	}
+	if err := engine.ValidateRoleText(role, string(b)); err != nil {
+		return "", fmt.Errorf("%s: %s", label, strings.TrimPrefix(err.Error(), engine.ErrInvalidSetting.Error()+": "))
+	}
+	return string(b), nil
+}
+
+// readRoleFiles reads every role file cfg names; a role it leaves out is
+// absent from the result: not configured.
+func readRoleFiles(root string, cfg engine.ProjectConfig) (map[string]string, error) {
+	var roles map[string]string
+	for _, role := range engine.Roles {
+		rel, ok := cfg.RoleFiles[role]
+		if !ok {
+			continue
+		}
+		text, err := readRoleFile(root, role, rel)
+		if err != nil {
+			return nil, err
+		}
+		if roles == nil {
+			roles = map[string]string{}
+		}
+		roles[role] = text
+	}
+	return roles, nil
+}
+
 // shortHash is the first 12 characters of a content hash.
 func shortHash(h string) string {
 	if len(h) > 12 {
@@ -327,6 +387,21 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 	// A file that names an instructions_file has the client read it: the
 	// engine takes the text, never the path (§5.9).
 	var instructions *string
+	var roles map[string]string
+	if len(cfg.RoleFiles) > 0 {
+		root, err := gitRoot(filepath.Dir(file))
+		if err != nil {
+			return fail(stderr, err)
+		}
+		if roles, err = readRoleFiles(root, cfg); err != nil {
+			return fail(stderr, err)
+		}
+		for _, role := range engine.Roles {
+			if text, ok := roles[role]; ok && strings.TrimSpace(text) == "" {
+				fmt.Fprintf(stdout, "instructions.%s %s is empty: the role runs on the contract alone\n", role, cfg.RoleFiles[role])
+			}
+		}
+	}
 	if cfg.InstructionsFile != "" {
 		root, err := gitRoot(filepath.Dir(file))
 		if err != nil {
@@ -349,7 +424,7 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 	if code != 0 {
 		return code
 	}
-	res, err := client.ImportProjectConfigWith(ctx, repo, content, instructions, yes)
+	res, err := client.ImportProjectConfigRoles(ctx, repo, content, instructions, roles, yes)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -366,7 +441,7 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 			fmt.Fprintln(stdout, "not imported; nothing changed (--yes accepts the replacement)")
 			return 1
 		}
-		if res, err = client.ImportProjectConfigWith(ctx, repo, content, instructions, true); err != nil {
+		if res, err = client.ImportProjectConfigRoles(ctx, repo, content, instructions, roles, true); err != nil {
 			return fail(stderr, err)
 		}
 	}

@@ -268,6 +268,17 @@ func roleImportVersion(role, text string) string {
 // the import is refused with ErrRoleTextKept and the kept local record
 // returned beside it.
 func (e *Engine) ImportRoleInstructions(ctx context.Context, repoURL, role, text string) (*RoleInstructions, error) {
+	return e.importRoleInstructions(ctx, repoURL, role, text, false)
+}
+
+// ImportRoleFile is ImportRoleInstructions for a role whose configured
+// file the client read (§5.9): an empty regular file is the empty-by-choice
+// state, imported, not an unset value.
+func (e *Engine) ImportRoleFile(ctx context.Context, repoURL, role, text string) (*RoleInstructions, error) {
+	return e.importRoleInstructions(ctx, repoURL, role, text, true)
+}
+
+func (e *Engine) importRoleInstructions(ctx context.Context, repoURL, role, text string, emptyByChoice bool) (*RoleInstructions, error) {
 	if !slices.Contains(Roles, role) {
 		return nil, fmt.Errorf("%w: unknown role %q; valid roles: %s", ErrInvalidSetting, role, strings.Join(Roles, ", "))
 	}
@@ -320,7 +331,7 @@ func (e *Engine) ImportRoleInstructions(ctx context.Context, repoURL, role, text
 			}
 		}
 		switch {
-		case text == "":
+		case text == "" && !emptyByChoice:
 			// An empty file is an unset value (§5.9): the role returns
 			// to not configured, the shipped default applying again.
 			if _, err := tx.Exec("DELETE FROM role_instructions WHERE project_id = ? AND role = ?", project, role); err != nil {
