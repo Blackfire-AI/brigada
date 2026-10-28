@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/defaults"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
@@ -60,29 +59,6 @@ func projectInstructionsTx(tx *sql.Tx, project int64) (string, instructionsMeta,
 		meta.Source, meta.Hash = SourceImported, prov.Hash
 	}
 	return text, meta, nil
-}
-
-// stampTaskInstructionsTx resolves the project's instructions onto a task
-// at creation (§5.9): the effective text, copied into the task row with
-// its source, version and digest. A project with none leaves the task's
-// columns empty.
-func stampTaskInstructionsTx(tx *sql.Tx, project, taskID int64, now time.Time) error {
-	text, meta, err := projectInstructionsTx(tx, project)
-	if err != nil {
-		return err
-	}
-	if text == "" {
-		return nil
-	}
-	mb, err := json.Marshal(meta)
-	if err != nil {
-		return fmt.Errorf("encode the instructions of task %d: %w", taskID, err)
-	}
-	if _, err := tx.Exec("UPDATE tasks SET instructions = ?, instructions_meta = ?, updated_at = ? WHERE id = ?",
-		text, string(mb), fmtTime(now), taskID); err != nil {
-		return fmt.Errorf("record the instructions of task %d: %w", taskID, err)
-	}
-	return nil
 }
 
 // taskInstructionsTx reads the instruction text a task recorded at

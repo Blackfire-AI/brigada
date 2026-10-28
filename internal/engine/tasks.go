@@ -28,6 +28,10 @@ type TaskParams struct {
 	// offer in full.
 	Harness string
 	Labels  []string
+	// Skills names, in order, the project's imported skills the task's
+	// prompts carry (§5.10): resolved and copied onto the task once, at
+	// creation; nil or empty = none.
+	Skills []string
 }
 
 // TaskResult is what SubmitTask did: the task it created, the project it
@@ -153,7 +157,15 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create the task: last insert id: %w", err)
 	}
-	if err := stampTaskInstructionsTx(tx, project, taskID, now); err != nil {
+	// What the task's prompts carry resolves here, once (§5.9, §5.10):
+	// both role texts and the named skills copied onto the task, so a
+	// later change to a setting, a role text or the skills import never
+	// alters it, and the first prompt below carries the recorded text.
+	ti, err := resolveTaskInstructionsTx(tx, project, title, p.Skills)
+	if err != nil {
+		return TaskResult{}, err
+	}
+	if err := recordTaskInstructionsTx(tx, taskID, ti, now); err != nil {
 		return TaskResult{}, err
 	}
 	instructions, err := taskInstructionsTx(tx, taskID)

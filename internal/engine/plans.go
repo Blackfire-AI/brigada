@@ -48,6 +48,10 @@ type PlanTask struct {
 	// ExtraRepos are the read-only repositories the task is given (§5.8).
 	// nil = inherit the project default; non-nil, even empty, replaces it.
 	ExtraRepos []ExtraRepo
+	// Skills names, in order, the project's imported skills the task's
+	// prompts carry (§5.10): resolved and copied onto the task once, at
+	// creation; nil or empty = none.
+	Skills []string
 }
 
 // CreatedTask is one task CreatePlan made: its id, its name, and the
@@ -269,6 +273,23 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 			return CreatePlanResult{}, fmt.Errorf("task %d: spec is required: the worker's task, verbatim (§1.4)", i+1)
 		}
 	}
+	// What each task's prompts carry (§5.9 'Versioning', §5.10 'Resolved
+	// once') resolves here, before anything is written: the effective
+	// role texts and the named skills, copied onto each task below. A
+	// refusal — an unknown or repeated skill, a prompt over its bound —
+	// refuses the plan whole, the task named.
+	snaps := make([]TaskInstructions, len(tasks))
+	for i, t := range tasks {
+		label := t.Name
+		if label == "" {
+			label = fmt.Sprintf("task %d", i+1)
+		}
+		ti, terr := resolveTaskInstructionsTx(tx, project, label, t.Skills)
+		if terr != nil {
+			return CreatePlanResult{}, terr
+		}
+		snaps[i] = ti
+	}
 	deps, bases, continues, err := validatePlanGraph(tasks, func(ref string) (bool, string, error) {
 		return crossPlanDepTx(tx, project, ref)
 	})
@@ -388,7 +409,7 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		if err != nil {
 			return CreatePlanResult{}, fmt.Errorf("create the task: last insert id: %w", err)
 		}
-		if err := stampTaskInstructionsTx(tx, project, taskID, now); err != nil {
+		if err := recordTaskInstructionsTx(tx, taskID, snaps[i], now); err != nil {
 			return CreatePlanResult{}, err
 		}
 		res.Tasks[i] = CreatedTask{TaskID: taskID, Name: t.Name}

@@ -401,6 +401,40 @@ func recordTaskInstructionsTx(tx *sql.Tx, taskID int64, ti TaskInstructions, now
 	return nil
 }
 
+// reresolveTaskInstructionsTx re-resolves what a task that has not
+// started carries (§5.9 'Versioning', §5.10): the current role texts,
+// with the skills the caller names — nil keeps the names the task
+// recorded, any list, empty included, replaces them — and the fresh
+// resolution recorded over the old one.
+func reresolveTaskInstructionsTx(tx *sql.Tx, project, taskID int64, task string, skills []string, now time.Time) error {
+	names := skills
+	if names == nil {
+		snap, err := taskSnapshotTx(tx, taskID)
+		if err != nil {
+			return err
+		}
+		names = make([]string, len(snap.Skills))
+		for i, s := range snap.Skills {
+			names[i] = s.Name
+		}
+	}
+	ti, err := resolveTaskInstructionsTx(tx, project, task, names)
+	if err != nil {
+		return err
+	}
+	return recordTaskInstructionsTx(tx, taskID, ti, now)
+}
+
+// taskStartedTx reports whether a task has queued or run any job: only
+// a task with none may have its snapshot re-resolved by an amendment.
+func taskStartedTx(tx *sql.Tx, taskID int64) (bool, error) {
+	var started bool
+	if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM jobs WHERE task_id = ?)`, taskID).Scan(&started); err != nil {
+		return false, fmt.Errorf("read the jobs of task %d: %w", taskID, err)
+	}
+	return started, nil
+}
+
 // taskSnapshotTx reads the snapshot a task recorded. A task recorded
 // before the skills arrived carries its worker text with the older
 // provenance, whose settings version is the import hash, an explicitly

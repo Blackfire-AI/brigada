@@ -80,6 +80,7 @@ func (s *Server) handleTaskSubmit(w http.ResponseWriter, r *http.Request, _ iden
 		Class:    req.Class,
 		Harness:  req.Harness,
 		Labels:   nonNil(req.Labels),
+		Skills:   req.Skills,
 	})
 	if err != nil {
 		// Like the job submit: a task the engine will not take is the
@@ -109,6 +110,9 @@ type taskSubmitRequest struct {
 	Class    string   `json:"class"`
 	Harness  string   `json:"harness"`
 	Labels   []string `json:"labels"`
+	// Skills (§5.10) names, in order, the project's imported skills the
+	// task's prompts carry; absent or empty = none.
+	Skills []string `json:"skills,omitempty"`
 }
 
 // taskSubmitResponse names what the submit created: the project it

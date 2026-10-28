@@ -216,6 +216,196 @@ func TestResolveTaskInstructionsRefusesAndOrders(t *testing.T) {
 	}
 }
 
+// TestCreatePlanResolvesInstructions: plan_create resolves what each
+// task's prompts carry — the role texts and the ordered skills — and
+// copies it onto the task, the worker text in the column the first
+// job's prompt reads; an unknown or repeated skill, or a prompt over
+// its bound, refuses the plan whole, the task named.
+func TestCreatePlanResolvesInstructions(t *testing.T) {
+	e := newEnv(t)
+	e.importSkills(
+		Skill{Name: "cli-flag", Text: "register the flag", TreeDigest: "t1"},
+		Skill{Name: "surface-parity", For: SkillForReviewer, Text: "find the siblings"},
+	)
+	e.setRole(RoleWorker, "Use tabs.")
+	e.setRole(RoleReviewer, "Check the changelog.")
+
+	res := e.createPlan([]PlanTask{
+		{Name: "skilled", Spec: "add the flag", Skills: []string{"surface-parity", "cli-flag"}},
+		{Name: "plain", Spec: "no skills"},
+	})
+	skilled, plain := e.snapshot(res.Tasks[0].TaskID), e.snapshot(res.Tasks[1].TaskID)
+	if got := skillNames(skilled.Skills); len(got) != 2 || got[0] != "surface-parity" || got[1] != "cli-flag" {
+		t.Errorf("skills = %v, want the order given", got)
+	}
+	if skilled.Worker.Text != "Use tabs." || skilled.Worker.Source != SourceLocal || skilled.Reviewer.Text != "Check the changelog." {
+		t.Errorf("skilled snapshot = %+v, want both role texts with provenance", skilled)
+	}
+	if len(plain.Skills) != 0 || plain.Worker.Text != "Use tabs." {
+		t.Errorf("plain snapshot = %+v, want the texts and no skills", plain)
+	}
+	if got := e.taskInstructions(res.Tasks[0].TaskID); got != "Use tabs." {
+		t.Errorf("task instructions = %q, want the worker text in the column jobs read", got)
+	}
+	if p := e.jobPrompt(res.Tasks[0].JobID); !strings.Contains(p, "<project-instructions>\nUse tabs.\n</project-instructions>") {
+		t.Errorf("the first job's prompt does not carry the worker text:\n%s", p)
+	}
+
+	for name, tasks := range map[string][]PlanTask{
+		"unknown skill": {{Name: "a", Spec: "s", Skills: []string{"nope"}}},
+		"twice":         {{Name: "a", Spec: "s", Skills: []string{"cli-flag", "cli-flag"}}},
+	} {
+		_, err := e.eng.CreatePlan(e.ctx, e.project, "refused", tasks)
+		if !errors.Is(err, ErrTaskInstructions) || !strings.Contains(err.Error(), `"a"`) {
+			t.Errorf("%s: err = %v, want the task refused by name", name, err)
+		}
+	}
+	if got := e.int("SELECT COUNT(*) FROM plans"); got != 2 {
+		t.Errorf("plans after the refusals = %d, want the seeded 1 and the one created", got)
+	}
+
+	// A prompt over its bound refuses the plan too, the size, the
+	// limit and the task named (§5.10).
+	e.importSkills(
+		Skill{Name: "a", Text: strings.Repeat("a", MaxSkillBytes)},
+		Skill{Name: "b", Text: strings.Repeat("b", MaxSkillBytes)},
+		Skill{Name: "wrk", For: SkillForWorker, Text: strings.Repeat("w", MaxSkillBytes)},
+	)
+	e.setRole(RoleWorker, strings.Repeat("t", MaxRoleTextBytes))
+	_, err := e.eng.CreatePlan(e.ctx, e.project, "over", []PlanTask{{Name: "big", Spec: "s", Skills: []string{"a", "b", "wrk"}}})
+	if !errors.Is(err, ErrTaskInstructions) || !strings.Contains(err.Error(), `"big"`) || !strings.Contains(err.Error(), "20480") {
+		t.Errorf("over the bound: err = %v, want the size, the limit and the task named", err)
+	}
+}
+
+// TestAmendResolvesAndReresolves: an added task resolves at the
+// amendment as a created one does; a respec or retier of a task that
+// has not started re-resolves its role texts and skills — nil skills
+// keep the recorded names, a list replaces them, even empty — and a
+// started task keeps its record.
+func TestAmendResolvesAndReresolves(t *testing.T) {
+	e := newEnv(t)
+	e.importSkills(Skill{Name: "bugfix", Text: "v1 bugfix"}, Skill{Name: "docs", Text: "v1 docs"})
+	e.setRole(RoleWorker, "v1 worker")
+	e.setRole(RoleReviewer, "v1 reviewer")
+	res := e.createPlan([]PlanTask{
+		{Name: "build", Spec: "build it", Class: "answer"},
+		{Name: "ship", Spec: "ship it", Class: "answer", Deps: []string{"build"}, Skills: []string{"bugfix"}},
+	})
+	build, ship := res.Tasks[0].TaskID, res.Tasks[1].TaskID
+	if snap := e.snapshot(build); snap.Worker.Text != "v1 worker" || len(snap.Skills) != 0 {
+		t.Fatalf("build snapshot = %+v, want the v1 worker text, no skills", snap)
+	}
+	if snap := e.snapshot(ship); len(snap.Skills) != 1 || snap.Skills[0].Text != "v1 bugfix" {
+		t.Fatalf("ship snapshot = %+v, want bugfix v1", snap)
+	}
+
+	am := e.amend(res.PlanID, PlanAmendment{Add: []PlanTask{{Name: "docs-task", Spec: "write docs", Class: "answer", Deps: []string{"build"}, Skills: []string{"docs"}}}})
+	if snap := e.snapshot(am.Added[0].TaskID); len(snap.Skills) != 1 || snap.Skills[0].Text != "v1 docs" || snap.Worker.Text != "v1 worker" {
+		t.Errorf("added task snapshot = %+v, want docs v1 and the v1 texts", snap)
+	}
+
+	// The settings move on; a task that has not started follows.
+	e.setRole(RoleWorker, "v2 worker")
+	e.setRole(RoleReviewer, "v2 reviewer")
+	e.importSkills(Skill{Name: "bugfix", Text: "v2 bugfix"}, Skill{Name: "docs", Text: "v2 docs"})
+
+	e.amend(res.PlanID, PlanAmendment{Respec: []PlanRespec{{Task: "ship", Spec: "ship it harder"}}})
+	snap := e.snapshot(ship)
+	if snap.Worker.Text != "v2 worker" || snap.Reviewer.Text != "v2 reviewer" {
+		t.Errorf("after the respec snapshot = %+v, want the v2 texts", snap)
+	}
+	if got := skillNames(snap.Skills); len(got) != 1 || got[0] != "bugfix" || snap.Skills[0].Text != "v2 bugfix" {
+		t.Errorf("after the respec skills = %+v, want bugfix kept by name with the v2 text", snap.Skills)
+	}
+	e.amend(res.PlanID, PlanAmendment{Respec: []PlanRespec{{Task: "ship", Spec: "ship it harder", Skills: []string{"docs"}}}})
+	if got := skillNames(e.snapshot(ship).Skills); len(got) != 1 || got[0] != "docs" {
+		t.Errorf("after a respec with skills = %v, want docs replacing bugfix", got)
+	}
+	e.amend(res.PlanID, PlanAmendment{Respec: []PlanRespec{{Task: "ship", Spec: "ship it harder", Skills: []string{}}}})
+	if snap := e.snapshot(ship); len(snap.Skills) != 0 {
+		t.Errorf("after a respec with [] skills = %+v, want none", snap.Skills)
+	}
+
+	e.setRole(RoleWorker, "v3 worker")
+	e.amend(res.PlanID, PlanAmendment{Retier: []PlanRetier{{Task: "ship", Tier: "light"}}})
+	if got := e.taskInstructions(ship); got != "v3 worker" {
+		t.Errorf("after a retier task instructions = %q, want the re-resolved v3 worker", got)
+	}
+	// A started task — build's work job is queued — keeps its record.
+	e.amend(res.PlanID, PlanAmendment{Retier: []PlanRetier{{Task: "build", Effort: "low"}}})
+	if got := e.taskInstructions(build); got != "v1 worker" {
+		t.Errorf("after a retier of a started task instructions = %q, want the recorded v1 worker", got)
+	}
+
+	for name, am := range map[string]PlanAmendment{
+		"add unknown":    {Add: []PlanTask{{Name: "bad", Spec: "s", Skills: []string{"nope"}}}},
+		"respec unknown": {Respec: []PlanRespec{{Task: "ship", Spec: "s", Skills: []string{"nope"}}}},
+		"retier unknown": {Retier: []PlanRetier{{Task: "ship", Skills: []string{"nope"}}}},
+	} {
+		if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, am); !errors.Is(err, ErrTaskInstructions) {
+			t.Errorf("%s: err = %v, want ErrTaskInstructions", name, err)
+		}
+	}
+	if got := e.taskInstructions(build); got != "v1 worker" {
+		t.Errorf("after the refusals build instructions = %q, want the recorded v1 worker", got)
+	}
+}
+
+// TestSubmitTaskRecordsSnapshots: the direct submission records both
+// role snapshots and its skills at creation; a later change to the
+// setting, a role text or the skills import never alters its fix or
+// review prompts, and its first prompt carries the recorded snapshot.
+func TestSubmitTaskRecordsSnapshots(t *testing.T) {
+	e := newEnv(t)
+	e.importSkills(Skill{Name: "bugfix", Text: "v1 bugfix", TreeDigest: "tree-v1"})
+	e.setRole(RoleWorker, "v1 worker")
+	e.setRole(RoleReviewer, "v1 reviewer")
+	res := e.submitTask(TaskParams{RepoURL: envRepo, BaseRef: "main", Spec: "fix the bug", CheckCmd: "go test ./...", Skills: []string{"bugfix"}})
+	snap := e.snapshot(res.TaskID)
+	if snap.Worker.Text != "v1 worker" || snap.Worker.Digest != instructionsDigest("v1 worker") || snap.Reviewer.Text != "v1 reviewer" || len(snap.Skills) != 1 || snap.Skills[0].Text != "v1 bugfix" {
+		t.Fatalf("snapshot = %+v, want both role texts and the skill", snap)
+	}
+	if p := e.jobPrompt(res.JobID); !strings.Contains(p, "<project-instructions>\nv1 worker\n</project-instructions>") {
+		t.Errorf("the first prompt does not carry the recorded worker text:\n%s", p)
+	}
+
+	author := e.agented("author", "anthropic", "implement")
+	g := e.leaseAny(author)
+	const newer = "v2 everything"
+	e.set(map[string]string{SettingInstructions: newer})
+	e.setRole(RoleWorker, newer)
+	e.setRole(RoleReviewer, newer)
+	e.importSkills(Skill{Name: "bugfix", Text: "v2 bugfix", TreeDigest: "tree-v2"})
+	if ans := e.complete(g, doneOn(branchOf(res.TaskID), failCheck)); ans != AnsOK {
+		t.Fatalf("complete the failed-check work: %s", ans)
+	}
+	fix := e.jobPrompt(e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'fix'", res.TaskID))
+	if strings.Count(fix, "v1 worker") != 1 || strings.Contains(fix, newer) {
+		t.Errorf("fix prompt carries the recorded text %d times and the new %t; want the recorded text once and none of the new:\n%s",
+			strings.Count(fix, "v1 worker"), strings.Contains(fix, newer), fix)
+	}
+	fg := e.authorLease(author)
+	if fg == nil {
+		t.Fatal("the fix round was not leased")
+	}
+	e.agented("reviewer", "google", "implement", "review")
+	if ans := e.complete(fg, doneOn(branchOf(res.TaskID), passCheck)); ans != AnsOK {
+		t.Fatalf("complete the fixed work: %s", ans)
+	}
+	review := e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review'", res.TaskID)
+	if review == 0 {
+		t.Fatalf("no review job; have %v", e.eventKinds())
+	}
+	if p := e.jobPrompt(review); strings.Count(p, "v1 worker") != 1 || strings.Contains(p, newer) {
+		t.Errorf("review prompt carries the recorded text %d times and the new %t; want the recorded text once and none of the new:\n%s",
+			strings.Count(p, "v1 worker"), strings.Contains(p, newer), p)
+	}
+	if got := e.snapshot(res.TaskID); got.Worker.Text != "v1 worker" || got.Skills[0].Text != "v1 bugfix" || got.Skills[0].TreeDigest != "tree-v1" {
+		t.Errorf("the run altered the snapshot: %+v", got)
+	}
+}
+
 // TestTaskSnapshotSurvivesLaterChanges: a recorded task keeps its texts
 // and skills whatever the settings and the skills import say later; a
 // new resolution sees the new values.
