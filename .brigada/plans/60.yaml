@@ -5,9 +5,9 @@
 plan: 60
 title: "plan_file_branch becomes a project setting you can set, show and import"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-28T14:58:37.876545Z
-updated: 2026-10-28T14:58:37.876545Z
+updated: 2026-10-28T18:31:44.985531Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -22,6 +22,6 @@ tasks:
     class: "implement"
     deps: []
     base: ""
-    state: needs_foreman
+    state: cancelled
     branch: "brigada/task-206"
     rounds: 0
