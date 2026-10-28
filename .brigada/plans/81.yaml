@@ -63,8 +63,8 @@ tasks:
     continue: "skills_api"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: done
+    branch: "brigada/task-230-r1"
     rounds: 0
   - id: 231
     name: "record"
@@ -163,7 +163,7 @@ tasks:
     continue: "prompts"
     tier: heavy
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 240
