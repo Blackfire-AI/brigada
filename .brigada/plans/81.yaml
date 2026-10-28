@@ -74,7 +74,7 @@ tasks:
     base: "prompts_rt"
     continue: "prompts_rt"
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 232
@@ -118,7 +118,7 @@ tasks:
     continue: "store"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-235-r2"
     rounds: 0
   - id: 236
@@ -163,7 +163,7 @@ tasks:
     continue: "prompts"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-239-r1"
     rounds: 0
   - id: 240
