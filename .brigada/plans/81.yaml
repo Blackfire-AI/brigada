@@ -39,7 +39,7 @@ tasks:
     continue: "defaults"
     tier: heavy
     effort: medium
-    state: running
+    state: done
     branch: "brigada/task-228"
     rounds: 1
   - id: 229
@@ -118,7 +118,7 @@ tasks:
     continue: "store"
     tier: heavy
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 236
