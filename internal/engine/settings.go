@@ -719,5 +719,21 @@ func applySettingsRowTx(tx *sql.Tx, project int64, rawSettings, rawProv string, 
 	if _, err := tx.Exec("UPDATE projects SET settings = ?, settings_prov = ?, updated_at = ? WHERE id = ?", string(b), pb, fmtTime(now), project); err != nil {
 		return fmt.Errorf("store the settings of project %d: %w", project, err)
 	}
+	if raw, touched := parsed[SettingInstructions]; touched {
+		// The instructions setting is the worker role's text (§5.9):
+		// every change of it here mirrors into the role row, so the
+		// setting's readers and the role's see one text. A set here is
+		// a local override from now on; a reset returns the role to
+		// not configured, where the embedded default applies.
+		if raw == nil {
+			if _, err := tx.Exec("DELETE FROM role_instructions WHERE project_id = ? AND role = ?", project, RoleWorker); err != nil {
+				return fmt.Errorf("clear the worker instructions of project %d: %w", project, err)
+			}
+		} else if text, ok := rawString(raw); ok && text != "" {
+			if err := upsertRoleInstructionTx(tx, project, RoleWorker, text, SourceLocal, "", now); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }

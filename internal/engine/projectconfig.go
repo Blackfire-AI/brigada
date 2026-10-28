@@ -646,15 +646,21 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 		return ImportResult{}, configErr("%s names %q but no text was sent: the client reads the file and sends its content", configKeyInstructionsFile, cfg.InstructionsFile)
 	case cfg.InstructionsFile == "" && instructions != nil:
 		return ImportResult{}, configErr("instructions text was sent but the file sets no %s", configKeyInstructionsFile)
-	case instructions != nil && strings.TrimSpace(*instructions) != "":
-		if err := ValidateInstructions(*instructions); err != nil {
+	case instructions != nil:
+		// Every text sent is bounded and checked before an empty one is
+		// read as unset: a whitespace-only file over the bound is a
+		// refusal naming the worker role, the size and the limit, never
+		// a silently cleared value.
+		if err := validateRoleText(RoleWorker, *instructions); err != nil {
 			return ImportResult{}, configErr("%s: %s", cfg.InstructionsFile, strings.TrimPrefix(err.Error(), ErrInvalidSetting.Error()+": "))
 		}
-		raw, err := json.Marshal(*instructions)
-		if err != nil {
-			return ImportResult{}, fmt.Errorf("encode the instructions: %w", err)
+		if strings.TrimSpace(*instructions) != "" {
+			raw, err := json.Marshal(*instructions)
+			if err != nil {
+				return ImportResult{}, fmt.Errorf("encode the instructions: %w", err)
+			}
+			cfg.Values[SettingInstructions] = raw
 		}
-		cfg.Values[SettingInstructions] = raw
 	}
 	// The hash covers the yaml and the instruction text, so a change to the
 	// text alone shows as a changed import.
@@ -688,6 +694,27 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 			return fmt.Errorf("parse the provenance of project %d: %w", project, err)
 		}
 		first := prov.Hash == ""
+		// An empty-by-choice worker row is a hand-set value in its own
+		// right (§5.9): the file's text meets it as a replacement to
+		// accept or a conflict to keep, never as a fresh set over an
+		// absent key, so the marker survives the merge itself and the
+		// settings readers see no instructions while it stands.
+		emptyChoice := false
+		if !born {
+			var src, wtext string
+			err := tx.QueryRow("SELECT source, text FROM role_instructions WHERE project_id = ? AND role = ?", project, RoleWorker).Scan(&src, &wtext)
+			switch {
+			case errors.Is(err, sql.ErrNoRows):
+			case err != nil:
+				return fmt.Errorf("read the worker instructions of project %d: %w", project, err)
+			default:
+				emptyChoice = src == SourceLocal && wtext == ""
+			}
+		}
+		// replacedLocal: this import explicitly accepted the replacement
+		// of a hand-set instructions value, so the worker row follows
+		// the settings instead of keeping the local text.
+		replacedLocal := false
 		newImported := map[string]json.RawMessage{}
 		for _, k := range SettingKeys {
 			fv, inFile := cfg.Values[k]
@@ -699,6 +726,24 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 					// nobody overrode: back to the default.
 					res.Applied = append(res.Applied, ConfigChange{k, renderSettingRaw(k, cur), "default"})
 					delete(row, k)
+				}
+				continue
+			}
+			if k == SettingInstructions && emptyChoice {
+				// The marker reads as the hand-set empty value the file
+				// would replace: a diff to accept on a first import, a
+				// conflict to keep after it.
+				empty := json.RawMessage(`""`)
+				if first {
+					res.Diffs = append(res.Diffs, ConfigChange{k, renderSettingRaw(k, empty), renderSettingRaw(k, fv)})
+					if accept {
+						row[k] = fv
+						newImported[k] = fv
+						replacedLocal = true
+						res.Applied = append(res.Applied, ConfigChange{k, renderSettingRaw(k, empty), renderSettingRaw(k, fv)})
+					}
+				} else {
+					res.Conflicts = append(res.Conflicts, ConfigChange{k, renderConflictRaw(k, empty), renderConflictRaw(k, fv)})
 				}
 				continue
 			}
@@ -720,6 +765,9 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 				if accept {
 					row[k] = fv
 					newImported[k] = fv
+					if k == SettingInstructions {
+						replacedLocal = true
+					}
 					res.Applied = append(res.Applied, ConfigChange{k, renderSettingRaw(k, cur), renderSettingRaw(k, fv)})
 				}
 			default:
@@ -749,6 +797,14 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 		}
 		if _, err := tx.Exec("UPDATE projects SET archived_at = NULL, settings = ?, settings_prov = ?, updated_at = ? WHERE id = ?", string(b), pb, fmtTime(now), project); err != nil {
 			return fmt.Errorf("store the settings of project %d: %w", project, err)
+		}
+		// The worker role row mirrors the import's instructions outcome
+		// (§5.9): text and provenance both, so a re-import that moved
+		// only other keys still dates the row with the new hash; a local
+		// text or an empty-by-choice mark is left alone unless this
+		// import explicitly accepted its replacement.
+		if err := syncWorkerInstructionTx(tx, project, row, newImported, hash, replacedLocal, now); err != nil {
+			return err
 		}
 		v, err := settingsViewTx(tx, project, shownRepo, e.cfg.ForemanWakeBudget)
 		if err != nil {

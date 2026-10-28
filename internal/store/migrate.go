@@ -1,9 +1,11 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,6 +13,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/defaults"
 )
 
 // The schema migrations, one numbered file each, embedded so the single
@@ -155,6 +160,7 @@ var schemaEdits = map[int]func(ctx context.Context, tx *sql.Tx) error{
 	50: widenJobKinds,
 	58: widenPlanReviewChecks,
 	59: widenPlanNeedsForemanCheck,
+	64: seedRoleInstructions,
 }
 
 // jobsPairingCheck is the CHECK 0001 put on jobs: foreman jobs have no
@@ -276,4 +282,109 @@ func editTableCheck(ctx context.Context, tx *sql.Tx, table, from, to string) err
 		return fmt.Errorf("close schema edits: %w", err)
 	}
 	return nil
+}
+
+// seedRoleInstructions is 0064's data half: every project gains one row
+// per role. A project with an instructions setting keeps it as its
+// worker text, with the setting's own provenance (imported when the
+// last import set that value, else local). Every role the project has
+// no text for is seeded with the embedded default, provenance
+// "generated from <version>, by upgrade": source 'generated' with the
+// defaults version in settings_version, so the exact default a project
+// runs is pinned at the upgrade and stays even when later defaults
+// change.
+func seedRoleInstructions(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, "SELECT id, settings, settings_prov FROM projects")
+	if err != nil {
+		return fmt.Errorf("list the projects for the role seed: %w", err)
+	}
+	type proj struct {
+		id   int64
+		text string // the worker text, "" when none
+		// imported provenance of the worker text, from settings_prov
+		source, version string
+	}
+	var projs []proj
+	for rows.Next() {
+		var p proj
+		var raw, prov string
+		if err := rows.Scan(&p.id, &raw, &prov); err != nil {
+			rows.Close()
+			return fmt.Errorf("read a project for the role seed: %w", err)
+		}
+		row := map[string]json.RawMessage{}
+		if raw != "" {
+			if err := json.Unmarshal([]byte(raw), &row); err != nil {
+				rows.Close()
+				return fmt.Errorf("parse the settings of project %d: %w", p.id, err)
+			}
+		}
+		if cur, ok := row["instructions"]; ok {
+			var s string
+			if json.Unmarshal(cur, &s) == nil && s != "" {
+				p.text = s
+				p.source = "local"
+				if v, ok := importedValue(prov, "instructions", cur); ok {
+					p.source, p.version = "imported", v
+				}
+			}
+		}
+		projs = append(projs, p)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("list the projects for the role seed: %w", err)
+	}
+	rows.Close()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, p := range projs {
+		for _, role := range roleNames {
+			text, source, version := p.text, p.source, p.version
+			if role != "worker" || source == "" {
+				// Every role a project has no text for — the three
+				// others always, the worker when no setting sets one —
+				// is seeded from the embedded default.
+				text, source, version = "", "generated", defaults.Version
+				b, err := defaults.LiveRoleText(role)
+				if err != nil {
+					return fmt.Errorf("seed the %s role: %w", role, err)
+				}
+				text = b
+			}
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO role_instructions (project_id, role, text, source, settings_version, digest, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				p.id, role, text, source, version, defaults.Digest(text), now); err != nil {
+				return fmt.Errorf("seed the %s role of project %d: %w", role, p.id, err)
+			}
+		}
+	}
+	return nil
+}
+
+// roleNames is the role set of role_instructions, in table-CHECK order.
+var roleNames = []string{"foreman", "plan_review", "worker", "reviewer"}
+
+// importedValue reports the settings version the last import set key
+// to: the provenance's hash when its imported map holds exactly cur.
+func importedValue(prov, key string, cur json.RawMessage) (string, bool) {
+	if prov == "" {
+		return "", false
+	}
+	var p struct {
+		Hash     string                     `json:"hash"`
+		Imported map[string]json.RawMessage `json:"imported"`
+	}
+	if err := json.Unmarshal([]byte(prov), &p); err != nil {
+		return "", false
+	}
+	imp, ok := p.Imported[key]
+	if !ok || p.Hash == "" {
+		return "", false
+	}
+	var a, b bytes.Buffer
+	if json.Compact(&a, imp) != nil || json.Compact(&b, cur) != nil {
+		return "", false
+	}
+	return p.Hash, a.String() == b.String()
 }
