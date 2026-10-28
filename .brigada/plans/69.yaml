@@ -22,6 +22,6 @@ tasks:
     class: "implement"
     deps: []
     base: ""
-    state: reviewing
+    state: needs_foreman
     branch: "brigada/task-215"
     rounds: 1
