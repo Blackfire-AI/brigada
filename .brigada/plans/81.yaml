@@ -84,8 +84,8 @@ tasks:
     deps: ["record"]
     base: "record"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-232"
     rounds: 0
   - id: 233
     name: "init"
