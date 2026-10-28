@@ -260,20 +260,23 @@ func editTableCheckEither(ctx context.Context, tx *sql.Tx, table string, froms [
 // per-role instruction texts (§5.9). A role with no text takes the
 // embedded default, provenance 'generated from <version>, by upgrade';
 // a project whose instructions setting holds a text keeps it as its
-// worker text and gains the other three.
+// worker text, with the setting's provenance — the local or imported
+// source, and for an imported value the settings version (the import
+// hash) — and gains the other three.
 func seedRoleInstructions(ctx context.Context, tx *sql.Tx) error {
-	rows, err := tx.QueryContext(ctx, "SELECT id, settings FROM projects")
+	rows, err := tx.QueryContext(ctx, "SELECT id, settings, settings_prov FROM projects")
 	if err != nil {
 		return fmt.Errorf("list the projects: %w", err)
 	}
 	type projectRow struct {
 		id       int64
 		settings string
+		prov     string
 	}
 	var projects []projectRow
 	for rows.Next() {
 		var p projectRow
-		if err := rows.Scan(&p.id, &p.settings); err != nil {
+		if err := rows.Scan(&p.id, &p.settings, &p.prov); err != nil {
 			rows.Close()
 			return fmt.Errorf("list the projects: %w", err)
 		}
@@ -288,25 +291,45 @@ func seedRoleInstructions(ctx context.Context, tx *sql.Tx) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, p := range projects {
 		var worker string
+		source, version := "local", ""
 		if p.settings != "" {
 			var row map[string]json.RawMessage
 			if json.Unmarshal([]byte(p.settings), &row) == nil {
 				_ = json.Unmarshal(row["instructions"], &worker)
 			}
 		}
+		if worker != "" && p.prov != "" {
+			// The setting's provenance rides along: an instructions the
+			// last import set stays imported, with its settings version.
+			var prov struct {
+				Hash     string                     `json:"hash"`
+				Imported map[string]json.RawMessage `json:"imported"`
+			}
+			if json.Unmarshal([]byte(p.prov), &prov) == nil {
+				var imported string
+				if raw, ok := prov.Imported["instructions"]; ok && json.Unmarshal(raw, &imported) == nil && imported == worker {
+					source, version = "imported", prov.Hash
+				}
+			}
+		}
 		for _, role := range defaults.Roles {
-			text, source := "", generated
-			if role == "worker" && worker != "" {
-				text, source = worker, "instructions setting, by upgrade"
-			} else {
+			text := ""
+			switch {
+			case role == "worker" && worker != "":
+				text = worker
+			default:
 				text, err = defaults.RoleText(role)
 				if err != nil {
 					return err
 				}
 			}
+			roleSource, roleVersion := generated, ""
+			if role == "worker" && worker != "" {
+				roleSource, roleVersion = source, version
+			}
 			if _, err := tx.ExecContext(ctx,
-				"INSERT INTO role_instructions (project_id, role, text, source, digest, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-				p.id, role, text, source, defaults.Digest(text), now); err != nil {
+				"INSERT INTO role_instructions (project_id, role, text, source, settings_version, digest, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				p.id, role, text, roleSource, roleVersion, defaults.Digest(text), now); err != nil {
 				return fmt.Errorf("seed the %s text of project %d: %w", role, p.id, err)
 			}
 		}

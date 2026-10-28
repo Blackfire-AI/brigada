@@ -95,6 +95,63 @@ func TestRoleTextStates(t *testing.T) {
 	}
 }
 
+// TestWorkerRoleTextSynchronized: the worker's role text is the
+// instructions setting — a set or an import through either surface
+// moves the setting and the stored row together, so the task
+// resolution and the role views agree.
+func TestWorkerRoleTextSynchronized(t *testing.T) {
+	e := newEnv(t)
+	// Through the setting: the row materializes it with the local source.
+	e.set(map[string]string{SettingInstructions: "use tabs"})
+	if v := roleTextViews(t, e)[RoleWorker]; v.State != RoleTextFile || v.Text != "use tabs" || v.Source != SourceLocal || v.Digest != defaults.Digest("use tabs") {
+		t.Errorf("after the setting worker = %+v, want the setting materialized", v)
+	}
+	// Through SetRoleText: the setting moves with the row.
+	if _, err := e.eng.SetRoleText(e.ctx, envRepo, RoleWorker, "use spaces", "", ""); err != nil {
+		t.Fatalf("set the worker text: %v", err)
+	}
+	sv := settingOf(t, *mustSettings(t, e), SettingInstructions)
+	if sv.Source != SourceLocal || !strings.HasPrefix(sv.Value, "10 bytes") {
+		t.Errorf("after SetRoleText the setting = %+v, want the local override", sv)
+	}
+	if v := roleTextViews(t, e)[RoleWorker]; v.Text != "use spaces" || v.Source != SourceLocal {
+		t.Errorf("after SetRoleText worker = %+v, want one value", v)
+	}
+	// Through the import: the row carries the import's source and hash.
+	res, err := e.importWithText("instructions_file: .brigada/instructions.md\n", ptr("v1 rules"), true)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if v := roleTextViews(t, e)[RoleWorker]; v.Text != "v1 rules" || v.Source != SourceImported || v.Version != res.Hash {
+		t.Errorf("after the import worker = %+v, want the import's provenance (hash %s)", v, res.Hash)
+	}
+	// Empty by choice: the setting is unset, the row keeps the state.
+	if _, err := e.eng.SetRoleText(e.ctx, envRepo, RoleWorker, "", "", ""); err != nil {
+		t.Fatalf("empty by choice: %v", err)
+	}
+	if sv := settingOf(t, *mustSettings(t, e), SettingInstructions); !sv.Default || sv.Value != "none" {
+		t.Errorf("after the empty set the setting = %+v, want none/default", sv)
+	}
+	if v := roleTextViews(t, e)[RoleWorker]; v.State != RoleTextEmptyByChoice || v.Text != "" {
+		t.Errorf("after the empty set worker = %+v, want empty by choice", v)
+	}
+	// A setting set over the marker replaces it.
+	e.set(map[string]string{SettingInstructions: "back"})
+	if v := roleTextViews(t, e)[RoleWorker]; v.State != RoleTextFile || v.Text != "back" {
+		t.Errorf("after the re-set worker = %+v, want the file state", v)
+	}
+	// Reset: both gone.
+	if err := e.eng.ResetRoleText(e.ctx, envRepo, RoleWorker); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if sv := settingOf(t, *mustSettings(t, e), SettingInstructions); !sv.Default || sv.Value != "none" {
+		t.Errorf("after the reset the setting = %+v, want none/default", sv)
+	}
+	if v := roleTextViews(t, e)[RoleWorker]; v.State != RoleTextNotConfigured || v.Text != "" {
+		t.Errorf("after the reset worker = %+v, want not configured", v)
+	}
+}
+
 // TestRoleTextSeededDefaultIsNotConfigured: a row an upgrade generated
 // reads as not configured, the embedded default it holds.
 func TestRoleTextSeededDefaultIsNotConfigured(t *testing.T) {

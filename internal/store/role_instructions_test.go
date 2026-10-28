@@ -20,12 +20,14 @@ func roleRow(t *testing.T, db *sql.DB, project int64, role string) (text, source
 }
 
 // TestRoleInstructionsMigrationSeeds builds the store of a binary that
-// predates the role_instructions migration, with two projects — one
-// whose instructions setting holds a text, one without — and opens it
-// with this binary: every project gains all four per-role texts. A role
-// with no text takes the embedded default, provenance
-// 'generated from <version>, by upgrade'; the instructed project keeps
-// its setting as the worker text and gains the other three.
+// predates the role_instructions migration, with three projects — one
+// whose instructions setting holds a local text, one whose holds a text
+// the last import set, one without — and opens it with this binary:
+// every project gains all four per-role texts. A role with no text
+// takes the embedded default, provenance 'generated from <version>, by
+// upgrade'; the instructed projects keep their setting as the worker
+// text with its provenance (the imported one with its settings
+// version) and gain the other three.
 func TestRoleInstructionsMigrationSeeds(t *testing.T) {
 	migs, err := allMigrations()
 	if err != nil {
@@ -55,16 +57,19 @@ func TestRoleInstructionsMigrationSeeds(t *testing.T) {
 		t.Fatalf("set user_version: %v", err)
 	}
 	clean := insertProject(t, db)
-	instructed := insertID(t, db, `INSERT INTO projects (repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
+	local := insertID(t, db, `INSERT INTO projects (repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
 		VALUES ('https://example.invalid/other.git', 'main', ?, 'claude', 'sonnet', ?, ?)`,
 		`{"instructions":"private project guidance"}`, ts, ts)
+	imported := insertID(t, db, `INSERT INTO projects (repo_url, default_branch, settings, settings_prov, foreman_harness, foreman_model, created_at, updated_at)
+		VALUES ('https://example.invalid/shared.git', 'main', ?, ?, 'claude', 'sonnet', ?, ?)`,
+		`{"instructions":"shared rules"}`, `{"hash":"imp0rthash","imported":{"instructions":"shared rules"}}`, ts, ts)
 	if err := db.Close(); err != nil {
 		t.Fatalf("close raw store: %v", err)
 	}
 
 	s := openStore(t, path)
-	if got := queryInt(t, s.db, "SELECT COUNT(*) FROM role_instructions"); got != 8 {
-		t.Fatalf("rows after upgrade = %d, want 4 roles x 2 projects", got)
+	if got := queryInt(t, s.db, "SELECT COUNT(*) FROM role_instructions"); got != 12 {
+		t.Fatalf("rows after upgrade = %d, want 4 roles x 3 projects", got)
 	}
 	generated := defaults.GeneratedProvenance(defaults.Version)
 	for _, role := range defaults.Roles {
@@ -76,15 +81,25 @@ func TestRoleInstructionsMigrationSeeds(t *testing.T) {
 		if text != want || source != generated || digest != defaults.Digest(want) {
 			t.Errorf("clean project %s = %d bytes, %q, %q; want the generated default", role, len(text), source, digest)
 		}
-		text, source, _, digest = roleRow(t, s.db, instructed, role)
+		text, source, version, digest := roleRow(t, s.db, local, role)
 		if role == "worker" {
-			if text != "private project guidance" || source != "instructions setting, by upgrade" || digest != defaults.Digest(text) {
-				t.Errorf("instructed project worker = %d bytes, %q, %q; want the setting kept", len(text), source, digest)
+			if text != "private project guidance" || source != "local" || version != "" || digest != defaults.Digest(text) {
+				t.Errorf("local project worker = %d bytes, %q, %q, %q; want the setting kept with its provenance", len(text), source, version, digest)
 			}
 			continue
 		}
 		if text != want || source != generated || digest != defaults.Digest(want) {
-			t.Errorf("instructed project %s = %d bytes, %q, %q; want the generated default", role, len(text), source, digest)
+			t.Errorf("local project %s = %d bytes, %q, %q; want the generated default", role, len(text), source, digest)
+		}
+		text, source, version, digest = roleRow(t, s.db, imported, role)
+		if role == "worker" {
+			if text != "shared rules" || source != "imported" || version != "imp0rthash" || digest != defaults.Digest(text) {
+				t.Errorf("imported project worker = %d bytes, %q, %q, %q; want the setting kept with its import provenance", len(text), source, version, digest)
+			}
+			continue
+		}
+		if text != want || source != generated || digest != defaults.Digest(want) {
+			t.Errorf("imported project %s = %d bytes, %q, %q; want the generated default", role, len(text), source, digest)
 		}
 	}
 }

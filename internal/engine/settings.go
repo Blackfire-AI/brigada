@@ -677,6 +677,13 @@ func (e *Engine) applySettingsTx(tx *sql.Tx, project int64, values map[string]st
 	if err := applySettingsRowTx(tx, project, rawSettings, rawProv, parsed, now); err != nil {
 		return err
 	}
+	// The instructions setting is the worker's role text: materialize
+	// the row so the two never disagree (§5.9).
+	if _, ok := values[SettingInstructions]; ok {
+		if err := syncWorkerTextTx(tx, project, now); err != nil {
+			return err
+		}
+	}
 	_, err := appendEventTx(tx, evProjectSettingSet, project, 0, 0,
 		eventPayload{Reason: strings.Join(settingPairs(values), "; ")}, now)
 	return err

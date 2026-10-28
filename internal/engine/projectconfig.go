@@ -750,6 +750,11 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 		if _, err := tx.Exec("UPDATE projects SET archived_at = NULL, settings = ?, settings_prov = ?, updated_at = ? WHERE id = ?", string(b), pb, fmtTime(now), project); err != nil {
 			return fmt.Errorf("store the settings of project %d: %w", project, err)
 		}
+		// An imported instructions is the worker's role text too:
+		// materialize the row from the setting, provenance and all (§5.9).
+		if err := syncWorkerTextTx(tx, project, now); err != nil {
+			return err
+		}
 		v, err := settingsViewTx(tx, project, shownRepo, e.cfg.ForemanWakeBudget)
 		if err != nil {
 			return err

@@ -3,10 +3,12 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/defaults"
@@ -120,6 +122,36 @@ func roleTextView(role string, row roleTextRow) RoleTextView {
 	return v
 }
 
+// roleTextUpsert writes one role's row, the worker's included.
+const roleTextUpsert = `INSERT INTO role_instructions (project_id, role, text, source, settings_version, digest, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT (project_id, role) DO UPDATE SET
+		text = excluded.text, source = excluded.source, settings_version = excluded.settings_version,
+		digest = excluded.digest, updated_at = excluded.updated_at`
+
+// syncWorkerTextTx materializes the instructions setting into the
+// worker's role row after either changes (§5.9): the setting stays the
+// worker text's one source of truth and the row its stored copy, so the
+// task resolution below and the role views never disagree. An unset
+// setting removes the row; an empty-by-choice marker survives only
+// until the setting next changes.
+func syncWorkerTextTx(tx *sql.Tx, project int64, now time.Time) error {
+	text, meta, err := projectInstructionsTx(tx, project)
+	if err != nil {
+		return err
+	}
+	if text == "" {
+		if _, err := tx.Exec("DELETE FROM role_instructions WHERE project_id = ? AND role = ?", project, RoleWorker); err != nil {
+			return fmt.Errorf("materialize the worker text of project %d: %w", project, err)
+		}
+		return nil
+	}
+	if _, err := tx.Exec(roleTextUpsert, project, RoleWorker, text, meta.Source, meta.Hash, meta.Digest, fmtTime(now)); err != nil {
+		return fmt.Errorf("materialize the worker text of project %d: %w", project, err)
+	}
+	return nil
+}
+
 // SetRoleText sets or imports one role's instruction text (§5.9). A set
 // passes the text with source "" (recorded as a local override); an
 // import passes the file's text, a source naming it and the settings
@@ -128,6 +160,13 @@ func roleTextView(role string, row roleTextRow) RoleTextView {
 // truncated: a refusal leaves the previous value in effect. An empty
 // text is a state of its own — empty by choice — not a reset; use
 // ResetRoleText for that.
+//
+// The worker role is the instructions setting: a set through here is a
+// local set of the setting, and the row is materialized from it, so
+// `project set instructions=`, a project.yaml import and this call all
+// move one value. The passed source and settings version record
+// nothing for the worker — imports of the worker text go through the
+// config import, which keeps its provenance.
 func (e *Engine) SetRoleText(ctx context.Context, repoURL, role, text, source, settingsVersion string) (RoleTextView, error) {
 	if repoURL == "" {
 		return RoleTextView{}, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
@@ -158,13 +197,44 @@ func (e *Engine) SetRoleText(ctx context.Context, repoURL, role, text, source, s
 		if err := activeProjectTx(tx, project); err != nil {
 			return err
 		}
+		if role == RoleWorker {
+			// One source of truth: write the setting as a local override —
+			// an empty text unsets it — then materialize the row from it.
+			var rawSettings, rawProv string
+			if err := tx.QueryRow("SELECT settings, settings_prov FROM projects WHERE id = ?", project).Scan(&rawSettings, &rawProv); err != nil {
+				return fmt.Errorf("read the settings of project %d: %w", project, err)
+			}
+			parsed := map[string]json.RawMessage{SettingInstructions: nil}
+			if text != "" {
+				raw, err := json.Marshal(text)
+				if err != nil {
+					return fmt.Errorf("encode the instructions of project %d: %w", project, err)
+				}
+				parsed[SettingInstructions] = raw
+			}
+			if err := applySettingsRowTx(tx, project, rawSettings, rawProv, parsed, now); err != nil {
+				return err
+			}
+			if err := syncWorkerTextTx(tx, project, now); err != nil {
+				return err
+			}
+			if text == "" {
+				// The setting cannot hold an empty value; the row keeps the
+				// empty-by-choice state alone.
+				digest := instructionsDigest("")
+				if _, err := tx.Exec(roleTextUpsert, project, RoleWorker, "", SourceLocal, "", digest, fmtTime(now)); err != nil {
+					return fmt.Errorf("store the worker text of the project of %s: %w", RedactRepoURL(repoURL), err)
+				}
+			}
+			rows, err := roleTextRowsTx(tx, project)
+			if err != nil {
+				return err
+			}
+			out = roleTextView(RoleWorker, rows[RoleWorker])
+			return nil
+		}
 		digest := instructionsDigest(text)
-		if _, err := tx.Exec(`INSERT INTO role_instructions (project_id, role, text, source, settings_version, digest, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT (project_id, role) DO UPDATE SET
-				text = excluded.text, source = excluded.source, settings_version = excluded.settings_version,
-				digest = excluded.digest, updated_at = excluded.updated_at`,
-			project, role, text, source, settingsVersion, digest, fmtTime(now)); err != nil {
+		if _, err := tx.Exec(roleTextUpsert, project, role, text, source, settingsVersion, digest, fmtTime(now)); err != nil {
 			return fmt.Errorf("store the %s text of the project of %s: %w", role, RedactRepoURL(repoURL), err)
 		}
 		out = roleTextView(role, roleTextRow{text: text, source: source, version: settingsVersion, digest: digest})
@@ -180,7 +250,8 @@ func (e *Engine) SetRoleText(ctx context.Context, repoURL, role, text, source, s
 }
 
 // ResetRoleText removes one role's text: the role is not configured
-// again and the embedded default applies.
+// again and the embedded default applies. For the worker the
+// instructions setting is reset with it.
 func (e *Engine) ResetRoleText(ctx context.Context, repoURL, role string) error {
 	if repoURL == "" {
 		return fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
@@ -189,7 +260,8 @@ func (e *Engine) ResetRoleText(ctx context.Context, repoURL, role string) error 
 		return fmt.Errorf("%w: unknown role %q; valid roles: %s", ErrInvalidSetting, role, strings.Join(RoleTexts, ", "))
 	}
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		if _, err := e.sweepTx(tx, e.cfg.Now()); err != nil {
+		now := e.cfg.Now()
+		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
 		var project int64
@@ -199,6 +271,15 @@ func (e *Engine) ResetRoleText(ctx context.Context, repoURL, role string) error 
 		}
 		if err != nil {
 			return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
+		}
+		if role == RoleWorker {
+			var rawSettings, rawProv string
+			if err := tx.QueryRow("SELECT settings, settings_prov FROM projects WHERE id = ?", project).Scan(&rawSettings, &rawProv); err != nil {
+				return fmt.Errorf("read the settings of project %d: %w", project, err)
+			}
+			if err := applySettingsRowTx(tx, project, rawSettings, rawProv, map[string]json.RawMessage{SettingInstructions: nil}, now); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.Exec("DELETE FROM role_instructions WHERE project_id = ? AND role = ?", project, role); err != nil {
 			return fmt.Errorf("reset the %s text of the project of %s: %w", role, RedactRepoURL(repoURL), err)

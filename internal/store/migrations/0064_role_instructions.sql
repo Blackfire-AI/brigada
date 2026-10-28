@@ -5,9 +5,11 @@
 -- its SHA-256 digest. The Go edit after this SQL seeds every project:
 -- a role with no text takes the embedded default, provenance
 -- 'generated from <version>, by upgrade'; a project whose instructions
--- setting holds a text keeps it as its worker text and gains the other
--- three. A project created after the migration writes no rows: a role
--- with no row reads as not configured and the embedded default applies.
+-- setting holds a text keeps it as its worker text — with the setting's
+-- provenance, the local or imported source and for an imported value
+-- its settings version — and gains the other three. A project created
+-- after the migration writes no rows: a role with no row reads as not
+-- configured and the embedded default applies.
 CREATE TABLE role_instructions (
     project_id        INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     role              TEXT NOT NULL CHECK (role IN ('foreman', 'plan_review', 'worker', 'reviewer')),
