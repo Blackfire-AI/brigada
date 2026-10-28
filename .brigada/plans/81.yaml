@@ -119,8 +119,8 @@ tasks:
     tier: heavy
     effort: medium
     caps: {restart: 4}
-    state: running
-    branch: "brigada/task-235-r3"
+    state: reviewing
+    branch: "brigada/task-235-r4"
     rounds: 0
   - id: 236
     name: "client_show"
