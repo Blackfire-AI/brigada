@@ -22,6 +22,6 @@ tasks:
     class: "implement"
     deps: []
     base: ""
-    state: reviewing
+    state: running
     branch: "brigada/task-216"
-    rounds: 0
+    rounds: 1
