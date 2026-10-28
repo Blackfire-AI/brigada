@@ -74,8 +74,8 @@ tasks:
     base: "prompts_rt"
     continue: "prompts_rt"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-231"
     rounds: 0
   - id: 232
     name: "client"
