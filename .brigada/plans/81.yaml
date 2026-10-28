@@ -40,8 +40,8 @@ tasks:
     tier: heavy
     effort: medium
     state: running
-    branch: "brigada/task-228-r1"
-    rounds: 0
+    branch: "brigada/task-228-r2"
+    rounds: 1
   - id: 229
     name: "skills_api"
     title: "plan_create/plan_amend take skills; re-resolve unstarted tasks"
