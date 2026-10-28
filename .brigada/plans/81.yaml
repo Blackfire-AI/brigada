@@ -7,7 +7,7 @@ title: "Instructions per role (#119) and task skills (#117): design §5.9, §5.1
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-10-28T20:42:23.229737Z
-updated: 2026-10-28T20:43:25.40404Z
+updated: 2026-10-28T20:44:04.190832Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -27,7 +27,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 228
@@ -46,9 +46,9 @@ tasks:
     name: "skills_api"
     title: "plan_create/plan_amend take skills; re-resolve unstarted tasks"
     class: "implement"
-    deps: ["store_skills"]
-    base: "store_skills"
-    continue: "store_skills"
+    deps: ["store_status"]
+    base: "store_status"
+    continue: "store_status"
     tier: heavy
     effort: medium
     state: pending
@@ -70,9 +70,9 @@ tasks:
     name: "record"
     title: "Record skills and digests in history, stats and the plan file"
     class: "implement"
-    deps: ["prompts"]
-    base: "prompts"
-    continue: "prompts"
+    deps: ["prompts_rt"]
+    base: "prompts_rt"
+    continue: "prompts_rt"
     effort: medium
     state: pending
     branch: ""
@@ -139,6 +139,29 @@ tasks:
     deps: ["init"]
     base: "init"
     continue: "init"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 238
+    name: "store_status"
+    title: "status: per-role instruction fields and skills list"
+    class: "implement"
+    deps: ["store_skills"]
+    base: "store_skills"
+    continue: "store_skills"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 239
+    name: "prompts_rt"
+    title: "Runtime resolution of foreman/plan-review texts and job-record provenance"
+    class: "implement"
+    deps: ["prompts"]
+    base: "prompts"
+    continue: "prompts"
+    tier: heavy
     effort: medium
     state: pending
     branch: ""
