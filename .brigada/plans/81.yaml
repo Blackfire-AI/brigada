@@ -151,7 +151,7 @@ tasks:
     base: "store_skills"
     continue: "store_skills"
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-238"
     rounds: 1
   - id: 239
