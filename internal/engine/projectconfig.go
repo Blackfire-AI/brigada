@@ -750,6 +750,13 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 		if _, err := tx.Exec("UPDATE projects SET archived_at = NULL, settings = ?, settings_prov = ?, updated_at = ? WHERE id = ?", string(b), pb, fmtTime(now), project); err != nil {
 			return fmt.Errorf("store the settings of project %d: %w", project, err)
 		}
+		// The worker role row mirrors the import's instructions outcome
+		// (§5.9): text and provenance both, so a re-import that moved
+		// only other keys still dates the row with the new hash, while
+		// a local text or an empty-by-choice mark is left alone.
+		if err := syncWorkerInstructionTx(tx, project, row, newImported, hash, now); err != nil {
+			return err
+		}
 		v, err := settingsViewTx(tx, project, shownRepo, e.cfg.ForemanWakeBudget)
 		if err != nil {
 			return err
