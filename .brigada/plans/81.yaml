@@ -39,8 +39,8 @@ tasks:
     continue: "defaults"
     tier: heavy
     effort: medium
-    state: running
-    branch: "brigada/task-228"
+    state: reviewing
+    branch: "brigada/task-228-r1"
     rounds: 0
   - id: 229
     name: "skills_api"
