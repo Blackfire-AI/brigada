@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,6 +12,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/defaults"
 )
 
 // The schema migrations, one numbered file each, embedded so the single
@@ -155,6 +159,7 @@ var schemaEdits = map[int]func(ctx context.Context, tx *sql.Tx) error{
 	50: widenJobKinds,
 	58: widenPlanReviewChecks,
 	59: widenPlanNeedsForemanCheck,
+	64: seedRoleInstructions,
 }
 
 // jobsPairingCheck is the CHECK 0001 put on jobs: foreman jobs have no
@@ -249,6 +254,64 @@ func editTableCheckEither(ctx context.Context, tx *sql.Tx, table string, froms [
 		}
 	}
 	return fmt.Errorf("edit the %s table: none of the earlier CHECK wordings was found", table)
+}
+
+// seedRoleInstructions is 0064's edit: every project gains its four
+// per-role instruction texts (§5.9). A role with no text takes the
+// embedded default, provenance 'generated from <version>, by upgrade';
+// a project whose instructions setting holds a text keeps it as its
+// worker text and gains the other three.
+func seedRoleInstructions(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, "SELECT id, settings FROM projects")
+	if err != nil {
+		return fmt.Errorf("list the projects: %w", err)
+	}
+	type projectRow struct {
+		id       int64
+		settings string
+	}
+	var projects []projectRow
+	for rows.Next() {
+		var p projectRow
+		if err := rows.Scan(&p.id, &p.settings); err != nil {
+			rows.Close()
+			return fmt.Errorf("list the projects: %w", err)
+		}
+		projects = append(projects, p)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("list the projects: %w", err)
+	}
+	rows.Close()
+	generated := defaults.GeneratedProvenance(defaults.Version)
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, p := range projects {
+		var worker string
+		if p.settings != "" {
+			var row map[string]json.RawMessage
+			if json.Unmarshal([]byte(p.settings), &row) == nil {
+				_ = json.Unmarshal(row["instructions"], &worker)
+			}
+		}
+		for _, role := range defaults.Roles {
+			text, source := "", generated
+			if role == "worker" && worker != "" {
+				text, source = worker, "instructions setting, by upgrade"
+			} else {
+				text, err = defaults.RoleText(role)
+				if err != nil {
+					return err
+				}
+			}
+			if _, err := tx.ExecContext(ctx,
+				"INSERT INTO role_instructions (project_id, role, text, source, digest, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+				p.id, role, text, source, defaults.Digest(text), now); err != nil {
+				return fmt.Errorf("seed the %s text of project %d: %w", role, p.id, err)
+			}
+		}
+	}
+	return nil
 }
 
 // editTableCheck replaces one constraint's text in a table's stored sql.

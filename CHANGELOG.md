@@ -9,6 +9,9 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Embedded default role instructions and task-shape skills for future prompt configuration.
 
+- Every shipped version's default texts, role texts and skill texts alike, are retrievable by version from a versioned archive (`internal/defaults/versions/<version>/…`), held by test to equal the live embed so a three-way diff can rebuild the exact text a file was generated from. Each of the eight task-shape skills now carries a concrete numbered procedure covering its required items.
+- Store migration 0064 records per-role instruction texts (foreman, plan_review, worker, reviewer) with source, settings version and digest, and seeds every project: a role with no text takes the embedded default, provenance `generated from <version>, by upgrade`, and a project's `instructions` setting stays as its worker text while it gains the other three. The engine grows `SetRoleText`, `ResetRoleText` and `ProjectRoleTexts`: the same 8192-byte valid-UTF-8 no-NUL bound as the instructions setting, refused with the role, the size and the limit and never truncated, with the three states `not configured`, `empty by choice` and `file`.
+
 - `brigada init` also writes the operator guide as a Claude Code skill, `.claude/skills/brigada-operator/SKILL.md`, from the same text as `.brigada/operator.md`; a rerun rewrites it and `brigada remove` deletes it.
 - `.brigada/operator.md` tells the operator to put an issue's content into the ask, since the foreman cannot read a tracker, and covers a landing on the default branch with no pull request.
 
