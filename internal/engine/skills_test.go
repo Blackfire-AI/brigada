@@ -249,9 +249,9 @@ func TestCreatePlanResolvesInstructions(t *testing.T) {
 	}
 	// The first job's prompt carries the worker text and the
 	// worker-audience skills alone: surface-parity is for the reviewer.
-	if p := e.jobPrompt(res.Tasks[0].JobID); !strings.Contains(p, "<project-instructions>\nUse tabs.\n</project-instructions>") {
+	if p := e.jobPrompt(res.Tasks[0].JobID); !strings.Contains(p, "<worker-instructions>\nUse tabs.\n</worker-instructions>") {
 		t.Errorf("the first job's prompt does not carry the worker text:\n%s", p)
-	} else if !strings.Contains(p, `<task-skill name="cli-flag">`) || !strings.Contains(p, "register the flag") || strings.Contains(p, "surface-parity") {
+	} else if !strings.Contains(p, `<skill name="cli-flag">`) || !strings.Contains(p, "register the flag") || strings.Contains(p, "surface-parity") {
 		t.Errorf("the first job's prompt carries %q, want the worker-audience skills alone:\n%s", skillNames(e.snapshot(res.Tasks[0].TaskID).Skills), p)
 	}
 
@@ -376,10 +376,10 @@ func TestSubmitTaskRecordsSnapshots(t *testing.T) {
 		t.Fatalf("snapshot = %+v, want both role texts and the two skills", snap)
 	}
 	first := e.jobPrompt(res.JobID)
-	if !strings.Contains(first, "<project-instructions>\nv1 worker\n</project-instructions>") {
+	if !strings.Contains(first, "<worker-instructions>\nv1 worker\n</worker-instructions>") {
 		t.Errorf("the first prompt does not carry the recorded worker text:\n%s", first)
 	}
-	if !strings.Contains(first, `<task-skill name="bugfix">`) || !strings.Contains(first, "v1 bugfix") || strings.Contains(first, "rev-guide") {
+	if !strings.Contains(first, `<skill name="bugfix">`) || !strings.Contains(first, "v1 bugfix") || strings.Contains(first, "rev-guide") {
 		t.Errorf("the first prompt carries the worker-audience skills alone, want bugfix without rev-guide:\n%s", first)
 	}
 
@@ -424,7 +424,7 @@ func TestSubmitTaskRecordsSnapshots(t *testing.T) {
 	if !strings.Contains(p, "<reviewer-instructions>\nv1 reviewer\n</reviewer-instructions>") {
 		t.Errorf("review prompt does not carry the recorded reviewer text in its own section:\n%s", p)
 	}
-	if !strings.Contains(p, `<task-skill name="bugfix">`) || !strings.Contains(p, `<task-skill name="rev-guide">`) || !strings.Contains(p, "v1 rev guide") || strings.Contains(p, "v2 ") {
+	if !strings.Contains(p, `<skill name="bugfix">`) || !strings.Contains(p, `<skill name="rev-guide">`) || !strings.Contains(p, "v1 rev guide") || strings.Contains(p, "v2 ") {
 		t.Errorf("review prompt skills: want the recorded bugfix and rev-guide texts and none of the new:\n%s", p)
 	}
 	if got := e.snapshot(res.TaskID); got.Worker.Text != "v1 worker" || got.Skills[0].Text != "v1 bugfix" || got.Skills[0].TreeDigest != "tree-v1" {
