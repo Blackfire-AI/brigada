@@ -5,9 +5,9 @@
 plan: 81
 title: "Instructions per role (#119) and task skills (#117): design §5.9, §5.10"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-10-28T20:42:23.229737Z
-updated: 2026-10-28T20:42:42.674493Z
+updated: 2026-10-28T20:43:25.40404Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -46,9 +46,9 @@ tasks:
     name: "skills_api"
     title: "plan_create/plan_amend take skills; re-resolve unstarted tasks"
     class: "implement"
-    deps: ["store"]
-    base: "store"
-    continue: "store"
+    deps: ["store_skills"]
+    base: "store_skills"
+    continue: "store_skills"
     tier: heavy
     effort: medium
     state: pending
@@ -81,8 +81,8 @@ tasks:
     name: "client"
     title: "Client: project.yaml instructions map, skills_dir, import, project set"
     class: "implement"
-    deps: ["store"]
-    base: "store"
+    deps: ["record"]
+    base: "record"
     effort: medium
     state: pending
     branch: ""
@@ -91,9 +91,9 @@ tasks:
     name: "init"
     title: "brigada init: role files and skills, instructions diff, take-default, remove"
     class: "implement"
-    deps: ["client"]
-    base: "client"
-    continue: "client"
+    deps: ["client_show"]
+    base: "client_show"
+    continue: "client_show"
     effort: medium
     state: pending
     branch: ""
@@ -102,7 +102,41 @@ tasks:
     name: "docs"
     title: "Docs: GUIDE, COMPATIBILITY, CHANGELOG, operator files, AGENTS/CLAUDE"
     class: "implement"
-    deps: ["record", "init"]
+    deps: ["init_diff"]
+    base: "init_diff"
+    continue: "init_diff"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 235
+    name: "store_skills"
+    title: "Store: skills, role snapshots on tasks, per-prompt bounds, status fields"
+    class: "implement"
+    deps: ["store"]
+    base: "store"
+    continue: "store"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 236
+    name: "client_show"
+    title: "Client: local overrides, conflicts, project show and status output"
+    class: "implement"
+    deps: ["client"]
+    base: "client"
+    continue: "client"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 237
+    name: "init_diff"
+    title: "instructions diff, init --take-default, for roles and skills"
+    class: "implement"
+    deps: ["init"]
     base: "init"
     continue: "init"
     effort: medium
