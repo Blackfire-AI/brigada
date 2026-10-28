@@ -118,8 +118,8 @@ tasks:
     continue: "store"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-235-r1"
     rounds: 0
   - id: 236
     name: "client_show"
