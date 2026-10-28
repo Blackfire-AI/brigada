@@ -24,4 +24,4 @@ tasks:
     base: ""
     state: running
     branch: "brigada/task-216"
-    rounds: 1
+    rounds: 2
