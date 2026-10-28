@@ -7,6 +7,8 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Embedded default role instructions and task-shape skills for future prompt configuration.
+
 - `brigada init` also writes the operator guide as a Claude Code skill, `.claude/skills/brigada-operator/SKILL.md`, from the same text as `.brigada/operator.md`; a rerun rewrites it and `brigada remove` deletes it.
 - `.brigada/operator.md` tells the operator to put an issue's content into the ask, since the foreman cannot read a tracker, and covers a landing on the default branch with no pull request.
 
