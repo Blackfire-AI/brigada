@@ -7,7 +7,7 @@ title: "Instructions per role (#119) and task skills (#117): design §5.9, §5.1
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-10-28T20:42:23.229737Z
-updated: 2026-10-28T20:46:06.361549Z
+updated: 2026-10-28T20:46:41.28173Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -102,9 +102,9 @@ tasks:
     name: "docs"
     title: "Docs: GUIDE, COMPATIBILITY, CHANGELOG, operator files, AGENTS/CLAUDE"
     class: "implement"
-    deps: ["docs_verify"]
-    base: "docs_verify"
-    continue: "docs_verify"
+    deps: ["docs_check"]
+    base: "docs_check"
+    continue: "docs_check"
     effort: medium
     state: pending
     branch: ""
@@ -184,6 +184,17 @@ tasks:
     deps: ["init_diff"]
     base: "init_diff"
     continue: "init_diff"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 242
+    name: "docs_check"
+    title: "Docs verifier test: links, anchors, CLI forms, assertions"
+    class: "implement"
+    deps: ["docs_verify"]
+    base: "docs_verify"
+    continue: "docs_verify"
     effort: medium
     state: pending
     branch: ""
