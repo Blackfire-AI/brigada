@@ -45,6 +45,12 @@ const (
 // import is refused, never truncated.
 const MaxRoleTextBytes = 8192
 
+// ErrRoleTextKept reports an import the caller could see refused: a
+// local override stands under the role's text, keeps its value, and the
+// user resolves the two (§5.9: neither wins silently). The record
+// returned beside it is the kept local one.
+var ErrRoleTextKept = errors.New("a local override kept its value")
+
 // RoleInstructions is one role's instruction text and its provenance.
 // Text is the effective text: the default when the role is not
 // configured, nothing when it is empty by choice, the stored text when
@@ -214,6 +220,123 @@ func (e *Engine) SetRoleInstructions(ctx context.Context, repoURL, role, text st
 	}
 	if ri == nil {
 		return nil, fmt.Errorf("read back the %s instructions the set just wrote", role)
+	}
+	return ri, nil
+}
+
+// roleImportVersion is the settings version an import records beside a
+// role's text: the hash of the imported content with the role and its
+// text, so a change to either shows as a changed import — the same
+// shape of hash the project-config import versions its file with.
+func roleImportVersion(role, text string) string {
+	return ConfigHash([]byte("\x00" + role + "\x00" + text))
+}
+
+// ImportRoleInstructions imports a role's instruction text (§5.9): the
+// text a file held, read and sent by the client, never a path for the
+// engine to read. The text is bounded like a set of it, and a refusal
+// — over the bound, not UTF-8, a NUL — truncates nothing and leaves the
+// previous value in effect. An applied import records the imported
+// source and the import's hash as the settings version, and a changed
+// import over a still-imported value applies; an empty text is an unset
+// value, taking the role back to not configured. A local override wins:
+// the import is refused with ErrRoleTextKept and the kept local record
+// returned beside it.
+func (e *Engine) ImportRoleInstructions(ctx context.Context, repoURL, role, text string) (*RoleInstructions, error) {
+	if !slices.Contains(Roles, role) {
+		return nil, fmt.Errorf("%w: unknown role %q; valid roles: %s", ErrInvalidSetting, role, strings.Join(Roles, ", "))
+	}
+	if repoURL == "" {
+		return nil, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
+	}
+	if _, cerr := Canonicalize(repoURL); cerr != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidSetting, cerr)
+	}
+	if text != "" {
+		if err := ValidateRoleText(role, text); err != nil {
+			return nil, err
+		}
+	}
+	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+		now := e.cfg.Now()
+		if _, err := e.sweepTx(tx, now); err != nil {
+			return err
+		}
+		var project int64
+		err := lookupProjectTx(tx, repoURL, "id", &project)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			project, err = createProjectTx(tx, repoURL, setupDefaultBranch, "", "", now)
+			if err != nil {
+				return err
+			}
+		case err != nil:
+			return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
+		}
+		if err := activeProjectTx(tx, project); err != nil {
+			return err
+		}
+		var cur, curMeta string
+		err = tx.QueryRow("SELECT text, meta FROM role_instructions WHERE project_id = ? AND role = ?", project, role).Scan(&cur, &curMeta)
+		switch {
+		case errors.Is(err, sql.ErrNoRows), err == nil:
+		default:
+			return fmt.Errorf("read the %s instructions of project %d: %w", role, project, err)
+		}
+		if err == nil && curMeta != "" {
+			var meta roleTextMeta
+			if err := json.Unmarshal([]byte(curMeta), &meta); err != nil {
+				return fmt.Errorf("parse the %s instructions of project %d: %w", role, project, err)
+			}
+			if meta.Source == SourceLocal {
+				// A local override wins over the file (§13.1): the
+				// import is refused whole and the local value stays.
+				return ErrRoleTextKept
+			}
+		}
+		switch {
+		case text == "":
+			// An empty file is an unset value (§5.9): the role returns
+			// to not configured, the shipped default applying again.
+			if _, err := tx.Exec("DELETE FROM role_instructions WHERE project_id = ? AND role = ?", project, role); err != nil {
+				return fmt.Errorf("unset the %s instructions of project %d: %w", role, project, err)
+			}
+		default:
+			meta, err := json.Marshal(roleTextMeta{Source: SourceImported, Version: roleImportVersion(role, text),
+				Digest: instructionsDigest(text), Bytes: len(text)})
+			if err != nil {
+				return fmt.Errorf("encode the %s instructions of project %d: %w", role, project, err)
+			}
+			if _, err := tx.Exec(`INSERT INTO role_instructions (project_id, role, text, meta) VALUES (?, ?, ?, ?)
+				ON CONFLICT (project_id, role) DO UPDATE SET text = excluded.text, meta = excluded.meta`,
+				project, role, text, string(meta)); err != nil {
+				return fmt.Errorf("import the %s instructions of project %d: %w", role, project, err)
+			}
+		}
+		_, err = appendEventTx(tx, evProjectSettingSet, project, 0, 0,
+			eventPayload{Reason: fmt.Sprintf("instructions %s: %s (imported)", role, instructionsSummary(text))}, now)
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, ErrRoleTextKept) {
+			kept, kerr := e.RoleInstructions(ctx, repoURL, role)
+			if kerr != nil || kept == nil {
+				return nil, err
+			}
+			return kept, fmt.Errorf("%w: %s instructions keep the local text %s; resolve the two",
+				ErrRoleTextKept, role, instructionsSummary(kept.Text))
+		}
+		if errors.Is(err, ErrInvalidSetting) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("import the %s instructions of the project of %s: %w", role, RedactRepoURL(repoURL), err)
+	}
+	ri, err := e.RoleInstructions(ctx, repoURL, role)
+	if err != nil {
+		return nil, err
+	}
+	if ri == nil {
+		return nil, fmt.Errorf("read back the %s instructions the import just wrote", role)
 	}
 	return ri, nil
 }

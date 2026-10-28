@@ -120,3 +120,121 @@ func TestRoleInstructionsBounds(t *testing.T) {
 
 // quoteJSON and itoa keep the seeded meta literal in the tests short.
 func quoteJSON(s string) string { return `"` + s + `"` }
+
+// importRole imports one role's text, failing the test on a refusal.
+func (e *env) importRole(role, text string) (*RoleInstructions, error) {
+	e.t.Helper()
+	return e.eng.ImportRoleInstructions(e.ctx, envRepo, role, text)
+}
+
+// TestRoleInstructionsImport: an imported role text is validated like a
+// set and records the imported source and the import's hash as its
+// settings version; a changed import over a still-imported value
+// applies; a refusal keeps the previous value; a local override wins
+// and is returned kept; an empty import unsets the role.
+func TestRoleInstructionsImport(t *testing.T) {
+	e := newEnv(t)
+
+	// The first import applies over the not-configured role.
+	ri, err := e.importRole(RolePlanReview, "v1 rules")
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if ri.State != RoleTextFile || ri.Text != "v1 rules" || ri.Source != SourceImported ||
+		ri.Version != roleImportVersion(RolePlanReview, "v1 rules") ||
+		ri.Digest != instructionsDigest("v1 rules") || ri.Bytes != len("v1 rules") {
+		t.Fatalf("after the import = %+v, want the file state with imported provenance and version", ri)
+	}
+
+	// A changed import over a still-imported value applies.
+	ri, err = e.importRole(RolePlanReview, "v2 rules")
+	if err != nil {
+		t.Fatalf("re-import: %v", err)
+	}
+	if ri.Text != "v2 rules" || ri.Source != SourceImported || ri.Version != roleImportVersion(RolePlanReview, "v2 rules") {
+		t.Fatalf("after the re-import = %+v, want the new text with its own version", ri)
+	}
+
+	// A refused import — over the bound, a NUL, not UTF-8 — names the
+	// role and the numbers and keeps the previous value in effect.
+	atLimit := strings.Repeat("b", MaxRoleTextBytes)
+	if _, err := e.importRole(RolePlanReview, atLimit); err != nil {
+		t.Fatalf("import at the limit: %v", err)
+	}
+	for name, bad := range map[string]string{
+		"over the limit": atLimit + "c",
+		"nul":            "a\x00b",
+		"not utf-8":      "a\xffb",
+	} {
+		_, err := e.importRole(RolePlanReview, bad)
+		if !errors.Is(err, ErrInvalidSetting) {
+			t.Errorf("%s: err = %v, want ErrInvalidSetting", name, err)
+		}
+		if !strings.Contains(err.Error(), RolePlanReview) {
+			t.Errorf("%s: err = %v, want the role named", name, err)
+		}
+		if name == "over the limit" && (!strings.Contains(err.Error(), "8193") || !strings.Contains(err.Error(), "8192")) {
+			t.Errorf("%s: err = %v, want the size and the limit", name, err)
+		}
+	}
+	if ri := e.roleText(RolePlanReview); ri.Text != atLimit || ri.Source != SourceImported {
+		t.Errorf("after the refusals = %+v, want the previous imported value", ri)
+	}
+
+	// A local override wins over the file: the import is refused with
+	// the kept local record beside it.
+	local := e.setRole(RolePlanReview, "my local rules")
+	ri, err = e.importRole(RolePlanReview, "v3 rules")
+	if !errors.Is(err, ErrRoleTextKept) {
+		t.Fatalf("import over a local override: err = %v, want ErrRoleTextKept", err)
+	}
+	if ri == nil || ri.State != RoleTextFile || ri.Text != local.Text || ri.Source != SourceLocal {
+		t.Errorf("kept record = %+v, want the local one", ri)
+	}
+	if !strings.Contains(err.Error(), "local") {
+		t.Errorf("err = %v, want it to name the local override", err)
+	}
+	if got := e.roleText(RolePlanReview); got.Text != "my local rules" {
+		t.Errorf("after the conflict = %+v, want the local override kept", got)
+	}
+
+	// An empty import unsets the role: back to not configured.
+	ri, err = e.importRole(RoleReviewer, "")
+	if err != nil {
+		t.Fatalf("empty import over an unconfigured role: %v", err)
+	}
+	if ri.State != RoleTextNotConfigured {
+		t.Fatalf("after the empty import = %+v, want not configured", ri)
+	}
+	if _, err := e.importRole(RoleWorker, "w1 rules"); err != nil {
+		t.Fatalf("import the worker text: %v", err)
+	}
+	if ri, err = e.importRole(RoleWorker, ""); err != nil || ri.State != RoleTextNotConfigured {
+		t.Fatalf("empty import over an imported value = %+v, %v; want not configured", ri, err)
+	}
+	e.setRole(RoleReviewer, "kept?")
+	if ri, err = e.importRole(RoleReviewer, ""); !errors.Is(err, ErrRoleTextKept) {
+		t.Fatalf("empty import over a local override: err = %v, want ErrRoleTextKept", err)
+	} else if ri.Text != "kept?" {
+		t.Errorf("kept record = %+v, want the local text", ri)
+	}
+
+	// The seeded provenance is no override: an import replaces it.
+	seeded, err := defaults.LiveRoleText(RoleForeman)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := store.RoleSourceSeededPrefix + defaults.Version + ", by upgrade"
+	e.exec(`INSERT INTO role_instructions (project_id, role, text, meta) VALUES (?, ?, ?, ?)`,
+		e.project, RoleForeman, seeded,
+		`{"source":`+quoteJSON(source)+`,"version":`+quoteJSON(defaults.Version)+
+			`,"digest":"`+defaults.Digest(seeded)+`","bytes":`+strconv.Itoa(len(seeded))+`}`)
+	if ri, err = e.importRole(RoleForeman, "file rules"); err != nil || ri.Text != "file rules" || ri.Source != SourceImported {
+		t.Fatalf("import over the seed = %+v, %v; want the imported text", ri, err)
+	}
+
+	// Only the four roles exist on the import path too.
+	if _, err := e.importRole("operator", "x"); !errors.Is(err, ErrInvalidSetting) {
+		t.Errorf("unknown role on import: err = %v, want ErrInvalidSetting", err)
+	}
+}
