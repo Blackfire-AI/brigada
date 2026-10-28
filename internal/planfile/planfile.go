@@ -62,6 +62,9 @@ type Task struct {
 	Deps     []string
 	Base     string // the dep whose branch the work starts from; '' = the default branch
 	Continue string // the dep whose author's session the first work job resumes (§6.1); '' = fresh
+	// Skills names the task's skills in the order it recorded them
+	// (§5.10); the file carries names alone, never texts.
+	Skills   []string
 	State    string
 	Branch   string // the result branch (§6.4); '' until the task pushed one
 	Rounds   int    // fix and review rounds spent (§7)
@@ -86,7 +89,7 @@ const header = `# Brigada plan file (§6.4): a mirror of the engine's store, whi
 # and the open questions — never transcripts.
 `
 
-const taskOptionsComment = "# Optional tier (light, standard, heavy) and effort (low, medium, high, max)\n# describe the model needed and how hard it should think (§6.1);\n# review_tier and review_effort do the same for its reviews (§7, §8); caps\n# override the task's fix_rounds, review_rounds and restart budgets (§6.1).\n"
+const taskOptionsComment = "# Optional tier (light, standard, heavy) and effort (low, medium, high, max)\n# describe the model needed and how hard it should think (§6.1);\n# review_tier and review_effort do the same for its reviews (§7, §8); caps\n# override the task's fix_rounds, review_rounds and restart budgets (§6.1);\n# skills name the project's skills the task carries, in order (§5.10).\n"
 
 // Keep the default file byte-for-byte stable; describe optional keys when used.
 const tasksComment = tasksGraphComment + taskOptionsComment
@@ -119,7 +122,7 @@ func Render(p Plan) ([]byte, error) {
 	fmt.Fprintf(&b, "updated: %s\n", p.Updated.UTC().Format(time.RFC3339Nano))
 	comment := tasksGraphComment
 	for _, t := range p.Tasks {
-		if (t.Tier != "" && t.Tier != adapter.TierStandard) || t.Effort != "" || t.ReviewTier != "" || t.ReviewEffort != "" || len(t.Caps) > 0 {
+		if (t.Tier != "" && t.Tier != adapter.TierStandard) || t.Effort != "" || t.ReviewTier != "" || t.ReviewEffort != "" || len(t.Caps) > 0 || len(t.Skills) > 0 {
 			comment = tasksComment
 			break
 		}
@@ -177,6 +180,13 @@ func Render(p Plan) ([]byte, error) {
 				return nil, fmt.Errorf("task %d: %w", t.ID, err)
 			}
 			fmt.Fprintf(&b, "    caps: %s\n", line)
+		}
+		if len(t.Skills) > 0 {
+			items := make([]string, len(t.Skills))
+			for i, n := range t.Skills {
+				items[i] = strconv.Quote(n)
+			}
+			fmt.Fprintf(&b, "    skills: [%s]\n", strings.Join(items, ", "))
 		}
 		fmt.Fprintf(&b, "    state: %s\n", t.State)
 		fmt.Fprintf(&b, "    branch: %s\n", strconv.Quote(t.Branch))
@@ -436,6 +446,20 @@ func (r *reader) task() (Task, error) {
 		}
 		if t.Caps, err = parseCaps(raw); err != nil {
 			return Task{}, r.errf("caps: %v", err)
+		}
+	}
+	// skills is written only when the task carries some (§5.10), in the
+	// order recorded, so files written before skills stay valid.
+	if r.peekIs(in + "skills:") {
+		raw, err := r.field(in, "skills")
+		if err != nil {
+			return Task{}, err
+		}
+		if t.Skills, err = parseList(raw); err != nil {
+			return Task{}, r.errf("skills: %v", err)
+		}
+		if len(t.Skills) == 0 {
+			return Task{}, r.errf("skills: written only when the task carries some")
 		}
 	}
 	if t.State, err = r.wordField(in, "state"); err != nil {

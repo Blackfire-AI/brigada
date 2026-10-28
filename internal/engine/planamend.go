@@ -1221,7 +1221,7 @@ func recordPlanOutcomeTx(tx *sql.Tx, project int64, success bool, now time.Time)
 	}
 	if _, err := tx.Exec(`INSERT INTO outcomes (project_id, agent_id, class, attempts, successes, updated_at)
 		VALUES (?, ?, ?, 1, ?, ?)
-		ON CONFLICT(project_id, agent_id, class) DO UPDATE SET
+		ON CONFLICT(project_id, agent_id, class, skills) DO UPDATE SET
 			attempts = attempts + 1, successes = successes + excluded.successes, updated_at = excluded.updated_at`,
 		project, agent, classPlan, successes, fmtTime(now)); err != nil {
 		return fmt.Errorf("record the outcome of the plan: %w", err)

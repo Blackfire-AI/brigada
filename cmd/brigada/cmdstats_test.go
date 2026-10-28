@@ -26,6 +26,7 @@ func TestStatsTable(t *testing.T) {
 	stub := stubStats{stats: []engine.ProjectStats{
 		{ProjectID: 1, RepoURL: "https://example.invalid/one.git", Rows: []engine.StatsRow{
 			{Harness: "claude", Model: "sonnet", Tier: "heavy", Live: true, Class: "implement", Attempts: 6, Successes: 5, Score: engine.Score(6, 5)},
+			{Harness: "claude", Model: "sonnet", Tier: "heavy", Live: true, Class: "implement", Skills: 2, Attempts: 1, Successes: 1, Score: engine.Score(1, 1)},
 			{Harness: "kimi", Model: "k2", Tier: "standard", Live: true, Class: "implement", Attempts: 2, Successes: 1, Score: engine.Score(2, 1)},
 			{Harness: "zcode", Model: "glm", Tier: "light", Live: false, Class: "implement", Score: engine.Score(0, 0)},
 		}},
@@ -36,10 +37,11 @@ func TestStatsTable(t *testing.T) {
 		t.Fatalf("exit %d, stderr %q", code, errb.String())
 	}
 	want := "https://example.invalid/one.git\n" +
-		"  AGENT                TIER      CLASS      ATTEMPTS  SUCCESSES  RATE  CONFIDENCE  INPUT OUTPUT CACHED REASONING TOKENS CALLS CALLS/JOB CALLS/SUCCESS USD WALL(s) COST/SUCCESS\n" +
-		"  claude/sonnet        heavy     implement  6         5          0.79  enough - - - - - - - - - - -\n" +
-		"  kimi/k2              standard  implement  2         1          0.50  starting - - - - - - - - - - -\n" +
-		"  zcode/glm (stale)    light     implement  0         0          0.50  none - - - - - - - - - - -\n" +
+		"  AGENT                TIER      CLASS      SKILLS  ATTEMPTS  SUCCESSES  RATE  CONFIDENCE  INPUT OUTPUT CACHED REASONING TOKENS CALLS CALLS/JOB CALLS/SUCCESS USD WALL(s) COST/SUCCESS\n" +
+		"  claude/sonnet        heavy     implement  0       6         5          0.79  enough - - - - - - - - - - -\n" +
+		"  claude/sonnet        heavy     implement  2       1         1          0.75  starting - - - - - - - - - - -\n" +
+		"  kimi/k2              standard  implement  0       2         1          0.50  starting - - - - - - - - - - -\n" +
+		"  zcode/glm (stale)    light     implement  0       0         0          0.50  none - - - - - - - - - - -\n" +
 		"\n" +
 		"https://example.invalid/two.git\n" +
 		"  no agents registered\n"
@@ -57,7 +59,7 @@ func TestStatsTable(t *testing.T) {
 	}
 	// Aligned: every table row puts CLASS's column at the same offset.
 	col := strings.Index(gotLines[1], "CLASS")
-	for _, l := range gotLines[2:5] {
+	for _, l := range gotLines[2:6] {
 		if !strings.HasPrefix(l[col:], "implement") {
 			t.Errorf("row %q: class column is not aligned under CLASS", l)
 		}

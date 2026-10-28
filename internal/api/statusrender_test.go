@@ -160,6 +160,22 @@ func TestStatusSectionsTaskTierEffort(t *testing.T) {
 	}
 }
 
+// TestStatusSectionsShowsSkills: a task's skills ride its line, in order
+// (§5.10); a task with none shows no word.
+func TestStatusSectionsShowsSkills(t *testing.T) {
+	st := Status{Plans: []engine.StatusPlan{{ID: 1, Tasks: []engine.StatusTask{
+		{ID: 1, Title: "skilled", State: "ready", Skills: []string{"cli-flag", "bugfix"}},
+		{ID: 2, Title: "plain", State: "ready"},
+	}}}}
+	got := StatusSections(st)
+	if !strings.Contains(got, "  task #1 ready skilled skills:cli-flag,bugfix") {
+		t.Errorf("status lacks the skills beside the task:\n%s", got)
+	}
+	if strings.Contains(got, "task #2 ready plain skills") {
+		t.Errorf("a task with no skills shows the word:\n%s", got)
+	}
+}
+
 // TestStatusSectionsLandReadyStates: the land_ready gate's target state
 // (issue #87) rides the task line — ready, the hold, and the not-ready
 // backoff's wait.

@@ -84,14 +84,14 @@ func renderStats(w io.Writer, stats []engine.ProjectStats) error {
 			continue
 		}
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "  AGENT\tTIER\tCLASS\tATTEMPTS\tSUCCESSES\tRATE\tCONFIDENCE\tINPUT\tOUTPUT\tCACHED\tREASONING\tTOKENS\tCALLS\tCALLS/JOB\tCALLS/SUCCESS\tUSD\tWALL(s)\tCOST/SUCCESS")
+		fmt.Fprintln(tw, "  AGENT\tTIER\tCLASS\tSKILLS\tATTEMPTS\tSUCCESSES\tRATE\tCONFIDENCE\tINPUT\tOUTPUT\tCACHED\tREASONING\tTOKENS\tCALLS\tCALLS/JOB\tCALLS/SUCCESS\tUSD\tWALL(s)\tCOST/SUCCESS")
 		for _, r := range p.Rows {
 			agent := agentName(r.Harness, r.Model, r.Effort)
 			if !r.Live {
 				agent += " (stale)"
 			}
-			fmt.Fprintf(tw, "  %s\t%s\t%s\t%d\t%d\t%.2f\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				agent, r.Tier, r.Class, r.Attempts, r.Successes, r.Score, statsConfidence(r.Attempts),
+			fmt.Fprintf(tw, "  %s\t%s\t%s\t%d\t%d\t%d\t%.2f\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				agent, r.Tier, r.Class, r.Skills, r.Attempts, r.Successes, r.Score, statsConfidence(r.Attempts),
 				statsTokens(r.InputTokens), statsTokens(r.OutputTokens), statsTokens(r.CachedInputTokens), statsTokens(r.ReasoningTokens), statsTokens(r.Tokens), statsTokens(r.ModelCalls), statsRatio(r.CallsPerJob), statsRatio(r.CallsPerSuccess), statsNumber(r.CostUSD), statsNumber(r.WallSeconds), statsCost(r))
 		}
 		if err := tw.Flush(); err != nil {

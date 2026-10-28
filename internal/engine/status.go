@@ -234,6 +234,8 @@ type StatusTask struct {
 	// first work job resumes (§6.1), by plan name or "#id"; empty when
 	// the task continues none.
 	Continues string `json:"continues,omitempty"`
+	// Skills names the skills the task recorded (§5.10), in order.
+	Skills []string `json:"skills,omitempty"`
 }
 
 // NeedsYouItem is one entry of the "needs you" queue (§10): something a
@@ -595,7 +597,7 @@ func statusPlanRows(tx *sql.Tx, query string, args ...any) ([]StatusPlan, error)
 
 // statusPlanTasksTx reads one status plan's tasks, in id order.
 func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, error) {
-	rows, err := tx.Query(`SELECT t.id, t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, '')
+	rows, err := tx.Query(`SELECT t.id, t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, ''), t.skills
 		FROM tasks t
 		LEFT JOIN landings l ON l.task_id = t.id
 		LEFT JOIN land_holds h ON h.task_id = t.id AND h.state = 'held'
@@ -607,12 +609,13 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, err
 	tasks := []StatusTask{}
 	for rows.Next() {
 		var t StatusTask
-		var capsJSON, pushed, retryAt, holdReason string
+		var capsJSON, pushed, retryAt, holdReason, skills string
 		var exit sql.NullInt64
-		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &retryAt, &exit, &holdReason); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &retryAt, &exit, &holdReason, &skills); err != nil {
 			return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
 		}
 		t.Caps = parseTaskCaps(capsJSON)
+		t.Skills = taskSkillNames(skills)
 		// A landing recorded as waiting sits at the push gate, not yet
 		// landed (§7.1); every other landing record — pushed or local, by
 		// the land job or a detected trailer — marks the task landed.

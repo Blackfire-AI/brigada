@@ -78,6 +78,12 @@ func summary(it Item) string {
 		TierServed string `json:"tier_served"`
 		EffortFrom string `json:"effort_from"`
 		EffortTo   string `json:"effort_to"`
+		Prompt     *struct {
+			Template     int      `json:"template"`
+			Instructions string   `json:"instructions"`
+			Reviewer     string   `json:"reviewer"`
+			Skills       []string `json:"skills"`
+		} `json:"prompt"`
 	}
 	if json.Unmarshal(it.Payload, &p) != nil {
 		return string(it.Payload)
@@ -126,6 +132,24 @@ func summary(it Item) string {
 	addInt("epoch", p.Epoch)
 	add("path", p.Path)
 	addInt("bytes", p.Bytes)
+	// A leased job's prompt names what it was composed from (§9): the
+	// template version and the digests, shortened to the usual 12.
+	if p.Prompt != nil {
+		short := func(d string) string {
+			if len(d) > 12 {
+				return d[:12]
+			}
+			return d
+		}
+		addInt("template", int64(p.Prompt.Template))
+		add("instructions", short(p.Prompt.Instructions))
+		add("reviewer", short(p.Prompt.Reviewer))
+		skills := make([]string, len(p.Prompt.Skills))
+		for i, d := range p.Prompt.Skills {
+			skills[i] = short(d)
+		}
+		add("skills", strings.Join(skills, ","))
+	}
 	return strings.Join(parts, " ")
 }
 

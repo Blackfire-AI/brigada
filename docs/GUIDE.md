@@ -705,7 +705,7 @@ Only you can decide: no foreman tool approves a plan or passes a gate.
 
 ### The plan file
 
-Every change to a plan is mirrored to `.brigada/plans/<plan-id>.yaml` and pushed to the `brigada/plans` branch of your remote, not to your default branch. The file holds the graph (deps, base, and a `continue` where one is set), the task states, the branches, the open questions and the foreman's task tier and effort, but no transcripts; the setting `plan_files: off` stops the mirror, and then nothing is written or pushed. It carries the foreman's tier rather than the effective tier raised by escalation; a standard tier and an unset effort are omitted.
+Every change to a plan is mirrored to `.brigada/plans/<plan-id>.yaml` and pushed to the `brigada/plans` branch of your remote, not to your default branch. The file holds the graph (deps, base, and a `continue` where one is set), each task's skill names in the order recorded (a `skills` list, written only for a task that has skills; names only, never texts), the task states, the branches, the open questions and the foreman's task tier and effort, but no transcripts; the setting `plan_files: off` stops the mirror, and then nothing is written or pushed. It carries the foreman's tier rather than the effective tier raised by escalation; a standard tier and an unset effort are omitted.
 
 The store is the authority, and the file is a copy that may lag: a push that fails is retried on the next change. The file exists so that `brigada recover` can rebuild plans after a lost store ([section 10](#10-backups-and-recovery)), and so you can see a plan from another machine.
 
@@ -965,10 +965,11 @@ With `headroom = true` (the default), task workers on the account that serves yo
 `brigada stats` prints one table per repo:
 
 ```text
-AGENT  TIER  CLASS  ATTEMPTS  SUCCESSES  RATE  CONFIDENCE  INPUT  OUTPUT  CACHED  REASONING  TOKENS  CALLS  CALLS/JOB  CALLS/SUCCESS  USD  WALL(s)  COST/SUCCESS
+AGENT  TIER  CLASS  SKILLS  ATTEMPTS  SUCCESSES  RATE  CONFIDENCE  INPUT  OUTPUT  CACHED  REASONING  TOKENS  CALLS  CALLS/JOB  CALLS/SUCCESS  USD  WALL(s)  COST/SUCCESS
 ```
 
 - **Tier** is the model-name table label (`light`, `standard` or `heavy`), corrected by any `tier.<harness>/<model>` config override, and determines which task tier the agent serves. The record stays keyed by repo, class and agent; changing the tier label keeps the agent's existing outcomes.
+- **Skills** is how many skills the tasks of the row carried ([design.md](design.md) §5.10). A row is one agent, class and skill count, so tasks with one skill and tasks with two are never pooled, and each row's rate comes from its own attempts. The dispatcher ranks on the sum over the skill counts. `status` shows a task's skills beside it as `skills:a,b`; the JSON `stats` rows, from the API and the MCP tool, carry the same number as `skills`.
 - **Attempts and successes** are counted when a task ends, for the agent that wrote the final change, in the task's class.
   - A success is a task whose check passed and, for `implement` tasks, whose review approved within the allowed rounds. Tasks of other classes succeed when the run is done with its check passed, with no review.
   - A task that runs out of rounds counts an attempt without a success.

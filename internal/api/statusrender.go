@@ -115,6 +115,9 @@ func StatusSections(st Status) string {
 				if t.Continues != "" {
 					line += " (continues " + t.Continues + ")"
 				}
+				if len(t.Skills) > 0 {
+					line += " skills:" + strings.Join(t.Skills, ",")
+				}
 				if t.Branch != "" {
 					line += " [" + t.Branch + "]"
 				}

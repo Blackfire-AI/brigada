@@ -19,6 +19,8 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Every engine-composed job records beside its prompt what the prompt was composed from (schema 0066, `jobs.prompt_meta`): the template's version and the SHA-256 digests of the instruction and skill texts the prompt carried — the worker template's for a work, fix, answer, restart or continue job; the review template's with both role texts for a review; the re-review's, the plan review's with its role texts, and the foreman turn's with the foreman text — so a recorded prompt is reproducible from the recorded snapshot. A retry or requeue that reuses a job's prompt carries its meta too.
 
+- A task's skills are recorded where you look (issue #117): `status` shows `skills:a,b` beside the task, the history's lease event of a job carries the template version and the digests of the instruction and skill texts its prompt carried, and the plan file mirrors the skill names in order (a `skills` list, written only when the task has some, round-tripping through the plan-file reader). The outcome record is split by skill count (schema 0067), so `brigada stats` gains a `SKILLS` column and the API and MCP rows a `skills` field; one-skill and two-skill tasks are never pooled, and the dispatcher ranks on the sum, so its scores do not change.
+
 - `brigada init` also writes the operator guide as a Claude Code skill, `.claude/skills/brigada-operator/SKILL.md`, from the same text as `.brigada/operator.md`; a rerun rewrites it and `brigada remove` deletes it.
 - `.brigada/operator.md` tells the operator to put an issue's content into the ask, since the foreman cannot read a tracker, and covers a landing on the default branch with no pull request.
 

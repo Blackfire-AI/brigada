@@ -147,12 +147,16 @@ type eventPayload struct {
 	// The approval limit's why (§6.3): the plan, and the classes and
 	// protected paths that put it over (Count holds the task count,
 	// Reason the reasons in words).
-	Plan    int64    `json:"plan,omitempty"`
-	Classes []string `json:"classes,omitempty"`
-	Paths   []string `json:"paths,omitempty"`
-	Agent   int64    `json:"agent,omitempty"`
-	Score   float64  `json:"score,omitempty"`
-	Pick    string   `json:"pick,omitempty"`
+	Plan int64 `json:"plan,omitempty"`
+	// Prompt is what a leased job's prompt was composed from (§5.9
+	// 'Versioning', §9): the template version and the digests of the
+	// instruction and skill texts it carried.
+	Prompt  *promptMeta `json:"prompt,omitempty"`
+	Classes []string    `json:"classes,omitempty"`
+	Paths   []string    `json:"paths,omitempty"`
+	Agent   int64       `json:"agent,omitempty"`
+	Score   float64     `json:"score,omitempty"`
+	Pick    string      `json:"pick,omitempty"`
 	// ExclusionLifted marks an agent pick of the very agent a review
 	// retry's exclusion named (§7, decided 2026-10-20): no other
 	// qualifying reviewer was available, so the preference was lifted

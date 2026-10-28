@@ -1327,11 +1327,15 @@ func recordOutcomeTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 	if job.AgentID == 0 {
 		return nil
 	}
-	_, err := tx.Exec(`INSERT INTO outcomes (project_id, agent_id, class, attempts, successes, updated_at)
-		VALUES (?, ?, ?, 1, 1, ?)
-		ON CONFLICT(project_id, agent_id, class) DO UPDATE SET
+	skills, err := taskSkillCountTx(tx, job.TaskID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO outcomes (project_id, agent_id, class, skills, attempts, successes, updated_at)
+		VALUES (?, ?, ?, ?, 1, 1, ?)
+		ON CONFLICT(project_id, agent_id, class, skills) DO UPDATE SET
 			attempts = attempts + 1, successes = successes + 1, updated_at = excluded.updated_at`,
-		job.ProjectID, job.AgentID, string(KindReview), fmtTime(now))
+		job.ProjectID, job.AgentID, string(KindReview), skills, fmtTime(now))
 	if err != nil {
 		return fmt.Errorf("record the outcome of job %d: %w", job.ID, err)
 	}
@@ -1373,11 +1377,15 @@ func recordTaskOutcomeTx(tx *sql.Tx, job *jobRow, success bool, now time.Time) e
 	if success {
 		successes = 1
 	}
-	_, err = tx.Exec(`INSERT INTO outcomes (project_id, agent_id, class, attempts, successes, updated_at)
-		VALUES (?, ?, ?, 1, ?, ?)
-		ON CONFLICT(project_id, agent_id, class) DO UPDATE SET
+	skills, err := taskSkillCountTx(tx, job.TaskID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO outcomes (project_id, agent_id, class, skills, attempts, successes, updated_at)
+		VALUES (?, ?, ?, ?, 1, ?, ?)
+		ON CONFLICT(project_id, agent_id, class, skills) DO UPDATE SET
 			attempts = attempts + 1, successes = successes + excluded.successes, updated_at = excluded.updated_at`,
-		job.ProjectID, agent, class, successes, fmtTime(now))
+		job.ProjectID, agent, class, skills, successes, fmtTime(now))
 	if err != nil {
 		return fmt.Errorf("record the outcome of task %d: %w", job.TaskID, err)
 	}
