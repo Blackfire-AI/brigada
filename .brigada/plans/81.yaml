@@ -118,7 +118,7 @@ tasks:
     continue: "store"
     tier: heavy
     effort: medium
-    state: done
+    state: running
     branch: "brigada/task-235-r2"
     rounds: 0
   - id: 236
