@@ -1,0 +1,111 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 81
+title: "Instructions per role (#119) and task skills (#117): design §5.9, §5.10"
+repo: "github.com/Blackfire-AI/brigada"
+state: needs_foreman
+created: 2026-10-28T20:42:23.229737Z
+updated: 2026-10-28T20:42:42.674493Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps — the continued
+# dep when base is empty and continue is set, else the default branch; merge a
+# task after its base. A task with continue, one of deps, starts in the
+# session of the dep's author.
+# States are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1);
+# review_tier and review_effort do the same for its reviews (§7, §8); caps
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1).
+tasks:
+  - id: 227
+    name: "defaults"
+    title: "Default role texts and eight default skills as embedded files"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 228
+    name: "store"
+    title: "Store: role instruction texts, skills, bounds, migration, status fields"
+    class: "implement"
+    deps: ["defaults"]
+    base: "defaults"
+    continue: "defaults"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 229
+    name: "skills_api"
+    title: "plan_create/plan_amend take skills; re-resolve unstarted tasks"
+    class: "implement"
+    deps: ["store"]
+    base: "store"
+    continue: "store"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 230
+    name: "prompts"
+    title: "Prompt composition per role: contract/judgment split, delimiters, skills"
+    class: "implement"
+    deps: ["skills_api"]
+    base: "skills_api"
+    continue: "skills_api"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 231
+    name: "record"
+    title: "Record skills and digests in history, stats and the plan file"
+    class: "implement"
+    deps: ["prompts"]
+    base: "prompts"
+    continue: "prompts"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 232
+    name: "client"
+    title: "Client: project.yaml instructions map, skills_dir, import, project set"
+    class: "implement"
+    deps: ["store"]
+    base: "store"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 233
+    name: "init"
+    title: "brigada init: role files and skills, instructions diff, take-default, remove"
+    class: "implement"
+    deps: ["client"]
+    base: "client"
+    continue: "client"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 234
+    name: "docs"
+    title: "Docs: GUIDE, COMPATIBILITY, CHANGELOG, operator files, AGENTS/CLAUDE"
+    class: "implement"
+    deps: ["record", "init"]
+    base: "init"
+    continue: "init"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
