@@ -155,6 +155,7 @@ var schemaEdits = map[int]func(ctx context.Context, tx *sql.Tx) error{
 	50: widenJobKinds,
 	58: widenPlanReviewChecks,
 	59: widenPlanNeedsForemanCheck,
+	64: seedRoleInstructions,
 }
 
 // jobsPairingCheck is the CHECK 0001 put on jobs: foreman jobs have no
