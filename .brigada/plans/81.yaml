@@ -52,8 +52,8 @@ tasks:
     tier: heavy
     effort: medium
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-229"
+    rounds: 1
   - id: 230
     name: "prompts"
     title: "Prompt composition per role: contract/judgment split, delimiters, skills"
