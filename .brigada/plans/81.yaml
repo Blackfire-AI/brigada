@@ -7,7 +7,7 @@ title: "Instructions per role (#119) and task skills (#117): design §5.9, §5.1
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-10-28T20:42:23.229737Z
-updated: 2026-10-28T20:47:26.108343Z
+updated: 2026-10-28T22:59:45.785685Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -118,9 +118,10 @@ tasks:
     continue: "store"
     tier: heavy
     effort: medium
+    caps: {restart: 4}
     state: running
     branch: "brigada/task-235-r3"
-    rounds: 1
+    rounds: 0
   - id: 236
     name: "client_show"
     title: "Client: local overrides, conflicts, project show and status output"
