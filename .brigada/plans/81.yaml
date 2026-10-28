@@ -74,7 +74,7 @@ tasks:
     base: "prompts_rt"
     continue: "prompts_rt"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-231"
     rounds: 0
   - id: 232
@@ -84,7 +84,7 @@ tasks:
     deps: ["record"]
     base: "record"
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 233
