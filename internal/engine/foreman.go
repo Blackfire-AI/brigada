@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/foreman"
 )
 
 // SubmitForemanTurn queues one headless foreman turn for the project
@@ -57,21 +59,31 @@ func (e *Engine) submitForemanTurnTx(tx *sql.Tx, project int64, inbox ForemanInb
 	if _, err := e.rotateForemanSessionTx(tx, project, now); err != nil {
 		return SubmitResult{}, err
 	}
-	prompt, err := foremanPromptTx(tx, project, inbox, now)
+	promptText, err := foremanPromptTx(tx, project, inbox, now)
 	if err != nil {
 		return SubmitResult{}, err
+	}
+	// The job records what its prompt was composed from (§5.9
+	// 'Versioning'): the turn template's version and, when the
+	// foreman's role text was resolved into the prompt, its digest.
+	meta := promptMeta{Template: foreman.TurnTemplateVersion}
+	if text, terr := storedRoleTextTx(tx, project, RoleForeman); terr != nil {
+		return SubmitResult{}, terr
+	} else if text != "" {
+		meta.Instructions = instructionsDigest(text)
 	}
 	// The harness and model are the job's placement constraint (§8): only
 	// an agent offering exactly that pair may take the turn, so it runs on
 	// the model the user chose (foremanPairTx).
 	return e.submitTx(tx, SubmitParams{
-		Key:       fmt.Sprintf("foreman:%d", project),
-		ProjectID: project,
-		Kind:      KindForeman,
-		Mode:      ModeSession,
-		Prompt:    prompt,
-		Harness:   harness,
-		Model:     model,
-		NotBefore: notBefore,
+		Key:        fmt.Sprintf("foreman:%d", project),
+		ProjectID:  project,
+		Kind:       KindForeman,
+		Mode:       ModeSession,
+		Prompt:     promptText,
+		PromptMeta: marshalPromptMeta(meta),
+		Harness:    harness,
+		Model:      model,
+		NotBefore:  notBefore,
 	}, now)
 }

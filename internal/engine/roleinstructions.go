@@ -168,6 +168,24 @@ func roleInstructionsTx(tx *sql.Tx, project int64, role string) (*RoleInstructio
 	return out, nil
 }
 
+// storedRoleTextTx reads one role's text as a prompt carries it (§5.9):
+// the stored row — the user's text, or the upgrade's seed of the default —
+// and "" when the project has no row at all. Unlike
+// roleInstructionsTx, which reports the live embedded default for a
+// role no row configures, a prompt composed from this never falls back
+// to a text in the binary: a not-configured role runs on the contract
+// alone (§5.9).
+func storedRoleTextTx(tx *sql.Tx, project int64, role string) (string, error) {
+	ri, err := roleInstructionsTx(tx, project, role)
+	if err != nil {
+		return "", err
+	}
+	if ri.Source == SourceDefault {
+		return "", nil
+	}
+	return ri.Text, nil
+}
+
 // SetRoleInstructions sets one role's instruction text for the repo's
 // project, from a file the client read or text the user gave. An empty
 // text is the empty-by-choice state, not a return to the default. A

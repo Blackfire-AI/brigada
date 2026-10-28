@@ -507,17 +507,18 @@ func (e *Engine) queueTaskWorkTx(tx *sql.Tx, project, taskID int64, spec string,
 	}
 	// The task's recorded snapshot is what the prompt carries (§5.10):
 	// the worker text and the worker-audience skills.
-	guidance, err := taskWorkerGuidanceTx(tx, taskID)
+	guidance, meta, err := taskWorkerGuidanceTx(tx, taskID)
 	if err != nil {
 		return SubmitResult{}, err
 	}
 	params := SubmitParams{
-		Key:       fmt.Sprintf("task:%d", taskID),
-		ProjectID: project,
-		TaskID:    taskID,
-		Kind:      KindWork,
-		Mode:      ModeFresh,
-		Prompt:    prompt.ComposeWorkerPrompt(spec, check, "", guidance...),
+		Key:        fmt.Sprintf("task:%d", taskID),
+		ProjectID:  project,
+		TaskID:     taskID,
+		Kind:       KindWork,
+		Mode:       ModeFresh,
+		Prompt:     prompt.ComposeWorkerPrompt(spec, check, "", guidance...),
+		PromptMeta: meta,
 	}
 	if cont, err := e.continuePlacementTx(tx, taskID, now); err != nil {
 		return SubmitResult{}, err

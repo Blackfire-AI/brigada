@@ -261,11 +261,14 @@ type RoleSnapshot struct {
 
 // TaskSkill is one skill as a task recorded it, in the order given.
 type TaskSkill struct {
-	Name       string `json:"name"`
-	For        string `json:"for"`
-	Text       string `json:"text"`
-	Digest     string `json:"digest"`
-	TreeDigest string `json:"tree_digest,omitempty"`
+	Name   string `json:"name"`
+	For    string `json:"for"`
+	Text   string `json:"text"`
+	Digest string `json:"digest"`
+	// Description is the skill's frontmatter line, recorded beside the
+	// text so a plan review can judge the pick without the store.
+	Description string `json:"description,omitempty"`
+	TreeDigest  string `json:"tree_digest,omitempty"`
 }
 
 // TaskInstructions is the snapshot a task takes at creation of what its
@@ -335,7 +338,7 @@ func resolveTaskInstructionsTx(tx *sql.Tx, project int64, task string, skillName
 				return TaskInstructions{}, fmt.Errorf("%w: task %q names skill %q, which the project has not imported; known skills: %s",
 					ErrTaskInstructions, task, name, knownSkills(have))
 			}
-			out.Skills = append(out.Skills, TaskSkill{Name: s.Name, For: s.For, Text: s.Text, Digest: s.Digest, TreeDigest: s.TreeDigest})
+			out.Skills = append(out.Skills, TaskSkill{Name: s.Name, For: s.For, Text: s.Text, Digest: s.Digest, Description: s.Description, TreeDigest: s.TreeDigest})
 		}
 	}
 	worker, err := roleInstructionsTx(tx, project, RoleWorker)
@@ -403,6 +406,64 @@ func recordTaskInstructionsTx(tx *sql.Tx, taskID int64, ti TaskInstructions, now
 	return nil
 }
 
+// promptMeta is what a job records beside its composed prompt (§5.9
+// 'Versioning'): the template's version and the digests of the
+// instruction and skill texts the prompt carried, so a recorded prompt
+// is reproducible from the recorded snapshot.
+type promptMeta struct {
+	// Template is the version of the template the prompt was composed
+	// from: the worker's, the review's, the re-review's, the plan
+	// review's or the foreman turn's.
+	Template int `json:"template"`
+	// Instructions is the digest of the instruction text the prompt
+	// carried — the worker snapshot for the author's jobs, the
+	// convention the author followed for a review, the foreman text a
+	// plan review or a turn carries.
+	Instructions string `json:"instructions,omitempty"`
+	// Reviewer is the digest of the reviewer's own role text, on the
+	// prompts that carry one.
+	Reviewer string `json:"reviewer,omitempty"`
+	// Skills holds the digests of the skills the prompt carried, in
+	// the order it carried them.
+	Skills []string `json:"skills,omitempty"`
+}
+
+// marshalPromptMeta encodes a prompt's meta for the job's column; "" is
+// never a value, an empty meta still names its template.
+func marshalPromptMeta(m promptMeta) string {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Sprintf(`{"template":%d}`, m.Template)
+	}
+	return string(b)
+}
+
+// workerPromptMeta is the meta of a prompt composed from the snapshot by
+// workerGuidance: the worker template's version, the worker text's
+// digest and the worker-audience skills' digests in order.
+func workerPromptMeta(ti TaskInstructions) promptMeta {
+	m := promptMeta{Template: prompt.WorkerTemplateVersion, Instructions: ti.Worker.Digest}
+	for _, s := range ti.Skills {
+		if s.For != SkillForReviewer {
+			m.Skills = append(m.Skills, s.Digest)
+		}
+	}
+	return m
+}
+
+// reviewerPromptMeta is the meta of a prompt composed from the snapshot
+// by reviewerGuidance: the review template's version, the digests of
+// both role texts and the reviewer-audience skills' digests in order.
+func reviewerPromptMeta(ti TaskInstructions) promptMeta {
+	m := promptMeta{Template: prompt.ReviewTemplateVersion, Instructions: ti.Worker.Digest, Reviewer: ti.Reviewer.Digest}
+	for _, s := range ti.Skills {
+		if s.For != SkillForWorker {
+			m.Skills = append(m.Skills, s.Digest)
+		}
+	}
+	return m
+}
+
 // workerGuidance turns a recorded snapshot into the options a worker
 // prompt takes (§5.10): the worker text and the skills not for the
 // reviewer alone, in the order recorded.
@@ -444,26 +505,28 @@ func reviewerPromptSkills(ti TaskInstructions) []prompt.Skill {
 }
 
 // taskWorkerGuidanceTx reads the snapshot a task recorded as a worker
-// prompt takes it: every job of the task's author — its first work, a
-// fix round, an answer, a restart — composes from this, whatever the
-// project's settings say now.
-func taskWorkerGuidanceTx(tx *sql.Tx, taskID int64) ([]prompt.Option, error) {
+// prompt takes it, with the meta the job records beside the prompt:
+// every job of the task's author — its first work, a fix round, an
+// answer, a restart — composes from this, whatever the project's
+// settings say now.
+func taskWorkerGuidanceTx(tx *sql.Tx, taskID int64) ([]prompt.Option, string, error) {
 	ti, err := taskSnapshotTx(tx, taskID)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return workerGuidance(ti), nil
+	return workerGuidance(ti), marshalPromptMeta(workerPromptMeta(ti)), nil
 }
 
 // taskReviewerGuidanceTx reads the snapshot a task recorded as a review
-// prompt takes it: the reviewer's own text beside the convention the
-// author followed, and the reviewer's skills.
-func taskReviewerGuidanceTx(tx *sql.Tx, taskID int64) ([]prompt.Option, error) {
+// prompt takes it, with the meta the job records beside the prompt: the
+// reviewer's own text beside the convention the author followed, and
+// the reviewer's skills.
+func taskReviewerGuidanceTx(tx *sql.Tx, taskID int64) ([]prompt.Option, string, error) {
 	ti, err := taskSnapshotTx(tx, taskID)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return reviewerGuidance(ti), nil
+	return reviewerGuidance(ti), marshalPromptMeta(reviewerPromptMeta(ti)), nil
 }
 
 // reresolveTaskInstructionsTx re-resolves what a task that has not

@@ -2,9 +2,12 @@ package engine
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
 // importSkills imports the project's skills, failing the test on a
@@ -524,5 +527,71 @@ func TestLegacyTaskKeepsFirstGuidance(t *testing.T) {
 	if strings.Count(p, old) != 1 || strings.Contains(p, newer) {
 		t.Errorf("review prompt carries old %d times, new %t; want the old text exactly once and none of the new:\n%s",
 			strings.Count(p, old), strings.Contains(p, newer), p)
+	}
+	if strings.Contains(p, "<reviewer-instructions>") {
+		t.Errorf("the legacy review prompt has a reviewer-instructions section; want none beside the convention the author followed:\n%s", p)
+	}
+}
+
+// TestJobRecordsPromptMeta: every job of a task records beside its
+// prompt what the prompt was composed from (§5.9 'Versioning'): the
+// template's version and the digests of the instruction and skill
+// texts it carried — the worker template's for the author's jobs, the
+// review template's with both role texts for the review — so a
+// recorded prompt is reproducible from the recorded snapshot.
+func TestJobRecordsPromptMeta(t *testing.T) {
+	e := newEnv(t)
+	e.importSkills(
+		Skill{Name: "bugfix", Text: "v1 bugfix"},
+		Skill{Name: "rev-guide", For: SkillForReviewer, Text: "v1 rev guide"},
+	)
+	e.setRole(RoleWorker, "v1 worker")
+	e.setRole(RoleReviewer, "v1 reviewer")
+	res := e.submitTask(TaskParams{RepoURL: envRepo, BaseRef: "main", Spec: "fix the bug", CheckCmd: "go test ./...", Skills: []string{"bugfix", "rev-guide"}})
+
+	meta := func(job int64) promptMeta {
+		var m promptMeta
+		if raw := e.str("SELECT prompt_meta FROM jobs WHERE id = ?", job); raw == "" {
+			t.Fatalf("job %d records no prompt_meta", job)
+		} else if err := json.Unmarshal([]byte(raw), &m); err != nil {
+			t.Fatalf("parse the prompt_meta of job %d: %v", job, err)
+		}
+		return m
+	}
+	snap := e.snapshot(res.TaskID)
+	if m := meta(res.JobID); m.Template != prompt.WorkerTemplateVersion ||
+		m.Instructions != instructionsDigest("v1 worker") || m.Reviewer != "" ||
+		len(m.Skills) != 1 || m.Skills[0] != instructionsDigest("v1 bugfix") {
+		t.Errorf("the work job's meta = %+v; want the worker template, the worker digest and the worker-audience skill alone", m)
+	}
+	if got, want := e.str("SELECT prompt_meta FROM jobs WHERE id = ?", res.JobID), marshalPromptMeta(workerPromptMeta(snap)); got != want {
+		t.Errorf("the work job's prompt_meta = %q, want %q", got, want)
+	}
+
+	author := e.agented("author", "anthropic", "implement")
+	g := e.leaseAny(author)
+	if ans := e.complete(g, doneOn(branchOf(res.TaskID), failCheck)); ans != AnsOK {
+		t.Fatalf("complete the failed-check work: %s", ans)
+	}
+	fix := e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'fix'", res.TaskID)
+	if got, want := e.str("SELECT prompt_meta FROM jobs WHERE id = ?", fix), marshalPromptMeta(workerPromptMeta(snap)); got != want {
+		t.Errorf("the fix job's prompt_meta = %q, want %q: the snapshot, not the store", got, want)
+	}
+	fg := e.authorLease(author)
+	if fg == nil {
+		t.Fatal("the fix round was not leased")
+	}
+	e.agented("reviewer", "google", "implement", "review")
+	if ans := e.complete(fg, doneOn(branchOf(res.TaskID), passCheck)); ans != AnsOK {
+		t.Fatalf("complete the fixed work: %s", ans)
+	}
+	review := e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review'", res.TaskID)
+	if review == 0 {
+		t.Fatalf("no review job; have %v", e.eventKinds())
+	}
+	if m := meta(review); m.Template != prompt.ReviewTemplateVersion ||
+		m.Instructions != instructionsDigest("v1 worker") || m.Reviewer != instructionsDigest("v1 reviewer") ||
+		len(m.Skills) != 2 || m.Skills[0] != instructionsDigest("v1 bugfix") || m.Skills[1] != instructionsDigest("v1 rev guide") {
+		t.Errorf("the review job's meta = %+v; want the review template, both role digests and both skills", m)
 	}
 }

@@ -458,6 +458,7 @@ func (e *Engine) retryInfraFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 		Kind:          job.Kind,
 		Mode:          job.Mode,
 		Prompt:        job.Prompt,
+		PromptMeta:    job.PromptMeta,
 		Harness:       job.Harness,
 		Labels:        jobLabels(job),
 		ExcludeFamily: job.ExcludeFamily,
@@ -621,6 +622,7 @@ func (e *Engine) autoRetryFixTx(tx *sql.Tx, job *jobRow, kind, text string, now 
 		Kind:         KindFix,
 		Mode:         mode,
 		Prompt:       job.Prompt,
+		PromptMeta:   job.PromptMeta,
 		Harness:      harness,
 		RequireAgent: agent,
 		Round:        roundNone,
@@ -786,7 +788,7 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 	if err != nil {
 		return err
 	}
-	guidance, err := taskWorkerGuidanceTx(tx, job.TaskID)
+	guidance, meta, err := taskWorkerGuidanceTx(tx, job.TaskID)
 	if err != nil {
 		return err
 	}
@@ -801,6 +803,7 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 		Kind:         KindFix,
 		Mode:         ModeSession,
 		Prompt:       prompt.ComposeWorkerPrompt(spec, check, feedback, guidance...),
+		PromptMeta:   meta,
 		Harness:      harness,
 		RequireAgent: agent,
 		Round:        round,
@@ -1012,7 +1015,7 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 	if err != nil {
 		return err
 	}
-	reviewGuidance, err := taskReviewerGuidanceTx(tx, job.TaskID)
+	reviewGuidance, reviewMeta, err := taskReviewerGuidanceTx(tx, job.TaskID)
 	if err != nil {
 		return err
 	}
@@ -1027,6 +1030,7 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 		Kind:          KindReview,
 		Mode:          ModeFresh,
 		Prompt:        prompt.ComposeReviewPrompt(spec, prompt.WorkerFeedback(job.Prompt), checkJSON, base, branch, reviewGuidance...),
+		PromptMeta:    reviewMeta,
 		ExcludeFamily: exclude,
 	}
 	if resumed != nil {
@@ -1034,6 +1038,7 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 		// diff it read: the prompt says what changed since (§7).
 		params.Mode = ModeSession
 		params.Prompt = reReviewPrompt(wr, checkJSON, base, branch, resumed.since)
+		params.PromptMeta = marshalPromptMeta(promptMeta{Template: prompt.ReReviewTemplateVersion})
 		params.Harness, params.RequireAgent = resumed.harness, resumed.agent
 	}
 	if _, err = e.submitTx(tx, params, now); err != nil {
@@ -1163,7 +1168,7 @@ func (e *Engine) requeueReviewTx(tx *sql.Tx, job *jobRow, c Completion, now time
 		return e.needsForemanTx(tx, job, evReviewNoVerdict,
 			eventPayload{Reason: boundNote(reason + "; no agent can take the review")}, now)
 	}
-	reviewPrompt, err := retryPromptTx(tx, job)
+	reviewPrompt, reviewMeta, err := retryPromptTx(tx, job)
 	if err != nil {
 		return err
 	}
@@ -1174,6 +1179,7 @@ func (e *Engine) requeueReviewTx(tx *sql.Tx, job *jobRow, c Completion, now time
 		Kind:          KindReview,
 		Mode:          ModeFresh,
 		Prompt:        reviewPrompt,
+		PromptMeta:    reviewMeta,
 		ExcludeFamily: job.ExcludeFamily,
 		ExcludeAgent:  job.ExcludeAgent,
 	}, now)
@@ -1249,7 +1255,7 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 		}
 		return e.needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: text}, now)
 	}
-	reviewPrompt, err := retryPromptTx(tx, job)
+	reviewPrompt, reviewMeta, err := retryPromptTx(tx, job)
 	if err != nil {
 		return err
 	}
@@ -1260,6 +1266,7 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 		Kind:          KindReview,
 		Mode:          ModeFresh,
 		Prompt:        reviewPrompt,
+		PromptMeta:    reviewMeta,
 		ExcludeFamily: job.ExcludeFamily,
 		ExcludeAgent:  job.AgentID,
 	}, now)

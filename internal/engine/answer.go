@@ -102,7 +102,7 @@ func (e *Engine) answerTx(tx *sql.Tx, project, taskID int64, text string, now ti
 	if err != nil {
 		return AnswerResult{}, err
 	}
-	guidance, err := taskWorkerGuidanceTx(tx, taskID)
+	guidance, meta, err := taskWorkerGuidanceTx(tx, taskID)
 	if err != nil {
 		return AnswerResult{}, err
 	}
@@ -118,6 +118,7 @@ func (e *Engine) answerTx(tx *sql.Tx, project, taskID int64, text string, now ti
 		Kind:         KindFix,
 		Mode:         ModeSession,
 		Prompt:       prompt.ComposeAnswerPrompt(spec, check, text, guidance...),
+		PromptMeta:   meta,
 		Harness:      harness,
 		RequireAgent: agent,
 		Round:        roundNone,
@@ -213,7 +214,7 @@ func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note stri
 	if err != nil {
 		return RestartResult{}, err
 	}
-	guidance, err := taskWorkerGuidanceTx(tx, taskID)
+	guidance, meta, err := taskWorkerGuidanceTx(tx, taskID)
 	if err != nil {
 		return RestartResult{}, err
 	}
@@ -225,6 +226,7 @@ func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note stri
 		Kind:         KindWork,
 		Mode:         ModeFresh,
 		Prompt:       prompt.ComposeWorkerPrompt(spec, check, note, guidance...),
+		PromptMeta:   meta,
 		Restart:      true,
 		RequireAgent: agent,
 		NotBefore:    notBefore,

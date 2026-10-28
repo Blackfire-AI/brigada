@@ -157,38 +157,39 @@ func reReviewPrompt(wr workerResultFields, checkJSON, base, branch, since string
 }
 
 // freshReviewPromptTx is the prompt of a fresh review of the task as it
-// stands: the one a retry or a requeue of a re-review asks, since the
-// re-review's own prompt is meant for the session it resumes. It is
-// composed as queueReviewTx composes a first review's, from the task's
-// latest work or fix job.
-func freshReviewPromptTx(tx *sql.Tx, taskID int64) (string, error) {
+// stands, with the meta the job records beside it: the one a retry or a
+// requeue of a re-review asks, since the re-review's own prompt is
+// meant for the session it resumes. It is composed as queueReviewTx
+// composes a first review's, from the task's latest work or fix job.
+func freshReviewPromptTx(tx *sql.Tx, taskID int64) (string, string, error) {
 	var authorPrompt, checkJSON string
 	if err := tx.QueryRow(`SELECT prompt, COALESCE(check_result, '') FROM jobs
 		WHERE task_id = ? AND kind IN ('work', 'fix') ORDER BY id DESC LIMIT 1`, taskID).Scan(&authorPrompt, &checkJSON); err != nil {
-		return "", fmt.Errorf("read the author job of task %d: %w", taskID, err)
+		return "", "", fmt.Errorf("read the author job of task %d: %w", taskID, err)
 	}
 	var branch string
 	if err := tx.QueryRow("SELECT COALESCE(branch, '') FROM tasks WHERE id = ?", taskID).Scan(&branch); err != nil {
-		return "", fmt.Errorf("read the branch of task %d: %w", taskID, err)
+		return "", "", fmt.Errorf("read the branch of task %d: %w", taskID, err)
 	}
 	spec, base, err := taskSpecAndBaseTx(tx, taskID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	guidance, err := taskReviewerGuidanceTx(tx, taskID)
+	guidance, meta, err := taskReviewerGuidanceTx(tx, taskID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return prompt.ComposeReviewPrompt(spec, prompt.WorkerFeedback(authorPrompt), checkJSON, base, branch, guidance...), nil
+	return prompt.ComposeReviewPrompt(spec, prompt.WorkerFeedback(authorPrompt), checkJSON, base, branch, guidance...), meta, nil
 }
 
-// retryPromptTx is the prompt a retry or a requeue of the review job
-// carries: the job's own, which asks the same question of the next
-// reviewer — except for a re-review, whose prompt speaks to a session no
-// other agent has, so the next reviewer gets the fresh review instead.
-func retryPromptTx(tx *sql.Tx, job *jobRow) (string, error) {
+// retryPromptTx is the prompt and its meta a retry or a requeue of the
+// review job carries: the job's own, which asks the same question of
+// the next reviewer — except for a re-review, whose prompt speaks to a
+// session no other agent has, so the next reviewer gets the fresh
+// review instead.
+func retryPromptTx(tx *sql.Tx, job *jobRow) (string, string, error) {
 	if job.Mode != ModeSession {
-		return job.Prompt, nil
+		return job.Prompt, job.PromptMeta, nil
 	}
 	return freshReviewPromptTx(tx, job.TaskID)
 }
