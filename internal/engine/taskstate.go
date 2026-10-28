@@ -786,7 +786,7 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 	if err != nil {
 		return err
 	}
-	instructions, err := taskInstructionsTx(tx, job.TaskID)
+	guidance, err := taskWorkerGuidanceTx(tx, job.TaskID)
 	if err != nil {
 		return err
 	}
@@ -800,7 +800,7 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 		TaskID:       job.TaskID,
 		Kind:         KindFix,
 		Mode:         ModeSession,
-		Prompt:       prompt.ComposeWorkerPrompt(spec, check, feedback, prompt.WithInstructions(instructions)),
+		Prompt:       prompt.ComposeWorkerPrompt(spec, check, feedback, guidance...),
 		Harness:      harness,
 		RequireAgent: agent,
 		Round:        round,
@@ -1012,7 +1012,7 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 	if err != nil {
 		return err
 	}
-	instructions, err := taskInstructionsTx(tx, job.TaskID)
+	reviewGuidance, err := taskReviewerGuidanceTx(tx, job.TaskID)
 	if err != nil {
 		return err
 	}
@@ -1026,7 +1026,7 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 		TaskID:        job.TaskID,
 		Kind:          KindReview,
 		Mode:          ModeFresh,
-		Prompt:        prompt.ComposeReviewPrompt(spec, prompt.WorkerFeedback(job.Prompt), checkJSON, base, branch, prompt.WithInstructions(instructions)),
+		Prompt:        prompt.ComposeReviewPrompt(spec, prompt.WorkerFeedback(job.Prompt), checkJSON, base, branch, reviewGuidance...),
 		ExcludeFamily: exclude,
 	}
 	if resumed != nil {

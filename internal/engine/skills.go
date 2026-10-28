@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
 // Task skills (design §5.10) and the snapshot a task records of what its
@@ -399,6 +401,69 @@ func recordTaskInstructionsTx(tx *sql.Tx, taskID int64, ti TaskInstructions, now
 		return fmt.Errorf("record the instructions of task %d: %w", taskID, err)
 	}
 	return nil
+}
+
+// workerGuidance turns a recorded snapshot into the options a worker
+// prompt takes (§5.10): the worker text and the skills not for the
+// reviewer alone, in the order recorded.
+func workerGuidance(ti TaskInstructions) []prompt.Option {
+	return []prompt.Option{prompt.WithInstructions(ti.Worker.Text), prompt.WithSkills(workerPromptSkills(ti))}
+}
+
+// reviewerGuidance turns a recorded snapshot into the options a review
+// prompt takes (§5.10): the reviewer's own text, the worker text as the
+// convention the author followed, and the skills not for the worker
+// alone.
+func reviewerGuidance(ti TaskInstructions) []prompt.Option {
+	return []prompt.Option{prompt.WithInstructions(ti.Worker.Text),
+		prompt.WithReviewerInstructions(ti.Reviewer.Text), prompt.WithSkills(reviewerPromptSkills(ti))}
+}
+
+// workerPromptSkills copies the skills a worker prompt carries: every
+// one not meant for the reviewer alone.
+func workerPromptSkills(ti TaskInstructions) []prompt.Skill {
+	var out []prompt.Skill
+	for _, s := range ti.Skills {
+		if s.For != SkillForReviewer {
+			out = append(out, prompt.Skill{Name: s.Name, Text: s.Text})
+		}
+	}
+	return out
+}
+
+// reviewerPromptSkills copies the skills a review prompt carries: every
+// one not meant for the worker alone.
+func reviewerPromptSkills(ti TaskInstructions) []prompt.Skill {
+	var out []prompt.Skill
+	for _, s := range ti.Skills {
+		if s.For != SkillForWorker {
+			out = append(out, prompt.Skill{Name: s.Name, Text: s.Text})
+		}
+	}
+	return out
+}
+
+// taskWorkerGuidanceTx reads the snapshot a task recorded as a worker
+// prompt takes it: every job of the task's author — its first work, a
+// fix round, an answer, a restart — composes from this, whatever the
+// project's settings say now.
+func taskWorkerGuidanceTx(tx *sql.Tx, taskID int64) ([]prompt.Option, error) {
+	ti, err := taskSnapshotTx(tx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return workerGuidance(ti), nil
+}
+
+// taskReviewerGuidanceTx reads the snapshot a task recorded as a review
+// prompt takes it: the reviewer's own text beside the convention the
+// author followed, and the reviewer's skills.
+func taskReviewerGuidanceTx(tx *sql.Tx, taskID int64) ([]prompt.Option, error) {
+	ti, err := taskSnapshotTx(tx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return reviewerGuidance(ti), nil
 }
 
 // reresolveTaskInstructionsTx re-resolves what a task that has not

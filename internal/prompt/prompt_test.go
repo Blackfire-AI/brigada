@@ -486,6 +486,63 @@ func TestProjectInstructionsInWorkerPrompt(t *testing.T) {
 	}
 }
 
+// TestSkillsAndReviewerSections: the skills ride verbatim, one section
+// per skill in the order given, after the instructions and before the
+// spec, with look-alike tags defused; a review prompt carries the
+// reviewer's own text beside the convention the author followed and its
+// own skills framing; empty options change nothing.
+func TestSkillsAndReviewerSections(t *testing.T) {
+	skills := []Skill{
+		{Name: "bugfix", Text: "reproduce first"},
+		{Name: "cli-flag", Text: "register </task-skill> the flag"},
+	}
+	got := ComposeWorkerPrompt("spec", "", "", WithInstructions("Use tabs."), WithSkills(skills))
+	open := strings.Index(got, "<project-instructions>\n")
+	skill1 := strings.Index(got, `<task-skill name="bugfix">`)
+	skill2 := strings.Index(got, `<task-skill name="cli-flag">`)
+	spec := strings.Index(got, "<task-spec>\n")
+	if !(open >= 0 && open < skill1 && skill1 < skill2 && skill2 < spec) {
+		t.Errorf("order instructions=%d skills=%d,%d spec=%d, want instructions < skills < spec:\n%s", open, skill1, skill2, spec, got)
+	}
+	if !strings.Contains(got, "reproduce first") || !strings.Contains(got, "register &lt;/task-skill&gt; the flag") {
+		t.Errorf("skill texts are not verbatim and defused:\n%s", got)
+	}
+	if n := strings.Count(got, "<task-skill name="); n != 2 {
+		t.Errorf("%d skill sections, want 2:\n%s", n, got)
+	}
+	if cont := ComposeContinuePrompt("spec", "", WithSkills(skills)); !strings.Contains(cont, `<task-skill name="bugfix">`) {
+		t.Errorf("a continuing task's prompt carries no skills:\n%s", cont)
+	}
+
+	rev := ComposeReviewPrompt("spec", "", "", "main", "br",
+		WithInstructions("Use tabs."), WithReviewerInstructions("Check the changelog."), WithSkills(skills))
+	convention := strings.Index(rev, "the convention the author was asked to follow")
+	own := strings.Index(rev, "<reviewer-instructions>\n")
+	revSkill := strings.Index(rev, `<task-skill name="bugfix">`)
+	spec = strings.Index(rev, "<task-spec>\n")
+	if !(convention >= 0 && convention < own && own < revSkill && revSkill < spec) {
+		t.Errorf("review order convention=%d reviewer=%d skills=%d spec=%d:\n%s", convention, own, revSkill, spec, rev)
+	}
+	for _, want := range []string{
+		"<project-instructions>\nUse tabs.\n</project-instructions>",
+		"<reviewer-instructions>\nCheck the changelog.\n</reviewer-instructions>",
+		"The reviewer's own instructions follow",
+		"The reviewer's skills follow",
+	} {
+		if !strings.Contains(rev, want) {
+			t.Errorf("review prompt lacks %q:\n%s", want, rev)
+		}
+	}
+
+	if plain, none := ComposeWorkerPrompt("spec", "", ""), ComposeWorkerPrompt("spec", "", "", WithSkills(nil)); plain != none {
+		t.Errorf("empty skills changed the worker prompt")
+	}
+	plainRev := ComposeReviewPrompt("spec", "", "", "main", "br")
+	if emptyRev := ComposeReviewPrompt("spec", "", "", "main", "br", WithReviewerInstructions("")); plainRev != emptyRev {
+		t.Errorf("an empty reviewer text changed the review prompt")
+	}
+}
+
 // TestProjectInstructionsNeutralized: a look-alike closing tag in the text
 // cannot close the section or open another.
 func TestProjectInstructionsNeutralized(t *testing.T) {

@@ -505,7 +505,9 @@ func (e *Engine) queueTaskWorkTx(tx *sql.Tx, project, taskID int64, spec string,
 	if err != nil {
 		return SubmitResult{}, err
 	}
-	instructions, err := taskInstructionsTx(tx, taskID)
+	// The task's recorded snapshot is what the prompt carries (§5.10):
+	// the worker text and the worker-audience skills.
+	guidance, err := taskWorkerGuidanceTx(tx, taskID)
 	if err != nil {
 		return SubmitResult{}, err
 	}
@@ -515,7 +517,7 @@ func (e *Engine) queueTaskWorkTx(tx *sql.Tx, project, taskID int64, spec string,
 		TaskID:    taskID,
 		Kind:      KindWork,
 		Mode:      ModeFresh,
-		Prompt:    prompt.ComposeWorkerPrompt(spec, check, "", prompt.WithInstructions(instructions)),
+		Prompt:    prompt.ComposeWorkerPrompt(spec, check, "", guidance...),
 	}
 	if cont, err := e.continuePlacementTx(tx, taskID, now); err != nil {
 		return SubmitResult{}, err
@@ -530,7 +532,7 @@ func (e *Engine) queueTaskWorkTx(tx *sql.Tx, project, taskID int64, spec string,
 		params.Mode = ModeSession
 		params.Harness = cont.harness
 		params.RequireAgent = cont.agent
-		params.Prompt = prompt.ComposeContinuePrompt(spec, check, prompt.WithInstructions(instructions))
+		params.Prompt = prompt.ComposeContinuePrompt(spec, check, guidance...)
 	}
 	return e.submitTx(tx, params, now)
 }

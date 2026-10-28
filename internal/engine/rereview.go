@@ -175,11 +175,11 @@ func freshReviewPromptTx(tx *sql.Tx, taskID int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	instructions, err := taskInstructionsTx(tx, taskID)
+	guidance, err := taskReviewerGuidanceTx(tx, taskID)
 	if err != nil {
 		return "", err
 	}
-	return prompt.ComposeReviewPrompt(spec, prompt.WorkerFeedback(authorPrompt), checkJSON, base, branch, prompt.WithInstructions(instructions)), nil
+	return prompt.ComposeReviewPrompt(spec, prompt.WorkerFeedback(authorPrompt), checkJSON, base, branch, guidance...), nil
 }
 
 // retryPromptTx is the prompt a retry or a requeue of the review job

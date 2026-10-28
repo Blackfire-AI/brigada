@@ -61,17 +61,6 @@ func projectInstructionsTx(tx *sql.Tx, project int64) (string, instructionsMeta,
 	return text, meta, nil
 }
 
-// taskInstructionsTx reads the instruction text a task recorded at
-// creation, "" when it has none: every prompt of the task's jobs and
-// reviews uses it, whatever the project setting says now.
-func taskInstructionsTx(tx *sql.Tx, taskID int64) (string, error) {
-	var text string
-	if err := tx.QueryRow("SELECT instructions FROM tasks WHERE id = ?", taskID).Scan(&text); err != nil {
-		return "", fmt.Errorf("read the instructions of task %d: %w", taskID, err)
-	}
-	return text, nil
-}
-
 // StatusInstructions is how a project's instructions show in status
 // (§5.9): the source, version, size and digest, and the full text only
 // when the caller asked for it.

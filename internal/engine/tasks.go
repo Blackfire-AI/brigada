@@ -160,16 +160,13 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 	// What the task's prompts carry resolves here, once (§5.9, §5.10):
 	// both role texts and the named skills copied onto the task, so a
 	// later change to a setting, a role text or the skills import never
-	// alters it, and the first prompt below carries the recorded text.
+	// alters it, and the first prompt below carries the recorded
+	// snapshot: the worker text and the worker-audience skills.
 	ti, err := resolveTaskInstructionsTx(tx, project, title, p.Skills)
 	if err != nil {
 		return TaskResult{}, err
 	}
 	if err := recordTaskInstructionsTx(tx, taskID, ti, now); err != nil {
-		return TaskResult{}, err
-	}
-	instructions, err := taskInstructionsTx(tx, taskID)
-	if err != nil {
 		return TaskResult{}, err
 	}
 
@@ -179,7 +176,7 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 		TaskID:    taskID,
 		Kind:      KindWork,
 		Mode:      ModeFresh,
-		Prompt:    prompt.ComposeWorkerPrompt(p.Spec, p.CheckCmd, "", prompt.WithInstructions(instructions)),
+		Prompt:    prompt.ComposeWorkerPrompt(p.Spec, p.CheckCmd, "", workerGuidance(ti)...),
 		Harness:   p.Harness,
 		Labels:    p.Labels,
 	}, now)

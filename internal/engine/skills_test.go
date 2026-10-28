@@ -247,8 +247,12 @@ func TestCreatePlanResolvesInstructions(t *testing.T) {
 	if got := e.taskInstructions(res.Tasks[0].TaskID); got != "Use tabs." {
 		t.Errorf("task instructions = %q, want the worker text in the column jobs read", got)
 	}
+	// The first job's prompt carries the worker text and the
+	// worker-audience skills alone: surface-parity is for the reviewer.
 	if p := e.jobPrompt(res.Tasks[0].JobID); !strings.Contains(p, "<project-instructions>\nUse tabs.\n</project-instructions>") {
 		t.Errorf("the first job's prompt does not carry the worker text:\n%s", p)
+	} else if !strings.Contains(p, `<task-skill name="cli-flag">`) || !strings.Contains(p, "register the flag") || strings.Contains(p, "surface-parity") {
+		t.Errorf("the first job's prompt carries %q, want the worker-audience skills alone:\n%s", skillNames(e.snapshot(res.Tasks[0].TaskID).Skills), p)
 	}
 
 	for name, tasks := range map[string][]PlanTask{
@@ -355,19 +359,28 @@ func TestAmendResolvesAndReresolves(t *testing.T) {
 // TestSubmitTaskRecordsSnapshots: the direct submission records both
 // role snapshots and its skills at creation; a later change to the
 // setting, a role text or the skills import never alters its fix or
-// review prompts, and its first prompt carries the recorded snapshot.
+// review prompts, and its first prompt carries the recorded snapshot —
+// the worker text and the worker-audience skills for the worker, the
+// reviewer's own text and the reviewer-audience skills for the review.
 func TestSubmitTaskRecordsSnapshots(t *testing.T) {
 	e := newEnv(t)
-	e.importSkills(Skill{Name: "bugfix", Text: "v1 bugfix", TreeDigest: "tree-v1"})
+	e.importSkills(
+		Skill{Name: "bugfix", Text: "v1 bugfix", TreeDigest: "tree-v1"},
+		Skill{Name: "rev-guide", For: SkillForReviewer, Text: "v1 rev guide"},
+	)
 	e.setRole(RoleWorker, "v1 worker")
 	e.setRole(RoleReviewer, "v1 reviewer")
-	res := e.submitTask(TaskParams{RepoURL: envRepo, BaseRef: "main", Spec: "fix the bug", CheckCmd: "go test ./...", Skills: []string{"bugfix"}})
+	res := e.submitTask(TaskParams{RepoURL: envRepo, BaseRef: "main", Spec: "fix the bug", CheckCmd: "go test ./...", Skills: []string{"bugfix", "rev-guide"}})
 	snap := e.snapshot(res.TaskID)
-	if snap.Worker.Text != "v1 worker" || snap.Worker.Digest != instructionsDigest("v1 worker") || snap.Reviewer.Text != "v1 reviewer" || len(snap.Skills) != 1 || snap.Skills[0].Text != "v1 bugfix" {
-		t.Fatalf("snapshot = %+v, want both role texts and the skill", snap)
+	if snap.Worker.Text != "v1 worker" || snap.Worker.Digest != instructionsDigest("v1 worker") || snap.Reviewer.Text != "v1 reviewer" || len(snap.Skills) != 2 {
+		t.Fatalf("snapshot = %+v, want both role texts and the two skills", snap)
 	}
-	if p := e.jobPrompt(res.JobID); !strings.Contains(p, "<project-instructions>\nv1 worker\n</project-instructions>") {
-		t.Errorf("the first prompt does not carry the recorded worker text:\n%s", p)
+	first := e.jobPrompt(res.JobID)
+	if !strings.Contains(first, "<project-instructions>\nv1 worker\n</project-instructions>") {
+		t.Errorf("the first prompt does not carry the recorded worker text:\n%s", first)
+	}
+	if !strings.Contains(first, `<task-skill name="bugfix">`) || !strings.Contains(first, "v1 bugfix") || strings.Contains(first, "rev-guide") {
+		t.Errorf("the first prompt carries the worker-audience skills alone, want bugfix without rev-guide:\n%s", first)
 	}
 
 	author := e.agented("author", "anthropic", "implement")
@@ -376,7 +389,10 @@ func TestSubmitTaskRecordsSnapshots(t *testing.T) {
 	e.set(map[string]string{SettingInstructions: newer})
 	e.setRole(RoleWorker, newer)
 	e.setRole(RoleReviewer, newer)
-	e.importSkills(Skill{Name: "bugfix", Text: "v2 bugfix", TreeDigest: "tree-v2"})
+	e.importSkills(
+		Skill{Name: "bugfix", Text: "v2 bugfix", TreeDigest: "tree-v2"},
+		Skill{Name: "rev-guide", For: SkillForReviewer, Text: "v2 rev guide"},
+	)
 	if ans := e.complete(g, doneOn(branchOf(res.TaskID), failCheck)); ans != AnsOK {
 		t.Fatalf("complete the failed-check work: %s", ans)
 	}
@@ -384,6 +400,9 @@ func TestSubmitTaskRecordsSnapshots(t *testing.T) {
 	if strings.Count(fix, "v1 worker") != 1 || strings.Contains(fix, newer) {
 		t.Errorf("fix prompt carries the recorded text %d times and the new %t; want the recorded text once and none of the new:\n%s",
 			strings.Count(fix, "v1 worker"), strings.Contains(fix, newer), fix)
+	}
+	if !strings.Contains(fix, "v1 bugfix") || strings.Contains(fix, "v2 bugfix") || strings.Contains(fix, "rev-guide") {
+		t.Errorf("fix prompt skills: want the recorded bugfix text and no rev-guide:\n%s", fix)
 	}
 	fg := e.authorLease(author)
 	if fg == nil {
@@ -397,9 +416,16 @@ func TestSubmitTaskRecordsSnapshots(t *testing.T) {
 	if review == 0 {
 		t.Fatalf("no review job; have %v", e.eventKinds())
 	}
-	if p := e.jobPrompt(review); strings.Count(p, "v1 worker") != 1 || strings.Contains(p, newer) {
-		t.Errorf("review prompt carries the recorded text %d times and the new %t; want the recorded text once and none of the new:\n%s",
-			strings.Count(p, "v1 worker"), strings.Contains(p, newer), p)
+	p := e.jobPrompt(review)
+	if strings.Count(p, "v1 worker") != 1 || strings.Count(p, "v1 reviewer") != 1 || strings.Contains(p, newer) {
+		t.Errorf("review prompt carries the worker text %d times, the reviewer text %d times and the new %t; want each recorded text once and none of the new:\n%s",
+			strings.Count(p, "v1 worker"), strings.Count(p, "v1 reviewer"), strings.Contains(p, newer), p)
+	}
+	if !strings.Contains(p, "<reviewer-instructions>\nv1 reviewer\n</reviewer-instructions>") {
+		t.Errorf("review prompt does not carry the recorded reviewer text in its own section:\n%s", p)
+	}
+	if !strings.Contains(p, `<task-skill name="bugfix">`) || !strings.Contains(p, `<task-skill name="rev-guide">`) || !strings.Contains(p, "v1 rev guide") || strings.Contains(p, "v2 ") {
+		t.Errorf("review prompt skills: want the recorded bugfix and rev-guide texts and none of the new:\n%s", p)
 	}
 	if got := e.snapshot(res.TaskID); got.Worker.Text != "v1 worker" || got.Skills[0].Text != "v1 bugfix" || got.Skills[0].TreeDigest != "tree-v1" {
 		t.Errorf("the run altered the snapshot: %+v", got)
