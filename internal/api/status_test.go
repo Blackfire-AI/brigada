@@ -267,3 +267,15 @@ func TestTaskSubmitEndpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusRoleGuidanceEndpoint(t *testing.T) {
+	e := newEnv(t)
+	code, _, data := e.do(http.MethodGet, fmt.Sprintf("/v1/status?project=%d&instructions=1", e.project1), "alice", "", nil)
+	if code != http.StatusOK {
+		t.Fatalf("status: %d %s", code, data)
+	}
+	st := decode[Status](t, data)
+	if len(st.RoleInstructions) != 4 || !strings.Contains(st.RoleInstructions[0].Text, "<foreman-instructions>") {
+		t.Fatalf("roles: %+v", st.RoleInstructions)
+	}
+}

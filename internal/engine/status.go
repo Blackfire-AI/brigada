@@ -106,7 +106,24 @@ type StatusInfo struct {
 	// Instructions lists the projects in scope that have project
 	// instructions (§5.9): source, version, size and digest; the text only
 	// from StatusWithInstructions.
-	Instructions []StatusInstructions `json:"instructions,omitempty"`
+	Instructions     []StatusInstructions     `json:"instructions,omitempty"`
+	RoleInstructions []StatusRoleInstructions `json:"role_instructions,omitempty"`
+	Skills           []StatusSkill            `json:"skills,omitempty"`
+}
+
+// CompareInstructionFileDigests applies file digests supplied by a client to
+// a single project's status. Missing digests and non-imported roles remain unknown.
+func (s *StatusInfo) CompareInstructionFileDigests(project int64, digests map[string]string) {
+	for i := range s.RoleInstructions {
+		role := &s.RoleInstructions[i]
+		if role.ProjectID != project || role.Source != SourceImported {
+			continue
+		}
+		if digest, ok := digests[role.Role]; ok {
+			changed := digest != role.Digest
+			role.ChangedSinceImport = &changed
+		}
+	}
 }
 
 // InfraRetry is one queued work or fix job held out of leasing by the
@@ -357,6 +374,9 @@ func (e *Engine) status(ctx context.Context, project int64, withText, all bool) 
 			return err
 		}
 		if info.Retries, err = statusRetriesTx(tx, project, now); err != nil {
+			return err
+		}
+		if info.RoleInstructions, info.Skills, err = statusGuidanceTx(tx, project, withText); err != nil {
 			return err
 		}
 		if info.Instructions, err = statusInstructionsTx(tx, project, withText); err != nil {

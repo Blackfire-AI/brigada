@@ -4,7 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/defaults"
+	"github.com/Blackfire-AI/brigada/internal/prompt"
+	"github.com/Blackfire-AI/brigada/internal/store"
 )
 
 // Project instructions (design §5.9): the project's one instruction text
@@ -152,4 +157,104 @@ func statusInstructionsTx(tx *sql.Tx, project int64, withText bool) ([]StatusIns
 		out = append(out, si)
 	}
 	return out, nil
+}
+
+// StatusRoleInstructions describes one effective role text. A nil comparison
+// means its baseline or the client's current file digest is unknown.
+type StatusRoleInstructions struct {
+	ProjectID          int64  `json:"project_id"`
+	RepoURL            string `json:"repo_url"`
+	Role               string `json:"role"`
+	State              string `json:"state"`
+	Source             string `json:"source,omitempty"`
+	Bytes              int    `json:"bytes"`
+	Digest             string `json:"digest,omitempty"`
+	GeneratedFrom      string `json:"generated_from,omitempty"`
+	Edited             *bool  `json:"edited"`
+	ChangedSinceImport *bool  `json:"changed_since_import"`
+	Text               string `json:"text,omitempty"`
+}
+
+type StatusSkill struct {
+	ProjectID   int64  `json:"project_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Digest      string `json:"digest"`
+	TimesUsed   int    `json:"times_used"`
+}
+
+func statusGuidanceTx(tx *sql.Tx, project int64, withText bool) ([]StatusRoleInstructions, []StatusSkill, error) {
+	q := "SELECT id, repo_url FROM projects WHERE archived_at IS NULL"
+	var args []any
+	if project != 0 {
+		q += " AND id = ?"
+		args = append(args, project)
+	}
+	rows, err := tx.Query(q+" ORDER BY id", args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	type proj struct {
+		id   int64
+		repo string
+	}
+	var projects []proj
+	for rows.Next() {
+		var p proj
+		if err = rows.Scan(&p.id, &p.repo); err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		projects = append(projects, p)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, nil, err
+	}
+	var roles []StatusRoleInstructions
+	var skills []StatusSkill
+	for _, p := range projects {
+		for _, role := range Roles {
+			ri, err := roleInstructionsTx(tx, p.id, role)
+			if err != nil {
+				return nil, nil, err
+			}
+			s := StatusRoleInstructions{ProjectID: p.id, RepoURL: RedactRepoURL(p.repo), Role: role, State: ri.State, Source: ri.Source, Bytes: ri.Bytes, Digest: ri.Digest}
+			if ri.Source == SourceDefault || strings.HasPrefix(ri.Source, store.RoleSourceSeededPrefix) {
+				s.GeneratedFrom = ri.Version
+				baseline, err := defaults.RoleText(ri.Version, role)
+				if err == nil {
+					edited := instructionsDigest(ri.Text) != instructionsDigest(baseline)
+					s.Edited = &edited
+				}
+			}
+			if withText {
+				s.Text = prompt.RoleInstructionsSection(role, ri.Text)
+			}
+			roles = append(roles, s)
+		}
+		sr, err := tx.Query(`SELECT s.name, s.description, s.digest,
+   (SELECT count(*) FROM tasks t JOIN plans p ON p.id = t.plan_id
+    WHERE p.project_id = s.project_id AND t.skills != '' AND EXISTS
+    (SELECT 1 FROM json_each(t.skills) j WHERE json_extract(j.value, '$.name') = s.name))
+   FROM skills s WHERE s.project_id = ? ORDER BY s.name`, p.id)
+		if err != nil {
+			return nil, nil, err
+		}
+		for sr.Next() {
+			s := StatusSkill{ProjectID: p.id}
+			if err := sr.Scan(&s.Name, &s.Description, &s.Digest, &s.TimesUsed); err != nil {
+				sr.Close()
+				return nil, nil, err
+			}
+			skills = append(skills, s)
+		}
+		err = sr.Err()
+		sr.Close()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return roles, skills, nil
 }

@@ -45,6 +45,17 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id identit
 		s.writeInternal(w, r, "read status", err)
 		return
 	}
+
+	// A digest belongs to one project; never apply it to an unscoped view.
+	if project != 0 {
+		digests := make(map[string]string)
+		for _, role := range engine.Roles {
+			if values, ok := r.URL.Query()["digest_"+role]; ok && len(values) > 0 {
+				digests[role] = values[0]
+			}
+		}
+		st.CompareInstructionFileDigests(project, digests)
+	}
 	writeJSON(w, http.StatusOK, st)
 }
 

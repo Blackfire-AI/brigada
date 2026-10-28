@@ -208,6 +208,23 @@ func StatusSections(st Status) string {
 		}
 		lines = append(lines, line)
 	}
+
+	for _, in := range st.RoleInstructions {
+		line := fmt.Sprintf("%s instructions (project #%d): %s, %d bytes, sha256 %s", in.Role, in.ProjectID, in.State, in.Bytes, in.Digest)
+		if in.GeneratedFrom != "" {
+			line += ", generated from " + in.GeneratedFrom
+		}
+		if in.Edited != nil {
+			line += fmt.Sprintf(", edited %t", *in.Edited)
+		}
+		if in.ChangedSinceImport != nil {
+			line += fmt.Sprintf(", changed since import %t", *in.ChangedSinceImport)
+		}
+		lines = append(lines, line)
+	}
+	for _, skill := range st.Skills {
+		lines = append(lines, fmt.Sprintf("skill %s (project #%d): %s, sha256 %s, used %d times", skill.Name, skill.ProjectID, skill.Description, skill.Digest, skill.TimesUsed))
+	}
 	return strings.Join(lines, "\n")
 }
 

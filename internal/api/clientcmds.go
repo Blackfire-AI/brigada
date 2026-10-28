@@ -126,7 +126,9 @@ type Status struct {
 	Retries []engine.InfraRetry `json:"retries,omitempty"`
 	// Instructions names the projects with project instructions (§5.9):
 	// source, version, size and digest; the text only when asked for.
-	Instructions []engine.StatusInstructions `json:"instructions,omitempty"`
+	Instructions     []engine.StatusInstructions     `json:"instructions,omitempty"`
+	RoleInstructions []engine.StatusRoleInstructions `json:"role_instructions,omitempty"`
+	Skills           []engine.StatusSkill            `json:"skills,omitempty"`
 }
 
 // Status reads the engine's own state (§13): which process it is, since

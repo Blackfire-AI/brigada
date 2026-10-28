@@ -559,3 +559,20 @@ func TestHarnessConfig(t *testing.T) {
 		t.Errorf("env = %v, want the token under %s alone", srv.Env, EnvToken)
 	}
 }
+
+func TestStatusRoleGuidanceParity(t *testing.T) {
+	e := newEnv(t)
+	st, err := e.client.StatusWithInstructions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := statusText(st)
+	for _, role := range st.RoleInstructions {
+		if !strings.Contains(rendered, role.Role+" instructions (project #") || !strings.Contains(rendered, role.Text) {
+			t.Errorf("missing role %+v", role)
+		}
+	}
+	if len(st.RoleInstructions) != 4 || !strings.Contains(rendered, "<foreman-instructions>") {
+		t.Fatalf("status: %s", rendered)
+	}
+}
