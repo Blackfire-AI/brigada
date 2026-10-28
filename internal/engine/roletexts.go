@@ -161,12 +161,13 @@ func syncWorkerTextTx(tx *sql.Tx, project int64, now time.Time) error {
 // text is a state of its own — empty by choice — not a reset; use
 // ResetRoleText for that.
 //
-// The worker role is the instructions setting: a set through here is a
-// local set of the setting, and the row is materialized from it, so
-// `project set instructions=`, a project.yaml import and this call all
-// move one value. The passed source and settings version record
-// nothing for the worker — imports of the worker text go through the
-// config import, which keeps its provenance.
+// The worker role's text is the instructions setting: a call through
+// here writes the setting as a local override — an empty text unsets
+// it — so `project set instructions=`, a project.yaml import and this
+// call all move one effective text. Unlike the setting, the row keeps
+// the provenance the caller passed, as every role's row does: an
+// import through this API records its source and settings version
+// while the effective text still resolves through the setting.
 func (e *Engine) SetRoleText(ctx context.Context, repoURL, role, text, source, settingsVersion string) (RoleTextView, error) {
 	if repoURL == "" {
 		return RoleTextView{}, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
@@ -198,8 +199,9 @@ func (e *Engine) SetRoleText(ctx context.Context, repoURL, role, text, source, s
 			return err
 		}
 		if role == RoleWorker {
-			// One source of truth: write the setting as a local override —
-			// an empty text unsets it — then materialize the row from it.
+			// One source of truth for the text: the setting takes it as a
+			// local override — an empty text unsets it — while the row keeps
+			// the provenance the caller passed, like every other role's.
 			var rawSettings, rawProv string
 			if err := tx.QueryRow("SELECT settings, settings_prov FROM projects WHERE id = ?", project).Scan(&rawSettings, &rawProv); err != nil {
 				return fmt.Errorf("read the settings of project %d: %w", project, err)
@@ -215,22 +217,17 @@ func (e *Engine) SetRoleText(ctx context.Context, repoURL, role, text, source, s
 			if err := applySettingsRowTx(tx, project, rawSettings, rawProv, parsed, now); err != nil {
 				return err
 			}
-			if err := syncWorkerTextTx(tx, project, now); err != nil {
-				return err
-			}
 			if text == "" {
 				// The setting cannot hold an empty value; the row keeps the
-				// empty-by-choice state alone.
-				digest := instructionsDigest("")
-				if _, err := tx.Exec(roleTextUpsert, project, RoleWorker, "", SourceLocal, "", digest, fmtTime(now)); err != nil {
-					return fmt.Errorf("store the worker text of the project of %s: %w", RedactRepoURL(repoURL), err)
-				}
+				// empty-by-choice state alone, and no settings version names
+				// an emptiness.
+				settingsVersion = ""
 			}
-			rows, err := roleTextRowsTx(tx, project)
-			if err != nil {
-				return err
+			digest := instructionsDigest(text)
+			if _, err := tx.Exec(roleTextUpsert, project, RoleWorker, text, source, settingsVersion, digest, fmtTime(now)); err != nil {
+				return fmt.Errorf("store the worker text of the project of %s: %w", RedactRepoURL(repoURL), err)
 			}
-			out = roleTextView(RoleWorker, rows[RoleWorker])
+			out = roleTextView(RoleWorker, roleTextRow{text: text, source: source, version: settingsVersion, digest: digest})
 			return nil
 		}
 		digest := instructionsDigest(text)

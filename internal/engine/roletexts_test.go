@@ -152,6 +152,75 @@ func TestWorkerRoleTextSynchronized(t *testing.T) {
 	}
 }
 
+// TestWorkerRoleTextImportProvenance: a worker import through the
+// role-text API keeps its source and settings version in the row while
+// the setting stays synchronized as the text's one source of truth.
+func TestWorkerRoleTextImportProvenance(t *testing.T) {
+	e := newEnv(t)
+	const fileSource = "file .brigada/instructions.md, imported now"
+	v, err := e.eng.SetRoleText(e.ctx, envRepo, RoleWorker, "shared rules", fileSource, "imp0rthash")
+	if err != nil {
+		t.Fatalf("import the worker text: %v", err)
+	}
+	if v.State != RoleTextFile || v.Text != "shared rules" || v.Source != fileSource || v.Version != "imp0rthash" || v.Digest != defaults.Digest("shared rules") {
+		t.Errorf("worker import = %+v, want the provenance kept", v)
+	}
+	// The row is where the provenance lives.
+	if got := e.str("SELECT text FROM role_instructions WHERE project_id = ? AND role = 'worker'", e.project); got != "shared rules" {
+		t.Errorf("worker row text = %q, want the imported text", got)
+	}
+	if got := e.str("SELECT source FROM role_instructions WHERE project_id = ? AND role = 'worker'", e.project); got != fileSource {
+		t.Errorf("worker row source = %q, want the import's", got)
+	}
+	if got := e.str("SELECT settings_version FROM role_instructions WHERE project_id = ? AND role = 'worker'", e.project); got != "imp0rthash" {
+		t.Errorf("worker row version = %q, want the import's", got)
+	}
+	// The setting holds the same text, as the effective resolution reads it.
+	sv := settingOf(t, *mustSettings(t, e), SettingInstructions)
+	if sv.Source != SourceLocal || !strings.HasPrefix(sv.Value, "12 bytes") {
+		t.Errorf("the setting after the import = %+v, want the synchronized local override", sv)
+	}
+}
+
+// TestWorkerEmptyChoiceSurvivesImports: a worker text set empty by
+// choice keeps its state and precedence — an unrelated import leaves
+// it, an instruction-bearing import asks before replacing it, and an
+// accepted one replaces it.
+func TestWorkerEmptyChoiceSurvivesImports(t *testing.T) {
+	e := newEnv(t)
+	if _, err := e.eng.SetRoleText(e.ctx, envRepo, RoleWorker, "", "", ""); err != nil {
+		t.Fatalf("empty by choice: %v", err)
+	}
+	// An unrelated import: nothing about the worker text changes.
+	if _, err := e.eng.ImportProjectConfig(e.ctx, envRepo, cfgFile("approval_max_tasks: -1\n"), false); err != nil {
+		t.Fatalf("unrelated import: %v", err)
+	}
+	if v := roleTextViews(t, e)[RoleWorker]; v.State != RoleTextEmptyByChoice || v.Text != "" {
+		t.Errorf("after the unrelated import worker = %+v, want empty by choice kept", v)
+	}
+	// An instruction-bearing import: the empty choice holds the local
+	// slot, so the import conflicts — both values named, nothing slid
+	// under the choice — instead of replacing it.
+	res, err := e.importWithText("instructions_file: .brigada/instructions.md\n", ptr("v1 rules"), false)
+	if err != nil || len(res.Conflicts) != 1 || res.Conflicts[0].Key != SettingInstructions || res.Conflicts[0].New != "v1 rules" {
+		t.Fatalf("import over the empty choice = %+v, %v; want one instructions conflict", res, err)
+	}
+	if v := roleTextViews(t, e)[RoleWorker]; v.State != RoleTextEmptyByChoice || v.Text != "" {
+		t.Errorf("after the conflicting import worker = %+v, want empty by choice kept", v)
+	}
+	// A deliberate change replaces the choice; the import's text then
+	// reads through the setting like any set.
+	if _, err := e.eng.SetRoleText(e.ctx, envRepo, RoleWorker, "v1 rules", "", ""); err != nil {
+		t.Fatalf("deliberate change: %v", err)
+	}
+	if v := roleTextViews(t, e)[RoleWorker]; v.State != RoleTextFile || v.Text != "v1 rules" || v.Source != SourceLocal {
+		t.Errorf("after the deliberate change worker = %+v, want the set text", v)
+	}
+	if sv := settingOf(t, *mustSettings(t, e), SettingInstructions); sv.Source != SourceLocal || !strings.HasPrefix(sv.Value, "8 bytes") {
+		t.Errorf("after the deliberate change the setting = %+v, want the local override", sv)
+	}
+}
+
 // TestRoleTextSeededDefaultIsNotConfigured: a row an upgrade generated
 // reads as not configured, the embedded default it holds.
 func TestRoleTextSeededDefaultIsNotConfigured(t *testing.T) {

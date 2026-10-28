@@ -77,27 +77,28 @@ func TestRoleInstructionsMigrationSeeds(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		text, source, _, digest := roleRow(t, s.db, clean, role)
+		text, source, version, digest := roleRow(t, s.db, clean, role)
 		if text != want || source != generated || digest != defaults.Digest(want) {
 			t.Errorf("clean project %s = %d bytes, %q, %q; want the generated default", role, len(text), source, digest)
 		}
-		text, source, version, digest := roleRow(t, s.db, local, role)
 		if role == "worker" {
+			// The local setting stays the worker text with its provenance.
+			text, source, version, digest = roleRow(t, s.db, local, role)
 			if text != "private project guidance" || source != "local" || version != "" || digest != defaults.Digest(text) {
 				t.Errorf("local project worker = %d bytes, %q, %q, %q; want the setting kept with its provenance", len(text), source, version, digest)
 			}
-			continue
-		}
-		if text != want || source != generated || digest != defaults.Digest(want) {
-			t.Errorf("local project %s = %d bytes, %q, %q; want the generated default", role, len(text), source, digest)
-		}
-		text, source, version, digest = roleRow(t, s.db, imported, role)
-		if role == "worker" {
+			// The imported one keeps the import's source and settings version.
+			text, source, version, digest = roleRow(t, s.db, imported, role)
 			if text != "shared rules" || source != "imported" || version != "imp0rthash" || digest != defaults.Digest(text) {
 				t.Errorf("imported project worker = %d bytes, %q, %q, %q; want the setting kept with its import provenance", len(text), source, version, digest)
 			}
 			continue
 		}
+		text, source, version, digest = roleRow(t, s.db, local, role)
+		if text != want || source != generated || digest != defaults.Digest(want) {
+			t.Errorf("local project %s = %d bytes, %q, %q; want the generated default", role, len(text), source, digest)
+		}
+		text, source, version, digest = roleRow(t, s.db, imported, role)
 		if text != want || source != generated || digest != defaults.Digest(want) {
 			t.Errorf("imported project %s = %d bytes, %q, %q; want the generated default", role, len(text), source, digest)
 		}

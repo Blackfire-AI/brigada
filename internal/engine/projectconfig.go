@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/Blackfire-AI/brigada/internal/defaults"
 )
 
 // The committed, nonsecret project configuration (design §13.1): the
@@ -688,10 +690,27 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 			return fmt.Errorf("parse the provenance of project %d: %w", project, err)
 		}
 		first := prov.Hash == ""
+		// A worker text set empty by choice (§5.9) holds the setting's
+		// local-value slot even though the setting is unset: an import
+		// must not slide under it as though no value existed.
+		workerChosenEmpty := false
+		if !born {
+			roleRows, err := roleTextRowsTx(tx, project)
+			if err != nil {
+				return err
+			}
+			if r, ok := roleRows[RoleWorker]; ok && r.text == "" && !defaults.IsGeneratedProvenance(r.source) {
+				workerChosenEmpty = true
+			}
+		}
+		workerBefore := row[SettingInstructions]
 		newImported := map[string]json.RawMessage{}
 		for _, k := range SettingKeys {
 			fv, inFile := cfg.Values[k]
 			cur, has := row[k]
+			if k == SettingInstructions && workerChosenEmpty && !has && inFile {
+				has, cur = true, json.RawMessage(`""`)
+			}
 			imp := has && prov.isImported(k, cur)
 			if !inFile {
 				if imp {
@@ -750,10 +769,14 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 		if _, err := tx.Exec("UPDATE projects SET archived_at = NULL, settings = ?, settings_prov = ?, updated_at = ? WHERE id = ?", string(b), pb, fmtTime(now), project); err != nil {
 			return fmt.Errorf("store the settings of project %d: %w", project, err)
 		}
-		// An imported instructions is the worker's role text too:
-		// materialize the row from the setting, provenance and all (§5.9).
-		if err := syncWorkerTextTx(tx, project, now); err != nil {
-			return err
+		// An instructions the import changed is the worker's role text
+		// too: materialize the row from the setting, provenance and all
+		// (§5.9). An unchanged one leaves the row alone — an empty-by-
+		// choice marker included.
+		if compactJSON(workerBefore) != compactJSON(row[SettingInstructions]) {
+			if err := syncWorkerTextTx(tx, project, now); err != nil {
+				return err
+			}
 		}
 		v, err := settingsViewTx(tx, project, shownRepo, e.cfg.ForemanWakeBudget)
 		if err != nil {
