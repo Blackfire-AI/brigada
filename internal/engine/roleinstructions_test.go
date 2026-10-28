@@ -146,9 +146,14 @@ func TestSettingsSyncWorkerRoleRow(t *testing.T) {
 // TestImportSyncsWorkerRoleInstruction: an import writes the worker role
 // row with its text and provenance, and a re-import that changes only
 // other keys still moves the row's settings version to the new hash
-// while the text stays; an empty-by-choice mark and a local text win
-// against the file; a file that stops setting instructions drops an
-// imported row, not a local one.
+// while the text stays; an empty-by-choice mark is preserved by the
+// merge itself — the file's text conflicts, the settings keep no
+// instructions — unless the import explicitly accepts its replacement,
+// which both views then take with the file's provenance; the same
+// acceptance replaces a local text; a file that stops setting
+// instructions drops an imported row, not a local one; a whitespace-only
+// file over the bound is refused like any oversized text, with the
+// worker role, the size and the limit named.
 func TestImportSyncsWorkerRoleInstruction(t *testing.T) {
 	e := newEnv(t)
 	const file = "instructions_file: .brigada/instructions.md\n"
@@ -175,42 +180,103 @@ func TestImportSyncsWorkerRoleInstruction(t *testing.T) {
 		t.Errorf("worker after the re-import = %+v, want the same text dated with the new hash %s", ri, res2.Hash)
 	}
 
-	// An empty-by-choice mark wins against the file's text.
+	// An empty-by-choice mark is preserved by the merge itself: the
+	// file's text conflicts, the settings keep no instructions, and the
+	// role keeps the marker — no reader can use the file's text.
 	mustSetRole(t, e, RoleWorker, "")
-	res3, err := e.importWithText(file, ptr("v3 rules"), false)
-	if err != nil {
-		t.Fatalf("import over the empty choice: %v", err)
+	res3, err := e.importWithText(file+"approval_max_tasks: 5\n", ptr("v3 rules"), false)
+	if err != nil || len(res3.Conflicts) != 1 || len(res3.Applied) != 0 {
+		t.Fatalf("import over the empty choice = %+v, %v, want one conflict and nothing applied", res3, err)
 	}
-	if ri := mustRole(t, e, RoleWorker); ri.State != RoleStateEmptyByChoice || ri.Source != SourceLocal || ri.Text != "" || ri.Version == res3.Hash {
-		t.Errorf("worker after the import over the empty choice = %+v, want the mark kept", ri)
+	if c := res3.Conflicts[0]; c.Key != SettingInstructions || c.Old != "" || c.New != "v3 rules" {
+		t.Errorf("the empty-choice conflict = %+v, want both texts on instructions", c)
+	}
+	if ri := mustRole(t, e, RoleWorker); ri.State != RoleStateEmptyByChoice || ri.Source != SourceLocal || ri.Text != "" {
+		t.Errorf("worker after the conflicted import = %+v, want the marker kept", ri)
+	}
+	if sv := settingOf(t, *mustSettings(t, e), SettingInstructions); !sv.Default || sv.Value != "none" {
+		t.Errorf("instructions setting after the conflicted import = %+v, want none/default", sv)
+	}
+
+	// An accepted first import replaces a local text: both views and
+	// their provenance agree on the file's text afterwards.
+	e2 := newEnv(t)
+	mustSetRole(t, e2, RoleWorker, "my local rules")
+	res4, err := e2.importWithText(file, ptr("v1 rules"), true)
+	if err != nil || res4.NeedsConfirm || len(res4.Diffs) != 1 || len(res4.Applied) != 1 {
+		t.Fatalf("accepted import over a local text = %+v, %v, want the diff accepted", res4, err)
+	}
+	if ri := mustRole(t, e2, RoleWorker); ri.State != RoleStateFile || ri.Source != SourceImported || ri.Text != "v1 rules" || ri.Version != res4.Hash {
+		t.Errorf("worker after the accepted replacement = %+v, want the file's text with its hash", ri)
+	}
+	if sv := settingOf(t, *mustSettings(t, e2), SettingInstructions); sv.Source != SourceImported || sv.Hash != res4.Hash || !strings.HasPrefix(sv.Value, "8 bytes") {
+		t.Errorf("instructions setting after the accepted replacement = %+v, want the same text and hash as the role", sv)
+	}
+
+	// The same acceptance replaces an empty-by-choice mark.
+	e3 := newEnv(t)
+	mustSetRole(t, e3, RoleWorker, "")
+	res5, err := e3.importWithText(file, ptr("w1 rules"), true)
+	if err != nil || res5.NeedsConfirm || len(res5.Diffs) != 1 || res5.Diffs[0].Key != SettingInstructions || res5.Diffs[0].Old != "none" {
+		t.Fatalf("accepted import over the empty choice = %+v, %v, want the marker's diff accepted", res5, err)
+	}
+	if ri := mustRole(t, e3, RoleWorker); ri.State != RoleStateFile || ri.Source != SourceImported || ri.Text != "w1 rules" || ri.Version != res5.Hash {
+		t.Errorf("worker after the accepted marker replacement = %+v, want the file's text", ri)
+	}
+	if sv := settingOf(t, *mustSettings(t, e3), SettingInstructions); sv.Source != SourceImported || sv.Hash != res5.Hash {
+		t.Errorf("instructions setting after the accepted marker replacement = %+v, want the file's text", sv)
 	}
 
 	// A local text conflicts with the file's and keeps its value.
-	e2 := newEnv(t)
-	if _, err := e2.importWithText(file, ptr("first rules"), false); err != nil {
+	e4 := newEnv(t)
+	if _, err := e4.importWithText(file, ptr("first rules"), false); err != nil {
 		t.Fatalf("import: %v", err)
 	}
-	mustSetRole(t, e2, RoleWorker, "my local rules")
-	if res, err := e2.importWithText(file, ptr("v4 rules"), false); err != nil || len(res.Conflicts) != 1 {
+	mustSetRole(t, e4, RoleWorker, "my local rules")
+	if res, err := e4.importWithText(file, ptr("v4 rules"), false); err != nil || len(res.Conflicts) != 1 {
 		t.Fatalf("import over a local text = %+v, %v, want one conflict", res, err)
 	}
-	if ri := mustRole(t, e2, RoleWorker); ri.Source != SourceLocal || ri.Text != "my local rules" {
+	if ri := mustRole(t, e4, RoleWorker); ri.Source != SourceLocal || ri.Text != "my local rules" {
 		t.Errorf("worker after the conflicted import = %+v, want the local text kept", ri)
 	}
 
 	// A file that stops setting instructions drops an imported row, not
 	// a local one.
-	e3 := newEnv(t)
-	if _, err := e3.importWithText(file, ptr("file rules"), false); err != nil {
+	e5 := newEnv(t)
+	if _, err := e5.importWithText(file, ptr("file rules"), false); err != nil {
 		t.Fatalf("import: %v", err)
 	}
-	if ri := mustRole(t, e3, RoleWorker); ri.Source != SourceImported || ri.Text != "file rules" {
+	if ri := mustRole(t, e5, RoleWorker); ri.Source != SourceImported || ri.Text != "file rules" {
 		t.Fatalf("worker before the drop = %+v, want imported", ri)
 	}
-	if _, err := e3.eng.ImportProjectConfig(e3.ctx, envRepo, cfgFile("approval_max_tasks: 3\n"), false); err != nil {
+	if _, err := e5.eng.ImportProjectConfig(e5.ctx, envRepo, cfgFile("approval_max_tasks: 3\n"), false); err != nil {
 		t.Fatalf("import without instructions: %v", err)
 	}
-	if ri := mustRole(t, e3, RoleWorker); ri.State != RoleStateNotConfigured || ri.Source != SourceDefault {
+	if ri := mustRole(t, e5, RoleWorker); ri.State != RoleStateNotConfigured || ri.Source != SourceDefault {
 		t.Errorf("worker after the drop = %+v, want not configured", ri)
+	}
+
+	// A whitespace-only file over the bound is refused like any
+	// oversized text — never read as an unset value that clears the
+	// import — and the previous value stays in effect.
+	e6 := newEnv(t)
+	res6, err := e6.importWithText(file, ptr("v1 rules"), false)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	_, err = e6.importWithText(file, ptr(strings.Repeat(" ", MaxRoleInstructionBytes+1)), false)
+	if err == nil || !errors.Is(err, ErrInvalidSetting) {
+		t.Fatalf("oversize whitespace-only import err = %v, want ErrInvalidSetting", err)
+	}
+	for _, want := range []string{RoleWorker, "8193", "8192"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("oversize whitespace-only import err = %v, want it to name %q", err, want)
+		}
+	}
+	if ri := mustRole(t, e6, RoleWorker); ri.Source != SourceImported || ri.Text != "v1 rules" || ri.Version != res6.Hash {
+		t.Errorf("worker after the refused import = %+v, want the previous value", ri)
+	}
+	if sv := settingOf(t, *mustSettings(t, e6), SettingInstructions); sv.Source != SourceImported || sv.Hash != res6.Hash {
+		t.Errorf("instructions setting after the refused import = %+v, want the previous value", sv)
 	}
 }

@@ -296,9 +296,11 @@ func (e *Engine) SetRoleInstruction(ctx context.Context, repoURL, role, text str
 // the text is unchanged, so a re-import that moved only other keys still
 // dates the row with the new hash. A local row — the user's own text or
 // an empty-by-choice mark — is left alone: it wins against the file, as
-// a local override does. When no instructions value is in effect, an
-// imported row is gone with it; a generated or local one stays.
-func syncWorkerInstructionTx(tx *sql.Tx, project int64, row, imported map[string]json.RawMessage, hash string, now time.Time) error {
+// a local override does, unless the import explicitly accepted the
+// replacement of that hand-set value, in which case the row follows the
+// settings. When no instructions value is in effect, an imported row is
+// gone with it; a generated or local one stays.
+func syncWorkerInstructionTx(tx *sql.Tx, project int64, row, imported map[string]json.RawMessage, hash string, replacedLocal bool, now time.Time) error {
 	raw, ok := row[SettingInstructions]
 	if !ok {
 		if _, err := tx.Exec("DELETE FROM role_instructions WHERE project_id = ? AND role = ? AND source = ?", project, RoleWorker, SourceImported); err != nil {
@@ -315,7 +317,7 @@ func syncWorkerInstructionTx(tx *sql.Tx, project int64, row, imported map[string
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:
 		return fmt.Errorf("read the worker instructions of project %d: %w", project, err)
-	case source == SourceLocal:
+	case source == SourceLocal && !replacedLocal:
 		return nil // the user's text or empty-by-choice mark wins
 	}
 	text, ok := rawString(raw)
