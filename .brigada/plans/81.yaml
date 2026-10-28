@@ -118,7 +118,7 @@ tasks:
     continue: "store"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-235-r1"
     rounds: 0
   - id: 236
@@ -151,7 +151,7 @@ tasks:
     base: "store_skills"
     continue: "store_skills"
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 239
