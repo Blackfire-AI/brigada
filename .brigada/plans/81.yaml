@@ -5,9 +5,9 @@
 plan: 81
 title: "Instructions per role (#119) and task skills (#117): design §5.9, §5.10"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-10-28T20:42:23.229737Z
-updated: 2026-10-28T22:59:45.785685Z
+updated: 2026-10-29T01:49:37.291905Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -119,7 +119,7 @@ tasks:
     tier: heavy
     effort: medium
     caps: {restart: 4}
-    state: reviewing
+    state: cancelled
     branch: "brigada/task-235-r4"
     rounds: 1
   - id: 236
@@ -196,6 +196,16 @@ tasks:
     deps: ["docs_verify"]
     base: "docs_verify"
     continue: "docs_verify"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 243
+    name: "store_audit"
+    title: "Audit store/instructions surface against design §5.9/§5.10 and fill gaps"
+    class: "implement"
+    deps: []
+    base: ""
     effort: medium
     state: pending
     branch: ""
