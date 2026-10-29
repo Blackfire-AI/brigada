@@ -71,7 +71,7 @@ tasks:
     deps: ["land_ready"]
     base: "land_ready"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-257"
     rounds: 2
   - id: 258
@@ -82,7 +82,7 @@ tasks:
     base: "prompts"
     tier: heavy
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 259
@@ -174,7 +174,7 @@ tasks:
     continue: "prompts"
     effort: medium
     review_tier: standard
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 267
