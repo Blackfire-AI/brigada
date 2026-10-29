@@ -231,6 +231,9 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 	if grant.BaseRef != grant.LandTarget && grant.BaseRef != grant.Branch {
 		refs = append(refs, grant.BaseRef)
 	}
+	if err := engine.CheckBaseFetchable(grant.BaseRef); err != nil {
+		return nil, err
+	}
 	if err := r.landFetch(ctx, dir, refs...); err != nil {
 		return nil, err
 	}

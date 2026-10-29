@@ -74,6 +74,8 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 		return TaskResult{}, fmt.Errorf("repo URL is required (product §5 rule 6: repos are addressed by URL)")
 	case p.BaseRef == "":
 		return TaskResult{}, fmt.Errorf("base ref is required: the ref the worktree starts from")
+	case CheckBaseFetchable(p.BaseRef) != nil:
+		return TaskResult{}, CheckBaseFetchable(p.BaseRef)
 	case p.Spec == "":
 		return TaskResult{}, fmt.Errorf("spec is required: the worker's task, verbatim (§1.4)")
 	}
