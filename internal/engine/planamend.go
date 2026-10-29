@@ -481,6 +481,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 				}
 			}
 		}
+		if err := CheckBaseFetchable(ref); err != nil {
+			return -1, fmt.Errorf("%s has %w", nodes[owner].label(), err)
+		}
 		return -1, fmt.Errorf("%s has base %q, which is not one of its deps: a base is a task it depends on", nodes[owner].label(), ref)
 	}
 	pickContinue := func(owner int, ref string) (int, error) {

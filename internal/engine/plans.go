@@ -181,6 +181,9 @@ func validatePlanGraph(tasks []PlanTask, crossDep func(ref string) (bool, string
 		if t.Base != "" {
 			j, ok := byName[t.Base]
 			if !ok || !seen[j] {
+				if err := CheckBaseFetchable(t.Base); err != nil {
+					return nil, nil, nil, fmt.Errorf("%s has %w", label(i), err)
+				}
 				return nil, nil, nil, fmt.Errorf("%s has base %q, which is not one of its deps: a base is the name of a task it depends on", label(i), t.Base)
 			}
 			bases[i] = j

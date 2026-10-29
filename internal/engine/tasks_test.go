@@ -98,6 +98,54 @@ func TestSubmitTaskValidates(t *testing.T) {
 	}
 }
 
+func TestSubmitTaskRefusesAnUnfetchableSHABase(t *testing.T) {
+	e := newEnv(t)
+	sha := strings.Repeat("ab12", 10)
+	_, err := e.eng.SubmitTask(e.ctx, TaskParams{RepoURL: "https://example.invalid/one.git", BaseRef: sha, Spec: "s"})
+	if err == nil || !strings.Contains(err.Error(), sha) || !strings.Contains(err.Error(), "commit SHA") {
+		t.Fatalf("sha base: err = %v, want a refusal naming the SHA", err)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs"); got != 0 {
+		t.Errorf("jobs after the refusal = %d, want 0", got)
+	}
+	if got := e.int("SELECT COUNT(*) FROM projects WHERE repo_url = 'https://example.invalid/one.git'"); got != 0 {
+		t.Errorf("projects after the refusal = %d, want 0", got)
+	}
+	// A branch name is fetchable, even a long or hex-like one.
+	for _, ref := range []string{"main", "refs/heads/dev", "abc1234", strings.Repeat("ab12", 9)} {
+		if err := CheckBaseFetchable(ref); err != nil {
+			t.Errorf("CheckBaseFetchable(%q) = %v, want accepted", ref, err)
+		}
+	}
+	if err := CheckBaseFetchable("refs/heads/" + sha); err == nil {
+		t.Errorf("a SHA under refs/heads/ accepted")
+	}
+}
+
+func TestPlanToolsRefuseASHABaseWhole(t *testing.T) {
+	e := newEnv(t)
+	sha := strings.Repeat("0f", 20)
+	plans, tasks := e.int("SELECT COUNT(*) FROM plans"), e.int("SELECT COUNT(*) FROM tasks")
+	_, err := e.eng.CreatePlan(e.ctx, e.project, "sha", []PlanTask{{Name: "a", Spec: "a", Base: sha}})
+	if err == nil || !strings.Contains(err.Error(), sha) || !strings.Contains(err.Error(), "commit SHA") {
+		t.Fatalf("plan_create: err = %v, want a SHA refusal", err)
+	}
+	if e.int("SELECT COUNT(*) FROM plans") != plans || e.int("SELECT COUNT(*) FROM tasks") != tasks {
+		t.Errorf("plan_create refusal left rows behind")
+	}
+	res := e.twoStep()
+	tasks = e.int("SELECT COUNT(*) FROM tasks")
+	_, err = e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+		Add: []PlanTask{{Name: "ok", Spec: "fine", Class: "answer"}, {Name: "bad", Spec: "x", Deps: []string{"build"}, Base: sha}},
+	})
+	if err == nil || !strings.Contains(err.Error(), sha) || !strings.Contains(err.Error(), "commit SHA") {
+		t.Fatalf("plan_amend add: err = %v, want a SHA refusal", err)
+	}
+	if got := e.int("SELECT COUNT(*) FROM tasks"); got != tasks {
+		t.Errorf("tasks after the refused amendment = %d, want %d: nothing applied", got, tasks)
+	}
+}
+
 func TestSubmitTaskTitleDefaultsToTheSpecsFirstLine(t *testing.T) {
 	e := newEnv(t)
 	res := e.submitTask(TaskParams{

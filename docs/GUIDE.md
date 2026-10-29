@@ -1281,7 +1281,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada agent reset <harness>/<model>`: clear a broken or cooling agent. See [section 8](#broken-agents).
 - `brigada cancel <job-id>`: stop one live job. See [section 4](#cancelling).
 - `brigada review --branch <name> [--repo URL]`: review a branch with an agent of another family, with no plan. See [section 7](#a-branch-with-no-plan).
-- `brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title T] [--harness H]`: submit one task directly, without the foreman. A debugging path; the base ref defaults to `main`.
+- `brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title T] [--harness H]`: submit one task directly, without the foreman. A debugging path; the base ref defaults to `main`. The base must be a branch name: the land job fetches branches by name, so a bare commit SHA (40 or 64 hex digits) is refused at submit, naming the SHA, as is a SHA given as a task's `base` in `plan_create` or `plan_amend`. Name a branch that contains the commit.
 
 ### Projects
 
