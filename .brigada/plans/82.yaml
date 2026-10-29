@@ -30,7 +30,7 @@ tasks:
     effort: high
     review_tier: heavy
     caps: {review_rounds: 4, restart: 3}
-    state: running
+    state: reviewing
     branch: "brigada/task-245-r1"
     rounds: 1
   - id: 246
