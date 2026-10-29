@@ -344,6 +344,48 @@ func TestLandGateHeldTaskClosesOnTheTrailerLanding(t *testing.T) {
 	}
 }
 
+// TestLandRejectClosesThePlan: the user's no settles the hold too
+// (#133). A plan whose only open task is held at the land gate stays
+// open; `brigada land reject` declines the landing — it will never
+// happen — and the plan closes, the report naming the task under
+// "landing declined", its branch left alone.
+func TestLandRejectClosesThePlan(t *testing.T) {
+	e := newEnv(t)
+	e.set(map[string]string{SettingApprovalTiers: "heavy"})
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	res := e.createPlan([]PlanTask{
+		{Name: "solo", Spec: "the only work", Tier: "heavy"},
+	})
+	solo := res.Tasks[0].TaskID
+
+	e.runTaskToDone(solo, author, reviewer)
+	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ? AND state = 'held'", solo); n != 1 {
+		t.Fatalf("solo land holds = %d, want 1: the heavy tier holds its landing", n)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
+		t.Fatalf("plan state = %q, want active: the held landing is still to come", got)
+	}
+
+	dec, err := e.eng.LandReject(e.ctx, e.project, solo)
+	if err != nil {
+		t.Fatalf("reject solo's hold: %v", err)
+	}
+	if dec.Released {
+		t.Fatalf("LandReject = %+v, want not released", dec)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planDone {
+		t.Fatalf("plan state = %q, want done: the rejected landing is declined, not live work", got)
+	}
+	p, ok := e.eventPayloadOf(evPlanDone)
+	if !ok {
+		t.Fatal("no plan_done event")
+	}
+	if !strings.Contains(p.Reason, fmt.Sprintf("landing declined: task %d solo", solo)) {
+		t.Errorf("plan_done report = %q, want the declined landing named", p.Reason)
+	}
+}
+
 // TestPushGateNeverStillClosesThePlan: a plan whose only open task
 // waits at the push gate under gate_push never closes (#133): the
 // landing is recorded local with the exact push command — the push is
