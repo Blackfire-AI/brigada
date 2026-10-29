@@ -5,9 +5,9 @@
 plan: 88
 title: "#126: another family becomes a review preference (review.family prefer|require)"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: active
 created: 2026-10-29T21:38:56.147268Z
-updated: 2026-10-29T21:39:27.634469Z
+updated: 2026-10-29T21:41:57.4238Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -30,7 +30,7 @@ tasks:
     tier: heavy
     effort: high
     review_tier: heavy
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 287
@@ -39,6 +39,53 @@ tasks:
     class: "implement"
     deps: ["family_engine"]
     base: "family_engine"
+    effort: medium
+    state: cancelled
+    branch: ""
+    rounds: 0
+  - id: 288
+    name: "family_placement"
+    title: "#126 (1/4): review.family prefer|require: the engine config key and the reviewer placement"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    state: running
+    branch: ""
+    rounds: 0
+  - id: 289
+    name: "family_rereview_prompt"
+    title: "#126 (2/4): re-reviews and reviewer prompts under review.family"
+    class: "implement"
+    deps: ["family_placement"]
+    base: "family_placement"
+    continue: "family_placement"
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 290
+    name: "family_visibility_docs"
+    title: "#126 (3/4): the review placement shown in history and status; design docs"
+    class: "implement"
+    deps: ["family_rereview_prompt"]
+    base: "family_rereview_prompt"
+    continue: "family_rereview_prompt"
+    effort: medium
+    review_tier: standard
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 291
+    name: "family_init_userdocs"
+    title: "#126 (4/4): init, user docs and CHANGELOG for review.family"
+    class: "implement"
+    deps: ["family_visibility_docs"]
+    base: "family_visibility_docs"
     effort: medium
     state: pending
     branch: ""
