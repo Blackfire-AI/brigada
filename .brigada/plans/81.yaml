@@ -186,8 +186,8 @@ tasks:
     base: "init_diff"
     continue: "init_diff"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-241"
     rounds: 0
   - id: 242
     name: "docs_check"
