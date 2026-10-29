@@ -7,7 +7,7 @@ title: "Integrate the stranded plan-81 stack onto landed; fix #122 (plan_amend c
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-10-29T07:35:58.740006Z
-updated: 2026-10-29T07:57:50.831608Z
+updated: 2026-10-29T08:16:46.691938Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -49,8 +49,8 @@ tasks:
     name: "bug115"
     title: "#115: task submit accepts a SHA base the land job cannot fetch"
     class: "implement"
-    deps: ["fix122"]
-    base: "fix122"
+    deps: ["checkout122"]
+    base: "checkout122"
     effort: medium
     caps: {restart: 2}
     state: pending
@@ -76,6 +76,27 @@ tasks:
     base: "fix122"
     effort: medium
     caps: {restart: 2}
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 250
+    name: "checkout122"
+    title: "#122 (part 2): foreman checkout and plan review read the land target"
+    class: "implement"
+    deps: ["fix122"]
+    base: "fix122"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 251
+    name: "bug124"
+    title: "#124: a reopened dependency leaves started dependents on a stale base"
+    class: "implement"
+    deps: ["bug116"]
+    base: "bug116"
+    tier: heavy
+    effort: medium
     state: pending
     branch: ""
     rounds: 0
