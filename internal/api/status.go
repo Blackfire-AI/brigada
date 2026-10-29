@@ -61,13 +61,13 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id identit
 			if len(values) == 0 {
 				continue
 			}
-			if name, ok := strings.CutPrefix(key, "skill_"); ok {
-				d := skills[name]
-				d.Digest = values[0]
-				skills[name] = d
-			} else if name, ok := strings.CutPrefix(key, "skilltree_"); ok {
+			if name, ok := strings.CutPrefix(key, "skilltree_"); ok {
 				d := skills[name]
 				d.Tree = values[0]
+				skills[name] = d
+			} else if name, ok := strings.CutPrefix(key, "skill_"); ok {
+				d := skills[name]
+				d.Digest = values[0]
 				skills[name] = d
 			}
 		}

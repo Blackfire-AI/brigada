@@ -33,7 +33,7 @@ func TestSkillImportEndToEnd(t *testing.T) {
 	}
 	content := []byte("schema: 1\nrepo: " + canon + "\nskills_dir: .brigada/skills\n")
 	skill := func(name, text string) engine.Skill {
-		return engine.Skill{Name: name, Description: "d " + name, Text: text, For: "both"}
+		return engine.Skill{Name: name, Description: "d " + name, Text: text, For: "both", TreeDigest: "tree-" + name}
 	}
 	do := func(skills []engine.Skill) error {
 		_, err := user.ImportProjectConfigFull(e.ctx, repo, content, nil, nil, &skills, true)
@@ -112,8 +112,12 @@ func TestSkillImportEndToEnd(t *testing.T) {
 		t.Fatalf("alpha is not in status")
 		return false
 	}
-	if changed(engine.SkillFileDigest{Digest: stored}) {
+	if changed(engine.SkillFileDigest{Digest: stored, Tree: "tree-alpha"}) {
 		t.Errorf("an unedited skill was flagged")
+	}
+	// A supporting-file edit moves the tree digest alone.
+	if !changed(engine.SkillFileDigest{Digest: stored, Tree: "tree-edited"}) {
+		t.Errorf("a tree-only edit was not flagged")
 	}
 	if !changed(engine.SkillFileDigest{Digest: "edited"}) {
 		t.Errorf("an edited skill was not flagged")
