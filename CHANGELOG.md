@@ -7,10 +7,12 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The foreman's file tools read only its checkout and its project's state (issue #131): the settings brigada writes for a headless turn and for attach confine `Read`, `Grep` and `Glob` to the reading checkout, subagents included, and no allow rule in the user's own settings lifts the refusal.
 - `scripts/land-ready.sh` waits for CI on the remote staging head, holds when no run appears within the grace period, and detects conflicting or unresolved PR mergeability (issue #128).
 
 ### Added
 
+- `issue_read`, a read-only foreman tool (issue #131): it answers the title, body and comments of an issue or pull request of the project's own repository inside `<issue>` data delimiters, with the user's `gh` login. When the repository is not on GitHub, `gh` is missing or not logged in, or the number does not exist, it returns that reason; the foreman's report says so and asks the user for the text, and the foreman never searches the disk for it.
 - Documented editable role instructions, task skills, their import and snapshot rules, and the diff/reset commands (issues #119 and #117). Enabled the documentation content verifier.
 
 - Embedded default role instructions and task-shape skills for future prompt configuration, each skill a numbered procedure, with a versioned archive (`internal/defaults/versions/<ver>/…`) holding every shipped version's texts for exact three-way diffs, tested equal to the live embed.

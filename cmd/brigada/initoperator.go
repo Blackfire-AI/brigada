@@ -55,9 +55,10 @@ Send the foreman a request with ` + "`brigada ask -`" + `, the message on stdin:
     Relevant code: auth/session.go. Closes #12 in the commit.
     EOF
 
-- The foreman has no shell and cannot read an issue tracker. Read the
-  issue yourself and put what it says into the ask; keep the number
-  only as a reference for ` + "`Closes`" + ` or ` + "`Refs`" + ` trailers.
+- The foreman has no shell. It reads the issues and pull requests of
+  the project's own repository with the issue tool. For an issue
+  anywhere else, put its text into the ask; keep the number only as
+  a reference for ` + "`Closes`" + ` or ` + "`Refs`" + ` trailers.
 - Name files and document sections; the foreman reads the repository.
 - Say the build order when tasks depend on each other.
 - Hint a tier when a task is easy (light) or risky (heavy); the foreman
