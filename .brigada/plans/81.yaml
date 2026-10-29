@@ -130,7 +130,7 @@ tasks:
     base: "client_digest"
     continue: "client_digest"
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 237
@@ -175,7 +175,7 @@ tasks:
     base: "client"
     continue: "client"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-240"
     rounds: 1
   - id: 241
@@ -217,6 +217,6 @@ tasks:
     deps: ["record", "client", "store_status", "prompts_rt"]
     base: "prompts_rt"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-244"
     rounds: 0
