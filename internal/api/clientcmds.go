@@ -589,6 +589,28 @@ func (c *Client) RestartTask(ctx context.Context, task int64, note, idemKey stri
 	}, nil
 }
 
+// LandRetryResult names what a land_retry did (#133): Outcome is one of
+// engine.LandRetryQueued (JobID the land job), LandRetryHeld,
+// LandRetryStaleBase or LandRetryRefused (Reason says why).
+type LandRetryResult struct {
+	TaskID  int64
+	Outcome string
+	JobID   int64
+	Reason  string
+}
+
+// RetryLanding runs the land rule again for a task parked by a rejected
+// push or an environment failure (#133). A refusal is an outcome, not an
+// error. idemKey as in Answer.
+func (c *Client) RetryLanding(ctx context.Context, task int64, idemKey string) (LandRetryResult, error) {
+	var out taskLandRetryResponse
+	path := "/v1/tasks/" + strconv.FormatInt(task, 10) + "/land-retry"
+	if err := c.callKeyed(ctx, http.MethodPost, path, idemKey, struct{}{}, &out); err != nil {
+		return LandRetryResult{}, err
+	}
+	return LandRetryResult{TaskID: out.TaskID, Outcome: out.Outcome, JobID: out.JobID, Reason: out.Reason}, nil
+}
+
 // CancelJob stops a live job (§12.1). The engine's answers — ok, already,
 // gone — come back as engine answers, not errors.
 func (c *Client) CancelJob(ctx context.Context, jobID int64) (engine.Answer, error) {
