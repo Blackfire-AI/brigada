@@ -75,7 +75,7 @@ tasks:
     base: "land_retry_docs"
     tier: heavy
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 281
@@ -120,7 +120,7 @@ tasks:
     deps: ["land_retry_api"]
     base: "land_retry_api"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-284"
     rounds: 0
   - id: 285
