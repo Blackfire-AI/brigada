@@ -54,8 +54,8 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-272"
     rounds: 0
   - id: 273
     name: "foreman_rule_changelog"
