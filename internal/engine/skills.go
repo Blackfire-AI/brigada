@@ -309,6 +309,9 @@ type TaskInstructions struct {
 	Worker   RoleSnapshot `json:"worker"`
 	Reviewer RoleSnapshot `json:"reviewer"`
 	Skills   []TaskSkill  `json:"skills,omitempty"`
+	// SkillsDir is the project's effective skills_dir when the task was
+	// resolved; the directory line of every prompt of the task names it.
+	SkillsDir string `json:"skills_dir,omitempty"`
 }
 
 // WorkerBytes is what the worker prompt carries of instructions plus
@@ -354,6 +357,11 @@ func snapshotOf(ri RoleInstruction) RoleSnapshot {
 // the limit; nothing is truncated.
 func resolveTaskInstructionsTx(tx *sql.Tx, project int64, task string, skillNames []string) (TaskInstructions, error) {
 	var out TaskInstructions
+	dir, err := projectSkillsDirTx(tx, project)
+	if err != nil {
+		return TaskInstructions{}, err
+	}
+	out.SkillsDir = dir
 	if len(skillNames) > 0 {
 		have, err := projectSkillsTx(tx, project)
 		if err != nil {
@@ -431,8 +439,8 @@ func recordTaskInstructionsTx(tx *sql.Tx, taskID int64, ti TaskInstructions, now
 		skills = string(b)
 	}
 	if _, err := tx.Exec(`UPDATE tasks SET instructions = ?, instructions_meta = ?, reviewer_instructions = ?,
-		reviewer_instructions_meta = ?, skills = ?, updated_at = ? WHERE id = ?`,
-		ti.Worker.Text, string(wm), ti.Reviewer.Text, string(rm), skills, fmtTime(now), taskID); err != nil {
+		reviewer_instructions_meta = ?, skills = ?, skills_dir = ?, updated_at = ? WHERE id = ?`,
+		ti.Worker.Text, string(wm), ti.Reviewer.Text, string(rm), skills, ti.SkillsDir, fmtTime(now), taskID); err != nil {
 		return fmt.Errorf("record the instructions of task %d: %w", taskID, err)
 	}
 	return nil
@@ -526,10 +534,26 @@ func reviewerPromptSkills(ti TaskInstructions) []prompt.Skill {
 	return workerPromptSkills(ti)
 }
 
-// taskSkillsDirTx reads the current project setting, not the task snapshot.
+// taskSkillsDirTx reads the skills_dir a task recorded at creation. A
+// task with none recorded gets the default, never the project's current
+// setting: migration 0070 wrote every older task's value.
 func taskSkillsDirTx(tx *sql.Tx, taskID int64) (string, error) {
+	var dir string
+	if err := tx.QueryRow(`SELECT skills_dir FROM tasks WHERE id = ?`, taskID).Scan(&dir); err != nil {
+		return "", fmt.Errorf("read the skills_dir of task %d: %w", taskID, err)
+	}
+	if dir == "" {
+		return DefaultSkillsDir, nil
+	}
+	return dir, nil
+}
+
+// projectSkillsDirTx reads a project's effective skills_dir: the setting,
+// or the default when unset. Only task creation and re-resolution call
+// it; prompts read the task's recorded value.
+func projectSkillsDirTx(tx *sql.Tx, project int64) (string, error) {
 	var raw string
-	if err := tx.QueryRow(`SELECT p.settings FROM projects p JOIN plans pl ON pl.project_id = p.id JOIN tasks t ON t.plan_id = pl.id WHERE t.id = ?`, taskID).Scan(&raw); err != nil {
+	if err := tx.QueryRow(`SELECT settings FROM projects WHERE id = ?`, project).Scan(&raw); err != nil {
 		return "", err
 	}
 	var settings map[string]json.RawMessage
