@@ -65,7 +65,7 @@ tasks:
     tier: heavy
     effort: medium
     caps: {restart: 2}
-    state: reviewing
+    state: done
     branch: "brigada/task-248-r1"
     rounds: 0
   - id: 249
