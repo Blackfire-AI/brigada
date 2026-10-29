@@ -98,8 +98,8 @@ tasks:
     base: "push_retry"
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: done
+    branch: "brigada/task-282"
     rounds: 0
   - id: 283
     name: "land_retry_api"
