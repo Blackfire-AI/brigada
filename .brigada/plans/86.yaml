@@ -5,9 +5,9 @@
 plan: 86
 title: "Re-land #131's contract/docs change (task 273) on the current land target"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-10-29T18:45:24.822349Z
-updated: 2026-10-29T18:45:24.822349Z
+updated: 2026-10-29T18:49:57.06941Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -28,6 +28,6 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
