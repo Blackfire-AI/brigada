@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/defaults"
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
 // newPlanReviewEnv is an env with the plan review on (§6.2): the
@@ -1076,5 +1079,79 @@ func TestPlanReviewInfraWindowSpentHoldsThePlan(t *testing.T) {
 	prompt := e.str("SELECT prompt FROM jobs WHERE kind = 'foreman' ORDER BY id DESC")
 	if !strings.Contains(prompt, "the network outage outlasted the "+capText(infraRetryWindow)+" infra retry window") {
 		t.Errorf("the woken turn's prompt lacks the outage:\n%s", prompt)
+	}
+}
+
+// TestPlanReviewResolvesRoleTextsAndSkills: the plan review's prompt
+// resolves its role texts from the store per job (§5.9) — never a text
+// in the binary: a project with neither configured runs the review on
+// the contract alone, and configured texts reach the next plan's
+// review in their own sections. The input names each task's ordered
+// skills with their descriptions (§5.10, check (h)), and says none
+// for a task without them; the job records the template version and
+// the role texts' digests beside the prompt.
+func TestPlanReviewResolvesRoleTextsAndSkills(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+
+	// Neither role configured: no role section, none of the binary's
+	// defaults, and a task without skills is named as having none.
+	plain := e.createPlan(nTasks(2))
+	reviewPrompt := e.str("SELECT prompt FROM jobs WHERE key = ?", planReviewKey(plain.PlanID))
+	for _, tag := range []string{"<plan-review-instructions>", "<foreman-instructions>"} {
+		if strings.Contains(reviewPrompt, tag) {
+			t.Errorf("a not-configured role added %s:\n%s", tag, reviewPrompt)
+		}
+	}
+	for _, role := range []string{RolePlanReview, RoleForeman} {
+		if live, err := defaults.LiveRoleText(role); err == nil && strings.Contains(reviewPrompt, live) {
+			t.Errorf("a not-configured %s role fell back to the binary's default text (§5.9)", role)
+		}
+	}
+	if !strings.Contains(reviewPrompt, "skills: none") {
+		t.Errorf("a task without skills is not named as having none:\n%s", reviewPrompt)
+	}
+	if meta := e.str("SELECT prompt_meta FROM jobs WHERE key = ?", planReviewKey(plain.PlanID)); meta != fmt.Sprintf(`{"template":%d}`, prompt.PlanReviewTemplateVersion) {
+		t.Errorf("a review without role texts records prompt_meta %q; want the plan review template's version alone", meta)
+	}
+
+	// Configured texts and named skills reach the next plan's review:
+	// the reviewer's own text and the foreman's as the convention the
+	// plan author followed, each in its own section; the skills in
+	// order with their descriptions; the meta naming template and
+	// digests.
+	const planReviewText = "Judge the plan against the checkout, not its telling of itself."
+	const foremanText = "Plan in small steps; one concern per task."
+	e.setRole(RolePlanReview, planReviewText)
+	e.setRole(RoleForeman, foremanText)
+	e.importSkills(
+		Skill{Name: "bugfix", Description: "Reproduce the failure before fixing it.", Text: "reproduce first"},
+		Skill{Name: "docs", Description: "Docs ship with the change that needs them.", Text: "write the docs"},
+	)
+	skilled := e.createPlan([]PlanTask{
+		{Name: "fix", Spec: "fix the bug", Skills: []string{"bugfix", "docs"}},
+		{Name: "walk", Spec: "no skills on this one"},
+	})
+	reviewPrompt = e.str("SELECT prompt FROM jobs WHERE key = ?", planReviewKey(skilled.PlanID))
+	for _, want := range []string{
+		"<plan-review-instructions>\n" + planReviewText + "\n</plan-review-instructions>",
+		"<foreman-instructions>\n" + foremanText + "\n</foreman-instructions>",
+		"skills, in order: bugfix — Reproduce the failure before fixing it.; docs — Docs ship with the change that needs them.",
+		"skills: none",
+	} {
+		if !strings.Contains(reviewPrompt, want) {
+			t.Errorf("the plan review input lacks %q:\n%s", want, reviewPrompt)
+		}
+	}
+	meta := e.str("SELECT prompt_meta FROM jobs WHERE key = ?", planReviewKey(skilled.PlanID))
+	for _, want := range []string{
+		fmt.Sprintf(`"template":%d`, prompt.PlanReviewTemplateVersion),
+		instructionsDigest(planReviewText),
+		instructionsDigest(foremanText),
+	} {
+		if !strings.Contains(meta, want) {
+			t.Errorf("the review's prompt_meta = %q, want it to name %q", meta, want)
+		}
 	}
 }

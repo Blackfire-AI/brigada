@@ -14,7 +14,7 @@ func TestPrepareForemanCheckout(t *testing.T) {
 	ctx := context.Background()
 	remote := newRemote(t)
 	scratch := t.TempDir()
-	first, err := PrepareForemanCheckout(ctx, scratch, remote, "main", nil)
+	first, err := PrepareForemanCheckout(ctx, scratch, remote, "", "main", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestPrepareForemanCheckout(t *testing.T) {
 	git(t, seed, "add", ".")
 	git(t, seed, "-c", "user.name=test", "-c", "user.email=test@brigada.invalid", "commit", "-m", "new default")
 	git(t, seed, "push", "origin", "trunk")
-	second, err := PrepareForemanCheckout(ctx, scratch, remote, "trunk", nil)
+	second, err := PrepareForemanCheckout(ctx, scratch, remote, "", "trunk", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestPrepareForemanCheckout(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	third, err := PrepareForemanCheckout(ctx, scratch, remote, "trunk", nil)
+	third, err := PrepareForemanCheckout(ctx, scratch, remote, "", "trunk", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestPrepareForemanCheckout(t *testing.T) {
 	if err := os.Rename(remotePath, remotePath+"-gone"); err != nil {
 		t.Fatal(err)
 	}
-	_, err = PrepareForemanCheckout(ctx, scratch, remote, "trunk", nil)
+	_, err = PrepareForemanCheckout(ctx, scratch, remote, "", "trunk", nil)
 	if err == nil || !strings.Contains(err.Error(), "fetch") || !strings.Contains(err.Error(), "does not appear to be a git repository") {
 		t.Fatalf("fetch failure = %v", err)
 	}
@@ -83,7 +83,7 @@ func TestPrepareForemanCheckout(t *testing.T) {
 		t.Errorf("foreman checkout fetch failure = %T, want an infrastructure error", err)
 	}
 	empty := t.TempDir()
-	if _, err := PrepareForemanCheckout(ctx, empty, remote, "main", nil); err == nil || !strings.Contains(err.Error(), "clone") {
+	if _, err := PrepareForemanCheckout(ctx, empty, remote, "", "main", nil); err == nil || !strings.Contains(err.Error(), "clone") {
 		t.Fatalf("clone failure = %v", err)
 	} else if !errors.As(err, &infra) {
 		t.Errorf("foreman checkout clone failure = %T, want an infrastructure error", err)

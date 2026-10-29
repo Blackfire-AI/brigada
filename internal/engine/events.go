@@ -15,9 +15,12 @@ import (
 const (
 	evProjectArchived        = "project_archived"          // removal retains history but closes the work gate
 	evProjectSettingSet      = "project_setting_set"       // a project setting changed — `brigada project set` or an approve that stops asking (§6.3); Reason lists key=value
+	evRoleInstructionSet     = "role_instruction_set"      // a role's instruction text was set (§5.9); Reason names the role and the size
 	evPlanCancelled          = "plan_cancelled"            // removal cancelled an unfinished plan
 	evPlanCreated            = "plan_created"              // CreatePlan: a plan now exists (§6.2)
 	evPlanDone               = "plan_done"                 // the plan's last open task finished (§6.2)
+	evPlanBlocked            = "plan_blocked"              // a blocked plan (§6.2): done work that can never land — a dependency cancelled or failed — keeps the plan active; Reason names each stranded task and the dead dependency. One wake per blockage
+	evPlanUnblocked          = "plan_unblocked"            // a blocked plan's last stranded task was freed (§6.2); the plan can close again, and a later blockage wakes anew
 	evPlanAwaitingApproval   = "plan_awaiting_approval"    // CreatePlan: the plan is over the approval limit and waits for the user's yes (§6.3)
 	evPlanReviewQueued       = "plan_review_queued"        // a plan_review job is queued: the plan waits in reviewing for the verdict before any work is queued (§6.2)
 	evPlanReviewed           = "plan_reviewed"             // a plan review round ended: approve, changes (with findings), no verdict, or accepted by the foreman (plan_accept); the plan proceeded, parks at needs_foreman for the foreman's answer, or waits for the user's yes (§6.2)
@@ -71,7 +74,11 @@ const (
 	evTaskPushed             = "task_pushed"               // the push phase pushed a waiting landing (§7.1)
 	evPushApproved           = "push_approved"             // the user released the push gate for waiting landings (§6.3)
 	evTaskLandFailed         = "task_land_failed"          // a conflict or a failed check on the landed result; the task parks (§7.1)
+	evLandEnvFailed          = "land_env_failed"           // the environment, not the task's content, failed a landing (issue #116): a fetch, credentials, a broken remote. One wake per cause while it is active; the tasks it parks are listed in the wake's line
+	evLandEnvRecovered       = "land_env_recovered"        // the environmental cause of failed landings cleared — a later landing succeeded — so a recurrence wakes anew (issue #116)
 	evTaskLandNotReady       = "task_land_not_ready"       // the land_ready gate answered not ready (issue #87); the landing is requeued after the backoff, Until names the next try
+	evTaskBaseStale          = "task_base_stale"           // the task is held on a stale base (issue #124): its stacked dependency was restarted after the task started and finished again from a new branch; Reason names the superseded base and the dependency's current branch, Branch the latter
+	evDepRebuilt             = "dep_rebuilt"               // a dependency finished again from a new result branch after a restart (issue #124): one wake names it and every started dependent held on its old round — parked at needs_foreman or refused at the land gate — until each is restarted on the new base
 	evProjectForemanSet      = "project_foreman_set"       // setup: the project's foreman harness and model were chosen (§4.1)
 	evForemanReport          = "foreman_report"            // a done foreman turn's final message, reported to the user (§3, §10)
 	evUserMessage            = "user_message"              // the user's message to the foreman, sent without attaching (§4.2 item 3)
@@ -136,7 +143,8 @@ type eventPayload struct {
 	Account    string `json:"account,omitempty"` // the quota account a cooling names (§8)
 	Until      string `json:"until,omitempty"`   // a deadline, RFC3339: a foreman limit's reset, a probe's next attempt; absent when unknown (§4.4)
 	Job        int64  `json:"job,omitempty"`     // a job the event names besides its own job_id column
-	Hold       int64  `json:"hold,omitempty"`    // the attach hold the event names (§4.2 item 1)
+	Hold       int64  `json:"hold,omitempty"`    // the attach hold the event names (§4.2)
+	Cause      string `json:"cause,omitempty"`   // a land cause key: the error class and the shared resource every task it fails parks under (issue #116)
 	Count      int64  `json:"count,omitempty"`   // how many of something the event counts (§4.2, §4.3)
 	Path       string `json:"path,omitempty"`    // a snapshot's file (§6.4)
 	Bytes      int64  `json:"bytes,omitempty"`   // a snapshot's size (§6.4)
@@ -147,12 +155,16 @@ type eventPayload struct {
 	// The approval limit's why (§6.3): the plan, and the classes and
 	// protected paths that put it over (Count holds the task count,
 	// Reason the reasons in words).
-	Plan    int64    `json:"plan,omitempty"`
-	Classes []string `json:"classes,omitempty"`
-	Paths   []string `json:"paths,omitempty"`
-	Agent   int64    `json:"agent,omitempty"`
-	Score   float64  `json:"score,omitempty"`
-	Pick    string   `json:"pick,omitempty"`
+	Plan int64 `json:"plan,omitempty"`
+	// Prompt is what a leased job's prompt was composed from (§5.9
+	// 'Versioning', §9): the template version and the digests of the
+	// instruction and skill texts it carried.
+	Prompt  *promptMeta `json:"prompt,omitempty"`
+	Classes []string    `json:"classes,omitempty"`
+	Paths   []string    `json:"paths,omitempty"`
+	Agent   int64       `json:"agent,omitempty"`
+	Score   float64     `json:"score,omitempty"`
+	Pick    string      `json:"pick,omitempty"`
 	// ExclusionLifted marks an agent pick of the very agent a review
 	// retry's exclusion named (§7, decided 2026-10-20): no other
 	// qualifying reviewer was available, so the preference was lifted

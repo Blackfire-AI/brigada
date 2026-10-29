@@ -24,9 +24,17 @@ func TestOperatorGuideContent(t *testing.T) {
 		"re-wakes the foreman", "brigada plan approve", "brigada land approve",
 		"brigada push approve", "--and-stop-asking", "tags and releases",
 		"brigada agent reset <harness>/<model>",
+		// Where the role files and skills are, and how to ask for a skill.
+		".brigada/instructions/<role>.md", "foreman,\n  plan_review, worker and reviewer",
+		".brigada/skills/<name>/SKILL.md", "skills_dir", "brigada project import",
+		"brigada instructions diff <role|skill>", "brigada init --take-default <role|skill>",
+		"use skill bugfix on task 3", "no skills on task 4",
 	} {
 		if !strings.Contains(operatorGuide, want) {
 			t.Errorf("guide lacks %q", want)
+		}
+		if !strings.Contains(operatorSkill, want) {
+			t.Errorf("operator skill lacks %q", want)
 		}
 	}
 	for _, old := range []string{"see gh issue", "Point at issues"} {

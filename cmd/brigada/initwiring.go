@@ -60,6 +60,9 @@ type wireFile struct {
 	state   string // created, added, replaced, removed, unchanged
 	err     error
 	purpose string // what the plan says the file is for; "" takes the path's default
+	// generated marks init's default role files and skills: --verbose does
+	// not print their full texts.
+	generated bool
 }
 
 func (w wireFile) changed() bool {
@@ -208,7 +211,7 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 				} else {
 					printFileDiff(w, f.rel, f.old, f.next, true)
 				}
-			} else if verbose {
+			} else if verbose && !f.generated {
 				for _, line := range splitDiffLines(f.next) {
 					if f.rel == engine.ProjectConfigPath {
 						printInitFileLine(w, "      ", line)

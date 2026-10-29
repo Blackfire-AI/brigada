@@ -14,6 +14,10 @@ type Usage struct {
 	ReasoningTokens   *int64   `json:"reasoning_tokens,omitempty"`
 	CostUSD           *float64 `json:"cost_usd,omitempty"`
 	ModelCalls        *int64   `json:"model_calls,omitempty"`
+	// CostCumulative marks CostUSD as the running total of a resumable
+	// session, not this invocation's own spend; the engine turns it into
+	// a per-job delta. Unset for adapters whose cost is per invocation.
+	CostCumulative bool `json:"cost_cumulative,omitempty"`
 }
 
 // Calls is a Usage that only counts n model requests.
@@ -40,6 +44,7 @@ func (u *Usage) Add(v *Usage) {
 	add(&u.ReasoningTokens, v.ReasoningTokens)
 	add(&u.CostUSD, v.CostUSD)
 	add(&u.ModelCalls, v.ModelCalls)
+	u.CostCumulative = u.CostCumulative || v.CostCumulative
 }
 
 // ParseUsage reads selected numeric fields independently. Malformed, negative

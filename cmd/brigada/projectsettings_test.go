@@ -62,6 +62,16 @@ const gateDefaults = "gate_plan=auto (default)\n" + "gate_land=auto (default)\n"
 	"approval_tiers=none (default)\n" + "approval_restarted=false (default)\n" +
 	"land_target=main (default)\n" + "after_land=none (default)\n" + "land_ready=none (default)\n"
 
+// guidanceDefaults is the per-role block and skills line `project show`
+// prints after the settings (§5.9) for a project that configured none of
+// them: every role on the shipped default, generated from the defaults
+// version, unedited.
+const guidanceDefaults = "instructions.foreman: not configured, file none, 3998 bytes, sha256 a10014040f4683de74edab9bbc1ccce279b125d6d708521bb7572870f235caff, generated from 1.0.0, edited false\n" +
+	"instructions.plan_review: not configured, file none, 797 bytes, sha256 5e40bd1559a16f947c20d32c59f385b3562fd4f332daaaa8038c532d73c9a4a3, generated from 1.0.0, edited false\n" +
+	"instructions.worker: not configured, file none, 922 bytes, sha256 5df16b58db5a42599c40836cb9cb9d24655ffe52723ed19b6db15b7d61112425, generated from 1.0.0, edited false\n" +
+	"instructions.reviewer: not configured, file none, 819 bytes, sha256 3c68950054e6429d33bc8a5a3e9539ba3ceb6f9131013065d1df6e0ea530b6ce, generated from 1.0.0, edited false\n" +
+	"skills: none imported\n"
+
 const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes, approval_protected_paths, gate_plan, gate_land, gate_push, plan_review, plan_review.tier, plan_review.effort, approval_tiers, approval_restarted, land_target, after_land, land_ready, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, plan_files, instructions"
 
 // TestProjectSettingsGolden covers project set and show: the defaults,
@@ -100,7 +110,7 @@ func TestProjectSettingsGolden(t *testing.T) {
 	}
 
 	// Show reads the same back.
-	if code, stdout, stderr = do("project", "show", "--repo", repo); code != 0 || stdout != want {
+	if code, stdout, stderr = do("project", "show", "--repo", repo); code != 0 || stdout != want+guidanceDefaults {
 		t.Fatalf("show = %d %q (stderr %q), want %q", code, stdout, stderr, want)
 	}
 

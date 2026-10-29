@@ -451,7 +451,9 @@ type jobGrant struct {
 	// is squashed onto. Empty for every other kind.
 	LandTarget string `json:"land_target,omitempty"`
 	// DefaultBranch is, for a land job (§7.1), the branch a missing land
-	// target is created from. Empty for every other kind.
+	// target is created from; for a foreman turn and a plan review, the
+	// branch their BaseRef (the land target) falls back to. Empty for
+	// every other kind.
 	DefaultBranch string `json:"default_branch,omitempty"`
 	// LandCommit is, for a land job's push phase (§7.1), the commit the
 	// landing already recorded: the runner pushes exactly it, no new

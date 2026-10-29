@@ -22,7 +22,7 @@ import (
 // the task under task_out_of_rounds rather than its own changes event.
 // Answer reads the set to learn what parked the task it was given.
 var parkingEventKinds = []string{
-	evTaskNeedsHelp, evTaskFailed, evTaskCheckFailed, evTaskOutOfRounds, evTaskLoop, evReviewNoVerdict, evTaskLandFailed,
+	evTaskNeedsHelp, evTaskFailed, evTaskCheckFailed, evTaskOutOfRounds, evTaskLoop, evReviewNoVerdict, evTaskLandFailed, evTaskBaseStale,
 }
 
 // AnswerResult is what Answer did: the questions row it filled — the
@@ -102,7 +102,7 @@ func (e *Engine) answerTx(tx *sql.Tx, project, taskID int64, text string, now ti
 	if err != nil {
 		return AnswerResult{}, err
 	}
-	instructions, err := taskInstructionsTx(tx, taskID)
+	guidance, meta, err := taskWorkerGuidanceTx(tx, taskID)
 	if err != nil {
 		return AnswerResult{}, err
 	}
@@ -117,7 +117,8 @@ func (e *Engine) answerTx(tx *sql.Tx, project, taskID int64, text string, now ti
 		TaskID:       taskID,
 		Kind:         KindFix,
 		Mode:         ModeSession,
-		Prompt:       prompt.ComposeAnswerPrompt(spec, check, text, prompt.WithInstructions(instructions)),
+		Prompt:       prompt.ComposeAnswerPrompt(spec, check, text, guidance...),
+		PromptMeta:   meta,
 		Harness:      harness,
 		RequireAgent: agent,
 		Round:        roundNone,
@@ -203,8 +204,15 @@ func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note string, n
 // retry (§3, §5.6). The caller checks the budget and records the decision;
 // an automatic retry pins the new attempt to a different eligible agent.
 // notBefore, when non-zero, holds the new job out of leasing until then
-// (§3: a retry's growing delay).
+// (§3: a retry's growing delay). The base is re-resolved first, so a
+// dependent the stale-base rule held (issue #124) rebuilds on its
+// dependency's current result branch, the one that dependency is done
+// from — a fresh attempt is the one path that may move the worktree's
+// starting point.
 func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note string, agent int64, notBefore time.Time, now time.Time) (RestartResult, error) {
+	if err := resolveBaseTx(tx, taskID, now); err != nil {
+		return RestartResult{}, err
+	}
 	spec, err := taskSpecTx(tx, taskID)
 	if err != nil {
 		return RestartResult{}, err
@@ -213,7 +221,7 @@ func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note stri
 	if err != nil {
 		return RestartResult{}, err
 	}
-	instructions, err := taskInstructionsTx(tx, taskID)
+	guidance, meta, err := taskWorkerGuidanceTx(tx, taskID)
 	if err != nil {
 		return RestartResult{}, err
 	}
@@ -224,7 +232,8 @@ func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note stri
 		TaskID:       taskID,
 		Kind:         KindWork,
 		Mode:         ModeFresh,
-		Prompt:       prompt.ComposeWorkerPrompt(spec, check, note, prompt.WithInstructions(instructions)),
+		Prompt:       prompt.ComposeWorkerPrompt(spec, check, note, guidance...),
+		PromptMeta:   meta,
 		Restart:      true,
 		RequireAgent: agent,
 		NotBefore:    notBefore,

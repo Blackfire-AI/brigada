@@ -19,7 +19,8 @@ import (
 // `needs you:` queue, "nothing" when it is empty. The client's status
 // command and the MCP bridge's status tool share this rendering, so a
 // user and the foreman read the same lines; a task's branch rides in
-// brackets only once it has one. The plans list the engine trimmed
+// brackets only once it has one, and a done implement task carries its
+// landing state beside the state — `landed@<sha>` or `not landed`. The plans list the engine trimmed
 // says so in one summary line (§10): the older finished plans counted,
 // the all view (`--all`, all=true) listing them.
 func StatusSections(st Status) string {
@@ -103,8 +104,11 @@ func StatusSections(st Status) string {
 			}
 			for _, t := range p.Tasks {
 				line := fmt.Sprintf("  task #%d %s %s", t.ID, t.State, t.Title)
-				if t.Landed {
-					line += " landed"
+				// A done implement task carries its landing state (§7.1):
+				// `landed@<sha>` or `not landed`, so a task done and not
+				// landed reads differently from a landed one.
+				if label := t.LandedLabel(); label != "" {
+					line += " " + label
 				}
 				if t.LandReady != "" {
 					line += " " + t.LandReady
@@ -114,6 +118,9 @@ func StatusSections(st Status) string {
 				}
 				if t.Continues != "" {
 					line += " (continues " + t.Continues + ")"
+				}
+				if len(t.Skills) > 0 {
+					line += " skills:" + strings.Join(t.Skills, ",")
 				}
 				if t.Branch != "" {
 					line += " [" + t.Branch + "]"
@@ -205,6 +212,27 @@ func StatusSections(st Status) string {
 		line := fmt.Sprintf("project instructions (project #%d): %s, %d bytes, sha256 %s", in.ProjectID, in.Source, in.Bytes, in.Digest)
 		if in.Version != "" {
 			line += ", version " + shortVersion(in.Version)
+		}
+		lines = append(lines, line)
+	}
+
+	for _, in := range st.RoleInstructions {
+		line := fmt.Sprintf("%s instructions (project #%d): %s, %d bytes, sha256 %s", in.Role, in.ProjectID, in.State, in.Bytes, in.Digest)
+		if in.GeneratedFrom != "" {
+			line += ", generated from " + in.GeneratedFrom
+		}
+		if in.Edited != nil {
+			line += fmt.Sprintf(", edited %t", *in.Edited)
+		}
+		if in.ChangedSinceImport != nil {
+			line += fmt.Sprintf(", changed since import %t", *in.ChangedSinceImport)
+		}
+		lines = append(lines, line)
+	}
+	for _, skill := range st.Skills {
+		line := fmt.Sprintf("skill %s (project #%d): %s, sha256 %s, used %d times", skill.Name, skill.ProjectID, skill.Description, skill.Digest, skill.TimesUsed)
+		if skill.ChangedSinceImport != nil {
+			line += fmt.Sprintf(", changed since import %t", *skill.ChangedSinceImport)
 		}
 		lines = append(lines, line)
 	}

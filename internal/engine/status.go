@@ -106,7 +106,48 @@ type StatusInfo struct {
 	// Instructions lists the projects in scope that have project
 	// instructions (§5.9): source, version, size and digest; the text only
 	// from StatusWithInstructions.
-	Instructions []StatusInstructions `json:"instructions,omitempty"`
+	Instructions     []StatusInstructions     `json:"instructions,omitempty"`
+	RoleInstructions []StatusRoleInstructions `json:"role_instructions,omitempty"`
+	Skills           []StatusSkill            `json:"skills,omitempty"`
+}
+
+// SkillFileDigest is a client's current digests of one skill directory: of
+// its SKILL.md and of the whole tree (§5.10), each over the file text
+// without the version header.
+type SkillFileDigest struct {
+	Digest string `json:"digest"`
+	Tree   string `json:"tree,omitempty"`
+}
+
+// CompareSkillFileDigests applies skill digests supplied by a client to a
+// single project's status. A skill the client sent no digest for stays
+// unknown; the stored snapshot is never touched.
+func (s *StatusInfo) CompareSkillFileDigests(project int64, digests map[string]SkillFileDigest) {
+	for i := range s.Skills {
+		sk := &s.Skills[i]
+		if sk.ProjectID != project {
+			continue
+		}
+		if d, ok := digests[sk.Name]; ok {
+			changed := d.Digest != sk.Digest || (d.Tree != "" && d.Tree != sk.TreeDigest)
+			sk.ChangedSinceImport = &changed
+		}
+	}
+}
+
+// CompareInstructionFileDigests applies file digests supplied by a client to
+// a single project's status. Missing digests and non-imported roles remain unknown.
+func (s *StatusInfo) CompareInstructionFileDigests(project int64, digests map[string]string) {
+	for i := range s.RoleInstructions {
+		role := &s.RoleInstructions[i]
+		if role.ProjectID != project || role.Source != SourceImported {
+			continue
+		}
+		if digest, ok := digests[role.Role]; ok {
+			changed := digest != role.Digest
+			role.ChangedSinceImport = &changed
+		}
+	}
 }
 
 // InfraRetry is one queued work or fix job held out of leasing by the
@@ -202,6 +243,9 @@ type StatusTask struct {
 	// at the push gate (§7.1): the land job squashed it, or a Brigada-Task
 	// trailer on the default branch was detected and recorded.
 	Landed bool `json:"landed,omitempty"`
+	// LandedCommit is the commit the task landed as on its target
+	// (§7.1), from its landing record; empty when it has none.
+	LandedCommit string `json:"landed_commit,omitempty"`
 	// LandReady is the land_ready gate's target state for a done task
 	// (issue #87): "ready" when its land job is queued or running,
 	// "held by rule land_ready: <line>" when the gate's exit 1 held the
@@ -217,6 +261,28 @@ type StatusTask struct {
 	// first work job resumes (§6.1), by plan name or "#id"; empty when
 	// the task continues none.
 	Continues string `json:"continues,omitempty"`
+	// Skills names the skills the task recorded (§5.10), in order.
+	Skills []string `json:"skills,omitempty"`
+}
+
+// LandedLabel words the task's landing state for the per-task lines the
+// foreman reads — the status views and the digest's plan lines (§7.1,
+// §10): `landed@<sha>` for a done implement task whose landing is
+// recorded, `not landed` for a done implement task without one, "" for
+// everything else — a task of a class that never lands, or one not done
+// yet. A done task that has not landed must read differently from a
+// landed one.
+func (t StatusTask) LandedLabel() string {
+	if t.State != taskDone || t.Class != classImplement {
+		return ""
+	}
+	if t.Landed && t.LandedCommit != "" {
+		return "landed@" + t.LandedCommit
+	}
+	if t.Landed {
+		return "landed"
+	}
+	return "not landed"
 }
 
 // NeedsYouItem is one entry of the "needs you" queue (§10): something a
@@ -357,6 +423,9 @@ func (e *Engine) status(ctx context.Context, project int64, withText, all bool) 
 			return err
 		}
 		if info.Retries, err = statusRetriesTx(tx, project, now); err != nil {
+			return err
+		}
+		if info.RoleInstructions, info.Skills, err = statusGuidanceTx(tx, project, withText); err != nil {
 			return err
 		}
 		if info.Instructions, err = statusInstructionsTx(tx, project, withText); err != nil {
@@ -575,7 +644,7 @@ func statusPlanRows(tx *sql.Tx, query string, args ...any) ([]StatusPlan, error)
 
 // statusPlanTasksTx reads one status plan's tasks, in id order.
 func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, error) {
-	rows, err := tx.Query(`SELECT t.id, t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, '')
+	rows, err := tx.Query(`SELECT t.id, t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(l.commit_sha, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, ''), t.skills
 		FROM tasks t
 		LEFT JOIN landings l ON l.task_id = t.id
 		LEFT JOIN land_holds h ON h.task_id = t.id AND h.state = 'held'
@@ -587,16 +656,18 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, err
 	tasks := []StatusTask{}
 	for rows.Next() {
 		var t StatusTask
-		var capsJSON, pushed, retryAt, holdReason string
+		var capsJSON, pushed, commit, retryAt, holdReason, skills string
 		var exit sql.NullInt64
-		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &retryAt, &exit, &holdReason); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &commit, &retryAt, &exit, &holdReason, &skills); err != nil {
 			return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
 		}
 		t.Caps = parseTaskCaps(capsJSON)
+		t.Skills = taskSkillNames(skills)
 		// A landing recorded as waiting sits at the push gate, not yet
 		// landed (§7.1); every other landing record — pushed or local, by
 		// the land job or a detected trailer — marks the task landed.
 		t.Landed = pushed != "" && pushed != "waiting"
+		t.LandedCommit = commit
 		t.LandReady, err = landReadyState(tx, t.ID, t.State, t.Class, pushed, retryAt, holdReason, exit, now)
 		if err != nil {
 			return nil, err
@@ -761,13 +832,15 @@ func firstLines(s string, max int) string {
 // fix round then answered (§3); the queue reads them only for a task
 // already parked, whose latest of these kinds they may still be.
 var needsYouEventKinds = []string{
-	evTaskCheckFailed, evTaskNeedsHelp, evTaskFailed, evTaskOutOfRounds, evTaskLoop, evReviewChanges, evReviewNoVerdict, evTaskLandFailed, evTaskPlanHeld,
+	evTaskCheckFailed, evTaskNeedsHelp, evTaskFailed, evTaskOutOfRounds, evTaskLoop, evReviewChanges, evReviewNoVerdict, evTaskLandFailed, evTaskPlanHeld, evTaskBaseStale,
 }
 
 // statusNeedsYouTx lists the "needs you" queue (§10): the tasks parked
 // at needs_foreman or needs_user — each with what its latest parking
 // event said — and the plans waiting for approval. Entries read in id
-// order; project scopes the queue to one project, 0 to all.
+// order; project scopes the queue to one project, 0 to all. A task an
+// environmental land failure parked is not listed alone: its cause's one
+// line, statusLandEnvCausesTx, lists every task it holds (issue #116).
 func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem, error) {
 	kinds := "'" + strings.Join(needsYouEventKinds, "', '") + "'"
 	query := fmt.Sprintf(`SELECT t.id, t.plan_id, t.title, t.state, COALESCE(e.kind, ''), COALESCE(e.payload, '')
@@ -777,7 +850,8 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 			SELECT e2.id FROM events e2
 			WHERE e2.task_id = t.id AND e2.kind IN (%s)
 			ORDER BY e2.id DESC LIMIT 1)
-		WHERE p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) AND t.state IN ('needs_foreman', 'needs_user')`, kinds)
+		WHERE p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) AND t.state IN ('needs_foreman', 'needs_user')
+			AND NOT (t.state = 'needs_foreman' AND t.land_env_cause <> '')`, kinds)
 	args := []any{}
 	if project != 0 {
 		query += " AND p.project_id = ?"
@@ -838,6 +912,23 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 		return nil, err
 	}
 	items = append(items, localLands...)
+
+	// A blocked plan's stranded tasks stay done as well (§6.2): each
+	// names the cancelled or failed dependency it can never land on.
+	stranded, err := statusStrandedTx(tx, project)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, stranded...)
+
+	// A task an environmental land failure parked waits under its
+	// cause's one line (issue #116), not alone: the line names the
+	// environment and lists every task it holds.
+	landEnv, err := statusLandEnvCausesTx(tx, project)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, landEnv...)
 
 	pquery := `SELECT p.id, p.title, p.version, pr.repo_url, p.state FROM plans p JOIN projects pr ON pr.id = p.project_id
 		WHERE pr.archived_at IS NULL AND p.state IN ('pending_approval', 'needs_foreman')`

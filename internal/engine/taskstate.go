@@ -458,6 +458,7 @@ func (e *Engine) retryInfraFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 		Kind:          job.Kind,
 		Mode:          job.Mode,
 		Prompt:        job.Prompt,
+		PromptMeta:    job.PromptMeta,
 		Harness:       job.Harness,
 		Labels:        jobLabels(job),
 		ExcludeFamily: job.ExcludeFamily,
@@ -621,6 +622,7 @@ func (e *Engine) autoRetryFixTx(tx *sql.Tx, job *jobRow, kind, text string, now 
 		Kind:         KindFix,
 		Mode:         mode,
 		Prompt:       job.Prompt,
+		PromptMeta:   job.PromptMeta,
 		Harness:      harness,
 		RequireAgent: agent,
 		Round:        roundNone,
@@ -786,7 +788,7 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 	if err != nil {
 		return err
 	}
-	instructions, err := taskInstructionsTx(tx, job.TaskID)
+	guidance, meta, err := taskWorkerGuidanceTx(tx, job.TaskID)
 	if err != nil {
 		return err
 	}
@@ -800,7 +802,8 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 		TaskID:       job.TaskID,
 		Kind:         KindFix,
 		Mode:         ModeSession,
-		Prompt:       prompt.ComposeWorkerPrompt(spec, check, feedback, prompt.WithInstructions(instructions)),
+		Prompt:       prompt.ComposeWorkerPrompt(spec, check, feedback, guidance...),
+		PromptMeta:   meta,
 		Harness:      harness,
 		RequireAgent: agent,
 		Round:        round,
@@ -1012,7 +1015,7 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 	if err != nil {
 		return err
 	}
-	instructions, err := taskInstructionsTx(tx, job.TaskID)
+	reviewGuidance, reviewMeta, err := taskReviewerGuidanceTx(tx, job.TaskID)
 	if err != nil {
 		return err
 	}
@@ -1026,7 +1029,8 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 		TaskID:        job.TaskID,
 		Kind:          KindReview,
 		Mode:          ModeFresh,
-		Prompt:        prompt.ComposeReviewPrompt(spec, prompt.WorkerFeedback(job.Prompt), checkJSON, base, branch, prompt.WithInstructions(instructions)),
+		Prompt:        prompt.ComposeReviewPrompt(spec, prompt.WorkerFeedback(job.Prompt), checkJSON, base, branch, reviewGuidance...),
+		PromptMeta:    reviewMeta,
 		ExcludeFamily: exclude,
 	}
 	if resumed != nil {
@@ -1034,6 +1038,7 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 		// diff it read: the prompt says what changed since (§7).
 		params.Mode = ModeSession
 		params.Prompt = reReviewPrompt(wr, checkJSON, base, branch, resumed.since)
+		params.PromptMeta = marshalPromptMeta(promptMeta{Template: prompt.ReReviewTemplateVersion})
 		params.Harness, params.RequireAgent = resumed.harness, resumed.agent
 	}
 	if _, err = e.submitTx(tx, params, now); err != nil {
@@ -1163,7 +1168,7 @@ func (e *Engine) requeueReviewTx(tx *sql.Tx, job *jobRow, c Completion, now time
 		return e.needsForemanTx(tx, job, evReviewNoVerdict,
 			eventPayload{Reason: boundNote(reason + "; no agent can take the review")}, now)
 	}
-	reviewPrompt, err := retryPromptTx(tx, job)
+	reviewPrompt, reviewMeta, err := retryPromptTx(tx, job)
 	if err != nil {
 		return err
 	}
@@ -1174,6 +1179,7 @@ func (e *Engine) requeueReviewTx(tx *sql.Tx, job *jobRow, c Completion, now time
 		Kind:          KindReview,
 		Mode:          ModeFresh,
 		Prompt:        reviewPrompt,
+		PromptMeta:    reviewMeta,
 		ExcludeFamily: job.ExcludeFamily,
 		ExcludeAgent:  job.ExcludeAgent,
 	}, now)
@@ -1249,7 +1255,7 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 		}
 		return e.needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: text}, now)
 	}
-	reviewPrompt, err := retryPromptTx(tx, job)
+	reviewPrompt, reviewMeta, err := retryPromptTx(tx, job)
 	if err != nil {
 		return err
 	}
@@ -1260,6 +1266,7 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 		Kind:          KindReview,
 		Mode:          ModeFresh,
 		Prompt:        reviewPrompt,
+		PromptMeta:    reviewMeta,
 		ExcludeFamily: job.ExcludeFamily,
 		ExcludeAgent:  job.AgentID,
 	}, now)
@@ -1320,11 +1327,15 @@ func recordOutcomeTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 	if job.AgentID == 0 {
 		return nil
 	}
-	_, err := tx.Exec(`INSERT INTO outcomes (project_id, agent_id, class, attempts, successes, updated_at)
-		VALUES (?, ?, ?, 1, 1, ?)
-		ON CONFLICT(project_id, agent_id, class) DO UPDATE SET
+	skills, err := taskSkillCountTx(tx, job.TaskID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO outcomes (project_id, agent_id, class, skills, attempts, successes, updated_at)
+		VALUES (?, ?, ?, ?, 1, 1, ?)
+		ON CONFLICT(project_id, agent_id, class, skills) DO UPDATE SET
 			attempts = attempts + 1, successes = successes + 1, updated_at = excluded.updated_at`,
-		job.ProjectID, job.AgentID, string(KindReview), fmtTime(now))
+		job.ProjectID, job.AgentID, string(KindReview), skills, fmtTime(now))
 	if err != nil {
 		return fmt.Errorf("record the outcome of job %d: %w", job.ID, err)
 	}
@@ -1366,11 +1377,15 @@ func recordTaskOutcomeTx(tx *sql.Tx, job *jobRow, success bool, now time.Time) e
 	if success {
 		successes = 1
 	}
-	_, err = tx.Exec(`INSERT INTO outcomes (project_id, agent_id, class, attempts, successes, updated_at)
-		VALUES (?, ?, ?, 1, ?, ?)
-		ON CONFLICT(project_id, agent_id, class) DO UPDATE SET
+	skills, err := taskSkillCountTx(tx, job.TaskID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO outcomes (project_id, agent_id, class, skills, attempts, successes, updated_at)
+		VALUES (?, ?, ?, ?, 1, ?, ?)
+		ON CONFLICT(project_id, agent_id, class, skills) DO UPDATE SET
 			attempts = attempts + 1, successes = successes + excluded.successes, updated_at = excluded.updated_at`,
-		job.ProjectID, agent, class, successes, fmtTime(now))
+		job.ProjectID, agent, class, skills, successes, fmtTime(now))
 	if err != nil {
 		return fmt.Errorf("record the outcome of task %d: %w", job.TaskID, err)
 	}
@@ -1382,9 +1397,11 @@ func recordTaskOutcomeTx(tx *sql.Tx, job *jobRow, success bool, now time.Time) e
 // for the foreman's judgment. The event kind names what waited and the
 // payload what the foreman will read. The event lands in the foreman's
 // inbox (§4.2) and a wake is evaluated, both in this same transaction:
-// the park itself is what makes the foreman's turn happen.
+// the park itself is what makes the foreman's turn happen. A park by
+// anything but an environmental land failure drops the task off any land
+// cause it held (issue #116): the cause's listing reads the column.
 func (e *Engine) needsForemanTx(tx *sql.Tx, job *jobRow, kind string, payload eventPayload, now time.Time) error {
-	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
+	if _, err := tx.Exec(`UPDATE tasks SET state = ?, land_env_cause = '', updated_at = ? WHERE id = ?`,
 		taskNeedsForeman, fmtTime(now), job.TaskID); err != nil {
 		return fmt.Errorf("park task %d at needs_foreman: %w", job.TaskID, err)
 	}
@@ -1425,6 +1442,13 @@ func (e *Engine) taskDoneTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 	// task done, so it runs after the release of the task's dependents and
 	// does not disturb the plan-closed check below.
 	if err := e.maybeLandTaskTx(tx, job.TaskID, now); err != nil {
+		return err
+	}
+	// The stale-base rule (§6.1, issue #124): this done recorded the
+	// branch the task's dependents must sit on, so any of them started on
+	// a superseded round parks here, one wake naming all — after the land
+	// rule, whose queueing the parks must not disturb.
+	if err := e.sweepStaleDependentsTx(tx, job.ProjectID, job.TaskID, now); err != nil {
 		return err
 	}
 	_, err := e.finishPlanIfClosedTx(tx, job.ProjectID, plan, job.TaskID, job.ID, now)

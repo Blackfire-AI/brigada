@@ -120,6 +120,14 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 			return err
 		}
 	}
+	// A landing the branch holds proves the environment the failed
+	// landings blamed (issue #116): their causes end, so a recurrence
+	// wakes anew.
+	if len(newLanded) > 0 {
+		if err := e.recoverLandEnvCausesTx(tx, project, now); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

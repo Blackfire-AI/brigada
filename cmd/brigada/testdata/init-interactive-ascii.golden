@@ -137,16 +137,39 @@ dsh (experimental): init can't check sign-in.
     codex     edit files and run commands inside codex's sandbox
     opencode  edit files; run only the commands of the worker tools scope
   [1mFiles[0m in this repository (brigada never commits them):
-    [32mnew[0m        .brigada/project.yaml                     [90mthe settings above[0m
-    [32mnew[0m        .brigada/operator.md                      [90mtells your own coding
-                                                         agent how to work with
-                                                         brigada[0m
-    [32mnew[0m        .claude/skills/brigada-operator/SKILL.md  [90mthe same guide as a
-                                                         Claude Code skill[0m
-    [90munchanged[0m  .git/info/exclude                         [90mremoves the exclude
-                                                         line that hid the
-                                                         private Claude Code
-                                                         settings[0m
+    [32mnew[0m        .brigada/project.yaml                      [90mthe settings above[0m
+    [32mnew[0m        .brigada/operator.md                       [90mtells your own coding
+                                                          agent how to work
+                                                          with brigada[0m
+    [32mnew[0m        .claude/skills/brigada-operator/SKILL.md   [90mthe same guide as a
+                                                          Claude Code skill[0m
+    [32mnew[0m        .brigada/instructions/foreman.md           [90mdefault foreman
+                                                          instructions[0m
+    [32mnew[0m        .brigada/instructions/plan_review.md       [90mdefault plan_review
+                                                          instructions[0m
+    [32mnew[0m        .brigada/instructions/worker.md            [90mdefault worker
+                                                          instructions[0m
+    [32mnew[0m        .brigada/instructions/reviewer.md          [90mdefault reviewer
+                                                          instructions[0m
+    [32mnew[0m        .brigada/skills/bugfix/SKILL.md            [90mdefault skill bugfix[0m
+    [32mnew[0m        .brigada/skills/cli-flag/SKILL.md          [90mdefault skill
+                                                          cli-flag[0m
+    [32mnew[0m        .brigada/skills/config-setting/SKILL.md    [90mdefault skill
+                                                          config-setting[0m
+    [32mnew[0m        .brigada/skills/dependency/SKILL.md        [90mdefault skill
+                                                          dependency[0m
+    [32mnew[0m        .brigada/skills/docs-change/SKILL.md       [90mdefault skill
+                                                          docs-change[0m
+    [32mnew[0m        .brigada/skills/refactor/SKILL.md          [90mdefault skill
+                                                          refactor[0m
+    [32mnew[0m        .brigada/skills/schema-migration/SKILL.md  [90mdefault skill
+                                                          schema-migration[0m
+    [32mnew[0m        .brigada/skills/surface-parity/SKILL.md    [90mdefault skill
+                                                          surface-parity[0m
+    [90munchanged[0m  .git/info/exclude                          [90mremoves the exclude
+                                                          line that hid the
+                                                          private Claude Code
+                                                          settings[0m
     [90m(show full contents: --verbose)[0m
 Operator guide: .brigada/operator.md tells your own coding agent how to work
   with brigada; have it read that file.
@@ -154,5 +177,5 @@ Operator guide: .brigada/operator.md tells your own coding agent how to work
     ~/.local/state/brigada/runner.log; stop it with: [36mbrigada stop[0m). The engine
     starts when needed and stops after 30 idle minutes.
 
-[1mWrite 3 files and start the runner? [0m[36m[y/N][0m[1m:[0m
+[1mWrite 15 files and start the runner? [0m[36m[y/N][0m[1m:[0m
 Declined; nothing written or started.

@@ -13,8 +13,13 @@ import (
 // filter with the real jq to the JSON it is given, as gh does, and
 // prints the result. The test asserts the recorded arguments afterwards.
 const fakeGH = `#!/bin/sh
-printf '%s\n' "$*" > "$FAKE_GH_ARGS"
-[ "$FAKE_GH_EXIT" = 0 ] || exit "$FAKE_GH_EXIT"
+printf '%s\n' "$*" >> "$FAKE_GH_ARGS"
+case "$1 $2" in
+  'api repos/{owner}/{repo}/branches/brigada%2Flanded') json='{"commit":{"sha":"current","commit":{"committer":{"date":"2099-01-01T00:00:00Z"}}}}' ;;
+  'pr list') json='[]' ;;
+  'run list') [ "$FAKE_GH_EXIT" = 0 ] || exit "$FAKE_GH_EXIT"; json=$FAKE_GH_JSON ;;
+  *) exit 1 ;;
+esac
 filter=
 while [ $# -gt 0 ]; do
   case $1 in
@@ -22,7 +27,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-printf '%s' "$FAKE_GH_JSON" | jq -r "$filter"
+printf '%s' "$json" | jq -r "$filter"
 `
 
 // TestLandReadyScript runs scripts/land-ready.sh against a fake gh and
@@ -37,7 +42,7 @@ func TestLandReadyScript(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := func(status, conclusion, url string) string {
-		return `[{"status":"` + status + `","conclusion":"` + conclusion + `","url":"` + url + `"}]`
+		return `[{"headSha":"current","status":"` + status + `","conclusion":"` + conclusion + `","url":"` + url + `"}]`
 	}
 	cases := []struct {
 		name     string
@@ -46,7 +51,7 @@ func TestLandReadyScript(t *testing.T) {
 		wantExit int
 		wantLine string
 	}{
-		{"no runs", `[]`, "0", 0, ""},
+		{"no runs", `[]`, "0", 2, ""},
 		{"success", run("completed", "success", "https://x/runs/1"), "0", 0, ""},
 		{"failure", run("completed", "failure", "https://x/runs/2"), "0", 1, "https://x/runs/2"},
 		{"cancelled", run("completed", "cancelled", "https://x/runs/3"), "0", 1, "https://x/runs/3"},
@@ -87,7 +92,7 @@ func TestLandReadyScript(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{"run list", "--branch brigada/landed", "--limit 1", "--json status,conclusion,url", "--jq "} {
+			for _, want := range []string{"run list", "--branch brigada/landed", "--limit 100", "--json status,conclusion,url,headSha", "--jq "} {
 				if !strings.Contains(string(args), want) {
 					t.Fatalf("gh args %q lack %q", args, want)
 				}

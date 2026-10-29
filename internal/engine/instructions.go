@@ -4,7 +4,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/defaults"
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
 // Project instructions (design §5.9): the project's one instruction text
@@ -55,40 +57,6 @@ func projectInstructionsTx(tx *sql.Tx, project int64) (string, instructionsMeta,
 		meta.Source, meta.Hash = SourceImported, prov.Hash
 	}
 	return text, meta, nil
-}
-
-// stampTaskInstructionsTx resolves the project's instructions onto a task
-// at creation (§5.9): the effective text, copied into the task row with
-// its source, version and digest. A project with none leaves the task's
-// columns empty.
-func stampTaskInstructionsTx(tx *sql.Tx, project, taskID int64, now time.Time) error {
-	text, meta, err := projectInstructionsTx(tx, project)
-	if err != nil {
-		return err
-	}
-	if text == "" {
-		return nil
-	}
-	mb, err := json.Marshal(meta)
-	if err != nil {
-		return fmt.Errorf("encode the instructions of task %d: %w", taskID, err)
-	}
-	if _, err := tx.Exec("UPDATE tasks SET instructions = ?, instructions_meta = ?, updated_at = ? WHERE id = ?",
-		text, string(mb), fmtTime(now), taskID); err != nil {
-		return fmt.Errorf("record the instructions of task %d: %w", taskID, err)
-	}
-	return nil
-}
-
-// taskInstructionsTx reads the instruction text a task recorded at
-// creation, "" when it has none: every prompt of the task's jobs and
-// reviews uses it, whatever the project setting says now.
-func taskInstructionsTx(tx *sql.Tx, taskID int64) (string, error) {
-	var text string
-	if err := tx.QueryRow("SELECT instructions FROM tasks WHERE id = ?", taskID).Scan(&text); err != nil {
-		return "", fmt.Errorf("read the instructions of task %d: %w", taskID, err)
-	}
-	return text, nil
 }
 
 // StatusInstructions is how a project's instructions show in status
@@ -152,4 +120,113 @@ func statusInstructionsTx(tx *sql.Tx, project int64, withText bool) ([]StatusIns
 		out = append(out, si)
 	}
 	return out, nil
+}
+
+// StatusRoleInstructions describes one effective role text. A nil comparison
+// means its baseline or the client's current file digest is unknown.
+type StatusRoleInstructions struct {
+	ProjectID          int64  `json:"project_id"`
+	RepoURL            string `json:"repo_url"`
+	Role               string `json:"role"`
+	State              string `json:"state"`
+	Source             string `json:"source,omitempty"`
+	Bytes              int    `json:"bytes"`
+	Digest             string `json:"digest,omitempty"`
+	GeneratedFrom      string `json:"generated_from,omitempty"`
+	Edited             *bool  `json:"edited"`
+	ChangedSinceImport *bool  `json:"changed_since_import"`
+	Text               string `json:"text,omitempty"`
+}
+
+type StatusSkill struct {
+	ProjectID   int64  `json:"project_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Digest      string `json:"digest"`
+	TimesUsed   int    `json:"times_used"`
+	TreeDigest  string `json:"tree_digest,omitempty"`
+	// ChangedSinceImport compares the client's current file and tree
+	// digests with the imported ones; nil when the client sent none.
+	ChangedSinceImport *bool `json:"changed_since_import"`
+}
+
+func statusGuidanceTx(tx *sql.Tx, project int64, withText bool) ([]StatusRoleInstructions, []StatusSkill, error) {
+	q := "SELECT id, repo_url FROM projects WHERE archived_at IS NULL"
+	var args []any
+	if project != 0 {
+		q += " AND id = ?"
+		args = append(args, project)
+	}
+	rows, err := tx.Query(q+" ORDER BY id", args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	type proj struct {
+		id   int64
+		repo string
+	}
+	var projects []proj
+	for rows.Next() {
+		var p proj
+		if err = rows.Scan(&p.id, &p.repo); err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		projects = append(projects, p)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, nil, err
+	}
+	var roles []StatusRoleInstructions
+	var skills []StatusSkill
+	for _, p := range projects {
+		for _, role := range RoleKeys {
+			ri, err := roleInstructionTx(tx, p.id, p.repo, role)
+			if err != nil {
+				return nil, nil, err
+			}
+			s := StatusRoleInstructions{ProjectID: p.id, RepoURL: RedactRepoURL(p.repo), Role: role, State: ri.State, Source: ri.Source, Bytes: ri.Bytes, Digest: ri.Digest}
+			if ri.Source == SourceDefault || ri.Source == SourceGenerated {
+				// A generated row names the defaults version it was
+				// seeded from; a role with no row runs this binary's.
+				s.GeneratedFrom = ri.Version
+				if ri.Source == SourceDefault {
+					s.GeneratedFrom = defaults.Version
+				}
+				baseline, err := defaults.ArchiveRoleText(s.GeneratedFrom, role)
+				if err == nil {
+					edited := instructionsDigest(ri.Text) != instructionsDigest(baseline)
+					s.Edited = &edited
+				}
+			}
+			if withText {
+				s.Text = prompt.RoleInstructionsSection(role, ri.Text)
+			}
+			roles = append(roles, s)
+		}
+		sr, err := tx.Query(`SELECT s.name, s.description, s.digest, s.tree_digest,
+   (SELECT count(*) FROM tasks t JOIN plans p ON p.id = t.plan_id
+    WHERE p.project_id = s.project_id AND t.skills != '' AND EXISTS
+    (SELECT 1 FROM json_each(t.skills) j WHERE json_extract(j.value, '$.name') = s.name))
+   FROM skills s WHERE s.project_id = ? ORDER BY s.name`, p.id)
+		if err != nil {
+			return nil, nil, err
+		}
+		for sr.Next() {
+			s := StatusSkill{ProjectID: p.id}
+			if err := sr.Scan(&s.Name, &s.Description, &s.Digest, &s.TreeDigest, &s.TimesUsed); err != nil {
+				sr.Close()
+				return nil, nil, err
+			}
+			skills = append(skills, s)
+		}
+		err = sr.Err()
+		sr.Close()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return roles, skills, nil
 }

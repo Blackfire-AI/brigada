@@ -48,6 +48,10 @@ type PlanTask struct {
 	// ExtraRepos are the read-only repositories the task is given (§5.8).
 	// nil = inherit the project default; non-nil, even empty, replaces it.
 	ExtraRepos []ExtraRepo
+	// Skills names, in order, the project's imported skills the task's
+	// prompts carry (§5.10): resolved and copied onto the task once, at
+	// creation; nil or empty = none.
+	Skills []string
 }
 
 // CreatedTask is one task CreatePlan made: its id, its name, and the
@@ -177,6 +181,9 @@ func validatePlanGraph(tasks []PlanTask, crossDep func(ref string) (bool, string
 		if t.Base != "" {
 			j, ok := byName[t.Base]
 			if !ok || !seen[j] {
+				if err := CheckBaseFetchable(t.Base); err != nil {
+					return nil, nil, nil, fmt.Errorf("%s has %w", label(i), err)
+				}
 				return nil, nil, nil, fmt.Errorf("%s has base %q, which is not one of its deps: a base is the name of a task it depends on", label(i), t.Base)
 			}
 			bases[i] = j
@@ -268,6 +275,23 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		if t.Spec == "" {
 			return CreatePlanResult{}, fmt.Errorf("task %d: spec is required: the worker's task, verbatim (§1.4)", i+1)
 		}
+	}
+	// What each task's prompts carry (§5.9 'Versioning', §5.10 'Resolved
+	// once') resolves here, before anything is written: the effective
+	// role texts and the named skills, copied onto each task below. A
+	// refusal — an unknown or repeated skill, a prompt over its bound —
+	// refuses the plan whole, the task named.
+	snaps := make([]TaskInstructions, len(tasks))
+	for i, t := range tasks {
+		label := t.Name
+		if label == "" {
+			label = fmt.Sprintf("task %d", i+1)
+		}
+		ti, terr := resolveTaskInstructionsTx(tx, project, label, t.Skills)
+		if terr != nil {
+			return CreatePlanResult{}, terr
+		}
+		snaps[i] = ti
 	}
 	deps, bases, continues, err := validatePlanGraph(tasks, func(ref string) (bool, string, error) {
 		return crossPlanDepTx(tx, project, ref)
@@ -388,7 +412,7 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		if err != nil {
 			return CreatePlanResult{}, fmt.Errorf("create the task: last insert id: %w", err)
 		}
-		if err := stampTaskInstructionsTx(tx, project, taskID, now); err != nil {
+		if err := recordTaskInstructionsTx(tx, taskID, snaps[i], now); err != nil {
 			return CreatePlanResult{}, err
 		}
 		res.Tasks[i] = CreatedTask{TaskID: taskID, Name: t.Name}
@@ -484,17 +508,20 @@ func (e *Engine) queueTaskWorkTx(tx *sql.Tx, project, taskID int64, spec string,
 	if err != nil {
 		return SubmitResult{}, err
 	}
-	instructions, err := taskInstructionsTx(tx, taskID)
+	// The task's recorded snapshot is what the prompt carries (§5.10):
+	// the worker text and the worker-audience skills.
+	guidance, meta, err := taskWorkerGuidanceTx(tx, taskID)
 	if err != nil {
 		return SubmitResult{}, err
 	}
 	params := SubmitParams{
-		Key:       fmt.Sprintf("task:%d", taskID),
-		ProjectID: project,
-		TaskID:    taskID,
-		Kind:      KindWork,
-		Mode:      ModeFresh,
-		Prompt:    prompt.ComposeWorkerPrompt(spec, check, "", prompt.WithInstructions(instructions)),
+		Key:        fmt.Sprintf("task:%d", taskID),
+		ProjectID:  project,
+		TaskID:     taskID,
+		Kind:       KindWork,
+		Mode:       ModeFresh,
+		Prompt:     prompt.ComposeWorkerPrompt(spec, check, "", guidance...),
+		PromptMeta: meta,
 	}
 	if cont, err := e.continuePlacementTx(tx, taskID, now); err != nil {
 		return SubmitResult{}, err
@@ -509,7 +536,7 @@ func (e *Engine) queueTaskWorkTx(tx *sql.Tx, project, taskID int64, spec string,
 		params.Mode = ModeSession
 		params.Harness = cont.harness
 		params.RequireAgent = cont.agent
-		params.Prompt = prompt.ComposeContinuePrompt(spec, check, prompt.WithInstructions(instructions))
+		params.Prompt = prompt.ComposeContinuePrompt(spec, check, guidance...)
 	}
 	return e.submitTx(tx, params, now)
 }

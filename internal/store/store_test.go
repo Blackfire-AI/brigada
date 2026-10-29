@@ -169,7 +169,7 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 	want := []string{
 		"agents", "artifacts", "attach_holds", "events", "foreman_inbox", "hold_tokens",
 		"idempotency", "jobs", "land_holds", "landings", "lease_tokens", "messages", "meta", "outcomes", "plan_mirror_dirty", "plans",
-		"projects", "questions", "runners", "sessions", "task_deps", "tasks", "tokens",
+		"projects", "questions", "role_instructions", "runners", "sessions", "skills", "task_deps", "tasks", "tokens",
 	}
 	got := queryStrings(t, s.db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
 	if !slices.Equal(got, want) {
@@ -984,6 +984,7 @@ func TestSchemaEditsMatchTheirMigrations(t *testing.T) {
 		50: "land_job",
 		58: "plan_review",
 		59: "plan_needs_foreman",
+		64: "role_instructions",
 	}
 	migs, err := allMigrations()
 	if err != nil {

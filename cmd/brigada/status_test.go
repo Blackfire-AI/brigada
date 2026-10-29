@@ -164,6 +164,10 @@ needs you:
 task #2 needs_foreman: should the sprocket be blue?
 task #4 reviewing: no reviewer: needs a reviewer of another family than the author (claude); offer an agent of another family to the runner (--agent harness=…) or review by hand
 plan #4 pending_approval
+foreman instructions (project #1): not configured, 3998 bytes, sha256 a10014040f4683de74edab9bbc1ccce279b125d6d708521bb7572870f235caff, generated from 1.0.0, edited false
+plan_review instructions (project #1): not configured, 797 bytes, sha256 5e40bd1559a16f947c20d32c59f385b3562fd4f332daaaa8038c532d73c9a4a3, generated from 1.0.0, edited false
+worker instructions (project #1): not configured, 922 bytes, sha256 5df16b58db5a42599c40836cb9cb9d24655ffe52723ed19b6db15b7d61112425, generated from 1.0.0, edited false
+reviewer instructions (project #1): not configured, 819 bytes, sha256 3c68950054e6429d33bc8a5a3e9539ba3ceb6f9131013065d1df6e0ea530b6ce, generated from 1.0.0, edited false
 `, at(-30*time.Minute))
 	if got := "plans:\n" + lines[1]; got != want {
 		t.Errorf("status sections =\n%s\nwant the golden:\n%s", got, want)
@@ -193,6 +197,10 @@ needs you:
 task #2 needs_foreman: should the sprocket be blue?
 task #4 reviewing: no reviewer: needs a reviewer of another family than the author (claude); offer an agent of another family to the runner (--agent harness=…) or review by hand
 plan #4 pending_approval
+foreman instructions (project #1): not configured, 3998 bytes, sha256 a10014040f4683de74edab9bbc1ccce279b125d6d708521bb7572870f235caff, generated from 1.0.0, edited false
+plan_review instructions (project #1): not configured, 797 bytes, sha256 5e40bd1559a16f947c20d32c59f385b3562fd4f332daaaa8038c532d73c9a4a3, generated from 1.0.0, edited false
+worker instructions (project #1): not configured, 922 bytes, sha256 5df16b58db5a42599c40836cb9cb9d24655ffe52723ed19b6db15b7d61112425, generated from 1.0.0, edited false
+reviewer instructions (project #1): not configured, 819 bytes, sha256 3c68950054e6429d33bc8a5a3e9539ba3ceb6f9131013065d1df6e0ea530b6ce, generated from 1.0.0, edited false
 `, at(-30*time.Minute))
 	if got := "plans:\n" + allLines[1]; got != wantAll {
 		t.Errorf("status --all sections =\n%s\nwant the golden:\n%s", got, wantAll)

@@ -160,6 +160,22 @@ func TestStatusSectionsTaskTierEffort(t *testing.T) {
 	}
 }
 
+// TestStatusSectionsShowsSkills: a task's skills ride its line, in order
+// (§5.10); a task with none shows no word.
+func TestStatusSectionsShowsSkills(t *testing.T) {
+	st := Status{Plans: []engine.StatusPlan{{ID: 1, Tasks: []engine.StatusTask{
+		{ID: 1, Title: "skilled", State: "ready", Skills: []string{"cli-flag", "bugfix"}},
+		{ID: 2, Title: "plain", State: "ready"},
+	}}}}
+	got := StatusSections(st)
+	if !strings.Contains(got, "  task #1 ready skilled skills:cli-flag,bugfix") {
+		t.Errorf("status lacks the skills beside the task:\n%s", got)
+	}
+	if strings.Contains(got, "task #2 ready plain skills") {
+		t.Errorf("a task with no skills shows the word:\n%s", got)
+	}
+}
+
 // TestStatusSectionsLandReadyStates: the land_ready gate's target state
 // (issue #87) rides the task line — ready, the hold, and the not-ready
 // backoff's wait.
@@ -178,6 +194,31 @@ func TestStatusSectionsLandReadyStates(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("status sections lack %q:\n%s", want, got)
 		}
+	}
+}
+
+// TestStatusSectionsLandedLabels: a done implement task carries its
+// landing state beside the state (§7.1) — `landed@<sha>` or `not
+// landed` — so a task done and not landed reads differently from a
+// landed one; a class that never lands says neither.
+func TestStatusSectionsLandedLabels(t *testing.T) {
+	st := Status{Plans: []engine.StatusPlan{{ID: 1, Tasks: []engine.StatusTask{
+		{ID: 1, Title: "merged", State: "done", Class: "implement", Landed: true, LandedCommit: "abc123"},
+		{ID: 2, Title: "waiting", State: "done", Class: "implement"},
+		{ID: 3, Title: "answer", State: "done", Class: "answer", Landed: false},
+	}}}}
+	got := StatusSections(st)
+	for _, want := range []string{
+		"  task #1 done merged landed@abc123\n",
+		"  task #2 done waiting not landed\n",
+		"  task #3 done answer\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status sections lack %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "task #3 done answer landed") {
+		t.Errorf("a task of a class that never lands carries a landing marker:\n%s", got)
 	}
 }
 

@@ -153,16 +153,27 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 			}
 			return fmt.Errorf("%w: no ready agent of the default reviewer's harness %q offers the review class", ErrNoReviewer, harness)
 		}
-		instructions, _, err := projectInstructionsTx(tx, in.project)
+		// A standalone review has no task snapshot (§5.9): it uses the
+		// role texts the engine resolves now — the project's row, else
+		// the shipped default, as a task resolving now would record —
+		// with the worker text as the project's current conventions.
+		worker, err := roleInstructionTx(tx, in.project, "", RoleWorker)
+		if err != nil {
+			return err
+		}
+		reviewer, err := roleInstructionTx(tx, in.project, "", RoleReviewer)
 		if err != nil {
 			return err
 		}
 		sr, err := e.submitTx(tx, SubmitParams{
-			Key:           fmt.Sprintf("review:%d:%s", in.project, branch),
-			ProjectID:     in.project,
-			Kind:          KindReview,
-			Mode:          ModeFresh,
-			Prompt:        prompt.ComposeStandaloneReviewPrompt(in.base, branch, prompt.WithInstructions(instructions)),
+			Key:       fmt.Sprintf("review:%d:%s", in.project, branch),
+			ProjectID: in.project,
+			Kind:      KindReview,
+			Mode:      ModeFresh,
+			Prompt: prompt.ComposeStandaloneReviewPrompt(in.base, branch,
+				prompt.WithInstructions(worker.Text), prompt.WithReviewerInstructions(reviewer.Text)),
+			PromptMeta: marshalPromptMeta(promptMeta{Template: prompt.ReviewTemplateVersion,
+				Instructions: instructionsDigest(worker.Text), Reviewer: instructionsDigest(reviewer.Text)}),
 			Harness:       harness,
 			ExcludeFamily: family,
 			Branch:        branch,

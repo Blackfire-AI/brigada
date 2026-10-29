@@ -793,7 +793,7 @@ func TestRunnerForemanCheckoutGitFailure(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := PrepareForemanCheckout(e.ctx, scratch, remote, "main", nil); err != nil {
+				if _, err := PrepareForemanCheckout(e.ctx, scratch, remote, "", "main", nil); err != nil {
 					t.Fatal(err)
 				}
 			}

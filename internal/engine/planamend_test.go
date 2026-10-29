@@ -76,14 +76,19 @@ func TestAmendAddsAndCancels(t *testing.T) {
 		t.Errorf("plan_amended events = %d, want 1", got)
 	}
 
-	// Cancelling a running task stops its job.
+	// Cancelling a running task stops its job. Its pending dependent
+	// docs cannot be left pointing at it (§6.2), so the same amendment
+	// cancels that too.
 	g := e.leaseAny(e.runner1)
 	if g == nil || g.TaskID != build.TaskID {
 		t.Fatalf("lease = %+v, want build's job", g)
 	}
-	e.amend(res.PlanID, PlanAmendment{Cancel: []string{"build"}})
+	e.amend(res.PlanID, PlanAmendment{Cancel: []string{"build", "docs"}})
 	if got := e.str("SELECT status FROM jobs WHERE id = ?", build.JobID); got != statusCancelled {
 		t.Errorf("build's job = %q, want cancelled", got)
+	}
+	if got := e.taskState(docs.TaskID); got != taskCancelled {
+		t.Errorf("docs state = %q, want cancelled with its dependency", got)
 	}
 	// A done task cannot be cancelled, an unknown one is refused.
 	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: []string{"nope"}}); err == nil {
@@ -475,30 +480,35 @@ func TestAmendWithNamesLikeStandIns(t *testing.T) {
 	}
 }
 
-// TestFailedOrCancelledDependencyNamedInDoneReport: tasks left waiting
-// behind a cancelled dependency are the plan's open end: the plan
-// finishes, its done event names them, and the plan outcome is a failure
-// on the foreman's agent.
-func TestFailedOrCancelledDependencyNamedInDoneReport(t *testing.T) {
+// TestFailedDependencyNamedInDoneReport: tasks left waiting behind a
+// failed dependency are the plan's open end: the plan finishes, its
+// done event names them, and the plan outcome is a failure on the
+// foreman's agent. (The foreman cannot cancel the failed task out from
+// under a waiting dependent: §6.2's cancel rule refuses unless the same
+// amendment covers the dependent, so the open end is what a failed
+// dependency leaves.)
+func TestFailedDependencyNamedInDoneReport(t *testing.T) {
 	e := newEnv(t)
 	agent := e.addAgent(e.runner1, "claude", "sonnet", "work")
 	res := e.twoStep()
 	g := e.leaseAny(e.runner1)
 	e.exec("UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high' WHERE plan_id = ?", res.PlanID)
 	e.complete(g, Completion{Result: `{"status":"failed","summary":"no clone"}`})
-	if got := e.taskState(res.Tasks[0].TaskID); got != taskNeedsForeman {
-		t.Fatalf("build = %q, want parked", got)
+	// The task failed for good: the row sits at failed, and ship waits
+	// behind it forever.
+	e.exec("UPDATE tasks SET state = 'failed' WHERE id = ?", res.Tasks[0].TaskID)
+	// Cancelling the failed task now would strand ship's edge, so the
+	// amendment is refused; the plan closes through the waiting rule.
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: []string{"build"}}); err == nil {
+		t.Fatal("cancelling a failed task with a waiting dependent succeeded")
 	}
-	am := e.amend(res.PlanID, PlanAmendment{Cancel: []string{"build"}})
-	if am.State != planDone {
-		t.Fatalf("amendment = %+v, want the plan closed: only ship, behind a cancelled task, is left", am)
-	}
+	e.amend(res.PlanID, PlanAmendment{Retier: []PlanRetier{{Task: "ship", Tier: "light"}}})
 	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planDone {
 		t.Errorf("plan state = %q, want done", got)
 	}
 	payload := e.str("SELECT payload FROM events WHERE kind = 'plan_done'")
-	if !strings.Contains(payload, "never ran") || !strings.Contains(payload, "ship") || !strings.Contains(payload, "cancelled") {
-		t.Errorf("plan_done payload = %s, want it to name ship as never run behind a cancelled task", payload)
+	if !strings.Contains(payload, "never ran") || !strings.Contains(payload, "ship") || !strings.Contains(payload, "failed") {
+		t.Errorf("plan_done payload = %s, want it to name ship as never run behind a failed task", payload)
 	}
 	var inbox ForemanInbox
 	if err := e.st.View(e.ctx, func(tx *sql.Tx) error {

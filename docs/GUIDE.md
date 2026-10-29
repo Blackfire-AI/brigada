@@ -140,6 +140,7 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 | `--accept-limited` | Go ahead with fewer than two review families. |
 | `--no-wiring` | In a repository, a no-op with a note: init writes no harness wiring and, on a rerun, strips nothing; it still writes `.brigada/operator.md` and the operator skill, which are not wiring. In a parent folder, skip the coordinator's wiring. |
 | `--all` | Only in a folder that is not a repository ([section 3](#3-several-repositories)). |
+| `--take-default NAME` | Reset one generated file to the new default under a fresh header, whatever it holds now: `NAME` is a role (`foreman`, `plan_review`, `worker`, `reviewer`) or a default skill name. It touches that file only, needs no engine and asks nothing; run `brigada project import` to apply it. An unknown name is a usage error listing the valid ones. |
 | `--state-dir DIR`, `--config PATH` | As for every command. |
 
 ### Without a terminal
@@ -199,6 +200,7 @@ The repository cleanup covers brigada's wiring:
 - the `/.claude/settings.local.json` line in git's `info/exclude`;
 - `.brigada/operator.md`, the operator guide init writes, when it still has init's generated header.
 - `.claude/skills/brigada-operator/SKILL.md`, the same guide as a Claude Code skill, when it still has init's generated header; an emptied `brigada-operator` directory goes with it.
+- The four role files and eight default skills init wrote (`.brigada/instructions/<role>.md`, `.brigada/skills/<name>/SKILL.md`), only while they are unedited: a file you changed stays and the plan lists it as left alone. Skills you added yourself are never touched.
 
 Other settings and hooks stay. A JSON file is deleted only if removing brigada's entries leaves nothing else in it. `.brigada/project.yaml` stays unless you pass `--delete-config`.
 
@@ -371,8 +373,11 @@ Out of scope: a plan whose tasks span repositories (a plan belongs to one projec
 - any agents cooling down;
 - the plans with their tasks, and the foreman's latest report;
 - how many messages wait for the foreman;
+- each role’s instruction state, size and digest, its generation version and edited state when known, and imported skills with descriptions, digests and task usage counts;
 - the **needs you** queue;
 - one hint line when your CLIs offer models no agent registers ([section 8](#models-added-later)).
+
+The foreman’s `status` tool with `instructions=true` also returns each effective role text in neutralized, role-specific data delimiters. The changed-since-import comparison is unknown until a client supplies a current file digest: on the status API a scoped request can pass `digest_foreman`, `digest_plan_review`, `digest_worker` or `digest_reviewer`. A role without a known generated baseline reports its edited state as unknown.
 
 The plans list keeps every live plan — active or awaiting approval — and the three most recently finished ones (done or cancelled); older finished plans are one count line, `N older finished plans hidden; pass all=true`. `brigada status --all` lists them all. The foreman's `status` tool does the same by default; its `all` parameter is `--all`'s twin. The needs-you queue and the running jobs are never trimmed.
 
@@ -386,14 +391,17 @@ The needs-you queue lists what only you (or the foreman) can unblock:
 | `task #N done: held by rule <key>: <reason>` | Your decision on a landing held at the land gate. The line carries the command that releases the hold, `brigada land approve N`, and the one that also changes the rule, `brigada land approve --and-stop-asking N`; `brigada land reject N` cancels the landing ([section 5](#5-finishing-the-land-job)). |
 | `task #N done: waits to push: <branch>@<sha>` | The push gate holds it; `brigada push approve` releases every waiting push of the project ([section 5](#5-finishing-the-land-job)). |
 | `task #N needs_foreman: <reason>` | Judgment: the worker asked a question, the task spent its rounds or failed after tier escalation was exhausted, or a run stopped. The foreman is woken for these; the entry is there so you can see it and step in. |
+| `task #N needs_foreman: task 12 (title), task 14 (title): <the environment failed the landing>` | The environment, not the work, is broken: a fetch that cannot reach the remote, credentials the remote refused, a landing setup that would not run. One line — and one wake — per cause, listing every task it holds; tasks failing on the same cause afterwards attach to it and are not woken separately. It clears when a later landing succeeds or the tasks are restarted ([section 5](#5-finishing-the-land-job)); a failure after that wakes again. |
+| `task #N needs_foreman: the base <branch> is a superseded result of task M` | A dependency was reopened — its landing failed, it was restarted, and it finished again from a new branch this task was never built on ([section 5](#5-finishing-the-land-job)). The foreman restarts the task to rebuild it on the new base; a landing asked for in the meantime is refused, never landed on the old round. |
 | `task #N needs_user: <reason>` | An answer from you, for a task parked for you directly. |
+| `task #N done: done but cannot land: <task> is cancelled\|failed` | A blocked plan ([section 7](#7-plans-checks-and-reviews)): the task is finished and approved, but a dependency it lands on died, so the plan stays open. The foreman re-points it off the dead dependency, or restarts it on a new base by a follow-up task when its branch was stacked on the dead one. |
 | `foreman #N limited: <until>` | A choice: wait, switch the foreman, or let approved plans run without it ([section 8](#8-agents-quota-and-health)). |
 | `foreman #N budget_spent: wake budget spent (20/20 today, resets <UTC time>); <n> events waiting` | Raise the day's wake budget with `brigada budget --wakes N`, or send `brigada ask`: a wake that carries your message is not charged. |
 | `agent <harness>/<model> broken: <reason>` | A fix, then `brigada agent reset <harness>/<model>`; repeated failures also recover by themselves ([section 8](#8-agents-quota-and-health)). For an `auth` break on a harness that reads its credential from the environment (dsh: `DEEPSEEK_API_KEY`), the reason names the variable and when the runner started, so you can see a runner that started without it; a runner that has not reported its start says so instead of a time. |
 
 ### The wake budget
 
-The foreman is woken headless on events: a plan done, a task parked, a question. Those wakes are limited per project per UTC day, 20 by default, so a loop cannot spend your subscription unseen.
+The foreman is woken headless on events: a plan done, a plan blocked (a dead dependency under done work, [section 7](#7-plans-checks-and-reviews)), a task parked, a question, an environment-failed landing (once per cause, listing its tasks, [section 5](#5-finishing-the-land-job)). Those wakes are limited per project per UTC day, 20 by default, so a loop cannot spend your subscription unseen.
 
 - `brigada budget` shows the budget, today's use, the reset time and how many events wait.
 - `brigada budget --wakes N` (1 to 1000) sets the budget for the project, and at once wakes whatever the spent budget had parked.
@@ -432,7 +440,7 @@ A task moves through these states, as `brigada status` shows them next to the ta
 2. `ready`: queued for an agent. A task can also wait here because every cap that applies is full ([section 8](#8-agents-quota-and-health)); it starts when a slot frees.
 3. `running`: a worker has the job. The runner's check also happens while the task is `running`; there is no separate `checking` state in the output.
 4. `reviewing`: for `implement` tasks whose check passed, a reviewer of another family reads the change ([section 7](#7-plans-checks-and-reviews)). A review that asks for changes sends the task back to `running` for a fix round.
-5. `done`. A `done` task whose landing is recorded — by the land job, or by a `Brigada-Task: <id>` trailer detected on the default branch ([section 5](#5-finishing-the-land-job)) — is shown as `landed` beside its state, so you can tell it from an approved task that has not merged yet.
+5. `done`. A done `implement` task carries its landing state beside its own, in `brigada status` and the foreman's views alike: `landed@<sha>` — the commit the task landed as, recorded by the land job or by a `Brigada-Task: <id>` trailer detected on the default branch ([section 5](#5-finishing-the-land-job)) — or `not landed`, so an approved task that has not merged yet reads differently from one that has. A task of a class that never lands shows neither.
 
 Off this path are `needs_foreman` and `needs_user` (parked, see the queue above), `failed`, and `cancelled`.
 
@@ -478,6 +486,12 @@ A landing lands the head the review approved: a branch that gained a commit afte
 
 A landing never resolves a conflict and never picks a side. When the task's diff no longer applies onto the target, or the check fails on the landed result, nothing is pushed: the task parks at `needs_foreman` with the conflicting files or the check log, and the foreman restarts it with a note (rebase onto the target's new head, resolve). The check and the review run again, and the task lands on its next approval.
 
+A dependency reopened under a running stack holds the stack: when a task that already started on its branch finishes again from a new one — its landing failed, it was restarted, and it completed from the new `-r<n>` branch — every started dependent that has not landed is parked with `task_base_stale` naming the superseded base and the new branch, one wake naming the rebuilt dependency and all of them; a dependent still running is only named in that wake and is refused when its own landing comes. Nothing ever lands on the old round. The foreman restarts each held task, which spends one of its restarts and rebuilds on the new base (a `continue` dependent starts fresh, as any restart does); a dependent that already landed keeps its landing, and one that had not started resolves to the new branch when it is released.
+
+### Environment failures
+
+Not every failed landing is about the work. When the environment fails the landing — the fetch cannot reach the remote, the remote refuses the runner's credentials, the landing's setup will not run, the land job keeps losing its runner — the task parks like any failure, but the foreman is woken once per cause, not once per task: the first failure's wake and its needs-you line list every task the cause holds, and tasks failing on the same cause afterwards attach to that wake and are not woken separately. The cause clears when a later landing of the project succeeds, or when its tasks are restarted or landed by hand; a failure after that is a recurrence and wakes again. Conflicts, failed checks, a branch that moved after its review and rejected pushes keep parking and waking per task.
+
 ### `after_land`
 
 `after_land`, when set, is a repo-relative command the runner runs after a successful land: after the push, or after the landing when the push gate is `never`. Its failure is reported — in the landing record and `brigada history` — and never undoes the landing.
@@ -492,7 +506,7 @@ A landing never resolves a conflict and never picks a side. When the task's diff
 | `1` | held | The landing holds on the first output line; release it with `brigada land approve <task>` (the command is not run again for that landing). |
 | `2`, any other code, a command that could not start, a timeout | not ready | Wait and retry: the landing is requeued on the backoff, with no failure and no restart spent. |
 
-The repository ships `scripts/land-ready.sh`, a gate on the staging branch's CI: it reads the newest `gh run list` run on `brigada/landed` and exits `0` when that run succeeded or the branch has no runs, `1` when it finished without success — failed, cancelled, skipped or timed out (the first output line is the run's URL), and `2` while it is queued or in progress, or when `gh` itself fails. It is not enabled by default; enable it with:
+The repository ships `scripts/land-ready.sh`, a gate on CI for the remote `brigada/landed` head. A missing branch or a successful run for that head permits landing. An open PR that conflicts with its base holds the landing; unknown mergeability waits for GitHub to compute it. If no run for the head appears within 15 minutes of its commit's committer date, the gate holds with the head and PR state; before then it retries, including when only older runs exist. Set `BRIGADA_LAND_READY_GRACE_SECONDS` to override the grace period. A run for the head that completed without success holds with its URL on the first line; a queued or in-progress run, or a failed `gh` lookup, retries. It is not enabled by default; enable it with:
 
 ```sh
 brigada project set land_ready=scripts/land-ready.sh
@@ -568,7 +582,9 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 | `extra_repos` | list of `"name repo ref"` strings | none | Other repositories checked out read-only beside every task ([section 7](#7-plans-checks-and-reviews)). |
 | `foreman_rotate_tokens` | non-negative integer | `400000` | Input tokens on one foreman turn past which the next turn starts a fresh session; `0` never rotates ([section 11](#session-size-and-rotation)). |
 | `plan_files` | `on` or `off` | `on` | `off` stops the plan-file mirror: no plan file is written or pushed ([The plan file](#the-plan-file)). |
-| `instructions_file` | repo-relative path | none | A text file whose contents become the project's instructions for every worker and reviewer, at most 8192 bytes (see [Project instructions](#project-instructions)). |
+| `instructions_file` | repo-relative path | none | Alias for `instructions.worker`; setting both is refused. |
+| `instructions` | map of role names to repo-relative files | none | Roles: `foreman`, `plan_review`, `worker`, `reviewer`. An empty path uses `.brigada/instructions/<role>.md`; each text is at most 8192 bytes. |
+| `skills_dir` | repo-relative directory | `.brigada/skills` | Skills to read at import (see [Skills](#skills)). |
 
 An example:
 
@@ -593,7 +609,8 @@ Some keys belong to you and this engine, not to the team. The shared file refuse
 | Key | Default | Meaning |
 |---|---|---|
 | `foreman_wakes_per_day` | `20`, or the config file's value | The daily wake budget, 1 to 1000 ([section 4](#4-while-work-runs); also `brigada budget --wakes N`). |
-| `instructions` | none | A local override of the instruction text. |
+| `instructions` | none | A local override of the worker instruction text (the old name, still working). |
+| `instructions.<role>` | none | A local override of one role's instruction text, for `foreman`, `plan_review`, `worker` or `reviewer` (see [Project instructions](#project-instructions)). Not a key of the committed file, where `instructions:` is a map of role files. |
 | `plan_review` | `true` | The plan review before a plan's (or an active plan's amendment's) tasks queue: a `plan_review` job, an agent of a family other than the foreman's, whose verdict starts the plan or sends findings back to the foreman ([section 7](#gates-and-rules)). |
 | `plan_review.tier` | `standard` | The plan reviewer's tier: `light`, `standard` or `heavy`. |
 | `plan_review.effort` | `medium` | The plan reviewer's effort: `low`, `medium`, `high` or `max`. |
@@ -603,12 +620,14 @@ brigada project set [--repo URL] key=value ...
 brigada project show [--repo URL]
 ```
 
-- `project set` accepts every key in the two tables above except `schema`, `repo` and `instructions_file`, so a local value can also override an imported one.
+- `project set` accepts every key in the two tables above except `schema`, `repo`, `instructions_file` and `skills_dir`; the file’s `instructions` map uses the role overrides below, so a local value can also override an imported one.
 - Flags go before the `key=value` pairs.
 - On the command line, list values are joined with `+`: `approval_classes=implement+review`, `approval_protected_paths=infra/**+db/*.sql`, `approval_tiers=light+heavy`.
 - An empty value (`approval_max_tasks=`) puts the key back to its default.
 - An unknown key, or a value the key does not take, is refused with a usage error that names the valid keys, and nothing is stored.
+- `project set instructions.<role>=text`, `=@file` or `=@-` (standard input) sets one role's local override; the roles are `foreman`, `plan_review`, `worker` and `reviewer`, at most 8192 bytes each. An empty value is the empty-by-choice state, not a return to the default. The file is read by the command, never by the engine.
 - `project set` creates the project if the repository has none yet, and prints the same listing as `show`.
+- `project show` also prints, after the settings, one line per role (state, file, size, SHA-256 digest, the defaults version it was generated from, whether it was edited, and whether its file changed since import) and the project's imported skills.
 
 Only you can run these commands; the foreman has no tool for them.
 
@@ -624,14 +643,51 @@ Only you can run these commands; the foreman has no tool for them.
 
 ### Project instructions
 
-A project has one instruction text that brigada puts into every worker and reviewer prompt, whatever the harness. It goes after the worker contract (result block, no pushing, tool scope), which always wins, and before the task spec.
+#### What init writes
+
+`brigada init` writes the four role files (`.brigada/instructions/foreman.md`, `plan_review.md`, `worker.md`, `reviewer.md`) and the eight default skills (`.brigada/skills/<name>/SKILL.md`) in one pass, and adds the `instructions:` map and `skills_dir:` to `.brigada/project.yaml` (a file that already has them, or the old `instructions_file`, keeps its own). Each generated file carries a marked header, an HTML comment naming the brigada version and the digest of the generated text: `<!-- brigada: version=1.0.0 digest=… -->` as the first line of a role file, and right after the closing `---` of a skill's frontmatter. Import ignores the header; every digest is over the file without it. On a rerun, init rewrites a file that is still exactly what it generated, leaves one you edited (the plan says `edited since version X, new default differs` and names `brigada instructions diff <name>` and `brigada init --take-default <name>`), and recreates one you deleted. A file counts as edited when anything but the header changed, frontmatter included.
+
+A project has separate instruction texts for its foreman, plan reviewer, worker and reviewer, independent of the harness. The versioned contract always wins. Workers receive worker instructions before skills and the spec; reviewers receive reviewer instructions and the worker snapshot as the convention the author followed.
 
 - Set it with `instructions_file: .brigada/instructions.md` in the committed file. Import reads the file and sends its text; the file must stay inside the repository.
 - Or set a local override with `brigada project set instructions=@path` (`@-` reads standard input).
 - It is at most 8192 bytes of UTF-8; a longer text is refused, never cut.
 - `project show` and `status` tell you the project has instructions (their size and a digest, not the text).
+- **Per-role texts.** The committed file may instead carry `instructions:` as a map of `foreman`, `plan_review`, `worker` and `reviewer` to repo-relative files (a key with no value means `.brigada/instructions/<role>.md`), and `skills_dir:` (default `.brigada/skills`). `instructions_file` is the old name of `instructions.worker`; naming both is refused. A role key left out is not configured; an empty file is empty by choice, except the worker's: its text is the `instructions` setting, so an empty worker file unsets it, as an empty `instructions_file` does, and the shipped default worker text applies.
+- **Which text wins.** A local override (`project set instructions.<role>=…`) beats the last imported file. A pulled change to a file applies only at the next explicit `brigada project import`: over a text that is still the previous import's it applies; over a local override it does not, and import prints a conflict with both texts (to take the file's text, set it with `project set instructions.<role>=@<file>`). The first import of a project, accepted with `--yes`, replaces a hand-set worker text as it replaces every hand-set setting.
+- **Changed since import.** `project show` and `status` compare the files and skills on disk with the last import and flag each role file or skill that is changed, added or removed. Nothing stored changes until you import again.
 - A task copies the text when it is created, so changing it later does not alter existing tasks.
-- The foreman's own turns do not get the text injected; the foreman reads it through `status` before it plans.
+- Foreman turns resolve their own text on each turn; plan reviews resolve plan-review and foreman texts for each job. The foreman can also read worker conventions through `status` with `instructions=true`.
+
+### Tuning how brigada's agents judge
+
+Edit the role file for the judgment you want to change: `foreman.md` for planning and task sizing, `plan_review.md` for judging plans, `worker.md` for implementation conventions, and `reviewer.md` for reviewing work. These live under `.brigada/instructions/`. Run `brigada project import` after editing or pulling changes. Each text must be valid UTF-8 without NUL, at most 8192 bytes; over-limit changes are refused, never truncated. An empty file explicitly chooses no guidance and runs on the contract alone, except an empty `worker.md`, which unsets the worker text (see above). A missing role is not configured: the foreman and the plan reviewer then run on the contract alone, while workers and reviewers get the shipped default text. Projects upgraded from an older brigada start with every role set to the shipped default it had then (shown as generated from that version, by upgrade), and an existing `instructions` setting as the worker text.
+
+For example, put a preference for smaller tasks in the foreman text and a requirement to examine migration rollback in the reviewer text. These customize judgment; they do not change gates, tool permissions or the result contract. Existing tasks retain their snapshots; amendments to tasks that have not started can resolve the current texts again.
+
+`brigada instructions diff <role>` shows your edits and changes to the shipped default using the generated header's version. If that baseline is unavailable it explains why and shows a two-way diff. `brigada init --take-default <role>` replaces that file with the current default; import afterward to apply it. Both commands also accept a shipped skill name.
+
+### Skills
+
+Skills supply task-specific procedures alongside the role instructions. Init supplies `bugfix`, `cli-flag`, `config-setting`, `dependency`, `docs-change`, `refactor`, `schema-migration` and `surface-parity`. Write your own at `.brigada/skills/<name>/SKILL.md`, or under the configured `skills_dir`:
+
+```markdown
+---
+name: migration-review
+description: Check a database migration and its rollback.
+for: reviewer
+---
+1. Read the migration and the existing schema.
+2. Check upgrade and rollback behavior against existing data.
+3. Verify the migration tests cover the affected constraints.
+4. Report concrete failures with file references.
+```
+
+The frontmatter requires `name` and `description`, with optional `for:`; other keys are refused. The name matches its directory, starts with a lowercase letter or digit, uses lowercase letters, digits and hyphens, and is at most 64 characters. The description is at most 1024 bytes. `for: worker` sends the text only to workers, `for: reviewer` only to reviewers, and `for: both` (also the default when omitted) to both. Reviewers see the names of worker-only skills without their text.
+
+Run `brigada project import` to import the set. Paths must stay inside the repository, including after resolving symlinks. Each skill text, including frontmatter but excluding its generated header, is at most 4096 UTF-8 bytes, with no NUL. Instructions plus applicable skills are bounded at 16384 bytes for a worker and 24576 bytes for a reviewer. An invalid import or task selection is refused with the offending name and bound; nothing is truncated.
+
+The foreman reads imported descriptions from `status` and picks zero to two skills matching each task's shape; it can read a skill file to understand its fit. Tell the foreman which skills to use, or to use none: your choice overrides its selection. The task's `skills` list preserves order; unknown or repeated names refuse the whole call. The texts are copied when the task is created, so later imports do not alter its work or reviews. For a task that has not started, `plan_amend` entries in `retier` or `respec` can replace the list; omit `skills` to keep it or use `[]` to clear it.
 
 ### The foreman, effort and tools on agents
 
@@ -642,10 +698,10 @@ The foreman's model and effort are chosen in `brigada init`, or with `brigada pr
 You ask; the foreman turns the ask into a **plan**: a set of tasks, each with a spec for the worker, a check command, a class (`implement` by default, also `review` and `answer`), and a list of the tasks it depends on.
 
 - A task with no dependencies is queued at once.
-- A task with dependencies waits (`pending`) until all of them are done. If one of them fails or is cancelled, the dependents keep waiting until the foreman re-points them to another task or drops the dependency.
+- A task with dependencies waits (`pending`) until all of them are done. If one of them fails or is cancelled, the dependents keep waiting until the foreman re-points them to another task or drops the dependency. Cancelling a task that still has dependents is refused unless the same amendment covers each: a pending dependent cancelled or re-pointed off it in the same call, while anything with a job or a result built on the cancelled task's branch — ready, running, reviewing, parked, done — blocks, the refusal naming every such dependent with its state.
 - A dependency may instead name, by id, a landed task of another plan of the project — one whose work is already on the land target, done and pushed there. It counts as done from the start; nothing waits on it. One that landed on another branch, or has not landed, is refused, and so is one belonging to another project.
 - The foreman can amend a live plan: add tasks, cancel tasks, re-point dependencies, change a waiting or parked task's tier and effort, or replace or append to a pending task's spec (`respec`).
-- A plan is `done` when no live work is left. That is not the same as everything succeeding: the plan's done report names the tasks that failed, that were cancelled without your approval, and that never ran, and what landed and what waits at a gate ([section 5](#5-finishing-the-land-job)).
+- A plan is `done` when no live work is left. That is not the same as everything succeeding: the plan's done report names the tasks that failed, that were cancelled without your approval, and that never ran, the skips your approval did cover as `cancelled`, and what landed and what waits at a gate ([section 5](#5-finishing-the-land-job)). One thing keeps a plan `active` past its last work: done, approved tasks that can never land, because a dependency under them was cancelled or failed — the shape a dependency restarted after a land conflict and then failed leaves. Such a **blocked** plan stays open with one needs-you line per stranded task; the foreman frees each by re-pointing it off the dead dependency (`plan_amend` retarget, which makes it land without running again), or — when the task's branch was stacked on the dead one, which the refusal names — by restarting it on a new base with a follow-up task. Plans the earlier behavior closed stay closed. A dependency reopened the other way — its landing failed, it was restarted, and it finished again from a new branch while its dependents had already started — leaves nothing stranded but holds the stack instead: each started dependent that has not landed parks on its stale base for a `task_restart` that rebuilds it there ([section 5](#5-finishing-the-land-job)), so the plan stays open until the chain is rebuilt and lands.
 
 Each task also has these fields, set by the foreman in `plan_create` or `plan_amend`:
 
@@ -656,11 +712,12 @@ Each task also has these fields, set by the foreman in `plan_create` or `plan_am
 | `review_tier` | `light`, `standard`, `heavy` | the config's `review.tier`: one tier below the task's | The tier of the model that reviews this task, taken as given, not as a step from the task's tier ([Reviews](#reviews)). |
 | `review_effort` | `low`, `medium`, `high`, `max` | the config's `review.effort`, `medium` | How hard the reviewer should think, whatever effort the task itself runs at ([Reviews](#reviews)). |
 | `caps` | an object with any of `fix_rounds`, `review_rounds`, `restart`, each an integer from 0 to 10 | the engine's defaults, per key | This task's own round budgets ([Rounds](#rounds)). An absent key keeps the default; an unknown key or a value out of range refuses the whole call. |
+| `skills` | a list of the project's imported skills' names, in order | none | Which imported skills the task's worker and reviewer prompts carry; `status` lists the project's skills with their descriptions. The texts are copied onto the task when it is created, so a later import changes nothing for it; an unknown or repeated name refuses the whole call. |
 | `continue` | the name of one of the task's `deps` | none | Which dependency's worker starts this task: when that dep is done, this task's first work job resumes the dep author's session on its own agent, so it starts with the files it already read instead of paying the cold start a new session pays. The continued dep is the task's base: `base` defaults to it, and a `base` naming another dep refuses the whole call, as a `continue` that is not one of the task's deps does. When the session or its agent is not available — the session id is unknown, the agent is gone, broken, capped at 0, cooling, or outside the task's tier — the task starts fresh as usual, and a `task_restart` of it always starts fresh. `brigada status` shows `continues <dep>` beside the task. |
 
 None of the fields triggers approval. The plan shown for approval includes tier and effort, and `brigada status` shows them beside tasks: `heavy @high`, for example. A task with non-default caps also shows them there, as `(restarts 4)` or `(fix 3, review 1, restarts 4)`. A task's own review tier and review effort show as `review:heavy` and `review@high`; the config defaults are left unsaid. An unchanged standard tier is omitted; `standard->heavy` shows an automatic bump from the foreman's tier to the effective tier, and `@low->medium` an automatic effort step (`@default->high` when the task set no effort).
 
-The foreman can use `plan_amend`'s `retier` list, for example `[{"task":"build","tier":"light","effort":"low"}]`, to change a `pending`, `ready` or `needs_foreman` task; the entry may carry `review_tier` and `review_effort` too, which change only how the task is reviewed. Omitted fields keep their values; changing the tier resets both the foreman's tier and the effective tier, and resets the effective effort to the task's effort; changing the effort sets the effective effort too. A task at `needs_foreman` still needs `task_restart` to run again. A `retier` entry may also carry `caps`, for example `[{"task":"build","caps":{"restart":4}}]`: it merges key by key into the task's caps, which is how the foreman gives a parked task more restarts before `task_restart`.
+The foreman can use `plan_amend`'s `retier` list, for example `[{"task":"build","tier":"light","effort":"low"}]`, to change a `pending`, `ready` or `needs_foreman` task; the entry may carry `review_tier` and `review_effort` too, which change only how the task is reviewed. Omitted fields keep their values; changing the tier resets both the foreman's tier and the effective tier, and resets the effective effort to the task's effort; changing the effort sets the effective effort too. A task at `needs_foreman` still needs `task_restart` to run again. A `retier` entry may also carry `caps`, for example `[{"task":"build","caps":{"restart":4}}]`: it merges key by key into the task's caps, which is how the foreman gives a parked task more restarts before `task_restart`. A `retier` entry — and a `respec` entry the same way — may also carry `skills`, replacing the recorded skills of a task that has not started: omit the field to keep them, `[]` to clear them. The entry re-resolves the task's role texts and skills, copying the current ones; a task that has started keeps what it was first given.
 
 ### Gates and rules
 
@@ -701,7 +758,7 @@ Only you can decide: no foreman tool approves a plan or passes a gate.
 
 ### The plan file
 
-Every change to a plan is mirrored to `.brigada/plans/<plan-id>.yaml` and pushed to the `brigada/plans` branch of your remote, not to your default branch. The file holds the graph (deps, base, and a `continue` where one is set), the task states, the branches, the open questions and the foreman's task tier and effort, but no transcripts; the setting `plan_files: off` stops the mirror, and then nothing is written or pushed. It carries the foreman's tier rather than the effective tier raised by escalation; a standard tier and an unset effort are omitted.
+Every change to a plan is mirrored to `.brigada/plans/<plan-id>.yaml` and pushed to the `brigada/plans` branch of your remote, not to your default branch. The file holds the graph (deps, base, and a `continue` where one is set), each task's skill names in the order recorded (a `skills` list, written only for a task that has skills; names only, never texts), the task states, the branches, the open questions and the foreman's task tier and effort, but no transcripts; the setting `plan_files: off` stops the mirror, and then nothing is written or pushed. It carries the foreman's tier rather than the effective tier raised by escalation; a standard tier and an unset effort are omitted.
 
 The store is the authority, and the file is a copy that may lag: a push that fails is retried on the next change. The file exists so that `brigada recover` can rebuild plans after a lost store ([section 10](#10-backups-and-recovery)), and so you can see a plan from another machine.
 
@@ -771,6 +828,7 @@ A review that asks for changes, or a failed check, starts a fix round on the aut
 
 - The author's family is read from the branch's last work job; failing that, from the `Co-Authored-By` trailers on its commits; failing that, `default_reviewer` in the config file (a harness name) takes the review. With none of the three, the review is refused.
 - There are no fix rounds, and a review that ends without a usable verdict is not retried: run it again.
+- With no task to have copied them, the review uses the project's current reviewer and worker texts (the shipped default for a role not configured), the worker text shown as the project's conventions, and no skills.
 - The verdict (approve, changes or no verdict, with the findings) is written to the history. It raises no desktop notification and no needs-you entry, so read it with `brigada history`.
 
 ## 8. Agents, quota and health
@@ -961,10 +1019,11 @@ With `headroom = true` (the default), task workers on the account that serves yo
 `brigada stats` prints one table per repo:
 
 ```text
-AGENT  TIER  CLASS  ATTEMPTS  SUCCESSES  RATE  CONFIDENCE  INPUT  OUTPUT  CACHED  REASONING  TOKENS  CALLS  CALLS/JOB  CALLS/SUCCESS  USD  WALL(s)  COST/SUCCESS
+AGENT  TIER  CLASS  SKILLS  ATTEMPTS  SUCCESSES  RATE  CONFIDENCE  INPUT  OUTPUT  CACHED  REASONING  TOKENS  CALLS  CALLS/JOB  CALLS/SUCCESS  USD  WALL(s)  COST/SUCCESS
 ```
 
 - **Tier** is the model-name table label (`light`, `standard` or `heavy`), corrected by any `tier.<harness>/<model>` config override, and determines which task tier the agent serves. The record stays keyed by repo, class and agent; changing the tier label keeps the agent's existing outcomes.
+- **Skills** is how many skills the tasks of the row carried ([design.md](design.md) §5.10). A row is one agent, class and skill count, so tasks with one skill and tasks with two are never pooled, and each row's rate comes from its own attempts. The dispatcher ranks on the sum over the skill counts. `status` shows a task's skills beside it as `skills:a,b`; the JSON `stats` rows, from the API and the MCP tool, carry the same number as `skills`.
 - **Attempts and successes** are counted when a task ends, for the agent that wrote the final change, in the task's class.
   - A success is a task whose check passed and, for `implement` tasks, whose review approved within the allowed rounds. Tasks of other classes succeed when the run is done with its check passed, with no review.
   - A task that runs out of rounds counts an attempt without a success.
@@ -1052,7 +1111,7 @@ These are current limits of the CLIs, not design choices. A harness that offers 
 
 ### Reading the code
 
-Headless turns and attach refresh `<state>/runner/foreman/<project>/repo` from the project's repo URL at its configured default branch. The opening prompt names the checkout's absolute path, branch and commit. The foreman reads the code and its CLAUDE.md/AGENTS.md before planning; the snapshot may lag the remote by one fetch. A clone or fetch failure fails the turn (or attach) with the git reason. The session's working directory is the checkout itself, so the repository's own instructions and project memory load as in any clone; a session recorded against another directory resumes as unknown, and a resume the CLI does not know starts a fresh session instead of failing the turn.
+Headless turns and attach refresh `<state>/runner/foreman/<project>/repo` from the project's repo URL at its `land_target` when one is set, else its default branch, so the foreman sees what has landed even while the default branch lags it. A land target the remote does not hold yet falls back to the default branch. The opening prompt names the checkout's absolute path, branch and commit, the default branch, and the fallback when it happened. The plan reviewer reads the same ref. The foreman reads the code and its CLAUDE.md/AGENTS.md before planning; the snapshot may lag the remote by one fetch. A clone or fetch failure fails the turn (or attach) with the git reason. The session's working directory is the checkout itself, so the repository's own instructions and project memory load as in any clone; a session recorded against another directory resumes as unknown, and a resume the CLI does not know starts a fresh session instead of failing the turn.
 
 ### What differs between claude and codex
 
@@ -1181,7 +1240,7 @@ Every key that `brigada project set` and `project show` know, with each default 
 | `foreman_rotate_tokens` | `400000` | yes |
 | `foreman_wakes_per_day` | `20`, or the config file's value | no, local only |
 | `plan_files` | `on` | yes |
-| `instructions` | `none` | no, local only (the file's counterpart is `instructions_file`) |
+| `instructions` | `none` | local worker-text override; the file uses an `instructions` role map or the `instructions_file` alias |
 
 ## 14. Command reference
 
@@ -1191,9 +1250,10 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 ### Starting
 
-- `brigada init [--repo URL] [--remote NAME] [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL[@EFFORT]] [--parallel N] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories).
+- `brigada init [--repo URL] [--remote NAME] [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL[@EFFORT]] [--parallel N] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. `brigada init --take-default <role|skill>` instead resets one generated role file or default skill to the new default under a fresh header and does nothing else. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories).
 - `brigada start`: start the engine and detached runner with the agents and tasks-at-once limit saved by init; succeeds when the runner is already running. Use it after a reboot or `brigada stop`. See [section 1](#changing-your-setup-later).
 - `brigada runner [--agent SPEC]... [--harness HARNESS] [--model MODEL] [--classes CLASSES] [--agent-file PATH] [--worker-script PATH] [--labels LABELS] [--max-parallel N]`, where SPEC is `harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]`: run a runner that leases jobs, runs workers and checks, and pushes branches. The shorthand agent flags cannot be mixed with `--agent`; `--worker-script` is for the `fake` harness used by tests. See [section 8](#8-agents-quota-and-health).
+- `brigada instructions diff <role|skill>`: compare one generated role file or default skill with the default it was generated from and with the new default, run inside the repository. It finds the generated text in the archive of shipped defaults by the version in the file's header, then prints what you changed (generated default against your file) and what brigada changed (generated default against the new default). A header naming a version this brigada does not ship, a digest that does not match, or no header gives a two-way diff of your file against the new default, with the reason. Unknown names are a usage error listing the roles and skills. `brigada init --take-default <role|skill>` resets the file.
 - `brigada stop [--engine]`: stop the detached runner in the selected state directory; `--engine` also stops the engine. Sends SIGTERM and waits up to 10 seconds per process; succeeds if nothing is running, and never starts the engine. See [section 1](#stopping).
 - `brigada remove [--yes] [--cancel] [--delete-config]`: remove brigada from this repository, keeping its project history. `--yes` applies the displayed plan and stops an unused runner without prompting; `--cancel` cancels live jobs and unfinished plans; `--delete-config` also deletes `.brigada/project.yaml`. See [section 1](#removing-brigada-from-a-repository).
 - `brigada mcp (--coordinator | --client | --socket PATH)`: serve brigada's tools over stdio. `--coordinator` is the coordinator bridge ([section 3](#3-several-repositories)), `--client` the tools of [section 12](#12-from-another-harness). Only one selector at a time. `--socket PATH` is the bridge a headless foreman session and an attached chat use; you do not run that by hand.
@@ -1229,7 +1289,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada agent reset <harness>/<model>`: clear a broken or cooling agent. See [section 8](#broken-agents).
 - `brigada cancel <job-id>`: stop one live job. See [section 4](#cancelling).
 - `brigada review --branch <name> [--repo URL]`: review a branch with an agent of another family, with no plan. See [section 7](#a-branch-with-no-plan).
-- `brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title T] [--harness H]`: submit one task directly, without the foreman. A debugging path; the base ref defaults to `main`.
+- `brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title T] [--harness H]`: submit one task directly, without the foreman. A debugging path; the base ref defaults to `main`. The base must be a branch name: the land job fetches branches by name, so a bare commit SHA (40 or 64 hex digits) is refused at submit, naming the SHA, as is a SHA given as a task's `base` in `plan_create` or `plan_amend`. Name a branch that contains the commit.
 
 ### Projects
 
@@ -1238,7 +1298,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada project set [--repo URL] key=value ...`, `brigada project show [--repo URL]`: set and read the project's settings and where each comes from. See [section 6](#local-only-settings).
 - `brigada project import [--repo URL] [--file PATH] [--yes]`: import `.brigada/project.yaml`. See [section 6](#importing-and-provenance).
 
-`plan_amend` is a foreman MCP tool ([section 7](#7-plans-checks-and-reviews)): it takes `plan` and optional `add`, `cancel`, `retarget`, `retier` and `respec` lists. Each `retier` entry names `task` (name or id) and optionally `tier` and `effort`. Each `respec` entry names `task`, the `spec` text and a `mode` of `replace` (the default) or `append`; it edits a `pending` task, one with no job yet, and is refused for a task that has started, where a follow-up task is the way. An edit that trips a plan rule (a protected path in the new text, the task's class) holds that task at `needs_foreman` while the plan stays active.
+`plan_amend` is a foreman MCP tool ([section 7](#7-plans-checks-and-reviews)): it takes `plan` and optional `add`, `cancel`, `retarget`, `retier` and `respec` lists. Each `retier` entry names `task` (name or id) and optionally `tier` and `effort`. Each `respec` entry names `task`, the `spec` text and a `mode` of `replace` (the default) or `append`; it edits a `pending` task, one with no job yet, and is refused for a task that has started, where a follow-up task is the way. A `retier` or `respec` entry may also carry `skills`, replacing the recorded skills of a task that has not started (omit to keep them, `[]` to clear them); an added task in `add` takes `skills` as `plan_create` does. An edit that trips a plan rule (a protected path in the new text, the task's class) holds that task at `needs_foreman` while the plan stays active.
 
 `plan_accept` is a foreman MCP tool over the plan review ([section 7](#7-plans-checks-and-reviews)): it takes `plan` and a required `reason`, and accepts a plan the review parked at `needs_foreman` as reviewed — the plan proceeds exactly as a spent round's verdict does, so its tasks start, or the plan waits for your yes when a rule holds it. The reason is recorded in the plan's history.
 
