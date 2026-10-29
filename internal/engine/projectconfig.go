@@ -243,6 +243,7 @@ func ParseProjectConfig(content []byte) (ProjectConfig, error) {
 			return ProjectConfig{}, configErr("%s (line %d): %v", configKeySkillsDir, sv.line, err)
 		}
 		cfg.SkillsDir = dir
+		cfg.Values[configKeySkillsDir], _ = json.Marshal(dir)
 	}
 	for _, k := range configSettingKeys {
 		v, ok := entries[k]
@@ -823,7 +824,7 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 		// the settings instead of keeping the local text.
 		replacedLocal := false
 		newImported := map[string]json.RawMessage{}
-		for _, k := range SettingKeys {
+		for _, k := range append(append([]string{}, SettingKeys...), configKeySkillsDir) {
 			fv, inFile := cfg.Values[k]
 			cur, has := row[k]
 			imp := has && prov.isImported(k, cur)

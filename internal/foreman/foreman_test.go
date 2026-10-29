@@ -81,7 +81,7 @@ func TestInstructionsGolden(t *testing.T) {
 }
 
 // TestInstructionsTaskSize: the foreman is told the task size guide the
-// plan review's check (g) also applies, the same wording in both.
+// plan review's check (g) applies by reference to foreman.md.
 func TestInstructionsTaskSize(t *testing.T) {
 	got, err := defaults.LiveRoleText("foreman")
 	if err != nil {

@@ -442,7 +442,7 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 		return strings.Join(l, settingListSep)
 	}
 	out := ProjectSettings{ProjectID: project, RepoURL: repo, ImportHash: prov.Hash}
-	for _, k := range SettingKeys {
+	for _, k := range append(append([]string{}, SettingKeys...), configKeySkillsDir) {
 		sv := SettingValue{Key: k, Source: SourceDefault}
 		cur, has := present[k]
 		sv.Default = !has
@@ -485,6 +485,11 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 				if b, err := strconv.ParseBool(string(cur)); err == nil {
 					sv.Value = strconv.FormatBool(b)
 				}
+			}
+		case configKeySkillsDir:
+			sv.Value = DefaultSkillsDir
+			if s, ok := rawString(cur); ok && s != "" {
+				sv.Value = s
 			}
 		case SettingPlanFiles:
 			sv.Value = PlanFilesOn

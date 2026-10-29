@@ -1155,3 +1155,43 @@ func TestPlanReviewResolvesRoleTextsAndSkills(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanReviewContractAndProjectJudgmentOrder(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	plain := e.createPlan(nTasks(2))
+	without := e.str("SELECT prompt FROM jobs WHERE key = ?", planReviewKey(plain.PlanID))
+	planText, err := defaults.LiveRoleText(RolePlanReview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foremanText, err := defaults.LiveRoleText(RoleForeman)
+	if err != nil {
+		t.Fatal(err)
+	}
+	markers := []string{"(a)", "(b)", "(c)", "(d)", "(e)", "(f)", "(g)", "(h)", "30 minutes", "5 numbered", "15 files"}
+	for _, marker := range markers {
+		if strings.Contains(without, marker) {
+			t.Errorf("unconfigured template contains %q", marker)
+		}
+	}
+	e.setRole(RolePlanReview, planText)
+	e.setRole(RoleForeman, foremanText)
+	configured := e.createPlan([]PlanTask{{Name: "first", Spec: "unique plan spec"}, {Name: "second", Spec: "another spec"}})
+	got := e.str("SELECT prompt FROM jobs WHERE key = ?", planReviewKey(configured.PlanID))
+	prev := -1
+	for _, part := range []string{"End your final message with exactly one JSON verdict block", "<plan-review-instructions>", "<foreman-instructions>", "\n<plan-review-input>", "unique plan spec"} {
+		pos := strings.Index(got, part)
+		if pos <= prev {
+			t.Fatalf("%q absent or out of order", part)
+		}
+		prev = pos
+	}
+	for _, marker := range markers {
+		want := strings.Count(planText, marker) + strings.Count(foremanText, marker)
+		if count := strings.Count(got, marker); want == 0 || count != want {
+			t.Errorf("%q occurs %d times, role texts contain %d", marker, count, want)
+		}
+	}
+}

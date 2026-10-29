@@ -52,7 +52,7 @@ func startSettingsEngine(t *testing.T) (context.Context, string) {
 // foreman wake budget (§4.3) and the project instructions (§5.9) at
 // their defaults, the last lines of every settings print.
 const tailDefaults = "setup=none (default)\n" + "setup_cache_key_files=none (default)\n" + "setup_timeout_minutes=15 (default)\n" +
-	"extra_repos=none (default)\n" + "foreman_rotate_tokens=400000 (default)\n" + "foreman_wakes_per_day=20 (default)\n" + "plan_files=on (default)\n" + "instructions=none (default)\n"
+	"extra_repos=none (default)\n" + "foreman_rotate_tokens=400000 (default)\n" + "foreman_wakes_per_day=20 (default)\n" + "plan_files=on (default)\n" + "instructions=none (default)\n" + "skills_dir=.brigada/skills (default)\n"
 
 // gateDefaults are the gates and land rules (§6.3) and the plan review
 // (§6.2) at their defaults, printed between the approval keys and
