@@ -65,9 +65,9 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: running
     branch: "brigada/task-289-r1"
-    rounds: 0
+    rounds: 1
   - id: 290
     name: "family_visibility_docs"
     title: "#126 (3/4): the review placement shown in history and status; design docs"
