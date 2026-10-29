@@ -174,8 +174,8 @@ tasks:
     continue: "prompts"
     effort: medium
     review_tier: standard
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-266"
     rounds: 0
   - id: 267
     name: "import_roles"
