@@ -1,0 +1,103 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 87
+title: "CI green on brigada/landed; #132 land check = CI; #133 parked tasks; #127 design"
+repo: "github.com/Blackfire-AI/brigada"
+state: reviewing
+created: 2026-10-29T21:13:44.852735Z
+updated: 2026-10-29T21:13:44.852735Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps — the continued
+# dep when base is empty and continue is set, else the default branch; merge a
+# task after its base. A task with continue, one of deps, starts in the
+# session of the dep's author.
+# States are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1);
+# review_tier and review_effort do the same for its reviews (§7, §8); caps
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1);
+# skills name the project's skills the task carries, in order (§5.10).
+tasks:
+  - id: 276
+    name: "gofmt"
+    title: "gofmt cmd/brigada/initoperator_test.go (CI red on 7dc51445)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: light
+    effort: low
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 277
+    name: "land_check"
+    title: "#132: the land check runs gofmt, guard and vet as CI does"
+    class: "implement"
+    deps: ["gofmt"]
+    base: "gofmt"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 278
+    name: "plan_open"
+    title: "#133 (1/3): a plan with a parked or held task stays open"
+    class: "implement"
+    deps: ["gofmt"]
+    base: "gofmt"
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 279
+    name: "land_retry"
+    title: "#133 (2/3): the foreman's land_retry for a task parked by a failed landing"
+    class: "implement"
+    deps: ["plan_open"]
+    base: "plan_open"
+    continue: "plan_open"
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 280
+    name: "push_retry"
+    title: "#133 (3/3): a push that lost the race retries from a fresh rebase, up to a bound"
+    class: "implement"
+    deps: ["gofmt"]
+    base: "gofmt"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 281
+    name: "sync_design"
+    title: "#127 design: keep the land target current with the default branch (docs/design.md)"
+    class: "implement"
+    deps: ["gofmt"]
+    base: "gofmt"
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 282
+    name: "changelog"
+    title: "CHANGELOG for #132 and #133"
+    class: "implement"
+    deps: ["land_check", "land_retry", "push_retry"]
+    base: ""
+    tier: light
+    effort: low
+    state: pending
+    branch: ""
+    rounds: 0
