@@ -7,7 +7,7 @@ title: "Bring role instructions and task skills to design §5.9/§5.10 (#119, #1
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-10-29T14:08:29.976259Z
-updated: 2026-10-29T14:38:35.315273Z
+updated: 2026-10-29T14:44:23.032215Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -18,7 +18,8 @@ updated: 2026-10-29T14:38:35.315273Z
 # Optional tier (light, standard, heavy) and effort (low, medium, high, max)
 # describe the model needed and how hard it should think (§6.1);
 # review_tier and review_effort do the same for its reviews (§7, §8); caps
-# override the task's fix_rounds, review_rounds and restart budgets (§6.1).
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1);
+# skills name the project's skills the task carries, in order (§5.10).
 tasks:
   - id: 253
     name: "land_ready"
@@ -39,8 +40,8 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: running
-    branch: ""
+    state: done
+    branch: "brigada/task-254"
     rounds: 0
   - id: 255
     name: "import"
@@ -103,7 +104,7 @@ tasks:
     deps: ["fallback"]
     base: "fallback"
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 261
@@ -132,7 +133,7 @@ tasks:
     name: "changelog"
     title: "CHANGELOG entries for plan 83"
     class: "implement"
-    deps: ["cli", "missing_section", "land_target_design"]
+    deps: ["cli", "missing_section"]
     base: ""
     tier: light
     effort: medium
@@ -161,14 +162,14 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: running
+    state: cancelled
     branch: "brigada/task-265"
     rounds: 1
   - id: 266
     name: "skills_dir_record"
     title: "skills_dir is resolved once onto the task record; prompts use the recorded value (#117 item 7, §5.10 \"Resolved once\")"
     class: "implement"
-    deps: ["prompts"]
+    deps: ["fallback", "prompts"]
     base: "prompts"
     continue: "prompts"
     effort: medium
