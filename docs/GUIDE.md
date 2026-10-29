@@ -650,11 +650,11 @@ brigada init --take-default <role>    # reset that one file to the new default u
 
 ### Project instructions
 
-A project has one instruction text that brigada puts into every worker and reviewer prompt, whatever the harness. It goes after the worker contract (result block, no pushing, tool scope), which always wins, and before the task spec.
+A project has one instruction text per role (foreman, plan_review, worker and reviewer) that brigada puts into the prompts of that role, whatever the harness. In a worker prompt the text goes after the worker contract (result block, no pushing, tool scope), which always wins, and before the skills and the task spec; a reviewer gets its own text beside the worker's.
 
-- Set it with `instructions_file: .brigada/instructions.md` in the committed file. Import reads the file and sends its text; the file must stay inside the repository.
-- Or set a local override with `brigada project set instructions=@path` (`@-` reads standard input).
-- It is at most 8192 bytes of UTF-8; a longer text is refused, never cut.
+- Set a role's text in the committed file with the `instructions:` map, for example `worker: .brigada/instructions/worker.md`. Import reads each file and sends its text; the files must stay inside the repository. The 1.0 key `instructions_file` still works as the name of `instructions.worker`.
+- Or set a local override with `brigada project set instructions.<role>=@path` (`@-` reads standard input); the old `brigada project set instructions=@path` sets the worker's.
+- Each text is at most 8192 bytes of UTF-8; a longer text is refused, never cut.
 - `project show` and `status` tell you the project has instructions (their size and a digest, not the text).
 - **Per-role texts.** The committed file may instead carry `instructions:` as a map of `foreman`, `plan_review`, `worker` and `reviewer` to repo-relative files (a key with no value means `.brigada/instructions/<role>.md`), and `skills_dir:` (default `.brigada/skills`). `instructions_file` is the old name of `instructions.worker`; naming both is refused. A role key left out is not configured; an empty file is empty by choice.
 - **Which text wins.** A local override (`project set instructions.<role>=…`) beats the last imported file. A pulled change to a file applies only at the next explicit `brigada project import`: over a text that is still the previous import's it applies; over a local override it does not, and import prints a conflict with both texts (to take the file's text, set it with `project set instructions.<role>=@<file>`).
