@@ -79,6 +79,10 @@ type Event struct {
 	// needs_foreman or needs_user as the task's state). A needs-you kind
 	// wakes the user only then.
 	Parked bool
+	// Placement is the placement kind the review job's pick recorded
+	// (issue #126): cross_family, same_family, same_agent or unknown;
+	// empty when the event's job was never leased.
+	Placement string
 }
 
 // needsForemanKinds are the event kinds whose body is "task #N needs
@@ -156,6 +160,12 @@ func Message(ev Event) (t, body string, ok bool) {
 		reason := ev.Reason
 		if reason == "" {
 			reason = ev.Kind
+		}
+		// A review's verdict or park names its placement once when it was
+		// not cross_family (issue #126). An unservable review has none:
+		// no reviewer was picked.
+		if (ev.Kind == KindReviewChanges || ev.Kind == KindReviewNoVerdict) && ev.Placement != "" && ev.Placement != "cross_family" {
+			reason += " (review placement: " + ev.Placement + ")"
 		}
 		return title, oneLine(fmt.Sprintf("task #%d needs you: %s", ev.TaskID, reason), bodyLimit), true
 	}

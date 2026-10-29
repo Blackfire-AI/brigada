@@ -210,6 +210,10 @@ type StatusPlan struct {
 	ReviewVerdict  string `json:"review_verdict,omitempty"`
 	ReviewFindings string `json:"review_findings,omitempty"`
 	ReviewJob      int64  `json:"review_job,omitempty"`
+	// ReviewPlacement is the latest leased plan review's placement
+	// (issue #126), as StatusTask's: empty for cross_family and for a
+	// plan not under review.
+	ReviewPlacement string `json:"review_placement,omitempty"`
 	// WaitingAmendment is true while the plan reviews with waiting
 	// amendment work (§6.2): tasks an amendment added or respecified
 	// under the running round, pending its verdict, which queues the
@@ -231,6 +235,11 @@ type StatusTask struct {
 	// review.effort), which status leaves unsaid.
 	ReviewTier   string `json:"review_tier,omitempty"`
 	ReviewEffort string `json:"review_effort,omitempty"`
+	// ReviewPlacement is how the reviewing task's latest leased review
+	// relates to its author (issue #126): same_family, same_agent or
+	// unknown. Empty for cross_family (the default, left unsaid), for a
+	// task not reviewing and for a review not leased yet.
+	ReviewPlacement string `json:"review_placement,omitempty"`
 	// Caps are the task's own round-cap overrides (§6.1); absent keys run
 	// at the engine default.
 	Caps   map[string]int `json:"caps,omitempty"`
@@ -590,7 +599,8 @@ func statusPlansTx(tx *sql.Tx, project int64, all bool, now time.Time) ([]Status
 	// whole (§9): the short views that cut the findings point at it.
 	planCols := `p.id, pr.repo_url, p.title, p.state, p.review_round, p.review_verdict, p.review_findings,
 		COALESCE((SELECT j.id FROM jobs j WHERE j.key = 'plan_review:' || p.id ORDER BY j.id DESC LIMIT 1), 0),
-		COALESCE(p.amend_batch, '')`
+		COALESCE(p.amend_batch, ''),
+		` + placementSQL(`(SELECT MAX(j.id) FROM jobs j WHERE j.key = 'plan_review:' || p.id)`)
 	finishedQuery := `SELECT ` + planCols + `
 		FROM plans p JOIN projects pr ON pr.id = p.project_id
 		WHERE ` + scope + ` AND p.state IN ('done', 'cancelled')
@@ -630,10 +640,14 @@ func statusPlanRows(tx *sql.Tx, query string, args ...any) ([]StatusPlan, error)
 	for rows.Next() {
 		var p StatusPlan
 		var amendBatch string
-		if err := rows.Scan(&p.ID, &p.RepoURL, &p.Title, &p.State, &p.ReviewRound, &p.ReviewVerdict, &p.ReviewFindings, &p.ReviewJob, &amendBatch); err != nil {
+		if err := rows.Scan(&p.ID, &p.RepoURL, &p.Title, &p.State, &p.ReviewRound, &p.ReviewVerdict, &p.ReviewFindings, &p.ReviewJob, &amendBatch, &p.ReviewPlacement); err != nil {
 			return nil, fmt.Errorf("list the status plans: %w", err)
 		}
 		p.WaitingAmendment = amendBatch != ""
+		if p.State != "reviewing" && p.State != "needs_foreman" {
+			p.ReviewPlacement = ""
+		}
+		p.ReviewPlacement = shownPlacement(p.ReviewPlacement)
 		plans = append(plans, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -644,7 +658,8 @@ func statusPlanRows(tx *sql.Tx, query string, args ...any) ([]StatusPlan, error)
 
 // statusPlanTasksTx reads one status plan's tasks, in id order.
 func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, error) {
-	rows, err := tx.Query(`SELECT t.id, t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(l.commit_sha, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, ''), t.skills
+	rows, err := tx.Query(`SELECT t.id, t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(l.commit_sha, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, ''), t.skills,
+		`+placementSQL(`(SELECT MAX(rj.id) FROM jobs rj WHERE rj.task_id = t.id AND rj.kind = 'review')`)+`
 		FROM tasks t
 		LEFT JOIN landings l ON l.task_id = t.id
 		LEFT JOIN land_holds h ON h.task_id = t.id AND h.state = 'held'
@@ -658,9 +673,13 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, err
 		var t StatusTask
 		var capsJSON, pushed, commit, retryAt, holdReason, skills string
 		var exit sql.NullInt64
-		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &commit, &retryAt, &exit, &holdReason, &skills); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &commit, &retryAt, &exit, &holdReason, &skills, &t.ReviewPlacement); err != nil {
 			return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
 		}
+		if t.State != taskReviewing {
+			t.ReviewPlacement = ""
+		}
+		t.ReviewPlacement = shownPlacement(t.ReviewPlacement)
 		t.Caps = parseTaskCaps(capsJSON)
 		t.Skills = taskSkillNames(skills)
 		// A landing recorded as waiting sits at the push gate, not yet
@@ -843,7 +862,8 @@ var needsYouEventKinds = []string{
 // line, statusLandEnvCausesTx, lists every task it holds (issue #116).
 func statusNeedsYouTx(tx *sql.Tx, reviewFamily string, project int64, now time.Time) ([]NeedsYouItem, error) {
 	kinds := "'" + strings.Join(needsYouEventKinds, "', '") + "'"
-	query := fmt.Sprintf(`SELECT t.id, t.plan_id, t.title, t.state, COALESCE(e.kind, ''), COALESCE(e.payload, '')
+	query := fmt.Sprintf(`SELECT t.id, t.plan_id, t.title, t.state, COALESCE(e.kind, ''), COALESCE(e.payload, ''),
+		`+placementSQL("COALESCE(e.job_id, 0)")+`
 		FROM tasks t
 		JOIN plans p ON p.id = t.plan_id
 		LEFT JOIN events e ON e.id = (
@@ -865,13 +885,18 @@ func statusNeedsYouTx(tx *sql.Tx, reviewFamily string, project int64, now time.T
 	items := []NeedsYouItem{}
 	for rows.Next() {
 		var it NeedsYouItem
-		var kind, payload string
-		if err := rows.Scan(&it.ID, &it.PlanID, &it.Title, &it.State, &kind, &payload); err != nil {
+		var kind, payload, placement string
+		if err := rows.Scan(&it.ID, &it.PlanID, &it.Title, &it.State, &kind, &payload, &placement); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("list the needs-you tasks: %w", err)
 		}
 		it.Kind = "task"
 		it.Reason = needsYouReason(kind, payload)
+		// A review's verdict or park names how the review was placed,
+		// once, when it was not cross_family (issue #126).
+		if kind == evReviewChanges || kind == evReviewNoVerdict {
+			it.Reason += placementNote(placement)
+		}
 		items = append(items, it)
 	}
 	if err := rows.Err(); err != nil {

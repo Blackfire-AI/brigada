@@ -78,6 +78,8 @@ func summary(it Item) string {
 		TierServed string `json:"tier_served"`
 		EffortFrom string `json:"effort_from"`
 		EffortTo   string `json:"effort_to"`
+		Agent      int64  `json:"agent"`
+		Placement  string `json:"placement"`
 		Prompt     *struct {
 			Template     int      `json:"template"`
 			Instructions string   `json:"instructions"`
@@ -93,6 +95,11 @@ func summary(it Item) string {
 	}
 	if it.Kind == "task_effort_bumped" {
 		return fmt.Sprintf("task effort %s -> %s: %s", p.EffortFrom, p.EffortTo, p.Reason)
+	}
+	// A review's pick names how its reviewer relates to the author
+	// (issue #126); every other pick keeps the generic rendering.
+	if it.Kind == "job_agent_picked" && p.Placement != "" {
+		return pickSummary(p.Agent, p.Placement)
 	}
 	var parts []string
 	add := func(k, v string) {
@@ -151,6 +158,24 @@ func summary(it Item) string {
 		add("skills", strings.Join(skills, ","))
 	}
 	return strings.Join(parts, " ")
+}
+
+// pickSummary words a review pick's placement (issue #126). A
+// cross_family pick keeps the plain reading; the others say plainly what
+// the reviewer is to the author. The reviewer is named by its agent id.
+func pickSummary(agent int64, placement string) string {
+	reviewer := "reviewer agent " + strconv.FormatInt(agent, 10)
+	switch placement {
+	case "cross_family":
+		return reviewer + " (another family than the author, placement=cross_family)"
+	case "same_family":
+		return reviewer + " (same family as the author, placement=same_family)"
+	case "same_agent":
+		return reviewer + " (the author's own agent, a fresh session, placement=same_agent)"
+	case "unknown":
+		return reviewer + " (author's family unknown, placement=unknown)"
+	}
+	return reviewer + " (placement=" + placement + ")"
 }
 
 // indentBody indents every line after the first by two spaces, so a

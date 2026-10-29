@@ -95,6 +95,11 @@ func StatusSections(st Status) string {
 				}
 				lines = append(lines, review)
 			}
+			// The leased plan review's placement (issue #126), unsaid
+			// when cross_family.
+			if p.ReviewPlacement != "" {
+				lines = append(lines, "  review: "+p.ReviewPlacement)
+			}
 			// Waiting amendment work (§6.2): tasks an amendment added
 			// or respecified under the running round, pending the
 			// verdict that queues the next round over them — never
@@ -157,6 +162,11 @@ func StatusSections(st Status) string {
 				}
 				if t.ReviewEffort != "" {
 					detail = append(detail, "review@"+t.ReviewEffort)
+				}
+				// The placement of the leased review (issue #126); a
+				// cross_family one is the default and left unsaid.
+				if t.ReviewPlacement != "" {
+					detail = append(detail, "review: "+t.ReviewPlacement)
 				}
 				if label := engine.TaskCapsLabel(t.Caps); label != "" {
 					detail = append(detail, "("+label+")")

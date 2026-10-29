@@ -345,7 +345,8 @@ func pendingInboxTx(tx *sql.Tx, project int64) (ForemanInbox, error) {
 // delivered ones for a status that names what a live turn carries.
 func inboxRowsTx(tx *sql.Tx, project int64, state string, job int64) (ForemanInbox, error) {
 	rows, err := tx.Query(`SELECT e.kind, COALESCE(e.task_id, 0), COALESCE(t.title, ''), e.payload,
-		COALESCE(pp.id, 0), COALESCE(pp.title, '')
+		COALESCE(pp.id, 0), COALESCE(pp.title, ''),
+		`+placementSQL("COALESCE(e.job_id, 0)")+`
 		FROM foreman_inbox i
 		JOIN events e ON e.id = i.event_id
 		LEFT JOIN tasks t ON t.id = e.task_id
@@ -361,7 +362,8 @@ func inboxRowsTx(tx *sql.Tx, project int64, state string, job int64) (ForemanInb
 		var task int64
 		var title, planTitle string
 		var plan int64
-		if err := rows.Scan(&kind, &task, &title, &payload, &plan, &planTitle); err != nil {
+		var placement string
+		if err := rows.Scan(&kind, &task, &title, &payload, &plan, &planTitle, &placement); err != nil {
 			rows.Close()
 			return ForemanInbox{}, fmt.Errorf("read the pending events of project %d: %w", project, err)
 		}
@@ -412,6 +414,12 @@ func inboxRowsTx(tx *sql.Tx, project int64, state string, job int64) (ForemanInb
 			}
 		default:
 			text = wakeEventText(kind, payload)
+		}
+		// A review's verdict or park names its placement once when it
+		// was not cross_family (issue #126).
+		switch kind {
+		case evReviewChanges, evReviewNoVerdict, evPlanReviewed:
+			text += placementNote(placement)
 		}
 		if kind == evLandEnvFailed {
 			// The one wake of an environmental land cause (issue #116)

@@ -225,3 +225,32 @@ func reviewPlacementKindTx(tx *sql.Tx, j *jobRow, agent int64) (string, error) {
 		return placeCrossFamily, nil
 	}
 }
+
+// placementSQL reads, for the job the SQL expression jobExpr names, the
+// placement its latest job_agent_picked event recorded (issue #126):
+// the kind of a review that was actually leased. A review still queued
+// or waiting has no such event and so no placement.
+func placementSQL(jobExpr string) string {
+	return `COALESCE((SELECT json_extract(pe.payload, '$.placement') FROM events pe
+		WHERE pe.kind = 'job_agent_picked' AND pe.job_id = ` + jobExpr + ` ORDER BY pe.id DESC LIMIT 1), '')`
+}
+
+// shownPlacement is the placement the status and the words that reach
+// the foreman or the user name: empty for cross_family (the engine
+// default, left unsaid) and for no placement at all.
+func shownPlacement(kind string) string {
+	if kind == placeCrossFamily {
+		return ""
+	}
+	return kind
+}
+
+// placementNote names a review's placement once, in the words the
+// needs-you reasons and the foreman's wake lines append; empty when
+// there is nothing to say.
+func placementNote(kind string) string {
+	if kind = shownPlacement(kind); kind == "" {
+		return ""
+	}
+	return " (review placement: " + kind + ")"
+}

@@ -230,7 +230,9 @@ func eventsAfterTx(tx *sql.Tx, after, limit int64) ([]Event, error) {
 	rows, err := tx.Query(`SELECT e.id, e.kind, COALESCE(e.task_id, 0),
 		COALESCE(t.plan_id, pp.id, 0), COALESCE(p.title, pp.title, ''),
 		COALESCE(ep.repo_url, tp.repo_url, ppj.repo_url, ''), e.created_at, e.payload,
-		COALESCE(e.job_id, 0)
+		COALESCE(e.job_id, 0),
+		COALESCE((SELECT json_extract(pe.payload, '$.placement') FROM events pe
+			WHERE pe.kind = 'job_agent_picked' AND pe.job_id = e.job_id ORDER BY pe.id DESC LIMIT 1), '')
 		FROM events e
 		LEFT JOIN tasks t ON t.id = e.task_id
 		LEFT JOIN plans p ON p.id = t.plan_id
@@ -249,7 +251,7 @@ func eventsAfterTx(tx *sql.Tx, after, limit int64) ([]Event, error) {
 	for rows.Next() {
 		var ev Event
 		var payload string
-		if err := rows.Scan(&ev.ID, &ev.Kind, &ev.TaskID, &ev.PlanID, &ev.PlanTitle, &ev.Project, &ev.At, &payload, &ev.JobID); err != nil {
+		if err := rows.Scan(&ev.ID, &ev.Kind, &ev.TaskID, &ev.PlanID, &ev.PlanTitle, &ev.Project, &ev.At, &payload, &ev.JobID, &ev.Placement); err != nil {
 			return nil, fmt.Errorf("read events after %d: %w", after, err)
 		}
 		ev.Reason = reasonOf(ev.Kind, payload)
