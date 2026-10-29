@@ -832,7 +832,7 @@ func firstLines(s string, max int) string {
 // fix round then answered (§3); the queue reads them only for a task
 // already parked, whose latest of these kinds they may still be.
 var needsYouEventKinds = []string{
-	evTaskCheckFailed, evTaskNeedsHelp, evTaskFailed, evTaskOutOfRounds, evTaskLoop, evReviewChanges, evReviewNoVerdict, evTaskLandFailed, evTaskPlanHeld,
+	evTaskCheckFailed, evTaskNeedsHelp, evTaskFailed, evTaskOutOfRounds, evTaskLoop, evReviewChanges, evReviewNoVerdict, evTaskLandFailed, evTaskPlanHeld, evTaskBaseStale,
 }
 
 // statusNeedsYouTx lists the "needs you" queue (§10): the tasks parked

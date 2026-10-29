@@ -489,7 +489,12 @@ func landReadyHold(reason string) bool {
 // grant carries the gate as skipped, so the runner lands without
 // re-running the command. The submit's answer says what happened:
 // created with the new job, pending behind the live job that holds the
-// key, or the zero answer for a task already landed.
+// key, or the zero answer for a task already landed. A task whose
+// recorded base is a superseded round of its stacked dependency is
+// refused here (issue #124): never landed on the old round — the task
+// parks at needs_foreman with an event naming both refs, whichever path
+// queued the landing, the rule's own or an approval's release — and the
+// zero answer says no job.
 func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, skipLandReady bool, now time.Time) (SubmitResult, error) {
 	var have int
 	if err := tx.QueryRow("SELECT COUNT(*) FROM landings WHERE task_id = ?", taskID).Scan(&have); err != nil {
@@ -497,6 +502,11 @@ func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, skipLandReady
 	}
 	if have > 0 {
 		return SubmitResult{}, nil
+	}
+	if dep, baseRef, depBranch, stale, err := staleBaseTx(tx, taskID); err != nil {
+		return SubmitResult{}, err
+	} else if stale {
+		return SubmitResult{}, e.parkStaleBaseTx(tx, project, taskID, dep, baseRef, depBranch, "the landing is refused", true, now)
 	}
 	return e.submitTx(tx, SubmitParams{
 		Key:           fmt.Sprintf("task:%d", taskID),
