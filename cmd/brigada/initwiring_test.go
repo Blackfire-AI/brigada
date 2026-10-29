@@ -444,6 +444,12 @@ func TestInitRerunNoWiringKeepsOldWiring(t *testing.T) {
 			want[dir+"/"] = ""
 		}
 	}
+	// The default role files and skills are init's own, not harness wiring.
+	for k, v := range after {
+		if _, ok := before[k]; !ok && (strings.HasPrefix(k, ".brigada/instructions") || strings.HasPrefix(k, ".brigada/skills")) {
+			want[k] = v
+		}
+	}
 	if !reflect.DeepEqual(after, want) {
 		t.Fatalf("init --no-wiring changed harness files:\nbefore %q\nafter %q", before, after)
 	}

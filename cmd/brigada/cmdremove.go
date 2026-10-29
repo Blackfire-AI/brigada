@@ -194,7 +194,7 @@ func printRemovalPlan(w io.Writer, repo string, files []wireFile, live int, canc
 			action = "keep (yours; delete it yourself or pass --delete-config)"
 		case !f.changed():
 			continue
-		case f.rel == operatorFile, f.rel == operatorSkillFile:
+		case f.rel == operatorFile, f.rel == operatorSkillFile, f.purpose == generatedPurpose:
 			action = "delete (brigada's own file)"
 		case f.rel == wiringMCPFile:
 			action = "remove the \"brigada\" server"
@@ -215,7 +215,7 @@ func printRemovalPlan(w io.Writer, repo string, files []wireFile, live int, canc
 		}
 		printInitWrapped(w, "    ", "      ", f.rel)
 		printInitWrapped(w, "      ", "      ", action)
-		if f.changed() && f.next == nil && f.rel != wiringSkillFile && f.rel != wiringRulesFile && f.rel != operatorFile && f.rel != operatorSkillFile && f.rel != engine.ProjectConfigPath {
+		if f.changed() && f.next == nil && f.rel != wiringSkillFile && f.rel != wiringRulesFile && f.rel != operatorFile && f.rel != operatorSkillFile && f.rel != engine.ProjectConfigPath && f.purpose != generatedPurpose {
 			fmt.Fprintln(w, "      (file deleted: nothing else in it)")
 		}
 	}

@@ -858,6 +858,15 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// The defaults' role files and skills (§5.9, §5.10) are named in the
+	// file init writes.
+	if proposed, err = engine.ProjectConfigGuidance(proposed); err != nil {
+		return fail(stderr, err)
+	}
+	proposedCfg, err := engine.ParseProjectConfig(proposed)
+	if err != nil {
+		return fail(stderr, err)
+	}
 	parsedTools, err := lifecycle.ParseTools(*tools)
 	if err != nil {
 		return usagef(stderr, "--tools: %v", err)
@@ -955,7 +964,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if !*noWiring {
 		wiring = planLegacyWiring(root)
 	}
-	operator := planOperatorFiles(root)
+	// The operator guide and the generated role files and skills are
+	// written whole, under the same plan, confirmation and recheck.
+	operator := append(planOperatorFiles(root), planGuidance(root, proposedCfg)...)
 	files := append(append([]wireFile{{rel: engine.ProjectConfigPath, old: old, next: proposed, exists: exists}}, operator...), wiring...)
 	printInitFiles(stdout, files, *verbose)
 	printInitOperatorNote(stdout)

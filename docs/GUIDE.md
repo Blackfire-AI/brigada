@@ -199,6 +199,7 @@ The repository cleanup covers brigada's wiring:
 - the `/.claude/settings.local.json` line in git's `info/exclude`;
 - `.brigada/operator.md`, the operator guide init writes, when it still has init's generated header.
 - `.claude/skills/brigada-operator/SKILL.md`, the same guide as a Claude Code skill, when it still has init's generated header; an emptied `brigada-operator` directory goes with it.
+- The four role files and eight default skills init wrote (`.brigada/instructions/<role>.md`, `.brigada/skills/<name>/SKILL.md`), only while they are unedited: a file you changed stays and the plan lists it as left alone. Skills you added yourself are never touched.
 
 Other settings and hooks stay. A JSON file is deleted only if removing brigada's entries leaves nothing else in it. `.brigada/project.yaml` stays unless you pass `--delete-config`.
 
@@ -629,6 +630,8 @@ Only you can run these commands; the foreman has no tool for them.
 `brigada init` imports for you. After you edit the file by hand or pull a change, run `brigada project import`.
 
 ### Project instructions
+
+**Init writes the defaults.** `brigada init` writes the four role files (`.brigada/instructions/foreman.md`, `plan_review.md`, `worker.md`, `reviewer.md`) and the eight default skills (`.brigada/skills/<name>/SKILL.md`) in one pass, and adds the `instructions:` map and `skills_dir:` to `.brigada/project.yaml` (a file that already has them, or the old `instructions_file`, keeps its own). Each generated file carries a marked header, an HTML comment naming the brigada version and the digest of the generated text: `<!-- brigada: version=1.0.0 digest=… -->` as the first line of a role file, and right after the closing `---` of a skill's frontmatter. Import ignores the header; every digest is over the file without it. On a rerun, init rewrites a file that is still exactly what it generated, leaves one you edited (the plan says `edited since version X, new default differs` and names `brigada project diff <path>`), and recreates one you deleted. A file counts as edited when anything but the header changed, frontmatter included.
 
 A project has one instruction text that brigada puts into every worker and reviewer prompt, whatever the harness. It goes after the worker contract (result block, no pushing, tool scope), which always wins, and before the task spec.
 
