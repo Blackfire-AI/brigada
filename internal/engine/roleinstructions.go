@@ -383,6 +383,22 @@ func roleImportVersion(role, text string) string {
 // empty-by-choice state, imported. A local override wins: the import is
 // refused with ErrRoleTextKept and the kept local record returned.
 func (e *Engine) ImportRoleFile(ctx context.Context, repoURL, role, text string) (*RoleInstruction, error) {
+	var out *RoleInstruction
+	if err := e.store.Update(ctx, func(tx *sql.Tx) error {
+		var err error
+		out, err = e.importRoleFileTx(tx, repoURL, role, text)
+		return err
+	}); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// importRoleFileTx is ImportRoleFile's whole step on one transaction, so
+// an import that carries the role files beside the project.yaml can run
+// every step of §13.1 as one: a failure anywhere rolls the whole import
+// back (§13.1: an import is one step).
+func (e *Engine) importRoleFileTx(tx *sql.Tx, repoURL, role, text string) (*RoleInstruction, error) {
 	if repoURL == "" {
 		return nil, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
 	}
@@ -397,7 +413,7 @@ func (e *Engine) ImportRoleFile(ctx context.Context, repoURL, role, text string)
 		return nil, fmt.Errorf("%w: %v", ErrInvalidSetting, cerr)
 	}
 	var out *RoleInstruction
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+	err := func() error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
@@ -441,7 +457,7 @@ func (e *Engine) ImportRoleFile(ctx context.Context, repoURL, role, text string)
 		}
 		out = &v
 		return nil
-	})
+	}()
 	switch {
 	case errors.Is(err, ErrRoleTextKept):
 		return out, fmt.Errorf("%w: %s instructions keep the local text %s; resolve the two",

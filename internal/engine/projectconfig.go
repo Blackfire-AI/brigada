@@ -727,6 +727,79 @@ func (e *Engine) ImportProjectConfig(ctx context.Context, repoURL string, conten
 // text is bounded like a `project set` of it, and a refusal leaves the
 // previous value in effect.
 func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, content []byte, instructions *string, accept bool) (ImportResult, error) {
+	var res ImportResult
+	if err := e.store.Update(ctx, func(tx *sql.Tx) error {
+		var err error
+		res, err = e.importProjectConfigTx(tx, repoURL, content, instructions, accept)
+		return err
+	}); err != nil {
+		return ImportResult{}, err
+	}
+	return res, nil
+}
+
+// ImportProjectConfigFiles is the whole import of a project.yaml and the
+// files it names (§13.1: an import is one step) in one store
+// transaction: the config keys with the skills_dir, the role texts the
+// nested instructions map names — the worker's riding the yaml itself,
+// as the instructions setting — and the skills of the skills_dir all
+// land together or not at all; a refusal or a failure at any step
+// leaves every previous value in effect. roles holds the text the
+// client read for each role file; a role absent from it is not
+// configured, and the worker entry rides instructions. A local
+// override that keeps its text under a role is no failure: the text
+// stays, the conflict is reported with both texts, and everything else
+// commits. skills, when not nil, replaces the project's set as
+// ImportSkills does; nil leaves the set alone.
+func (e *Engine) ImportProjectConfigFiles(ctx context.Context, repoURL string, content []byte, instructions *string, roles map[string]string, skills []Skill, accept bool) (ImportResult, error) {
+	var res ImportResult
+	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+		var err error
+		res, err = e.importProjectConfigTx(tx, repoURL, content, instructions, accept)
+		if err != nil {
+			return err
+		}
+		if res.NeedsConfirm {
+			// Nothing was written; the caller repeats with accept set.
+			return nil
+		}
+		for _, role := range RoleKeys {
+			text, ok := roles[role]
+			if !ok || role == RoleWorker {
+				continue
+			}
+			kept, err := e.importRoleFileTx(tx, repoURL, role, text)
+			if errors.Is(err, ErrRoleTextKept) {
+				// The local text stays; the conflict shows both texts (§5.9).
+				old := "local override"
+				if kept != nil {
+					old = kept.Text
+				}
+				res.Conflicts = append(res.Conflicts, ConfigChange{Key: "instructions." + role, Old: strconv.Quote(old), New: strconv.Quote(text)})
+				continue
+			}
+			if err != nil {
+				return err
+			}
+		}
+		if skills != nil {
+			if err := e.importSkillsTx(tx, repoURL, skills); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return ImportResult{}, err
+	}
+	return res, nil
+}
+
+// importProjectConfigTx is ImportProjectConfigWith's whole step on one
+// transaction, so an import that carries the role files and the skills
+// can run it as the first step of its own (§13.1: an import is one
+// step).
+func (e *Engine) importProjectConfigTx(tx *sql.Tx, repoURL string, content []byte, instructions *string, accept bool) (ImportResult, error) {
 	if repoURL == "" {
 		return ImportResult{}, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
 	}
@@ -777,7 +850,7 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 	// text alone shows as a changed import.
 	hash := ConfigHashWith(content, instructions)
 	res := ImportResult{Hash: hash}
-	err = e.store.Update(ctx, func(tx *sql.Tx) error {
+	err = func() error {
 		res = ImportResult{Hash: hash}
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
@@ -940,7 +1013,7 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 		}
 		res.Settings = &v
 		return nil
-	})
+	}()
 	if err != nil {
 		return ImportResult{}, fmt.Errorf("import the project configuration of %s: %w", RedactRepoURL(repoURL), err)
 	}

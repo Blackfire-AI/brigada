@@ -156,17 +156,30 @@ func validateSkills(skills []Skill) ([]Skill, []string, error) {
 // previous skills in effect. A re-import changes future resolutions
 // only, never a created task.
 func (e *Engine) ImportSkills(ctx context.Context, repoURL string, skills []Skill) ([]Skill, error) {
+	if err := e.store.Update(ctx, func(tx *sql.Tx) error {
+		return e.importSkillsTx(tx, repoURL, skills)
+	}); err != nil {
+		return nil, err
+	}
+	return e.Skills(ctx, repoURL)
+}
+
+// importSkillsTx is ImportSkills' whole step on one transaction, so an
+// import that carries the skills beside the project.yaml and the role
+// files can run every step of §13.1 as one: a failure anywhere rolls
+// the whole import back (§13.1: an import is one step).
+func (e *Engine) importSkillsTx(tx *sql.Tx, repoURL string, skills []Skill) error {
 	if repoURL == "" {
-		return nil, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
+		return fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
 	}
 	if _, cerr := Canonicalize(repoURL); cerr != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidSetting, cerr)
+		return fmt.Errorf("%w: %v", ErrInvalidSetting, cerr)
 	}
 	in, names, err := validateSkills(skills)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	err = e.store.Update(ctx, func(tx *sql.Tx) error {
+	err = func() error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
@@ -200,14 +213,14 @@ func (e *Engine) ImportSkills(ctx context.Context, repoURL string, skills []Skil
 		}
 		_, err = appendEventTx(tx, evProjectSettingSet, project, 0, 0, eventPayload{Reason: reason}, now)
 		return err
-	})
+	}()
 	if err != nil {
 		if errors.Is(err, ErrInvalidSetting) {
-			return nil, err
+			return err
 		}
-		return nil, fmt.Errorf("import the skills of the project of %s: %w", RedactRepoURL(repoURL), err)
+		return fmt.Errorf("import the skills of the project of %s: %w", RedactRepoURL(repoURL), err)
 	}
-	return e.Skills(ctx, repoURL)
+	return nil
 }
 
 // Skills lists the repo's project's imported skills by name. A repo with
