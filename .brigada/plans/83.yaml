@@ -1,0 +1,98 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 83
+title: "Bring role instructions and task skills to design §5.9/§5.10 (#119, #117); fix #128, #127, #129"
+repo: "github.com/Blackfire-AI/brigada"
+state: needs_foreman
+created: 2026-10-29T14:08:29.976259Z
+updated: 2026-10-29T14:08:58.237491Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps — the continued
+# dep when base is empty and continue is set, else the default branch; merge a
+# task after its base. A task with continue, one of deps, starts in the
+# session of the dep's author.
+# States are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1);
+# review_tier and review_effort do the same for its reviews (§7, §8); caps
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1).
+tasks:
+  - id: 253
+    name: "land_ready"
+    title: "#128: land-ready.sh checks the run's headSha and the landed PR's mergeability"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 254
+    name: "fallback"
+    title: "No run-time fallback to embedded role text; status and project show the three states (#119 items 1, 4, 8)"
+    class: "implement"
+    deps: ["land_ready"]
+    base: "land_ready"
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 255
+    name: "import"
+    title: "Import: not configured reachable, init writes role files for instructions_file projects, one import transaction (#119 items 3, 5)"
+    class: "implement"
+    deps: ["land_ready"]
+    base: "land_ready"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 256
+    name: "cli"
+    title: "Header and provenance carry the brigada version; instructions diff is three-way (#119 items 9, 10)"
+    class: "implement"
+    deps: ["land_ready"]
+    base: "land_ready"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 257
+    name: "prompts"
+    title: "Plan-review template keeps only the contract; skill framing, for: worker note, skill directory line (#119 item 2, #117 items 6, 7)"
+    class: "implement"
+    deps: ["land_ready"]
+    base: "land_ready"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 258
+    name: "missing_section"
+    title: "#129: a worker that cannot find a cited spec section stops and asks"
+    class: "implement"
+    deps: ["prompts"]
+    base: "prompts"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 259
+    name: "land_target"
+    title: "#127: the land target is kept up to date with the default branch; status shows the lag; foreman prompt names both heads"
+    class: "implement"
+    deps: ["land_ready"]
+    base: "land_ready"
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    state: pending
+    branch: ""
+    rounds: 0
