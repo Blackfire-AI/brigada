@@ -413,6 +413,20 @@ func inboxRowsTx(tx *sql.Tx, project int64, state string, job int64) (ForemanInb
 		default:
 			text = wakeEventText(kind, payload)
 		}
+		if kind == evLandEnvFailed {
+			// The one wake of an environmental land cause (issue #116)
+			// lists every task it parks at the moment it is read, so the
+			// tasks that attached after the wake are named in it too.
+			var p eventPayload
+			if json.Unmarshal([]byte(payload), &p) == nil && p.Cause != "" {
+				if parked, perr := landEnvParkedTx(tx, p.Cause); perr != nil {
+					rows.Close()
+					return ForemanInbox{}, perr
+				} else if len(parked) > 0 {
+					text += "; parked: " + landEnvList(parked)
+				}
+			}
+		}
 		inbox.Events = append(inbox.Events, fmt.Sprintf("%s task %d %s: %s",
 			kind, task, strings.Join(strings.Fields(title), " "), text))
 	}

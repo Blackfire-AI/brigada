@@ -74,6 +74,8 @@ const (
 	evTaskPushed             = "task_pushed"               // the push phase pushed a waiting landing (§7.1)
 	evPushApproved           = "push_approved"             // the user released the push gate for waiting landings (§6.3)
 	evTaskLandFailed         = "task_land_failed"          // a conflict or a failed check on the landed result; the task parks (§7.1)
+	evLandEnvFailed          = "land_env_failed"           // the environment, not the task's content, failed a landing (issue #116): a fetch, credentials, a broken remote. One wake per cause while it is active; the tasks it parks are listed in the wake's line
+	evLandEnvRecovered       = "land_env_recovered"        // the environmental cause of failed landings cleared — a later landing succeeded — so a recurrence wakes anew (issue #116)
 	evTaskLandNotReady       = "task_land_not_ready"       // the land_ready gate answered not ready (issue #87); the landing is requeued after the backoff, Until names the next try
 	evProjectForemanSet      = "project_foreman_set"       // setup: the project's foreman harness and model were chosen (§4.1)
 	evForemanReport          = "foreman_report"            // a done foreman turn's final message, reported to the user (§3, §10)
@@ -139,7 +141,8 @@ type eventPayload struct {
 	Account    string `json:"account,omitempty"` // the quota account a cooling names (§8)
 	Until      string `json:"until,omitempty"`   // a deadline, RFC3339: a foreman limit's reset, a probe's next attempt; absent when unknown (§4.4)
 	Job        int64  `json:"job,omitempty"`     // a job the event names besides its own job_id column
-	Hold       int64  `json:"hold,omitempty"`    // the attach hold the event names (§4.2 item 1)
+	Hold       int64  `json:"hold,omitempty"`    // the attach hold the event names (§4.2)
+	Cause      string `json:"cause,omitempty"`   // a land cause key: the error class and the shared resource every task it fails parks under (issue #116)
 	Count      int64  `json:"count,omitempty"`   // how many of something the event counts (§4.2, §4.3)
 	Path       string `json:"path,omitempty"`    // a snapshot's file (§6.4)
 	Bytes      int64  `json:"bytes,omitempty"`   // a snapshot's size (§6.4)

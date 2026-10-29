@@ -1397,9 +1397,11 @@ func recordTaskOutcomeTx(tx *sql.Tx, job *jobRow, success bool, now time.Time) e
 // for the foreman's judgment. The event kind names what waited and the
 // payload what the foreman will read. The event lands in the foreman's
 // inbox (§4.2) and a wake is evaluated, both in this same transaction:
-// the park itself is what makes the foreman's turn happen.
+// the park itself is what makes the foreman's turn happen. A park by
+// anything but an environmental land failure drops the task off any land
+// cause it held (issue #116): the cause's listing reads the column.
 func (e *Engine) needsForemanTx(tx *sql.Tx, job *jobRow, kind string, payload eventPayload, now time.Time) error {
-	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
+	if _, err := tx.Exec(`UPDATE tasks SET state = ?, land_env_cause = '', updated_at = ? WHERE id = ?`,
 		taskNeedsForeman, fmtTime(now), job.TaskID); err != nil {
 		return fmt.Errorf("park task %d at needs_foreman: %w", job.TaskID, err)
 	}

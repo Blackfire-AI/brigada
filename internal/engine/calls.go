@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -365,14 +366,18 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 	if usage == nil {
 		usage = &adapter.Usage{}
 	}
+	cost, sessionCost, err := jobCostTx(tx, job.ID, c.SessionID, usage)
+	if err != nil {
+		return "", err
+	}
 	accrue := accrualFrom(job.LastLeased, now)
 	if _, err := tx.Exec(`UPDATE jobs SET status = ?, result = ?, done_lease = ?,
 		lease_expires_at = NULL, last_leased = NULL, queued_at = NULL,
 		leased_seconds = leased_seconds + ?, updated_at = ?,
 		check_result = COALESCE(NULLIF(?, ''), check_result), error_kind = ?,
-		input_tokens = ?, output_tokens = ?, cached_input_tokens = ?, reasoning_tokens = ?, cost_usd = ?, wall_seconds = ?, model_calls = ?
+		input_tokens = ?, output_tokens = ?, cached_input_tokens = ?, reasoning_tokens = ?, cost_usd = ?, session_cost_usd = ?, wall_seconds = ?, model_calls = ?
 		WHERE id = ?`, status, string(result), leaseID, accrue, fmtTime(now), c.CheckResult, errorKind,
-		usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens, usage.ReasoningTokens, usage.CostUSD, c.WallSeconds, usage.ModelCalls, job.ID); err != nil {
+		usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens, usage.ReasoningTokens, cost, sessionCost, c.WallSeconds, usage.ModelCalls, job.ID); err != nil {
 		return "", fmt.Errorf("finish job %d: %w", job.ID, err)
 	}
 	// The turn is over, and its lease-scoped foreman token with it
@@ -710,4 +715,35 @@ func (e *Engine) PlanWorkerSeconds(ctx context.Context, planID int64) (time.Dura
 		return 0, fmt.Errorf("plan worker seconds: %w", err)
 	}
 	return time.Duration(secs) * time.Second, nil
+}
+
+// jobCostTx is the job's own cost and the session total it reported. An
+// adapter that flags its cost cumulative (Claude's total_cost_usd on a
+// resumed session) reports the session's running total; the job's cost is
+// that minus the latest earlier job's recorded total for the same session,
+// never below zero. With no earlier total (first job, fresh or forked
+// session) the reported value stands. Other adapters report per-invocation
+// cost, which is stored as is and records no session total.
+func jobCostTx(tx *sql.Tx, jobID int64, sessionID string, usage *adapter.Usage) (cost, sessionCost *float64, err error) {
+	if usage.CostUSD == nil || !usage.CostCumulative {
+		return usage.CostUSD, nil, nil
+	}
+	total := *usage.CostUSD
+	sessionCost = &total
+	cost = &total
+	if sessionID == "" {
+		return cost, sessionCost, nil
+	}
+	var prev sql.NullFloat64
+	err = tx.QueryRow(`SELECT session_cost_usd FROM jobs
+		WHERE id < ? AND session_cost_usd IS NOT NULL AND json_extract(result, '$.session_id') = ?
+		ORDER BY id DESC LIMIT 1`, jobID, sessionID).Scan(&prev)
+	if err == sql.ErrNoRows {
+		return cost, sessionCost, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("job %d earlier session cost: %w", jobID, err)
+	}
+	delta := math.Max(total-prev.Float64, 0)
+	return &delta, sessionCost, nil
 }
