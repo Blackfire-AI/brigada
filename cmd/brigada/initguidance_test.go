@@ -128,6 +128,37 @@ func TestInitGuidanceFirstRun(t *testing.T) {
 	}
 }
 
+// TestInitGuidancePartialRoleMap: a project.yaml naming only some roles keeps
+// its paths and gains the others, so all four role files are generated.
+func TestInitGuidancePartialRoleMap(t *testing.T) {
+	base, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	partial := string(base) + "instructions:\n  worker: docs/worker-rules.md  # mine\nskills_dir: .brigada/skills\n"
+	content, err := engine.ProjectConfigGuidance([]byte(partial))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := engine.ParseProjectConfig(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.RoleFiles) != 4 || cfg.RoleFiles["worker"] != "docs/worker-rules.md" || cfg.RoleFiles["foreman"] != engine.DefaultRoleFile("foreman") {
+		t.Fatalf("RoleFiles = %v\n%s", cfg.RoleFiles, content)
+	}
+	if !strings.Contains(string(content), "# mine") || strings.Count(string(content), "skills_dir:") != 1 {
+		t.Errorf("existing lines changed:\n%s", content)
+	}
+	root := t.TempDir()
+	applyGuidance(t, root, cfg)
+	for _, rel := range []string{"docs/worker-rules.md", ".brigada/instructions/foreman.md", ".brigada/instructions/plan_review.md", ".brigada/instructions/reviewer.md"} {
+		if !strings.HasPrefix(readRel(t, root, rel), "<!-- brigada: ") {
+			t.Errorf("%s has no generated header", rel)
+		}
+	}
+}
+
 // TestInitGuidanceRerun: an unedited generated file is rewritten when the
 // default moved; an edited one is kept and the plan names the version and
 // the diff command. Role files and skills alike.
