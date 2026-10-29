@@ -106,8 +106,8 @@ tasks:
     base: "docs_check"
     continue: "docs_check"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-234"
     rounds: 0
   - id: 235
     name: "store_skills"
