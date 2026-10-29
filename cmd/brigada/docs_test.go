@@ -33,7 +33,13 @@ import (
 // of subcommands a command handles inside itself (land approve, agents add).
 
 // docsFiles are the documents the verifier covers, relative to this package.
-var docsFiles = []string{"../../docs/GUIDE.md", "../../docs/COMPATIBILITY.md", "../../CHANGELOG.md"}
+var docsFiles = []string{docPath("docs/GUIDE.md"), docPath("docs/COMPATIBILITY.md"), docPath("CHANGELOG.md")}
+
+// repoRoot is absolute, resolved at start: other tests change directory.
+var repoRoot, _ = filepath.Abs("../..")
+
+// docPath is a repository file's absolute path.
+func docPath(rel string) string { return filepath.Join(repoRoot, filepath.FromSlash(rel)) }
 
 // requireNewDocs is flipped to true by the docs task, when GUIDE.md,
 // COMPATIBILITY.md and CHANGELOG.md say what checkNewDocs asks for. While it
@@ -411,7 +417,7 @@ func TestDocsLinksAndAnchors(t *testing.T) {
 }
 
 func TestDocsCommandLines(t *testing.T) {
-	text, err := os.ReadFile("../../docs/GUIDE.md")
+	text, err := os.ReadFile(docPath("docs/GUIDE.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,13 +439,13 @@ func TestDocsContent(t *testing.T) {
 		}
 		return string(b)
 	}
-	for _, f := range []string{"../../AGENTS.md", "../../CLAUDE.md"} {
+	for _, f := range []string{docPath("AGENTS.md"), docPath("CLAUDE.md")} {
 		report(t, checkNoStaleForemanPath(filepath.Base(f), read(f)))
 	}
 	if !requireNewDocs {
 		t.Skip("requireNewDocs is false: the docs task flips it once GUIDE, COMPATIBILITY and CHANGELOG say it")
 	}
-	report(t, checkNewDocs(read("../../docs/GUIDE.md"), read("../../docs/COMPATIBILITY.md"), read("../../CHANGELOG.md")))
+	report(t, checkNewDocs(read(docPath("docs/GUIDE.md")), read(docPath("docs/COMPATIBILITY.md")), read(docPath("CHANGELOG.md"))))
 }
 
 // The negative tests prove the helpers fail when they should.
