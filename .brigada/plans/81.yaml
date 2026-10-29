@@ -197,9 +197,9 @@ tasks:
     base: "docs_verify"
     continue: "docs_verify"
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-242"
-    rounds: 1
+    rounds: 2
   - id: 243
     name: "store_audit"
     title: "Audit store/instructions surface against design §5.9/§5.10 and fill gaps"
