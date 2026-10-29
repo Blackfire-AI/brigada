@@ -202,7 +202,7 @@ func TestInitGuidanceRerun(t *testing.T) {
 		if f.changed() || f.err != nil || string(f.next) != text {
 			t.Errorf("%s edited: changed %t, err %v", rel, f.changed(), f.err)
 		}
-		if !strings.Contains(f.purpose, "edited since version 0.9.0, new default differs") || !strings.Contains(f.purpose, "brigada project diff "+rel) {
+		if !strings.Contains(f.purpose, "edited since version 0.9.0, new default differs") || !strings.Contains(f.purpose, "brigada instructions diff "+map[string]string{workerRel: "worker", bugfixRel: "bugfix"}[rel]+" ") || !strings.Contains(f.purpose, "--take-default") {
 			t.Errorf("%s edited: purpose %q", rel, f.purpose)
 		}
 	}

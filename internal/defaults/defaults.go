@@ -95,6 +95,30 @@ func Versions() ([]string, error) {
 	return out, nil
 }
 
+// overlay holds archive files a test adds on top of Archive; nil in
+// production.
+var overlay fs.FS
+
+// SetArchiveOverlay makes the files of f, laid out like Archive
+// (versions/<ver>/...), readable beside the embedded archive until the
+// returned function runs. It exists so a test can ship a fixture older
+// version; nothing in the product calls it.
+func SetArchiveOverlay(f fs.FS) (restore func()) {
+	prev := overlay
+	overlay = f
+	return func() { overlay = prev }
+}
+
+// readArchive reads an archive path, the overlay first.
+func readArchive(path string) ([]byte, error) {
+	if overlay != nil {
+		if data, err := fs.ReadFile(overlay, path); err == nil {
+			return data, nil
+		}
+	}
+	return Archive.ReadFile(path)
+}
+
 // RoleText returns a version's archived role text, by role name.
 func RoleText(version, role string) (string, error) {
 	if !versionWord.MatchString(version) {
@@ -103,7 +127,7 @@ func RoleText(version, role string) (string, error) {
 	if !roleWord.MatchString(role) {
 		return "", fmt.Errorf("role %q is not one of %v", role, Roles)
 	}
-	data, err := Archive.ReadFile("versions/" + version + "/" + role + ".md")
+	data, err := readArchive("versions/" + version + "/" + role + ".md")
 	if err != nil {
 		return "", fmt.Errorf("read the archived %s text of version %s: %w", role, version, err)
 	}
@@ -118,7 +142,7 @@ func SkillText(version, skill string) (string, error) {
 	if !skillWord.MatchString(skill) {
 		return "", fmt.Errorf("skill %q is not a skill name", skill)
 	}
-	data, err := Archive.ReadFile("versions/" + version + "/skills/" + skill + "/SKILL.md")
+	data, err := readArchive("versions/" + version + "/skills/" + skill + "/SKILL.md")
 	if err != nil {
 		return "", fmt.Errorf("read the archived skill %s of version %s: %w", skill, version, err)
 	}

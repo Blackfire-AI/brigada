@@ -6,11 +6,11 @@ What brigada 1.0 promises until 2.0.
 
 ## What is covered
 
-**The CLI commands and their subcommands.** The top-level commands are `init`, `remove`, `attach`, `ask`, `review`, `engine`, `runner`, `start`, `config`, `stop`, `mcp`, `status`, `task`, `project`, `history`, `stats`, `capacity`, `top`, `cancel`, `agent`, `agents`, `plan`, `budget`, `recover`, `diff`, `land`, `push`, `logs`, `version` and `help`. The subcommands are `task submit`; `project foreman`, `project list`, `project set`, `project show` and `project import`; `agent reset`; `agents add`; `plan approve` and `plan reject`; `land approve` and `land reject`; `push approve`; and `hold yield` and `hold confirm`, which stay as no-ops that always exit 0. A bare `brigada` is `attach`. Their names and subcommand names keep working.
+**The CLI commands and their subcommands.** The top-level commands are `init`, `remove`, `instructions`, `attach`, `ask`, `review`, `engine`, `runner`, `start`, `config`, `stop`, `mcp`, `status`, `task`, `project`, `history`, `stats`, `capacity`, `top`, `cancel`, `agent`, `agents`, `plan`, `budget`, `recover`, `diff`, `land`, `push`, `logs`, `version` and `help`. The subcommands are `instructions diff`; `task submit`; `project foreman`, `project list`, `project set`, `project show` and `project import`; `agent reset`; `agents add`; `plan approve` and `plan reject`; `land approve` and `land reject`; `push approve`; and `hold yield` and `hold confirm`, which stay as no-ops that always exit 0. A bare `brigada` is `attach`. Their names and subcommand names keep working.
 
 **The CLI flags.** Every command takes `--state-dir DIR` and `--config PATH`. A command's other flags are frozen only where they are listed here; anything else its `--help` prints may change. The frozen flags:
 
-- `init`: `--repo`, `--remote`, `--yes`, `--probe`, `--verbose`, `--accept-limited`, `--check`, `--tools`, `--foreman`, `--agent` (repeatable), `--no-wiring`, `--parallel`, `--all`, `--overwrite-config`, `--signed-in`, `--now`.
+- `init`: `--repo`, `--remote`, `--yes`, `--probe`, `--verbose`, `--accept-limited`, `--check`, `--tools`, `--foreman`, `--agent` (repeatable), `--no-wiring`, `--parallel`, `--all`, `--overwrite-config`, `--signed-in`, `--now`, `--take-default`.
 - `remove`: `--yes`, `--cancel`, `--delete-config`.
 - `attach`: `--force`, `--no-start`, `--model`, `--effort`.
 - `ask`: `--repo`.

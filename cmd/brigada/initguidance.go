@@ -88,6 +88,8 @@ type guidanceTarget struct {
 	text  string
 	skill bool
 	what  string
+	// name is the role or skill name the commands take.
+	name string
 }
 
 // guidanceTargets lists the files init generates for cfg: the role files
@@ -105,7 +107,7 @@ func guidanceTargets(cfg engine.ProjectConfig) ([]guidanceTarget, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, guidanceTarget{rel: rel, text: text, what: "default " + role + " instructions"})
+		out = append(out, guidanceTarget{rel: rel, text: text, what: "default " + role + " instructions", name: role})
 	}
 	if cfg.SkillsDir != "" {
 		for _, name := range defaults.SkillNames {
@@ -113,7 +115,7 @@ func guidanceTargets(cfg engine.ProjectConfig) ([]guidanceTarget, error) {
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, guidanceTarget{rel: cfg.SkillsDir + "/" + name + "/SKILL.md", text: text, skill: true, what: "default skill " + name})
+			out = append(out, guidanceTarget{rel: cfg.SkillsDir + "/" + name + "/SKILL.md", text: text, skill: true, what: "default skill " + name, name: name})
 		}
 	}
 	return out, nil
@@ -154,7 +156,7 @@ func planGuidance(root string, cfg engine.ProjectConfig) []wireFile {
 			if !generated || version == "" {
 				version = "unknown"
 			}
-			return old, "unchanged", editedNote{version: version, rel: t.rel}
+			return old, "unchanged", editedNote{version: version, name: t.name}
 		}}})[0]
 		f.generated = true
 		var note editedNote
@@ -163,7 +165,7 @@ func planGuidance(root string, cfg engine.ProjectConfig) []wireFile {
 			f.err = nil
 			f.next = f.old
 			f.state = "unchanged"
-			f.purpose = fmt.Sprintf("edited since version %s, new default differs; kept. See: brigada project diff %s", note.version, note.rel)
+			f.purpose = fmt.Sprintf("edited since version %s, new default differs; kept. See: brigada instructions diff %s (brigada init --take-default %s resets it)", note.version, note.name, note.name)
 		} else if f.purpose == "" {
 			f.purpose = t.what
 		}
@@ -173,7 +175,7 @@ func planGuidance(root string, cfg engine.ProjectConfig) []wireFile {
 }
 
 // editedNote carries an edited file's version through a wireStep.
-type editedNote struct{ version, rel string }
+type editedNote struct{ version, name string }
 
 func (e editedNote) Error() string { return "edited since version " + e.version }
 
