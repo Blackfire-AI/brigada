@@ -185,7 +185,7 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: needs_foreman
+    state: running
     branch: "brigada/task-267"
     rounds: 0
   - id: 268
