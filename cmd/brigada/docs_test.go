@@ -1,12 +1,15 @@
 package main
 
 import (
-	"flag"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode"
@@ -20,15 +23,16 @@ import (
 //
 // FLAG METHOD. The command table (commands, and the subcommand tables of
 // main.go and dispatch.go) holds names and no flags, and the flags are
-// defined inline in each command's run function. The verifier does not
-// parse usage text, and it never runs a command's work: it asks for each
-// command's real flag.FlagSet through helpFlagSet (compat_test.go), which
-// swaps the newFlagSet constructor every command already builds its flags
-// with, so the set it compares is the very one the command registers and
-// cannot drift from the code. The only thing run is the command's flag
-// definition and its `--help` return, which happens before any engine,
-// file or network is touched. A documented flag must be in that set (the
-// common --state-dir and --config are in every set); a documented
+// defined inline in each command's run function. The verifier executes no
+// command, not even its flag parsing or --help: it reads the flag-definition
+// code itself. flagSetsFromSource parses the package's own non-test Go files
+// and, in every function that builds a set with `fs := newFlagSet("name",
+// ...)`, collects the names given to that set's definer calls (fs.Bool,
+// fs.StringVar, fs.Var, fs.Func, ...). A name built as "plan "+verb stands
+// for every path under that prefix. Every set also gets the common
+// --state-dir and --config, which addCommon defines on all of them, and -h
+// and --help. A documented flag must be in its command's set, so the docs
+// cannot drift from the code that defines the flags. A documented
 // subcommand must be in the command's table, or in COMPATIBILITY.md's list
 // of subcommands a command handles inside itself (land approve, agents add).
 
@@ -270,9 +274,9 @@ var plainWord = regexp.MustCompile(`^[a-z][a-z-]*$`)
 
 // commandChecker resolves documented command lines against the code.
 type commandChecker struct {
-	t     *testing.T
-	subs  []string // "parent sub" paths COMPATIBILITY.md documents
-	flags map[string]map[string]bool
+	t    *testing.T
+	subs []string // "parent sub" paths COMPATIBILITY.md documents
+	sets []sourceFlagSet
 }
 
 func newCommandChecker(t *testing.T) *commandChecker {
@@ -281,22 +285,148 @@ func newCommandChecker(t *testing.T) *commandChecker {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &commandChecker{t: t, subs: dc.subs, flags: map[string]map[string]bool{}}
+	files := map[string]string{}
+	entries, err := os.ReadDir(sourceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if n := e.Name(); strings.HasSuffix(n, ".go") && !strings.HasSuffix(n, "_test.go") {
+			b, err := os.ReadFile(filepath.Join(sourceDir, n))
+			if err != nil {
+				t.Fatal(err)
+			}
+			files[n] = string(b)
+		}
+	}
+	sets, err := flagSetsFromSource(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sets) < 25 {
+		t.Fatalf("found only %d flag sets in the command sources", len(sets))
+	}
+	return &commandChecker{t: t, subs: dc.subs, sets: sets}
 }
 
-// flagsOf is the flag names a command path registers, from its real
-// FlagSet; nil for a dispatcher that registers none.
+// sourceDir is this package's directory, absolute, resolved at start.
+var sourceDir, _ = filepath.Abs(".")
+
+// sourceFlagSet is one newFlagSet call's flags. prefix means the name ended
+// in a variable ("plan "+verb): it stands for every path under name.
+type sourceFlagSet struct {
+	name   string
+	prefix bool
+	flags  map[string]bool
+}
+
+// flagNameArg is the position of the flag name among the arguments of each
+// flag.FlagSet definer: first for Bool/String/Func..., second for the *Var
+// forms and Var.
+func flagNameArg(method string) (int, bool) {
+	switch method {
+	case "Bool", "String", "Int", "Int64", "Uint", "Uint64", "Float64", "Duration", "Func", "BoolFunc":
+		return 0, true
+	case "BoolVar", "StringVar", "IntVar", "Int64Var", "UintVar", "Uint64Var", "Float64Var", "DurationVar", "Var", "TextVar":
+		return 1, true
+	}
+	return 0, false
+}
+
+// flagSetsFromSource reads Go source (file name to text) without running
+// any of it and returns the flag names each newFlagSet call's set defines.
+func flagSetsFromSource(files map[string]string) ([]sourceFlagSet, error) {
+	var out []sourceFlagSet
+	fset := token.NewFileSet()
+	for name, src := range files {
+		f, err := parser.ParseFile(fset, name, src, 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			// The variable each newFlagSet result is assigned to.
+			sets := map[string]*sourceFlagSet{}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				as, ok := n.(*ast.AssignStmt)
+				if !ok || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
+					return true
+				}
+				call, ok := as.Rhs[0].(*ast.CallExpr)
+				if !ok || len(call.Args) == 0 {
+					return true
+				}
+				if id, ok := call.Fun.(*ast.Ident); !ok || id.Name != "newFlagSet" {
+					return true
+				}
+				v, ok := as.Lhs[0].(*ast.Ident)
+				if !ok {
+					return true
+				}
+				set := &sourceFlagSet{flags: map[string]bool{"h": true, "help": true, "state-dir": true, "config": true}}
+				switch a := call.Args[0].(type) {
+				case *ast.BasicLit:
+					set.name, _ = strconv.Unquote(a.Value)
+				case *ast.BinaryExpr:
+					if l, ok := a.X.(*ast.BasicLit); ok && a.Op == token.ADD {
+						set.name, _ = strconv.Unquote(l.Value)
+						set.prefix = true
+					}
+				}
+				if set.name != "" {
+					sets[v.Name] = set
+				}
+				return true
+			})
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				recv, ok := sel.X.(*ast.Ident)
+				if !ok || sets[recv.Name] == nil {
+					return true
+				}
+				if i, ok := flagNameArg(sel.Sel.Name); ok && i < len(call.Args) {
+					if lit, ok := call.Args[i].(*ast.BasicLit); ok {
+						if s, err := strconv.Unquote(lit.Value); err == nil {
+							sets[recv.Name].flags[s] = true
+						}
+					}
+				}
+				return true
+			})
+			for _, s := range sets {
+				out = append(out, *s)
+			}
+		}
+	}
+	return out, nil
+}
+
+// flagsOf is the flag names a command path defines, from the source; nil
+// for a dispatcher that defines none. A prefix set (plan approve and plan
+// reject share one function) applies to every path under its prefix.
 func (c *commandChecker) flagsOf(path string) map[string]bool {
-	if f, ok := c.flags[path]; ok {
-		return f
+	var out map[string]bool
+	for _, s := range c.sets {
+		if s.name == path || (s.prefix && strings.HasPrefix(path, s.name) && len(path) > len(s.name)) {
+			if out == nil {
+				out = map[string]bool{}
+			}
+			for f := range s.flags {
+				out[f] = true
+			}
+		}
 	}
-	var set map[string]bool
-	if fs := helpFlagSet(c.t, path); fs != nil {
-		set = map[string]bool{"h": true, "help": true}
-		fs.VisitAll(func(f *flag.Flag) { set[f.Name] = true })
-	}
-	c.flags[path] = set
-	return set
+	return out
 }
 
 // check returns the problems of one documented command line.
@@ -518,6 +648,46 @@ func TestDocsCommandCheckerFails(t *testing.T) {
 	// A comment is dropped, but a quoted # is not a comment.
 	if w := shellWords(`brigada ask "fix #12" # later`); len(w) != 3 || w[2] != "fix #12" {
 		t.Errorf("shellWords = %q", w)
+	}
+}
+
+// TestDocsFlagExtraction proves the source reader: every definer form, a
+// prefix name, a set that is not ours, and the real command table.
+func TestDocsFlagExtraction(t *testing.T) {
+	sets, err := flagSetsFromSource(map[string]string{"x.go": `package main
+func runX(verb string) {
+	fs := newFlagSet("x "+verb, "s", "d")
+	other := somethingElse("not-a-flag")
+	a := fs.Bool("alpha", false, "u")
+	fs.StringVar(&v, "beta", "", "u")
+	fs.Var(val, "gamma", "u")
+	fs.Func("delta", "u", nil)
+	other.Bool("nope", false, "u")
+	_ = a
+	g := newFlagSet("plain", "s", "d")
+	g.IntVar(&n, "eps", 0, "u")
+}`})
+	if err != nil || len(sets) != 2 {
+		t.Fatalf("sets = %v, %v", sets, err)
+	}
+	c := &commandChecker{sets: sets}
+	px := c.flagsOf("x set")
+	for _, want := range []string{"alpha", "beta", "gamma", "delta", "state-dir", "config", "help"} {
+		if !px[want] {
+			t.Errorf("x set lacks --%s: %v", want, px)
+		}
+	}
+	if px["nope"] || px["eps"] || c.flagsOf("x") != nil || !c.flagsOf("plain")["eps"] || c.flagsOf("plain")["alpha"] {
+		t.Errorf("extraction crossed sets: %v %v", px, c.flagsOf("plain"))
+	}
+	real := newCommandChecker(t)
+	for path, want := range map[string]string{"init": "take-default", "instructions diff": "state-dir", "project set": "repo", "plan approve": "and-stop-asking", "land approve": "and-stop-asking"} {
+		if !real.flagsOf(path)[want] {
+			t.Errorf("%s lacks --%s in the command sources", path, want)
+		}
+	}
+	if real.flagsOf("init")["bogus"] {
+		t.Errorf("init accepts --bogus")
 	}
 }
 
