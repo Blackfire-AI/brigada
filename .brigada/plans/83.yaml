@@ -5,9 +5,9 @@
 plan: 83
 title: "Bring role instructions and task skills to design §5.9/§5.10 (#119, #117); fix #128, #127, #129"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-10-29T14:08:29.976259Z
-updated: 2026-10-29T14:08:58.237491Z
+updated: 2026-10-29T14:14:07.178567Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -46,8 +46,8 @@ tasks:
     name: "import"
     title: "Import: not configured reachable, init writes role files for instructions_file projects, one import transaction (#119 items 3, 5)"
     class: "implement"
-    deps: ["land_ready"]
-    base: "land_ready"
+    deps: ["fallback_status"]
+    base: "fallback_status"
     tier: heavy
     effort: medium
     state: pending
@@ -57,8 +57,8 @@ tasks:
     name: "cli"
     title: "Header and provenance carry the brigada version; instructions diff is three-way (#119 items 9, 10)"
     class: "implement"
-    deps: ["land_ready"]
-    base: "land_ready"
+    deps: ["import"]
+    base: "import"
     effort: medium
     state: pending
     branch: ""
@@ -93,6 +93,49 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 260
+    name: "fallback_status"
+    title: "Status and brigada project show the three role states; GUIDE drops the fallback (#119 items 4, 8)"
+    class: "implement"
+    deps: ["fallback"]
+    base: "fallback"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 261
+    name: "land_target_status"
+    title: "#127 (2/3): status shows the land target's lag behind the default branch"
+    class: "implement"
+    deps: ["land_target"]
+    base: "land_target"
+    continue: "land_target"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 262
+    name: "land_target_prompt"
+    title: "#127 (3/3): the foreman's opening prompt names both heads; docs"
+    class: "implement"
+    deps: ["land_target_status"]
+    base: "land_target_status"
+    continue: "land_target_status"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 263
+    name: "changelog"
+    title: "CHANGELOG entries for plan 83"
+    class: "implement"
+    deps: ["cli", "missing_section", "land_target_prompt"]
+    base: ""
+    tier: light
+    effort: medium
     state: pending
     branch: ""
     rounds: 0
