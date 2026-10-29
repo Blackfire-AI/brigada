@@ -53,7 +53,7 @@ tasks:
     base: "checkout122"
     effort: medium
     caps: {restart: 2}
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 248
@@ -86,7 +86,7 @@ tasks:
     deps: ["fix122"]
     base: "fix122"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-250"
     rounds: 0
   - id: 251
