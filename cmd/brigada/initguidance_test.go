@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -128,9 +129,12 @@ func TestInitGuidanceFirstRun(t *testing.T) {
 	}
 }
 
-// TestInitGuidancePartialRoleMap: a project.yaml naming only some roles keeps
-// its paths and gains the others, so all four role files are generated.
-func TestInitGuidancePartialRoleMap(t *testing.T) {
+// TestInitGuidancePartialRoleMapKept: once the instructions map exists a
+// missing key is the user's choice (§5.9 'Three states'): init adds no
+// key back, generates files only for the roles the map names, and its
+// plan says the roles left out are not configured with the way to
+// restore them.
+func TestInitGuidancePartialRoleMapKept(t *testing.T) {
 	base, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none")
 	if err != nil {
 		t.Fatal(err)
@@ -140,22 +144,122 @@ func TestInitGuidancePartialRoleMap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if string(content) != partial {
+		t.Fatalf("a partial map gained keys:\n%s", content)
+	}
 	cfg, err := engine.ParseProjectConfig(content)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.RoleFiles) != 4 || cfg.RoleFiles["worker"] != "docs/worker-rules.md" || cfg.RoleFiles["foreman"] != engine.DefaultRoleFile("foreman") {
+	if len(cfg.RoleFiles) != 1 || cfg.RoleFiles["worker"] != "docs/worker-rules.md" {
 		t.Fatalf("RoleFiles = %v\n%s", cfg.RoleFiles, content)
 	}
-	if !strings.Contains(string(content), "# mine") || strings.Count(string(content), "skills_dir:") != 1 {
-		t.Errorf("existing lines changed:\n%s", content)
+	root := t.TempDir()
+	files := applyGuidance(t, root, cfg)
+	if got := len(files); got != 1+len(defaults.Skills) {
+		t.Fatalf("planned %d files, want the mapped role's and the %d skills", got, len(defaults.Skills))
+	}
+	if !strings.HasPrefix(readRel(t, root, "docs/worker-rules.md"), "<!-- brigada: ") {
+		t.Errorf("the mapped role's file was not generated")
+	}
+	for _, rel := range []string{".brigada/instructions/foreman.md", ".brigada/instructions/plan_review.md", ".brigada/instructions/reviewer.md"} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+			t.Errorf("%s was generated for a role left out (%v)", rel, err)
+		}
+	}
+	notes := guidanceNotes(cfg)
+	if len(notes) != 3 {
+		t.Fatalf("notes = %q, want the three roles left out", notes)
+	}
+	for _, role := range []string{"foreman", "plan_review", "reviewer"} {
+		if !slices.ContainsFunc(notes, func(n string) bool {
+			return strings.HasPrefix(n, "instructions."+role+": not configured") && strings.Contains(n, "brigada init --take-default "+role)
+		}) {
+			t.Errorf("no note restores %s: %q", role, notes)
+		}
+	}
+	// A map leaving out the worker, with no instructions_file either,
+	// notes the worker too: its key is the alias's or nobody's.
+	cfg.RoleFiles = map[string]string{"foreman": ".brigada/instructions/foreman.md"}
+	if notes = guidanceNotes(cfg); !slices.ContainsFunc(notes, func(n string) bool { return strings.HasPrefix(n, "instructions.worker: not configured") }) {
+		t.Errorf("the worker left out is not noted: %q", notes)
+	}
+}
+
+// TestInitGuidanceInstructionsFileGainsThreeRoles: a project still on
+// the 1.0 instructions_file gets foreman.md, plan_review.md and
+// reviewer.md generated and their keys in the instructions map, the
+// worker staying on its alias — never both keys, which §5.9 refuses.
+// The generated text is the shipped default, the same text the upgrade
+// seeds, so the next import changes nothing; and with a partial map
+// beside the alias nothing is added, for those keys were left out on
+// purpose.
+func TestInitGuidanceInstructionsFileGainsThreeRoles(t *testing.T) {
+	base, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	withAlias := string(base) + "instructions_file: .brigada/instructions.md\n"
+	content, err := engine.ProjectConfigGuidance([]byte(withAlias))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := engine.ParseProjectConfig(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InstructionsFile != ".brigada/instructions.md" {
+		t.Errorf("instructions_file = %q, want the alias kept", cfg.InstructionsFile)
+	}
+	if _, both := cfg.RoleFiles[engine.RoleWorker]; both {
+		t.Errorf("the worker gained a map key beside its alias:\n%s", content)
+	}
+	for _, role := range []string{"foreman", "plan_review", "reviewer"} {
+		if cfg.RoleFiles[role] != engine.DefaultRoleFile(role) {
+			t.Errorf("role %s = %q, want the default path", role, cfg.RoleFiles[role])
+		}
 	}
 	root := t.TempDir()
 	applyGuidance(t, root, cfg)
-	for _, rel := range []string{"docs/worker-rules.md", ".brigada/instructions/foreman.md", ".brigada/instructions/plan_review.md", ".brigada/instructions/reviewer.md"} {
-		if !strings.HasPrefix(readRel(t, root, rel), "<!-- brigada: ") {
-			t.Errorf("%s has no generated header", rel)
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(".brigada/instructions/worker.md"))); !os.IsNotExist(err) {
+		t.Errorf("a worker file was generated beside the alias (%v)", err)
+	}
+	for _, role := range []string{"foreman", "plan_review", "reviewer"} {
+		rel := engine.DefaultRoleFile(role)
+		live, _ := defaults.LiveRoleText(role)
+		if got := readRel(t, root, rel); got != generatedRoleFile(live) {
+			t.Errorf("%s = %.80q, want the default under its header", rel, got)
 		}
+		if text, err := readRoleFile(root, role, rel); err != nil || text != live {
+			t.Errorf("role %s imports as %.60q, %v", role, text, err)
+		}
+	}
+	if notes := guidanceNotes(cfg); len(notes) != 0 {
+		t.Errorf("the alias project has not-configured notes: %q", notes)
+	}
+
+	// The alias with a partial map: no new role keys, only the mapped
+	// files, and the worker setting moves as the worker's own text does.
+	aliasPartial := string(base) + "instructions_file: .brigada/instructions.md\ninstructions:\n  plan_review: pr.md\nskills_dir: .brigada/skills\n"
+	if content, err = engine.ProjectConfigGuidance([]byte(aliasPartial)); err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != aliasPartial {
+		t.Fatalf("the alias with a partial map gained keys:\n%s", content)
+	}
+	if cfg, err = engine.ParseProjectConfig(content); err != nil {
+		t.Fatal(err)
+	}
+	root = t.TempDir()
+	files := applyGuidance(t, root, cfg)
+	if got := len(files); got != 1+len(defaults.Skills) {
+		t.Fatalf("planned %d files, want the mapped role's and the skills", got)
+	}
+	if !strings.HasPrefix(readRel(t, root, "pr.md"), "<!-- brigada: ") {
+		t.Errorf("the mapped role's file was not generated")
+	}
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(".brigada/instructions.md"))); !os.IsNotExist(err) {
+		t.Errorf("the alias's own file was generated (%v)", err)
 	}
 }
 

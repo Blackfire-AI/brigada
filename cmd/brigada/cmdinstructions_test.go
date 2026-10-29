@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -184,6 +185,65 @@ func TestInitTakeDefault(t *testing.T) {
 	}
 	if code, _, _ := runCLI("init", "--take-default", "reviewer"); code != 0 || !strings.HasPrefix(readRel(t, root, ".brigada/instructions/reviewer.md"), "<!-- brigada: ") {
 		t.Errorf("a deleted file was not recreated")
+	}
+}
+
+// TestTakeDefaultRestoresRoleKey: a role whose key project.yaml's
+// instructions map does not carry (§5.9) gets the key back at its
+// default path beside the reset file, so the restore reaches the next
+// import; the worker on the instructions_file alias keeps the alias, and
+// a role already keyed changes no line of the map.
+func TestTakeDefaultRestoresRoleKey(t *testing.T) {
+	root := instructionsRepo(t)
+	config := readRel(t, root, ".brigada/project.yaml")
+	withoutReviewer := strings.Replace(config, "  reviewer: "+engine.DefaultRoleFile("reviewer")+"\n", "", 1)
+	if withoutReviewer == config {
+		t.Fatalf("the generated project.yaml names no reviewer key:\n%s", config)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".brigada", "project.yaml"), []byte(withoutReviewer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := runCLI("init", "--take-default", "reviewer")
+	if code != 0 || errs != "" {
+		t.Fatalf("take-default reviewer = %d %q %q", code, out, errs)
+	}
+	if !strings.Contains(out, "instructions.reviewer key added at the default path") {
+		t.Errorf("the restored key was not reported:\n%s", out)
+	}
+	after := readRel(t, root, ".brigada/project.yaml")
+	if !strings.Contains(after, "  reviewer: "+engine.DefaultRoleFile("reviewer")+"\n") {
+		t.Errorf("the reviewer key was not restored:\n%s", after)
+	}
+	if other := strings.Replace(after, "  reviewer: "+engine.DefaultRoleFile("reviewer")+"\n", "", 1); other != withoutReviewer {
+		t.Errorf("the restore disturbed other lines:\n%s", after)
+	}
+
+	// A role already keyed: the file resets, the map keeps its line.
+	if code, out, errs = runCLI("init", "--take-default", "worker"); code != 0 || errs != "" || strings.Contains(out, "key added") {
+		t.Fatalf("take-default worker = %d %q %q", code, out, errs)
+	}
+	if readRel(t, root, ".brigada/project.yaml") != after {
+		t.Errorf("a keyed role changed the map")
+	}
+
+	// The worker on the alias: the alias's own file is reset and no map
+	// key appears beside it, for the file refuses naming the text twice.
+	base, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := string(base) + "instructions_file: .brigada/instructions.md\n"
+	if err := os.WriteFile(filepath.Join(root, ".brigada", "project.yaml"), []byte(alias), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, errs = runCLI("init", "--take-default", "worker"); code != 0 || errs != "" || strings.Contains(out, "key added") {
+		t.Fatalf("take-default worker on the alias = %d %q %q", code, out, errs)
+	}
+	if readRel(t, root, ".brigada/project.yaml") != alias {
+		t.Errorf("the worker gained a map key beside its alias")
+	}
+	if !strings.HasPrefix(readRel(t, root, ".brigada/instructions.md"), "<!-- brigada: ") {
+		t.Errorf("the alias's own file was not reset")
 	}
 }
 
