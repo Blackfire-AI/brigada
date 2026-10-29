@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -133,6 +134,107 @@ func TestSettingsSyncWorkerRoleRow(t *testing.T) {
 	e.set(map[string]string{SettingInstructions: ""})
 	if ri := mustRole(t, e, RoleWorker); ri.State != RoleStateNotConfigured || ri.Source != SourceDefault {
 		t.Errorf("worker after the reset = %+v, want not configured", ri)
+	}
+}
+
+// TestUnimportRoleFiles: an import whose request no longer configures a
+// role moves it to not configured — its imported row is removed (§5.9
+// 'Three states, no hidden fallback'), so dropping a key from
+// project.yaml's instructions map is a choice that sticks. A local
+// override under the dropped key keeps its text and comes back as Kept,
+// the conflict ErrRoleTextKept reports for a file the map still names.
+// The upgrade's seed stands (no import owns the role), the worker never
+// moves here — its text imports with project.yaml itself — and a repo
+// without a project has nothing to remove.
+func TestUnimportRoleFiles(t *testing.T) {
+	e := newEnv(t)
+	if _, err := e.eng.ImportRoleFile(e.ctx, envRepo, RoleForeman, "file foreman rules"); err != nil {
+		t.Fatalf("import foreman: %v", err)
+	}
+	if _, err := e.eng.ImportRoleFile(e.ctx, envRepo, RoleReviewer, "file reviewer rules"); err != nil {
+		t.Fatalf("import reviewer: %v", err)
+	}
+	mustSetRole(t, e, RolePlanReview, "my local plan review")
+	seed := func(role, text string) {
+		t.Helper()
+		if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+			_, err := tx.Exec(`INSERT INTO role_instructions (project_id, role, text, source, settings_version, digest, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?)`, e.project, role, text, SourceGenerated, defaults.Version, instructionsDigest(text), seedTS)
+			return err
+		}); err != nil {
+			t.Fatalf("seed %s: %v", role, err)
+		}
+	}
+	seed(RoleWorker, "seeded worker")
+
+	removals, err := e.eng.UnimportRoleFiles(e.ctx, envRepo, map[string]bool{RoleReviewer: true})
+	if err != nil {
+		t.Fatalf("unimport: %v", err)
+	}
+	if len(removals) != 2 {
+		t.Fatalf("removals = %+v, want the imported foreman removed and the local plan_review kept", removals)
+	}
+	byRole := map[string]RoleFileRemoval{}
+	for _, rm := range removals {
+		byRole[rm.Role] = rm
+	}
+	rm := byRole[RoleForeman]
+	if rm.Removed == nil || rm.Kept != nil || rm.Removed.Text != "file foreman rules" {
+		t.Errorf("foreman removal = %+v, want the imported record removed", rm)
+	}
+	if c := rm.Change(); c.Key != "instructions.foreman" || c.New != RoleStateNotConfigured || !strings.Contains(c.Old, "18 bytes") {
+		t.Errorf("foreman removal change = %+v, want a summary moving to not configured", c)
+	}
+	rm = byRole[RolePlanReview]
+	if rm.Kept == nil || rm.Removed != nil || rm.Kept.Text != "my local plan review" || rm.Kept.Source != SourceLocal {
+		t.Errorf("plan_review removal = %+v, want the local override kept", rm)
+	}
+	if c := rm.Change(); !strings.Contains(c.Old, "my local plan review") || c.New != RoleStateNotConfigured {
+		t.Errorf("plan_review removal change = %+v, want the kept text against not configured", c)
+	}
+
+	if ri := mustRole(t, e, RoleForeman); ri.State != RoleStateNotConfigured || ri.Source != SourceDefault || ri.Text != "" {
+		t.Errorf("foreman after the removal = %+v, want not configured", ri)
+	}
+	if ri := mustRole(t, e, RolePlanReview); ri.State != RoleStateFile || ri.Text != "my local plan review" {
+		t.Errorf("plan_review after the removal = %+v, want the local text", ri)
+	}
+	if ri := mustRole(t, e, RoleReviewer); ri.Source != SourceImported || ri.Text != "file reviewer rules" {
+		t.Errorf("reviewer, still configured by the request = %+v, want the import kept", ri)
+	}
+	if ri := mustRole(t, e, RoleWorker); ri.Source != SourceGenerated || ri.Text != "seeded worker" {
+		t.Errorf("worker after the removal = %+v, want the seed untouched: the worker rides the config import", ri)
+	}
+
+	// An empty configured set removes every non-worker imported row; the
+	// seed and the local row still stand, the local one as a conflict.
+	removals, err = e.eng.UnimportRoleFiles(e.ctx, envRepo, nil)
+	if err != nil || len(removals) != 2 {
+		t.Fatalf("unimport all = %+v, %v; want the reviewer removed and the local plan_review kept", removals, err)
+	}
+	for _, rm := range removals {
+		switch rm.Role {
+		case RoleReviewer:
+			if rm.Removed == nil {
+				t.Errorf("reviewer removal = %+v, want the imported record removed", rm)
+			}
+		case RolePlanReview:
+			if rm.Kept == nil || rm.Kept.Text != "my local plan review" {
+				t.Errorf("plan_review removal = %+v, want the local override kept", rm)
+			}
+		default:
+			t.Errorf("unexpected removal %+v", rm)
+		}
+	}
+	if ri := mustRole(t, e, RoleReviewer); ri.State != RoleStateNotConfigured {
+		t.Errorf("reviewer after the second removal = %+v, want not configured", ri)
+	}
+
+	if got, err := e.eng.UnimportRoleFiles(e.ctx, "https://example.invalid/none.git", nil); err != nil || got != nil {
+		t.Errorf("a repo without a project = %+v, %v; want nil, nil", got, err)
+	}
+	if _, err := e.eng.UnimportRoleFiles(e.ctx, "", nil); !errors.Is(err, ErrInvalidSetting) {
+		t.Errorf("no repo: err = %v, want ErrInvalidSetting", err)
 	}
 }
 

@@ -138,6 +138,58 @@ func TestProjectGuidanceChangedSinceImport(t *testing.T) {
 	}
 }
 
+// TestProjectImportDroppedRoleKey: a role key dropped from the file's
+// instructions map makes that role not configured at the next import
+// (§5.9 'Three states, no hidden fallback'), reported as an applied
+// change; a local override under the dropped key keeps its text and the
+// import prints the conflict, as it does for a text the file carries.
+func TestProjectImportDroppedRoleKey(t *testing.T) {
+	ctx, state := startSettingsEngine(t)
+	write := importRepo(t)
+	run1 := func(args ...string) (int, string, string) { return runWithStdin(t, ctx, state, "", args) }
+
+	write(projectFile("instructions:\n  foreman: f.md\n  reviewer: r.md\n"))
+	writeRepoFile(t, "f.md", "foreman rules\n")
+	writeRepoFile(t, "r.md", "reviewer rules\n")
+	if code, _, stderr := run1("project", "import", "--yes"); code != 0 {
+		t.Fatalf("import = %d %q", code, stderr)
+	}
+
+	// The foreman key is dropped from the map.
+	write(projectFile("instructions:\n  reviewer: r.md\n"))
+	code, out, stderr := run1("project", "import", "--yes")
+	if code != 0 {
+		t.Fatalf("re-import = %d %q %q", code, out, stderr)
+	}
+	if l := lineWith(out, "  instructions.foreman:"); !strings.Contains(l, "-> not configured") {
+		t.Errorf("the dropped key was not reported as not configured: %q\n%s", l, out)
+	}
+	_, show, _ := run1("project", "show")
+	if l := lineWith(show, "instructions.foreman:"); !strings.Contains(l, "not configured") {
+		t.Errorf("show after the drop: %q\n%s", l, show)
+	}
+	if l := lineWith(show, "instructions.reviewer:"); !strings.Contains(l, "file") {
+		t.Errorf("the reviewer, still named, lost its file state: %q", l)
+	}
+
+	// A local override under a dropped key survives it, as a conflict.
+	if code, _, stderr := run1("project", "set", "instructions.reviewer=mine"); code != 0 {
+		t.Fatalf("set = %d %q", code, stderr)
+	}
+	write(projectFile("approval_max_tasks: 3\n"))
+	code, out, stderr = run1("project", "import", "--yes")
+	if code != 0 {
+		t.Fatalf("import without a map = %d %q %q", code, out, stderr)
+	}
+	if l := lineWith(out, "conflict: instructions.reviewer"); !strings.Contains(l, `"mine"`) || !strings.Contains(l, "not configured") {
+		t.Errorf("the kept override was not shown against not configured: %q\n%s", l, out)
+	}
+	_, show, _ = run1("project", "show")
+	if l := lineWith(show, "instructions.reviewer:"); !strings.Contains(l, "file") || !strings.Contains(l, "4 bytes") {
+		t.Errorf("the local override did not stand: %q\n%s", l, show)
+	}
+}
+
 // TestProjectRoleConflictShowsBothTexts: after the first import, a local
 // override keeps its text against a different imported file, and the
 // conflict prints both texts; the same file over a still-imported text

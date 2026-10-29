@@ -67,54 +67,34 @@ func ProjectConfigDefaults(content []byte, repo, check, tools string) ([]byte, e
 }
 
 // ProjectConfigGuidance adds what init's defaults need to a project.yaml
-// (§5.9, §5.10): the instructions map naming the four role files at their
-// default paths, and skills_dir. A key the file already has, and the old
-// instructions_file alias, are left as they are; a partial instructions
-// map gains the roles it lacks.
+// (§5.9, §5.10): the instructions map naming the role files at their
+// default paths, and skills_dir. A file with no instructions map at all
+// is first generation: it gains the whole map — or, when it keeps the
+// 1.0 instructions_file, the three other roles only, the worker staying
+// on its alias, for the file refuses naming both keys. Once the map
+// exists a missing key is the user's choice: nothing is added back, so
+// dropping a key reaches not configured at the next import, and init
+// says so with the way to restore it (ProjectConfigRoleKey, the engine
+// half of `brigada init --take-default <role>`). A key the map has is
+// left as it is, and so is skills_dir.
 func ProjectConfigGuidance(content []byte) ([]byte, error) {
 	cfg, err := ParseProjectConfig(content)
 	if err != nil {
 		return nil, err
 	}
 	var add strings.Builder
-	if cfg.RoleFiles != nil {
-		// A partial map keeps its paths; the roles it leaves out join it
-		// at their default paths, so all four files are generated.
-		var missing []string
+	switch {
+	case cfg.RoleFiles != nil:
+		// The map exists: its missing keys were left out on purpose.
+	case cfg.InstructionsFile != "":
+		add.WriteString(configKeyInstructions + ":\n")
 		for _, role := range RoleKeys {
-			if _, ok := cfg.RoleFiles[role]; !ok {
-				missing = append(missing, "  "+role+": "+DefaultRoleFile(role))
+			if role == RoleWorker {
+				continue // instructions_file is the worker's key (§5.9)
 			}
+			add.WriteString("  " + role + ": " + DefaultRoleFile(role) + "\n")
 		}
-		if len(missing) > 0 {
-			lines := strings.Split(string(content), "\n")
-			at, last := -1, -1
-			for i, l := range lines {
-				switch {
-				case at < 0:
-					if strings.TrimSpace(stripYAMLComment(l)) == configKeyInstructions+":" && !strings.HasPrefix(l, " ") {
-						at, last = i, i
-					}
-				case strings.HasPrefix(l, " "):
-					if strings.TrimSpace(stripYAMLComment(l)) != "" {
-						last = i
-					}
-				case strings.TrimSpace(l) != "":
-					goto found
-				}
-			}
-		found:
-			if at < 0 {
-				return nil, configErr("cannot find the %s map to complete", configKeyInstructions)
-			}
-			lines = append(lines[:last+1], append(missing, lines[last+1:]...)...)
-			content = []byte(strings.Join(lines, "\n"))
-			if _, err := ParseProjectConfig(content); err != nil {
-				return nil, err
-			}
-		}
-	}
-	if cfg.RoleFiles == nil && cfg.InstructionsFile == "" {
+	default:
 		add.WriteString(configKeyInstructions + ":\n")
 		for _, role := range RoleKeys {
 			add.WriteString("  " + role + ": " + DefaultRoleFile(role) + "\n")
@@ -131,8 +111,73 @@ func ProjectConfigGuidance(content []byte) ([]byte, error) {
 		out += "\n"
 	}
 	res := []byte(out + add.String())
-	_, err = ParseProjectConfig(res)
-	return res, err
+	if _, err := ParseProjectConfig(res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// ProjectConfigRoleKey adds one role's key to a project.yaml's
+// instructions map at the role's default path: the restore path of a
+// role deliberately left out (§5.9), which `brigada init --take-default
+// <role>` takes and init's plan names. A key the map already has keeps
+// its path, and the worker stays on the instructions_file alias when the
+// file carries one — a map key beside it is refused, as the file itself
+// refuses both.
+func ProjectConfigRoleKey(content []byte, role string) ([]byte, error) {
+	if !slicesContains(RoleKeys, role) {
+		return nil, configErr("unknown role %q; valid roles: %s", role, strings.Join(RoleKeys, ", "))
+	}
+	cfg, err := ParseProjectConfig(content)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := cfg.RoleFiles[role]; ok {
+		return content, nil
+	}
+	if role == RoleWorker && cfg.InstructionsFile != "" {
+		// The alias is the worker's key; adding the map's beside it
+		// would name the same text twice (§5.9).
+		return content, nil
+	}
+	line := "  " + role + ": " + DefaultRoleFile(role)
+	if cfg.RoleFiles == nil {
+		out := string(content)
+		if !strings.HasSuffix(out, "\n") {
+			out += "\n"
+		}
+		res := []byte(out + configKeyInstructions + ":\n" + line + "\n")
+		if _, err := ParseProjectConfig(res); err != nil {
+			return nil, err
+		}
+		return res, nil
+	}
+	lines := strings.Split(string(content), "\n")
+	at, last := -1, -1
+	for i, l := range lines {
+		switch {
+		case at < 0:
+			if strings.TrimSpace(stripYAMLComment(l)) == configKeyInstructions+":" && !strings.HasPrefix(l, " ") {
+				at, last = i, i
+			}
+		case strings.HasPrefix(l, " "):
+			if strings.TrimSpace(stripYAMLComment(l)) != "" {
+				last = i
+			}
+		case strings.TrimSpace(l) != "":
+			goto found
+		}
+	}
+found:
+	if at < 0 {
+		return nil, configErr("cannot find the %s map to complete", configKeyInstructions)
+	}
+	lines = append(lines[:last+1], append([]string{line}, lines[last+1:]...)...)
+	res := []byte(strings.Join(lines, "\n"))
+	if _, err := ParseProjectConfig(res); err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 func yamlString(s string) string { b, _ := json.Marshal(s); return string(b) }

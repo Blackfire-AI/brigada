@@ -135,6 +135,29 @@ func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request, _ i
 		return
 	}
 	if !got.NeedsConfirm {
+		configured := map[string]bool{}
+		for role := range req.Roles {
+			configured[role] = true
+		}
+		removals, err := s.eng.UnimportRoleFiles(r.Context(), req.RepoURL, configured)
+		if err != nil {
+			if errors.Is(err, engine.ErrInvalidSetting) {
+				writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+				return
+			}
+			s.writeInternal(w, r, "unimport the role instructions", err)
+			return
+		}
+		for _, rm := range removals {
+			// A role whose key the file dropped moves to not
+			// configured; a local override under it keeps its text
+			// and shows as the conflict (§5.9).
+			if rm.Kept != nil {
+				got.Conflicts = append(got.Conflicts, rm.Change())
+			} else {
+				got.Applied = append(got.Applied, rm.Change())
+			}
+		}
 		for _, role := range engine.RoleKeys {
 			text, ok := req.Roles[role]
 			if !ok || role == engine.RoleWorker {
