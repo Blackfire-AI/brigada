@@ -31,8 +31,8 @@ tasks:
     review_tier: heavy
     caps: {review_rounds: 4, restart: 3}
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-245-r1"
+    rounds: 1
   - id: 246
     name: "fix122"
     title: "Fix #122: plan_amend cancel with dependents, stranded done tasks, done vs landed in wake context"
