@@ -5,9 +5,9 @@
 plan: 88
 title: "#126: another family becomes a review preference (review.family prefer|require)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-10-29T21:38:56.147268Z
-updated: 2026-10-29T21:45:35.956652Z
+updated: 2026-10-29T22:31:37.003746Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -65,7 +65,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 290
@@ -99,6 +99,6 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: done
     branch: "brigada/task-292"
     rounds: 1
