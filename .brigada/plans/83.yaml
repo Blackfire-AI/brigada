@@ -82,8 +82,8 @@ tasks:
     base: "prompts"
     tier: heavy
     effort: medium
-    state: running
-    branch: "brigada/task-258"
+    state: reviewing
+    branch: "brigada/task-258-r1"
     rounds: 0
   - id: 259
     name: "land_target"
