@@ -18,7 +18,8 @@ updated: 2026-10-22T21:23:59.532177Z
 # Optional tier (light, standard, heavy) and effort (low, medium, high, max)
 # describe the model needed and how hard it should think (§6.1);
 # review_tier and review_effort do the same for its reviews (§7, §8); caps
-# override the task's fix_rounds, review_rounds and restart budgets (§6.1).
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1);
+# skills name the project's skills the task carries, in order (§5.10).
 tasks:
   - id: 151
     name: "deflake-land-push-other-runner"
