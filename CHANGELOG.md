@@ -11,11 +11,14 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A plan with a task parked at `needs_foreman` or `needs_user`, or held at the land gate, stays open instead of closing done (issue #133): the foreman can still cancel, restart or replace the task, and a landing whose push lost the race to another landing retries from a fresh rebase, up to a bound, instead of parking after one retry.
+- The project's land check runs gofmt, the guard tool and go vet before the tests, as CI does (issue #132): `default_check` in `.brigada/project.yaml` runs gofmt, `go run ./internal/tools/guard` and `go vet ./...` ahead of `go test ./...`, and a test keeps the check in step with CI's pre-test steps (shellcheck aside).
 - The foreman's file tools read only its checkout and its project's state (issue #131): the settings brigada writes for a headless turn and for attach confine `Read`, `Grep` and `Glob` to the reading checkout, subagents included, and no allow rule in the user's own settings lifts the refusal.
 - `scripts/land-ready.sh` waits for CI on the remote staging head, holds when no run appears within the grace period, and detects conflicting or unresolved PR mergeability (issue #128).
 
 ### Added
 
+- `land_retry`, a foreman tool (issue #133): it queues the landing again for a task parked by a landing that failed before a landing was recorded, outside its content — a rejected push or an environment failure, with the outcomes `queued`, `held`, `stale_base` or `refused` — through the same gates; a task whose landing is already recorded (pushed or waiting) is refused in favour of `task_restart`, and so is a conflict or a failed landed check.
 - `issue_read`, a read-only foreman tool (issue #131): it answers the title, body and comments of an issue or pull request of the project's own repository inside `<issue>` data delimiters, with the user's `gh` login. When the repository is not on GitHub, `gh` is missing or not logged in, or the number does not exist, it returns that reason; the foreman's report says so and asks the user for the text, and the foreman never searches the disk for it.
 - Documented editable role instructions, task skills, their import and snapshot rules, and the diff/reset commands (issues #119 and #117). Enabled the documentation content verifier.
 
