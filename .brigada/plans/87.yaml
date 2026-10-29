@@ -133,7 +133,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: running
     branch: "brigada/task-285-r2"
     rounds: 2
   - id: 293
@@ -144,6 +144,6 @@ tasks:
     base: "land_check"
     tier: light
     effort: low
-    state: reviewing
+    state: done
     branch: "brigada/task-293-r1"
     rounds: 0
