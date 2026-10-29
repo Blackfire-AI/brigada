@@ -506,7 +506,7 @@ Not every failed landing is about the work. When the environment fails the landi
 | `1` | held | The landing holds on the first output line; release it with `brigada land approve <task>` (the command is not run again for that landing). |
 | `2`, any other code, a command that could not start, a timeout | not ready | Wait and retry: the landing is requeued on the backoff, with no failure and no restart spent. |
 
-The repository ships `scripts/land-ready.sh`, a gate on the staging branch's CI: it reads the newest `gh run list` run on `brigada/landed` and exits `0` when that run succeeded or the branch has no runs, `1` when it finished without success — failed, cancelled, skipped or timed out (the first output line is the run's URL), and `2` while it is queued or in progress, or when `gh` itself fails. It is not enabled by default; enable it with:
+The repository ships `scripts/land-ready.sh`, a gate on CI for the remote `brigada/landed` head. A missing branch or a successful run for that head permits landing. An open PR that conflicts with its base holds the landing; unknown mergeability waits for GitHub to compute it. If no run for the head appears within 15 minutes of its commit's committer date, the gate holds with the head and PR state; before then it retries, including when only older runs exist. Set `BRIGADA_LAND_READY_GRACE_SECONDS` to override the grace period. A run for the head that completed without success holds with its URL on the first line; a queued or in-progress run, or a failed `gh` lookup, retries. It is not enabled by default; enable it with:
 
 ```sh
 brigada project set land_ready=scripts/land-ready.sh
