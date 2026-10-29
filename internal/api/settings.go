@@ -133,10 +133,15 @@ func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request, _ i
 			if !ok {
 				continue
 			}
-			_, err := s.eng.ImportRoleFile(r.Context(), req.RepoURL, role, text)
+			kept, err := s.eng.ImportRoleFile(r.Context(), req.RepoURL, role, text)
 			switch {
 			case errors.Is(err, engine.ErrRoleTextKept):
-				got.Conflicts = append(got.Conflicts, engine.ConfigChange{Key: "instructions." + role, Old: "local override", New: "file"})
+				// The local text stays; the conflict shows both texts (§5.9).
+				old := "local override"
+				if kept != nil {
+					old = kept.Text
+				}
+				got.Conflicts = append(got.Conflicts, engine.ConfigChange{Key: "instructions." + role, Old: strconv.Quote(old), New: strconv.Quote(text)})
 			case errors.Is(err, engine.ErrInvalidSetting):
 				writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
 				return
@@ -157,6 +162,52 @@ func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request, _ i
 		}
 	}
 	writeJSON(w, http.StatusOK, got)
+}
+
+// roleInstructionsRequest is the PUT body's shape: which repo, and the
+// text of each role to set as a local override.
+type roleInstructionsRequest struct {
+	RepoURL string            `json:"repo_url"`
+	Roles   map[string]string `json:"roles"`
+}
+
+// handleRoleInstructionsSet sets role instruction texts as local overrides
+// (`project set instructions.<role>=…`). Every role is validated before any
+// is stored, so a refusal changes nothing.
+func (s *Server) handleRoleInstructionsSet(w http.ResponseWriter, r *http.Request, _ identity) {
+	if !requireMethod(w, r, http.MethodPut) {
+		return
+	}
+	var req roleInstructionsRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	for role, text := range req.Roles {
+		if err := engine.ValidateRoleText(role, text); err != nil {
+			writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+			return
+		}
+	}
+	for _, role := range engine.Roles {
+		text, ok := req.Roles[role]
+		if !ok {
+			continue
+		}
+		if _, err := s.eng.SetRoleInstructions(r.Context(), req.RepoURL, role, text); err != nil {
+			if errors.Is(err, engine.ErrInvalidSetting) {
+				writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+				return
+			}
+			s.writeInternal(w, r, "set the role instructions", err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// SetRoleInstructions sets the roles' instruction texts as local overrides.
+func (c *Client) SetRoleInstructions(ctx context.Context, repoURL string, roles map[string]string) error {
+	return c.call(ctx, http.MethodPut, "/v1/projects/role-instructions", roleInstructionsRequest{RepoURL: repoURL, Roles: roles}, nil)
 }
 
 // importRequest is the PUT body's shape: the repo's origin, the file's

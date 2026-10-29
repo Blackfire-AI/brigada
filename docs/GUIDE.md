@@ -596,7 +596,8 @@ Some keys belong to you and this engine, not to the team. The shared file refuse
 | Key | Default | Meaning |
 |---|---|---|
 | `foreman_wakes_per_day` | `20`, or the config file's value | The daily wake budget, 1 to 1000 ([section 4](#4-while-work-runs); also `brigada budget --wakes N`). |
-| `instructions` | none | A local override of the instruction text. |
+| `instructions` | none | A local override of the project-wide instruction text (the old name, still working). |
+| `instructions.<role>` | none | A local override of one role's instruction text, for `foreman`, `plan_review`, `worker` or `reviewer` (see [Project instructions](#project-instructions)). Not a key of the committed file, where `instructions:` is a map of role files. |
 | `plan_review` | `true` | The plan review before a plan's (or an active plan's amendment's) tasks queue: a `plan_review` job, an agent of a family other than the foreman's, whose verdict starts the plan or sends findings back to the foreman ([section 7](#gates-and-rules)). |
 | `plan_review.tier` | `standard` | The plan reviewer's tier: `light`, `standard` or `heavy`. |
 | `plan_review.effort` | `medium` | The plan reviewer's effort: `low`, `medium`, `high` or `max`. |
@@ -611,7 +612,9 @@ brigada project show [--repo URL]
 - On the command line, list values are joined with `+`: `approval_classes=implement+review`, `approval_protected_paths=infra/**+db/*.sql`, `approval_tiers=light+heavy`.
 - An empty value (`approval_max_tasks=`) puts the key back to its default.
 - An unknown key, or a value the key does not take, is refused with a usage error that names the valid keys, and nothing is stored.
+- `project set instructions.<role>=text`, `=@file` or `=@-` (standard input) sets one role's local override; the roles are `foreman`, `plan_review`, `worker` and `reviewer`, at most 8192 bytes each. An empty value is the empty-by-choice state, not a return to the default. The file is read by the command, never by the engine.
 - `project set` creates the project if the repository has none yet, and prints the same listing as `show`.
+- `project show` also prints, after the settings, one line per role (state, file, size, SHA-256 digest, the defaults version it was generated from, whether it was edited, and whether its file changed since import) and the project's imported skills.
 
 Only you can run these commands; the foreman has no tool for them.
 
@@ -633,6 +636,9 @@ A project has one instruction text that brigada puts into every worker and revie
 - Or set a local override with `brigada project set instructions=@path` (`@-` reads standard input).
 - It is at most 8192 bytes of UTF-8; a longer text is refused, never cut.
 - `project show` and `status` tell you the project has instructions (their size and a digest, not the text).
+- **Per-role texts.** The committed file may instead carry `instructions:` as a map of `foreman`, `plan_review`, `worker` and `reviewer` to repo-relative files (a key with no value means `.brigada/instructions/<role>.md`), and `skills_dir:` (default `.brigada/skills`). `instructions_file` is the old name of `instructions.worker`; naming both is refused. A role key left out is not configured; an empty file is empty by choice.
+- **Which text wins.** A local override (`project set instructions.<role>=…`) beats the last imported file. A pulled change to a file applies only at the next explicit `brigada project import`: over a text that is still the previous import's it applies; over a local override it does not, and import prints a conflict with both texts (to take the file's text, set it with `project set instructions.<role>=@<file>`).
+- **Changed since import.** `project show` and `status` compare the files and skills on disk with the last import and flag each role file or skill that is changed, added or removed. Nothing stored changes until you import again.
 - A task copies the text when it is created, so changing it later does not alter existing tasks.
 - The foreman's own turns do not get the text injected; the foreman reads it through `status` before it plans.
 

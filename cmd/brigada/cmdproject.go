@@ -95,6 +95,7 @@ func runProjectSettings(ctx context.Context, verb string, args []string, stdout,
 	}
 	validKeys := strings.Join(engine.SettingKeys, ", ")
 	values := map[string]string{}
+	roleValues := map[string]string{}
 	pairs := fs.Args()
 	if verb == "show" && len(pairs) > 0 {
 		return usagef(stderr, "project show takes no positional arguments, got %q", pairs)
@@ -109,6 +110,29 @@ func runProjectSettings(ctx context.Context, verb string, args []string, stdout,
 		}
 		if _, dup := values[key]; dup {
 			return usagef(stderr, "project set names %s twice", key)
+		}
+		if role, ok := strings.CutPrefix(key, "instructions."); ok {
+			// instructions.<role>=@file|@-|text sets one role's local
+			// override (§5.9); the plain `instructions` key stays the
+			// project-wide worker text it always was.
+			if err := engine.ValidateRoleText(role, ""); err != nil {
+				return usagef(stderr, "%v", err)
+			}
+			if _, dup := roleValues[role]; dup {
+				return usagef(stderr, "project set names %s twice", key)
+			}
+			if strings.HasPrefix(value, "@") {
+				text, err := readInstructionsArg(value[1:])
+				if err != nil {
+					return fail(stderr, err)
+				}
+				value = text
+			}
+			if err := engine.ValidateRoleText(role, value); err != nil {
+				return usagef(stderr, "%v", err)
+			}
+			roleValues[role] = value
+			continue
 		}
 		if key == engine.SettingInstructions && strings.HasPrefix(value, "@") {
 			// instructions=@file (or @- for stdin) reads the text here: the
@@ -146,7 +170,16 @@ func runProjectSettings(ctx context.Context, verb string, args []string, stdout,
 		err error
 	)
 	if verb == "set" {
-		got, err = client.SetProjectSettings(ctx, repo, values)
+		if len(roleValues) > 0 {
+			if err := client.SetRoleInstructions(ctx, repo, roleValues); err != nil {
+				return fail(stderr, err)
+			}
+		}
+		if len(values) > 0 {
+			got, err = client.SetProjectSettings(ctx, repo, values)
+		} else {
+			got, err = client.ProjectSettings(ctx, repo)
+		}
 	} else {
 		got, err = client.ProjectSettings(ctx, repo)
 		var se *api.StatusError
@@ -158,6 +191,9 @@ func runProjectSettings(ctx context.Context, verb string, args []string, stdout,
 		return fail(stderr, err)
 	}
 	printSettings(stdout, got)
+	if verb == "show" {
+		printGuidance(ctx, client, stdout, got.ProjectID)
+	}
 	return 0
 }
 
@@ -470,6 +506,13 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 		fmt.Fprintf(stdout, "  %s: %s -> %s\n", c.Key, c.Old, c.New)
 	}
 	for _, c := range res.Conflicts {
+		if strings.HasPrefix(c.Key, "instructions.") {
+			// A role text conflict shows both texts; the local one stands
+			// until the user sets the text they want (§5.9).
+			fmt.Fprintf(stdout, "conflict: %s: local override %s kept, file has %s; to take the file's text: brigada project set %s=@<file>\n",
+				c.Key, c.Old, c.New, c.Key)
+			continue
+		}
 		fmt.Fprintf(stdout, "conflict: %s: local override %s kept, file has %s; to take the file's value: brigada project set %s= then import again\n",
 			c.Key, c.Old, c.New, c.Key)
 	}
@@ -493,15 +536,8 @@ func reportGuidanceChanges(ctx context.Context, client *api.Client, root string,
 	if err != nil {
 		return
 	}
-	for _, r := range st.RoleInstructions {
-		if r.ChangedSinceImport != nil && *r.ChangedSinceImport {
-			fmt.Fprintf(stdout, "instructions.%s %s: changed since the last import; brigada project import applies it\n", r.Role, cfg.RoleFiles[r.Role])
-		}
-	}
-	for _, s := range st.Skills {
-		if s.ChangedSinceImport != nil && *s.ChangedSinceImport {
-			fmt.Fprintf(stdout, "skill %s: changed since the last import; brigada project import applies it\n", s.Name)
-		}
+	for _, line := range guidanceChangeLines(st, project, cfg, root) {
+		fmt.Fprintln(stdout, line)
 	}
 }
 
