@@ -7,7 +7,7 @@ title: "Integrate the stranded plan-81 stack onto landed; fix #122 (plan_amend c
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-10-29T07:35:58.740006Z
-updated: 2026-10-29T08:18:19.288324Z
+updated: 2026-10-29T09:36:24.962001Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
