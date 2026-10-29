@@ -110,8 +110,8 @@ tasks:
     continue: "land_retry"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-283"
     rounds: 0
   - id: 284
     name: "land_retry_docs"
