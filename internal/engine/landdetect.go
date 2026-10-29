@@ -154,6 +154,13 @@ func (e *Engine) settleLandedTx(tx *sql.Tx, taskID int64, commit string, unpushe
 		return false, fmt.Errorf("read task %d: %w", taskID, err)
 	}
 	if state != taskNeedsForeman {
+		// The record settles a done task whose landing was still to
+		// come — the live work that kept its plan open (#133) — so the
+		// close runs here: the record is the outcome it waited for. A
+		// plan already finished, or with work left, is left as it is.
+		if _, err := e.finishPlanIfClosedTx(tx, project, plan, taskID, 0, now); err != nil {
+			return changed, err
+		}
 		return changed, nil
 	}
 	// Only a parking by a failed landing moves: a task parked for any
