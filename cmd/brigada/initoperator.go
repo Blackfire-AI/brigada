@@ -75,6 +75,31 @@ Send the foreman a request with ` + "`brigada ask -`" + `, the message on stdin:
 - ` + "`brigada diff --stat N`" + `: what task N changed, as a diffstat.
 - ` + "`brigada top`" + ` is the user's live view; do not run it.
 
+## Instructions and skills
+
+Brigada puts the project's instructions into every prompt, one text
+per role, and task skills into the prompts of the tasks that name
+them. They are files in the repository:
+
+- Role files: ` + "`.brigada/instructions/<role>.md`" + ` for foreman,
+  plan_review, worker and reviewer.
+- Skills: ` + "`.brigada/skills/<name>/SKILL.md`" + `, in the directory
+  project.yaml names as ` + "`skills_dir`" + `.
+
+Edit them like any file, then run ` + "`brigada project import`" + ` to
+apply the change; ` + "`brigada status`" + ` flags a file that changed
+since the last import. ` + "`brigada instructions diff <role|skill>`" + `
+compares a file with the default it came from, and
+` + "`brigada init --take-default <role|skill>`" + ` resets it.
+
+To ask for a skill on a task, say so in the ask, naming the task:
+
+    use skill bugfix on task 3
+    no skills on task 4
+
+Name only skills that exist under skills_dir. Say "no skills" when a
+task should run on the instructions alone.
+
 ## After a landing
 
 - If the project's land_target is a staging branch and after_land opens
