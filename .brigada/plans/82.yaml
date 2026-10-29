@@ -86,8 +86,8 @@ tasks:
     deps: ["fix122"]
     base: "fix122"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-250"
     rounds: 0
   - id: 251
     name: "bug124"
