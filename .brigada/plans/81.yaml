@@ -130,9 +130,9 @@ tasks:
     base: "client_digest"
     continue: "client_digest"
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-236"
-    rounds: 1
+    rounds: 2
   - id: 237
     name: "init_diff"
     title: "instructions diff, init --take-default, for roles and skills"
