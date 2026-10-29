@@ -344,17 +344,16 @@ func effectiveRoleTx(tx *sql.Tx, project int64, role string) (*RoleInstructions,
 	return out, nil
 }
 
-// reviewerSnapshotOf records the reviewer role's effective text as a
-// task's copy of it.
-func reviewerSnapshotOf(ri *RoleInstructions) RoleSnapshot {
+// roleSnapshotOf records a role's effective text as a task's copy of it.
+func roleSnapshotOf(ri *RoleInstructions) RoleSnapshot {
 	return RoleSnapshot{Text: ri.Text, Source: ri.Source, Version: ri.Version, Digest: instructionsDigest(ri.Text), Bytes: len(ri.Text)}
 }
 
 // resolveTaskInstructionsTx resolves what a task's prompts will carry
-// (§5.9 'Versioning', §5.10 'Resolved once'): the project's effective
-// worker text — the instructions setting, the text every job of the
-// task already reads — with its provenance, the effective reviewer text
-// with its own, and the named skills copied in the order given. An
+// (§5.9 'Versioning', §5.10 'Resolved once'): the effective worker and
+// reviewer role texts — the role's row, or the live default when it is
+// not configured, an empty-by-choice role copied as empty — each with
+// its provenance, and the named skills copied in the order given. An
 // unknown skill or one named twice refuses the task whole; so does a
 // worker prompt whose instructions plus skills pass
 // MaxWorkerPromptBytes or a reviewer prompt passing
@@ -382,19 +381,16 @@ func resolveTaskInstructionsTx(tx *sql.Tx, project int64, task string, skillName
 			out.Skills = append(out.Skills, TaskSkill{Name: s.Name, For: s.For, Text: s.Text, Digest: s.Digest, TreeDigest: s.TreeDigest})
 		}
 	}
-	text, meta, err := projectInstructionsTx(tx, project)
+	worker, err := effectiveRoleTx(tx, project, RoleWorker)
 	if err != nil {
 		return TaskInstructions{}, err
 	}
-	out.Worker = RoleSnapshot{Text: text, Source: meta.Source, Version: meta.Hash, Digest: meta.Digest, Bytes: meta.Bytes}
-	if out.Worker.Digest == "" {
-		out.Worker.Digest = instructionsDigest(text)
-	}
+	out.Worker = roleSnapshotOf(worker)
 	reviewer, err := effectiveRoleTx(tx, project, RoleReviewer)
 	if err != nil {
 		return TaskInstructions{}, err
 	}
-	out.Reviewer = reviewerSnapshotOf(reviewer)
+	out.Reviewer = roleSnapshotOf(reviewer)
 	if n := out.WorkerBytes(); n > MaxWorkerPromptBytes {
 		return TaskInstructions{}, fmt.Errorf("%w: task %q: the worker prompt's instructions and skills are %d bytes, over the %d byte limit; pick fewer or shorter skills (nothing is truncated)",
 			ErrTaskInstructions, task, n, MaxWorkerPromptBytes)

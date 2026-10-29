@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/Blackfire-AI/brigada/internal/defaults"
 )
 
 // importSkills imports the project's skills, failing the test on a
@@ -128,7 +130,7 @@ func TestResolveTaskInstructionsBounds(t *testing.T) {
 		Skill{Name: "wrk", For: SkillForWorker, Text: full},
 		Skill{Name: "tiny", Text: "t"},
 	)
-	e.set(map[string]string{SettingInstructions: strings.Repeat("w", MaxInstructionsBytes)})
+	e.setRole(RoleWorker, strings.Repeat("w", MaxRoleTextBytes))
 	e.setRole(RoleReviewer, strings.Repeat("r", MaxSkillBytes))
 
 	// Worker 8192 + two skills = 16384; reviewer 4096 + 8192 + 8192 + a
@@ -179,7 +181,7 @@ func TestResolveTaskInstructionsRefusesAndOrders(t *testing.T) {
 		Skill{Name: "cli-flag", Text: "register the flag", TreeDigest: "t1"},
 		Skill{Name: "surface-parity", For: SkillForReviewer, Text: "find the siblings"},
 	)
-	e.set(map[string]string{SettingInstructions: "Use tabs."})
+	e.setRole(RoleWorker, "Use tabs.")
 	e.setRole(RoleReviewer, "Check the changelog.")
 
 	for name, names := range map[string][]string{
@@ -216,13 +218,80 @@ func TestResolveTaskInstructionsRefusesAndOrders(t *testing.T) {
 	}
 }
 
+// TestResolveWorkerRoleStates: the worker snapshot is the effective
+// worker role, never the older instructions setting: the live default
+// with its version when the role is not configured, the set or imported
+// text with its provenance, and nothing when the role is empty by choice.
+func TestResolveWorkerRoleStates(t *testing.T) {
+	e := newEnv(t)
+	e.set(map[string]string{SettingInstructions: "Legacy setting text."})
+	e.exec("DELETE FROM role_instructions WHERE project_id = ? AND role = ?", e.project, RoleWorker)
+
+	live, err := defaults.LiveRoleText(RoleWorker)
+	if err != nil {
+		t.Fatalf("live worker default: %v", err)
+	}
+	ti, err := e.resolve("default")
+	if err != nil {
+		t.Fatalf("resolve default: %v", err)
+	}
+	if w := ti.Worker; w.Text != live || w.Source != SourceDefault || w.Version != defaults.Version ||
+		w.Digest != instructionsDigest(live) || w.Bytes != len(live) {
+		t.Errorf("not configured: worker = %+v, want the live default of %s", w, defaults.Version)
+	}
+
+	e.setRole(RoleWorker, "Set rule.")
+	if ti, err = e.resolve("set"); err != nil {
+		t.Fatalf("resolve set: %v", err)
+	}
+	if w := ti.Worker; w.Text != "Set rule." || w.Source != SourceLocal || w.Digest != instructionsDigest("Set rule.") {
+		t.Errorf("set: worker = %+v, want the local text", w)
+	}
+
+	e.setRole(RoleWorker, "")
+	if ti, err = e.resolve("empty"); err != nil {
+		t.Fatalf("resolve empty: %v", err)
+	}
+	if w := ti.Worker; w.Text != "" || w.Source != SourceLocal || w.Bytes != 0 || ti.WorkerBytes() != 0 {
+		t.Errorf("empty by choice: worker = %+v (%d bytes), want no text", w, ti.WorkerBytes())
+	}
+
+	// Back to not configured, an import applies with its hash as the
+	// settings version.
+	e.exec("DELETE FROM role_instructions WHERE project_id = ? AND role = ?", e.project, RoleWorker)
+	if _, err := e.eng.ImportRoleInstructions(e.ctx, envRepo, RoleWorker, "Imported rule."); err != nil {
+		t.Fatalf("import worker: %v", err)
+	}
+	if ti, err = e.resolve("imported"); err != nil {
+		t.Fatalf("resolve imported: %v", err)
+	}
+	if w := ti.Worker; w.Text != "Imported rule." || w.Source != SourceImported ||
+		w.Version != roleImportVersion(RoleWorker, "Imported rule.") || w.Digest != instructionsDigest("Imported rule.") {
+		t.Errorf("imported: worker = %+v, want the imported text with its import version", w)
+	}
+
+	// The recorded snapshot carries the role's provenance into the
+	// columns jobs read.
+	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		return recordTaskInstructionsTx(tx, e.task, ti, e.clock.Now())
+	}); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if got := e.snapshot(e.task).Worker; got.Text != "Imported rule." || got.Source != SourceImported || got.Version != ti.Worker.Version {
+		t.Errorf("recorded worker = %+v, want the imported role", got)
+	}
+	if got := e.taskInstructions(e.task); got != "Imported rule." {
+		t.Errorf("task instructions = %q, want the imported role text", got)
+	}
+}
+
 // TestTaskSnapshotSurvivesLaterChanges: a recorded task keeps its texts
 // and skills whatever the settings and the skills import say later; a
 // new resolution sees the new values.
 func TestTaskSnapshotSurvivesLaterChanges(t *testing.T) {
 	e := newEnv(t)
 	e.importSkills(Skill{Name: "bugfix", Text: "v1 bugfix", TreeDigest: "tree-v1"})
-	e.set(map[string]string{SettingInstructions: "v1 worker"})
+	e.setRole(RoleWorker, "v1 worker")
 	e.setRole(RoleReviewer, "v1 reviewer")
 	ti, err := e.resolve("t", "bugfix")
 	if err != nil {
@@ -253,7 +322,7 @@ func TestTaskSnapshotSurvivesLaterChanges(t *testing.T) {
 		t.Errorf("skills = %+v, want v1", got.Skills)
 	}
 	now, err := e.resolve("t", "bugfix")
-	if err != nil || now.Worker.Text != "v2 setting" || now.Reviewer.Text != "v2 reviewer" || now.Skills[0].Text != "v2 bugfix" {
+	if err != nil || now.Worker.Text != "v2 role row" || now.Reviewer.Text != "v2 reviewer" || now.Skills[0].Text != "v2 bugfix" {
 		t.Errorf("a new resolution = %+v, %v, want the new texts and skill", now, err)
 	}
 }
@@ -281,6 +350,7 @@ func TestLegacyTaskKeepsFirstGuidance(t *testing.T) {
 	// and its review are composed.
 	const newer = "New rule: never write doc comments."
 	e.set(map[string]string{SettingInstructions: newer})
+	e.setRole(RoleWorker, newer)
 	e.setRole(RoleReviewer, newer)
 	if ans := e.complete(g, doneOn("task/1-1", failCheck)); ans != AnsOK {
 		t.Fatalf("complete the failed-check work: %s", ans)
