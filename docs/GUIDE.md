@@ -391,6 +391,7 @@ The needs-you queue lists what only you (or the foreman) can unblock:
 | `task #N done: held by rule <key>: <reason>` | Your decision on a landing held at the land gate. The line carries the command that releases the hold, `brigada land approve N`, and the one that also changes the rule, `brigada land approve --and-stop-asking N`; `brigada land reject N` cancels the landing ([section 5](#5-finishing-the-land-job)). |
 | `task #N done: waits to push: <branch>@<sha>` | The push gate holds it; `brigada push approve` releases every waiting push of the project ([section 5](#5-finishing-the-land-job)). |
 | `task #N needs_foreman: <reason>` | Judgment: the worker asked a question, the task spent its rounds or failed after tier escalation was exhausted, or a run stopped. The foreman is woken for these; the entry is there so you can see it and step in. |
+| `task #N needs_foreman: task 12 (title), task 14 (title): <the environment failed the landing>` | The environment, not the work, is broken: a fetch that cannot reach the remote, credentials the remote refused, a landing setup that would not run. One line — and one wake — per cause, listing every task it holds; tasks failing on the same cause afterwards attach to it and are not woken separately. It clears when a later landing succeeds or the tasks are restarted ([section 5](#5-finishing-the-land-job)); a failure after that wakes again. |
 | `task #N needs_user: <reason>` | An answer from you, for a task parked for you directly. |
 | `task #N done: done but cannot land: <task> is cancelled\|failed` | A blocked plan ([section 7](#7-plans-checks-and-reviews)): the task is finished and approved, but a dependency it lands on died, so the plan stays open. The foreman re-points it off the dead dependency, or restarts it on a new base by a follow-up task when its branch was stacked on the dead one. |
 | `foreman #N limited: <until>` | A choice: wait, switch the foreman, or let approved plans run without it ([section 8](#8-agents-quota-and-health)). |
@@ -399,7 +400,7 @@ The needs-you queue lists what only you (or the foreman) can unblock:
 
 ### The wake budget
 
-The foreman is woken headless on events: a plan done, a plan blocked (a dead dependency under done work, [section 7](#7-plans-checks-and-reviews)), a task parked, a question. Those wakes are limited per project per UTC day, 20 by default, so a loop cannot spend your subscription unseen.
+The foreman is woken headless on events: a plan done, a plan blocked (a dead dependency under done work, [section 7](#7-plans-checks-and-reviews)), a task parked, a question, an environment-failed landing (once per cause, listing its tasks, [section 5](#5-finishing-the-land-job)). Those wakes are limited per project per UTC day, 20 by default, so a loop cannot spend your subscription unseen.
 
 - `brigada budget` shows the budget, today's use, the reset time and how many events wait.
 - `brigada budget --wakes N` (1 to 1000) sets the budget for the project, and at once wakes whatever the spent budget had parked.
@@ -483,6 +484,10 @@ Only you can say these: the foreman has no tool to pass a gate.
 A landing lands the head the review approved: a branch that gained a commit after its approving review is refused, nothing squashed or pushed, and the task parks at `needs_foreman` naming both heads, for the foreman to restart it so the new head is checked and reviewed.
 
 A landing never resolves a conflict and never picks a side. When the task's diff no longer applies onto the target, or the check fails on the landed result, nothing is pushed: the task parks at `needs_foreman` with the conflicting files or the check log, and the foreman restarts it with a note (rebase onto the target's new head, resolve). The check and the review run again, and the task lands on its next approval.
+
+### Environment failures
+
+Not every failed landing is about the work. When the environment fails the landing — the fetch cannot reach the remote, the remote refuses the runner's credentials, the landing's setup will not run, the land job keeps losing its runner — the task parks like any failure, but the foreman is woken once per cause, not once per task: the first failure's wake and its needs-you line list every task the cause holds, and tasks failing on the same cause afterwards attach to that wake and are not woken separately. The cause clears when a later landing of the project succeeds, or when its tasks are restarted or landed by hand; a failure after that is a recurrence and wakes again. Conflicts, failed checks, a branch that moved after its review and rejected pushes keep parking and waking per task.
 
 ### `after_land`
 

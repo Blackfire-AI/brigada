@@ -838,7 +838,9 @@ var needsYouEventKinds = []string{
 // statusNeedsYouTx lists the "needs you" queue (§10): the tasks parked
 // at needs_foreman or needs_user — each with what its latest parking
 // event said — and the plans waiting for approval. Entries read in id
-// order; project scopes the queue to one project, 0 to all.
+// order; project scopes the queue to one project, 0 to all. A task an
+// environmental land failure parked is not listed alone: its cause's one
+// line, statusLandEnvCausesTx, lists every task it holds (issue #116).
 func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem, error) {
 	kinds := "'" + strings.Join(needsYouEventKinds, "', '") + "'"
 	query := fmt.Sprintf(`SELECT t.id, t.plan_id, t.title, t.state, COALESCE(e.kind, ''), COALESCE(e.payload, '')
@@ -848,7 +850,8 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 			SELECT e2.id FROM events e2
 			WHERE e2.task_id = t.id AND e2.kind IN (%s)
 			ORDER BY e2.id DESC LIMIT 1)
-		WHERE p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) AND t.state IN ('needs_foreman', 'needs_user')`, kinds)
+		WHERE p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) AND t.state IN ('needs_foreman', 'needs_user')
+			AND NOT (t.state = 'needs_foreman' AND t.land_env_cause <> '')`, kinds)
 	args := []any{}
 	if project != 0 {
 		query += " AND p.project_id = ?"
@@ -917,6 +920,15 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 		return nil, err
 	}
 	items = append(items, stranded...)
+
+	// A task an environmental land failure parked waits under its
+	// cause's one line (issue #116), not alone: the line names the
+	// environment and lists every task it holds.
+	landEnv, err := statusLandEnvCausesTx(tx, project)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, landEnv...)
 
 	pquery := `SELECT p.id, p.title, p.version, pr.repo_url, p.state FROM plans p JOIN projects pr ON pr.id = p.project_id
 		WHERE pr.archived_at IS NULL AND p.state IN ('pending_approval', 'needs_foreman')`
