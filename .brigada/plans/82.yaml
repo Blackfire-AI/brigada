@@ -53,8 +53,8 @@ tasks:
     base: "checkout122"
     effort: medium
     caps: {restart: 2}
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-247"
     rounds: 0
   - id: 248
     name: "bug116"
