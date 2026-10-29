@@ -70,7 +70,7 @@ tasks:
     deps: ["land_ready"]
     base: "land_ready"
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-257"
     rounds: 2
   - id: 258
