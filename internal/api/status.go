@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
 )
@@ -45,6 +46,33 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id identit
 		s.writeInternal(w, r, "read status", err)
 		return
 	}
+
+	// A digest belongs to one project; never apply it to an unscoped view.
+	if project != 0 {
+		digests := make(map[string]string)
+		for _, role := range engine.RoleKeys {
+			if values, ok := r.URL.Query()["digest_"+role]; ok && len(values) > 0 {
+				digests[role] = values[0]
+			}
+		}
+		st.CompareInstructionFileDigests(project, digests)
+		skills := make(map[string]engine.SkillFileDigest)
+		for key, values := range r.URL.Query() {
+			if len(values) == 0 {
+				continue
+			}
+			if name, ok := strings.CutPrefix(key, "skilltree_"); ok {
+				d := skills[name]
+				d.Tree = values[0]
+				skills[name] = d
+			} else if name, ok := strings.CutPrefix(key, "skill_"); ok {
+				d := skills[name]
+				d.Digest = values[0]
+				skills[name] = d
+			}
+		}
+		st.CompareSkillFileDigests(project, skills)
+	}
 	writeJSON(w, http.StatusOK, st)
 }
 
@@ -69,6 +97,7 @@ func (s *Server) handleTaskSubmit(w http.ResponseWriter, r *http.Request, _ iden
 		Class:    req.Class,
 		Harness:  req.Harness,
 		Labels:   nonNil(req.Labels),
+		Skills:   req.Skills,
 	})
 	if err != nil {
 		// Like the job submit: a task the engine will not take is the
@@ -98,6 +127,9 @@ type taskSubmitRequest struct {
 	Class    string   `json:"class"`
 	Harness  string   `json:"harness"`
 	Labels   []string `json:"labels"`
+	// Skills (§5.10) names, in order, the project's imported skills the
+	// task's prompts carry; absent or empty = none.
+	Skills []string `json:"skills,omitempty"`
 }
 
 // taskSubmitResponse names what the submit created: the project it

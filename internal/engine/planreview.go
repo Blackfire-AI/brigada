@@ -64,9 +64,19 @@ func planReviewWanted(pr planReviewSettings, tasks []PlanTask) bool {
 	return true
 }
 
+// planReviewSkillView is one of a task's named skills as the plan
+// review's input carries it (§5.10, check (h)): the name and the
+// description the import recorded, never the text — the reviewer opens
+// the SKILL.md itself and judges it.
+type planReviewSkillView struct {
+	Name        string
+	Description string
+}
+
 // planReviewTaskView is one task of the plan under review, as the input
 // names it: the spec verbatim, the check, the class, the tier and the
-// effort, and the graph — deps by name, the base and the continued dep.
+// effort, the graph — deps by name, the base and the continued dep —
+// and the ordered skills the task named.
 type planReviewTaskView struct {
 	ID       int64
 	Name     string
@@ -79,6 +89,7 @@ type planReviewTaskView struct {
 	Deps     []string
 	Base     string
 	Continue string
+	Skills   []planReviewSkillView
 }
 
 // planReviewPlanView is the plan under review: its id, title and tasks.
@@ -155,6 +166,19 @@ func composePlanReviewInput(round int, plan planReviewPlanView, others []otherPl
 			check = "none"
 		}
 		b.WriteString("check: " + check + "\n")
+		if len(t.Skills) > 0 {
+			parts := make([]string, len(t.Skills))
+			for i, s := range t.Skills {
+				if s.Description != "" {
+					parts[i] = s.Name + " — " + s.Description
+				} else {
+					parts[i] = s.Name
+				}
+			}
+			b.WriteString("skills, in order: " + strings.Join(parts, "; ") + "\n")
+		} else {
+			b.WriteString("skills: none\n")
+		}
 		b.WriteString("spec, verbatim:\n" + t.Spec + "\n")
 	}
 	if len(others) == 0 {
@@ -231,14 +255,16 @@ func planReviewTierTx(tx *sql.Tx, cfg *Config, j *jobRow) (string, error) {
 
 // planReviewPlanTx loads the plan under review as the input's views: its
 // title, and each task with the spec verbatim, the check, the class, the
-// tier and effort, and the graph by name.
+// tier and effort, the graph by name and the ordered skills the task
+// named (§5.10) — names and descriptions, the text never: the reviewer
+// opens the SKILL.md itself.
 func planReviewPlanTx(tx *sql.Tx, plan int64) (planReviewPlanView, error) {
 	var view planReviewPlanView
 	if err := tx.QueryRow("SELECT id, title FROM plans WHERE id = ?", plan).Scan(&view.ID, &view.Title); err != nil {
 		return planReviewPlanView{}, fmt.Errorf("read plan %d: %w", plan, err)
 	}
 	rows, err := tx.Query(`SELECT t.id, t.name, t.title, t.spec, COALESCE(t.check_cmd, ''), t.class,
-			t.tier, COALESCE(NULLIF(t.effort, ''), 'default')
+			t.tier, COALESCE(NULLIF(t.effort, ''), 'default'), COALESCE(t.skills, '')
 		FROM tasks t WHERE t.plan_id = ? ORDER BY t.id`, plan)
 	if err != nil {
 		return planReviewPlanView{}, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
@@ -246,9 +272,20 @@ func planReviewPlanTx(tx *sql.Tx, plan int64) (planReviewPlanView, error) {
 	var tasks []planReviewTaskView
 	for rows.Next() {
 		var t planReviewTaskView
-		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Spec, &t.Check, &t.Class, &t.Tier, &t.Effort); err != nil {
+		var rawSkills string
+		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Spec, &t.Check, &t.Class, &t.Tier, &t.Effort, &rawSkills); err != nil {
 			rows.Close()
 			return planReviewPlanView{}, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
+		}
+		if rawSkills != "" {
+			var recorded []TaskSkill
+			if err := json.Unmarshal([]byte(rawSkills), &recorded); err != nil {
+				rows.Close()
+				return planReviewPlanView{}, fmt.Errorf("parse the skills of task %d: %w", t.ID, err)
+			}
+			for _, s := range recorded {
+				t.Skills = append(t.Skills, planReviewSkillView{Name: s.Name, Description: s.Description})
+			}
 		}
 		tasks = append(tasks, t)
 	}
@@ -483,13 +520,35 @@ func (e *Engine) queuePlanReviewRoundTx(tx *sql.Tx, project, plan, round int64, 
 			return fmt.Errorf("read the review of plan %d: %w", plan, err)
 		}
 	}
-	text := prompt.ComposePlanReviewPrompt(composePlanReviewInput(int(round), view, others, prevVerdict, prevFindings))
+	// The role texts are resolved from the store per job (§5.9), never
+	// from a text in the binary: the plan reviewer's own, and the
+	// foreman's as the convention the plan author followed. A role not
+	// configured adds no section — the review runs on the contract
+	// alone.
+	planReviewText, err := storedRoleTextTx(tx, project, RolePlanReview)
+	if err != nil {
+		return err
+	}
+	foremanText, err := storedRoleTextTx(tx, project, RoleForeman)
+	if err != nil {
+		return err
+	}
+	meta := promptMeta{Template: prompt.PlanReviewTemplateVersion}
+	if planReviewText != "" {
+		meta.Reviewer = instructionsDigest(planReviewText)
+	}
+	if foremanText != "" {
+		meta.Instructions = instructionsDigest(foremanText)
+	}
+	text := prompt.ComposePlanReviewPrompt(composePlanReviewInput(int(round), view, others, prevVerdict, prevFindings),
+		prompt.WithPlanReviewInstructions(planReviewText), prompt.WithForemanInstructions(foremanText))
 	sr, err := e.submitTx(tx, SubmitParams{
 		Key:           planReviewKey(plan),
 		ProjectID:     project,
 		Kind:          KindPlanReview,
 		Mode:          ModeFresh,
 		Prompt:        text,
+		PromptMeta:    marshalPromptMeta(meta),
 		ExcludeFamily: family,
 	}, now)
 	if err != nil {
@@ -646,6 +705,7 @@ func (e *Engine) retryPlanReviewInfraTx(tx *sql.Tx, job *jobRow, plan int64, c C
 		Kind:          KindPlanReview,
 		Mode:          ModeFresh,
 		Prompt:        job.Prompt,
+		PromptMeta:    job.PromptMeta,
 		ExcludeFamily: job.ExcludeFamily,
 		ExcludeAgent:  job.ExcludeAgent,
 		NotBefore:     now.Add(infraDelayFor(streak)),
@@ -691,6 +751,7 @@ func (e *Engine) planReviewFailedTx(tx *sql.Tx, job *jobRow, plan int64, reason 
 		Kind:          KindPlanReview,
 		Mode:          ModeFresh,
 		Prompt:        job.Prompt,
+		PromptMeta:    job.PromptMeta,
 		ExcludeFamily: job.ExcludeFamily,
 		ExcludeAgent:  job.AgentID,
 	}, now)

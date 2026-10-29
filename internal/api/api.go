@@ -118,6 +118,9 @@ func (s *Server) Handler() http.Handler {
 	// Explicit import of the repo's .brigada/project.yaml (§13.1): the
 	// client sends the file's content.
 	mux.HandleFunc("/v1/projects/import", s.authed([]string{roleClient, roleAdmin}, s.idempotent(s.handleProjectImport)))
+	// A local override of one role's instruction text (§5.9): the client
+	// read the text; the engine never reads a path.
+	mux.HandleFunc("/v1/projects/role-instructions", s.authed([]string{roleClient, roleAdmin}, s.idempotent(s.handleRoleInstructionsSet)))
 	// The mux's own 404 is plain text; the API speaks JSON everywhere.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, codeNotFound, "no such endpoint")

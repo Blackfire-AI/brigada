@@ -115,6 +115,9 @@ func StatusSections(st Status) string {
 				if t.Continues != "" {
 					line += " (continues " + t.Continues + ")"
 				}
+				if len(t.Skills) > 0 {
+					line += " skills:" + strings.Join(t.Skills, ",")
+				}
 				if t.Branch != "" {
 					line += " [" + t.Branch + "]"
 				}
@@ -205,6 +208,27 @@ func StatusSections(st Status) string {
 		line := fmt.Sprintf("project instructions (project #%d): %s, %d bytes, sha256 %s", in.ProjectID, in.Source, in.Bytes, in.Digest)
 		if in.Version != "" {
 			line += ", version " + shortVersion(in.Version)
+		}
+		lines = append(lines, line)
+	}
+
+	for _, in := range st.RoleInstructions {
+		line := fmt.Sprintf("%s instructions (project #%d): %s, %d bytes, sha256 %s", in.Role, in.ProjectID, in.State, in.Bytes, in.Digest)
+		if in.GeneratedFrom != "" {
+			line += ", generated from " + in.GeneratedFrom
+		}
+		if in.Edited != nil {
+			line += fmt.Sprintf(", edited %t", *in.Edited)
+		}
+		if in.ChangedSinceImport != nil {
+			line += fmt.Sprintf(", changed since import %t", *in.ChangedSinceImport)
+		}
+		lines = append(lines, line)
+	}
+	for _, skill := range st.Skills {
+		line := fmt.Sprintf("skill %s (project #%d): %s, sha256 %s, used %d times", skill.Name, skill.ProjectID, skill.Description, skill.Digest, skill.TimesUsed)
+		if skill.ChangedSinceImport != nil {
+			line += fmt.Sprintf(", changed since import %t", *skill.ChangedSinceImport)
 		}
 		lines = append(lines, line)
 	}

@@ -607,8 +607,14 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				return nil, fmt.Errorf("stamp the session generation of job %d: %w", j.ID, err)
 			}
 		}
-		if _, err := appendEventTx(tx, evJobLeased, j.ProjectID, j.TaskID, j.ID,
-			eventPayload{Lease: leasePrefix(leaseID), Owner: owner, Attempt: j.Attempts + 1}, now); err != nil {
+		leased := eventPayload{Lease: leasePrefix(leaseID), Owner: owner, Attempt: j.Attempts + 1}
+		if j.PromptMeta != "" {
+			var meta promptMeta
+			if err := json.Unmarshal([]byte(j.PromptMeta), &meta); err == nil {
+				leased.Prompt = &meta
+			}
+		}
+		if _, err := appendEventTx(tx, evJobLeased, j.ProjectID, j.TaskID, j.ID, leased, now); err != nil {
 			return nil, err
 		}
 		// Why this agent (§8): plain log, no inbox row and no wake. The
@@ -1094,7 +1100,8 @@ func qualifyingAgentRowsTx(tx *sql.Tx, runner int64, j *jobRow, class, now strin
 		harness, model = pair.harness, pair.model
 	}
 	query := `SELECT a.id, a.family, a.harness, a.classes, a.model, a.health, COALESCE(a.cooling_until, ''), COALESCE(o.attempts, 0), COALESCE(o.successes, 0), a.adapter, a.account
-		FROM agents a LEFT JOIN outcomes o ON o.agent_id = a.id AND o.project_id = ? AND o.class = ?
+		FROM agents a LEFT JOIN (SELECT agent_id, SUM(attempts) AS attempts, SUM(successes) AS successes
+			FROM outcomes WHERE project_id = ? AND class = ? GROUP BY agent_id) o ON o.agent_id = a.id
 		WHERE 1 = 1`
 	args := []any{j.ProjectID, class}
 	if runner != 0 {

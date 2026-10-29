@@ -79,3 +79,5 @@ Never commit secrets, tokens, private hostnames or private IP addresses. `guard`
 
 `brigada init` writes `.brigada/project.yaml`; do not edit it by hand.
 
+
+The foreman's editable project instructions live in `.brigada/instructions/foreman.md`; import changes with `brigada project import`.

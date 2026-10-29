@@ -65,4 +65,74 @@ func ProjectConfigDefaults(content []byte, repo, check, tools string) ([]byte, e
 	_, err = ParseProjectConfig(out)
 	return out, err
 }
+
+// ProjectConfigGuidance adds what init's defaults need to a project.yaml
+// (§5.9, §5.10): the instructions map naming the four role files at their
+// default paths, and skills_dir. A key the file already has, and the old
+// instructions_file alias, are left as they are; a partial instructions
+// map gains the roles it lacks.
+func ProjectConfigGuidance(content []byte) ([]byte, error) {
+	cfg, err := ParseProjectConfig(content)
+	if err != nil {
+		return nil, err
+	}
+	var add strings.Builder
+	if cfg.RoleFiles != nil {
+		// A partial map keeps its paths; the roles it leaves out join it
+		// at their default paths, so all four files are generated.
+		var missing []string
+		for _, role := range RoleKeys {
+			if _, ok := cfg.RoleFiles[role]; !ok {
+				missing = append(missing, "  "+role+": "+DefaultRoleFile(role))
+			}
+		}
+		if len(missing) > 0 {
+			lines := strings.Split(string(content), "\n")
+			at, last := -1, -1
+			for i, l := range lines {
+				switch {
+				case at < 0:
+					if strings.TrimSpace(stripYAMLComment(l)) == configKeyInstructions+":" && !strings.HasPrefix(l, " ") {
+						at, last = i, i
+					}
+				case strings.HasPrefix(l, " "):
+					if strings.TrimSpace(stripYAMLComment(l)) != "" {
+						last = i
+					}
+				case strings.TrimSpace(l) != "":
+					goto found
+				}
+			}
+		found:
+			if at < 0 {
+				return nil, configErr("cannot find the %s map to complete", configKeyInstructions)
+			}
+			lines = append(lines[:last+1], append(missing, lines[last+1:]...)...)
+			content = []byte(strings.Join(lines, "\n"))
+			if _, err := ParseProjectConfig(content); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if cfg.RoleFiles == nil && cfg.InstructionsFile == "" {
+		add.WriteString(configKeyInstructions + ":\n")
+		for _, role := range RoleKeys {
+			add.WriteString("  " + role + ": " + DefaultRoleFile(role) + "\n")
+		}
+	}
+	if cfg.SkillsDir == "" {
+		add.WriteString(configKeySkillsDir + ": " + DefaultSkillsDir + "\n")
+	}
+	if add.Len() == 0 {
+		return content, nil
+	}
+	out := string(content)
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	res := []byte(out + add.String())
+	_, err = ParseProjectConfig(res)
+	return res, err
+}
+
 func yamlString(s string) string { b, _ := json.Marshal(s); return string(b) }

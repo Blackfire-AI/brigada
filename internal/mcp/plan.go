@@ -38,6 +38,9 @@ type planTaskArg struct {
 	// ExtraRepos (§5.8): absent inherits the project default, a list (even
 	// []) replaces it. No omitempty, so [] and absent hash differently.
 	ExtraRepos []extraRepoArg `json:"extra_repos"`
+	// Skills (§5.10) names, in order, the project's imported skills the
+	// task's prompts carry; absent or empty = none.
+	Skills []string `json:"skills,omitempty"`
 }
 
 // extraRepoArg is one read-only extra repository of a task (§5.8).
@@ -90,7 +93,7 @@ func callPlanCreate(ctx context.Context, c *api.Client, args json.RawMessage) (s
 	a = a.canonical()
 	p := api.PlanCreate{Title: a.Title, Tasks: make([]api.PlanTask, len(a.Tasks))}
 	for i, t := range a.Tasks {
-		p.Tasks[i] = api.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos)}
+		p.Tasks[i] = api.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos), Skills: t.Skills}
 	}
 	res, err := c.CreatePlan(ctx, p, idemKey("plan_create", a))
 	if err != nil {
@@ -192,6 +195,10 @@ type planRespecArg struct {
 	Task taskRef `json:"task"`
 	Spec string  `json:"spec"`
 	Mode string  `json:"mode,omitempty"`
+	// Skills (§5.10) replaces the task's recorded skills, in order;
+	// absent keeps them, [] clears them. No omitempty, so the two hash
+	// differently.
+	Skills []string `json:"skills"`
 }
 
 type planAddArg struct {
@@ -211,6 +218,8 @@ type planAddArg struct {
 	Class        string    `json:"class"`
 	// ExtraRepos as planTaskArg's.
 	ExtraRepos []extraRepoArg `json:"extra_repos"`
+	// Skills as planTaskArg's.
+	Skills []string `json:"skills,omitempty"`
 }
 
 type planRetierArg struct {
@@ -220,6 +229,10 @@ type planRetierArg struct {
 	ReviewTier   string         `json:"review_tier,omitempty"`
 	ReviewEffort string         `json:"review_effort,omitempty"`
 	Caps         map[string]int `json:"caps,omitempty"`
+	// Skills (§5.10) replaces the recorded skills of a task that has not
+	// started; absent keeps them, [] clears them. No omitempty, so the
+	// two hash differently.
+	Skills []string `json:"skills"`
 }
 
 type planRetargetArg struct {
@@ -253,16 +266,16 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 	}
 	am := api.PlanAmend{Cancel: refStrings(a.Cancel)}
 	for _, t := range a.Add {
-		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Continue: string(t.Continue), Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos)})
+		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Continue: string(t.Continue), Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos), Skills: t.Skills})
 	}
 	for _, rt := range a.Retarget {
 		am.Retarget = append(am.Retarget, api.PlanRetarget{Task: string(rt.Task), Deps: refStrings(rt.Deps), Base: string(rt.Base), Continue: string(rt.Continue)})
 	}
 	for _, rt := range a.Retier {
-		am.Retier = append(am.Retier, api.PlanRetier{Task: string(rt.Task), Tier: rt.Tier, Effort: rt.Effort, ReviewTier: rt.ReviewTier, ReviewEffort: rt.ReviewEffort, Caps: rt.Caps})
+		am.Retier = append(am.Retier, api.PlanRetier{Task: string(rt.Task), Tier: rt.Tier, Effort: rt.Effort, ReviewTier: rt.ReviewTier, ReviewEffort: rt.ReviewEffort, Caps: rt.Caps, Skills: rt.Skills})
 	}
 	for _, rs := range a.Respec {
-		am.Respec = append(am.Respec, api.PlanRespec{Task: string(rs.Task), Spec: rs.Spec, Mode: rs.Mode})
+		am.Respec = append(am.Respec, api.PlanRespec{Task: string(rs.Task), Spec: rs.Spec, Mode: rs.Mode, Skills: rs.Skills})
 	}
 	res, err := c.AmendPlan(ctx, a.Plan, am, idemKey("plan_amend", a))
 	if err != nil {

@@ -95,6 +95,7 @@ func runProjectSettings(ctx context.Context, verb string, args []string, stdout,
 	}
 	validKeys := strings.Join(engine.SettingKeys, ", ")
 	values := map[string]string{}
+	roleValues := map[string]string{}
 	pairs := fs.Args()
 	if verb == "show" && len(pairs) > 0 {
 		return usagef(stderr, "project show takes no positional arguments, got %q", pairs)
@@ -110,6 +111,32 @@ func runProjectSettings(ctx context.Context, verb string, args []string, stdout,
 		if _, dup := values[key]; dup {
 			return usagef(stderr, "project set names %s twice", key)
 		}
+		if role, ok := strings.CutPrefix(key, "instructions."); ok {
+			// instructions.<role>=@file|@-|text sets one role's local
+			// override (§5.9); the plain `instructions` key stays the
+			// project-wide worker text it always was.
+			if err := engine.ValidateRoleText(role, ""); err != nil {
+				return usagef(stderr, "%v", err)
+			}
+			if _, dup := roleValues[role]; dup {
+				if _, alias := values[engine.SettingInstructions]; alias && role == engine.RoleWorker {
+					return usagef(stderr, "project set names instructions and instructions.worker, which are the same text; give one")
+				}
+				return usagef(stderr, "project set names %s twice", key)
+			}
+			if strings.HasPrefix(value, "@") {
+				text, err := readInstructionsArg(value[1:])
+				if err != nil {
+					return fail(stderr, err)
+				}
+				value = text
+			}
+			if err := engine.ValidateRoleText(role, value); err != nil {
+				return usagef(stderr, "%v", err)
+			}
+			roleValues[role] = value
+			continue
+		}
 		if key == engine.SettingInstructions && strings.HasPrefix(value, "@") {
 			// instructions=@file (or @- for stdin) reads the text here: the
 			// engine takes the text, never a path (§5.9).
@@ -123,6 +150,15 @@ func runProjectSettings(ctx context.Context, verb string, args []string, stdout,
 			return usagef(stderr, "%v", err)
 		}
 		values[key] = value
+		if key == engine.SettingInstructions && value != "" {
+			// The old name is the worker override (§5.9): the text also
+			// sets the worker role, and no other. The project-wide setting
+			// keeps it too, for the readers that still use it.
+			if _, dup := roleValues[engine.RoleWorker]; dup {
+				return usagef(stderr, "project set names instructions and instructions.worker, which are the same text; give one")
+			}
+			roleValues[engine.RoleWorker] = value
+		}
 	}
 	if repo == "" {
 		dir, err := os.Getwd()
@@ -146,7 +182,16 @@ func runProjectSettings(ctx context.Context, verb string, args []string, stdout,
 		err error
 	)
 	if verb == "set" {
-		got, err = client.SetProjectSettings(ctx, repo, values)
+		if len(roleValues) > 0 {
+			if err := client.SetRoleInstructions(ctx, repo, roleValues); err != nil {
+				return fail(stderr, err)
+			}
+		}
+		if len(values) > 0 {
+			got, err = client.SetProjectSettings(ctx, repo, values)
+		} else {
+			got, err = client.ProjectSettings(ctx, repo)
+		}
 	} else {
 		got, err = client.ProjectSettings(ctx, repo)
 		var se *api.StatusError
@@ -158,6 +203,9 @@ func runProjectSettings(ctx context.Context, verb string, args []string, stdout,
 		return fail(stderr, err)
 	}
 	printSettings(stdout, got)
+	if verb == "show" {
+		printGuidance(ctx, client, stdout, got.ProjectID)
+	}
 	return 0
 }
 
@@ -232,6 +280,69 @@ func readInstructionsFile(root, rel string) (string, error) {
 		return "", fmt.Errorf("instructions_file %s: %s", rel, strings.TrimPrefix(err.Error(), engine.ErrInvalidSetting.Error()+": "))
 	}
 	return string(b), nil
+}
+
+// readRoleFile reads the file the nested instructions map names for a
+// role (§5.9), by the rules of readInstructionsFile: inside the
+// repository after symlinks, a regular file, bounded at
+// engine.MaxRoleTextBytes before the engine checks it again. Every
+// refusal names the key and the path. An empty file returns "": empty by
+// choice.
+func readRoleFile(root, role, rel string) (string, error) {
+	label := "instructions." + role + " " + rel
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("%s: resolve the repository root: %w", label, err)
+	}
+	full, err := filepath.EvalSymlinks(filepath.Join(realRoot, filepath.FromSlash(rel)))
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", label, err)
+	}
+	if inside, err := filepath.Rel(realRoot, full); err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%s resolves outside the repository", label)
+	}
+	st, err := os.Stat(full)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", label, err)
+	}
+	if !st.Mode().IsRegular() {
+		return "", fmt.Errorf("%s is not a regular file", label)
+	}
+	if st.Size() > engine.MaxRoleInstructionBytes+maxHeaderBytes {
+		return "", fmt.Errorf("%s is %d bytes, over the %d byte limit; shorten it (nothing is truncated)", label, st.Size(), engine.MaxRoleInstructionBytes)
+	}
+	b, err := os.ReadFile(full)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", label, err)
+	}
+	// The version header is no part of the text: the stored text and its
+	// digest are those of the file without it (§5.9).
+	text := stripRoleHeader(string(b))
+	if err := engine.ValidateRoleText(role, text); err != nil {
+		return "", fmt.Errorf("%s: %s", label, strings.TrimPrefix(err.Error(), engine.ErrInvalidSetting.Error()+": "))
+	}
+	return text, nil
+}
+
+// readRoleFiles reads every role file cfg names; a role it leaves out is
+// absent from the result: not configured.
+func readRoleFiles(root string, cfg engine.ProjectConfig) (map[string]string, error) {
+	var roles map[string]string
+	for _, role := range engine.RoleKeys {
+		rel, ok := cfg.RoleFiles[role]
+		if !ok {
+			continue
+		}
+		text, err := readRoleFile(root, role, rel)
+		if err != nil {
+			return nil, err
+		}
+		if roles == nil {
+			roles = map[string]string{}
+		}
+		roles[role] = text
+	}
+	return roles, nil
 }
 
 // shortHash is the first 12 characters of a content hash.
@@ -327,6 +438,50 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 	// A file that names an instructions_file has the client read it: the
 	// engine takes the text, never the path (§5.9).
 	var instructions *string
+	var roles map[string]string
+	if len(cfg.RoleFiles) > 0 {
+		root, err := gitRoot(filepath.Dir(file))
+		if err != nil {
+			return fail(stderr, err)
+		}
+		if roles, err = readRoleFiles(root, cfg); err != nil {
+			return fail(stderr, err)
+		}
+		for _, role := range engine.RoleKeys {
+			text, ok := roles[role]
+			switch {
+			case !ok || strings.TrimSpace(text) != "":
+			case role == engine.RoleWorker:
+				fmt.Fprintf(stdout, "instructions.%s %s is empty: the project's instructions are unset and the default worker text applies\n", role, cfg.RoleFiles[role])
+			default:
+				fmt.Fprintf(stdout, "instructions.%s %s is empty: the role runs on the contract alone\n", role, cfg.RoleFiles[role])
+			}
+		}
+		// The worker's file is instructions_file spelled in the map
+		// (§5.9): its text is the instructions setting and rides the
+		// import beside the file, in its hash.
+		if text, ok := roles[engine.RoleWorker]; ok {
+			instructions = &text
+			delete(roles, engine.RoleWorker)
+		}
+	}
+	// A skills_dir has the client parse every skill under it; the engine
+	// takes their texts and digests, never the directory (§5.10).
+	var skills *[]engine.Skill
+	if cfg.SkillsDir != "" {
+		root, err := gitRoot(filepath.Dir(file))
+		if err != nil {
+			return fail(stderr, err)
+		}
+		parsed, err := readSkills(root, cfg.SkillsDir)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		if parsed == nil {
+			parsed = []engine.Skill{}
+		}
+		skills = &parsed
+	}
 	if cfg.InstructionsFile != "" {
 		root, err := gitRoot(filepath.Dir(file))
 		if err != nil {
@@ -349,7 +504,7 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 	if code != 0 {
 		return code
 	}
-	res, err := client.ImportProjectConfigWith(ctx, repo, content, instructions, yes)
+	res, err := client.ImportProjectConfigFull(ctx, repo, content, instructions, roles, skills, yes)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -366,7 +521,7 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 			fmt.Fprintln(stdout, "not imported; nothing changed (--yes accepts the replacement)")
 			return 1
 		}
-		if res, err = client.ImportProjectConfigWith(ctx, repo, content, instructions, true); err != nil {
+		if res, err = client.ImportProjectConfigFull(ctx, repo, content, instructions, roles, skills, true); err != nil {
 			return fail(stderr, err)
 		}
 	}
@@ -375,6 +530,13 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 		fmt.Fprintf(stdout, "  %s: %s -> %s\n", c.Key, c.Old, c.New)
 	}
 	for _, c := range res.Conflicts {
+		if strings.HasPrefix(c.Key, "instructions.") {
+			// A role text conflict shows both texts; the local one stands
+			// until the user sets the text they want (§5.9).
+			fmt.Fprintf(stdout, "conflict: %s: local override %s kept, file has %s; to take the file's text: brigada project set %s=@<file>\n",
+				c.Key, c.Old, c.New, c.Key)
+			continue
+		}
 		fmt.Fprintf(stdout, "conflict: %s: local override %s kept, file has %s; to take the file's value: brigada project set %s= then import again\n",
 			c.Key, c.Old, c.New, c.Key)
 	}
@@ -382,6 +544,32 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 		printSettings(stdout, *res.Settings)
 	}
 	return 0
+}
+
+// reportGuidanceChanges flags the role files and skills whose current
+// digests differ from the imported ones (§5.9, §5.10): the client reports
+// the digests of what is on disk, the engine compares, and nothing stored
+// changes until the next import. Silent when nothing is configured or
+// nothing changed.
+func reportGuidanceChanges(ctx context.Context, client *api.Client, root string, content []byte, project int64, stdout io.Writer) {
+	cfg, err := engine.ParseProjectConfig(content)
+	if err != nil || project == 0 || (len(cfg.RoleFiles) == 0 && cfg.SkillsDir == "") {
+		return
+	}
+	st, err := client.StatusWithFileDigests(ctx, project, currentFileDigests(root, cfg))
+	if err != nil {
+		return
+	}
+	// The file each role reads is the client's knowledge (project.yaml),
+	// so status names it beside the engine's per-role line (§5.9).
+	for _, role := range engine.RoleKeys {
+		if p, ok := cfg.RoleFiles[role]; ok {
+			fmt.Fprintf(stdout, "instructions.%s: file %s\n", role, p)
+		}
+	}
+	for _, line := range guidanceChangeLines(st, project, cfg, root) {
+		fmt.Fprintln(stdout, line)
+	}
 }
 
 // reportProjectConfigStatus is status's flag (§13.1) for a project whose
@@ -411,12 +599,19 @@ func reportProjectConfigStatus(ctx context.Context, client *api.Client, stdout i
 		return
 	}
 	var instructions *string
-	if cfg, err := engine.ParseProjectConfig(content); err == nil && cfg.InstructionsFile != "" {
-		if text, err := readInstructionsFile(root, cfg.InstructionsFile); err == nil {
-			instructions = &text
+	if cfg, err := engine.ParseProjectConfig(content); err == nil {
+		if rel, ok := cfg.RoleFiles[engine.RoleWorker]; ok {
+			if text, err := readRoleFile(root, engine.RoleWorker, rel); err == nil {
+				instructions = &text
+			}
+		} else if cfg.InstructionsFile != "" {
+			if text, err := readInstructionsFile(root, cfg.InstructionsFile); err == nil {
+				instructions = &text
+			}
 		}
 	}
 	hash := engine.ConfigHashWith(content, instructions)
+	defer reportGuidanceChanges(ctx, client, root, content, got.ProjectID, stdout)
 	switch {
 	case got.ImportHash == "":
 		fmt.Fprintf(stdout, "%s: not imported yet (brigada project import)\n", engine.ProjectConfigPath)

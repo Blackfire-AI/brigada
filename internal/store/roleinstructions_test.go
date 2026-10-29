@@ -15,19 +15,26 @@ import (
 // path the caller seeds old data into.
 func buildPreRoleInstructions(t *testing.T) (string, *sql.DB) {
 	t.Helper()
+	return openBeforeMigration(t, "role_instructions")
+}
+
+// openBeforeMigration builds the store a binary that predates the named
+// migration would leave behind, as buildPreRoleInstructions does.
+func openBeforeMigration(t *testing.T, name string) (string, *sql.DB) {
+	t.Helper()
 	migs, err := allMigrations()
 	if err != nil {
 		t.Fatalf("list migrations: %v", err)
 	}
 	before := 0
 	for _, m := range migs {
-		if m.name == "role_instructions" {
+		if m.name == name {
 			before = m.version - 1
 			break
 		}
 	}
 	if before == 0 {
-		t.Fatal("role_instructions migration not found in allMigrations")
+		t.Fatalf("%s migration not found in allMigrations", name)
 	}
 	path := filepath.Join(t.TempDir(), "store.db")
 	db, err := sql.Open("sqlite", dsn(path))

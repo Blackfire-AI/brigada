@@ -32,6 +32,7 @@ type StatsRow struct {
 	Runner             string   `json:"runner"`
 	Live               bool     `json:"live"` // the runner was seen within the stats window
 	Class              string   `json:"class"`
+	Skills             int      `json:"skills"` // how many skills the tasks of the row carried (§5.10); rows with different counts are never pooled
 	Attempts           int      `json:"attempts"`
 	Successes          int      `json:"successes"`
 	Score              float64  `json:"score"`
@@ -157,15 +158,15 @@ func statsTx(tx *sql.Tx, cfg Config, project int64, now time.Time) ([]ProjectSta
 			class string
 		}
 		seen := map[key]bool{}
-		orows, err := tx.Query(`SELECT agent_id, class, attempts, successes FROM outcomes
-			WHERE project_id = ? ORDER BY agent_id, class`, p.ProjectID)
+		orows, err := tx.Query(`SELECT agent_id, class, skills, attempts, successes FROM outcomes
+			WHERE project_id = ? ORDER BY agent_id, class, skills`, p.ProjectID)
 		if err != nil {
 			return nil, fmt.Errorf("list outcomes of project %d: %w", p.ProjectID, err)
 		}
 		for orows.Next() {
 			var agent int64
 			var row StatsRow
-			if err := orows.Scan(&agent, &row.Class, &row.Attempts, &row.Successes); err != nil {
+			if err := orows.Scan(&agent, &row.Class, &row.Skills, &row.Attempts, &row.Successes); err != nil {
 				orows.Close()
 				return nil, fmt.Errorf("list outcomes of project %d: %w", p.ProjectID, err)
 			}
@@ -173,9 +174,9 @@ func statsTx(tx *sql.Tx, cfg Config, project int64, now time.Time) ([]ProjectSta
 			if !ok {
 				continue // the agents row is gone; the cascade removes the outcome with it
 			}
-			attempts, successes, class := row.Attempts, row.Successes, row.Class
+			attempts, successes, class, skills := row.Attempts, row.Successes, row.Class, row.Skills
 			row = a.StatsRow
-			row.Class, row.Attempts, row.Successes = class, attempts, successes
+			row.Class, row.Skills, row.Attempts, row.Successes = class, skills, attempts, successes
 			row.Score = Score(attempts, successes)
 			p.Rows = append(p.Rows, row)
 			seen[key{agent, class}] = true
@@ -208,6 +209,9 @@ func statsTx(tx *sql.Tx, cfg Config, project int64, now time.Time) ([]ProjectSta
 			if a.Class != b.Class {
 				return a.Class < b.Class
 			}
+			if a.Skills != b.Skills {
+				return a.Skills < b.Skills
+			}
 			if a.Score != b.Score {
 				return a.Score > b.Score
 			}
@@ -229,12 +233,13 @@ func statsTx(tx *sql.Tx, cfg Config, project int64, now time.Time) ([]ProjectSta
 func usageStatsTx(tx *sql.Tx, p *ProjectStats, agents map[int64]*statsAgent) error {
 	rows, err := tx.Query(`SELECT j.agent_id,
   CASE j.kind WHEN 'review' THEN 'review' WHEN 'foreman' THEN 'plan' ELSE COALESCE(t.class, 'implement') END AS class,
+  CASE WHEN j.kind = 'foreman' OR COALESCE(t.skills, '') = '' THEN 0 ELSE json_array_length(t.skills) END AS skills,
   SUM(j.input_tokens), SUM(j.output_tokens), SUM(j.cached_input_tokens), SUM(j.reasoning_tokens),
   SUM(CASE WHEN j.input_tokens IS NOT NULL OR j.output_tokens IS NOT NULL THEN COALESCE(j.input_tokens,0) + COALESCE(j.output_tokens,0) END),
   SUM(j.cost_usd), SUM(j.wall_seconds), SUM(j.model_calls), COUNT(j.model_calls)
   FROM jobs j LEFT JOIN tasks t ON t.id = j.task_id
   WHERE j.project_id = ? AND j.agent_id IS NOT NULL
-  GROUP BY 1, 2`, p.ProjectID)
+  GROUP BY 1, 2, 3`, p.ProjectID)
 	if err != nil {
 		return fmt.Errorf("sum job usage: %w", err)
 	}
@@ -242,7 +247,7 @@ func usageStatsTx(tx *sql.Tx, p *ProjectStats, agents map[int64]*statsAgent) err
 	for rows.Next() {
 		var u StatsRow
 		var callJobs int64
-		if err := rows.Scan(&u.AgentID, &u.Class, &u.InputTokens, &u.OutputTokens, &u.CachedInputTokens, &u.ReasoningTokens, &u.Tokens, &u.CostUSD, &u.WallSeconds, &u.ModelCalls, &callJobs); err != nil {
+		if err := rows.Scan(&u.AgentID, &u.Class, &u.Skills, &u.InputTokens, &u.OutputTokens, &u.CachedInputTokens, &u.ReasoningTokens, &u.Tokens, &u.CostUSD, &u.WallSeconds, &u.ModelCalls, &callJobs); err != nil {
 			return err
 		}
 		a := agents[u.AgentID]
@@ -251,14 +256,14 @@ func usageStatsTx(tx *sql.Tx, p *ProjectStats, agents map[int64]*statsAgent) err
 		}
 		index := -1
 		for i := range p.Rows {
-			if p.Rows[i].AgentID == u.AgentID && p.Rows[i].Class == u.Class {
+			if p.Rows[i].AgentID == u.AgentID && p.Rows[i].Class == u.Class && p.Rows[i].Skills == u.Skills {
 				index = i
 				break
 			}
 		}
 		if index < 0 {
 			row := a.StatsRow
-			row.Class = u.Class
+			row.Class, row.Skills = u.Class, u.Skills
 			row.Score = Score(0, 0)
 			p.Rows = append(p.Rows, row)
 			index = len(p.Rows) - 1

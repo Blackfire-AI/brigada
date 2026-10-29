@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -298,5 +299,103 @@ func TestPlanAmendRetierRoundTrip(t *testing.T) {
 	_, err = c.AmendPlan(ctx, plan.PlanID, PlanAmend{Retier: []PlanRetier{{Task: strconv.FormatInt(plan.TaskID, 10), Effort: "ultra"}}}, "bad-retier")
 	if err == nil || !strings.Contains(err.Error(), "effort") {
 		t.Errorf("invalid effort accepted: %v", err)
+	}
+}
+
+// TestPlanSkillsRoundTrip: the skills field of a task rides plan_create,
+// plan_amend's respec and retier, and the task submit through the API to
+// the engine's resolver — the ordered names recorded on the task, an
+// absent field keeping the recorded skills, [] clearing them — and an
+// unknown name refuses the call naming the task and the known skills.
+func TestPlanSkillsRoundTrip(t *testing.T) {
+	e := newEnv(t)
+	const repo = "https://example.invalid/one.git"
+	if _, err := e.eng.ImportSkills(e.ctx, repo, []engine.Skill{
+		{Name: "cli-flag", Text: "register the flag"},
+		{Name: "docs-change", Text: "update the docs"},
+	}); err != nil {
+		t.Fatalf("import skills: %v", err)
+	}
+	skillNamesOf := func(task int64) []string {
+		t.Helper()
+		var raw string
+		if err := e.st.View(e.ctx, func(tx *sql.Tx) error {
+			return tx.QueryRow("SELECT skills FROM tasks WHERE id = ?", task).Scan(&raw)
+		}); err != nil {
+			t.Fatalf("read the skills of task %d: %v", task, err)
+		}
+		var s []struct {
+			Name string `json:"name"`
+		}
+		if raw != "" {
+			if err := json.Unmarshal([]byte(raw), &s); err != nil {
+				t.Fatalf("parse the skills %q: %v", raw, err)
+			}
+		}
+		out := make([]string, len(s))
+		for i, x := range s {
+			out[i] = x.Name
+		}
+		return out
+	}
+
+	body := `{"title":"skilled","tasks":[{"name":"build","spec":"build it","skills":["docs-change","cli-flag"]},{"name":"ship","spec":"ship it","deps":["build"],"skills":["cli-flag"]}]}`
+	code, _, data := e.do(http.MethodPost, "/v1/plans", "foreman1", "skills-1", []byte(body))
+	if code != http.StatusOK {
+		t.Fatalf("plan_create: %d %s", code, data)
+	}
+	res := decode[planCreateBody](t, data)
+	if got := skillNamesOf(res.TaskID); len(got) != 2 || got[0] != "docs-change" || got[1] != "cli-flag" {
+		t.Errorf("first task skills = %v, want the order given", got)
+	}
+	var ship int64
+	if err := e.st.View(e.ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT id FROM tasks WHERE plan_id = ? AND name = 'ship'", res.PlanID).Scan(&ship)
+	}); err != nil {
+		t.Fatalf("read ship: %v", err)
+	}
+
+	amend := func(idem, body string) (int, []byte) {
+		t.Helper()
+		path := "/v1/plans/" + strconv.FormatInt(res.PlanID, 10) + "/amend"
+		code, _, data := e.do(http.MethodPost, path, "foreman1", idem, []byte(body))
+		return code, data
+	}
+	if code, data := amend("skills-2", `{"respec":[{"task":"ship","spec":"ship more","skills":["docs-change"]}]}`); code != http.StatusOK {
+		t.Fatalf("respec with skills: %d %s", code, data)
+	}
+	if got := skillNamesOf(ship); len(got) != 1 || got[0] != "docs-change" {
+		t.Errorf("after a respec with skills = %v, want docs-change", got)
+	}
+	if code, data := amend("skills-3", `{"respec":[{"task":"ship","spec":"ship more"}]}`); code != http.StatusOK {
+		t.Fatalf("respec without skills: %d %s", code, data)
+	}
+	if got := skillNamesOf(ship); len(got) != 1 || got[0] != "docs-change" {
+		t.Errorf("after a respec without skills = %v, want the recorded skill kept", got)
+	}
+	if code, data := amend("skills-4", `{"retier":[{"task":"ship","tier":"light","skills":[]}]}`); code != http.StatusOK {
+		t.Fatalf("retier with skills: %d %s", code, data)
+	}
+	if got := skillNamesOf(ship); len(got) != 0 {
+		t.Errorf("after a retier with [] = %v, want none", got)
+	}
+	if code, data := amend("skills-5", `{"respec":[{"task":"ship","spec":"ship more","skills":["nope"]}]}`); code != http.StatusBadRequest ||
+		!strings.Contains(string(data), "nope") || !strings.Contains(string(data), "cli-flag, docs-change") {
+		t.Errorf("an unknown skill: %d %s, want a 400 naming it and the known skills", code, data)
+	}
+
+	sub := `{"repo_url":"` + repo + `","base_ref":"main","spec":"direct","skills":["cli-flag"]}`
+	code, _, data = e.do(http.MethodPost, "/v1/tasks", "root", "skills-6", []byte(sub))
+	if code != http.StatusOK {
+		t.Fatalf("task submit: %d %s", code, data)
+	}
+	direct := decode[struct {
+		TaskID int64 `json:"task_id"`
+	}](t, data)
+	if got := skillNamesOf(direct.TaskID); len(got) != 1 || got[0] != "cli-flag" {
+		t.Errorf("a direct submission's skills = %v, want cli-flag", got)
+	}
+	if got := e.str("SELECT instructions FROM tasks WHERE id = ?", direct.TaskID); got == "" {
+		t.Errorf("a direct submission recorded no worker text")
 	}
 }

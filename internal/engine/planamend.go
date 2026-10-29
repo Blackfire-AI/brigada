@@ -36,8 +36,9 @@ type PlanRetarget struct {
 }
 
 // PlanRetier changes a waiting or parked task's tier, effort, review tier,
-// review effort or caps. Empty fields preserve their current values; Task
-// accepts a plan task's name or decimal id.
+// review effort, caps or — for a task that has not started — skills.
+// Empty fields preserve their current values; Task accepts a plan task's
+// name or decimal id.
 type PlanRetier struct {
 	Task         string
 	Tier         string
@@ -47,6 +48,10 @@ type PlanRetier struct {
 	// Caps merges key by key into the task's own caps (fix_rounds,
 	// review_rounds, restart; 0 to 10); nil changes none.
 	Caps map[string]int
+	// Skills, in order, replaces the task's recorded skills (§5.10) when
+	// the task has not started; nil keeps them. The re-resolution copies
+	// the current texts.
+	Skills []string
 }
 
 // Spec edit modes of a PlanRespec.
@@ -58,10 +63,14 @@ const (
 // PlanRespec edits the spec of a pending task, one with no job yet: Mode
 // replace (the default) swaps the whole spec for Spec, append adds Spec
 // after the current one. Task accepts a plan task's name or decimal id.
+// The edit re-resolves the task's role texts and skills (§5.9, §5.10):
+// Skills, in order, replaces the recorded skills — nil keeps them — and
+// the current texts are copied whatever Skills says.
 type PlanRespec struct {
-	Task string
-	Spec string
-	Mode string
+	Task   string
+	Spec   string
+	Mode   string
+	Skills []string
 }
 
 // PlanAmendment is what the foreman changes in a live plan (§12.2): tasks
@@ -241,6 +250,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	if err != nil {
 		return AmendPlanResult{}, err
 	}
+	// What an added task's prompts carry resolves here, as a created
+	// task's does (§5.9, §5.10), before anything is written.
+	addSnaps := make([]TaskInstructions, len(am.Add))
 	for i, t := range am.Add {
 		if err := validateTaskTierEffort(t); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("added task %d %q: %w", i+1, t.Name, err)
@@ -251,6 +263,15 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if t.Spec == "" {
 			return AmendPlanResult{}, fmt.Errorf("added task %d: spec is required: the worker's task, verbatim (§1.4)", i+1)
 		}
+		label := t.Name
+		if label == "" {
+			label = fmt.Sprintf("added task %d", i+1)
+		}
+		ti, terr := resolveTaskInstructionsTx(tx, proj, label, t.Skills)
+		if terr != nil {
+			return AmendPlanResult{}, terr
+		}
+		addSnaps[i] = ti
 		if t.Name != "" {
 			if j, dup := byName[t.Name]; dup {
 				return AmendPlanResult{}, fmt.Errorf("task name %q is already used by %s: names are unique in a plan", t.Name, nodes[j].label())
@@ -383,6 +404,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	// respecText is what the edit adds, which is all the plan rules judge.
 	var respecced []int
 	respecText := map[int]string{}
+	respecSkills := map[int][]string{}
 	for _, rs := range am.Respec {
 		i, err := resolve(rs.Task)
 		if err != nil {
@@ -409,6 +431,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			return AmendPlanResult{}, fmt.Errorf("respec %s: mode %q is not replace or append", nodes[i].label(), rs.Mode)
 		}
 		respecText[i] = rs.Spec
+		respecSkills[i] = rs.Skills
 		respecced = append(respecced, i)
 	}
 	// Dependencies resolve after the cancels, against the whole amended
@@ -606,6 +629,17 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 				return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), err)
 			}
 		}
+		// A task that has not started takes the current texts and
+		// skills (§5.9 'Versioning'); a started task keeps its record.
+		started, serr := taskStartedTx(tx, nodes[i].id)
+		if serr != nil {
+			return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), serr)
+		}
+		if !started {
+			if err := reresolveTaskInstructionsTx(tx, proj, nodes[i].id, nodes[i].label(), rt.Skills, now); err != nil {
+				return AmendPlanResult{}, fmt.Errorf("retier %s: %w", nodes[i].label(), err)
+			}
+		}
 		res.Retiered = append(res.Retiered, nodes[i].id)
 	}
 	for _, i := range respecced {
@@ -623,6 +657,11 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 				return AmendPlanResult{}, err
 			}
 			res.Held = append(res.Held, HeldTask{TaskID: nodes[i].id, Name: nodes[i].name, Reason: respecHold[i]})
+		}
+		// A pending task has no job yet, so it has not started: the
+		// edit re-resolves its texts and skills (§5.9 'Versioning').
+		if err := reresolveTaskInstructionsTx(tx, proj, nodes[i].id, nodes[i].label(), respecSkills[i], now); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("respec %s: %w", nodes[i].label(), err)
 		}
 		res.Respecced = append(res.Respecced, nodes[i].id)
 	}
@@ -645,7 +684,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if nodes[i].id, err = r.LastInsertId(); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("create the task: last insert id: %w", err)
 		}
-		if err := stampTaskInstructionsTx(tx, proj, nodes[i].id, now); err != nil {
+		if err := recordTaskInstructionsTx(tx, nodes[i].id, addSnaps[k], now); err != nil {
 			return AmendPlanResult{}, err
 		}
 		if addedHold[k] != "" {
@@ -1182,7 +1221,7 @@ func recordPlanOutcomeTx(tx *sql.Tx, project int64, success bool, now time.Time)
 	}
 	if _, err := tx.Exec(`INSERT INTO outcomes (project_id, agent_id, class, attempts, successes, updated_at)
 		VALUES (?, ?, ?, 1, ?, ?)
-		ON CONFLICT(project_id, agent_id, class) DO UPDATE SET
+		ON CONFLICT(project_id, agent_id, class, skills) DO UPDATE SET
 			attempts = attempts + 1, successes = successes + excluded.successes, updated_at = excluded.updated_at`,
 		project, agent, classPlan, successes, fmtTime(now)); err != nil {
 		return fmt.Errorf("record the outcome of the plan: %w", err)

@@ -155,8 +155,11 @@ func foremanDigestDueTx(tx *sql.Tx, project int64) (bool, error) {
 }
 
 // foremanPromptTx composes a foreman prompt, a headless turn's or an
-// attach's opening one (§4.2): the instructions, then the wake template
-// with the inbox — and, on a rotated session's first turn, the digest.
+// attach's opening one (§4.2): the contract, the foreman's own role
+// text — resolved from the store per turn (§5.9), never a text in the
+// binary, so a not-configured role runs on the contract alone — then
+// the wake template with the inbox, and, on a rotated session's first
+// turn, the digest.
 func foremanPromptTx(tx *sql.Tx, project int64, inbox ForemanInbox, now time.Time) (string, error) {
 	due, err := foremanDigestDueTx(tx, project)
 	if err != nil {
@@ -168,7 +171,11 @@ func foremanPromptTx(tx *sql.Tx, project int64, inbox ForemanInbox, now time.Tim
 			return "", err
 		}
 	}
-	return foreman.Instructions() + "\n" + foreman.ComposeTurnPromptDigest(digest, inbox.Events, inbox.UserMessages), nil
+	text, err := storedRoleTextTx(tx, project, RoleForeman)
+	if err != nil {
+		return "", err
+	}
+	return foreman.ComposePromptDigest(text, digest, inbox.Events, inbox.UserMessages), nil
 }
 
 // foremanDigestTx writes the digest a fresh session starts from (§4.2):

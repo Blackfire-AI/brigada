@@ -71,7 +71,7 @@ func (s *Server) handlePlanCreate(w http.ResponseWriter, r *http.Request, id ide
 	}
 	tasks := make([]engine.PlanTask, len(req.Tasks))
 	for i, t := range req.Tasks {
-		tasks[i] = engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos}
+		tasks[i] = engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills}
 	}
 	res, err := s.eng.CreatePlan(r.Context(), project, req.Title, tasks)
 	if err != nil {
@@ -152,6 +152,10 @@ type planTaskBody struct {
 	// ExtraRepos (§5.8): absent or null inherits the project default; a
 	// list, even [], replaces it. No omitempty: [] must survive the trip.
 	ExtraRepos []engine.ExtraRepo `json:"extra_repos"`
+	// Skills (§5.10) names, in order, the project's imported skills the
+	// task's prompts carry; absent or empty = none. An unknown or
+	// repeated name refuses the whole call.
+	Skills []string `json:"skills,omitempty"`
 }
 
 // planCreateResponse names what the call created: the plan, the
@@ -304,16 +308,16 @@ func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id iden
 	// the foreman's own cancellations are never approved.
 	am := engine.PlanAmendment{Cancel: req.Cancel, SkipApproved: id.role != roleForeman}
 	for _, t := range req.Add {
-		am.Add = append(am.Add, engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos})
+		am.Add = append(am.Add, engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills})
 	}
 	for _, rt := range req.Retarget {
 		am.Retarget = append(am.Retarget, engine.PlanRetarget{Task: rt.Task, Deps: rt.Deps, Base: rt.Base, Continue: rt.Continue})
 	}
 	for _, rt := range req.Retier {
-		am.Retier = append(am.Retier, engine.PlanRetier{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort, ReviewTier: rt.ReviewTier, ReviewEffort: rt.ReviewEffort, Caps: rt.Caps})
+		am.Retier = append(am.Retier, engine.PlanRetier{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort, ReviewTier: rt.ReviewTier, ReviewEffort: rt.ReviewEffort, Caps: rt.Caps, Skills: rt.Skills})
 	}
 	for _, rs := range req.Respec {
-		am.Respec = append(am.Respec, engine.PlanRespec{Task: rs.Task, Spec: rs.Spec, Mode: rs.Mode})
+		am.Respec = append(am.Respec, engine.PlanRespec{Task: rs.Task, Spec: rs.Spec, Mode: rs.Mode, Skills: rs.Skills})
 	}
 	res, err := s.eng.AmendPlan(r.Context(), project, planID, am)
 	switch {
@@ -363,6 +367,10 @@ type planRespecBody struct {
 	Task string `json:"task"`
 	Spec string `json:"spec"`
 	Mode string `json:"mode,omitempty"`
+	// Skills (§5.10) replaces the task's recorded skills, in order, when
+	// the task has not started; absent keeps them, [] clears them. No
+	// omitempty: [] must survive the trip.
+	Skills []string `json:"skills"`
 }
 
 type planRetierBody struct {
@@ -372,6 +380,10 @@ type planRetierBody struct {
 	ReviewTier   string         `json:"review_tier,omitempty"`
 	ReviewEffort string         `json:"review_effort,omitempty"`
 	Caps         map[string]int `json:"caps,omitempty"`
+	// Skills (§5.10) replaces the recorded skills of a task that has not
+	// started; absent keeps them, [] clears them. No omitempty: [] must
+	// survive the trip.
+	Skills []string `json:"skills"`
 }
 
 type planRetargetBody struct {

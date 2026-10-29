@@ -106,7 +106,48 @@ type StatusInfo struct {
 	// Instructions lists the projects in scope that have project
 	// instructions (§5.9): source, version, size and digest; the text only
 	// from StatusWithInstructions.
-	Instructions []StatusInstructions `json:"instructions,omitempty"`
+	Instructions     []StatusInstructions     `json:"instructions,omitempty"`
+	RoleInstructions []StatusRoleInstructions `json:"role_instructions,omitempty"`
+	Skills           []StatusSkill            `json:"skills,omitempty"`
+}
+
+// SkillFileDigest is a client's current digests of one skill directory: of
+// its SKILL.md and of the whole tree (§5.10), each over the file text
+// without the version header.
+type SkillFileDigest struct {
+	Digest string `json:"digest"`
+	Tree   string `json:"tree,omitempty"`
+}
+
+// CompareSkillFileDigests applies skill digests supplied by a client to a
+// single project's status. A skill the client sent no digest for stays
+// unknown; the stored snapshot is never touched.
+func (s *StatusInfo) CompareSkillFileDigests(project int64, digests map[string]SkillFileDigest) {
+	for i := range s.Skills {
+		sk := &s.Skills[i]
+		if sk.ProjectID != project {
+			continue
+		}
+		if d, ok := digests[sk.Name]; ok {
+			changed := d.Digest != sk.Digest || (d.Tree != "" && d.Tree != sk.TreeDigest)
+			sk.ChangedSinceImport = &changed
+		}
+	}
+}
+
+// CompareInstructionFileDigests applies file digests supplied by a client to
+// a single project's status. Missing digests and non-imported roles remain unknown.
+func (s *StatusInfo) CompareInstructionFileDigests(project int64, digests map[string]string) {
+	for i := range s.RoleInstructions {
+		role := &s.RoleInstructions[i]
+		if role.ProjectID != project || role.Source != SourceImported {
+			continue
+		}
+		if digest, ok := digests[role.Role]; ok {
+			changed := digest != role.Digest
+			role.ChangedSinceImport = &changed
+		}
+	}
 }
 
 // InfraRetry is one queued work or fix job held out of leasing by the
@@ -217,6 +258,8 @@ type StatusTask struct {
 	// first work job resumes (§6.1), by plan name or "#id"; empty when
 	// the task continues none.
 	Continues string `json:"continues,omitempty"`
+	// Skills names the skills the task recorded (§5.10), in order.
+	Skills []string `json:"skills,omitempty"`
 }
 
 // NeedsYouItem is one entry of the "needs you" queue (§10): something a
@@ -357,6 +400,9 @@ func (e *Engine) status(ctx context.Context, project int64, withText, all bool) 
 			return err
 		}
 		if info.Retries, err = statusRetriesTx(tx, project, now); err != nil {
+			return err
+		}
+		if info.RoleInstructions, info.Skills, err = statusGuidanceTx(tx, project, withText); err != nil {
 			return err
 		}
 		if info.Instructions, err = statusInstructionsTx(tx, project, withText); err != nil {
@@ -575,7 +621,7 @@ func statusPlanRows(tx *sql.Tx, query string, args ...any) ([]StatusPlan, error)
 
 // statusPlanTasksTx reads one status plan's tasks, in id order.
 func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, error) {
-	rows, err := tx.Query(`SELECT t.id, t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, '')
+	rows, err := tx.Query(`SELECT t.id, t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, ''), t.skills
 		FROM tasks t
 		LEFT JOIN landings l ON l.task_id = t.id
 		LEFT JOIN land_holds h ON h.task_id = t.id AND h.state = 'held'
@@ -587,12 +633,13 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, err
 	tasks := []StatusTask{}
 	for rows.Next() {
 		var t StatusTask
-		var capsJSON, pushed, retryAt, holdReason string
+		var capsJSON, pushed, retryAt, holdReason, skills string
 		var exit sql.NullInt64
-		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &retryAt, &exit, &holdReason); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &retryAt, &exit, &holdReason, &skills); err != nil {
 			return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
 		}
 		t.Caps = parseTaskCaps(capsJSON)
+		t.Skills = taskSkillNames(skills)
 		// A landing recorded as waiting sits at the push gate, not yet
 		// landed (§7.1); every other landing record — pushed or local, by
 		// the land job or a detected trailer — marks the task landed.

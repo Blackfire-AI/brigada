@@ -53,6 +53,11 @@ type jobRow struct {
 	ReleasedLease  string
 	DoneLease      string
 	NotBefore      string // a queued job is not leasable before this time; '' = now (§3, §4.2)
+	// PromptMeta is what the job recorded beside its composed prompt
+	// (§5.9 'Versioning'): the template's version and the digests of
+	// the instruction and skill texts the prompt carried; '' = none
+	// recorded.
+	PromptMeta string
 	// SkipLandReady is the engine's mark on the land job an approval
 	// queues to release the land_ready gate's hold (issue #87): the
 	// runner runs no command and lands. False on every other job.
@@ -69,7 +74,8 @@ const jobColumns = `id, project_id, COALESCE(task_id, 0), kind, key, mode, promp
 	COALESCE(cap_held_at, ''), COALESCE(cap_held_layer, ''), COALESCE(cap_held_key, ''),
 	COALESCE(leased_seconds, 0), harness, model, effort, labels, restart, retry,
 	COALESCE(released_by, 0), COALESCE(released_until, ''), COALESCE(release_note, ''),
-	COALESCE(released_lease, ''), COALESCE(done_lease, ''), COALESCE(not_before, ''), skip_land_ready`
+	COALESCE(released_lease, ''), COALESCE(done_lease, ''), COALESCE(not_before, ''), COALESCE(prompt_meta, ''),
+	skip_land_ready`
 
 // scanJob scans one job from a *sql.Row or *sql.Rows.
 func scanJob(row interface{ Scan(dest ...any) error }) (*jobRow, error) {
@@ -82,7 +88,7 @@ func scanJob(row interface{ Scan(dest ...any) error }) (*jobRow, error) {
 		&j.CapHeldAt, &j.CapHeldLayer, &j.CapHeldKey,
 		&j.LeasedSeconds, &j.Harness, &j.Model, &j.Effort, &j.Labels, &j.Restart, &j.Retry,
 		&j.ReleasedBy, &j.ReleasedUntil, &j.ReleaseNote, &j.ReleasedLease,
-		&j.DoneLease, &j.NotBefore, &j.SkipLandReady)
+		&j.DoneLease, &j.NotBefore, &j.PromptMeta, &j.SkipLandReady)
 	if err != nil {
 		return nil, err
 	}

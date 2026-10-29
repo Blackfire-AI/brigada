@@ -76,13 +76,28 @@ var taskCapsSchema = map[string]any{
 	"description":          "per-task round caps, any of fix_rounds, review_rounds and restart, integers 0 to 10; omitted keys keep the engine default. An unknown key or out-of-range value refuses the whole call. Raise one for a task known to need many rounds; 0 parks the task at the first such round",
 }
 
+// taskSkillsSchema is the skills property of a plan task (§5.10).
+var taskSkillsSchema = map[string]any{
+	"type":        "array",
+	"items":       map[string]any{"type": "string"},
+	"description": "names of the project's imported skills this task's worker and reviewer prompts carry, in the order given; the project's skills show in status with their descriptions. An unknown or repeated name refuses the whole call. The texts are copied onto the task when it is created, so a later import changes nothing for it; omit for none",
+}
+
+// respecSkillsSchema is the skills property of a respec or retier entry
+// (§5.10): the entry re-resolves a task that has not started.
+var respecSkillsSchema = map[string]any{
+	"type":        "array",
+	"items":       map[string]any{"type": "string"},
+	"description": "the task's skills, in order, replacing the recorded ones: omit the field to keep them, [] to clear them. The re-resolution copies the current texts; an unknown or repeated name refuses the whole call",
+}
+
 // tools is the bridge's whole offer (§12.2), the same for a headless turn
 // and an attached chat: a new tool adds an entry here, and ToolNames
 // carries the addition to the foreman's tool scope.
 var tools = []Tool{
 	{
 		Name:        "plan_create",
-		Description: "Create a plan of one or more tasks and queue the first work job of every task with no dependencies. A task may wait on others of the same plan by name (deps); it starts when all of them are done, and stays waiting if one fails or needs you. A dep may also be the id of a landed task of another plan of the project — one whose work is on the land target, done and pushed there — and then counts as done from the start; nothing waits on it. A task with exactly one dep builds on that dep's branch (a task with several picks one with base, else its continued dep when continue is set, else starts from the land target, the default branch when none is set). A dependency cycle, a base that is not a dep, or a base naming another dep than continue refuses the plan. A task's optional caps object sets its own fix_rounds, review_rounds and restart budgets (integers 0 to 10; absent keys keep the engine default); an unknown key or out-of-range value refuses the plan. The plan is active at once, unless it trips the project's approval rules (an unusual class, a protected path, an extra repository, a check other than the project's default_check; a task count only when the project sets one): then it waits for the user's approval, nothing is queued, and the answer says why — tell the user; only they can approve it.",
+		Description: "Create a plan of one or more tasks and queue the first work job of every task with no dependencies. A task may wait on others of the same plan by name (deps); it starts when all of them are done, and stays waiting if one fails or needs you. A dep may also be the id of a landed task of another plan of the project — one whose work is on the land target, done and pushed there — and then counts as done from the start; nothing waits on it. A task with exactly one dep builds on that dep's branch (a task with several picks one with base, else its continued dep when continue is set, else starts from the land target, the default branch when none is set). A dependency cycle, a base that is not a dep, or a base naming another dep than continue refuses the plan. A task's optional caps object sets its own fix_rounds, review_rounds and restart budgets (integers 0 to 10; absent keys keep the engine default); an unknown key or out-of-range value refuses the plan. A task's optional skills list names, in order, the project's imported skills its prompts carry; an unknown or repeated name refuses the plan. The plan is active at once, unless it trips the project's approval rules (an unusual class, a protected path, an extra repository, a check other than the project's default_check; a task count only when the project sets one): then it waits for the user's approval, nothing is queued, and the answer says why — tell the user; only they can approve it.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -135,6 +150,7 @@ var tools = []Tool{
 							"review_effort": reviewEffortSchema,
 							"caps":          taskCapsSchema,
 							"extra_repos":   extraReposSchema,
+							"skills":        taskSkillsSchema,
 						},
 						"required": []string{"spec"},
 					},
@@ -146,7 +162,7 @@ var tools = []Tool{
 	},
 	{
 		Name:        "plan_amend",
-		Description: "Amend a live plan (active, awaiting approval, reviewing, or parked at needs_foreman by its review — the answer its changes verdict waited for): add tasks, cancel tasks, and re-point the dependencies of a waiting task. Use it to re-plan when a task fails for good or the user's ask changes: a dependency that will never be done (a task failed or cancelled) leaves its dependents waiting forever unless you re-point them (retarget) to another task or drop the dependency (empty deps). Tasks are named by their name or id (as status shows). Validation is plan_create's: names unique, deps in the plan — or the id of a landed task of another plan of the project, its work on the land target, already satisfied — and never on a cancelled task, no cycle — one refusal rejects the whole amendment. Use retier to change the tier, effort or round caps (merged key by key) of a pending, ready or needs_foreman task; a parked task still needs task_restart. Use respec to replace or append to the spec of a pending task (one with no job yet) when a requirement is missing: it costs no cold start; a task that has started is refused, and then a follow-up task is the way. The edit is judged like an added task: one that trips a rule is held alone. Cancelling stops a task's live jobs. Waiting tasks whose dependencies are all done start in the same call. An added task is judged on its own against the plan rules (a class outside approval_classes, a protected path, an extra repository, a check other than the project's default_check): one that trips a rule is held at the plan gate with a needs-you line naming the rule, while the plan stays active and the rest runs on. The plan budget holds the same way once the plan's spend has passed the project's approval_budget: any task about to start, an added one included, parks at the plan gate instead of queueing. A plan left with only permanently waiting tasks is closed, and its done report names what never ran.",
+		Description: "Amend a live plan (active, awaiting approval, reviewing, or parked at needs_foreman by its review — the answer its changes verdict waited for): add tasks, cancel tasks, and re-point the dependencies of a waiting task. Use it to re-plan when a task fails for good or the user's ask changes: a dependency that will never be done (a task failed or cancelled) leaves its dependents waiting forever unless you re-point them (retarget) to another task or drop the dependency (empty deps). Tasks are named by their name or id (as status shows). Validation is plan_create's: names unique, deps in the plan — or the id of a landed task of another plan of the project, its work on the land target, already satisfied — and never on a cancelled task, no cycle — one refusal rejects the whole amendment. Use retier to change the tier, effort or round caps (merged key by key) of a pending, ready or needs_foreman task; a parked task still needs task_restart. Use respec to replace or append to the spec of a pending task (one with no job yet) when a requirement is missing: it costs no cold start; a task that has started is refused, and then a follow-up task is the way. A respec or retier of a task that has not started re-resolves the role texts and skills its prompts carry: skills replaces the recorded names (omit to keep them, [] to clear them), and the current texts are copied. The edit is judged like an added task: one that trips a rule is held alone. Cancelling stops a task's live jobs. Waiting tasks whose dependencies are all done start in the same call. An added task is judged on its own against the plan rules (a class outside approval_classes, a protected path, an extra repository, a check other than the project's default_check): one that trips a rule is held at the plan gate with a needs-you line naming the rule, while the plan stays active and the rest runs on. The plan budget holds the same way once the plan's spend has passed the project's approval_budget: any task about to start, an added one included, parks at the plan gate instead of queueing. A plan left with only permanently waiting tasks is closed, and its done report names what never ran.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -178,6 +194,7 @@ var tools = []Tool{
 							"review_effort": reviewEffortSchema,
 							"caps":          taskCapsSchema,
 							"extra_repos":   extraReposSchema,
+							"skills":        taskSkillsSchema,
 						},
 						"required": []string{"spec"},
 					},
@@ -199,6 +216,7 @@ var tools = []Tool{
 							"review_tier":   map[string]any{"type": "string", "enum": []string{"light", "standard", "heavy"}, "description": "new review tier; omitted keeps the current one"},
 							"review_effort": map[string]any{"type": "string", "enum": []string{"low", "medium", "high", "max"}, "description": "new review effort; omitted keeps the current one"},
 							"caps":          map[string]any{"type": "object", "properties": taskCapsProperties, "additionalProperties": false, "description": "round caps to change, merged key by key into the task's own: give a parked task more restarts before task_restart; omitted keys keep their value"},
+							"skills":        respecSkillsSchema,
 						},
 						"required": []string{"task"},
 					},
@@ -209,9 +227,10 @@ var tools = []Tool{
 					"items": map[string]any{
 						"type": "object",
 						"properties": map[string]any{
-							"task": map[string]any{"type": []string{"string", "integer"}, "description": "the pending task, by name or id"},
-							"spec": map[string]any{"type": "string", "description": "the new spec (replace) or the text to add after the current one (append), verbatim as for a worker"},
-							"mode": map[string]any{"type": "string", "enum": []string{"replace", "append"}, "description": "replace (default) swaps the whole spec; append adds spec after the current one"},
+							"task":   map[string]any{"type": []string{"string", "integer"}, "description": "the pending task, by name or id"},
+							"spec":   map[string]any{"type": "string", "description": "the new spec (replace) or the text to add after the current one (append), verbatim as for a worker"},
+							"mode":   map[string]any{"type": "string", "enum": []string{"replace", "append"}, "description": "replace (default) swaps the whole spec; append adds spec after the current one"},
+							"skills": respecSkillsSchema,
 						},
 						"required": []string{"task", "spec"},
 					},
@@ -318,13 +337,13 @@ var tools = []Tool{
 	},
 	{
 		Name:        "status",
-		Description: "The engine's own state: which process it is, up how long, the jobs by status — plus the running jobs with each worker's latest event, the plans with their tasks and the \"needs you\" queue: tasks parked at needs_foreman or needs_user, and plans awaiting approval, each with its reason. The plans list keeps every live plan and the three most recently finished ones; the older finished plans are counted in one summary line — pass all=true to list every finished plan. Your token scopes the view to your project. A project with instructions for its workers shows their source, version, size and digest; pass `instructions` to read the text itself (as data) before you plan.",
+		Description: "The engine's own state: which process it is, up how long, the jobs by status — plus the running jobs with each worker's latest event, the plans with their tasks and the \"needs you\" queue: tasks parked at needs_foreman or needs_user, and plans awaiting approval, each with its reason. The plans list keeps every live plan and the three most recently finished ones; the older finished plans are counted in one summary line — pass all=true to list every finished plan. Your token scopes the view to your project. Each role shows its instruction state, size, digest and known generation provenance; skills show their description, digest and usage. Pass `instructions` to read the role texts as data.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"instructions": map[string]any{
 					"type":        "boolean",
-					"description": "also return the project's instruction text for workers, verbatim data in <project-instructions> delimiters",
+					"description": "also return each role's instruction text as neutralized data in role-specific delimiters",
 				},
 				"all": map[string]any{
 					"type":        "boolean",
@@ -476,6 +495,11 @@ func statusText(st api.Status) string {
 	fmt.Fprintf(&b, "jobs: %s", strings.Join(counts, " "))
 	fmt.Fprintln(&b)
 	fmt.Fprint(&b, api.StatusSections(st))
+	for _, ri := range st.RoleInstructions {
+		if ri.Text != "" {
+			fmt.Fprintf(&b, "\n\nproject #%d:\n%s", ri.ProjectID, ri.Text)
+		}
+	}
 	for _, si := range st.Instructions {
 		if si.Text != "" {
 			fmt.Fprintf(&b, "\n\nproject #%d:\n%s", si.ProjectID, prompt.ForemanInstructionsSection(si.Text))
