@@ -536,6 +536,13 @@ func reportGuidanceChanges(ctx context.Context, client *api.Client, root string,
 	if err != nil {
 		return
 	}
+	// The file each role reads is the client's knowledge (project.yaml),
+	// so status names it beside the engine's per-role line (§5.9).
+	for _, role := range engine.Roles {
+		if p, ok := cfg.RoleFiles[role]; ok {
+			fmt.Fprintf(stdout, "instructions.%s: file %s\n", role, p)
+		}
+	}
 	for _, line := range guidanceChangeLines(st, project, cfg, root) {
 		fmt.Fprintln(stdout, line)
 	}

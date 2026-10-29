@@ -119,7 +119,7 @@ func TestProjectGuidanceChangedSinceImport(t *testing.T) {
 		t.Errorf("the stored digests moved before a re-import")
 	}
 	_, status, _ := run1("status")
-	for _, want := range []string{"instructions.worker w.md: changed since the last import", "skill one: changed since the last import", "skill three: added since the last import", "skill two: removed since the last import"} {
+	for _, want := range []string{"instructions.worker: file w.md","instructions.worker w.md: changed since the last import", "skill one: changed since the last import", "skill three: added since the last import", "skill two: removed since the last import"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("status lacks %q:\n%s", want, status)
 		}
