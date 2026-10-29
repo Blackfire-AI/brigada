@@ -451,10 +451,8 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 			text, ok := roles[role]
 			switch {
 			case !ok || strings.TrimSpace(text) != "":
-			case role == engine.RoleWorker:
-				fmt.Fprintf(stdout, "instructions.%s %s is empty: the project's instructions are unset and the default worker text applies\n", role, cfg.RoleFiles[role])
 			default:
-				fmt.Fprintf(stdout, "instructions.%s %s is empty: the role runs on the contract alone\n", role, cfg.RoleFiles[role])
+				fmt.Fprintf(stdout, "instructions.%s %s is empty: empty by choice, the role runs on the contract alone\n", role, cfg.RoleFiles[role])
 			}
 		}
 		// The worker's file is instructions_file spelled in the map

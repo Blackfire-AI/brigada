@@ -164,10 +164,10 @@ needs you:
 task #2 needs_foreman: should the sprocket be blue?
 task #4 reviewing: no reviewer: needs a reviewer of another family than the author (claude); offer an agent of another family to the runner (--agent harness=…) or review by hand
 plan #4 pending_approval
-foreman instructions (project #1): not configured, 0 bytes, sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, generated from 1.0.0, edited true
-plan_review instructions (project #1): not configured, 0 bytes, sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, generated from 1.0.0, edited true
-worker instructions (project #1): not configured, 0 bytes, sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, generated from 1.0.0, edited true
-reviewer instructions (project #1): not configured, 0 bytes, sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, generated from 1.0.0, edited true
+foreman instructions (project #1): not configured
+plan_review instructions (project #1): not configured
+worker instructions (project #1): not configured
+reviewer instructions (project #1): not configured
 `, at(-30*time.Minute))
 	if got := "plans:\n" + lines[1]; got != want {
 		t.Errorf("status sections =\n%s\nwant the golden:\n%s", got, want)
@@ -197,10 +197,10 @@ needs you:
 task #2 needs_foreman: should the sprocket be blue?
 task #4 reviewing: no reviewer: needs a reviewer of another family than the author (claude); offer an agent of another family to the runner (--agent harness=…) or review by hand
 plan #4 pending_approval
-foreman instructions (project #1): not configured, 0 bytes, sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, generated from 1.0.0, edited true
-plan_review instructions (project #1): not configured, 0 bytes, sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, generated from 1.0.0, edited true
-worker instructions (project #1): not configured, 0 bytes, sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, generated from 1.0.0, edited true
-reviewer instructions (project #1): not configured, 0 bytes, sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, generated from 1.0.0, edited true
+foreman instructions (project #1): not configured
+plan_review instructions (project #1): not configured
+worker instructions (project #1): not configured
+reviewer instructions (project #1): not configured
 `, at(-30*time.Minute))
 	if got := "plans:\n" + allLines[1]; got != wantAll {
 		t.Errorf("status --all sections =\n%s\nwant the golden:\n%s", got, wantAll)

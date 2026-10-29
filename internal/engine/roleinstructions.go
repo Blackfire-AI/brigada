@@ -317,14 +317,28 @@ func (e *Engine) SetRoleInstruction(ctx context.Context, repoURL, role, text str
 // a local override does, unless the import explicitly accepted the
 // replacement of that hand-set value, in which case the row follows the
 // settings. When no instructions value is in effect, an imported row is
-// gone with it; a generated or local one stays.
-func syncWorkerInstructionTx(tx *sql.Tx, project int64, row, imported map[string]json.RawMessage, hash string, replacedLocal bool, now time.Time) error {
+// gone with it; a generated or local one stays. An empty worker file
+// (emptyFile) is the one exception: the file is read as the empty-by-choice
+// state (§5.9), so an empty imported row stands for it.
+func syncWorkerInstructionTx(tx *sql.Tx, project int64, row, imported map[string]json.RawMessage, hash string, replacedLocal, emptyFile bool, now time.Time) error {
 	raw, ok := row[SettingInstructions]
 	if !ok {
 		if _, err := tx.Exec("DELETE FROM role_instructions WHERE project_id = ? AND role = ? AND source = ?", project, RoleWorker, SourceImported); err != nil {
 			return fmt.Errorf("clear the imported worker instructions of project %d: %w", project, err)
 		}
-		return nil
+		if !emptyFile {
+			return nil
+		}
+		var source string
+		err := tx.QueryRow("SELECT source FROM role_instructions WHERE project_id = ? AND role = ?", project, RoleWorker).Scan(&source)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+		case err != nil:
+			return fmt.Errorf("read the worker instructions of project %d: %w", project, err)
+		case source == SourceLocal && !replacedLocal:
+			return nil // the user's own mark or text wins
+		}
+		return upsertRoleInstructionTx(tx, project, RoleWorker, "", SourceImported, hash, now)
 	}
 	if _, imp := imported[SettingInstructions]; !imp {
 		return nil // a local override kept its value against the file

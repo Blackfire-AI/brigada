@@ -770,6 +770,9 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 			cfg.Values[SettingInstructions] = raw
 		}
 	}
+	// An empty worker file is the empty-by-choice state (§5.9), not an
+	// absent key: it unsets the setting and leaves an empty imported row.
+	emptyWorkerFile := instructions != nil && strings.TrimSpace(*instructions) == ""
 	// The hash covers the yaml and the instruction text, so a change to the
 	// text alone shows as a changed import.
 	hash := ConfigHashWith(content, instructions)
@@ -928,7 +931,7 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 		// only other keys still dates the row with the new hash; a local
 		// text or an empty-by-choice mark is left alone unless this
 		// import explicitly accepted its replacement.
-		if err := syncWorkerInstructionTx(tx, project, row, newImported, hash, replacedLocal, now); err != nil {
+		if err := syncWorkerInstructionTx(tx, project, row, newImported, hash, replacedLocal, emptyWorkerFile, now); err != nil {
 			return err
 		}
 		v, err := settingsViewTx(tx, project, shownRepo, e.cfg.ForemanWakeBudget)

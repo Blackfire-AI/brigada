@@ -182,3 +182,46 @@ func TestProjectRoleConflictShowsBothTexts(t *testing.T) {
 		t.Errorf("the local override did not stand: %q", l)
 	}
 }
+
+// TestProjectShowRoleStates: project show names the three states of §5.9
+// — not configured for an absent key, empty by choice for an empty role
+// file, the file with its size and digest otherwise — and the import
+// never says an empty worker file lets the default worker text apply.
+func TestProjectShowRoleStates(t *testing.T) {
+	ctx, state := startSettingsEngine(t)
+	write := importRepo(t)
+	run1 := func(args ...string) (int, string, string) { return runWithStdin(t, ctx, state, "", args) }
+
+	write(projectFile("instructions:\n  worker: empty.md\n  reviewer: rev.md\n  foreman: none.md\n"))
+	writeRepoFile(t, "empty.md", "")
+	writeRepoFile(t, "rev.md", "review rules\n")
+	writeRepoFile(t, "none.md", "")
+	code, out, stderr := run1("project", "import", "--yes")
+	if code != 0 {
+		t.Fatalf("import = %d %q %q", code, out, stderr)
+	}
+	for _, role := range []string{"worker", "foreman"} {
+		l := lineWith(out, "instructions."+role+" ")
+		if !strings.Contains(l, "empty by choice") || strings.Contains(l, "default worker text") {
+			t.Errorf("import line for the empty %s file = %q, want empty by choice", role, l)
+		}
+	}
+
+	_, show, _ := run1("project", "show")
+	for prefix, want := range map[string]string{
+		"instructions.worker:":      "instructions.worker: empty by choice, file empty.md",
+		"instructions.foreman:":     "instructions.foreman: empty by choice, file none.md",
+		"instructions.plan_review:": "instructions.plan_review: not configured, file none",
+		"instructions.reviewer:":    "instructions.reviewer: file, file rev.md, 13 bytes, sha256 ",
+	} {
+		if l := lineWith(show, prefix); !strings.HasPrefix(l, want) {
+			t.Errorf("show line %q = %q, want it to start %q\n%s", prefix, l, want, show)
+		}
+	}
+	for _, role := range []string{"worker", "foreman", "plan_review"} {
+		l := lineWith(show, "instructions."+role+":")
+		if strings.Contains(l, "bytes") || strings.Contains(l, "sha256") || strings.Contains(l, "generated from") || strings.Contains(l, "edited") {
+			t.Errorf("%s shows more than its state: %q", role, l)
+		}
+	}
+}
