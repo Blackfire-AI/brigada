@@ -49,7 +49,7 @@ func docPath(rel string) string { return filepath.Join(repoRoot, filepath.FromSl
 // COMPATIBILITY.md and CHANGELOG.md say what checkNewDocs asks for. While it
 // is false the content assertions are proven against sample text only, so
 // the verifier lands green before the docs do.
-const requireNewDocs = false
+const requireNewDocs = true
 
 // --- links and anchors -------------------------------------------------
 

@@ -547,7 +547,7 @@ A project's settings come from three places:
 
 ### `.brigada/project.yaml`, schema 1
 
-The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. Lists are written as a `[a, b]` flow list or as `- item` lines. `schema` and `repo` are required; every other key is optional, and leaving one out keeps its default. An unknown key is an error that lists the valid keys.
+The file uses `key: value` lines, with a role map under `instructions`, one document, at most 64 KiB. Lists are written as a `[a, b]` flow list or as `- item` lines. `schema` and `repo` are required; every other key is optional, and leaving one out keeps its default. An unknown key is an error that lists the valid keys.
 
 | Key | Value | Default | Meaning |
 |---|---|---|---|
@@ -573,7 +573,9 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 | `extra_repos` | list of `"name repo ref"` strings | none | Other repositories checked out read-only beside every task ([section 7](#7-plans-checks-and-reviews)). |
 | `foreman_rotate_tokens` | non-negative integer | `400000` | Input tokens on one foreman turn past which the next turn starts a fresh session; `0` never rotates ([section 11](#session-size-and-rotation)). |
 | `plan_files` | `on` or `off` | `on` | `off` stops the plan-file mirror: no plan file is written or pushed ([The plan file](#the-plan-file)). |
-| `instructions_file` | repo-relative path | none | A text file whose contents become the project's instructions for every worker and reviewer, at most 8192 bytes (see [Project instructions](#project-instructions)). |
+| `instructions` | role-to-path map | none | Role instruction files, keyed by `foreman`, `plan_review`, `worker` and `reviewer` ([Project instructions](#project-instructions)). |
+| `instructions_file` | repo-relative path | none | Legacy alias for `instructions.worker`; setting both is refused. |
+| `skills_dir` | repo-relative path | none | Directory of task skills; an empty value selects `.brigada/skills`. |
 
 An example:
 
@@ -598,7 +600,7 @@ Some keys belong to you and this engine, not to the team. The shared file refuse
 | Key | Default | Meaning |
 |---|---|---|
 | `foreman_wakes_per_day` | `20`, or the config file's value | The daily wake budget, 1 to 1000 ([section 4](#4-while-work-runs); also `brigada budget --wakes N`). |
-| `instructions` | none | A local override of the project-wide instruction text (the old name, still working). |
+| `instructions` | none | Legacy local alias for the worker instruction text. |
 | `instructions.<role>` | none | A local override of one role's instruction text, for `foreman`, `plan_review`, `worker` or `reviewer` (see [Project instructions](#project-instructions)). Not a key of the committed file, where `instructions:` is a map of role files. |
 | `plan_review` | `true` | The plan review before a plan's (or an active plan's amendment's) tasks queue: a `plan_review` job, an agent of a family other than the foreman's, whose verdict starts the plan or sends findings back to the foreman ([section 7](#gates-and-rules)). |
 | `plan_review.tier` | `standard` | The plan reviewer's tier: `light`, `standard` or `heavy`. |
@@ -632,19 +634,34 @@ Only you can run these commands; the foreman has no tool for them.
 
 ### Project instructions
 
+#### What init writes
+
 **Init writes the defaults.** `brigada init` writes the four role files (`.brigada/instructions/foreman.md`, `plan_review.md`, `worker.md`, `reviewer.md`) and the eight default skills (`.brigada/skills/<name>/SKILL.md`) in one pass, and adds the `instructions:` map and `skills_dir:` to `.brigada/project.yaml` (a file that already has them, or the old `instructions_file`, keeps its own). Each generated file carries a marked header, an HTML comment naming the brigada version and the digest of the generated text: `<!-- brigada: version=1.0.0 digest=… -->` as the first line of a role file, and right after the closing `---` of a skill's frontmatter. Import ignores the header; every digest is over the file without it. On a rerun, init rewrites a file that is still exactly what it generated, leaves one you edited (the plan says `edited since version X, new default differs` and names `brigada instructions diff <name>` and `brigada init --take-default <name>`), and recreates one you deleted. A file counts as edited when anything but the header changed, frontmatter included.
 
-A project has one instruction text that brigada puts into every worker and reviewer prompt, whatever the harness. It goes after the worker contract (result block, no pushing, tool scope), which always wins, and before the task spec.
+#### Tuning how brigada's agents judge
 
-- Set it with `instructions_file: .brigada/instructions.md` in the committed file. Import reads the file and sends its text; the file must stay inside the repository.
-- Or set a local override with `brigada project set instructions=@path` (`@-` reads standard input).
-- It is at most 8192 bytes of UTF-8; a longer text is refused, never cut.
-- `project show` and `status` tell you the project has instructions (their size and a digest, not the text).
-- **Per-role texts.** The committed file may instead carry `instructions:` as a map of `foreman`, `plan_review`, `worker` and `reviewer` to repo-relative files (a key with no value means `.brigada/instructions/<role>.md`), and `skills_dir:` (default `.brigada/skills`). `instructions_file` is the old name of `instructions.worker`; naming both is refused. A role key left out is not configured; an empty file is empty by choice.
-- **Which text wins.** A local override (`project set instructions.<role>=…`) beats the last imported file. A pulled change to a file applies only at the next explicit `brigada project import`: over a text that is still the previous import's it applies; over a local override it does not, and import prints a conflict with both texts (to take the file's text, set it with `project set instructions.<role>=@<file>`).
-- **Changed since import.** `project show` and `status` compare the files and skills on disk with the last import and flag each role file or skill that is changed, added or removed. Nothing stored changes until you import again.
-- A task copies the text when it is created, so changing it later does not alter existing tasks.
-- The foreman's own turns do not get the text injected; the foreman reads it through `status` before it plans.
+The `instructions:` map assigns repo-relative files to `foreman`, `plan_review`, `worker` and `reviewer`. An empty role value selects `.brigada/instructions/<role>.md`; an omitted role is not configured, and an empty file is empty by choice. `instructions_file` is the legacy alias for `instructions.worker`: setting both is refused. Import reads regular files inside the repository, resolving symlinks, and sends the text to the engine. Each text must be UTF-8 without NUL, at most 8192 bytes; invalid or oversized input is refused without truncation.
+
+The versioned contract always wins. Workers receive their role text before the task spec; reviewers receive their own text and the worker text as the convention the author followed. Foreman turns receive the foreman text, and plan reviews receive both the plan review text and the foreman's convention. Worker and reviewer texts and selected skills are copied when a task is created; later imports do not change a started task. A plan amendment touching a task that has not started resolves its guidance again. Foreman turns and plan reviews resolve their guidance for each turn or job.
+
+Set a local override with `brigada project set instructions.<role>=@path` (`@-` reads standard input); `instructions` is the legacy worker alias. A local override wins over a later import, which reports a conflict. To take a file's text, set that role from the file. `project show` and `status` show each role's state, source, size, digest, generation version and edited state when known, and flag changes since import. The foreman's `status` tool can return the texts as data.
+
+Compare your edits and new defaults with `brigada instructions diff <role>`; reset a generated file with `brigada init --take-default <role>`, then import it. Both commands accept a default skill name as well as a role.
+
+### Task skills
+
+Skills supply task-specific project know-how. Write one in `.brigada/skills/<name>/SKILL.md` (or the configured `skills_dir`), with frontmatter containing `name` matching the directory, a `description`, and optional `for: worker`, `for: reviewer` or `for: both` (the default). Names use lowercase letters, digits and hyphens, at most 64 characters. For example:
+
+```markdown
+---
+name: api-change
+description: Changing an API endpoint
+for: both
+---
+Check compatibility and update the API documentation.
+```
+
+Import after editing skills. Each file is at most 4096 bytes of UTF-8 without NUL; import refuses invalid files rather than truncating them. Combined instruction and applicable skill text is limited to 16384 bytes for a worker prompt and 24576 for a reviewer prompt. The foreman sees imported names and descriptions in status and picks an ordered list for each task; you can ask it to use or omit specific skills. The plan reviewer sees the picks and descriptions. Skills apply after role instructions and before the task spec, filtered by `for:`; the reviewer is told when a worker-only skill was given to the author. Unknown or repeated names and over-limit prompts are refused. A task retains its recorded skills through work and review; status shows their names and the plan file records them.
 
 ### The foreman, effort and tools on agents
 
@@ -1196,7 +1213,7 @@ Every key that `brigada project set` and `project show` know, with each default 
 | `foreman_rotate_tokens` | `400000` | yes |
 | `foreman_wakes_per_day` | `20`, or the config file's value | no, local only |
 | `plan_files` | `on` | yes |
-| `instructions` | `none` | no, local only (the file's counterpart is `instructions_file`) |
+| `instructions` | `none` | no, local only (the file's counterparts are `instructions.worker` and the legacy `instructions_file`) |
 
 ## 14. Command reference
 
