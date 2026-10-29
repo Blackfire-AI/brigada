@@ -106,7 +106,7 @@ tasks:
     base: "docs_check"
     continue: "docs_check"
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 235
@@ -197,7 +197,7 @@ tasks:
     base: "docs_verify"
     continue: "docs_verify"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-242"
     rounds: 2
   - id: 243
