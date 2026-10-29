@@ -7,7 +7,7 @@ title: "#131: the foreman reads only its checkout and its project's state; a rea
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-10-29T16:22:24.777979Z
-updated: 2026-10-29T16:45:36.279495Z
+updated: 2026-10-29T16:56:43.246277Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -42,7 +42,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 272
