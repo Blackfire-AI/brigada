@@ -64,7 +64,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: done
     branch: "brigada/task-279-r1"
     rounds: 0
   - id: 280
@@ -110,7 +110,7 @@ tasks:
     continue: "land_retry"
     tier: heavy
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 284
