@@ -254,6 +254,11 @@ type Config struct {
 	// repo at repoURL; a standalone review's author-family fallback.
 	// Nil keeps the git-backed default; tests inject it.
 	BranchTrailers func(ctx context.Context, repoURL, base, branch string) (string, error)
+	// IssueFetch reads one issue or pull request of the repository at
+	// repoURL (§12.2 issue_read): GET requests alone. Nil keeps the
+	// gh-backed default — the user's own gh login on the engine's host;
+	// tests inject it so no test reaches the network.
+	IssueFetch func(ctx context.Context, repoURL string, number int, comments bool) (*Issue, error)
 	// Warnf logs the warnings of work the engine does best-effort, the
 	// plan-file mirror's failed pushes among them; nil logs to the
 	// standard logger.
@@ -300,6 +305,7 @@ func DefaultConfig() Config {
 		SnapshotEvery:     defaultSnapshotEvery,
 		SnapshotKeep:      defaultSnapshotKeep,
 		Warnf:             log.Printf,
+		IssueFetch:        ghIssueFetch,
 	}
 }
 
@@ -463,6 +469,9 @@ func New(s *store.Store, cfg Config) *Engine {
 	def.DefaultReviewer = cfg.DefaultReviewer
 	if cfg.BranchTrailers != nil {
 		def.BranchTrailers = cfg.BranchTrailers
+	}
+	if cfg.IssueFetch != nil {
+		def.IssueFetch = cfg.IssueFetch
 	}
 	if cfg.SnapshotEvery > 0 {
 		def.SnapshotEvery = cfg.SnapshotEvery

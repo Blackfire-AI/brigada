@@ -635,6 +635,24 @@ func (c *Client) ForemanEvents(ctx context.Context, wait time.Duration) (engine.
 	return engine.ForemanInbox{Events: nonNil(out.Events), UserMessages: out.UserMessages}, nil
 }
 
+// Issue reads one issue or pull request of the token's own project
+// (§12.1 issues, §12.2 issue_read): number names it on the project's
+// own repository, which the token's project alone picks — never an
+// argument — and comments asks for the comments too. A refusal carries
+// the reason in its message: the repository is not on GitHub, gh is
+// missing or not logged in, the number does not exist.
+func (c *Client) Issue(ctx context.Context, number int, comments bool) (engine.Issue, error) {
+	path := "/v1/issues/" + strconv.Itoa(number)
+	if comments {
+		path += "?comments=1"
+	}
+	var out engine.Issue
+	if err := c.call(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return engine.Issue{}, err
+	}
+	return out, nil
+}
+
 // AttachResult is the attach answer as the client reads it (§4.2 item
 // 1): a created hold carries everything the attached session needs;
 // the busy answer carries what made it busy — the live turn's job id,
