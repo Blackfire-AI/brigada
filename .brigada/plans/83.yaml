@@ -82,7 +82,7 @@ tasks:
     base: "prompts"
     tier: heavy
     effort: medium
-    state: done
+    state: needs_foreman
     branch: "brigada/task-258"
     rounds: 0
   - id: 259
