@@ -1283,9 +1283,12 @@ func reviewAgentQualifies(id int64, family, classes, excludeFamily string, exclu
 // test (issue #126): every family step of the ladder qualifies at once —
 // a known different family, the author's own on another agent, the
 // author's own agent — and the lease's step choice sorts them. An author
-// of unknown family keeps today's rule: any review-class agent but the
-// author's own. An agent of unknown family never serves an author of a
-// known one, so no unknown relationship is ever a placement.
+// of unknown family keeps today's rule, any review-class agent but the
+// author's own: "any available review-class agent ... as today" keeps
+// the author out, and the ladder's own-agent step is reached through a
+// known family alone — a choice, so the author never reviews its own
+// work unnamed by any family. An agent of unknown family never serves an
+// author of a known one, so no unknown relationship is ever a placement.
 func reviewAgentQualifiesPrefer(id int64, family, classes, authorFamily string, author int64) bool {
 	switch {
 	case !agentOffersClass(classes, string(KindReview)):

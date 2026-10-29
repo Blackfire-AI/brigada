@@ -508,7 +508,7 @@ func (e *Engine) queuePlanReviewRoundTx(tx *sql.Tx, project, plan, round int64, 
 		}
 		reason := "no agent offers the review class"
 		if family != "" && !familyPrefer(e.cfg.Review.Family) {
-			reason = "no agent of a family other than the foreman's offers the review class"
+			reason = "no agent of a family other than the foreman's offers the review class, review.family=require"
 		}
 		return e.planReviewConcludedTx(tx, project, plan, 0, planReviewSkipped, "", reason, now, true)
 	}

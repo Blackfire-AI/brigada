@@ -45,6 +45,8 @@ type ReviewBranchResult struct {
 	// when it could not be told and the default reviewer was taken.
 	Family string `json:"family,omitempty"`
 	// Source is where the family came from: job, trailer or default.
+	// Empty when no witness named one and no default reviewer was
+	// configured — the open placement prefer makes (issue #126).
 	Source string `json:"source"`
 }
 
@@ -129,18 +131,23 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 		}
 		if family == "" {
 			source, harness = reviewSourceDefault, e.cfg.DefaultReviewer
-			// An author's family that cannot be told needs a default
-			// reviewer under require alone (issue #126): under prefer any
-			// ready review-class agent may take the review.
-			if harness == "" && !familyPrefer(e.cfg.Review.Family) {
-				onlyAuthor, err := onlyAuthorReviewerTx(tx, review)
-				if err != nil {
-					return err
+			if harness == "" {
+				// An author's family that cannot be told needs a default
+				// reviewer under require alone (issue #126): under prefer
+				// any ready review-class agent may take the review, and
+				// with no witness that named the family — and no default
+				// reviewer either — the result claims no source.
+				if !familyPrefer(e.cfg.Review.Family) {
+					onlyAuthor, err := onlyAuthorReviewerTx(tx, review)
+					if err != nil {
+						return err
+					}
+					if onlyAuthor {
+						return fmt.Errorf("%w: %s", ErrNoReviewer, noReviewerAuthor)
+					}
+					return fmt.Errorf("%w: the author's family of %s is unknown (no work job of the branch, no known Co-Authored-By trailer) and no default_reviewer is configured", ErrNoReviewer, branch)
 				}
-				if onlyAuthor {
-					return fmt.Errorf("%w: %s", ErrNoReviewer, noReviewerAuthor)
-				}
-				return fmt.Errorf("%w: the author's family of %s is unknown (no work job of the branch, no known Co-Authored-By trailer) and no default_reviewer is configured", ErrNoReviewer, branch)
+				source = ""
 			}
 		}
 		review.ExcludeFamily, review.Harness = family, harness
@@ -158,7 +165,7 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 				return fmt.Errorf("%w: %s", ErrNoReviewer, noReviewerAuthor)
 			}
 			if family != "" && !familyPrefer(e.cfg.Review.Family) {
-				return fmt.Errorf("%w: no agent of a family other than %q is ready and offers the review class", ErrNoReviewer, family)
+				return fmt.Errorf("%w: no agent of a family other than %q is ready and offers the review class, review.family=require", ErrNoReviewer, family)
 			}
 			if harness != "" {
 				return fmt.Errorf("%w: no ready agent of the default reviewer's harness %q offers the review class", ErrNoReviewer, harness)

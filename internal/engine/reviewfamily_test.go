@@ -214,8 +214,8 @@ func TestPreferBranchReviewPlacedWithoutAFamily(t *testing.T) {
 		if err != nil {
 			t.Fatalf("review the branch of an unknown family: %v", err)
 		}
-		if res.Family != "" || res.Source != reviewSourceDefault {
-			t.Errorf("result = %+v, want no family and the default source", res)
+		if res.Family != "" || res.Source != "" {
+			t.Errorf("result = %+v, want no family and no source: nothing named one", res)
 		}
 		g := e.leaseAny(reviewer)
 		if g == nil || g.JobID != res.JobID {
