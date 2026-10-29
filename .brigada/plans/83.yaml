@@ -104,7 +104,7 @@ tasks:
     deps: ["fallback"]
     base: "fallback"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-260-r3"
     rounds: 0
   - id: 261
@@ -185,7 +185,7 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 268
