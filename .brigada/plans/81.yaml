@@ -106,9 +106,9 @@ tasks:
     base: "docs_check"
     continue: "docs_check"
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-234"
-    rounds: 2
+    rounds: 0
   - id: 235
     name: "store_skills"
     title: "Store: skills, role snapshots on tasks, per-prompt bounds, status fields"
