@@ -141,8 +141,8 @@ tasks:
     base: "init"
     continue: "init"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-237"
     rounds: 0
   - id: 238
     name: "store_status"
