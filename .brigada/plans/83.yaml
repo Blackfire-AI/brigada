@@ -5,9 +5,9 @@
 plan: 83
 title: "Bring role instructions and task skills to design §5.9/§5.10 (#119, #117); fix #128, #127, #129"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: active
 created: 2026-10-29T14:08:29.976259Z
-updated: 2026-10-29T14:24:15.417155Z
+updated: 2026-10-29T14:26:47.551329Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -39,7 +39,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 255
@@ -70,7 +70,7 @@ tasks:
     deps: ["land_ready"]
     base: "land_ready"
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 258
@@ -93,7 +93,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 260
@@ -114,7 +114,7 @@ tasks:
     base: "land_target_prequeue"
     continue: "land_target_prequeue"
     effort: medium
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 262
@@ -125,14 +125,14 @@ tasks:
     base: "land_target_status"
     continue: "land_target_status"
     effort: medium
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 263
     name: "changelog"
     title: "CHANGELOG entries for plan 83"
     class: "implement"
-    deps: ["cli", "missing_section", "land_target_prompt"]
+    deps: ["cli", "missing_section", "land_target_design"]
     base: ""
     tier: light
     effort: medium
@@ -149,6 +149,18 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: pending
+    state: cancelled
+    branch: ""
+    rounds: 0
+  - id: 265
+    name: "land_target_design"
+    title: "#127 design: land-target sync protocol in docs/design.md §7.1 (docs only)"
+    class: "implement"
+    deps: ["land_ready"]
+    base: "land_ready"
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    state: ready
     branch: ""
     rounds: 0
