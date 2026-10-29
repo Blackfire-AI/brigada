@@ -34,7 +34,7 @@ CI runs these; run them before you push:
 - `api`: the engine's JSON HTTP API, on a Unix socket (remote TLS is backlog)
 - `caps`: the concurrency-caps model
 - `engine`: the mailbox, job creation from ready tasks, and the routine rules
-- `foreman`: the foreman's fixed instructions and wake template
+- `foreman`: the foreman's fixed contract and wake template. The foreman's instructions text is the project's own `.brigada/instructions/foreman.md` (the shipped default lives in `internal/defaults`), read through the store, not from this package
 - `history`: the per-project timeline of what happened
 - `landing`: the git side of landing an approved task (§7.1)
 - `lifecycle`: the engine's life as a process: lock, start on demand, idle exit
