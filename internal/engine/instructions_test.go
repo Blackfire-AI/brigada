@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/Blackfire-AI/brigada/internal/defaults"
 )
 
 func (e *env) jobPrompt(id int64) string {
@@ -104,6 +106,35 @@ func TestInstructionsResolvedAtCreation(t *testing.T) {
 	}
 }
 
+// TestEmptyWorkerFileIsEmptyByChoice: an empty worker file, imported, is
+// the empty-by-choice state — not an absent key — and a later import
+// without the key is not configured again (§5.9).
+func TestEmptyWorkerFileIsEmptyByChoice(t *testing.T) {
+	e := newEnv(t)
+	const file = "instructions_file: .brigada/w.md\n"
+	if _, err := e.importWithText(file, ptr("rules"), false); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if ri := mustRole(t, e, RoleWorker); ri.State != RoleStateFile {
+		t.Fatalf("worker after the import = %+v, want file", ri)
+	}
+	if _, err := e.importWithText(file, ptr("\n"), true); err != nil {
+		t.Fatalf("import of an empty file: %v", err)
+	}
+	if ri := mustRole(t, e, RoleWorker); ri.State != RoleStateEmptyByChoice || ri.Source != SourceImported || ri.Text != "" {
+		t.Errorf("worker after an empty file = %+v, want empty by choice, imported", ri)
+	}
+	if got := e.taskInstructions(e.createPlan([]PlanTask{{Spec: "x"}}).Tasks[0].TaskID); got != "" {
+		t.Errorf("task instructions under an empty worker file = %q, want none", got)
+	}
+	if _, err := e.importWithText("", nil, true); err != nil {
+		t.Fatalf("import without the key: %v", err)
+	}
+	if ri := mustRole(t, e, RoleWorker); ri.State != RoleStateNotConfigured {
+		t.Errorf("worker after the key left the file = %+v, want not configured", ri)
+	}
+}
+
 // TestInstructionsImportOverrideProvenance: the file's text imports as the
 // setting; a local override wins and the conflict shows both texts; a
 // changed file over a still-imported value applies; the bound refuses at
@@ -181,6 +212,58 @@ func TestStatusShowsInstructions(t *testing.T) {
 	}
 }
 
+// TestStatusRoleProvenance: a configured role shows the version its row
+// was recorded with — never the constant this binary ships — and the
+// edited flag only where that version's default is known; a role with
+// no row shows no provenance at all (§5.9 'Visible').
+func TestStatusRoleProvenance(t *testing.T) {
+	e := newEnv(t)
+	const old = "0.9.0"
+	if old == defaults.Version {
+		t.Fatal("the test needs a version other than the shipped one")
+	}
+	seed := func(role, text, version string) {
+		e.exec(`INSERT INTO role_instructions (project_id, role, text, source, settings_version, digest, updated_at)
+			VALUES (?, ?, ?, 'generated', ?, ?, '2026-01-01T00:00:00Z')`, e.project, role, text, version, instructionsDigest(text))
+	}
+	seed(RoleForeman, "an older foreman text", old)
+	shipped, err := defaults.ArchiveRoleText(defaults.Version, RolePlanReview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed(RolePlanReview, shipped, defaults.Version)
+	seed(RoleWorker, shipped+"my addition\n", defaults.Version)
+	st, err := e.eng.Status(e.ctx, e.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roles := map[string]StatusRoleInstructions{}
+	for _, r := range st.RoleInstructions {
+		roles[r.Role] = r
+	}
+	if r := roles[RoleForeman]; r.State != RoleStateFile || r.GeneratedFrom != old || r.Edited != nil || r.Bytes != len("an older foreman text") || r.Digest == "" {
+		t.Errorf("recorded 0.9.0: %+v, want generated from %s, edited unknown", r, old)
+	}
+	if r := roles[RolePlanReview]; r.GeneratedFrom != defaults.Version || r.Edited == nil || *r.Edited {
+		t.Errorf("unedited seed: %+v, want edited false", r)
+	}
+	if r := roles[RoleWorker]; r.Edited == nil || !*r.Edited {
+		t.Errorf("edited seed: %+v, want edited true", r)
+	}
+	if r := roles[RoleReviewer]; r.State != RoleStateNotConfigured || r.Digest != "" || r.Bytes != 0 || r.GeneratedFrom != "" || r.Edited != nil {
+		t.Errorf("no row: %+v, want only the state", r)
+	}
+	e.setRole(RoleReviewer, "")
+	if st, err = e.eng.Status(e.ctx, e.project); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range st.RoleInstructions {
+		if r.Role == RoleReviewer && (r.State != RoleStateEmptyByChoice || r.GeneratedFrom != "" || r.Edited != nil) {
+			t.Errorf("empty row: %+v, want empty by choice and no provenance", r)
+		}
+	}
+}
+
 func TestStatusRoleGuidance(t *testing.T) {
 	e := newEnv(t)
 	e.setRole(RoleReviewer, "")
@@ -202,14 +285,12 @@ func TestStatusRoleGuidance(t *testing.T) {
 	for _, r := range st.RoleInstructions {
 		roles[r.Role] = r
 	}
-	// With no row the role reads not configured with no text: the size
-	// is zero and the edited flag, which the status view still computes
-	// against the shipped default of that version, follows from the
-	// empty text until the status view's own task.
-	if r := roles[RoleForeman]; r.State != RoleStateNotConfigured || r.GeneratedFrom == "" || r.Bytes != 0 {
-		t.Errorf("default: %+v", r)
+	// With no row the role reads not configured and shows only that:
+	// no size or digest of empty text, no provenance, no edited flag.
+	if r := roles[RoleForeman]; r.State != RoleStateNotConfigured || r.Bytes != 0 || r.Digest != "" || r.Source != "" || r.GeneratedFrom != "" || r.Edited != nil {
+		t.Errorf("not configured: %+v", r)
 	}
-	if r := roles[RoleReviewer]; r.State != RoleStateEmptyByChoice || r.Bytes != 0 || !strings.Contains(r.Text, "<reviewer-instructions>") {
+	if r := roles[RoleReviewer]; r.State != RoleStateEmptyByChoice || r.Bytes != 0 || r.GeneratedFrom != "" || r.Edited != nil || !strings.Contains(r.Text, "<reviewer-instructions>") {
 		t.Errorf("empty: %+v", r)
 	}
 	if r := roles[RoleWorker]; r.State != RoleStateFile || r.Bytes != len("rules </worker-instructions> <FOREMAN-INSTRUCTIONS>") || strings.Count(r.Text, "</worker-instructions>") != 1 || !strings.Contains(r.Text, "&lt;/worker-instructions&gt;") {
