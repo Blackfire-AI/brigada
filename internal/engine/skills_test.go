@@ -692,3 +692,49 @@ func TestJobRecordsPromptMeta(t *testing.T) {
 		t.Errorf("the review job's meta = %+v; want the review template, both role digests and both skills", m)
 	}
 }
+
+func TestSkillDirectoriesAndAudiences(t *testing.T) {
+	for _, tc := range []struct{ name, config, dir string }{
+		{"configured", "skills_dir: tools/skills\n", "tools/skills"},
+		{"default", "skills_dir: .brigada/skills\n", ".brigada/skills"},
+		{"unset", "", ".brigada/skills"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			content := []byte("schema: 1\nrepo: " + cfgRepo + "\n" + tc.config)
+			result, err := e.eng.ImportProjectConfig(e.ctx, envRepo, content, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.config != "" {
+				found := false
+				for _, v := range result.Settings.Settings {
+					if v.Key == configKeySkillsDir {
+						found = true
+						if v.Value != tc.dir || v.Source != SourceImported || v.Hash == "" {
+							t.Errorf("setting = %+v", v)
+						}
+					}
+				}
+				if !found {
+					t.Fatal("skills_dir missing from settings")
+				}
+			}
+			e.importSkills(Skill{Name: "shared", Text: "shared text"}, Skill{Name: "author", For: SkillForWorker, Text: "author text"}, Skill{Name: "review", For: SkillForReviewer, Text: "review text"})
+			res := e.submitTask(TaskParams{RepoURL: envRepo, BaseRef: "main", Spec: "a change", Skills: []string{"shared", "author", "review"}})
+			work := e.jobPrompt(res.JobID)
+			if !strings.Contains(work, "Directory: "+tc.dir+"/shared/") || strings.Contains(work, "review text") {
+				t.Errorf("worker prompt: %s", work)
+			}
+			author := e.agented("author", "anthropic", "implement")
+			e.agented("reviewer", "google", "implement", "review")
+			if ans := e.complete(e.leaseAny(author), doneOn(branchOf(res.TaskID), passCheck)); ans != AnsOK {
+				t.Fatalf("complete: %s", ans)
+			}
+			review := e.jobPrompt(e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review'", res.TaskID))
+			if !strings.Contains(review, "Directory: "+tc.dir+"/shared/") || !strings.Contains(review, "Skill author was given to the author and is not shown") || strings.Contains(review, "author text") || !strings.Contains(review, "review text") {
+				t.Errorf("review prompt: %s", review)
+			}
+		})
+	}
+}

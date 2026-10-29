@@ -112,6 +112,7 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingForemanWakesPerDay, Value: "20", Default: true, Source: SourceDefault},
 		{Key: SettingPlanFiles, Value: "on", Default: true, Source: SourceDefault},
 		{Key: SettingInstructions, Value: "none", Default: true, Source: SourceDefault},
+		{Key: configKeySkillsDir, Value: DefaultSkillsDir, Default: true, Source: SourceDefault},
 	}
 	if len(got.Settings) != len(want) {
 		t.Fatalf("settings = %+v, want %+v", got.Settings, want)
@@ -125,7 +126,7 @@ func TestProjectSettingsView(t *testing.T) {
 		t.Errorf("stored settings %s lost an unrelated key", raw)
 	}
 	read, err := e.eng.ProjectSettings(e.ctx, envRepo)
-	if err != nil || read == nil || len(read.Settings) != len(SettingKeys) || read.Settings[0].Value != "3" {
+	if err != nil || read == nil || len(read.Settings) != len(SettingKeys)+1 || read.Settings[0].Value != "3" {
 		t.Fatalf("read = %+v, %v", read, err)
 	}
 	if none, err := e.eng.ProjectSettings(e.ctx, "https://example.invalid/none.git"); err != nil || none != nil {

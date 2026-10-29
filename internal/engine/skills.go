@@ -515,28 +515,36 @@ func reviewerGuidance(ti TaskInstructions) []prompt.Option {
 		prompt.WithReviewerInstructions(ti.Reviewer.Text), prompt.WithSkills(reviewerPromptSkills(ti))}
 }
 
-// workerPromptSkills copies the skills a worker prompt carries: every
-// one not meant for the reviewer alone.
+// workerPromptSkills preserves the audience for prompt filtering.
 func workerPromptSkills(ti TaskInstructions) []prompt.Skill {
 	var out []prompt.Skill
 	for _, s := range ti.Skills {
-		if s.For != SkillForReviewer {
-			out = append(out, prompt.Skill{Name: s.Name, Text: s.Text})
-		}
+		out = append(out, prompt.Skill{Name: s.Name, For: s.For, Text: s.Text})
 	}
 	return out
 }
 
-// reviewerPromptSkills copies the skills a review prompt carries: every
-// one not meant for the worker alone.
+// reviewerPromptSkills also carries worker-only names for the omission note.
 func reviewerPromptSkills(ti TaskInstructions) []prompt.Skill {
-	var out []prompt.Skill
-	for _, s := range ti.Skills {
-		if s.For != SkillForWorker {
-			out = append(out, prompt.Skill{Name: s.Name, Text: s.Text})
+	return workerPromptSkills(ti)
+}
+
+// taskSkillsDirTx reads the current project setting, not the task snapshot.
+func taskSkillsDirTx(tx *sql.Tx, taskID int64) (string, error) {
+	var raw string
+	if err := tx.QueryRow(`SELECT p.settings FROM projects p JOIN plans pl ON pl.project_id = p.id JOIN tasks t ON t.plan_id = pl.id WHERE t.id = ?`, taskID).Scan(&raw); err != nil {
+		return "", err
+	}
+	var settings map[string]json.RawMessage
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+			return "", err
 		}
 	}
-	return out
+	if dir, ok := rawString(settings[configKeySkillsDir]); ok && dir != "" {
+		return dir, nil
+	}
+	return DefaultSkillsDir, nil
 }
 
 // taskWorkerGuidanceTx reads the snapshot a task recorded as a worker
@@ -549,7 +557,11 @@ func taskWorkerGuidanceTx(tx *sql.Tx, taskID int64) ([]prompt.Option, string, er
 	if err != nil {
 		return nil, "", err
 	}
-	return workerGuidance(ti), marshalPromptMeta(workerPromptMeta(ti)), nil
+	dir, err := taskSkillsDirTx(tx, taskID)
+	if err != nil {
+		return nil, "", err
+	}
+	return append(workerGuidance(ti), prompt.WithSkillsDir(dir)), marshalPromptMeta(workerPromptMeta(ti)), nil
 }
 
 // taskReviewerGuidanceTx reads the snapshot a task recorded as a review
@@ -561,7 +573,11 @@ func taskReviewerGuidanceTx(tx *sql.Tx, taskID int64) ([]prompt.Option, string, 
 	if err != nil {
 		return nil, "", err
 	}
-	return reviewerGuidance(ti), marshalPromptMeta(reviewerPromptMeta(ti)), nil
+	dir, err := taskSkillsDirTx(tx, taskID)
+	if err != nil {
+		return nil, "", err
+	}
+	return append(reviewerGuidance(ti), prompt.WithSkillsDir(dir)), marshalPromptMeta(reviewerPromptMeta(ti)), nil
 }
 
 // reresolveTaskInstructionsTx re-resolves what a task that has not
