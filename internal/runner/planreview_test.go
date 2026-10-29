@@ -102,12 +102,15 @@ func (f *planReviewFixture) assertReviewerSaw(t *testing.T) {
 	saw := reviewerMarker(t, f.markers, "pr-prompt")
 	for _, want := range []string{
 		"<plan-review-input>", "the spec of task a", "the spec of task b",
-		"already on that ref", "```json",
+		"End your final message with exactly one JSON verdict block", "```json",
 		`head of "main", the project's default branch`,
 	} {
 		if !strings.Contains(saw, want) {
 			t.Errorf("the plan review prompt lacks %q:\n%s", want, saw)
 		}
+	}
+	if strings.Contains(saw, "already on that ref") {
+		t.Error("unconfigured plan review carries a hard-coded judgment check")
 	}
 	if head := strings.TrimSpace(reviewerMarker(t, f.markers, "pr-head")); head != f.main {
 		t.Errorf("the plan review worktree sat at %q, want main %q", head, f.main)
