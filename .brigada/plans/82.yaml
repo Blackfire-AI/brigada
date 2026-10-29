@@ -76,8 +76,8 @@ tasks:
     base: "fix122"
     effort: medium
     caps: {restart: 2}
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-249"
     rounds: 0
   - id: 250
     name: "checkout122"
@@ -107,6 +107,6 @@ tasks:
     deps: ["fix122"]
     base: "fix122"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
