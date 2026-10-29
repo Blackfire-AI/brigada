@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
 )
@@ -55,6 +56,22 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id identit
 			}
 		}
 		st.CompareInstructionFileDigests(project, digests)
+		skills := make(map[string]engine.SkillFileDigest)
+		for key, values := range r.URL.Query() {
+			if len(values) == 0 {
+				continue
+			}
+			if name, ok := strings.CutPrefix(key, "skill_"); ok {
+				d := skills[name]
+				d.Digest = values[0]
+				skills[name] = d
+			} else if name, ok := strings.CutPrefix(key, "skilltree_"); ok {
+				d := skills[name]
+				d.Tree = values[0]
+				skills[name] = d
+			}
+		}
+		st.CompareSkillFileDigests(project, skills)
 	}
 	writeJSON(w, http.StatusOK, st)
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
 )
@@ -111,6 +112,12 @@ func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request, _ i
 			return
 		}
 	}
+	if req.Skills != nil {
+		if err := engine.ValidateSkills(*req.Skills); err != nil {
+			writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+			return
+		}
+	}
 	got, err := s.eng.ImportProjectConfigWith(r.Context(), req.RepoURL, req.Content, req.Instructions, req.Accept)
 	if err != nil {
 		if errors.Is(err, engine.ErrInvalidSetting) || errors.Is(err, engine.ErrInvalidRepoURL) {
@@ -138,6 +145,16 @@ func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request, _ i
 				return
 			}
 		}
+		if req.Skills != nil {
+			if _, err := s.eng.ImportSkills(r.Context(), req.RepoURL, *req.Skills); err != nil {
+				if errors.Is(err, engine.ErrInvalidSetting) {
+					writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+					return
+				}
+				s.writeInternal(w, r, "import the skills", err)
+				return
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, got)
 }
@@ -156,6 +173,9 @@ type importRequest struct {
 	// names, read by the client (§5.9). A role absent is not configured;
 	// an empty text is empty by choice.
 	Roles map[string]string `json:"roles,omitempty"`
+	// Skills is every skill the client parsed under skills_dir (§5.10);
+	// nil when the file names no skills_dir, [] for a directory with none.
+	Skills *[]engine.Skill `json:"skills,omitempty"`
 }
 
 // ImportProjectConfig sends a project.yaml's content for import. With
@@ -175,11 +195,49 @@ func (c *Client) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 // nested instructions map names role files: roles holds the text the
 // client read for each (§5.9).
 func (c *Client) ImportProjectConfigRoles(ctx context.Context, repoURL string, content []byte, instructions *string, roles map[string]string, accept bool) (engine.ImportResult, error) {
+	return c.ImportProjectConfigFull(ctx, repoURL, content, instructions, roles, nil, accept)
+}
+
+// ImportProjectConfigFull is ImportProjectConfigRoles for a file that
+// names a skills_dir (§5.10): skills, when not nil, is every skill the
+// client parsed under it and replaces the project's set; an empty set
+// drops them all.
+func (c *Client) ImportProjectConfigFull(ctx context.Context, repoURL string, content []byte, instructions *string, roles map[string]string, skills *[]engine.Skill, accept bool) (engine.ImportResult, error) {
 	var out engine.ImportResult
-	if err := c.call(ctx, http.MethodPut, "/v1/projects/import", importRequest{RepoURL: repoURL, Content: content, Accept: accept, Instructions: instructions, Roles: roles}, &out); err != nil {
+	if err := c.call(ctx, http.MethodPut, "/v1/projects/import", importRequest{RepoURL: repoURL, Content: content, Accept: accept, Instructions: instructions, Roles: roles, Skills: skills}, &out); err != nil {
 		return engine.ImportResult{}, err
 	}
 	return out, nil
+}
+
+// FileDigests are the client's current digests of the files a project.yaml
+// names (§5.9, §5.10), each over the file text without its version header.
+type FileDigests struct {
+	// Roles maps a role to the digest of its file.
+	Roles map[string]string
+	// Skills maps a skill name to the digests of its SKILL.md and its tree.
+	Skills map[string]engine.SkillFileDigest
+}
+
+// StatusWithFileDigests is Status for one project with the client's current
+// file digests, so the engine can flag what changed since import. The
+// stored snapshots are not touched.
+func (c *Client) StatusWithFileDigests(ctx context.Context, project int64, d FileDigests) (Status, error) {
+	q := url.Values{"project": {strconv.FormatInt(project, 10)}}
+	for role, digest := range d.Roles {
+		q.Set("digest_"+role, digest)
+	}
+	for name, sd := range d.Skills {
+		q.Set("skill_"+name, sd.Digest)
+		if sd.Tree != "" {
+			q.Set("skilltree_"+name, sd.Tree)
+		}
+	}
+	var st Status
+	if err := c.call(ctx, http.MethodGet, "/v1/status?"+q.Encode(), nil, &st); err != nil {
+		return Status{}, err
+	}
+	return st, nil
 }
 
 // ProjectSettings reads the repo's settings. The API's 404 — the repo has

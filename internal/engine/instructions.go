@@ -146,6 +146,10 @@ type StatusSkill struct {
 	Description string `json:"description"`
 	Digest      string `json:"digest"`
 	TimesUsed   int    `json:"times_used"`
+	TreeDigest  string `json:"tree_digest,omitempty"`
+	// ChangedSinceImport compares the client's current file and tree
+	// digests with the imported ones; nil when the client sent none.
+	ChangedSinceImport *bool `json:"changed_since_import"`
 }
 
 func statusGuidanceTx(tx *sql.Tx, project int64, withText bool) ([]StatusRoleInstructions, []StatusSkill, error) {
@@ -199,7 +203,7 @@ func statusGuidanceTx(tx *sql.Tx, project int64, withText bool) ([]StatusRoleIns
 			}
 			roles = append(roles, s)
 		}
-		sr, err := tx.Query(`SELECT s.name, s.description, s.digest,
+		sr, err := tx.Query(`SELECT s.name, s.description, s.digest, s.tree_digest,
    (SELECT count(*) FROM tasks t JOIN plans p ON p.id = t.plan_id
     WHERE p.project_id = s.project_id AND t.skills != '' AND EXISTS
     (SELECT 1 FROM json_each(t.skills) j WHERE json_extract(j.value, '$.name') = s.name))
@@ -209,7 +213,7 @@ func statusGuidanceTx(tx *sql.Tx, project int64, withText bool) ([]StatusRoleIns
 		}
 		for sr.Next() {
 			s := StatusSkill{ProjectID: p.id}
-			if err := sr.Scan(&s.Name, &s.Description, &s.Digest, &s.TimesUsed); err != nil {
+			if err := sr.Scan(&s.Name, &s.Description, &s.Digest, &s.TreeDigest, &s.TimesUsed); err != nil {
 				sr.Close()
 				return nil, nil, err
 			}

@@ -111,6 +111,30 @@ type StatusInfo struct {
 	Skills           []StatusSkill            `json:"skills,omitempty"`
 }
 
+// SkillFileDigest is a client's current digests of one skill directory: of
+// its SKILL.md and of the whole tree (§5.10), each over the file text
+// without the version header.
+type SkillFileDigest struct {
+	Digest string `json:"digest"`
+	Tree   string `json:"tree,omitempty"`
+}
+
+// CompareSkillFileDigests applies skill digests supplied by a client to a
+// single project's status. A skill the client sent no digest for stays
+// unknown; the stored snapshot is never touched.
+func (s *StatusInfo) CompareSkillFileDigests(project int64, digests map[string]SkillFileDigest) {
+	for i := range s.Skills {
+		sk := &s.Skills[i]
+		if sk.ProjectID != project {
+			continue
+		}
+		if d, ok := digests[sk.Name]; ok {
+			changed := d.Digest != sk.Digest || (d.Tree != "" && d.Tree != sk.TreeDigest)
+			sk.ChangedSinceImport = &changed
+		}
+	}
+}
+
 // CompareInstructionFileDigests applies file digests supplied by a client to
 // a single project's status. Missing digests and non-imported roles remain unknown.
 func (s *StatusInfo) CompareInstructionFileDigests(project int64, digests map[string]string) {

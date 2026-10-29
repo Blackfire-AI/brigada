@@ -260,17 +260,20 @@ func readRoleFile(root, role, rel string) (string, error) {
 	if !st.Mode().IsRegular() {
 		return "", fmt.Errorf("%s is not a regular file", label)
 	}
-	if st.Size() > engine.MaxRoleTextBytes {
+	if st.Size() > engine.MaxRoleTextBytes+maxHeaderBytes {
 		return "", fmt.Errorf("%s is %d bytes, over the %d byte limit; shorten it (nothing is truncated)", label, st.Size(), engine.MaxRoleTextBytes)
 	}
 	b, err := os.ReadFile(full)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", label, err)
 	}
-	if err := engine.ValidateRoleText(role, string(b)); err != nil {
+	// The version header is no part of the text: the stored text and its
+	// digest are those of the file without it (§5.9).
+	text := stripRoleHeader(string(b))
+	if err := engine.ValidateRoleText(role, text); err != nil {
 		return "", fmt.Errorf("%s: %s", label, strings.TrimPrefix(err.Error(), engine.ErrInvalidSetting.Error()+": "))
 	}
-	return string(b), nil
+	return text, nil
 }
 
 // readRoleFiles reads every role file cfg names; a role it leaves out is
@@ -402,6 +405,23 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 			}
 		}
 	}
+	// A skills_dir has the client parse every skill under it; the engine
+	// takes their texts and digests, never the directory (§5.10).
+	var skills *[]engine.Skill
+	if cfg.SkillsDir != "" {
+		root, err := gitRoot(filepath.Dir(file))
+		if err != nil {
+			return fail(stderr, err)
+		}
+		parsed, err := readSkills(root, cfg.SkillsDir)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		if parsed == nil {
+			parsed = []engine.Skill{}
+		}
+		skills = &parsed
+	}
 	if cfg.InstructionsFile != "" {
 		root, err := gitRoot(filepath.Dir(file))
 		if err != nil {
@@ -424,7 +444,7 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 	if code != 0 {
 		return code
 	}
-	res, err := client.ImportProjectConfigRoles(ctx, repo, content, instructions, roles, yes)
+	res, err := client.ImportProjectConfigFull(ctx, repo, content, instructions, roles, skills, yes)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -441,7 +461,7 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 			fmt.Fprintln(stdout, "not imported; nothing changed (--yes accepts the replacement)")
 			return 1
 		}
-		if res, err = client.ImportProjectConfigRoles(ctx, repo, content, instructions, roles, true); err != nil {
+		if res, err = client.ImportProjectConfigFull(ctx, repo, content, instructions, roles, skills, true); err != nil {
 			return fail(stderr, err)
 		}
 	}
@@ -457,6 +477,32 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 		printSettings(stdout, *res.Settings)
 	}
 	return 0
+}
+
+// reportGuidanceChanges flags the role files and skills whose current
+// digests differ from the imported ones (§5.9, §5.10): the client reports
+// the digests of what is on disk, the engine compares, and nothing stored
+// changes until the next import. Silent when nothing is configured or
+// nothing changed.
+func reportGuidanceChanges(ctx context.Context, client *api.Client, root string, content []byte, project int64, stdout io.Writer) {
+	cfg, err := engine.ParseProjectConfig(content)
+	if err != nil || project == 0 || (len(cfg.RoleFiles) == 0 && cfg.SkillsDir == "") {
+		return
+	}
+	st, err := client.StatusWithFileDigests(ctx, project, currentFileDigests(root, cfg))
+	if err != nil {
+		return
+	}
+	for _, r := range st.RoleInstructions {
+		if r.ChangedSinceImport != nil && *r.ChangedSinceImport {
+			fmt.Fprintf(stdout, "instructions.%s %s: changed since the last import; brigada project import applies it\n", r.Role, cfg.RoleFiles[r.Role])
+		}
+	}
+	for _, s := range st.Skills {
+		if s.ChangedSinceImport != nil && *s.ChangedSinceImport {
+			fmt.Fprintf(stdout, "skill %s: changed since the last import; brigada project import applies it\n", s.Name)
+		}
+	}
 }
 
 // reportProjectConfigStatus is status's flag (§13.1) for a project whose
@@ -492,6 +538,7 @@ func reportProjectConfigStatus(ctx context.Context, client *api.Client, stdout i
 		}
 	}
 	hash := engine.ConfigHashWith(content, instructions)
+	defer reportGuidanceChanges(ctx, client, root, content, got.ProjectID, stdout)
 	switch {
 	case got.ImportHash == "":
 		fmt.Fprintf(stdout, "%s: not imported yet (brigada project import)\n", engine.ProjectConfigPath)

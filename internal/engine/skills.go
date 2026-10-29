@@ -119,6 +119,34 @@ func validateSkill(s *Skill) error {
 	return nil
 }
 
+// ValidateSkills checks a skill import whole, as ImportSkills will, so a
+// caller can refuse before it writes anything else. The refusal names the
+// skill.
+func ValidateSkills(skills []Skill) error {
+	_, _, err := validateSkills(skills)
+	return err
+}
+
+// validateSkills returns the import's skills with their defaults filled,
+// and their names in order.
+func validateSkills(skills []Skill) ([]Skill, []string, error) {
+	in := make([]Skill, len(skills))
+	copy(in, skills)
+	seen := map[string]bool{}
+	names := make([]string, 0, len(in))
+	for i := range in {
+		if err := validateSkill(&in[i]); err != nil {
+			return nil, nil, err
+		}
+		if seen[in[i].Name] {
+			return nil, nil, fmt.Errorf("%w: skill %s is given twice", ErrInvalidSetting, in[i].Name)
+		}
+		seen[in[i].Name] = true
+		names = append(names, in[i].Name)
+	}
+	return in, names, nil
+}
+
 // ImportSkills replaces the repo's project's skills with an import of its
 // skills directory (§5.10): every SKILL.md as text, with its name,
 // description, digest and tree digest, read and sent by the client. A
@@ -134,21 +162,11 @@ func (e *Engine) ImportSkills(ctx context.Context, repoURL string, skills []Skil
 	if _, cerr := Canonicalize(repoURL); cerr != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidSetting, cerr)
 	}
-	in := make([]Skill, len(skills))
-	copy(in, skills)
-	seen := map[string]bool{}
-	names := make([]string, 0, len(in))
-	for i := range in {
-		if err := validateSkill(&in[i]); err != nil {
-			return nil, err
-		}
-		if seen[in[i].Name] {
-			return nil, fmt.Errorf("%w: skill %s is given twice", ErrInvalidSetting, in[i].Name)
-		}
-		seen[in[i].Name] = true
-		names = append(names, in[i].Name)
+	in, names, err := validateSkills(skills)
+	if err != nil {
+		return nil, err
 	}
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+	err = e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
