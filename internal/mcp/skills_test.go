@@ -80,14 +80,14 @@ func TestServePlanSkills(t *testing.T) {
 	if got := skillsOf(t, e, "ship spec"); !reflect.DeepEqual(got, []string{"surface-parity", "cli-flag"}) {
 		t.Errorf("skills = %v, want the order given", got)
 	}
-	var instructions string
+	var instructions, meta string
 	if err := e.st.View(t.Context(), func(tx *sql.Tx) error {
-		return tx.QueryRow("SELECT instructions FROM tasks WHERE spec = 'build spec'").Scan(&instructions)
+		return tx.QueryRow("SELECT instructions, instructions_meta FROM tasks WHERE spec = 'build spec'").Scan(&instructions, &meta)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if instructions == "" {
-		t.Error("the created task recorded no worker text")
+	if instructions != "" || !strings.Contains(meta, `"source":"default"`) {
+		t.Errorf("the created task recorded worker text %q with meta %q, want none with the not-configured source", instructions, meta)
 	}
 
 	var plan int64

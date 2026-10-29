@@ -346,12 +346,15 @@ func snapshotOf(ri RoleInstruction) RoleSnapshot {
 // resolveTaskInstructionsTx resolves what a task's prompts will carry
 // (§5.9 'Versioning', §5.10 'Resolved once'): the project's effective
 // worker and reviewer texts with their provenance, and the named skills
-// copied in the order given. An unknown skill or one named twice refuses
-// the task whole; so does a worker prompt whose instructions plus skills
-// pass MaxWorkerPromptBytes or a reviewer prompt passing
-// MaxReviewerPromptBytes, a 'for:' skill counting only in the prompt it
-// appears in. The refusal names the task, and for a bound the size and
-// the limit; nothing is truncated.
+// copied in the order given. A role with no row resolves to no text —
+// the snapshot records the not-configured source and the prompt carries
+// no instructions section (§5.9 'Three states, no hidden fallback') —
+// and an empty-by-choice row to no text recorded as empty. An unknown
+// skill or one named twice refuses the task whole; so does a worker
+// prompt whose instructions plus skills pass MaxWorkerPromptBytes or a
+// reviewer prompt passing MaxReviewerPromptBytes, a 'for:' skill
+// counting only in the prompt it appears in. The refusal names the
+// task, and for a bound the size and the limit; nothing is truncated.
 func resolveTaskInstructionsTx(tx *sql.Tx, project int64, task string, skillNames []string) (TaskInstructions, error) {
 	var out TaskInstructions
 	if len(skillNames) > 0 {
