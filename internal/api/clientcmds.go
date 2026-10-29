@@ -126,7 +126,9 @@ type Status struct {
 	Retries []engine.InfraRetry `json:"retries,omitempty"`
 	// Instructions names the projects with project instructions (§5.9):
 	// source, version, size and digest; the text only when asked for.
-	Instructions []engine.StatusInstructions `json:"instructions,omitempty"`
+	Instructions     []engine.StatusInstructions     `json:"instructions,omitempty"`
+	RoleInstructions []engine.StatusRoleInstructions `json:"role_instructions,omitempty"`
+	Skills           []engine.StatusSkill            `json:"skills,omitempty"`
 }
 
 // Status reads the engine's own state (§13): which process it is, since
@@ -226,6 +228,9 @@ type TaskSubmit struct {
 	Class    string
 	Harness  string
 	Labels   []string
+	// Skills names, in order, the project's imported skills the task's
+	// prompts carry (§5.10); nil or empty = none.
+	Skills []string
 }
 
 // TaskSubmitResult names what the submit created.
@@ -249,6 +254,7 @@ func (c *Client) SubmitTask(ctx context.Context, t TaskSubmit) (TaskSubmitResult
 		Class:    t.Class,
 		Harness:  t.Harness,
 		Labels:   t.Labels,
+		Skills:   t.Skills,
 	}
 	var out taskSubmitResponse
 	if err := c.call(ctx, http.MethodPost, "/v1/tasks", body, &out); err != nil {
@@ -300,6 +306,9 @@ type PlanTask struct {
 	// inherits the project default, a non-nil list (even empty) replaces
 	// it.
 	ExtraRepos []engine.ExtraRepo
+	// Skills names, in order, the project's imported skills the task's
+	// prompts carry (§5.10); nil or empty = none.
+	Skills []string `json:"skills,omitempty"`
 }
 
 // PlanCreateResult names what the call created: the plan, the first
@@ -333,7 +342,7 @@ type PlanCreatedTask struct {
 func (c *Client) CreatePlan(ctx context.Context, p PlanCreate, idemKey string) (PlanCreateResult, error) {
 	body := planCreateRequest{RepoURL: p.RepoURL, Title: p.Title, Tasks: make([]planTaskBody, len(p.Tasks))}
 	for i, t := range p.Tasks {
-		body.Tasks[i] = planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos}
+		body.Tasks[i] = planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills}
 	}
 	var out planCreateResponse
 	if err := c.callKeyed(ctx, http.MethodPost, "/v1/plans", idemKey, body, &out); err != nil {
@@ -368,15 +377,17 @@ type PlanAmend struct {
 }
 
 // PlanRespec edits the spec of a pending task: Mode replace (the default)
-// or append.
+// or append. Skills, when not nil, replaces the task's recorded skills.
 type PlanRespec struct {
-	Task string
-	Spec string
-	Mode string
+	Task   string
+	Spec   string
+	Mode   string
+	Skills []string
 }
 
 // PlanRetier changes a waiting or parked task's tier, effort, review tier or
-// review effort; empty keeps it.
+// review effort; empty keeps it. Skills, when not nil, replaces the
+// recorded skills of a task that has not started.
 type PlanRetier struct {
 	Task         string
 	Tier         string
@@ -384,6 +395,7 @@ type PlanRetier struct {
 	ReviewTier   string
 	ReviewEffort string
 	Caps         map[string]int // merged key by key into the task's caps
+	Skills       []string       // nil keeps the recorded skills
 }
 
 // PlanRetarget replaces one waiting task's whole dependency set.
@@ -425,16 +437,16 @@ type PlanHeldTask struct {
 func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey string) (PlanAmendResult, error) {
 	body := planAmendRequest{Cancel: a.Cancel}
 	for _, t := range a.Add {
-		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos})
+		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills})
 	}
 	for _, rt := range a.Retarget {
 		body.Retarget = append(body.Retarget, planRetargetBody{Task: rt.Task, Deps: rt.Deps, Base: rt.Base, Continue: rt.Continue})
 	}
 	for _, rt := range a.Retier {
-		body.Retier = append(body.Retier, planRetierBody{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort, ReviewTier: rt.ReviewTier, ReviewEffort: rt.ReviewEffort, Caps: rt.Caps})
+		body.Retier = append(body.Retier, planRetierBody{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort, ReviewTier: rt.ReviewTier, ReviewEffort: rt.ReviewEffort, Caps: rt.Caps, Skills: rt.Skills})
 	}
 	for _, rs := range a.Respec {
-		body.Respec = append(body.Respec, planRespecBody{Task: rs.Task, Spec: rs.Spec, Mode: rs.Mode})
+		body.Respec = append(body.Respec, planRespecBody{Task: rs.Task, Spec: rs.Spec, Mode: rs.Mode, Skills: rs.Skills})
 	}
 	var out planAmendResponse
 	path := "/v1/plans/" + strconv.FormatInt(plan, 10) + "/amend"

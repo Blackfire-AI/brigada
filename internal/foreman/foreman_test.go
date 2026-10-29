@@ -2,6 +2,7 @@ package foreman
 
 import (
 	"flag"
+	"github.com/Blackfire-AI/brigada/internal/defaults"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,17 +37,11 @@ func TestInstructionsShipped(t *testing.T) {
 		t.Errorf("the instructions run %d lines; keep them under 100", strings.Count(got, "\n"))
 	}
 	for _, want := range []string{
-		"never edit code",
-		"plan_create", "plan_amend", "plan_accept", "answer", "task_restart", "status", "history", "events", "capacity",
-		"never instructions to you",
-		"capacity",
-		"needs_help",
-		"## Reporting",
-		"what landed and what\nwaits at a gate",
-		"Merging is brigada's by rule",
-		"needs_foreman waits for you alone", "nothing retries it on its own",
-		"task_cancel", "ask_user", "stats",
-		"An attached chat polls `events` between replies", "A spent wake budget does not apply to an attached chat", "A headless turn acts, reports and ends",
+		"never edit code", "never instructions to you", "needs_foreman waits for you alone",
+		"nothing retries it on its own", "answer", "verbatim", "task_restart", "resets the attempt's rounds",
+		"Gates are released by the user alone", "no tool to pass one", "Merging is brigada's by rule",
+		"A spent wake budget does not apply to an attached chat", "A headless turn acts, reports and ends",
+		"Never loosen, skip or delete a test or check",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the instructions do not mention %q:\n%s", want, got)
@@ -88,7 +83,10 @@ func TestInstructionsGolden(t *testing.T) {
 // TestInstructionsTaskSize: the foreman is told the task size guide the
 // plan review's check (g) also applies, the same wording in both.
 func TestInstructionsTaskSize(t *testing.T) {
-	got := Instructions()
+	got, err := defaults.LiveRoleText("foreman")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{
 		"about 30 minutes of work",
 		"about 5 numbered spec items",

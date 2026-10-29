@@ -157,12 +157,41 @@ func roleInstructionTx(tx *sql.Tx, project int64, repo, role string) (RoleInstru
 		Provenance: provenanceLine(source, version),
 		Bytes:      len(text), Digest: digest,
 	}
-	if source == SourceLocal && text == "" {
+	if (source == SourceLocal || source == SourceImported) && text == "" {
+		// A local mark, or an empty role file an import read (§5.9):
+		// no text applies.
 		out.State = RoleStateEmptyByChoice
 		out.Digest = instructionsDigest("")
 	}
 	out.Text = text
 	return out, nil
+}
+
+// storedRoleTextTx reads one role's text as a prompt carries it (§5.9):
+// the stored row — the user's text, an import's, or the upgrade's seed
+// of the default — and "" when the project has no row at all. Unlike
+// roleInstructionTx, which reports the live embedded default for a role
+// no row configures, a prompt composed from this never falls back to a
+// text in the binary: a not-configured role runs on the contract alone.
+func storedRoleTextTx(tx *sql.Tx, project int64, role string) (string, error) {
+	ri, err := roleInstructionTx(tx, project, "", role)
+	if err != nil {
+		return "", err
+	}
+	if ri.Source == SourceDefault {
+		return "", nil
+	}
+	return ri.Text, nil
+}
+
+// ValidateRoleText checks a role text the way a set or an import does:
+// a known role, then validateRoleText's bounds. A client calls it to
+// refuse before it sends; the engine checks again.
+func ValidateRoleText(role, text string) error {
+	if !validRole(role) {
+		return fmt.Errorf("%w: unknown role %q; valid roles: %s", ErrInvalidSetting, role, strings.Join(RoleKeys, ", "))
+	}
+	return validateRoleText(role, text)
 }
 
 // RoleInstruction reads the repo's effective text for one role, with its
@@ -325,4 +354,99 @@ func syncWorkerInstructionTx(tx *sql.Tx, project int64, row, imported map[string
 		return nil
 	}
 	return upsertRoleInstructionTx(tx, project, RoleWorker, text, SourceImported, hash, now)
+}
+
+// ErrRoleTextKept reports a role-file import refused because a local
+// override stands under the role's text: it keeps its value and the
+// user resolves the two (§5.9: neither wins silently). The record
+// returned beside it is the kept local one.
+var ErrRoleTextKept = errors.New("a local override kept its value")
+
+// roleImportVersion is the settings version an import of a role file
+// records: the hash of the role and its text, so a change to either
+// shows as a changed import.
+func roleImportVersion(role, text string) string {
+	return ConfigHash([]byte("\x00" + role + "\x00" + text))
+}
+
+// ImportRoleFile imports the text of a role file project.yaml's nested
+// instructions map names (§5.9), read and sent by the client, never a
+// path for the engine to read. It covers the foreman, plan_review and
+// reviewer roles; the worker's file is the instructions setting and
+// imports with project.yaml itself (ImportProjectConfigWith), so the
+// setting and the worker row stay one text. The text is bounded like a
+// set of it and never truncated. An applied import records the imported
+// source and its hash as the settings version; an empty file is the
+// empty-by-choice state, imported. A local override wins: the import is
+// refused with ErrRoleTextKept and the kept local record returned.
+func (e *Engine) ImportRoleFile(ctx context.Context, repoURL, role, text string) (*RoleInstruction, error) {
+	if repoURL == "" {
+		return nil, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
+	}
+	if err := ValidateRoleText(role, text); err != nil {
+		return nil, err
+	}
+	if role == RoleWorker {
+		return nil, fmt.Errorf("%w: the worker file imports as the instructions setting, with project.yaml", ErrInvalidSetting)
+	}
+	canon, cerr := Canonicalize(repoURL)
+	if cerr != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidSetting, cerr)
+	}
+	var out *RoleInstruction
+	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+		now := e.cfg.Now()
+		if _, err := e.sweepTx(tx, now); err != nil {
+			return err
+		}
+		var project int64
+		var shownRepo string
+		err := lookupProjectTx(tx, repoURL, "id, repo_url", &project, &shownRepo)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			project, err = createProjectTx(tx, repoURL, setupDefaultBranch, "", "", now)
+			if err != nil {
+				return err
+			}
+			shownRepo = canon
+		case err != nil:
+			return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
+		}
+		if err := activeProjectTx(tx, project); err != nil {
+			return err
+		}
+		cur, err := roleInstructionTx(tx, project, shownRepo, role)
+		if err != nil {
+			return err
+		}
+		if cur.Source == SourceLocal {
+			// A local override wins over the file: the import is
+			// refused whole and the local value stays.
+			out = &cur
+			return ErrRoleTextKept
+		}
+		if err := upsertRoleInstructionTx(tx, project, role, text, SourceImported, roleImportVersion(role, text), now); err != nil {
+			return err
+		}
+		if _, err := appendEventTx(tx, evRoleInstructionSet, project, 0, 0,
+			eventPayload{Reason: fmt.Sprintf("%s instructions imported, %d bytes", role, len(text))}, now); err != nil {
+			return err
+		}
+		v, err := roleInstructionTx(tx, project, shownRepo, role)
+		if err != nil {
+			return err
+		}
+		out = &v
+		return nil
+	})
+	switch {
+	case errors.Is(err, ErrRoleTextKept):
+		return out, fmt.Errorf("%w: %s instructions keep the local text %s; resolve the two",
+			ErrRoleTextKept, role, instructionsSummary(out.Text))
+	case errors.Is(err, ErrInvalidSetting):
+		return nil, err
+	case err != nil:
+		return nil, fmt.Errorf("import the %s instructions of the project of %s: %w", role, RedactRepoURL(repoURL), err)
+	}
+	return out, nil
 }

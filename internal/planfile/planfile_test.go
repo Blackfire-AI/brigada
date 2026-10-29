@@ -46,6 +46,7 @@ func TestParseInvertsRender(t *testing.T) {
 		"caps":                   {ID: 9, State: "active", Created: time.Unix(1, 0).UTC(), Updated: time.Unix(2, 0).UTC(), Tasks: []Task{{ID: 1, State: "ready", Caps: map[string]int{"restart": 4, "fix_rounds": 0}}, {ID: 2, State: "pending"}}},
 		"tier and effort":        {ID: 8, State: "active", Created: time.Unix(1, 0).UTC(), Updated: time.Unix(2, 0).UTC(), Tasks: []Task{{ID: 1, Tier: "heavy", Effort: "high", State: "ready"}, {ID: 2, Tier: "light", State: "pending"}}},
 		"review tier and effort": {ID: 7, State: "active", Created: time.Unix(1, 0).UTC(), Updated: time.Unix(2, 0).UTC(), Tasks: []Task{{ID: 1, Tier: "heavy", Effort: "high", ReviewTier: "heavy", ReviewEffort: "max", State: "ready"}, {ID: 2, ReviewEffort: "low", State: "pending"}}},
+		"skills in order":        {ID: 6, State: "active", Created: time.Unix(1, 0).UTC(), Updated: time.Unix(2, 0).UTC(), Tasks: []Task{{ID: 1, Skills: []string{"cli-flag", "bugfix", "a \"b\", c"}, State: "ready"}, {ID: 2, State: "pending"}}},
 		"no tasks": {ID: 1, Title: "", Repo: "r", State: "draft",
 			Created: time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC), Updated: time.Date(2026, 1, 2, 3, 4, 5, 7, time.UTC)},
 		"awkward text": {ID: 2, Title: "tab\there, \"quotes\", back\\slash, ünïcode, [brackets], # hash", Repo: "file:///a b/c.git",
@@ -177,5 +178,28 @@ func TestDescribe(t *testing.T) {
 	}
 	if got := Describe(&p, next); !strings.Contains(got, "and 1 more") {
 		t.Errorf("many changes = %q, want the tail folded", got)
+	}
+}
+
+// TestSkillsLineKeepsOrderAndStaysOptional: the skills line holds the
+// names in the order recorded, a task with none writes no line, and an
+// empty list is a file the engine would never write (§6.4).
+func TestSkillsLineKeepsOrderAndStaysOptional(t *testing.T) {
+	p := goldenPlan()
+	p.Tasks[0].Skills = []string{"zeta", "alpha"}
+	data, err := Render(p)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if n := strings.Count(string(data), "skills: "); n != 1 || !strings.Contains(string(data), "    skills: [\"zeta\", \"alpha\"]\n") {
+		t.Errorf("rendering has %d skills lines, want the one in order:\n%s", n, data)
+	}
+	plain, err := Render(goldenPlan())
+	if err != nil || strings.Contains(string(plain), "skills:") {
+		t.Errorf("a plan with no skills renders a skills line (err %v):\n%s", err, plain)
+	}
+	empty := strings.Replace(string(data), `skills: ["zeta", "alpha"]`, "skills: []", 1)
+	if _, err := Parse([]byte(empty)); err == nil {
+		t.Error("parse took an empty skills list")
 	}
 }

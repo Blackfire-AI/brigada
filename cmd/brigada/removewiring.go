@@ -77,8 +77,19 @@ func planRemoval(root string, deleteConfig bool) []wireFile {
 		}
 		return d, "unchanged", nil
 	}})
-	return append(planSteps(root, steps), planExcludeRemoval(root))
+	files := planSteps(root, steps)
+	// Only unedited generated role files and skills go (§5.9); an edited
+	// one stays and the plan says so.
+	generated := planSteps(root, guidanceRemovalSteps(root))
+	for i := range generated {
+		generated[i].purpose = generatedPurpose
+	}
+	return append(append(files, generated...), planExcludeRemoval(root))
 }
+
+// generatedPurpose marks a wireFile as one of init's generated role files
+// or skills.
+const generatedPurpose = "brigada generated file"
 
 func removeSettingsExclude(d []byte, exists bool) ([]byte, string, error) {
 	var out []byte

@@ -64,6 +64,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	parallel := fs.Int("parallel", 0, "tasks at once on this machine (1..64)")
 	all := fs.Bool("all", false, "in a folder that is not a repository: register every new repository found, without asking")
 	overwrite := fs.Bool("overwrite-config", false, "replace config caps and saved agent lines that already hold another value; without it init adds only missing keys and reports each value it keeps and changes")
+	takeDefault := fs.String("take-default", "", "reset one role file or default skill (a role: foreman, plan_review, worker, reviewer; or a skill name) to the new default under a fresh header; touches that file only")
 	agents := &agentSpecs{}
 	fs.Var(agents, "agent", "--agent once per harness and model, same complete syntax and model defaults as brigada runner")
 	signedIn := map[string]bool{}
@@ -81,6 +82,10 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	if len(fs.Args()) != 0 {
 		return usagef(stderr, "init takes no positional arguments; run it inside one repository")
+	}
+	if *takeDefault != "" {
+		// Resets one generated file; no probe, plan or engine (§5.9).
+		return runTakeDefault(stdout, stderr, *takeDefault)
 	}
 	// askedHarness names every harness whose worker questions this run
 	// asks; an interactive answer replaces every saved line of an asked
@@ -858,6 +863,15 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// The defaults' role files and skills (§5.9, §5.10) are named in the
+	// file init writes.
+	if proposed, err = engine.ProjectConfigGuidance(proposed); err != nil {
+		return fail(stderr, err)
+	}
+	proposedCfg, err := engine.ParseProjectConfig(proposed)
+	if err != nil {
+		return fail(stderr, err)
+	}
 	parsedTools, err := lifecycle.ParseTools(*tools)
 	if err != nil {
 		return usagef(stderr, "--tools: %v", err)
@@ -955,7 +969,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if !*noWiring {
 		wiring = planLegacyWiring(root)
 	}
-	operator := planOperatorFiles(root)
+	// The operator guide and the generated role files and skills are
+	// written whole, under the same plan, confirmation and recheck.
+	operator := append(planOperatorFiles(root), planGuidance(root, proposedCfg)...)
 	files := append(append([]wireFile{{rel: engine.ProjectConfigPath, old: old, next: proposed, exists: exists}}, operator...), wiring...)
 	printInitFiles(stdout, files, *verbose)
 	printInitOperatorNote(stdout)

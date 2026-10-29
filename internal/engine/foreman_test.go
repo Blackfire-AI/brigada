@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Blackfire-AI/brigada/internal/defaults"
 	"github.com/Blackfire-AI/brigada/internal/foreman"
 )
 
@@ -213,5 +214,78 @@ func TestForemanTurnReportsToTheUser(t *testing.T) {
 	wantLong := `{"report":"` + long + `"}`
 	if payload := e.str("SELECT payload FROM events WHERE kind = ? ORDER BY id DESC LIMIT 1", evForemanReport); payload != wantLong {
 		t.Errorf("the 3 KB report's payload runs %d bytes, want the report whole in the event:\n%.120s…", len(payload), payload)
+	}
+}
+
+// TestForemanTurnResolvesRoleTextPerTurn: a foreman turn's prompt
+// carries the foreman's role text resolved from the store per turn
+// (§5.9) — never a text in the binary. A project whose role is not
+// configured runs on the contract alone, with no role section and none
+// of the shipped default; a set text reaches the next turn; a changed
+// text reaches the one after; and each turn's job records beside its
+// prompt the template's version and the text's digest.
+func TestForemanTurnResolvesRoleTextPerTurn(t *testing.T) {
+	e := newEnv(t)
+	e.offerForeman(e.runner1)
+
+	turn := func() string {
+		t.Helper()
+		r, err := e.eng.SubmitForemanTurn(e.ctx, e.project, wakeEvents)
+		if err != nil {
+			t.Fatalf("submit foreman turn: %v", err)
+		}
+		if r.Answer != AnsCreated {
+			t.Fatalf("submit foreman turn = %s; want created", r.Answer)
+		}
+		g := e.lease(e.runner1, []string{"claude"}, nil)
+		if g == nil || g.JobID != r.JobID {
+			t.Fatalf("the turn was not leased: %+v, want job %d", g, r.JobID)
+		}
+		prompt := e.str("SELECT prompt FROM jobs WHERE id = ?", r.JobID)
+		if ans := e.complete(g, done()); ans != AnsOK {
+			t.Fatalf("complete the turn: %s", ans)
+		}
+		return prompt
+	}
+
+	// Not configured: the contract alone — no role section, and none of
+	// the binary's default foreman.md, which the prompt must never fall
+	// back to (§5.9).
+	prompt := turn()
+	if strings.Contains(prompt, "<foreman-instructions>") {
+		t.Errorf("a not-configured role added a foreman-instructions section:\n%s", prompt)
+	}
+	if live, err := defaults.LiveRoleText(RoleForeman); err == nil && strings.Contains(prompt, live) {
+		t.Errorf("a not-configured role fell back to the binary's default foreman text (§5.9)")
+	}
+	if meta := e.str("SELECT prompt_meta FROM jobs ORDER BY id DESC LIMIT 1"); meta != fmt.Sprintf(`{"template":%d}`, foreman.TurnTemplateVersion) {
+		t.Errorf("a turn without a role text records prompt_meta %q; want the turn template's version alone", meta)
+	}
+
+	// A set text reaches the next turn, framed as data in its own
+	// section; the job records its digest beside the template version.
+	const v1 = "Plan in small steps; one concern per task."
+	e.setRole(RoleForeman, v1)
+	prompt = turn()
+	if !strings.Contains(prompt, "<foreman-instructions>\n"+v1+"\n</foreman-instructions>") {
+		t.Errorf("the turn after the set does not carry the foreman text in its own section:\n%s", prompt)
+	}
+	meta := e.str("SELECT prompt_meta FROM jobs ORDER BY id DESC LIMIT 1")
+	for _, want := range []string{fmt.Sprintf(`"template":%d`, foreman.TurnTemplateVersion), instructionsDigest(v1)} {
+		if !strings.Contains(meta, want) {
+			t.Errorf("the turn's prompt_meta = %q, want it to name %q", meta, want)
+		}
+	}
+
+	// A changed text reaches the turn after it: the wake resolves the
+	// store per turn, so no turn keeps a stale text.
+	const v2 = "Plan in even smaller steps."
+	e.setRole(RoleForeman, v2)
+	prompt = turn()
+	if !strings.Contains(prompt, "<foreman-instructions>\n"+v2+"\n</foreman-instructions>") {
+		t.Errorf("the turn after the change does not carry the new text:\n%s", prompt)
+	}
+	if strings.Contains(prompt, v1) {
+		t.Errorf("the turn after the change still carries the old text:\n%s", prompt)
 	}
 }

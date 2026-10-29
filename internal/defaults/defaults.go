@@ -82,14 +82,43 @@ func Versions() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	if overlay != nil {
+		if more, err := fs.ReadDir(overlay, "versions"); err == nil {
+			entries = append(entries, more...)
+		}
+	}
 	var out []string
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.IsDir() && !has(out, e.Name()) {
 			out = append(out, e.Name())
 		}
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// overlay holds archive files a test adds on top of Archive; nil in
+// production.
+var overlay fs.FS
+
+// SetArchiveOverlay makes the files of f, laid out like Archive
+// (versions/<ver>/...), readable beside the embedded archive until the
+// returned function runs. It exists so a test can ship a fixture older
+// version; nothing in the product calls it.
+func SetArchiveOverlay(f fs.FS) (restore func()) {
+	prev := overlay
+	overlay = f
+	return func() { overlay = prev }
+}
+
+// readArchive reads an archive path, the overlay first.
+func readArchive(path string) ([]byte, error) {
+	if overlay != nil {
+		if data, err := fs.ReadFile(overlay, path); err == nil {
+			return data, nil
+		}
+	}
+	return Archive.ReadFile(path)
 }
 
 // ArchiveText returns a shipped version's archived text by name: the
@@ -107,7 +136,7 @@ func ArchiveText(version, name string) (string, error) {
 	if !fs.ValidPath(name) {
 		return "", fmt.Errorf("invalid archive path %q", name)
 	}
-	b, err := Archive.ReadFile("versions/" + version + "/" + name)
+	b, err := readArchive("versions/" + version + "/" + name)
 	if err != nil {
 		return "", fmt.Errorf("version %s holds no %q", version, name)
 	}

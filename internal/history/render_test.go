@@ -111,3 +111,13 @@ func TestRenderLanding(t *testing.T) {
 		t.Errorf("task_pushed summary = %q", got)
 	}
 }
+
+// TestRenderLeasedPromptDigests: a lease event names the template and
+// the shortened digests of the instruction and skill texts (§9).
+func TestRenderLeasedPromptDigests(t *testing.T) {
+	it := Item{Type: TypeEvent, Kind: "job_leased", Payload: []byte(`{"lease":"abc","prompt":{"template":2,"instructions":"0123456789abcdef","skills":["aaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbb"]}}`)}
+	want := "lease=abc template=2 instructions=0123456789ab skills=aaaaaaaaaaaa,bbbbbbbbbbbb"
+	if got := summary(it); got != want {
+		t.Errorf("summary = %q, want %q", got, want)
+	}
+}

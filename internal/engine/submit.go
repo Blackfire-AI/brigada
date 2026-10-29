@@ -78,6 +78,12 @@ type SubmitParams struct {
 	// land_ready gate's hold (issue #87): the runner runs no command and
 	// lands. False on every other job.
 	SkipLandReady bool
+	// PromptMeta is what the job records beside its composed prompt
+	// (§5.9 'Versioning'): the template's version and the digests of
+	// the instruction and skill texts the prompt carried, so a
+	// recorded prompt is reproducible. '' on a job whose prompt was
+	// composed without guidance.
+	PromptMeta string
 }
 
 // branch is the branch the submit names, for the job_created event: only
@@ -196,10 +202,10 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 	if !p.NotBefore.IsZero() {
 		notBefore = fmtTime(p.NotBefore)
 	}
-	res, err := tx.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status,
+	res, err := tx.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, prompt_meta, status,
 		harness, model, labels, restart, round, exclude_family, exclude_agent, require_agent, branch, queued_at, not_before, skip_land_ready, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ProjectID, nullIfZero(p.TaskID), string(p.Kind), p.Key, string(p.Mode), p.Prompt,
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ProjectID, nullIfZero(p.TaskID), string(p.Kind), p.Key, string(p.Mode), p.Prompt, p.PromptMeta,
 		p.Harness, p.Model, string(labelsJSON), boolInt(p.Restart), round, p.ExcludeFamily, nullIfZero(p.ExcludeAgent),
 		nullIfZero(p.RequireAgent), branch, nowStr, notBefore, boolInt(p.SkipLandReady), nowStr, nowStr)
 	if err != nil {
