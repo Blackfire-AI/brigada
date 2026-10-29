@@ -5,9 +5,9 @@
 plan: 87
 title: "CI green on brigada/landed; #132 land check = CI; #133 parked tasks; #127 design"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: active
 created: 2026-10-29T21:13:44.852735Z
-updated: 2026-10-29T21:22:54.787309Z
+updated: 2026-10-29T21:26:29.415734Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -58,9 +58,9 @@ tasks:
     name: "land_retry"
     title: "#133 (2/3): the foreman's land_retry for a task parked by a failed landing"
     class: "implement"
-    deps: ["plan_open"]
-    base: "plan_open"
-    continue: "plan_open"
+    deps: ["plan_open_held"]
+    base: "plan_open_held"
+    continue: "plan_open_held"
     tier: heavy
     effort: medium
     review_tier: heavy
@@ -120,6 +120,19 @@ tasks:
     deps: ["land_retry_api"]
     base: "land_retry_api"
     effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 285
+    name: "plan_open_held"
+    title: "#133 (1b/3): a task held at the land gate keeps its plan open; landing settlement closes it"
+    class: "implement"
+    deps: ["plan_open"]
+    base: "plan_open"
+    continue: "plan_open"
+    tier: heavy
+    effort: medium
+    review_tier: heavy
     state: pending
     branch: ""
     rounds: 0
