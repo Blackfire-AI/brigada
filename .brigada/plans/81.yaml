@@ -84,7 +84,7 @@ tasks:
     deps: ["record"]
     base: "record"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-232"
     rounds: 0
   - id: 233
@@ -119,9 +119,9 @@ tasks:
     tier: heavy
     effort: medium
     caps: {restart: 4}
-    state: reviewing
+    state: running
     branch: "brigada/task-235-r4"
-    rounds: 0
+    rounds: 1
   - id: 236
     name: "client_show"
     title: "Client: local overrides, conflicts, project show and status output"
@@ -175,7 +175,7 @@ tasks:
     base: "client"
     continue: "client"
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 241
