@@ -386,6 +386,59 @@ func TestLandRejectClosesThePlan(t *testing.T) {
 	}
 }
 
+// TestLandRejectNamesDeclinedBesideLanded: a plan where one task lands
+// and another's land-gate hold the user rejects closes with a report
+// that names both — the landing under "landed", the rejected hold
+// under "landing declined" — never "all tasks landed", which would say
+// the declined task landed (#133).
+func TestLandRejectNamesDeclinedBesideLanded(t *testing.T) {
+	e := newEnv(t)
+	e.set(map[string]string{SettingApprovalTiers: "heavy"})
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+
+	dep := e.task // lands pushed
+	child := e.addTask("{}")
+	e.exec("UPDATE tasks SET tier = 'heavy', effective_tier = 'heavy' WHERE id = ?", child)
+	e.exec("INSERT INTO task_deps (plan_id, task_id, depends_on_task_id) VALUES (?, ?, ?)", e.plan, child, dep)
+
+	// The dependency lands pushed.
+	e.runToDone(author, reviewer)
+	g := e.leaseGit(author)
+	if g == nil || g.TaskID != dep {
+		t.Fatalf("the dependency's land job was not leased: %+v", g)
+	}
+	if ans := e.complete(g, Completion{Result: `{"target_branch":"main","commit":"abc123","check_passed":true,"pushed":"pushed"}`}); ans != AnsOK {
+		t.Fatalf("complete the dependency's land: %s", ans)
+	}
+
+	// The dependent runs to done and is held at the land gate (heavy);
+	// the user rejects its landing, and the plan closes over both.
+	e.runTaskToDone(child, author, reviewer)
+	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ? AND state = 'held'", child); n != 1 {
+		t.Fatalf("land holds for the child = %d, want 1", n)
+	}
+	if _, err := e.eng.LandReject(e.ctx, e.project, child); err != nil {
+		t.Fatalf("reject the child's hold: %v", err)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", e.plan); got != planDone {
+		t.Fatalf("plan state = %q, want done after the rejection", got)
+	}
+	p, ok := e.eventPayloadOf(evPlanDone)
+	if !ok {
+		t.Fatal("no plan_done event")
+	}
+	if !strings.Contains(p.Reason, "landed:") || !strings.Contains(p.Reason, "abc123") {
+		t.Errorf("plan_done report = %q, want the landing named", p.Reason)
+	}
+	if !strings.Contains(p.Reason, "landing declined:") {
+		t.Errorf("plan_done report = %q, want the declined landing named", p.Reason)
+	}
+	if strings.Contains(p.Reason, "all tasks landed") {
+		t.Errorf("plan_done report = %q, want no all-tasks-landed over a declined landing", p.Reason)
+	}
+}
+
 // TestPushGateNeverStillClosesThePlan: a plan whose only open task
 // waits at the push gate under gate_push never closes (#133): the
 // landing is recorded local with the exact push command — the push is

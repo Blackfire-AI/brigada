@@ -1277,7 +1277,7 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 		}
 	}
 	var report []string
-	if len(failed) == 0 && len(waiting) == 0 && len(gated) == 0 && len(cancelled) == 0 && len(landed) > 0 {
+	if len(failed) == 0 && len(waiting) == 0 && len(gated) == 0 && len(cancelled) == 0 && len(declined) == 0 && len(landed) > 0 {
 		report = append(report, "all tasks landed")
 	} else {
 		if len(landed) > 0 {
