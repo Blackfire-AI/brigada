@@ -1,0 +1,47 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 82
+title: "Integrate the stranded plan-81 stack onto landed; fix #122 (plan_amend cancel with dependents, done-vs-landed)"
+repo: "github.com/Blackfire-AI/brigada"
+state: needs_foreman
+created: 2026-10-29T07:35:58.740006Z
+updated: 2026-10-29T07:36:25.318308Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps — the continued
+# dep when base is empty and continue is set, else the default branch; merge a
+# task after its base. A task with continue, one of deps, starts in the
+# session of the dep's author.
+# States are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1);
+# review_tier and review_effort do the same for its reviews (§7, §8); caps
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1).
+tasks:
+  - id: 245
+    name: "integrate"
+    title: "Integrate the plan-81 stack (task-234-r2, task-244) onto brigada/landed"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: high
+    review_tier: heavy
+    caps: {review_rounds: 4, restart: 3}
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 246
+    name: "fix122"
+    title: "Fix #122: plan_amend cancel with dependents, stranded done tasks, done vs landed in wake context"
+    class: "implement"
+    deps: ["integrate"]
+    base: "integrate"
+    tier: heavy
+    effort: medium
+    caps: {restart: 2}
+    state: pending
+    branch: ""
+    rounds: 0
