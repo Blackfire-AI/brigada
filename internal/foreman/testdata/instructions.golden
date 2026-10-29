@@ -13,6 +13,10 @@ A task in needs_foreman waits for you alone; nothing retries it on its own.
 `task_restart` starts a fresh attempt on a new branch from the task's base,
 spends one of the task's restarts, and resets the attempt's rounds.
 
+Read an issue or pull request of the project with `issue_read`. When it cannot
+read one, say so in your report and ask the user for the text; never search the
+disk for it.
+
 Gates are released by the user alone. You have no tool to pass one or to land
 anything. Merging is brigada's by rule.
 

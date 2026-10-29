@@ -8,8 +8,11 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - `scripts/land-ready.sh` waits for CI on the remote staging head, holds when no run appears within the grace period, and detects conflicting or unresolved PR mergeability (issue #128).
+- The foreman's file tools read only its checkout and its project's state (issue #131): the settings brigada writes confine `Read`, `Grep` and `Glob` to the reading checkout, in a headless turn and an attached chat alike, subagents included, and no allow rule in the user's own settings lifts it. When the foreman cannot read an issue, its report says so and asks you for the text; it never searches the disk for it (foreman instructions version 24, defaults 1.0.1).
 
 ### Added
+
+- A read-only issue tool for the foreman, `issue_read` (issue #131): it takes an issue or pull-request number of the project's own repository and answers the title, body and, on request, the comments inside `<issue>` data delimiters, by GET requests alone with the user's own `gh` login. When the issue cannot be read — the repository is not on GitHub, `gh` is missing or not logged in, or the number does not exist — it answers that reason, and the foreman asks you for the text. `.brigada/operator.md` now says the foreman reads the project's own issues itself and the operator puts the text into the ask only for an issue elsewhere.
 
 - Documented editable role instructions, task skills, their import and snapshot rules, and the diff/reset commands (issues #119 and #117). Enabled the documentation content verifier.
 

@@ -12,7 +12,7 @@ import (
 )
 
 // Version identifies the brigada version these defaults ship with.
-const Version = "1.0.0"
+const Version = "1.0.1"
 
 // Texts holds the role texts and skill files at their package-relative paths.
 //

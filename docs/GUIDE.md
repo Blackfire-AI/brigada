@@ -1086,7 +1086,7 @@ A foreman harness must meet four requirements, and the runner and `brigada attac
 - **(a)** resume one long-lived session headless, so every wake continues the same conversation;
 - **(b)** take brigada's MCP server per run from a config the runner writes, in a strict mode so the repository's own MCP servers do not load;
 - **(c)** let `brigada attach` join that same session interactively;
-- **(d)** accept a read-only tool scope with no shell and no edits, since the foreman plans and never writes code: its file tools read the session's one allowed root — the reading checkout — and are refused everywhere else.
+- **(d)** accept a read-only tool scope with no shell and no edits, since the foreman plans and never writes code: its file tools read the session's one allowed root — the reading checkout — and are refused everywhere else. Issue and pull-request text comes through the `issue_read` tool, not the file tools; when it cannot read one, the foreman says so and asks you for the text, and never searches the disk.
 
 Setup checks (a), and that the harness can carry the bridge, through `ResumeCapableHarnesses` in `internal/adapter/adapter.go`, and refuses any other harness. The strictness in (b) is not checked. Status per harness, as the code has it:
 
