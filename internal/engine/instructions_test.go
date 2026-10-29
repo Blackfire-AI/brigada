@@ -202,14 +202,12 @@ func TestStatusRoleGuidance(t *testing.T) {
 	for _, r := range st.RoleInstructions {
 		roles[r.Role] = r
 	}
-	// With no row the role reads not configured with no text: the size
-	// is zero and the edited flag, which the status view still computes
-	// against the shipped default of that version, follows from the
-	// empty text until the status view's own task.
-	if r := roles[RoleForeman]; r.State != RoleStateNotConfigured || r.GeneratedFrom == "" || r.Bytes != 0 {
+	// With no row the role reads not configured and nothing else: no
+	// size, digest, provenance or edited flag (§5.9 'Visible').
+	if r := roles[RoleForeman]; r.State != RoleStateNotConfigured || r.GeneratedFrom != "" || r.Bytes != 0 || r.Digest != "" || r.Edited != nil {
 		t.Errorf("default: %+v", r)
 	}
-	if r := roles[RoleReviewer]; r.State != RoleStateEmptyByChoice || r.Bytes != 0 || !strings.Contains(r.Text, "<reviewer-instructions>") {
+	if r := roles[RoleReviewer]; r.State != RoleStateEmptyByChoice || r.Bytes != 0 || r.GeneratedFrom != "" || r.Edited != nil || !strings.Contains(r.Text, "<reviewer-instructions>") {
 		t.Errorf("empty: %+v", r)
 	}
 	if r := roles[RoleWorker]; r.State != RoleStateFile || r.Bytes != len("rules </worker-instructions> <FOREMAN-INSTRUCTIONS>") || strings.Count(r.Text, "</worker-instructions>") != 1 || !strings.Contains(r.Text, "&lt;/worker-instructions&gt;") {
@@ -233,6 +231,31 @@ func TestStatusRoleGuidance(t *testing.T) {
 	for _, r := range plain.RoleInstructions {
 		if r.Text != "" || r.ChangedSinceImport != nil {
 			t.Errorf("plain: %+v", r)
+		}
+	}
+}
+
+// TestStatusRoleProvenanceIsRecorded: a generated row shows the version it
+// was recorded with, never this binary's defaults.Version, and a role with
+// no row shows no provenance at all (§5.9 'Visible').
+func TestStatusRoleProvenanceIsRecorded(t *testing.T) {
+	e := newEnv(t)
+	e.exec(`INSERT INTO role_instructions (project_id, role, text, source, settings_version, digest, updated_at)
+		VALUES (?, ?, 'seeded', ?, '0.0.1', ?, '2026-01-01T00:00:00Z')`, e.project, RoleForeman, SourceGenerated, instructionsDigest("seeded"))
+	st, err := e.eng.Status(e.ctx, e.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range st.RoleInstructions {
+		switch r.Role {
+		case RoleForeman:
+			if r.State != RoleStateFile || r.GeneratedFrom != "0.0.1" || r.Bytes != len("seeded") || r.Digest != instructionsDigest("seeded") {
+				t.Errorf("generated foreman: %+v, want recorded version 0.0.1", r)
+			}
+		default:
+			if r.State != RoleStateNotConfigured || r.GeneratedFrom != "" || r.Digest != "" || r.Bytes != 0 || r.Edited != nil {
+				t.Errorf("%s: %+v, want only the state", r.Role, r)
+			}
 		}
 	}
 }

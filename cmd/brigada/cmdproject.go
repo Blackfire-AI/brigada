@@ -249,7 +249,7 @@ func readInstructionsArg(path string) (string, error) {
 // names (§5.9), for the import: the path must stay inside the repository
 // at root after symlinks are resolved and name a regular file, and the
 // text is bounded and checked as the engine will check it. Refusals name
-// the path. An empty file is returned as "": an unset value.
+// the path. An empty file is returned as "": empty by choice.
 func readInstructionsFile(root, rel string) (string, error) {
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -451,10 +451,8 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 			text, ok := roles[role]
 			switch {
 			case !ok || strings.TrimSpace(text) != "":
-			case role == engine.RoleWorker:
-				fmt.Fprintf(stdout, "instructions.%s %s is empty: the project's instructions are unset and the default worker text applies\n", role, cfg.RoleFiles[role])
 			default:
-				fmt.Fprintf(stdout, "instructions.%s %s is empty: the role runs on the contract alone\n", role, cfg.RoleFiles[role])
+				fmt.Fprintf(stdout, "instructions.%s %s is empty: empty by choice, the role runs on the contract alone\n", role, cfg.RoleFiles[role])
 			}
 		}
 		// The worker's file is instructions_file spelled in the map
@@ -493,7 +491,7 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 		}
 		instructions = &text
 		if strings.TrimSpace(text) == "" {
-			fmt.Fprintf(stdout, "instructions_file %s is empty: the project's instructions are unset\n", cfg.InstructionsFile)
+			fmt.Fprintf(stdout, "instructions_file %s is empty: empty by choice, the project has no instructions\n", cfg.InstructionsFile)
 		}
 	}
 	rt, code := resolveRuntime(common, stderr)

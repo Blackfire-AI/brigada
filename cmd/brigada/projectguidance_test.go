@@ -182,3 +182,25 @@ func TestProjectRoleConflictShowsBothTexts(t *testing.T) {
 		t.Errorf("the local override did not stand: %q", l)
 	}
 }
+
+// TestProjectShowRoleStates: `project show` prints the three states of
+// §5.9 — not configured with only its state and file, empty by choice,
+// and a file text with its size and digest.
+func TestProjectShowRoleStates(t *testing.T) {
+	ctx, state := startSettingsEngine(t)
+	importRepo(t)
+	run1 := func(args ...string) (int, string, string) { return runWithStdin(t, ctx, state, "", args) }
+	if code, _, stderr := run1("project", "set", "instructions.worker=", "instructions.reviewer=review rules"); code != 0 {
+		t.Fatalf("set roles = %d, stderr %q", code, stderr)
+	}
+	_, out, _ := run1("project", "show")
+	if l := lineWith(out, "instructions.foreman:"); l != "instructions.foreman: not configured, file none" {
+		t.Errorf("foreman line = %q, want only the state and file", l)
+	}
+	if l := lineWith(out, "instructions.worker:"); !strings.HasPrefix(l, "instructions.worker: empty by choice, file none, 0 bytes") || strings.Contains(l, "default") {
+		t.Errorf("worker line = %q, want empty by choice", l)
+	}
+	if l := lineWith(out, "instructions.reviewer:"); !strings.HasPrefix(l, "instructions.reviewer: file, file none, 12 bytes") {
+		t.Errorf("reviewer line = %q, want a file text", l)
+	}
+}

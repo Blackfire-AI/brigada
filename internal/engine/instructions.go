@@ -187,16 +187,17 @@ func statusGuidanceTx(tx *sql.Tx, project int64, withText bool) ([]StatusRoleIns
 			if err != nil {
 				return nil, nil, err
 			}
-			s := StatusRoleInstructions{ProjectID: p.id, RepoURL: RedactRepoURL(p.repo), Role: role, State: ri.State, Source: ri.Source, Bytes: ri.Bytes, Digest: ri.Digest}
-			if ri.Source == SourceDefault || ri.Source == SourceGenerated {
+			s := StatusRoleInstructions{ProjectID: p.id, RepoURL: RedactRepoURL(p.repo), Role: role, State: ri.State, Source: ri.Source}
+			if ri.State != RoleStateNotConfigured {
+				// A role not configured runs nothing: its state is all
+				// status shows (§5.9), no size, digest or provenance.
+				s.Bytes, s.Digest = ri.Bytes, ri.Digest
+			}
+			if ri.Source == SourceGenerated {
 				// A generated row names the defaults version it was
-				// seeded from; a role with no row runs this binary's.
+				// seeded from, as recorded; never this binary's.
 				s.GeneratedFrom = ri.Version
-				if ri.Source == SourceDefault {
-					s.GeneratedFrom = defaults.Version
-				}
-				baseline, err := defaults.ArchiveRoleText(s.GeneratedFrom, role)
-				if err == nil {
+				if baseline, err := defaults.ArchiveRoleText(s.GeneratedFrom, role); err == nil {
 					edited := instructionsDigest(ri.Text) != instructionsDigest(baseline)
 					s.Edited = &edited
 				}

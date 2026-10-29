@@ -65,13 +65,12 @@ const gateDefaults = "gate_plan=auto (default)\n" + "gate_land=auto (default)\n"
 // guidanceDefaults is the per-role block and skills line `project show`
 // prints after the settings (§5.9) for a project that configured none of
 // them: every role not configured, no text of its own — at run time the
-// engine never falls back to a text in the binary — so the empty text
-// reads 0 bytes with the empty digest, and the edited flag the view
-// still computes against the shipped default reads true.
-const guidanceDefaults = "instructions.foreman: not configured, file none, 0 bytes, sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, generated from 1.0.0, edited true\n" +
-	"instructions.plan_review: not configured, file none, 0 bytes, sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, generated from 1.0.0, edited true\n" +
-	"instructions.worker: not configured, file none, 0 bytes, sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, generated from 1.0.0, edited true\n" +
-	"instructions.reviewer: not configured, file none, 0 bytes, sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, generated from 1.0.0, edited true\n" +
+// engine never falls back to a text in the binary — so the line is the
+// state and the file alone: no size, digest, provenance or edited flag.
+const guidanceDefaults = "instructions.foreman: not configured, file none\n" +
+	"instructions.plan_review: not configured, file none\n" +
+	"instructions.worker: not configured, file none\n" +
+	"instructions.reviewer: not configured, file none\n" +
 	"skills: none imported\n"
 
 const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes, approval_protected_paths, gate_plan, gate_land, gate_push, plan_review, plan_review.tier, plan_review.effort, approval_tiers, approval_restarted, land_target, after_land, land_ready, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, plan_files, instructions"
