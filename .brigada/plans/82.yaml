@@ -42,7 +42,7 @@ tasks:
     tier: heavy
     effort: high
     caps: {restart: 2}
-    state: reviewing
+    state: done
     branch: "brigada/task-246"
     rounds: 0
   - id: 247
@@ -76,7 +76,7 @@ tasks:
     base: "fix122"
     effort: medium
     caps: {restart: 2}
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 250
@@ -86,7 +86,7 @@ tasks:
     deps: ["fix122"]
     base: "fix122"
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 251
@@ -107,6 +107,6 @@ tasks:
     deps: ["fix122"]
     base: "fix122"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
