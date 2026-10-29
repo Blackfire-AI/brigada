@@ -87,9 +87,9 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: running
     branch: "brigada/task-281"
-    rounds: 0
+    rounds: 1
   - id: 282
     name: "changelog"
     title: "CHANGELOG for #132 and #133"
