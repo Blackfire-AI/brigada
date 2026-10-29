@@ -77,8 +77,8 @@ tasks:
     continue: "family_rereview_prompt"
     effort: medium
     review_tier: standard
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-290"
     rounds: 0
   - id: 291
     name: "family_init_userdocs"
