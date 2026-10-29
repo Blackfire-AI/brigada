@@ -105,7 +105,9 @@ func TestRunnerSetupRunsBeforeWorkerAndCheck(t *testing.T) {
 func TestRunnerSetupCacheReusedAndRebuilt(t *testing.T) {
 	t.Parallel()
 	remote := newRemote(t)
-	e := newTestEnv(t, engine.Config{})
+	// review.family=require keeps the one agent's reviews parked
+	// (issue #126): only the work jobs may spend the setup cache here.
+	e := newTestEnv(t, engine.Config{Review: engine.ReviewConfig{Family: engine.ReviewFamilyRequire}})
 	e.seedProject(remote)
 	markers := markerDir(t)
 	p := e.startRunner(writeWorkerScript(t, setupWorker), 100*time.Millisecond)
@@ -147,7 +149,9 @@ func TestRunnerSetupCacheReusedAndRebuilt(t *testing.T) {
 func TestRunnerSetupCacheNeverSharedAcrossRepositories(t *testing.T) {
 	t.Parallel()
 	remoteA, remoteB := newRemote(t), newRemote(t)
-	e := newTestEnv(t, engine.Config{})
+	// review.family=require keeps the one agent's reviews parked
+	// (issue #126): only the work jobs may spend the setup cache here.
+	e := newTestEnv(t, engine.Config{Review: engine.ReviewConfig{Family: engine.ReviewFamilyRequire}})
 	e.seedProject(remoteA)
 	markers := markerDir(t)
 	p := e.startRunner(writeWorkerScript(t, setupWorker), 100*time.Millisecond)

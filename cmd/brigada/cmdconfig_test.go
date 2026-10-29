@@ -93,6 +93,7 @@ func TestConfigSavedAgentsAndRunningRunnerOutsideRepo(t *testing.T) {
 		"foreman_wakes_per_day = 20 (default)", "default_reviewer = none (default)",
 		"rounds.fix = 2 (default)", "rounds.review = 2 (default)", "rounds.restart = 3 (default)",
 		"review.tier = below (default)", "review.effort = medium (default)",
+		"review.family = prefer (default)",
 		"snapshot_dir = none (default)", "caps.plan = no cap (default)",
 		"caps.runner = no cap (default)", "caps.account.<label> = no cap (default)",
 		"caps.model.<model> = no cap (default)", "cost.<harness>/<model> = 1 (default)",
@@ -237,12 +238,16 @@ func TestConfigDefaultsAndLongLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	config := filepath.Join(t.TempDir(), strings.Repeat("long-config-", 15))
-	if err := os.WriteFile(config, []byte("idle_minutes = 0\ntools.claude/sonnet = Bash("+strings.Repeat("long-command", 20)+")\n"), 0600); err != nil {
+	if err := os.WriteFile(config, []byte("idle_minutes = 0\nreview.family = require\ntools.claude/sonnet = Bash("+strings.Repeat("long-command", 20)+")\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	out = configDo(t, context.Background(), "--state-dir", state, "--config", config)
 	if !strings.Contains(out, "idle_minutes = 30 (default; file has 0)") {
 		t.Fatalf("zero idle is not the engine default:\n%s", out)
+	}
+	// The file's effective value replaces the default marker (issue #126).
+	if !strings.Contains(out, "review.family = require") || strings.Contains(out, "review.family = prefer") {
+		t.Fatalf("review.family does not show the file's value:\n%s", out)
 	}
 }
 

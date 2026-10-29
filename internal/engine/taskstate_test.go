@@ -320,12 +320,13 @@ func TestTerminalTransitionCountsOnce(t *testing.T) {
 	}
 }
 
-// TestReviewJobFamilyRule walks §7's placement: a review job that
-// excludes the author's family is invisible to a runner with no agent
-// of another family that offers review, and the first qualifying agent
-// by id is the one a lease records.
+// TestReviewJobFamilyRule walks §7's placement under
+// review.family=require (issue #126): a review job that excludes the
+// author's family is invisible to a runner with no agent of another
+// family that offers review, and the first qualifying agent by id is
+// the one a lease records.
 func TestReviewJobFamilyRule(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) { c.Review.Family = ReviewFamilyRequire })
 	author := e.agented("author", "anthropic", "implement")
 	review := e.runToReview(author)
 
@@ -383,7 +384,10 @@ func TestUnknownAuthorFamilyReview(t *testing.T) {
 // placement, not a cap hold, so nothing is stamped on the job and the
 // queue TTL, not a slot, is what ends its wait.
 func TestReviewJobWithoutARunnerIsNotAHeldJob(t *testing.T) {
-	e := newEnvCfg(t, func(c *Config) { c.QueueTTL = time.Minute })
+	e := newEnvCfg(t, func(c *Config) {
+		c.QueueTTL = time.Minute
+		c.Review.Family = ReviewFamilyRequire
+	})
 	author := e.agented("author", "anthropic", "implement", "review")
 	review := e.runToReview(author)
 

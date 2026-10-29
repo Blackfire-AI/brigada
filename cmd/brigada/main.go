@@ -42,9 +42,9 @@ Commands:
 	attach          Attach to this repo's foreman and chat (what a bare
 	                brigada runs).
 	ask <message>   Send the foreman a message without attaching.
-	review --branch <x>
-	                Review a branch with an agent of another family than
-	                its author's, with no plan or task.
+ 	review --branch <x>
+ 	                Review a branch, with an agent from another model
+ 	                family when one is available; no plan or task.
 	engine          Run the engine: store and API on the Unix socket.
 	runner          Run a runner: lease jobs, run workers, run checks.
 	start           Start the engine and detached runner with saved agents.

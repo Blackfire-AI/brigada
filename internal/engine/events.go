@@ -169,16 +169,21 @@ type eventPayload struct {
 	// retry's exclusion named (§7, decided 2026-10-20): no other
 	// qualifying reviewer was available, so the preference was lifted
 	// and the excluded agent took the job again.
-	ExclusionLifted bool     `json:"exclusion_lifted,omitempty"`
-	TierAsked       string   `json:"tier_asked,omitempty"`
-	TierServed      string   `json:"tier_served,omitempty"`
-	EffortFrom      string   `json:"effort_from,omitempty"` // an effort step's old effective effort (§8)
-	EffortTo        string   `json:"effort_to,omitempty"`   // an effort step's new effective effort (§8)
-	Retiered        []int64  `json:"retiered,omitempty"`    // tasks whose tier or effort plan_amend changed
-	PassedOver      []int64  `json:"passed_over,omitempty"`
-	Weight          *int     `json:"weight,omitempty"`
-	Draw            float64  `json:"draw,omitempty"`
-	Candidates      []Ranked `json:"candidates,omitempty"`
+	ExclusionLifted bool `json:"exclusion_lifted,omitempty"`
+	// Placement is how a review job's picked reviewer relates to its
+	// author (issue #126): cross_family, same_family, same_agent — or
+	// unknown when the author's family is not known. Computed at the
+	// pick; a non-review job's pick carries none.
+	Placement  string   `json:"placement,omitempty"`
+	TierAsked  string   `json:"tier_asked,omitempty"`
+	TierServed string   `json:"tier_served,omitempty"`
+	EffortFrom string   `json:"effort_from,omitempty"` // an effort step's old effective effort (§8)
+	EffortTo   string   `json:"effort_to,omitempty"`   // an effort step's new effective effort (§8)
+	Retiered   []int64  `json:"retiered,omitempty"`    // tasks whose tier or effort plan_amend changed
+	PassedOver []int64  `json:"passed_over,omitempty"`
+	Weight     *int     `json:"weight,omitempty"`
+	Draw       float64  `json:"draw,omitempty"`
+	Candidates []Ranked `json:"candidates,omitempty"`
 	// A foreman session rotation's why (§4.2): the input tokens the last
 	// turn read, the threshold it crossed, and the generation it opened.
 	Tokens    int64 `json:"tokens,omitempty"`

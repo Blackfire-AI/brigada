@@ -90,7 +90,13 @@ func TestStatusGolden(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- lifecycle.Run(ctx, lifecycle.Config{StateDir: state, Idle: time.Minute}) }()
+	// One agent of the author's family: review.family=require keeps the
+	// seeded review unservable, as the golden's needs-you line says
+	// (issue #126).
+	go func() {
+		done <- lifecycle.Run(ctx, lifecycle.Config{StateDir: state, Idle: time.Minute,
+			Review: engine.ReviewConfig{Family: engine.ReviewFamilyRequire}})
+	}()
 	t.Cleanup(func() {
 		cancel()
 		select {

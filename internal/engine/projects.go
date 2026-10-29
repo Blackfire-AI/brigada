@@ -244,7 +244,7 @@ func (e *Engine) Projects(ctx context.Context) ([]ProjectInfo, error) {
 		}
 		rows.Close()
 		for i := range out {
-			items, err := statusNeedsYouTx(tx, out[i].ProjectID, now)
+			items, err := statusNeedsYouTx(tx, e.cfg.Review.Family, out[i].ProjectID, now)
 			if err != nil {
 				return err
 			}

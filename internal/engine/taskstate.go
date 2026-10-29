@@ -958,7 +958,9 @@ func authorPlacementTx(tx *sql.Tx, taskID int64) (harness string, agent int64, e
 }
 
 // queueReviewTx moves an implement task into reviewing and queues its
-// review job (§7): same key, placed on another family than the author's,
+// review job (§7): same key, placed by the review family policy — an
+// agent of another family than the author's under
+// review.family=require, the family steps of issue #126 under prefer —
 // in a fresh session — except the review after a fix round that answered
 // a changes verdict, which resumes that verdict's reviewer's session
 // (resumedReviewTx) and is shown the fix round alone. The engine
@@ -1046,7 +1048,7 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 	}
 	// A review nobody could ever take is flagged at once, not at the
 	// next sweep: the user hears of it when the task starts waiting.
-	return flagUnservableReviewsTx(tx, now)
+	return flagUnservableReviewsTx(tx, e.cfg.Review.Family, now)
 }
 
 // agentFamilyTx reads the family a review must differ from (§7): the
@@ -1160,7 +1162,7 @@ func (e *Engine) requeueReviewTx(tx *sql.Tx, job *jobRow, c Completion, now time
 	}
 	requeue := &jobRow{ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindReview,
 		ExcludeFamily: job.ExcludeFamily, ExcludeAgent: job.ExcludeAgent}
-	noAgent, err := noReviewAgentTx(tx, requeue)
+	noAgent, err := noReviewAgentTx(tx, e.cfg.Review.Family, requeue)
 	if err != nil {
 		return err
 	}
@@ -1203,8 +1205,8 @@ const reviewOnlyReviewerTwice = "the only available reviewer twice gave no verdi
 
 // queueReviewRetryTx answers an unusable review with another reviewer
 // (§7): a new review job, once per review cycle — a cycle being the
-// review of the change the task's latest author job produced — placed
-// on another agent of a non-author family, so the same reviewer never
+// review of the change the task's latest author job produced — placed by
+// the review family policy on another agent, so the same reviewer never
 // reads its own output again. The retry asks the same question: its
 // prompt is the unusable review's own, which the engine composed from
 // the same template and the same verbatim data. The exclusion of the
@@ -1232,7 +1234,7 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 	}
 	retry := &jobRow{ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindReview,
 		ExcludeFamily: job.ExcludeFamily, ExcludeAgent: job.AgentID}
-	noAgent, err := noReviewAgentTx(tx, retry)
+	noAgent, err := noReviewAgentTx(tx, e.cfg.Review.Family, retry)
 	if err != nil {
 		return err
 	}
@@ -1243,9 +1245,12 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 			if err != nil {
 				return err
 			}
-			if onlyAuthor {
+			switch {
+			case onlyAuthor:
 				why = noReviewerAuthor
-			} else {
+			case familyPrefer(e.cfg.Review.Family):
+				why = "no other agent can take the retry"
+			default:
 				why = "no other agent of another family can take the retry"
 			}
 		}
