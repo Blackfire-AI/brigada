@@ -42,7 +42,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `brigada init`'s file header and the client provenance recorded with an import carry the brigada version, and `brigada instructions diff` prints its three-way comparison as one diff (issue #119).
 
-- The plan-review template keeps only the verdict contract (issues #119 and #117): the checks and the size guide come from the project's `plan_review.md` and `foreman.md`; skill framing states that the project's instructions stand above a skill's text; a `for: worker` skill is named to the reviewer as it was given to the author; and the per-skill directory line in the worker and reviewer prompts names the project's configured skills directory, `<skills_dir>/<name>/` (`.brigada/skills/` by default).
+- The plan-review template keeps only the verdict contract (issues #119 and #117): the checks and the size guide come from the project's `plan_review.md` and `foreman.md`; skill framing states that the project's instructions stand above a skill's text; a `for: worker` skill is named to the reviewer as it was given to the author; and the per-skill directory line in the worker and reviewer prompts names the skills_dir recorded on the task at creation, `<skills_dir>/<name>/` (`.brigada/skills/` when none is recorded).
 
 - A worker that cannot find a documentation section its spec cites stops with `needs_help`, naming the section and the reference it read, and the foreman treats that as blocking (issue #129).
 
