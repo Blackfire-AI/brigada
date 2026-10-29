@@ -3,7 +3,7 @@ brigada init: set up example.invalid/imported
 brigada runs coding tasks on the agent CLIs you are signed in to. A foreman
 (an agent) turns your request into a plan of tasks; workers (other agents)
 write the code in their own git worktrees; your check command tests it; and
-an agent of a different model family reviews it. Four short steps follow.
+an agent of another family, if any, reviews it. Four short steps follow.
 The engine mirrors plan files (titles, task states, dependencies,
 branches, open questions, extra repositories) to the brigada/plans
 branch of your remote; turn that off with
@@ -47,9 +47,9 @@ Step 2 of 4: workers
   Each agent CLI below can run tasks. brigada offers every model the CLI
   knows: for each task the foreman says how heavy a model it needs (light,
   standard, heavy) and how hard it should think, and brigada picks the
-  model of that tier with the best record on this repo. Reviews always go
-  to a different model family than the author's, so you need at least two
-  families (e.g. claude + codex).
+  model of that tier with the best record on this repo. Reviews go to another
+  family than the author's when one is available (review.family=prefer); with
+  one family they fall back to the same family or agent.
 
   claude: signed in
     Use claude's models for tasks (sonnet and 4 more)? [Y/n]:

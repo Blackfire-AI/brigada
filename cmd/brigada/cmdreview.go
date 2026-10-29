@@ -17,7 +17,7 @@ import (
 func runReview(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("review",
 		"brigada review --branch BRANCH [--repo URL] [--no-start]",
-		"Review a branch, with an agent from another model family when one is available.")
+		"Review a branch, with an agent from another model family when one is available\n(review.family=prefer, the default; the author's own family or agent otherwise),\nor only from another family with review.family=require in the engine config.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	branch := fs.String("branch", "", "the branch to review (required)")

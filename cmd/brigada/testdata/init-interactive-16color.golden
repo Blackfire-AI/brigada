@@ -3,7 +3,7 @@
 [90mbrigada runs coding tasks on the agent CLIs you are signed in to. A foreman[0m
 [90m(an agent) turns your request into a plan of tasks; workers (other agents)[0m
 [90mwrite the code in their own git worktrees; your check command tests it; and[0m
-[90man agent of a different model family reviews it. Four short steps follow.[0m
+[90man agent of another family, if any, reviews it. Four short steps follow.[0m
 [90mThe engine mirrors plan files (titles, task states, dependencies,[0m
 [90mbranches, open questions, extra repositories) to the brigada/plans[0m
 [90mbranch of your remote; turn that off with[0m
@@ -47,9 +47,9 @@ dsh (experimental): init can't check sign-in.
 [90m  Each agent CLI below can run tasks. brigada offers every model the CLI[0m
 [90m  knows: for each task the foreman says how heavy a model it needs (light,[0m
 [90m  standard, heavy) and how hard it should think, and brigada picks the[0m
-[90m  model of that tier with the best record on this repo. Reviews always go[0m
-[90m  to a different model family than the author's, so you need at least two[0m
-[90m  families (e.g. claude + codex).[0m
+[90m  model of that tier with the best record on this repo. Reviews go to another[0m
+[90m  family than the author's when one is available (review.family=prefer); with[0m
+[90m  one family they fall back to the same family or agent.[0m
 
   [1mclaude[0m  [32m✓ signed in[0m
 [1m    Use claude's models for tasks (sonnet and 4 more)? [0m[36m[Y/n][0m[1m:[0m

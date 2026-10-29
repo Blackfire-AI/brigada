@@ -14,7 +14,7 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 2. They pick an agent per task by gut feel, and switch CLIs when one hits its 5-hour or weekly limit.
 3. They babysit the agent: rerun it, paste errors back, decide when to give up.
 4. They don't know which agent is actually best on *their* repo for *this* kind of task.
-5. Agents say "done" without running the tests, and nobody from another model family reviews the change.
+5. Agents say "done" without running the tests, and nobody from another model family (when one is available, `review.family=prefer`; required with `review.family=require`) reviews the change.
 
 ## 3. What it does
 
@@ -30,13 +30,13 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 4. **Dispatches** each task to an eligible agent chosen by sampling: each agent's measured record for that class on this repo, weighed against its configured cost, among agents with quota left and healthy. With no record yet (a new user or repo) the draws are wide, so every agent gets tried, and `stats` shows how confident each number is. The foreman says per task how heavy a model it needs (light, standard or heavy) and how hard it should think; the engine samples a model of that tier among the CLIs you allowed, by record weighed against cost, never leaving the tier by choice. A failed task first retries at a higher effort, then climbs a tier ([design.md](design.md) §6.1, §8).
 5. **Runs** the agent's official CLI headless in its own git worktree, signed in with your account.
 6. **Checks** the work by running the task's check, never trusting "done".
-7. **Reviews** every change independently, using a model from a different family. Review catches real problems even after work passes its check, and cross-family routing spreads the work across subscriptions so a review does not wait on or spend the author's quota. Fix rounds are capped.
+7. **Reviews** every change independently, using a model from another family when available (`review.family=prefer`, the default; required with `review.family=require`). Review catches real problems even after work passes its check, and cross-family routing spreads the work across subscriptions so a review does not wait on or spend the author's quota. Fix rounds are capped.
 8. **Handles failures:** retries at a higher effort, then a higher tier, moves the task to another agent, or parks it for the foreman, which re-plans, splits it, or asks you.
 9. **Lands** each approved task onto your branch as soon as its dependencies are landed, reruns your check on the result, and pushes ([design.md](design.md) §7.1): the mechanical end of the loop is brigada's, and you stop it only with a rule, at the plan, the landing or the push ([design.md](design.md) §6.3). A task that your rules hold, a conflict, or a check that fails on the landed result is never resolved by a rule: it waits for you or goes back to the foreman.
 10. **Reports** progress and results: what landed, what waits at a gate, what needs you. You can **stop or cancel** a plan or a task at any time.
 11. **Learns:** every outcome feeds the record, so the next pick is better. `brigada stats` shows who wins where.
 
-**The loop is brigada's; the stops are yours.** Every step the check and the cross-family review have already decided — landing, the check on the result, the push — runs without you. You decide where the loop waits by writing rules into the project file, and the defaults are conservative: a plan over the size limit waits, landing is automatic, the push waits for you until you set it to go on its own. A gate is enforced by the engine, never by the foreman, which has no tool to pass one.
+**The loop is brigada's; the stops are yours.** Every step the check and the review (another family when available) have already decided — landing, the check on the result, the push — runs without you. You decide where the loop waits by writing rules into the project file, and the defaults are conservative: a plan over the size limit waits, landing is automatic, the push waits for you until you set it to go on its own. A gate is enforced by the engine, never by the foreman, which has no tool to pass one.
 
 ## 4. How it's built
 
@@ -88,7 +88,7 @@ In:
 - `brigada review --branch <x>` without the foreman (the author's family from the job record or the `Co-Authored-By` trailer): it seeds the record and shows value on its own;
 - the engine and a local runner;
 - adapters for Claude Code, Codex, Kimi and opencode, plus an experimental adapter for dsh ([GUIDE](GUIDE.md#dsh-experimental), [COMPATIBILITY](COMPATIBILITY.md)) (Gemini has no adapter);
-- check and cross-family review;
+- check and review, by another family when available (`review.family=prefer`; required with `require`);
 - the outcome record and `brigada stats`;
 - quota learned from the CLIs' own limit errors: an account that hits its limit cools until the reset time;
 - an MCP bridge so other harnesses can call brigada.
@@ -112,11 +112,11 @@ brigada is a standalone tool beside your own harness session: not a board, and n
 | Orchestrator.inc (13k★, Go, Apache-2.0): orchestrator, workers, 27+ harnesses, kanban | you pick the agent per task; no outcome or quota routing; desktop app; telemetry on by default |
 | Multica (52k★): board, agents as teammates, remote runtimes | no routing, checks or cross-review; its license restricts embedding |
 | Claude Code Projects, Codex cloud | one vendor each, cloud |
-| Claude Code agent teams (experimental): a lead session, teammates, a shared task list, a mailbox; local | interactive only (no teammates in headless mode); one team per session with a fixed lead, in-process teammates not restored on resume; the lead approves teammates' plans without the user; single vendor; no outcome routing, no checks it runs itself, no cross-family review. A neighbour, not a substitute: it can't run inside brigada's headless workers |
+| Claude Code agent teams (experimental): a lead session, teammates, a shared task list, a mailbox; local | interactive only (no teammates in headless mode); one team per session with a fixed lead, in-process teammates not restored on resume; the lead approves teammates' plans without the user; single vendor; no outcome routing, no checks it runs itself, no review by another family. A neighbour, not a substitute: it can't run inside brigada's headless workers |
 | Gas Town, Symphony, vibe-kanban, claude-squad | orchestration without outcome routing |
 | CodexBar (22k★) | shows quota only; brigada uses it as a source |
 
-**Edge:** a foreman that routes by measured outcomes, runs checks, and enforces independent cross-family review to catch problems beyond the check and spread review work across subscriptions; it works headless and sends no telemetry. No tool in this landscape routes by per-repo outcomes.
+**Edge:** a foreman that routes by measured outcomes, runs checks, and enforces independent review, by another family when available (`review.family=prefer`; required with `require`), to catch problems beyond the check and spread review work across subscriptions; it works headless and sends no telemetry. No tool in this landscape routes by per-repo outcomes.
 
 ## 8. Terms of use
 
@@ -139,7 +139,7 @@ brigada is a standalone tool beside your own harness session: not a board, and n
 | Risk | Mitigation |
 |---|---|
 | The foreman splits work badly | the plan gate's rules (a size limit, classes, protected paths); the planner's own outcomes are recorded; re-planning when a task fails |
-| A bad change lands on your branch without you | the check and the cross-family review before landing, the check again on the landed result, the push gate (`auto` by default), protected paths and tiers that hold a landing for you, a staging target branch as a setting; nothing is force-pushed and a landing never resolves a conflict |
+| A bad change lands on your branch without you | the check and the review (another family when available) before landing, the check again on the landed result, the push gate (`auto` by default), protected paths and tiers that hold a landing for you, a staging target branch as a setting; nothing is force-pushed and a landing never resolves a conflict |
 | The foreman's subscription hits its limit | you're notified and decide (wait, switch harness or model, or continue without it); plain commands and approved plans work without it |
 | No outcome data on a fresh install | defaults plus wide draws from a thin record, confidence shown in `stats`; standalone `review` seeds the record |
 | Scope: foreman plus engine plus adapters | phase it: one task end to end first, then plans with dependencies, then failure handling and re-planning |

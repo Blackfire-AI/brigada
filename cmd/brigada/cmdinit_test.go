@@ -109,8 +109,8 @@ func TestInitProbeAndRefusals(t *testing.T) {
 	}{
 		{"probe", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}, "", 0, "Probe only"},
 		{"declined", []string{"--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}, "\n\n\nn\n", 1, "Declined"},
-		{"one family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=anthropic/claude-opus-4", "--signed-in", "claude,opencode"}, "", 1, "--accept-limited"},
-		{"limited acknowledged", []string{"--probe", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--signed-in", "claude"}, "", 0, "LIMITED SETUP"},
+		{"one family", []string{"@require", "--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=anthropic/claude-opus-4", "--signed-in", "claude,opencode"}, "", 1, "--accept-limited"},
+		{"limited acknowledged", []string{"@require", "--probe", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--signed-in", "claude"}, "", 0, "LIMITED SETUP"},
 		{"zero", []string{"--yes", "--agent", "harness=claude,model=sonnet"}, "", 1, "zero usable agents"},
 		{"no explicit models", []string{"--probe"}, "", 1, "zero usable agents"},
 		{"bad model", []string{"--probe", "--agent", "harness=claude,model=unknown"}, "", 1, "cannot identify the family"},
@@ -123,8 +123,8 @@ func TestInitProbeAndRefusals(t *testing.T) {
 		{"duplicate claude model", []string{"--probe", "--agent", "harness=claude", "--agent", "harness=claude,model=sonnet"}, "", 1, "agent claude/sonnet is offered twice: one agent per harness and model per runner"},
 		{"runner defaults", []string{"--probe", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex"}, "", 0, "    codex     CLI default"},
 		{"codex default second family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=default", "--signed-in", "claude,codex"}, "", 0, "Reviews: 2 model families"},
-		{"opencode default unknown family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=default", "--signed-in", "claude,opencode"}, "", 1, "--accept-limited"},
-		{"opencode default limited acknowledged", []string{"--probe", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=default", "--signed-in", "claude,opencode"}, "", 0, "unknown family"},
+		{"opencode default unknown family", []string{"@require", "--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=default", "--signed-in", "claude,opencode"}, "", 1, "--accept-limited"},
+		{"opencode default limited acknowledged", []string{"@require", "--probe", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=default", "--signed-in", "claude,opencode"}, "", 0, "unknown family"},
 		{"opencode needs provider", []string{"--probe", "--agent", "harness=opencode,model=glm"}, "", 1, "opencode needs provider/model, e.g. zai-coding-plan/glm-5.3"},
 		{"model whitespace", []string{"--probe", "--agent", "harness=claude,model=sonnet other"}, "", 1, "model must be a nonempty model identifier"},
 	} {
@@ -136,7 +136,7 @@ func TestInitProbeAndRefusals(t *testing.T) {
 			calls := fakeInitPATH(t, "claude", "codex", "kimi", "opencode")
 			writeInitCodexScript(t, "  debug  Diagnostic tools", "  models  Render the raw model catalog as JSON", "      --bundled  Skip refresh", initCodexCatalogCommand, initCodexCatalogCommand)
 			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
-			code, out, err := initFixedParallel(t, state, tc.stdin, tc.args...)
+			code, out, err := initFixedParallel(t, state, tc.stdin, requireArgs(t, tc.args)...)
 			if code != tc.wantCode || !strings.Contains(out+err, tc.want) {
 				t.Fatalf("got %d\n%s\n%s", code, out, err)
 			}
@@ -1709,7 +1709,7 @@ func TestInitAgentsVeryLongModel(t *testing.T) {
 				"codex": {entries: []initModelEntry{{value: "default", name: "gpt-6.1-sol"}}},
 			}
 			var out bytes.Buffer
-			printInitAgents(&out, agents, 2, foreman, sources, adapter.AgentTier)
+			printInitAgents(&out, agents, 2, false, foreman, sources, adapter.AgentTier)
 			for _, line := range strings.Split(out.String(), "\n") {
 				if len([]rune(line)) >= 80 {
 					t.Errorf("line must be under 80 columns: %q", line)

@@ -14,6 +14,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `review.family` (issue #126), an engine config key: `prefer` (the default) sends a review to another model family when one is available and otherwise to the author's own family or agent, labelled in history; `require` keeps the old rule that only another family reviews. This changes the default: reviews no longer wait for another family. `brigada init` follows the setting: under `prefer` fewer than two review families is a warning, init reports ready and `--accept-limited` is not needed; under `require` the limited-setup stop and acknowledgement stay. The init texts, the `brigada review` help, the user guide, product notes, README and the compatibility notes state the rule.
 - `issue_read`, a read-only foreman tool (issue #131): it answers the title, body and comments of an issue or pull request of the project's own repository inside `<issue>` data delimiters, with the user's `gh` login. When the repository is not on GitHub, `gh` is missing or not logged in, or the number does not exist, it returns that reason; the foreman's report says so and asks the user for the text, and the foreman never searches the disk for it.
 - Documented editable role instructions, task skills, their import and snapshot rules, and the diff/reset commands (issues #119 and #117). Enabled the documentation content verifier.
 
