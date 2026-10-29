@@ -107,6 +107,6 @@ tasks:
     deps: ["fix122"]
     base: "fix122"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-252"
     rounds: 0
