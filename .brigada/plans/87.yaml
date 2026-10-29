@@ -120,8 +120,8 @@ tasks:
     deps: ["land_retry_api"]
     base: "land_retry_api"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-284"
     rounds: 0
   - id: 285
     name: "plan_open_held"
