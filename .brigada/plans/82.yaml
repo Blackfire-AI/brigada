@@ -5,9 +5,9 @@
 plan: 82
 title: "Integrate the stranded plan-81 stack onto landed; fix #122 (plan_amend cancel with dependents, done-vs-landed)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-10-29T07:35:58.740006Z
-updated: 2026-10-29T07:39:46.911429Z
+updated: 2026-10-29T07:57:50.831608Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -41,6 +41,40 @@ tasks:
     base: "integrate"
     tier: heavy
     effort: high
+    caps: {restart: 2}
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 247
+    name: "bug115"
+    title: "#115: task submit accepts a SHA base the land job cannot fetch"
+    class: "implement"
+    deps: ["fix122"]
+    base: "fix122"
+    effort: medium
+    caps: {restart: 2}
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 248
+    name: "bug116"
+    title: "#116: land job environment failure wakes the foreman once per task; one wake per cause"
+    class: "implement"
+    deps: ["bug115"]
+    base: "bug115"
+    tier: heavy
+    effort: medium
+    caps: {restart: 2}
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 249
+    name: "bug118"
+    title: "#118: TestRunnerStallKillsChildAfterLeaderExits flaky right after host wake"
+    class: "implement"
+    deps: ["fix122"]
+    base: "fix122"
+    effort: medium
     caps: {restart: 2}
     state: pending
     branch: ""
