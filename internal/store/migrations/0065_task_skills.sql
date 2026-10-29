@@ -1,6 +1,7 @@
 -- 0065_task_skills: the project's task skills and a task's snapshot of
--- what its prompts carry (design §5.9 'Bounds', 'Versioning'; §5.10
--- 'Import', 'Resolved once').
+-- what its prompts carry (design §5.9 'Size bound', 'Versioning'; §5.10
+-- 'Recorded'; the skills import and resolution rules in GUIDE §6,
+-- 'Skills').
 --
 -- skills holds the last import of the project's skills directory: one
 -- row per SKILL.md, its text as the client read it, the text's digest
