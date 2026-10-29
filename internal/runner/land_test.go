@@ -897,6 +897,13 @@ func TestRunnerLandAfterLandFailure(t *testing.T) {
 // that refuses the landing's push would. Pushes to other branches —
 // the work round's own — pass untouched.
 func landHookRemote(t *testing.T, reject int) string {
+	return landHookRefRemote(t, reject, "refs/heads/main")
+}
+
+// landHookRefRemote is landHookRemote for one named ref: the waiting
+// ref under the ask and never gates, whose pushes another landing of
+// the stack would race.
+func landHookRefRemote(t *testing.T, reject int, ref string) string {
 	t.Helper()
 	// The hook runs under the runner's git push, whose environment no
 	// longer carries the test's markers directory: the path is baked in.
@@ -907,13 +914,13 @@ func landHookRemote(t *testing.T, reject int) string {
 		}
 	}
 	if markers == "" {
-		t.Fatal("landHookRemote needs markerDir(t) first")
+		t.Fatal("landHookRefRemote needs markerDir(t) first")
 	}
 	remote := newRemote(t)
 	hook := filepath.Join(strings.TrimPrefix(remote, "file://"), "hooks", "pre-receive")
 	script := `#!/bin/sh
-while read old new ref; do
-	if [ "$ref" = "refs/heads/main" ]; then
+while read old new r; do
+	if [ "$r" = "` + ref + `" ]; then
 		f="` + markers + `/pushes"
 		n=$(($(cat "$f" 2>/dev/null || echo 0)+1))
 		echo $n >"$f"
@@ -928,36 +935,42 @@ exit 0
 	return remote
 }
 
-// TestRunnerLandPushRejectedRetriesOnce: a push the target rejected is
-// retried once from a fresh fetch and squash, and the retry's push
-// lands.
-func TestRunnerLandPushRejectedRetriesOnce(t *testing.T) {
+// TestRunnerLandPushRejectedTwiceLandsOnThird: a push the target
+// rejected twice is retried from a fresh fetch and squash each time,
+// and the third attempt lands — with land_ready run once, before the
+// first attempt, and never again for the retries.
+func TestRunnerLandPushRejectedTwiceLandsOnThird(t *testing.T) {
 	t.Parallel()
 	markers := markerDir(t)
-	remote := landHookRemote(t, 1)
+	remote := landHookRemote(t, 2)
 	e := newTestEnv(t, engine.Config{})
-	task, work := e.landTest(t, remote, `{"gate_push":"auto"}`,
+	task, work := e.landTest(t, remote, `{"gate_push":"auto","land_ready":"echo once >> \"$TEST_MARKERS_DIR/land-ready\""}`,
 		"Add work.txt with hello in it.", `test "$(cat work.txt)" = hello`, reviewScript(reviewApproveResult))
 
 	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
 	e.waitTaskState(task, "done")
 	commit := e.waitLanding(task, "pushed")
 	if got := remoteBranchCommit(t, remote, "main"); got != commit {
-		t.Errorf("main = %s, want the retry's landing commit %s", got, commit)
+		t.Errorf("main = %s, want the third attempt's landing commit %s", got, commit)
 	}
-	e.waitUntil("two pushes to reach the hook", func() bool {
+	e.waitUntil("three pushes to reach the hook", func() bool {
 		data, err := os.ReadFile(filepath.Join(markers, "pushes"))
-		return err == nil && strings.TrimSpace(string(data)) == "2"
+		return err == nil && strings.TrimSpace(string(data)) == "3"
 	})
+	ready, err := os.ReadFile(filepath.Join(markers, "land-ready"))
+	if err != nil || strings.Count(string(ready), "once") != 1 {
+		t.Errorf("land_ready ran %d times, want once before the first attempt alone", strings.Count(string(ready), "once"))
+	}
 }
 
-// TestRunnerLandPushRejectedTwiceFails: a push the target rejects again
-// after the one retry fails the landing like a conflict — nothing
-// pushed, no record, the task parked for the foreman.
-func TestRunnerLandPushRejectedTwiceFails(t *testing.T) {
+// TestRunnerLandPushRejectedEveryAttemptFails: a push the target
+// rejects on every attempt ends the job at the bound — five attempts —
+// with nothing pushed, no record, and the failure naming the count and
+// the target's movement; the task parks for the foreman.
+func TestRunnerLandPushRejectedEveryAttemptFails(t *testing.T) {
 	t.Parallel()
 	markerDir(t)
-	remote := landHookRemote(t, 2)
+	remote := landHookRemote(t, 99)
 	seed := remoteBranchCommit(t, remote, "main")
 	e := newTestEnv(t, engine.Config{})
 	task, work := e.landTest(t, remote, `{"gate_push":"auto"}`,
@@ -972,8 +985,80 @@ func TestRunnerLandPushRejectedTwiceFails(t *testing.T) {
 		t.Errorf("main moved by the rejected landing: %s, want the seed %s", got, seed)
 	}
 	rec := e.strOf("SELECT result FROM jobs WHERE id = ?", e.landJobID(task))
-	if !strings.Contains(rec, "rejected") && !strings.Contains(rec, "push") {
-		t.Errorf("the failed landing's record does not name the push: %s", rec)
+	for _, want := range []string{"rejected after 5 attempts", "target moved"} {
+		if !strings.Contains(rec, want) {
+			t.Errorf("the failed landing's record lacks %q: %s", want, rec)
+		}
+	}
+}
+
+// TestRunnerLandRejectedThenMovedTargetConflicts: a target that moves
+// between a rejected push and its retry ends the landing as a conflict
+// on the retry's fresh squash, with no further retry — the record
+// carries the file, nothing is pushed, and the task parks. The landing
+// check's own sleep holds the first attempt open while another
+// engineer's push moves main under it, so its push is rejected as a
+// real non-fast-forward.
+func TestRunnerLandRejectedThenMovedTargetConflicts(t *testing.T) {
+	t.Parallel()
+	markers := markerDir(t)
+	remote := newRemote(t)
+	seed := remoteBranchCommit(t, remote, "main")
+	e := newTestEnv(t, engine.Config{})
+	task, work := e.landTest(t, remote, `{"gate_push":"auto","default_check":": >> \"$TEST_MARKERS_DIR/checked\"; sleep 5; test \"$(cat work.txt)\" = hello"}`,
+		"Add work.txt with hello in it.", `test "$(cat work.txt)" = hello`, reviewScript(reviewApproveResult))
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	// The first attempt's check has started and sleeps: while it waits,
+	// another engineer lands on main a change that collides with the
+	// task's, so the attempt's own push — squashed on the old head — is
+	// rejected.
+	e.waitUntil("the landing check to start", func() bool {
+		_, err := os.Stat(filepath.Join(markers, "checked"))
+		return err == nil
+	})
+	moved := pushToMain(t, remote, "work.txt", "goodbye\n")
+	if moved == seed {
+		t.Fatal("the conflicting push never moved main")
+	}
+	e.waitTaskState(task, "needs_foreman")
+	if _, _, _, _, ok := e.landing(task); ok {
+		t.Error("a conflicting landing was recorded")
+	}
+	rec := e.strOf("SELECT result FROM jobs WHERE id = ?", e.landJobID(task))
+	if !strings.Contains(rec, "work.txt") {
+		t.Errorf("the landing record does not name the conflicting file: %s", rec)
+	}
+	if got := remoteBranchCommit(t, remote, "main"); got != moved {
+		t.Errorf("main = %s, want the moved head %s", got, moved)
+	}
+}
+
+// TestRunnerLandWaitingRefPushRejectedRetries: under the ask gate a
+// push the waiting ref rejects — another landing moved it first — is
+// retried the same way, from a fresh fetch and squash, and the third
+// attempt takes the ref: the landing waits there and main never moves.
+func TestRunnerLandWaitingRefPushRejectedRetries(t *testing.T) {
+	t.Parallel()
+	markers := markerDir(t)
+	remote := landHookRefRemote(t, 2, landWaitRef("main"))
+	seed := remoteBranchCommit(t, remote, "main")
+	e := newTestEnv(t, engine.Config{})
+	task, work := e.landTest(t, remote, `{"gate_push":"ask"}`,
+		"Add work.txt with hello in it.", `test "$(cat work.txt)" = hello`, reviewScript(reviewApproveResult))
+
+	e.waitJob(work, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	e.waitTaskState(task, "done")
+	commit := e.waitLanding(task, "waiting")
+	e.waitUntil("three pushes to reach the hook", func() bool {
+		data, err := os.ReadFile(filepath.Join(markers, "pushes"))
+		return err == nil && strings.TrimSpace(string(data)) == "3"
+	})
+	if got := remoteRefCommit(t, remote, landWaitRef("main")); got != commit {
+		t.Errorf("the waiting ref = %q, want the third attempt's commit %s", got, commit)
+	}
+	if got := remoteBranchCommit(t, remote, "main"); got != seed {
+		t.Errorf("main moved under gate_push ask: %s, want the seed %s", got, seed)
 	}
 }
 
