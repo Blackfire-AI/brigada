@@ -10,6 +10,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/defaults"
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/version"
 )
 
 // Init writes the full defaults (§5.9, §5.10): the four role files and the
@@ -21,7 +22,7 @@ import (
 
 // generatedHeader is the marked header for a generated text.
 func generatedHeader(text string) string {
-	return fmt.Sprintf("<!-- brigada: version=%s digest=%s -->\n", defaults.Version, defaults.Digest(text))
+	return fmt.Sprintf("<!-- brigada: version=%s digest=%s -->\n", version.String(), defaults.Digest(text))
 }
 
 // skillFrontmatterEnd is the offset just past a SKILL.md's closing `---`
