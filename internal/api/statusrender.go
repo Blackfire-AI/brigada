@@ -19,7 +19,8 @@ import (
 // `needs you:` queue, "nothing" when it is empty. The client's status
 // command and the MCP bridge's status tool share this rendering, so a
 // user and the foreman read the same lines; a task's branch rides in
-// brackets only once it has one. The plans list the engine trimmed
+// brackets only once it has one, and a done implement task carries its
+// landing state beside the state — `landed@<sha>` or `not landed`. The plans list the engine trimmed
 // says so in one summary line (§10): the older finished plans counted,
 // the all view (`--all`, all=true) listing them.
 func StatusSections(st Status) string {
@@ -103,8 +104,11 @@ func StatusSections(st Status) string {
 			}
 			for _, t := range p.Tasks {
 				line := fmt.Sprintf("  task #%d %s %s", t.ID, t.State, t.Title)
-				if t.Landed {
-					line += " landed"
+				// A done implement task carries its landing state (§7.1):
+				// `landed@<sha>` or `not landed`, so a task done and not
+				// landed reads differently from a landed one.
+				if label := t.LandedLabel(); label != "" {
+					line += " " + label
 				}
 				if t.LandReady != "" {
 					line += " " + t.LandReady

@@ -76,20 +76,15 @@ type landNotReadyRecord struct {
 // job on its key is left alone, so the callers that re-evaluate it — a
 // dependency landing, a hold release — never queue a second job.
 func (e *Engine) maybeLandTaskTx(tx *sql.Tx, taskID int64, now time.Time) error {
-	var state, class string
 	var plan int64
-	if err := tx.QueryRow("SELECT state, class, plan_id FROM tasks WHERE id = ?", taskID).
-		Scan(&state, &class, &plan); err != nil {
+	if err := tx.QueryRow("SELECT plan_id FROM tasks WHERE id = ?", taskID).Scan(&plan); err != nil {
 		return fmt.Errorf("read task %d: %w", taskID, err)
 	}
-	if state != taskDone || class != classImplement {
-		return nil
-	}
-	approved, err := taskApprovedTx(tx, taskID)
+	landable, err := landableDoneTx(tx, taskID)
 	if err != nil {
 		return err
 	}
-	if !approved {
+	if !landable {
 		return nil
 	}
 	landed, err := depsLandedTx(tx, taskID)
@@ -167,6 +162,24 @@ func taskApprovedTx(tx *sql.Tx, taskID int64) (bool, error) {
 	return v.Verdict == verdictApprove && len(v.Findings) >= minSubstantiveFindings, nil
 }
 
+// landableDoneTx reports whether the task is one the land rule queues a
+// landing for (§7.1): done, of the implement class — the one class that
+// lands — and approved by its last review. The done report's
+// not-yet-landed list and the blocked-plan rule's stranded tasks (§6.2)
+// read the same eligibility here, so the three can never disagree: a
+// done task of a class that never lands is never "not yet landed" and
+// never holds its plan open.
+func landableDoneTx(tx *sql.Tx, taskID int64) (bool, error) {
+	var state, class string
+	if err := tx.QueryRow("SELECT state, class FROM tasks WHERE id = ?", taskID).Scan(&state, &class); err != nil {
+		return false, fmt.Errorf("read task %d: %w", taskID, err)
+	}
+	if state != taskDone || class != classImplement {
+		return false, nil
+	}
+	return taskApprovedTx(tx, taskID)
+}
+
 // depsLandedTx reports whether every dependency of taskID is landed
 // (§7.1): a dependency with a landing record, or a dependency of a class
 // that never lands — only implement tasks are landable, so another
@@ -184,49 +197,69 @@ func depsLandedTx(tx *sql.Tx, taskID int64) (bool, error) {
 		return false, fmt.Errorf("read the dependencies of task %d: %w", taskID, err)
 	}
 	defer rows.Close()
+	var deps []int64
 	for rows.Next() {
 		var dep int64
 		if err := rows.Scan(&dep); err != nil {
 			return false, fmt.Errorf("read the dependencies of task %d: %w", taskID, err)
 		}
-		var class string
-		if err := tx.QueryRow("SELECT class FROM tasks WHERE id = ?", dep).Scan(&class); err != nil {
-			return false, fmt.Errorf("read the class of dependency %d: %w", dep, err)
-		}
-		if class != classImplement {
-			continue
-		}
-		var pushed string
-		err := tx.QueryRow("SELECT pushed FROM landings WHERE task_id = ?", dep).Scan(&pushed)
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
-		}
+		deps = append(deps, dep)
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("read the dependencies of task %d: %w", taskID, err)
+	}
+	for _, dep := range deps {
+		landed, err := depLandedForTx(tx, taskID, dep)
 		if err != nil {
-			return false, fmt.Errorf("read the landing of dependency %d: %w", dep, err)
+			return false, err
 		}
-		switch pushed {
-		case "pushed":
-			// The dependency's work is on the target.
-		case "waiting", "local":
-			released, err := depPushReleasedTx(tx, dep)
-			if err != nil {
-				return false, err
-			}
-			if released {
-				continue
-			}
-			stacks, err := dependentStacksTx(tx, taskID)
-			if err != nil {
-				return false, err
-			}
-			if !stacks {
-				return false, nil
-			}
-		default:
+		if !landed {
 			return false, nil
 		}
 	}
-	return true, rows.Err()
+	return true, nil
+}
+
+// depLandedForTx reports whether the dependency dep of the task taskID
+// is settled for that task's landing (§7.1), the one predicate
+// depsLandedTx walks: a dependency of a class other than implement
+// never lands, so it never blocks; an implement dependency counts with
+// a landing pushed, released, or — waiting or local — while the
+// dependent's own landing stacks onto the waiting ref. The blocked-plan
+// rule (§6.2) reads it too, so a dependency the landing rule skips can
+// never strand a dependent either.
+func depLandedForTx(tx *sql.Tx, taskID, dep int64) (bool, error) {
+	var class string
+	if err := tx.QueryRow("SELECT class FROM tasks WHERE id = ?", dep).Scan(&class); err != nil {
+		return false, fmt.Errorf("read the class of dependency %d: %w", dep, err)
+	}
+	if class != classImplement {
+		return true, nil // never lands, so nothing waits on it
+	}
+	var pushed string
+	err := tx.QueryRow("SELECT pushed FROM landings WHERE task_id = ?", dep).Scan(&pushed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the landing of dependency %d: %w", dep, err)
+	}
+	switch pushed {
+	case "pushed":
+		// The dependency's work is on the target.
+		return true, nil
+	case "waiting", "local":
+		released, err := depPushReleasedTx(tx, dep)
+		if err != nil {
+			return false, err
+		}
+		if released {
+			return true, nil
+		}
+		return dependentStacksTx(tx, taskID)
+	default:
+		return false, nil
+	}
 }
 
 // crossPlanDepTx checks a dependency ref that names no task of the plan

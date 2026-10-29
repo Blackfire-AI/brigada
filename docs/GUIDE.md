@@ -392,13 +392,14 @@ The needs-you queue lists what only you (or the foreman) can unblock:
 | `task #N done: waits to push: <branch>@<sha>` | The push gate holds it; `brigada push approve` releases every waiting push of the project ([section 5](#5-finishing-the-land-job)). |
 | `task #N needs_foreman: <reason>` | Judgment: the worker asked a question, the task spent its rounds or failed after tier escalation was exhausted, or a run stopped. The foreman is woken for these; the entry is there so you can see it and step in. |
 | `task #N needs_user: <reason>` | An answer from you, for a task parked for you directly. |
+| `task #N done: done but cannot land: <task> is cancelled\|failed` | A blocked plan ([section 7](#7-plans-checks-and-reviews)): the task is finished and approved, but a dependency it lands on died, so the plan stays open. The foreman re-points it off the dead dependency, or restarts it on a new base by a follow-up task when its branch was stacked on the dead one. |
 | `foreman #N limited: <until>` | A choice: wait, switch the foreman, or let approved plans run without it ([section 8](#8-agents-quota-and-health)). |
 | `foreman #N budget_spent: wake budget spent (20/20 today, resets <UTC time>); <n> events waiting` | Raise the day's wake budget with `brigada budget --wakes N`, or send `brigada ask`: a wake that carries your message is not charged. |
 | `agent <harness>/<model> broken: <reason>` | A fix, then `brigada agent reset <harness>/<model>`; repeated failures also recover by themselves ([section 8](#8-agents-quota-and-health)). For an `auth` break on a harness that reads its credential from the environment (dsh: `DEEPSEEK_API_KEY`), the reason names the variable and when the runner started, so you can see a runner that started without it; a runner that has not reported its start says so instead of a time. |
 
 ### The wake budget
 
-The foreman is woken headless on events: a plan done, a task parked, a question. Those wakes are limited per project per UTC day, 20 by default, so a loop cannot spend your subscription unseen.
+The foreman is woken headless on events: a plan done, a plan blocked (a dead dependency under done work, [section 7](#7-plans-checks-and-reviews)), a task parked, a question. Those wakes are limited per project per UTC day, 20 by default, so a loop cannot spend your subscription unseen.
 
 - `brigada budget` shows the budget, today's use, the reset time and how many events wait.
 - `brigada budget --wakes N` (1 to 1000) sets the budget for the project, and at once wakes whatever the spent budget had parked.
@@ -437,7 +438,7 @@ A task moves through these states, as `brigada status` shows them next to the ta
 2. `ready`: queued for an agent. A task can also wait here because every cap that applies is full ([section 8](#8-agents-quota-and-health)); it starts when a slot frees.
 3. `running`: a worker has the job. The runner's check also happens while the task is `running`; there is no separate `checking` state in the output.
 4. `reviewing`: for `implement` tasks whose check passed, a reviewer of another family reads the change ([section 7](#7-plans-checks-and-reviews)). A review that asks for changes sends the task back to `running` for a fix round.
-5. `done`. A `done` task whose landing is recorded — by the land job, or by a `Brigada-Task: <id>` trailer detected on the default branch ([section 5](#5-finishing-the-land-job)) — is shown as `landed` beside its state, so you can tell it from an approved task that has not merged yet.
+5. `done`. A done `implement` task carries its landing state beside its own, in `brigada status` and the foreman's views alike: `landed@<sha>` — the commit the task landed as, recorded by the land job or by a `Brigada-Task: <id>` trailer detected on the default branch ([section 5](#5-finishing-the-land-job)) — or `not landed`, so an approved task that has not merged yet reads differently from one that has. A task of a class that never lands shows neither.
 
 Off this path are `needs_foreman` and `needs_user` (parked, see the queue above), `failed`, and `cancelled`.
 
@@ -689,10 +690,10 @@ The foreman's model and effort are chosen in `brigada init`, or with `brigada pr
 You ask; the foreman turns the ask into a **plan**: a set of tasks, each with a spec for the worker, a check command, a class (`implement` by default, also `review` and `answer`), and a list of the tasks it depends on.
 
 - A task with no dependencies is queued at once.
-- A task with dependencies waits (`pending`) until all of them are done. If one of them fails or is cancelled, the dependents keep waiting until the foreman re-points them to another task or drops the dependency.
+- A task with dependencies waits (`pending`) until all of them are done. If one of them fails or is cancelled, the dependents keep waiting until the foreman re-points them to another task or drops the dependency. Cancelling a task that still has dependents is refused unless the same amendment covers each: a pending dependent cancelled or re-pointed off it in the same call, while anything with a job or a result built on the cancelled task's branch — ready, running, reviewing, parked, done — blocks, the refusal naming every such dependent with its state.
 - A dependency may instead name, by id, a landed task of another plan of the project — one whose work is already on the land target, done and pushed there. It counts as done from the start; nothing waits on it. One that landed on another branch, or has not landed, is refused, and so is one belonging to another project.
 - The foreman can amend a live plan: add tasks, cancel tasks, re-point dependencies, change a waiting or parked task's tier and effort, or replace or append to a pending task's spec (`respec`).
-- A plan is `done` when no live work is left. That is not the same as everything succeeding: the plan's done report names the tasks that failed, that were cancelled without your approval, and that never ran, and what landed and what waits at a gate ([section 5](#5-finishing-the-land-job)).
+- A plan is `done` when no live work is left. That is not the same as everything succeeding: the plan's done report names the tasks that failed, that were cancelled without your approval, and that never ran, the skips your approval did cover as `cancelled`, and what landed and what waits at a gate ([section 5](#5-finishing-the-land-job)). One thing keeps a plan `active` past its last work: done, approved tasks that can never land, because a dependency under them was cancelled or failed — the shape a dependency restarted after a land conflict and then failed leaves. Such a **blocked** plan stays open with one needs-you line per stranded task; the foreman frees each by re-pointing it off the dead dependency (`plan_amend` retarget, which makes it land without running again), or — when the task's branch was stacked on the dead one, which the refusal names — by restarting it on a new base with a follow-up task. Plans the earlier behavior closed stay closed.
 
 Each task also has these fields, set by the foreman in `plan_create` or `plan_amend`:
 

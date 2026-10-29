@@ -243,6 +243,9 @@ type StatusTask struct {
 	// at the push gate (§7.1): the land job squashed it, or a Brigada-Task
 	// trailer on the default branch was detected and recorded.
 	Landed bool `json:"landed,omitempty"`
+	// LandedCommit is the commit the task landed as on its target
+	// (§7.1), from its landing record; empty when it has none.
+	LandedCommit string `json:"landed_commit,omitempty"`
 	// LandReady is the land_ready gate's target state for a done task
 	// (issue #87): "ready" when its land job is queued or running,
 	// "held by rule land_ready: <line>" when the gate's exit 1 held the
@@ -260,6 +263,26 @@ type StatusTask struct {
 	Continues string `json:"continues,omitempty"`
 	// Skills names the skills the task recorded (§5.10), in order.
 	Skills []string `json:"skills,omitempty"`
+}
+
+// LandedLabel words the task's landing state for the per-task lines the
+// foreman reads — the status views and the digest's plan lines (§7.1,
+// §10): `landed@<sha>` for a done implement task whose landing is
+// recorded, `not landed` for a done implement task without one, "" for
+// everything else — a task of a class that never lands, or one not done
+// yet. A done task that has not landed must read differently from a
+// landed one.
+func (t StatusTask) LandedLabel() string {
+	if t.State != taskDone || t.Class != classImplement {
+		return ""
+	}
+	if t.Landed && t.LandedCommit != "" {
+		return "landed@" + t.LandedCommit
+	}
+	if t.Landed {
+		return "landed"
+	}
+	return "not landed"
 }
 
 // NeedsYouItem is one entry of the "needs you" queue (§10): something a
@@ -621,7 +644,7 @@ func statusPlanRows(tx *sql.Tx, query string, args ...any) ([]StatusPlan, error)
 
 // statusPlanTasksTx reads one status plan's tasks, in id order.
 func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, error) {
-	rows, err := tx.Query(`SELECT t.id, t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, ''), t.skills
+	rows, err := tx.Query(`SELECT t.id, t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(l.commit_sha, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, ''), t.skills
 		FROM tasks t
 		LEFT JOIN landings l ON l.task_id = t.id
 		LEFT JOIN land_holds h ON h.task_id = t.id AND h.state = 'held'
@@ -633,9 +656,9 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, err
 	tasks := []StatusTask{}
 	for rows.Next() {
 		var t StatusTask
-		var capsJSON, pushed, retryAt, holdReason, skills string
+		var capsJSON, pushed, commit, retryAt, holdReason, skills string
 		var exit sql.NullInt64
-		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &retryAt, &exit, &holdReason, &skills); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &commit, &retryAt, &exit, &holdReason, &skills); err != nil {
 			return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
 		}
 		t.Caps = parseTaskCaps(capsJSON)
@@ -644,6 +667,7 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, err
 		// landed (§7.1); every other landing record — pushed or local, by
 		// the land job or a detected trailer — marks the task landed.
 		t.Landed = pushed != "" && pushed != "waiting"
+		t.LandedCommit = commit
 		t.LandReady, err = landReadyState(tx, t.ID, t.State, t.Class, pushed, retryAt, holdReason, exit, now)
 		if err != nil {
 			return nil, err
@@ -885,6 +909,14 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 		return nil, err
 	}
 	items = append(items, localLands...)
+
+	// A blocked plan's stranded tasks stay done as well (§6.2): each
+	// names the cancelled or failed dependency it can never land on.
+	stranded, err := statusStrandedTx(tx, project)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, stranded...)
 
 	pquery := `SELECT p.id, p.title, p.version, pr.repo_url, p.state FROM plans p JOIN projects pr ON pr.id = p.project_id
 		WHERE pr.archived_at IS NULL AND p.state IN ('pending_approval', 'needs_foreman')`
