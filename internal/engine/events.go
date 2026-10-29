@@ -77,6 +77,8 @@ const (
 	evLandEnvFailed          = "land_env_failed"           // the environment, not the task's content, failed a landing (issue #116): a fetch, credentials, a broken remote. One wake per cause while it is active; the tasks it parks are listed in the wake's line
 	evLandEnvRecovered       = "land_env_recovered"        // the environmental cause of failed landings cleared — a later landing succeeded — so a recurrence wakes anew (issue #116)
 	evTaskLandNotReady       = "task_land_not_ready"       // the land_ready gate answered not ready (issue #87); the landing is requeued after the backoff, Until names the next try
+	evTaskBaseStale          = "task_base_stale"           // the task is held on a stale base (issue #124): its stacked dependency was restarted after the task started and finished again from a new branch; Reason names the superseded base and the dependency's current branch, Branch the latter
+	evDepRebuilt             = "dep_rebuilt"               // a dependency finished again from a new result branch after a restart (issue #124): one wake names it and every started dependent held on its old round — parked at needs_foreman or refused at the land gate — until each is restarted on the new base
 	evProjectForemanSet      = "project_foreman_set"       // setup: the project's foreman harness and model were chosen (§4.1)
 	evForemanReport          = "foreman_report"            // a done foreman turn's final message, reported to the user (§3, §10)
 	evUserMessage            = "user_message"              // the user's message to the foreman, sent without attaching (§4.2 item 3)

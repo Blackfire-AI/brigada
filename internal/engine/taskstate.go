@@ -1444,6 +1444,13 @@ func (e *Engine) taskDoneTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 	if err := e.maybeLandTaskTx(tx, job.TaskID, now); err != nil {
 		return err
 	}
+	// The stale-base rule (§6.1, issue #124): this done recorded the
+	// branch the task's dependents must sit on, so any of them started on
+	// a superseded round parks here, one wake naming all — after the land
+	// rule, whose queueing the parks must not disturb.
+	if err := e.sweepStaleDependentsTx(tx, job.ProjectID, job.TaskID, now); err != nil {
+		return err
+	}
 	_, err := e.finishPlanIfClosedTx(tx, job.ProjectID, plan, job.TaskID, job.ID, now)
 	return err
 }
