@@ -1147,8 +1147,11 @@ func (e *Engine) landCheckFailedTx(tx *sql.Tx, job *jobRow, rec landRecord, now 
 // land approve` — which re-queues the landing with the gate skipped. In
 // the push phase the landing is already recorded waiting; the same hold
 // then sits on the push, and the approval re-queues the push instead.
-// The hold has no job, so the plan closes here, named under "waits at a
-// gate" (§7.1).
+// The plan-close check that follows reads the two holds apart (§7.1,
+// #133): one with no landing record is a landing still to come, which
+// keeps the plan open until the release settles it, and one beside a
+// recorded waiting push is a waiting push, which may close the plan,
+// named under "waits to push".
 func (e *Engine) landHeldTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	reason := "held by rule land_ready"
 	var rec landHeldRecord
