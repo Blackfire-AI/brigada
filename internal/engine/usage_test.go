@@ -107,3 +107,68 @@ func TestStatsUsageAllJobKinds(t *testing.T) {
 		}
 	}
 }
+
+// Two jobs on one Claude session report the session's running total; each
+// job records its own delta, and the sums (and the plan budget) add deltas.
+func TestResumedSessionCostIsPerJob(t *testing.T) {
+	e := newEnv(t)
+	e.addAgent(e.runner1, "claude", "sonnet", "work")
+	e.setSettings(`{"approval_budget": "$2"}`)
+	res := e.createPlan([]PlanTask{
+		{Name: "a", Spec: "a", Class: "answer"},
+		{Name: "b", Spec: "b", Class: "answer"},
+		{Name: "c", Spec: "c", Class: "answer", Deps: []string{"a", "b"}},
+	})
+	for _, total := range []float64{1.0, 1.75} {
+		g := e.leaseAny(e.runner1)
+		if g == nil {
+			t.Fatal("no lease")
+		}
+		c := done()
+		c.SessionID = "sess-resumed"
+		c.Usage = &adapter.Usage{CostUSD: usageFloat(total), CostCumulative: true}
+		if ans := e.complete(g, c); ans != AnsOK {
+			t.Fatal(ans)
+		}
+	}
+	var costs []float64
+	var sessions []float64
+	err := e.st.View(e.ctx, func(tx *sql.Tx) error {
+		rows, err := tx.Query(`SELECT cost_usd, session_cost_usd FROM jobs WHERE cost_usd IS NOT NULL ORDER BY id`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var c, s float64
+			if err := rows.Scan(&c, &s); err != nil {
+				return err
+			}
+			costs = append(costs, c)
+			sessions = append(sessions, s)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(costs) != 2 || costs[0] != 1.0 || costs[1] != 0.75 || sessions[1] != 1.75 {
+		t.Fatalf("costs = %v sessions = %v, want deltas 1 and 0.75 of total 1.75", costs, sessions)
+	}
+	if got := e.taskState(res.Tasks[2].TaskID); got != taskReady {
+		t.Fatalf("c = %q, want ready: summed deltas $1.75 are under the $2 budget", got)
+	}
+	stats, err := e.eng.Stats(e.ctx, e.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var total float64
+	for _, row := range stats[0].Rows {
+		if row.CostUSD != nil {
+			total += *row.CostUSD
+		}
+	}
+	if total != 1.75 {
+		t.Fatalf("stats cost = %v, want 1.75", total)
+	}
+}

@@ -624,6 +624,9 @@ func (a *Adapter) ResultText(events []adapter.Event) string {
 // Result usage and total_cost_usd are the CLI result envelope's fields:
 // https://code.claude.com/docs/en/agent-sdk/cost-tracking
 // Only the result is counted, never its per-message usage as well.
+// total_cost_usd is the session's running total on a resumed session, so
+// it is flagged cumulative; the token counts and num_turns are this
+// invocation's own and stay as they are.
 func resultUsage(lj lineJSON) *adapter.Usage {
 	u := adapter.ParseUsage(lj.Usage, "input_tokens", "output_tokens", "cache_read_input_tokens", "", "")
 	cost := adapter.ParseUsage(json.RawMessage(`{"cost":`+string(lj.Cost)+`}`), "", "", "", "", "cost")
@@ -652,6 +655,9 @@ func resultUsage(lj lineJSON) *adapter.Usage {
 			u = &adapter.Usage{}
 		}
 		u.Add(adapter.Calls(turns))
+	}
+	if u != nil && u.CostUSD != nil {
+		u.CostCumulative = true
 	}
 	return u
 }
