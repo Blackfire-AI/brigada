@@ -5,9 +5,9 @@
 plan: 83
 title: "Bring role instructions and task skills to design §5.9/§5.10 (#119, #117); fix #128, #127, #129"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-10-29T14:08:29.976259Z
-updated: 2026-10-29T14:27:50.42041Z
+updated: 2026-10-29T14:29:59.176431Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -46,8 +46,8 @@ tasks:
     name: "import"
     title: "Import: not configured reachable, init writes role files for instructions_file projects, one import transaction (#119 items 3, 5)"
     class: "implement"
-    deps: ["fallback_status"]
-    base: "fallback_status"
+    deps: ["fallback", "prompts"]
+    base: ""
     tier: heavy
     effort: medium
     state: pending
@@ -70,10 +70,9 @@ tasks:
     deps: ["land_ready"]
     base: "land_ready"
     effort: medium
-    state: needs_foreman
+    state: running
     branch: ""
     rounds: 0
-    question: "How should the configured skills_dir be retained and made available to prompt composition, given the instruction not to add a store migration?"
   - id: 258
     name: "missing_section"
     title: "#129: a worker that cannot find a cited spec section stops and asks"
