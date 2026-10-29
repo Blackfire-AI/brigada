@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -212,5 +213,38 @@ func TestReviewBranchWithoutEligibleReviewerErrors(t *testing.T) {
 	}
 	if _, err := e.reviewBranch(" "); !errors.Is(err, ErrInvalidReview) {
 		t.Errorf("blank branch error = %v, want invalid review", err)
+	}
+}
+
+// A standalone review has no task snapshot, so it uses the current role
+// texts rather than the legacy project setting or an earlier task's text.
+func TestReviewBranchUsesCurrentRoleInstructions(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	e.agented("reviewer", "openai", "review")
+	e.setRole(RoleWorker, "old worker")
+	branch := e.authored(author)
+	e.set(map[string]string{SettingInstructions: "legacy setting"})
+	e.setRole(RoleWorker, "current worker")
+	e.setRole(RoleReviewer, "current reviewer")
+	res, err := e.reviewBranch(branch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := e.jobPrompt(res.JobID)
+	for _, want := range []string{"<worker-instructions>\ncurrent worker\n</worker-instructions>", "<reviewer-instructions>\ncurrent reviewer\n</reviewer-instructions>"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt missing %q: %s", want, p)
+		}
+	}
+	if strings.Contains(p, "legacy setting") || strings.Contains(p, "old worker") {
+		t.Errorf("prompt contains stale guidance: %s", p)
+	}
+	var meta promptMeta
+	if err := json.Unmarshal([]byte(e.str("SELECT prompt_meta FROM jobs WHERE id = ?", res.JobID)), &meta); err != nil {
+		t.Fatal(err)
+	}
+	if meta.Instructions != instructionsDigest("current worker") || meta.Reviewer != instructionsDigest("current reviewer") {
+		t.Errorf("prompt metadata = %+v", meta)
 	}
 }

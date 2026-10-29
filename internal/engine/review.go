@@ -153,7 +153,13 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 			}
 			return fmt.Errorf("%w: no ready agent of the default reviewer's harness %q offers the review class", ErrNoReviewer, harness)
 		}
-		instructions, imeta, err := projectInstructionsTx(tx, in.project)
+		// A standalone review has no task snapshot. Use the current stored
+		// role texts, with the worker text as current project conventions.
+		worker, err := storedRoleTextTx(tx, in.project, RoleWorker)
+		if err != nil {
+			return err
+		}
+		reviewer, err := storedRoleTextTx(tx, in.project, RoleReviewer)
 		if err != nil {
 			return err
 		}
@@ -162,8 +168,8 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 			ProjectID:     in.project,
 			Kind:          KindReview,
 			Mode:          ModeFresh,
-			Prompt:        prompt.ComposeStandaloneReviewPrompt(in.base, branch, prompt.WithInstructions(instructions)),
-			PromptMeta:    marshalPromptMeta(promptMeta{Template: prompt.ReviewTemplateVersion, Instructions: imeta.Digest}),
+			Prompt:        prompt.ComposeStandaloneReviewPrompt(in.base, branch, prompt.WithInstructions(worker), prompt.WithReviewerInstructions(reviewer)),
+			PromptMeta:    marshalPromptMeta(promptMeta{Template: prompt.ReviewTemplateVersion, Instructions: instructionsDigest(worker), Reviewer: instructionsDigest(reviewer)}),
 			Harness:       harness,
 			ExcludeFamily: family,
 			Branch:        branch,
