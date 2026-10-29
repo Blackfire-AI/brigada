@@ -65,7 +65,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: done
     branch: "brigada/task-289-r1"
     rounds: 1
   - id: 290
@@ -77,7 +77,7 @@ tasks:
     continue: "family_rereview_prompt"
     effort: medium
     review_tier: standard
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 291
