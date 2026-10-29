@@ -61,8 +61,11 @@ func buildSteps(workflow string) ([]ciStep, error) {
 			if strings.HasPrefix(field, "run:") {
 				steps[len(steps)-1].run = strings.TrimSpace(strings.TrimPrefix(field, "run:"))
 				if steps[len(steps)-1].run == "" {
-					return nil, fmt.Errorf("multiline run in build step; update the test")
+					return nil, fmt.Errorf("multiline run in build step %q; update the test", steps[len(steps)-1].name)
 				}
+			}
+			if !strings.HasPrefix(field, "name: ") && !strings.HasPrefix(field, "run:") && !strings.HasPrefix(field, "uses: ") {
+				return nil, fmt.Errorf("unsupported build step %q; update the test", strings.TrimSpace(field))
 			}
 			continue
 		}
@@ -107,6 +110,12 @@ func buildSteps(workflow string) ([]ciStep, error) {
 	}
 	pre := 0
 	for _, step := range steps[:testIndex] {
+		if step.name == "" && step.run == "" {
+			return nil, fmt.Errorf("unsupported build step %q before test; update the test", step.name)
+		}
+		if step.name != "shellcheck" && step.run == "" {
+			return nil, fmt.Errorf("unsupported build step %q before test; update the test", step.name)
+		}
 		if step.run != "" {
 			pre++
 		}
@@ -183,11 +192,39 @@ func TestBuildStepsErrors(t *testing.T) {
 		{"no pre-test", prefix + "      - name: test\n        run: go test ./...\n", "empty pre-test"},
 		{"duplicate build", prefix + "  build:\n    steps:\n", "duplicate build job"},
 		{"multiline run", prefix + "      - name: format\n        run: |\n          gofmt .\n", "update the test"},
+		{"unsupported pre-test step", prefix + "      - name: setup\n        with: value\n      - name: test\n        run: go test ./...\n", "setup"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := buildSteps(tc.workflow)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got %v, want error containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildStepsUnnamedRun(t *testing.T) {
+	const workflow = "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n      - run: staticcheck ./...\n      - name: test\n        run: go test ./...\n"
+	steps, err := buildSteps(workflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name  string
+		check string
+		want  string
+	}{
+		{"check lacks unnamed run", "go test ./...", "does not match CI"},
+		{"check includes unnamed run", "staticcheck ./... && go test ./...", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ciCheckDrift(steps, tc.check)
+			if tc.want == "" && err != nil {
+				t.Fatalf("ciCheckDrift: %v", err)
+			}
+			if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
 				t.Fatalf("got %v, want error containing %q", err, tc.want)
 			}
 		})
