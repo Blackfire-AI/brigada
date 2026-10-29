@@ -196,8 +196,8 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-268"
     rounds: 0
   - id: 269
     name: "init_test_wrap"
