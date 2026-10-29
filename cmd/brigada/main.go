@@ -15,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
 	"github.com/Blackfire-AI/brigada/internal/logo"
 	"github.com/Blackfire-AI/brigada/internal/version"
 )
@@ -192,6 +193,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	if runKeptHold(args) {
 		return 0
+	}
+	if args[0] == claude.ReadScopeSubcommand {
+		// The foreman session's read-scope hook (§4.1): internal
+		// plumbing the session's settings invoke, not a user command,
+		// so it is dispatched here, outside the command table.
+		return runReadScope(ctx, args[1:], os.Stdin, stdout, stderr)
 	}
 	cmd, ok := commands[args[0]]
 	if !ok {

@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
@@ -137,13 +138,27 @@ func TestCommand(t *testing.T) {
 // carrying it cannot pass for anything else.
 const foremanTokenValue = "foreman-token-4b7e2d1a9c"
 
+// wantSettings is the settings JSON the golden argvs carry, built by
+// the code under test for the same inputs: TestForemanSettings pins
+// what is inside it, so the goldens only need its exact place in argv.
+func wantSettings(t *testing.T, root, statusLine string) string {
+	t.Helper()
+	s, err := foremanSettingsJSON(root, statusLine)
+	if err != nil {
+		t.Fatalf("render the foreman settings: %v", err)
+	}
+	return s
+}
+
 // TestCommandForemanScope is the foreman turn's golden argv (§4, §12.2):
 // a job that carries an MCP config gets the bridge — --mcp-config with
 // --strict-mcp-config, so no other server rides along — and brigada's
 // tool scope in place of the agent config's: the bridge's own tools
-// (the one tool table's whole offer, in the CLI's mcp__ spelling) plus
-// the read-only file tools, with the shell and every editing tool
-// denied by name. The foreman never edits code.
+// (the one tool table's whole offer, in the CLI's mcp__ spelling) —
+// the file tools carry no allow rule, their confinement to the
+// checkout rides the session's --settings hook — with the shell, every
+// editing tool, the notebook reader and the web tools denied by name.
+// The foreman never edits code and reads no wider than the checkout.
 //
 // The token itself — set in the environment the way the bridge's would
 // be — reaches neither the command line nor the worker's environment:
@@ -154,12 +169,14 @@ func TestCommandForemanScope(t *testing.T) {
 	t.Setenv(mcp.EnvToken, foremanTokenValue)
 	const prompt = "the foreman's wake prompt"
 	const config = "/runner-state/mcp/turn-x1/config.json"
-	wantScope := []string{"--allowedTools", "Read", "Grep", "Glob",
+	dir := t.TempDir()
+	wantScope := []string{"--allowedTools",
 		"mcp__brigada__plan_create", "mcp__brigada__plan_amend", "mcp__brigada__plan_accept", "mcp__brigada__answer", "mcp__brigada__task_restart",
 		"mcp__brigada__task_cancel", "mcp__brigada__ask_user",
 		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__events",
 		"mcp__brigada__capacity", "mcp__brigada__stats",
-		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "Write"}
+		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "NotebookRead", "Write", "WebFetch", "WebSearch"}
+	settings := wantSettings(t, dir, "")
 	cases := []struct {
 		name    string
 		ad      Adapter
@@ -170,7 +187,7 @@ func TestCommandForemanScope(t *testing.T) {
 			ad:   Adapter{Binary: "/usr/local/bin/claude"},
 			wantArg: append([]string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
 				"--permission-mode", "acceptEdits",
-				"--mcp-config", config}, wantScope...),
+				"--mcp-config", config, "--settings", settings}, wantScope...),
 		},
 		{
 			name: "the foreman scope replaces the agent config's",
@@ -181,11 +198,11 @@ func TestCommandForemanScope(t *testing.T) {
 			},
 			wantArg: append([]string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
 				"--permission-mode", "bypassPermissions",
-				"--mcp-config", config}, wantScope...),
+				"--mcp-config", config, "--settings", settings}, wantScope...),
 		},
 	}
 	for _, tc := range cases {
-		cmd, err := tc.ad.Command(adapter.Job{Prompt: prompt, MCPConfig: config}, t.TempDir(), "")
+		cmd, err := tc.ad.Command(adapter.Job{Prompt: prompt, MCPConfig: config}, dir, "")
 		if err != nil {
 			t.Fatalf("%s: build command: %v", tc.name, err)
 		}
@@ -211,28 +228,29 @@ func TestCommandForemanScope(t *testing.T) {
 
 // TestAttachCommandGolden is the attached session's golden argv (§4.2
 // item 1): the CLI interactive — no -p, nothing to parse — with the
-// opening prompt as its initial prompt, the bridge and the foreman's
-// tool scope exactly as a headless turn carries them, and the session
-// flags that make the write-back possible: a first session starts
-// under the client's --session-id alone, a resume forks the key's
-// session onto it with --fork-session. The prompt leads the argv —
-// the tool-scope flags are variadic, and a positional after them would
-// parse as one more tool name, leaving the session with no prompt. The
-// streams stay unwired — the terminal is the caller's — and the hold
-// token, like every brigada secret, reaches neither argv nor the
-// environment.
+// opening prompt as its initial prompt, the bridge, the session's
+// read-scope settings and the foreman's tool scope exactly as a
+// headless turn carries them, and the session flags that make the
+// write-back possible: a first session starts under the client's
+// --session-id alone, a resume forks the key's session onto it with
+// --fork-session. The prompt leads the argv — the tool-scope flags are
+// variadic, and a positional after them would parse as one more tool
+// name, leaving the session with no prompt. The streams stay unwired —
+// the terminal is the caller's — and the hold token, like every
+// brigada secret, reaches neither argv nor the environment.
 func TestAttachCommandGolden(t *testing.T) {
 	stubCLI(t)
 	t.Setenv(mcp.EnvToken, foremanTokenValue)
 	const prompt = "the foreman's opening prompt"
 	const config = "/runner-state/mcp/turn-x1/config.json"
 	const newID = "9f1d2b34-51a6-4c8e-a2d7-0b3c4d5e6f70"
-	wantScope := []string{"--allowedTools", "Read", "Grep", "Glob",
+	dir := t.TempDir()
+	wantScope := []string{"--allowedTools",
 		"mcp__brigada__plan_create", "mcp__brigada__plan_amend", "mcp__brigada__plan_accept", "mcp__brigada__answer", "mcp__brigada__task_restart",
 		"mcp__brigada__task_cancel", "mcp__brigada__ask_user",
 		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__events",
 		"mcp__brigada__capacity", "mcp__brigada__stats",
-		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "Write"}
+		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "NotebookRead", "Write", "WebFetch", "WebSearch"}
 	cases := []struct {
 		name    string
 		ad      Adapter
@@ -245,7 +263,7 @@ func TestAttachCommandGolden(t *testing.T) {
 			ad:   Adapter{Binary: "/usr/local/bin/claude"},
 			job:  adapter.Job{Prompt: prompt, Model: "sonnet", MCPConfig: config},
 			wantArg: append([]string{prompt, "--session-id", newID, "--model", "sonnet",
-				"--mcp-config", config}, wantScope...),
+				"--mcp-config", config, "--settings", wantSettings(t, dir, "")}, wantScope...),
 		},
 		{
 			name:   "resume forks onto the new id",
@@ -254,33 +272,35 @@ func TestAttachCommandGolden(t *testing.T) {
 			resume: "sess-first",
 			wantArg: append([]string{prompt, "--resume", "sess-first", "--fork-session",
 				"--session-id", newID, "--model", "sonnet",
-				"--mcp-config", config}, wantScope...),
+				"--mcp-config", config, "--settings", wantSettings(t, dir, "")}, wantScope...),
 		},
 		{
 			name: "model and effort pass through",
 			ad:   Adapter{Binary: "/usr/local/bin/claude"},
 			job:  adapter.Job{Prompt: prompt, Model: "opus", Effort: "high", MCPConfig: config},
 			wantArg: append([]string{prompt, "--session-id", newID, "--model", "opus", "--effort", "high",
-				"--mcp-config", config}, wantScope...),
+				"--mcp-config", config, "--settings", wantSettings(t, dir, "")}, wantScope...),
 		},
 		{
-			name: "a status line rides as this session's settings",
+			// The status bar rides the same settings as the read-scope
+			// hook, one --settings flag carrying both.
+			name: "a status line rides beside the read-scope hook",
 			ad:   Adapter{Binary: "/usr/local/bin/claude"},
 			job:  adapter.Job{Prompt: prompt, MCPConfig: config, StatusLine: "'/opt/brigada' status --line"},
 			wantArg: append([]string{prompt, "--session-id", newID,
 				"--mcp-config", config,
-				"--settings", `{"statusLine":{"command":"'/opt/brigada' status --line","refreshInterval":3,"type":"command"}}`}, wantScope...),
+				"--settings", wantSettings(t, dir, "'/opt/brigada' status --line")}, wantScope...),
 		},
 		{
 			name: "no model adds no flag",
 			ad:   Adapter{},
 			job:  adapter.Job{Prompt: prompt, MCPConfig: config},
 			wantArg: append([]string{prompt, "--session-id", newID,
-				"--mcp-config", config}, wantScope...),
+				"--mcp-config", config, "--settings", wantSettings(t, dir, "")}, wantScope...),
 		},
 	}
 	for _, tc := range cases {
-		cmd, err := tc.ad.AttachCommand(tc.job, t.TempDir(), tc.resume, newID)
+		cmd, err := tc.ad.AttachCommand(tc.job, dir, tc.resume, newID)
 		if err != nil {
 			t.Fatalf("%s: build the attached session: %v", tc.name, err)
 		}
@@ -395,18 +415,19 @@ func TestCommandWorkerDefaultScope(t *testing.T) {
 	if slices.Contains(foremanBypass.Args, "Bash") && !slices.Contains(foremanBypass.Args[slices.Index(foremanBypass.Args, "--disallowedTools"):], "Bash") {
 		t.Errorf("a worker scope reached the foreman: %v", foremanBypass.Args)
 	}
-	foreman, err := ad.Command(adapter.Job{Prompt: "p", MCPConfig: config}, t.TempDir(), "")
+	dir := t.TempDir()
+	foreman, err := ad.Command(adapter.Job{Prompt: "p", MCPConfig: config}, dir, "")
 	if err != nil {
 		t.Fatalf("build foreman command: %v", err)
 	}
 	wantForeman := []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
-		"--permission-mode", "acceptEdits", "--mcp-config", config,
-		"--allowedTools", "Read", "Grep", "Glob",
+		"--permission-mode", "acceptEdits", "--mcp-config", config, "--settings", wantSettings(t, dir, ""),
+		"--allowedTools",
 		"mcp__brigada__plan_create", "mcp__brigada__plan_amend", "mcp__brigada__plan_accept", "mcp__brigada__answer", "mcp__brigada__task_restart",
 		"mcp__brigada__task_cancel", "mcp__brigada__ask_user",
 		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__events",
 		"mcp__brigada__capacity", "mcp__brigada__stats",
-		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "Write"}
+		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "NotebookRead", "Write", "WebFetch", "WebSearch"}
 	if !slices.Equal(foreman.Args, wantForeman) {
 		t.Errorf("foreman args =\n%v\nwant\n%v", foreman.Args, wantForeman)
 	}
@@ -819,7 +840,8 @@ func TestCommandReviewIsReadOnly(t *testing.T) {
 // TestForemanRunsInTheCheckout: both foreman bodies run in the working
 // directory they are given — the reading checkout — with no extra
 // directory to read, no additional-CLAUDE.md switch, the edit denials
-// kept, and --strict-mcp-config only on the headless turn.
+// kept, --strict-mcp-config only on the headless turn, and the
+// read-scope hook's root bound to that same checkout on both.
 func TestForemanRunsInTheCheckout(t *testing.T) {
 	stubCLI(t)
 	ad := &Adapter{PermissionMode: "bypassPermissions"}
@@ -858,7 +880,7 @@ func TestForemanRunsInTheCheckout(t *testing.T) {
 		if i < 0 {
 			t.Fatalf("missing edit denials: %v", cmd.Args)
 		}
-		for _, denied := range []string{"Bash", "Edit", "NotebookEdit", "Write"} {
+		for _, denied := range []string{"Bash", "Edit", "NotebookEdit", "NotebookRead", "Write", "WebFetch", "WebSearch"} {
 			if !slices.Contains(cmd.Args[i+1:], denied) {
 				t.Errorf("%s no longer denied: %v", denied, cmd.Args)
 			}
@@ -868,6 +890,109 @@ func TestForemanRunsInTheCheckout(t *testing.T) {
 		}
 		if cmd.Dir != checkout {
 			t.Errorf("session cwd = %s, want the checkout %s", cmd.Dir, checkout)
+		}
+		// The read scope is bound to the checkout itself: the hook the
+		// settings carry names it as the one root.
+		i = slices.Index(cmd.Args, "--settings")
+		if i < 0 {
+			t.Fatalf("the foreman session carries no settings: %v", cmd.Args)
+		}
+		var doc foremanSettings
+		if err := json.Unmarshal([]byte(cmd.Args[i+1]), &doc); err != nil {
+			t.Fatalf("the settings are not JSON: %v", err)
+		}
+		if doc.Hooks == nil || len(doc.Hooks.PreToolUse) != 1 || len(doc.Hooks.PreToolUse[0].Hooks) != 1 {
+			t.Fatalf("the settings carry no read-scope hook: %s", cmd.Args[i+1])
+		}
+		want := shellQuote(checkout)
+		if got := doc.Hooks.PreToolUse[0].Hooks[0].Command; !strings.Contains(got, ReadScopeSubcommand+" --root "+want) {
+			t.Errorf("the read-scope hook's root = %q, want the checkout %q", got, checkout)
+		}
+	}
+}
+
+// TestForemanSettings pins what the foreman session's settings carry
+// (§4.1): a PreToolUse hook on Read, Grep and Glob — the one mechanism
+// that binds every agent in the session, subagents included, and whose
+// block no allow rule lifts — with the session's working directory, the
+// reading checkout, as its one allowed root, and brigada's own binary
+// as the hook command. The status line, when one is set, rides the same
+// settings beside the hook; a headless turn carries the hook alone. The
+// decisions the hook makes are TestReadScopeDeny's, in readscope_test.
+func TestForemanSettings(t *testing.T) {
+	stubCLI(t)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("find the test binary: %v", err)
+	}
+	root := t.TempDir()
+	const statusLine = "'/opt/brigada' status --line"
+	for name, tc := range map[string]struct {
+		statusLine string
+		job        adapter.Job
+	}{
+		"headless turn": {"", adapter.Job{Prompt: "p", MCPConfig: "/runner/mcp/config.json"}},
+		"attach":        {statusLine, adapter.Job{Prompt: "p", MCPConfig: "/runner/mcp/config.json", StatusLine: statusLine}},
+	} {
+		var settings string
+		if tc.statusLine == "" {
+			cmd, err := (&Adapter{}).Command(tc.job, root, "")
+			if err != nil {
+				t.Fatalf("%s: build command: %v", name, err)
+			}
+			i := slices.Index(cmd.Args, "--settings")
+			if i < 0 {
+				t.Fatalf("%s: the headless turn carries no settings: %v", name, cmd.Args)
+			}
+			settings = cmd.Args[i+1]
+		} else {
+			cmd, err := (&Adapter{}).AttachCommand(tc.job, root, "", "sess-new")
+			if err != nil {
+				t.Fatalf("%s: build attached session: %v", name, err)
+			}
+			i := slices.Index(cmd.Args, "--settings")
+			if i < 0 {
+				t.Fatalf("%s: the attached session carries no settings: %v", name, cmd.Args)
+			}
+			settings = cmd.Args[i+1]
+		}
+		var doc foremanSettings
+		if err := json.Unmarshal([]byte(settings), &doc); err != nil {
+			t.Fatalf("%s: the settings are not JSON: %v", name, err)
+		}
+		// The user's own settings, which a headless turn loads through
+		// --setting-sources user and an attach loads anyway, could
+		// switch every hook off with disableAllHooks; the session's own
+		// settings pin it back on, and outrank theirs.
+		if doc.DisableAllHooks {
+			t.Errorf("%s: the session settings do not pin disableAllHooks off: %s", name, settings)
+		}
+		if !strings.Contains(settings, `"disableAllHooks":false`) {
+			t.Errorf("%s: the settings JSON leaves disableAllHooks unsaid: %s", name, settings)
+		}
+		if doc.Hooks == nil || len(doc.Hooks.PreToolUse) != 1 {
+			t.Fatalf("%s: no PreToolUse hook: %s", name, settings)
+		}
+		group := doc.Hooks.PreToolUse[0]
+		if group.Matcher != "^(Read|Grep|Glob)$" {
+			t.Errorf("%s: matcher = %q, want the three file tools anchored", name, group.Matcher)
+		}
+		if len(group.Hooks) != 1 || group.Hooks[0].Type != "command" {
+			t.Fatalf("%s: the hook group is not one command: %s", name, settings)
+		}
+		wantCommand := shellQuote(exe) + " " + ReadScopeSubcommand + " --root " + shellQuote(root)
+		if got := group.Hooks[0].Command; got != wantCommand {
+			t.Errorf("%s: hook command = %q, want %q", name, got, wantCommand)
+		}
+		if tc.statusLine == "" {
+			if doc.StatusLine != nil {
+				t.Errorf("%s: a headless turn carries a status line: %s", name, settings)
+			}
+			continue
+		}
+		if doc.StatusLine == nil || doc.StatusLine.Command != statusLine ||
+			doc.StatusLine.Type != "command" || doc.StatusLine.RefreshInterval != statusLineRefreshSeconds {
+			t.Errorf("%s: the status line did not survive beside the hook: %s", name, settings)
 		}
 	}
 }
