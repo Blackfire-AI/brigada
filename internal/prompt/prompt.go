@@ -552,6 +552,14 @@ func WithPlanReviewRef(p, ref, landTarget, defaultBranch string) string {
 	return p + note
 }
 
+// WithWorkerBase appends the note naming the ref and commit a task
+// worker's worktree was built on, so a worker that cannot find a section
+// its spec cites can say what it read (issue #129). The runner adds it
+// once the worktree is made; the engine-stored prompt does not carry it.
+func WithWorkerBase(p, ref, commit string) string {
+	return p + fmt.Sprintf("\nBase note: your worktree was built on %q at commit %s.\n", ref, commit)
+}
+
 // ComposeReReviewPrompt builds the prompt of a re-review (§7): the fixed
 // template, the fix round's summary and the check result verbatim between
 // their data delimiters, and the two diff commands filled with the head

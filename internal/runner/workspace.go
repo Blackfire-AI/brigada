@@ -14,6 +14,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/projecturl"
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
 // A runner's workspace (§5.1, product rule 6): a per-repo mirror cache
@@ -166,6 +167,7 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 		return nil, fmt.Errorf("read the worktree's base commit: %w", trimCmdError(out, err))
 	}
 	w.base = strings.TrimSpace(string(out))
+	grant.Prompt = prompt.WithWorkerBase(grant.Prompt, baseRef, w.base)
 	return w, nil
 }
 
