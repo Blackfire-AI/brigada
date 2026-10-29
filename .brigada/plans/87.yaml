@@ -146,4 +146,4 @@ tasks:
     effort: low
     state: running
     branch: "brigada/task-293"
-    rounds: 1
+    rounds: 2
