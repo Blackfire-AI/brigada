@@ -141,7 +141,7 @@ tasks:
     base: "init"
     continue: "init"
     effort: medium
-    state: running
+    state: done
     branch: "brigada/task-237"
     rounds: 1
   - id: 238
@@ -186,7 +186,7 @@ tasks:
     base: "init_diff"
     continue: "init_diff"
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 242
