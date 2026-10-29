@@ -95,9 +95,9 @@ tasks:
     base: "client_show"
     continue: "client_show"
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-233"
-    rounds: 0
+    rounds: 1
   - id: 234
     name: "docs"
     title: "Docs: GUIDE, COMPATIBILITY, CHANGELOG, operator files, AGENTS/CLAUDE"
