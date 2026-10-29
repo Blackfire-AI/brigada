@@ -185,8 +185,8 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: running
-    branch: "brigada/task-267"
+    state: reviewing
+    branch: "brigada/task-267-r1"
     rounds: 0
   - id: 268
     name: "import_tx"
