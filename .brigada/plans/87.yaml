@@ -133,9 +133,9 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: running
+    state: reviewing
     branch: "brigada/task-285-r2"
-    rounds: 1
+    rounds: 2
   - id: 293
     name: "cicheck_fail_closed"
     title: "#132 follow-up: the CI drift reader fails closed on unnamed or unsupported pre-test steps"
