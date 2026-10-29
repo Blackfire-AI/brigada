@@ -5,9 +5,9 @@
 plan: 83
 title: "Bring role instructions and task skills to design §5.9/§5.10 (#119, #117); fix #128, #127, #129"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: needs_foreman
 created: 2026-10-29T14:08:29.976259Z
-updated: 2026-10-29T14:31:55.233958Z
+updated: 2026-10-29T14:37:54.76138Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -50,15 +50,15 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 256
     name: "cli"
     title: "Header and provenance carry the brigada version; instructions diff is three-way (#119 items 9, 10)"
     class: "implement"
-    deps: ["import"]
-    base: "import"
+    deps: ["import_tx"]
+    base: "import_tx"
     effort: medium
     state: pending
     branch: ""
@@ -72,7 +72,7 @@ tasks:
     effort: medium
     state: running
     branch: "brigada/task-257"
-    rounds: 1
+    rounds: 2
   - id: 258
     name: "missing_section"
     title: "#129: a worker that cannot find a cited spec section stops and asks"
@@ -162,5 +162,39 @@ tasks:
     effort: medium
     review_tier: heavy
     state: running
+    branch: ""
+    rounds: 0
+  - id: 266
+    name: "skills_dir_record"
+    title: "skills_dir is resolved once onto the task record; prompts use the recorded value (#117 item 7, §5.10 \"Resolved once\")"
+    class: "implement"
+    deps: ["prompts"]
+    base: "prompts"
+    continue: "prompts"
+    effort: medium
+    review_tier: standard
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 267
+    name: "import_roles"
+    title: "Import and init: not configured reachable; init writes role files for instructions_file projects (#119 items 3, 5)"
+    class: "implement"
+    deps: ["fallback", "prompts", "fallback_status"]
+    base: ""
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 268
+    name: "import_tx"
+    title: "Project import runs config, skills_dir, roles and skills in one transaction (#119 audit)"
+    class: "implement"
+    deps: ["skills_dir_record", "import_roles"]
+    base: ""
+    tier: heavy
+    effort: medium
+    state: pending
     branch: ""
     rounds: 0
