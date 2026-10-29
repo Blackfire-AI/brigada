@@ -209,7 +209,7 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 	if err != nil {
 		return abandon(fmt.Errorf("make the foreman's scratch directory: %w", err))
 	}
-	checkout, err := runner.PrepareForemanCheckout(ctx, scratch, res.RepoURL, res.DefaultBranch, nil)
+	checkout, err := runner.PrepareForemanCheckout(ctx, scratch, res.RepoURL, res.LandTarget, res.DefaultBranch, nil)
 	if err != nil {
 		return abandon(fmt.Errorf("prepare the foreman checkout: %w", err))
 	}
@@ -217,7 +217,7 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 	// outside the land job (§7.1) before the foreman reads status, so it
 	// can tell "already merged" from "waiting to merge". A failed report
 	// is a warning, never an attach failure.
-	if err := runner.ReportLanded(ctx, client, res.RepoURL, res.DefaultBranch, checkout); err != nil {
+	if err := runner.ReportLanded(ctx, client, res.RepoURL, checkout.Branch, checkout); err != nil {
 		fmt.Fprintf(stderr, "brigada: warning: report landed tasks: %v\n", err)
 	}
 	res.Prompt = foreman.WithCheckout(res.Prompt, checkout)

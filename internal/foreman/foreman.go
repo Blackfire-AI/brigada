@@ -224,8 +224,15 @@ func ComposeTurnPromptDigest(digest string, events []string, userMessages []User
 // Checkout identifies the runner-prepared reading copy at this turn's fetch.
 type Checkout struct {
 	Path   string
-	Branch string
+	Branch string // the ref checked out
 	Commit string
+	// DefaultBranch is the project's default branch, which may lag what
+	// landed on the land target. Empty when the caller did not say.
+	DefaultBranch string
+	// LandTarget is the project's land target as configured, empty when
+	// unset. A target other than Branch means the checkout fell back to
+	// the default branch because the remote holds no such ref yet.
+	LandTarget string
 }
 
 // WithCheckout adds runtime checkout metadata to either a headless wake or
@@ -237,9 +244,26 @@ Project checkout (read-only; refreshed before this session):
 Path: %q
 Branch: %q
 Commit: %q
-Read the checkout's CLAUDE.md and AGENTS.md, when present, and the code before planning.
+%sRead the checkout's CLAUDE.md and AGENTS.md, when present, and the code before planning.
 The snapshot may lag the remote by one fetch. Never edit or push this checkout.
-`, neutralize(checkout.Path), neutralize(checkout.Branch), neutralize(checkout.Commit))
+`, neutralize(checkout.Path), neutralize(checkout.Branch), neutralize(checkout.Commit), refNote(checkout))
+}
+
+// refNote says which tree the checkout is: the land target, which holds
+// what has landed, or the default branch it fell back to, and the default
+// branch itself, which may lag the land target (issue #122).
+func refNote(c Checkout) string {
+	def := neutralize(c.DefaultBranch)
+	switch {
+	case c.DefaultBranch == "":
+		return ""
+	case c.LandTarget != "" && c.LandTarget != c.Branch:
+		return fmt.Sprintf("The project's land target %q does not exist on the remote yet, so this checkout is the default branch %q instead; nothing has landed on the target.\n", neutralize(c.LandTarget), def)
+	case c.DefaultBranch == c.Branch:
+		return ""
+	default:
+		return fmt.Sprintf("The checkout is the land target, where approved work lands. The project's default branch is %q and may lag what landed here.\n", def)
+	}
 }
 
 // ComposePrompt composes the contract, optional foreman role text, then the

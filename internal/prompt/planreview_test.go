@@ -22,7 +22,8 @@ func TestComposePlanReviewPrompt(t *testing.T) {
 		t.Errorf("plan review prompt does not open with %q:\n%s", ReviewerOpener, got)
 	}
 	for _, want := range []string{
-		"already on the default branch or in another active plan",
+		"already on that ref or in another active plan",
+		"ref named in the note after the plan",
 		"contradict the code or docs/design.md",
 		"touching the same files",
 		"unrelated work chained",

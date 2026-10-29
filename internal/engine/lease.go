@@ -83,7 +83,9 @@ type LeaseGrant struct {
 	LandTarget string
 	// DefaultBranch is, for a land job (§7.1), the project's default
 	// branch: the runner creates a land_target the remote does not have
-	// yet from it. Empty for every other kind.
+	// yet from it. A foreman turn and a plan review carry it too: their
+	// BaseRef is the land target, and the default branch is the fallback
+	// when the remote lacks it (issue #122). Empty for every other kind.
 	DefaultBranch string
 	// LandMessage is, for a land job's squash phase (§7.1), the task
 	// data the squash commit message is built from, as the hand-driven
@@ -665,6 +667,18 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		if err != nil {
 			return nil, err
 		}
+		// A foreman turn and a plan review read the land target, not the
+		// default branch (issue #122): what landed there is what they
+		// must see. The grant carries the default branch too, so the
+		// prompt can name both. A standalone review keeps the default
+		// branch as its diff base.
+		defaultBranch := ""
+		if j.TaskID == 0 && (j.Kind == KindForeman || j.Kind == KindPlanReview) {
+			defaultBranch = baseRef
+			if baseRef, err = effectiveLandTargetTx(tx, j.ProjectID, defaultBranch); err != nil {
+				return nil, err
+			}
+		}
 		reviewBranch := ""
 		if j.Kind == KindReview {
 			// The review reads the task's result branch (§7) and runs no
@@ -771,6 +785,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			AgentModel:      agentModel,
 			RepoURL:         repo,
 			BaseRef:         baseRef,
+			DefaultBranch:   defaultBranch,
 			CheckCmd:        checkCmd,
 			WorkerTools:     workerTools,
 			Setup:           setup,
@@ -1327,6 +1342,19 @@ func taskInfoTx(tx *sql.Tx, j *jobRow) (repoURL, baseRef, checkCmd, branch strin
 		repoURL = override
 	}
 	return repoURL, baseRef, checkCmd, branch, nil
+}
+
+// effectiveLandTargetTx is the project's land_target setting, or the
+// given default branch when none is set (§6.3).
+func effectiveLandTargetTx(tx *sql.Tx, project int64, defaultBranch string) (string, error) {
+	s, err := projectApprovalTx(tx, project)
+	if err != nil {
+		return "", err
+	}
+	if s.LandTarget == "" {
+		return defaultBranch, nil
+	}
+	return s.LandTarget, nil
 }
 
 // standaloneReviewInfoTx reads what a task-less review's grant needs
