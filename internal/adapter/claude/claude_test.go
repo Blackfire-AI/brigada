@@ -173,7 +173,7 @@ func TestCommandForemanScope(t *testing.T) {
 	wantScope := []string{"--allowedTools",
 		"mcp__brigada__plan_create", "mcp__brigada__plan_amend", "mcp__brigada__plan_accept", "mcp__brigada__answer", "mcp__brigada__task_restart",
 		"mcp__brigada__task_cancel", "mcp__brigada__ask_user",
-		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__events",
+		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__issue_read", "mcp__brigada__events",
 		"mcp__brigada__capacity", "mcp__brigada__stats",
 		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "NotebookRead", "Write", "WebFetch", "WebSearch"}
 	settings := wantSettings(t, dir, "")
@@ -248,7 +248,7 @@ func TestAttachCommandGolden(t *testing.T) {
 	wantScope := []string{"--allowedTools",
 		"mcp__brigada__plan_create", "mcp__brigada__plan_amend", "mcp__brigada__plan_accept", "mcp__brigada__answer", "mcp__brigada__task_restart",
 		"mcp__brigada__task_cancel", "mcp__brigada__ask_user",
-		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__events",
+		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__issue_read", "mcp__brigada__events",
 		"mcp__brigada__capacity", "mcp__brigada__stats",
 		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "NotebookRead", "Write", "WebFetch", "WebSearch"}
 	cases := []struct {
@@ -425,7 +425,7 @@ func TestCommandWorkerDefaultScope(t *testing.T) {
 		"--allowedTools",
 		"mcp__brigada__plan_create", "mcp__brigada__plan_amend", "mcp__brigada__plan_accept", "mcp__brigada__answer", "mcp__brigada__task_restart",
 		"mcp__brigada__task_cancel", "mcp__brigada__ask_user",
-		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__events",
+		"mcp__brigada__status", "mcp__brigada__history", "mcp__brigada__issue_read", "mcp__brigada__events",
 		"mcp__brigada__capacity", "mcp__brigada__stats",
 		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "NotebookRead", "Write", "WebFetch", "WebSearch"}
 	if !slices.Equal(foreman.Args, wantForeman) {
