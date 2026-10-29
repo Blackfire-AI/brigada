@@ -197,7 +197,7 @@ tasks:
     base: "docs_verify"
     continue: "docs_verify"
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-242"
     rounds: 2
   - id: 243
