@@ -106,10 +106,9 @@ tasks:
     base: "docs_check"
     continue: "docs_check"
     effort: medium
-    state: needs_foreman
+    state: running
     branch: "brigada/task-234-r1"
     rounds: 1
-    question: "Can the runner or foreman amend the branch tip so its commit body ends with the two required Closes lines?"
   - id: 235
     name: "store_skills"
     title: "Store: skills, role snapshots on tasks, per-prompt bounds, status fields"
