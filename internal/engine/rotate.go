@@ -240,7 +240,14 @@ func foremanDigestTx(tx *sql.Tx, project int64, now time.Time) (string, error) {
 				add("  - %d more tasks omitted", len(tasks)-digestMaxTasks)
 				break
 			}
-			add("  - task %d %q: %s", t.ID, title(t.Title), t.State)
+			line := fmt.Sprintf("  - task %d %q: %s", t.ID, title(t.Title), t.State)
+			// A done implement task carries its landing state (§7.1): a
+			// task done and not landed must read differently from a
+			// landed one.
+			if label := t.LandedLabel(); label != "" {
+				line += ", " + label
+			}
+			add("%s", line)
 		}
 	}
 

@@ -197,6 +197,31 @@ func TestStatusSectionsLandReadyStates(t *testing.T) {
 	}
 }
 
+// TestStatusSectionsLandedLabels: a done implement task carries its
+// landing state beside the state (§7.1) — `landed@<sha>` or `not
+// landed` — so a task done and not landed reads differently from a
+// landed one; a class that never lands says neither.
+func TestStatusSectionsLandedLabels(t *testing.T) {
+	st := Status{Plans: []engine.StatusPlan{{ID: 1, Tasks: []engine.StatusTask{
+		{ID: 1, Title: "merged", State: "done", Class: "implement", Landed: true, LandedCommit: "abc123"},
+		{ID: 2, Title: "waiting", State: "done", Class: "implement"},
+		{ID: 3, Title: "answer", State: "done", Class: "answer", Landed: false},
+	}}}}
+	got := StatusSections(st)
+	for _, want := range []string{
+		"  task #1 done merged landed@abc123\n",
+		"  task #2 done waiting not landed\n",
+		"  task #3 done answer\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status sections lack %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "task #3 done answer landed") {
+		t.Errorf("a task of a class that never lands carries a landing marker:\n%s", got)
+	}
+}
+
 // TestStatusSectionsCountsHiddenFinishedPlans: the trimmed plans list
 // says in one line, after the plans, how many older finished plans it
 // left out and what lists them (§10); nothing is said when none hide.

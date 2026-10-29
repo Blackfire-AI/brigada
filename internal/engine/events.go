@@ -19,6 +19,8 @@ const (
 	evPlanCancelled          = "plan_cancelled"            // removal cancelled an unfinished plan
 	evPlanCreated            = "plan_created"              // CreatePlan: a plan now exists (§6.2)
 	evPlanDone               = "plan_done"                 // the plan's last open task finished (§6.2)
+	evPlanBlocked            = "plan_blocked"              // a blocked plan (§6.2): done work that can never land — a dependency cancelled or failed — keeps the plan active; Reason names each stranded task and the dead dependency. One wake per blockage
+	evPlanUnblocked          = "plan_unblocked"            // a blocked plan's last stranded task was freed (§6.2); the plan can close again, and a later blockage wakes anew
 	evPlanAwaitingApproval   = "plan_awaiting_approval"    // CreatePlan: the plan is over the approval limit and waits for the user's yes (§6.3)
 	evPlanReviewQueued       = "plan_review_queued"        // a plan_review job is queued: the plan waits in reviewing for the verdict before any work is queued (§6.2)
 	evPlanReviewed           = "plan_reviewed"             // a plan review round ended: approve, changes (with findings), no verdict, or accepted by the foreman (plan_accept); the plan proceeded, parks at needs_foreman for the foreman's answer, or waits for the user's yes (§6.2)
