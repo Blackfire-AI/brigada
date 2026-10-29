@@ -137,6 +137,35 @@ func TestParkWakesForemanWithTheEventVerbatim(t *testing.T) {
 	}
 }
 
+// TestNeedsHelpNamingAMissingCitedSectionParksForTheForeman is the stop
+// rule of issue #129: a worker whose spec cites a docs section its
+// checkout does not carry returns needs_help naming the section and the
+// ref and commit it read (the prompt's base note). The task parks in
+// needs_foreman, the foreman's wake carries the question verbatim, and
+// nothing is reviewed or landed: no review job, no land job, the plan
+// stays open.
+func TestNeedsHelpNamingAMissingCitedSectionParksForTheForeman(t *testing.T) {
+	e := newEnv(t)
+	question := `docs/design.md §5.9 does not carry the headings the spec cites; my checkout is base ref brigada/landed at commit 3aeabbd9 (the base note). Fix the base or the spec.`
+	e.park(question)
+	if got := e.str("SELECT state FROM tasks WHERE id = ?", e.task); got != taskNeedsForeman {
+		t.Fatalf("task state after the needs_help = %q, want %q", got, taskNeedsForeman)
+	}
+	job := e.int("SELECT id FROM jobs WHERE kind = 'foreman'")
+	want := "<event>\n" + e.wakeLine(evTaskNeedsHelp, question) + "\n</event>"
+	if prompt := e.str("SELECT prompt FROM jobs WHERE id = ?", job); !strings.Contains(prompt, want) {
+		t.Errorf("wake prompt = %q, want it to carry the question verbatim:\n%s", prompt, want)
+	}
+	for _, kind := range []string{string(KindReview), string(KindLand)} {
+		if n := e.int("SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind = ?", e.project, kind); n != 0 {
+			t.Errorf("%s jobs after the park = %d, want none: nothing is reviewed or landed", kind, n)
+		}
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", e.plan); got != "active" {
+		t.Errorf("plan state after the park = %q, want active", got)
+	}
+}
+
 // TestParksWhileATurnRunsWaitForIt is the coalescing rule (§4.2): a
 // park while a turn is live wakes nothing — the live turn's completion
 // re-evaluates — and the next turn carries every pending event, the

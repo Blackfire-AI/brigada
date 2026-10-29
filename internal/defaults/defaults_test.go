@@ -158,6 +158,43 @@ func TestCurrentArchiveEqualsLive(t *testing.T) {
 	}
 }
 
+// TestWorkerStopRule: the default worker text carries the stop rule of
+// issue #129 — a spec that cites a docs section the checkout does not
+// carry stops the worker with needs_help, naming the section and the ref
+// and commit it read; the worker never guesses and never writes the
+// section itself. The default foreman text carries the matching blocking
+// rule: the foreman fixes the base or the spec, or asks the user, and
+// never answers "continue without it".
+func TestWorkerStopRule(t *testing.T) {
+	worker, err := LiveRoleText("worker")
+	if err != nil {
+		t.Fatalf("live worker text: %v", err)
+	}
+	for _, phrase := range []string{
+		"stop with needs_help",
+		"name the missing section and the base ref and commit",
+		"do not guess",
+		"never write the section yourself",
+	} {
+		if !strings.Contains(worker, phrase) {
+			t.Errorf("worker.md never says %q", phrase)
+		}
+	}
+	foreman, err := LiveRoleText("foreman")
+	if err != nil {
+		t.Fatalf("live foreman text: %v", err)
+	}
+	for _, phrase := range []string{
+		"is blocking",
+		"the task's base or the spec, or ask the user",
+		`"continue without it"`,
+	} {
+		if !strings.Contains(foreman, phrase) {
+			t.Errorf("foreman.md never says %q", phrase)
+		}
+	}
+}
+
 // TestArchiveRefusals: an unknown version, an unknown role or skill, and
 // a name outside the archive are refused, never guessed.
 func TestArchiveRefusals(t *testing.T) {

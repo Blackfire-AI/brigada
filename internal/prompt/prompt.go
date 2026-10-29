@@ -552,6 +552,17 @@ func WithPlanReviewRef(p, ref, landTarget, defaultBranch string) string {
 	return p + note
 }
 
+// WithWorkerBase appends the note naming the task's base ref and the
+// commit the worktree starts from (issue #129): a spec that cites a docs
+// section as its source makes the worker's stop nameable — the missing
+// section and the ref and commit it read. The runner adds it once the
+// worktree is made, so the note states what was actually checked out;
+// like the plan review's ref note, it is fixed text plus the two verbatim
+// values, never data the worker or the spec wrote.
+func WithWorkerBase(p, ref, commit string) string {
+	return p + fmt.Sprintf("\nBase note: the task's base ref is %q and your worktree starts at commit %s. A spec that names a docs section as its source and this checkout does not carry it: stop with needs_help naming the section, this ref and this commit; never guess or write the section yourself.\n", ref, commit)
+}
+
 // ComposeReReviewPrompt builds the prompt of a re-review (§7): the fixed
 // template, the fix round's summary and the check result verbatim between
 // their data delimiters, and the two diff commands filled with the head

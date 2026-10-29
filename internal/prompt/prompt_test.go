@@ -430,6 +430,30 @@ func TestWorkerPromptForbidsLoosening(t *testing.T) {
 	}
 }
 
+// TestWithWorkerBase: the base note names the task's base ref and the
+// commit the worktree starts from, and carries the stop rule of issue
+// #129 — a spec that cites a section the checkout does not carry stops
+// the worker with needs_help naming both. The note is appended whole, so
+// a follow-up section before it stays intact and the feedback extraction
+// (WorkerFeedback) is unchanged.
+func TestWithWorkerBase(t *testing.T) {
+	base := ComposeWorkerPrompt("spec", "make test", "")
+	got := WithWorkerBase(base, "brigada/landed", "3aeabbd9e6ac787c332cb4d1a446e8d47af00f2")
+	if !strings.HasPrefix(got, base) {
+		t.Fatalf("the base note is not appended after the composed prompt:\n%s", got)
+	}
+	for _, want := range []string{
+		`the task's base ref is "brigada/landed"`,
+		"your worktree starts at commit 3aeabbd9e6ac787c332cb4d1a446e8d47af00f2",
+		"stop with needs_help naming the section, this ref and this commit",
+		"never guess or write the section yourself",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the base note lacks %q:\n%s", want, got)
+		}
+	}
+}
+
 // TestWorkerFeedback: the feedback comes back out of a composed follow-up
 // prompt, and a fresh prompt has none.
 func TestWorkerFeedback(t *testing.T) {

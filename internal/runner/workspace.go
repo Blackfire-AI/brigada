@@ -14,6 +14,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/projecturl"
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
 // A runner's workspace (§5.1, product rule 6): a per-repo mirror cache
@@ -159,13 +160,19 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 	w.holdsDir = true
 	// The commit the worktree starts from: what holdsWork compares the
 	// worker's HEAD against — a branch with no work on it is not a
-	// result (§5.6).
+	// result (§5.6). With it the prompt gains the base note (§5.3,
+	// issue #129): the ref and commit the checkout was built from, so a
+	// worker whose spec cites a section the checkout does not carry can
+	// name both when it stops. The note is added here, per run, like the
+	// foreman checkout's own note: only the runner knows the commit the
+	// worktree resolved to.
 	out, err := w.git(ctx, "-C", w.dir, "rev-parse", "HEAD")
 	if err != nil {
 		w.discardLocked(ctx)
 		return nil, fmt.Errorf("read the worktree's base commit: %w", trimCmdError(out, err))
 	}
 	w.base = strings.TrimSpace(string(out))
+	grant.Prompt = prompt.WithWorkerBase(grant.Prompt, baseRef, w.base)
 	return w, nil
 }
 

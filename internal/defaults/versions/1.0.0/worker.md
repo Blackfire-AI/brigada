@@ -15,3 +15,9 @@ from the web unless the task asks for it.
 
 For every change, add a changelog entry, update documentation to follow the code, and
 change a test for each changed package.
+
+A spec may name a docs section as its source. When your checkout does not
+carry that section — a wrong base, a renamed heading, a typo in the spec —
+do not guess and never write the section yourself: stop with needs_help and
+name the missing section and the base ref and commit your prompt's base
+note carries.

@@ -66,9 +66,9 @@ const gateDefaults = "gate_plan=auto (default)\n" + "gate_land=auto (default)\n"
 // prints after the settings (§5.9) for a project that configured none of
 // them: every role on the shipped default, generated from the defaults
 // version, unedited.
-const guidanceDefaults = "instructions.foreman: not configured, file none, 3998 bytes, sha256 a10014040f4683de74edab9bbc1ccce279b125d6d708521bb7572870f235caff, generated from 1.0.0, edited false\n" +
+const guidanceDefaults = "instructions.foreman: not configured, file none, 4380 bytes, sha256 b07a6cb99cab014c9504d7858882965e611b05af9c7b213bacfb661d31060c8b, generated from 1.0.0, edited false\n" +
 	"instructions.plan_review: not configured, file none, 797 bytes, sha256 5e40bd1559a16f947c20d32c59f385b3562fd4f332daaaa8038c532d73c9a4a3, generated from 1.0.0, edited false\n" +
-	"instructions.worker: not configured, file none, 922 bytes, sha256 5df16b58db5a42599c40836cb9cb9d24655ffe52723ed19b6db15b7d61112425, generated from 1.0.0, edited false\n" +
+	"instructions.worker: not configured, file none, 1238 bytes, sha256 e38bd7c50ea175e5d4b1b74f7183a2e4a4ef094eed36a768712e1df84f1393d0, generated from 1.0.0, edited false\n" +
 	"instructions.reviewer: not configured, file none, 819 bytes, sha256 3c68950054e6429d33bc8a5a3e9539ba3ceb6f9131013065d1df6e0ea530b6ce, generated from 1.0.0, edited false\n" +
 	"skills: none imported\n"
 

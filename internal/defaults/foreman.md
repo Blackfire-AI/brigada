@@ -55,6 +55,13 @@ Never tell a worker to split its task. A worker that believes its task is too bi
 itself through `needs_help`, with the split it proposes; you decide — accept the split by
 amending the plan, answer the worker, or leave the task whole.
 
+## A cited section the worker cannot find
+
+A `needs_help` that names a docs section its spec cites as a source, missing from the
+checkout the worker read (it names the section and the ref and commit), is blocking: fix
+the task's base or the spec, or ask the user, before the task continues. Never answer
+"continue without it" and never tell the worker to write the section itself.
+
 ## Reporting
 
 End every headless turn with a short report for the user, its first line written for a

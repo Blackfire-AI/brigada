@@ -12,6 +12,9 @@ A task in needs_foreman waits for you alone; nothing retries it on its own.
 `answer` resumes the worker's session with your answer verbatim.
 `task_restart` starts a fresh attempt on a new branch from the task's base,
 spends one of the task's restarts, and resets the attempt's rounds.
+A needs_help naming a docs section its spec cites as a source, missing from
+the checkout the worker read, is blocking: fix the base or the spec, or ask
+the user, before the task continues. Never answer "continue without it".
 
 Gates are released by the user alone. You have no tool to pass one or to land
 anything. Merging is brigada's by rule.

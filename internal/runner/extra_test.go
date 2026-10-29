@@ -220,7 +220,8 @@ func TestExtraRepoEnvRefusesAMalformedName(t *testing.T) {
 // TestRunnerWithoutExtrasKeepsThePromptPlain pins the other side of §5.8:
 // the paragraph and the read dirs exist only when the job has extra
 // repositories; a job without them sees its prompt exactly as the engine
-// composed it, and no read dir at all.
+// composed it plus the runner's base note (§5.3, issue #129) alone, and no
+// read dir at all.
 func TestRunnerWithoutExtrasKeepsThePromptPlain(t *testing.T) {
 	t.Parallel()
 	remote := newRemote(t)
@@ -239,7 +240,8 @@ printf '%s\n' "$BRIGADA_FAKE_READ_DIRS" > "$BRIGADA_TEST_MARKERS/worker-readdirs
 	defer p.stop(t)
 	e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
 
-	if got := strings.Join(markerLines(t, markers, "worker-prompt"), "\n"); got != strings.TrimSpace(composed) {
+	want := strings.TrimSpace(prompt.WithWorkerBase(composed, "main", remoteHead(t, remote, "main")))
+	if got := strings.Join(markerLines(t, markers, "worker-prompt"), "\n"); got != want {
 		t.Errorf("the prompt without extras changed:\n%s", got)
 	}
 	if got := strings.Join(markerLines(t, markers, "worker-readdirs"), ""); got != "" {
