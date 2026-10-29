@@ -28,8 +28,8 @@ tasks:
     base: ""
     effort: medium
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-253"
+    rounds: 1
   - id: 254
     name: "fallback"
     title: "No run-time fallback to embedded role text; status and project show the three states (#119 items 1, 4, 8)"
