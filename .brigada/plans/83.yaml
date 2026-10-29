@@ -161,9 +161,9 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: running
     branch: "brigada/task-265"
-    rounds: 0
+    rounds: 1
   - id: 266
     name: "skills_dir_record"
     title: "skills_dir is resolved once onto the task record; prompts use the recorded value (#117 item 7, §5.10 \"Resolved once\")"
