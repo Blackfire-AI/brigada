@@ -174,7 +174,7 @@ tasks:
     continue: "prompts"
     effort: medium
     review_tier: standard
-    state: reviewing
+    state: done
     branch: "brigada/task-266"
     rounds: 0
   - id: 267
