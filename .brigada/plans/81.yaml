@@ -5,9 +5,9 @@
 plan: 81
 title: "Instructions per role (#119) and task skills (#117): design §5.9, §5.10"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-28T20:42:23.229737Z
-updated: 2026-10-29T01:51:01.578648Z
+updated: 2026-10-29T03:26:01.391126Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -106,7 +106,7 @@ tasks:
     base: "docs_check"
     continue: "docs_check"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-234-r2"
     rounds: 0
   - id: 235
