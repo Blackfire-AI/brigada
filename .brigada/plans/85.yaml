@@ -28,7 +28,6 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: needs_foreman
+    state: running
     branch: ""
     rounds: 0
-    question: "Git commands are blocked in this worktree, so I cannot read brigada/task-258-r1 (or brigada/landed) to re-apply 258's change. Can you enable read-only git (git diff/log/show/merge-base/branch), or supply 258's diff another way, so I can port it?"
