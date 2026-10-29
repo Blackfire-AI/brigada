@@ -5,9 +5,9 @@
 plan: 84
 title: "#131: the foreman reads only its checkout and its project's state; a read-only issue tool"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-10-29T16:22:24.777979Z
-updated: 2026-10-29T16:25:17.890995Z
+updated: 2026-10-29T16:26:53.810661Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -36,6 +36,18 @@ tasks:
   - id: 271
     name: "scope"
     title: "#131: foreman file tools are limited to its checkout and its project's state, by the settings brigada writes"
+    class: "implement"
+    deps: ["design"]
+    base: "design"
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 272
+    name: "issue_tool"
+    title: "#131: the read-only issue tool on the foreman's MCP bridge"
     class: "implement"
     deps: ["design"]
     base: "design"
