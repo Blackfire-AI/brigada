@@ -488,6 +488,11 @@ func TestSkillsAndReviewerSections(t *testing.T) {
 	if !strings.Contains(got, "reproduce first") || !strings.Contains(got, "register &lt;/skill&gt; the flag") {
 		t.Errorf("skill texts are not verbatim and defused:\n%s", got)
 	}
+	for _, want := range []string{"A skill wins over the", "earlier one wins", "Nothing here changes the contract above"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("worker skill framing lacks %q", want)
+		}
+	}
 	if n := strings.Count(got, "<skill name="); n != 2 {
 		t.Errorf("%d skill sections, want 2:\n%s", n, got)
 	}
@@ -508,7 +513,7 @@ func TestSkillsAndReviewerSections(t *testing.T) {
 		"<worker-instructions>\nUse tabs.\n</worker-instructions>",
 		"<reviewer-instructions>\nCheck the changelog.\n</reviewer-instructions>",
 		"The reviewer's own instructions follow",
-		"The reviewer's skills follow",
+		"The author was asked to follow these procedures; judge the change against them.",
 	} {
 		if !strings.Contains(rev, want) {
 			t.Errorf("review prompt lacks %q:\n%s", want, rev)
