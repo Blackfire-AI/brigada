@@ -145,5 +145,5 @@ tasks:
     tier: light
     effort: low
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-293"
+    rounds: 1
