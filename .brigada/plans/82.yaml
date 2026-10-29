@@ -42,8 +42,8 @@ tasks:
     tier: heavy
     effort: high
     caps: {restart: 2}
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-246"
     rounds: 0
   - id: 247
     name: "bug115"
