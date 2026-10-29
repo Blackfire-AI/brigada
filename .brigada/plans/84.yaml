@@ -64,6 +64,6 @@ tasks:
     deps: ["issue_tool"]
     base: "issue_tool"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-273"
     rounds: 0
