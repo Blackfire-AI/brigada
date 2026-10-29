@@ -75,8 +75,8 @@ tasks:
     base: "land_retry_docs"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: done
+    branch: "brigada/task-280"
     rounds: 0
   - id: 281
     name: "sync_design"
@@ -87,7 +87,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 282
@@ -98,7 +98,7 @@ tasks:
     base: "push_retry"
     tier: light
     effort: low
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 283
