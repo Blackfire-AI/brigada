@@ -39,8 +39,8 @@ tasks:
     deps: ["gofmt"]
     base: "gofmt"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-277"
     rounds: 0
   - id: 278
     name: "plan_open"
