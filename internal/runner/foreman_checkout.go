@@ -17,8 +17,18 @@ import (
 // repository's own CLAUDE.md, AGENTS.md and .claude/ load there as in
 // any clone. Only this preparation writes the checkout; the foreman must
 // receive read-only access from its harness.
-func PrepareForemanCheckout(ctx context.Context, scratch, repoURL, branch string, gitEnv []string) (foreman.Checkout, error) {
-	if repoURL == "" || branch == "" {
+//
+// The checkout reads the project's land target (issue #122), so the
+// foreman sees what has landed even when the default branch lags it. An
+// empty landTarget means the default branch. A land target the remote
+// does not hold yet (before the first landing creates it) falls back to
+// the default branch; the returned Checkout says so.
+func PrepareForemanCheckout(ctx context.Context, scratch, repoURL, landTarget, defaultBranch string, gitEnv []string) (foreman.Checkout, error) {
+	branch := landTarget
+	if branch == "" {
+		branch = defaultBranch
+	}
+	if repoURL == "" || defaultBranch == "" {
 		return foreman.Checkout{}, fmt.Errorf("the foreman requires a project repo URL and default branch")
 	}
 	dir, err := filepath.Abs(filepath.Join(scratch, "repo"))
@@ -33,8 +43,13 @@ func PrepareForemanCheckout(ctx context.Context, scratch, repoURL, branch string
 		}
 		return strings.TrimSpace(string(out)), nil
 	}
-	if _, err := git("check-ref-format", "--branch", branch); err != nil {
-		return foreman.Checkout{}, fmt.Errorf("invalid default branch %q: %w", branch, err)
+	if _, err := git("check-ref-format", "--branch", defaultBranch); err != nil {
+		return foreman.Checkout{}, fmt.Errorf("invalid default branch %q: %w", defaultBranch, err)
+	}
+	if branch != defaultBranch {
+		if _, err := git("check-ref-format", "--branch", branch); err != nil {
+			return foreman.Checkout{}, fmt.Errorf("invalid land target %q: %w", branch, err)
+		}
 	}
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		// Clone aside: a failed clone never leaves a partial repo for a retry.
@@ -62,6 +77,15 @@ func PrepareForemanCheckout(ctx context.Context, scratch, repoURL, branch string
 			return foreman.Checkout{}, err
 		}
 	}
+	if branch != defaultBranch {
+		out, err := git("-C", dir, "ls-remote", "--heads", "origin", "refs/heads/"+branch)
+		if err != nil {
+			return foreman.Checkout{}, &infraError{fmt.Errorf("list %s branch %s: %w", redactURL(repoURL), branch, err)}
+		}
+		if out == "" {
+			branch = defaultBranch
+		}
+	}
 	remoteRef := "refs/remotes/origin/" + branch
 	if _, err := git("-C", dir, "fetch", "--no-tags", "--prune", "origin", "+refs/heads/"+branch+":"+remoteRef); err != nil {
 		return foreman.Checkout{}, &infraError{fmt.Errorf("fetch %s branch %s: %w", redactURL(repoURL), branch, err)}
@@ -76,5 +100,5 @@ func PrepareForemanCheckout(ctx context.Context, scratch, repoURL, branch string
 	if err != nil {
 		return foreman.Checkout{}, err
 	}
-	return foreman.Checkout{Path: dir, Branch: branch, Commit: commit}, nil
+	return foreman.Checkout{Path: dir, Branch: branch, Commit: commit, DefaultBranch: defaultBranch, LandTarget: landTarget}, nil
 }

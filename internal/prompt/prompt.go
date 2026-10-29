@@ -6,6 +6,7 @@
 package prompt
 
 import (
+	"fmt"
 	"html"
 	"path"
 	"regexp"
@@ -484,7 +485,7 @@ var reReviewTemplate = strings.NewReplacer(reviewDiffVar, ReviewDiffFile).Replac
 
 // PlanReviewTemplateVersion is the plan review prompt's version (§7),
 // under the same rule as the worker's (§1.4).
-const PlanReviewTemplateVersion = 3
+const PlanReviewTemplateVersion = 4
 
 // planReviewTemplateSrc is the fixed part of a plan review prompt: a
 // reviewer reads a plan, not a change, against a checkout of the default
@@ -494,7 +495,7 @@ is queued, and nothing else. You were placed cross-family — a different
 family of agent than the foreman's, which wrote the plan — exactly so
 you read it without the foreman's instincts. You run alone in a
 read-only git worktree prepared for you at the current head of the
-project's default branch, and the review is read-only throughout: do
+ref named in the note after the plan, and the review is read-only throughout: do
 not edit files, do not commit, do not push, do not run the tasks'
 checks. You cannot message anyone mid-run: whatever you need to say
 goes in your final message's verdict block, and it is read only after
@@ -512,7 +513,7 @@ Judge the plan against the checkout, and cite evidence from it — a
 file, a path, a commit, a line of docs/design.md — for each finding.
 Check:
 
-  (a) work already on the default branch or in another active plan: a
+  (a) work already on that ref or in another active plan: a
       task that asks for what the checkout already does, or what
       another plan's task is making;
   (b) specs that contradict the code or docs/design.md;
@@ -551,6 +552,25 @@ func ComposePlanReviewPrompt(input string, opts ...Option) string {
 	b.WriteString(neutralize(input))
 	b.WriteString("\n</plan-review-input>\n")
 	return b.String()
+}
+
+// WithPlanReviewRef appends the note naming the ref the reviewer's
+// worktree is at (issue #122): the land target, which holds what has
+// landed, with the default branch named as the one that may lag it, or
+// the default branch itself when the land target is unset or the remote
+// does not hold it yet. The runner adds it once the worktree is made, so
+// the note states what was actually checked out.
+func WithPlanReviewRef(p, ref, landTarget, defaultBranch string) string {
+	note := "\nRef note: your worktree is at the head of " + fmt.Sprintf("%q", ref)
+	switch {
+	case landTarget != "" && landTarget != ref:
+		note += fmt.Sprintf(", the project's default branch: the land target %q does not exist on the remote yet, so nothing has landed on it.\n", landTarget)
+	case defaultBranch != "" && defaultBranch != ref:
+		note += fmt.Sprintf(", the project's land target, where approved work lands. The default branch %q may lag what landed here.\n", defaultBranch)
+	default:
+		note += ", the project's default branch.\n"
+	}
+	return p + note
 }
 
 // ComposeReReviewPrompt builds the prompt of a re-review (§7): the fixed

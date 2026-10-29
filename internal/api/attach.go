@@ -75,6 +75,7 @@ func (s *Server) handleForemanAttach(w http.ResponseWriter, r *http.Request, _ i
 		ForemanToken:  res.ForemanToken,
 		RepoURL:       res.RepoURL,
 		DefaultBranch: res.DefaultBranch,
+		LandTarget:    res.LandTarget,
 		Harness:       res.Harness,
 		Model:         res.Model,
 		Effort:        res.Effort,
@@ -221,6 +222,7 @@ type attachResponse struct {
 	ForemanToken  string    `json:"foreman_token"`
 	RepoURL       string    `json:"repo_url"`
 	DefaultBranch string    `json:"default_branch"`
+	LandTarget    string    `json:"land_target,omitempty"`
 	Harness       string    `json:"harness"`
 	Model         string    `json:"model"`
 	Effort        string    `json:"effort,omitempty"`

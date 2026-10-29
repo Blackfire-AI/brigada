@@ -62,6 +62,7 @@ First release candidate of 1.0.0. The changes are listed under 1.0.0 below.
 
 ### Fixed
 
+- With `land_target` set, the foreman's reading checkout (headless turns and attach) and the plan reviewer's worktree read the land target instead of the default branch (issue #122), so a plan review finding no longer goes stale against work that landed there. A land target the remote does not hold yet falls back to the default branch, and the foreman's opening prompt and the plan reviewer's prompt name the ref read and the default branch, with the fallback noted. A standalone branch review keeps the default branch as its diff base. The foreman and plan review grants carry the default branch beside the land target as their base ref, and the attach result carries `land_target`; the plan review template moves to version 4.
 - A Codex reset time at or within 15 minutes before the limit message now cools the account for two minutes instead of rolling the reset into the next day or year (issue #114).
 
 - `brigada init` resolves SSH origin aliases through `ssh -G` after confirmation and accepts `--repo` as a full URL or, with an SSH origin, a canonical identity (issue #102). Registration stores the canonical identity and a usable transport.

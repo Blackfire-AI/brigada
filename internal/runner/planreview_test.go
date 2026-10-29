@@ -102,7 +102,8 @@ func (f *planReviewFixture) assertReviewerSaw(t *testing.T) {
 	saw := reviewerMarker(t, f.markers, "pr-prompt")
 	for _, want := range []string{
 		"<plan-review-input>", "the spec of task a", "the spec of task b",
-		"already on the default branch", "```json",
+		"already on that ref", "```json",
+		`head of "main", the project's default branch`,
 	} {
 		if !strings.Contains(saw, want) {
 			t.Errorf("the plan review prompt lacks %q:\n%s", want, saw)

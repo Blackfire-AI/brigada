@@ -34,7 +34,7 @@ func (r *jobRun) runForemanTurn(ctx context.Context) {
 		r.finishWithError(ctx, "make the foreman's scratch directory: "+err.Error())
 		return
 	}
-	checkout, err := PrepareForemanCheckout(ctx, dir, r.grant.RepoURL, r.grant.BaseRef, r.cfg.GitEnv)
+	checkout, err := PrepareForemanCheckout(ctx, dir, r.grant.RepoURL, r.grant.BaseRef, r.grant.DefaultBranch, r.cfg.GitEnv)
 	if err != nil {
 		// A fetch that could not be done is the turn's own plumbing
 		// (issue #46): an infrastructure failure the engine keeps for
@@ -47,11 +47,12 @@ func (r *jobRun) runForemanTurn(ctx context.Context) {
 		}
 		return
 	}
-	// The checkout just fetched the project's default branch: scan it for
+	// The checkout just fetched the land target (or the default branch it
+	// fell back to): scan it for
 	// tasks landed outside the land job (§7.1) before the foreman reads
 	// status, so it can tell "already merged" from "waiting to merge". A
 	// failed report is a warning, never a turn failure.
-	if err := ReportLanded(ctx, r.client, r.grant.RepoURL, r.grant.BaseRef, checkout); err != nil {
+	if err := ReportLanded(ctx, r.client, r.grant.RepoURL, checkout.Branch, checkout); err != nil {
 		r.cfg.Log.WarnContext(ctx, "report landed tasks", "job_id", r.grant.JobID, "err", err)
 	}
 	r.grant.Prompt = foreman.WithCheckout(r.grant.Prompt, checkout)

@@ -32,6 +32,7 @@ type AttachResult struct {
 	ForemanToken  string
 	RepoURL       string
 	DefaultBranch string
+	LandTarget    string // the effective land target; the default branch when unset
 	Harness       string
 	Model         string
 	Effort        string // the foreman's reasoning-effort level; '' = unset
@@ -80,6 +81,10 @@ func (e *Engine) attachTx(tx *sql.Tx, project int64, force bool, now time.Time) 
 	case err != nil:
 		return AttachResult{}, fmt.Errorf("read the foreman of project %d: %w", project, err)
 	}
+	landTarget, err := effectiveLandTargetTx(tx, project, branch)
+	if err != nil {
+		return AttachResult{}, err
+	}
 	if harness == "" || model == "" {
 		// Nobody to attach to: the foreman is the user's own choice
 		// (§4.1), and a project that never named one has nobody to run.
@@ -123,6 +128,7 @@ func (e *Engine) attachTx(tx *sql.Tx, project int64, force bool, now time.Time) 
 		Answer:        AnsCreated,
 		RepoURL:       repo,
 		DefaultBranch: branch,
+		LandTarget:    landTarget,
 		Harness:       harness,
 		Model:         model,
 		Effort:        effort,

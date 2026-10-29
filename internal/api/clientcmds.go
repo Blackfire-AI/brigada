@@ -647,6 +647,7 @@ type AttachResult struct {
 	ForemanToken  string
 	RepoURL       string
 	DefaultBranch string
+	LandTarget    string // the effective land target; the default branch when unset
 	Harness       string
 	Model         string
 	Effort        string // the foreman's reasoning-effort level; '' = unset
@@ -680,6 +681,7 @@ func (c *Client) Attach(ctx context.Context, repoURL string, force bool) (Attach
 		ForemanToken:  out.ForemanToken,
 		RepoURL:       out.RepoURL,
 		DefaultBranch: out.DefaultBranch,
+		LandTarget:    out.LandTarget,
 		Harness:       out.Harness,
 		Model:         out.Model,
 		Effort:        out.Effort,
