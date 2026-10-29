@@ -144,6 +144,6 @@ tasks:
     base: "land_check"
     tier: light
     effort: low
-    state: running
-    branch: "brigada/task-293"
+    state: reviewing
+    branch: "brigada/task-293-r1"
     rounds: 0
