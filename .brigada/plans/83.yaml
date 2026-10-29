@@ -82,7 +82,7 @@ tasks:
     base: "prompts"
     tier: heavy
     effort: medium
-    state: ready
+    state: running
     branch: "brigada/task-258"
     rounds: 0
   - id: 259
