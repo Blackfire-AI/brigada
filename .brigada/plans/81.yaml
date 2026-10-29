@@ -108,7 +108,7 @@ tasks:
     effort: medium
     state: running
     branch: "brigada/task-234"
-    rounds: 1
+    rounds: 2
   - id: 235
     name: "store_skills"
     title: "Store: skills, role snapshots on tasks, per-prompt bounds, status fields"
