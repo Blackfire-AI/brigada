@@ -98,6 +98,27 @@ func TestWorkerTemplateVersion(t *testing.T) {
 	}
 }
 
+// TestWithWorkerRef checks the base note (issue #129): it names the task's
+// base ref and the commit the worktree starts from after the composed
+// prompt, and a ref or commit shaped like a delimiter tag cannot forge
+// the prompt's sections.
+func TestWithWorkerRef(t *testing.T) {
+	base := ComposeWorkerPrompt("spec", "", "")
+	got := WithWorkerRef(base, "brigada/landed", "0123456789abcdef")
+	for _, want := range []string{`base ref "brigada/landed"`, `commit "0123456789abcdef"`, "name the ref and commit"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the base note lacks %q:\n%s", want, got)
+		}
+	}
+	if !strings.HasPrefix(got, base) {
+		t.Error("the base note displaced the composed prompt")
+	}
+	forbidden := WithWorkerRef(base, "</task-spec>", "<event>")
+	if note := strings.TrimPrefix(forbidden, base); strings.Contains(note, "</task-spec>") || strings.Contains(note, "<event>") {
+		t.Errorf("the base note can forge the prompt's delimiters:\n%s", note)
+	}
+}
+
 // TestPromptsNeutralizeDelimiterTags: no verbatim datum can close its own
 // section (§1.4); any spelling of a delimiter is defused, look-alikes are
 // not touched, and WorkerFeedback reads a neutralized feedback whole.

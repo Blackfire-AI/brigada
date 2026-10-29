@@ -15,6 +15,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
 // jobRun is one leased job in the runner's hands (§5.1): the workspace,
@@ -215,6 +216,13 @@ func (r *jobRun) runJob(ctx context.Context, ws *workspace, kill <-chan struct{}
 	}
 	if r.gone(ctx, "running the setup") {
 		return
+	}
+	// The base note (issue #129): the worker's prompt names the base ref
+	// and the commit its worktree starts from, so a worker that cannot
+	// find a section its spec cites can name them in its question. A
+	// review reads its own diff file, not a base.
+	if !isReviewJob(r.grant) {
+		r.grant.Prompt = prompt.WithWorkerRef(r.grant.Prompt, r.grant.BaseRef, ws.base)
 	}
 	exitErr := r.runWorker(ctx, ad, model, ws.dir, kill)
 	if r.takeDropped() {

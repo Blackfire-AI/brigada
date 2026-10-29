@@ -399,6 +399,8 @@ The needs-you queue lists what only you (or the foreman) can unblock:
 | `foreman #N budget_spent: wake budget spent (20/20 today, resets <UTC time>); <n> events waiting` | Raise the day's wake budget with `brigada budget --wakes N`, or send `brigada ask`: a wake that carries your message is not charged. |
 | `agent <harness>/<model> broken: <reason>` | A fix, then `brigada agent reset <harness>/<model>`; repeated failures also recover by themselves ([section 8](#8-agents-quota-and-health)). For an `auth` break on a harness that reads its credential from the environment (dsh: `DEEPSEEK_API_KEY`), the reason names the variable and when the runner started, so you can see a runner that started without it; a runner that has not reported its start says so instead of a time. |
 
+A question can name a gap, not a choice. A worker that cannot find a docs section or file its spec cites as its source stops and asks, naming the section and the ref and commit it read. The foreman treats that question as blocking: it fixes the base or the spec, or asks you, before the task continues — never "continue without it" — and nothing of the task is reviewed or landed until it does. The worker does not guess or write the section itself.
+
 ### The wake budget
 
 The foreman is woken headless on events: a plan done, a plan blocked (a dead dependency under done work, [section 7](#7-plans-checks-and-reviews)), a task parked, a question, an environment-failed landing (once per cause, listing its tasks, [section 5](#5-finishing-the-land-job)). Those wakes are limited per project per UTC day, 20 by default, so a loop cannot spend your subscription unseen.

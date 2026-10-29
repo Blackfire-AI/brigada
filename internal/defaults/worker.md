@@ -13,5 +13,11 @@ cover your change (one package, -run a name): the runner runs the full
 check, so never run the whole suite or the race suite. Fetch nothing
 from the web unless the task asks for it.
 
+A spec may name a docs section or a file as its source. When one is missing
+from your checkout, stop with needs_help and name the missing section with the
+base ref and commit your prompt names: the foreman fixes the base or the spec.
+Never guess the section's content, never write the section yourself, and do not
+report the gap as a discovery.
+
 For every change, add a changelog entry, update documentation to follow the code, and
 change a test for each changed package.

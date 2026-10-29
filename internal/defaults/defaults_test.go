@@ -72,6 +72,44 @@ func TestDigest(t *testing.T) {
 	}
 }
 
+// TestWorkerCarriesTheMissingSectionStop (issue #129): the default worker
+// text tells a worker that cannot find a section its spec cites to stop
+// with needs_help naming the section and the base ref and commit it read,
+// and never to guess or write the section itself.
+func TestWorkerCarriesTheMissingSectionStop(t *testing.T) {
+	text, err := LiveRoleText("worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"stop with needs_help", "name the missing section", "base ref and commit",
+		"fixes the base or the spec", "Never guess", "never write the section yourself",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the worker text lacks %q:\n%s", want, text)
+		}
+	}
+}
+
+// TestForemanTreatsAMissingSectionAsBlocking (issue #129): the default
+// foreman text treats a needs_help naming a missing cited section as
+// blocking — fix the base or the spec, or ask the user, never answer
+// "continue without it".
+func TestForemanTreatsAMissingSectionAsBlocking(t *testing.T) {
+	text, err := LiveRoleText("foreman")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"stops with", "naming the missing section", "That question", "is blocking",
+		"Fix the base or the spec, or ask the user", `never answer "continue without it"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the foreman text lacks %q:\n%s", want, text)
+		}
+	}
+}
+
 // TestArchiveHoldsEveryVersionWhole: every shipped version's directory
 // carries exactly the twelve texts — four roles, eight skills — and
 // nothing else, so a version is retrievable whole by version and name.

@@ -145,7 +145,7 @@ A run's error is the CLI's own verdict. In codex's stream an `error` event or it
 
 ### 5.3 The worker prompt
 
-A fixed worker template (versioned) plus the task spec verbatim, plus the answer or feedback for follow-up jobs. The template tells the worker to end with the result block (§5.4). The project's worker instructions (§5.9) and the task's skills (§5.10) follow the template's contract as verbatim data, each in its own delimiters, before the task spec.
+A fixed worker template (versioned) plus the task spec verbatim, plus the answer or feedback for follow-up jobs. The template tells the worker to end with the result block (§5.4). The project's worker instructions (§5.9) and the task's skills (§5.10) follow the template's contract as verbatim data, each in its own delimiters, before the task spec. A work job's prompt also carries a note the runner appends once the worktree is built: the task's base ref and the commit the worktree starts from, so a worker that cannot find a section its spec cites (§5.4) can name them in its question.
 
 The default `worker.md` and `reviewer.md` that init writes (§5.9) each carry a short "work economically" paragraph; the templates do not, since the paragraphs are judgment, not contract. A work job's tool output totals only 100-400 KB, but it makes 60-150 tool calls and every call resends the whole conversation, so it processes 3-18M tokens. The worker paragraph says: prefer few large steps; plan edits to a file and make them in as few as the tools allow; read a file to change once, and search a large document for its heading instead of reading it in slices; use one combined search pattern; run only the tests that cover the change, never the whole or the race suite, since the runner runs the full check; fetch nothing from the web unless the task asks. The reviewer's shorter paragraph says: read the diff first and open only what it touches.
 
@@ -164,6 +164,8 @@ The worker's final message ends with one JSON block:
 A missing or malformed block counts as `failed` with reason `no-result`. The runner verifies the branch was pushed, committing first what the worker left uncommitted unless that includes a new file that looks like a credential or hidden configuration (§5.8).
 
 The contract binds task jobs (`work`, `fix`, `review`, §11); a review job's block is the verdict block of §7. A foreman job is exempt: its turn's output is its tool calls (§12.2), and ending without a result block is not `failed`. On `needs_help`, `question` carries the question or a proposed split of the task; the foreman answers it or re-plans through `plan_amend` (§3, §6.2), so the split needs no field of its own.
+
+A spec may name a docs section or a file as its source. A worker whose checkout does not hold it stops with `needs_help`, naming the missing section and the base ref and commit its prompt names (§5.3): it never guesses the section's content and never writes the section itself, and the gap is a question, not a `discoveries` note. The foreman treats that question as blocking (§3): it fixes the base or the spec, or asks the user, before the task continues — never answers "continue without it", and nothing is reviewed or landed until it does.
 
 ### 5.5 Checks run by the runner
 

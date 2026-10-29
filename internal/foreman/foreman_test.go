@@ -42,6 +42,7 @@ func TestInstructionsShipped(t *testing.T) {
 		"Gates are released by the user alone", "no tool to pass one", "Merging is brigada's by rule",
 		"A spent wake budget does not apply to an attached chat", "A headless turn acts, reports and ends",
 		"Never loosen, skip or delete a test or check",
+		"a section the spec cites as missing", `Never answer "continue without it"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the instructions do not mention %q:\n%s", want, got)
