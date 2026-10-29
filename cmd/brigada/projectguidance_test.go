@@ -47,7 +47,7 @@ func TestProjectSetRoleInstructions(t *testing.T) {
 	for prefix, want := range map[string]string{
 		"instructions.foreman:":     "file, file none, 9 bytes",
 		"instructions.reviewer:":    "file, file none, 13 bytes",
-		"instructions.worker:":      "empty by choice",
+		"instructions.worker:":      "file, file none, 18 bytes", // the old key set the worker text
 		"instructions.plan_review:": "file, file none, 2 bytes",
 		"instructions=":             "instructions=",
 	} {
@@ -64,6 +64,9 @@ func TestProjectSetRoleInstructions(t *testing.T) {
 	}
 	if code, _, stderr := run1("project", "set", "instructions.worker="+strings.Repeat("x", 8193)); code == 0 || !strings.Contains(stderr, "8192") {
 		t.Errorf("oversized role text: code %d, stderr %q", code, stderr)
+	}
+	if code, _, stderr := run1("project", "set", "instructions=a", "instructions.worker=b"); code == 0 || !strings.Contains(stderr, "same text") {
+		t.Errorf("the old key with instructions.worker: code %d, stderr %q", code, stderr)
 	}
 	if code, _, stderr := run1("project", "set", "instructions.worker=a", "instructions.worker=b"); code == 0 || !strings.Contains(stderr, "twice") {
 		t.Errorf("a role given twice: code %d, stderr %q", code, stderr)
@@ -119,7 +122,7 @@ func TestProjectGuidanceChangedSinceImport(t *testing.T) {
 		t.Errorf("the stored digests moved before a re-import")
 	}
 	_, status, _ := run1("status")
-	for _, want := range []string{"instructions.worker: file w.md","instructions.worker w.md: changed since the last import", "skill one: changed since the last import", "skill three: added since the last import", "skill two: removed since the last import"} {
+	for _, want := range []string{"instructions.worker: file w.md", "instructions.worker w.md: changed since the last import", "skill one: changed since the last import", "skill three: added since the last import", "skill two: removed since the last import"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("status lacks %q:\n%s", want, status)
 		}

@@ -119,6 +119,9 @@ func runProjectSettings(ctx context.Context, verb string, args []string, stdout,
 				return usagef(stderr, "%v", err)
 			}
 			if _, dup := roleValues[role]; dup {
+				if _, alias := values[engine.SettingInstructions]; alias && role == engine.RoleWorker {
+					return usagef(stderr, "project set names instructions and instructions.worker, which are the same text; give one")
+				}
 				return usagef(stderr, "project set names %s twice", key)
 			}
 			if strings.HasPrefix(value, "@") {
@@ -147,6 +150,15 @@ func runProjectSettings(ctx context.Context, verb string, args []string, stdout,
 			return usagef(stderr, "%v", err)
 		}
 		values[key] = value
+		if key == engine.SettingInstructions && value != "" {
+			// The old name is the worker override (§5.9): the text also
+			// sets the worker role, and no other. The project-wide setting
+			// keeps it too, for the readers that still use it.
+			if _, dup := roleValues[engine.RoleWorker]; dup {
+				return usagef(stderr, "project set names instructions and instructions.worker, which are the same text; give one")
+			}
+			roleValues[engine.RoleWorker] = value
+		}
 	}
 	if repo == "" {
 		dir, err := os.Getwd()
