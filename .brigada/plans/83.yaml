@@ -5,9 +5,9 @@
 plan: 83
 title: "Bring role instructions and task skills to design §5.9/§5.10 (#119, #117); fix #128, #127, #129"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: active
 created: 2026-10-29T14:08:29.976259Z
-updated: 2026-10-29T14:30:23.446947Z
+updated: 2026-10-29T14:31:55.233958Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -46,7 +46,7 @@ tasks:
     name: "import"
     title: "Import: not configured reachable, init writes role files for instructions_file projects, one import transaction (#119 items 3, 5)"
     class: "implement"
-    deps: ["fallback", "prompts"]
+    deps: ["fallback", "prompts", "fallback_status"]
     base: ""
     tier: heavy
     effort: medium
