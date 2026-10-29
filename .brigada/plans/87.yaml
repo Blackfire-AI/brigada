@@ -64,8 +64,8 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-279-r1"
     rounds: 0
   - id: 280
     name: "push_retry"
