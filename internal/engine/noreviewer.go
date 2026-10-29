@@ -121,7 +121,7 @@ func noReviewerReasonTx(tx *sql.Tx, reviewFamily string, j *jobRow, entry bool) 
 		family = ""
 	}
 	if entry {
-		return noReviewerEntry(family), nil
+		return noReviewerEntry(family, reviewFamily), nil
 	}
 	return noReviewerWhy(family, reviewFamily), nil
 }
@@ -142,12 +142,18 @@ func noReviewerWhy(family, reviewFamily string) string {
 
 // noReviewerEntry is the needs-you line, and the notification's, for an
 // unservable review: what is missing and what the user can do about it.
-func noReviewerEntry(family string) string {
+// Where the family rule is the cause it is named with its setting
+// (issue #126), as noReviewerWhy names it.
+func noReviewerEntry(family, reviewFamily string) string {
 	if family == "" {
 		return "no reviewer: no agent offers review; offer an agent that does to the runner (--agent harness=…) or review by hand"
 	}
-	return "no reviewer: needs a reviewer of another family than the author (" + family +
+	why := "no reviewer: needs a reviewer of another family than the author (" + family +
 		"); offer an agent of another family to the runner (--agent harness=…) or review by hand"
+	if familyPrefer(reviewFamily) {
+		return why
+	}
+	return why + ", review.family=require"
 }
 
 // queuedReview is a queued review job of a task waiting for its review.
