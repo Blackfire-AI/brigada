@@ -95,7 +95,7 @@ tasks:
     base: "client_show"
     continue: "client_show"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-233"
     rounds: 1
   - id: 234
@@ -141,7 +141,7 @@ tasks:
     base: "init"
     continue: "init"
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 238
