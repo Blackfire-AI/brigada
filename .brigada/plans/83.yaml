@@ -137,8 +137,8 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-263"
     rounds: 0
   - id: 264
     name: "land_target_prequeue"
