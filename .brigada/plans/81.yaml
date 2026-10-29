@@ -130,7 +130,7 @@ tasks:
     base: "client_digest"
     continue: "client_digest"
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-236"
     rounds: 2
   - id: 237
