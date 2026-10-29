@@ -120,6 +120,25 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 			return err
 		}
 	}
+	// A settled task was live work its plan waited on (#133), and the
+	// release above may have ended a dependent held at the land gate —
+	// a hold with no job, which lets its plan close under "waits at a
+	// gate" — so the close runs now, after the releases moved every
+	// dependent, never between the records the loop above writes.
+	seenPlan := map[int64]bool{}
+	for _, id := range newLanded {
+		var plan int64
+		if err := tx.QueryRow("SELECT plan_id FROM tasks WHERE id = ?", id).Scan(&plan); err != nil {
+			return fmt.Errorf("read the plan of task %d: %w", id, err)
+		}
+		if seenPlan[plan] {
+			continue
+		}
+		seenPlan[plan] = true
+		if _, err := e.finishPlanIfClosedTx(tx, project, plan, id, 0, now); err != nil {
+			return err
+		}
+	}
 	// A landing the branch holds proves the environment the failed
 	// landings blamed (issue #116): their causes end, so a recurrence
 	// wakes anew.
@@ -154,13 +173,6 @@ func (e *Engine) settleLandedTx(tx *sql.Tx, taskID int64, commit string, unpushe
 		return false, fmt.Errorf("read task %d: %w", taskID, err)
 	}
 	if state != taskNeedsForeman {
-		// The record settles a done task whose landing was still to
-		// come — the live work that kept its plan open (#133) — so the
-		// close runs here: the record is the outcome it waited for. A
-		// plan already finished, or with work left, is left as it is.
-		if _, err := e.finishPlanIfClosedTx(tx, project, plan, taskID, 0, now); err != nil {
-			return changed, err
-		}
 		return changed, nil
 	}
 	// Only a parking by a failed landing moves: a task parked for any

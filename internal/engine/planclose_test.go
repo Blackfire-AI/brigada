@@ -152,6 +152,55 @@ func TestLandFailureParksUnderAnOpenPlan(t *testing.T) {
 	}
 }
 
+// TestTrailerSettlesBaseAndHoldsDependentAndCloses: the trailer path of
+// the settle. base is held at the land gate and its dependent, heavy
+// too, sits done with no landing record and no hold — the plan open on
+// #133's rule. base's trailer then shows on the default branch: the
+// record settles base and releases the dependent's landing, which the
+// heavy tier holds at the land gate — a hold with no job — and the
+// close runs after the release, the plan finishing with base landed
+// and the dependent named under "waits at a gate".
+func TestTrailerSettlesBaseAndHoldsDependentAndCloses(t *testing.T) {
+	e := newEnv(t)
+	e.set(map[string]string{SettingApprovalTiers: "heavy"})
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	res := e.createPlan([]PlanTask{
+		{Name: "base", Spec: "the base work", Tier: "heavy"},
+		{Name: "top", Spec: "the stacked work", Tier: "heavy", Deps: []string{"base"}},
+	})
+	base, top := res.Tasks[0].TaskID, res.Tasks[1].TaskID
+	e.runTaskToDone(base, author, reviewer)
+	e.runTaskToDone(top, author, reviewer)
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
+		t.Fatalf("plan state = %q, want active: top's landing is still to come", got)
+	}
+	if _, ok := e.eventPayloadOf(evPlanDone); ok {
+		t.Fatal("the plan closed done over a landing still to come")
+	}
+
+	// The detection reports base's trailer: the record clears base's
+	// hold and releases top's landing, which the tier holds at the gate.
+	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",
+		[]LandedCommit{{TaskID: base, Commit: "h1d1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ? AND state = 'held'", top); n != 1 {
+		t.Fatalf("top land holds = %d, want 1: the release held its landing at the gate", n)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planDone {
+		t.Fatalf("plan state = %q, want done: only a held task remains, and a hold lets the plan close", got)
+	}
+	p, ok := e.eventPayloadOf(evPlanDone)
+	if !ok {
+		t.Fatal("no plan_done event")
+	}
+	if !strings.Contains(p.Reason, fmt.Sprintf("landed: task %d base (main@h1d1)", base)) ||
+		!strings.Contains(p.Reason, fmt.Sprintf("waits at a gate: task %d top (", top)) {
+		t.Errorf("plan_done report = %q, want base landed and top named at the gate", p.Reason)
+	}
+}
+
 // TestLandGateHeldTaskAloneStillCloses: a plan whose only unsettled
 // task is held at the land gate closes as before, the task named under
 // "waits at a gate" — the hold is the user's to release, with no job
