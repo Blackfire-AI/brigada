@@ -5,9 +5,9 @@
 plan: 84
 title: "#131: the foreman reads only its checkout and its project's state; a read-only issue tool"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: needs_foreman
 created: 2026-10-29T16:22:24.777979Z
-updated: 2026-10-29T16:22:24.777979Z
+updated: 2026-10-29T16:25:17.890995Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
