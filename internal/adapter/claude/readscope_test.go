@@ -26,10 +26,13 @@ func readInput(path string) string {
 
 // TestReadScopeDeny covers the hook's verdicts: a file tool call is
 // refused unless every path it names stays inside the allowed root —
-// the reading checkout — however the path is spelled, and every other
-// shape of payload stands. The allowed-root rule is what the settings
-// carry, so an allow rule in the user's own settings changes nothing
-// here: the hook never sees one.
+// the reading checkout — however the path is spelled, and a call that
+// cannot be read into paths at all is refused too: the CLI treats any
+// exit other than 2 as non-blocking, so the hook fails closed. Only a
+// Grep or Glob with no path argument passes unjudged, for it searches
+// the working directory, the root itself. The allowed-root rule is
+// what the settings carry, so an allow rule in the user's own settings
+// changes nothing here: the hook never sees one.
 func TestReadScopeDeny(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "docs", "deep"), 0o755); err != nil {
@@ -90,10 +93,12 @@ func TestReadScopeDeny(t *testing.T) {
 		{"glob outside the root, absolute", root, hookJSON("Glob", root, `{"pattern":"`+outside+`/*.json"}`), true},
 		{"glob with a path outside the root", root, hookJSON("Glob", root, `{"pattern":"*.json","path":"`+outside+`"}`), true},
 		{"a relative path against a cwd outside the root", root, hookJSON("Read", outside, readInput("settings.json")), true},
-		{"a tool that is not a file tool", root, hookJSON("Task", root, `{"prompt":"read everything"}`), false},
-		{"a payload that is not JSON", root, []byte("not json"), false},
-		{"a payload that names no tool", root, []byte(`{"tool_input":{"file_path":"/etc/passwd"}}`), false},
-		{"a payload with no path argument", root, hookJSON("Read", root, `{}`), false},
+		{"a tool that is not a file tool", root, hookJSON("Task", root, `{"prompt":"read everything"}`), true},
+		{"a payload that is not JSON", root, []byte("not json"), true},
+		{"a payload that names no tool", root, []byte(`{"tool_input":{"file_path":"/etc/passwd"}}`), true},
+		{"a payload whose input is not an object", root, hookJSON("Read", root, `3`), true},
+		{"a Read with no path to judge", root, hookJSON("Read", root, `{}`), true},
+		{"a Glob with no path and a bare pattern", root, hookJSON("Glob", root, `{"pattern":"**/*.go"}`), false},
 	}
 	for _, tc := range cases {
 		reason, deny := ReadScopeDeny(tc.root, tc.payload)

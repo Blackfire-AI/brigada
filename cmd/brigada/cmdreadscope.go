@@ -20,7 +20,9 @@ import (
 // call when it reads outside --root: exit 2 blocks the tool call, with
 // the reason on stderr for the model to see, and exit 0 lets it
 // through. The decision is claude.ReadScopeDeny's; this is only its
-// plumbing.
+// plumbing. A payload that cannot even be read is refused the same way
+// — the CLI treats any exit other than 2 as non-blocking, so a broken
+// pipe is a blocked call, not an allowed one.
 func runReadScope(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := newFlagSet("readscope", "brigada readscope --root <dir>",
 		"The foreman session's read-scope hook; the session's settings run it, nobody by hand.")
@@ -38,7 +40,8 @@ func runReadScope(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	}
 	payload, err := io.ReadAll(stdin)
 	if err != nil {
-		return fail(stderr, fmt.Errorf("read the hook payload: %w", err))
+		fmt.Fprintln(stderr, "brigada: the hook payload cannot be read; refusing the call")
+		return 2
 	}
 	if reason, deny := claude.ReadScopeDeny(*root, payload); deny {
 		fmt.Fprintln(stderr, reason)

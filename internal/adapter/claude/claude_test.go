@@ -960,6 +960,16 @@ func TestForemanSettings(t *testing.T) {
 		if err := json.Unmarshal([]byte(settings), &doc); err != nil {
 			t.Fatalf("%s: the settings are not JSON: %v", name, err)
 		}
+		// The user's own settings, which a headless turn loads through
+		// --setting-sources user and an attach loads anyway, could
+		// switch every hook off with disableAllHooks; the session's own
+		// settings pin it back on, and outrank theirs.
+		if doc.DisableAllHooks {
+			t.Errorf("%s: the session settings do not pin disableAllHooks off: %s", name, settings)
+		}
+		if !strings.Contains(settings, `"disableAllHooks":false`) {
+			t.Errorf("%s: the settings JSON leaves disableAllHooks unsaid: %s", name, settings)
+		}
 		if doc.Hooks == nil || len(doc.Hooks.PreToolUse) != 1 {
 			t.Fatalf("%s: no PreToolUse hook: %s", name, settings)
 		}

@@ -12,6 +12,14 @@ package claude
 // settings, which an attach loads, can widen. The hook command is
 // brigada itself, the readscope subcommand, with the allowed root as
 // its one argument; cmd/brigada dispatches it.
+//
+// The hook fails closed: the CLI treats any PreToolUse exit other than
+// 2 as non-blocking, so an unreadable payload, one that cannot be
+// parsed, or a matched tool call with no path argument to judge is
+// refused, never waved through. The settings also pin
+// disableAllHooks to false — the user's own settings, loaded by an
+// attach and by a headless turn alike, could switch every hook off —
+// and the flag's settings outrank them.
 
 import (
 	"encoding/json"
@@ -34,16 +42,20 @@ const readScopeMatcherPattern = "^(Read|Grep|Glob)$"
 // foremanSettingsJSON renders the settings a foreman session runs under
 // (§4.1, §4.2 item 1): the read-scope hook on the file tools — the same
 // for a headless turn and for an attach — with the attach's status line
-// beside it when one is set. root is the session's allowed root, its
-// working directory: the project's reading checkout, never brigada's
-// own state, whose tokens and per-turn configs are not the foreman's to
-// read.
+// beside it when one is set, and disableAllHooks pinned to false: the
+// user's own settings, which both a headless turn (--setting-sources
+// user) and an attach load, could otherwise switch the hook off with a
+// single key, and the flag's settings outrank theirs. root is the
+// session's allowed root, its working directory: the project's reading
+// checkout, never brigada's own state, whose tokens and per-turn
+// configs are not the foreman's to read.
 func foremanSettingsJSON(root, statusLine string) (string, error) {
 	command, err := readScopeHookCommand(root)
 	if err != nil {
 		return "", err
 	}
 	settings := foremanSettings{
+		DisableAllHooks: false,
 		Hooks: &foremanHooks{
 			PreToolUse: []readScopeGroup{{
 				Matcher: readScopeMatcherPattern,
@@ -65,11 +77,13 @@ func foremanSettingsJSON(root, statusLine string) (string, error) {
 	return string(encoded), nil
 }
 
-// foremanSettings is the settings JSON a foreman session carries: the
-// read-scope hook always, the status line on an attach.
+// foremanSettings is the settings JSON a foreman session carries:
+// hooks switched on for the session whatever the user's own settings
+// say, the read-scope hook always, the status line on an attach.
 type foremanSettings struct {
-	Hooks      *foremanHooks       `json:"hooks,omitempty"`
-	StatusLine *statusLineSettings `json:"statusLine,omitempty"`
+	DisableAllHooks bool                `json:"disableAllHooks"`
+	Hooks           *foremanHooks       `json:"hooks,omitempty"`
+	StatusLine      *statusLineSettings `json:"statusLine,omitempty"`
 }
 
 // foremanHooks is the settings' hooks table; the read scope is a
@@ -127,10 +141,13 @@ func shellQuote(s string) string {
 
 // ReadScopeDeny decides one PreToolUse payload for the read scope: it
 // reports whether the call's path arguments stay inside root, and the
-// reason to refuse the call with when one does not. A payload that is
-// not JSON, names no tool or carries no path argument decides nothing —
-// there is no path to check — so the call stands; the hook's matcher
-// has already confined these decisions to Read, Grep and Glob.
+// reason to refuse the call with when one does not. It fails closed —
+// the CLI treats any exit other than 2 as non-blocking, so a payload
+// that is not JSON, names no tool, names a tool the matcher does not
+// match, or cannot be read into path arguments at all is refused: the
+// scope is a boundary, and what cannot be judged does not pass. The
+// one exception is a Grep or Glob with no path argument: they search
+// the working directory, which is the root itself.
 //
 // Each path argument is read the way the CLI would read it: absolute,
 // or against the payload's own working directory, with symlinks
@@ -140,14 +157,18 @@ func shellQuote(s string) string {
 func ReadScopeDeny(root string, payload []byte) (reason string, deny bool) {
 	var call hookCall
 	if json.Unmarshal(payload, &call) != nil || call.ToolName == "" {
-		return "", false
+		return "brigada: the call cannot be read against the read scope; refusing it", true
 	}
 	base := call.Cwd
 	if base == "" {
 		base = root
 	}
 	scope := resolveScopePath(root, root)
-	for _, arg := range readScopePaths(call.ToolName, call.ToolInput) {
+	paths, ok := readScopePaths(call.ToolName, call.ToolInput)
+	if !ok {
+		return fmt.Sprintf("brigada: the %s call's paths cannot be read against the read scope (%s); refusing it", call.ToolName, scope), true
+	}
+	for _, arg := range paths {
 		if arg == "" {
 			continue
 		}
@@ -178,25 +199,29 @@ type toolPathArgs struct {
 	Pattern      string `json:"pattern"`
 }
 
-// readScopePaths lists the path arguments one file tool call reads; the
-// tool decides which of its arguments are paths. A tool that is none of
-// the three — or an input that is not JSON — has none, and its call
-// stands.
-func readScopePaths(tool string, input json.RawMessage) []string {
+// readScopePaths lists the path arguments one file tool call reads, and
+// whether the call could be read at all: false refuses it. A tool the
+// matcher does not name, an input that is not a JSON object, and a Read
+// with no file to name are all unreadable — a Grep or a Glob with no
+// path is not, for it searches the working directory, the root itself.
+func readScopePaths(tool string, input json.RawMessage) ([]string, bool) {
 	if tool != "Read" && tool != "Grep" && tool != "Glob" {
-		return nil
+		return nil, false
 	}
 	var args toolPathArgs
-	if json.Unmarshal(input, &args) != nil {
-		return nil
+	if len(input) == 0 || json.Unmarshal(input, &args) != nil {
+		return nil, false
 	}
 	switch tool {
 	case "Read":
-		return []string{args.FilePath, args.NotebookPath}
+		if args.FilePath == "" && args.NotebookPath == "" {
+			return nil, false
+		}
+		return []string{args.FilePath, args.NotebookPath}, true
 	case "Grep":
-		return []string{args.Path}
+		return []string{args.Path}, true
 	default: // Glob: the pattern's literal head is a path too
-		return []string{args.Path, globLiteralHead(args.Pattern)}
+		return []string{args.Path, globLiteralHead(args.Pattern)}, true
 	}
 }
 

@@ -47,7 +47,8 @@ func TestReadScopeCommand(t *testing.T) {
 		{"a Read inside the checkout", readScopePayload("Read", filepath.Join(checkout, "README.md")), 0, ""},
 		{"a Read outside, the user's own settings", readScopePayload("Read", home), 2, "read scope"},
 		{"a Grep outside the checkout", fmt.Sprintf(`{"tool_name":"Grep","cwd":"/nowhere","tool_input":{"pattern":"token","path":%q}}`, neighbour), 2, "read scope"},
-		{"not a hook payload", "garbage", 0, ""},
+		{"not a hook payload", "garbage", 2, "read scope"},
+		{"a Read with no path to judge", readScopePayload("Read", ""), 2, "read scope"},
 	}
 	for _, tc := range cases {
 		var out, errb bytes.Buffer
@@ -65,9 +66,10 @@ func TestReadScopeCommand(t *testing.T) {
 	}
 }
 
-// TestReadScopeCommandRefusals: no root names nothing to guard, and the
-// command is dispatched from run's argument path, so it must parse
-// without touching stdin.
+// TestReadScopeCommandRefusals: no root names nothing to guard, the
+// command is dispatched from run's argument path (so it must parse
+// without touching stdin), and a payload that cannot even be read is a
+// blocked call, never an allowed one.
 func TestReadScopeCommandRefusals(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := runReadScope(context.Background(), nil, strings.NewReader(""), &out, &errb)
@@ -78,10 +80,18 @@ func TestReadScopeCommandRefusals(t *testing.T) {
 	if code != 2 || !strings.Contains(errb.String(), "positional") {
 		t.Errorf("stray argument: exit = %d, stderr = %q, want a usage error", code, errb.String())
 	}
-	// The dispatch itself: a bare readscope reaches the command (and
-	// stops at the usage error) rather than the unknown-command path.
 	errb.Reset()
 	if code := run(context.Background(), []string{"readscope"}, &out, &errb); code != 2 || !strings.Contains(errb.String(), "--root") {
 		t.Errorf("run(readscope): exit = %d, stderr = %q, want the readscope usage error", code, errb.String())
 	}
+	errb.Reset()
+	code = runReadScope(context.Background(), []string{"--root", t.TempDir()}, errReader{}, &out, &errb)
+	if code != 2 || !strings.Contains(errb.String(), "cannot be read") {
+		t.Errorf("an unreadable payload: exit = %d, stderr = %q, want the call blocked", code, errb.String())
+	}
 }
+
+// errReader is a stdin that fails, the way a broken pipe does.
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, os.ErrClosed }
