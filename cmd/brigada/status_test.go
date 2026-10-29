@@ -168,7 +168,7 @@ foreman report:
   nothing else needs you
 needs you:
 task #2 needs_foreman: should the sprocket be blue?
-task #4 reviewing: no reviewer: needs a reviewer of another family than the author (claude); offer an agent of another family to the runner (--agent harness=…) or review by hand, review.family=require
+task #4 reviewing: no reviewer: needs a reviewer of another family than the author (claude); offer an agent of another family to the runner (--agent harness=…) or review by hand
 plan #4 pending_approval
 foreman instructions (project #1): not configured
 plan_review instructions (project #1): not configured
@@ -201,7 +201,7 @@ foreman report:
   nothing else needs you
 needs you:
 task #2 needs_foreman: should the sprocket be blue?
-task #4 reviewing: no reviewer: needs a reviewer of another family than the author (claude); offer an agent of another family to the runner (--agent harness=…) or review by hand, review.family=require
+task #4 reviewing: no reviewer: needs a reviewer of another family than the author (claude); offer an agent of another family to the runner (--agent harness=…) or review by hand
 plan #4 pending_approval
 foreman instructions (project #1): not configured
 plan_review instructions (project #1): not configured

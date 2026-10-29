@@ -145,7 +145,7 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 					if onlyAuthor {
 						return fmt.Errorf("%w: %s", ErrNoReviewer, noReviewerAuthor)
 					}
-					return fmt.Errorf("%w: the author's family of %s is unknown (no work job of the branch, no known Co-Authored-By trailer) and no default_reviewer is configured", ErrNoReviewer, branch)
+					return fmt.Errorf("%w: the author's family of %s is unknown (no work job of the branch, no known Co-Authored-By trailer) and no default_reviewer is configured, review.family=require", ErrNoReviewer, branch)
 				}
 				source = ""
 			}
@@ -155,6 +155,21 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 			string(KindReview), fmtTime(now))
 		if err != nil {
 			return err
+		}
+		if len(cands) == 0 && family == "" && harness != "" && familyPrefer(e.cfg.Review.Family) {
+			// Under prefer the default reviewer is asked first, never
+			// alone (issue #126): with none of its harness ready, any
+			// ready review-class agent takes the review.
+			review.Harness = ""
+			if cands, err = eligibleAgentsTx(tx, &e.cfg, nil, 0, review,
+				string(KindReview), fmtTime(now)); err != nil {
+				return err
+			}
+			if len(cands) > 0 {
+				harness, source = "", ""
+			} else {
+				review.Harness = harness
+			}
 		}
 		if len(cands) == 0 {
 			onlyAuthor, err := onlyAuthorReviewerTx(tx, review)

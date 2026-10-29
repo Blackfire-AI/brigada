@@ -7,6 +7,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Review execution under `review.family` (issue #126): under `prefer` a re-review resumes the previous reviewer's own session whatever its family, the author's own agent included, while `require` keeps today's family check and every fresh fallback is unchanged. A review on the author's own agent runs in a fresh session of its own or resumes only its own earlier review, never the author's, and the next fix round still resumes the author's. The review, plan review and re-review prompts state the placement the lease made — cross-family, same-family, same-agent, or that the author's family is not known — instead of always claiming cross-family (review template 9, plan review 6, re-review 2). Under `prefer` a branch review of an unknown family whose default reviewer's harness has no ready agent goes to any ready review-class agent, a plan review retry that only the excluded reviewer could take holds the plan saying so, and require's refusal of an unknown family names `review.family=require`.
 - The foreman's file tools read only its checkout and its project's state (issue #131): the settings brigada writes for a headless turn and for attach confine `Read`, `Grep` and `Glob` to the reading checkout, subagents included, and no allow rule in the user's own settings lifts the refusal.
 - `scripts/land-ready.sh` waits for CI on the remote staging head, holds when no run appears within the grace period, and detects conflicting or unresolved PR mergeability (issue #128).
 

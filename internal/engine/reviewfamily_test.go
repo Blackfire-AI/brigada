@@ -229,8 +229,9 @@ func TestPreferBranchReviewPlacedWithoutAFamily(t *testing.T) {
 		e, _ := setup(t)
 		e.eng.cfg.Review.Family = ReviewFamilyRequire
 		_, err := e.reviewBranch("feature/x")
-		if !errors.Is(err, ErrNoReviewer) || !strings.Contains(err.Error(), "no default_reviewer is configured") {
-			t.Fatalf("error = %v, want today's refusal naming the missing default reviewer", err)
+		if !errors.Is(err, ErrNoReviewer) || !strings.Contains(err.Error(), "no default_reviewer is configured") ||
+			!strings.Contains(err.Error(), "review.family=require") {
+			t.Fatalf("error = %v, want today's refusal naming the missing default reviewer and review.family=require", err)
 		}
 		if n := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'review'"); n != 0 {
 			t.Errorf("%d review jobs queued by a refused review", n)

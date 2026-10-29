@@ -37,10 +37,22 @@ const (
 // completion.
 func changesRound(t *testing.T, review func(*Completion)) *reReviewFixture {
 	t.Helper()
-	e := newEnv(t)
+	return changesRoundWith(t, nil, "google", review)
+}
+
+// changesRoundWith is changesRound with the engine's config adjusted by
+// cfg (nil keeps the defaults) and the reviewer of reviewerFamily.
+func changesRoundWith(t *testing.T, cfg func(*Config), reviewerFamily string, review func(*Completion)) *reReviewFixture {
+	t.Helper()
+	var e *env
+	if cfg != nil {
+		e = newEnvCfg(t, cfg)
+	} else {
+		e = newEnv(t)
+	}
 	f := &reReviewFixture{e: e}
 	f.author = e.agented("author", "anthropic", "implement")
-	f.reviewer = e.agented("reviewer", "google", "review")
+	f.reviewer = e.agented("reviewer", reviewerFamily, "review")
 	e.submit(e.work())
 	g := e.authorLease(f.author)
 	first := headResult("task/1-1", "added the thing", "h1")
@@ -294,10 +306,12 @@ func TestReReviewIsFreshWhenTheReviewerCools(t *testing.T) {
 	f.wantFresh("is cooling until")
 }
 
-// TestReReviewFamilyRuleStillApplies: a fix round whose author is now of
-// the reviewer's family cannot be re-reviewed by it.
+// TestReReviewFamilyRuleStillApplies: under review.family=require a fix
+// round whose author is now of the reviewer's family cannot be
+// re-reviewed by it. (Under prefer it can: see
+// TestPreferReReviewResumesASameFamilyReviewer.)
 func TestReReviewFamilyRuleStillApplies(t *testing.T) {
-	f := changesRound(t, nil)
+	f := changesRoundWith(t, func(c *Config) { c.Review.Family = ReviewFamilyRequire }, "google", nil)
 	f.e.exec("UPDATE agents SET family = 'google' WHERE id = ?", f.e.agentOf(f.author))
 	f.e.agented("other", "moonshot", "review")
 	f.fixDone("h2")

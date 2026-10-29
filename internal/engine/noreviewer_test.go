@@ -89,7 +89,7 @@ func TestReviewUnservable(t *testing.T) {
 }
 
 const wantNoReviewer = "no reviewer: needs a reviewer of another family than the author (anthropic); " +
-	"offer an agent of another family to the runner (--agent harness=…) or review by hand, review.family=require"
+	"offer an agent of another family to the runner (--agent harness=…) or review by hand"
 
 // needsYouTask returns the task's needs-you entry, if any.
 func (e *env) needsYouTask(task int64) (NeedsYouItem, bool) {
