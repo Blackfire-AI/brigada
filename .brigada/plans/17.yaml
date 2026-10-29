@@ -16,8 +16,10 @@ updated: 2026-10-20T17:33:59.686701Z
 # States are the engine's (§6.1), rounds the fix and review rounds
 # spent (§7), question the worker's open question (§3), when it has one.
 # Optional tier (light, standard, heavy) and effort (low, medium, high, max)
-# describe the model needed and how hard it should think (§6.1); caps
-# override the task's fix_rounds, review_rounds and restart budgets (§14).
+# describe the model needed and how hard it should think (§6.1);
+# review_tier and review_effort do the same for its reviews (§7, §8); caps
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1);
+# skills name the project's skills the task carries, in order (§5.10).
 tasks:
   - id: 56
     name: "dsh-argv"
