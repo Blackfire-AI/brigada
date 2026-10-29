@@ -5,9 +5,9 @@
 plan: 87
 title: "CI green on brigada/landed; #132 land check = CI; #133 parked tasks; #127 design"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: active
 created: 2026-10-29T21:13:44.852735Z
-updated: 2026-10-29T21:45:19.018907Z
+updated: 2026-10-29T21:46:11.871444Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -134,5 +134,16 @@ tasks:
     effort: medium
     review_tier: heavy
     state: pending
+    branch: ""
+    rounds: 0
+  - id: 293
+    name: "cicheck_fail_closed"
+    title: "#132 follow-up: the CI drift reader fails closed on unnamed or unsupported pre-test steps"
+    class: "implement"
+    deps: ["land_check"]
+    base: "land_check"
+    tier: light
+    effort: low
+    state: running
     branch: ""
     rounds: 0
