@@ -30,7 +30,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: running
+    state: done
     branch: "brigada/task-270"
     rounds: 1
   - id: 271
