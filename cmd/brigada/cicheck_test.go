@@ -121,7 +121,7 @@ func buildSteps(workflow string) ([]ciStep, error) {
 		if step.uses && step.name == "" && step.run == "" {
 			continue
 		}
-		if step.run == "" && step.name != "shellcheck" {
+		if (step.run == "" && step.name != "shellcheck") || strings.Contains(step.run, "${{") {
 			return nil, fmt.Errorf("unsupported build step %q before test; update the test", step.name)
 		}
 		if step.run != "" {
