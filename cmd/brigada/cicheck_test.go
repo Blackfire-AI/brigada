@@ -12,7 +12,10 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
-type ciStep struct{ name, run string }
+type ciStep struct {
+	name, run string
+	uses      bool
+}
 
 // buildSteps reads the workflow's build job, including steps after test so
 // duplicate test steps and unsupported multiline runs cannot go unnoticed.
@@ -64,7 +67,9 @@ func buildSteps(workflow string) ([]ciStep, error) {
 					return nil, fmt.Errorf("multiline run in build step %q; update the test", steps[len(steps)-1].name)
 				}
 			}
-			if !strings.HasPrefix(field, "name: ") && !strings.HasPrefix(field, "run:") && !strings.HasPrefix(field, "uses: ") {
+			if strings.HasPrefix(field, "uses: ") {
+				steps[len(steps)-1].uses = true
+			} else if !strings.HasPrefix(field, "name: ") && !strings.HasPrefix(field, "run:") {
 				return nil, fmt.Errorf("unsupported build step %q; update the test", strings.TrimSpace(field))
 			}
 			continue
@@ -79,6 +84,9 @@ func buildSteps(workflow string) ([]ciStep, error) {
 			steps[len(steps)-1].run = strings.TrimSpace(strings.TrimPrefix(line, "        run:"))
 			if steps[len(steps)-1].run == "" {
 				return nil, fmt.Errorf("multiline run in build step; update the test")
+			}
+			if strings.HasPrefix(line, "        ") && !strings.HasPrefix(line, "        name:") && !strings.HasPrefix(line, "        run:") && !strings.HasPrefix(line, "        #") && strings.TrimSpace(line) != "" {
+				return nil, fmt.Errorf("unsupported build step %q; update the test", steps[len(steps)-1].name)
 			}
 		}
 	}
@@ -110,10 +118,10 @@ func buildSteps(workflow string) ([]ciStep, error) {
 	}
 	pre := 0
 	for _, step := range steps[:testIndex] {
-		if step.name == "" && step.run == "" {
-			return nil, fmt.Errorf("unsupported build step %q before test; update the test", step.name)
+		if step.uses && step.name == "" && step.run == "" {
+			continue
 		}
-		if step.name != "shellcheck" && step.run == "" {
+		if step.run == "" && step.name != "shellcheck" {
 			return nil, fmt.Errorf("unsupported build step %q before test; update the test", step.name)
 		}
 		if step.run != "" {
@@ -147,7 +155,7 @@ func ciCheckDrift(steps []ciStep, check string) error {
 }
 
 func TestCICheckDrift(t *testing.T) {
-	base := []ciStep{{"gofmt", `test -z "$(gofmt -l .)"`}, {"shellcheck", "shellcheck install.sh"}, {"guard", "go run ./internal/tools/guard"}, {"vet", "go vet ./..."}, {"test", "go test ./..."}}
+	base := []ciStep{{name: "gofmt", run: `test -z "$(gofmt -l .)"`}, {name: "shellcheck", run: "shellcheck install.sh"}, {name: "guard", run: "go run ./internal/tools/guard"}, {name: "vet", run: "go vet ./..."}, {name: "test", run: "go test ./..."}}
 	check := `test -z "$(gofmt -l .)" && go run ./internal/tools/guard && go vet ./... && go test ./...`
 	modified := func(f func([]ciStep) []ciStep) []ciStep { return f(append([]ciStep(nil), base...)) }
 	cases := []struct {
@@ -167,7 +175,7 @@ func TestCICheckDrift(t *testing.T) {
 		{"extra command", base, check + " && true", false},
 		{"test not last", base, strings.Replace(check, "go vet ./... && go test ./...", "go test ./... && go vet ./...", 1), false},
 		{"new CI step", modified(func(s []ciStep) []ciStep {
-			return append(append(s[:4:4], ciStep{"staticcheck", "staticcheck ./..."}), s[4:]...)
+			return append(append(s[:4:4], ciStep{name: "staticcheck", run: "staticcheck ./..."}), s[4:]...)
 		}), check, false},
 		{"changed CI gofmt", modified(func(s []ciStep) []ciStep { s[0].run = "gofmt -w ."; return s }), check, false},
 		{"shellcheck removed", modified(func(s []ciStep) []ciStep { return append(s[:1:1], s[2:]...) }), check, true},
@@ -228,6 +236,14 @@ func TestBuildStepsUnnamedRun(t *testing.T) {
 				t.Fatalf("got %v, want error containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestBuildStepsUnsupportedPreTestShape(t *testing.T) {
+	const workflow = "jobs:\n  build:\n    steps:\n      - name: setup\n        run: ${{ matrix.command }}\n      - name: test\n        run: go test ./...\n"
+	_, err := buildSteps(workflow)
+	if err == nil || !strings.Contains(err.Error(), "setup") {
+		t.Fatalf("got %v, want error naming unsupported step setup", err)
 	}
 }
 
