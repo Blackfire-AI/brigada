@@ -7,6 +7,8 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Documented editable role instructions, task skills, their import and snapshot rules, and the diff/reset commands (issues #119 and #117). Enabled the documentation content verifier.
+
 - Embedded default role instructions and task-shape skills for future prompt configuration. Each default skill now carries a concrete numbered procedure for its task shape (at least four steps), and every shipped version's texts are archived under `internal/defaults/versions/<ver>/`, retrievable by version for the role texts and by version and skill name for the skills, so a three-way diff can rebuild the exact text a file was generated from; a test holds the current version's archive equal to the live defaults.
 
 - The store holds per-role instruction texts — foreman, plan_review, worker and reviewer — each with its source, settings version and digest (schema 0064). The migration seeds every project's rows from the embedded defaults with the provenance 'generated from <version>, by upgrade'; a project with an existing `instructions` setting keeps it as its worker text and gains the other three roles. The engine sets, imports and reads a role's text: bounded at 8192 bytes of UTF-8 with no NUL, refused with the role, size and limit named and never truncated, in three states — not configured, empty by choice, file. An import records the imported provenance and its hash as the settings version, and a changed import over a still-imported value applies; a local override wins over the file and an empty import unsets the role.
