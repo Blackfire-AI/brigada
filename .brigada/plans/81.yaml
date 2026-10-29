@@ -176,8 +176,8 @@ tasks:
     continue: "client"
     effort: medium
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-240"
+    rounds: 1
   - id: 241
     name: "docs_verify"
     title: "Docs verifier test and generated operator content"
