@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Blackfire-AI/brigada/internal/defaults"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
@@ -220,12 +219,9 @@ func TestTaskSubmitEndpoint(t *testing.T) {
 
 	// The queued job carries the harness constraint, and the engine
 	// composed its prompt from the template plus the spec verbatim
-	// (§1.4, §5.3), the default worker text as the project
-	// instructions; a runner may lease it (§8).
-	live, err := defaults.LiveRoleText(engine.RoleWorker)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// (§1.4, §5.3) — no instructions section, for the project has no
+	// worker text (§5.9 'Three states, no hidden fallback'); a runner
+	// may lease it (§8).
 	_, _, jobBody := e.do(http.MethodGet, fmt.Sprintf("/v1/jobs/%d", res.JobID), "root", "", nil)
 	job := decode[struct {
 		Key     string   `json:"key"`
@@ -237,7 +233,7 @@ func TestTaskSubmitEndpoint(t *testing.T) {
 	if job.Key != fmt.Sprintf("task:%d", res.TaskID) || job.Status != "queued" {
 		t.Errorf("job = %+v, want queued on the task's key", job)
 	}
-	if job.Prompt != prompt.ComposeWorkerPrompt("the spec", "go test ./...", "", prompt.WithInstructions(live)) || !strings.Contains(job.Prompt, "<task-spec>\nthe spec\n</task-spec>") {
+	if job.Prompt != prompt.ComposeWorkerPrompt("the spec", "go test ./...", "") || !strings.Contains(job.Prompt, "<task-spec>\nthe spec\n</task-spec>") {
 		t.Errorf("job prompt = %q, want the engine's composed prompt with the spec verbatim", job.Prompt)
 	}
 	if job.Harness != "claude" {

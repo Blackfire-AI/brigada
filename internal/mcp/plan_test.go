@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
-	"github.com/Blackfire-AI/brigada/internal/defaults"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
 	"github.com/Blackfire-AI/brigada/internal/store"
@@ -112,11 +111,7 @@ func TestServeCallPlanCreate(t *testing.T) {
 			t.Errorf("plan_create text = %q, want it to name %s", text, want)
 		}
 	}
-	live, err := defaults.LiveRoleText(engine.RoleWorker)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if jobPrompt != prompt.ComposeWorkerPrompt("Fix the frobnicator.\nKeep its tests whole.", "go test ./...", "", prompt.WithInstructions(live)) {
+	if jobPrompt != prompt.ComposeWorkerPrompt("Fix the frobnicator.\nKeep its tests whole.", "go test ./...", "") {
 		t.Errorf("job prompt = %q, want the engine's composed template plus the spec verbatim", jobPrompt)
 	}
 	assertOneActivePlan(t, e, plan, task, job)

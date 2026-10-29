@@ -155,8 +155,8 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 		}
 		// A standalone review has no task snapshot (§5.9): it uses the
 		// role texts the engine resolves now — the project's row, else
-		// the shipped default, as a task resolving now would record —
-		// with the worker text as the project's current conventions.
+		// none, as a task resolving now would record — with the worker
+		// text as the project's current conventions.
 		worker, err := roleInstructionTx(tx, in.project, "", RoleWorker)
 		if err != nil {
 			return err

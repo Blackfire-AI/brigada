@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Blackfire-AI/brigada/internal/defaults"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
@@ -74,14 +73,12 @@ func TestCreatePlanOneTask(t *testing.T) {
 		t.Errorf("job status = %q, want queued", status)
 	}
 	spec := "Fix the frobnicator.\nKeep its tests whole."
-	live, err := defaults.LiveRoleText(RoleWorker)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p := e.str("SELECT prompt FROM jobs WHERE id = ?", res.JobID); p != prompt.ComposeWorkerPrompt(spec, "go test ./...", "", prompt.WithInstructions(live)) {
+	if p := e.str("SELECT prompt FROM jobs WHERE id = ?", res.JobID); p != prompt.ComposeWorkerPrompt(spec, "go test ./...", "") {
 		t.Errorf("job prompt = %q, want the composed template plus the spec verbatim", p)
 	} else if !strings.Contains(p, "<task-spec>\n"+spec+"\n</task-spec>") {
 		t.Errorf("job prompt = %q, want the spec verbatim between delimiters", p)
+	} else if strings.Contains(p, "<worker-instructions>") {
+		t.Errorf("job prompt of an unconfigured worker carries an instructions section:\n%s", p)
 	}
 	// The submit's task_spec message rode along (§9).
 	if got := e.int("SELECT COUNT(*) FROM messages WHERE kind = 'task_spec' AND event_id = (SELECT id FROM events WHERE job_id = ?)", res.JobID); got != 1 {
