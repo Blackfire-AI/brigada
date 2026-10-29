@@ -660,7 +660,7 @@ A project has one instruction text per role (foreman, plan_review, worker and re
 - **Which text wins.** A local override (`project set instructions.<role>=…`) beats the last imported file. A pulled change to a file applies only at the next explicit `brigada project import`: over a text that is still the previous import's it applies; over a local override it does not, and import prints a conflict with both texts (to take the file's text, set it with `project set instructions.<role>=@<file>`).
 - **Changed since import.** `project show` and `status` compare the files and skills on disk with the last import and flag each role file or skill that is changed, added or removed. Nothing stored changes until you import again.
 - A task copies the text when it is created, so changing it later does not alter existing tasks.
-- The foreman's own turns do not get the text injected; the foreman reads it through `status` before it plans.
+- Each role's text goes into its own prompts: a foreman turn gets `foreman.md` after its contract, a plan review gets `plan_review.md` and `foreman.md` (the convention the plan author followed), workers get `worker.md`, and reviews get `reviewer.md`. The foreman can also read the worker's text through `status` before it plans.
 - **In `status` and `project show`.** Each role prints its state (`not configured`, `empty by choice` or `file`), the file it reads, its size, its SHA-256 digest, the defaults version it was generated from, whether it was edited, and whether the file changed since import; each skill prints its description, digest and how many tasks used it, and files or skills added or removed on disk are named.
 
 ### Tuning how brigada's agents judge
