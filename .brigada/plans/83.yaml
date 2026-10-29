@@ -5,9 +5,9 @@
 plan: 83
 title: "Bring role instructions and task skills to design §5.9/§5.10 (#119, #117); fix #128, #127, #129"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-10-29T14:08:29.976259Z
-updated: 2026-10-29T14:14:26.761479Z
+updated: 2026-10-29T14:22:01.864172Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -110,9 +110,9 @@ tasks:
     name: "land_target_status"
     title: "#127 (2/3): status shows the land target's lag behind the default branch"
     class: "implement"
-    deps: ["land_target"]
-    base: "land_target"
-    continue: "land_target"
+    deps: ["land_target_prequeue"]
+    base: "land_target_prequeue"
+    continue: "land_target_prequeue"
     effort: medium
     state: pending
     branch: ""
@@ -136,6 +136,19 @@ tasks:
     base: ""
     tier: light
     effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 264
+    name: "land_target_prequeue"
+    title: "#127 (1b/3): before a plan's first task, the land target is brought up to date; holds for gate and conflict"
+    class: "implement"
+    deps: ["land_target"]
+    base: "land_target"
+    continue: "land_target"
+    tier: heavy
+    effort: medium
+    review_tier: heavy
     state: pending
     branch: ""
     rounds: 0
