@@ -5,9 +5,9 @@
 plan: 95
 title: "#126 finish: contributor Review sections follow review.family; close the issue"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-30T20:09:20.033833Z
-updated: 2026-10-30T20:14:12.460995Z
+updated: 2026-10-30T20:24:24.687083Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
