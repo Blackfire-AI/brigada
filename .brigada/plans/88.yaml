@@ -87,9 +87,9 @@ tasks:
     deps: ["family_visibility_docs"]
     base: "family_visibility_docs"
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-291-r1"
-    rounds: 0
+    rounds: 1
   - id: 292
     name: "family_placement_v2"
     title: "#126 (1/4): review.family prefer|require: the engine config key and the reviewer placement"
