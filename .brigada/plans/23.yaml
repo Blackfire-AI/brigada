@@ -5,9 +5,9 @@
 plan: 23
 title: "Backlog after plan 22: #39 gaps, #41, #36, #40, #44, #43, #45, #34"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-21T13:18:36.059521Z
-updated: 2026-10-30T12:55:44.615423Z
+updated: 2026-10-30T22:01:20.732672Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -28,7 +28,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-83"
     rounds: 1
   - id: 84
@@ -40,7 +40,7 @@ tasks:
     continue: "prep-classify"
     tier: heavy
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-84"
     rounds: 0
   - id: 85
@@ -51,7 +51,7 @@ tasks:
     base: "fix-round-retry"
     continue: "fix-round-retry"
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-85"
     rounds: 0
   - id: 86
@@ -93,7 +93,7 @@ tasks:
     base: "hardcap-lease"
     tier: heavy
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-89"
     rounds: 0
   - id: 90
