@@ -11,7 +11,12 @@ import (
 	"strings"
 )
 
-// Version identifies the brigada version these defaults ship with.
+// Version names the newest directory of the archive, the version of the
+// current defaults. It is not the brigada binary's version
+// (internal/version), which generated headers carry: a header's version
+// selects an archive directory when it names one, and its digest verifies
+// the text found there; when no directory matches, [FindByDigest] finds
+// the text by digest alone.
 const Version = "1.0.0"
 
 // Texts holds the role texts and skill files at their package-relative paths.
@@ -141,6 +146,22 @@ func ArchiveText(version, name string) (string, error) {
 		return "", fmt.Errorf("version %s holds no %q", version, name)
 	}
 	return string(b), nil
+}
+
+// FindByDigest returns the archived text of a role or skill file (name as
+// for [ArchiveText]) whose digest is digest, from any shipped version,
+// newest first, and the version it was found in.
+func FindByDigest(name, digest string) (text, version string, ok bool) {
+	versions, err := Versions()
+	if err != nil {
+		return "", "", false
+	}
+	for i := len(versions) - 1; i >= 0; i-- {
+		if t, err := ArchiveText(versions[i], name); err == nil && Digest(t) == digest {
+			return t, versions[i], true
+		}
+	}
+	return "", "", false
 }
 
 // ArchiveRoleText returns a shipped version's archived text of a role.
