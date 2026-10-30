@@ -53,9 +53,9 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: running
     branch: "brigada/task-308"
-    rounds: 1
+    rounds: 2
   - id: 310
     name: "skills_dir_default"
     title: "#146: import reads skills under the default skills_dir when project.yaml names no key"
