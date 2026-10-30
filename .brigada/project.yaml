@@ -9,3 +9,4 @@ instructions:
   plan_review: .brigada/instructions/plan_review.md
   worker: .brigada/instructions/worker.md
   reviewer: .brigada/instructions/reviewer.md
+skills_dir: .brigada/skills
