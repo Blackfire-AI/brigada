@@ -47,10 +47,11 @@ func (r landRetryRefusal) Error() string { return r.reason }
 // environment failure, with no landing record. The task returns to done
 // — off the needs-you queue, and off its environment cause the way a
 // restart takes it off (the cause's episode ends once no task it parked
-// is still parked) — and the land rule runs as for any done task: the
-// land gate and its approval rules, land_ready (the grant never skips
-// it) and the push gate all apply. No gate is passed and no restart is
-// spent.
+// is still parked) — releasing, as any finish does, the dependents that
+// waited on it (§6.1): a pending one's work job is queued here. The land
+// rule then runs as for any done task: the land gate and its approval
+// rules, land_ready (the grant never skips it) and the push gate all
+// apply. No gate is passed and no restart is spent.
 //
 // The outcomes are four. queued: the land job is submitted, and the
 // land_retried event names it. held: a land-gate rule held the task, the
@@ -212,13 +213,20 @@ func landRetryablePush(p eventPayload) bool {
 }
 
 // retryLandingTx returns an eligible task to done and runs the land rule
-// on it (#133), recording the outcome. The rule's empty outcome cannot
-// follow the eligibility checks; it fails the transaction rather than
-// leave the task done with nothing queued.
+// on it (#133), recording the outcome. The return to done is a finish,
+// with the dependents' release a finish performs (§6.1,
+// releaseDependentsTx): a dependent added while the task was parked —
+// pending behind it — gets its work job here, the one scheduling path
+// that frees waiting work, so the retry never leaves it stranded. The
+// rule's empty outcome cannot follow the eligibility checks; it fails
+// the transaction rather than leave the task done with nothing queued.
 func (e *Engine) retryLandingTx(tx *sql.Tx, project, taskID int64, now time.Time) (LandRetryResult, error) {
 	if _, err := tx.Exec(`UPDATE tasks SET state = ?, land_env_cause = '', updated_at = ? WHERE id = ?`,
 		taskDone, fmtTime(now), taskID); err != nil {
 		return LandRetryResult{}, fmt.Errorf("return task %d to done: %w", taskID, err)
+	}
+	if err := e.releaseDependentsTx(tx, project, taskID, now); err != nil {
+		return LandRetryResult{}, err
 	}
 	r, err := e.landRuleTx(tx, taskID, now)
 	if err != nil {
