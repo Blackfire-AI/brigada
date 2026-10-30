@@ -214,59 +214,88 @@ func TestNonBusyErrorIsNotRetried(t *testing.T) {
 }
 
 // TestConcurrentSweepsDetectOneSuspension covers the commit bookkeeping
-// under concurrency (sweepTxMu): several sweeps run at once past a
-// suspension on a file-backed store — many pooled connections, real
-// interleaving — and they serialize through the bookkeeping, so the
-// suspension is detected once, its deadline shift applied once and one
-// engine_suspended event lands. Without the serialization a sweep that
-// begins behind a just-committed one reads the pre-commit tick — the
-// commit's write lock is gone before its tick is recorded — detects the
-// same suspension again and shifts the deadlines twice; a rollback can
-// also drop a committed tick. The counts below are invariants of the
-// serialization, whatever the interleaving.
+// under concurrency, with the interleaving driven rather than raced: the
+// afterTxCommit hook parks the first sweep between its commit and its
+// tick's recording — the window where the store's write lock is already
+// gone — and a second sweep runs at that window on a file-backed store,
+// where pooled connections make the concurrency real. The serialized
+// bookkeeping holds the second sweep until the first's tick is recorded,
+// so the suspension is detected once and the cap clock shifted once;
+// without the serialization the second sweep reads the pre-commit tick,
+// detects the same suspension again and shifts the deadlines twice. The
+// parked world cannot finish the second sweep, so the wait below always
+// picks the right branch: no flake in either world, and the assertions
+// fail outright in the unserialized one.
 func TestConcurrentSweepsDetectOneSuspension(t *testing.T) {
 	e := newEnvAt(t, filepath.Join(t.TempDir(), "store.db"), nil)
 	e.submit(e.work())
 	g := e.leaseAny(e.runner1)
 	e.mustSweep() // a tick before the sleep: the suspension is a gap from here
 	before := e.str("SELECT first_leased FROM jobs WHERE id = ?", g.JobID)
-	e.clock.Advance(2 * time.Hour) // the host sleeps: every sweep behind this sees the jump
+	e.clock.Advance(2 * time.Hour) // the host sleeps: the next sweep sees the jump
 
-	const n = 8
-	start := make(chan struct{})
-	errs := make(chan error, n)
-	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			if _, err := e.eng.Sweep(e.ctx); err != nil {
-				errs <- err
-			}
-		}()
+	// The first committing sweep parks between its commit and the
+	// recording of its tick: provably committed, provably unrecorded.
+	parked := make(chan struct{})
+	release := make(chan struct{})
+	aDone := make(chan error, 1)
+	var first sync.Once
+	e.eng.afterTxCommit = func() {
+		first.Do(func() {
+			close(parked)
+			<-release
+		})
 	}
-	close(start)
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		t.Fatalf("a concurrent sweep failed: %v", err)
+	go func() {
+		_, err := e.eng.Sweep(e.ctx)
+		aDone <- err
+	}()
+	<-parked
+
+	// The second sweep runs in the window. It may finish there only when
+	// the bookkeeping does not serialize — the regression — and it can
+	// never finish there when it does, so the timeout branch is the
+	// serialized world's certain path.
+	bDone := make(chan error, 1)
+	go func() {
+		_, err := e.eng.Sweep(e.ctx)
+		bDone <- err
+	}()
+	select {
+	case err := <-bDone: // not serialized: the second sweep slipped past the parked one
+		close(release)
+		if err != nil {
+			t.Fatalf("the second sweep, unserialized, failed: %v", err)
+		}
+		if err := <-aDone; err != nil {
+			t.Fatalf("the first sweep failed: %v", err)
+		}
+	case <-time.After(2 * time.Second): // serialized: the second sweep waits for the tick
+		close(release)
+		if err := <-aDone; err != nil {
+			t.Fatalf("the first sweep failed: %v", err)
+		}
+		if err := <-bDone; err != nil {
+			t.Fatalf("the second sweep failed: %v", err)
+		}
 	}
 	if count := e.int("SELECT COUNT(*) FROM events WHERE kind = ?", evEngineSuspended); count != 1 {
-		t.Fatalf("engine_suspended events = %d, want the one detection: the sweeps serialize through the commit bookkeeping", count)
+		t.Fatalf("engine_suspended events = %d, want the one detection: a sweep behind a committed, unrecorded tick re-detected the suspension", count)
 	}
-	first, err := parseTime(before)
+	firstAt, err := parseTime(before)
 	if err != nil {
 		t.Fatalf("first_leased %q: %v", before, err)
 	}
-	if want := fmtTime(first.Add(2 * time.Hour)); e.str("SELECT first_leased FROM jobs WHERE id = ?", g.JobID) != want {
-		t.Fatalf("first_leased = %q, want %q: the sleep shifted the cap clock once, not once per concurrent sweep",
+	if want := fmtTime(firstAt.Add(2 * time.Hour)); e.str("SELECT first_leased FROM jobs WHERE id = ?", g.JobID) != want {
+		t.Fatalf("first_leased = %q, want %q: the sleep shifted the cap clock once, not once per sweep behind the window",
 			e.str("SELECT first_leased FROM jobs WHERE id = ?", g.JobID), want)
 	}
-	// The recorded tick is the last committed sweep's, so the gap is
-	// spent: a further sweep, with the engine awake, suspends nothing.
+	// The recorded tick is the committed sweep's, so the gap is spent: a
+	// further sweep with the engine awake suspends nothing, and a tick
+	// the settlement lost would leave the gap open for it to re-detect.
 	e.clock.Advance(time.Minute)
+	e.mustSweep()
 	if count := e.int("SELECT COUNT(*) FROM events WHERE kind = ?", evEngineSuspended); count != 1 {
-		t.Fatalf("engine_suspended events after a wakeful tick = %d, want still the one: a committed tick was lost", count)
+		t.Fatalf("engine_suspended events after a wakeful sweep = %d, want still the one: a committed tick was lost", count)
 	}
 }

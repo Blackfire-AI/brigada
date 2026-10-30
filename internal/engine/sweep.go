@@ -118,11 +118,28 @@ func (e *Engine) stageSweep(tx *sql.Tx, now time.Time) {
 	e.sweepMu.Unlock()
 }
 
+// lockSweepTx takes the write transactions' serialization (sweepTxSem)
+// for ctx's caller, giving up with the context instead of waiting
+// without bound: the call's own deadline still bounds its whole wait.
+func (e *Engine) lockSweepTx(ctx context.Context) error {
+	select {
+	case e.sweepTxSem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// unlockSweepTx returns the write transactions' serialization.
+func (e *Engine) unlockSweepTx() {
+	<-e.sweepTxSem
+}
+
 // commitStagedSweep records the tick tx staged, when the staging is still
 // its: the commit is what makes a sweep's work — its tick included —
 // real. The whole check-and-record sits under one hold of sweepMu, and
-// the write transactions themselves serialize through it
-// (mirroredStore.Update holds sweepTxMu over the transaction and its
+// the write transactions themselves serialize through their settlement
+// (mirroredStore.Update holds sweepTxSem over the transaction and its
 // settlement), so no later sweep's tick can slip between the commit and
 // this recording and be lost to it, and no older tick can overwrite a
 // newer one: each committed tick lands in order, and a sweep that rolls

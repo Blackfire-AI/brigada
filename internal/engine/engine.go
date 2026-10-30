@@ -360,6 +360,13 @@ type Engine struct {
 	// real lock past the busy timeout.
 	faultBusyTx func() error
 
+	// afterTxCommit, when set by a test, runs after a write transaction
+	// committed but before its sweep tick is recorded: it holds the
+	// commit-to-bookkeeping window open, so a concurrent sweep's place in
+	// the serialization is tested by driving the interleaving, not by
+	// racing for it.
+	afterTxCommit func()
+
 	// sweepMu guards lastSweep, the wall-clock time of the previous sweep
 	// tick (§13): the suspension check reads the gap from it, and engine
 	// calls may sweep concurrently. It guards the staged tick too: the
@@ -370,16 +377,19 @@ type Engine struct {
 	stagedTx    *sql.Tx   // the transaction whose sweep staged a tick
 	stagedSweep time.Time // the tick it staged
 
-	// sweepTxMu serializes the engine's write transactions through their
-	// commit bookkeeping (§13): every engine write begins with a sweep,
-	// and a sweep's tick is recorded only after its transaction commits —
-	// after the store's write lock is already gone — so the next
-	// transaction's sweep must wait for that recording, not only for the
-	// lock, or two sweeps behind one suspension would both read the
-	// pre-commit tick, detect the suspension twice and shift its
-	// deadlines twice. Views wait on nothing: readers hold no write lock
-	// and no tick.
-	sweepTxMu sync.Mutex
+	// sweepTxSem serializes the engine's write transactions through their
+	// commit bookkeeping (§13), one holder at a time: every engine write
+	// begins with a sweep, and a sweep's tick is recorded only after its
+	// transaction commits — after the store's write lock is already gone —
+	// so the next transaction's sweep must wait for that recording, not
+	// only for the lock, or two sweeps behind one suspension would both
+	// read the pre-commit tick, detect the suspension twice and shift its
+	// deadlines twice. It is a one-slot channel taken with the caller's
+	// context, so a call queued behind holders — a heartbeat behind slow
+	// writers — gives up at its own deadline instead of waiting without
+	// bound. Views wait on nothing: readers hold no write lock and no
+	// tick.
+	sweepTxSem chan struct{}
 
 	// drainMu guards draining, the runners that reported a restart
 	// drain pending (§5.1): each takes no new lease and exits once its
@@ -506,6 +516,7 @@ func New(s *store.Store, cfg Config) *Engine {
 		def.Warnf = cfg.Warnf
 	}
 	e := &Engine{cfg: def}
+	e.sweepTxSem = make(chan struct{}, 1)
 	e.store = mirroredStore{Store: s, e: e}
 	return e
 }
