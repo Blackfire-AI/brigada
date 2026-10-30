@@ -152,7 +152,8 @@ func TestRunnerShutdownMidJobLetsTheLeaseLapse(t *testing.T) {
 // is let go.
 func TestJobWaitingForTheMirrorKeepsItsLease(t *testing.T) {
 	remote := newRemote(t)
-	e := newTestEnv(t, engine.Config{LeaseTTL: 700 * time.Millisecond})
+	const leaseTTL = 2 * time.Second
+	e := newTestEnv(t, engine.Config{LeaseTTL: leaseTTL})
 	e.seedProject(remote)
 	task := e.seedTask("", "test -f work.txt")
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
@@ -173,7 +174,7 @@ func TestJobWaitingForTheMirrorKeepsItsLease(t *testing.T) {
 	defer p.stop(t)
 
 	e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "leased" || j.Status == "running" })
-	deadline := time.Now().Add(1500 * time.Millisecond) // twice the lease and more
+	deadline := time.Now().Add(2*leaseTTL + leaseTTL/2)
 	for time.Now().Before(deadline) {
 		if _, err := e.eng.Sweep(e.ctx); err != nil {
 			t.Fatalf("sweep: %v", err)
