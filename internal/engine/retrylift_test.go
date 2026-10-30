@@ -161,7 +161,7 @@ func TestLiftedRetryTwiceNoVerdictParksTheTask(t *testing.T) {
 // never relaxed — with no reviewer but the author's own agent, the
 // lift opens nothing and the task parks on the first no-verdict.
 func TestLiftedExclusionNeverReachesTheAuthorsFamily(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) { c.Review.Family = ReviewFamilyRequire })
 	author := e.agented("author", "anthropic", "implement", "review")
 	first := e.agented("first", "google", "review")
 	e.runToReview(author)

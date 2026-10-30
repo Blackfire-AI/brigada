@@ -160,14 +160,14 @@ func foremanDigestDueTx(tx *sql.Tx, project int64) (bool, error) {
 // binary, so a not-configured role runs on the contract alone — then
 // the wake template with the inbox, and, on a rotated session's first
 // turn, the digest.
-func foremanPromptTx(tx *sql.Tx, project int64, inbox ForemanInbox, now time.Time) (string, error) {
+func foremanPromptTx(tx *sql.Tx, reviewFamily string, project int64, inbox ForemanInbox, now time.Time) (string, error) {
 	due, err := foremanDigestDueTx(tx, project)
 	if err != nil {
 		return "", err
 	}
 	digest := ""
 	if due {
-		if digest, err = foremanDigestTx(tx, project, now); err != nil {
+		if digest, err = foremanDigestTx(tx, reviewFamily, project, now); err != nil {
 			return "", err
 		}
 	}
@@ -183,7 +183,7 @@ func foremanPromptTx(tx *sql.Tx, project int64, inbox ForemanInbox, now time.Tim
 // approval with their tasks' states, the needs-you queue with its
 // reasons, and the newest history events. Every list is bounded and
 // says how much it left out, and the whole is cut at digestMaxBytes.
-func foremanDigestTx(tx *sql.Tx, project int64, now time.Time) (string, error) {
+func foremanDigestTx(tx *sql.Tx, reviewFamily string, project int64, now time.Time) (string, error) {
 	var lines []string
 	add := func(format string, args ...any) {
 		lines = append(lines, fmt.Sprintf(format, args...))
@@ -251,7 +251,7 @@ func foremanDigestTx(tx *sql.Tx, project int64, now time.Time) (string, error) {
 		}
 	}
 
-	needs, err := statusNeedsYouTx(tx, project, now)
+	needs, err := statusNeedsYouTx(tx, reviewFamily, project, now)
 	if err != nil {
 		return "", err
 	}

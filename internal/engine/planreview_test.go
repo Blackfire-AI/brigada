@@ -959,7 +959,10 @@ func TestPlanReviewLostRunnerProceeds(t *testing.T) {
 // review job — what a recovered store holds — gets its round queued
 // again, and proceeds when no reviewer can run it.
 func TestPlanReviewRecoveredRoundRequeued(t *testing.T) {
-	e := newPlanReviewEnv(t)
+	e := newEnvCfg(t, func(c *Config) {
+		c.PlanReview = nil
+		c.Review.Family = ReviewFamilyRequire
+	})
 	e.offerForeman(e.runner1)
 	e.offerReviewer()
 	res := e.createPlan(nTasks(2))

@@ -53,8 +53,8 @@ type Config struct {
 	// Rounds are the config file's default round caps; unnamed keys keep
 	// the engine defaults.
 	Rounds RoundsConfig
-	// Review is the config file's default tier and effort of a review;
-	// unnamed keys keep the engine defaults.
+	// Review is the config file's default tier, effort and family rule of
+	// a review; unnamed keys keep the engine defaults.
 	Review engine.ReviewConfig
 	// TaskAutoRetry controls transient work retries; nil keeps the default, on.
 	TaskAutoRetry *bool

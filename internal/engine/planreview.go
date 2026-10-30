@@ -15,8 +15,12 @@ import (
 )
 
 // The plan review (§6.2): a plan — and an amendment of an active plan
-// that adds or edits tasks — is reviewed by an agent of a family other than the
-// foreman's before any of its work is queued. The plan waits in
+// that adds or edits tasks — is reviewed before any of its work is
+// queued, placed by the review family policy (issue #126) with the
+// foreman as the author: an agent of a family other than the foreman's
+// under review.family=require, the family steps of prefer — the
+// foreman's own family and then the foreman's own agent — when no other
+// family is available. The plan waits in
 // planReviewing with all its tasks pending and one plan_review job on
 // the key plan_review:<plan>; the verdict is the reviewer's result block
 // (§7's verdict block), approve or changes with findings. Approve runs
@@ -26,7 +30,7 @@ import (
 // accepts the plan as reviewed with a recorded reason. At most two
 // rounds: the second changes verdict proceeds through the same
 // evaluation as approve, the findings recorded and shown. A
-// reviewer that cannot be had — no agent of another family offers the
+// reviewer that cannot be had — no agent offers the
 // review class, or the job never runs, runs past its hard cap or loses
 // its runner too often — proceeds the same way. A reviewer that runs and
 // gives no verdict is retried once on another agent, as a task review is
@@ -231,12 +235,14 @@ func foremanFamilyTx(tx *sql.Tx, project int64) (string, error) {
 
 // planReviewerAvailableTx reports whether any registered agent could
 // take the project's plan review: the same structural test a review
-// job's placement applies (§7), over the foreman's family exclusion and
-// the review class, health and cooling aside — a broken or cooling
-// reviewer is a wait, a missing one is not.
-func planReviewerAvailableTx(tx *sql.Tx, project int64, family string) (bool, error) {
+// job's placement applies (§7), over the review class and the family
+// rule the review.family setting picks (issue #126) — the foreman's
+// family excluded under require, every family step under prefer —
+// health and cooling aside: a broken or cooling reviewer is a wait, a
+// missing one is not.
+func planReviewerAvailableTx(tx *sql.Tx, reviewFamily string, project int64, family string) (bool, error) {
 	review := &jobRow{ProjectID: project, Kind: KindPlanReview, ExcludeFamily: family}
-	agents, err := qualifyingAgentRowsTx(tx, 0, review, string(KindReview), "")
+	agents, err := qualifyingAgentRowsTx(tx, reviewFamily, 0, review, string(KindReview), "")
 	if err != nil {
 		return false, err
 	}
@@ -467,8 +473,9 @@ func foldWaitingBatch(batch, waiting []int64) []int64 {
 }
 
 // queuePlanReviewRoundTx queues the plan's review round (§6.2): one
-// plan_review job on the plan's key, placed on an agent of a family other
-// than the foreman's, carrying the input composed from the plan and the
+// plan_review job on the plan's key, placed by the review family policy
+// with the foreman as the author (issue #126), carrying the input
+// composed from the plan and the
 // project's other active plans. The one-live-job-per-key rule keeps a
 // plan from being reviewed twice concurrently: a submit that coalesced
 // behind a live review queues nothing and changes nothing. A round
@@ -485,7 +492,7 @@ func (e *Engine) queuePlanReviewRoundTx(tx *sql.Tx, project, plan, round int64, 
 	if err != nil {
 		return err
 	}
-	available, err := planReviewerAvailableTx(tx, project, family)
+	available, err := planReviewerAvailableTx(tx, e.cfg.Review.Family, project, family)
 	if err != nil {
 		return err
 	}
@@ -499,9 +506,9 @@ func (e *Engine) queuePlanReviewRoundTx(tx *sql.Tx, project, plan, round int64, 
 			round, planReviewBatchJSON(batch), fmtTime(now), plan); err != nil {
 			return fmt.Errorf("record the review round of plan %d: %w", plan, err)
 		}
-		reason := "no agent of a family other than the foreman's offers the review class"
-		if family == "" {
-			reason = "no agent offers the review class"
+		reason := "no agent offers the review class"
+		if family != "" && !familyPrefer(e.cfg.Review.Family) {
+			reason = "no agent of a family other than the foreman's offers the review class, review.family=require"
 		}
 		return e.planReviewConcludedTx(tx, project, plan, 0, planReviewSkipped, "", reason, now, true)
 	}
@@ -738,7 +745,7 @@ func (e *Engine) planReviewFailedTx(tx *sql.Tx, job *jobRow, plan int64, reason 
 		return e.planReviewHeldTx(tx, job.ProjectID, plan, reason+"; the retry on another reviewer gave no verdict either", now)
 	}
 	retry := &jobRow{ProjectID: job.ProjectID, Kind: KindPlanReview, ExcludeFamily: job.ExcludeFamily, ExcludeAgent: job.AgentID}
-	noAgent, err := noReviewAgentTx(tx, retry)
+	noAgent, err := noReviewAgentTx(tx, e.cfg.Review.Family, retry)
 	if err != nil {
 		return err
 	}

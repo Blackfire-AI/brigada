@@ -87,9 +87,9 @@ type FileConfig struct {
 	// rounds.review, rounds.restart); a key the file never names stays nil
 	// and keeps the engine default.
 	Rounds RoundsConfig
-	// Review is the default tier and effort of a review (review.tier,
-	// review.effort, §7, §8); a key the file never names stays empty and
-	// keeps the engine default.
+	// Review is the default tier, effort and family rule of a review
+	// (review.tier, review.effort, review.family, §7, §8); a key the file
+	// never names stays empty and keeps the engine default.
 	Review engine.ReviewConfig
 	// SnapshotDir is where the engine snapshots its store daily (§6.4):
 	// an absolute directory outside the state directory's store. Empty =
@@ -262,6 +262,11 @@ func loadConfigFile(path string, required bool) (FileConfig, error) {
 				err = fmt.Errorf("want one of %s", strings.Join(adapter.TaskEffortLevels, ", "))
 			}
 			cfg.Review.Effort = value
+		case key == "review.family":
+			if !engine.ValidReviewFamily(value) {
+				err = fmt.Errorf("want %s or %s", engine.ReviewFamilyPrefer, engine.ReviewFamilyRequire)
+			}
+			cfg.Review.Family = value
 		case strings.HasPrefix(key, "caps."), strings.HasPrefix(key, "cost."), strings.HasPrefix(key, "tier."):
 			err = setCap(&cfg.Caps, key, value)
 		case strings.HasPrefix(key, "tools."):
@@ -269,7 +274,7 @@ func loadConfigFile(path string, required bool) (FileConfig, error) {
 		case strings.HasPrefix(key, "env."):
 			err = setEnvRef(&cfg, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, notify.webhook, snapshot_dir, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, rounds.fix, rounds.review, rounds.restart, review.tier, review.effort, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model>, a tools.claude/<model> or an env.<harness>.<VAR>", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, notify.webhook, snapshot_dir, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, rounds.fix, rounds.review, rounds.restart, review.tier, review.effort, review.family, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model>, a tools.claude/<model> or an env.<harness>.<VAR>", path, n+1, key)
 		}
 		if err != nil {
 			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)
