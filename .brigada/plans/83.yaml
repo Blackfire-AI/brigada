@@ -61,7 +61,7 @@ tasks:
     deps: ["import_tx"]
     base: "import_tx"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-256-r1"
     rounds: 0
   - id: 257
