@@ -13,6 +13,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/caps"
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 	"github.com/Blackfire-AI/brigada/internal/store"
 )
 
@@ -623,6 +624,16 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		if _, err := appendEventTx(tx, evJobLeased, j.ProjectID, j.TaskID, j.ID, leased, now); err != nil {
 			return nil, err
 		}
+		// The placement kind (issue #126), computed at the pick and never
+		// earlier: how the chosen reviewer relates to the review's author.
+		// The pick event records it and the grant's prompt states it. An
+		// agent-less lease names no reviewer, so nothing is placed.
+		placement := ""
+		if agent != 0 && (j.Kind == KindReview || j.Kind == KindPlanReview) {
+			if placement, err = reviewPlacementKindTx(tx, j, agent); err != nil {
+				return nil, err
+			}
+		}
 		// Why this agent (§8): plain log, no inbox row and no wake. The
 		// agents ranked above the pick were passed over for cap room and
 		// are named, and every candidate's weight and draw is recorded.
@@ -643,16 +654,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 					payload.Candidates = append(payload.Candidates, Ranked{Agent: c.id, Weight: c.weight, Draw: c.draw})
 				}
 			}
-			// The placement kind (issue #126), computed at the pick and
-			// never earlier: how the chosen reviewer relates to the
-			// review's author.
-			if j.Kind == KindReview || j.Kind == KindPlanReview {
-				placement, err := reviewPlacementKindTx(tx, j, agent)
-				if err != nil {
-					return nil, err
-				}
-				payload.Placement = placement
-			}
+			payload.Placement = placement
 			// The picked agent may be the one a review retry's exclusion
 			// named: no other qualifying reviewer was available, so the
 			// preference was lifted (§7) and the excluded agent runs —
@@ -786,7 +788,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			Kind:           j.Kind,
 			Mode:           j.Mode,
 			Key:            j.Key,
-			Prompt:         j.Prompt,
+			Prompt:         prompt.WithPlacement(j.Prompt, placement),
 			LeaseID:        leaseID,
 			LeaseExpiresAt: expires,
 			ForemanToken:   foremanToken,

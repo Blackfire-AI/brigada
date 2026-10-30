@@ -750,7 +750,13 @@ func (e *Engine) planReviewFailedTx(tx *sql.Tx, job *jobRow, plan int64, reason 
 		return err
 	}
 	if noAgent {
-		return e.planReviewHeldTx(tx, job.ProjectID, plan, reason+"; no other agent can take the retry", now)
+		why := "; no other agent can take the retry"
+		if familyPrefer(e.cfg.Review.Family) {
+			// The family steps found no one but the excluded reviewer
+			// (issue #126): say so, since no family rule is the cause.
+			why += ": the only available reviewer was the one excluded"
+		}
+		return e.planReviewHeldTx(tx, job.ProjectID, plan, reason+why, now)
 	}
 	sr, err := e.submitTx(tx, SubmitParams{
 		Key:           job.Key,
