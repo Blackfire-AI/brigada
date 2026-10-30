@@ -88,7 +88,12 @@ func (e *Engine) Heartbeat(ctx context.Context, owner, jobID int64, leaseID stri
 			return e.faultBusy()
 		})
 	})
-	return ans, expires, err
+	if err != nil {
+		// The last attempt rolled back, its answer and expiry with it:
+		// only a committed beat's values leave the call.
+		return "", time.Time{}, err
+	}
+	return ans, expires, nil
 }
 
 func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, prog Progress, rep SweepReport, now time.Time) (Answer, time.Time, error) {

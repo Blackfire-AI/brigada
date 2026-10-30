@@ -91,6 +91,14 @@ type mirroredStore struct {
 
 func (m mirroredStore) Update(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	e := m.e
+	// The engine's write transactions serialize through their commit
+	// bookkeeping (sweepTxMu): the tick a sweep stages is recorded only
+	// after the commit, when the store's write lock is already gone, so
+	// the next write waits here — before its own sweep reads the tick —
+	// rather than reading the pre-commit one and detecting the same
+	// suspension twice.
+	e.sweepTxMu.Lock()
+	defer e.sweepTxMu.Unlock()
 	// The sweep a transaction ran staged its tick (§13); the commit or
 	// the rollback settles it — only a sweep whose transaction committed
 	// consumed the suspension gap.

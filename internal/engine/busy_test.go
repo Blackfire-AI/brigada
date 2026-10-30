@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"errors"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -134,12 +136,15 @@ func TestSweepAndHeartbeatStayBusyAfterBoundedAttempts(t *testing.T) {
 		e.clock.Advance(e.eng.cfg.LeaseTTL + time.Second) // work the rolled-back attempts would commit
 		calls := 0
 		e.eng.faultBusyTx = func() error { calls++; return errBusy }
-		_, err := e.eng.Sweep(e.ctx)
+		rep, err := e.eng.Sweep(e.ctx)
 		if !store.IsBusy(err) {
 			t.Fatalf("sweep error = %v, want the busy it could not ride out", err)
 		}
 		if calls != bound {
 			t.Fatalf("the transaction ran %d times, want the retry's %d bounded attempts", calls, bound)
+		}
+		if len(rep.Expired) != 0 || len(rep.HardCapped) != 0 || len(rep.QueueTimedOut) != 0 {
+			t.Fatalf("report = %+v, want none: no attempt committed, so none of its values return", rep)
 		}
 		if status := e.str("SELECT status FROM jobs WHERE id = ?", g.JobID); status != statusLeased {
 			t.Fatalf("status = %q, want leased: no attempt committed", status)
@@ -152,12 +157,15 @@ func TestSweepAndHeartbeatStayBusyAfterBoundedAttempts(t *testing.T) {
 		before := e.str("SELECT lease_expires_at FROM jobs WHERE id = ?", g.JobID)
 		calls := 0
 		e.eng.faultBusyTx = func() error { calls++; return errBusy }
-		_, _, err := e.eng.Heartbeat(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, Progress{})
+		ans, expires, err := e.eng.Heartbeat(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, Progress{})
 		if !store.IsBusy(err) {
 			t.Fatalf("heartbeat error = %v, want the busy it could not ride out", err)
 		}
 		if calls != bound {
 			t.Fatalf("the transaction ran %d times, want the retry's %d bounded attempts", calls, bound)
+		}
+		if ans != "" || !expires.IsZero() {
+			t.Fatalf("answer = %q, expiry = %v, want none: the last attempt rolled back, and only a committed beat's values return", ans, expires)
 		}
 		if after := e.str("SELECT lease_expires_at FROM jobs WHERE id = ?", g.JobID); after != before {
 			t.Fatalf("lease expiry moved from %q to %q: no attempt committed", before, after)
@@ -166,48 +174,99 @@ func TestSweepAndHeartbeatStayBusyAfterBoundedAttempts(t *testing.T) {
 }
 
 // TestNonBusyErrorIsNotRetried covers the boundary: an error that is not
-// busy goes back at once, unretried, whatever call it came from.
+// busy goes back at once, unretried, whatever call it came from, and the
+// rolled-back attempt's outputs go back with nothing.
 func TestNonBusyErrorIsNotRetried(t *testing.T) {
 	boom := errors.New("no such table: jobs")
-	for _, tc := range []struct {
-		name  string
-		setup func(e *env) *LeaseGrant
-		run   func(e *env, g *LeaseGrant) error
-	}{
-		{
-			name: "sweep",
-			setup: func(e *env) *LeaseGrant {
-				e.submit(e.work())
-				return nil
-			},
-			run: func(e *env, _ *LeaseGrant) error {
-				_, err := e.eng.Sweep(e.ctx)
-				return err
-			},
-		},
-		{
-			name: "heartbeat",
-			setup: func(e *env) *LeaseGrant {
-				e.submit(e.work())
-				return e.leaseAny(e.runner1)
-			},
-			run: func(e *env, g *LeaseGrant) error {
-				_, _, err := e.eng.Heartbeat(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, Progress{})
-				return err
-			},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			e := newEnv(t)
-			g := tc.setup(e)
-			calls := 0
-			e.eng.faultBusyTx = func() error { calls++; return boom }
-			if err := tc.run(e, g); !errors.Is(err, boom) {
-				t.Fatalf("error = %v, want the injected one at once", err)
+	t.Run("sweep", func(t *testing.T) {
+		e := newEnv(t)
+		e.submit(e.work())
+		calls := 0
+		e.eng.faultBusyTx = func() error { calls++; return boom }
+		rep, err := e.eng.Sweep(e.ctx)
+		if !errors.Is(err, boom) {
+			t.Fatalf("sweep error = %v, want the injected one at once", err)
+		}
+		if len(rep.Expired) != 0 || len(rep.HardCapped) != 0 || len(rep.QueueTimedOut) != 0 {
+			t.Fatalf("report = %+v, want none: the one attempt rolled back, so none of its values return", rep)
+		}
+		if calls != 1 {
+			t.Fatalf("the transaction ran %d times, want the one attempt: a non-busy error is never retried", calls)
+		}
+	})
+	t.Run("heartbeat", func(t *testing.T) {
+		e := newEnv(t)
+		e.submit(e.work())
+		g := e.leaseAny(e.runner1)
+		calls := 0
+		e.eng.faultBusyTx = func() error { calls++; return boom }
+		ans, expires, err := e.eng.Heartbeat(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, Progress{})
+		if !errors.Is(err, boom) {
+			t.Fatalf("heartbeat error = %v, want the injected one at once", err)
+		}
+		if ans != "" || !expires.IsZero() {
+			t.Fatalf("answer = %q, expiry = %v, want none: the one attempt rolled back, so none of its values return", ans, expires)
+		}
+		if calls != 1 {
+			t.Fatalf("the transaction ran %d times, want the one attempt: a non-busy error is never retried", calls)
+		}
+	})
+}
+
+// TestConcurrentSweepsDetectOneSuspension covers the commit bookkeeping
+// under concurrency (sweepTxMu): several sweeps run at once past a
+// suspension on a file-backed store — many pooled connections, real
+// interleaving — and they serialize through the bookkeeping, so the
+// suspension is detected once, its deadline shift applied once and one
+// engine_suspended event lands. Without the serialization a sweep that
+// begins behind a just-committed one reads the pre-commit tick — the
+// commit's write lock is gone before its tick is recorded — detects the
+// same suspension again and shifts the deadlines twice; a rollback can
+// also drop a committed tick. The counts below are invariants of the
+// serialization, whatever the interleaving.
+func TestConcurrentSweepsDetectOneSuspension(t *testing.T) {
+	e := newEnvAt(t, filepath.Join(t.TempDir(), "store.db"), nil)
+	e.submit(e.work())
+	g := e.leaseAny(e.runner1)
+	e.mustSweep() // a tick before the sleep: the suspension is a gap from here
+	before := e.str("SELECT first_leased FROM jobs WHERE id = ?", g.JobID)
+	e.clock.Advance(2 * time.Hour) // the host sleeps: every sweep behind this sees the jump
+
+	const n = 8
+	start := make(chan struct{})
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if _, err := e.eng.Sweep(e.ctx); err != nil {
+				errs <- err
 			}
-			if calls != 1 {
-				t.Fatalf("the transaction ran %d times, want the one attempt: a non-busy error is never retried", calls)
-			}
-		})
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("a concurrent sweep failed: %v", err)
+	}
+	if count := e.int("SELECT COUNT(*) FROM events WHERE kind = ?", evEngineSuspended); count != 1 {
+		t.Fatalf("engine_suspended events = %d, want the one detection: the sweeps serialize through the commit bookkeeping", count)
+	}
+	first, err := parseTime(before)
+	if err != nil {
+		t.Fatalf("first_leased %q: %v", before, err)
+	}
+	if want := fmtTime(first.Add(2 * time.Hour)); e.str("SELECT first_leased FROM jobs WHERE id = ?", g.JobID) != want {
+		t.Fatalf("first_leased = %q, want %q: the sleep shifted the cap clock once, not once per concurrent sweep",
+			e.str("SELECT first_leased FROM jobs WHERE id = ?", g.JobID), want)
+	}
+	// The recorded tick is the last committed sweep's, so the gap is
+	// spent: a further sweep, with the engine awake, suspends nothing.
+	e.clock.Advance(time.Minute)
+	if count := e.int("SELECT COUNT(*) FROM events WHERE kind = ?", evEngineSuspended); count != 1 {
+		t.Fatalf("engine_suspended events after a wakeful tick = %d, want still the one: a committed tick was lost", count)
 	}
 }

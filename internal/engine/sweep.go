@@ -108,19 +108,6 @@ func (e *Engine) sweepGap(now time.Time) (gap time.Duration, suspended bool) {
 	return gap, gap > suspensionGap(e.cfg.SweepInterval)
 }
 
-// recordSweep records a sweep tick at now (§13): the next sweep measures
-// its gap from here. It runs only after the sweeping transaction has
-// committed: the sweep stages its tick (stageSweep) and the commit
-// records it (mirroredStore.Update), so a sweep that rolls back — busy
-// at COMMIT, an error in the caller's own later steps of the same
-// transaction — does not consume the gap. The retry still sees the
-// pre-sleep jump and re-detects the suspension.
-func (e *Engine) recordSweep(now time.Time) {
-	e.sweepMu.Lock()
-	e.lastSweep = now
-	e.sweepMu.Unlock()
-}
-
 // stageSweep stages now as the sweep tick of tx, the transaction running
 // the sweep: the tick is measured but not yet real, for the transaction
 // may still roll back. sweepGap keeps reading the last committed tick
@@ -133,22 +120,27 @@ func (e *Engine) stageSweep(tx *sql.Tx, now time.Time) {
 
 // commitStagedSweep records the tick tx staged, when the staging is still
 // its: the commit is what makes a sweep's work — its tick included —
-// real. A later sweep of another transaction that replaced the staging
-// records its own tick instead. A nil tx (the begin itself failed)
-// staged nothing.
+// real. The whole check-and-record sits under one hold of sweepMu, and
+// the write transactions themselves serialize through it
+// (mirroredStore.Update holds sweepTxMu over the transaction and its
+// settlement), so no later sweep's tick can slip between the commit and
+// this recording and be lost to it, and no older tick can overwrite a
+// newer one: each committed tick lands in order, and a sweep that rolls
+// back — busy at COMMIT, an error in the caller's own later steps of the
+// same transaction — does not consume the gap. The retry still sees the
+// pre-sleep jump and re-detects the suspension. A nil tx (the begin
+// itself failed) staged nothing.
 func (e *Engine) commitStagedSweep(tx *sql.Tx) {
 	if tx == nil {
 		return
 	}
 	e.sweepMu.Lock()
-	staged, at := e.stagedTx, e.stagedSweep
-	if e.stagedTx == tx {
-		e.stagedTx, e.stagedSweep = nil, time.Time{}
+	defer e.sweepMu.Unlock()
+	if e.stagedTx != tx {
+		return
 	}
-	e.sweepMu.Unlock()
-	if staged == tx {
-		e.recordSweep(at)
-	}
+	e.lastSweep = e.stagedSweep
+	e.stagedTx, e.stagedSweep = nil, time.Time{}
 }
 
 // dropStagedSweep drops the tick tx staged: the transaction rolled back,

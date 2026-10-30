@@ -370,6 +370,17 @@ type Engine struct {
 	stagedTx    *sql.Tx   // the transaction whose sweep staged a tick
 	stagedSweep time.Time // the tick it staged
 
+	// sweepTxMu serializes the engine's write transactions through their
+	// commit bookkeeping (§13): every engine write begins with a sweep,
+	// and a sweep's tick is recorded only after its transaction commits —
+	// after the store's write lock is already gone — so the next
+	// transaction's sweep must wait for that recording, not only for the
+	// lock, or two sweeps behind one suspension would both read the
+	// pre-commit tick, detect the suspension twice and shift its
+	// deadlines twice. Views wait on nothing: readers hold no write lock
+	// and no tick.
+	sweepTxMu sync.Mutex
+
 	// drainMu guards draining, the runners that reported a restart
 	// drain pending (§5.1): each takes no new lease and exits once its
 	// running jobs finish. A register from the same runner clears its
