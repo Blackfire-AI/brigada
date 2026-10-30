@@ -189,7 +189,16 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	// Recovery (§13): judgment events that parked a task while no engine
 	// ran get their foreman turn now — after the sweep, as every engine
-	// call does it, and before the API serves a soul.
+	// call does it, and before the API serves a soul. First, the plans a
+	// pre-#133 engine closed done over live work (§6.2) return to
+	// active, so the tools the recovery turns reach see them live.
+	reopened, err := eng.ReopenStrandedPlans(ctx)
+	if err != nil {
+		return fmt.Errorf("engine: %w", err)
+	}
+	if len(reopened) > 0 {
+		log.InfoContext(ctx, "reopened plans closed done over live work", "plans", reopened)
+	}
 	if err := eng.RecoverForemanWakes(ctx); err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}

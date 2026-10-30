@@ -19,6 +19,7 @@ const (
 	evPlanCancelled          = "plan_cancelled"            // removal cancelled an unfinished plan
 	evPlanCreated            = "plan_created"              // CreatePlan: a plan now exists (§6.2)
 	evPlanDone               = "plan_done"                 // the plan's last open task finished (§6.2)
+	evPlanReopened           = "plan_reopened"             // the start-of-engine pass returned a plan closed done over live work to active (§6.2, §13, issue #137); Reason names the tasks that kept it open
 	evPlanBlocked            = "plan_blocked"              // a blocked plan (§6.2): done work that can never land — a dependency cancelled or failed — keeps the plan active; Reason names each stranded task and the dead dependency. One wake per blockage
 	evPlanUnblocked          = "plan_unblocked"            // a blocked plan's last stranded task was freed (§6.2); the plan can close again, and a later blockage wakes anew
 	evPlanAwaitingApproval   = "plan_awaiting_approval"    // CreatePlan: the plan is over the approval limit and waits for the user's yes (§6.3)

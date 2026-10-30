@@ -220,6 +220,12 @@ func (e *Engine) retryLandingTx(tx *sql.Tx, project, taskID int64, now time.Time
 		taskDone, fmtTime(now), taskID); err != nil {
 		return LandRetryResult{}, fmt.Errorf("return task %d to done: %w", taskID, err)
 	}
+	// A parked task returning to done frees its waiting dependents as a
+	// finished task's does (§6.1, the settleLandedTx precedent): a
+	// dependent added while it sat parked starts now, not never.
+	if err := e.releaseDependentsTx(tx, project, taskID, now); err != nil {
+		return LandRetryResult{}, err
+	}
 	r, err := e.landRuleTx(tx, taskID, now)
 	if err != nil {
 		return LandRetryResult{}, err

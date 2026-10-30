@@ -94,6 +94,95 @@ func TestRunDeliveriesAdvanceTheCursor(t *testing.T) {
 	}
 }
 
+// TestStartupReopensStrandedPlans seeds the store with the pre-#133
+// strand (§6.2, issue #137): a plan closed `done` over a task parked at
+// needs_foreman, which no tool of a finished plan can reach. The engine
+// role's start-up runs the reopen pass before the API serves, so the
+// plan is active again with one plan_reopened event naming the task —
+// and a second engine over the same store changes nothing.
+func TestStartupReopensStrandedPlans(t *testing.T) {
+	state := testsupport.ShortStateDir(t)
+	p := lifecycle.PathsOf(state)
+	ctx := context.Background()
+	st, err := store.Open(ctx, p.Store)
+	if err != nil {
+		t.Fatalf("open the store: %v", err)
+	}
+	seedStrandedPlan(t, ctx, st)
+	st.Close()
+
+	runEngine := func() {
+		t.Helper()
+		err := lifecycle.Run(ctx, lifecycle.Config{
+			StateDir: state,
+			Notify:   "none",
+			Idle:     300 * time.Millisecond,
+			IdleTick: 50 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatalf("run the engine: %v", err)
+		}
+	}
+	runEngine()
+
+	st, err = store.Open(ctx, p.Store)
+	if err != nil {
+		t.Fatalf("reopen the store: %v", err)
+	}
+	defer st.Close()
+	var planState string
+	var reopened int
+	if err := st.View(ctx, func(tx *sql.Tx) error {
+		if err := tx.QueryRow("SELECT state FROM plans WHERE id = 1").Scan(&planState); err != nil {
+			return err
+		}
+		return tx.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'plan_reopened'`).Scan(&reopened)
+	}); err != nil {
+		t.Fatalf("read the plan: %v", err)
+	}
+	if planState != "active" {
+		t.Errorf("plan state after start-up = %q, want active: the pass ran", planState)
+	}
+	if reopened != 1 {
+		t.Errorf("plan_reopened events = %d, want one", reopened)
+	}
+
+	// A second engine over the same store reopens nothing.
+	runEngine()
+	reopened = 0
+	if err := st.View(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = 'plan_reopened'`).Scan(&reopened)
+	}); err != nil {
+		t.Fatalf("read the events: %v", err)
+	}
+	if reopened != 1 {
+		t.Errorf("plan_reopened events after a second start-up = %d, want still one", reopened)
+	}
+}
+
+// seedStrandedPlan installs one project (its plan files off, so the
+// start-up mirror pushes nothing) holding one plan closed done over one
+// task parked at needs_foreman: the rows the reopen pass reads.
+func seedStrandedPlan(t *testing.T, ctx context.Context, st *store.Store) {
+	t.Helper()
+	err := st.Update(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO projects (repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
+			VALUES ('https://example.com/r.git', 'main', '{"plan_files":"off"}', 'claude', 'sonnet', '2026-10-13T00:00:00Z', '2026-10-13T00:00:00Z')`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO plans (id, project_id, title, state, created_at, updated_at)
+			VALUES (1, 1, 'Stranded', 'done', '2026-10-13T00:00:00Z', '2026-10-13T00:00:00Z')`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO tasks (id, plan_id, title, spec, class, state, base_ref, created_at, updated_at)
+			VALUES (1, 1, 'Parked', 'spec', 'implement', 'needs_foreman', 'main', '2026-10-13T00:00:00Z', '2026-10-13T00:00:00Z')`)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed the stranded plan: %v", err)
+	}
+}
+
 // seedNotifyEvent installs one project and one task_check_failed event,
 // the minimal log rows the delivery loop's joins resolve.
 func seedNotifyEvent(t *testing.T, ctx context.Context, st *store.Store) {
