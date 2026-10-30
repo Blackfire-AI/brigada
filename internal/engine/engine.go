@@ -354,6 +354,11 @@ type Engine struct {
 	// transaction just before its sweep, to play a slow sweep out.
 	beforeHeartbeatSweep func()
 
+	// betweenLeaseTx, when set by a test, runs in a lease poll between its
+	// arrival transaction and its queue walk, the window where another
+	// write can commit, so that interleaving is driven, not raced for.
+	betweenLeaseTx func()
+
 	// faultBusyTx, when set by a test, runs at the end of a retried
 	// transaction's work — a sweep's, a heartbeat's, a prune's or a job
 	// read's sweep: a busy error it
