@@ -42,8 +42,8 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: running
-    branch: "brigada/task-296"
+    state: done
+    branch: "brigada/task-296-r1"
     rounds: 0
   - id: 297
     name: "batch_design_execution"
@@ -55,7 +55,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 298
