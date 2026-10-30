@@ -11,5 +11,6 @@ web.
 Check the change against the project's stated conventions and the instructions the author
 received. Cite the relevant convention and concrete evidence in the diff for each finding;
 do not invent requirements. Examples of misses to look for when the conventions apply
-include a missing changelog entry, inconsistent behavior across equivalent surfaces, and
-outdated documentation for touched keys. These examples are not universal requirements.
+include inconsistent behavior across equivalent surfaces and outdated documentation for
+touched keys. A missing changelog entry is not a miss here: changelog entries are tasks of
+their own. These examples are not universal requirements.

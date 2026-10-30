@@ -17,7 +17,7 @@ description: Restructuring code while preserving observable behavior.
    reconsider there.
 4. Update the documentation only for renamed names the docs still spell
    the old way; add no new prose for moved code.
-5. Add a changelog entry only when the rename or move is itself worth a
-   line, and never claim a behavior change.
+5. Leave CHANGELOG.md to the changelog task the foreman plans, and never
+   claim a behavior change.
 
 If your tools can run the relevant tests, commands, or checks, do it; otherwise verify by inspection and say so in the summary.
