@@ -5,9 +5,9 @@
 plan: 90
 title: "#134 (design): the land job lands a batch, one push and one CI run per batch"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-10-30T08:19:05.705688Z
-updated: 2026-10-30T09:03:05.553707Z
+updated: 2026-10-30T09:03:43.90225Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
