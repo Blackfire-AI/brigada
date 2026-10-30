@@ -354,7 +354,8 @@ type Engine struct {
 	beforeHeartbeatSweep func()
 
 	// faultBusyTx, when set by a test, runs at the end of a retried
-	// transaction's work — a sweep's or a heartbeat's: a busy error it
+	// transaction's work — a sweep's, a heartbeat's, a prune's or a job
+	// read's sweep: a busy error it
 	// returns plays the store refusing the transaction the write lock, so
 	// the bounded retry is tested deterministically, without holding a
 	// real lock past the busy timeout.
