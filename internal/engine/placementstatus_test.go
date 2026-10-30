@@ -55,8 +55,12 @@ func TestStatusNamesASameAgentReviewPlacement(t *testing.T) {
 	if got := wakeEventText(evReviewChanges, raw); got != "fix this (review placement: same_agent)" {
 		t.Errorf("wake text = %q", got)
 	}
-	if got := needsYouReason(evReviewChanges, raw); got != "fix this (review placement: same_agent)" {
+	if got := needsYouReason(evReviewChanges, raw); got != "review placement same_agent: fix this" {
 		t.Errorf("needs-you reason = %q", got)
+	}
+	long := `{"findings":"` + strings.Repeat("long findings ", 30) + `","placement":"same_family"}`
+	if got := needsYouReason(evReviewChanges, long); !strings.HasPrefix(got, "review placement same_family: ") {
+		t.Errorf("long-findings needs-you reason lost the placement: %q", got)
 	}
 	// Cross_family is the default and stays unsaid.
 	cross := `{"findings":"fix this","placement":"cross_family"}`

@@ -1270,7 +1270,10 @@ func needsYouReason(kind, payload string) string {
 		reason = kind
 	}
 	if kind == evReviewChanges || kind == evReviewNoVerdict {
-		reason += placementNote(p.Placement)
+		// First, so the line's cut never drops it.
+		if p.Placement != "" && p.Placement != placeCrossFamily {
+			reason = "review placement " + p.Placement + ": " + reason
+		}
 	}
 	return oneLine(reason, needsYouReasonLimit)
 }
