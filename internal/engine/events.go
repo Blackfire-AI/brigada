@@ -21,6 +21,7 @@ const (
 	evPlanDone               = "plan_done"                 // the plan's last open task finished (§6.2)
 	evPlanBlocked            = "plan_blocked"              // a blocked plan (§6.2): done work that can never land — a dependency cancelled or failed — keeps the plan active; Reason names each stranded task and the dead dependency. One wake per blockage
 	evPlanUnblocked          = "plan_unblocked"            // a blocked plan's last stranded task was freed (§6.2); the plan can close again, and a later blockage wakes anew
+	evPlanReopened           = "plan_reopened"             // the start-up reopen pass (#137) returned a done plan that still held live work (#133) to active; Tasks names the ids that kept it open, and no foreman is woken
 	evPlanAwaitingApproval   = "plan_awaiting_approval"    // CreatePlan: the plan is over the approval limit and waits for the user's yes (§6.3)
 	evPlanReviewQueued       = "plan_review_queued"        // a plan_review job is queued: the plan waits in reviewing for the verdict before any work is queued (§6.2)
 	evPlanReviewed           = "plan_reviewed"             // a plan review round ended: approve, changes (with findings), no verdict, or accepted by the foreman (plan_accept); the plan proceeded, parks at needs_foreman for the foreman's answer, or waits for the user's yes (§6.2)
@@ -176,6 +177,7 @@ type eventPayload struct {
 	EffortFrom      string   `json:"effort_from,omitempty"` // an effort step's old effective effort (§8)
 	EffortTo        string   `json:"effort_to,omitempty"`   // an effort step's new effective effort (§8)
 	Retiered        []int64  `json:"retiered,omitempty"`    // tasks whose tier or effort plan_amend changed
+	Tasks           []int64  `json:"tasks,omitempty"`       // the task ids a plan_reopened names as the live work that kept the plan open (#137)
 	PassedOver      []int64  `json:"passed_over,omitempty"`
 	Weight          *int     `json:"weight,omitempty"`
 	Draw            float64  `json:"draw,omitempty"`

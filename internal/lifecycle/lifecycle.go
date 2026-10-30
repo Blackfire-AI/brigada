@@ -187,6 +187,18 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := eng.RecordInstance(ctx, int64(os.Getpid()), started); err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}
+	// The #137 reopen pass, before the wake recovery and before the API
+	// serves a soul: plans the engine closed done before #133's
+	// live-work rule, still holding parked tasks and their dependents,
+	// return to active once here, so the tools read them again — the
+	// guards that refuse a finished plan stay as they are.
+	reopened, err := eng.ReopenStrandedPlans(ctx)
+	if err != nil {
+		return fmt.Errorf("engine: %w", err)
+	}
+	if len(reopened) > 0 {
+		log.InfoContext(ctx, "reopened plans that closed done while still holding live work", "plans", reopened)
+	}
 	// Recovery (§13): judgment events that parked a task while no engine
 	// ran get their foreman turn now — after the sweep, as every engine
 	// call does it, and before the API serves a soul.
