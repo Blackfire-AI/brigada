@@ -120,6 +120,96 @@ func TestReopenPassLetsLandRetryRunAndTheDependentLand(t *testing.T) {
 	}
 }
 
+// TestReopenPassReleasesThePendingDependent: the spec's own strand of
+// issue #137. A task parked by a rejected push sits in a plan the old
+// rule closed done, a dependent added while it was parked still pending
+// behind it — the dependent's work never started, so it waits on the
+// parent's done, not on its landing. The pass reopens the plan, the
+// retry answers queued and returns the parent to done, and that finish
+// releases the dependent through the one scheduling path that frees
+// waiting work (§6.1): its work job is queued, and the plan cannot
+// close again over it.
+func TestReopenPassReleasesThePendingDependent(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	res := e.createPlan([]PlanTask{
+		{Name: "base", Spec: "the base work"},
+	})
+	base := res.Tasks[0].TaskID
+	e.runTaskToDone(base, author, reviewer)
+	g := e.leaseGit(author)
+	if g == nil || g.TaskID != base {
+		t.Fatalf("lease = %+v, want base's land job", g)
+	}
+	if ans := e.complete(g, Completion{Error: landRejectedErr}); ans != AnsOK {
+		t.Fatalf("fail base's push: %s", ans)
+	}
+	if state := e.taskState(base); state != taskNeedsForeman {
+		t.Fatalf("base state = %q, want needs_foreman", state)
+	}
+	// The dependent is added under the parked parent — a pending task
+	// behind a task that is not done, so no release ever ran for it.
+	e.amend(res.PlanID, PlanAmendment{Add: []PlanTask{
+		{Name: "top", Spec: "the dependent work", Deps: []string{"base"}},
+	}})
+	top := e.int("SELECT id FROM tasks WHERE plan_id = ? AND name = 'top'", res.PlanID)
+	if state := e.taskState(top); state != taskPending {
+		t.Fatalf("top state = %q, want pending behind the parked parent", state)
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ?", top); n != 0 {
+		t.Fatalf("top jobs = %d, want none while it waits", n)
+	}
+	// The old rule's close, then the pass: the plan holds live work —
+	// the parked parent alone; the pending dependent is not live work.
+	e.exec("UPDATE plans SET state = ? WHERE id = ?", planDone, res.PlanID)
+	if reopened := e.reopenStrandedPlans(); len(reopened) != 1 || reopened[0] != res.PlanID {
+		t.Fatalf("reopened plans = %v, want [%d]", reopened, res.PlanID)
+	}
+	p, ok := e.eventPayloadOf(evPlanReopened)
+	if !ok || p.Plan != res.PlanID || !reflect.DeepEqual(p.Tasks, []int64{base}) {
+		t.Fatalf("plan_reopened = %+v (%t), want plan %d naming only task %d", p, ok, res.PlanID, base)
+	}
+
+	// The retry answers queued, and the return to done releases the
+	// dependent as any finish does: its work job is queued.
+	r := e.retryLanding(e.project, base)
+	if r.Outcome != LandRetryQueued || r.JobID == 0 {
+		t.Fatalf("RetryLanding = %+v, want queued with its land job", r)
+	}
+	if state := e.taskState(base); state != taskDone {
+		t.Fatalf("base state after the retry = %q, want done", state)
+	}
+	if state := e.taskState(top); state != taskReady {
+		t.Fatalf("top state after the retry = %q, want ready: the finish releases it", state)
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'work' AND status IN ('queued', 'leased', 'running')", top); n != 1 {
+		t.Fatalf("top's live work jobs = %d, want 1: the retry frees the waiting work", n)
+	}
+
+	// The parent lands, and the dependent's work is still the plan's
+	// live work: the plan cannot close again over it. The dependent's
+	// queued work job is leased first and held open, so the land job is
+	// the next grant.
+	gWork := e.leaseGit(author)
+	if gWork == nil || gWork.Kind != KindWork || gWork.TaskID != top {
+		t.Fatalf("lease = %+v, want top's queued work", gWork)
+	}
+	g2 := e.leaseGit(author)
+	if g2 == nil || g2.JobID != r.JobID {
+		t.Fatalf("lease = %+v, want the retried land job %d", g2, r.JobID)
+	}
+	if ans := e.complete(g2, Completion{Result: `{"target_branch":"main","commit":"bbb222","check_passed":true,"pushed":"pushed"}`}); ans != AnsOK {
+		t.Fatalf("land base: %s", ans)
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'work' AND status IN ('queued', 'leased', 'running')", top); n != 1 {
+		t.Fatalf("top's live work jobs after the landing = %d, want 1", n)
+	}
+	if state := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); state != "active" {
+		t.Fatalf("plan state = %q, want active while the dependent runs", state)
+	}
+}
+
 // TestReopenPassLetsAmendCancelParkedTasks: two tasks parked in a done
 // plan — one by a land conflict, one by a failed land check — are
 // cancelled by plan_amend once the pass reopened the plan, and with
