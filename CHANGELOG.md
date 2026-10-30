@@ -18,6 +18,8 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Documented batch gate attribution and records (issue #134): stable checked-head evidence, conservative suspect lists, per-member hold decisions, the importable `land_batch_max` setting, complete runner outcomes, history and reservation-aware task readers.
+
 - Documented the land batch run (issue #134): per-member squash and stacked checks, isolated content failures with dependent landings left waiting, one publication with bounded retries, per-landing push approvals, and recovery of every member after a lost runner.
 
 - `land_retry`, a foreman tool (issue #133): it queues the landing again for a task parked by a landing that failed before a landing was recorded, outside its content — a rejected push or an environment failure, with the outcomes `queued`, `held`, `stale_base` or `refused` — through the same gates; a task whose landing is already recorded (pushed or waiting) is refused in favour of `task_restart`, and so is a conflict or a failed landed check.
