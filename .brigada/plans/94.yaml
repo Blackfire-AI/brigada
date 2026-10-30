@@ -5,9 +5,9 @@
 plan: 94
 title: "#140 retire unlanded tasks; #142 land_ready hold re-checks itself"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-10-30T19:52:43.95381Z
-updated: 2026-10-30T20:15:24.108317Z
+updated: 2026-10-30T20:43:18.042477Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -54,5 +54,29 @@ tasks:
     effort: medium
     review_tier: heavy
     state: running
+    branch: ""
+    rounds: 0
+  - id: 310
+    name: "skills_dir_default"
+    title: "#146: import reads skills under the default skills_dir when project.yaml names no key"
+    class: "implement"
+    deps: ["ready_recheck"]
+    base: "ready_recheck"
+    tier: light
+    effort: medium
+    skills: ["bugfix"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 311
+    name: "changelog_94"
+    title: "CHANGELOG entries for plan 94 (#142, #146)"
+    class: "implement"
+    deps: ["skills_dir_default"]
+    base: "skills_dir_default"
+    tier: light
+    effort: low
+    skills: ["docs-change"]
+    state: pending
     branch: ""
     rounds: 0
