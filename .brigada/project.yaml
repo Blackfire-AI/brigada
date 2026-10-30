@@ -4,3 +4,9 @@ default_check: 'test -z "$(gofmt -l .)" && go run ./internal/tools/guard && go v
 worker_tools: "Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*)"
 land_target: "brigada/landed"
 after_land: ".brigada/after-land.sh"
+instructions:
+  foreman: .brigada/instructions/foreman.md
+  plan_review: .brigada/instructions/plan_review.md
+  worker: .brigada/instructions/worker.md
+  reviewer: .brigada/instructions/reviewer.md
+skills_dir: .brigada/skills
