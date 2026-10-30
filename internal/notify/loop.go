@@ -50,6 +50,8 @@ type eventPayload struct {
 	Model    string `json:"model,omitempty"`
 	Plan     int64  `json:"plan,omitempty"`
 	Count    int64  `json:"count,omitempty"`
+	// Placement is a review verdict's placement kind (issue #126).
+	Placement string `json:"placement,omitempty"`
 }
 
 // hookPost is one notification waiting for its webhook turn: the event
@@ -329,6 +331,14 @@ func reasonOf(kind, payload string) string {
 		reason = p.Question
 	case KindReviewChanges:
 		reason = p.Findings
+	}
+	// A review verdict that is not cross_family names its placement once;
+	// an unservable review has none (it was never leased).
+	if (kind == KindReviewChanges || kind == KindReviewNoVerdict) && p.Placement != "" && p.Placement != "cross_family" {
+		if reason == "" {
+			reason = kind
+		}
+		reason = "review placement " + p.Placement + ": " + reason // first, so the cut never drops it
 	}
 	return oneLine(reason, bodyLimit)
 }

@@ -88,6 +88,9 @@ func StatusSections(st Status) string {
 			// findings are the event's whole text; the line cuts at its
 			// own bound and, when the cut landed, points at the review
 			// job's history, which holds them whole (§6.2).
+			if p.ReviewPlacement != "" {
+				lines = append(lines, "  review: "+p.ReviewPlacement)
+			}
 			if p.ReviewVerdict != "" || p.ReviewFindings != "" {
 				review := "  review: " + p.ReviewVerdict
 				if p.ReviewFindings != "" {
@@ -157,6 +160,11 @@ func StatusSections(st Status) string {
 				}
 				if t.ReviewEffort != "" {
 					detail = append(detail, "review@"+t.ReviewEffort)
+				}
+				// The leased review's placement when it is not cross_family;
+				// cross_family is left unsaid (issue #126).
+				if t.ReviewPlacement != "" {
+					detail = append(detail, "review: "+t.ReviewPlacement)
 				}
 				if label := engine.TaskCapsLabel(t.Caps); label != "" {
 					detail = append(detail, "("+label+")")

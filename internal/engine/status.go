@@ -210,6 +210,11 @@ type StatusPlan struct {
 	ReviewVerdict  string `json:"review_verdict,omitempty"`
 	ReviewFindings string `json:"review_findings,omitempty"`
 	ReviewJob      int64  `json:"review_job,omitempty"`
+	// ReviewPlacement is the leased plan review's placement kind (issue
+	// #126) when it is not cross_family: same_family, same_agent or
+	// unknown. Empty for cross_family (the default, left unsaid), for a
+	// plan not under review and for a review no reviewer has leased yet.
+	ReviewPlacement string `json:"review_placement,omitempty"`
 	// WaitingAmendment is true while the plan reviews with waiting
 	// amendment work (§6.2): tasks an amendment added or respecified
 	// under the running round, pending its verdict, which queues the
@@ -231,6 +236,12 @@ type StatusTask struct {
 	// review.effort), which status leaves unsaid.
 	ReviewTier   string `json:"review_tier,omitempty"`
 	ReviewEffort string `json:"review_effort,omitempty"`
+	// ReviewPlacement is the placement kind (issue #126) of the task's
+	// latest review job while the task reviews, when that job was leased
+	// and the kind is not cross_family: same_family, same_agent or
+	// unknown. Empty otherwise: a review no reviewer has leased names
+	// its unservable reason, never a placement.
+	ReviewPlacement string `json:"review_placement,omitempty"`
 	// Caps are the task's own round-cap overrides (§6.1); absent keys run
 	// at the engine default.
 	Caps   map[string]int `json:"caps,omitempty"`
@@ -614,6 +625,11 @@ func statusPlansTx(tx *sql.Tx, project int64, all bool, now time.Time) ([]Status
 		if plans[i].Tasks, err = statusPlanTasksTx(tx, plans[i].ID, now); err != nil {
 			return nil, 0, err
 		}
+		if plans[i].State == planReviewing && plans[i].ReviewJob != 0 {
+			if plans[i].ReviewPlacement, err = statusPlacementTx(tx, plans[i].ReviewJob); err != nil {
+				return nil, 0, err
+			}
+		}
 	}
 	return plans, finished - len(fin), nil
 }
@@ -687,8 +703,66 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, err
 		if tasks[i].Continues, err = statusContinuesTx(tx, tasks[i].ID); err != nil {
 			return nil, err
 		}
+		if tasks[i].State == taskReviewing {
+			var job int64
+			err := tx.QueryRow(`SELECT id FROM jobs WHERE task_id = ? AND kind = ? ORDER BY id DESC LIMIT 1`,
+				tasks[i].ID, KindReview).Scan(&job)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("read the review job of task %d: %w", tasks[i].ID, err)
+			}
+			if tasks[i].ReviewPlacement, err = statusPlacementTx(tx, job); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return tasks, nil
+}
+
+// statusPlacementTx reads the placement kind the lease recorded on a
+// review job's job_agent_picked event (issue #126) and returns it when
+// it is worth saying: same_family, same_agent or unknown. cross_family
+// is the default and stays unsaid, and a job no lease picked an agent
+// for has no event, so a waiting review shows no placement at all.
+func statusPlacementTx(tx *sql.Tx, job int64) (string, error) {
+	placement, err := jobPlacementTx(tx, job)
+	if err != nil || placement == placeCrossFamily {
+		return "", err
+	}
+	return placement, nil
+}
+
+// jobPlacementTx reads the placement kind the lease recorded on the
+// job's job_agent_picked event (issue #126), whatever the kind; "" when
+// no lease picked an agent for the job (a review waiting for a reviewer
+// has none, so it is never given a label).
+func jobPlacementTx(tx *sql.Tx, job int64) (string, error) {
+	if job == 0 {
+		return "", nil
+	}
+	var payload string
+	err := tx.QueryRow(`SELECT payload FROM events WHERE job_id = ? AND kind = ? ORDER BY id DESC LIMIT 1`,
+		job, evJobAgentPicked).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read the pick of job %d: %w", job, err)
+	}
+	var p eventPayload
+	if json.Unmarshal([]byte(payload), &p) != nil {
+		return "", nil
+	}
+	return p.Placement, nil
+}
+
+// placementNote words a review event's placement once (issue #126) for
+// the needs-you reason and the foreman's wake text: empty for
+// cross_family, the default, and for an event that carries none.
+func placementNote(placement string) string {
+	if placement == "" || placement == placeCrossFamily {
+		return ""
+	}
+	return " (review placement: " + placement + ")"
 }
 
 // landReadyState words the land_ready gate's target state for one done
@@ -1194,6 +1268,12 @@ func needsYouReason(kind, payload string) string {
 	}
 	if reason == "" {
 		reason = kind
+	}
+	if kind == evReviewChanges || kind == evReviewNoVerdict {
+		// First, so the line's cut never drops it.
+		if p.Placement != "" && p.Placement != placeCrossFamily {
+			reason = "review placement " + p.Placement + ": " + reason
+		}
 	}
 	return oneLine(reason, needsYouReasonLimit)
 }

@@ -78,6 +78,8 @@ func summary(it Item) string {
 		TierServed string `json:"tier_served"`
 		EffortFrom string `json:"effort_from"`
 		EffortTo   string `json:"effort_to"`
+		Agent      int64  `json:"agent"`
+		Placement  string `json:"placement"`
 		Prompt     *struct {
 			Template     int      `json:"template"`
 			Instructions string   `json:"instructions"`
@@ -93,6 +95,9 @@ func summary(it Item) string {
 	}
 	if it.Kind == "task_effort_bumped" {
 		return fmt.Sprintf("task effort %s -> %s: %s", p.EffortFrom, p.EffortTo, p.Reason)
+	}
+	if it.Kind == "job_agent_picked" && p.Placement != "" {
+		return pickedPlacement(p.Agent, p.Placement)
 	}
 	var parts []string
 	add := func(k, v string) {
@@ -167,4 +172,23 @@ func indentBody(line string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// pickedPlacement is a review's job_agent_picked line (issue #126): the
+// reviewer's agent and how it relates to the author, the placement kind
+// the lease recorded. Only a review's pick carries one; another job's
+// pick renders as before.
+func pickedPlacement(agent int64, placement string) string {
+	who := "reviewer agent " + strconv.FormatInt(agent, 10)
+	switch placement {
+	case "cross_family":
+		return who + " (cross_family: another family than the author)"
+	case "same_family":
+		return who + " (same_family: same family as the author, review.family=prefer)"
+	case "same_agent":
+		return who + " (same_agent: the author's own agent, review.family=prefer)"
+	case "unknown":
+		return who + " (unknown: the author's family unknown)"
+	}
+	return who + " (placement " + placement + ")"
 }

@@ -463,6 +463,9 @@ func wakeEventText(kind, payload string) string {
 	if text == "" {
 		return kind
 	}
+	if kind == evReviewChanges || kind == evReviewNoVerdict {
+		text += placementNote(p.Placement)
+	}
 	return text
 }
 
