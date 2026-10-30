@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -359,6 +360,114 @@ func syncWorkerInstructionTx(tx *sql.Tx, project int64, row, imported map[string
 	return upsertRoleInstructionTx(tx, project, RoleWorker, text, SourceImported, hash, now)
 }
 
+// RoleFileRemoval is one role an import moved to not configured, or one
+// whose local override stood against the move (§5.9): exactly one of
+// Removed and Kept is set.
+type RoleFileRemoval struct {
+	Role string
+	// Removed is the imported record that was deleted.
+	Removed *RoleInstruction
+	// Kept is the local record that kept its text against the dropped
+	// key, the ErrRoleTextKept case of a role file the file no longer
+	// names.
+	Kept *RoleInstruction
+}
+
+// Change is the import-result line of one removal: an applied move to
+// not configured, or the conflict of a local override that kept its
+// text while the file dropped the role's key.
+func (r RoleFileRemoval) Change() ConfigChange {
+	if r.Kept != nil {
+		return ConfigChange{Key: "instructions." + r.Role, Old: strconv.Quote(r.Kept.Text), New: RoleStateNotConfigured}
+	}
+	old := "none"
+	if r.Removed != nil {
+		old = instructionsSummary(r.Removed.Text)
+	}
+	return ConfigChange{Key: "instructions." + r.Role, Old: old, New: RoleStateNotConfigured}
+}
+
+// UnimportRoleFiles moves to not configured (§5.9 'Three states, no
+// hidden fallback') every non-worker role whose key the request no
+// longer configures: configured holds the roles the request configures —
+// the keys project.yaml's instructions map still names — and any other
+// role's imported row is removed, so dropping a key reaches not
+// configured at the next import instead of pinning the last import's
+// text forever. The worker is not this function's: its text is the
+// instructions setting and imports with project.yaml itself
+// (ImportProjectConfigWith), which removes its imported row the same
+// way. A local override wins (§13.1): the row keeps its text and is
+// returned as Kept, the caller's conflict, as ErrRoleTextKept is for a
+// text the file still carries. The upgrade's seed of a default (source
+// generated) is no import: it stands until an import owns the role, so
+// a project that upgraded without rerunning init keeps its guidance.
+func (e *Engine) UnimportRoleFiles(ctx context.Context, repoURL string, configured map[string]bool) ([]RoleFileRemoval, error) {
+	if repoURL == "" {
+		return nil, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
+	}
+	var out []RoleFileRemoval
+	err := e.store.Update(ctx, func(tx *sql.Tx) error {
+		var err error
+		out, err = e.unimportRoleFilesTx(tx, repoURL, configured)
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, ErrInvalidSetting) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("unimport the role instructions of %s: %w", RedactRepoURL(repoURL), err)
+	}
+	return out, nil
+}
+
+// unimportRoleFilesTx is UnimportRoleFiles' store step inside one
+// transaction, so the whole-project import (ImportProject) shares the
+// transaction the removals ride and rolls back with it.
+func (e *Engine) unimportRoleFilesTx(tx *sql.Tx, repoURL string, configured map[string]bool) ([]RoleFileRemoval, error) {
+	var out []RoleFileRemoval
+	now := e.cfg.Now()
+	if _, err := e.sweepTx(tx, now); err != nil {
+		return nil, err
+	}
+	var project int64
+	err := lookupProjectTx(tx, repoURL, "id", &project)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil // nothing was ever imported; there is no row to remove
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
+	}
+	for _, role := range RoleKeys {
+		if role == RoleWorker || configured[role] {
+			continue
+		}
+		cur, err := roleInstructionTx(tx, project, "", role)
+		if err != nil {
+			return nil, err
+		}
+		switch cur.Source {
+		case SourceDefault:
+			// No row: already not configured.
+		case SourceLocal:
+			// A local override wins over the key the file dropped:
+			// its text stays and the import reports the conflict.
+			out = append(out, RoleFileRemoval{Role: role, Kept: &cur})
+		case SourceGenerated:
+			// The upgrade's seed, never an import: it stands.
+		default:
+			if _, err := tx.Exec("DELETE FROM role_instructions WHERE project_id = ? AND role = ?", project, role); err != nil {
+				return nil, fmt.Errorf("clear the imported %s instructions of project %d: %w", role, project, err)
+			}
+			if _, err := appendEventTx(tx, evRoleInstructionSet, project, 0, 0,
+				eventPayload{Reason: fmt.Sprintf("%s instructions removed, key gone from the imported file", role)}, now); err != nil {
+				return nil, err
+			}
+			out = append(out, RoleFileRemoval{Role: role, Removed: &cur})
+		}
+	}
+	return out, nil
+}
+
 // ErrRoleTextKept reports a role-file import refused because a local
 // override stands under the role's text: it keeps its value and the
 // user resolves the two (§5.9: neither wins silently). The record
@@ -398,49 +507,9 @@ func (e *Engine) ImportRoleFile(ctx context.Context, repoURL, role, text string)
 	}
 	var out *RoleInstruction
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		now := e.cfg.Now()
-		if _, err := e.sweepTx(tx, now); err != nil {
-			return err
-		}
-		var project int64
-		var shownRepo string
-		err := lookupProjectTx(tx, repoURL, "id, repo_url", &project, &shownRepo)
-		switch {
-		case errors.Is(err, sql.ErrNoRows):
-			project, err = createProjectTx(tx, repoURL, setupDefaultBranch, "", "", now)
-			if err != nil {
-				return err
-			}
-			shownRepo = canon
-		case err != nil:
-			return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
-		}
-		if err := activeProjectTx(tx, project); err != nil {
-			return err
-		}
-		cur, err := roleInstructionTx(tx, project, shownRepo, role)
-		if err != nil {
-			return err
-		}
-		if cur.Source == SourceLocal {
-			// A local override wins over the file: the import is
-			// refused whole and the local value stays.
-			out = &cur
-			return ErrRoleTextKept
-		}
-		if err := upsertRoleInstructionTx(tx, project, role, text, SourceImported, roleImportVersion(role, text), now); err != nil {
-			return err
-		}
-		if _, err := appendEventTx(tx, evRoleInstructionSet, project, 0, 0,
-			eventPayload{Reason: fmt.Sprintf("%s instructions imported, %d bytes", role, len(text))}, now); err != nil {
-			return err
-		}
-		v, err := roleInstructionTx(tx, project, shownRepo, role)
-		if err != nil {
-			return err
-		}
-		out = &v
-		return nil
+		var err error
+		out, err = e.importRoleFileTx(tx, repoURL, canon, role, text)
+		return err
 	})
 	switch {
 	case errors.Is(err, ErrRoleTextKept):
@@ -452,4 +521,53 @@ func (e *Engine) ImportRoleFile(ctx context.Context, repoURL, role, text string)
 		return nil, fmt.Errorf("import the %s instructions of the project of %s: %w", role, RedactRepoURL(repoURL), err)
 	}
 	return out, nil
+}
+
+// importRoleFileTx is ImportRoleFile's store step inside one
+// transaction, so the whole-project import (ImportProject) shares the
+// transaction the role write rides and rolls back with it. ErrRoleTextKept
+// is its one non-error refusal: nothing was written and the kept local
+// record is returned beside it.
+func (e *Engine) importRoleFileTx(tx *sql.Tx, repoURL, canon, role, text string) (*RoleInstruction, error) {
+	now := e.cfg.Now()
+	if _, err := e.sweepTx(tx, now); err != nil {
+		return nil, err
+	}
+	var project int64
+	var shownRepo string
+	err := lookupProjectTx(tx, repoURL, "id, repo_url", &project, &shownRepo)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		project, err = createProjectTx(tx, repoURL, setupDefaultBranch, "", "", now)
+		if err != nil {
+			return nil, err
+		}
+		shownRepo = canon
+	case err != nil:
+		return nil, fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
+	}
+	if err := activeProjectTx(tx, project); err != nil {
+		return nil, err
+	}
+	cur, err := roleInstructionTx(tx, project, shownRepo, role)
+	if err != nil {
+		return nil, err
+	}
+	if cur.Source == SourceLocal {
+		// A local override wins over the file: the import is
+		// refused whole and the local value stays.
+		return &cur, ErrRoleTextKept
+	}
+	if err := upsertRoleInstructionTx(tx, project, role, text, SourceImported, roleImportVersion(role, text), now); err != nil {
+		return nil, err
+	}
+	if _, err := appendEventTx(tx, evRoleInstructionSet, project, 0, 0,
+		eventPayload{Reason: fmt.Sprintf("%s instructions imported, %d bytes", role, len(text))}, now); err != nil {
+		return nil, err
+	}
+	v, err := roleInstructionTx(tx, project, shownRepo, role)
+	if err != nil {
+		return nil, err
+	}
+	return &v, nil
 }

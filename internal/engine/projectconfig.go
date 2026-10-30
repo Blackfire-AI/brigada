@@ -727,19 +727,54 @@ func (e *Engine) ImportProjectConfig(ctx context.Context, repoURL string, conten
 // text is bounded like a `project set` of it, and a refusal leaves the
 // previous value in effect.
 func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, content []byte, instructions *string, accept bool) (ImportResult, error) {
-	if repoURL == "" {
-		return ImportResult{}, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
-	}
-	canon, err := Canonicalize(repoURL)
-	if err != nil {
-		return ImportResult{}, fmt.Errorf("%w: %v", ErrInvalidSetting, err)
-	}
-	cfg, err := ParseProjectConfig(content)
+	imp, err := parseProjectImport(repoURL, content, instructions)
 	if err != nil {
 		return ImportResult{}, err
 	}
+	var res ImportResult
+	err = e.store.Update(ctx, func(tx *sql.Tx) error {
+		var err error
+		res, err = e.importProjectConfigTx(tx, repoURL, imp, accept)
+		return err
+	})
+	if err != nil {
+		return ImportResult{}, fmt.Errorf("import the project configuration of %s: %w", RedactRepoURL(repoURL), err)
+	}
+	return res, nil
+}
+
+// projectImport is one project.yaml import validated whole, ready for the
+// store: the parsed file, the canonical identity of the origin, the
+// worker key's file spelling, the import hash and the empty-by-choice
+// worker file.
+type projectImport struct {
+	cfg       ProjectConfig
+	canon     string
+	workerKey string
+	hash      string
+	// emptyWorkerFile: the worker file was sent empty — the
+	// empty-by-choice state (§5.9), not an absent key.
+	emptyWorkerFile bool
+}
+
+// parseProjectImport validates what an import takes before the store is
+// touched at all (§13.1): the origin's identity, the file whole, and the
+// worker instructions text the client read (§5.9), each naming the other
+// and bounded. A refusal leaves every previous value in effect.
+func parseProjectImport(repoURL string, content []byte, instructions *string) (projectImport, error) {
+	if repoURL == "" {
+		return projectImport{}, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
+	}
+	canon, err := Canonicalize(repoURL)
+	if err != nil {
+		return projectImport{}, fmt.Errorf("%w: %v", ErrInvalidSetting, err)
+	}
+	cfg, err := ParseProjectConfig(content)
+	if err != nil {
+		return projectImport{}, err
+	}
 	if cfg.Repo != canon {
-		return ImportResult{}, configErr("repo %q is not this repository's origin %q; refusing to import another repository's configuration", cfg.Repo, canon)
+		return projectImport{}, configErr("repo %q is not this repository's origin %q; refusing to import another repository's configuration", cfg.Repo, canon)
 	}
 	// The worker's file is instructions_file or, the same thing spelled
 	// in the nested map, instructions.worker (§5.9): either way its text
@@ -751,198 +786,197 @@ func (e *Engine) ImportProjectConfigWith(ctx context.Context, repoURL string, co
 	}
 	switch {
 	case workerFile != "" && instructions == nil:
-		return ImportResult{}, configErr("%s names %q but no text was sent: the client reads the file and sends its content", workerKey, workerFile)
+		return projectImport{}, configErr("%s names %q but no text was sent: the client reads the file and sends its content", workerKey, workerFile)
 	case workerFile == "" && instructions != nil:
-		return ImportResult{}, configErr("instructions text was sent but the file sets no %s", configKeyInstructionsFile)
+		return projectImport{}, configErr("instructions text was sent but the file sets no %s", configKeyInstructionsFile)
 	case instructions != nil:
 		// Every text sent is bounded and checked before an empty one is
 		// read as unset: a whitespace-only file over the bound is a
 		// refusal naming the worker role, the size and the limit, never
 		// a silently cleared value.
 		if err := validateRoleText(RoleWorker, *instructions); err != nil {
-			return ImportResult{}, configErr("%s: %s", workerFile, strings.TrimPrefix(err.Error(), ErrInvalidSetting.Error()+": "))
+			return projectImport{}, configErr("%s: %s", workerFile, strings.TrimPrefix(err.Error(), ErrInvalidSetting.Error()+": "))
 		}
 		if strings.TrimSpace(*instructions) != "" {
 			raw, err := json.Marshal(*instructions)
 			if err != nil {
-				return ImportResult{}, fmt.Errorf("encode the instructions: %w", err)
+				return projectImport{}, fmt.Errorf("encode the instructions: %w", err)
 			}
 			cfg.Values[SettingInstructions] = raw
 		}
 	}
-	// An empty worker file is the empty-by-choice state (§5.9), not an
-	// absent key: it unsets the setting and leaves an empty imported row.
-	emptyWorkerFile := instructions != nil && strings.TrimSpace(*instructions) == ""
 	// The hash covers the yaml and the instruction text, so a change to the
 	// text alone shows as a changed import.
-	hash := ConfigHashWith(content, instructions)
-	res := ImportResult{Hash: hash}
-	err = e.store.Update(ctx, func(tx *sql.Tx) error {
-		res = ImportResult{Hash: hash}
-		now := e.cfg.Now()
-		if _, err := e.sweepTx(tx, now); err != nil {
-			return err
+	return projectImport{cfg: cfg, canon: canon, workerKey: workerKey,
+		hash:            ConfigHashWith(content, instructions),
+		emptyWorkerFile: instructions != nil && strings.TrimSpace(*instructions) == ""}, nil
+}
+
+// importProjectConfigTx is ImportProjectConfigWith's store step inside
+// one transaction: settings, provenance and the worker row land together
+// with everything else the caller's transaction holds — the whole-project
+// import (ImportProject) shares it — and roll back with it.
+func (e *Engine) importProjectConfigTx(tx *sql.Tx, repoURL string, imp projectImport, accept bool) (ImportResult, error) {
+	res := ImportResult{Hash: imp.hash}
+	now := e.cfg.Now()
+	if _, err := e.sweepTx(tx, now); err != nil {
+		return ImportResult{}, err
+	}
+	var project int64
+	var rawSettings, rawProv, shownRepo string
+	err := lookupProjectTx(tx, repoURL, "id, settings, settings_prov, repo_url", &project, &rawSettings, &rawProv, &shownRepo)
+	born := false
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		born = true
+		rawSettings, rawProv, shownRepo = "", "", imp.canon
+	case err != nil:
+		return ImportResult{}, fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
+	}
+	row := map[string]json.RawMessage{}
+	if rawSettings != "" {
+		if err := json.Unmarshal([]byte(rawSettings), &row); err != nil {
+			return ImportResult{}, fmt.Errorf("parse the settings of project %d: %w", project, err)
 		}
-		var project int64
-		var rawSettings, rawProv, shownRepo string
-		err := lookupProjectTx(tx, repoURL, "id, settings, settings_prov, repo_url", &project, &rawSettings, &rawProv, &shownRepo)
-		born := false
+	}
+	prov, err := parseProv(rawProv)
+	if err != nil {
+		return ImportResult{}, fmt.Errorf("parse the provenance of project %d: %w", project, err)
+	}
+	first := prov.Hash == ""
+	// An empty-by-choice worker row is a hand-set value in its own
+	// right (§5.9): the file's text meets it as a replacement to
+	// accept or a conflict to keep, never as a fresh set over an
+	// absent key, so the marker survives the merge itself and the
+	// settings readers see no instructions while it stands.
+	emptyChoice := false
+	if !born {
+		var src, wtext string
+		err := tx.QueryRow("SELECT source, text FROM role_instructions WHERE project_id = ? AND role = ?", project, RoleWorker).Scan(&src, &wtext)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			born = true
-			rawSettings, rawProv, shownRepo = "", "", canon
 		case err != nil:
-			return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
+			return ImportResult{}, fmt.Errorf("read the worker instructions of project %d: %w", project, err)
+		default:
+			emptyChoice = src == SourceLocal && wtext == ""
 		}
-		row := map[string]json.RawMessage{}
-		if rawSettings != "" {
-			if err := json.Unmarshal([]byte(rawSettings), &row); err != nil {
-				return fmt.Errorf("parse the settings of project %d: %w", project, err)
+	}
+	// replacedLocal: this import explicitly accepted the replacement
+	// of a hand-set instructions value, so the worker row follows
+	// the settings instead of keeping the local text.
+	replacedLocal := false
+	newImported := map[string]json.RawMessage{}
+	for _, k := range append(append([]string{}, SettingKeys...), configKeySkillsDir) {
+		fv, inFile := imp.cfg.Values[k]
+		cur, has := row[k]
+		wasImported := has && prov.isImported(k, cur)
+		if !inFile {
+			if wasImported {
+				// The file dropped a key the previous import set and
+				// nobody overrode: back to the default.
+				res.Applied = append(res.Applied, ConfigChange{k, renderSettingRaw(k, cur), "default"})
+				delete(row, k)
 			}
+			continue
 		}
-		prov, err := parseProv(rawProv)
-		if err != nil {
-			return fmt.Errorf("parse the provenance of project %d: %w", project, err)
-		}
-		first := prov.Hash == ""
-		// An empty-by-choice worker row is a hand-set value in its own
-		// right (§5.9): the file's text meets it as a replacement to
-		// accept or a conflict to keep, never as a fresh set over an
-		// absent key, so the marker survives the merge itself and the
-		// settings readers see no instructions while it stands.
-		emptyChoice := false
-		if !born {
-			var src, wtext string
-			err := tx.QueryRow("SELECT source, text FROM role_instructions WHERE project_id = ? AND role = ?", project, RoleWorker).Scan(&src, &wtext)
-			switch {
-			case errors.Is(err, sql.ErrNoRows):
-			case err != nil:
-				return fmt.Errorf("read the worker instructions of project %d: %w", project, err)
-			default:
-				emptyChoice = src == SourceLocal && wtext == ""
-			}
-		}
-		// replacedLocal: this import explicitly accepted the replacement
-		// of a hand-set instructions value, so the worker row follows
-		// the settings instead of keeping the local text.
-		replacedLocal := false
-		newImported := map[string]json.RawMessage{}
-		for _, k := range append(append([]string{}, SettingKeys...), configKeySkillsDir) {
-			fv, inFile := cfg.Values[k]
-			cur, has := row[k]
-			imp := has && prov.isImported(k, cur)
-			if !inFile {
-				if imp {
-					// The file dropped a key the previous import set and
-					// nobody overrode: back to the default.
-					res.Applied = append(res.Applied, ConfigChange{k, renderSettingRaw(k, cur), "default"})
-					delete(row, k)
-				}
-				continue
-			}
-			if k == SettingInstructions && emptyChoice {
-				// The marker reads as the hand-set empty value the file
-				// would replace: a diff to accept on a first import, a
-				// conflict to keep after it.
-				empty := json.RawMessage(`""`)
-				if first {
-					res.Diffs = append(res.Diffs, ConfigChange{k, renderSettingRaw(k, empty), renderSettingRaw(k, fv)})
-					if accept {
-						row[k] = fv
-						newImported[k] = fv
-						replacedLocal = true
-						res.Applied = append(res.Applied, ConfigChange{k, renderSettingRaw(k, empty), renderSettingRaw(k, fv)})
-					}
-				} else {
-					res.Conflicts = append(res.Conflicts, ConfigChange{k, renderConflictRaw(k, empty), renderConflictRaw(k, fv)})
-				}
-				continue
-			}
-			switch {
-			case !has:
-				row[k] = fv
-				newImported[k] = fv
-				res.Applied = append(res.Applied, ConfigChange{k, "default", renderSettingRaw(k, fv)})
-			case compactJSON(cur) == compactJSON(fv):
-				if imp {
-					newImported[k] = fv
-				}
-			case imp:
-				row[k] = fv
-				newImported[k] = fv
-				res.Applied = append(res.Applied, ConfigChange{k, renderSettingRaw(k, cur), renderSettingRaw(k, fv)})
-			case first:
-				res.Diffs = append(res.Diffs, ConfigChange{k, renderSettingRaw(k, cur), renderSettingRaw(k, fv)})
+		if k == SettingInstructions && emptyChoice {
+			// The marker reads as the hand-set empty value the file
+			// would replace: a diff to accept on a first import, a
+			// conflict to keep after it.
+			empty := json.RawMessage(`""`)
+			if first {
+				res.Diffs = append(res.Diffs, ConfigChange{k, renderSettingRaw(k, empty), renderSettingRaw(k, fv)})
 				if accept {
 					row[k] = fv
 					newImported[k] = fv
-					if k == SettingInstructions {
-						replacedLocal = true
-					}
-					res.Applied = append(res.Applied, ConfigChange{k, renderSettingRaw(k, cur), renderSettingRaw(k, fv)})
+					replacedLocal = true
+					res.Applied = append(res.Applied, ConfigChange{k, renderSettingRaw(k, empty), renderSettingRaw(k, fv)})
 				}
-			default:
-				res.Conflicts = append(res.Conflicts, ConfigChange{k, renderConflictRaw(k, cur), renderConflictRaw(k, fv)})
+			} else {
+				res.Conflicts = append(res.Conflicts, ConfigChange{k, renderConflictRaw(k, empty), renderConflictRaw(k, fv)})
 			}
+			continue
 		}
-		if workerKey != configKeyInstructionsFile {
-			// The worker file came from the nested map: name the change
-			// the way the file spells it, a conflict showing both texts
-			// quoted like every other role's.
-			for _, l := range [][]ConfigChange{res.Applied, res.Diffs, res.Conflicts} {
-				for i := range l {
-					if l[i].Key == SettingInstructions {
-						l[i].Key = workerKey
-					}
+		switch {
+		case !has:
+			row[k] = fv
+			newImported[k] = fv
+			res.Applied = append(res.Applied, ConfigChange{k, "default", renderSettingRaw(k, fv)})
+		case compactJSON(cur) == compactJSON(fv):
+			if wasImported {
+				newImported[k] = fv
+			}
+		case wasImported:
+			row[k] = fv
+			newImported[k] = fv
+			res.Applied = append(res.Applied, ConfigChange{k, renderSettingRaw(k, cur), renderSettingRaw(k, fv)})
+		case first:
+			res.Diffs = append(res.Diffs, ConfigChange{k, renderSettingRaw(k, cur), renderSettingRaw(k, fv)})
+			if accept {
+				row[k] = fv
+				newImported[k] = fv
+				if k == SettingInstructions {
+					replacedLocal = true
 				}
+				res.Applied = append(res.Applied, ConfigChange{k, renderSettingRaw(k, cur), renderSettingRaw(k, fv)})
 			}
-			for i := range res.Conflicts {
-				if c := &res.Conflicts[i]; c.Key == workerKey {
-					c.Old, c.New = strconv.Quote(c.Old), strconv.Quote(c.New)
-				}
-			}
+		default:
+			res.Conflicts = append(res.Conflicts, ConfigChange{k, renderConflictRaw(k, cur), renderConflictRaw(k, fv)})
 		}
-		if len(res.Diffs) > 0 && !accept {
-			// Nothing is written before the user accepts the replacement.
-			res.NeedsConfirm = true
-			res.Applied = nil
-			return nil
-		}
-		prov.Hash, prov.Imported = hash, newImported
-		b, err := json.Marshal(row)
-		if err != nil {
-			return fmt.Errorf("encode the settings of project %d: %w", project, err)
-		}
-		pb, err := prov.encode()
-		if err != nil {
-			return fmt.Errorf("encode the provenance of project %d: %w", project, err)
-		}
-		if born {
-			project, err = createProjectTx(tx, repoURL, setupDefaultBranch, "", "", now)
-			if err != nil {
-				return err
-			}
-		}
-		if _, err := tx.Exec("UPDATE projects SET archived_at = NULL, settings = ?, settings_prov = ?, updated_at = ? WHERE id = ?", string(b), pb, fmtTime(now), project); err != nil {
-			return fmt.Errorf("store the settings of project %d: %w", project, err)
-		}
-		// The worker role row mirrors the import's instructions outcome
-		// (§5.9): text and provenance both, so a re-import that moved
-		// only other keys still dates the row with the new hash; a local
-		// text or an empty-by-choice mark is left alone unless this
-		// import explicitly accepted its replacement.
-		if err := syncWorkerInstructionTx(tx, project, row, newImported, hash, replacedLocal, emptyWorkerFile, now); err != nil {
-			return err
-		}
-		v, err := settingsViewTx(tx, project, shownRepo, e.cfg.ForemanWakeBudget)
-		if err != nil {
-			return err
-		}
-		res.Settings = &v
-		return nil
-	})
-	if err != nil {
-		return ImportResult{}, fmt.Errorf("import the project configuration of %s: %w", RedactRepoURL(repoURL), err)
 	}
+	if imp.workerKey != configKeyInstructionsFile {
+		// The worker file came from the nested map: name the change
+		// the way the file spells it, a conflict showing both texts
+		// quoted like every other role's.
+		for _, l := range [][]ConfigChange{res.Applied, res.Diffs, res.Conflicts} {
+			for i := range l {
+				if l[i].Key == SettingInstructions {
+					l[i].Key = imp.workerKey
+				}
+			}
+		}
+		for i := range res.Conflicts {
+			if c := &res.Conflicts[i]; c.Key == imp.workerKey {
+				c.Old, c.New = strconv.Quote(c.Old), strconv.Quote(c.New)
+			}
+		}
+	}
+	if len(res.Diffs) > 0 && !accept {
+		// Nothing is written before the user accepts the replacement.
+		res.NeedsConfirm = true
+		res.Applied = nil
+		return res, nil
+	}
+	prov.Hash, prov.Imported = imp.hash, newImported
+	b, err := json.Marshal(row)
+	if err != nil {
+		return ImportResult{}, fmt.Errorf("encode the settings of project %d: %w", project, err)
+	}
+	pb, err := prov.encode()
+	if err != nil {
+		return ImportResult{}, fmt.Errorf("encode the provenance of project %d: %w", project, err)
+	}
+	if born {
+		project, err = createProjectTx(tx, repoURL, setupDefaultBranch, "", "", now)
+		if err != nil {
+			return ImportResult{}, err
+		}
+	}
+	if _, err := tx.Exec("UPDATE projects SET archived_at = NULL, settings = ?, settings_prov = ?, updated_at = ? WHERE id = ?", string(b), pb, fmtTime(now), project); err != nil {
+		return ImportResult{}, fmt.Errorf("store the settings of project %d: %w", project, err)
+	}
+	// The worker role row mirrors the import's instructions outcome
+	// (§5.9): text and provenance both, so a re-import that moved
+	// only other keys still dates the row with the new hash; a local
+	// text or an empty-by-choice mark is left alone unless this
+	// import explicitly accepted its replacement.
+	if err := syncWorkerInstructionTx(tx, project, row, newImported, imp.hash, replacedLocal, imp.emptyWorkerFile, now); err != nil {
+		return ImportResult{}, err
+	}
+	v, err := settingsViewTx(tx, project, shownRepo, e.cfg.ForemanWakeBudget)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	res.Settings = &v
 	return res, nil
 }

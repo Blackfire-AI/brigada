@@ -21,7 +21,7 @@ import (
 
 // generatedHeader is the marked header for a generated text.
 func generatedHeader(text string) string {
-	return fmt.Sprintf("<!-- brigada: version=%s digest=%s -->\n", defaults.Version, defaults.Digest(text))
+	return fmt.Sprintf("<!-- brigada: version=%s digest=%s -->\n", brigadaVersion(), defaults.Digest(text))
 }
 
 // skillFrontmatterEnd is the offset just past a SKILL.md's closing `---`
@@ -94,8 +94,9 @@ type guidanceTarget struct {
 
 // guidanceTargets lists the files init generates for cfg: the role files
 // the nested instructions map names, and the default skills under
-// skills_dir. A project.yaml that uses the old instructions_file alias, or
-// names no skills_dir, gets no files for them.
+// skills_dir. A worker the file keeps on the old instructions_file alias
+// gets no generated file of its own: the alias's file is the worker's
+// (§5.9), and a file naming no skills_dir gets none for it.
 func guidanceTargets(cfg engine.ProjectConfig) ([]guidanceTarget, error) {
 	var out []guidanceTarget
 	for _, role := range engine.RoleKeys {
@@ -119,6 +120,26 @@ func guidanceTargets(cfg engine.ProjectConfig) ([]guidanceTarget, error) {
 		}
 	}
 	return out, nil
+}
+
+// guidanceNotes names the roles init's plan leaves not configured (§5.9
+// 'Three states, no hidden fallback'): a role whose key the
+// instructions map does not carry — the worker's key being its
+// instructions_file alias. Once the map exists a missing key is the
+// user's choice, so init adds nothing back; it says what stands and how
+// the role comes back.
+func guidanceNotes(cfg engine.ProjectConfig) []string {
+	var notes []string
+	for _, role := range engine.RoleKeys {
+		if _, ok := cfg.RoleFiles[role]; ok {
+			continue
+		}
+		if role == engine.RoleWorker && cfg.InstructionsFile != "" {
+			continue
+		}
+		notes = append(notes, fmt.Sprintf("instructions.%s: not configured (no key in project.yaml's instructions map); brigada init --take-default %s restores it", role, role))
+	}
+	return notes
 }
 
 // planGuidance plans the generated files (§5.9). A missing file is

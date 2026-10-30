@@ -8,14 +8,18 @@ import (
 )
 
 // reviewUnservableTx reports whether a queued review job could never be
-// taken by any registered agent, even one ready and out of cooling: no
+// taken by any registered agent, even one ready and out of cooling.
+// Under review.family=require (issue #126) that is today's rule: no
 // agent other than the author passes ExcludeFamily and offers the
 // review class — and, on a retry whose exclusion lifts nowhere (the
-// excluded agent gone or of the author's family), ExcludeAgent too —
-// the test qualifyingAgentRowsTx applies. A cooling or broken
-// agent of the right family makes the job merely wait, never
-// unservable: health is temporary, a missing structural reviewer is not.
-func reviewUnservableTx(tx *sql.Tx, j *jobRow) (bool, error) {
+// excluded agent gone or of the author's family), ExcludeAgent too.
+// Under prefer a review is unservable only when no review-class agent
+// at all could take it: the family ladder always has a step for a
+// known family, and an unknown one keeps any agent but the author. A
+// cooling or broken agent of the winning step makes the job merely
+// wait, never unservable: health is temporary, a missing structural
+// reviewer is not. The test qualifyingAgentRowsTx applies.
+func reviewUnservableTx(tx *sql.Tx, reviewFamily string, j *jobRow) (bool, error) {
 	// A review that excludes nothing (an agent-less author) is taken by
 	// any runner, agent-less ones included: never structurally stuck.
 	if j.Kind != KindReview {
@@ -28,7 +32,7 @@ func reviewUnservableTx(tx *sql.Tx, j *jobRow) (bool, error) {
 	if j.ExcludeFamily == "" && j.ExcludeAgent == 0 && author == 0 {
 		return false, nil
 	}
-	return noReviewAgentTx(tx, j)
+	return noReviewAgentTx(tx, reviewFamily, j)
 }
 
 // reviewAuthorTx identifies whose work a review reads, independently of
@@ -58,13 +62,13 @@ func reviewAuthorTx(tx *sql.Tx, j *jobRow) (int64, error) {
 }
 
 // noReviewAgentTx applies lease eligibility without temporary health and
-// cooling limits. In particular, the author remains excluded on retries,
-// alongside the author's known family. A retry's agent exclusion lifts
-// when no other reviewer exists structurally (decided 2026-10-20): the
-// excluded reviewer then takes the retry, so it alone is never a missing
-// reviewer.
-func noReviewAgentTx(tx *sql.Tx, j *jobRow) (bool, error) {
-	agents, err := qualifyingAgentRowsTx(tx, 0, j, string(KindReview), "")
+// cooling limits. In particular, the author remains excluded on retries
+// whose family is unknown, alongside the family rule require keeps. A
+// retry's agent exclusion lifts when no other reviewer exists
+// structurally (decided 2026-10-20): the excluded reviewer then takes
+// the retry, so it alone is never a missing reviewer.
+func noReviewAgentTx(tx *sql.Tx, reviewFamily string, j *jobRow) (bool, error) {
+	agents, err := qualifyingAgentRowsTx(tx, reviewFamily, 0, j, string(KindReview), "")
 	return len(agents) == 0, err
 }
 
@@ -102,7 +106,7 @@ func onlyAuthorReviewerTx(tx *sql.Tx, j *jobRow) (bool, error) {
 	return found, rows.Err()
 }
 
-func noReviewerReasonTx(tx *sql.Tx, j *jobRow, entry bool) (string, error) {
+func noReviewerReasonTx(tx *sql.Tx, reviewFamily string, j *jobRow, entry bool) (string, error) {
 	onlyAuthor, err := onlyAuthorReviewerTx(tx, j)
 	if err != nil {
 		return "", err
@@ -110,29 +114,46 @@ func noReviewerReasonTx(tx *sql.Tx, j *jobRow, entry bool) (string, error) {
 	if onlyAuthor {
 		return noReviewerAuthor, nil
 	}
-	if entry {
-		return noReviewerEntry(j.ExcludeFamily), nil
+	family := j.ExcludeFamily
+	if familyPrefer(reviewFamily) {
+		// The family ladder never leaves a review unservable (issue
+		// #126): whatever is missing, the family rule is not the cause.
+		family = ""
 	}
-	return noReviewerWhy(j.ExcludeFamily), nil
+	if entry {
+		return noReviewerEntry(family, reviewFamily), nil
+	}
+	return noReviewerWhy(family, reviewFamily), nil
 }
 
 // noReviewerWhy is the one sentence for why a review job can never be
-// taken, the words the queue-TTL park gives.
-func noReviewerWhy(family string) string {
+// taken, the words the queue-TTL park gives. Where the family rule is
+// the cause it is named with its setting (issue #126).
+func noReviewerWhy(family, reviewFamily string) string {
 	if family == "" {
 		return "no reviewer: no agent offers review"
 	}
-	return "no reviewer: no agent of a family other than " + family + " offers review"
+	why := "no reviewer: no agent of a family other than " + family + " offers review"
+	if familyPrefer(reviewFamily) {
+		return why
+	}
+	return why + ", review.family=require"
 }
 
 // noReviewerEntry is the needs-you line, and the notification's, for an
 // unservable review: what is missing and what the user can do about it.
-func noReviewerEntry(family string) string {
+// Where the family rule is the cause it is named with its setting
+// (issue #126), as noReviewerWhy names it.
+func noReviewerEntry(family, reviewFamily string) string {
 	if family == "" {
 		return "no reviewer: no agent offers review; offer an agent that does to the runner (--agent harness=…) or review by hand"
 	}
-	return "no reviewer: needs a reviewer of another family than the author (" + family +
+	why := "no reviewer: needs a reviewer of another family than the author (" + family +
 		"); offer an agent of another family to the runner (--agent harness=…) or review by hand"
+	if familyPrefer(reviewFamily) {
+		return why
+	}
+	return why + ", review.family=require"
 }
 
 // queuedReview is a queued review job of a task waiting for its review.
@@ -174,7 +195,7 @@ func queuedReviewsTx(tx *sql.Tx, project int64) ([]queuedReview, error) {
 
 // unservableReviewsTx is the queued task reviews no agent could ever
 // take (see reviewUnservableTx).
-func unservableReviewsTx(tx *sql.Tx, project int64) ([]queuedReview, error) {
+func unservableReviewsTx(tx *sql.Tx, reviewFamily string, project int64) ([]queuedReview, error) {
 	all, err := queuedReviewsTx(tx, project)
 	if err != nil {
 		return nil, err
@@ -185,12 +206,12 @@ func unservableReviewsTx(tx *sql.Tx, project int64) ([]queuedReview, error) {
 		if err != nil {
 			return nil, err
 		}
-		bad, err := reviewUnservableTx(tx, j)
+		bad, err := reviewUnservableTx(tx, reviewFamily, j)
 		if err != nil {
 			return nil, err
 		}
 		if bad {
-			q.reason, err = noReviewerReasonTx(tx, j, true)
+			q.reason, err = noReviewerReasonTx(tx, reviewFamily, j, true)
 			if err != nil {
 				return nil, err
 			}
@@ -204,8 +225,8 @@ func unservableReviewsTx(tx *sql.Tx, project int64) ([]queuedReview, error) {
 // time a queued review job is found unservable; the delivery loop turns
 // it into the user's notification (§10). The event is the dedup mark:
 // the sweep runs on every tick and status call, the event once per job.
-func flagUnservableReviewsTx(tx *sql.Tx, now time.Time) error {
-	bad, err := unservableReviewsTx(tx, 0)
+func flagUnservableReviewsTx(tx *sql.Tx, reviewFamily string, now time.Time) error {
+	bad, err := unservableReviewsTx(tx, reviewFamily, 0)
 	if err != nil {
 		return err
 	}
@@ -224,8 +245,8 @@ func flagUnservableReviewsTx(tx *sql.Tx, now time.Time) error {
 // statusNoReviewerTx is the needs-you entries of the unservable task
 // reviews (§10): the task waits at reviewing until an eligible reviewer
 // registers.
-func statusNoReviewerTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
-	bad, err := unservableReviewsTx(tx, project)
+func statusNoReviewerTx(tx *sql.Tx, reviewFamily string, project int64) ([]NeedsYouItem, error) {
+	bad, err := unservableReviewsTx(tx, reviewFamily, project)
 	if err != nil {
 		return nil, err
 	}

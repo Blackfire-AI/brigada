@@ -167,39 +167,7 @@ func (e *Engine) ImportSkills(ctx context.Context, repoURL string, skills []Skil
 		return nil, err
 	}
 	err = e.store.Update(ctx, func(tx *sql.Tx) error {
-		now := e.cfg.Now()
-		if _, err := e.sweepTx(tx, now); err != nil {
-			return err
-		}
-		var project int64
-		err := lookupProjectTx(tx, repoURL, "id", &project)
-		switch {
-		case errors.Is(err, sql.ErrNoRows):
-			project, err = createProjectTx(tx, repoURL, setupDefaultBranch, "", "", now)
-			if err != nil {
-				return err
-			}
-		case err != nil:
-			return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
-		}
-		if err := activeProjectTx(tx, project); err != nil {
-			return err
-		}
-		if _, err := tx.Exec("DELETE FROM skills WHERE project_id = ?", project); err != nil {
-			return fmt.Errorf("replace the skills of project %d: %w", project, err)
-		}
-		for _, s := range in {
-			if _, err := tx.Exec(`INSERT INTO skills (project_id, name, description, for_role, text, digest, tree_digest)
-				VALUES (?, ?, ?, ?, ?, ?, ?)`, project, s.Name, s.Description, s.For, s.Text, s.Digest, s.TreeDigest); err != nil {
-				return fmt.Errorf("import skill %s of project %d: %w", s.Name, project, err)
-			}
-		}
-		reason := "skills: none (imported)"
-		if len(names) > 0 {
-			reason = fmt.Sprintf("skills: %s (imported)", strings.Join(names, ","))
-		}
-		_, err = appendEventTx(tx, evProjectSettingSet, project, 0, 0, eventPayload{Reason: reason}, now)
-		return err
+		return e.importSkillsTx(tx, repoURL, in, names)
 	})
 	if err != nil {
 		if errors.Is(err, ErrInvalidSetting) {
@@ -208,6 +176,46 @@ func (e *Engine) ImportSkills(ctx context.Context, repoURL string, skills []Skil
 		return nil, fmt.Errorf("import the skills of the project of %s: %w", RedactRepoURL(repoURL), err)
 	}
 	return e.Skills(ctx, repoURL)
+}
+
+// importSkillsTx is ImportSkills' store step inside one transaction, with
+// the skills already validated (validateSkills fills their defaults), so
+// the whole-project import (ImportProject) shares the transaction the
+// skills write rides and rolls back with it.
+func (e *Engine) importSkillsTx(tx *sql.Tx, repoURL string, in []Skill, names []string) error {
+	now := e.cfg.Now()
+	if _, err := e.sweepTx(tx, now); err != nil {
+		return err
+	}
+	var project int64
+	err := lookupProjectTx(tx, repoURL, "id", &project)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		project, err = createProjectTx(tx, repoURL, setupDefaultBranch, "", "", now)
+		if err != nil {
+			return err
+		}
+	case err != nil:
+		return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
+	}
+	if err := activeProjectTx(tx, project); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM skills WHERE project_id = ?", project); err != nil {
+		return fmt.Errorf("replace the skills of project %d: %w", project, err)
+	}
+	for _, s := range in {
+		if _, err := tx.Exec(`INSERT INTO skills (project_id, name, description, for_role, text, digest, tree_digest)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, project, s.Name, s.Description, s.For, s.Text, s.Digest, s.TreeDigest); err != nil {
+			return fmt.Errorf("import skill %s of project %d: %w", s.Name, project, err)
+		}
+	}
+	reason := "skills: none (imported)"
+	if len(names) > 0 {
+		reason = fmt.Sprintf("skills: %s (imported)", strings.Join(names, ","))
+	}
+	_, err = appendEventTx(tx, evProjectSettingSet, project, 0, 0, eventPayload{Reason: reason}, now)
+	return err
 }
 
 // Skills lists the repo's project's imported skills by name. A repo with

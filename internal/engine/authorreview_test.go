@@ -23,7 +23,9 @@ func TestReviewNeverLeasesToAuthor(t *testing.T) {
 		{"known author with empty exclusion", "anthropic", "anthropic", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			e := newEnv(t)
+			// review.family=require keeps today's rule (issue #126): the
+			// author never reviews its own work, whatever the family.
+			e := newEnvCfg(t, func(c *Config) { c.Review.Family = ReviewFamilyRequire })
 			author := e.agented("author", tt.authorFamily, "implement", "review")
 			review := e.runToReview(author)
 			if tt.clearFamily {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/caps"
+	"github.com/Blackfire-AI/brigada/internal/prompt"
 	"github.com/Blackfire-AI/brigada/internal/store"
 )
 
@@ -220,8 +221,15 @@ func (e *Engine) Lease(ctx context.Context, owner int64, harnesses, labels []str
 		}); err != nil {
 			return err
 		}
+		if e.betweenLeaseTx != nil {
+			e.betweenLeaseTx()
+		}
 		return e.store.Update(tctx, func(tx *sql.Tx) error {
-			g, err := e.leaseTx(tx, owner, harnesses, labels, now)
+			// The walk is stamped with its own time: a write that
+			// committed between the two transactions carries a later
+			// time than the arrival's, and a lease stamped earlier
+			// would read as recorded before the job it leases.
+			g, err := e.leaseTx(tx, owner, harnesses, labels, e.cfg.Now())
 			if err != nil {
 				return fmt.Errorf("lease for runner %d: %w", owner, err)
 			}
@@ -398,9 +406,13 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			// The agent rules (§3, §7, §8): a job that excludes a family or
 			// an agent needs one of this runner's agents that passes the
 			// exclusions, review-capable; a job that requires an agent — a
-			// fix round on the author's session — needs that one. A runner
-			// with none — no agents at all, only the author's family, only
-			// the excluded reviewer, not the author's agent, no agent that
+			// fix round on the author's session — needs that one. The
+			// review family rule follows review.family (issue #126):
+			// require keeps the cross-family-only rule, and under prefer
+			// the family steps may hand the job to this runner's same-family
+			// agent or the author's own when no agent of another family is
+			// available anywhere. A runner with none — no agents at all,
+			// only agents the placement passes over, no agent that
 			// takes the job's class, or none ready and out of cooling — does
 			// not get the job. That is an unmet placement, not a cap hold:
 			// nothing is stamped, and the queue TTL measures the job's wait
@@ -619,6 +631,16 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		if _, err := appendEventTx(tx, evJobLeased, j.ProjectID, j.TaskID, j.ID, leased, now); err != nil {
 			return nil, err
 		}
+		// The placement kind (issue #126), computed at the pick and never
+		// earlier: how the chosen reviewer relates to the review's author.
+		// The pick event records it and the grant's prompt states it. An
+		// agent-less lease names no reviewer, so nothing is placed.
+		placement := ""
+		if agent != 0 && (j.Kind == KindReview || j.Kind == KindPlanReview) {
+			if placement, err = reviewPlacementKindTx(tx, j, agent); err != nil {
+				return nil, err
+			}
+		}
 		// Why this agent (§8): plain log, no inbox row and no wake. The
 		// agents ranked above the pick were passed over for cap room and
 		// are named, and every candidate's weight and draw is recorded.
@@ -639,6 +661,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 					payload.Candidates = append(payload.Candidates, Ranked{Agent: c.id, Weight: c.weight, Draw: c.draw})
 				}
 			}
+			payload.Placement = placement
 			// The picked agent may be the one a review retry's exclusion
 			// named: no other qualifying reviewer was available, so the
 			// preference was lifted (§7) and the excluded agent runs —
@@ -772,7 +795,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			Kind:           j.Kind,
 			Mode:           j.Mode,
 			Key:            j.Key,
-			Prompt:         j.Prompt,
+			Prompt:         prompt.WithPlacement(j.Prompt, placement),
 			LeaseID:        leaseID,
 			LeaseExpiresAt: expires,
 			ForemanToken:   foremanToken,
@@ -879,6 +902,13 @@ type agentCand struct {
 	tierAsked  string
 	tierServed string
 
+	// family is the agent's model family and runner the runner that
+	// advertised it: what the review placement's family steps (issue
+	// #126) sort every runner's candidates by, before the polling
+	// runner's own filter runs.
+	family string
+	runner int64
+
 	// Filled for every lookup, but read only for the agents that cannot
 	// take the job yet (qualifyingAgentsTx): model, health, cooling_until.
 	model   string
@@ -924,7 +954,9 @@ func ranksBefore(a, b *agentCand) bool {
 // leaseAgentsTx ranks the agents the lease may pick from (§8, §8.1): the
 // runner's agents matching the job's harness constraint, ready and out
 // of cooling at now, offering the job kind's class, and passing the
-// family rule's exclusions when it carries them (§7, §8) — sampled by
+// review family rule when the job carries one (§7, §8) — cross-family
+// alone under review.family=require, the family steps of issue #126
+// under prefer — sampled by
 // rankAgents from the outcome record of the job's (repo, class) and the
 // configured cost weights. A job that requires an agent (§3) — a
 // fix round resuming the author's session — has its list named
@@ -939,6 +971,8 @@ func leaseAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j 
 // whose candidate lookup uses the task's class rather than the job kind's.
 // Runner 0 ranks all registered agents for an automatic restart's pin. A
 // caller that only asks who qualifies passes a nil rnd and gets id order.
+// A review under review.family=prefer is placed by preferReviewAgentsTx
+// instead (issue #126): its family steps read availability.
 func eligibleAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
 	return qualifyingAgentsTx(tx, cfg, rnd, runner, j, class, now, false)
 }
@@ -955,6 +989,11 @@ func eligibleAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64,
 // qualifyingAgentRowsTx, so the tier choice above, the candidates and
 // the hold all read the same exclusion.
 func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
+	// A review under prefer walks the family steps (issue #126), whose
+	// order reads availability: its own lookup decides them and the tier.
+	if familyPrefer(cfg.Review.Family) && (j.Kind == KindReview || j.Kind == KindPlanReview) {
+		return preferReviewAgentsTx(tx, cfg, rnd, runner, j, class, now, unavailable)
+	}
 	limits := cfg.Caps
 	asked, served := "", ""
 	if j.TaskID != 0 && j.Kind != KindForeman {
@@ -963,7 +1002,7 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 			return nil, err
 		}
 		if j.RequireAgent == 0 {
-			served, err = tierServedTx(tx, limits, j, class, asked, now)
+			served, err = tierServedTx(tx, cfg.Review.Family, limits, j, class, asked, now)
 			if err != nil {
 				return nil, err
 			}
@@ -976,12 +1015,12 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 		if asked, err = planReviewTierTx(tx, cfg, j); err != nil {
 			return nil, err
 		}
-		served, err = tierServedTx(tx, limits, j, class, asked, now)
+		served, err = tierServedTx(tx, cfg.Review.Family, limits, j, class, asked, now)
 		if err != nil {
 			return nil, err
 		}
 	}
-	rows, err := qualifyingAgentRowsTx(tx, runner, j, class, now)
+	rows, err := qualifyingAgentRowsTx(tx, cfg.Review.Family, runner, j, class, now)
 	if err != nil {
 		return nil, err
 	}
@@ -1016,11 +1055,21 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 // caps are applied later, after the tier is fixed. When no tier has an
 // available agent but some agents are only cooling, the tier of the agent
 // that resets first is served, so the job waits for the earliest reset.
-func tierServedTx(tx *sql.Tx, limits caps.Limits, j *jobRow, class, asked, now string) (string, error) {
-	agents, err := qualifyingAgentRowsTx(tx, 0, j, class, now)
+func tierServedTx(tx *sql.Tx, reviewFamily string, limits caps.Limits, j *jobRow, class, asked, now string) (string, error) {
+	agents, err := qualifyingAgentRowsTx(tx, reviewFamily, 0, j, class, now)
 	if err != nil {
 		return "", err
 	}
+	return tierServedRows(limits, agents, asked, now), nil
+}
+
+// tierServedRows is tierServedTx's choice over a given set of qualifying
+// agents: prefer the asked tier, then climb, then step down from heavy;
+// with no ready agent anywhere, the tier of the agent that resets first,
+// so the job waits for the earliest reset. The prefer placement (issue
+// #126) applies it within one family step alone, so the steps outrank
+// the tier.
+func tierServedRows(limits caps.Limits, agents []agentCand, asked, now string) string {
 	hasReady := map[string]bool{}
 	var soonest string
 	soonestTiers := map[string]bool{}
@@ -1043,7 +1092,7 @@ func tierServedTx(tx *sql.Tx, limits caps.Limits, j *jobRow, class, asked, now s
 	if len(hasReady) == 0 {
 		hasReady = soonestTiers
 	}
-	return tierServed(asked, hasReady), nil
+	return tierServed(asked, hasReady)
 }
 
 // cappedAtZero reports whether the model's cap or the account's cap is
@@ -1079,20 +1128,24 @@ func tierServed(asked string, hasReady map[string]bool) string {
 }
 
 // qualifyingAgentRowsTx applies the shared pin, harness/model, class,
-// family and exclusion filters, without health, cooling or tier. A
-// review retry's agent exclusion is a preference (§7, decided
-// 2026-10-20): reviewExclusionLiftedTx decides it, so the lease's
+// family and exclusion filters, without health, cooling or tier. The
+// family rule follows the review.family setting (issue #126): require
+// keeps the cross-family-only rule of §7 and §8; prefer lets every step
+// of the ladder through at once — a known different family, the author's
+// own on another agent, the author's own agent — and the lease's step
+// choice sorts them. A review retry's agent exclusion is a preference
+// (§7, decided 2026-10-20): reviewExclusionLiftedTx decides it, so the lease's
 // candidates, the tier choice and the structural reviewer checks all
 // read the same exclusion. Structural reviewer checks also use this:
 // broken or cooling reviewers still exist.
-func qualifyingAgentRowsTx(tx *sql.Tx, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
+func qualifyingAgentRowsTx(tx *sql.Tx, reviewFamily string, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
 	author, err := reviewAuthorTx(tx, j)
 	if err != nil {
 		return nil, err
 	}
 	excludeAgent := j.ExcludeAgent
 	if excludeAgent != 0 && j.Kind == KindReview {
-		lifted, err := reviewExclusionLiftedTx(tx, j, class, now)
+		lifted, err := reviewExclusionLiftedTx(tx, reviewFamily, j, class, now)
 		if err != nil {
 			return nil, err
 		}
@@ -1114,7 +1167,7 @@ func qualifyingAgentRowsTx(tx *sql.Tx, runner int64, j *jobRow, class, now strin
 		}
 		harness, model = pair.harness, pair.model
 	}
-	query := `SELECT a.id, a.family, a.harness, a.classes, a.model, a.health, COALESCE(a.cooling_until, ''), COALESCE(o.attempts, 0), COALESCE(o.successes, 0), a.adapter, a.account
+	query := `SELECT a.id, a.family, a.harness, a.classes, a.model, a.health, COALESCE(a.cooling_until, ''), COALESCE(o.attempts, 0), COALESCE(o.successes, 0), a.adapter, a.account, a.runner_id
 		FROM agents a LEFT JOIN (SELECT agent_id, SUM(attempts) AS attempts, SUM(successes) AS successes
 			FROM outcomes WHERE project_id = ? AND class = ? GROUP BY agent_id) o ON o.agent_id = a.id
 		WHERE 1 = 1`
@@ -1140,12 +1193,19 @@ func qualifyingAgentRowsTx(tx *sql.Tx, runner int64, j *jobRow, class, now strin
 		return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 	}
 	defer rows.Close()
+	authorFamily := ""
+	if familyPrefer(reviewFamily) && (j.ExcludeFamily != "" || j.Kind == KindReview || j.Kind == KindPlanReview) {
+		if _, authorFamily, err = reviewAuthorKnownFamilyTx(tx, j); err != nil {
+			return nil, err
+		}
+	}
 	var cands []agentCand
 	for rows.Next() {
 		var id int64
 		var attempts, successes int
 		var family, harness, classes, model, health, cooling, adapterName, account string
-		if err := rows.Scan(&id, &family, &harness, &classes, &model, &health, &cooling, &attempts, &successes, &adapterName, &account); err != nil {
+		var runnerID int64
+		if err := rows.Scan(&id, &family, &harness, &classes, &model, &health, &cooling, &attempts, &successes, &adapterName, &account, &runnerID); err != nil {
 			return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 		}
 		// Ordinary work and fix leases use the implement class. A pinned
@@ -1159,12 +1219,21 @@ func qualifyingAgentRowsTx(tx *sql.Tx, runner int64, j *jobRow, class, now strin
 			continue
 		}
 		if j.ExcludeFamily != "" || j.Kind == KindReview || j.Kind == KindPlanReview {
-			if !reviewAgentQualifies(id, family, classes, j.ExcludeFamily, excludeAgent, author) {
+			switch {
+			case j.RequireAgent != 0 && id == j.RequireAgent:
+				// A pinned job (a re-review on its reviewer's session)
+				// keeps its agent whatever the family: the pin is the
+				// placement.
+			case familyPrefer(reviewFamily):
+				if !reviewAgentQualifiesPrefer(id, family, classes, authorFamily, author) {
+					continue
+				}
+			case !reviewAgentQualifies(id, family, classes, j.ExcludeFamily, excludeAgent, author):
 				continue
 			}
 		}
 		cands = append(cands, agentCand{id: id, adapter: adapterName, harness: harness, model: model, health: health, cooling: cooling,
-			account: account, attempts: attempts, success: successes, score: Score(attempts, successes)})
+			family: family, runner: runnerID, account: account, attempts: attempts, success: successes, score: Score(attempts, successes)})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
@@ -1204,7 +1273,7 @@ func runnerHasAgentsTx(tx *sql.Tx, runner int64) (bool, error) {
 	return n > 0, nil
 }
 
-// reviewAgentQualifies is the review placement's agent test (§7, §8):
+// reviewAgentQualifies is the require placement's agent test (§7, §8):
 // when a family is excluded, the agent needs a known different family;
 // it must also offer review and differ from the author and excluded agent.
 // The exclusions name the author, its family and, on a retry, the first
@@ -1219,24 +1288,47 @@ func reviewAgentQualifies(id int64, family, classes, excludeFamily string, exclu
 	return agentOffersClass(classes, string(KindReview))
 }
 
+// reviewAgentQualifiesPrefer is the prefer placement's structural agent
+// test (issue #126): every family step of the ladder qualifies at once —
+// a known different family, the author's own on another agent, the
+// author's own agent — and the lease's step choice sorts them. An author
+// of unknown family keeps today's rule, any review-class agent but the
+// author's own: "any available review-class agent ... as today" keeps
+// the author out, and the ladder's own-agent step is reached through a
+// known family alone — a choice, so the author never reviews its own
+// work unnamed by any family. An agent of unknown family never serves an
+// author of a known one, so no unknown relationship is ever a placement.
+func reviewAgentQualifiesPrefer(id int64, family, classes, authorFamily string, author int64) bool {
+	switch {
+	case !agentOffersClass(classes, string(KindReview)):
+		return false
+	case authorFamily == "":
+		return id != author
+	default:
+		return family != ""
+	}
+}
+
 // reviewExclusionLiftedTx reports whether a review job's agent exclusion
 // gives way (§7, decided 2026-10-20): the exclusion of the first
 // reviewer is a preference, and it holds only while another qualifying
 // reviewer is available — ready and not cooling, whatever the distance
 // to the reset — so the review never waits behind another family's
-// reset while the excluded agent could run again. With none available the excluded
+// reset while the excluded agent could run again. Under prefer
+// (issue #126) the qualifying set is the family ladder's every step,
+// the author's own agent included. With none available the excluded
 // agent qualifies again. A now of "" asks structurally: another
 // qualifying reviewer of any health keeps the exclusion, the answer the
 // queue-time and unservable checks read. The family rule never lifts:
-// the author and its family stay closed whatever is available, and only
-// the retry exclusion is dropped to look for the other reviewer.
-func reviewExclusionLiftedTx(tx *sql.Tx, j *jobRow, class, now string) (bool, error) {
+// the steps stay ordered whatever is available, and only the retry
+// exclusion is dropped to look for the other reviewer.
+func reviewExclusionLiftedTx(tx *sql.Tx, reviewFamily string, j *jobRow, class, now string) (bool, error) {
 	if j.Kind != KindReview || j.ExcludeAgent == 0 {
 		return false, nil
 	}
 	sans := *j
 	sans.ExcludeAgent = 0 // the other reviewers alone; no recursion: the lift no longer applies
-	rows, err := qualifyingAgentRowsTx(tx, 0, &sans, class, "")
+	rows, err := qualifyingAgentRowsTx(tx, reviewFamily, 0, &sans, class, "")
 	if err != nil {
 		return false, err
 	}

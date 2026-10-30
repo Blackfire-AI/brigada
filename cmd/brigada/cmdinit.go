@@ -974,6 +974,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	operator := append(planOperatorFiles(root), planGuidance(root, proposedCfg)...)
 	files := append(append([]wireFile{{rel: engine.ProjectConfigPath, old: old, next: proposed, exists: exists}}, operator...), wiring...)
 	printInitFiles(stdout, files, *verbose)
+	for _, note := range guidanceNotes(proposedCfg) {
+		printInitWrapped(stdout, "  ", "    ", note)
+	}
 	printInitOperatorNote(stdout)
 	if *noWiring {
 		printInitWrapped(stdout, "", "  ", initDim(stdout, "--no-wiring: init in a repository no longer wires or unwires the harness; the flag matters only in a parent folder"))

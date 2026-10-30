@@ -1207,7 +1207,9 @@ exit 1
 func TestRunnerHistoryEndToEnd(t *testing.T) {
 	t.Parallel()
 	remote := newRemote(t)
-	e := newTestEnv(t, engine.Config{})
+	// The fixture has one agent: review.family=require keeps its reviews
+	// parked as the asserted story says (issue #126).
+	e := newTestEnv(t, engine.Config{Review: engine.ReviewConfig{Family: engine.ReviewFamilyRequire}})
 	e.seedProject(remote)
 	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt with hello in it.", "", ""))

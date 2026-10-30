@@ -20,9 +20,10 @@ import (
 var ErrInvalidReview = errors.New("invalid review")
 
 // ErrNoReviewer marks a standalone review nobody can take (§7): no
-// agent is ready, out of cooling, offering the review class and of a
-// family other than the author's — or the author's family cannot be
-// told and no default reviewer is configured.
+// agent is ready, out of cooling and offering the review class — and,
+// under review.family=require (issue #126), of a family other than the
+// author's — or the author's family cannot be told and no default
+// reviewer is configured, which require alone refuses.
 var ErrNoReviewer = errors.New("no eligible reviewer")
 
 // Where a standalone review learned the author's family from.
@@ -44,6 +45,8 @@ type ReviewBranchResult struct {
 	// when it could not be told and the default reviewer was taken.
 	Family string `json:"family,omitempty"`
 	// Source is where the family came from: job, trailer or default.
+	// Empty when no witness named one and no default reviewer was
+	// configured — the open placement prefer makes (issue #126).
 	Source string `json:"source"`
 }
 
@@ -53,11 +56,16 @@ type ReviewBranchResult struct {
 // branch with no such job, or one whose agent is gone or has no family,
 // falls back to the Co-Authored-By trailers of its commits, and then to
 // the config's default reviewer, which takes the review with no family
-// rule. The review is placed by the review policy's cross-family rule
-// among the agents that are ready, out of cooling and offer the review
-// class — and, as for any review, the lease picks among them by the
-// dispatcher's ranking. No such agent is ErrNoReviewer. The project is
-// the one with repoURL, or the engine's only one.
+// rule. The review is placed by the review family policy (issue #126):
+// under require an agent of another family alone qualifies; under
+// prefer the family steps fall back to the author's own family and then
+// the author's own agent, and a branch whose author's family cannot be
+// told at all is placed on any ready agent offering the review class —
+// the default reviewer's harness first when one is configured, as
+// today. Among the agents that qualify — and, as for any review, the
+// lease picks among them by the dispatcher's ranking — no such agent is
+// ErrNoReviewer. The project is the one with repoURL, or the engine's
+// only one.
 func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (ReviewBranchResult, error) {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
@@ -124,14 +132,22 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 		if family == "" {
 			source, harness = reviewSourceDefault, e.cfg.DefaultReviewer
 			if harness == "" {
-				onlyAuthor, err := onlyAuthorReviewerTx(tx, review)
-				if err != nil {
-					return err
+				// An author's family that cannot be told needs a default
+				// reviewer under require alone (issue #126): under prefer
+				// any ready review-class agent may take the review, and
+				// with no witness that named the family — and no default
+				// reviewer either — the result claims no source.
+				if !familyPrefer(e.cfg.Review.Family) {
+					onlyAuthor, err := onlyAuthorReviewerTx(tx, review)
+					if err != nil {
+						return err
+					}
+					if onlyAuthor {
+						return fmt.Errorf("%w: %s", ErrNoReviewer, noReviewerAuthor)
+					}
+					return fmt.Errorf("%w: the author's family of %s is unknown (no work job of the branch, no known Co-Authored-By trailer) and no default_reviewer is configured, review.family=require", ErrNoReviewer, branch)
 				}
-				if onlyAuthor {
-					return fmt.Errorf("%w: %s", ErrNoReviewer, noReviewerAuthor)
-				}
-				return fmt.Errorf("%w: the author's family of %s is unknown (no work job of the branch, no known Co-Authored-By trailer) and no default_reviewer is configured", ErrNoReviewer, branch)
+				source = ""
 			}
 		}
 		review.ExcludeFamily, review.Harness = family, harness
@@ -139,6 +155,21 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 			string(KindReview), fmtTime(now))
 		if err != nil {
 			return err
+		}
+		if len(cands) == 0 && family == "" && harness != "" && familyPrefer(e.cfg.Review.Family) {
+			// Under prefer the default reviewer is asked first, never
+			// alone (issue #126): with none of its harness ready, any
+			// ready review-class agent takes the review.
+			review.Harness = ""
+			if cands, err = eligibleAgentsTx(tx, &e.cfg, nil, 0, review,
+				string(KindReview), fmtTime(now)); err != nil {
+				return err
+			}
+			if len(cands) > 0 {
+				harness, source = "", ""
+			} else {
+				review.Harness = harness
+			}
 		}
 		if len(cands) == 0 {
 			onlyAuthor, err := onlyAuthorReviewerTx(tx, review)
@@ -148,10 +179,13 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 			if onlyAuthor {
 				return fmt.Errorf("%w: %s", ErrNoReviewer, noReviewerAuthor)
 			}
-			if family != "" {
-				return fmt.Errorf("%w: no agent of a family other than %q is ready and offers the review class", ErrNoReviewer, family)
+			if family != "" && !familyPrefer(e.cfg.Review.Family) {
+				return fmt.Errorf("%w: no agent of a family other than %q is ready and offers the review class, review.family=require", ErrNoReviewer, family)
 			}
-			return fmt.Errorf("%w: no ready agent of the default reviewer's harness %q offers the review class", ErrNoReviewer, harness)
+			if harness != "" {
+				return fmt.Errorf("%w: no ready agent of the default reviewer's harness %q offers the review class", ErrNoReviewer, harness)
+			}
+			return fmt.Errorf("%w: no ready agent offers the review class", ErrNoReviewer)
 		}
 		// A standalone review has no task snapshot (§5.9): it uses the
 		// role texts the engine resolves now — the project's row, else
