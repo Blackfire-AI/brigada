@@ -220,6 +220,134 @@ func TestServeCallTaskRestart(t *testing.T) {
 	}
 }
 
+// TestServeCallTaskRetire covers the task_retire tool end to end against
+// a test engine (§6.2, §12.2): the bridge — under a foreman token, as a
+// real one runs — retires a done task of the token's project named by
+// its plan name, the reason verbatim in the tool's text and the event,
+// the caller recorded as the foreman, and the repeated call replaying
+// the first answer through the minted key. A name no plan holds is the
+// tool's own error.
+func TestServeCallTaskRetire(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	task := seedTask(t, e, "done", "orphan")
+	s := start(t, e)
+
+	a := s.call(1, "tools/call", map[string]any{
+		"name":      "task_retire",
+		"arguments": map[string]any{"tasks": []any{"orphan"}, "reason": "superseded by task 274"},
+	})
+	text, isError := toolText(t, a)
+	if isError {
+		t.Fatalf("task_retire errored: %s", text)
+	}
+	for _, want := range []string{
+		"retired task " + strconv.FormatInt(task, 10),
+		"superseded by task 274",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("task_retire text = %q, want it to name %s", text, want)
+		}
+	}
+	if state := strOf(t, e, "SELECT state FROM tasks WHERE id = ?", task); state != "retired" {
+		t.Errorf("task state after the retire = %q, want retired", state)
+	}
+	if payload := strOf(t, e, "SELECT payload FROM events WHERE kind = 'task_retired' AND task_id = ?", task); payload == "" ||
+		!strings.Contains(payload, `"caller":"foreman"`) || !strings.Contains(payload, "superseded by task 274") {
+		t.Errorf("task_retired payload = %q, want the foreman caller and the reason verbatim", payload)
+	}
+	if !slices.Contains(ToolNames(), "task_retire") {
+		t.Errorf("the foreman offer lacks task_retire: %v", ToolNames())
+	}
+
+	// The repeat replays the first answer: no second event.
+	a = s.call(2, "tools/call", map[string]any{
+		"name":      "task_retire",
+		"arguments": map[string]any{"tasks": []any{"orphan"}, "reason": "superseded by task 274"},
+	})
+	if again, _ := toolText(t, a); again != text {
+		t.Errorf("repeated task_retire text = %q, want the first answer %q", again, text)
+	}
+	if n := countOf(t, e, "SELECT COUNT(*) FROM events WHERE kind = 'task_retired' AND task_id = ?", task); n != 1 {
+		t.Errorf("task_retired events after the repeat = %d, want 1: the minted key deduped the call", n)
+	}
+
+	// A name no plan holds is the tool's own error, and an id works too.
+	a = s.call(3, "tools/call", map[string]any{
+		"name":      "task_retire",
+		"arguments": map[string]any{"tasks": []any{"no-such-task"}, "reason": "go"},
+	})
+	if text, isError := toolText(t, a); !isError || !strings.Contains(text, "no-such-task") {
+		t.Errorf("task_retire of an unknown name = %q (error %v), want the tool's error", text, isError)
+	}
+	other := seedTask(t, e, "needs_foreman", "second")
+	a = s.call(4, "tools/call", map[string]any{
+		"name":      "task_retire",
+		"arguments": map[string]any{"tasks": []any{other}, "reason": "landed by hand"},
+	})
+	if text, isError := toolText(t, a); isError {
+		t.Errorf("task_retire by id errored: %s", text)
+	}
+	if state := strOf(t, e, "SELECT state FROM tasks WHERE id = ?", other); state != "retired" {
+		t.Errorf("second task state = %q, want retired by id", state)
+	}
+}
+
+// TestServeCallTaskRetireRefused covers the tool's error path: a task
+// with a landing record is refused, the engine's reason carried as the
+// tool's error, and nothing changes.
+func TestServeCallTaskRetireRefused(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	task := seedTask(t, e, "done", "landed")
+	if err := e.st.Update(t.Context(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, created_at)
+			VALUES (?, 1, 'main', 'abc123', 'pushed', ?)`, task, seedTS)
+		return err
+	}); err != nil {
+		t.Fatalf("seed the landing: %v", err)
+	}
+	s := start(t, e)
+	a := s.call(1, "tools/call", map[string]any{
+		"name":      "task_retire",
+		"arguments": map[string]any{"tasks": []any{task}, "reason": "too late"},
+	})
+	text, isError := toolText(t, a)
+	if !isError || !strings.Contains(text, "is landed") {
+		t.Errorf("task_retire of a landed task = %q (error %v), want the engine's refusal", text, isError)
+	}
+	if state := strOf(t, e, "SELECT state FROM tasks WHERE id = ?", task); state != "done" {
+		t.Errorf("task state after the refusal = %q, want done: nothing was written", state)
+	}
+}
+
+// seedTask adds a task of the token's project in the named state, with
+// a plan name other tools may name it by, and returns its id.
+func seedTask(t *testing.T, e *env, state, name string) int64 {
+	t.Helper()
+	var task int64
+	err := e.st.Update(t.Context(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO plans (project_id, title, state, created_at, updated_at)
+			VALUES (1, 'a plan', 'active', ?, ?)`, seedTS, seedTS)
+		if err != nil {
+			return err
+		}
+		plan, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		res, err = tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, created_at, updated_at)
+			VALUES (?, ?, 'a task', 'the spec', 'go test ./...', 'implement', ?, 'main', '{}', ?, ?)`,
+			plan, name, state, seedTS, seedTS)
+		if err != nil {
+			return err
+		}
+		return tx.QueryRow("SELECT last_insert_rowid()").Scan(&task)
+	})
+	if err != nil {
+		t.Fatalf("seed the %s task: %v", state, err)
+	}
+	return task
+}
+
 // TestRenderLandRetry renders each of the land retry's four outcomes as
 // its own text (#133): the queued land job, the hold's reason verbatim
 // with the user's release, the stale base with task_restart, and a

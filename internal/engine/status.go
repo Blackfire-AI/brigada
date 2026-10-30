@@ -244,12 +244,16 @@ type StatusTask struct {
 	ReviewPlacement string `json:"review_placement,omitempty"`
 	// Caps are the task's own round-cap overrides (§6.1); absent keys run
 	// at the engine default.
-	Caps   map[string]int `json:"caps,omitempty"`
-	ID     int64          `json:"id"`
-	Title  string         `json:"title"`
-	Class  string         `json:"class"`
-	State  string         `json:"state"`
-	Branch string         `json:"branch"` // empty while the task has no result branch yet
+	Caps map[string]int `json:"caps,omitempty"`
+	ID   int64          `json:"id"`
+	// Name is the task's plan name (§6.1), empty when it has none: the
+	// short handle the plan tools name tasks by, shown so a tool's
+	// caller can carry it back.
+	Name   string `json:"name,omitempty"`
+	Title  string `json:"title"`
+	Class  string `json:"class"`
+	State  string `json:"state"`
+	Branch string `json:"branch"` // empty while the task has no result branch yet
 	// Landed is true when the task's landing is recorded and not waiting
 	// at the push gate (§7.1): the land job squashed it, or a Brigada-Task
 	// trailer on the default branch was detected and recorded.
@@ -660,7 +664,7 @@ func statusPlanRows(tx *sql.Tx, query string, args ...any) ([]StatusPlan, error)
 
 // statusPlanTasksTx reads one status plan's tasks, in id order.
 func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, error) {
-	rows, err := tx.Query(`SELECT t.id, t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(l.commit_sha, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, ''), t.skills
+	rows, err := tx.Query(`SELECT t.id, COALESCE(t.name, ''), t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(l.commit_sha, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, ''), t.skills
 		FROM tasks t
 		LEFT JOIN landings l ON l.task_id = t.id
 		LEFT JOIN land_holds h ON h.task_id = t.id AND h.state = 'held'
@@ -674,7 +678,7 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, err
 		var t StatusTask
 		var capsJSON, pushed, commit, retryAt, holdReason, skills string
 		var exit sql.NullInt64
-		if err := rows.Scan(&t.ID, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &commit, &retryAt, &exit, &holdReason, &skills); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &commit, &retryAt, &exit, &holdReason, &skills); err != nil {
 			return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
 		}
 		t.Caps = parseTaskCaps(capsJSON)

@@ -23,12 +23,12 @@ import (
 // planStrandedTx computes the plan's stranded tasks (§6.2): done,
 // landable tasks (the land rule's own eligibility, §7.1: implement and
 // approved) that can never land, because an implement dependency of
-// theirs was cancelled or failed, or is itself stranded — the blockage
-// is transitive over the plan's graph, so a chain stranded at its root
-// strands every task above it, and freeing the root frees the rest in
-// landing order. The returned map names, per stranded task's node
-// index, the root cause's node index: the cancelled or failed task the
-// needs-you line and the wake name.
+// theirs was cancelled, failed or retired, or is itself stranded — the
+// blockage is transitive over the plan's graph, so a chain stranded at
+// its root strands every task above it, and freeing the root frees the
+// rest in landing order. The returned map names, per stranded task's
+// node index, the root cause's node index: the cancelled, failed or
+// retired task the needs-you line and the wake name.
 func planStrandedTx(tx *sql.Tx, nodes []amendNode) (map[int]int, error) {
 	memo := map[int]int{} // node index -> root index; -1 = not stranded
 	var visit func(int) (int, error)
@@ -43,7 +43,7 @@ func planStrandedTx(tx *sql.Tx, nodes []amendNode) (map[int]int, error) {
 				continue // a dependency that never lands never blocks (§7.1)
 			}
 			switch nodes[j].state {
-			case taskCancelled, taskFailed:
+			case taskCancelled, taskFailed, taskRetired:
 				if root < 0 {
 					root = j
 				}
@@ -164,12 +164,13 @@ func lastPlanBlockEventTx(tx *sql.Tx, plan int64) (string, error) {
 }
 
 // stackedOnDeadDepTx reports whether the done task's recorded base is
-// the result branch of a cancelled or failed implement dependency it is
-// being re-pointed off (§7.1): such a task's branch was built on the
-// dead work, and the landing diff — taken against the recorded base, so
-// it excludes the base's changes — assumes it. Only a task whose base
-// is the land target, or a landed task, may be re-pointed; the returned
-// index names the dependency the task is stacked on, -1 when it is not.
+// the result branch of a cancelled, failed or retired implement
+// dependency it is being re-pointed off (§7.1): such a task's branch was
+// built on the dead work, and the landing diff — taken against the
+// recorded base, so it excludes the base's changes — assumes it. Only a
+// task whose base is the land target, or a landed task, may be
+// re-pointed; the returned index names the dependency the task is
+// stacked on, -1 when it is not.
 func stackedOnDeadDepTx(tx *sql.Tx, nodes []amendNode, i int) (int, error) {
 	var baseRef string
 	if err := tx.QueryRow("SELECT COALESCE(base_ref, '') FROM tasks WHERE id = ?", nodes[i].id).Scan(&baseRef); err != nil {
@@ -183,7 +184,7 @@ func stackedOnDeadDepTx(tx *sql.Tx, nodes []amendNode, i int) (int, error) {
 			continue
 		}
 		switch nodes[j].state {
-		case taskCancelled, taskFailed:
+		case taskCancelled, taskFailed, taskRetired:
 			var branch string
 			if err := tx.QueryRow("SELECT COALESCE(branch, '') FROM tasks WHERE id = ?", nodes[j].id).Scan(&branch); err != nil {
 				return -1, fmt.Errorf("read the branch of task %d: %w", nodes[j].id, err)
