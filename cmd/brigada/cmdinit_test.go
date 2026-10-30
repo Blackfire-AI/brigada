@@ -109,8 +109,11 @@ func TestInitProbeAndRefusals(t *testing.T) {
 	}{
 		{"probe", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}, "", 0, "Probe only"},
 		{"declined", []string{"--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=gpt-5", "--signed-in", "claude,codex"}, "\n\n\nn\n", 1, "Declined"},
-		{"one family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=anthropic/claude-opus-4", "--signed-in", "claude,opencode"}, "", 1, "--accept-limited"},
-		{"limited acknowledged", []string{"--probe", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--signed-in", "claude"}, "", 0, "LIMITED SETUP"},
+		{"one family require", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=anthropic/claude-opus-4", "--signed-in", "claude,opencode", "--config=@require"}, "", 1, "--accept-limited (review.family=require)"},
+		{"one family prefer", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=anthropic/claude-opus-4", "--signed-in", "claude,opencode"}, "", 0, "Reviews: 1 model family; review.family=prefer, so reviews prefer another"},
+		{"one family prefer warns", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--signed-in", "claude"}, "", 0, "WARNING: fewer than two distinct review-capable model families.\n  review.family=prefer (the default)"},
+		{"limited acknowledged", []string{"--probe", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--signed-in", "claude", "--config=@require"}, "", 0, "LIMITED SETUP"},
+		{"limited require reviews line", []string{"--probe", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--signed-in", "claude", "--config=@require"}, "", 0, "Reviews: 1 model family; review.family=require, so reviews wait for"},
 		{"zero", []string{"--yes", "--agent", "harness=claude,model=sonnet"}, "", 1, "zero usable agents"},
 		{"no explicit models", []string{"--probe"}, "", 1, "zero usable agents"},
 		{"bad model", []string{"--probe", "--agent", "harness=claude,model=unknown"}, "", 1, "cannot identify the family"},
@@ -123,7 +126,7 @@ func TestInitProbeAndRefusals(t *testing.T) {
 		{"duplicate claude model", []string{"--probe", "--agent", "harness=claude", "--agent", "harness=claude,model=sonnet"}, "", 1, "agent claude/sonnet is offered twice: one agent per harness and model per runner"},
 		{"runner defaults", []string{"--probe", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex"}, "", 0, "    codex     CLI default"},
 		{"codex default second family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=codex,model=default", "--signed-in", "claude,codex"}, "", 0, "Reviews: 2 model families"},
-		{"opencode default unknown family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=default", "--signed-in", "claude,opencode"}, "", 1, "--accept-limited"},
+		{"opencode default unknown family", []string{"--probe", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=default", "--signed-in", "claude,opencode", "--config=@require"}, "", 1, "--accept-limited"},
 		{"opencode default limited acknowledged", []string{"--probe", "--accept-limited", "--agent", "harness=claude,model=sonnet", "--agent", "harness=opencode,model=default", "--signed-in", "claude,opencode"}, "", 0, "unknown family"},
 		{"opencode needs provider", []string{"--probe", "--agent", "harness=opencode,model=glm"}, "", 1, "opencode needs provider/model, e.g. zai-coding-plan/glm-5.3"},
 		{"model whitespace", []string{"--probe", "--agent", "harness=claude,model=sonnet other"}, "", 1, "model must be a nonempty model identifier"},
@@ -136,7 +139,15 @@ func TestInitProbeAndRefusals(t *testing.T) {
 			calls := fakeInitPATH(t, "claude", "codex", "kimi", "opencode")
 			writeInitCodexScript(t, "  debug  Diagnostic tools", "  models  Render the raw model catalog as JSON", "      --bundled  Skip refresh", initCodexCatalogCommand, initCodexCatalogCommand)
 			state := filepath.Join(testsupport.ShortStateDir(t), "absent")
-			code, out, err := initFixedParallel(t, state, tc.stdin, tc.args...)
+			args := slices.Clone(tc.args)
+			if i := slices.Index(args, "--config=@require"); i >= 0 {
+				requireConfig := filepath.Join(t.TempDir(), "config")
+				if err := os.WriteFile(requireConfig, []byte("review.family = require\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				args[i] = "--config=" + requireConfig
+			}
+			code, out, err := initFixedParallel(t, state, tc.stdin, args...)
 			if code != tc.wantCode || !strings.Contains(out+err, tc.want) {
 				t.Fatalf("got %d\n%s\n%s", code, out, err)
 			}
@@ -1709,7 +1720,7 @@ func TestInitAgentsVeryLongModel(t *testing.T) {
 				"codex": {entries: []initModelEntry{{value: "default", name: "gpt-6.1-sol"}}},
 			}
 			var out bytes.Buffer
-			printInitAgents(&out, agents, 2, foreman, sources, adapter.AgentTier)
+			printInitAgents(&out, agents, 2, false, foreman, sources, adapter.AgentTier)
 			for _, line := range strings.Split(out.String(), "\n") {
 				if len([]rune(line)) >= 80 {
 					t.Errorf("line must be under 80 columns: %q", line)
