@@ -150,6 +150,23 @@ brigada sends no usage data, analytics or crash reports anywhere. That is a prom
 
 brigada has no API-key setting of its own. Workers inherit your environment (minus brigada's own variables and your git-forge, cloud and registry credentials, such as `GH_TOKEN` or `AWS_SECRET_ACCESS_KEY`), so a CLI that you have set up with an API key the way its vendor documents is driven the same way. See [docs/TERMS.md](docs/TERMS.md).
 
+## Models that built brigada
+
+brigada is developed with brigada, so models from four families have written and reviewed its code:
+
+| Family | Models |
+|---|---|
+| Anthropic | Claude Opus 5.5, Claude Sonnet 5.5, Claude Haiku, Claude Fable 5.1 |
+| OpenAI | GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Sol, GPT-6 Astra, GPT-6 Luna |
+| Zhipu | GLM 5.3, GLM 5.3 Flash |
+| DeepSeek | DeepSeek V4 Pro, DeepSeek Flash |
+
+A commit brigada lands names its model, or the model family when the job record names no model, in a `Co-Authored-By` trailer; a commit whose family is unknown carries `Brigada-Author: unknown` instead. GitHub's contributor list shows a co-author only when the trailer's address belongs to a GitHub account, so it lists Claude and Codex but not the others. To count commits per model:
+
+```sh
+git log --format='%(trailers:key=Co-Authored-By,valueonly,unfold)' | grep -v '^$' | sort | uniq -c | sort -rn
+```
+
 ## Releasing
 
 Maintainers tag a version and push the tag:

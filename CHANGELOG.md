@@ -20,6 +20,8 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The README names the models that built brigada, by family, explains why GitHub's contributor list shows only some of them, and gives the `git log` command that counts commits per model.
+
 - Documented batch gate attribution and records (issue #134): stable checked-head evidence, conservative suspect lists, per-member hold decisions, the importable `land_batch_max` setting, complete runner outcomes, history and reservation-aware task readers.
 
 - Documented the land batch run (issue #134): per-member squash and stacked checks, isolated content failures with dependent landings left waiting, one publication with bounded retries, per-landing push approvals, and recovery of every member after a lost runner.
