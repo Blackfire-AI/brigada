@@ -1067,16 +1067,24 @@ func liveLandJobTx(tx *sql.Tx, taskID int64) (bool, error) {
 	return n > 0, nil
 }
 
+// finishTaskPlanTx closes the task's plan once whatever kept it open is
+// settled (§6.2, §7.1, #133) — its land job's outcome, the hold the
+// user released or rejected — so the plan's done report is written
+// here. job is 0 when no job settled it.
+func (e *Engine) finishTaskPlanTx(tx *sql.Tx, project, task, job int64, now time.Time) error {
+	var plan int64
+	if err := tx.QueryRow("SELECT plan_id FROM tasks WHERE id = ?", task).Scan(&plan); err != nil {
+		return fmt.Errorf("read the plan of task %d: %w", task, err)
+	}
+	_, err := e.finishPlanIfClosedTx(tx, project, plan, task, job, now)
+	return err
+}
+
 // finishLandPlanTx closes the task's plan once its land job has an
 // outcome (§6.2, §7.1): a live land job kept the plan open, so the
 // landing's completion is where the plan's done report is written.
 func (e *Engine) finishLandPlanTx(tx *sql.Tx, job *jobRow, now time.Time) error {
-	var plan int64
-	if err := tx.QueryRow("SELECT plan_id FROM tasks WHERE id = ?", job.TaskID).Scan(&plan); err != nil {
-		return fmt.Errorf("read the plan of task %d: %w", job.TaskID, err)
-	}
-	_, err := e.finishPlanIfClosedTx(tx, job.ProjectID, plan, job.TaskID, job.ID, now)
-	return err
+	return e.finishTaskPlanTx(tx, job.ProjectID, job.TaskID, job.ID, now)
 }
 
 // pushCompletedTx applies a push phase's completion (§7.1): the landing
@@ -1147,8 +1155,11 @@ func (e *Engine) landCheckFailedTx(tx *sql.Tx, job *jobRow, rec landRecord, now 
 // land approve` — which re-queues the landing with the gate skipped. In
 // the push phase the landing is already recorded waiting; the same hold
 // then sits on the push, and the approval re-queues the push instead.
-// The hold has no job, so the plan closes here, named under "waits at a
-// gate" (§7.1).
+// The plan-close check that follows reads the two holds apart (§7.1,
+// #133): one with no landing record is a landing still to come, which
+// keeps the plan open until the release settles it, and one beside a
+// recorded waiting push is a waiting push, which may close the plan,
+// named under "waits to push".
 func (e *Engine) landHeldTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	reason := "held by rule land_ready"
 	var rec landHeldRecord
@@ -1579,6 +1590,11 @@ func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve, stop
 	}
 	if _, err := appendEventTx(tx, evTaskLandRejected, project, taskID, 0,
 		eventPayload{Status: taskDone, Reason: boundNote(reason)}, now); err != nil {
+		return LandDecision{}, err
+	}
+	// The rejection settles the hold (#133): a plan the hold kept open
+	// closes over the declined landing, the report naming it.
+	if err := e.finishTaskPlanTx(tx, project, taskID, 0, now); err != nil {
 		return LandDecision{}, err
 	}
 	return LandDecision{TaskID: taskID, Released: false}, nil

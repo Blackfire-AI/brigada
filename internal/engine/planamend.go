@@ -1135,10 +1135,13 @@ func (e *Engine) readyPlanTasksTx(tx *sql.Tx, project, plan int64, now time.Time
 // cancelled or failed dependency under it) keeps the plan active, one
 // wake per blockage telling the foreman. So does a done task whose
 // landing is still to come (§7.1, #133): one the land rule would land,
-// with no landing record yet and no hold at the land gate — most often a
-// dependency of its own has not landed — is live work, and a landing
+// with no landing record yet — most often a dependency of its own has
+// not landed, or it is held at the land gate, its landing waiting on
+// the user's release — is live work, and a landing
 // that later fails parks its task under a plan that is still active and
-// the foreman can still act on. The plan also counts one
+// the foreman can still act on. A landing the user declined — a
+// rejected land hold (§6.3) — is not live work: it will never happen,
+// and the report names it declined. The plan also counts one
 // attempt on the "plan" class for the foreman's agent: a success when
 // every task ended done or was cancelled with the user's approval
 // (skip_approved), a failure when a task failed out, was cancelled
@@ -1172,12 +1175,17 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 			// outcome, so the done report names it and a failed landing
 			// counts against the plan. So is one the land rule would
 			// land whose landing has not happened and not been declined
-			// (#133): no landing record yet and no hold at the land
-			// gate — most often a dependency of its own has not landed,
-			// so no land job exists — the landing, or its failure, is
-			// still to come, and the plan must not close done over it.
-			// A hold at the land gate has no job and lets the plan
-			// close, named under "waits at a gate".
+			// (#133): no landing record yet — most often a dependency
+			// of its own has not landed, so no land job exists, or the
+			// task is held at the land gate, its landing waiting on the
+			// user's release — the landing, or its failure, is still to
+			// come, and the plan must not close done over it. A hold
+			// the user rejected is that decline (§6.3): the landing
+			// will never happen, so it is not live work and the report
+			// names it declined. A hold on a landing already recorded
+			// is a different hold (§6.3, §7.1): the push phase's,
+			// beside a waiting push — the plan may close, the report
+			// naming the task under "waits to push".
 			if live, err := liveLandJobTx(tx, n.id); err != nil {
 				return false, err
 			} else if live {
@@ -1188,10 +1196,18 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 			} else if l == nil {
 				if _, held, err := heldLandHoldTx(tx, n.id); err != nil {
 					return false, err
-				} else if !held {
-					if landable, err := landableDoneTx(tx, n.id); err != nil {
+				} else if held {
+					// The land gate holds a landing still to come
+					// (#133): the plan waits for the user's release
+					// and the landing it queues.
+					return false, nil
+				}
+				if landable, err := landableDoneTx(tx, n.id); err != nil {
+					return false, err
+				} else if landable {
+					if rejected, err := rejectedLandHoldTx(tx, n.id); err != nil {
 						return false, err
-					} else if landable {
+					} else if !rejected {
 						return false, nil
 					}
 				}
@@ -1230,14 +1246,16 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 	}
 	// What landed, and what waits (§7.1): a done task with a landing
 	// record landed — or waits at the push gate when its landing is
-	// recorded waiting — and a land_holds row holds one at the land gate.
-	// A done, landable task with neither kept the plan open above, and a
-	// class the land rule's own eligibility (§7.1) skips never lands, so
-	// neither is named here: the close waits for the first and the
+	// recorded waiting, a hold on that push beside it — and one whose
+	// hold the user rejected is named declined, its landing cancelled.
+	// A done task that kept the plan open above — landable with no
+	// record, or held at the land gate — never reaches this close, and
+	// a class the land rule's own eligibility (§7.1) skips never lands,
+	// so neither is named here: the close waits for the first and the
 	// report never speaks of the second. The done report names all of
 	// it, beside what was cancelled with the user's approval, what
 	// failed and what never ran.
-	var landed, gated []string
+	var landed, gated, declined []string
 	for _, n := range nodes {
 		if n.state != taskDone {
 			continue
@@ -1252,14 +1270,14 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 			}
 			continue
 		}
-		if reason, held, err := heldLandHoldTx(tx, n.id); err != nil {
+		if rejected, err := rejectedLandHoldTx(tx, n.id); err != nil {
 			return false, err
-		} else if held {
-			gated = append(gated, fmt.Sprintf("%s (%s)", n.label(), reason))
+		} else if rejected {
+			declined = append(declined, n.label())
 		}
 	}
 	var report []string
-	if len(failed) == 0 && len(waiting) == 0 && len(gated) == 0 && len(cancelled) == 0 && len(landed) > 0 {
+	if len(failed) == 0 && len(waiting) == 0 && len(gated) == 0 && len(cancelled) == 0 && len(declined) == 0 && len(landed) > 0 {
 		report = append(report, "all tasks landed")
 	} else {
 		if len(landed) > 0 {
@@ -1267,6 +1285,9 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 		}
 		if len(gated) > 0 {
 			report = append(report, "waits at a gate: "+strings.Join(gated, "; "))
+		}
+		if len(declined) > 0 {
+			report = append(report, "landing declined: "+strings.Join(declined, ", "))
 		}
 		if len(failed) > 0 {
 			report = append(report, "failed: "+strings.Join(failed, ", "))
@@ -1299,6 +1320,19 @@ func heldLandHoldTx(tx *sql.Tx, taskID int64) (reason string, held bool, err err
 		return "", false, fmt.Errorf("read the land hold of task %d: %w", taskID, err)
 	}
 	return reason, true, nil
+}
+
+// rejectedLandHoldTx reports whether the task's land-gate hold was
+// rejected by the user (§6.3): a land_holds row in state rejected, the
+// landing cancelled, never to happen. The plan-closing rule (§7.1,
+// #133) counts such a task declined, not live work.
+func rejectedLandHoldTx(tx *sql.Tx, taskID int64) (bool, error) {
+	var n int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM land_holds WHERE task_id = ? AND state = 'rejected'`, taskID).
+		Scan(&n); err != nil {
+		return false, fmt.Errorf("read the rejected land hold of task %d: %w", taskID, err)
+	}
+	return n > 0, nil
 }
 
 // recordPlanOutcomeTx counts one finished plan on the outcome record's

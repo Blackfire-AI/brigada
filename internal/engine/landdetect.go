@@ -121,10 +121,11 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 		}
 	}
 	// A settled task was live work its plan waited on (#133), and the
-	// release above may have ended a dependent held at the land gate —
-	// a hold with no job, which lets its plan close under "waits at a
-	// gate" — so the close runs now, after the releases moved every
-	// dependent, never between the records the loop above writes.
+	// release above may have moved a dependent of it — a landing
+	// queued, or a hold at the land gate, which keeps that plan open
+	// until the user releases it — so the close runs now, after the
+	// releases moved every dependent, never between the records the
+	// loop above writes.
 	seenPlan := map[int64]bool{}
 	for _, id := range newLanded {
 		var plan int64

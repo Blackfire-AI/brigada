@@ -5,6 +5,10 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The plan-closing rule counts a land-gate hold as a landing still to come (issue #133): a done task held at the land gate keeps its plan open until the user releases the hold and the landing settles, by its land job or by its trailer on the branch, instead of the plan closing under "waits at a gate". A hold on the push of a landing already recorded is a waiting push: the plan may close over it, named under "waits to push", and every path that settles a landing or a hold — the land job's outcomes, a hold release or rejection, the trailer detection — re-evaluates the close. A landing the user rejects (`brigada land reject`) closes a plan the hold kept open, the done report naming it under "landing declined".
+
 ### Fixed
 
 - The foreman's file tools read only its checkout and its project's state (issue #131): the settings brigada writes for a headless turn and for attach confine `Read`, `Grep` and `Glob` to the reading checkout, subagents included, and no allow rule in the user's own settings lifts the refusal.
