@@ -92,13 +92,13 @@ func TestInitGuidanceFirstRun(t *testing.T) {
 	// Role files: the header is the first line. Skills: frontmatter first,
 	// the header right after its closing line.
 	worker, _ := defaults.LiveRoleText("worker")
-	want := "<!-- brigada: version=" + defaults.Version + " digest=" + defaults.Digest(worker) + " -->\n" + worker
+	want := "<!-- brigada: version=" + brigadaVersion() + " digest=" + defaults.Digest(worker) + " -->\n" + worker
 	if got := readRel(t, root, workerRel); got != want {
 		t.Errorf("worker.md = %.120q, want the header and the default", got)
 	}
 	skill := readRel(t, root, bugfixRel)
 	end, ok := skillFrontmatterEnd(skill)
-	if !ok || !strings.HasPrefix(skill, "---\nname: bugfix\n") || !strings.HasPrefix(skill[end:], "<!-- brigada: version="+defaults.Version) {
+	if !ok || !strings.HasPrefix(skill, "---\nname: bugfix\n") || !strings.HasPrefix(skill[end:], "<!-- brigada: version="+brigadaVersion()) {
 		t.Errorf("bugfix SKILL.md = %.200q", skill)
 	}
 
@@ -288,7 +288,7 @@ func TestInitGuidanceRerun(t *testing.T) {
 	if err := applyWiring(plan); err != nil {
 		t.Fatal(err)
 	}
-	if got := readRel(t, root, workerRel); !strings.Contains(got, "version="+defaults.Version) || strings.Contains(got, "old worker") {
+	if got := readRel(t, root, workerRel); !strings.Contains(got, "version="+brigadaVersion()) || strings.Contains(got, "old worker") {
 		t.Errorf("worker.md was not rewritten: %.100q", got)
 	}
 	if got := readRel(t, root, bugfixRel); strings.Contains(got, "old body") {
@@ -327,7 +327,7 @@ func TestInitGuidanceDetectionIgnoresOnlyTheHeader(t *testing.T) {
 	if !isUnedited(gen, true) {
 		t.Fatal("a fresh skill is edited")
 	}
-	if !isUnedited(strings.Replace(gen, "version="+defaults.Version, "version=7.7.7", 1), true) {
+	if !isUnedited(strings.Replace(gen, "version="+brigadaVersion(), "version=7.7.7", 1), true) {
 		t.Errorf("a version change in the header made the skill edited")
 	}
 	for name, edit := range map[string]string{

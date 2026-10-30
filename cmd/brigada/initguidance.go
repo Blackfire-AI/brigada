@@ -21,7 +21,7 @@ import (
 
 // generatedHeader is the marked header for a generated text.
 func generatedHeader(text string) string {
-	return fmt.Sprintf("<!-- brigada: version=%s digest=%s -->\n", defaults.Version, defaults.Digest(text))
+	return fmt.Sprintf("<!-- brigada: version=%s digest=%s -->\n", brigadaVersion(), defaults.Digest(text))
 }
 
 // skillFrontmatterEnd is the offset just past a SKILL.md's closing `---`
