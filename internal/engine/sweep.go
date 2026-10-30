@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/store"
 )
 
 // SweepReport names the jobs the sweep dealt with, so a caller (and a
@@ -23,10 +25,15 @@ type SweepReport struct {
 // window, messages and artifacts, leaving the event log whole.
 func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 	var rep SweepReport
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		var err error
-		rep, err = e.sweepTx(tx, e.cfg.Now())
-		return err
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeDeadline)
+	defer cancel()
+	err := store.RetryBusy(ctx, func() error {
+		rep = SweepReport{}
+		return e.store.Update(ctx, func(tx *sql.Tx) error {
+			var err error
+			rep, err = e.sweepTx(tx, e.cfg.Now())
+			return err
+		})
 	})
 	if err != nil {
 		return SweepReport{}, fmt.Errorf("sweep: %w", err)
