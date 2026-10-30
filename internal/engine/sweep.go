@@ -23,10 +23,25 @@ type SweepReport struct {
 // window, messages and artifacts, leaving the event log whole.
 func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 	var rep SweepReport
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		var err error
-		rep, err = e.sweepTx(tx, e.cfg.Now())
-		return err
+	// A sweep that began is finished on a context of its own, like a
+	// heartbeat: a caller that gives up mid-sweep must not roll the
+	// transaction back under its statements' feet, and the bounded busy
+	// retry rides out a store whose write lock a heavier writer held past
+	// the busy timeout. The maintenance transaction only — the prune
+	// below keeps the caller's own context.
+	err := retryBusyTx(ctx, writeDeadline, func(ctx context.Context) error {
+		// A retried sweep starts clean: the failed attempt rolled back,
+		// its report with it, so only the committed attempt's report
+		// returns.
+		rep = SweepReport{}
+		return e.store.Update(ctx, func(tx *sql.Tx) error {
+			var err error
+			rep, err = e.sweepTx(tx, e.cfg.Now())
+			if err != nil {
+				return err
+			}
+			return e.faultBusy()
+		})
 	})
 	if err != nil {
 		return SweepReport{}, fmt.Errorf("sweep: %w", err)
@@ -94,12 +109,56 @@ func (e *Engine) sweepGap(now time.Time) (gap time.Duration, suspended bool) {
 }
 
 // recordSweep records a sweep tick at now (§13): the next sweep measures
-// its gap from here. It is called only once a sweep has done its work,
-// so a sweep that fails and rolls back does not consume the gap — the
-// retry still sees the pre-sleep jump and re-detects the suspension.
+// its gap from here. It runs only after the sweeping transaction has
+// committed: the sweep stages its tick (stageSweep) and the commit
+// records it (mirroredStore.Update), so a sweep that rolls back — busy
+// at COMMIT, an error in the caller's own later steps of the same
+// transaction — does not consume the gap. The retry still sees the
+// pre-sleep jump and re-detects the suspension.
 func (e *Engine) recordSweep(now time.Time) {
 	e.sweepMu.Lock()
 	e.lastSweep = now
+	e.sweepMu.Unlock()
+}
+
+// stageSweep stages now as the sweep tick of tx, the transaction running
+// the sweep: the tick is measured but not yet real, for the transaction
+// may still roll back. sweepGap keeps reading the last committed tick
+// until the commit lands.
+func (e *Engine) stageSweep(tx *sql.Tx, now time.Time) {
+	e.sweepMu.Lock()
+	e.stagedTx, e.stagedSweep = tx, now
+	e.sweepMu.Unlock()
+}
+
+// commitStagedSweep records the tick tx staged, when the staging is still
+// its: the commit is what makes a sweep's work — its tick included —
+// real. A later sweep of another transaction that replaced the staging
+// records its own tick instead. A nil tx (the begin itself failed)
+// staged nothing.
+func (e *Engine) commitStagedSweep(tx *sql.Tx) {
+	if tx == nil {
+		return
+	}
+	e.sweepMu.Lock()
+	staged, at := e.stagedTx, e.stagedSweep
+	if e.stagedTx == tx {
+		e.stagedTx, e.stagedSweep = nil, time.Time{}
+	}
+	e.sweepMu.Unlock()
+	if staged == tx {
+		e.recordSweep(at)
+	}
+}
+
+// dropStagedSweep drops the tick tx staged: the transaction rolled back,
+// so its sweep never happened and the gap it measured is still open for
+// the retry to read.
+func (e *Engine) dropStagedSweep(tx *sql.Tx) {
+	e.sweepMu.Lock()
+	if e.stagedTx == tx {
+		e.stagedTx, e.stagedSweep = nil, time.Time{}
+	}
 	e.sweepMu.Unlock()
 }
 
@@ -205,14 +264,14 @@ func (e *Engine) restartDeadlinesTx(tx *sql.Tx, now time.Time, gap time.Duration
 func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep SweepReport, err error) {
 	nowStr := fmtTime(now)
 
-	// Record the tick only once the sweep's own work has succeeded: a
-	// sweep that fails rolls its work back, and the next tick must still
-	// see the pre-sleep gap to re-detect the suspension (§13).
-	defer func() {
-		if err == nil {
-			e.recordSweep(now)
-		}
-	}()
+	// Stage the tick, and let the commit record it: a sweep that rolls
+	// back after this point — busy at COMMIT, an error in the caller's
+	// later steps of the same transaction — must not consume the
+	// suspension gap, so the retry still sees the pre-sleep jump and
+	// re-detects the suspension (§13). Every sweepTx/sweepPolledTx caller
+	// shares this: the staging settles with the transaction it rode in
+	// (mirroredStore.Update).
+	e.stageSweep(tx, now)
 
 	// A suspension (§13): the wall clock jumped far past the sweep
 	// interval between ticks, so the engine itself slept. Deadlines are

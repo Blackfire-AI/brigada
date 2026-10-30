@@ -59,28 +59,34 @@ func (e *Engine) Heartbeat(ctx context.Context, owner, jobID int64, leaseID stri
 	// A heartbeat that began is finished on a context of its own: a request
 	// that gives up mid-sweep (a client timeout under load) must not roll
 	// the transaction back and cost a live worker its lease. The deadline
-	// keeps a wedged store from holding the call forever.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), heartbeatDeadline)
-	defer cancel()
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		now := e.cfg.Now()
-		// The heartbeat shows the runner is here, before the sweep can
-		// call it stale (§8 "Health").
-		if err := e.runnerSeenTx(tx, owner, now); err != nil {
-			return err
-		}
-		if e.beforeHeartbeatSweep != nil {
-			e.beforeHeartbeatSweep()
-		}
-		rep, err := e.sweepTx(tx, now)
-		if err != nil {
-			return err
-		}
-		ans, expires, err = e.heartbeatTx(tx, owner, jobID, leaseID, prog, rep, now)
-		if err != nil {
-			return fmt.Errorf("heartbeat job %d: %w", jobID, err)
-		}
-		return nil
+	// keeps a wedged store from holding the call forever, and the bounded
+	// busy retry rides out a store whose write lock a heavier writer held
+	// past the busy timeout — the whole retry within the one deadline.
+	err := retryBusyTx(ctx, heartbeatDeadline, func(ctx context.Context) error {
+		// A retried beat starts clean: the failed attempt rolled back,
+		// its answer and expiry with it, so only the committed attempt's
+		// values return.
+		ans, expires = "", time.Time{}
+		return e.store.Update(ctx, func(tx *sql.Tx) error {
+			now := e.cfg.Now()
+			// The heartbeat shows the runner is here, before the sweep can
+			// call it stale (§8 "Health").
+			if err := e.runnerSeenTx(tx, owner, now); err != nil {
+				return err
+			}
+			if e.beforeHeartbeatSweep != nil {
+				e.beforeHeartbeatSweep()
+			}
+			rep, err := e.sweepTx(tx, now)
+			if err != nil {
+				return err
+			}
+			ans, expires, err = e.heartbeatTx(tx, owner, jobID, leaseID, prog, rep, now)
+			if err != nil {
+				return fmt.Errorf("heartbeat job %d: %w", jobID, err)
+			}
+			return e.faultBusy()
+		})
 	})
 	return ans, expires, err
 }

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -352,11 +353,22 @@ type Engine struct {
 	// transaction just before its sweep, to play a slow sweep out.
 	beforeHeartbeatSweep func()
 
+	// faultBusyTx, when set by a test, runs at the end of a retried
+	// transaction's work — a sweep's or a heartbeat's: a busy error it
+	// returns plays the store refusing the transaction the write lock, so
+	// the bounded retry is tested deterministically, without holding a
+	// real lock past the busy timeout.
+	faultBusyTx func() error
+
 	// sweepMu guards lastSweep, the wall-clock time of the previous sweep
 	// tick (§13): the suspension check reads the gap from it, and engine
-	// calls may sweep concurrently.
-	sweepMu   sync.Mutex
-	lastSweep time.Time
+	// calls may sweep concurrently. It guards the staged tick too: the
+	// tick the transaction sweeping now has measured but not committed,
+	// recorded only when that transaction commits (stageSweep).
+	sweepMu     sync.Mutex
+	lastSweep   time.Time
+	stagedTx    *sql.Tx   // the transaction whose sweep staged a tick
+	stagedSweep time.Time // the tick it staged
 
 	// drainMu guards draining, the runners that reported a restart
 	// drain pending (§5.1): each takes no new lease and exits once its
