@@ -66,8 +66,8 @@ tasks:
     effort: medium
     skills: ["bugfix"]
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-310"
+    rounds: 1
   - id: 311
     name: "changelog_94"
     title: "CHANGELOG entries for plan 94 (#142, #146)"
