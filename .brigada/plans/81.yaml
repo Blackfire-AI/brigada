@@ -5,9 +5,9 @@
 plan: 81
 title: "Instructions per role (#119) and task skills (#117): design §5.9, §5.10"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-28T20:42:23.229737Z
-updated: 2026-10-30T12:55:44.615423Z
+updated: 2026-10-30T22:01:21.727837Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -52,7 +52,7 @@ tasks:
     continue: "store_status"
     tier: heavy
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-229"
     rounds: 1
   - id: 230
@@ -64,7 +64,7 @@ tasks:
     continue: "skills_api"
     tier: heavy
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-230-r1"
     rounds: 0
   - id: 231
@@ -75,7 +75,7 @@ tasks:
     base: "prompts_rt"
     continue: "prompts_rt"
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-231"
     rounds: 0
   - id: 232
@@ -85,7 +85,7 @@ tasks:
     deps: ["record"]
     base: "record"
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-232"
     rounds: 0
   - id: 233
@@ -96,7 +96,7 @@ tasks:
     base: "client_show"
     continue: "client_show"
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-233"
     rounds: 1
   - id: 234
@@ -107,7 +107,7 @@ tasks:
     base: "docs_check"
     continue: "docs_check"
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-234-r2"
     rounds: 0
   - id: 235
@@ -131,7 +131,7 @@ tasks:
     base: "client_digest"
     continue: "client_digest"
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-236"
     rounds: 2
   - id: 237
@@ -142,7 +142,7 @@ tasks:
     base: "init"
     continue: "init"
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-237"
     rounds: 1
   - id: 238
@@ -153,7 +153,7 @@ tasks:
     base: "store_skills"
     continue: "store_skills"
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-238"
     rounds: 1
   - id: 239
@@ -165,7 +165,7 @@ tasks:
     continue: "prompts"
     tier: heavy
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-239-r1"
     rounds: 0
   - id: 240
@@ -176,7 +176,7 @@ tasks:
     base: "client"
     continue: "client"
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-240"
     rounds: 1
   - id: 241
@@ -187,7 +187,7 @@ tasks:
     base: "init_diff"
     continue: "init_diff"
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-241"
     rounds: 0
   - id: 242
@@ -198,7 +198,7 @@ tasks:
     base: "docs_verify"
     continue: "docs_verify"
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-242"
     rounds: 2
   - id: 243
@@ -218,6 +218,6 @@ tasks:
     deps: ["record", "client", "store_status", "prompts_rt"]
     base: "prompts_rt"
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-244"
     rounds: 0
