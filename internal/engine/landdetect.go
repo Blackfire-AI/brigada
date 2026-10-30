@@ -60,8 +60,9 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 			continue
 		}
 		var taskProject int64
-		err := tx.QueryRow(`SELECT p.project_id FROM tasks t JOIN plans p ON p.id = t.plan_id WHERE t.id = ?`,
-			lc.TaskID).Scan(&taskProject)
+		var state string
+		err := tx.QueryRow(`SELECT p.project_id, t.state FROM tasks t JOIN plans p ON p.id = t.plan_id WHERE t.id = ?`,
+			lc.TaskID).Scan(&taskProject, &state)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue // no such task; a trailer for another project's id is not ours
 		}
@@ -70,6 +71,12 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 		}
 		if taskProject != project {
 			continue // the trailer names another project's task
+		}
+		if state == taskRetired {
+			// A retired task never lands by any path (§6.2): its
+			// trailer on the branch is a fact of the repo, not a
+			// landing to record.
+			continue
 		}
 		// A landing on the branch clears a held hold even when a record
 		// already exists: a hold left beside a record must not survive.

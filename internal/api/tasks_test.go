@@ -277,3 +277,95 @@ func TestTaskRestartEndpoint(t *testing.T) {
 		t.Errorf("restart a missing task: %d, want 404", code)
 	}
 }
+
+// TestTaskRetireEndpoint covers POST /v1/tasks/retire (§6.2, §12.1):
+// the foreman's task_retire and the user's `brigada task retire` both
+// land here — the caller recorded with each retirement is the role that
+// asked — scoped and idempotent like the answer, the engine's refusals
+// riding as 400s.
+func TestTaskRetireEndpoint(t *testing.T) {
+	e := newEnv(t)
+	parked := seedParked(t, e, e.plan, "task_out_of_rounds", `{"reason":"the task's fix_rounds are spent"}`)
+
+	if code, _, _ := e.do(http.MethodPost, "/v1/tasks/retire", "r1", "", []byte(`{"tasks":[1],"reason":"go"}`)); code != http.StatusForbidden {
+		t.Fatalf("runner retires: %d, want 403", code)
+	}
+	if code, _, _ := e.do(http.MethodPost, "/v1/tasks/retire", "foreman1", "", []byte(`{"tasks":[99999],"reason":"go"}`)); code != http.StatusNotFound {
+		t.Fatalf("retire a missing task: %d, want 404", code)
+	}
+	if code, _, data := e.do(http.MethodPost, "/v1/tasks/retire", "foreman1", "", []byte(`{"tasks":[],"reason":"go"}`)); code != http.StatusBadRequest {
+		t.Fatalf("retire with no tasks: %d %s, want 400", code, data)
+	}
+
+	body := fmt.Sprintf(`{"tasks":[%d],"reason":"superseded by task 274"}`, parked)
+	code, _, data := e.do(http.MethodPost, "/v1/tasks/retire", "foreman1", "ret-1", []byte(body))
+	if code != http.StatusOK {
+		t.Fatalf("foreman retires: %d %s, want 200", code, data)
+	}
+	res := decode[struct {
+		Retired []int64 `json:"retired"`
+		Plans   []struct {
+			PlanID int64  `json:"plan_id"`
+			State  string `json:"state"`
+		} `json:"plans"`
+	}](t, data)
+	if len(res.Retired) != 1 || res.Retired[0] != parked {
+		t.Fatalf("retire = %s, want the parked task", data)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", parked); state != "retired" {
+		t.Errorf("task state after the retire = %q, want retired", state)
+	}
+	if payload := e.str("SELECT payload FROM events WHERE kind = 'task_retired'"); !strings.Contains(payload, `"caller":"foreman"`) || !strings.Contains(payload, "superseded by task 274") {
+		t.Errorf("task_retired payload = %s, want the foreman caller and the reason verbatim", payload)
+	}
+
+	// An idempotent repeat returns the first result.
+	code, _, repeat := e.do(http.MethodPost, "/v1/tasks/retire", "foreman1", "ret-1", []byte(body))
+	if code != http.StatusOK || string(repeat) != string(data) {
+		t.Errorf("idempotent repeat = %d %s, want the first answer %s", code, repeat, data)
+	}
+
+	// A client retires too, recorded as the user's word.
+	other := seedParked(t, e, e.plan, "task_needs_help", `{"question":"mine?"}`)
+	if code, _, _ := e.do(http.MethodPost, "/v1/tasks/retire", "alice", "", []byte(fmt.Sprintf(`{"tasks":[%d],"reason":"done by hand"}`, other))); code != http.StatusOK {
+		t.Fatalf("client retires: %d, want 200", code)
+	}
+	if payload := e.str(`SELECT payload FROM events WHERE kind = 'task_retired' AND task_id = ?`, other); !strings.Contains(payload, `"caller":"user"`) {
+		t.Errorf("task_retired payload = %s, want the user caller", payload)
+	}
+
+	// The engine's refusals ride as 400s: a landed task, a missing reason.
+	landed := seedParked(t, e, e.plan, "task_needs_help", `{"question":"x"}`)
+	e.exec(`INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, created_at)
+		VALUES (?, ?, 'main', 'abc123', 'pushed', ?)`, landed, e.project1, seedTS)
+	if code, _, data = e.do(http.MethodPost, "/v1/tasks/retire", "foreman1", "", []byte(fmt.Sprintf(`{"tasks":[%d],"reason":"late"}`, landed))); code != http.StatusBadRequest {
+		t.Fatalf("retire a landed task: %d %s, want 400", code, data)
+	}
+	if !strings.Contains(decode[errBody](t, data).Error, "is landed") {
+		t.Errorf("refusal = %s, want the landing named", data)
+	}
+	if code, _, data = e.do(http.MethodPost, "/v1/tasks/retire", "foreman1", "", []byte(fmt.Sprintf(`{"tasks":[%d]}`, landed))); code != http.StatusBadRequest {
+		t.Fatalf("retire with no reason: %d %s, want 400", code, data)
+	}
+	if !strings.Contains(decode[errBody](t, data).Error, "reason is required") {
+		t.Errorf("refusal = %s, want the reason named", data)
+	}
+
+	// A foreman token is walled into its own project (§12.1).
+	var foreignPlan int64
+	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO plans (project_id, title, state, created_at, updated_at)
+			VALUES (?, 'another plan', 'active', ?, ?)`, e.project2, seedTS, seedTS)
+		if err != nil {
+			return err
+		}
+		foreignPlan, err = res.LastInsertId()
+		return err
+	}); err != nil {
+		t.Fatalf("seed the other project's plan: %v", err)
+	}
+	foreign := seedParked(t, e, foreignPlan, "task_needs_help", `{"question":"mine?"}`)
+	if code, _, data = e.do(http.MethodPost, "/v1/tasks/retire", "foreman1", "", []byte(fmt.Sprintf(`{"tasks":[%d],"reason":"go"}`, foreign))); code != http.StatusForbidden {
+		t.Fatalf("foreman retires another project's task: %d %s, want 403", code, data)
+	}
+}

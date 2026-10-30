@@ -985,6 +985,7 @@ func TestSchemaEditsMatchTheirMigrations(t *testing.T) {
 		58: "plan_review",
 		59: "plan_needs_foreman",
 		64: "role_instructions",
+		71: "task_retired",
 	}
 	migs, err := allMigrations()
 	if err != nil {
@@ -1050,6 +1051,20 @@ func TestPlanNeedsForemanMigration(t *testing.T) {
 		VALUES (?, 'the parked plan', 'needs_foreman', ?, ?)`, f.project, ts, ts)
 	if got := queryString(t, f.db, "SELECT state FROM plans WHERE id = ?", plan); got != "needs_foreman" {
 		t.Errorf("parked plan state = %q, want needs_foreman", got)
+	}
+}
+
+// TestTaskRetiredMigration pins what 0071_task_retired added (§6.2): the
+// tasks state CHECK admits retired, the settle of a task that will not
+// land, beside the cancelled one.
+func TestTaskRetiredMigration(t *testing.T) {
+	f := newFixture(t)
+	exec(t, f.db, `UPDATE tasks SET state = 'retired' WHERE id = ?`, f.task)
+	if got := queryString(t, f.db, "SELECT state FROM tasks WHERE id = ?", f.task); got != "retired" {
+		t.Errorf("retired task state = %q, want retired", got)
+	}
+	if _, err := f.db.Exec(`UPDATE tasks SET state = 'bogus' WHERE id = ?`, f.task); err == nil || !strings.Contains(err.Error(), "CHECK") {
+		t.Errorf("task with a bogus state: err = %v; want a CHECK failure", err)
 	}
 }
 

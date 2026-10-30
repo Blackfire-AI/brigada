@@ -161,6 +161,7 @@ var schemaEdits = map[int]func(ctx context.Context, tx *sql.Tx) error{
 	58: widenPlanReviewChecks,
 	59: widenPlanNeedsForemanCheck,
 	64: seedRoleInstructions,
+	71: widenTaskStates,
 }
 
 // jobsPairingCheck is the CHECK 0001 put on jobs: foreman jobs have no
@@ -228,6 +229,21 @@ const plansStateCheckNeedsForeman = "CHECK (state IN ('draft', 'pending_approval
 // the same in-place edit 0058 used for reviewing.
 func widenPlanNeedsForemanCheck(ctx context.Context, tx *sql.Tx) error {
 	return editTableCheck(ctx, tx, "plans", plansStateCheckReviewing, plansStateCheckNeedsForeman)
+}
+
+// The tasks state CHECK 0001 put on the table, and the one that also
+// admits a retired task (§6.2): retire settles a task that will not
+// land, and the word reads apart from cancelled in the store, the
+// history and the plan file.
+const (
+	taskStateCheck        = "CHECK (state IN ('pending', 'ready', 'running', 'checking', 'reviewing', 'done', 'needs_foreman', 'needs_user', 'failed', 'cancelled'))"
+	taskStateCheckRetired = "CHECK (state IN ('pending', 'ready', 'running', 'checking', 'reviewing', 'done', 'needs_foreman', 'needs_user', 'failed', 'cancelled', 'retired'))"
+)
+
+// widenTaskStates lets the tasks table hold a retired task, by the same
+// in-place edit 0058 and 0059 used for the plans table.
+func widenTaskStates(ctx context.Context, tx *sql.Tx) error {
+	return editTableCheck(ctx, tx, "tasks", taskStateCheck, taskStateCheckRetired)
 }
 
 // widenPlanReviewChecks lets the jobs table hold a plan_review job and
