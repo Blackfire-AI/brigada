@@ -87,7 +87,7 @@ tasks:
     deps: ["family_visibility_docs"]
     base: "family_visibility_docs"
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-291-r1"
     rounds: 1
   - id: 292
