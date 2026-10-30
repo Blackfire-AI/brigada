@@ -5,9 +5,9 @@
 plan: 93
 title: "Flaky TestBP8aExit: a lease's events must not predate the job they lease"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-30T14:47:45.011097Z
-updated: 2026-10-30T14:50:17.483306Z
+updated: 2026-10-30T15:00:43.561468Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
