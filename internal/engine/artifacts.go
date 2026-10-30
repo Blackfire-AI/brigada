@@ -342,62 +342,76 @@ type PruneReport struct {
 // while the blobs stay gone — read as not-found (Artifact), never as
 // corruption. File removal itself is best-effort; the rows are gone
 // whatever it answered.
+//
+// The transaction runs under the bounded busy retry, on a context of
+// its own within writeDeadline, as the sweep's maintenance transaction
+// does — and apart from it, so a prune refused busy never re-runs a
+// maintenance pass that already committed. Each attempt starts its
+// report clean, so PruneReport.Files counts two things: the blob files
+// the committed attempt's transaction removed, and the stale upload
+// temps sweepStaleTemps takes after the commit. A blob an attempt
+// removed before it rolled back is not counted: it stays gone while
+// its rows survive that attempt — the trade above — and the retry
+// deletes those rows again, its remove of the missing file a no-op.
 func (e *Engine) Prune(ctx context.Context, before time.Time) (PruneReport, error) {
 	var rep PruneReport
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		res, err := tx.Exec("DELETE FROM messages WHERE created_at < ?", fmtTime(before))
-		if err != nil {
-			return fmt.Errorf("prune messages: %w", err)
-		}
-		if rep.Messages, err = res.RowsAffected(); err != nil {
-			return fmt.Errorf("prune messages: rows: %w", err)
-		}
-		rows, err := tx.Query("SELECT id, sha256 FROM artifacts WHERE created_at < ?", fmtTime(before))
-		if err != nil {
-			return fmt.Errorf("list pruned artifacts: %w", err)
-		}
-		var ids []int64
-		var shas []string
-		for rows.Next() {
-			var id int64
-			var sha string
-			if err := rows.Scan(&id, &sha); err != nil {
+	err := retryBusyTx(ctx, writeDeadline, func(ctx context.Context) error {
+		rep = PruneReport{}
+		return e.store.Update(ctx, func(tx *sql.Tx) error {
+			res, err := tx.Exec("DELETE FROM messages WHERE created_at < ?", fmtTime(before))
+			if err != nil {
+				return fmt.Errorf("prune messages: %w", err)
+			}
+			if rep.Messages, err = res.RowsAffected(); err != nil {
+				return fmt.Errorf("prune messages: rows: %w", err)
+			}
+			rows, err := tx.Query("SELECT id, sha256 FROM artifacts WHERE created_at < ?", fmtTime(before))
+			if err != nil {
+				return fmt.Errorf("list pruned artifacts: %w", err)
+			}
+			var ids []int64
+			var shas []string
+			for rows.Next() {
+				var id int64
+				var sha string
+				if err := rows.Scan(&id, &sha); err != nil {
+					rows.Close()
+					return fmt.Errorf("list pruned artifacts: %w", err)
+				}
+				ids = append(ids, id)
+				if !slices.Contains(shas, sha) {
+					shas = append(shas, sha)
+				}
+			}
+			if err := rows.Err(); err != nil {
 				rows.Close()
 				return fmt.Errorf("list pruned artifacts: %w", err)
 			}
-			ids = append(ids, id)
-			if !slices.Contains(shas, sha) {
-				shas = append(shas, sha)
-			}
-		}
-		if err := rows.Err(); err != nil {
 			rows.Close()
-			return fmt.Errorf("list pruned artifacts: %w", err)
-		}
-		rows.Close()
-		rep.Artifacts = int64(len(ids))
-		for _, id := range ids {
-			if _, err := tx.Exec("DELETE FROM artifacts WHERE id = ?", id); err != nil {
-				return fmt.Errorf("prune artifact %d: %w", id, err)
+			rep.Artifacts = int64(len(ids))
+			for _, id := range ids {
+				if _, err := tx.Exec("DELETE FROM artifacts WHERE id = ?", id); err != nil {
+					return fmt.Errorf("prune artifact %d: %w", id, err)
+				}
 			}
-		}
-		for _, sha := range shas {
-			var left int
-			if err := tx.QueryRow("SELECT COUNT(*) FROM artifacts WHERE sha256 = ?", sha).Scan(&left); err != nil {
-				return fmt.Errorf("count references of %s: %w", sha, err)
+			for _, sha := range shas {
+				var left int
+				if err := tx.QueryRow("SELECT COUNT(*) FROM artifacts WHERE sha256 = ?", sha).Scan(&left); err != nil {
+					return fmt.Errorf("count references of %s: %w", sha, err)
+				}
+				if left > 0 {
+					continue // a younger row still addresses this blob
+				}
+				path, ok := blobPath(e.cfg.DataDir, sha)
+				if !ok {
+					continue // not a content address: no file of ours to take
+				}
+				if os.Remove(path) == nil {
+					rep.Files++
+				}
 			}
-			if left > 0 {
-				continue // a younger row still addresses this blob
-			}
-			path, ok := blobPath(e.cfg.DataDir, sha)
-			if !ok {
-				continue // not a content address: no file of ours to take
-			}
-			if os.Remove(path) == nil {
-				rep.Files++
-			}
-		}
-		return nil
+			return e.faultBusy()
+		})
 	})
 	if err != nil {
 		return PruneReport{}, fmt.Errorf("prune before %s: %w", fmtTime(before), err)

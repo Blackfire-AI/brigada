@@ -27,8 +27,10 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 	// heartbeat: a caller that gives up mid-sweep must not roll the
 	// transaction back under its statements' feet, and the bounded busy
 	// retry rides out a store whose write lock a heavier writer held past
-	// the busy timeout. The maintenance transaction only — the prune
-	// below keeps the caller's own context.
+	// the busy timeout. The maintenance transaction is its own retry
+	// unit: the prune below retries apart from it (Prune), so a prune
+	// refused busy never re-runs a maintenance pass that already
+	// committed.
 	err := retryBusyTx(ctx, writeDeadline, func(ctx context.Context) error {
 		// A retried sweep starts clean: the failed attempt rolled back,
 		// its report with it, so only the committed attempt's report

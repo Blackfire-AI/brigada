@@ -299,3 +299,110 @@ func TestConcurrentSweepsDetectOneSuspension(t *testing.T) {
 		t.Fatalf("engine_suspended events after a wakeful sweep = %d, want still the one: a committed tick was lost", count)
 	}
 }
+
+// TestSweepRetriesThePruneApartFromTheMaintenance covers the two retry
+// units of a sweep with a retention: the maintenance transaction commits
+// once, the prune after it is refused busy once and commits on its own
+// retry, and the committed maintenance pass is never run again — the
+// hook sees the maintenance, the busy prune and the prune's retry, in
+// that order, and nothing else.
+func TestSweepRetriesThePruneApartFromTheMaintenance(t *testing.T) {
+	e := newEnv(t)
+	e.eng.cfg.Retention = time.Hour
+	e.submit(e.work())
+	g := e.leaseAny(e.runner1)
+	e.clock.Advance(e.eng.cfg.LeaseTTL + time.Second) // the lease lapses: the maintenance has work to commit
+	e.exec(`INSERT INTO messages (project_id, kind, author, content, created_at)
+		VALUES (?, 'note', 'engine', 'an aged note', ?)`, e.project, fmtTime(e.clock.Now().Add(-2*time.Hour)))
+	calls := 0
+	e.eng.faultBusyTx = func() error {
+		calls++
+		if calls == 2 { // the prune's first attempt, after the maintenance committed
+			return errBusy
+		}
+		return nil
+	}
+	rep, err := e.eng.Sweep(e.ctx)
+	if err != nil {
+		t.Fatalf("sweep past a busy prune: %v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("the transactions ran %d times, want the maintenance once, the busy prune and its retry", calls)
+	}
+	if len(rep.Expired) != 1 || rep.Expired[0] != g.JobID {
+		t.Fatalf("report = %+v, want the expired job %d: the maintenance's report survives the prune's retry", rep, g.JobID)
+	}
+	if n := e.int("SELECT COUNT(*) FROM events WHERE kind = ?", evLeaseRequeued); n != 1 {
+		t.Fatalf("lease_requeued events = %d, want the one the single maintenance pass wrote", n)
+	}
+	if n := e.int("SELECT COUNT(*) FROM messages WHERE content = 'an aged note'"); n != 0 {
+		t.Fatalf("aged notes = %d, want none: the prune's retry committed", n)
+	}
+}
+
+// TestJobReadSweepsAfterOneBusyAttempt covers the retry on the sweep a
+// job read runs when a time rule could have bitten: one attempt refused
+// busy, the next commits, and the read returns the swept row.
+func TestJobReadSweepsAfterOneBusyAttempt(t *testing.T) {
+	e := newEnv(t)
+	e.submit(e.work())
+	g := e.leaseAny(e.runner1)
+	e.clock.Advance(e.eng.cfg.LeaseTTL + time.Second) // the lease lapses: the read must sweep
+	calls := 0
+	e.eng.faultBusyTx = func() error {
+		calls++
+		if calls == 1 {
+			return errBusy
+		}
+		return nil
+	}
+	info, err := e.eng.Job(e.ctx, g.JobID)
+	if err != nil {
+		t.Fatalf("job read after one busy sweep attempt: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("the sweep ran %d times, want the failed attempt and the retry", calls)
+	}
+	if info == nil || info.Status != statusQueued {
+		t.Fatalf("job = %+v, want the swept row, queued", info)
+	}
+}
+
+// TestPruneBusyBoundAndNonBusyError covers the prune's retry at its
+// edges: refused busy on every attempt it fails with the busy error
+// after the bounded attempts, and an error that is not busy goes back at
+// once, unretried.
+func TestPruneBusyBoundAndNonBusyError(t *testing.T) {
+	bound := 0
+	store.RetryBusy(context.Background(), func() error {
+		bound++
+		return errBusy
+	})
+	t.Run("busy", func(t *testing.T) {
+		e := newEnv(t)
+		calls := 0
+		e.eng.faultBusyTx = func() error { calls++; return errBusy }
+		rep, err := e.eng.Prune(e.ctx, e.clock.Now())
+		if !store.IsBusy(err) {
+			t.Fatalf("prune error = %v, want the busy it could not ride out", err)
+		}
+		if calls != bound {
+			t.Fatalf("the transaction ran %d times, want the retry's %d bounded attempts", calls, bound)
+		}
+		if rep != (PruneReport{}) {
+			t.Fatalf("report = %+v, want none: no attempt committed", rep)
+		}
+	})
+	t.Run("not busy", func(t *testing.T) {
+		e := newEnv(t)
+		boom := errors.New("no such table: messages")
+		calls := 0
+		e.eng.faultBusyTx = func() error { calls++; return boom }
+		if _, err := e.eng.Prune(e.ctx, e.clock.Now()); !errors.Is(err, boom) {
+			t.Fatalf("prune error = %v, want the injected one at once", err)
+		}
+		if calls != 1 {
+			t.Fatalf("the transaction ran %d times, want the one attempt: a non-busy error is never retried", calls)
+		}
+	})
+}
