@@ -5,9 +5,9 @@
 plan: 94
 title: "#140 retire unlanded tasks; #142 land_ready hold re-checks itself"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: needs_foreman
 created: 2026-10-30T19:52:43.95381Z
-updated: 2026-10-30T20:04:31.268147Z
+updated: 2026-10-30T20:09:30.605478Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
