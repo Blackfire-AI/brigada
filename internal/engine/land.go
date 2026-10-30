@@ -358,11 +358,17 @@ func crossPlanDepTx(tx *sql.Tx, project int64, ref string) (ok bool, why string,
 
 // depPushReleasedTx reports whether a dependency's push was released
 // (§6.3): a live land job on its key, which a task with a landing
-// record holds only as the push phase brigada push approve queued.
+// record holds only as the push phase brigada push approve queued. The
+// engine's re-check of a push-phase land_ready hold (issue #142) is the
+// one exception: a live land job that answers to a held hold re-checks
+// a push still waiting, it does not release it, so a dependent under
+// gate_push auto keeps waiting for the dependency's work as it always
+// did.
 func depPushReleasedTx(tx *sql.Tx, dep int64) (bool, error) {
 	var n int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'
-		AND status IN ('queued', 'leased', 'running')`, dep).Scan(&n); err != nil {
+		AND status IN ('queued', 'leased', 'running')
+		AND NOT EXISTS (SELECT 1 FROM land_holds WHERE task_id = ? AND state = 'held')`, dep, dep).Scan(&n); err != nil {
 		return false, fmt.Errorf("read the land jobs of dependency %d: %w", dep, err)
 	}
 	return n > 0, nil
@@ -499,12 +505,43 @@ func (e *Engine) holdLandTx(tx *sql.Tx, project, taskID int64, reason string, no
 }
 
 // clearLandHoldTx drops a held land-gate hold of the task once its landing
-// is recorded, by trailer or by the land job (§6.3): the landing is done,
-// so the needs-you line that waited on it goes too. A rejected row stays,
-// as LandReject leaves it, so the rule never re-holds the task.
-func clearLandHoldTx(tx *sql.Tx, taskID int64) error {
+// is settled, by trailer or by the land job (§6.3): the landing is done,
+// so the needs-you line that waited on it goes too. A land_ready hold the
+// engine releases here is the re-check's own release (issue #142): the
+// gate passed on the re-check the hold queued, or the landing settled
+// beside the hold — a trailer landed the task under it — and the event
+// that records it is distinct from the user's release. That event's
+// re-check, when one is still live under the hold, is cancelled with the
+// hold: its landing is settled. A rejected row stays, as LandReject
+// leaves it, so the rule never re-holds the task.
+func (e *Engine) clearLandHoldTx(tx *sql.Tx, project, taskID int64, now time.Time) error {
+	reason, held, err := heldLandHoldTx(tx, taskID)
+	if err != nil {
+		return err
+	}
+	if !held {
+		return nil
+	}
 	if _, err := tx.Exec(`DELETE FROM land_holds WHERE task_id = ? AND state = 'held'`, taskID); err != nil {
 		return fmt.Errorf("clear the land hold of task %d: %w", taskID, err)
+	}
+	if !landReadyHold(reason) {
+		return nil
+	}
+	if _, err := appendEventTx(tx, evTaskLandRecheckReleased, project, taskID, 0,
+		eventPayload{Status: taskDone, Reason: boundNote("land_ready passed; the engine released the hold")}, now); err != nil {
+		return err
+	}
+	// A landing that settled beside the hold — most often a detected
+	// trailer — leaves the hold's re-check live with nothing left to
+	// check; a re-check whose own landing just recorded is already done
+	// and reads as no live job here.
+	if live, err := liveJobTx(tx, fmt.Sprintf("task:%d", taskID)); err != nil {
+		return err
+	} else if live != nil && live.Kind == KindLand {
+		if _, err := e.cancelTx(tx, live, "the landing settled beside the land_ready hold", now); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1076,7 +1113,7 @@ func (e *Engine) landSucceededTx(tx *sql.Tx, job *jobRow, rec landRecord, now ti
 		job.TaskID, job.ProjectID, rec.TargetBranch, rec.Commit, pushed, rec.PushCmd, rec.AfterLandErr, fmtTime(now)); err != nil {
 		return fmt.Errorf("record the landing of task %d: %w", job.TaskID, err)
 	}
-	if err := clearLandHoldTx(tx, job.TaskID); err != nil {
+	if err := e.clearLandHoldTx(tx, job.ProjectID, job.TaskID, now); err != nil {
 		return err
 	}
 	if _, err := appendEventTx(tx, evTaskLanded, job.ProjectID, job.TaskID, job.ID,
@@ -1148,6 +1185,13 @@ func (e *Engine) pushCompletedTx(tx *sql.Tx, job *jobRow, existing *landingRow, 
 		pr.AfterLandErr, job.TaskID); err != nil {
 		return fmt.Errorf("record the push of task %d: %w", job.TaskID, err)
 	}
+	// The push a land_ready hold held is released by its own re-check
+	// (issue #142): the gate passed and the push went through, so the
+	// hold goes with the engine's release event, exactly as the landing
+	// itself clears its hold.
+	if err := e.clearLandHoldTx(tx, job.ProjectID, job.TaskID, now); err != nil {
+		return err
+	}
 	if _, err := appendEventTx(tx, evTaskPushed, job.ProjectID, job.TaskID, job.ID,
 		eventPayload{Status: taskDone, Branch: pr.TargetBranch, Commit: pr.Commit, Pushed: "pushed",
 			AfterLandError: pr.AfterLandErr}, now); err != nil {
@@ -1186,6 +1230,14 @@ func (e *Engine) landCheckFailedTx(tx *sql.Tx, job *jobRow, rec landRecord, now 
 	}, now)
 }
 
+// landReadyRecheckDelay is how long the engine waits before it re-checks
+// a land_ready hold (issue #142): the gate's exit 1 is a red CI run, and
+// the run stays rerunnable for weeks, so a hold is never final — a rerun
+// that goes green should release the landing by itself, not wait for the
+// user. Ten minutes is slow enough that a rerun has time to start and go
+// green, quick enough that a landing does not sit held all day.
+const landReadyRecheckDelay = 10 * time.Minute
+
 // landHeldTx answers the land_ready gate's hold (issue #87): the command
 // refused the landing with its own words — exit 1 — so nothing is
 // squashed, pushed or recorded, and the task holds at the land gate with
@@ -1199,14 +1251,94 @@ func (e *Engine) landCheckFailedTx(tx *sql.Tx, job *jobRow, rec landRecord, now 
 // keeps the plan open until the release settles it, and one beside a
 // recorded waiting push is a waiting push, which may close the plan,
 // named under "waits to push".
+//
+// The engine also re-checks the hold itself (issue #142): it queues the
+// landing's next land job, not before landReadyRecheckDelay, running the
+// command again exactly as this job ran it. The re-check's exit 0 lands —
+// every other gate applying, the hold released with the landing and its
+// own history event — and its exit 1 lands back here, the hold kept, its
+// reason moved to the command's new first line, the next re-check
+// queued; any other exit keeps the hold and requeues the landing on the
+// not-ready backoff, as the gate always has. Until the re-check passes,
+// the hold is everything it always was: the needs-you line, the
+// notification, `brigada land approve` and `reject`, which cancel a
+// pending re-check. A task the landing has left behind — retired,
+// cancelled — is held and re-checked never.
 func (e *Engine) landHeldTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	reason := "held by rule land_ready"
 	var rec landHeldRecord
 	if json.Unmarshal([]byte(c.Result), &rec) == nil && rec.Line != "" {
 		reason += ": " + boundNote(rec.Line)
 	}
-	if err := e.holdLandTx(tx, job.ProjectID, job.TaskID, reason, now); err != nil {
+	var state string
+	if err := tx.QueryRow("SELECT state FROM tasks WHERE id = ?", job.TaskID).Scan(&state); err != nil {
+		return fmt.Errorf("read task %d: %w", job.TaskID, err)
+	}
+	if state == taskRetired || state == taskCancelled {
+		// The task settled another way while its landing ran (§6.2): no
+		// hold of ours lands on it, and nothing is re-checked.
+		return e.finishLandPlanTx(tx, job, now)
+	}
+	recheck := false
+	prev, held, err := heldLandHoldTx(tx, job.TaskID)
+	if err != nil {
 		return err
+	}
+	switch {
+	case held:
+		// A re-check's exit 1 again: the hold stands, and only its reason
+		// may move to the command's new first line. An unchanged line
+		// records nothing — no event, no new needs-you words — so the
+		// history moves only when the user can see it move.
+		recheck = true
+		if prev != reason {
+			if _, err := tx.Exec(`UPDATE land_holds SET reason = ? WHERE task_id = ? AND state = 'held'`,
+				reason, job.TaskID); err != nil {
+				return fmt.Errorf("re-word the land hold of task %d: %w", job.TaskID, err)
+			}
+			if _, err := appendEventTx(tx, evTaskLandHeld, job.ProjectID, job.TaskID, 0,
+				eventPayload{Status: taskDone, Reason: boundNote(reason)}, now); err != nil {
+				return err
+			}
+		}
+	default:
+		// No held row: the gate's first refusal — or a landing decided
+		// another way, its hold rejected or released with a job of its
+		// own, which no completion of this job may hold again.
+		var decided int
+		if err := tx.QueryRow("SELECT COUNT(*) FROM land_holds WHERE task_id = ?", job.TaskID).Scan(&decided); err != nil {
+			return fmt.Errorf("read the land hold of task %d: %w", job.TaskID, err)
+		}
+		if decided == 0 {
+			if err := e.holdLandTx(tx, job.ProjectID, job.TaskID, reason, now); err != nil {
+				return err
+			}
+			recheck = true
+		}
+	}
+	if recheck {
+		// The re-check is a land job like the landing's own — same key,
+		// same command, nothing skipped — so its exit 0 lands through
+		// every gate and its other answers feed back into this path. The
+		// completing job freed the key earlier in this transaction, so
+		// the submit cannot sit behind a live job; an answer but a
+		// created job is an error, not a silent loss of the re-check.
+		sr, err := e.submitTx(tx, SubmitParams{
+			Key:       job.Key,
+			ProjectID: job.ProjectID,
+			TaskID:    job.TaskID,
+			Kind:      KindLand,
+			Mode:      ModeFresh,
+			Prompt:    "", // no worker: nothing is composed (§1.4)
+			Labels:    []string{"git"},
+			NotBefore: now.Add(landReadyRecheckDelay),
+		}, now)
+		if err != nil {
+			return err
+		}
+		if sr.Answer != AnsCreated {
+			return fmt.Errorf("queue the land_ready re-check of task %d: submit %s answered %s", job.TaskID, job.Key, sr.Answer)
+		}
 	}
 	return e.finishLandPlanTx(tx, job, now)
 }
@@ -1562,6 +1694,23 @@ func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve, stop
 	// skipped: the user's yes replaces the command, which already spoke,
 	// so the re-queued landing runs no command and lands.
 	skip := landReadyHold(reason)
+	if skip {
+		// The hold may carry the engine's pending re-check (issue #142),
+		// a live land job queued to run the command again: the user's
+		// decision replaces it — approve lands exactly once, with the
+		// gate skipped, and reject declines — so the re-check is
+		// cancelled here, and a runner that already began it finds its
+		// completion refused. A hold of any other rule keeps today's
+		// behavior: a live job on the key is reported below, and nothing
+		// is queued behind it.
+		if live, err := liveJobTx(tx, fmt.Sprintf("task:%d", taskID)); err != nil {
+			return LandDecision{}, err
+		} else if live != nil && live.Kind == KindLand {
+			if _, err := e.cancelTx(tx, live, "the user decided the land_ready hold", now); err != nil {
+				return LandDecision{}, err
+			}
+		}
+	}
 	if approve {
 		var changed []string
 		if stopAsking {

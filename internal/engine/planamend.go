@@ -1166,34 +1166,50 @@ func planLiveWorkTx(tx *sql.Tx, nodes []amendNode) ([]int64, error) {
 			// names it declined. A hold on a landing already recorded
 			// is a different hold (§6.3, §7.1): the push phase's,
 			// beside a waiting push — the plan may close, the report
-			// naming the task under "waits to push".
-			if liveJob, err := liveLandJobTx(tx, n.id); err != nil {
+			// naming the task under "waits to push" — and the one live
+			// land job such a hold may carry is the engine's re-check
+			// of that push (issue #142), which waits like the push it
+			// re-checks, so it is not live work either.
+			l, err := landingTx(tx, n.id)
+			if err != nil {
 				return nil, err
-			} else if liveJob {
-				live = append(live, n.id)
-				continue
 			}
-			if l, err := landingTx(tx, n.id); err != nil {
-				return nil, err
-			} else if l == nil {
-				if _, held, err := heldLandHoldTx(tx, n.id); err != nil {
+			recheck := false
+			if l != nil && l.Pushed == "waiting" {
+				if reason, held, err := heldLandHoldTx(tx, n.id); err != nil {
 					return nil, err
-				} else if held {
-					// The land gate holds a landing still to come
-					// (#133): the plan waits for the user's release
-					// and the landing it queues.
+				} else if held && landReadyHold(reason) {
+					recheck = true
+				}
+			}
+			if !recheck {
+				if liveJob, err := liveLandJobTx(tx, n.id); err != nil {
+					return nil, err
+				} else if liveJob {
 					live = append(live, n.id)
 					continue
 				}
-				if landable, err := landableDoneTx(tx, n.id); err != nil {
+			}
+			if l != nil {
+				continue
+			}
+			if _, held, err := heldLandHoldTx(tx, n.id); err != nil {
+				return nil, err
+			} else if held {
+				// The land gate holds a landing still to come
+				// (#133): the plan waits for the user's release
+				// and the landing it queues.
+				live = append(live, n.id)
+				continue
+			}
+			if landable, err := landableDoneTx(tx, n.id); err != nil {
+				return nil, err
+			} else if landable {
+				if rejected, err := rejectedLandHoldTx(tx, n.id); err != nil {
 					return nil, err
-				} else if landable {
-					if rejected, err := rejectedLandHoldTx(tx, n.id); err != nil {
-						return nil, err
-					} else if !rejected {
-						live = append(live, n.id)
-						continue
-					}
+				} else if !rejected {
+					live = append(live, n.id)
+					continue
 				}
 			}
 		case taskCancelled, taskFailed, taskPending, taskRetired:
