@@ -7,7 +7,7 @@ title: "#140 retire unlanded tasks; #142 land_ready hold re-checks itself"
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-10-30T19:52:43.95381Z
-updated: 2026-10-30T19:52:43.95381Z
+updated: 2026-10-30T19:53:16.207094Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -37,8 +37,8 @@ tasks:
     name: "ready_recheck"
     title: "#142: a land_ready hold is re-checked and releases itself once the gate passes"
     class: "implement"
-    deps: []
-    base: ""
+    deps: ["retire"]
+    base: "retire"
     tier: heavy
     effort: medium
     state: pending
