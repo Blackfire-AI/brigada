@@ -64,6 +64,7 @@ Within schema 1, new keys are added as optional keys. A file that worked before 
 - `answer`: `task` and `text` (both required).
 - `task_restart`: `task` (required) and `note`.
 - `task_cancel`: `task` (required).
+- `land_retry` (experimental): `task` (required).
 - `ask_user`: `text` (required).
 - `status`: `instructions` and `all`, both booleans.
 - `history`: `task` and `limit`.

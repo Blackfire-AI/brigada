@@ -2,10 +2,13 @@ package mcp
 
 import (
 	"database/sql"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/Blackfire-AI/brigada/internal/api"
+	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
 
@@ -214,5 +217,73 @@ func TestServeCallTaskRestart(t *testing.T) {
 	}
 	if n := countOf(t, e, "SELECT COUNT(*) FROM jobs WHERE task_id = ?", task); n != 1 {
 		t.Errorf("the task's jobs after the repeat = %d, want 1: the minted key deduped the call", n)
+	}
+}
+
+// TestRenderLandRetry renders each of the land retry's four outcomes as
+// its own text (#133): the queued land job, the hold's reason verbatim
+// with the user's release, the stale base with task_restart, and a
+// refusal's reason as the tool's error.
+func TestRenderLandRetry(t *testing.T) {
+	const hold = "held by rule gate_land: gate_land is ask"
+	const stale = "the landing is refused: the base brigada/task-3 is a superseded result of task 3, now on brigada/task-3-r1; restart the task to rebuild on the new base (task_restart)"
+	for _, tc := range []struct {
+		name    string
+		res     api.LandRetryResult
+		want    []string
+		isError bool
+	}{
+		{"queued", api.LandRetryResult{Outcome: engine.LandRetryQueued, JobID: 42}, []string{"queued land job 42 for task 7"}, false},
+		{"held", api.LandRetryResult{Outcome: engine.LandRetryHeld, Reason: hold},
+			[]string{"task 7 is held at the land gate: " + hold, "brigada land approve 7"}, false},
+		{"stale_base", api.LandRetryResult{Outcome: engine.LandRetryStaleBase, Reason: stale},
+			[]string{"stale base", stale, "task_restart is the way forward"}, false},
+		{"refused", api.LandRetryResult{Outcome: engine.LandRetryRefused, Reason: "task 7 already has a landing record (pushed)"},
+			[]string{"task 7 already has a landing record (pushed)"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			text, err := renderLandRetry(7, tc.res)
+			if tc.isError {
+				if err == nil {
+					t.Fatalf("render = %q, want the refusal as the tool's error", text)
+				}
+				text = err.Error()
+			} else if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(text, want) {
+					t.Errorf("render = %q, want it to carry %q", text, want)
+				}
+			}
+		})
+	}
+}
+
+// TestServeCallLandRetryRefused covers the land_retry tool end to end
+// (#133): a task parked by something other than a failed landing is
+// refused, the engine's reason carried as the tool's error, and the
+// task stays parked with no job.
+func TestServeCallLandRetryRefused(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	task := seedParked(t, e, "task_out_of_rounds", `{"reason":"the task's fix_rounds are spent"}`)
+	s := start(t, e)
+
+	a := s.call(1, "tools/call", map[string]any{
+		"name":      "land_retry",
+		"arguments": map[string]any{"task": task},
+	})
+	text, isError := toolText(t, a)
+	if !isError || !strings.Contains(text, "not by a failed landing") {
+		t.Errorf("land_retry = %q (error %v), want the engine's refusal as the tool's error", text, isError)
+	}
+	if state := strOf(t, e, "SELECT state FROM tasks WHERE id = ?", task); state != "needs_foreman" {
+		t.Errorf("task state after the refusal = %q, want still parked", state)
+	}
+	if n := countOf(t, e, "SELECT COUNT(*) FROM jobs WHERE task_id = ?", task); n != 0 {
+		t.Errorf("jobs after the refusal = %d, want none", n)
+	}
+	if !slices.Contains(ToolNames(), "land_retry") {
+		t.Errorf("the foreman offer lacks land_retry: %v", ToolNames())
 	}
 }

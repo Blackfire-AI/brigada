@@ -89,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 	// chat's hold token, scoped to its project, needs nothing more.
 	mux.HandleFunc("/v1/tasks/{id}/answer", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskAnswer)))
 	mux.HandleFunc("/v1/tasks/{id}/restart", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskRestart)))
+	mux.HandleFunc("/v1/tasks/{id}/land-retry", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskLandRetry)))
 	mux.HandleFunc("/v1/plans", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handlePlanCreate)))
 	mux.HandleFunc("/v1/plans/{id}/amend", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handlePlanAmend)))
 	mux.HandleFunc("/v1/plans/{id}/accept", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handlePlanAccept)))

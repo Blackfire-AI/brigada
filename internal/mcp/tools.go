@@ -326,6 +326,16 @@ var tools = []Tool{
 		Call: callTaskCancel,
 	},
 	{
+		Name:        "land_retry",
+		Description: "Re-run the land rule for a task parked at needs_foreman by a failed landing that is not about its content: a rejected push (the target moved) or an environment failure (a fetch, credentials, a broken remote). Every gate still applies, land_ready included, and no restart is spent. The result is one of: the land job queued; held at the land gate, which the user's `brigada land approve` releases; refused on a stale base, parked again for task_restart; or refused with the reason (a landing already recorded, a task not parked by such a failure, a finished plan). A conflict, a failed land check, a moved approved head or a stale base needs task_restart instead.",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"task": map[string]any{"type": "integer", "description": "the parked task's id"}},
+			"required":   []string{"task"},
+		},
+		Call: callLandRetry,
+	},
+	{
 		Name:        "ask_user",
 		Description: "Record a question for the user in the project journal, where the history shows it. In an attached chat, ask it in the chat too and wait for the answer; a headless turn puts it in its final report and ends — the user answers with `brigada ask`, which wakes the foreman.",
 		InputSchema: map[string]any{
