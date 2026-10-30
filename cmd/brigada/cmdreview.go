@@ -8,14 +8,16 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
-// runReview is `brigada review --branch X` (§7): a cross-family review
-// of a branch with no plan, task or foreman behind it. It submits the
-// review job, prints its id and exits; the verdict arrives through
-// history, status and notifications like any review's.
+// runReview is `brigada review --branch X` (§7): a review of a branch
+// with no plan, task or foreman behind it, placed by the review.family
+// policy — an agent of another family when one is available, and under
+// review.family=prefer the author's own family or agent when none is.
+// It submits the review job, prints its id and exits; the verdict
+// arrives through history, status and notifications like any review's.
 func runReview(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("review",
 		"brigada review --branch BRANCH [--repo URL] [--no-start]",
-		"Review a branch with an agent from another model family.")
+		"Review a branch, with an agent from another model family when one is available.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	branch := fs.String("branch", "", "the branch to review (required)")

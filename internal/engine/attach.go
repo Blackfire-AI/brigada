@@ -176,7 +176,7 @@ func (e *Engine) attachTx(tx *sql.Tx, project int64, force bool, now time.Time) 
 	if err != nil {
 		return AttachResult{}, err
 	}
-	if res.Prompt, err = foremanPromptTx(tx, project, inbox, now); err != nil {
+	if res.Prompt, err = foremanPromptTx(tx, e.cfg.Review.Family, project, inbox, now); err != nil {
 		return AttachResult{}, err
 	}
 	if _, err := tx.Exec(`UPDATE foreman_inbox SET state = ?, hold_id = ?, job_id = NULL WHERE project_id = ? AND state = ?`,

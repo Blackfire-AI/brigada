@@ -179,6 +179,17 @@ func TestBP8aExit(t *testing.T) {
 	remote := testsupport.NewGitRemote(t)
 	state := testsupport.ShortStateDir(t)
 	killEngineOnCleanup(t, state)
+	// This is a one-family world: review.family=require keeps its
+	// reviews parked as the story below walks (issue #126), read by the
+	// engine the runner starts on demand through the default config.
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	if err := os.MkdirAll(filepath.Join(xdg, "brigada"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(xdg, "brigada", "config"), []byte("review.family = require\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	// The markers directory reaches the worker through its environment
 	// (the runner passes the ambient set through, minus brigada's own

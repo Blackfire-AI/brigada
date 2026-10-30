@@ -59,7 +59,7 @@ func (e *Engine) submitForemanTurnTx(tx *sql.Tx, project int64, inbox ForemanInb
 	if _, err := e.rotateForemanSessionTx(tx, project, now); err != nil {
 		return SubmitResult{}, err
 	}
-	promptText, err := foremanPromptTx(tx, project, inbox, now)
+	promptText, err := foremanPromptTx(tx, e.cfg.Review.Family, project, inbox, now)
 	if err != nil {
 		return SubmitResult{}, err
 	}
