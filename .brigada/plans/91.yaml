@@ -5,9 +5,9 @@
 plan: 91
 title: "#135: sweep fails \"database is locked\" under runner heartbeats"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-10-30T09:25:52.175601Z
-updated: 2026-10-30T09:26:15.994347Z
+updated: 2026-10-30T09:27:39.834829Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -27,6 +27,18 @@ tasks:
     class: "implement"
     deps: []
     base: ""
+    effort: medium
+    review_tier: heavy
+    state: cancelled
+    branch: ""
+    rounds: 0
+  - id: 300
+    name: "sweep_busy_retry"
+    title: "#135: the sweep, prune, heartbeat and job-read write transactions ride out SQLITE_BUSY"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
     effort: medium
     review_tier: heavy
     state: pending
