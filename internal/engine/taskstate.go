@@ -1090,8 +1090,12 @@ func (e *Engine) reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now ti
 	case haveVerdict && v.Verdict == verdictChanges:
 		// The findings are the fix round's feedback (§3) and the event's
 		// own payload (§9): the review's words are kept whatever follows.
+		placement, err := jobPlacementTx(tx, job.ID)
+		if err != nil {
+			return err
+		}
 		if _, err := appendEventTx(tx, evReviewChanges, job.ProjectID, job.TaskID, job.ID,
-			eventPayload{Findings: boundNote(v.Findings)}, now); err != nil {
+			eventPayload{Findings: boundNote(v.Findings), Placement: placement}, now); err != nil {
 			return err
 		}
 		return e.queueFixRoundTx(tx, job, roundReview, v.Findings, v.Findings, nil, now)
@@ -1226,7 +1230,11 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 		if err != nil {
 			return err
 		}
-		return e.needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: text}, now)
+		placement, err := jobPlacementTx(tx, job.ID)
+		if err != nil {
+			return err
+		}
+		return e.needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: text, Placement: placement}, now)
 	}
 	spent, err := reviewRetrySpentTx(tx, job)
 	if err != nil {
@@ -1258,7 +1266,11 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 		if err != nil {
 			return err
 		}
-		return e.needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: text}, now)
+		placement, err := jobPlacementTx(tx, job.ID)
+		if err != nil {
+			return err
+		}
+		return e.needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: text, Placement: placement}, now)
 	}
 	reviewPrompt, reviewMeta, err := retryPromptTx(tx, job)
 	if err != nil {

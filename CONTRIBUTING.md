@@ -59,8 +59,10 @@ the notices from the nested module:
 
 ## Review
 
-Every change is reviewed by a model from a different family than its
-author's, with `brigada review --branch <branch>`. A maintainer also
+Every change is reviewed by another model: one from a different family
+than its author's when one is available (`review.family=prefer`), else
+another agent of the author's family, or the author's own agent in a
+fresh session. `brigada review --branch <branch>`. A maintainer also
 reviews every change before it merges.
 
 ## Commits

@@ -76,6 +76,15 @@ func TestStatusGolden(t *testing.T) {
 			VALUES (1, 'claude', 'claude', 'sonnet', 'claude', 'claude', '["implement","review"]', ?, ?)`, at(0), at(0))
 		exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, exclude_family, queued_at, created_at, updated_at)
 			VALUES (1, 4, 'review', 'task:4', 'fresh', 'review it', 'queued', 'claude', ?, ?, ?)`, at(0), at(0), at(0))
+		// A second reviewing task, whose review was leased and placed on
+		// an agent of the author's own family (issue #126): status names
+		// the placement. The waiting review above has none to name.
+		exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, branch, base_ref, caps, created_at, updated_at)
+			VALUES (1, 'review the widget', 'the spec', 'go test ./...', 'implement', 'reviewing', 'task/5-1', 'main', '{}', ?, ?)`, at(0), at(0))
+		exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, agent_id, queued_at, created_at, updated_at)
+			VALUES (1, 5, 'review', 'task:5', 'fresh', 'review it', 'done', 1, ?, ?, ?)`, at(0), at(0), at(0))
+		exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
+			VALUES ('job_agent_picked', 1, 5, 2, '{"agent":1,"pick":"sampled","placement":"same_family"}', ?)`, at(0))
 		exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
 			VALUES ('task_needs_help', 1, 2, NULL, '{"question":"should the sprocket be blue?"}', ?)`, at(0))
 		exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
@@ -144,7 +153,7 @@ func TestStatusGolden(t *testing.T) {
 	if matched, _ := regexp.MatchString(`^engine pid [0-9]+ up [0-9hms]+$`, head[0]); !matched {
 		t.Errorf("the engine line = %q, want `engine pid <pid> up <uptime>`", head[0])
 	}
-	if want := "jobs: queued 1 leased 0 running 0 done 0 failed 0 cancelled 0 stalled 0"; head[1] != want {
+	if want := "jobs: queued 1 leased 0 running 0 done 1 failed 0 cancelled 0 stalled 0"; head[1] != want {
 		t.Errorf("the jobs line = %q, want %q", head[1], want)
 	}
 
@@ -157,6 +166,7 @@ func TestStatusGolden(t *testing.T) {
   task #1 ready the frobnicator
   task #2 needs_foreman wire the sprocket [task/2-1]
   task #4 reviewing review the gadget [task/4-1]
+  task #5 reviewing review the widget [task/5-1]  review: same_family
 #2 done stale work
 #3 done fresh work
   task #3 done tidy the docs [task/3-1]
@@ -190,6 +200,7 @@ reviewer instructions (project #1): not configured
   task #1 ready the frobnicator
   task #2 needs_foreman wire the sprocket [task/2-1]
   task #4 reviewing review the gadget [task/4-1]
+  task #5 reviewing review the widget [task/5-1]  review: same_family
 #2 done stale work
 #3 done fresh work
   task #3 done tidy the docs [task/3-1]
