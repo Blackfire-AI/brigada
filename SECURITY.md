@@ -20,7 +20,7 @@ We aim to acknowledge reports within a few days.
 
 ## Scope and trust model
 
-brigada runs agent CLIs (Claude Code, Codex, Kimi, opencode) with your own credentials.
+brigada runs agent CLIs (Claude Code, Codex, Kimi, opencode, dsh) with your own credentials.
 
 - Workers run in git worktrees, not containers, each under its CLI's own permission scope ([GUIDE section 8](docs/GUIDE.md#scope-per-harness)). They inherit your environment minus the credential scrub, so a check command, a test run or a kimi worker can still reach your credentials and network. Do not point brigada at a repository you do not trust ([design §5.7](docs/design.md#57-an-environment-for-checks-and-reviews)).
 - Checks and setup commands run as you, in your account, though without your forge and cloud credentials (`GH_TOKEN`, `SSH_AUTH_SOCK` and the like) and without brigada's own variables. The runner's own git commands keep the credentials they need to fetch and push.
