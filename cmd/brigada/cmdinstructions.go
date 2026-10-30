@@ -53,7 +53,7 @@ func resolveGuidance(root, name string) (guidanceTarget, error) {
 		default:
 			rel = engine.DefaultRoleFile(role)
 		}
-		return guidanceTarget{rel: rel, text: text, what: "role " + role}, nil
+		return guidanceTarget{rel: rel, text: text, what: "role " + role, name: role}, nil
 	}
 	for _, skill := range defaults.Skills {
 		if skill != name {
@@ -67,7 +67,7 @@ func resolveGuidance(root, name string) (guidanceTarget, error) {
 		if dir == "" {
 			dir = engine.DefaultSkillsDir
 		}
-		return guidanceTarget{rel: dir + "/" + skill + "/SKILL.md", text: text, skill: true, what: "skill " + skill}, nil
+		return guidanceTarget{rel: dir + "/" + skill + "/SKILL.md", text: text, skill: true, what: "skill " + skill, name: skill}, nil
 	}
 	return guidanceTarget{}, fmt.Errorf("unknown role or skill %q; want one of: %s", name, guidanceNames())
 }
@@ -236,10 +236,51 @@ func lineDiff(a, b []string, ctx int) []string {
 	return out
 }
 
+// restoreRoleKey puts a role's key back into the repository's
+// project.yaml when the instructions map does not carry it (§5.9), so a
+// file `--take-default` restores is configured again. The worker on the
+// instructions_file alias, a key already present and a repository with
+// no readable project.yaml keep what they have.
+func restoreRoleKey(root, role string) (bool, error) {
+	path := filepath.Join(root, filepath.FromSlash(engine.ProjectConfigPath))
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	cfg, err := engine.ParseProjectConfig(content)
+	if err != nil {
+		// A file init did not write is not take-default's to fix.
+		return false, nil
+	}
+	if _, ok := cfg.RoleFiles[role]; ok {
+		return false, nil
+	}
+	if role == engine.RoleWorker && cfg.InstructionsFile != "" {
+		return false, nil // the alias is the worker's key (§5.9)
+	}
+	if err := initSafeFile(path); err != nil {
+		return false, err
+	}
+	next, err := engine.ProjectConfigRoleKey(content, role)
+	if err != nil {
+		return false, err
+	}
+	if err := writeInitFile(path, content, next, true); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // runTakeDefault is `brigada init --take-default <role|skill>` (§5.9): the
 // file is reset to the new default under a fresh header, whatever was in
-// it. It touches that one file, and no engine: `brigada project import`
-// applies it.
+// it. A role whose key project.yaml's instructions map does not carry
+// gets the key back at its default path, so the restored file is
+// configured again; the worker on the instructions_file alias keeps that
+// alias. It touches the one file and the map's one line, and no engine:
+// `brigada project import` applies it.
 func runTakeDefault(stdout, stderr io.Writer, name string) int {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -258,6 +299,17 @@ func runTakeDefault(stdout, stderr io.Writer, name string) int {
 	}
 	if err := wiringSafePath(root, t.rel); err != nil {
 		return fail(stderr, err)
+	}
+	// A role left not configured gets its key back beside the file, so
+	// the restore reaches the import (§5.9).
+	if !t.skill {
+		added, err := restoreRoleKey(root, t.name)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		if added {
+			fmt.Fprintf(stdout, "%s: instructions.%s key added at the default path\n", engine.ProjectConfigPath, t.name)
+		}
 	}
 	path := filepath.Join(root, filepath.FromSlash(t.rel))
 	if err := initSafeFile(path); err != nil {
