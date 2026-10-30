@@ -61,7 +61,7 @@ tasks:
     deps: ["import_tx"]
     base: "import_tx"
     effort: medium
-    state: done
+    state: running
     branch: "brigada/task-256"
     rounds: 0
   - id: 257
@@ -196,7 +196,7 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-268-r1"
     rounds: 0
   - id: 269
