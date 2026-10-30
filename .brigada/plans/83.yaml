@@ -5,9 +5,9 @@
 plan: 83
 title: "Bring role instructions and task skills to design §5.9/§5.10 (#119, #117); fix #128, #127, #129"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-29T14:08:29.976259Z
-updated: 2026-10-30T14:15:06.211658Z
+updated: 2026-10-30T22:01:22.527703Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -82,10 +82,9 @@ tasks:
     base: "prompts"
     tier: heavy
     effort: medium
-    state: needs_foreman
+    state: retired
     branch: "brigada/task-258-r1"
     rounds: 0
-    question: "brigada/landed already carries this task's whole change (commit 8df311fd, task 274, 'Closes #129') and my base brigada/task-257@fc5d32ab has diverged from landed, so a verbatim rebuild re-conflicts at land time. Rebuild this task on current brigada/landed, or close it as already done by task 274?"
   - id: 259
     name: "land_target"
     title: "#127: the land target is kept up to date with the default branch; status shows the lag; foreman prompt names both heads"
@@ -138,7 +137,7 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: done
+    state: retired
     branch: "brigada/task-263"
     rounds: 1
   - id: 264
