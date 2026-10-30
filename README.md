@@ -161,7 +161,7 @@ brigada is developed with brigada, so models from four families have written and
 | Zhipu | GLM 5.3, GLM 5.3 Flash |
 | DeepSeek | DeepSeek V4 Pro, DeepSeek Flash |
 
-Each landed commit names its model in a `Co-Authored-By` trailer. GitHub's contributor list shows a co-author only when the trailer's address belongs to a GitHub account, so it lists Claude and Codex but not the others. To count commits per model:
+A commit brigada lands names its model, or the model family when the job record names no model, in a `Co-Authored-By` trailer; a commit whose family is unknown carries `Brigada-Author: unknown` instead. GitHub's contributor list shows a co-author only when the trailer's address belongs to a GitHub account, so it lists Claude and Codex but not the others. To count commits per model:
 
 ```sh
 git log --format='%(trailers:key=Co-Authored-By,valueonly,unfold)' | grep -v '^$' | sort | uniq -c | sort -rn
