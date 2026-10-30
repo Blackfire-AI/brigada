@@ -405,7 +405,7 @@ func (e *Engine) status(ctx context.Context, project int64, withText, all bool) 
 		if info.Report, err = statusReportTx(tx, project); err != nil {
 			return err
 		}
-		if info.NeedsYou, err = statusNeedsYouTx(tx, project, now); err != nil {
+		if info.NeedsYou, err = statusNeedsYouTx(tx, &e.cfg, project, now); err != nil {
 			return err
 		}
 		// A wake the day's budget holds is its own entry (§4.3): the
@@ -841,7 +841,7 @@ var needsYouEventKinds = []string{
 // order; project scopes the queue to one project, 0 to all. A task an
 // environmental land failure parked is not listed alone: its cause's one
 // line, statusLandEnvCausesTx, lists every task it holds (issue #116).
-func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem, error) {
+func statusNeedsYouTx(tx *sql.Tx, cfg *Config, project int64, now time.Time) ([]NeedsYouItem, error) {
 	kinds := "'" + strings.Join(needsYouEventKinds, "', '") + "'"
 	query := fmt.Sprintf(`SELECT t.id, t.plan_id, t.title, t.state, COALESCE(e.kind, ''), COALESCE(e.payload, '')
 		FROM tasks t
@@ -882,7 +882,7 @@ func statusNeedsYouTx(tx *sql.Tx, project int64, now time.Time) ([]NeedsYouItem,
 
 	// A task whose review no agent could ever take waits at reviewing:
 	// listed beside the parked tasks until a reviewer registers.
-	noReviewer, err := statusNoReviewerTx(tx, project)
+	noReviewer, err := statusNoReviewerTx(tx, cfg, project)
 	if err != nil {
 		return nil, err
 	}

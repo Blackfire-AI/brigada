@@ -10,13 +10,14 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/notify"
 )
 
-// TestReviewUnservable: a queued review is unservable only when no
-// registered agent could ever take it — none of another family than the
-// author's offers the review class. A retry's excluded agent alone is no
-// longer a gap (decided 2026-10-20): the exclusion is a preference, and
-// with no other reviewer the excluded one takes the retry. Cooling or
-// broken agents of the right family make it merely wait: those are
-// temporary, a missing reviewer is not.
+// TestReviewUnservable: under review.family = require (issue #126), a
+// queued review is unservable only when no registered agent could ever
+// take it — none of another family than the author's offers the review
+// class. A retry's excluded agent alone is no longer a gap (decided
+// 2026-10-20): the exclusion is a preference, and with no other
+// reviewer the excluded one takes the retry. Cooling or broken agents
+// of the right family make it merely wait: those are temporary, a
+// missing reviewer is not.
 func TestReviewUnservable(t *testing.T) {
 	type agent struct {
 		family  string
@@ -54,7 +55,7 @@ func TestReviewUnservable(t *testing.T) {
 	}
 	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := newEnv(t)
+			e := newEnvCfg(t, func(c *Config) { c.Review.Family = ReviewFamilyRequire })
 			var ids []int64
 			for j, a := range tt.agents {
 				runner := e.agented(fmt.Sprintf("h%d-%d", i, j), a.family, a.classes...)
@@ -74,7 +75,7 @@ func TestReviewUnservable(t *testing.T) {
 			var got bool
 			err := e.st.View(e.ctx, func(tx *sql.Tx) error {
 				var err error
-				got, err = reviewUnservableTx(tx, j)
+				got, err = reviewUnservableTx(tx, &e.eng.cfg, j)
 				return err
 			})
 			if err != nil {
@@ -87,7 +88,7 @@ func TestReviewUnservable(t *testing.T) {
 	}
 }
 
-const wantNoReviewer = "no reviewer: needs a reviewer of another family than the author (anthropic); " +
+const wantNoReviewer = "no reviewer: needs a reviewer of another family than the author (anthropic, review.family=require); " +
 	"offer an agent of another family to the runner (--agent harness=…) or review by hand"
 
 // needsYouTask returns the task's needs-you entry, if any.
@@ -106,10 +107,10 @@ func (e *env) needsYouTask(task int64) (NeedsYouItem, bool) {
 }
 
 // TestStatusListsAnUnservableReview: while a task's review waits with no
-// reviewer of another family, status says so; the entry goes when one
-// registers.
+// reviewer of another family (review.family = require), status says so;
+// the entry goes when one registers.
 func TestStatusListsAnUnservableReview(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) { c.Review.Family = ReviewFamilyRequire })
 	author := e.agented("author", "anthropic", "implement", "review")
 	e.agented("unknown-reviewer", "", "review")
 	e.runToReview(author)
@@ -128,10 +129,11 @@ func TestStatusListsAnUnservableReview(t *testing.T) {
 	}
 }
 
-// TestCoolingReviewerIsNotMissing: a cooling agent of another family is
-// a wait, not a structural gap: no entry, no notification.
+// TestCoolingReviewerIsNotMissing: under review.family = require, a
+// cooling agent of another family is a wait, not a structural gap: no
+// entry, no notification.
 func TestCoolingReviewerIsNotMissing(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) { c.Review.Family = ReviewFamilyRequire })
 	author := e.agented("author", "anthropic", "implement", "review")
 	reviewer := e.agented("reviewer", "google", "review")
 	e.runToReview(author)
@@ -157,11 +159,14 @@ func TestQueueTTLParkReasonNamesTheMissingReviewer(t *testing.T) {
 		// The sole review provider is now named as the author, rather than
 		// describing this as only a missing family.
 		{"unservable", false, false, wantAuthorOnlyReviewer, "queue TTL exceeded"},
-		{"unknown family unservable", false, true, "no reviewer: no agent of a family other than anthropic offers review", "queue TTL exceeded"},
+		{"unknown family unservable", false, true, "no reviewer: no agent of a family other than anthropic offers review, review.family=require", "queue TTL exceeded"},
 		{"merely waiting", true, false, "queue TTL exceeded: no runner leased the job within", "no reviewer"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			e := newEnvCfg(t, func(c *Config) { c.QueueTTL = 10 * time.Minute })
+			e := newEnvCfg(t, func(c *Config) {
+				c.Review.Family = ReviewFamilyRequire
+				c.QueueTTL = 10 * time.Minute
+			})
 			author := e.agented("author", "anthropic", "implement", "review")
 			review := e.runToReview(author)
 			if tt.otherFamily {
@@ -197,7 +202,7 @@ func TestQueueTTLParkReasonNamesTheMissingReviewer(t *testing.T) {
 // notification through the delivery loop; repeated status calls and
 // sweeps raise no more.
 func TestUnservableReviewNotifiesOnce(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) { c.Review.Family = ReviewFamilyRequire })
 	author := e.agented("author", "anthropic", "implement", "review")
 	e.runToReview(author)
 

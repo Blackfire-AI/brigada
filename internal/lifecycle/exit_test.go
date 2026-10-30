@@ -180,6 +180,20 @@ func TestBP8aExit(t *testing.T) {
 	state := testsupport.ShortStateDir(t)
 	killEngineOnCleanup(t, state)
 
+	// This one-family world asserts the require-mode family wall (§7,
+	// review.family): under the prefer default the single agent would
+	// take its own review, and the story the timeline expects — a review
+	// nobody can lease — would not happen.
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	if err := os.MkdirAll(filepath.Join(configHome, "brigada"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configHome, "brigada", "config"),
+		[]byte("review.family = require\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	// The markers directory reaches the worker through its environment
 	// (the runner passes the ambient set through, minus brigada's own
 	// share).

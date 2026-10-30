@@ -33,7 +33,7 @@ const (
 	evJobCapped              = "job_capped"                // submit: the task's round cap is spent
 	evJobLeased              = "job_leased"                // a runner took the job
 	evJobCapHeld             = "job_cap_held"              // a lease poll skipped the job: a cap layer has no room (§8.1)
-	evJobAgentPicked         = "job_agent_picked"          // why a task job's lease took its agent: score, weight and draws of the sampled ranking, passed over for cap room (§8)
+	evJobAgentPicked         = "job_agent_picked"        // why a task job's lease took its agent: score, weight and draws of the sampled ranking, passed over for cap room (§8); a review's payload names its placement kind too (§7)
 	evLeaseRevived           = "lease_revived"             // a heartbeat revived a lapsed lease
 	evJobReleased            = "job_released"              // the holder gave the job back
 	evJobCompleted           = "job_completed"             // done, failed, stalled, time_cap, check_failed…
@@ -165,8 +165,12 @@ type eventPayload struct {
 	Classes []string    `json:"classes,omitempty"`
 	Paths   []string    `json:"paths,omitempty"`
 	Agent   int64       `json:"agent,omitempty"`
-	Score   float64     `json:"score,omitempty"`
-	Pick    string      `json:"pick,omitempty"`
+	// Placement is the placement kind of a picked review job (§7,
+	// review.family): cross_family, same_family, same_agent — or unknown,
+	// when the author's family, or the reviewer's, cannot be told.
+	Placement string   `json:"placement,omitempty"`
+	Score     float64  `json:"score,omitempty"`
+	Pick      string   `json:"pick,omitempty"`
 	// ExclusionLifted marks an agent pick of the very agent a review
 	// retry's exclusion named (§7, decided 2026-10-20): no other
 	// qualifying reviewer was available, so the preference was lifted

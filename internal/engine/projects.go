@@ -243,8 +243,8 @@ func (e *Engine) Projects(ctx context.Context) ([]ProjectInfo, error) {
 			return fmt.Errorf("list the projects: %w", err)
 		}
 		rows.Close()
-		for i := range out {
-			items, err := statusNeedsYouTx(tx, out[i].ProjectID, now)
+	for i := range out {
+		items, err := statusNeedsYouTx(tx, &e.cfg, out[i].ProjectID, now)
 			if err != nil {
 				return err
 			}

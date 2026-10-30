@@ -204,39 +204,28 @@ func composePlanReviewInput(round int, plan planReviewPlanView, others []otherPl
 }
 
 // foremanFamilyTx reads the family a plan review must differ from
-// (§6.2): the family of the project's foreman agent, the one
-// registered for the project's foreman harness and model. A project with
-// no foreman chosen, or whose pair no runner advertises, has no family to
-// exclude: any agent offering the review class may review.
+// (§6.2): the family of the project's foreman agent, the one registered
+// for the project's foreman harness and model. A project with no foreman
+// chosen, or whose pair no runner advertises, has no family to exclude:
+// any agent offering the review class may review.
 func foremanFamilyTx(tx *sql.Tx, project int64) (string, error) {
-	var harness, model string
-	if err := tx.QueryRow("SELECT foreman_harness, foreman_model FROM projects WHERE id = ?", project).
-		Scan(&harness, &model); err != nil {
-		return "", fmt.Errorf("read the foreman of project %d: %w", project, err)
+	agent, err := foremanAgentTx(tx, project)
+	if err != nil || agent == 0 {
+		return "", err
 	}
-	if harness == "" || model == "" {
-		return "", nil
-	}
-	var family string
-	err := tx.QueryRow("SELECT family FROM agents WHERE harness = ? AND model = ? ORDER BY id LIMIT 1", harness, model).
-		Scan(&family)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("read the foreman's agent of project %d: %w", project, err)
-	}
-	return family, nil
+	return agentFamilyTx(tx, agent)
 }
 
 // planReviewerAvailableTx reports whether any registered agent could
 // take the project's plan review: the same structural test a review
 // job's placement applies (§7), over the foreman's family exclusion and
 // the review class, health and cooling aside — a broken or cooling
-// reviewer is a wait, a missing one is not.
-func planReviewerAvailableTx(tx *sql.Tx, project int64, family string) (bool, error) {
+// reviewer is a wait, a missing one is not. Under review.family = prefer
+// any family step's agent counts: the review falls to the foreman's own
+// family, or the foreman's own agent, before it is skipped.
+func planReviewerAvailableTx(tx *sql.Tx, cfg *Config, project int64, family string) (bool, error) {
 	review := &jobRow{ProjectID: project, Kind: KindPlanReview, ExcludeFamily: family}
-	agents, err := qualifyingAgentRowsTx(tx, 0, review, string(KindReview), "")
+	agents, err := qualifyingAgentRowsTx(tx, cfg, 0, review, string(KindReview), "")
 	if err != nil {
 		return false, err
 	}
@@ -485,7 +474,7 @@ func (e *Engine) queuePlanReviewRoundTx(tx *sql.Tx, project, plan, round int64, 
 	if err != nil {
 		return err
 	}
-	available, err := planReviewerAvailableTx(tx, project, family)
+	available, err := planReviewerAvailableTx(tx, &e.cfg, project, family)
 	if err != nil {
 		return err
 	}
@@ -499,9 +488,9 @@ func (e *Engine) queuePlanReviewRoundTx(tx *sql.Tx, project, plan, round int64, 
 			round, planReviewBatchJSON(batch), fmtTime(now), plan); err != nil {
 			return fmt.Errorf("record the review round of plan %d: %w", plan, err)
 		}
-		reason := "no agent of a family other than the foreman's offers the review class"
-		if family == "" {
-			reason = "no agent offers the review class"
+		reason := "no agent offers the review class"
+		if family != "" && e.cfg.Review.Family == ReviewFamilyRequire {
+			reason = "no agent of a family other than the foreman's offers the review class, review.family=require"
 		}
 		return e.planReviewConcludedTx(tx, project, plan, 0, planReviewSkipped, "", reason, now, true)
 	}
@@ -738,7 +727,7 @@ func (e *Engine) planReviewFailedTx(tx *sql.Tx, job *jobRow, plan int64, reason 
 		return e.planReviewHeldTx(tx, job.ProjectID, plan, reason+"; the retry on another reviewer gave no verdict either", now)
 	}
 	retry := &jobRow{ProjectID: job.ProjectID, Kind: KindPlanReview, ExcludeFamily: job.ExcludeFamily, ExcludeAgent: job.AgentID}
-	noAgent, err := noReviewAgentTx(tx, retry)
+	noAgent, err := noReviewAgentTx(tx, &e.cfg, retry)
 	if err != nil {
 		return err
 	}

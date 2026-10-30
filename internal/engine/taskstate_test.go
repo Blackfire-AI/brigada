@@ -320,12 +320,13 @@ func TestTerminalTransitionCountsOnce(t *testing.T) {
 	}
 }
 
-// TestReviewJobFamilyRule walks §7's placement: a review job that
-// excludes the author's family is invisible to a runner with no agent
-// of another family that offers review, and the first qualifying agent
-// by id is the one a lease records.
+// TestReviewJobFamilyRule walks §7's placement under
+// review.family = require: a review job that excludes the author's
+// family is invisible to a runner with no agent of another family that
+// offers review, and the first qualifying agent by id is the one a
+// lease records.
 func TestReviewJobFamilyRule(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, requireFamily)
 	author := e.agented("author", "anthropic", "implement")
 	review := e.runToReview(author)
 
@@ -378,12 +379,16 @@ func TestUnknownAuthorFamilyReview(t *testing.T) {
 	}
 }
 
-// TestReviewJobWithoutARunnerIsNotAHeldJob: a review job no runner can
-// take waits like any queued job (§8) — the family rule is an unmet
-// placement, not a cap hold, so nothing is stamped on the job and the
-// queue TTL, not a slot, is what ends its wait.
+// TestReviewJobWithoutARunnerIsNotAHeldJob: under review.family =
+// require, a review job no runner can take waits like any queued job
+// (§8) — the family rule is an unmet placement, not a cap hold, so
+// nothing is stamped on the job and the queue TTL, not a slot, is what
+// ends its wait.
 func TestReviewJobWithoutARunnerIsNotAHeldJob(t *testing.T) {
-	e := newEnvCfg(t, func(c *Config) { c.QueueTTL = time.Minute })
+	e := newEnvCfg(t, func(c *Config) {
+		requireFamily(c)
+		c.QueueTTL = time.Minute
+	})
 	author := e.agented("author", "anthropic", "implement", "review")
 	review := e.runToReview(author)
 

@@ -157,11 +157,12 @@ func TestLiftedRetryTwiceNoVerdictParksTheTask(t *testing.T) {
 	}
 }
 
-// TestLiftedExclusionNeverReachesTheAuthorsFamily: the family rule is
-// never relaxed — with no reviewer but the author's own agent, the
-// lift opens nothing and the task parks on the first no-verdict.
+// TestLiftedExclusionNeverReachesTheAuthorsFamily: under
+// review.family = require the family rule is never relaxed — with no
+// reviewer but the author's own agent, the lift opens nothing and the
+// task parks on the first no-verdict.
 func TestLiftedExclusionNeverReachesTheAuthorsFamily(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, requireFamily)
 	author := e.agented("author", "anthropic", "implement", "review")
 	first := e.agented("first", "google", "review")
 	e.runToReview(author)

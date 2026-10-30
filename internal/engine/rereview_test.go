@@ -34,10 +34,11 @@ const (
 
 // changesRound drives the task to a changes verdict and stops with the fix
 // round queued, not yet run. Pass adjust to change the reviewer's
-// completion.
+// completion. The fixture runs under review.family = require: these
+// tests assert the cross-family reviewer's place (issue #126).
 func changesRound(t *testing.T, review func(*Completion)) *reReviewFixture {
 	t.Helper()
-	e := newEnv(t)
+	e := newEnvCfg(t, requireFamily)
 	f := &reReviewFixture{e: e}
 	f.author = e.agented("author", "anthropic", "implement")
 	f.reviewer = e.agented("reviewer", "google", "review")
@@ -294,8 +295,9 @@ func TestReReviewIsFreshWhenTheReviewerCools(t *testing.T) {
 	f.wantFresh("is cooling until")
 }
 
-// TestReReviewFamilyRuleStillApplies: a fix round whose author is now of
-// the reviewer's family cannot be re-reviewed by it.
+// TestReReviewFamilyRuleStillApplies: under review.family = require, a
+// fix round whose author is now of the reviewer's family cannot be
+// re-reviewed by it.
 func TestReReviewFamilyRuleStillApplies(t *testing.T) {
 	f := changesRound(t, nil)
 	f.e.exec("UPDATE agents SET family = 'google' WHERE id = ?", f.e.agentOf(f.author))

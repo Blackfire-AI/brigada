@@ -181,11 +181,13 @@ func TestReviewBranchFallsBackToTheDefaultReviewer(t *testing.T) {
 	}
 }
 
-// TestReviewBranchWithoutEligibleReviewerErrors: no agent of another
-// family that is ready and offers the review class is a plain error, and
-// so is an unknown family with no default reviewer.
+// TestReviewBranchWithoutEligibleReviewerErrors: under
+// review.family = require, no agent of another family that is ready and
+// offers the review class is a plain error, and so is an unknown family
+// with no default reviewer.
 func TestReviewBranchWithoutEligibleReviewerErrors(t *testing.T) {
 	e := newEnvCfg(t, func(c *Config) {
+		c.Review.Family = ReviewFamilyRequire
 		c.BranchTrailers = func(context.Context, string, string, string) (string, error) { return "", nil }
 	})
 	author := e.agented("author", "anthropic", "implement", "review")

@@ -10,6 +10,11 @@ import (
 
 const wantAuthorOnlyReviewer = "no reviewer: the only agent offering review is the author; offer another agent to the runner (--agent harness=…) or review by hand"
 
+// requireFamily is the config adjustment every test of the require-mode
+// family wall runs under (issue #126): under the prefer default these
+// outcomes are the placement's steps instead.
+func requireFamily(c *Config) { c.Review.Family = ReviewFamilyRequire }
+
 func TestReviewNeverLeasesToAuthor(t *testing.T) {
 	for _, tt := range []struct {
 		name, authorFamily, reviewerFamily string
@@ -23,7 +28,7 @@ func TestReviewNeverLeasesToAuthor(t *testing.T) {
 		{"known author with empty exclusion", "anthropic", "anthropic", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			e := newEnv(t)
+			e := newEnvCfg(t, requireFamily)
 			author := e.agented("author", tt.authorFamily, "implement", "review")
 			review := e.runToReview(author)
 			if tt.clearFamily {
@@ -54,7 +59,7 @@ func TestReviewRetryNeverLeasesToAuthorOrFirstReviewer(t *testing.T) {
 		{"known author with empty exclusion", "anthropic", "anthropic", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			e := newEnv(t)
+			e := newEnvCfg(t, requireFamily)
 			author := e.agented("author", tt.authorFamily, "implement", "review")
 			first := e.agented("first", "google", "review")
 			second := e.agented("second", tt.secondFamily, "review")
@@ -91,7 +96,7 @@ func TestReviewRetryNeverLeasesToAuthorOrFirstReviewer(t *testing.T) {
 }
 
 func TestReviewRetryDoesNotCountUnknownFamilyAuthorAsReviewer(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, requireFamily)
 	author := e.agented("author", "", "implement", "review")
 	first := e.agented("first", "", "review")
 	e.runToReview(author)
@@ -142,7 +147,10 @@ func TestReviewExcludesLatestFixAuthor(t *testing.T) {
 }
 
 func TestAuthorOnlyReviewIsUnservable(t *testing.T) {
-	e := newEnvCfg(t, func(c *Config) { c.QueueTTL = time.Minute })
+	e := newEnvCfg(t, func(c *Config) {
+		requireFamily(c)
+		c.QueueTTL = time.Minute
+	})
 	author := e.agented("author", "", "implement", "review")
 	review := e.runToReview(author)
 	// Cooling must not make the author's own review look temporarily held.
@@ -175,6 +183,7 @@ func TestAuthorOnlyReviewIsUnservable(t *testing.T) {
 
 func TestBranchReviewExcludesUnknownFamilyAuthor(t *testing.T) {
 	e := newEnvCfg(t, func(c *Config) {
+		requireFamily(c)
 		c.DefaultReviewer = "author"
 		c.BranchTrailers = func(context.Context, string, string, string) (string, error) { return "", nil }
 	})
@@ -205,7 +214,10 @@ func TestBranchReviewExcludesUnknownFamilyAuthor(t *testing.T) {
 }
 
 func TestQueuedBranchReviewOnlyAuthorIsUnservable(t *testing.T) {
-	e := newEnvCfg(t, func(c *Config) { c.QueueTTL = time.Minute })
+	e := newEnvCfg(t, func(c *Config) {
+		requireFamily(c)
+		c.QueueTTL = time.Minute
+	})
 	author := e.agented("author", "", "implement", "review")
 	branch := e.authored(author)
 	// A queued branch review must remain protected even when submitted

@@ -134,7 +134,7 @@ func TestPlanReviewParkShowsInTheDigest(t *testing.T) {
 	var digest string
 	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
 		var err error
-		digest, err = foremanDigestTx(tx, e.project, e.clock.Now())
+		digest, err = foremanDigestTx(tx, &e.eng.cfg, e.project, e.clock.Now())
 		return err
 	}); err != nil {
 		t.Fatal(err)

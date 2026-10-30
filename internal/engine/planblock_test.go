@@ -473,7 +473,7 @@ func TestLandedLabelsInDigestAndStatus(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		digest, err = foremanDigestTx(tx, e.project, e.clock.Now())
+		digest, err = foremanDigestTx(tx, &e.eng.cfg, e.project, e.clock.Now())
 		return err
 	}); err != nil {
 		t.Fatal(err)

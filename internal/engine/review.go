@@ -19,10 +19,10 @@ import (
 // one that names no branch.
 var ErrInvalidReview = errors.New("invalid review")
 
-// ErrNoReviewer marks a standalone review nobody can take (§7): no
-// agent is ready, out of cooling, offering the review class and of a
-// family other than the author's — or the author's family cannot be
-// told and no default reviewer is configured.
+// ErrNoReviewer marks a standalone review nobody can take (§7): no agent
+// is ready, out of cooling and offering the review class — and, under
+// review.family = require, of a family other than the author's — or the
+// author's family cannot be told and no default reviewer is configured.
 var ErrNoReviewer = errors.New("no eligible reviewer")
 
 // Where a standalone review learned the author's family from.
@@ -40,8 +40,9 @@ type ReviewBranchResult struct {
 	ProjectID int64  `json:"project_id"`
 	JobID     int64  `json:"job_id"`
 	Run       int    `json:"run,omitempty"`
-	// Family is the author's family the reviewer must differ from; empty
-	// when it could not be told and the default reviewer was taken.
+	// Family is the author's family the reviewer must differ from under
+	// review.family = require; empty when it could not be told and the
+	// default reviewer was taken.
 	Family string `json:"family,omitempty"`
 	// Source is where the family came from: job, trailer or default.
 	Source string `json:"source"`
@@ -53,9 +54,12 @@ type ReviewBranchResult struct {
 // branch with no such job, or one whose agent is gone or has no family,
 // falls back to the Co-Authored-By trailers of its commits, and then to
 // the config's default reviewer, which takes the review with no family
-// rule. The review is placed by the review policy's cross-family rule
-// among the agents that are ready, out of cooling and offer the review
-// class — and, as for any review, the lease picks among them by the
+// rule. The review is placed by the review policy's family rule
+// (§7, review.family) among the agents that are ready, out of cooling
+// and offer the review class — under prefer another family first, then
+// the author's own family and agent, and with an unknown family any
+// review-class agent instead of a refusal; under require another family
+// or nobody — and, as for any review, the lease picks among them by the
 // dispatcher's ranking. No such agent is ErrNoReviewer. The project is
 // the one with repoURL, or the engine's only one.
 func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (ReviewBranchResult, error) {
@@ -69,6 +73,7 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 		base    string
 		family  string
 	}
+	require := e.cfg.Review.Family == ReviewFamilyRequire
 	err := e.store.View(ctx, func(tx *sql.Tx) error {
 		project, err := askProjectTx(tx, repoURL)
 		if err != nil {
@@ -121,9 +126,11 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 			}
 			source = reviewSourceTrailer
 		}
-		if family == "" {
+		if family == "" && (e.cfg.DefaultReviewer != "" || require) {
 			source, harness = reviewSourceDefault, e.cfg.DefaultReviewer
 			if harness == "" {
+				// require keeps the refusal: an unknown family and no
+				// default reviewer leave nobody the rule can name.
 				onlyAuthor, err := onlyAuthorReviewerTx(tx, review)
 				if err != nil {
 					return err
@@ -134,6 +141,8 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 				return fmt.Errorf("%w: the author's family of %s is unknown (no work job of the branch, no known Co-Authored-By trailer) and no default_reviewer is configured", ErrNoReviewer, branch)
 			}
 		}
+		// Under prefer an unknown family with no default reviewer is no
+		// refusal: any available review-class agent takes the review.
 		review.ExcludeFamily, review.Harness = family, harness
 		cands, err := eligibleAgentsTx(tx, &e.cfg, nil, 0, review,
 			string(KindReview), fmtTime(now))
@@ -147,6 +156,9 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 			}
 			if onlyAuthor {
 				return fmt.Errorf("%w: %s", ErrNoReviewer, noReviewerAuthor)
+			}
+			if !require {
+				return fmt.Errorf("%w: no agent that offers the review class is ready", ErrNoReviewer)
 			}
 			if family != "" {
 				return fmt.Errorf("%w: no agent of a family other than %q is ready and offers the review class", ErrNoReviewer, family)

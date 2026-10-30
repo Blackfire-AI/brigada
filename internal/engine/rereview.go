@@ -108,9 +108,10 @@ type resumedReview struct {
 // is a re-review (§7). It is when the job is a fix round and a changes
 // verdict stands before it, and the reviewer of that verdict can still be
 // had: its session id and the head it judged are known, its agent is
-// ready and not cooling, and it still passes the
-// review rules against the author of this round — a different family, the
-// review class, not the author itself. why says, for the fresh review that
+// ready and not cooling, and it still passes the review family rule
+// against the author of this round — under require a different family,
+// under prefer any family step (§7, review.family) — and the review
+// class, never the author itself. why says, for the fresh review that
 // results when a verdict stood but the reviewer could not be had, what
 // stopped the resume; it is empty when nothing could have been resumed.
 func (e *Engine) resumedReviewTx(tx *sql.Tx, job *jobRow, excludeFamily string, now time.Time) (rr *resumedReview, why string, err error) {
@@ -139,12 +140,19 @@ func (e *Engine) resumedReviewTx(tx *sql.Tx, job *jobRow, excludeFamily string, 
 	if err != nil {
 		return nil, "", fmt.Errorf("read agent %d: %w", prior.agent, err)
 	}
+	placement := reviewPlacement{family: excludeFamily, author: job.AgentID,
+		require: e.cfg.Review.Family == ReviewFamilyRequire}
+	_, familyOk := placement.stepOf(prior.agent, family)
 	switch {
 	case health != "ready":
 		return nil, "the previous reviewer's agent is " + health, nil
 	case cooling > fmtTime(now):
 		return nil, "the previous reviewer's agent is cooling until " + cooling, nil
-	case !reviewAgentQualifies(prior.agent, family, classes, excludeFamily, 0, job.AgentID):
+	case prior.agent == job.AgentID:
+		return nil, "the previous reviewer's agent no longer qualifies for this change", nil
+	case !familyOk:
+		return nil, "the previous reviewer's agent no longer qualifies for this change", nil
+	case !agentOffersClass(classes, string(KindReview)):
 		return nil, "the previous reviewer's agent no longer qualifies for this change", nil
 	}
 	return &resumedReview{agent: prior.agent, harness: harness, since: prior.head}, "", nil

@@ -1011,7 +1011,7 @@ func (e *Engine) attachLandEnvWakeTx(tx *sql.Tx, key string, now time.Time) erro
 	if err != nil {
 		return err
 	}
-	prompt, err := foremanPromptTx(tx, project, inbox, now)
+	prompt, err := foremanPromptTx(tx, &e.cfg, project, inbox, now)
 	if err != nil {
 		return err
 	}

@@ -1046,7 +1046,7 @@ func (e *Engine) queueReviewTx(tx *sql.Tx, job *jobRow, wr workerResultFields, c
 	}
 	// A review nobody could ever take is flagged at once, not at the
 	// next sweep: the user hears of it when the task starts waiting.
-	return flagUnservableReviewsTx(tx, now)
+	return flagUnservableReviewsTx(tx, &e.cfg, now)
 }
 
 // agentFamilyTx reads the family a review must differ from (§7): the
@@ -1160,7 +1160,7 @@ func (e *Engine) requeueReviewTx(tx *sql.Tx, job *jobRow, c Completion, now time
 	}
 	requeue := &jobRow{ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindReview,
 		ExcludeFamily: job.ExcludeFamily, ExcludeAgent: job.ExcludeAgent}
-	noAgent, err := noReviewAgentTx(tx, requeue)
+	noAgent, err := noReviewAgentTx(tx, &e.cfg, requeue)
 	if err != nil {
 		return err
 	}
@@ -1203,15 +1203,15 @@ const reviewOnlyReviewerTwice = "the only available reviewer twice gave no verdi
 
 // queueReviewRetryTx answers an unusable review with another reviewer
 // (§7): a new review job, once per review cycle — a cycle being the
-// review of the change the task's latest author job produced — placed
-// on another agent of a non-author family, so the same reviewer never
-// reads its own output again. The retry asks the same question: its
-// prompt is the unusable review's own, which the engine composed from
-// the same template and the same verbatim data. The exclusion of the
-// first reviewer is a preference (decided 2026-10-20): when no other
-// qualifying reviewer is available the lease lifts it and the same
-// agent takes the retry — and a retry that ran on the excluded agent
-// and still ends unusable parks the task at once, the lift spent.
+// review of the change the task's latest author job produced — placed by
+// the review placement's family rule (review.family), so the same
+// reviewer never reads its own output again. The retry asks the same
+// question: its prompt is the unusable review's own, which the engine
+// composed from the same template and the same verbatim data. The
+// exclusion of the first reviewer is a preference (decided 2026-10-20):
+// when no other qualifying reviewer is available the lease lifts it and
+// the same agent takes the retry — and a retry that ran on the excluded
+// agent and still ends unusable parks the task at once, the lift spent.
 // When the retry is spent or no agent can take it, the task parks at
 // needs_foreman with the no-verdict event, for the foreman's judgment.
 func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now time.Time) error {
@@ -1232,7 +1232,7 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 	}
 	retry := &jobRow{ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindReview,
 		ExcludeFamily: job.ExcludeFamily, ExcludeAgent: job.AgentID}
-	noAgent, err := noReviewAgentTx(tx, retry)
+	noAgent, err := noReviewAgentTx(tx, &e.cfg, retry)
 	if err != nil {
 		return err
 	}
@@ -1245,8 +1245,10 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 			}
 			if onlyAuthor {
 				why = noReviewerAuthor
+			} else if e.cfg.Review.Family == ReviewFamilyRequire {
+				why = "no other agent of another family can take the retry, review.family=require"
 			} else {
-				why = "no other agent of another family can take the retry"
+				why = "no other agent can take the retry"
 			}
 		}
 		text, err := reviewParkedText(tx, job, reviewOutcomeWord(reason), why)

@@ -15,21 +15,38 @@ const (
 	ReviewTierSame  = "same"
 )
 
+// The review.family settings (§7, issue #126): another model family is a
+// review preference, not a wall. prefer — the default — places a review
+// on another family when one is available and falls back to the author's
+// family and then the author's own agent; require keeps the wall: an
+// agent of the author's family never qualifies.
+const (
+	ReviewFamilyPrefer  = "prefer"
+	ReviewFamilyRequire = "require"
+)
+
 // defaultReviewEffort is the effort a review runs at when neither the task
 // nor the config names one.
 const defaultReviewEffort = "medium"
 
 // ReviewConfig is the engine-wide default for reviews (§7, §8): the config
-// file's review.tier and review.effort. The zero value is the default,
-// one tier below the task's at medium effort.
+// file's review.tier, review.effort and review.family. The zero value is
+// the default, one tier below the task's at medium effort, another family
+// preferred.
 type ReviewConfig struct {
 	Tier   string // ReviewTierBelow or ReviewTierSame; '' = below
 	Effort string // low, medium, high or max; '' = medium
+	Family string // ReviewFamilyPrefer or ReviewFamilyRequire; '' = prefer
 }
 
 // ValidReviewTier reports whether word is a review.tier setting.
 func ValidReviewTier(word string) bool {
 	return word == ReviewTierBelow || word == ReviewTierSame
+}
+
+// ValidReviewFamily reports whether word is a review.family setting.
+func ValidReviewFamily(word string) bool {
+	return word == ReviewFamilyPrefer || word == ReviewFamilyRequire
 }
 
 // reviewTierFor is the tier a review of a task asks for (§8): the task's

@@ -423,7 +423,7 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 
 	// A queued review no agent could ever take is flagged before the TTL
 	// reads it, so the notification precedes the park.
-	if err := flagUnservableReviewsTx(tx, now); err != nil {
+	if err := flagUnservableReviewsTx(tx, &e.cfg, now); err != nil {
 		return rep, err
 	}
 
@@ -527,12 +527,12 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 				if err != nil {
 					return rep, err
 				}
-				bad, err := reviewUnservableTx(tx, j)
+				bad, err := reviewUnservableTx(tx, &e.cfg, j)
 				if err != nil {
 					return rep, err
 				}
 				if bad {
-					reason, err = noReviewerReasonTx(tx, j, false)
+					reason, err = noReviewerReasonTx(tx, &e.cfg, j, false)
 					if err != nil {
 						return rep, err
 					}
