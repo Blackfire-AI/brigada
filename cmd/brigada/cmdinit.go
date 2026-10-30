@@ -54,7 +54,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	now := fs.Bool("now", false, "restart the runner at once when its agents change, cutting its running jobs; without it the restart waits out running jobs")
 	probe := fs.Bool("probe", false, "print the plan only; write nothing and start nothing")
 	verbose := fs.Bool("verbose", false, "also print the full contents of new repository setup files")
-	limited := fs.Bool("accept-limited", false, "acknowledge fewer than two review families; reviews still require another family")
+	limited := fs.Bool("accept-limited", false, "acknowledge fewer than two review families; matters only under review.family=require, where reviews wait for another family; under the default prefer it changes nothing")
 	check := fs.String("check", "", "default check command, or none / - for no check (never executed by init)")
 	repo := fs.String("repo", "", "repository URL or canonical identity to register instead of the selected remote")
 	remote := fs.String("remote", "", "git remote to use as the project's repository")
@@ -198,6 +198,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if code != 0 {
 		return code
 	}
+	requireFamily := rt.file.Review.Family == engine.ReviewFamilyRequire
 	rt.stateDir, err = filepath.Abs(rt.stateDir)
 	if err != nil {
 		return fail(stderr, err)
@@ -264,7 +265,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 	}
 	if canAsk {
-		fmt.Fprint(stdout, initDim(stdout, "brigada runs coding tasks on the agent CLIs you are signed in to. A foreman\n(an agent) turns your request into a plan of tasks; workers (other agents)\nwrite the code in their own git worktrees; your check command tests it; and\nan agent of a different model family reviews it. Four short steps follow.\nThe engine mirrors plan files (titles, task states, dependencies,\nbranches, open questions, extra repositories) to the brigada/plans\nbranch of your remote; turn that off with\n`brigada project set plan_files=off`.\nNothing is written or started until you confirm at the end.\n\n"))
+		fmt.Fprint(stdout, initDim(stdout, "brigada runs coding tasks on the agent CLIs you are signed in to. A foreman\n(an agent) turns your request into a plan of tasks; workers (other agents)\nwrite the code in their own git worktrees; your check command tests it; and\nan agent of another model family reviews it\n"+initReviewIntro(requireFamily)+" Four short steps follow.\nThe engine mirrors plan files (titles, task states, dependencies,\nbranches, open questions, extra repositories) to the brigada/plans\nbranch of your remote; turn that off with\n`brigada project set plan_files=off`.\nNothing is written or started until you confirm at the end.\n\n"))
 	}
 	terminal := false
 	if f, ok := projectStdin.(*os.File); ok {
@@ -486,7 +487,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		}
 		foremanPicked = true
 		fmt.Fprintln(stdout)
-		initStep(stdout, 2, "workers", "  Each agent CLI below can run tasks. brigada offers every model the CLI\n  knows: for each task the foreman says how heavy a model it needs (light,\n  standard, heavy) and how hard it should think, and brigada picks the\n  model of that tier with the best record on this repo. Reviews always go\n  to a different model family than the author's, so you need at least two\n  families (e.g. claude + codex).\n")
+		initStep(stdout, 2, "workers", "  Each agent CLI below can run tasks. brigada offers every model the CLI\n  knows: for each task the foreman says how heavy a model it needs (light,\n  standard, heavy) and how hard it should think, and brigada picks the\n  model of that tier with the best record on this repo."+initReviewWorkers(requireFamily))
 		for _, h := range initHarnesses {
 			if !probes[h].installed || ((h == "claude" || h == "codex") && !confirmedCLI(h)) {
 				continue
@@ -670,11 +671,17 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if len(usable) == 0 {
 		return fail(stderr, fmt.Errorf("zero usable agents; install and sign in to a supported harness, then name it with --agent and confirm authentication with --signed-in; nothing written or started"))
 	}
-	isLimited := len(families) < 2
-	if isLimited {
-		printInitWrapped(stdout, "LIMITED SETUP: ", "  ", "fewer than two distinct review-capable model families. Sign in to a harness of another family, or add a model of another family with classes=review. Cross-family reviews that cannot be served will wait; inspect brigada status.")
-		if !*limited {
-			return fail(stderr, fmt.Errorf("setup stopped; add a second review family or explicitly acknowledge with --accept-limited; nothing written or started"))
+	// Fewer than two review families stops setup only under review.family=require;
+	// under prefer reviews fall back to the same family or the author's agent.
+	isLimited := len(families) < 2 && requireFamily
+	if len(families) < 2 {
+		if requireFamily {
+			printInitWrapped(stdout, "LIMITED SETUP: ", "  ", "fewer than two distinct review-capable model families, and review.family=require. Sign in to a harness of another family, or add a model of another family with classes=review. Reviews that cannot be served by another family will wait; inspect brigada status.")
+			if !*limited {
+				return fail(stderr, fmt.Errorf("setup stopped; add a second review family or explicitly acknowledge with --accept-limited (review.family=require); nothing written or started"))
+			}
+		} else {
+			printInitWrapped(stdout, "WARNING: ", "  ", "fewer than two distinct review-capable model families. review.family=prefer (the default): reviews prefer another family and fall back to the same family or the author's own agent, labelled in history. Add a model of another family with classes=review for cross-family reviews, or set review.family=require in the engine config to insist on them.")
 		}
 	}
 	// The foreman is the model picked above, picked now when --agent skipped
@@ -905,7 +912,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	}
 	planForeman := *chosen
 	planForeman.effort = foremanEffort
-	printInitAgents(stdout, usable, len(families), planForeman, sources, rt.file.Caps.TierOf)
+	printInitAgents(stdout, usable, len(families), requireFamily, planForeman, sources, rt.file.Caps.TierOf)
 	var accounts []string
 	seenAccounts := map[string]bool{}
 	for _, h := range initHarnesses {
@@ -1144,7 +1151,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		fmt.Fprintf(&done, " Detached runner started (pid %d).", result.Record.PID)
 	}
 	if isLimited {
-		done.WriteString(" Limited setup applied; cross-family reviews may wait.")
+		done.WriteString(" Limited setup applied (review.family=require); reviews wait for another family.")
 	} else if agentsMatch {
 		done.WriteString(" Setup ready.")
 	} else {
@@ -1381,7 +1388,7 @@ func initFamilyName(family string) string {
 // printInitAgents is the Plan's foreman and agent table. The tier is what the
 // foreman asks for per task; each row names the harness, model, family, tier
 // and what the agent may do.
-func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agentSpec, sources map[string]initModelSource, tier func(harness, model string) string) {
+func printInitAgents(w io.Writer, agents []agentSpec, families int, requireFamily bool, foreman agentSpec, sources map[string]initModelSource, tier func(harness, model string) string) {
 	out := initPresentation(w)
 	style := out.style
 	heading := "Plan"
@@ -1448,7 +1455,7 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, foreman agen
 		prefix := fmt.Sprintf("    %-9s ", s.harness) + initPad(modelCells[i], modelWidth) + "  " + initPad(style.Dim(familyNames[i]), familyWidth) + "  " + initPad(tiers[i], tierWidth) + "  "
 		printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), roles[i])
 	}
-	printInitWrapped(w, "  "+style.Bold("Reviews:")+" ", "    ", fmt.Sprintf("%d model families, so every task can get a reviewer of another one.", families))
+	printInitWrapped(w, "  "+style.Bold("Reviews:")+" ", "    ", initReviewsLine(families, requireFamily))
 	if slices.ContainsFunc(agents, func(s agentSpec) bool { return s.harness == "dsh" }) {
 		printInitWrapped(w, "  ", "  ", style.Dim("dsh is experimental and may change in any release."))
 	}

@@ -12,7 +12,7 @@ You may pay for more than one AI coding subscription. brigada sits above their o
 - the **foreman**, one of those CLIs (claude or codex; [GUIDE section 11](docs/GUIDE.md#11-the-foremans-harness-claude-or-codex) lists what a foreman harness must do), turns what you ask for into a plan of tasks with dependencies between them. It lives in a brigada-owned session: you talk to it with `brigada attach`, and it acts headless while you are away;
 - the **dispatcher** gives each task to the agent with the best measured record for that kind of task on *your* repo, among the agents that still have quota;
 - every task's own **check** (tests, lint, any command) runs on the result, so "done" is not taken on trust;
-- a **reviewer** from a different model family than the author reads the change;
+- a **reviewer** from another model family than the author's when one is available (`review.family=prefer`, the default; required with `review.family=require`) reads the change;
 - Independent review catches problems that checks can miss: in brigada's own development, reviewers asked for changes on 69 of 165 tasks, and every one had already passed its check. In a planted-bug exercise, reviewers caught 37 of 40 spec-breaking bugs, with each family missing exactly one; on a small sample of real backlog work, results showed no family advantage either way. Cross-family routing also spreads reviews across subscriptions, so they do not wait on or spend the author's quota.
 - the **outcome** of every task is recorded locally, and `brigada stats` shows which agent actually wins where;
 - **landing is brigada's**: each approved task is squashed onto the target branch, your check reruns on the result, and the push follows your push gate (`auto` by default); `brigada land` stays as the hand-driven form, and gates hold anything you want to see first.
@@ -82,7 +82,7 @@ Replace `<os>` and `<arch>` with your platform, for example `brigada-linux-amd64
 To use brigada, you need:
 
 - `git` and a repository with an `origin` remote;
-- signed-in agent CLIs on `PATH`. Reviews need a model family other than the author's, so offer review-capable agents from at least two families.
+- signed-in agent CLIs on `PATH`. Reviews go to a model family other than the author's when one is available (`review.family=prefer`, the default; with one family they fall back to the same family or the same agent), and always with `review.family=require`, so offer review-capable agents from at least two families.
 
 ### What `brigada version` prints
 
@@ -102,7 +102,7 @@ brigada init
 Init walks you through four steps:
 
 1. Pick the foreman model from the signed-in Claude and Codex CLIs, then how hard it should think. `--foreman claude/sonnet@medium` supplies both.
-2. Choose which CLIs' models may run tasks. Opencode offers a menu with multiple picks. Reviews need two model families; Kimi reviews only unless you let it write code.
+2. Choose which CLIs' models may run tasks. Opencode offers a menu with multiple picks. Two model families give cross-family reviews (preferred; required with `review.family=require`); Kimi reviews only unless you let it write code.
 3. Set tasks at once on this machine (or pass `--parallel N`). Enter keeps the saved limit, else half the cores, at least 1 and at most 4.
 4. Confirm the check suggested by your build files, type your own command, or enter `-` for none. Init takes worker tools from that choice and never runs the check.
 
@@ -134,7 +134,7 @@ brigada land <task-id>...   # land approved tasks by hand (the land job does it 
 
 ## Talking to the foreman yourself
 
-You can also skip the operator and talk to the foreman directly: run `brigada attach` inside the repository. The foreman is an agent in a brigada-owned session: your attached chat and the headless turns that wake on events while you are away are one transcript, running in a reading checkout of your repository with your own harness config. It plans through brigada's tools (`--model` and `--effort` override the project's foreman choice for one chat); the runner works each task on its own branch in a worktree, runs the check and pushes the branch; and a reviewer of another family reads it. See [section 2](docs/GUIDE.md#2-talking-to-the-foreman-brigada-attach).
+You can also skip the operator and talk to the foreman directly: run `brigada attach` inside the repository. The foreman is an agent in a brigada-owned session: your attached chat and the headless turns that wake on events while you are away are one transcript, running in a reading checkout of your repository with your own harness config. It plans through brigada's tools (`--model` and `--effort` override the project's foreman choice for one chat); the runner works each task on its own branch in a worktree, runs the check and pushes the branch; and a reviewer of another family when available (`review.family=prefer`, the default; required with `review.family=require`) reads it. See [section 2](docs/GUIDE.md#2-talking-to-the-foreman-brigada-attach).
 
 The [guide](docs/GUIDE.md) covers the rest: a coordinator session over several repositories, watching work as it runs, configuration, and the full command reference.
 

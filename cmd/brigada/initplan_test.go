@@ -45,7 +45,7 @@ func TestInitPlanAgentRowsFit80(t *testing.T) {
 		{harness: "opencode", model: "zai-coding-plan/glm-5.3", effort: "low", classes: []string{"implement", "review", "answer"}},
 	}
 	var b bytes.Buffer
-	printInitAgents(&b, agents, 4, agents[0], nil, adapter.AgentTier)
+	printInitAgents(&b, agents, 4, false, agents[0], nil, adapter.AgentTier)
 	rows := 0
 	for _, line := range strings.Split(b.String(), "\n") {
 		if term.VisibleWidth(line) >= 80 {
@@ -90,7 +90,7 @@ func TestInitPlanRoleColumn(t *testing.T) {
 			// golden-fixture model, so the boundary cases differ by one column.
 			agents = append(agents, agentSpec{harness: "opencode", model: "zai-coding-plan/glm-5.3", classes: []string{"review"}})
 			var out bytes.Buffer
-			printInitAgents(&out, agents, 4, agents[0], nil, adapter.AgentTier)
+			printInitAgents(&out, agents, 4, false, agents[0], nil, adapter.AgentTier)
 			_, table, _ := strings.Cut(out.String(), "foreman picks the tier per task):\n")
 			table, _, _ = strings.Cut(table, "  Reviews:")
 			rows, families, continuations := 0, 0, 0
@@ -151,7 +151,7 @@ func TestInitPlanLongModelStacks(t *testing.T) {
 		{harness: "claude", model: "fable", classes: []string{"implement", "review", "answer"}},
 	}
 	var b bytes.Buffer
-	printInitAgents(&b, agents, 2, agents[1], nil, adapter.AgentTier)
+	printInitAgents(&b, agents, 2, false, agents[1], nil, adapter.AgentTier)
 	_, table, _ := strings.Cut(b.String(), "foreman picks the tier per task):\n")
 	table, _, _ = strings.Cut(table, "  Reviews:")
 	lines := strings.Split(strings.TrimRight(table, "\n"), "\n")
