@@ -5,9 +5,9 @@
 plan: 91
 title: "#135: sweep fails \"database is locked\" under runner heartbeats"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-10-30T09:25:52.175601Z
-updated: 2026-10-30T09:28:02.906093Z
+updated: 2026-10-30T09:28:55.373672Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -41,6 +41,31 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: running
+    state: cancelled
+    branch: ""
+    rounds: 0
+  - id: 301
+    name: "busy_retry_core"
+    title: "#135 (1/2): Sweep's and Heartbeat's write transactions ride out SQLITE_BUSY; the suspension tick is recorded only after a commit"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 302
+    name: "busy_retry_prune_read"
+    title: "#135 (2/2): Prune and the job-read sweep ride out SQLITE_BUSY; the heartbeat's bounded outcome is documented"
+    class: "implement"
+    deps: ["busy_retry_core"]
+    base: "busy_retry_core"
+    continue: "busy_retry_core"
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    state: pending
     branch: ""
     rounds: 0
