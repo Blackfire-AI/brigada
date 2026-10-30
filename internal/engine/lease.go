@@ -221,8 +221,15 @@ func (e *Engine) Lease(ctx context.Context, owner int64, harnesses, labels []str
 		}); err != nil {
 			return err
 		}
+		if e.betweenLeaseTx != nil {
+			e.betweenLeaseTx()
+		}
 		return e.store.Update(tctx, func(tx *sql.Tx) error {
-			g, err := e.leaseTx(tx, owner, harnesses, labels, now)
+			// The walk is stamped with its own time: a write that
+			// committed between the two transactions carries a later
+			// time than the arrival's, and a lease stamped earlier
+			// would read as recorded before the job it leases.
+			g, err := e.leaseTx(tx, owner, harnesses, labels, e.cfg.Now())
 			if err != nil {
 				return fmt.Errorf("lease for runner %d: %w", owner, err)
 			}
