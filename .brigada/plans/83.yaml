@@ -82,9 +82,10 @@ tasks:
     base: "prompts"
     tier: heavy
     effort: medium
-    state: running
+    state: needs_foreman
     branch: "brigada/task-258-r1"
     rounds: 0
+    question: "brigada/landed already carries this task's whole change (commit 8df311fd, task 274, 'Closes #129') and my base brigada/task-257@fc5d32ab has diverged from landed, so a verbatim rebuild re-conflicts at land time. Rebuild this task on current brigada/landed, or close it as already done by task 274?"
   - id: 259
     name: "land_target"
     title: "#127: the land target is kept up to date with the default branch; status shows the lag; foreman prompt names both heads"
