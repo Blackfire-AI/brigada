@@ -87,9 +87,11 @@ func (c *Client) SetProjectSettings(ctx context.Context, repoURL string, values 
 }
 
 // handleProjectImport imports a project.yaml the client read (§13.1): the
-// body carries the file's content, never a path. A file the engine
-// refuses (unknown key, wrong schema, another repo) is the caller's own
-// and answers 400.
+// body carries the file's content, never a path. One import is one step:
+// the settings, the skills_dir, the role files' texts and the skills land
+// in one store transaction, and a file the engine refuses (unknown key,
+// wrong schema, another repo) is the caller's own, answers 400 and leaves
+// every previous value in effect.
 func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request, _ identity) {
 	if !requireMethod(w, r, http.MethodPut) {
 		return
@@ -98,34 +100,7 @@ func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request, _ i
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	for _, role := range engine.RoleKeys {
-		if text, ok := req.Roles[role]; ok {
-			if err := engine.ValidateRoleText(role, text); err != nil {
-				writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
-				return
-			}
-		}
-	}
-	for role := range req.Roles {
-		if err := engine.ValidateRoleText(role, ""); err != nil {
-			writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
-			return
-		}
-	}
-	if req.Skills != nil {
-		if err := engine.ValidateSkills(*req.Skills); err != nil {
-			writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
-			return
-		}
-	}
-	// The worker's file is the instructions setting (§5.9): its text
-	// rides the project.yaml import itself, so the setting and the
-	// worker row stay one text.
-	instructions := req.Instructions
-	if text, ok := req.Roles[engine.RoleWorker]; ok && instructions == nil {
-		instructions = &text
-	}
-	got, err := s.eng.ImportProjectConfigWith(r.Context(), req.RepoURL, req.Content, instructions, req.Accept)
+	got, err := s.eng.ImportProject(r.Context(), req.RepoURL, req.Content, req.Instructions, req.Roles, req.Skills, req.Accept)
 	if err != nil {
 		if errors.Is(err, engine.ErrInvalidSetting) || errors.Is(err, engine.ErrInvalidRepoURL) {
 			writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
@@ -133,63 +108,6 @@ func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request, _ i
 		}
 		s.writeInternal(w, r, "import the project configuration", err)
 		return
-	}
-	if !got.NeedsConfirm {
-		configured := map[string]bool{}
-		for role := range req.Roles {
-			configured[role] = true
-		}
-		removals, err := s.eng.UnimportRoleFiles(r.Context(), req.RepoURL, configured)
-		if err != nil {
-			if errors.Is(err, engine.ErrInvalidSetting) {
-				writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
-				return
-			}
-			s.writeInternal(w, r, "unimport the role instructions", err)
-			return
-		}
-		for _, rm := range removals {
-			// A role whose key the file dropped moves to not
-			// configured; a local override under it keeps its text
-			// and shows as the conflict (§5.9).
-			if rm.Kept != nil {
-				got.Conflicts = append(got.Conflicts, rm.Change())
-			} else {
-				got.Applied = append(got.Applied, rm.Change())
-			}
-		}
-		for _, role := range engine.RoleKeys {
-			text, ok := req.Roles[role]
-			if !ok || role == engine.RoleWorker {
-				continue
-			}
-			kept, err := s.eng.ImportRoleFile(r.Context(), req.RepoURL, role, text)
-			switch {
-			case errors.Is(err, engine.ErrRoleTextKept):
-				// The local text stays; the conflict shows both texts (§5.9).
-				old := "local override"
-				if kept != nil {
-					old = kept.Text
-				}
-				got.Conflicts = append(got.Conflicts, engine.ConfigChange{Key: "instructions." + role, Old: strconv.Quote(old), New: strconv.Quote(text)})
-			case errors.Is(err, engine.ErrInvalidSetting):
-				writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
-				return
-			case err != nil:
-				s.writeInternal(w, r, "import the role instructions", err)
-				return
-			}
-		}
-		if req.Skills != nil {
-			if _, err := s.eng.ImportSkills(r.Context(), req.RepoURL, *req.Skills); err != nil {
-				if errors.Is(err, engine.ErrInvalidSetting) {
-					writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
-					return
-				}
-				s.writeInternal(w, r, "import the skills", err)
-				return
-			}
-		}
 	}
 	writeJSON(w, http.StatusOK, got)
 }
