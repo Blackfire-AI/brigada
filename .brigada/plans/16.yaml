@@ -5,9 +5,9 @@
 plan: 16
 title: "One foreman, one memory: attach is the door; retire mode A (interactive hold, quiet window, init wiring)"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
+state: active
 created: 2026-10-20T15:04:59.234039Z
-updated: 2026-10-20T18:24:17.427111Z
+updated: 2026-10-30T12:55:44.615423Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
