@@ -91,17 +91,52 @@ type mirroredStore struct {
 
 func (m mirroredStore) Update(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	e := m.e
+	// The engine's write transactions serialize through their commit
+	// bookkeeping (sweepTxSem): the tick a sweep stages is recorded only
+	// after the commit, when the store's write lock is already gone, so
+	// the next write waits here — before its own sweep reads the tick —
+	// rather than reading the pre-commit one and detecting the same
+	// suspension twice. The wait rides the caller's context: a call
+	// queued behind holders gives up at its own deadline, never without
+	// bound.
+	if err := e.lockSweepTx(ctx); err != nil {
+		return err
+	}
+	defer e.unlockSweepTx()
+	// The sweep a transaction ran staged its tick (§13); the commit or
+	// the rollback settles it — only a sweep whose transaction committed
+	// consumed the suspension gap. A test's hook may sit between the
+	// commit and the settlement, the exact window the serialization
+	// closes.
+	var tx *sql.Tx
+	settle := func(err error) {
+		if err == nil && e.afterTxCommit != nil {
+			e.afterTxCommit()
+		}
+		if err == nil {
+			e.commitStagedSweep(tx)
+		} else {
+			e.dropStagedSweep(tx)
+		}
+	}
 	if !e.cfg.PlanFiles {
-		return m.Store.Update(ctx, fn)
+		err := m.Store.Update(ctx, func(t *sql.Tx) error {
+			tx = t
+			return fn(t)
+		})
+		settle(err)
+		return err
 	}
 	owed := false
-	err := m.Store.Update(ctx, func(tx *sql.Tx) error {
+	err := m.Store.Update(ctx, func(t *sql.Tx) error {
+		tx = t
 		owed = false
-		if err := fn(tx); err != nil {
+		if err := fn(t); err != nil {
 			return err
 		}
-		return tx.QueryRow("SELECT EXISTS (SELECT 1 FROM plan_mirror_dirty)").Scan(&owed)
+		return t.QueryRow("SELECT EXISTS (SELECT 1 FROM plan_mirror_dirty)").Scan(&owed)
 	})
+	settle(err)
 	if err == nil && owed {
 		e.SyncPlanFiles()
 	}
