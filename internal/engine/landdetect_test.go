@@ -1,8 +1,6 @@
 package engine
 
 import (
-	"database/sql"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -242,10 +240,13 @@ func TestRejectedPushOfLandedTaskRaisesNothing(t *testing.T) {
 	}
 }
 
-// TestPlanDoneReportLeavesLandedOutOfWaiting: a done plan whose tasks are
-// landed and one is still waiting names the landed one in "landed" and
-// the waiting one in "not yet landed", never the other way around.
-func TestPlanDoneReportLeavesLandedOutOfWaiting(t *testing.T) {
+// TestPlanCloseWaitsForTheLastLanding: a done, approved task with no
+// landing record and no hold — its land job retired with no outcome, as
+// plan 84's tasks sat done behind a dependency held at the land gate
+// (#133) — keeps the plan open: no plan_done is written until the
+// landing is recorded, and the report that closes the plan names both
+// tasks as landed, never "not yet landed".
+func TestPlanCloseWaitsForTheLastLanding(t *testing.T) {
 	e := newEnv(t)
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
@@ -264,32 +265,35 @@ func TestPlanDoneReportLeavesLandedOutOfWaiting(t *testing.T) {
 	}
 
 	// The second task reaches done and approved; its land job is queued,
-	// so the plan stays open until the landing has an outcome (§7.1). To
-	// see the "not yet landed" list — a done, approved task with no
-	// landing record and no hold — retire the queued job without a
-	// landing and close the plan directly.
+	// so the plan stays open until the landing has an outcome (§7.1).
+	// Retiring the queued job without a landing leaves the outcome
+	// unsettled — a done, approved task with no record and no hold — and
+	// the close is still refused: the plan stays active, no plan_done.
 	e.runTaskToDone(second, author, reviewer)
 	e.exec("UPDATE jobs SET status = 'done' WHERE task_id = ? AND kind = 'land'", second)
-	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
-		_, err := e.eng.finishPlanIfClosedTx(tx, e.project, e.plan, 0, 0, e.clock.Now())
-		return err
-	}); err != nil {
-		t.Fatal(err)
+	e.finishPlan(e.plan)
+	if got := e.str("SELECT state FROM plans WHERE id = ?", e.plan); got != "active" {
+		t.Fatalf("plan state = %q, want active: the second task's landing has no outcome", got)
+	}
+	if _, ok := e.eventPayloadOf(evPlanDone); ok {
+		t.Fatal("the plan closed done over a landing with no outcome")
 	}
 
+	// The landing recorded — its trailer found on the branch — is the
+	// outcome the close waited for: the plan closes naming both.
+	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",
+		[]LandedCommit{{TaskID: second, Commit: "abc234"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", e.plan); got != planDone {
+		t.Fatalf("plan state = %q, want done once the landing was recorded", got)
+	}
 	p, ok := e.eventPayloadOf(evPlanDone)
 	if !ok {
 		t.Fatal("no plan_done event")
 	}
-	if !strings.Contains(p.Reason, "landed: task "+strconv.FormatInt(first, 10)) {
-		t.Errorf("plan_done report = %q, want it to name task %d as landed", p.Reason, first)
-	}
-	wantWait := "not yet landed: task " + strconv.FormatInt(second, 10)
-	if !strings.Contains(p.Reason, wantWait) {
-		t.Errorf("plan_done report = %q, want it to name task %d as not yet landed", p.Reason, second)
-	}
-	if strings.Contains(p.Reason, "not yet landed: task "+strconv.FormatInt(first, 10)) {
-		t.Errorf("plan_done report = %q, the landed task %d must be left out of the waiting list", p.Reason, first)
+	if p.Reason != "all tasks landed" {
+		t.Errorf("plan_done report = %q, want all tasks landed: both records are in", p.Reason)
 	}
 }
 

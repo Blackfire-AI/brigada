@@ -164,11 +164,10 @@ func taskApprovedTx(tx *sql.Tx, taskID int64) (bool, error) {
 
 // landableDoneTx reports whether the task is one the land rule queues a
 // landing for (§7.1): done, of the implement class — the one class that
-// lands — and approved by its last review. The done report's
-// not-yet-landed list and the blocked-plan rule's stranded tasks (§6.2)
-// read the same eligibility here, so the three can never disagree: a
-// done task of a class that never lands is never "not yet landed" and
-// never holds its plan open.
+// lands — and approved by its last review. The plan-closing rule's
+// unlanded live work (#133) and the blocked-plan rule's stranded tasks
+// (§6.2) read the same eligibility here, so the two can never disagree:
+// a done task of a class that never lands never holds its plan open.
 func landableDoneTx(tx *sql.Tx, taskID int64) (bool, error) {
 	var state, class string
 	if err := tx.QueryRow("SELECT state, class FROM tasks WHERE id = ?", taskID).Scan(&state, &class); err != nil {
