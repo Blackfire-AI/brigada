@@ -21,11 +21,11 @@ const WorkerTemplateVersion = 11
 
 // ReviewTemplateVersion is the review prompt template's version (§7),
 // under the same rule as the worker's (§1.4).
-const ReviewTemplateVersion = 8
+const ReviewTemplateVersion = 9
 
 // ReReviewTemplateVersion is the re-review prompt's version (§7): the
 // prompt a reviewer resuming its own session is sent after a fix round.
-const ReReviewTemplateVersion = 1
+const ReReviewTemplateVersion = 2
 
 // WorkerOpener and ReviewerOpener are the first words of every worker
 // and reviewer prompt the engine composes. They are a contract: the
@@ -312,9 +312,48 @@ func composeWorkerPrompt(spec, check, followup string, o options) string {
 	return b.String()
 }
 
+// The placement kinds a reviewer prompt states (issue #126), the ones the
+// engine records at the lease's pick: how the reviewer relates to the
+// author. A prompt is composed at queue time with the cross-family
+// sentence and placed at lease (WithPlacement), when the reviewer is
+// known.
+const (
+	PlacementCrossFamily = "cross_family"
+	PlacementSameFamily  = "same_family"
+	PlacementSameAgent   = "same_agent"
+	PlacementUnknown     = "unknown"
+)
+
+// reviewPlacedCross is the review template's placement sentence as
+// composed; WithPlacement swaps it for reviewPlaced's when the reviewer
+// is not of another family.
+const reviewPlacedCross = `You were placed cross-family — a different
+family of agent than the author's — exactly so you read the change
+without the author's instincts.`
+
+// reviewPlaced is the review template's placement sentence for each
+// placement kind but cross_family.
+var reviewPlaced = map[string]string{
+	PlacementSameFamily: `You were placed same-family — a different
+agent of the author's own model family, since no reviewer of another
+family was available. Read the change as independently as a reviewer
+of another family would: judge it from the diff and the spec, never
+from instincts you share with the author.`,
+	PlacementSameAgent: `You run on the author's own agent and model,
+since no other reviewer was available, in a fresh session of your own:
+you have no access to the author's session and know nothing of how the
+change was made. Read it as independently as a reviewer of another
+family would: judge it from the diff and the spec, never from
+instincts you share with the author.`,
+	PlacementUnknown: `The author's model family is not known, so
+whether yours differs from it is not known either. Read the change as
+independently as a reviewer of another family would: judge it from the
+diff and the spec alone.`,
+}
+
 // reviewTemplate is the fixed part of every review prompt (§7). It
-// tells the reviewer what it is — a reader, cross-family, with nothing
-// to change — where the verbatim data begins and ends, how to see the
+// tells the reviewer what it is — a reader, placed as the lease decides
+// (cross-family as composed), with nothing to change — where the verbatim data begins and ends, how to see the
 // change itself, and that its final message must end with one verdict
 // block. The implementer's summary is deliberately no input of the
 // composer's at all: the anti-steering rule of §7 is enforced by what
@@ -324,9 +363,7 @@ func composeWorkerPrompt(spec, check, followup string, o options) string {
 // and branch of the diff arrive as placeholders too, so the command the
 // reviewer runs is the template's own wording, not data.
 const reviewTemplateSrc = `You are a brigada reviewer: you review one change another worker
-made, and nothing else. You were placed cross-family — a different
-family of agent than the author's — exactly so you read the change
-without the author's instincts. You run alone in a read-only git
+made, and nothing else. ` + reviewPlacedCross + ` You run alone in a read-only git
 worktree prepared for you at the change's branch, and the review is
 read-only throughout: do not edit files, do not commit, do not push.
 You cannot message anyone mid-run: whatever you need to say goes in
@@ -483,17 +520,96 @@ var reviewVerdictContract = strings.ReplaceAll(
 // out; the data and the diff refs are resolved per prompt.
 var reReviewTemplate = strings.NewReplacer(reviewDiffVar, ReviewDiffFile).Replace(reReviewTemplateSrc)
 
+// reReviewOpener is the re-review template's first words, which tell its
+// prompt from a first review's.
+const reReviewOpener = "You are a brigada reviewer, back for a re-review"
+
+// reReviewPlaced is the paragraph WithPlacement adds after a re-review's
+// first one when the reviewer is not of another family than the author:
+// the cross-family re-review says nothing of it, as it always has.
+var reReviewPlaced = map[string]string{
+	PlacementSameFamily: `You were placed same-family — a different agent of the author's own
+model family. Keep reading as independently as a reviewer of another
+family would: judge the fix from the diff, never from instincts you
+share with the author.`,
+	PlacementSameAgent: `You run on the author's own agent and model, in your own review
+session: you have no access to the author's session, only to your own
+earlier review. Keep reading as independently as a reviewer of another
+family would: judge the fix from the diff, never from instincts you
+share with the author.`,
+	PlacementUnknown: `The author's model family is not known, so whether yours differs
+from it is not known either. Keep reading as independently as a
+reviewer of another family would: judge the fix from the diff alone.`,
+}
+
+// WithPlacement states a reviewer prompt's real placement (issue #126):
+// the review, plan review and re-review prompts are composed at queue
+// time, as for a cross-family reviewer, and the reviewer is picked only
+// at lease. For a same_family, same_agent or unknown placement the
+// review and plan review templates' placement sentence is swapped for
+// the kind's, and a re-review gains the kind's paragraph after its
+// first; a cross_family or empty kind, or a prompt of no reviewer
+// template, is returned as is. The template's sentence comes before any
+// data, so the first occurrence is the template's own.
+func WithPlacement(p, kind string) string {
+	switch {
+	case kind == "" || kind == PlacementCrossFamily:
+		return p
+	case strings.HasPrefix(p, reReviewOpener):
+		text, ok := reReviewPlaced[kind]
+		head, rest, cut := strings.Cut(p, "\n\n")
+		if !ok || !cut {
+			return p
+		}
+		return head + "\n\n" + text + "\n\n" + rest
+	case strings.HasPrefix(p, ReviewerOpener+": you review one plan"):
+		if text, ok := planPlaced[kind]; ok {
+			return strings.Replace(p, planPlacedCross, text, 1)
+		}
+	case strings.HasPrefix(p, ReviewerOpener):
+		if text, ok := reviewPlaced[kind]; ok {
+			return strings.Replace(p, reviewPlacedCross, text, 1)
+		}
+	}
+	return p
+}
+
 // PlanReviewTemplateVersion is the plan review prompt's version (§7),
 // under the same rule as the worker's (§1.4).
-const PlanReviewTemplateVersion = 5
+const PlanReviewTemplateVersion = 6
+
+// planPlacedCross is the plan review template's placement sentence as
+// composed, swapped by WithPlacement as the review template's is.
+const planPlacedCross = `You were placed cross-family — a different
+family of agent than the foreman's, which wrote the plan — exactly so
+you read it without the foreman's instincts.`
+
+// planPlaced is the plan review template's placement sentence for each
+// placement kind but cross_family: the foreman is the plan's author.
+var planPlaced = map[string]string{
+	PlacementSameFamily: `You were placed same-family — a different
+agent of the model family of the foreman, which wrote the plan, since
+no reviewer of another family was available. Read the plan as
+independently as a reviewer of another family would: judge it from
+the plan and the code it builds on, never from instincts you share
+with the foreman.`,
+	PlacementSameAgent: `You run on the foreman's own agent and model,
+which wrote the plan, since no other reviewer was available, in a
+fresh session of your own: you have no access to the foreman's session
+and know nothing of how the plan was made. Read it as independently as
+a reviewer of another family would: judge it from the plan and the
+code it builds on, never from instincts you share with the foreman.`,
+	PlacementUnknown: `The model family of the foreman, which wrote
+the plan, is not known, so whether yours differs from it is not known
+either. Read the plan as independently as a reviewer of another family
+would: judge it from the plan and the code it builds on alone.`,
+}
 
 // planReviewTemplateSrc is the fixed part of a plan review prompt: a
 // reviewer reads a plan, not a change, against a checkout of the default
 // branch. It ends with the review template's verdict contract, verbatim.
 const planReviewTemplateSrc = `You are a brigada reviewer: you review one plan before any of its work
-is queued, and nothing else. You were placed cross-family — a different
-family of agent than the foreman's, which wrote the plan — exactly so
-you read it without the foreman's instincts. You run alone in a
+is queued, and nothing else. ` + planPlacedCross + ` You run alone in a
 read-only git worktree prepared for you at the current head of the
 ref named in the note after the plan, and the review is read-only throughout: do
 not edit files, do not commit, do not push, do not run the tasks'
