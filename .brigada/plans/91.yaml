@@ -53,7 +53,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: done
     branch: "brigada/task-301"
     rounds: 2
   - id: 302
@@ -66,6 +66,6 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: pending
+    state: running
     branch: ""
     rounds: 0
