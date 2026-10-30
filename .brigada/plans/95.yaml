@@ -29,6 +29,6 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: done
+    branch: "brigada/task-309"
     rounds: 0
