@@ -65,7 +65,7 @@ tasks:
     tier: light
     effort: medium
     skills: ["bugfix"]
-    state: running
+    state: reviewing
     branch: "brigada/task-310"
     rounds: 1
   - id: 311
