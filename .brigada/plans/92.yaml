@@ -31,6 +31,6 @@ tasks:
     effort: medium
     review_tier: heavy
     review_effort: high
-    state: reviewing
+    state: done
     branch: "brigada/task-303-r1"
     rounds: 2
