@@ -99,6 +99,6 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: needs_foreman
+    state: running
     branch: "brigada/task-292"
-    rounds: 1
+    rounds: 0
