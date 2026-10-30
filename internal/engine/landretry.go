@@ -244,17 +244,6 @@ func (e *Engine) retryLandingTx(tx *sql.Tx, project, taskID int64, now time.Time
 			return LandRetryResult{}, err
 		}
 	}
-	// A parked task that stays done frees its waiting dependents as a
-	// finished task's does (§6.1, the settleLandedTx precedent): a
-	// dependent added while it sat parked starts now, not never. Only a
-	// task still done frees them — a stale base parks it again (issue
-	// #124), and no dependent may start work built on the round the
-	// rebuild will replace.
-	if status == taskDone {
-		if err := e.releaseDependentsTx(tx, project, taskID, now); err != nil {
-			return LandRetryResult{}, err
-		}
-	}
 	words := r.Outcome
 	if r.Reason != "" {
 		words += ": " + r.Reason
