@@ -42,9 +42,9 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: running
     branch: "brigada/task-296"
-    rounds: 1
+    rounds: 2
   - id: 297
     name: "batch_design_execution"
     title: "#134 (2/3) design: running a land batch, partial outcomes and the push (docs/design.md)"
