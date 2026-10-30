@@ -71,7 +71,7 @@ A commit that completes a GitHub issue ends its body with a line of its own, `Cl
 
 ## Review
 
-Every change is reviewed by a model from a different family than its author's: `brigada review --branch <branch>`.
+Every change is reviewed by another model: one from a different family than its author's when one is available (`review.family=prefer`), else another agent of the author's family, or the author's own agent in a fresh session. `brigada review --branch <branch>`.
 
 ## Public repository
 
