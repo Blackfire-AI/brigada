@@ -18,6 +18,8 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Documented the land batch run (issue #134): per-member squash and stacked checks, isolated content failures with dependent landings left waiting, one publication with bounded retries, per-landing push approvals, and recovery of every member after a lost runner.
+
 - `land_retry`, a foreman tool (issue #133): it queues the landing again for a task parked by a landing that failed before a landing was recorded, outside its content — a rejected push or an environment failure, with the outcomes `queued`, `held`, `stale_base` or `refused` — through the same gates; a task whose landing is already recorded (pushed or waiting) is refused in favour of `task_restart`, and so is a conflict or a failed landed check.
 - `issue_read`, a read-only foreman tool (issue #131): it answers the title, body and comments of an issue or pull request of the project's own repository inside `<issue>` data delimiters, with the user's `gh` login. When the repository is not on GitHub, `gh` is missing or not logged in, or the number does not exist, it returns that reason; the foreman's report says so and asks the user for the text, and the foreman never searches the disk for it.
 - Documented editable role instructions, task skills, their import and snapshot rules, and the diff/reset commands (issues #119 and #117). Enabled the documentation content verifier.
