@@ -16,7 +16,6 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Documented batch landing (issue #134, design step 1): one `land` job lands every landing ready for the same target — dependencies landed or earlier in the batch, not held at the land gate, not refused for a stale base — in dependency order, ties by task id, bounded by the project setting `land_batch_max` (1 keeps one landing per job). The batch job is keyed `land:<project>:<target>`, each member reserved by a live `land_batch_members` row released when its landing settles or the job ends, and the design states the race, restart, lease-loss, late-ready, `land approve`, `land_retry` and `land_ready` cases as checks.
 - `issue_read`, a read-only foreman tool (issue #131): it answers the title, body and comments of an issue or pull request of the project's own repository inside `<issue>` data delimiters, with the user's `gh` login. When the repository is not on GitHub, `gh` is missing or not logged in, or the number does not exist, it returns that reason; the foreman's report says so and asks the user for the text, and the foreman never searches the disk for it.
 - Documented editable role instructions, task skills, their import and snapshot rules, and the diff/reset commands (issues #119 and #117). Enabled the documentation content verifier.
 
