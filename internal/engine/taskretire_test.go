@@ -299,3 +299,36 @@ func TestRetireCancelledTaskRefused(t *testing.T) {
 		t.Errorf("retire a cancelled task: err = %v, want the refusal", err)
 	}
 }
+
+// TestRetireAcrossProjects: a call with project 0 may span projects, and
+// each plan closes under its own project — the done report and its
+// inbox row land in the project the plan belongs to, not the first
+// task's.
+func TestRetireAcrossProjects(t *testing.T) {
+	e := newEnv(t)
+	e.exec("UPDATE tasks SET state = 'needs_foreman' WHERE id = ?", e.task)
+	other := e.int(`INSERT INTO projects (repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
+		VALUES ('https://example.invalid/two.git', 'main', '{}', 'claude', 'sonnet', ?, ?) RETURNING id`, seedTS, seedTS)
+	otherPlan := e.int(`INSERT INTO plans (project_id, title, state, created_at, updated_at)
+		VALUES (?, 'the other plan', 'active', ?, ?) RETURNING id`, other, seedTS, seedTS)
+	otherTask := e.int(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, base_ref, caps, created_at, updated_at)
+		VALUES (?, 'the other task', 'the spec', 'go test ./...', 'implement', 'needs_foreman', 'main', '{}', ?, ?) RETURNING id`,
+		otherPlan, seedTS, seedTS)
+
+	res, err := e.eng.Retire(e.ctx, 0, []int64{e.task, otherTask}, "one sweep, two projects", "user")
+	if err != nil {
+		t.Fatalf("retire across projects: %v", err)
+	}
+	if len(res.Retired) != 2 || len(res.Plans) != 2 {
+		t.Fatalf("retire result = %+v, want both tasks and both plans", res)
+	}
+	for _, plan := range []struct{ id, project int64 }{{e.plan, e.project}, {otherPlan, other}} {
+		if got := e.str("SELECT state FROM plans WHERE id = ?", plan.id); got != planDone {
+			t.Errorf("plan %d state = %q, want done", plan.id, got)
+		}
+		if got := e.int(`SELECT project_id FROM events WHERE kind = ? AND json_extract(payload, '$.plan') = ?`,
+			evPlanDone, plan.id); got != plan.project {
+			t.Errorf("plan %d done report project = %d, want its own %d", plan.id, got, plan.project)
+		}
+	}
+}

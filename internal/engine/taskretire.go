@@ -96,7 +96,7 @@ func (t retireTask) label() string {
 func (e *Engine) retireTx(tx *sql.Tx, project int64, tasks []int64, reason, caller string, now time.Time) (RetireResult, error) {
 	seen := map[int64]bool{}
 	var retiring []retireTask
-	plans := map[int64]bool{}
+	planProject := map[int64]int64{}
 	var order []int64
 	for _, id := range tasks {
 		if seen[id] {
@@ -133,8 +133,8 @@ func (e *Engine) retireTx(tx *sql.Tx, project int64, tasks []int64, reason, call
 		}
 		seen[id] = true
 		retiring = append(retiring, t)
-		if !plans[t.plan] {
-			plans[t.plan] = true
+		if _, ok := planProject[t.plan]; !ok {
+			planProject[t.plan] = t.project
 			order = append(order, t.plan)
 		}
 	}
@@ -202,9 +202,11 @@ func (e *Engine) retireTx(tx *sql.Tx, project int64, tasks []int64, reason, call
 	// The plan closes by the usual rule: a retired task is settled, so
 	// what the close reads is the rest of the plan. A plan that is not
 	// active keeps its state; the result names each plan's state as it
-	// stands after the call.
+	// stands after the call. A plan closes under its own project, so a
+	// call that spans projects (project 0, the engine's own reach) still
+	// reports each plan right.
 	for _, plan := range order {
-		if _, err := e.finishPlanIfClosedTx(tx, retiring[0].project, plan, 0, 0, now); err != nil {
+		if _, err := e.finishPlanIfClosedTx(tx, planProject[plan], plan, 0, 0, now); err != nil {
 			return RetireResult{}, err
 		}
 		state := ""

@@ -55,11 +55,11 @@ Commands:
 	                foreman's for a turn or an attached chat (--socket).
 	status          Show the engine, its jobs by status, plans and what
 	                needs you (--line: one short line).
- 	task submit     Submit one task directly, without the foreman (a
- 	                debugging path).
- 	task retire <task-id>... --reason TEXT
- 	                Retire tasks that will not land: their jobs stop,
- 	                their branches stay, their plans close over them.
+	task submit     Submit one task directly, without the foreman (a
+	                debugging path).
+	task retire <task-id>... --reason TEXT
+	                Retire tasks that will not land: their jobs stop,
+	                their branches stay, their plans close over them.
 	project foreman Show or set a repo's foreman harness, model and effort
 	                (--repo defaults to this repo's origin).
 	project list    List the projects: repo, foreman, active plans,

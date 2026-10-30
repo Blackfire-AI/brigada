@@ -1252,7 +1252,7 @@ Every key that `brigada project set` and `project show` know, with each default 
 
 `brigada help` prints the command list. `brigada <command> --help` (also `-h` or `-help`) prints a command's usage, description and flags; `brigada help <command> [<subcommand>]` prints the same help. For the two-level commands `project`, `agent`, `plan` and `task`, `--help` or `help` lists the subcommands; use, for example, `brigada project foreman --help` for a subcommand's flags. Help exits 0. A usage error names the relevant help command on stderr.
 
-A command's flags go after its name and before its positional arguments (`diff`, `logs` and `land` also accept flags after their ids). Every executable command also takes `--state-dir DIR` and `--config PATH`, and most client commands take `--no-start` (fail instead of starting the engine); the synopses below leave these out. Exit codes: 0 ok, 1 error, 2 usage. Init's setup refusals exit 1. `brigada hold yield` and `brigada hold confirm` are no-ops that always exit 0; every other `hold` subcommand is an unknown command.
+A command's flags go after its name and before its positional arguments (`diff`, `logs`, `land` and `task retire` also accept flags after their ids). Every executable command also takes `--state-dir DIR` and `--config PATH`, and most client commands take `--no-start` (fail instead of starting the engine); the synopses below leave these out. Exit codes: 0 ok, 1 error, 2 usage. Init's setup refusals exit 1. `brigada hold yield` and `brigada hold confirm` are no-ops that always exit 0; every other `hold` subcommand is an unknown command.
 
 ### Starting
 

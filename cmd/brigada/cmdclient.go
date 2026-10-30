@@ -135,22 +135,34 @@ type taskRetirer interface {
 // <task-id>...` (§6.2): the user settles tasks that will not land —
 // their live jobs stop, their land holds drop, their branches stay
 // untouched, and they never land by any path — with the reason recorded
-// verbatim. Their plans close once nothing else holds them open.
+// verbatim. Their plans close once nothing else holds them open. Task
+// ids and flags may interleave, as `land`'s do.
 func runTaskRetire(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("task retire",
-		"brigada task retire --reason TEXT [--no-start] <task-id>...",
+		"brigada task retire [--reason TEXT] [--no-start] <task-id>...",
 		"Retire tasks that will not land; their branches stay and their plans close.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	reason := fs.String("reason", "", "why the tasks are retired, recorded verbatim with each")
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
-	if code, stop := common.parse(stdout, stderr, args); stop {
-		return code
+	// Task ids and flags may interleave; the flag package stops at the
+	// first positional, so parse again after each one.
+	var rest []string
+	remaining := args
+	for {
+		if code, stop := common.parse(stdout, stderr, remaining); stop {
+			return code
+		}
+		left := fs.Args()
+		if len(left) == 0 {
+			break
+		}
+		rest = append(rest, left[0])
+		remaining = left[1:]
 	}
 	if strings.TrimSpace(*reason) == "" {
 		return usagef(stderr, "task retire needs --reason TEXT")
 	}
-	rest := fs.Args()
 	if len(rest) == 0 {
 		return usagef(stderr, "usage: brigada task retire --reason TEXT <task-id>...")
 	}

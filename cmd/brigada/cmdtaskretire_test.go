@@ -76,3 +76,22 @@ func TestTaskRetireUsage(t *testing.T) {
 		})
 	}
 }
+
+// TestTaskRetireFlagsAfterIds: ids and flags interleave, as `land`'s do
+// — a reason after the ids is parsed, not lost to the flag package's
+// stop at the first positional. The trailing bad id is what proves it:
+// the parse reached it, so the failure names the id, not a missing
+// reason.
+func TestTaskRetireFlagsAfterIds(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runTaskRetire(context.Background(), []string{"7", "--reason", "superseded by task 274", "nine"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("exit %d, stderr %q, want 2", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "task id must be a positive integer") {
+		t.Errorf("stderr %q names the bad id, want the parse to have reached it", errb.String())
+	}
+	if strings.Contains(errb.String(), "needs --reason") {
+		t.Errorf("stderr %q says the reason is missing, want the reason after the ids parsed", errb.String())
+	}
+}
