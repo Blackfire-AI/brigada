@@ -19,7 +19,7 @@ var instructions string
 // InstructionsVersion is the foreman instructions' version (§4.1): the
 // versioned file shipped with brigada that every foreman prompt
 // prepends. Editing contract.md means bumping this.
-const InstructionsVersion = 24
+const InstructionsVersion = 25
 
 // Instructions returns the foreman instructions (§4.1): what the
 // foreman is, its data discipline, and the engine facts it acts on.

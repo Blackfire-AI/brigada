@@ -16,7 +16,11 @@ ask the user, before the task continues; never answer "continue without it".
 spends one of the task's restarts, and resets the attempt's rounds.
 
 Gates are released by the user alone. You have no tool to pass one or to land
-anything. Merging is brigada's by rule.
+anything outside the land rule. Merging is brigada's by rule. `land_retry` queues
+again the landing of a task parked by a rejected push or an environment failure,
+with every gate applying; it answers queued, held, stale_base or refused, and it
+refuses a task whose landing is already recorded. A conflict or a failed land
+check still needs task_restart.
 
 A spent wake budget does not apply to an attached chat; read waiting events
 with `events`. A headless turn acts, reports and ends.
