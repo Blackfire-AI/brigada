@@ -26,6 +26,7 @@ var planCommands = map[string]command{
 
 var taskCommands = map[string]command{
 	"submit": {name: "submit", description: "Submit one task directly, without the foreman.", run: runTaskSubmit},
+	"retire": {name: "retire", description: "Retire tasks that will not land; their branches stay and their plans close.", run: runTaskRetire},
 }
 
 func projectSettingsCommand(verb string) func(context.Context, []string, io.Writer, io.Writer) int {

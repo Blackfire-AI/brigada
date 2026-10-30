@@ -1641,14 +1641,16 @@ func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve, stop
 
 // landHoldTaskTx validates the task the land decision acts on (§6.3): a
 // task of project with a live land-gate hold. It returns the hold's
-// reason.
+// reason. A retired task is refused naming its retirement (§6.2): its
+// hold is gone and its landing will never happen, which is a different
+// word than the plain "not held" the gateless task reads.
 func landHoldTaskTx(tx *sql.Tx, project, taskID int64) (string, error) {
-	var reason string
+	var reason, state string
 	var proj int64
-	err := tx.QueryRow(`SELECT COALESCE(h.reason, ''), p.project_id
+	err := tx.QueryRow(`SELECT COALESCE(h.reason, ''), p.project_id, t.state
 		FROM tasks t JOIN plans p ON p.id = t.plan_id
 		LEFT JOIN land_holds h ON h.task_id = t.id AND h.state = 'held'
-		WHERE t.id = ?`, taskID).Scan(&reason, &proj)
+		WHERE t.id = ?`, taskID).Scan(&reason, &proj, &state)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && project != 0 && proj != project) {
 		return "", fmt.Errorf("no such task %d", taskID)
 	}
@@ -1657,6 +1659,16 @@ func landHoldTaskTx(tx *sql.Tx, project, taskID int64) (string, error) {
 	}
 	if err := activeProjectTx(tx, proj); err != nil {
 		return "", err
+	}
+	if state == taskRetired {
+		why, err := taskRetireReasonTx(tx, taskID)
+		if err != nil {
+			return "", err
+		}
+		if why == "" {
+			why = "settled aside"
+		}
+		return "", fmt.Errorf("task %d is retired: %s; a retired task never lands", taskID, why)
 	}
 	if reason == "" {
 		return "", fmt.Errorf("task %d is not held at the land gate", taskID)

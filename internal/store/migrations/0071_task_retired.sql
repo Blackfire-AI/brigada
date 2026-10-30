@@ -1,0 +1,6 @@
+-- 0071_task_retired: retiring a task (§6.2) — settling one that will not
+-- land, its branch left untouched and nothing ever landed — gives the
+-- tasks state CHECK its own word, `retired`, so a retired task reads
+-- apart from a cancelled one in the store, the history and the plan
+-- file. The edit migrate.go runs beside this file widens the CHECK in
+-- place, as 0058 and 0059 did for the plans table.

@@ -301,10 +301,10 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		}
 		return 0, fmt.Errorf("%q names no task of plan %d", ref, plan)
 	}
-	// liveDeps resolves a dependency list; a dependency that ended failed
-	// or cancelled will never be done and is refused. A ref naming no
-	// task of the plan may name a landed task of another plan (§6.1):
-	// already satisfied, so no edge waits on it.
+	// liveDeps resolves a dependency list; a dependency that ended
+	// failed, cancelled or retired will never be done and is refused. A
+	// ref naming no task of the plan may name a landed task of another
+	// plan (§6.1): already satisfied, so no edge waits on it.
 	liveDeps := func(owner int, refs []string) ([]int, error) {
 		var out []int
 		seen := map[int]bool{}
@@ -326,7 +326,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			if j == owner {
 				return nil, fmt.Errorf("%s depends on itself", nodes[owner].label())
 			}
-			if s := nodes[j].state; s == taskCancelled || s == taskFailed {
+			if s := nodes[j].state; s == taskCancelled || s == taskFailed || s == taskRetired {
 				return nil, fmt.Errorf("%s depends on %s, which is %s and will never be done: re-point it or drop the dependency", nodes[owner].label(), nodes[j].label(), s)
 			}
 			if !seen[j] {
@@ -348,6 +348,8 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			return AmendPlanResult{}, fmt.Errorf("cancel: %s is added by this same amendment", nodes[i].label())
 		case nodes[i].state == taskDone:
 			return AmendPlanResult{}, fmt.Errorf("cancel: %s is done", nodes[i].label())
+		case nodes[i].state == taskRetired:
+			return AmendPlanResult{}, fmt.Errorf("cancel: %s is retired: a retired task is settled, nothing cancels it", nodes[i].label())
 		case nodes[i].state == taskCancelled || nodes[i].cancelNow:
 			continue
 		}
@@ -572,17 +574,17 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	// amendment only by being cancelled too or — when pending, with no
 	// job yet — re-pointed off the cancelled task, which the dep
 	// resolution above already moved. A dependent that already ended
-	// cancelled or failed cannot continue work, so it never blocks.
-	// Every other state has a job, a branch or an approved result built
-	// on the cancelled task's branch, and the whole amendment is
-	// refused, each offender named with its state.
+	// cancelled, failed or retired cannot continue work, so it never
+	// blocks. Every other state has a job, a branch or an approved
+	// result built on the cancelled task's branch, and the whole
+	// amendment is refused, each offender named with its state.
 	for _, i := range cancelled {
 		var offenders []string
 		for d := range nodes {
 			if d == i || !slices.Contains(nodes[d].deps, i) {
 				continue
 			}
-			if nodes[d].state == taskCancelled || nodes[d].state == taskFailed {
+			if nodes[d].state == taskCancelled || nodes[d].state == taskFailed || nodes[d].state == taskRetired {
 				continue
 			}
 			offenders = append(offenders, fmt.Sprintf("%s (%s)", nodes[d].label(), nodes[d].state))
@@ -651,7 +653,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	res := AmendPlanResult{PlanID: plan, State: newState}
 	nowStr := fmtTime(now)
 	for _, i := range cancelled {
-		if err := e.cancelTaskJobsTx(tx, nodes[i].id, now); err != nil {
+		if err := e.cancelTaskJobsTx(tx, nodes[i].id, "task cancelled by plan_amend", now); err != nil {
 			return AmendPlanResult{}, err
 		}
 		if _, err := tx.Exec(`UPDATE tasks SET state = ?, skip_approved = ?, updated_at = ? WHERE id = ?`,
@@ -1011,9 +1013,10 @@ func loadAmendNodesTx(tx *sql.Tx, plan int64) ([]amendNode, error) {
 	return nodes, edges.Err()
 }
 
-// cancelTaskJobsTx stops every live job of a task, so a cancelled task
-// leaves no worker running or queued.
-func (e *Engine) cancelTaskJobsTx(tx *sql.Tx, task int64, now time.Time) error {
+// cancelTaskJobsTx stops every live job of a task, so a cancelled or
+// retired task leaves no worker running or queued. reason names who
+// asked, recorded on each job_cancelled event.
+func (e *Engine) cancelTaskJobsTx(tx *sql.Tx, task int64, reason string, now time.Time) error {
 	rows, err := tx.Query(`SELECT id FROM jobs WHERE task_id = ? ORDER BY id`, task)
 	if err != nil {
 		return fmt.Errorf("read the jobs of task %d: %w", task, err)
@@ -1040,7 +1043,7 @@ func (e *Engine) cancelTaskJobsTx(tx *sql.Tx, task int64, now time.Time) error {
 		if job == nil || isTerminal(job.Status) {
 			continue
 		}
-		if _, err := e.cancelTx(tx, job, "task cancelled by plan_amend", now); err != nil {
+		if _, err := e.cancelTx(tx, job, reason, now); err != nil {
 			return err
 		}
 	}
@@ -1128,19 +1131,21 @@ func (e *Engine) readyPlanTasksTx(tx *sql.Tx, project, plan int64, now time.Time
 
 // planLiveWorkTx reads, from a plan's nodes alone, whether live work
 // remains (§6.2, #133) and which task ids hold it — no writes, no events,
-// no wake. Live work is: a task not done, cancelled, failed or pending;
-// a done task whose land job is queued or running (§7.1: the plan closes
-// when the landing has an outcome, so a failed landing counts against
-// it); a done task with no landing record held at the land gate (its
-// landing waits on the user's release); and a done task with no landing
-// record the land rule would land — done, implement, approved (§7.1) —
-// with no rejected hold declining it: most often a dependency of its own
-// has not landed, so no land job exists. A hold the user rejected is
-// that decline (§6.3), not live work, and a hold on a landing already
-// recorded is the push phase's (§7.1), beside a waiting push — neither
-// holds a plan open. The plan-close rule (finishPlanIfClosedTx) and the
-// start-up reopen pass (ReopenStrandedPlans, #137) both read it here, so
-// a plan the one would keep open the other reopens.
+// no wake. Live work is: a task not done, cancelled, failed, retired or
+// pending; a done task whose land job is queued or running (§7.1: the
+// plan closes when the landing has an outcome, so a failed landing
+// counts against it); a done task with no landing record held at the
+// land gate (its landing waits on the user's release); and a done task
+// with no landing record the land rule would land — done, implement,
+// approved (§7.1) — with no rejected hold declining it: most often a
+// dependency of its own has not landed, so no land job exists. A hold
+// the user rejected is that decline (§6.3), not live work, and a hold
+// on a landing already recorded is the push phase's (§7.1), beside a
+// waiting push — neither holds a plan open. A retired task is settled
+// (§6.2): it never lands and never waits, so it is not live work
+// either. The plan-close rule (finishPlanIfClosedTx) and the start-up
+// reopen pass (ReopenStrandedPlans, #137) both read it here, so a plan
+// the one would keep open the other reopens.
 func planLiveWorkTx(tx *sql.Tx, nodes []amendNode) ([]int64, error) {
 	var live []int64
 	for _, n := range nodes {
@@ -1191,11 +1196,12 @@ func planLiveWorkTx(tx *sql.Tx, nodes []amendNode) ([]int64, error) {
 					}
 				}
 			}
-		case taskCancelled, taskFailed, taskPending:
+		case taskCancelled, taskFailed, taskPending, taskRetired:
 			// The close names these — the failed, the abandoned or
-			// approved skip, the never-run — and so does the pass not
-			// reopen over them: a pending task behind a failed one
-			// never kept a plan open (#137).
+			// approved skip, the never-run, the retired — and so does
+			// the pass not reopen over them: a pending task behind a
+			// failed one never kept a plan open (#137), and a retired
+			// one is settled for good (§6.2).
 		default:
 			live = append(live, n.id) // live work remains
 		}
@@ -1204,10 +1210,11 @@ func planLiveWorkTx(tx *sql.Tx, nodes []amendNode) ([]int64, error) {
 }
 
 // finishPlanIfClosedTx finishes an active plan with no live work left
-// (§6.2): every task is done, failed or cancelled, or pending behind one
-// that will never be done. Those permanently waiting tasks are the plan's
-// open end, and the plan_done event — the foreman's done report — names
-// them, with any failed task, so the user sees what never ran. A blocked
+// (§6.2): every task is done, failed, cancelled, retired or pending
+// behind one that will never be done. Those permanently waiting tasks
+// are the plan's open end, and the plan_done event — the foreman's done
+// report — names them, with any failed task and each retired one with
+// its reason, so the user sees what never ran and what was set aside. A blocked
 // plan never reaches that: done work that can never land (§6.2, a
 // cancelled or failed dependency under it) keeps the plan active, one
 // wake per blockage telling the foreman. So does a done task whose
@@ -1220,10 +1227,10 @@ func planLiveWorkTx(tx *sql.Tx, nodes []amendNode) ([]int64, error) {
 // rejected land hold (§6.3) — is not live work: it will never happen,
 // and the report names it declined. The plan also counts one
 // attempt on the "plan" class for the foreman's agent: a success when
-// every task ended done or was cancelled with the user's approval
-// (skip_approved), a failure when a task failed out, was cancelled
-// without that approval, or never ran. It reports whether it finished
-// the plan.
+// every task ended done, was cancelled with the user's approval
+// (skip_approved) or was retired, a failure when a task failed out,
+// was cancelled without that approval, or never ran. It reports whether
+// it finished the plan.
 func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64, now time.Time) (bool, error) {
 	var state string
 	if err := tx.QueryRow("SELECT state FROM plans WHERE id = ?", plan).Scan(&state); err != nil {
@@ -1250,7 +1257,7 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 	} else if len(live) > 0 {
 		return false, nil
 	}
-	var failed, waiting, cancelled []string
+	var failed, waiting, cancelled, retired []string
 	for _, n := range nodes {
 		switch n.state {
 		case taskDone:
@@ -1271,6 +1278,19 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 			}
 		case taskFailed:
 			failed = append(failed, n.label())
+		case taskRetired:
+			// A retirement is a deliberate settle (§6.2): the report
+			// names the task retired with the reason it was retired for,
+			// verbatim, and it counts neither as a failure nor as a
+			// success of the plan.
+			why, err := taskRetireReasonTx(tx, n.id)
+			if err != nil {
+				return false, err
+			}
+			if why == "" {
+				why = "retired"
+			}
+			retired = append(retired, fmt.Sprintf("%s (%s)", n.label(), why))
 		case taskPending:
 			why := make([]string, 0, len(nodes))
 			for _, j := range n.deps {
@@ -1323,7 +1343,7 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 		}
 	}
 	var report []string
-	if len(failed) == 0 && len(waiting) == 0 && len(gated) == 0 && len(cancelled) == 0 && len(declined) == 0 && len(landed) > 0 {
+	if len(failed) == 0 && len(waiting) == 0 && len(gated) == 0 && len(cancelled) == 0 && len(declined) == 0 && len(retired) == 0 && len(landed) > 0 {
 		report = append(report, "all tasks landed")
 	} else {
 		if len(landed) > 0 {
@@ -1340,6 +1360,9 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 		}
 		if len(cancelled) > 0 {
 			report = append(report, "cancelled: "+strings.Join(cancelled, ", ")+" (with the user's approval)")
+		}
+		if len(retired) > 0 {
+			report = append(report, "retired: "+strings.Join(retired, ", "))
 		}
 		if len(waiting) > 0 {
 			report = append(report, "never ran: "+strings.Join(waiting, "; "))

@@ -27,6 +27,7 @@ const (
 	taskNeedsUser    = "needs_user"
 	taskFailed       = "failed"
 	taskCancelled    = "cancelled"
+	taskRetired      = "retired"
 )
 
 // Plan states (§6.2) the engine sets: active from its creation, done

@@ -611,6 +611,18 @@ func (c *Client) RetryLanding(ctx context.Context, task int64, idemKey string) (
 	return LandRetryResult{TaskID: out.TaskID, Outcome: out.Outcome, JobID: out.JobID, Reason: out.Reason}, nil
 }
 
+// RetireTasks retires tasks that will not land (§6.2, §12.1): their live
+// jobs stop, their land holds drop, their branches stay untouched and
+// their plans close over them, each retirement recorded with the reason
+// verbatim. idemKey as in Answer.
+func (c *Client) RetireTasks(ctx context.Context, tasks []int64, reason, idemKey string) (engine.RetireResult, error) {
+	var out engine.RetireResult
+	if err := c.callKeyed(ctx, http.MethodPost, "/v1/tasks/retire", idemKey, taskRetireRequest{Tasks: tasks, Reason: reason}, &out); err != nil {
+		return engine.RetireResult{}, err
+	}
+	return out, nil
+}
+
 // CancelJob stops a live job (§12.1). The engine's answers — ok, already,
 // gone — come back as engine answers, not errors.
 func (c *Client) CancelJob(ctx context.Context, jobID int64) (engine.Answer, error) {

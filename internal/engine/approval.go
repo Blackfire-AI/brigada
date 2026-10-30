@@ -616,20 +616,21 @@ func (e *Engine) cancelPlanTx(tx *sql.Tx, proj, plan int64, eventKind string, no
 	if _, err := tx.Exec(`UPDATE plans SET state = ?, updated_at = ? WHERE id = ?`, planCancelled, fmtTime(now), plan); err != nil {
 		return fmt.Errorf("cancel plan %d: %w", plan, err)
 	}
-	// A plan an amendment held may have tasks already running.
+	// A plan an amendment held may have tasks already running. A retired
+	// task is settled: its state stays, as a done one's does.
 	nodes, err := loadAmendNodesTx(tx, plan)
 	if err != nil {
 		return err
 	}
 	for _, n := range nodes {
-		if n.state != taskDone && n.state != taskCancelled {
-			if err := e.cancelTaskJobsTx(tx, n.id, now); err != nil {
+		if n.state != taskDone && n.state != taskCancelled && n.state != taskRetired {
+			if err := e.cancelTaskJobsTx(tx, n.id, "plan rejected", now); err != nil {
 				return err
 			}
 		}
 	}
-	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE plan_id = ? AND state NOT IN (?, ?)`,
-		taskCancelled, fmtTime(now), plan, taskDone, taskCancelled); err != nil {
+	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE plan_id = ? AND state NOT IN (?, ?, ?)`,
+		taskCancelled, fmtTime(now), plan, taskDone, taskCancelled, taskRetired); err != nil {
 		return fmt.Errorf("cancel the tasks of plan %d: %w", plan, err)
 	}
 	if err := recordPlanOutcomeTx(tx, proj, false, now); err != nil {

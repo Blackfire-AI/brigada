@@ -326,6 +326,26 @@ var tools = []Tool{
 		Call: callTaskCancel,
 	},
 	{
+		Name:        "task_retire",
+		Description: "Retire tasks that will not land — done work that landed elsewhere or is superseded, a task parked past repair, one held at the land gate, failed, or never run — recording the reason verbatim. A retired task's live jobs stop, its land hold drops, its branch is left untouched, and it never lands by any path; its plan closes once nothing else holds it open, the done report naming it retired with the reason. Use task_cancel to drop a task that is not done from a live plan by amendment; use task_retire when the task is finished or parked and its result is set aside for good — a done task cannot be cancelled, and a landed, cancelled or already retired one cannot be retired. A task with dependents blocks the retirement unless each is retired in this same call or is already cancelled or retired; every other state blocks, failed included, and the refusal names each with its state.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tasks": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": []string{"string", "integer"}},
+					"description": "the tasks to retire, by name or id, as status shows them",
+				},
+				"reason": map[string]any{
+					"type":        "string",
+					"description": "why the tasks are retired, verbatim, e.g. \"superseded by task 274\"; recorded with each retirement and in the plan's done report",
+				},
+			},
+			"required": []string{"tasks", "reason"},
+		},
+		Call: callTaskRetire,
+	},
+	{
 		Name:        "land_retry",
 		Description: "Re-run the land rule for a task parked at needs_foreman by a failed landing that is not about its content: a rejected push (the target moved) or an environment failure (a fetch, credentials, a broken remote). Every gate still applies, land_ready included, and no restart is spent. The result is one of: the land job queued; held at the land gate, which the user's `brigada land approve` releases; refused on a stale base, parked again for task_restart; or refused with the reason (a landing already recorded, a task not parked by such a failure, a finished plan). A conflict, a failed land check, a moved approved head or a stale base needs task_restart instead.",
 		InputSchema: map[string]any{

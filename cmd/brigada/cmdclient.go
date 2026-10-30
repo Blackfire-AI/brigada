@@ -120,9 +120,89 @@ func withLogo(stdout io.Writer, line string) string {
 }
 
 // runTask is the task command's dispatch: `task submit`, the debugging
-// path that submits a task without the foreman (§12.1).
+// path that submits a task without the foreman (§12.1), and `task
+// retire`, the user's settle of tasks that will not land (§6.2).
 func runTask(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	return dispatch(ctx, args, stdout, stderr, "task", "usage: brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title TITLE] [--harness HARNESS]", "submit", taskCommands)
+	return dispatch(ctx, args, stdout, stderr, "task", "usage: brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title TITLE] [--harness HARNESS] | brigada task retire --reason TEXT <task-id>...", "submit or retire", taskCommands)
+}
+
+// taskRetirer is what task retire asks of the API client; tests stub it.
+type taskRetirer interface {
+	RetireTasks(ctx context.Context, tasks []int64, reason, idemKey string) (engine.RetireResult, error)
+}
+
+// runTaskRetire is `brigada task retire [--reason TEXT] [--no-start]
+// <task-id>...` (§6.2): the user settles tasks that will not land —
+// their live jobs stop, their land holds drop, their branches stay
+// untouched, and they never land by any path — with the reason recorded
+// verbatim. Their plans close once nothing else holds them open. Task
+// ids and flags may interleave, as `land`'s do.
+func runTaskRetire(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("task retire",
+		"brigada task retire [--reason TEXT] [--no-start] <task-id>...",
+		"Retire tasks that will not land; their branches stay and their plans close.")
+	stderr = commandStderr(stderr, fs.Name())
+	common := addCommon(fs)
+	reason := fs.String("reason", "", "why the tasks are retired, recorded verbatim with each")
+	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
+	// Task ids and flags may interleave; the flag package stops at the
+	// first positional, so parse again after each one.
+	var rest []string
+	remaining := args
+	for {
+		if code, stop := common.parse(stdout, stderr, remaining); stop {
+			return code
+		}
+		left := fs.Args()
+		if len(left) == 0 {
+			break
+		}
+		rest = append(rest, left[0])
+		remaining = left[1:]
+	}
+	if strings.TrimSpace(*reason) == "" {
+		return usagef(stderr, "task retire needs --reason TEXT")
+	}
+	if len(rest) == 0 {
+		return usagef(stderr, "usage: brigada task retire --reason TEXT <task-id>...")
+	}
+	seen := map[int64]bool{}
+	var ids []int64
+	for _, s := range rest {
+		id, ok := parseID(stderr, "task id", s)
+		if !ok {
+			return 2
+		}
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	rt, code := resolveRuntime(common, stderr)
+	if code != 0 {
+		return code
+	}
+	client, code := connect(ctx, rt, "client", *noStart, stderr)
+	if code != 0 {
+		return code
+	}
+	return printTaskRetire(ctx, client, ids, *reason, stdout, stderr)
+}
+
+// printTaskRetire retires through the client and says what it did: each
+// retired task, and the state each touched plan reached.
+func printTaskRetire(ctx context.Context, client taskRetirer, ids []int64, reason string, stdout, stderr io.Writer) int {
+	res, err := client.RetireTasks(ctx, ids, reason, "")
+	if err != nil {
+		return fail(stderr, err)
+	}
+	for _, id := range res.Retired {
+		fmt.Fprintf(stdout, "task %d retired: %s\n", id, reason)
+	}
+	for _, p := range res.Plans {
+		fmt.Fprintf(stdout, "plan %d is %s\n", p.PlanID, p.State)
+	}
+	return 0
 }
 
 // runTaskSubmit is the debug submit (§12.1): one task created whole —

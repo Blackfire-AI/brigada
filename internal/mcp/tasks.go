@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
@@ -42,6 +43,85 @@ func callTaskCancel(ctx context.Context, c *api.Client, args json.RawMessage) (s
 		}
 	}
 	return "", fmt.Errorf("task %d is not in this project's current plans", a.Task)
+}
+
+// taskRetireArgs is the task_retire tool's arguments (§6.2, §12.2): the
+// tasks to retire — raw values, each an id or a plan name — and the
+// required reason. The raw shape keeps the idempotency key canonical
+// whatever mix of names and ids a call carries.
+type taskRetireArgs struct {
+	Tasks  []json.RawMessage `json:"tasks"`
+	Reason string            `json:"reason"`
+}
+
+// callTaskRetire runs the task_retire tool (§6.2, §12.2): tasks of this
+// project's plans that will not land are retired through
+// /v1/tasks/retire with the reason verbatim, rendered as text naming
+// each retired task and the state its plan reached. Names resolve
+// against the project's plans as status shows them, and must name one
+// task alone. The idempotency key is minted as in answer.
+func callTaskRetire(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
+	var a taskRetireArgs
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &a); err != nil {
+			return "", fmt.Errorf("arguments: %w", err)
+		}
+	}
+	if len(a.Tasks) == 0 {
+		return "", fmt.Errorf("tasks is required: the tasks to retire, by name or id")
+	}
+	if strings.TrimSpace(a.Reason) == "" {
+		return "", fmt.Errorf("reason is required: say why the tasks are retired")
+	}
+	status, err := c.Status(ctx)
+	if err != nil {
+		return "", err
+	}
+	byName := map[string][]int64{}
+	for _, p := range status.Plans {
+		for _, t := range p.Tasks {
+			if t.Name != "" {
+				byName[t.Name] = append(byName[t.Name], t.ID)
+			}
+		}
+	}
+	var ids []int64
+	for _, raw := range a.Tasks {
+		var id int64
+		if err := json.Unmarshal(raw, &id); err == nil {
+			ids = append(ids, id)
+			continue
+		}
+		var name string
+		if err := json.Unmarshal(raw, &name); err != nil {
+			return "", fmt.Errorf("each task is an id or a name, got %s", raw)
+		}
+		named, ok := byName[name]
+		switch {
+		case !ok || len(named) == 0:
+			return "", fmt.Errorf("task name %q is not in this project's current plans", name)
+		case len(named) > 1:
+			return "", fmt.Errorf("task name %q is used by tasks %v: name them by id", name, named)
+		}
+		ids = append(ids, named[0])
+	}
+	res, err := c.RetireTasks(ctx, ids, a.Reason, idemKey("task_retire", taskRetireArgs{Tasks: a.Tasks, Reason: a.Reason}))
+	if err != nil {
+		return "", err
+	}
+	parts := make([]string, 0, len(res.Retired))
+	for _, id := range res.Retired {
+		parts = append(parts, fmt.Sprintf("task %d", id))
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "retired %s: %s", strings.Join(parts, ", "), a.Reason)
+	for _, p := range res.Plans {
+		fmt.Fprintf(&b, "\nplan %d is %s", p.PlanID, p.State)
+		if p.State == "done" {
+			b.WriteString("; its done report follows in your events")
+		}
+	}
+	return b.String(), nil
 }
 
 // callAskUser records the foreman's question for the user: an attached

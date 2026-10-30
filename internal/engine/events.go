@@ -61,6 +61,7 @@ const (
 	evTaskEffortBumped       = "task_effort_bumped"        // rule escalation on the same tier; EffortFrom is the old effort, EffortTo the new, Reason the trigger (§8)
 	evTaskRestarted          = "task_restarted"            // a foreman or automatic restart queued a fresh work attempt (§3, §5.6)
 	evTaskFailed             = "task_failed"               // the run failed or said nothing usable; the foreman decides (§3)
+	evTaskRetired            = "task_retired"              // a task that will not land was retired (§6.2); Reason carries the caller's words verbatim, Caller who asked — foreman or user
 	evTaskLoop               = "task_loop"                 // the worker repeats itself: the same check failure across fix rounds, or the same tool call in a window; the foreman decides (§5.6)
 	evReviewChanges          = "review_changes"            // the reviewer wants changes; a fix round answers them (§3, §7)
 	evReviewNoVerdict        = "review_no_verdict"         // the review ended without a usable verdict; the retry is spent or impossible (§7)
@@ -139,17 +140,20 @@ type eventPayload struct {
 	Report     string `json:"report,omitempty"`   // a foreman turn's final message, its report to the user, bounded to about 4 KB (boundReport) (§3, §10)
 	Text       string `json:"text,omitempty"`     // a user message's words (§4.2 item 3)
 	Source     string `json:"source,omitempty"`   // the client token label a user message came from (§12.2)
-	Harness    string `json:"harness,omitempty"`
-	Model      string `json:"model,omitempty"`
-	Effort     string `json:"effort,omitempty"`  // a foreman setting's reasoning-effort level
-	Account    string `json:"account,omitempty"` // the quota account a cooling names (§8)
-	Until      string `json:"until,omitempty"`   // a deadline, RFC3339: a foreman limit's reset, a probe's next attempt; absent when unknown (§4.4)
-	Job        int64  `json:"job,omitempty"`     // a job the event names besides its own job_id column
-	Hold       int64  `json:"hold,omitempty"`    // the attach hold the event names (§4.2)
-	Cause      string `json:"cause,omitempty"`   // a land cause key: the error class and the shared resource every task it fails parks under (issue #116)
-	Count      int64  `json:"count,omitempty"`   // how many of something the event counts (§4.2, §4.3)
-	Path       string `json:"path,omitempty"`    // a snapshot's file (§6.4)
-	Bytes      int64  `json:"bytes,omitempty"`   // a snapshot's size (§6.4)
+	// Caller names who asked for a retirement (§6.2): the foreman or
+	// the user, recorded beside the reason on each task_retired event.
+	Caller  string `json:"caller,omitempty"`
+	Harness string `json:"harness,omitempty"`
+	Model   string `json:"model,omitempty"`
+	Effort  string `json:"effort,omitempty"`  // a foreman setting's reasoning-effort level
+	Account string `json:"account,omitempty"` // the quota account a cooling names (§8)
+	Until   string `json:"until,omitempty"`   // a deadline, RFC3339: a foreman limit's reset, a probe's next attempt; absent when unknown (§4.4)
+	Job     int64  `json:"job,omitempty"`     // a job the event names besides its own job_id column
+	Hold    int64  `json:"hold,omitempty"`    // the attach hold the event names (§4.2)
+	Cause   string `json:"cause,omitempty"`   // a land cause key: the error class and the shared resource every task it fails parks under (issue #116)
+	Count   int64  `json:"count,omitempty"`   // how many of something the event counts (§4.2, §4.3)
+	Path    string `json:"path,omitempty"`    // a snapshot's file (§6.4)
+	Bytes   int64  `json:"bytes,omitempty"`   // a snapshot's size (§6.4)
 	// The agent pick's why (§8): the agent, its score, how the rank
 	// chose it (pickSampled), its cost weight and draw, every ranked
 	// candidate's weight and draw in rank order, and the better-ranked

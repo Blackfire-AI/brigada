@@ -107,6 +107,58 @@ func (s *Server) handleTaskLandRetry(w http.ResponseWriter, r *http.Request, id 
 	})
 }
 
+// handleTaskRetire is the retire behind the API (§6.2, §12.1): tasks
+// named by id, retired whole with the reason verbatim — the foreman's
+// task_retire tool and the user's `brigada task retire` both land here.
+// The caller recorded with each retirement is the role that asked: the
+// foreman for a foreman token, the user for a client or admin one.
+// Scoped and idempotent like the answer.
+func (s *Server) handleTaskRetire(w http.ResponseWriter, r *http.Request, id identity) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var req taskRetireRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if len(req.Tasks) == 0 {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "tasks is required: the ids of the tasks to retire")
+		return
+	}
+	var project int64
+	for _, taskID := range req.Tasks {
+		p, ok := s.taskProject(w, r, id, taskID)
+		if !ok {
+			return
+		}
+		if project == 0 {
+			project = p
+		} else if project != p {
+			writeError(w, http.StatusBadRequest, codeBadRequest, "the tasks belong to more than one project; retire each project's tasks in its own call")
+			return
+		}
+	}
+	caller := "user"
+	if id.role == roleForeman {
+		caller = "foreman"
+	}
+	res, err := s.eng.Retire(r.Context(), project, req.Tasks, req.Reason, caller)
+	if err != nil {
+		// The engine's refusals — a landed, cancelled or retired task, a
+		// dependent that blocks — are the caller's mistakes.
+		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// taskRetireRequest is the retire body: the task ids and the reason,
+// recorded verbatim.
+type taskRetireRequest struct {
+	Tasks  []int64 `json:"tasks"`
+	Reason string  `json:"reason"`
+}
+
 // taskProject resolves the project a task belongs to and checks the
 // caller's reach (§12.1): the task's id names the project — no repo URL
 // to send — so a foreman token is simply walled into its own, while a
