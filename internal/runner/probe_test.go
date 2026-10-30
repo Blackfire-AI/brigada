@@ -110,7 +110,7 @@ func (e *testEnv) agentProbeDelay() int64 {
 // breakAgent marks the fake agent broken for reason with a probe due at
 // probeAt and the given delay.
 func (e *testEnv) breakAgent(reason, probeAt string, delay int64) error {
-	return e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	return e.update(func(tx *sql.Tx) error {
 		_, err := tx.Exec(`UPDATE agents SET health = 'broken', health_reason = ?, probe_at = ?, probe_delay = ? WHERE adapter = 'fake'`,
 			reason, probeAt, delay)
 		return err

@@ -22,7 +22,7 @@ func (e *testEnv) setTaskSetup(task int64, spec engine.SetupSpec) {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	err = e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	err = e.update(func(tx *sql.Tx) error {
 		_, err := tx.Exec("UPDATE tasks SET setup = ? WHERE id = ?", string(b), task)
 		return err
 	})
