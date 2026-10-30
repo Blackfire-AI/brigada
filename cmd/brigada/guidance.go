@@ -37,14 +37,17 @@ func localProjectFile() (string, engine.ProjectConfig, bool) {
 }
 
 // skillDelta compares the skills on disk with the imported ones: the names
-// added to skills_dir and removed from it since the import. A changed skill
-// is the engine's comparison of digests, not this one. ok is false when
-// the directory cannot be read, so nothing is called removed by mistake.
+// added to the skills directory and removed from it since the import —
+// the named skills_dir, or the default when the file names none and it
+// exists. A changed skill is the engine's comparison of digests, not
+// this one. ok is false when the directory cannot be read, so nothing is
+// called removed by mistake.
 func skillDelta(st api.Status, project int64, cfg engine.ProjectConfig, root string) (added, removed []string, err error) {
-	if cfg.SkillsDir == "" {
+	dir := effectiveSkillsDir(root, cfg)
+	if dir == "" {
 		return nil, nil, nil
 	}
-	disk, err := readSkills(root, cfg.SkillsDir)
+	disk, err := readSkills(root, dir)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -89,7 +92,7 @@ func guidanceChangeLines(st api.Status, project int64, cfg engine.ProjectConfig,
 	}
 	added, removed, err := skillDelta(st, project, cfg, root)
 	if err != nil {
-		return append(lines, fmt.Sprintf("skills_dir %s: %v", cfg.SkillsDir, err))
+		return append(lines, fmt.Sprintf("skills_dir %s: %v", effectiveSkillsDir(root, cfg), err))
 	}
 	for _, n := range added {
 		lines = append(lines, fmt.Sprintf("skill %s: added since the last import; brigada project import applies it", n))

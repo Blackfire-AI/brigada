@@ -256,6 +256,17 @@ func TestProjectImportDefaultSkillsDir(t *testing.T) {
 		t.Fatalf("show = %q, want the imported skill bugfix", stdout)
 	}
 
+	// A skill added under the default directory after the import is
+	// reported by status as added; nothing stored changes until the
+	// next import.
+	writeTree(t, ".", map[string]string{
+		".brigada/skills/extra/SKILL.md": "---\nname: extra\ndescription: a later skill\n---\nbody\n",
+	})
+	if code, stdout, _ := do("", "status"); code != 0 ||
+		!strings.Contains(stdout, "skill extra: added since the last import; brigada project import applies it") {
+		t.Fatalf("status = %d %q, want the added skill reported", code, stdout)
+	}
+
 	// A named skills_dir is the only directory read: its skill replaces
 	// the default directory's, which is not read again.
 	writeTree(t, ".", map[string]string{
