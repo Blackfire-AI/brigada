@@ -41,7 +41,7 @@ tasks:
     base: "retire_v2"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-307"
     rounds: 0
   - id: 308
@@ -65,7 +65,7 @@ tasks:
     tier: light
     effort: medium
     skills: ["bugfix"]
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 311
