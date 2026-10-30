@@ -135,6 +135,8 @@ func TestIsRelease(t *testing.T) {
 		{"", false},
 		{"v0.0.0-20261023000000-abcdefabcdef", false},
 		{"v1.2.3-pre.0.20261023000000-abcdefabcdef", false},
+		{"v1.0.0-rc.4.0.20261030215708-70d666dc4d29+dirty", false},
+		{"v0.0.0-20261023000000-abcdefabcdef+dirty", false},
 		{"dev", false},
 		{"v1", false},
 		{"v1.2", false},
