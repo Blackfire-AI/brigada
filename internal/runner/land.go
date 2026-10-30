@@ -109,11 +109,33 @@ func (r *jobRun) runLandJob(ctx context.Context) {
 	r.runLandSquashPhase(runCtx)
 }
 
-// runLandSquashPhase is the landing itself (§7.1): one attempt, and —
-// when the target moved under the push — one retry from a fresh fetch.
-// A conflict or a failed check is the attempt's outcome, not the
-// runner's failure: the record carries the files or the check log,
-// nothing is pushed, and the task parks for the foreman.
+// landPushAttempts bounds a landing's push attempts (§7.1, #133): a
+// push the target's movement keeps rejecting is retried from a fresh
+// fetch and squash, the check rerun on every attempt, up to this many
+// attempts in all — so a landing that keeps losing the race to another
+// landing's push fails with the rejection instead of parking after one
+// retry.
+const landPushAttempts = 5
+
+// landRetryPause is the pause before a rejected push's next attempt
+// (§7.1): short and growing — 2s, 4s, 8s, capped there — so concurrent
+// landings stop colliding while a landing that keeps losing the race
+// still ends in seconds, not minutes.
+func landRetryPause(attempt int) time.Duration {
+	pause := time.Duration(1<<uint(attempt)) * time.Second
+	if pause > 8*time.Second {
+		pause = 8 * time.Second
+	}
+	return pause
+}
+
+// runLandSquashPhase is the landing itself (§7.1): one attempt, then —
+// for as long as the target's movement rejects the push, up to
+// landPushAttempts attempts in all — another from a fresh fetch, a
+// short growing pause between. A conflict or a failed check on any
+// attempt is that attempt's outcome, not the runner's failure: the
+// record carries the files or the check log, nothing is pushed, and
+// the task parks for the foreman.
 func (r *jobRun) runLandSquashPhase(ctx context.Context) {
 	grant := r.grant
 	switch {
@@ -148,25 +170,38 @@ func (r *jobRun) runLandSquashPhase(ctx context.Context) {
 		}
 		return
 	}
-	out, err := r.landAttempt(ctx, dir)
-	if err != nil {
-		r.finishLandErr(ctx, err)
-		return
-	}
-	if out.pushRejected {
-		// The target — or the waiting ref, under the ask and never
-		// gates — moved under the push (§7.1): fetch and retry the
-		// squash once, then a second rejection is a conflict-like
-		// failure.
-		r.cfg.Log.WarnContext(ctx, "the landing push was rejected; retrying once from a fresh fetch",
-			"job_id", grant.JobID, "err", out.pushErr)
+	var out *landOutcome
+	for attempt := 1; ; attempt++ {
+		var err error
 		out, err = r.landAttempt(ctx, dir)
 		if err != nil {
 			r.finishLandErr(ctx, err)
 			return
 		}
-		if out.pushRejected {
-			r.finishWithError(ctx, "the push was rejected again after one retry (the target moved): "+out.pushErr)
+		if !out.pushRejected {
+			break
+		}
+		// The target — or the waiting ref, under the ask and never
+		// gates — moved under the push again (§7.1): after a short,
+		// growing pause the landing tries once more from a fresh
+		// fetch, squash and check. A conflict or a failed check ends
+		// the next attempt as it ends the first; only a push still
+		// rejected comes back here, and once the bound is spent the
+		// job fails with the rejection — its words still the
+		// target's movement, the count beside them — so the engine
+		// sorts it as it always did.
+		if attempt == landPushAttempts {
+			r.finishWithError(ctx, fmt.Sprintf("the push was rejected after %d attempts (the target moved): %s",
+				attempt, out.pushErr))
+			return
+		}
+		r.cfg.Log.WarnContext(ctx, "the landing push was rejected; retrying from a fresh fetch",
+			"job_id", grant.JobID, "attempt", attempt, "err", out.pushErr)
+		select {
+		case <-time.After(landRetryPause(attempt)):
+		case <-ctx.Done():
+			r.gone(ctx, "waiting to retry the landing push")
+			r.finishWithError(ctx, "the run was no longer ours while the landing waited to retry its push")
 			return
 		}
 	}
@@ -192,8 +227,8 @@ func (r *jobRun) finishLandErr(ctx context.Context, err error) {
 // landOutcome is one squash attempt's result (§7.1): the landing
 // record's fields — conflict files and check log included, for the two
 // outcomes that park the task — plus the push rejection the caller
-// retries once. An error return is an infrastructure failure the runner
-// could not turn into any landing at all.
+// retries from a fresh fetch. An error return is an infrastructure
+// failure the runner could not turn into any landing at all.
 type landOutcome struct {
 	target       string
 	commit       string
@@ -415,7 +450,7 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 		// runs after_land. The commit waits on the remote's waiting ref,
 		// fast-forward only, so it outlives this clone and any runner can
 		// push it; a rejection means another landing moved the ref first,
-		// and the caller retries once from a fresh fetch and squash.
+		// and the caller retries from a fresh fetch and squash.
 		if err := r.landPushWaiting(ctx, dir, grant.LandTarget); err != nil {
 			r.discardLandAttempt(ctx, dir)
 			o.pushRejected = true
@@ -440,8 +475,8 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 		o.afterErr = r.runAfterLand(ctx, dir)
 	default:
 		if out, err := r.landGit(ctx, dir, "push", "--quiet", "origin", "HEAD:refs/heads/"+grant.LandTarget); err != nil {
-			// The target moved (§7.1): the attempt is discarded and the
-			// caller retries once, from a fresh fetch and squash.
+			// The target moved (§7.1): the attempt is discarded and
+			// the caller retries from a fresh fetch and squash.
 			r.discardLandAttempt(ctx, dir)
 			o.pushRejected = true
 			o.pushErr = trimCmdError(out, err).Error()

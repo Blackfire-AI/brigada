@@ -337,7 +337,7 @@ func TestLandEnvClass(t *testing.T) {
 		{"runner_lost", "runner lost 3 times", "runner"},
 		{"", "the task's diff no longer applies onto main: the merge conflicted", ""},
 		{"", "brigada/task-1 is at abc, not the approved head def: the branch moved after its review; nothing landed", ""},
-		{"", "the push was rejected again after one retry (the target moved): non-fast-forward", ""},
+		{"", "the push was rejected after 5 attempts (the target moved): non-fast-forward", ""},
 		{"", "read the fetched head of brigada/task-1: exit 128", ""},
 		{"", "detach the landing clone: exit 1", ""},
 		{"", "the land job is incomplete: target \"main\", branch \"\", base \"main\"", ""},
