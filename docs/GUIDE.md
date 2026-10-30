@@ -588,7 +588,7 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 | `plan_files` | `on` or `off` | `on` | `off` stops the plan-file mirror: no plan file is written or pushed ([The plan file](#the-plan-file)). |
 | `instructions_file` | repo-relative path | none | Alias for `instructions.worker`; setting both is refused. |
 | `instructions` | map of role names to repo-relative files | none | Roles: `foreman`, `plan_review`, `worker`, `reviewer`. An empty path uses `.brigada/instructions/<role>.md`; each text is at most 8192 bytes. |
-| `skills_dir` | repo-relative directory | `.brigada/skills` | Skills to read at import (see [Skills](#skills)). |
+| `skills_dir` | repo-relative directory | `.brigada/skills` | Skills to read at import; a file that names no `skills_dir` reads `.brigada/skills` when that directory exists (see [Skills](#skills)). |
 
 An example:
 
@@ -674,7 +674,7 @@ For example, put a preference for smaller tasks in the foreman text and a requir
 
 ### Skills
 
-Skills supply task-specific procedures alongside the role instructions. Init supplies `bugfix`, `cli-flag`, `config-setting`, `dependency`, `docs-change`, `refactor`, `schema-migration` and `surface-parity`. Write your own at `.brigada/skills/<name>/SKILL.md`, or under the configured `skills_dir`:
+Skills supply task-specific procedures alongside the role instructions. Init supplies `bugfix`, `cli-flag`, `config-setting`, `dependency`, `docs-change`, `refactor`, `schema-migration` and `surface-parity`. Write your own at `.brigada/skills/<name>/SKILL.md`, or under the configured `skills_dir`; import reads `.brigada/skills` when the file names no `skills_dir` and that directory exists:
 
 ```markdown
 ---

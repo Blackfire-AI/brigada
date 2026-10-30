@@ -222,3 +222,51 @@ func runWithStdin(t *testing.T, ctx context.Context, state, stdin string, args [
 	code := run(ctx, full, &stdout, &stderr)
 	return code, stdout.String(), stderr.String()
 }
+
+// TestProjectImportDefaultSkillsDir: a project.yaml that names no
+// skills_dir reads the default .brigada/skills at import when it exists
+// (as `init --take-default <skill>` writes it), sends no skills when it
+// does not, and a named skills_dir is still the only directory read.
+func TestProjectImportDefaultSkillsDir(t *testing.T) {
+	ctx, state := startSettingsEngine(t)
+	write := importRepo(t)
+	do := func(stdin string, args ...string) (int, string, string) {
+		return runWithStdin(t, ctx, state, stdin, args)
+	}
+
+	// No skills_dir key and no default directory: no skills are sent.
+	write(projectFile(""))
+	if code, stdout, stderr := do("", "project", "import"); code != 0 || !strings.Contains(stdout, "imported .brigada/project.yaml") {
+		t.Fatalf("import = %d %q (stderr %q)", code, stdout, stderr)
+	}
+	if _, stdout, _ := do("", "project", "show"); !strings.Contains(stdout, "skills: none imported") {
+		t.Fatalf("show = %q, want no skills imported", stdout)
+	}
+
+	// The default directory, with the file still naming no skills_dir,
+	// imports its skill.
+	writeTree(t, ".", map[string]string{
+		".brigada/skills/bugfix/SKILL.md": "---\nname: bugfix\ndescription: fix a bug\n---\nbody\n",
+	})
+	if code, _, stderr := do("", "project", "import"); code != 0 {
+		t.Fatalf("import = %d %q", code, stderr)
+	}
+	_, stdout, _ := do("", "project", "show")
+	if !strings.Contains(stdout, "skill bugfix: fix a bug, sha256 ") {
+		t.Fatalf("show = %q, want the imported skill bugfix", stdout)
+	}
+
+	// A named skills_dir is the only directory read: its skill replaces
+	// the default directory's, which is not read again.
+	writeTree(t, ".", map[string]string{
+		"skills/other/SKILL.md": "---\nname: other\ndescription: an own skill\n---\nbody\n",
+	})
+	write(projectFile("skills_dir: skills"))
+	if code, _, stderr := do("", "project", "import"); code != 0 {
+		t.Fatalf("import = %d %q", code, stderr)
+	}
+	_, stdout, _ = do("", "project", "show")
+	if !strings.Contains(stdout, "skill other: an own skill, sha256 ") || strings.Contains(stdout, "skill bugfix: fix a bug") {
+		t.Fatalf("show = %q, want only the named directory's skill", stdout)
+	}
+}

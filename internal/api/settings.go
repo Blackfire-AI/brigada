@@ -173,7 +173,9 @@ type importRequest struct {
 	// an empty text is empty by choice.
 	Roles map[string]string `json:"roles,omitempty"`
 	// Skills is every skill the client parsed under skills_dir (§5.10);
-	// nil when the file names no skills_dir, [] for a directory with none.
+	// nil when no skills directory is in play — the file names none and
+	// the default .brigada/skills does not exist — and [] for a directory
+	// in play that holds none.
 	Skills *[]engine.Skill `json:"skills,omitempty"`
 }
 
