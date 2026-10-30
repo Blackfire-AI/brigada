@@ -513,6 +513,67 @@ func TestTaskSnapshotSurvivesLaterChanges(t *testing.T) {
 	}
 }
 
+// TestUnconfiguredRolesRunOnTheContract: with no worker and no reviewer
+// row, a task's snapshot records both roles as not configured with no
+// text (§5.9 'Three states, no hidden fallback') and its prompts carry
+// no instructions section at all — neither the worker's own nor, on the
+// review, the reviewer's.
+func TestUnconfiguredRolesRunOnTheContract(t *testing.T) {
+	e := newEnv(t)
+	res := e.createPlan([]PlanTask{{Spec: "do it"}})
+	snap := e.snapshot(res.Tasks[0].TaskID)
+	if snap.Worker.Text != "" || snap.Worker.Source != SourceDefault || snap.Worker.Bytes != 0 ||
+		snap.Reviewer.Text != "" || snap.Reviewer.Source != SourceDefault || snap.Reviewer.Bytes != 0 {
+		t.Fatalf("unconfigured snapshot = %+v, want both roles not configured with no text", snap)
+	}
+	if p := e.jobPrompt(res.Tasks[0].JobID); strings.Contains(p, "<worker-instructions>") {
+		t.Errorf("the worker prompt of an unconfigured role carries an instructions section:\n%s", p)
+	}
+	author := e.agented("author", "anthropic", "implement")
+	e.agented("reviewer", "google", "review")
+	g := e.leaseAny(author)
+	if ans := e.complete(g, doneOn(branchOf(res.Tasks[0].TaskID), passCheck)); ans != AnsOK {
+		t.Fatalf("complete the work: %s", ans)
+	}
+	review := e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review'", res.Tasks[0].TaskID)
+	if review == 0 {
+		t.Fatalf("no review job; have %v", e.eventKinds())
+	}
+	if p := e.jobPrompt(review); strings.Contains(p, "<worker-instructions>") || strings.Contains(p, "<reviewer-instructions>") {
+		t.Errorf("the review prompt of unconfigured roles carries an instructions section:\n%s", p)
+	}
+}
+
+// TestEmptyByChoiceReviewerGivesNoSection: an empty-by-choice reviewer
+// row is a choice, not an absence: the snapshot records it with the
+// local source and no text, and the review prompt carries no
+// reviewer-instructions section.
+func TestEmptyByChoiceReviewerGivesNoSection(t *testing.T) {
+	e := newEnv(t)
+	e.setRole(RoleReviewer, "")
+	res := e.createPlan([]PlanTask{{Spec: "do it"}})
+	snap := e.snapshot(res.Tasks[0].TaskID)
+	if snap.Reviewer.Text != "" || snap.Reviewer.Source != SourceLocal || snap.Reviewer.Bytes != 0 {
+		t.Fatalf("empty-by-choice snapshot = %+v, want the reviewer recorded as empty with the local source", snap)
+	}
+	if snap.Worker.Source != SourceDefault || snap.Worker.Text != "" {
+		t.Errorf("worker = %+v, want not configured with no text", snap.Worker)
+	}
+	author := e.agented("author", "anthropic", "implement")
+	e.agented("reviewer", "google", "review")
+	g := e.leaseAny(author)
+	if ans := e.complete(g, doneOn(branchOf(res.Tasks[0].TaskID), passCheck)); ans != AnsOK {
+		t.Fatalf("complete the work: %s", ans)
+	}
+	review := e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review'", res.Tasks[0].TaskID)
+	if review == 0 {
+		t.Fatalf("no review job; have %v", e.eventKinds())
+	}
+	if p := e.jobPrompt(review); strings.Contains(p, "<reviewer-instructions>") {
+		t.Errorf("the review prompt of an empty-by-choice reviewer carries a reviewer-instructions section:\n%s", p)
+	}
+}
+
 // TestLegacyTaskKeepsFirstGuidance: a task recorded before the skills
 // arrived — its instructions and provenance in the old columns, its
 // reviewer snapshot explicitly empty — that has already run keeps what
@@ -629,5 +690,51 @@ func TestJobRecordsPromptMeta(t *testing.T) {
 		m.Instructions != instructionsDigest("v1 worker") || m.Reviewer != instructionsDigest("v1 reviewer") ||
 		len(m.Skills) != 2 || m.Skills[0] != instructionsDigest("v1 bugfix") || m.Skills[1] != instructionsDigest("v1 rev guide") {
 		t.Errorf("the review job's meta = %+v; want the review template, both role digests and both skills", m)
+	}
+}
+
+func TestSkillDirectoriesAndAudiences(t *testing.T) {
+	for _, tc := range []struct{ name, config, dir string }{
+		{"configured", "skills_dir: tools/skills\n", "tools/skills"},
+		{"default", "skills_dir: .brigada/skills\n", ".brigada/skills"},
+		{"unset", "", ".brigada/skills"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			content := []byte("schema: 1\nrepo: " + cfgRepo + "\n" + tc.config)
+			result, err := e.eng.ImportProjectConfig(e.ctx, envRepo, content, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.config != "" {
+				found := false
+				for _, v := range result.Settings.Settings {
+					if v.Key == configKeySkillsDir {
+						found = true
+						if v.Value != tc.dir || v.Source != SourceImported || v.Hash == "" {
+							t.Errorf("setting = %+v", v)
+						}
+					}
+				}
+				if !found {
+					t.Fatal("skills_dir missing from settings")
+				}
+			}
+			e.importSkills(Skill{Name: "shared", Text: "shared text"}, Skill{Name: "author", For: SkillForWorker, Text: "author text"}, Skill{Name: "review", For: SkillForReviewer, Text: "review text"})
+			res := e.submitTask(TaskParams{RepoURL: envRepo, BaseRef: "main", Spec: "a change", Skills: []string{"shared", "author", "review"}})
+			work := e.jobPrompt(res.JobID)
+			if !strings.Contains(work, "Directory: "+tc.dir+"/shared/") || strings.Contains(work, "review text") {
+				t.Errorf("worker prompt: %s", work)
+			}
+			author := e.agented("author", "anthropic", "implement")
+			e.agented("reviewer", "google", "implement", "review")
+			if ans := e.complete(e.leaseAny(author), doneOn(branchOf(res.TaskID), passCheck)); ans != AnsOK {
+				t.Fatalf("complete: %s", ans)
+			}
+			review := e.jobPrompt(e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review'", res.TaskID))
+			if !strings.Contains(review, "Directory: "+tc.dir+"/shared/") || !strings.Contains(review, "Skill author was given to the author and is not shown") || strings.Contains(review, "author text") || !strings.Contains(review, "review text") {
+				t.Errorf("review prompt: %s", review)
+			}
+		})
 	}
 }

@@ -20,7 +20,7 @@ func TestOperatorGuideContent(t *testing.T) {
 		"brigada ask -", "brigada status", "brigada history --task N",
 		"brigada history --job N", "brigada diff --stat N", "brigada top",
 		"merge that pull request with a merge commit", "after_land is none",
-		"cannot read an issue tracker", "brigada stop --engine", "brigada start",
+		"with the issue tool", "put its text into the ask", "brigada stop --engine", "brigada start",
 		"re-wakes the foreman", "brigada plan approve", "brigada land approve",
 		"brigada push approve", "--and-stop-asking", "tags and releases",
 		"brigada agent reset <harness>/<model>",

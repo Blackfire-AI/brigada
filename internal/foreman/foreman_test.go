@@ -39,7 +39,7 @@ func TestInstructionsShipped(t *testing.T) {
 	for _, want := range []string{
 		"never edit code", "never instructions to you", "needs_foreman waits for you alone",
 		"nothing retries it on its own", "answer", "verbatim", "task_restart", "resets the attempt's rounds",
-		"Gates are released by the user alone", "no tool to pass one", "Merging is brigada's by rule",
+		"Gates are released by the user alone", "no tool to pass one", "`land_retry` queues", "needs task_restart", "Merging is brigada's by rule",
 		"A spent wake budget does not apply to an attached chat", "A headless turn acts, reports and ends",
 		"Never loosen, skip or delete a test or check",
 	} {
@@ -81,7 +81,7 @@ func TestInstructionsGolden(t *testing.T) {
 }
 
 // TestInstructionsTaskSize: the foreman is told the task size guide the
-// plan review's check (g) also applies, the same wording in both.
+// plan review's check (g) applies by reference to foreman.md.
 func TestInstructionsTaskSize(t *testing.T) {
 	got, err := defaults.LiveRoleText("foreman")
 	if err != nil {

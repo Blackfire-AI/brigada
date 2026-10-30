@@ -64,9 +64,11 @@ Within schema 1, new keys are added as optional keys. A file that worked before 
 - `answer`: `task` and `text` (both required).
 - `task_restart`: `task` (required) and `note`.
 - `task_cancel`: `task` (required).
+- `land_retry` (experimental): `task` (required).
 - `ask_user`: `text` (required).
 - `status`: `instructions` and `all`, both booleans.
 - `history`: `task` and `limit`.
+- `issue_read` (experimental): `number` (required) and `comments`, a boolean; it reads the project's own repository alone, never one the call names.
 - `events` (experimental): `wait_seconds`.
 - `capacity`: no arguments.
 - `stats`: no arguments.

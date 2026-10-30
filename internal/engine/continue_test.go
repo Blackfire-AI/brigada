@@ -5,20 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Blackfire-AI/brigada/internal/defaults"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
-
-// liveWorker is the default worker text the fixture's unconfigured role
-// resolves: what a created task's prompts carry as their instructions.
-func liveWorker(t *testing.T) string {
-	t.Helper()
-	live, err := defaults.LiveRoleText(RoleWorker)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return live
-}
 
 // continuePlan creates build -> ship where ship continues build: both of
 // the named class so a done finishes each outright, no review needed.
@@ -82,7 +70,7 @@ func TestContinueResumesDepAuthorSession(t *testing.T) {
 		t.Errorf("ship's work job required agent = %d, want the dep author's %d", agent, e.agentOf(author))
 	}
 	if got, want := e.str("SELECT prompt FROM jobs WHERE id = ?", job),
-		prompt.ComposeContinuePrompt("ship it", "", prompt.WithInstructions(liveWorker(t))); got != want {
+		prompt.ComposeContinuePrompt("ship it", ""); got != want {
 		t.Errorf("ship's prompt = %q\nwant the composed\n%q", got, want)
 	} else if !strings.Contains(got, "A new task follows in this session") {
 		t.Errorf("ship's prompt does not say a new task follows in the session:\n%s", got)
@@ -316,7 +304,7 @@ func TestAmendAddedTaskContinues(t *testing.T) {
 		t.Errorf("the added task's work job mode = %q, want session", mode)
 	}
 	if got, want := e.str("SELECT prompt FROM jobs WHERE id = ?", job),
-		prompt.ComposeContinuePrompt("ship it", "", prompt.WithInstructions(liveWorker(t))); got != want {
+		prompt.ComposeContinuePrompt("ship it", ""); got != want {
 		t.Errorf("prompt = %q\nwant the composed\n%q", got, want)
 	}
 }

@@ -1,6 +1,6 @@
 schema: 1
 repo: "github.com/Blackfire-AI/brigada"
-default_check: "go test ./..."
+default_check: 'test -z "$(gofmt -l .)" && go run ./internal/tools/guard && go vet ./... && go test ./...'
 worker_tools: "Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*)"
 land_target: "brigada/landed"
 after_land: ".brigada/after-land.sh"

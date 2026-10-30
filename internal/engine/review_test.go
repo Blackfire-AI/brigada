@@ -6,8 +6,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-
-	"github.com/Blackfire-AI/brigada/internal/defaults"
 )
 
 const reviewRepo = "https://example.invalid/brigada.git"
@@ -251,10 +249,11 @@ func TestReviewBranchUsesCurrentRoleInstructions(t *testing.T) {
 	}
 }
 
-// TestReviewBranchUsesDefaultReviewerText: a project with no reviewer
-// row reviews with the shipped default reviewer text, the text a task
-// resolving now would record.
-func TestReviewBranchUsesDefaultReviewerText(t *testing.T) {
+// TestReviewBranchWithoutRoleRows: a standalone review of a project
+// with no worker or reviewer row runs on the contract alone (§5.9
+// 'Three states, no hidden fallback'): neither prompt section, and the
+// meta records the digests of the empty texts.
+func TestReviewBranchWithoutRoleRows(t *testing.T) {
 	e := newEnv(t)
 	author := e.agented("author", "anthropic", "implement")
 	e.agented("reviewer", "openai", "review")
@@ -263,18 +262,14 @@ func TestReviewBranchUsesDefaultReviewerText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	live, err := defaults.LiveRoleText(RoleReviewer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p := e.jobPrompt(res.JobID); !strings.Contains(p, "<reviewer-instructions>") {
-		t.Errorf("prompt has no reviewer section for the default text: %s", p)
+	if p := e.jobPrompt(res.JobID); strings.Contains(p, "<worker-instructions>") || strings.Contains(p, "<reviewer-instructions>") {
+		t.Errorf("prompt of a project with no role rows carries an instructions section:\n%s", p)
 	}
 	var meta promptMeta
 	if err := json.Unmarshal([]byte(e.str("SELECT prompt_meta FROM jobs WHERE id = ?", res.JobID)), &meta); err != nil {
 		t.Fatal(err)
 	}
-	if meta.Reviewer != instructionsDigest(live) {
-		t.Errorf("reviewer digest = %q, want the shipped default's", meta.Reviewer)
+	if meta.Instructions != instructionsDigest("") || meta.Reviewer != instructionsDigest("") {
+		t.Errorf("prompt metadata = %+v, want the digests of the empty texts", meta)
 	}
 }

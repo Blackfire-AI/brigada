@@ -44,9 +44,11 @@ func TestClientBridge(t *testing.T) {
 	if got := strings.Join(names, ","); got != "ask_foreman,status,history" {
 		t.Fatalf("client tools = %s, want ask_foreman,status,history", got)
 	}
-	a = s.call(2, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{}})
-	if a.Error == nil || a.Error.Code != codeInvalidParams {
-		t.Errorf("plan_create on the client bridge = %+v, want an unknown tool", a.Error)
+	for _, name := range []string{"plan_create", "land_retry"} {
+		a = s.call(2, "tools/call", map[string]any{"name": name, "arguments": map[string]any{}})
+		if a.Error == nil || a.Error.Code != codeInvalidParams {
+			t.Errorf("%s on the client bridge = %+v, want an unknown tool", name, a.Error)
+		}
 	}
 	a = s.call(3, "tools/call", map[string]any{"name": "ask_foreman", "arguments": map[string]any{"text": "amend §5.4"}})
 	if text, isErr := toolText(t, a); isErr || !strings.Contains(text, "waking up") {

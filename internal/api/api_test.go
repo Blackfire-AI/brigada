@@ -138,7 +138,7 @@ func newEnvTokens(t *testing.T, tokens string) *env {
 	if err := os.WriteFile(tokenFile, []byte(tokens), 0o600); err != nil {
 		t.Fatalf("write token file: %v", err)
 	}
-	e.eng = engine.New(st, engine.Config{Now: e.clock.Now, PlanReview: &planReviewOff})
+	e.eng = engine.New(st, engine.Config{Now: e.clock.Now, PlanReview: &planReviewOff, IssueFetch: issueFetchStub})
 	api, err := New(ctx, st, e.eng, nil, tokenFile)
 	if err != nil {
 		t.Fatalf("build api server: %v", err)

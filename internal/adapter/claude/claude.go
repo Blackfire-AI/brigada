@@ -50,17 +50,22 @@ type Adapter struct {
 // accepted without a prompt, which headless runs cannot answer anyway.
 const workerPermissionMode = "acceptEdits"
 
-// foremanToolScope is the foreman's tool scope (§4): brigada's MCP tools
-// — the bridge's whole offer, in the mcp__<server>__<tool> spelling the
-// CLI names them by — plus the read-only file tools. The deny side
-// names the shell and every editing tool the CLI carries, so no
-// permission mode can let one through: the foreman never edits code.
+// foremanToolScope is the foreman's tool scope (§4): brigada's MCP
+// tools — the bridge's whole offer, in the mcp__<server>__<tool>
+// spelling the CLI names them by — alone. The read-only file tools
+// carry no allow rule: their confinement to the session's one allowed
+// root, the reading checkout, is the read-scope hook in the session's
+// settings (foremanSettingsJSON), which refuses a Read, Grep or Glob
+// outside the root whatever any allow rule says, and binds subagents
+// too. The deny side names the shell, every editing tool, the notebook
+// reader and the web tools, so no permission mode and no allow rule the
+// user's own settings carry can let one through: the foreman never
+// edits code and reads no wider than the checkout.
 func foremanToolScope() (allowed, disallowed []string) {
-	allowed = []string{"Read", "Grep", "Glob"}
 	for _, name := range mcp.ToolNames() {
 		allowed = append(allowed, "mcp__"+mcp.ServerName+"__"+name)
 	}
-	return allowed, []string{"Bash", "Edit", "NotebookEdit", "Write"}
+	return allowed, []string{"Bash", "Edit", "NotebookEdit", "NotebookRead", "Write", "WebFetch", "WebSearch"}
 }
 
 // reviewToolScope is a reviewer's tool scope: the read-only file tools and
@@ -177,9 +182,16 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		// bridge is the turn's own, and the CLI offers no other server
 		// beside it. The foreman's tool scope is brigada's too (§4), not
 		// the agent config's — it decides through the bridge and reads
-		// the repo, and never edits code.
+		// the repo, and never edits code. The session's settings carry
+		// the read-scope hook (§4.1), which confines the file tools to
+		// workdir, the reading checkout the turn runs in.
 		args = append(args, "--mcp-config", job.MCPConfig)
 		allowed, disallowed = foremanToolScope()
+		settings, err := foremanSettingsJSON(workdir, "")
+		if err != nil {
+			return nil, fmt.Errorf("claude: %w", err)
+		}
+		args = append(args, "--settings", settings)
 	} else if allowed == nil {
 		// A code worker with no explicit scope gets the default (§5.2):
 		// the Go toolchain, so it can build and test as it goes.
@@ -269,24 +281,19 @@ func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSe
 		args = append(args, "--effort", job.Effort)
 	}
 	args = append(args, "--mcp-config", job.MCPConfig)
-	if job.StatusLine != "" {
-		// The CLI's status bar runs the command on a timer as well as on
-		// the session's own events, so it stays current while the chat
-		// is idle and the workers are not. The settings ride on the flag
-		// for this session alone; the user's own settings files are
-		// never touched.
-		settings, err := json.Marshal(map[string]any{
-			"statusLine": map[string]any{
-				"type":            "command",
-				"command":         job.StatusLine,
-				"refreshInterval": statusLineRefreshSeconds,
-			},
-		})
-		if err != nil {
-			return nil, fmt.Errorf("encode the status line settings: %w", err)
-		}
-		args = append(args, "--settings", string(settings))
+	// The session's settings carry the read-scope hook (§4.1): the same
+	// confinement a headless turn runs under — the file tools read
+	// workdir, the reading checkout, and are refused everywhere else —
+	// binding every agent in the chat, subagents included, and holding
+	// against any allow rule the user's own settings load, so the chat
+	// reads no wider than a headless turn does. The status bar rides
+	// the same settings, beside the hook, for this session alone; the
+	// user's own settings files are never touched.
+	settings, err := foremanSettingsJSON(workdir, job.StatusLine)
+	if err != nil {
+		return nil, fmt.Errorf("claude: %w", err)
 	}
+	args = append(args, "--settings", settings)
 	allowed, disallowed := foremanToolScope()
 	args = append(args, append([]string{"--allowedTools"}, allowed...)...)
 	args = append(args, append([]string{"--disallowedTools"}, disallowed...)...)

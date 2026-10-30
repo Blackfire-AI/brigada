@@ -249,8 +249,11 @@ func TestAfterLandFailureReportedNeverUndone(t *testing.T) {
 }
 
 // TestPlanDoneReportNamesLandings: a plan whose tasks all finish closes
-// with a done report naming what landed and what waits at a gate — a
-// dependency that landed, and a dependent held at the land gate.
+// with a done report naming what landed and what waits at a gate. A
+// dependent held at the land gate keeps the plan open first (#133) —
+// its landing is still to come — and the close that follows the
+// dependent's release names the dependency landed and the dependent
+// waiting at the push gate.
 func TestPlanDoneReportNamesLandings(t *testing.T) {
 	e := newEnv(t)
 	e.set(map[string]string{SettingApprovalTiers: "heavy"})
@@ -272,10 +275,32 @@ func TestPlanDoneReportNamesLandings(t *testing.T) {
 		t.Fatalf("complete the dependency's land: %s", ans)
 	}
 
-	// The dependent runs to done and is held at the land gate (heavy).
+	// The dependent runs to done and is held at the land gate (heavy):
+	// the plan stays open on the hold, no report yet (#133).
 	e.runTaskToDone(child, author, reviewer)
 	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ? AND state = 'held'", child); n != 1 {
 		t.Fatalf("land holds for the child = %d, want 1", n)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", e.plan); got != "active" {
+		t.Fatalf("plan state while the child holds = %q, want active", got)
+	}
+	if _, ok := e.eventPayloadOf(evPlanDone); ok {
+		t.Fatal("the plan closed done over a task held at the land gate")
+	}
+
+	// The release lands the dependent, which waits at the push gate:
+	// the plan closes naming the dependency landed and the dependent
+	// waiting there.
+	e.set(map[string]string{SettingGatePush: GateAsk})
+	if _, err := e.eng.LandApprove(e.ctx, e.project, child, false); err != nil {
+		t.Fatalf("release the child's hold: %v", err)
+	}
+	g = e.leaseGit(author)
+	if g == nil || g.TaskID != child {
+		t.Fatalf("the child's land job was not leased: %+v", g)
+	}
+	if ans := e.complete(g, Completion{Result: `{"target_branch":"main","commit":"def456","check_passed":true,"pushed":"waiting"}`}); ans != AnsOK {
+		t.Fatalf("complete the child's land: %s", ans)
 	}
 
 	p, ok := e.eventPayloadOf(evPlanDone)
@@ -285,7 +310,7 @@ func TestPlanDoneReportNamesLandings(t *testing.T) {
 	if !strings.Contains(p.Reason, "landed:") || !strings.Contains(p.Reason, "abc123") {
 		t.Errorf("plan_done report = %q, want it to name what landed", p.Reason)
 	}
-	if !strings.Contains(p.Reason, "waits at a gate:") || !strings.Contains(p.Reason, "heavy") {
+	if !strings.Contains(p.Reason, "waits at a gate:") || !strings.Contains(p.Reason, "waits to push") {
 		t.Errorf("plan_done report = %q, want it to name what waits at a gate", p.Reason)
 	}
 }

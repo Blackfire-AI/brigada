@@ -95,7 +95,7 @@ func TestCoordinatorBridgeOffer(t *testing.T) {
 	if got := strings.Join(CoordinatorToolNames(), ","); got != strings.Join(names, ",") {
 		t.Errorf("CoordinatorToolNames() = %s, want the offer %s", got, strings.Join(names, ","))
 	}
-	for i, name := range []string{"plan_create", "plan_amend", "task_restart", "task_cancel", "answer", "decision_note", "hold_acquire", "hold_yield", "events", "capacity", "ask_user"} {
+	for i, name := range []string{"plan_create", "plan_amend", "task_restart", "task_cancel", "land_retry", "answer", "decision_note", "hold_acquire", "hold_yield", "events", "capacity", "ask_user"} {
 		a = s.call(10+i, "tools/call", map[string]any{"name": name, "arguments": map[string]any{}})
 		if a.Error == nil || a.Error.Code != codeInvalidParams || !strings.Contains(a.Error.Message, "unknown tool") {
 			t.Errorf("%s on the coordinator bridge = %+v, want an unknown tool", name, a.Error)

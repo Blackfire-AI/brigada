@@ -19,6 +19,8 @@ CI runs these; run them before you push:
     CGO_ENABLED=1 go test -race -count=1 ./...
     (cd internal/tools/licenses && go test -count=1 .)
 
+The project's `default_check` runs CI's build-job steps before the tests (gofmt, guard and vet), then `go test`; a test keeps the two in step, while shellcheck, race, licences and macOS stay CI-only.
+
 `guard` is the repository's own scanner for private addresses and similar leaks.
 
 `THIRD_PARTY_NOTICES.md` comes from the nested module in `internal/tools/licenses` (its own `go.mod`), which keeps go-licenses out of the main `go.mod` and makes the notices reproducible. The generator runs go-licenses once per platform the release workflow builds and unions the module sets, so the file is identical on every host. Do not fold it into the main module. Locally, `TestThirdPartyNoticesFresh` skips when the generator cannot run; CI sets `CI=true` and fails instead. To regenerate after a dependency change:
@@ -77,7 +79,7 @@ Never commit secrets, tokens, private hostnames or private IP addresses. `guard`
 
 ## Files brigada manages
 
-`brigada init` writes `.brigada/project.yaml`; do not edit it by hand.
+`brigada init` writes `.brigada/project.yaml`. Change `default_check` by editing that key and running `brigada project import`; the other keys are init's.
 
 
 The foreman's editable project instructions live in `.brigada/instructions/foreman.md`; import changes with `brigada project import`.

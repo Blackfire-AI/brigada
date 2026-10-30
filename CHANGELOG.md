@@ -5,12 +5,26 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The plan-closing rule counts a land-gate hold as a landing still to come (issue #133): a done task held at the land gate keeps its plan open until the user releases the hold and the landing settles, by its land job or by its trailer on the branch, instead of the plan closing under "waits at a gate". A hold on the push of a landing already recorded is a waiting push: the plan may close over it, named under "waits to push", and every path that settles a landing or a hold — the land job's outcomes, a hold release or rejection, the trailer detection — re-evaluates the close. A landing the user rejects (`brigada land reject`) closes a plan the hold kept open, the done report naming it under "landing declined".
+
 ### Fixed
 
+- The sweep and a heartbeat ride out a busy store (issue #135): both run their one maintenance transaction under the store's bounded busy retry, on a context of their own within their existing deadline, so a write lock held past the busy timeout — whatever held it, an intermittent busy's source being unpinnable from a CI log — no longer fails a lease-keeping heartbeat or a sweep. A retried attempt starts clean, so only the committed attempt's report, answer and expiry return, a sweep tick is recorded only after its transaction commits — an attempt that rolls back after detecting a suspension no longer consumes the gap, and the retry still writes `engine_suspended` — and the engine's write transactions serialize through that commit bookkeeping, so concurrent sweeps behind one suspension detect it once and shift its deadlines once. The retention prune and the sweep a job read runs ride out a busy store the same way, each its own retry unit: a prune refused busy retries alone, never re-running the sweep's committed maintenance pass, and its report counts only the committed attempt's removed blobs plus the stale upload temps. The retry is bounded: a store busy past its attempts or deadline still fails the call with the busy error, and the idle sweep and the runner's heartbeat try again on their next tick.
+- A plan with a task parked at `needs_foreman` or `needs_user`, or held at the land gate, stays open instead of closing done (issue #133): the foreman can still cancel, restart or replace the task, and a landing whose push lost the race to another landing retries from a fresh rebase, up to a bound, instead of parking after one retry.
+- The project's land check runs gofmt, the guard tool and go vet before the tests, as CI does (issue #132): `default_check` in `.brigada/project.yaml` runs gofmt, `go run ./internal/tools/guard` and `go vet ./...` ahead of `go test ./...`, and a test keeps the check in step with CI's pre-test steps (shellcheck aside).
+- The foreman's file tools read only its checkout and its project's state (issue #131): the settings brigada writes for a headless turn and for attach confine `Read`, `Grep` and `Glob` to the reading checkout, subagents included, and no allow rule in the user's own settings lifts the refusal.
 - `scripts/land-ready.sh` waits for CI on the remote staging head, holds when no run appears within the grace period, and detects conflicting or unresolved PR mergeability (issue #128).
 
 ### Added
 
+- Documented batch gate attribution and records (issue #134): stable checked-head evidence, conservative suspect lists, per-member hold decisions, the importable `land_batch_max` setting, complete runner outcomes, history and reservation-aware task readers.
+
+- Documented the land batch run (issue #134): per-member squash and stacked checks, isolated content failures with dependent landings left waiting, one publication with bounded retries, per-landing push approvals, and recovery of every member after a lost runner.
+
+- `land_retry`, a foreman tool (issue #133): it queues the landing again for a task parked by a landing that failed before a landing was recorded, outside its content — a rejected push or an environment failure, with the outcomes `queued`, `held`, `stale_base` or `refused` — through the same gates; a task whose landing is already recorded (pushed or waiting) is refused in favour of `task_restart`, and so is a conflict or a failed landed check.
+- `issue_read`, a read-only foreman tool (issue #131): it answers the title, body and comments of an issue or pull request of the project's own repository inside `<issue>` data delimiters, with the user's `gh` login. When the repository is not on GitHub, `gh` is missing or not logged in, or the number does not exist, it returns that reason; the foreman's report says so and asks the user for the text, and the foreman never searches the disk for it.
 - Documented editable role instructions, task skills, their import and snapshot rules, and the diff/reset commands (issues #119 and #117). Enabled the documentation content verifier.
 
 - Embedded default role instructions and task-shape skills for future prompt configuration, each skill a numbered procedure, with a versioned archive (`internal/defaults/versions/<ver>/…`) holding every shipped version's texts for exact three-way diffs, tested equal to the live embed.

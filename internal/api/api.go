@@ -70,6 +70,10 @@ func (s *Server) Handler() http.Handler {
 	// it; the foreman runs no git (product §5 rule 1).
 	mux.HandleFunc("/v1/landed", s.authed([]string{roleRunner, roleClient, roleAdmin}, s.handleLanded))
 	mux.HandleFunc("/v1/history", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleHistory))
+	// The foreman's issue read (§12.1 issues, §12.2): GET alone, the
+	// foreman role alone — the repository comes from the token's own
+	// project, never from the call.
+	mux.HandleFunc("/v1/issues/{number}", s.authed([]string{roleForeman}, s.handleIssueGet))
 	mux.HandleFunc("/v1/artifacts/{id}", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleArtifactGet))
 	mux.HandleFunc("/v1/jobs", s.authed([]string{roleAdmin}, s.idempotent(s.handleSubmit)))
 	mux.HandleFunc("/v1/tasks", s.authed([]string{roleAdmin}, s.idempotent(s.handleTaskSubmit)))
@@ -85,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 	// chat's hold token, scoped to its project, needs nothing more.
 	mux.HandleFunc("/v1/tasks/{id}/answer", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskAnswer)))
 	mux.HandleFunc("/v1/tasks/{id}/restart", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskRestart)))
+	mux.HandleFunc("/v1/tasks/{id}/land-retry", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskLandRetry)))
 	mux.HandleFunc("/v1/plans", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handlePlanCreate)))
 	mux.HandleFunc("/v1/plans/{id}/amend", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handlePlanAmend)))
 	mux.HandleFunc("/v1/plans/{id}/accept", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handlePlanAccept)))

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,10 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
+
+// baseNoteRE matches the note the runner appends to a task job's prompt
+// (issue #129): the base ref and the commit the worktree was built on.
+var baseNoteRE = regexp.MustCompile(`^\n+Base note: your worktree was built on "[^"]+" at commit [0-9a-f]{40}\.$`)
 
 // setTaskExtra records extra repositories on the task, as the engine does at
 // the task's creation (§5.8).
@@ -239,7 +244,10 @@ printf '%s\n' "$BRIGADA_FAKE_READ_DIRS" > "$BRIGADA_TEST_MARKERS/worker-readdirs
 	defer p.stop(t)
 	e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
 
-	if got := strings.Join(markerLines(t, markers, "worker-prompt"), "\n"); got != strings.TrimSpace(composed) {
+	// The runner appends the base note (issue #129) and nothing else.
+	got := strings.Join(markerLines(t, markers, "worker-prompt"), "\n")
+	rest, ok := strings.CutPrefix(got, strings.TrimSpace(composed))
+	if !ok || !baseNoteRE.MatchString(rest) {
 		t.Errorf("the prompt without extras changed:\n%s", got)
 	}
 	if got := strings.Join(markerLines(t, markers, "worker-readdirs"), ""); got != "" {

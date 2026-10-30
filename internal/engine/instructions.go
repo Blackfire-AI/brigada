@@ -187,15 +187,20 @@ func statusGuidanceTx(tx *sql.Tx, project int64, withText bool) ([]StatusRoleIns
 			if err != nil {
 				return nil, nil, err
 			}
-			s := StatusRoleInstructions{ProjectID: p.id, RepoURL: RedactRepoURL(p.repo), Role: role, State: ri.State, Source: ri.Source, Bytes: ri.Bytes, Digest: ri.Digest}
-			if ri.Source == SourceDefault || ri.Source == SourceGenerated {
-				// A generated row names the defaults version it was
-				// seeded from; a role with no row runs this binary's.
+			s := StatusRoleInstructions{ProjectID: p.id, RepoURL: RedactRepoURL(p.repo), Role: role, State: ri.State}
+			// A role that is not configured runs nothing (§5.9 'Three
+			// states, no hidden fallback'): its state is all it shows,
+			// with no size or digest of empty text, no provenance and no
+			// edited flag. The row's Source stays default for the readers
+			// of the text.
+			if ri.State != RoleStateNotConfigured {
+				s.Source, s.Bytes, s.Digest = ri.Source, ri.Bytes, ri.Digest
+			}
+			if ri.Source == SourceGenerated {
+				// A seeded row names the defaults version it was recorded
+				// with, never the version this binary ships.
 				s.GeneratedFrom = ri.Version
-				if ri.Source == SourceDefault {
-					s.GeneratedFrom = defaults.Version
-				}
-				baseline, err := defaults.ArchiveRoleText(s.GeneratedFrom, role)
+				baseline, err := defaults.ArchiveRoleText(ri.Version, role)
 				if err == nil {
 					edited := instructionsDigest(ri.Text) != instructionsDigest(baseline)
 					s.Edited = &edited

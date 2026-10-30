@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
+	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
 func callStats(ctx context.Context, c *api.Client, _ json.RawMessage) (string, error) {
@@ -110,4 +111,47 @@ func callTaskRestart(ctx context.Context, c *api.Client, args json.RawMessage) (
 		return "", err
 	}
 	return fmt.Sprintf("task %d restarted: work job %d %s", a.Task, res.JobID, res.Answer), nil
+}
+
+// landRetryArgs is the land_retry tool's arguments (#133): the parked
+// task.
+type landRetryArgs struct {
+	Task int64 `json:"task"`
+}
+
+// callLandRetry runs the land_retry tool (#133): the land rule run again
+// through /v1/tasks/<id>/land-retry for a task a rejected push or an
+// environment failure parked, rendered by renderLandRetry. The
+// idempotency key is minted as in answer.
+func callLandRetry(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
+	var a landRetryArgs
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &a); err != nil {
+			return "", fmt.Errorf("arguments: %w", err)
+		}
+	}
+	res, err := c.RetryLanding(ctx, a.Task, idemKey("land_retry", a))
+	if err != nil {
+		return "", err
+	}
+	return renderLandRetry(a.Task, res)
+}
+
+// renderLandRetry words each outcome of a land retry as its own text: a
+// queued land job, a hold at the land gate with its reason verbatim and
+// the user's release, a stale base parked for task_restart, and a
+// refusal — the engine's reason — as the tool's error.
+func renderLandRetry(task int64, res api.LandRetryResult) (string, error) {
+	switch res.Outcome {
+	case engine.LandRetryQueued:
+		return fmt.Sprintf("queued land job %d for task %d", res.JobID, task), nil
+	case engine.LandRetryHeld:
+		return fmt.Sprintf("task %d is held at the land gate: %s; the user's `brigada land approve %d` releases it",
+			task, res.Reason, task), nil
+	case engine.LandRetryStaleBase:
+		return fmt.Sprintf("task %d is parked again on a stale base: %s; task_restart is the way forward", task, res.Reason), nil
+	case engine.LandRetryRefused:
+		return "", fmt.Errorf("land_retry refused: %s", res.Reason)
+	}
+	return "", fmt.Errorf("land_retry for task %d answered an unknown outcome %q", task, res.Outcome)
 }

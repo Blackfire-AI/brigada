@@ -172,13 +172,17 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 		return TaskResult{}, err
 	}
 
+	guidance, _, err := taskWorkerGuidanceTx(tx, taskID)
+	if err != nil {
+		return TaskResult{}, err
+	}
 	sr, err := e.submitTx(tx, SubmitParams{
 		Key:        fmt.Sprintf("task:%d", taskID),
 		ProjectID:  project,
 		TaskID:     taskID,
 		Kind:       KindWork,
 		Mode:       ModeFresh,
-		Prompt:     prompt.ComposeWorkerPrompt(p.Spec, p.CheckCmd, "", workerGuidance(ti)...),
+		Prompt:     prompt.ComposeWorkerPrompt(p.Spec, p.CheckCmd, "", guidance...),
 		PromptMeta: marshalPromptMeta(workerPromptMeta(ti)),
 		Harness:    p.Harness,
 		Labels:     p.Labels,

@@ -395,7 +395,7 @@ func TestPlanSkillsRoundTrip(t *testing.T) {
 	if got := skillNamesOf(direct.TaskID); len(got) != 1 || got[0] != "cli-flag" {
 		t.Errorf("a direct submission's skills = %v, want cli-flag", got)
 	}
-	if got := e.str("SELECT instructions FROM tasks WHERE id = ?", direct.TaskID); got == "" {
-		t.Errorf("a direct submission recorded no worker text")
+	if got, meta := e.str("SELECT instructions FROM tasks WHERE id = ?", direct.TaskID), e.str("SELECT instructions_meta FROM tasks WHERE id = ?", direct.TaskID); got != "" || !strings.Contains(meta, `"source":"default"`) {
+		t.Errorf("a direct submission recorded worker text %q with meta %q, want none with the not-configured source", got, meta)
 	}
 }

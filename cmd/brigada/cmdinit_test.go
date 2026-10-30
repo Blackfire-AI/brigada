@@ -1120,8 +1120,9 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 		log, _ := os.ReadFile(filepath.Join(state, "engine.log"))
 		t.Fatalf("%d\n%s\n%s\nengine log: %s", code, out, err, log)
 	}
+	flat := strings.Join(strings.Fields(out), " ")
 	for _, want := range []string{"Done: wrote ", "wrote 15 files (not committed). Detached runner started", "stop it with: brigada stop", "Next:\n  1. Talk to the foreman: brigada attach\n  2. Or, without a conversation: brigada ask", "Stop the runner: brigada stop"} {
-		if !strings.Contains(out, want) {
+		if !strings.Contains(flat, strings.Join(strings.Fields(want), " ")) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}

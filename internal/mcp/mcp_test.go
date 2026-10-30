@@ -67,7 +67,7 @@ func newEnvToken(t *testing.T, tokens, secret string) *env {
 	if err := os.WriteFile(tokenPath, []byte(tokens), 0o600); err != nil {
 		t.Fatalf("write token file: %v", err)
 	}
-	srv, err := api.New(ctx, st, engine.New(st, engine.Config{PlanReview: &planReviewOff}), nil, tokenPath)
+	srv, err := api.New(ctx, st, engine.New(st, engine.Config{PlanReview: &planReviewOff, IssueFetch: issueFetchStub}), nil, tokenPath)
 	if err != nil {
 		t.Fatalf("build api server: %v", err)
 	}

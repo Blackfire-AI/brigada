@@ -217,7 +217,10 @@ func StatusSections(st Status) string {
 	}
 
 	for _, in := range st.RoleInstructions {
-		line := fmt.Sprintf("%s instructions (project #%d): %s, %d bytes, sha256 %s", in.Role, in.ProjectID, in.State, in.Bytes, in.Digest)
+		line := fmt.Sprintf("%s instructions (project #%d): %s", in.Role, in.ProjectID, in.State)
+		if in.State == "file" {
+			line += fmt.Sprintf(", %d bytes, sha256 %s", in.Bytes, in.Digest)
+		}
 		if in.GeneratedFrom != "" {
 			line += ", generated from " + in.GeneratedFrom
 		}

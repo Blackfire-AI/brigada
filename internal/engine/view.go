@@ -106,9 +106,18 @@ func (e *Engine) Job(ctx context.Context, id int64) (*JobInfo, error) {
 	if !e.sweepDue(row, e.cfg.Now()) {
 		return info, nil
 	}
-	if err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		_, err := e.sweepTx(tx, e.cfg.Now())
-		return err
+	// The sweep is a write transaction finished on a context of its own,
+	// under the bounded busy retry within writeDeadline, as Sweep's is: a
+	// reader that gives up mid-sweep must not roll it back, and a write
+	// lock a heavier writer held past the busy timeout is ridden out
+	// instead of failing the read.
+	if err := retryBusyTx(ctx, writeDeadline, func(ctx context.Context) error {
+		return e.store.Update(ctx, func(tx *sql.Tx) error {
+			if _, err := e.sweepTx(tx, e.cfg.Now()); err != nil {
+				return err
+			}
+			return e.faultBusy()
+		})
 	}); err != nil {
 		return nil, fmt.Errorf("read job %d: %w", id, err)
 	}

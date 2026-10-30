@@ -9,16 +9,15 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"github.com/Blackfire-AI/brigada/internal/defaults"
 )
 
 // Per-role instruction texts (design §5.9): beside the worker text the
 // instructions setting holds, each role has a text of its own, stored
 // one row per project and role. The row's provenance says where the
-// text came from; a missing row is not configured and the embedded
-// default applies; a row with an empty local text is an empty-by-choice
-// mark that suppresses the default.
+// text came from; a missing row is not configured — no text applies,
+// for at run time the engine never falls back to a text in the binary
+// (§5.9 'Three states, no hidden fallback'); a row with an empty local
+// text is an empty-by-choice mark.
 
 // The roles a project can set an instruction text for.
 const (
@@ -31,9 +30,9 @@ const (
 // RoleKeys are the roles, in the order show prints them.
 var RoleKeys = []string{RoleForeman, RolePlanReview, RoleWorker, RoleReviewer}
 
-// The three states of a role text (§5.9): not configured (no row: the
-// embedded default applies), empty by choice (a row whose local text is
-// empty: no text applies), and file (a row holding a text).
+// The three states of a role text (§5.9): not configured (no row: no
+// text applies), empty by choice (a row whose local text is empty: no
+// text applies), and file (a row holding a text).
 const (
 	RoleStateNotConfigured = "not configured"
 	RoleStateEmptyByChoice = "empty by choice"
@@ -71,8 +70,9 @@ type RoleInstruction struct {
 	Provenance string `json:"provenance"`
 	Bytes      int    `json:"bytes"`
 	Digest     string `json:"digest"`
-	// Text is the effective text: the row's, or the embedded default of
-	// a role not configured; empty for an empty-by-choice row.
+	// Text is the effective text: the row's; empty for a role not
+	// configured or an empty-by-choice row, for at run time the engine
+	// never falls back to a text in the binary (§5.9).
 	Text string `json:"text,omitempty"`
 }
 
@@ -126,27 +126,20 @@ func upsertRoleInstructionTx(tx *sql.Tx, project int64, role, text, source, vers
 	return nil
 }
 
-// defaultRoleInstruction reads the embedded default of a role as the
-// view of a role that is not configured.
-func defaultRoleInstruction(project int64, repo, role string) (RoleInstruction, error) {
-	text, err := defaults.LiveRoleText(role)
-	if err != nil {
-		return RoleInstruction{}, fmt.Errorf("read the default %s instructions: %w", role, err)
-	}
-	return RoleInstruction{
-		ProjectID: project, RepoURL: repo, Role: role,
-		State: RoleStateNotConfigured, Source: SourceDefault,
-		Bytes: len(text), Digest: instructionsDigest(text), Text: text,
-	}, nil
-}
-
-// roleInstructionTx reads one role's effective text and provenance.
+// roleInstructionTx reads one role's effective text and provenance. A
+// role with no row is not configured (§5.9 'Three states, no hidden
+// fallback'): no text of its own, the source reading default, and at
+// run time the engine never falls back to a text in the binary.
 func roleInstructionTx(tx *sql.Tx, project int64, repo, role string) (RoleInstruction, error) {
 	var text, source, version, digest string
 	err := tx.QueryRow("SELECT text, source, settings_version, digest FROM role_instructions WHERE project_id = ? AND role = ?", project, role).
 		Scan(&text, &source, &version, &digest)
 	if errors.Is(err, sql.ErrNoRows) {
-		return defaultRoleInstruction(project, repo, role)
+		return RoleInstruction{
+			ProjectID: project, RepoURL: repo, Role: role,
+			State: RoleStateNotConfigured, Source: SourceDefault,
+			Bytes: 0, Digest: instructionsDigest(""),
+		}, nil
 	}
 	if err != nil {
 		return RoleInstruction{}, fmt.Errorf("read the %s instructions of project %d: %w", role, project, err)
@@ -169,17 +162,13 @@ func roleInstructionTx(tx *sql.Tx, project int64, repo, role string) (RoleInstru
 
 // storedRoleTextTx reads one role's text as a prompt carries it (§5.9):
 // the stored row — the user's text, an import's, or the upgrade's seed
-// of the default — and "" when the project has no row at all. Unlike
-// roleInstructionTx, which reports the live embedded default for a role
-// no row configures, a prompt composed from this never falls back to a
-// text in the binary: a not-configured role runs on the contract alone.
+// of the default — and "" when the project has no row at all: a
+// not-configured role runs on the contract alone, never a text in the
+// binary.
 func storedRoleTextTx(tx *sql.Tx, project int64, role string) (string, error) {
 	ri, err := roleInstructionTx(tx, project, "", role)
 	if err != nil {
 		return "", err
-	}
-	if ri.Source == SourceDefault {
-		return "", nil
 	}
 	return ri.Text, nil
 }
@@ -328,14 +317,28 @@ func (e *Engine) SetRoleInstruction(ctx context.Context, repoURL, role, text str
 // a local override does, unless the import explicitly accepted the
 // replacement of that hand-set value, in which case the row follows the
 // settings. When no instructions value is in effect, an imported row is
-// gone with it; a generated or local one stays.
-func syncWorkerInstructionTx(tx *sql.Tx, project int64, row, imported map[string]json.RawMessage, hash string, replacedLocal bool, now time.Time) error {
+// gone with it; a generated or local one stays. An empty worker file
+// (emptyFile) is the one exception: the file is read as the empty-by-choice
+// state (§5.9), so an empty imported row stands for it.
+func syncWorkerInstructionTx(tx *sql.Tx, project int64, row, imported map[string]json.RawMessage, hash string, replacedLocal, emptyFile bool, now time.Time) error {
 	raw, ok := row[SettingInstructions]
 	if !ok {
 		if _, err := tx.Exec("DELETE FROM role_instructions WHERE project_id = ? AND role = ? AND source = ?", project, RoleWorker, SourceImported); err != nil {
 			return fmt.Errorf("clear the imported worker instructions of project %d: %w", project, err)
 		}
-		return nil
+		if !emptyFile {
+			return nil
+		}
+		var source string
+		err := tx.QueryRow("SELECT source FROM role_instructions WHERE project_id = ? AND role = ?", project, RoleWorker).Scan(&source)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+		case err != nil:
+			return fmt.Errorf("read the worker instructions of project %d: %w", project, err)
+		case source == SourceLocal && !replacedLocal:
+			return nil // the user's own mark or text wins
+		}
+		return upsertRoleInstructionTx(tx, project, RoleWorker, "", SourceImported, hash, now)
 	}
 	if _, imp := imported[SettingInstructions]; !imp {
 		return nil // a local override kept its value against the file

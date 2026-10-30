@@ -120,6 +120,26 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 			return err
 		}
 	}
+	// A settled task was live work its plan waited on (#133), and the
+	// release above may have moved a dependent of it — a landing
+	// queued, or a hold at the land gate, which keeps that plan open
+	// until the user releases it — so the close runs now, after the
+	// releases moved every dependent, never between the records the
+	// loop above writes.
+	seenPlan := map[int64]bool{}
+	for _, id := range newLanded {
+		var plan int64
+		if err := tx.QueryRow("SELECT plan_id FROM tasks WHERE id = ?", id).Scan(&plan); err != nil {
+			return fmt.Errorf("read the plan of task %d: %w", id, err)
+		}
+		if seenPlan[plan] {
+			continue
+		}
+		seenPlan[plan] = true
+		if _, err := e.finishPlanIfClosedTx(tx, project, plan, id, 0, now); err != nil {
+			return err
+		}
+	}
 	// A landing the branch holds proves the environment the failed
 	// landings blamed (issue #116): their causes end, so a recurrence
 	// wakes anew.

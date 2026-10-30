@@ -309,6 +309,9 @@ type TaskInstructions struct {
 	Worker   RoleSnapshot `json:"worker"`
 	Reviewer RoleSnapshot `json:"reviewer"`
 	Skills   []TaskSkill  `json:"skills,omitempty"`
+	// SkillsDir is the project's effective skills_dir when the task was
+	// resolved; the directory line of every prompt of the task names it.
+	SkillsDir string `json:"skills_dir,omitempty"`
 }
 
 // WorkerBytes is what the worker prompt carries of instructions plus
@@ -346,14 +349,22 @@ func snapshotOf(ri RoleInstruction) RoleSnapshot {
 // resolveTaskInstructionsTx resolves what a task's prompts will carry
 // (§5.9 'Versioning', §5.10 'Resolved once'): the project's effective
 // worker and reviewer texts with their provenance, and the named skills
-// copied in the order given. An unknown skill or one named twice refuses
-// the task whole; so does a worker prompt whose instructions plus skills
-// pass MaxWorkerPromptBytes or a reviewer prompt passing
-// MaxReviewerPromptBytes, a 'for:' skill counting only in the prompt it
-// appears in. The refusal names the task, and for a bound the size and
-// the limit; nothing is truncated.
+// copied in the order given. A role with no row resolves to no text —
+// the snapshot records the not-configured source and the prompt carries
+// no instructions section (§5.9 'Three states, no hidden fallback') —
+// and an empty-by-choice row to no text recorded as empty. An unknown
+// skill or one named twice refuses the task whole; so does a worker
+// prompt whose instructions plus skills pass MaxWorkerPromptBytes or a
+// reviewer prompt passing MaxReviewerPromptBytes, a 'for:' skill
+// counting only in the prompt it appears in. The refusal names the
+// task, and for a bound the size and the limit; nothing is truncated.
 func resolveTaskInstructionsTx(tx *sql.Tx, project int64, task string, skillNames []string) (TaskInstructions, error) {
 	var out TaskInstructions
+	dir, err := projectSkillsDirTx(tx, project)
+	if err != nil {
+		return TaskInstructions{}, err
+	}
+	out.SkillsDir = dir
 	if len(skillNames) > 0 {
 		have, err := projectSkillsTx(tx, project)
 		if err != nil {
@@ -431,8 +442,8 @@ func recordTaskInstructionsTx(tx *sql.Tx, taskID int64, ti TaskInstructions, now
 		skills = string(b)
 	}
 	if _, err := tx.Exec(`UPDATE tasks SET instructions = ?, instructions_meta = ?, reviewer_instructions = ?,
-		reviewer_instructions_meta = ?, skills = ?, updated_at = ? WHERE id = ?`,
-		ti.Worker.Text, string(wm), ti.Reviewer.Text, string(rm), skills, fmtTime(now), taskID); err != nil {
+		reviewer_instructions_meta = ?, skills = ?, skills_dir = ?, updated_at = ? WHERE id = ?`,
+		ti.Worker.Text, string(wm), ti.Reviewer.Text, string(rm), skills, ti.SkillsDir, fmtTime(now), taskID); err != nil {
 		return fmt.Errorf("record the instructions of task %d: %w", taskID, err)
 	}
 	return nil
@@ -512,28 +523,52 @@ func reviewerGuidance(ti TaskInstructions) []prompt.Option {
 		prompt.WithReviewerInstructions(ti.Reviewer.Text), prompt.WithSkills(reviewerPromptSkills(ti))}
 }
 
-// workerPromptSkills copies the skills a worker prompt carries: every
-// one not meant for the reviewer alone.
+// workerPromptSkills preserves the audience for prompt filtering.
 func workerPromptSkills(ti TaskInstructions) []prompt.Skill {
 	var out []prompt.Skill
 	for _, s := range ti.Skills {
-		if s.For != SkillForReviewer {
-			out = append(out, prompt.Skill{Name: s.Name, Text: s.Text})
-		}
+		out = append(out, prompt.Skill{Name: s.Name, For: s.For, Text: s.Text})
 	}
 	return out
 }
 
-// reviewerPromptSkills copies the skills a review prompt carries: every
-// one not meant for the worker alone.
+// reviewerPromptSkills also carries worker-only names for the omission note.
 func reviewerPromptSkills(ti TaskInstructions) []prompt.Skill {
-	var out []prompt.Skill
-	for _, s := range ti.Skills {
-		if s.For != SkillForWorker {
-			out = append(out, prompt.Skill{Name: s.Name, Text: s.Text})
+	return workerPromptSkills(ti)
+}
+
+// taskSkillsDirTx reads the skills_dir a task recorded at creation. A
+// task with none recorded gets the default, never the project's current
+// setting: migration 0070 wrote every older task's value.
+func taskSkillsDirTx(tx *sql.Tx, taskID int64) (string, error) {
+	var dir string
+	if err := tx.QueryRow(`SELECT skills_dir FROM tasks WHERE id = ?`, taskID).Scan(&dir); err != nil {
+		return "", fmt.Errorf("read the skills_dir of task %d: %w", taskID, err)
+	}
+	if dir == "" {
+		return DefaultSkillsDir, nil
+	}
+	return dir, nil
+}
+
+// projectSkillsDirTx reads a project's effective skills_dir: the setting,
+// or the default when unset. Only task creation and re-resolution call
+// it; prompts read the task's recorded value.
+func projectSkillsDirTx(tx *sql.Tx, project int64) (string, error) {
+	var raw string
+	if err := tx.QueryRow(`SELECT settings FROM projects WHERE id = ?`, project).Scan(&raw); err != nil {
+		return "", err
+	}
+	var settings map[string]json.RawMessage
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+			return "", err
 		}
 	}
-	return out
+	if dir, ok := rawString(settings[configKeySkillsDir]); ok && dir != "" {
+		return dir, nil
+	}
+	return DefaultSkillsDir, nil
 }
 
 // taskWorkerGuidanceTx reads the snapshot a task recorded as a worker
@@ -546,7 +581,11 @@ func taskWorkerGuidanceTx(tx *sql.Tx, taskID int64) ([]prompt.Option, string, er
 	if err != nil {
 		return nil, "", err
 	}
-	return workerGuidance(ti), marshalPromptMeta(workerPromptMeta(ti)), nil
+	dir, err := taskSkillsDirTx(tx, taskID)
+	if err != nil {
+		return nil, "", err
+	}
+	return append(workerGuidance(ti), prompt.WithSkillsDir(dir)), marshalPromptMeta(workerPromptMeta(ti)), nil
 }
 
 // taskReviewerGuidanceTx reads the snapshot a task recorded as a review
@@ -558,7 +597,11 @@ func taskReviewerGuidanceTx(tx *sql.Tx, taskID int64) ([]prompt.Option, string, 
 	if err != nil {
 		return nil, "", err
 	}
-	return reviewerGuidance(ti), marshalPromptMeta(reviewerPromptMeta(ti)), nil
+	dir, err := taskSkillsDirTx(tx, taskID)
+	if err != nil {
+		return nil, "", err
+	}
+	return append(reviewerGuidance(ti), prompt.WithSkillsDir(dir)), marshalPromptMeta(reviewerPromptMeta(ti)), nil
 }
 
 // reresolveTaskInstructionsTx re-resolves what a task that has not

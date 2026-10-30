@@ -127,7 +127,10 @@ func printGuidance(ctx context.Context, client *api.Client, stdout io.Writer, pr
 		if p, ok := cfg.RoleFiles[r.Role]; ok {
 			file = p
 		}
-		line := fmt.Sprintf("instructions.%s: %s, file %s, %d bytes, sha256 %s", r.Role, r.State, file, r.Bytes, r.Digest)
+		line := fmt.Sprintf("instructions.%s: %s, file %s", r.Role, r.State, file)
+		if r.State == "file" {
+			line += fmt.Sprintf(", %d bytes, sha256 %s", r.Bytes, r.Digest)
+		}
 		if r.GeneratedFrom != "" {
 			line += ", generated from " + r.GeneratedFrom
 		}

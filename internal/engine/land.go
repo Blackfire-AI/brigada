@@ -76,34 +76,52 @@ type landNotReadyRecord struct {
 // job on its key is left alone, so the callers that re-evaluate it — a
 // dependency landing, a hold release — never queue a second job.
 func (e *Engine) maybeLandTaskTx(tx *sql.Tx, taskID int64, now time.Time) error {
+	_, err := e.landRuleTx(tx, taskID, now)
+	return err
+}
+
+// landRuleResult is what one run of the land rule did (§7.1): queued the
+// land job (JobID names it), held the task at the land gate (Reason
+// names the rule), refused the landing on a stale base — the task parked
+// again, Reason naming both refs (issue #124) — or nothing, the empty
+// outcome, when the rule leaves the task alone.
+type landRuleResult struct {
+	Outcome string // LandRetryQueued, LandRetryHeld, LandRetryStaleBase or ""
+	JobID   int64
+	Reason  string
+}
+
+// landRuleTx is the land rule maybeLandTaskTx runs, reporting what it
+// did: RetryLanding (#133) answers with it, every other caller drops it.
+func (e *Engine) landRuleTx(tx *sql.Tx, taskID int64, now time.Time) (landRuleResult, error) {
 	var plan int64
 	if err := tx.QueryRow("SELECT plan_id FROM tasks WHERE id = ?", taskID).Scan(&plan); err != nil {
-		return fmt.Errorf("read task %d: %w", taskID, err)
+		return landRuleResult{}, fmt.Errorf("read task %d: %w", taskID, err)
 	}
 	landable, err := landableDoneTx(tx, taskID)
 	if err != nil {
-		return err
+		return landRuleResult{}, err
 	}
 	if !landable {
-		return nil
+		return landRuleResult{}, nil
 	}
 	landed, err := depsLandedTx(tx, taskID)
 	if err != nil {
-		return err
+		return landRuleResult{}, err
 	}
 	if !landed {
-		return nil
+		return landRuleResult{}, nil
 	}
 	var project int64
 	if err := tx.QueryRow("SELECT project_id FROM plans WHERE id = ?", plan).Scan(&project); err != nil {
-		return fmt.Errorf("read the project of task %d: %w", taskID, err)
+		return landRuleResult{}, fmt.Errorf("read the project of task %d: %w", taskID, err)
 	}
 	var have int
 	if err := tx.QueryRow("SELECT COUNT(*) FROM landings WHERE task_id = ?", taskID).Scan(&have); err != nil {
-		return fmt.Errorf("read the landing of task %d: %w", taskID, err)
+		return landRuleResult{}, fmt.Errorf("read the landing of task %d: %w", taskID, err)
 	}
 	if have > 0 {
-		return nil
+		return landRuleResult{}, nil
 	}
 	// A land_holds row of any state — held at the gate, or rejected — means
 	// the landing is already decided for this task: the rule never re-holds
@@ -112,25 +130,46 @@ func (e *Engine) maybeLandTaskTx(tx *sql.Tx, taskID int64, now time.Time) error 
 	// gate here.
 	var held int
 	if err := tx.QueryRow("SELECT COUNT(*) FROM land_holds WHERE task_id = ?", taskID).Scan(&held); err != nil {
-		return fmt.Errorf("read the land hold of task %d: %w", taskID, err)
+		return landRuleResult{}, fmt.Errorf("read the land hold of task %d: %w", taskID, err)
 	}
 	if held > 0 {
-		return nil
+		return landRuleResult{}, nil
 	}
 	if live, err := liveJobTx(tx, fmt.Sprintf("task:%d", taskID)); err != nil {
-		return err
+		return landRuleResult{}, err
 	} else if live != nil {
-		return nil // the land job (or another of the task's jobs) already holds the key
+		return landRuleResult{}, nil // the land job (or another of the task's jobs) already holds the key
 	}
 	reason, err := landHoldReasonTx(tx, project, taskID)
 	if err != nil {
-		return err
+		return landRuleResult{}, err
 	}
 	if reason != "" {
-		return e.holdLandTx(tx, project, taskID, reason, now)
+		if err := e.holdLandTx(tx, project, taskID, reason, now); err != nil {
+			return landRuleResult{}, err
+		}
+		return landRuleResult{Outcome: LandRetryHeld, Reason: reason}, nil
 	}
-	_, err = e.queueLandJobTx(tx, project, taskID, false, now)
-	return err
+	sr, err := e.queueLandJobTx(tx, project, taskID, false, now)
+	if err != nil {
+		return landRuleResult{}, err
+	}
+	switch sr.Answer {
+	case AnsCreated:
+		return landRuleResult{Outcome: LandRetryQueued, JobID: sr.JobID}, nil
+	case "":
+		// The landing record and the live key were read above, so the zero
+		// answer is the stale-base refusal: queueLandJobTx parked the task.
+		var payload string
+		if err := tx.QueryRow(`SELECT payload FROM events WHERE task_id = ? AND kind = ?
+			ORDER BY id DESC LIMIT 1`, taskID, evTaskBaseStale).Scan(&payload); err != nil {
+			return landRuleResult{}, fmt.Errorf("read the stale-base refusal of task %d: %w", taskID, err)
+		}
+		var p eventPayload
+		_ = json.Unmarshal([]byte(payload), &p)
+		return landRuleResult{Outcome: LandRetryStaleBase, Reason: p.Reason}, nil
+	}
+	return landRuleResult{}, nil
 }
 
 // taskApprovedTx reports whether the task's last review, after its last
@@ -164,11 +203,10 @@ func taskApprovedTx(tx *sql.Tx, taskID int64) (bool, error) {
 
 // landableDoneTx reports whether the task is one the land rule queues a
 // landing for (§7.1): done, of the implement class — the one class that
-// lands — and approved by its last review. The done report's
-// not-yet-landed list and the blocked-plan rule's stranded tasks (§6.2)
-// read the same eligibility here, so the three can never disagree: a
-// done task of a class that never lands is never "not yet landed" and
-// never holds its plan open.
+// lands — and approved by its last review. The plan-closing rule's
+// unlanded live work (#133) and the blocked-plan rule's stranded tasks
+// (§6.2) read the same eligibility here, so the two can never disagree:
+// a done task of a class that never lands never holds its plan open.
 func landableDoneTx(tx *sql.Tx, taskID int64) (bool, error) {
 	var state, class string
 	if err := tx.QueryRow("SELECT state, class FROM tasks WHERE id = ?", taskID).Scan(&state, &class); err != nil {
@@ -1068,16 +1106,24 @@ func liveLandJobTx(tx *sql.Tx, taskID int64) (bool, error) {
 	return n > 0, nil
 }
 
+// finishTaskPlanTx closes the task's plan once whatever kept it open is
+// settled (§6.2, §7.1, #133) — its land job's outcome, the hold the
+// user released or rejected — so the plan's done report is written
+// here. job is 0 when no job settled it.
+func (e *Engine) finishTaskPlanTx(tx *sql.Tx, project, task, job int64, now time.Time) error {
+	var plan int64
+	if err := tx.QueryRow("SELECT plan_id FROM tasks WHERE id = ?", task).Scan(&plan); err != nil {
+		return fmt.Errorf("read the plan of task %d: %w", task, err)
+	}
+	_, err := e.finishPlanIfClosedTx(tx, project, plan, task, job, now)
+	return err
+}
+
 // finishLandPlanTx closes the task's plan once its land job has an
 // outcome (§6.2, §7.1): a live land job kept the plan open, so the
 // landing's completion is where the plan's done report is written.
 func (e *Engine) finishLandPlanTx(tx *sql.Tx, job *jobRow, now time.Time) error {
-	var plan int64
-	if err := tx.QueryRow("SELECT plan_id FROM tasks WHERE id = ?", job.TaskID).Scan(&plan); err != nil {
-		return fmt.Errorf("read the plan of task %d: %w", job.TaskID, err)
-	}
-	_, err := e.finishPlanIfClosedTx(tx, job.ProjectID, plan, job.TaskID, job.ID, now)
-	return err
+	return e.finishTaskPlanTx(tx, job.ProjectID, job.TaskID, job.ID, now)
 }
 
 // pushCompletedTx applies a push phase's completion (§7.1): the landing
@@ -1148,8 +1194,11 @@ func (e *Engine) landCheckFailedTx(tx *sql.Tx, job *jobRow, rec landRecord, now 
 // land approve` — which re-queues the landing with the gate skipped. In
 // the push phase the landing is already recorded waiting; the same hold
 // then sits on the push, and the approval re-queues the push instead.
-// The hold has no job, so the plan closes here, named under "waits at a
-// gate" (§7.1).
+// The plan-close check that follows reads the two holds apart (§7.1,
+// #133): one with no landing record is a landing still to come, which
+// keeps the plan open until the release settles it, and one beside a
+// recorded waiting push is a waiting push, which may close the plan,
+// named under "waits to push".
 func (e *Engine) landHeldTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	reason := "held by rule land_ready"
 	var rec landHeldRecord
@@ -1580,6 +1629,11 @@ func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve, stop
 	}
 	if _, err := appendEventTx(tx, evTaskLandRejected, project, taskID, 0,
 		eventPayload{Status: taskDone, Reason: boundNote(reason)}, now); err != nil {
+		return LandDecision{}, err
+	}
+	// The rejection settles the hold (#133): a plan the hold kept open
+	// closes over the declined landing, the report naming it.
+	if err := e.finishTaskPlanTx(tx, project, taskID, 0, now); err != nil {
 		return LandDecision{}, err
 	}
 	return LandDecision{TaskID: taskID, Released: false}, nil

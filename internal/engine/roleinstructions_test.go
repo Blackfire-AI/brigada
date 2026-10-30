@@ -27,19 +27,16 @@ func mustSetRole(t *testing.T, e *env, role, text string) *RoleInstruction {
 	return ri
 }
 
-// TestRoleInstructionStates: a role starts not configured with the
-// embedded default in effect; a set makes it a file text with local
-// provenance; an empty set is an empty-by-choice mark that suppresses
-// the default; the worker role mirrors the instructions setting.
+// TestRoleInstructionStates: a role starts not configured, with no text
+// of its own — at run time the engine never falls back to a text in the
+// binary (§5.9); a set makes it a file text with local provenance; an
+// empty set is an empty-by-choice mark that suppresses the default; the
+// worker role mirrors the instructions setting.
 func TestRoleInstructionStates(t *testing.T) {
 	e := newEnv(t)
-	wantDefault, err := defaults.LiveRoleText("foreman")
-	if err != nil {
-		t.Fatalf("live foreman default: %v", err)
-	}
 	ri := mustRole(t, e, RoleForeman)
-	if ri.State != RoleStateNotConfigured || ri.Source != SourceDefault || ri.Text != wantDefault || ri.Bytes != len(wantDefault) || ri.Digest != defaults.Digest(wantDefault) || ri.Version != "" {
-		t.Errorf("foreman before any set = %+v, want not configured with the embedded default", ri)
+	if ri.State != RoleStateNotConfigured || ri.Source != SourceDefault || ri.Text != "" || ri.Bytes != 0 || ri.Digest != instructionsDigest("") || ri.Version != "" {
+		t.Errorf("foreman before any set = %+v, want not configured with no text", ri)
 	}
 
 	ri = mustSetRole(t, e, RoleForeman, "Be terse.")
@@ -54,12 +51,8 @@ func TestRoleInstructionStates(t *testing.T) {
 	if ri.State != RoleStateEmptyByChoice || ri.Source != SourceLocal || ri.Text != "" || ri.Bytes != 0 {
 		t.Errorf("reviewer after an empty set = %+v, want empty by choice", ri)
 	}
-	wantWorkerDefault, err := defaults.LiveRoleText(RoleWorker)
-	if err != nil {
-		t.Fatalf("live worker default: %v", err)
-	}
-	if got := mustRole(t, e, RoleWorker).Text; got != wantWorkerDefault {
-		t.Errorf("worker after the reviewer's set = the default unchanged, got %d bytes", len(got))
+	if got := mustRole(t, e, RoleWorker).Text; got != "" {
+		t.Errorf("worker after the reviewer's set = %q, want no text of an unconfigured role", got)
 	}
 
 	// The worker role is the instructions setting: both change together.

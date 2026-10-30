@@ -76,6 +76,37 @@ func (s *Server) handleTaskRestart(w http.ResponseWriter, r *http.Request, id id
 	})
 }
 
+// handleTaskLandRetry is the foreman's land_retry behind the API (#133):
+// the land rule run again for a task parked by a rejected push or an
+// environment failure, every gate still applying. Scoped and idempotent
+// like the restart. Each of the engine's four outcomes — queued, held,
+// stale_base, refused — answers 200 with the outcome named, a refusal's
+// reason included: the caller renders each one.
+func (s *Server) handleTaskLandRetry(w http.ResponseWriter, r *http.Request, id identity) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	taskID, ok := parseTaskID(w, r)
+	if !ok {
+		return
+	}
+	project, ok := s.taskProject(w, r, id, taskID)
+	if !ok {
+		return
+	}
+	res, err := s.eng.RetryLanding(r.Context(), project, taskID)
+	if err != nil {
+		s.writeInternal(w, r, "retry the landing", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, taskLandRetryResponse{
+		TaskID:  res.TaskID,
+		Outcome: res.Outcome,
+		JobID:   res.JobID,
+		Reason:  res.Reason,
+	})
+}
+
 // taskProject resolves the project a task belongs to and checks the
 // caller's reach (§12.1): the task's id names the project — no repo URL
 // to send — so a foreman token is simply walled into its own, while a
@@ -192,4 +223,14 @@ type taskRestartResponse struct {
 	Answer string `json:"answer"`
 	JobID  int64  `json:"job_id"`
 	Run    int    `json:"run"`
+}
+
+// taskLandRetryResponse names what the land retry did (#133): the
+// outcome — queued, held, stale_base or refused — the land job a queued
+// retry submitted, and the reason the others carry.
+type taskLandRetryResponse struct {
+	TaskID  int64  `json:"task_id"`
+	Outcome string `json:"outcome"`
+	JobID   int64  `json:"job_id,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
