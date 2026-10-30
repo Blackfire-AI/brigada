@@ -5,9 +5,9 @@
 plan: 90
 title: "#134 (design): the land job lands a batch, one push and one CI run per batch"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-10-30T08:19:05.705688Z
-updated: 2026-10-30T08:19:31.435092Z
+updated: 2026-10-30T08:21:50.923572Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -27,6 +27,44 @@ tasks:
     class: "implement"
     deps: []
     base: ""
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    state: cancelled
+    branch: ""
+    rounds: 0
+  - id: 296
+    name: "batch_design_membership"
+    title: "#134 (1/3) design: a land batch's membership, order and ownership (docs/design.md)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 297
+    name: "batch_design_execution"
+    title: "#134 (2/3) design: running a land batch, partial outcomes and the push (docs/design.md)"
+    class: "implement"
+    deps: ["batch_design_membership"]
+    base: "batch_design_membership"
+    continue: "batch_design_membership"
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 298
+    name: "batch_design_attribution"
+    title: "#134 (3/3) design: red-batch suspects, land_batch_max, protocol and records (docs/design.md)"
+    class: "implement"
+    deps: ["batch_design_execution"]
+    base: "batch_design_execution"
+    continue: "batch_design_execution"
     tier: heavy
     effort: medium
     review_tier: heavy
