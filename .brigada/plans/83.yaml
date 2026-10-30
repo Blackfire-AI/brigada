@@ -220,6 +220,6 @@ tasks:
     tier: light
     effort: medium
     review_tier: standard
-    state: reviewing
+    state: running
     branch: "brigada/task-304-r1"
-    rounds: 0
+    rounds: 1
