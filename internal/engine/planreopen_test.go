@@ -228,6 +228,47 @@ func TestReopenStrandedPlansLetsCancelsCloseItAgain(t *testing.T) {
 	}
 }
 
+// TestReopenStrandedPlansTakesBlockedShapesToo: the live-work test
+// reads the task alone — the landable test does not exclude a dead
+// dependency (§7.1) — so a done plan the earlier behavior closed over a
+// stranded chain (a failed dependency under done, approved tasks whose
+// landings never happened) holds live work and reopens like any other.
+// Back active, the blockage rule holds it open again, announced at the
+// plan's next closing evaluation.
+func TestReopenStrandedPlansTakesBlockedShapesToo(t *testing.T) {
+	e, _, plan, x, a, b := seedChain(t)
+	e.exec("UPDATE plans SET state = ? WHERE id = ?", planDone, plan)
+
+	reopened := e.reopenStranded()
+	if len(reopened) != 1 || reopened[0] != plan {
+		t.Fatalf("reopened = %v, want [%d]: the stranded chain is live work by the close rule's test", reopened, plan)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", plan); got != "active" {
+		t.Fatalf("plan state after the pass = %q, want active", got)
+	}
+	p, ok := e.eventPayloadOf(evPlanReopened)
+	if !ok || !strings.Contains(p.Reason, fmt.Sprintf("task %d a (done)", a)) ||
+		!strings.Contains(p.Reason, fmt.Sprintf("task %d b (done)", b)) {
+		t.Fatalf("plan_reopened = %+v (%t), want the stranded done tasks named", p, ok)
+	}
+	if strings.Contains(p.Reason, fmt.Sprintf("task %d x (", x)) {
+		t.Errorf("plan_reopened reason = %q, want the failed task not named live", p.Reason)
+	}
+
+	// The reopened plan is a blocked shape back active: the closing rule
+	// keeps it open and announces the blockage anew.
+	e.finishPlan(plan)
+	if got := e.str("SELECT state FROM plans WHERE id = ?", plan); got != "active" {
+		t.Errorf("plan state after the re-evaluation = %q, want active as blocked", got)
+	}
+	if _, ok := e.eventPayloadOf(evPlanBlocked); !ok {
+		t.Error("no plan_blocked event after the reopened plan's closing evaluation")
+	}
+	if _, ok := e.eventPayloadOf(evPlanDone); ok {
+		t.Error("the reopened blocked plan closed done over its stranded work")
+	}
+}
+
 // TestReopenStrandedPlansLeavesSettledPlansAlone: a plan done with no
 // live work — its only task landed — stays done, with no event.
 func TestReopenStrandedPlansLeavesSettledPlansAlone(t *testing.T) {

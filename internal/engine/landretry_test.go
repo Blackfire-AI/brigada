@@ -192,6 +192,9 @@ func TestRetryLandingHeldAtTheGate(t *testing.T) {
 // of its dependency after the rejected push is refused by the land rule
 // on the retry — parked again with task_base_stale, no job — a recorded
 // outcome naming task_restart; a second retry is then refused outright.
+// A pending dependent added behind the parked task stays pending: only a
+// retry that leaves the task done frees its dependents, and a dependent
+// must not start work built on the round the rebuild will replace.
 func TestRetryLandingStaleBase(t *testing.T) {
 	e := newEnv(t)
 	author := e.agented("author", "anthropic", "implement")
@@ -234,6 +237,18 @@ func TestRetryLandingStaleBase(t *testing.T) {
 	if ans := e.complete(lg, Completion{Error: landRejectedErr}); ans != AnsOK {
 		t.Fatalf("fail mid's push: %s", ans)
 	}
+	// A dependent added while mid sits parked: pending behind a task that
+	// is not done, it never started.
+	am := e.amend(plan.PlanID, PlanAmendment{Add: []PlanTask{
+		{Name: "top", Title: "the top", Spec: "use the mid", Deps: []string{"mid"}},
+	}})
+	if len(am.Added) != 1 {
+		t.Fatalf("amendment = %+v, want top added", am)
+	}
+	top := am.Added[0].TaskID
+	if got := e.taskState(top); got != taskPending {
+		t.Fatalf("top state = %q, want pending behind the parked mid", got)
+	}
 	// The dependency's result moved to a new round while mid waited.
 	e.exec("UPDATE tasks SET branch = ? WHERE id = ?", branchOf(lib)+"-r1", lib)
 
@@ -244,6 +259,12 @@ func TestRetryLandingStaleBase(t *testing.T) {
 	}
 	if state := e.str("SELECT state FROM tasks WHERE id = ?", mid); state != taskNeedsForeman {
 		t.Errorf("mid state = %q, want needs_foreman again", state)
+	}
+	if got := e.taskState(top); got != taskPending {
+		t.Errorf("top state = %q, want still pending: the stale-base retry parks mid again and frees no dependent", got)
+	}
+	if got := e.queuedWork(top); got != 0 {
+		t.Errorf("top's queued work jobs = %d, want none on the superseded round", got)
 	}
 	if n := e.queuedLandJobs(mid); n != 0 {
 		t.Errorf("queued land jobs = %d, want none on a stale base", n)
