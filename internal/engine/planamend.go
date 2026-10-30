@@ -1126,6 +1126,83 @@ func (e *Engine) readyPlanTasksTx(tx *sql.Tx, project, plan int64, now time.Time
 	return out, held, nil
 }
 
+// planLiveWorkTx reads, from a plan's nodes alone, whether live work
+// remains (§6.2, #133) and which task ids hold it — no writes, no events,
+// no wake. Live work is: a task not done, cancelled, failed or pending;
+// a done task whose land job is queued or running (§7.1: the plan closes
+// when the landing has an outcome, so a failed landing counts against
+// it); a done task with no landing record held at the land gate (its
+// landing waits on the user's release); and a done task with no landing
+// record the land rule would land — done, implement, approved (§7.1) —
+// with no rejected hold declining it: most often a dependency of its own
+// has not landed, so no land job exists. A hold the user rejected is
+// that decline (§6.3), not live work, and a hold on a landing already
+// recorded is the push phase's (§7.1), beside a waiting push — neither
+// holds a plan open. The plan-close rule (finishPlanIfClosedTx) and the
+// start-up reopen pass (ReopenStrandedPlans, #137) both read it here, so
+// a plan the one would keep open the other reopens.
+func planLiveWorkTx(tx *sql.Tx, nodes []amendNode) ([]int64, error) {
+	var live []int64
+	for _, n := range nodes {
+		switch n.state {
+		case taskDone:
+			// A done task whose land job is queued or running is still
+			// live work (§7.1): the plan closes when the landing has an
+			// outcome, so the done report names it and a failed landing
+			// counts against the plan. So is one the land rule would
+			// land whose landing has not happened and not been declined
+			// (#133): no landing record yet — most often a dependency
+			// of its own has not landed, so no land job exists, or the
+			// task is held at the land gate, its landing waiting on the
+			// user's release — the landing, or its failure, is still to
+			// come, and the plan must not close done over it. A hold
+			// the user rejected is that decline (§6.3): the landing
+			// will never happen, so it is not live work and the report
+			// names it declined. A hold on a landing already recorded
+			// is a different hold (§6.3, §7.1): the push phase's,
+			// beside a waiting push — the plan may close, the report
+			// naming the task under "waits to push".
+			if liveJob, err := liveLandJobTx(tx, n.id); err != nil {
+				return nil, err
+			} else if liveJob {
+				live = append(live, n.id)
+				continue
+			}
+			if l, err := landingTx(tx, n.id); err != nil {
+				return nil, err
+			} else if l == nil {
+				if _, held, err := heldLandHoldTx(tx, n.id); err != nil {
+					return nil, err
+				} else if held {
+					// The land gate holds a landing still to come
+					// (#133): the plan waits for the user's release
+					// and the landing it queues.
+					live = append(live, n.id)
+					continue
+				}
+				if landable, err := landableDoneTx(tx, n.id); err != nil {
+					return nil, err
+				} else if landable {
+					if rejected, err := rejectedLandHoldTx(tx, n.id); err != nil {
+						return nil, err
+					} else if !rejected {
+						live = append(live, n.id)
+						continue
+					}
+				}
+			}
+		case taskCancelled, taskFailed, taskPending:
+			// The close names these — the failed, the abandoned or
+			// approved skip, the never-run — and so does the pass not
+			// reopen over them: a pending task behind a failed one
+			// never kept a plan open (#137).
+		default:
+			live = append(live, n.id) // live work remains
+		}
+	}
+	return live, nil
+}
+
 // finishPlanIfClosedTx finishes an active plan with no live work left
 // (§6.2): every task is done, failed or cancelled, or pending behind one
 // that will never be done. Those permanently waiting tasks are the plan's
@@ -1166,52 +1243,21 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 	if blocked {
 		return false, nil
 	}
+	// The live-work test is the helper's, shared with the start-up
+	// reopen pass (#137), so the two can never drift apart.
+	if live, err := planLiveWorkTx(tx, nodes); err != nil {
+		return false, err
+	} else if len(live) > 0 {
+		return false, nil
+	}
 	var failed, waiting, cancelled []string
 	for _, n := range nodes {
 		switch n.state {
 		case taskDone:
-			// A done task whose land job is queued or running is still
-			// live work (§7.1): the plan closes when the landing has an
-			// outcome, so the done report names it and a failed landing
-			// counts against the plan. So is one the land rule would
-			// land whose landing has not happened and not been declined
-			// (#133): no landing record yet — most often a dependency
-			// of its own has not landed, so no land job exists, or the
-			// task is held at the land gate, its landing waiting on the
-			// user's release — the landing, or its failure, is still to
-			// come, and the plan must not close done over it. A hold
-			// the user rejected is that decline (§6.3): the landing
-			// will never happen, so it is not live work and the report
-			// names it declined. A hold on a landing already recorded
-			// is a different hold (§6.3, §7.1): the push phase's,
-			// beside a waiting push — the plan may close, the report
-			// naming the task under "waits to push".
-			if live, err := liveLandJobTx(tx, n.id); err != nil {
-				return false, err
-			} else if live {
-				return false, nil
-			}
-			if l, err := landingTx(tx, n.id); err != nil {
-				return false, err
-			} else if l == nil {
-				if _, held, err := heldLandHoldTx(tx, n.id); err != nil {
-					return false, err
-				} else if held {
-					// The land gate holds a landing still to come
-					// (#133): the plan waits for the user's release
-					// and the landing it queues.
-					return false, nil
-				}
-				if landable, err := landableDoneTx(tx, n.id); err != nil {
-					return false, err
-				} else if landable {
-					if rejected, err := rejectedLandHoldTx(tx, n.id); err != nil {
-						return false, err
-					} else if !rejected {
-						return false, nil
-					}
-				}
-			}
+			// Live work the helper above already ruled on: a done task
+			// that reached the close is settled (§7.1, #133) — its
+			// landing recorded, declined by a rejected hold, or of a
+			// class that never lands — and the report below names it.
 		case taskCancelled:
 			// Only a skip the user approved is a skip: the foreman's own
 			// cancellation is an abandoned task, whatever state it was in
