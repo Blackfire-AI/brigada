@@ -5,9 +5,9 @@
 plan: 89
 title: "Flaky TestJobWaitingForTheMirrorKeepsItsLease on slow macOS runners"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-10-30T06:16:49.768225Z
-updated: 2026-10-30T06:17:12.107036Z
+updated: 2026-10-30T06:25:03.114694Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
