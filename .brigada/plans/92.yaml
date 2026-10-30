@@ -33,4 +33,4 @@ tasks:
     review_effort: high
     state: running
     branch: "brigada/task-303"
-    rounds: 2
+    rounds: 0
