@@ -53,9 +53,9 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: reviewing
+    state: running
     branch: "brigada/task-301"
-    rounds: 0
+    rounds: 1
   - id: 302
     name: "busy_retry_prune_read"
     title: "#135 (2/2): Prune and the job-read sweep ride out SQLITE_BUSY; the heartbeat's bounded outcome is documented"
