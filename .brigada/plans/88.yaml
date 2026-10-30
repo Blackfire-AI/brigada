@@ -65,8 +65,8 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: heavy
-    state: running
-    branch: "brigada/task-289-r1"
+    state: reviewing
+    branch: "brigada/task-289-r2"
     rounds: 0
   - id: 290
     name: "family_visibility_docs"
