@@ -1,15 +1,16 @@
-// Package opencode drives OpenCode 1.19.0 headless: one `opencode run`
-// per worker job, resumed by session id. Credentials remain in the CLI's
-// own store (`opencode auth login`); the adapter supplies none.
+// Package opencode drives OpenCode 1.19.5 headless: one `opencode run`
+// per worker job, resumed by session id, and the bare TUI for an attached
+// foreman chat. Credentials remain in the CLI's own store
+// (`opencode auth login`); the adapter supplies none.
 package opencode
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -53,7 +54,10 @@ func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
 // Command passes the prompt as one positional argument after --. OpenCode
 // permits edits headless by default, matching worker policy, and
 // workerPermissions limits bash to the job's mapped tool scope (none for a
-// review) and denies paths outside the worktree.
+// review) and denies paths outside the worktree. A foreman job — one
+// carrying an MCP config — instead runs the foreman scope
+// (foremanPermissions), with the bridge offered through a config directory
+// of the adapter's own beside the runner's MCP config.
 // Never pass --auto (or its permission-bypass aliases); permission rules
 // ride the environment, not the CLI's project config.
 //
@@ -62,9 +66,6 @@ func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
 // run/v1.ts:29, mini.ts localDirectory), so cmd.Dir alone is not enough:
 // the runner sets PWD to the worktree on every command it starts.
 func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*exec.Cmd, error) {
-	if job.MCPConfig != "" {
-		return nil, errors.New("opencode: the CLI run path has no MCP-config flag; a job carrying an MCP config cannot run on it")
-	}
 	if err := adapter.ValidateEffort("opencode", job.Effort); err != nil {
 		return nil, fmt.Errorf("opencode: %w", err)
 	}
@@ -93,8 +94,232 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	}
 	a.model = job.Model
 	cmd.Dir = workdir
-	cmd.Env = workerPermissions(workerEnv(os.Environ()), job.ReadDirs, job.Tools, job.Review)
+	env := workerEnv(os.Environ())
+	if job.MCPConfig != "" {
+		dir, err := bridgeConfigDir(job.MCPConfig)
+		if err != nil {
+			return nil, err
+		}
+		env = append(env, "OPENCODE_CONFIG_DIR="+dir)
+		env = foremanPermissions(env)
+	} else {
+		env = workerPermissions(env, job.ReadDirs, job.Tools, job.Review)
+	}
+	cmd.Env = env
 	return cmd, nil
+}
+
+// foremanPermissions sets the foreman's read-only scope (§4.1 item d): no
+// bash, no edits, no web fetches, and no file read outside the working
+// directory — which a foreman turn's and an attached chat's is the reading
+// checkout, so external_directory deny confines reads to it. It is the
+// review scope's own keys, set whatever the job: an ambient
+// OPENCODE_PERMISSION keeps every other rule, and these four keys are
+// replaced, so nothing the machine carries reopens the scope.
+func foremanPermissions(env []string) []string {
+	return workerPermissions(env, nil, nil, true)
+}
+
+// bridgeConfig is the harness MCP config as opencode reads it: the brigada
+// server under mcp, a local command with the session's token in its
+// environment (the 1.19 config shape — server names directly under mcp,
+// not the mcp.servers nesting of later configs).
+type bridgeConfig struct {
+	MCP map[string]bridgeServer `json:"mcp"`
+}
+
+// bridgeServer is the one server bridgeConfig offers: this binary run as
+// the mcp bridge over the engine's socket (§12.2).
+type bridgeServer struct {
+	Type        string            `json:"type"`
+	Command     []string          `json:"command"`
+	Environment map[string]string `json:"environment"`
+}
+
+// bridgeConfigFile is the name of the config the adapter writes beside the
+// runner's own MCP config, in that config's private directory.
+const bridgeConfigFile = "opencode.json"
+
+// bridgeConfigDir writes the opencode.json that carries the bridge into
+// the MCP config's own private directory (§12.2) and returns that
+// directory, which OPENCODE_CONFIG_DIR names to the CLI: the run path has
+// no MCP-config flag, but the CLI reads its config — MCP servers
+// included — from a directory the environment names, one searched before
+// the user's own and without touching it. The runner writes that
+// directory for one session (a headless turn or an attached chat) and
+// removes it whole when the session ends, so the token this file carries
+// dies with it; the source config is the harness-neutral one the runner
+// writes, and what a CLI cannot take as a flag it takes as a config file
+// named for it here.
+func bridgeConfigDir(mcpConfig string) (string, error) {
+	data, err := os.ReadFile(mcpConfig)
+	if err != nil {
+		return "", fmt.Errorf("opencode: read MCP config %q: %w", mcpConfig, err)
+	}
+	var src struct {
+		Servers map[string]struct {
+			Command string            `json:"command"`
+			Args    []string          `json:"args"`
+			Env     map[string]string `json:"env"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &src); err != nil {
+		return "", fmt.Errorf("opencode: parse MCP config %q: %w", mcpConfig, err)
+	}
+	if len(src.Servers) == 0 {
+		return "", fmt.Errorf("opencode: MCP config %q carries no server", mcpConfig)
+	}
+	cfg := bridgeConfig{MCP: make(map[string]bridgeServer, len(src.Servers))}
+	for name, s := range src.Servers {
+		cfg.MCP[name] = bridgeServer{
+			Type:        "local",
+			Command:     append([]string{s.Command}, s.Args...),
+			Environment: s.Env,
+		}
+	}
+	encoded, err := json.Marshal(cfg)
+	if err != nil {
+		return "", fmt.Errorf("opencode: encode the bridge's config: %w", err)
+	}
+	dir := filepath.Dir(mcpConfig)
+	path := filepath.Join(dir, bridgeConfigFile)
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		return "", fmt.Errorf("opencode: write the bridge's config %q: %w", path, err)
+	}
+	// The directory is the session's own, made 0700 by the runner; the
+	// chmod only pins the mode against a future that writes into a
+	// directory it did not make (§12.2: the token's file is 0600).
+	if err := os.Chmod(path, 0o600); err != nil {
+		return "", fmt.Errorf("opencode: chmod the bridge's config %q: %w", path, err)
+	}
+	return dir, nil
+}
+
+// replacePWD points the environment's PWD at dir and drops any OLDPWD:
+// the CLI resolves its working directory from $PWD in preference to its
+// cwd (the note on Command), so an inherited PWD — an attach runs from
+// the user's own directory — would point the session elsewhere however
+// cmd.Dir is set.
+func replacePWD(env []string, dir string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "PWD=") || strings.HasPrefix(kv, "OLDPWD=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "PWD="+dir)
+}
+
+// AttachCommand implements adapter.Interactive (§4.2 item 1): the CLI's
+// own terminal — the bare `opencode` TUI — continuing the foreman's
+// session by id. There is no fork onto a caller-minted id (the CLI has no
+// --session-id to take one), so the chat runs on the id it resumed and
+// the release writes that id back (WritebackSessionID); newSessionID is
+// unused. The opening prompt rides --prompt, which the 1.19.5 TUI places
+// in its input box rather than sending: the chat's first Enter submits
+// it. The bridge rides OPENCODE_CONFIG_DIR and the foreman scope
+// OPENCODE_PERMISSION, both as a headless turn carries them, and
+// OPENCODE_DISABLE_PROJECT_CONFIG keeps the checkout's own config out;
+// the user's global config still loads, its MCP servers beside the
+// bridge. The model and effort ride -m and --variant as in Command, and
+// StatusLine is ignored: the TUI has no status bar a command feeds.
+//
+// PWD is set to workdir, the reading checkout, by replacePWD above: the
+// attach does not run through the runner's exec, which sets PWD for every
+// worker command (§5.2), so the adapter carries it itself.
+func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, _ string) (*exec.Cmd, error) {
+	if job.MCPConfig == "" {
+		return nil, fmt.Errorf("opencode: an attached foreman runs with the bridge: the job carries no MCP config")
+	}
+	if err := adapter.ValidateEffort("opencode", job.Effort); err != nil {
+		return nil, fmt.Errorf("opencode: %w", err)
+	}
+	dir, err := bridgeConfigDir(job.MCPConfig)
+	if err != nil {
+		return nil, err
+	}
+	binary := a.Binary
+	if binary == "" {
+		binary = "opencode"
+	}
+	args := make([]string, 0, 8)
+	if resumeSessionID != "" {
+		args = append(args, "-s", resumeSessionID)
+	}
+	if job.Model != "" && job.Model != DefaultModel {
+		args = append(args, "-m", job.Model)
+	}
+	if job.Effort != "" {
+		args = append(args, "--variant", job.Effort)
+	}
+	if job.Prompt != "" {
+		args = append(args, "--prompt", job.Prompt)
+	}
+	cmd := exec.Command(binary, args...)
+	if cmd.Err != nil {
+		return nil, cmd.Err
+	}
+	cmd.Dir = workdir
+	env := append(workerEnv(os.Environ()), "OPENCODE_CONFIG_DIR="+dir)
+	env = replacePWD(env, workdir)
+	cmd.Env = foremanPermissions(env)
+	return cmd, nil
+}
+
+// WritebackSessionID implements adapter.SessionWriteback: an attached
+// opencode chat continues under the id it resumed — the CLI mints no id a
+// caller names — so that id is the write-back unchanged, and a chat that
+// started fresh is discovered from the CLI's own session list afterwards:
+// the newest session of the checkout, which is brigada's alone (the
+// checkout lives under the runner's state, and the attach holds the
+// foreman's live slot while the chat runs, so nothing else starts a
+// session there). A discovery that fails returns an error; the caller
+// falls back to its minted id, which the CLI does not know, and the next
+// headless turn refuses the resume and starts fresh in place (§5.6).
+func (a *Adapter) WritebackSessionID(ctx context.Context, workdir, resumeSessionID string) (string, error) {
+	if resumeSessionID != "" {
+		return resumeSessionID, nil
+	}
+	binary := a.Binary
+	if binary == "" {
+		binary = "opencode"
+	}
+	cmd := exec.CommandContext(ctx, binary, "session", "list", "--format", "json", "-n", "16")
+	cmd.Dir = workdir
+	cmd.Env = replacePWD(workerEnv(os.Environ()), workdir)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("opencode: list the sessions of %s: %w", workdir, err)
+	}
+	var sessions []struct {
+		ID        string `json:"id"`
+		Directory string `json:"directory"`
+		Updated   int64  `json:"updated"`
+	}
+	if err := json.Unmarshal(out, &sessions); err != nil {
+		return "", fmt.Errorf("opencode: parse the session list: %w", err)
+	}
+	// The CLI stores a session's directory resolved (macOS names a
+	// /var/folders checkout /private/var/folders), so both spellings of
+	// the checkout are matched before the newest wins.
+	resolved := workdir
+	if r, err := filepath.EvalSymlinks(workdir); err == nil {
+		resolved = r
+	}
+	best, bestUpdated := "", int64(0)
+	for _, s := range sessions {
+		if s.Directory != workdir && s.Directory != resolved {
+			continue
+		}
+		if s.Updated > bestUpdated {
+			best, bestUpdated = s.ID, s.Updated
+		}
+	}
+	if best == "" {
+		return "", fmt.Errorf("opencode: the CLI's session list holds no session of %s", workdir)
+	}
+	return best, nil
 }
 
 // Keep the CLI's ambient login state, but never the runner's secrets (§5.1).

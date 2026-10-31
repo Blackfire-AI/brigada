@@ -20,6 +20,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
 	"github.com/Blackfire-AI/brigada/internal/adapter/codex"
 	"github.com/Blackfire-AI/brigada/internal/adapter/kimi"
+	"github.com/Blackfire-AI/brigada/internal/adapter/opencode"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/foreman"
@@ -170,6 +171,12 @@ func defaultAdapterForAttach(harness string) (adapter.Adapter, bool) {
 		return &codex.Adapter{}, true
 	case "kimi":
 		return &kimi.Adapter{}, true
+	case "opencode":
+		// The foreman's turn carries the bridge through a config directory
+		// the adapter writes beside the runner's MCP config, and the TUI
+		// continues the session by id; the write-back rides the adapter's
+		// SessionWriteback.
+		return &opencode.Adapter{}, true
 	}
 	return nil, false
 }
@@ -242,6 +249,31 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 		Prompt: res.Prompt, Model: res.Model, Effort: res.Effort, MCPConfig: config,
 		StatusLine: statusLineCommand(rt),
 	}
+	// The id the release writes back (§4.2 item 1): the client's minted
+	// one, unless the adapter's CLI keeps its own session id — opencode
+	// continues the id it resumed, and a fresh chat's id is discovered
+	// from the CLI's own session list once the chat ends — in which case
+	// the chat's own id is what the next headless turn must resume. The
+	// settlement runs again after the CLI exits, for a chat that started
+	// fresh names its id only then.
+	releaseID := newSessionID
+	settleWriteback := func(resume string) string {
+		wb, ok := ad.(adapter.SessionWriteback)
+		if !ok {
+			return newSessionID
+		}
+		wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		id, err := wb.WritebackSessionID(wctx, checkout.Path, resume)
+		if err != nil {
+			fmt.Fprintf(stderr, "brigada: warning: the %s chat's session could not be named (%v); the release writes the minted id, which the CLI does not know, and the next turn starts a fresh session in place\n", res.Harness, err)
+			return newSessionID
+		}
+		return id
+	}
+	if res.SessionID != "" {
+		releaseID = settleWriteback(res.SessionID)
+	}
 	// build makes the harness command resuming the given session, or
 	// starting fresh for "". The terminal's own streams, not the
 	// command's writers: the attached session is the user's, and in
@@ -250,6 +282,7 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 	// back. The one exception is a resume's stderr, copied to a small
 	// tail as well: it is where the CLI says it does not know the
 	// session, which the attach then starts fresh instead.
+	resumed := res.SessionID
 	build := func(resume string) (*exec.Cmd, *tailBuffer, error) {
 		cmd, err := inter.AttachCommand(job, checkout.Path, resume, newSessionID)
 		if err != nil {
@@ -276,17 +309,18 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigs)
-	fmt.Fprintf(stdout, "attached to the foreman of project %d (hold %d, session %s)\n", project, res.HoldID, newSessionID)
+	fmt.Fprintf(stdout, "attached to the foreman of project %d (hold %d, session %s)\n", project, res.HoldID, releaseID)
 	if err := cmd.Start(); err != nil {
 		defer removeConfig()
 		return abandon(fmt.Errorf("start the %s session: %w", res.Harness, err))
 	}
 	// Whatever ends the session from here — a clean exit, a crash, a
-	// signal — the config dies with it and the hold is released with
-	// the id the chat ended on, which is the client's own whatever the
-	// CLI did (§4.2: the client generated it for exactly this).
+	// signal — the config dies with it and the hold is released with the
+	// id the chat ended on: the client's minted one (claude forks the
+	// resumed session onto it), or the CLI's own the adapter names
+	// (SessionWriteback), settled below before this defer runs.
 	defer removeConfig()
-	defer releaseAttach(ctx, client, res.HoldID, newSessionID, stderr)
+	defer func() { releaseAttach(ctx, client, res.HoldID, releaseID, stderr) }()
 
 	// The session's own context is the terminal's with the interrupts
 	// taken out (main wraps them in signal.NotifyContext, so a Ctrl-C
@@ -333,6 +367,7 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 		// resume was a saving, not a requirement, so the chat starts a
 		// fresh session, and the release writes its id back as usual.
 		fmt.Fprintf(stderr, "brigada: the %s CLI does not know the foreman's last session (%s); starting a fresh one\n", res.Harness, res.SessionID)
+		resumed = ""
 		fresh, _, err := build("")
 		if err == nil {
 			err = fresh.Start()
@@ -344,6 +379,11 @@ func runAttachedSession(ctx context.Context, rt *runtime, client *api.Client, pr
 			waitErr = fresh.Wait()
 		}
 	}
+	// A fresh chat on a CLI that keeps its own session ids names its
+	// session only now, after the CLI exited; a resumed one settles the
+	// same id again. This is the releaseID the deferred release above
+	// writes back, whatever ended the chat.
+	releaseID = settleWriteback(resumed)
 	stopForward()
 	stopBeats()
 	<-beatsDone

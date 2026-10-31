@@ -205,7 +205,10 @@ func mcpConfigsDir(stateDir string) string {
 // directory (that is the working directory the harness reads at will),
 // and never a command line, which anyone listing processes could read.
 // The token reaches this file and the bridge it names; the caller
-// deletes both with RemoveMCPConfig when the session ends.
+// deletes both with RemoveMCPConfig when the session ends. The directory
+// is the session's alone, and an adapter may write its own CLI's shape
+// of the bridge beside config.json (opencode's opencode.json): the
+// removal takes the directory whole.
 //
 // Every failure after the directory is made removes what it made — a
 // partial file included — so the caller's error path has no debris to
@@ -250,15 +253,17 @@ func WriteMCPConfig(stateDir, socket, token string) (string, error) {
 }
 
 // RemoveMCPConfig removes one MCP config WriteMCPConfig wrote — the
-// file, then the private directory it lived in — whatever ended the
-// session. The token inside is dead with its lease or hold; the file
-// must not outlive it. A path already gone is not an error, so the
-// removal is idempotent; any other failure is the caller's to report.
+// config.json first, then the private directory whole, for an adapter may
+// have written its own CLI's shape of the bridge beside it (§5.2), and
+// that file carries the same token — whatever ended the session. The
+// token inside is dead with its lease or hold; the file must not outlive
+// it. A path already gone is not an error, so the removal is idempotent;
+// any other failure is the caller's to report.
 func RemoveMCPConfig(path string) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := os.Remove(filepath.Dir(path)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.RemoveAll(filepath.Dir(path)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil

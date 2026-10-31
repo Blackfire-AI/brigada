@@ -1,7 +1,9 @@
 package opencode
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -29,9 +31,11 @@ func TestNameAndForemanCapability(t *testing.T) {
 	if a.Name() != "opencode" {
 		t.Errorf("Name() = %q", a.Name())
 	}
-	if adapter.ResumeCapable(a.Name()) {
-		t.Fatal("opencode cannot carry the foreman's MCP bridge")
+	if !adapter.ResumeCapable(a.Name()) {
+		t.Fatal("opencode must be a harness the foreman can run on: it resumes headless and carries the bridge")
 	}
+	var _ adapter.Interactive = a
+	var _ adapter.SessionWriteback = a
 }
 
 func TestCommand(t *testing.T) {
@@ -73,12 +77,179 @@ func TestCommand(t *testing.T) {
 	}
 }
 
-func TestCommandMCPConfigRefused(t *testing.T) {
+// writeTurnConfig mimics the runner's per-session MCP config (§12.2): a
+// private directory holding the harness-neutral config the runner writes,
+// returned as the path a job's MCPConfig carries.
+func writeTurnConfig(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	config := `{"mcpServers":{"brigada":{"command":"/usr/local/bin/brigada","args":["mcp","--socket","/run/brigada/api.sock"],"env":{"BRIGADA_TOKEN":"lease-secret-9"}}}}`
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestCommandForeman(t *testing.T) {
+	stubCLI(t)
+	t.Setenv("BRIGADA_RUNNER_TOKEN", "runner-private-value")
+	config := writeTurnConfig(t)
+	const foremanScope = `OPENCODE_PERMISSION={"bash":"deny","edit":"deny","external_directory":"deny","webfetch":"deny"}`
 	for _, resume := range []string{"", "ses_123"} {
-		_, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", MCPConfig: "/bridge/config.json"}, t.TempDir(), resume)
-		if err == nil || !strings.Contains(err.Error(), "MCP-config") {
-			t.Errorf("resume %q: error = %v, want MCP-config refusal", resume, err)
+		cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Model: "provider/model", MCPConfig: config}, t.TempDir(), resume)
+		if err != nil {
+			t.Fatalf("resume %q: %v", resume, err)
 		}
+		if (resume != "") != slices.Contains(cmd.Args, "-s") {
+			t.Errorf("resume %q: args = %q", resume, cmd.Args)
+		}
+		wantDir := filepath.Dir(config)
+		if !slices.Contains(cmd.Env, "OPENCODE_CONFIG_DIR="+wantDir) {
+			t.Errorf("resume %q: the bridge's config directory is not named to the CLI among %q", resume, cmd.Env)
+		}
+		if !slices.Contains(cmd.Env, foremanScope) {
+			t.Errorf("resume %q: the foreman scope is not the review's own keys among %q", resume, cmd.Env)
+		}
+		if !slices.Contains(cmd.Env, "OPENCODE_DISABLE_PROJECT_CONFIG=1") {
+			t.Errorf("resume %q: the repository's opencode config is not disabled", resume)
+		}
+		for _, kv := range cmd.Env {
+			if strings.Contains(kv, "runner-private-value") || strings.Contains(kv, "lease-secret-9") {
+				t.Errorf("resume %q: a secret reached the CLI's environment: %s", resume, kv)
+			}
+		}
+		// The bridge's own config, written beside the runner's, carries
+		// the token where only the CLI and the bridge read it.
+		bridge, err := os.ReadFile(filepath.Join(wantDir, "opencode.json"))
+		if err != nil {
+			t.Fatalf("resume %q: %v", resume, err)
+		}
+		var got struct {
+			MCP map[string]struct {
+				Type        string            `json:"type"`
+				Command     []string          `json:"command"`
+				Environment map[string]string `json:"environment"`
+			} `json:"mcp"`
+		}
+		if err := json.Unmarshal(bridge, &got); err != nil {
+			t.Fatalf("resume %q: parse the bridge's config: %v", resume, err)
+		}
+		server, ok := got.MCP["brigada"]
+		if !ok || server.Type != "local" || !slices.Equal(server.Command, []string{"/usr/local/bin/brigada", "mcp", "--socket", "/run/brigada/api.sock"}) || !reflect.DeepEqual(server.Environment, map[string]string{"BRIGADA_TOKEN": "lease-secret-9"}) {
+			t.Errorf("resume %q: bridge server = %+v", resume, server)
+		}
+	}
+	// A config the runner's own write would answer with is refused
+	// plainly, never run half-configured.
+	if _, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", MCPConfig: filepath.Join(t.TempDir(), "gone.json")}, t.TempDir(), ""); err == nil || !strings.Contains(err.Error(), "gone.json") {
+		t.Errorf("a missing MCP config: error = %v, want it named", err)
+	}
+}
+
+func TestAttachCommand(t *testing.T) {
+	stubCLI(t)
+	t.Setenv("BRIGADA_RUNNER_TOKEN", "runner-private-value")
+	t.Setenv("PWD", "/the/users/own/directory")
+	if _, err := (&Adapter{}).AttachCommand(adapter.Job{Prompt: "p"}, t.TempDir(), "ses_1", "minted-1"); err == nil || !strings.Contains(err.Error(), "MCP config") {
+		t.Errorf("a job without the bridge: error = %v, want the missing MCP config named", err)
+	}
+	config := writeTurnConfig(t)
+	const prompt = "opening prompt with `quotes` and\nnewlines"
+	cmd, err := (&Adapter{}).AttachCommand(adapter.Job{Prompt: prompt, Model: "provider/model", Effort: "high", MCPConfig: config}, "/checkout", "ses_9", "minted-9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"opencode", "-s", "ses_9", "-m", "provider/model", "--variant", "high", "--prompt", prompt}
+	if !slices.Equal(cmd.Args, want) {
+		t.Errorf("args = %q, want %q", cmd.Args, want)
+	}
+	if cmd.Dir != "/checkout" {
+		t.Errorf("Dir = %q, want /checkout", cmd.Dir)
+	}
+	for _, flag := range []string{"--auto", "--yolo", "--dangerously-skip-permissions", "--fork"} {
+		if slices.Contains(cmd.Args, flag) {
+			t.Errorf("unexpected flag %q", flag)
+		}
+	}
+	if !slices.Contains(cmd.Env, "PWD=/checkout") {
+		t.Errorf("the checkout is not named as PWD among %q", cmd.Env)
+	}
+	if slices.ContainsFunc(cmd.Env, func(kv string) bool { return strings.HasPrefix(kv, "OLDPWD=") || kv == "PWD=/the/users/own/directory" }) {
+		t.Errorf("an inherited PWD survived among %q", cmd.Env)
+	}
+	if !slices.Contains(cmd.Env, "OPENCODE_CONFIG_DIR="+filepath.Dir(config)) {
+		t.Errorf("the bridge's config directory is not named to the CLI among %q", cmd.Env)
+	}
+	if !slices.Contains(cmd.Env, `OPENCODE_PERMISSION={"bash":"deny","edit":"deny","external_directory":"deny","webfetch":"deny"}`) {
+		t.Errorf("the foreman scope is missing among %q", cmd.Env)
+	}
+	for _, kv := range cmd.Env {
+		if strings.Contains(kv, "runner-private-value") {
+			t.Errorf("a runner secret reached the chat: %s", kv)
+		}
+	}
+	// A fresh chat carries no session flag at all.
+	fresh, err := (&Adapter{}).AttachCommand(adapter.Job{Prompt: "p", MCPConfig: config}, "/checkout", "", "minted-9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(fresh.Args, "-s") {
+		t.Errorf("a fresh chat names a session: %q", fresh.Args)
+	}
+}
+
+// stubSessionListCLI writes a stub opencode whose `session list --format
+// json` prints the given JSON; any other invocation fails.
+func stubSessionListCLI(t *testing.T, list string) string {
+	t.Helper()
+	dir := t.TempDir()
+	fixture := filepath.Join(dir, "sessions.json")
+	if err := os.WriteFile(fixture, []byte(list), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "opencode")
+	// /bin/cat, not cat: an earlier stubCLI in the same test may have
+	// narrowed PATH to a directory that holds nothing but the CLI.
+	script := "#!/bin/sh\ncase \"$*\" in *\"session list --format json\"*) /bin/cat '" + fixture + "' ;; *) exit 111 ;; esac\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestWritebackSessionID(t *testing.T) {
+	// A chat that resumed a session keeps its id: the CLI is not asked.
+	stubCLI(t)
+	id, err := (&Adapter{}).WritebackSessionID(context.Background(), t.TempDir(), "ses_kept")
+	if err != nil || id != "ses_kept" {
+		t.Errorf("writeback = %q, %v; want ses_kept, no error", id, err)
+	}
+
+	// A fresh chat's id is discovered from the CLI's own list: the
+	// newest session of the checkout wins, other directories and older
+	// ones of the same checkout do not, and a checkout stored resolved
+	// (/private/... on macOS) still matches.
+	checkout := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := fmt.Sprintf(`[
+		{"id":"ses_other","directory":"/somewhere/else","updated":99},
+		{"id":"ses_old","directory":%q,"updated":10},
+		{"id":"ses_new","directory":%q,"updated":42}
+	]`, resolved, checkout)
+	a := &Adapter{Binary: stubSessionListCLI(t, list)}
+	id, err = a.WritebackSessionID(context.Background(), checkout, "")
+	if err != nil || id != "ses_new" {
+		t.Errorf("writeback = %q, %v; want ses_new, no error", id, err)
+	}
+
+	// No session of the checkout: an error, never a guess.
+	a = &Adapter{Binary: stubSessionListCLI(t, `[]`)}
+	if _, err := a.WritebackSessionID(context.Background(), checkout, ""); err == nil {
+		t.Error("an empty session list must be an error")
 	}
 }
 

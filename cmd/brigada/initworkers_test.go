@@ -89,8 +89,9 @@ func TestInitOpenCodeMultiPick(t *testing.T) {
 			if err := os.WriteFile(path, script, 0755); err != nil {
 				t.Fatal(err)
 			}
-			// Use codex (the only foreman is its default), then the picks.
-			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\n"+tc.answer+"n\n", "--signed-in", "codex", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
+			// The foreman question first (its default answer is codex, for
+			// opencode can plan too now), then use codex, then the picks.
+			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\n\n"+tc.answer+"n\n", "--signed-in", "codex", "--accept-limited", "--check", "true", "--tools", "none", "--no-wiring")
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 				t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 			}
