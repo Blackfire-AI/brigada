@@ -22,14 +22,27 @@ Contents:
 
 ## 1. Install and `brigada init`
 
-You need Go 1.27 or newer, `git`, a repository with a git remote, and signed-in agent CLIs on `PATH`.
+You need `git`, a repository with a git remote, and signed-in agent CLIs on `PATH`. macOS and Linux on amd64 and arm64 are supported; Windows is not. Homebrew, the install script and the prebuilt binaries need no Go toolchain; `go install` needs Go 1.27 or newer.
+
+```sh
+brew install blackfire-ai/tap/brigada
+brigada version
+```
+
+or the install script (it verifies the release against `SHA256SUMS` and installs into `~/.local/bin` without sudo):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Blackfire-AI/brigada/main/install.sh | sh
+```
+
+or `go install`, with `$(go env GOPATH)/bin` on your `PATH`:
 
 ```sh
 go install github.com/Blackfire-AI/brigada/cmd/brigada@latest
 brigada version
 ```
 
-Make sure `$(go env GOPATH)/bin` is on your `PATH`.
+Prebuilt binaries are on the [releases page](https://github.com/Blackfire-AI/brigada/releases).
 
 ### The parts
 
@@ -1336,7 +1349,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 ### Projects
 
-- `brigada project foreman [--repo URL] [--harness H --model M [--effort E]]`: show the repo's foreman (`claude` or `codex`) and its effort, or set them with `--harness` and `--model`; `--repo` defaults to the chosen remote of the working directory. See [section 11](#11-the-foremans-harness-claude-codex-or-opencode).
+- `brigada project foreman [--repo URL] [--harness H --model M [--effort E]]`: show the repo's foreman (`claude`, `codex` or `opencode`) and its effort, or set them with `--harness` and `--model`; `--repo` defaults to the chosen remote of the working directory. See [section 11](#11-the-foremans-harness-claude-codex-or-opencode).
 - `brigada project list`: every project with its foreman, active plans and needs-you count. See [section 3](#3-several-repositories).
 - `brigada project set [--repo URL] key=value ...`, `brigada project show [--repo URL]`: set and read the project's settings and where each comes from. See [section 6](#local-only-settings).
 - `brigada project import [--repo URL] [--file PATH] [--yes]`: import `.brigada/project.yaml`. See [section 6](#importing-and-provenance).

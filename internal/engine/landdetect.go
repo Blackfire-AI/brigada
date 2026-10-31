@@ -10,15 +10,17 @@ import (
 )
 
 // LandedCommit is one landing the runner detected (§7.1): a commit on
-// the project's default branch that carries the task's Brigada-Task
+// the project's landing branch — the land target when one is set, else
+// the default branch — that carries the task's Brigada-Task
 // trailer, whatever made the commit.
 type LandedCommit struct {
 	TaskID int64  `json:"task_id"`
 	Commit string `json:"commit"`
 }
 
-// RecordLanded records landings the runner detected from the default
-// branch's trailers (§7.1): a hand squash, or a brigada land in the
+// RecordLanded records landings the runner detected from the landing
+// branch's trailers — the land target when one is set, else the default
+// branch (§7.1): a hand squash, or a brigada land in the
 // user's clone, whose commits the land job never made. Each entry whose
 // task belongs to the project repoURL names is written as a landing
 // record — the engine's "landed" mark, carrying the commit — unless one
@@ -50,7 +52,7 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 	}
 	// Every landing the detection reports is written before any
 	// dependent is released: a chain landed together by hand — head and
-	// tail both on the default branch, each by its own trailer — must
+	// tail both on the landing branch, each by its own trailer — must
 	// have the tail's row written before the head's landing re-runs the
 	// rule on the tail, or the rule would queue a land job for a task
 	// that is already on the branch.
@@ -158,7 +160,8 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 	return nil
 }
 
-// settleLandedTx brings a task whose commit is on the default branch to
+// settleLandedTx brings a task whose commit is on the landing branch —
+// the land target when one is set, else the default branch — to
 // its landed end state (§7.1): a landing not yet pushed — waiting at the
 // push gate, or left to the user under gate_push never — becomes pushed
 // at the commit that carries the trailer, and a task parked at needs_foreman by a failed landing
