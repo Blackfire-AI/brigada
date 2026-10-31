@@ -432,9 +432,7 @@ func TestRunnerStallKillsProcessTree(t *testing.T) {
 	defer p.stop(t)
 
 	e.waitUntil("the worker and its child to start", func() bool {
-		_, errParent := os.Stat(filepath.Join(markers, "parent"))
-		_, errChild := os.Stat(filepath.Join(markers, "child"))
-		return errParent == nil && errChild == nil
+		return markerHoldsPID(markers, "parent") && markerHoldsPID(markers, "child")
 	})
 	parent := readMarkerPID(t, markers, "parent")
 	child := readMarkerPID(t, markers, "child")
@@ -497,9 +495,8 @@ func TestRunnerStallKillsChildAfterLeaderExits(t *testing.T) {
 	defer p.stop(t)
 
 	e.waitUntil("the worker and its child to start", func() bool {
-		_, errChild := os.Stat(filepath.Join(markers, "child"))
 		_, errStarted := os.Stat(filepath.Join(markers, "started"))
-		return errChild == nil && errStarted == nil
+		return markerHoldsPID(markers, "child") && errStarted == nil
 	})
 	child := readMarkerPID(t, markers, "child")
 
@@ -524,6 +521,18 @@ func TestRunnerStallKillsChildAfterLeaderExits(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	e.assertNoWorktrees()
+}
+
+// markerHoldsPID reports whether a pid marker is complete: the shell's
+// `echo $$ > file` creates the file before it writes the pid, so a
+// marker that exists may still be empty.
+func markerHoldsPID(markers, name string) bool {
+	data, err := os.ReadFile(filepath.Join(markers, name))
+	if err != nil {
+		return false
+	}
+	_, err = strconv.Atoi(strings.TrimSpace(string(data)))
+	return err == nil
 }
 
 // readMarkerPID reads a pid the worker wrote to its markers directory.

@@ -18,7 +18,10 @@ import (
 
 // The concurrency tests bound every wait: a worker that expects its
 // sibling gives up after eight seconds and a test's own waits end at
-// ten, so a sequential regression fails instead of hanging.
+// ten, so a sequential regression fails instead of hanging. Their
+// runners take implement jobs only: a finished work job queues its
+// review, and a review run of the same script would leave a marker of
+// its own.
 
 // rendezvousWorker starts, then waits (bounded) until a second worker
 // has started too; it leaves a "met" marker only if it saw the second.
@@ -71,7 +74,7 @@ func TestRunnerMaxParallelRunsJobsConcurrently(t *testing.T) {
 	markers := markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, rendezvousWorker), 100*time.Millisecond,
-		func(c *Config) { c.MaxParallel = 2 })
+		func(c *Config) { c.MaxParallel = 2; c.Agents[0].Classes = []string{"implement"} })
 	defer p.stop(t)
 
 	for _, job := range jobs {
@@ -96,7 +99,7 @@ func TestRunnerMaxParallelOneIsSequential(t *testing.T) {
 	markers := markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, logWorker), 100*time.Millisecond,
-		func(c *Config) { c.MaxParallel = 1 })
+		func(c *Config) { c.MaxParallel = 1; c.Agents[0].Classes = []string{"implement"} })
 	defer p.stop(t)
 
 	for _, job := range jobs {

@@ -30,7 +30,7 @@ func (e *testEnv) setForeman(harness, model string) {
 	e.t.Helper()
 	// Older fixtures seed no URL; every foreman now needs code to read.
 	repo := newRemote(e.t)
-	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	err := e.update(func(tx *sql.Tx) error {
 		_, err := tx.Exec("UPDATE projects SET foreman_harness = ?, foreman_model = ?, repo_url = COALESCE(NULLIF(repo_url, ''), ?) WHERE id = ?",
 			harness, model, repo, e.project)
 		return err
@@ -104,7 +104,7 @@ func TestRunnerForemanTurnRunsInScratchDir(t *testing.T) {
 	remote := newRemote(t)
 	git(t, "", "--git-dir", strings.TrimPrefix(remote, "file://"), "branch", "project-default", "main")
 	e.seedProject(remote)
-	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	if err := e.update(func(tx *sql.Tx) error {
 		_, err := tx.Exec("UPDATE projects SET default_branch = 'project-default' WHERE id = ?", e.project)
 		return err
 	}); err != nil {
@@ -826,7 +826,7 @@ func TestRunnerForemanTurnStartsFreshWhenResumeIsRejected(t *testing.T) {
 	e.seedProject("")
 	e.setForeman("fake", "fake-1")
 	key := "foreman:" + strconv.FormatInt(e.project, 10)
-	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	if err := e.update(func(tx *sql.Tx) error {
 		_, err := tx.Exec(`INSERT INTO sessions (key, harness_session_id, state, created_at)
 			VALUES (?, 'stale-sess', 'active', '2026-01-01T00:00:00Z')`, key)
 		return err

@@ -27,7 +27,7 @@ func (e *testEnv) setTaskExtra(task int64, repos ...engine.ExtraRepo) {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	err = e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	err = e.update(func(tx *sql.Tx) error {
 		_, err := tx.Exec("UPDATE tasks SET extra_repos = ? WHERE id = ?", string(b), task)
 		return err
 	})
