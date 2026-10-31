@@ -19,20 +19,24 @@ dsh (experimental): init can't check sign-in.
 [1m━━ Step 1 of 4 · the foreman[0m
 [38;2;138;143;152m  The foreman plans the work and decides what happens when a task needs[0m
 [38;2;138;143;152m  judgment. It runs whenever work finishes, so it uses that agent's quota.[0m
-[38;2;138;143;152m  Only claude and codex can be the foreman.[0m
+[38;2;138;143;152m  Only claude, codex and opencode can be the foreman.[0m
 [38;2;138;143;152m    Which model should the foreman run?[0m
-    ▸[38;2;108;198;224m 1[0m  [1mclaude/sonnet[0m               [38;2;138;143;152mSonnet 4 · Balanced[0m
-     [38;2;108;198;224m 2[0m  claude/opus                 [38;2;138;143;152mOpus 4 · Most capable[0m
-     [38;2;108;198;224m 3[0m  claude/haiku                [38;2;138;143;152mfastest; fine for small tasks[0m
-     [38;2;108;198;224m 4[0m  claude/claude-sonnet-4[1m]  [38;2;138;143;152mSonnet, 1M context[0m
-     [38;2;108;198;224m 5[0m  claude/claude-opus-4        [38;2;138;143;152mOpus 4 · Most capable[0m
-     [38;2;108;198;224m 6[0m  codex/gpt-6.1-sol           [38;2;138;143;152myour codex default (~/.codex/config.toml)[0m
-     [38;2;108;198;224m 7[0m  codex/gpt-5                 [38;2;138;143;152mEarlier coding model.[0m
-     [38;2;108;198;224m 8[0m  codex/gpt-5.4-mini          [38;2;138;143;152mA smaller coding model for quick tasks,
-                                     with a long description that must wrap
-                                     within the menu without losing any of its
-                                     words.[0m
-[1m    Pick 1-8, or type harness/model [0m[38;2;108;198;224m[1][0m[1m:[0m
+    ▸[38;2;108;198;224m 1[0m  [1mclaude/sonnet[0m                     [38;2;138;143;152mSonnet 4 · Balanced[0m
+     [38;2;108;198;224m 2[0m  claude/opus                       [38;2;138;143;152mOpus 4 · Most capable[0m
+     [38;2;108;198;224m 3[0m  claude/haiku                      [38;2;138;143;152mfastest; fine for small tasks[0m
+     [38;2;108;198;224m 4[0m  claude/claude-sonnet-4[1m]        [38;2;138;143;152mSonnet, 1M context[0m
+     [38;2;108;198;224m 5[0m  claude/claude-opus-4              [38;2;138;143;152mOpus 4 · Most capable[0m
+     [38;2;108;198;224m 6[0m  codex/gpt-6.1-sol                 [38;2;138;143;152myour codex default
+                                           (~/.codex/config.toml)[0m
+     [38;2;108;198;224m 7[0m  codex/gpt-5                       [38;2;138;143;152mEarlier coding model.[0m
+     [38;2;108;198;224m 8[0m  codex/gpt-5.4-mini                [38;2;138;143;152mA smaller coding model for quick
+                                           tasks, with a long description that
+                                           must wrap within the menu without
+                                           losing any of its words.[0m
+     [38;2;108;198;224m 9[0m  opencode/zai-coding-plan/glm-5.3  [38;2;138;143;152mGLM-5.3, 200K context[0m
+     [38;2;108;198;224m10[0m  opencode/zai-coding-plan/glm-5.2  [38;2;138;143;152mGLM-5.2, 200K context[0m
+     [38;2;108;198;224m11[0m  opencode/opencode/deepseek-v3     [38;2;138;143;152mDeepSeek V3, 1M context[0m
+[1m    Pick 1-11, or type harness/model [0m[38;2;108;198;224m[1][0m[1m:[0m
     [38;2;138;143;152mHow hard should the foreman think? Higher means better plans and decisions,
     and slower turns that use more of the plan's limits.[0m
     ▸[38;2;108;198;224m 1[0m  [1mmedium[0m  [38;2;138;143;152mClaude Code's default[0m

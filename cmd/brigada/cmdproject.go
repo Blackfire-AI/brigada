@@ -663,9 +663,9 @@ func runProjectForeman(ctx context.Context, args []string, stdout, stderr io.Wri
 		noStart bool
 	)
 	fs.StringVar(&repo, "repo", "", "the repository URL; empty = the origin of the working directory")
-	fs.StringVar(&harness, "harness", "", "the foreman's harness (claude or codex: a CLI that resumes headless); empty = show the choice")
+	fs.StringVar(&harness, "harness", "", "the foreman's harness (claude, codex or opencode: a CLI that resumes headless); empty = show the choice")
 	fs.StringVar(&model, "model", "", "the foreman's model; goes with --harness")
-	fs.StringVar(&effort, "effort", "", "the foreman's reasoning effort, validated per harness (claude: low|medium|high|xhigh|max; codex: none|minimal|low|medium|high|xhigh|max|ultra); goes with --harness; empty = the CLI's default")
+	fs.StringVar(&effort, "effort", "", "the foreman's reasoning effort, validated per harness (claude: low|medium|high|xhigh|max; codex: none|minimal|low|medium|high|xhigh|max|ultra; opencode: a provider variant such as high or minimal); goes with --harness; empty = the CLI's default")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code

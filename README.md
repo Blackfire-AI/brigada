@@ -9,7 +9,7 @@
 
 You may pay for more than one AI coding subscription. brigada sits above their official command-line tools (Claude Code, Codex CLI, Kimi CLI, opencode, and dsh, DeepSeek's CLI) and uses them as workers:
 
-- the **foreman**, one of those CLIs (claude or codex; [GUIDE section 11](docs/GUIDE.md#11-the-foremans-harness-claude-or-codex) lists what a foreman harness must do), turns what you ask for into a plan of tasks with dependencies between them. It lives in a brigada-owned session: you talk to it with `brigada attach`, and it acts headless while you are away;
+- the **foreman**, one of those CLIs (claude, codex or opencode; [GUIDE section 11](docs/GUIDE.md#11-the-foremans-harness-claude-codex-or-opencode) lists what a foreman harness must do), turns what you ask for into a plan of tasks with dependencies between them. It lives in a brigada-owned session: you talk to it with `brigada attach`, and it acts headless while you are away;
 - the **dispatcher** gives each task to the agent with the best measured record for that kind of task on *your* repo, among the agents that still have quota;
 - every task's own **check** (tests, lint, any command) runs on the result, so "done" is not taken on trust;
 - a **reviewer** from another model family than the author's when one is available (`review.family=prefer`, the default; required with `review.family=require`) reads the change;
@@ -101,7 +101,7 @@ brigada init
 
 Init walks you through four steps:
 
-1. Pick the foreman model from the signed-in Claude and Codex CLIs, then how hard it should think. `--foreman claude/sonnet@medium` supplies both.
+1. Pick the foreman model from the signed-in Claude, Codex and OpenCode CLIs, then how hard it should think. `--foreman claude/sonnet@medium` supplies both.
 2. Choose which CLIs' models may run tasks. Opencode offers a menu with multiple picks. Two model families give cross-family reviews (preferred; required with `review.family=require`); Kimi reviews only unless you let it write code.
 3. Set tasks at once on this machine (or pass `--parallel N`). Enter keeps the saved limit, else half the cores, at least 1 and at most 4.
 4. Confirm the check suggested by your build files, type your own command, or enter `-` for none. Init takes worker tools from that choice and never runs the check.

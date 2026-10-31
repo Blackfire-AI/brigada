@@ -680,15 +680,24 @@ func TestDefaultAdapterForAttachCodexIsInteractive(t *testing.T) {
 		t.Fatalf("defaultAdapterForAttach(codex) returned %T, want adapter.Interactive", ad)
 	}
 
-	for _, harness := range []string{"kimi", "opencode"} {
-		ad, ok := defaultAdapterForAttach(harness)
-		if harness == "opencode" && ok {
-			t.Errorf("defaultAdapterForAttach(%q) = %T, want unavailable", harness, ad)
-		}
-		if ok {
-			if _, interactive := ad.(adapter.Interactive); interactive {
-				t.Errorf("defaultAdapterForAttach(%q) returned an interactive adapter", harness)
-			}
+	// opencode carries an attached chat too, and settles its own
+	// session-id write-back: its TUI continues the resumed id instead of
+	// forking onto a caller-minted one.
+	ad, ok = defaultAdapterForAttach("opencode")
+	if !ok {
+		t.Fatal("defaultAdapterForAttach(opencode) = unavailable, want available")
+	}
+	if _, ok := ad.(adapter.Interactive); !ok {
+		t.Fatalf("defaultAdapterForAttach(opencode) returned %T, want adapter.Interactive", ad)
+	}
+	if _, ok := ad.(adapter.SessionWriteback); !ok {
+		t.Fatalf("defaultAdapterForAttach(opencode) returned %T, want adapter.SessionWriteback", ad)
+	}
+
+	// kimi has no interactive session to resume.
+	if ad, ok := defaultAdapterForAttach("kimi"); ok {
+		if _, interactive := ad.(adapter.Interactive); interactive {
+			t.Errorf("defaultAdapterForAttach(kimi) returned an interactive adapter (%T)", ad)
 		}
 	}
 }
