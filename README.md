@@ -23,6 +23,39 @@ brigada drives the vendors' **unmodified** CLIs, each signed in with your own ac
 
 > **Before you start.** brigada is local-first: one Go binary and a SQLite store on your machine. Workers run in git worktrees, not containers, each under its CLI's own permission scope: claude edits under `acceptEdits` with a tool allowlist (the file tools and the Go toolchain by default), codex and dsh run in an OS-level workspace-write sandbox, opencode is scoped by `OPENCODE_PERMISSION`, kimi work jobs carry no scope from brigada, and every review is read-only. The scope per harness is in [GUIDE section 8](docs/GUIDE.md#scope-per-harness). Workers inherit your environment minus the credential scrub, so a check command, a test run or a kimi worker can still reach your credentials and network. Do not point brigada at a repository you do not trust ([design §5.7](docs/design.md#57-an-environment-for-checks-and-reviews)).
 
+## Ask your coding agent to set it up
+
+The quickest door today: paste this into the coding agent you already keep open in your repository. It installs brigada and walks `brigada init`; you confirm the choices, the agent does the typing. Prefer your own hands? [Install](#install) and the [first run](#first-run-brigada-init) are below.
+
+```text
+Install brigada on this machine and set it up for this repository, then
+report what you did.
+
+1. Install brigada: `brew install blackfire-ai/tap/brigada`, or
+   `curl -fsSL https://raw.githubusercontent.com/Blackfire-AI/brigada/main/install.sh | sh`.
+   Confirm with `brigada version`.
+2. List which agent CLIs are installed and signed in — claude, codex,
+   opencode, kimi, dsh — using their status commands only: never run a
+   login, never print keys or tokens.
+3. Run `brigada init --probe` in this repository and show me the plan it
+   prints.
+4. Ask me to confirm the foreman, which CLIs' models may run tasks, the
+   check command and tasks at once; then apply the plan without further
+   questions, for example:
+   brigada init --yes --signed-in claude,codex --foreman claude/sonnet \
+     --agent harness=claude,model=sonnet --agent harness=codex,model=gpt-5 \
+     --check 'go test ./...' --parallel 4
+5. Report the agents, the files written, and that I talk to the foreman
+   with `brigada attach`. From then on, follow `.brigada/operator.md`.
+
+brigada's repository is https://github.com/Blackfire-AI/brigada; its
+README and docs/GUIDE.md answer most questions — consult them when a
+step is unclear. Stop and ask me if a step fails or a choice remains
+open. Never commit or push what init writes.
+```
+
+What the prompt's steps mean is [the guide, section 1](docs/GUIDE.md#through-your-own-harness); what the agent does afterwards is `.brigada/operator.md`, the guide init wrote — the prompt is only the door.
+
 ## Install
 
 Supported platforms are macOS and Linux, on amd64 and arm64. Windows is not supported. Homebrew, the install script, and prebuilt binaries need no Go toolchain.
@@ -118,39 +151,6 @@ After you confirm, init:
 Rerun `brigada init` to change agents, the foreman model and effort, or tasks at once; use `brigada start` after a reboot and `brigada config` to see every setting and how to change it.
 
 `brigada remove` removes brigada's repository wiring, `.brigada/operator.md` and the operator skill, and archives the project, keeping its history; see [the guide](docs/GUIDE.md#removing-brigada-from-a-repository).
-
-### Ask your coding agent to set it up
-
-The quickest door today: paste this into the coding agent you already keep open in your repository. It installs brigada and walks `brigada init`; you confirm the choices, the agent does the typing.
-
-```text
-Install brigada on this machine and set it up for this repository, then
-report what you did.
-
-1. Install brigada: `brew install blackfire-ai/tap/brigada`, or
-   `curl -fsSL https://raw.githubusercontent.com/Blackfire-AI/brigada/main/install.sh | sh`.
-   Confirm with `brigada version`.
-2. List which agent CLIs are installed and signed in — claude, codex,
-   opencode, kimi, dsh — using their status commands only: never run a
-   login, never print keys or tokens.
-3. Run `brigada init --probe` in this repository and show me the plan it
-   prints.
-4. Ask me to confirm the foreman, which CLIs' models may run tasks, the
-   check command and tasks at once; then apply the plan without further
-   questions, for example:
-   brigada init --yes --signed-in claude,codex --foreman claude/sonnet \
-     --agent harness=claude,model=sonnet --agent harness=codex,model=gpt-5 \
-     --check 'go test ./...' --parallel 4
-5. Report the agents, the files written, and that I talk to the foreman
-   with `brigada attach`. From then on, follow `.brigada/operator.md`.
-
-brigada's repository is https://github.com/Blackfire-AI/brigada; its
-README and docs/GUIDE.md answer most questions — consult them when a
-step is unclear. Stop and ask me if a step fails or a choice remains
-open. Never commit or push what init writes.
-```
-
-What the prompt's steps mean is [the guide, section 1](docs/GUIDE.md#through-your-own-harness); what the agent does afterwards is `.brigada/operator.md`, the guide init wrote — the prompt is only the door.
 
 ## The first five minutes
 
