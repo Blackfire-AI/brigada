@@ -9,8 +9,9 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/landing"
 )
 
-// ReportLanded scans a freshly refreshed foreman checkout's default
-// branch for Brigada-Task trailers and reports each task it finds to the
+// ReportLanded scans the branch a freshly refreshed foreman checkout
+// reads — the land target when one is set, else the default branch — for
+// Brigada-Task trailers and reports each task it finds to the
 // engine as landed (§7.1): a landing made outside the land job — a hand
 // squash, or a brigada land in the user's clone. It is called from a
 // headless turn and from attach, the two places the checkout is
