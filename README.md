@@ -144,8 +144,10 @@ report what you did.
 5. Report the agents, the files written, and that I talk to the foreman
    with `brigada attach`. From then on, follow `.brigada/operator.md`.
 
-Stop and ask me if a step fails or a choice is unclear. Never commit or
-push what init writes.
+brigada's repository is https://github.com/Blackfire-AI/brigada; its
+README and docs/GUIDE.md answer most questions — consult them when a
+step is unclear. Stop and ask me if a step fails or a choice remains
+open. Never commit or push what init writes.
 ```
 
 What the prompt's steps mean is [the guide, section 1](docs/GUIDE.md#through-your-own-harness); what the agent does afterwards is `.brigada/operator.md`, the guide init wrote — the prompt is only the door.

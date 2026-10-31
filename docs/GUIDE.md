@@ -195,8 +195,10 @@ report what you did.
 5. Report the agents, the files written, and that I talk to the foreman
    with `brigada attach`. From then on, follow `.brigada/operator.md`.
 
-Stop and ask me if a step fails or a choice is unclear. Never commit or
-push what init writes.
+brigada's repository is https://github.com/Blackfire-AI/brigada; its
+README and docs/GUIDE.md answer most questions — consult them when a
+step is unclear. Stop and ask me if a step fails or a choice remains
+open. Never commit or push what init writes.
 ```
 
 The steps are this section's own: step 2 is the sign-in probe above (an opencode that runs on environment keys needs `--signed-in opencode` in step 4's list, for the probe cannot confirm it), step 3 is the probe plan of [without a terminal](#without-a-terminal), and step 4 is the `--yes` apply, whose answers come from the flags of [flags](#flags) because `--yes` asks nothing. The guardrails are init's own rules: it never runs a login command or a model, reads status in memory and never prints or stores it, and writes nothing until the plan is confirmed — by you, through the agent. Once init has written `.brigada/operator.md` and the operator skill beside it, the same agent works brigada through that guide ([section 2](#2-talking-to-the-foreman-brigada-attach)): the prompt is only the door. A repository that already carries an operator guide — a rerun — needs none of this; the agent follows the guide it has.
