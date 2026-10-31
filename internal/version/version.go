@@ -97,8 +97,12 @@ func isRelease(v string) bool {
 }
 
 // hasPseudoVersion reports whether v contains the timestamp-plus-hash pair
-// every Go pseudo-version ends with.
+// every Go pseudo-version ends with. Build metadata is not part of it: Go
+// stamps a build from a modified tree v1.2.3-0.<time>-<hash>+dirty.
 func hasPseudoVersion(v string) bool {
+	if i := strings.IndexByte(v, '+'); i >= 0 {
+		v = v[:i]
+	}
 	parts := strings.FieldsFunc(v, func(r rune) bool { return r == '-' || r == '.' })
 	for i := range parts {
 		if isPseudoTail(parts, i) {

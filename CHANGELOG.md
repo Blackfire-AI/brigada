@@ -23,6 +23,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The project's land check runs gofmt, the guard tool and go vet before the tests, as CI does (issue #132): `default_check` in `.brigada/project.yaml` runs gofmt, `go run ./internal/tools/guard` and `go vet ./...` ahead of `go test ./...`, and a test keeps the check in step with CI's pre-test steps (shellcheck aside).
 - The foreman's file tools read only its checkout and its project's state (issue #131): the settings brigada writes for a headless turn and for attach confine `Read`, `Grep` and `Glob` to the reading checkout, subagents included, and no allow rule in the user's own settings lifts the refusal.
 - `scripts/land-ready.sh` waits for CI on the remote staging head, holds when no run appears within the grace period, and detects conflicting or unresolved PR mergeability (issue #128).
+- `brigada version` of a source build from a modified tree inside a tagged history no longer passes Go's stamped pseudo-version off as a release: build metadata such as `+dirty` is set aside before the pseudo-version test, so such a build prints `0.0.0-dev+<rev12>-modified` as the README says.
 
 ### Added
 
