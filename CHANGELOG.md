@@ -3,6 +3,10 @@
 The format of this file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.5] - 2026-10-31
+
+Fifth release candidate of 1.0.0. The binary changes since rc.4, so this candidate restarts the quiet period before 1.0.0. Since rc.4: role instructions and task skills — `.brigada/project.yaml` maps a file per role and names a `skills_dir`, `brigada init` writes the shipped defaults and `--take-default` resets one, `brigada instructions diff` diffs a file three ways, and every prompt runs on the texts and skills recorded when the task was made, never on a text embedded in the binary (#119, #117); reviews prefer a reviewer from another model family, the `review.family` key `prefer` or `require`, with the placement named in `status` and history (#126); opencode can be the foreman (#152), and the README's agent-setup prompt sets brigada up through your own coding agent; a done task held at the land gate keeps its plan open and `land_retry` re-queues a parked landing (#133), a plan once closed over live work reopens once at start-up (#137), a `land_ready` hold re-checks itself and releases once the gate passes (#142), and a plan whose tasks can never land stays open and says so (#122); `brigada task retire` settles tasks that will never land (#140); the sweep, a heartbeat and the retention prune ride out a busy store (#135); the foreman's file tools read only its checkout and its `issue_read` answers an issue or pull request (#131); `brigada project import` reads `.brigada/skills` when no `skills_dir` is named (#146); `scripts/land-ready.sh` waits for green CI on the staging head (#128) and the land check runs gofmt, guard and vet before the tests (#132); `brigada version` of a build from a modified tree no longer passes a pseudo-version off as a release; CI runs the engine's race tests in new shards with a cached build, and three flaky runner tests are fixed. The changes are listed under Unreleased below.
+
 ## [Unreleased]
 
 ### Added
