@@ -77,6 +77,6 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: done
+    state: needs_foreman
     branch: "brigada/task-311"
     rounds: 0
