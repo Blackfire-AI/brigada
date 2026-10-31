@@ -464,21 +464,23 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 		}
 	}
 	// A skills_dir has the client parse every skill under it; the engine
-	// takes their texts and digests, never the directory (§5.10).
+	// takes their texts and digests, never the directory (§5.10). A file
+	// that names no skills_dir reads the default .brigada/skills when it
+	// exists: `init --take-default` writes skills there without the key.
 	var skills *[]engine.Skill
-	if cfg.SkillsDir != "" {
-		root, err := gitRoot(filepath.Dir(file))
-		if err != nil {
-			return fail(stderr, err)
+	if root, err := gitRoot(filepath.Dir(file)); err == nil {
+		if dir := effectiveSkillsDir(root, cfg); dir != "" {
+			parsed, err := readSkills(root, dir)
+			if err != nil {
+				return fail(stderr, err)
+			}
+			if parsed == nil {
+				parsed = []engine.Skill{}
+			}
+			skills = &parsed
 		}
-		parsed, err := readSkills(root, cfg.SkillsDir)
-		if err != nil {
-			return fail(stderr, err)
-		}
-		if parsed == nil {
-			parsed = []engine.Skill{}
-		}
-		skills = &parsed
+	} else if cfg.SkillsDir != "" {
+		return fail(stderr, err)
 	}
 	if cfg.InstructionsFile != "" {
 		root, err := gitRoot(filepath.Dir(file))
@@ -551,7 +553,7 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 // nothing changed.
 func reportGuidanceChanges(ctx context.Context, client *api.Client, root string, content []byte, project int64, stdout io.Writer) {
 	cfg, err := engine.ParseProjectConfig(content)
-	if err != nil || project == 0 || (len(cfg.RoleFiles) == 0 && cfg.SkillsDir == "") {
+	if err != nil || project == 0 || (len(cfg.RoleFiles) == 0 && effectiveSkillsDir(root, cfg) == "") {
 		return
 	}
 	st, err := client.StatusWithFileDigests(ctx, project, currentFileDigests(root, cfg))
