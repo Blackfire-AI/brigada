@@ -649,7 +649,7 @@ func TestRunnerSpawnFailureIsInfrastructure(t *testing.T) {
 // mustExec runs one statement the test needs against the store.
 func (e *testEnv) mustExec(query string, args ...any) {
 	e.t.Helper()
-	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	if err := e.update(func(tx *sql.Tx) error {
 		_, err := tx.Exec(query, args...)
 		return err
 	}); err != nil {

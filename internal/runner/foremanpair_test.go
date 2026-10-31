@@ -161,7 +161,7 @@ func TestRunnerForemanTurnRunsOnTheSecondAdapter(t *testing.T) {
 	e.waitUntil("both agents to register", func() bool {
 		return e.int64Of("SELECT COUNT(*) FROM agents") == 2
 	})
-	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	if err := e.update(func(tx *sql.Tx) error {
 		_, err := tx.Exec("UPDATE agents SET health = 'broken', health_reason = 'test' WHERE adapter = 'fakea'")
 		return err
 	}); err != nil {
@@ -206,7 +206,7 @@ func TestRunnerWorkRunsOnTheNamedModel(t *testing.T) {
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
-	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	if err := e.update(func(tx *sql.Tx) error {
 		_, err := tx.Exec("UPDATE tasks SET effort = 'high' WHERE id = ?", task)
 		return err
 	}); err != nil {

@@ -126,11 +126,20 @@ func (e *testEnv) stopAPI() {
 	}
 }
 
+// update runs fn in one store write transaction, as the test's seeding
+// does, riding out a busy store with the engine's own bounded retry: a
+// sweep or lease of the running engine can hold the write lock past the
+// busy timeout under -race. A busy attempt rolled back, so fn re-runs
+// clean.
+func (e *testEnv) update(fn func(tx *sql.Tx) error) error {
+	return store.RetryBusy(e.ctx, func() error { return e.st.Update(e.ctx, fn) })
+}
+
 // seedProject makes a project over the given repo URL, the task's
 // remote, plus its plan.
 func (e *testEnv) seedProject(repoURL string) {
 	e.t.Helper()
-	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	err := e.update(func(tx *sql.Tx) error {
 		res, err := tx.Exec(`INSERT INTO projects (repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
 			VALUES (?, 'main', '{}', 'claude', 'sonnet', ?, ?)`, repoURL, e2eSeedTS, e2eSeedTS)
 		if err != nil {
@@ -154,7 +163,7 @@ func (e *testEnv) seedProject(repoURL string) {
 func (e *testEnv) seedTask(repoURL, checkCmd string) int64 {
 	e.t.Helper()
 	var task int64
-	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	err := e.update(func(tx *sql.Tx) error {
 		res, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, repo_url, base_ref, caps, created_at, updated_at)
 			VALUES ((SELECT id FROM plans WHERE project_id = ?), 'a task', 'the task spec', ?, 'implement', 'ready', NULLIF(?, ''), 'main', '{}', ?, ?)`,
 			e.project, e.sub(checkCmd), repoURL, e2eSeedTS, e2eSeedTS)

@@ -29,7 +29,7 @@ import (
 // land tests set the push gates, the default check and after_land.
 func (e *testEnv) setProjectSettings(settings string) {
 	e.t.Helper()
-	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	err := e.update(func(tx *sql.Tx) error {
 		_, err := tx.Exec("UPDATE projects SET settings = ? WHERE id = ?", e.sub(settings), e.project)
 		return err
 	})
@@ -117,7 +117,7 @@ func (e *testEnv) startLandRunner(t *testing.T, workerScript string, adjust ...f
 // addDep records that task depends on dep (§6.1), as a plan's edge.
 func (e *testEnv) addDep(task, dep int64) {
 	e.t.Helper()
-	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	err := e.update(func(tx *sql.Tx) error {
 		_, err := tx.Exec(`INSERT INTO task_deps (plan_id, task_id, depends_on_task_id, is_base, is_continue)
 			VALUES ((SELECT plan_id FROM tasks WHERE id = ?), ?, ?, 0, 0)`, task, task, dep)
 		return err
@@ -481,7 +481,7 @@ func TestRunnerLandRebuiltDependentDiffsAgainstTheTarget(t *testing.T) {
 	dependent := e.seedTask("", "")
 	branch := taskBranch(dependent, 1)
 	file := "task-" + strconv.FormatInt(dependent, 10) + ".txt"
-	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	err := e.update(func(tx *sql.Tx) error {
 		_, err := tx.Exec(`UPDATE tasks SET base_ref = ?, check_cmd = ? WHERE id = ?`,
 			taskBranch(dep, 1), fmt.Sprintf("test \"$(cat %s)\" = hello", file), dependent)
 		return err
@@ -559,7 +559,7 @@ func TestRunnerLandStackedOnLandedDependencyDiffsTheTree(t *testing.T) {
 	dependent := e.seedTask("", `test "$(cat shared.txt)" = "shared rewritten by the dependent"`)
 	branch := taskBranch(dependent, 1)
 	depBranch := taskBranch(dep, 1)
-	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	err := e.update(func(tx *sql.Tx) error {
 		_, err := tx.Exec(`UPDATE tasks SET base_ref = ? WHERE id = ?`, depBranch, dependent)
 		return err
 	})
@@ -634,7 +634,7 @@ func TestRunnerLandStackedOnLandedDependencyDoesNotRevertLaterLandings(t *testin
 	file := "task-" + strconv.FormatInt(dependent, 10) + ".txt"
 	branch := taskBranch(dependent, 1)
 	depBranch := taskBranch(dep, 1)
-	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	err := e.update(func(tx *sql.Tx) error {
 		_, err := tx.Exec(`UPDATE tasks SET base_ref = ?, check_cmd = ? WHERE id = ?`,
 			depBranch, fmt.Sprintf("test \"$(cat %s)\" = hello", file), dependent)
 		return err
@@ -1116,7 +1116,7 @@ func TestRunnerLandCheckRunsSetupAndSeesExtraRepos(t *testing.T) {
 	task := e.seedTask("", `test "$(cat work.txt)" = hello`)
 	setup := `{"command":"echo \"$PWD\" >> \"$TEST_MARKERS_DIR/setup-dirs\"","timeout_minutes":5}`
 	extras := `{"repos":[{"name":"tools","repo":"example.invalid/tools","url":"` + extra + `"}],"source":"task"}`
-	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+	err := e.update(func(tx *sql.Tx) error {
 		_, err := tx.Exec("UPDATE tasks SET setup = ?, extra_repos = ? WHERE id = ?", e.sub(setup), extras, task)
 		return err
 	})

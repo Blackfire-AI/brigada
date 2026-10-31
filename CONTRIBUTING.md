@@ -69,8 +69,9 @@ reviews every change before it merges.
 
 Use Conventional Commits with a scope, as in `git log`:
 `fix(init): ...`, `feat(engine): ...`, `docs: ...`. The subject says what
-the change does, in plain words. Reference the issue in the body with
-`Fixes #N`.
+the change does, in plain words. A commit that completes an issue ends
+its body with a line of its own, `Closes #N`, before any trailers; one
+that does part of it says `Refs #N`.
 
 ## License
 
