@@ -119,6 +119,37 @@ Rerun `brigada init` to change agents, the foreman model and effort, or tasks at
 
 `brigada remove` removes brigada's repository wiring, `.brigada/operator.md` and the operator skill, and archives the project, keeping its history; see [the guide](docs/GUIDE.md#removing-brigada-from-a-repository).
 
+### Ask your coding agent to set it up
+
+The quickest door today: paste this into the coding agent you already keep open in your repository. It installs brigada and walks `brigada init`; you confirm the choices, the agent does the typing.
+
+```text
+Install brigada on this machine and set it up for this repository, then
+report what you did.
+
+1. Install brigada: `brew install blackfire-ai/tap/brigada`, or
+   `curl -fsSL https://raw.githubusercontent.com/Blackfire-AI/brigada/main/install.sh | sh`.
+   Confirm with `brigada version`.
+2. List which agent CLIs are installed and signed in — claude, codex,
+   opencode, kimi, dsh — using their status commands only: never run a
+   login, never print keys or tokens.
+3. Run `brigada init --probe` in this repository and show me the plan it
+   prints.
+4. Ask me to confirm the foreman, which CLIs' models may run tasks, the
+   check command and tasks at once; then apply the plan without further
+   questions, for example:
+   brigada init --yes --signed-in claude,codex --foreman claude/sonnet \
+     --agent harness=claude,model=sonnet --agent harness=codex,model=gpt-5 \
+     --check 'go test ./...' --parallel 4
+5. Report the agents, the files written, and that I talk to the foreman
+   with `brigada attach`. From then on, follow `.brigada/operator.md`.
+
+Stop and ask me if a step fails or a choice is unclear. Never commit or
+push what init writes.
+```
+
+What the prompt's steps mean is [the guide, section 1](docs/GUIDE.md#through-your-own-harness); what the agent does afterwards is `.brigada/operator.md`, the guide init wrote — the prompt is only the door.
+
 ## The first five minutes
 
 1. Install brigada (above) and run `brigada init` in your repository (above).

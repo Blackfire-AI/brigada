@@ -170,6 +170,37 @@ brigada init --probe --agent harness=claude,model=sonnet --agent harness=codex,m
 
 If init fails after writing `project.yaml`, it says `partial init` and names the step that failed; fix the error and rerun it. Init is safe to rerun.
 
+### Through your own harness
+
+A third way to run the setup: paste a prompt into the coding agent you already keep open in this repository, and it installs brigada and walks init — the agent does the typing, you confirm the choices. A prompt that asks for exactly that:
+
+```text
+Install brigada on this machine and set it up for this repository, then
+report what you did.
+
+1. Install brigada: `brew install blackfire-ai/tap/brigada`, or
+   `curl -fsSL https://raw.githubusercontent.com/Blackfire-AI/brigada/main/install.sh | sh`.
+   Confirm with `brigada version`.
+2. List which agent CLIs are installed and signed in — claude, codex,
+   opencode, kimi, dsh — using their status commands only: never run a
+   login, never print keys or tokens.
+3. Run `brigada init --probe` in this repository and show me the plan it
+   prints.
+4. Ask me to confirm the foreman, which CLIs' models may run tasks, the
+   check command and tasks at once; then apply the plan without further
+   questions, for example:
+   brigada init --yes --signed-in claude,codex --foreman claude/sonnet \
+     --agent harness=claude,model=sonnet --agent harness=codex,model=gpt-5 \
+     --check 'go test ./...' --parallel 4
+5. Report the agents, the files written, and that I talk to the foreman
+   with `brigada attach`. From then on, follow `.brigada/operator.md`.
+
+Stop and ask me if a step fails or a choice is unclear. Never commit or
+push what init writes.
+```
+
+The steps are this section's own: step 2 is the sign-in probe above (an opencode that runs on environment keys needs `--signed-in opencode` in step 4's list, for the probe cannot confirm it), step 3 is the probe plan of [without a terminal](#without-a-terminal), and step 4 is the `--yes` apply, whose answers come from the flags of [flags](#flags) because `--yes` asks nothing. The guardrails are init's own rules: it never runs a login command or a model, reads status in memory and never prints or stores it, and writes nothing until the plan is confirmed — by you, through the agent. Once init has written `.brigada/operator.md` and the operator skill beside it, the same agent works brigada through that guide ([section 2](#2-talking-to-the-foreman-brigada-attach)): the prompt is only the door. A repository that already carries an operator guide — a rerun — needs none of this; the agent follows the guide it has.
+
 ### Changing your setup later
 
 Run `brigada init` again to change the foreman, its effort or the agents. Its questions default to the saved choices: the saved foreman and its effort (marked `current`), whether each CLI had agents, whether Kimi may write code and which OpenCode models were picked. The tasks-at-once step defaults to the saved limit. The check prompt defaults to the existing `.brigada/project.yaml` check, and Enter keeps it. A rerun adds config caps only where the key is absent and keeps the saved agent lines its answers do not replace — the runner keeps serving them — reporting what it keeps; declining a CLI's question removes its saved lines, and `--overwrite-config` replaces them. The role files follow the same rule ([Project instructions](#project-instructions)): a rerun rewrites a generated file nobody edited, and a role key missing from an existing `instructions:` map stays out — the role runs not configured, the plan says so, and `brigada init --take-default <role>` brings it back. Confirm the plan to apply changes. If the agents or task limit changed, init stops the detached runner and starts it with the new choices.
