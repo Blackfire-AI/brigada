@@ -114,3 +114,22 @@ func TestRoleFileHeader(t *testing.T) {
 		t.Errorf("header strip = %q, %q, %v, %v", a, b, err, err2)
 	}
 }
+
+// TestEffectiveSkillsDir: the client reads the named skills_dir, or the
+// default when the file names none and the default exists on disk.
+func TestEffectiveSkillsDir(t *testing.T) {
+	root := t.TempDir()
+	cfg := engine.ProjectConfig{}
+	if dir := effectiveSkillsDir(root, cfg); dir != "" {
+		t.Errorf("no skills_dir and no default directory = %q, want none", dir)
+	}
+	writeTree(t, root, map[string]string{".brigada/skills/x/SKILL.md": skillDoc})
+	if dir := effectiveSkillsDir(root, cfg); dir != engine.DefaultSkillsDir {
+		t.Errorf("no skills_dir with a default directory = %q, want %q", dir, engine.DefaultSkillsDir)
+	}
+	cfg.SkillsDir = "s"
+	writeTree(t, root, map[string]string{"s/x/SKILL.md": skillDoc})
+	if dir := effectiveSkillsDir(root, cfg); dir != "s" {
+		t.Errorf("a named skills_dir = %q, want s", dir)
+	}
+}

@@ -262,6 +262,21 @@ func skillTreeDigest(dir string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// effectiveSkillsDir is the skills directory the client reads: the one
+// project.yaml names, or the default .brigada/skills when the file names
+// none and that directory exists (§5.10) — `init --take-default` writes
+// a skill there without the key. "" when neither is in play, so no
+// skills are read or sent.
+func effectiveSkillsDir(root string, cfg engine.ProjectConfig) string {
+	if cfg.SkillsDir != "" {
+		return cfg.SkillsDir
+	}
+	if st, err := os.Stat(filepath.Join(root, filepath.FromSlash(engine.DefaultSkillsDir))); err == nil && st.IsDir() {
+		return engine.DefaultSkillsDir
+	}
+	return ""
+}
+
 // currentFileDigests are the digests of the files cfg names as they are on
 // disk now, for status to compare with what was imported. A file that
 // cannot be read is left out: its state is unknown.
@@ -272,8 +287,8 @@ func currentFileDigests(root string, cfg engine.ProjectConfig) api.FileDigests {
 			d.Roles[role] = textDigest(text)
 		}
 	}
-	if cfg.SkillsDir != "" {
-		if skills, err := readSkills(root, cfg.SkillsDir); err == nil {
+	if dir := effectiveSkillsDir(root, cfg); dir != "" {
+		if skills, err := readSkills(root, dir); err == nil {
 			for _, s := range skills {
 				d.Skills[s.Name] = engine.SkillFileDigest{Digest: s.Digest, Tree: s.TreeDigest}
 			}

@@ -171,14 +171,20 @@ func TestLandApproveThroughTheHold(t *testing.T) {
 	if ans := e.complete(g, landHeld("the release window is closed")); ans != AnsOK {
 		t.Fatalf("complete the held land job: %s", ans)
 	}
-	if n := e.landJobs(); n != 1 {
-		t.Fatalf("land jobs = %d, want only the held one", n)
+	// The hold queues the engine's re-check (issue #142): the held job
+	// done, one land job waits out the re-check interval.
+	if n := e.landJobs(); n != 2 {
+		t.Fatalf("land jobs = %d, want the held one and its re-check", n)
+	}
+	want := fmtTime(e.clock.Now().Add(landReadyRecheckDelay))
+	if got := e.str(`SELECT not_before FROM jobs WHERE task_id = ? AND kind = 'land' AND status = 'queued'`, e.task); got != want {
+		t.Errorf("the re-check's not_before = %q, want %q", got, want)
 	}
 	// The hold stands on its own: re-running the rule queues nothing, and
 	// nothing lands until the user approves.
 	e.maybeLand(e.task)
-	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land' AND status = 'queued'", e.task); n != 0 {
-		t.Errorf("queued land jobs while held = %d, want none: the hold has no job", n)
+	if n := e.landJobs(); n != 2 {
+		t.Errorf("land jobs after the rule re-ran = %d, want still 2: the hold's re-check alone", n)
 	}
 	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", e.task); n != 0 {
 		t.Errorf("landing records while held = %d, want none", n)
