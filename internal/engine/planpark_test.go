@@ -319,3 +319,309 @@ func TestRecoverKeepsAParkedPlanParked(t *testing.T) {
 		t.Errorf("work jobs = %d, want none while the plan is parked", got)
 	}
 }
+
+// needsYouPlan reads the needs-you entry of one plan, nil when absent.
+func needsYouPlan(t *testing.T, e *env, plan int64) *NeedsYouItem {
+	t.Helper()
+	st, err := e.eng.Status(e.ctx, e.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range st.NeedsYou {
+		if st.NeedsYou[i].Kind == "plan" && st.NeedsYou[i].ID == plan {
+			return &st.NeedsYou[i]
+		}
+	}
+	return nil
+}
+
+// TestASwallowedChangesVerdictIsNamed (issue #164): a done turn that
+// consumes a parked plan's changes verdict without answering it becomes
+// visible — one plan_verdict_unanswered event names the plan, the
+// verdict and the turn, and the needs-you entry names the turn ahead of
+// the findings — while the row stays consumed, the plan stays parked
+// and no new turn is submitted: the event wakes nothing.
+func TestASwallowedChangesVerdictIsNamed(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	res, _ := parkForChanges(t, e, []PlanTask{{Name: "a", Spec: "do a"}, {Name: "b", Spec: "do b"}})
+	turn := e.int("SELECT id FROM jobs WHERE kind = 'foreman' ORDER BY id DESC")
+	e.complete(e.leaseForeman(), Completion{Result: `{"status":"done"}`})
+
+	if want := []string{"consumed:" + fmt.Sprint(turn)}; !equalStrings(e.inboxStates(), want) {
+		t.Errorf("inbox after the done turn = %v, want %v", e.inboxStates(), want)
+	}
+	if p, ok := e.eventPayloadOf(evPlanVerdictUnanswered); !ok ||
+		p.Plan != res.PlanID || p.Status != verdictChanges || p.Job != turn || p.Run != 1 {
+		t.Errorf("plan_verdict_unanswered payload = %+v, want plan %d, changes, turn %d, round 1", p, res.PlanID, turn)
+	}
+	if got := e.foremanJobs(); got != 1 {
+		t.Errorf("foreman turns after the swallow = %d, want the one: the event wakes nothing", got)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planNeedsForeman {
+		t.Errorf("plan state after the swallow = %q, want still parked", got)
+	}
+	entry := needsYouPlan(t, e, res.PlanID)
+	if entry == nil || entry.State != planNeedsForeman {
+		t.Fatalf("needs-you entry = %+v, want the parked plan", entry)
+	}
+	want := fmt.Sprintf("foreman turn %d ended without answering the changes verdict", turn)
+	if !strings.Contains(entry.Reason, want) || !strings.Contains(entry.Reason, "The second task") {
+		t.Errorf("needs-you reason = %q, want the turn named ahead of the findings", entry.Reason)
+	}
+}
+
+// TestAnAnsweredVerdictIsNotNamed: a turn that answers the verdict
+// before it ends — an amendment moves the plan to reviewing with the
+// verdict cleared — swallows nothing: the row is consumed, no event, no
+// unanswered line.
+func TestAnAnsweredVerdictIsNotNamed(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	res, _ := parkForChanges(t, e, []PlanTask{{Name: "a", Spec: "do a"}})
+	g := e.leaseForeman()
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+		Respec: []PlanRespec{{Task: "a", Spec: "do a, and only a"}},
+	}); err != nil {
+		t.Fatalf("the turn answers by amending: %v", err)
+	}
+	e.complete(g, Completion{Result: `{"status":"done"}`})
+
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planReviewing {
+		t.Fatalf("plan state after the answer = %q, want %s", got, planReviewing)
+	}
+	if got := e.str("SELECT review_verdict FROM plans WHERE id = ?", res.PlanID); got != "" {
+		t.Errorf("review verdict after the answer = %q, want cleared", got)
+	}
+	if got := e.int("SELECT COUNT(*) FROM foreman_inbox WHERE state = ?", inboxConsumed); got != 1 {
+		t.Errorf("consumed rows = %d, want the verdict's one", got)
+	}
+	if got := e.countEvents(evPlanVerdictUnanswered); got != 0 {
+		t.Errorf("plan_verdict_unanswered events = %d, want none", got)
+	}
+	if entry := needsYouPlan(t, e, res.PlanID); entry != nil {
+		t.Errorf("needs-you entry = %+v, want none: the plan reviews again", entry)
+	}
+}
+
+// TestAnAcceptedVerdictIsNotNamed: plan_accept is an answer too — the
+// plan proceeds, the verdict field stays as the acceptance left it, and
+// the done turn that carried the verdict swallows nothing.
+func TestAnAcceptedVerdictIsNotNamed(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	res, _ := parkForChanges(t, e, []PlanTask{{Name: "a", Spec: "do a"}, {Name: "b", Spec: "do b", Deps: []string{"a"}}})
+	g := e.leaseForeman()
+	if _, err := e.eng.AcceptPlan(e.ctx, e.project, res.PlanID, "the findings name follow-up work, not blockers"); err != nil {
+		t.Fatalf("the turn answers by accepting: %v", err)
+	}
+	e.complete(g, Completion{Result: `{"status":"done"}`})
+
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
+		t.Fatalf("plan state after the accept = %q, want active", got)
+	}
+	if got := e.str("SELECT review_verdict FROM plans WHERE id = ?", res.PlanID); got != verdictChanges {
+		t.Errorf("review verdict after the accept = %q, want the changes verdict kept", got)
+	}
+	if got := e.countEvents(evPlanVerdictUnanswered); got != 0 {
+		t.Errorf("plan_verdict_unanswered events = %d, want none", got)
+	}
+	if entry := needsYouPlan(t, e, res.PlanID); entry != nil {
+		t.Errorf("needs-you entry = %+v, want none: the plan proceeded", entry)
+	}
+}
+
+// TestAFailedTurnOwesTheVerdictToTheWake: a failed turn returns its row
+// with an attempt and no event, no unanswered line — the wake machinery
+// owns the verdict, re-delivering it to the next turn.
+func TestAFailedTurnOwesTheVerdictToTheWake(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	res, _ := parkForChanges(t, e, nTasks(2))
+	e.complete(e.leaseForeman(), Completion{Error: "boom"})
+
+	if got := e.countEvents(evPlanVerdictUnanswered); got != 0 {
+		t.Errorf("plan_verdict_unanswered events = %d, want none", got)
+	}
+	if got := e.int("SELECT attempts FROM foreman_inbox"); got != 1 {
+		t.Errorf("attempts after the failed turn = %d, want 1", got)
+	}
+	if got := e.foremanJobs(); got != 2 {
+		t.Errorf("foreman turns after the failed turn = %d, want the re-wake's 2", got)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planNeedsForeman {
+		t.Errorf("plan state after the failed turn = %q, want still parked", got)
+	}
+	entry := needsYouPlan(t, e, res.PlanID)
+	if entry == nil {
+		t.Fatal("the parked plan is not in the needs-you queue")
+	}
+	if !strings.HasPrefix(entry.Reason, "The second task") || strings.Contains(entry.Reason, "turn") {
+		t.Errorf("needs-you reason = %q, want today's plain findings line", entry.Reason)
+	}
+}
+
+// TestAPendingVerdictRowKeepsTodaysLine: before any turn carries the
+// verdict — the woken turn cancelled, its row back to pending — the
+// needs-you entry is today's plain findings line.
+func TestAPendingVerdictRowKeepsTodaysLine(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	res, _ := parkForChanges(t, e, nTasks(2))
+	turn := e.int("SELECT id FROM jobs WHERE kind = 'foreman' ORDER BY id DESC")
+	if ans := e.cancel(turn); ans != AnsOK {
+		t.Fatalf("cancel the woken turn: %s", ans)
+	}
+	if got := e.countEvents(evPlanVerdictUnanswered); got != 0 {
+		t.Errorf("plan_verdict_unanswered events = %d, want none", got)
+	}
+	entry := needsYouPlan(t, e, res.PlanID)
+	if entry == nil || entry.State != planNeedsForeman {
+		t.Fatalf("needs-you entry = %+v, want the parked plan", entry)
+	}
+	if !strings.HasPrefix(entry.Reason, "The second task") || strings.Contains(entry.Reason, "turn") {
+		t.Errorf("needs-you reason = %q, want today's plain findings line", entry.Reason)
+	}
+}
+
+// TestAVerdictReadThroughEventsIsNotASwallow: a row the events tool
+// consumed — no turn completed done carrying it — never counts as
+// swallowed, whatever job id the row kept from an earlier delivery.
+func TestAVerdictReadThroughEventsIsNotASwallow(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	res, _ := parkForChanges(t, e, nTasks(2))
+	turn := e.int("SELECT id FROM jobs WHERE kind = 'foreman' ORDER BY id DESC")
+	if ans := e.cancel(turn); ans != AnsOK {
+		t.Fatalf("cancel the woken turn: %s", ans)
+	}
+	inbox, err := e.eng.ForemanEvents(e.ctx, e.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inbox.Events) != 1 || !strings.Contains(inbox.Events[0], theFindings) {
+		t.Fatalf("events = %v, want the verdict's line", inbox.Events)
+	}
+	if got := e.countEvents(evPlanVerdictUnanswered); got != 0 {
+		t.Errorf("plan_verdict_unanswered events = %d, want none", got)
+	}
+	if got := e.str("SELECT state FROM foreman_inbox"); got != inboxConsumed {
+		t.Errorf("the verdict's row = %s, want consumed", got)
+	}
+	entry := needsYouPlan(t, e, res.PlanID)
+	if entry == nil || !strings.HasPrefix(entry.Reason, "The second task") {
+		t.Fatalf("needs-you entry = %+v, want the plain findings line", entry)
+	}
+}
+
+// TestAVerdictReadThroughAttachIsNotASwallow: a forced attach cancels
+// the woken turn and takes the row — its job_id cleared — and releasing
+// the hold consumes it: an attached foreman that read the verdict is
+// not a turn that failed to act.
+func TestAVerdictReadThroughAttachIsNotASwallow(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	res, _ := parkForChanges(t, e, nTasks(2))
+	att, err := e.eng.Attach(e.ctx, e.project, true)
+	if err != nil || att.Answer != AnsCreated {
+		t.Fatalf("attach = %+v, %v; want created", att, err)
+	}
+	if !strings.Contains(att.Prompt, theFindings) {
+		t.Errorf("the opening prompt lacks the findings:\n%s", att.Prompt)
+	}
+	if ans, err := e.eng.ReleaseAttach(e.ctx, att.HoldID, "s-1"); err != nil || ans != AnsOK {
+		t.Fatalf("release the attach: %s, %v", ans, err)
+	}
+	if got := e.countEvents(evPlanVerdictUnanswered); got != 0 {
+		t.Errorf("plan_verdict_unanswered events = %d, want none", got)
+	}
+	if got := e.int("SELECT COALESCE(job_id, 0) FROM foreman_inbox"); got != 0 {
+		t.Errorf("the consumed row names job %d, want none", got)
+	}
+	entry := needsYouPlan(t, e, res.PlanID)
+	if entry == nil || !strings.HasPrefix(entry.Reason, "The second task") {
+		t.Fatalf("needs-you entry = %+v, want the plain findings line", entry)
+	}
+}
+
+// TestEachSwallowedVerdictGetsItsEvent: one event per swallowed verdict,
+// not one per episode — two plans' verdicts, each swallowed by its own
+// turn, each produce their event naming their own plan.
+func TestEachSwallowedVerdictGetsItsEvent(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	one := e.createPlan(nTasks(2))
+	two := e.createPlan(nTasks(2))
+	e.reviewVerdict(e.lease(e.runner2, nil, nil), verdictChanges, theFindings)
+	e.reviewVerdict(e.lease(e.runner2, nil, nil), verdictChanges, "the other plan's findings")
+	for i := 0; i < 2; i++ {
+		if before := e.countEvents(evPlanVerdictUnanswered); before != int64(i) {
+			t.Fatalf("events before swallow %d = %d, want %d", i+1, before, i)
+		}
+		e.complete(e.leaseForeman(), Completion{Result: `{"status":"done"}`})
+		if after := e.countEvents(evPlanVerdictUnanswered); after != int64(i+1) {
+			t.Fatalf("events after swallow %d = %d, want %d", i+1, after, i+1)
+		}
+	}
+	for _, id := range []int64{one.PlanID, two.PlanID} {
+		if got := e.int("SELECT COUNT(*) FROM events WHERE kind = ? AND json_extract(payload, '$.plan') = ?",
+			evPlanVerdictUnanswered, id); got != 1 {
+			t.Errorf("plan_verdict_unanswered events naming plan %d = %d, want 1", id, got)
+		}
+		if got := e.str("SELECT state FROM plans WHERE id = ?", id); got != planNeedsForeman {
+			t.Errorf("plan %d = %s, want still parked", id, got)
+		}
+	}
+}
+
+// TestAReParkAfterAnAnswerIsNamedAnew: the event is per swallowed
+// verdict — after the foreman answers and a later review parks the plan
+// again, the next swallowed verdict is named anew, with its own round
+// and turn.
+func TestAReParkAfterAnAnswerIsNamedAnew(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	res := e.createPlan([]PlanTask{{Name: "solo", Spec: "look at the branch", Class: "review"}})
+	if res.State != "active" {
+		t.Fatalf("plan state = %q, want active: a review-class single task skips the creation review", res.State)
+	}
+	// The first park: an amendment's review round 1 returns changes.
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+		Add: []PlanTask{{Name: "plain", Spec: "add the feature"}},
+	}); err != nil {
+		t.Fatalf("amend: %v", err)
+	}
+	e.reviewVerdict(e.lease(e.runner2, nil, nil), verdictChanges, theFindings)
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planNeedsForeman {
+		t.Fatalf("plan state after the changes = %q, want parked", got)
+	}
+	e.complete(e.leaseForeman(), Completion{Result: `{"status":"done"}`})
+	if got := e.countEvents(evPlanVerdictUnanswered); got != 1 {
+		t.Fatalf("plan_verdict_unanswered events after the swallow = %d, want 1", got)
+	}
+
+	// The answer moves the plan on, and round 2 approves: active again.
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+		Respec: []PlanRespec{{Task: "plain", Spec: "add the feature, carefully"}},
+	}); err != nil {
+		t.Fatalf("answer by amending: %v", err)
+	}
+	e.reviewVerdict(e.lease(e.runner2, nil, nil), verdictApprove, theFindings)
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
+		t.Fatalf("plan state after round 2 = %q, want active", got)
+	}
+
+	// The re-park: a fresh amendment's review round 1 returns changes.
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+		Add: []PlanTask{{Name: "more", Spec: "add more"}},
+	}); err != nil {
+		t.Fatalf("amend again: %v", err)
+	}
+	e.reviewVerdict(e.lease(e.runner2, nil, nil), verdictChanges, "still wrong")
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planNeedsForeman {
+		t.Fatalf("plan state after the second changes = %q, want parked again", got)
+	}
+	second := e.int("SELECT id FROM jobs WHERE kind = 'foreman' ORDER BY id DESC")
+	e.complete(e.leaseForeman(), Completion{Result: `{"status":"done"}`})
+	if got := e.countEvents(evPlanVerdictUnanswered); got != 2 {
+		t.Fatalf("plan_verdict_unanswered events after the re-park = %d, want 2", got)
+	}
+	if p, ok := e.eventPayloadOf(evPlanVerdictUnanswered); !ok || p.Plan != res.PlanID || p.Job != second || p.Run != 1 {
+		t.Errorf("the new event = %+v, want plan %d, turn %d, round 1", p, res.PlanID, second)
+	}
+}
