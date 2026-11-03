@@ -87,8 +87,8 @@ tasks:
     base: "fold"
     continue: "fold"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-317"
     rounds: 0
   - id: 318
     name: "tree2"
