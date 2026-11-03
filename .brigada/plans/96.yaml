@@ -161,8 +161,8 @@ tasks:
     continue: "budget"
     effort: medium
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-323"
+    rounds: 1
   - id: 324
     name: "docs"
     title: "top: CHANGELOG for the stacked view, fold-bullet clause, docs read-through (Closes #162)"
