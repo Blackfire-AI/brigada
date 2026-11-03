@@ -89,8 +89,8 @@ func TestRunningCapFoldsGlobal(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			snap := engine.CapacitySnapshot{Layers: tt.layers}
-			if got := runningCap(tt.agent, globalCap(snap)); got != tt.want {
-				t.Errorf("runningCap = %q, want %q", got, tt.want)
+			if got := RunningCap(tt.agent, GlobalCap(snap)); got != tt.want {
+				t.Errorf("RunningCap = %q, want %q", got, tt.want)
 			}
 		})
 	}

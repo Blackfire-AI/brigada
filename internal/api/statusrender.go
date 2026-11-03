@@ -56,16 +56,7 @@ func StatusSections(st Status) string {
 			lines = append(lines, fmt.Sprintf("held: %s %s: foreman turn waiting: no runner offers %s", what, h.Kind, h.Agent))
 			continue
 		}
-		wait := "waiting for a free " + h.Layer + " slot"
-		switch {
-		case h.Layer == "runner":
-			wait = "waiting for a runner slot"
-		case h.Layer == "cooling" && h.Agent != "":
-			wait = fmt.Sprintf("waiting: %s cooling until %s", h.Agent, h.Until)
-		case h.Layer == "cooling":
-			wait = "waiting: agent cooling"
-		}
-		lines = append(lines, fmt.Sprintf("held: %s %s: %s", what, h.Kind, wait))
+		lines = append(lines, fmt.Sprintf("held: %s %s: %s", what, h.Kind, HeldWait(h)))
 	}
 	for _, r := range st.Retries {
 		lines = append(lines, "waiting: "+RetryLine(r, time.Now()))
@@ -250,6 +241,24 @@ func StatusSections(st Status) string {
 	return strings.Join(lines, "\n")
 }
 
+// HeldWait words why one held job waits (§8.1): a runner slot, a free
+// slot on a named layer, its agent's quota — the agent and when its
+// cooling ends — or an unnamed agent's cooling. StatusSections renders
+// it after `held: <what> <kind>: ` per held entry, and top's agents
+// view reuses it, so the two read the same words.
+func HeldWait(h engine.HeldJob) string {
+	wait := "waiting for a free " + h.Layer + " slot"
+	switch {
+	case h.Layer == "runner":
+		wait = "waiting for a runner slot"
+	case h.Layer == "cooling" && h.Agent != "":
+		wait = fmt.Sprintf("waiting: %s cooling until %s", h.Agent, h.Until)
+	case h.Layer == "cooling":
+		wait = "waiting: agent cooling"
+	}
+	return wait
+}
+
 // RetryLine words one job waiting on an infra retry (§5.1) for the
 // status and top views: "task #4 work: retry in 5m: could not resolve
 // github.com" — the job or task, its kind, the time left to its
@@ -327,16 +336,16 @@ func runningLines(jobs []engine.StatusJob, now time.Time) []string {
 	}
 	lines := []string{"running:"}
 	for _, j := range jobs {
-		lines = append(lines, "  "+describeJob(j, now))
+		lines = append(lines, "  "+DescribeJob(j, now))
 	}
 	return lines
 }
 
-// describeJob is one running job in a few words: "task #3 work ·
+// DescribeJob is one running job in a few words: "task #3 work ·
 // claude/sonnet · 1m40s · Edit". A foreman turn names no task; the
 // parts the engine does not know yet are left out. A "tool_start Edit"
 // event shows as the tool's name alone; other events show as they are.
-func describeJob(j engine.StatusJob, now time.Time) string {
+func DescribeJob(j engine.StatusJob, now time.Time) string {
 	head := fmt.Sprintf("job #%d", j.ID)
 	if j.TaskID != 0 {
 		head = fmt.Sprintf("task #%d", j.TaskID)
@@ -371,9 +380,9 @@ func StatusLine(st Status, now time.Time) string {
 	var parts []string
 	switch n := len(st.Running); {
 	case n == 1:
-		parts = append(parts, describeJob(st.Running[0], now))
+		parts = append(parts, DescribeJob(st.Running[0], now))
 	case n > 1:
-		parts = append(parts, fmt.Sprintf("%s (+%d more)", describeJob(st.Running[0], now), n-1))
+		parts = append(parts, fmt.Sprintf("%s (+%d more)", DescribeJob(st.Running[0], now), n-1))
 	}
 	if q := st.Jobs["queued"]; q > 0 {
 		parts = append(parts, fmt.Sprintf("%d queued", q))
