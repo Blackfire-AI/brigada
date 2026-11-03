@@ -30,7 +30,7 @@ tasks:
     effort: medium
     review_tier: heavy
     skills: ["bugfix", "surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-326"
     rounds: 1
   - id: 327
