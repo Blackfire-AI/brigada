@@ -132,6 +132,7 @@ func TestHeldWait(t *testing.T) {
 		{"a free slot on a named layer", engine.HeldJob{ID: 4, Kind: "work", Layer: "account"}, "waiting for a free account slot"},
 		{"an agent cooling", engine.HeldJob{ID: 5, Kind: "work", Layer: "cooling", Agent: "claude/opus", Until: "2026-10-14T12:30:00.000000000Z"}, "waiting: claude/opus cooling until 2026-10-14T12:30:00.000000000Z"},
 		{"an unnamed agent cooling", engine.HeldJob{ID: 6, Kind: "work", Layer: "cooling"}, "waiting: agent cooling"},
+		{"a foreman turn no runner offers", engine.HeldJob{ID: 9, Kind: "foreman", Layer: "no_pair", Agent: "claude/opus"}, "foreman turn waiting: no runner offers claude/opus"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
