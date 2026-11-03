@@ -160,7 +160,7 @@ tasks:
     base: "budget"
     continue: "budget"
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-323"
     rounds: 1
   - id: 324
