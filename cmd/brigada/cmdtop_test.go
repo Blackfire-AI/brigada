@@ -433,6 +433,23 @@ func TestRenderTopShowsGateHoldsAndLandJobs(t *testing.T) {
 	}
 }
 
+// TestRenderTopKeepsAHeldTaskOutOfNeedsYou: a task the foreman holds
+// arrives in foreman_holds, not needs_you (§10): it leaves the NEEDS YOU
+// queue and the count, and the plan tree keeps the worker's question
+// beside it.
+func TestRenderTopKeepsAHeldTaskOutOfNeedsYou(t *testing.T) {
+	model := busyTopModel()
+	model.status.ForemanHolds = model.status.NeedsYou
+	model.status.NeedsYou = nil
+	got := plainTop(model, 200, 0)
+	if !strings.Contains(got, "nothing needs you") || strings.Contains(got, "! #2 should the sprocket be blue?") {
+		t.Errorf("a held task is listed under NEEDS YOU:\n%s", got)
+	}
+	if want := "! #2 wire the sprocket should the sprocket be blue?"; !strings.Contains(got, want) {
+		t.Errorf("the plan tree lacks %q:\n%s", want, got)
+	}
+}
+
 // TestRenderTopShowsAnInfraRetry: a waiting retry renders as its ↺ line
 // under the plan its task belongs to, in place of the task's queued line.
 func TestRenderTopShowsAnInfraRetry(t *testing.T) {

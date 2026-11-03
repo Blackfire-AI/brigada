@@ -22,7 +22,7 @@ func TestReasonNamesANonCrossFamilyPlacementOnce(t *testing.T) {
 			t.Errorf("reasonOf(%s, %s) = %q, want %q", tc.kind, tc.payload, got, tc.want)
 		}
 	}
-	_, body, ok := Message(Event{Kind: KindReviewChanges, Parked: true, TaskID: 6,
+	_, body, ok := Message(Event{Kind: KindReviewChanges, Parked: true, ParkedAtUser: true, TaskID: 6,
 		Reason: reasonOf(KindReviewChanges, `{"findings":"nit","placement":"same_agent"}`)})
 	if !ok || strings.Count(body, "same_agent") != 1 {
 		t.Errorf("banner = %q (%t), want the placement named once", body, ok)

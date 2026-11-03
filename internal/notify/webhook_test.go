@@ -107,12 +107,17 @@ func TestWebhookPayloadForEachKind(t *testing.T) {
 		{KindPlanAwaitingApproval, 0, 1, `{"plan":1,"reason":"2 tasks at once"}`,
 			"plan #1 needs your approval: 2 tasks at once: `brigada plan approve 1` or `brigada plan reject 1`"},
 		{KindPlanDone, 0, 1, `{"plan":1,"status":"done"}`, "plan #1 done: Ship it"},
-		{KindTaskCheckFailed, 1, 1, `{"status":"needs_foreman","reason":"exit 1"}`, "task #1 needs you: its check failed"},
-		{KindTaskNeedsHelp, 1, 1, `{"status":"needs_foreman","question":"which way?"}`, "task #1 needs you: which way?"},
-		{KindTaskFailed, 1, 1, `{"status":"needs_foreman","reason":"boom"}`, "task #1 needs you: boom"},
-		{KindReviewChanges, 1, 1, `{"status":"needs_foreman","findings":"the retry loop"}`, "task #1 needs you: the retry loop"},
-		{KindReviewNoVerdict, 1, 1, `{"status":"needs_foreman","reason":"empty verdict"}`, "task #1 needs you: empty verdict"},
-		{KindTaskOutOfRounds, 1, 1, `{"status":"needs_foreman","reason":"rounds spent"}`, "task #1 needs you: rounds spent"},
+		// A park at needs_foreman posts nothing of its own (the foreman
+		// handles it): the park rows below land at needs_user, and
+		// task_unattended speaks for the foreman's park.
+		{KindTaskCheckFailed, 1, 1, `{"status":"needs_user","reason":"exit 1"}`, "task #1 needs you: its check failed"},
+		{KindTaskNeedsHelp, 1, 1, `{"status":"needs_user","question":"which way?"}`, "task #1 needs you: which way?"},
+		{KindTaskFailed, 1, 1, `{"status":"needs_user","reason":"boom"}`, "task #1 needs you: boom"},
+		{KindReviewChanges, 1, 1, `{"status":"needs_user","findings":"the retry loop"}`, "task #1 needs you: the retry loop"},
+		{KindReviewNoVerdict, 1, 1, `{"status":"needs_user","reason":"empty verdict"}`, "task #1 needs you: empty verdict"},
+		{KindTaskOutOfRounds, 1, 1, `{"status":"needs_user","reason":"rounds spent"}`, "task #1 needs you: rounds spent"},
+		{KindTaskUnattended, 1, 1, `{"status":"needs_foreman","reason":"which way?","park_kind":"task_needs_help"}`, "task #1 needs you: which way?"},
+		{KindTaskUnattended, 1, 1, `{"status":"needs_foreman","reason":"exit 1","park_kind":"task_check_failed"}`, "task #1 needs you: its check failed"},
 		{KindReviewUnservable, 1, 1, `{"reason":"no agent of another family"}`, "task #1 reviewing: no agent of another family"},
 		{KindForemanReport, 0, 0, `{"report":"plan #1 done\nnothing else needs you"}`, "plan #1 done"},
 		{KindForemanLimited, 0, 0, `{"until":"2026-10-21T18:00:00Z"}`,
@@ -176,7 +181,7 @@ func TestWebhookRetriesOnceOnFailure(t *testing.T) {
 	st := openStore(t, ctx, filepath.Join(t.TempDir(), "store.db"))
 	defer st.Close()
 	seedProject(t, ctx, st)
-	id := appendEvent(t, ctx, st, KindTaskCheckFailed, 1, 1, `{"status":"needs_foreman","reason":"exit 1"}`)
+	id := appendEvent(t, ctx, st, KindTaskCheckFailed, 1, 1, `{"status":"needs_user","reason":"exit 1"}`)
 
 	r := newRelay(t)
 	atomic.StoreInt32(&r.fail, 1) // the first attempt answers 500
@@ -206,7 +211,7 @@ func TestWebhookExhaustedRetriesNeverBlock(t *testing.T) {
 	st := openStore(t, ctx, filepath.Join(t.TempDir(), "store.db"))
 	defer st.Close()
 	seedProject(t, ctx, st)
-	id := appendEvent(t, ctx, st, KindTaskCheckFailed, 1, 1, `{"status":"needs_foreman","reason":"exit 1"}`)
+	id := appendEvent(t, ctx, st, KindTaskCheckFailed, 1, 1, `{"status":"needs_user","reason":"exit 1"}`)
 
 	r := newRelay(t)
 	atomic.StoreInt32(&r.fail, 2) // both attempts answer 500
@@ -233,7 +238,7 @@ func TestWebhookTimeoutDoesNotBlock(t *testing.T) {
 	st := openStore(t, ctx, filepath.Join(t.TempDir(), "store.db"))
 	defer st.Close()
 	seedProject(t, ctx, st)
-	appendEvent(t, ctx, st, KindTaskCheckFailed, 1, 1, `{"status":"needs_foreman","reason":"exit 1"}`)
+	appendEvent(t, ctx, st, KindTaskCheckFailed, 1, 1, `{"status":"needs_user","reason":"exit 1"}`)
 
 	r := newRelay(t)
 	r.delay = 500 * time.Millisecond
@@ -277,7 +282,7 @@ func TestWebhookHungRelayDoesNotDelayTheTick(t *testing.T) {
 	var last int64
 	for i := 0; i < events; i++ {
 		last = appendEvent(t, ctx, st, KindTaskFailed, 1, 1,
-			fmt.Sprintf(`{"status":"needs_foreman","reason":"failure %d"}`, i+1))
+			fmt.Sprintf(`{"status":"needs_user","reason":"failure %d"}`, i+1))
 	}
 
 	r := newRelay(t)
@@ -321,7 +326,7 @@ func TestWebhookFailureLoggedWithoutURL(t *testing.T) {
 	st := openStore(t, ctx, filepath.Join(t.TempDir(), "store.db"))
 	defer st.Close()
 	seedProject(t, ctx, st)
-	appendEvent(t, ctx, st, KindTaskCheckFailed, 1, 1, `{"status":"needs_foreman","reason":"exit 1"}`)
+	appendEvent(t, ctx, st, KindTaskCheckFailed, 1, 1, `{"status":"needs_user","reason":"exit 1"}`)
 
 	r := newRelay(t)
 	atomic.StoreInt32(&r.fail, 2)

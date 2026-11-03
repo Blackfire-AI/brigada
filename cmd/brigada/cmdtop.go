@@ -579,7 +579,7 @@ func newTopPlans(st api.Status, now time.Time, style term.Style, width int) topP
 	}
 	claims := newTopClaims(st)
 	reasons := make(map[int64]string)
-	for _, n := range st.NeedsYou {
+	for _, n := range append(append([]engine.NeedsYouItem{}, st.NeedsYou...), st.ForemanHolds...) {
 		if n.Kind == "task" {
 			reasons[n.ID] = n.Reason
 		}
