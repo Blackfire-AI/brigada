@@ -124,8 +124,8 @@ tasks:
     continue: "frame2"
     effort: medium
     skills: ["surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-320"
     rounds: 0
   - id: 321
     name: "tree3"
