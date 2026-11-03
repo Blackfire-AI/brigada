@@ -160,7 +160,7 @@ tasks:
     base: "budget"
     continue: "budget"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 324
