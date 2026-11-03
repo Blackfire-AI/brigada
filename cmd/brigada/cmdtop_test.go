@@ -708,3 +708,114 @@ func TestRenderTopTallerThanScreenKeepsHeader(t *testing.T) {
 		t.Errorf("first line is %q, want the header", lines[0])
 	}
 }
+
+// agentsModel is busyTopModel with three agents side by side: a short
+// ready name, a cooling one and a long broken one.
+func agentsModel() topModel {
+	model := busyTopModel()
+	four := 4
+	cool := topNow.Add(time.Hour).UTC().Format(engine.TimeLayout)
+	model.capacity.Agents = []engine.CapacityAgent{
+		{Harness: "claude", Model: "opus", Cap: &four, CapLayer: "runner", Running: 1, Quota: "ready"},
+		{Harness: "codex", Model: "gpt-5", CapLayer: "none", Quota: "cooling", CoolingUntil: cool},
+		{Harness: "claude", Model: "sonnet-long-name", CapLayer: "none", Running: 2, Quota: "broken"},
+	}
+	model.status.NeedsYou = append(model.status.NeedsYou,
+		engine.NeedsYouItem{Kind: "agent", ID: 7, State: "broken", Title: "claude/sonnet-long-name", Reason: "login expired"})
+	return model
+}
+
+// TestTopAgentsOneLinePerAgent: every state is one line; cells align;
+// the cap agrees with the folded cell; the quota cells read per state.
+func TestTopAgentsOneLinePerAgent(t *testing.T) {
+	model := agentsModel()
+	plain := term.New(logo.Caps{})
+	got := topAgents(model, topNow, plain, 100, 0)
+	if len(got) != 5 {
+		t.Fatalf("section = %d lines, want head, 3 agents, global:\n%s", len(got), strings.Join(got, "\n"))
+	}
+	if want := "AGENTS " + strings.Repeat("─", 100-7); got[0] != want {
+		t.Errorf("head = %q", got[0])
+	}
+	eight := 8
+	a := model.capacity.Agents
+	cool := topNow.Add(time.Hour).In(topNow.Location()).Format("15:04")
+	wants := []string{
+		"claude/opus              " + api.RunningCap(a[0], &eight) + "  ✓",
+		"codex/gpt-5              " + api.RunningCap(a[1], &eight) + "  ↺ " + cool,
+		"claude/sonnet-long-name  " + api.RunningCap(a[2], &eight) + "  ✗ login expired",
+	}
+	for i, w := range wants {
+		if got[1+i] != w {
+			t.Errorf("line %d = %q, want %q", i, got[1+i], w)
+		}
+	}
+	if got[4] != "all ≤ global 8" {
+		t.Errorf("global line = %q", got[4])
+	}
+	colour := term.New(logo.Caps{Color: logo.Color16})
+	styled := topAgents(model, topNow, colour, 100, 0)
+	if s := term.StripEscapes(strings.Join(styled, "\n")); s != strings.Join(got, "\n") {
+		t.Errorf("styled text differs from plain:\n%s\nvs\n%s", s, strings.Join(got, "\n"))
+	}
+	if !strings.Contains(styled[1], colour.OK("✓")) || !strings.Contains(styled[2], colour.Warn("↺ "+cool)) ||
+		!strings.Contains(styled[3], colour.Bad("✗ login expired")) {
+		t.Errorf("quota styles wrong: %q", styled[1:4])
+	}
+}
+
+// TestTopAgentsBrokenFallbackAndCut: a broken agent with no needs-you
+// entry reads "broken"; a name longer than the width is cut with "...".
+func TestTopAgentsBrokenFallbackAndCut(t *testing.T) {
+	model := agentsModel()
+	model.status.NeedsYou = model.status.NeedsYou[:1]
+	plain := term.New(logo.Caps{})
+	got := topAgents(model, topNow, plain, 100, 0)
+	if !strings.HasSuffix(got[3], "✗ broken") {
+		t.Errorf("fallback line = %q", got[3])
+	}
+	cut := topAgents(model, topNow, plain, 12, 0)
+	if !strings.HasPrefix(cut[3], "claude/so...") {
+		t.Errorf("long name not cut: %q", cut)
+	}
+}
+
+// TestTopAgentsGlobalLineOmitted: no global cap, no `all ≤` line.
+func TestTopAgentsGlobalLineOmitted(t *testing.T) {
+	model := agentsModel()
+	model.capacity.Layers = nil
+	got := topAgents(model, topNow, term.New(logo.Caps{}), 100, 0)
+	if len(got) != 4 || strings.Contains(strings.Join(got, "\n"), "all ≤") {
+		t.Errorf("section = %q", got)
+	}
+}
+
+// TestTopAgentsBudget: a budget trims the agent lines and counts them.
+func TestTopAgentsBudget(t *testing.T) {
+	model := agentsModel()
+	plain := term.New(logo.Caps{})
+	got := topAgents(model, topNow, plain, 100, 4)
+	if len(got) != 4 || got[2] != "+2 more (brigada agents)" || got[3] != "all ≤ global 8" || !strings.HasPrefix(got[1], "claude/opus") {
+		t.Errorf("trimmed section = %q", got)
+	}
+	if all := topAgents(model, topNow, plain, 100, 5); len(all) != 5 {
+		t.Errorf("a fitting budget trimmed: %q", all)
+	}
+}
+
+// TestRenderTopFinalOrder: header, meters, NEEDS YOU, PLANS, AGENTS and
+// the events strip in order, one blank line between sections only.
+func TestRenderTopFinalOrder(t *testing.T) {
+	got := plainTop(agentsModel(), 100, 0)
+	last := -1
+	for _, h := range []string{"brigada top", "SLOTS", "NEEDS YOU", "PLANS", "AGENTS", "15:02:45"} {
+		i := strings.Index(got, h)
+		if i < last {
+			t.Errorf("%q out of order:\n%s", h, got)
+		}
+		last = i
+	}
+	if strings.Contains(got, "\n\n\n") || strings.HasSuffix(got, "\n") {
+		t.Errorf("stray blank line:\n%q", got)
+	}
+}
