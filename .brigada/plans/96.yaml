@@ -149,7 +149,7 @@ tasks:
     continue: "agents"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-322"
     rounds: 0
   - id: 323
@@ -160,7 +160,7 @@ tasks:
     base: "budget"
     continue: "budget"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 324
