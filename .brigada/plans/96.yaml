@@ -173,6 +173,6 @@ tasks:
     tier: light
     effort: medium
     skills: ["docs-change"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
