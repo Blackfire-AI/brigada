@@ -149,8 +149,8 @@ tasks:
     continue: "agents"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-322"
     rounds: 0
   - id: 323
     name: "snapshot"
