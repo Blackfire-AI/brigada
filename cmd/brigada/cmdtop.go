@@ -188,10 +188,6 @@ func dialEngine(ctx context.Context, rt *runtime, role string, noStart bool) (*a
 // a later section yields its lines before an earlier one. With a plain
 // style the text is the same and has no escapes.
 func renderTop(model topModel, width, height int, now time.Time, style term.Style) []string {
-	agents := api.AgentsTable(model.capacity, now, style, width)
-	if global := globalCap(model.capacity); global != nil {
-		agents = append(agents, style.Dim(fmt.Sprintf("all \u2264 global %d", *global)))
-	}
 	sections := [][]string{
 		topHeader(model, now, style, width),
 		topMeters(model, style, width),
@@ -202,7 +198,7 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 	}
 	sections = append(sections,
 		topPlansTree(model.status, now, style, width),
-		agents,
+		topAgents(model, now, style, width, 0),
 		topEvents(model.events, now, style, width),
 	)
 	var lines []string
@@ -260,16 +256,75 @@ func topHeader(model topModel, now time.Time, style term.Style, width int) []str
 	return lines
 }
 
-// globalCap is the snapshot's global layer cap, nil when there is no
-// global layer or the layer is uncapped; it is the line under the AGENTS
-// table.
-func globalCap(snap engine.CapacitySnapshot) *int {
-	for _, l := range snap.Layers {
-		if l.Layer == caps.LayerGlobal {
-			return l.Cap
+// topAgents is the AGENTS section: a rule-filled head, one line per
+// agent — `harness/model` padded to the widest name, the running count
+// against the effective cap as `brigada capacity` folds it, then the
+// quota cell — and a dim `all ≤ global N` line when the snapshot carries
+// a global cap. A broken agent's reason comes from its agent needs-you
+// entry in the unscoped status, "broken" when the status has none.
+// budget is the section's line budget, head included; 0 is no limit.
+// When the lines do not fit, the tail of the agent lines goes and a dim
+// `+N more (brigada agents)` line counts them, the global line kept
+// under it.
+func topAgents(model topModel, now time.Time, style term.Style, width, budget int) []string {
+	head := topSectionHead("AGENTS", style, width)
+	snap := model.capacity
+	g := api.GlobalCap(snap)
+	var global []string
+	if g != nil {
+		global = []string{style.Dim(fmt.Sprintf("all ≤ global %d", *g))}
+	}
+	if len(snap.Agents) == 0 {
+		return append([]string{head, style.Dim("no agents advertised")}, global...)
+	}
+	reasons := make(map[string]string)
+	for _, n := range model.status.NeedsYou {
+		if n.Kind == "agent" {
+			reasons[n.Title] = n.Reason
 		}
 	}
-	return nil
+	names := make([]string, len(snap.Agents))
+	capCells := make([]string, len(snap.Agents))
+	nameW, capW := 0, 0
+	for i, a := range snap.Agents {
+		names[i] = a.Harness + "/" + a.Model
+		capCells[i] = api.RunningCap(a, g)
+		nameW = max(nameW, utf8.RuneCountInString(names[i]))
+		capW = max(capW, utf8.RuneCountInString(capCells[i]))
+	}
+	nameW = min(nameW, width)
+	agents := make([]string, len(snap.Agents))
+	for i, a := range snap.Agents {
+		name := cutLine(names[i], nameW)
+		prefix := name + strings.Repeat(" ", nameW-utf8.RuneCountInString(name)+2) +
+			capCells[i] + strings.Repeat(" ", capW-utf8.RuneCountInString(capCells[i])+2)
+		var quota string
+		switch a.Quota {
+		case "broken":
+			reason := reasons[names[i]]
+			if reason == "" {
+				reason = "broken"
+			}
+			if room := width - utf8.RuneCountInString(prefix) - 2; room >= 10 {
+				reason = cutLine(reason, room)
+			}
+			quota = style.Bad("✗ " + reason)
+		case "cooling":
+			quota = style.Warn("↺ " + api.LocalClock(a.CoolingUntil, now))
+		default:
+			quota = style.OK("✓")
+		}
+		agents[i] = prefix + quota
+	}
+	lines := []string{head}
+	if budget <= 0 || 1+len(agents)+len(global) <= budget {
+		lines = append(lines, agents...)
+		return append(lines, global...)
+	}
+	room := max(budget-2-len(global), 0)
+	lines = append(lines, agents[:room]...)
+	lines = append(lines, style.Dim(fmt.Sprintf("+%d more (brigada agents)", len(agents)-room)))
+	return append(lines, global...)
 }
 
 // topSlots reads the global cap layer's use and cap from the capacity
