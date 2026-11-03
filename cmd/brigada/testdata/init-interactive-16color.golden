@@ -19,20 +19,24 @@ dsh (experimental): init can't check sign-in.
 [1m━━ Step 1 of 4 · the foreman[0m
 [90m  The foreman plans the work and decides what happens when a task needs[0m
 [90m  judgment. It runs whenever work finishes, so it uses that agent's quota.[0m
-[90m  Only claude and codex can be the foreman.[0m
+[90m  Only claude, codex and opencode can be the foreman.[0m
 [90m    Which model should the foreman run?[0m
-    ▸[36m 1[0m  [1mclaude/sonnet[0m               [90mSonnet 4 · Balanced[0m
-     [36m 2[0m  claude/opus                 [90mOpus 4 · Most capable[0m
-     [36m 3[0m  claude/haiku                [90mfastest; fine for small tasks[0m
-     [36m 4[0m  claude/claude-sonnet-4[1m]  [90mSonnet, 1M context[0m
-     [36m 5[0m  claude/claude-opus-4        [90mOpus 4 · Most capable[0m
-     [36m 6[0m  codex/gpt-6.1-sol           [90myour codex default (~/.codex/config.toml)[0m
-     [36m 7[0m  codex/gpt-5                 [90mEarlier coding model.[0m
-     [36m 8[0m  codex/gpt-5.4-mini          [90mA smaller coding model for quick tasks,
-                                     with a long description that must wrap
-                                     within the menu without losing any of its
-                                     words.[0m
-[1m    Pick 1-8, or type harness/model [0m[36m[1][0m[1m:[0m
+    ▸[36m 1[0m  [1mclaude/sonnet[0m                     [90mSonnet 4 · Balanced[0m
+     [36m 2[0m  claude/opus                       [90mOpus 4 · Most capable[0m
+     [36m 3[0m  claude/haiku                      [90mfastest; fine for small tasks[0m
+     [36m 4[0m  claude/claude-sonnet-4[1m]        [90mSonnet, 1M context[0m
+     [36m 5[0m  claude/claude-opus-4              [90mOpus 4 · Most capable[0m
+     [36m 6[0m  codex/gpt-6.1-sol                 [90myour codex default
+                                           (~/.codex/config.toml)[0m
+     [36m 7[0m  codex/gpt-5                       [90mEarlier coding model.[0m
+     [36m 8[0m  codex/gpt-5.4-mini                [90mA smaller coding model for quick
+                                           tasks, with a long description that
+                                           must wrap within the menu without
+                                           losing any of its words.[0m
+     [36m 9[0m  opencode/zai-coding-plan/glm-5.3  [90mGLM-5.3, 200K context[0m
+     [36m10[0m  opencode/zai-coding-plan/glm-5.2  [90mGLM-5.2, 200K context[0m
+     [36m11[0m  opencode/opencode/deepseek-v3     [90mDeepSeek V3, 1M context[0m
+[1m    Pick 1-11, or type harness/model [0m[36m[1][0m[1m:[0m
     [90mHow hard should the foreman think? Higher means better plans and decisions,
     and slower turns that use more of the plan's limits.[0m
     ▸[36m 1[0m  [1mmedium[0m  [90mClaude Code's default[0m

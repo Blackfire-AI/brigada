@@ -59,7 +59,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	repo := fs.String("repo", "", "repository URL or canonical identity to register instead of the selected remote")
 	remote := fs.String("remote", "", "git remote to use as the project's repository")
 	tools := fs.String("tools", "", "worker scope in runner tools= syntax; scopes claude's tool list and opencode's bash commands")
-	foreman := fs.String("foreman", "", "choose the foreman, a signed-in claude or codex model, as harness/model[@effort]; without @effort an interactive run asks for the effort")
+	foreman := fs.String("foreman", "", "choose the foreman, a signed-in claude, codex or opencode model, as harness/model[@effort]; without @effort an interactive run asks for the effort")
 	noWiring := fs.Bool("no-wiring", false, "in a parent folder, skip the coordinator's wiring; in a repository, leave the harness untouched: init writes no harness wiring, and an older init's stays")
 	parallel := fs.Int("parallel", 0, "tasks at once on this machine (1..64)")
 	all := fs.Bool("all", false, "in a folder that is not a repository: register every new repository found, without asking")
@@ -388,13 +388,13 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	var foremanSpec agentSpec
 	foremanEffort, foremanPicked := "", false
 	// pickForeman is step 1: the foreman's model among those of the signed-in
-	// claude and codex CLIs, then its effort. The foreman is a model, so it is
+	// claude, codex and opencode CLIs, then its effort. The foreman is a model, so it is
 	// chosen before the workers.
 	pickForeman := func() (agentSpec, string, int) {
-		initStep(stdout, 1, "the foreman", "  The foreman plans the work and decides what happens when a task needs\n  judgment. It runs whenever work finishes, so it uses that agent's quota.\n  Only claude and codex can be the foreman.\n")
+		initStep(stdout, 1, "the foreman", "  The foreman plans the work and decides what happens when a task needs\n  judgment. It runs whenever work finishes, so it uses that agent's quota.\n  Only claude, codex and opencode can be the foreman.\n")
 		candidates := initForemanCandidates(sources, confirmedCLI)
 		if len(candidates) == 0 {
-			return agentSpec{}, "", fail(stderr, fmt.Errorf("no foreman: only a signed-in claude or codex can plan; sign in to one and confirm it with --signed-in; nothing written or started"))
+			return agentSpec{}, "", fail(stderr, fmt.Errorf("no foreman: only a signed-in claude, codex or opencode can plan; sign in to one and confirm it with --signed-in; nothing written or started"))
 		}
 		defaultChoice := 1
 		for i, c := range candidates {

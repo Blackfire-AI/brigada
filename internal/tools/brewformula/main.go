@@ -44,9 +44,8 @@ func generate(sums, version string) (string, error) {
 	fmt.Fprintf(&formula, `class Brigada < Formula
   desc "Coordinate coding agents with checks and cross-reviews"
   homepage "https://github.com/Blackfire-AI/brigada"
-  version "%s"
   license "Apache-2.0"
-`, version)
+`)
 	for _, platform := range []struct{ os, block string }{{"darwin", "macos"}, {"linux", "linux"}} {
 		fmt.Fprintf(&formula, "\n  on_%s do\n", platform.block)
 		for i, arch := range []struct{ name, block string }{{"arm64", "arm"}, {"amd64", "intel"}} {

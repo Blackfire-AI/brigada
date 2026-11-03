@@ -32,7 +32,6 @@ func TestGenerate(t *testing.T) {
 		"class Brigada < Formula\n",
 		`  desc "Coordinate coding agents with checks and cross-reviews"`,
 		`  homepage "https://github.com/Blackfire-AI/brigada"`,
-		`  version "1.2.3"`,
 		`  license "Apache-2.0"`,
 		"  def install\n    bin.install \"brigada\"\n  end",
 		"  test do\n    assert_match version.to_s, shell_output(\"#{bin}/brigada version\")\n  end\nend\n",
@@ -40,6 +39,9 @@ func TestGenerate(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("formula missing %q", want)
 		}
+	}
+	if strings.Contains(got, `  version "`) {
+		t.Error("formula carries an explicit version; brew audits it as redundant with the version scanned from the URL")
 	}
 	for i, name := range tarballs {
 		os := "macos"

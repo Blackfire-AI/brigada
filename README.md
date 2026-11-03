@@ -9,7 +9,7 @@
 
 You may pay for more than one AI coding subscription. brigada sits above their official command-line tools (Claude Code, Codex CLI, Kimi CLI, opencode, and dsh, DeepSeek's CLI) and uses them as workers:
 
-- the **foreman**, one of those CLIs (claude or codex; [GUIDE section 11](docs/GUIDE.md#11-the-foremans-harness-claude-or-codex) lists what a foreman harness must do), turns what you ask for into a plan of tasks with dependencies between them. It lives in a brigada-owned session: you talk to it with `brigada attach`, and it acts headless while you are away;
+- the **foreman**, one of those CLIs (claude, codex or opencode; [GUIDE section 11](docs/GUIDE.md#11-the-foremans-harness-claude-codex-or-opencode) lists what a foreman harness must do), turns what you ask for into a plan of tasks with dependencies between them. It lives in a brigada-owned session: you talk to it with `brigada attach`, and it acts headless while you are away;
 - the **dispatcher** gives each task to the agent with the best measured record for that kind of task on *your* repo, among the agents that still have quota;
 - every task's own **check** (tests, lint, any command) runs on the result, so "done" is not taken on trust;
 - a **reviewer** from another model family than the author's when one is available (`review.family=prefer`, the default; required with `review.family=require`) reads the change;
@@ -22,6 +22,39 @@ dsh support is experimental: it was checked against one developer-preview releas
 brigada drives the vendors' **unmodified** CLIs, each signed in with your own account. It uses the accounts you configure, one login per account, and when one is rate-limited it dispatches to another configured account. See [docs/TERMS.md](docs/TERMS.md).
 
 > **Before you start.** brigada is local-first: one Go binary and a SQLite store on your machine. Workers run in git worktrees, not containers, each under its CLI's own permission scope: claude edits under `acceptEdits` with a tool allowlist (the file tools and the Go toolchain by default), codex and dsh run in an OS-level workspace-write sandbox, opencode is scoped by `OPENCODE_PERMISSION`, kimi work jobs carry no scope from brigada, and every review is read-only. The scope per harness is in [GUIDE section 8](docs/GUIDE.md#scope-per-harness). Workers inherit your environment minus the credential scrub, so a check command, a test run or a kimi worker can still reach your credentials and network. Do not point brigada at a repository you do not trust ([design §5.7](docs/design.md#57-an-environment-for-checks-and-reviews)).
+
+## Ask your coding agent to set it up
+
+The quickest door today: paste this into the coding agent you already keep open in your repository. It installs brigada and walks `brigada init`; you confirm the choices, the agent does the typing. Prefer your own hands? [Install](#install) and the [first run](#first-run-brigada-init) are below.
+
+```text
+Install brigada on this machine and set it up for this repository, then
+report what you did.
+
+1. Install brigada: `brew install blackfire-ai/tap/brigada`, or
+   `curl -fsSL https://raw.githubusercontent.com/Blackfire-AI/brigada/main/install.sh | sh`.
+   Confirm with `brigada version`.
+2. List which agent CLIs are installed and signed in — claude, codex,
+   opencode, kimi, dsh — using their status commands only: never run a
+   login, never print keys or tokens.
+3. Run `brigada init --probe` in this repository and show me the plan it
+   prints.
+4. Ask me to confirm the foreman, which CLIs' models may run tasks, the
+   check command and tasks at once; then apply the plan without further
+   questions, for example:
+   brigada init --yes --signed-in claude,codex --foreman claude/sonnet \
+     --agent harness=claude,model=sonnet --agent harness=codex,model=gpt-5 \
+     --check 'go test ./...' --parallel 4
+5. Report the agents, the files written, and that I talk to the foreman
+   with `brigada attach`. From then on, follow `.brigada/operator.md`.
+
+brigada's repository is https://github.com/Blackfire-AI/brigada; its
+README and docs/GUIDE.md answer most questions — consult them when a
+step is unclear. Stop and ask me if a step fails or a choice remains
+open. Never commit or push what init writes.
+```
+
+What the prompt's steps mean is [the guide, section 1](docs/GUIDE.md#through-your-own-harness); what the agent does afterwards is `.brigada/operator.md`, the guide init wrote — the prompt is only the door.
 
 ## Install
 
@@ -71,7 +104,7 @@ test -s selected-checksum && sha256sum -c selected-checksum &&
 
 On macOS, use `shasum -a 256 -c selected-checksum` instead of `sha256sum -c selected-checksum`. Add `~/.local/bin` to `PATH` if it is not already there.
 
-To check that a tarball was built by this repository's release workflow, install the [GitHub CLI](https://cli.github.com/) and run this in the directory with the downloaded tarball:
+To check that a tarball was built by this repository's release workflow, install the [GitHub CLI](https://cli.github.com/) — signed in: `gh attestation verify` needs a token even for a public repository, so `gh auth login` or set `GH_TOKEN` — and run this in the directory with the downloaded tarball:
 
 ```sh
 gh attestation verify brigada-<os>-<arch>.tar.gz --repo Blackfire-AI/brigada
@@ -101,7 +134,7 @@ brigada init
 
 Init walks you through four steps:
 
-1. Pick the foreman model from the signed-in Claude and Codex CLIs, then how hard it should think. `--foreman claude/sonnet@medium` supplies both.
+1. Pick the foreman model from the signed-in Claude, Codex and OpenCode CLIs, then how hard it should think. `--foreman claude/sonnet@medium` supplies both.
 2. Choose which CLIs' models may run tasks. Opencode offers a menu with multiple picks. Two model families give cross-family reviews (preferred; required with `review.family=require`); Kimi reviews only unless you let it write code.
 3. Set tasks at once on this machine (or pass `--parallel N`). Enter keeps the saved limit, else half the cores, at least 1 and at most 4.
 4. Confirm the check suggested by your build files, type your own command, or enter `-` for none. Init takes worker tools from that choice and never runs the check.

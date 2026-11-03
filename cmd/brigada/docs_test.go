@@ -524,6 +524,16 @@ func checkNewDocs(guide, compat, changelog string) []string {
 			unreleased = unreleased[:j]
 		}
 	}
+	// At a release the [Unreleased] entries fold into the release
+	// section, which then carries the mentions instead.
+	if strings.TrimSpace(unreleased) == "" {
+		if i := strings.Index(changelog, "\n## [1.0.0]"); i >= 0 {
+			unreleased = changelog[i+len("\n## [1.0.0]"):]
+			if j := strings.Index(unreleased, "\n## "); j >= 0 {
+				unreleased = unreleased[:j]
+			}
+		}
+	}
 	lower := strings.ToLower(unreleased)
 	if unreleased == "" || !strings.Contains(lower, "instructions") || !strings.Contains(lower, "skills") {
 		problems = append(problems, "CHANGELOG.md's Unreleased section does not mention instructions and skills")
@@ -708,7 +718,7 @@ func TestDocsContentCheckerFails(t *testing.T) {
 		"no refusal":       {guide, "`instructions_file` is the alias of `instructions.worker`.", changelog, "both keys is refused"},
 		"changelog old":    {guide, compat, strings.Replace(changelog, "skills", "tools", 1), "Unreleased section"},
 		"changelog empty":  {guide, compat, "# Changelog\n", "Unreleased section"},
-		"unreleased scope": {guide, compat, strings.Replace(changelog, "- Role instructions and skills.", "", 1) + "instructions skills", "Unreleased section"},
+		"unreleased scope": {guide, compat, "instructions skills\n" + strings.Replace(changelog, "- Role instructions and skills.", "", 1), "Unreleased section"},
 	} {
 		p := checkNewDocs(tc.guide, tc.compat, tc.changelog)
 		if len(p) == 0 || !strings.Contains(strings.Join(p, "\n"), tc.want) {

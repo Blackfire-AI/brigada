@@ -11,7 +11,7 @@ The terms used by [product.md](product.md) and [design.md](design.md). Where a d
 
 ## Execution
 
-- **Harness:** an official, unmodified agent CLI, such as Claude Code, Codex CLI or Gemini CLI. brigada runs it **headless**: non-interactively, with the prompt as input and an event stream as output.
+- **Harness:** an official, unmodified agent CLI, such as Claude Code, Codex CLI or OpenCode. brigada runs it **headless**: non-interactively, with the prompt as input and an event stream as output.
 - **Model:** the LLM a harness runs with, such as a given Claude or GLM model.
 - **Family:** the vendor lineage of a model (Claude, GPT, Gemini, Kimi, GLM, …). A review's placement is `cross_family` (the reviewer's family differs from the author's), `same_family`, `same_agent` (the author's own agent in a fresh session) or `unknown` (the author's family is not known); the `review.family` setting, `prefer` or `require`, decides whether the last three are allowed (§7).
 - **Account:** the user's sign-in for a harness: one subscription with its own quota window. Several agents can share one account.

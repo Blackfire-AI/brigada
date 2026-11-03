@@ -126,6 +126,23 @@ type Interactive interface {
 	AttachCommand(job Job, workdir, resumeSessionID, newSessionID string) (*exec.Cmd, error)
 }
 
+// SessionWriteback is the optional adapter interface for a CLI whose
+// interactive resume keeps its own session id — one the client cannot
+// mint for it the way claude's --session-id takes a caller's id: the
+// release of the attach writes back the id this returns instead of the
+// id the client minted. resumeSessionID is the id the chat resumed —
+// returned unchanged, for the CLI continues under it — and "" means the
+// chat started fresh, its id discovered from the CLI's own session list
+// in workdir, which is why the caller runs this after the CLI exits. An
+// error is the caller's to warn about and answer with the minted id,
+// which the CLI does not know: its next headless turn then refuses the
+// resume and starts fresh in place (§5.6).
+type SessionWriteback interface {
+	// WritebackSessionID names the session id an ended attach leaves the
+	// key on, bound to ctx for the discovery a fresh chat needs.
+	WritebackSessionID(ctx context.Context, workdir, resumeSessionID string) (string, error)
+}
+
 // EventKind is the shape of one progress event (§5.6): what the runner
 // tracks for heartbeats and, later, stall detection.
 type EventKind string
@@ -229,17 +246,18 @@ func IsInfraText(text string) bool {
 // cannot resume headless and carry the foreman's MCP bridge. This is
 // the one place that set lives; the engine consults it at setup.
 var ResumeCapableHarnesses = map[string]bool{
-	"claude": true, // the Claude Code CLI: `claude -p --resume <session>` (§5.2)
-	"codex":  true, // Codex CLI: `codex exec resume <id>`; -c carries the foreman's MCP bridge
-	"fake":   true, // the scripted test adapter
+	"claude":   true, // the Claude Code CLI: `claude -p --resume <session>` (§5.2)
+	"codex":    true, // Codex CLI: `codex exec resume <id>`; -c carries the foreman's MCP bridge
+	"opencode": true, // OpenCode CLI: `opencode run -s <id>` resumes headless; the
+	// bridge rides an adapter-written config in a directory OPENCODE_CONFIG_DIR
+	// names, the attach the TUI's own `-s <id>` (its session-id write-back
+	// through SessionWriteback).
+	"fake": true, // the scripted test adapter
 	// kimi is absent although its CLI resumes headless (`kimi --session
 	// <id>`): this set gates the foreman's harness, whose turns carry the
 	// `brigada mcp` bridge (§12.2), and kimi has no MCP-config flag to
 	// offer it — its adapter refuses such jobs outright. A foreman cannot
 	// run on kimi until its CLI can carry the bridge.
-	// opencode is also worker-only although `opencode run -s <id>`
-	// resumes headless: its run path has no MCP-config flag to carry
-	// the foreman bridge. Like kimi, its adapter refuses MCP-config jobs.
 	// dsh is worker-only too: `dsh --session-id <id>` resumes headless,
 	// but no MCP-config flag is known to carry the bridge, so its adapter
 	// refuses MCP-config jobs.
