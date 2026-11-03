@@ -112,8 +112,8 @@ tasks:
     continue: "tree3"
     effort: medium
     skills: ["surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-319"
     rounds: 0
   - id: 320
     name: "helpers"
