@@ -497,10 +497,14 @@ func foremanReportTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error
 // poorer — the count the wake's stall reads (§5.6: a stalled turn is a
 // turn that never answered); a cancelled one returns them untouched,
 // because a cancel is the user's own stop, not a failure to answer, and
-// its attempts must not grow from it. Either way the key's follow-up
-// flag clears. A cancelled turn wakes nothing at once — the user just
-// said stop, and an instant re-wake would defy them — so its events
-// stay pending for the next judgment event or the start-of-engine
+// its attempts must not grow from it. A done turn that swallowed a
+// `changes` verdict — the plan still parked at needs_foreman when the
+// turn ended (§6.2) — is named before the rows go (issue #164): one
+// plan_verdict_unanswered event per swallowed verdict, a plain log
+// record that lands in no inbox and wakes no turn. Either way the key's
+// follow-up flag clears. A cancelled turn wakes nothing at once — the
+// user just said stop, and an instant re-wake would defy them — so its
+// events stay pending for the next judgment event or the start-of-engine
 // recovery (§13). Every other ending re-evaluates the wake here, in the
 // same transaction as the completion, so the events that arrived during
 // the turn, and the ones just returned, reach the next turn.
@@ -510,6 +514,9 @@ func (e *Engine) foremanFinishedTx(tx *sql.Tx, job *jobRow, status string, now t
 	}
 	switch status {
 	case statusDone:
+		if err := e.planVerdictsUnansweredTx(tx, job, now); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`UPDATE foreman_inbox SET state = ? WHERE job_id = ? AND state = ?`,
 			inboxConsumed, job.ID, inboxDelivered); err != nil {
 			return fmt.Errorf("consume the inbox delivered to job %d: %w", job.ID, err)
@@ -532,6 +539,67 @@ func (e *Engine) foremanFinishedTx(tx *sql.Tx, job *jobRow, status string, now t
 		return nil
 	}
 	return e.wakeForemanTx(tx, job.ProjectID, now)
+}
+
+// planVerdictsUnansweredTx names the `changes` verdicts a done foreman
+// turn is about to swallow (issue #164, §6.2): each plan_reviewed event
+// still delivered to the turn whose verdict stands — the plan parked at
+// needs_foreman with the same round and verdict, no amendment moved it
+// to reviewing and no plan_accept proceeded it — gets one
+// plan_verdict_unanswered event naming the plan, the verdict, the
+// review round and the turn that failed to act. One event per row, per
+// swallow: a re-park after an answer is a new row a new turn carries,
+// and it is named anew. The event is a plain log record, never
+// inboxEventTx: it lands in no inbox and wakes no turn (§4.2), and the
+// rows the turn carried are consumed exactly as they would have been —
+// only the swallowing becomes visible, while the plan stays parked for
+// a later event, an attach or the user.
+func (e *Engine) planVerdictsUnansweredTx(tx *sql.Tx, job *jobRow, now time.Time) error {
+	rows, err := tx.Query(`SELECT e.payload FROM foreman_inbox i JOIN events e ON e.id = i.event_id
+		WHERE i.job_id = ? AND i.state = ? AND e.kind = ?`,
+		job.ID, inboxDelivered, evPlanReviewed)
+	if err != nil {
+		return fmt.Errorf("read the plan verdicts delivered to job %d: %w", job.ID, err)
+	}
+	var payloads []string
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			rows.Close()
+			return fmt.Errorf("read the plan verdicts delivered to job %d: %w", job.ID, err)
+		}
+		payloads = append(payloads, payload)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("read the plan verdicts delivered to job %d: %w", job.ID, err)
+	}
+	rows.Close()
+	for _, payload := range payloads {
+		var p eventPayload
+		if json.Unmarshal([]byte(payload), &p) != nil || p.Status != verdictChanges || p.Plan == 0 {
+			continue
+		}
+		var state, verdict string
+		var round int64
+		if err := tx.QueryRow(`SELECT state, review_verdict, review_round FROM plans WHERE id = ?`, p.Plan).
+			Scan(&state, &verdict, &round); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return fmt.Errorf("read plan %d: %w", p.Plan, err)
+		}
+		if state != planNeedsForeman || verdict != verdictChanges || round != p.Run {
+			// Answered: an amendment moved the plan to reviewing with
+			// the verdict cleared, or plan_accept proceeded it.
+			continue
+		}
+		if _, err := appendEventTx(tx, evPlanVerdictUnanswered, job.ProjectID, 0, job.ID,
+			eventPayload{Plan: p.Plan, Status: verdictChanges, Run: round, Job: job.ID}, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RecoverForemanWakes is the start-of-engine recovery (§13): after the

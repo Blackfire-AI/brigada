@@ -25,6 +25,7 @@ const (
 	evPlanAwaitingApproval    = "plan_awaiting_approval"     // CreatePlan: the plan is over the approval limit and waits for the user's yes (§6.3)
 	evPlanReviewQueued        = "plan_review_queued"         // a plan_review job is queued: the plan waits in reviewing for the verdict before any work is queued (§6.2)
 	evPlanReviewed            = "plan_reviewed"              // a plan review round ended: approve, changes (with findings), no verdict, or accepted by the foreman (plan_accept); the plan proceeded, parks at needs_foreman for the foreman's answer, or waits for the user's yes (§6.2)
+	evPlanVerdictUnanswered   = "plan_verdict_unanswered"    // a done foreman turn consumed a plan's changes verdict without answering it (issue #164): one event per swallowed verdict names the plan, the verdict's round and the turn that failed to act; the plan stays parked, and the event wakes no turn (§4.2, §6.2)
 	evPlanAmended             = "plan_amended"               // the foreman amended a live plan: tasks added, cancelled or re-pointed (§12.2)
 	evPlanApproved            = "plan_approved"              // the user approved the plan; its first wave is queued (§6.3)
 	evPlanRejected            = "plan_rejected"              // the user rejected the plan; its tasks are cancelled (§6.3)

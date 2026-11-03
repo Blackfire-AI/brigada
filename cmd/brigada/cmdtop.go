@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -181,19 +180,25 @@ func dialEngine(ctx context.Context, rt *runtime, role string, noStart bool) (*a
 	return client, nil
 }
 
-// renderTop lays the view out, top to bottom: the header, then the
-// AGENTS, RUNNING, QUEUE, PLANS, NEEDS YOU and EVENTS sections, every
-// line cut to width and the whole trimmed to height — height 0 means no
-// height limit — so a later section yields its lines before an earlier
-// one. With a plain style the text is the same and has no escapes.
+// renderTop lays the view out, top to bottom: the header, the meters
+// strip, NEEDS YOU, then the AGENTS, RUNNING, QUEUE and PLANS sections
+// and the events strip at the bottom, every line cut to width and the
+// whole trimmed to height — height 0 means no height limit — so a later
+// section yields its lines before an earlier one. With a plain style
+// the text is the same and has no escapes.
 func renderTop(model topModel, width, height int, now time.Time, style term.Style) []string {
+	agents := api.AgentsTable(model.capacity, now, style, width)
+	if global := globalCap(model.capacity); global != nil {
+		agents = append(agents, style.Dim(fmt.Sprintf("all \u2264 global %d", *global)))
+	}
 	sections := [][]string{
 		topHeader(model, now, style, width),
-		api.AgentsTable(model.capacity, now, style, width),
+		topMeters(model, style, width),
+		topNeedsYou(model.status, style, width),
+		agents,
 		topRunning(model.status, now, style, width),
 		topQueue(model.status, now, style, width),
 		topPlans(model.status, style, width),
-		topNeedsYou(model.status, style, width),
 		topEvents(model.events, now, style, width),
 	}
 	var lines []string
@@ -221,24 +226,27 @@ func topFit(line string, width int) string {
 	return cutLine(term.StripEscapes(line), width)
 }
 
-// topHeader is the first line of the view: the engine's pid and
-// uptime, the runners, the global slot use against its cap, the time,
-// and the keys. A failed fetch adds its error as a second line, so the
-// view keeps its shape while the loop retries.
+// topHeader is the first line of the view: the engine's pid, its uptime
+// and the clock, then a dim rule filling the width that remains and the
+// keys at the right end. A failed fetch adds its error as a second
+// line, so the view keeps its shape while the loop retries.
 func topHeader(model topModel, now time.Time, style term.Style, width int) []string {
 	st := model.status
 	uptime := "0s"
 	if started := parseStartedAt(st.StartedAt); !started.IsZero() {
 		uptime = formatUptime(now.Sub(started))
 	}
-	runners, used, limit := topSlots(model.capacity)
-	keys := "q quits, p pauses"
+	keys := "q quit · p pause"
 	if model.paused {
 		keys = "paused; p resumes, q quits"
 	}
-	line := fmt.Sprintf("brigada top · pid %d · up %s · runners %d · slots %s/%s · %s · %s",
-		st.Pid, uptime, runners, used, limit, now.Format("15:04:05"), keys)
-	lines := []string{cutLine(line, width)}
+	left := fmt.Sprintf("brigada top · pid %d · up %s · %s", st.Pid, uptime, now.Format("15:04:05"))
+	rule := width - term.VisibleWidth(left) - term.VisibleWidth(keys) - 2
+	if rule < 1 {
+		rule = 1
+	}
+	line := left + " " + style.Dim(strings.Repeat("─", rule)) + " " + keys
+	lines := []string{topFit(line, width)}
 	if model.err != nil {
 		lines = append(lines, style.Bad(cutLine("engine: "+model.err.Error(), width)))
 	}
@@ -248,26 +256,71 @@ func topHeader(model topModel, now time.Time, style term.Style, width int) []str
 	return lines
 }
 
-// topSlots reads the header's runner count and the global cap layer's
-// use and cap from the capacity snapshot: "?" when no global layer came
-// back, as with a failed capacity fetch.
-func topSlots(snap engine.CapacitySnapshot) (runners int, used, limit string) {
+// globalCap is the snapshot's global layer cap, nil when there is no
+// global layer or the layer is uncapped; it is the line under the AGENTS
+// table.
+func globalCap(snap engine.CapacitySnapshot) *int {
 	for _, l := range snap.Layers {
-		switch l.Layer {
-		case caps.LayerRunner:
-			runners++
-		case caps.LayerGlobal:
-			used = strconv.Itoa(l.Use)
-			limit = "none"
-			if l.Cap != nil {
-				limit = strconv.Itoa(*l.Cap)
-			}
+		if l.Layer == caps.LayerGlobal {
+			return l.Cap
 		}
 	}
-	if used == "" {
-		used, limit = "?", "?"
+	return nil
+}
+
+// topSlots reads the global cap layer's use and cap from the capacity
+// snapshot: the meters strip's slots cell. ok is false when no global
+// layer came back, as with a failed capacity fetch; limit is nil when
+// the layer is uncapped.
+func topSlots(snap engine.CapacitySnapshot) (use int, limit *int, ok bool) {
+	for _, l := range snap.Layers {
+		if l.Layer == caps.LayerGlobal {
+			return l.Use, l.Cap, true
+		}
 	}
-	return runners, used, limit
+	return 0, nil, false
+}
+
+// topMeters is the strip under the header: the global layer's slots
+// against their cap, then the run, queue, held and needs counters, the
+// parts three spaces apart. The slots cell has no bar when the layer is
+// uncapped or capped at zero — no all-empty bar — and reads `?/?` when
+// the capacity fetch failed.
+func topMeters(model topModel, style term.Style, width int) []string {
+	st := model.status
+	cell := "SLOTS ?/?"
+	if use, limit, ok := topSlots(model.capacity); ok {
+		useLimit := fmt.Sprintf("%d/none", use)
+		bar := ""
+		if limit != nil {
+			useLimit = fmt.Sprintf("%d/%d", use, *limit)
+			if *limit >= 1 {
+				bar = topSlotBar(use, *limit) + " "
+			}
+		}
+		cell = "SLOTS " + bar + useLimit
+	}
+	parts := []string{
+		cell,
+		style.Bold(fmt.Sprintf("%d run", len(st.Running))),
+		fmt.Sprintf("%d queue", st.Jobs["queued"]),
+		style.Warn(fmt.Sprintf("%d held", len(st.Held))),
+		style.Bad(fmt.Sprintf("%d needs", len(st.NeedsYou))),
+	}
+	return []string{topFit(strings.Join(parts, "   "), width)}
+}
+
+// topSlotBar is the meters' slots bar: the global use against its cap
+// as at most ten cells — ▓ filled and ░ empty in proportion, at least
+// one ▓ whenever the use is over zero, so a sliver of use always shows.
+func topSlotBar(use, limit int) string {
+	cells := min(limit, 10)
+	filled := use * cells / limit
+	if use > 0 && filled == 0 {
+		filled = 1
+	}
+	filled = min(filled, cells)
+	return strings.Repeat("▓", filled) + strings.Repeat("░", cells-filled)
 }
 
 // topRunning lists the jobs a runner holds, one line each: job, task,
@@ -367,37 +420,89 @@ func topPlans(st api.Status, style term.Style, width int) []string {
 	return lines
 }
 
-// topNeedsYou lists the needs-you queue, one line per entry.
+// topNeedsYou is the needs-you queue at the top of the view, under the
+// meters and before every other section: the header line carries a rule
+// fill to the width, then one Bad line per entry, cut to width and
+// capped at three entry lines with one dim "+N more" line under them.
+// The section is always visible: an empty queue keeps the header and
+// renders one dim line under it.
 func topNeedsYou(st api.Status, style term.Style, width int) []string {
-	lines := []string{style.Bold("NEEDS YOU")}
-	if len(st.NeedsYou) == 0 {
-		return append(lines, "  nothing")
+	rule := width - term.VisibleWidth("NEEDS YOU") - 1
+	if rule < 1 {
+		rule = 1
 	}
-	for _, n := range st.NeedsYou {
-		line := fmt.Sprintf("%s #%d %s", n.Kind, n.ID, n.State)
-		if n.Kind == "agent" {
-			line = fmt.Sprintf("agent %s %s", n.Title, n.State) // named as `brigada agent reset` takes it
+	lines := []string{style.Bold("NEEDS YOU") + " " + style.Dim(strings.Repeat("─", rule))}
+	if len(st.NeedsYou) == 0 {
+		return append(lines, style.Dim("nothing needs you"))
+	}
+	for i, n := range st.NeedsYou {
+		if i == 3 {
+			lines = append(lines, style.Dim(fmt.Sprintf("+%d more", len(st.NeedsYou)-i)))
+			break
 		}
-		if n.Reason != "" {
-			line += ": " + n.Reason
-		}
-		lines = append(lines, "  "+cutLine(line, width-2))
+		lines = append(lines, style.Bad(cutLine(topNeedsYouLine(n), width)))
 	}
 	return lines
 }
 
-// topEvents lists the newest history items, newest first, each as its
-// time and its one-line gist; the layout leaves as many lines as fit.
+// topNeedsYouLine is one needs-you entry as its compact line: the
+// entry's own fields decide the subject — a task or plan its id, an
+// agent its harness/model name (the name `brigada agent reset` takes),
+// a foreman or project entry its Title — then the reason, or the state
+// when the entry carries none.
+func topNeedsYouLine(n engine.NeedsYouItem) string {
+	subject := fmt.Sprintf("#%d", n.ID)
+	switch n.Kind {
+	case "agent", "foreman", "project":
+		subject = n.Title
+	}
+	reason := n.Reason
+	if reason == "" {
+		reason = n.State
+	}
+	return "! " + subject + " " + reason
+}
+
+// topEvents is the strip at the bottom: the newest history items,
+// newest first, joined by " · " into one line cut to width. Wrapping
+// the strip over two lines is a later task's; topEventItem renders each
+// item for both.
 func topEvents(items []history.Item, now time.Time, style term.Style, width int) []string {
-	lines := []string{style.Bold("EVENTS")}
 	if len(items) == 0 {
-		return append(lines, "  none")
+		return []string{style.Dim("no events")}
 	}
+	parts := make([]string, len(items))
 	for i := len(items) - 1; i >= 0; i-- {
-		it := items[i]
-		lines = append(lines, "  "+cutLine(topClock(it.CreatedAt, now)+" "+history.Line(it), width-2))
+		parts[len(items)-1-i] = topEventItem(items[i], now, style)
 	}
-	return lines
+	return []string{topFit(strings.Join(parts, " · "), width)}
+}
+
+// topEventItem is one history item as the events strip shows it: its
+// clock time and its one-line gist, the state words coloured.
+func topEventItem(it history.Item, now time.Time, style term.Style) string {
+	return topClock(it.CreatedAt, now) + " " + topColourStates(history.Line(it), style)
+}
+
+// topColourStates colours a line's state words: done and recovered in
+// the OK style, failed and broken in the Bad style. A word stands
+// alone or ends a field after its "=" or "_", as a status value or an
+// event kind's last part does.
+func topColourStates(line string, style term.Style) string {
+	fields := strings.Fields(line)
+	for i, f := range fields {
+		head, word := "", f
+		if sep := strings.LastIndexAny(f, "=_"); sep >= 0 {
+			head, word = f[:sep+1], f[sep+1:]
+		}
+		switch word {
+		case "done", "recovered":
+			fields[i] = head + style.OK(word)
+		case "failed", "broken":
+			fields[i] = head + style.Bad(word)
+		}
+	}
+	return strings.Join(fields, " ")
 }
 
 // topClock is a stored stamp as a clock time in now's zone: the hour,
