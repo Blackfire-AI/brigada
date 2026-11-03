@@ -109,6 +109,38 @@ func TestRenderTopSections(t *testing.T) {
 	}
 }
 
+// TestRenderTopGlobalCapLine: the AGENTS section names the global cap
+// under its table, and the line is omitted when the snapshot carries no
+// global cap.
+func TestRenderTopGlobalCapLine(t *testing.T) {
+	eight := 8
+	tests := []struct {
+		name   string
+		layers []engine.CapacityLayer
+		want   string
+	}{
+		{"a capped global", []engine.CapacityLayer{{Layer: "global", Cap: &eight}}, "all ≤ global 8"},
+		{"no global layer", nil, ""},
+		{"an uncapped global", []engine.CapacityLayer{{Layer: "global"}}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model := busyTopModel()
+			model.capacity.Layers = tt.layers
+			got := plainTop(model, 100, 0)
+			if tt.want == "" {
+				if strings.Contains(got, "all ≤ global") {
+					t.Errorf("view has a global cap line without a cap:\n%s", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("view lacks %q:\n%s", tt.want, got)
+			}
+		})
+	}
+}
+
 // TestRenderTopShowsGateHoldsAndLandJobs: a land job a runner holds is
 // a running line like any job, and the land-gate and push-gate holds
 // sit in NEEDS YOU with the rule that tripped and the task id.

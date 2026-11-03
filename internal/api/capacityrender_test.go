@@ -46,9 +46,9 @@ func capacityFixture(t *testing.T) (engine.CapacitySnapshot, time.Time) {
 // columns: the agents table, then the layers table.
 const capacityGolden = `AGENTS
 AGENT        TIER      EFFORT   COST  RUNNING/CAP    QUOTA
-claude/opus  heavy     high     3     1/none         ready
+claude/opus  heavy     high     3     1/8 (global)   ready
 codex/gpt-x  standard  default  1     2/2 (account)  cooling until 12:30
-kimi/k2      light     default  1     0/none         broken
+kimi/k2      light     default  1     0/8 (global)   broken
 
 LAYERS
 LAYER    KEY     CAP   USE  QUEUE
@@ -58,6 +58,43 @@ account  codex   2     2    1
 model    gpt-x   2     2    1
 plan     7       none  1    0
 global   -       8     3    0`
+
+// TestRunningCapFoldsGlobal is the effective-cap rule as a table: the
+// agent's own layer binds, the global layer binds, a tie names the
+// agent's own layer, an uncapped agent under a capped global, a global
+// cap of 0, no global layer at all, and a plan layer left out of the
+// fold.
+func TestRunningCapFoldsGlobal(t *testing.T) {
+	two := 2
+	four := 4
+	zero := 0
+	global := func(cap *int) []engine.CapacityLayer {
+		return []engine.CapacityLayer{{Layer: "global", Cap: cap}}
+	}
+	tests := []struct {
+		name   string
+		agent  engine.CapacityAgent
+		layers []engine.CapacityLayer
+		want   string
+	}{
+		{"the agent's own layer binds", engine.CapacityAgent{Running: 1, Cap: &two, CapLayer: "account"}, global(&four), "1/2 (account)"},
+		{"the global layer binds", engine.CapacityAgent{Running: 1, Cap: &four, CapLayer: "runner"}, global(&two), "1/2 (global)"},
+		{"a tie names the agent's own layer", engine.CapacityAgent{Running: 1, Cap: &two, CapLayer: "model"}, global(&two), "1/2 (model)"},
+		{"an uncapped agent under a capped global", engine.CapacityAgent{Running: 1, CapLayer: "none"}, global(&four), "1/4 (global)"},
+		{"a global cap of 0 binds over any agent cap", engine.CapacityAgent{Running: 1, Cap: &four, CapLayer: "runner"}, global(&zero), "1/0 (global)"},
+		{"no global layer", engine.CapacityAgent{Running: 1, Cap: &two, CapLayer: "account"}, nil, "1/2 (account)"},
+		{"neither caps", engine.CapacityAgent{Running: 1, CapLayer: "none"}, nil, "1/none"},
+		{"a plan layer does not cap an agent", engine.CapacityAgent{Running: 1, CapLayer: "none"}, []engine.CapacityLayer{{Layer: "plan", PlanID: 7, Cap: &two}}, "1/none"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snap := engine.CapacitySnapshot{Layers: tt.layers}
+			if got := runningCap(tt.agent, globalCap(snap)); got != tt.want {
+				t.Errorf("runningCap = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestCapacityTablesGolden(t *testing.T) {
 	snap, now := capacityFixture(t)

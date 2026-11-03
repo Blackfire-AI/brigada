@@ -13,11 +13,12 @@ import (
 
 // CapacityTables renders the capacity snapshot (§12.2) as two aligned
 // tables for a terminal. AGENTS: each agent's harness/model, tier, effort,
-// cost weight, running jobs against its cap with the layer that sets it,
-// and its quota — ready, cooling until a local time, or broken. LAYERS:
-// each cap layer's name and key, its cap, use and queue depth. style
-// supplies the colour; with a plain style the text is the same and has no
-// escapes. The last column of each table is cut to fit width.
+// cost weight, running jobs against its effective cap — its own cap folded
+// with the global layer — and the layer that binds it, then its quota —
+// ready, cooling until a local time, or broken. LAYERS: each cap layer's
+// name and key, its cap, use and queue depth. style supplies the colour;
+// with a plain style the text is the same and has no escapes. The last
+// column of each table is cut to fit width.
 func CapacityTables(snap engine.CapacitySnapshot, now time.Time, style term.Style, width int) string {
 	lines := AgentsTable(snap, now, style, width)
 	lines = append(lines, "", style.Bold("LAYERS"))
@@ -43,13 +44,14 @@ func AgentsTable(snap engine.CapacitySnapshot, now time.Time, style term.Style, 
 		lines = append(lines, "  no agents advertised")
 	} else {
 		rows := [][]capCell{capHeader(style, "AGENT", "TIER", "EFFORT", "COST", "RUNNING/CAP", "QUOTA")}
+		global := globalCap(snap)
 		for _, a := range snap.Agents {
 			rows = append(rows, []capCell{
 				plainCell(a.Harness + "/" + a.Model),
 				plainCell(a.Tier),
 				plainCell(a.Effort),
 				plainCell(strconv.Itoa(a.Cost)),
-				plainCell(runningCap(a)),
+				plainCell(runningCap(a, global)),
 				quotaCell(a, now, style),
 			})
 		}
@@ -105,14 +107,32 @@ func localClock(stamp string, now time.Time) string {
 	return t.Format("2006-01-02 15:04")
 }
 
-// runningCap is an agent's running jobs against its cap, with the layer
-// that sets the cap: "1/4 (runner)", or "1/none" when no layer caps it.
-func runningCap(a engine.CapacityAgent) string {
-	text := strconv.Itoa(a.Running) + "/" + capLimit(a.Cap)
-	if a.Cap != nil {
-		text += " (" + a.CapLayer + ")"
+// runningCap is an agent's running jobs against its effective cap — the
+// smaller of the agent's own cap and the snapshot's global cap — with the
+// layer that binds it: "1/4 (runner)", "1/8 (global)", or "1/none" when no
+// layer caps it. A tie names the agent's own layer.
+func runningCap(a engine.CapacityAgent, global *int) string {
+	limit, layer := a.Cap, a.CapLayer
+	if global != nil && (limit == nil || *global < *limit) {
+		limit, layer = global, caps.LayerGlobal
+	}
+	text := strconv.Itoa(a.Running) + "/" + capLimit(limit)
+	if limit != nil {
+		text += " (" + layer + ")"
 	}
 	return text
+}
+
+// globalCap is the snapshot's global layer cap, nil when there is no
+// global layer or the layer is uncapped. Plan layers stay out of an
+// agent's effective cap: they bound a plan, not an agent.
+func globalCap(snap engine.CapacitySnapshot) *int {
+	for _, l := range snap.Layers {
+		if l.Layer == caps.LayerGlobal {
+			return l.Cap
+		}
+	}
+	return nil
 }
 
 // capLimit is one cap as the tables show it: "none" for an uncapped
