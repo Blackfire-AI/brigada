@@ -160,9 +160,10 @@ tasks:
     base: "budget"
     continue: "budget"
     effort: medium
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
+    question: "Can someone run `go test ./cmd/brigada -run TestTopSnapshotGolden -update` in this worktree, review the two generated goldens (80 columns, no escapes, busy has 'q quit · p pause', quiet has 'no events' and 'nothing needs you'), and then run the check command?"
   - id: 324
     name: "docs"
     title: "top: CHANGELOG for the stacked view, fold-bullet clause, docs read-through (Closes #162)"
