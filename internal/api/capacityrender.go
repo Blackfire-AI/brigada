@@ -44,14 +44,14 @@ func AgentsTable(snap engine.CapacitySnapshot, now time.Time, style term.Style, 
 		lines = append(lines, "  no agents advertised")
 	} else {
 		rows := [][]capCell{capHeader(style, "AGENT", "TIER", "EFFORT", "COST", "RUNNING/CAP", "QUOTA")}
-		global := globalCap(snap)
+		global := GlobalCap(snap)
 		for _, a := range snap.Agents {
 			rows = append(rows, []capCell{
 				plainCell(a.Harness + "/" + a.Model),
 				plainCell(a.Tier),
 				plainCell(a.Effort),
 				plainCell(strconv.Itoa(a.Cost)),
-				plainCell(runningCap(a, global)),
+				plainCell(RunningCap(a, global)),
 				quotaCell(a, now, style),
 			})
 		}
@@ -86,16 +86,16 @@ func quotaCell(a engine.CapacityAgent, now time.Time, style term.Style) capCell 
 	case "broken":
 		return capCell{text: "broken", style: style.Bad}
 	case "cooling":
-		return capCell{text: "cooling until " + localClock(a.CoolingUntil, now), style: style.Warn}
+		return capCell{text: "cooling until " + LocalClock(a.CoolingUntil, now), style: style.Warn}
 	}
 	return plainCell("ready")
 }
 
-// localClock is a stored UTC stamp as a clock time in now's zone (the
+// LocalClock is a stored UTC stamp as a clock time in now's zone (the
 // local zone when now is time.Now): the hour and minute on the day of now,
 // the date too on any other day. A stamp that does not parse is shown as
 // it is.
-func localClock(stamp string, now time.Time) string {
+func LocalClock(stamp string, now time.Time) string {
 	t, err := time.Parse(engine.TimeLayout, stamp)
 	if err != nil {
 		return stamp
@@ -107,11 +107,11 @@ func localClock(stamp string, now time.Time) string {
 	return t.Format("2006-01-02 15:04")
 }
 
-// runningCap is an agent's running jobs against its effective cap — the
+// RunningCap is an agent's running jobs against its effective cap — the
 // smaller of the agent's own cap and the snapshot's global cap — with the
 // layer that binds it: "1/4 (runner)", "1/8 (global)", or "1/none" when no
 // layer caps it. A tie names the agent's own layer.
-func runningCap(a engine.CapacityAgent, global *int) string {
+func RunningCap(a engine.CapacityAgent, global *int) string {
 	limit, layer := a.Cap, a.CapLayer
 	if global != nil && (limit == nil || *global < *limit) {
 		limit, layer = global, caps.LayerGlobal
@@ -123,10 +123,10 @@ func runningCap(a engine.CapacityAgent, global *int) string {
 	return text
 }
 
-// globalCap is the snapshot's global layer cap, nil when there is no
+// GlobalCap is the snapshot's global layer cap, nil when there is no
 // global layer or the layer is uncapped. Plan layers stay out of an
 // agent's effective cap: they bound a plan, not an agent.
-func globalCap(snap engine.CapacitySnapshot) *int {
+func GlobalCap(snap engine.CapacitySnapshot) *int {
 	for _, l := range snap.Layers {
 		if l.Layer == caps.LayerGlobal {
 			return l.Cap

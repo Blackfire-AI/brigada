@@ -119,6 +119,42 @@ func TestStatusSectionsNamesAMissingForemanPair(t *testing.T) {
 	}
 }
 
+// TestHeldWait: the held-wait wording as a table — every form a held
+// line shows — and the status's held lines carry it whole, so the
+// wording cannot drift.
+func TestHeldWait(t *testing.T) {
+	tests := []struct {
+		name string
+		held engine.HeldJob
+		want string
+	}{
+		{"a runner slot", engine.HeldJob{ID: 3, Kind: "work", Layer: "runner"}, "waiting for a runner slot"},
+		{"a free slot on a named layer", engine.HeldJob{ID: 4, Kind: "work", Layer: "account"}, "waiting for a free account slot"},
+		{"an agent cooling", engine.HeldJob{ID: 5, Kind: "work", Layer: "cooling", Agent: "claude/opus", Until: "2026-10-14T12:30:00.000000000Z"}, "waiting: claude/opus cooling until 2026-10-14T12:30:00.000000000Z"},
+		{"an unnamed agent cooling", engine.HeldJob{ID: 6, Kind: "work", Layer: "cooling"}, "waiting: agent cooling"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := HeldWait(tt.held); got != tt.want {
+				t.Errorf("HeldWait = %q, want %q", got, tt.want)
+			}
+		})
+	}
+	st := Status{Held: []engine.HeldJob{
+		{ID: 3, TaskID: 2, Kind: "work", Layer: "runner"},
+		{ID: 9, Kind: "foreman", Layer: "no_pair", Agent: "claude/opus"},
+	}}
+	got := StatusSections(st)
+	for _, want := range []string{
+		"held: task #2 work: waiting for a runner slot\n",
+		"held: job #9 foreman: foreman turn waiting: no runner offers claude/opus\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status sections lack %q:\n%s", want, got)
+		}
+	}
+}
+
 // TestStatusSectionsShowsAnInfraRetry: a job waiting out an infra
 // backoff reads as the retry with its wait and the failure's words.
 func TestStatusSectionsShowsAnInfraRetry(t *testing.T) {
