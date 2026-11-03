@@ -183,23 +183,73 @@ func dialEngine(ctx context.Context, rt *runtime, role string, noStart bool) (*a
 // renderTop lays the view out, top to bottom: the header, the meters
 // strip, NEEDS YOU, the loose jobs no plan claims (only when there are
 // any), the PLANS tree with every job under its plan, the AGENTS
-// section and the events strip at the bottom, every line cut to width
-// and the whole trimmed to height — height 0 means no height limit — so
-// a later section yields its lines before an earlier one. With a plain
-// style the text is the same and has no escapes.
+// section and the events strip at the bottom, every line cut to width.
+// The height is a budget, 0 meaning no limit: lines beyond it yield in
+// order — the events strip's second line, then plan task lines from
+// the last listed plan upward, then agent lines from the bottom of the
+// list upward, counted in a dim +N more (brigada agents) line — and
+// what never yields (the header with its error and hint lines, the
+// meters, NEEDS YOU whole, the loose jobs, every plan's own line, the
+// agents head with its global line, the events strip's first line,
+// every blank line between sections) renders whole even when the view
+// overflows the screen. With a plain style the text is the same and
+// has no escapes.
 func renderTop(model topModel, width, height int, now time.Time, style term.Style) []string {
-	sections := [][]string{
-		topHeader(model, now, style, width),
-		topMeters(model, style, width),
-		topNeedsYou(model.status, style, width),
+	header := topHeader(model, now, style, width)
+	meters := topMeters(model, style, width)
+	needs := topNeedsYou(model.status, style, width)
+	loose := topLoose(model.status, now, style, width)
+	plans := newTopPlans(model.status, now, style, width)
+	events := topEvents(model.events, now, style, width)
+
+	// The budget's arithmetic: how many lines the view carries with
+	// eventLines strip lines, planDrop plan task lines dropped and
+	// agentsKeep agent lines kept.
+	agentsAll := len(model.capacity.Agents)
+	globalLines := 0
+	if api.GlobalCap(model.capacity) != nil {
+		globalLines = 1
 	}
-	if loose := topLoose(model.status, now, style, width); len(loose) > 0 {
+	sectionCount := 6
+	if len(loose) > 0 {
+		sectionCount++
+	}
+	eventLines, planDrop, agentsKeep := len(events), 0, agentsAll
+	count := func() int {
+		agentsLines := 1 + agentsKeep + globalLines
+		if agentsKeep < agentsAll {
+			// The +N more (brigada agents) line that names the drops.
+			agentsLines++
+		}
+		return len(header) + len(meters) + len(needs) + len(loose) +
+			len(plans.lines) - planDrop + agentsLines + eventLines +
+			sectionCount - 1
+	}
+	if height > 0 && count() > height {
+		eventLines = 1
+		if over := count() - height; over > 0 {
+			planDrop = min(over, len(plans.taskIdx))
+			if over = count() - height; over > 0 {
+				// Every agent line dropped past the first pays for the
+				// +N more line that names them.
+				if save := min(over, agentsAll-1); save > 0 {
+					agentsKeep = agentsAll - 1 - save
+				}
+			}
+		}
+	}
+	agents := topAgents(model, now, style, width, 0)
+	if agentsKeep < agentsAll {
+		agents = topAgents(model, now, style, width, 2+globalLines+agentsKeep)
+	}
+	sections := [][]string{header, meters, needs}
+	if len(loose) > 0 {
 		sections = append(sections, loose)
 	}
 	sections = append(sections,
-		topPlansTree(model.status, now, style, width),
-		topAgents(model, now, style, width, 0),
-		topEvents(model.events, now, style, width),
+		plans.yield(planDrop),
+		agents,
+		events[:eventLines],
 	)
 	var lines []string
 	for i, section := range sections {
@@ -207,9 +257,6 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 			lines = append(lines, "")
 		}
 		lines = append(lines, section...)
-	}
-	if height > 0 && len(lines) > height {
-		lines = lines[:height]
 	}
 	for i, line := range lines {
 		lines[i] = topFit(line, width)
@@ -228,8 +275,11 @@ func topFit(line string, width int) string {
 
 // topHeader is the first line of the view: the engine's pid, its uptime
 // and the clock, then a dim rule filling the width that remains and the
-// keys at the right end. A failed fetch adds its error as a second
-// line, so the view keeps its shape while the loop retries.
+// keys at the right end. The keys show only when they fit whole — left,
+// two spaces and the keys within the width; a key is never cut
+// mid-word — and otherwise the rule fills what remains of the width. A
+// failed fetch adds its error as a second line, so the view keeps its
+// shape while the loop retries.
 func topHeader(model topModel, now time.Time, style term.Style, width int) []string {
 	st := model.status
 	uptime := "0s"
@@ -241,11 +291,12 @@ func topHeader(model topModel, now time.Time, style term.Style, width int) []str
 		keys = "paused; p resumes, q quits"
 	}
 	left := fmt.Sprintf("brigada top · pid %d · up %s · %s", st.Pid, uptime, now.Format("15:04:05"))
-	rule := width - term.VisibleWidth(left) - term.VisibleWidth(keys) - 2
-	if rule < 1 {
-		rule = 1
+	var line string
+	if rule := width - term.VisibleWidth(left) - term.VisibleWidth(keys) - 2; rule >= 1 {
+		line = left + " " + style.Dim(strings.Repeat("─", rule)) + " " + keys
+	} else {
+		line = left + " " + style.Dim(strings.Repeat("─", max(width-term.VisibleWidth(left)-1, 1)))
 	}
-	line := left + " " + style.Dim(strings.Repeat("─", rule)) + " " + keys
 	lines := []string{topFit(line, width)}
 	if model.err != nil {
 		lines = append(lines, style.Bad(cutLine("engine: "+model.err.Error(), width)))
@@ -481,15 +532,50 @@ func topLoose(st api.Status, now time.Time, style term.Style, width int) []strin
 	return lines
 }
 
+// topPlansView is the rendered PLANS section with its yield order
+// marked: lines holds the whole section, taskIdx the indices of the
+// plan task lines in the order the height budget drops them — the last
+// listed plan's block bottom-up, then the plan before it. A plan's own
+// line and the +N finished line never yield.
+type topPlansView struct {
+	lines   []string
+	taskIdx []int
+}
+
+// yield drops the first n plan task lines from the section.
+func (v topPlansView) yield(n int) []string {
+	if n <= 0 {
+		return v.lines
+	}
+	n = min(n, len(v.taskIdx))
+	drop := make(map[int]bool, n)
+	for _, idx := range v.taskIdx[:n] {
+		drop[idx] = true
+	}
+	lines := make([]string, 0, len(v.lines)-n)
+	for i, line := range v.lines {
+		if !drop[i] {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
 // topPlansTree is the PLANS section: every plan the status lists, each
 // live one with its live work beneath it — the running jobs first, then
 // a line per task still waiting, held, retrying, parked or reviewing —
 // and each finished one a single line. A Dim "+N finished" line counts
 // the finished plans the status hid.
 func topPlansTree(st api.Status, now time.Time, style term.Style, width int) []string {
-	lines := []string{topSectionHead("PLANS", style, width)}
+	return newTopPlans(st, now, style, width).lines
+}
+
+// newTopPlans renders the PLANS section and marks its plan task lines
+// for the height budget.
+func newTopPlans(st api.Status, now time.Time, style term.Style, width int) topPlansView {
+	v := topPlansView{lines: []string{topSectionHead("PLANS", style, width)}}
 	if len(st.Plans) == 0 {
-		lines = append(lines, style.Dim("none"))
+		v.lines = append(v.lines, style.Dim("none"))
 	}
 	claims := newTopClaims(st)
 	reasons := make(map[int64]string)
@@ -498,40 +584,46 @@ func topPlansTree(st api.Status, now time.Time, style term.Style, width int) []s
 			reasons[n.ID] = n.Reason
 		}
 	}
+	var blocks [][]int
 	for _, p := range st.Plans {
-		lines = append(lines, topPlanLine(p, style, width))
+		v.lines = append(v.lines, topPlanLine(p, style, width))
 		if topPlanFinished(p) {
 			continue
+		}
+		var block []int
+		task := func(line string) {
+			v.lines = append(v.lines, line)
+			block = append(block, len(v.lines)-1)
 		}
 		// Which tasks a job already speaks for: a task with a running,
 		// held or retrying job shows as that job's line, not its state's.
 		busy := make(map[int64]bool)
 		for _, j := range st.Running {
 			if id, ok := claims.plan(j.ID, j.TaskID); ok && id == p.ID {
-				lines = append(lines, topRunningLine(j, now, style, width))
+				task(topRunningLine(j, now, style, width))
 				busy[j.TaskID] = true
 			}
 		}
 		for _, h := range st.Held {
 			if id, ok := claims.plan(h.ID, h.TaskID); ok && id == p.ID && h.TaskID == 0 {
-				lines = append(lines, topHeldLine(h, style, width))
+				task(topHeldLine(h, style, width))
 			}
 		}
 		for _, r := range st.Retries {
 			if id, ok := claims.plan(r.ID, r.TaskID); ok && id == p.ID && r.TaskID == 0 {
-				lines = append(lines, topRetryLine(r, now, style, width))
+				task(topRetryLine(r, now, style, width))
 			}
 		}
 		for _, t := range p.Tasks {
 			for _, h := range st.Held {
 				if h.TaskID == t.ID {
-					lines = append(lines, topHeldLine(h, style, width))
+					task(topHeldLine(h, style, width))
 					busy[t.ID] = true
 				}
 			}
 			for _, r := range st.Retries {
 				if r.TaskID == t.ID {
-					lines = append(lines, topRetryLine(r, now, style, width))
+					task(topRetryLine(r, now, style, width))
 					busy[t.ID] = true
 				}
 			}
@@ -539,14 +631,20 @@ func topPlansTree(st api.Status, now time.Time, style term.Style, width int) []s
 				continue
 			}
 			if line := topTaskLine(t, reasons[t.ID], style, width); line != "" {
-				lines = append(lines, line)
+				task(line)
 			}
+		}
+		blocks = append(blocks, block)
+	}
+	for i := len(blocks) - 1; i >= 0; i-- {
+		for j := len(blocks[i]) - 1; j >= 0; j-- {
+			v.taskIdx = append(v.taskIdx, blocks[i][j])
 		}
 	}
 	if st.HiddenFinishedPlans > 0 {
-		lines = append(lines, style.Dim(fmt.Sprintf("+%d finished", st.HiddenFinishedPlans)))
+		v.lines = append(v.lines, style.Dim(fmt.Sprintf("+%d finished", st.HiddenFinishedPlans)))
 	}
-	return lines
+	return v
 }
 
 // topPlanLine is a plan's own line. A finished plan's mark comes from
@@ -625,8 +723,13 @@ func topTaskLine(t engine.StatusTask, reason string, style term.Style, width int
 }
 
 // topSectionHead is a section's head line: the Bold title and a Dim
-// rule filling the width.
+// rule filling the width. Below 60 columns the rule is dropped and the
+// title stands alone — the width is too narrow to spend on fills —
+// while the section's lines beneath keep their indentation.
 func topSectionHead(title string, style term.Style, width int) string {
+	if width < 60 {
+		return style.Bold(title)
+	}
 	rule := width - term.VisibleWidth(title) - 1
 	if rule < 1 {
 		rule = 1
@@ -674,8 +777,11 @@ func topNeedsYouLine(n engine.NeedsYouItem) string {
 }
 
 // topEvents is the strip at the bottom: the newest history items,
-// newest first, joined by " · " into one line cut to width. Wrapping
-// the strip over two lines is a later task's; topEventItem renders each
+// newest first, joined by " · ". Whole items fill the first line; the
+// first item that does not fit wraps to a second line only when a
+// whole item fits there, that line cut to width when items remain —
+// and when no item fits on the second line the strip stays one line
+// cut to width. There is never a third line. topEventItem renders each
 // item for both.
 func topEvents(items []history.Item, now time.Time, style term.Style, width int) []string {
 	if len(items) == 0 {
@@ -685,7 +791,34 @@ func topEvents(items []history.Item, now time.Time, style term.Style, width int)
 	for i := len(items) - 1; i >= 0; i-- {
 		parts[len(items)-1-i] = topEventItem(items[i], now, style)
 	}
-	return []string{topFit(strings.Join(parts, " · "), width)}
+	// fill packs whole items from start while they fit; it reports how
+	// many it took and the first index it left out.
+	fill := func(start int) (took, next int) {
+		used := 0
+		for i := start; i < len(parts); i++ {
+			part := term.VisibleWidth(parts[i])
+			if i > start {
+				part += len(" · ")
+			}
+			if used+part > width {
+				return i - start, i
+			}
+			used += part
+		}
+		return len(parts) - start, len(parts)
+	}
+	first, next := fill(0)
+	if next == len(parts) {
+		return []string{strings.Join(parts, " · ")}
+	}
+	if second, _ := fill(next); second == 0 {
+		// No whole item fits on the second line: one line, cut.
+		return []string{topFit(strings.Join(parts, " · "), width)}
+	}
+	return []string{
+		strings.Join(parts[:first], " · "),
+		topFit(strings.Join(parts[first:], " · "), width),
+	}
 }
 
 // topEventItem is one history item as the events strip shows it: its
@@ -715,9 +848,9 @@ func topColourStates(line string, style term.Style) string {
 	return strings.Join(fields, " ")
 }
 
-// topClock is a stored stamp as a clock time in now's zone: the hour,
-// minute and second on now's day, the date too on any other day. A
-// stamp that does not parse shows as it is.
+// topClock is a stored stamp as a clock time in now's zone: the hour
+// and minute on now's day, the date too on any other day. A stamp that
+// does not parse shows as it is.
 func topClock(stamp string, now time.Time) string {
 	t, err := time.Parse(engine.TimeLayout, stamp)
 	if err != nil {
@@ -725,9 +858,9 @@ func topClock(stamp string, now time.Time) string {
 	}
 	t = t.In(now.Location())
 	if t.Format("2006-01-02") == now.Format("2006-01-02") {
-		return t.Format("15:04:05")
+		return t.Format("15:04")
 	}
-	return t.Format("01-02 15:04:05")
+	return t.Format("01-02 15:04")
 }
 
 // cutLine cuts plain text to width runes, ending "..." when it had to

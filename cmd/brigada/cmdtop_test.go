@@ -116,7 +116,7 @@ func TestRenderTopSections(t *testing.T) {
 		"AGENTS",
 		"claude/opus",
 		"all ≤ global 8",
-		"15:02:45 task_done task 3: status=done · 15:02:41 job_created job 5: branch=task/3-1",
+		"15:02 task_done task 3: status=done · 15:02 job_created job 5: branch=task/3-1",
 	}
 	last := -1
 	for _, w := range want {
@@ -289,19 +289,49 @@ func TestTopNeedsYouEmptyQueue(t *testing.T) {
 	}
 }
 
-// TestTopEventsStrip: the strip joins the newest items, newest first,
-// cuts at width and renders one dim line when nothing happened.
+// TestTopEventsStrip: the strip joins the newest items, newest first —
+// one line when they fit, two when a whole item fits on the second
+// line, one cut line when it does not — and renders one dim line when
+// nothing happened.
 func TestTopEventsStrip(t *testing.T) {
 	items := busyTopModel().events
-	want := "15:02:45 task_done task 3: status=done · 15:02:41 job_created job 5: branch=task/3-1"
-	if got := topEvents(items, topNow, term.New(logo.Caps{}), 200)[0]; got != want {
+	style := term.New(logo.Caps{})
+	want := "15:02 task_done task 3: status=done · 15:02 job_created job 5: branch=task/3-1"
+	if got := topEvents(items, topNow, style, 200); len(got) != 1 || got[0] != want {
 		t.Errorf("strip = %q, want %q", got, want)
 	}
-	if got := topEvents(items, topNow, term.New(logo.Caps{}), 30)[0]; got != "15:02:45 task_done task 3: ..." {
+	wrapped := topEvents(items, topNow, style, 76)
+	if len(wrapped) != 2 || wrapped[0] != "15:02 task_done task 3: status=done" ||
+		wrapped[1] != "15:02 job_created job 5: branch=task/3-1" {
+		t.Errorf("wrapped strip = %q", wrapped)
+	}
+	if got := topEvents(items, topNow, style, 30)[0]; got != "15:02 task_done task 3: sta..." {
 		t.Errorf("cut = %q", got)
 	}
-	if got := topEvents(nil, topNow, term.New(logo.Caps{}), 80); got[0] != "no events" {
+	if got := topEvents(nil, topNow, style, 80); got[0] != "no events" {
 		t.Errorf("empty = %q", got)
+	}
+}
+
+// TestTopClockMinutes: the events strip's pairs show HH:MM — the date
+// too on another day — while the header's own clock keeps its seconds.
+func TestTopClockMinutes(t *testing.T) {
+	if got := topClock("2026-10-20T15:02:45.000000000Z", topNow); got != "15:02" {
+		t.Errorf("same-day stamp = %q, want 15:02", got)
+	}
+	if got := topClock("2026-10-19T15:02:45.000000000Z", topNow); got != "10-19 15:02" {
+		t.Errorf("other-day stamp = %q, want 10-19 15:02", got)
+	}
+	style := term.New(logo.Caps{})
+	model := busyTopModel()
+	strip := strings.Join(topEvents(model.events, topNow, style, 200), "\n")
+	if !strings.Contains(strip, "15:02 task_done") ||
+		strings.Contains(strip, "15:02:45") || strings.Contains(strip, "15:02:41") {
+		t.Errorf("strip = %q, want HH:MM pairs", strip)
+	}
+	header := topHeader(model, topNow, style, 100)[0]
+	if !strings.Contains(header, "15:04:09") {
+		t.Errorf("header = %q, want its seconds", header)
 	}
 }
 
@@ -317,16 +347,16 @@ func TestTopEventItemStates(t *testing.T) {
 	}{
 		{"done", history.Item{Type: history.TypeEvent, ID: 1, Kind: "task_done", TaskID: 3,
 			Payload: []byte(`{"status":"done"}`), CreatedAt: "2026-10-20T15:02:45.000000000Z"},
-			"15:02:45 task_" + style.OK("done") + " task 3: status=" + style.OK("done")},
+			"15:02 task_" + style.OK("done") + " task 3: status=" + style.OK("done")},
 		{"recovered", history.Item{Type: history.TypeEvent, ID: 2, Kind: "agent_recovered", ProjectID: 1,
 			CreatedAt: "2026-10-20T15:02:46.000000000Z"},
-			"15:02:46 agent_" + style.OK("recovered") + " project 1:"},
+			"15:02 agent_" + style.OK("recovered") + " project 1:"},
 		{"failed", history.Item{Type: history.TypeEvent, ID: 3, Kind: "task_failed", TaskID: 4,
 			Payload: []byte(`{"status":"failed"}`), CreatedAt: "2026-10-20T15:02:47.000000000Z"},
-			"15:02:47 task_" + style.Bad("failed") + " task 4: status=" + style.Bad("failed")},
+			"15:02 task_" + style.Bad("failed") + " task 4: status=" + style.Bad("failed")},
 		{"broken", history.Item{Type: history.TypeEvent, ID: 4, Kind: "agent_broken", ProjectID: 1,
 			Payload: []byte(`{"reason":"auth: no key"}`), CreatedAt: "2026-10-20T15:02:48.000000000Z"},
-			"15:02:48 agent_" + style.Bad("broken") + " project 1: reason=auth: no key"},
+			"15:02 agent_" + style.Bad("broken") + " project 1: reason=auth: no key"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -573,15 +603,114 @@ func TestTopLoose(t *testing.T) {
 	}
 }
 
+// TestRenderTopFitsSize: a screen shorter than the view's floor still
+// renders the floor whole — the busy fixture at 40x10 keeps every line
+// within 40 columns while the count passes the height, because nothing
+// inside the floor is cut or dropped.
 func TestRenderTopFitsSize(t *testing.T) {
 	lines := renderTop(busyTopModel(), 40, 10, topNow, term.New(logo.Caps{}))
-	if len(lines) != 10 {
-		t.Fatalf("got %d lines, want 10", len(lines))
+	want := []string{
+		"brigada top · pid 4242 · up 2h0m0s · ...",
+		"",
+		"SLOTS ▓▓▓░░░░░ 3/8   1 run   2 queue ...",
+		"",
+		"NEEDS YOU",
+		"! #2 should the sprocket be blue?",
+		"",
+		"PLANS",
+		"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
+		"",
+		"AGENTS",
+		"claude/opus  1/8 (global)  ✓",
+		"all ≤ global 8",
+		"",
+		"15:02 task_done task 3: status=done",
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Errorf("floor =\n%s\nwant\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+	if len(lines) <= 10 {
+		t.Errorf("got %d lines, want the floor past the height", len(lines))
 	}
 	for _, l := range lines {
 		if n := term.VisibleWidth(l); n > 40 {
 			t.Errorf("line %q is %d wide", l, n)
 		}
+	}
+}
+
+// TestRenderTopHeightYieldOrder: lines beyond the height yield in order
+// — the events strip's second line, then plan task lines from the last
+// listed plan upward, then agent lines from the bottom of the list
+// upward — while every plan's own line and the +N more (brigada agents)
+// line stay.
+func TestRenderTopHeightYieldOrder(t *testing.T) {
+	model := agentsModel()
+	tests := []struct {
+		name   string
+		height int
+		lines  int
+		want   []string
+		lacks  []string
+	}{
+		{"everything fits", 22, 22, []string{
+			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
+			"✗ login expired",
+			"15:02 job_created job 5: branch=task/3-1",
+		}, nil},
+		{"events second line", 21, 21, []string{
+			"15:02 task_done task 3: status=done",
+		}, []string{"job_created"}},
+		{"last plan task line", 20, 20, []string{
+			"  ▸ task #3 work · claude/sonnet@high · 1m40s · Edit",
+			"  ! #2 wire the sprocket should the sprocket be blue?",
+			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
+		}, []string{"? task #4 work held", "job_created"}},
+		{"then the parked line", 19, 19, []string{
+			"  ▸ task #3 work · claude/sonnet@high · 1m40s · Edit",
+			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
+		}, []string{"wire the sprocket should", "? task #4 work held", "job_created"}},
+		{"then the running line", 18, 18, []string{
+			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
+		}, []string{"▸ task #3", "wire the sprocket should", "? task #4 work held", "job_created"}},
+		{"then agent lines", 17, 17, []string{
+			"claude/opus",
+			"+2 more (brigada agents)",
+			"all ≤ global 8",
+		}, []string{"codex/gpt-5", "✗ login expired", "▸ task #3"}},
+		{"down to none", 16, 16, []string{
+			"+3 more (brigada agents)",
+			"all ≤ global 8",
+			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
+		}, []string{"✗ login expired"}},
+		{"the floor overflows", 15, 16, []string{
+			"+3 more (brigada agents)",
+			"all ≤ global 8",
+		}, []string{"claude/opus", "✗ login expired"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := renderTop(model, 76, tt.height, topNow, term.New(logo.Caps{}))
+			got := strings.Join(lines, "\n")
+			if len(lines) != tt.lines {
+				t.Fatalf("got %d lines, want %d:\n%s", len(lines), tt.lines, got)
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("view lacks %q:\n%s", w, got)
+				}
+			}
+			for _, w := range tt.lacks {
+				if strings.Contains(got, w) {
+					t.Errorf("view keeps %q:\n%s", w, got)
+				}
+			}
+			for _, l := range lines {
+				if n := term.VisibleWidth(l); n > 76 {
+					t.Errorf("line %q is %d wide", l, n)
+				}
+			}
+		})
 	}
 }
 
@@ -699,13 +828,113 @@ func TestTopScreenDrawRedrawsInPlace(t *testing.T) {
 	}
 }
 
-func TestRenderTopTallerThanScreenKeepsHeader(t *testing.T) {
+// TestRenderTopScreenHeights: a screen shorter than the floor returns
+// the floor whole — more lines than the height, the header first,
+// nothing inside the floor cut — and a screen taller than the content
+// changes nothing.
+func TestRenderTopScreenHeights(t *testing.T) {
 	lines := renderTop(busyTopModel(), 60, 5, topNow, term.New(logo.Caps{}))
-	if len(lines) != 5 {
-		t.Fatalf("got %d lines, want 5", len(lines))
+	if len(lines) <= 5 {
+		t.Fatalf("got %d lines, want the floor past the height:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
 	if !strings.Contains(lines[0], "brigada top") {
 		t.Errorf("first line is %q, want the header", lines[0])
+	}
+	got := strings.Join(lines, "\n")
+	for _, w := range []string{
+		"NEEDS YOU",
+		"! #2 should the sprocket be blue?",
+		"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
+		"all ≤ global 8",
+		"15:02 task_done task 3: status=done",
+	} {
+		if !strings.Contains(got, w) {
+			t.Errorf("floor lacks %q:\n%s", w, got)
+		}
+	}
+	if strings.Contains(got, "...") {
+		t.Errorf("a floor line is cut:\n%s", got)
+	}
+	for _, l := range lines {
+		if n := term.VisibleWidth(l); n > 60 {
+			t.Errorf("line %q is %d wide", l, n)
+		}
+	}
+	tall := renderTop(busyTopModel(), 60, 40, topNow, term.New(logo.Caps{}))
+	unbounded := renderTop(busyTopModel(), 60, 0, topNow, term.New(logo.Caps{}))
+	if strings.Join(tall, "\n") != strings.Join(unbounded, "\n") {
+		t.Errorf("tall screen trims:\n%s\nwant\n%s", strings.Join(tall, "\n"), strings.Join(unbounded, "\n"))
+	}
+}
+
+// shortTopModel is busyTopModel with a header left short enough — 39
+// columns — that the keys fit from width 58 up.
+func shortTopModel() topModel {
+	model := busyTopModel()
+	model.status.Pid = 99
+	model.status.StartedAt = topNow.UTC().Format(engine.TimeLayout)
+	return model
+}
+
+// TestTopHeaderKeysFit: the keys show only when the left part, two
+// spaces and the keys fit the width whole — a key is never cut
+// mid-word — and otherwise a dim rule fills what remains of the width.
+// busyTopModel's header left is 45 columns, so its keys fit only from
+// width 64 up, at 60 too they give way.
+func TestTopHeaderKeysFit(t *testing.T) {
+	style := term.New(logo.Caps{})
+	tests := []struct {
+		name  string
+		model topModel
+		width int
+		keys  bool
+	}{
+		{"busy at 59 drops the keys", busyTopModel(), 59, false},
+		{"busy at 60 drops the keys too", busyTopModel(), 60, false},
+		{"busy at 63 drops the keys", busyTopModel(), 63, false},
+		{"busy at 64 shows the keys", busyTopModel(), 64, true},
+		{"short left at 57 drops the keys", shortTopModel(), 57, false},
+		{"short left at 58 shows the keys", shortTopModel(), 58, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			line := topHeader(tt.model, topNow, style, tt.width)[0]
+			if n := term.VisibleWidth(line); n != tt.width {
+				t.Errorf("header is %d wide, want %d: %q", n, tt.width, line)
+			}
+			if tt.keys && !strings.HasSuffix(line, "q quit · p pause") {
+				t.Errorf("header lacks the keys: %q", line)
+			}
+			if !tt.keys && strings.Contains(line, "quit") {
+				t.Errorf("header keeps the keys: %q", line)
+			}
+		})
+	}
+	want := "brigada top · pid 99 · up 0s · 15:04:09 " + strings.Repeat("─", 17)
+	if got := topHeader(shortTopModel(), topNow, style, 57)[0]; got != want {
+		t.Errorf("keys-dropped header = %q, want %q", got, want)
+	}
+}
+
+// TestRenderTopNarrowSectionHeads: below 60 columns the section heads
+// drop their rule fills and keep their titles, the lines beneath keep
+// their indentation, and at 60 the fills return.
+func TestRenderTopNarrowSectionHeads(t *testing.T) {
+	narrow := strings.Join(renderTop(busyTopModel(), 59, 0, topNow, term.New(logo.Caps{})), "\n")
+	for _, head := range []string{"NEEDS YOU", "PLANS", "AGENTS"} {
+		if !strings.Contains(narrow, "\n"+head+"\n") {
+			t.Errorf("narrow view lacks the bare head %q:\n%s", head, narrow)
+		}
+	}
+	if !strings.Contains(narrow, "  ▸ task #3 work · claude/sonnet@high · 1m40s · Edit") {
+		t.Errorf("narrow view loses the indentation beneath a head:\n%s", narrow)
+	}
+	wide := strings.Join(renderTop(busyTopModel(), 60, 0, topNow, term.New(logo.Caps{})), "\n")
+	for _, head := range []string{"NEEDS YOU", "PLANS", "AGENTS"} {
+		want := head + " " + strings.Repeat("─", 60-len(head)-1)
+		if !strings.Contains(wide, want) {
+			t.Errorf("wide view lacks the filled head %q:\n%s", want, wide)
+		}
 	}
 }
 
@@ -808,7 +1037,7 @@ func TestTopAgentsBudget(t *testing.T) {
 func TestRenderTopFinalOrder(t *testing.T) {
 	got := plainTop(agentsModel(), 100, 0)
 	last := -1
-	for _, h := range []string{"brigada top", "SLOTS", "NEEDS YOU", "PLANS", "AGENTS", "15:02:45"} {
+	for _, h := range []string{"brigada top", "SLOTS", "NEEDS YOU", "PLANS", "AGENTS", "15:02 task_done"} {
 		i := strings.Index(got, h)
 		if i < last {
 			t.Errorf("%q out of order:\n%s", h, got)
