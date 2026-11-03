@@ -16,7 +16,7 @@ func TestShellCommands(t *testing.T) {
 		{"default", nil, []string{"go build", "go test", "go vet", "gofmt"}, false},
 		{"none", []string{}, nil, false},
 		{"explicit, Edit left out", []string{"Edit", "Bash(npm test:*)", "Bash(git diff:*)"}, []string{"npm test", "git diff"}, false},
-		{"exact pattern does not map", []string{"Bash(git status)"}, nil, false},
+		{"exact rule gives its command", []string{"Bash(git status)", "Bash()", "Read"}, []string{"git status"}, false},
 		{"whole shell", []string{"Edit", "Bash"}, nil, true},
 	} {
 		got, whole := (&Adapter{AllowedTools: tc.tools}).ShellCommands([]string{"Bash(ignored:*)"})

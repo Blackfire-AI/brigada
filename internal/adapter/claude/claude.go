@@ -111,7 +111,7 @@ var _ adapter.Adapter = (*Adapter)(nil)
 
 // ShellCommands implements adapter.ShellScoped: the commands of the
 // agent's own scope (AllowedTools; nil is the Go default, non-nil empty is
-// none). Only `Bash(X:*)` entries give a command, in order; other tools
+// none). Each `Bash(X:*)` or exact `Bash(X)` entry gives X, in order; other tools
 // such as Edit are left out, and a bare Bash names the whole shell. The
 // job's tools are not read: claude takes its scope from its config.
 func (a *Adapter) ShellCommands(_ []string) (commands []string, whole bool) {
@@ -127,7 +127,14 @@ func (a *Adapter) ShellCommands(_ []string) (commands []string, whole bool) {
 		if !ok {
 			continue
 		}
-		if cmd, ok := strings.CutSuffix(rest, ":*)"); ok && cmd != "" {
+		// `Bash(X:*)` allows X and what follows it; the exact rule
+		// `Bash(X)` allows X alone. Either way X is a command the
+		// shell may run, so a Bash rule never reads as no shell.
+		cmd, ok := strings.CutSuffix(rest, ":*)")
+		if !ok {
+			cmd, ok = strings.CutSuffix(rest, ")")
+		}
+		if ok && cmd != "" {
 			commands = append(commands, cmd)
 		}
 	}

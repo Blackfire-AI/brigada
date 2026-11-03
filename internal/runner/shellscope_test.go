@@ -40,10 +40,9 @@ func TestShellScopeNoteClaudeDefault(t *testing.T) {
 // form that ran is named, and git, which was refused, is not promised.
 func TestClaudeCompoundNoteMatchesTheProbes(t *testing.T) {
 	t.Parallel()
-	for _, form := range []string{"&&", ";", "pipe into tail", "2>&1", "cd persists", "worktree root"} {
-		if !strings.Contains(claudeCompoundNote, form) {
-			t.Errorf("the compound sentence dropped %q: %s", form, claudeCompoundNote)
-		}
+	const want = "A line that chains allowed commands with &&, ; or a pipe into tail, or adds 2>&1, runs. A cd persists into your next call, so stay at the worktree root."
+	if claudeCompoundNote != want {
+		t.Errorf("the compound sentence drifted from the probe results:\n got: %s\nwant: %s", claudeCompoundNote, want)
 	}
 	if strings.Contains(claudeCompoundNote, "git") {
 		t.Errorf("the compound sentence promises git: %s", claudeCompoundNote)
