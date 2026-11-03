@@ -802,6 +802,10 @@ func TestPrintTopSnapshot(t *testing.T) {
 	}
 }
 
+// topGoldenDir is testdata resolved at package init: other tests change
+// the working directory, which would break a relative path.
+var topGoldenDir, _ = filepath.Abs("testdata")
+
 var updateTopGolden = flag.Bool("update", false, "rewrite the top snapshot golden files")
 
 // quietTopModel is a fetched model with nothing to show: no events, no
@@ -858,7 +862,7 @@ func TestTopSnapshotGolden(t *testing.T) {
 					t.Errorf("snapshot lacks %q:\n%s", w, got)
 				}
 			}
-			path := filepath.Join("testdata", "top-snapshot-"+tc.name+".golden")
+			path := filepath.Join(topGoldenDir, "top-snapshot-"+tc.name+".golden")
 			if *updateTopGolden {
 				if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
 					t.Fatal(err)
