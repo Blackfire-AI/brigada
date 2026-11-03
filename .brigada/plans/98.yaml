@@ -30,7 +30,7 @@ tasks:
     effort: medium
     review_tier: heavy
     skills: ["bugfix", "surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 327
@@ -41,6 +41,6 @@ tasks:
     base: ""
     effort: medium
     skills: ["bugfix"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
