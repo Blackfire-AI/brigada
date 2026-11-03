@@ -112,7 +112,7 @@ tasks:
     continue: "tree3"
     effort: medium
     skills: ["surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 320
