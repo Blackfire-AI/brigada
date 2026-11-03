@@ -124,10 +124,9 @@ tasks:
     continue: "frame2"
     effort: medium
     skills: ["surface-parity"]
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-320"
     rounds: 0
-    question: "Can the runner cherry-pick the tip commit of brigada/task-320 onto this worktree's base (3d61ce6f) itself, or allow git commands here so I can do it? Rewriting from the spec risks conflicts with tasks 321 and 319."
   - id: 321
     name: "tree3"
     title: "top: the plans tree — every job under its plan, finished plans one line (Refs #162)"
