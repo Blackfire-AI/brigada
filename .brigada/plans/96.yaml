@@ -5,9 +5,9 @@
 plan: 96
 title: "Rework brigada top: stacked layout, effective caps, needs-you first (#162)"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-03T10:19:37.283675Z
-updated: 2026-11-03T12:25:45.682205Z
+updated: 2026-11-03T19:32:11.088875Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -52,7 +52,7 @@ tasks:
     tier: heavy
     effort: medium
     caps: {review_rounds: 3}
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 315
@@ -100,18 +100,77 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["surface-parity"]
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 319
     name: "agents"
     title: "top: one-line agents and the final stacked order (Refs #162)"
     class: "implement"
-    deps: ["tree2"]
-    base: "tree2"
-    continue: "tree2"
+    deps: ["tree3"]
+    base: "tree3"
+    continue: "tree3"
     effort: medium
     skills: ["surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 320
+    name: "helpers"
+    title: "top: export the status helpers the tree and agents reuse (Refs #162)"
+    class: "implement"
+    deps: ["frame2"]
+    base: "frame2"
+    continue: "frame2"
+    effort: medium
+    skills: ["surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 321
+    name: "tree3"
+    title: "top: the plans tree — every job under its plan, finished plans one line (Refs #162)"
+    class: "implement"
+    deps: ["helpers"]
+    base: "helpers"
+    continue: "helpers"
+    effort: medium
+    skills: ["surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 322
+    name: "budget"
+    title: "top: height budget, narrow width and the events wrap (Refs #162)"
+    class: "implement"
+    deps: ["agents"]
+    base: "agents"
+    continue: "agents"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 323
+    name: "snapshot"
+    title: "top: deterministic piped snapshot — pinned clock and locale, golden (Refs #162)"
+    class: "implement"
+    deps: ["budget"]
+    base: "budget"
+    continue: "budget"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 324
+    name: "docs"
+    title: "top: CHANGELOG for the stacked view, fold-bullet clause, docs read-through (Closes #162)"
+    class: "implement"
+    deps: ["snapshot"]
+    base: "snapshot"
+    continue: "snapshot"
+    tier: light
+    effort: medium
+    skills: ["docs-change"]
     state: pending
     branch: ""
     rounds: 0
