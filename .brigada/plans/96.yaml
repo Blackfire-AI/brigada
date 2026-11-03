@@ -137,7 +137,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 322
