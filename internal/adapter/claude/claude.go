@@ -109,6 +109,33 @@ func ScopeText(tools []string) string {
 
 var _ adapter.Adapter = (*Adapter)(nil)
 
+// ShellCommands implements adapter.ShellScoped: the commands of the
+// agent's own scope (AllowedTools; nil is the Go default, non-nil empty is
+// none). Only `Bash(X:*)` entries give a command, in order; other tools
+// such as Edit are left out, and a bare Bash names the whole shell. The
+// job's tools are not read: claude takes its scope from its config.
+func (a *Adapter) ShellCommands(_ []string) (commands []string, whole bool) {
+	tools := a.AllowedTools
+	if tools == nil {
+		tools = DefaultWorkerTools()
+	}
+	for _, t := range tools {
+		if t == "Bash" {
+			return nil, true
+		}
+		rest, ok := strings.CutPrefix(t, "Bash(")
+		if !ok {
+			continue
+		}
+		if cmd, ok := strings.CutSuffix(rest, ":*)"); ok && cmd != "" {
+			commands = append(commands, cmd)
+		}
+	}
+	return commands, false
+}
+
+var _ adapter.ShellScoped = (*Adapter)(nil)
+
 // The claude CLI carries the attach too (§4.2 item 1): interactive
 // resume on a forked session id.
 var _ adapter.Interactive = (*Adapter)(nil)

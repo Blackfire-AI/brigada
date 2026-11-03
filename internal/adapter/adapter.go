@@ -105,6 +105,20 @@ type Job struct {
 	StatusLine string
 }
 
+// ShellScoped is the optional adapter interface for a harness whose
+// permission rules limit a worker's shell to named commands: the runner
+// asks it what the scope in force is, so the worker's prompt can say so.
+// codex, kimi and dsh run in OS sandboxes, implement nothing, and keep
+// their prompt unchanged.
+type ShellScoped interface {
+	// ShellCommands reports the commands a work or fix job's shell may
+	// run, in scope order, as the command prefixes the scope names
+	// (`go test` for `Bash(go test:*)`). tools is Job.Tools. An empty
+	// list with whole false means no shell at all; whole true means the
+	// scope names the whole shell, which refuses nothing.
+	ShellCommands(tools []string) (commands []string, whole bool)
+}
+
 // Interactive is the optional adapter interface for the attach (§4.2
 // item 1): an adapter whose CLI can carry an interactive terminal
 // session — the user's own chat with the foreman, not a headless run —
