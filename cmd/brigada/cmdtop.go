@@ -187,9 +187,13 @@ func dialEngine(ctx context.Context, rt *runtime, role string, noStart bool) (*a
 // height limit — so a later section yields its lines before an earlier
 // one. With a plain style the text is the same and has no escapes.
 func renderTop(model topModel, width, height int, now time.Time, style term.Style) []string {
+	agents := api.AgentsTable(model.capacity, now, style, width)
+	if global := globalCap(model.capacity); global != nil {
+		agents = append(agents, style.Dim(fmt.Sprintf("all \u2264 global %d", *global)))
+	}
 	sections := [][]string{
 		topHeader(model, now, style, width),
-		api.AgentsTable(model.capacity, now, style, width),
+		agents,
 		topRunning(model.status, now, style, width),
 		topQueue(model.status, now, style, width),
 		topPlans(model.status, style, width),
@@ -246,6 +250,18 @@ func topHeader(model topModel, now time.Time, style term.Style, width int) []str
 		lines = append(lines, cutLine(model.hint, width))
 	}
 	return lines
+}
+
+// globalCap is the snapshot's global layer cap, nil when there is no
+// global layer or the layer is uncapped; it is the line under the AGENTS
+// table.
+func globalCap(snap engine.CapacitySnapshot) *int {
+	for _, l := range snap.Layers {
+		if l.Layer == caps.LayerGlobal {
+			return l.Cap
+		}
+	}
+	return nil
 }
 
 // topSlots reads the header's runner count and the global cap layer's
