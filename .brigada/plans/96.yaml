@@ -160,7 +160,7 @@ tasks:
     base: "budget"
     continue: "budget"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-323"
     rounds: 1
   - id: 324
@@ -173,6 +173,6 @@ tasks:
     tier: light
     effort: medium
     skills: ["docs-change"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
