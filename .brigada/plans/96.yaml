@@ -112,7 +112,7 @@ tasks:
     continue: "tree3"
     effort: medium
     skills: ["surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-319"
     rounds: 0
   - id: 320
@@ -149,7 +149,7 @@ tasks:
     continue: "agents"
     tier: heavy
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 323
