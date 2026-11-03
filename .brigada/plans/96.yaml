@@ -5,9 +5,9 @@
 plan: 96
 title: "Rework brigada top: stacked layout, effective caps, needs-you first (#162)"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-03T10:19:37.283675Z
-updated: 2026-11-03T10:24:18.811753Z
+updated: 2026-11-03T10:40:16.803848Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -39,18 +39,40 @@ tasks:
     deps: ["fold"]
     base: "fold"
     effort: medium
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 314
     name: "finish"
     title: "top: height budget, narrow width, snapshot test, docs and CHANGELOG (Closes #162)"
     class: "implement"
-    deps: ["sections"]
-    base: "sections"
-    continue: "sections"
+    deps: ["tree"]
+    base: "tree"
+    continue: "tree"
     effort: medium
     caps: {review_rounds: 3}
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 315
+    name: "frame"
+    title: "top: the stacked frame — header, meters, NEEDS YOU first, events (Refs #162)"
+    class: "implement"
+    deps: ["fold"]
+    base: "fold"
+    continue: "fold"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 316
+    name: "tree"
+    title: "top: the plan tree and one-line agents (Refs #162)"
+    class: "implement"
+    deps: ["frame"]
+    base: "frame"
+    continue: "frame"
+    effort: medium
     state: pending
     branch: ""
     rounds: 0
