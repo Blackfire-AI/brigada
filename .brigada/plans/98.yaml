@@ -31,8 +31,8 @@ tasks:
     review_tier: heavy
     skills: ["bugfix", "surface-parity"]
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-326"
+    rounds: 1
   - id: 327
     name: "shell_scope"
     title: "The worker prompt names the shell scope (Closes #167)"
