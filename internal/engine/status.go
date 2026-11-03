@@ -1036,7 +1036,8 @@ func statusNeedsYouTx(tx *sql.Tx, reviewFamily string, project int64, now time.T
 	// Why each waits (§6.3, §6.2): the awaiting plan's
 	// plan_awaiting_approval event's words; the parked plan's findings,
 	// cut to the queue's one line and, when the cut landed, pointing at
-	// the history that holds them whole.
+	// the history that holds them whole — headed, while a done turn
+	// swallowed the verdict, by the turn that failed to act (§4.2).
 	for i := range items {
 		if items[i].Kind != "plan" {
 			continue
@@ -1045,6 +1046,15 @@ func statusNeedsYouTx(tx *sql.Tx, reviewFamily string, project int64, now time.T
 			reason, job, err := parkedPlanReasonTx(tx, items[i].ID)
 			if err != nil {
 				return nil, err
+			}
+			if turn, swallowed, serr := parkedPlanSwallowedTx(tx, items[i].ID); serr != nil {
+				return nil, serr
+			} else if swallowed {
+				note := fmt.Sprintf("foreman turn %d ended without answering the changes verdict", turn)
+				if reason != "" {
+					note += ": " + reason
+				}
+				reason = note
 			}
 			items[i].Reason = oneLine(reason, needsYouReasonLimit)
 			if flat := strings.Join(strings.Fields(reason), " "); job > 0 && len(flat) > needsYouReasonLimit {
@@ -1242,6 +1252,54 @@ func parkedPlanReasonTx(tx *sql.Tx, plan int64) (reason string, job int64, err e
 		reason = p.Reason
 	}
 	return reason, job, nil
+}
+
+// parkedPlanSwallowedTx reads whether a plan its review parked on a
+// `changes` verdict had it swallowed by a done foreman turn (issue
+// #164): the verdict's row — the plan's latest plan_reviewed inbox row —
+// is consumed, and its job_id names a foreman job that completed done,
+// so a turn read the findings and answered nothing. The state comes
+// from the live tables, so the entry reverts to the plain findings line
+// once the plan is answered or the row returns to pending (a failed
+// turn's rows, the start-up heal). A row whose job_id is NULL never
+// counts: attach delivery clears it, and release and the events tool
+// consume those rows — an attached foreman that read the verdict is not
+// a turn that failed to act. The turn's id is what the entry names.
+func parkedPlanSwallowedTx(tx *sql.Tx, plan int64) (turn int64, swallowed bool, err error) {
+	var verdict string
+	if err := tx.QueryRow(`SELECT review_verdict FROM plans WHERE id = ?`, plan).Scan(&verdict); err != nil {
+		return 0, false, fmt.Errorf("read the review verdict of plan %d: %w", plan, err)
+	}
+	if verdict != verdictChanges {
+		return 0, false, nil
+	}
+	var state string
+	var job sql.NullInt64
+	err = tx.QueryRow(`SELECT i.state, i.job_id FROM foreman_inbox i
+		JOIN events e ON e.id = i.event_id
+		WHERE e.kind = ? AND json_extract(e.payload, '$.plan') = ?
+		ORDER BY i.event_id DESC LIMIT 1`, evPlanReviewed, plan).Scan(&state, &job)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("read the review row of plan %d: %w", plan, err)
+	}
+	if state != inboxConsumed || !job.Valid || job.Int64 == 0 {
+		return 0, false, nil
+	}
+	var kind Kind
+	var status string
+	if err := tx.QueryRow(`SELECT kind, status FROM jobs WHERE id = ?`, job.Int64).Scan(&kind, &status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("read the turn that carried plan %d's verdict: %w", plan, err)
+	}
+	if kind != KindForeman || status != statusDone {
+		return 0, false, nil
+	}
+	return job.Int64, true, nil
 }
 
 // needsYouReason renders one parked task's reason from its latest
