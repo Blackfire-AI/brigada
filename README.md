@@ -123,7 +123,7 @@ Rerun `brigada init` to change agents, the foreman model and effort, or tasks at
 
 1. Install brigada (above) and run `brigada init` in your repository (above).
 2. Open your coding agent in the repository and tell it to read `.brigada/operator.md`. Then tell it, for example, "ask brigada to fix #12". Your agent is the operator: it passes the request to the foreman through the CLI and reports back; it approves nothing.
-3. Watch `brigada top`: your live view of agents, jobs, queue, plans and events.
+3. Watch `brigada top`: your live view of the meters, what needs you, plans, agents and events.
 4. Approve what the needs-you queue holds. A plan over your size limit, a landing a rule holds, and a push wait for you, with `brigada plan approve`, `brigada land approve` and `brigada push approve`; the operator tells you when something waits, and the decision is yours.
 
 ```sh
