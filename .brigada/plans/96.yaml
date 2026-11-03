@@ -5,9 +5,9 @@
 plan: 96
 title: "Rework brigada top: stacked layout, effective caps, needs-you first (#162)"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: needs_foreman
 created: 2026-11-03T10:19:37.283675Z
-updated: 2026-11-03T11:48:56.64884Z
+updated: 2026-11-03T11:56:52.087013Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
