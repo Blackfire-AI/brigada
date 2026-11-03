@@ -29,8 +29,8 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-312"
     rounds: 0
   - id: 313
     name: "sections"
