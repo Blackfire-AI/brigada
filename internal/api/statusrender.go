@@ -52,10 +52,6 @@ func StatusSections(st Status) string {
 		if h.TaskID != 0 {
 			what = fmt.Sprintf("task #%d", h.TaskID)
 		}
-		if h.Layer == "no_pair" {
-			lines = append(lines, fmt.Sprintf("held: %s %s: foreman turn waiting: no runner offers %s", what, h.Kind, h.Agent))
-			continue
-		}
 		lines = append(lines, fmt.Sprintf("held: %s %s: %s", what, h.Kind, HeldWait(h)))
 	}
 	for _, r := range st.Retries {
@@ -243,12 +239,15 @@ func StatusSections(st Status) string {
 
 // HeldWait words why one held job waits (§8.1): a runner slot, a free
 // slot on a named layer, its agent's quota — the agent and when its
-// cooling ends — or an unnamed agent's cooling. StatusSections renders
-// it after `held: <what> <kind>: ` per held entry, and top's agents
-// view reuses it, so the two read the same words.
+// cooling ends — an unnamed agent's cooling, or a foreman turn no
+// runner offers the agent for (no_pair). StatusSections renders it
+// after `held: <what> <kind>: ` per held entry, and top's plans tree
+// reuses it, so the two read the same words.
 func HeldWait(h engine.HeldJob) string {
 	wait := "waiting for a free " + h.Layer + " slot"
 	switch {
+	case h.Layer == "no_pair":
+		wait = "foreman turn waiting: no runner offers " + h.Agent
 	case h.Layer == "runner":
 		wait = "waiting for a runner slot"
 	case h.Layer == "cooling" && h.Agent != "":

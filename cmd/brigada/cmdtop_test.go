@@ -47,8 +47,9 @@ func (f *fakeTop) History(context.Context, api.HistoryQuery) (history.Page, erro
 // topNow is the tests' clock: a fixed instant.
 var topNow = time.Date(2026, 10, 20, 15, 4, 9, 0, time.UTC)
 
-// busyTopModel is one full view's data: an agent, a running job, a held
-// one, an active plan with a parked task, the needs-you queue and events.
+// busyTopModel is one full view's data: an agent, an active plan with a
+// done task, a parked one, one running and one held, the needs-you
+// queue and events.
 func busyTopModel() topModel {
 	eight := 8
 	leased := topNow.Add(-100 * time.Second).UTC().Format(engine.TimeLayout)
@@ -67,6 +68,8 @@ func busyTopModel() topModel {
 				Tasks: []engine.StatusTask{
 					{ID: 1, Title: "the frobnicator", State: "done"},
 					{ID: 2, Title: "wire the sprocket", State: "needs_foreman"},
+					{ID: 3, Title: "oil the gears", State: "running"},
+					{ID: 4, Title: "polish the knobs", State: "ready"},
 				},
 			}},
 			NeedsYou: []engine.NeedsYouItem{
@@ -93,23 +96,26 @@ func plainTop(model topModel, width, height int) string {
 }
 
 // TestRenderTopSections: the view's order — header, meters, NEEDS YOU,
-// then the AGENTS, RUNNING, QUEUE and PLANS sections, then the events
-// strip — with every section's text in its place.
+// the loose jobs, the PLANS tree, AGENTS, then the events strip — with
+// every section's text in its place.
 func TestRenderTopSections(t *testing.T) {
-	got := plainTop(busyTopModel(), 100, 0)
+	model := busyTopModel()
+	model.status.Running = append(model.status.Running,
+		engine.StatusJob{ID: 30, Kind: "foreman", Status: "running"})
+	got := plainTop(model, 100, 0)
 	want := []string{
 		"brigada top · pid 4242 · up 2h0m0s · 15:04:09",
-		"SLOTS ▓▓▓░░░░░ 3/8   1 run   2 queue   1 held   1 needs",
+		"SLOTS ▓▓▓░░░░░ 3/8   2 run   2 queue   1 held   1 needs",
 		"NEEDS YOU",
 		"! #2 should the sprocket be blue?",
+		"\n\n  ▸ job #30 foreman\n\nPLANS ─",
+		"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
+		"  ▸ task #3 work · claude/sonnet@high · 1m40s · Edit",
+		"  ! #2 wire the sprocket should the sprocket be blue?",
+		"  ? task #4 work held: waiting for a runner slot",
 		"AGENTS",
 		"claude/opus",
 		"all ≤ global 8",
-		"job #5 task #3 work claude/sonnet@high 1m40s tool_start Edit",
-		"2 queued",
-		"held: job #6 work by runner",
-		"#1 active fix the frobnicator 1/2",
-		"task #2 needs_foreman wire the sprocket: should the sprocket be blue?",
 		"15:02:45 task_done task 3: status=done · 15:02:41 job_created job 5: branch=task/3-1",
 	}
 	last := -1
@@ -363,12 +369,16 @@ func TestRenderTopGlobalCapLine(t *testing.T) {
 	}
 }
 
-// TestRenderTopShowsGateHoldsAndLandJobs: a land job a runner holds is
-// a running line like any job, and the land-gate and push-gate holds
-// sit in NEEDS YOU with the rule that tripped and the task id.
+// TestRenderTopShowsGateHoldsAndLandJobs: a land job a runner holds
+// renders under its task inside its plan, though the task is done, and
+// the land-gate and push-gate holds sit in NEEDS YOU with the rule that
+// tripped and the task id.
 func TestRenderTopShowsGateHoldsAndLandJobs(t *testing.T) {
 	model := busyTopModel()
 	leased := topNow.Add(-100 * time.Second).UTC().Format(engine.TimeLayout)
+	model.status.Plans[0].Tasks = append(model.status.Plans[0].Tasks,
+		engine.StatusTask{ID: 8, Title: "ship the gizmo", State: "done"},
+		engine.StatusTask{ID: 9, Title: "push the widget", State: "done"})
 	model.status.Running = append(model.status.Running,
 		engine.StatusJob{ID: 10, TaskID: 9, Kind: "land", Status: "running", LeasedAt: leased})
 	model.status.NeedsYou = append(model.status.NeedsYou,
@@ -379,24 +389,187 @@ func TestRenderTopShowsGateHoldsAndLandJobs(t *testing.T) {
 		"\n! #2 should the sprocket be blue?" +
 		"\n! #8 held by rule gate_land: gate_land is ask; release: brigada land approve 8; change the rule: brigada land approve --and-stop-asking 8" +
 		"\n! #9 waits to push: task/9-1@abc123"
-	for _, w := range []string{
-		"job #10 task #9 land 1m40s",
-		want,
-	} {
+	tree := "#1 fix the frobnicator 3/6 ▓▓▓▓▓░░░░░░" +
+		"\n  ▸ task #3 work · claude/sonnet@high · 1m40s · Edit" +
+		"\n  ▸ task #9 land · 1m40s" +
+		"\n  ! #2 wire the sprocket should the sprocket be blue?"
+	for _, w := range []string{tree, want} {
 		if !strings.Contains(got, w) {
 			t.Errorf("view lacks %q:\n%s", w, got)
 		}
 	}
+	if strings.Contains(got, "#8 ship the gizmo") {
+		t.Errorf("a done task with no job renders a line:\n%s", got)
+	}
 }
 
+// TestRenderTopShowsAnInfraRetry: a waiting retry renders as its ↺ line
+// under the plan its task belongs to, in place of the task's queued line.
 func TestRenderTopShowsAnInfraRetry(t *testing.T) {
 	model := busyTopModel()
+	model.status.Held = nil
 	nb := topNow.Add(5 * time.Minute).UTC().Format(engine.TimeLayout)
 	model.status.Retries = []engine.InfraRetry{{ID: 9, TaskID: 4, Kind: "work", NotBefore: nb, Reason: "could not resolve github.com"}}
 	got := plainTop(model, 200, 0)
-	want := "waiting: task #4 work: retry in 5m: could not resolve github.com"
+	want := "  ! #2 wire the sprocket should the sprocket be blue?" +
+		"\n  ↺ task #4 work: retry in 5m: could not resolve github.com" +
+		"\n\nAGENTS"
 	if !strings.Contains(got, want) {
 		t.Errorf("view lacks %q:\n%s", want, got)
+	}
+	if strings.Contains(got, "#4 polish the knobs") {
+		t.Errorf("the retrying task also renders its queued line:\n%s", got)
+	}
+}
+
+// TestTopPlansTree: every plan the status lists renders — a live one
+// with its running jobs first, then a line per task still live work, a
+// finished one as one line — then the hidden finished plans counted.
+func TestTopPlansTree(t *testing.T) {
+	leased := topNow.Add(-14 * time.Minute).UTC().Format(engine.TimeLayout)
+	nb := topNow.Add(5 * time.Minute).UTC().Format(engine.TimeLayout)
+	head := "PLANS " + strings.Repeat("─", 74)
+	tests := []struct {
+		name string
+		st   api.Status
+		want []string
+	}{
+		{"no plans", api.Status{}, []string{head, "none"}},
+		{"every task line form", api.Status{
+			Plans: []engine.StatusPlan{{ID: 96, Title: "Rework brigada top", State: "active", Tasks: []engine.StatusTask{
+				{ID: 310, Title: "helpers", State: "done"},
+				{ID: 311, Title: "dropped", State: "cancelled"},
+				{ID: 312, Title: "old", State: "retired"},
+				{ID: 313, Title: "landing", State: "done"},
+				{ID: 314, Title: "finish", State: "needs_foreman"},
+				{ID: 315, Title: "ask", State: "needs_user"},
+				{ID: 316, Title: "audit", State: "reviewing"},
+				{ID: 317, Title: "work", State: "running"},
+				{ID: 318, Title: "tree", State: "ready"},
+				{ID: 319, Title: "docs", State: "pending", WaitingOn: []string{"tree", "#317"}},
+				{ID: 320, Title: "fix", State: "ready"},
+				{ID: 321, Title: "net", State: "ready"},
+			}}},
+			Running: []engine.StatusJob{
+				{ID: 40, TaskID: 317, Kind: "work", Harness: "opencode", Model: "glm-5.3", LeasedAt: leased, LastEvent: "editing cmdtop.go"},
+				{ID: 43, TaskID: 313, Kind: "land", LeasedAt: leased},
+			},
+			Held:     []engine.HeldJob{{ID: 41, TaskID: 320, Kind: "fix", Layer: "runner"}},
+			Retries:  []engine.InfraRetry{{ID: 42, TaskID: 321, Kind: "work", NotBefore: nb, Reason: "could not resolve github.com"}},
+			NeedsYou: []engine.NeedsYouItem{{Kind: "task", ID: 314, State: "needs_foreman", Reason: "rounds spent"}},
+		}, []string{
+			head,
+			"#96 Rework brigada top 2/12 ▓░░░░░░░░░░",
+			"  ▸ task #317 work · opencode/glm-5.3 · 14m0s · editing cmdtop.go",
+			"  ▸ task #313 land · 14m0s",
+			"  ! #314 finish rounds spent",
+			"  ! #315 ask needs_user",
+			"  · #316 audit (review)",
+			"  · #318 tree (queued)",
+			"  · #319 docs (waiting on tree, #317)",
+			"  ? task #320 fix held: waiting for a runner slot",
+			"  ↺ task #321 work: retry in 5m: could not resolve github.com",
+		}},
+		{"finished plans one line, hidden ones counted", api.Status{
+			Plans: []engine.StatusPlan{
+				{ID: 97, Title: "all done, not closed", State: "active", Tasks: []engine.StatusTask{{ID: 1, State: "done"}, {ID: 2, State: "done"}}},
+				{ID: 83, Title: "Role instructions", State: "done", Tasks: []engine.StatusTask{{ID: 3, State: "done"}, {ID: 4, State: "done"}, {ID: 5, State: "cancelled"}}},
+				{ID: 80, Title: "Abandoned", State: "cancelled", Tasks: []engine.StatusTask{{ID: 6, Title: "never", State: "cancelled"}, {ID: 7, Title: "left", State: "ready"}}},
+			},
+			HiddenFinishedPlans: 41,
+		}, []string{
+			head,
+			"#97 all done, not closed 2/2 ▓▓▓▓▓▓▓▓▓▓▓",
+			"#83 Role instructions 2/3 ✓",
+			"#80 Abandoned ✗",
+			"+41 finished",
+		}},
+		{"a live plan's review job under its plan", api.Status{
+			Plans: []engine.StatusPlan{{ID: 12, Title: "Review me", State: "reviewing", ReviewJob: 50,
+				Tasks: []engine.StatusTask{{ID: 1, Title: "first", State: "pending"}}}},
+			Running: []engine.StatusJob{{ID: 50, Kind: "plan_review", Harness: "claude", Model: "opus", LeasedAt: leased}},
+		}, []string{
+			head,
+			"#12 Review me 0/1 ░░░░░░░░░░░",
+			"  ▸ job #50 plan_review · claude/opus · 14m0s",
+			"  · #1 first (queued)",
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := strings.Join(topPlansTree(tt.st, topNow, term.New(logo.Caps{}), 80), "\n")
+			if want := strings.Join(tt.want, "\n"); got != want {
+				t.Errorf("tree =\n%s\nwant\n%s", got, want)
+			}
+			if loose := topLoose(tt.st, topNow, term.New(logo.Caps{}), 80); len(loose) != 0 {
+				t.Errorf("a plan's job is loose: %q", loose)
+			}
+		})
+	}
+}
+
+// TestTopPlansTreeColours: the live plan's id Bold, the bar's fill OK and
+// its empty cells Dim, the finished marks OK and Bad, the line forms in
+// their colours.
+func TestTopPlansTreeColours(t *testing.T) {
+	style := term.New(logo.Caps{Color: logo.Color16})
+	st := api.Status{
+		Plans: []engine.StatusPlan{
+			{ID: 1, Title: "live", State: "active", Tasks: []engine.StatusTask{
+				{ID: 1, State: "done"}, {ID: 2, Title: "run", State: "running"}, {ID: 3, Title: "q", State: "ready"},
+				{ID: 4, Title: "held", State: "ready"}, {ID: 5, Title: "stuck", State: "needs_foreman"},
+			}},
+			{ID: 2, Title: "done", State: "done", Tasks: []engine.StatusTask{{ID: 6, State: "done"}}},
+			{ID: 3, Title: "gone", State: "cancelled"},
+		},
+		Running: []engine.StatusJob{{ID: 9, TaskID: 2, Kind: "work"}},
+		Held:    []engine.HeldJob{{ID: 10, TaskID: 4, Kind: "work", Layer: "runner"}},
+	}
+	got := topPlansTree(st, topNow, style, 80)
+	want := []string{
+		topSectionHead("PLANS", style, 80),
+		style.Bold("#1") + " live 1/5 " + style.OK("▓▓") + style.Dim("░░░░░░░░░"),
+		"  " + style.Accent("▸") + " task #2 work",
+		"  " + style.Dim("· #3 q (queued)"),
+		"  " + style.Warn("? task #4 work held: waiting for a runner slot"),
+		"  " + style.Bad("! #5 stuck needs_foreman"),
+		"#2 done 1/1 " + style.OK("✓"),
+		"#3 gone " + style.Bad("✗"),
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("tree =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestTopLoose: the jobs no listed live plan claims — a taskless running
+// turn, a taskless held one, a taskless retry, the review of a plan the
+// tree does not list — render in the loose block, and it is absent from
+// the view when every job has its plan.
+func TestTopLoose(t *testing.T) {
+	nb := topNow.Add(2 * time.Minute).UTC().Format(engine.TimeLayout)
+	model := busyTopModel()
+	model.status.Running = append(model.status.Running,
+		engine.StatusJob{ID: 60, Kind: "foreman", Harness: "claude", Model: "opus"},
+		engine.StatusJob{ID: 63, Kind: "plan_review"})
+	model.status.Held = append(model.status.Held,
+		engine.HeldJob{ID: 61, Kind: "foreman", Layer: "no_pair", Agent: "claude/opus"})
+	model.status.Retries = []engine.InfraRetry{{ID: 62, Kind: "foreman", NotBefore: nb, Reason: "could not resolve github.com"}}
+	// Job 63 reviews a plan hidden behind the finished ones the tree lists.
+	model.status.HiddenFinishedPlans = 1
+	got := plainTop(model, 100, 0)
+	want := "! #2 should the sprocket be blue?" +
+		"\n\n  ▸ job #60 foreman · claude/opus" +
+		"\n  ▸ job #63 plan_review" +
+		"\n  ? job #61 foreman held: foreman turn waiting: no runner offers claude/opus" +
+		"\n  ↺ job #62 foreman: retry in 2m: could not resolve github.com" +
+		"\n\nPLANS ─"
+	if !strings.Contains(got, want) {
+		t.Errorf("view lacks the loose block %q:\n%s", want, got)
+	}
+
+	got = plainTop(busyTopModel(), 100, 0)
+	if !strings.Contains(got, "! #2 should the sprocket be blue?\n\nPLANS ─") {
+		t.Errorf("an empty loose block renders:\n%s", got)
 	}
 }
 
