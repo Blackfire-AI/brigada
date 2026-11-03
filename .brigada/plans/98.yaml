@@ -41,6 +41,6 @@ tasks:
     base: ""
     effort: medium
     skills: ["bugfix"]
-    state: running
+    state: reviewing
     branch: "brigada/task-327"
     rounds: 2
