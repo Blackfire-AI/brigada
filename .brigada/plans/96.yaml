@@ -5,9 +5,9 @@
 plan: 96
 title: "Rework brigada top: stacked layout, effective caps, needs-you first (#162)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-03T10:19:37.283675Z
-updated: 2026-11-03T11:27:00.829405Z
+updated: 2026-11-03T11:48:56.64884Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -46,9 +46,9 @@ tasks:
     name: "finish"
     title: "top: height budget, narrow width, snapshot test, docs and CHANGELOG (Closes #162)"
     class: "implement"
-    deps: ["tree"]
-    base: "tree"
-    continue: "tree"
+    deps: ["agents"]
+    base: "agents"
+    continue: "agents"
     effort: medium
     caps: {review_rounds: 3}
     state: pending
@@ -62,7 +62,7 @@ tasks:
     base: "fold"
     continue: "fold"
     effort: medium
-    state: ready
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 316
@@ -73,6 +73,42 @@ tasks:
     base: "frame"
     continue: "frame"
     tier: heavy
+    effort: medium
+    skills: ["surface-parity"]
+    state: cancelled
+    branch: ""
+    rounds: 0
+  - id: 317
+    name: "frame2"
+    title: "top: the stacked frame — header, meters, NEEDS YOU first, events (Refs #162)"
+    class: "implement"
+    deps: ["fold"]
+    base: "fold"
+    continue: "fold"
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 318
+    name: "tree2"
+    title: "top: the plan tree — every job under its plan, pending and land lines (Refs #162)"
+    class: "implement"
+    deps: ["frame2"]
+    base: "frame2"
+    continue: "frame2"
+    tier: heavy
+    effort: medium
+    skills: ["surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 319
+    name: "agents"
+    title: "top: one-line agents and the final stacked order (Refs #162)"
+    class: "implement"
+    deps: ["tree2"]
+    base: "tree2"
+    continue: "tree2"
     effort: medium
     skills: ["surface-parity"]
     state: pending
