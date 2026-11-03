@@ -32,6 +32,6 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["bugfix"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
