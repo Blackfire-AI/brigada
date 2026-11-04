@@ -20,7 +20,10 @@ in chat is lost to them.
   `docs/product.md` on a branch, `brigada review --branch <name>` (another
   model family), fix, pull request to main.
 - A bug or small feature: an issue number or a one-paragraph statement is
-  enough; the foreman reads the code itself.
+  enough; the foreman reads the code itself, and this repository's issues
+  and pull requests with `issue_read`. Put the text of anything elsewhere
+  into the ask.
+- Push what the ask cites: unpushed work is invisible to them.
 
 ## 2. The message
 
@@ -44,12 +47,17 @@ attach` only when the plan needs discussion; detach writes the session back.
 
 ## 3. Watch, and hand the user only decisions
 
+- `brigada ask` returns at once. The reply is the `foreman report:` line of
+  `brigada status`, after the turn ends. Relay it, questions and estimates
+  included, and send the user's answer or veto with another `brigada ask`,
+  naming the plan or task.
 - `brigada status` (filter out `done`/`cancelled` lines), `brigada history
   --task N`, `brigada logs --task N`, `brigada diff N --stat`.
 - A plan held by a rule waits in the needs-you queue: `brigada plan approve
   N`, `brigada land approve <task>` and `brigada push approve` are the user's
   commands. Report the plan table and the foreman's estimate, then stop.
-  Never approve for them.
+  Never approve for them; `--and-stop-asking`, tags, releases, landing by
+  hand and rule changes are theirs too.
 - Poll in the background (exit on `pending_approval`, `needs_user` or a held
   gate), report once. No foreground sleeps.
 - `needs_foreman` is the foreman's; `needs_user` and a held gate are the
@@ -62,6 +70,11 @@ The land job squashes each approved task onto `land_target`
 request to main, repeating each commit's `Closes #N` line in its body. Watch
 the land and push gates in the needs-you queue. The pull request is merged
 with a merge commit, so the staging branch stays an ancestor of main.
+
+After a landing that changes the engine's or the runner's code, once nothing
+pending needs the old behaviour, restart them: `brigada stop --engine`, then
+`brigada start`. After an outage, `brigada start`, then `brigada ask` again:
+an ask re-wakes the foreman.
 
 ## 5. Report
 
