@@ -5,9 +5,9 @@
 plan: 102
 title: "Readable events: top's vertical list and readable brigada history"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: needs_foreman
 created: 2026-11-04T14:20:43.33202Z
-updated: 2026-11-04T14:34:06.027765Z
+updated: 2026-11-04T14:41:26.452046Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
