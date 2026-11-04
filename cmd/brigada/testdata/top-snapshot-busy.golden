@@ -18,4 +18,4 @@ codex/gpt-5              0/8 (global)  ↺ 16:04
 claude/sonnet-long-name  2/8 (global)  ✗ login expired
 all ≤ global 8
 
-15:02 task_done task 3: status=done · 15:02 job_created job 5: branch=task/3-1
+15:02 #3 done · 15:02 #3 landed
