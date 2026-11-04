@@ -105,6 +105,6 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["bugfix"]
-    state: needs_foreman
+    state: running
     branch: ""
     rounds: 0
