@@ -28,7 +28,10 @@ deletes it. Do not edit. -->
 // the description to decide when to load it.
 const operatorSkillFrontmatter = `---
 name: brigada-operator
-description: Ask brigada's foreman to do work, watch it, follow landings
+description: >-
+  Ask brigada's foreman to do work, watch it, follow landings. Use when
+  the user says "ask brigada", "give it to brigada", "hand to the
+  foreman", or asks for brigada status or a landing.
 ---
 
 `
@@ -55,16 +58,35 @@ Send the foreman a request with ` + "`brigada ask -`" + `, the message on stdin:
     Relevant code: auth/session.go. Closes #12 in the commit.
     EOF
 
+- The foreman and its workers read what is pushed, not your working
+  tree. Push what the ask cites, or put it in the ask.
 - The foreman has no shell. It reads the issues and pull requests of
   the project's own repository with the issue tool. For an issue
-  anywhere else, put its text into the ask; keep the number only as
-  a reference for ` + "`Closes`" + ` or ` + "`Refs`" + ` trailers.
+  anywhere else, or when the repository is not on GitHub or gh is not
+  signed in, put its text into the ask; keep the number only as a
+  reference for ` + "`Closes`" + ` or ` + "`Refs`" + ` trailers.
 - Name files and document sections; the foreman reads the repository.
 - Say the build order when tasks depend on each other.
 - Hint a tier when a task is easy (light) or risky (heavy); the foreman
   decides.
 - If an account is cooling (` + "`brigada status`" + ` shows it), say so, or
   clear a fixed one with ` + "`brigada agent reset <harness>/<model>`" + `.
+
+## Hear back
+
+` + "`brigada ask`" + ` returns at once with one line: the foreman was woken,
+or why the message waits. The reply comes later: each headless
+foreman turn ends with a report, which ` + "`brigada status`" + ` shows as
+` + "`foreman report:`" + `.
+
+- Relay the report to the user, its questions and estimates included;
+  the foreman asks the user through it.
+- Send the user's answer or veto with another ` + "`brigada ask`" + `, naming
+  the plan or task. It wakes the foreman.
+- A new plan shows as reviewing first; no work starts until the review
+  concludes.
+- When a plan needs a conversation, the user runs ` + "`brigada attach`" + `;
+  a message sent meanwhile waits for them.
 
 ## Watch
 
@@ -73,6 +95,7 @@ Send the foreman a request with ` + "`brigada ask -`" + `, the message on stdin:
   is one short line.
 - ` + "`brigada history --task N`" + `: one task's timeline.
 - ` + "`brigada history --job N`" + `: one job's timeline, its full verdict.
+- ` + "`brigada logs --task N`" + `: what task N's latest job did.
 - ` + "`brigada diff --stat N`" + `: what task N changed, as a diffstat.
 - ` + "`brigada top`" + ` is the user's live view; do not run it.
 
@@ -89,9 +112,11 @@ them. They are files in the repository:
 
 Edit them like any file, then run ` + "`brigada project import`" + ` to
 apply the change; ` + "`brigada status`" + ` flags a file that changed
-since the last import. ` + "`brigada instructions diff <role|skill>`" + `
-compares a file with the default it came from, and
-` + "`brigada init --take-default <role|skill>`" + ` resets it.
+since the last import. Commit and push them too: import reads your
+working copy, the foreman's checkout what is pushed.
+` + "`brigada instructions diff <role|skill>`" + ` compares a file with the
+default it came from, and ` + "`brigada init --take-default <role|skill>`" + `
+resets it.
 
 To ask for a skill on a task, say so in the ask, naming the task:
 
@@ -109,26 +134,29 @@ task should run on the instructions alone.
 - If land_target is the default branch and after_land is none, the
   landing went straight to the default branch: there is no pull
   request to merge.
-- If the engine's or the runner's own code landed and nothing pending
-  needs the old behaviour, restart them: ` + "`brigada stop --engine`" + `, then
+- After a brigada upgrade, or when the engine's or the runner's own
+  code landed in this repository, and nothing pending needs the old
+  behaviour, restart them: ` + "`brigada stop --engine`" + `, then
   ` + "`brigada start`" + `.
 
 ## Recover
 
 After an outage (engine down, runner dead, a quota wall), run
-` + "`brigada start`" + `, then ` + "`brigada ask`" + ` again: an ask re-wakes the foreman.
+` + "`brigada start`" + `, then ` + "`brigada ask`" + ` again: an ask re-wakes the foreman,
+even when its wake budget for the day is spent.
 
 ## The user's alone
 
 Never do these for the user; say what waits and let them decide:
 
 - ` + "`brigada plan approve`" + ` and ` + "`brigada plan reject`" + `
-- ` + "`brigada land approve`" + ` and ` + "`brigada land reject`" + `
+- ` + "`brigada land approve`" + `, ` + "`brigada land reject`" + ` and landing by hand
+  with ` + "`brigada land`" + `
 - ` + "`brigada push approve`" + `
 - ` + "`--and-stop-asking`" + ` on any approval
 - tags and releases
 - changes to the rules: the approval limit, ` + "`brigada project set`" + `,
-  ` + "`.brigada/project.yaml`" + `
+  ` + "`brigada budget --wakes`" + `, ` + "`.brigada/project.yaml`" + `
 `
 
 // planOperatorFile plans the operator guide: written whole, whatever is

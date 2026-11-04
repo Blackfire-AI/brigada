@@ -29,6 +29,9 @@ func TestOperatorGuideContent(t *testing.T) {
 		".brigada/skills/<name>/SKILL.md", "skills_dir", "brigada project import",
 		"brigada instructions diff <role|skill>", "brigada init --take-default <role|skill>",
 		"use skill bugfix on task 3", "no skills on task 4",
+		// How the reply comes back, and what the checkouts can see.
+		"foreman report:", "another `brigada ask`", "brigada attach",
+		"read what is pushed", "brigada logs --task N", "After a brigada upgrade",
 	} {
 		if !strings.Contains(operatorGuide, want) {
 			t.Errorf("guide lacks %q", want)

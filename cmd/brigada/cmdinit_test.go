@@ -1258,7 +1258,7 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 	}
 	assertInitSavedAgents(t, state, afterDefaults.Specs)
 	again = afterDefaults
-	if strings.Contains(out, "Restart your agent session") || !strings.Contains(out, "  2. Or, without a conversation: brigada ask") || strings.Contains(out, "§") {
+	if strings.Contains(out, "Restart your agent session") || !strings.Contains(out, "  2. Or, without a conversation: brigada ask") || !strings.Contains(out, "  3. Or through your own coding agent: have it read .brigada/operator.md") || strings.Contains(out, "§") {
 		t.Fatalf("--no-wiring Next block:\n%s", out)
 	}
 	args[2] = "harness=claude,model=opus,account=work,effort=low"

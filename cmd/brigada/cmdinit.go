@@ -1164,6 +1164,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	fmt.Fprintln(stdout, style.Bold("Next:"))
 	fmt.Fprintf(stdout, "  1. Talk to the foreman: %s\n", style.Accent("brigada attach"))
 	fmt.Fprintf(stdout, "  2. Or, without a conversation: %s\n", style.Accent("brigada ask \"what you want built\""))
+	fmt.Fprintf(stdout, "  3. Or through your own coding agent: have it read %s\n", operatorFile)
 	fmt.Fprintln(stdout, "  Watch progress: "+style.Accent("brigada status")+"    Stop the runner: "+style.Accent("brigada stop"))
 	return 0
 }
