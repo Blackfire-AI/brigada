@@ -120,7 +120,7 @@ tasks:
     effort: low
     review_tier: standard
     skills: ["docs-change"]
-    state: reviewing
+    state: done
     branch: "brigada/task-337"
     rounds: 0
   - id: 338
