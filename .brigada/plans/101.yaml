@@ -5,9 +5,9 @@
 plan: 101
 title: "brigada top: pre-release fix pass (follow-up to #162)"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-04T08:25:24.461967Z
-updated: 2026-11-04T10:38:11.803942Z
+updated: 2026-11-04T10:40:56.686185Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -50,9 +50,9 @@ tasks:
     name: "events"
     title: "top: readable events strip (Refs #162)"
     class: "implement"
-    deps: ["scope"]
-    base: "scope"
-    continue: "scope"
+    deps: ["scope2"]
+    base: "scope2"
+    continue: "scope2"
     effort: medium
     skills: ["bugfix"]
     state: pending
@@ -120,6 +120,19 @@ tasks:
     effort: low
     review_tier: standard
     skills: ["docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 338
+    name: "scope2"
+    title: "top: header scope, plan tags, goldens and docs (Refs #162)"
+    class: "implement"
+    deps: ["scope"]
+    base: "scope"
+    continue: "scope"
+    tier: heavy
+    effort: medium
+    skills: ["bugfix"]
     state: pending
     branch: ""
     rounds: 0
