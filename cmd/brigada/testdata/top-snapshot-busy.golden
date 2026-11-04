@@ -1,0 +1,21 @@
+brigada top · pid 4242 · up 2h0m0s · 15:04:09 ───────────────── q quit · p pause
+
+SLOTS ▓▓▓░░░░░ 3/8   1 run   2 queue   1 held   2 needs
+
+NEEDS YOU ──────────────────────────────────────────────────────────────────────
+! #2 should the sprocket be blue?
+! claude/sonnet-long-name login expired
+
+PLANS ──────────────────────────────────────────────────────────────────────────
+#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░
+  ▸ task #3 work · claude/sonnet@high · 1m40s · Edit
+  ! #2 wire the sprocket should the sprocket be blue?
+  ? task #4 work held: waiting for a runner slot
+
+AGENTS ─────────────────────────────────────────────────────────────────────────
+claude/opus              1/4 (runner)  ✓
+codex/gpt-5              0/8 (global)  ↺ 16:04
+claude/sonnet-long-name  2/8 (global)  ✗ login expired
+all ≤ global 8
+
+15:02 task_done task 3: status=done · 15:02 job_created job 5: branch=task/3-1

@@ -80,7 +80,7 @@ func runTop(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if code != 0 {
 			return code
 		}
-		if code := printTopSnapshot(ctx, client, repo, stdout, stderr); code != 0 {
+		if code := printTopSnapshot(ctx, client, repo, time.Now(), stdout, stderr); code != 0 {
 			return code
 		}
 		if hint := agentsHint(ctx, rt, true); hint != "" {
@@ -92,14 +92,15 @@ func runTop(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 }
 
 // printTopSnapshot fetches once and prints the plain rendering; the
-// loop never runs here. Any fetch error is a failure, not a line.
-func printTopSnapshot(ctx context.Context, client topClient, repo string, stdout, stderr io.Writer) int {
+// loop never runs here. Any fetch error is a failure, not a line. now is
+// the clock the rendering reads, so a test can fix it.
+func printTopSnapshot(ctx context.Context, client topClient, repo string, now time.Time, stdout, stderr io.Writer) int {
 	model, err := topFetch(ctx, client, repo)
 	if err != nil {
 		return fail(stderr, err)
 	}
 	style := term.New(detectCaps(stdout))
-	fmt.Fprintln(stdout, strings.Join(renderTop(model, style.Width(), 0, time.Now(), style), "\n"))
+	fmt.Fprintln(stdout, strings.Join(renderTop(model, style.Width(), 0, now, style), "\n"))
 	return 0
 }
 

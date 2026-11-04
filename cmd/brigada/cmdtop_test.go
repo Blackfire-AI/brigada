@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
@@ -785,7 +789,7 @@ func TestPrintTopSnapshot(t *testing.T) {
 		projects: []engine.ProjectInfo{{ProjectID: 7, RepoURL: "https://example.invalid/r.git"}},
 	}
 	var out, errOut bytes.Buffer
-	if code := printTopSnapshot(context.Background(), fake, "https://example.invalid/r.git", &out, &errOut); code != 0 {
+	if code := printTopSnapshot(context.Background(), fake, "https://example.invalid/r.git", topNow, &out, &errOut); code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut.String())
 	}
 	if !strings.Contains(out.String(), "brigada top") {
@@ -793,8 +797,97 @@ func TestPrintTopSnapshot(t *testing.T) {
 	}
 	fake.projectsErr = errors.New("down")
 	out.Reset()
-	if code := printTopSnapshot(context.Background(), fake, "https://example.invalid/r.git", &out, &errOut); code != 1 {
+	if code := printTopSnapshot(context.Background(), fake, "https://example.invalid/r.git", topNow, &out, &errOut); code != 1 {
 		t.Errorf("exit %d, want 1", code)
+	}
+}
+
+// topGoldenDir is testdata resolved at package init: other tests change
+// the working directory, which would break a relative path.
+var topGoldenDir, _ = filepath.Abs("testdata")
+
+var updateTopGolden = flag.Bool("update", false, "rewrite the top snapshot golden files")
+
+// quietTopModel is a fetched model with nothing to show: no events, no
+// plans, nothing that needs the user.
+func quietTopModel() topModel {
+	return topModel{status: api.Status{
+		Pid:       4242,
+		StartedAt: topNow.Add(-2 * time.Hour).UTC().Format(engine.TimeLayout),
+	}}
+}
+
+// TestTopSnapshotGolden: the piped one-shot snapshot, through a stubbed
+// client and a non-terminal stdout, with the environment pinned so the
+// caps are UTF-8, no colour, 80 columns on every host. The output holds
+// no escape and equals the golden file; -update rewrites the files.
+func TestTopSnapshotGolden(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("LANG", "en_US.UTF-8")
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+	t.Setenv("COLUMNS", "80")
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("COLORTERM", "")
+	const repo = "https://example.invalid/r.git"
+	for _, tc := range []struct {
+		name  string
+		model topModel
+		want  []string
+	}{
+		{"busy", agentsModel(), []string{"q quit · p pause"}},
+		{"quiet", quietTopModel(), []string{"no events", "nothing needs you"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeTop{
+				status:   tc.model.status,
+				capacity: tc.model.capacity,
+				projects: []engine.ProjectInfo{{ProjectID: 7, RepoURL: repo}},
+				page:     history.Page{Items: tc.model.events},
+			}
+			var out, errOut bytes.Buffer
+			if code := printTopSnapshot(context.Background(), fake, repo, topNow, &out, &errOut); code != 0 {
+				t.Fatalf("exit %d: %s", code, errOut.String())
+			}
+			got := out.String()
+			if strings.Contains(got, "\x1b") {
+				t.Errorf("snapshot holds an escape:\n%q", got)
+			}
+			for i, line := range strings.Split(got, "\n") {
+				if n := utf8.RuneCountInString(line); n > 80 {
+					t.Errorf("line %d is %d columns, want at most 80: %q", i+1, n, line)
+				}
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("snapshot lacks %q:\n%s", w, got)
+				}
+			}
+			path := filepath.Join(topGoldenDir, "top-snapshot-"+tc.name+".golden")
+			if *updateTopGolden {
+				if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("%v (run go test ./cmd/brigada -run TestTopSnapshotGolden -update)", err)
+			}
+			if got != string(want) {
+				gl, wl := strings.Split(got, "\n"), strings.Split(string(want), "\n")
+				for i := 0; i < max(len(gl), len(wl)); i++ {
+					var g, w string
+					if i < len(gl) {
+						g = gl[i]
+					}
+					if i < len(wl) {
+						w = wl[i]
+					}
+					if g != w {
+						t.Errorf("%s line %d:\n got  %q\n want %q", path, i+1, g, w)
+					}
+				}
+			}
+		})
 	}
 }
 
