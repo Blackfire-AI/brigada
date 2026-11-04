@@ -85,7 +85,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["bugfix"]
-    state: reviewing
+    state: done
     branch: "brigada/task-350"
     rounds: 0
   - id: 351
