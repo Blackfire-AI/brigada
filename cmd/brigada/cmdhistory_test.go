@@ -13,6 +13,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/history"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
@@ -99,9 +100,119 @@ func TestHistoryShowsTheLandingRecord(t *testing.T) {
 	}
 	t.Cleanup(func() { connectClient = oldConnect })
 
+	// Noise the bare view hides, a worker result and a foreman report.
+	report := "All landed.\nSecond line of the report."
+	err = st.Update(ctx, func(tx *sql.Tx) error {
+		for _, j := range []string{
+			`(7, 1, 1, 'work', 'task:1', 'fresh', '', 'done', ?, ?)`,
+			`(41, 1, NULL, 'foreman', 'report:41', 'fresh', '', 'done', ?, ?)`,
+		} {
+			if _, err := tx.Exec(`INSERT INTO jobs (id, project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
+				VALUES `+j, now, now); err != nil {
+				return err
+			}
+		}
+		for _, ev := range []struct{ kind, payload string }{
+			{"job_leased", `{"lease":"L1"}`},
+			{"job_cap_held", `{}`},
+			{"job_created", `{"branch":"task/1-1"}`},
+			{"job_agent_picked", `{}`},
+		} {
+			if _, err := tx.Exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
+				VALUES (?, 1, 1, 7, ?, ?)`, ev.kind, ev.payload, now); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO events (kind, project_id, job_id, payload, created_at)
+			VALUES ('foreman_report', 1, 41, ?, ?)`, `{"report":`+quoteJSON(strings.ReplaceAll(report, "\n", `\n`))+`}`, now); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO messages (project_id, kind, author, content, created_at)
+			VALUES (1, 'worker_result', 'worker', ?, ?)`, `{"status":"done","summary":"Shipped the gizmo."}`, now)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed the noise: %v", err)
+	}
+
 	var out, errb bytes.Buffer
-	if code := run(ctx, []string{"history", "--state-dir", state, "--no-start"}, &out, &errb); code != 0 {
-		t.Fatalf("history: exit %d, stderr %q", code, errb.String())
+	historyOut := func(args ...string) string {
+		t.Helper()
+		out.Reset()
+		errb.Reset()
+		full := append([]string{"history", "--state-dir", state, "--no-start"}, args...)
+		if code := run(ctx, full, &out, &errb); code != 0 {
+			t.Fatalf("history %v: exit %d, stderr %q", args, code, errb.String())
+		}
+		return out.String()
+	}
+
+	// The default output: local time, the shared words, the landing record
+	// whole, nothing internal, no JSON, no nanoseconds.
+	bare := historyOut()
+	for _, want := range []string{
+		" #1 landed, push waits branch=main commit=9f21ab3c4d5e6f708192a3b4c5d6e7f890123456",
+		"push_cmd=" + pushCmd,
+		"after_land_error=exit 3: after-land boom",
+		" #1 pushed branch=main commit=9f21ab3c4d5e6f708192a3b4c5d6e7f890123456 after_land_error=exit 1: push boom",
+		" report #41\n",
+	} {
+		if !strings.Contains(bare, want) {
+			t.Errorf("history lacks %q:\n%s", want, bare)
+		}
+	}
+	for _, bad := range []string{"job_leased", "job_cap_held", "job_created", "job_agent_picked", "worker_result", "Shipped", "{", "All landed", now[:19]} {
+		if strings.Contains(bare, bad) {
+			t.Errorf("bare history shows %q:\n%s", bad, bare)
+		}
+	}
+	local := time.Now().Local().Format("01-02 15:04")
+	if prev := time.Now().Add(-time.Minute).Local().Format("01-02 15:04"); !strings.HasPrefix(bare, local+" ") && !strings.HasPrefix(bare, prev+" ") {
+		t.Errorf("history does not start with the local time %q:\n%s", local, bare)
+	}
+
+	// --task shows the worker result as words; --job shows the report whole.
+	task := historyOut("--task", "1")
+	if !strings.Contains(task, "job 7 job leased: lease=L1") || !strings.Contains(task, " #1 landed, push waits: ") || strings.Contains(task, `{"status"`) {
+		t.Errorf("history --task:\n%s", task)
+	}
+	if job := historyOut("--job", "41"); !strings.Contains(job, "report #41: report=All landed.\n  Second line of the report.\n") {
+		t.Errorf("history --job lacks the whole report:\n%s", job)
+	}
+
+	// --raw is history.Render's output, bare and with --task.
+	for _, args := range [][]string{{"--raw"}, {"--raw", "--task", "1"}} {
+		var page history.Page
+		query := api.HistoryQuery{Limit: 100}
+		if len(args) > 1 {
+			query.TaskID = 1
+		}
+		_, token, terr := lifecycle.TokenForRole(paths.Tokens, "client")
+		if terr != nil {
+			t.Fatal(terr)
+		}
+		client := api.NewClientWithHTTPClient(&http.Client{Transport: historyTransport{handler: srv.Handler()}}, token)
+		page, err = client.History(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var want bytes.Buffer
+		if err := history.Render(&want, page.Items); err != nil {
+			t.Fatal(err)
+		}
+		if got := historyOut(args...); got != want.String() {
+			t.Errorf("history %v =\n%s\nwant history.Render's\n%s", args, got, want.String())
+		}
+	}
+
+	// A misspelled flag is a usage error.
+	if code := run(ctx, []string{"history", "--rw", "--state-dir", state, "--no-start"}, &out, &errb); code != 2 {
+		t.Errorf("history --rw: exit %d, want 2", code)
+	}
+
+	out.Reset()
+	if code := run(ctx, []string{"history", "--raw", "--state-dir", state, "--no-start"}, &out, &errb); code != 0 {
+		t.Fatalf("history --raw: exit %d, stderr %q", code, errb.String())
 	}
 	for _, want := range []string{
 		"task_landed task 1:",

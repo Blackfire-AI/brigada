@@ -163,7 +163,7 @@ func plainTop(model topModel, width, height int) string {
 }
 
 // TestRenderTopSections: the view's order — header, meters, NEEDS YOU,
-// the FOREMAN block, the PLANS tree, AGENTS, then the events strip — with
+// the FOREMAN block, the PLANS tree, AGENTS, then the events section — with
 // every section's text in its place.
 func TestRenderTopSections(t *testing.T) {
 	model := busyTopModel()
@@ -468,7 +468,7 @@ func TestTopEventsCut(t *testing.T) {
 }
 
 // TestTopEventWords: every allowlisted kind in its plain words, and the
-// kinds and types the strip leaves out.
+// kinds and types the events section leaves out.
 func TestTopEventWords(t *testing.T) {
 	stamp := "2026-10-20T15:02:45.000000000Z"
 	until := topNow.Add(time.Hour).UTC().Format(engine.TimeLayout)
@@ -536,6 +536,26 @@ func TestTopEventWords(t *testing.T) {
 	}
 }
 
+// TestTopAndHistoryShareWords: top and history word one event the same,
+// the words being history.EventWords' alone.
+func TestTopAndHistoryShareWords(t *testing.T) {
+	until := topNow.Add(time.Hour).UTC().Format(engine.TimeLayout)
+	it := history.Item{Type: history.TypeEvent, ID: 1, Kind: "agent_cooling", ProjectID: 1,
+		Payload: []byte(`{"account":"work","until":"` + until + `"}`), CreatedAt: "2026-10-20T15:02:45.000000000Z"}
+	topWords, ok := topEventWords(it, topNow)
+	want, wantOK := history.EventWords(it, func(s string) string { return api.LocalClock(s, topNow) })
+	if !ok || !wantOK || topWords != want || want != "work cooling until 16:04" {
+		t.Errorf("top words %q (%v), shared words %q (%v)", topWords, ok, want, wantOK)
+	}
+	var b bytes.Buffer
+	if err := history.RenderReadable(&b, []history.Item{it}, time.UTC, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(b.String(), "10-20 15:02 work cooling until ") {
+		t.Errorf("history line = %q", b.String())
+	}
+}
+
 // TestTopFetchFiltersEvents: topFetch keeps only the allowlisted events,
 // oldest first as the page came, and asks for the wider page.
 func TestTopFetchFiltersEvents(t *testing.T) {
@@ -569,7 +589,7 @@ func TestTopFetchFiltersEvents(t *testing.T) {
 }
 
 // TestTopEventsKeptAcrossTicks: a page of 200 items with no kept one
-// leaves the previous tick's strip as it was, and two ticks that share
+// leaves the previous tick's events as they were, and two ticks that share
 // an item show it once.
 func TestTopEventsKeptAcrossTicks(t *testing.T) {
 	stamp := "2026-10-20T15:02:45.000000000Z"
@@ -622,7 +642,7 @@ func TestTopEventsKeptAcrossTicks(t *testing.T) {
 	}
 }
 
-// TestTopClockMinutes: the events strip's pairs show HH:MM — the date
+// TestTopClockMinutes: the events section's pairs show HH:MM — the date
 // too on another day — while the header's own clock keeps its seconds.
 func TestTopClockMinutes(t *testing.T) {
 	if got := topClock("2026-10-20T15:02:45.000000000Z", topNow); got != "15:02" {
@@ -3026,7 +3046,7 @@ func TestRenderTopASCIIWithoutUTF8(t *testing.T) {
 }
 
 // TestRenderTopFinalOrder: header, meters, NEEDS YOU, PLANS, AGENTS and
-// the events strip in order, one blank line between sections only.
+// the events section in order, one blank line between sections only.
 func TestRenderTopFinalOrder(t *testing.T) {
 	got := plainTop(agentsModel(), 100, 0)
 	last := -1
