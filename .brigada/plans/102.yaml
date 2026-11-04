@@ -31,7 +31,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     caps: {restart: 0}
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 340
