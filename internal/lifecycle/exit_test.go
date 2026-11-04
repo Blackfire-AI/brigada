@@ -139,11 +139,11 @@ func lsRemoteCount(t *testing.T, remote, pattern string) int {
 	return len(strings.Fields(string(out))) / 2
 }
 
-// historyKinds runs `brigada history --task N` and returns the timeline
-// line kinds, in order.
+// historyKinds runs `brigada history --raw --task N` and returns the
+// timeline line kinds, in order.
 func historyKinds(t *testing.T, bin, state string, task int) []string {
 	t.Helper()
-	stdout, stderr, code := runBrigada(t, bin, "history", "--state-dir", state, "--task", strconv.Itoa(task), "--no-start")
+	stdout, stderr, code := runBrigada(t, bin, "history", "--raw", "--state-dir", state, "--task", strconv.Itoa(task), "--no-start")
 	if code != 0 {
 		t.Fatalf("history --task %d exit = %d, stderr = %q", task, code, stderr)
 	}
