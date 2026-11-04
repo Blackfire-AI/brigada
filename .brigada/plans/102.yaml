@@ -31,7 +31,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     caps: {restart: 0}
-    state: reviewing
+    state: done
     branch: "brigada/task-339"
     rounds: 0
   - id: 340
@@ -46,6 +46,6 @@ tasks:
     review_effort: medium
     caps: {restart: 0}
     skills: ["cli-flag", "surface-parity"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
