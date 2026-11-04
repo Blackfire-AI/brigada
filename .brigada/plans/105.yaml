@@ -44,8 +44,8 @@ tasks:
     review_effort: medium
     caps: {restart: 1}
     skills: ["bugfix", "surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-347-r1"
     rounds: 0
   - id: 348
     name: "check-log"
