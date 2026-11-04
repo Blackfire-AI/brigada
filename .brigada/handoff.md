@@ -17,7 +17,8 @@ in chat is lost to them.
 - A bug or small feature: an issue number or a one-paragraph statement is
   enough; the foreman reads the code itself, and this repository's issues
   and pull requests with `issue_read`. Put the text of anything elsewhere
-  into the ask.
+  into the ask. A failed check's event holds only the end of its log; the
+  foreman reads the whole with `check_log`.
 - Push what the ask cites: unpushed work is invisible to them.
 
 ## 2. The message
