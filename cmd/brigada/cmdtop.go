@@ -396,11 +396,13 @@ const (
 type topLine struct {
 	text    string
 	class   topYield
-	section int     // the section whose borders go with its last row, or topSecNone
-	box     *topBox // set on a section's top border
-	foot    bool    // the section's bottom border
-	boxed   bool    // the text sits in a box row
-	bad     bool    // the box is a Bad one
+	section int        // the section whose borders go with its last row, or topSecNone
+	box     *topBox    // set on a section's top border
+	foot    bool       // the section's bottom border
+	boxed   bool       // the text sits in a box row
+	bad     bool       // the box is a Bad one
+	tint    int        // the row's background tint (topTint...), none by default
+	job     *topJobRow // a job row whose text topLayoutJobs builds with its box's columns
 	fold    topFold
 	count   int  // what a fold line counts besides what drops: the off agents
 	late    bool // drops after the other lines of its class
@@ -481,7 +483,7 @@ func (f *topFrame) texts() []string {
 		case l.foot:
 			text = topBoxBottom(l.bad, f.style, f.width)
 		case l.boxed:
-			text = topBoxRow(text, l.bad, f.style, f.width)
+			text = topBoxRow(text, l.bad, l.tint, f.style, f.width)
 		}
 		out = append(out, text)
 	}
@@ -815,16 +817,6 @@ func topSlotMeter(use, limit, cells int, style term.Style) string {
 	return meter
 }
 
-// topDescribeJob is status's own words for a job, its ` · ` joints in the
-// style's separator so the plain ASCII style has no Unicode of its own.
-func topDescribeJob(j engine.StatusJob, now time.Time, style term.Style) string {
-	text := api.DescribeJob(j, now)
-	if sep := topEventSep(style); sep != " · " {
-		text = strings.ReplaceAll(text, " · ", sep)
-	}
-	return text
-}
-
 // topPlanFinished says a plan's State has ended it: done or cancelled.
 func topPlanFinished(p engine.StatusPlan) bool {
 	return p.State == "done" || p.State == "cancelled"
@@ -878,22 +870,6 @@ func (c topClaims) plan(jobID, taskID int64) (int64, bool) {
 	return id, ok
 }
 
-// topRunningLine is one running job under its task, its plan or in the
-// FOREMAN or JOBS block: the Accent pointer and status's own words for the job.
-func topRunningLine(j engine.StatusJob, now time.Time, style term.Style, width int) string {
-	return "  " + style.Accent(style.Pointer()) + " " + cutLine(topDescribeJob(j, now, style), width-4)
-}
-
-// topHeldLine is one held job, in Warn: the task it is for, or the job
-// when it has none, its kind and status's own words for the wait.
-func topHeldLine(h engine.HeldJob, style term.Style, width int) string {
-	what := fmt.Sprintf("job #%d", h.ID)
-	if h.TaskID != 0 {
-		what = fmt.Sprintf("task #%d", h.TaskID)
-	}
-	return "  " + style.Warn(cutLine(fmt.Sprintf("? %s %s held: %s", what, h.Kind, api.HeldWait(h)), width-2))
-}
-
 // topRetryLine is one job waiting on an infra retry, Dim, in status's
 // own words.
 func topRetryLine(r engine.InfraRetry, now time.Time, style term.Style, width int) string {
@@ -910,26 +886,28 @@ func topRetryLine(r engine.InfraRetry, now time.Time, style term.Style, width in
 func topPlanless(st api.Status, now time.Time, style term.Style, width int) (foreman, jobs []topLine) {
 	claims := newTopClaims(st)
 	var fore, other []topLine
-	add := func(kind, text string, class topYield) {
+	add := func(kind string, line topLine) {
 		if kind == string(engine.KindForeman) {
-			fore = append(fore, topLine{text: text, class: class, section: topSecForeman})
+			line.section = topSecForeman
+			fore = append(fore, line)
 		} else {
-			other = append(other, topLine{text: text, class: class, section: topSecJobs})
+			line.section = topSecJobs
+			other = append(other, line)
 		}
 	}
 	for _, j := range st.Running {
 		if _, ok := claims.plan(j.ID, j.TaskID); !ok {
-			add(j.Kind, topRunningLine(j, now, style, width), yieldRunning)
+			add(j.Kind, topLine{job: topRunningRow(j, "", now, style), class: yieldRunning})
 		}
 	}
 	for _, h := range st.Held {
 		if _, ok := claims.plan(h.ID, h.TaskID); !ok {
-			add(h.Kind, topHeldLine(h, style, width), yieldHeld)
+			add(h.Kind, topLine{job: topHeldRow(h, "", style), class: yieldHeld})
 		}
 	}
 	for _, r := range st.Retries {
 		if _, ok := claims.plan(r.ID, r.TaskID); !ok {
-			add(r.Kind, topRetryLine(r, now, style, width), yieldHeld)
+			add(r.Kind, topLine{text: topRetryLine(r, now, style, width), class: yieldHeld})
 		}
 	}
 	// Dim notes the status carries that no job line speaks for: the user's
@@ -969,6 +947,8 @@ func topPlanless(st api.Status, now time.Time, style term.Style, width int) (for
 		}
 		other = append(other, note(fmt.Sprintf("runner restarting after %d running %s", len(st.Running), noun), topSecJobs))
 	}
+	topLayoutJobs(fore, style, width)
+	topLayoutJobs(other, style, width)
 	if len(fore) > 0 {
 		foreman = topBoxed(topSecForeman, topBox{title: "FOREMAN"}, fore)
 	}
@@ -999,7 +979,7 @@ func newTopPlans(st api.Status, tagged, fetched bool, now time.Time, style term.
 	line := func(text string, class topYield) topLine {
 		return topLine{text: text, class: class, section: topSecPlans}
 	}
-	box := topBox{title: "PLANS"}
+	box := topBox{title: "PLANS", legend: topPlanLegend(style)}
 	if fetched {
 		live, finished := 0, st.HiddenFinishedPlans
 		for _, p := range st.Plans {
@@ -1028,19 +1008,28 @@ func newTopPlans(st api.Status, tagged, fetched bool, now time.Time, style term.
 			reasons[n.ID] = n.Reason
 		}
 	}
-	layout := newTopPlanLayout(st.Plans, tagged, style, width)
+	running := make(map[int64]bool, len(st.Running))
+	for _, j := range st.Running {
+		if j.TaskID != 0 {
+			running[j.TaskID] = true
+		}
+	}
+	layout := newTopPlanLayout(st.Plans, running, tagged, style, width)
 	for _, p := range st.Plans {
 		tag := ""
 		if tagged {
 			tag = topRepoName(p.RepoURL)
 		}
 		if topPlanFinished(p) {
-			lines = append(lines, line(topPlanLine(p, tag, layout, style, width), yieldFinished))
+			lines = append(lines, line(topPlanLine(p, tag, running, layout, style, width), yieldFinished))
 			continue
 		}
-		lines = append(lines, line(topPlanLine(p, tag, layout, style, width), yieldRest))
+		lines = append(lines, line(topPlanLine(p, tag, running, layout, style, width), yieldRest))
 		task := func(text string, class topYield) {
 			lines = append(lines, line(text, class))
+		}
+		row := func(r *topJobRow, class topYield) {
+			lines = append(lines, topLine{job: r, class: class, section: topSecPlans})
 		}
 		titles := make(map[int64]string, len(p.Tasks))
 		for _, t := range p.Tasks {
@@ -1055,18 +1044,14 @@ func newTopPlans(st api.Status, tagged, fetched bool, now time.Time, style term.
 		reviewJob := false // a job claimed for the plan's own review shows
 		for _, j := range st.Running {
 			if id, ok := claims.plan(j.ID, j.TaskID); ok && id == p.ID {
-				text := topRunningLine(j, now, style, width)
-				if title := titles[j.TaskID]; j.TaskID != 0 && title != "" {
-					text = topPlanRunningLine(j, title, now, style, width)
-				}
-				task(text, yieldRunning)
+				row(topRunningRow(j, titles[j.TaskID], now, style), yieldRunning)
 				busy[j.TaskID] = true
 				reviewJob = reviewJob || j.TaskID == 0
 			}
 		}
 		for _, h := range st.Held {
 			if id, ok := claims.plan(h.ID, h.TaskID); ok && id == p.ID && h.TaskID == 0 {
-				task(topHeldLine(h, style, width), yieldHeld)
+				row(topHeldRow(h, "", style), yieldHeld)
 				reviewJob = true
 			}
 		}
@@ -1082,11 +1067,7 @@ func newTopPlans(st api.Status, tagged, fetched bool, now time.Time, style term.
 		for _, t := range p.Tasks {
 			for _, h := range st.Held {
 				if h.TaskID == t.ID {
-					text := topHeldLine(h, style, width)
-					if t.Title != "" {
-						text = topPlanHeldLine(h, t.Title, style, width)
-					}
-					task(text, yieldHeld)
+					row(topHeldRow(h, t.Title, style), yieldHeld)
 					busy[t.ID] = true
 				}
 			}
@@ -1100,7 +1081,7 @@ func newTopPlans(st api.Status, tagged, fetched bool, now time.Time, style term.
 				continue
 			}
 			if t.LandedLabel() == "not landed" {
-				task(topLandingLine(t, now, style, width), yieldHeld)
+				row(topLandingRow(t, now, style), yieldHeld)
 				continue
 			}
 			if topTaskSettled(t.State) {
@@ -1109,16 +1090,10 @@ func newTopPlans(st api.Status, tagged, fetched bool, now time.Time, style term.
 			if quiet && topTaskWaits(t.State) {
 				continue
 			}
-			if text := topTaskLine(t, reasons[t.ID], style, width); text != "" {
-				class := yieldQueued
-				switch t.State {
-				case "needs_foreman", "needs_user", "failed":
-					class = yieldHeld // a parked task
-				}
-				task(text, class)
-			}
+			lines = append(lines, topTaskLine(t, reasons[t.ID], style, width))
 		}
 	}
+	topLayoutJobs(lines, style, width)
 	return topBoxed(topSecPlans, box, lines)
 }
 
@@ -1143,20 +1118,25 @@ func topPlanCounts(p engine.StatusPlan) (done, total int) {
 	return done, total
 }
 
-// topPlanTail is what ends a plan's line: done/total and the bar for an
-// active plan, `done/total ✓` for a done one, `✗` for a cancelled one,
-// and a state word for any other — `awaiting approval`, `reviewing round
-// N` (the plan review's round, as status words it) or `needs foreman`.
-func topPlanTail(p engine.StatusPlan, style term.Style) string {
-	done, total := topPlanCounts(p)
-	count := fmt.Sprintf("%d/%d", done, total)
+// topPlanTail is what ends a plan's line, right-aligned: the cells
+// (topPlanCells), two spaces and done/total for an active plan, just
+// done/total once the cells would take more than a third of the width,
+// `done` for a done plan, `cancelled` for a cancelled one, and a state word
+// for any other — `awaiting approval`, `reviewing round N` (the plan
+// review's round, as status words it) or `needs foreman`.
+func topPlanTail(p engine.StatusPlan, running map[int64]bool, style term.Style, width int) string {
 	switch p.State {
 	case "done":
-		return count + " " + style.OK(style.Check())
+		return style.OK("done")
 	case "cancelled":
-		return style.Bad(style.Cross())
+		return style.Bad("cancelled")
 	case "", "active":
-		return count + " " + topPlanBar(done, total, style)
+		done, total := topPlanCounts(p)
+		count := fmt.Sprintf("%d/%d", done, total)
+		if cells := topPlanCells(p, running, style); cells != "" && term.VisibleWidth(cells)*3 <= width {
+			return cells + "  " + count
+		}
+		return count
 	case "pending_approval":
 		return style.Warn("awaiting approval")
 	case "reviewing":
@@ -1167,15 +1147,15 @@ func topPlanTail(p engine.StatusPlan, style term.Style) string {
 	return style.Dim(strings.ReplaceAll(p.State, "_", " "))
 }
 
-// topPlanLayout is the columns every plan line of the list shares, so the
-// tails start in one column: the widest id, the widest tag (0 when no line
-// names its repo) and the widest title, the title capped so the widest
-// tail still fits.
+// topPlanLayout is the columns every plan line of the list shares: the
+// widest id, the widest tag (0 when no line names its repo) and the widest
+// title, the title capped so the widest tail still fits. The tails end at
+// the right edge.
 type topPlanLayout struct {
 	id, tag, title, tail int
 }
 
-func newTopPlanLayout(plans []engine.StatusPlan, tagged bool, style term.Style, width int) topPlanLayout {
+func newTopPlanLayout(plans []engine.StatusPlan, running map[int64]bool, tagged bool, style term.Style, width int) topPlanLayout {
 	var l topPlanLayout
 	for _, p := range plans {
 		l.id = max(l.id, len(fmt.Sprintf("#%d", p.ID)))
@@ -1183,7 +1163,7 @@ func newTopPlanLayout(plans []engine.StatusPlan, tagged bool, style term.Style, 
 			l.tag = max(l.tag, utf8.RuneCountInString(topRepoName(p.RepoURL)))
 		}
 		l.title = max(l.title, utf8.RuneCountInString(p.Title))
-		l.tail = max(l.tail, term.VisibleWidth(topPlanTail(p, style)))
+		l.tail = max(l.tail, term.VisibleWidth(topPlanTail(p, running, style, width)))
 	}
 	fixed := l.id + 1 + l.tail + 1
 	if l.tag > 0 {
@@ -1194,11 +1174,10 @@ func newTopPlanLayout(plans []engine.StatusPlan, tagged bool, style term.Style, 
 }
 
 // topPlanLine is a plan's own line: the id, the tag when the layout has
-// tags, the title and the tail (topPlanTail), each padded to the layout's
-// column. A finished plan's mark comes from its State; a live plan's id is
-// Bold, and it never carries a mark, even with every task done. The tag
-// sits Dim after the id and the title gives way to it.
-func topPlanLine(p engine.StatusPlan, tag string, l topPlanLayout, style term.Style, width int) string {
+// tags, the title, and the tail (topPlanTail) right-aligned to the width. A
+// live plan's id is Bold. The tag sits Dim after the id and the title gives
+// way to the widest tail.
+func topPlanLine(p engine.StatusPlan, tag string, running map[int64]bool, l topPlanLayout, style term.Style, width int) string {
 	id := fmt.Sprintf("#%d", p.ID)
 	pad := strings.Repeat(" ", l.id-len(id))
 	if !topPlanFinished(p) {
@@ -1208,9 +1187,9 @@ func topPlanLine(p engine.StatusPlan, tag string, l topPlanLayout, style term.St
 	if l.tag > 0 {
 		out += style.Dim(tag) + strings.Repeat(" ", l.tag-utf8.RuneCountInString(tag)) + "  "
 	}
-	title := cutLine(p.Title, l.title)
-	out += title + strings.Repeat(" ", max(l.title-utf8.RuneCountInString(title), 0)) + " "
-	return out + topPlanTail(p, style)
+	out += cutLine(p.Title, l.title)
+	tail := topPlanTail(p, running, style, width)
+	return out + strings.Repeat(" ", max(width-term.VisibleWidth(out)-term.VisibleWidth(tail), 1)) + tail
 }
 
 // topTaskWaits says a live task's state is plain waiting: not parked and
@@ -1223,12 +1202,12 @@ func topTaskWaits(state string) bool {
 	return true
 }
 
-// topLandingLine is a done task that has not landed and that no job speaks
-// for, Dim: `⇡ #330 title  landing: ...`, with what the landing waits on —
-// `queued` for a land job in the queue, the land_ready gate's own words
-// with the stored retry stamp as a local clock, or `not landed` when the
-// task carries no word.
-func topLandingLine(t engine.StatusTask, now time.Time, style term.Style, width int) string {
+// topLandingRow is a done task that has not landed and that no job speaks
+// for, a column row with a teal `⇡` and `landing: ...` in the kind column,
+// with what the landing waits on — `queued` for a land job in the queue, the
+// land_ready gate's own words with the stored retry stamp as a local clock,
+// or `not landed` when the task carries no word.
+func topLandingRow(t engine.StatusTask, now time.Time, style term.Style) *topJobRow {
 	what := "not landed"
 	switch t.LandReady {
 	case "":
@@ -1237,11 +1216,7 @@ func topLandingLine(t engine.StatusTask, now time.Time, style term.Style, width 
 	default:
 		what = topLandReadyWords(t.LandReady, now)
 	}
-	subject := fmt.Sprintf("#%d", t.ID)
-	if t.Title != "" {
-		subject += " " + t.Title
-	}
-	return "  " + style.Dim(cutLine(style.Up()+" "+subject+"  landing: "+what, width-2))
+	return topWaitRow(style.Up(), topJobID(t.ID), t.Title, "landing: "+what, style.Teal)
 }
 
 // topLandReadyWords shows the stamp in `waiting (retry at <stamp>, last
@@ -1260,78 +1235,77 @@ func topLandReadyWords(ready string, now time.Time) string {
 	return ready[:i+len(marker)] + api.LocalClock(rest[:j], now) + rest[j:]
 }
 
-// topTitled is `ref title rest` cut to width, the title giving way and
-// nothing else: the title is whole when fewer than 4 columns remain for
-// it, and only then does the ordinary width cut apply.
-func topTitled(ref, title, rest string, width int) string {
-	room := width - utf8.RuneCountInString(ref) - 1 - utf8.RuneCountInString(rest)
-	switch {
-	case room >= utf8.RuneCountInString(title):
-	case room >= 4:
-		title = cutLine(title, room)
-	default:
-		return cutLine(ref+" "+title+rest, width)
+// topHeldRow is one held job, a column row with a Warn `?` and
+// `held: ...` in the kind column: the task it is for, or `job #N` in the
+// title column when it has none. title is the task's title, "" when unknown.
+func topHeldRow(h engine.HeldJob, title string, style term.Style) *topJobRow {
+	if h.TaskID == 0 {
+		title = fmt.Sprintf("job #%d", h.ID)
 	}
-	return ref + " " + title + rest
+	return topWaitRow(style.Question(), topJobID(h.TaskID), title, "held: "+api.HeldWait(h), style.Warn)
 }
 
-// topPlanRunningLine is a running job under its plan, with its task's
-// title: `▸ #331 title · work · claude/sonnet@high · 3m12s · Edit`, the
-// tail status's own words for the job minus the leading `task #N `.
-func topPlanRunningLine(j engine.StatusJob, title string, now time.Time, style term.Style, width int) string {
-	tail := strings.TrimPrefix(topDescribeJob(j, now, style), fmt.Sprintf("task #%d ", j.TaskID))
-	return "  " + style.Accent(style.Pointer()) + " " + topTitled(fmt.Sprintf("#%d", j.TaskID), title, topEventSep(style)+tail, width-4)
+// topPlanCells is a live plan's progress, one cell per task in task order,
+// cancelled and retired tasks left out: landed OK, or done of a class that
+// never lands; done and not landed teal; running (the task has a job in
+// running) Accent; parked Bad; any other task an empty cell in Dim.
+func topPlanCells(p engine.StatusPlan, running map[int64]bool, style term.Style) string {
+	var cells strings.Builder
+	for _, t := range p.Tasks {
+		switch {
+		case t.State == "cancelled" || t.State == "retired":
+		case t.State == "done" && (t.Landed || t.LandedLabel() == ""):
+			cells.WriteString(style.OK(style.Filled()))
+		case t.State == "done":
+			cells.WriteString(style.Teal(style.Filled()))
+		case running[t.ID]:
+			cells.WriteString(style.Accent(style.Filled()))
+		case t.State == "needs_foreman" || t.State == "needs_user" || t.State == "failed":
+			cells.WriteString(style.Bad(style.Filled()))
+		default:
+			cells.WriteString(style.Dim(style.Empty()))
+		}
+	}
+	return cells.String()
 }
 
-// topPlanHeldLine is a held job under its plan, with its task's title:
-// `? #333 title  held: waiting for a free account slot`.
-func topPlanHeldLine(h engine.HeldJob, title string, style term.Style, width int) string {
-	return "  " + style.Warn("? "+topTitled(fmt.Sprintf("#%d", h.TaskID), title, "  held: "+api.HeldWait(h), width-4))
+// topPlanLegend is the PLANS border's key to the cells, each in its colour.
+func topPlanLegend(style term.Style) string {
+	return style.OK(style.Filled()) + style.Dim(" landed") + "  " +
+		style.Teal(style.Filled()) + style.Dim(" done") + "  " +
+		style.Accent(style.Filled()) + style.Dim(" running") + "  " +
+		style.Dim(style.Empty()) + style.Dim(" queued")
 }
 
-// topPlanBar is a live plan's progress: eleven cells, ▓ filled in OK
-// and ░ empty in Dim, in proportion to the done tasks, at least one ▓
-// once any is done.
-func topPlanBar(done, total int, style term.Style) string {
-	const cells = 11
-	filled := 0
-	if total > 0 {
-		filled = done * cells / total
-	}
-	if done > 0 && filled == 0 {
-		filled = 1
-	}
-	filled = min(filled, cells)
-	var bar string
-	if filled > 0 {
-		bar = style.OK(strings.Repeat(style.Filled(), filled))
-	}
-	if filled < cells {
-		bar += style.Dim(strings.Repeat(style.Empty(), cells-filled))
-	}
-	return bar
-}
-
-// topTaskLine is a live task's line when no job speaks for it: Dim
-// queued — or waiting on the dependencies it names — for a task not
-// yet leased, Bad with the needs-you reason for a parked one, Dim
-// "(review)" for a task reviewing with no job running.
-func topTaskLine(t engine.StatusTask, reason string, style term.Style, width int) string {
-	subject := fmt.Sprintf("#%d %s", t.ID, t.Title)
+// topTaskLine is a live task's line when no job speaks for it: a column
+// row of Dim `·`, the id, the title and queued — or waiting on the
+// dependencies it names — for a task not yet leased, or "(review)" for a
+// task reviewing with no job running; a free-form Bad `!` line on the
+// needs-you tint, with the needs-you reason, for a parked one. A parked
+// line yields in class f, the rest in class d.
+func topTaskLine(t engine.StatusTask, reason string, style term.Style, width int) topLine {
+	line := topLine{section: topSecPlans}
 	switch t.State {
 	case "needs_foreman", "needs_user", "failed":
 		if reason == "" {
 			reason = t.State
 		}
-		return "  " + style.Bad(cutLine("! "+subject+" "+reason, width-2))
+		subject := fmt.Sprintf("#%d %s", t.ID, t.Title)
+		line = topNeedsRow(cutLine("! "+subject+" "+reason, width-2), style)
+		line.text = "  " + line.text
+		line.section, line.class = topSecPlans, yieldHeld
+		return line
 	case "reviewing":
-		return "  " + style.Dim(cutLine(style.Dot()+" "+subject+" (review)", width-2))
+		line.job = topDimRow(style.Dot(), topJobID(t.ID), t.Title, "(review)")
+	default:
+		wait := "(queued)"
+		if len(t.WaitingOn) > 0 {
+			wait = "(waiting on " + strings.Join(t.WaitingOn, ", ") + ")"
+		}
+		line.job = topDimRow(style.Dot(), topJobID(t.ID), t.Title, wait)
 	}
-	wait := "(queued)"
-	if len(t.WaitingOn) > 0 {
-		wait = "(waiting on " + strings.Join(t.WaitingOn, ", ") + ")"
-	}
-	return "  " + style.Dim(cutLine(style.Dot()+" "+subject+" "+wait, width-2))
+	line.class = yieldQueued
+	return line
 }
 
 // topNeedsYou is the needs-you queue as bare text, without its borders:
@@ -1375,13 +1349,22 @@ func newTopNeedsYou(st api.Status, sole bool, style term.Style, width int) []top
 			left := cutLine(texts[i], col)
 			text = left + strings.Repeat(" ", max(col-utf8.RuneCountInString(left), 0)) + "  " + tails[i]
 		}
-		rows = append(rows, topLine{text: style.Bad(text)})
+		rows = append(rows, topNeedsRow(text, style))
 	}
 	if more := len(st.NeedsYou) - len(shown); more > 0 {
 		rows = append(rows, topLine{text: style.Dim(fmt.Sprintf("+%d more (brigada status)", more))})
 	}
 	box := topBox{title: fmt.Sprintf("NEEDS YOU %d", len(st.NeedsYou)), bad: true}
 	return topBoxed(topSecNeeds, box, rows)
+}
+
+// topNeedsRow is a needs-you row: on a dark red, its text the tint's own
+// colour, where the style tints; Bad text where it does not.
+func topNeedsRow(text string, style term.Style) topLine {
+	if topTints(style) {
+		return topLine{text: text, tint: topTintNeeds}
+	}
+	return topLine{text: style.Bad(text)}
 }
 
 // topNeedsYouTail is the command that answers an entry, `→ brigada ...`,

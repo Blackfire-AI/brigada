@@ -158,6 +158,11 @@ func busyTopModel() topModel {
 	}
 }
 
+// alignRight is a plan line: left, then tail ending at width.
+func alignRight(left, tail string, width int) string {
+	return left + strings.Repeat(" ", width-term.VisibleWidth(left)-term.VisibleWidth(tail)) + tail
+}
+
 func plainTop(model topModel, width, height int) string {
 	return strings.Join(renderTop(model, width, height, topNow, term.New(logo.Caps{UTF8: true})), "\n")
 }
@@ -207,12 +212,14 @@ func TestRenderTopSections(t *testing.T) {
 		"╭─ NEEDS YOU 1 ─",
 		"│ ! #2 should the sprocket be blue?",
 		"╭─ FOREMAN ─",
-		"│   ▸ job #30 foreman",
+		"│   ▸ job #30  foreman",
 		"╭─ PLANS  1 live · 0 finished ─",
-		"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
-		"  ▸ #3 oil the gears · work · claude/sonnet@high · 1m40s · Edit",
+		" ■ landed  ■ done  ■ running  □ queued ─╮",
+		"#1 fix the frobnicator",
+		"■■■□  1/4 │",
+		"  ▸ #3  oil the gears     work  claude/sonnet@high  1m40s  Edit",
 		"  ! #2 wire the sprocket should the sprocket be blue?",
-		"  ? #4 polish the knobs  held: waiting for a runner slot",
+		"  ? #4  polish the knobs  held: waiting for a runner slot",
 		"╭─ AGENTS ─",
 		"claude/opus",
 		"all ≤ global 8",
@@ -924,9 +931,9 @@ func TestRenderTopShowsGateHoldsAndLandJobs(t *testing.T) {
 		"\n! #2 should the sprocket be blue?" +
 		"\n! #8 held by rule gate_land: gate_land is ask  → brigada land approve 8" +
 		"\n! #9 waits to push: task/9-1@abc123"
-	tree := "#1 fix the frobnicator 3/6 ▓▓▓▓▓░░░░░░" +
-		"\n  ▸ #3 oil the gears · work · claude/sonnet@high · 1m40s · Edit" +
-		"\n  ▸ #9 push the widget · land · 1m40s" +
+	tree := alignRight("#1 fix the frobnicator", "■■■□■■  3/6", 196) +
+		"\n  ▸ #3  oil the gears     work  claude/sonnet@high  1m40s  Edit" +
+		"\n  ▸ #9  push the widget   land                      1m40s" +
 		"\n  ! #2 wire the sprocket should the sprocket be blue?"
 	for _, w := range []string{tree, want} {
 		if !strings.Contains(got, w) {
@@ -1011,15 +1018,15 @@ func TestTopPlansTree(t *testing.T) {
 			NeedsYou: []engine.NeedsYouItem{{Kind: "task", ID: 314, State: "needs_foreman", Reason: "rounds spent"}},
 		}, []string{
 			head,
-			"#96 Rework brigada top 2/10 ▓▓░░░░░░░░░",
-			"  ▸ #317 work · work · opencode/glm-5.3 · 14m0s · editing cmdtop.go",
-			"  ▸ #313 landing · land · 14m0s",
+			alignRight("#96 Rework brigada top", "■■■■□■□□□□  2/10", 80),
+			"  ▸ #317  work     work  opencode/glm-5.3  14m00s  editing cmdtop.go",
+			"  ▸ #313  landing  land                    14m00s",
 			"  ! #314 finish rounds spent",
 			"  ! #315 ask needs_user",
-			"  · #316 audit (review)",
-			"  · #318 tree (queued)",
-			"  · #319 docs (waiting on tree, #317)",
-			"  ? #320 fix  held: waiting for a runner slot",
+			"  · #316  audit    (review)",
+			"  · #318  tree     (queued)",
+			"  · #319  docs     (waiting on tree, #317)",
+			"  ? #320  fix      held: waiting for a runner slot",
 			"  ↺ task #321 work: retry in 5m: could not resolve github.com",
 		}},
 		{"finished plans one line, hidden ones counted", api.Status{
@@ -1031,9 +1038,9 @@ func TestTopPlansTree(t *testing.T) {
 			HiddenFinishedPlans: 41,
 		}, []string{
 			head,
-			"#97 all done, not closed 2/2 ▓▓▓▓▓▓▓▓▓▓▓",
-			"#83 Role instructions    2/2 ✓",
-			"#80 Abandoned            ✗",
+			alignRight("#97 all done, not closed", "■■  2/2", 80),
+			alignRight("#83 Role instructions", "done", 80),
+			alignRight("#80 Abandoned", "cancelled", 80),
 		}},
 		{"a live plan's review job under its plan", api.Status{
 			Plans: []engine.StatusPlan{{ID: 12, Title: "Review me", State: "reviewing", ReviewRound: 2, ReviewJob: 50,
@@ -1041,8 +1048,8 @@ func TestTopPlansTree(t *testing.T) {
 			Running: []engine.StatusJob{{ID: 50, Kind: "plan_review", Harness: "claude", Model: "opus", LeasedAt: leased}},
 		}, []string{
 			head,
-			"#12 Review me reviewing round 2",
-			"  ▸ job #50 plan_review · claude/opus · 14m0s",
+			alignRight("#12 Review me", "reviewing round 2", 80),
+			"  ▸ job #50  plan_review  claude/opus  14m00s",
 		}},
 	}
 	for _, tt := range tests {
@@ -1078,13 +1085,13 @@ func TestTopPlansTreeColours(t *testing.T) {
 	got := topPlansTree(st, topNow, style, 80)
 	want := []string{
 		"PLANS",
-		style.Bold("#1") + " live 1/5 " + style.OK("▓▓") + style.Dim("░░░░░░░░░"),
-		"  " + style.Accent("▸") + " #2 run · work",
-		"  " + style.Dim("· #3 q (queued)"),
-		"  " + style.Warn("? #4 held  held: waiting for a runner slot"),
+		alignRight(style.Bold("#1")+" live", style.OK("■")+style.Accent("■")+style.Dim("□")+style.Dim("□")+style.Bad("■")+"  1/5", 80),
+		"  " + style.Accent("▸") + " #2  run   work",
+		"  " + style.Dim("· #3  q     (queued)"),
+		"  " + style.Warn("?") + " #4  held  " + style.Warn("held: waiting for a runner slot"),
 		"  " + style.Bad("! #5 stuck needs_foreman"),
-		"#2 done 1/1 " + style.OK("✓"),
-		"#3 gone " + style.Bad("✗"),
+		alignRight("#2 done", style.OK("done"), 80),
+		alignRight("#3 gone", style.Bad("cancelled"), 80),
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("tree =\n%q\nwant\n%q", got, want)
@@ -1121,10 +1128,10 @@ func TestTopPlanStateWords(t *testing.T) {
 			{ID: 3, Title: "c", State: "ready"}, {ID: 4, Title: "d", State: "needs_user"}}},
 	}}
 	want := []string{
-		"#1 approve me awaiting approval",
-		"#2 review me  reviewing round 3",
+		alignRight("#1 approve me", "awaiting approval", 80),
+		alignRight("#2 review me", "reviewing round 3", 80),
 		"  · plan review queued",
-		"#3 foreman    needs foreman",
+		alignRight("#3 foreman", "needs foreman", 80),
 		"  ! #4 d needs_user",
 	}
 	if got := topPlanLines(st, 80); strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -1172,29 +1179,24 @@ func TestTopPlanTailsAlign(t *testing.T) {
 		}
 		return out
 	}
+	right := func(left, tail string) string {
+		return left + strings.Repeat(" ", 80-utf8.RuneCountInString(left)-utf8.RuneCountInString(tail)) + tail
+	}
 	want := []string{
-		"#101 brigada  Fix events strip reviewing round 2",
-		"#102 brigada  Top polish       2/5 ▓▓▓▓░░░░░░░",
-		"#9   brigada  Shipped          1/1 ✓",
+		right("#101 brigada  Fix events strip", "reviewing round 2"),
+		right("#102 brigada  Top polish", "■■□□□  2/5"),
+		right("#9   brigada  Shipped", "done"),
 	}
 	if got := plain(80); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("lines =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	// At 40 columns the titles are cut to keep the widest tail whole, and
-	// the tails still start in one column.
+	// the tails still end at the right edge.
 	narrow := plain(40)
 	for _, l := range narrow {
-		if n := term.VisibleWidth(l); n > 40 {
-			t.Errorf("line %q is %d wide", l, n)
+		if n := term.VisibleWidth(l); n != 40 {
+			t.Errorf("line %q is %d wide, want 40", l, n)
 		}
-	}
-	col := -1
-	for i, tail := range []string{"reviewing round 2", "2/5 ", "1/1 "} {
-		at := utf8.RuneCountInString(narrow[i][:strings.LastIndex(narrow[i], tail)])
-		if col >= 0 && at != col {
-			t.Errorf("tail %q starts at column %d, want %d:\n%s", tail, at, col, strings.Join(narrow, "\n"))
-		}
-		col = at
 	}
 	if !strings.Contains(narrow[0], "Fix e... reviewing round 2") {
 		t.Errorf("narrow line = %q, want the title cut", narrow[0])
@@ -1215,10 +1217,10 @@ func TestTopPlanDoneNotLanded(t *testing.T) {
 	}
 	st := api.Status{Plans: []engine.StatusPlan{{ID: 7, Title: "land me", State: "active", Tasks: tasks}}}
 	want := []string{
-		"#7 land me 2/5 ▓▓▓▓░░░░░░░",
-		"  ⇡ #330 events wording  landing: waiting (retry at 11:10, last exit 1)",
-		"  ⇡ #331 queued land  landing: queued",
-		"  ⇡ #332 bare  landing: not landed",
+		"#7 land me" + strings.Repeat(" ", 80-len("#7 land me")-utf8.RuneCountInString("■■■■■  2/5")) + "■■■■■  2/5",
+		"  ⇡ #330  events wording  landing: waiting (retry at 11:10, last exit 1)",
+		"  ⇡ #331  queued land     landing: queued",
+		"  ⇡ #332  bare            landing: not landed",
 	}
 	if got := topPlansTree(st, topNow, term.New(logo.Caps{UTF8: true}), 80)[1:]; strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("tree =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -1226,34 +1228,37 @@ func TestTopPlanDoneNotLanded(t *testing.T) {
 	if c := topLineClass(t, st, 80, want[1]); c != yieldHeld {
 		t.Errorf("the ⇡ line is class %d, want the held class", c)
 	}
-	dim := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
-	if line := topLandingLine(tasks[2], topNow, dim, 80); line != "  "+dim.Dim("⇡ #332 bare  landing: not landed") {
-		t.Errorf("the ⇡ line is not Dim: %q", line)
+	teal := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
+	lines := []topLine{{job: topLandingRow(tasks[2], topNow, teal)}}
+	topLayoutJobs(lines, teal, 80)
+	if want := "  " + teal.Teal("⇡") + " #332  bare  " + teal.Teal("landing: not landed"); lines[0].text != want {
+		t.Errorf("the ⇡ line = %q, want teal mark and wait text over a plain id and title: %q", lines[0].text, want)
 	}
 
 	// A land job that speaks for the task shows as its own line, not the ⇡ one.
 	st.Running = []engine.StatusJob{{ID: 9, TaskID: 332, Kind: "land"}}
 	got := strings.Join(topPlanLines(st, 80), "\n")
-	if !strings.Contains(got, "▸ #332 bare · land") || strings.Contains(got, "#332 bare  landing") {
+	if !strings.Contains(got, "▸ #332  bare") || strings.Contains(got, "landing: not landed") {
 		t.Errorf("a running land job and the ⇡ line both speak:\n%s", got)
 	}
 
-	// The bar reads complete only when the landing is; a class that never
+	// The tail reads complete only when the landing is; a class that never
 	// lands and a finished plan count state done.
+	plain := term.New(logo.Caps{UTF8: true})
 	last := func(state string, landed bool) string {
 		p := engine.StatusPlan{ID: 8, Title: "p", State: state, Tasks: []engine.StatusTask{
 			{ID: 1, State: "done", Class: "implement", Landed: true},
 			{ID: 2, Title: "last", State: "done", Class: "implement", Landed: landed}}}
-		return topPlanLine(p, "", newTopPlanLayout([]engine.StatusPlan{p}, false, term.New(logo.Caps{UTF8: true}), 80), term.New(logo.Caps{UTF8: true}), 80)
+		return strings.TrimLeft(topPlanLine(p, "", nil, newTopPlanLayout([]engine.StatusPlan{p}, nil, false, plain, 40), plain, 40), "#8 p ")
 	}
-	if got := last("active", false); got != "#8 p 1/2 ▓▓▓▓▓░░░░░░" {
-		t.Errorf("the bar counts a task not landed: %q", got)
+	if got := last("active", false); got != "■■  1/2" {
+		t.Errorf("the tail counts a task not landed: %q", got)
 	}
-	if got := last("active", true); got != "#8 p 2/2 ▓▓▓▓▓▓▓▓▓▓▓" {
-		t.Errorf("the bar misses a landed task: %q", got)
+	if got := last("active", true); got != "■■  2/2" {
+		t.Errorf("the tail misses a landed task: %q", got)
 	}
-	if got := last("done", false); got != "#8 p 2/2 ✓" {
-		t.Errorf("a finished plan = %q, want state done counted", got)
+	if got := last("done", false); got != "done" {
+		t.Errorf("a finished plan = %q, want the word done", got)
 	}
 }
 
@@ -1275,13 +1280,14 @@ func TestTopPlanJobLinesNameTheirTask(t *testing.T) {
 		want  []string
 	}{
 		{100, []string{
-			"  ▸ #331 clip frame to height · work · claude/sonnet@high · 3m12s · Edit",
-			"  ? #333 agent order  held: waiting for a free account slot",
+			"  ▸ #331  clip frame to height  work  claude/sonnet@high  3m12s  Edit",
+			"  ? #333  agent order           held: waiting for a free account slot",
 		}},
-		// 8 columns remain for the title: it is cut, the rest stays whole.
+		// Under 76 columns the last event is left out and the title gives way:
+		// the kind, agent and age stay whole; the wait text is cut at the end.
 		{60, []string{
-			"  ▸ #331 clip ... · work · claude/sonnet@high · 3m12s · Edit",
-			"  ? #333 agent order  held: waiting for a free account slot",
+			"  ▸ #331  clip frame to ...  work  claude/sonnet@high  3m12s",
+			"  ? #333  agent order        held: waiting for a free acc...",
 		}},
 	}
 	for _, tt := range tests {
@@ -1290,17 +1296,22 @@ func TestTopPlanJobLinesNameTheirTask(t *testing.T) {
 			t.Errorf("width %d lines =\n%s\nwant\n%s", tt.width, strings.Join(got, "\n"), strings.Join(tt.want, "\n"))
 		}
 	}
-	// Fewer than 4 columns for the title: it goes whole and the usual cut applies.
-	got := topPlanLines(st, 55)[1]
-	if !strings.HasPrefix(got, "  ▸ #331 clip frame to height") || !strings.HasSuffix(got, "...") || utf8.RuneCountInString(got) != 55 {
-		t.Errorf("line = %q, want the title whole and the line cut to 55", got)
+	// A last event still too long with the title at 8 columns is cut at the
+	// line's end; the kind, agent and age stay whole.
+	long := job
+	long.LastEvent = "tool_start " + strings.Repeat("x", 60)
+	st.Running = []engine.StatusJob{long}
+	got := topPlanLines(st, 80)[1]
+	if !strings.HasPrefix(got, "  ▸ #331  clip ...  work  claude/sonnet@high  3m12s  xxx") || !strings.HasSuffix(got, "xxx...") || utf8.RuneCountInString(got) != 80 {
+		t.Errorf("line = %q, want the title at 8 and the event cut to 80", got)
 	}
-	// A task with no title keeps today's line, byte for byte.
-	st.Running = []engine.StatusJob{{ID: 42, TaskID: 334, Kind: "work", LeasedAt: leased}}
-	st.Held = nil
-	want := topRunningLine(st.Running[0], topNow, term.New(logo.Caps{UTF8: true}), 100)
-	if got := topPlanLines(st, 100); got[1] != want {
-		t.Errorf("untitled task line = %q, want %q", got[1], want)
+	// A task with no title has an empty title cell.
+	st = api.Status{
+		Plans:   []engine.StatusPlan{{ID: 7, Title: "p", State: "active", Tasks: []engine.StatusTask{{ID: 334, State: "running"}}}},
+		Running: []engine.StatusJob{{ID: 42, TaskID: 334, Kind: "work", LeasedAt: leased}},
+	}
+	if got := topPlanLines(st, 100); got[1] != "  ▸ #334  work  3m12s" {
+		t.Errorf("untitled task line = %q", got[1])
 	}
 }
 
@@ -1322,7 +1333,10 @@ func TestTopPlanTotalsLeaveOutCancelledAndRetired(t *testing.T) {
 			{ID: 1, State: "done"}, {ID: 2, State: "done"}, {ID: 3, State: "done"},
 			{ID: 4, State: "cancelled"}, {ID: 5, State: "retired"}, {ID: 6, Title: "go", State: "running"}}},
 	}}
-	want := []string{"#96 Rework 8/8 ✓", "#97 Live   3/4 ▓▓▓▓▓▓▓▓░░░", "  · #6 go (queued)"}
+	right := func(left, tail string) string {
+		return left + strings.Repeat(" ", 80-utf8.RuneCountInString(left)-utf8.RuneCountInString(tail)) + tail
+	}
+	want := []string{right("#96 Rework", "done"), right("#97 Live", "■■■□  3/4"), "  · #6  go  (queued)"}
 	if got := topPlanLines(st, 80); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("tree =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
@@ -1400,8 +1414,8 @@ func TestTopPlanlessJobsHaveNoHead(t *testing.T) {
 		return out
 	}
 	head := func(title string) string { return title }
-	fline := topRunningLine(foremanJob, topNow, term.New(logo.Caps{UTF8: true}), 80)
-	oline := topRunningLine(otherJob, topNow, term.New(logo.Caps{UTF8: true}), 80)
+	fline := "  ▸ job #2619  foreman  claude/opus"
+	oline := "  ▸ job #63  plan_review"
 	needsLine := "! #2 should the sprocket be blue?"
 
 	t.Run("reported case", func(t *testing.T) {
@@ -1454,10 +1468,10 @@ func TestTopPlanlessJobsHaveNoHead(t *testing.T) {
 		style := term.New(logo.Caps{UTF8: true})
 		want := []string{head("NEEDS YOU"), "nothing needs you", "",
 			head("FOREMAN"),
-			topHeldLine(m.status.Held[0], style, 80),
+			"  ? job #61  held: " + api.HeldWait(m.status.Held[0]),
 			topRetryLine(m.status.Retries[0], topNow, style, 80), "",
 			head("JOBS"),
-			topHeldLine(m.status.Held[1], style, 80),
+			"  ? job #64  held: " + api.HeldWait(m.status.Held[1]),
 			topRetryLine(m.status.Retries[1], topNow, style, 80), "",
 			head("PLANS")}
 		if got := between(80, m); strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -1523,11 +1537,11 @@ func TestTopPlanless(t *testing.T) {
 	got := unboxTop(model, 100, 0)
 	want := "! #2 should the sprocket be blue?" +
 		"\n\nFOREMAN"
-	rest := "\n  ▸ job #60 foreman · claude/opus" +
-		"\n  ? job #61 foreman held: foreman turn waiting: no runner offers claude/opus" +
+	rest := "\n  ▸ job #60  foreman  claude/opus" +
+		"\n  ? job #61  held: foreman turn waiting: no runner offers claude/opus" +
 		"\n  ↺ job #62 foreman: retry in 2m: could not resolve github.com" +
 		"\n\nJOBS"
-	tail := "\n  ▸ job #63 plan_review" +
+	tail := "\n  ▸ job #63  plan_review" +
 		"\n\nPLANS"
 	i := strings.Index(got, want)
 	if i < 0 {
@@ -1685,7 +1699,7 @@ func TestRenderTopFitsSize(t *testing.T) {
 	if want := cutLine(" 3/8 slots  1 run  2 queue  1 held  1 needs", 40); lines[1] != want {
 		t.Errorf("meters row = %q, want %q", lines[1], want)
 	}
-	for _, w := range []string{"╭─ NEEDS YOU 1 ", "│ ! #2 should the sprocket be blue?", "╭─ PLANS ", "│ #1 fix the frobni... 1/4 ▓▓░░░░░░░░░ │"} {
+	for _, w := range []string{"╭─ NEEDS YOU 1 ", "│ ! #2 should the sprocket be blue?", "╭─ PLANS ", "│ #1 fix the frobnicator     ■■■□  1/4 │"} {
 		if !strings.Contains(got, w) {
 			t.Errorf("the frame lacks %q:\n%s", w, got)
 		}
@@ -1729,7 +1743,7 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 		lacks  []string
 	}{
 		{"everything fits", 22, 22, []string{
-			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
+			"#1 fix the frobnicator",
 			"✗ login expired",
 			"╭─ EVENTS ─",
 			"15:02  review approve task/3-1-oil-the-gears-after-the-frobnicator-fix",
@@ -1740,18 +1754,18 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 		}, []string{"review approve"}},
 		{"the held line", 20, 20, []string{
 			"  ! #2 wire the sprocket should the sprocket be blue?",
-			"  ▸ #3 oil the gears · work · claude/sonnet@high · 1m40s · Edit",
-		}, []string{"? #4 polish the knobs  held"}},
+			"  ▸ #3  oil the gears",
+		}, []string{"? #4  polish the knobs  held"}},
 		{"the parked line", 19, 19, []string{
-			"  ▸ #3 oil the gears · work · claude/sonnet@high · 1m40s · Edit",
-		}, []string{"? #4 polish the knobs", "wire the sprocket should"}},
+			"  ▸ #3  oil the gears",
+		}, []string{"? #4  polish the knobs", "wire the sprocket should"}},
 		{"the running line", 18, 18, []string{
-			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
+			"#1 fix the frobnicator",
 			"╭─ EVENTS ─",
 			"15:02  #3 done",
-		}, []string{"▸ #3 oil the gears"}},
+		}, []string{"▸ #3  oil the gears"}},
 		{"event row 1, its box goes with it", 17, 15, []string{
-			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
+			"#1 fix the frobnicator",
 			"all ≤ global 8",
 		}, []string{"EVENTS", "#3 done"}},
 		{"the global line", 14, 14, []string{
@@ -1764,10 +1778,10 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 		}, []string{"1/4 (runner)  ✓"}},
 		{"the broken agent", 12, 12, []string{
 			"codex/gpt-5              0/8 (global)  ↺ 16:04",
-			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
+			"#1 fix the frobnicator",
 		}, []string{"2/8 (global)  ✗ login expired"}},
 		{"the cooling agent, its box goes with it", 11, 9, []string{
-			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
+			"#1 fix the frobnicator",
 		}, []string{"AGENTS", "codex/gpt-5", "↺ 16:04"}},
 		{"the plan line, its box goes with it", 8, 6, []string{
 			"! claude/sonnet-long-n...  → brigada agent reset claude/sonnet-long-name",
@@ -1968,9 +1982,9 @@ func TestTopPlanLineNamesItsRepo(t *testing.T) {
 		repo     string
 		want     string
 	}{
-		{"two projects", two, "", "#101 brigada  Fix events strip 0/0"},
-		{"one project", one, "", "#101 Fix events strip 0/0"},
-		{"project flag", two, repo, "#101 Fix events strip 0/0"},
+		{"two projects", two, "", "│ #101 brigada  Fix events strip" + strings.Repeat(" ", 96-30-3) + "0/0 │"},
+		{"one project", one, "", "│ #101 Fix events strip" + strings.Repeat(" ", 96-21-3) + "0/0 │"},
+		{"project flag", two, repo, "│ #101 Fix events strip" + strings.Repeat(" ", 96-21-3) + "0/0 │"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			model, err := topFetch(context.Background(), &fakeTop{status: st, projects: tt.projects}, tt.repo)
@@ -1990,15 +2004,15 @@ func TestTopPlanTagKeepsItsCells(t *testing.T) {
 	plain := term.New(logo.Caps{UTF8: true})
 	const repo = "https://example.invalid/acme/brigada.git"
 	live := engine.StatusPlan{ID: 101, RepoURL: repo, Title: strings.Repeat("long title ", 8), State: "active"}
-	got := topPlanLine(live, "brigada", newTopPlanLayout([]engine.StatusPlan{live}, true, plain, 50), plain, 50)
-	if !strings.HasPrefix(got, "#101 brigada  long") || !strings.Contains(got, "... 0/0 ") {
+	got := topPlanLine(live, "brigada", nil, newTopPlanLayout([]engine.StatusPlan{live}, nil, true, plain, 50), plain, 50)
+	if !strings.HasPrefix(got, "#101 brigada  long") || !strings.HasSuffix(got, "... 0/0") {
 		t.Errorf("line = %q, want the tag whole and the title cut", got)
 	}
 	if n := utf8.RuneCountInString(got); n != 50 {
 		t.Errorf("line is %d cells, want 50: %q", n, got)
 	}
 	done := engine.StatusPlan{ID: 102, RepoURL: repo, Title: "shipped", State: "done"}
-	if got := topPlanLine(done, "brigada", newTopPlanLayout([]engine.StatusPlan{done}, true, plain, 50), plain, 50); got != "#102 brigada  shipped 0/0 ✓" {
+	if got := topPlanLine(done, "brigada", nil, newTopPlanLayout([]engine.StatusPlan{done}, nil, true, plain, 50), plain, 50); got != "#102 brigada  shipped"+strings.Repeat(" ", 50-21-4)+"done" {
 		t.Errorf("finished line = %q", got)
 	}
 }
@@ -2560,7 +2574,7 @@ func TestRenderTopNarrowBoxes(t *testing.T) {
 		}
 	}
 	narrow := strings.Join(renderTop(busyTopModel(), 59, 0, topNow, term.New(logo.Caps{UTF8: true})), "\n")
-	if !strings.Contains(narrow, "│   ▸ #3 oi") || !strings.Contains(narrow, "· 1m40s · Edit") {
+	if !strings.Contains(narrow, "│   ▸ #3  oil") || !strings.Contains(narrow, "claude/sonnet@high  1m40s │") {
 		t.Errorf("narrow view loses the indentation beneath a head:\n%s", narrow)
 	}
 }
@@ -2759,7 +2773,7 @@ func TestRenderTopQueuedYield(t *testing.T) {
 	model.capacity.Agents = append(model.capacity.Agents,
 		engine.CapacityAgent{Harness: "codex", Model: "a", CapLayer: "none", Quota: "ready"})
 	full := strings.Join(renderTop(model, 100, 0, topNow, style), "\n")
-	for _, w := range []string{"· #5 five (queued)", "· #6 six (waiting on #5)", "· #7 seven (review)", "codex/a"} {
+	for _, w := range []string{"· #5  five", "· #6  six", "(waiting on #5)", "· #7  seven", "(review)", "codex/a"} {
 		if !strings.Contains(full, w) {
 			t.Fatalf("the full view lacks %q:\n%s", w, full)
 		}
@@ -2770,13 +2784,13 @@ func TestRenderTopQueuedYield(t *testing.T) {
 		lacks  []string
 		keeps  []string
 	}{
-		{base, nil, []string{"(review)", "(waiting on #5)", "(queued)", "codex/a", "? #4 polish the knobs"}},
+		{base, nil, []string{"(review)", "(waiting on #5)", "(queued)", "codex/a", "? #4  polish the knobs"}},
 		{base - 1, []string{"(review)"}, []string{"(waiting on #5)", "(queued)", "codex/a"}},
-		{base - 2, []string{"(review)", "(waiting on #5)"}, []string{"· #5 five (queued)", "codex/a"}},
-		{base - 3, []string{"(review)", "(waiting on #5)", "(queued)"}, []string{"codex/a", "? #4 polish the knobs"}},
+		{base - 2, []string{"(review)", "(waiting on #5)"}, []string{"· #5  five", "(queued)", "codex/a"}},
+		{base - 3, []string{"(review)", "(waiting on #5)", "(queued)"}, []string{"codex/a", "? #4  polish the knobs"}},
 		// The idle agent folds, paying for its +N more line, and the held
 		// line goes with the next step.
-		{base - 4, []string{"(queued)", "codex/a", "? #4 polish the knobs"}, []string{"+1 idle (brigada capacity)", "▸ #3 oil the gears"}},
+		{base - 4, []string{"(queued)", "codex/a", "? #4  polish the knobs"}, []string{"+1 idle (brigada capacity)", "▸ #3  oil the gears"}},
 	}
 	for _, tt := range tests {
 		lines := renderTop(model, 100, tt.height, topNow, style)
@@ -2910,8 +2924,8 @@ func TestTopReportLine(t *testing.T) {
 	tail := full[len(full)-4:]
 	want := []string{
 		"╭─ EVENTS " + strings.Repeat("─", 30) + " All landed, but #5 needs a look. ─╮",
-		topBoxRow("15:02  #3 done", false, style, 76),
-		topBoxRow("15:02  review approve task/3-1-oil-the-gears-after-the-frobnicator-fix", false, style, 76),
+		topBoxRow("15:02  #3 done", false, topTintNone, style, 76),
+		topBoxRow("15:02  review approve task/3-1-oil-the-gears-after-the-frobnicator-fix", false, topTintNone, style, 76),
 		"╰" + strings.Repeat("─", 74) + "╯",
 	}
 	if strings.Join(tail, "\n") != strings.Join(want, "\n") {
@@ -2966,7 +2980,7 @@ func TestTopForemanAndJobsNotes(t *testing.T) {
 	}, topNow, plain, 80)
 	want := []string{
 		"FOREMAN",
-		"  ▸ job #30 foreman",
+		"  ▸ job #30  foreman",
 		"  2 messages for the foreman",
 		"  foreman slot: attach (attached chat) since 11:10",
 		"  foreman slot: headless turn (foreman turn) since 11:10",
@@ -3226,9 +3240,11 @@ func TestRenderTopASCIIWithoutUTF8(t *testing.T) {
 		" ==================  3/8 slots",
 		"+- NEEDS YOU 3 ---",
 		"-> brigada plan approve 2",
-		"#1 fix the frobnicator 1/6 #..........",
-		"  > #3 oil the gears | work | claude/sonnet@high | 1m40s | Edit",
-		"  ^ #5 ship it  landing: queued",
+		"#1 fix the frobnicator",
+		"###.#.  1/6 |",
+		"# landed  # done  # running  . queued -+",
+		"  > #3  oil the gears     work  claude/sonnet@high  1m40s  Edit",
+		"  ^ #5  ship it           landing: queued",
 		"  -> task #6 work: retry in 5m: dns",
 		"codex/gpt-5              0/8 (global)  -> 16:04",
 		"claude/sonnet-long-name  2/8 (global)  x login expired",

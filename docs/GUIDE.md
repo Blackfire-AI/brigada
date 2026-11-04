@@ -1086,19 +1086,30 @@ The held and needs counters in the slots row are coloured only above zero.
 The meter fills in proportion to the use, at least one cell once the use is over zero, in the accent colour and in the warning colour when the use reaches the cap, the rest dim in the same glyph; with no cap or a cap of 0 the row reads `2/none slots` or `0/0 slots` and has no meter, and `?/? slots` when the capacity could not be read.
 The meter shrinks when the row is tight and is left out under 4 cells.
 
-The plans tree puts every job under its plan: an active plan's line carries its done/total and a progress bar,
+The plans tree puts every job under its plan: an active plan's line ends, at the right edge of the box, in one cell per task and `done/total`, as `■■■■■■□□  3/8`,
 while a plan that is neither active nor finished shows a state word in their place —
 `awaiting approval`, `reviewing round N` or `needs foreman` —
-and the tails of all the plan lines start in one column, as in
-`#101 brigada  Fix events strip   reviewing round 2` over `#102 brigada  Top polish        2/5 ▓▓▓▓░░░░░░░`.
-The total leaves out cancelled and retired tasks, and the bar counts a done task only once it is landed, or when its class never lands.
-Beneath the line come its running jobs (`▸`, in `brigada status`'s words, with the task's id and title in place of `task #N`: `▸ #331 clip frame to height · work · claude/sonnet@high · 3m12s · Edit`; on a narrow terminal the title is cut and the rest stays whole),
-then a line per task still live work —
-queued or waiting on its dependencies (not under a plan that is not active), held (`?`, as `? #333 agent order  held: waiting for a free account slot`), waiting on an infra retry (`↺`), parked for you (`!` with the needs-you reason) or reviewing;
-a done task that has not landed and that no job speaks for gets a dim `⇡ #330 events wording  landing: waiting (retry at 11:10, last exit 1)` line,
+and a finished plan shows `done` (green) or `cancelled` (red);
+the title is cut to leave room for the widest tail, as in
+`#101 brigada  Fix events strip      reviewing round 2` over `#102 brigada  Top polish             ■■□□□  2/5`.
+The cells follow the task order and leave out cancelled and retired tasks: green for a landed task, or a done one whose class never lands, teal for a done task that has not landed, the accent colour for a task with a running job, red for a parked one (`needs_foreman`, `needs_user`, `failed`), and an empty dim `□` for any other.
+The PLANS top border carries a legend of them, `■ landed  ■ done  ■ running  □ queued`, each cell in its colour, left out when it does not fit.
+When the cells would take more than a third of the width the tail is just `done/total`.
+The total leaves out cancelled and retired tasks, and the count takes a done task only once it is landed, or when its class never lands.
+A job row has fixed columns that line up across the rows of a box — the mark, the task id, the title, the kind, the agent, the age and the last event, two spaces apart — in PLANS, FOREMAN and JOBS, each box with its own widths.
+Beneath the line come its running jobs (`▸`, as `▸ #342  clip frame to terminal height  work  claude/sonnet@high  3m12s  Edit`):
+the agent is `harness/model@effort`, and a name of more than two `/` segments shows its last, so `opencode/zai-coding-plan/glm-5.3` reads `glm-5.3`;
+the age is `45s`, `9m04s` or `1h02m03s`; the last event is the tool's name alone, and is left out under 80 terminal columns.
+The title is the part cut when the line is tight, down to 8 columns; a last event still too long is cut at the line's end.
+A job with no task has an empty id and `job #N` as its title.
+Then comes a line per task still live work —
+queued or waiting on its dependencies (not under a plan that is not active), held (a yellow `?`, as `? #333  agent order  held: waiting for a free account slot`), waiting on an infra retry (`↺`), parked for you (`!` with the needs-you reason) or reviewing;
+the wait text of a row with no running job sits in the kind column and runs to the end of the line;
+a done task that has not landed and that no job speaks for gets a teal `⇡ #330  events wording  landing: waiting (retry at 11:10, last exit 1)` line,
 with `queued` for a queued land job and `not landed` when the task carries no word;
+a queued, waiting-on or review task is a dim `·` row;
 a reviewing plan whose review no job has started shows a dim `· plan review queued` line —
-while a finished plan is one line, `#N <title> done/total ✓` or `#N <title> ✗`;
+while a finished plan is one line, `#N <title>` and `done` or `cancelled`;
 a foreman turn no plan claims sits in a FOREMAN box and any other job no listed plan claims in a JOBS box,
 between the needs-you box and the plans tree, each shown only when it has lines.
 The FOREMAN block also carries dim lines for the user's messages waiting for the foreman (`2 messages for the foreman`) and for each foreman slot that is not free, with its state, label and the local time since (`foreman slot: attach (attached chat) since 11:10`), a headless turn whose job runs left out because its job line speaks for it;
@@ -1112,6 +1123,8 @@ and an entry that has an action ends in it, whole, `→ <command>`, the tails st
 and `→ brigada agent reset <harness>/<model>` for a broken agent;
 every other entry, `push by hand: <command>` and a plan parked for the foreman included, has none.
 The queue is capped at three lines with a `+N more (brigada status)` line. When it is empty the box is grey, has no count and holds a dim `✓ nothing needs you` row.
+
+At 256 colours and true colour each `!` needs-you row, in every box, sits on a dark red and each `▸` running job row on a dark blue; the tint sets the row's text colour as well as its background, so it reads on a light theme, and covers the row's padding inside the borders. At 16 colours and with `NO_COLOR` the rows carry no tint.
 
 The frame never has more lines than the terminal is tall.
 When the view is taller, lines drop class by class, each class from the bottom of the view upward, one line at a time, until it fits:

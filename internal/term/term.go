@@ -69,6 +69,42 @@ func (s Style) Bad(text string) string {
 	return s.wrap(text, "\x1b[31m", "\x1b[38;5;203m", "\x1b[38;2;255;95;95m")
 }
 
+// Teal colors work that is done but not yet landed, apart from Accent at
+// every depth.
+func (s Style) Teal(text string) string {
+	return s.wrap(text, "\x1b[96m", "\x1b[38;5;37m", "\x1b[38;2;0;175;175m")
+}
+
+// tint paints text on a background: it opens fg and bg, re-emits both after
+// every reset inside text (Style.wrap ends with a full reset, which would end
+// the background), and closes with a reset. Only 256 colours and true colour
+// tint; 16 colours and no colour return text unchanged. The pairs are the
+// escapes for those two depths.
+func (s Style) tint(text, fg256, bg256, fgTrue, bgTrue string) string {
+	var open string
+	switch s.caps.Color {
+	case logo.Color256:
+		open = "\x1b[" + bg256 + "m\x1b[" + fg256 + "m"
+	case logo.TrueColor:
+		open = "\x1b[" + bgTrue + "m\x1b[" + fgTrue + "m"
+	default:
+		return text
+	}
+	return open + strings.ReplaceAll(text, reset, reset+open) + reset
+}
+
+// TintNeeds paints a needs-you row on a dark red, text and background both
+// set, so the row reads on a light theme too. Colours inside the text keep
+// the background. Without 256 colours or true colour it returns text as is.
+func (s Style) TintNeeds(text string) string {
+	return s.tint(text, "38;5;224", "48;5;52", "38;2;255;215;215", "48;2;59;20;24")
+}
+
+// TintRun paints a running job's row on a dark blue; see TintNeeds.
+func (s Style) TintRun(text string) string {
+	return s.tint(text, "38;5;153", "48;5;17", "38;2;215;227;255", "48;2;18;35;63")
+}
+
 func (s Style) symbol(unicode, ascii string) string {
 	if s.caps.UTF8 {
 		return unicode
@@ -94,11 +130,11 @@ func (s Style) Rule() string { return s.symbol("━━", "==") }
 // Again returns a repeat arrow, or "->" without UTF-8.
 func (s Style) Again() string { return s.symbol("↺", "->") }
 
-// Filled returns a filled bar cell, or "#" without UTF-8.
-func (s Style) Filled() string { return s.symbol("▓", "#") }
+// Filled returns a filled progress cell, or "#" without UTF-8.
+func (s Style) Filled() string { return s.symbol("■", "#") }
 
-// Empty returns an empty bar cell, or "." without UTF-8.
-func (s Style) Empty() string { return s.symbol("░", ".") }
+// Empty returns an empty progress cell, or "." without UTF-8.
+func (s Style) Empty() string { return s.symbol("□", ".") }
 
 // Dash returns a rule cell, or "-" without UTF-8.
 func (s Style) Dash() string { return s.symbol("─", "-") }
