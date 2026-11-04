@@ -59,9 +59,9 @@ tasks:
     review_tier: standard
     review_effort: medium
     caps: {fix_rounds: 4, review_rounds: 4, restart: 1}
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-343"
-    rounds: 2
+    rounds: 0
   - id: 344
     name: "agents-grid"
     title: "top: two-column agents and family colours"
