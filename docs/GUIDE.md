@@ -1329,7 +1329,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada diff <task-id> [--stat] [--repo URL]`: what a task changed, as `git diff base...branch`; run inside the repo. See [section 4](#history-diffs-and-logs).
 - `brigada logs <job-id> [--check] [--tail N] [--follow]`, or `brigada logs --task N`: a job's transcript as readable lines, or its check log. See [section 4](#history-diffs-and-logs).
 - `brigada stats`: tier, attempts, successes, rate and confidence per agent, class and repo. See [section 9](#9-the-record-and-stats).
-- `brigada top [--interval D] [--project URL] [--no-start]`: the engine full-screen, with the same unregistered-models hint as `status`; one plain snapshot when piped. See [section 8](#capacity).
+- `brigada top [--interval D] [--project URL] [--no-start]`: the engine full-screen as one stacked column, with the same unregistered-models hint as `status`; one plain snapshot when piped. See [section 8](#capacity).
 - `brigada capacity [--project URL]`: each agent's tier, effort, cost, running jobs against its cap, and quota; each cap layer's cap, use and queue. See [section 8](#capacity).
 
 ### Finishing
