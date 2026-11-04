@@ -107,8 +107,8 @@ tasks:
     review_effort: medium
     caps: {restart: 5}
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-336-r4"
     rounds: 0
   - id: 337
     name: "split"
