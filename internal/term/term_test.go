@@ -110,6 +110,14 @@ func TestSymbols(t *testing.T) {
 		{"Pointer", Style.Pointer, "▸", ">"},
 		{"Rule", Style.Rule, "━━", "=="},
 		{"Again", Style.Again, "↺", "->"},
+		{"Filled", Style.Filled, "▓", "#"},
+		{"Empty", Style.Empty, "░", "."},
+		{"Dash", Style.Dash, "─", "-"},
+		{"Cross", Style.Cross, "✗", "x"},
+		{"Dot", Style.Dot, "·", "|"},
+		{"AtMost", Style.AtMost, "≤", "<="},
+		{"Up", Style.Up, "⇡", "^"},
+		{"Arrow", Style.Arrow, "→", "->"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, depth := range []logo.Depth{logo.NoColor, logo.Color16, logo.Color256, logo.TrueColor} {
