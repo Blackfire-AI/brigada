@@ -186,92 +186,224 @@ func dialEngine(ctx context.Context, rt *runtime, role string, noStart bool) (*a
 // the JOBS block (any other job no plan claims), each only when it has
 // lines, the PLANS tree with every job under its plan, the AGENTS
 // section and the events strip at the bottom, every line cut to width.
-// The height is a budget, 0 meaning no limit: lines beyond it yield in
-// order — the events strip's second line, then plan task lines from
-// the last listed plan upward, then agent lines from the bottom of the
-// list upward, counted in a dim +N more (brigada agents) line — and
-// what never yields (the header with its error and hint lines, the
-// meters, NEEDS YOU whole, the FOREMAN and JOBS blocks with their heads,
-// every plan's own line, the
-// agents head with its global line, the events strip's first line,
-// every blank line between sections) renders whole even when the view
-// overflows the screen. With a plain style the text is the same and
-// has no escapes.
+// The height is a limit, 0 meaning none: the frame never has more lines
+// than it. Every line carries a yield class (topYield) and, while the
+// frame is taller than the height, lines drop class by class, each class
+// from the bottom of the view upward, one line at a time, until it fits:
+// a the events strip's second line; b finished plans, folded into the dim
+// +N finished line; c the blank lines between sections; d queued task
+// lines (waiting on, review included); e idle agents, counted in the dim
+// +N more (brigada agents) line; f held and retry lines and parked task
+// lines; g running lines; h every other line outside the header and NEEDS
+// YOU — the events strip's first line, the other agent lines, the global
+// line, the fold lines, each plan's own line, the placeholders, the PLANS
+// and AGENTS heads — with the meters strip dropping last of the class,
+// though it sits above NEEDS YOU. A section head goes with its section's
+// last line, the FOREMAN and JOBS heads too: it drops next, unless the
+// frame already fits. i the hard clip: only the header (with its error
+// and hint lines) and NEEDS YOU remain, and the frame is cut from the
+// bottom. A fold line not yet shown costs the line it adds. With a plain
+// style the text is the same and has no escapes.
 func renderTop(model topModel, width, height int, now time.Time, style term.Style) []string {
-	header := topHeader(model, now, style, width)
-	meters := topMeters(model, style, width)
-	needs := topNeedsYou(model.status, style, width)
-	foreman, jobs := topPlanless(model.status, now, style, width)
-	plans := newTopPlans(model.status, now, style, width)
-	events := topEvents(model.events, now, style, width)
-
-	// The budget's arithmetic: how many lines the view carries with
-	// eventLines strip lines, planDrop plan task lines dropped and
-	// agentsKeep agent lines kept.
-	agentsAll := len(model.capacity.Agents)
-	globalLines := 0
-	if api.GlobalCap(model.capacity) != nil {
-		globalLines = 1
-	}
-	sectionCount := 6
-	// Each non-empty block adds its head, its job lines and one blank.
-	if len(foreman) > 0 {
-		sectionCount++
-	}
-	if len(jobs) > 0 {
-		sectionCount++
-	}
-	eventLines, planDrop, agentsKeep := len(events), 0, agentsAll
-	count := func() int {
-		agentsLines := 1 + agentsKeep + globalLines
-		if agentsKeep < agentsAll {
-			// The +N more (brigada agents) line that names the drops.
-			agentsLines++
+	var lines []topLine
+	add := func(section []topLine) {
+		if len(section) == 0 {
+			return
 		}
-		return len(header) + len(meters) + len(needs) + len(foreman) + len(jobs) +
-			len(plans.lines) - planDrop + agentsLines + eventLines +
-			sectionCount - 1
+		if len(lines) > 0 {
+			lines = append(lines, topLine{class: yieldBlank})
+		}
+		lines = append(lines, section...)
 	}
-	if height > 0 && count() > height {
-		eventLines = 1
-		if over := count() - height; over > 0 {
-			planDrop = min(over, len(plans.taskIdx))
-			if over = count() - height; over > 0 {
-				// Every agent line dropped past the first pays for the
-				// +N more line that names them.
-				if save := min(over, agentsAll-1); save > 0 {
-					agentsKeep = agentsAll - 1 - save
+	add(topPinned(topHeader(model, now, style, width)))
+	add([]topLine{{text: topMeters(model, style, width)[0], class: yieldRest, late: true}})
+	add(topPinned(topNeedsYou(model.status, style, width)))
+	foreman, jobs := topPlanless(model.status, now, style, width)
+	add(foreman)
+	add(jobs)
+	add(newTopPlans(model.status, now, style, width))
+	add(topAgentLines(model, now, style, width))
+	add(topEventLines(model.events, now, style, width))
+
+	frame := &topFrame{lines: lines, hidden: model.status.HiddenFinishedPlans, style: style}
+	frame.fit(height)
+	out := frame.texts()
+	if height > 0 && len(out) > height {
+		out = out[:height]
+	}
+	for i, line := range out {
+		out[i] = topFit(line, width)
+	}
+	return out
+}
+
+// topYield is a line's yield class: the order in which lines drop while
+// the frame is taller than the height. To make a new kind of line yield,
+// give it a class when its section builds it; the drop loop needs no
+// other change.
+type topYield int
+
+const (
+	yieldPinned       topYield = iota // header and NEEDS YOU: only the hard clip cuts them
+	yieldEventsSecond                 // a: the events strip's second line
+	yieldFinished                     // b: a finished plan's line, folded into +N finished
+	yieldBlank                        // c: the blank lines between sections
+	yieldQueued                       // d: queued, waiting-on and review task lines
+	yieldIdle                         // e: idle agents, counted in +N more (brigada agents)
+	yieldHeld                         // f: held and retry lines, parked task lines
+	yieldRunning                      // g: running lines
+	yieldRest                         // h: every other line outside the header and NEEDS YOU
+)
+
+// The sections whose head goes with their last line.
+const (
+	topSecNone = iota
+	topSecForeman
+	topSecJobs
+	topSecPlans
+	topSecAgents
+)
+
+// topFold marks a generated line: the dim count of what dropped.
+type topFold int
+
+const (
+	foldNone     topFold = iota
+	foldFinished         // +N finished
+	foldIdle             // +N more (brigada agents)
+)
+
+// topLine is one line of the frame with what the drop loop needs.
+type topLine struct {
+	text    string
+	class   topYield
+	section int  // the section whose head goes with its last line, or topSecNone
+	head    bool // the section's head line
+	fold    topFold
+	late    bool // drops after the other lines of its class
+	dropped bool
+}
+
+// topPinned wraps lines no class drops.
+func topPinned(texts []string) []topLine {
+	lines := make([]topLine, len(texts))
+	for i, text := range texts {
+		lines[i] = topLine{text: text}
+	}
+	return lines
+}
+
+// topFrame is the view's lines with the drops so far. hidden is the
+// finished plans the status already hid; folded counts what the drops
+// added to the two fold lines.
+type topFrame struct {
+	lines          []topLine
+	hidden         int
+	foldedFinished int
+	foldedIdle     int
+	style          term.Style
+}
+
+// visible says whether line i renders: not dropped, and a fold line only
+// once it counts something.
+func (f *topFrame) visible(i int) bool {
+	l := f.lines[i]
+	if l.dropped {
+		return false
+	}
+	switch l.fold {
+	case foldFinished:
+		return f.hidden+f.foldedFinished > 0
+	case foldIdle:
+		return f.foldedIdle > 0
+	}
+	return true
+}
+
+func (f *topFrame) size() int {
+	n := 0
+	for i := range f.lines {
+		if f.visible(i) {
+			n++
+		}
+	}
+	return n
+}
+
+// texts is the visible lines' text, the fold lines worded from their counts.
+func (f *topFrame) texts() []string {
+	var out []string
+	for i, l := range f.lines {
+		if !f.visible(i) {
+			continue
+		}
+		switch l.fold {
+		case foldFinished:
+			out = append(out, f.style.Dim(fmt.Sprintf("+%d finished", f.hidden+f.foldedFinished)))
+		case foldIdle:
+			out = append(out, f.style.Dim(fmt.Sprintf("+%d more (brigada agents)", f.foldedIdle)))
+		default:
+			out = append(out, l.text)
+		}
+	}
+	return out
+}
+
+// drop removes line i and counts it into its fold line.
+func (f *topFrame) drop(i int) {
+	f.lines[i].dropped = true
+	switch f.lines[i].class {
+	case yieldFinished:
+		f.foldedFinished++
+	case yieldIdle:
+		f.foldedIdle++
+	}
+}
+
+// dropEmptyHead drops a section's head once no other line of the section
+// is left.
+func (f *topFrame) dropEmptyHead(section int) {
+	if section == topSecNone {
+		return
+	}
+	head := -1
+	for j, l := range f.lines {
+		if l.section != section {
+			continue
+		}
+		if l.head {
+			head = j
+		} else if f.visible(j) {
+			return
+		}
+	}
+	if head >= 0 {
+		f.lines[head].dropped = true
+	}
+}
+
+// fit drops lines until the frame has at most height lines, class by
+// class and from the bottom upward in each; height 0 is no limit. Lines
+// that are late in their class go after the rest of it. A section's head
+// goes right after its last line, when the frame is still too tall. What
+// the classes leave over is the hard clip, which the caller applies.
+func (f *topFrame) fit(height int) {
+	if height <= 0 {
+		return
+	}
+	for class := yieldEventsSecond; class <= yieldRest; class++ {
+		for _, late := range []bool{false, true} {
+			for i := len(f.lines) - 1; i >= 0 && f.size() > height; i-- {
+				l := f.lines[i]
+				if l.class == class && l.late == late && f.visible(i) {
+					f.drop(i)
+					if f.size() > height {
+						f.dropEmptyHead(l.section)
+					}
 				}
 			}
 		}
 	}
-	agents := topAgents(model, now, style, width, 0)
-	if agentsKeep < agentsAll {
-		agents = topAgents(model, now, style, width, 2+globalLines+agentsKeep)
-	}
-	sections := [][]string{header, meters, needs}
-	if len(foreman) > 0 {
-		sections = append(sections, foreman)
-	}
-	if len(jobs) > 0 {
-		sections = append(sections, jobs)
-	}
-	sections = append(sections,
-		plans.yield(planDrop),
-		agents,
-		events[:eventLines],
-	)
-	var lines []string
-	for i, section := range sections {
-		if i > 0 {
-			lines = append(lines, "")
-		}
-		lines = append(lines, section...)
-	}
-	for i, line := range lines {
-		lines[i] = topFit(line, width)
-	}
-	return lines
 }
 
 // topFit cuts one styled line to width: a line that fits keeps its
@@ -323,20 +455,29 @@ func topHeader(model topModel, now time.Time, style term.Style, width int) []str
 // quota cell — and a dim `all ≤ global N` line when the snapshot carries
 // a global cap. A broken agent's reason comes from its agent needs-you
 // entry in the unscoped status, "broken" when the status has none.
-// budget is the section's line budget, head included; 0 is no limit.
-// When the lines do not fit, the tail of the agent lines goes and a dim
-// `+N more (brigada agents)` line counts them, the global line kept
-// under it.
-func topAgents(model topModel, now time.Time, style term.Style, width, budget int) []string {
-	head := topSectionHead("AGENTS", style, width)
+// The text comes from topAgents; topAgentLines carries each line's
+// yield class, the idle agents' (no running job, quota neither
+// cooling nor broken) being the ones the height drops first, counted in a
+// dim `+N more (brigada agents)` line that sits above the global line.
+func topAgents(model topModel, now time.Time, style term.Style, width int) []string {
+	frame := &topFrame{lines: topAgentLines(model, now, style, width), style: style}
+	return frame.texts()
+}
+
+func topAgentLines(model topModel, now time.Time, style term.Style, width int) []topLine {
+	line := func(text string, class topYield) topLine {
+		return topLine{text: text, class: class, section: topSecAgents}
+	}
+	head := line(topSectionHead("AGENTS", style, width), yieldRest)
+	head.head = true
 	snap := model.capacity
 	g := api.GlobalCap(snap)
-	var global []string
+	var global []topLine
 	if g != nil {
-		global = []string{style.Dim(fmt.Sprintf("all ≤ global %d", *g))}
+		global = []topLine{line(style.Dim(fmt.Sprintf("all ≤ global %d", *g)), yieldRest)}
 	}
 	if len(snap.Agents) == 0 {
-		return append([]string{head, style.Dim("no agents advertised")}, global...)
+		return append([]topLine{head, line(style.Dim("no agents advertised"), yieldRest)}, global...)
 	}
 	reasons := make(map[string]string)
 	for _, n := range model.status.NeedsYou {
@@ -354,7 +495,7 @@ func topAgents(model topModel, now time.Time, style term.Style, width, budget in
 		capW = max(capW, utf8.RuneCountInString(capCells[i]))
 	}
 	nameW = min(nameW, width)
-	agents := make([]string, len(snap.Agents))
+	agents := make([]topLine, len(snap.Agents))
 	for i, a := range snap.Agents {
 		name := cutLine(names[i], nameW)
 		prefix := name + strings.Repeat(" ", nameW-utf8.RuneCountInString(name)+2) +
@@ -375,16 +516,14 @@ func topAgents(model topModel, now time.Time, style term.Style, width, budget in
 		default:
 			quota = style.OK("✓")
 		}
-		agents[i] = prefix + quota
+		class := yieldRest
+		if a.Running == 0 && a.Quota != "broken" && a.Quota != "cooling" {
+			class = yieldIdle
+		}
+		agents[i] = line(prefix+quota, class)
 	}
-	lines := []string{head}
-	if budget <= 0 || 1+len(agents)+len(global) <= budget {
-		lines = append(lines, agents...)
-		return append(lines, global...)
-	}
-	room := max(budget-2-len(global), 0)
-	lines = append(lines, agents[:room]...)
-	lines = append(lines, style.Dim(fmt.Sprintf("+%d more (brigada agents)", len(agents)-room)))
+	lines := append([]topLine{head}, agents...)
+	lines = append(lines, topLine{class: yieldRest, section: topSecAgents, fold: foldIdle})
 	return append(lines, global...)
 }
 
@@ -522,68 +661,40 @@ func topRetryLine(r engine.InfraRetry, now time.Time, style term.Style, width in
 // turn goes under a FOREMAN head; any other job — the review of a plan
 // the tree does not list — under a JOBS head. Inside a block the order
 // is running, held, retrying. A block is nil, and renderTop leaves it
-// out, when it has no job.
-func topPlanless(st api.Status, now time.Time, style term.Style, width int) (foreman, jobs []string) {
+// out, when it has no job. The running lines yield in class g, the held
+// and retry lines in class f, and a block's head goes with its last line.
+func topPlanless(st api.Status, now time.Time, style term.Style, width int) (foreman, jobs []topLine) {
 	claims := newTopClaims(st)
-	var fore, other []string
-	add := func(kind, line string) {
+	var fore, other []topLine
+	add := func(kind, text string, class topYield) {
 		if kind == string(engine.KindForeman) {
-			fore = append(fore, line)
+			fore = append(fore, topLine{text: text, class: class, section: topSecForeman})
 		} else {
-			other = append(other, line)
+			other = append(other, topLine{text: text, class: class, section: topSecJobs})
 		}
 	}
 	for _, j := range st.Running {
 		if _, ok := claims.plan(j.ID, j.TaskID); !ok {
-			add(j.Kind, topRunningLine(j, now, style, width))
+			add(j.Kind, topRunningLine(j, now, style, width), yieldRunning)
 		}
 	}
 	for _, h := range st.Held {
 		if _, ok := claims.plan(h.ID, h.TaskID); !ok {
-			add(h.Kind, topHeldLine(h, style, width))
+			add(h.Kind, topHeldLine(h, style, width), yieldHeld)
 		}
 	}
 	for _, r := range st.Retries {
 		if _, ok := claims.plan(r.ID, r.TaskID); !ok {
-			add(r.Kind, topRetryLine(r, now, style, width))
+			add(r.Kind, topRetryLine(r, now, style, width), yieldHeld)
 		}
 	}
 	if len(fore) > 0 {
-		foreman = append([]string{topSectionHead("FOREMAN", style, width)}, fore...)
+		foreman = append([]topLine{{text: topSectionHead("FOREMAN", style, width), class: yieldRest, section: topSecForeman, head: true}}, fore...)
 	}
 	if len(other) > 0 {
-		jobs = append([]string{topSectionHead("JOBS", style, width)}, other...)
+		jobs = append([]topLine{{text: topSectionHead("JOBS", style, width), class: yieldRest, section: topSecJobs, head: true}}, other...)
 	}
 	return foreman, jobs
-}
-
-// topPlansView is the rendered PLANS section with its yield order
-// marked: lines holds the whole section, taskIdx the indices of the
-// plan task lines in the order the height budget drops them — the last
-// listed plan's block bottom-up, then the plan before it. A plan's own
-// line and the +N finished line never yield.
-type topPlansView struct {
-	lines   []string
-	taskIdx []int
-}
-
-// yield drops the first n plan task lines from the section.
-func (v topPlansView) yield(n int) []string {
-	if n <= 0 {
-		return v.lines
-	}
-	n = min(n, len(v.taskIdx))
-	drop := make(map[int]bool, n)
-	for _, idx := range v.taskIdx[:n] {
-		drop[idx] = true
-	}
-	lines := make([]string, 0, len(v.lines)-n)
-	for i, line := range v.lines {
-		if !drop[i] {
-			lines = append(lines, line)
-		}
-	}
-	return lines
 }
 
 // topPlansTree is the PLANS section: every plan the status lists, each
@@ -592,15 +703,24 @@ func (v topPlansView) yield(n int) []string {
 // and each finished one a single line. A Dim "+N finished" line counts
 // the finished plans the status hid.
 func topPlansTree(st api.Status, now time.Time, style term.Style, width int) []string {
-	return newTopPlans(st, now, style, width).lines
+	frame := &topFrame{lines: newTopPlans(st, now, style, width), hidden: st.HiddenFinishedPlans, style: style}
+	return frame.texts()
 }
 
-// newTopPlans renders the PLANS section and marks its plan task lines
-// for the height budget.
-func newTopPlans(st api.Status, now time.Time, style term.Style, width int) topPlansView {
-	v := topPlansView{lines: []string{topSectionHead("PLANS", style, width)}}
+// newTopPlans renders the PLANS section with each line's yield class: a
+// finished plan's line folds into the +N finished line (b), a queued,
+// waiting-on or review task line is class d, a held, retry or parked
+// line f, a running line g, and a live plan's own line, the none
+// placeholder, the +N finished line and the head are class h.
+func newTopPlans(st api.Status, now time.Time, style term.Style, width int) []topLine {
+	line := func(text string, class topYield) topLine {
+		return topLine{text: text, class: class, section: topSecPlans}
+	}
+	head := line(topSectionHead("PLANS", style, width), yieldRest)
+	head.head = true
+	lines := []topLine{head}
 	if len(st.Plans) == 0 {
-		v.lines = append(v.lines, style.Dim("none"))
+		lines = append(lines, line(style.Dim("none"), yieldRest))
 	}
 	claims := newTopClaims(st)
 	reasons := make(map[int64]string)
@@ -609,67 +729,63 @@ func newTopPlans(st api.Status, now time.Time, style term.Style, width int) topP
 			reasons[n.ID] = n.Reason
 		}
 	}
-	var blocks [][]int
 	for _, p := range st.Plans {
-		v.lines = append(v.lines, topPlanLine(p, style, width))
 		if topPlanFinished(p) {
+			lines = append(lines, line(topPlanLine(p, style, width), yieldFinished))
 			continue
 		}
-		var block []int
-		task := func(line string) {
-			v.lines = append(v.lines, line)
-			block = append(block, len(v.lines)-1)
+		lines = append(lines, line(topPlanLine(p, style, width), yieldRest))
+		task := func(text string, class topYield) {
+			lines = append(lines, line(text, class))
 		}
 		// Which tasks a job already speaks for: a task with a running,
 		// held or retrying job shows as that job's line, not its state's.
 		busy := make(map[int64]bool)
 		for _, j := range st.Running {
 			if id, ok := claims.plan(j.ID, j.TaskID); ok && id == p.ID {
-				task(topRunningLine(j, now, style, width))
+				task(topRunningLine(j, now, style, width), yieldRunning)
 				busy[j.TaskID] = true
 			}
 		}
 		for _, h := range st.Held {
 			if id, ok := claims.plan(h.ID, h.TaskID); ok && id == p.ID && h.TaskID == 0 {
-				task(topHeldLine(h, style, width))
+				task(topHeldLine(h, style, width), yieldHeld)
 			}
 		}
 		for _, r := range st.Retries {
 			if id, ok := claims.plan(r.ID, r.TaskID); ok && id == p.ID && r.TaskID == 0 {
-				task(topRetryLine(r, now, style, width))
+				task(topRetryLine(r, now, style, width), yieldHeld)
 			}
 		}
 		for _, t := range p.Tasks {
 			for _, h := range st.Held {
 				if h.TaskID == t.ID {
-					task(topHeldLine(h, style, width))
+					task(topHeldLine(h, style, width), yieldHeld)
 					busy[t.ID] = true
 				}
 			}
 			for _, r := range st.Retries {
 				if r.TaskID == t.ID {
-					task(topRetryLine(r, now, style, width))
+					task(topRetryLine(r, now, style, width), yieldHeld)
 					busy[t.ID] = true
 				}
 			}
 			if busy[t.ID] || topTaskSettled(t.State) {
 				continue
 			}
-			if line := topTaskLine(t, reasons[t.ID], style, width); line != "" {
-				task(line)
+			if text := topTaskLine(t, reasons[t.ID], style, width); text != "" {
+				class := yieldQueued
+				switch t.State {
+				case "needs_foreman", "needs_user", "failed":
+					class = yieldHeld // a parked task
+				}
+				task(text, class)
 			}
 		}
-		blocks = append(blocks, block)
 	}
-	for i := len(blocks) - 1; i >= 0; i-- {
-		for j := len(blocks[i]) - 1; j >= 0; j-- {
-			v.taskIdx = append(v.taskIdx, blocks[i][j])
-		}
-	}
-	if st.HiddenFinishedPlans > 0 {
-		v.lines = append(v.lines, style.Dim(fmt.Sprintf("+%d finished", st.HiddenFinishedPlans)))
-	}
-	return v
+	// The fold line counts the finished plans the status hid and, once
+	// the height drops any, those too; it shows only when it counts one.
+	return append(lines, topLine{class: yieldRest, section: topSecPlans, fold: foldFinished})
 }
 
 // topPlanLine is a plan's own line. A finished plan's mark comes from
@@ -844,6 +960,20 @@ func topEvents(items []history.Item, now time.Time, style term.Style, width int)
 		strings.Join(parts[:first], " · "),
 		topFit(strings.Join(parts[first:], " · "), width),
 	}
+}
+
+// topEventLines is the strip with its yield classes: the first line is
+// class h, the second class a, the first line to go.
+func topEventLines(items []history.Item, now time.Time, style term.Style, width int) []topLine {
+	var lines []topLine
+	for i, text := range topEvents(items, now, style, width) {
+		class := yieldRest
+		if i > 0 {
+			class = yieldEventsSecond
+		}
+		lines = append(lines, topLine{text: text, class: class})
+	}
+	return lines
 }
 
 // topEventItem is one history item as the events strip shows it: its
