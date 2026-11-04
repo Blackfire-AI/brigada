@@ -118,6 +118,12 @@ func TestSymbols(t *testing.T) {
 		{"AtMost", Style.AtMost, "≤", "<="},
 		{"Up", Style.Up, "⇡", "^"},
 		{"Arrow", Style.Arrow, "→", "->"},
+		{"Meter", Style.Meter, "━", "="},
+		{"BoxTopLeft", Style.BoxTopLeft, "╭", "+"},
+		{"BoxTopRight", Style.BoxTopRight, "╮", "+"},
+		{"BoxBottomLeft", Style.BoxBottomLeft, "╰", "+"},
+		{"BoxBottomRight", Style.BoxBottomRight, "╯", "+"},
+		{"BoxSide", Style.BoxSide, "│", "|"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, depth := range []logo.Depth{logo.NoColor, logo.Color16, logo.Color256, logo.TrueColor} {
@@ -133,6 +139,26 @@ func TestSymbols(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestOneLine: the brand's one-line form at each depth, only the ▙ coloured
+// and the escape closed; plain with no colour; empty without UTF-8.
+func TestOneLine(t *testing.T) {
+	for _, tc := range []struct {
+		caps logo.Caps
+		want string
+	}{
+		{logo.Caps{Color: logo.TrueColor, UTF8: true}, "\x1b[38;2;255;90;31m▙\x1b[0m brigada"},
+		{logo.Caps{Color: logo.Color256, UTF8: true}, "\x1b[38;5;202m▙\x1b[0m brigada"},
+		{logo.Caps{Color: logo.Color16, UTF8: true}, "\x1b[31m▙\x1b[0m brigada"},
+		{logo.Caps{Color: logo.NoColor, UTF8: true}, "▙ brigada"},
+		{logo.Caps{Color: logo.TrueColor}, ""},
+		{logo.Caps{}, ""},
+	} {
+		if got := New(tc.caps).OneLine(); got != tc.want {
+			t.Errorf("caps %+v: OneLine = %q, want %q", tc.caps, got, tc.want)
+		}
 	}
 }
 

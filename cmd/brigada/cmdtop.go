@@ -294,54 +294,55 @@ func dialEngine(ctx context.Context, rt *runtime, role string, noStart bool) (*a
 	return client, nil
 }
 
-// renderTop lays the view out, top to bottom: the header, the meters
-// strip, NEEDS YOU, the FOREMAN block (a foreman turn no plan claims) and
-// the JOBS block (any other job no plan claims), each only when it has
-// lines, the PLANS tree with every job under its plan, the AGENTS
-// section and the EVENTS section at the bottom (the report line, the
-// EVENTS head and up to 10 rows, newest first), every line cut to width.
+// renderTop lays the view out, top to bottom: the two-row header strip
+// (the brand mark, scope, uptime, clock and keys; the slots meter and the
+// counters), the hint line, then one rounded box per section — NEEDS YOU,
+// the FOREMAN block (a foreman turn no plan claims) and the JOBS block (any
+// other job no plan claims), each only when it has lines, the PLANS tree
+// with every job under its plan, the AGENTS section and the EVENTS section
+// at the bottom (up to 10 rows, newest first, the foreman's report line in
+// the right of its top border). A section's text is built at the box's
+// inner width, so a cut never eats a border. Every line is cut to width.
 // The height is a limit, 0 meaning none: the frame never has more lines
 // than it. Every line carries a yield class (topYield) and, while the
 // frame is taller than the height, lines drop class by class, each class
 // from the bottom of the view upward, one line at a time, until it fits:
-// a0 event rows 3 and up; a event row 2, then the foreman's report line
-// above the EVENTS head; b finished plans, folded into the dim
-// +N finished line; c the blank lines between sections; d queued task
-// lines (waiting on, review included); e idle agents, counted in the dim
+// a0 event rows 3 and up; a event row 2; b finished plans' lines; c the
+// blank lines between sections (none today); d queued task lines (waiting
+// on, review included); e idle agents, counted in the dim
 // +N idle · M off (brigada capacity) line; f held and retry lines, the
-// FOREMAN and JOBS notes and parked task lines; g running lines; h every other line outside the header and NEEDS
-// YOU — event row 1, the other agent lines, the global
-// line, the fold lines, each plan's own line, the placeholders, the PLANS,
-// AGENTS and EVENTS heads — with the meters strip dropping last of the class,
-// though it sits above NEEDS YOU. A section head goes with its section's
-// last line, the FOREMAN and JOBS heads too: it drops next, unless the
-// frame already fits. i the hard clip: only the header (with its error
-// and hint lines) and NEEDS YOU remain, and the frame is cut from the
-// bottom. A fold line not yet shown costs the line it adds. With a plain
-// style the text is the same and has no escapes.
+// FOREMAN and JOBS notes and parked task lines; g running lines; h every
+// other row outside the header and NEEDS YOU — event row 1, the other
+// agent lines, the global line, the fold line, each plan's own line, the
+// placeholders — with the slots row dropping last of the class, though it
+// sits above NEEDS YOU. A section's top and bottom borders are rows of the
+// section: both go right after its last row, so an empty box never shows
+// and a drop may undershoot the height by a row or two. NEEDS YOU keeps
+// its borders. i the hard clip: only the header (with its error and hint
+// lines) and NEEDS YOU remain, and the frame is cut from the bottom. A
+// fold line not yet shown costs the line it adds. With a plain style the
+// text is the same and has no escapes.
 func renderTop(model topModel, width, height int, now time.Time, style term.Style) []string {
+	inner := max(width-4, 1)
 	var lines []topLine
-	add := func(section []topLine) {
-		if len(section) == 0 {
-			return
-		}
-		if len(lines) > 0 {
-			lines = append(lines, topLine{class: yieldBlank})
-		}
-		lines = append(lines, section...)
-	}
+	add := func(section []topLine) { lines = append(lines, section...) }
 	add(topPinned(topHeader(model, now, style, width)))
 	add([]topLine{{text: topMeters(model, style, width)[0], class: yieldRest, late: true}})
-	add(topPinned(topNeedsYou(model.status, model.soleProject, style, width)))
-	foreman, jobs := topPlanless(model.status, now, style, width)
+	add(topPinned(topHint(model, style, width)))
+	add(newTopNeedsYou(model.status, model.soleProject, style, inner))
+	foreman, jobs := topPlanless(model.status, now, style, inner)
 	add(foreman)
 	add(jobs)
-	add(newTopPlans(model.status, model.tagPlans, model.statusOK, now, style, width))
-	add(topAgentLines(model, now, style, width))
-	// The report line, then the EVENTS head, with no blank line between.
-	add(append(topReportLine(model.status, style, width), topEventLines(model.events, now, style, width)...))
+	add(newTopPlans(model.status, model.tagPlans, model.statusOK, now, style, inner))
+	add(topAgentLines(model, now, style, inner))
+	events := topEventLines(model.events, now, style, inner)
+	if r := model.status.Report; r != nil {
+		first, _, _ := strings.Cut(strings.TrimSpace(r.Text), "\n")
+		events[0].box.right = strings.TrimSpace(first)
+	}
+	add(events)
 
-	frame := &topFrame{lines: lines, hidden: model.status.HiddenFinishedPlans, style: style}
+	frame := &topFrame{lines: lines, style: style, width: width}
 	frame.fit(height)
 	out := frame.texts()
 	if height > 0 && len(out) > height {
@@ -360,10 +361,10 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 type topYield int
 
 const (
-	yieldPinned       topYield = iota // header and NEEDS YOU: only the hard clip cuts them
+	yieldPinned       topYield = iota // header, NEEDS YOU and the borders: only the hard clip cuts them
 	yieldEventsExtra                  // a0: event rows 3 and up
-	yieldEventsSecond                 // a: event row 2, then the report line above the EVENTS head
-	yieldFinished                     // b: a finished plan's line, folded into +N finished
+	yieldEventsSecond                 // a: event row 2
+	yieldFinished                     // b: a finished plan's line
 	yieldBlank                        // c: the blank lines between sections
 	yieldQueued                       // d: queued, waiting-on and review task lines
 	yieldIdle                         // e: idle agents, counted in +N idle · M off (brigada capacity)
@@ -372,9 +373,10 @@ const (
 	yieldRest                         // h: every other line outside the header and NEEDS YOU
 )
 
-// The sections whose head goes with their last line.
+// The sections whose borders go with their last row.
 const (
 	topSecNone = iota
+	topSecNeeds
 	topSecForeman
 	topSecJobs
 	topSecPlans
@@ -386,17 +388,19 @@ const (
 type topFold int
 
 const (
-	foldNone     topFold = iota
-	foldFinished         // +N finished
-	foldIdle             // +N idle · M off (brigada capacity)
+	foldNone topFold = iota
+	foldIdle         // +N idle · M off (brigada capacity)
 )
 
 // topLine is one line of the frame with what the drop loop needs.
 type topLine struct {
 	text    string
 	class   topYield
-	section int  // the section whose head goes with its last line, or topSecNone
-	head    bool // the section's head line
+	section int     // the section whose borders go with its last row, or topSecNone
+	box     *topBox // set on a section's top border
+	foot    bool    // the section's bottom border
+	boxed   bool    // the text sits in a box row
+	bad     bool    // the box is a Bad one
 	fold    topFold
 	count   int  // what a fold line counts besides what drops: the off agents
 	late    bool // drops after the other lines of its class
@@ -412,15 +416,14 @@ func topPinned(texts []string) []topLine {
 	return lines
 }
 
-// topFrame is the view's lines with the drops so far. hidden is the
-// finished plans the status already hid; folded counts what the drops
-// added to the two fold lines.
+// topFrame is the view's lines with the drops so far. width is the frame's
+// width: with it the box lines render, and 0 leaves the rows as bare text,
+// the borders out. foldedIdle counts what the drops added to the fold line.
 type topFrame struct {
-	lines          []topLine
-	hidden         int
-	foldedFinished int
-	foldedIdle     int
-	style          term.Style
+	lines      []topLine
+	foldedIdle int
+	style      term.Style
+	width      int
 }
 
 // visible says whether line i renders: not dropped, and a fold line only
@@ -430,10 +433,7 @@ func (f *topFrame) visible(i int) bool {
 	if l.dropped {
 		return false
 	}
-	switch l.fold {
-	case foldFinished:
-		return f.hidden+f.foldedFinished > 0
-	case foldIdle:
+	if l.fold == foldIdle {
 		return f.foldedIdle+l.count > 0
 	}
 	return true
@@ -449,17 +449,16 @@ func (f *topFrame) size() int {
 	return n
 }
 
-// texts is the visible lines' text, the fold lines worded from their counts.
+// texts is the visible lines' text, the fold line worded from its counts
+// and every box line drawn at the frame's width.
 func (f *topFrame) texts() []string {
 	var out []string
 	for i, l := range f.lines {
 		if !f.visible(i) {
 			continue
 		}
-		switch l.fold {
-		case foldFinished:
-			out = append(out, f.style.Dim(fmt.Sprintf("+%d finished", f.hidden+f.foldedFinished)))
-		case foldIdle:
+		text := l.text
+		if l.fold == foldIdle {
 			var parts []string
 			if f.foldedIdle > 0 {
 				parts = append(parts, fmt.Sprintf("+%d idle", f.foldedIdle))
@@ -467,10 +466,24 @@ func (f *topFrame) texts() []string {
 			if l.count > 0 {
 				parts = append(parts, fmt.Sprintf("%d off", l.count))
 			}
-			out = append(out, f.style.Dim(strings.Join(parts, topEventSep(f.style))+" (brigada capacity)"))
-		default:
-			out = append(out, l.text)
+			text = f.style.Dim(strings.Join(parts, topEventSep(f.style)) + " (brigada capacity)")
 		}
+		switch {
+		case f.width <= 0:
+			if l.foot {
+				continue
+			}
+			if l.box != nil {
+				text = l.box.title
+			}
+		case l.box != nil:
+			text = topBoxTop(*l.box, f.style, f.width)
+		case l.foot:
+			text = topBoxBottom(l.bad, f.style, f.width)
+		case l.boxed:
+			text = topBoxRow(text, l.bad, f.style, f.width)
+		}
+		out = append(out, text)
 	}
 	return out
 }
@@ -478,41 +491,34 @@ func (f *topFrame) texts() []string {
 // drop removes line i and counts it into its fold line.
 func (f *topFrame) drop(i int) {
 	f.lines[i].dropped = true
-	switch f.lines[i].class {
-	case yieldFinished:
-		f.foldedFinished++
-	case yieldIdle:
+	if f.lines[i].class == yieldIdle {
 		f.foldedIdle++
 	}
 }
 
-// dropEmptyHead drops a section's head once no other line of the section
-// is left.
-func (f *topFrame) dropEmptyHead(section int) {
-	if section == topSecNone {
+// dropEmptyBorders drops a section's borders once no other line of the
+// section is left.
+func (f *topFrame) dropEmptyBorders(section int) {
+	if section == topSecNone || section == topSecNeeds {
 		return
 	}
-	head := -1
 	for j, l := range f.lines {
-		if l.section != section {
-			continue
-		}
-		if l.head {
-			head = j
-		} else if f.visible(j) {
+		if l.section == section && !l.foot && l.box == nil && f.visible(j) {
 			return
 		}
 	}
-	if head >= 0 {
-		f.lines[head].dropped = true
+	for j, l := range f.lines {
+		if l.section == section && (l.foot || l.box != nil) {
+			f.lines[j].dropped = true
+		}
 	}
 }
 
 // fit drops lines until the frame has at most height lines, class by
 // class and from the bottom upward in each; height 0 is no limit. Lines
-// that are late in their class go after the rest of it. A section's head
-// goes right after its last line, when the frame is still too tall. What
-// the classes leave over is the hard clip, which the caller applies.
+// that are late in their class go after the rest of it. A section's
+// borders go right after its last row. What the classes leave over is the
+// hard clip, which the caller applies.
 func (f *topFrame) fit(height int) {
 	if height <= 0 {
 		return
@@ -523,9 +529,7 @@ func (f *topFrame) fit(height int) {
 				l := f.lines[i]
 				if l.class == class && l.late == late && f.visible(i) {
 					f.drop(i)
-					if f.size() > height {
-						f.dropEmptyHead(l.section)
-					}
+					f.dropEmptyBorders(l.section)
 				}
 			}
 		}
@@ -541,14 +545,14 @@ func topFit(line string, width int) string {
 	return cutLine(term.StripEscapes(line), width)
 }
 
-// topHeader is the first line of the view: the scope, when the fetch
-// found one, the engine's uptime and the clock, then a dim rule filling
-// the width that remains and the keys at the right end. The keys show
-// only when they fit whole — left,
-// two spaces and the keys within the width; a key is never cut
-// mid-word — and otherwise the rule fills what remains of the width. A
-// failed fetch adds its error as a second line, so the view keeps its
-// shape while the loop retries.
+// topHeader is the first row of the view, after one leading space: the
+// brand mark (`▙ brigada`, the word alone without UTF-8), three spaces, the
+// scope when the fetch found one and the engine's uptime joined by the
+// separator, and at the right end the clock, three spaces and the keys. The
+// keys show only when they fit whole — the left part, two spaces and the
+// right part within the width; a key is never cut mid-word — and otherwise
+// the clock moves up against the right edge. A failed fetch adds its error
+// as a second row, so the view keeps its shape while the loop retries.
 func topHeader(model topModel, now time.Time, style term.Style, width int) []string {
 	st := model.status
 	sep := topEventSep(style)
@@ -556,29 +560,46 @@ func topHeader(model topModel, now time.Time, style term.Style, width int) []str
 	if started := parseStartedAt(st.StartedAt); !started.IsZero() {
 		uptime = topUptime(now.Sub(started))
 	}
-	keys := "q quit" + sep + "p pause"
+	keys := "q quit  p pause"
 	if model.paused {
 		keys = "paused; p resumes, q quits"
 	}
-	left := "brigada"
-	if model.scope != "" {
-		left += sep + model.scope
+	// The brand's one-line form; without UTF-8 it has none and the word stands.
+	mark := style.OneLine()
+	if mark == "" {
+		mark = "brigada"
 	}
-	left += fmt.Sprintf("%sup %s%s%s", sep, uptime, sep, now.Format("15:04:05"))
-	var line string
-	if rule := width - term.VisibleWidth(left) - term.VisibleWidth(keys) - 2; rule >= 1 {
-		line = left + " " + style.Dim(strings.Repeat(style.Dash(), rule)) + " " + keys
-	} else {
-		line = left + " " + style.Dim(strings.Repeat(style.Dash(), max(width-term.VisibleWidth(left)-1, 1)))
+	left := " " + mark + "   "
+	if model.scope != "" {
+		left += model.scope + sep
+	}
+	left += "up " + uptime
+	clock := now.Format("15:04:05")
+	// The keys show only when they fit whole, two spaces from the left
+	// part; otherwise the clock moves up against the right edge.
+	right := clock + "   " + keys
+	gap := width - term.VisibleWidth(left) - term.VisibleWidth(right)
+	if gap < 2 {
+		right = clock
+		gap = width - term.VisibleWidth(left) - term.VisibleWidth(right)
+	}
+	line := left
+	if gap >= 1 {
+		line += strings.Repeat(" ", gap) + right
 	}
 	lines := []string{topFit(line, width)}
 	if model.err != nil {
 		lines = append(lines, style.Bad(cutLine("engine: "+model.err.Error(), width)))
 	}
-	if model.hint != "" {
-		lines = append(lines, style.Dim(cutLine(model.hint, width)))
-	}
 	return lines
+}
+
+// topHint is the unregistered-models line under the header, Dim, or nothing.
+func topHint(model topModel, style term.Style, width int) []string {
+	if model.hint == "" {
+		return nil
+	}
+	return []string{style.Dim(cutLine(model.hint, width))}
 }
 
 // topUptime is the engine's uptime as the header shows it: whole seconds
@@ -618,8 +639,7 @@ func topAgentLines(model topModel, now time.Time, style term.Style, width int) [
 	line := func(text string, class topYield) topLine {
 		return topLine{text: text, class: class, section: topSecAgents}
 	}
-	head := line(topSectionHead("AGENTS", style, width), yieldRest)
-	head.head = true
+	box := topBox{title: "AGENTS"}
 	snap := model.capacity
 	g := api.GlobalCap(snap)
 	var global []topLine
@@ -627,7 +647,7 @@ func topAgentLines(model topModel, now time.Time, style term.Style, width int) [
 		global = []topLine{line(style.Dim(fmt.Sprintf("all %s global %d", style.AtMost(), *g)), yieldRest)}
 	}
 	if len(snap.Agents) == 0 {
-		return append([]topLine{head, line(style.Dim("no agents advertised"), yieldRest)}, global...)
+		return topBoxed(topSecAgents, box, append([]topLine{line(style.Dim("no agents advertised"), yieldRest)}, global...))
 	}
 	reasons := make(map[string]string)
 	for _, n := range model.status.NeedsYou {
@@ -696,9 +716,8 @@ func topAgentLines(model topModel, now time.Time, style term.Style, width int) [
 		}
 		agents[i] = line(prefix+quota, class)
 	}
-	lines := append([]topLine{head}, agents...)
-	lines = append(lines, topLine{class: yieldRest, section: topSecAgents, fold: foldIdle, count: off})
-	return append(lines, global...)
+	lines := append(agents, topLine{class: yieldRest, section: topSecAgents, fold: foldIdle, count: off})
+	return topBoxed(topSecAgents, box, append(lines, global...))
 }
 
 // topAgentOff says an agent is off: an effective cap of 0 (its own, or the
@@ -724,24 +743,21 @@ func topSlots(snap engine.CapacitySnapshot) (use int, limit *int, ok bool) {
 	return 0, nil, false
 }
 
-// topMeters is the strip under the header: the global layer's slots
-// against their cap, then the run, queue, held and needs counters, the
-// parts three spaces apart. The slots cell has no bar when the layer is
-// uncapped or capped at zero — no all-empty bar — and reads `?/?` when
-// the capacity fetch failed.
+// topMeters is the header's second row, after one leading space: the slots
+// meter and `use/cap slots` at the left, the run, queue, held and needs
+// counters at the right, two spaces apart. There is no meter when the layer
+// is uncapped or capped at zero — `2/none slots`, `0/0 slots` — and the cell
+// reads `?/? slots` when the capacity fetch failed.
 func topMeters(model topModel, style term.Style, width int) []string {
 	st := model.status
-	cell := "SLOTS ?/?"
+	cell := "?/? slots"
+	meterUse, meterLimit := 0, 0
 	if use, limit, ok := topSlots(model.capacity); ok {
-		useLimit := fmt.Sprintf("%d/none", use)
-		bar := ""
+		cell = fmt.Sprintf("%d/none slots", use)
 		if limit != nil {
-			useLimit = fmt.Sprintf("%d/%d", use, *limit)
-			if *limit >= 1 {
-				bar = topSlotBar(use, *limit, style) + " "
-			}
+			cell = fmt.Sprintf("%d/%d slots", use, *limit)
+			meterUse, meterLimit = use, *limit
 		}
-		cell = "SLOTS " + bar + useLimit
 	}
 	// A counter is coloured only above zero: nothing held or needed reads plain.
 	counter := func(n int, label string, colour func(string) string) string {
@@ -751,27 +767,52 @@ func topMeters(model topModel, style term.Style, width int) []string {
 		}
 		return colour(text)
 	}
-	parts := []string{
-		cell,
+	counters := []string{
 		style.Bold(fmt.Sprintf("%d run", len(st.Running))),
 		fmt.Sprintf("%d queue", st.Jobs["queued"]),
 		counter(len(st.Held), "held", style.Warn),
 		counter(len(st.NeedsYou), "needs", style.Bad),
 	}
-	return []string{topFit(strings.Join(parts, "   "), width)}
+	right := strings.Join(counters, "  ")
+	// The meter takes what the row leaves, up to 18 cells; under 4 it is
+	// left out. Only a positive cap has one.
+	left := " " + cell
+	if meterLimit >= 1 {
+		room := width - 1 - 2 - term.VisibleWidth(cell) - 2 - term.VisibleWidth(right)
+		if cells := min(room, topMeterCells); cells >= 4 {
+			left = " " + topSlotMeter(meterUse, meterLimit, cells, style) + "  " + cell
+		}
+	}
+	gap := max(width-term.VisibleWidth(left)-term.VisibleWidth(right), 2)
+	return []string{topFit(left+strings.Repeat(" ", gap)+right, width)}
 }
 
-// topSlotBar is the meters' slots bar: the global use against its cap
-// as at most ten cells — ▓ filled and ░ empty in proportion, at least
-// one ▓ whenever the use is over zero, so a sliver of use always shows.
-func topSlotBar(use, limit int, style term.Style) string {
-	cells := min(limit, 10)
+// topMeterCells is the slots meter's width in cells.
+const topMeterCells = 18
+
+// topSlotMeter is the slots meter: the global use against its cap as
+// cells of one glyph — filled in proportion, at least one whenever the use
+// is over zero, so a sliver of use always shows. The filled cells are
+// Accent, Warn once the use reaches the cap; the rest are Dim, so the plain
+// text is the same at any use and the number beside it carries the use.
+func topSlotMeter(use, limit, cells int, style term.Style) string {
 	filled := use * cells / limit
 	if use > 0 && filled == 0 {
 		filled = 1
 	}
 	filled = min(filled, cells)
-	return strings.Repeat(style.Filled(), filled) + strings.Repeat(style.Empty(), cells-filled)
+	colour := style.Accent
+	if use >= limit {
+		colour = style.Warn
+	}
+	var meter string
+	if filled > 0 {
+		meter = colour(strings.Repeat(style.Meter(), filled))
+	}
+	if filled < cells {
+		meter += style.Dim(strings.Repeat(style.Meter(), cells-filled))
+	}
+	return meter
 }
 
 // topDescribeJob is status's own words for a job, its ` · ` joints in the
@@ -929,10 +970,10 @@ func topPlanless(st api.Status, now time.Time, style term.Style, width int) (for
 		other = append(other, note(fmt.Sprintf("runner restarting after %d running %s", len(st.Running), noun), topSecJobs))
 	}
 	if len(fore) > 0 {
-		foreman = append([]topLine{{text: topSectionHead("FOREMAN", style, width), class: yieldRest, section: topSecForeman, head: true}}, fore...)
+		foreman = topBoxed(topSecForeman, topBox{title: "FOREMAN"}, fore)
 	}
 	if len(other) > 0 {
-		jobs = append([]topLine{{text: topSectionHead("JOBS", style, width), class: yieldRest, section: topSecJobs, head: true}}, other...)
+		jobs = topBoxed(topSecJobs, topBox{title: "JOBS"}, other)
 	}
 	return foreman, jobs
 }
@@ -940,27 +981,37 @@ func topPlanless(st api.Status, now time.Time, style term.Style, width int) (for
 // topPlansTree is the PLANS section: every plan the status lists, each
 // live one with its live work beneath it — the running jobs first, then
 // a line per task still waiting, held, retrying, parked or reviewing —
-// and each finished one a single line. A Dim "+N finished" line counts
-// the finished plans the status hid.
+// and each finished one a single line, as bare text under the title.
 func topPlansTree(st api.Status, now time.Time, style term.Style, width int) []string {
-	frame := &topFrame{lines: newTopPlans(st, false, false, now, style, width), hidden: st.HiddenFinishedPlans, style: style}
+	frame := &topFrame{lines: newTopPlans(st, false, false, now, style, width), style: style}
 	return frame.texts()
 }
 
-// newTopPlans renders the PLANS section with each line's yield class: a
-// finished plan's line folds into the +N finished line (b), a queued,
-// waiting-on or review task line is class d, a held, retry or parked
-// line f (a done task not landed too, as its ⇡ line), a running line g, a
-// reviewing plan's `plan review queued` line d, and a live plan's own line, the none
-// placeholder, the +N finished line and the head are class h. With tagged
-// each plan's own line names its repo.
+// newTopPlans renders the PLANS box with each line's yield class: a
+// finished plan's line is class b, a queued, waiting-on or review task
+// line is class d, a held, retry or parked line f (a done task not landed
+// too, as its ⇡ line), a running line g, a reviewing plan's
+// `plan review queued` line d, and a live plan's own line and the none
+// placeholder are class h. The top border's note counts the live plans and
+// the finished ones, listed and hidden, once the status has come back
+// (fetched). With tagged each plan's own line names its repo.
 func newTopPlans(st api.Status, tagged, fetched bool, now time.Time, style term.Style, width int) []topLine {
 	line := func(text string, class topYield) topLine {
 		return topLine{text: text, class: class, section: topSecPlans}
 	}
-	head := line(topSectionHead("PLANS", style, width), yieldRest)
-	head.head = true
-	lines := []topLine{head}
+	box := topBox{title: "PLANS"}
+	if fetched {
+		live, finished := 0, st.HiddenFinishedPlans
+		for _, p := range st.Plans {
+			if topPlanFinished(p) {
+				finished++
+			} else {
+				live++
+			}
+		}
+		box.note = fmt.Sprintf("%d live%s%d finished", live, topEventSep(style), finished)
+	}
+	var lines []topLine
 	if len(st.Plans) == 0 {
 		// A status that came back with no plans, hidden or listed, is a
 		// first run; one that did not come back has said nothing.
@@ -1068,9 +1119,7 @@ func newTopPlans(st api.Status, tagged, fetched bool, now time.Time, style term.
 			}
 		}
 	}
-	// The fold line counts the finished plans the status hid and, once
-	// the height drops any, those too; it shows only when it counts one.
-	return append(lines, topLine{class: yieldRest, section: topSecPlans, fold: foldFinished})
+	return topBoxed(topSecPlans, box, lines)
 }
 
 // topPlanCounts is a plan's done and total task counts. The total leaves
@@ -1285,60 +1334,54 @@ func topTaskLine(t engine.StatusTask, reason string, style term.Style, width int
 	return "  " + style.Dim(cutLine(style.Dot()+" "+subject+" "+wait, width-2))
 }
 
-// topSectionHead is a section's head line: the Bold title and a Dim
-// rule filling the width. Below 60 columns the rule is dropped and the
-// title stands alone — the width is too narrow to spend on fills —
-// while the section's lines beneath keep their indentation.
-func topSectionHead(title string, style term.Style, width int) string {
-	if width < 60 {
-		return style.Bold(title)
-	}
-	rule := width - term.VisibleWidth(title) - 1
-	if rule < 1 {
-		rule = 1
-	}
-	return style.Bold(title) + " " + style.Dim(strings.Repeat(style.Dash(), rule))
+// topNeedsYou is the needs-you queue as bare text, without its borders:
+// the title, then the rows of newTopNeedsYou.
+func topNeedsYou(st api.Status, sole bool, style term.Style, width int) []string {
+	frame := &topFrame{lines: newTopNeedsYou(st, sole, style, width), style: style}
+	return frame.texts()
 }
 
-// topNeedsYou is the needs-you queue at the top of the view, under the
-// meters and before every other section: the header line carries a rule
-// fill to the width, then one Bad line per entry, cut to width and
-// capped at three entry lines with one dim "+N more" line under them. The
-// cap never hides a broken agent while a line remains (topNeedsYouShown).
-// The section is always visible: an empty queue keeps the header and
-// renders one dim line under it.
-func topNeedsYou(st api.Status, sole bool, style term.Style, width int) []string {
-	lines := []string{topSectionHead("NEEDS YOU", style, width)}
+// newTopNeedsYou is the needs-you box at the top of the view, under the
+// header and before every other section: one Bad row per entry, cut to
+// width and capped at three entry rows with one dim "+N more" row under
+// them. The cap never hides a broken agent while a row remains
+// (topNeedsYouShown). The box is Bad, its title carrying the queue's full
+// count. The section is always visible: an empty queue has a grey border
+// and title with no count, and one dim `✓ nothing needs you` row. All of it
+// is pinned.
+func newTopNeedsYou(st api.Status, sole bool, style term.Style, width int) []topLine {
 	if len(st.NeedsYou) == 0 {
-		return append(lines, style.Dim("nothing needs you"))
+		rows := []topLine{{text: style.Dim(style.Check() + " nothing needs you")}}
+		return topBoxed(topSecNeeds, topBox{title: "NEEDS YOU"}, rows)
 	}
 	shown := topNeedsYouShown(st.NeedsYou)
 	// An entry with an action keeps it whole at the end of its line and the
-	// reason is cut instead; the tails start in one column, after the widest
-	// reason that leaves the widest tail room.
+	// reason is cut instead; the tails start in one column, placed so the
+	// widest tail ends at the right edge.
 	texts := make([]string, len(shown))
 	tails := make([]string, len(shown))
-	col, tailW := 0, 0
+	tailW := 0
 	for i, n := range shown {
 		texts[i], tails[i] = topNeedsYouLine(n), topNeedsYouTail(n, st, sole, style)
 		if tails[i] != "" {
-			col = max(col, utf8.RuneCountInString(texts[i]))
 			tailW = max(tailW, utf8.RuneCountInString(tails[i]))
 		}
 	}
-	col = max(min(col, width-tailW-2), 4)
+	col := max(width-tailW-2, 4)
+	var rows []topLine
 	for i := range shown {
 		text := cutLine(texts[i], width)
 		if tails[i] != "" {
 			left := cutLine(texts[i], col)
 			text = left + strings.Repeat(" ", max(col-utf8.RuneCountInString(left), 0)) + "  " + tails[i]
 		}
-		lines = append(lines, style.Bad(text))
+		rows = append(rows, topLine{text: style.Bad(text)})
 	}
 	if more := len(st.NeedsYou) - len(shown); more > 0 {
-		lines = append(lines, style.Dim(fmt.Sprintf("+%d more (brigada status)", more)))
+		rows = append(rows, topLine{text: style.Dim(fmt.Sprintf("+%d more (brigada status)", more))})
 	}
-	return lines
+	box := topBox{title: fmt.Sprintf("NEEDS YOU %d", len(st.NeedsYou)), bad: true}
+	return topBoxed(topSecNeeds, box, rows)
 }
 
 // topNeedsYouTail is the command that answers an entry, `→ brigada ...`,
@@ -1448,7 +1491,7 @@ func topNeedsYouLine(n engine.NeedsYouItem) string {
 const topEventRows = 10
 
 // topShows says whether top shows an item: an event the allowlist words,
-// except the foreman's report, which the report line above EVENTS says.
+// except the foreman's report, which the EVENTS border says.
 func topShows(it history.Item) bool {
 	if it.Kind == "foreman_report" {
 		return false
@@ -1457,31 +1500,19 @@ func topShows(it history.Item) bool {
 	return ok
 }
 
-// topReportLine is the foreman's last report above the EVENTS head, Dim:
-// `report #<job>: <first line of the text>`, cut to width. Only a status
-// with a report has it; it yields in the second event row's class, right
-// after that row, since the report can say what NEEDS YOU does not.
-func topReportLine(st api.Status, style term.Style, width int) []topLine {
-	if st.Report == nil {
-		return nil
-	}
-	first, _, _ := strings.Cut(strings.TrimSpace(st.Report.Text), "\n")
-	text := fmt.Sprintf("report #%d: %s", st.Report.JobID, strings.TrimSpace(first))
-	return []topLine{{text: style.Dim(cutLine(text, width)), class: yieldEventsSecond}}
-}
-
-// topEventLines is the EVENTS section: its head, then the newest kept
-// items, newest first, one per row, at most topEventRows. A row is the
-// time, two spaces and the event's words, the time column padded to the
-// widest time of the rows built so the words start in one column; each
-// row is cut to width. With no items the section is the head and a dim
-// `no events`. Row 1 and the head yield last (yieldRest), row 2 in
-// yieldEventsSecond and rows 3 and up in yieldEventsExtra, the first
-// class to go; the head goes with the section's last row.
+// topEventLines is the EVENTS box: the newest kept items, newest first,
+// one per row, at most topEventRows. A row is the time, two spaces and the
+// event's words, the time column padded to the widest time of the rows
+// built so the words start in one column; each row is cut to width. With
+// no items the box holds a dim `no events`. Row 1 yields last
+// (yieldRest), row 2 in yieldEventsSecond and rows 3 and up in
+// yieldEventsExtra, the first class to go; the borders go with the last
+// row. The top border's right end carries the foreman's report line
+// (renderTop sets it).
 func topEventLines(items []history.Item, now time.Time, style term.Style, width int) []topLine {
-	head := topLine{text: topSectionHead("EVENTS", style, width), class: yieldRest, section: topSecEvents, head: true}
+	box := topBox{title: "EVENTS"}
 	if len(items) == 0 {
-		return []topLine{head, {text: style.Dim("no events"), class: yieldRest, section: topSecEvents}}
+		return topBoxed(topSecEvents, box, []topLine{{text: style.Dim("no events"), class: yieldRest}})
 	}
 	if len(items) > topEventRows {
 		items = items[len(items)-topEventRows:]
@@ -1494,7 +1525,7 @@ func topEventLines(items []history.Item, now time.Time, style term.Style, width 
 			pad = n
 		}
 	}
-	lines := []topLine{head}
+	var lines []topLine
 	for i, clock := range clocks {
 		words, _ := topEventWords(items[len(items)-1-i], now)
 		text := clock + strings.Repeat(" ", pad-term.VisibleWidth(clock)) + "  " + topColourStates(words, style)
@@ -1505,9 +1536,9 @@ func topEventLines(items []history.Item, now time.Time, style term.Style, width 
 		case i > 1:
 			class = yieldEventsExtra
 		}
-		lines = append(lines, topLine{text: topFit(text, width), class: class, section: topSecEvents})
+		lines = append(lines, topLine{text: topFit(text, width), class: class})
 	}
-	return lines
+	return topBoxed(topSecEvents, box, lines)
 }
 
 // topEventSep joins the events section's items and the header's parts: the style's
