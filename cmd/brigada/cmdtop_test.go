@@ -280,20 +280,24 @@ func TestTopNeedsYouCapNeverHidesAgents(t *testing.T) {
 	for i := 1; i <= 5; i++ {
 		mixed = append(mixed, engine.NeedsYouItem{Kind: "task", ID: int64(i), Reason: "why"})
 	}
-	mixed = append(mixed, engine.NeedsYouItem{Kind: "agent", ID: 6, Title: "dsh/large", Reason: "auth"})
+	mixed = append(mixed, engine.NeedsYouItem{Kind: "agent", ID: 6, State: "broken", Title: "dsh/large", Reason: "auth"})
 	for i := 1; i <= 4; i++ {
-		agents = append(agents, engine.NeedsYouItem{Kind: "agent", ID: int64(i), Title: fmt.Sprintf("dsh/m%d", i), Reason: "auth"})
+		agents = append(agents, engine.NeedsYouItem{Kind: "agent", ID: int64(i), State: "broken", Title: fmt.Sprintf("dsh/m%d", i), Reason: "auth"})
 	}
 	for _, tt := range []struct {
 		name  string
 		queue []engine.NeedsYouItem
 		want  []string
 	}{
-		{"one agent behind tasks", mixed, []string{"! #1 why", "! #2 why", "! dsh/large auth", "+3 more"}},
-		{"four agents", agents, []string{"! dsh/m1 auth", "! dsh/m2 auth", "! dsh/m3 auth", "+1 more"}},
+		{"one agent behind tasks", mixed, []string{"! #1 why", "! #2 why", "! dsh/large auth  → brigada agent reset dsh/large", "+3 more (brigada status)"}},
+		{"four agents", agents, []string{
+			"! dsh/m1 auth  → brigada agent reset dsh/m1",
+			"! dsh/m2 auth  → brigada agent reset dsh/m2",
+			"! dsh/m3 auth  → brigada agent reset dsh/m3",
+			"+1 more (brigada status)"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got := topNeedsYou(api.Status{NeedsYou: tt.queue}, term.New(logo.Caps{}), 100)[1:]
+			got := topNeedsYou(api.Status{NeedsYou: tt.queue}, false, term.New(logo.Caps{}), 100)[1:]
 			if strings.Join(got, "\n") != strings.Join(tt.want, "\n") {
 				t.Errorf("lines = %q, want %q", got, tt.want)
 			}
@@ -311,15 +315,15 @@ func TestTopNeedsYouCompactLines(t *testing.T) {
 		want string
 	}{
 		{"task", engine.NeedsYouItem{Kind: "task", ID: 298, State: "needs_foreman", Reason: "budget out"}, "! #298 budget out"},
-		{"plan", engine.NeedsYouItem{Kind: "plan", ID: 9, State: "pending_approval", Reason: "over the approval limit"}, "! #9 over the approval limit"},
-		{"agent", engine.NeedsYouItem{Kind: "agent", ID: 4, State: "broken", Title: "dsh/large", Reason: "auth: no key"}, "! dsh/large auth: no key"},
+		{"plan", engine.NeedsYouItem{Kind: "plan", ID: 9, State: "pending_approval", Reason: "over the approval limit"}, "! #9 over the approval limit  → brigada plan approve 9"},
+		{"agent", engine.NeedsYouItem{Kind: "agent", ID: 4, State: "broken", Title: "dsh/large", Reason: "auth: no key"}, "! dsh/large auth: no key  → brigada agent reset dsh/large"},
 		{"foreman", engine.NeedsYouItem{Kind: "foreman", ID: 1, State: "outage", Title: "https://example.invalid/r.git", Reason: "turns failed on the infrastructure"}, "! https://example.invalid/r.git turns failed on the infrastructure"},
 		{"project", engine.NeedsYouItem{Kind: "project", ID: 2, State: "duplicate", Title: "https://example.invalid/r.git", Reason: "projects 1 and 2 are the same repository"}, "! https://example.invalid/r.git projects 1 and 2 are the same repository"},
 		{"no reason shows the state", engine.NeedsYouItem{Kind: "task", ID: 7, State: "needs_user"}, "! #7 needs_user"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lines := topNeedsYou(api.Status{NeedsYou: []engine.NeedsYouItem{tt.item}}, term.New(logo.Caps{}), 120)
+			lines := topNeedsYou(api.Status{NeedsYou: []engine.NeedsYouItem{tt.item}}, false, term.New(logo.Caps{}), 120)
 			if len(lines) != 2 || lines[1] != tt.want {
 				t.Errorf("lines = %q, want the entry %q", lines, tt.want)
 			}
@@ -337,11 +341,11 @@ func TestTopNeedsYouCapsAtThreeLines(t *testing.T) {
 	for i := 1; i <= 5; i++ {
 		items = append(items, engine.NeedsYouItem{Kind: "task", ID: int64(i), State: "needs_foreman", Reason: fmt.Sprintf("why %d", i)})
 	}
-	got := strings.Join(topNeedsYou(api.Status{NeedsYou: items}, term.New(logo.Caps{}), 100), "\n")
+	got := strings.Join(topNeedsYou(api.Status{NeedsYou: items}, false, term.New(logo.Caps{}), 100), "\n")
 	want := strings.Join([]string{
 		"NEEDS YOU " + strings.Repeat("─", 90),
 		"! #1 why 1", "! #2 why 2", "! #3 why 3",
-		"+2 more",
+		"+2 more (brigada status)",
 	}, "\n")
 	if got != want {
 		t.Errorf("lines =\n%s\nwant\n%s", got, want)
@@ -356,21 +360,21 @@ func TestTopNeedsYouColours(t *testing.T) {
 		{Kind: "task", ID: 2, State: "needs_foreman", Reason: "should the sprocket be blue?"},
 		{Kind: "agent", ID: 4, State: "broken", Title: "dsh/large", Reason: "auth: no key"},
 	}}
-	lines := topNeedsYou(st, style, 100)
+	lines := topNeedsYou(st, false, style, 100)
 	if want := style.Bold("NEEDS YOU") + " " + style.Dim(strings.Repeat("─", 90)); lines[0] != want {
 		t.Errorf("header = %q, want a bold title and a dim rule", lines[0])
 	}
-	if lines[1] != style.Bad("! #2 should the sprocket be blue?") || lines[2] != style.Bad("! dsh/large auth: no key") {
+	if lines[1] != style.Bad("! #2 should the sprocket be blue?") || lines[2] != style.Bad("! dsh/large auth: no key  → brigada agent reset dsh/large") {
 		t.Errorf("entries = %q", lines)
 	}
 	var four []engine.NeedsYouItem
 	for i := 0; i < 4; i++ {
 		four = append(four, engine.NeedsYouItem{Kind: "task", ID: int64(i + 1), Reason: "why"})
 	}
-	if got := topNeedsYou(api.Status{NeedsYou: four}, style, 100); got[4] != style.Dim("+1 more") {
-		t.Errorf("cap line = %q, want dim +1 more", got[4])
+	if got := topNeedsYou(api.Status{NeedsYou: four}, false, style, 100); got[4] != style.Dim("+1 more (brigada status)") {
+		t.Errorf("cap line = %q, want dim +1 more (brigada status)", got[4])
 	}
-	if got := topNeedsYou(api.Status{}, style, 100); got[1] != style.Dim("nothing needs you") {
+	if got := topNeedsYou(api.Status{}, false, style, 100); got[1] != style.Dim("nothing needs you") {
 		t.Errorf("empty queue = %q, want dim nothing needs you", got)
 	}
 }
@@ -378,7 +382,7 @@ func TestTopNeedsYouColours(t *testing.T) {
 // TestTopNeedsYouEmptyQueue: the section stays visible when nothing
 // needs the user.
 func TestTopNeedsYouEmptyQueue(t *testing.T) {
-	lines := topNeedsYou(api.Status{}, term.New(logo.Caps{}), 80)
+	lines := topNeedsYou(api.Status{}, false, term.New(logo.Caps{}), 80)
 	want := "NEEDS YOU " + strings.Repeat("─", 70) + "\nnothing needs you"
 	if got := strings.Join(lines, "\n"); got != want {
 		t.Errorf("empty queue =\n%s\nwant\n%s", got, want)
@@ -672,7 +676,7 @@ func TestRenderTopShowsGateHoldsAndLandJobs(t *testing.T) {
 	got := plainTop(model, 200, 0)
 	want := "NEEDS YOU " + strings.Repeat("─", 190) +
 		"\n! #2 should the sprocket be blue?" +
-		"\n! #8 held by rule gate_land: gate_land is ask; release: brigada land approve 8; change the rule: brigada land approve --and-stop-asking 8" +
+		"\n! #8 held by rule gate_land: gate_land is ask  → brigada land approve 8" +
 		"\n! #9 waits to push: task/9-1@abc123"
 	tree := "#1 fix the frobnicator 3/6 ▓▓▓▓▓░░░░░░" +
 		"\n  ▸ #3 oil the gears · work · claude/sonnet@high · 1m40s · Edit" +
@@ -1498,32 +1502,34 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 			"all ≤ global 8",
 		}, []string{"#3 done"}},
 		{"the global line", 11, 11, 0, []string{
-			"2/8 (global)  ✗ login expired",
-		}, []string{"all ≤ global 8"}},
-		{"the broken agent", 10, 10, 0, []string{
-			"codex/gpt-5              0/8 (global)  ↺ 16:04",
-		}, []string{"2/8 (global)  ✗ login expired"}},
-		{"the cooling agent", 9, 9, 0, []string{
 			"claude/opus              1/4 (runner)  ✓",
+		}, []string{"all ≤ global 8"}},
+		// The agents list broken and cooling first, then running, so the
+		// running agent is the last line and the first to go.
+		{"the running agent", 10, 10, 0, []string{
+			"2/8 (global)  ✗ login expired",
+		}, []string{"1/4 (runner)  ✓"}},
+		{"the broken agent", 9, 9, 0, []string{
+			"codex/gpt-5              0/8 (global)  ↺ 16:04",
 			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
-		}, []string{"codex/gpt-5", "↺ 16:04"}},
-		{"the last agent, its head follows", 8, 8, 0, []string{
+		}, []string{"2/8 (global)  ✗ login expired"}},
+		{"the cooling agent, its head follows", 8, 8, 0, []string{
 			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░\nAGENTS ─",
-		}, []string{"claude/opus"}},
+		}, []string{"codex/gpt-5", "↺ 16:04"}},
 		{"the AGENTS head", 7, 7, 0, []string{
 			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
 		}, []string{"AGENTS"}},
 		{"the plan line, its head follows", 6, 6, 0, []string{
-			"! claude/sonnet-long-name login expired\nPLANS ─",
+			"! claude/sonnet-long-name ...  → brigada agent reset claude/sonnet-long-name\nPLANS ─",
 		}, []string{"#1 fix the frobnicator"}},
 		{"the PLANS head", 5, 5, 0, []string{
 			"SLOTS ▓▓▓░░░░░ 3/8",
 			"! #2 should the sprocket be blue?",
-			"! claude/sonnet-long-name login expired",
+			"! claude/sonnet-long-name ...  → brigada agent reset claude/sonnet-long-name",
 		}, []string{"PLANS"}},
 		{"the meters last", 4, 4, 0, []string{
 			"! #2 should the sprocket be blue?",
-			"! claude/sonnet-long-name login expired",
+			"! claude/sonnet-long-name ...  → brigada agent reset claude/sonnet-long-name",
 		}, []string{"SLOTS"}},
 		{"the hard clip", 3, 3, 0, []string{
 			"! #2 should the sprocket be blue?",
@@ -2008,7 +2014,7 @@ func TestTopSnapshotGolden(t *testing.T) {
 		model topModel
 		want  []string
 	}{
-		{"busy", agentsModel(), []string{"q quit · p pause"}},
+		{"busy", goldenBusyModel(), []string{"q quit · p pause", "report #41: "}},
 		{"quiet", quietTopModel(), []string{"no events", "nothing needs you"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2240,9 +2246,10 @@ func TestTopAgentsOneLinePerAgent(t *testing.T) {
 	a := model.capacity.Agents
 	cool := topNow.Add(time.Hour).In(topNow.Location()).Format("15:04")
 	wants := []string{
-		"claude/opus              " + api.RunningCap(a[0], &eight) + "  ✓",
+		// Broken and cooling agents first, then the running one.
 		"codex/gpt-5              " + api.RunningCap(a[1], &eight) + "  ↺ " + cool,
 		"claude/sonnet-long-name  " + api.RunningCap(a[2], &eight) + "  ✗ login expired",
+		"claude/opus              " + api.RunningCap(a[0], &eight) + "  ✓",
 	}
 	for i, w := range wants {
 		if got[1+i] != w {
@@ -2257,8 +2264,8 @@ func TestTopAgentsOneLinePerAgent(t *testing.T) {
 	if s := term.StripEscapes(strings.Join(styled, "\n")); s != strings.Join(got, "\n") {
 		t.Errorf("styled text differs from plain:\n%s\nvs\n%s", s, strings.Join(got, "\n"))
 	}
-	if !strings.Contains(styled[1], colour.OK("✓")) || !strings.Contains(styled[2], colour.Warn("↺ "+cool)) ||
-		!strings.Contains(styled[3], colour.Bad("✗ login expired")) {
+	if !strings.Contains(styled[3], colour.OK("✓")) || !strings.Contains(styled[1], colour.Warn("↺ "+cool)) ||
+		!strings.Contains(styled[2], colour.Bad("✗ login expired")) {
 		t.Errorf("quota styles wrong: %q", styled[1:4])
 	}
 }
@@ -2270,11 +2277,11 @@ func TestTopAgentsBrokenFallbackAndCut(t *testing.T) {
 	model.status.NeedsYou = model.status.NeedsYou[:1]
 	plain := term.New(logo.Caps{})
 	got := topAgents(model, topNow, plain, 100)
-	if !strings.HasSuffix(got[3], "✗ broken") {
-		t.Errorf("fallback line = %q", got[3])
+	if !strings.HasSuffix(got[2], "✗ broken") {
+		t.Errorf("fallback line = %q", got[2])
 	}
 	cut := topAgents(model, topNow, plain, 12)
-	if !strings.HasPrefix(cut[3], "claude/so...") {
+	if !strings.HasPrefix(cut[2], "claude/so...") {
 		t.Errorf("long name not cut: %q", cut)
 	}
 }
@@ -2290,7 +2297,7 @@ func TestTopAgentsGlobalLineOmitted(t *testing.T) {
 }
 
 // TestTopAgentsBudget: class e of the drop order — idle agents leave the
-// AGENTS section first and a dim +N more (brigada agents) line counts
+// AGENTS section first and a dim +N idle (brigada capacity) line counts
 // them, the global line under it; the busy, cooling and broken agents
 // stay.
 func TestTopAgentsBudget(t *testing.T) {
@@ -2329,10 +2336,10 @@ func TestTopAgentsBudget(t *testing.T) {
 	// so the next idle agent goes as well.
 	lines = renderTop(model, 76, base-1, topNow, style)
 	want := strings.Join([]string{
-		"claude/opus              1/4 (runner)  ✓",
 		"codex/gpt-5              0/8 (global)  ↺ 16:04",
 		"claude/sonnet-long-name  2/8 (global)  ✗ login expired",
-		"+2 more (brigada agents)",
+		"claude/opus              1/4 (runner)  ✓",
+		"+2 idle (brigada capacity)",
 		"all ≤ global 8",
 	}, "\n")
 	if len(lines) != base-1 || agentLines(lines) != want {
@@ -2341,7 +2348,7 @@ func TestTopAgentsBudget(t *testing.T) {
 	// The cooling and the broken agent outlast the idle ones: the events
 	// line, the lowest of the rest, goes next.
 	lines = renderTop(model, 76, base-2, topNow, style)
-	if len(lines) != base-2 || !strings.Contains(agentLines(lines), "+2 more (brigada agents)") ||
+	if len(lines) != base-2 || !strings.Contains(agentLines(lines), "+2 idle (brigada capacity)") ||
 		!strings.Contains(agentLines(lines), "✗ login expired") || strings.Contains(agentLines(lines), "codex/a") {
 		t.Errorf("at %d:\n%s", base-2, strings.Join(lines, "\n"))
 	}
@@ -2411,7 +2418,7 @@ func TestRenderTopQueuedYield(t *testing.T) {
 		{base - 3, []string{"(review)", "(waiting on #5)", "(queued)"}, []string{"codex/a", "? #4 polish the knobs"}},
 		// The idle agent folds, paying for its +N more line, and the held
 		// line goes with the next step.
-		{base - 4, []string{"(queued)", "codex/a", "? #4 polish the knobs"}, []string{"+1 more (brigada agents)", "▸ #3 oil the gears"}},
+		{base - 4, []string{"(queued)", "codex/a", "? #4 polish the knobs"}, []string{"+1 idle (brigada capacity)", "▸ #3 oil the gears"}},
 	}
 	for _, tt := range tests {
 		lines := renderTop(model, 100, tt.height, topNow, style)
@@ -2429,6 +2436,293 @@ func TestRenderTopQueuedYield(t *testing.T) {
 				t.Errorf("at %d the frame lacks %q:\n%s", tt.height, w, got)
 			}
 		}
+	}
+}
+
+// goldenBusyModel is agentsModel with the foreman's last report, so the
+// busy golden shows the report line.
+func goldenBusyModel() topModel {
+	model := agentsModel()
+	model.status.Report = &engine.StatusReport{ProjectID: 1, JobID: 41, CreatedAt: "2026-10-20T15:00:00.000000000Z",
+		Text: "Plan 1 is half done; task 2 waits for your answer.\nThe rest follows."}
+	return model
+}
+
+// TestTopNeedsYouTails: an entry that has an action keeps it whole at the
+// end of its line, told apart by Kind, State and the Reason's prefix; the
+// rest have none.
+func TestTopNeedsYouTails(t *testing.T) {
+	const repo = "https://example.invalid/acme/brigada.git"
+	st := api.Status{Plans: []engine.StatusPlan{{ID: 5, RepoURL: repo}}}
+	hold := "held by rule approval_tiers: heavy; release: brigada land approve 312; change the rule: brigada land approve --and-stop-asking 312"
+	tests := []struct {
+		name string
+		item engine.NeedsYouItem
+		sole bool
+		want string
+	}{
+		{"plan pending approval", engine.NeedsYouItem{Kind: "plan", ID: 9, State: "pending_approval", Title: "Top polish"},
+			false, "! #9 Top polish awaiting approval  → brigada plan approve 9"},
+		{"plan with the foreman", engine.NeedsYouItem{Kind: "plan", ID: 9, State: "needs_foreman", Title: "Top polish"},
+			false, "! #9 Top polish needs foreman"},
+		{"land hold, the command shows once", engine.NeedsYouItem{Kind: "task", ID: 312, State: "done", Reason: hold},
+			false, "! #312 held by rule approval_tiers: heavy  → brigada land approve 312"},
+		{"held by rule on a task not done", engine.NeedsYouItem{Kind: "task", ID: 4, State: "needs_foreman", Reason: "held by rule x"},
+			false, "! #4 held by rule x"},
+		{"push wait, one project", engine.NeedsYouItem{Kind: "task", ID: 7, State: "done", PlanID: 5, Reason: "waits to push: task/7-1@abc123"},
+			true, "! #7 waits to push: task/7-1@abc123  → brigada push approve"},
+		{"push wait, named repo", engine.NeedsYouItem{Kind: "task", ID: 7, State: "done", PlanID: 5, Reason: "waits to push: task/7-1@abc123"},
+			false, "! #7 waits to push: task/7-1@abc123  → brigada push approve --repo " + repo},
+		{"push wait, plan not listed", engine.NeedsYouItem{Kind: "task", ID: 7, State: "done", PlanID: 6, Reason: "waits to push: task/7-1@abc123"},
+			false, "! #7 waits to push: task/7-1@abc123"},
+		{"push by hand", engine.NeedsYouItem{Kind: "task", ID: 8, State: "done", PlanID: 5, Reason: "push by hand: git push origin main"},
+			true, "! #8 push by hand: git push origin main"},
+		{"stranded task", engine.NeedsYouItem{Kind: "task", ID: 10, State: "needs_foreman", Reason: "stranded: no runner"},
+			true, "! #10 stranded: no runner"},
+		{"environment cause", engine.NeedsYouItem{Kind: "task", ID: 11, State: "needs_user", Reason: "environment: git is missing"},
+			true, "! #11 environment: git is missing"},
+		{"broken agent", engine.NeedsYouItem{Kind: "agent", ID: 4, State: "broken", Title: "codex/gpt-5", Reason: "auth"},
+			false, "! codex/gpt-5 auth  → brigada agent reset codex/gpt-5"},
+		{"agent not broken", engine.NeedsYouItem{Kind: "agent", ID: 4, State: "cooling", Title: "codex/gpt-5", Reason: "slow"},
+			false, "! codex/gpt-5 slow"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := st
+			s.NeedsYou = []engine.NeedsYouItem{tt.item}
+			lines := topNeedsYou(s, tt.sole, term.New(logo.Caps{}), 120)
+			if len(lines) != 2 || lines[1] != tt.want {
+				t.Errorf("lines = %q, want the entry %q", lines, tt.want)
+			}
+		})
+	}
+}
+
+// TestTopNeedsYouTailsAlign: the tails start in one column, after the
+// widest reason; a narrow width cuts the reason and keeps the tail whole.
+func TestTopNeedsYouTailsAlign(t *testing.T) {
+	hold := engine.NeedsYouItem{Kind: "task", ID: 312, State: "done",
+		Reason: "held by rule approval_tiers: heavy; release: brigada land approve 312; change the rule: brigada land approve --and-stop-asking 312"}
+	plan := engine.NeedsYouItem{Kind: "plan", ID: 9, State: "pending_approval", Title: "Top polish"}
+	plain := term.New(logo.Caps{})
+	st := api.Status{NeedsYou: []engine.NeedsYouItem{hold, plan}}
+	got := topNeedsYou(st, false, plain, 100)
+	want := []string{
+		"! #312 held by rule approval_tiers: heavy  → brigada land approve 312",
+		"! #9 Top polish awaiting approval          → brigada plan approve 9",
+	}
+	if got[1] != want[0] || got[2] != want[1] {
+		t.Errorf("lines =\n%s\n%s\nwant\n%s\n%s", got[1], got[2], want[0], want[1])
+	}
+	if a, b := strings.Index(got[1], "→"), strings.Index(got[2], "→"); a != b {
+		t.Errorf("tails start at byte %d and %d, want one column", a, b)
+	}
+
+	narrow := topNeedsYou(api.Status{NeedsYou: []engine.NeedsYouItem{hold}}, false, plain, 60)[1]
+	if want := "! #312 held by rule approval_...  → brigada land approve 312"; narrow != want {
+		t.Errorf("narrow line = %q, want %q", narrow, want)
+	}
+	if n := utf8.RuneCountInString(narrow); n != 60 {
+		t.Errorf("narrow line is %d cells, want 60", n)
+	}
+	if strings.Count(narrow, "brigada land approve") != 1 {
+		t.Errorf("the command shows more than once: %q", narrow)
+	}
+}
+
+// TestTopReportLine: the foreman's last report shows as one dim line above
+// the events strip, only when there is one, and yields right after the
+// strip's second line.
+func TestTopReportLine(t *testing.T) {
+	model := agentsModel()
+	model.events = []history.Item{
+		{Type: history.TypeEvent, ID: 11, Kind: "review_verdict", ProjectID: 1, JobID: 5,
+			Payload:   []byte(`{"status":"approve","branch":"task/3-1-oil-the-gears-after-the-frobnicator-fix"}`),
+			CreatedAt: "2026-10-20T15:02:41.000000000Z"},
+		model.events[1],
+	}
+	style := term.New(logo.Caps{})
+	if got := strings.Join(renderTop(model, 76, 0, topNow, style), "\n"); strings.Contains(got, "report #") {
+		t.Errorf("a status with no report shows a report line:\n%s", got)
+	}
+	model.status.Report = &engine.StatusReport{ProjectID: 1, JobID: 41, Text: "All landed, but #5 needs a look.\nSecond line."}
+	full := renderTop(model, 76, 0, topNow, style)
+	tail := full[len(full)-3:]
+	want := []string{
+		"report #41: All landed, but #5 needs a look.",
+		"15:02 #3 done",
+		"15:02 review approve task/3-1-oil-the-gears-after-the-frobnicator-fix",
+	}
+	if strings.Join(tail, "\n") != strings.Join(want, "\n") {
+		t.Errorf("tail =\n%s\nwant\n%s", strings.Join(tail, "\n"), strings.Join(want, "\n"))
+	}
+	n := len(full)
+	one := renderTop(model, 76, n-1, topNow, style)
+	if got := strings.Join(one, "\n"); len(one) != n-1 || strings.Contains(got, "review approve") || !strings.Contains(got, "report #41") {
+		t.Errorf("one line less should drop only the strip's second line:\n%s", got)
+	}
+	two := renderTop(model, 76, n-2, topNow, style)
+	if got := strings.Join(two, "\n"); len(two) != n-2 || strings.Contains(got, "report #41") || !strings.Contains(got, "15:02 #3 done") {
+		t.Errorf("two lines less should drop the report line next:\n%s", got)
+	}
+	// The line is Dim and cut to width.
+	colour := term.New(logo.Caps{Color: logo.Color16})
+	lines := topReportLine(model.status, colour, 20)
+	if len(lines) != 1 || lines[0].text != colour.Dim("report #41: All l...") || lines[0].class != yieldEventsSecond {
+		t.Errorf("report line = %+v", lines)
+	}
+}
+
+// TestTopForemanAndJobsNotes: the user's messages and the slot holders
+// show in the FOREMAN block, a pending runner restart in the JOBS block,
+// each in a dim line of the held class; a headless turn whose job runs is
+// not repeated, and a block shows when it has any line.
+func TestTopForemanAndJobsNotes(t *testing.T) {
+	plain := term.New(logo.Caps{})
+	stamp := time.Date(2026, 10, 20, 11, 10, 0, 0, time.UTC).Format(engine.TimeLayout)
+	texts := func(lines []topLine) []string {
+		var out []string
+		for _, l := range lines {
+			out = append(out, l.text)
+		}
+		return out
+	}
+	foreman, jobs := topPlanless(api.Status{
+		ForemanMessages: 2,
+		Running:         []engine.StatusJob{{ID: 30, Kind: "foreman"}},
+		Slots: []engine.Slot{
+			{ProjectID: 1, State: engine.SlotFree},
+			{ProjectID: 1, State: engine.SlotAttach, HolderID: 3, Label: "attached chat", Since: stamp},
+			{ProjectID: 2, State: engine.SlotTurn, HolderID: 30, Label: "foreman turn", Since: stamp},
+			{ProjectID: 3, State: engine.SlotTurn, HolderID: 31, Label: "foreman turn", Since: stamp},
+		},
+	}, topNow, plain, 80)
+	want := []string{
+		topSectionHead("FOREMAN", plain, 80),
+		"  ▸ job #30 foreman",
+		"  2 messages for the foreman",
+		"  foreman slot: attach (attached chat) since 11:10",
+		"  foreman slot: headless turn (foreman turn) since 11:10",
+	}
+	if got := texts(foreman); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("FOREMAN block =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if len(jobs) != 0 {
+		t.Errorf("JOBS block = %v, want none", texts(jobs))
+	}
+	for _, l := range foreman[2:] {
+		if l.class != yieldHeld || l.section != topSecForeman {
+			t.Errorf("note %q is class %d section %d, want held / FOREMAN", l.text, l.class, l.section)
+		}
+	}
+	// The headless turn whose job runs is skipped; one message reads singular,
+	// and a block shows with only a note.
+	foreman, _ = topPlanless(api.Status{ForemanMessages: 1,
+		Slots: []engine.Slot{{State: engine.SlotTurn, HolderID: 30, Label: "foreman turn", Since: stamp}}}, topNow, plain, 80)
+	if got := texts(foreman); len(got) != 3 || got[1] != "  1 message for the foreman" {
+		t.Errorf("FOREMAN block = %q", got)
+	}
+	foreman, _ = topPlanless(api.Status{Running: []engine.StatusJob{{ID: 30, Kind: "foreman"}},
+		Slots: []engine.Slot{{State: engine.SlotTurn, HolderID: 30, Label: "foreman turn", Since: stamp}}}, topNow, plain, 80)
+	if got := texts(foreman); len(got) != 2 {
+		t.Errorf("the running turn's slot repeats its job line: %q", got)
+	}
+	// A pending runner restart sits in the JOBS block, only while something runs.
+	_, jobs = topPlanless(api.Status{RunnerDraining: true,
+		Running: []engine.StatusJob{{ID: 63, Kind: "plan_review"}}}, topNow, plain, 80)
+	if got := texts(jobs); len(got) != 3 || got[2] != "  runner restarting after 1 running job" || jobs[2].class != yieldHeld || jobs[2].section != topSecJobs {
+		t.Errorf("JOBS block = %q", got)
+	}
+	_, jobs = topPlanless(api.Status{RunnerDraining: true,
+		Running: []engine.StatusJob{{ID: 63, Kind: "plan_review"}, {ID: 64, Kind: "plan_review"}}}, topNow, plain, 80)
+	if got := texts(jobs); got[len(got)-1] != "  runner restarting after 2 running jobs" {
+		t.Errorf("JOBS block = %q", got)
+	}
+	foreman, jobs = topPlanless(api.Status{RunnerDraining: true}, topNow, plain, 80)
+	if len(foreman)+len(jobs) != 0 {
+		t.Errorf("a drain with nothing running shows blocks: %v %v", texts(foreman), texts(jobs))
+	}
+	// Dim, and no escape in the plain style.
+	colour := term.New(logo.Caps{Color: logo.Color16})
+	foreman, _ = topPlanless(api.Status{ForemanMessages: 1}, topNow, colour, 80)
+	if foreman[1].text != "  "+colour.Dim("1 message for the foreman") {
+		t.Errorf("note = %q, want Dim", foreman[1].text)
+	}
+}
+
+// TestTopMetersZeroCountersPlain: held and needs colour only above zero.
+func TestTopMetersZeroCountersPlain(t *testing.T) {
+	style := term.New(logo.Caps{Color: logo.Color16})
+	model := busyTopModel()
+	model.status.Held, model.status.NeedsYou = nil, nil
+	got := topMeters(model, style, 100)[0]
+	want := "SLOTS ▓▓▓░░░░░ 3/8   " + style.Bold("1 run") + "   2 queue   0 held   0 needs"
+	if got != want {
+		t.Errorf("meters = %q, want %q", got, want)
+	}
+	if plain := topMeters(model, term.New(logo.Caps{}), 100)[0]; plain != "SLOTS ▓▓▓░░░░░ 3/8   1 run   2 queue   0 held   0 needs" {
+		t.Errorf("plain meters = %q", plain)
+	}
+}
+
+// TestTopAgentsOrderAndOff: off agents — an effective cap of 0, nothing
+// running, a ready quota — never list; the rest go broken and cooling
+// first, then running, then idle, in snapshot order within a group.
+func TestTopAgentsOrderAndOff(t *testing.T) {
+	zero := 0
+	cool := topNow.Add(time.Hour).UTC().Format(engine.TimeLayout)
+	model := busyTopModel()
+	model.capacity.Agents = []engine.CapacityAgent{
+		{Harness: "x", Model: "idle1", CapLayer: "none", Quota: "ready"},
+		{Harness: "x", Model: "off", Cap: &zero, CapLayer: "model", Quota: "ready"},
+		{Harness: "x", Model: "run", CapLayer: "none", Running: 1, Quota: "ready"},
+		{Harness: "x", Model: "cool", CapLayer: "none", Quota: "cooling", CoolingUntil: cool},
+		{Harness: "x", Model: "broke", CapLayer: "none", Quota: "broken"},
+		{Harness: "x", Model: "idle2", CapLayer: "none", Quota: "ready"},
+		{Harness: "x", Model: "offbusy", Cap: &zero, CapLayer: "model", Running: 1, Quota: "ready"},
+	}
+	got := topAgents(model, topNow, term.New(logo.Caps{}), 100)
+	var names []string
+	for _, l := range got[1 : len(got)-2] {
+		names = append(names, strings.Fields(l)[0])
+	}
+	if want := "x/cool x/broke x/run x/offbusy x/idle1 x/idle2"; strings.Join(names, " ") != want {
+		t.Errorf("order = %q, want %q", strings.Join(names, " "), want)
+	}
+	if fold := got[len(got)-2]; fold != "1 off (brigada capacity)" {
+		t.Errorf("fold line = %q, want the off count", fold)
+	}
+	// The global cap makes every ready, idle agent off.
+	model.capacity.Layers = []engine.CapacityLayer{{Layer: "global", Cap: &zero}}
+	got = topAgents(model, topNow, term.New(logo.Caps{}), 100)
+	if joined := strings.Join(got, "\n"); strings.Contains(joined, "x/idle1") || !strings.Contains(joined, "x/run") {
+		t.Errorf("a global cap of 0 should fold the idle agents out:\n%s", joined)
+	}
+}
+
+// TestTopAgentsFoldLine: the dim fold line counts the idle agents the
+// height dropped and the off ones, either part left out when zero and no
+// line when both are.
+func TestTopAgentsFoldLine(t *testing.T) {
+	plain := term.New(logo.Caps{})
+	for _, tt := range []struct {
+		idle, off int
+		want      []string
+	}{
+		{4, 2, []string{"+4 idle · 2 off (brigada capacity)"}},
+		{4, 0, []string{"+4 idle (brigada capacity)"}},
+		{0, 2, []string{"2 off (brigada capacity)"}},
+		{0, 0, nil},
+	} {
+		frame := &topFrame{lines: []topLine{{fold: foldIdle, count: tt.off}}, foldedIdle: tt.idle, style: plain}
+		if got := frame.texts(); strings.Join(got, "|") != strings.Join(tt.want, "|") {
+			t.Errorf("idle %d off %d: fold = %q, want %q", tt.idle, tt.off, got, tt.want)
+		}
+	}
+	colour := term.New(logo.Caps{Color: logo.Color16})
+	frame := &topFrame{lines: []topLine{{fold: foldIdle, count: 1}}, foldedIdle: 1, style: colour}
+	if got := frame.texts(); len(got) != 1 || got[0] != colour.Dim("+1 idle · 1 off (brigada capacity)") {
+		t.Errorf("fold = %q, want Dim", got)
 	}
 }
 
