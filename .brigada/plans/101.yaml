@@ -107,7 +107,7 @@ tasks:
     review_effort: medium
     caps: {restart: 5}
     skills: ["bugfix"]
-    state: reviewing
+    state: done
     branch: "brigada/task-336-r4"
     rounds: 0
   - id: 337
