@@ -30,7 +30,7 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 347
@@ -44,7 +44,7 @@ tasks:
     review_effort: medium
     caps: {restart: 0}
     skills: ["bugfix", "surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 348
@@ -58,7 +58,7 @@ tasks:
     review_effort: medium
     caps: {restart: 0}
     skills: ["bugfix", "surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 349
