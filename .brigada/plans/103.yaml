@@ -60,8 +60,8 @@ tasks:
     review_effort: medium
     caps: {fix_rounds: 4, review_rounds: 4, restart: 1}
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-343"
+    rounds: 1
   - id: 344
     name: "agents-grid"
     title: "top: two-column agents and family colours"
