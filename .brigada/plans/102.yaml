@@ -31,8 +31,8 @@ tasks:
     review_tier: standard
     review_effort: medium
     caps: {restart: 0}
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-339"
     rounds: 0
   - id: 340
     name: "history-readable"
