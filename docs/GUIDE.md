@@ -1061,19 +1061,21 @@ A foreman turn is never held back by the plan or model caps, and goes ahead of q
 
 `brigada capacity` prints the same snapshot as two tables. AGENTS lists each agent with its tier, effort, cost weight, running jobs against its effective cap — its own runner, account and model caps with the global cap folded in — and the layer that binds it, then its quota: `ready`, `cooling until` a local time, or `broken`. LAYERS lists each cap layer with its key, cap, use and queue. It shows the project of the repository you are in; `--project URL` names another, and outside a repository it shows every project's.
 
-`brigada top` is a live view of the engine: every `--interval` (default 2s) it redraws a one-line header —
-the scope, the engine's uptime and the clock, a dim rule filling the width that remains, `q quit · p pause` at the right end —
-then a meters strip —
-the global slots against their cap as a bar of ▓ and ░ with the use beside it, then the run, queue, held and needs counters —
-then the needs-you queue, the plans tree, the agents section —
+`brigada top` is a live view of the engine: every `--interval` (default 2s) it redraws a two-row header —
+the brand's `▙ brigada` mark, the scope and the engine's uptime on the left, the clock and `q quit  p pause` at the right edge;
+then the global slots as a meter of 18 `━` cells in proportion to the cap, at least one filled once any slot is in use, with `use/cap slots` beside it, and the run, queue, held and needs counters at the right edge —
+then one rounded box per section, each a titled top border and `│ text │` rows, no blank row between boxes:
+the needs-you queue, the plans tree, the agents section —
 one line per agent: its `harness/model`, its running jobs against its effective cap as `brigada capacity` shows it,
 then its quota as `✓` when ready, `↺ HH:MM` while cooling until that time, or `✗` and a short reason when broken;
 the broken and cooling agents come first, then the running ones, then the idle ones;
 an agent that is off — an effective cap of 0, nothing running, a ready quota — never lists, and a dim `+N idle · M off (brigada capacity)` line counts the off agents and the idle ones the height dropped, either part left out when zero;
 a dim `all ≤ global N` line under the list names the global cap —
-and above the EVENTS head, when the foreman has reported, a dim `report #N: <first line of the report>` line, since the report can say what the needs-you queue does not —
-and the newest user-facing events under an EVENTS head at the bottom, one per row, newest on top, each row its clock time (with the date on another day), two spaces and the event in plain words, as `10:02  #328 landed` over `09:40  plan #99 done`, the words starting in one column; a tall screen shows up to 10 rows.
-Plan, task, review and agent events show; the foreman's report shows in the report line above, not in the list; job bookkeeping, messages and the other events do not. The top keeps the newest 50 of them across redraws, so a busy run never empties the list.
+and the newest user-facing events in the EVENTS box at the bottom, one per row, newest on top, each row its clock time (with the date on another day), two spaces and the event in plain words, as `10:02  #328 landed` over `09:40  plan #99 done`, the words starting in one column; a tall screen shows up to 10 rows.
+When the foreman has reported, the first line of its report sits dim at the right end of the EVENTS top border, cut to fit, since the report can say what the needs-you queue does not.
+Plan, task, review and agent events show; the foreman's report shows in the border, not in the list; job bookkeeping, messages and the other events do not. The top keeps the newest 50 of them across redraws, so a busy run never empties the list.
+A box's title is bold in its top border, with a dim note after it: the PLANS note counts the live and the finished plans, the hidden finished ones too (`3 live · 98 finished`), once the first status has arrived; the needs-you box carries the queue's full count in its title and is red while it has entries.
+On a terminal without UTF-8 the boxes are drawn with `+ - |`, the meter with `=`, and the mark is left out, leaving the word `brigada`.
 Without `--project` every section shows the whole engine, whatever the working directory.
 With `--project` every section shows that one project,
 except that a broken agent still shows, in the needs-you queue and with its reason in the agents section, because agents belong to no project;
@@ -1081,7 +1083,7 @@ every other entry stays the project's.
 The scope is the repository's short name with `--project` or when the engine has one project, and `N projects` otherwise.
 When more than one project shows, each plan line carries its repository's short name after the id, as in `#101 brigada  Fix events strip`.
 The needs-you queue shows three lines, broken agents chosen first, and `+N more (brigada status)` counts the rest.
-The held and needs counters in the meters strip are coloured only above zero.
+The held and needs counters in the header are coloured only above zero; the meter is cyan, yellow once the use reaches the cap, and its empty cells are grey. With no cap, or a cap of 0, there is no meter and the cell reads `2/none slots` or `0/0 slots`; a failed capacity fetch reads `?/? slots`. A narrow row shrinks the meter and, under 4 cells, leaves it out.
 
 The plans tree puts every job under its plan: an active plan's line carries its done/total and a progress bar,
 while a plan that is neither active nor finished shows a state word in their place —
@@ -1095,38 +1097,37 @@ queued or waiting on its dependencies (not under a plan that is not active), hel
 a done task that has not landed and that no job speaks for gets a dim `⇡ #330 events wording  landing: waiting (retry at 11:10, last exit 1)` line,
 with `queued` for a queued land job and `not landed` when the task carries no word;
 a reviewing plan whose review no job has started shows a dim `· plan review queued` line —
-while a finished plan is one line, `#N <title> done/total ✓` or `#N <title> ✗`, and `+N finished` counts the older finished plans hidden;
-a foreman turn no plan claims sits under a FOREMAN head and any other job no listed plan claims under a JOBS head,
+while a finished plan is one line, `#N <title> done/total ✓` or `#N <title> ✗`;
+a foreman turn no plan claims sits in a FOREMAN box and any other job no listed plan claims in a JOBS box,
 between the needs-you queue and the plans tree, each shown only when it has lines.
-The FOREMAN block also carries dim lines for the user's messages waiting for the foreman (`2 messages for the foreman`) and for each foreman slot that is not free, with its state, label and the local time since (`foreman slot: attach (attached chat) since 11:10`), a headless turn whose job runs left out because its job line speaks for it;
-the JOBS block carries a dim `runner restarting after N running job(s)` line while a runner restart waits behind running jobs.
+The FOREMAN box also carries dim lines for the user's messages waiting for the foreman (`2 messages for the foreman`) and for each foreman slot that is not free, with its state, label and the local time since (`foreman slot: attach (attached chat) since 11:10`), a headless turn whose job runs left out because its job line speaks for it;
+the JOBS box carries a dim `runner restarting after N running job(s)` line while a runner restart waits behind running jobs.
 
 The needs-you queue comes first and is always visible: one compact `!` line per entry —
 `! #N <reason>` for a task or a plan (a plan with no reason shows its title and `awaiting approval` or `needs foreman`), the agent's `harness/model`, or the repository's URL for a foreman or project entry —
-and an entry that has an action ends in it, whole, `→ <command>`, the tails starting in one column and a long reason cut instead:
+and an entry that has an action ends in it, whole, `→ <command>`, the tails starting in one column with the widest ending at the box's right edge and a long reason cut instead:
 `→ brigada plan approve N` for a plan awaiting approval, `→ brigada land approve N` for a task held by a rule (the reason stops before the commands it embeds),
 `→ brigada push approve` for a landing that waits to push (with `--repo URL` unless the view is unscoped with one project),
 and `→ brigada agent reset <harness>/<model>` for a broken agent;
 every other entry, `push by hand: <command>` and a plan parked for the foreman included, has none.
-The queue is capped at three lines with a `+N more (brigada status)` line, and shows `nothing needs you` when it is empty.
+The queue is capped at three lines with a `+N more (brigada status)` line, and shows a dim `✓ nothing needs you` (`ok nothing needs you` without UTF-8) in a grey box when it is empty.
 
 The frame never has more lines than the terminal is tall.
-When the view is taller, lines drop class by class, each class from the bottom of the view upward, one line at a time, until it fits:
-event rows 3 to 10, from the bottom, then row 2, then the report line above the EVENTS head;
-finished plans, folded into the dim `+N finished` line;
-the blank lines between sections;
-queued `·` task lines, including `(waiting on ...)` and `(review)`, from the last plan upward;
-idle agents (no running job, quota neither cooling nor broken), counted in the dim `+N idle · M off (brigada capacity)` line;
-held `?` and retry `↺` lines, the dim lines of the FOREMAN and JOBS blocks and parked `!` task lines;
-running `▸` lines;
-and then every other line outside the header and the needs-you queue —
-event row 1, the remaining agent lines, the `all ≤ global N` line, the fold lines, each plan's own line, the placeholders, the PLANS, AGENTS and EVENTS heads —
-with the meters strip last of them, though it sits above the needs-you queue.
+When the view is taller, rows drop class by class, each class from the bottom of the view upward, one row at a time, until it fits:
+event rows 3 to 10, from the bottom, then row 2;
+finished plans;
+queued `·` task rows, including `(waiting on ...)` and `(review)`, from the last plan upward;
+idle agents (no running job, quota neither cooling nor broken), counted in the dim `+N idle · M off (brigada capacity)` row;
+held `?` and retry `↺` rows, the dim rows of the FOREMAN and JOBS boxes and parked `!` task rows;
+running `▸` rows;
+and then every other row outside the header and the needs-you queue —
+event row 1, the remaining agent rows, the `all ≤ global N` row, the fold row, each plan's own row, the placeholders —
+with the meters row last of them, though it sits above the needs-you queue.
 
-A fold line not yet shown costs the line it adds, and a section head, FOREMAN and JOBS included, goes with its section's last line.
+A fold row not yet shown costs the row it adds. A box's borders go with its section's last row, and a box with no row never shows, so a drop can leave the frame a row or two shorter than the terminal.
 
-The header, with its error and hint lines, and the needs-you queue never drop for another line;
-on a screen too short for them the frame is cut from the bottom, into the needs-you queue, so the height still holds.
+The header, with its error and hint rows, and the needs-you queue with its borders never drop for another row;
+on a screen too short for them the frame is cut from the bottom, into the needs-you box, so the height still holds.
 
 Below 60 columns the section heads drop their rule fills, and a header whose keys do not fit whole drops them for a dim rule filling the rest of the width.
 `q` quits and `p` pauses the refresh.
@@ -1407,7 +1408,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada diff <task-id> [--stat] [--repo URL]`: what a task changed, as `git diff base...branch`; run inside the repo. See [section 4](#history-diffs-and-logs).
 - `brigada logs <job-id> [--check] [--tail N] [--follow]`, or `brigada logs --task N`: a job's transcript as readable lines, or its check log. See [section 4](#history-diffs-and-logs).
 - `brigada stats`: tier, attempts, successes, rate and confidence per agent, class and repo. See [section 9](#9-the-record-and-stats).
-- `brigada top [--interval D] [--project URL] [--no-start]`: the engine full-screen as one stacked column, with the same unregistered-models hint as `status`; one plain snapshot when piped. See [section 8](#capacity).
+- `brigada top [--interval D] [--project URL] [--no-start]`: the engine full-screen as one column of boxes, with the same unregistered-models hint as `status`; one plain snapshot when piped. See [section 8](#capacity).
 - `brigada capacity [--project URL]`: each agent's tier, effort, cost, running jobs against its cap, and quota; each cap layer's cap, use and queue. See [section 8](#capacity).
 
 ### Finishing

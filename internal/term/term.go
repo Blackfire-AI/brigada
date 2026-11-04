@@ -4,6 +4,7 @@ package term
 
 import (
 	"regexp"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/logo"
@@ -116,6 +117,33 @@ func (s Style) Up() string { return s.symbol("⇡", "^") }
 
 // Arrow returns a rightward arrow, or "->" without UTF-8.
 func (s Style) Arrow() string { return s.symbol("→", "->") }
+
+// Meter returns a slots-meter cell, or "=" without UTF-8.
+func (s Style) Meter() string { return s.symbol("━", "=") }
+
+// BoxTL returns a box's top-left corner, or "+" without UTF-8.
+func (s Style) BoxTL() string { return s.symbol("╭", "+") }
+
+// BoxTR returns a box's top-right corner, or "+" without UTF-8.
+func (s Style) BoxTR() string { return s.symbol("╮", "+") }
+
+// BoxBL returns a box's bottom-left corner, or "+" without UTF-8.
+func (s Style) BoxBL() string { return s.symbol("╰", "+") }
+
+// BoxBR returns a box's bottom-right corner, or "+" without UTF-8.
+func (s Style) BoxBR() string { return s.symbol("╯", "+") }
+
+// BoxSide returns a box's vertical side, or "|" without UTF-8.
+func (s Style) BoxSide() string { return s.symbol("│", "|") }
+
+// OneLine returns the brand's one-line mark, "▙ brigada", without its
+// trailing newline: the ▙ in hi-vis at the colour depth the style has, the
+// rest in the default foreground, as logo.String prints it. With NoColor it
+// is the bare text; without UTF-8 it is empty, as the brand has no ASCII
+// one-line form.
+func (s Style) OneLine() string {
+	return strings.TrimSuffix(logo.String(logo.OneLine, s.caps), "\n")
+}
 
 // Width returns the layout width, clamped to 80..100 columns. Unknown widths
 // and output that is not a terminal use 80 columns.

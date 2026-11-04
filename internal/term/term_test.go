@@ -118,6 +118,12 @@ func TestSymbols(t *testing.T) {
 		{"AtMost", Style.AtMost, "≤", "<="},
 		{"Up", Style.Up, "⇡", "^"},
 		{"Arrow", Style.Arrow, "→", "->"},
+		{"Meter", Style.Meter, "━", "="},
+		{"BoxTL", Style.BoxTL, "╭", "+"},
+		{"BoxTR", Style.BoxTR, "╮", "+"},
+		{"BoxBL", Style.BoxBL, "╰", "+"},
+		{"BoxBR", Style.BoxBR, "╯", "+"},
+		{"BoxSide", Style.BoxSide, "│", "|"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, depth := range []logo.Depth{logo.NoColor, logo.Color16, logo.Color256, logo.TrueColor} {
@@ -131,6 +137,28 @@ func TestSymbols(t *testing.T) {
 						t.Errorf("depth %d, UTF8 %t: got %q, want %q", depth, utf8, got, want)
 					}
 				}
+			}
+		})
+	}
+}
+
+// TestOneLine: the brand's one-line mark with the flame colour on the ▙
+// alone at each depth, bare with NoColor, empty without UTF-8.
+func TestOneLine(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		caps logo.Caps
+		want string
+	}{
+		{"true colour", logo.Caps{Color: logo.TrueColor, UTF8: true}, "\x1b[38;2;255;90;31m▙\x1b[0m brigada"},
+		{"256 colours", logo.Caps{Color: logo.Color256, UTF8: true}, "\x1b[38;5;202m▙\x1b[0m brigada"},
+		{"16 colours", logo.Caps{Color: logo.Color16, UTF8: true}, "\x1b[31m▙\x1b[0m brigada"},
+		{"no colour", logo.Caps{UTF8: true}, "▙ brigada"},
+		{"no UTF-8", logo.Caps{Color: logo.TrueColor}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := New(tc.caps).OneLine(); got != tc.want {
+				t.Errorf("OneLine() = %q, want %q", got, tc.want)
 			}
 		})
 	}

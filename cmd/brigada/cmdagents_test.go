@@ -313,11 +313,12 @@ func TestDiffAgentsCoversTheDefaultModel(t *testing.T) {
 func TestTopHeaderShowsTheAgentsHint(t *testing.T) {
 	style := term.New(logo.Caps{})
 	hint := "2 models your CLIs offer but no agent registers: brigada agents"
-	lines := topHeader(topModel{hint: hint}, time.Now(), style, 80)
-	if len(lines) != 2 || lines[1] != hint {
-		t.Fatalf("header = %q", lines)
+	// The hint is the third row, under the header's two.
+	lines := renderTop(topModel{hint: hint}, 80, 0, time.Now(), style)
+	if len(lines) < 4 || lines[2] != hint || !strings.HasPrefix(lines[3], "+") {
+		t.Fatalf("view = %q", lines)
 	}
-	if lines := topHeader(topModel{}, time.Now(), style, 80); len(lines) != 1 {
-		t.Fatalf("header without a hint = %q", lines)
+	if lines := renderTop(topModel{}, 80, 0, time.Now(), style); strings.Contains(strings.Join(lines[:3], "\n"), hint) || !strings.HasPrefix(lines[2], "+") {
+		t.Fatalf("view without a hint = %q", lines)
 	}
 }
