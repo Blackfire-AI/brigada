@@ -100,6 +100,6 @@ tasks:
     review_effort: medium
     caps: {restart: 0}
     skills: ["surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-351"
     rounds: 0
