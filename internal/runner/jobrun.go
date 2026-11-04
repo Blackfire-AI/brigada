@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +39,10 @@ type jobRun struct {
 	toolOpenedAt time.Time
 	sessionID    string
 	cliError     *adapter.Event
+	// outputLimit is the last model step's cut-off at the output limit,
+	// nil when that step ended otherwise. It is not a cliError: a run
+	// that still ended with a result block stands.
+	outputLimit *adapter.OutputLimit
 	// turnStarted is set when the stdout stream shows its turn.started
 	// (adapter.TurnMarker): errors the adapter marks Notice are warnings
 	// until then.
@@ -478,6 +484,8 @@ func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte, fromStderr bool) {
 		r.sessionID = ev.SessionID
 	}
 	switch ev.Kind {
+	case adapter.EvUsage:
+		r.outputLimit = ev.OutputLimit
 	case adapter.EvError:
 		// A stderr-sorted error is kept apart from the stream's own
 		// (see stderrError): stderr carries warnings beside failures.
@@ -727,6 +735,14 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 	}
 
 	result := parseResult(ad.ResultText(r.snapshotEvents()))
+	r.mu.Lock()
+	cut := r.outputLimit
+	r.mu.Unlock()
+	if cut != nil && result.Reason == reasonNoResult {
+		text := outputLimitText(cut)
+		r.finishWithCLIError(ctx, text, &adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrOutputLimit, Text: text})
+		return
+	}
 	if result.Reason == reasonNoResult && exitErr != nil {
 		result.Summary = fmt.Sprintf("worker exited with %v; %s", exitErr, result.Summary)
 	}
@@ -867,6 +883,28 @@ func (r *jobRun) finishWithCLIError(ctx context.Context, msg string, cliErr *ada
 		ErrorKind:  string(kind),
 		LimitUntil: cliErr.LimitUntil,
 	})
+}
+
+// outputLimitText is the error of a run whose last step was cut off at
+// its output limit and left no result: the total is output plus
+// reasoning tokens.
+func outputLimitText(c *adapter.OutputLimit) string {
+	return fmt.Sprintf("output limit reached: %s tokens, %s of them reasoning",
+		groupThousands(c.OutputTokens+c.ReasoningTokens), groupThousands(c.ReasoningTokens))
+}
+
+// groupThousands writes n with a comma between thousands.
+func groupThousands(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	neg := strings.HasPrefix(s, "-")
+	s = strings.TrimPrefix(s, "-")
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	if neg {
+		s = "-" + s
+	}
+	return s
 }
 
 // finishWithSetupError completes the job with a failed setup (§5.7): an

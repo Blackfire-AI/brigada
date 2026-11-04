@@ -424,6 +424,30 @@ func TestNormalFixture(t *testing.T) {
 	}
 }
 
+func TestOutputLimitFixture(t *testing.T) {
+	a := &Adapter{}
+	events := parseFixture(t, "output-limit.jsonl", a.ParseEvent)
+	var usage []adapter.Event
+	for _, ev := range events {
+		if ev.Kind == adapter.EvUsage {
+			usage = append(usage, ev)
+		}
+	}
+	if len(usage) != 2 {
+		t.Fatalf("usage events = %+v, want 2", usage)
+	}
+	want := &adapter.OutputLimit{OutputTokens: 49, ReasoningTokens: 31951}
+	if !reflect.DeepEqual(usage[0].OutputLimit, want) {
+		t.Errorf("cut-off step carries %+v, want %+v", usage[0].OutputLimit, want)
+	}
+	if usage[0].Usage == nil || usage[0].Usage.ModelCalls == nil || *usage[0].Usage.ModelCalls != 1 {
+		t.Errorf("cut-off step's usage = %+v, want the step counted", usage[0].Usage)
+	}
+	if usage[1].OutputLimit != nil {
+		t.Errorf("a later step that stopped carries %+v, want the cut-off cleared", usage[1].OutputLimit)
+	}
+}
+
 func TestFailureFixtures(t *testing.T) {
 	a := &Adapter{}
 	for _, tc := range []struct {

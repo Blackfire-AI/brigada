@@ -494,7 +494,7 @@ func (e *Engine) retryInfraFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 // carries, for a work job and a fix round alike.
 func transientCLIError(kind string) bool {
 	switch kind {
-	case "limit", "auth", string(adapter.ErrModel), "other", "runner_lost":
+	case "limit", "auth", string(adapter.ErrModel), string(adapter.ErrOutputLimit), "other", "runner_lost":
 		return true
 	}
 	return false
