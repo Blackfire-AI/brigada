@@ -466,7 +466,7 @@ When `notify` is `auto` (the default), the engine also raises a desktop notifica
 
 ### History, diffs and logs
 
-`brigada history` prints the timeline, oldest first: events and messages together. `--task N` and `--job N` narrow it to one task or one job. `--limit N` (1 to 500, default 100) sets how many entries are fetched per request; the command fetches every page, so the output is always the whole timeline.
+`brigada history` prints the timeline in plain words, oldest first. Each line starts with its local time as `MM-DD HH:MM`, then says what happened in the words `brigada top` uses, such as `#335 landed`, `plan #101 done` or `job 9 review approve fix/x`. The bare view shows only those events, so the lease, cap and message entries stay out; a landing also prints its target branch, its commit, its exact push command and its `after_land` failure, each whole. A report or a verdict is one line there: the job number is how you read its whole text. `--task N` and `--job N` narrow the timeline to one task or one job and show every item, internal events and messages included, each with its subject, its kind in plain words and its text whole: a worker's result as its status and summary, a review's findings in full. `--raw` prints the internal event names, UTC stamps and raw payloads instead, with the bare view's items and the `--task` and `--job` views alike. `--limit N` (1 to 500, default 100) is the page size, not a count of printed items: the command fetches every page, so the output is always the whole timeline.
 
 `brigada diff <task-id> [--stat] [--repo URL]` prints what a task changed, as `git diff <base>...<branch>` between the task's base ref and its latest result branch (`-r<n>` included).
 
@@ -883,7 +883,7 @@ A review that asks for changes, or a failed check, starts a fix round on the aut
 - The author's family is read from the branch's last work job; failing that, from the `Co-Authored-By` trailers on its commits; failing that, `default_reviewer` in the config file (a harness name) takes the review. With none of the three, `review.family=prefer` (the default) places the review on any available review-class agent; only `review.family=require` keeps the refusal, with the reason ending `, review.family=require`.
 - There are no fix rounds, and a review that ends without a usable verdict is not retried: run it again.
 - With no task to have copied them, the review uses the project's current reviewer and worker texts (a role not configured contributes none), the worker text shown as the project's conventions, and no skills.
-- The verdict (approve, changes or no verdict, with the findings) is written to the history. It raises no desktop notification and no needs-you entry, so read it with `brigada history`.
+- The verdict (approve, changes or no verdict, with the findings) is written to the history. It raises no desktop notification and no needs-you entry, so read it with `brigada history --job N`.
 
 ## 8. Agents, quota and health
 
@@ -1071,9 +1071,9 @@ then its quota as `✓` when ready, `↺ HH:MM` while cooling until that time, o
 the broken and cooling agents come first, then the running ones, then the idle ones;
 an agent that is off — an effective cap of 0, nothing running, a ready quota — never lists, and a dim `+N idle · M off (brigada capacity)` line counts the off agents and the idle ones the height dropped, either part left out when zero;
 a dim `all ≤ global N` line under the list names the global cap —
-and above the events strip, when the foreman has reported, a dim `report #N: <first line of the report>` line, since the report can say what the needs-you queue does not —
-and the newest user-facing events as a strip at the bottom, each with its clock time in plain words, as `10:02 #328 landed · 09:40 plan #99 done`, joined by ` · ` and wrapping to a second line when the width allows.
-Plan, task, review, agent and foreman-report events show; job bookkeeping, messages and the other events do not. The strip keeps the newest 50 of them across redraws, so a busy run never empties it.
+and above the EVENTS head, when the foreman has reported, a dim `report #N: <first line of the report>` line, since the report can say what the needs-you queue does not —
+and the newest user-facing events under an EVENTS head at the bottom, one per row, newest on top, each row its clock time (with the date on another day), two spaces and the event in plain words, as `10:02  #328 landed` over `09:40  plan #99 done`, the words starting in one column; a tall screen shows up to 10 rows.
+Plan, task, review and agent events show; the foreman's report shows in the report line above, not in the list; job bookkeeping, messages and the other events do not. The top keeps the newest 50 of them across redraws, so a busy run never empties the list.
 Without `--project` every section shows the whole engine, whatever the working directory.
 With `--project` every section shows that one project,
 except that a broken agent still shows, in the needs-you queue and with its reason in the agents section, because agents belong to no project;
@@ -1112,7 +1112,7 @@ The queue is capped at three lines with a `+N more (brigada status)` line, and s
 
 The frame never has more lines than the terminal is tall.
 When the view is taller, lines drop class by class, each class from the bottom of the view upward, one line at a time, until it fits:
-the events strip's second line, then the report line above it;
+event rows 3 to 10, from the bottom, then row 2, then the report line above the EVENTS head;
 finished plans, folded into the dim `+N finished` line;
 the blank lines between sections;
 queued `·` task lines, including `(waiting on ...)` and `(review)`, from the last plan upward;
@@ -1120,7 +1120,7 @@ idle agents (no running job, quota neither cooling nor broken), counted in the d
 held `?` and retry `↺` lines, the dim lines of the FOREMAN and JOBS blocks and parked `!` task lines;
 running `▸` lines;
 and then every other line outside the header and the needs-you queue —
-the events strip's first line, the remaining agent lines, the `all ≤ global N` line, the fold lines, each plan's own line, the placeholders, the PLANS and AGENTS heads —
+event row 1, the remaining agent lines, the `all ≤ global N` line, the fold lines, each plan's own line, the placeholders, the PLANS, AGENTS and EVENTS heads —
 with the meters strip last of them, though it sits above the needs-you queue.
 
 A fold line not yet shown costs the line it adds, and a section head, FOREMAN and JOBS included, goes with its section's last line.
@@ -1403,7 +1403,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada status [--line] [--all]`: the engine, jobs, plans and the needs-you queue, plus a hint when your CLIs offer unregistered models. See [section 4](#4-while-work-runs).
 - `brigada agents`: the models your CLIs offer that no agent registers, with their name-based tier and account, and registered models a CLI no longer lists; read-only. See [section 8](#models-added-later).
 - `brigada agents add <harness>/<model> [--classes CLASSES] [--effort LEVEL] [--now]`: register one model by appending its line to the agents file; restart a running runner to serve it, waiting out its running jobs, or cutting them with `--now`. See [section 8](#models-added-later).
-- `brigada history [--task N] [--job N] [--limit N]`: the timeline. See [section 4](#history-diffs-and-logs).
+- `brigada history [--task N] [--job N] [--limit N] [--raw]`: the timeline in plain words; `--raw` prints the internal form. See [section 4](#history-diffs-and-logs).
 - `brigada diff <task-id> [--stat] [--repo URL]`: what a task changed, as `git diff base...branch`; run inside the repo. See [section 4](#history-diffs-and-logs).
 - `brigada logs <job-id> [--check] [--tail N] [--follow]`, or `brigada logs --task N`: a job's transcript as readable lines, or its check log. See [section 4](#history-diffs-and-logs).
 - `brigada stats`: tier, attempts, successes, rate and confidence per agent, class and repo. See [section 9](#9-the-record-and-stats).

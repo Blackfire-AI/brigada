@@ -27,7 +27,7 @@ What brigada 1.0 promises until 2.0.
 - `project list`: `--no-start`.
 - `project set` and `project show`: `--repo`, `--no-start`.
 - `project import`: `--repo`, `--file`, `--yes`, `--no-start`.
-- `history`: `--task`, `--job`, `--limit`, `--no-start`.
+- `history`: `--task`, `--job`, `--limit`, `--raw`, `--no-start`.
 - `stats`: `--no-start`.
 - `capacity`: `--project`, `--no-start`.
 - `top`: `--interval`, `--project`, `--no-start`.

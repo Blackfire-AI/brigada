@@ -3,13 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -52,7 +50,7 @@ const topEventsLimit = 200
 
 // topEventsKeep is how many kept items the loop holds across ticks: the
 // newest, so a busy run that pushes every kept item out of one page
-// never empties the strip.
+// never empties the events section.
 const topEventsKeep = 50
 
 // runTop is `brigada top`: the engine as a full-screen view that
@@ -202,7 +200,7 @@ func topFetch(ctx context.Context, client topClient, repo string) (topModel, err
 	}
 	if page, err := client.History(ctx, api.HistoryQuery{ProjectID: projectID, Limit: topEventsLimit, Last: true}); err == nil {
 		for _, it := range page.Items {
-			if _, ok := topEventWords(it, time.Time{}); ok {
+			if topShows(it) {
 				model.events = append(model.events, it)
 			}
 		}
@@ -300,20 +298,21 @@ func dialEngine(ctx context.Context, rt *runtime, role string, noStart bool) (*a
 // strip, NEEDS YOU, the FOREMAN block (a foreman turn no plan claims) and
 // the JOBS block (any other job no plan claims), each only when it has
 // lines, the PLANS tree with every job under its plan, the AGENTS
-// section and the events strip at the bottom, every line cut to width.
+// section and the EVENTS section at the bottom (the report line, the
+// EVENTS head and up to 10 rows, newest first), every line cut to width.
 // The height is a limit, 0 meaning none: the frame never has more lines
 // than it. Every line carries a yield class (topYield) and, while the
 // frame is taller than the height, lines drop class by class, each class
 // from the bottom of the view upward, one line at a time, until it fits:
-// a the events strip's second line, then the foreman's report line above
-// the strip; b finished plans, folded into the dim
+// a0 event rows 3 and up; a event row 2, then the foreman's report line
+// above the EVENTS head; b finished plans, folded into the dim
 // +N finished line; c the blank lines between sections; d queued task
 // lines (waiting on, review included); e idle agents, counted in the dim
 // +N idle · M off (brigada capacity) line; f held and retry lines, the
 // FOREMAN and JOBS notes and parked task lines; g running lines; h every other line outside the header and NEEDS
-// YOU — the events strip's first line, the other agent lines, the global
-// line, the fold lines, each plan's own line, the placeholders, the PLANS
-// and AGENTS heads — with the meters strip dropping last of the class,
+// YOU — event row 1, the other agent lines, the global
+// line, the fold lines, each plan's own line, the placeholders, the PLANS,
+// AGENTS and EVENTS heads — with the meters strip dropping last of the class,
 // though it sits above NEEDS YOU. A section head goes with its section's
 // last line, the FOREMAN and JOBS heads too: it drops next, unless the
 // frame already fits. i the hard clip: only the header (with its error
@@ -339,6 +338,7 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 	add(jobs)
 	add(newTopPlans(model.status, model.tagPlans, model.statusOK, now, style, width))
 	add(topAgentLines(model, now, style, width))
+	// The report line, then the EVENTS head, with no blank line between.
 	add(append(topReportLine(model.status, style, width), topEventLines(model.events, now, style, width)...))
 
 	frame := &topFrame{lines: lines, hidden: model.status.HiddenFinishedPlans, style: style}
@@ -361,7 +361,8 @@ type topYield int
 
 const (
 	yieldPinned       topYield = iota // header and NEEDS YOU: only the hard clip cuts them
-	yieldEventsSecond                 // a: the events strip's second line
+	yieldEventsExtra                  // a0: event rows 3 and up
+	yieldEventsSecond                 // a: event row 2, then the report line above the EVENTS head
 	yieldFinished                     // b: a finished plan's line, folded into +N finished
 	yieldBlank                        // c: the blank lines between sections
 	yieldQueued                       // d: queued, waiting-on and review task lines
@@ -378,6 +379,7 @@ const (
 	topSecJobs
 	topSecPlans
 	topSecAgents
+	topSecEvents
 )
 
 // topFold marks a generated line: the dim count of what dropped.
@@ -515,7 +517,7 @@ func (f *topFrame) fit(height int) {
 	if height <= 0 {
 		return
 	}
-	for class := yieldEventsSecond; class <= yieldRest; class++ {
+	for class := yieldEventsExtra; class <= yieldRest; class++ {
 		for _, late := range []bool{false, true} {
 			for i := len(f.lines) - 1; i >= 0 && f.size() > height; i-- {
 				l := f.lines[i]
@@ -1442,56 +1444,23 @@ func topNeedsYouLine(n engine.NeedsYouItem) string {
 	return "! " + subject + " " + reason
 }
 
-// topEvents is the strip at the bottom: the newest kept items,
-// newest first, joined by topEventSep. Whole items fill the first line; the
-// first item that does not fit wraps to a second line only when a
-// whole item fits there, that line cut to width when items remain —
-// and when no item fits on the second line the strip stays one line
-// cut to width. There is never a third line. topEventItem renders each
-// item for both.
-func topEvents(items []history.Item, now time.Time, style term.Style, width int) []string {
-	if len(items) == 0 {
-		return []string{style.Dim("no events")}
+// topEventRows is how many event rows the EVENTS section shows at most.
+const topEventRows = 10
+
+// topShows says whether top shows an item: an event the allowlist words,
+// except the foreman's report, which the report line above EVENTS says.
+func topShows(it history.Item) bool {
+	if it.Kind == "foreman_report" {
+		return false
 	}
-	sep := topEventSep(style)
-	parts := make([]string, len(items))
-	for i := len(items) - 1; i >= 0; i-- {
-		parts[len(items)-1-i] = topEventItem(items[i], now, style)
-	}
-	// fill packs whole items from start while they fit; it reports how
-	// many it took and the first index it left out.
-	fill := func(start int) (took, next int) {
-		used := 0
-		for i := start; i < len(parts); i++ {
-			part := term.VisibleWidth(parts[i])
-			if i > start {
-				part += term.VisibleWidth(sep)
-			}
-			if used+part > width {
-				return i - start, i
-			}
-			used += part
-		}
-		return len(parts) - start, len(parts)
-	}
-	first, next := fill(0)
-	if next == len(parts) {
-		return []string{strings.Join(parts, sep)}
-	}
-	if second, _ := fill(next); second == 0 {
-		// No whole item fits on the second line: one line, cut.
-		return []string{topFit(strings.Join(parts, sep), width)}
-	}
-	return []string{
-		strings.Join(parts[:first], sep),
-		topFit(strings.Join(parts[first:], sep), width),
-	}
+	_, ok := topEventWords(it, time.Time{})
+	return ok
 }
 
-// topReportLine is the foreman's last report above the events strip, Dim:
+// topReportLine is the foreman's last report above the EVENTS head, Dim:
 // `report #<job>: <first line of the text>`, cut to width. Only a status
-// with a report has it; it yields in the strip's second-line class, right
-// after that line, since the report can say what NEEDS YOU does not.
+// with a report has it; it yields in the second event row's class, right
+// after that row, since the report can say what NEEDS YOU does not.
 func topReportLine(st api.Status, style term.Style, width int) []topLine {
 	if st.Report == nil {
 		return nil
@@ -1501,109 +1470,56 @@ func topReportLine(st api.Status, style term.Style, width int) []topLine {
 	return []topLine{{text: style.Dim(cutLine(text, width)), class: yieldEventsSecond}}
 }
 
-// topEventLines is the strip with its yield classes: the first line is
-// class h, the second class a, the first line to go.
+// topEventLines is the EVENTS section: its head, then the newest kept
+// items, newest first, one per row, at most topEventRows. A row is the
+// time, two spaces and the event's words, the time column padded to the
+// widest time of the rows built so the words start in one column; each
+// row is cut to width. With no items the section is the head and a dim
+// `no events`. Row 1 and the head yield last (yieldRest), row 2 in
+// yieldEventsSecond and rows 3 and up in yieldEventsExtra, the first
+// class to go; the head goes with the section's last row.
 func topEventLines(items []history.Item, now time.Time, style term.Style, width int) []topLine {
-	var lines []topLine
-	for i, text := range topEvents(items, now, style, width) {
-		class := yieldRest
-		if i > 0 {
-			class = yieldEventsSecond
+	head := topLine{text: topSectionHead("EVENTS", style, width), class: yieldRest, section: topSecEvents, head: true}
+	if len(items) == 0 {
+		return []topLine{head, {text: style.Dim("no events"), class: yieldRest, section: topSecEvents}}
+	}
+	if len(items) > topEventRows {
+		items = items[len(items)-topEventRows:]
+	}
+	clocks := make([]string, len(items))
+	pad := 0
+	for i := range items {
+		clocks[i] = topClock(items[len(items)-1-i].CreatedAt, now)
+		if n := term.VisibleWidth(clocks[i]); n > pad {
+			pad = n
 		}
-		lines = append(lines, topLine{text: text, class: class})
+	}
+	lines := []topLine{head}
+	for i, clock := range clocks {
+		words, _ := topEventWords(items[len(items)-1-i], now)
+		text := clock + strings.Repeat(" ", pad-term.VisibleWidth(clock)) + "  " + topColourStates(words, style)
+		class := yieldRest
+		switch {
+		case i == 1:
+			class = yieldEventsSecond
+		case i > 1:
+			class = yieldEventsExtra
+		}
+		lines = append(lines, topLine{text: topFit(text, width), class: class, section: topSecEvents})
 	}
 	return lines
 }
 
-// topEventSep joins the strip's items and the header's parts: the style's
+// topEventSep joins the events section's items and the header's parts: the style's
 // dot between spaces, three columns wide in either alphabet.
 func topEventSep(style term.Style) string { return " " + style.Dot() + " " }
 
-// topEventPayload is the part of an event's payload the strip words.
-type topEventPayload struct {
-	Plan    int64  `json:"plan"`
-	Status  string `json:"status"`
-	Branch  string `json:"branch"`
-	Pushed  string `json:"pushed"`
-	Harness string `json:"harness"`
-	Model   string `json:"model"`
-	Account string `json:"account"`
-	Until   string `json:"until"`
-}
-
-// topEventWords is an event in plain words, or false when the strip does
-// not show its kind: only the allowlist below shows, and a message never
-// does. now reads the clock of an agent_cooling's deadline.
+// topEventWords is an event in plain words, or false when top does not
+// show its kind: history.EventWords holds the allowlist and the wording
+// that `brigada history` shares. now reads the clock of an agent_cooling's
+// deadline.
 func topEventWords(it history.Item, now time.Time) (string, bool) {
-	if it.Type != history.TypeEvent {
-		return "", false
-	}
-	var p topEventPayload
-	if len(it.Payload) > 0 {
-		_ = json.Unmarshal(it.Payload, &p) // an unreadable payload words as an empty one
-	}
-	task := "task"
-	if it.TaskID != 0 {
-		task = "#" + strconv.FormatInt(it.TaskID, 10)
-	}
-	plan := "plan"
-	if p.Plan != 0 {
-		plan = "plan #" + strconv.FormatInt(p.Plan, 10)
-	}
-	agent := p.Harness + "/" + p.Model
-	switch it.Kind {
-	case "plan_done":
-		return plan + " done", true
-	case "plan_approved":
-		return plan + " approved", true
-	case "plan_awaiting_approval":
-		return plan + " awaiting approval", true
-	case "task_done":
-		return task + " done", true
-	case "task_landed":
-		if p.Pushed == "waiting" || p.Pushed == "local" {
-			return task + " landed, push waits", true
-		}
-		return task + " landed", true
-	case "task_pushed":
-		return task + " pushed", true
-	case "task_failed":
-		return task + " failed", true
-	case "task_land_failed":
-		return task + " land failed", true
-	case "review_verdict":
-		verdict := "review no verdict"
-		switch p.Status {
-		case "approve":
-			verdict = "review approve"
-		case "changes":
-			verdict = "review changes"
-		}
-		if p.Branch != "" {
-			verdict += " " + p.Branch
-		}
-		return verdict, true
-	case "agent_broken":
-		return agent + " broken", true
-	case "agent_recovered":
-		return agent + " recovered", true
-	case "agent_cooling":
-		words := p.Account + " cooling"
-		if p.Until != "" {
-			words += " until " + api.LocalClock(p.Until, now)
-		}
-		return words, true
-	case "foreman_report":
-		return "report #" + strconv.FormatInt(it.JobID, 10), true
-	}
-	return "", false
-}
-
-// topEventItem is one kept event as the events strip shows it: its
-// clock time and its plain words, the state words coloured.
-func topEventItem(it history.Item, now time.Time, style term.Style) string {
-	words, _ := topEventWords(it, now)
-	return topClock(it.CreatedAt, now) + " " + topColourStates(words, style)
+	return history.EventWords(it, func(stamp string) string { return api.LocalClock(stamp, now) })
 }
 
 // topColourStates colours a line's state words: done and recovered in
