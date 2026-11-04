@@ -17,7 +17,7 @@ import (
 // selects an archive directory when it names one, and its digest verifies
 // the text found there; when no directory matches, [FindByDigest] finds
 // the text by digest alone.
-const Version = "1.0.0"
+const Version = "1.1.0"
 
 // Texts holds the role texts and skill files at their package-relative paths.
 //
