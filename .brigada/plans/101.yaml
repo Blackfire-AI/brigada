@@ -7,7 +7,7 @@ title: "brigada top: pre-release fix pass (follow-up to #162)"
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-11-04T08:25:24.461967Z
-updated: 2026-11-04T10:01:24.956942Z
+updated: 2026-11-04T10:24:54.388753Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -102,9 +102,11 @@ tasks:
     class: "implement"
     deps: []
     base: ""
-    tier: heavy
-    effort: medium
+    effort: high
+    review_tier: heavy
+    review_effort: medium
+    caps: {restart: 5}
     skills: ["bugfix"]
-    state: needs_foreman
+    state: running
     branch: ""
     rounds: 0
