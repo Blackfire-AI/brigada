@@ -5,9 +5,9 @@
 plan: 103
 title: "brigada top: visual redesign"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-04T18:01:34.310769Z
-updated: 2026-11-04T18:12:04.660491Z
+updated: 2026-11-04T18:14:18.827985Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -51,6 +51,20 @@ tasks:
   - id: 343
     name: "screens"
     title: "top: empty, idle, error and paused screens"
+    class: "implement"
+    deps: ["agents-grid"]
+    base: "agents-grid"
+    continue: "agents-grid"
+    effort: medium
+    review_tier: standard
+    review_effort: medium
+    caps: {fix_rounds: 4, review_rounds: 4, restart: 1}
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 344
+    name: "agents-grid"
+    title: "top: two-column agents and family colours"
     class: "implement"
     deps: ["table-rows"]
     base: "table-rows"
