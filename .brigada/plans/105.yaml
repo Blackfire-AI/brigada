@@ -5,9 +5,9 @@
 plan: 105
 title: "v1.1.0 fix pass, step 2: #173, #172, #180, #182"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-04T21:25:28.74361Z
-updated: 2026-11-04T21:30:27.656451Z
+updated: 2026-11-04T21:32:43.138088Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -85,6 +85,21 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["bugfix"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 351
+    name: "check-log-docs"
+    title: "check_log: foreman text, 1.1.0 archive and docs"
+    class: "implement"
+    deps: ["check-log"]
+    base: "check-log"
+    continue: "check-log"
+    effort: medium
+    review_tier: standard
+    review_effort: medium
+    caps: {restart: 0}
+    skills: ["surface-parity"]
     state: pending
     branch: ""
     rounds: 0
