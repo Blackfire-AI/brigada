@@ -5,10 +5,16 @@
 #
 # exit 0: the branch does not exist yet, or a run for its head succeeded.
 # exit 1: the PR conflicts with its base, no run for the head appeared
-#         within the grace period, or a run for the head completed without
-#         success. The first line gives the reason (or the failed run URL).
+#         within the grace period, a run for the head completed without
+#         success, or a job still got no runner after max_attempts (3)
+#         attempts. The first line gives the reason (or the failed run URL;
+#         for a spent job the line "<jobs> got no runner after <n> attempts").
 # exit 2: PR mergeability is unknown, no run for the head has appeared
-#         within the grace period, a run is pending, or a lookup fails.
+#         within the grace period, a run or job is pending, a lookup fails,
+#         or a failed run's only failures are jobs that got no runner (a
+#         cancelled job with no step run): the script reruns those jobs and
+#         waits, and when gh refuses the rerun it prints gh's error and
+#         retries on the next call.
 #
 # Enable it with: brigada project set land_ready=scripts/land-ready.sh
 set -u
@@ -47,8 +53,8 @@ if [ "$pr" != none ] && [ -n "$pr" ]; then
     UNKNOWN) echo "PR #$number mergeability is UNKNOWN"; exit 2;;
   esac
 fi
-run=$(gh run list --branch "$branch" --limit 100 --json status,conclusion,url,headSha \
-  --jq "(map(select(.headSha == \"$head\")) | .[0]) // .[0] | if . == null then \"none\" else \"\\(.headSha)|\\(.status)|\\(.conclusion // \"\")|\\(.url)\" end") || {
+run=$(gh run list --branch "$branch" --limit 100 --json status,conclusion,url,headSha,databaseId,attempt \
+  --jq "(map(select(.headSha == \"$head\")) | .[0]) // .[0] | if . == null then \"none\" else \"\\(.headSha)|\\(.status)|\\(.conclusion // \"\")|\\(.databaseId)|\\(.attempt)|\\(.url)\" end") || {
   echo "gh run list failed for $branch"
   exit 2
 }
@@ -70,6 +76,10 @@ rest=${run#*|}
 status=${rest%%|*}
 rest=${rest#*|}
 conclusion=${rest%%|*}
+rest=${rest#*|}
+run_id=${rest%%|*}
+rest=${rest#*|}
+attempt=${rest%%|*}
 url=${rest#*|}
 if [ "$status" != completed ]; then
   echo "run for $head is $status: $url"
@@ -77,6 +87,51 @@ if [ "$status" != completed ]; then
 fi
 if [ "$conclusion" = success ]; then
   exit 0
+fi
+if [ "$conclusion" = failure ]; then
+  jobs=$(gh api "repos/{owner}/{repo}/actions/runs/$run_id/jobs?per_page=100" --jq '.jobs[] | "\(.name)|\(.status)|\(.conclusion // "")|\(if ((.steps // []) | map(select((.conclusion // "") != "" and .conclusion != "skipped")) | length) > 0 then "ran" else "none" end)"') || {
+    echo "gh jobs lookup failed for run $run_id"
+    exit 2
+  }
+  max_attempts=3
+  total=0
+  bad=0
+  names=
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    total=$((total + 1))
+    ran=${line##*|}
+    line=${line%|*}
+    job_conclusion=${line##*|}
+    line=${line%|*}
+    job_status=${line##*|}
+    job_name=${line%|*}
+    if [ "$job_status" != completed ]; then
+      echo "job $job_name of run $run_id is $job_status: $url"
+      exit 2
+    fi
+    if [ "$job_conclusion" = cancelled ] && [ "$ran" = none ]; then
+      names="${names:+$names, }$job_name"
+    elif [ "$job_conclusion" != success ]; then
+      bad=1
+    fi
+  done <<EOF
+$jobs
+EOF
+  if [ "$total" -gt 0 ] && [ "$bad" = 0 ] && [ -n "$names" ]; then
+    case $attempt in *[!0-9]*|'') echo "invalid attempt for run $run_id: $attempt"; exit 2;; esac
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      echo "$names got no runner after $attempt attempts"
+      echo "$url"
+      exit 1
+    fi
+    rerun=$(gh run rerun "$run_id" --failed 2>&1) || {
+      echo "$rerun"
+      exit 2
+    }
+    echo "$names got no runner on attempt $attempt of $max_attempts; rerun requested: $url"
+    exit 2
+  fi
 fi
 echo "$url"
 echo "run for $head concluded $conclusion"
