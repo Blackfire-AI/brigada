@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +39,10 @@ type jobRun struct {
 	toolOpenedAt time.Time
 	sessionID    string
 	cliError     *adapter.Event
+	// outputCut is the output-limit cut-off of the run's last model step,
+	// cleared by a later step that ended otherwise. It is no cliError: a
+	// run that still ended with a result block stands.
+	outputCut *adapter.OutputCut
 	// turnStarted is set when the stdout stream shows its turn.started
 	// (adapter.TurnMarker): errors the adapter marks Notice are warnings
 	// until then.
@@ -478,6 +484,8 @@ func (r *jobRun) recordEvent(ad adapter.Adapter, line []byte, fromStderr bool) {
 		r.sessionID = ev.SessionID
 	}
 	switch ev.Kind {
+	case adapter.EvUsage:
+		r.outputCut = ev.OutputCut
 	case adapter.EvError:
 		// A stderr-sorted error is kept apart from the stream's own
 		// (see stderrError): stderr carries warnings beside failures.
@@ -727,6 +735,15 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 	}
 
 	result := parseResult(ad.ResultText(r.snapshotEvents()))
+	if result.Reason == reasonNoResult {
+		r.mu.Lock()
+		cut := r.outputCut
+		r.mu.Unlock()
+		if cut != nil {
+			r.finishWithCLIError(ctx, outputLimitText(*cut), &adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrOutputLimit})
+			return
+		}
+	}
 	if result.Reason == reasonNoResult && exitErr != nil {
 		result.Summary = fmt.Sprintf("worker exited with %v; %s", exitErr, result.Summary)
 	}
@@ -867,6 +884,31 @@ func (r *jobRun) finishWithCLIError(ctx context.Context, msg string, cliErr *ada
 		ErrorKind:  string(kind),
 		LimitUntil: cliErr.LimitUntil,
 	})
+}
+
+// outputLimitText is the error text of a run whose last step the output
+// token limit cut off: the total is output plus reasoning tokens.
+func outputLimitText(c adapter.OutputCut) string {
+	return fmt.Sprintf("output limit reached: %s tokens, %s of them reasoning",
+		groupDigits(c.Output+c.Reasoning), groupDigits(c.Reasoning))
+}
+
+// groupDigits writes n with a comma between thousands.
+func groupDigits(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	neg := strings.HasPrefix(s, "-")
+	s = strings.TrimPrefix(s, "-")
+	var b strings.Builder
+	if neg {
+		b.WriteByte('-')
+	}
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
 }
 
 // finishWithSetupError completes the job with a failed setup (§5.7): an

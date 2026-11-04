@@ -209,7 +209,19 @@ const (
 	// fixes its model or the account, so it stays out like an auth break
 	// and no probe clears it.
 	ErrModel ErrorKind = "model"
+	// ErrOutputLimit is a run whose last step the model's output token
+	// limit cut off. It is no stream error: a result block the run still
+	// ended with stands, and the runner reports the kind only for a run
+	// that ended with no result.
+	ErrOutputLimit ErrorKind = "output_limit"
 )
+
+// OutputCut is a model step cut off at its output token limit: the
+// tokens the step produced, and how many of them were reasoning.
+type OutputCut struct {
+	Output    int64
+	Reasoning int64
+}
 
 // modelRejectedRe matches a provider refusing the model by name: "The
 // 'x' model is not supported when using Codex with a ChatGPT account",
@@ -301,9 +313,13 @@ func ResumeCapable(harness string) bool {
 // ErrorKind and Text.
 type Event struct {
 	Usage *Usage
-	Kind  EventKind
-	Time  time.Time // when the adapter parsed it; the runner's clock
-	Text  string
+	// OutputCut rides a usage event whose step the output token limit
+	// cut off; a usage event without it closes a step that ended
+	// otherwise, which clears an earlier cut-off.
+	OutputCut *OutputCut
+	Kind      EventKind
+	Time      time.Time // when the adapter parsed it; the runner's clock
+	Text      string
 	// Args is a tool call's arguments as the CLI's stream carried them,
 	// empty for a CLI that prints none (or a kind that has none): with
 	// Text it names the call, so the runner's loop watch (§5.6) tells

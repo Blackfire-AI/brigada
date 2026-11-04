@@ -499,6 +499,7 @@ type lineJSON struct {
 }
 
 type partJSON struct {
+	Reason string          `json:"reason"`
 	Tokens json.RawMessage `json:"tokens"`
 	Type   string          `json:"type"`
 	Text   string          `json:"text"`
@@ -549,7 +550,20 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 		if u != nil {
 			u.Add(adapter.Calls(1))
 		}
-		return adapter.Event{Kind: adapter.EvUsage, Usage: u}, u != nil
+		ev := adapter.Event{Kind: adapter.EvUsage, Usage: u}
+		// A step that finishes with reason "length" hit the output token
+		// limit; the runner keeps only the last step's verdict.
+		if lj.Part.Reason == "length" {
+			cut := &adapter.OutputCut{}
+			if u != nil && u.OutputTokens != nil {
+				cut.Output = *u.OutputTokens
+			}
+			if u != nil && u.ReasoningTokens != nil {
+				cut.Reasoning = *u.ReasoningTokens
+			}
+			ev.OutputCut = cut
+		}
+		return ev, u != nil
 	case "step_start":
 		if lj.Part.Type == "step-start" && lj.SessionID != "" {
 			return adapter.Event{Kind: adapter.EvSession, SessionID: lj.SessionID}, true
