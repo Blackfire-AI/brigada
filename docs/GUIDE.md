@@ -1059,7 +1059,7 @@ A foreman turn is never held back by the plan or model caps, and goes ahead of q
 `brigada capacity` prints the same snapshot as two tables. AGENTS lists each agent with its tier, effort, cost weight, running jobs against its effective cap — its own runner, account and model caps with the global cap folded in — and the layer that binds it, then its quota: `ready`, `cooling until` a local time, or `broken`. LAYERS lists each cap layer with its key, cap, use and queue. It shows the project of the repository you are in; `--project URL` names another, and outside a repository it shows every project's.
 
 `brigada top` is a live view of the engine: every `--interval` (default 2s) it redraws a one-line header —
-the engine's pid, its uptime and the clock, a dim rule filling the width that remains, `q quit · p pause` at the right end —
+the scope, the engine's uptime and the clock, a dim rule filling the width that remains, `q quit · p pause` at the right end —
 then a meters strip —
 the global slots against their cap as a bar of ▓ and ░ with the use beside it, then the run, queue, held and needs counters —
 then the needs-you queue, the plans tree, the agents section —
@@ -1067,6 +1067,13 @@ one line per agent: its `harness/model`, its running jobs against its effective 
 then its quota as `✓` when ready, `↺ HH:MM` while cooling until that time, or `✗` and a short reason when broken;
 a dim `all ≤ global N` line under the list names the global cap —
 and the newest events as a strip at the bottom, the items joined by ` · `, wrapping to a second line when the width allows.
+Without `--project` every section shows the whole engine, whatever the working directory.
+With `--project` every section shows that one project,
+except that a broken agent still shows, in the needs-you queue and with its reason in the agents section, because agents belong to no project;
+every other entry stays the project's.
+The scope is the repository's short name with `--project` or when the engine has one project, and `N projects` otherwise.
+When more than one project shows, each plan line carries its repository's short name after the id, as in `#101 brigada Fix events strip`.
+The needs-you queue shows three lines, broken agents chosen first, and `+N more` counts the rest.
 
 The plans tree puts every job under its plan: a live plan's line carries its done/total and a progress bar,
 and beneath it come its running jobs (`▸`, in `brigada status`'s words),
