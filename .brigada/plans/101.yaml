@@ -83,7 +83,7 @@ tasks:
     review_tier: heavy
     caps: {restart: 0}
     skills: ["bugfix"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 335
