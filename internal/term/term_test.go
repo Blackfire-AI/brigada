@@ -22,6 +22,9 @@ func TestStylesAtEveryDepth(t *testing.T) {
 		{"Warn", Style.Warn, [4]string{"", "\x1b[33m", "\x1b[38;5;221m", "\x1b[38;2;255;215;95m"}},
 		{"Bad", Style.Bad, [4]string{"", "\x1b[31m", "\x1b[38;5;203m", "\x1b[38;2;255;95;95m"}},
 		{"Teal", Style.Teal, [4]string{"", "\x1b[96m", "\x1b[38;5;37m", "\x1b[38;2;0;175;175m"}},
+		{"Violet", Style.Violet, [4]string{"", "\x1b[95m", "\x1b[38;5;141m", "\x1b[38;2;177;151;255m"}},
+		{"Blue", Style.Blue, [4]string{"", "\x1b[94m", "\x1b[38;5;69m", "\x1b[38;2;95;135;255m"}},
+		{"Mint", Style.Mint, [4]string{"", "\x1b[92m", "\x1b[38;5;85m", "\x1b[38;2;110;231;183m"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, depth := range []logo.Depth{logo.NoColor, logo.Color16, logo.Color256, logo.TrueColor} {
@@ -46,6 +49,7 @@ func assertPlain(t *testing.T, style Style) {
 	for name, fn := range map[string]func(string) string{
 		"Bold": style.Bold, "Dim": style.Dim, "Accent": style.Accent,
 		"OK": style.OK, "Warn": style.Warn, "Bad": style.Bad, "Teal": style.Teal,
+		"Violet": style.Violet, "Blue": style.Blue, "Mint": style.Mint,
 		"TintNeeds": style.TintNeeds, "TintRun": style.TintRun,
 	} {
 		if got := fn(text); got != text {
@@ -112,6 +116,7 @@ func TestSymbols(t *testing.T) {
 		{"Pointer", Style.Pointer, "▸", ">"},
 		{"Rule", Style.Rule, "━━", "=="},
 		{"Again", Style.Again, "↺", "->"},
+		{"Bullet", Style.Bullet, "●", "*"},
 		{"Filled", Style.Filled, "■", "#"},
 		{"Empty", Style.Empty, "□", "."},
 		{"Dash", Style.Dash, "─", "-"},
