@@ -52,6 +52,8 @@ type eventPayload struct {
 	Count    int64  `json:"count,omitempty"`
 	// Placement is a review verdict's placement kind (issue #126).
 	Placement string `json:"placement,omitempty"`
+	// ParkKind is the parking event a task_unattended names.
+	ParkKind string `json:"park_kind,omitempty"`
 }
 
 // hookPost is one notification waiting for its webhook turn: the event
@@ -256,6 +258,8 @@ func eventsAfterTx(tx *sql.Tx, after, limit int64) ([]Event, error) {
 		}
 		ev.Reason = reasonOf(ev.Kind, payload)
 		ev.Parked = parkedBy(payload)
+		ev.ParkedAtUser = parkedAtUser(payload)
+		ev.ParkKind = parkKindOf(payload)
 		if ev.Kind == KindPlanAwaitingApproval {
 			// The event names its plan in the payload, not through a task.
 			var p eventPayload
@@ -283,6 +287,26 @@ func parkedBy(payload string) bool {
 		return false
 	}
 	return p.Status == "needs_foreman" || p.Status == "needs_user"
+}
+
+// parkedAtUser reports whether the event parked its task at needs_user:
+// the one park whose banner still wakes the user. A park at needs_foreman
+// is the foreman's; task_unattended speaks for it when nobody handles it.
+func parkedAtUser(payload string) bool {
+	var p eventPayload
+	if payload == "" || json.Unmarshal([]byte(payload), &p) != nil {
+		return false
+	}
+	return p.Status == "needs_user"
+}
+
+// parkKindOf is the parking event's kind a task_unattended payload names.
+func parkKindOf(payload string) string {
+	var p eventPayload
+	if payload == "" || json.Unmarshal([]byte(payload), &p) != nil {
+		return ""
+	}
+	return p.ParkKind
 }
 
 // reasonOf picks the payload's words for the kind, the same choice the

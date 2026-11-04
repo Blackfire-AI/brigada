@@ -24,6 +24,7 @@ const (
 	KindForemanLimited         = "foreman_limited"           // the foreman's CLI hit its subscription limit (§4.4, §10)
 	KindForemanWakeBudgetSpent = "foreman_wake_budget_spent" // the day's foreman wake budget is spent (§4.3, §10)
 	KindAgentBroken            = "agent_broken"              // an agent was marked broken (§8 "Health", §10)
+	KindTaskUnattended         = "task_unattended"           // a task parked at needs_foreman that the foreman does not hold (§10)
 	// KindReviewUnservable: a task's queued review can never be taken —
 	// no agent of another family offers review (§7, §10).
 	KindReviewUnservable = "review_unservable"
@@ -76,15 +77,24 @@ type Event struct {
 	// report's, whose own lines the mapper cuts to the first.
 	Reason string
 	// Parked is true when the event parked its task (its payload names
-	// needs_foreman or needs_user as the task's state). A needs-you kind
-	// wakes the user only then.
-	Parked bool
+	// needs_foreman or needs_user as the task's state); ParkedAtUser is
+	// true when that state is needs_user. A needs-you kind wakes the user
+	// only for a park at needs_user: a park at needs_foreman is the
+	// foreman's, and task_unattended speaks when nobody handles it.
+	Parked       bool
+	ParkedAtUser bool
+	// ParkKind is the kind of the parking event a task_unattended names;
+	// the webhook's text reads it to keep a check's output off the relay.
+	ParkKind string
 }
 
 // needsForemanKinds are the event kinds whose body is "task #N needs
-// you: <reason>": every way a task parks at needs_foreman (§3, §7).
-// task_check_failed and review_changes also land without parking, before
-// a fix round; Message skips an event that did not park (Event.Parked).
+// you: <reason>" when they park a task at needs_user (§3, §7): the ways
+// a task parks. A park at needs_foreman raises no banner of its own —
+// the foreman handles it, and task_unattended raises the banner when it
+// will not. task_check_failed and review_changes also land without
+// parking, before a fix round; Message skips an event that did not park
+// at needs_user (Event.ParkedAtUser).
 var needsForemanKinds = map[string]bool{
 	KindTaskCheckFailed: true,
 	KindTaskNeedsHelp:   true,
@@ -152,7 +162,9 @@ func Message(ev Event) (t, body string, ok bool) {
 		// Reason is the needs-you entry's own words: what is missing and
 		// what the user can do about it.
 		return title, oneLine(fmt.Sprintf("task #%d reviewing: %s", ev.TaskID, ev.Reason), bodyLimit), true
-	case needsForemanKinds[ev.Kind] && ev.Parked:
+	case ev.Kind == KindTaskUnattended || needsForemanKinds[ev.Kind] && ev.ParkedAtUser:
+		// task_unattended: a task parked at needs_foreman that the
+		// foreman does not hold (§10); its Reason is the queue's words.
 		reason := ev.Reason
 		if reason == "" {
 			reason = ev.Kind
@@ -169,7 +181,7 @@ func Message(ev Event) (t, body string, ok bool) {
 // task out of fix rounds with its reason included, posts the banner's
 // line.
 func hookText(ev Event, body string) string {
-	if ev.Kind == KindTaskCheckFailed {
+	if ev.Kind == KindTaskCheckFailed || ev.Kind == KindTaskUnattended && ev.ParkKind == KindTaskCheckFailed {
 		return oneLine(fmt.Sprintf("task #%d needs you: its check failed", ev.TaskID), bodyLimit)
 	}
 	return body

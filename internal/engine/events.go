@@ -25,6 +25,7 @@ const (
 	evPlanAwaitingApproval    = "plan_awaiting_approval"     // CreatePlan: the plan is over the approval limit and waits for the user's yes (§6.3)
 	evPlanReviewQueued        = "plan_review_queued"         // a plan_review job is queued: the plan waits in reviewing for the verdict before any work is queued (§6.2)
 	evPlanReviewed            = "plan_reviewed"              // a plan review round ended: approve, changes (with findings), no verdict, or accepted by the foreman (plan_accept); the plan proceeded, parks at needs_foreman for the foreman's answer, or waits for the user's yes (§6.2)
+	evTaskUnattended          = "task_unattended"            // a task parked at needs_foreman that the foreman does not hold — no harness, the limit, the budget, a stall, an outage, or a done turn that consumed its event — so it waits for the user: one event per park, Reason the needs-you words and ParkKind the parking event's kind; a plain log record, in no inbox, waking no turn (§4.2, §10)
 	evPlanVerdictUnanswered   = "plan_verdict_unanswered"    // a done foreman turn consumed a plan's changes verdict without answering it (issue #164): one event per swallowed verdict names the plan, the verdict's round and the turn that failed to act; the plan stays parked, and the event wakes no turn (§4.2, §6.2)
 	evPlanAmended             = "plan_amended"               // the foreman amended a live plan: tasks added, cancelled or re-pointed (§12.2)
 	evPlanApproved            = "plan_approved"              // the user approved the plan; its first wave is queued (§6.3)
@@ -133,6 +134,8 @@ type eventPayload struct {
 	// record and the history, never undone (§6.3).
 	AfterLandError string `json:"after_land_error,omitempty"`
 	Question       string `json:"question,omitempty"` // the worker's question (§5.4)
+	// ParkKind is the kind of the parking event a task_unattended names.
+	ParkKind string `json:"park_kind,omitempty"`
 	// Discoveries is what a worker learned beyond its own task (§4.2).
 	Discoveries string `json:"discoveries,omitempty"`
 	// QuestionID names the questions row an answer filled (§3, §11):

@@ -57,42 +57,42 @@ func TestMessage(t *testing.T) {
 		},
 		{
 			name:  "check failed",
-			ev:    Event{Kind: KindTaskCheckFailed, Parked: true, TaskID: 3, Reason: "exit 1: parser_test.go:42"},
+			ev:    Event{Kind: KindTaskCheckFailed, Parked: true, ParkedAtUser: true, TaskID: 3, Reason: "exit 1: parser_test.go:42"},
 			title: "brigada",
 			body:  "task #3 needs you: exit 1: parser_test.go:42",
 			ok:    true,
 		},
 		{
 			name:  "needs help reads the question",
-			ev:    Event{Kind: KindTaskNeedsHelp, Parked: true, TaskID: 4, Reason: "ignored", PlanTitle: "x"},
+			ev:    Event{Kind: KindTaskNeedsHelp, Parked: true, ParkedAtUser: true, TaskID: 4, Reason: "ignored", PlanTitle: "x"},
 			title: "brigada",
 			body:  "task #4 needs you: ignored",
 			ok:    true,
 		},
 		{
 			name:  "run failed",
-			ev:    Event{Kind: KindTaskFailed, Parked: true, TaskID: 5, Reason: "the CLI died mid-run"},
+			ev:    Event{Kind: KindTaskFailed, Parked: true, ParkedAtUser: true, TaskID: 5, Reason: "the CLI died mid-run"},
 			title: "brigada",
 			body:  "task #5 needs you: the CLI died mid-run",
 			ok:    true,
 		},
 		{
 			name:  "review changes read the findings",
-			ev:    Event{Kind: KindReviewChanges, Parked: true, TaskID: 6, Reason: "the off-by-one in retry"},
+			ev:    Event{Kind: KindReviewChanges, Parked: true, ParkedAtUser: true, TaskID: 6, Reason: "the off-by-one in retry"},
 			title: "brigada",
 			body:  "task #6 needs you: the off-by-one in retry",
 			ok:    true,
 		},
 		{
 			name:  "no verdict",
-			ev:    Event{Kind: KindReviewNoVerdict, Parked: true, TaskID: 7, Reason: "verdict block missing"},
+			ev:    Event{Kind: KindReviewNoVerdict, Parked: true, ParkedAtUser: true, TaskID: 7, Reason: "verdict block missing"},
 			title: "brigada",
 			body:  "task #7 needs you: verdict block missing",
 			ok:    true,
 		},
 		{
 			name:  "out of rounds, once the engine emits it",
-			ev:    Event{Kind: KindTaskOutOfRounds, Parked: true, TaskID: 8, Reason: "fix rounds spent"},
+			ev:    Event{Kind: KindTaskOutOfRounds, Parked: true, ParkedAtUser: true, TaskID: 8, Reason: "fix rounds spent"},
 			title: "brigada",
 			body:  "task #8 needs you: fix rounds spent",
 			ok:    true,
@@ -113,14 +113,14 @@ func TestMessage(t *testing.T) {
 		},
 		{
 			name:  "empty reason falls back to the kind",
-			ev:    Event{Kind: KindTaskCheckFailed, Parked: true, TaskID: 9},
+			ev:    Event{Kind: KindTaskCheckFailed, Parked: true, ParkedAtUser: true, TaskID: 9},
 			title: "brigada",
 			body:  "task #9 needs you: task_check_failed",
 			ok:    true,
 		},
 		{
 			name:  "reason flattens to one line",
-			ev:    Event{Kind: KindTaskCheckFailed, Parked: true, TaskID: 2, Reason: "first line\nsecond\tline"},
+			ev:    Event{Kind: KindTaskCheckFailed, Parked: true, ParkedAtUser: true, TaskID: 2, Reason: "first line\nsecond\tline"},
 			title: "brigada",
 			body:  "task #2 needs you: first line second line",
 			ok:    true,
@@ -136,6 +136,15 @@ func TestMessage(t *testing.T) {
 		// lands without parking the task: no banner.
 		{name: "check failed without park", ev: Event{Kind: KindTaskCheckFailed, TaskID: 1, Reason: "exit 1"}},
 		{name: "review changes without park", ev: Event{Kind: KindReviewChanges, TaskID: 1, Reason: "nit"}},
+		// A park at needs_foreman is the foreman's: no banner of its own.
+		{name: "park at needs_foreman", ev: Event{Kind: KindTaskNeedsHelp, Parked: true, TaskID: 1, Reason: "which way?"}},
+		{
+			name:  "task unattended",
+			ev:    Event{Kind: KindTaskUnattended, TaskID: 11, Reason: "which way?", ParkKind: KindTaskNeedsHelp},
+			title: "brigada",
+			body:  "task #11 needs you: which way?",
+			ok:    true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -160,7 +169,7 @@ func TestMessage(t *testing.T) {
 }
 
 func TestMessageBodyLimit(t *testing.T) {
-	ev := Event{Kind: KindTaskCheckFailed, Parked: true, TaskID: 1, Reason: strings.Repeat("x", bodyLimit*2)}
+	ev := Event{Kind: KindTaskCheckFailed, Parked: true, ParkedAtUser: true, TaskID: 1, Reason: strings.Repeat("x", bodyLimit*2)}
 	_, body, ok := Message(ev)
 	if !ok {
 		t.Fatal("a long reason must still notify")
@@ -230,6 +239,21 @@ func TestParkedBy(t *testing.T) {
 				t.Errorf("parkedBy(%q) = %v, want %v", tc.payload, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestParkedAtUserAndParkKind(t *testing.T) {
+	if parkedAtUser(`{"status":"needs_foreman"}`) || !parkedAtUser(`{"status":"needs_user"}`) || parkedAtUser("") {
+		t.Error("parkedAtUser must be true for needs_user only")
+	}
+	if got := parkKindOf(`{"park_kind":"task_check_failed"}`); got != KindTaskCheckFailed {
+		t.Errorf("parkKindOf = %q, want task_check_failed", got)
+	}
+	if got := hookText(Event{Kind: KindTaskUnattended, TaskID: 4, ParkKind: KindTaskCheckFailed}, "task #4 needs you: secret"); got != "task #4 needs you: its check failed" {
+		t.Errorf("hookText = %q, want the check output left out", got)
+	}
+	if got := hookText(Event{Kind: KindTaskUnattended, TaskID: 4, ParkKind: KindTaskNeedsHelp}, "task #4 needs you: why?"); got != "task #4 needs you: why?" {
+		t.Errorf("hookText = %q, want the banner's line", got)
 	}
 }
 

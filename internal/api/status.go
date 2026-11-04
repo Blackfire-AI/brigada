@@ -47,6 +47,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id identit
 		return
 	}
 
+	// The queue holds only what a rule or the foreman gave the user
+	// (§10): the tasks the foreman holds move to their own list for
+	// every caller but the foreman, whose status tool renders the same
+	// sections and reads the whole queue.
+	if id.role != roleForeman {
+		st.SplitForemanHolds()
+	}
+
 	// A digest belongs to one project; never apply it to an unscoped view.
 	if project != 0 {
 		digests := make(map[string]string)

@@ -20,7 +20,7 @@ func TestLoopCursorSurvivesRestart(t *testing.T) {
 	// A log the engine might have written: routine events interleaved
 	// with the two kinds that notify.
 	appendEvent(t, ctx, st, "job_created", 0, 0, "{}")
-	appendEvent(t, ctx, st, KindTaskCheckFailed, 0, 1, `{"status":"needs_foreman","reason":"exit 1"}`)
+	appendEvent(t, ctx, st, KindTaskCheckFailed, 0, 1, `{"status":"needs_user","reason":"exit 1"}`)
 	appendEvent(t, ctx, st, "task_running", 0, 1, "{}")
 	appendEvent(t, ctx, st, KindPlanDone, 0, 2, `{"status":"done"}`)
 
@@ -54,7 +54,7 @@ func TestLoopCursorSurvivesRestart(t *testing.T) {
 	if n := fresh.Notes(); len(n) != 0 {
 		t.Fatalf("restart re-notified %v, want nothing old", n)
 	}
-	appendEvent(t, ctx, st, KindTaskNeedsHelp, 0, 2, `{"status":"needs_foreman","question":"which way?"}`)
+	appendEvent(t, ctx, st, KindTaskNeedsHelp, 0, 2, `{"status":"needs_user","question":"which way?"}`)
 	if err := NewLoop(st, fresh, nil).Flush(ctx); err != nil {
 		t.Fatalf("flush the new event: %v", err)
 	}
@@ -69,8 +69,8 @@ func TestLoopFlushDeliversPending(t *testing.T) {
 	defer st.Close()
 	seedProject(t, ctx, st)
 
-	appendEvent(t, ctx, st, KindReviewChanges, 0, 1, `{"status":"needs_foreman","findings":"the retry loop"}`)
-	appendEvent(t, ctx, st, KindReviewNoVerdict, 0, 1, `{"status":"needs_foreman","reason":"empty verdict"}`)
+	appendEvent(t, ctx, st, KindReviewChanges, 0, 1, `{"status":"needs_user","findings":"the retry loop"}`)
+	appendEvent(t, ctx, st, KindReviewNoVerdict, 0, 1, `{"status":"needs_user","reason":"empty verdict"}`)
 
 	fake := &Fake{}
 	loop := NewLoop(st, fake, nil)
@@ -99,7 +99,7 @@ func TestLoopFailingNotifierDoesNotStall(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		appendEvent(t, ctx, st, KindTaskCheckFailed, 0, 1,
-			fmt.Sprintf(`{"status":"needs_foreman","reason":"failure %d"}`, i+1))
+			fmt.Sprintf(`{"status":"needs_user","reason":"failure %d"}`, i+1))
 	}
 
 	fake := &Fake{Err: errors.New("no banner service")}
@@ -117,7 +117,7 @@ func TestLoopFailingNotifierDoesNotStall(t *testing.T) {
 	// The notifier heals; only what arrived since the cursor notifies —
 	// the broken three never repeat.
 	fake.Err = nil
-	appendEvent(t, ctx, st, KindTaskFailed, 0, 1, `{"status":"needs_foreman","reason":"still down"}`)
+	appendEvent(t, ctx, st, KindTaskFailed, 0, 1, `{"status":"needs_user","reason":"still down"}`)
 	if err := loop.Flush(ctx); err != nil {
 		t.Fatalf("flush after healing: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestLoopNoneNotifierStillAdvances(t *testing.T) {
 	st := openStore(t, ctx, filepath.Join(t.TempDir(), "store.db"))
 	defer st.Close()
 	seedProject(t, ctx, st)
-	appendEvent(t, ctx, st, KindTaskCheckFailed, 0, 1, `{"status":"needs_foreman","reason":"exit 9"}`)
+	appendEvent(t, ctx, st, KindTaskCheckFailed, 0, 1, `{"status":"needs_user","reason":"exit 9"}`)
 
 	if err := NewLoop(st, None{}, nil).Flush(ctx); err != nil {
 		t.Fatalf("flush: %v", err)
@@ -224,7 +224,7 @@ func TestLoopCursorAdvancesPerEvent(t *testing.T) {
 	var ids []int64
 	for i := 0; i < 5; i++ {
 		ids = append(ids, appendEvent(t, ctx, st, KindTaskCheckFailed, 0, 1,
-			fmt.Sprintf(`{"status":"needs_foreman","reason":"failure %d"}`, i+1)))
+			fmt.Sprintf(`{"status":"needs_user","reason":"failure %d"}`, i+1)))
 	}
 
 	flushCtx, cancel := context.WithCancel(ctx)
@@ -292,7 +292,7 @@ func TestLoopCancelledBannerIsNotDropped(t *testing.T) {
 	var ids []int64
 	for i := 0; i < 3; i++ {
 		ids = append(ids, appendEvent(t, ctx, st, KindTaskCheckFailed, 0, 1,
-			fmt.Sprintf(`{"status":"needs_foreman","reason":"failure %d"}`, i+1)))
+			fmt.Sprintf(`{"status":"needs_user","reason":"failure %d"}`, i+1)))
 	}
 
 	flushCtx, cancel := context.WithCancel(ctx)
