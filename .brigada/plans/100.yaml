@@ -5,9 +5,9 @@
 plan: 100
 title: "top: plan-less jobs get labelled FOREMAN and JOBS blocks (follow-up to #162)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-11-04T06:24:53.578122Z
-updated: 2026-11-04T06:28:03.755266Z
+updated: 2026-11-04T06:39:26.902907Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
