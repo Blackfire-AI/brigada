@@ -5,9 +5,9 @@
 plan: 103
 title: "brigada top: visual redesign"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-11-04T18:01:34.310769Z
-updated: 2026-11-04T18:20:56.763426Z
+updated: 2026-11-04T21:04:54.68445Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
