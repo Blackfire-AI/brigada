@@ -1068,9 +1068,9 @@ then its quota as `✓` when ready, `↺ HH:MM` while cooling until that time, o
 the broken and cooling agents come first, then the running ones, then the idle ones;
 an agent that is off — an effective cap of 0, nothing running, a ready quota — never lists, and a dim `+N idle · M off (brigada capacity)` line counts the off agents and the idle ones the height dropped, either part left out when zero;
 a dim `all ≤ global N` line under the list names the global cap —
-and above the events strip, when the foreman has reported, a dim `report #N: <first line of the report>` line, since the report can say what the needs-you queue does not —
-and the newest user-facing events as a strip at the bottom, each with its clock time in plain words, as `10:02 #328 landed · 09:40 plan #99 done`, joined by ` · ` and wrapping to a second line when the width allows.
-Plan, task, review, agent and foreman-report events show; job bookkeeping, messages and the other events do not. The strip keeps the newest 50 of them across redraws, so a busy run never empties it.
+and above the EVENTS head, when the foreman has reported, a dim `report #N: <first line of the report>` line, since the report can say what the needs-you queue does not —
+and the newest user-facing events under an EVENTS head at the bottom, one per row, newest on top, each row its clock time (with the date on another day), two spaces and the event in plain words, as `10:02  #328 landed` over `09:40  plan #99 done`, the words starting in one column; a tall screen shows up to 10 rows.
+Plan, task, review and agent events show; the foreman's report shows in the report line above, not in the list; job bookkeeping, messages and the other events do not. The top keeps the newest 50 of them across redraws, so a busy run never empties the list.
 Without `--project` every section shows the whole engine, whatever the working directory.
 With `--project` every section shows that one project,
 except that a broken agent still shows, in the needs-you queue and with its reason in the agents section, because agents belong to no project;
@@ -1109,7 +1109,7 @@ The queue is capped at three lines with a `+N more (brigada status)` line, and s
 
 The frame never has more lines than the terminal is tall.
 When the view is taller, lines drop class by class, each class from the bottom of the view upward, one line at a time, until it fits:
-the events strip's second line, then the report line above it;
+event rows 3 to 10, from the bottom, then row 2, then the report line above the EVENTS head;
 finished plans, folded into the dim `+N finished` line;
 the blank lines between sections;
 queued `·` task lines, including `(waiting on ...)` and `(review)`, from the last plan upward;
@@ -1117,7 +1117,7 @@ idle agents (no running job, quota neither cooling nor broken), counted in the d
 held `?` and retry `↺` lines, the dim lines of the FOREMAN and JOBS blocks and parked `!` task lines;
 running `▸` lines;
 and then every other line outside the header and the needs-you queue —
-the events strip's first line, the remaining agent lines, the `all ≤ global N` line, the fold lines, each plan's own line, the placeholders, the PLANS and AGENTS heads —
+event row 1, the remaining agent lines, the `all ≤ global N` line, the fold lines, each plan's own line, the placeholders, the PLANS, AGENTS and EVENTS heads —
 with the meters strip last of them, though it sits above the needs-you queue.
 
 A fold line not yet shown costs the line it adds, and a section head, FOREMAN and JOBS included, goes with its section's last line.
