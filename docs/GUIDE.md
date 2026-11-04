@@ -1066,11 +1066,11 @@ the brand's `▙ brigada` mark, the scope and the engine's uptime on the left, t
 then the global slots as a meter of 18 `━` cells in proportion to the cap, at least one filled once any slot is in use, with `use/cap slots` beside it, and the run, queue, held and needs counters at the right edge —
 then one rounded box per section, each a titled top border and `│ text │` rows, no blank row between boxes:
 the needs-you queue, the plans tree, the agents section —
-one line per agent: its `harness/model`, its running jobs against its effective cap as `brigada capacity` shows it,
-then its quota as `✓` when ready, `↺ HH:MM` while cooling until that time, or `✗` and a short reason when broken;
-the broken and cooling agents come first, then the running ones, then the idle ones;
-an agent that is off — an effective cap of 0, nothing running, a ready quota — never lists, and a dim `+N idle · M off (brigada capacity)` line counts the off agents and the idle ones the height dropped, either part left out when zero;
-a dim `all ≤ global N` line under the list names the global cap —
+one cell per agent, in two columns of equal width filled row by row (one column on a narrow box): a mark, the agent's name (a name of more than two `/` segments shows its last), one cell `■` or `□` per slot of its effective cap as `brigada capacity` folds it, filled up to the running jobs (an agent with no cap, or a cap over 8, shows `2/none` or `1/9 (runner)` instead), and its quota —
+`●` when ready, `↺` and `until HH:MM` while cooling until that time, or `✗` and a short reason cut to the cell when broken;
+the broken and cooling agents come first, then the running ones, then the idle ones; a running agent's name takes its family's colour (claude violet, glm blue, dsh mint, any other grey), the same colour as in its job line, and an idle agent's name is grey;
+an agent that is off — an effective cap of 0, nothing running, a ready quota — never lists;
+the AGENTS border carries a dim note: `all ≤ global N` when the global cap sits below some agent's own cap or an agent has none, and `M off` for the off agents, either part left out alone, or `all ready` when no agent is broken or cooling, none is off and no layer caps anything —
 and the newest user-facing events in the EVENTS box at the bottom, one per row, newest on top, each row its clock time (with the date on another day), two spaces and the event in plain words, as `10:02  #328 landed` over `09:40  plan #99 done`, the words starting in one column; a tall screen shows up to 10 rows.
 When the foreman has reported, the first line of its report sits dim at the right end of the EVENTS top border, cut to fit, since the report can say what the needs-you queue does not.
 Plan, task, review and agent events show; the foreman's report shows in the border, not in the list; job bookkeeping, messages and the other events do not. The top keeps the newest 50 of them across redraws, so a busy run never empties the list.
@@ -1120,11 +1120,11 @@ When the view is taller, rows drop class by class, each class from the bottom of
 event rows 3 to 10, from the bottom, then row 2;
 finished plans;
 queued `·` task rows, including `(waiting on ...)` and `(review)`, from the last plan upward;
-idle agents (no running job, quota neither cooling nor broken), counted in the dim `+N idle · M off (brigada capacity)` row;
+agent rows whose agents are all idle (no running job, quota neither cooling nor broken);
 held `?` and retry `↺` rows, the dim rows of the FOREMAN and JOBS boxes and parked `!` task rows;
 running `▸` rows;
 and then every other row outside the header and the needs-you queue —
-event row 1, the remaining agent rows, the `all ≤ global N` row, the fold row, each plan's own row, the placeholders —
+event row 1, the remaining agent rows, each plan's own row, the placeholders —
 with the meters row last of them, though it sits above the needs-you queue.
 
 A fold row not yet shown costs the row it adds. A box's borders go with its section's last row, and a box with no row never shows, so a drop can leave the frame a row or two shorter than the terminal.

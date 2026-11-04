@@ -100,6 +100,24 @@ func (s Style) Filled() string { return s.symbol("■", "#") }
 // Empty returns an empty task cell, or "." without UTF-8.
 func (s Style) Empty() string { return s.symbol("□", ".") }
 
+// Bullet returns a filled dot, or "*" without UTF-8.
+func (s Style) Bullet() string { return s.symbol("●", "*") }
+
+// Violet colors the claude family's names.
+func (s Style) Violet(text string) string {
+	return s.wrap(text, "\x1b[35m", "\x1b[38;5;141m", "\x1b[38;2;175;135;255m")
+}
+
+// Blue colors the glm family's names.
+func (s Style) Blue(text string) string {
+	return s.wrap(text, "\x1b[34m", "\x1b[38;5;75m", "\x1b[38;2;95;175;255m")
+}
+
+// Mint colors the dsh family's names.
+func (s Style) Mint(text string) string {
+	return s.wrap(text, "\x1b[92m", "\x1b[38;5;121m", "\x1b[38;2;135;255;175m")
+}
+
 // Teal colors landing marks teal, apart from Accent at every depth.
 func (s Style) Teal(text string) string {
 	return s.wrap(text, "\x1b[96m", "\x1b[38;5;37m", "\x1b[38;2;0;175;175m")
