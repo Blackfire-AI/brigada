@@ -83,8 +83,8 @@ tasks:
     review_tier: heavy
     caps: {restart: 0}
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-334"
     rounds: 0
   - id: 335
     name: "polish"
