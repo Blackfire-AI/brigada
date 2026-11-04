@@ -477,38 +477,27 @@ func TestTopEventWords(t *testing.T) {
 			Payload: []byte(payload), CreatedAt: stamp}
 	}
 	style := term.New(logo.Caps{UTF8: true})
+	// The wording's own cases live in internal/history (TestEventWords);
+	// top and history give the same words for one event, and top's row is
+	// the time and those words.
 	tests := []struct {
 		name string
 		item history.Item
 		want string
 	}{
-		{"plan_done", ev("plan_done", 0, 0, `{"plan":99,"status":"done"}`), "15:02  plan #99 done"},
-		{"plan_done without a plan", ev("plan_done", 0, 0, `{}`), "15:02  plan done"},
-		{"plan_approved", ev("plan_approved", 0, 0, `{"plan":7,"status":"active"}`), "15:02  plan #7 approved"},
-		{"plan_awaiting_approval", ev("plan_awaiting_approval", 0, 0, `{"plan":8}`), "15:02  plan #8 awaiting approval"},
-		{"task_done", ev("task_done", 3, 0, `{"status":"done"}`), "15:02  #3 done"},
-		{"task_landed", ev("task_landed", 328, 0, `{"pushed":"pushed"}`), "15:02  #328 landed"},
-		{"task_landed no push state", ev("task_landed", 328, 0, ``), "15:02  #328 landed"},
-		{"task_landed waiting", ev("task_landed", 328, 0, `{"pushed":"waiting"}`), "15:02  #328 landed, push waits"},
-		{"task_landed local", ev("task_landed", 328, 0, `{"pushed":"local"}`), "15:02  #328 landed, push waits"},
-		{"task_pushed", ev("task_pushed", 328, 0, `{}`), "15:02  #328 pushed"},
-		{"task_failed", ev("task_failed", 4, 0, `{"status":"failed"}`), "15:02  #4 failed"},
-		{"task_land_failed", ev("task_land_failed", 4, 0, `{"reason":"conflict"}`), "15:02  #4 land failed"},
+		{"task_landed", ev("task_landed", 328, 0, `{"pushed":"waiting"}`), "15:02  #328 landed, push waits"},
 		{"review approve", ev("review_verdict", 0, 9, `{"status":"approve","branch":"fix/x"}`), "15:02  review approve fix/x"},
-		{"review changes", ev("review_verdict", 0, 9, `{"status":"changes","branch":"fix/x"}`), "15:02  review changes fix/x"},
-		{"review no verdict", ev("review_verdict", 0, 9, `{"status":"no_verdict"}`), "15:02  review no verdict"},
-		{"agent_broken", ev("agent_broken", 0, 0, `{"harness":"codex","model":"gpt-5","reason":"auth"}`), "15:02  codex/gpt-5 broken"},
-		{"agent_recovered", ev("agent_recovered", 0, 0, `{"harness":"codex","model":"gpt-5"}`), "15:02  codex/gpt-5 recovered"},
 		{"agent_cooling", ev("agent_cooling", 3, 5, `{"account":"work","until":"`+until+`"}`), "15:02  work cooling until 16:04"},
-		{"agent_cooling without a deadline", ev("agent_cooling", 3, 5, `{"account":"work"}`), "15:02  work cooling"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := topEventTexts([]history.Item{tt.item}, topNow, style, 200)[1]; got != tt.want {
 				t.Errorf("row = %q, want %q", got, tt.want)
 			}
-			if _, ok := topEventWords(tt.item, topNow); !ok {
-				t.Errorf("kind %s is not kept", tt.item.Kind)
+			clock := func(stamp string) string { return api.LocalClock(stamp, topNow) }
+			shared, _ := history.EventWords(tt.item, clock)
+			if words, ok := topEventWords(tt.item, topNow); !ok || words != shared {
+				t.Errorf("top words %q (%v), history words %q", words, ok, shared)
 			}
 		})
 	}

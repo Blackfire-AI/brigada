@@ -143,7 +143,7 @@ func lsRemoteCount(t *testing.T, remote, pattern string) int {
 // line kinds, in order.
 func historyKinds(t *testing.T, bin, state string, task int) []string {
 	t.Helper()
-	stdout, stderr, code := runBrigada(t, bin, "history", "--state-dir", state, "--task", strconv.Itoa(task), "--no-start")
+	stdout, stderr, code := runBrigada(t, bin, "history", "--raw", "--state-dir", state, "--task", strconv.Itoa(task), "--no-start")
 	if code != 0 {
 		t.Fatalf("history --task %d exit = %d, stderr = %q", task, code, stderr)
 	}

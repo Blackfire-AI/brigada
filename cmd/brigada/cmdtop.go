@@ -3,13 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -1516,84 +1514,12 @@ func topEventLines(items []history.Item, now time.Time, style term.Style, width 
 // dot between spaces, three columns wide in either alphabet.
 func topEventSep(style term.Style) string { return " " + style.Dot() + " " }
 
-// topEventPayload is the part of an event's payload the strip words.
-type topEventPayload struct {
-	Plan    int64  `json:"plan"`
-	Status  string `json:"status"`
-	Branch  string `json:"branch"`
-	Pushed  string `json:"pushed"`
-	Harness string `json:"harness"`
-	Model   string `json:"model"`
-	Account string `json:"account"`
-	Until   string `json:"until"`
-}
-
-// topEventWords is an event in plain words, or false when the strip does
-// not show its kind: only the allowlist below shows, and a message never
-// does. now reads the clock of an agent_cooling's deadline.
+// topEventWords is an event in plain words, or false when top does not
+// word its kind: the wording and its allowlist are history.EventWords,
+// shared with `brigada history`. now reads the clock of an agent_cooling's
+// deadline.
 func topEventWords(it history.Item, now time.Time) (string, bool) {
-	if it.Type != history.TypeEvent {
-		return "", false
-	}
-	var p topEventPayload
-	if len(it.Payload) > 0 {
-		_ = json.Unmarshal(it.Payload, &p) // an unreadable payload words as an empty one
-	}
-	task := "task"
-	if it.TaskID != 0 {
-		task = "#" + strconv.FormatInt(it.TaskID, 10)
-	}
-	plan := "plan"
-	if p.Plan != 0 {
-		plan = "plan #" + strconv.FormatInt(p.Plan, 10)
-	}
-	agent := p.Harness + "/" + p.Model
-	switch it.Kind {
-	case "plan_done":
-		return plan + " done", true
-	case "plan_approved":
-		return plan + " approved", true
-	case "plan_awaiting_approval":
-		return plan + " awaiting approval", true
-	case "task_done":
-		return task + " done", true
-	case "task_landed":
-		if p.Pushed == "waiting" || p.Pushed == "local" {
-			return task + " landed, push waits", true
-		}
-		return task + " landed", true
-	case "task_pushed":
-		return task + " pushed", true
-	case "task_failed":
-		return task + " failed", true
-	case "task_land_failed":
-		return task + " land failed", true
-	case "review_verdict":
-		verdict := "review no verdict"
-		switch p.Status {
-		case "approve":
-			verdict = "review approve"
-		case "changes":
-			verdict = "review changes"
-		}
-		if p.Branch != "" {
-			verdict += " " + p.Branch
-		}
-		return verdict, true
-	case "agent_broken":
-		return agent + " broken", true
-	case "agent_recovered":
-		return agent + " recovered", true
-	case "agent_cooling":
-		words := p.Account + " cooling"
-		if p.Until != "" {
-			words += " until " + api.LocalClock(p.Until, now)
-		}
-		return words, true
-	case "foreman_report":
-		return "report #" + strconv.FormatInt(it.JobID, 10), true
-	}
-	return "", false
+	return history.EventWords(it, func(stamp string) string { return api.LocalClock(stamp, now) })
 }
 
 // topColourStates colours a line's state words: done and recovered in

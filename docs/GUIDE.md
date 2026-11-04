@@ -463,7 +463,7 @@ When `notify` is `auto` (the default), the engine also raises a desktop notifica
 
 ### History, diffs and logs
 
-`brigada history` prints the timeline, oldest first: events and messages together. `--task N` and `--job N` narrow it to one task or one job. `--limit N` (1 to 500, default 100) sets how many entries are fetched per request; the command fetches every page, so the output is always the whole timeline.
+`brigada history` prints the timeline for a person, oldest first. A bare `brigada history` shows the events that read as plain words, one line each, as `10-20 15:02  #335 landed`: the local time, then the words, the same wording `brigada top` uses; a landing also shows its target branch, its commit in full, the exact push command and an after_land failure, and a review verdict or a foreman report stays one line that names its job. Job bookkeeping and messages stay out. `--task N` and `--job N` show every item of that task or job, internal kinds included, in the same form, with the reason, report, question, answer and findings whole and a worker's result as its status, summary and notes; `brigada history --job N` is a review's full verdict. `--raw` prints the internal kinds, nanosecond UTC stamps and JSON, as earlier versions did, with `--task` and `--job` alike. `--limit N` (1 to 500, default 100) is a page size: the command fetches every page, so the output is always the whole timeline and `--limit` does not count the items printed.
 
 `brigada diff <task-id> [--stat] [--repo URL]` prints what a task changed, as `git diff <base>...<branch>` between the task's base ref and its latest result branch (`-r<n>` included).
 
@@ -880,7 +880,7 @@ A review that asks for changes, or a failed check, starts a fix round on the aut
 - The author's family is read from the branch's last work job; failing that, from the `Co-Authored-By` trailers on its commits; failing that, `default_reviewer` in the config file (a harness name) takes the review. With none of the three, `review.family=prefer` (the default) places the review on any available review-class agent; only `review.family=require` keeps the refusal, with the reason ending `, review.family=require`.
 - There are no fix rounds, and a review that ends without a usable verdict is not retried: run it again.
 - With no task to have copied them, the review uses the project's current reviewer and worker texts (a role not configured contributes none), the worker text shown as the project's conventions, and no skills.
-- The verdict (approve, changes or no verdict, with the findings) is written to the history. It raises no desktop notification and no needs-you entry, so read it with `brigada history`.
+- The verdict (approve, changes or no verdict, with the findings) is written to the history. It raises no desktop notification and no needs-you entry, so read it with `brigada history --job N`.
 
 ## 8. Agents, quota and health
 
@@ -1400,7 +1400,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada status [--line] [--all]`: the engine, jobs, plans and the needs-you queue, plus a hint when your CLIs offer unregistered models. See [section 4](#4-while-work-runs).
 - `brigada agents`: the models your CLIs offer that no agent registers, with their name-based tier and account, and registered models a CLI no longer lists; read-only. See [section 8](#models-added-later).
 - `brigada agents add <harness>/<model> [--classes CLASSES] [--effort LEVEL] [--now]`: register one model by appending its line to the agents file; restart a running runner to serve it, waiting out its running jobs, or cutting them with `--now`. See [section 8](#models-added-later).
-- `brigada history [--task N] [--job N] [--limit N]`: the timeline. See [section 4](#history-diffs-and-logs).
+- `brigada history [--task N] [--job N] [--limit N] [--raw]`: the timeline. See [section 4](#history-diffs-and-logs).
 - `brigada diff <task-id> [--stat] [--repo URL]`: what a task changed, as `git diff base...branch`; run inside the repo. See [section 4](#history-diffs-and-logs).
 - `brigada logs <job-id> [--check] [--tail N] [--follow]`, or `brigada logs --task N`: a job's transcript as readable lines, or its check log. See [section 4](#history-diffs-and-logs).
 - `brigada stats`: tier, attempts, successes, rate and confidence per agent, class and repo. See [section 9](#9-the-record-and-stats).

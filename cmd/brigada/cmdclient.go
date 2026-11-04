@@ -290,7 +290,7 @@ func readSpec(path string) (string, error) {
 // merged, oldest first, every page followed to the end.
 func runHistory(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("history",
-		"brigada history [--task ID] [--job ID] [--limit N] [--no-start]",
+		"brigada history [--task ID] [--job ID] [--limit N] [--raw] [--no-start]",
 		"Show the timeline, optionally filtered by task or job.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
@@ -298,11 +298,13 @@ func runHistory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		task    int64
 		job     int64
 		limit   int
+		raw     bool
 		noStart bool
 	)
-	fs.Int64Var(&task, "task", 0, "show one task's timeline")
-	fs.Int64Var(&job, "job", 0, "show one job's timeline")
-	fs.IntVar(&limit, "limit", 100, "page size, 1..500")
+	fs.Int64Var(&task, "task", 0, "show one task's timeline, every item in full")
+	fs.Int64Var(&job, "job", 0, "show one job's timeline, every item in full")
+	fs.IntVar(&limit, "limit", 100, "page size, 1..500 (every page is fetched, so it does not count the items printed)")
+	fs.BoolVar(&raw, "raw", false, "print the internal kinds, stamps and JSON, as before")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
@@ -324,13 +326,24 @@ func runHistory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if code != 0 {
 		return code
 	}
+	now := time.Now()
+	readable := history.ReadableOptions{
+		Full:  task != 0 || job != 0,
+		Loc:   now.Location(),
+		Clock: func(stamp string) string { return api.LocalClock(stamp, now) },
+	}
 	since := ""
 	for {
 		page, err := client.History(ctx, api.HistoryQuery{TaskID: task, JobID: job, Since: since, Limit: limit})
 		if err != nil {
 			return fail(stderr, err)
 		}
-		if err := history.Render(stdout, page.Items); err != nil {
+		if raw {
+			err = history.Render(stdout, page.Items)
+		} else {
+			err = history.RenderReadable(stdout, page.Items, readable)
+		}
+		if err != nil {
 			return fail(stderr, err)
 		}
 		if page.NextCursor == "" {

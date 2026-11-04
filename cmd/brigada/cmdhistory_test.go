@@ -13,6 +13,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/history"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
@@ -102,6 +103,62 @@ func TestHistoryShowsTheLandingRecord(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := run(ctx, []string{"history", "--state-dir", state, "--no-start"}, &out, &errb); code != 0 {
 		t.Fatalf("history: exit %d, stderr %q", code, errb.String())
+	}
+	for _, want := range []string{
+		"#1 landed, push waits",
+		"branch=main commit=9f21ab3c4d5e6f708192a3b4c5d6e7f890123456",
+		"push_cmd=" + pushCmd,
+		"after_land_error=exit 3: after-land boom",
+		"#1 pushed",
+		"after_land_error=exit 1: push boom",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("default history lacks %q:\n%s", want, out.String())
+		}
+	}
+	for _, bad := range []string{"task_landed", "{", "Z "} {
+		if strings.Contains(out.String(), bad) {
+			t.Errorf("default history shows %q:\n%s", bad, out.String())
+		}
+	}
+
+	// --raw is the old output, byte for byte: history.Render of the page,
+	// bare and with --task.
+	client, _ := connectClient(ctx, &runtime{stateDir: state}, "client", true, &errb)
+	page, err := client.History(ctx, api.HistoryQuery{Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rendered bytes.Buffer
+	if err := history.Render(&rendered, page.Items); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if code := run(ctx, []string{"history", "--raw", "--state-dir", state, "--no-start"}, &out, &errb); code != 0 {
+		t.Fatalf("history --raw: exit %d, stderr %q", code, errb.String())
+	}
+	if out.String() != rendered.String() {
+		t.Errorf("--raw =\n%s\nwant history.Render's\n%s", out.String(), rendered.String())
+	}
+	taskPage, err := client.History(ctx, api.HistoryQuery{TaskID: 1, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered.Reset()
+	if err := history.Render(&rendered, taskPage.Items); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if code := run(ctx, []string{"history", "--raw", "--task", "1", "--state-dir", state, "--no-start"}, &out, &errb); code != 0 {
+		t.Fatalf("history --raw --task: exit %d, stderr %q", code, errb.String())
+	}
+	if out.String() != rendered.String() {
+		t.Errorf("--raw --task =\n%s\nwant history.Render's\n%s", out.String(), rendered.String())
+	}
+
+	out.Reset()
+	if code := run(ctx, []string{"history", "--raw", "--state-dir", state, "--no-start"}, &out, &errb); code != 0 {
+		t.Fatalf("history --raw: exit %d, stderr %q", code, errb.String())
 	}
 	for _, want := range []string{
 		"task_landed task 1:",
