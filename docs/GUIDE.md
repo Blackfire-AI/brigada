@@ -123,13 +123,14 @@ The `Plan` block then shows:
 - `At once:`, with the machine limit and each usable account's cap.
 - `Check:`, which names the check and reminds you that init does not run it and that you can edit `.brigada/project.yaml`, or shows `none (work goes straight to review)`.
 - `What workers may do:`, with a row for each harness that implements. Claude gets `edit files; run only: …`, or `edit files; no commands` for `none`. Codex can edit and run commands inside its sandbox. Kimi, if allowed to implement, can edit and run any command without asking. Opencode gets `edit files; run only the commands of the worker tools scope`.
-- `Files in this repository`, which lists each file's state first (`new`, `changes`, `unchanged`, or `left alone`, with its reason after the path), then its path and its purpose. On a first run the list is `.brigada/project.yaml` alone; on a rerun over an older init's wiring it also names the files it strips (below). Changes to existing files show diffs and keep other settings and comments; new files show full contents only with `--verbose`. Init never commits these files.
+- `Files in this repository`, which lists each file's state first (`new`, `changes`, `unchanged`, or `left alone`, with its reason after the path), then its path and its purpose. On a first run the list is `.brigada/project.yaml`, the operator guide and its skill, the four role files and the eight default skills; on a rerun over an older init's wiring it also names the files it strips (below). Changes to existing files show diffs and keep other settings and comments; new files show full contents only with `--verbose`. Init never commits these files.
 - `In the background:`, with the persistent runner, its log, `brigada stop`, and the engine's exit after 30 idle minutes.
-- `Next:`, the closing text: talk to the foreman with `brigada attach`, or send `brigada ask "what you want built"` without a conversation, then watch `brigada status`.
+- `Next:`, the closing text: talk to the foreman with `brigada attach`, send `brigada ask "what you want built"` without a conversation, or have your own coding agent read `.brigada/operator.md`, then watch `brigada status`.
 
 Then, after you confirm (`y` at the prompt, or `--yes`), init:
 
 - writes **`.brigada/project.yaml`** ([section 6](#6-configuring-a-project)). The file is yours to commit; brigada never commits or pushes anything. The write is refused if the file is a symlink or names another repository, and a file that changed after the plan was shown is not overwritten;
+- writes the operator guide `.brigada/operator.md` and its skill `.claude/skills/brigada-operator/SKILL.md`, the four role files under `.brigada/instructions/` and the default skills under `.brigada/skills/` ([the operator flow](#the-operator-flow)). These are yours to commit as well: the import reads your working copy, the foreman's checkout what is pushed;
 - strips brigada's wiring from the repository, unless `--no-wiring`: the `brigada` server in `.mcp.json`, the hooks in private `.claude/settings.local.json` and the legacy brigada hooks in shared `.claude/settings.json`, the `brigada` table in `.codex/config.toml`, `.brigada/foreman.md` and its block in `AGENTS.md` with `CLAUDE.md`'s import section, the old foreman skill, and the `/.claude/settings.local.json` line in git's `info/exclude`. Init writes no harness wiring; only brigada's own entries change, and a file you have not edited comes back byte for byte;
 - starts the engine on demand, imports the project file (recording where each value came from, [section 6](#6-configuring-a-project)), registers the foreman, saves the agent and concurrency choices and starts one detached runner. The answers replace what they cover — an interactive run's questions replace every saved line of each CLI asked about, so declining a CLI removes its lines, while `--agent` replaces the harness and model pairs it names — and every other saved agent line stays in the agents file and the runner serves it, unless `--overwrite-config` is passed. If its agents or concurrency changed, init restarts the runner with the new choices; otherwise it keeps the running one. The restart waits out the runner's running jobs — no job is cut — and `--now` restarts at once instead, cutting them. The runner's log is `runner.log` in the state directory.
 
@@ -205,8 +206,9 @@ report what you did.
    brigada init --yes --signed-in claude,codex --foreman claude/sonnet \
      --agent harness=claude,model=sonnet --agent harness=codex,model=gpt-5 \
      --check 'go test ./...' --parallel 4
-5. Report the agents, the files written, and that I talk to the foreman
-   with `brigada attach`. From then on, follow `.brigada/operator.md`.
+5. Report the agents and the files written, which are mine to commit.
+   Tell me I can talk to the foreman through you or with
+   `brigada attach`. From then on, follow `.brigada/operator.md`.
 
 brigada's repository is https://github.com/Blackfire-AI/brigada; its
 README and docs/GUIDE.md answer most questions — consult them when a
@@ -312,10 +314,11 @@ With `claude`, an attached foreman is the same session the headless turns resume
 
 The usual way in is through your own coding agent, the operator. `brigada init` writes `.brigada/operator.md`, a generated, harness-agnostic guide (init overwrites it on a rerun, `--no-wiring` does not skip it, `brigada remove` deletes it). For Claude Code, init also writes the same text as the skill `.claude/skills/brigada-operator/SKILL.md`. Open your agent in the repository, have it read that file, and tell it, for example, "ask brigada to fix #12". The operator:
 
-- **asks** with `brigada ask -`, naming files and document sections, the build order, tier hints and cooling accounts (the foreman reads the project's own repository's issues itself with its `issue_read` tool, so a bare issue number of that repository is often enough; putting the issue text into the ask still helps when the issue is elsewhere — another repository, another tracker — and issue numbers stay as references for `Closes` and `Refs` trailers);
-- **watches** with `brigada status`, `brigada history --task N`, `brigada history --job N` (a job's full verdict) and `brigada diff --stat N`; you watch the same work live in `brigada top`;
-- **follows a landing**: merges the staging pull request with a merge commit once CI is green (when `land_target` is the default branch and `after_land` is none, there is no pull request to merge), and restarts the engine and runner when their own code landed and nothing pending needs the old behaviour;
-- **recovers** after an outage by asking again: an ask re-wakes the foreman.
+- **asks** with `brigada ask -`, naming files and document sections, the build order, tier hints and cooling accounts. The foreman and its workers read what is pushed, not the working tree, so what an ask cites is pushed first or put in the ask. The foreman reads the project's own repository's issues itself with its `issue_read` tool, so a bare issue number of that repository is often enough; the issue text goes into the ask when the issue is elsewhere — another repository, another tracker — or when the repository is not on GitHub or `gh` is not signed in, and issue numbers stay as references for `Closes` and `Refs` trailers;
+- **hears back** from the `foreman report:` line of `brigada status`: `brigada ask` returns at once, and each headless turn ends with a report. The operator relays it to you, questions included, and sends your answer or veto with another `brigada ask`;
+- **watches** with `brigada status`, `brigada history --task N`, `brigada history --job N` (a job's full verdict), `brigada logs --task N` and `brigada diff --stat N`; you watch the same work live in `brigada top`;
+- **follows a landing**: merges the staging pull request with a merge commit once CI is green (when `land_target` is the default branch and `after_land` is none, there is no pull request to merge), and restarts the engine and runner after a brigada upgrade, or when their own code landed in the repository, once nothing pending needs the old behaviour;
+- **recovers** after an outage by asking again: an ask re-wakes the foreman, even when its wake budget for the day is spent.
 
 The operator has no approval authority. Plan approval, land approval, push approval, `--and-stop-asking`, tags and releases, and rule changes stay yours; the operator tells you what waits. `brigada attach` below is the other way in: your own conversation with the foreman.
 

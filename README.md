@@ -45,8 +45,9 @@ report what you did.
    brigada init --yes --signed-in claude,codex --foreman claude/sonnet \
      --agent harness=claude,model=sonnet --agent harness=codex,model=gpt-5 \
      --check 'go test ./...' --parallel 4
-5. Report the agents, the files written, and that I talk to the foreman
-   with `brigada attach`. From then on, follow `.brigada/operator.md`.
+5. Report the agents and the files written, which are mine to commit.
+   Tell me I can talk to the foreman through you or with
+   `brigada attach`. From then on, follow `.brigada/operator.md`.
 
 brigada's repository is https://github.com/Blackfire-AI/brigada; its
 README and docs/GUIDE.md answer most questions — consult them when a
@@ -54,7 +55,12 @@ step is unclear. Stop and ask me if a step fails or a choice remains
 open. Never commit or push what init writes.
 ```
 
-What the prompt's steps mean is [the guide, section 1](docs/GUIDE.md#through-your-own-harness); what the agent does afterwards is `.brigada/operator.md`, the guide init wrote — the prompt is only the door.
+The prompt is only the door. Init also writes `.brigada/operator.md` into your repository, the guide your agent follows from then on, so you can tell it, for example, "ask brigada to fix #12". After setup:
+
+- [The first five minutes](#the-first-five-minutes): your first ask, and what to approve.
+- [The operator flow](docs/GUIDE.md#the-operator-flow): what your agent does for you with the foreman, and what stays yours.
+- [Talking to the foreman yourself](#talking-to-the-foreman-yourself): `brigada attach`, and [the guide, section 2](docs/GUIDE.md#2-talking-to-the-foreman-brigada-attach).
+- [What the prompt's steps mean](docs/GUIDE.md#through-your-own-harness): step by step, with init's guardrails.
 
 ## Install
 
@@ -143,7 +149,7 @@ Init then lists the agents, permissions and files, and shows a diff for every ex
 
 After you confirm, init:
 
-- writes `.brigada/project.yaml`, which is yours to commit (brigada never commits or pushes it), `.brigada/operator.md`, a generated guide that tells your own coding agent how to work with brigada, and the same guide as a Claude Code skill, `.claude/skills/brigada-operator/SKILL.md` (init overwrites both on a rerun, `--no-wiring` does not skip them, and `brigada remove` deletes them). Unless `--no-wiring`, it also strips brigada's repository wiring (MCP and hook entries, the foreman files and the git exclude line); it does not touch `AGENTS.md` or `CLAUDE.md` except to remove an older init's marked block;
+- writes `.brigada/project.yaml`, which is yours to commit (brigada never commits or pushes it), `.brigada/operator.md`, a generated guide that tells your own coding agent how to work with brigada, and the same guide as a Claude Code skill, `.claude/skills/brigada-operator/SKILL.md` (init overwrites both on a rerun, `--no-wiring` does not skip them, and `brigada remove` deletes them), and the role files and default skills under `.brigada/`, which you can edit. Commit these too: the foreman's checkout reads what is pushed. Unless `--no-wiring`, it also strips brigada's repository wiring (MCP and hook entries, the foreman files and the git exclude line); it does not touch `AGENTS.md` or `CLAUDE.md` except to remove an older init's marked block;
 - starts the engine and a detached runner.
 
 `brigada init --probe` shows the plan and writes nothing. Stop the runner with `brigada stop`; add `--engine` to stop the engine too. Every step and flag is in [the guide, section 1](docs/GUIDE.md#1-install-and-brigada-init).
