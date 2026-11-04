@@ -78,6 +78,10 @@ const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes,
 // TestProjectSettingsGolden covers project set and show: the defaults,
 // one override, the reset, and the usage errors for a bad key and value.
 func TestProjectSettingsGolden(t *testing.T) {
+	// project show reads the working directory's repository for its skills
+	// and instruction files; an empty directory keeps the test to the
+	// project it creates.
+	t.Chdir(t.TempDir())
 	ctx, state := startSettingsEngine(t)
 	repo := "https://example.invalid/settings.git"
 
