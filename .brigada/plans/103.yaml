@@ -45,7 +45,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     caps: {fix_rounds: 4, review_rounds: 4, restart: 1}
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 343
