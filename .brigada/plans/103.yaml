@@ -31,7 +31,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     caps: {fix_rounds: 4, review_rounds: 4, restart: 1}
-    state: running
+    state: reviewing
     branch: "brigada/task-341"
     rounds: 1
   - id: 342
