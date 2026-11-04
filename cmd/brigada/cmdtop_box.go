@@ -9,9 +9,11 @@ import (
 
 // topBox is a section's top border: the title, the note after it and the
 // note at the right end, all optional but the title. bad paints the whole
-// border and the title Bad.
+// border and the title Bad. legend is a styled note for the right end that
+// is left out whole when it does not fit.
 type topBox struct {
 	title, note, right string
+	legend             string
 	bad                bool
 }
 
@@ -72,9 +74,18 @@ func topBoxTop(b topBox, style term.Style, width int) string {
 			right = ""
 		}
 	}
+	// The right end, styled: the plain note in Dim, or the legend when it
+	// fits whole.
+	rightOut, rightW := "", 0
+	switch {
+	case right != "":
+		rightOut, rightW = style.Dim(right), count(right)
+	case b.legend != "" && term.VisibleWidth(b.legend) <= width-used-3:
+		rightOut, rightW = b.legend, term.VisibleWidth(b.legend)
+	}
 	fill := width - used + 1
-	if right != "" {
-		fill -= count(right) + 3
+	if rightW > 0 {
+		fill -= rightW + 3
 	}
 	fill = max(fill, 1)
 	out := border(style.BoxTopLeft()+style.Dash()) + " " + title(t)
@@ -82,8 +93,8 @@ func topBoxTop(b topBox, style term.Style, width int) string {
 		out += "  " + style.Dim(note)
 	}
 	out += " " + border(strings.Repeat(style.Dash(), fill))
-	if right != "" {
-		out += " " + style.Dim(right) + " " + border(style.Dash())
+	if rightW > 0 {
+		out += " " + rightOut + " " + border(style.Dash())
 	}
 	return out + border(style.BoxTopRight())
 }
@@ -97,9 +108,22 @@ func topBoxBottom(bad bool, style term.Style, width int) string {
 	return border(style.BoxBottomLeft() + strings.Repeat(style.Dash(), max(width-2, 0)) + style.BoxBottomRight())
 }
 
+// The tints a row can carry.
+const (
+	topTintNone  = iota
+	topTintNeeds // a needs-you entry: a dark red
+	topTintRun   // a running job: a dark blue
+)
+
+// topTints says whether the style tints rows at all: 256 colours and true
+// colour do, 16 colours and no colour do not.
+func topTints(style term.Style) bool { return style.TintNeeds("x") != "x" }
+
 // topBoxRow is one row of a box: `│ text │`, the text cut to the inner
-// width and padded to it by its visible width.
-func topBoxRow(text string, bad bool, style term.Style, width int) string {
+// width and padded to it by its visible width. A tinted row is tinted after
+// the cut and the padding, so the tint covers the margins and the padding
+// inside the borders.
+func topBoxRow(text string, bad bool, tint int, style term.Style, width int) string {
 	border := style.Dim
 	if bad {
 		border = style.Bad
@@ -107,5 +131,12 @@ func topBoxRow(text string, bad bool, style term.Style, width int) string {
 	inner := max(width-4, 0)
 	text = topFit(text, inner)
 	pad := max(inner-term.VisibleWidth(text), 0)
-	return border(style.BoxSide()) + " " + text + strings.Repeat(" ", pad) + " " + border(style.BoxSide())
+	body := " " + text + strings.Repeat(" ", pad) + " "
+	switch tint {
+	case topTintNeeds:
+		body = style.TintNeeds(body)
+	case topTintRun:
+		body = style.TintRun(body)
+	}
+	return border(style.BoxSide()) + body + border(style.BoxSide())
 }
