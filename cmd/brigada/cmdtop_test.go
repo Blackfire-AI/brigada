@@ -100,7 +100,7 @@ func plainTop(model topModel, width, height int) string {
 }
 
 // TestRenderTopSections: the view's order — header, meters, NEEDS YOU,
-// the loose jobs, the PLANS tree, AGENTS, then the events strip — with
+// the FOREMAN block, the PLANS tree, AGENTS, then the events strip — with
 // every section's text in its place.
 func TestRenderTopSections(t *testing.T) {
 	model := busyTopModel()
@@ -112,7 +112,8 @@ func TestRenderTopSections(t *testing.T) {
 		"SLOTS ▓▓▓░░░░░ 3/8   2 run   2 queue   1 held   1 needs",
 		"NEEDS YOU",
 		"! #2 should the sprocket be blue?",
-		"\n\n  ▸ job #30 foreman\n\nPLANS ─",
+		"\n\nFOREMAN ─",
+		"  ▸ job #30 foreman\n\nPLANS ─",
 		"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
 		"  ▸ task #3 work · claude/sonnet@high · 1m40s · Edit",
 		"  ! #2 wire the sprocket should the sprocket be blue?",
@@ -552,8 +553,8 @@ func TestTopPlansTree(t *testing.T) {
 			if want := strings.Join(tt.want, "\n"); got != want {
 				t.Errorf("tree =\n%s\nwant\n%s", got, want)
 			}
-			if loose := topLoose(tt.st, topNow, term.New(logo.Caps{}), 80); len(loose) != 0 {
-				t.Errorf("a plan's job is loose: %q", loose)
+			if foreman, jobs := topPlanless(tt.st, topNow, term.New(logo.Caps{}), 80); len(foreman)+len(jobs) != 0 {
+				t.Errorf("a plan's job is plan-less: %q %q", foreman, jobs)
 			}
 		})
 	}
@@ -592,11 +593,153 @@ func TestTopPlansTreeColours(t *testing.T) {
 	}
 }
 
-// TestTopLoose: the jobs no listed live plan claims — a taskless running
-// turn, a taskless held one, a taskless retry, the review of a plan the
-// tree does not list — render in the loose block, and it is absent from
-// the view when every job has its plan.
-func TestTopLoose(t *testing.T) {
+// TestTopPlanlessJobsHaveNoHead: a running job no live plan claims used
+// to render as a bare block under NEEDS YOU, reading as part of it. Now a
+// foreman turn sits under a FOREMAN head and any other such job under a
+// JOBS head, each its own section between NEEDS YOU and PLANS.
+func TestTopPlanlessJobsHaveNoHead(t *testing.T) {
+	foremanJob := engine.StatusJob{ID: 2619, Kind: "foreman", Harness: "claude", Model: "opus"}
+	otherJob := engine.StatusJob{ID: 63, Kind: "plan_review"}
+	nb := topNow.Add(2 * time.Minute).UTC().Format(engine.TimeLayout)
+	calm := func() topModel {
+		m := busyTopModel()
+		m.status.NeedsYou, m.status.Running, m.status.Held, m.status.Plans = nil, nil, nil, nil
+		return m
+	}
+	// between returns the view's lines from NEEDS YOU's head through
+	// PLANS's head.
+	between := func(width int, m topModel) []string {
+		lines := renderTop(m, width, 0, topNow, term.New(logo.Caps{}))
+		from, to := -1, -1
+		for i, l := range lines {
+			if strings.HasPrefix(l, "NEEDS YOU") {
+				from = i
+			}
+			if strings.HasPrefix(l, "PLANS") {
+				to = i
+			}
+		}
+		if from < 0 || to < from {
+			t.Fatalf("view lacks NEEDS YOU or PLANS:\n%s", strings.Join(lines, "\n"))
+		}
+		return lines[from : to+1]
+	}
+	head := func(title string) string { return topSectionHead(title, term.New(logo.Caps{}), 80) }
+	fline := topRunningLine(foremanJob, topNow, term.New(logo.Caps{}), 80)
+	oline := topRunningLine(otherJob, topNow, term.New(logo.Caps{}), 80)
+	needsLine := "! #2 should the sprocket be blue?"
+
+	t.Run("reported case", func(t *testing.T) {
+		m := calm()
+		m.status.Running = []engine.StatusJob{foremanJob}
+		want := []string{head("NEEDS YOU"), "nothing needs you", "", head("FOREMAN"), fline, "", head("PLANS")}
+		if got := between(80, m); strings.Join(got, "\n") != strings.Join(want, "\n") {
+			t.Errorf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
+	})
+	t.Run("foreman only with needs-you entries", func(t *testing.T) {
+		m := calm()
+		m.status.NeedsYou = busyTopModel().status.NeedsYou
+		m.status.Running = []engine.StatusJob{foremanJob}
+		got := strings.Join(between(80, m), "\n")
+		want := strings.Join([]string{head("NEEDS YOU"), needsLine, "", head("FOREMAN"), fline, "", head("PLANS")}, "\n")
+		if got != want || strings.Contains(got, "JOBS") {
+			t.Errorf("got\n%s\nwant\n%s", got, want)
+		}
+	})
+	t.Run("non-foreman job only", func(t *testing.T) {
+		m := calm()
+		m.status.Running = []engine.StatusJob{otherJob}
+		got := strings.Join(between(80, m), "\n")
+		want := strings.Join([]string{head("NEEDS YOU"), "nothing needs you", "", head("JOBS"), oline, "", head("PLANS")}, "\n")
+		if got != want || strings.Contains(got, "FOREMAN") {
+			t.Errorf("got\n%s\nwant\n%s", got, want)
+		}
+	})
+	t.Run("both blocks, foreman first", func(t *testing.T) {
+		m := calm()
+		m.status.Running = []engine.StatusJob{otherJob, foremanJob}
+		got := strings.Join(between(80, m), "\n")
+		want := strings.Join([]string{head("NEEDS YOU"), "nothing needs you", "", head("FOREMAN"), fline, "",
+			head("JOBS"), oline, "", head("PLANS")}, "\n")
+		if got != want {
+			t.Errorf("got\n%s\nwant\n%s", got, want)
+		}
+	})
+	t.Run("held and retrying jobs are classified", func(t *testing.T) {
+		m := calm()
+		m.status.Held = []engine.HeldJob{
+			{ID: 61, Kind: "foreman", Layer: "no_pair", Agent: "claude/opus"},
+			{ID: 64, Kind: "plan_review", Layer: "runner"},
+		}
+		m.status.Retries = []engine.InfraRetry{
+			{ID: 62, Kind: "foreman", NotBefore: nb, Reason: "could not resolve github.com"},
+			{ID: 65, Kind: "plan_review", NotBefore: nb, Reason: "dns"},
+		}
+		style := term.New(logo.Caps{})
+		want := []string{head("NEEDS YOU"), "nothing needs you", "",
+			head("FOREMAN"),
+			topHeldLine(m.status.Held[0], style, 80),
+			topRetryLine(m.status.Retries[0], topNow, style, 80), "",
+			head("JOBS"),
+			topHeldLine(m.status.Held[1], style, 80),
+			topRetryLine(m.status.Retries[1], topNow, style, 80), "",
+			head("PLANS")}
+		if got := between(80, m); strings.Join(got, "\n") != strings.Join(want, "\n") {
+			t.Errorf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
+	})
+	t.Run("no plan-less job", func(t *testing.T) {
+		got := plainTop(busyTopModel(), 100, 0)
+		if strings.Contains(got, "FOREMAN") || strings.Contains(got, "JOBS") {
+			t.Errorf("a head renders with no plan-less job:\n%s", got)
+		}
+		if !strings.Contains(got, "! #2 should the sprocket be blue?\n\nPLANS ─") {
+			t.Errorf("NEEDS YOU is not followed by PLANS:\n%s", got)
+		}
+	})
+	t.Run("narrow heads carry no rule", func(t *testing.T) {
+		m := calm()
+		m.status.Running = []engine.StatusJob{otherJob, foremanJob}
+		got := between(59, m)
+		for _, title := range []string{"FOREMAN", "JOBS"} {
+			found := false
+			for _, l := range got {
+				if l == title {
+					found = true
+				}
+				if strings.HasPrefix(l, title) && strings.Contains(l, "─") {
+					t.Errorf("%s head has a rule: %q", title, l)
+				}
+			}
+			if !found {
+				t.Errorf("no bare %s head in\n%s", title, strings.Join(got, "\n"))
+			}
+		}
+	})
+	t.Run("height budget counts the blocks", func(t *testing.T) {
+		m := busyTopModel()
+		m.status.Running = append(m.status.Running, otherJob, foremanJob)
+		style := term.New(logo.Caps{})
+		full := renderTop(m, 60, 0, topNow, style)
+		if got := renderTop(m, 60, len(full), topNow, style); strings.Join(got, "\n") != strings.Join(full, "\n") {
+			t.Errorf("at the exact height lines yield:\n%s", strings.Join(got, "\n"))
+		}
+		short := renderTop(m, 60, len(full)-1, topNow, style)
+		if len(short) != len(full)-1 {
+			t.Errorf("one line less: %d lines, want %d", len(short), len(full)-1)
+		}
+		if len(short) == len(full) || strings.Join(short[:len(short)-1], "\n") != strings.Join(full[:len(short)-1], "\n") {
+			t.Errorf("one line less did not yield only the events strip's second line:\n%s", strings.Join(short, "\n"))
+		}
+	})
+}
+
+// TestTopPlanless: the jobs no listed live plan claims — a taskless
+// running turn, a taskless held one, a taskless retry, the review of a
+// plan the tree does not list — render in the FOREMAN and JOBS blocks,
+// which are absent from the view when every job has its plan.
+func TestTopPlanless(t *testing.T) {
 	nb := topNow.Add(2 * time.Minute).UTC().Format(engine.TimeLayout)
 	model := busyTopModel()
 	model.status.Running = append(model.status.Running,
@@ -609,18 +752,27 @@ func TestTopLoose(t *testing.T) {
 	model.status.HiddenFinishedPlans = 1
 	got := plainTop(model, 100, 0)
 	want := "! #2 should the sprocket be blue?" +
-		"\n\n  ▸ job #60 foreman · claude/opus" +
-		"\n  ▸ job #63 plan_review" +
+		"\n\nFOREMAN ─"
+	rest := "\n  ▸ job #60 foreman · claude/opus" +
 		"\n  ? job #61 foreman held: foreman turn waiting: no runner offers claude/opus" +
 		"\n  ↺ job #62 foreman: retry in 2m: could not resolve github.com" +
+		"\n\nJOBS ─"
+	tail := "\n  ▸ job #63 plan_review" +
 		"\n\nPLANS ─"
-	if !strings.Contains(got, want) {
-		t.Errorf("view lacks the loose block %q:\n%s", want, got)
+	i := strings.Index(got, want)
+	if i < 0 {
+		t.Fatalf("view lacks the FOREMAN head after NEEDS YOU:\n%s", got)
 	}
-
-	got = plainTop(busyTopModel(), 100, 0)
-	if !strings.Contains(got, "! #2 should the sprocket be blue?\n\nPLANS ─") {
-		t.Errorf("an empty loose block renders:\n%s", got)
+	// The heads carry a rule to the width; skip it to the line's end.
+	body := got[i+len(want):]
+	body = body[strings.Index(body, "\n"):]
+	if !strings.HasPrefix(body, rest) {
+		t.Errorf("FOREMAN block wrong:\n%s", got)
+	}
+	body = body[len(rest):]
+	body = body[strings.Index(body, "\n"):]
+	if !strings.HasPrefix(body, tail) {
+		t.Errorf("JOBS block wrong:\n%s", got)
 	}
 }
 
