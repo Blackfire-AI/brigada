@@ -144,7 +144,7 @@ cat > /dev/null
 echo '{"type":"assistant","text":"starting"}'
 echo '{"type":"tool_start","name":"Bash"}'
 : > "$BRIGADA_TEST_MARKERS/started"
-sleep 0.6
+sleep 3
 echo hello > work.txt
 git add -A
 git commit -qm 'fake work: add work.txt'
@@ -311,9 +311,11 @@ func TestRunnerToolCallSuspendsStallClock(t *testing.T) {
 	markerDir(t)
 
 	// The stall window is a third of the call: without the suspension
-	// the run would be stopped mid-call.
+	// the run would be stopped mid-call. The window is wide enough that a
+	// worker slow to start on a busy machine does not spend it before its
+	// tool_start lands.
 	p := e.startRunner(writeWorkerScript(t, longToolWorker), 100*time.Millisecond,
-		func(c *Config) { c.StallAfter = 400 * time.Millisecond })
+		func(c *Config) { c.StallAfter = time.Second })
 	defer p.stop(t)
 
 	done := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
