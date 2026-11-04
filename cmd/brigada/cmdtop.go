@@ -21,8 +21,8 @@ import (
 )
 
 // topClient is what top asks of the API client: the status, the
-// capacity snapshot, the projects (to name a repo's project) and the
-// newest history page — all endpoints that exist — and a copy of itself
+// capacity snapshot, the projects (to name a repo's project and the
+// view's scope) and the newest history page — all endpoints that exist — and a copy of itself
 // whose reads name one project. Tests stub it.
 type topClient interface {
 	Status(ctx context.Context) (api.Status, error)
@@ -62,7 +62,7 @@ func runTop(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		noStart  bool
 	)
 	fs.DurationVar(&interval, "interval", 2*time.Second, "how often to redraw, as in 500ms or 2s")
-	fs.StringVar(&project, "project", "", "the repository URL whose project to show (default: the working directory's repository)")
+	fs.StringVar(&project, "project", "", "the repository URL whose project to show (default: every project)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; show the error and keep retrying")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
@@ -122,6 +122,12 @@ type topModel struct {
 	status   api.Status
 	capacity engine.CapacitySnapshot
 	events   []history.Item
+	// scope is what the header says the view shows: a repo's short name
+	// or `N projects`, "" when the projects could not be read.
+	scope string
+	// tagPlans says more than one project shows, so each plan line names
+	// its repo.
+	tagPlans bool
 	// err is the fetch's first error: the view shows it as a line and
 	// the loop keeps retrying. Parts that did fetch still render.
 	err error
@@ -131,26 +137,35 @@ type topModel struct {
 	hint string
 }
 
-// topFetch gathers one tick's model: the status, the capacity snapshot
-// and the newest history page, of the project the repo names, or of the
-// whole engine when the repo is empty. A project's status lists no broken
-// agent, since agents belong to no project, so a repo adds one unscoped
-// Status call and takes only that answer's agent entries, after the
-// project's own. A part that fails leaves its zero value and notes the
-// error; the first error comes back too, so the snapshot path can fail
-// while the loop shows the line and retries.
+// topFetch gathers one tick's model: the scope, the status, the capacity
+// snapshot and the newest history page, of the project the repo names, or
+// of the whole engine when the repo is empty. A project's status lists no
+// broken agent, since agents belong to no project, so a repo adds one
+// unscoped Status call and takes only that answer's agent entries, after
+// the project's own. A part that fails leaves its zero value and notes
+// the error; the first error comes back too, so the snapshot path can
+// fail while the loop shows the line and retries.
 func topFetch(ctx context.Context, client topClient, repo string) (topModel, error) {
+	var model topModel
 	reader := client
 	var projectID int64
 	if repo != "" {
+		model.scope = topRepoName(repo)
 		id, err := lookupProjectID(ctx, client, repo)
 		if err != nil {
-			return topModel{err: err}, err
+			model.err = err
+			return model, err
 		}
 		projectID = id
 		reader = client.forProject(id)
+	} else if projects, err := client.Projects(ctx); err != nil {
+		model.err = err
+	} else if len(projects) == 1 {
+		model.scope = topRepoName(projects[0].RepoURL)
+	} else {
+		model.scope = fmt.Sprintf("%d projects", len(projects))
+		model.tagPlans = len(projects) > 1
 	}
-	var model topModel
 	if st, err := reader.Status(ctx); err != nil {
 		model.err = err
 	} else {
@@ -174,6 +189,13 @@ func topFetch(ctx context.Context, client topClient, repo string) (topModel, err
 		model.err = err
 	}
 	return model, model.err
+}
+
+// topRepoName is a repo's short name: the last path segment of its URL,
+// without .git.
+func topRepoName(url string) string {
+	name := strings.TrimSuffix(strings.TrimRight(url, "/"), ".git")
+	return name[strings.LastIndexAny(name, "/:")+1:]
 }
 
 // topWithAgents is a project's needs-you entries followed by the agent
@@ -200,6 +222,9 @@ func (m topModel) keepPrevious(prev topModel) topModel {
 	}
 	if m.events == nil {
 		m.events = prev.events
+	}
+	if m.scope == "" {
+		m.scope, m.tagPlans = prev.scope, prev.tagPlans
 	}
 	return m
 }
@@ -259,7 +284,7 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 	foreman, jobs := topPlanless(model.status, now, style, width)
 	add(foreman)
 	add(jobs)
-	add(newTopPlans(model.status, now, style, width))
+	add(newTopPlans(model.status, model.tagPlans, now, style, width))
 	add(topAgentLines(model, now, style, width))
 	add(topEventLines(model.events, now, style, width))
 
@@ -453,9 +478,10 @@ func topFit(line string, width int) string {
 	return cutLine(term.StripEscapes(line), width)
 }
 
-// topHeader is the first line of the view: the engine's pid, its uptime
-// and the clock, then a dim rule filling the width that remains and the
-// keys at the right end. The keys show only when they fit whole — left,
+// topHeader is the first line of the view: the scope, when the fetch
+// found one, the engine's uptime and the clock, then a dim rule filling
+// the width that remains and the keys at the right end. The keys show
+// only when they fit whole — left,
 // two spaces and the keys within the width; a key is never cut
 // mid-word — and otherwise the rule fills what remains of the width. A
 // failed fetch adds its error as a second line, so the view keeps its
@@ -470,7 +496,11 @@ func topHeader(model topModel, now time.Time, style term.Style, width int) []str
 	if model.paused {
 		keys = "paused; p resumes, q quits"
 	}
-	left := fmt.Sprintf("brigada top · pid %d · up %s · %s", st.Pid, uptime, now.Format("15:04:05"))
+	left := "brigada"
+	if model.scope != "" {
+		left += " · " + model.scope
+	}
+	left += fmt.Sprintf(" · up %s · %s", uptime, now.Format("15:04:05"))
 	var line string
 	if rule := width - term.VisibleWidth(left) - term.VisibleWidth(keys) - 2; rule >= 1 {
 		line = left + " " + style.Dim(strings.Repeat("─", rule)) + " " + keys
@@ -742,7 +772,7 @@ func topPlanless(st api.Status, now time.Time, style term.Style, width int) (for
 // and each finished one a single line. A Dim "+N finished" line counts
 // the finished plans the status hid.
 func topPlansTree(st api.Status, now time.Time, style term.Style, width int) []string {
-	frame := &topFrame{lines: newTopPlans(st, now, style, width), hidden: st.HiddenFinishedPlans, style: style}
+	frame := &topFrame{lines: newTopPlans(st, false, now, style, width), hidden: st.HiddenFinishedPlans, style: style}
 	return frame.texts()
 }
 
@@ -750,8 +780,9 @@ func topPlansTree(st api.Status, now time.Time, style term.Style, width int) []s
 // finished plan's line folds into the +N finished line (b), a queued,
 // waiting-on or review task line is class d, a held, retry or parked
 // line f, a running line g, and a live plan's own line, the none
-// placeholder, the +N finished line and the head are class h.
-func newTopPlans(st api.Status, now time.Time, style term.Style, width int) []topLine {
+// placeholder, the +N finished line and the head are class h. With tagged
+// each plan's own line names its repo.
+func newTopPlans(st api.Status, tagged bool, now time.Time, style term.Style, width int) []topLine {
 	line := func(text string, class topYield) topLine {
 		return topLine{text: text, class: class, section: topSecPlans}
 	}
@@ -769,11 +800,15 @@ func newTopPlans(st api.Status, now time.Time, style term.Style, width int) []to
 		}
 	}
 	for _, p := range st.Plans {
+		tag := ""
+		if tagged {
+			tag = topRepoName(p.RepoURL)
+		}
 		if topPlanFinished(p) {
-			lines = append(lines, line(topPlanLine(p, style, width), yieldFinished))
+			lines = append(lines, line(topPlanLine(p, tag, style, width), yieldFinished))
 			continue
 		}
-		lines = append(lines, line(topPlanLine(p, style, width), yieldRest))
+		lines = append(lines, line(topPlanLine(p, tag, style, width), yieldRest))
 		task := func(text string, class topYield) {
 			lines = append(lines, line(text, class))
 		}
@@ -830,8 +865,10 @@ func newTopPlans(st api.Status, now time.Time, style term.Style, width int) []to
 // topPlanLine is a plan's own line. A finished plan's mark comes from
 // its State: `#id title done/total ✓` for done, `#id title ✗` for
 // cancelled. A live plan's is the Bold id, the title, done/total and an
-// eleven-cell progress bar — never a mark, even with every task done.
-func topPlanLine(p engine.StatusPlan, style term.Style, width int) string {
+// eleven-cell progress bar — never a mark, even with every task done. A
+// tag, when there is one, sits Dim after the id and the title gives way
+// to it.
+func topPlanLine(p engine.StatusPlan, tag string, style term.Style, width int) string {
 	done := 0
 	for _, t := range p.Tasks {
 		if t.State == "done" {
@@ -850,11 +887,15 @@ func topPlanLine(p engine.StatusPlan, style term.Style, width int) string {
 		tail = count + " " + topPlanBar(done, len(p.Tasks), style)
 	}
 	room := width - term.VisibleWidth(id) - term.VisibleWidth(tail) - 2
+	if tag != "" {
+		room -= term.VisibleWidth(tag) + 1
+		tag = style.Dim(tag) + " "
+	}
 	title := cutLine(p.Title, max(room, 4))
 	if !topPlanFinished(p) {
 		id = style.Bold(id)
 	}
-	return id + " " + title + " " + tail
+	return id + " " + tag + title + " " + tail
 }
 
 // topPlanBar is a live plan's progress: eleven cells, ▓ filled in OK
@@ -920,7 +961,8 @@ func topSectionHead(title string, style term.Style, width int) string {
 // topNeedsYou is the needs-you queue at the top of the view, under the
 // meters and before every other section: the header line carries a rule
 // fill to the width, then one Bad line per entry, cut to width and
-// capped at three entry lines with one dim "+N more" line under them.
+// capped at three entry lines with one dim "+N more" line under them. The
+// cap never hides a broken agent while a line remains (topNeedsYouShown).
 // The section is always visible: an empty queue keeps the header and
 // renders one dim line under it.
 func topNeedsYou(st api.Status, style term.Style, width int) []string {
@@ -928,14 +970,43 @@ func topNeedsYou(st api.Status, style term.Style, width int) []string {
 	if len(st.NeedsYou) == 0 {
 		return append(lines, style.Dim("nothing needs you"))
 	}
-	for i, n := range st.NeedsYou {
-		if i == 3 {
-			lines = append(lines, style.Dim(fmt.Sprintf("+%d more", len(st.NeedsYou)-i)))
-			break
-		}
+	shown := topNeedsYouShown(st.NeedsYou)
+	for _, n := range shown {
 		lines = append(lines, style.Bad(cutLine(topNeedsYouLine(n), width)))
 	}
+	if more := len(st.NeedsYou) - len(shown); more > 0 {
+		lines = append(lines, style.Dim(fmt.Sprintf("+%d more", more)))
+	}
 	return lines
+}
+
+// topNeedsYouShown chooses the three entries a longer queue shows: the
+// agent entries first, in queue order, the others filling the slots left.
+// The chosen entries keep their queue order.
+func topNeedsYouShown(queue []engine.NeedsYouItem) []engine.NeedsYouItem {
+	const limit = 3
+	if len(queue) <= limit {
+		return queue
+	}
+	agents := 0
+	for _, n := range queue {
+		if n.Kind == "agent" {
+			agents++
+		}
+	}
+	others := max(limit-agents, 0)
+	shown := make([]engine.NeedsYouItem, 0, limit)
+	for _, n := range queue {
+		switch {
+		case len(shown) == limit:
+		case n.Kind == "agent":
+			shown = append(shown, n)
+		case others > 0:
+			shown = append(shown, n)
+			others--
+		}
+	}
+	return shown
 }
 
 // topNeedsYouLine is one needs-you entry as its compact line: the
