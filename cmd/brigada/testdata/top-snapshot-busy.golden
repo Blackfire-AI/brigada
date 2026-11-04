@@ -4,7 +4,7 @@ SLOTS ▓▓▓░░░░░ 3/8   1 run   2 queue   1 held   2 needs
 
 NEEDS YOU ──────────────────────────────────────────────────────────────────────
 ! #2 should the sprocket be blue?
-! claude/sonnet-long-name login expired
+! claude/sonnet-long-name logi...  → brigada agent reset claude/sonnet-long-name
 
 PLANS ──────────────────────────────────────────────────────────────────────────
 #1 fix the frobnicator 1/4 ▓▓░░░░░░░░░
@@ -13,9 +13,10 @@ PLANS ────────────────────────�
   ? #4 polish the knobs  held: waiting for a runner slot
 
 AGENTS ─────────────────────────────────────────────────────────────────────────
-claude/opus              1/4 (runner)  ✓
 codex/gpt-5              0/8 (global)  ↺ 16:04
 claude/sonnet-long-name  2/8 (global)  ✗ login expired
+claude/opus              1/4 (runner)  ✓
 all ≤ global 8
 
+report #41: Plan 1 is half done; task 2 waits for your answer.
 15:02 #3 done · 15:02 #3 landed

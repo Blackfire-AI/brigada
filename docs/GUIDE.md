@@ -514,7 +514,7 @@ Whether you land by hand or the land job does it, the engine learns the task lan
 
 The loop — plan, work, check, review, land, push — runs on its own; you stop it with gates and rules ([section 7](#gates-and-rules)). Two matter here:
 
-- The **land gate** holds a landing before the squash. `gate_land: ask` holds every landing; a rule holds the one task that trips it — a tier among `approval_tiers`, a changed path matching `approval_protected_paths`, or a spent restart when `approval_restarted` is `true`. A held task stays `done`, and only its dependents' landings wait on it: work on the rest of the plan goes on. The needs-you entry names the rule and the commands that answer it, as `task #N done: held by rule approval_tiers, approval_protected_paths: heavy; touches infra/**; release: brigada land approve N; change the rule: brigada land approve --and-stop-asking N`, in `brigada status`; `brigada top` shows the entry's compact form, `! #N <reason>`. A task that lands while held, by its trailer on the land target or by its land job, leaves the queue.
+- The **land gate** holds a landing before the squash. `gate_land: ask` holds every landing; a rule holds the one task that trips it — a tier among `approval_tiers`, a changed path matching `approval_protected_paths`, or a spent restart when `approval_restarted` is `true`. A held task stays `done`, and only its dependents' landings wait on it: work on the rest of the plan goes on. The needs-you entry names the rule and the commands that answer it, as `task #N done: held by rule approval_tiers, approval_protected_paths: heavy; touches infra/**; release: brigada land approve N; change the rule: brigada land approve --and-stop-asking N`, in `brigada status`; `brigada top` shows the entry's compact form, `! #N <reason> → <command>`, with the release command whole at the end of the line. A task that lands while held, by its trailer on the land target or by its land job, leaves the queue.
 - The **push gate** (`gate_push`) decides what follows a successful landing:
   - `auto` (the default): the runner pushes the target at once.
   - `ask`: the landing is recorded as waiting, and the queue shows `task #N done: waits to push: <branch>@<sha>`. The commit waits on the remote under `refs/brigada/land/<target>`, a ref outside your branches that only ever moves forward, so it outlives the runner that made it. Waiting landings stack: the next landing is squashed onto the newest waiting one, so a dependent sits on top of its dependency. `brigada push approve` releases every waiting landing of the project at once: each gets its push, no new squash, on whichever runner takes it, and the stack reaches the target in order. If the target moved outside brigada while landings waited, their push is refused as a non-fast-forward and the task parks for the foreman. Switching `gate_push` from `ask` to `auto` pushes nothing that waits: a waiting landing still waits for `brigada push approve`, and one brigada re-makes because its waiting ref went stale (the target moved past it) waits at `ask` again rather than pushing under `auto`.
@@ -1065,7 +1065,10 @@ the global slots against their cap as a bar of ▓ and ░ with the use beside i
 then the needs-you queue, the plans tree, the agents section —
 one line per agent: its `harness/model`, its running jobs against its effective cap as `brigada capacity` shows it,
 then its quota as `✓` when ready, `↺ HH:MM` while cooling until that time, or `✗` and a short reason when broken;
+the broken and cooling agents come first, then the running ones, then the idle ones;
+an agent that is off — an effective cap of 0, nothing running, a ready quota — never lists, and a dim `+N idle · M off (brigada capacity)` line counts the off agents and the idle ones the height dropped, either part left out when zero;
 a dim `all ≤ global N` line under the list names the global cap —
+and above the events strip, when the foreman has reported, a dim `report #N: <first line of the report>` line, since the report can say what the needs-you queue does not —
 and the newest user-facing events as a strip at the bottom, each with its clock time in plain words, as `10:02 #328 landed · 09:40 plan #99 done`, joined by ` · ` and wrapping to a second line when the width allows.
 Plan, task, review, agent and foreman-report events show; job bookkeeping, messages and the other events do not. The strip keeps the newest 50 of them across redraws, so a busy run never empties it.
 Without `--project` every section shows the whole engine, whatever the working directory.
@@ -1074,7 +1077,8 @@ except that a broken agent still shows, in the needs-you queue and with its reas
 every other entry stays the project's.
 The scope is the repository's short name with `--project` or when the engine has one project, and `N projects` otherwise.
 When more than one project shows, each plan line carries its repository's short name after the id, as in `#101 brigada  Fix events strip`.
-The needs-you queue shows three lines, broken agents chosen first, and `+N more` counts the rest.
+The needs-you queue shows three lines, broken agents chosen first, and `+N more (brigada status)` counts the rest.
+The held and needs counters in the meters strip are coloured only above zero.
 
 The plans tree puts every job under its plan: an active plan's line carries its done/total and a progress bar,
 while a plan that is neither active nor finished shows a state word in their place —
@@ -1090,20 +1094,27 @@ with `queued` for a queued land job and `not landed` when the task carries no wo
 a reviewing plan whose review no job has started shows a dim `· plan review queued` line —
 while a finished plan is one line, `#N <title> done/total ✓` or `#N <title> ✗`, and `+N finished` counts the older finished plans hidden;
 a foreman turn no plan claims sits under a FOREMAN head and any other job no listed plan claims under a JOBS head,
-between the needs-you queue and the plans tree, each shown only when it has jobs.
+between the needs-you queue and the plans tree, each shown only when it has lines.
+The FOREMAN block also carries dim lines for the user's messages waiting for the foreman (`2 messages for the foreman`) and for each foreman slot that is not free, with its state, label and the local time since (`foreman slot: attach (attached chat) since 11:10`), a headless turn whose job runs left out because its job line speaks for it;
+the JOBS block carries a dim `runner restarting after N running job(s)` line while a runner restart waits behind running jobs.
 
 The needs-you queue comes first and is always visible: one compact `!` line per entry —
 `! #N <reason>` for a task or a plan (a plan with no reason shows its title and `awaiting approval` or `needs foreman`), the agent's `harness/model`, or the repository's URL for a foreman or project entry —
-capped at three lines with a `+N more` line, and `nothing needs you` when it is empty.
+and an entry that has an action ends in it, whole, `→ <command>`, the tails starting in one column and a long reason cut instead:
+`→ brigada plan approve N` for a plan awaiting approval, `→ brigada land approve N` for a task held by a rule (the reason stops before the commands it embeds),
+`→ brigada push approve` for a landing that waits to push (with `--repo URL` unless the view is unscoped with one project),
+and `→ brigada agent reset <harness>/<model>` for a broken agent;
+every other entry, `push by hand: <command>` and a plan parked for the foreman included, has none.
+The queue is capped at three lines with a `+N more (brigada status)` line, and shows `nothing needs you` when it is empty.
 
 The frame never has more lines than the terminal is tall.
 When the view is taller, lines drop class by class, each class from the bottom of the view upward, one line at a time, until it fits:
-the events strip's second line;
+the events strip's second line, then the report line above it;
 finished plans, folded into the dim `+N finished` line;
 the blank lines between sections;
 queued `·` task lines, including `(waiting on ...)` and `(review)`, from the last plan upward;
-idle agents (no running job, quota neither cooling nor broken), counted in the dim `+N more (brigada agents)` line;
-held `?` and retry `↺` lines and parked `!` task lines;
+idle agents (no running job, quota neither cooling nor broken), counted in the dim `+N idle · M off (brigada capacity)` line;
+held `?` and retry `↺` lines, the dim lines of the FOREMAN and JOBS blocks and parked `!` task lines;
 running `▸` lines;
 and then every other line outside the header and the needs-you queue —
 the events strip's first line, the remaining agent lines, the `all ≤ global N` line, the fold lines, each plan's own line, the placeholders, the PLANS and AGENTS heads —
