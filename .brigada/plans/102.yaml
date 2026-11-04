@@ -46,6 +46,6 @@ tasks:
     review_effort: medium
     caps: {restart: 1}
     skills: ["cli-flag", "surface-parity"]
-    state: needs_foreman
+    state: running
     branch: ""
     rounds: 0
