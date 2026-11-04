@@ -101,25 +101,23 @@ func runTop(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if code != 0 {
 			return code
 		}
-		if code := printTopSnapshot(ctx, topAPI{client}, repo, time.Now(), stdout, stderr); code != 0 {
-			return code
-		}
-		if hint := agentsHint(ctx, rt, true); hint != "" {
-			fmt.Fprintln(stdout, hint)
-		}
-		return 0
+		// The hint sits under the header, so it is fetched first and goes
+		// into the model the snapshot renders.
+		return printTopSnapshot(ctx, topAPI{client}, repo, agentsHint(ctx, rt, true), time.Now(), stdout, stderr)
 	}
 	return topLoop(ctx, rt, repo, interval, noStart, stdout)
 }
 
 // printTopSnapshot fetches once and prints the plain rendering; the
 // loop never runs here. Any fetch error is a failure, not a line. now is
-// the clock the rendering reads, so a test can fix it.
-func printTopSnapshot(ctx context.Context, client topClient, repo string, now time.Time, stdout, stderr io.Writer) int {
+// the clock the rendering reads, so a test can fix it. hint is the
+// unregistered-models line, which the rendering puts under the header.
+func printTopSnapshot(ctx context.Context, client topClient, repo, hint string, now time.Time, stdout, stderr io.Writer) int {
 	model, err := topFetch(ctx, client, repo)
 	if err != nil {
 		return fail(stderr, err)
 	}
+	model.hint = hint
 	style := term.New(detectCaps(stdout))
 	fmt.Fprintln(stdout, strings.Join(renderTop(model, style.Width(), 0, now, style), "\n"))
 	return 0
@@ -142,6 +140,9 @@ type topModel struct {
 	// soleProject says the view is unscoped and the engine has exactly one
 	// project, so `brigada push approve` needs no --repo.
 	soleProject bool
+	// statusOK says the status fetched, so an empty plans list is the
+	// engine's answer and not the absence of one.
+	statusOK bool
 	// err is the fetch's first error: the view shows it as a line and
 	// the loop keeps retrying. Parts that did fetch still render.
 	err error
@@ -185,6 +186,7 @@ func topFetch(ctx context.Context, client topClient, repo string) (topModel, err
 		model.err = err
 	} else {
 		model.status = st
+		model.statusOK = true
 		if repo != "" {
 			if all, err := client.Status(ctx); err != nil {
 				model.err = err
@@ -234,7 +236,7 @@ func topWithAgents(scoped, unscoped []engine.NeedsYouItem) []engine.NeedsYouItem
 // blank screen.
 func (m topModel) keepPrevious(prev topModel) topModel {
 	if m.status.Pid == 0 && m.status.StartedAt == "" {
-		m.status = prev.status
+		m.status, m.statusOK = prev.status, prev.statusOK
 	}
 	if len(m.capacity.Agents) == 0 && len(m.capacity.Layers) == 0 {
 		m.capacity = prev.capacity
@@ -335,7 +337,7 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 	foreman, jobs := topPlanless(model.status, now, style, width)
 	add(foreman)
 	add(jobs)
-	add(newTopPlans(model.status, model.tagPlans, now, style, width))
+	add(newTopPlans(model.status, model.tagPlans, model.statusOK, now, style, width))
 	add(topAgentLines(model, now, style, width))
 	add(append(topReportLine(model.status, style, width), topEventLines(model.events, now, style, width)...))
 
@@ -463,7 +465,7 @@ func (f *topFrame) texts() []string {
 			if l.count > 0 {
 				parts = append(parts, fmt.Sprintf("%d off", l.count))
 			}
-			out = append(out, f.style.Dim(strings.Join(parts, " · ")+" (brigada capacity)"))
+			out = append(out, f.style.Dim(strings.Join(parts, topEventSep(f.style))+" (brigada capacity)"))
 		default:
 			out = append(out, l.text)
 		}
@@ -547,33 +549,48 @@ func topFit(line string, width int) string {
 // shape while the loop retries.
 func topHeader(model topModel, now time.Time, style term.Style, width int) []string {
 	st := model.status
+	sep := topEventSep(style)
 	uptime := "0s"
 	if started := parseStartedAt(st.StartedAt); !started.IsZero() {
-		uptime = formatUptime(now.Sub(started))
+		uptime = topUptime(now.Sub(started))
 	}
-	keys := "q quit · p pause"
+	keys := "q quit" + sep + "p pause"
 	if model.paused {
 		keys = "paused; p resumes, q quits"
 	}
 	left := "brigada"
 	if model.scope != "" {
-		left += " · " + model.scope
+		left += sep + model.scope
 	}
-	left += fmt.Sprintf(" · up %s · %s", uptime, now.Format("15:04:05"))
+	left += fmt.Sprintf("%sup %s%s%s", sep, uptime, sep, now.Format("15:04:05"))
 	var line string
 	if rule := width - term.VisibleWidth(left) - term.VisibleWidth(keys) - 2; rule >= 1 {
-		line = left + " " + style.Dim(strings.Repeat("─", rule)) + " " + keys
+		line = left + " " + style.Dim(strings.Repeat(style.Dash(), rule)) + " " + keys
 	} else {
-		line = left + " " + style.Dim(strings.Repeat("─", max(width-term.VisibleWidth(left)-1, 1)))
+		line = left + " " + style.Dim(strings.Repeat(style.Dash(), max(width-term.VisibleWidth(left)-1, 1)))
 	}
 	lines := []string{topFit(line, width)}
 	if model.err != nil {
 		lines = append(lines, style.Bad(cutLine("engine: "+model.err.Error(), width)))
 	}
 	if model.hint != "" {
-		lines = append(lines, cutLine(model.hint, width))
+		lines = append(lines, style.Dim(cutLine(model.hint, width)))
 	}
 	return lines
+}
+
+// topUptime is the engine's uptime as the header shows it: whole seconds
+// under a minute (`45s`), whole minutes under an hour (`33m`), else hours
+// and minutes (`11h33m`, `2h0m`), each truncated. The seconds stay in the
+// header's clock.
+func topUptime(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(max(d, 0)/time.Second))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	}
+	return fmt.Sprintf("%dh%dm", int(d/time.Hour), int(d%time.Hour/time.Minute))
 }
 
 // topAgents is the AGENTS section: a rule-filled head, one line per
@@ -605,7 +622,7 @@ func topAgentLines(model topModel, now time.Time, style term.Style, width int) [
 	g := api.GlobalCap(snap)
 	var global []topLine
 	if g != nil {
-		global = []topLine{line(style.Dim(fmt.Sprintf("all ≤ global %d", *g)), yieldRest)}
+		global = []topLine{line(style.Dim(fmt.Sprintf("all %s global %d", style.AtMost(), *g)), yieldRest)}
 	}
 	if len(snap.Agents) == 0 {
 		return append([]topLine{head, line(style.Dim("no agents advertised"), yieldRest)}, global...)
@@ -665,11 +682,11 @@ func topAgentLines(model topModel, now time.Time, style term.Style, width int) [
 			if room := width - utf8.RuneCountInString(prefix) - 2; room >= 10 {
 				reason = cutLine(reason, room)
 			}
-			quota = style.Bad("✗ " + reason)
+			quota = style.Bad(style.Cross() + " " + reason)
 		case "cooling":
-			quota = style.Warn("↺ " + api.LocalClock(a.CoolingUntil, now))
+			quota = style.Warn(style.Again() + " " + api.LocalClock(a.CoolingUntil, now))
 		default:
-			quota = style.OK("✓")
+			quota = style.OK(style.Check())
 		}
 		class := yieldRest
 		if a.Running == 0 && a.Quota != "broken" && a.Quota != "cooling" {
@@ -719,7 +736,7 @@ func topMeters(model topModel, style term.Style, width int) []string {
 		if limit != nil {
 			useLimit = fmt.Sprintf("%d/%d", use, *limit)
 			if *limit >= 1 {
-				bar = topSlotBar(use, *limit) + " "
+				bar = topSlotBar(use, *limit, style) + " "
 			}
 		}
 		cell = "SLOTS " + bar + useLimit
@@ -745,14 +762,24 @@ func topMeters(model topModel, style term.Style, width int) []string {
 // topSlotBar is the meters' slots bar: the global use against its cap
 // as at most ten cells — ▓ filled and ░ empty in proportion, at least
 // one ▓ whenever the use is over zero, so a sliver of use always shows.
-func topSlotBar(use, limit int) string {
+func topSlotBar(use, limit int, style term.Style) string {
 	cells := min(limit, 10)
 	filled := use * cells / limit
 	if use > 0 && filled == 0 {
 		filled = 1
 	}
 	filled = min(filled, cells)
-	return strings.Repeat("▓", filled) + strings.Repeat("░", cells-filled)
+	return strings.Repeat(style.Filled(), filled) + strings.Repeat(style.Empty(), cells-filled)
+}
+
+// topDescribeJob is status's own words for a job, its ` · ` joints in the
+// style's separator so the plain ASCII style has no Unicode of its own.
+func topDescribeJob(j engine.StatusJob, now time.Time, style term.Style) string {
+	text := api.DescribeJob(j, now)
+	if sep := topEventSep(style); sep != " · " {
+		text = strings.ReplaceAll(text, " · ", sep)
+	}
+	return text
 }
 
 // topPlanFinished says a plan's State has ended it: done or cancelled.
@@ -811,7 +838,7 @@ func (c topClaims) plan(jobID, taskID int64) (int64, bool) {
 // topRunningLine is one running job under its task, its plan or in the
 // FOREMAN or JOBS block: the Accent pointer and status's own words for the job.
 func topRunningLine(j engine.StatusJob, now time.Time, style term.Style, width int) string {
-	return "  " + style.Accent("▸") + " " + cutLine(api.DescribeJob(j, now), width-4)
+	return "  " + style.Accent(style.Pointer()) + " " + cutLine(topDescribeJob(j, now, style), width-4)
 }
 
 // topHeldLine is one held job, in Warn: the task it is for, or the job
@@ -827,7 +854,7 @@ func topHeldLine(h engine.HeldJob, style term.Style, width int) string {
 // topRetryLine is one job waiting on an infra retry, Dim, in status's
 // own words.
 func topRetryLine(r engine.InfraRetry, now time.Time, style term.Style, width int) string {
-	return "  " + style.Dim(cutLine("↺ "+api.RetryLine(r, now), width-2))
+	return "  " + style.Dim(cutLine(style.Again()+" "+api.RetryLine(r, now), width-2))
 }
 
 // topPlanless is the two blocks under NEEDS YOU: the running, held and
@@ -914,7 +941,7 @@ func topPlanless(st api.Status, now time.Time, style term.Style, width int) (for
 // and each finished one a single line. A Dim "+N finished" line counts
 // the finished plans the status hid.
 func topPlansTree(st api.Status, now time.Time, style term.Style, width int) []string {
-	frame := &topFrame{lines: newTopPlans(st, false, now, style, width), hidden: st.HiddenFinishedPlans, style: style}
+	frame := &topFrame{lines: newTopPlans(st, false, false, now, style, width), hidden: st.HiddenFinishedPlans, style: style}
 	return frame.texts()
 }
 
@@ -925,7 +952,7 @@ func topPlansTree(st api.Status, now time.Time, style term.Style, width int) []s
 // reviewing plan's `plan review queued` line d, and a live plan's own line, the none
 // placeholder, the +N finished line and the head are class h. With tagged
 // each plan's own line names its repo.
-func newTopPlans(st api.Status, tagged bool, now time.Time, style term.Style, width int) []topLine {
+func newTopPlans(st api.Status, tagged, fetched bool, now time.Time, style term.Style, width int) []topLine {
 	line := func(text string, class topYield) topLine {
 		return topLine{text: text, class: class, section: topSecPlans}
 	}
@@ -933,7 +960,13 @@ func newTopPlans(st api.Status, tagged bool, now time.Time, style term.Style, wi
 	head.head = true
 	lines := []topLine{head}
 	if len(st.Plans) == 0 {
-		lines = append(lines, line(style.Dim("none"), yieldRest))
+		// A status that came back with no plans, hidden or listed, is a
+		// first run; one that did not come back has said nothing.
+		text := "none"
+		if fetched && st.HiddenFinishedPlans == 0 {
+			text = `no plans yet: brigada ask "fix #12"`
+		}
+		lines = append(lines, line(style.Dim(text), yieldRest))
 	}
 	claims := newTopClaims(st)
 	reasons := make(map[int64]string)
@@ -991,7 +1024,7 @@ func newTopPlans(st api.Status, tagged bool, now time.Time, style term.Style, wi
 			}
 		}
 		if p.State == "reviewing" && !reviewJob {
-			task("  "+style.Dim("· plan review queued"), yieldQueued)
+			task("  "+style.Dim(style.Dot()+" plan review queued"), yieldQueued)
 		}
 		for _, t := range p.Tasks {
 			for _, h := range st.Held {
@@ -1068,9 +1101,9 @@ func topPlanTail(p engine.StatusPlan, style term.Style) string {
 	count := fmt.Sprintf("%d/%d", done, total)
 	switch p.State {
 	case "done":
-		return count + " " + style.OK("✓")
+		return count + " " + style.OK(style.Check())
 	case "cancelled":
-		return style.Bad("✗")
+		return style.Bad(style.Cross())
 	case "", "active":
 		return count + " " + topPlanBar(done, total, style)
 	case "pending_approval":
@@ -1157,7 +1190,7 @@ func topLandingLine(t engine.StatusTask, now time.Time, style term.Style, width 
 	if t.Title != "" {
 		subject += " " + t.Title
 	}
-	return "  " + style.Dim(cutLine("⇡ "+subject+"  landing: "+what, width-2))
+	return "  " + style.Dim(cutLine(style.Up()+" "+subject+"  landing: "+what, width-2))
 }
 
 // topLandReadyWords shows the stamp in `waiting (retry at <stamp>, last
@@ -1195,8 +1228,8 @@ func topTitled(ref, title, rest string, width int) string {
 // title: `▸ #331 title · work · claude/sonnet@high · 3m12s · Edit`, the
 // tail status's own words for the job minus the leading `task #N `.
 func topPlanRunningLine(j engine.StatusJob, title string, now time.Time, style term.Style, width int) string {
-	tail := strings.TrimPrefix(api.DescribeJob(j, now), fmt.Sprintf("task #%d ", j.TaskID))
-	return "  " + style.Accent("▸") + " " + topTitled(fmt.Sprintf("#%d", j.TaskID), title, " · "+tail, width-4)
+	tail := strings.TrimPrefix(topDescribeJob(j, now, style), fmt.Sprintf("task #%d ", j.TaskID))
+	return "  " + style.Accent(style.Pointer()) + " " + topTitled(fmt.Sprintf("#%d", j.TaskID), title, topEventSep(style)+tail, width-4)
 }
 
 // topPlanHeldLine is a held job under its plan, with its task's title:
@@ -1220,10 +1253,10 @@ func topPlanBar(done, total int, style term.Style) string {
 	filled = min(filled, cells)
 	var bar string
 	if filled > 0 {
-		bar = style.OK(strings.Repeat("▓", filled))
+		bar = style.OK(strings.Repeat(style.Filled(), filled))
 	}
 	if filled < cells {
-		bar += style.Dim(strings.Repeat("░", cells-filled))
+		bar += style.Dim(strings.Repeat(style.Empty(), cells-filled))
 	}
 	return bar
 }
@@ -1241,13 +1274,13 @@ func topTaskLine(t engine.StatusTask, reason string, style term.Style, width int
 		}
 		return "  " + style.Bad(cutLine("! "+subject+" "+reason, width-2))
 	case "reviewing":
-		return "  " + style.Dim(cutLine("· "+subject+" (review)", width-2))
+		return "  " + style.Dim(cutLine(style.Dot()+" "+subject+" (review)", width-2))
 	}
 	wait := "(queued)"
 	if len(t.WaitingOn) > 0 {
 		wait = "(waiting on " + strings.Join(t.WaitingOn, ", ") + ")"
 	}
-	return "  " + style.Dim(cutLine("· "+subject+" "+wait, width-2))
+	return "  " + style.Dim(cutLine(style.Dot()+" "+subject+" "+wait, width-2))
 }
 
 // topSectionHead is a section's head line: the Bold title and a Dim
@@ -1262,7 +1295,7 @@ func topSectionHead(title string, style term.Style, width int) string {
 	if rule < 1 {
 		rule = 1
 	}
-	return style.Bold(title) + " " + style.Dim(strings.Repeat("─", rule))
+	return style.Bold(title) + " " + style.Dim(strings.Repeat(style.Dash(), rule))
 }
 
 // topNeedsYou is the needs-you queue at the top of the view, under the
@@ -1285,7 +1318,7 @@ func topNeedsYou(st api.Status, sole bool, style term.Style, width int) []string
 	tails := make([]string, len(shown))
 	col, tailW := 0, 0
 	for i, n := range shown {
-		texts[i], tails[i] = topNeedsYouLine(n), topNeedsYouTail(n, st, sole)
+		texts[i], tails[i] = topNeedsYouLine(n), topNeedsYouTail(n, st, sole, style)
 		if tails[i] != "" {
 			col = max(col, utf8.RuneCountInString(texts[i]))
 			tailW = max(tailW, utf8.RuneCountInString(tails[i]))
@@ -1315,27 +1348,28 @@ func topNeedsYou(st api.Status, sole bool, style term.Style, width int) []string
 // the working directory's origin, which is the view's project only when it
 // is unscoped with one project; otherwise the tail names the entry's plan's
 // repository, and an entry whose plan is not listed has no tail.
-func topNeedsYouTail(n engine.NeedsYouItem, st api.Status, sole bool) string {
+func topNeedsYouTail(n engine.NeedsYouItem, st api.Status, sole bool, style term.Style) string {
+	arrow := style.Arrow() + " "
 	switch n.Kind {
 	case "plan":
 		if n.State == "pending_approval" {
-			return fmt.Sprintf("→ brigada plan approve %d", n.ID)
+			return fmt.Sprintf("%sbrigada plan approve %d", arrow, n.ID)
 		}
 	case "agent":
 		if n.State == "broken" && n.Title != "" {
-			return "→ brigada agent reset " + n.Title
+			return arrow + "brigada agent reset " + n.Title
 		}
 	case "task":
 		switch {
 		case n.State == "done" && strings.HasPrefix(n.Reason, "held by rule"):
-			return fmt.Sprintf("→ brigada land approve %d", n.ID)
+			return fmt.Sprintf("%sbrigada land approve %d", arrow, n.ID)
 		case strings.HasPrefix(n.Reason, "waits to push:"):
 			if sole {
-				return "→ brigada push approve"
+				return arrow + "brigada push approve"
 			}
 			for _, p := range st.Plans {
 				if n.PlanID != 0 && p.ID == n.PlanID && p.RepoURL != "" {
-					return "→ brigada push approve --repo " + p.RepoURL
+					return arrow + "brigada push approve --repo " + p.RepoURL
 				}
 			}
 		}
@@ -1419,6 +1453,7 @@ func topEvents(items []history.Item, now time.Time, style term.Style, width int)
 	if len(items) == 0 {
 		return []string{style.Dim("no events")}
 	}
+	sep := topEventSep(style)
 	parts := make([]string, len(items))
 	for i := len(items) - 1; i >= 0; i-- {
 		parts[len(items)-1-i] = topEventItem(items[i], now, style)
@@ -1430,7 +1465,7 @@ func topEvents(items []history.Item, now time.Time, style term.Style, width int)
 		for i := start; i < len(parts); i++ {
 			part := term.VisibleWidth(parts[i])
 			if i > start {
-				part += term.VisibleWidth(topEventSep)
+				part += term.VisibleWidth(sep)
 			}
 			if used+part > width {
 				return i - start, i
@@ -1441,15 +1476,15 @@ func topEvents(items []history.Item, now time.Time, style term.Style, width int)
 	}
 	first, next := fill(0)
 	if next == len(parts) {
-		return []string{strings.Join(parts, topEventSep)}
+		return []string{strings.Join(parts, sep)}
 	}
 	if second, _ := fill(next); second == 0 {
 		// No whole item fits on the second line: one line, cut.
-		return []string{topFit(strings.Join(parts, topEventSep), width)}
+		return []string{topFit(strings.Join(parts, sep), width)}
 	}
 	return []string{
-		strings.Join(parts[:first], topEventSep),
-		topFit(strings.Join(parts[first:], topEventSep), width),
+		strings.Join(parts[:first], sep),
+		topFit(strings.Join(parts[first:], sep), width),
 	}
 }
 
@@ -1480,8 +1515,9 @@ func topEventLines(items []history.Item, now time.Time, style term.Style, width 
 	return lines
 }
 
-// topEventSep joins the strip's items; it is three columns wide.
-const topEventSep = " · "
+// topEventSep joins the strip's items and the header's parts: the style's
+// dot between spaces, three columns wide in either alphabet.
+func topEventSep(style term.Style) string { return " " + style.Dot() + " " }
 
 // topEventPayload is the part of an event's payload the strip words.
 type topEventPayload struct {

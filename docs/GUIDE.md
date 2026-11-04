@@ -1129,8 +1129,11 @@ Below 60 columns the section heads drop their rule fills, and a header whose key
 `q` quits and `p` pauses the refresh.
 When the engine cannot be reached the view keeps the last data and shows the error on a line while it retries; `--no-start` stops it starting an engine.
 When the output is not a terminal it prints one plain snapshot and exits.
+The header shows the uptime as `45s` under a minute, `33m` under an hour and `11h33m` after, truncated; the seconds stay in the clock.
+When the engine answers with no plans at all, the plans section reads `no plans yet: brigada ask "fix #12"`; when it cannot be reached it keeps `none`.
+Without UTF-8 in the locale every glyph the view draws has an ASCII fallback — `#` and `.` for the bars, `-` for the rules, `>` for the running pointer, `->` for a retry, a cooling agent and the action tails, `x` for a failure, `ok` for a ready agent, `|` between parts, `<=` in the global cap line and `^` on the landing line — so the plain style reads the same text; task titles, reasons and report text stay as they are.
 
-The same hint line as `status` sits under the header when your CLIs offer unregistered models; `top` only reads the cached listing on each redraw ([section 8](#models-added-later)).
+The same hint line as `status`, dim, sits under the header when your CLIs offer unregistered models, in the piped snapshot too; `top` only reads the cached listing on each redraw ([section 8](#models-added-later)).
 
 The foreman can look at the capacity it has when it plans (per agent: the tier, the configured effort or `default`, the cap, the running jobs, the quota state and the cost weight), but the engine enforces the caps whatever the foreman believes. `cost.<harness>/<model>` is a relative weight, default 1, that the foreman sees when it decides which tasks can wait for a cheaper agent. It also steers dispatch: agents of a tier rank by `weight / p` ([section 8](#tiers)), so a dearer agent is picked less often unless its record is clearly better.
 
