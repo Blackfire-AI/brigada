@@ -31,6 +31,6 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["bugfix"]
-    state: running
+    state: reviewing
     branch: "brigada/task-345"
     rounds: 1
