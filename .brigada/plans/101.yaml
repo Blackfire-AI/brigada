@@ -69,7 +69,7 @@ tasks:
     review_tier: heavy
     caps: {restart: 0}
     skills: ["bugfix"]
-    state: reviewing
+    state: done
     branch: "brigada/task-333"
     rounds: 0
   - id: 334
@@ -83,7 +83,7 @@ tasks:
     review_tier: heavy
     caps: {restart: 0}
     skills: ["bugfix"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 335
