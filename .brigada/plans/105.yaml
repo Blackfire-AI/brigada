@@ -85,8 +85,8 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-350"
     rounds: 0
   - id: 351
     name: "check-log-docs"
