@@ -104,8 +104,10 @@ type eventJSON struct {
 	Args      string          `json:"args"`
 	SessionID string          `json:"session_id"`
 	Kind      string          `json:"kind"`
-	Message   string          `json:"message"`
-	Until     string          `json:"until"` // a limit error's reset time, RFC3339 (§4.4)
+	// OutputLimit marks a usage line as a step cut off at the output limit.
+	OutputLimit bool   `json:"output_limit"`
+	Message     string `json:"message"`
+	Until       string `json:"until"` // a limit error's reset time, RFC3339 (§4.4)
 }
 
 // ParseEvent implements adapter.Adapter. A line that is not one of the
@@ -140,7 +142,17 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 			kind = adapter.EvUsage
 		}
 		u := adapter.ParseUsage(ev.Usage, "input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens", "cost_usd")
-		return adapter.Event{Kind: kind, Text: ev.Text, Usage: u}, true
+		out := adapter.Event{Kind: kind, Text: ev.Text, Usage: u}
+		if kind == adapter.EvUsage && ev.OutputLimit {
+			out.OutputLimit = &adapter.OutputLimit{}
+			if u != nil && u.OutputTokens != nil {
+				out.OutputLimit.OutputTokens = *u.OutputTokens
+			}
+			if u != nil && u.ReasoningTokens != nil {
+				out.OutputLimit.ReasoningTokens = *u.ReasoningTokens
+			}
+		}
+		return out, true
 	case "error":
 		kind := adapter.ErrorKind(ev.Kind)
 		switch kind {

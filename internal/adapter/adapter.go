@@ -209,6 +209,11 @@ const (
 	// fixes its model or the account, so it stays out like an auth break
 	// and no probe clears it.
 	ErrModel ErrorKind = "model"
+	// ErrOutputLimit is a run cut off at its output token limit: the
+	// model stopped for length, not for lack of work. It is not a quota
+	// limit (ErrLimit) and cools no account; the runner raises it only
+	// when the cut-off left the run without a result.
+	ErrOutputLimit ErrorKind = "output_limit"
 )
 
 // modelRejectedRe matches a provider refusing the model by name: "The
@@ -320,11 +325,21 @@ type Event struct {
 	// (codex's turn.failed): it names the failure over any earlier error
 	// event of the same stream.
 	Final bool
+	// OutputLimit rides a usage event whose model step ended at the
+	// output token limit. A later usage event without it clears it, so
+	// only the run's last step counts.
+	OutputLimit *OutputLimit
 	// Notice marks an error event that is only a warning while the
 	// turn has not started (codex's startup notices): the runner, which
 	// tracks each job's turn through TurnMarker, downgrades it to a
 	// warning until then.
 	Notice bool
+}
+
+// OutputLimit is the spend of a model step cut off at its output limit.
+type OutputLimit struct {
+	OutputTokens    int64
+	ReasoningTokens int64
 }
 
 // TurnMarker is the optional adapter interface for a CLI whose stream
