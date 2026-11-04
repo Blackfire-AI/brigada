@@ -15,10 +15,12 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
-// The stalled-worker tests (§5.6, BP8a-4b). The timings are real but
-// small — the policy's arithmetic is covered by its table test below,
-// and the default minutes-long windows by the manual clock, so nothing
-// here sleeps longer than a heartbeat interval needs.
+// The stalled-worker tests (§5.6, BP8a-4b). The policy's arithmetic is
+// covered by its table test below. A test whose worker does work under
+// the silence clock (git, a slow start) uses the manual clock, so a busy
+// machine cannot expire the window early; only the tool-call and time-cap
+// tests keep real, small timings, because no silence window is at risk
+// in them (an open call suspends it; the cap stops the run either way).
 
 // TestStallPolicyCheck is the policy's arithmetic on fixed times: the
 // silence window, the suspension an open tool call buys and its own
@@ -134,18 +136,20 @@ sleep 30
 `
 
 // longToolWorker opens a tool call and works inside it, silent for
-// longer than the stall window: the open call suspends the clock.
+// longer than the stall window: the open call suspends the clock. Its
+// git steps run inside the call too, so no git step runs under a live
+// clock; only the result line follows tool_end.
 const longToolWorker = `
 cat > /dev/null
 echo '{"type":"assistant","text":"starting"}'
 echo '{"type":"tool_start","name":"Bash"}'
 : > "$BRIGADA_TEST_MARKERS/started"
-sleep 0.6
-echo '{"type":"tool_end","name":"Bash"}'
+sleep 3
 echo hello > work.txt
 git add -A
 git commit -qm 'fake work: add work.txt'
 br=$(git rev-parse --abbrev-ref HEAD)
+echo '{"type":"tool_end","name":"Bash"}'
 printf '{"type":"result","text":"done inside the tool: {\\"status\\":\\"done\\",\\"summary\\":\\"added work.txt\\",\\"branch\\":\\"%s\\"}"}\n' "$br"
 : > "$BRIGADA_TEST_MARKERS/finished"
 `
@@ -201,11 +205,29 @@ func TestRunnerStalledWorker(t *testing.T) {
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
 	markers := markerDir(t)
 
+	// The manual clock keeps the window from expiring before the worker
+	// has reported its progress, however slow the start is under load.
+	clk := newManualClock()
 	p := e.startRunner(writeWorkerScript(t, silentWorker), 100*time.Millisecond,
-		func(c *Config) { c.StallAfter = 400 * time.Millisecond })
+		func(c *Config) {
+			c.Clock = clk.Clock()
+			c.StallAfter = 400 * time.Millisecond
+		})
 	defer p.stop(t)
 
-	stopped := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == statusStalled })
+	e.waitUntil("the worker to start", func() bool {
+		_, err := os.Stat(filepath.Join(markers, "started"))
+		return err == nil
+	})
+	// Advanced until the job stalls: the first advance may land before the
+	// run counts the worker as watched.
+	stopped := e.waitJob(job, func(j *engine.JobInfo) bool {
+		if j.Status == statusStalled {
+			return true
+		}
+		clk.Advance(time.Minute)
+		return false
+	})
 	res := e.workerResult(stopped)
 	if res.Status != statusStalled {
 		t.Errorf("worker result = %+v, want status %q", res, statusStalled)
@@ -289,9 +311,11 @@ func TestRunnerToolCallSuspendsStallClock(t *testing.T) {
 	markerDir(t)
 
 	// The stall window is a third of the call: without the suspension
-	// the run would be stopped mid-call.
+	// the run would be stopped mid-call. The window is wide enough that a
+	// worker slow to start on a busy machine does not spend it before its
+	// tool_start lands.
 	p := e.startRunner(writeWorkerScript(t, longToolWorker), 100*time.Millisecond,
-		func(c *Config) { c.StallAfter = 400 * time.Millisecond })
+		func(c *Config) { c.StallAfter = time.Second })
 	defer p.stop(t)
 
 	done := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
@@ -381,13 +405,29 @@ func TestRunnerStoppedRunPushesCommittedWork(t *testing.T) {
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
-	markerDir(t)
+	markers := markerDir(t)
 
+	// The manual clock keeps the window from expiring while the worker
+	// still commits; the clock moves only after the commit's marker.
+	clk := newManualClock()
 	p := e.startRunner(writeWorkerScript(t, stalledCommitter), 100*time.Millisecond,
-		func(c *Config) { c.StallAfter = 400 * time.Millisecond })
+		func(c *Config) {
+			c.Clock = clk.Clock()
+			c.StallAfter = 400 * time.Millisecond
+		})
 	defer p.stop(t)
 
-	stopped := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == statusStalled })
+	e.waitUntil("the worker to commit and start", func() bool {
+		_, err := os.Stat(filepath.Join(markers, "started"))
+		return err == nil
+	})
+	stopped := e.waitJob(job, func(j *engine.JobInfo) bool {
+		if j.Status == statusStalled {
+			return true
+		}
+		clk.Advance(time.Minute)
+		return false
+	})
 	res := e.workerResult(stopped)
 	if res.Status != statusStalled {
 		t.Fatalf("worker result = %+v, want status %q", res, statusStalled)
