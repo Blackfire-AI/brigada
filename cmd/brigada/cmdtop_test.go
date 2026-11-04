@@ -554,7 +554,7 @@ func TestTopPlansTree(t *testing.T) {
 				t.Errorf("tree =\n%s\nwant\n%s", got, want)
 			}
 			if foreman, jobs := topPlanless(tt.st, topNow, term.New(logo.Caps{}), 80); len(foreman)+len(jobs) != 0 {
-				t.Errorf("a plan's job is plan-less: %q %q", foreman, jobs)
+				t.Errorf("a plan's job is plan-less: %v %v", foreman, jobs)
 			}
 		})
 	}
@@ -776,34 +776,153 @@ func TestTopPlanless(t *testing.T) {
 	}
 }
 
-// TestRenderTopFitsSize: a screen shorter than the view's floor still
-// renders the floor whole — the busy fixture at 40x10 keeps every line
-// within 40 columns while the count passes the height, because nothing
-// inside the floor is cut or dropped.
+// crowdedTopModel is a busy engine on a short screen: twelve live plans
+// each with a running job and a queued task, six finished plans listed
+// and four more hidden, a full NEEDS YOU queue, a foreman turn and a held
+// job no plan claims, and four agents of which three are idle.
+func crowdedTopModel() topModel {
+	m := busyTopModel()
+	m.status.Running, m.status.Held, m.status.Plans = nil, nil, nil
+	finished := func(id int64) engine.StatusPlan {
+		return engine.StatusPlan{ID: id, Title: fmt.Sprintf("done plan %d", id), State: "done",
+			Tasks: []engine.StatusTask{{ID: id * 10, Title: "t", State: "done"}}}
+	}
+	for id := int64(30); id < 32; id++ {
+		m.status.Plans = append(m.status.Plans, finished(id))
+	}
+	for i := int64(1); i <= 12; i++ {
+		m.status.Plans = append(m.status.Plans, engine.StatusPlan{
+			ID: i, Title: fmt.Sprintf("live plan %d", i), State: "active",
+			Tasks: []engine.StatusTask{
+				{ID: 100 + i, Title: "running work", State: "running"},
+				{ID: 200 + i, Title: "queued work", State: "ready"},
+			}})
+		m.status.Running = append(m.status.Running,
+			engine.StatusJob{ID: 1000 + i, TaskID: 100 + i, Kind: "work", Status: "running", Harness: "claude", Model: "sonnet"})
+	}
+	for id := int64(32); id < 36; id++ {
+		m.status.Plans = append(m.status.Plans, finished(id))
+	}
+	m.status.HiddenFinishedPlans = 4
+	m.status.Running = append(m.status.Running, engine.StatusJob{ID: 2000, Kind: "foreman", Status: "running"})
+	m.status.Held = []engine.HeldJob{{ID: 2001, Kind: "plan_review", Layer: "runner"}}
+	m.status.NeedsYou = nil
+	for i := int64(1); i <= 5; i++ {
+		m.status.NeedsYou = append(m.status.NeedsYou,
+			engine.NeedsYouItem{Kind: "task", ID: i, State: "needs_foreman", Reason: fmt.Sprintf("question %d", i)})
+	}
+	m.capacity.Agents = append(m.capacity.Agents,
+		engine.CapacityAgent{Harness: "codex", Model: "a", CapLayer: "none", Quota: "ready"},
+		engine.CapacityAgent{Harness: "codex", Model: "b", CapLayer: "none", Quota: "ready"},
+		engine.CapacityAgent{Harness: "codex", Model: "c", CapLayer: "none", Quota: "ready"})
+	return m
+}
+
+// TestRenderTopOverflowsAShortTerminal: on a 12-row terminal top drew 19
+// lines, so the alternate screen scrolled and the header, the error line
+// and NEEDS YOU went first, while running job lines yielded and finished
+// plans never did. The frame never has more lines than the height, every
+// finished plan folds into the +N finished line before any running line
+// drops, and the header and NEEDS YOU survive at each height.
+func TestRenderTopOverflowsAShortTerminal(t *testing.T) {
+	m := crowdedTopModel()
+	m.err = errors.New("connection refused")
+	m.hint = "2 models offered; run brigada agents"
+	const running = 13
+	for _, height := range []int{12, 24, 40} {
+		t.Run(fmt.Sprint(height), func(t *testing.T) {
+			lines := renderTop(m, 80, height, topNow, term.New(logo.Caps{}))
+			got := strings.Join(lines, "\n")
+			if len(lines) > height {
+				t.Fatalf("got %d lines, want at most %d:\n%s", len(lines), height, got)
+			}
+			if !strings.HasPrefix(lines[0], "brigada top") || !strings.Contains(lines[1], "engine: connection refused") {
+				t.Errorf("the header and its error line are not first:\n%s", got)
+			}
+			for _, w := range []string{"2 models offered", "NEEDS YOU", "! #1 question 1", "! #2 question 2", "! #3 question 3", "+2 more"} {
+				if !strings.Contains(got, w) {
+					t.Errorf("the frame lacks %q:\n%s", w, got)
+				}
+			}
+			shown := strings.Count(got, "▸")
+			finished := strings.Count(got, "done plan")
+			if shown < running && finished > 0 {
+				t.Errorf("a running line dropped (%d of %d) while %d finished plans stay:\n%s", shown, running, finished, got)
+			}
+			if finished == 0 && shown == running && !strings.Contains(got, "+10 finished") {
+				t.Errorf("the finished plans fold into no +10 finished line:\n%s", got)
+			}
+			if height == 12 && shown >= running {
+				t.Errorf("no running line dropped at 12 rows, the case is vacuous:\n%s", got)
+			}
+		})
+	}
+}
+
+// TestRenderTopBelowTheFloor: below the lines the header and NEEDS YOU
+// need, the height wins. The meters strip is the last line outside the two
+// to go, and the hard clip cuts into NEEDS YOU from its bottom.
+func TestRenderTopBelowTheFloor(t *testing.T) {
+	style := term.New(logo.Caps{})
+	header := "brigada top · pid 4242 · up 2h0m0s · 15:04:09"
+	needsHead := topSectionHead("NEEDS YOU", style, 80)
+	entry := "! #2 should the sprocket be blue?"
+	queue := busyTopModel()
+	queue.status.NeedsYou = nil
+	for i := int64(1); i <= 5; i++ {
+		queue.status.NeedsYou = append(queue.status.NeedsYou,
+			engine.NeedsYouItem{Kind: "task", ID: i, State: "needs_foreman", Reason: "q"})
+	}
+	tests := []struct {
+		name   string
+		model  topModel
+		height int
+		want   []string // line prefixes
+	}{
+		{"height 3 drops the meters", busyTopModel(), 3, []string{header, needsHead, entry}},
+		{"height 4 keeps the meters", busyTopModel(), 4, []string{header, "SLOTS ", needsHead, entry}},
+		{"hard clip", queue, 2, []string{header, needsHead}},
+		{"hard clip into the entries", queue, 4, []string{header, needsHead, "! #1 q", "! #2 q"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := renderTop(tt.model, 80, tt.height, topNow, style)
+			if len(lines) != len(tt.want) {
+				t.Fatalf("got %d lines, want %d:\n%s", len(lines), len(tt.want), strings.Join(lines, "\n"))
+			}
+			for i, w := range tt.want {
+				if !strings.HasPrefix(lines[i], w) {
+					t.Errorf("line %d = %q, want prefix %q", i, lines[i], w)
+				}
+			}
+		})
+	}
+}
+
+// TestRenderTopFitsSize: the busy fixture at 40x10 is exactly 10 lines
+// with the header first and NEEDS YOU kept, and no line is wider than 40.
 func TestRenderTopFitsSize(t *testing.T) {
 	lines := renderTop(busyTopModel(), 40, 10, topNow, term.New(logo.Caps{}))
 	want := []string{
 		"brigada top · pid 4242 · up 2h0m0s · ...",
-		"",
 		"SLOTS ▓▓▓░░░░░ 3/8   1 run   2 queue ...",
-		"",
 		"NEEDS YOU",
 		"! #2 should the sprocket be blue?",
-		"",
 		"PLANS",
 		"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
-		"",
 		"AGENTS",
 		"claude/opus  1/8 (global)  ✓",
 		"all ≤ global 8",
-		"",
 		"15:02 task_done task 3: status=done",
 	}
 	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
-		t.Errorf("floor =\n%s\nwant\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
+		t.Errorf("frame =\n%s\nwant\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
 	}
-	if len(lines) <= 10 {
-		t.Errorf("got %d lines, want the floor past the height", len(lines))
+	if len(lines) != 10 {
+		t.Errorf("got %d lines, want exactly 10", len(lines))
+	}
+	if !strings.HasPrefix(lines[0], "brigada top") || !strings.Contains(strings.Join(lines, "\n"), "NEEDS YOU") {
+		t.Errorf("the header is not first or NEEDS YOU is gone:\n%s", strings.Join(lines, "\n"))
 	}
 	for _, l := range lines {
 		if n := term.VisibleWidth(l); n > 40 {
@@ -812,54 +931,90 @@ func TestRenderTopFitsSize(t *testing.T) {
 	}
 }
 
-// TestRenderTopHeightYieldOrder: lines beyond the height yield in order
-// — the events strip's second line, then plan task lines from the last
-// listed plan upward, then agent lines from the bottom of the list
-// upward — while every plan's own line and the +N more (brigada agents)
-// line stay.
+// TestRenderTopHeightYieldOrder: lines beyond the height yield class by
+// class, each from the bottom of the view upward, one line at a time: the
+// events strip's second line, the blank lines between sections, the
+// held and parked lines, the running line, then the class of every other
+// line — the events strip's first line, the global line, the agent lines
+// bottom-up with the AGENTS head after the last, the plan's own line and
+// the PLANS head, the meters strip last — and last the hard clip into
+// NEEDS YOU. A head drops right after its section's last line, so every
+// height here is met exactly. (Finished plans, queued lines and idle
+// agents are in TestRenderTopFinishedFold, TestRenderTopQueuedYield and
+// TestTopAgentsBudget.)
 func TestRenderTopHeightYieldOrder(t *testing.T) {
 	model := agentsModel()
 	tests := []struct {
 		name   string
 		height int
 		lines  int
+		blanks int
 		want   []string
 		lacks  []string
 	}{
-		{"everything fits", 22, 22, []string{
+		{"everything fits", 22, 22, 5, []string{
 			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
 			"✗ login expired",
 			"15:02 job_created job 5: branch=task/3-1",
 		}, nil},
-		{"events second line", 21, 21, []string{
+		{"events second line", 21, 21, 5, []string{
 			"15:02 task_done task 3: status=done",
 		}, []string{"job_created"}},
-		{"last plan task line", 20, 20, []string{
-			"  ▸ task #3 work · claude/sonnet@high · 1m40s · Edit",
+		{"the lowest blank line", 20, 20, 4, []string{
+			"all ≤ global 8\n15:02 task_done",
+			"  ? task #4 work held: waiting for a runner slot\n\nAGENTS",
+		}, nil},
+		{"no blank line", 16, 16, 0, []string{
+			"all ≤ global 8\n15:02 task_done",
+			"  ? task #4 work held",
 			"  ! #2 wire the sprocket should the sprocket be blue?",
-			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
-		}, []string{"? task #4 work held", "job_created"}},
-		{"then the parked line", 19, 19, []string{
+		}, nil},
+		{"the held line", 15, 15, 0, []string{
+			"  ! #2 wire the sprocket should the sprocket be blue?",
 			"  ▸ task #3 work · claude/sonnet@high · 1m40s · Edit",
+		}, []string{"? task #4 work held"}},
+		{"the parked line", 14, 14, 0, []string{
+			"  ▸ task #3 work · claude/sonnet@high · 1m40s · Edit",
+		}, []string{"? task #4", "wire the sprocket should"}},
+		{"the running line", 13, 13, 0, []string{
 			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
-		}, []string{"wire the sprocket should", "? task #4 work held", "job_created"}},
-		{"then the running line", 18, 18, []string{
+			"15:02 task_done task 3: status=done",
+		}, []string{"▸ task #3"}},
+		{"the events first line", 12, 12, 0, []string{
 			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
-		}, []string{"▸ task #3", "wire the sprocket should", "? task #4 work held", "job_created"}},
-		{"then agent lines", 17, 17, []string{
-			"claude/opus",
-			"+2 more (brigada agents)",
 			"all ≤ global 8",
-		}, []string{"codex/gpt-5", "✗ login expired", "▸ task #3"}},
-		{"down to none", 16, 16, []string{
-			"+3 more (brigada agents)",
-			"all ≤ global 8",
+		}, []string{"task_done"}},
+		{"the global line", 11, 11, 0, []string{
+			"2/8 (global)  ✗ login expired",
+		}, []string{"all ≤ global 8"}},
+		{"the broken agent", 10, 10, 0, []string{
+			"codex/gpt-5              0/8 (global)  ↺ 16:04",
+		}, []string{"2/8 (global)  ✗ login expired"}},
+		{"the cooling agent", 9, 9, 0, []string{
+			"claude/opus              1/4 (runner)  ✓",
 			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
-		}, []string{"✗ login expired"}},
-		{"the floor overflows", 15, 16, []string{
-			"+3 more (brigada agents)",
-			"all ≤ global 8",
-		}, []string{"claude/opus", "✗ login expired"}},
+		}, []string{"codex/gpt-5", "↺ 16:04"}},
+		{"the last agent, its head follows", 8, 8, 0, []string{
+			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░\nAGENTS ─",
+		}, []string{"claude/opus"}},
+		{"the AGENTS head", 7, 7, 0, []string{
+			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
+		}, []string{"AGENTS"}},
+		{"the plan line, its head follows", 6, 6, 0, []string{
+			"! claude/sonnet-long-name login expired\nPLANS ─",
+		}, []string{"#1 fix the frobnicator"}},
+		{"the PLANS head", 5, 5, 0, []string{
+			"SLOTS ▓▓▓░░░░░ 3/8",
+			"! #2 should the sprocket be blue?",
+			"! claude/sonnet-long-name login expired",
+		}, []string{"PLANS"}},
+		{"the meters last", 4, 4, 0, []string{
+			"! #2 should the sprocket be blue?",
+			"! claude/sonnet-long-name login expired",
+		}, []string{"SLOTS"}},
+		{"the hard clip", 3, 3, 0, []string{
+			"! #2 should the sprocket be blue?",
+		}, []string{"login expired"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -867,6 +1022,12 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 			got := strings.Join(lines, "\n")
 			if len(lines) != tt.lines {
 				t.Fatalf("got %d lines, want %d:\n%s", len(lines), tt.lines, got)
+			}
+			if blanks := strings.Count("\n"+got+"\n", "\n\n"); blanks != tt.blanks {
+				t.Errorf("got %d blank lines, want %d:\n%s", blanks, tt.blanks, got)
+			}
+			if !strings.HasPrefix(lines[0], "brigada top") {
+				t.Errorf("first line is %q, want the header", lines[0])
 			}
 			for _, w := range tt.want {
 				if !strings.Contains(got, w) {
@@ -1090,28 +1251,31 @@ func TestTopScreenDrawRedrawsInPlace(t *testing.T) {
 	}
 }
 
-// TestRenderTopScreenHeights: a screen shorter than the floor returns
-// the floor whole — more lines than the height, the header first,
-// nothing inside the floor cut — and a screen taller than the content
-// changes nothing.
+// TestRenderTopScreenHeights: a screen shorter than the content returns
+// exactly the height — the header first, no line cut, the lines that
+// still fit — and a screen taller than the content changes nothing.
 func TestRenderTopScreenHeights(t *testing.T) {
 	lines := renderTop(busyTopModel(), 60, 5, topNow, term.New(logo.Caps{}))
-	if len(lines) <= 5 {
-		t.Fatalf("got %d lines, want the floor past the height:\n%s", len(lines), strings.Join(lines, "\n"))
+	if len(lines) != 5 {
+		t.Fatalf("got %d lines, want exactly 5:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
 	if !strings.Contains(lines[0], "brigada top") {
 		t.Errorf("first line is %q, want the header", lines[0])
 	}
 	got := strings.Join(lines, "\n")
 	for _, w := range []string{
+		"SLOTS ▓▓▓░░░░░ 3/8   1 run   2 queue   1 held   1 needs",
 		"NEEDS YOU",
 		"! #2 should the sprocket be blue?",
-		"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
-		"all ≤ global 8",
-		"15:02 task_done task 3: status=done",
+		"PLANS",
 	} {
 		if !strings.Contains(got, w) {
-			t.Errorf("floor lacks %q:\n%s", w, got)
+			t.Errorf("frame lacks %q:\n%s", w, got)
+		}
+	}
+	for _, w := range []string{"#1 fix the frobnicator", "all ≤ global 8", "task_done"} {
+		if strings.Contains(got, w) {
+			t.Errorf("frame keeps %q past the height:\n%s", w, got)
 		}
 	}
 	if strings.Contains(got, "...") {
@@ -1221,7 +1385,7 @@ func agentsModel() topModel {
 func TestTopAgentsOneLinePerAgent(t *testing.T) {
 	model := agentsModel()
 	plain := term.New(logo.Caps{})
-	got := topAgents(model, topNow, plain, 100, 0)
+	got := topAgents(model, topNow, plain, 100)
 	if len(got) != 5 {
 		t.Fatalf("section = %d lines, want head, 3 agents, global:\n%s", len(got), strings.Join(got, "\n"))
 	}
@@ -1245,7 +1409,7 @@ func TestTopAgentsOneLinePerAgent(t *testing.T) {
 		t.Errorf("global line = %q", got[4])
 	}
 	colour := term.New(logo.Caps{Color: logo.Color16})
-	styled := topAgents(model, topNow, colour, 100, 0)
+	styled := topAgents(model, topNow, colour, 100)
 	if s := term.StripEscapes(strings.Join(styled, "\n")); s != strings.Join(got, "\n") {
 		t.Errorf("styled text differs from plain:\n%s\nvs\n%s", s, strings.Join(got, "\n"))
 	}
@@ -1261,11 +1425,11 @@ func TestTopAgentsBrokenFallbackAndCut(t *testing.T) {
 	model := agentsModel()
 	model.status.NeedsYou = model.status.NeedsYou[:1]
 	plain := term.New(logo.Caps{})
-	got := topAgents(model, topNow, plain, 100, 0)
+	got := topAgents(model, topNow, plain, 100)
 	if !strings.HasSuffix(got[3], "✗ broken") {
 		t.Errorf("fallback line = %q", got[3])
 	}
-	cut := topAgents(model, topNow, plain, 12, 0)
+	cut := topAgents(model, topNow, plain, 12)
 	if !strings.HasPrefix(cut[3], "claude/so...") {
 		t.Errorf("long name not cut: %q", cut)
 	}
@@ -1275,22 +1439,152 @@ func TestTopAgentsBrokenFallbackAndCut(t *testing.T) {
 func TestTopAgentsGlobalLineOmitted(t *testing.T) {
 	model := agentsModel()
 	model.capacity.Layers = nil
-	got := topAgents(model, topNow, term.New(logo.Caps{}), 100, 0)
+	got := topAgents(model, topNow, term.New(logo.Caps{}), 100)
 	if len(got) != 4 || strings.Contains(strings.Join(got, "\n"), "all ≤") {
 		t.Errorf("section = %q", got)
 	}
 }
 
-// TestTopAgentsBudget: a budget trims the agent lines and counts them.
+// TestTopAgentsBudget: class e of the drop order — idle agents leave the
+// AGENTS section first and a dim +N more (brigada agents) line counts
+// them, the global line under it; the busy, cooling and broken agents
+// stay.
 func TestTopAgentsBudget(t *testing.T) {
 	model := agentsModel()
-	plain := term.New(logo.Caps{})
-	got := topAgents(model, topNow, plain, 100, 4)
-	if len(got) != 4 || got[2] != "+2 more (brigada agents)" || got[3] != "all ≤ global 8" || !strings.HasPrefix(got[1], "claude/opus") {
-		t.Errorf("trimmed section = %q", got)
+	model.capacity.Agents = append(model.capacity.Agents,
+		engine.CapacityAgent{Harness: "codex", Model: "a", CapLayer: "none", Quota: "ready"},
+		engine.CapacityAgent{Harness: "codex", Model: "b", CapLayer: "none", Quota: "ready"})
+	model.events = nil
+	model.status.Running, model.status.Held, model.status.Plans = nil, nil, nil
+	style := term.New(logo.Caps{})
+	full := renderTop(model, 76, 0, topNow, style)
+	blanks := strings.Count(strings.Join(full, "\n")+"\n", "\n\n")
+	// Without the blank lines, the next line to go is the last idle agent.
+	base := len(full) - blanks
+	agentLines := func(lines []string) string {
+		from := -1
+		for i, l := range lines {
+			if strings.HasPrefix(l, "AGENTS") {
+				from = i
+			}
+		}
+		if from < 0 {
+			return ""
+		}
+		rest := lines[from+1:]
+		if n := len(rest); n > 0 && strings.HasPrefix(rest[n-1], "no events") {
+			rest = rest[:n-1]
+		}
+		return strings.Join(rest, "\n")
 	}
-	if all := topAgents(model, topNow, plain, 100, 5); len(all) != 5 {
-		t.Errorf("a fitting budget trimmed: %q", all)
+	lines := renderTop(model, 76, base, topNow, style)
+	if len(lines) != base || !strings.Contains(agentLines(lines), "codex/b") {
+		t.Errorf("at %d the idle agents are not all kept:\n%s", base, strings.Join(lines, "\n"))
+	}
+	// The first idle agent folded pays for the +N more line: no gain yet,
+	// so the next idle agent goes as well.
+	lines = renderTop(model, 76, base-1, topNow, style)
+	want := strings.Join([]string{
+		"claude/opus              1/4 (runner)  ✓",
+		"codex/gpt-5              0/8 (global)  ↺ 16:04",
+		"claude/sonnet-long-name  2/8 (global)  ✗ login expired",
+		"+2 more (brigada agents)",
+		"all ≤ global 8",
+	}, "\n")
+	if len(lines) != base-1 || agentLines(lines) != want {
+		t.Errorf("at %d the AGENTS section is\n%s\nwant\n%s\nin\n%s", base-1, agentLines(lines), want, strings.Join(lines, "\n"))
+	}
+	// The cooling and the broken agent outlast the idle ones: the events
+	// line, the lowest of the rest, goes next.
+	lines = renderTop(model, 76, base-2, topNow, style)
+	if len(lines) != base-2 || !strings.Contains(agentLines(lines), "+2 more (brigada agents)") ||
+		!strings.Contains(agentLines(lines), "✗ login expired") || strings.Contains(agentLines(lines), "codex/a") {
+		t.Errorf("at %d:\n%s", base-2, strings.Join(lines, "\n"))
+	}
+}
+
+// TestRenderTopFinishedFold: class b — finished plans fold into the dim
+// +N finished line, bottom of the view first, and the first fold pays for
+// the line it adds, so it gains nothing alone.
+func TestRenderTopFinishedFold(t *testing.T) {
+	style := term.New(logo.Caps{})
+	model := busyTopModel()
+	for id := int64(7); id <= 8; id++ {
+		model.status.Plans = append(model.status.Plans, engine.StatusPlan{
+			ID: id, Title: fmt.Sprintf("old plan %d", id), State: "done",
+			Tasks: []engine.StatusTask{{ID: id * 10, Title: "t", State: "done"}}})
+	}
+	full := renderTop(model, 100, 0, topNow, style)
+	n := len(full)
+	if lines := renderTop(model, 100, n, topNow, style); len(lines) != n {
+		t.Fatalf("at %d lines yield:\n%s", n, strings.Join(lines, "\n"))
+	}
+	// One line less: folding the last plan alone gains nothing, so both fold.
+	got := strings.Join(renderTop(model, 100, n-1, topNow, style), "\n")
+	if strings.Contains(got, "old plan") || !strings.Contains(got, "\n+2 finished\n") || len(strings.Split(got, "\n")) != n-1 {
+		t.Errorf("at %d:\n%s", n-1, got)
+	}
+	// With finished plans already hidden, the first fold gains a line.
+	model.status.HiddenFinishedPlans = 3
+	n++
+	got = strings.Join(renderTop(model, 100, n-1, topNow, style), "\n")
+	if !strings.Contains(got, "#7 old plan 7") || strings.Contains(got, "old plan 8") || !strings.Contains(got, "\n+4 finished\n") ||
+		len(strings.Split(got, "\n")) != n-1 {
+		t.Errorf("at %d:\n%s", n-1, got)
+	}
+}
+
+// TestRenderTopQueuedYield: class d — the queued, waiting-on and review
+// task lines go from the last plan upward after the blank lines and
+// before the idle agents, then held and parked lines.
+func TestRenderTopQueuedYield(t *testing.T) {
+	style := term.New(logo.Caps{})
+	model := busyTopModel()
+	model.status.Plans = append(model.status.Plans, engine.StatusPlan{
+		ID: 2, Title: "second", State: "active",
+		Tasks: []engine.StatusTask{
+			{ID: 5, Title: "five", State: "ready"},
+			{ID: 6, Title: "six", State: "ready", WaitingOn: []string{"#5"}},
+			{ID: 7, Title: "seven", State: "reviewing"},
+		}})
+	model.capacity.Agents = append(model.capacity.Agents,
+		engine.CapacityAgent{Harness: "codex", Model: "a", CapLayer: "none", Quota: "ready"})
+	full := strings.Join(renderTop(model, 100, 0, topNow, style), "\n")
+	for _, w := range []string{"· #5 five (queued)", "· #6 six (waiting on #5)", "· #7 seven (review)", "codex/a"} {
+		if !strings.Contains(full, w) {
+			t.Fatalf("the full view lacks %q:\n%s", w, full)
+		}
+	}
+	base := len(strings.Split(full, "\n")) - strings.Count(full+"\n", "\n\n")
+	tests := []struct {
+		height int
+		lacks  []string
+		keeps  []string
+	}{
+		{base, nil, []string{"(review)", "(waiting on #5)", "(queued)", "codex/a", "? task #4"}},
+		{base - 1, []string{"(review)"}, []string{"(waiting on #5)", "(queued)", "codex/a"}},
+		{base - 2, []string{"(review)", "(waiting on #5)"}, []string{"· #5 five (queued)", "codex/a"}},
+		{base - 3, []string{"(review)", "(waiting on #5)", "(queued)"}, []string{"codex/a", "? task #4"}},
+		// The idle agent folds, paying for its +N more line, and the held
+		// line goes with the next step.
+		{base - 4, []string{"(queued)", "codex/a", "? task #4"}, []string{"+1 more (brigada agents)", "▸ task #3"}},
+	}
+	for _, tt := range tests {
+		lines := renderTop(model, 100, tt.height, topNow, style)
+		got := strings.Join(lines, "\n")
+		if len(lines) != tt.height {
+			t.Errorf("at %d got %d lines:\n%s", tt.height, len(lines), got)
+		}
+		for _, w := range tt.lacks {
+			if strings.Contains(got, w) {
+				t.Errorf("at %d the frame keeps %q:\n%s", tt.height, w, got)
+			}
+		}
+		for _, w := range tt.keeps {
+			if !strings.Contains(got, w) {
+				t.Errorf("at %d the frame lacks %q:\n%s", tt.height, w, got)
+			}
+		}
 	}
 }
 
