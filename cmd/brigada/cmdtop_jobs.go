@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/term"
@@ -138,7 +137,7 @@ func topLayoutJobs(lines []topLine, style term.Style, inner int) {
 	if len(rows) == 0 {
 		return
 	}
-	count := utf8.RuneCountInString
+	count := term.CellWidth
 	var markW, idW, titleW, kindW, agentW, ageW, eventW, waitW int
 	for _, r := range rows {
 		markW, idW = max(markW, count(r.mark)), max(idW, count(r.id))

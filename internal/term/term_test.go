@@ -9,6 +9,46 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/logo"
 )
 
+func TestCellWidth(t *testing.T) {
+	for _, tc := range []struct {
+		name, text string
+		want       int
+	}{
+		{"ascii", "brigada", 7},
+		{"empty", "", 0},
+		{"cjk", "日本語", 6},
+		{"hangul", "한글", 4},
+		{"fullwidth", "ＡＢ１", 6},
+		{"fullwidth yen", "￥", 2},
+		{"emoji", "🚀", 2},
+		{"emoji in text", "ok ✅", 5},
+		{"combining", "é", 1},
+		{"combining after cjk", "日́", 2},
+		{"variation selector", "️", 0},
+		{"box glyphs", "╭─│╮╰╯", 6},
+		{"block glyphs", "■□━▸↺≤…", 7},
+		{"escapes", "\x1b[1m日本\x1b[0m", 4},
+		{"mixed", "a日b🚀", 6},
+	} {
+		if got := CellWidth(tc.text); got != tc.want {
+			t.Errorf("%s: CellWidth(%q) = %d, want %d", tc.name, tc.text, got, tc.want)
+		}
+	}
+	if got := VisibleWidth("日本"); got != 2 {
+		t.Errorf("VisibleWidth counts runes: got %d, want 2", got)
+	}
+}
+
+func TestCellTablesAreSorted(t *testing.T) {
+	for name, table := range map[string][]cellRange{"zero": zeroCells, "wide": wideCells} {
+		for i, r := range table {
+			if r.lo > r.hi || (i > 0 && r.lo <= table[i-1].hi) {
+				t.Errorf("%s table entry %d (%U-%U) is out of order", name, i, r.lo, r.hi)
+			}
+		}
+	}
+}
+
 func TestStylesAtEveryDepth(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

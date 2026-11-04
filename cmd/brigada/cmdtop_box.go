@@ -2,7 +2,6 @@ package main
 
 import (
 	"strings"
-	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/term"
 )
@@ -39,7 +38,7 @@ func topBoxTop(b topBox, style term.Style, width int) string {
 	if b.bad {
 		border, title = style.Bad, style.Bad
 	}
-	count := utf8.RuneCountInString
+	count := term.CellWidth
 	t, note, right := b.title, b.note, b.right
 	// The corners, the dash and space after the first, the space before the
 	// fill and one fill cell: 6 columns around the title.
@@ -47,7 +46,7 @@ func topBoxTop(b topBox, style term.Style, width int) string {
 		if room >= 4 {
 			t = cutLine(t, room)
 		} else {
-			t = string([]rune(t)[:max(room, 0)])
+			t = cutCells(t, max(room, 0))
 		}
 	}
 	used := count(t) + 6
@@ -80,8 +79,8 @@ func topBoxTop(b topBox, style term.Style, width int) string {
 	switch {
 	case right != "":
 		rightOut, rightW = style.Dim(right), count(right)
-	case b.legend != "" && term.VisibleWidth(b.legend) <= width-used-3:
-		rightOut, rightW = b.legend, term.VisibleWidth(b.legend)
+	case b.legend != "" && term.CellWidth(b.legend) <= width-used-3:
+		rightOut, rightW = b.legend, term.CellWidth(b.legend)
 	}
 	fill := width - used + 1
 	if rightW > 0 {
@@ -130,7 +129,7 @@ func topBoxRow(text string, bad bool, tint int, style term.Style, width int) str
 	}
 	inner := max(width-4, 0)
 	text = topFit(text, inner)
-	pad := max(inner-term.VisibleWidth(text), 0)
+	pad := max(inner-term.CellWidth(text), 0)
 	body := " " + text + strings.Repeat(" ", pad) + " "
 	switch tint {
 	case topTintNeeds:

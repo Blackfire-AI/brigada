@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/caps"
@@ -396,7 +395,7 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 	events := topEventLinesAt(model.events, model.statusOK && topFirstRun(model.status), secNow, style, inner)
 	if r := model.status.Report; r != nil {
 		first, _, _ := strings.Cut(strings.TrimSpace(r.Text), "\n")
-		events[0].box.right = strings.TrimSpace(first)
+		events[0].box.right = strings.TrimSpace(topMarkdownPlain(first))
 	}
 	add(events)
 
@@ -573,7 +572,7 @@ func (f *topFrame) fit(height int) {
 // topFit cuts one styled line to width: a line that fits keeps its
 // colour; one that overflows is cut on its plain text, so no line wraps.
 func topFit(line string, width int) string {
-	if term.VisibleWidth(line) <= width {
+	if term.CellWidth(line) <= width {
 		return line
 	}
 	return cutLine(term.StripEscapes(line), width)
@@ -622,10 +621,10 @@ func topHeader(model topModel, now time.Time, style term.Style, width int) []str
 	// The keys show only when they fit whole, two spaces from the left
 	// part; otherwise the clock moves up against the right edge.
 	right := clockOut + "   " + keys
-	gap := width - term.VisibleWidth(left) - term.VisibleWidth(right)
+	gap := width - term.CellWidth(left) - term.CellWidth(right)
 	if gap < 2 {
 		right = clockOut
-		gap = width - term.VisibleWidth(left) - term.VisibleWidth(right)
+		gap = width - term.CellWidth(left) - term.CellWidth(right)
 	}
 	line := left
 	if gap >= 1 {
@@ -673,7 +672,7 @@ func topBand(model topModel, now time.Time, style term.Style, width int) string 
 	default:
 		return ""
 	}
-	count := utf8.RuneCountInString
+	count := term.CellWidth
 	// Columns: a leading space, the first part, the gaps, a trailing space.
 	room := width - 2
 	withMiddle := count(first) + 3 + count(middle)
@@ -771,12 +770,12 @@ func topMeters(model topModel, style term.Style, width int) []string {
 	// left out. Only a positive cap has one.
 	left := " " + cell
 	if meterLimit >= 1 {
-		room := width - 1 - 2 - term.VisibleWidth(cell) - 2 - term.VisibleWidth(right)
+		room := width - 1 - 2 - term.CellWidth(cell) - 2 - term.CellWidth(right)
 		if cells := min(room, topMeterCells); cells >= 4 {
 			left = " " + topSlotMeter(meterUse, meterLimit, cells, style) + "  " + cell
 		}
 	}
-	gap := max(width-term.VisibleWidth(left)-term.VisibleWidth(right), 2)
+	gap := max(width-term.CellWidth(left)-term.CellWidth(right), 2)
 	return []string{topFit(left+strings.Repeat(" ", gap)+right, width)}
 }
 
@@ -1160,7 +1159,7 @@ func topPlanTail(p engine.StatusPlan, running map[int64]bool, style term.Style, 
 	case "", "active":
 		done, total := topPlanCounts(p)
 		count := fmt.Sprintf("%d/%d", done, total)
-		if cells := topPlanCells(p, running, style); cells != "" && term.VisibleWidth(cells)*3 <= width {
+		if cells := topPlanCells(p, running, style); cells != "" && term.CellWidth(cells)*3 <= width {
 			return cells + "  " + count
 		}
 		return count
@@ -1187,10 +1186,10 @@ func newTopPlanLayout(plans []engine.StatusPlan, running map[int64]bool, tagged 
 	for _, p := range plans {
 		l.id = max(l.id, len(fmt.Sprintf("#%d", p.ID)))
 		if tagged {
-			l.tag = max(l.tag, utf8.RuneCountInString(topRepoName(p.RepoURL)))
+			l.tag = max(l.tag, term.CellWidth(topRepoName(p.RepoURL)))
 		}
-		l.title = max(l.title, utf8.RuneCountInString(p.Title))
-		l.tail = max(l.tail, term.VisibleWidth(topPlanTail(p, running, style, width)))
+		l.title = max(l.title, term.CellWidth(p.Title))
+		l.tail = max(l.tail, term.CellWidth(topPlanTail(p, running, style, width)))
 	}
 	fixed := l.id + 1 + l.tail + 1
 	if l.tag > 0 {
@@ -1212,11 +1211,11 @@ func topPlanLine(p engine.StatusPlan, tag string, running map[int64]bool, l topP
 	}
 	out := id + pad + " "
 	if l.tag > 0 {
-		out += style.Dim(tag) + strings.Repeat(" ", l.tag-utf8.RuneCountInString(tag)) + "  "
+		out += style.Dim(tag) + strings.Repeat(" ", l.tag-term.CellWidth(tag)) + "  "
 	}
 	out += cutLine(p.Title, l.title)
 	tail := topPlanTail(p, running, style, width)
-	return out + strings.Repeat(" ", max(width-term.VisibleWidth(out)-term.VisibleWidth(tail), 1)) + tail
+	return out + strings.Repeat(" ", max(width-term.CellWidth(out)-term.CellWidth(tail), 1)) + tail
 }
 
 // topTaskWaits says a live task's state is plain waiting: not parked and
@@ -1365,7 +1364,7 @@ func newTopNeedsYou(st api.Status, sole bool, style term.Style, width int) []top
 	for i, n := range shown {
 		texts[i], tails[i] = topNeedsYouLine(n), topNeedsYouTail(n, st, sole, style)
 		if tails[i] != "" {
-			tailW = max(tailW, utf8.RuneCountInString(tails[i]))
+			tailW = max(tailW, term.CellWidth(tails[i]))
 		}
 	}
 	col := max(width-tailW-2, 4)
@@ -1374,7 +1373,7 @@ func newTopNeedsYou(st api.Status, sole bool, style term.Style, width int) []top
 		text := cutLine(texts[i], width)
 		if tails[i] != "" {
 			left := cutLine(texts[i], col)
-			text = left + strings.Repeat(" ", max(col-utf8.RuneCountInString(left), 0)) + "  " + tails[i]
+			text = left + strings.Repeat(" ", max(col-term.CellWidth(left), 0)) + "  " + tails[i]
 		}
 		rows = append(rows, topNeedsRow(text, style))
 	}
@@ -1541,14 +1540,14 @@ func topEventLinesAt(items []history.Item, firstRun bool, now time.Time, style t
 	pad := 0
 	for i := range items {
 		clocks[i] = topClock(items[len(items)-1-i].CreatedAt, now)
-		if n := term.VisibleWidth(clocks[i]); n > pad {
+		if n := term.CellWidth(clocks[i]); n > pad {
 			pad = n
 		}
 	}
 	var lines []topLine
 	for i, clock := range clocks {
 		words, _ := topEventWords(items[len(items)-1-i], now)
-		text := clock + strings.Repeat(" ", pad-term.VisibleWidth(clock)) + "  " + topColourStates(words, style)
+		text := clock + strings.Repeat(" ", pad-term.CellWidth(clock)) + "  " + topColourStates(words, style)
 		class := yieldRest
 		switch {
 		case i == 1:
@@ -1609,14 +1608,35 @@ func topClock(stamp string, now time.Time) string {
 	return t.Format("01-02 15:04")
 }
 
-// cutLine cuts plain text to width runes, ending "..." when it had to
-// cut and width leaves room for the mark. Styled text is never passed
-// here: colour wraps the cut, never the other way.
+// cutLine cuts plain text to width terminal cells, ending "..." when it had
+// to cut and width leaves room for the mark. The cut falls on a cell
+// boundary, so a wide character is never split; the result can be a cell
+// short of width, which the caller pads. Styled text is never passed here:
+// colour wraps the cut, never the other way.
 func cutLine(text string, width int) string {
-	if n := utf8.RuneCountInString(text); n > width && width > 3 {
-		return string([]rune(text)[:width-3]) + "..."
+	if term.CellWidth(text) > width && width > 3 {
+		return cutCells(text, width-3) + "..."
 	}
 	return text
+}
+
+// cutCells keeps the longest prefix of plain text that fits width cells,
+// with no mark.
+func cutCells(text string, width int) string {
+	n := 0
+	for i, r := range text {
+		w := term.RuneWidth(r)
+		if n+w > width {
+			return text[:i]
+		}
+		n += w
+	}
+	return text
+}
+
+// topMarkdownPlain strips the bold and code marks from a line of markdown.
+func topMarkdownPlain(text string) string {
+	return strings.NewReplacer("**", "", "`", "").Replace(text)
 }
 
 // The plain ANSI of the full-screen view: the alternate screen and the

@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
@@ -87,11 +86,11 @@ func topAgentLines(model topModel, now time.Time, style term.Style, width int) [
 	names := make([]string, len(listed))
 	for i, a := range listed {
 		names[i] = topShortAgent(a.Harness + "/" + a.Model)
-		nameW = max(nameW, utf8.RuneCountInString(names[i]))
+		nameW = max(nameW, term.CellWidth(names[i]))
 		if slots, _, ok := topAgentCells(a, g); ok {
 			cellW = max(cellW, slots)
 		} else {
-			cellW = max(cellW, utf8.RuneCountInString(api.RunningCap(a, g)))
+			cellW = max(cellW, term.CellWidth(api.RunningCap(a, g)))
 		}
 		switch a.Quota {
 		case "cooling":
@@ -118,7 +117,7 @@ func topAgentLines(model topModel, now time.Time, style term.Style, width int) [
 			class = yieldRest
 		}
 		if cols == 2 && i+1 < len(cells) {
-			text += strings.Repeat(" ", max(colW-term.VisibleWidth(text), 0)) + topJobGap + cells[i+1]
+			text += strings.Repeat(" ", max(colW-term.CellWidth(text), 0)) + topJobGap + cells[i+1]
 			if !idle[i+1] {
 				class = yieldRest
 			}
@@ -137,10 +136,10 @@ func topAgentCell(a engine.CapacityAgent, g *int, name string, nameW, colW int, 
 	put := func(text string, fn func(string) string) {
 		room := max(colW-used, 0)
 		text = cutLine(text, room)
-		if utf8.RuneCountInString(text) > room {
-			text = string([]rune(text)[:room])
+		if term.CellWidth(text) > room {
+			text = cutCells(text, room)
 		}
-		used += utf8.RuneCountInString(text)
+		used += term.CellWidth(text)
 		if fn != nil && text != "" {
 			text = fn(text)
 		}
@@ -161,13 +160,13 @@ func topAgentCell(a engine.CapacityAgent, g *int, name string, nameW, colW int, 
 		quota, quotaFn = "until "+api.LocalClock(a.CoolingUntil, now), style.Warn
 	}
 	put(mark, markFn)
-	put(strings.Repeat(" ", topAgentMarkW(style)-utf8.RuneCountInString(mark)+1), nil)
+	put(strings.Repeat(" ", topAgentMarkW(style)-term.CellWidth(mark)+1), nil)
 	nameFn := style.Dim
 	if a.Running > 0 {
 		nameFn = topFamily(style, name)
 	}
 	shown := cutLine(name, nameW)
-	put(shown+strings.Repeat(" ", max(nameW-utf8.RuneCountInString(shown), 0)), nameFn)
+	put(shown+strings.Repeat(" ", max(nameW-term.CellWidth(shown), 0)), nameFn)
 	gap()
 	if slots, filled, ok := topAgentCells(a, g); ok {
 		put(strings.Repeat(style.Filled(), filled), style.Accent)
@@ -185,7 +184,7 @@ func topAgentCell(a engine.CapacityAgent, g *int, name string, nameW, colW int, 
 // topAgentMarkW is the width of the widest mark, which every mark pads to:
 // one with UTF-8, two without.
 func topAgentMarkW(style term.Style) int {
-	return max(utf8.RuneCountInString(style.Bullet()), utf8.RuneCountInString(style.Cross()), utf8.RuneCountInString(style.Again()))
+	return max(term.CellWidth(style.Bullet()), term.CellWidth(style.Cross()), term.CellWidth(style.Again()))
 }
 
 // topAgentCells says how an agent's running count draws as cells: one per
