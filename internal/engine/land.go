@@ -1220,13 +1220,16 @@ func (e *Engine) landConflictTx(tx *sql.Tx, job *jobRow, rec landRecord, now tim
 // landCheckFailedTx parks a task whose check failed on the landed result
 // (§7.1): nothing is pushed, and the check log names the failure.
 func (e *Engine) landCheckFailedTx(tx *sql.Tx, job *jobRow, rec landRecord, now time.Time) error {
-	reason := "the check failed on the landed result"
+	// The check log is a tail already; the event keeps the end of it, where
+	// the failure is, and names the land job whose log check_log reads.
+	reason := fmt.Sprintf("the check failed on the landed result (land job %d)", job.ID)
 	if rec.CheckLog != "" {
-		reason += ": " + boundNote(rec.CheckLog)
+		reason += ": "
+		reason += tailNote(rec.CheckLog, noteBound-len(reason))
 	}
 	return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{
-		Reason:      boundNote(reason),
-		CheckOutput: boundNote(rec.CheckLog),
+		Reason:      reason,
+		CheckOutput: tailNote(rec.CheckLog, noteBound),
 	}, now)
 }
 

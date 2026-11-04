@@ -128,7 +128,7 @@ type UserMessage struct {
 // words above all.
 // Any spelling counts — upper or mixed case, inner spaces — since a
 // model reads tags loosely.
-var delimiterTags = regexp.MustCompile(`(?i)<\s*(/?)\s*(event|user-message|digest|worker-instructions|reviewer-instructions|foreman-instructions|plan-review-instructions|skill|task-spec|diff)(\s+[^\s<>][^<>]*?)?\s*>`)
+var delimiterTags = regexp.MustCompile(`(?i)<\s*(/?)\s*(event|user-message|digest|worker-instructions|reviewer-instructions|foreman-instructions|plan-review-instructions|skill|task-spec|diff|check-log)(\s+[^\s<>][^<>]*?)?\s*>`)
 
 // neutralize defuses the delimiter tags inside verbatim data (§1.4).
 func neutralize(data string) string {

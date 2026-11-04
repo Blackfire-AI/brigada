@@ -97,7 +97,7 @@ var workerTemplate = strings.ReplaceAll(workerTemplateSrc, "%FENCE%", "```")
 // or check result can close its own section and pose as template text.
 // Any spelling counts — upper or mixed case, inner spaces — since a
 // model reads tags loosely.
-var delimiterTags = regexp.MustCompile(`(?i)<\s*(/?)\s*(skill|diff|event|user-message|digest|task-spec|task-skill|feedback|check-result|check-command|project-instructions|foreman-instructions|plan-review-instructions|worker-instructions|reviewer-instructions|fix-summary|plan-review-input)(\s+[^\s<>][^<>]*?)?\s*>`)
+var delimiterTags = regexp.MustCompile(`(?i)<\s*(/?)\s*(skill|diff|event|user-message|digest|task-spec|task-skill|feedback|check-result|check-command|project-instructions|foreman-instructions|plan-review-instructions|worker-instructions|reviewer-instructions|fix-summary|plan-review-input|check-log)(\s+[^\s<>][^<>]*?)?\s*>`)
 
 // neutralize defuses the delimiter tags inside verbatim data (§1.4).
 func neutralize(data string) string {
