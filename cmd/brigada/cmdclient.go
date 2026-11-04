@@ -335,7 +335,7 @@ func runHistory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		if raw {
 			err = history.Render(stdout, page.Items)
 		} else {
-			err = history.RenderReadable(stdout, page.Items, time.Local, task != 0 || job != 0)
+			err = history.RenderReadable(stdout, page.Items, time.Now().Location(), task != 0 || job != 0)
 		}
 		if err != nil {
 			return fail(stderr, err)
