@@ -57,7 +57,7 @@ const topEventsKeep = 50
 // redraws every --interval from the status, capacity and history the
 // API already serves — no endpoint of its own. When stdout is not a
 // terminal it prints one plain snapshot and exits, so pipes and tests
-// read it. Engine errors show as a line in the view while the loop
+// read it. Engine errors show as a band in the view while the loop
 // keeps retrying; with --no-start the retry never starts an engine.
 func runTop(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("top",
@@ -141,7 +141,7 @@ type topModel struct {
 	// statusOK says the status fetched, so an empty plans list is the
 	// engine's answer and not the absence of one.
 	statusOK bool
-	// err is the fetch's first error: the view shows it as a line and
+	// err is the fetch's first error: the view shows it as a band and
 	// the loop keeps retrying. Parts that did fetch still render.
 	err error
 	// paused says the loop froze the refresh (the p key); pausedAt is when,
@@ -276,7 +276,7 @@ func topWithAgents(scoped, unscoped []engine.NeedsYouItem) []engine.NeedsYouItem
 }
 
 // keepPrevious fills the parts a failed fetch left empty from the last
-// tick's model, so an error line sits over the last data instead of a
+// tick's model, so the error band sits over the last data instead of a
 // blank screen.
 func (m topModel) keepPrevious(prev topModel) topModel {
 	if m.status.Pid == 0 && m.status.StartedAt == "" {
@@ -585,8 +585,9 @@ func topFit(line string, width int) string {
 // separator, and at the right end the clock, three spaces and the keys. The
 // keys show only when they fit whole — the left part, two spaces and the
 // right part within the width; a key is never cut mid-word — and otherwise
-// the clock moves up against the right edge. A failed fetch adds its error
-// as a second row, so the view keeps its shape while the loop retries.
+// the clock moves up against the right edge. While the fetch is failing the
+// clock is Bad and the uptime is left out; the error itself is the band
+// under the header (topBand).
 func topHeader(model topModel, now time.Time, style term.Style, width int) []string {
 	st := model.status
 	sep := topEventSep(style)
@@ -1688,7 +1689,7 @@ func terminalSize(w io.Writer) (width, height int) {
 // topLoop is the full-screen view: fetch and draw every interval, q
 // quits, p freezes and unfreezes the refresh, the context's end
 // (SIGINT, SIGTERM) restores the terminal and exits. A fetch that
-// fails draws its error as a line over the last data and the next tick
+// fails draws its error as a band over the last data and the next tick
 // tries again; the dial never starts an engine under --no-start.
 func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Duration, noStart bool, stdout io.Writer) int {
 	screen := newTopScreen(stdout)
