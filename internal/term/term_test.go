@@ -39,6 +39,14 @@ func TestCellWidth(t *testing.T) {
 	}
 }
 
+func TestColour(t *testing.T) {
+	for depth, want := range map[logo.Depth]bool{logo.NoColor: false, logo.Color16: true, logo.Color256: true, logo.TrueColor: true} {
+		if got := New(logo.Caps{Color: depth}).Colour(); got != want {
+			t.Errorf("Colour() at depth %d = %v, want %v", depth, got, want)
+		}
+	}
+}
+
 func TestCellTablesAreSorted(t *testing.T) {
 	for name, table := range map[string][]cellRange{"zero": zeroCells, "wide": wideCells} {
 		for i, r := range table {

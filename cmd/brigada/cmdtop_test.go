@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -214,9 +215,9 @@ func TestRenderTopSections(t *testing.T) {
 		"╭─ FOREMAN ─",
 		"│   ▸ job #30  foreman",
 		"╭─ PLANS  1 live · 0 finished ─",
-		" ■ landed  ■ done  ■ running  □ queued ─╮",
+		" ■ landed  ▣ done  ◆ running  □ queued ─╮",
 		"#1 fix the frobnicator",
-		"■■■□  1/4 │",
+		"■!◆□  1/4 │",
 		"  ▸ #3  oil the gears     work  claude/sonnet@high  1m40s  Edit",
 		"  ! #2 wire the sprocket should the sprocket be blue?",
 		"  ? #4  polish the knobs  held: waiting for a runner slot",
@@ -302,6 +303,30 @@ func TestTopHeaderMark(t *testing.T) {
 	}
 }
 
+var (
+	planCellsField  = regexp.MustCompile(`(?m)^(│ #\d+ .* )([#=>.!■▣◆□]+)(  \d+/\d+ │)$`)
+	planLegendField = regexp.MustCompile(`[#=>.■▣◆□] landed  [#=>.■▣◆□] done  [#=>.■▣◆□] running  [#=>.■▣◆□] queued`)
+)
+
+// normPlanGlyphs rewrites the two fields of a plain frame that differ with
+// the style's glyph set, the plan cells and the PLANS legend, to the glyphs
+// of a coloured Unicode frame, and nothing else: a styled frame without its
+// escapes then reads as the no-colour one. Every state but queued becomes
+// `■`, queued `□`.
+func normPlanGlyphs(frame string) string {
+	frame = planCellsField.ReplaceAllStringFunc(frame, func(row string) string {
+		m := planCellsField.FindStringSubmatch(row)
+		cells := strings.Map(func(r rune) rune {
+			if r == '□' || r == '.' {
+				return '□'
+			}
+			return '■'
+		}, m[2])
+		return m[1] + cells + m[3]
+	})
+	return planLegendField.ReplaceAllString(frame, "■ landed  ■ done  ■ running  □ queued")
+}
+
 // TestRenderTopBoxesAtEveryWidth: at 60, 80, 100 and 120 columns no line is
 // over the width and every boxed row is exactly the width; the plain style
 // reads the same as the styled text; NO_COLOR has no escape; the ASCII frame
@@ -325,7 +350,7 @@ func TestRenderTopBoxesAtEveryWidth(t *testing.T) {
 			{Color: logo.TrueColor, UTF8: true},
 		} {
 			styled := renderTop(model, width, 0, topNow, term.New(caps))
-			if got, want := term.StripEscapes(strings.Join(styled, "\n")), strings.Join(lines, "\n"); got != want {
+			if got, want := normPlanGlyphs(term.StripEscapes(strings.Join(styled, "\n"))), normPlanGlyphs(strings.Join(lines, "\n")); got != want {
 				t.Errorf("width %d: styled text differs from plain:\n%s\nvs\n%s", width, got, want)
 			}
 		}
@@ -929,7 +954,7 @@ func TestRenderTopShowsGateHoldsAndLandJobs(t *testing.T) {
 		"\n! #2 should the sprocket be blue?" +
 		"\n! #8 held by rule gate_land: gate_land is ask  → brigada land approve 8" +
 		"\n! #9 waits to push: task/9-1@abc123"
-	tree := alignRight("#1 fix the frobnicator", "■■■□■■  3/6", 196) +
+	tree := alignRight("#1 fix the frobnicator", "■!◆□■■  3/6", 196) +
 		"\n  ▸ #3  oil the gears     work  claude/sonnet@high  1m40s  Edit" +
 		"\n  ▸ #9  push the widget   land                      1m40s" +
 		"\n  ! #2 wire the sprocket should the sprocket be blue?"
@@ -1016,7 +1041,7 @@ func TestTopPlansTree(t *testing.T) {
 			NeedsYou: []engine.NeedsYouItem{{Kind: "task", ID: 314, State: "needs_foreman", Reason: "rounds spent"}},
 		}, []string{
 			head,
-			alignRight("#96 Rework brigada top", "■■■■□■□□□□  2/10", 80),
+			alignRight("#96 Rework brigada top", "■■!!□◆□□□□  2/10", 80),
 			"  ▸ #317  work     work  opencode/glm-5.3  14m00s  editing cmdtop.go",
 			"  ▸ #313  landing  land                    14m00s",
 			"  ! #314 finish rounds spent",
@@ -1215,7 +1240,7 @@ func TestTopPlanDoneNotLanded(t *testing.T) {
 	}
 	st := api.Status{Plans: []engine.StatusPlan{{ID: 7, Title: "land me", State: "active", Tasks: tasks}}}
 	want := []string{
-		"#7 land me" + strings.Repeat(" ", 80-len("#7 land me")-utf8.RuneCountInString("■■■■■  2/5")) + "■■■■■  2/5",
+		"#7 land me" + strings.Repeat(" ", 80-len("#7 land me")-utf8.RuneCountInString("▣▣▣■■  2/5")) + "▣▣▣■■  2/5",
 		"  ⇡ #330  events wording  landing: waiting (retry at 11:10, last exit 1)",
 		"  ⇡ #331  queued land     landing: queued",
 		"  ⇡ #332  bare            landing: not landed",
@@ -1249,7 +1274,7 @@ func TestTopPlanDoneNotLanded(t *testing.T) {
 			{ID: 2, Title: "last", State: "done", Class: "implement", Landed: landed}}}
 		return strings.TrimLeft(topPlanLine(p, "", nil, newTopPlanLayout([]engine.StatusPlan{p}, nil, false, plain, 40), plain, 40), "#8 p ")
 	}
-	if got := last("active", false); got != "■■  1/2" {
+	if got := last("active", false); got != "■▣  1/2" {
 		t.Errorf("the tail counts a task not landed: %q", got)
 	}
 	if got := last("active", true); got != "■■  2/2" {
@@ -1698,7 +1723,7 @@ func TestRenderTopFitsSize(t *testing.T) {
 	if want := cutLine(" 3/8 slots  1 run  2 queue  1 held  1 needs", 40); lines[1] != want {
 		t.Errorf("meters row = %q, want %q", lines[1], want)
 	}
-	for _, w := range []string{"╭─ NEEDS YOU 1 ", "│ ! #2 should the sprocket be blue?", "╭─ PLANS ", "│ #1 fix the frobnicator     ■■■□  1/4 │"} {
+	for _, w := range []string{"╭─ NEEDS YOU 1 ", "│ ! #2 should the sprocket be blue?", "╭─ PLANS ", "│ #1 fix the frobnicator     ■!◆□  1/4 │"} {
 		if !strings.Contains(got, w) {
 			t.Errorf("the frame lacks %q:\n%s", w, got)
 		}
@@ -2807,7 +2832,7 @@ func TestTopAgentsFamilyColour(t *testing.T) {
 			t.Errorf("a plain style paints:\n%q", plain)
 		}
 	}
-	if s := term.StripEscapes(jobs); s != strings.Join(renderTop(busyTopModel(), 100, 0, topNow, term.New(logo.Caps{UTF8: true})), "\n") {
+	if s := normPlanGlyphs(term.StripEscapes(jobs)); s != normPlanGlyphs(strings.Join(renderTop(busyTopModel(), 100, 0, topNow, term.New(logo.Caps{UTF8: true})), "\n")) {
 		t.Errorf("styled text differs from plain:\n%s", s)
 	}
 }
@@ -3700,7 +3725,7 @@ func TestTopBandFramesFit(t *testing.T) {
 					{Color: logo.TrueColor, UTF8: true},
 				} {
 					styled := renderTop(m, width, height, topNow, term.New(caps))
-					if a, b := term.StripEscapes(strings.Join(styled, "\n")), strings.Join(base, "\n"); a != b {
+					if a, b := normPlanGlyphs(term.StripEscapes(strings.Join(styled, "\n"))), normPlanGlyphs(strings.Join(base, "\n")); a != b {
 						t.Errorf("%s %dx%d depth %d: styled text differs:\n%s\nvs\n%s", name, width, height, caps.Color, a, b)
 					}
 					if caps.Color == logo.NoColor && strings.Contains(strings.Join(styled, "\n"), "\x1b") {
@@ -3789,8 +3814,8 @@ func TestRenderTopASCIIWithoutUTF8(t *testing.T) {
 		"+- NEEDS YOU 3 ---",
 		"-> brigada plan approve 2",
 		"#1 fix the frobnicator",
-		"###.#.  1/6 |",
-		"# landed  # done  # running  . queued -+",
+		"#!>.=.  1/6 |",
+		"# landed  = done  > running  . queued -+",
 		"  > #3  oil the gears     work  claude/sonnet@high  1m40s  Edit",
 		"  ^ #5  ship it           landing: queued",
 		"  -> task #6 work: retry in 5m: dns",

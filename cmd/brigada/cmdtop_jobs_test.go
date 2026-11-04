@@ -123,7 +123,7 @@ func TestTopPlanCellColours(t *testing.T) {
 func TestTopPlansLegend(t *testing.T) {
 	plain := term.New(logo.Caps{UTF8: true})
 	box := topBox{title: "PLANS", note: "3 live · 98 finished", legend: topPlanLegend(plain)}
-	if got := topBoxTop(box, plain, 92); !strings.Contains(got, " ■ landed  ■ done  ■ running  □ queued ─╮") || term.CellWidth(got) != 92 {
+	if got := topBoxTop(box, plain, 92); !strings.Contains(got, " ■ landed  ▣ done  ◆ running  □ queued ─╮") || term.CellWidth(got) != 92 {
 		t.Errorf("wide border = %q", got)
 	}
 	got := topBoxTop(box, plain, 50)
@@ -138,8 +138,57 @@ func TestTopPlansLegend(t *testing.T) {
 		}
 	}
 	ascii := topPlanLegend(term.New(logo.Caps{}))
-	if ascii != "# landed  # done  # running  . queued" {
+	if ascii != "# landed  = done  > running  . queued" {
 		t.Errorf("ASCII legend = %q", ascii)
+	}
+}
+
+// TestTopPlanGlyphsTellStatesApart: without colour, or without UTF-8, the
+// cells and the legend give landed, done, running and queued a glyph each;
+// a parked task shows `!` in the cells and is not in the legend; every
+// glyph is one cell wide.
+func TestTopPlanGlyphsTellStatesApart(t *testing.T) {
+	p := engine.StatusPlan{ID: 1, Title: "p", State: "active", Tasks: []engine.StatusTask{
+		{ID: 1, State: "done", Class: "implement", Landed: true},
+		{ID: 2, State: "done", Class: "implement"},
+		{ID: 3, State: "running"},
+		{ID: 4, State: "ready"},
+		{ID: 5, State: "needs_foreman"},
+	}}
+	for _, tt := range []struct {
+		name          string
+		caps          logo.Caps
+		cells, legend string
+	}{
+		{"ASCII", logo.Caps{}, "#=>.!", "# landed  = done  > running  . queued"},
+		{"ASCII with colour", logo.Caps{Color: logo.Color256}, "#=>.!", "# landed  = done  > running  . queued"},
+		{"Unicode no colour", logo.Caps{UTF8: true}, "■▣◆□!", "■ landed  ▣ done  ◆ running  □ queued"},
+		{"Unicode NO_COLOR", logo.Caps{Color: logo.NoColor, UTF8: true}, "■▣◆□!", "■ landed  ▣ done  ◆ running  □ queued"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			style := term.New(tt.caps)
+			cells := term.StripEscapes(topPlanCells(p, map[int64]bool{3: true}, style))
+			if cells != tt.cells {
+				t.Errorf("cells = %q, want %q", cells, tt.cells)
+			}
+			legend := term.StripEscapes(topPlanLegend(style))
+			if legend != tt.legend {
+				t.Errorf("legend = %q, want %q", legend, tt.legend)
+			}
+			seen := map[rune]bool{}
+			for _, r := range cells {
+				if seen[r] {
+					t.Errorf("cells %q repeat the glyph %q", cells, r)
+				}
+				seen[r] = true
+				if n := term.CellWidth(string(r)); n != 1 {
+					t.Errorf("glyph %q is %d cells wide", r, n)
+				}
+			}
+			if strings.Contains(legend, "!") {
+				t.Errorf("legend %q lists the parked glyph", legend)
+			}
+		})
 	}
 }
 
@@ -173,7 +222,7 @@ func TestTopTints(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			lines := renderTop(model, 100, 0, topNow, term.New(tt.caps))
 			for i := range lines {
-				if got := term.StripEscapes(lines[i]); got != plain[i] {
+				if got := term.StripEscapes(lines[i]); normPlanGlyphs(got) != normPlanGlyphs(plain[i]) {
 					t.Errorf("line %d reads %q, want %q", i, got, plain[i])
 				}
 			}

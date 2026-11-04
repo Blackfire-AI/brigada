@@ -1096,8 +1096,9 @@ while a plan that is neither active nor finished shows a state word in their pla
 and a finished plan shows `done` (green) or `cancelled` (red);
 the title is cut to leave room for the widest tail, as in
 `#101 brigada  Fix events strip      reviewing round 2` over `#102 brigada  Top polish             ■■□□□  2/5`.
-The cells follow the task order and leave out cancelled and retired tasks: green for a landed task, or a done one whose class never lands, teal for a done task that has not landed, the accent colour for a task with a running job, red for a parked one (`needs_foreman`, `needs_user`, `failed`), and an empty dim `□` for any other.
-The PLANS top border carries a legend of them, `■ landed  ■ done  ■ running  □ queued`, each cell in its colour, left out when it does not fit.
+The cells follow the task order and leave out cancelled and retired tasks: green for a landed task, or a done one whose class never lands, teal for a done task that has not landed, the accent colour for a task with a running job, red for a parked one (`needs_foreman`, `failed`), and an empty dim `□` for any other.
+With colour and UTF-8 the cells share `■` and tell apart by colour. With no colour, or no UTF-8, each state has a glyph of its own: `■` landed, `▣` done, `◆` running, `□` queued and `!` parked in Unicode, `#` `=` `>` `.` and `!` in ASCII.
+The PLANS top border carries a legend of the four states other than parked, `■ landed  ■ done  ■ running  □ queued` in colour (`■ landed  ▣ done  ◆ running  □ queued` with no colour), each in its colour, left out when it does not fit.
 When the cells would take more than a third of the width the tail is just `done/total`.
 The total leaves out cancelled and retired tasks, and the count takes a done task only once it is landed, or when its class never lands.
 A job row has fixed columns that line up across the rows of a box — the mark, the task id, the title, the kind, the agent, the age and the last event, two spaces apart — in PLANS, FOREMAN and JOBS, each box with its own widths.
