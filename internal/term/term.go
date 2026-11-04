@@ -94,11 +94,54 @@ func (s Style) Rule() string { return s.symbol("━━", "==") }
 // Again returns a repeat arrow, or "->" without UTF-8.
 func (s Style) Again() string { return s.symbol("↺", "->") }
 
-// Filled returns a filled bar cell, or "#" without UTF-8.
-func (s Style) Filled() string { return s.symbol("▓", "#") }
+// Filled returns a filled task cell, or "#" without UTF-8.
+func (s Style) Filled() string { return s.symbol("■", "#") }
 
-// Empty returns an empty bar cell, or "." without UTF-8.
-func (s Style) Empty() string { return s.symbol("░", ".") }
+// Empty returns an empty task cell, or "." without UTF-8.
+func (s Style) Empty() string { return s.symbol("□", ".") }
+
+// Teal colors landing marks teal, apart from Accent at every depth.
+func (s Style) Teal(text string) string {
+	return s.wrap(text, "\x1b[96m", "\x1b[38;5;37m", "\x1b[38;2;0;175;175m")
+}
+
+// tinted says the style can paint a row's background: 256 colours or true
+// colour. At 16 colours and with NO_COLOR rows are not tinted.
+func (s Style) tinted() bool {
+	return s.caps.Color == logo.Color256 || s.caps.Color == logo.TrueColor
+}
+
+// tint paints text on a background with its own foreground. wrap ends every
+// span with a full reset, which would end the background too, so the
+// background and foreground are opened again after each inner reset. The
+// four values are SGR parameters: background and foreground at 256 colours,
+// then at true colour.
+func (s Style) tint(text, bg256, fg256, bgTrue, fgTrue string) string {
+	bg, fg := bg256, fg256
+	if s.caps.Color == logo.TrueColor {
+		bg, fg = bgTrue, fgTrue
+	}
+	open := "\x1b[" + bg + "m\x1b[" + fg + "m"
+	return open + strings.ReplaceAll(text, reset, reset+open) + reset
+}
+
+// TintNeeds paints a needs-you row light red on dark red. Where rows are
+// not tinted (16 colours) the text is Bad; with NO_COLOR it is plain.
+func (s Style) TintNeeds(text string) string {
+	if !s.tinted() {
+		return s.Bad(text)
+	}
+	return s.tint(text, "48;5;52", "38;5;224", "48;2;59;20;24", "38;2;255;215;215")
+}
+
+// TintRun paints a running job's row light blue on dark blue. Where rows
+// are not tinted the text is returned as it is.
+func (s Style) TintRun(text string) string {
+	if !s.tinted() {
+		return text
+	}
+	return s.tint(text, "48;5;17", "38;5;153", "48;2;18;35;63", "38;2;215;227;255")
+}
 
 // Dash returns a rule cell, or "-" without UTF-8.
 func (s Style) Dash() string { return s.symbol("─", "-") }

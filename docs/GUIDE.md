@@ -1085,19 +1085,22 @@ When more than one project shows, each plan line carries its repository's short 
 The needs-you queue shows three lines, broken agents chosen first, and `+N more (brigada status)` counts the rest.
 The held and needs counters in the header are coloured only above zero; the meter is cyan, yellow once the use reaches the cap, and its empty cells are grey. With no cap, or a cap of 0, there is no meter and the cell reads `2/none slots` or `0/0 slots`; a failed capacity fetch reads `?/? slots`. A narrow row shrinks the meter and, under 4 cells, leaves it out.
 
-The plans tree puts every job under its plan: an active plan's line carries its done/total and a progress bar,
+The plans tree puts every job under its plan: an active plan's line ends, at the right edge of the box, with one `■` or `□` cell per task and its done/total, as `■■■■□□  3/8`,
 while a plan that is neither active nor finished shows a state word in their place —
-`awaiting approval`, `reviewing round N` or `needs foreman` —
-and the tails of all the plan lines start in one column, as in
-`#101 brigada  Fix events strip   reviewing round 2` over `#102 brigada  Top polish        2/5 ▓▓▓▓░░░░░░░`.
-The total leaves out cancelled and retired tasks, and the bar counts a done task only once it is landed, or when its class never lands.
-Beneath the line come its running jobs (`▸`, in `brigada status`'s words, with the task's id and title in place of `task #N`: `▸ #331 clip frame to height · work · claude/sonnet@high · 3m12s · Edit`; on a narrow terminal the title is cut and the rest stays whole),
-then a line per task still live work —
-queued or waiting on its dependencies (not under a plan that is not active), held (`?`, as `? #333 agent order  held: waiting for a free account slot`), waiting on an infra retry (`↺`), parked for you (`!` with the needs-you reason) or reviewing;
-a done task that has not landed and that no job speaks for gets a dim `⇡ #330 events wording  landing: waiting (retry at 11:10, last exit 1)` line,
+`awaiting approval`, `reviewing round N` or `needs foreman` — and a finished plan shows `done` or `cancelled`;
+the titles are cut to leave the widest tail, as in
+`#101 brigada  Fix events strip` against `reviewing round 2` over `#102 brigada  Top polish` against `■■□□□  2/5`.
+The cells follow the tasks in order, the cancelled and retired left out: a landed task, or a done one of a class that never lands, is green; a done task not yet landed is teal; a task with a running job is cyan; a parked one (`needs_foreman`, `needs_user`, `failed`) is red; any other is an empty grey `□`. The PLANS border carries the legend `■ landed  ■ done  ■ running  □ queued` in the same colours when it fits. When the cells would take more than a third of the width, the tail is just done/total.
+The total leaves out cancelled and retired tasks, and a done task counts only once it is landed, or when its class never lands.
+Beneath the line come its running jobs (`▸`), laid out in columns that line up across the rows of the box: the task's id, its title, the job's kind, the agent as `harness/model@effort` (a name of more than two `/` segments shows its last segment, so `opencode/zai-coding-plan/glm-5.3` reads `glm-5.3`), the age as `45s`, `9m04s` or `1h02m03s`, and the last event, two spaces apart, as `▸  #331  clip frame to height  work  claude/sonnet@high  3m12s  Edit`;
+on a narrow terminal the title is cut first and never the kind, agent or age, and below 80 terminal columns the last event is left out; a job with no task has `job #N` in the title column and no id,
+then a row per task still live work, its wait text in the kind column and running to the end of the row —
+queued or waiting on its dependencies (not under a plan that is not active; a dim `·` row, as `·  #345  docs and changelog  (waiting on #342)`), held (a yellow `?`, as `?  #333  agent order  held: waiting for a free account slot`), waiting on an infra retry (a dim `↺` line), parked for you (a red `!` line with the needs-you reason) or reviewing;
+a done task that has not landed and that no job speaks for gets a teal `⇡  #330  events wording  landing: waiting (retry at 11:10, last exit 1)` row,
 with `queued` for a queued land job and `not landed` when the task carries no word;
 a reviewing plan whose review no job has started shows a dim `· plan review queued` line —
-while a finished plan is one line, `#N <title> done/total ✓` or `#N <title> ✗`;
+while a finished plan is one line, `#N <title>` and `done` or `cancelled`;
+at 256 colours and true colour a needs-you entry sits on a dark red and a running job row on a dark blue, in every box, with the row's padding inside the tint; there is no tint at 16 colours or without colour;
 a foreman turn no plan claims sits in a FOREMAN box and any other job no listed plan claims in a JOBS box,
 between the needs-you queue and the plans tree, each shown only when it has lines.
 The FOREMAN box also carries dim lines for the user's messages waiting for the foreman (`2 messages for the foreman`) and for each foreman slot that is not free, with its state, label and the local time since (`foreman slot: attach (attached chat) since 11:10`), a headless turn whose job runs left out because its job line speaks for it;

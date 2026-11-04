@@ -18,6 +18,7 @@ func TestStylesAtEveryDepth(t *testing.T) {
 		{"Bold", Style.Bold, [4]string{"", "\x1b[1m", "\x1b[1m", "\x1b[1m"}},
 		{"Dim", Style.Dim, [4]string{"", "\x1b[90m", "\x1b[38;5;245m", "\x1b[38;2;138;143;152m"}},
 		{"Accent", Style.Accent, [4]string{"", "\x1b[36m", "\x1b[38;5;80m", "\x1b[38;2;108;198;224m"}},
+		{"Teal", Style.Teal, [4]string{"", "\x1b[96m", "\x1b[38;5;37m", "\x1b[38;2;0;175;175m"}},
 		{"OK", Style.OK, [4]string{"", "\x1b[32m", "\x1b[38;5;77m", "\x1b[38;2;95;215;95m"}},
 		{"Warn", Style.Warn, [4]string{"", "\x1b[33m", "\x1b[38;5;221m", "\x1b[38;2;255;215;95m"}},
 		{"Bad", Style.Bad, [4]string{"", "\x1b[31m", "\x1b[38;5;203m", "\x1b[38;2;255;95;95m"}},
@@ -110,8 +111,8 @@ func TestSymbols(t *testing.T) {
 		{"Pointer", Style.Pointer, "▸", ">"},
 		{"Rule", Style.Rule, "━━", "=="},
 		{"Again", Style.Again, "↺", "->"},
-		{"Filled", Style.Filled, "▓", "#"},
-		{"Empty", Style.Empty, "░", "."},
+		{"Filled", Style.Filled, "■", "#"},
+		{"Empty", Style.Empty, "□", "."},
 		{"Dash", Style.Dash, "─", "-"},
 		{"Cross", Style.Cross, "✗", "x"},
 		{"Dot", Style.Dot, "·", "|"},
@@ -161,6 +162,52 @@ func TestOneLine(t *testing.T) {
 				t.Errorf("OneLine() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestTints: rows are tinted at 256 colours and true colour only, the
+// background and foreground opened again after every inner reset, the text
+// unchanged once the escapes go; at 16 colours a needs row is Bad and a
+// running row plain, with no colour both are plain.
+func TestTints(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		depth logo.Depth
+		fn    func(Style, string) string
+		open  string
+	}{
+		{"needs 256", logo.Color256, Style.TintNeeds, "\x1b[48;5;52m\x1b[38;5;224m"},
+		{"needs true", logo.TrueColor, Style.TintNeeds, "\x1b[48;2;59;20;24m\x1b[38;2;255;215;215m"},
+		{"run 256", logo.Color256, Style.TintRun, "\x1b[48;5;17m\x1b[38;5;153m"},
+		{"run true", logo.TrueColor, Style.TintRun, "\x1b[48;2;18;35;63m\x1b[38;2;215;227;255m"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			style := New(logo.Caps{Color: tc.depth, UTF8: true})
+			text := style.Accent("▸") + " job"
+			got := tc.fn(style, text)
+			if !strings.HasPrefix(got, tc.open) || !strings.HasSuffix(got, "\x1b[0m") {
+				t.Errorf("tint = %q, want it opened with %q and closed", got, tc.open)
+			}
+			// Every reset of the inner span is followed by the open again.
+			if n, m := strings.Count(got, "\x1b[0m"), strings.Count(got, tc.open); m != n {
+				t.Errorf("%d resets but %d opens in %q", n, m, got)
+			}
+			if !strings.Contains(got, "\x1b[0m"+tc.open+" job") {
+				t.Errorf("the background does not survive the inner span: %q", got)
+			}
+			if StripEscapes(got) != "▸ job" {
+				t.Errorf("stripped tint = %q", StripEscapes(got))
+			}
+		})
+	}
+	for _, depth := range []logo.Depth{logo.NoColor, logo.Color16} {
+		style := New(logo.Caps{Color: depth, UTF8: true})
+		if got := style.TintRun("row"); got != "row" {
+			t.Errorf("depth %d: run row = %q, want plain", depth, got)
+		}
+		if got := style.TintNeeds("row"); got != style.Bad("row") {
+			t.Errorf("depth %d: needs row = %q, want Bad", depth, got)
+		}
 	}
 }
 
