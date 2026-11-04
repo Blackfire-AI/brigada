@@ -58,8 +58,8 @@ tasks:
     review_effort: medium
     caps: {restart: 0}
     skills: ["bugfix", "surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-348"
     rounds: 0
   - id: 349
     name: "top-widths"
