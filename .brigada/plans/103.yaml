@@ -45,8 +45,8 @@ tasks:
     review_tier: standard
     review_effort: medium
     caps: {fix_rounds: 4, review_rounds: 4, restart: 1}
-    state: running
-    branch: "brigada/task-342"
+    state: reviewing
+    branch: "brigada/task-342-r1"
     rounds: 0
   - id: 343
     name: "screens"
