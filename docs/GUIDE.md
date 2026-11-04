@@ -1129,7 +1129,7 @@ A fold row not yet shown costs the row it adds. A box's borders go with its sect
 The header, with its error and hint rows, and the needs-you queue with its borders never drop for another row;
 on a screen too short for them the frame is cut from the bottom, into the needs-you box, so the height still holds.
 
-Below 60 columns the section heads drop their rule fills, and a header whose keys do not fit whole drops them for a dim rule filling the rest of the width.
+The boxes stay below 60 columns, and the header shows its keys only when they fit whole; otherwise the clock alone sits against the right edge.
 `q` quits and `p` pauses the refresh.
 When the engine cannot be reached the view keeps the last data and shows the error on a line while it retries; `--no-start` stops it starting an engine.
 When the output is not a terminal it prints one plain snapshot and exits.
