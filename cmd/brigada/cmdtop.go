@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -40,9 +43,17 @@ func (c topAPI) forProject(projectID int64) topClient {
 	return topAPI{c.ProjectReader(projectID)}
 }
 
-// topEventsLimit is the history page top fetches: the newest items,
-// enough to fill any terminal's events section.
-const topEventsLimit = 50
+// topEventsLimit is the history page top fetches: the newest items, as
+// many as the engine's history bound (500) leaves room for beside the
+// job_cap_held, job_leased and job_created items that dominate the
+// timeline and that topFetch drops, so the kept ones still fill any
+// terminal's events section.
+const topEventsLimit = 200
+
+// topEventsKeep is how many kept items the loop holds across ticks: the
+// newest, so a busy run that pushes every kept item out of one page
+// never empties the strip.
+const topEventsKeep = 50
 
 // runTop is `brigada top`: the engine as a full-screen view that
 // redraws every --interval from the status, capacity and history the
@@ -184,7 +195,11 @@ func topFetch(ctx context.Context, client topClient, repo string) (topModel, err
 		model.err = err
 	}
 	if page, err := client.History(ctx, api.HistoryQuery{ProjectID: projectID, Limit: topEventsLimit, Last: true}); err == nil {
-		model.events = page.Items
+		for _, it := range page.Items {
+			if _, ok := topEventWords(it, time.Time{}); ok {
+				model.events = append(model.events, it)
+			}
+		}
 	} else if model.err == nil {
 		model.err = err
 	}
@@ -227,6 +242,37 @@ func (m topModel) keepPrevious(prev topModel) topModel {
 		m.scope, m.tagPlans = prev.scope, prev.tagPlans
 	}
 	return m
+}
+
+// mergeTopEvents is the kept items of the previous model and of a tick,
+// deduplicated by (Type, ID) with the tick's copy winning, oldest first,
+// the newest topEventsKeep of them.
+func mergeTopEvents(prev, tick []history.Item) []history.Item {
+	type key struct {
+		typ string
+		id  int64
+	}
+	seen := make(map[key]bool, len(prev)+len(tick))
+	var merged []history.Item
+	for _, group := range [][]history.Item{tick, prev} {
+		for _, it := range group {
+			k := key{it.Type, it.ID}
+			if !seen[k] {
+				seen[k] = true
+				merged = append(merged, it)
+			}
+		}
+	}
+	sort.SliceStable(merged, func(i, j int) bool {
+		if merged[i].CreatedAt != merged[j].CreatedAt {
+			return merged[i].CreatedAt < merged[j].CreatedAt
+		}
+		return merged[i].ID < merged[j].ID
+	})
+	if len(merged) > topEventsKeep {
+		merged = merged[len(merged)-topEventsKeep:]
+	}
+	return merged
 }
 
 // dialEngine is connect for a loop that shows its errors instead of
@@ -1027,8 +1073,8 @@ func topNeedsYouLine(n engine.NeedsYouItem) string {
 	return "! " + subject + " " + reason
 }
 
-// topEvents is the strip at the bottom: the newest history items,
-// newest first, joined by " · ". Whole items fill the first line; the
+// topEvents is the strip at the bottom: the newest kept items,
+// newest first, joined by topEventSep. Whole items fill the first line; the
 // first item that does not fit wraps to a second line only when a
 // whole item fits there, that line cut to width when items remain —
 // and when no item fits on the second line the strip stays one line
@@ -1049,7 +1095,7 @@ func topEvents(items []history.Item, now time.Time, style term.Style, width int)
 		for i := start; i < len(parts); i++ {
 			part := term.VisibleWidth(parts[i])
 			if i > start {
-				part += len(" · ")
+				part += term.VisibleWidth(topEventSep)
 			}
 			if used+part > width {
 				return i - start, i
@@ -1060,15 +1106,15 @@ func topEvents(items []history.Item, now time.Time, style term.Style, width int)
 	}
 	first, next := fill(0)
 	if next == len(parts) {
-		return []string{strings.Join(parts, " · ")}
+		return []string{strings.Join(parts, topEventSep)}
 	}
 	if second, _ := fill(next); second == 0 {
 		// No whole item fits on the second line: one line, cut.
-		return []string{topFit(strings.Join(parts, " · "), width)}
+		return []string{topFit(strings.Join(parts, topEventSep), width)}
 	}
 	return []string{
-		strings.Join(parts[:first], " · "),
-		topFit(strings.Join(parts[first:], " · "), width),
+		strings.Join(parts[:first], topEventSep),
+		topFit(strings.Join(parts[first:], topEventSep), width),
 	}
 }
 
@@ -1086,10 +1132,94 @@ func topEventLines(items []history.Item, now time.Time, style term.Style, width 
 	return lines
 }
 
-// topEventItem is one history item as the events strip shows it: its
-// clock time and its one-line gist, the state words coloured.
+// topEventSep joins the strip's items; it is three columns wide.
+const topEventSep = " · "
+
+// topEventPayload is the part of an event's payload the strip words.
+type topEventPayload struct {
+	Plan    int64  `json:"plan"`
+	Status  string `json:"status"`
+	Branch  string `json:"branch"`
+	Pushed  string `json:"pushed"`
+	Harness string `json:"harness"`
+	Model   string `json:"model"`
+	Account string `json:"account"`
+	Until   string `json:"until"`
+}
+
+// topEventWords is an event in plain words, or false when the strip does
+// not show its kind: only the allowlist below shows, and a message never
+// does. now reads the clock of an agent_cooling's deadline.
+func topEventWords(it history.Item, now time.Time) (string, bool) {
+	if it.Type != history.TypeEvent {
+		return "", false
+	}
+	var p topEventPayload
+	if len(it.Payload) > 0 {
+		_ = json.Unmarshal(it.Payload, &p) // an unreadable payload words as an empty one
+	}
+	task := "task"
+	if it.TaskID != 0 {
+		task = "#" + strconv.FormatInt(it.TaskID, 10)
+	}
+	plan := "plan"
+	if p.Plan != 0 {
+		plan = "plan #" + strconv.FormatInt(p.Plan, 10)
+	}
+	agent := p.Harness + "/" + p.Model
+	switch it.Kind {
+	case "plan_done":
+		return plan + " done", true
+	case "plan_approved":
+		return plan + " approved", true
+	case "plan_awaiting_approval":
+		return plan + " awaiting approval", true
+	case "task_done":
+		return task + " done", true
+	case "task_landed":
+		if p.Pushed == "waiting" || p.Pushed == "local" {
+			return task + " landed, push waits", true
+		}
+		return task + " landed", true
+	case "task_pushed":
+		return task + " pushed", true
+	case "task_failed":
+		return task + " failed", true
+	case "task_land_failed":
+		return task + " land failed", true
+	case "review_verdict":
+		verdict := "review no verdict"
+		switch p.Status {
+		case "approve":
+			verdict = "review approve"
+		case "changes":
+			verdict = "review changes"
+		}
+		if p.Branch != "" {
+			verdict += " " + p.Branch
+		}
+		return verdict, true
+	case "agent_broken":
+		return agent + " broken", true
+	case "agent_recovered":
+		return agent + " recovered", true
+	case "agent_cooling":
+		words := p.Account + " cooling"
+		if p.Until != "" {
+			words += " until " + api.LocalClock(p.Until, now)
+		}
+		return words, true
+	case "foreman_report":
+		return "report #" + strconv.FormatInt(it.JobID, 10), true
+	}
+	return "", false
+}
+
+// topEventItem is one kept event as the events strip shows it: its
+// clock time and its plain words, the state words coloured.
 func topEventItem(it history.Item, now time.Time, style term.Style) string {
-	return topClock(it.CreatedAt, now) + " " + topColourStates(history.Line(it), style)
+	words, _ := topEventWords(it, now)
+	return topClock(it.CreatedAt, now) + " " + topColourStates(words, style)
 }
 
 // topColourStates colours a line's state words: done and recovered in
@@ -1230,6 +1360,7 @@ func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Durati
 		fetched, err := topFetch(ctx, topAPI{client}, repo)
 		fetched.err = err
 		fetched.paused = model.paused
+		fetched.events = mergeTopEvents(model.events, fetched.events)
 		if err != nil {
 			fetched = fetched.keepPrevious(model)
 		}

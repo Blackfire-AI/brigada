@@ -1066,7 +1066,8 @@ then the needs-you queue, the plans tree, the agents section —
 one line per agent: its `harness/model`, its running jobs against its effective cap as `brigada capacity` shows it,
 then its quota as `✓` when ready, `↺ HH:MM` while cooling until that time, or `✗` and a short reason when broken;
 a dim `all ≤ global N` line under the list names the global cap —
-and the newest events as a strip at the bottom, the items joined by ` · `, wrapping to a second line when the width allows.
+and the newest user-facing events as a strip at the bottom, each with its clock time in plain words, as `10:02 #328 landed · 09:40 plan #99 done`, joined by ` · ` and wrapping to a second line when the width allows.
+Plan, task, review, agent and foreman-report events show; job bookkeeping, messages and the other events do not. The strip keeps the newest 50 of them across redraws, so a busy run never empties it.
 Without `--project` every section shows the whole engine, whatever the working directory.
 With `--project` every section shows that one project,
 except that a broken agent still shows, in the needs-you queue and with its reason in the agents section, because agents belong to no project;

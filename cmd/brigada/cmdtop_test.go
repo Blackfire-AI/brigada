@@ -149,8 +149,8 @@ func busyTopModel() topModel {
 			Layers: []engine.CapacityLayer{{Layer: "global", Cap: &eight, Use: 3}},
 		},
 		events: []history.Item{
-			{Type: history.TypeEvent, ID: 11, Kind: "job_created", ProjectID: 1, TaskID: 3, JobID: 5,
-				Payload: []byte(`{"branch":"task/3-1"}`), CreatedAt: "2026-10-20T15:02:41.000000000Z"},
+			{Type: history.TypeEvent, ID: 11, Kind: "task_landed", ProjectID: 1, TaskID: 3,
+				Payload: []byte(`{"branch":"main","pushed":"pushed"}`), CreatedAt: "2026-10-20T15:02:41.000000000Z"},
 			{Type: history.TypeEvent, ID: 12, Kind: "task_done", ProjectID: 1, TaskID: 3,
 				Payload: []byte(`{"status":"done"}`), CreatedAt: "2026-10-20T15:02:45.000000000Z"},
 		},
@@ -183,7 +183,7 @@ func TestRenderTopSections(t *testing.T) {
 		"AGENTS",
 		"claude/opus",
 		"all ≤ global 8",
-		"15:02 task_done task 3: status=done · 15:02 job_created job 5: branch=task/3-1",
+		"15:02 #3 done · 15:02 #3 landed",
 	}
 	last := -1
 	for _, w := range want {
@@ -392,20 +392,179 @@ func TestTopNeedsYouEmptyQueue(t *testing.T) {
 func TestTopEventsStrip(t *testing.T) {
 	items := busyTopModel().events
 	style := term.New(logo.Caps{})
-	want := "15:02 task_done task 3: status=done · 15:02 job_created job 5: branch=task/3-1"
+	want := "15:02 #3 done · 15:02 #3 landed"
 	if got := topEvents(items, topNow, style, 200); len(got) != 1 || got[0] != want {
 		t.Errorf("strip = %q, want %q", got, want)
 	}
-	wrapped := topEvents(items, topNow, style, 76)
-	if len(wrapped) != 2 || wrapped[0] != "15:02 task_done task 3: status=done" ||
-		wrapped[1] != "15:02 job_created job 5: branch=task/3-1" {
+	wrapped := topEvents(items, topNow, style, 30)
+	if len(wrapped) != 2 || wrapped[0] != "15:02 #3 done" || wrapped[1] != "15:02 #3 landed" {
 		t.Errorf("wrapped strip = %q", wrapped)
 	}
-	if got := topEvents(items, topNow, style, 30)[0]; got != "15:02 task_done task 3: sta..." {
+	if got := topEvents(items, topNow, style, 10)[0]; got != "15:02 #..." {
 		t.Errorf("cut = %q", got)
 	}
 	if got := topEvents(nil, topNow, style, 80); got[0] != "no events" {
 		t.Errorf("empty = %q", got)
+	}
+}
+
+// TestTopEventsSeparatorWidth: the " · " between two items counts its
+// three columns, not its four bytes, so a strip of exactly the width
+// stays on one line and one column less wraps.
+func TestTopEventsSeparatorWidth(t *testing.T) {
+	items := busyTopModel().events
+	style := term.New(logo.Caps{})
+	const strip = "15:02 #3 done · 15:02 #3 landed"
+	if n := term.VisibleWidth(strip); n != 31 {
+		t.Fatalf("fixture strip is %d columns, want 31", n)
+	}
+	if got := topEvents(items, topNow, style, 31); len(got) != 1 || got[0] != strip {
+		t.Errorf("a strip of exactly the width = %q, want %q", got, strip)
+	}
+	if got := topEvents(items, topNow, style, 30); len(got) != 2 {
+		t.Errorf("a strip one column too wide = %q, want two lines", got)
+	}
+}
+
+// TestTopEventWords: every allowlisted kind in its plain words, and the
+// kinds and types the strip leaves out.
+func TestTopEventWords(t *testing.T) {
+	stamp := "2026-10-20T15:02:45.000000000Z"
+	until := topNow.Add(time.Hour).UTC().Format(engine.TimeLayout)
+	ev := func(kind string, task, job int64, payload string) history.Item {
+		return history.Item{Type: history.TypeEvent, ID: 1, Kind: kind, ProjectID: 1, TaskID: task, JobID: job,
+			Payload: []byte(payload), CreatedAt: stamp}
+	}
+	style := term.New(logo.Caps{})
+	tests := []struct {
+		name string
+		item history.Item
+		want string
+	}{
+		{"plan_done", ev("plan_done", 0, 0, `{"plan":99,"status":"done"}`), "15:02 plan #99 done"},
+		{"plan_done without a plan", ev("plan_done", 0, 0, `{}`), "15:02 plan done"},
+		{"plan_approved", ev("plan_approved", 0, 0, `{"plan":7,"status":"active"}`), "15:02 plan #7 approved"},
+		{"plan_awaiting_approval", ev("plan_awaiting_approval", 0, 0, `{"plan":8}`), "15:02 plan #8 awaiting approval"},
+		{"task_done", ev("task_done", 3, 0, `{"status":"done"}`), "15:02 #3 done"},
+		{"task_landed", ev("task_landed", 328, 0, `{"pushed":"pushed"}`), "15:02 #328 landed"},
+		{"task_landed no push state", ev("task_landed", 328, 0, ``), "15:02 #328 landed"},
+		{"task_landed waiting", ev("task_landed", 328, 0, `{"pushed":"waiting"}`), "15:02 #328 landed, push waits"},
+		{"task_landed local", ev("task_landed", 328, 0, `{"pushed":"local"}`), "15:02 #328 landed, push waits"},
+		{"task_pushed", ev("task_pushed", 328, 0, `{}`), "15:02 #328 pushed"},
+		{"task_failed", ev("task_failed", 4, 0, `{"status":"failed"}`), "15:02 #4 failed"},
+		{"task_land_failed", ev("task_land_failed", 4, 0, `{"reason":"conflict"}`), "15:02 #4 land failed"},
+		{"review approve", ev("review_verdict", 0, 9, `{"status":"approve","branch":"fix/x"}`), "15:02 review approve fix/x"},
+		{"review changes", ev("review_verdict", 0, 9, `{"status":"changes","branch":"fix/x"}`), "15:02 review changes fix/x"},
+		{"review no verdict", ev("review_verdict", 0, 9, `{"status":"no_verdict"}`), "15:02 review no verdict"},
+		{"agent_broken", ev("agent_broken", 0, 0, `{"harness":"codex","model":"gpt-5","reason":"auth"}`), "15:02 codex/gpt-5 broken"},
+		{"agent_recovered", ev("agent_recovered", 0, 0, `{"harness":"codex","model":"gpt-5"}`), "15:02 codex/gpt-5 recovered"},
+		{"agent_cooling", ev("agent_cooling", 3, 5, `{"account":"work","until":"`+until+`"}`), "15:02 work cooling until 16:04"},
+		{"agent_cooling without a deadline", ev("agent_cooling", 3, 5, `{"account":"work"}`), "15:02 work cooling"},
+		{"foreman_report", ev("foreman_report", 0, 41, `{"report":"all landed"}`), "15:02 report #41"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := topEventItem(tt.item, topNow, style); got != tt.want {
+				t.Errorf("item = %q, want %q", got, tt.want)
+			}
+			if _, ok := topEventWords(tt.item, topNow); !ok {
+				t.Errorf("kind %s is not kept", tt.item.Kind)
+			}
+		})
+	}
+	for _, out := range []history.Item{
+		{Type: history.TypeMessage, ID: 1, Kind: "worker_result", Author: "worker",
+			Content: `{"status":"done","summary":"Plan 99 landed"}`, CreatedAt: stamp},
+		{Type: history.TypeMessage, ID: 2, Kind: "task_done", Author: "worker", CreatedAt: stamp},
+		ev("job_created", 3, 5, `{"branch":"task/3-1"}`),
+		ev("job_leased", 3, 5, `{}`),
+		ev("job_cap_held", 3, 5, `{}`),
+		ev("task_running", 3, 0, `{}`),
+		ev("review_changes", 3, 0, `{}`),
+	} {
+		if words, ok := topEventWords(out, topNow); ok {
+			t.Errorf("%s %s is kept as %q", out.Type, out.Kind, words)
+		}
+	}
+}
+
+// TestTopFetchFiltersEvents: topFetch keeps only the allowlisted events,
+// oldest first as the page came, and asks for the wider page.
+func TestTopFetchFiltersEvents(t *testing.T) {
+	stamp := "2026-10-20T15:02:45.000000000Z"
+	fake := &fakeTop{
+		projects: []engine.ProjectInfo{{ProjectID: 7, RepoURL: "https://example.invalid/r.git"}},
+		page: history.Page{Items: []history.Item{
+			{Type: history.TypeEvent, ID: 1, Kind: "job_created", TaskID: 3, JobID: 5, CreatedAt: stamp},
+			{Type: history.TypeEvent, ID: 2, Kind: "task_running", TaskID: 3, CreatedAt: stamp},
+			{Type: history.TypeMessage, ID: 3, Kind: "worker_result", Author: "worker", Content: `{"status":"done"}`, CreatedAt: stamp},
+			{Type: history.TypeEvent, ID: 4, Kind: "task_done", TaskID: 3, CreatedAt: stamp},
+			{Type: history.TypeEvent, ID: 5, Kind: "job_leased", TaskID: 3, JobID: 5, CreatedAt: stamp},
+		}},
+	}
+	model, err := topFetch(context.Background(), fake, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(model.events) != 1 || model.events[0].ID != 4 {
+		t.Errorf("events = %+v, want only the task_done", model.events)
+	}
+	if topEventsLimit != 200 {
+		t.Errorf("topEventsLimit = %d, want 200", topEventsLimit)
+	}
+}
+
+// TestTopEventsKeptAcrossTicks: a page of 200 items with no kept one
+// leaves the previous tick's strip as it was, and two ticks that share
+// an item show it once.
+func TestTopEventsKeptAcrossTicks(t *testing.T) {
+	stamp := "2026-10-20T15:02:45.000000000Z"
+	var noise []history.Item
+	for i := 0; i < topEventsLimit; i++ {
+		noise = append(noise, history.Item{Type: history.TypeEvent, ID: int64(1000 + i), Kind: "job_leased", JobID: 5, CreatedAt: stamp})
+	}
+	fake := &fakeTop{
+		projects: []engine.ProjectInfo{{ProjectID: 7, RepoURL: "https://example.invalid/r.git"}},
+		page:     history.Page{Items: noise},
+	}
+	prev := busyTopModel()
+	tick, err := topFetch(context.Background(), fake, "")
+	if err != nil || len(tick.events) != 0 {
+		t.Fatalf("topFetch: %v, events %+v, want none kept", err, tick.events)
+	}
+	merged := mergeTopEvents(prev.events, tick.events)
+	if len(merged) != 2 || merged[0].ID != 11 || merged[1].ID != 12 {
+		t.Errorf("merged = %+v, want the previous strip", merged)
+	}
+	style := term.New(logo.Caps{})
+	if got := topEvents(merged, topNow, style, 200); got[0] != "15:02 #3 done · 15:02 #3 landed" {
+		t.Errorf("strip = %q, want the previous tick's", got)
+	}
+
+	// Dedupe: the next tick repeats item 12 and adds item 13.
+	next := []history.Item{
+		prev.events[1],
+		{Type: history.TypeEvent, ID: 13, Kind: "task_pushed", TaskID: 3, CreatedAt: "2026-10-20T15:03:00.000000000Z"},
+	}
+	merged = mergeTopEvents(merged, next)
+	if len(merged) != 3 || merged[0].ID != 11 || merged[1].ID != 12 || merged[2].ID != 13 {
+		t.Errorf("merged = %+v, want 11, 12, 13 once each, oldest first", merged)
+	}
+	// A message with the same ID is another item.
+	merged = mergeTopEvents(merged, []history.Item{{Type: history.TypeMessage, ID: 12}})
+	if len(merged) != 4 {
+		t.Errorf("a message of the same id merged away: %+v", merged)
+	}
+
+	// Only the newest topEventsKeep stay.
+	var many []history.Item
+	for i := 1; i <= topEventsKeep+10; i++ {
+		many = append(many, history.Item{Type: history.TypeEvent, ID: int64(i), Kind: "task_done", TaskID: 1,
+			CreatedAt: time.Date(2026, 10, 20, 10, 0, i, 0, time.UTC).Format(engine.TimeLayout)})
+	}
+	kept := mergeTopEvents(nil, many)
+	if len(kept) != topEventsKeep || kept[0].ID != 11 || kept[len(kept)-1].ID != int64(topEventsKeep+10) {
+		t.Errorf("kept %d items from id %d to %d, want the newest %d", len(kept), kept[0].ID, kept[len(kept)-1].ID, topEventsKeep)
 	}
 }
 
@@ -421,7 +580,7 @@ func TestTopClockMinutes(t *testing.T) {
 	style := term.New(logo.Caps{})
 	model := busyTopModel()
 	strip := strings.Join(topEvents(model.events, topNow, style, 200), "\n")
-	if !strings.Contains(strip, "15:02 task_done") ||
+	if !strings.Contains(strip, "15:02 #3 done") ||
 		strings.Contains(strip, "15:02:45") || strings.Contains(strip, "15:02:41") {
 		t.Errorf("strip = %q, want HH:MM pairs", strip)
 	}
@@ -443,16 +602,16 @@ func TestTopEventItemStates(t *testing.T) {
 	}{
 		{"done", history.Item{Type: history.TypeEvent, ID: 1, Kind: "task_done", TaskID: 3,
 			Payload: []byte(`{"status":"done"}`), CreatedAt: "2026-10-20T15:02:45.000000000Z"},
-			"15:02 task_" + style.OK("done") + " task 3: status=" + style.OK("done")},
+			"15:02 #3 " + style.OK("done")},
 		{"recovered", history.Item{Type: history.TypeEvent, ID: 2, Kind: "agent_recovered", ProjectID: 1,
-			CreatedAt: "2026-10-20T15:02:46.000000000Z"},
-			"15:02 agent_" + style.OK("recovered") + " project 1:"},
+			Payload: []byte(`{"harness":"codex","model":"gpt-5"}`), CreatedAt: "2026-10-20T15:02:46.000000000Z"},
+			"15:02 codex/gpt-5 " + style.OK("recovered")},
 		{"failed", history.Item{Type: history.TypeEvent, ID: 3, Kind: "task_failed", TaskID: 4,
 			Payload: []byte(`{"status":"failed"}`), CreatedAt: "2026-10-20T15:02:47.000000000Z"},
-			"15:02 task_" + style.Bad("failed") + " task 4: status=" + style.Bad("failed")},
+			"15:02 #4 " + style.Bad("failed")},
 		{"broken", history.Item{Type: history.TypeEvent, ID: 4, Kind: "agent_broken", ProjectID: 1,
-			Payload: []byte(`{"reason":"auth: no key"}`), CreatedAt: "2026-10-20T15:02:48.000000000Z"},
-			"15:02 agent_" + style.Bad("broken") + " project 1: reason=auth: no key"},
+			Payload: []byte(`{"harness":"codex","model":"gpt-5","reason":"auth: no key"}`), CreatedAt: "2026-10-20T15:02:48.000000000Z"},
+			"15:02 codex/gpt-5 " + style.Bad("broken")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1004,7 +1163,7 @@ func TestRenderTopFitsSize(t *testing.T) {
 		"AGENTS",
 		"claude/opus  1/8 (global)  ✓",
 		"all ≤ global 8",
-		"15:02 task_done task 3: status=done",
+		"15:02 #3 done · 15:02 #3 landed",
 	}
 	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
 		t.Errorf("frame =\n%s\nwant\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
@@ -1035,6 +1194,14 @@ func TestRenderTopFitsSize(t *testing.T) {
 // TestTopAgentsBudget.)
 func TestRenderTopHeightYieldOrder(t *testing.T) {
 	model := agentsModel()
+	// A standalone review's branch is long enough that the two items
+	// wrap at width 76 and each fits a line whole.
+	model.events = []history.Item{
+		{Type: history.TypeEvent, ID: 11, Kind: "review_verdict", ProjectID: 1, JobID: 5,
+			Payload:   []byte(`{"status":"approve","branch":"task/3-1-oil-the-gears-after-the-frobnicator-fix"}`),
+			CreatedAt: "2026-10-20T15:02:41.000000000Z"},
+		model.events[1],
+	}
 	tests := []struct {
 		name   string
 		height int
@@ -1046,17 +1213,17 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 		{"everything fits", 22, 22, 5, []string{
 			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
 			"✗ login expired",
-			"15:02 job_created job 5: branch=task/3-1",
+			"15:02 review approve task/3-1-oil-the-gears-after-the-frobnicator-fix",
 		}, nil},
 		{"events second line", 21, 21, 5, []string{
-			"15:02 task_done task 3: status=done",
-		}, []string{"job_created"}},
+			"15:02 #3 done",
+		}, []string{"review approve"}},
 		{"the lowest blank line", 20, 20, 4, []string{
-			"all ≤ global 8\n15:02 task_done",
+			"all ≤ global 8\n15:02 #3 done",
 			"  ? task #4 work held: waiting for a runner slot\n\nAGENTS",
 		}, nil},
 		{"no blank line", 16, 16, 0, []string{
-			"all ≤ global 8\n15:02 task_done",
+			"all ≤ global 8\n15:02 #3 done",
 			"  ? task #4 work held",
 			"  ! #2 wire the sprocket should the sprocket be blue?",
 		}, nil},
@@ -1069,12 +1236,12 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 		}, []string{"? task #4", "wire the sprocket should"}},
 		{"the running line", 13, 13, 0, []string{
 			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
-			"15:02 task_done task 3: status=done",
+			"15:02 #3 done",
 		}, []string{"▸ task #3"}},
 		{"the events first line", 12, 12, 0, []string{
 			"#1 fix the frobnicator 1/4 ▓▓░░░░░░░░░",
 			"all ≤ global 8",
-		}, []string{"task_done"}},
+		}, []string{"#3 done"}},
 		{"the global line", 11, 11, 0, []string{
 			"2/8 (global)  ✗ login expired",
 		}, []string{"all ≤ global 8"}},
@@ -1528,7 +1695,7 @@ func TestTopKeepPrevious(t *testing.T) {
 		t.Errorf("scope %q, tag %v: the failed fetch lost them", failed.scope, failed.tagPlans)
 	}
 	got := plainTop(failed, 100, 0)
-	if !strings.Contains(got, "engine: engine gone") || !strings.Contains(got, "claude/opus") || !strings.Contains(got, "job_created") {
+	if !strings.Contains(got, "engine: engine gone") || !strings.Contains(got, "claude/opus") || !strings.Contains(got, "15:02 #3 done · 15:02 #3 landed") {
 		t.Errorf("failed fetch blanked the screen:\n%s", got)
 	}
 }
@@ -1694,7 +1861,7 @@ func TestRenderTopScreenHeights(t *testing.T) {
 			t.Errorf("frame lacks %q:\n%s", w, got)
 		}
 	}
-	for _, w := range []string{"#1 fix the frobnicator", "all ≤ global 8", "task_done"} {
+	for _, w := range []string{"#1 fix the frobnicator", "all ≤ global 8", "#3 done"} {
 		if strings.Contains(got, w) {
 			t.Errorf("frame keeps %q past the height:\n%s", w, got)
 		}
@@ -2013,7 +2180,7 @@ func TestRenderTopQueuedYield(t *testing.T) {
 func TestRenderTopFinalOrder(t *testing.T) {
 	got := plainTop(agentsModel(), 100, 0)
 	last := -1
-	for _, h := range []string{"brigada top", "SLOTS", "NEEDS YOU", "PLANS", "AGENTS", "15:02 task_done"} {
+	for _, h := range []string{"brigada top", "SLOTS", "NEEDS YOU", "PLANS", "AGENTS", "15:02 #3 done"} {
 		i := strings.Index(got, h)
 		if i < last {
 			t.Errorf("%q out of order:\n%s", h, got)
