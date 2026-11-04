@@ -92,7 +92,7 @@ The main package lives in `cmd/brigada`, so that is the install path. Make sure 
 Prebuilt binaries and tarballs are also attached to each [GitHub release](https://github.com/Blackfire-AI/brigada/releases) with `SHA256SUMS` (see [Releasing](#releasing)). To download and verify a tarball manually instead of piping a script to `sh`, choose a release version and your platform (`darwin` or `linux`, `amd64` or `arm64`):
 
 ```sh
-version=1.0.0
+version=1.1.0
 os=linux
 arch=amd64
 asset="brigada-${os}-${arch}.tar.gz"
