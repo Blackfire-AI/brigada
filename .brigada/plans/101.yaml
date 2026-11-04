@@ -55,8 +55,8 @@ tasks:
     continue: "scope2"
     effort: medium
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-332"
     rounds: 0
   - id: 333
     name: "tree"
