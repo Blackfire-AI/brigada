@@ -182,15 +182,17 @@ func dialEngine(ctx context.Context, rt *runtime, role string, noStart bool) (*a
 }
 
 // renderTop lays the view out, top to bottom: the header, the meters
-// strip, NEEDS YOU, the loose jobs no plan claims (only when there are
-// any), the PLANS tree with every job under its plan, the AGENTS
+// strip, NEEDS YOU, the FOREMAN block (a foreman turn no plan claims) and
+// the JOBS block (any other job no plan claims), each only when it has
+// lines, the PLANS tree with every job under its plan, the AGENTS
 // section and the events strip at the bottom, every line cut to width.
 // The height is a budget, 0 meaning no limit: lines beyond it yield in
 // order — the events strip's second line, then plan task lines from
 // the last listed plan upward, then agent lines from the bottom of the
 // list upward, counted in a dim +N more (brigada agents) line — and
 // what never yields (the header with its error and hint lines, the
-// meters, NEEDS YOU whole, the loose jobs, every plan's own line, the
+// meters, NEEDS YOU whole, the FOREMAN and JOBS blocks with their heads,
+// every plan's own line, the
 // agents head with its global line, the events strip's first line,
 // every blank line between sections) renders whole even when the view
 // overflows the screen. With a plain style the text is the same and
@@ -199,7 +201,7 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 	header := topHeader(model, now, style, width)
 	meters := topMeters(model, style, width)
 	needs := topNeedsYou(model.status, style, width)
-	loose := topLoose(model.status, now, style, width)
+	foreman, jobs := topPlanless(model.status, now, style, width)
 	plans := newTopPlans(model.status, now, style, width)
 	events := topEvents(model.events, now, style, width)
 
@@ -212,7 +214,11 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 		globalLines = 1
 	}
 	sectionCount := 6
-	if len(loose) > 0 {
+	// Each non-empty block adds its head, its job lines and one blank.
+	if len(foreman) > 0 {
+		sectionCount++
+	}
+	if len(jobs) > 0 {
 		sectionCount++
 	}
 	eventLines, planDrop, agentsKeep := len(events), 0, agentsAll
@@ -222,7 +228,7 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 			// The +N more (brigada agents) line that names the drops.
 			agentsLines++
 		}
-		return len(header) + len(meters) + len(needs) + len(loose) +
+		return len(header) + len(meters) + len(needs) + len(foreman) + len(jobs) +
 			len(plans.lines) - planDrop + agentsLines + eventLines +
 			sectionCount - 1
 	}
@@ -244,8 +250,11 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 		agents = topAgents(model, now, style, width, 2+globalLines+agentsKeep)
 	}
 	sections := [][]string{header, meters, needs}
-	if len(loose) > 0 {
-		sections = append(sections, loose)
+	if len(foreman) > 0 {
+		sections = append(sections, foreman)
+	}
+	if len(jobs) > 0 {
+		sections = append(sections, jobs)
 	}
 	sections = append(sections,
 		plans.yield(planDrop),
@@ -453,7 +462,7 @@ func topTaskSettled(state string) bool {
 // topClaims maps a job to the live plan whose tree line it renders
 // under: a job of a live plan's task, or a live plan's review job
 // (StatusPlan.ReviewJob). A taskless job no live plan names as its
-// review is loose; a finished plan never carries a live job.
+// review is plan-less; a finished plan never carries a live job.
 type topClaims struct {
 	taskPlan   map[int64]int64 // task id → live plan id
 	reviewPlan map[int64]int64 // review job id → live plan id
@@ -476,7 +485,7 @@ func newTopClaims(st api.Status) topClaims {
 }
 
 // plan is the live plan that claims a job, by its task or as the plan's
-// review job; ok is false for a loose job.
+// review job; ok is false for a plan-less job.
 func (c topClaims) plan(jobID, taskID int64) (int64, bool) {
 	if taskID != 0 {
 		id, ok := c.taskPlan[taskID]
@@ -487,7 +496,7 @@ func (c topClaims) plan(jobID, taskID int64) (int64, bool) {
 }
 
 // topRunningLine is one running job under its task, its plan or in the
-// loose block: the Accent pointer and status's own words for the job.
+// FOREMAN or JOBS block: the Accent pointer and status's own words for the job.
 func topRunningLine(j engine.StatusJob, now time.Time, style term.Style, width int) string {
 	return "  " + style.Accent("▸") + " " + cutLine(api.DescribeJob(j, now), width-4)
 }
@@ -508,29 +517,44 @@ func topRetryLine(r engine.InfraRetry, now time.Time, style term.Style, width in
 	return "  " + style.Dim(cutLine("↺ "+api.RetryLine(r, now), width-2))
 }
 
-// topLoose is the block under NEEDS YOU, with no head: the running,
-// held and retrying jobs no live plan claims — a foreman turn, the
-// review of a plan the tree does not list — so no job goes unseen. It
-// is empty, and renderTop leaves it out, when every job has its plan.
-func topLoose(st api.Status, now time.Time, style term.Style, width int) []string {
+// topPlanless is the two blocks under NEEDS YOU: the running, held and
+// retrying jobs no live plan claims, so no job goes unseen. A foreman
+// turn goes under a FOREMAN head; any other job — the review of a plan
+// the tree does not list — under a JOBS head. Inside a block the order
+// is running, held, retrying. A block is nil, and renderTop leaves it
+// out, when it has no job.
+func topPlanless(st api.Status, now time.Time, style term.Style, width int) (foreman, jobs []string) {
 	claims := newTopClaims(st)
-	var lines []string
+	var fore, other []string
+	add := func(kind, line string) {
+		if kind == string(engine.KindForeman) {
+			fore = append(fore, line)
+		} else {
+			other = append(other, line)
+		}
+	}
 	for _, j := range st.Running {
 		if _, ok := claims.plan(j.ID, j.TaskID); !ok {
-			lines = append(lines, topRunningLine(j, now, style, width))
+			add(j.Kind, topRunningLine(j, now, style, width))
 		}
 	}
 	for _, h := range st.Held {
 		if _, ok := claims.plan(h.ID, h.TaskID); !ok {
-			lines = append(lines, topHeldLine(h, style, width))
+			add(h.Kind, topHeldLine(h, style, width))
 		}
 	}
 	for _, r := range st.Retries {
 		if _, ok := claims.plan(r.ID, r.TaskID); !ok {
-			lines = append(lines, topRetryLine(r, now, style, width))
+			add(r.Kind, topRetryLine(r, now, style, width))
 		}
 	}
-	return lines
+	if len(fore) > 0 {
+		foreman = append([]string{topSectionHead("FOREMAN", style, width)}, fore...)
+	}
+	if len(other) > 0 {
+		jobs = append([]string{topSectionHead("JOBS", style, width)}, other...)
+	}
+	return foreman, jobs
 }
 
 // topPlansView is the rendered PLANS section with its yield order
