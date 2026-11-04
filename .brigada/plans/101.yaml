@@ -137,6 +137,6 @@ tasks:
     review_tier: heavy
     caps: {restart: 0}
     skills: ["bugfix", "cli-flag"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-338"
     rounds: 0
