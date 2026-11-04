@@ -19,4 +19,6 @@ claude/opus              1/4 (runner)  ✓
 all ≤ global 8
 
 report #41: Plan 1 is half done; task 2 waits for your answer.
-15:02 #3 done · 15:02 #3 landed
+EVENTS ─────────────────────────────────────────────────────────────────────────
+15:02  #3 done
+15:02  #3 landed
