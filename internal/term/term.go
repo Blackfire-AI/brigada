@@ -93,6 +93,30 @@ func (s Style) Rule() string { return s.symbol("━━", "==") }
 // Again returns a repeat arrow, or "->" without UTF-8.
 func (s Style) Again() string { return s.symbol("↺", "->") }
 
+// Filled returns a filled bar cell, or "#" without UTF-8.
+func (s Style) Filled() string { return s.symbol("▓", "#") }
+
+// Empty returns an empty bar cell, or "." without UTF-8.
+func (s Style) Empty() string { return s.symbol("░", ".") }
+
+// Dash returns a rule cell, or "-" without UTF-8.
+func (s Style) Dash() string { return s.symbol("─", "-") }
+
+// Cross returns a failure mark, or "x" without UTF-8.
+func (s Style) Cross() string { return s.symbol("✗", "x") }
+
+// Dot returns a separator dot, or "|" without UTF-8.
+func (s Style) Dot() string { return s.symbol("·", "|") }
+
+// AtMost returns a less-than-or-equal sign, or "<=" without UTF-8.
+func (s Style) AtMost() string { return s.symbol("≤", "<=") }
+
+// Up returns an upward arrow, or "^" without UTF-8.
+func (s Style) Up() string { return s.symbol("⇡", "^") }
+
+// Arrow returns a rightward arrow, or "->" without UTF-8.
+func (s Style) Arrow() string { return s.symbol("→", "->") }
+
 // Width returns the layout width, clamped to 80..100 columns. Unknown widths
 // and output that is not a terminal use 80 columns.
 func (s Style) Width() int {

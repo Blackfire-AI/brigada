@@ -158,7 +158,7 @@ func busyTopModel() topModel {
 }
 
 func plainTop(model topModel, width, height int) string {
-	return strings.Join(renderTop(model, width, height, topNow, term.New(logo.Caps{})), "\n")
+	return strings.Join(renderTop(model, width, height, topNow, term.New(logo.Caps{UTF8: true})), "\n")
 }
 
 // TestRenderTopSections: the view's order — header, meters, NEEDS YOU,
@@ -170,7 +170,7 @@ func TestRenderTopSections(t *testing.T) {
 		engine.StatusJob{ID: 30, Kind: "foreman", Status: "running"})
 	got := plainTop(model, 100, 0)
 	want := []string{
-		"brigada · r · up 2h0m0s · 15:04:09",
+		"brigada · r · up 2h0m · 15:04:09",
 		"SLOTS ▓▓▓░░░░░ 3/8   2 run   2 queue   1 held   1 needs",
 		"NEEDS YOU",
 		"! #2 should the sprocket be blue?",
@@ -206,8 +206,8 @@ func TestRenderTopSections(t *testing.T) {
 // clock, a rule filling the width that remains, the keys at the right
 // end — and fills the width exactly.
 func TestTopHeaderRuleAndKeys(t *testing.T) {
-	style := term.New(logo.Caps{})
-	left := "brigada · r · up 2h0m0s · 15:04:09"
+	style := term.New(logo.Caps{UTF8: true})
+	left := "brigada · r · up 2h0m · 15:04:09"
 	rule := 80 - term.VisibleWidth(left) - term.VisibleWidth("q quit · p pause") - 2
 	want := left + " " + strings.Repeat("─", rule) + " q quit · p pause"
 	lines := topHeader(busyTopModel(), topNow, style, 80)
@@ -217,7 +217,7 @@ func TestTopHeaderRuleAndKeys(t *testing.T) {
 	if got := term.VisibleWidth(lines[0]); got != 80 {
 		t.Errorf("header is %d wide, want 80", got)
 	}
-	colour := term.New(logo.Caps{Color: logo.Color16})
+	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
 	if got := topHeader(busyTopModel(), topNow, colour, 80)[0]; !strings.Contains(got, colour.Dim(strings.Repeat("─", rule))) {
 		t.Errorf("rule is not dim:\n%q", got)
 	}
@@ -253,7 +253,7 @@ func TestTopMetersSlotsCell(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			model := busyTopModel()
 			model.capacity.Layers = tt.layers
-			got := topMeters(model, term.New(logo.Caps{}), 100)[0]
+			got := topMeters(model, term.New(logo.Caps{UTF8: true}), 100)[0]
 			if !strings.HasPrefix(got, tt.want+"   ") {
 				t.Errorf("meters = %q, want the slots cell %q", got, tt.want)
 			}
@@ -264,7 +264,7 @@ func TestTopMetersSlotsCell(t *testing.T) {
 // TestTopMetersCountersAndColours: the counters follow the cell — run
 // bold, queue plain, held warn, needs bad — three spaces apart.
 func TestTopMetersCountersAndColours(t *testing.T) {
-	style := term.New(logo.Caps{Color: logo.Color16})
+	style := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
 	got := topMeters(busyTopModel(), style, 100)[0]
 	want := "SLOTS ▓▓▓░░░░░ 3/8   " + style.Bold("1 run") + "   2 queue   " + style.Warn("1 held") + "   " + style.Bad("1 needs")
 	if got != want {
@@ -297,7 +297,7 @@ func TestTopNeedsYouCapNeverHidesAgents(t *testing.T) {
 			"+1 more (brigada status)"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got := topNeedsYou(api.Status{NeedsYou: tt.queue}, false, term.New(logo.Caps{}), 100)[1:]
+			got := topNeedsYou(api.Status{NeedsYou: tt.queue}, false, term.New(logo.Caps{UTF8: true}), 100)[1:]
 			if strings.Join(got, "\n") != strings.Join(tt.want, "\n") {
 				t.Errorf("lines = %q, want %q", got, tt.want)
 			}
@@ -323,7 +323,7 @@ func TestTopNeedsYouCompactLines(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lines := topNeedsYou(api.Status{NeedsYou: []engine.NeedsYouItem{tt.item}}, false, term.New(logo.Caps{}), 120)
+			lines := topNeedsYou(api.Status{NeedsYou: []engine.NeedsYouItem{tt.item}}, false, term.New(logo.Caps{UTF8: true}), 120)
 			if len(lines) != 2 || lines[1] != tt.want {
 				t.Errorf("lines = %q, want the entry %q", lines, tt.want)
 			}
@@ -341,7 +341,7 @@ func TestTopNeedsYouCapsAtThreeLines(t *testing.T) {
 	for i := 1; i <= 5; i++ {
 		items = append(items, engine.NeedsYouItem{Kind: "task", ID: int64(i), State: "needs_foreman", Reason: fmt.Sprintf("why %d", i)})
 	}
-	got := strings.Join(topNeedsYou(api.Status{NeedsYou: items}, false, term.New(logo.Caps{}), 100), "\n")
+	got := strings.Join(topNeedsYou(api.Status{NeedsYou: items}, false, term.New(logo.Caps{UTF8: true}), 100), "\n")
 	want := strings.Join([]string{
 		"NEEDS YOU " + strings.Repeat("─", 90),
 		"! #1 why 1", "! #2 why 2", "! #3 why 3",
@@ -355,7 +355,7 @@ func TestTopNeedsYouCapsAtThreeLines(t *testing.T) {
 // TestTopNeedsYouColours: the entries are Bad, the "+N more" and the
 // empty queue's line dim, the header's rule fill dim too.
 func TestTopNeedsYouColours(t *testing.T) {
-	style := term.New(logo.Caps{Color: logo.Color16})
+	style := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
 	st := api.Status{NeedsYou: []engine.NeedsYouItem{
 		{Kind: "task", ID: 2, State: "needs_foreman", Reason: "should the sprocket be blue?"},
 		{Kind: "agent", ID: 4, State: "broken", Title: "dsh/large", Reason: "auth: no key"},
@@ -382,7 +382,7 @@ func TestTopNeedsYouColours(t *testing.T) {
 // TestTopNeedsYouEmptyQueue: the section stays visible when nothing
 // needs the user.
 func TestTopNeedsYouEmptyQueue(t *testing.T) {
-	lines := topNeedsYou(api.Status{}, false, term.New(logo.Caps{}), 80)
+	lines := topNeedsYou(api.Status{}, false, term.New(logo.Caps{UTF8: true}), 80)
 	want := "NEEDS YOU " + strings.Repeat("─", 70) + "\nnothing needs you"
 	if got := strings.Join(lines, "\n"); got != want {
 		t.Errorf("empty queue =\n%s\nwant\n%s", got, want)
@@ -395,7 +395,7 @@ func TestTopNeedsYouEmptyQueue(t *testing.T) {
 // nothing happened.
 func TestTopEventsStrip(t *testing.T) {
 	items := busyTopModel().events
-	style := term.New(logo.Caps{})
+	style := term.New(logo.Caps{UTF8: true})
 	want := "15:02 #3 done · 15:02 #3 landed"
 	if got := topEvents(items, topNow, style, 200); len(got) != 1 || got[0] != want {
 		t.Errorf("strip = %q, want %q", got, want)
@@ -417,7 +417,7 @@ func TestTopEventsStrip(t *testing.T) {
 // stays on one line and one column less wraps.
 func TestTopEventsSeparatorWidth(t *testing.T) {
 	items := busyTopModel().events
-	style := term.New(logo.Caps{})
+	style := term.New(logo.Caps{UTF8: true})
 	const strip = "15:02 #3 done · 15:02 #3 landed"
 	if n := term.VisibleWidth(strip); n != 31 {
 		t.Fatalf("fixture strip is %d columns, want 31", n)
@@ -439,7 +439,7 @@ func TestTopEventWords(t *testing.T) {
 		return history.Item{Type: history.TypeEvent, ID: 1, Kind: kind, ProjectID: 1, TaskID: task, JobID: job,
 			Payload: []byte(payload), CreatedAt: stamp}
 	}
-	style := term.New(logo.Caps{})
+	style := term.New(logo.Caps{UTF8: true})
 	tests := []struct {
 		name string
 		item history.Item
@@ -540,7 +540,7 @@ func TestTopEventsKeptAcrossTicks(t *testing.T) {
 	if len(merged) != 2 || merged[0].ID != 11 || merged[1].ID != 12 {
 		t.Errorf("merged = %+v, want the previous strip", merged)
 	}
-	style := term.New(logo.Caps{})
+	style := term.New(logo.Caps{UTF8: true})
 	if got := topEvents(merged, topNow, style, 200); got[0] != "15:02 #3 done · 15:02 #3 landed" {
 		t.Errorf("strip = %q, want the previous tick's", got)
 	}
@@ -581,7 +581,7 @@ func TestTopClockMinutes(t *testing.T) {
 	if got := topClock("2026-10-19T15:02:45.000000000Z", topNow); got != "10-19 15:02" {
 		t.Errorf("other-day stamp = %q, want 10-19 15:02", got)
 	}
-	style := term.New(logo.Caps{})
+	style := term.New(logo.Caps{UTF8: true})
 	model := busyTopModel()
 	strip := strings.Join(topEvents(model.events, topNow, style, 200), "\n")
 	if !strings.Contains(strip, "15:02 #3 done") ||
@@ -598,7 +598,7 @@ func TestTopClockMinutes(t *testing.T) {
 // recovered in the OK style, failed and broken in the Bad style — as a
 // whole word, a status value or an event kind's last part.
 func TestTopEventItemStates(t *testing.T) {
-	style := term.New(logo.Caps{Color: logo.Color16})
+	style := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
 	tests := []struct {
 		name string
 		item history.Item
@@ -802,11 +802,11 @@ func TestTopPlansTree(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := strings.Join(topPlansTree(tt.st, topNow, term.New(logo.Caps{}), 80), "\n")
+			got := strings.Join(topPlansTree(tt.st, topNow, term.New(logo.Caps{UTF8: true}), 80), "\n")
 			if want := strings.Join(tt.want, "\n"); got != want {
 				t.Errorf("tree =\n%s\nwant\n%s", got, want)
 			}
-			if foreman, jobs := topPlanless(tt.st, topNow, term.New(logo.Caps{}), 80); len(foreman)+len(jobs) != 0 {
+			if foreman, jobs := topPlanless(tt.st, topNow, term.New(logo.Caps{UTF8: true}), 80); len(foreman)+len(jobs) != 0 {
 				t.Errorf("a plan's job is plan-less: %v %v", foreman, jobs)
 			}
 		})
@@ -817,7 +817,7 @@ func TestTopPlansTree(t *testing.T) {
 // its empty cells Dim, the finished marks OK and Bad, the line forms in
 // their colours.
 func TestTopPlansTreeColours(t *testing.T) {
-	style := term.New(logo.Caps{Color: logo.Color16})
+	style := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
 	st := api.Status{
 		Plans: []engine.StatusPlan{
 			{ID: 1, Title: "live", State: "active", Tasks: []engine.StatusTask{
@@ -848,13 +848,13 @@ func TestTopPlansTreeColours(t *testing.T) {
 
 // topPlanLines is a status's PLANS lines in plain text, without the head.
 func topPlanLines(st api.Status, width int) []string {
-	return topPlansTree(st, topNow, term.New(logo.Caps{}), width)[1:]
+	return topPlansTree(st, topNow, term.New(logo.Caps{UTF8: true}), width)[1:]
 }
 
 // topLineClass is the yield class of the PLANS line with the text.
 func topLineClass(t *testing.T, st api.Status, width int, text string) topYield {
 	t.Helper()
-	for _, l := range newTopPlans(st, false, topNow, term.New(logo.Caps{}), width) {
+	for _, l := range newTopPlans(st, false, false, topNow, term.New(logo.Caps{UTF8: true}), width) {
 		if l.text == text {
 			return l.class
 		}
@@ -917,10 +917,10 @@ func TestTopPlanTailsAlign(t *testing.T) {
 			{ID: 4, State: "cancelled"}, {ID: 5, State: "running"}, {ID: 6, State: "running"}, {ID: 7, State: "running"}}},
 		{ID: 9, RepoURL: repo, Title: "Shipped", State: "done", Tasks: []engine.StatusTask{{ID: 8, State: "done"}}},
 	}}
-	style := term.New(logo.Caps{})
+	style := term.New(logo.Caps{UTF8: true})
 	plain := func(width int) []string {
 		var out []string
-		for _, l := range newTopPlans(st, true, topNow, style, width) {
+		for _, l := range newTopPlans(st, true, false, topNow, style, width) {
 			if strings.HasPrefix(l.text, "#") {
 				out = append(out, l.text)
 			}
@@ -975,13 +975,13 @@ func TestTopPlanDoneNotLanded(t *testing.T) {
 		"  ⇡ #331 queued land  landing: queued",
 		"  ⇡ #332 bare  landing: not landed",
 	}
-	if got := topPlansTree(st, topNow, term.New(logo.Caps{}), 80)[1:]; strings.Join(got, "\n") != strings.Join(want, "\n") {
+	if got := topPlansTree(st, topNow, term.New(logo.Caps{UTF8: true}), 80)[1:]; strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("tree =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	if c := topLineClass(t, st, 80, want[1]); c != yieldHeld {
 		t.Errorf("the ⇡ line is class %d, want the held class", c)
 	}
-	dim := term.New(logo.Caps{Color: logo.Color16})
+	dim := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
 	if line := topLandingLine(tasks[2], topNow, dim, 80); line != "  "+dim.Dim("⇡ #332 bare  landing: not landed") {
 		t.Errorf("the ⇡ line is not Dim: %q", line)
 	}
@@ -999,7 +999,7 @@ func TestTopPlanDoneNotLanded(t *testing.T) {
 		p := engine.StatusPlan{ID: 8, Title: "p", State: state, Tasks: []engine.StatusTask{
 			{ID: 1, State: "done", Class: "implement", Landed: true},
 			{ID: 2, Title: "last", State: "done", Class: "implement", Landed: landed}}}
-		return topPlanLine(p, "", newTopPlanLayout([]engine.StatusPlan{p}, false, term.New(logo.Caps{}), 80), term.New(logo.Caps{}), 80)
+		return topPlanLine(p, "", newTopPlanLayout([]engine.StatusPlan{p}, false, term.New(logo.Caps{UTF8: true}), 80), term.New(logo.Caps{UTF8: true}), 80)
 	}
 	if got := last("active", false); got != "#8 p 1/2 ▓▓▓▓▓░░░░░░" {
 		t.Errorf("the bar counts a task not landed: %q", got)
@@ -1053,7 +1053,7 @@ func TestTopPlanJobLinesNameTheirTask(t *testing.T) {
 	// A task with no title keeps today's line, byte for byte.
 	st.Running = []engine.StatusJob{{ID: 42, TaskID: 334, Kind: "work", LeasedAt: leased}}
 	st.Held = nil
-	want := topRunningLine(st.Running[0], topNow, term.New(logo.Caps{}), 100)
+	want := topRunningLine(st.Running[0], topNow, term.New(logo.Caps{UTF8: true}), 100)
 	if got := topPlanLines(st, 100); got[1] != want {
 		t.Errorf("untitled task line = %q, want %q", got[1], want)
 	}
@@ -1118,7 +1118,7 @@ func TestTopPlanlessJobsHaveNoHead(t *testing.T) {
 	// between returns the view's lines from NEEDS YOU's head through
 	// PLANS's head.
 	between := func(width int, m topModel) []string {
-		lines := renderTop(m, width, 0, topNow, term.New(logo.Caps{}))
+		lines := renderTop(m, width, 0, topNow, term.New(logo.Caps{UTF8: true}))
 		from, to := -1, -1
 		for i, l := range lines {
 			if strings.HasPrefix(l, "NEEDS YOU") {
@@ -1133,9 +1133,9 @@ func TestTopPlanlessJobsHaveNoHead(t *testing.T) {
 		}
 		return lines[from : to+1]
 	}
-	head := func(title string) string { return topSectionHead(title, term.New(logo.Caps{}), 80) }
-	fline := topRunningLine(foremanJob, topNow, term.New(logo.Caps{}), 80)
-	oline := topRunningLine(otherJob, topNow, term.New(logo.Caps{}), 80)
+	head := func(title string) string { return topSectionHead(title, term.New(logo.Caps{UTF8: true}), 80) }
+	fline := topRunningLine(foremanJob, topNow, term.New(logo.Caps{UTF8: true}), 80)
+	oline := topRunningLine(otherJob, topNow, term.New(logo.Caps{UTF8: true}), 80)
 	needsLine := "! #2 should the sprocket be blue?"
 
 	t.Run("reported case", func(t *testing.T) {
@@ -1185,7 +1185,7 @@ func TestTopPlanlessJobsHaveNoHead(t *testing.T) {
 			{ID: 62, Kind: "foreman", NotBefore: nb, Reason: "could not resolve github.com"},
 			{ID: 65, Kind: "plan_review", NotBefore: nb, Reason: "dns"},
 		}
-		style := term.New(logo.Caps{})
+		style := term.New(logo.Caps{UTF8: true})
 		want := []string{head("NEEDS YOU"), "nothing needs you", "",
 			head("FOREMAN"),
 			topHeldLine(m.status.Held[0], style, 80),
@@ -1229,7 +1229,7 @@ func TestTopPlanlessJobsHaveNoHead(t *testing.T) {
 	t.Run("height budget counts the blocks", func(t *testing.T) {
 		m := busyTopModel()
 		m.status.Running = append(m.status.Running, otherJob, foremanJob)
-		style := term.New(logo.Caps{})
+		style := term.New(logo.Caps{UTF8: true})
 		full := renderTop(m, 60, 0, topNow, style)
 		if got := renderTop(m, 60, len(full), topNow, style); strings.Join(got, "\n") != strings.Join(full, "\n") {
 			t.Errorf("at the exact height lines yield:\n%s", strings.Join(got, "\n"))
@@ -1340,7 +1340,7 @@ func TestRenderTopOverflowsAShortTerminal(t *testing.T) {
 	const running = 13
 	for _, height := range []int{12, 24, 40} {
 		t.Run(fmt.Sprint(height), func(t *testing.T) {
-			lines := renderTop(m, 80, height, topNow, term.New(logo.Caps{}))
+			lines := renderTop(m, 80, height, topNow, term.New(logo.Caps{UTF8: true}))
 			got := strings.Join(lines, "\n")
 			if len(lines) > height {
 				t.Fatalf("got %d lines, want at most %d:\n%s", len(lines), height, got)
@@ -1372,8 +1372,8 @@ func TestRenderTopOverflowsAShortTerminal(t *testing.T) {
 // need, the height wins. The meters strip is the last line outside the two
 // to go, and the hard clip cuts into NEEDS YOU from its bottom.
 func TestRenderTopBelowTheFloor(t *testing.T) {
-	style := term.New(logo.Caps{})
-	header := "brigada · r · up 2h0m0s · 15:04:09"
+	style := term.New(logo.Caps{UTF8: true})
+	header := "brigada · r · up 2h0m · 15:04:09"
 	needsHead := topSectionHead("NEEDS YOU", style, 80)
 	entry := "! #2 should the sprocket be blue?"
 	queue := busyTopModel()
@@ -1411,9 +1411,9 @@ func TestRenderTopBelowTheFloor(t *testing.T) {
 // TestRenderTopFitsSize: the busy fixture at 40x10 is exactly 10 lines
 // with the header first and NEEDS YOU kept, and no line is wider than 40.
 func TestRenderTopFitsSize(t *testing.T) {
-	lines := renderTop(busyTopModel(), 40, 10, topNow, term.New(logo.Caps{}))
+	lines := renderTop(busyTopModel(), 40, 10, topNow, term.New(logo.Caps{UTF8: true}))
 	want := []string{
-		"brigada · r · up 2h0m0s · 15:04:09 ─────",
+		"brigada · r · up 2h0m · 15:04:09 ───────",
 		"SLOTS ▓▓▓░░░░░ 3/8   1 run   2 queue ...",
 		"NEEDS YOU",
 		"! #2 should the sprocket be blue?",
@@ -1537,7 +1537,7 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lines := renderTop(model, 76, tt.height, topNow, term.New(logo.Caps{}))
+			lines := renderTop(model, 76, tt.height, topNow, term.New(logo.Caps{UTF8: true}))
 			got := strings.Join(lines, "\n")
 			if len(lines) != tt.lines {
 				t.Fatalf("got %d lines, want %d:\n%s", len(lines), tt.lines, got)
@@ -1669,7 +1669,7 @@ func TestTopHeaderNamesTheScope(t *testing.T) {
 	const repo = "https://example.invalid/acme/brigada.git"
 	one := []engine.ProjectInfo{{ProjectID: 7, RepoURL: repo}}
 	two := append(one, engine.ProjectInfo{ProjectID: 8, RepoURL: "https://example.invalid/acme/other.git"})
-	up := "up 1h0m0s · 15:04:09"
+	up := "up 1h0m · 15:04:09"
 	for _, tt := range []struct {
 		name        string
 		projects    []engine.ProjectInfo
@@ -1734,7 +1734,7 @@ func TestTopPlanLineNamesItsRepo(t *testing.T) {
 // TestTopPlanTagKeepsItsCells: on a narrow line the title gives way to
 // the tag, and the line still fits; a finished plan carries the tag too.
 func TestTopPlanTagKeepsItsCells(t *testing.T) {
-	plain := term.New(logo.Caps{})
+	plain := term.New(logo.Caps{UTF8: true})
 	const repo = "https://example.invalid/acme/brigada.git"
 	live := engine.StatusPlan{ID: 101, RepoURL: repo, Title: strings.Repeat("long title ", 8), State: "active"}
 	got := topPlanLine(live, "brigada", newTopPlanLayout([]engine.StatusPlan{live}, true, plain, 50), plain, 50)
@@ -1870,7 +1870,7 @@ func TestTopProjectFailedAgentCallKeepsTheScopedStatus(t *testing.T) {
 		t.Errorf("the scoped plans did not survive:\n%s", got)
 	}
 	var out, errOut bytes.Buffer
-	if code := printTopSnapshot(context.Background(), fake, "https://example.invalid/r.git", topNow, &out, &errOut); code != 1 {
+	if code := printTopSnapshot(context.Background(), fake, "https://example.invalid/r.git", "", topNow, &out, &errOut); code != 1 {
 		t.Errorf("snapshot exit %d, want 1", code)
 	}
 }
@@ -1969,7 +1969,7 @@ func TestPrintTopSnapshot(t *testing.T) {
 		projects: []engine.ProjectInfo{{ProjectID: 7, RepoURL: "https://example.invalid/r.git"}},
 	}
 	var out, errOut bytes.Buffer
-	if code := printTopSnapshot(context.Background(), fake, "https://example.invalid/r.git", topNow, &out, &errOut); code != 0 {
+	if code := printTopSnapshot(context.Background(), fake, "https://example.invalid/r.git", "", topNow, &out, &errOut); code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut.String())
 	}
 	if !strings.HasPrefix(out.String(), "brigada · r · up ") {
@@ -1977,7 +1977,7 @@ func TestPrintTopSnapshot(t *testing.T) {
 	}
 	fake.projectsErr = errors.New("down")
 	out.Reset()
-	if code := printTopSnapshot(context.Background(), fake, "https://example.invalid/r.git", topNow, &out, &errOut); code != 1 {
+	if code := printTopSnapshot(context.Background(), fake, "https://example.invalid/r.git", "", topNow, &out, &errOut); code != 1 {
 		t.Errorf("exit %d, want 1", code)
 	}
 }
@@ -2025,7 +2025,7 @@ func TestTopSnapshotGolden(t *testing.T) {
 				page:     history.Page{Items: tc.model.events},
 			}
 			var out, errOut bytes.Buffer
-			if code := printTopSnapshot(context.Background(), fake, repo, topNow, &out, &errOut); code != 0 {
+			if code := printTopSnapshot(context.Background(), fake, repo, "", topNow, &out, &errOut); code != 0 {
 				t.Fatalf("exit %d: %s", code, errOut.String())
 			}
 			got := out.String()
@@ -2105,7 +2105,7 @@ func TestTopScreenDrawRedrawsInPlace(t *testing.T) {
 // exactly the height — the header first, no line cut, the lines that
 // still fit — and a screen taller than the content changes nothing.
 func TestRenderTopScreenHeights(t *testing.T) {
-	lines := renderTop(busyTopModel(), 60, 5, topNow, term.New(logo.Caps{}))
+	lines := renderTop(busyTopModel(), 60, 5, topNow, term.New(logo.Caps{UTF8: true}))
 	if len(lines) != 5 {
 		t.Fatalf("got %d lines, want exactly 5:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
@@ -2136,8 +2136,8 @@ func TestRenderTopScreenHeights(t *testing.T) {
 			t.Errorf("line %q is %d wide", l, n)
 		}
 	}
-	tall := renderTop(busyTopModel(), 60, 40, topNow, term.New(logo.Caps{}))
-	unbounded := renderTop(busyTopModel(), 60, 0, topNow, term.New(logo.Caps{}))
+	tall := renderTop(busyTopModel(), 60, 40, topNow, term.New(logo.Caps{UTF8: true}))
+	unbounded := renderTop(busyTopModel(), 60, 0, topNow, term.New(logo.Caps{UTF8: true}))
 	if strings.Join(tall, "\n") != strings.Join(unbounded, "\n") {
 		t.Errorf("tall screen trims:\n%s\nwant\n%s", strings.Join(tall, "\n"), strings.Join(unbounded, "\n"))
 	}
@@ -2154,10 +2154,10 @@ func shortTopModel() topModel {
 // TestTopHeaderKeysFit: the keys show only when the left part, two
 // spaces and the keys fit the width whole — a key is never cut
 // mid-word — and otherwise a dim rule fills what remains of the width.
-// busyTopModel's header left is 34 columns, so its keys fit only from
-// width 53 up.
+// busyTopModel's header left is 32 columns, so its keys fit only from
+// width 51 up.
 func TestTopHeaderKeysFit(t *testing.T) {
-	style := term.New(logo.Caps{})
+	style := term.New(logo.Caps{UTF8: true})
 	tests := []struct {
 		name  string
 		model topModel
@@ -2165,8 +2165,8 @@ func TestTopHeaderKeysFit(t *testing.T) {
 		keys  bool
 	}{
 		{"busy at 40 drops the keys", busyTopModel(), 40, false},
-		{"busy at 52 drops the keys", busyTopModel(), 52, false},
-		{"busy at 53 shows the keys", busyTopModel(), 53, true},
+		{"busy at 50 drops the keys", busyTopModel(), 50, false},
+		{"busy at 51 shows the keys", busyTopModel(), 51, true},
 		{"busy at 60 shows the keys", busyTopModel(), 60, true},
 		{"short left at 48 drops the keys", shortTopModel(), 48, false},
 		{"short left at 49 shows the keys", shortTopModel(), 49, true},
@@ -2195,7 +2195,7 @@ func TestTopHeaderKeysFit(t *testing.T) {
 // drop their rule fills and keep their titles, the lines beneath keep
 // their indentation, and at 60 the fills return.
 func TestRenderTopNarrowSectionHeads(t *testing.T) {
-	narrow := strings.Join(renderTop(busyTopModel(), 59, 0, topNow, term.New(logo.Caps{})), "\n")
+	narrow := strings.Join(renderTop(busyTopModel(), 59, 0, topNow, term.New(logo.Caps{UTF8: true})), "\n")
 	for _, head := range []string{"NEEDS YOU", "PLANS", "AGENTS"} {
 		if !strings.Contains(narrow, "\n"+head+"\n") {
 			t.Errorf("narrow view lacks the bare head %q:\n%s", head, narrow)
@@ -2205,7 +2205,7 @@ func TestRenderTopNarrowSectionHeads(t *testing.T) {
 	if !strings.Contains(narrow, "  ▸ #3 oil th... · work · claude/sonnet@high · 1m40s · Edit") {
 		t.Errorf("narrow view loses the indentation beneath a head:\n%s", narrow)
 	}
-	wide := strings.Join(renderTop(busyTopModel(), 60, 0, topNow, term.New(logo.Caps{})), "\n")
+	wide := strings.Join(renderTop(busyTopModel(), 60, 0, topNow, term.New(logo.Caps{UTF8: true})), "\n")
 	for _, head := range []string{"NEEDS YOU", "PLANS", "AGENTS"} {
 		want := head + " " + strings.Repeat("─", 60-len(head)-1)
 		if !strings.Contains(wide, want) {
@@ -2234,7 +2234,7 @@ func agentsModel() topModel {
 // the cap agrees with the folded cell; the quota cells read per state.
 func TestTopAgentsOneLinePerAgent(t *testing.T) {
 	model := agentsModel()
-	plain := term.New(logo.Caps{})
+	plain := term.New(logo.Caps{UTF8: true})
 	got := topAgents(model, topNow, plain, 100)
 	if len(got) != 5 {
 		t.Fatalf("section = %d lines, want head, 3 agents, global:\n%s", len(got), strings.Join(got, "\n"))
@@ -2259,7 +2259,7 @@ func TestTopAgentsOneLinePerAgent(t *testing.T) {
 	if got[4] != "all ≤ global 8" {
 		t.Errorf("global line = %q", got[4])
 	}
-	colour := term.New(logo.Caps{Color: logo.Color16})
+	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
 	styled := topAgents(model, topNow, colour, 100)
 	if s := term.StripEscapes(strings.Join(styled, "\n")); s != strings.Join(got, "\n") {
 		t.Errorf("styled text differs from plain:\n%s\nvs\n%s", s, strings.Join(got, "\n"))
@@ -2275,7 +2275,7 @@ func TestTopAgentsOneLinePerAgent(t *testing.T) {
 func TestTopAgentsBrokenFallbackAndCut(t *testing.T) {
 	model := agentsModel()
 	model.status.NeedsYou = model.status.NeedsYou[:1]
-	plain := term.New(logo.Caps{})
+	plain := term.New(logo.Caps{UTF8: true})
 	got := topAgents(model, topNow, plain, 100)
 	if !strings.HasSuffix(got[2], "✗ broken") {
 		t.Errorf("fallback line = %q", got[2])
@@ -2290,7 +2290,7 @@ func TestTopAgentsBrokenFallbackAndCut(t *testing.T) {
 func TestTopAgentsGlobalLineOmitted(t *testing.T) {
 	model := agentsModel()
 	model.capacity.Layers = nil
-	got := topAgents(model, topNow, term.New(logo.Caps{}), 100)
+	got := topAgents(model, topNow, term.New(logo.Caps{UTF8: true}), 100)
 	if len(got) != 4 || strings.Contains(strings.Join(got, "\n"), "all ≤") {
 		t.Errorf("section = %q", got)
 	}
@@ -2307,7 +2307,7 @@ func TestTopAgentsBudget(t *testing.T) {
 		engine.CapacityAgent{Harness: "codex", Model: "b", CapLayer: "none", Quota: "ready"})
 	model.events = nil
 	model.status.Running, model.status.Held, model.status.Plans = nil, nil, nil
-	style := term.New(logo.Caps{})
+	style := term.New(logo.Caps{UTF8: true})
 	full := renderTop(model, 76, 0, topNow, style)
 	blanks := strings.Count(strings.Join(full, "\n")+"\n", "\n\n")
 	// Without the blank lines, the next line to go is the last idle agent.
@@ -2358,7 +2358,7 @@ func TestTopAgentsBudget(t *testing.T) {
 // +N finished line, bottom of the view first, and the first fold pays for
 // the line it adds, so it gains nothing alone.
 func TestRenderTopFinishedFold(t *testing.T) {
-	style := term.New(logo.Caps{})
+	style := term.New(logo.Caps{UTF8: true})
 	model := busyTopModel()
 	for id := int64(7); id <= 8; id++ {
 		model.status.Plans = append(model.status.Plans, engine.StatusPlan{
@@ -2389,7 +2389,7 @@ func TestRenderTopFinishedFold(t *testing.T) {
 // task lines go from the last plan upward after the blank lines and
 // before the idle agents, then held and parked lines.
 func TestRenderTopQueuedYield(t *testing.T) {
-	style := term.New(logo.Caps{})
+	style := term.New(logo.Caps{UTF8: true})
 	model := busyTopModel()
 	model.status.Plans = append(model.status.Plans, engine.StatusPlan{
 		ID: 2, Title: "second", State: "active",
@@ -2490,7 +2490,7 @@ func TestTopNeedsYouTails(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := st
 			s.NeedsYou = []engine.NeedsYouItem{tt.item}
-			lines := topNeedsYou(s, tt.sole, term.New(logo.Caps{}), 120)
+			lines := topNeedsYou(s, tt.sole, term.New(logo.Caps{UTF8: true}), 120)
 			if len(lines) != 2 || lines[1] != tt.want {
 				t.Errorf("lines = %q, want the entry %q", lines, tt.want)
 			}
@@ -2504,7 +2504,7 @@ func TestTopNeedsYouTailsAlign(t *testing.T) {
 	hold := engine.NeedsYouItem{Kind: "task", ID: 312, State: "done",
 		Reason: "held by rule approval_tiers: heavy; release: brigada land approve 312; change the rule: brigada land approve --and-stop-asking 312"}
 	plan := engine.NeedsYouItem{Kind: "plan", ID: 9, State: "pending_approval", Title: "Top polish"}
-	plain := term.New(logo.Caps{})
+	plain := term.New(logo.Caps{UTF8: true})
 	st := api.Status{NeedsYou: []engine.NeedsYouItem{hold, plan}}
 	got := topNeedsYou(st, false, plain, 100)
 	want := []string{
@@ -2541,7 +2541,7 @@ func TestTopReportLine(t *testing.T) {
 			CreatedAt: "2026-10-20T15:02:41.000000000Z"},
 		model.events[1],
 	}
-	style := term.New(logo.Caps{})
+	style := term.New(logo.Caps{UTF8: true})
 	if got := strings.Join(renderTop(model, 76, 0, topNow, style), "\n"); strings.Contains(got, "report #") {
 		t.Errorf("a status with no report shows a report line:\n%s", got)
 	}
@@ -2566,7 +2566,7 @@ func TestTopReportLine(t *testing.T) {
 		t.Errorf("two lines less should drop the report line next:\n%s", got)
 	}
 	// The line is Dim and cut to width.
-	colour := term.New(logo.Caps{Color: logo.Color16})
+	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
 	lines := topReportLine(model.status, colour, 20)
 	if len(lines) != 1 || lines[0].text != colour.Dim("report #41: All l...") || lines[0].class != yieldEventsSecond {
 		t.Errorf("report line = %+v", lines)
@@ -2578,7 +2578,7 @@ func TestTopReportLine(t *testing.T) {
 // each in a dim line of the held class; a headless turn whose job runs is
 // not repeated, and a block shows when it has any line.
 func TestTopForemanAndJobsNotes(t *testing.T) {
-	plain := term.New(logo.Caps{})
+	plain := term.New(logo.Caps{UTF8: true})
 	stamp := time.Date(2026, 10, 20, 11, 10, 0, 0, time.UTC).Format(engine.TimeLayout)
 	texts := func(lines []topLine) []string {
 		var out []string
@@ -2643,7 +2643,7 @@ func TestTopForemanAndJobsNotes(t *testing.T) {
 		t.Errorf("a drain with nothing running shows blocks: %v %v", texts(foreman), texts(jobs))
 	}
 	// Dim, and no escape in the plain style.
-	colour := term.New(logo.Caps{Color: logo.Color16})
+	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
 	foreman, _ = topPlanless(api.Status{ForemanMessages: 1}, topNow, colour, 80)
 	if foreman[1].text != "  "+colour.Dim("1 message for the foreman") {
 		t.Errorf("note = %q, want Dim", foreman[1].text)
@@ -2652,7 +2652,7 @@ func TestTopForemanAndJobsNotes(t *testing.T) {
 
 // TestTopMetersZeroCountersPlain: held and needs colour only above zero.
 func TestTopMetersZeroCountersPlain(t *testing.T) {
-	style := term.New(logo.Caps{Color: logo.Color16})
+	style := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
 	model := busyTopModel()
 	model.status.Held, model.status.NeedsYou = nil, nil
 	got := topMeters(model, style, 100)[0]
@@ -2660,7 +2660,7 @@ func TestTopMetersZeroCountersPlain(t *testing.T) {
 	if got != want {
 		t.Errorf("meters = %q, want %q", got, want)
 	}
-	if plain := topMeters(model, term.New(logo.Caps{}), 100)[0]; plain != "SLOTS ▓▓▓░░░░░ 3/8   1 run   2 queue   0 held   0 needs" {
+	if plain := topMeters(model, term.New(logo.Caps{UTF8: true}), 100)[0]; plain != "SLOTS ▓▓▓░░░░░ 3/8   1 run   2 queue   0 held   0 needs" {
 		t.Errorf("plain meters = %q", plain)
 	}
 }
@@ -2681,7 +2681,7 @@ func TestTopAgentsOrderAndOff(t *testing.T) {
 		{Harness: "x", Model: "idle2", CapLayer: "none", Quota: "ready"},
 		{Harness: "x", Model: "offbusy", Cap: &zero, CapLayer: "model", Running: 1, Quota: "ready"},
 	}
-	got := topAgents(model, topNow, term.New(logo.Caps{}), 100)
+	got := topAgents(model, topNow, term.New(logo.Caps{UTF8: true}), 100)
 	var names []string
 	for _, l := range got[1 : len(got)-2] {
 		names = append(names, strings.Fields(l)[0])
@@ -2694,7 +2694,7 @@ func TestTopAgentsOrderAndOff(t *testing.T) {
 	}
 	// The global cap makes every ready, idle agent off.
 	model.capacity.Layers = []engine.CapacityLayer{{Layer: "global", Cap: &zero}}
-	got = topAgents(model, topNow, term.New(logo.Caps{}), 100)
+	got = topAgents(model, topNow, term.New(logo.Caps{UTF8: true}), 100)
 	if joined := strings.Join(got, "\n"); strings.Contains(joined, "x/idle1") || !strings.Contains(joined, "x/run") {
 		t.Errorf("a global cap of 0 should fold the idle agents out:\n%s", joined)
 	}
@@ -2704,7 +2704,7 @@ func TestTopAgentsOrderAndOff(t *testing.T) {
 // height dropped and the off ones, either part left out when zero and no
 // line when both are.
 func TestTopAgentsFoldLine(t *testing.T) {
-	plain := term.New(logo.Caps{})
+	plain := term.New(logo.Caps{UTF8: true})
 	for _, tt := range []struct {
 		idle, off int
 		want      []string
@@ -2719,10 +2719,159 @@ func TestTopAgentsFoldLine(t *testing.T) {
 			t.Errorf("idle %d off %d: fold = %q, want %q", tt.idle, tt.off, got, tt.want)
 		}
 	}
-	colour := term.New(logo.Caps{Color: logo.Color16})
+	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
 	frame := &topFrame{lines: []topLine{{fold: foldIdle, count: 1}}, foldedIdle: 1, style: colour}
 	if got := frame.texts(); len(got) != 1 || got[0] != colour.Dim("+1 idle · 1 off (brigada capacity)") {
 		t.Errorf("fold = %q, want Dim", got)
+	}
+}
+
+// TestTopUptime: the header's uptime is whole seconds under a minute,
+// whole minutes under an hour, else hours and minutes, each truncated.
+func TestTopUptime(t *testing.T) {
+	for _, tt := range []struct {
+		d    time.Duration
+		want string
+	}{
+		{-time.Second, "0s"},
+		{0, "0s"},
+		{45 * time.Second, "45s"},
+		{59*time.Second + 900*time.Millisecond, "59s"},
+		{time.Minute, "1m"},
+		{33*time.Minute + 9*time.Second, "33m"},
+		{59*time.Minute + 59*time.Second, "59m"},
+		{time.Hour, "1h0m"},
+		{2 * time.Hour, "2h0m"},
+		{11*time.Hour + 33*time.Minute + 9*time.Second, "11h33m"},
+		{49*time.Hour + 59*time.Second, "49h0m"},
+	} {
+		if got := topUptime(tt.d); got != tt.want {
+			t.Errorf("topUptime(%s) = %q, want %q", tt.d, got, tt.want)
+		}
+	}
+}
+
+// TestTopFirstRunLine: a status that came back with no plans, listed or
+// hidden, reads as a first run; one that did not come back keeps `none`.
+func TestTopFirstRunLine(t *testing.T) {
+	const first = `no plans yet: brigada ask "fix #12"`
+	const repo = "https://example.invalid/r.git"
+	projects := []engine.ProjectInfo{{ProjectID: 7, RepoURL: repo}}
+	fetched, err := topFetch(context.Background(), &fakeTop{status: quietTopModel().status, projects: projects}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plainTop(fetched, 80, 0); !strings.Contains(got, "\n"+first+"\n") || strings.Contains(got, "\nnone\n") {
+		t.Errorf("a fetched empty status lacks the first-run line:\n%s", got)
+	}
+	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
+	if lines := newTopPlans(fetched.status, false, true, topNow, colour, 80); lines[1].text != colour.Dim(first) {
+		t.Errorf("first-run line = %q, want Dim", lines[1].text)
+	}
+	// Plans hidden behind the finished ones are not a first run.
+	hidden := fetched
+	hidden.status.HiddenFinishedPlans = 2
+	if got := plainTop(hidden, 80, 0); !strings.Contains(got, "\nnone\n") || strings.Contains(got, "no plans yet") {
+		t.Errorf("hidden finished plans read as a first run:\n%s", got)
+	}
+	// A failed status fetch has said nothing; the loop's kept status neither.
+	failed, err := topFetch(context.Background(), &fakeTop{statusErr: errors.New("down"), projects: projects}, "")
+	if err == nil || failed.statusOK {
+		t.Fatalf("failed fetch: err %v, statusOK %t", err, failed.statusOK)
+	}
+	if got := plainTop(failed, 80, 0); !strings.Contains(got, "\nnone\n") || strings.Contains(got, "no plans yet") {
+		t.Errorf("a failed fetch reads as a first run:\n%s", got)
+	}
+	if got := plainTop(topModel{}, 80, 0); !strings.Contains(got, "\nnone\n") {
+		t.Errorf("a model never fetched lacks none:\n%s", got)
+	}
+	kept := failed.keepPrevious(fetched)
+	if got := plainTop(kept, 80, 0); !strings.Contains(got, "\n"+first+"\n") {
+		t.Errorf("the kept status lost its first-run line:\n%s", got)
+	}
+}
+
+// TestTopHintUnderHeader: the unregistered-models hint is a Dim line under
+// the header, in the snapshot as in the loop, the same text in plain style.
+func TestTopHintUnderHeader(t *testing.T) {
+	const hint = "2 models your CLIs offer but no agent registers: brigada agents"
+	model := busyTopModel()
+	model.hint = hint
+	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
+	if lines := topHeader(model, topNow, colour, 100); len(lines) != 2 || lines[1] != colour.Dim(hint) {
+		t.Errorf("header lines = %q, want the hint Dim", lines)
+	}
+	lines := renderTop(model, 100, 0, topNow, term.New(logo.Caps{UTF8: true}))
+	if lines[1] != hint || lines[2] != "" || !strings.HasPrefix(lines[3], "SLOTS") {
+		t.Errorf("view opens %q, want the header, the hint, a blank line and the meters", lines[:4])
+	}
+
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("LANG", "en_US.UTF-8")
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+	t.Setenv("COLUMNS", "80")
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("COLORTERM", "")
+	fake := &fakeTop{
+		status:   busyTopModel().status,
+		capacity: busyTopModel().capacity,
+		projects: []engine.ProjectInfo{{ProjectID: 7, RepoURL: "https://example.invalid/r.git"}},
+	}
+	var out, errOut bytes.Buffer
+	if code := printTopSnapshot(context.Background(), fake, "https://example.invalid/r.git", hint, topNow, &out, &errOut); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	got := strings.Split(out.String(), "\n")
+	if got[1] != hint || strings.Contains(out.String(), "\x1b") || strings.HasSuffix(strings.TrimRight(out.String(), "\n"), hint) {
+		t.Errorf("snapshot lines = %q, want the plain hint under the header and not at the bottom", got)
+	}
+}
+
+// TestRenderTopASCIIWithoutUTF8: with UTF8 off the whole frame is ASCII,
+// at 80 columns and below 60, whatever glyph the view draws.
+func TestRenderTopASCIIWithoutUTF8(t *testing.T) {
+	model := agentsModel()
+	nb := topNow.Add(5 * time.Minute).UTC().Format(engine.TimeLayout)
+	model.hint = "2 models your CLIs offer but no agent registers: brigada agents"
+	model.status.Plans[0].Tasks = append(model.status.Plans[0].Tasks,
+		engine.StatusTask{ID: 5, Title: "ship it", State: "done", Class: "implement", LandReady: "ready"},
+		engine.StatusTask{ID: 6, Title: "net", State: "ready"})
+	model.status.Retries = []engine.InfraRetry{{ID: 9, TaskID: 6, Kind: "work", NotBefore: nb, Reason: "dns"}}
+	model.status.NeedsYou = append(model.status.NeedsYou,
+		engine.NeedsYouItem{Kind: "plan", ID: 2, State: "pending_approval", Title: "Plan two"})
+	model.status.Report = &engine.StatusReport{JobID: 41, Text: "All landed."}
+	ascii := term.New(logo.Caps{})
+	for _, width := range []int{80, 50} {
+		for _, line := range renderTop(model, width, 0, topNow, ascii) {
+			for _, r := range line {
+				if r >= 0x80 {
+					t.Errorf("width %d: %q in the ASCII line %q", width, r, line)
+					break
+				}
+			}
+		}
+	}
+	got := strings.Join(renderTop(model, 80, 0, topNow, ascii), "\n")
+	for _, w := range []string{
+		"brigada | r | up 2h0m | 15:04:09 ----",
+		"q quit | p pause",
+		"SLOTS ###..... 3/8",
+		"NEEDS YOU ----",
+		"! #2 Plan two awaiting approval   -> brigada plan approve 2",
+		"#1 fix the frobnicator 1/6 #..........",
+		"  > #3 oil the gears | work | claude/sonnet@high | 1m40s | Edit",
+		"  ^ #5 ship it  landing: queued",
+		"  -> task #6 work: retry in 5m: dns",
+		"codex/gpt-5              0/8 (global)  -> 16:04",
+		"claude/sonnet-long-name  2/8 (global)  x login expired",
+		"claude/opus              1/4 (runner)  ok",
+		"all <= global 8",
+		"report #41: All landed.",
+		"15:02 #3 done | 15:02 #3 landed",
+	} {
+		if !strings.Contains(got, w) {
+			t.Errorf("ASCII view lacks %q:\n%s", w, got)
+		}
 	}
 }
 
