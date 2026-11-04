@@ -58,7 +58,7 @@ tasks:
     review_effort: medium
     caps: {restart: 0}
     skills: ["bugfix", "surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-348"
     rounds: 0
   - id: 349
@@ -100,6 +100,6 @@ tasks:
     review_effort: medium
     caps: {restart: 0}
     skills: ["surface-parity"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
