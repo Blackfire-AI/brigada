@@ -5,9 +5,9 @@
 plan: 98
 title: "Fix #166 needs-you holds only what needs the user; fix #167 worker prompt names the shell scope"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-11-03T21:51:52.59286Z
-updated: 2026-11-03T22:04:48.482191Z
+updated: 2026-11-04T05:39:24.865486Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
