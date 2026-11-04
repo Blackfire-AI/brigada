@@ -206,8 +206,9 @@ report what you did.
    brigada init --yes --signed-in claude,codex --foreman claude/sonnet \
      --agent harness=claude,model=sonnet --agent harness=codex,model=gpt-5 \
      --check 'go test ./...' --parallel 4
-5. Report the agents, the files written, and that I talk to the foreman
-   with `brigada attach`. From then on, follow `.brigada/operator.md`.
+5. Report the agents and the files written, which are mine to commit.
+   Tell me I can talk to the foreman through you or with
+   `brigada attach`. From then on, follow `.brigada/operator.md`.
 
 brigada's repository is https://github.com/Blackfire-AI/brigada; its
 README and docs/GUIDE.md answer most questions — consult them when a
