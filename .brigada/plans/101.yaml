@@ -5,9 +5,9 @@
 plan: 101
 title: "brigada top: pre-release fix pass (follow-up to #162)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-04T08:25:24.461967Z
-updated: 2026-11-04T10:46:54.715234Z
+updated: 2026-11-04T10:47:10.435533Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -42,7 +42,7 @@ tasks:
     continue: "split"
     tier: heavy
     effort: medium
-    skills: ["bugfix", "cli-flag"]
+    skills: ["bugfix"]
     state: pending
     branch: ""
     rounds: 0
@@ -120,7 +120,7 @@ tasks:
     effort: low
     review_tier: standard
     skills: ["docs-change"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 338
@@ -132,7 +132,7 @@ tasks:
     continue: "scope"
     tier: heavy
     effort: medium
-    skills: ["bugfix"]
+    skills: ["bugfix", "cli-flag"]
     state: pending
     branch: ""
     rounds: 0
