@@ -4,8 +4,8 @@
 │ ! #2 should the sprocket be blue?                                            │
 │ ! claude/sonnet-long-name ...  → brigada agent reset claude/sonnet-long-name │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ PLANS  1 live · 0 finished ───────── ■ landed  ■ done  ■ running  □ queued ─╮
-│ #1 fix the frobnicator                                             ■■■□  1/4 │
+╭─ PLANS  1 live · 0 finished ───────── ■ landed  ▣ done  ◆ running  □ queued ─╮
+│ #1 fix the frobnicator                                             ■!◆□  1/4 │
 │   ▸ #3  oil the gears     work  claude/sonnet@high  1m40s  Edit              │
 │   ! #2 wire the sprocket should the sprocket be blue?                        │
 │   ? #4  polish the knobs  held: waiting for a runner slot                    │

@@ -1274,33 +1274,55 @@ func topHeldRow(h engine.HeldJob, title string, style term.Style) *topJobRow {
 // topPlanCells is a live plan's progress, one cell per task in task order,
 // cancelled and retired tasks left out: landed OK, or done of a class that
 // never lands; done and not landed teal; running (the task has a job in
-// running) Accent; parked Bad; any other task an empty cell in Dim.
+// running) Accent; parked Bad; any other task an empty cell in Dim. Without
+// colour or UTF-8 each state has a glyph of its own (topPlanGlyphs).
 func topPlanCells(p engine.StatusPlan, running map[int64]bool, style term.Style) string {
+	g := topPlanGlyphs(style)
 	var cells strings.Builder
 	for _, t := range p.Tasks {
 		switch {
 		case t.State == "cancelled" || t.State == "retired":
 		case t.State == "done" && (t.Landed || t.LandedLabel() == ""):
-			cells.WriteString(style.OK(style.Filled()))
+			cells.WriteString(style.OK(g.landed))
 		case t.State == "done":
-			cells.WriteString(style.Teal(style.Filled()))
+			cells.WriteString(style.Teal(g.done))
 		case running[t.ID]:
-			cells.WriteString(style.Accent(style.Filled()))
+			cells.WriteString(style.Accent(g.running))
 		case t.State == "needs_foreman" || t.State == "needs_user" || t.State == "failed":
-			cells.WriteString(style.Bad(style.Filled()))
+			cells.WriteString(style.Bad(g.parked))
 		default:
-			cells.WriteString(style.Dim(style.Empty()))
+			cells.WriteString(style.Dim(g.queued))
 		}
 	}
 	return cells.String()
 }
 
+// topPlanGlyph is the glyph of each plan-cell state.
+type topPlanGlyph struct{ landed, done, running, queued, parked string }
+
+// topPlanGlyphs picks the glyphs for the plan cells and the legend. With
+// colour and UTF-8 the states tell apart by colour and share the progress
+// cells; with no colour, or with no UTF-8, each has its own glyph: `#` `=`
+// `>` `.` `!` in ASCII, `■` `▣` `◆` `□` `!` in Unicode.
+func topPlanGlyphs(style term.Style) topPlanGlyph {
+	ascii := style.Filled() == "#"
+	switch {
+	case ascii:
+		return topPlanGlyph{"#", "=", ">", ".", "!"}
+	case !style.Colour():
+		return topPlanGlyph{"■", "▣", "◆", "□", "!"}
+	}
+	return topPlanGlyph{style.Filled(), style.Filled(), style.Filled(), style.Empty(), style.Filled()}
+}
+
 // topPlanLegend is the PLANS border's key to the cells, each in its colour.
+// It holds four states; a parked task shows in the cells only.
 func topPlanLegend(style term.Style) string {
-	return style.OK(style.Filled()) + style.Dim(" landed") + "  " +
-		style.Teal(style.Filled()) + style.Dim(" done") + "  " +
-		style.Accent(style.Filled()) + style.Dim(" running") + "  " +
-		style.Dim(style.Empty()) + style.Dim(" queued")
+	g := topPlanGlyphs(style)
+	return style.OK(g.landed) + style.Dim(" landed") + "  " +
+		style.Teal(g.done) + style.Dim(" done") + "  " +
+		style.Accent(g.running) + style.Dim(" running") + "  " +
+		style.Dim(g.queued) + style.Dim(" queued")
 }
 
 // topTaskLine is a live task's line when no job speaks for it: a column

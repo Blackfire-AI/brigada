@@ -3,7 +3,7 @@
 ╭─ NEEDS YOU ──────────────────────────────────────────────────────────────────╮
 │ ✓ nothing needs you                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ PLANS  0 live · 0 finished ───────── ■ landed  ■ done  ■ running  □ queued ─╮
+╭─ PLANS  0 live · 0 finished ───────── ■ landed  ▣ done  ◆ running  □ queued ─╮
 │ no plans yet. Give the foreman something to do:                              │
 │                                                                              │
 │   $ brigada ask "fix #12"                                                    │

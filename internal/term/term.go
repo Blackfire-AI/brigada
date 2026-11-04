@@ -39,6 +39,9 @@ func (s Style) wrap(text, color16, color256, trueColor string) string {
 	return escape + text + reset
 }
 
+// Colour reports whether the style paints with colour.
+func (s Style) Colour() bool { return s.caps.Color != logo.NoColor }
+
 // Bold emphasizes text when color is enabled.
 func (s Style) Bold(text string) string {
 	return s.wrap(text, "\x1b[1m", "\x1b[1m", "\x1b[1m")
