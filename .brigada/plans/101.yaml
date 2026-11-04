@@ -95,8 +95,8 @@ tasks:
     continue: "needs"
     effort: medium
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-335"
     rounds: 0
   - id: 336
     name: "frame2"
