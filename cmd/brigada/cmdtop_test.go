@@ -258,12 +258,11 @@ func TestTopHeaderRuleAndKeys(t *testing.T) {
 	if got := term.VisibleWidth(lines[0]); got != 80 {
 		t.Errorf("header is %d wide, want 80", got)
 	}
-	keys := "paused; p resumes, q quits"
-	right = "15:04:09   " + keys
+	// Pausing leaves the keys alone: the band says p resumes.
 	paused := busyTopModel()
 	paused.paused = true
-	if got := topHeader(paused, topNow, style, 80)[0]; got != left+strings.Repeat(" ", 80-term.VisibleWidth(left)-term.VisibleWidth(right))+right {
-		t.Errorf("paused header = %q", got)
+	if got := topHeader(paused, topNow, style, 80)[0]; got != want {
+		t.Errorf("paused header = %q, want %q", got, want)
 	}
 }
 
@@ -1619,8 +1618,9 @@ func TestRenderTopOverflowsAShortTerminal(t *testing.T) {
 			if len(lines) > height {
 				t.Fatalf("got %d lines, want at most %d:\n%s", len(lines), height, got)
 			}
-			if !strings.HasPrefix(lines[0], " ▙ brigada   r · up") || !strings.Contains(lines[1], "engine: connection refused") {
-				t.Errorf("the header and its error line are not first:\n%s", got)
+			if !strings.HasPrefix(lines[0], " ▙ brigada   r ") || strings.Contains(lines[0], "up ") ||
+				!strings.HasPrefix(lines[1], " ✗ engine: connection refused") && !strings.HasPrefix(lines[2], " ✗ engine: connection refused") {
+				t.Errorf("the header and its error band are not first:\n%s", got)
 			}
 			for _, w := range []string{"2 models offered", "NEEDS YOU", "! #1 question 1", "! #2 question 2", "! #3 question 3", "+2 more"} {
 				if !strings.Contains(got, w) {
@@ -1940,7 +1940,7 @@ func TestTopHeaderNamesTheScope(t *testing.T) {
 		{"project flag", two, nil, repo, mark + "brigada · up 1h0m "},
 		{"one project", one, nil, "", mark + "brigada · up 1h0m "},
 		{"two projects", two, nil, "", mark + "2 projects · up 1h0m "},
-		{"failed projects", nil, errors.New("projects down"), "", mark + "up 1h0m "},
+		{"failed projects", nil, errors.New("projects down"), "", mark},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := &fakeTop{status: ownProjectStatus(), projects: tt.projects, projectsErr: tt.projectsErr}
@@ -1955,8 +1955,8 @@ func TestTopHeaderNamesTheScope(t *testing.T) {
 			if !strings.Contains(got, "own project plan") {
 				t.Errorf("the plans did not render:\n%s", got)
 			}
-			if tt.projectsErr != nil && !strings.Contains(got, "engine: projects down") {
-				t.Errorf("no error line:\n%s", got)
+			if tt.projectsErr != nil && (!strings.Contains(got, "✗ engine: projects down") || strings.Contains(got, "ENGINE UNREACHABLE")) {
+				t.Errorf("no error band:\n%s", got)
 			}
 		})
 	}
@@ -3311,19 +3311,26 @@ func TestTopUptime(t *testing.T) {
 // TestTopFirstRunLine: a status that came back with no plans, listed or
 // hidden, reads as a first run; one that did not come back keeps `none`.
 func TestTopFirstRunLine(t *testing.T) {
-	const first = `no plans yet: brigada ask "fix #12"`
+	const first = "no plans yet. Give the foreman something to do:"
+	const rows = first + "\n\n  $ brigada ask \"fix #12\"\n\nPlans and tasks appear here. What needs you shows above.\n"
 	const repo = "https://example.invalid/r.git"
 	projects := []engine.ProjectInfo{{ProjectID: 7, RepoURL: repo}}
 	fetched, err := topFetch(context.Background(), &fakeTop{status: quietTopModel().status, projects: projects}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := unboxTop(fetched, 80, 0); !strings.Contains(got, "\n"+first+"\n") || strings.Contains(got, "\nnone\n") {
-		t.Errorf("a fetched empty status lacks the first-run line:\n%s", got)
+	if got := unboxTop(fetched, 80, 0); !strings.Contains(got, "\n"+rows) || strings.Contains(got, "\nnone\n") || !strings.Contains(got, "\nno events yet\n") {
+		t.Errorf("a fetched empty status lacks the first-run rows:\n%s", got)
 	}
 	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
-	if lines := newTopPlans(fetched.status, false, true, topNow, colour, 80); lines[1].text != colour.Dim(first) {
-		t.Errorf("first-run line = %q, want Dim", lines[1].text)
+	lines := newTopPlans(fetched.status, false, true, topNow, colour, 80)
+	if len(lines) != 7 || lines[1].text != first || lines[5].text != colour.Dim("Plans and tasks appear here. What needs you shows above.") {
+		t.Errorf("first-run rows = %+v", lines)
+	}
+	for _, l := range lines[1:6] {
+		if l.class != yieldRest {
+			t.Errorf("first-run row %q yields in class %d, want h", l.text, l.class)
+		}
 	}
 	// Plans hidden behind the finished ones are not a first run.
 	hidden := fetched
@@ -3345,6 +3352,326 @@ func TestTopFirstRunLine(t *testing.T) {
 	kept := failed.keepPrevious(fetched)
 	if got := unboxTop(kept, 80, 0); !strings.Contains(got, "\n"+first+"\n") {
 		t.Errorf("the kept status lost its first-run line:\n%s", got)
+	}
+}
+
+// topFinishedModel is a fetched status whose only plans are finished.
+func topFinishedModel() topModel {
+	m := busyTopModel()
+	m.statusOK = true
+	m.status.Running, m.status.Held, m.status.NeedsYou = nil, nil, nil
+	m.status.Plans = []engine.StatusPlan{
+		{ID: 1, Title: "fix the frobnicator", State: "done"},
+		{ID: 2, Title: "oil the gears", State: "cancelled"},
+	}
+	return m
+}
+
+// TestTopIdlePlans: with plans and none live the PLANS note reads `none live
+// · N finished`, the finished plans show as their lines and a Dim idle row
+// names the newest landing; with no landing kept the row is left out, and
+// with only hidden finished plans the box keeps `none`. The idle row yields
+// with the finished lines.
+func TestTopIdlePlans(t *testing.T) {
+	m := topFinishedModel()
+	got := unboxTop(m, 80, 0)
+	for _, w := range []string{"PLANS  none live · 2 finished", "#1 fix the frobnicator", "#2 oil the gears", "idle: last work landed 15:02\n"} {
+		if !strings.Contains(got, w) {
+			t.Errorf("idle view lacks %q:\n%s", w, got)
+		}
+	}
+	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
+	lines := topPlansBox(m.status, false, true, m.events, topNow, colour, 76)
+	if last := lines[len(lines)-2]; last.text != colour.Dim("idle: last work landed 15:02") || last.class != yieldFinished {
+		t.Errorf("idle row = %+v, want Dim in the finished class", last)
+	}
+	// The newest landing wins.
+	m.events = append(m.events, history.Item{Type: history.TypeEvent, ID: 13, Kind: "task_landed", ProjectID: 1, TaskID: 4,
+		Payload: []byte(`{"branch":"main","pushed":"pushed"}`), CreatedAt: "2026-10-20T15:03:00.000000000Z"})
+	if got := unboxTop(m, 80, 0); !strings.Contains(got, "landed 15:03\n") {
+		t.Errorf("idle row is not the newest landing:\n%s", got)
+	}
+	// No landing kept: no idle row.
+	m.events = m.events[1:2]
+	if got := unboxTop(m, 80, 0); strings.Contains(got, "idle:") || !strings.Contains(got, "none live · 2 finished") {
+		t.Errorf("idle row without a landing:\n%s", got)
+	}
+	// Only hidden finished plans: no row, so the box keeps none.
+	hidden := topFinishedModel()
+	hidden.events = hidden.events[1:2]
+	hidden.status.Plans, hidden.status.HiddenFinishedPlans = nil, 3
+	if got := unboxTop(hidden, 80, 0); !strings.Contains(got, "none live · 3 finished\nnone\n") || strings.Contains(got, "no plans yet") {
+		t.Errorf("hidden-only view:\n%s", got)
+	}
+	hidden = topFinishedModel()
+	hidden.status.Plans, hidden.status.HiddenFinishedPlans = nil, 3
+	if got := unboxTop(hidden, 80, 0); !strings.Contains(got, "none live · 3 finished\nidle: last work landed 15:02\n") {
+		t.Errorf("hidden-only view with a landing:\n%s", got)
+	}
+}
+
+// topErrorModel is a model whose last good fetch was 42s before topNow.
+func topErrorModel(dial bool) topModel {
+	m := busyTopModel()
+	m.statusOK = true
+	m.fetchedAt = topNow.Add(-42 * time.Second)
+	m.dialFailed = dial
+	m.err = errors.New("connection refused")
+	return m
+}
+
+// bandOf is the line of a frame that holds marker.
+func bandOf(t *testing.T, lines []string, marker string) string {
+	t.Helper()
+	for _, l := range lines {
+		if strings.Contains(l, marker) {
+			return l
+		}
+	}
+	t.Fatalf("no line holds %q:\n%s", marker, strings.Join(lines, "\n"))
+	return ""
+}
+
+// TestTopErrorBand: a failed dial shows `✗ ENGINE UNREACHABLE` with the age of
+// the data and `brigada start` at the right edge; a fetch error from a running
+// engine shows `✗ engine: <text>` with no action; with no good fetch the age
+// is `no data yet`. The middle part goes before the first is cut, ASCII says
+// `x`, and the band reads the same in plain style.
+func TestTopErrorBand(t *testing.T) {
+	plain := term.New(logo.Caps{UTF8: true})
+	dial := renderTop(topErrorModel(true), 90, 0, topNow, plain)
+	want := " ✗ ENGINE UNREACHABLE   retrying · data is 42s old" + strings.Repeat(" ", 90-1-20-3-26-13-1) + "brigada start "
+	if got := bandOf(t, dial, "ENGINE"); got != want {
+		t.Errorf("dial band = %q, want %q", got, want)
+	}
+	if strings.Contains(strings.Join(dial, "\n"), "engine: ") {
+		t.Errorf("the old engine line shows:\n%s", strings.Join(dial, "\n"))
+	}
+	fetch := renderTop(topErrorModel(false), 90, 0, topNow, plain)
+	want = " ✗ engine: connection refused   retrying · data is 42s old" + strings.Repeat(" ", 90-1-28-3-26)
+	got := bandOf(t, fetch, "engine: ")
+	if got != want || strings.Contains(strings.Join(fetch, "\n"), "brigada start") {
+		t.Errorf("fetch band = %q, want %q and no action", got, want)
+	}
+	nodata := topErrorModel(true)
+	nodata.fetchedAt = time.Time{}
+	if got := bandOf(t, renderTop(nodata, 90, 0, topNow, plain), "ENGINE"); !strings.Contains(got, "retrying · no data yet") {
+		t.Errorf("no-data band = %q", got)
+	}
+	// Tight: the middle part goes first, then the first part is cut.
+	if got := bandOf(t, renderTop(topErrorModel(true), 50, 0, topNow, plain), "ENGINE"); got != " ✗ ENGINE UNREACHABLE"+strings.Repeat(" ", 50-1-20-13-1)+"brigada start " {
+		t.Errorf("tight dial band = %q", got)
+	}
+	long := topErrorModel(false)
+	long.err = errors.New(strings.Repeat("down ", 20))
+	if got := bandOf(t, renderTop(long, 40, 0, topNow, plain), "engine: "); term.VisibleWidth(got) != 40 || !strings.Contains(got, "...") || strings.Contains(got, "retrying") {
+		t.Errorf("cut band = %q", got)
+	}
+	ascii := renderTop(topErrorModel(true), 90, 0, topNow, term.New(logo.Caps{}))
+	if got := bandOf(t, ascii, "ENGINE"); !strings.HasPrefix(got, " x ENGINE UNREACHABLE   retrying | data is 42s old") {
+		t.Errorf("ASCII band = %q", got)
+	}
+}
+
+// TestTopErrorDimsEverythingBelow: while the fetch fails every line under the
+// band is the one Dim colour with no tint, NEEDS YOU's red and the family
+// colours included; the header keeps its mark's colour and has a Bad clock
+// and no uptime, and the band is solid Bad.
+func TestTopErrorDimsEverythingBelow(t *testing.T) {
+	m := topErrorModel(true)
+	m.status.Running[0].Model = "sonnet"
+	for _, caps := range []logo.Caps{
+		{Color: logo.Color16, UTF8: true},
+		{Color: logo.Color256, UTF8: true},
+		{Color: logo.TrueColor, UTF8: true},
+	} {
+		style := term.New(caps)
+		lines := renderTop(m, 100, 0, topNow, style)
+		band := style.BandBad("")
+		open := strings.TrimSuffix(band, "\x1b[0m")
+		bandAt := -1
+		for i, l := range lines {
+			switch {
+			case i == 0:
+				if !strings.Contains(l, style.Bad("15:04:09")) || strings.Contains(l, "up ") || !strings.HasPrefix(l, " "+style.OneLine()) {
+					t.Errorf("depth %d header = %q", caps.Color, l)
+				}
+			case strings.HasPrefix(l, open):
+				bandAt = i
+				if !strings.Contains(l, style.Bold("brigada start")) {
+					t.Errorf("band = %q lacks the Bold action", l)
+				}
+			case l == "":
+			default:
+				if l != style.Dim(term.StripEscapes(l)) {
+					t.Errorf("depth %d line %d = %q, want one Dim colour", caps.Color, i, l)
+				}
+			}
+		}
+		if bandAt < 0 {
+			t.Errorf("depth %d: no band in the frame", caps.Color)
+		}
+	}
+}
+
+// TestTopPausedBand: a pause shows a solid Warn band with the pause time and
+// the right-edge `p resumes`; the keys stay `q quit  p pause`, the sections
+// keep their colours and tints, the job ages stop while the header clock and
+// uptime run on; an error shows over a pause.
+func TestTopPausedBand(t *testing.T) {
+	plain := term.New(logo.Caps{UTF8: true})
+	m := busyTopModel()
+	m.statusOK = true
+	m.paused, m.pausedAt = true, topNow
+	later := topNow.Add(30 * time.Second)
+	lines := renderTop(m, 90, 0, later, plain)
+	want := " || PAUSED   at 15:04:09 · ages frozen" + strings.Repeat(" ", 90-1-9-3-25-9-1) + "p resumes "
+	if got := bandOf(t, lines, "PAUSED"); got != want {
+		t.Errorf("paused band = %q, want %q", got, want)
+	}
+	got := strings.Join(lines, "\n")
+	for _, w := range []string{"15:04:39   q quit  p pause", "up 2h0m", "1m40s"} {
+		if !strings.Contains(got, w) {
+			t.Errorf("paused view lacks %q:\n%s", w, got)
+		}
+	}
+	if strings.Contains(got, "paused; p resumes") || strings.Contains(got, "2m10s") {
+		t.Errorf("paused view:\n%s", got)
+	}
+	m.paused, m.pausedAt = false, time.Time{}
+	if got := strings.Join(renderTop(m, 90, 0, later, plain), "\n"); !strings.Contains(got, "2m10s") || strings.Contains(got, "PAUSED") {
+		t.Errorf("running view:\n%s", got)
+	}
+	// Sections keep their colours and tints.
+	m.paused, m.pausedAt = true, topNow
+	style := term.New(logo.Caps{Color: logo.TrueColor, UTF8: true})
+	lines = renderTop(m, 100, 0, topNow, style)
+	if got := bandOf(t, lines, "PAUSED"); !strings.HasPrefix(got, "\x1b[48;2;255;215;95;38;2;17;17;17m") || !strings.Contains(got, style.Bold("p resumes")) {
+		t.Errorf("paused band = %q", got)
+	}
+	if got := bandOf(t, lines, "should the sprocket"); !strings.Contains(got, "\x1b[48;2;59;20;24m") {
+		t.Errorf("NEEDS YOU lost its tint: %q", got)
+	}
+	if got := lines[0]; strings.Contains(got, style.Bad("15:04:09")) || !strings.HasPrefix(got, " "+style.OneLine()) {
+		t.Errorf("paused header = %q", got)
+	}
+	// Error over paused.
+	m.err, m.dialFailed = errors.New("down"), true
+	both := strings.Join(renderTop(m, 90, 0, topNow, plain), "\n")
+	if !strings.Contains(both, "ENGINE UNREACHABLE") || strings.Contains(both, "PAUSED") {
+		t.Errorf("error over paused:\n%s", both)
+	}
+}
+
+// TestTopErrorSequence: a failed dial, then a good dial whose fetch fails,
+// reads as a fetch error from a running engine — no `brigada start`, no
+// ENGINE UNREACHABLE; a clean fetch clears the band and sets the good time; a
+// failed fetch keeps the last good time and the pause carries across.
+func TestTopErrorSequence(t *testing.T) {
+	plain := term.New(logo.Caps{UTF8: true})
+	model := busyTopModel()
+	model.statusOK = true
+	model = afterFetch(topModel{}, model, nil, topNow.Add(-time.Minute))
+	model = model.afterDial(errors.New("cannot reach the engine"))
+	if !model.dialFailed || model.err == nil || model.status.Pid != 4242 {
+		t.Fatalf("after a failed dial: %+v", model)
+	}
+	got := plainTop(model, 100, 0)
+	if !strings.Contains(got, "ENGINE UNREACHABLE") || !strings.Contains(got, "data is 1m old") {
+		t.Errorf("failed dial:\n%s", got)
+	}
+	model = model.afterDial(nil)
+	model = afterFetch(model, topModel{}, errors.New("status: 500"), topNow)
+	if model.dialFailed || !model.fetchedAt.Equal(topNow.Add(-time.Minute)) {
+		t.Fatalf("after the failed fetch: dialFailed %t, fetchedAt %s", model.dialFailed, model.fetchedAt)
+	}
+	got = strings.Join(renderTop(model, 100, 0, topNow, plain), "\n")
+	if !strings.Contains(got, "✗ engine: status: 500") || strings.Contains(got, "brigada start") || strings.Contains(got, "ENGINE UNREACHABLE") {
+		t.Errorf("fetch error after a dial failure:\n%s", got)
+	}
+	if !strings.Contains(got, "data is 1m old") || !strings.Contains(got, "claude/opus") {
+		t.Errorf("the age or the kept data is missing:\n%s", got)
+	}
+	fresh := busyTopModel()
+	fresh.statusOK = true
+	model = afterFetch(model, fresh, nil, topNow)
+	if model.err != nil || !model.fetchedAt.Equal(topNow) || strings.Contains(plainTop(model, 100, 0), "retrying") {
+		t.Errorf("after a clean fetch: err %v, fetchedAt %s", model.err, model.fetchedAt)
+	}
+	model = model.togglePause(topNow)
+	if !model.paused || !model.pausedAt.Equal(topNow) {
+		t.Fatalf("paused: %+v", model)
+	}
+	model = afterFetch(model, fresh, nil, topNow)
+	if !model.paused || !model.pausedAt.Equal(topNow) {
+		t.Errorf("the pause did not carry across the fetch")
+	}
+	if model = model.togglePause(topNow.Add(time.Second)); model.paused || !model.pausedAt.IsZero() {
+		t.Errorf("resumed: %+v", model)
+	}
+}
+
+// TestTopBandFramesFit: in each state (running, first run, idle, dial error,
+// fetch error, paused, error over paused) at 12, 24 and 40 rows and 60, 80,
+// 100 and 120 columns, no frame is taller or wider than the terminal; the
+// styled frames read as the plain one; NO_COLOR has no escape; the ASCII frame
+// has no Unicode; and the header and NEEDS YOU survive.
+func TestTopBandFramesFit(t *testing.T) {
+	states := map[string]topModel{}
+	running := crowdedTopModel()
+	running.statusOK = true
+	states["running"] = running
+	states["first run"] = topModel{statusOK: true, scope: "r", status: api.Status{StartedAt: busyTopModel().status.StartedAt}}
+	states["idle"] = topFinishedModel()
+	states["dial"] = topErrorModel(true)
+	states["fetch"] = topErrorModel(false)
+	paused := crowdedTopModel()
+	paused.statusOK, paused.paused, paused.pausedAt = true, true, topNow
+	states["paused"] = paused
+	both := paused
+	both.err, both.dialFailed, both.fetchedAt = errors.New("down"), true, topNow.Add(-5*time.Second)
+	states["both"] = both
+	plain := term.New(logo.Caps{UTF8: true})
+	for name, m := range states {
+		for _, height := range []int{12, 24, 40} {
+			for _, width := range []int{60, 80, 100, 120} {
+				base := renderTop(m, width, height, topNow, plain)
+				if len(base) > height {
+					t.Errorf("%s %dx%d: %d lines", name, width, height, len(base))
+				}
+				for _, l := range base {
+					if term.VisibleWidth(l) > width {
+						t.Errorf("%s %dx%d: line %q is wider", name, width, height, l)
+					}
+				}
+				if !strings.Contains(base[0], "brigada") || !strings.Contains(strings.Join(base, "\n"), "NEEDS YOU") {
+					t.Errorf("%s %dx%d: header or NEEDS YOU lost:\n%s", name, width, height, strings.Join(base, "\n"))
+				}
+				for _, caps := range []logo.Caps{
+					{Color: logo.NoColor, UTF8: true},
+					{Color: logo.Color16, UTF8: true},
+					{Color: logo.Color256, UTF8: true},
+					{Color: logo.TrueColor, UTF8: true},
+				} {
+					styled := renderTop(m, width, height, topNow, term.New(caps))
+					if a, b := term.StripEscapes(strings.Join(styled, "\n")), strings.Join(base, "\n"); a != b {
+						t.Errorf("%s %dx%d depth %d: styled text differs:\n%s\nvs\n%s", name, width, height, caps.Color, a, b)
+					}
+					if caps.Color == logo.NoColor && strings.Contains(strings.Join(styled, "\n"), "\x1b") {
+						t.Errorf("%s %dx%d: NO_COLOR frame has escapes", name, width, height)
+					}
+				}
+				ascii := renderTop(m, width, height, topNow, term.New(logo.Caps{}))
+				if len(ascii) > height {
+					t.Errorf("%s %dx%d ASCII: %d lines", name, width, height, len(ascii))
+				}
+				for _, l := range ascii {
+					if term.VisibleWidth(l) > width || len(l) != utf8.RuneCountInString(l) {
+						t.Errorf("%s %dx%d ASCII line %q", name, width, height, l)
+					}
+				}
+			}
+		}
 	}
 }
 
