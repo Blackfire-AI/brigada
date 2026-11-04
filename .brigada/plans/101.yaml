@@ -5,9 +5,9 @@
 plan: 101
 title: "brigada top: pre-release fix pass (follow-up to #162)"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: needs_foreman
 created: 2026-11-04T08:25:24.461967Z
-updated: 2026-11-04T09:00:29.174257Z
+updated: 2026-11-04T09:27:58.669719Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
