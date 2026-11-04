@@ -17,7 +17,8 @@ in chat is lost to them.
 - A bug or small feature: an issue number or a one-paragraph statement is
   enough; the foreman reads the code itself, and this repository's issues
   and pull requests with `issue_read`. Put the text of anything elsewhere
-  into the ask.
+  into the ask. A failed check's event holds only the end of its log; the
+  foreman reads the whole with `check_log`.
 - Push what the ask cites: unpushed work is invisible to them.
 
 ## 2. The message
@@ -53,10 +54,12 @@ attach` only when the plan needs discussion; detach writes the session back.
   commands. Report the plan table and the foreman's estimate, then stop.
   Never approve for them; `--and-stop-asking`, tags, releases, landing by
   hand and rule changes are theirs too.
-- Poll in the background (exit on `pending_approval`, `needs_user` or a held
-  gate), report once. No foreground sleeps.
-- `needs_foreman` is the foreman's; `needs_user` and a held gate are the
-  user's. Everything else is a report, not a question.
+- Poll in the background (exit on `pending_approval` or a held gate), report
+  once. No foreground sleeps.
+- `needs_foreman` is the foreman's; a held gate is the user's. The foreman
+  reaches the user through its report — `ask_user` parks nothing — and the
+  user answers with `brigada ask`. Everything else is a report, not a
+  question.
 
 ## 4. Landing
 

@@ -313,11 +313,14 @@ func TestDiffAgentsCoversTheDefaultModel(t *testing.T) {
 func TestTopHeaderShowsTheAgentsHint(t *testing.T) {
 	style := term.New(logo.Caps{})
 	hint := "2 models your CLIs offer but no agent registers: brigada agents"
-	lines := topHeader(topModel{hint: hint}, time.Now(), style, 80)
-	if len(lines) != 2 || lines[1] != hint {
-		t.Fatalf("header = %q", lines)
+	lines := topHint(topModel{hint: hint}, style, 80)
+	if len(lines) != 1 || lines[0] != hint {
+		t.Fatalf("hint = %q", lines)
 	}
-	if lines := topHeader(topModel{}, time.Now(), style, 80); len(lines) != 1 {
-		t.Fatalf("header without a hint = %q", lines)
+	if lines := topHint(topModel{}, style, 80); len(lines) != 0 {
+		t.Fatalf("hint without one = %q", lines)
+	}
+	if rows := topHeader(topModel{hint: hint}, time.Now(), style, 80); len(rows) != 1 {
+		t.Fatalf("header = %q, want the hint under the meters row, not in it", rows)
 	}
 }

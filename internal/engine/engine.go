@@ -562,9 +562,28 @@ func capError(kind Kind, limit time.Duration) string {
 	return fmt.Sprintf("hard cap exceeded: %s jobs are capped at %s", kind, capText(limit))
 }
 
+// noteBound is the most bytes a release reason keeps.
+const noteBound = 500
+
 // boundNote keeps a release reason to 500 bytes.
 func boundNote(s string) string {
-	return cutRune(s, 500)
+	return cutRune(s, noteBound)
+}
+
+// tailNote keeps the last max bytes of s, for a log whose end holds the
+// failure. The cut moves forward to a rune boundary.
+func tailNote(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	if max <= 0 {
+		return ""
+	}
+	s = s[len(s)-max:]
+	for len(s) > 0 && !utf8.RuneStart(s[0]) {
+		s = s[1:]
+	}
+	return s
 }
 
 // boundReport keeps a foreman report to about 4 KB (§3, §10): the event

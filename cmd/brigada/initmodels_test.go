@@ -234,7 +234,6 @@ func TestInitCodexCatalog(t *testing.T) {
 
 func TestInitCodexDiscoverySafety(t *testing.T) {
 	t.Chdir(t.TempDir())
-	shortenHarnessTimeout(t)
 	const root = "  debug  Diagnostic tools"
 	const debug = "  models  Render the raw model catalog as JSON"
 	const bundledHelp = "      --bundled  Skip refresh"
@@ -260,6 +259,11 @@ func TestInitCodexDiscoverySafety(t *testing.T) {
 		{"bundled after timeout", root, debug, bundledHelp, "exec /bin/sleep 10", catalog, true, discoveryCalls + "codex debug models --help\ncodex debug models --bundled\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			// Only the deliberate hang needs the short timeout; every other
+			// case runs on the default, so a slow script start cannot fail it.
+			if tc.name == "bundled after timeout" {
+				shortenHarnessTimeout(t)
+			}
 			calls := fakeInitPATH(t, "codex")
 			writeInitCodexScript(t, tc.root, tc.debug, tc.help, tc.refresh, tc.bundled)
 			start := time.Now()
@@ -504,12 +508,16 @@ func TestInitOpenCodeDiscoverySafety(t *testing.T) {
 	}
 }
 
-// shortenHarnessTimeout makes a discovery call that hangs give up at once:
-// the fixtures answer in milliseconds, so only the deliberate hang meets it.
+// shortenHarnessTimeout makes a discovery call that hangs give up in a
+// couple of seconds, well under the tests' 6-second bound. Call it inside
+// the subtest that hangs on purpose, not for a whole test: every fake call
+// under it must still start within the timeout, so a busy machine can fail
+// a case that shares it. The value is long enough for the fast fixtures to
+// start and short enough that the fake's 10-second sleep outlasts it.
 func shortenHarnessTimeout(t *testing.T) {
 	t.Helper()
 	old := harnessCommandTimeout
-	harnessCommandTimeout = 500 * time.Millisecond
+	harnessCommandTimeout = 2 * time.Second
 	t.Cleanup(func() { harnessCommandTimeout = old })
 }
 
