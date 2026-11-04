@@ -250,11 +250,21 @@ func TestTopHeaderRowOne(t *testing.T) {
 	if got := topHeader(busyTopModel(), topNow, style, 80); got != want {
 		t.Errorf("header = %q, want %q", got, want)
 	}
+	// The keys stay the same while paused; the band says what resumes.
 	paused := busyTopModel()
 	paused.paused = true
-	keys := "15:04:09   paused; p resumes, q quits"
-	if got := topHeader(paused, topNow, style, 80); got != left+strings.Repeat(" ", 80-term.VisibleWidth(left)-term.VisibleWidth(keys))+keys {
-		t.Errorf("paused header = %q", got)
+	if got := topHeader(paused, topNow, style, 80); got != want {
+		t.Errorf("paused header = %q, want the same keys %q", got, want)
+	}
+	// On the error screen the uptime is left out and the clock is Bad.
+	failing := busyTopModel()
+	failing.err = errors.New("boom")
+	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
+	got := topHeader(failing, topNow, colour, 80)
+	errLeft := " ▙ brigada   r"
+	if term.StripEscapes(got) != errLeft+strings.Repeat(" ", 80-utf8.RuneCountInString(errLeft)-len(right))+right ||
+		!strings.Contains(got, colour.Bad("15:04:09")) || strings.Contains(got, "up 2h0m") {
+		t.Errorf("error header = %q", got)
 	}
 }
 
@@ -1711,8 +1721,11 @@ func TestRenderTopOverflowsAShortTerminal(t *testing.T) {
 			if len(lines) > height {
 				t.Fatalf("got %d lines, want at most %d:\n%s", len(lines), height, got)
 			}
-			if !strings.HasPrefix(lines[0], " ▙ brigada   r · up") || !strings.Contains(lines[1], "engine: connection refused") {
-				t.Errorf("the header and its error line are not first:\n%s", got)
+			if !strings.HasPrefix(lines[0], " ▙ brigada   r") || strings.Contains(lines[0], "up 2h") {
+				t.Errorf("the error header is not first:\n%s", got)
+			}
+			if !strings.Contains(strings.Join(lines[:3], "\n"), "✗ engine: connection refused") {
+				t.Errorf("the band is not under the header:\n%s", got)
 			}
 			for _, w := range []string{"2 models offered", "NEEDS YOU 5", "! #1 question 1", "! #2 question 2", "! #3 question 3", "+2 more"} {
 				if !strings.Contains(got, w) {
@@ -1969,7 +1982,7 @@ func TestTopHeaderNamesTheScope(t *testing.T) {
 		{"project flag", two, nil, repo, " ▙ brigada   brigada · " + up + " "},
 		{"one project", one, nil, "", " ▙ brigada   brigada · " + up + " "},
 		{"two projects", two, nil, "", " ▙ brigada   2 projects · " + up + " "},
-		{"failed projects", nil, errors.New("projects down"), "", " ▙ brigada   " + up + " "},
+		{"failed projects", nil, errors.New("projects down"), "", " ▙ brigada "},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := &fakeTop{status: ownProjectStatus(), projects: tt.projects, projectsErr: tt.projectsErr}
@@ -3327,15 +3340,24 @@ func TestTopUptime(t *testing.T) {
 // TestTopFirstRunLine: a status that came back with no plans, listed or
 // hidden, reads as a first run; one that did not come back keeps `none`.
 func TestTopFirstRunLine(t *testing.T) {
-	const first = `no plans yet: brigada ask "fix #12"`
+	const first = "no plans yet. Give the foreman something to do:"
 	const repo = "https://example.invalid/r.git"
 	projects := []engine.ProjectInfo{{ProjectID: 7, RepoURL: repo}}
 	fetched, err := topFetch(context.Background(), &fakeTop{status: quietTopModel().status, projects: projects}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := plainTop(fetched, 80, 0); !strings.Contains(got, "│ "+first+" ") || strings.Contains(got, "│ none ") {
-		t.Errorf("a fetched empty status lacks the first-run line:\n%s", got)
+	got := plainTop(fetched, 80, 0)
+	rows := []string{first, "", `  $ brigada ask "fix #12"`, "", "Plans and tasks appear here. What needs you shows above."}
+	read := strings.Join(topBoxed(strings.Split(got, "\n")), "\n")
+	if !strings.Contains(read, "╭ PLANS\n"+strings.Join(rows, "\n")+"\n╰") || strings.Contains(got, "│ none ") ||
+		!strings.Contains(read, "╭ EVENTS\nno events yet\n╰") {
+		t.Errorf("a fetched empty status lacks the first-run rows:\n%s", got)
+	}
+	for _, l := range newTopPlans(fetched.status, false, true, topNow, term.New(logo.Caps{UTF8: true}), 80) {
+		if l.class != yieldRest {
+			t.Errorf("first-run row %q is class %d, want h", l.text, l.class)
+		}
 	}
 	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
 	if lines := newTopPlans(fetched.status, false, true, topNow, colour, 80); lines[0].text != colour.Dim(first) {
@@ -3359,8 +3381,293 @@ func TestTopFirstRunLine(t *testing.T) {
 		t.Errorf("a model never fetched lacks none:\n%s", got)
 	}
 	kept := failed.keepPrevious(fetched)
-	if got := plainTop(kept, 80, 0); !strings.Contains(got, "│ "+first+" ") {
+	if got := plainTop(kept, 80, 0); !strings.Contains(got, "│ "+first+" ") || !strings.Contains(got, "no events yet") {
 		t.Errorf("the kept status lost its first-run line:\n%s", got)
+	}
+}
+
+// bandOf is the line of a plain frame that holds the text, or "".
+func bandOf(lines []string, text string) string {
+	for _, l := range lines {
+		if strings.Contains(l, text) {
+			return l
+		}
+	}
+	return ""
+}
+
+// TestTopErrorBand: the slots row gives way to a blank row, a full-width
+// band and a blank row; the dial's failure reads `✗ ENGINE UNREACHABLE`
+// with the age of the data and `brigada start`, a fetch error from a
+// running engine `✗ engine: <text>` with no action; the middle part goes
+// before the first is cut; and the band reads in plain style.
+func TestTopErrorBand(t *testing.T) {
+	plain := term.New(logo.Caps{UTF8: true})
+	model := busyTopModel()
+	model.statusOK = true
+	model.err = errors.New("connection refused")
+	model.dialFailed = true
+	model.lastGood = topNow.Add(-42 * time.Second)
+	lines := renderTop(model, 92, 0, topNow, plain)
+	left := " ✗ ENGINE UNREACHABLE   retrying · data is 42s old"
+	want := left + strings.Repeat(" ", 92-utf8.RuneCountInString(left)-len("brigada start ")) + "brigada start "
+	if lines[1] != "" || lines[2] != want || lines[3] != "" || utf8.RuneCountInString(lines[2]) != 92 {
+		t.Errorf("error rows = %q %q %q, want a blank row, %q and a blank row", lines[1], lines[2], lines[3], want)
+	}
+	if strings.Contains(strings.Join(lines, "\n"), "engine: connection refused") || strings.Contains(strings.Join(lines, "\n"), "slots") {
+		t.Errorf("the old error line or the slots row is still there:\n%s", strings.Join(lines, "\n"))
+	}
+	// No data yet.
+	model.lastGood = time.Time{}
+	if band := bandOf(renderTop(model, 92, 0, topNow, plain), "UNREACHABLE"); !strings.Contains(band, "retrying · no data yet") {
+		t.Errorf("band = %q, want no data yet", band)
+	}
+	// A fetch error from a running engine: its text, the same retrying
+	// part, no action.
+	model.dialFailed = false
+	model.lastGood = topNow.Add(-42 * time.Second)
+	band := bandOf(renderTop(model, 92, 0, topNow, plain), "engine:")
+	if !strings.HasPrefix(band, " ✗ engine: connection refused   retrying · data is 42s old") || strings.Contains(band, "brigada start") || utf8.RuneCountInString(band) != 92 {
+		t.Errorf("fetch band = %q", band)
+	}
+	// Narrow: the middle goes before the first is cut.
+	model.dialFailed = true
+	if band := bandOf(renderTop(model, 40, 0, topNow, plain), "UNREACHABLE"); strings.Contains(band, "retrying") || !strings.Contains(band, "brigada start") || utf8.RuneCountInString(band) != 40 {
+		t.Errorf("narrow band = %q, want the middle left out and the action kept", band)
+	}
+	model.dialFailed = false
+	model.err = errors.New(strings.Repeat("long reason ", 10))
+	if band := bandOf(renderTop(model, 60, 0, topNow, plain), "engine:"); strings.Contains(band, "retrying") || !strings.Contains(band, "...") || utf8.RuneCountInString(band) != 60 {
+		t.Errorf("narrow fetch band = %q, want it cut with the middle gone", band)
+	}
+	// ASCII uses x.
+	model.err = errors.New("boom")
+	model.dialFailed = true
+	if band := bandOf(renderTop(model, 92, 0, topNow, term.New(logo.Caps{})), "UNREACHABLE"); !strings.HasPrefix(band, " x ENGINE UNREACHABLE   retrying | data is 42s old") {
+		t.Errorf("ASCII band = %q", band)
+	}
+}
+
+// TestTopErrorSequence: a dial failure, then a dial that works with a
+// fetch that fails, reads as a fetch error: no `brigada start`, no
+// UNREACHABLE; a clean fetch then clears the error and sets the time.
+func TestTopErrorSequence(t *testing.T) {
+	plain := term.New(logo.Caps{UTF8: true})
+	m := topModel{}.afterDial(errors.New("cannot reach the engine"))
+	if !m.dialFailed || m.err == nil || !m.lastGood.IsZero() {
+		t.Fatalf("after a failed dial: %+v", m)
+	}
+	if band := bandOf(renderTop(m, 92, 0, topNow, plain), "UNREACHABLE"); !strings.Contains(band, "brigada start") {
+		t.Errorf("a failed dial lacks the action: %q", band)
+	}
+	m = m.afterFetch(topModel{}, errors.New("status: 500"), topNow)
+	frame := strings.Join(renderTop(m, 92, 0, topNow, plain), "\n")
+	if m.dialFailed || strings.Contains(frame, "brigada start") || strings.Contains(frame, "ENGINE UNREACHABLE") || !strings.Contains(frame, "✗ engine: status: 500") {
+		t.Errorf("a failed fetch after a working dial:\n%s", frame)
+	}
+	if !m.lastGood.IsZero() {
+		t.Errorf("a failed fetch set the last good time %v", m.lastGood)
+	}
+	good := m.afterFetch(busyTopModel(), nil, topNow)
+	if good.err != nil || good.dialFailed || !good.lastGood.Equal(topNow) {
+		t.Errorf("a clean fetch: err %v, dialFailed %v, lastGood %v", good.err, good.dialFailed, good.lastGood)
+	}
+	later := good.afterFetch(topModel{}, errors.New("late"), topNow.Add(time.Minute))
+	if !later.lastGood.Equal(topNow) || later.status.Pid != 4242 {
+		t.Errorf("a failed fetch lost the last good time or the data: %+v", later.lastGood)
+	}
+	// The pause carries across a fetch, and p records and clears it.
+	p := good.togglePause(topNow)
+	if !p.paused || !p.pausedAt.Equal(topNow) {
+		t.Fatalf("pause = %v at %v", p.paused, p.pausedAt)
+	}
+	if carried := p.afterFetch(busyTopModel(), nil, topNow); !carried.paused || !carried.pausedAt.Equal(topNow) {
+		t.Errorf("the pause did not carry across a fetch")
+	}
+	if resumed := p.togglePause(topNow); resumed.paused || !resumed.pausedAt.IsZero() {
+		t.Errorf("resume left the pause time")
+	}
+}
+
+// TestTopErrorDimsEverythingBelow: in error every line below the band is
+// one Dim colour with no tint and no other colour, the header and the band
+// stay, the clock is Bad and the mark keeps its colour.
+func TestTopErrorDimsEverythingBelow(t *testing.T) {
+	model := agentsModel()
+	model.statusOK = true
+	model.err = errors.New("boom")
+	model.dialFailed = true
+	model.lastGood = topNow.Add(-time.Minute)
+	model.status.Running = append(model.status.Running, engine.StatusJob{ID: 30, Kind: "foreman", Status: "running"})
+	for _, caps := range []logo.Caps{{Color: logo.Color256, UTF8: true}, {Color: logo.TrueColor, UTF8: true}} {
+		style := term.New(caps)
+		lines := renderTop(model, 100, 0, topNow, style)
+		past := false
+		for i, line := range lines {
+			switch {
+			case i == 0:
+				if !strings.Contains(line, style.Bad("15:04:09")) || strings.Contains(term.StripEscapes(line), "up ") {
+					t.Errorf("header = %q, want a Bad clock and no uptime", line)
+				}
+			case !past && strings.Contains(line, "ENGINE UNREACHABLE"):
+				past = true
+				if !strings.Contains(line, "\x1b[48;") {
+					t.Errorf("the band is not solid: %q", line)
+				}
+			case past && line != "":
+				if want := style.Dim(term.StripEscapes(line)); line != want {
+					t.Errorf("line %d = %q, want one Dim colour %q", i, line, want)
+				}
+			}
+		}
+		if !past {
+			t.Fatalf("no band in\n%s", strings.Join(lines, "\n"))
+		}
+	}
+	// The mark keeps its hi-vis colour on the error screen, and nothing else uses it.
+	frame := strings.Join(renderTop(model, 100, 0, topNow, term.New(logo.Caps{Color: logo.TrueColor, UTF8: true})), "\n")
+	if n := strings.Count(frame, "38;2;255;90;31"); n != 1 {
+		t.Errorf("hi-vis appears %d times, want once on the mark", n)
+	}
+	// 16 colours: the band is solid, nothing below it is tinted.
+	c16 := strings.Join(renderTop(model, 100, 0, topNow, term.New(logo.Caps{Color: logo.Color16, UTF8: true})), "\n")
+	if !strings.Contains(c16, "\x1b[41;30m") || strings.Contains(c16, "\x1b[48;") {
+		t.Errorf("16-colour frame: band missing or a tint present")
+	}
+}
+
+// TestTopPausedBand: the paused band is solid Warn with `|| PAUSED`, the
+// pause time and `p resumes`; the keys stay; the sections keep their
+// colours and tints; the rows read the pause time, so a job's age stands
+// still while the header clock moves; the error band wins over it.
+func TestTopPausedBand(t *testing.T) {
+	plain := term.New(logo.Caps{UTF8: true})
+	model := busyTopModel()
+	model.statusOK = true
+	model.paused = true
+	model.pausedAt = topNow.Add(-60 * time.Second)
+	lines := renderTop(model, 92, 0, topNow, plain)
+	left := " || PAUSED   at 15:03:09 · ages frozen"
+	want := left + strings.Repeat(" ", 92-utf8.RuneCountInString(left)-len("p resumes ")) + "p resumes "
+	if lines[1] != "" || lines[2] != want || lines[3] != "" {
+		t.Errorf("paused rows = %q %q %q, want %q", lines[1], lines[2], lines[3], want)
+	}
+	if !strings.Contains(lines[0], "15:04:09   q quit  p pause") || strings.Contains(strings.Join(lines, "\n"), "paused; p resumes") {
+		t.Errorf("header = %q, want the real clock and the usual keys", lines[0])
+	}
+	// The job leased 100s before topNow has run 40s at the pause, and still
+	// has an hour later, while the header clock moves.
+	frame := strings.Join(lines, "\n")
+	later := renderTop(model, 92, 0, topNow.Add(time.Hour), plain)
+	if !strings.Contains(frame, "  40s  ") || !strings.Contains(strings.Join(later, "\n"), "  40s  ") {
+		t.Errorf("job age moved while paused:\n%s", frame)
+	}
+	if !strings.Contains(later[0], "16:04:09") || !strings.Contains(later[0], "up 3h0m") || !strings.Contains(lines[0], "up 2h0m") {
+		t.Errorf("header clock or uptime did not move: %q / %q", lines[0], later[0])
+	}
+	// Sections keep their colours and tints; the band is solid Warn.
+	style := term.New(logo.Caps{Color: logo.Color256, UTF8: true})
+	coloured := strings.Join(renderTop(model, 92, 0, topNow, style), "\n")
+	for _, w := range []string{"\x1b[48;5;221;38;5;16m", "\x1b[48;5;52m", "\x1b[48;5;17m"} {
+		if !strings.Contains(coloured, w) {
+			t.Errorf("paused frame lacks %q", w)
+		}
+	}
+	// Error over paused.
+	model.err = errors.New("boom")
+	both := strings.Join(renderTop(model, 92, 0, topNow, plain), "\n")
+	if strings.Contains(both, "PAUSED") || !strings.Contains(both, "✗ engine: boom") {
+		t.Errorf("error over paused:\n%s", both)
+	}
+}
+
+// TestTopIdle: with plans listed or hidden and none live the PLANS note is
+// `none live · N finished` and a Dim row names the newest landing, left
+// out when there is none; a box left with no row keeps `none`.
+func TestTopIdle(t *testing.T) {
+	landed := history.Item{Type: history.TypeEvent, ID: 9, Kind: "task_landed", TaskID: 3, Payload: []byte(`{"pushed":"pushed"}`), CreatedAt: "2026-10-20T15:02:41.000000000Z"}
+	older := history.Item{Type: history.TypeEvent, ID: 8, Kind: "task_landed", TaskID: 2, Payload: []byte(`{"pushed":"pushed"}`), CreatedAt: "2026-10-19T09:00:00.000000000Z"}
+	done := engine.StatusPlan{ID: 7, Title: "old plan", State: "done", Tasks: []engine.StatusTask{{ID: 1, State: "done"}}}
+	model := topModel{statusOK: true, status: api.Status{Pid: 1, StartedAt: topNow.Add(-time.Hour).UTC().Format(engine.TimeLayout), Plans: []engine.StatusPlan{done}}}
+	read := func(m topModel) string { return readTop(m, 92, 0) }
+	frame := plainTop(model, 92, 0)
+	if !strings.Contains(frame, "╭─ PLANS  none live · 1 finished ─") || strings.Contains(frame, "idle:") {
+		t.Errorf("idle with no landing:\n%s", frame)
+	}
+	model.events = []history.Item{older, landed}
+	if r := read(model); !strings.Contains(r, "#7 old plan") || !strings.Contains(r, "done\nidle: last work landed 15:02\n╰") {
+		t.Errorf("idle with a landing:\n%s", r)
+	}
+	// Hidden finished plans only: the idle row alone, or `none`.
+	hidden := topModel{statusOK: true, status: api.Status{Pid: 1, HiddenFinishedPlans: 4}}
+	if r := read(hidden); !strings.Contains(r, "╭ PLANS\nnone\n╰") || strings.Contains(r, "no plans yet") {
+		t.Errorf("hidden only:\n%s", r)
+	}
+	if f := plainTop(hidden, 92, 0); !strings.Contains(f, "╭─ PLANS  none live · 4 finished ─") {
+		t.Errorf("hidden note:\n%s", f)
+	}
+	hidden.events = []history.Item{landed}
+	if r := read(hidden); !strings.Contains(r, "╭ PLANS\nidle: last work landed 15:02\n╰") {
+		t.Errorf("hidden with a landing:\n%s", r)
+	}
+	// The idle row is Dim.
+	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
+	if row, _ := topIdleRow(model.events, topNow, colour); row != colour.Dim("idle: last work landed 15:02") {
+		t.Errorf("idle row = %q, want Dim", row)
+	}
+	// A live plan is not idle.
+	model.status.Plans = append(model.status.Plans, engine.StatusPlan{ID: 8, Title: "live", State: "active"})
+	if strings.Contains(read(model), "idle:") {
+		t.Errorf("a live plan reads idle")
+	}
+}
+
+// TestTopStatesFit: every state — error, paused, first run, idle — fits
+// 12, 24 and 40 rows and 60, 80, 100 and 120 columns, in every style, and
+// a styled frame reads as the plain one.
+func TestTopStatesFit(t *testing.T) {
+	base := agentsModel()
+	base.statusOK = true
+	error1 := base
+	error1.err, error1.dialFailed = errors.New("boom"), true
+	error2 := base
+	error2.err = errors.New("status: " + strings.Repeat("x", 90))
+	paused := base
+	paused.paused, paused.pausedAt = true, topNow.Add(-time.Minute)
+	first := topModel{statusOK: true, status: api.Status{Pid: 1}}
+	idle := topModel{statusOK: true, status: api.Status{Pid: 1, HiddenFinishedPlans: 2}, events: []history.Item{
+		{Type: history.TypeEvent, ID: 9, Kind: "task_landed", TaskID: 3, CreatedAt: "2026-10-20T15:02:41.000000000Z"}}}
+	for name, m := range map[string]topModel{"dial": error1, "fetch": error2, "paused": paused, "first run": first, "idle": idle} {
+		for _, caps := range []logo.Caps{{UTF8: true}, {}, {Color: logo.Color16, UTF8: true}, {Color: logo.Color256, UTF8: true}, {Color: logo.TrueColor, UTF8: true}} {
+			style := term.New(caps)
+			for _, width := range []int{60, 80, 100, 120} {
+				for _, height := range []int{0, 12, 24, 40} {
+					lines := renderTop(m, width, height, topNow, style)
+					if height > 0 && len(lines) > height {
+						t.Errorf("%s %dx%d: %d lines", name, width, height, len(lines))
+					}
+					for _, l := range lines {
+						if n := term.VisibleWidth(l); n > width {
+							t.Errorf("%s %dx%d: line is %d wide: %q", name, width, height, n, l)
+						}
+						if !caps.UTF8 {
+							for _, r := range term.StripEscapes(l) {
+								if r >= 0x80 {
+									t.Errorf("%s: %q in the ASCII line %q", name, r, l)
+									break
+								}
+							}
+						}
+					}
+					plain := renderTop(m, width, height, topNow, term.New(logo.Caps{UTF8: caps.UTF8}))
+					for i, l := range lines {
+						if term.StripEscapes(l) != plain[i] {
+							t.Errorf("%s %dx%d line %d reads %q, want %q", name, width, height, i, term.StripEscapes(l), plain[i])
+						}
+					}
+				}
+			}
+		}
 	}
 }
 

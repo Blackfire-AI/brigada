@@ -144,10 +144,49 @@ type topModel struct {
 	// err is the fetch's first error: the view shows it as a line and
 	// the loop keeps retrying. Parts that did fetch still render.
 	err error
-	// paused says the loop froze the refresh (the p key).
-	paused bool
+	// paused says the loop froze the refresh (the p key); pausedAt is when,
+	// the clock the rows read while paused.
+	paused   bool
+	pausedAt time.Time
+	// lastGood is when the last fetch without an error ended, zero when
+	// none has; dialFailed says the last dial to the engine failed, as
+	// opposed to a fetch from a running engine.
+	lastGood   time.Time
+	dialFailed bool
 	// hint is the unregistered-models line of the cached listing, or "".
 	hint string
+}
+
+// afterDial is the model after a dial that failed: the data stays, the
+// error and the failed dial are noted.
+func (m topModel) afterDial(err error) topModel {
+	m.err, m.dialFailed = err, true
+	return m
+}
+
+// afterFetch is the model after a dial that worked and a fetch that gave
+// fetched and err: the pause and the last good time carry over, a clean
+// fetch sets the last good time to now, and a failed one keeps the last
+// data under its error. The dial worked, so dialFailed is clear.
+func (m topModel) afterFetch(fetched topModel, err error, now time.Time) topModel {
+	fetched.err = err
+	fetched.paused, fetched.pausedAt, fetched.lastGood = m.paused, m.pausedAt, m.lastGood
+	fetched.events = mergeTopEvents(m.events, fetched.events)
+	if err != nil {
+		return fetched.keepPrevious(m)
+	}
+	fetched.lastGood = now
+	return fetched
+}
+
+// togglePause pauses at now, or resumes.
+func (m topModel) togglePause(now time.Time) topModel {
+	m.paused = !m.paused
+	m.pausedAt = time.Time{}
+	if m.paused {
+		m.pausedAt = now
+	}
+	return m
 }
 
 // topFetch gathers one tick's model: the scope, the status, the capacity
@@ -295,8 +334,11 @@ func dialEngine(ctx context.Context, rt *runtime, role string, noStart bool) (*a
 }
 
 // renderTop lays the view out, top to bottom: the two-row header (the
-// mark, scope, uptime and clock; the slots meter and the counters), the
-// engine error and the unregistered-models hint when there are any, then
+// mark, scope, uptime and clock; the slots meter and the counters), or a
+// blank row, a band and a blank row in place of the second row while the
+// engine errs (a solid Bad band, with every line below it one Dim colour)
+// or the view is paused (a solid Warn band, the rows reading the pause
+// time), the unregistered-models hint when there is one, then
 // one rounded box per section — NEEDS YOU, the FOREMAN box (a foreman turn
 // no plan claims) and the JOBS box (any other job no plan claims), each
 // only when it has rows, the PLANS tree with every job under its plan, the
@@ -325,10 +367,26 @@ func dialEngine(ctx context.Context, rt *runtime, role string, noStart bool) (*a
 func renderTop(model topModel, width, height int, now time.Time, style term.Style) []string {
 	inner := max(width-4, 1)
 	lines := topPinned([]string{topHeader(model, now, style, width)})
-	if model.err != nil {
-		lines = append(lines, topPinned([]string{style.Bad(cutLine("engine: "+model.err.Error(), width))})...)
+	// The header reads the real clock; the sections read the pause time
+	// while paused, so job ages stand still.
+	header := now
+	if model.paused && !model.pausedAt.IsZero() {
+		now = model.pausedAt
 	}
-	lines = append(lines, topLine{text: topMeters(model, style, width), class: yieldRest, late: true})
+	// A band takes the place of the slots row: a blank row, the band and a
+	// blank row. The error band wins over the paused one.
+	band := ""
+	switch {
+	case model.err != nil:
+		band = topErrorBand(model, header, style, width)
+	case model.paused:
+		band = topPausedBand(model, header, style, width)
+	}
+	if band != "" {
+		lines = append(lines, topLine{class: yieldBlank}, topLine{text: band}, topLine{class: yieldBlank})
+	} else {
+		lines = append(lines, topLine{text: topMeters(model, style, width), class: yieldRest, late: true})
+	}
 	if model.hint != "" {
 		lines = append(lines, topPinned([]string{style.Dim(cutLine(model.hint, width))})...)
 	}
@@ -351,9 +409,24 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 	foreman, jobs := topPlanless(model.status, now, style, inner)
 	section(topSecForeman, foreman)
 	section(topSecJobs, jobs)
-	section(topSecPlans, newTopPlans(model.status, model.tagPlans, model.statusOK, now, style, inner))
+	plans := newTopPlans(model.status, model.tagPlans, model.statusOK, now, style, inner)
+	// Idle: plans exist, listed or hidden, and none is live. The newest
+	// landing, when there is one, closes the finished plans.
+	if topIdle(model) {
+		if row, ok := topIdleRow(model.events, now, style); ok {
+			if len(model.status.Plans) == 0 {
+				plans = nil
+			}
+			plans = append(plans, topLine{text: row, class: yieldFinished, section: topSecPlans})
+		}
+	}
+	section(topSecPlans, plans)
 	section(topSecAgents, topAgentLines(model, now, style, inner))
-	section(topSecEvents, topEventLines(model.events, now, style, inner))
+	eventRows := topEventLines(model.events, now, style, inner)
+	if topFirstRun(model) && len(model.events) == 0 {
+		eventRows = []topLine{{text: style.Dim("no events yet"), class: yieldRest}}
+	}
+	section(topSecEvents, eventRows)
 
 	frame := &topFrame{lines: lines, style: style, width: width, heads: topHeads(model, style)}
 	frame.fit(height)
@@ -364,7 +437,48 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 	for i, line := range out {
 		out[i] = topFit(line, width)
 	}
+	// In error every line below the band goes to one Dim colour with no
+	// tint, so old data cannot pass as live; the header and the band stay.
+	if model.err != nil {
+		past := false
+		for i, line := range out {
+			if past && line != "" {
+				out[i] = style.Dim(term.StripEscapes(line))
+			}
+			past = past || line == topFit(band, width)
+		}
+	}
 	return out
+}
+
+// topFirstRun says the status fetched and has no plans at all, listed or
+// hidden.
+func topFirstRun(model topModel) bool {
+	return model.statusOK && len(model.status.Plans) == 0 && model.status.HiddenFinishedPlans == 0
+}
+
+// topIdle says plans exist, listed or hidden, and none is live.
+func topIdle(model topModel) bool {
+	if !model.statusOK || (len(model.status.Plans) == 0 && model.status.HiddenFinishedPlans == 0) {
+		return false
+	}
+	for _, p := range model.status.Plans {
+		if !topPlanFinished(p) {
+			return false
+		}
+	}
+	return true
+}
+
+// topIdleRow is the Dim row `idle: last work landed HH:MM`, from the
+// newest task_landed item; ok is false when there is none.
+func topIdleRow(events []history.Item, now time.Time, style term.Style) (string, bool) {
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Kind == "task_landed" {
+			return style.Dim("idle: last work landed " + topClock(events[i].CreatedAt, now)), true
+		}
+	}
+	return "", false
 }
 
 // topYield is a line's yield class: the order in which lines drop while
@@ -458,7 +572,11 @@ func topHeads(model topModel, style term.Style) map[int]topHead {
 			}
 		}
 		live := len(st.Plans) - (finished - st.HiddenFinishedPlans)
-		plans.note = fmt.Sprintf("%d live%s%d finished", live, topEventSep(style), finished)
+		liveWords := fmt.Sprint(live)
+		if live == 0 && finished > 0 {
+			liveWords = "none"
+		}
+		plans.note = fmt.Sprintf("%s live%s%d finished", liveWords, topEventSep(style), finished)
 	}
 	events := head("EVENTS")
 	if st.Report != nil {
@@ -715,25 +833,86 @@ func topHeader(model topModel, now time.Time, style term.Style, width int) strin
 		uptime = topUptime(now.Sub(started))
 	}
 	keys := "q quit  p pause"
-	if model.paused {
-		keys = "paused; p resumes, q quits"
-	}
 	mark := style.OneLine()
 	if mark == "" {
 		mark = "brigada"
 	}
+	// On the error screen the uptime is left out, the data being old, and
+	// the clock is Bad.
 	left := " " + mark + "   "
-	if model.scope != "" {
-		left += model.scope + sep
+	if model.err != nil {
+		left = " " + mark
+		if model.scope != "" {
+			left += "   " + model.scope
+		}
+	} else {
+		if model.scope != "" {
+			left += model.scope + sep
+		}
+		left += "up " + uptime
 	}
-	left += "up " + uptime
 	clock := now.Format("15:04:05")
-	right := clock
+	right, styled := clock, clock
 	if full := clock + "   " + keys; term.VisibleWidth(left)+2+term.VisibleWidth(full) <= width {
 		right = full
+		styled = clock + "   " + keys
+	}
+	if model.err != nil {
+		styled = style.Bad(clock) + strings.TrimPrefix(styled, clock)
 	}
 	gap := max(width-term.VisibleWidth(left)-term.VisibleWidth(right), 1)
-	return topFit(left+strings.Repeat(" ", gap)+right, width)
+	return topFit(left+strings.Repeat(" ", gap)+styled, width)
+}
+
+// topBand is a full-width band row, one leading and one trailing space: the
+// first part Bold, three spaces and the middle part, and the action Bold at
+// the right edge, padded to the width and painted by paint. The middle part
+// is left out before the first is cut.
+func topBand(first, middle, action string, paint func(string) string, style term.Style, width int) string {
+	room := max(width-2, 1)
+	if action != "" {
+		room = max(room-utf8.RuneCountInString(action)-2, 1)
+	}
+	if utf8.RuneCountInString(first)+3+utf8.RuneCountInString(middle) > room {
+		middle = ""
+	}
+	first = cutLine(first, room)
+	text := " " + style.Bold(first)
+	if middle != "" {
+		text += "   " + middle
+	}
+	if action != "" {
+		text += strings.Repeat(" ", max(width-1-term.VisibleWidth(text)-utf8.RuneCountInString(action), 1)) + style.Bold(action) + " "
+	} else {
+		text += strings.Repeat(" ", max(width-term.VisibleWidth(text), 0))
+	}
+	return paint(text)
+}
+
+// topErrorBand is the band of the error screen: `✗ ENGINE UNREACHABLE`,
+// how long the data is old and `brigada start` when the dial failed, and
+// `✗ engine: <text>` with the same retrying part and no action when a
+// running engine's fetch failed.
+func topErrorBand(model topModel, now time.Time, style term.Style, width int) string {
+	retry := "retrying" + topEventSep(style) + "no data yet"
+	if !model.lastGood.IsZero() {
+		retry = "retrying" + topEventSep(style) + "data is " + topUptime(now.Sub(model.lastGood)) + " old"
+	}
+	if model.dialFailed {
+		return topBand(style.Cross()+" ENGINE UNREACHABLE", retry, "brigada start", style.BandBad, style, width)
+	}
+	text, _, _ := strings.Cut(strings.TrimSpace(model.err.Error()), "\n")
+	return topBand(style.Cross()+" engine: "+text, retry, "", style.BandBad, style, width)
+}
+
+// topPausedBand is the band of the paused view: `|| PAUSED`, when it
+// paused and `p resumes`.
+func topPausedBand(model topModel, now time.Time, style term.Style, width int) string {
+	at := model.pausedAt
+	if at.IsZero() {
+		at = now
+	}
+	return topBand("|| PAUSED", "at "+at.Format("15:04:05")+topEventSep(style)+"ages frozen", "p resumes", style.BandWarn, style, width)
 }
 
 // topUptime is the engine's uptime as the header shows it: whole seconds
@@ -1391,11 +1570,17 @@ func newTopPlans(st api.Status, tagged, fetched bool, now time.Time, style term.
 	if len(st.Plans) == 0 {
 		// A status that came back with no plans, hidden or listed, is a
 		// first run; one that did not come back has said nothing.
-		text := "none"
 		if fetched && st.HiddenFinishedPlans == 0 {
-			text = `no plans yet: brigada ask "fix #12"`
+			for _, text := range []string{"no plans yet. Give the foreman something to do:", "",
+				`  $ brigada ask "fix #12"`, "", "Plans and tasks appear here. What needs you shows above."} {
+				if text != "" {
+					text = style.Dim(text)
+				}
+				lines = append(lines, line(text, yieldRest))
+			}
+		} else {
+			lines = append(lines, line(style.Dim("none"), yieldRest))
 		}
-		lines = append(lines, line(style.Dim(text), yieldRest))
 	}
 	claims := newTopClaims(st)
 	reasons := make(map[int64]string)
@@ -2020,17 +2205,11 @@ func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Durati
 	refresh := func() {
 		client, err := dialEngine(ctx, rt, "client", noStart)
 		if err != nil {
-			model.err = err
+			model = model.afterDial(err)
 			return
 		}
 		fetched, err := topFetch(ctx, topAPI{client}, repo)
-		fetched.err = err
-		fetched.paused = model.paused
-		fetched.events = mergeTopEvents(model.events, fetched.events)
-		if err != nil {
-			fetched = fetched.keepPrevious(model)
-		}
-		model = fetched
+		model = model.afterFetch(fetched, err, time.Now())
 		// Each tick reads the cached listing; no CLI runs on a tick.
 		model.hint = agentsHint(ctx, rt, false)
 	}
@@ -2053,7 +2232,7 @@ func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Durati
 			case 'q', 'Q':
 				return 0
 			case 'p', 'P':
-				model.paused = !model.paused
+				model = model.togglePause(time.Now())
 				if !model.paused {
 					refresh()
 				}

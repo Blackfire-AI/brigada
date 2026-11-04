@@ -215,6 +215,35 @@ func TestTints(t *testing.T) {
 	}
 }
 
+// TestBands: a band is solid at 16 colours too, its background opened
+// again after each inner reset so a bold span keeps it, and plain text
+// with no colour.
+func TestBands(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fn   func(Style, string) string
+		open [3]string
+	}{
+		{"bad", Style.BandBad, [3]string{"\x1b[41;30m", "\x1b[48;5;203;38;5;16m", "\x1b[48;2;255;95;95;38;2;17;17;17m"}},
+		{"warn", Style.BandWarn, [3]string{"\x1b[43;30m", "\x1b[48;5;221;38;5;16m", "\x1b[48;2;255;215;95;38;2;17;17;17m"}},
+	} {
+		for i, depth := range []logo.Depth{logo.Color16, logo.Color256, logo.TrueColor} {
+			style := New(logo.Caps{Color: depth, UTF8: true})
+			got := tc.fn(style, " "+style.Bold("HEAD")+" tail")
+			if !strings.HasPrefix(got, tc.open[i]) || !strings.HasSuffix(got, "\x1b[0m") ||
+				!strings.Contains(got, "\x1b[0m"+tc.open[i]+" tail") || StripEscapes(got) != " HEAD tail" {
+				t.Errorf("%s depth %d: band = %q", tc.name, depth, got)
+			}
+			if strings.Contains(got, "255;90;31") {
+				t.Errorf("%s depth %d: band uses the hi-vis colour", tc.name, depth)
+			}
+		}
+		if got := tc.fn(New(logo.Caps{UTF8: true}), "plain"); got != "plain" {
+			t.Errorf("%s with no colour = %q", tc.name, got)
+		}
+	}
+}
+
 func TestWidth(t *testing.T) {
 	for _, tc := range []struct {
 		width, want int

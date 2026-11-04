@@ -139,8 +139,41 @@ func (s Style) tint(text, bg256, fg256, bgTrue, fgTrue string) string {
 	if s.caps.Color == logo.TrueColor {
 		bg, fg = bgTrue, fgTrue
 	}
-	open := "\x1b[" + bg + "m\x1b[" + fg + "m"
+	return paint(text, "\x1b["+bg+"m\x1b["+fg+"m")
+}
+
+// paint wraps text in open, which it opens again after each inner reset.
+func paint(text, open string) string {
 	return open + strings.ReplaceAll(text, reset, reset+open) + reset
+}
+
+// band paints a full-width band: the SGR parameters of the background and
+// dark foreground at 16 colours, 256 colours and true colour, opened again
+// after each inner reset so bold spans keep the background. Unlike a tint a
+// band shows at 16 colours; with no colour it is the plain text.
+func (s Style) band(text, c16, c256, cTrue string) string {
+	var params string
+	switch s.caps.Color {
+	case logo.Color16:
+		params = c16
+	case logo.Color256:
+		params = c256
+	case logo.TrueColor:
+		params = cTrue
+	default:
+		return text
+	}
+	return paint(text, "\x1b["+params+"m")
+}
+
+// BandBad paints a band solid red with dark text: the engine error.
+func (s Style) BandBad(text string) string {
+	return s.band(text, "41;30", "48;5;203;38;5;16", "48;2;255;95;95;38;2;17;17;17")
+}
+
+// BandWarn paints a band solid yellow with dark text: the paused view.
+func (s Style) BandWarn(text string) string {
+	return s.band(text, "43;30", "48;5;221;38;5;16", "48;2;255;215;95;38;2;17;17;17")
 }
 
 // TintNeeds paints a needs-you row light red on dark red. Where rows are
