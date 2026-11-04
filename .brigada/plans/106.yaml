@@ -30,6 +30,6 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
