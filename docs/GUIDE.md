@@ -1127,7 +1127,7 @@ and then every other row outside the header and the needs-you queue —
 event row 1, the remaining agent rows, each plan's own row, the placeholders —
 with the meters row last of them, though it sits above the needs-you queue.
 
-A fold row not yet shown costs the row it adds. A box's borders go with its section's last row, and a box with no row never shows, so a drop can leave the frame a row or two shorter than the terminal.
+A box's borders go with its section's last row, and a box with no row never shows, so a drop can leave the frame a row or two shorter than the terminal.
 
 The header, with its error and hint rows, and the needs-you queue with its borders never drop for another row;
 on a screen too short for them the frame is cut from the bottom, into the needs-you box, so the height still holds.
