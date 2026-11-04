@@ -1073,19 +1073,27 @@ With `--project` every section shows that one project,
 except that a broken agent still shows, in the needs-you queue and with its reason in the agents section, because agents belong to no project;
 every other entry stays the project's.
 The scope is the repository's short name with `--project` or when the engine has one project, and `N projects` otherwise.
-When more than one project shows, each plan line carries its repository's short name after the id, as in `#101 brigada Fix events strip`.
+When more than one project shows, each plan line carries its repository's short name after the id, as in `#101 brigada  Fix events strip`.
 The needs-you queue shows three lines, broken agents chosen first, and `+N more` counts the rest.
 
-The plans tree puts every job under its plan: a live plan's line carries its done/total and a progress bar,
-and beneath it come its running jobs (`▸`, in `brigada status`'s words),
+The plans tree puts every job under its plan: an active plan's line carries its done/total and a progress bar,
+while a plan that is neither active nor finished shows a state word in their place —
+`awaiting approval`, `reviewing round N` or `needs foreman` —
+and the tails of all the plan lines start in one column, as in
+`#101 brigada  Fix events strip   reviewing round 2` over `#102 brigada  Top polish        2/5 ▓▓▓▓░░░░░░░`.
+The total leaves out cancelled and retired tasks, and the bar counts a done task only once it is landed, or when its class never lands.
+Beneath the line come its running jobs (`▸`, in `brigada status`'s words, with the task's id and title in place of `task #N`: `▸ #331 clip frame to height · work · claude/sonnet@high · 3m12s · Edit`; on a narrow terminal the title is cut and the rest stays whole),
 then a line per task still live work —
-queued or waiting on its dependencies, held (`?`), waiting on an infra retry (`↺`), parked for you (`!` with the needs-you reason) or reviewing —
+queued or waiting on its dependencies (not under a plan that is not active), held (`?`, as `? #333 agent order  held: waiting for a free account slot`), waiting on an infra retry (`↺`), parked for you (`!` with the needs-you reason) or reviewing;
+a done task that has not landed and that no job speaks for gets a dim `⇡ #330 events wording  landing: waiting (retry at 11:10, last exit 1)` line,
+with `queued` for a queued land job and `not landed` when the task carries no word;
+a reviewing plan whose review no job has started shows a dim `· plan review queued` line —
 while a finished plan is one line, `#N <title> done/total ✓` or `#N <title> ✗`, and `+N finished` counts the older finished plans hidden;
 a foreman turn no plan claims sits under a FOREMAN head and any other job no listed plan claims under a JOBS head,
 between the needs-you queue and the plans tree, each shown only when it has jobs.
 
 The needs-you queue comes first and is always visible: one compact `!` line per entry —
-`! #N <reason>` for a task or a plan, the agent's `harness/model`, or the repository's URL for a foreman or project entry —
+`! #N <reason>` for a task or a plan (a plan with no reason shows its title and `awaiting approval` or `needs foreman`), the agent's `harness/model`, or the repository's URL for a foreman or project entry —
 capped at three lines with a `+N more` line, and `nothing needs you` when it is empty.
 
 The frame never has more lines than the terminal is tall.
