@@ -71,8 +71,8 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-349"
     rounds: 0
   - id: 350
     name: "top-glyphs"
