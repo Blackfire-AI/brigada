@@ -105,6 +105,6 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["bugfix"]
-    state: running
+    state: ready
     branch: ""
     rounds: 0
