@@ -160,7 +160,7 @@ func busyTopModel() topModel {
 
 // alignRight is a plan line: left, then tail ending at width.
 func alignRight(left, tail string, width int) string {
-	return left + strings.Repeat(" ", width-term.VisibleWidth(left)-term.VisibleWidth(tail)) + tail
+	return left + strings.Repeat(" ", width-term.CellWidth(left)-term.CellWidth(tail)) + tail
 }
 
 func plainTop(model topModel, width, height int) string {
@@ -250,12 +250,12 @@ func TestTopHeaderRuleAndKeys(t *testing.T) {
 	style := term.New(logo.Caps{UTF8: true})
 	left := " ▙ brigada   r · up 2h0m"
 	right := "15:04:09   q quit  p pause"
-	want := left + strings.Repeat(" ", 80-term.VisibleWidth(left)-term.VisibleWidth(right)) + right
+	want := left + strings.Repeat(" ", 80-term.CellWidth(left)-term.CellWidth(right)) + right
 	lines := topHeader(busyTopModel(), topNow, style, 80)
 	if lines[0] != want {
 		t.Errorf("header = %q, want %q", lines[0], want)
 	}
-	if got := term.VisibleWidth(lines[0]); got != 80 {
+	if got := term.CellWidth(lines[0]); got != 80 {
 		t.Errorf("header is %d wide, want 80", got)
 	}
 	// Pausing leaves the keys alone: the band says p resumes.
@@ -315,7 +315,7 @@ func TestRenderTopBoxesAtEveryWidth(t *testing.T) {
 		lines := renderTop(model, width, 0, topNow, plain)
 		for i, l := range lines {
 			boxed := strings.HasPrefix(l, "│") || strings.HasPrefix(l, "╭") || strings.HasPrefix(l, "╰")
-			if n := term.VisibleWidth(l); n > width || (boxed && n != width) {
+			if n := term.CellWidth(l); n > width || (boxed && n != width) {
 				t.Errorf("width %d line %d %q is %d wide", width, i, l, n)
 			}
 		}
@@ -410,7 +410,7 @@ func TestTopMetersSlotsCell(t *testing.T) {
 	}
 	// The meter shrinks to fit and is left out under 4 cells.
 	model := busyTopModel()
-	if got := topMeters(model, term.New(logo.Caps{UTF8: true}), 50)[0]; strings.Count(got, "━") != 5 || term.VisibleWidth(got) != 50 {
+	if got := topMeters(model, term.New(logo.Caps{UTF8: true}), 50)[0]; strings.Count(got, "━") != 5 || term.CellWidth(got) != 50 {
 		t.Errorf("shrunk meter = %q", got)
 	}
 	if got := topMeters(model, term.New(logo.Caps{UTF8: true}), 48)[0]; strings.Contains(got, "━") {
@@ -534,7 +534,7 @@ func TestTopNeedsYouColours(t *testing.T) {
 		t.Errorf("box = %q, want Bad sides and bottom", boxed)
 	}
 	tail := "→ brigada agent reset dsh/large"
-	wantTail := fmt.Sprintf("%-*s  %s", 100-term.VisibleWidth(tail)-2, "! dsh/large auth: no key", tail)
+	wantTail := fmt.Sprintf("%-*s  %s", 100-term.CellWidth(tail)-2, "! dsh/large auth: no key", tail)
 	if lines[1] != style.Bad("! #2 should the sprocket be blue?") || lines[2] != style.Bad(wantTail) {
 		t.Errorf("entries = %q", lines)
 	}
@@ -1192,7 +1192,7 @@ func TestTopPlanTailsAlign(t *testing.T) {
 	// the tails still end at the right edge.
 	narrow := plain(40)
 	for _, l := range narrow {
-		if n := term.VisibleWidth(l); n != 40 {
+		if n := term.CellWidth(l); n != 40 {
 			t.Errorf("line %q is %d wide, want 40", l, n)
 		}
 	}
@@ -1704,10 +1704,10 @@ func TestRenderTopFitsSize(t *testing.T) {
 		}
 	}
 	for _, l := range lines {
-		if n := term.VisibleWidth(l); n > 40 {
+		if n := term.CellWidth(l); n > 40 {
 			t.Errorf("line %q is %d wide", l, n)
 		}
-		if (strings.HasPrefix(l, "│") || strings.HasPrefix(l, "╭") || strings.HasPrefix(l, "╰")) && term.VisibleWidth(l) != 40 {
+		if (strings.HasPrefix(l, "│") || strings.HasPrefix(l, "╭") || strings.HasPrefix(l, "╰")) && term.CellWidth(l) != 40 {
 			t.Errorf("box line %q is not exactly 40 wide", l)
 		}
 	}
@@ -1819,7 +1819,7 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 				}
 			}
 			for _, l := range lines {
-				if n := term.VisibleWidth(l); n > 76 {
+				if n := term.CellWidth(l); n > 76 {
 					t.Errorf("line %q is %d wide", l, n)
 				}
 			}
@@ -2483,7 +2483,7 @@ func TestRenderTopScreenHeights(t *testing.T) {
 		t.Errorf("a floor line is cut:\n%s", got)
 	}
 	for _, l := range lines {
-		if n := term.VisibleWidth(l); n > 60 {
+		if n := term.CellWidth(l); n > 60 {
 			t.Errorf("line %q is %d wide", l, n)
 		}
 	}
@@ -2526,7 +2526,7 @@ func TestTopHeaderKeysFit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			line := topHeader(tt.model, topNow, style, tt.width)[0]
-			if n := term.VisibleWidth(line); n != tt.width {
+			if n := term.CellWidth(line); n != tt.width {
 				t.Errorf("header is %d wide, want %d: %q", n, tt.width, line)
 			}
 			if tt.keys && !strings.HasSuffix(line, "15:04:09   q quit  p pause") {
@@ -2540,6 +2540,52 @@ func TestTopHeaderKeysFit(t *testing.T) {
 	want := " ▙ brigada   r · up 0s" + strings.Repeat(" ", 19) + "15:04:09"
 	if got := topHeader(shortTopModel(), topNow, style, 49)[0]; got != want {
 		t.Errorf("keys-dropped header = %q, want %q", got, want)
+	}
+}
+
+// TestTopEventsBorderStripsMarkdown: the foreman report's first line sits in
+// the EVENTS border without its bold marks and backticks.
+func TestTopEventsBorderStripsMarkdown(t *testing.T) {
+	model := agentsModel()
+	model.statusOK = true
+	model.status.Report = &engine.StatusReport{JobID: 41, Text: "**Landed** `#5` and `#6`, **one** left.\nSecond `line`."}
+	plain := term.New(logo.Caps{UTF8: true})
+	for _, width := range []int{60, 80, 100} {
+		got := strings.Join(renderTop(model, width, 0, topNow, plain), "\n")
+		for _, l := range strings.Split(got, "\n") {
+			if strings.HasPrefix(l, "╭─ EVENTS") && (strings.Contains(l, "**") || strings.Contains(l, "`")) {
+				t.Errorf("width %d: the EVENTS border shows markdown: %q", width, l)
+			}
+		}
+		if width == 100 && !strings.Contains(got, "Landed #5 and #6, one left.") {
+			t.Errorf("the EVENTS border lacks the plain report line:\n%s", got)
+		}
+	}
+}
+
+// TestTopWideCharactersFillBoxedRows: a plan title and a job title with CJK
+// and emoji leave every boxed row exactly the frame's width in cells.
+func TestTopWideCharactersFillBoxedRows(t *testing.T) {
+	model := busyTopModel()
+	model.status.Plans[0].Title = "日本語のとても長い計画の題名 🚀🚀 with a tail of words"
+	for i := range model.status.Plans[0].Tasks {
+		model.status.Plans[0].Tasks[i].Title = "歯車に油を差す 🛢 とても長いタスクの題名です"
+	}
+	model.status.Running[0].LastEvent = "tool_start 編集 🚀 ファイル"
+	plain := term.New(logo.Caps{UTF8: true})
+	for _, width := range []int{60, 80, 100} {
+		lines := renderTop(model, width, 0, topNow, plain)
+		wide := false
+		for i, l := range lines {
+			boxed := strings.HasPrefix(l, "│") || strings.HasPrefix(l, "╭") || strings.HasPrefix(l, "╰")
+			if n := term.CellWidth(l); n > width || (boxed && n != width) {
+				t.Errorf("width %d line %d %q is %d cells wide", width, i, l, n)
+			}
+			wide = wide || strings.Contains(l, "日本") || strings.Contains(l, "歯車")
+		}
+		if !wide {
+			t.Errorf("width %d shows no CJK title:\n%s", width, strings.Join(lines, "\n"))
+		}
 	}
 }
 
@@ -2561,7 +2607,7 @@ func TestRenderTopNarrowBoxes(t *testing.T) {
 		}
 		for i, l := range lines {
 			boxed := strings.HasPrefix(l, "│") || strings.HasPrefix(l, "╭") || strings.HasPrefix(l, "╰")
-			if n := term.VisibleWidth(l); n > width || (boxed && n != width) {
+			if n := term.CellWidth(l); n > width || (boxed && n != width) {
 				t.Errorf("width %d line %d %q is %d wide", width, i, l, n)
 			}
 		}
@@ -2772,7 +2818,7 @@ func TestTopAgentsWidths(t *testing.T) {
 	for _, width := range []int{60, 80, 100, 120} {
 		for _, style := range []term.Style{term.New(logo.Caps{UTF8: true}), term.New(logo.Caps{Color: logo.Color256, UTF8: true})} {
 			for _, l := range renderTop(agentsModel(), width, 0, topNow, style) {
-				if n := term.VisibleWidth(l); n > width {
+				if n := term.CellWidth(l); n > width {
 					t.Errorf("width %d: line %q is %d wide", width, l, n)
 				}
 			}
@@ -3272,13 +3318,13 @@ func TestTopAgentNote(t *testing.T) {
 	model := agentNoteModel([]engine.CapacityAgent{ready, off}, global(&two))
 	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
 	box := *topAgentLines(model, topNow, colour, 86)[0].box
-	if got := topBoxTop(box, colour, 90); !strings.Contains(got, colour.Dim("all ≤ global 2 · 1 off")) || term.VisibleWidth(got) != 90 {
+	if got := topBoxTop(box, colour, 90); !strings.Contains(got, colour.Dim("all ≤ global 2 · 1 off")) || term.CellWidth(got) != 90 {
 		t.Errorf("border = %q", got)
 	}
-	if got := topBoxTop(box, plain, 24); !strings.Contains(got, "all ≤ ") || term.VisibleWidth(got) != 24 {
+	if got := topBoxTop(box, plain, 24); !strings.Contains(got, "all ≤ ") || term.CellWidth(got) != 24 {
 		t.Errorf("a cut note: %q", got)
 	}
-	if got := topBoxTop(box, plain, 12); strings.Contains(got, "global") || term.VisibleWidth(got) != 12 {
+	if got := topBoxTop(box, plain, 12); strings.Contains(got, "global") || term.CellWidth(got) != 12 {
 		t.Errorf("a note that cannot fit stays out: %q", got)
 	}
 }
@@ -3464,7 +3510,7 @@ func TestTopErrorBand(t *testing.T) {
 	}
 	long := topErrorModel(false)
 	long.err = errors.New(strings.Repeat("down ", 20))
-	if got := bandOf(t, renderTop(long, 40, 0, topNow, plain), "engine: "); term.VisibleWidth(got) != 40 || !strings.Contains(got, "...") || strings.Contains(got, "retrying") {
+	if got := bandOf(t, renderTop(long, 40, 0, topNow, plain), "engine: "); term.CellWidth(got) != 40 || !strings.Contains(got, "...") || strings.Contains(got, "retrying") {
 		t.Errorf("cut band = %q", got)
 	}
 	ascii := renderTop(topErrorModel(true), 90, 0, topNow, term.New(logo.Caps{}))
@@ -3640,7 +3686,7 @@ func TestTopBandFramesFit(t *testing.T) {
 					t.Errorf("%s %dx%d: %d lines", name, width, height, len(base))
 				}
 				for _, l := range base {
-					if term.VisibleWidth(l) > width {
+					if term.CellWidth(l) > width {
 						t.Errorf("%s %dx%d: line %q is wider", name, width, height, l)
 					}
 				}
@@ -3666,7 +3712,7 @@ func TestTopBandFramesFit(t *testing.T) {
 					t.Errorf("%s %dx%d ASCII: %d lines", name, width, height, len(ascii))
 				}
 				for _, l := range ascii {
-					if term.VisibleWidth(l) > width || len(l) != utf8.RuneCountInString(l) {
+					if term.CellWidth(l) > width || len(l) != utf8.RuneCountInString(l) {
 						t.Errorf("%s %dx%d ASCII line %q", name, width, height, l)
 					}
 				}

@@ -123,11 +123,11 @@ func TestTopPlanCellColours(t *testing.T) {
 func TestTopPlansLegend(t *testing.T) {
 	plain := term.New(logo.Caps{UTF8: true})
 	box := topBox{title: "PLANS", note: "3 live · 98 finished", legend: topPlanLegend(plain)}
-	if got := topBoxTop(box, plain, 92); !strings.Contains(got, " ■ landed  ■ done  ■ running  □ queued ─╮") || term.VisibleWidth(got) != 92 {
+	if got := topBoxTop(box, plain, 92); !strings.Contains(got, " ■ landed  ■ done  ■ running  □ queued ─╮") || term.CellWidth(got) != 92 {
 		t.Errorf("wide border = %q", got)
 	}
 	got := topBoxTop(box, plain, 50)
-	if strings.Contains(got, "landed") || term.VisibleWidth(got) != 50 {
+	if strings.Contains(got, "landed") || term.CellWidth(got) != 50 {
 		t.Errorf("narrow border = %q, want the legend left out", got)
 	}
 	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
@@ -220,7 +220,7 @@ func TestRenderTopFrameHeights(t *testing.T) {
 				t.Errorf("%dx%d: header or NEEDS YOU lost:\n%s", width, height, strings.Join(lines, "\n"))
 			}
 			for _, l := range lines {
-				if term.VisibleWidth(l) > width {
+				if term.CellWidth(l) > width {
 					t.Errorf("%dx%d: %q is wider", width, height, l)
 				}
 			}

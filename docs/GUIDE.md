@@ -1075,7 +1075,7 @@ A running agent's name takes its family's colour — violet for claude, blue for
 The broken and cooling agents come first, then the running ones, then the idle ones, and an agent that is off — an effective cap of 0, nothing running, a ready quota — never lists.
 The AGENTS top border carries a dim note: `all ≤ global N` when the global cap sits below some agent's own cap or an agent has none, `M off` for the agents that are off, both joined by `·` or either alone, and `all ready` when no agent is broken or cooling, none is off and no layer caps anything; it is cut or left out when it does not fit —
 and the newest user-facing events in an EVENTS box at the bottom, one per row, newest on top, each row its clock time (with the date on another day), two spaces and the event in plain words, as `10:02  #328 landed` over `09:40  plan #99 done`, the words starting in one column; a tall screen shows up to 10 rows.
-When the foreman has reported, the first line of its report sits Dim in the right of the EVENTS top border, cut to fit, since the report can say what the needs-you queue does not.
+When the foreman has reported, the first line of its report sits Dim in the right of the EVENTS top border, without its `**` and backtick marks and cut to fit (`brigada status` keeps the full text), since the report can say what the needs-you queue does not.
 Plan, task, review and agent events show; the foreman's report shows in that border, not in the list; job bookkeeping, messages and the other events do not. The top keeps the newest 50 of them across redraws, so a busy run never empties the list.
 A box has its title Bold in the top border and a Dim note after it; the PLANS note reads `N live · M finished`, counting the finished plans listed and hidden, or `none live · M finished` when plans exist and none is live, and is left out until the first status arrives.
 When plans exist and none is live, the finished plans show as their lines and a dim `idle: last work landed HH:MM` row, with the time of the newest landing the view has kept, ends them; it is left out when none is kept and yields with the finished lines.
@@ -1104,6 +1104,7 @@ A job row has fixed columns that line up across the rows of a box — the mark, 
 Beneath the line come its running jobs (`▸`, as `▸ #342  clip frame to terminal height  work  claude/sonnet@high  3m12s  Edit`):
 the agent is `harness/model@effort`, and a name of more than two `/` segments shows its last, so `opencode/zai-coding-plan/glm-5.3` reads `glm-5.3`;
 the age is `45s`, `9m04s` or `1h02m03s`; the last event is the tool's name alone, and is left out under 80 terminal columns.
+`brigada top` measures text in terminal cells: a CJK or emoji character takes two, a combining mark none, and a cut falls between characters, never inside a wide one, so every boxed row is exactly the frame's width.
 The title is the part cut when the line is tight, down to 8 columns; a last event still too long is cut at the line's end.
 A job with no task has an empty id and `job #N` as its title.
 Then comes a line per task still live work —
