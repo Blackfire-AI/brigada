@@ -67,6 +67,7 @@ Within schema 1, new keys are added as optional keys. A file that worked before 
 - `task_cancel`: `task` (required).
 - `task_retire` (experimental): `tasks` and `reason` (both required); `tasks` is a list of task references (by name or id).
 - `land_retry` (experimental): `task` (required).
+- `check_log` (experimental): `job` (required), `offset` and `limit`.
 - `ask_user`: `text` (required).
 - `status`: `instructions` and `all`, both booleans.
 - `history`: `task` and `limit`.

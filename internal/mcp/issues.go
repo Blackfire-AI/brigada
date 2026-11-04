@@ -87,7 +87,7 @@ func fencedIssue(iss engine.Issue) string {
 // a delimiter in forge text cannot close the section and pose as
 // instructions. Any spelling counts — upper or mixed case, inner
 // spaces — since a model reads tags loosely.
-var issueDelimiterTags = regexp.MustCompile(`(?i)<\s*(/?)\s*(issue|event|user-message|digest|worker-instructions|reviewer-instructions|foreman-instructions|plan-review-instructions|skill|task-spec|diff)(\s+[^\s<>][^<>]*?)?\s*>`)
+var issueDelimiterTags = regexp.MustCompile(`(?i)<\s*(/?)\s*(issue|event|user-message|digest|worker-instructions|reviewer-instructions|foreman-instructions|plan-review-instructions|skill|task-spec|diff|check-log)(\s+[^\s<>][^<>]*?)?\s*>`)
 
 // defuseIssue defuses the delimiter tags inside issue text (§12.2): the
 // same replacement history's fence makes, covering <issue> too.
