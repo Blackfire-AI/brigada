@@ -704,7 +704,8 @@ func topPlanFinished(p engine.StatusPlan) bool {
 
 // topTaskSettled says a task's state leaves it no live work: done,
 // cancelled or retired. Its plan's done/total already counts it, so the
-// tree gives it no line of its own.
+// tree gives it no line of its own — except a done task that has not
+// landed, which gets its ⇡ line (topLandingLine).
 func topTaskSettled(state string) bool {
 	switch state {
 	case "done", "cancelled", "retired":
@@ -825,7 +826,8 @@ func topPlansTree(st api.Status, now time.Time, style term.Style, width int) []s
 // newTopPlans renders the PLANS section with each line's yield class: a
 // finished plan's line folds into the +N finished line (b), a queued,
 // waiting-on or review task line is class d, a held, retry or parked
-// line f, a running line g, and a live plan's own line, the none
+// line f (a done task not landed too, as its ⇡ line), a running line g, a
+// reviewing plan's `plan review queued` line d, and a live plan's own line, the none
 // placeholder, the +N finished line and the head are class h. With tagged
 // each plan's own line names its repo.
 func newTopPlans(st api.Status, tagged bool, now time.Time, style term.Style, width int) []topLine {
@@ -845,42 +847,65 @@ func newTopPlans(st api.Status, tagged bool, now time.Time, style term.Style, wi
 			reasons[n.ID] = n.Reason
 		}
 	}
+	layout := newTopPlanLayout(st.Plans, tagged, style, width)
 	for _, p := range st.Plans {
 		tag := ""
 		if tagged {
 			tag = topRepoName(p.RepoURL)
 		}
 		if topPlanFinished(p) {
-			lines = append(lines, line(topPlanLine(p, tag, style, width), yieldFinished))
+			lines = append(lines, line(topPlanLine(p, tag, layout, style, width), yieldFinished))
 			continue
 		}
-		lines = append(lines, line(topPlanLine(p, tag, style, width), yieldRest))
+		lines = append(lines, line(topPlanLine(p, tag, layout, style, width), yieldRest))
 		task := func(text string, class topYield) {
 			lines = append(lines, line(text, class))
 		}
+		titles := make(map[int64]string, len(p.Tasks))
+		for _, t := range p.Tasks {
+			titles[t.ID] = t.Title
+		}
+		// A plan that is not active shows its state word on its own line,
+		// so its waiting tasks get no queued line of theirs.
+		quiet := p.State != "active" && p.State != ""
 		// Which tasks a job already speaks for: a task with a running,
 		// held or retrying job shows as that job's line, not its state's.
 		busy := make(map[int64]bool)
+		reviewJob := false // a job claimed for the plan's own review shows
 		for _, j := range st.Running {
 			if id, ok := claims.plan(j.ID, j.TaskID); ok && id == p.ID {
-				task(topRunningLine(j, now, style, width), yieldRunning)
+				text := topRunningLine(j, now, style, width)
+				if title := titles[j.TaskID]; j.TaskID != 0 && title != "" {
+					text = topPlanRunningLine(j, title, now, style, width)
+				}
+				task(text, yieldRunning)
 				busy[j.TaskID] = true
+				reviewJob = reviewJob || j.TaskID == 0
 			}
 		}
 		for _, h := range st.Held {
 			if id, ok := claims.plan(h.ID, h.TaskID); ok && id == p.ID && h.TaskID == 0 {
 				task(topHeldLine(h, style, width), yieldHeld)
+				reviewJob = true
 			}
 		}
 		for _, r := range st.Retries {
 			if id, ok := claims.plan(r.ID, r.TaskID); ok && id == p.ID && r.TaskID == 0 {
 				task(topRetryLine(r, now, style, width), yieldHeld)
+				reviewJob = true
 			}
+		}
+		if p.State == "reviewing" && !reviewJob {
+			task("  "+style.Dim("· plan review queued"), yieldQueued)
 		}
 		for _, t := range p.Tasks {
 			for _, h := range st.Held {
 				if h.TaskID == t.ID {
-					task(topHeldLine(h, style, width), yieldHeld)
+					text := topHeldLine(h, style, width)
+					if t.Title != "" {
+						text = topPlanHeldLine(h, t.Title, style, width)
+					}
+					task(text, yieldHeld)
 					busy[t.ID] = true
 				}
 			}
@@ -890,7 +915,17 @@ func newTopPlans(st api.Status, tagged bool, now time.Time, style term.Style, wi
 					busy[t.ID] = true
 				}
 			}
-			if busy[t.ID] || topTaskSettled(t.State) {
+			if busy[t.ID] {
+				continue
+			}
+			if t.LandedLabel() == "not landed" {
+				task(topLandingLine(t, now, style, width), yieldHeld)
+				continue
+			}
+			if topTaskSettled(t.State) {
+				continue
+			}
+			if quiet && topTaskWaits(t.State) {
 				continue
 			}
 			if text := topTaskLine(t, reasons[t.ID], style, width); text != "" {
@@ -908,40 +943,171 @@ func newTopPlans(st api.Status, tagged bool, now time.Time, style term.Style, wi
 	return append(lines, topLine{class: yieldRest, section: topSecPlans, fold: foldFinished})
 }
 
-// topPlanLine is a plan's own line. A finished plan's mark comes from
-// its State: `#id title done/total ✓` for done, `#id title ✗` for
-// cancelled. A live plan's is the Bold id, the title, done/total and an
-// eleven-cell progress bar — never a mark, even with every task done. A
-// tag, when there is one, sits Dim after the id and the title gives way
-// to it.
-func topPlanLine(p engine.StatusPlan, tag string, style term.Style, width int) string {
-	done := 0
+// topPlanCounts is a plan's done and total task counts. The total leaves
+// out cancelled and retired tasks. A live plan counts a done task only
+// once it is landed or is of a class that never lands (LandedLabel empty),
+// so its bar does not read complete before the landing is; a finished plan
+// counts every done task.
+func topPlanCounts(p engine.StatusPlan) (done, total int) {
+	live := !topPlanFinished(p)
 	for _, t := range p.Tasks {
-		if t.State == "done" {
-			done++
+		switch t.State {
+		case "cancelled", "retired":
+			continue
+		case "done":
+			if !live || t.Landed || t.LandedLabel() == "" {
+				done++
+			}
 		}
+		total++
 	}
-	count := fmt.Sprintf("%d/%d", done, len(p.Tasks))
-	id := fmt.Sprintf("#%d", p.ID)
-	var tail string
+	return done, total
+}
+
+// topPlanTail is what ends a plan's line: done/total and the bar for an
+// active plan, `done/total ✓` for a done one, `✗` for a cancelled one,
+// and a state word for any other — `awaiting approval`, `reviewing round
+// N` (the plan review's round, as status words it) or `needs foreman`.
+func topPlanTail(p engine.StatusPlan, style term.Style) string {
+	done, total := topPlanCounts(p)
+	count := fmt.Sprintf("%d/%d", done, total)
 	switch p.State {
 	case "done":
-		tail = count + " " + style.OK("✓")
+		return count + " " + style.OK("✓")
 	case "cancelled":
-		tail = style.Bad("✗")
-	default:
-		tail = count + " " + topPlanBar(done, len(p.Tasks), style)
+		return style.Bad("✗")
+	case "", "active":
+		return count + " " + topPlanBar(done, total, style)
+	case "pending_approval":
+		return style.Warn("awaiting approval")
+	case "reviewing":
+		return style.Dim(fmt.Sprintf("reviewing round %d", p.ReviewRound))
+	case "needs_foreman":
+		return style.Warn("needs foreman")
 	}
-	room := width - term.VisibleWidth(id) - term.VisibleWidth(tail) - 2
-	if tag != "" {
-		room -= term.VisibleWidth(tag) + 1
-		tag = style.Dim(tag) + " "
+	return style.Dim(strings.ReplaceAll(p.State, "_", " "))
+}
+
+// topPlanLayout is the columns every plan line of the list shares, so the
+// tails start in one column: the widest id, the widest tag (0 when no line
+// names its repo) and the widest title, the title capped so the widest
+// tail still fits.
+type topPlanLayout struct {
+	id, tag, title, tail int
+}
+
+func newTopPlanLayout(plans []engine.StatusPlan, tagged bool, style term.Style, width int) topPlanLayout {
+	var l topPlanLayout
+	for _, p := range plans {
+		l.id = max(l.id, len(fmt.Sprintf("#%d", p.ID)))
+		if tagged {
+			l.tag = max(l.tag, utf8.RuneCountInString(topRepoName(p.RepoURL)))
+		}
+		l.title = max(l.title, utf8.RuneCountInString(p.Title))
+		l.tail = max(l.tail, term.VisibleWidth(topPlanTail(p, style)))
 	}
-	title := cutLine(p.Title, max(room, 4))
+	fixed := l.id + 1 + l.tail + 1
+	if l.tag > 0 {
+		fixed += l.tag + 2
+	}
+	l.title = min(l.title, max(width-fixed, 4))
+	return l
+}
+
+// topPlanLine is a plan's own line: the id, the tag when the layout has
+// tags, the title and the tail (topPlanTail), each padded to the layout's
+// column. A finished plan's mark comes from its State; a live plan's id is
+// Bold, and it never carries a mark, even with every task done. The tag
+// sits Dim after the id and the title gives way to it.
+func topPlanLine(p engine.StatusPlan, tag string, l topPlanLayout, style term.Style, width int) string {
+	id := fmt.Sprintf("#%d", p.ID)
+	pad := strings.Repeat(" ", l.id-len(id))
 	if !topPlanFinished(p) {
 		id = style.Bold(id)
 	}
-	return id + " " + tag + title + " " + tail
+	out := id + pad + " "
+	if l.tag > 0 {
+		out += style.Dim(tag) + strings.Repeat(" ", l.tag-utf8.RuneCountInString(tag)) + "  "
+	}
+	title := cutLine(p.Title, l.title)
+	out += title + strings.Repeat(" ", max(l.title-utf8.RuneCountInString(title), 0)) + " "
+	return out + topPlanTail(p, style)
+}
+
+// topTaskWaits says a live task's state is plain waiting: not parked and
+// not reviewing, so only its queued or waiting-on line speaks for it.
+func topTaskWaits(state string) bool {
+	switch state {
+	case "needs_foreman", "needs_user", "failed", "reviewing":
+		return false
+	}
+	return true
+}
+
+// topLandingLine is a done task that has not landed and that no job speaks
+// for, Dim: `⇡ #330 title  landing: ...`, with what the landing waits on —
+// `queued` for a land job in the queue, the land_ready gate's own words
+// with the stored retry stamp as a local clock, or `not landed` when the
+// task carries no word.
+func topLandingLine(t engine.StatusTask, now time.Time, style term.Style, width int) string {
+	what := "not landed"
+	switch t.LandReady {
+	case "":
+	case "ready":
+		what = "queued"
+	default:
+		what = topLandReadyWords(t.LandReady, now)
+	}
+	subject := fmt.Sprintf("#%d", t.ID)
+	if t.Title != "" {
+		subject += " " + t.Title
+	}
+	return "  " + style.Dim(cutLine("⇡ "+subject+"  landing: "+what, width-2))
+}
+
+// topLandReadyWords shows the stamp in `waiting (retry at <stamp>, last
+// exit N)` as a local clock; any other words stay as they are.
+func topLandReadyWords(ready string, now time.Time) string {
+	const marker = "retry at "
+	i := strings.Index(ready, marker)
+	if i < 0 {
+		return ready
+	}
+	rest := ready[i+len(marker):]
+	j := strings.IndexAny(rest, ",)")
+	if j < 0 {
+		return ready
+	}
+	return ready[:i+len(marker)] + api.LocalClock(rest[:j], now) + rest[j:]
+}
+
+// topTitled is `ref title rest` cut to width, the title giving way and
+// nothing else: the title is whole when fewer than 4 columns remain for
+// it, and only then does the ordinary width cut apply.
+func topTitled(ref, title, rest string, width int) string {
+	room := width - utf8.RuneCountInString(ref) - 1 - utf8.RuneCountInString(rest)
+	switch {
+	case room >= utf8.RuneCountInString(title):
+	case room >= 4:
+		title = cutLine(title, room)
+	default:
+		return cutLine(ref+" "+title+rest, width)
+	}
+	return ref + " " + title + rest
+}
+
+// topPlanRunningLine is a running job under its plan, with its task's
+// title: `▸ #331 title · work · claude/sonnet@high · 3m12s · Edit`, the
+// tail status's own words for the job minus the leading `task #N `.
+func topPlanRunningLine(j engine.StatusJob, title string, now time.Time, style term.Style, width int) string {
+	tail := strings.TrimPrefix(api.DescribeJob(j, now), fmt.Sprintf("task #%d ", j.TaskID))
+	return "  " + style.Accent("▸") + " " + topTitled(fmt.Sprintf("#%d", j.TaskID), title, " · "+tail, width-4)
+}
+
+// topPlanHeldLine is a held job under its plan, with its task's title:
+// `? #333 title  held: waiting for a free account slot`.
+func topPlanHeldLine(h engine.HeldJob, title string, style term.Style, width int) string {
+	return "  " + style.Warn("? "+topTitled(fmt.Sprintf("#%d", h.TaskID), title, "  held: "+api.HeldWait(h), width-4))
 }
 
 // topPlanBar is a live plan's progress: eleven cells, ▓ filled in OK
@@ -1067,6 +1233,19 @@ func topNeedsYouLine(n engine.NeedsYouItem) string {
 		subject = n.Title
 	}
 	reason := n.Reason
+	if reason == "" && n.Kind == "plan" {
+		// A plan entry with no reason says what the plan waits for, not
+		// the raw state word.
+		switch n.State {
+		case "pending_approval":
+			reason = "awaiting approval"
+		case "needs_foreman":
+			reason = "needs foreman"
+		}
+		if reason != "" && n.Title != "" {
+			subject += " " + n.Title
+		}
+	}
 	if reason == "" {
 		reason = n.State
 	}
