@@ -74,14 +74,20 @@ func (in ForemanInbox) Empty() bool {
 }
 
 // wakeForemanTx evaluates one wake for the project, its outcome left to
-// wakeOutcomeTx's callers that report it.
+// wakeOutcomeTx's callers that report it. Once the wake has settled, the
+// parked tasks the foreman will not handle are named (§10): the park
+// that raised the wake no longer notifies on its own, so a task no turn
+// carries is announced here, once per park.
 func (e *Engine) wakeForemanTx(tx *sql.Tx, project int64, now time.Time) error {
 	_, err := e.wakeOutcomeTx(tx, project, now)
 	// Background events must not resurrect a removed project or break a sweep.
 	if errors.Is(err, ErrProjectArchived) {
 		return nil
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return e.announceUnattendedTx(tx, project, now)
 }
 
 // wakeOutcomeTx evaluates one wake for the project (§4.2 item 2, §4.3):

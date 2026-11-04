@@ -80,7 +80,7 @@ func runTop(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if code != 0 {
 			return code
 		}
-		if code := printTopSnapshot(ctx, client, repo, stdout, stderr); code != 0 {
+		if code := printTopSnapshot(ctx, client, repo, time.Now(), stdout, stderr); code != 0 {
 			return code
 		}
 		if hint := agentsHint(ctx, rt, true); hint != "" {
@@ -92,14 +92,15 @@ func runTop(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 }
 
 // printTopSnapshot fetches once and prints the plain rendering; the
-// loop never runs here. Any fetch error is a failure, not a line.
-func printTopSnapshot(ctx context.Context, client topClient, repo string, stdout, stderr io.Writer) int {
+// loop never runs here. Any fetch error is a failure, not a line. now is
+// the clock the rendering reads, so a test can fix it.
+func printTopSnapshot(ctx context.Context, client topClient, repo string, now time.Time, stdout, stderr io.Writer) int {
 	model, err := topFetch(ctx, client, repo)
 	if err != nil {
 		return fail(stderr, err)
 	}
 	style := term.New(detectCaps(stdout))
-	fmt.Fprintln(stdout, strings.Join(renderTop(model, style.Width(), 0, time.Now(), style), "\n"))
+	fmt.Fprintln(stdout, strings.Join(renderTop(model, style.Width(), 0, now, style), "\n"))
 	return 0
 }
 
@@ -181,35 +182,91 @@ func dialEngine(ctx context.Context, rt *runtime, role string, noStart bool) (*a
 }
 
 // renderTop lays the view out, top to bottom: the header, the meters
-// strip, NEEDS YOU, then the AGENTS, RUNNING, QUEUE and PLANS sections
-// and the events strip at the bottom, every line cut to width and the
-// whole trimmed to height — height 0 means no height limit — so a later
-// section yields its lines before an earlier one. With a plain style
-// the text is the same and has no escapes.
+// strip, NEEDS YOU, the FOREMAN block (a foreman turn no plan claims) and
+// the JOBS block (any other job no plan claims), each only when it has
+// lines, the PLANS tree with every job under its plan, the AGENTS
+// section and the events strip at the bottom, every line cut to width.
+// The height is a budget, 0 meaning no limit: lines beyond it yield in
+// order — the events strip's second line, then plan task lines from
+// the last listed plan upward, then agent lines from the bottom of the
+// list upward, counted in a dim +N more (brigada agents) line — and
+// what never yields (the header with its error and hint lines, the
+// meters, NEEDS YOU whole, the FOREMAN and JOBS blocks with their heads,
+// every plan's own line, the
+// agents head with its global line, the events strip's first line,
+// every blank line between sections) renders whole even when the view
+// overflows the screen. With a plain style the text is the same and
+// has no escapes.
 func renderTop(model topModel, width, height int, now time.Time, style term.Style) []string {
-	agents := api.AgentsTable(model.capacity, now, style, width)
-	if global := globalCap(model.capacity); global != nil {
-		agents = append(agents, style.Dim(fmt.Sprintf("all \u2264 global %d", *global)))
+	header := topHeader(model, now, style, width)
+	meters := topMeters(model, style, width)
+	needs := topNeedsYou(model.status, style, width)
+	foreman, jobs := topPlanless(model.status, now, style, width)
+	plans := newTopPlans(model.status, now, style, width)
+	events := topEvents(model.events, now, style, width)
+
+	// The budget's arithmetic: how many lines the view carries with
+	// eventLines strip lines, planDrop plan task lines dropped and
+	// agentsKeep agent lines kept.
+	agentsAll := len(model.capacity.Agents)
+	globalLines := 0
+	if api.GlobalCap(model.capacity) != nil {
+		globalLines = 1
 	}
-	sections := [][]string{
-		topHeader(model, now, style, width),
-		topMeters(model, style, width),
-		topNeedsYou(model.status, style, width),
+	sectionCount := 6
+	// Each non-empty block adds its head, its job lines and one blank.
+	if len(foreman) > 0 {
+		sectionCount++
+	}
+	if len(jobs) > 0 {
+		sectionCount++
+	}
+	eventLines, planDrop, agentsKeep := len(events), 0, agentsAll
+	count := func() int {
+		agentsLines := 1 + agentsKeep + globalLines
+		if agentsKeep < agentsAll {
+			// The +N more (brigada agents) line that names the drops.
+			agentsLines++
+		}
+		return len(header) + len(meters) + len(needs) + len(foreman) + len(jobs) +
+			len(plans.lines) - planDrop + agentsLines + eventLines +
+			sectionCount - 1
+	}
+	if height > 0 && count() > height {
+		eventLines = 1
+		if over := count() - height; over > 0 {
+			planDrop = min(over, len(plans.taskIdx))
+			if over = count() - height; over > 0 {
+				// Every agent line dropped past the first pays for the
+				// +N more line that names them.
+				if save := min(over, agentsAll-1); save > 0 {
+					agentsKeep = agentsAll - 1 - save
+				}
+			}
+		}
+	}
+	agents := topAgents(model, now, style, width, 0)
+	if agentsKeep < agentsAll {
+		agents = topAgents(model, now, style, width, 2+globalLines+agentsKeep)
+	}
+	sections := [][]string{header, meters, needs}
+	if len(foreman) > 0 {
+		sections = append(sections, foreman)
+	}
+	if len(jobs) > 0 {
+		sections = append(sections, jobs)
+	}
+	sections = append(sections,
+		plans.yield(planDrop),
 		agents,
-		topRunning(model.status, now, style, width),
-		topQueue(model.status, now, style, width),
-		topPlans(model.status, style, width),
-		topEvents(model.events, now, style, width),
-	}
+		events[:eventLines],
+	)
 	var lines []string
 	for i, section := range sections {
 		if i > 0 {
 			lines = append(lines, "")
 		}
 		lines = append(lines, section...)
-	}
-	if height > 0 && len(lines) > height {
-		lines = lines[:height]
 	}
 	for i, line := range lines {
 		lines[i] = topFit(line, width)
@@ -228,8 +285,11 @@ func topFit(line string, width int) string {
 
 // topHeader is the first line of the view: the engine's pid, its uptime
 // and the clock, then a dim rule filling the width that remains and the
-// keys at the right end. A failed fetch adds its error as a second
-// line, so the view keeps its shape while the loop retries.
+// keys at the right end. The keys show only when they fit whole — left,
+// two spaces and the keys within the width; a key is never cut
+// mid-word — and otherwise the rule fills what remains of the width. A
+// failed fetch adds its error as a second line, so the view keeps its
+// shape while the loop retries.
 func topHeader(model topModel, now time.Time, style term.Style, width int) []string {
 	st := model.status
 	uptime := "0s"
@@ -241,11 +301,12 @@ func topHeader(model topModel, now time.Time, style term.Style, width int) []str
 		keys = "paused; p resumes, q quits"
 	}
 	left := fmt.Sprintf("brigada top · pid %d · up %s · %s", st.Pid, uptime, now.Format("15:04:05"))
-	rule := width - term.VisibleWidth(left) - term.VisibleWidth(keys) - 2
-	if rule < 1 {
-		rule = 1
+	var line string
+	if rule := width - term.VisibleWidth(left) - term.VisibleWidth(keys) - 2; rule >= 1 {
+		line = left + " " + style.Dim(strings.Repeat("─", rule)) + " " + keys
+	} else {
+		line = left + " " + style.Dim(strings.Repeat("─", max(width-term.VisibleWidth(left)-1, 1)))
 	}
-	line := left + " " + style.Dim(strings.Repeat("─", rule)) + " " + keys
 	lines := []string{topFit(line, width)}
 	if model.err != nil {
 		lines = append(lines, style.Bad(cutLine("engine: "+model.err.Error(), width)))
@@ -256,16 +317,75 @@ func topHeader(model topModel, now time.Time, style term.Style, width int) []str
 	return lines
 }
 
-// globalCap is the snapshot's global layer cap, nil when there is no
-// global layer or the layer is uncapped; it is the line under the AGENTS
-// table.
-func globalCap(snap engine.CapacitySnapshot) *int {
-	for _, l := range snap.Layers {
-		if l.Layer == caps.LayerGlobal {
-			return l.Cap
+// topAgents is the AGENTS section: a rule-filled head, one line per
+// agent — `harness/model` padded to the widest name, the running count
+// against the effective cap as `brigada capacity` folds it, then the
+// quota cell — and a dim `all ≤ global N` line when the snapshot carries
+// a global cap. A broken agent's reason comes from its agent needs-you
+// entry in the unscoped status, "broken" when the status has none.
+// budget is the section's line budget, head included; 0 is no limit.
+// When the lines do not fit, the tail of the agent lines goes and a dim
+// `+N more (brigada agents)` line counts them, the global line kept
+// under it.
+func topAgents(model topModel, now time.Time, style term.Style, width, budget int) []string {
+	head := topSectionHead("AGENTS", style, width)
+	snap := model.capacity
+	g := api.GlobalCap(snap)
+	var global []string
+	if g != nil {
+		global = []string{style.Dim(fmt.Sprintf("all ≤ global %d", *g))}
+	}
+	if len(snap.Agents) == 0 {
+		return append([]string{head, style.Dim("no agents advertised")}, global...)
+	}
+	reasons := make(map[string]string)
+	for _, n := range model.status.NeedsYou {
+		if n.Kind == "agent" {
+			reasons[n.Title] = n.Reason
 		}
 	}
-	return nil
+	names := make([]string, len(snap.Agents))
+	capCells := make([]string, len(snap.Agents))
+	nameW, capW := 0, 0
+	for i, a := range snap.Agents {
+		names[i] = a.Harness + "/" + a.Model
+		capCells[i] = api.RunningCap(a, g)
+		nameW = max(nameW, utf8.RuneCountInString(names[i]))
+		capW = max(capW, utf8.RuneCountInString(capCells[i]))
+	}
+	nameW = min(nameW, width)
+	agents := make([]string, len(snap.Agents))
+	for i, a := range snap.Agents {
+		name := cutLine(names[i], nameW)
+		prefix := name + strings.Repeat(" ", nameW-utf8.RuneCountInString(name)+2) +
+			capCells[i] + strings.Repeat(" ", capW-utf8.RuneCountInString(capCells[i])+2)
+		var quota string
+		switch a.Quota {
+		case "broken":
+			reason := reasons[names[i]]
+			if reason == "" {
+				reason = "broken"
+			}
+			if room := width - utf8.RuneCountInString(prefix) - 2; room >= 10 {
+				reason = cutLine(reason, room)
+			}
+			quota = style.Bad("✗ " + reason)
+		case "cooling":
+			quota = style.Warn("↺ " + api.LocalClock(a.CoolingUntil, now))
+		default:
+			quota = style.OK("✓")
+		}
+		agents[i] = prefix + quota
+	}
+	lines := []string{head}
+	if budget <= 0 || 1+len(agents)+len(global) <= budget {
+		lines = append(lines, agents...)
+		return append(lines, global...)
+	}
+	room := max(budget-2-len(global), 0)
+	lines = append(lines, agents[:room]...)
+	lines = append(lines, style.Dim(fmt.Sprintf("+%d more (brigada agents)", len(agents)-room)))
+	return append(lines, global...)
 }
 
 // topSlots reads the global cap layer's use and cap from the capacity
@@ -323,101 +443,323 @@ func topSlotBar(use, limit int) string {
 	return strings.Repeat("▓", filled) + strings.Repeat("░", cells-filled)
 }
 
-// topRunning lists the jobs a runner holds, one line each: job, task,
-// kind, agent, age and the worker's latest move.
-func topRunning(st api.Status, now time.Time, style term.Style, width int) []string {
-	lines := []string{style.Bold("RUNNING")}
-	if len(st.Running) == 0 {
-		return append(lines, "  none")
+// topPlanFinished says a plan's State has ended it: done or cancelled.
+func topPlanFinished(p engine.StatusPlan) bool {
+	return p.State == "done" || p.State == "cancelled"
+}
+
+// topTaskSettled says a task's state leaves it no live work: done,
+// cancelled or retired. Its plan's done/total already counts it, so the
+// tree gives it no line of its own.
+func topTaskSettled(state string) bool {
+	switch state {
+	case "done", "cancelled", "retired":
+		return true
+	}
+	return false
+}
+
+// topClaims maps a job to the live plan whose tree line it renders
+// under: a job of a live plan's task, or a live plan's review job
+// (StatusPlan.ReviewJob). A taskless job no live plan names as its
+// review is plan-less; a finished plan never carries a live job.
+type topClaims struct {
+	taskPlan   map[int64]int64 // task id → live plan id
+	reviewPlan map[int64]int64 // review job id → live plan id
+}
+
+func newTopClaims(st api.Status) topClaims {
+	c := topClaims{taskPlan: map[int64]int64{}, reviewPlan: map[int64]int64{}}
+	for _, p := range st.Plans {
+		if topPlanFinished(p) {
+			continue
+		}
+		for _, t := range p.Tasks {
+			c.taskPlan[t.ID] = p.ID
+		}
+		if p.ReviewJob != 0 {
+			c.reviewPlan[p.ReviewJob] = p.ID
+		}
+	}
+	return c
+}
+
+// plan is the live plan that claims a job, by its task or as the plan's
+// review job; ok is false for a plan-less job.
+func (c topClaims) plan(jobID, taskID int64) (int64, bool) {
+	if taskID != 0 {
+		id, ok := c.taskPlan[taskID]
+		return id, ok
+	}
+	id, ok := c.reviewPlan[jobID]
+	return id, ok
+}
+
+// topRunningLine is one running job under its task, its plan or in the
+// FOREMAN or JOBS block: the Accent pointer and status's own words for the job.
+func topRunningLine(j engine.StatusJob, now time.Time, style term.Style, width int) string {
+	return "  " + style.Accent("▸") + " " + cutLine(api.DescribeJob(j, now), width-4)
+}
+
+// topHeldLine is one held job, in Warn: the task it is for, or the job
+// when it has none, its kind and status's own words for the wait.
+func topHeldLine(h engine.HeldJob, style term.Style, width int) string {
+	what := fmt.Sprintf("job #%d", h.ID)
+	if h.TaskID != 0 {
+		what = fmt.Sprintf("task #%d", h.TaskID)
+	}
+	return "  " + style.Warn(cutLine(fmt.Sprintf("? %s %s held: %s", what, h.Kind, api.HeldWait(h)), width-2))
+}
+
+// topRetryLine is one job waiting on an infra retry, Dim, in status's
+// own words.
+func topRetryLine(r engine.InfraRetry, now time.Time, style term.Style, width int) string {
+	return "  " + style.Dim(cutLine("↺ "+api.RetryLine(r, now), width-2))
+}
+
+// topPlanless is the two blocks under NEEDS YOU: the running, held and
+// retrying jobs no live plan claims, so no job goes unseen. A foreman
+// turn goes under a FOREMAN head; any other job — the review of a plan
+// the tree does not list — under a JOBS head. Inside a block the order
+// is running, held, retrying. A block is nil, and renderTop leaves it
+// out, when it has no job.
+func topPlanless(st api.Status, now time.Time, style term.Style, width int) (foreman, jobs []string) {
+	claims := newTopClaims(st)
+	var fore, other []string
+	add := func(kind, line string) {
+		if kind == string(engine.KindForeman) {
+			fore = append(fore, line)
+		} else {
+			other = append(other, line)
+		}
 	}
 	for _, j := range st.Running {
-		line := fmt.Sprintf("job #%d", j.ID)
-		if j.TaskID != 0 {
-			line += fmt.Sprintf(" task #%d", j.TaskID)
+		if _, ok := claims.plan(j.ID, j.TaskID); !ok {
+			add(j.Kind, topRunningLine(j, now, style, width))
 		}
-		line += " " + j.Kind
-		if j.Harness != "" {
-			agent := j.Harness + "/" + j.Model
-			if j.Effort != "" {
-				agent += "@" + j.Effort
-			}
-			line += " " + agent
-		}
-		if leased, err := time.Parse(engine.TimeLayout, j.LeasedAt); err == nil {
-			line += " " + formatUptime(now.Sub(leased))
-		}
-		if j.LastEvent != "" {
-			line += " " + j.LastEvent
-		}
-		lines = append(lines, "  "+cutLine(line, width-2))
-	}
-	return lines
-}
-
-// topQueue counts the queued jobs and lists the held ones with the
-// layer that holds each.
-func topQueue(st api.Status, now time.Time, style term.Style, width int) []string {
-	lines := []string{style.Bold("QUEUE")}
-	queued := st.Jobs["queued"]
-	if queued == 0 && len(st.Held) == 0 && len(st.Retries) == 0 {
-		return append(lines, "  empty")
-	}
-	if queued > 0 {
-		lines = append(lines, fmt.Sprintf("  %d queued", queued))
 	}
 	for _, h := range st.Held {
-		line := fmt.Sprintf("held: job #%d %s by %s", h.ID, h.Kind, h.Layer)
-		if h.Agent != "" {
-			line += " (" + h.Agent + ")"
+		if _, ok := claims.plan(h.ID, h.TaskID); !ok {
+			add(h.Kind, topHeldLine(h, style, width))
 		}
-		lines = append(lines, "  "+cutLine(line, width-2))
 	}
 	for _, r := range st.Retries {
-		lines = append(lines, "  "+cutLine("waiting: "+api.RetryLine(r, now), width-2))
+		if _, ok := claims.plan(r.ID, r.TaskID); !ok {
+			add(r.Kind, topRetryLine(r, now, style, width))
+		}
+	}
+	if len(fore) > 0 {
+		foreman = append([]string{topSectionHead("FOREMAN", style, width)}, fore...)
+	}
+	if len(other) > 0 {
+		jobs = append([]string{topSectionHead("JOBS", style, width)}, other...)
+	}
+	return foreman, jobs
+}
+
+// topPlansView is the rendered PLANS section with its yield order
+// marked: lines holds the whole section, taskIdx the indices of the
+// plan task lines in the order the height budget drops them — the last
+// listed plan's block bottom-up, then the plan before it. A plan's own
+// line and the +N finished line never yield.
+type topPlansView struct {
+	lines   []string
+	taskIdx []int
+}
+
+// yield drops the first n plan task lines from the section.
+func (v topPlansView) yield(n int) []string {
+	if n <= 0 {
+		return v.lines
+	}
+	n = min(n, len(v.taskIdx))
+	drop := make(map[int]bool, n)
+	for _, idx := range v.taskIdx[:n] {
+		drop[idx] = true
+	}
+	lines := make([]string, 0, len(v.lines)-n)
+	for i, line := range v.lines {
+		if !drop[i] {
+			lines = append(lines, line)
+		}
 	}
 	return lines
 }
 
-// topPlans lists the active plans with done/total tasks, and under
-// each the tasks parked at needs_foreman or needs_user with the reason
-// the needs-you queue carries for them.
-func topPlans(st api.Status, style term.Style, width int) []string {
-	lines := []string{style.Bold("PLANS")}
-	var active []engine.StatusPlan
-	for _, p := range st.Plans {
-		if p.State == "active" {
-			active = append(active, p)
-		}
+// topPlansTree is the PLANS section: every plan the status lists, each
+// live one with its live work beneath it — the running jobs first, then
+// a line per task still waiting, held, retrying, parked or reviewing —
+// and each finished one a single line. A Dim "+N finished" line counts
+// the finished plans the status hid.
+func topPlansTree(st api.Status, now time.Time, style term.Style, width int) []string {
+	return newTopPlans(st, now, style, width).lines
+}
+
+// newTopPlans renders the PLANS section and marks its plan task lines
+// for the height budget.
+func newTopPlans(st api.Status, now time.Time, style term.Style, width int) topPlansView {
+	v := topPlansView{lines: []string{topSectionHead("PLANS", style, width)}}
+	if len(st.Plans) == 0 {
+		v.lines = append(v.lines, style.Dim("none"))
 	}
-	if len(active) == 0 {
-		return append(lines, "  none")
-	}
+	claims := newTopClaims(st)
 	reasons := make(map[int64]string)
-	for _, n := range st.NeedsYou {
+	for _, n := range append(append([]engine.NeedsYouItem{}, st.NeedsYou...), st.ForemanHolds...) {
 		if n.Kind == "task" {
 			reasons[n.ID] = n.Reason
 		}
 	}
-	for _, p := range active {
-		done := 0
-		for _, t := range p.Tasks {
-			if t.State == "done" {
-				done++
+	var blocks [][]int
+	for _, p := range st.Plans {
+		v.lines = append(v.lines, topPlanLine(p, style, width))
+		if topPlanFinished(p) {
+			continue
+		}
+		var block []int
+		task := func(line string) {
+			v.lines = append(v.lines, line)
+			block = append(block, len(v.lines)-1)
+		}
+		// Which tasks a job already speaks for: a task with a running,
+		// held or retrying job shows as that job's line, not its state's.
+		busy := make(map[int64]bool)
+		for _, j := range st.Running {
+			if id, ok := claims.plan(j.ID, j.TaskID); ok && id == p.ID {
+				task(topRunningLine(j, now, style, width))
+				busy[j.TaskID] = true
 			}
 		}
-		lines = append(lines, cutLine(fmt.Sprintf("  #%d %s %s %d/%d", p.ID, p.State, p.Title, done, len(p.Tasks)), width))
+		for _, h := range st.Held {
+			if id, ok := claims.plan(h.ID, h.TaskID); ok && id == p.ID && h.TaskID == 0 {
+				task(topHeldLine(h, style, width))
+			}
+		}
+		for _, r := range st.Retries {
+			if id, ok := claims.plan(r.ID, r.TaskID); ok && id == p.ID && r.TaskID == 0 {
+				task(topRetryLine(r, now, style, width))
+			}
+		}
 		for _, t := range p.Tasks {
-			if t.State != "needs_foreman" && t.State != "needs_user" {
+			for _, h := range st.Held {
+				if h.TaskID == t.ID {
+					task(topHeldLine(h, style, width))
+					busy[t.ID] = true
+				}
+			}
+			for _, r := range st.Retries {
+				if r.TaskID == t.ID {
+					task(topRetryLine(r, now, style, width))
+					busy[t.ID] = true
+				}
+			}
+			if busy[t.ID] || topTaskSettled(t.State) {
 				continue
 			}
-			line := fmt.Sprintf("    task #%d %s %s", t.ID, t.State, t.Title)
-			if reason := reasons[t.ID]; reason != "" {
-				line += ": " + reason
+			if line := topTaskLine(t, reasons[t.ID], style, width); line != "" {
+				task(line)
 			}
-			lines = append(lines, cutLine(line, width))
+		}
+		blocks = append(blocks, block)
+	}
+	for i := len(blocks) - 1; i >= 0; i-- {
+		for j := len(blocks[i]) - 1; j >= 0; j-- {
+			v.taskIdx = append(v.taskIdx, blocks[i][j])
 		}
 	}
-	return lines
+	if st.HiddenFinishedPlans > 0 {
+		v.lines = append(v.lines, style.Dim(fmt.Sprintf("+%d finished", st.HiddenFinishedPlans)))
+	}
+	return v
+}
+
+// topPlanLine is a plan's own line. A finished plan's mark comes from
+// its State: `#id title done/total ✓` for done, `#id title ✗` for
+// cancelled. A live plan's is the Bold id, the title, done/total and an
+// eleven-cell progress bar — never a mark, even with every task done.
+func topPlanLine(p engine.StatusPlan, style term.Style, width int) string {
+	done := 0
+	for _, t := range p.Tasks {
+		if t.State == "done" {
+			done++
+		}
+	}
+	count := fmt.Sprintf("%d/%d", done, len(p.Tasks))
+	id := fmt.Sprintf("#%d", p.ID)
+	var tail string
+	switch p.State {
+	case "done":
+		tail = count + " " + style.OK("✓")
+	case "cancelled":
+		tail = style.Bad("✗")
+	default:
+		tail = count + " " + topPlanBar(done, len(p.Tasks), style)
+	}
+	room := width - term.VisibleWidth(id) - term.VisibleWidth(tail) - 2
+	title := cutLine(p.Title, max(room, 4))
+	if !topPlanFinished(p) {
+		id = style.Bold(id)
+	}
+	return id + " " + title + " " + tail
+}
+
+// topPlanBar is a live plan's progress: eleven cells, ▓ filled in OK
+// and ░ empty in Dim, in proportion to the done tasks, at least one ▓
+// once any is done.
+func topPlanBar(done, total int, style term.Style) string {
+	const cells = 11
+	filled := 0
+	if total > 0 {
+		filled = done * cells / total
+	}
+	if done > 0 && filled == 0 {
+		filled = 1
+	}
+	filled = min(filled, cells)
+	var bar string
+	if filled > 0 {
+		bar = style.OK(strings.Repeat("▓", filled))
+	}
+	if filled < cells {
+		bar += style.Dim(strings.Repeat("░", cells-filled))
+	}
+	return bar
+}
+
+// topTaskLine is a live task's line when no job speaks for it: Dim
+// queued — or waiting on the dependencies it names — for a task not
+// yet leased, Bad with the needs-you reason for a parked one, Dim
+// "(review)" for a task reviewing with no job running.
+func topTaskLine(t engine.StatusTask, reason string, style term.Style, width int) string {
+	subject := fmt.Sprintf("#%d %s", t.ID, t.Title)
+	switch t.State {
+	case "needs_foreman", "needs_user", "failed":
+		if reason == "" {
+			reason = t.State
+		}
+		return "  " + style.Bad(cutLine("! "+subject+" "+reason, width-2))
+	case "reviewing":
+		return "  " + style.Dim(cutLine("· "+subject+" (review)", width-2))
+	}
+	wait := "(queued)"
+	if len(t.WaitingOn) > 0 {
+		wait = "(waiting on " + strings.Join(t.WaitingOn, ", ") + ")"
+	}
+	return "  " + style.Dim(cutLine("· "+subject+" "+wait, width-2))
+}
+
+// topSectionHead is a section's head line: the Bold title and a Dim
+// rule filling the width. Below 60 columns the rule is dropped and the
+// title stands alone — the width is too narrow to spend on fills —
+// while the section's lines beneath keep their indentation.
+func topSectionHead(title string, style term.Style, width int) string {
+	if width < 60 {
+		return style.Bold(title)
+	}
+	rule := width - term.VisibleWidth(title) - 1
+	if rule < 1 {
+		rule = 1
+	}
+	return style.Bold(title) + " " + style.Dim(strings.Repeat("─", rule))
 }
 
 // topNeedsYou is the needs-you queue at the top of the view, under the
@@ -427,11 +769,7 @@ func topPlans(st api.Status, style term.Style, width int) []string {
 // The section is always visible: an empty queue keeps the header and
 // renders one dim line under it.
 func topNeedsYou(st api.Status, style term.Style, width int) []string {
-	rule := width - term.VisibleWidth("NEEDS YOU") - 1
-	if rule < 1 {
-		rule = 1
-	}
-	lines := []string{style.Bold("NEEDS YOU") + " " + style.Dim(strings.Repeat("─", rule))}
+	lines := []string{topSectionHead("NEEDS YOU", style, width)}
 	if len(st.NeedsYou) == 0 {
 		return append(lines, style.Dim("nothing needs you"))
 	}
@@ -464,8 +802,11 @@ func topNeedsYouLine(n engine.NeedsYouItem) string {
 }
 
 // topEvents is the strip at the bottom: the newest history items,
-// newest first, joined by " · " into one line cut to width. Wrapping
-// the strip over two lines is a later task's; topEventItem renders each
+// newest first, joined by " · ". Whole items fill the first line; the
+// first item that does not fit wraps to a second line only when a
+// whole item fits there, that line cut to width when items remain —
+// and when no item fits on the second line the strip stays one line
+// cut to width. There is never a third line. topEventItem renders each
 // item for both.
 func topEvents(items []history.Item, now time.Time, style term.Style, width int) []string {
 	if len(items) == 0 {
@@ -475,7 +816,34 @@ func topEvents(items []history.Item, now time.Time, style term.Style, width int)
 	for i := len(items) - 1; i >= 0; i-- {
 		parts[len(items)-1-i] = topEventItem(items[i], now, style)
 	}
-	return []string{topFit(strings.Join(parts, " · "), width)}
+	// fill packs whole items from start while they fit; it reports how
+	// many it took and the first index it left out.
+	fill := func(start int) (took, next int) {
+		used := 0
+		for i := start; i < len(parts); i++ {
+			part := term.VisibleWidth(parts[i])
+			if i > start {
+				part += len(" · ")
+			}
+			if used+part > width {
+				return i - start, i
+			}
+			used += part
+		}
+		return len(parts) - start, len(parts)
+	}
+	first, next := fill(0)
+	if next == len(parts) {
+		return []string{strings.Join(parts, " · ")}
+	}
+	if second, _ := fill(next); second == 0 {
+		// No whole item fits on the second line: one line, cut.
+		return []string{topFit(strings.Join(parts, " · "), width)}
+	}
+	return []string{
+		strings.Join(parts[:first], " · "),
+		topFit(strings.Join(parts[first:], " · "), width),
+	}
 }
 
 // topEventItem is one history item as the events strip shows it: its
@@ -505,9 +873,9 @@ func topColourStates(line string, style term.Style) string {
 	return strings.Join(fields, " ")
 }
 
-// topClock is a stored stamp as a clock time in now's zone: the hour,
-// minute and second on now's day, the date too on any other day. A
-// stamp that does not parse shows as it is.
+// topClock is a stored stamp as a clock time in now's zone: the hour
+// and minute on now's day, the date too on any other day. A stamp that
+// does not parse shows as it is.
 func topClock(stamp string, now time.Time) string {
 	t, err := time.Parse(engine.TimeLayout, stamp)
 	if err != nil {
@@ -515,9 +883,9 @@ func topClock(stamp string, now time.Time) string {
 	}
 	t = t.In(now.Location())
 	if t.Format("2006-01-02") == now.Format("2006-01-02") {
-		return t.Format("15:04:05")
+		return t.Format("15:04")
 	}
-	return t.Format("01-02 15:04:05")
+	return t.Format("01-02 15:04")
 }
 
 // cutLine cuts plain text to width runes, ending "..." when it had to

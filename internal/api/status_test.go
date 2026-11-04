@@ -72,6 +72,16 @@ func TestStatusEndpointPlansAndNeedsYou(t *testing.T) {
 		if _, err := tx.Exec(`UPDATE tasks SET state = 'needs_foreman' WHERE id = ?`, e.task); err != nil {
 			return err
 		}
+		// The own task's park is in the foreman's inbox, and a chat is
+		// attached to its project: the foreman handles the task (§10).
+		if _, err := tx.Exec(`INSERT INTO foreman_inbox (event_id, project_id, state)
+			SELECT id, project_id, 'pending' FROM events WHERE kind = 'task_needs_help' AND task_id = ?`, e.task); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO attach_holds (project_id, state, expires_at, created_at) VALUES (?, 'live', ?, ?)`,
+			e.project1, e.clock.Now().Add(time.Hour).UTC().Format(engine.TimeLayout), now); err != nil {
+			return err
+		}
 		plan, err := tx.Exec(`INSERT INTO plans (project_id, title, state, created_at, updated_at)
 			VALUES (?, 'the other plan', 'active', ?, ?)`, e.project2, now, now)
 		if err != nil {
@@ -106,8 +116,13 @@ func TestStatusEndpointPlansAndNeedsYou(t *testing.T) {
 		t.Fatalf("client reads status: %d %s", code, data)
 	}
 	st := decode[engine.StatusInfo](t, data)
-	if len(st.Plans) != 2 || len(st.NeedsYou) != 2 {
-		t.Fatalf("the client's status = %d plans, %+v, want both projects' plans and queues", len(st.Plans), st.NeedsYou)
+	// The own task is the foreman's: out of the client's queue, in its
+	// foreman_holds list; the other project's park has no inbox row.
+	if len(st.Plans) != 2 || len(st.NeedsYou) != 1 || st.NeedsYou[0].ID == e.task ||
+		len(st.ForemanHolds) != 1 || st.ForemanHolds[0].ID != e.task ||
+		st.ForemanHolds[0].Reason != "which API should the client call?" {
+		t.Fatalf("the client's status = %d plans, needs_you %+v, foreman_holds %+v; want both plans, the other project's task queued and the own task held",
+			len(st.Plans), st.NeedsYou, st.ForemanHolds)
 	}
 	byID := map[int64]engine.StatusPlan{}
 	for _, p := range st.Plans {
@@ -117,13 +132,6 @@ func TestStatusEndpointPlansAndNeedsYou(t *testing.T) {
 	if own.State != "active" || own.RepoURL != "https://example.invalid/one.git" || len(own.Tasks) != 1 ||
 		own.Tasks[0].ID != e.task || own.Tasks[0].State != "needs_foreman" {
 		t.Errorf("the own plan = %+v, want the active plan with its parked task", own)
-	}
-	reasons := map[int64]string{}
-	for _, it := range st.NeedsYou {
-		reasons[it.ID] = it.Reason
-	}
-	if got := reasons[e.task]; got != "which API should the client call?" {
-		t.Errorf("the own task's reason = %q, want the question the event carries", got)
 	}
 
 	// The foreman is walled into its own project: its plan and its task

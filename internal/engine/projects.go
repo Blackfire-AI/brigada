@@ -248,7 +248,12 @@ func (e *Engine) Projects(ctx context.Context) ([]ProjectInfo, error) {
 			if err != nil {
 				return err
 			}
-			out[i].NeedsYou = len(items)
+			// The foreman's holds are not the user's to look at (§10).
+			for _, it := range items {
+				if !it.ForemanHolds {
+					out[i].NeedsYou++
+				}
+			}
 		}
 		return nil
 	})

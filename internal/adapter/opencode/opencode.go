@@ -426,19 +426,8 @@ func bashRules(tools []string, review bool) any {
 	if review {
 		return "deny"
 	}
-	if tools == nil {
-		tools = claude.DefaultWorkerTools()
-	}
 	rules := map[string]any{}
-	for _, t := range tools {
-		rest, ok := strings.CutPrefix(t, "Bash(")
-		if !ok {
-			continue
-		}
-		cmd, ok := strings.CutSuffix(rest, ":*)")
-		if !ok || !bashCommandOK(cmd) {
-			continue
-		}
+	for _, cmd := range mappedCommands(tools) {
 		rules[cmd] = "allow"
 		rules[cmd+" *"] = "allow"
 	}
@@ -448,6 +437,37 @@ func bashRules(tools []string, review bool) any {
 	rules["*"] = "deny" // sorts before every allowed command, so it is read first
 	return rules
 }
+
+// mappedCommands is the commands of a Claude-spelled scope that map onto
+// opencode's bash rules, in scope order; a nil scope is the Go default.
+func mappedCommands(tools []string) []string {
+	if tools == nil {
+		tools = claude.DefaultWorkerTools()
+	}
+	var cmds []string
+	for _, t := range tools {
+		rest, ok := strings.CutPrefix(t, "Bash(")
+		if !ok {
+			continue
+		}
+		cmd, ok := strings.CutSuffix(rest, ":*)")
+		if !ok || !bashCommandOK(cmd) {
+			continue
+		}
+		cmds = append(cmds, cmd)
+	}
+	return cmds
+}
+
+// ShellCommands implements adapter.ShellScoped: the commands bashRules
+// allows a worker, so the prompt names what the rules enforce. A scope
+// that maps to none is a shell denied outright, and opencode has no
+// whole-shell scope.
+func (a *Adapter) ShellCommands(tools []string) (commands []string, whole bool) {
+	return mappedCommands(tools), false
+}
+
+var _ adapter.ShellScoped = (*Adapter)(nil)
 
 // bashCommandOK accepts a plain command prefix: it starts with a letter,
 // digit, dot or slash and holds only letters, digits and . / _ - and

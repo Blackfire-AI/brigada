@@ -83,18 +83,32 @@ func TestWebhookTextOmitsCheckOutput(t *testing.T) {
 	defer st.Close()
 	seedProject(t, ctx, st)
 	secretish := "printenv says " + strings.Repeat("x", 12)
-	appendEvent(t, ctx, st, KindTaskCheckFailed, 1, 1, `{"status":"needs_foreman","reason":"`+secretish+`"}`)
+	appendEvent(t, ctx, st, KindTaskCheckFailed, 1, 1, `{"status":"needs_user","reason":"`+secretish+`"}`)
+	// The same output reaches the user through task_unattended when the
+	// foreman does not hold the park.
+	appendEvent(t, ctx, st, KindTaskUnattended, 1, 1, `{"status":"needs_foreman","reason":"`+secretish+`","park_kind":"task_check_failed"}`)
 
 	r := newRelay(t)
 	banner := &Fake{}
 	if err := NewLoop(st, banner, nil).WithWebhook(r.hook()).Flush(ctx); err != nil {
 		t.Fatalf("flush: %v", err)
 	}
-	waitFor(t, "the post", func() bool { return len(r.received()) >= 1 })
-	if p := r.received()[0]; strings.Contains(p.Raw, secretish) {
-		t.Errorf("webhook body %q carries the check output", p.Raw)
+	waitFor(t, "the posts", func() bool { return len(r.received()) >= 2 })
+	for _, p := range r.received() {
+		if strings.Contains(p.Raw, secretish) {
+			t.Errorf("webhook body %q carries the check output", p.Raw)
+		}
+		if p.Body.Text != "task #1 needs you: its check failed" {
+			t.Errorf("webhook text %q, want the check-failed line", p.Body.Text)
+		}
 	}
-	if got := banner.Notes(); len(got) != 1 || !strings.Contains(got[0].Body, secretish) {
-		t.Errorf("banner notes = %v, want the desktop banner to keep the check tail", got)
+	got := banner.Notes()
+	if len(got) != 2 {
+		t.Fatalf("banner notes = %v, want one per event", got)
+	}
+	for _, n := range got {
+		if !strings.Contains(n.Body, secretish) {
+			t.Errorf("banner note %q, want the desktop banner to keep the check tail", n.Body)
+		}
 	}
 }

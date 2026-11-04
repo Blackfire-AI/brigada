@@ -261,7 +261,7 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 		}
 	}
 	cmd, err := ad.Command(adapter.Job{
-		Prompt:    r.grant.Prompt + r.extraPromptOf(),
+		Prompt:    r.grant.Prompt + r.extraPromptOf() + shellScopeNote(ad, r.grant, tools, r.mcpConfig),
 		Model:     model,
 		Review:    isReviewJob(r.grant),
 		Effort:    r.cfg.effortFor(r.grant),

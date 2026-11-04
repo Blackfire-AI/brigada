@@ -94,6 +94,11 @@ type StatusInfo struct {
 	HiddenFinishedPlans int            `json:"hidden_finished_plans,omitempty"`
 	Report              *StatusReport  `json:"report,omitempty"`
 	NeedsYou            []NeedsYouItem `json:"needs_you"`
+	// ForemanHolds lists the needs-you entries the foreman holds (§10),
+	// split out of NeedsYou for a caller that is not the foreman: the
+	// engine's own Status keeps every entry in NeedsYou, and the API
+	// moves the held ones here (SplitForemanHolds).
+	ForemanHolds []NeedsYouItem `json:"foreman_holds,omitempty"`
 	// Cooling lists the agents held back for quota (§8, §10): shown
 	// beside the running jobs, never in the needs-you queue.
 	Cooling []CoolingAgent `json:"cooling,omitempty"`
@@ -314,6 +319,11 @@ type NeedsYouItem struct {
 	Title  string `json:"title"`
 	Reason string `json:"reason,omitempty"`
 	PlanID int64  `json:"plan_id,omitempty"` // the task's plan, when the entry is a task
+	// ForemanHolds is true for a task parked at needs_foreman that the
+	// foreman will handle (§10, foremanHolds.task): a live turn carries
+	// its event, or an attached chat holds the project. The user's queue
+	// leaves such a task out; the foreman's list keeps it.
+	ForemanHolds bool `json:"foreman_holds,omitempty"`
 	// A plan awaiting approval also carries what a coordinator shows the
 	// user and quotes back (§4.6): the project's repo URL, the
 	// plan's version — an amendment bumps it — and its tasks.
@@ -902,6 +912,21 @@ func firstLines(s string, max int) string {
 	return strings.Join(lines[:max], "\n")
 }
 
+// SplitForemanHolds moves the held entries out of NeedsYou into
+// ForemanHolds (§10): what a caller other than the foreman reads, since
+// the queue holds only what a rule or the foreman gave the user.
+func (s *StatusInfo) SplitForemanHolds() {
+	kept := make([]NeedsYouItem, 0, len(s.NeedsYou))
+	for _, it := range s.NeedsYou {
+		if it.ForemanHolds {
+			s.ForemanHolds = append(s.ForemanHolds, it)
+			continue
+		}
+		kept = append(kept, it)
+	}
+	s.NeedsYou = kept
+}
+
 // needsYouEventKinds are the event kinds whose payload carries a parked
 // task's reason (§10). The set is the queue's vocabulary: a task is in
 // the queue because one of these parked it — except that
@@ -913,15 +938,19 @@ var needsYouEventKinds = []string{
 	evTaskCheckFailed, evTaskNeedsHelp, evTaskFailed, evTaskOutOfRounds, evTaskLoop, evReviewChanges, evReviewNoVerdict, evTaskLandFailed, evTaskPlanHeld, evTaskBaseStale,
 }
 
-// statusNeedsYouTx lists the "needs you" queue (§10): the tasks parked
+// statusNeedsYouTx lists every "needs you" entry (§10): the tasks parked
 // at needs_foreman or needs_user — each with what its latest parking
-// event said — and the plans waiting for approval. Entries read in id
+// event said — and the plans waiting for approval. The list is whole:
+// a task the foreman holds is marked ForemanHolds and stays in it, so
+// the foreman's own view and the rotation digest read it all; the API
+// moves the held entries out of a user's queue (SplitForemanHolds) and
+// the project list counts only the rest. Entries read in id
 // order; project scopes the queue to one project, 0 to all. A task an
 // environmental land failure parked is not listed alone: its cause's one
 // line, statusLandEnvCausesTx, lists every task it holds (issue #116).
 func statusNeedsYouTx(tx *sql.Tx, reviewFamily string, project int64, now time.Time) ([]NeedsYouItem, error) {
 	kinds := "'" + strings.Join(needsYouEventKinds, "', '") + "'"
-	query := fmt.Sprintf(`SELECT t.id, t.plan_id, t.title, t.state, COALESCE(e.kind, ''), COALESCE(e.payload, '')
+	query := fmt.Sprintf(`SELECT t.id, t.plan_id, t.title, t.state, COALESCE(e.kind, ''), COALESCE(e.payload, ''), p.project_id, COALESCE(e.id, 0)
 		FROM tasks t
 		JOIN plans p ON p.id = t.plan_id
 		LEFT JOIN events e ON e.id = (
@@ -941,22 +970,37 @@ func statusNeedsYouTx(tx *sql.Tx, reviewFamily string, project int64, now time.T
 		return nil, fmt.Errorf("list the needs-you tasks: %w", err)
 	}
 	items := []NeedsYouItem{}
+	var projects, parks []int64
 	for rows.Next() {
 		var it NeedsYouItem
 		var kind, payload string
-		if err := rows.Scan(&it.ID, &it.PlanID, &it.Title, &it.State, &kind, &payload); err != nil {
+		var proj, park int64
+		if err := rows.Scan(&it.ID, &it.PlanID, &it.Title, &it.State, &kind, &payload, &proj, &park); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("list the needs-you tasks: %w", err)
 		}
 		it.Kind = "task"
 		it.Reason = needsYouReason(kind, payload)
 		items = append(items, it)
+		projects = append(projects, proj)
+		parks = append(parks, park)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
 		return nil, fmt.Errorf("list the needs-you tasks: %w", err)
 	}
 	rows.Close()
+	holds := newForemanHolds()
+	for i := range items {
+		if items[i].State != taskNeedsForeman {
+			continue
+		}
+		held, err := holds.task(tx, projects[i], parks[i], now)
+		if err != nil {
+			return nil, err
+		}
+		items[i].ForemanHolds = held
+	}
 
 	// A task whose review no agent could ever take waits at reviewing:
 	// listed beside the parked tasks until a reviewer registers.

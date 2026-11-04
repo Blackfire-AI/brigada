@@ -24,9 +24,12 @@ case "$1 $2" in
   'run list')
     case "$*" in *headSha*) ;; *) exit 3;; esac
     printf '%s\n' "$RUN" ;;
+  'api repos/{owner}/{repo}/actions/runs/'*'/jobs?per_page=100') printf '%s\n' "$JOBS" ;;
+  'run rerun') exit 0 ;;
   *) exit 3 ;;
 esac
 `
+	const noRunner = "test-macos|completed|cancelled|none"
 	for _, tc := range []struct {
 		name, pr, run string
 		age           time.Duration
@@ -35,17 +38,23 @@ esac
 		first         string
 		contains      string
 	}{
-		{"success", "none", "current|completed|success|https://example.com/run", 0, false, 0, "", ""},
-		{"older within grace", "none", "old|completed|success|https://example.com/run", 0, false, 2, "", "current yet; newest run is for old"},
-		{"older past grace", "42|MERGEABLE|main", "old|completed|success|https://example.com/run", time.Hour, false, 1, "no CI run for current after 900s: PR #42 MERGEABLE", ""},
-		{"in progress", "none", "current|in_progress||https://example.com/run", 0, false, 2, "", "in_progress"},
+		{"success", "none", "current|completed|success|7|1|https://example.com/run", 0, false, 0, "", ""},
+		{"older within grace", "none", "old|completed|success|7|1|https://example.com/run", 0, false, 2, "", "current yet; newest run is for old"},
+		{"older past grace", "42|MERGEABLE|main", "old|completed|success|7|1|https://example.com/run", time.Hour, false, 1, "no CI run for current after 900s: PR #42 MERGEABLE", ""},
+		{"in progress", "none", "current|in_progress||7|1|https://example.com/run", 0, false, 2, "", "in_progress"},
 		{"no run within grace", "none", "none", 0, false, 2, "", "no CI run for current yet"},
 		{"no run past grace", "none", "none", time.Hour, false, 1, "no CI run for current after 900s: no open PR", ""},
 		{"conflicting", "42|CONFLICTING|main", "none", 0, false, 1, "PR #42 conflicts with main: CI will not run", ""},
 		{"unknown", "42|UNKNOWN|main", "none", time.Hour, false, 2, "", "UNKNOWN"},
 		{"missing branch", "none", "none", 0, true, 0, "", ""},
-		{"failed run", "none", "current|completed|failure|https://example.com/run", 0, false, 1, "https://example.com/run", ""},
+		{"failed run", "none", "current|completed|failure|7|1|https://example.com/run", 0, false, 1, "https://example.com/run", ""},
+		{"no runner rerun", "none", "current|completed|failure|7|1|https://example.com/run", 0, false, 2, "", "test-macos got no runner on attempt 1"},
+		{"no runner spent", "none", "current|completed|failure|7|3|https://example.com/run", 0, false, 1, "test-macos got no runner after 3 attempts", ""},
 	} {
+		jobs := "build|completed|failure|ran"
+		if strings.HasPrefix(tc.name, "no runner") {
+			jobs = noRunner
+		}
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(stub), 0755); err != nil {
@@ -56,7 +65,7 @@ esac
 				missing = "yes"
 			}
 			cmd := exec.Command("sh", script)
-			cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "BRANCH_MISSING="+missing, "COMMIT_DATE="+time.Now().UTC().Add(-tc.age).Format("2006-01-02T15:04:05Z"), "PR="+tc.pr, "RUN="+tc.run, "BRIGADA_LAND_READY_GRACE_SECONDS=900")
+			cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "BRANCH_MISSING="+missing, "COMMIT_DATE="+time.Now().UTC().Add(-tc.age).Format("2006-01-02T15:04:05Z"), "PR="+tc.pr, "RUN="+tc.run, "JOBS="+jobs, "BRIGADA_LAND_READY_GRACE_SECONDS=900")
 			out, err := cmd.CombinedOutput()
 			code := 0
 			if err != nil {
