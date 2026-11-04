@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,32 +23,90 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/term"
 )
 
-// fakeTop stubs the top client: what it serves and what fails.
+// fakeTop stubs the top client: what it serves, what fails and what the
+// calls asked. status is the unscoped answer; scopedStatus is a project
+// reader's, and when nil the reader serves status without its agent
+// entries, as the engine does.
 type fakeTop struct {
-	status      api.Status
-	capacity    engine.CapacitySnapshot
-	projects    []engine.ProjectInfo
-	page        history.Page
-	statusErr   error
-	capacityErr error
-	projectsErr error
-	historyErr  error
+	status          api.Status
+	scopedStatus    *api.Status
+	capacity        engine.CapacitySnapshot
+	projects        []engine.ProjectInfo
+	page            history.Page
+	statusErr       error
+	scopedStatusErr error
+	capacityErr     error
+	projectsErr     error
+	historyErr      error
+
+	statusCalls       int
+	scopedStatusCalls int
+	projectsCalls     int
+	readerProject     int64
+	capacityProject   int64
+	historyProject    int64
 }
 
 func (f *fakeTop) Status(context.Context) (api.Status, error) {
+	f.statusCalls++
 	return f.status, f.statusErr
 }
 
-func (f *fakeTop) Capacity(context.Context, int64) (engine.CapacitySnapshot, error) {
+func (f *fakeTop) Capacity(_ context.Context, projectID int64) (engine.CapacitySnapshot, error) {
+	f.capacityProject = projectID
 	return f.capacity, f.capacityErr
 }
 
 func (f *fakeTop) Projects(context.Context) ([]engine.ProjectInfo, error) {
+	f.projectsCalls++
 	return f.projects, f.projectsErr
 }
 
-func (f *fakeTop) History(context.Context, api.HistoryQuery) (history.Page, error) {
+func (f *fakeTop) History(_ context.Context, q api.HistoryQuery) (history.Page, error) {
+	f.historyProject = q.ProjectID
 	return f.page, f.historyErr
+}
+
+func (f *fakeTop) forProject(projectID int64) topClient {
+	f.readerProject = projectID
+	return fakeTopReader{fakeTop: f, project: projectID}
+}
+
+// fakeTopReader is fakeTop's project reader, the seam ProjectReader is on
+// the real client: a read with no project of its own falls back to the
+// reader's.
+type fakeTopReader struct {
+	*fakeTop
+	project int64
+}
+
+func (r fakeTopReader) Status(context.Context) (api.Status, error) {
+	r.scopedStatusCalls++
+	if r.scopedStatus != nil {
+		return *r.scopedStatus, r.scopedStatusErr
+	}
+	st := r.status
+	st.NeedsYou = nil
+	for _, n := range r.status.NeedsYou {
+		if n.Kind != "agent" {
+			st.NeedsYou = append(st.NeedsYou, n)
+		}
+	}
+	return st, r.scopedStatusErr
+}
+
+func (r fakeTopReader) Capacity(ctx context.Context, projectID int64) (engine.CapacitySnapshot, error) {
+	if projectID == 0 {
+		projectID = r.project
+	}
+	return r.fakeTop.Capacity(ctx, projectID)
+}
+
+func (r fakeTopReader) History(ctx context.Context, q api.HistoryQuery) (history.Page, error) {
+	if q.ProjectID == 0 {
+		q.ProjectID = r.project
+	}
+	return r.fakeTop.History(ctx, q)
 }
 
 // topNow is the tests' clock: a fixed instant.
@@ -1100,6 +1161,196 @@ func TestTopFetchProjectsErrorSetsModelErr(t *testing.T) {
 	}
 	if !errors.Is(model.err, boom) {
 		t.Errorf("model.err = %v, want %v", model.err, boom)
+	}
+}
+
+// TestTopFetchWithProjectScopesEveryCall: --project puts its id on the
+// status, the capacity and the history.
+func TestTopFetchWithProjectScopesEveryCall(t *testing.T) {
+	fake := &fakeTop{projects: []engine.ProjectInfo{{ProjectID: 7, RepoURL: "https://example.invalid/r.git"}}}
+	if _, err := topFetch(context.Background(), fake, "https://example.invalid/r.git"); err != nil {
+		t.Fatal(err)
+	}
+	if fake.readerProject != 7 || fake.capacityProject != 7 || fake.historyProject != 7 {
+		t.Errorf("reader %d, capacity %d, history %d; want 7 on all three", fake.readerProject, fake.capacityProject, fake.historyProject)
+	}
+	if fake.scopedStatusCalls != 1 || fake.statusCalls != 1 {
+		t.Errorf("scoped Status calls %d, unscoped %d; want one of each", fake.scopedStatusCalls, fake.statusCalls)
+	}
+}
+
+// TestTopFetchWithoutProjectIgnoresTheWorkingDirectory: no --project
+// scopes nothing, even in a checkout of a project the engine has, and a
+// tick makes exactly one Status call.
+func TestTopFetchWithoutProjectIgnoresTheWorkingDirectory(t *testing.T) {
+	const origin = "https://example.invalid/r.git"
+	repo := t.TempDir()
+	gitIn(t, repo, "init", "-q")
+	gitIn(t, repo, "remote", "add", "origin", origin)
+	t.Chdir(repo)
+	fake := &fakeTop{projects: []engine.ProjectInfo{{ProjectID: 7, RepoURL: origin}}}
+	if _, err := topFetch(context.Background(), fake, ""); err != nil {
+		t.Fatal(err)
+	}
+	if fake.readerProject != 0 || fake.capacityProject != 0 || fake.historyProject != 0 {
+		t.Errorf("reader %d, capacity %d, history %d; want none scoped", fake.readerProject, fake.capacityProject, fake.historyProject)
+	}
+	if fake.statusCalls != 1 || fake.scopedStatusCalls != 0 {
+		t.Errorf("unscoped Status calls %d, scoped %d; want exactly one unscoped", fake.statusCalls, fake.scopedStatusCalls)
+	}
+	if fake.projectsCalls != 0 {
+		t.Errorf("Projects called %d times, want none", fake.projectsCalls)
+	}
+}
+
+// otherProjectsFake serves the engine as --project sees it: the given
+// status scoped; on the unscoped one a broken agent, another project's
+// task and plan entries and its plan; and the capacity listing the agent
+// as broken.
+func otherProjectsFake(scoped api.Status) *fakeTop {
+	unscoped := scoped
+	unscoped.NeedsYou = []engine.NeedsYouItem{
+		{Kind: "task", ID: 901, State: "needs_user", Reason: "other task entry"},
+		{Kind: "plan", ID: 902, State: "pending_approval", Reason: "other plan entry"},
+		{Kind: "agent", ID: 7, State: "broken", Title: "claude/opus", Reason: "login expired"},
+	}
+	unscoped.Plans = []engine.StatusPlan{{ID: 903, Title: "other project plan", State: "active"}}
+	return &fakeTop{
+		status:       unscoped,
+		scopedStatus: &scoped,
+		capacity: engine.CapacitySnapshot{Agents: []engine.CapacityAgent{
+			{Harness: "claude", Model: "opus", CapLayer: "none", Quota: "broken"},
+		}},
+		projects: []engine.ProjectInfo{{ProjectID: 7, RepoURL: "https://example.invalid/r.git"}},
+	}
+}
+
+// ownProjectStatus is a scoped status holding this project's one plan.
+func ownProjectStatus() api.Status {
+	return api.Status{
+		Pid:       4242,
+		StartedAt: topNow.Add(-time.Hour).UTC().Format(engine.TimeLayout),
+		Plans:     []engine.StatusPlan{{ID: 1, Title: "own project plan", State: "active"}},
+	}
+}
+
+// TestTopProjectKeepsBrokenAgentsAndNothingElse: the unscoped call adds
+// the agent entry, so NEEDS YOU shows it and AGENTS its reason, and no
+// other entry or plan of another project reaches the frame.
+func TestTopProjectKeepsBrokenAgentsAndNothingElse(t *testing.T) {
+	scoped := ownProjectStatus()
+	scoped.NeedsYou = []engine.NeedsYouItem{{Kind: "task", ID: 3, State: "needs_user", Reason: "own task entry"}}
+	model, err := topFetch(context.Background(), otherProjectsFake(scoped), "https://example.invalid/r.git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(model.status.NeedsYou); n != 2 || model.status.NeedsYou[0].ID != 3 || model.status.NeedsYou[1].Kind != "agent" {
+		t.Fatalf("NeedsYou = %+v, want the task, then the agent", model.status.NeedsYou)
+	}
+	got := plainTop(model, 100, 0)
+	for _, want := range []string{"! #3 own task entry", "! claude/opus login expired", "own project plan", "✗ login expired", "2 needs"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("frame lacks %q:\n%s", want, got)
+		}
+	}
+	for _, not := range []string{"#901", "#902", "#903", "other task entry", "other plan entry", "other project plan", "✗ broken"} {
+		if strings.Contains(got, not) {
+			t.Errorf("frame shows %q:\n%s", not, got)
+		}
+	}
+}
+
+// TestTopProjectFailedAgentCallKeepsTheScopedStatus: the unscoped call's
+// failure is the tick's error, the project's plans still render and the
+// snapshot fails as on any fetch error.
+func TestTopProjectFailedAgentCallKeepsTheScopedStatus(t *testing.T) {
+	boom := errors.New("unscoped down")
+	fake := otherProjectsFake(ownProjectStatus())
+	fake.statusErr = boom
+	model, err := topFetch(context.Background(), fake, "https://example.invalid/r.git")
+	if !errors.Is(err, boom) || !errors.Is(model.err, boom) {
+		t.Fatalf("err %v, model.err %v; want %v", err, model.err, boom)
+	}
+	if got := plainTop(model, 100, 0); !strings.Contains(got, "own project plan") || strings.Contains(got, "other project plan") {
+		t.Errorf("the scoped plans did not survive:\n%s", got)
+	}
+	var out, errOut bytes.Buffer
+	if code := printTopSnapshot(context.Background(), fake, "https://example.invalid/r.git", topNow, &out, &errOut); code != 1 {
+		t.Errorf("snapshot exit %d, want 1", code)
+	}
+}
+
+// TestTopProjectFailedStatusSkipsTheAgentCall: with no scoped status
+// there is nothing to merge into.
+func TestTopProjectFailedStatusSkipsTheAgentCall(t *testing.T) {
+	boom := errors.New("scoped down")
+	fake := otherProjectsFake(ownProjectStatus())
+	fake.scopedStatusErr = boom
+	if _, err := topFetch(context.Background(), fake, "https://example.invalid/r.git"); !errors.Is(err, boom) {
+		t.Fatalf("err %v, want %v", err, boom)
+	}
+	if fake.statusCalls != 0 {
+		t.Errorf("unscoped Status calls = %d, want none", fake.statusCalls)
+	}
+}
+
+// topRequests records the API requests and answers each with an empty
+// body of its shape.
+type topRequests struct{ seen []string }
+
+func (r *topRequests) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.seen = append(r.seen, req.URL.Path+"?"+req.URL.RawQuery)
+	body, err := json.Marshal(struct{}{})
+	if req.URL.Path == "/v1/projects" {
+		body, err = json.Marshal([]engine.ProjectInfo{{ProjectID: 7, RepoURL: "https://example.invalid/r.git"}})
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Request: req}, nil
+}
+
+// TestTopAPIScopesTheRequests: the real client's requests carry the
+// project with --project, but for the extra unscoped status, and carry
+// none without it.
+func TestTopAPIScopesTheRequests(t *testing.T) {
+	count := func(seen []string, path string) (scoped, unscoped int) {
+		for _, req := range seen {
+			if !strings.HasPrefix(req, path+"?") {
+				continue
+			}
+			if strings.Contains(req, "project=7") {
+				scoped++
+			} else {
+				unscoped++
+			}
+		}
+		return scoped, unscoped
+	}
+	requests := &topRequests{}
+	client := topAPI{api.NewClientWithHTTPClient(&http.Client{Transport: requests}, "token")}
+	if _, err := topFetch(context.Background(), client, "https://example.invalid/r.git"); err != nil {
+		t.Fatal(err)
+	}
+	if s, u := count(requests.seen, "/v1/status"); s != 1 || u != 1 {
+		t.Errorf("status scoped %d, unscoped %d, want 1 and 1: %q", s, u, requests.seen)
+	}
+	for _, path := range []string{"/v1/capacity", "/v1/history"} {
+		if s, u := count(requests.seen, path); s != 1 || u != 0 {
+			t.Errorf("%s scoped %d, unscoped %d, want 1 and 0: %q", path, s, u, requests.seen)
+		}
+	}
+	requests.seen = nil
+	if _, err := topFetch(context.Background(), client, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(requests.seen) != 3 {
+		t.Errorf("requests = %q, want status, capacity and history", requests.seen)
+	}
+	for _, req := range requests.seen {
+		if strings.Contains(req, "project=") {
+			t.Errorf("request %q is scoped, want the whole engine", req)
+		}
 	}
 }
 

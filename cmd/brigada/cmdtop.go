@@ -22,12 +22,22 @@ import (
 
 // topClient is what top asks of the API client: the status, the
 // capacity snapshot, the projects (to name a repo's project) and the
-// newest history page — all endpoints that exist. Tests stub it.
+// newest history page — all endpoints that exist — and a copy of itself
+// whose reads name one project. Tests stub it.
 type topClient interface {
 	Status(ctx context.Context) (api.Status, error)
 	Capacity(ctx context.Context, projectID int64) (engine.CapacitySnapshot, error)
 	Projects(ctx context.Context) ([]engine.ProjectInfo, error)
 	History(ctx context.Context, q api.HistoryQuery) (history.Page, error)
+	forProject(projectID int64) topClient
+}
+
+// topAPI is the real topClient: the API client, whose ProjectReader
+// answers with its own concrete type.
+type topAPI struct{ *api.Client }
+
+func (c topAPI) forProject(projectID int64) topClient {
+	return topAPI{c.ProjectReader(projectID)}
 }
 
 // topEventsLimit is the history page top fetches: the newest items,
@@ -80,7 +90,7 @@ func runTop(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if code != 0 {
 			return code
 		}
-		if code := printTopSnapshot(ctx, client, repo, time.Now(), stdout, stderr); code != 0 {
+		if code := printTopSnapshot(ctx, topAPI{client}, repo, time.Now(), stdout, stderr); code != 0 {
 			return code
 		}
 		if hint := agentsHint(ctx, rt, true); hint != "" {
@@ -121,33 +131,61 @@ type topModel struct {
 	hint string
 }
 
-// topFetch gathers one tick's model: the project the repo names, then
-// the status, the capacity snapshot and the newest history page. A part
-// that fails leaves its zero value and notes the error; the first error
-// comes back too, so the snapshot path can fail while the loop shows the
-// line and retries.
+// topFetch gathers one tick's model: the status, the capacity snapshot
+// and the newest history page, of the project the repo names, or of the
+// whole engine when the repo is empty. A project's status lists no broken
+// agent, since agents belong to no project, so a repo adds one unscoped
+// Status call and takes only that answer's agent entries, after the
+// project's own. A part that fails leaves its zero value and notes the
+// error; the first error comes back too, so the snapshot path can fail
+// while the loop shows the line and retries.
 func topFetch(ctx context.Context, client topClient, repo string) (topModel, error) {
-	projectID, err := lookupProjectID(ctx, client, repo)
-	if err != nil {
-		return topModel{err: err}, err
+	reader := client
+	var projectID int64
+	if repo != "" {
+		id, err := lookupProjectID(ctx, client, repo)
+		if err != nil {
+			return topModel{err: err}, err
+		}
+		projectID = id
+		reader = client.forProject(id)
 	}
 	var model topModel
-	if st, err := client.Status(ctx); err != nil {
+	if st, err := reader.Status(ctx); err != nil {
 		model.err = err
 	} else {
 		model.status = st
+		if repo != "" {
+			if all, err := client.Status(ctx); err != nil {
+				model.err = err
+			} else {
+				model.status.NeedsYou = topWithAgents(st.NeedsYou, all.NeedsYou)
+			}
+		}
 	}
-	if snap, err := client.Capacity(ctx, projectID); err == nil {
+	if snap, err := reader.Capacity(ctx, projectID); err == nil {
 		model.capacity = snap
 	} else if model.err == nil {
 		model.err = err
 	}
-	if page, err := client.History(ctx, api.HistoryQuery{Limit: topEventsLimit, Last: true}); err == nil {
+	if page, err := client.History(ctx, api.HistoryQuery{ProjectID: projectID, Limit: topEventsLimit, Last: true}); err == nil {
 		model.events = page.Items
 	} else if model.err == nil {
 		model.err = err
 	}
 	return model, model.err
+}
+
+// topWithAgents is a project's needs-you entries followed by the agent
+// entries of the unscoped queue, in the order they came.
+func topWithAgents(scoped, unscoped []engine.NeedsYouItem) []engine.NeedsYouItem {
+	merged := append([]engine.NeedsYouItem{}, scoped...)
+	for _, n := range unscoped {
+		if n.Kind == "agent" {
+			merged = append(merged, n)
+		}
+	}
+	return merged
 }
 
 // keepPrevious fills the parts a failed fetch left empty from the last
@@ -454,7 +492,8 @@ func topHeader(model topModel, now time.Time, style term.Style, width int) []str
 // against the effective cap as `brigada capacity` folds it, then the
 // quota cell — and a dim `all ≤ global N` line when the snapshot carries
 // a global cap. A broken agent's reason comes from its agent needs-you
-// entry in the unscoped status, "broken" when the status has none.
+// entry, which topFetch keeps in a project's status too, "broken" when
+// the status has none.
 // The text comes from topAgents; topAgentLines carries each line's
 // yield class, the idle agents' (no running job, quota neither
 // cooling nor broken) being the ones the height drops first, counted in a
@@ -1117,7 +1156,7 @@ func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Durati
 			model.err = err
 			return
 		}
-		fetched, err := topFetch(ctx, client, repo)
+		fetched, err := topFetch(ctx, topAPI{client}, repo)
 		fetched.err = err
 		fetched.paused = model.paused
 		if err != nil {
