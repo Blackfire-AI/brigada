@@ -105,7 +105,40 @@ func (s Style) tint(text, fg256, bg256, fgTrue, bgTrue string) string {
 	default:
 		return text
 	}
+	return paintOver(text, open)
+}
+
+// paintOver wraps text in open, re-emitted after every reset inside text.
+func paintOver(text, open string) string {
 	return open + strings.ReplaceAll(text, reset, reset+open) + reset
+}
+
+// band paints a full-width band: text on a solid background with dark text,
+// the parameters given per depth. Unlike a tint it shows at 16 colours too;
+// with no colour it returns text as is. Bold spans inside keep the background.
+func (s Style) band(text, c16, c256, cTrue string) string {
+	var params string
+	switch s.caps.Color {
+	case logo.Color16:
+		params = c16
+	case logo.Color256:
+		params = c256
+	case logo.TrueColor:
+		params = cTrue
+	default:
+		return text
+	}
+	return paintOver(text, "\x1b["+params+"m")
+}
+
+// BandBad paints the error band: dark text on a solid red.
+func (s Style) BandBad(text string) string {
+	return s.band(text, "41;30", "48;5;203;38;5;16", "48;2;255;95;95;38;2;17;17;17")
+}
+
+// BandWarn paints the paused band: dark text on a solid yellow.
+func (s Style) BandWarn(text string) string {
+	return s.band(text, "43;30", "48;5;221;38;5;16", "48;2;255;215;95;38;2;17;17;17")
 }
 
 // TintNeeds paints a needs-you row on a dark red, text and background both

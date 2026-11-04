@@ -232,6 +232,42 @@ func TestWidth(t *testing.T) {
 	}
 }
 
+// TestBands: the error and paused bands paint dark text on a solid colour at
+// 16 colours, 256 colours and true colour, keep the background through a Bold
+// span and are plain text without colour.
+func TestBands(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		paint func(Style, string) string
+		open  [4]string
+	}{
+		{"BandBad", Style.BandBad, [4]string{"", "41;30", "48;5;203;38;5;16", "48;2;255;95;95;38;2;17;17;17"}},
+		{"BandWarn", Style.BandWarn, [4]string{"", "43;30", "48;5;221;38;5;16", "48;2;255;215;95;38;2;17;17;17"}},
+	} {
+		for _, depth := range []logo.Depth{logo.NoColor, logo.Color16, logo.Color256, logo.TrueColor} {
+			style := New(logo.Caps{Color: depth, UTF8: true})
+			in := "a " + style.Bold("b") + " c"
+			got := tc.paint(style, in)
+			if depth == logo.NoColor {
+				if got != "a b c" {
+					t.Errorf("%s with no colour = %q, want plain", tc.name, got)
+				}
+				continue
+			}
+			open := "\x1b[" + tc.open[depth] + "m"
+			if !strings.HasPrefix(got, open) || !strings.HasSuffix(got, "\x1b[0m") {
+				t.Errorf("%s depth %d = %q, want the opening %q and a reset", tc.name, depth, got, open)
+			}
+			if strings.Count(got, "\x1b[0m"+open) != 1 {
+				t.Errorf("%s depth %d = %q: the reset inside lost the band", tc.name, depth, got)
+			}
+			if StripEscapes(got) != "a b c" {
+				t.Errorf("%s depth %d text = %q", tc.name, depth, StripEscapes(got))
+			}
+		}
+	}
+}
+
 func TestVisibleWidth(t *testing.T) {
 	style := New(logo.Caps{TTY: true, Color: logo.TrueColor, UTF8: true})
 	for _, tc := range []struct {

@@ -1063,7 +1063,7 @@ A foreman turn is never held back by the plan or model caps, and goes ahead of q
 
 `brigada top` is a live view of the engine: every `--interval` (default 2s) it redraws a two-row header —
 the brand mark `▙ brigada` (the word alone without UTF-8; only the `▙` is coloured), the scope and the engine's uptime, then the clock and `q quit  p pause` at the right end —
-and a slots row —
+and a slots row, which a band replaces while the engine is failing or the view is paused —
 the global slots against their cap as a `━` meter of up to 18 cells with `3/8 slots` beside it, then the run, queue, held and needs counters at the right end —
 then one rounded box per section, one column at every width with no blank row between boxes: the needs-you queue, the plans tree, the agents section —
 the agents in two columns of equal width, filled row by row, when the box is 72 columns wide inside or more, and in one column below that.
@@ -1076,7 +1076,8 @@ The AGENTS top border carries a dim note: `all ≤ global N` when the global cap
 and the newest user-facing events in an EVENTS box at the bottom, one per row, newest on top, each row its clock time (with the date on another day), two spaces and the event in plain words, as `10:02  #328 landed` over `09:40  plan #99 done`, the words starting in one column; a tall screen shows up to 10 rows.
 When the foreman has reported, the first line of its report sits Dim in the right of the EVENTS top border, cut to fit, since the report can say what the needs-you queue does not.
 Plan, task, review and agent events show; the foreman's report shows in that border, not in the list; job bookkeeping, messages and the other events do not. The top keeps the newest 50 of them across redraws, so a busy run never empties the list.
-A box has its title Bold in the top border and a Dim note after it; the PLANS note reads `N live · M finished`, counting the finished plans listed and hidden, and is left out until the first status arrives.
+A box has its title Bold in the top border and a Dim note after it; the PLANS note reads `N live · M finished`, counting the finished plans listed and hidden, or `none live · M finished` when plans exist and none is live, and is left out until the first status arrives.
+When plans exist and none is live, the finished plans show as their lines and a dim `idle: last work landed HH:MM` row, with the time of the newest landing the view has kept, ends them; it is left out when none is kept and yields with the finished lines.
 Without `--project` every section shows the whole engine, whatever the working directory.
 With `--project` every section shows that one project,
 except that a broken agent still shows, in the needs-you queue and with its reason in the agents section, because agents belong to no project;
@@ -1131,26 +1132,33 @@ At 256 colours and true colour each `!` needs-you row, in every box, sits on a d
 The frame never has more lines than the terminal is tall.
 When the view is taller, lines drop class by class, each class from the bottom of the view upward, one line at a time, until it fits:
 event rows 3 to 10, from the bottom, then row 2;
-finished plans' lines;
+finished plans' lines, with the idle row;
+the blank rows around a band;
 queued `·` task lines, including `(waiting on ...)` and `(review)`, from the last plan upward;
 idle agent rows (every agent in the row has no running job and a quota neither cooling nor broken), uncounted;
 held `?` and retry `↺` lines, the dim lines of the FOREMAN and JOBS blocks and parked `!` task lines;
 running `▸` lines;
-and then every other line outside the header and the needs-you queue —
+and then every other line outside the header, the band and the needs-you queue —
 event row 1, the remaining agent rows, each plan's own line, the placeholders —
 with the slots row last of them, though it sits above the needs-you box.
 
 A box's top and bottom borders are rows of its section and go right after its last row, so an empty box never shows and a drop may leave the frame a row or two short of the height.
 
-The header, with its error and hint lines, and the needs-you box, borders included, never drop for another line;
+The header, the band and the hint line under it, and the needs-you box, borders included, never drop for another line;
 on a screen too short for them the frame is cut from the bottom, into the needs-you box, so the height still holds.
 
 Below 60 columns the boxes stay, and a header whose keys do not fit whole drops them and moves the clock against the right edge.
 `q` quits and `p` pauses the refresh.
-When the engine cannot be reached the view keeps the last data and shows the error on a line while it retries; `--no-start` stops it starting an engine.
+When the engine cannot be reached the view keeps the last data and retries, and a full-width red band under the header says so, in place of the slots row: `✗ ENGINE UNREACHABLE`, `retrying · data is 42s old` (`no data yet` before the first fetch) and `brigada start` at the right edge, which shows only when the dial failed, `--no-start` with no engine included; `--no-start` stops the view starting an engine.
+A fetch error from a running engine shows `✗ engine: <its text>` with the same retrying part and no action.
+The middle part is left out before the first part is cut.
+While the band shows, every line below it is one dim colour with no tint, so old data does not read as live, and the header's clock turns red and its uptime is left out.
+A pause shows a yellow band, `|| PAUSED`, `at HH:MM:SS · ages frozen` and `p resumes` at the right edge; the sections keep their colours, the job ages stop at the pause time, and the header's clock and uptime keep running.
+The error band shows when both apply.
+The bands are dark text on a solid colour, and plain text with no colour.
 When the output is not a terminal it prints one plain snapshot and exits.
 The header shows the uptime as `45s` under a minute, `33m` under an hour and `11h33m` after, truncated; the seconds stay in the clock.
-When the engine answers with no plans at all, the plans section reads `no plans yet: brigada ask "fix #12"`; when it cannot be reached it keeps `none`.
+When the engine answers with no plans at all, listed or hidden, the plans box reads `no plans yet. Give the foreman something to do:`, the command `$ brigada ask "fix #12"` and `Plans and tasks appear here. What needs you shows above.`, and the events box reads `no events yet`; when the status has not been read it keeps `none`.
 Without UTF-8 in the locale every glyph the view draws has an ASCII fallback — `#` and `.` for the plan bars, `=` for the slots meter, `+`, `-` and `|` for the boxes, the plain word `brigada` in place of the mark, `>` for the running pointer, `->` for a retry, a cooling agent and the action tails, `x` for a failure, `ok` for a ready agent, `|` between parts, `<=` in the global cap line and `^` on the landing line — so the plain style reads the same text; task titles, reasons and report text stay as they are.
 
 The same hint line as `status`, dim, sits under the header when your CLIs offer unregistered models, in the piped snapshot too; `top` only reads the cached listing on each redraw ([section 8](#models-added-later)).
