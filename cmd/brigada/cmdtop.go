@@ -309,19 +309,17 @@ func dialEngine(ctx context.Context, rt *runtime, role string, noStart bool) (*a
 // from the bottom of the view upward, one line at a time, until it fits:
 // a0 event rows 3 and up; a event row 2; b finished plans' lines; c the
 // blank lines between sections (none today); d queued task lines (waiting
-// on, review included); e idle agents, counted in the dim
-// +N idle · M off (brigada capacity) line; f held and retry lines, the
-// FOREMAN and JOBS notes and parked task lines; g running lines; h every
-// other row outside the header and NEEDS YOU — event row 1, the other
-// agent lines, the global line, the fold line, each plan's own line, the
-// placeholders — with the slots row dropping last of the class, though it
+// on, review included); e idle agent rows, uncounted; f held and retry
+// lines, the FOREMAN and JOBS notes and parked task lines; g running lines;
+// h every other row outside the header and NEEDS YOU — event row 1, the
+// other agent rows, each plan's own line, the placeholders — with the
+// slots row dropping last of the class, though it
 // sits above NEEDS YOU. A section's top and bottom borders are rows of the
 // section: both go right after its last row, so an empty box never shows
 // and a drop may undershoot the height by a row or two. NEEDS YOU keeps
 // its borders. i the hard clip: only the header (with its error and hint
-// lines) and NEEDS YOU remain, and the frame is cut from the bottom. A
-// fold line not yet shown costs the line it adds. With a plain style the
-// text is the same and has no escapes.
+// lines) and NEEDS YOU remain, and the frame is cut from the bottom. With
+// a plain style the text is the same and has no escapes.
 func renderTop(model topModel, width, height int, now time.Time, style term.Style) []string {
 	inner := max(width-4, 1)
 	var lines []topLine
@@ -367,7 +365,7 @@ const (
 	yieldFinished                     // b: a finished plan's line
 	yieldBlank                        // c: the blank lines between sections
 	yieldQueued                       // d: queued, waiting-on and review task lines
-	yieldIdle                         // e: idle agents, counted in +N idle · M off (brigada capacity)
+	yieldIdle                         // e: idle agent rows
 	yieldHeld                         // f: held and retry lines, parked task lines
 	yieldRunning                      // g: running lines
 	yieldRest                         // h: every other line outside the header and NEEDS YOU
@@ -384,14 +382,6 @@ const (
 	topSecEvents
 )
 
-// topFold marks a generated line: the dim count of what dropped.
-type topFold int
-
-const (
-	foldNone topFold = iota
-	foldIdle         // +N idle · M off (brigada capacity)
-)
-
 // topLine is one line of the frame with what the drop loop needs.
 type topLine struct {
 	text    string
@@ -403,9 +393,7 @@ type topLine struct {
 	bad     bool       // the box is a Bad one
 	tint    int        // the row's background tint (topTint...), none by default
 	job     *topJobRow // a job row whose text topLayoutJobs builds with its box's columns
-	fold    topFold
-	count   int  // what a fold line counts besides what drops: the off agents
-	late    bool // drops after the other lines of its class
+	late    bool       // drops after the other lines of its class
 	dropped bool
 }
 
@@ -420,26 +408,15 @@ func topPinned(texts []string) []topLine {
 
 // topFrame is the view's lines with the drops so far. width is the frame's
 // width: with it the box lines render, and 0 leaves the rows as bare text,
-// the borders out. foldedIdle counts what the drops added to the fold line.
+// the borders out.
 type topFrame struct {
-	lines      []topLine
-	foldedIdle int
-	style      term.Style
-	width      int
+	lines []topLine
+	style term.Style
+	width int
 }
 
-// visible says whether line i renders: not dropped, and a fold line only
-// once it counts something.
-func (f *topFrame) visible(i int) bool {
-	l := f.lines[i]
-	if l.dropped {
-		return false
-	}
-	if l.fold == foldIdle {
-		return f.foldedIdle+l.count > 0
-	}
-	return true
-}
+// visible says whether line i renders: it is not dropped.
+func (f *topFrame) visible(i int) bool { return !f.lines[i].dropped }
 
 func (f *topFrame) size() int {
 	n := 0
@@ -451,8 +428,8 @@ func (f *topFrame) size() int {
 	return n
 }
 
-// texts is the visible lines' text, the fold line worded from its counts
-// and every box line drawn at the frame's width.
+// texts is the visible lines' text, every box line drawn at the frame's
+// width.
 func (f *topFrame) texts() []string {
 	var out []string
 	for i, l := range f.lines {
@@ -460,16 +437,6 @@ func (f *topFrame) texts() []string {
 			continue
 		}
 		text := l.text
-		if l.fold == foldIdle {
-			var parts []string
-			if f.foldedIdle > 0 {
-				parts = append(parts, fmt.Sprintf("+%d idle", f.foldedIdle))
-			}
-			if l.count > 0 {
-				parts = append(parts, fmt.Sprintf("%d off", l.count))
-			}
-			text = f.style.Dim(strings.Join(parts, topEventSep(f.style)) + " (brigada capacity)")
-		}
 		switch {
 		case f.width <= 0:
 			if l.foot {
@@ -490,13 +457,8 @@ func (f *topFrame) texts() []string {
 	return out
 }
 
-// drop removes line i and counts it into its fold line.
-func (f *topFrame) drop(i int) {
-	f.lines[i].dropped = true
-	if f.lines[i].class == yieldIdle {
-		f.foldedIdle++
-	}
-}
+// drop removes line i.
+func (f *topFrame) drop(i int) { f.lines[i].dropped = true }
 
 // dropEmptyBorders drops a section's borders once no other line of the
 // section is left.
@@ -616,120 +578,6 @@ func topUptime(d time.Duration) string {
 		return fmt.Sprintf("%dm", int(d/time.Minute))
 	}
 	return fmt.Sprintf("%dh%dm", int(d/time.Hour), int(d%time.Hour/time.Minute))
-}
-
-// topAgents is the AGENTS section: a rule-filled head, one line per
-// agent — `harness/model` padded to the widest name, the running count
-// against the effective cap as `brigada capacity` folds it, then the
-// quota cell — and a dim `all ≤ global N` line when the snapshot carries
-// a global cap. A broken agent's reason comes from its agent needs-you
-// entry, which topFetch keeps in a project's status too, "broken" when
-// the status has none.
-// The text comes from topAgents; topAgentLines carries each line's
-// yield class, the idle agents' (no running job, quota neither
-// cooling nor broken) being the ones the height drops first. Off agents
-// (an effective cap of 0, nothing running, quota ready) never list. The
-// rest go broken and cooling first, then running, then idle. A dim
-// `+N idle · M off (brigada capacity)` line, either part left out when
-// zero, counts what dropped and what is off, above the global line.
-func topAgents(model topModel, now time.Time, style term.Style, width int) []string {
-	frame := &topFrame{lines: topAgentLines(model, now, style, width), style: style}
-	return frame.texts()
-}
-
-func topAgentLines(model topModel, now time.Time, style term.Style, width int) []topLine {
-	line := func(text string, class topYield) topLine {
-		return topLine{text: text, class: class, section: topSecAgents}
-	}
-	box := topBox{title: "AGENTS"}
-	snap := model.capacity
-	g := api.GlobalCap(snap)
-	var global []topLine
-	if g != nil {
-		global = []topLine{line(style.Dim(fmt.Sprintf("all %s global %d", style.AtMost(), *g)), yieldRest)}
-	}
-	if len(snap.Agents) == 0 {
-		return topBoxed(topSecAgents, box, append([]topLine{line(style.Dim("no agents advertised"), yieldRest)}, global...))
-	}
-	reasons := make(map[string]string)
-	for _, n := range model.status.NeedsYou {
-		if n.Kind == "agent" {
-			reasons[n.Title] = n.Reason
-		}
-	}
-	// An agent whose effective cap is 0 with nothing running and a ready
-	// quota is off: it reads as ready but takes no job, so it folds out of
-	// the list for good and only the fold line counts it. The rest go
-	// broken and cooling first, then running, then idle, stable inside a
-	// group.
-	var listed []engine.CapacityAgent
-	off := 0
-	for _, a := range snap.Agents {
-		if topAgentOff(a, g) {
-			off++
-			continue
-		}
-		listed = append(listed, a)
-	}
-	group := func(a engine.CapacityAgent) int {
-		switch {
-		case a.Quota == "broken" || a.Quota == "cooling":
-			return 0
-		case a.Running > 0:
-			return 1
-		}
-		return 2
-	}
-	sort.SliceStable(listed, func(i, j int) bool { return group(listed[i]) < group(listed[j]) })
-	names := make([]string, len(listed))
-	capCells := make([]string, len(listed))
-	nameW, capW := 0, 0
-	for i, a := range listed {
-		names[i] = a.Harness + "/" + a.Model
-		capCells[i] = api.RunningCap(a, g)
-		nameW = max(nameW, utf8.RuneCountInString(names[i]))
-		capW = max(capW, utf8.RuneCountInString(capCells[i]))
-	}
-	nameW = min(nameW, width)
-	agents := make([]topLine, len(listed))
-	for i, a := range listed {
-		name := cutLine(names[i], nameW)
-		prefix := name + strings.Repeat(" ", nameW-utf8.RuneCountInString(name)+2) +
-			capCells[i] + strings.Repeat(" ", capW-utf8.RuneCountInString(capCells[i])+2)
-		var quota string
-		switch a.Quota {
-		case "broken":
-			reason := reasons[names[i]]
-			if reason == "" {
-				reason = "broken"
-			}
-			if room := width - utf8.RuneCountInString(prefix) - 2; room >= 10 {
-				reason = cutLine(reason, room)
-			}
-			quota = style.Bad(style.Cross() + " " + reason)
-		case "cooling":
-			quota = style.Warn(style.Again() + " " + api.LocalClock(a.CoolingUntil, now))
-		default:
-			quota = style.OK(style.Check())
-		}
-		class := yieldRest
-		if a.Running == 0 && a.Quota != "broken" && a.Quota != "cooling" {
-			class = yieldIdle
-		}
-		agents[i] = line(prefix+quota, class)
-	}
-	lines := append(agents, topLine{class: yieldRest, section: topSecAgents, fold: foldIdle, count: off})
-	return topBoxed(topSecAgents, box, append(lines, global...))
-}
-
-// topAgentOff says an agent is off: an effective cap of 0 (its own, or the
-// global cap's), no running job and a ready quota.
-func topAgentOff(a engine.CapacityAgent, global *int) bool {
-	limit := a.Cap
-	if global != nil && (limit == nil || *global < *limit) {
-		limit = global
-	}
-	return limit != nil && *limit == 0 && a.Running == 0 && a.Quota == "ready"
 }
 
 // topSlots reads the global cap layer's use and cap from the capacity

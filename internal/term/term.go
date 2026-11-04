@@ -75,6 +75,21 @@ func (s Style) Teal(text string) string {
 	return s.wrap(text, "\x1b[96m", "\x1b[38;5;37m", "\x1b[38;2;0;175;175m")
 }
 
+// Violet colors the claude family's agent names.
+func (s Style) Violet(text string) string {
+	return s.wrap(text, "\x1b[95m", "\x1b[38;5;141m", "\x1b[38;2;177;151;255m")
+}
+
+// Blue colors the glm family's agent names.
+func (s Style) Blue(text string) string {
+	return s.wrap(text, "\x1b[94m", "\x1b[38;5;69m", "\x1b[38;2;95;135;255m")
+}
+
+// Mint colors the dsh family's agent names.
+func (s Style) Mint(text string) string {
+	return s.wrap(text, "\x1b[92m", "\x1b[38;5;85m", "\x1b[38;2;110;231;183m")
+}
+
 // tint paints text on a background: it opens fg and bg, re-emits both after
 // every reset inside text (Style.wrap ends with a full reset, which would end
 // the background), and closes with a reset. Only 256 colours and true colour
@@ -129,6 +144,9 @@ func (s Style) Rule() string { return s.symbol("━━", "==") }
 
 // Again returns a repeat arrow, or "->" without UTF-8.
 func (s Style) Again() string { return s.symbol("↺", "->") }
+
+// Bullet returns a filled circle, or "*" without UTF-8.
+func (s Style) Bullet() string { return s.symbol("●", "*") }
 
 // Filled returns a filled progress cell, or "#" without UTF-8.
 func (s Style) Filled() string { return s.symbol("■", "#") }

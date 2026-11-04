@@ -1066,11 +1066,13 @@ the brand mark `▙ brigada` (the word alone without UTF-8; only the `▙` is co
 and a slots row —
 the global slots against their cap as a `━` meter of up to 18 cells with `3/8 slots` beside it, then the run, queue, held and needs counters at the right end —
 then one rounded box per section, one column at every width with no blank row between boxes: the needs-you queue, the plans tree, the agents section —
-one line per agent: its `harness/model`, its running jobs against its effective cap as `brigada capacity` shows it,
-then its quota as `✓` when ready, `↺ HH:MM` while cooling until that time, or `✗` and a short reason when broken;
-the broken and cooling agents come first, then the running ones, then the idle ones;
-an agent that is off — an effective cap of 0, nothing running, a ready quota — never lists, and a dim `+N idle · M off (brigada capacity)` line counts the off agents and the idle ones the height dropped, either part left out when zero;
-a dim `all ≤ global N` line under the list names the global cap —
+the agents in two columns of equal width, filled row by row, when the box is 72 columns wide inside or more, and in one column below that.
+An agent's cell is a mark, its `harness/model` padded to the widest listed name, its running jobs against its effective cap and its quota text:
+the mark is a green `●` when the quota is ready, a yellow `↺` and `until HH:MM` while cooling, or a red `✗` and a short reason when broken (`broken` when the needs-you queue has no reason), and the reason is cut to its cell;
+the running jobs are one cell per slot of the effective cap as `brigada capacity` folds it — its own cap with the global cap folded in — filled up to the running count, as `■□□`, and an agent with no cap, a cap of 0 or a cap over 8 shows `brigada capacity`'s text, as `2/none`, instead.
+A running agent's name takes its family's colour — violet for claude, blue for glm, mint for dsh, dim for any other — and an idle agent's name is dim; the agent column of a running job line in PLANS, FOREMAN and JOBS takes the same colour.
+The broken and cooling agents come first, then the running ones, then the idle ones, and an agent that is off — an effective cap of 0, nothing running, a ready quota — never lists.
+The AGENTS top border carries a dim note: `all ≤ global N` when the global cap sits below some agent's own cap or an agent has none, `M off` for the agents that are off, both joined by `·` or either alone, and `all ready` when no agent is broken or cooling, none is off and no layer caps anything; it is cut or left out when it does not fit —
 and the newest user-facing events in an EVENTS box at the bottom, one per row, newest on top, each row its clock time (with the date on another day), two spaces and the event in plain words, as `10:02  #328 landed` over `09:40  plan #99 done`, the words starting in one column; a tall screen shows up to 10 rows.
 When the foreman has reported, the first line of its report sits Dim in the right of the EVENTS top border, cut to fit, since the report can say what the needs-you queue does not.
 Plan, task, review and agent events show; the foreman's report shows in that border, not in the list; job bookkeeping, messages and the other events do not. The top keeps the newest 50 of them across redraws, so a busy run never empties the list.
@@ -1131,14 +1133,14 @@ When the view is taller, lines drop class by class, each class from the bottom o
 event rows 3 to 10, from the bottom, then row 2;
 finished plans' lines;
 queued `·` task lines, including `(waiting on ...)` and `(review)`, from the last plan upward;
-idle agents (no running job, quota neither cooling nor broken), counted in the dim `+N idle · M off (brigada capacity)` line;
+idle agent rows (every agent in the row has no running job and a quota neither cooling nor broken), uncounted;
 held `?` and retry `↺` lines, the dim lines of the FOREMAN and JOBS blocks and parked `!` task lines;
 running `▸` lines;
 and then every other line outside the header and the needs-you queue —
-event row 1, the remaining agent lines, the `all ≤ global N` line, the fold line, each plan's own line, the placeholders —
+event row 1, the remaining agent rows, each plan's own line, the placeholders —
 with the slots row last of them, though it sits above the needs-you box.
 
-A fold line not yet shown costs the line it adds. A box's top and bottom borders are rows of its section and go right after its last row, so an empty box never shows and a drop may leave the frame a row or two short of the height.
+A box's top and bottom borders are rows of its section and go right after its last row, so an empty box never shows and a drop may leave the frame a row or two short of the height.
 
 The header, with its error and hint lines, and the needs-you box, borders included, never drop for another line;
 on a screen too short for them the frame is cut from the bottom, into the needs-you box, so the height still holds.

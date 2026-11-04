@@ -20,6 +20,7 @@ type topJobRow struct {
 	kind, agent, age, event string
 	wait                    string
 	markFn, textFn, waitFn  func(string) string // colour of the mark, of the id and title, of the wait text; nil is plain
+	agentFn                 func(string) string // colour of the agent cell: its family's (topFamily)
 	running                 bool                // a running job's row: tinted
 	dim                     bool                // the whole row is Dim, painted once
 }
@@ -91,6 +92,7 @@ func topRunningRow(j engine.StatusJob, title string, now time.Time, style term.S
 		title: title, kind: j.Kind, agent: topJobAgent(j), age: topJobAge(j.LeasedAt, now),
 		event: strings.TrimPrefix(j.LastEvent, "tool_start "),
 	}
+	row.agentFn = topFamily(style, row.agent)
 	if j.TaskID != 0 {
 		row.id = fmt.Sprintf("#%d", j.TaskID)
 	} else {
@@ -215,9 +217,13 @@ func topLayoutJobs(lines []topLine, style term.Style, inner int) {
 			}
 			b += topJobGap + paint(r.waitFn, cutLine(r.wait, max(room, 0)))
 		} else {
-			for _, cell := range [][2]any{{r.kind, kindW}, {r.agent, agentW}, {r.age, ageW}} {
-				if w := cell[1].(int); w > 0 {
-					b += topJobGap + pad(cell[0].(string), w)
+			for _, cell := range []struct {
+				text string
+				w    int
+				fn   func(string) string
+			}{{r.kind, kindW, nil}, {r.agent, agentW, r.agentFn}, {r.age, ageW, nil}} {
+				if cell.w > 0 {
+					b += topJobGap + paint(cell.fn, cell.text) + strings.Repeat(" ", max(cell.w-count(cell.text), 0))
 				}
 			}
 			if eventRoom > 0 && r.event != "" {
