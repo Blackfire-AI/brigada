@@ -59,7 +59,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     caps: {fix_rounds: 4, review_rounds: 4, restart: 1}
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 344
@@ -73,6 +73,6 @@ tasks:
     review_tier: standard
     review_effort: medium
     caps: {fix_rounds: 4, review_rounds: 4, restart: 1}
-    state: reviewing
+    state: done
     branch: "brigada/task-344"
     rounds: 1
