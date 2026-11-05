@@ -33,8 +33,8 @@ func (e *historyTableEnv) stamp(minutes float64) string {
 	return historyBase.Add(time.Duration(minutes * float64(time.Minute))).Format(engine.TimeLayout)
 }
 
-// local is the bare time column of an event minutes into the fixture.
-func (e *historyTableEnv) local(minutes float64) string {
+// shown is the time column of an event minutes into the fixture.
+func (e *historyTableEnv) shown(minutes float64) string {
 	return historyBase.Add(time.Duration(minutes * float64(time.Minute))).Local().Format("01-02 15:04")
 }
 
@@ -200,11 +200,11 @@ func TestHistoryDetailAndRawAreUnchanged(t *testing.T) {
 	e := newHistoryTableEnv(t)
 	e.statusCalls.Store(0)
 	sha := "c30" + strings.Repeat("0", 20)
-	detailTask := e.local(120) + " task 30 task running\n" +
-		e.local(120.5) + " job 7 job leased: lease=L1\n" +
-		e.local(121) + " #30 done: status=done\n" +
-		e.local(123) + " #30 landed: commit=" + sha + " pushed=pushed\n"
-	detailJob := e.local(120.5) + " job 7 job leased: lease=L1\n"
+	detailTask := e.shown(120) + " task 30 task running\n" +
+		e.shown(120.5) + " job 7 job leased: lease=L1\n" +
+		e.shown(121) + " #30 done: status=done\n" +
+		e.shown(123) + " #30 landed: commit=" + sha + " pushed=pushed\n"
+	detailJob := e.shown(120.5) + " job 7 job leased: lease=L1\n"
 	rawTask := e.stamp(120) + " task_running task 30: \n" +
 		e.stamp(120.5) + " job_leased job 7: lease=L1\n" +
 		e.stamp(121) + " task_done task 30: status=done\n" +
