@@ -11,11 +11,18 @@ import (
 )
 
 // The land retry (#133): a task whose landing failed on something other
-// than its content — the push rejected because the target moved, or the
-// environment (issue #116) — is parked at needs_foreman, and a restart
-// would redo work that is finished and approved. RetryLanding queues the
-// landing again instead, through the land rule itself, so every gate
-// still applies; the foreman's land_retry tool calls it.
+// than its content — the push rejected because the target moved, the
+// environment (issue #116), or a check the foreman judged unrelated to the
+// task's diff — is parked at needs_foreman, and a restart would redo work
+// that is finished and approved and rebuild every dependent. RetryLanding
+// queues the landing again instead, through the land rule itself, so
+// every gate still applies; the foreman's land_retry tool calls it. No
+// rerun is automatic: for a failed check the judgment is the foreman's,
+// from check_log.
+
+// landCheckFailureCap is how many times the check may fail on one approved
+// head before the land retry refuses: the original failure and two reruns.
+const landCheckFailureCap = 3
 
 // The outcomes of a land retry, LandRetryResult.Outcome.
 const (
@@ -42,16 +49,19 @@ type landRetryRefusal struct{ reason string }
 func (r landRetryRefusal) Error() string { return r.reason }
 
 // RetryLanding queues again the landing of a task parked by a landing
-// failure that is not about its content (#133): a task of project, in a
-// plan not finished, parked at needs_foreman by a rejected push or by an
-// environment failure, with no landing record. The task returns to done
-// — off the needs-you queue, and off its environment cause the way a
-// restart takes it off (the cause's episode ends once no task it parked
-// is still parked) — releasing, as any finish does, the dependents that
-// waited on it (§6.1): a pending one's work job is queued here. The land
-// rule then runs as for any done task: the land gate and its approval
-// rules, land_ready (the grant never skips it) and the push gate all
-// apply. No gate is passed and no restart is spent.
+// failure that may not be about its content (#133): a task of project, in
+// a plan not finished, parked at needs_foreman by a rejected push, by an
+// environment failure or by a failed land check, with no landing record.
+// The task returns to done — off the needs-you queue, and off its
+// environment cause the way a restart takes it off (the cause's episode
+// ends once no task it parked is still parked) — releasing, as any finish
+// does, the dependents that waited on it (§6.1): a pending one's work job
+// is queued here. The land rule then runs as for any done task: the land
+// gate and its approval rules, land_ready (the grant never skips it) and
+// the push gate all apply. No gate is passed and no restart is spent. The
+// land job refetches the target, squashes again, reruns the check and
+// refuses a head other than the approved one, so a target that moved since
+// the failure needs no refusal here, and it pushes only on a passing check.
 //
 // The outcomes are four. queued: the land job is submitted, and the
 // land_retried event names it. held: a land-gate rule held the task, the
@@ -65,8 +75,9 @@ func (r landRetryRefusal) Error() string { return r.reason }
 // project or a finished plan, one with a landing record (pushed or
 // waiting at the push gate: task_restart makes a fresh attempt), one not
 // parked at needs_foreman, held at the land gate (the user's), one with
-// a live job, or one parked by anything but a rejected push or an
-// environment failure — a conflict, a failed land check, a moved
+// a live job, one whose check has failed landCheckFailureCap times on this
+// approved head, or one parked by anything but a rejected push, an
+// environment failure or a failed land check — a conflict, a moved
 // approved head or a stale base want task_restart.
 func (e *Engine) RetryLanding(ctx context.Context, project, taskID int64) (LandRetryResult, error) {
 	res := LandRetryResult{TaskID: taskID}
@@ -166,7 +177,17 @@ func landRetryEligibleTx(tx *sql.Tx, project, taskID int64) error {
 	if cause == "" {
 		var p eventPayload
 		_ = json.Unmarshal([]byte(payload), &p)
-		if !landRetryablePush(p) {
+		// A failed check first: its reason carries the log's tail, whose
+		// words must not read as a conflict or a moved approved head.
+		if isLandCheckFailure(p.Reason) {
+			n, err := landCheckFailuresTx(tx, taskID)
+			if err != nil {
+				return err
+			}
+			if n >= landCheckFailureCap {
+				return refuse("the check failed %d times on this approved head of task %d: use task_restart", n, taskID)
+			}
+		} else if !landRetryablePush(p) {
 			return refuse("task %d is parked by a landing failure about its content (%s): use task_restart", taskID, oneLine(p.Reason, 200))
 		}
 	}
@@ -191,17 +212,53 @@ func landRetryEligibleTx(tx *sql.Tx, project, taskID int64) error {
 	return nil
 }
 
+// landCheckFailuresTx counts the task's failed land checks on its approved
+// head: the task_land_failed events of a failed check whose job is above
+// the last done work or fix job, the boundary of taskApprovedTx, so a
+// restart resets the count. land_retried is no count of them: it also
+// records push and environment retries and held and stale-base outcomes.
+func landCheckFailuresTx(tx *sql.Tx, taskID int64) (int, error) {
+	authorID, err := lastAuthorJobTx(tx, taskID)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := tx.Query(`SELECT payload FROM events WHERE task_id = ? AND kind = ? AND job_id > ?`,
+		taskID, evTaskLandFailed, authorID)
+	if err != nil {
+		return 0, fmt.Errorf("read the failed landings of task %d: %w", taskID, err)
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return 0, fmt.Errorf("read a failed landing of task %d: %w", taskID, err)
+		}
+		var p eventPayload
+		_ = json.Unmarshal([]byte(payload), &p)
+		if isLandCheckFailure(p.Reason) {
+			n++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("read the failed landings of task %d: %w", taskID, err)
+	}
+	return n, nil
+}
+
 // landRetryablePush reports whether a task_land_failed event with no
 // environment cause is a rejected push (§7.1) — the target moved, the
-// task's content untouched. The content failures are read first, because
-// their words — a conflicting file's name, a check log — may contain the
-// push-rejection markers: a conflict, a failed check on the landed
-// result, a moved approved head.
+// task's content untouched. It is about pushes alone: a failed land check
+// answers false here, and landRetryEligibleTx reads that case before it
+// asks. The other failures are read first, because their words — a
+// conflicting file's name, a check log — may contain the push-rejection
+// markers: a conflict, a failed check on the landed result, a moved
+// approved head.
 func landRetryablePush(p eventPayload) bool {
 	if p.CheckOutput != "" {
 		return false
 	}
-	for _, s := range []string{"land conflict:", "the check failed on the landed result"} {
+	for _, s := range []string{"land conflict:", landCheckFailedReason} {
 		if strings.HasPrefix(p.Reason, s) {
 			return false
 		}

@@ -17,10 +17,12 @@ spends one of the task's restarts, and resets the attempt's rounds.
 
 Gates are released by the user alone. You have no tool to pass one or to land
 anything outside the land rule. Merging is brigada's by rule. `land_retry` queues
-again the landing of a task parked by a rejected push or an environment failure,
-with every gate applying; it answers queued, held, stale_base or refused, and it
-refuses a task whose landing is already recorded. A conflict or a failed land
-check still needs task_restart.
+again the landing of a task parked by a rejected push, an environment failure or
+a failed land check, with every gate applying; it answers queued, held, stale_base
+or refused, and it refuses a task whose landing is already recorded. A failed land
+check may go to `land_retry`, up to 3 failures on one approved head, when
+`check_log` shows the failure is unrelated to the task's diff; nothing reruns it
+on its own. A conflict or a real check failure still needs task_restart.
 
 A spent wake budget does not apply to an attached chat; read waiting events
 with `events`. A headless turn acts, reports and ends.
