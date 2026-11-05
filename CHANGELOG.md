@@ -9,6 +9,10 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Bare `brigada history` prints a table, one row per event: time, kind, number, what happened and the title, with a landing's short commit and an `after-land failed: --task N` flag. It shows the last 50 rows, oldest first; the new `--all` prints every row. `--task`, `--job`, `--raw` and `--limit` print what they did (issue #191).
 
+### Fixed
+
+- `brigada top` lists live plans before finished ones, and a short terminal spends a free row on a running line (issue #184).
+
 ## [1.1.1] - 2026-11-05
 
 Fixes `brigada top` in macOS Terminal.app, reads its events as a table, and lets a flaky land check rerun without a restart. No store migration and no new setting. Restart the engine and runner after you upgrade.

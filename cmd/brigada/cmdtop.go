@@ -365,7 +365,9 @@ func dialEngine(ctx context.Context, rt *runtime, role string, noStart bool) (*a
 // slots row dropping last of the class, though it
 // sits above NEEDS YOU. A section's top and bottom borders are rows of the
 // section: both go right after its last row, so an empty box never shows
-// and a drop may undershoot the height by a row or two. NEEDS YOU keeps
+// and a drop may undershoot the height by a row or two; the spare rows go
+// back to running lines, topmost first, each only while its box and, in
+// PLANS, its plan's line still show. NEEDS YOU keeps
 // its borders. i the hard clip: only the header, the band (with its hint
 // line) and NEEDS YOU remain, and the frame is cut from the bottom. While
 // the fetch is failing every line but the header and the band is Dim. With
@@ -552,8 +554,12 @@ func (f *topFrame) dropEmptyBorders(section int) {
 // fit drops lines until the frame has at most height lines, class by
 // class and from the bottom upward in each; height 0 is no limit. Lines
 // that are late in their class go after the rest of it. A section's
-// borders go right after its last row. What the classes leave over is the
-// hard clip, which the caller applies.
+// borders go right after its last row. A box takes its two borders with its
+// last row, so a class h drop can leave the frame a row or two short; those
+// spare rows go back to running lines, the topmost first, one row each, a
+// line only when its box still shows and, in PLANS, its own plan's line too.
+// No box is rebuilt and no other class comes back. What the classes leave
+// over is the hard clip, which the caller applies.
 func (f *topFrame) fit(height int) {
 	if height <= 0 {
 		return
@@ -569,6 +575,38 @@ func (f *topFrame) fit(height int) {
 			}
 		}
 	}
+	for i := range f.lines {
+		if f.size() >= height {
+			return
+		}
+		if l := f.lines[i]; l.dropped && l.class == yieldRunning && f.canReturn(i) {
+			f.lines[i].dropped = false
+		}
+	}
+}
+
+// canReturn says a dropped running line i may come back: its section's box
+// shows and, in PLANS, so does the nearest plan line above it.
+func (f *topFrame) canReturn(i int) bool {
+	section := f.lines[i].section
+	shown := false
+	for j, l := range f.lines {
+		if l.section == section && l.box != nil && f.visible(j) {
+			shown = true
+		}
+	}
+	if !shown {
+		return false
+	}
+	if section != topSecPlans {
+		return true
+	}
+	for j := i - 1; j >= 0; j-- {
+		if l := f.lines[j]; l.section == section && l.class == yieldRest && l.box == nil && !l.foot {
+			return f.visible(j)
+		}
+	}
+	return false
 }
 
 // topFit cuts one styled line to width: a line that fits keeps its
@@ -994,7 +1032,8 @@ func topFirstRunRows(style term.Style, line func(string, topYield) topLine) []to
 // no plans is a first run (topFirstRunRows); one that did not come back has
 // said nothing and keeps `none`. When plans exist and none is live, the note
 // reads `none live · N finished` and a Dim `idle: last work landed HH:MM`
-// row ends the finished lines, left out when no landing is kept.
+// row ends the finished lines, left out when no landing is kept. Every live
+// plan is listed before every finished one, id order kept in each group.
 func topPlansBox(st api.Status, tagged, fetched bool, events []history.Item, now time.Time, style term.Style, width int) []topLine {
 	line := func(text string, class topYield) topLine {
 		return topLine{text: text, class: class, section: topSecPlans}
@@ -1032,7 +1071,16 @@ func topPlansBox(st api.Status, tagged, fetched bool, events []history.Item, now
 		}
 	}
 	layout := newTopPlanLayout(st.Plans, running, tagged, style, width)
-	for _, p := range st.Plans {
+	// Live plans first, then finished ones, each group in id order.
+	ordered := make([]engine.StatusPlan, 0, len(st.Plans))
+	for _, finishedGroup := range []bool{false, true} {
+		for _, p := range st.Plans {
+			if topPlanFinished(p) == finishedGroup {
+				ordered = append(ordered, p)
+			}
+		}
+	}
+	for _, p := range ordered {
 		tag := ""
 		if tagged {
 			tag = topRepoName(p.RepoURL)

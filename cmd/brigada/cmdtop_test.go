@@ -1382,9 +1382,94 @@ func TestTopPlanTotalsLeaveOutCancelledAndRetired(t *testing.T) {
 	right := func(left, tail string) string {
 		return left + strings.Repeat(" ", 80-utf8.RuneCountInString(left)-utf8.RuneCountInString(tail)) + tail
 	}
-	want := []string{right("#96 Rework", "done"), right("#97 Live", "■■■□  3/4"), "  · #6  go  (queued)"}
+	want := []string{right("#97 Live", "■■■□  3/4"), "  · #6  go  (queued)", right("#96 Rework", "done")}
 	if got := topPlanLines(st, 80); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("tree =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestTopPlansLiveFirst: every live plan is listed before every finished
+// one, id order kept in each group, on a plain tree and on a tagged view; a
+// cancelled plan is finished, an awaiting-approval and a reviewing plan are
+// live.
+func TestTopPlansLiveFirst(t *testing.T) {
+	const repo = "https://example.invalid/acme/brigada.git"
+	st := api.Status{Plans: []engine.StatusPlan{
+		{ID: 1, RepoURL: repo, Title: "one", State: "done"},
+		{ID: 2, RepoURL: repo, Title: "two", State: "active"},
+		{ID: 3, RepoURL: repo, Title: "three", State: "cancelled"},
+		{ID: 4, RepoURL: repo, Title: "four", State: "awaiting_approval"},
+		{ID: 5, RepoURL: repo, Title: "five", State: "done"},
+		{ID: 6, RepoURL: repo, Title: "six", State: "reviewing", ReviewRound: 1, ReviewJob: 50},
+	}}
+	style := term.New(logo.Caps{UTF8: true})
+	order := func(tagged bool) []string {
+		var out []string
+		for _, l := range newTopPlans(st, tagged, false, topNow, style, 80) {
+			if strings.HasPrefix(l.text, "#") {
+				out = append(out, strings.Fields(l.text)[0])
+			}
+		}
+		return out
+	}
+	want := "#2 #4 #6 #1 #3 #5"
+	for _, tagged := range []bool{false, true} {
+		if got := strings.Join(order(tagged), " "); got != want {
+			t.Errorf("tagged=%v order = %s, want %s", tagged, got, want)
+		}
+	}
+	if st.Plans[0].ID != 1 || st.Plans[1].ID != 2 {
+		t.Errorf("st.Plans was reordered")
+	}
+}
+
+// TestTopSpareRowGoesToRunningLine: when a class h drop leaves a free row,
+// the topmost dropped running line comes back if its box and plan line
+// still show; the frame never exceeds the height, and a running line never
+// shows without its plan's line.
+func TestTopSpareRowGoesToRunningLine(t *testing.T) {
+	model := topModel{status: api.Status{
+		Running: []engine.StatusJob{
+			{ID: 5, TaskID: 1, Kind: "work", Status: "running", Harness: "claude", Model: "sonnet"},
+			{ID: 6, TaskID: 2, Kind: "work", Status: "running", Harness: "claude", Model: "sonnet"},
+		},
+		Plans: []engine.StatusPlan{
+			{ID: 1, Title: "first", State: "active", Tasks: []engine.StatusTask{{ID: 1, Title: "alpha", State: "running"}}},
+			{ID: 2, Title: "second", State: "active", Tasks: []engine.StatusTask{{ID: 2, Title: "beta", State: "running"}}},
+		},
+	}}
+	sawOne := false
+	for height := 3; height <= 30; height++ {
+		lines := strings.Split(plainTop(model, 76, height), "\n")
+		if len(lines) > height {
+			t.Fatalf("height %d: %d lines", height, len(lines))
+		}
+		inPlans, planShown := false, false
+		var running []string
+		for _, l := range lines {
+			switch {
+			case strings.Contains(l, "╭─ PLANS"):
+				inPlans, planShown = true, false
+			case strings.HasPrefix(l, "╰"):
+				inPlans = false
+			case inPlans && strings.HasPrefix(l, "│ #"):
+				planShown = true
+			case inPlans && strings.Contains(l, "▸ #"):
+				if !planShown {
+					t.Errorf("height %d: running line without its plan line:\n%s", height, strings.Join(lines, "\n"))
+				}
+				running = append(running, l)
+			}
+		}
+		if len(running) == 1 && strings.Contains(running[0], "#1") && len(lines) == height {
+			sawOne = true
+		}
+		if len(running) == 1 && strings.Contains(running[0], "#2") {
+			t.Errorf("height %d: the second running line shows without the first:\n%s", height, strings.Join(lines, "\n"))
+		}
+	}
+	if !sawOne {
+		t.Error("no height shows exactly the first running line in a full frame")
 	}
 }
 
@@ -1767,7 +1852,10 @@ func TestRenderTopFitsSize(t *testing.T) {
 }
 
 // TestRenderTopHeightYieldOrder: lines beyond the height yield class by
-// class, each from the bottom of the view upward, one line at a time:
+// class, each from the bottom of the view upward, one line at a time (a
+// box's borders go with its last row, so a drop can leave a spare row, and
+// that row goes back to the topmost running line whose box and plan line
+// still show):
 // event row 2, the blank lines between sections, the
 // held and parked lines, the running line, then the class of every other
 // line — event row 1 with the EVENTS head after it, the agent rows
@@ -1817,8 +1905,11 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 			"╭─ EVENTS ─",
 			"15:02  task    #3  done     oil the gears",
 		}, []string{"▸ #3  oil the gears  "}},
-		{"event row 1, its box goes with it", 15, 13, []string{
+		// The class h drop of event row 1 takes its box with it and leaves a
+		// free row, which goes back to the running line.
+		{"event row 1, its box goes with it, a spare row returns", 15, 14, []string{
 			"#1 fix the frobnicator",
+			"▸ #3",
 			"╭─ AGENTS  all ≤ global 8 ─",
 		}, []string{"EVENTS", "task    #3  done"}},
 		// The agents list broken and cooling first, then running, so the
@@ -1826,8 +1917,9 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 		{"the running agent's row", 12, 12, []string{
 			"until 16:04  ✗ claude/...  ■■□□□□□□  login ex...",
 		}, []string{"● claude/..."}},
-		{"the broken and cooling row, its box goes with it", 11, 9, []string{
+		{"the broken and cooling row, its box goes with it", 11, 10, []string{
 			"#1 fix the frobnicator",
+			"▸ #3",
 		}, []string{"AGENTS", "codex/g...", "until 16:04"}},
 		{"the plan line, its box goes with it", 8, 6, []string{
 			"! claude/sonnet-long-n...  → brigada agent reset claude/sonnet-long-name",

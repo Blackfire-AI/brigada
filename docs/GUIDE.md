@@ -1118,7 +1118,7 @@ a done task that has not landed and that no job speaks for gets a teal `⇡ #330
 with `queued` for a queued land job and `not landed` when the task carries no word;
 a queued, waiting-on or review task is a dim `·` row;
 a reviewing plan whose review no job has started shows a dim `· plan review queued` line —
-while a finished plan is one line, `#N <title>` and `done` or `cancelled`;
+while a finished plan is one line, `#N <title>` and `done` or `cancelled`, listed below every live plan (each group keeps id order);
 a foreman turn no plan claims sits in a FOREMAN box and any other job no listed plan claims in a JOBS box,
 between the needs-you box and the plans tree, each shown only when it has lines.
 The FOREMAN block also carries dim lines for the user's messages waiting for the foreman (`2 messages for the foreman`) and for each foreman slot that is not free, with its state, label and the local time since (`foreman slot: attach (attached chat) since 11:10`), a headless turn whose job runs left out because its job line speaks for it;
@@ -1148,7 +1148,7 @@ and then every other line outside the header, the band and the needs-you queue �
 event row 1, the remaining agent rows, each plan's own line, the placeholders —
 with the slots row last of them, though it sits above the needs-you box.
 
-A box's top and bottom borders are rows of its section and go right after its last row, so an empty box never shows and a drop may leave the frame a row or two short of the height.
+A box's top and bottom borders are rows of its section and go right after its last row, so an empty box never shows and a drop may leave the frame a row or two short of the height; a spare row goes back to a running line whose box and plan line still show, so the frame may still fall short when none can return.
 
 The header, the band and the hint line under it, and the needs-you box, borders included, never drop for another line;
 on a screen too short for them the frame is cut from the bottom, into the needs-you box, so the height still holds.
