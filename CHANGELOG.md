@@ -13,6 +13,10 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `brigada top` lists live plans before finished ones, and a short terminal spends a free row on a running line (issue #184).
 
+### Added
+
+- In the full-screen `brigada top`, a running job's `▸` is a spinner on a 120 ms redraw of its own, with colour and UTF-8 and while a job runs; `--interval` still sets the fetch, a frame makes no API call, and only the lines that changed are written (issue #176).
+
 ## [1.1.1] - 2026-11-05
 
 Fixes `brigada top` in macOS Terminal.app, reads its events as a table, and lets a flaky land check rerun without a restart. No store migration and no new setting. Restart the engine and runner after you upgrade.

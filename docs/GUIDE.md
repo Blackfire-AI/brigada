@@ -1062,7 +1062,7 @@ A foreman turn is never held back by the plan or model caps, and goes ahead of q
 
 `brigada capacity` prints the same snapshot as two tables. AGENTS lists each agent with its tier, effort, cost weight, running jobs against its effective cap — its own runner, account and model caps with the global cap folded in — and the layer that binds it, then its quota: `ready`, `cooling until` a local time, or `broken`. LAYERS lists each cap layer with its key, cap, use and queue. It shows the project of the repository you are in; `--project URL` names another, and outside a repository it shows every project's.
 
-`brigada top` is a live view of the engine: every `--interval` (default 2s) it redraws a two-row header —
+`brigada top` is a live view of the engine: every `--interval` (default 2s), the fetch rate, it redraws a two-row header —
 the brand mark `▙ brigada` (the word alone without UTF-8; only the `▙` is coloured), the scope and the engine's uptime, then the clock and `q quit  p pause` at the right end —
 and a slots row, which a band replaces while the engine is failing or the view is paused —
 the global slots against their cap as a `━` meter of up to 18 cells with `3/8 slots` beside it, then the run, queue, held and needs counters at the right end —
@@ -1105,7 +1105,7 @@ The PLANS top border carries a legend of the four states other than parked, `■
 When the cells would take more than a third of the width the tail is just `done/total`.
 The total leaves out cancelled and retired tasks, and the count takes a done task only once it is landed, or when its class never lands.
 A job row has fixed columns that line up across the rows of a box — the mark, the task id, the title, the kind, the agent, the age and the last event, two spaces apart — in PLANS, FOREMAN and JOBS, each box with its own widths.
-Beneath the line come its running jobs (`▸`, as `▸ #342  clip frame to terminal height  work  claude/sonnet@high  3m12s  Edit`):
+Beneath the line come its running jobs (`▸`, as `▸ #342  clip frame to terminal height  work  claude/sonnet@high  3m12s  Edit`; with colour and UTF-8 the full-screen view turns the `▸` into a spinner redrawn every 120 ms, with no fetch of its own, and it stays a static `▸` — `>` in ASCII — with no colour, in a piped snapshot, while paused and while the engine band shows):
 the agent is `harness/model@effort`, and a name of more than two `/` segments shows its last, so `opencode/zai-coding-plan/glm-5.3` reads `glm-5.3`;
 the age is `45s`, `9m04s` or `1h02m03s`; the last event is the tool's name alone, and is left out under 80 terminal columns.
 `brigada top` measures text in terminal cells: a CJK or emoji character takes two, a combining mark none, and a cut falls between characters, never inside a wide one, so every boxed row is exactly the frame's width.
