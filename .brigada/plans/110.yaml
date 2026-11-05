@@ -44,6 +44,6 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-360"
     rounds: 0
