@@ -5,9 +5,9 @@
 plan: 107
 title: "top keeps its last column and redraws on resize (#186)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-05T11:06:58.245037Z
-updated: 2026-11-05T11:10:13.735894Z
+updated: 2026-11-05T11:13:43.597186Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -33,5 +33,31 @@ tasks:
     caps: {restart: 0}
     skills: ["bugfix"]
     state: running
+    branch: ""
+    rounds: 0
+  - id: 354
+    name: "fix-181"
+    title: "land_retry reruns a failed land check"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    review_effort: medium
+    skills: ["bugfix", "surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 355
+    name: "changelog-181"
+    title: "CHANGELOG entry for #181"
+    class: "implement"
+    deps: ["top-resize", "fix-181"]
+    base: "top-resize"
+    tier: light
+    effort: low
+    skills: ["docs-change"]
+    state: pending
     branch: ""
     rounds: 0
