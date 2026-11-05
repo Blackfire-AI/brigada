@@ -5,9 +5,9 @@
 plan: 110
 title: "top: live plans first, spare rows for running lines, running spinner (#184, #176)"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-11-05T20:36:50.758559Z
-updated: 2026-11-05T20:36:50.758559Z
+updated: 2026-11-05T20:40:35.580131Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -31,7 +31,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["bugfix"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 360
