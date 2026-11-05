@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -2457,22 +2458,75 @@ func TestTopTakesNoArguments(t *testing.T) {
 }
 
 func TestTopScreenDrawRedrawsInPlace(t *testing.T) {
-	var out bytes.Buffer
-	screen := newTopScreen(&out)
-	out.Reset()
-	screen.draw([]string{"one", "two", "three"})
-	got := out.String()
-	if n := strings.Count(got, "\r\n"); n != 2 {
-		t.Errorf("frame has %d line breaks, want 2:\n%q", n, got)
+	full := strings.Repeat("x", 20)
+	const height = 3
+	for _, tc := range []struct {
+		name   string
+		lines  []string
+		breaks int
+		short  bool
+	}{
+		{"short", []string{full, full}, 2, true},
+		{"fills the height", []string{full, full, full}, 2, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			screen := newTopScreen(&out)
+			out.Reset()
+			screen.draw(tc.lines, height)
+			got := out.String()
+			if !strings.HasPrefix(got, "\x1b[H") {
+				t.Errorf("frame does not start with home: %q", got)
+			}
+			if strings.Contains(got, "\x1b[2J") {
+				t.Errorf("frame clears by scrolling: %q", got)
+			}
+			if n := strings.Count(got, "\r\n"); n != tc.breaks {
+				t.Errorf("frame has %d line breaks, want %d:\n%q", n, tc.breaks, got)
+			}
+			for _, erase := range []string{"\x1b[K", "\x1b[J"} {
+				if strings.Contains(got, full+erase) {
+					t.Errorf("%q follows a line's text: %q", erase, got)
+				}
+			}
+			if tc.short {
+				if !strings.HasSuffix(got, "\r\n\x1b[J") {
+					t.Errorf("short frame does not end with a break and erase below: %q", got)
+				}
+			} else if !strings.HasSuffix(got, full) {
+				t.Errorf("full frame does not end with the last line's text: %q", got)
+			}
+		})
 	}
-	if !strings.HasPrefix(got, "\x1b[H") {
-		t.Errorf("frame does not start with home: %q", got)
+}
+
+// TestTopEventsResizeRedrawsWithoutFetch: a resize draws and never
+// fetches, running or paused.
+func TestTopEventsResizeRedrawsWithoutFetch(t *testing.T) {
+	keys := make(chan byte)
+	ticks := make(chan time.Time)
+	resize := make(chan os.Signal)
+	refreshes, draws := 0, 0
+	paused := false
+	done := make(chan int)
+	go func() {
+		done <- topEvents(context.Background(), keys, ticks, resize,
+			func() { refreshes++ }, func() { draws++ },
+			func() { paused = !paused }, func() bool { return paused })
+	}()
+	resize <- syscall.SIGWINCH
+	keys <- 'p' // pause: draws, no fetch
+	resize <- syscall.SIGWINCH
+	ticks <- time.Now() // paused tick: draws, no fetch
+	keys <- 'q'
+	if code := <-done; code != 0 {
+		t.Fatalf("exit %d, want 0", code)
 	}
-	if !strings.HasSuffix(got, "\x1b[J") {
-		t.Errorf("frame does not end with erase below: %q", got)
+	if refreshes != 0 {
+		t.Errorf("%d fetches, want 0", refreshes)
 	}
-	if strings.Contains(got, "\x1b[2J") {
-		t.Errorf("frame clears by scrolling: %q", got)
+	if draws != 4 {
+		t.Errorf("%d draws, want 4", draws)
 	}
 }
 

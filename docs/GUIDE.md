@@ -1152,6 +1152,7 @@ on a screen too short for them the frame is cut from the bottom, into the needs-
 
 Below 60 columns the boxes stay, and a header whose keys do not fit whole drops them and moves the clock against the right edge.
 `q` quits and `p` pauses the refresh.
+A terminal resize redraws at once from the data the view already holds, also while paused.
 When the engine cannot be reached the view keeps the last data and retries, and a full-width red band under the header says so, in place of the slots row: `✗ ENGINE UNREACHABLE`, `retrying · data is 42s old` (`no data yet` before the first fetch) and `brigada start` at the right edge, which shows only when the dial failed, `--no-start` with no engine included; `--no-start` stops the view starting an engine.
 A fetch error from a running engine shows `✗ engine: <its text>` with the same retrying part and no action.
 The middle part is left out before the first part is cut.
