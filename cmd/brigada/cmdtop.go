@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -393,7 +394,7 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 	add(jobs)
 	add(topPlansBox(model.status, model.tagPlans, model.statusOK, model.events, secNow, style, inner))
 	add(topAgentLines(model, secNow, style, inner))
-	events := topEventLinesAt(model.events, model.statusOK && topFirstRun(model.status), secNow, style, inner)
+	events := topEventLinesAt(model.events, model.status, model.statusOK && topFirstRun(model.status), secNow, style, inner)
 	if r := model.status.Report; r != nil {
 		first, _, _ := strings.Cut(strings.TrimSpace(r.Text), "\n")
 		events[0].box.right = strings.TrimSpace(topMarkdownPlain(first))
@@ -1533,22 +1534,46 @@ func topShows(it history.Item) bool {
 }
 
 // topEventLines is the EVENTS box: the newest kept items, newest first,
-// one per row, at most topEventRows. A row is the time, two spaces and the
-// event's words, the time column padded to the widest time of the rows
-// built so the words start in one column; each row is cut to width. With
-// no items the box holds a dim `no events`. Row 1 yields last
-// (yieldRest), row 2 in yieldEventsSecond and rows 3 and up in
-// yieldEventsExtra, the first class to go; the borders go with the last
-// row. The top border's right end carries the foreman's report line
-// (renderTop sets it).
-func topEventLines(items []history.Item, now time.Time, style term.Style, width int) []topLine {
-	return topEventLinesAt(items, false, now, style, width)
+// one per row, at most topEventRows, as a table of five columns joined by
+// two spaces: the time (topClock, a date on another day), the kind, the
+// number (`#N`, left-aligned), what happened (the only coloured cell) and
+// a title (the plan's or the task's from status, a review's task title or,
+// with no task number, its branch, an agent's subject). Every column is
+// padded to the widest cell of the rows built, and a column blank on every
+// row takes no width and no gap. A task_done row is left out when the items
+// hold a task_landed for the same task, before the row limit applies. Only
+// the title gives way to a narrow box: it is cut to its room and left out
+// when the room is under topTitleFloor cells; topFit cuts a row still
+// longer than width as the last resort. With no items the box holds a dim
+// `no events`. Row 1 yields last (yieldRest), row 2 in yieldEventsSecond
+// and rows 3 and up in yieldEventsExtra, the first class to go; the
+// borders go with the last row. The top border's right end carries the
+// foreman's report line (renderTop sets it).
+func topEventLines(items []history.Item, status api.Status, now time.Time, style term.Style, width int) []topLine {
+	return topEventLinesAt(items, status, false, now, style, width)
 }
+
+// topTitleFloor is the fewest cells the events table gives a title.
+const topTitleFloor = 8
 
 // topEventLinesAt is topEventLines that reads `no events yet` instead of `no
 // events` on a first run.
-func topEventLinesAt(items []history.Item, firstRun bool, now time.Time, style term.Style, width int) []topLine {
+func topEventLinesAt(items []history.Item, status api.Status, firstRun bool, now time.Time, style term.Style, width int) []topLine {
 	box := topBox{title: "EVENTS"}
+	landed := map[int64]bool{}
+	for _, it := range items {
+		if it.Kind == "task_landed" && it.TaskID != 0 {
+			landed[it.TaskID] = true
+		}
+	}
+	var shown []history.Item
+	for _, it := range items {
+		if it.Kind == "task_done" && it.TaskID != 0 && landed[it.TaskID] {
+			continue
+		}
+		shown = append(shown, it)
+	}
+	items = shown
 	if len(items) == 0 {
 		text := "no events"
 		if firstRun {
@@ -1559,18 +1584,83 @@ func topEventLinesAt(items []history.Item, firstRun bool, now time.Time, style t
 	if len(items) > topEventRows {
 		items = items[len(items)-topEventRows:]
 	}
-	clocks := make([]string, len(items))
-	pad := 0
-	for i := range items {
-		clocks[i] = topClock(items[len(items)-1-i].CreatedAt, now)
-		if n := term.CellWidth(clocks[i]); n > pad {
-			pad = n
+	planTitle := map[int64]string{}
+	taskTitle := map[int64]string{}
+	for _, p := range status.Plans {
+		planTitle[p.ID] = p.Title
+		for _, t := range p.Tasks {
+			taskTitle[t.ID] = t.Title
+		}
+	}
+	clockOf := func(stamp string) string { return api.LocalClock(stamp, now) }
+	// cells[i] is row i, newest first, as time, kind, number, what, title.
+	cells := make([][5]string, len(items))
+	var wide [5]int
+	for i := range cells {
+		it := items[len(items)-1-i]
+		cols, _ := history.EventColumns(it, clockOf)
+		num := ""
+		if cols.Number != 0 {
+			num = "#" + strconv.FormatInt(cols.Number, 10)
+		}
+		title := cols.Subject
+		switch cols.Kind {
+		case "plan":
+			title = planTitle[cols.Number]
+		case "task":
+			title = taskTitle[cols.Number]
+		case "review":
+			if cols.Number != 0 {
+				title = taskTitle[cols.Number]
+			}
+		}
+		cells[i] = [5]string{topClock(it.CreatedAt, now), cols.Kind, num, cols.What, strings.Join(strings.Fields(title), " ")}
+		for c, cell := range cells[i] {
+			if n := term.CellWidth(cell); n > wide[c] {
+				wide[c] = n
+			}
+		}
+	}
+	// Only the title gives way: its room is what the four other columns
+	// and the gap before it leave.
+	if wide[4] > 0 {
+		fixed := 0
+		for _, w := range wide[:4] {
+			if w > 0 {
+				if fixed > 0 {
+					fixed += 2
+				}
+				fixed += w
+			}
+		}
+		room := width - fixed - 2
+		switch {
+		case room < topTitleFloor:
+			wide[4] = 0
+		case wide[4] > room:
+			wide[4] = 0
+			for i := range cells {
+				cells[i][4] = cutLine(cells[i][4], room)
+				if n := term.CellWidth(cells[i][4]); n > wide[4] {
+					wide[4] = n
+				}
+			}
 		}
 	}
 	var lines []topLine
-	for i, clock := range clocks {
-		words, _ := topEventWords(items[len(items)-1-i], now)
-		text := clock + strings.Repeat(" ", pad-term.CellWidth(clock)) + "  " + topColourStates(words, style)
+	for i, row := range cells {
+		var parts []string
+		for c, cell := range row {
+			if wide[c] == 0 {
+				continue
+			}
+			pad := strings.Repeat(" ", wide[c]-term.CellWidth(cell))
+			if c == 3 {
+				cell = topColourStates(cell, style) // the padding stays outside the colour
+			}
+			parts = append(parts, cell+pad)
+		}
+		text := strings.TrimRight(strings.Join(parts, "  "), " ")
 		class := yieldRest
 		switch {
 		case i == 1:
