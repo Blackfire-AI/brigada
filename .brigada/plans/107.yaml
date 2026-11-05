@@ -32,9 +32,9 @@ tasks:
     review_effort: medium
     caps: {restart: 0}
     skills: ["bugfix"]
-    state: reviewing
+    state: running
     branch: "brigada/task-353"
-    rounds: 1
+    rounds: 2
   - id: 354
     name: "fix-181"
     title: "land_retry reruns a failed land check"
