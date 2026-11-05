@@ -176,16 +176,15 @@ func (e *Engine) landRuleTx(tx *sql.Tx, taskID int64, now time.Time) (landRuleRe
 // author job, was a substantive approve (§7) — the verdict that lets an
 // implement task land.
 func taskApprovedTx(tx *sql.Tx, taskID int64) (bool, error) {
-	var authorID int64
-	if err := tx.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM jobs
-		WHERE task_id = ? AND kind IN ('work', 'fix') AND status = 'done'`, taskID).Scan(&authorID); err != nil {
-		return false, fmt.Errorf("read the last author job of task %d: %w", taskID, err)
+	authorID, err := lastAuthorJobTx(tx, taskID)
+	if err != nil {
+		return false, err
 	}
 	if authorID == 0 {
 		return false, nil
 	}
 	var reviewResult string
-	err := tx.QueryRow(`SELECT COALESCE(result, '') FROM jobs
+	err = tx.QueryRow(`SELECT COALESCE(result, '') FROM jobs
 		WHERE task_id = ? AND kind = 'review' AND status = 'done' AND id > ?
 		ORDER BY id DESC LIMIT 1`, taskID, authorID).Scan(&reviewResult)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -199,6 +198,18 @@ func taskApprovedTx(tx *sql.Tx, taskID int64) (bool, error) {
 		return false, nil
 	}
 	return v.Verdict == verdictApprove && len(v.Findings) >= minSubstantiveFindings, nil
+}
+
+// lastAuthorJobTx returns the task's last done work or fix job, 0 when it
+// has none: the boundary of one approved head, for a restart or a fix
+// that finishes moves it past everything recorded of the head before.
+func lastAuthorJobTx(tx *sql.Tx, taskID int64) (int64, error) {
+	var authorID int64
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM jobs
+		WHERE task_id = ? AND kind IN ('work', 'fix') AND status = 'done'`, taskID).Scan(&authorID); err != nil {
+		return 0, fmt.Errorf("read the last author job of task %d: %w", taskID, err)
+	}
+	return authorID, nil
 }
 
 // landableDoneTx reports whether the task is one the land rule queues a
@@ -1217,12 +1228,23 @@ func (e *Engine) landConflictTx(tx *sql.Tx, job *jobRow, rec landRecord, now tim
 	return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: boundNote(reason)}, now)
 }
 
+// landCheckFailedReason opens the reason of every failed land check. The
+// log's tail follows it in the reason, so the land retry reads this prefix
+// before any other word of the reason: isLandCheckFailure.
+const landCheckFailedReason = "the check failed on the landed result"
+
+// isLandCheckFailure reports whether a task_land_failed reason is a check
+// that failed on the landed result.
+func isLandCheckFailure(reason string) bool {
+	return strings.HasPrefix(reason, landCheckFailedReason)
+}
+
 // landCheckFailedTx parks a task whose check failed on the landed result
 // (§7.1): nothing is pushed, and the check log names the failure.
 func (e *Engine) landCheckFailedTx(tx *sql.Tx, job *jobRow, rec landRecord, now time.Time) error {
 	// The check log is a tail already; the event keeps the end of it, where
 	// the failure is, and names the land job whose log check_log reads.
-	reason := fmt.Sprintf("the check failed on the landed result (land job %d)", job.ID)
+	reason := fmt.Sprintf("%s (land job %d)", landCheckFailedReason, job.ID)
 	if rec.CheckLog != "" {
 		reason += ": "
 		reason += tailNote(rec.CheckLog, noteBound-len(reason))

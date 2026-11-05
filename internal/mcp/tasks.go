@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -200,9 +201,14 @@ type landRetryArgs struct {
 }
 
 // callLandRetry runs the land_retry tool (#133): the land rule run again
-// through /v1/tasks/<id>/land-retry for a task a rejected push or an
-// environment failure parked, rendered by renderLandRetry. The
-// idempotency key is minted as in answer.
+// through /v1/tasks/<id>/land-retry for a task a rejected push, an
+// environment failure or a failed land check parked, rendered by
+// renderLandRetry. Unlike answer's, the idempotency key is fresh on every
+// call: one task may be parked and retried several times, and the API
+// replays any 200 — a refusal too — for a day, so a key of the task alone
+// would answer a later park with an earlier outcome. A repeated call is
+// harmless without a shared key: the engine refuses a task that is not
+// parked or has a live job, so it cannot queue a second landing.
 func callLandRetry(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
 	var a landRetryArgs
 	if len(args) > 0 {
@@ -210,7 +216,15 @@ func callLandRetry(ctx context.Context, c *api.Client, args json.RawMessage) (st
 			return "", fmt.Errorf("arguments: %w", err)
 		}
 	}
-	res, err := c.RetryLanding(ctx, a.Task, idemKey("land_retry", a))
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		return "", fmt.Errorf("mint the idempotency key: %w", err)
+	}
+	key := idemKey("land_retry", struct {
+		Task  int64
+		Nonce []byte
+	}{a.Task, nonce})
+	res, err := c.RetryLanding(ctx, a.Task, key)
 	if err != nil {
 		return "", err
 	}

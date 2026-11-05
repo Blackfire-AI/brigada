@@ -5,6 +5,11 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `brigada top` no longer loses the last character of a full-width line in a real terminal, and a terminal resize redraws at once from the data the view holds, with no fetch (issue #186).
+- A land check that failed on a flake could only be restarted, which rebuilt every dependent. `land_retry` now reruns a failed land check through the land rule, with every gate applying and no restart spent, at most twice for one approved head: after the third failure it refuses and names `task_restart`. The foreman calls it only when `check_log` shows the failure is unrelated to the task's diff; a conflict, a real check failure and a moved approved head still need `task_restart` (issue #181).
+
 ## [1.1.0] - 2026-11-05
 
 A rebuilt `brigada top`, a readable `brigada history`, and fixes that name failures brigada used to hide. No store migration and no new setting. Restart the engine and runner after you upgrade.

@@ -1,19 +1,87 @@
 package engine
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 )
 
 // The land-retry tests (#133): RetryLanding queues again the landing of
-// a task a rejected push or an environment failure parked, through the
-// land rule and every gate, and refuses everything else with the reason
-// named and nothing changed.
+// a task a rejected push, an environment failure or a failed land check
+// parked, through the land rule and every gate, up to the cap on failed
+// land checks, and refuses everything else with the reason named and
+// nothing changed.
 
 // landRejectedErr is a land job's error as a push the target moved under
 // words it: not the environment, not the task's content.
 const landRejectedErr = "the push was rejected again after one retry (the target moved): non-fast-forward"
+
+// landCheckFailed is a land job's record of a check that failed on the
+// landed result, with the check's log verbatim.
+func landCheckFailed(t *testing.T, log string) Completion {
+	t.Helper()
+	res, err := json.Marshal(map[string]any{"target_branch": "main", "commit": "", "check_passed": false, "check_log": log})
+	if err != nil {
+		t.Fatalf("encode the land record: %v", err)
+	}
+	return Completion{Result: string(res)}
+}
+
+// stackedDone runs two tasks of a new plan, mid stacked on lib, to done
+// and approved, leaving lib's land job the next git work.
+func (e *env) stackedDone(author, reviewer int64) (lib, mid int64) {
+	e.t.Helper()
+	plan, err := e.eng.CreatePlan(e.ctx, e.project, "the stack", []PlanTask{
+		{Name: "lib", Title: "the lib", Spec: "write the lib"},
+		{Name: "mid", Title: "the mid", Spec: "use the lib", Deps: []string{"lib"}},
+	})
+	if err != nil {
+		e.t.Fatalf("create plan: %v", err)
+	}
+	lib, mid = plan.Tasks[0].TaskID, plan.Tasks[1].TaskID
+	for _, task := range []int64{lib, mid} {
+		g := e.leaseAny(author)
+		if g == nil || g.TaskID != task {
+			e.t.Fatalf("lease = %+v, want the work of task %d", g, task)
+		}
+		if ans := e.complete(g, doneOn(branchOf(task), passCheck)); ans != AnsOK {
+			e.t.Fatalf("complete task %d: %s", task, ans)
+		}
+		e.approveReview(reviewer)
+	}
+	return lib, mid
+}
+
+// landPushedTask leases the next land job, which must be task's, and
+// completes it as pushed.
+func (e *env) landPushedTask(author, task int64, commit string) {
+	e.t.Helper()
+	g := e.leaseGit(author)
+	if g == nil || g.Kind != KindLand || g.TaskID != task {
+		e.t.Fatalf("lease = %+v, want the land job of task %d", g, task)
+	}
+	res := fmt.Sprintf(`{"target_branch":"main","commit":%q,"check_passed":true,"pushed":"pushed"}`, commit)
+	if ans := e.complete(g, Completion{Result: res}); ans != AnsOK {
+		e.t.Fatalf("land task %d: %s", task, ans)
+	}
+}
+
+// failLandCheck leases the next land job, which must be task's, and
+// fails its check, parking the task again.
+func (e *env) failLandCheck(author, task int64) {
+	e.t.Helper()
+	g := e.leaseGit(author)
+	if g == nil || g.Kind != KindLand || g.TaskID != task {
+		e.t.Fatalf("lease = %+v, want the land job of task %d", g, task)
+	}
+	if ans := e.complete(g, landCheckFailed(e.t, "--- FAIL: TestFlake")); ans != AnsOK {
+		e.t.Fatalf("fail the land check: %s", ans)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", task); state != taskNeedsForeman {
+		e.t.Fatalf("task state after the failed check = %q, want needs_foreman", state)
+	}
+}
 
 // parkLanding drives the fixture's task to done, leases its land job and
 // completes it with c, the failure that parks it.
@@ -260,9 +328,208 @@ func TestRetryLandingStaleBase(t *testing.T) {
 	}
 }
 
-// TestRetryLandingRefusals: every task the retry does not take is
-// refused with the reason naming what it found, no row changed and no
-// land_retried event recorded.
+// TestRetryLandingFlakyCheckLands: a check that fails on the landed
+// result and passes on the rerun lands the task on the land_retry alone:
+// no restart is spent, and a done dependent is neither restarted nor
+// marked stale — it lands after its dependency, on its own work.
+func TestRetryLandingFlakyCheckLands(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	lib, mid := e.stackedDone(author, reviewer)
+	branch := e.str("SELECT branch FROM tasks WHERE id = ?", lib)
+	e.failLandCheck(author, lib)
+
+	res := e.retryLanding(e.project, lib)
+	if res.Outcome != LandRetryQueued || res.JobID == 0 || res.TaskID != lib {
+		t.Fatalf("RetryLanding = %+v, want queued with its land job", res)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", lib); state != taskDone {
+		t.Errorf("task state after the retry = %q, want done", state)
+	}
+	e.landPushedTask(author, lib, "lib-1")
+	e.landPushedTask(author, mid, "mid-1")
+
+	for _, task := range []int64{lib, mid} {
+		if pushed := e.str("SELECT pushed FROM landings WHERE task_id = ?", task); pushed != "pushed" {
+			t.Errorf("task %d landing = %q, want pushed", task, pushed)
+		}
+		if state := e.str("SELECT state FROM tasks WHERE id = ?", task); state != taskDone {
+			t.Errorf("task %d state = %q, want done", task, state)
+		}
+		if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1", task); n != 0 {
+			t.Errorf("task %d restart jobs = %d, want none spent", task, n)
+		}
+		if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'work'", task); n != 1 {
+			t.Errorf("task %d work jobs = %d, want the first alone", task, n)
+		}
+	}
+	if b := e.str("SELECT branch FROM tasks WHERE id = ?", lib); b != branch {
+		t.Errorf("task branch = %q, want %q unchanged", b, branch)
+	}
+	for _, kind := range []string{evDepRebuilt, evTaskBaseStale} {
+		if n := e.countEvents(kind); n != 0 {
+			t.Errorf("%s events = %d, want none: the dependent is not stale", kind, n)
+		}
+	}
+}
+
+// TestRetryLandingCheckCap: the third failure of the check on one
+// approved head is refused, naming the count and task_restart, with
+// nothing changed; a restart's new author job resets the count.
+func TestRetryLandingCheckCap(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+	e.failLandCheck(author, e.task)
+	for range 2 {
+		if res := e.retryLanding(e.project, e.task); res.Outcome != LandRetryQueued {
+			t.Fatalf("RetryLanding = %+v, want queued", res)
+		}
+		e.failLandCheck(author, e.task)
+	}
+
+	jobs := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ?", e.task)
+	res := e.retryLanding(e.project, e.task)
+	if res.Outcome != LandRetryRefused || res.JobID != 0 ||
+		!strings.Contains(res.Reason, "3 times") || !strings.Contains(res.Reason, "task_restart") {
+		t.Fatalf("RetryLanding = %+v, want refused naming 3 times and task_restart", res)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+		t.Errorf("task state = %q, want still parked", state)
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ?", e.task); got != jobs {
+		t.Errorf("jobs = %d, want %d unchanged", got, jobs)
+	}
+	if n := e.countEvents(evLandRetried); n != 2 {
+		t.Errorf("land_retried events = %d, want the two reruns alone", n)
+	}
+
+	if _, err := e.eng.RestartTask(e.ctx, e.project, e.task, "the check really fails"); err != nil {
+		t.Fatalf("restart the task: %v", err)
+	}
+	g := e.leaseAny(author)
+	if g == nil || g.Kind != KindWork {
+		t.Fatalf("lease = %+v, want the restarted work", g)
+	}
+	if ans := e.complete(g, doneOn(g.Branch, passCheck)); ans != AnsOK {
+		t.Fatalf("complete the restarted work: %s", ans)
+	}
+	e.approveReview(reviewer)
+	e.failLandCheck(author, e.task)
+	if res := e.retryLanding(e.project, e.task); res.Outcome != LandRetryQueued {
+		t.Errorf("RetryLanding after the restart = %+v, want queued: the restart reset the count", res)
+	}
+}
+
+// TestRetryLandingCheckCapCountsFailedChecks: the cap counts failed
+// checks, not land_retried events: a push rejected between two of them
+// is retried without spending one.
+func TestRetryLandingCheckCapCountsFailedChecks(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+	e.failLandCheck(author, e.task)
+	if res := e.retryLanding(e.project, e.task); res.Outcome != LandRetryQueued {
+		t.Fatalf("first RetryLanding = %+v, want queued", res)
+	}
+	g := e.leaseGit(author)
+	if ans := e.complete(g, Completion{Error: landRejectedErr}); ans != AnsOK {
+		t.Fatalf("reject the push: %s", ans)
+	}
+	if res := e.retryLanding(e.project, e.task); res.Outcome != LandRetryQueued {
+		t.Fatalf("RetryLanding of the rejected push = %+v, want queued", res)
+	}
+	e.failLandCheck(author, e.task)
+	if res := e.retryLanding(e.project, e.task); res.Outcome != LandRetryQueued {
+		t.Errorf("RetryLanding at two failed checks after three retries = %+v, want queued", res)
+	}
+}
+
+// TestRetryLandingCheckLogIsNotAReason: a check log carrying the words of
+// a conflict, a moved head and a rejected push reads as the failed check
+// it is, and is retried.
+func TestRetryLandingCheckLogIsNotAReason(t *testing.T) {
+	e := newEnv(t)
+	e.parkLanding(landCheckFailed(t, "land conflict: a.go\nbrigada/task-1 is at abc, not the approved head def\nTestPush: rejected, non-fast-forward"))
+	p, ok := e.taskEvent(e.task, evTaskLandFailed)
+	if !ok || !strings.Contains(p.Reason, "land conflict:") || !strings.Contains(p.Reason, "not the approved head") {
+		t.Fatalf("task_land_failed = %+v (%t), want the log's words in the reason", p, ok)
+	}
+	if res := e.retryLanding(e.project, e.task); res.Outcome != LandRetryQueued {
+		t.Errorf("RetryLanding = %+v, want queued", res)
+	}
+}
+
+// TestRetryLandingStaleBaseAfterFailedCheck: a failed check does not
+// carry a stale base past the land rule: the retry parks the task again
+// with task_base_stale, and a second retry is refused.
+func TestRetryLandingStaleBaseAfterFailedCheck(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	lib, mid := e.stackedDone(author, reviewer)
+	e.landPushedTask(author, lib, "lib-1")
+	e.failLandCheck(author, mid)
+	// The dependency's result moved to a new round while mid waited.
+	e.exec("UPDATE tasks SET branch = ? WHERE id = ?", branchOf(lib)+"-r1", lib)
+
+	res := e.retryLanding(e.project, mid)
+	if res.Outcome != LandRetryStaleBase || res.JobID != 0 || !strings.Contains(res.Reason, "task_restart") {
+		t.Fatalf("RetryLanding = %+v, want stale_base naming task_restart", res)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", mid); state != taskNeedsForeman {
+		t.Errorf("mid state = %q, want needs_foreman again", state)
+	}
+	if n := e.queuedLandJobs(mid); n != 0 {
+		t.Errorf("queued land jobs = %d, want none on a stale base", n)
+	}
+	if again := e.retryLanding(e.project, mid); again.Outcome != LandRetryRefused || !strings.Contains(again.Reason, "task_restart") {
+		t.Errorf("second RetryLanding = %+v, want refused naming task_restart", again)
+	}
+}
+
+// TestRetryLandingAfterFailedCheckRunsLandReady: the rerun runs land_ready
+// even when the land job that failed its check had skipped it on the
+// user's release: the release covered that attempt and no other.
+func TestRetryLandingAfterFailedCheckRunsLandReady(t *testing.T) {
+	e := newEnv(t)
+	e.set(map[string]string{SettingLandReady: ".brigada/land-ready.sh"})
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+	if ans := e.complete(e.leaseGit(author), landHeld("the release window is closed")); ans != AnsOK {
+		t.Fatalf("hold the landing: %s", ans)
+	}
+	if _, err := e.eng.LandApprove(e.ctx, e.project, e.task, false); err != nil {
+		t.Fatalf("LandApprove: %v", err)
+	}
+	g := e.leaseGit(author)
+	if g == nil || g.Kind != KindLand || !g.SkipLandReady {
+		t.Fatalf("the released land job = %+v, want one that skips land_ready", g)
+	}
+	if ans := e.complete(g, landCheckFailed(t, "--- FAIL: TestFlake")); ans != AnsOK {
+		t.Fatalf("fail the land check: %s", ans)
+	}
+
+	res := e.retryLanding(e.project, e.task)
+	if res.Outcome != LandRetryQueued {
+		t.Fatalf("RetryLanding = %+v, want queued", res)
+	}
+	g = e.leaseGit(author)
+	if g == nil || g.JobID != res.JobID {
+		t.Fatalf("the retried land job was not leased: %+v", g)
+	}
+	if g.LandReady != ".brigada/land-ready.sh" || g.SkipLandReady {
+		t.Errorf("retried grant land_ready/skip = %q/%v, want the command run, not skipped", g.LandReady, g.SkipLandReady)
+	}
+}
+
+// TestRetryLandingRefusals: every task the retry does not take — a failed
+// land check at its cap has a test of its own — is refused with the reason
+// naming what it found, no row changed and no land_retried event recorded.
 func TestRetryLandingRefusals(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -312,10 +579,6 @@ func TestRetryLandingRefusals(t *testing.T) {
 		}, "not by a failed landing"},
 		{"land conflict", func(e *env) int64 {
 			e.parkLanding(Completion{Result: `{"target_branch":"main","commit":"","check_passed":false,"conflict_files":["rejected.go"]}`})
-			return e.project
-		}, "task_restart"},
-		{"failed land check", func(e *env) int64 {
-			e.parkLanding(Completion{Result: `{"target_branch":"main","commit":"x","check_passed":false,"check_log":"TestPush: rejected"}`})
 			return e.project
 		}, "task_restart"},
 		{"moved approved head", func(e *env) int64 {

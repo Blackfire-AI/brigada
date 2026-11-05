@@ -77,11 +77,13 @@ func (s *Server) handleTaskRestart(w http.ResponseWriter, r *http.Request, id id
 }
 
 // handleTaskLandRetry is the foreman's land_retry behind the API (#133):
-// the land rule run again for a task parked by a rejected push or an
-// environment failure, every gate still applying. Scoped and idempotent
-// like the restart. Each of the engine's four outcomes — queued, held,
-// stale_base, refused — answers 200 with the outcome named, a refusal's
-// reason included: the caller renders each one.
+// the land rule run again for a task parked by a rejected push, an
+// environment failure or a failed land check, every gate still applying.
+// Scoped and idempotent like the restart. Each of the engine's four
+// outcomes — queued, held, stale_base, refused — answers 200 with the
+// outcome named, a refusal's reason included: the caller renders each one,
+// and since the 200 is replayed under its key, the bridge mints a fresh
+// key per call.
 func (s *Server) handleTaskLandRetry(w http.ResponseWriter, r *http.Request, id identity) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
