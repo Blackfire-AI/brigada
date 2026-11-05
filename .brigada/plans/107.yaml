@@ -46,7 +46,7 @@ tasks:
     review_tier: heavy
     review_effort: medium
     skills: ["bugfix", "surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 355
