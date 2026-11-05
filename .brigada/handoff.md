@@ -90,3 +90,10 @@ grep -o '#[0-9]\+' CHANGELOG.md | sort -u | tr -d '#' | while read n; do
   [ "$(gh issue view "$n" --json state -q .state 2>/dev/null)" = OPEN ] && echo "#$n open"
 done
 ```
+
+Then list the open bugs that block a release, and do not tag while one is
+listed (AGENTS.md, Bug severity):
+
+```sh
+gh issue list --search 'label:critical,major'
+```
