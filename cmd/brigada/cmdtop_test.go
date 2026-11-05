@@ -776,12 +776,12 @@ func TestTopAndHistoryShareWords(t *testing.T) {
 	if !ok || !wantOK || topWords != want || want != "work cooling until 16:04" {
 		t.Errorf("top words %q (%v), shared words %q (%v)", topWords, ok, want, wantOK)
 	}
-	var b bytes.Buffer
-	if err := history.RenderReadable(&b, []history.Item{it}, time.UTC, false); err != nil {
-		t.Fatal(err)
+	row, ok := history.EventRow(it, time.UTC, history.Titles{})
+	if !ok {
+		t.Fatal("the cooling event is not a history row")
 	}
-	if !strings.HasPrefix(b.String(), "10-20 15:02 work cooling until ") {
-		t.Errorf("history line = %q", b.String())
+	if line, want := row.Line(history.FitWidths([]history.TableRow{row}), term.Style{}), "10-20 15:02  agent  cooling  work until 10-20 16:04"; line != want {
+		t.Errorf("history row = %q, want %q", line, want)
 	}
 }
 

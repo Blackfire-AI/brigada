@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/term"
 )
 
 const readableStamp = "2026-10-20T15:02:45.123456789Z"
@@ -67,44 +69,39 @@ func TestEventWords(t *testing.T) {
 	}
 }
 
-func renderReadable(t *testing.T, items []Item, all bool) string {
+func renderReadable(t *testing.T, items []Item) string {
 	t.Helper()
 	var b bytes.Buffer
-	if err := RenderReadable(&b, items, time.UTC, all); err != nil {
+	if err := RenderReadable(&b, items, time.UTC); err != nil {
 		t.Fatal(err)
 	}
 	return b.String()
 }
 
-func TestRenderReadableBare(t *testing.T) {
-	sha := "9f21ab3c4d5e6f708192a3b4c5d6e7f890123456"
-	items := []Item{
-		readableEvent("job_created", 3, 5, `{"branch":"task/3-1"}`),
-		readableEvent("job_leased", 3, 5, `{}`),
-		readableEvent("job_cap_held", 3, 5, `{}`),
-		readableEvent("job_agent_picked", 3, 5, `{}`),
-		{Type: TypeMessage, ID: 2, Kind: "task_spec", Author: "foreman", Content: "Do it.", CreatedAt: readableStamp},
-		readableEvent("task_landed", 3, 0, `{"branch":"main","commit":"`+sha+`","pushed":"local","push_cmd":"git push origin FETCH_HEAD:main","after_land_error":"exit 3: boom"}`),
-		readableEvent("review_verdict", 0, 9, `{"status":"approve","branch":"fix/x","findings":"long findings"}`),
-		readableEvent("foreman_report", 0, 12, `{"report":"All landed.\nSecond line."}`),
-	}
-	want := "10-20 15:02 #3 landed, push waits branch=main commit=" + sha + " push_cmd=git push origin FETCH_HEAD:main after_land_error=exit 3: boom\n" +
-		"10-20 15:02 job 9 review approve fix/x\n" +
-		"10-20 15:02 report #12\n"
-	if got := renderReadable(t, items, false); got != want {
-		t.Errorf("bare view =\n%s\nwant\n%s", got, want)
-	}
-}
-
 func TestRenderReadableTimeZone(t *testing.T) {
 	loc := time.FixedZone("x", 2*3600)
-	var b bytes.Buffer
 	items := []Item{readableEvent("task_done", 3, 0, `{}`), {Type: TypeEvent, Kind: "task_done", TaskID: 4, CreatedAt: "garbage"}}
-	if err := RenderReadable(&b, items, loc, false); err != nil {
+	var detail bytes.Buffer
+	if err := RenderReadable(&detail, items, loc); err != nil {
 		t.Fatal(err)
 	}
-	if want := "10-20 17:02 #3 done\ngarbage #4 done\n"; b.String() != want {
-		t.Errorf("got %q, want %q", b.String(), want)
+	if want := "10-20 17:02 #3 done\ngarbage #4 done\n"; detail.String() != want {
+		t.Errorf("detail got %q, want %q", detail.String(), want)
+	}
+	var rows []TableRow
+	for _, it := range items {
+		row, ok := EventRow(it, loc, Titles{})
+		if !ok {
+			t.Fatalf("%s is not a row", it.Kind)
+		}
+		rows = append(rows, row)
+	}
+	var table bytes.Buffer
+	if err := WriteTable(&table, rows, FitWidths(rows), term.Style{}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "10-20 17:02  task  #3  done\ngarbage      task  #4  done\n"; table.String() != want {
+		t.Errorf("table got %q, want %q", table.String(), want)
 	}
 }
 
@@ -120,7 +117,7 @@ func TestRenderReadableDetail(t *testing.T) {
 		readableEvent("foreman_report", 0, 12, `{"report":"All landed.\nSecond line."}`),
 		readableEvent("task_asked", 3, 5, `{"question":"which way?"}`),
 	}
-	got := renderReadable(t, items, true)
+	got := renderReadable(t, items)
 	for _, want := range []string{
 		"10-20 15:02 foreman task spec: Spec line one.\n  Spec line two.\n",
 		"10-20 15:02 job 5 job leased: lease=abc\n",
@@ -216,37 +213,40 @@ func TestRenderReadablePinsEveryKind(t *testing.T) {
 		bare string
 		all  string
 	}{
-		{readableEvent("plan_done", 12, 0, `{"plan":99,"status":"done"}`), "10-20 15:02 plan #99 done", "10-20 15:02 plan #99 done: status=done"},
-		{readableEvent("plan_approved", 0, 0, `{"plan":7,"status":"active"}`), "10-20 15:02 plan #7 approved", "10-20 15:02 plan #7 approved: status=active"},
-		{readableEvent("plan_awaiting_approval", 0, 0, `{"plan":8}`), "10-20 15:02 plan #8 awaiting approval", "10-20 15:02 plan #8 awaiting approval"},
-		{readableEvent("task_done", 3, 0, `{"status":"done"}`), "10-20 15:02 #3 done", "10-20 15:02 #3 done: status=done"},
+		{readableEvent("plan_done", 12, 0, `{"plan":99,"status":"done"}`), "10-20 15:02  plan  #99  done", "10-20 15:02 plan #99 done: status=done"},
+		{readableEvent("plan_done", 12, 0, `{"status":"done"}`), "10-20 15:02  plan  done", "10-20 15:02 plan done: status=done"},
+		{readableEvent("plan_approved", 0, 0, `{"plan":7,"status":"active"}`), "10-20 15:02  plan  #7  approved", "10-20 15:02 plan #7 approved: status=active"},
+		{readableEvent("plan_awaiting_approval", 0, 0, `{"plan":8}`), "10-20 15:02  plan  #8  awaiting approval", "10-20 15:02 plan #8 awaiting approval"},
+		{readableEvent("task_done", 3, 0, `{"status":"done"}`), "10-20 15:02  task  #3  done", "10-20 15:02 #3 done: status=done"},
 		{readableEvent("task_landed", 328, 0, `{"pushed":"waiting","branch":"main","commit":"abc123"}`),
-			"10-20 15:02 #328 landed, push waits branch=main commit=abc123", "10-20 15:02 #328 landed, push waits: branch=main commit=abc123 pushed=waiting"},
-		{readableEvent("task_landed", 329, 0, `{"pushed":"pushed"}`), "10-20 15:02 #329 landed", "10-20 15:02 #329 landed: pushed=pushed"},
-		{readableEvent("task_pushed", 328, 0, `{"branch":"main"}`), "10-20 15:02 #328 pushed branch=main", "10-20 15:02 #328 pushed: branch=main"},
-		{readableEvent("task_failed", 4, 0, `{"status":"failed"}`), "10-20 15:02 #4 failed", "10-20 15:02 #4 failed: status=failed"},
-		{readableEvent("task_land_failed", 4, 0, `{"reason":"conflict"}`), "10-20 15:02 #4 land failed", "10-20 15:02 #4 land failed: reason=conflict"},
-		{readableEvent("review_verdict", 3, 9, `{"status":"approve","branch":"fix/x"}`), "10-20 15:02 job 9 review approve fix/x", "10-20 15:02 job 9 review approve fix/x: branch=fix/x status=approve"},
-		{readableEvent("review_verdict", 3, 9, `{"status":"changes","branch":"fix/x"}`), "10-20 15:02 job 9 review changes fix/x", "10-20 15:02 job 9 review changes fix/x: branch=fix/x status=changes"},
-		{readableEvent("review_verdict", 0, 9, `{"status":"no_verdict"}`), "10-20 15:02 job 9 review no verdict", "10-20 15:02 job 9 review no verdict: status=no_verdict"},
-		{readableEvent("agent_broken", 0, 0, `{"harness":"codex","model":"gpt-5","reason":"auth"}`), "10-20 15:02 codex/gpt-5 broken", "10-20 15:02 codex/gpt-5 broken: reason=auth"},
-		{readableEvent("agent_recovered", 0, 0, `{"harness":"codex","model":"gpt-5"}`), "10-20 15:02 codex/gpt-5 recovered", "10-20 15:02 codex/gpt-5 recovered"},
-		{readableEvent("agent_cooling", 3, 5, `{"account":"work","until":"2026-10-20T16:04:00.000000000Z"}`), "10-20 15:02 work cooling until 10-20 16:04", "10-20 15:02 work cooling until 10-20 16:04"},
-		{readableEvent("foreman_report", 0, 41, `{"report":"all landed"}`), "10-20 15:02 report #41", "10-20 15:02 report #41: report=all landed"},
+			"10-20 15:02  task  #328  landed, push waits  abc123", "10-20 15:02 #328 landed, push waits: branch=main commit=abc123 pushed=waiting"},
+		{readableEvent("task_landed", 329, 0, `{"pushed":"pushed"}`), "10-20 15:02  task  #329  landed", "10-20 15:02 #329 landed: pushed=pushed"},
+		{readableEvent("task_pushed", 328, 0, `{"branch":"main"}`), "10-20 15:02  task  #328  pushed", "10-20 15:02 #328 pushed: branch=main"},
+		{readableEvent("task_failed", 4, 0, `{"status":"failed"}`), "10-20 15:02  task  #4  failed", "10-20 15:02 #4 failed: status=failed"},
+		{readableEvent("task_land_failed", 4, 0, `{"reason":"conflict"}`), "10-20 15:02  task  #4  land failed", "10-20 15:02 #4 land failed: reason=conflict"},
+		{readableEvent("review_verdict", 3, 9, `{"status":"approve","branch":"fix/x"}`), "10-20 15:02  review  #3  approve", "10-20 15:02 job 9 review approve fix/x: branch=fix/x status=approve"},
+		{readableEvent("review_verdict", 3, 9, `{"status":"changes","branch":"fix/x"}`), "10-20 15:02  review  #3  changes", "10-20 15:02 job 9 review changes fix/x: branch=fix/x status=changes"},
+		{readableEvent("review_verdict", 0, 9, `{"status":"changes","branch":"fix/x"}`), "10-20 15:02  review  changes  fix/x · job 9", "10-20 15:02 job 9 review changes fix/x: branch=fix/x status=changes"},
+		{readableEvent("review_verdict", 0, 9, `{"status":"no_verdict"}`), "10-20 15:02  review  no verdict  job 9", "10-20 15:02 job 9 review no verdict: status=no_verdict"},
+		{readableEvent("agent_broken", 0, 0, `{"harness":"codex","model":"gpt-5","reason":"auth"}`), "10-20 15:02  agent  broken  codex/gpt-5", "10-20 15:02 codex/gpt-5 broken: reason=auth"},
+		{readableEvent("agent_recovered", 0, 0, `{"harness":"codex","model":"gpt-5"}`), "10-20 15:02  agent  recovered  codex/gpt-5", "10-20 15:02 codex/gpt-5 recovered"},
+		{readableEvent("agent_cooling", 3, 5, `{"account":"work","until":"2026-10-20T16:04:00.000000000Z"}`), "10-20 15:02  agent  cooling  work until 10-20 16:04", "10-20 15:02 work cooling until 10-20 16:04"},
+		{readableEvent("foreman_report", 0, 41, `{"report":"all landed"}`), "10-20 15:02  report  #41", "10-20 15:02 report #41: report=all landed"},
 	}
 	for _, tt := range tests {
-		for _, all := range []bool{false, true} {
-			var b bytes.Buffer
-			if err := RenderReadable(&b, []Item{tt.item}, time.UTC, all); err != nil {
-				t.Fatal(err)
-			}
-			want := tt.bare
-			if all {
-				want = tt.all
-			}
-			if got := strings.TrimSuffix(b.String(), "\n"); got != want {
-				t.Errorf("%s all=%v: line = %q, want %q", tt.item.Kind, all, got, want)
-			}
+		var b bytes.Buffer
+		if err := RenderReadable(&b, []Item{tt.item}, time.UTC); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.TrimSuffix(b.String(), "\n"); got != tt.all {
+			t.Errorf("%s detail: line = %q, want %q", tt.item.Kind, got, tt.all)
+		}
+		row, ok := EventRow(tt.item, time.UTC, Titles{})
+		if !ok {
+			t.Fatalf("%s is not a row", tt.item.Kind)
+		}
+		if got := row.Line(FitWidths([]TableRow{row}), term.Style{}); got != tt.bare {
+			t.Errorf("%s table: line = %q, want %q", tt.item.Kind, got, tt.bare)
 		}
 	}
 }

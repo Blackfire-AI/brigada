@@ -12,31 +12,18 @@ import (
 // readableTimeLayout is the time every readable line starts with.
 const readableTimeLayout = "01-02 15:04"
 
-// RenderReadable writes the timeline for a person, one item per line
-// (oldest first as given), each starting with its time in loc as
-// `01-02 15:04`. A stamp that does not parse shows as it is.
-//
-// With all false it is the bare view: only the items EventWords words, as
-// the words; a landing adds its target branch, its commit and its push
-// command and after_land failure, each whole. With all true (a task's or
-// a job's timeline) every item shows: a worded one as its words, then its
-// payload text; any other as its subject, its kind in plain words and its
-// text, a worker result as its status and summary instead of JSON. A text
-// runs whole, never cut; a body over several lines keeps indentBody's
-// shape. Render stays the raw rendering.
-func RenderReadable(w io.Writer, items []Item, loc *time.Location, all bool) error {
+// RenderReadable writes a task's or a job's timeline for a person, one item
+// per line (oldest first as given), each starting with its time in loc as
+// `01-02 15:04`. A stamp that does not parse shows as it is. Every item
+// shows: a worded one as its words, then its payload text; any other as its
+// subject, its kind in plain words and its text, a worker result as its
+// status and summary instead of JSON. A text runs whole, never cut; a body
+// over several lines keeps indentBody's shape. The bare view of `brigada
+// history` is the table in table.go; Render stays the raw rendering.
+func RenderReadable(w io.Writer, items []Item, loc *time.Location) error {
 	clock := func(stamp string) string { return readableTime(stamp, loc) }
 	for _, it := range items {
-		var line string
-		if all {
-			line = readableDetail(it, clock)
-		} else {
-			var ok bool
-			if line, ok = readableBare(it, clock); !ok {
-				continue
-			}
-		}
-		line = readableTime(it.CreatedAt, loc) + " " + line
+		line := readableTime(it.CreatedAt, loc) + " " + readableDetail(it, clock)
 		if _, err := fmt.Fprintln(w, indentBody(line)); err != nil {
 			return err
 		}
@@ -62,31 +49,6 @@ func readableWords(it Item, clock func(string) string) (string, bool) {
 		words = "job " + strconv.FormatInt(it.JobID, 10) + " " + words
 	}
 	return words, ok
-}
-
-// readableBare is an item's line in the bare view, or false when the view
-// hides it.
-func readableBare(it Item, clock func(string) string) (string, bool) {
-	words, ok := readableWords(it, clock)
-	if !ok {
-		return "", false
-	}
-	if it.Kind != "task_landed" && it.Kind != "task_pushed" {
-		return words, true
-	}
-	var p struct {
-		Branch    string `json:"branch"`
-		Commit    string `json:"commit"`
-		PushCmd   string `json:"push_cmd"`
-		AfterLand string `json:"after_land_error"`
-	}
-	_ = json.Unmarshal(it.Payload, &p)
-	for _, f := range [][2]string{{"branch", p.Branch}, {"commit", p.Commit}, {"push_cmd", p.PushCmd}, {"after_land_error", p.AfterLand}} {
-		if f[1] != "" {
-			words += " " + f[0] + "=" + f[1]
-		}
-	}
-	return words, true
 }
 
 // readableDetail is an item's line in a task's or a job's timeline.

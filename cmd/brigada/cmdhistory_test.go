@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,9 +21,16 @@ import (
 
 // historyTransport serves one in-process engine's handler without a
 // listener, as the removal tests' transport does.
-type historyTransport struct{ handler http.Handler }
+// A non-nil statusCalls counts the /v1/status requests it serves.
+type historyTransport struct {
+	handler     http.Handler
+	statusCalls *atomic.Int32
+}
 
 func (h historyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if h.statusCalls != nil && req.URL.Path == "/v1/status" {
+		h.statusCalls.Add(1)
+	}
 	w := httptest.NewRecorder()
 	h.handler.ServeHTTP(w, req)
 	return w.Result(), nil
@@ -147,21 +155,20 @@ func TestHistoryShowsTheLandingRecord(t *testing.T) {
 		return out.String()
 	}
 
-	// The default output: local time, the shared words, the landing record
-	// whole, nothing internal, no JSON, no nanoseconds.
+	// The default output: a table in local time, a landing with its title,
+	// its short commit and the after-land flag, nothing internal, no JSON,
+	// no nanoseconds, and none of the landing record --task carries.
 	bare := historyOut()
 	for _, want := range []string{
-		" #1 landed, push waits branch=main commit=9f21ab3c4d5e6f708192a3b4c5d6e7f890123456",
-		"push_cmd=" + pushCmd,
-		"after_land_error=exit 3: after-land boom",
-		" #1 pushed branch=main commit=9f21ab3c4d5e6f708192a3b4c5d6e7f890123456 after_land_error=exit 1: push boom",
-		" report #41\n",
+		"  task    #1   landed, push waits  ship the gizmo  9f21ab3  after-land failed: --task 1\n",
+		"  task    #1   pushed              ship the gizmo  9f21ab3  after-land failed: --task 1\n",
+		"  report  #41\n",
 	} {
 		if !strings.Contains(bare, want) {
 			t.Errorf("history lacks %q:\n%s", want, bare)
 		}
 	}
-	for _, bad := range []string{"job_leased", "job_cap_held", "job_created", "job_agent_picked", "worker_result", "Shipped", "{", "All landed", now[:19]} {
+	for _, bad := range []string{"push_cmd=", "after_land_error=", "after-land boom", "push boom", "9f21ab3c4d5e", "job_leased", "job_cap_held", "job_created", "job_agent_picked", "worker_result", "Shipped", "{", "All landed", now[:19]} {
 		if strings.Contains(bare, bad) {
 			t.Errorf("bare history shows %q:\n%s", bad, bare)
 		}
@@ -175,6 +182,22 @@ func TestHistoryShowsTheLandingRecord(t *testing.T) {
 	task := historyOut("--task", "1")
 	if !strings.Contains(task, "job 7 job leased: lease=L1") || !strings.Contains(task, " #1 landed, push waits: ") || strings.Contains(task, `{"status"`) {
 		t.Errorf("history --task:\n%s", task)
+	}
+	// The landing record the bare view leaves out: the target branch, the
+	// full commit, the push command and the after_land failures, of the
+	// landing and of the push.
+	for _, want := range []string{
+		" #1 landed, push waits: ",
+		"branch=main",
+		"commit=9f21ab3c4d5e6f708192a3b4c5d6e7f890123456",
+		"push_cmd=" + pushCmd,
+		"after_land_error=exit 3: after-land boom",
+		" #1 pushed: ",
+		"after_land_error=exit 1: push boom",
+	} {
+		if !strings.Contains(task, want) {
+			t.Errorf("history --task lacks %q:\n%s", want, task)
+		}
 	}
 	if job := historyOut("--job", "41"); !strings.Contains(job, "report #41: report=All landed.\n  Second line of the report.\n") {
 		t.Errorf("history --job lacks the whole report:\n%s", job)
