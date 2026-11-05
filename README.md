@@ -7,6 +7,10 @@
 
 **Talk to the foreman. It splits the work into tasks; brigada gives each task to the agent with the best measured record on your repo among those with quota left, checks and cross-reviews the result, and learns from the outcome.**
 
+![Terminal recording: brigada ask starts a plan of two tasks, claude/sonnet works on them, glm-5.3 reviews them, both land, and git log shows the task trailers.](docs/assets/demo-run.gif)
+
+*Real run, cut from 35 minutes to its state changes.*
+
 You may pay for more than one AI coding subscription. brigada sits above their official command-line tools (Claude Code, Codex CLI, Kimi CLI, opencode, and dsh, DeepSeek's CLI) and uses them as workers:
 
 - the **foreman**, one of those CLIs (claude, codex or opencode; [GUIDE section 11](docs/GUIDE.md#11-the-foremans-harness-claude-codex-or-opencode) lists what a foreman harness must do), turns what you ask for into a plan of tasks with dependencies between them. It lives in a brigada-owned session: you talk to it with `brigada attach`, and it acts headless while you are away;
