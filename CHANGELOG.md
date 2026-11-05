@@ -6,7 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
-`brigada top` no longer loses the last character of a full-width line in a real terminal, and a terminal resize redraws at once from the data the view holds, with no fetch (issue #186).
+
+- `brigada top` no longer loses the last character of a full-width line in a real terminal, and a terminal resize redraws at once from the data the view holds, with no fetch (issue #186).
 
 ## [1.1.0] - 2026-11-05
 
