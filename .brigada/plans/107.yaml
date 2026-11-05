@@ -46,8 +46,8 @@ tasks:
     review_tier: heavy
     review_effort: medium
     skills: ["bugfix", "surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-354"
     rounds: 0
   - id: 355
     name: "changelog-181"
