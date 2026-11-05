@@ -5,6 +5,10 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The EVENTS rows of `brigada top` read as a table: time, kind, number, what happened and the plan's or task's title, each column aligned. A task's `done` row is hidden once its `landed` row shows, and a narrow box cuts the title first. `brigada history` prints what it did.
+
 ### Fixed
 
 - `brigada top` no longer loses the last character of a full-width line in a real terminal, and a terminal resize redraws at once from the data the view holds, with no fetch (issue #186).
