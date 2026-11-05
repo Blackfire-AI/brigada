@@ -31,8 +31,8 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-359"
     rounds: 0
   - id: 360
     name: "top-spinner"
