@@ -604,8 +604,9 @@ type LandRetryResult struct {
 }
 
 // RetryLanding runs the land rule again for a task parked by a rejected
-// push or an environment failure (#133). A refusal is an outcome, not an
-// error. idemKey as in Answer.
+// push, an environment failure or a failed land check (#133). A refusal
+// is an outcome, not an error, and it is replayed under idemKey like any
+// answer: a key must not outlive the park it was minted for.
 func (c *Client) RetryLanding(ctx context.Context, task int64, idemKey string) (LandRetryResult, error) {
 	var out taskLandRetryResponse
 	path := "/v1/tasks/" + strconv.FormatInt(task, 10) + "/land-retry"

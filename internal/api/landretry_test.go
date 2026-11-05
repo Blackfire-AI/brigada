@@ -88,6 +88,20 @@ func TestTaskLandRetryQueued(t *testing.T) {
 	}
 }
 
+// TestTaskLandRetryFailedCheck: a task a failed land check parked is
+// retried like a rejected push, whatever words its check log carries.
+func TestTaskLandRetryFailedCheck(t *testing.T) {
+	e := newEnv(t)
+	task := seedLandRejected(t, e, e.plan)
+	e.exec(`INSERT INTO events (kind, project_id, task_id, payload, created_at) VALUES ('task_land_failed', ?, ?, ?, ?)`,
+		e.project1, task, `{"reason":"the check failed on the landed result (land job 1): land conflict: a.go"}`, seedTS)
+
+	res, _ := e.landRetry(task, "foreman1", "lr-check")
+	if res.Outcome != "queued" || res.JobID == 0 {
+		t.Fatalf("land retry = %+v, want queued with its land job", res)
+	}
+}
+
 // TestTaskLandRetryHeld: a land-gate rule holds the retried landing; the
 // answer names the hold's reason and no job.
 func TestTaskLandRetryHeld(t *testing.T) {

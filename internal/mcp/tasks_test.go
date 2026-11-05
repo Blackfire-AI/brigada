@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -413,5 +415,147 @@ func TestServeCallLandRetryRefused(t *testing.T) {
 	}
 	if !slices.Contains(ToolNames(), "land_retry") {
 		t.Errorf("the foreman offer lacks land_retry: %v", ToolNames())
+	}
+}
+
+// landRetrySeedApprove is a stored approve verdict, the review a landable
+// task carries; its findings are long enough to count as substantive.
+func landRetrySeedApprove(t *testing.T) string {
+	t.Helper()
+	verdict, err := json.Marshal(map[string]string{
+		"verdict":  "approve",
+		"findings": strings.Repeat("the change does what the spec asks and the check covers it. ", 3),
+	})
+	if err != nil {
+		t.Fatalf("encode the verdict: %v", err)
+	}
+	stored, err := json.Marshal(map[string]string{"result": string(verdict)})
+	if err != nil {
+		t.Fatalf("encode the stored verdict: %v", err)
+	}
+	return string(stored)
+}
+
+// seedJob inserts a job of the task, returning its id.
+func seedJob(t *testing.T, e *env, task int64, kind, status, result string) int64 {
+	t.Helper()
+	var id int64
+	err := e.st.Update(t.Context(), func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, result, created_at, updated_at)
+			VALUES (1, ?, ?, ?, 'fresh', '', ?, ?, ?, ?)`,
+			task, kind, fmt.Sprintf("task:%d", task), status, result, seedTS, seedTS)
+		if err != nil {
+			return err
+		}
+		id, err = res.LastInsertId()
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed the %s job: %v", kind, err)
+	}
+	return id
+}
+
+// seedLandRejected parks a task by a rejected push behind a done work job
+// and a substantive approve: a task the land rule would land.
+func seedLandRejected(t *testing.T, e *env) int64 {
+	t.Helper()
+	task := seedParked(t, e, "task_land_failed", `{"reason":"push rejected: non-fast-forward"}`)
+	seedJob(t, e, task, "work", "done", `{"result":"{}"}`)
+	seedJob(t, e, task, "review", "done", landRetrySeedApprove(t))
+	return task
+}
+
+// parkOnLandCheck writes what a land job's failed check writes: the job
+// over, the task parked, and the task_land_failed event naming the job.
+func parkOnLandCheck(t *testing.T, e *env, task, job int64) {
+	t.Helper()
+	payload, err := json.Marshal(map[string]string{
+		"reason": fmt.Sprintf("the check failed on the landed result (land job %d): --- FAIL: TestFlake", job),
+	})
+	if err != nil {
+		t.Fatalf("encode the event: %v", err)
+	}
+	err = e.st.Update(t.Context(), func(tx *sql.Tx) error {
+		if _, err := tx.Exec("UPDATE jobs SET status = 'done' WHERE id = ?", job); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("UPDATE tasks SET state = 'needs_foreman' WHERE id = ?", task); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO events (kind, project_id, task_id, job_id, payload, created_at)
+			VALUES ('task_land_failed', 1, ?, ?, ?, ?)`, task, job, string(payload), seedTS)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("park the task on its land check: %v", err)
+	}
+}
+
+// TestServeCallLandRetryEachPark covers the land_retry tool's key: every
+// failed land check is a new park and a new call, so each rerun is a new
+// land job rather than the first answer replayed, up to the engine's own
+// refusal at the cap.
+func TestServeCallLandRetryEachPark(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	task := seedLandRejected(t, e)
+	parkOnLandCheck(t, e, task, seedJob(t, e, task, "land", "running", "{}"))
+	s := start(t, e)
+	retry := func(id int) (string, bool) {
+		t.Helper()
+		return toolText(t, s.call(id, "tools/call", map[string]any{
+			"name":      "land_retry",
+			"arguments": map[string]any{"task": task},
+		}))
+	}
+
+	seen := map[int64]bool{}
+	for i := range 2 {
+		text, isError := retry(i + 1)
+		job := countOf(t, e, "SELECT COALESCE(MAX(id), 0) FROM jobs WHERE task_id = ? AND kind = 'land' AND status = 'queued'", task)
+		if want := fmt.Sprintf("queued land job %d for task %d", job, task); isError || job == 0 || text != want {
+			t.Fatalf("land_retry %d = %q (error %v), want %q", i+1, text, isError, want)
+		}
+		if seen[job] {
+			t.Fatalf("land_retry %d queued job %d again", i+1, job)
+		}
+		seen[job] = true
+		parkOnLandCheck(t, e, task, job)
+	}
+	text, isError := retry(3)
+	if !isError || !strings.Contains(text, "3 times") || !strings.Contains(text, "task_restart") {
+		t.Errorf("land_retry at the cap = %q (error %v), want the engine's refusal naming 3 times and task_restart", text, isError)
+	}
+	if n := countOf(t, e, "SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'", task); n != 3 {
+		t.Errorf("land jobs = %d, want the first and its two reruns", n)
+	}
+	if state := strOf(t, e, "SELECT state FROM tasks WHERE id = ?", task); state != "needs_foreman" {
+		t.Errorf("task state after the refusal = %q, want still parked", state)
+	}
+}
+
+// TestServeCallLandRetryRefusalNotReplayed: a refusal answers 200, so a
+// key shared by two calls would replay it after the task became eligible;
+// the second call acts instead.
+func TestServeCallLandRetryRefusalNotReplayed(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	task := seedLandRejected(t, e)
+	live := seedJob(t, e, task, "land", "queued", "{}")
+	s := start(t, e)
+	args := map[string]any{"name": "land_retry", "arguments": map[string]any{"task": task}}
+
+	text, isError := toolText(t, s.call(1, "tools/call", args))
+	if !isError || !strings.Contains(text, "live") {
+		t.Fatalf("first land_retry = %q (error %v), want refused on the live job", text, isError)
+	}
+	if err := e.st.Update(t.Context(), func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE jobs SET status = 'done' WHERE id = ?", live)
+		return err
+	}); err != nil {
+		t.Fatalf("end the live job: %v", err)
+	}
+	text, isError = toolText(t, s.call(2, "tools/call", args))
+	if isError || !strings.HasPrefix(text, "queued land job") {
+		t.Errorf("second land_retry = %q (error %v), want queued", text, isError)
 	}
 }
