@@ -44,6 +44,6 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
