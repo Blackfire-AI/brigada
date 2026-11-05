@@ -12,6 +12,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/history"
 	"github.com/Blackfire-AI/brigada/internal/logo"
+	"github.com/Blackfire-AI/brigada/internal/term"
 )
 
 // Tests can exercise the real authenticated API handler without a listener.
@@ -286,11 +287,14 @@ func readSpec(path string) (string, error) {
 	return string(data), nil
 }
 
-// runHistory is the §9 timeline as plain text: events and messages
-// merged, oldest first, every page followed to the end.
+// runHistory is the §9 timeline as plain text, every page followed to the
+// end. Bare, it is a table of the allowlisted events, oldest first: the last
+// 50 rows once the final page is read, or every row as its page arrives with
+// --all; it reads the status once for the titles. --task and --job print
+// every item of that timeline in words, and --raw the raw items.
 func runHistory(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("history",
-		"brigada history [--task ID] [--job ID] [--limit N] [--raw] [--no-start]",
+		"brigada history [--task ID] [--job ID] [--limit N] [--all] [--raw] [--no-start]",
 		"Show the timeline in plain words, optionally filtered by task or job.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
@@ -298,12 +302,14 @@ func runHistory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		task    int64
 		job     int64
 		limit   int
+		all     bool
 		raw     bool
 		noStart bool
 	)
 	fs.Int64Var(&task, "task", 0, "show one task's timeline, every item")
 	fs.Int64Var(&job, "job", 0, "show one job's timeline, every item")
 	fs.IntVar(&limit, "limit", 100, "page size, 1..500; every page is fetched, so it does not count printed items")
+	fs.BoolVar(&all, "all", false, "print every row of the bare view instead of the last 50")
 	fs.BoolVar(&raw, "raw", false, "print internal event names, UTC stamps and raw payloads")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	if code, stop := common.parse(stdout, stderr, args); stop {
@@ -326,25 +332,70 @@ func runHistory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if code != 0 {
 		return code
 	}
+	bare := !raw && task == 0 && job == 0
+	var (
+		titles history.Titles
+		widths history.TableWidths
+		style  term.Style
+		rows   []history.TableRow
+	)
+	loc := time.Now().Location()
+	if bare {
+		st, err := client.StatusAll(ctx, false)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		titles = history.Titles{Plans: map[int64]string{}, Tasks: map[int64]string{}}
+		for _, p := range st.Plans {
+			titles.Plans[p.ID] = p.Title
+			for _, t := range p.Tasks {
+				titles.Tasks[t.ID] = t.Title
+			}
+		}
+		widths = history.StatusWidths(titles)
+		style = term.New(detectCaps(stdout))
+	}
 	since := ""
 	for {
 		page, err := client.History(ctx, api.HistoryQuery{TaskID: task, JobID: job, Since: since, Limit: limit})
 		if err != nil {
 			return fail(stderr, err)
 		}
-		if raw {
+		switch {
+		case raw:
 			err = history.Render(stdout, page.Items)
-		} else {
-			err = history.RenderReadable(stdout, page.Items, time.Now().Location(), task != 0 || job != 0)
+		case !bare:
+			err = history.RenderReadable(stdout, page.Items, loc)
+		default:
+			var pageRows []history.TableRow
+			for _, it := range page.Items {
+				if row, ok := history.EventRow(it, loc, titles); ok {
+					pageRows = append(pageRows, row)
+				}
+			}
+			if all {
+				err = history.WriteTable(stdout, pageRows, widths, style)
+				break
+			}
+			rows = append(rows, pageRows...)
+			if len(rows) > history.TableRows {
+				rows = append(rows[:0], rows[len(rows)-history.TableRows:]...)
+			}
 		}
 		if err != nil {
 			return fail(stderr, err)
 		}
 		if page.NextCursor == "" {
-			return 0
+			break
 		}
 		since = page.NextCursor
 	}
+	if bare && !all {
+		if err := history.WriteTable(stdout, rows, history.FitWidths(rows), style); err != nil {
+			return fail(stderr, err)
+		}
+	}
+	return 0
 }
 
 // runCancel stops a live job (§12.1).
