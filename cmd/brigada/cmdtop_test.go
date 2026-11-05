@@ -225,8 +225,7 @@ func TestRenderTopSections(t *testing.T) {
 		"╭─ AGENTS  all ≤ global 8 ─",
 		"claude/opus",
 		"╭─ EVENTS ─",
-		"15:02  #3 done",
-		"15:02  #3 landed",
+		"15:02  task  #3  landed  oil the gears",
 	}
 	last := -1
 	for _, w := range want {
@@ -604,8 +603,8 @@ func TestTopNeedsYouEmptyQueue(t *testing.T) {
 
 // topEventTexts is the texts of an events section's lines, the title for
 // its top border and no bottom border.
-func topEventTexts(items []history.Item, now time.Time, style term.Style, width int) []string {
-	return (&topFrame{lines: topEventLines(items, now, style, width), style: style}).texts()
+func topEventTexts(items []history.Item, status api.Status, now time.Time, style term.Style, width int) []string {
+	return (&topFrame{lines: topEventLines(items, status, now, style, width), style: style}).texts()
 }
 
 // topEventsFixture is n task_done events 1..n, oldest first, a minute
@@ -624,18 +623,19 @@ func topEventsFixture(n int) []history.Item {
 // event, newest first, the time then two spaces then the words; at
 // most 10 rows; a dim `no events` under the head when nothing happened.
 func TestTopEventsList(t *testing.T) {
-	items := busyTopModel().events
+	model := busyTopModel()
 	style := term.New(logo.Caps{UTF8: true})
 	head := "EVENTS"
-	want := []string{head, "15:02  #3 done", "15:02  #3 landed"}
-	if got := topEventTexts(items, topNow, style, 80); !reflect.DeepEqual(got, want) {
+	// The landed task's done row is hidden.
+	want := []string{head, "15:02  task  #3  landed  oil the gears"}
+	if got := topEventTexts(model.events, model.status, topNow, style, 80); !reflect.DeepEqual(got, want) {
 		t.Errorf("list = %q, want %q", got, want)
 	}
-	if got := topEventTexts(nil, topNow, style, 80); !reflect.DeepEqual(got, []string{head, "no events"}) {
+	if got := topEventTexts(nil, api.Status{}, topNow, style, 80); !reflect.DeepEqual(got, []string{head, "no events"}) {
 		t.Errorf("empty = %q", got)
 	}
-	got := topEventTexts(topEventsFixture(14), topNow, style, 80)
-	if len(got) != 11 || got[1] != "15:02  #14 done" || got[10] != "14:53  #5 done" {
+	got := topEventTexts(topEventsFixture(14), api.Status{}, topNow, style, 80)
+	if len(got) != 11 || got[1] != "15:02  task  #14  done" || got[10] != "14:53  task  #5   done" {
 		t.Errorf("14 events = %q, want the head and the newest 10, #14 first", got)
 	}
 }
@@ -650,27 +650,48 @@ func TestTopEventsTimeColumn(t *testing.T) {
 		{Type: history.TypeEvent, ID: 2, Kind: "task_done", TaskID: 2, Payload: []byte(`{"status":"done"}`), CreatedAt: "2026-10-20T15:02:00.000000000Z"},
 	}
 	// The newest row's time is padded to the widest time, "10-18 09:30".
-	want := []string{"15:02        #2 done", "10-18 09:30  #1 done"}
-	if got := topEventTexts(items, topNow, style, 80)[1:]; !reflect.DeepEqual(got, want) {
+	want := []string{"15:02        task  #2  done", "10-18 09:30  task  #1  done"}
+	if got := topEventTexts(items, api.Status{}, topNow, style, 80)[1:]; !reflect.DeepEqual(got, want) {
 		t.Errorf("mixed days = %q, want %q", got, want)
 	}
 	// With ten newer rows the other-day event is not built and the column is 5 wide.
 	many := append([]history.Item{items[0]}, topEventsFixture(10)...)
-	if got := topEventTexts(many, topNow, style, 80); got[1] != "15:02  #10 done" || got[10] != "14:53  #1 done" {
+	if got := topEventTexts(many, api.Status{}, topNow, style, 80); got[1] != "15:02  task  #10  done" || got[10] != "14:53  task  #1   done" {
 		t.Errorf("dropped row shifted the column: %q", got)
 	}
 }
 
-// TestTopEventsCut: a row of exactly the width stays whole and one
-// column less cuts it with an ellipsis.
+// topTitleStatus is a status whose plan 1 and task 3 have the given titles.
+func topTitleStatus(plan, task string) api.Status {
+	return api.Status{Plans: []engine.StatusPlan{{ID: 1, Title: plan, Tasks: []engine.StatusTask{{ID: 3, Title: task}}}}}
+}
+
+// TestTopEventsCut: only the title gives way. A title of exactly its room
+// stays whole and one cell more is cut with an ellipsis; under 8 cells of
+// room the title is left out with its gap, and the other columns never cut.
 func TestTopEventsCut(t *testing.T) {
 	style := term.New(logo.Caps{UTF8: true})
-	items := busyTopModel().events
-	if got := topEventTexts(items, topNow, style, 14)[1]; got != "15:02  #3 done" {
-		t.Errorf("row of exactly the width = %q", got)
+	item := []history.Item{{Type: history.TypeEvent, ID: 1, Kind: "task_landed", TaskID: 3, CreatedAt: "2026-10-20T15:02:00.000000000Z"}}
+	status := topTitleStatus("p", "0123456789")
+	const fixed = len("15:02  task  #3  landed")
+	// Room is width - fixed - 2.
+	if got := topEventTexts(item, status, topNow, style, fixed+2+10)[1]; got != "15:02  task  #3  landed  0123456789" {
+		t.Errorf("title of exactly its room = %q", got)
 	}
-	if got := topEventTexts(items, topNow, style, 13)[1]; got != "15:02  #3 ..." {
-		t.Errorf("row one column too wide = %q", got)
+	if got := topEventTexts(item, status, topNow, style, fixed+2+9)[1]; got != "15:02  task  #3  landed  012345..." {
+		t.Errorf("title one cell too long = %q", got)
+	}
+	if got := topEventTexts(item, status, topNow, style, fixed+2+8)[1]; got != "15:02  task  #3  landed  01234..." {
+		t.Errorf("title at the floor = %q", got)
+	}
+	for _, w := range []int{fixed + 2 + 7, fixed + 2, fixed} {
+		if got := topEventTexts(item, status, topNow, style, w)[1]; got != "15:02  task  #3  landed" {
+			t.Errorf("width %d: title not left out: %q", w, got)
+		}
+	}
+	// Below the fixed columns topFit is the last resort.
+	if got := topEventTexts(item, status, topNow, style, fixed-1)[1]; got != "15:02  task  #3  la..." {
+		t.Errorf("below the fixed columns = %q", got)
 	}
 }
 
@@ -689,29 +710,30 @@ func TestTopEventWords(t *testing.T) {
 		item history.Item
 		want string
 	}{
-		{"plan_done", ev("plan_done", 0, 0, `{"plan":99,"status":"done"}`), "15:02  plan #99 done"},
-		{"plan_done without a plan", ev("plan_done", 0, 0, `{}`), "15:02  plan done"},
-		{"plan_approved", ev("plan_approved", 0, 0, `{"plan":7,"status":"active"}`), "15:02  plan #7 approved"},
-		{"plan_awaiting_approval", ev("plan_awaiting_approval", 0, 0, `{"plan":8}`), "15:02  plan #8 awaiting approval"},
-		{"task_done", ev("task_done", 3, 0, `{"status":"done"}`), "15:02  #3 done"},
-		{"task_landed", ev("task_landed", 328, 0, `{"pushed":"pushed"}`), "15:02  #328 landed"},
-		{"task_landed no push state", ev("task_landed", 328, 0, ``), "15:02  #328 landed"},
-		{"task_landed waiting", ev("task_landed", 328, 0, `{"pushed":"waiting"}`), "15:02  #328 landed, push waits"},
-		{"task_landed local", ev("task_landed", 328, 0, `{"pushed":"local"}`), "15:02  #328 landed, push waits"},
-		{"task_pushed", ev("task_pushed", 328, 0, `{}`), "15:02  #328 pushed"},
-		{"task_failed", ev("task_failed", 4, 0, `{"status":"failed"}`), "15:02  #4 failed"},
-		{"task_land_failed", ev("task_land_failed", 4, 0, `{"reason":"conflict"}`), "15:02  #4 land failed"},
-		{"review approve", ev("review_verdict", 0, 9, `{"status":"approve","branch":"fix/x"}`), "15:02  review approve fix/x"},
-		{"review changes", ev("review_verdict", 0, 9, `{"status":"changes","branch":"fix/x"}`), "15:02  review changes fix/x"},
-		{"review no verdict", ev("review_verdict", 0, 9, `{"status":"no_verdict"}`), "15:02  review no verdict"},
-		{"agent_broken", ev("agent_broken", 0, 0, `{"harness":"codex","model":"gpt-5","reason":"auth"}`), "15:02  codex/gpt-5 broken"},
-		{"agent_recovered", ev("agent_recovered", 0, 0, `{"harness":"codex","model":"gpt-5"}`), "15:02  codex/gpt-5 recovered"},
-		{"agent_cooling", ev("agent_cooling", 3, 5, `{"account":"work","until":"`+until+`"}`), "15:02  work cooling until 16:04"},
-		{"agent_cooling without a deadline", ev("agent_cooling", 3, 5, `{"account":"work"}`), "15:02  work cooling"},
+		{"plan_done", ev("plan_done", 0, 0, `{"plan":99,"status":"done"}`), "15:02  plan  #99  done"},
+		{"plan_done without a plan", ev("plan_done", 0, 0, `{}`), "15:02  plan  done"},
+		{"plan_done with a plan and a task", ev("plan_done", 12, 0, `{"plan":99}`), "15:02  plan  #99  done"},
+		{"plan_approved", ev("plan_approved", 0, 0, `{"plan":7,"status":"active"}`), "15:02  plan  #7  approved"},
+		{"plan_awaiting_approval", ev("plan_awaiting_approval", 0, 0, `{"plan":8}`), "15:02  plan  #8  awaiting approval"},
+		{"task_done", ev("task_done", 3, 0, `{"status":"done"}`), "15:02  task  #3  done"},
+		{"task_landed", ev("task_landed", 328, 0, `{"pushed":"pushed"}`), "15:02  task  #328  landed"},
+		{"task_landed no push state", ev("task_landed", 328, 0, ``), "15:02  task  #328  landed"},
+		{"task_landed waiting", ev("task_landed", 328, 0, `{"pushed":"waiting"}`), "15:02  task  #328  landed, push waits"},
+		{"task_landed local", ev("task_landed", 328, 0, `{"pushed":"local"}`), "15:02  task  #328  landed, push waits"},
+		{"task_pushed", ev("task_pushed", 328, 0, `{}`), "15:02  task  #328  pushed"},
+		{"task_failed", ev("task_failed", 4, 0, `{"status":"failed"}`), "15:02  task  #4  failed"},
+		{"task_land_failed", ev("task_land_failed", 4, 0, `{"reason":"conflict"}`), "15:02  task  #4  land failed"},
+		{"review approve", ev("review_verdict", 0, 9, `{"status":"approve","branch":"fix/x"}`), "15:02  review  approve  fix/x"},
+		{"review changes", ev("review_verdict", 0, 9, `{"status":"changes","branch":"fix/x"}`), "15:02  review  changes  fix/x"},
+		{"review no verdict", ev("review_verdict", 0, 9, `{"status":"no_verdict"}`), "15:02  review  no verdict"},
+		{"agent_broken", ev("agent_broken", 0, 0, `{"harness":"codex","model":"gpt-5","reason":"auth"}`), "15:02  agent  broken  codex/gpt-5"},
+		{"agent_recovered", ev("agent_recovered", 0, 0, `{"harness":"codex","model":"gpt-5"}`), "15:02  agent  recovered  codex/gpt-5"},
+		{"agent_cooling", ev("agent_cooling", 3, 5, `{"account":"work","until":"`+until+`"}`), "15:02  agent  cooling  work until 16:04"},
+		{"agent_cooling without a deadline", ev("agent_cooling", 3, 5, `{"account":"work"}`), "15:02  agent  cooling  work"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := topEventTexts([]history.Item{tt.item}, topNow, style, 200)[1]; got != tt.want {
+			if got := topEventTexts([]history.Item{tt.item}, api.Status{}, topNow, style, 200)[1]; got != tt.want {
 				t.Errorf("row = %q, want %q", got, tt.want)
 			}
 			if _, ok := topEventWords(tt.item, topNow); !ok {
@@ -785,7 +807,7 @@ func TestTopFetchFiltersEvents(t *testing.T) {
 	if len(model.events) != 1 || model.events[0].ID != 4 {
 		t.Errorf("events = %+v, want only the task_done, no foreman_report", model.events)
 	}
-	for _, text := range topEventTexts(model.events, topNow, term.New(logo.Caps{UTF8: true}), 80) {
+	for _, text := range topEventTexts(model.events, api.Status{}, topNow, term.New(logo.Caps{UTF8: true}), 80) {
 		if strings.Contains(text, "report") {
 			t.Errorf("row %q names a report", text)
 		}
@@ -818,7 +840,7 @@ func TestTopEventsKeptAcrossTicks(t *testing.T) {
 		t.Errorf("merged = %+v, want the previous strip", merged)
 	}
 	style := term.New(logo.Caps{UTF8: true})
-	if got := topEventTexts(merged, topNow, style, 200); len(got) != 3 || got[1] != "15:02  #3 done" || got[2] != "15:02  #3 landed" {
+	if got := topEventTexts(merged, prev.status, topNow, style, 200); len(got) != 2 || got[1] != "15:02  task  #3  landed  oil the gears" {
 		t.Errorf("list = %q, want the previous tick's", got)
 	}
 
@@ -860,8 +882,8 @@ func TestTopClockMinutes(t *testing.T) {
 	}
 	style := term.New(logo.Caps{UTF8: true})
 	model := busyTopModel()
-	strip := strings.Join(topEventTexts(model.events, topNow, style, 200), "\n")
-	if !strings.Contains(strip, "15:02  #3 done") ||
+	strip := strings.Join(topEventTexts(model.events, model.status, topNow, style, 200), "\n")
+	if !strings.Contains(strip, "15:02  task  #3  landed") ||
 		strings.Contains(strip, "15:02:45") || strings.Contains(strip, "15:02:41") {
 		t.Errorf("strip = %q, want HH:MM pairs", strip)
 	}
@@ -883,20 +905,20 @@ func TestTopEventItemStates(t *testing.T) {
 	}{
 		{"done", history.Item{Type: history.TypeEvent, ID: 1, Kind: "task_done", TaskID: 3,
 			Payload: []byte(`{"status":"done"}`), CreatedAt: "2026-10-20T15:02:45.000000000Z"},
-			"15:02  #3 " + style.OK("done")},
+			"15:02  task  #3  " + style.OK("done")},
 		{"recovered", history.Item{Type: history.TypeEvent, ID: 2, Kind: "agent_recovered", ProjectID: 1,
 			Payload: []byte(`{"harness":"codex","model":"gpt-5"}`), CreatedAt: "2026-10-20T15:02:46.000000000Z"},
-			"15:02  codex/gpt-5 " + style.OK("recovered")},
+			"15:02  agent  " + style.OK("recovered") + "  codex/gpt-5"},
 		{"failed", history.Item{Type: history.TypeEvent, ID: 3, Kind: "task_failed", TaskID: 4,
 			Payload: []byte(`{"status":"failed"}`), CreatedAt: "2026-10-20T15:02:47.000000000Z"},
-			"15:02  #4 " + style.Bad("failed")},
+			"15:02  task  #4  " + style.Bad("failed")},
 		{"broken", history.Item{Type: history.TypeEvent, ID: 4, Kind: "agent_broken", ProjectID: 1,
 			Payload: []byte(`{"harness":"codex","model":"gpt-5","reason":"auth: no key"}`), CreatedAt: "2026-10-20T15:02:48.000000000Z"},
-			"15:02  codex/gpt-5 " + style.Bad("broken")},
+			"15:02  agent  " + style.Bad("broken") + "  codex/gpt-5"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := topEventTexts([]history.Item{tt.item}, topNow, style, 200)[1]; got != tt.want {
+			if got := topEventTexts([]history.Item{tt.item}, api.Status{}, topNow, style, 200)[1]; got != tt.want {
 				t.Errorf("row = %q, want %q", got, tt.want)
 			}
 		})
@@ -1528,6 +1550,11 @@ func TestTopPlanlessJobsHaveNoHead(t *testing.T) {
 	t.Run("height budget counts the blocks", func(t *testing.T) {
 		m := busyTopModel()
 		m.status.Running = append(m.status.Running, otherJob, foremanJob)
+		// Two rows that the landed task's hidden done row does not leave out.
+		m.events = []history.Item{
+			{Type: history.TypeEvent, ID: 13, Kind: "task_pushed", ProjectID: 1, TaskID: 3, CreatedAt: "2026-10-20T15:02:41.000000000Z"},
+			m.events[1],
+		}
 		style := term.New(logo.Caps{UTF8: true})
 		full := renderTop(m, 60, 0, topNow, style)
 		if got := renderTop(m, 60, len(full), topNow, style); strings.Join(got, "\n") != strings.Join(full, "\n") {
@@ -1772,12 +1799,12 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 			"╭─ AGENTS  all ≤ global 8 ─",
 			"↺ codex/g...  □□□□□□□□  until 16:04  ✗ claude/...  ■■□□□□□□  login ex...",
 			"╭─ EVENTS ─",
-			"15:02  review approve task/3-1-oil-the-gears-after-the-frobnicator-fix",
+			"15:02  review      approve  task/3-1-oil-the-gears-after-the-frobnica...",
 		}, nil},
 		{"event row 2", 19, 19, []string{
 			"╭─ EVENTS ─",
-			"15:02  #3 done",
-		}, []string{"review approve"}},
+			"15:02  task    #3  done     oil the gears",
+		}, []string{"review "}},
 		{"the held line", 18, 18, []string{
 			"  ! #2 wire the sprocket should the sprocket be blue?",
 			"  ▸ #3  oil the gears",
@@ -1788,12 +1815,12 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 		{"the running line", 16, 16, []string{
 			"#1 fix the frobnicator",
 			"╭─ EVENTS ─",
-			"15:02  #3 done",
-		}, []string{"▸ #3  oil the gears"}},
+			"15:02  task    #3  done     oil the gears",
+		}, []string{"▸ #3  oil the gears  "}},
 		{"event row 1, its box goes with it", 15, 13, []string{
 			"#1 fix the frobnicator",
 			"╭─ AGENTS  all ≤ global 8 ─",
-		}, []string{"EVENTS", "#3 done"}},
+		}, []string{"EVENTS", "task    #3  done"}},
 		// The agents list broken and cooling first, then running, so the
 		// running agent's row is the last and the first to go.
 		{"the running agent's row", 12, 12, []string{
@@ -2243,7 +2270,7 @@ func TestTopKeepPrevious(t *testing.T) {
 		t.Errorf("scope %q, tag %v: the failed fetch lost them", failed.scope, failed.tagPlans)
 	}
 	got := unboxTop(failed, 100, 0)
-	if !strings.Contains(got, "engine: engine gone") || !strings.Contains(got, "claude/opus") || !strings.Contains(got, "15:02  #3 done\n15:02  #3 landed") {
+	if !strings.Contains(got, "engine: engine gone") || !strings.Contains(got, "claude/opus") || !strings.Contains(got, "15:02  task  #3  landed  oil the gears") {
 		t.Errorf("failed fetch blanked the screen:\n%s", got)
 	}
 }
@@ -2297,7 +2324,7 @@ func TestTopSnapshotShowsTenEvents(t *testing.T) {
 	if n := topEventRowCount(lines); n != 10 {
 		t.Errorf("snapshot has %d event rows, want 10:\n%s", n, out.String())
 	}
-	if !strings.Contains(out.String(), "╭─ EVENTS ─") || !strings.Contains(unboxLines(lines), "15:02  #12 done\n15:01  #11 done\n") ||
+	if !strings.Contains(out.String(), "╭─ EVENTS ─") || !strings.Contains(unboxLines(lines), "15:02  task  #12  done\n15:01  task  #11  done\n") ||
 		strings.Contains(out.String(), "#2 done") {
 		t.Errorf("snapshot events are not the newest 10, newest first:\n%s", out.String())
 	}
@@ -2325,29 +2352,29 @@ func TestRenderTopEventRowYield(t *testing.T) {
 		lines := renderTop(model, 76, n-k, topNow, style)
 		got := strings.Join(lines, "\n")
 		if len(lines) != n-k || topEventRowCount(lines) != 10-k || !strings.Contains(got, " All landed. ─╮") ||
-			!strings.Contains(unboxLines(lines), "15:02  #14 done\n15:01  #13 done") {
+			!strings.Contains(unboxLines(lines), "15:02  task  #14  done\n15:01  task  #13  done") {
 			t.Errorf("at %d (rows 3+ drop one by one) got %d lines, %d rows:\n%s", n-k, len(lines), topEventRowCount(lines), got)
 		}
-		if k > 0 && strings.Contains(got, fmt.Sprintf("#%d done", 14-(10-k))) {
+		if k > 0 && strings.Contains(got, fmt.Sprintf("task  #%d ", 14-(10-k))) {
 			t.Errorf("at %d the row #%d, the lowest, stays:\n%s", n-k, 14-(10-k), got)
 		}
 	}
 	// Exactly room for 2 rows keeps both, with the report in the border.
 	two := renderTop(model, 76, n-8, topNow, style)
-	if topEventRowCount(two) != 2 || !strings.Contains(strings.Join(two, "\n"), "15:01  #13 done") {
+	if topEventRowCount(two) != 2 || !strings.Contains(strings.Join(two, "\n"), "15:01  task  #13  done") {
 		t.Errorf("room for 2 rows:\n%s", strings.Join(two, "\n"))
 	}
 	// One shorter drops row 2 alone.
 	one := renderTop(model, 76, n-9, topNow, style)
 	got := strings.Join(one, "\n")
-	if len(one) != n-9 || topEventRowCount(one) != 1 || strings.Contains(got, "#13 done") || !strings.Contains(got, " All landed. ─╮") {
+	if len(one) != n-9 || topEventRowCount(one) != 1 || strings.Contains(got, "task  #13 ") || !strings.Contains(got, " All landed. ─╮") {
 		t.Errorf("one line shorter should drop row 2 only:\n%s", got)
 	}
 	// Then the events are done: the held plan line goes before row 1 does,
 	// and the report stays in the border with row 1.
 	none := renderTop(model, 76, n-10, topNow, style)
 	got = strings.Join(none, "\n")
-	if len(none) != n-10 || !strings.Contains(got, " All landed. ─╮") || !strings.Contains(got, "15:02  #14 done") || strings.Contains(got, "? #4 polish") {
+	if len(none) != n-10 || !strings.Contains(got, " All landed. ─╮") || !strings.Contains(got, "15:02  task  #14  done") || strings.Contains(got, "? #4 polish") {
 		t.Errorf("two lines shorter should drop the next class, not the event row:\n%s", got)
 	}
 	// No height ever gets a frame taller than it.
@@ -3192,8 +3219,8 @@ func TestTopReportLine(t *testing.T) {
 	tail := full[len(full)-4:]
 	want := []string{
 		"╭─ EVENTS " + strings.Repeat("─", 30) + " All landed, but #5 needs a look. ─╮",
-		topBoxRow("15:02  #3 done", false, topTintNone, style, 76),
-		topBoxRow("15:02  review approve task/3-1-oil-the-gears-after-the-frobnicator-fix", false, topTintNone, style, 76),
+		topBoxRow("15:02  task    #3  done     oil the gears", false, topTintNone, style, 76),
+		topBoxRow("15:02  review      approve  task/3-1-oil-the-gears-after-the-frobnica...", false, topTintNone, style, 76),
 		"╰" + strings.Repeat("─", 74) + "╯",
 	}
 	if strings.Join(tail, "\n") != strings.Join(want, "\n") {
@@ -3878,8 +3905,7 @@ func TestRenderTopASCIIWithoutUTF8(t *testing.T) {
 		"| *  claude/opus  #...",
 		"+- EVENTS ---",
 		" All landed. -+",
-		"| 15:02  #3 done",
-		"| 15:02  #3 landed",
+		"| 15:02  task  #3  landed  oil the gears",
 		"+-----",
 	} {
 		if !strings.Contains(got, w) {
@@ -3893,7 +3919,7 @@ func TestRenderTopASCIIWithoutUTF8(t *testing.T) {
 func TestRenderTopFinalOrder(t *testing.T) {
 	got := plainTop(agentsModel(), 100, 0)
 	last := -1
-	for _, h := range []string{"▙ brigada", "slots", "╭─ NEEDS YOU", "╭─ PLANS", "╭─ AGENTS", "╭─ EVENTS", "15:02  #3 done"} {
+	for _, h := range []string{"▙ brigada", "slots", "╭─ NEEDS YOU", "╭─ PLANS", "╭─ AGENTS", "╭─ EVENTS", "15:02  task  #3  landed"} {
 		i := strings.Index(got, h)
 		if i < last {
 			t.Errorf("%q out of order:\n%s", h, got)
