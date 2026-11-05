@@ -81,13 +81,14 @@ func topJobAge(leasedAt string, now time.Time) string {
 	return fmt.Sprintf("%ds", s)
 }
 
-// topRunningRow is a running job's row: the Accent pointer, the task id and
+// topRunningRow is a running job's row: the Accent mark (the pointer, or the
+// frame's spinner glyph, one cell either way), the task id and
 // title (a job with no task has an empty id and `job #N` as the title), the
 // kind, the agent, the age and the last event with `tool_start ` trimmed. title is the
 // task's title, "" when the plan that names it is not listed.
-func topRunningRow(j engine.StatusJob, title string, now time.Time, style term.Style) *topJobRow {
+func topRunningRow(j engine.StatusJob, title string, now time.Time, style term.Style, mark string) *topJobRow {
 	row := &topJobRow{
-		mark: style.Pointer(), markFn: style.Accent, running: true,
+		mark: mark, markFn: style.Accent, running: true,
 		title: title, kind: j.Kind, agent: topJobAgent(j), age: topJobAge(j.LeasedAt, now),
 		event: strings.TrimPrefix(j.LastEvent, "tool_start "),
 	}

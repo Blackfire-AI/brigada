@@ -175,6 +175,19 @@ func (s Style) Warning() string { return "!" }
 // Pointer returns a triangular pointer, or ">" without UTF-8.
 func (s Style) Pointer() string { return s.symbol("▸", ">") }
 
+var spinnerFrames = [...]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// Spinner returns one of ten braille spinner frames, one cell wide; frame is
+// taken modulo ten, a negative one included. With no colour or no UTF-8 it
+// returns Pointer, so the mark never moves where it cannot be painted.
+func (s Style) Spinner(frame int) string {
+	if s.caps.Color == logo.NoColor || !s.caps.UTF8 {
+		return s.Pointer()
+	}
+	n := len(spinnerFrames)
+	return spinnerFrames[(frame%n+n)%n]
+}
+
 // Rule returns a short rule, or "==" without UTF-8.
 func (s Style) Rule() string { return s.symbol("━━", "==") }
 

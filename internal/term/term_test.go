@@ -197,6 +197,36 @@ func TestSymbols(t *testing.T) {
 	}
 }
 
+// TestSpinner: ten one-cell frames taken modulo ten, a negative frame
+// included; the pointer with no colour or no UTF-8.
+func TestSpinner(t *testing.T) {
+	colour := New(logo.Caps{Color: logo.Color256, UTF8: true})
+	frames := "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+	for i, want := range strings.Split(frames, "") {
+		for _, f := range []int{i, i + 10, i - 10, i + 1000} {
+			if got := colour.Spinner(f); got != want {
+				t.Errorf("Spinner(%d) = %q, want %q", f, got, want)
+			}
+		}
+		if w := CellWidth(want); w != 1 {
+			t.Errorf("frame %q is %d cells wide", want, w)
+		}
+	}
+	if got := colour.Spinner(-1); got != "⠏" {
+		t.Errorf("Spinner(-1) = %q, want ⠏", got)
+	}
+	for _, caps := range []logo.Caps{
+		{Color: logo.NoColor, UTF8: true},
+		{Color: logo.TrueColor, UTF8: false},
+		{},
+	} {
+		s := New(caps)
+		if got := s.Spinner(3); got != s.Pointer() {
+			t.Errorf("caps %+v: Spinner = %q, want %q", caps, got, s.Pointer())
+		}
+	}
+}
+
 // TestOneLine: the brand's one-line form at each depth, only the ▙ coloured
 // and the escape closed; plain with no colour; empty without UTF-8.
 func TestOneLine(t *testing.T) {
