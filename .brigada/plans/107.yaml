@@ -5,9 +5,9 @@
 plan: 107
 title: "top keeps its last column and redraws on resize (#186)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-11-05T11:06:58.245037Z
-updated: 2026-11-05T11:21:21.196742Z
+updated: 2026-11-05T12:06:33.569482Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
