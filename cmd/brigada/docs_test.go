@@ -525,8 +525,10 @@ func checkNewDocs(guide, compat, changelog string) []string {
 		}
 	}
 	// At a release the [Unreleased] entries fold into the release
-	// section, which then carries the mentions instead.
-	if strings.TrimSpace(unreleased) == "" {
+	// section, which then carries the mentions instead. Unreleased
+	// entries about other changes do not stand in for them either.
+	if lu := strings.ToLower(unreleased); strings.TrimSpace(unreleased) == "" ||
+		!strings.Contains(lu, "instructions") || !strings.Contains(lu, "skills") {
 		if i := strings.Index(changelog, "\n## [1.0.0]"); i >= 0 {
 			unreleased = changelog[i+len("\n## [1.0.0]"):]
 			if j := strings.Index(unreleased, "\n## "); j >= 0 {

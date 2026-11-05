@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
 	"time"
@@ -1664,7 +1665,10 @@ func topMarkdownPlain(text string) string {
 // The plain ANSI of the full-screen view: the alternate screen and the
 // hidden cursor, restored on close — including on SIGINT and SIGTERM,
 // which end the loop's context. Each frame redraws in place: home, then
-// every line erased to its end, then erase below.
+// each line erased before its text is written, then erase below only
+// when the frame is shorter than the screen. An erase written after a
+// character in the last column removes it, because the cursor stays on
+// that cell with a wrap pending.
 const (
 	topEnterAlt   = "\x1b[?1049h"
 	topLeaveAlt   = "\x1b[?1049l"
@@ -1691,17 +1695,20 @@ func (s *topScreen) close() {
 	fmt.Fprint(s.w, topShowCursor, topLeaveAlt)
 }
 
-func (s *topScreen) draw(lines []string) {
+func (s *topScreen) draw(lines []string, height int) {
 	var b strings.Builder
 	b.WriteString(topHome)
 	for i, line := range lines {
 		if i > 0 {
 			b.WriteString("\r\n")
 		}
-		b.WriteString(line)
 		b.WriteString(topEraseLine)
+		b.WriteString(line)
 	}
-	b.WriteString(topEraseBelow)
+	if len(lines) < height {
+		b.WriteString("\r\n")
+		b.WriteString(topEraseBelow)
+	}
 	fmt.Fprint(s.w, b.String())
 }
 
@@ -1732,7 +1739,9 @@ func terminalSize(w io.Writer) (width, height int) {
 // quits, p freezes and unfreezes the refresh, the context's end
 // (SIGINT, SIGTERM) restores the terminal and exits. A fetch that
 // fails draws its error as a band over the last data and the next tick
-// tries again; the dial never starts an engine under --no-start.
+// tries again; the dial never starts an engine under --no-start. A
+// terminal resize (SIGWINCH) redraws at once from the model it holds,
+// with no fetch, also while paused.
 func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Duration, noStart bool, stdout io.Writer) int {
 	screen := newTopScreen(stdout)
 	defer screen.close()
@@ -1743,6 +1752,9 @@ func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Durati
 		defer restore()
 		go readKeys(stopKeys, keys)
 	}
+	resize := make(chan os.Signal, 1)
+	signal.Notify(resize, unix.SIGWINCH)
+	defer signal.Stop(resize)
 	var model topModel
 	refresh := func() {
 		client, err := dialEngine(ctx, rt, "client", noStart)
@@ -1759,12 +1771,21 @@ func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Durati
 	go refreshAgentsCacheIfStale(ctx, rt)
 	draw := func() {
 		width, height := terminalSize(stdout)
-		screen.draw(renderTop(model, width, height, time.Now(), term.New(detectCaps(stdout))))
+		screen.draw(renderTop(model, width, height, time.Now(), term.New(detectCaps(stdout))), height)
 	}
 	refresh()
 	draw()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	return topEvents(ctx, keys, ticker.C, resize, refresh, draw,
+		func() { model = model.togglePause(time.Now()) },
+		func() bool { return model.paused })
+}
+
+// topEvents is the select loop of topLoop: keys, ticks and resizes drive
+// refresh (a fetch) and draw. A resize only draws.
+func topEvents(ctx context.Context, keys <-chan byte, ticks <-chan time.Time, resize <-chan os.Signal,
+	refresh, draw, togglePause func(), paused func() bool) int {
 	for {
 		select {
 		case <-ctx.Done():
@@ -1774,16 +1795,18 @@ func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Durati
 			case 'q', 'Q':
 				return 0
 			case 'p', 'P':
-				model = model.togglePause(time.Now())
-				if !model.paused {
+				togglePause()
+				if !paused() {
 					refresh()
 				}
 				draw()
 			}
-		case <-ticker.C:
-			if !model.paused {
+		case <-ticks:
+			if !paused() {
 				refresh()
 			}
+			draw()
+		case <-resize:
 			draw()
 		}
 	}
