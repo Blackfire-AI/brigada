@@ -5,9 +5,9 @@
 plan: 108
 title: "top: EVENTS rows read as a table (1.1.1)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-11-05T12:16:51.419258Z
-updated: 2026-11-05T12:24:01.496125Z
+updated: 2026-11-05T12:51:26.97516Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
