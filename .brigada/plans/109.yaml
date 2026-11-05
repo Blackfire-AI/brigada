@@ -5,9 +5,9 @@
 plan: 109
 title: "history: bare view as a table, last 50 rows by default, --all (#191)"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: needs_foreman
 created: 2026-11-05T15:36:47.62275Z
-updated: 2026-11-05T15:43:29.99012Z
+updated: 2026-11-05T15:48:38.624611Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
