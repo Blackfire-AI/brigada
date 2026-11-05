@@ -73,6 +73,13 @@ A commit that completes a GitHub issue ends its body with a line of its own, `Cl
 
 Every change is reviewed by another model: one from a different family than its author's when one is available (`review.family=prefer`), else another agent of the author's family, or the author's own agent in a fresh session. `brigada review --branch <branch>`.
 
+## Bug severity
+
+Label a bug `critical` or `major`; no label means minor, which ships when convenient. Severity is for bugs only.
+
+- `critical`: data loss, a security hole, or brigada cannot work. Fix it now and release a patch.
+- `major`: a wrong result or a broken view for many users, with no easy way around it. No release until it is fixed.
+
 ## Handing work to the foreman
 
 A coding session outside brigada that hands work to the foreman, or follows it, reads `.brigada/handoff.md` first, whatever its agent CLI.

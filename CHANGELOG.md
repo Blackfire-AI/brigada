@@ -5,13 +5,17 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-05
+
+Fixes `brigada top` in macOS Terminal.app, reads its events as a table, and lets a flaky land check rerun without a restart. No store migration and no new setting. Restart the engine and runner after you upgrade.
+
 ### Changed
 
 - The EVENTS rows of `brigada top` read as a table: time, kind, number, what happened and the plan's or task's title, each column aligned. A task's `done` row is hidden once its `landed` row shows, and a narrow box cuts the title first. `brigada history` prints what it did.
 
 ### Fixed
 
-- `brigada top` no longer loses the last character of a full-width line in a real terminal, and a terminal resize redraws at once from the data the view holds, with no fetch (issue #186).
+- `brigada top` lost the last character of every full-width line in macOS Terminal.app, so boxes had no right border and `p pause` read `p paus`. It now keeps the last column, and a terminal resize redraws at once from the data the view holds, with no fetch (issue #186).
 - A land check that failed on a flake could only be restarted, which rebuilt every dependent. `land_retry` now reruns a failed land check through the land rule, with every gate applying and no restart spent, at most twice for one approved head: after the third failure it refuses and names `task_restart`. The foreman calls it only when `check_log` shows the failure is unrelated to the task's diff; a conflict, a real check failure and a moved approved head still need `task_restart` (issue #181).
 
 ## [1.1.0] - 2026-11-05
