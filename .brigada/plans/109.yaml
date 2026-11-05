@@ -31,6 +31,6 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["cli-flag", "surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
