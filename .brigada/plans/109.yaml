@@ -44,6 +44,6 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["cli-flag", "surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-358"
     rounds: 1
