@@ -17,6 +17,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/caps"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/history"
+	"github.com/Blackfire-AI/brigada/internal/logo"
 	"github.com/Blackfire-AI/brigada/internal/projecturl"
 	"github.com/Blackfire-AI/brigada/internal/term"
 	"golang.org/x/sys/unix"
@@ -156,7 +157,15 @@ type topModel struct {
 	dialFailed bool
 	// hint is the unregistered-models line of the cached listing, or "".
 	hint string
+	// animate says the full-screen loop redraws on its own tick, so the
+	// running rows carry a spinner frame; only topLoop sets it, and a fetch
+	// keeps it.
+	animate bool
 }
+
+// topSpinEvery is the redraw period of the running rows' spinner, apart
+// from the fetch interval.
+const topSpinEvery = 120 * time.Millisecond
 
 // afterDial is the model once the loop has dialled the engine: a failed dial
 // keeps the data, notes the error and sets the dial-failed flag; a good one
@@ -178,6 +187,7 @@ func afterFetch(prev, fetched topModel, err error, now time.Time) topModel {
 	fetched.err = err
 	fetched.paused, fetched.pausedAt, fetched.dialFailed = prev.paused, prev.pausedAt, prev.dialFailed
 	fetched.fetchedAt = prev.fetchedAt
+	fetched.animate = prev.animate
 	fetched.events = mergeTopEvents(prev.events, fetched.events)
 	if err != nil {
 		return fetched.keepPrevious(prev)
@@ -365,7 +375,9 @@ func dialEngine(ctx context.Context, rt *runtime, role string, noStart bool) (*a
 // slots row dropping last of the class, though it
 // sits above NEEDS YOU. A section's top and bottom borders are rows of the
 // section: both go right after its last row, so an empty box never shows
-// and a drop may undershoot the height by a row or two. NEEDS YOU keeps
+// and a drop may undershoot the height by a row or two; the spare rows go
+// back to running lines, topmost first, each only while its box and, in
+// PLANS, its plan's line still show. NEEDS YOU keeps
 // its borders. i the hard clip: only the header, the band (with its hint
 // line) and NEEDS YOU remain, and the frame is cut from the bottom. While
 // the fetch is failing every line but the header and the band is Dim. With
@@ -389,10 +401,16 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 	}
 	add(topPinned(topHint(model, style, width)))
 	add(newTopNeedsYou(model.status, model.soleProject, style, inner))
-	foreman, jobs := topPlanless(model.status, secNow, style, inner)
+	// One mark for every running row of the frame: a spinner frame of the
+	// real clock while the view animates, else the static pointer.
+	mark := style.Pointer()
+	if model.animate && !model.paused && model.err == nil {
+		mark = style.Spinner(int(now.UnixMilli() / topSpinEvery.Milliseconds()))
+	}
+	foreman, jobs := topPlanless(model.status, secNow, style, inner, mark)
 	add(foreman)
 	add(jobs)
-	add(topPlansBox(model.status, model.tagPlans, model.statusOK, model.events, secNow, style, inner))
+	add(topPlansBox(model.status, model.tagPlans, model.statusOK, model.events, secNow, style, inner, mark))
 	add(topAgentLines(model, secNow, style, inner))
 	events := topEventLinesAt(model.events, model.status, model.statusOK && topFirstRun(model.status), secNow, style, inner)
 	if r := model.status.Report; r != nil {
@@ -552,8 +570,12 @@ func (f *topFrame) dropEmptyBorders(section int) {
 // fit drops lines until the frame has at most height lines, class by
 // class and from the bottom upward in each; height 0 is no limit. Lines
 // that are late in their class go after the rest of it. A section's
-// borders go right after its last row. What the classes leave over is the
-// hard clip, which the caller applies.
+// borders go right after its last row. A box takes its two borders with its
+// last row, so a class h drop can leave the frame a row or two short; those
+// spare rows go back to running lines, the topmost first, one row each, a
+// line only when its box still shows and, in PLANS, its own plan's line too.
+// No box is rebuilt and no other class comes back. What the classes leave
+// over is the hard clip, which the caller applies.
 func (f *topFrame) fit(height int) {
 	if height <= 0 {
 		return
@@ -569,6 +591,38 @@ func (f *topFrame) fit(height int) {
 			}
 		}
 	}
+	for i := range f.lines {
+		if f.size() >= height {
+			return
+		}
+		if l := f.lines[i]; l.dropped && l.class == yieldRunning && f.canReturn(i) {
+			f.lines[i].dropped = false
+		}
+	}
+}
+
+// canReturn says a dropped running line i may come back: its section's box
+// shows and, in PLANS, so does the nearest plan line above it.
+func (f *topFrame) canReturn(i int) bool {
+	section := f.lines[i].section
+	shown := false
+	for j, l := range f.lines {
+		if l.section == section && l.box != nil && f.visible(j) {
+			shown = true
+		}
+	}
+	if !shown {
+		return false
+	}
+	if section != topSecPlans {
+		return true
+	}
+	for j := i - 1; j >= 0; j-- {
+		if l := f.lines[j]; l.section == section && l.class == yieldRest && l.box == nil && !l.foot {
+			return f.visible(j)
+		}
+	}
+	return false
 }
 
 // topFit cuts one styled line to width: a line that fits keeps its
@@ -875,7 +929,7 @@ func topRetryLine(r engine.InfraRetry, now time.Time, style term.Style, width in
 // is running, held, retrying. A block is nil, and renderTop leaves it
 // out, when it has no job. The running lines yield in class g, the held
 // and retry lines in class f, and a block's head goes with its last line.
-func topPlanless(st api.Status, now time.Time, style term.Style, width int) (foreman, jobs []topLine) {
+func topPlanless(st api.Status, now time.Time, style term.Style, width int, mark string) (foreman, jobs []topLine) {
 	claims := newTopClaims(st)
 	var fore, other []topLine
 	add := func(kind string, line topLine) {
@@ -889,7 +943,7 @@ func topPlanless(st api.Status, now time.Time, style term.Style, width int) (for
 	}
 	for _, j := range st.Running {
 		if _, ok := claims.plan(j.ID, j.TaskID); !ok {
-			add(j.Kind, topLine{job: topRunningRow(j, "", now, style), class: yieldRunning})
+			add(j.Kind, topLine{job: topRunningRow(j, "", now, style, mark), class: yieldRunning})
 		}
 	}
 	for _, h := range st.Held {
@@ -956,6 +1010,7 @@ func topPlanless(st api.Status, now time.Time, style term.Style, width int) (for
 // and each finished one a single line, as bare text under the title.
 func topPlansTree(st api.Status, now time.Time, style term.Style, width int) []string {
 	frame := &topFrame{lines: newTopPlans(st, false, false, now, style, width), style: style}
+	// (the static pointer: a tree is no live frame)
 	return frame.texts()
 }
 
@@ -968,7 +1023,7 @@ func topPlansTree(st api.Status, now time.Time, style term.Style, width int) []s
 // the finished ones, listed and hidden, once the status has come back
 // (fetched). With tagged each plan's own line names its repo.
 func newTopPlans(st api.Status, tagged, fetched bool, now time.Time, style term.Style, width int) []topLine {
-	return topPlansBox(st, tagged, fetched, nil, now, style, width)
+	return topPlansBox(st, tagged, fetched, nil, now, style, width, style.Pointer())
 }
 
 // topFirstRun says the status has no plans at all, listed or hidden. It means
@@ -994,8 +1049,9 @@ func topFirstRunRows(style term.Style, line func(string, topYield) topLine) []to
 // no plans is a first run (topFirstRunRows); one that did not come back has
 // said nothing and keeps `none`. When plans exist and none is live, the note
 // reads `none live · N finished` and a Dim `idle: last work landed HH:MM`
-// row ends the finished lines, left out when no landing is kept.
-func topPlansBox(st api.Status, tagged, fetched bool, events []history.Item, now time.Time, style term.Style, width int) []topLine {
+// row ends the finished lines, left out when no landing is kept. Every live
+// plan is listed before every finished one, id order kept in each group.
+func topPlansBox(st api.Status, tagged, fetched bool, events []history.Item, now time.Time, style term.Style, width int, mark string) []topLine {
 	line := func(text string, class topYield) topLine {
 		return topLine{text: text, class: class, section: topSecPlans}
 	}
@@ -1032,7 +1088,16 @@ func topPlansBox(st api.Status, tagged, fetched bool, events []history.Item, now
 		}
 	}
 	layout := newTopPlanLayout(st.Plans, running, tagged, style, width)
-	for _, p := range st.Plans {
+	// Live plans first, then finished ones, each group in id order.
+	ordered := make([]engine.StatusPlan, 0, len(st.Plans))
+	for _, finishedGroup := range []bool{false, true} {
+		for _, p := range st.Plans {
+			if topPlanFinished(p) == finishedGroup {
+				ordered = append(ordered, p)
+			}
+		}
+	}
+	for _, p := range ordered {
 		tag := ""
 		if tagged {
 			tag = topRepoName(p.RepoURL)
@@ -1061,7 +1126,7 @@ func topPlansBox(st api.Status, tagged, fetched bool, events []history.Item, now
 		reviewJob := false // a job claimed for the plan's own review shows
 		for _, j := range st.Running {
 			if id, ok := claims.plan(j.ID, j.TaskID); ok && id == p.ID {
-				row(topRunningRow(j, titles[j.TaskID], now, style), yieldRunning)
+				row(topRunningRow(j, titles[j.TaskID], now, style, mark), yieldRunning)
 				busy[j.TaskID] = true
 				reviewJob = reviewJob || j.TaskID == 0
 			}
@@ -1754,9 +1819,11 @@ func topMarkdownPlain(text string) string {
 
 // The plain ANSI of the full-screen view: the alternate screen and the
 // hidden cursor, restored on close — including on SIGINT and SIGTERM,
-// which end the loop's context. Each frame redraws in place: home, then
-// each line erased before its text is written, then erase below only
-// when the frame is shorter than the screen. An erase written after a
+// which end the loop's context. The first frame, and any frame after the
+// size changed, repaints whole in place: home, then each line erased before
+// its text is written, then erase below only when the frame is shorter than
+// the screen. Any other frame writes only the lines that changed, each at
+// its absolute address, erased before its text. An erase written after a
 // character in the last column removes it, because the cursor stays on
 // that cell with a wrap pending.
 const (
@@ -1770,10 +1837,14 @@ const (
 )
 
 // topScreen owns stdout for the loop: it enters the alternate screen
-// and hides the cursor, redraws the given lines, and close restores
-// everything.
+// and hides the cursor, draws the given lines, and close restores
+// everything. It keeps the last frame and its size, so a frame writes only
+// what changed.
 type topScreen struct {
-	w io.Writer
+	w             io.Writer
+	last          []string
+	width, height int
+	drawn         bool
 }
 
 func newTopScreen(w io.Writer) *topScreen {
@@ -1785,7 +1856,33 @@ func (s *topScreen) close() {
 	fmt.Fprint(s.w, topShowCursor, topLeaveAlt)
 }
 
-func (s *topScreen) draw(lines []string, height int) {
+// draw writes a frame for a screen of width by height. A frame identical to
+// the last at the same size writes nothing; a changed line is written at its
+// address, erased first; a frame shorter than the last erases what is left
+// below it; the first frame and a new size repaint whole.
+func (s *topScreen) draw(lines []string, width, height int) {
+	repaint := !s.drawn || width != s.width || height != s.height
+	prev := s.last
+	s.last, s.width, s.height, s.drawn = append([]string(nil), lines...), width, height, true
+	if !repaint {
+		var b strings.Builder
+		for i, line := range lines {
+			if i < len(prev) && prev[i] == line {
+				continue
+			}
+			fmt.Fprintf(&b, "\x1b[%d;1H", i+1)
+			b.WriteString(topEraseLine)
+			b.WriteString(line)
+		}
+		if len(lines) < len(prev) {
+			fmt.Fprintf(&b, "\x1b[%d;1H", len(lines)+1)
+			b.WriteString(topEraseBelow)
+		}
+		if b.Len() > 0 {
+			fmt.Fprint(s.w, b.String())
+		}
+		return
+	}
 	var b strings.Builder
 	b.WriteString(topHome)
 	for i, line := range lines {
@@ -1831,7 +1928,10 @@ func terminalSize(w io.Writer) (width, height int) {
 // fails draws its error as a band over the last data and the next tick
 // tries again; the dial never starts an engine under --no-start. A
 // terminal resize (SIGWINCH) redraws at once from the model it holds,
-// with no fetch, also while paused.
+// with no fetch, also while paused. With colour and UTF-8 the running rows
+// carry a spinner: a second ticker (topSpinEvery) redraws from the model,
+// with no fetch, while a job runs; --interval stays the fetch rate. Only
+// changed lines are written.
 func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Duration, noStart bool, stdout io.Writer) int {
 	screen := newTopScreen(stdout)
 	defer screen.close()
@@ -1846,6 +1946,8 @@ func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Durati
 	signal.Notify(resize, unix.SIGWINCH)
 	defer signal.Stop(resize)
 	var model topModel
+	detected := detectCaps(stdout)
+	model.animate = detected.Color != logo.NoColor && detected.UTF8
 	refresh := func() {
 		client, err := dialEngine(ctx, rt, "client", noStart)
 		model = model.afterDial(err)
@@ -1861,21 +1963,33 @@ func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Durati
 	go refreshAgentsCacheIfStale(ctx, rt)
 	draw := func() {
 		width, height := terminalSize(stdout)
-		screen.draw(renderTop(model, width, height, time.Now(), term.New(detectCaps(stdout))), height)
+		screen.draw(renderTop(model, width, height, time.Now(), term.New(detectCaps(stdout))), width, height)
 	}
 	refresh()
 	draw()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	return topEvents(ctx, keys, ticker.C, resize, refresh, draw,
+	// Without colour and UTF-8 the frames channel stays nil and never fires.
+	var frames <-chan time.Time
+	if model.animate {
+		spin := time.NewTicker(topSpinEvery)
+		defer spin.Stop()
+		frames = spin.C
+	}
+	return topEvents(ctx, keys, ticker.C, resize, frames, refresh, draw,
 		func() { model = model.togglePause(time.Now()) },
-		func() bool { return model.paused })
+		func() bool { return model.paused },
+		func() bool {
+			return model.animate && !model.paused && model.err == nil && len(model.status.Running) > 0
+		})
 }
 
 // topEvents is the select loop of topLoop: keys, ticks and resizes drive
-// refresh (a fetch) and draw. A resize only draws.
+// refresh (a fetch) and draw. A resize only draws. A frames tick draws when
+// animating says a running row spins and never fetches; a nil frames channel
+// never fires.
 func topEvents(ctx context.Context, keys <-chan byte, ticks <-chan time.Time, resize <-chan os.Signal,
-	refresh, draw, togglePause func(), paused func() bool) int {
+	frames <-chan time.Time, refresh, draw, togglePause func(), paused, animating func() bool) int {
 	for {
 		select {
 		case <-ctx.Done():
@@ -1898,6 +2012,10 @@ func topEvents(ctx context.Context, keys <-chan byte, ticks <-chan time.Time, re
 			draw()
 		case <-resize:
 			draw()
+		case <-frames:
+			if animating() {
+				draw()
+			}
 		}
 	}
 }

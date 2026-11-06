@@ -1104,7 +1104,7 @@ func TestTopPlansTree(t *testing.T) {
 			if want := strings.Join(tt.want, "\n"); got != want {
 				t.Errorf("tree =\n%s\nwant\n%s", got, want)
 			}
-			if foreman, jobs := topPlanless(tt.st, topNow, term.New(logo.Caps{UTF8: true}), 80); len(foreman)+len(jobs) != 0 {
+			if foreman, jobs := topPlanless(tt.st, topNow, term.New(logo.Caps{UTF8: true}), 80, "▸"); len(foreman)+len(jobs) != 0 {
 				t.Errorf("a plan's job is plan-less: %v %v", foreman, jobs)
 			}
 		})
@@ -1382,9 +1382,94 @@ func TestTopPlanTotalsLeaveOutCancelledAndRetired(t *testing.T) {
 	right := func(left, tail string) string {
 		return left + strings.Repeat(" ", 80-utf8.RuneCountInString(left)-utf8.RuneCountInString(tail)) + tail
 	}
-	want := []string{right("#96 Rework", "done"), right("#97 Live", "■■■□  3/4"), "  · #6  go  (queued)"}
+	want := []string{right("#97 Live", "■■■□  3/4"), "  · #6  go  (queued)", right("#96 Rework", "done")}
 	if got := topPlanLines(st, 80); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("tree =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestTopPlansLiveFirst: every live plan is listed before every finished
+// one, id order kept in each group, on a plain tree and on a tagged view; a
+// cancelled plan is finished, an awaiting-approval and a reviewing plan are
+// live.
+func TestTopPlansLiveFirst(t *testing.T) {
+	const repo = "https://example.invalid/acme/brigada.git"
+	st := api.Status{Plans: []engine.StatusPlan{
+		{ID: 1, RepoURL: repo, Title: "one", State: "done"},
+		{ID: 2, RepoURL: repo, Title: "two", State: "active"},
+		{ID: 3, RepoURL: repo, Title: "three", State: "cancelled"},
+		{ID: 4, RepoURL: repo, Title: "four", State: "awaiting_approval"},
+		{ID: 5, RepoURL: repo, Title: "five", State: "done"},
+		{ID: 6, RepoURL: repo, Title: "six", State: "reviewing", ReviewRound: 1, ReviewJob: 50},
+	}}
+	style := term.New(logo.Caps{UTF8: true})
+	order := func(tagged bool) []string {
+		var out []string
+		for _, l := range newTopPlans(st, tagged, false, topNow, style, 80) {
+			if strings.HasPrefix(l.text, "#") {
+				out = append(out, strings.Fields(l.text)[0])
+			}
+		}
+		return out
+	}
+	want := "#2 #4 #6 #1 #3 #5"
+	for _, tagged := range []bool{false, true} {
+		if got := strings.Join(order(tagged), " "); got != want {
+			t.Errorf("tagged=%v order = %s, want %s", tagged, got, want)
+		}
+	}
+	if st.Plans[0].ID != 1 || st.Plans[1].ID != 2 {
+		t.Errorf("st.Plans was reordered")
+	}
+}
+
+// TestTopSpareRowGoesToRunningLine: when a class h drop leaves a free row,
+// the topmost dropped running line comes back if its box and plan line
+// still show; the frame never exceeds the height, and a running line never
+// shows without its plan's line.
+func TestTopSpareRowGoesToRunningLine(t *testing.T) {
+	model := topModel{status: api.Status{
+		Running: []engine.StatusJob{
+			{ID: 5, TaskID: 1, Kind: "work", Status: "running", Harness: "claude", Model: "sonnet"},
+			{ID: 6, TaskID: 2, Kind: "work", Status: "running", Harness: "claude", Model: "sonnet"},
+		},
+		Plans: []engine.StatusPlan{
+			{ID: 1, Title: "first", State: "active", Tasks: []engine.StatusTask{{ID: 1, Title: "alpha", State: "running"}}},
+			{ID: 2, Title: "second", State: "active", Tasks: []engine.StatusTask{{ID: 2, Title: "beta", State: "running"}}},
+		},
+	}}
+	sawOne := false
+	for height := 3; height <= 30; height++ {
+		lines := strings.Split(plainTop(model, 76, height), "\n")
+		if len(lines) > height {
+			t.Fatalf("height %d: %d lines", height, len(lines))
+		}
+		inPlans, planShown := false, false
+		var running []string
+		for _, l := range lines {
+			switch {
+			case strings.Contains(l, "╭─ PLANS"):
+				inPlans, planShown = true, false
+			case strings.HasPrefix(l, "╰"):
+				inPlans = false
+			case inPlans && strings.HasPrefix(l, "│ #"):
+				planShown = true
+			case inPlans && strings.Contains(l, "▸ #"):
+				if !planShown {
+					t.Errorf("height %d: running line without its plan line:\n%s", height, strings.Join(lines, "\n"))
+				}
+				running = append(running, l)
+			}
+		}
+		if len(running) == 1 && strings.Contains(running[0], "#1") && len(lines) == height {
+			sawOne = true
+		}
+		if len(running) == 1 && strings.Contains(running[0], "#2") {
+			t.Errorf("height %d: the second running line shows without the first:\n%s", height, strings.Join(lines, "\n"))
+		}
+	}
+	if !sawOne {
+		t.Error("no height shows exactly the first running line in a full frame")
 	}
 }
 
@@ -1767,7 +1852,10 @@ func TestRenderTopFitsSize(t *testing.T) {
 }
 
 // TestRenderTopHeightYieldOrder: lines beyond the height yield class by
-// class, each from the bottom of the view upward, one line at a time:
+// class, each from the bottom of the view upward, one line at a time (a
+// box's borders go with its last row, so a drop can leave a spare row, and
+// that row goes back to the topmost running line whose box and plan line
+// still show):
 // event row 2, the blank lines between sections, the
 // held and parked lines, the running line, then the class of every other
 // line — event row 1 with the EVENTS head after it, the agent rows
@@ -1817,8 +1905,11 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 			"╭─ EVENTS ─",
 			"15:02  task    #3  done     oil the gears",
 		}, []string{"▸ #3  oil the gears  "}},
-		{"event row 1, its box goes with it", 15, 13, []string{
+		// The class h drop of event row 1 takes its box with it and leaves a
+		// free row, which goes back to the running line.
+		{"event row 1, its box goes with it, a spare row returns", 15, 14, []string{
 			"#1 fix the frobnicator",
+			"▸ #3",
 			"╭─ AGENTS  all ≤ global 8 ─",
 		}, []string{"EVENTS", "task    #3  done"}},
 		// The agents list broken and cooling first, then running, so the
@@ -1826,8 +1917,9 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 		{"the running agent's row", 12, 12, []string{
 			"until 16:04  ✗ claude/...  ■■□□□□□□  login ex...",
 		}, []string{"● claude/..."}},
-		{"the broken and cooling row, its box goes with it", 11, 9, []string{
+		{"the broken and cooling row, its box goes with it", 11, 10, []string{
 			"#1 fix the frobnicator",
+			"▸ #3",
 		}, []string{"AGENTS", "codex/g...", "until 16:04"}},
 		{"the plan line, its box goes with it", 8, 6, []string{
 			"! claude/sonnet-long-n...  → brigada agent reset claude/sonnet-long-name",
@@ -2288,6 +2380,9 @@ func TestPrintTopSnapshot(t *testing.T) {
 	if !strings.HasPrefix(out.String(), " ▙ brigada   r · up ") {
 		t.Errorf("snapshot lacks the header:\n%s", out.String())
 	}
+	if strings.ContainsAny(out.String(), "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏") {
+		t.Errorf("snapshot carries a spinner glyph:\n%s", out.String())
+	}
 	fake.projectsErr = errors.New("down")
 	out.Reset()
 	if code := printTopSnapshot(context.Background(), fake, "https://example.invalid/r.git", "", topNow, &out, &errOut); code != 1 {
@@ -2500,7 +2595,7 @@ func TestTopScreenDrawRedrawsInPlace(t *testing.T) {
 			var out bytes.Buffer
 			screen := newTopScreen(&out)
 			out.Reset()
-			screen.draw(tc.lines, height)
+			screen.draw(tc.lines, 20, height)
 			got := out.String()
 			if !strings.HasPrefix(got, "\x1b[H") {
 				t.Errorf("frame does not start with home: %q", got)
@@ -2537,9 +2632,10 @@ func TestTopEventsResizeRedrawsWithoutFetch(t *testing.T) {
 	paused := false
 	done := make(chan int)
 	go func() {
-		done <- topEvents(context.Background(), keys, ticks, resize,
+		done <- topEvents(context.Background(), keys, ticks, resize, nil,
 			func() { refreshes++ }, func() { draws++ },
-			func() { paused = !paused }, func() bool { return paused })
+			func() { paused = !paused }, func() bool { return paused },
+			func() bool { return false })
 	}()
 	resize <- syscall.SIGWINCH
 	keys <- 'p' // pause: draws, no fetch
@@ -2554,6 +2650,142 @@ func TestTopEventsResizeRedrawsWithoutFetch(t *testing.T) {
 	}
 	if draws != 4 {
 		t.Errorf("%d draws, want 4", draws)
+	}
+}
+
+// TestTopEventsFramesDrawWithoutFetch: a frames tick draws only while
+// animating says so and never fetches; keys and ticks act as before.
+func TestTopEventsFramesDrawWithoutFetch(t *testing.T) {
+	keys := make(chan byte)
+	ticks := make(chan time.Time)
+	resize := make(chan os.Signal)
+	frames := make(chan time.Time)
+	refreshes, draws := 0, 0
+	paused, animating := false, true
+	drawn := make(chan struct{}, 8)
+	done := make(chan int)
+	go func() {
+		done <- topEvents(context.Background(), keys, ticks, resize, frames,
+			func() { refreshes++ }, func() { draws++; drawn <- struct{}{} },
+			func() { paused = !paused }, func() bool { return paused },
+			func() bool { return animating })
+	}()
+	frames <- time.Now() // animating: draws
+	<-drawn
+	frames <- time.Now()
+	<-drawn
+	animating = false
+	frames <- time.Now() // not animating: no draw
+	ticks <- time.Now()  // a fetch tick: fetches and draws
+	<-drawn
+	keys <- 'q'
+	if code := <-done; code != 0 {
+		t.Fatalf("exit %d, want 0", code)
+	}
+	if refreshes != 1 {
+		t.Errorf("%d fetches, want 1 (the tick's)", refreshes)
+	}
+	if draws != 3 {
+		t.Errorf("%d draws, want 3", draws)
+	}
+}
+
+// TestRenderTopSpinner: with animate and a colour UTF-8 style the running
+// rows carry the frame for now, the same on every row, a new one 120 ms
+// later and the width of the static row; the static pointer shows with
+// animate off, no colour, ASCII, a pause and an error.
+func TestRenderTopSpinner(t *testing.T) {
+	const braille = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+	colour := term.New(logo.Caps{Color: logo.Color256, UTF8: true})
+	model := busyTopModel()
+	model.status.Running = append(model.status.Running,
+		engine.StatusJob{ID: 9, Kind: "plan_review"}) // a plan-less row
+	now := time.UnixMilli(1_700_000_000_040)
+	frame := func(n time.Time) string { return colour.Spinner(int(n.UnixMilli() / topSpinEvery.Milliseconds())) }
+	rows := func(lines []string, mark string) int {
+		n := 0
+		for _, l := range lines {
+			if strings.Contains(term.StripEscapes(l), mark+" #3 ") || strings.Contains(term.StripEscapes(l), mark+" job #9") {
+				n++
+			}
+		}
+		return n
+	}
+	static := renderTop(model, 80, 0, now, colour)
+	model.animate = true
+	a := renderTop(model, 80, 0, now, colour)
+	b := renderTop(model, 80, 0, now.Add(topSpinEvery), colour)
+	if got := rows(a, frame(now)); got != 2 {
+		t.Errorf("%d rows carry the frame %q, want 2:\n%s", got, frame(now), strings.Join(a, "\n"))
+	}
+	if frame(now) == frame(now.Add(topSpinEvery)) || rows(b, frame(now.Add(topSpinEvery))) != 2 {
+		t.Errorf("a frame 120 ms later does not differ:\n%s", strings.Join(b, "\n"))
+	}
+	if len(a) != len(static) {
+		t.Fatalf("line count %d vs %d", len(a), len(static))
+	}
+	for i := range a {
+		if term.CellWidth(a[i]) != term.CellWidth(static[i]) {
+			t.Errorf("line %d width %d, static %d", i, term.CellWidth(a[i]), term.CellWidth(static[i]))
+		}
+	}
+	paused := model
+	paused = paused.togglePause(now)
+	failing := model
+	failing.err = errors.New("down")
+	off := model
+	off.animate = false
+	for _, tc := range []struct {
+		name  string
+		model topModel
+		style term.Style
+		mark  string
+	}{
+		{"animate off", off, colour, "▸"},
+		{"no colour", model, term.New(logo.Caps{UTF8: true}), "▸"},
+		{"ascii", model, term.New(logo.Caps{Color: logo.Color256}), ">"},
+		{"paused", paused, colour, "▸"},
+		{"error", failing, colour, "▸"},
+	} {
+		got := strings.Join(renderTop(tc.model, 80, 0, now, tc.style), "\n")
+		if strings.ContainsAny(got, braille) {
+			t.Errorf("%s: spinner glyph shows:\n%s", tc.name, got)
+		}
+		if !strings.Contains(term.StripEscapes(got), tc.mark+" #3 ") {
+			t.Errorf("%s: no static %q row:\n%s", tc.name, tc.mark, got)
+		}
+	}
+}
+
+// TestTopScreenDrawChangedLines: an identical frame writes nothing, a
+// changed line is written at its address with the erase first, a shorter
+// frame erases below, and a size change repaints whole.
+func TestTopScreenDrawChangedLines(t *testing.T) {
+	var out bytes.Buffer
+	screen := newTopScreen(&out)
+	out.Reset()
+	screen.draw([]string{"one", "two", "three"}, 20, 5)
+	if !strings.HasPrefix(out.String(), "\x1b[H") {
+		t.Errorf("first frame does not repaint whole: %q", out.String())
+	}
+	out.Reset()
+	screen.draw([]string{"one", "two", "three"}, 20, 5)
+	if out.Len() != 0 {
+		t.Errorf("identical frame wrote %q", out.String())
+	}
+	screen.draw([]string{"one", "TWO", "three"}, 20, 5)
+	if got, want := out.String(), "\x1b[2;1H\x1b[KTWO"; got != want {
+		t.Errorf("changed line wrote %q, want %q", got, want)
+	}
+	out.Reset()
+	screen.draw([]string{"one", "TWO"}, 20, 5)
+	if got, want := out.String(), "\x1b[3;1H\x1b[J"; got != want {
+		t.Errorf("shorter frame wrote %q, want %q", got, want)
+	}
+	out.Reset()
+	screen.draw([]string{"one", "TWO"}, 30, 5)
+	if got := out.String(); !strings.HasPrefix(got, "\x1b[H\x1b[Kone\r\n\x1b[KTWO") {
+		t.Errorf("size change did not repaint whole: %q", got)
 	}
 }
 
@@ -3272,7 +3504,7 @@ func TestTopForemanAndJobsNotes(t *testing.T) {
 			{ProjectID: 2, State: engine.SlotTurn, HolderID: 30, Label: "foreman turn", Since: stamp},
 			{ProjectID: 3, State: engine.SlotTurn, HolderID: 31, Label: "foreman turn", Since: stamp},
 		},
-	}, topNow, plain, 80)
+	}, topNow, plain, 80, "▸")
 	want := []string{
 		"FOREMAN",
 		"  ▸ job #30  foreman",
@@ -3294,33 +3526,33 @@ func TestTopForemanAndJobsNotes(t *testing.T) {
 	// The headless turn whose job runs is skipped; one message reads singular,
 	// and a block shows with only a note.
 	foreman, _ = topPlanless(api.Status{ForemanMessages: 1,
-		Slots: []engine.Slot{{State: engine.SlotTurn, HolderID: 30, Label: "foreman turn", Since: stamp}}}, topNow, plain, 80)
+		Slots: []engine.Slot{{State: engine.SlotTurn, HolderID: 30, Label: "foreman turn", Since: stamp}}}, topNow, plain, 80, "▸")
 	if got := texts(foreman); len(got) != 3 || got[1] != "  1 message for the foreman" {
 		t.Errorf("FOREMAN block = %q", got)
 	}
 	foreman, _ = topPlanless(api.Status{Running: []engine.StatusJob{{ID: 30, Kind: "foreman"}},
-		Slots: []engine.Slot{{State: engine.SlotTurn, HolderID: 30, Label: "foreman turn", Since: stamp}}}, topNow, plain, 80)
+		Slots: []engine.Slot{{State: engine.SlotTurn, HolderID: 30, Label: "foreman turn", Since: stamp}}}, topNow, plain, 80, "▸")
 	if got := texts(foreman); len(got) != 2 {
 		t.Errorf("the running turn's slot repeats its job line: %q", got)
 	}
 	// A pending runner restart sits in the JOBS block, only while something runs.
 	_, jobs = topPlanless(api.Status{RunnerDraining: true,
-		Running: []engine.StatusJob{{ID: 63, Kind: "plan_review"}}}, topNow, plain, 80)
+		Running: []engine.StatusJob{{ID: 63, Kind: "plan_review"}}}, topNow, plain, 80, "▸")
 	if got := texts(jobs); len(got) != 3 || got[2] != "  runner restarting after 1 running job" || jobs[2].class != yieldHeld || jobs[2].section != topSecJobs {
 		t.Errorf("JOBS block = %q", got)
 	}
 	_, jobs = topPlanless(api.Status{RunnerDraining: true,
-		Running: []engine.StatusJob{{ID: 63, Kind: "plan_review"}, {ID: 64, Kind: "plan_review"}}}, topNow, plain, 80)
+		Running: []engine.StatusJob{{ID: 63, Kind: "plan_review"}, {ID: 64, Kind: "plan_review"}}}, topNow, plain, 80, "▸")
 	if got := texts(jobs); got[len(got)-1] != "  runner restarting after 2 running jobs" {
 		t.Errorf("JOBS block = %q", got)
 	}
-	foreman, jobs = topPlanless(api.Status{RunnerDraining: true}, topNow, plain, 80)
+	foreman, jobs = topPlanless(api.Status{RunnerDraining: true}, topNow, plain, 80, "▸")
 	if len(foreman)+len(jobs) != 0 {
 		t.Errorf("a drain with nothing running shows blocks: %v %v", texts(foreman), texts(jobs))
 	}
 	// Dim, and no escape in the plain style.
 	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
-	foreman, _ = topPlanless(api.Status{ForemanMessages: 1}, topNow, colour, 80)
+	foreman, _ = topPlanless(api.Status{ForemanMessages: 1}, topNow, colour, 80, "▸")
 	if foreman[1].text != "  "+colour.Dim("1 message for the foreman") {
 		t.Errorf("note = %q, want Dim", foreman[1].text)
 	}
@@ -3533,7 +3765,7 @@ func TestTopIdlePlans(t *testing.T) {
 		}
 	}
 	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
-	lines := topPlansBox(m.status, false, true, m.events, topNow, colour, 76)
+	lines := topPlansBox(m.status, false, true, m.events, topNow, colour, 76, "▸")
 	if last := lines[len(lines)-2]; last.text != colour.Dim("idle: last work landed 15:02") || last.class != yieldFinished {
 		t.Errorf("idle row = %+v, want Dim in the finished class", last)
 	}
