@@ -319,10 +319,11 @@ type NeedsYouItem struct {
 	Title  string `json:"title"`
 	Reason string `json:"reason,omitempty"`
 	PlanID int64  `json:"plan_id,omitempty"` // the task's plan, when the entry is a task
-	// ForemanHolds is true for a task parked at needs_foreman that the
-	// foreman will handle (§10, foremanHolds.task): a live turn carries
-	// its event, or an attached chat holds the project. The user's queue
-	// leaves such a task out; the foreman's list keeps it.
+	// ForemanHolds is true for a task or a plan parked at needs_foreman
+	// that the foreman will handle (§10, foremanHolds.task and .plan): a
+	// live turn carries its event, or an attached chat holds the project.
+	// The user's queue leaves such an entry out; the foreman's list keeps
+	// it.
 	ForemanHolds bool `json:"foreman_holds,omitempty"`
 	// A plan awaiting approval also carries what a coordinator shows the
 	// user and quotes back (§4.6): the project's repo URL, the
@@ -1052,7 +1053,8 @@ func statusNeedsYouTx(tx *sql.Tx, reviewFamily string, project int64, now time.T
 	}
 	items = append(items, landEnv...)
 
-	pquery := `SELECT p.id, p.title, p.version, pr.repo_url, p.state FROM plans p JOIN projects pr ON pr.id = p.project_id
+	planProjects := map[int64]int64{}
+	pquery := `SELECT p.id, p.title, p.version, pr.repo_url, p.state, p.project_id FROM plans p JOIN projects pr ON pr.id = p.project_id
 		WHERE pr.archived_at IS NULL AND p.state IN ('pending_approval', 'needs_foreman')`
 	pargs := []any{}
 	if project != 0 {
@@ -1067,9 +1069,11 @@ func statusNeedsYouTx(tx *sql.Tx, reviewFamily string, project int64, now time.T
 	defer prows.Close()
 	for prows.Next() {
 		var it NeedsYouItem
-		if err := prows.Scan(&it.ID, &it.Title, &it.Version, &it.RepoURL, &it.State); err != nil {
+		var proj int64
+		if err := prows.Scan(&it.ID, &it.Title, &it.Version, &it.RepoURL, &it.State, &proj); err != nil {
 			return nil, fmt.Errorf("list the plans awaiting a decision: %w", err)
 		}
+		planProjects[it.ID] = proj
 		it.Kind = "plan"
 		items = append(items, it)
 	}
@@ -1087,22 +1091,12 @@ func statusNeedsYouTx(tx *sql.Tx, reviewFamily string, project int64, now time.T
 			continue
 		}
 		if items[i].State == planNeedsForeman {
-			reason, job, err := parkedPlanReasonTx(tx, items[i].ID)
-			if err != nil {
+			var err error
+			if items[i].Reason, err = parkedPlanNeedsYouReasonTx(tx, items[i].ID); err != nil {
 				return nil, err
 			}
-			if turn, swallowed, serr := parkedPlanSwallowedTx(tx, items[i].ID); serr != nil {
-				return nil, serr
-			} else if swallowed {
-				note := fmt.Sprintf("foreman turn %d ended without answering the changes verdict", turn)
-				if reason != "" {
-					note += ": " + reason
-				}
-				reason = note
-			}
-			items[i].Reason = oneLine(reason, needsYouReasonLimit)
-			if flat := strings.Join(strings.Fields(reason), " "); job > 0 && len(flat) > needsYouReasonLimit {
-				items[i].Reason += reportPointer(job)
+			if items[i].ForemanHolds, err = holds.plan(tx, planProjects[items[i].ID], items[i].ID, now); err != nil {
+				return nil, err
 			}
 			continue
 		}
@@ -1266,6 +1260,32 @@ func awaitingReasonTx(tx *sql.Tx, plan int64) (string, error) {
 		}
 	}
 	return "", rows.Err()
+}
+
+// parkedPlanNeedsYouReasonTx is the needs-you line of a plan its review
+// parked (§6.2): the findings cut to one line and, when the cut landed,
+// pointing at the history that holds them whole — headed, while a done
+// turn swallowed the verdict, by the turn that failed to act (§4.2). The
+// queue and the plan_unattended banner say the same words.
+func parkedPlanNeedsYouReasonTx(tx *sql.Tx, plan int64) (string, error) {
+	reason, job, err := parkedPlanReasonTx(tx, plan)
+	if err != nil {
+		return "", err
+	}
+	if turn, swallowed, serr := parkedPlanSwallowedTx(tx, plan); serr != nil {
+		return "", serr
+	} else if swallowed {
+		note := fmt.Sprintf("foreman turn %d ended without answering the changes verdict", turn)
+		if reason != "" {
+			note += ": " + reason
+		}
+		reason = note
+	}
+	out := oneLine(reason, needsYouReasonLimit)
+	if flat := strings.Join(strings.Fields(reason), " "); job > 0 && len(flat) > needsYouReasonLimit {
+		out += reportPointer(job)
+	}
+	return out, nil
 }
 
 // parkedPlanReasonTx reads why a plan its review parked waits (§6.2):

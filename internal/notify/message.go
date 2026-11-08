@@ -25,6 +25,9 @@ const (
 	KindForemanWakeBudgetSpent = "foreman_wake_budget_spent" // the day's foreman wake budget is spent (§4.3, §10)
 	KindAgentBroken            = "agent_broken"              // an agent was marked broken (§8 "Health", §10)
 	KindTaskUnattended         = "task_unattended"           // a task parked at needs_foreman that the foreman does not hold (§10)
+	// KindPlanUnattended: a plan parked at needs_foreman that the foreman
+	// does not hold (§6.2, §10).
+	KindPlanUnattended = "plan_unattended"
 	// KindReviewUnservable: a task's queued review can never be taken —
 	// no agent of another family offers review (§7, §10).
 	KindReviewUnservable = "review_unservable"
@@ -162,6 +165,14 @@ func Message(ev Event) (t, body string, ok bool) {
 		// Reason is the needs-you entry's own words: what is missing and
 		// what the user can do about it.
 		return title, oneLine(fmt.Sprintf("task #%d reviewing: %s", ev.TaskID, ev.Reason), bodyLimit), true
+	case ev.Kind == KindPlanUnattended:
+		// A plan parked at needs_foreman that the foreman does not hold;
+		// its Reason is the queue's words, swallowed-turn heading included.
+		reason := ev.Reason
+		if reason == "" {
+			reason = ev.Kind
+		}
+		return title, oneLine(fmt.Sprintf("plan #%d needs you: %s", ev.PlanID, reason), bodyLimit), true
 	case ev.Kind == KindTaskUnattended || needsForemanKinds[ev.Kind] && ev.ParkedAtUser:
 		// task_unattended: a task parked at needs_foreman that the
 		// foreman does not hold (§10); its Reason is the queue's words.

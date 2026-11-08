@@ -370,6 +370,133 @@ func TestASwallowedChangesVerdictIsNamed(t *testing.T) {
 	}
 }
 
+// planHeld reads whether the engine's whole list marks the plan's
+// needs-you entry as held by the foreman; present is false when it has none.
+func planHeld(t *testing.T, e *env, plan int64) (held, present bool) {
+	t.Helper()
+	if it := needsYouPlan(t, e, plan); it != nil {
+		return it.ForemanHolds, true
+	}
+	return false, false
+}
+
+// TestAParkedPlanTheForemanHandlesLeavesNeedsYou (issue #197): the task
+// rule applied to a plan parked on a changes verdict — a live turn or an
+// attach hold holds it, out of the user's queue and the project count,
+// while the foreman's own status keeps it and nothing is announced.
+func TestAParkedPlanTheForemanHandlesLeavesNeedsYou(t *testing.T) {
+	for _, attached := range []bool{false, true} {
+		e := newPlanReviewEnv(t)
+		res, _ := parkForChanges(t, e, []PlanTask{{Name: "a", Spec: "do a"}, {Name: "b", Spec: "do b"}})
+		if attached {
+			e.attach(true)
+		}
+		if held, present := planHeld(t, e, res.PlanID); !present || !held {
+			t.Fatalf("attached=%v: plan held=%v present=%v, want held in the whole list", attached, held, present)
+		}
+		info, err := e.eng.Status(e.ctx, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info.SplitForemanHolds()
+		for _, it := range info.NeedsYou {
+			if it.Kind == "plan" {
+				t.Errorf("attached=%v: the user's queue lists the held plan: %+v", attached, it)
+			}
+		}
+		found := false
+		for _, it := range info.ForemanHolds {
+			found = found || it.Kind == "plan" && it.ID == res.PlanID
+		}
+		if !found {
+			t.Errorf("attached=%v: foreman_holds = %+v, want the plan", attached, info.ForemanHolds)
+		}
+		if projects, err := e.eng.Projects(e.ctx); err != nil || projects[0].NeedsYou != 0 {
+			t.Errorf("attached=%v: projects = %+v, %v; want needs_you 0", attached, projects, err)
+		}
+		if got := e.countEvents(evPlanUnattended); got != 0 {
+			t.Errorf("attached=%v: plan_unattended events = %d, want none", attached, got)
+		}
+		if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planNeedsForeman {
+			t.Errorf("attached=%v: plan state = %q, want the state line unchanged", attached, got)
+		}
+	}
+}
+
+// TestAParkedPlanTheForemanWillNotHandleIsAnnouncedOnce: a limited
+// foreman, a swallowed verdict and a cancelled turn each leave the plan in
+// needs-you with one plan_unattended event, never repeated by a later wake.
+func TestAParkedPlanTheForemanWillNotHandleIsAnnouncedOnce(t *testing.T) {
+	cases := []struct {
+		name string
+		end  func(e *env)
+	}{
+		{"swallowed", func(e *env) {
+			e.complete(e.leaseForeman(), Completion{Result: `{"status":"done"}`})
+		}},
+		{"limited", func(e *env) {
+			e.complete(e.leaseForeman(), Completion{Error: "foreman CLI failed (limit): you've hit your usage limit", ErrorKind: "limit"})
+		}},
+		{"cancelled", func(e *env) {
+			if ans := e.cancel(e.int("SELECT id FROM jobs WHERE kind = 'foreman' ORDER BY id DESC")); ans != AnsOK {
+				e.t.Fatalf("cancel: %s", ans)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newPlanReviewEnv(t)
+			res, _ := parkForChanges(t, e, []PlanTask{{Name: "a", Spec: "do a"}, {Name: "b", Spec: "do b"}})
+			if held, _ := planHeld(t, e, res.PlanID); !held {
+				t.Fatal("plan not held before the turn ends")
+			}
+			jobs := e.foremanJobs()
+			tc.end(e)
+			e.rewake()
+			held, present := planHeld(t, e, res.PlanID)
+			if !present || held {
+				t.Fatalf("plan held=%v present=%v, want the user's", held, present)
+			}
+			if got := e.countEvents(evPlanUnattended); got != 1 {
+				t.Fatalf("plan_unattended events = %d, want 1", got)
+			}
+			p, _ := e.eventPayloadOf(evPlanUnattended)
+			if p.Plan != res.PlanID || !strings.Contains(p.Reason, "The second task") {
+				t.Errorf("payload = %+v, want plan %d and the findings", p, res.PlanID)
+			}
+			if tc.name == "swallowed" && !strings.Contains(p.Reason, "ended without answering the changes verdict") {
+				t.Errorf("reason = %q, want the swallowed-turn heading", p.Reason)
+			}
+			if tc.name == "cancelled" && e.foremanJobs() != jobs {
+				t.Errorf("foreman jobs = %d, want %d: a cancel wakes nothing", e.foremanJobs(), jobs)
+			}
+			e.rewake()
+			if got := e.countEvents(evPlanUnattended); got != 1 {
+				t.Errorf("plan_unattended events after a later wake = %d, want still 1", got)
+			}
+			if n := e.int(`SELECT COUNT(*) FROM foreman_inbox i JOIN events ev ON ev.id = i.event_id WHERE ev.kind = ?`, evPlanUnattended); n != 0 {
+				t.Errorf("plan_unattended rows in the inbox = %d, want none", n)
+			}
+		})
+	}
+}
+
+// TestAPendingApprovalPlanIsNotHeld: a plan awaiting the user's yes stays
+// the user's, whatever the foreman does.
+func TestAPendingApprovalPlanIsNotHeld(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	res := e.createPlan([]PlanTask{{Name: "a", Spec: "do a"}})
+	e.exec(`UPDATE plans SET state = 'pending_approval' WHERE id = ?`, res.PlanID)
+	e.rewake()
+	if held, present := planHeld(t, e, res.PlanID); !present || held {
+		t.Errorf("held=%v present=%v, want listed and not held", held, present)
+	}
+	if got := e.countEvents(evPlanUnattended); got != 0 {
+		t.Errorf("plan_unattended events = %d, want none", got)
+	}
+}
+
 // TestAnAnsweredVerdictIsNotNamed: a turn that answers the verdict
 // before it ends — an amendment moves the plan to reviewing with the
 // verdict cleared — swallows nothing: the row is consumed, no event, no

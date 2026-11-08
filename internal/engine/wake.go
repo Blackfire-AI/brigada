@@ -511,7 +511,8 @@ func foremanReportTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error
 // follow-up flag clears. A cancelled turn wakes nothing at once — the
 // user just said stop, and an instant re-wake would defy them — so its
 // events stay pending for the next judgment event or the start-of-engine
-// recovery (§13). Every other ending re-evaluates the wake here, in the
+// recovery (§13); the cancel still announces the parked tasks and plans
+// that no live turn holds now (announceUnattendedTx), without waking. Every other ending re-evaluates the wake here, in the
 // same transaction as the completion, so the events that arrived during
 // the turn, and the ones just returned, reach the next turn.
 func (e *Engine) foremanFinishedTx(tx *sql.Tx, job *jobRow, status string, now time.Time) error {
@@ -542,7 +543,11 @@ func (e *Engine) foremanFinishedTx(tx *sql.Tx, job *jobRow, status string, now t
 		return fmt.Errorf("clear the follow-up flag of job %d: %w", job.ID, err)
 	}
 	if status == statusCancelled {
-		return nil
+		// The cancel is the user's stop, so it wakes nothing — but the turn
+		// no longer holds what it carried, and a parked task or plan the
+		// foreman will not handle is announced now (§10), not at some
+		// later wake. A live attach hold keeps the foreman holding.
+		return e.announceUnattendedTx(tx, job.ProjectID, now)
 	}
 	return e.wakeForemanTx(tx, job.ProjectID, now)
 }

@@ -15,6 +15,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A plan its review parked at `needs_foreman` no longer shows in the needs-you queue while a foreman turn or an attached chat is answering the verdict (issue #197). It moves to `foreman_holds`, and a `plan_unattended` event announces it, once per park, when the foreman will not handle it (limited, budget spent, stalled, cancelled turn, or a done turn that left the verdict unanswered). A cancelled foreman turn also announces the parked tasks and plans it no longer holds, without waking.
 - `brigada top` lists live plans before finished ones, and a short terminal spends a free row on a running line (issue #184).
 
 ### Added

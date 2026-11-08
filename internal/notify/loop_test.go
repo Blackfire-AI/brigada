@@ -325,6 +325,46 @@ func TestLoopCancelledBannerIsNotDropped(t *testing.T) {
 	}
 }
 
+// TestLoopDeliversPlanUnattended: a plan_unattended event reaches the
+// banner through the delivery path — the plan resolved from the payload's
+// plan id, the reason the needs-you queue's words — for a plain park, a
+// swallowed verdict (the heading the queue uses), and a re-park after an
+// amendment, which is a new announcement and a new banner.
+func TestLoopDeliversPlanUnattended(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t, ctx, filepath.Join(t.TempDir(), "store.db"))
+	defer st.Close()
+	seedProject(t, ctx, st)
+	fake := &Fake{}
+	loop := NewLoop(st, fake, nil)
+
+	appendEvent(t, ctx, st, KindPlanUnattended, 1, 0, `{"plan":1,"reason":"The second task is vague."}`)
+	if err := loop.Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	if got := fake.Notes(); len(got) != 1 || got[0].Body != "plan #1 needs you: The second task is vague." {
+		t.Fatalf("notes = %v, want the plan and its reason", got)
+	}
+
+	swallowed := "foreman turn 7 ended without answering the changes verdict: The second task is vague."
+	appendEvent(t, ctx, st, KindPlanUnattended, 1, 0, `{"plan":1,"reason":"`+swallowed+`"}`)
+	if err := loop.Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	if got := fake.Notes(); len(got) != 2 || got[1].Body != "plan #1 needs you: "+swallowed {
+		t.Fatalf("notes = %v, want the swallowed-turn heading and a new banner for the re-park", got)
+	}
+
+	// An empty reason falls back to the kind.
+	appendEvent(t, ctx, st, KindPlanUnattended, 1, 0, `{"plan":1}`)
+	if err := loop.Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	if got := fake.Notes(); len(got) != 3 || got[2].Body != "plan #1 needs you: plan_unattended" {
+		t.Fatalf("notes = %v, want the kind as the fallback", got)
+	}
+}
+
 func openStore(t *testing.T, ctx context.Context, path string) *store.Store {
 	t.Helper()
 	st, err := store.Open(ctx, path)

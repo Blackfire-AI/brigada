@@ -139,6 +139,42 @@ func TestForemanHoldsRule(t *testing.T) {
 	}
 }
 
+// TestCancelAnnouncesWhatNoTurnHolds: a cancelled turn wakes nothing, but
+// the parked task and plan it carried are announced at once, one event
+// each; a live attach hold keeps the foreman holding, so nothing is.
+func TestCancelAnnouncesWhatNoTurnHolds(t *testing.T) {
+	t.Run("a parked task", func(t *testing.T) {
+		e := newEnv(t)
+		e.park("which file?")
+		job := e.int(`SELECT id FROM jobs WHERE kind = 'foreman'`)
+		if it, ok := e.taskItem(); !ok || !it.ForemanHolds {
+			t.Fatalf("task item = %+v, %v; want held before the cancel", it, ok)
+		}
+		if ans := e.cancel(job); ans != AnsOK {
+			t.Fatalf("cancel: %s", ans)
+		}
+		if it, ok := e.taskItem(); !ok || it.ForemanHolds {
+			t.Errorf("task item = %+v, %v; want the user's after the cancel", it, ok)
+		}
+		if got := e.countEvents(evTaskUnattended); got != 1 {
+			t.Errorf("task_unattended events = %d, want 1", got)
+		}
+		if got := e.foremanJobs(); got != 1 {
+			t.Errorf("foreman jobs = %d, want the cancelled one only: a cancel wakes nothing", got)
+		}
+	})
+	t.Run("a live attach hold", func(t *testing.T) {
+		e := newEnv(t)
+		e.park("which file?")
+		// A forced attach cancels the live turn; its hold is already live
+		// when the cancel settles, so the chat holds what the turn carried.
+		e.attach(true)
+		if got := e.countEvents(evTaskUnattended); got != 0 {
+			t.Errorf("task_unattended events = %d, want none under an attach hold", got)
+		}
+	})
+}
+
 // TestSplitForemanHoldsAndProjectCount: the split moves a held task out
 // of needs_you and into foreman_holds, and the project list counts only
 // what is not held.

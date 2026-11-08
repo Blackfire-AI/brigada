@@ -9,9 +9,9 @@ import (
 )
 
 // foremanHolds answers, per project, whether the foreman will handle a
-// task parked at needs_foreman (§10): the queue holds only what a rule
-// or the foreman gave the user, so a task the foreman holds stays out of
-// it. It reads and never writes — the limit's expiry is read, not
+// task or a plan parked at needs_foreman (§10): the queue holds only what
+// a rule or the foreman gave the user, so an entry the foreman holds stays
+// out of it. It reads and never writes — the limit's expiry is read, not
 // cleared — and caches the project-wide facts for one listing.
 type foremanHolds struct {
 	projects map[int64]foremanFacts
@@ -97,8 +97,43 @@ func (h *foremanHolds) task(tx *sql.Tx, project, event int64, now time.Time) (bo
 	return (row == inboxPending || row == inboxDelivered) && f.turnLive, nil
 }
 
-// announceUnattendedTx names the tasks the user must now look at because
-// the foreman will not (§10): for each task of the project parked at
+// plan reports whether the foreman holds a plan parked at needs_foreman
+// on a `changes` verdict (§10, §6.2): the task rule applied to the plan's
+// latest plan_reviewed event and that event's inbox row — the row
+// parkedPlanSwallowedTx reads. No row (a plan rule's hold) and a consumed
+// row (a done turn that did not answer the verdict) leave the plan to the
+// user.
+func (h *foremanHolds) plan(tx *sql.Tx, project, plan int64, now time.Time) (bool, error) {
+	event, err := latestPlanReviewedTx(tx, plan)
+	if err != nil {
+		return false, err
+	}
+	return h.task(tx, project, event, now)
+}
+
+// latestPlanReviewedTx is the id of the plan's latest plan_reviewed event,
+// 0 when it has none.
+func latestPlanReviewedTx(tx *sql.Tx, plan int64) (int64, error) {
+	var event int64
+	err := tx.QueryRow(`SELECT id FROM events
+		WHERE kind = ? AND json_valid(payload) AND json_extract(payload, '$.plan') = ?
+		ORDER BY id DESC LIMIT 1`, evPlanReviewed, plan).Scan(&event)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read the latest review of plan %d: %w", plan, err)
+	}
+	return event, nil
+}
+
+// announceUnattendedTx names the tasks and plans the user must now look at
+// because the foreman will not (§10). A plan parked at needs_foreman whose
+// parking event — its latest plan_reviewed — has an inbox row, that the
+// foreman does not hold and that no plan_unattended has named since that
+// event, gets one plan_unattended event carrying the plan and the queue's
+// reason, swallowed-turn heading included. Every caller announces both.
+// For each task of the project parked at
 // needs_foreman with no land-environment cause, whose parking event has
 // an inbox row, that the foreman does not hold and that no task_unattended
 // has announced since that parking event, one task_unattended event. It is
@@ -151,6 +186,71 @@ func (e *Engine) announceUnattendedTx(tx *sql.Tx, project int64, now time.Time) 
 		}
 		if _, err := appendEventTx(tx, evTaskUnattended, project, p.task, 0,
 			eventPayload{Status: taskNeedsForeman, Reason: needsYouReason(p.kind, p.payload), ParkKind: p.kind}, now); err != nil {
+			return err
+		}
+	}
+	return e.announceUnattendedPlansTx(tx, project, holds, now)
+}
+
+// announceUnattendedPlansTx is announceUnattendedTx's plan half: one
+// plan_unattended per park of a needs_foreman plan the foreman does not
+// hold. The dedupe keys on the plan's latest plan_reviewed event, so a
+// plan amended, re-reviewed and parked again is announced anew.
+func (e *Engine) announceUnattendedPlansTx(tx *sql.Tx, project int64, holds *foremanHolds, now time.Time) error {
+	rows, err := tx.Query(`SELECT p.id FROM plans p WHERE p.project_id = ? AND p.state = ? ORDER BY p.id`,
+		project, planNeedsForeman)
+	if err != nil {
+		return fmt.Errorf("list the parked plans of project %d: %w", project, err)
+	}
+	var plans []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("list the parked plans of project %d: %w", project, err)
+		}
+		plans = append(plans, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("list the parked plans of project %d: %w", project, err)
+	}
+	rows.Close()
+	for _, plan := range plans {
+		event, err := latestPlanReviewedTx(tx, plan)
+		if err != nil {
+			return err
+		}
+		if event == 0 {
+			continue
+		}
+		var n int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM foreman_inbox WHERE event_id = ?`, event).Scan(&n); err != nil {
+			return fmt.Errorf("read the inbox row of event %d: %w", event, err)
+		}
+		if n == 0 {
+			continue
+		}
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM events WHERE kind = ? AND id > ? AND json_valid(payload)
+			AND json_extract(payload, '$.plan') = ?`, evPlanUnattended, event, plan).Scan(&n); err != nil {
+			return fmt.Errorf("read the announcements of plan %d: %w", plan, err)
+		}
+		if n > 0 {
+			continue
+		}
+		held, err := holds.plan(tx, project, plan, now)
+		if err != nil {
+			return err
+		}
+		if held {
+			continue
+		}
+		reason, err := parkedPlanNeedsYouReasonTx(tx, plan)
+		if err != nil {
+			return err
+		}
+		if _, err := appendEventTx(tx, evPlanUnattended, project, 0, 0,
+			eventPayload{Plan: plan, Reason: reason}, now); err != nil {
 			return err
 		}
 	}

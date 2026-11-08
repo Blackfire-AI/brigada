@@ -106,23 +106,9 @@ func (e *Engine) attachTx(tx *sql.Tx, project int64, force bool, now time.Time) 
 	if err != nil {
 		return AttachResult{}, err
 	}
-	if live != nil {
-		if !force {
-			// The client says "foreman is busy" and waits on this job.
-			return AttachResult{Answer: AnsBusy, JobID: live.ID}, nil
-		}
-		// Force: the user insists, so the turn stops. The cancelled rule
-		// already on main returns its events to pending, uncounted, and
-		// wakes nothing at once — the opening prompt below takes them.
-		if _, err := e.cancelTx(tx, live, "attach", now); err != nil {
-			return AttachResult{}, err
-		}
-	}
-	// A session grown past the project's threshold starts over before the
-	// chat (§4.2), ahead of the session id read below, so the chat never
-	// resumes the old one; the opening prompt then carries the digest.
-	if _, err := e.rotateForemanSessionTx(tx, project, now); err != nil {
-		return AttachResult{}, err
+	if live != nil && !force {
+		// The client says "foreman is busy" and waits on this job.
+		return AttachResult{Answer: AnsBusy, JobID: live.ID}, nil
 	}
 	res := AttachResult{
 		Answer:        AnsCreated,
@@ -141,6 +127,22 @@ func (e *Engine) attachTx(tx *sql.Tx, project int64, force bool, now time.Time) 
 	}
 	if res.HoldID, err = resHold.LastInsertId(); err != nil {
 		return AttachResult{}, fmt.Errorf("create the attach hold of project %d: last insert id: %w", project, err)
+	}
+	if live != nil {
+		// Force: the user insists, so the turn stops. The cancelled rule
+		// already on main returns its events to pending, uncounted, and
+		// wakes nothing at once — the opening prompt below takes them. The
+		// hold is already live, so the cancel announces nothing: the
+		// attached chat holds what the turn carried (§10).
+		if _, err := e.cancelTx(tx, live, "attach", now); err != nil {
+			return AttachResult{}, err
+		}
+	}
+	// A session grown past the project's threshold starts over before the
+	// chat (§4.2), ahead of the session id read below, so the chat never
+	// resumes the old one; the opening prompt then carries the digest.
+	if _, err := e.rotateForemanSessionTx(tx, project, now); err != nil {
+		return AttachResult{}, err
 	}
 	secret, err := e.cfg.NewLeaseToken()
 	if err != nil {
