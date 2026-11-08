@@ -30,6 +30,6 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["bugfix"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
