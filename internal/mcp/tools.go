@@ -450,7 +450,7 @@ var tools = []Tool{
 	},
 	{
 		Name:        "capacity",
-		Description: "The capacity snapshot: per agent its effective cap (and the layer that sets it), running jobs, quota state (ready, cooling until a time, or broken) and cost weight (which steers dispatch: within a tier, agents rank by weight divided by a draw from their record, and weight 0 goes first); per layer — each runner, account, capped model, active plan of the project and global — the cap, use and queue depth. Call this when you plan: it tells you how wide the task graph can be, when to sequence instead of fanning out, which tasks can wait for a cheaper agent, and which agents are cooling or broken.",
+		Description: "The capacity snapshot: per agent its effective cap (and the layer that sets it), running jobs, quota state (ready, cooling until a time, or broken) and cost weight (which steers dispatch: within a tier, agents rank by weight divided by a draw from their record, and weight 0 goes first); per layer — each runner, account, capped model, active plan of the project and global — the cap, use and queue depth; per queued job pinned to an agent (a pin) its job, task, agent, whether the pin can place (ready, cooling, broken or capped_at_0) and the cap hold if any, so a wait for a slot reads differently from a pin that can never place. Call this when you plan: it tells you how wide the task graph can be, when to sequence instead of fanning out, which tasks can wait for a cheaper agent, and which agents are cooling or broken.",
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},

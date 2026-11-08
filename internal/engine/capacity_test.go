@@ -386,3 +386,103 @@ func TestCapacityModelHoldInstance(t *testing.T) {
 		}
 	}
 }
+
+// TestCapacityPins covers the pin entries (issue #195): a held pin on a
+// ready agent, an unstamped pin on a zero-capped agent, pins on a broken
+// and a cooling agent, a foreman job pinned to a zero-capped model (only
+// the account cap counts for it), and an unpinned queued job left out.
+func TestCapacityPins(t *testing.T) {
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Account = map[string]int{"frozen": 0}
+		c.Caps.Model = map[string]int{"nomodel": 0}
+	})
+	ready := e.addAgent(e.runner1, "claude", "sonnet", "work")
+	frozen := e.addAgent(e.runner1, "claude", "sonnet", "frozen")
+	broken := e.addAgent(e.runner1, "claude", "haiku", "work")
+	cooling := e.addAgent(e.runner1, "claude", "opus", "work")
+	nomodel := e.addAgent(e.runner1, "claude", "nomodel", "work")
+	e.exec("UPDATE agents SET health = 'broken' WHERE id = ?", broken)
+	coolUntil := fmtTime(e.clock.Now().Add(time.Hour))
+	e.exec("UPDATE agents SET cooling_until = ? WHERE id = ?", coolUntil, cooling)
+
+	// pin queues one job pinned to an agent (0: unpinned), stamped with a
+	// cap hold when layer is set.
+	pin := func(key, kind string, agent int64, layer, hkey string) {
+		t.Helper()
+		task := e.addTask("{}")
+		var pinned, heldLayer, heldKey any
+		if agent != 0 {
+			pinned = agent
+		}
+		if layer != "" {
+			heldLayer, heldKey = layer, hkey
+		}
+		e.exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, require_agent, cap_held_layer, cap_held_key, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'fresh', 'prompt', 'queued', ?, ?, ?, ?, ?)`,
+			e.project, task, kind, key, pinned, heldLayer, heldKey, seedTS, seedTS)
+	}
+	pin("pin:ready", "work", ready, caps.LayerModel, "sonnet")
+	pin("pin:frozen", "work", frozen, "", "")
+	pin("pin:broken", "work", broken, "", "")
+	pin("pin:cooling", "work", cooling, "", "")
+	pin("pin:nomodel", "work", nomodel, "", "")
+	pin("pin:foreman-nomodel", "foreman", nomodel, "", "")
+	pin("pin:foreman-frozen", "foreman", frozen, "", "")
+	pin("unpinned", "work", 0, "", "")
+
+	snap, err := e.eng.Capacity(e.ctx, e.project)
+	if err != nil {
+		t.Fatalf("capacity: %v", err)
+	}
+	type want struct {
+		agent int64
+		kind  string
+		state string
+		held  string
+		until string
+	}
+	wants := []want{
+		{ready, "work", PinReady, caps.LayerModel + " sonnet", ""},
+		{frozen, "work", PinCappedAtZero, "", ""},
+		{broken, "work", PinBroken, "", ""},
+		{cooling, "work", PinCooling, "", coolUntil},
+		{nomodel, "work", PinCappedAtZero, "", ""},
+		{nomodel, "foreman", PinReady, "", ""},
+		{frozen, "foreman", PinCappedAtZero, "", ""},
+	}
+	if len(snap.Pins) != len(wants) {
+		t.Fatalf("pins = %+v, want %d entries (the unpinned job has none)", snap.Pins, len(wants))
+	}
+	for i, w := range wants {
+		p := snap.Pins[i]
+		held := p.HeldLayer
+		if p.HeldKey != "" {
+			held += " " + p.HeldKey
+		}
+		if p.AgentID != w.agent || p.Kind != w.kind || p.State != w.state || held != w.held || p.CoolingUntil != w.until {
+			t.Errorf("pin %d = %+v, want agent %d %s state %s held %q until %q", i, p, w.agent, w.kind, w.state, w.held, w.until)
+		}
+		if p.JobID == 0 || p.TaskID == 0 || p.Harness != "claude" || p.Model == "" {
+			t.Errorf("pin %d = %+v, want job, task, harness and model filled", i, p)
+		}
+	}
+
+	// A project that owns none of the jobs sees none of the pins.
+	other, err := e.eng.Capacity(e.ctx, e.project+1000)
+	if err != nil {
+		t.Fatalf("capacity of another project: %v", err)
+	}
+	if len(other.Pins) != 0 {
+		t.Errorf("another project's pins = %+v, want none", other.Pins)
+	}
+
+	// With no pinned job the snapshot carries no pins at all.
+	e.exec("DELETE FROM jobs WHERE require_agent IS NOT NULL")
+	snap, err = e.eng.Capacity(e.ctx, 0)
+	if err != nil {
+		t.Fatalf("capacity: %v", err)
+	}
+	if snap.Pins != nil {
+		t.Errorf("pins = %+v, want nil once no queued job is pinned", snap.Pins)
+	}
+}
