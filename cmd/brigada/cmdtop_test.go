@@ -1884,7 +1884,7 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 	}{
 		{"everything fits", 21, 21, []string{
 			"#1 fix the frobnicator",
-			"╭─ AGENTS  all ≤ global 8 ─",
+			"╭─ AGENTS  1 broken · 1 cooling · all ≤ global 8 ─",
 			"↺ codex/gpt-5",
 			"S×2  □□□□□□□□  until 16:04",
 			"✗ claude/sonnet-long-name  L×1  ■■□□□□□□  login expired",
@@ -1913,7 +1913,7 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 		{"event row 1, its box goes with it, a spare row returns", 16, 15, []string{
 			"#1 fix the frobnicator",
 			"▸ #3",
-			"╭─ AGENTS  all ≤ global 8 ─",
+			"╭─ AGENTS  1 broken · 1 cooling · all ≤ global 8 ─",
 		}, []string{"EVENTS", "task    #3  done"}},
 		// The agents list in name order, so the last by name goes first.
 		{"the last agent's row", 13, 13, []string{
@@ -3286,7 +3286,7 @@ func TestTopAgentsASCII(t *testing.T) {
 		case l.box != nil:
 			all = append(all, topBoxTop(*l.box, ascii, 94))
 		case l.foot:
-			all = append(all, topBoxBottom(false, l.note, ascii, 94))
+			all = append(all, topBoxBottom(false, ascii, 94))
 		default:
 			all = append(all, topBoxRow(l.text, false, 0, ascii, 94))
 		}
@@ -3721,56 +3721,6 @@ func TestTopAgentsOrderIsStable(t *testing.T) {
 	}
 }
 
-// TestTopAgentsFootNote: the AGENTS bottom border counts the broken (Bad)
-// and the cooling (Warn) agents, one alone when the other is zero, none when
-// both are, and cuts or drops the note on a narrow width.
-func TestTopAgentsFootNote(t *testing.T) {
-	cool := topNow.Add(time.Hour).UTC().Format(engine.TimeLayout)
-	ready := engine.CapacityAgent{Harness: "a", Model: "ready", CapLayer: "none", Quota: "ready"}
-	broken := engine.CapacityAgent{Harness: "a", Model: "broken", CapLayer: "none", Quota: "broken"}
-	cooling := engine.CapacityAgent{Harness: "a", Model: "cooling", CapLayer: "none", Quota: "cooling", CoolingUntil: cool}
-	foot := func(style term.Style, width int, agents ...engine.CapacityAgent) string {
-		model := busyTopModel()
-		model.capacity.Agents = agents
-		lines := topAgentLines(model, topNow, style, width)
-		last := lines[len(lines)-1]
-		return topBoxBottom(last.bad, last.note, style, width)
-	}
-	plain := term.New(logo.Caps{UTF8: true})
-	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
-	for _, tt := range []struct {
-		name   string
-		agents []engine.CapacityAgent
-		want   string
-	}{
-		{"broken only", []engine.CapacityAgent{ready, broken, broken}, "╰─ 2 broken " + strings.Repeat("─", 51) + "╯"},
-		{"cooling only", []engine.CapacityAgent{ready, cooling}, "╰─ 1 cooling " + strings.Repeat("─", 50) + "╯"},
-		{"both", []engine.CapacityAgent{broken, cooling, cooling}, "╰─ 1 broken · 2 cooling " + strings.Repeat("─", 39) + "╯"},
-		{"neither", []engine.CapacityAgent{ready}, "╰" + strings.Repeat("─", 62) + "╯"},
-	} {
-		if got := foot(plain, 64, tt.agents...); got != tt.want {
-			t.Errorf("%s: foot = %q, want %q", tt.name, got, tt.want)
-		}
-	}
-	got := foot(colour, 64, broken, cooling)
-	if !strings.Contains(got, colour.Bad("1 broken")) || !strings.Contains(got, colour.Warn("1 cooling")) {
-		t.Errorf("the counts are not Bad and Warn: %q", got)
-	}
-	// Too narrow for the whole note: cut with an ellipsis, then left out.
-	if got := foot(plain, 20, broken, cooling); term.CellWidth(got) != 20 || !strings.HasPrefix(got, "╰─ 1 broken") ||
-		!strings.Contains(got, "... ─") || !strings.HasSuffix(got, "╯") {
-		t.Errorf("cut foot = %q", got)
-	}
-	if got := foot(plain, 9, broken, cooling); got != "╰───────╯" {
-		t.Errorf("a foot with no room for the note = %q", got)
-	}
-	// The cut note keeps its escapes whole.
-	cut := foot(colour, 20, broken, cooling)
-	if s := term.StripEscapes(cut); term.CellWidth(s) != 20 || strings.Count(cut, "\x1b[")%2 != 0 {
-		t.Errorf("cut styled foot = %q", cut)
-	}
-}
-
 // TestTopAgentsOrderAndOff: off agents — an effective cap of 0, nothing
 // running, a ready quota — never list; the rest go in the byte order of the
 // full harness/model name, whatever their state.
@@ -3796,8 +3746,8 @@ func TestTopAgentsOrderAndOff(t *testing.T) {
 	if want := "x/broke x/cool x/idle1 x/idle2 x/offbusy x/run"; strings.Join(names, " ") != want {
 		t.Errorf("order = %q, want %q", strings.Join(names, " "), want)
 	}
-	if note := topAgentLines(model, topNow, term.New(logo.Caps{UTF8: true}), 60)[0].box.note; note != "all ≤ global 8 · 1 off" {
-		t.Errorf("note = %q, want the off count", note)
+	if note := agentNoteText(topAgentLines(model, topNow, term.New(logo.Caps{UTF8: true}), 60)[0].box.note); note != "1 broken · 1 cooling · all ≤ global 8 · 1 off" {
+		t.Errorf("note = %q, want the counts in front of the off count", note)
 	}
 	// The global cap makes every ready, idle agent off.
 	model.capacity.Layers = []engine.CapacityLayer{{Layer: "global", Cap: &zero}}
@@ -3815,52 +3765,87 @@ func agentNoteModel(agents []engine.CapacityAgent, layers ...engine.CapacityLaye
 	return model
 }
 
-// TestTopAgentNote: the AGENTS border's note in each form: the global cap
-// when it sits below some agent's own cap or an agent has none, the off
-// count, both joined, `all ready` when nothing is broken, cooling, off or
-// capped, and nothing otherwise; Dim, cut or left out when it does not fit.
+// agentNoteText is an AGENTS note as its parts' plain text, joined by the
+// separator.
+func agentNoteText(parts []topNotePart) string {
+	texts := make([]string, len(parts))
+	for i, p := range parts {
+		texts[i] = p.text
+	}
+	return strings.Join(texts, " · ")
+}
+
+// TestTopAgentNote: the AGENTS border's note, part by part: the broken and
+// cooling counts over the listed agents first, then the global cap when it
+// sits below some agent's own cap or an agent has none, and the off count,
+// each part left out when it does not apply; `all ready` when nothing is
+// broken, cooling, off or capped, and nothing otherwise; in the border the
+// counts Bad and Warn and the rest Dim, cut or left out when it does not
+// fit.
 func TestTopAgentNote(t *testing.T) {
 	two, four, zero := 2, 4, 0
 	cool := topNow.Add(time.Hour).UTC().Format(engine.TimeLayout)
 	ready := engine.CapacityAgent{Harness: "a", Model: "b", CapLayer: "none", Quota: "ready"}
 	capped := engine.CapacityAgent{Harness: "a", Model: "c", Cap: &four, CapLayer: "runner", Quota: "ready"}
 	off := engine.CapacityAgent{Harness: "a", Model: "d", Cap: &zero, CapLayer: "model", Quota: "ready"}
-	cooling := engine.CapacityAgent{Harness: "a", Model: "e", CapLayer: "none", Quota: "cooling", CoolingUntil: cool}
+	broken := engine.CapacityAgent{Harness: "a", Model: "e", CapLayer: "none", Quota: "broken"}
+	cooling := engine.CapacityAgent{Harness: "a", Model: "f", CapLayer: "none", Quota: "cooling", CoolingUntil: cool}
 	global := func(n *int) engine.CapacityLayer { return engine.CapacityLayer{Layer: "global", Cap: n} }
 	tests := []struct {
 		name  string
 		model topModel
 		want  string
 	}{
+		{"broken alone", agentNoteModel([]engine.CapacityAgent{ready, broken, broken}), "2 broken"},
+		{"cooling alone", agentNoteModel([]engine.CapacityAgent{ready, cooling}), "1 cooling"},
+		{"broken and cooling", agentNoteModel([]engine.CapacityAgent{broken, cooling, cooling}), "1 broken · 2 cooling"},
+		{"the counts with the global cap and the off count", agentNoteModel([]engine.CapacityAgent{ready, off, broken, cooling}, global(&two)), "1 broken · 1 cooling · all ≤ global 2 · 1 off"},
 		{"global below an own cap", agentNoteModel([]engine.CapacityAgent{capped}, global(&two)), "all ≤ global 2"},
 		{"global with an uncapped agent", agentNoteModel([]engine.CapacityAgent{capped, ready}, global(&four)), "all ≤ global 4"},
 		{"global above every own cap", agentNoteModel([]engine.CapacityAgent{capped}, global(&four)), ""},
 		{"global and off", agentNoteModel([]engine.CapacityAgent{ready, off}, global(&two)), "all ≤ global 2 · 1 off"},
 		{"off alone", agentNoteModel([]engine.CapacityAgent{capped, off}), "1 off"},
 		{"all ready", agentNoteModel([]engine.CapacityAgent{ready}, engine.CapacityLayer{Layer: "runner", Cap: nil}), "all ready"},
-		{"cooling", agentNoteModel([]engine.CapacityAgent{ready, cooling}), ""},
 		{"an own cap", agentNoteModel([]engine.CapacityAgent{capped}), ""},
 		{"a capped layer", agentNoteModel([]engine.CapacityAgent{ready}, engine.CapacityLayer{Layer: "runner", Cap: &four}), ""},
 		{"no agents", agentNoteModel(nil, global(&two)), ""},
 	}
 	plain := term.New(logo.Caps{UTF8: true})
 	for _, tt := range tests {
-		if got := topAgentLines(tt.model, topNow, plain, 90)[0].box.note; got != tt.want {
+		if got := agentNoteText(topAgentLines(tt.model, topNow, plain, 90)[0].box.note); got != tt.want {
 			t.Errorf("%s: note = %q, want %q", tt.name, got, tt.want)
 		}
 	}
-	// In the border, Dim, and cut or left out when it does not fit.
-	model := agentNoteModel([]engine.CapacityAgent{ready, off}, global(&two))
+	// In the border the counts are Bad and Warn, the rest Dim, and the note
+	// is cut or left out when it does not fit.
+	model := agentNoteModel([]engine.CapacityAgent{ready, off, broken, cooling}, global(&two))
 	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
 	box := *topAgentLines(model, topNow, colour, 86)[0].box
-	if got := topBoxTop(box, colour, 90); !strings.Contains(got, colour.Dim("all ≤ global 2 · 1 off")) || term.CellWidth(got) != 90 {
-		t.Errorf("border = %q", got)
+	top := topBoxTop(box, colour, 90)
+	if !strings.Contains(top, colour.Bad("1 broken")) || !strings.Contains(top, colour.Warn("1 cooling")) ||
+		!strings.Contains(top, colour.Dim("all ≤ global 2")) || !strings.Contains(top, colour.Dim("1 off")) ||
+		term.CellWidth(top) != 90 {
+		t.Errorf("border = %q", top)
 	}
-	if got := topBoxTop(box, plain, 24); !strings.Contains(got, "all ≤ ") || term.CellWidth(got) != 24 {
+	// Too narrow for the whole note: the later parts go first, whole, then
+	// the last one standing is cut with an ellipsis.
+	if got := topBoxTop(box, plain, 24); !strings.Contains(got, "1 broken") ||
+		strings.Contains(got, "cooling") || strings.Contains(got, "global") || term.CellWidth(got) != 24 {
 		t.Errorf("a cut note: %q", got)
 	}
-	if got := topBoxTop(box, plain, 12); strings.Contains(got, "global") || term.CellWidth(got) != 12 {
+	if got := topBoxTop(box, plain, 20); !strings.Contains(got, "1 b...") || term.CellWidth(got) != 20 {
+		t.Errorf("a note cut mid-part: %q", got)
+	}
+	if got := topBoxTop(box, plain, 12); strings.Contains(got, "broken") || term.CellWidth(got) != 12 {
 		t.Errorf("a note that cannot fit stays out: %q", got)
+	}
+	// The cut keeps its escapes whole and the part's colour.
+	cut := topBoxTop(box, colour, 20)
+	if s := term.StripEscapes(cut); term.CellWidth(s) != 20 || strings.Count(cut, "\x1b[")%2 != 0 {
+		t.Errorf("cut styled note = %q", cut)
+	}
+	if want := colour.Bad("1 b..."); !strings.Contains(cut, want) {
+		t.Errorf("the cut part loses its colour: %q", cut)
 	}
 }
 
@@ -4329,7 +4314,7 @@ func TestRenderTopASCIIWithoutUTF8(t *testing.T) {
 		"  > #3  oil the gears     work  claude/sonnet@high  1m40s  Edit",
 		"  ^ #5  ship it           landing: queued",
 		"  -> task #6 work: retry in 5m: dns",
-		"+- AGENTS  all <= global 8 ---",
+		"+- AGENTS  1 broken | 1 cooling | all <= global 8 ---",
 		"| -> codex/gpt-5",
 		"Sx2  ........  until 16:04",
 		"| x  claude/sonnet-long-name  Lx1  ##......  login expired",

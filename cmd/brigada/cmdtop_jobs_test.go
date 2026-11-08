@@ -123,7 +123,7 @@ func TestTopPlanCellColours(t *testing.T) {
 // colour, and leaves it out whole when it does not fit.
 func TestTopPlansLegend(t *testing.T) {
 	plain := term.New(logo.Caps{UTF8: true})
-	box := topBox{title: "PLANS", note: "3 live · 98 finished", legend: topPlanLegend(plain)}
+	box := topBox{title: "PLANS", note: []topNotePart{{"3 live · 98 finished", plain.Dim}}, legend: topPlanLegend(plain)}
 	if got := topBoxTop(box, plain, 92); !strings.Contains(got, " ■ landed  ▣ done  ◆ running  □ queued ─╮") || term.CellWidth(got) != 92 {
 		t.Errorf("wide border = %q", got)
 	}

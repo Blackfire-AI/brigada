@@ -32,12 +32,12 @@ const topAgentCellsMax = 8
 // has none. A running agent's name takes its family colour (topFamily), an
 // idle one's is Dim.
 //
-// The top border carries the note (topAgentNote), the bottom border the
-// count of listed agents that are broken (Bad) and cooling (Warn), as
-// `1 broken · 3 cooling`, left out when both are zero. A row yields in the
-// idle class only when every agent in it is idle (no running job, quota
-// neither cooling nor broken), so the height drops idle rows first,
-// uncounted. Off agents (an effective cap of 0, nothing running, quota ready)
+// The top border carries the note (topAgentNote): the listed agents that
+// are broken (Bad) and cooling (Warn) counted in front of the global-cap
+// and off parts, as `1 broken · 3 cooling · all ≤ global 4 · 2 off`. A row
+// yields in the idle class only when every agent in it is idle (no running
+// job, quota neither cooling nor broken), so the height drops idle rows
+// first, uncounted. Off agents (an effective cap of 0, nothing running, quota ready)
 // never list. The rest go in the order of the full harness/model string,
 // byte by byte, so a row moves only when an agent is added or removed; state
 // shows through the mark and the colours alone.
@@ -66,7 +66,6 @@ func topAgentLines(model topModel, now time.Time, style term.Style, width int) [
 		}
 		listed = append(listed, a)
 	}
-	box.note = topAgentNote(snap, g, off, style)
 	key := func(a engine.CapacityAgent) string { return a.Harness + "/" + a.Model }
 	sort.SliceStable(listed, func(i, j int) bool { return key(listed[i]) < key(listed[j]) })
 	broken, cooling := 0, 0
@@ -78,14 +77,7 @@ func topAgentLines(model topModel, now time.Time, style term.Style, width int) [
 			cooling++
 		}
 	}
-	var foot []string
-	if broken > 0 {
-		foot = append(foot, style.Bad(fmt.Sprintf("%d broken", broken)))
-	}
-	if cooling > 0 {
-		foot = append(foot, style.Warn(fmt.Sprintf("%d cooling", cooling)))
-	}
-	box.foot = strings.Join(foot, topEventSep(style))
+	box.note = topAgentNote(snap, g, off, broken, cooling, style)
 	// The widest name sets the name column, but it gives way before the
 	// tag, the cells and the quota text of a cooling or broken agent do.
 	nameW, tagW, cellW, quotaW := 0, 0, 0, 0
@@ -242,38 +234,46 @@ func topAgentLimit(a engine.CapacityAgent, global *int) *int {
 	return limit
 }
 
-// topAgentNote is the AGENTS top border's note: `all ≤ global N` when the
-// global cap sits below some agent's own cap or an agent has none, `M off`
-// when M agents are off, joined by the separator or either alone, and
+// topAgentNote is the AGENTS top border's note, part by part: the listed
+// agents that are broken (`N broken`, Bad) and cooling (`N cooling`, Warn)
+// counted, then `all ≤ global N` when the global cap sits below some
+// agent's own cap or an agent has none, and `M off` when M agents are off —
+// each part left out when it does not apply, joined by the separator — and
 // `all ready` when no agent is broken or cooling, none is off and no layer
 // caps anything.
-func topAgentNote(snap engine.CapacitySnapshot, g *int, off int, style term.Style) string {
-	var parts []string
+func topAgentNote(snap engine.CapacitySnapshot, g *int, off, broken, cooling int, style term.Style) []topNotePart {
+	var parts []topNotePart
+	if broken > 0 {
+		parts = append(parts, topNotePart{fmt.Sprintf("%d broken", broken), style.Bad})
+	}
+	if cooling > 0 {
+		parts = append(parts, topNotePart{fmt.Sprintf("%d cooling", cooling), style.Warn})
+	}
 	if g != nil {
 		for _, a := range snap.Agents {
 			if a.Cap == nil || *g < *a.Cap {
-				parts = append(parts, fmt.Sprintf("all %s global %d", style.AtMost(), *g))
+				parts = append(parts, topNotePart{fmt.Sprintf("all %s global %d", style.AtMost(), *g), style.Dim})
 				break
 			}
 		}
 	}
 	if off > 0 {
-		parts = append(parts, fmt.Sprintf("%d off", off))
+		parts = append(parts, topNotePart{fmt.Sprintf("%d off", off), style.Dim})
 	}
 	if len(parts) > 0 {
-		return strings.Join(parts, topEventSep(style))
+		return parts
 	}
 	for _, a := range snap.Agents {
-		if a.Quota == "broken" || a.Quota == "cooling" || a.Cap != nil {
-			return ""
+		if a.Cap != nil {
+			return nil
 		}
 	}
 	for _, l := range snap.Layers {
 		if l.Cap != nil {
-			return ""
+			return nil
 		}
 	}
-	return "all ready"
+	return []topNotePart{{"all ready", style.Dim}}
 }
 
 // topAgentOff says an agent is off: an effective cap of 0 (its own, or the
