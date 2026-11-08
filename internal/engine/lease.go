@@ -960,9 +960,13 @@ func ranksBefore(a, b *agentCand) bool {
 // rankAgents from the outcome record of the job's (repo, class) and the
 // configured cost weights. A job that requires an agent (§3) — a
 // fix round resuming the author's session — has its list named
-// outright: that agent or none, never ranked against another. Empty
-// when the runner advertises no such agent — the caller then refuses
-// the lease, unless the runner advertises nothing at all.
+// outright: that agent or none, never ranked against another. An agent
+// whose model or account is capped at exactly 0 (a foreman turn: its
+// account alone) is never listed: it can never take the job, so a pin on
+// it leaves no candidate, an unmet placement the queue TTL parks rather
+// than a cap hold. Empty when the runner advertises no such agent — the
+// caller then refuses the lease, unless the runner advertises nothing at
+// all.
 func leaseAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, now string) ([]agentCand, error) {
 	return eligibleAgentsTx(tx, cfg, rnd, runner, j, kindClass(j.Kind), now)
 }
@@ -972,7 +976,9 @@ func leaseAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j 
 // Runner 0 ranks all registered agents for an automatic restart's pin. A
 // caller that only asks who qualifies passes a nil rnd and gets id order.
 // A review under review.family=prefer is placed by preferReviewAgentsTx
-// instead (issue #126): its family steps read availability.
+// instead (issue #126): its family steps read availability. An agent
+// capped at exactly 0 (cappedAtZeroFor) is never returned, so an automatic
+// retry never pins one (issue #195).
 func eligibleAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
 	return qualifyingAgentsTx(tx, cfg, rnd, runner, j, class, now, false)
 }
@@ -982,7 +988,10 @@ func eligibleAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64,
 // those that qualify for the job by pin, harness, class and family rule
 // but cannot take it yet — with their model, health and cooling
 // deadline filled in: what the cooling hold (§8.1) and the queue-TTL
-// park reason read. Unpinned task jobs are restricted to the served tier
+// park reason read. Whatever unavailable says, an agent capped at exactly
+// 0 is skipped (cappedAtZeroFor): it can never take the job, so it is
+// neither a candidate nor something the cooling hold waits on, while a
+// merely full cap still waits. Unpinned task jobs are restricted to the served tier
 // before availability is checked: the task's effective tier for a work or
 // fix job, the review tier for a review (jobTierTx). A review retry's agent exclusion is
 // applied as the preference it is (§7): the lift is decided inside
@@ -1029,6 +1038,9 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 		tier := limits.TierOf(c.harness, c.model)
 		if served != "" && tier != served {
 			continue
+		}
+		if cappedAtZeroFor(limits, j.Kind, c.account, c.model) {
+			continue // can never take the job: no candidate, nothing to wait on
 		}
 		if !unavailable && (c.health != "ready" || c.cooling > now) {
 			continue
@@ -1093,6 +1105,29 @@ func tierServedRows(limits caps.Limits, agents []agentCand, asked, now string) s
 		hasReady = soonestTiers
 	}
 	return tierServed(asked, hasReady)
+}
+
+// cappedAtZeroFor is cappedAtZero for one job kind: the policy that
+// removes an agent from placement (§8, §8.1). An agent capped at exactly 0
+// can never take a job, so it is no candidate and nothing the cooling hold
+// waits on. A foreman turn is exempt from the model cap (caps.Room), so for
+// it only the agent's account capped at 0 counts; every other kind is
+// refused by either its model or its account.
+func cappedAtZeroFor(limits caps.Limits, kind Kind, account, model string) bool {
+	return zeroCapLayer(limits, kind, account, model) != ""
+}
+
+// zeroCapLayer names the layer that caps the agent at exactly 0 for the
+// job kind (cappedAtZeroFor's policy): caps.LayerModel, caps.LayerAccount,
+// or "" when neither does. The model is named first when both do.
+func zeroCapLayer(limits caps.Limits, kind Kind, account, model string) string {
+	if n, ok := limits.Model[model]; ok && n == 0 && kind != KindForeman {
+		return caps.LayerModel
+	}
+	if n, ok := limits.Account[account]; ok && n == 0 {
+		return caps.LayerAccount
+	}
+	return ""
 }
 
 // cappedAtZero reports whether the model's cap or the account's cap is

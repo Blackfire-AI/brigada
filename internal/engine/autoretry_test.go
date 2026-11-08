@@ -607,3 +607,83 @@ func TestFixRetryWaitsOutItsBackoff(t *testing.T) {
 		t.Fatalf("retry after the backoff = %+v, want job %d", fresh, retry)
 	}
 }
+
+// zeroCapScenarios cap the "zero" agent (claude/sonnet on account "zero")
+// at exactly 0, once at the model layer and once at the account layer.
+var zeroCapScenarios = map[string]func(*Config){
+	"model":   func(c *Config) { c.Caps.Model = map[string]int{"sonnet": 0} },
+	"account": func(c *Config) { c.Caps.Account = map[string]int{"zero": 0} },
+}
+
+// TestWorkRetryNeverPinsAZeroCappedAgent: an agent of the served tier
+// capped at 0 is no candidate, however well its record ranks, so the
+// automatic work retry pins a placeable agent (issue #195).
+func TestWorkRetryNeverPinsAZeroCappedAgent(t *testing.T) {
+	for name, adjust := range zeroCapScenarios {
+		t.Run(name, func(t *testing.T) {
+			e := newEnvCfg(t, adjust)
+			author := e.addAgent(e.runner1, "codex", "gpt-5", "author")
+			e.submit(e.work())
+			g := e.leaseAny(e.runner1)
+			if g == nil || e.jobAgent(g.JobID) != author {
+				t.Fatalf("lease = %+v, want the author's agent %d", g, author)
+			}
+			zero := e.addAgent(e.runner1, "claude", "sonnet", "zero")
+			good := e.addAgent(e.runner1, "kimi", "k2", "good")
+			e.record(zero, 8, 8) // the record draw favours the zero-capped agent
+			e.record(good, 8, 1)
+
+			c := Completion{Error: "worker CLI failed: temporarily unavailable", ErrorKind: "other"}
+			if ans := e.complete(g, c); ans != AnsOK {
+				t.Fatalf("complete = %s, want ok", ans)
+			}
+			retry := e.int("SELECT id FROM jobs WHERE task_id = ? AND restart = 1", e.task)
+			if retry == 0 {
+				t.Fatal("no automatic restart queued, want one on the placeable agent")
+			}
+			if pin := e.int("SELECT require_agent FROM jobs WHERE id = ?", retry); pin != good {
+				t.Fatalf("retry pin = %d, want the placeable agent %d, never the zero-capped %d", pin, good, zero)
+			}
+			if p, ok := e.eventPayloadOf(evTaskRestarted); !ok || p.Agent != good {
+				t.Errorf("restart event = %+v (%t), want agent %d", p, ok, good)
+			}
+			if got := e.leaseAny(e.runner1); got == nil || got.JobID != retry {
+				t.Fatalf("lease = %+v, want the retry %d", got, retry)
+			}
+			if layers := e.capHeldLayers(retry); len(layers) != 0 {
+				t.Errorf("job_cap_held events of the retry = %v, want none", layers)
+			}
+		})
+	}
+}
+
+// TestWorkRetryParksWhenTheOnlyOtherAgentIsZeroCapped: with the one other
+// agent of the class capped at 0, autoRestartWorkTx finds no candidate,
+// restarts nothing, and the task takes the ordinary failure path.
+func TestWorkRetryParksWhenTheOnlyOtherAgentIsZeroCapped(t *testing.T) {
+	for name, adjust := range zeroCapScenarios {
+		t.Run(name, func(t *testing.T) {
+			e := newEnvCfg(t, adjust)
+			author := e.addAgent(e.runner1, "codex", "gpt-5", "author")
+			e.addAgent(e.runner1, "claude", "sonnet", "zero")
+			e.submit(e.work())
+			g := e.leaseAny(e.runner1)
+			if g == nil || e.jobAgent(g.JobID) != author {
+				t.Fatalf("lease = %+v, want the author's agent %d", g, author)
+			}
+			e.complete(g, Completion{Error: "worker CLI failed", ErrorKind: "other"})
+			if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+				t.Errorf("task state = %s, want needs_foreman", state)
+			}
+			if n := e.countEvents(evTaskRestarted); n != 0 {
+				t.Errorf("restart events = %d, want none", n)
+			}
+			if n := e.countEvents(evTaskFailed); n != 1 {
+				t.Errorf("failure events = %d, want one", n)
+			}
+			if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ?", e.task); n != 1 {
+				t.Errorf("task jobs = %d, want only the failed work", n)
+			}
+		})
+	}
+}

@@ -15,6 +15,55 @@ func newRequireEnv(t *testing.T) *env {
 	return newEnvCfg(t, func(c *Config) { c.Review.Family = ReviewFamilyRequire })
 }
 
+// TestPreferNeverPlacesAReviewOnAZeroCappedReviewer: under review.family=
+// prefer a reviewer whose model or account is capped at 0 can never take
+// the review (issue #195). A placeable reviewer of a later family step is
+// picked instead; with none the job waits unplaced, with no cap hold.
+func TestPreferNeverPlacesAReviewOnAZeroCappedReviewer(t *testing.T) {
+	for name, adjust := range map[string]func(*Config){
+		"model":   func(c *Config) { c.Caps.Model = map[string]int{"google-1": 0} },
+		"account": func(c *Config) { c.Caps.Account = map[string]int{"google": 0} },
+	} {
+		t.Run(name+" falls to the next step", func(t *testing.T) {
+			e := newEnvCfg(t, adjust) // no review.family key: the prefer default
+			author := e.agented("author", "anthropic", "implement")
+			sibling := e.agented("sibling", "anthropic", "review")
+			zero := e.agented("zero", "google", "review")
+			review := e.runToReview(author)
+
+			if g := e.leaseAny(zero); g != nil {
+				t.Fatalf("the zero-capped reviewer leased %+v", g)
+			}
+			g := e.leaseAny(sibling)
+			if g == nil || g.JobID != review {
+				t.Fatalf("the placeable reviewer leased %+v, want the review %d", g, review)
+			}
+			if agent := e.jobAgent(review); agent != e.agentOf(sibling) {
+				t.Errorf("review agent = %d, want the placeable %d", agent, e.agentOf(sibling))
+			}
+			if got := e.pickPlacement(review); got != placeSameFamily {
+				t.Errorf("placement = %q, want %q", got, placeSameFamily)
+			}
+		})
+		t.Run(name+" waits unplaced", func(t *testing.T) {
+			e := newEnvCfg(t, adjust)
+			author := e.agented("author", "anthropic", "implement")
+			zero := e.agented("zero", "google", "review")
+			review := e.runToReview(author)
+
+			if g := e.leaseAny(zero); g != nil {
+				t.Fatalf("the zero-capped reviewer leased %+v", g)
+			}
+			if layer := e.heldLayer(review); layer != "" {
+				t.Errorf("hold layer = %q, want none: an unmet placement, not a cap hold", layer)
+			}
+			if layers := e.capHeldLayers(review); len(layers) != 0 {
+				t.Errorf("job_cap_held events = %v, want none", layers)
+			}
+		})
+	}
+}
+
 // pickPlacement is the placement kind of the job's newest agent pick.
 func (e *env) pickPlacement(job int64) string {
 	e.t.Helper()

@@ -172,7 +172,9 @@ func TestTierFallsBackFromZeroCap(t *testing.T) {
 			e.assertTierPick(job.JobID, opus, "standard", "heavy")
 		})
 	}
-	t.Run("a zero cap on every tier waits", func(t *testing.T) {
+	// Every agent capped at 0 is no candidate (issue #195): an unmet
+	// placement the queue TTL measures, not a cap hold.
+	t.Run("a zero cap on every tier leases nothing and holds nothing", func(t *testing.T) {
 		e := newEnvCfg(t, func(c *Config) { c.Caps.Account = map[string]int{"standard": 0, "heavy": 0} })
 		e.addAgent(e.runner1, "claude", "sonnet", "standard")
 		e.addAgent(e.runner1, "claude", "opus", "heavy")
@@ -180,8 +182,58 @@ func TestTierFallsBackFromZeroCap(t *testing.T) {
 		if g := e.leaseAny(e.runner1); g != nil {
 			t.Fatalf("leased %+v with every account capped at 0", g)
 		}
+		if layer := e.heldLayer(job.JobID); layer != "" {
+			t.Errorf("hold layer = %q, want no hold for an agent that can never take the job", layer)
+		}
+		if layers := e.capHeldLayers(job.JobID); len(layers) != 0 {
+			t.Errorf("job_cap_held events = %v, want none", layers)
+		}
+	})
+	t.Run("a full cap on every tier waits", func(t *testing.T) {
+		e := newEnvCfg(t, func(c *Config) { c.Caps.Account = map[string]int{"standard": 1, "heavy": 1} })
+		e.exec("UPDATE runners SET max_parallel = 8")
+		sonnet := e.addAgent(e.runner1, "claude", "sonnet", "standard")
+		opus := e.addAgent(e.runner1, "claude", "opus", "heavy")
+		first := e.tierWork("standard")
+		if g := e.leaseAny(e.runner1); g == nil || g.JobID != first.JobID {
+			t.Fatalf("lease = %+v, want job %d", g, first.JobID)
+		}
+		e.assertTierPick(first.JobID, sonnet, "standard", "standard")
+		second := e.tierWork("heavy")
+		if g := e.leaseAny(e.runner1); g == nil || g.JobID != second.JobID {
+			t.Fatalf("lease = %+v, want job %d", g, second.JobID)
+		}
+		e.assertTierPick(second.JobID, opus, "heavy", "heavy")
+		job := e.tierWork("standard")
+		if g := e.leaseAny(e.runner1); g != nil {
+			t.Fatalf("leased %+v with every account full", g)
+		}
 		e.assertHeld(job.JobID, "account")
 	})
+}
+
+// An agent capped at exactly 0 is never leased to an unpinned job, whatever
+// its record says: the other agent of the tier takes every job (issue #195).
+func TestUnpinnedLeaseNeverPicksAZeroCappedAgent(t *testing.T) {
+	for name, adjust := range map[string]func(*Config){
+		"model":   func(c *Config) { c.Caps.Model = map[string]int{"sonnet": 0} },
+		"account": func(c *Config) { c.Caps.Account = map[string]int{"zero": 0} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnvCfg(t, adjust)
+			e.exec("UPDATE runners SET max_parallel = 8")
+			zero := e.addAgent(e.runner1, "claude", "sonnet", "zero")
+			good := e.addAgent(e.runner1, "codex", "gpt-5", "good")
+			e.record(zero, 8, 8) // the record draw favours the zero-capped agent
+			e.record(good, 8, 1)
+			for i := 0; i < 3; i++ {
+				g := e.leaseNew(e.runner1)
+				if got := e.jobAgent(g.JobID); got != good {
+					t.Fatalf("job %d ran on agent %d, want %d, never the zero-capped %d", g.JobID, got, good, zero)
+				}
+			}
+		})
+	}
 }
 
 func TestFixRoundPinIgnoresTier(t *testing.T) {

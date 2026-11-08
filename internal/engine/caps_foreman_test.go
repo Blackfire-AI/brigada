@@ -175,3 +175,33 @@ func TestForemanTurnIgnoresPlanAndModelCaps(t *testing.T) {
 		t.Fatalf("foreman lease = %+v, want the turn %d through the full plan and model caps", gf, turn.JobID)
 	}
 }
+
+// TestForemanTurnPlacementFollowsTheZeroCapPolicy: a foreman turn is exempt
+// from the model cap but not the account cap, so an agent whose model is
+// capped at 0 still takes the turn, and one whose account is capped at 0
+// is no candidate: the turn is refused there, with no cap hold (issue #195).
+func TestForemanTurnPlacementFollowsTheZeroCapPolicy(t *testing.T) {
+	t.Run("model capped at 0 places", func(t *testing.T) {
+		e := newEnvCfg(t, func(c *Config) { c.Caps.Model = map[string]int{"sonnet": 0} })
+		e.seedAgent(e.runner1, "claude", "claude", "sonnet", "work")
+		turn := e.submit(e.foremanTurn())
+		gf := e.leaseClaude(e.runner1)
+		if gf == nil || gf.JobID != turn.JobID {
+			t.Fatalf("foreman lease = %+v, want the turn %d on an agent whose model is capped at 0", gf, turn.JobID)
+		}
+	})
+	t.Run("account capped at 0 refuses", func(t *testing.T) {
+		e := newEnvCfg(t, func(c *Config) { c.Caps.Account = map[string]int{"work": 0} })
+		e.seedAgent(e.runner1, "claude", "claude", "sonnet", "work")
+		turn := e.submit(e.foremanTurn())
+		if gf := e.leaseClaude(e.runner1); gf != nil {
+			t.Fatalf("foreman lease = %+v, want the turn refused on an account capped at 0", gf)
+		}
+		if layer := e.heldLayer(turn.JobID); layer != "" {
+			t.Errorf("hold layer = %q, want none: an unmet placement, not a cap hold", layer)
+		}
+		if layers := e.capHeldLayers(turn.JobID); len(layers) != 0 {
+			t.Errorf("job_cap_held events = %v, want none", layers)
+		}
+	})
+}

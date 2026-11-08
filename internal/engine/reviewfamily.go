@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/Blackfire-AI/brigada/internal/caps"
 )
@@ -96,6 +97,12 @@ func preferReviewAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner in
 	if err != nil {
 		return nil, err
 	}
+	// An agent capped at 0 can never take the review (cappedAtZeroFor): it
+	// belongs to no step, so a step holding only such agents does not win
+	// or become the one the job waits on.
+	rows = slices.DeleteFunc(rows, func(c agentCand) bool {
+		return cappedAtZeroFor(cfg.Caps, j.Kind, c.account, c.model)
+	})
 	steps := reviewFamilySteps(rows, author, authorFamily)
 	winning, first := -1, -1
 	for i, step := range steps {

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -412,6 +413,50 @@ func TestSweepQueueTTLParksTask(t *testing.T) {
 		t.Fatalf("status = %q, want failed by the queue TTL", status)
 	}
 	checkSweptTaskParked(t, e)
+}
+
+// TestQueueTTLParksAPinOnAZeroCappedAgent: a job pinned to an agent whose
+// model or account is capped at 0 has no candidate — an unmet placement,
+// not a cap hold, and not a cooling hold when the agent also cools — so no
+// hold is stamped and the queue TTL parks it with a reason naming the pin
+// and the cap (issue #195).
+func TestQueueTTLParksAPinOnAZeroCappedAgent(t *testing.T) {
+	for name, adjust := range zeroCapScenarios {
+		for _, cooling := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s cooling=%t", name, cooling), func(t *testing.T) {
+				e := newEnvCfg(t, func(c *Config) {
+					adjust(c)
+					c.RunnerStale = time.Hour // the agent is not broken by a quiet runner
+				})
+				zero := e.addAgent(e.runner1, "claude", "sonnet", "zero")
+				if cooling {
+					e.coolUntil(zero, time.Hour)
+				}
+				fix := e.pinnedFix(zero)
+				if g := e.leaseAny(e.runner1); g != nil {
+					t.Fatalf("leased %+v pinned to an agent capped at 0", g)
+				}
+				e.elapse(10*time.Minute + 2*time.Second)
+				if layer := e.heldLayer(fix.JobID); layer != "" {
+					t.Errorf("hold layer = %q, want none: no cap or cooling hold on a zero-capped pin", layer)
+				}
+				if layers := e.capHeldLayers(fix.JobID); len(layers) != 0 {
+					t.Errorf("job_cap_held events = %v, want none", layers)
+				}
+				if status := e.str("SELECT status FROM jobs WHERE id = ?", fix.JobID); status != statusFailed {
+					t.Fatalf("status = %q, want failed by the queue TTL", status)
+				}
+				layer := "model"
+				if name == "account" {
+					layer = "account"
+				}
+				want := fmt.Sprintf("job pinned to claude/sonnet (capped at 0 at the %s layer)", layer)
+				if result := e.str("SELECT result FROM jobs WHERE id = ?", fix.JobID); !strings.Contains(result, "queue TTL exceeded") || !strings.Contains(result, want) {
+					t.Errorf("result = %q, want the queue TTL failure containing %q", result, want)
+				}
+			})
+		}
+	}
 }
 
 func TestWorkerTimeAccrual(t *testing.T) {

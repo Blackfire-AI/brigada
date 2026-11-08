@@ -487,19 +487,28 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 				// A pin on a broken agent has no end in sight, so it is not
 				// held (a cooling one is, see holdCoolingTx); the park names
 				// the pin and the state instead of blaming the runners.
-				var harness, model, health, why string
-				err := tx.QueryRow("SELECT harness, model, health, health_reason FROM agents WHERE id = ?", x.requireAgent).
-					Scan(&harness, &model, &health, &why)
+				// A pin on an agent capped at 0 is no candidate and no cap
+				// hold (issue #195): the park names the pin and the cap.
+				var harness, model, health, why, account string
+				err := tx.QueryRow("SELECT harness, model, health, health_reason, account FROM agents WHERE id = ?", x.requireAgent).
+					Scan(&harness, &model, &health, &why, &account)
 				if err != nil && !errors.Is(err, sql.ErrNoRows) {
 					return rep, fmt.Errorf("read the pinned agent %d: %w", x.requireAgent, err)
 				}
-				if err == nil && health == "broken" {
-					state := "broken"
-					if why != "" {
-						state += ": " + why
+				if err == nil {
+					state := ""
+					if health == "broken" {
+						state = "broken"
+						if why != "" {
+							state += ": " + why
+						}
+					} else if layer := zeroCapLayer(e.cfg.Caps, Kind(x.kind), account, model); layer != "" {
+						state = fmt.Sprintf("capped at 0 at the %s layer", layer)
 					}
-					reason = fmt.Sprintf("queue TTL exceeded: job pinned to %s/%s (%s); no runner leased the job within %s",
-						harness, model, state, capText(e.cfg.QueueTTL))
+					if state != "" {
+						reason = fmt.Sprintf("queue TTL exceeded: job pinned to %s/%s (%s); no runner leased the job within %s",
+							harness, model, state, capText(e.cfg.QueueTTL))
+					}
 				}
 			}
 			if x.task != 0 && x.requireAgent == 0 && x.kind != string(KindLand) {
