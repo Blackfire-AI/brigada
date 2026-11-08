@@ -5,9 +5,9 @@
 plan: 115
 title: "engine: never pin or place on a model capped at 0; show pins in capacity (#195)"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-08T14:46:34.912806Z
-updated: 2026-11-08T14:47:39.802062Z
+updated: 2026-11-08T14:48:31.285078Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
