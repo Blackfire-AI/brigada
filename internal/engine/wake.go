@@ -510,7 +510,7 @@ func foremanReportTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error
 // record that lands in no inbox and wakes no turn. Either way the key's
 // follow-up flag clears. A cancelled turn wakes nothing at once — the
 // user just said stop, and an instant re-wake would defy them — so its
-// events stay pending for the next judgment event or the start-of-engine
+// unattended parks are announced without waking, and events stay pending for the next judgment event or the start-of-engine
 // recovery (§13). Every other ending re-evaluates the wake here, in the
 // same transaction as the completion, so the events that arrived during
 // the turn, and the ones just returned, reach the next turn.
@@ -542,7 +542,7 @@ func (e *Engine) foremanFinishedTx(tx *sql.Tx, job *jobRow, status string, now t
 		return fmt.Errorf("clear the follow-up flag of job %d: %w", job.ID, err)
 	}
 	if status == statusCancelled {
-		return nil
+		return e.announceUnattendedTx(tx, job.ProjectID, now)
 	}
 	return e.wakeForemanTx(tx, job.ProjectID, now)
 }

@@ -15,6 +15,8 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Plans parked by review leave the needs-you queue while the foreman handles them and notify when it cannot (issue #197).
+
 - `brigada top` lists live plans before finished ones, and a short terminal spends a free row on a running line (issue #184).
 
 ### Added
