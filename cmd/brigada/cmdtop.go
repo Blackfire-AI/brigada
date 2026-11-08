@@ -400,6 +400,7 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 		add([]topLine{{class: yieldBlank}, {text: band}, {class: yieldBlank}})
 	}
 	add(topPinned(topHint(model, style, width)))
+	add(topPinned(topPauseBands(model, now, style, width)))
 	add(newTopNeedsYou(model.status, model.soleProject, style, inner))
 	// One mark for every running row of the frame: a spinner frame of the
 	// real clock while the view animates, else the static pointer.
@@ -754,6 +755,45 @@ func topBand(model topModel, now time.Time, style term.Style, width int) string 
 		body += strings.Repeat(" ", max(width-used, 0))
 	}
 	return paint(body)
+}
+
+// topPauseBands is one full-width band per dispatch pause that stands
+// (§8.3 "What shows it"), apart from the view's own `p` pause and its
+// band: `|| DISPATCH PAUSED`, then the scope, the start, `drain` for a
+// drain's origin, the jobs still draining (`drained` once none is) and
+// the queued jobs the pause holds. The `p` band names the refresh
+// frozen, this one the engine's dispatch.
+func topPauseBands(model topModel, now time.Time, style term.Style, width int) []string {
+	var out []string
+	sep := topEventSep(style)
+	for _, p := range model.status.Pauses {
+		first := "|| DISPATCH PAUSED"
+		parts := []string{api.PauseScope(p), "since " + api.LocalClock(p.StartedAt, now)}
+		if p.Origin == engine.PauseOriginDrain {
+			parts = append(parts, "drain")
+		}
+		if len(p.Draining) == 0 {
+			parts = append(parts, "drained")
+		} else {
+			jobs := make([]string, 0, len(p.Draining))
+			for _, j := range p.Draining {
+				what := fmt.Sprintf("job #%d", j.ID)
+				if j.TaskID != 0 {
+					what = fmt.Sprintf("task #%d", j.TaskID)
+				}
+				jobs = append(jobs, what+" "+j.Kind)
+			}
+			parts = append(parts, "draining: "+strings.Join(jobs, ", "))
+		}
+		if p.Queued > 0 {
+			parts = append(parts, fmt.Sprintf("%d queued", p.Queued))
+		}
+		middle := cutLine(strings.Join(parts, sep), max(width-2-3-term.CellWidth(first), 0))
+		body := " " + style.Bold(first) + "   " + middle
+		used := 1 + term.CellWidth(first) + 3 + term.CellWidth(middle)
+		out = append(out, style.BandWarn(body+strings.Repeat(" ", max(width-used, 0))))
+	}
+	return out
 }
 
 // topHint is the unregistered-models line under the header, Dim, or nothing.

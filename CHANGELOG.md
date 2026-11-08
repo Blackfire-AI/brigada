@@ -21,6 +21,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `brigada pause` and `brigada resume` pause and resume dispatch for the engine or, with `--repo`, one project; `brigada stop --engine --drain` pauses the engine, waits for its running jobs and then stops. `brigada status` prints a `paused:` line per pause, `brigada top` shows it in a band of its own beside the `p` pause, and the foreman's `status` and `capacity` tools show it; a queued job of a paused scope is counted under the pause, never as `held:` (issue #198). Restart the engine and runner after you upgrade.
 - In the full-screen `brigada top`, a running job's `▸` is a spinner on a 120 ms redraw of its own, with colour and UTF-8 and while a job runs; `--interval` still sets the fetch, a frame makes no API call, and only the lines that changed are written (issue #176).
 
 ## [1.1.1] - 2026-11-05

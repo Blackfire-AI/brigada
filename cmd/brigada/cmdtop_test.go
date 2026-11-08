@@ -4200,6 +4200,56 @@ func TestTopPausedBand(t *testing.T) {
 	}
 }
 
+// TestTopDispatchPauseBand: a dispatch pause (§8.3) shows in a band of its
+// own, naming the scope, the start, the drain origin, the jobs still
+// draining and the queued jobs it holds; the view's own `p` pause keeps its
+// band beside it, and a paused queued job is not a `held` in the counters.
+func TestTopDispatchPauseBand(t *testing.T) {
+	plain := term.New(logo.Caps{UTF8: true})
+	m := busyTopModel()
+	m.statusOK = true
+	started := topNow.Add(-time.Hour).UTC().Format(engine.TimeLayout)
+	m.status.Pauses = []engine.LivePause{
+		{Origin: engine.PauseOriginDrain, StartedAt: started, Queued: 3,
+			Draining: []engine.PauseJob{{ID: 5, TaskID: 3, Kind: "work", Status: "running"}}},
+		{ProjectID: 2, RepoURL: "github.com/o/r", Origin: engine.PauseOriginUser, StartedAt: started, Drained: true},
+	}
+	m.status.Held = nil
+	clock := api.LocalClock(started, topNow)
+	lines := renderTop(m, 120, 0, topNow, plain)
+	engineBand := strings.TrimRight(bandOf(t, lines, "DISPATCH PAUSED"), " ")
+	for _, w := range []string{"engine", "since " + clock, "drain", "draining: task #3 work", "3 queued"} {
+		if !strings.Contains(engineBand, w) {
+			t.Errorf("engine pause band = %q, lacks %q", engineBand, w)
+		}
+	}
+	got := strings.Join(lines, "\n")
+	if !strings.Contains(got, "project github.com/o/r") || !strings.Contains(got, "drained") {
+		t.Errorf("project pause band missing:\n%s", got)
+	}
+	if strings.Contains(got, "PAUSED   at ") || strings.Contains(got, "p resumes") {
+		t.Errorf("the refresh pause band shows without the p key:\n%s", got)
+	}
+	if !strings.Contains(got, "0 held") {
+		t.Errorf("a paused queued job counted as held:\n%s", got)
+	}
+	// The p pause keeps its own band beside the dispatch pause's.
+	m.paused, m.pausedAt = true, topNow
+	lines = renderTop(m, 120, 0, topNow, plain)
+	bandOf(t, lines, "DISPATCH PAUSED")
+	if got := bandOf(t, lines, "ages frozen"); strings.Contains(got, "DISPATCH") || !strings.Contains(got, "p resumes") {
+		t.Errorf("p band = %q", got)
+	}
+	// Narrow widths cut the band to the width, never past it.
+	for _, w := range []int{40, 60} {
+		for _, l := range renderTop(m, w, 0, topNow, plain) {
+			if term.CellWidth(l) > w {
+				t.Errorf("width %d: line %q is wider", w, l)
+			}
+		}
+	}
+}
+
 // TestTopErrorSequence: a failed dial, then a good dial whose fetch fails,
 // reads as a fetch error from a running engine — no `brigada start`, no
 // ENGINE UNREACHABLE; a clean fetch clears the band and sets the good time; a

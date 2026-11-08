@@ -318,6 +318,39 @@ func TestUserMessagePastAQueuedTurnWhilePaused(t *testing.T) {
 	}
 }
 
+// TestPauseDoesNotCountTheTurnTheLeaseGateLetsThrough: a queued foreman
+// turn a pending user message waits on leases under the pause, so the
+// status counts it neither under the pause nor as a held wait; a queued
+// judgment turn with no message waiting is the pause's.
+func TestPauseDoesNotCountTheTurnTheLeaseGateLetsThrough(t *testing.T) {
+	e := newEnv(t)
+	e.park("the first question") // the judgment turn, queued with its event
+	e.pauseProject(PauseOriginUser, "cli")
+	st, err := e.eng.Status(e.ctx, 0)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(st.Pauses) != 1 || st.Pauses[0].Queued != 1 {
+		t.Fatalf("pauses = %+v, want the queued judgment turn counted under the pause", st.Pauses)
+	}
+	if _, err := e.eng.AskForeman(e.ctx, "", "and my message", "c1"); err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	if st, err = e.eng.Status(e.ctx, 0); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(st.Pauses) != 1 || st.Pauses[0].Queued != 0 {
+		t.Errorf("pauses = %+v, want the turn the user's message waits on left out of the count", st.Pauses)
+	}
+	// The turn leases through the pause, so whatever holds it is a real
+	// wait (here no runner offers its agent), not the pause's.
+	for _, h := range st.Held {
+		if h.Kind != string(KindForeman) {
+			t.Errorf("held = %+v, want at most the foreman turn", st.Held)
+		}
+	}
+}
+
 // TestPauseKeepsJudgmentEventsPending: while the scope is paused, the
 // engine submits no headless turn for a judgment event — it stays
 // pending in the inbox, the wake's outcome says paused — and the resume

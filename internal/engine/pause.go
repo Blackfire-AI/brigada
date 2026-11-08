@@ -381,6 +381,22 @@ func notPausedSQL(alias string) string {
 		AND (p.project_id IS NULL OR p.project_id = ` + alias + `.project_id))`
 }
 
+// heldByPauseSQL is the clause that keeps a jobs query to the jobs a
+// pause actually holds queued (§8.3): their project or the engine is
+// paused, less the lease gate's one exception — a foreman turn a user
+// message waits on (foremanTurnCarriesUserTx, whose condition it
+// mirrors) leases through the pause, so the pause does not hold it.
+// The status, the capacity view and the pause's own count read it;
+// alias names the jobs table in the query.
+func heldByPauseSQL(alias string) string {
+	return `(EXISTS (SELECT 1 FROM pauses p WHERE p.ended_at IS NULL
+		AND (p.project_id IS NULL OR p.project_id = ` + alias + `.project_id))
+		AND NOT (` + alias + `.kind = '` + string(KindForeman) + `' AND EXISTS (SELECT 1 FROM foreman_inbox i
+			JOIN events e ON e.id = i.event_id
+			WHERE i.project_id = ` + alias + `.project_id AND e.kind = '` + evUserMessage + `'
+			AND ((i.job_id = ` + alias + `.id AND i.state = '` + inboxDelivered + `') OR i.state = '` + inboxPending + `'))))`
+}
+
 // LivePause is one pause that stands, as the status and the capacity
 // view carry it (§8.3 "What shows it"): its scope, its start, its
 // origin and the scope's jobs still draining. The JSON fields are
@@ -480,7 +496,7 @@ func livePausesViewTx(tx *sql.Tx, project int64) ([]LivePause, error) {
 		}
 		jrows.Close()
 		p.Drained = len(p.Draining) == 0
-		if err := tx.QueryRow(`SELECT COUNT(*) `+jobsQuery+` AND status = 'queued'`, jobArgs...).Scan(&p.Queued); err != nil {
+		if err := tx.QueryRow(`SELECT COUNT(*) `+jobsQuery+` AND status = 'queued' AND `+heldByPauseSQL("jobs"), jobArgs...).Scan(&p.Queued); err != nil {
 			return nil, fmt.Errorf("count the jobs a pause holds: %w", err)
 		}
 	}
