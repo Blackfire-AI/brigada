@@ -30,9 +30,9 @@ tasks:
     tier: heavy
     effort: high
     skills: ["schema-migration"]
-    state: reviewing
+    state: running
     branch: "brigada/task-429"
-    rounds: 0
+    rounds: 1
   - id: 430
     name: "pause-clocks"
     title: "feat(engine): a pause's held time shifts queue deadlines; status carries the pause"
