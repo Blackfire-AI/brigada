@@ -29,7 +29,7 @@ tasks:
     base: ""
     effort: medium
     skills: ["bugfix"]
-    state: reviewing
+    state: done
     branch: "brigada/task-378-r3"
     rounds: 1
   - id: 379
@@ -40,6 +40,6 @@ tasks:
     base: "zero-cap-placement"
     effort: medium
     skills: ["surface-parity"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
