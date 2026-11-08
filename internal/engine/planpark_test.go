@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Blackfire-AI/brigada/internal/notify"
 	"github.com/Blackfire-AI/brigada/internal/planfile"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
@@ -428,16 +429,24 @@ func TestAParkedPlanTheForemanHandlesLeavesNeedsYou(t *testing.T) {
 // needs-you with one plan_unattended event, never repeated by a later wake.
 func TestAParkedPlanTheForemanWillNotHandleIsAnnouncedOnce(t *testing.T) {
 	cases := []struct {
-		name string
-		end  func(e *env)
+		name   string
+		budget bool // the day's budget is one turn
+		end    func(e *env)
 	}{
-		{"swallowed", func(e *env) {
+		{"budget spent", true, func(e *env) {
+			e.complete(e.leaseForeman(), Completion{Error: "boom"})
+		}},
+		{"no foreman harness", false, func(e *env) {
+			e.exec(`UPDATE projects SET foreman_harness = '', foreman_model = '' WHERE id = ?`, e.project)
+			e.complete(e.leaseForeman(), Completion{Error: "boom"})
+		}},
+		{"swallowed", false, func(e *env) {
 			e.complete(e.leaseForeman(), Completion{Result: `{"status":"done"}`})
 		}},
-		{"limited", func(e *env) {
+		{"limited", false, func(e *env) {
 			e.complete(e.leaseForeman(), Completion{Error: "foreman CLI failed (limit): you've hit your usage limit", ErrorKind: "limit"})
 		}},
-		{"cancelled", func(e *env) {
+		{"cancelled", false, func(e *env) {
 			if ans := e.cancel(e.int("SELECT id FROM jobs WHERE kind = 'foreman' ORDER BY id DESC")); ans != AnsOK {
 				e.t.Fatalf("cancel: %s", ans)
 			}
@@ -446,6 +455,9 @@ func TestAParkedPlanTheForemanWillNotHandleIsAnnouncedOnce(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newPlanReviewEnv(t)
+			if tc.budget {
+				e = newEnvCfg(t, func(c *Config) { c.PlanReview = nil; c.ForemanWakeBudget = 1 })
+			}
 			res, _ := parkForChanges(t, e, []PlanTask{{Name: "a", Spec: "do a"}, {Name: "b", Spec: "do b"}})
 			if held, _ := planHeld(t, e, res.PlanID); !held {
 				t.Fatal("plan not held before the turn ends")
@@ -459,6 +471,18 @@ func TestAParkedPlanTheForemanWillNotHandleIsAnnouncedOnce(t *testing.T) {
 			held, present := planHeld(t, e, res.PlanID)
 			if !present || held {
 				t.Fatalf("plan held=%v present=%v, want the user's", held, present)
+			}
+			info, err := e.eng.Status(e.ctx, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			info.SplitForemanHolds()
+			inQueue := false
+			for _, it := range info.NeedsYou {
+				inQueue = inQueue || it.Kind == "plan" && it.ID == res.PlanID
+			}
+			if !inQueue {
+				t.Errorf("needs_you = %+v, want the plan in the user's split queue", info.NeedsYou)
 			}
 			if got := e.countEvents(evPlanUnattended); got != 1 {
 				t.Fatalf("plan_unattended events = %d, want 1", got)
@@ -481,6 +505,79 @@ func TestAParkedPlanTheForemanWillNotHandleIsAnnouncedOnce(t *testing.T) {
 				t.Errorf("plan_unattended rows in the inbox = %d, want none", n)
 			}
 		})
+	}
+}
+
+// TestAReParkedPlanIsAnnouncedAnew: the plan_unattended dedupe keys on the
+// latest plan_reviewed event, so a plan answered, re-reviewed and parked
+// again produces a second event and a second banner, while a later wake
+// repeats neither.
+func TestAReParkedPlanIsAnnouncedAnew(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	res := e.createPlan([]PlanTask{{Name: "solo", Spec: "look at the branch", Class: "review"}})
+	fake := &notify.Fake{}
+	loop := notify.NewLoop(e.st, fake, nil)
+	banners := func() []string {
+		if err := loop.Flush(e.ctx); err != nil {
+			t.Fatalf("flush: %v", err)
+		}
+		var out []string
+		for _, n := range fake.Notes() {
+			if strings.HasPrefix(n.Body, fmt.Sprintf("plan #%d needs you: ", res.PlanID)) {
+				out = append(out, n.Body)
+			}
+		}
+		return out
+	}
+	park := func(add, findings string) {
+		if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+			Add: []PlanTask{{Name: add, Spec: "add " + add}},
+		}); err != nil {
+			t.Fatalf("amend: %v", err)
+		}
+		e.reviewVerdict(e.lease(e.runner2, nil, nil), verdictChanges, findings)
+		if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planNeedsForeman {
+			t.Fatalf("plan state = %q, want parked", got)
+		}
+		e.complete(e.leaseForeman(), Completion{Result: `{"status":"done"}`})
+	}
+
+	park("plain", theFindings)
+	if got := e.countEvents(evPlanUnattended); got != 1 {
+		t.Fatalf("plan_unattended after the first park = %d, want 1", got)
+	}
+	if got := banners(); len(got) != 1 || !strings.Contains(got[0], "ended without answering the changes verdict") {
+		t.Fatalf("banners after the first park = %q, want one with the swallowed-turn heading", got)
+	}
+	e.rewake()
+	if got := e.countEvents(evPlanUnattended); got != 1 {
+		t.Fatalf("plan_unattended after a later wake = %d, want still 1", got)
+	}
+
+	// The answer moves the plan on; round 2 approves.
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+		Respec: []PlanRespec{{Task: "plain", Spec: "add plain, carefully"}},
+	}); err != nil {
+		t.Fatalf("answer by amending: %v", err)
+	}
+	e.reviewVerdict(e.lease(e.runner2, nil, nil), verdictApprove, theFindings)
+
+	park("more", "still wrong")
+	if got := e.countEvents(evPlanUnattended); got != 2 {
+		t.Fatalf("plan_unattended after the re-park = %d, want 2", got)
+	}
+	got := banners()
+	if len(got) != 2 || !strings.Contains(got[1], "still wrong") {
+		t.Fatalf("banners after the re-park = %q, want a second, new one", got)
+	}
+	e.rewake()
+	if n := e.countEvents(evPlanUnattended); n != 2 {
+		t.Errorf("plan_unattended after a later wake = %d, want still 2", n)
+	}
+	if got := banners(); len(got) != 2 {
+		t.Errorf("banners after a later wake = %q, want still two", got)
 	}
 }
 
