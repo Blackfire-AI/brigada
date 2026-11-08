@@ -52,6 +52,16 @@ func (e *env) livePauses(scope int64) int64 {
 	return e.int("SELECT COUNT(*) FROM pauses WHERE ended_at IS NULL AND COALESCE(project_id, 0) = ?", scope)
 }
 
+// foremanWakesToday counts the day's foreman turns of the fixture
+// project — the count the wake budget charges (§4.3, wakeOutcomeTx) —
+// so a test can assert what a resume spent: one wake, not one per
+// event and not a second one for a queued turn.
+func (e *env) foremanWakesToday() int64 {
+	dayStart, _ := wakeDayBounds(e.clock.Now())
+	return e.int("SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind = 'foreman' AND created_at >= ?",
+		e.project, fmtTime(dayStart))
+}
+
 // eventField reads one payload field of every event of kind, in order.
 func (e *env) eventField(kind, field string) []string {
 	e.t.Helper()
@@ -337,6 +347,14 @@ func TestPauseKeepsJudgmentEventsPending(t *testing.T) {
 	if got := e.foremanJobs(); got != 2 {
 		t.Fatalf("foreman turns after the resume = %d, want the held wake submitted", got)
 	}
+	// One wake charged: the day counts the cancelled turn and the
+	// resume's one, and nothing was refused (§4.3).
+	if got := e.foremanWakesToday(); got != 2 {
+		t.Fatalf("the day's foreman turns = %d, want the cancelled one and the resume's one", got)
+	}
+	if got := e.countEvents(evForemanWakeBudgetSpent); got != 0 {
+		t.Errorf("budget-spent events = %d, want none", got)
+	}
 }
 
 // TestResumeUnderARemainingScope: resuming one project under an engine
@@ -362,6 +380,12 @@ func TestResumeUnderARemainingScope(t *testing.T) {
 	if got := e.foremanJobs(); got != 2 {
 		t.Fatalf("foreman turns after the engine's lift = %d, want the held wake submitted", got)
 	}
+	if got := e.foremanWakesToday(); got != 2 {
+		t.Fatalf("the day's foreman turns = %d, want the cancelled one and the one the lift woke", got)
+	}
+	if got := e.countEvents(evForemanWakeBudgetSpent); got != 0 {
+		t.Errorf("budget-spent events = %d, want none", got)
+	}
 
 	// The project's own pause outlasts the engine's lift.
 	e2 := newEnv(t)
@@ -379,6 +403,12 @@ func TestResumeUnderARemainingScope(t *testing.T) {
 	if got := e2.foremanJobs(); got != 2 {
 		t.Fatalf("foreman turns after the project's lift = %d, want the held wake submitted", got)
 	}
+	if got := e2.foremanWakesToday(); got != 2 {
+		t.Fatalf("the day's foreman turns = %d, want the cancelled one and the one the lift woke", got)
+	}
+	if got := e2.countEvents(evForemanWakeBudgetSpent); got != 0 {
+		t.Errorf("budget-spent events = %d, want none", got)
+	}
 }
 
 // TestResumeRunsTheQueuedTurnThenOneCoalescedTurn: at the resume, a
@@ -386,8 +416,11 @@ func TestResumeUnderARemainingScope(t *testing.T) {
 // given then; the judgment events that piled up behind the pause
 // coalesce into one turn after it, so the freed project is charged one
 // wake — not one per event and not a second one for the queued turn.
+// The budget is two: the queued turn spent one charge when it was
+// submitted, so the resume has exactly one wake left — enough for the
+// coalesced turn, and a charge more would be refused and named.
 func TestResumeRunsTheQueuedTurnThenOneCoalescedTurn(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) { c.ForemanWakeBudget = 2 })
 	e.park("the first question")  // the turn, queued with its event
 	e.park("the second question") // parks again: the event waits behind the live turn
 	e.park("the third question")
@@ -407,6 +440,28 @@ func TestResumeRunsTheQueuedTurnThenOneCoalescedTurn(t *testing.T) {
 	prompt := e.str("SELECT prompt FROM jobs WHERE kind = 'foreman' ORDER BY id DESC LIMIT 1")
 	if !strings.Contains(prompt, "the second question") || !strings.Contains(prompt, "the third question") {
 		t.Fatalf("the coalesced turn does not carry both pending events:\n%s", prompt)
+	}
+	// The charge (§4.3): the day counts the queued turn and the one
+	// coalesced turn — two of the budget's two, nothing refused — so the
+	// resume spent one wake for both events, and the queued turn's run
+	// cost no second charge.
+	if got := e.foremanWakesToday(); got != 2 {
+		t.Fatalf("the day's foreman turns = %d, want the queued one and the coalesced one", got)
+	}
+	if got := e.countEvents(evForemanWakeBudgetSpent); got != 0 {
+		t.Fatalf("budget-spent events = %d, want the coalesced wake to have fit the budget", got)
+	}
+	// The budget is now exactly spent: a later judgment event waits for
+	// the day to reset — the proof that the resume used its one wake and
+	// left the budget at exactly the two charges there were.
+	g2 := e.leaseForeman()
+	e.complete(g2, Completion{Result: `{"status":"done","summary":"answered"}`})
+	e.park("a fourth question")
+	if got := e.foremanJobs(); got != 2 {
+		t.Fatalf("foreman turns after the spent budget = %d, want the two charges only", got)
+	}
+	if got := e.countEvents(evForemanWakeBudgetSpent); got != 1 {
+		t.Fatalf("budget-spent events after the later event = %d, want the day's budget exactly spent", got)
 	}
 }
 
@@ -432,6 +487,12 @@ func TestStartupRecoverySkipsAPausedScope(t *testing.T) {
 		e.resumeProject("cli")
 		if got := e.foremanJobs(); got != 2 {
 			t.Fatalf("foreman turns after the resume = %d, want the held wake submitted", got)
+		}
+		if got := e.foremanWakesToday(); got != 2 {
+			t.Fatalf("the day's foreman turns = %d, want the cancelled one and the resume's one", got)
+		}
+		if got := e.countEvents(evForemanWakeBudgetSpent); got != 0 {
+			t.Errorf("budget-spent events = %d, want none", got)
 		}
 	})
 	t.Run("the engine's pause", func(t *testing.T) {
@@ -466,6 +527,12 @@ func TestResumeDrainLiftsOnlyADrainPause(t *testing.T) {
 	if got := e.foremanJobs(); got != 2 {
 		t.Fatalf("foreman turns after the drain lift = %d, want the held wake submitted", got)
 	}
+	if got := e.foremanWakesToday(); got != 2 {
+		t.Fatalf("the day's foreman turns = %d, want the cancelled one and the one the lift woke", got)
+	}
+	if got := e.countEvents(evForemanWakeBudgetSpent); got != 0 {
+		t.Errorf("budget-spent events = %d, want none", got)
+	}
 
 	e2 := newEnv(t)
 	e2.park("which file?")
@@ -485,5 +552,11 @@ func TestResumeDrainLiftsOnlyADrainPause(t *testing.T) {
 	}
 	if got := e2.foremanJobs(); got != 2 {
 		t.Fatalf("foreman turns after the resume = %d, want the held wake submitted", got)
+	}
+	if got := e2.foremanWakesToday(); got != 2 {
+		t.Fatalf("the day's foreman turns = %d, want the cancelled one and the resume's one", got)
+	}
+	if got := e2.countEvents(evForemanWakeBudgetSpent); got != 0 {
+		t.Errorf("budget-spent events = %d, want none", got)
 	}
 }
