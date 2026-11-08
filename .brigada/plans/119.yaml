@@ -5,9 +5,9 @@
 plan: 119
 title: "top: AGENTS broken/cooling count back on the top border"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-11-08T18:28:30.890211Z
-updated: 2026-11-08T18:28:30.890211Z
+updated: 2026-11-08T18:32:13.217018Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -29,6 +29,6 @@ tasks:
     base: ""
     tier: light
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
