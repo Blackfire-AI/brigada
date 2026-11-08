@@ -53,7 +53,7 @@ tasks:
     base: "pause-clocks"
     effort: medium
     skills: ["cli-flag", "surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-431-r2"
     rounds: 0
   - id: 432
@@ -65,6 +65,6 @@ tasks:
     continue: "pause-cli"
     effort: medium
     skills: ["surface-parity"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
