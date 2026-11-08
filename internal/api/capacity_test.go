@@ -4,10 +4,45 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/logo"
+	"github.com/Blackfire-AI/brigada/internal/term"
 )
+
+// TestCapacityTablesPins covers the PINS table (issue #195): a held pin on
+// a ready agent, an unstamped pin on a capped-at-0 agent and a pin on a
+// broken one, and a snapshot with no pins rendering without the table.
+func TestCapacityTablesPins(t *testing.T) {
+	style := term.New(logo.Caps{})
+	now := time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
+	snap := engine.CapacitySnapshot{
+		Agents: []engine.CapacityAgent{{ID: 1, Harness: "claude", Model: "sonnet", Tier: "standard", Effort: "default", Cost: 1, CapLayer: "none", Quota: "ready"}},
+		Layers: []engine.CapacityLayer{{Layer: "global"}},
+	}
+	plain := CapacityTables(snap, now, style, 120)
+	if strings.Contains(plain, "PINS") {
+		t.Errorf("a snapshot with no pins has a PINS table:\n%s", plain)
+	}
+
+	snap.Pins = []engine.CapacityPin{
+		{JobID: 7, Kind: "work", TaskID: 3, AgentID: 1, Harness: "claude", Model: "sonnet", HeldLayer: "model", HeldKey: "sonnet", State: engine.PinReady},
+		{JobID: 8, Kind: "work", TaskID: 4, AgentID: 2, Harness: "claude", Model: "opus", State: engine.PinCappedAtZero},
+		{JobID: 9, Kind: "review", AgentID: 3, Harness: "codex", Model: "gpt", State: engine.PinBroken},
+	}
+	out := CapacityTables(snap, now, style, 120)
+	if !strings.HasPrefix(out, plain) {
+		t.Errorf("the pins changed the tables above them:\n%s", out)
+	}
+	for _, want := range []string{"PINS", "model sonnet", "capped_at_0", "broken", "2 claude/opus"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the output lacks %q:\n%s", want, out)
+		}
+	}
+}
 
 // exec runs one statement against the raw store, for seeding the rows
 // an endpoint reads.
@@ -29,6 +64,23 @@ func (e *env) exec(query string, args ...any) {
 func TestCapacityRoles(t *testing.T) {
 	e := newEnv(t)
 	plan2 := e.seedCapacityRows()
+	// One queued job pinned to the seeded agent in each project.
+	e.exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, require_agent, created_at, updated_at)
+		VALUES (?, ?, 'work', 'task:1-pin', 'fresh', 'prompt', 'queued', (SELECT MIN(id) FROM agents), ?, ?)`,
+		e.project1, e.task, seedTS, seedTS)
+	e.exec(`INSERT INTO jobs (project_id, kind, key, mode, prompt, status, require_agent, created_at, updated_at)
+		VALUES (?, 'foreman', 'foreman:2-pin', 'session', 'prompt', 'queued', (SELECT MIN(id) FROM agents), ?, ?)`,
+		e.project2, seedTS, seedTS)
+	pinKinds := func(snap engine.CapacitySnapshot) string {
+		var kinds []string
+		for _, p := range snap.Pins {
+			if p.State != engine.PinReady || p.Harness != "claude" {
+				t.Errorf("pin = %+v, want a ready pin on the claude agent", p)
+			}
+			kinds = append(kinds, p.Kind)
+		}
+		return strings.Join(kinds, ",")
+	}
 
 	// The roles that do not belong are refused, uniformly.
 	code, _, data := e.do(http.MethodGet, "/v1/capacity", "", "", nil)
@@ -61,6 +113,17 @@ func TestCapacityRoles(t *testing.T) {
 		if !hasPlanLayer(snap, plan2) {
 			t.Errorf("%s reads capacity: project 2's plan %d missing, want every project's plans", token, plan2)
 		}
+		if got := pinKinds(snap); got != "work,foreman" {
+			t.Errorf("%s reads capacity: pins = %q, want both projects' pins", token, got)
+		}
+	}
+	// An admin asking for one project sees that project's pins alone.
+	code, _, data = e.do(http.MethodGet, "/v1/capacity?project=2", "root", "", nil)
+	if code != http.StatusOK {
+		t.Fatalf("root asks for project 2: %d %s, want 200", code, data)
+	}
+	if got := pinKinds(decode[engine.CapacitySnapshot](t, data)); got != "foreman" {
+		t.Errorf("root project=2 pins = %q, want project 2's foreman pin alone", got)
 	}
 
 	// The foreman reads its own project's plans only: no ask means its
@@ -72,10 +135,16 @@ func TestCapacityRoles(t *testing.T) {
 	}
 	snap := decode[engine.CapacitySnapshot](t, data)
 	assertCapacityPlans(t, snap, e.plan, plan2)
+	if got := pinKinds(snap); got != "work" {
+		t.Errorf("foreman pins = %q, want its own project's work pin alone", got)
+	}
 
 	code, _, data = e.do(http.MethodGet, "/v1/capacity?project=2", "foreman1", "", nil)
 	if code != http.StatusForbidden {
 		t.Fatalf("foreman asks for project 2: %d %s, want 403", code, data)
+	}
+	if strings.Contains(string(data), "pins") || strings.Contains(string(data), "foreman:2-pin") {
+		t.Errorf("foreman project=2 refusal leaks pins: %s", data)
 	}
 	if err := decode[errBody](t, data); err.Code != codeForbidden {
 		t.Errorf("foreman scope: code = %q, want %q", err.Code, codeForbidden)
@@ -83,6 +152,9 @@ func TestCapacityRoles(t *testing.T) {
 	code, _, data = e.do(http.MethodGet, "/v1/capacity?project=1", "foreman1", "", nil)
 	if code != http.StatusOK {
 		t.Fatalf("foreman asks for its own project: %d %s, want 200", code, data)
+	}
+	if got := pinKinds(decode[engine.CapacitySnapshot](t, data)); got != "work" {
+		t.Errorf("foreman project=1 pins = %q, want its own project's work pin alone", got)
 	}
 
 	// A malformed project is the caller's mistake, not the engine's.

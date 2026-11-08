@@ -77,7 +77,7 @@ The terms used by [product.md](product.md) and [design.md](design.md). Where a d
 - **Stall:** a worker alive but with no activity for `stall_minutes` (default 10). The runner kills it and completes the job as `stalled` (§5.6).
 - **Cap:** a hard bound on rounds, attempts, time or parallel jobs: per-task round caps, the class time cap, `tool_call_cap_minutes`, the concurrency caps.
 - **Concurrency cap:** a limit on parallel jobs at one layer: runner, account, model, plan or global. A job starts only if every layer has room; a task blocked only by full caps is queued and does not park; a pending foreman turn outranks queued task jobs (§8.1).
-- **Capacity:** what the foreman sees through the `capacity` tool: per agent, the effective cap, running jobs, quota state and cost weight; per layer, cap, use and queue depth (§12.2).
+- **Capacity:** what the foreman sees through the `capacity` tool: per agent, the effective cap, running jobs, quota state and cost weight; per layer, cap, use and queue depth; per queued job pinned to an agent, whether the pin can place (§12.2).
 - **Cost weight:** a relative cost per agent that the user sets (default 1), so the foreman can let tasks wait for a cheaper agent (§8.1).
 - **Foreman headroom:** a slot kept free on the foreman's account so task workers don't leave the foreman limited mid-plan (§8.2).
 - **Budget:** a spending bound the user can raise: per project, foreman wake-ups per day (§4.3).
