@@ -65,6 +65,6 @@ tasks:
     continue: "pause-cli"
     effort: medium
     skills: ["surface-parity"]
-    state: running
+    state: reviewing
     branch: "brigada/task-432"
     rounds: 1
