@@ -52,6 +52,6 @@ tasks:
     continue: "agents-tier-cost"
     effort: medium
     skills: ["surface-parity"]
-    state: running
+    state: reviewing
     branch: "brigada/task-396"
     rounds: 1
