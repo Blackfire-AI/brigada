@@ -42,7 +42,7 @@ tasks:
     continue: "pause-core"
     tier: heavy
     effort: high
-    state: reviewing
+    state: done
     branch: "brigada/task-430-r1"
     rounds: 0
   - id: 431
@@ -53,7 +53,7 @@ tasks:
     base: "pause-clocks"
     effort: medium
     skills: ["cli-flag", "surface-parity"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 432
