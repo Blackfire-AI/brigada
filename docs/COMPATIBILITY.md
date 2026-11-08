@@ -6,7 +6,7 @@ What brigada 1.0 promises until 2.0.
 
 ## What is covered
 
-**The CLI commands and their subcommands.** The top-level commands are `init`, `remove`, `instructions`, `attach`, `ask`, `review`, `engine`, `runner`, `start`, `config`, `stop`, `mcp`, `status`, `task`, `project`, `history`, `stats`, `capacity`, `top`, `cancel`, `agent`, `agents`, `plan`, `budget`, `recover`, `diff`, `land`, `push`, `logs`, `version` and `help`. The subcommands are `instructions diff`; `task submit` and `task retire`; `project foreman`, `project list`, `project set`, `project show` and `project import`; `agent reset`; `agents add`; `plan approve` and `plan reject`; `land approve` and `land reject`; `push approve`; and `hold yield` and `hold confirm`, which stay as no-ops that always exit 0. A bare `brigada` is `attach`. Their names and subcommand names keep working.
+**The CLI commands and their subcommands.** The top-level commands are `init`, `remove`, `instructions`, `attach`, `ask`, `review`, `engine`, `runner`, `start`, `pause`, `resume`, `config`, `stop`, `mcp`, `status`, `task`, `project`, `history`, `stats`, `capacity`, `top`, `cancel`, `agent`, `agents`, `plan`, `budget`, `recover`, `diff`, `land`, `push`, `logs`, `version` and `help`. The subcommands are `instructions diff`; `task submit` and `task retire`; `project foreman`, `project list`, `project set`, `project show` and `project import`; `agent reset`; `agents add`; `plan approve` and `plan reject`; `land approve` and `land reject`; `push approve`; and `hold yield` and `hold confirm`, which stay as no-ops that always exit 0. A bare `brigada` is `attach`. Their names and subcommand names keep working.
 
 **The CLI flags.** Every command takes `--state-dir DIR` and `--config PATH`. A command's other flags are frozen only where they are listed here; anything else its `--help` prints may change. The frozen flags:
 
@@ -18,7 +18,8 @@ What brigada 1.0 promises until 2.0.
 - `engine`: `--idle-minutes`.
 - `runner`: `--harness`, `--model`, `--worker-script`, `--agent-file`, `--classes`, `--labels`, `--max-parallel`, `--agent` (repeatable), `--no-start`.
 - `start`, `config`, `version`, `agents`, `hold yield`, `hold confirm`: no flags beyond the common two.
-- `stop`: `--engine`.
+- `pause`, `resume`: `--repo`, `--no-start`. An empty `--repo` (and its absence) is the engine's scope.
+- `stop`: `--engine`, `--drain` (which needs `--engine`: pause the engine and wait out its running jobs before stopping).
 - `mcp`: `--coordinator`, `--client`, `--socket`.
 - `status`: `--line`, `--all`, `--no-start`.
 - `task submit`: `--repo`, `--base`, `--spec`, `--check`, `--title`, `--harness`, `--no-start`.
