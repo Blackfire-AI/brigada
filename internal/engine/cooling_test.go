@@ -138,6 +138,60 @@ func TestAllQualifyingAgentsCoolingHolds(t *testing.T) {
 	}
 }
 
+// TestPinnedJobOnZeroCappedAgentParksNamingIt (issue #195): a job pinned
+// to an agent whose model or account is capped at 0 has no candidate, so
+// it is neither cap-held at that layer nor cooling-held when the agent
+// also cools; the queue TTL parks it and the reason names the pin and the
+// zero cap.
+func TestPinnedJobOnZeroCappedAgentParksNamingIt(t *testing.T) {
+	for _, layer := range []string{"model", "account"} {
+		for _, cool := range []bool{false, true} {
+			name := layer
+			if cool {
+				name += " cooling"
+			}
+			t.Run(name, func(t *testing.T) {
+				e := newEnvCfg(t, func(c *Config) {
+					c.RunnerStale = time.Hour // the runner stays seen: no broken agent
+					if layer == "model" {
+						c.Caps.Model = map[string]int{"gpt-5": 0}
+					} else {
+						c.Caps.Account = map[string]int{"work": 0}
+					}
+				})
+				codex := e.addAgent(e.runner1, "codex", "gpt-5", "work")
+				if cool {
+					e.coolUntil(codex, time.Hour) // longer than the TTL
+				}
+				fix := e.pinnedFix(codex)
+
+				e.elapse(5 * time.Minute)
+				if g := e.lease(e.runner1, nil, nil); g != nil {
+					t.Fatalf("leased job %d on an agent capped at 0", g.JobID)
+				}
+				e.mustSweep()
+				if got := e.heldLayer(fix.JobID); got != "" {
+					t.Errorf("hold layer = %q, want none: a zero cap is an unmet placement", got)
+				}
+				if layers := e.capHeldLayers(fix.JobID); len(layers) != 0 {
+					t.Errorf("job_cap_held events = %v, want none", layers)
+				}
+
+				e.elapse(5*time.Minute + time.Second)
+				if status := e.str("SELECT status FROM jobs WHERE id = ?", fix.JobID); status != statusFailed {
+					t.Fatalf("status = %q, want failed by the queue TTL", status)
+				}
+				result := e.str("SELECT result FROM jobs WHERE id = ?", fix.JobID)
+				for _, want := range []string{"queue TTL exceeded", "pinned to codex/gpt-5", "capped at 0 at the " + layer + " layer"} {
+					if !strings.Contains(result, want) {
+						t.Errorf("result = %q, want it to contain %q", result, want)
+					}
+				}
+			})
+		}
+	}
+}
+
 // TestPinnedJobOnBrokenAgentParksNamingIt: a broken pin has no end in
 // sight, so it is not held; the TTL parks it and the reason names the
 // pinned agent and its state.

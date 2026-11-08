@@ -486,18 +486,28 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 			if x.requireAgent != 0 {
 				// A pin on a broken agent has no end in sight, so it is not
 				// held (a cooling one is, see holdCoolingTx); the park names
-				// the pin and the state instead of blaming the runners.
-				var harness, model, health, why string
-				err := tx.QueryRow("SELECT harness, model, health, health_reason FROM agents WHERE id = ?", x.requireAgent).
-					Scan(&harness, &model, &health, &why)
+				// the pin and the state instead of blaming the runners. A pin
+				// on an agent capped at exactly 0 is the same: it never
+				// takes the job, so it is no candidate and holds nothing
+				// (issue #195), and the park names the pin and the layer.
+				var harness, model, account, health, why string
+				err := tx.QueryRow("SELECT harness, model, account, health, health_reason FROM agents WHERE id = ?", x.requireAgent).
+					Scan(&harness, &model, &account, &health, &why)
 				if err != nil && !errors.Is(err, sql.ErrNoRows) {
 					return rep, fmt.Errorf("read the pinned agent %d: %w", x.requireAgent, err)
 				}
+				state := ""
 				if err == nil && health == "broken" {
-					state := "broken"
+					state = "broken"
 					if why != "" {
 						state += ": " + why
 					}
+				} else if err == nil {
+					if layer := zeroCapLayer(e.cfg.Caps, Kind(x.kind), account, model); layer != "" {
+						state = "capped at 0 at the " + layer + " layer"
+					}
+				}
+				if state != "" {
 					reason = fmt.Sprintf("queue TTL exceeded: job pinned to %s/%s (%s); no runner leased the job within %s",
 						harness, model, state, capText(e.cfg.QueueTTL))
 				}

@@ -87,6 +87,8 @@ func reviewAuthorKnownFamilyTx(tx *sql.Tx, j *jobRow) (int64, string, error) {
 // any review-class agent but the author's own. A pinned job (a
 // re-review on its reviewer's session) has its agent for the winning
 // step whatever its family. runner 0 ranks over every registered agent.
+// A reviewer whose model or account is capped at exactly 0 is never
+// placed, as in qualifyingAgentsTx (issue #195).
 func preferReviewAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
 	author, authorFamily, err := reviewAuthorKnownFamilyTx(tx, j)
 	if err != nil {
@@ -96,6 +98,10 @@ func preferReviewAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner in
 	if err != nil {
 		return nil, err
 	}
+	// A reviewer capped at exactly 0 can never take the review (issue
+	// #195): it is left out before the steps are drawn, so a step of
+	// such reviewers alone is no step to wait on, and no candidate.
+	rows = dropZeroCapped(cfg.Caps, j.Kind, rows)
 	steps := reviewFamilySteps(rows, author, authorFamily)
 	winning, first := -1, -1
 	for i, step := range steps {

@@ -2367,7 +2367,18 @@ func TestTopKeepPrevious(t *testing.T) {
 	}
 }
 
+// pinUTF8Env pins the environment the snapshot's caps are read from to a
+// UTF-8 terminal, as TestTopSnapshotGolden does, so a host with a C
+// locale or TERM=dumb does not render the ASCII fallback.
+func pinUTF8Env(t *testing.T) {
+	t.Helper()
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("LANG", "en_US.UTF-8")
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+}
+
 func TestPrintTopSnapshot(t *testing.T) {
+	pinUTF8Env(t)
 	fake := &fakeTop{
 		status:   busyTopModel().status,
 		capacity: busyTopModel().capacity,
@@ -2405,6 +2416,7 @@ func topEventRowCount(lines []string) int {
 // TestTopSnapshotShowsTenEvents: the piped snapshot renders with height 0,
 // so 12 events show as the newest 10 rows, #12 first.
 func TestTopSnapshotShowsTenEvents(t *testing.T) {
+	pinUTF8Env(t)
 	fake := &fakeTop{
 		status:   busyTopModel().status,
 		capacity: busyTopModel().capacity,

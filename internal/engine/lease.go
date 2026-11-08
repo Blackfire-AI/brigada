@@ -953,7 +953,9 @@ func ranksBefore(a, b *agentCand) bool {
 
 // leaseAgentsTx ranks the agents the lease may pick from (§8, §8.1): the
 // runner's agents matching the job's harness constraint, ready and out
-// of cooling at now, offering the job kind's class, and passing the
+// of cooling at now, not capped at exactly 0 for the job's kind (the
+// account cap, and the model cap for all but a foreman turn — issue
+// #195), offering the job kind's class, and passing the
 // review family rule when the job carries one (§7, §8) — cross-family
 // alone under review.family=require, the family steps of issue #126
 // under prefer — sampled by
@@ -972,7 +974,9 @@ func leaseAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j 
 // Runner 0 ranks all registered agents for an automatic restart's pin. A
 // caller that only asks who qualifies passes a nil rnd and gets id order.
 // A review under review.family=prefer is placed by preferReviewAgentsTx
-// instead (issue #126): its family steps read availability.
+// instead (issue #126): its family steps read availability. An agent
+// capped at exactly 0 for the job's kind is never returned (issue #195),
+// so an automatic retry never pins one.
 func eligibleAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
 	return qualifyingAgentsTx(tx, cfg, rnd, runner, j, class, now, false)
 }
@@ -982,7 +986,11 @@ func eligibleAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64,
 // those that qualify for the job by pin, harness, class and family rule
 // but cannot take it yet — with their model, health and cooling
 // deadline filled in: what the cooling hold (§8.1) and the queue-TTL
-// park reason read. Unpinned task jobs are restricted to the served tier
+// park reason read. Either way an agent whose account — or, for any kind
+// but a foreman turn, whose model — is capped at exactly 0 is left out
+// (zeroCapLayer, issue #195): it can never take the job, so it is not a
+// candidate, an automatic retry's pin or what the cooling hold waits on;
+// a merely full cap is the lease's cap gate, as before. Unpinned task jobs are restricted to the served tier
 // before availability is checked: the task's effective tier for a work or
 // fix job, the review tier for a review (jobTierTx). A review retry's agent exclusion is
 // applied as the preference it is (§7): the lift is decided inside
@@ -1025,7 +1033,10 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 		return nil, err
 	}
 	var cands []agentCand
-	for _, c := range rows {
+	// An agent capped at exactly 0 for this kind of job is dropped
+	// whatever unavailable says (issue #195): a pin on one gets no
+	// candidate, an unmet placement the queue TTL parks.
+	for _, c := range dropZeroCapped(limits, j.Kind, rows) {
 		tier := limits.TierOf(c.harness, c.model)
 		if served != "" && tier != served {
 			continue
@@ -1103,6 +1114,38 @@ func cappedAtZero(limits caps.Limits, account, model string) bool {
 	}
 	n, ok := limits.Account[account]
 	return ok && n == 0
+}
+
+// zeroCapLayer names the cap layer — caps.LayerAccount or
+// caps.LayerModel — that is configured as exactly 0 on an agent's path
+// for a job of the given kind, or "" when none is (§8.1, issue #195). It
+// follows caps.Room's exemptions: a foreman turn ignores the model cap,
+// so only an account capped at 0 shuts an agent out of one; every other
+// kind is shut out by either. An agent so capped can never take the job,
+// so the placement drops it outright: it is neither a candidate nor an
+// agent the cooling hold waits on.
+func zeroCapLayer(limits caps.Limits, kind Kind, account, model string) string {
+	if n, ok := limits.Account[account]; ok && n == 0 {
+		return caps.LayerAccount
+	}
+	if kind != KindForeman {
+		if n, ok := limits.Model[model]; ok && n == 0 {
+			return caps.LayerModel
+		}
+	}
+	return ""
+}
+
+// dropZeroCapped removes the agents zeroCapLayer shuts out of a job of
+// the given kind, keeping the rest in order.
+func dropZeroCapped(limits caps.Limits, kind Kind, rows []agentCand) []agentCand {
+	kept := rows[:0:0]
+	for _, c := range rows {
+		if zeroCapLayer(limits, kind, c.account, c.model) == "" {
+			kept = append(kept, c)
+		}
+	}
+	return kept
 }
 
 // tierServed prefers the asked tier, then climbs, then steps down from

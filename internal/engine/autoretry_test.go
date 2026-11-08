@@ -137,6 +137,89 @@ func TestTransientWorkFailureParksWithoutEligibleOtherAgent(t *testing.T) {
 	}
 }
 
+// zeroCapRetryEnv builds the issue #195 fixture: the author, an agent of
+// the served tier capped at 0 on the given layer whose outcome record and
+// cost the retry's draw would favour, and — with withOther — a costlier,
+// weaker agent of the same tier that can take the job.
+func zeroCapRetryEnv(t *testing.T, layer string, withOther bool) (e *env, author, zero, other int64) {
+	t.Helper()
+	e = newEnvCfg(t, func(c *Config) {
+		switch layer {
+		case "model":
+			c.Caps.Model = map[string]int{"zero-1": 0}
+		case "account":
+			c.Caps.Account = map[string]int{"zero": 0}
+		}
+		c.Caps.Tier = map[string]string{"author/author-1": "standard", "zero/zero-1": "standard", "other/other-1": "standard"}
+		c.Caps.Cost = map[string]int{"other/other-1": 5}
+	})
+	author = e.agented("author", "author", "implement")
+	zero = e.agentOf(e.agented("zero", "zero", "implement"))
+	e.record(zero, 20, 20)
+	if withOther {
+		other = e.agentOf(e.agented("other", "other", "implement"))
+		e.record(other, 20, 1)
+	}
+	return e, author, zero, other
+}
+
+// TestAutomaticRestartNeverPinsZeroCappedAgent (issue #195): an agent
+// capped at 0 is no retry candidate, however the draw would rank it, so
+// the restart pins the agent that can take the job.
+func TestAutomaticRestartNeverPinsZeroCappedAgent(t *testing.T) {
+	for _, layer := range []string{"model", "account"} {
+		t.Run(layer, func(t *testing.T) {
+			e, author, zero, other := zeroCapRetryEnv(t, layer, true)
+			e.submit(e.work())
+			g := e.leaseAny(author)
+			if g == nil {
+				t.Fatal("the author leased nothing")
+			}
+			e.complete(g, Completion{Error: "worker CLI failed: temporarily unavailable", ErrorKind: "other"})
+			retry := e.int("SELECT COALESCE(MAX(id), 0) FROM jobs WHERE task_id = ? AND restart = 1", e.task)
+			if retry == 0 {
+				t.Fatal("no restart queued, want one pinned to the placeable agent")
+			}
+			pin := e.int("SELECT require_agent FROM jobs WHERE id = ?", retry)
+			if pin == zero {
+				t.Fatalf("retry pinned to agent %d, capped at 0 at the %s layer", zero, layer)
+			}
+			if pin != other {
+				t.Errorf("retry pin = %d, want the placeable agent %d", pin, other)
+			}
+		})
+	}
+}
+
+// TestAutomaticRestartSkipsWhenOnlyZeroCappedRemains (issue #195): with
+// the class's only other agent capped at 0, nothing restarts and the task
+// fails as usual instead of queueing a job no agent can ever take.
+func TestAutomaticRestartSkipsWhenOnlyZeroCappedRemains(t *testing.T) {
+	for _, layer := range []string{"model", "account"} {
+		t.Run(layer, func(t *testing.T) {
+			e, author, _, _ := zeroCapRetryEnv(t, layer, false)
+			e.submit(e.work())
+			g := e.leaseAny(author)
+			if g == nil {
+				t.Fatal("the author leased nothing")
+			}
+			e.complete(g, Completion{Error: "worker CLI failed", ErrorKind: "other"})
+			if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+				t.Errorf("task state = %s, want needs_foreman", state)
+			}
+			if n := e.countEvents(evTaskRestarted); n != 0 {
+				t.Errorf("restart events = %d, want none", n)
+			}
+			if n := e.countEvents(evTaskFailed); n != 1 {
+				t.Errorf("failure events = %d, want one", n)
+			}
+			if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ?", e.task); n != 1 {
+				t.Errorf("task jobs = %d, want only the failed work", n)
+			}
+		})
+	}
+}
+
 func TestSecondTransientWorkFailureParks(t *testing.T) {
 	e := newEnv(t)
 	first := e.agented("first", "a", "implement")
