@@ -1067,9 +1067,10 @@ the brand mark `▙ brigada` (the word alone without UTF-8; only the `▙` is co
 and a slots row, which a band replaces while the engine is failing or the view is paused —
 the global slots against their cap as a `━` meter of up to 18 cells with `3/8 slots` beside it, then the run, queue, held and needs counters at the right end —
 then one rounded box per section, one column at every width with no blank row between boxes: the needs-you queue, the plans tree, the agents section —
-the agents in two columns of equal width, filled row by row, when the box is 72 columns wide inside or more, and in one column below that.
-An agent's cell is a mark, its `harness/model` padded to the widest listed name, its running jobs against its effective cap and its quota text:
+the agents in two columns of equal width, filled row by row, when every listed cell fits its column whole, and in one column otherwise (a broken agent's longer reason does not count toward the fit and is cut at the end of its cell).
+An agent's cell is a mark, its `harness/model` padded to the widest listed name, its tag, its running jobs against its effective cap and its quota text:
 the mark is a green `●` when the quota is ready, a yellow `↺` and `until HH:MM` while cooling, or a red `✗` and a short reason when broken (`broken` when the needs-you queue has no reason), and the reason is cut to its cell;
+the tag is the tier's first letter in upper case (`?` for none), a `×` (`x` without UTF-8) and the cost weight, as `H×3`, `S×2` or `L×1`, dim, padded to the widest listed tag;
 the running jobs are one cell per slot of the effective cap as `brigada capacity` folds it — its own cap with the global cap folded in — filled up to the running count, as `■□□`, and an agent with no cap, a cap of 0 or a cap over 8 shows `brigada capacity`'s text, as `2/none`, instead.
 A running agent's name takes its family's colour — violet for claude, blue for glm, mint for dsh, dim for any other — and an idle agent's name is dim; the agent column of a running job line in PLANS, FOREMAN and JOBS takes the same colour.
 The broken and cooling agents come first, then the running ones, then the idle ones, and an agent that is off — an effective cap of 0, nothing running, a ready quota — never lists.

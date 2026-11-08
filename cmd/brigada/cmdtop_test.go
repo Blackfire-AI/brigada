@@ -1882,45 +1882,53 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 		want   []string
 		lacks  []string
 	}{
-		{"everything fits", 20, 20, []string{
+		{"everything fits", 21, 21, []string{
 			"#1 fix the frobnicator",
 			"╭─ AGENTS  all ≤ global 8 ─",
-			"↺ codex/g...  □□□□□□□□  until 16:04  ✗ claude/...  ■■□□□□□□  login ex...",
+			"↺ codex/gpt-5",
+			"S×2  □□□□□□□□  until 16:04",
+			"✗ claude/sonnet-long-name  L×1  ■■□□□□□□  login expired",
+			"● claude/opus",
 			"╭─ EVENTS ─",
 			"15:02  review      approve  task/3-1-oil-the-gears-after-the-frobnica...",
 		}, nil},
-		{"event row 2", 19, 19, []string{
+		{"event row 2", 20, 20, []string{
 			"╭─ EVENTS ─",
 			"15:02  task    #3  done     oil the gears",
 		}, []string{"review "}},
-		{"the held line", 18, 18, []string{
+		{"the held line", 19, 19, []string{
 			"  ! #2 wire the sprocket should the sprocket be blue?",
 			"  ▸ #3  oil the gears",
 		}, []string{"? #4  polish the knobs  held"}},
-		{"the parked line", 17, 17, []string{
+		{"the parked line", 18, 18, []string{
 			"  ▸ #3  oil the gears",
 		}, []string{"? #4  polish the knobs", "wire the sprocket should"}},
-		{"the running line", 16, 16, []string{
+		{"the running line", 17, 17, []string{
 			"#1 fix the frobnicator",
 			"╭─ EVENTS ─",
 			"15:02  task    #3  done     oil the gears",
 		}, []string{"▸ #3  oil the gears  "}},
 		// The class h drop of event row 1 takes its box with it and leaves a
 		// free row, which goes back to the running line.
-		{"event row 1, its box goes with it, a spare row returns", 15, 14, []string{
+		{"event row 1, its box goes with it, a spare row returns", 16, 15, []string{
 			"#1 fix the frobnicator",
 			"▸ #3",
 			"╭─ AGENTS  all ≤ global 8 ─",
 		}, []string{"EVENTS", "task    #3  done"}},
-		// The agents list broken and cooling first, then running, so the
-		// running agent's row is the last and the first to go.
-		{"the running agent's row", 12, 12, []string{
-			"until 16:04  ✗ claude/...  ■■□□□□□□  login ex...",
-		}, []string{"● claude/..."}},
-		{"the broken and cooling row, its box goes with it", 11, 10, []string{
+		// The agents list cooling and broken first, then running, so the
+		// running agent's row is the last and the first to go, the broken
+		// one's next.
+		{"the running agent's row", 13, 13, []string{
+			"↺ codex/gpt-5",
+			"✗ claude/sonnet-long-name  L×1  ■■□□□□□□  login expired",
+		}, []string{"● claude/opus"}},
+		{"the broken agent's row", 12, 12, []string{
+			"↺ codex/gpt-5",
+		}, []string{"● claude/opus", "✗ claude/sonnet-long-name  L×1"}},
+		{"the cooling row, its box goes with it", 11, 10, []string{
 			"#1 fix the frobnicator",
 			"▸ #3",
-		}, []string{"AGENTS", "codex/g...", "until 16:04"}},
+		}, []string{"AGENTS", "codex/gpt-5", "until 16:04"}},
 		{"the plan line, its box goes with it", 8, 6, []string{
 			"! claude/sonnet-long-n...  → brigada agent reset claude/sonnet-long-name",
 		}, []string{"PLANS", "#1 fix the frobnicator"}},
@@ -2194,7 +2202,7 @@ func otherProjectsFake(scoped api.Status) *fakeTop {
 		status:       unscoped,
 		scopedStatus: &scoped,
 		capacity: engine.CapacitySnapshot{Agents: []engine.CapacityAgent{
-			{Harness: "claude", Model: "opus", CapLayer: "none", Quota: "broken"},
+			{Harness: "claude", Model: "opus", CapLayer: "none", Quota: "broken", Tier: "heavy", Cost: 3},
 		}},
 		projects: []engine.ProjectInfo{{ProjectID: 7, RepoURL: "https://example.invalid/r.git"}},
 	}
@@ -2223,7 +2231,7 @@ func TestTopProjectKeepsBrokenAgentsAndNothingElse(t *testing.T) {
 		t.Fatalf("NeedsYou = %+v, want the task, then the agent", model.status.NeedsYou)
 	}
 	got := plainTop(model, 100, 0)
-	for _, want := range []string{"! #3 own task entry", "! claude/opus login expired", "own project plan", "✗ claude/opus  0/none  login expired", "2 needs"} {
+	for _, want := range []string{"! #3 own task entry", "! claude/opus login expired", "own project plan", "✗ claude/opus  H×3  0/none  login expired", "2 needs"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("frame lacks %q:\n%s", want, got)
 		}
@@ -2248,7 +2256,7 @@ func TestTopProjectAgentSurvivesTheCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := plainTop(model, 100, 0)
-	for _, want := range []string{"! #1 own task entry", "! #2 own task entry", "! claude/opus login expired", "+2 more", "✗ claude/opus  0/none  login expired"} {
+	for _, want := range []string{"! #1 own task entry", "! #2 own task entry", "! claude/opus login expired", "+2 more", "✗ claude/opus  H×3  0/none  login expired"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("frame lacks %q:\n%s", want, got)
 		}
@@ -2975,17 +2983,17 @@ func agentsModel() topModel {
 	four := 4
 	cool := topNow.Add(time.Hour).UTC().Format(engine.TimeLayout)
 	model.capacity.Agents = []engine.CapacityAgent{
-		{Harness: "claude", Model: "opus", Cap: &four, CapLayer: "runner", Running: 1, Quota: "ready"},
-		{Harness: "codex", Model: "gpt-5", CapLayer: "none", Quota: "cooling", CoolingUntil: cool},
-		{Harness: "claude", Model: "sonnet-long-name", CapLayer: "none", Running: 2, Quota: "broken"},
+		{Harness: "claude", Model: "opus", Cap: &four, CapLayer: "runner", Running: 1, Quota: "ready", Tier: "heavy", Cost: 3},
+		{Harness: "codex", Model: "gpt-5", CapLayer: "none", Quota: "cooling", CoolingUntil: cool, Tier: "standard", Cost: 2},
+		{Harness: "claude", Model: "sonnet-long-name", CapLayer: "none", Running: 2, Quota: "broken", Tier: "light", Cost: 1},
 	}
 	model.status.NeedsYou = append(model.status.NeedsYou,
 		engine.NeedsYouItem{Kind: "agent", ID: 7, State: "broken", Title: "claude/sonnet-long-name", Reason: "login expired"})
 	return model
 }
 
-// TestTopAgentsOneColumn: under 72 inner columns the agents list one per
-// row; the marks, the cells and the quota text read per state, and the
+// TestTopAgentsOneColumn: when two cells do not fit whole the agents list one
+// per row, each with its tag; the marks, the cells and the quota text read per state, and the
 // styled text is the plain text with colour.
 func TestTopAgentsOneColumn(t *testing.T) {
 	model := agentsModel()
@@ -3000,9 +3008,9 @@ func TestTopAgentsOneColumn(t *testing.T) {
 	cool := topNow.Add(time.Hour).In(topNow.Location()).Format("15:04")
 	wants := []string{
 		// Broken and cooling agents first, then the running one.
-		"↺ " + fmt.Sprintf("%-23s", "codex/gpt-5") + "  □□□□□□□□  until " + cool,
-		"✗ claude/sonnet-long-name  ■■□□□□□□  login expired",
-		"● " + fmt.Sprintf("%-23s", "claude/opus") + "  ■□□□",
+		"↺ " + fmt.Sprintf("%-23s", "codex/gpt-5") + "  S×2  □□□□□□□□  until " + cool,
+		"✗ claude/sonnet-long-name  L×1  ■■□□□□□□  login expired",
+		"● " + fmt.Sprintf("%-23s", "claude/opus") + "  H×3  ■□□□",
 	}
 	for i, w := range wants {
 		if got[1+i] != w {
@@ -3021,37 +3029,130 @@ func TestTopAgentsOneColumn(t *testing.T) {
 	}
 }
 
-// TestTopAgentsTwoColumns: from 72 inner columns the agents fill two columns
-// of equal width row by row, the names padded to the widest listed name.
-func TestTopAgentsTwoColumns(t *testing.T) {
+// fitModel is five agents of four cells each, one broken, one cooling: a cell
+// needs 48 columns (mark 1, space, name 22, gap, tag 3, gap, cells 4, gap,
+// `until HH:MM` 11), so two columns fit from 98.
+func fitModel() topModel {
 	four := 4
 	model := busyTopModel()
 	model.capacity.Layers = nil
 	cool := topNow.Add(time.Hour).UTC().Format(engine.TimeLayout)
 	model.capacity.Agents = []engine.CapacityAgent{
-		{Harness: "claude", Model: "sonnet", Cap: &four, CapLayer: "runner", Running: 1, Quota: "ready"},
-		{Harness: "claude", Model: "opus", Cap: &four, CapLayer: "runner", Quota: "ready"},
-		{Harness: "dsh", Model: "deepseek-flash", Cap: &four, CapLayer: "runner", Quota: "broken"},
-		{Harness: "opencode", Model: "zai-coding-plan/glm-5.3-flash", Cap: &four, CapLayer: "runner", Quota: "cooling", CoolingUntil: cool},
-		{Harness: "claude", Model: "haiku", Cap: &four, CapLayer: "runner", Quota: "ready"},
+		{Harness: "claude", Model: "sonnet", Cap: &four, CapLayer: "runner", Running: 1, Quota: "ready", Tier: "standard", Cost: 2},
+		{Harness: "claude", Model: "opus", Cap: &four, CapLayer: "runner", Quota: "ready", Tier: "heavy", Cost: 3},
+		{Harness: "dsh", Model: "deepseek-flash", Cap: &four, CapLayer: "runner", Quota: "broken", Tier: "light", Cost: 1},
+		{Harness: "opencode", Model: "zai-coding-plan/glm-5.3-flash", Cap: &four, CapLayer: "runner", Quota: "cooling", CoolingUntil: cool, Tier: "light", Cost: 1},
+		{Harness: "claude", Model: "haiku", Cap: &four, CapLayer: "runner", Quota: "ready", Tier: "light", Cost: 1},
 	}
 	model.status.NeedsYou = []engine.NeedsYouItem{{Kind: "agent", State: "broken", Title: "dsh/deepseek-flash", Reason: "login expired"}}
-	got := topAgents(model, topNow, term.New(logo.Caps{UTF8: true}), 90)
+	return model
+}
+
+// TestTopAgentsTwoColumns: when two cells fit whole the agents fill two
+// columns of equal width row by row, the names padded to the widest listed
+// name and the tags to the widest tag.
+func TestTopAgentsTwoColumns(t *testing.T) {
+	model := fitModel()
+	got := topAgents(model, topNow, term.New(logo.Caps{UTF8: true}), 98)
 	clock := topNow.Add(time.Hour).In(topNow.Location()).Format("15:04")
+	name := func(s string) string { return fmt.Sprintf("%-22s", s) }
 	want := []string{
 		"AGENTS",
 		// Broken and cooling first, then running, then idle.
-		"✗ dsh/deepseek-flash      □□□□  login exp...  ↺ opencode/glm-5.3-flash  □□□□  until " + clock,
-		"● claude/sonnet           ■□□□                ● claude/opus             □□□□",
-		"● claude/haiku            □□□□",
+		"✗ " + name("dsh/deepseek-flash") + "  L×1  □□□□  login ex...  ↺ opencode/glm-5.3-flash  L×1  □□□□  until " + clock,
+		"● " + name("claude/sonnet") + "  S×2  ■□□□" + strings.Repeat(" ", 15) + "● " + name("claude/opus") + "  H×3  □□□□",
+		"● " + name("claude/haiku") + "  L×1  □□□□",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("rows:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	for _, line := range got[1:] {
-		if i := strings.Index(line, "  ↺"); i >= 0 && utf8.RuneCountInString(line[:i]) != 44 {
-			t.Errorf("the second column starts at %d, want 44: %q", utf8.RuneCountInString(line[:i]), line)
+		if i := strings.Index(line, "  ↺"); i >= 0 && utf8.RuneCountInString(line[:i]) != 48 {
+			t.Errorf("the second column starts at %d, want 48: %q", utf8.RuneCountInString(line[:i]), line)
 		}
+	}
+}
+
+// TestTopAgentsColumnBoundary: one column one cell short of the width that
+// fits two whole cells, two columns at it.
+func TestTopAgentsColumnBoundary(t *testing.T) {
+	model := fitModel()
+	plain := term.New(logo.Caps{UTF8: true})
+	if got := topAgents(model, topNow, plain, 97); len(got) != 6 {
+		t.Errorf("at 97: %d lines, want one column (head and 5 agents):\n%s", len(got), strings.Join(got, "\n"))
+	}
+	if got := topAgents(model, topNow, plain, 98); len(got) != 4 {
+		t.Errorf("at 98: %d lines, want two columns (head and 3 rows):\n%s", len(got), strings.Join(got, "\n"))
+	}
+}
+
+// TestTopAgentsTag: the tag is the tier's letter, the times sign and the cost
+// weight, `?` for an empty tier, `x` for the sign without UTF-8, and Dim.
+func TestTopAgentsTag(t *testing.T) {
+	utf := term.New(logo.Caps{UTF8: true})
+	ascii := term.New(logo.Caps{})
+	for _, tt := range []struct {
+		tier       string
+		cost       int
+		utf, ascii string
+	}{
+		{"heavy", 3, "H×3", "Hx3"},
+		{"standard", 2, "S×2", "Sx2"},
+		{"light", 1, "L×1", "Lx1"},
+		{"", 4, "?×4", "?x4"},
+	} {
+		a := engine.CapacityAgent{Tier: tt.tier, Cost: tt.cost}
+		if got := topAgentTag(a, utf); got != tt.utf {
+			t.Errorf("tag(%q, %d) = %q, want %q", tt.tier, tt.cost, got, tt.utf)
+		}
+		if got := topAgentTag(a, ascii); got != tt.ascii {
+			t.Errorf("ascii tag(%q, %d) = %q, want %q", tt.tier, tt.cost, got, tt.ascii)
+		}
+	}
+	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
+	rows := strings.Join(topAgents(fitModel(), topNow, colour, 98), "\n")
+	if !strings.Contains(rows, colour.Dim("S×2")) {
+		t.Errorf("the tag is not Dim:\n%q", rows)
+	}
+	plain := strings.Join(topAgents(fitModel(), topNow, ascii, 120), "\n")
+	if !strings.Contains(plain, "Sx2") || strings.Contains(plain, "×") {
+		t.Errorf("ASCII tags:\n%s", plain)
+	}
+}
+
+// TestTopAgentsTagPadding: a two-digit cost widens every tag to 4 cells, so
+// the cells after it stay aligned.
+func TestTopAgentsTagPadding(t *testing.T) {
+	two := 2
+	model := busyTopModel()
+	model.capacity.Layers = nil
+	model.capacity.Agents = []engine.CapacityAgent{
+		{Harness: "claude", Model: "opus", Cap: &two, CapLayer: "runner", Running: 1, Quota: "ready", Tier: "heavy", Cost: 10},
+		{Harness: "claude", Model: "haiku", Cap: &two, CapLayer: "runner", Running: 1, Quota: "ready", Tier: "light", Cost: 1},
+	}
+	got := topAgents(model, topNow, term.New(logo.Caps{UTF8: true}), 40)
+	want := []string{
+		"AGENTS",
+		"● claude/opus   H×10  ■□",
+		"● claude/haiku  L×1   ■□",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("rows:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestTopAgentsLongReasonKeepsColumns: a broken agent's reason longer than
+// `until HH:MM` does not count toward the fit, so two columns stay, and the
+// reason is cut at the end of its cell.
+func TestTopAgentsLongReasonKeepsColumns(t *testing.T) {
+	model := fitModel()
+	model.status.NeedsYou[0].Reason = strings.Repeat("login expired ", 6)
+	got := topAgents(model, topNow, term.New(logo.Caps{UTF8: true}), 98)
+	if len(got) != 4 {
+		t.Fatalf("%d lines, want two columns (head and 3 rows):\n%s", len(got), strings.Join(got, "\n"))
+	}
+	if !strings.Contains(got[1], "  login ex...  ↺ ") {
+		t.Errorf("the long reason is not cut at its cell's end: %q", got[1])
 	}
 }
 
@@ -3077,8 +3178,8 @@ func TestTopAgentsCells(t *testing.T) {
 		{"over 8", engine.CapacityAgent{Cap: &nine, CapLayer: "runner", Running: 1}, nil, "1/9 (runner)"},
 	} {
 		tt.agent.Harness, tt.agent.Model, tt.agent.Quota = "a", "b", "ready"
-		cell := topAgentCell(tt.agent, tt.g, "a/b", 3, 60, "", topNow, plain)
-		if want := "● a/b  " + tt.want; cell != want {
+		cell := topAgentCell(tt.agent, tt.g, "a/b", 3, "S×2", 60, "", topNow, plain)
+		if want := "● a/b  S×2  " + tt.want; cell != want {
 			t.Errorf("%s: cell = %q, want %q", tt.name, cell, want)
 		}
 	}
@@ -3092,7 +3193,7 @@ func TestTopAgentsBrokenFallbackAndCut(t *testing.T) {
 	model.status.NeedsYou = model.status.NeedsYou[:1]
 	plain := term.New(logo.Caps{UTF8: true})
 	got := topAgents(model, topNow, plain, 71)
-	if !strings.HasSuffix(got[2], "✗ claude/sonnet-long-name  ■■□□□□□□  broken") {
+	if !strings.HasSuffix(got[2], "✗ claude/sonnet-long-name  L×1  ■■□□□□□□  broken") {
 		t.Errorf("fallback row = %q", got[2])
 	}
 	model = agentsModel()
@@ -3199,14 +3300,15 @@ func TestTopAgentsASCII(t *testing.T) {
 			}
 		}
 	}
-	if got := strings.Join(all, "\n"); !strings.Contains(got, "*  claude/opus") || !strings.Contains(got, "all <= global 8") {
+	if got := strings.Join(all, "\n"); !strings.Contains(got, "*  claude/opus") || !strings.Contains(got, "Hx3") || !strings.Contains(got, "all <= global 8") {
 		t.Errorf("ASCII frame:\n%s", got)
 	}
 }
 
 // TestTopAgentsBudget: class e of the drop order — idle agent rows leave
 // the AGENTS section first, uncounted; the busy, cooling and broken agents
-// stay. A row of two cells is idle only when both agents are.
+// stay. In two columns a row is idle only when both its agents are; here the
+// cells do not fit two columns, so each row is one agent's.
 func TestTopAgentsBudget(t *testing.T) {
 	model := agentsModel()
 	model.capacity.Agents = append(model.capacity.Agents,
@@ -3237,19 +3339,23 @@ func TestTopAgentsBudget(t *testing.T) {
 	if len(lines) != base || !strings.Contains(agentLines(lines), "codex/b") {
 		t.Errorf("at %d the idle agents are not all kept:\n%s", base, strings.Join(lines, "\n"))
 	}
-	// The row of two idle agents goes, with nothing counting it; the row
-	// that pairs the busy opus with an idle one stays.
+	// One column: the idle agents' rows go one by one from the bottom.
 	lines = renderTop(model, 76, base-1, topNow, style)
 	got := agentLines(lines)
-	if len(lines) != base-1 || strings.Contains(got, "codex/b") || strings.Contains(got, "codex/c") ||
+	if len(lines) != base-1 || strings.Contains(got, "codex/c") || !strings.Contains(got, "codex/b") ||
 		!strings.Contains(got, "■□□□") || !strings.Contains(got, "codex/a") || strings.Contains(got, "idle") {
 		t.Errorf("at %d the AGENTS section is\n%s\nin\n%s", base-1, got, strings.Join(lines, "\n"))
 	}
+	lines = renderTop(model, 76, base-3, topNow, style)
+	got = agentLines(lines)
+	if len(lines) != base-3 || strings.Contains(got, "codex/a") || !strings.Contains(got, "until 16:04") || !strings.Contains(got, "■□□□") {
+		t.Errorf("at %d the AGENTS section is\n%s\nin\n%s", base-3, got, strings.Join(lines, "\n"))
+	}
 	// The cooling, the broken and the busy agent outlast the idle ones: the
 	// events row, the lowest of the rest, goes next, its borders with it.
-	lines = renderTop(model, 76, base-2, topNow, style)
+	lines = renderTop(model, 76, base-4, topNow, style)
 	got = agentLines(lines)
-	if len(lines) > base-2 || strings.Contains(strings.Join(lines, "\n"), "EVENTS") ||
+	if len(lines) > base-4 || strings.Contains(strings.Join(lines, "\n"), "EVENTS") ||
 		!strings.Contains(got, "until 16:04") || !strings.Contains(got, "login ex") || !strings.Contains(got, "■□□□") {
 		t.Errorf("at %d:\n%s", base-2, strings.Join(lines, "\n"))
 	}
@@ -4145,8 +4251,11 @@ func TestRenderTopASCIIWithoutUTF8(t *testing.T) {
 		"  ^ #5  ship it           landing: queued",
 		"  -> task #6 work: retry in 5m: dns",
 		"+- AGENTS  all <= global 8 ---",
-		"| -> codex/gpt-5  ........  until 16:04  x  claude/s...  ##......  login ex... |",
-		"| *  claude/opus  #...",
+		"| -> codex/gpt-5",
+		"Sx2  ........  until 16:04",
+		"| x  claude/sonnet-long-name  Lx1  ##......  login expired",
+		"| *  claude/opus",
+		"Hx3  #...",
 		"+- EVENTS ---",
 		" All landed. -+",
 		"| 15:02  task  #3  landed  oil the gears",
