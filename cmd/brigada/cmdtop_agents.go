@@ -32,12 +32,15 @@ const topAgentCellsMax = 8
 // has none. A running agent's name takes its family colour (topFamily), an
 // idle one's is Dim.
 //
-// The top border carries the note (topAgentNote). A row yields in the idle
-// class only when every agent in it is idle (no running job, quota neither
-// cooling nor broken), so the height drops idle rows first, uncounted. Off
-// agents (an effective cap of 0, nothing running, quota ready) never list.
-// The rest go broken and cooling first, then running, then idle, stable
-// inside a group.
+// The top border carries the note (topAgentNote), the bottom border the
+// count of listed agents that are broken (Bad) and cooling (Warn), as
+// `1 broken · 3 cooling`, left out when both are zero. A row yields in the
+// idle class only when every agent in it is idle (no running job, quota
+// neither cooling nor broken), so the height drops idle rows first,
+// uncounted. Off agents (an effective cap of 0, nothing running, quota ready)
+// never list. The rest go in the order of the full harness/model string,
+// byte by byte, so a row moves only when an agent is added or removed; state
+// shows through the mark and the colours alone.
 func topAgentLines(model topModel, now time.Time, style term.Style, width int) []topLine {
 	line := func(text string, class topYield) topLine {
 		return topLine{text: text, class: class, section: topSecAgents}
@@ -64,16 +67,25 @@ func topAgentLines(model topModel, now time.Time, style term.Style, width int) [
 		listed = append(listed, a)
 	}
 	box.note = topAgentNote(snap, g, off, style)
-	group := func(a engine.CapacityAgent) int {
-		switch {
-		case a.Quota == "broken" || a.Quota == "cooling":
-			return 0
-		case a.Running > 0:
-			return 1
+	key := func(a engine.CapacityAgent) string { return a.Harness + "/" + a.Model }
+	sort.SliceStable(listed, func(i, j int) bool { return key(listed[i]) < key(listed[j]) })
+	broken, cooling := 0, 0
+	for _, a := range listed {
+		switch a.Quota {
+		case "broken":
+			broken++
+		case "cooling":
+			cooling++
 		}
-		return 2
 	}
-	sort.SliceStable(listed, func(i, j int) bool { return group(listed[i]) < group(listed[j]) })
+	var foot []string
+	if broken > 0 {
+		foot = append(foot, style.Bad(fmt.Sprintf("%d broken", broken)))
+	}
+	if cooling > 0 {
+		foot = append(foot, style.Warn(fmt.Sprintf("%d cooling", cooling)))
+	}
+	box.foot = strings.Join(foot, topEventSep(style))
 	// The widest name sets the name column, but it gives way before the
 	// tag, the cells and the quota text of a cooling or broken agent do.
 	nameW, tagW, cellW, quotaW := 0, 0, 0, 0
