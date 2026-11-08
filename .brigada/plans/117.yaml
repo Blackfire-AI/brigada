@@ -5,9 +5,9 @@
 plan: 117
 title: "top: short agent names keep the harness (opencode/glm-5.3)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-08T16:23:05.270113Z
-updated: 2026-11-08T16:25:29.051373Z
+updated: 2026-11-08T16:34:55.726199Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -31,4 +31,15 @@ tasks:
     effort: low
     state: done
     branch: "brigada/task-394"
+    rounds: 0
+  - id: 395
+    name: "agents-tier-cost"
+    title: "top: AGENTS shows tier and cost, two columns only when they fit"
+    class: "implement"
+    deps: ["short-agent-harness"]
+    base: "short-agent-harness"
+    effort: medium
+    skills: ["surface-parity"]
+    state: pending
+    branch: ""
     rounds: 0
