@@ -30,8 +30,8 @@ tasks:
     tier: heavy
     effort: high
     skills: ["schema-migration"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-429"
     rounds: 0
   - id: 430
     name: "pause-clocks"
