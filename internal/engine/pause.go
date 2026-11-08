@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -166,7 +167,324 @@ func (e *Engine) liftScopeTx(tx *sql.Tx, project int64, lift func(*pauseRow) boo
 	if _, err := appendEventTx(tx, evDispatchResumed, project, 0, 0, eventPayload{Origin: live.origin, Caller: caller}, now); err != nil {
 		return err
 	}
+	if err := shiftFreedJobsTx(tx, project, now); err != nil {
+		return err
+	}
 	return e.evaluateHeldWakesTx(tx, now)
+}
+
+// pauseSpan is one stored pause interval as the held time reads it
+// (§8.3 "Clocks"): a pause that still stands spans up to now.
+type pauseSpan struct {
+	start, end time.Time
+}
+
+// scopeSpansTx reads every stored pause interval that covers the
+// project — the engine's own and the project's — each ended at its
+// lift, or at now while it stands (§8.3 "Clocks"). The rows are the
+// whole record: a lifted pause keeps its interval, so the held time is
+// derived from them, never stored beside them.
+func scopeSpansTx(tx *sql.Tx, project int64, now time.Time) ([]pauseSpan, error) {
+	rows, err := tx.Query(`SELECT started_at, COALESCE(ended_at, '') FROM pauses
+		WHERE project_id IS NULL OR project_id = ? ORDER BY started_at`, project)
+	if err != nil {
+		return nil, fmt.Errorf("read the pause intervals of project %d: %w", project, err)
+	}
+	defer rows.Close()
+	var spans []pauseSpan
+	for rows.Next() {
+		var started, ended string
+		if err := rows.Scan(&started, &ended); err != nil {
+			return nil, fmt.Errorf("read the pause intervals of project %d: %w", project, err)
+		}
+		s, err := parseTime(started)
+		if err != nil {
+			continue // an interval with no readable start holds nothing
+		}
+		end := now
+		if ended != "" {
+			if t, err := parseTime(ended); err == nil && t.Before(now) {
+				end = t
+			}
+		}
+		if end.After(s) {
+			spans = append(spans, pauseSpan{start: s, end: end})
+		}
+	}
+	return spans, rows.Err()
+}
+
+// mergeSpans folds overlapping and touching pause intervals into their
+// union, ordered by start: an engine pause and a project pause that
+// overlap count once (§8.3 "Clocks").
+func mergeSpans(spans []pauseSpan) []pauseSpan {
+	sorted := append([]pauseSpan(nil), spans...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].start.Before(sorted[j].start) })
+	var out []pauseSpan
+	for _, s := range sorted {
+		if n := len(out); n > 0 && !s.start.After(out[n-1].end) {
+			if s.end.After(out[n-1].end) {
+				out[n-1].end = s.end
+			}
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// heldWithin is the paused time within [from, to]: the length of the
+// union of the spans, each cut to the window — so a span that began
+// before from counts only from it, and overlapping spans count once.
+func heldWithin(spans []pauseSpan, from, to time.Time) time.Duration {
+	var held time.Duration
+	for _, s := range mergeSpans(spans) {
+		start, end := s.start, s.end
+		if start.Before(from) {
+			start = from
+		}
+		if end.After(to) {
+			end = to
+		}
+		if end.After(start) {
+			held += end.Sub(start)
+		}
+	}
+	return held
+}
+
+// heldSinceTx is the time a pause of the project or of the engine held
+// it since from (§8.3 "Clocks"): the union of the scope's pause
+// intervals within [from, now].
+func heldSinceTx(tx *sql.Tx, project int64, from, now time.Time) (time.Duration, error) {
+	spans, err := scopeSpansTx(tx, project, now)
+	if err != nil {
+		return 0, err
+	}
+	return heldWithin(spans, from, now), nil
+}
+
+// shiftFreedJobsTx is the clocks' half of a lift (§8.3 "Clocks"): every
+// queued job the lift frees — of a project neither scope pauses any
+// longer — has its queue-TTL clock and its retry's not-before shifted
+// by its held time, as the suspension rule shifts deadlines past a gap
+// (restartDeadlinesTx, §13), so a pause by itself never fails or parks
+// a job. The held time is the paused stretch that ends with this lift —
+// the merged engine and project intervals, so overlapping pauses count
+// once — taken from the later of the job's queuing and the stretch's
+// start, so a job queued mid-pause counts only its own wait. An earlier
+// stretch was shifted at its own lift and is never counted again. The
+// queue TTL reads queued_at, cap_held_at and not_before (sweepPolledTx
+// round 3), so all three move: queued_at and not_before by the held
+// time, a cap hold stamped during the pause no further than now. A lift
+// under a remaining scope frees nothing and shifts nothing yet. The
+// infra-retry window is not stored here: infraStreakSpentTx computes
+// its held time against the streak's start.
+func shiftFreedJobsTx(tx *sql.Tx, lifted int64, now time.Time) error {
+	engine, paused, err := livePausesTx(tx)
+	if err != nil {
+		return err
+	}
+	if engine || (lifted != 0 && paused[lifted]) {
+		return nil
+	}
+	query := `SELECT id, project_id, queued_at, COALESCE(cap_held_at, ''), COALESCE(not_before, '')
+		FROM jobs WHERE status = 'queued' AND queued_at IS NOT NULL`
+	var args []any
+	if lifted != 0 {
+		query += " AND project_id = ?"
+		args = append(args, lifted)
+	}
+	rows, err := tx.Query(query+" ORDER BY id", args...)
+	if err != nil {
+		return fmt.Errorf("read the queued jobs a lift frees: %w", err)
+	}
+	type queuedClock struct {
+		id, project                int64
+		queued, capHeld, notBefore string
+	}
+	var jobs []queuedClock
+	for rows.Next() {
+		var q queuedClock
+		if err := rows.Scan(&q.id, &q.project, &q.queued, &q.capHeld, &q.notBefore); err != nil {
+			rows.Close()
+			return fmt.Errorf("read the queued jobs a lift frees: %w", err)
+		}
+		jobs = append(jobs, q)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("read the queued jobs a lift frees: %w", err)
+	}
+	rows.Close()
+	// The stretch that ends now, per freed project: the merged segment
+	// of its scope's intervals whose end is this lift.
+	stretches := map[int64]*pauseSpan{}
+	for _, q := range jobs {
+		if paused[q.project] {
+			continue // the project's own pause still holds it
+		}
+		stretch, ok := stretches[q.project]
+		if !ok {
+			spans, err := scopeSpansTx(tx, q.project, now)
+			if err != nil {
+				return err
+			}
+			for _, s := range mergeSpans(spans) {
+				if !s.end.Before(now) {
+					s := s
+					stretch = &s
+				}
+			}
+			stretches[q.project] = stretch
+		}
+		if stretch == nil {
+			continue
+		}
+		queued, err := parseTime(q.queued)
+		if err != nil {
+			continue
+		}
+		from := stretch.start
+		if queued.After(from) {
+			from = queued
+		}
+		held := now.Sub(from)
+		if held <= 0 {
+			continue
+		}
+		var capHeld, notBefore any
+		if t, err := parseTime(q.capHeld); err == nil {
+			shifted := t.Add(held)
+			if shifted.After(now) {
+				shifted = now
+			}
+			capHeld = fmtTime(shifted)
+		}
+		if t, err := parseTime(q.notBefore); err == nil {
+			notBefore = fmtTime(t.Add(held))
+		}
+		if _, err := tx.Exec(`UPDATE jobs SET queued_at = ?, cap_held_at = COALESCE(?, cap_held_at),
+			not_before = COALESCE(?, not_before), updated_at = ? WHERE id = ?`,
+			fmtTime(queued.Add(held)), capHeld, notBefore, fmtTime(now), q.id); err != nil {
+			return fmt.Errorf("shift the clocks of job %d past its pause: %w", q.id, err)
+		}
+	}
+	return nil
+}
+
+// notPausedSQL is the clause that keeps a jobs query to the jobs no
+// pause covers (§8.3): neither the engine's live pause nor their
+// project's. alias names the jobs table in the query.
+func notPausedSQL(alias string) string {
+	return `NOT EXISTS (SELECT 1 FROM pauses p WHERE p.ended_at IS NULL
+		AND (p.project_id IS NULL OR p.project_id = ` + alias + `.project_id))`
+}
+
+// LivePause is one pause that stands, as the status and the capacity
+// view carry it (§8.3 "What shows it"): its scope, its start, its
+// origin and the scope's jobs still draining. The JSON fields are
+// stable; the renderings of `brigada status`, `brigada top` and the
+// MCP tools read them.
+type LivePause struct {
+	// ProjectID names the paused project; 0 is the engine's own pause,
+	// the scope of every project.
+	ProjectID int64 `json:"project_id"`
+	// RepoURL is the paused project's repo URL; empty for the engine's.
+	RepoURL string `json:"repo_url,omitempty"`
+	// Origin is who set the pause: user or drain (§8.3).
+	Origin string `json:"origin"`
+	// StartedAt is when the pause began (the store's UTC text).
+	StartedAt string `json:"started_at"`
+	// Draining lists the scope's jobs still leased or running, oldest
+	// first — the drain the pause waits on; empty once drained.
+	Draining []PauseJob `json:"draining"`
+	// Drained is true when none of the scope's jobs is leased or running.
+	Drained bool `json:"drained"`
+	// Queued counts the scope's queued jobs the pause holds: they are
+	// counted here, never as a held: wait for a slot (§8.1). A job both
+	// the engine's and its project's pause cover counts under each.
+	Queued int `json:"queued"`
+}
+
+// PauseJob is one job a pause's drain still waits on (§8.3): leased or
+// running in the paused scope.
+type PauseJob struct {
+	ID     int64  `json:"id"`
+	TaskID int64  `json:"task_id,omitempty"`
+	Kind   string `json:"kind"`
+	Status string `json:"status"`
+}
+
+// livePausesViewTx lists the pauses that stand (§8.3), the engine's
+// first, then per project in id order, each with the jobs its scope
+// still drains and the queued jobs it holds. project scopes the view as
+// the status does: 0 is every pause and every job; a project lists the
+// engine's pause and its own, with the jobs of that project alone.
+func livePausesViewTx(tx *sql.Tx, project int64) ([]LivePause, error) {
+	query := `SELECT COALESCE(p.project_id, 0), COALESCE(pr.repo_url, ''), p.origin, p.started_at
+		FROM pauses p LEFT JOIN projects pr ON pr.id = p.project_id
+		WHERE p.ended_at IS NULL AND (p.project_id IS NULL OR pr.archived_at IS NULL)`
+	var args []any
+	if project != 0 {
+		query += " AND (p.project_id IS NULL OR p.project_id = ?)"
+		args = append(args, project)
+	}
+	rows, err := tx.Query(query+" ORDER BY COALESCE(p.project_id, 0)", args...)
+	if err != nil {
+		return nil, fmt.Errorf("list the live pauses: %w", err)
+	}
+	var out []LivePause
+	for rows.Next() {
+		var p LivePause
+		if err := rows.Scan(&p.ProjectID, &p.RepoURL, &p.Origin, &p.StartedAt); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("list the live pauses: %w", err)
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("list the live pauses: %w", err)
+	}
+	rows.Close()
+	for i := range out {
+		p := &out[i]
+		scope := p.ProjectID
+		if scope == 0 {
+			scope = project // the engine's scope, as far as the caller sees
+		}
+		jobsQuery := "FROM jobs WHERE project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)"
+		var jobArgs []any
+		if scope != 0 {
+			jobsQuery += " AND project_id = ?"
+			jobArgs = append(jobArgs, scope)
+		}
+		p.Draining = []PauseJob{}
+		jrows, err := tx.Query(`SELECT id, COALESCE(task_id, 0), kind, status `+jobsQuery+
+			` AND status IN ('leased', 'running') ORDER BY id`, jobArgs...)
+		if err != nil {
+			return nil, fmt.Errorf("list the jobs a pause drains: %w", err)
+		}
+		for jrows.Next() {
+			var j PauseJob
+			if err := jrows.Scan(&j.ID, &j.TaskID, &j.Kind, &j.Status); err != nil {
+				jrows.Close()
+				return nil, fmt.Errorf("list the jobs a pause drains: %w", err)
+			}
+			p.Draining = append(p.Draining, j)
+		}
+		if err := jrows.Err(); err != nil {
+			jrows.Close()
+			return nil, fmt.Errorf("list the jobs a pause drains: %w", err)
+		}
+		jrows.Close()
+		p.Drained = len(p.Draining) == 0
+		if err := tx.QueryRow(`SELECT COUNT(*) `+jobsQuery+` AND status = 'queued'`, jobArgs...).Scan(&p.Queued); err != nil {
+			return nil, fmt.Errorf("count the jobs a pause holds: %w", err)
+		}
+	}
+	return out, nil
 }
 
 // pauseRow is one stored pause interval (§11): the row a scope's live

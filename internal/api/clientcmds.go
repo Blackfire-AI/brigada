@@ -123,8 +123,12 @@ type Status struct {
 	ForemanHolds []engine.NeedsYouItem `json:"foreman_holds,omitempty"`
 	// Cooling lists the agents held back for quota (§8, §10).
 	Cooling []engine.CoolingAgent `json:"cooling,omitempty"`
-	// Held lists the queued jobs a full cap layer holds (§8.1).
+	// Held lists the queued jobs a full cap layer holds (§8.1); a paused
+	// scope's queued jobs are never among them.
 	Held []engine.HeldJob `json:"held,omitempty"`
+	// Pauses lists the dispatch pauses that stand (§8.3): scope, start,
+	// origin, the jobs still draining and the queued jobs each holds.
+	Pauses []engine.LivePause `json:"pauses,omitempty"`
 	// Retries lists the queued jobs waiting out an infrastructure
 	// backoff (§5.1): rendered as `retry in 5m: <failure>`.
 	Retries []engine.InfraRetry `json:"retries,omitempty"`

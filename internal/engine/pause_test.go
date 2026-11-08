@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 // pauseProject pauses the fixture project's dispatch and resumeProject
@@ -558,5 +559,401 @@ func TestResumeDrainLiftsOnlyADrainPause(t *testing.T) {
 	}
 	if got := e2.countEvents(evForemanWakeBudgetSpent); got != 0 {
 		t.Errorf("budget-spent events = %d, want none", got)
+	}
+}
+
+// queuedAt reads a job's queue-TTL clock.
+func (e *env) queuedAt(job int64) string {
+	return e.str("SELECT queued_at FROM jobs WHERE id = ?", job)
+}
+
+// TestPauseHeldTimeCountsOverlappingPausesOnce: an engine pause and a
+// project pause that overlap count once (§8.3 "Clocks"), and a resume
+// under a remaining scope shifts nothing yet — the engine's lift leaves
+// the project's own pause holding the job, so the clock moves only at
+// the project's lift, by the whole union. The wall clock ran past the
+// queue TTL meanwhile, and the paused job never timed out.
+func TestPauseHeldTimeCountsOverlappingPausesOnce(t *testing.T) {
+	e := newEnv(t) // the 10m queue TTL
+	t0 := e.clock.Now()
+	job := e.submit(e.work()).JobID
+	queued := e.queuedAt(job)
+	e.elapse(2 * time.Minute)
+	e.pauseEngine(PauseOriginUser, "cli") // t0+2m
+	e.elapse(3 * time.Minute)
+	e.pauseProject(PauseOriginUser, "cli") // t0+5m, inside the engine's
+	e.elapse(3 * time.Minute)
+	e.resumeEngine("cli") // t0+8m: the project's own pause still holds the job
+	if got := e.queuedAt(job); got != queued {
+		t.Fatalf("queued_at after the engine's lift = %s, want %s unshifted under the project's pause", got, queued)
+	}
+	e.elapse(3 * time.Minute)
+	e.resumeProject("cli") // t0+11m: the union [t0+2m, t0+11m] is 9m
+	if got, want := e.queuedAt(job), fmtTime(t0.Add(9*time.Minute)); got != want {
+		t.Fatalf("queued_at after the last lift = %s, want %s: the overlapping pauses counted once", got, want)
+	}
+	if got := e.str("SELECT status FROM jobs WHERE id = ?", job); got != statusQueued {
+		t.Fatalf("job status = %s, want queued: 11m of wall clock, 2m of it unpaused", got)
+	}
+}
+
+// TestPauseHeldTimeOfAJobQueuedMidPause: each job counts only its own
+// wait (§8.3 "Clocks") — a job queued before the pause is held from the
+// pause's start, one queued mid-pause from its own queuing.
+func TestPauseHeldTimeOfAJobQueuedMidPause(t *testing.T) {
+	e := newEnv(t)
+	t0 := e.clock.Now()
+	before := e.submit(e.work()).JobID
+	e.elapse(time.Minute)
+	e.pauseProject(PauseOriginUser, "cli") // t0+1m
+	e.elapse(4 * time.Minute)
+	other := e.addTask("{}")
+	mid := e.submit(SubmitParams{Key: fmt.Sprintf("task:%d", other), ProjectID: e.project, TaskID: other,
+		Kind: KindWork, Mode: ModeFresh, Prompt: "the other work"}).JobID // t0+5m
+	e.elapse(3 * time.Minute)
+	e.resumeProject("cli") // t0+8m
+	if got, want := e.queuedAt(before), fmtTime(t0.Add(7*time.Minute)); got != want {
+		t.Errorf("queued_at of the job queued before the pause = %s, want %s (7m held)", got, want)
+	}
+	if got, want := e.queuedAt(mid), fmtTime(t0.Add(8*time.Minute)); got != want {
+		t.Errorf("queued_at of the job queued mid-pause = %s, want %s (its own 3m)", got, want)
+	}
+}
+
+// TestPauseLongerThanTheQueueTTLFailsNothing: while the pause lasts the
+// queue TTL never fails a paused job, however long; after the resume
+// the TTL is shifted by the held time, so the job fails only once its
+// unpaused wait passes the TTL.
+func TestPauseLongerThanTheQueueTTLFailsNothing(t *testing.T) {
+	e := newEnv(t) // the 10m queue TTL
+	job := e.submit(e.work()).JobID
+	e.elapse(5 * time.Minute)
+	e.pauseProject(PauseOriginUser, "cli")
+	e.elapse(30 * time.Minute) // three TTLs
+	if got := e.str("SELECT status FROM jobs WHERE id = ?", job); got != statusQueued {
+		t.Fatalf("job status under the pause = %s, want queued", got)
+	}
+	if got := e.countEvents(evJobQueueTimedOut); got != 0 {
+		t.Fatalf("queue-TTL events under the pause = %d, want none", got)
+	}
+	e.resumeProject("cli") // 5m of unpaused wait so far
+	e.elapse(4 * time.Minute)
+	if got := e.str("SELECT status FROM jobs WHERE id = ?", job); got != statusQueued {
+		t.Fatalf("job status 9m unpaused = %s, want queued: the TTL was shifted by the pause", got)
+	}
+	e.elapse(2 * time.Minute)
+	if got := e.str("SELECT status FROM jobs WHERE id = ?", job); got != statusFailed {
+		t.Fatalf("job status 11m unpaused = %s, want failed on the shifted TTL", got)
+	}
+	if got := e.countEvents(evJobQueueTimedOut); got != 1 {
+		t.Errorf("queue-TTL events = %d, want the one past the shifted TTL", got)
+	}
+}
+
+// TestPauseShiftsARetrysNotBefore: a retry's not-before is shifted by
+// the held time at the lift, so the backoff that remained at the pause
+// remains after it.
+func TestPauseShiftsARetrysNotBefore(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "fam", "implement")
+	e.submit(e.work())
+	t0 := e.clock.Now()
+	infraFail(e, author) // the retry waits for t0+1m
+	retry := e.int("SELECT id FROM jobs WHERE key = ? AND status = 'queued'", e.work().Key)
+	e.elapse(30 * time.Second)
+	e.pauseProject(PauseOriginUser, "cli")
+	e.elapse(10 * time.Minute)
+	if g := e.leaseAny(author); g != nil {
+		t.Fatalf("the paused retry leased: %+v", g)
+	}
+	e.resumeProject("cli") // 10m held
+	if got, want := e.str("SELECT not_before FROM jobs WHERE id = ?", retry), fmtTime(t0.Add(infraDelayFor(1)+10*time.Minute)); got != want {
+		t.Fatalf("not_before after the lift = %s, want %s", got, want)
+	}
+	if g := e.leaseAny(author); g != nil {
+		t.Fatalf("the retry leased before its shifted not-before: %+v", g)
+	}
+	e.elapse(30 * time.Second)
+	if g := e.leaseAny(author); g == nil || g.JobID != retry {
+		t.Fatalf("the poll after the shifted not-before = %+v, want the retry %d", g, retry)
+	}
+}
+
+// TestPauseShiftsTheInfraWindowOfATaskRetry: a task job's infra streak
+// that spans a pause longer than the retry window (§5.1) is not spent on
+// account of the pause — without the shift the failure after the resume
+// would be past the window and park the task.
+func TestPauseShiftsTheInfraWindowOfATaskRetry(t *testing.T) {
+	e := newEnvCfg(t, func(c *Config) { c.SweepInterval = 5 * time.Minute })
+	author := e.agented("author", "fam", "implement")
+	e.submit(e.work())
+	key := e.work().Key
+	infraFail(e, author) // the streak begins
+	e.pauseProject(PauseOriginUser, "cli")
+	e.elapse(infraRetryWindow + 10*time.Minute)
+	e.resumeProject("cli")
+	e.waitOutInfraRetry(key)
+	infraFail(e, author) // past the window by the wall clock, not by the unpaused time
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskRunning {
+		t.Fatalf("task state = %s, want running behind another retry", state)
+	}
+	if n := e.countEvents(evTaskFailed); n != 0 {
+		t.Errorf("task_failed events = %d, want none: the pause spent no window", n)
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE key = ? AND status = 'queued'", key); n != 1 {
+		t.Errorf("queued retries = %d, want 1", n)
+	}
+}
+
+// TestPauseShiftsTheInfraWindowOfAForemanWake: a foreman turn that
+// failed on the infrastructure as the pause began has its re-wake held
+// by the pause; at the resume the wake's streak is measured without the
+// paused time, so the wake answers instead of naming a spent outage.
+func TestPauseShiftsTheInfraWindowOfAForemanWake(t *testing.T) {
+	e := newEnvCfg(t, func(c *Config) { c.SweepInterval = 5 * time.Minute })
+	e.park("which file?")
+	g := e.leaseForemanRaw()
+	if g == nil {
+		t.Fatal("no foreman turn to lease")
+	}
+	e.pauseProject(PauseOriginUser, "cli")
+	if ans := e.complete(g, Completion{Error: "prepare the foreman checkout: could not resolve host", ErrorKind: ErrorKindInfra}); ans != AnsOK {
+		t.Fatalf("complete the infra turn: %s", ans)
+	}
+	if got := e.liveForeman(); got != 0 {
+		t.Fatalf("live foreman turns under the pause = %d, want the re-wake held", got)
+	}
+	e.elapse(infraRetryWindow + 10*time.Minute)
+	e.resumeProject("cli")
+	if n := e.countEvents(evForemanOutageSpent); n != 0 {
+		t.Errorf("foreman_outage_spent events = %d, want none: the pause spent no window", n)
+	}
+	if got := e.liveForeman(); got != 1 {
+		t.Fatalf("live foreman turns after the resume = %d, want the re-wake", got)
+	}
+}
+
+// TestPauseShiftsTheInfraWindowOfAPlanReview: the plan review's infra
+// retry (§5.1, §6.2) shares the window check, so a streak that spans a
+// pause is not held for the foreman on account of the paused time.
+func TestPauseShiftsTheInfraWindowOfAPlanReview(t *testing.T) {
+	e := newEnvCfg(t, func(c *Config) { c.PlanReview = nil; c.SweepInterval = 5 * time.Minute })
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	res := e.createPlan(nTasks(2))
+	key := planReviewKey(res.PlanID)
+	leaseRound := func() *LeaseGrant {
+		t.Helper()
+		g := e.lease(e.runner2, nil, nil)
+		if g == nil || g.Kind != KindPlanReview {
+			t.Fatalf("plan review lease = %+v", g)
+		}
+		return g
+	}
+	g := leaseRound()
+	e.pauseProject(PauseOriginUser, "cli")
+	if ans := e.complete(g, Completion{Error: "Cannot connect to API", ErrorKind: ErrorKindInfra}); ans != AnsOK {
+		t.Fatalf("complete the infra failure: %s", ans)
+	}
+	e.elapse(infraRetryWindow + 10*time.Minute)
+	e.resumeProject("cli")
+	e.waitOutInfraRetry(key)
+	if ans := e.complete(leaseRound(), Completion{Error: "Cannot connect to API", ErrorKind: ErrorKindInfra}); ans != AnsOK {
+		t.Fatalf("complete the second infra failure: %s", ans)
+	}
+	if got := e.str("SELECT COALESCE(review_verdict, '') FROM plans WHERE id = ?", res.PlanID); got == planReviewNoRun {
+		t.Fatalf("recorded verdict = %q, want no hold: the pause spent no window", got)
+	}
+	if got := e.countEvents(evPlanReviewed); got != 0 {
+		t.Errorf("plan_reviewed events = %d, want none", got)
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE key = ? AND status = 'queued'", key); n != 1 {
+		t.Errorf("queued plan review retries = %d, want 1", n)
+	}
+}
+
+// TestRunningJobWallTimeCapFiresDuringAPause: running jobs are not
+// touched by the pause, and neither is their wall-time cap (§8.3).
+func TestRunningJobWallTimeCapFiresDuringAPause(t *testing.T) {
+	e := newEnv(t)
+	job := e.submit(e.work()).JobID
+	if g := e.leaseAny(e.runner1); g == nil {
+		t.Fatal("the work job was not leased")
+	}
+	e.pauseProject(PauseOriginUser, "cli")
+	limit := e.eng.cfg.HardCaps[KindWork]
+	// The lease outlives the cap, so the cap and not its expiry ends it.
+	e.exec("UPDATE jobs SET lease_expires_at = ? WHERE id = ?", fmtTime(e.clock.Now().Add(limit+time.Hour)), job)
+	e.elapse(limit + time.Minute)
+	if got := e.str("SELECT status FROM jobs WHERE id = ?", job); got != statusFailed {
+		t.Fatalf("job status past its cap under the pause = %s, want failed", got)
+	}
+	if got := e.countEvents(evJobHardCapped); got != 1 {
+		t.Errorf("hard-cap events = %d, want 1", got)
+	}
+}
+
+// TestStatusListsThePauseWithItsDrainingJobs: the status and the
+// capacity view carry each live pause with its scope, start and origin
+// and the scope's jobs still leased or running; the paused scope's
+// queued jobs count under the pause and leave the held: list and the
+// layers' queue depths; once nothing runs, the scope is drained.
+func TestStatusListsThePauseWithItsDrainingJobs(t *testing.T) {
+	e := newEnv(t)
+	running := e.submit(e.work()).JobID
+	g := e.leaseAny(e.runner1)
+	if g == nil || g.JobID != running {
+		t.Fatalf("the poll = %+v, want job %d", g, running)
+	}
+	other := e.addTask("{}")
+	queued := e.submit(SubmitParams{Key: fmt.Sprintf("task:%d", other), ProjectID: e.project, TaskID: other,
+		Kind: KindWork, Mode: ModeFresh, Prompt: "the other work"}).JobID
+	// The stamp a full runner layer leaves on the job it holds (§8.1).
+	e.exec("UPDATE jobs SET cap_held_layer = 'runner', cap_held_key = ?, cap_held_at = ? WHERE id = ?",
+		fmt.Sprint(e.runner1), fmtTime(e.clock.Now()), queued)
+	heldIDs := func(hs []HeldJob) []int64 {
+		var ids []int64
+		for _, h := range hs {
+			ids = append(ids, h.ID)
+		}
+		return ids
+	}
+	runnerQueue := func(snap CapacitySnapshot) int {
+		for _, l := range snap.Layers {
+			if l.Layer == "runner" && l.RunnerID == e.runner1 {
+				return l.Queue
+			}
+		}
+		return -1
+	}
+	st, err := e.eng.Status(e.ctx, 0)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(st.Pauses) != 0 || len(st.Held) != 1 || st.Held[0].ID != queued {
+		t.Fatalf("status before the pause: pauses %+v, held %v; want no pause and the held job %d", st.Pauses, heldIDs(st.Held), queued)
+	}
+	snap, err := e.eng.Capacity(e.ctx, 0)
+	if err != nil {
+		t.Fatalf("capacity: %v", err)
+	}
+	if got := runnerQueue(snap); got != 1 {
+		t.Fatalf("runner queue before the pause = %d, want the held job", got)
+	}
+
+	started := fmtTime(e.clock.Now())
+	e.pauseProject(PauseOriginUser, "cli")
+	if st, err = e.eng.Status(e.ctx, 0); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(st.Pauses) != 1 {
+		t.Fatalf("pauses = %+v, want the project's", st.Pauses)
+	}
+	p := st.Pauses[0]
+	if p.ProjectID != e.project || p.RepoURL != "https://example.invalid/brigada.git" || p.Origin != PauseOriginUser ||
+		p.StartedAt != started || p.Drained || p.Queued != 1 {
+		t.Errorf("the pause = %+v, want the project's user pause from %s, draining, one queued", p, started)
+	}
+	if len(p.Draining) != 1 || p.Draining[0].ID != running || p.Draining[0].TaskID != e.task ||
+		p.Draining[0].Kind != string(KindWork) || (p.Draining[0].Status != statusLeased && p.Draining[0].Status != statusRunning) {
+		t.Errorf("draining = %+v, want the leased job %d", p.Draining, running)
+	}
+	if len(st.Held) != 0 {
+		t.Errorf("held = %v, want the paused job counted under the pause, not as a wait for a slot", heldIDs(st.Held))
+	}
+	if snap, err = e.eng.Capacity(e.ctx, 0); err != nil {
+		t.Fatalf("capacity: %v", err)
+	}
+	if got := runnerQueue(snap); got != 0 {
+		t.Errorf("runner queue under the pause = %d, want the paused job left out", got)
+	}
+	if len(snap.Pauses) != 1 || snap.Pauses[0].ProjectID != e.project || len(snap.Pauses[0].Draining) != 1 {
+		t.Errorf("capacity pauses = %+v, want the project's with its draining job", snap.Pauses)
+	}
+
+	// The engine's pause lists first; a foreman's view scoped to its
+	// project carries both.
+	e.pauseEngine(PauseOriginDrain, "stop --engine --drain")
+	if st, err = e.eng.Status(e.ctx, e.project); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(st.Pauses) != 2 || st.Pauses[0].ProjectID != 0 || st.Pauses[0].Origin != PauseOriginDrain ||
+		st.Pauses[0].RepoURL != "" || len(st.Pauses[0].Draining) != 1 || st.Pauses[1].ProjectID != e.project {
+		t.Fatalf("pauses = %+v, want the engine's drain then the project's", st.Pauses)
+	}
+
+	// The running job ends: the scope is drained.
+	if ans := e.complete(g, doneOn(branchOf(e.task), passCheck)); ans != AnsOK {
+		t.Fatalf("complete the running job: %s", ans)
+	}
+	if st, err = e.eng.Status(e.ctx, 0); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	for _, p := range st.Pauses {
+		if !p.Drained || len(p.Draining) != 0 {
+			t.Errorf("pause of scope %d after the job ended = %+v, want drained", p.ProjectID, p)
+		}
+	}
+}
+
+// TestPauseSurvivesAnEngineRestart: the pause is stored, not
+// remembered (§8.3 "Storage and stopping") — a new engine over the same
+// store keeps the scope paused, lists the pause, and its resume shifts
+// the held time across the restart.
+func TestPauseSurvivesAnEngineRestart(t *testing.T) {
+	e := newEnv(t)
+	t0 := e.clock.Now()
+	job := e.submit(e.work()).JobID
+	e.elapse(time.Minute)
+	e.pauseProject(PauseOriginUser, "cli") // t0+1m
+	e.elapse(5 * time.Minute)
+	e.eng = New(e.st, e.eng.cfg) // the engine restarts over the same store
+	if g := e.leaseAny(e.runner1); g != nil {
+		t.Fatalf("the restarted engine leased a paused job: %+v", g)
+	}
+	st, err := e.eng.Status(e.ctx, 0)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(st.Pauses) != 1 || st.Pauses[0].ProjectID != e.project || st.Pauses[0].Queued != 1 {
+		t.Fatalf("pauses after the restart = %+v, want the project's holding its job", st.Pauses)
+	}
+	e.elapse(4 * time.Minute)
+	if res := e.resumeProject("cli"); !res.Resumed {
+		t.Fatalf("the resume after the restart = %+v, want the stored pause lifted", res)
+	}
+	if got, want := e.queuedAt(job), fmtTime(t0.Add(9*time.Minute)); got != want {
+		t.Errorf("queued_at after the resume = %s, want %s (9m held across the restart)", got, want)
+	}
+	if g := e.leaseAny(e.runner1); g == nil || g.JobID != job {
+		t.Fatalf("the poll after the resume = %+v, want job %d", g, job)
+	}
+}
+
+// TestHeldWithinUnionsTheSpans pins the held-time arithmetic: the
+// union of the spans within the window, a span cut to the window and
+// overlapping or touching spans counted once.
+func TestHeldWithinUnionsTheSpans(t *testing.T) {
+	t0 := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	at := func(m int) time.Time { return t0.Add(time.Duration(m) * time.Minute) }
+	spans := []pauseSpan{
+		{start: at(10), end: at(20)},
+		{start: at(15), end: at(30)}, // overlaps the first
+		{start: at(30), end: at(35)}, // touches the second
+		{start: at(50), end: at(60)},
+	}
+	cases := []struct {
+		from, to int
+		want     time.Duration
+	}{
+		{0, 100, 35 * time.Minute},
+		{25, 100, 20 * time.Minute}, // queued mid-pause: from 25 only
+		{0, 12, 2 * time.Minute},
+		{36, 49, 0},
+	}
+	for _, c := range cases {
+		if got := heldWithin(spans, at(c.from), at(c.to)); got != c.want {
+			t.Errorf("heldWithin([%d, %d]) = %s, want %s", c.from, c.to, got, c.want)
+		}
 	}
 }

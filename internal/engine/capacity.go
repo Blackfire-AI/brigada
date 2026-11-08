@@ -33,6 +33,12 @@ type CapacitySnapshot struct {
 	// is an unmet placement with no cap-hold stamp, so it cannot be read
 	// off the layers' queue depths. Empty when no queued job is pinned.
 	Pins []CapacityPin `json:"pins,omitempty"`
+	// Pauses lists the dispatch pauses that stand (§8.3), as the status
+	// carries them (LivePause): scope, start, origin, the jobs still
+	// draining and the queued jobs each holds, scoped to the project
+	// like the plan layer. A paused scope's queued jobs are counted
+	// there, never in a layer's queue depth.
+	Pauses []LivePause `json:"pauses,omitempty"`
 }
 
 // The states a pin's snapshot entry carries: whether the pinned agent can
@@ -253,14 +259,16 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 	// runner, account or model that actually had no room. A plan hold
 	// stamped before the key column existed falls back to the plan its
 	// task names; a hold with no instance to name — global — counts at
-	// the global layer alone.
+	// the global layer alone. A queued job of a paused scope waits for
+	// the resume, not for a slot (§8.3): the pause counts it, whatever
+	// hold it was stamped with, and no layer's queue does.
 	type hold struct {
 		layer, key string
 		plan       int64 // the task's plan: the fallback for a plan hold without a key
 	}
 	held, err := tx.Query(`SELECT COALESCE(j.cap_held_layer, ''), COALESCE(j.cap_held_key, ''), COALESCE(t.plan_id, 0)
 		FROM jobs j LEFT JOIN tasks t ON t.id = j.task_id
-		WHERE j.status = 'queued' AND j.cap_held_layer IS NOT NULL ORDER BY j.id`)
+		WHERE j.status = 'queued' AND j.cap_held_layer IS NOT NULL AND ` + notPausedSQL("j") + ` ORDER BY j.id`)
 	if err != nil {
 		return CapacitySnapshot{}, fmt.Errorf("list held jobs: %w", err)
 	}
@@ -525,6 +533,12 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 			p.State = PinReady
 		}
 		snap.Pins = append(snap.Pins, p)
+	}
+
+	// The pauses that stand (§8.3), scoped like the status: the engine's
+	// and the project's own, with the jobs each still drains.
+	if snap.Pauses, err = livePausesViewTx(tx, projectID); err != nil {
+		return CapacitySnapshot{}, err
 	}
 	return snap, nil
 }

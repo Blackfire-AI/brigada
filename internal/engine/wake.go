@@ -195,7 +195,11 @@ func (e *Engine) wakeOutcomeTx(tx *sql.Tx, project int64, now time.Time) (WakeOu
 	if err != nil {
 		return "", err
 	}
-	if streak > 0 && infraStreakSpent(began, now) {
+	spent, err := infraStreakSpentTx(tx, project, began, now)
+	if err != nil {
+		return "", err
+	}
+	if streak > 0 && spent {
 		// Named once per episode of the outage, like the stall's own
 		// event: the wake a later evaluation would announce again is
 		// the one already sitting in the log.
