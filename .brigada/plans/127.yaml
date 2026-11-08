@@ -42,8 +42,8 @@ tasks:
     continue: "pause-core"
     tier: heavy
     effort: high
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-430-r1"
     rounds: 0
   - id: 431
     name: "pause-cli"
