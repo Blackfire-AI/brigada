@@ -29,9 +29,9 @@ tasks:
     base: ""
     effort: medium
     skills: ["bugfix"]
-    state: running
+    state: ready
     branch: "brigada/task-378-r2"
-    rounds: 2
+    rounds: 0
   - id: 379
     name: "capacity-pins"
     title: "capacity: list queued jobs pinned to an agent and whether the pin can place"
