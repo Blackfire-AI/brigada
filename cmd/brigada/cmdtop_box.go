@@ -9,16 +9,18 @@ import (
 // topBox is a section's top border: the title, the note after it and the
 // note at the right end, all optional but the title. bad paints the whole
 // border and the title Bad. legend is a styled note for the right end that
-// is left out whole when it does not fit.
+// is left out whole when it does not fit. foot is a styled note for the
+// left end of the bottom border, drawn by topBoxBottom.
 type topBox struct {
 	title, note, right string
 	legend             string
+	foot               string
 	bad                bool
 }
 
 // topBoxed wraps a section's rows in its borders: the top border first,
-// the bottom border last, both in the pinned class, which only an empty
-// section drops (dropEmptyBorders).
+// the bottom border last (carrying box.foot as its note), both in the
+// pinned class, which only an empty section drops (dropEmptyBorders).
 func topBoxed(section int, box topBox, rows []topLine) []topLine {
 	lines := make([]topLine, 0, len(rows)+2)
 	lines = append(lines, topLine{section: section, box: &box, bad: box.bad})
@@ -26,7 +28,7 @@ func topBoxed(section int, box topBox, rows []topLine) []topLine {
 		r.section, r.boxed, r.bad = section, true, box.bad
 		lines = append(lines, r)
 	}
-	return append(lines, topLine{section: section, foot: true, bad: box.bad})
+	return append(lines, topLine{section: section, foot: true, bad: box.bad, note: box.foot})
 }
 
 // topBoxTop is a section's top border at width: `╭─ TITLE  note ──── right ─╮`,
@@ -98,11 +100,32 @@ func topBoxTop(b topBox, style term.Style, width int) string {
 	return out + border(style.BoxTopRight())
 }
 
-// topBoxBottom is a section's bottom border at width.
-func topBoxBottom(bad bool, style term.Style, width int) string {
+// topBoxBottom is a section's bottom border at width: `╰───────╯`, or with a
+// styled note `╰─ note ─────╯`, the border Dim (Bad for a Bad box). A note
+// that does not fit is cut by its visible text with cutLine (and painted Dim,
+// so a cut never splits an escape sequence), or left out when under 4 cells
+// of room remain.
+func topBoxBottom(bad bool, note string, style term.Style, width int) string {
 	border := style.Dim
 	if bad {
 		border = style.Bad
+	}
+	if note != "" {
+		// The corners, the dash and the two spaces, and one fill cell: 6
+		// columns around the note.
+		room := width - 6
+		switch {
+		case term.CellWidth(note) <= room:
+		case room >= 4:
+			note = style.Dim(cutLine(term.StripEscapes(note), room))
+		default:
+			note = ""
+		}
+	}
+	if note != "" {
+		fill := max(width-term.CellWidth(note)-5, 1)
+		return border(style.BoxBottomLeft()+style.Dash()) + " " + note + " " +
+			border(strings.Repeat(style.Dash(), fill)+style.BoxBottomRight())
 	}
 	return border(style.BoxBottomLeft() + strings.Repeat(style.Dash(), max(width-2, 0)) + style.BoxBottomRight())
 }

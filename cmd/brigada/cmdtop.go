@@ -478,6 +478,7 @@ type topLine struct {
 	section int        // the section whose borders go with its last row, or topSecNone
 	box     *topBox    // set on a section's top border
 	foot    bool       // the section's bottom border
+	note    string     // the styled note a bottom border carries at its left
 	boxed   bool       // the text sits in a box row
 	bad     bool       // the box is a Bad one
 	tint    int        // the row's background tint (topTint...), none by default
@@ -537,7 +538,7 @@ func (f *topFrame) texts() []string {
 		case l.box != nil:
 			text = topBoxTop(*l.box, f.style, f.width)
 		case l.foot:
-			text = topBoxBottom(l.bad, f.style, f.width)
+			text = topBoxBottom(l.bad, l.note, f.style, f.width)
 		case l.boxed:
 			text = topBoxRow(text, l.bad, l.tint, f.style, f.width)
 		}
