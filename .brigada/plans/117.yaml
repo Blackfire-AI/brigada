@@ -40,8 +40,8 @@ tasks:
     base: "short-agent-harness"
     effort: medium
     skills: ["surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-395"
     rounds: 0
   - id: 396
     name: "agents-stable-order"
