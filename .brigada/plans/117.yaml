@@ -52,6 +52,6 @@ tasks:
     continue: "agents-tier-cost"
     effort: medium
     skills: ["surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
