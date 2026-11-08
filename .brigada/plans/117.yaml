@@ -7,7 +7,7 @@ title: "top: short agent names keep the harness (opencode/glm-5.3)"
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-11-08T16:23:05.270113Z
-updated: 2026-11-08T16:38:52.456239Z
+updated: 2026-11-08T16:39:08.27921Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
