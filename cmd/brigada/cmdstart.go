@@ -7,9 +7,14 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
 )
+
+// Tests can exercise the drain lift over an in-process API without a
+// listener.
+var connectStart = connect
 
 func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("start",
@@ -40,6 +45,15 @@ func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		if err != nil {
 			return fail(stderr, err)
 		}
+	}
+	// An interrupted `stop --engine --drain` leaves its pause standing
+	// (§8.3): an engine that still answers has it lifted now, for the
+	// already-running path below starts none. The normal path lifts it
+	// once its own engine is up.
+	drainLifted := false
+	if lifecycle.EngineRunning(ctx, rt.paths.Socket) {
+		liftDrainPause(ctx, rt, stdout, stderr)
+		drainLifted = true
 	}
 	dir := runnerStateDir(rt)
 	rec, running, err := runnerstate.Running(dir)
@@ -76,6 +90,9 @@ func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}); err != nil {
 		return fail(stderr, err)
 	}
+	if !drainLifted {
+		liftDrainPause(ctx, rt, stdout, stderr)
+	}
 	result, err := startDetachedRunner(ctx, rt, saved, parallel, "")
 	if err != nil {
 		return fail(stderr, err)
@@ -87,6 +104,35 @@ func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			result.Record.PID, filepath.Join(rt.stateDir, "runner.log"))
 	}
 	return 0
+}
+
+// liftDrainPause is start's half of §8.3's stopping story: a pause of
+// origin `drain` is lifted here through the engine's drain-only lift —
+// a resume, with its evaluation of the held wakes — while a user's
+// pause is left alone and said to stay. The engine must already answer.
+func liftDrainPause(ctx context.Context, rt *runtime, stdout, stderr io.Writer) {
+	client, code := connectStart(ctx, rt, "client", true, stderr)
+	if code != 0 {
+		return // the pause survives; the next start lifts it
+	}
+	res, err := client.ResumeDrain(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "brigada: lift the drain pause: %v\n", err)
+		return
+	}
+	if res.Resumed {
+		fmt.Fprintln(stdout, "engine resumed: the drain pause is lifted")
+		return
+	}
+	st, err := client.Status(ctx)
+	if err != nil {
+		return
+	}
+	for _, p := range st.Pauses {
+		if p.ProjectID == 0 && p.Origin == engine.PauseOriginUser {
+			fmt.Fprintln(stdout, "the engine stays paused (a user's pause); `brigada resume` lifts it")
+		}
+	}
 }
 
 // startDetachedRunner is shared by init, start and agents add, including

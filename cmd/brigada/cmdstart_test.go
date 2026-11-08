@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Blackfire-AI/brigada/internal/api"
+	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
@@ -152,5 +154,69 @@ func TestStartInvalidArgumentsAndAgents(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(state, "engine.log")); !os.IsNotExist(err) {
 		t.Fatalf("invalid agents started an engine: %v", err)
+	}
+}
+
+// TestStartLiftsADrainPause: an interrupted `stop --engine --drain`
+// leaves the engine up and paused with origin `drain`; `brigada start`
+// lifts that pause through the engine's drain-only lift, with its wake
+// evaluation, and says so (§8.3).
+func TestStartLiftsADrainPause(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	state, st, _ := drainTestEnv(t)
+	client := api.NewClient(lifecycle.PathsOf(state).Socket, clientToken(t, state))
+	if _, err := client.Pause(context.Background(), "", engine.PauseOriginDrain); err != nil {
+		t.Fatalf("pause the engine for the drain: %v", err)
+	}
+	rec, running, err := runnerstate.Running(filepath.Join(state, "runner"))
+	if err != nil || !running {
+		t.Fatalf("the runner helper is not running: %v", err)
+	}
+	code, out, errs := startDo("--state-dir", state)
+	want := fmt.Sprintf("engine resumed: the drain pause is lifted\nrunner already running (pid %d)\n", rec.PID)
+	if code != 0 || out != want || errs != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want %q", code, out, errs, want)
+	}
+	if origin := drainPause(t, st); origin != "" {
+		t.Fatalf("the engine pause still stands with origin %q, want it lifted", origin)
+	}
+}
+
+// TestStartLeavesAUserPause: a user's pause is not start's to lift;
+// start says the engine stays paused (§8.3).
+func TestStartLeavesAUserPause(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	state, st, _ := drainTestEnv(t)
+	client := api.NewClient(lifecycle.PathsOf(state).Socket, clientToken(t, state))
+	if _, err := client.Pause(context.Background(), "", engine.PauseOriginUser); err != nil {
+		t.Fatalf("pause the engine: %v", err)
+	}
+	rec, running, err := runnerstate.Running(filepath.Join(state, "runner"))
+	if err != nil || !running {
+		t.Fatalf("the runner helper is not running: %v", err)
+	}
+	code, out, errs := startDo("--state-dir", state)
+	want := fmt.Sprintf("the engine stays paused (a user's pause); `brigada resume` lifts it\nrunner already running (pid %d)\n", rec.PID)
+	if code != 0 || out != want || errs != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want %q", code, out, errs, want)
+	}
+	if origin := drainPause(t, st); origin != engine.PauseOriginUser {
+		t.Fatalf("the standing engine pause has origin %q, want the user's", origin)
+	}
+}
+
+// TestStartWithNoPauseSaysNothing: a start over no pause prints only
+// the runner's line — the lift is silent when there is nothing to lift.
+func TestStartWithNoPauseSaysNothing(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	state, _, _ := drainTestEnv(t)
+	rec, running, err := runnerstate.Running(filepath.Join(state, "runner"))
+	if err != nil || !running {
+		t.Fatalf("the runner helper is not running: %v", err)
+	}
+	code, out, errs := startDo("--state-dir", state)
+	want := fmt.Sprintf("runner already running (pid %d)\n", rec.PID)
+	if code != 0 || out != want || errs != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want %q", code, out, errs, want)
 	}
 }

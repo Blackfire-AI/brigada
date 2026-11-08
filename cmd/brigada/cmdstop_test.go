@@ -3,6 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"net"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,8 +17,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Blackfire-AI/brigada/internal/api"
+	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
+	"github.com/Blackfire-AI/brigada/internal/store"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
@@ -205,4 +213,199 @@ func TestStopRejectsArguments(t *testing.T) {
 	if code := run(context.Background(), []string{"stop", "now"}, &out, &errb); code != 2 {
 		t.Fatalf("code=%d err=%q", code, errb.String())
 	}
+}
+
+// TestStopDrainNeedsEngine: --drain without --engine is refused with a
+// clear error (§8.3).
+func TestStopDrainNeedsEngine(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := run(context.Background(), []string{"stop", "--drain"}, &out, &errb)
+	if code != 2 || !strings.Contains(errb.String(), "--drain pauses the engine and waits out its jobs") {
+		t.Fatalf("code=%d err=%q, want the --engine requirement", code, errb.String())
+	}
+}
+
+// drainTestEnv is the `stop --engine --drain` fixture: an in-process
+// API served on the state directory's own socket over a store holding
+// one project and one running foreman job, a runner helper holding the
+// runner lock and an engine helper holding the engine lock. The API
+// server stands in for the engine's client surface; the helpers stand
+// in for its processes.
+func drainTestEnv(t *testing.T) (state string, st *store.Store, jobID int64) {
+	t.Helper()
+	ctx := context.Background()
+	state = testsupport.ShortStateDir(t)
+	paths := lifecycle.PathsOf(state)
+	st = openFreshStore(t, paths.Store)
+	t.Cleanup(func() { st.Close() })
+	if err := lifecycle.EnsureTokenFile(paths.Tokens); err != nil {
+		t.Fatal(err)
+	}
+	err := st.Update(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO projects (repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
+			VALUES ('https://example.invalid/one.git', 'main', '{}', 'claude', 'sonnet', '2026-11-09T00:00:00Z', '2026-11-09T00:00:00Z')`); err != nil {
+			return err
+		}
+		res, err := tx.Exec(`INSERT INTO jobs (project_id, kind, key, mode, prompt, status, created_at, updated_at)
+			VALUES (1, 'foreman', 'foreman:1', 'session', 'wake up', 'running', '2026-11-09T00:00:00Z', '2026-11-09T00:00:00Z')`)
+		if err != nil {
+			return err
+		}
+		jobID, err = res.LastInsertId()
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed the store: %v", err)
+	}
+	srv, err := api.New(ctx, st, engine.New(st, engine.Config{}), nil, paths.Tokens)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := net.Listen("unix", paths.Socket)
+	if err != nil {
+		t.Fatalf("listen on the test socket: %v", err)
+	}
+	server := httptest.NewUnstartedServer(srv.Handler())
+	server.Listener = l
+	server.Start()
+	t.Cleanup(server.Close)
+	startStopHelper(t, "runner", state)
+	startStopHelper(t, "engine", state)
+	return state, st, jobID
+}
+
+// drainPause reads the engine's standing pause, if one stands: its
+// origin, else the empty string.
+func drainPause(t *testing.T, st *store.Store) string {
+	t.Helper()
+	var origin string
+	err := st.View(context.Background(), func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT origin FROM pauses WHERE ended_at IS NULL AND project_id IS NULL`).Scan(&origin)
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return ""
+	}
+	if err != nil {
+		t.Fatalf("read the engine's pause: %v", err)
+	}
+	return origin
+}
+
+// TestStopEngineDrain: the drain pauses the engine, waits while the
+// running job holds it — naming the job — and stops the runner and the
+// engine once the job ends (§8.3).
+func TestStopEngineDrain(t *testing.T) {
+	state, st, job := drainTestEnv(t)
+	finish := time.AfterFunc(3*drainPollInterval, func() {
+		if err := st.Update(context.Background(), func(tx *sql.Tx) error {
+			_, err := tx.Exec(`UPDATE jobs SET status = 'done', updated_at = '2026-11-09T00:01:00Z' WHERE id = ?`, job)
+			return err
+		}); err != nil {
+			t.Errorf("finish the job: %v", err)
+		}
+	})
+	defer finish.Stop()
+	var out, errb bytes.Buffer
+	code := run(context.Background(), []string{"stop", "--engine", "--drain", "--state-dir", state}, &out, &errb)
+	if code != 0 || errb.String() != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out.String(), errb.String())
+	}
+	for _, want := range []string{
+		"engine paused for the drain",
+		fmt.Sprintf("draining: job %d (foreman, running)", job),
+		"engine drained",
+		"runner stopped",
+		"engine stopped",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("stdout %q lacks %q", out.String(), want)
+		}
+	}
+	// The drain's pause outlives the stop: stored, it waits for
+	// `brigada start` to lift it (§8.3).
+	if origin := drainPause(t, st); origin != engine.PauseOriginDrain {
+		t.Fatalf("the standing engine pause has origin %q, want drain", origin)
+	}
+}
+
+// TestStopEngineDrainOverUserPause: over a user's pause the origin
+// stays the user's (§8.3), and the drain still waits the jobs out.
+func TestStopEngineDrainOverUserPause(t *testing.T) {
+	state, st, job := drainTestEnv(t)
+	client := api.NewClient(lifecycle.PathsOf(state).Socket, clientToken(t, state))
+	if _, err := client.Pause(context.Background(), "", engine.PauseOriginUser); err != nil {
+		t.Fatalf("pause the engine: %v", err)
+	}
+	finish := time.AfterFunc(2*drainPollInterval, func() {
+		if err := st.Update(context.Background(), func(tx *sql.Tx) error {
+			_, err := tx.Exec(`UPDATE jobs SET status = 'done', updated_at = '2026-11-09T00:01:00Z' WHERE id = ?`, job)
+			return err
+		}); err != nil {
+			t.Errorf("finish the job: %v", err)
+		}
+	})
+	defer finish.Stop()
+	var out, errb bytes.Buffer
+	code := run(context.Background(), []string{"stop", "--engine", "--drain", "--state-dir", state}, &out, &errb)
+	if code != 0 || errb.String() != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out.String(), errb.String())
+	}
+	if !strings.Contains(out.String(), "engine already paused (origin user)") || !strings.Contains(out.String(), "engine drained") {
+		t.Fatalf("stdout=%q, want the user's origin named and the drain finished", out.String())
+	}
+	if origin := drainPause(t, st); origin != engine.PauseOriginUser {
+		t.Fatalf("the standing engine pause has origin %q, want the user's", origin)
+	}
+}
+
+// TestStopEngineDrainInterrupted: interrupting the wait stops nothing
+// and leaves the pause in place, and says so (§8.3); `brigada start`
+// then lifts the drain pause, the engine still up.
+func TestStopEngineDrainInterrupted(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	state, st, _ := drainTestEnv(t)
+	runnerDir := filepath.Join(state, "runner")
+	before, running, err := runnerstate.Running(runnerDir)
+	if err != nil || !running {
+		t.Fatalf("the runner helper is not running: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(3*drainPollInterval, cancel)
+	var out, errb bytes.Buffer
+	code := run(ctx, []string{"stop", "--engine", "--drain", "--state-dir", state}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("code=%d out=%q err=%q, want the interrupt's exit 1", code, out.String(), errb.String())
+	}
+	if !strings.Contains(out.String(), "drain interrupted: nothing stopped; the engine stays paused (origin drain); `brigada start` lifts it") {
+		t.Fatalf("stdout=%q, want the interruption said", out.String())
+	}
+	if origin := drainPause(t, st); origin != engine.PauseOriginDrain {
+		t.Fatalf("the standing engine pause has origin %q, want drain", origin)
+	}
+	if rec, running, _ := runnerstate.Running(runnerDir); !running || rec.PID != before.PID {
+		t.Fatal("the drain's interrupt stopped the runner")
+	}
+	if pid := lifecycle.EnginePid(lifecycle.PathsOf(state).Lock); pid == 0 {
+		t.Fatal("the drain's interrupt stopped the engine")
+	}
+	// The engine still up after the interrupted drain: `brigada start`
+	// lifts the drain pause (§8.3).
+	startCode, startOut, startErrs := startDo("--state-dir", state)
+	if startCode != 0 || !strings.Contains(startOut, "engine resumed: the drain pause is lifted") || startErrs != "" {
+		t.Fatalf("start after the interrupt: code=%d out=%q err=%q", startCode, startOut, startErrs)
+	}
+	if origin := drainPause(t, st); origin != "" {
+		t.Fatalf("the engine pause still stands with origin %q, want it lifted", origin)
+	}
+}
+
+// clientToken reads the state directory's client token secret, for the
+// fixtures that drive the in-process API directly.
+func clientToken(t *testing.T, state string) string {
+	t.Helper()
+	_, secret, err := lifecycle.TokenForRole(lifecycle.PathsOf(state).Tokens, "client")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return secret
 }

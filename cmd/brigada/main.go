@@ -48,8 +48,14 @@ Commands:
 	engine          Run the engine: store and API on the Unix socket.
 	runner          Run a runner: lease jobs, run workers, run checks.
 	start           Start the engine and detached runner with saved agents.
+	pause           Pause dispatch: the whole engine, or one project
+	                with --repo.
+	resume          Lift a dispatch pause of the engine or of one
+	                project with --repo.
 	config          Show every setting, where it lives and how to change it.
-	stop            Stop the detached runner (--engine: the engine too).
+	stop            Stop the detached runner (--engine: the engine too;
+	                --engine --drain: pause and wait out running jobs
+	                first).
 	mcp             Serve brigada's tools over stdio: the coordinator's
 	                (--coordinator), the client's (--client), or the
 	                foreman's for a turn or an attached chat (--socket).
@@ -152,6 +158,8 @@ var commands = map[string]command{
 	"engine":       {name: "engine", run: runEngine},
 	"runner":       {name: "runner", run: runRunner},
 	"start":        {name: "start", run: runStart},
+	"pause":        {name: "pause", run: runPause},
+	"resume":       {name: "resume", run: runResume},
 	"config":       {name: "config", run: runConfig},
 	"stop":         {name: "stop", run: runStop},
 	"mcp":          {name: "mcp", run: runMCP},
