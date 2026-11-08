@@ -1106,7 +1106,7 @@ When the cells would take more than a third of the width the tail is just `done/
 The total leaves out cancelled and retired tasks, and the count takes a done task only once it is landed, or when its class never lands.
 A job row has fixed columns that line up across the rows of a box — the mark, the task id, the title, the kind, the agent, the age and the last event, two spaces apart — in PLANS, FOREMAN and JOBS, each box with its own widths.
 Beneath the line come its running jobs (`▸`, as `▸ #342  clip frame to terminal height  work  claude/sonnet@high  3m12s  Edit`; with colour and UTF-8 the full-screen view turns the `▸` into a spinner redrawn every 120 ms, with no fetch of its own, and it stays a static `▸` — `>` in ASCII — with no colour, in a piped snapshot, while paused and while the engine band shows):
-the agent is `harness/model@effort`, and a name of more than two `/` segments shows its last, so `opencode/zai-coding-plan/glm-5.3` reads `glm-5.3`;
+the agent is `harness/model@effort`, and a name of more than two `/` segments keeps its first and last, so `opencode/zai-coding-plan/glm-5.3` reads `opencode/glm-5.3`;
 the age is `45s`, `9m04s` or `1h02m03s`; the last event is the tool's name alone, and is left out under 80 terminal columns.
 `brigada top` measures text in terminal cells: a CJK or emoji character takes two, a combining mark none, and a cut falls between characters, never inside a wide one, so every boxed row is exactly the frame's width.
 The title is the part cut when the line is tight, down to 8 columns; a last event still too long is cut at the line's end.

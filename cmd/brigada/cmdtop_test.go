@@ -3041,9 +3041,9 @@ func TestTopAgentsTwoColumns(t *testing.T) {
 	want := []string{
 		"AGENTS",
 		// Broken and cooling first, then running, then idle.
-		"✗ dsh/deepseek-flash  □□□□  login expired     ↺ glm-5.3-flash       □□□□  until " + clock,
-		"● claude/sonnet       ■□□□                    ● claude/opus         □□□□",
-		"● claude/haiku        □□□□",
+		"✗ dsh/deepseek-flash      □□□□  login exp...  ↺ opencode/glm-5.3-flash  □□□□  until " + clock,
+		"● claude/sonnet           ■□□□                ● claude/opus             □□□□",
+		"● claude/haiku            □□□□",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("rows:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -3126,9 +3126,9 @@ func TestTopAgentsFamilyColour(t *testing.T) {
 	}
 	colour := term.New(logo.Caps{Color: logo.Color256, UTF8: true})
 	rows := strings.Join(topAgents(model, topNow, colour, 60), "\n")
-	pad := func(name string) string { return fmt.Sprintf("%-11s", name) }
+	pad := func(name string) string { return fmt.Sprintf("%-16s", name) }
 	for _, want := range []string{
-		colour.Violet(pad("claude/opus")), colour.Blue(pad("glm-5.3")), colour.Mint(pad("dsh/flash")),
+		colour.Violet(pad("claude/opus")), colour.Blue(pad("opencode/glm-5.3")), colour.Mint(pad("dsh/flash")),
 		colour.Dim(pad("codex/gpt-5")), colour.Dim(pad("claude/idle")),
 	} {
 		if !strings.Contains(rows, want) {
@@ -3139,7 +3139,7 @@ func TestTopAgentsFamilyColour(t *testing.T) {
 		t.Errorf("an idle agent takes a family colour:\n%s", rows)
 	}
 	for name, fn := range map[string]func(string) string{
-		"claude/opus": colour.Violet, "glm-5.3": colour.Blue, "dsh/flash": colour.Mint,
+		"claude/opus": colour.Violet, "opencode/glm-5.3": colour.Blue, "dsh/flash": colour.Mint,
 		"opencode/zai-coding-plan/glm-5.3@high": colour.Blue, "codex/gpt-5": colour.Dim, "claude": colour.Violet,
 	} {
 		if got := topFamily(colour, name)("x"); got != fn("x") {
