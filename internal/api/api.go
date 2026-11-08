@@ -84,7 +84,11 @@ func (s *Server) Handler() http.Handler {
 	// pass either gate, and no MCP set offers one.
 	mux.HandleFunc("/v1/tasks/{id}/land/approve", s.authed([]string{roleClient, roleAdmin}, s.handleTaskLandDecision(true)))
 	mux.HandleFunc("/v1/tasks/{id}/land/reject", s.authed([]string{roleClient, roleAdmin}, s.handleTaskLandDecision(false)))
-	mux.HandleFunc("/v1/push/approve", s.authed([]string{roleClient, roleAdmin}, s.handlePushApprove))
+	// Pause and resume dispatch (§8.3, §12.1): the user's, client and
+	// admin tokens only, as plan approval is.
+	mux.HandleFunc("/v1/dispatch/pause", s.authed([]string{roleClient, roleAdmin}, s.handlePause))
+	mux.HandleFunc("/v1/dispatch/resume", s.authed([]string{roleClient, roleAdmin}, s.handleResume))
+	mux.HandleFunc("/v1/push/approve",s.authed([]string{roleClient, roleAdmin}, s.handlePushApprove))
 	// Foreman mutations: a headless turn's lease token or an attached
 	// chat's hold token, scoped to its project, needs nothing more.
 	mux.HandleFunc("/v1/tasks/{id}/answer", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskAnswer)))

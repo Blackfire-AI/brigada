@@ -48,6 +48,10 @@ func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}
 	if running {
 		fmt.Fprintf(stdout, "runner already running (pid %d)\n", rec.PID)
+		// An interrupted drain leaves the engine up and paused.
+		if lifecycle.EngineRunning(ctx, rt.paths.Socket) {
+			return liftDrainPause(ctx, rt, stdout, stderr)
+		}
 		return 0
 	}
 	saved, err := runnerstate.LoadAgents(dir)
@@ -76,6 +80,9 @@ func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}); err != nil {
 		return fail(stderr, err)
 	}
+	if code := liftDrainPause(ctx, rt, stdout, stderr); code != 0 {
+		return code
+	}
 	result, err := startDetachedRunner(ctx, rt, saved, parallel, "")
 	if err != nil {
 		return fail(stderr, err)
@@ -85,6 +92,28 @@ func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	} else {
 		fmt.Fprintf(stdout, "runner started (pid %d); log: %s\n",
 			result.Record.PID, filepath.Join(rt.stateDir, "runner.log"))
+	}
+	return 0
+}
+
+// liftDrainPause lifts a pause of origin drain (§8.3) through the
+// engine's drain-only lift, a resume with its wake evaluation, and leaves
+// a user's pause alone, saying the engine stays paused. It runs whether
+// the engine starts now or is still up after an interrupted drain.
+func liftDrainPause(ctx context.Context, rt *runtime, stdout, stderr io.Writer) int {
+	client, code := connect(ctx, rt, "client", true, stderr)
+	if code != 0 {
+		return code
+	}
+	res, err := client.ResumeDrain(ctx)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	switch {
+	case res.Resumed:
+		fmt.Fprintln(stdout, "engine resumed: the drain's pause is lifted")
+	case res.StillPaused != "":
+		fmt.Fprintln(stdout, "engine stays paused: the pause is yours (brigada resume lifts it)")
 	}
 	return 0
 }
