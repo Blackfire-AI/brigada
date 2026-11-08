@@ -11,8 +11,9 @@
 │   ? #4  polish the knobs  held: waiting for a runner slot                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ AGENTS  all ≤ global 8 ─────────────────────────────────────────────────────╮
-│ ↺ codex/gpt-5   □□□□□□□□  until 16:04  ✗ claude/so...  ■■□□□□□□  login ex... │
-│ ● claude/opus   ■□□□                                                         │
+│ ↺ codex/gpt-5              S×2  □□□□□□□□  until 16:04                        │
+│ ✗ claude/sonnet-long-name  L×1  ■■□□□□□□  login expired                      │
+│ ● claude/opus              H×3  ■□□□                                         │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ EVENTS ──────────────── Plan 1 is half done; task 2 waits for your answer. ─╮
 │ 15:02  task  #3  landed  oil the gears                                       │

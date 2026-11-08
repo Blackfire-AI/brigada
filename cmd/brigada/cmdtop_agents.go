@@ -18,17 +18,15 @@ func topAgents(model topModel, now time.Time, style term.Style, width int) []str
 	return frame.texts()
 }
 
-// topAgentColumns is the inner width from which the AGENTS box has two
-// columns of equal width; under it there is one.
-const topAgentColumns = 72
-
 // topAgentCellsMax is the largest effective cap drawn as cells.
 const topAgentCellsMax = 8
 
 // topAgentLines is the AGENTS box: the agents filled row by row into two
-// columns, or one under topAgentColumns. A cell is a mark — OK `●`, Warn `↺`
+// columns when twice the width a cell needs whole (plus the gap) fits the
+// box, else one. A cell is a mark — OK `●`, Warn `↺`
 // with `until HH:MM`, Bad `✗` with the reason — the name padded to the widest
-// listed name, one cell per slot of the effective cap (topAgentCells) and the
+// listed name, the tag (topAgentTag) padded to the widest listed tag and Dim,
+// one cell per slot of the effective cap (topAgentCells) and the
 // quota text. A broken agent's reason comes from its agent needs-you entry,
 // which topFetch keeps in a project's status too, "broken" when the status
 // has none. A running agent's name takes its family colour (topFamily), an
@@ -76,15 +74,14 @@ func topAgentLines(model topModel, now time.Time, style term.Style, width int) [
 		return 2
 	}
 	sort.SliceStable(listed, func(i, j int) bool { return group(listed[i]) < group(listed[j]) })
-	cols, colW := 1, width
-	if width >= topAgentColumns {
-		cols, colW = 2, (width-len(topJobGap))/2
-	}
 	// The widest name sets the name column, but it gives way before the
-	// cells and the quota text of a cooling or broken agent do.
-	nameW, cellW, quotaW := 0, 0, 0
+	// tag, the cells and the quota text of a cooling or broken agent do.
+	nameW, tagW, cellW, quotaW := 0, 0, 0, 0
 	names := make([]string, len(listed))
+	tags := make([]string, len(listed))
 	for i, a := range listed {
+		tags[i] = topAgentTag(a, style)
+		tagW = max(tagW, term.CellWidth(tags[i]))
 		names[i] = topShortAgent(a.Harness + "/" + a.Model)
 		nameW = max(nameW, term.CellWidth(names[i]))
 		if slots, _, ok := topAgentCells(a, g); ok {
@@ -99,7 +96,17 @@ func topAgentLines(model topModel, now time.Time, style term.Style, width int) [
 			quotaW = max(quotaW, len("broken"))
 		}
 	}
-	room := colW - topAgentMarkW(style) - 1 - len(topJobGap) - cellW
+	// A cell needs its widest name whole; a broken agent's longer reason does
+	// not count and may be cut at the end of its cell.
+	need := topAgentMarkW(style) + 1 + nameW + len(topJobGap) + tagW + len(topJobGap) + cellW
+	if quotaW > 0 {
+		need += len(topJobGap) + quotaW
+	}
+	cols, colW := 1, width
+	if 2*need+len(topJobGap) <= width {
+		cols, colW = 2, (width-len(topJobGap))/2
+	}
+	room := colW - topAgentMarkW(style) - 1 - len(topJobGap) - tagW - len(topJobGap) - cellW
 	if quotaW > 0 {
 		room -= len(topJobGap) + quotaW
 	}
@@ -108,7 +115,8 @@ func topAgentLines(model topModel, now time.Time, style term.Style, width int) [
 	idle := make([]bool, len(listed))
 	for i, a := range listed {
 		idle[i] = a.Running == 0 && a.Quota != "broken" && a.Quota != "cooling"
-		cells[i] = topAgentCell(a, g, names[i], nameW, colW, reasons[a.Harness+"/"+a.Model], now, style)
+		tags[i] += strings.Repeat(" ", tagW-term.CellWidth(tags[i]))
+		cells[i] = topAgentCell(a, g, names[i], nameW, tags[i], colW, reasons[a.Harness+"/"+a.Model], now, style)
 	}
 	var rows []topLine
 	for i := 0; i < len(cells); i += cols {
@@ -128,9 +136,10 @@ func topAgentLines(model topModel, now time.Time, style term.Style, width int) [
 }
 
 // topAgentCell is one agent's cell within colW columns: the mark, the name
-// padded to nameW, the cells of its cap and its quota text. Each part is cut
+// padded to nameW, the tag (already padded, drawn Dim), the cells of its cap
+// and its quota text. Each part is cut
 // with cutLine to the room the cell has left, so the cell never exceeds colW.
-func topAgentCell(a engine.CapacityAgent, g *int, name string, nameW, colW int, reason string, now time.Time, style term.Style) string {
+func topAgentCell(a engine.CapacityAgent, g *int, name string, nameW int, tag string, colW int, reason string, now time.Time, style term.Style) string {
 	var b strings.Builder
 	used := 0
 	put := func(text string, fn func(string) string) {
@@ -168,6 +177,8 @@ func topAgentCell(a engine.CapacityAgent, g *int, name string, nameW, colW int, 
 	shown := cutLine(name, nameW)
 	put(shown+strings.Repeat(" ", max(nameW-term.CellWidth(shown), 0)), nameFn)
 	gap()
+	put(tag, style.Dim)
+	gap()
 	if slots, filled, ok := topAgentCells(a, g); ok {
 		put(strings.Repeat(style.Filled(), filled), style.Accent)
 		put(strings.Repeat(style.Empty(), slots-filled), style.Dim)
@@ -179,6 +190,16 @@ func topAgentCell(a engine.CapacityAgent, g *int, name string, nameW, colW int, 
 		put(quota, quotaFn)
 	}
 	return b.String()
+}
+
+// topAgentTag is an agent's tag: its tier's first letter in upper case (`?`
+// when the tier is empty), the times sign and its cost weight, as in `H×3`.
+func topAgentTag(a engine.CapacityAgent, style term.Style) string {
+	tier := "?"
+	if a.Tier != "" {
+		tier = strings.ToUpper(a.Tier[:1])
+	}
+	return fmt.Sprintf("%s%s%d", tier, style.Times(), a.Cost)
 }
 
 // topAgentMarkW is the width of the widest mark, which every mark pads to:
