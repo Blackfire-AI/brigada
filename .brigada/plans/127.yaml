@@ -66,5 +66,5 @@ tasks:
     effort: medium
     skills: ["surface-parity"]
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-432"
+    rounds: 1
