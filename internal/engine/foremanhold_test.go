@@ -79,7 +79,7 @@ func TestForemanHoldsRule(t *testing.T) {
 				}
 			}
 		}},
-		{"a cancelled turn", false, 0, func(e *env) {
+		{"a cancelled turn", false, 1, func(e *env) {
 			e.park("which file?")
 			job := e.int(`SELECT id FROM jobs WHERE kind = 'foreman'`)
 			if ans := e.cancel(job); ans != AnsOK {

@@ -452,7 +452,10 @@ func TestAParkedPlanTheForemanWillNotHandleIsAnnouncedOnce(t *testing.T) {
 			}
 			jobs := e.foremanJobs()
 			tc.end(e)
-			e.rewake()
+			if tc.name != "cancelled" {
+				// A cancel wakes nothing; a rewake would queue a new turn.
+				e.rewake()
+			}
 			held, present := planHeld(t, e, res.PlanID)
 			if !present || held {
 				t.Fatalf("plan held=%v present=%v, want the user's", held, present)

@@ -16,6 +16,7 @@ type jobRow struct {
 	ID             int64
 	ProjectID      int64
 	TaskID         int64 // 0 for a foreman turn
+	attaching      bool  // a cancel an attach forces: the chat holds what the turn carried, so it announces nothing
 	Kind           Kind
 	Key            string
 	Mode           Mode

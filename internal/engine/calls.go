@@ -619,7 +619,9 @@ func (e *Engine) cancelTx(tx *sql.Tx, job *jobRow, reason string, now time.Time)
 	}
 	// A cancelled foreman turn returns its events to pending (§4.2), and
 	// the wake that follows runs in this same transaction.
-	if err := e.foremanFinishedTx(tx, job, statusCancelled, now); err != nil {
+	settled := *job
+	settled.attaching = reason == "attach"
+	if err := e.foremanFinishedTx(tx, &settled, statusCancelled, now); err != nil {
 		return "", err
 	}
 	return AnsOK, nil

@@ -547,6 +547,9 @@ func (e *Engine) foremanFinishedTx(tx *sql.Tx, job *jobRow, status string, now t
 		// no longer holds what it carried, and a parked task or plan the
 		// foreman will not handle is announced now (§10), not at some
 		// later wake. A live attach hold keeps the foreman holding.
+		if job.attaching {
+			return nil
+		}
 		return e.announceUnattendedTx(tx, job.ProjectID, now)
 	}
 	return e.wakeForemanTx(tx, job.ProjectID, now)
