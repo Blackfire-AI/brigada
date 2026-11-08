@@ -30,7 +30,7 @@ tasks:
     tier: heavy
     effort: high
     skills: ["schema-migration"]
-    state: running
+    state: reviewing
     branch: "brigada/task-429"
     rounds: 1
   - id: 430
