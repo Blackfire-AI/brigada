@@ -409,8 +409,10 @@ func TestCapacityPins(t *testing.T) {
 	// cap hold when layer is set.
 	pin := func(key, kind string, agent int64, layer, hkey string) {
 		t.Helper()
-		task := e.addTask("{}")
-		var pinned, heldLayer, heldKey any
+		var task, pinned, heldLayer, heldKey any
+		if kind != "foreman" { // a foreman job names no task
+			task = e.addTask("{}")
+		}
 		if agent != 0 {
 			pinned = agent
 		}
@@ -462,7 +464,7 @@ func TestCapacityPins(t *testing.T) {
 		if p.AgentID != w.agent || p.Kind != w.kind || p.State != w.state || held != w.held || p.CoolingUntil != w.until {
 			t.Errorf("pin %d = %+v, want agent %d %s state %s held %q until %q", i, p, w.agent, w.kind, w.state, w.held, w.until)
 		}
-		if p.JobID == 0 || p.TaskID == 0 || p.Harness != "claude" || p.Model == "" {
+		if p.JobID == 0 || (p.TaskID == 0) != (w.kind == "foreman") || p.Harness != "claude" || p.Model == "" {
 			t.Errorf("pin %d = %+v, want job, task, harness and model filled", i, p)
 		}
 	}
