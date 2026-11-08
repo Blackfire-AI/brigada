@@ -20,7 +20,9 @@ import (
 // queued job pinned to an agent ("pin job 7 task 3 work -> agent 2
 // claude/sonnet state=capped_at_0 held=model sonnet"; held= only when a
 // cap hold is stamped), so a pin that can never place reads differently
-// from a wait for a slot — and the reserved headroom. That is the read
+// from a wait for a slot — then one `paused:` line per dispatch pause
+// that stands (scope, start, origin when a drain, the jobs still
+// draining, the queued jobs it holds; §8.3) and the reserved headroom. That is the read
 // the foreman plans from (§4.5): how wide the task graph can be, when
 // to sequence instead of fanning out, and which agents are cooling or
 // broken. The tool takes no arguments; a foreman token's scope is its
@@ -72,6 +74,11 @@ func callCapacity(ctx context.Context, c *api.Client, _ json.RawMessage) (string
 		}
 		fmt.Fprintf(&b, "pin job %d%s %s -> agent %d %s/%s state=%s%s\n",
 			p.JobID, task, p.Kind, p.AgentID, p.Harness, p.Model, state, held)
+	}
+	// A dispatch pause (§8.3) is why queued work waits with no slot full:
+	// the same line the status prints, so a turn reads it one way.
+	for _, p := range snap.Pauses {
+		fmt.Fprintln(&b, api.PauseLine(p))
 	}
 	for _, h := range snap.Headroom {
 		fmt.Fprintf(&b, "headroom project %d account=%s cap=%s\n", h.ProjectID, h.Account, capText(h.Cap))

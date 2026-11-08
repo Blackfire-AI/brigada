@@ -268,7 +268,7 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 	}
 	held, err := tx.Query(`SELECT COALESCE(j.cap_held_layer, ''), COALESCE(j.cap_held_key, ''), COALESCE(t.plan_id, 0)
 		FROM jobs j LEFT JOIN tasks t ON t.id = j.task_id
-		WHERE j.status = 'queued' AND j.cap_held_layer IS NOT NULL AND ` + notPausedSQL("j") + ` ORDER BY j.id`)
+		WHERE j.status = 'queued' AND j.cap_held_layer IS NOT NULL AND NOT ` + heldByPauseSQL("j") + ` ORDER BY j.id`)
 	if err != nil {
 		return CapacitySnapshot{}, fmt.Errorf("list held jobs: %w", err)
 	}

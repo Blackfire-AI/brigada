@@ -95,6 +95,39 @@ func TestStatusSectionsRunnerDraining(t *testing.T) {
 	}
 }
 
+// TestStatusSectionsPaused: one `paused:` line per dispatch pause (§8.3
+// "What shows it") — scope, start, the origin only for a drain, the jobs
+// still draining or `drained`, the queued jobs it holds — with no `held:`
+// line for those jobs and no needs-you entry.
+func TestStatusSectionsPaused(t *testing.T) {
+	st := Status{
+		Pauses: []engine.LivePause{
+			{Origin: engine.PauseOriginDrain, StartedAt: "2026-11-09T10:00:00.000000000Z", Queued: 2,
+				Draining: []engine.PauseJob{
+					{ID: 5, TaskID: 3, Kind: "work", Status: "running"},
+					{ID: 9, Kind: "foreman", Status: "leased"},
+				}},
+			{ProjectID: 2, RepoURL: "github.com/o/r", Origin: engine.PauseOriginUser,
+				StartedAt: "2026-11-09T11:00:00.000000000Z", Drained: true},
+		},
+	}
+	got := StatusSections(st)
+	for _, want := range []string{
+		"paused: engine since 2026-11-09T10:00:00.000000000Z (drain); draining: task #3 work (running), job #9 foreman (leased); 2 queued\n",
+		"paused: project github.com/o/r since 2026-11-09T11:00:00.000000000Z; drained\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status sections = %q, want the line %q", got, want)
+		}
+	}
+	if strings.Contains(got, "held:") || strings.Contains(got, "needs you: 1") || strings.Contains(got, "(user)") {
+		t.Errorf("status sections = %q, want no held wait, no needs-you entry, no user origin", got)
+	}
+	if strings.Contains(StatusSections(Status{}), "paused:") {
+		t.Error("an unpaused status shows a paused line")
+	}
+}
+
 // TestStatusSectionsShowGateHolds: a task held at the land gate or
 // waiting at the push gate is a needs-you line naming its task id and
 // the rule that tripped.

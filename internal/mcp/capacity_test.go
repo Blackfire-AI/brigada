@@ -106,6 +106,49 @@ func TestServeCallCapacity(t *testing.T) {
 	}
 }
 
+// TestServeCallStatusAndCapacityCarryThePause: the foreman's status and
+// capacity tools both show the pauses that stand (§8.3 "What shows it") —
+// the engine's drain and the foreman's own project's — as `paused:`
+// lines, and the status shows no `held:` wait and no needs-you entry for
+// them; neither tool offers a way to pause or resume.
+func TestServeCallStatusAndCapacityCarryThePause(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	started := time.Now().UTC().Add(-time.Hour).Format(engine.TimeLayout)
+	err := e.st.Update(t.Context(), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO pauses (project_id, origin, started_at) VALUES (NULL, 'drain', ?)`, started); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO pauses (project_id, origin, started_at) VALUES (1, 'user', ?)`, started)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed the pauses: %v", err)
+	}
+	s := start(t, e)
+	for i, name := range []string{"status", "capacity"} {
+		text, isError := toolText(t, s.call(i+1, "tools/call", map[string]any{"name": name, "arguments": map[string]any{}}))
+		if isError {
+			t.Fatalf("%s errored: %s", name, text)
+		}
+		for _, want := range []string{
+			"paused: engine since " + started + " (drain); drained",
+			"since " + started + "; drained",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s text = %q, want the line %q", name, text, want)
+			}
+		}
+		if strings.Contains(text, "held:") {
+			t.Errorf("%s text = %q, want no held wait", name, text)
+		}
+	}
+	for _, name := range ToolNames() {
+		if name == "pause" || name == "resume" {
+			t.Errorf("the foreman set offers %q", name)
+		}
+	}
+}
+
 // TestServeCallCapacityPins covers the pin lines (issue #195): a held pin
 // on a ready agent and a pin on a broken one, one line each after the
 // layers; the test above covers a snapshot without pins.
