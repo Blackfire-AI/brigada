@@ -53,9 +53,9 @@ tasks:
     base: "pause-clocks"
     effort: medium
     skills: ["cli-flag", "surface-parity"]
-    state: running
+    state: ready
     branch: "brigada/task-431"
-    rounds: 2
+    rounds: 0
   - id: 432
     name: "pause-display"
     title: "feat(status): show the pause in status, top and the foreman's tools"
