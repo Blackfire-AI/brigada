@@ -47,6 +47,14 @@ func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return fail(stderr, err)
 	}
 	if running {
+		// An interrupted drain leaves the runner and the engine up under the
+		// drain's pause (§8.3): start is what lifts it. An engine that is not
+		// up holds nothing to lift, and start does not start one here.
+		if lifecycle.EngineRunning(ctx, rt.paths.Socket) {
+			if code := liftDrainPause(ctx, rt, stdout, stderr); code != 0 {
+				return code
+			}
+		}
 		fmt.Fprintf(stdout, "runner already running (pid %d)\n", rec.PID)
 		return 0
 	}
@@ -76,6 +84,11 @@ func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}); err != nil {
 		return fail(stderr, err)
 	}
+	// The engine may have been stopped by a drain, whose pause is stored
+	// (§8.3): it comes back paused, and start lifts that pause.
+	if code := liftDrainPause(ctx, rt, stdout, stderr); code != 0 {
+		return code
+	}
 	result, err := startDetachedRunner(ctx, rt, saved, parallel, "")
 	if err != nil {
 		return fail(stderr, err)
@@ -85,6 +98,37 @@ func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	} else {
 		fmt.Fprintf(stdout, "runner started (pid %d); log: %s\n",
 			result.Record.PID, filepath.Join(rt.stateDir, "runner.log"))
+	}
+	return 0
+}
+
+// liftDrainPause is the lift `brigada start` makes (§8.3): the engine's
+// pause is lifted when a drain set it — a resume, with its evaluation of
+// the held wakes — and a user's pause is left alone, with a line saying
+// the engine stays paused. It talks to the engine that answers and
+// starts none.
+func liftDrainPause(ctx context.Context, rt *runtime, stdout, stderr io.Writer) int {
+	client, code := connect(ctx, rt, "client", true, stderr)
+	if code != 0 {
+		return code
+	}
+	res, err := client.ResumeDrain(ctx)
+	if err != nil {
+		return fail(stderr, fmt.Errorf("lift the drain pause: %w", err))
+	}
+	if res.Resumed {
+		fmt.Fprintln(stdout, "lifted the drain pause: the engine dispatches again")
+		return 0
+	}
+	st, err := client.Status(ctx)
+	if err != nil {
+		return fail(stderr, fmt.Errorf("read the pauses: %w", err))
+	}
+	for _, p := range st.Pauses {
+		if p.ProjectID == 0 {
+			fmt.Fprintln(stdout, "the engine stays paused: the pause is the user's; brigada resume lifts it")
+			break
+		}
 	}
 	return 0
 }

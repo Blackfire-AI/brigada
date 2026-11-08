@@ -49,7 +49,8 @@ Commands:
 	runner          Run a runner: lease jobs, run workers, run checks.
 	start           Start the engine and detached runner with saved agents.
 	config          Show every setting, where it lives and how to change it.
-	stop            Stop the detached runner (--engine: the engine too).
+	stop            Stop the detached runner (--engine: the engine too;
+	                --engine --drain: pause and wait for running jobs first).
 	mcp             Serve brigada's tools over stdio: the coordinator's
 	                (--coordinator), the client's (--client), or the
 	                foreman's for a turn or an attached chat (--socket).
@@ -111,7 +112,12 @@ Commands:
 	                Show the project's foreman wake budget: today's use
 	                and the reset time; --wakes sets it.
 	cancel <job-id> Cancel a live job.
-	recover         Rebuild a lost store from the newest snapshot and the
+	pause [--repo URL]
+	                Pause dispatch for the whole engine, or for one project:
+	                running jobs finish, nothing new starts.
+	resume [--repo URL]
+	                Lift that scope's pause and no other.
+	recover       Rebuild a lost store from the newest snapshot and the
 	                plan files; the engine must be stopped.
 	hold yield|confirm  Kept for old hooks; does nothing, exits 0.
 	version         Print the brigada version and exit.
@@ -163,6 +169,8 @@ var commands = map[string]command{
 	"capacity":     {name: "capacity", run: runCapacity},
 	"top":          {name: "top", run: runTop},
 	"cancel":       {name: "cancel", run: runCancel},
+	"pause":        {name: "pause", run: runPause},
+	"resume":       {name: "resume", run: runResume},
 	"agent":        {name: "agent", run: runAgent, subcommands: agentCommands},
 	"agents":       {name: "agents", run: runAgents},
 	"plan":         {name: "plan", run: runPlan, subcommands: planCommands},

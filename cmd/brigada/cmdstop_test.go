@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -198,6 +199,146 @@ func TestStopEngine(t *testing.T) {
 	if pid := lifecycle.EnginePid(lifecycle.PathsOf(state).Lock); pid != 0 {
 		t.Fatalf("engine pid %d still holds the lock", pid)
 	}
+}
+
+// engineStops stands in for signalling the engine, which a test's engine
+// — it runs in the test's own process — must never be sent.
+type engineStops struct {
+	calls atomic.Int32
+	pid   atomic.Int64
+}
+
+// fakeEngineStop replaces the engine's termination and polls a drain fast.
+func fakeEngineStop(t *testing.T) *engineStops {
+	t.Helper()
+	stops := &engineStops{}
+	oldTerminate, oldPoll := terminateEngine, drainPoll
+	terminateEngine = func(_ context.Context, pid int, _ func() bool) (bool, error) {
+		stops.calls.Add(1)
+		stops.pid.Store(int64(pid))
+		return true, nil
+	}
+	drainPoll = 10 * time.Millisecond
+	t.Cleanup(func() { terminateEngine, drainPoll = oldTerminate, oldPoll })
+	return stops
+}
+
+// startDrainStop runs `stop --engine --drain` in the background.
+func startDrainStop(ctx context.Context, state string) (*syncBuffer, *syncBuffer, <-chan int) {
+	var out, errb syncBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- run(ctx, []string{"stop", "--state-dir", state, "--engine", "--drain"}, &out, &errb)
+	}()
+	return &out, &errb, done
+}
+
+// TestStopDrainWaitsForRunningJob: the drain pauses the engine, waits while
+// a job runs — naming it — and stops the runner and the engine only once
+// the job has ended.
+func TestStopDrainWaitsForRunningJob(t *testing.T) {
+	ctx, state := startPauseEngine(t, seedRunningJob)
+	stops := fakeEngineStop(t)
+	out, errb, done := startDrainStop(ctx, state)
+
+	waitForOutput(t, out, "engine paused to drain\n")
+	waitForOutput(t, out, "waiting on 1 job: job 1 (task 1, work, running)\n")
+	select {
+	case code := <-done:
+		t.Fatalf("the drain ended with %d while a job ran: stdout %q stderr %q", code, out.String(), errb.String())
+	case <-time.After(150 * time.Millisecond):
+	}
+	if stops.calls.Load() != 0 {
+		t.Fatal("the engine was stopped while a job ran")
+	}
+
+	mustDo(t, ctx, state, "cancel", "1")
+	select {
+	case code := <-done:
+		if code != 0 || errb.String() != "" {
+			t.Fatalf("the drain ended with %d: stdout %q stderr %q", code, out.String(), errb.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the drain never ended: stdout %q", out.String())
+	}
+	wantContains(t, "the drain's output", out.String(), "engine drained: no job leased or running\n",
+		"no runner running\n", "engine stopped (pid ")
+	if stops.calls.Load() != 1 {
+		t.Errorf("the engine was stopped %d times, want once", stops.calls.Load())
+	}
+	// The pause is stored with origin drain: a later start lifts it.
+	wantContains(t, "the user's pause over the drain's", mustDo(t, ctx, state, "pause"),
+		"the engine was already paused (origin user, since ")
+}
+
+// TestStopDrainOverUserPause: a drain over the user's pause leaves its
+// origin the user's.
+func TestStopDrainOverUserPause(t *testing.T) {
+	ctx, state := startPauseEngine(t, nil)
+	stops := fakeEngineStop(t)
+	mustDo(t, ctx, state, "pause")
+
+	out := mustDo(t, ctx, state, "stop", "--engine", "--drain")
+	wantContains(t, "the drain's output", out, "the engine is already paused by the user; the pause stays the user's\n",
+		"engine drained: no job leased or running\n", "engine stopped (pid ")
+	if stops.calls.Load() != 1 {
+		t.Errorf("the engine was stopped %d times, want once", stops.calls.Load())
+	}
+	// A drain-only lift would have lifted a drain's pause; the user's stands.
+	wantContains(t, "resume", mustDo(t, ctx, state, "resume"), "resumed the engine\n")
+}
+
+// TestStopDrainInterrupted: interrupting the wait stops nothing and leaves
+// the pause in place, and says so.
+func TestStopDrainInterrupted(t *testing.T) {
+	ctx, state := startPauseEngine(t, seedRunningJob)
+	stops := fakeEngineStop(t)
+	stopCtx, interrupt := context.WithCancel(ctx)
+	defer interrupt()
+	out, errb, done := startDrainStop(stopCtx, state)
+
+	waitForOutput(t, out, "waiting on 1 job: job 1 (task 1, work, running)\n")
+	interrupt()
+	select {
+	case code := <-done:
+		if code != 1 || errb.String() != "" {
+			t.Fatalf("the interrupted drain ended with %d: stdout %q stderr %q", code, out.String(), errb.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the interrupted drain never ended: stdout %q", out.String())
+	}
+	wantContains(t, "the interrupted drain's output", out.String(),
+		"interrupted: nothing was stopped and the engine stays paused")
+	if strings.Contains(out.String(), "runner stopped") || stops.calls.Load() != 0 {
+		t.Errorf("the interrupted drain stopped something: stdout %q, engine stops %d", out.String(), stops.calls.Load())
+	}
+	// The pause stands: resuming it finds it, and the job still runs.
+	wantContains(t, "resume", mustDo(t, ctx, state, "resume"), "resumed the engine\n")
+}
+
+// TestStopDrainWithoutEngineFlag: --drain drains the engine, so it is
+// refused without --engine.
+func TestStopDrainWithoutEngineFlag(t *testing.T) {
+	state := testsupport.ShortStateDir(t)
+	code, out, errs := stopDo(t, state, "--drain")
+	if code != 2 || out != "" || !strings.Contains(errs, "--drain needs --engine") ||
+		!strings.Contains(errs, "Run 'brigada stop --help' for usage.") {
+		t.Fatalf("stop --drain = %d, stdout %q, stderr %q, want a usage error", code, out, errs)
+	}
+	if code, _, errs = stopDo(t, state, "--engine", "--drian"); code != 2 {
+		t.Fatalf("stop --engine --drian = %d, stderr %q, want a usage error", code, errs)
+	}
+}
+
+// TestStopDrainNoEngine: with no engine there is nothing to drain, and the
+// stop goes on as stop --engine does.
+func TestStopDrainNoEngine(t *testing.T) {
+	state := testsupport.ShortStateDir(t)
+	code, out, errs := stopDo(t, state, "--engine", "--drain")
+	if code != 0 || errs != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
+	}
+	wantContains(t, "stop output", out, "no engine running; nothing to drain\n", "no runner running\n", "no engine running\n")
 }
 
 func TestStopRejectsArguments(t *testing.T) {

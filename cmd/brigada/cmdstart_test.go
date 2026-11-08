@@ -68,6 +68,48 @@ func TestStartAlreadyRunning(t *testing.T) {
 	}
 }
 
+// TestStartLiftsInterruptedDrain: a drain interrupted leaves the runner and
+// the engine up under the drain's pause; `brigada start` lifts it, a resume
+// with its wake evaluation, though the engine is still up.
+func TestStartLiftsInterruptedDrain(t *testing.T) {
+	ctx, state := startPauseEngine(t, seedRunningJob)
+	fakeEngineStop(t)
+	runnerPid := startStopHelper(t, "runner", state)
+	stopCtx, interrupt := context.WithCancel(ctx)
+	defer interrupt()
+	out, _, done := startDrainStop(stopCtx, state)
+	waitForOutput(t, out, "waiting on 1 job: job 1 (task 1, work, running)\n")
+	interrupt()
+	if code := <-done; code != 1 {
+		t.Fatalf("the interrupted drain = %d, stdout %q", code, out.String())
+	}
+	if !processAlive(runnerPid) {
+		t.Fatal("the interrupted drain stopped the runner")
+	}
+
+	code, startOut, errs := startDo("--state-dir", state)
+	want := fmt.Sprintf("lifted the drain pause: the engine dispatches again\nrunner already running (pid %d)\n", runnerPid)
+	if code != 0 || startOut != want || errs != "" {
+		t.Fatalf("start = %d, stdout %q, stderr %q, want %q", code, startOut, errs, want)
+	}
+	wantContains(t, "resume after start", mustDo(t, ctx, state, "resume"), "the engine was not paused\n")
+}
+
+// TestStartLeavesUserPause: `brigada start` leaves a user's pause alone and
+// says the engine stays paused.
+func TestStartLeavesUserPause(t *testing.T) {
+	ctx, state := startPauseEngine(t, nil)
+	runnerPid := startStopHelper(t, "runner", state)
+	mustDo(t, ctx, state, "pause")
+
+	code, out, errs := startDo("--state-dir", state)
+	want := fmt.Sprintf("the engine stays paused: the pause is the user's; brigada resume lifts it\nrunner already running (pid %d)\n", runnerPid)
+	if code != 0 || out != want || errs != "" {
+		t.Fatalf("start = %d, stdout %q, stderr %q, want %q", code, out, errs, want)
+	}
+	wantContains(t, "resume after start", mustDo(t, ctx, state, "resume"), "resumed the engine\n")
+}
+
 func TestStartSavedAgents(t *testing.T) {
 	binary := testsupport.BuildBrigada(t)
 	old := initBinary

@@ -99,6 +99,11 @@ func (s *Server) Handler() http.Handler {
 	// foreman role, the foreman never confirms its own plans.
 	mux.HandleFunc("/v1/plans/{id}/approve", s.authed([]string{roleClient, roleAdmin}, s.idempotent(s.handlePlanDecision(true))))
 	mux.HandleFunc("/v1/plans/{id}/reject", s.authed([]string{roleClient, roleAdmin}, s.idempotent(s.handlePlanDecision(false))))
+	// The user's pause and resume of dispatch (§8.3, §12.1): client and
+	// admin tokens only, as plan approval is — a foreman never pauses or
+	// resumes its own dispatch.
+	mux.HandleFunc("/v1/dispatch/pause", s.authed([]string{roleClient, roleAdmin}, s.handlePause))
+	mux.HandleFunc("/v1/dispatch/resume", s.authed([]string{roleClient, roleAdmin}, s.handleResume))
 	// The attach hold (§4.2 item 1): the client or admin takes the
 	// foreman for an attached chat, heartbeats and releases it; the
 	// foreman role long-polls the project's events.
