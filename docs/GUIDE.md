@@ -1119,7 +1119,7 @@ a done task that has not landed and that no job speaks for gets a teal `⇡ #330
 with `queued` for a queued land job and `not landed` when the task carries no word;
 a queued, waiting-on or review task is a dim `·` row;
 a reviewing plan whose review no job has started shows a dim `· plan review queued` line —
-while a finished plan is one line, `#N <title>` and `done` or `cancelled`, listed below every live plan (each group keeps id order);
+while a finished plan is one line, `#N <title>` and `done` or `cancelled`, listed below every live plan (live plans in id order, finished ones newest first, highest id first);
 a foreman turn no plan claims sits in a FOREMAN box and any other job no listed plan claims in a JOBS box,
 between the needs-you box and the plans tree, each shown only when it has lines.
 The FOREMAN block also carries dim lines for the user's messages waiting for the foreman (`2 messages for the foreman`) and for each foreman slot that is not free, with its state, label and the local time since (`foreman slot: attach (attached chat) since 11:10`), a headless turn whose job runs left out because its job line speaks for it;

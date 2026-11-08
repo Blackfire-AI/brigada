@@ -1050,7 +1050,9 @@ func topFirstRunRows(style term.Style, line func(string, topYield) topLine) []to
 // said nothing and keeps `none`. When plans exist and none is live, the note
 // reads `none live · N finished` and a Dim `idle: last work landed HH:MM`
 // row ends the finished lines, left out when no landing is kept. Every live
-// plan is listed before every finished one, id order kept in each group.
+// plan is listed before every finished one, live plans in id order and
+// finished ones newest first (highest id first), so a short terminal drops
+// the oldest finished plans first.
 func topPlansBox(st api.Status, tagged, fetched bool, events []history.Item, now time.Time, style term.Style, width int, mark string) []topLine {
 	line := func(text string, class topYield) topLine {
 		return topLine{text: text, class: class, section: topSecPlans}
@@ -1089,15 +1091,22 @@ func topPlansBox(st api.Status, tagged, fetched bool, events []history.Item, now
 		}
 	}
 	layout := newTopPlanLayout(st.Plans, running, tagged, style, width)
-	// Live plans first, then finished ones, each group in id order.
-	ordered := make([]engine.StatusPlan, 0, len(st.Plans))
-	for _, finishedGroup := range []bool{false, true} {
-		for _, p := range st.Plans {
-			if topPlanFinished(p) == finishedGroup {
-				ordered = append(ordered, p)
-			}
+	// Live plans first in ascending id order, then finished ones newest
+	// first, descending id: the frame's class b drop takes the bottom
+	// finished line first, so the oldest finished plans are the ones that
+	// go on a short terminal.
+	livePlans := make([]engine.StatusPlan, 0, len(st.Plans))
+	finishedPlans := make([]engine.StatusPlan, 0, len(st.Plans))
+	for _, p := range st.Plans {
+		if topPlanFinished(p) {
+			finishedPlans = append(finishedPlans, p)
+		} else {
+			livePlans = append(livePlans, p)
 		}
 	}
+	sort.Slice(livePlans, func(i, j int) bool { return livePlans[i].ID < livePlans[j].ID })
+	sort.Slice(finishedPlans, func(i, j int) bool { return finishedPlans[i].ID > finishedPlans[j].ID })
+	ordered := append(append(make([]engine.StatusPlan, 0, len(st.Plans)), livePlans...), finishedPlans...)
 	for _, p := range ordered {
 		tag := ""
 		if tagged {
