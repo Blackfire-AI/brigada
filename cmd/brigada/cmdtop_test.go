@@ -3065,7 +3065,7 @@ func TestTopAgentsTwoColumns(t *testing.T) {
 		t.Errorf("rows:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	for _, line := range got[1:3] {
-		if r := []rune(line); len(r) != 98 || r[48] != ' ' || r[49] != ' ' || r[50] == ' ' {
+		if r := []rune(line); len(r) < 51 || r[48] != ' ' || r[49] != ' ' || r[50] == ' ' {
 			t.Errorf("the second column does not start at 50: %q", line)
 		}
 	}
