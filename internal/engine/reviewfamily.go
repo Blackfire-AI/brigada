@@ -142,6 +142,9 @@ func preferReviewAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner in
 		if served != "" && tier != served {
 			continue
 		}
+		if cappedAtZeroFor(cfg.Caps, j.Kind, c.account, c.model) {
+			continue // never placeable, whatever unavailable says
+		}
 		if !unavailable && (c.health != "ready" || c.cooling > now) {
 			continue
 		}

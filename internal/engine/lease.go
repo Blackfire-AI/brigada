@@ -960,7 +960,9 @@ func ranksBefore(a, b *agentCand) bool {
 // rankAgents from the outcome record of the job's (repo, class) and the
 // configured cost weights. A job that requires an agent (§3) — a
 // fix round resuming the author's session — has its list named
-// outright: that agent or none, never ranked against another. Empty
+// outright: that agent or none, never ranked against another. An agent
+// whose model or account is capped at exactly 0 (a foreman turn: its
+// account alone) is never named. Empty
 // when the runner advertises no such agent — the caller then refuses
 // the lease, unless the runner advertises nothing at all.
 func leaseAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, now string) ([]agentCand, error) {
@@ -972,7 +974,8 @@ func leaseAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j 
 // Runner 0 ranks all registered agents for an automatic restart's pin. A
 // caller that only asks who qualifies passes a nil rnd and gets id order.
 // A review under review.family=prefer is placed by preferReviewAgentsTx
-// instead (issue #126): its family steps read availability.
+// instead (issue #126): its family steps read availability. An agent
+// capped at exactly 0 is never a candidate (see qualifyingAgentsTx).
 func eligibleAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
 	return qualifyingAgentsTx(tx, cfg, rnd, runner, j, class, now, false)
 }
@@ -982,7 +985,10 @@ func eligibleAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64,
 // those that qualify for the job by pin, harness, class and family rule
 // but cannot take it yet — with their model, health and cooling
 // deadline filled in: what the cooling hold (§8.1) and the queue-TTL
-// park reason read. Unpinned task jobs are restricted to the served tier
+// park reason read. An agent capped at exactly 0 — by its model or its
+// account, for a foreman turn by its account alone — can never take the
+// job: it is neither a candidate nor something the cooling hold waits on,
+// whatever unavailable says, while a merely full cap still waits. Unpinned task jobs are restricted to the served tier
 // before availability is checked: the task's effective tier for a work or
 // fix job, the review tier for a review (jobTierTx). A review retry's agent exclusion is
 // applied as the preference it is (§7): the lift is decided inside
@@ -1029,6 +1035,9 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 		tier := limits.TierOf(c.harness, c.model)
 		if served != "" && tier != served {
 			continue
+		}
+		if cappedAtZeroFor(limits, j.Kind, c.account, c.model) {
+			continue // never placeable: neither a candidate nor a cooling wait
 		}
 		if !unavailable && (c.health != "ready" || c.cooling > now) {
 			continue
@@ -1093,6 +1102,17 @@ func tierServedRows(limits caps.Limits, agents []agentCand, asked, now string) s
 		hasReady = soonestTiers
 	}
 	return tierServed(asked, hasReady)
+}
+
+// cappedAtZeroFor is cappedAtZero for one job kind: a foreman turn is
+// exempt from the model cap (§8.1, caps.Room) but not from the account
+// cap, so only its account can cap it at 0.
+func cappedAtZeroFor(limits caps.Limits, kind Kind, account, model string) bool {
+	if kind == KindForeman {
+		n, ok := limits.Account[account]
+		return ok && n == 0
+	}
+	return cappedAtZero(limits, account, model)
 }
 
 // cappedAtZero reports whether the model's cap or the account's cap is
