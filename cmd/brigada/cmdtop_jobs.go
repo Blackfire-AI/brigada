@@ -36,12 +36,12 @@ const topJobTitleMin = 8
 const topJobGap = "  "
 
 // topShortAgent is a running agent's name in its short form: a name of more
-// than two `/` segments shows its last segment, so `opencode/zai-coding-plan/glm-5.3`
-// reads `glm-5.3`.
+// than two `/` segments keeps its first and last, so `opencode/zai-coding-plan/glm-5.3`
+// reads `opencode/glm-5.3`.
 func topShortAgent(name string) string {
 	segs := strings.Split(name, "/")
 	if len(segs) > 2 {
-		return segs[len(segs)-1]
+		return segs[0] + "/" + segs[len(segs)-1]
 	}
 	return name
 }

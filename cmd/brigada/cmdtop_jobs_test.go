@@ -44,7 +44,7 @@ func TestTopJobColumnsLineUp(t *testing.T) {
 	}
 	for _, c := range []struct{ a, b, c string }{
 		{"work", "fix", "review"},
-		{"glm-5.3", "claude/sonnet@high", "claude/opus"},
+		{"opencode/glm-5.3", "claude/sonnet@high", "claude/opus"},
 		{"3m12s", "1h02m03s", "45s"},
 	} {
 		if x, y, z := column(rows[0], c.a), column(rows[1], c.b), column(rows[2], c.c); x < 0 || x != y || x != z {
@@ -76,7 +76,8 @@ func TestTopJobAge(t *testing.T) {
 		t.Errorf("age of no lease = %q", got)
 	}
 	for in, want := range map[string]string{
-		"opencode/zai-coding-plan/glm-5.3": "glm-5.3",
+		"opencode/zai-coding-plan/glm-5.3": "opencode/glm-5.3",
+		"a/b/c/d":                          "a/d",
 		"claude/sonnet":                    "claude/sonnet",
 		"glm-5.3":                          "glm-5.3",
 	} {
