@@ -1136,8 +1136,8 @@ func TestTopPlansTreeColours(t *testing.T) {
 		"  " + style.Dim("· #3  q     (queued)"),
 		"  " + style.Warn("?") + " #4  held  " + style.Warn("held: waiting for a runner slot"),
 		"  " + style.Bad("! #5 stuck needs_foreman"),
-		alignRight("#2 done", style.OK("done"), 80),
 		alignRight("#3 gone", style.Bad("cancelled"), 80),
+		alignRight("#2 done", style.OK("done"), 80),
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("tree =\n%q\nwant\n%q", got, want)
@@ -1389,9 +1389,9 @@ func TestTopPlanTotalsLeaveOutCancelledAndRetired(t *testing.T) {
 }
 
 // TestTopPlansLiveFirst: every live plan is listed before every finished
-// one, id order kept in each group, on a plain tree and on a tagged view; a
-// cancelled plan is finished, an awaiting-approval and a reviewing plan are
-// live.
+// one, live plans in id order and finished ones newest first, on a plain
+// tree and on a tagged view; a cancelled plan is finished, an
+// awaiting-approval and a reviewing plan are live.
 func TestTopPlansLiveFirst(t *testing.T) {
 	const repo = "https://example.invalid/acme/brigada.git"
 	st := api.Status{Plans: []engine.StatusPlan{
@@ -1412,7 +1412,7 @@ func TestTopPlansLiveFirst(t *testing.T) {
 		}
 		return out
 	}
-	want := "#2 #4 #6 #1 #3 #5"
+	want := "#2 #4 #6 #5 #3 #1"
 	for _, tagged := range []bool{false, true} {
 		if got := strings.Join(order(tagged), " "); got != want {
 			t.Errorf("tagged=%v order = %s, want %s", tagged, got, want)
@@ -1420,6 +1420,77 @@ func TestTopPlansLiveFirst(t *testing.T) {
 	}
 	if st.Plans[0].ID != 1 || st.Plans[1].ID != 2 {
 		t.Errorf("st.Plans was reordered")
+	}
+}
+
+// TestTopPlansFinishedNewestFirst: the box sorts by plan id, not by the
+// status's order — live plans in id order, finished ones newest first —
+// and a short terminal's class b drop takes the bottom finished line
+// first, so the oldest finished plans go and #9, the newest, is the last
+// finished line left.
+func TestTopPlansFinishedNewestFirst(t *testing.T) {
+	const repo = "https://example.invalid/acme/brigada.git"
+	st := api.Status{Plans: []engine.StatusPlan{
+		{ID: 9, RepoURL: repo, Title: "nine", State: "done"},
+		{ID: 7, RepoURL: repo, Title: "seven", State: "active"},
+		{ID: 2, RepoURL: repo, Title: "two", State: "done"},
+		{ID: 3, RepoURL: repo, Title: "three", State: "active"},
+		{ID: 5, RepoURL: repo, Title: "five", State: "cancelled"},
+	}}
+	style := term.New(logo.Caps{UTF8: true})
+	var out []string
+	for _, l := range newTopPlans(st, false, false, topNow, style, 80) {
+		if strings.HasPrefix(l.text, "#") {
+			out = append(out, strings.Fields(l.text)[0])
+		}
+	}
+	if got, want := strings.Join(out, " "), "#3 #7 #9 #5 #2"; got != want {
+		t.Errorf("order = %s, want %s", got, want)
+	}
+	finished := map[string]bool{"#9": true, "#5": true, "#2": true}
+	sawAll, sawNine := false, false
+	model := topModel{status: st}
+	for height := 18; height >= 3; height-- {
+		lines := strings.Split(plainTop(model, 80, height), "\n")
+		if len(lines) > height {
+			t.Fatalf("height %d: %d lines:\n%s", height, len(lines), strings.Join(lines, "\n"))
+		}
+		var ids []string
+		inPlans := false
+		for _, l := range lines {
+			switch {
+			case strings.Contains(l, "╭─ PLANS"):
+				inPlans = true
+			case strings.HasPrefix(l, "╰"):
+				inPlans = false
+			case inPlans && strings.HasPrefix(l, "│ #"):
+				ids = append(ids, strings.Fields(strings.TrimPrefix(l, "│ "))[0])
+			}
+		}
+		if strings.Join(ids, " ") == "#3 #7 #9 #5 #2" {
+			sawAll = true
+		}
+		var finishedIDs []string
+		for _, id := range ids {
+			if finished[id] {
+				finishedIDs = append(finishedIDs, id)
+			}
+		}
+		// Drops only ever take the tail: #2 first, then #5, so what shows
+		// is always a prefix of the newest-first list.
+		want := strings.Join([]string{"#9", "#5", "#2"}[:len(finishedIDs)], " ")
+		if got := strings.Join(finishedIDs, " "); got != want {
+			t.Errorf("height %d: finished order = %q, want %q:\n%s", height, got, want, strings.Join(lines, "\n"))
+		}
+		if strings.Join(finishedIDs, " ") == "#9" {
+			sawNine = true
+		}
+	}
+	if !sawAll {
+		t.Error("no height shows all five plans in order #3 #7 #9 #5 #2")
+	}
+	if !sawNine {
+		t.Error("no height leaves #9 as the last finished line")
 	}
 }
 
@@ -3376,9 +3447,9 @@ func TestRenderTopFinishedFold(t *testing.T) {
 	if lines := renderTop(model, 100, n, topNow, style); len(lines) != n {
 		t.Fatalf("at %d lines yield:\n%s", n, strings.Join(lines, "\n"))
 	}
-	// One line less: the last finished plan's line goes, with no fold line.
+	// One line less: the oldest finished plan's line goes, with no fold line.
 	got := strings.Join(renderTop(model, 100, n-1, topNow, style), "\n")
-	if strings.Contains(got, "old plan 8") || !strings.Contains(got, "#7 old plan 7") || strings.Contains(got, "finished\n") || len(strings.Split(got, "\n")) != n-1 {
+	if strings.Contains(got, "old plan 7") || !strings.Contains(got, "#8 old plan 8") || strings.Contains(got, "finished\n") || len(strings.Split(got, "\n")) != n-1 {
 		t.Errorf("at %d:\n%s", n-1, got)
 	}
 	got = strings.Join(renderTop(model, 100, n-2, topNow, style), "\n")
