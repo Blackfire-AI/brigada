@@ -31,7 +31,7 @@ tasks:
     skills: ["bugfix"]
     state: running
     branch: "brigada/task-378-r1"
-    rounds: 1
+    rounds: 2
   - id: 379
     name: "capacity-pins"
     title: "capacity: list queued jobs pinned to an agent and whether the pin can place"
