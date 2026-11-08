@@ -30,7 +30,7 @@ tasks:
     tier: heavy
     effort: high
     skills: ["schema-migration"]
-    state: reviewing
+    state: done
     branch: "brigada/task-429"
     rounds: 1
   - id: 430
@@ -42,7 +42,7 @@ tasks:
     continue: "pause-core"
     tier: heavy
     effort: high
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 431
