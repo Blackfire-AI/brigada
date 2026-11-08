@@ -103,8 +103,14 @@ type StatusInfo struct {
 	// beside the running jobs, never in the needs-you queue.
 	Cooling []CoolingAgent `json:"cooling,omitempty"`
 	// Held lists the queued jobs a full cap layer holds (§8.1); the
-	// runner layer's are jobs waiting for a runner slot.
+	// runner layer's are jobs waiting for a runner slot. A queued job of
+	// a paused scope is never listed here: Pauses counts it.
 	Held []HeldJob `json:"held,omitempty"`
+	// Pauses lists the dispatch pauses that stand (§8.3), the engine's
+	// first: each with its scope, start and origin, the scope's jobs
+	// still draining (leased or running) and the queued jobs it holds. A
+	// foreman caller sees the engine's pause and its own project's.
+	Pauses []LivePause `json:"pauses,omitempty"`
 	// Retries lists the queued jobs waiting out an infrastructure
 	// backoff (§5.1): the job's not-before and the failure's words.
 	Retries []InfraRetry `json:"retries,omitempty"`
@@ -445,6 +451,9 @@ func (e *Engine) status(ctx context.Context, project int64, withText, all bool) 
 			return err
 		}
 		if info.Held, err = statusHeldTx(tx, project); err != nil {
+			return err
+		}
+		if info.Pauses, err = livePausesViewTx(tx, project); err != nil {
 			return err
 		}
 		if info.Retries, err = statusRetriesTx(tx, project, now); err != nil {

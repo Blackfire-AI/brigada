@@ -228,6 +228,8 @@ func (e *Engine) holdBusyRunnersTx(tx *sql.Tx, now time.Time, polling int64) err
 // for its agent's quota to reset: Agent ("harness/model") is the one
 // whose cooling ends first and Until when; "no_pair" is a foreman turn
 // waiting for a runner agent that offers its harness/model, named by Agent.
+// A queued job of a paused scope is never a HeldJob: the pause holds it
+// (§8.3), and StatusInfo.Pauses counts it.
 type HeldJob struct {
 	ID     int64  `json:"id"`
 	TaskID int64  `json:"task_id,omitempty"`
@@ -239,13 +241,16 @@ type HeldJob struct {
 }
 
 // statusHeldTx lists the queued jobs held by a full cap layer, oldest
-// first.
+// first. A queued job of a paused scope is not listed, whatever hold it
+// was stamped with: the pause holds it, and the status counts it under
+// the pause (§8.3, LivePause.Queued), never as a wait for a slot.
 func statusHeldTx(tx *sql.Tx, project int64) ([]HeldJob, error) {
 	query := `SELECT j.id, COALESCE(j.task_id, 0), j.kind, j.cap_held_layer, COALESCE(j.cap_held_at, ''),
 		CASE WHEN j.cap_held_layer = '` + layerNoPair + `' THEN COALESCE(j.cap_held_key, '') ELSE COALESCE(a.harness || '/' || a.model, '') END,
 		COALESCE(a.cooling_until, '')
 		FROM jobs j LEFT JOIN agents a ON j.cap_held_layer = '` + layerCooling + `' AND CAST(a.id AS TEXT) = j.cap_held_key
-		WHERE j.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) AND j.status = 'queued' AND j.cap_held_layer IS NOT NULL`
+		WHERE j.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) AND j.status = 'queued' AND j.cap_held_layer IS NOT NULL
+		AND ` + notPausedSQL("j")
 	var args []any
 	if project != 0 {
 		query += " AND j.project_id = ?"
