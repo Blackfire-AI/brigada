@@ -11,6 +11,9 @@
 # The brigada binary built at the repository root
 /brigada
 
+# The guard tool built at the repository root (`go build ./internal/tools/guard`)
+/guard
+
 # The licenses tool built inside its nested module
 /internal/tools/licenses/licenses
 
