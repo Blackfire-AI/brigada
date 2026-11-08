@@ -289,3 +289,49 @@ func TestStatusRoleGuidanceEndpoint(t *testing.T) {
 		t.Fatalf("roles: %+v", st.RoleInstructions)
 	}
 }
+
+func TestStatusSplitsHeldPlanForClient(t *testing.T) {
+	e := newEnv(t)
+	err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		now := e.clock.Now().UTC().Format(engine.TimeLayout)
+		if _, err := tx.Exec(`UPDATE plans SET state = 'needs_foreman', review_verdict = 'changes' WHERE id = ?`, e.plan); err != nil {
+			return err
+		}
+		result, err := tx.Exec(`INSERT INTO events (kind, project_id, payload, created_at) VALUES ('plan_reviewed', ?, ?, ?)`, e.project1, fmt.Sprintf(`{"plan":%d,"findings":"revise it"}`, e.plan), now)
+		if err != nil {
+			return err
+		}
+		id, err := result.LastInsertId()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO foreman_inbox (event_id, project_id, state) VALUES (?, ?, 'pending')`, id, e.project1); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`INSERT INTO attach_holds (project_id, state, expires_at, created_at) VALUES (?, 'live', ?, ?)`, e.project1, e.clock.Now().Add(time.Hour).UTC().Format(engine.TimeLayout), now)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		token string
+		held  bool
+	}{{"alice", true}, {"foreman1", false}} {
+		code, _, data := e.do(http.MethodGet, "/v1/status", tc.token, "", nil)
+		if code != http.StatusOK {
+			t.Fatalf("status: %d %s", code, data)
+		}
+		st := decode[engine.StatusInfo](t, data)
+		if len(st.Plans) != 1 || st.Plans[0].State != "needs_foreman" {
+			t.Fatalf("plans = %+v", st.Plans)
+		}
+		if tc.held {
+			if len(st.ForemanHolds) != 1 || len(st.NeedsYou) != 0 || st.ForemanHolds[0].ID != e.plan {
+				t.Fatalf("client queue = %+v / %+v", st.NeedsYou, st.ForemanHolds)
+			}
+		} else if len(st.NeedsYou) != 1 || st.NeedsYou[0].ID != e.plan {
+			t.Fatalf("foreman queue = %+v", st.NeedsYou)
+		}
+	}
+}

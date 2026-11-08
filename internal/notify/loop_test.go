@@ -416,3 +416,34 @@ func execSQL(t *testing.T, st *store.Store, q string) {
 		t.Fatalf("exec %q: %v", q, err)
 	}
 }
+
+func TestLoopPlanUnattendedDelivery(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t, ctx, filepath.Join(t.TempDir(), "store.db"))
+	defer st.Close()
+	seedProject(t, ctx, st)
+	appendEvent(t, ctx, st, "plan_reviewed", 1, 0, `{"plan":1,"status":"changes"}`)
+	appendEvent(t, ctx, st, KindPlanUnattended, 1, 0, `{"plan":1,"reason":"fix the plan"}`)
+	appendEvent(t, ctx, st, "plan_verdict_unanswered", 1, 0, `{"plan":1,"job":9}`)
+	appendEvent(t, ctx, st, KindPlanUnattended, 1, 0, `{"plan":1,"reason":"foreman turn 9 ended without answering the changes verdict: fix it"}`)
+	fake := &Fake{}
+	loop := NewLoop(st, fake, nil)
+	if err := loop.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	appendEvent(t, ctx, st, "plan_reviewed", 1, 0, `{"plan":1,"status":"changes"}`)
+	appendEvent(t, ctx, st, KindPlanUnattended, 1, 0, `{"plan":1,"reason":"still wrong"}`)
+	if err := loop.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	want := []Note{{"brigada", "plan #1 needs you: fix the plan"}, {"brigada", "plan #1 needs you: foreman turn 9 ended without answering the changes verdict: fix it"}, {"brigada", "plan #1 needs you: still wrong"}}
+	got := fake.Notes()
+	if len(got) != len(want) {
+		t.Fatalf("notes = %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("note %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}

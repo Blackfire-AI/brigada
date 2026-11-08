@@ -117,7 +117,7 @@ type Status struct {
 	HiddenFinishedPlans int                   `json:"hidden_finished_plans,omitempty"`
 	Report              *engine.StatusReport  `json:"report,omitempty"`
 	NeedsYou            []engine.NeedsYouItem `json:"needs_you"`
-	// ForemanHolds lists the tasks the foreman handles (§10): out of
+	// ForemanHolds lists the tasks and plans the foreman handles (§10): out of
 	// needs_you for a caller that is not the foreman, kept apart so the
 	// plan tree still shows the worker's question beside the task.
 	ForemanHolds []engine.NeedsYouItem `json:"foreman_holds,omitempty"`
