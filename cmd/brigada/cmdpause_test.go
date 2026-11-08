@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -14,25 +13,6 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/store"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
-
-// syncBuffer is a writer a command goroutine and the test read and write
-// at once.
-type syncBuffer struct {
-	mu sync.Mutex
-	b  bytes.Buffer
-}
-
-func (s *syncBuffer) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.Write(p)
-}
-
-func (s *syncBuffer) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.String()
-}
 
 // waitForOutput waits until the buffer carries want.
 func waitForOutput(t *testing.T, buf *syncBuffer, want string) {
