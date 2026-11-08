@@ -40,6 +40,6 @@ tasks:
     base: "zero-cap-placement"
     effort: medium
     skills: ["surface-parity"]
-    state: running
+    state: reviewing
     branch: "brigada/task-379"
     rounds: 1
