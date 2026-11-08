@@ -168,7 +168,7 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 	}
 	want := []string{
 		"agents", "artifacts", "attach_holds", "events", "foreman_inbox", "hold_tokens",
-		"idempotency", "jobs", "land_holds", "landings", "lease_tokens", "messages", "meta", "outcomes", "plan_mirror_dirty", "plans",
+		"idempotency", "jobs", "land_holds", "landings", "lease_tokens", "messages", "meta", "outcomes", "pauses", "plan_mirror_dirty", "plans",
 		"projects", "questions", "role_instructions", "runners", "sessions", "skills", "task_deps", "tasks", "tokens",
 	}
 	got := queryStrings(t, s.db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
@@ -835,6 +835,9 @@ func TestCheckConstraintsRejectBadValues(t *testing.T) {
 		{"second meta row",
 			"INSERT INTO meta (id, fence_epoch) VALUES (2, 1)",
 			nil},
+		{"pause origin",
+			"INSERT INTO pauses (project_id, origin, started_at) VALUES (?, 'bogus', ?)",
+			[]any{f.project, ts}},
 		{"meta fence epoch below one",
 			"UPDATE meta SET fence_epoch = 0",
 			nil},
@@ -940,6 +943,38 @@ func TestAtMostOneLiveJobPerKey(t *testing.T) {
 		VALUES (?, NULL, 'foreman', ?, 'session', 'wake up', 'queued', ?, ?)`, f.project, fmt.Sprintf("foreman:%d", f.project), ts, ts)
 	if n := queryInt(t, f.db, "SELECT COUNT(*) FROM jobs WHERE status IN ('queued', 'leased', 'running')"); n != 2 {
 		t.Errorf("live jobs = %d, want 2 (one per key)", n)
+	}
+}
+
+// TestAtMostOneLivePausePerScope: the pauses table of 0072 keeps one
+// live pause per scope (§8.3) — the engine's (project NULL) or one
+// project's — while every lifted interval stays as its own row, so a
+// resumed scope keeps the history of its pauses whole.
+func TestAtMostOneLivePausePerScope(t *testing.T) {
+	f := newFixture(t)
+
+	// A second live pause for the engine's scope is refused.
+	exec(t, f.db, "INSERT INTO pauses (project_id, origin, started_at) VALUES (NULL, 'user', ?)", ts)
+	if _, err := f.db.Exec("INSERT INTO pauses (project_id, origin, started_at) VALUES (NULL, 'drain', ?)", ts); err == nil || !strings.Contains(err.Error(), "UNIQUE") {
+		t.Errorf("second live engine pause: err = %v; want a UNIQUE failure", err)
+	}
+	// A project's own scope is its own row: it may stand beside the
+	// engine's pause, and a second one for the same project is refused.
+	exec(t, f.db, "INSERT INTO pauses (project_id, origin, started_at) VALUES (?, 'user', ?)", f.project, ts)
+	if _, err := f.db.Exec("INSERT INTO pauses (project_id, origin, started_at) VALUES (?, 'drain', ?)", f.project, ts); err == nil || !strings.Contains(err.Error(), "UNIQUE") {
+		t.Errorf("second live project pause: err = %v; want a UNIQUE failure", err)
+	}
+
+	// Lifting both pauses ends their intervals and frees the scopes for
+	// new pauses, each interval its own row.
+	exec(t, f.db, "UPDATE pauses SET ended_at = ? WHERE ended_at IS NULL", ts)
+	exec(t, f.db, "INSERT INTO pauses (project_id, origin, started_at) VALUES (?, 'drain', ?)", f.project, ts)
+	exec(t, f.db, "INSERT INTO pauses (project_id, origin, started_at) VALUES (NULL, 'user', ?)", ts)
+	if n := queryInt(t, f.db, "SELECT COUNT(*) FROM pauses WHERE ended_at IS NULL"); n != 2 {
+		t.Errorf("live pauses = %d, want one per scope", n)
+	}
+	if n := queryInt(t, f.db, "SELECT COUNT(*) FROM pauses"); n != 4 {
+		t.Errorf("stored intervals = %d, want the lifted ones kept beside the live", n)
 	}
 }
 
