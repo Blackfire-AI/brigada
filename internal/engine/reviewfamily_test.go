@@ -96,6 +96,61 @@ func TestPreferFallsBackToTheAuthorsAgent(t *testing.T) {
 	}
 }
 
+// TestPreferNeverPlacesZeroCappedReviewer (issue #195): under prefer a
+// reviewer whose model or account is capped at 0 is never placed — the
+// review goes to the next step's reviewer, or, with none, waits unheld.
+func TestPreferNeverPlacesZeroCappedReviewer(t *testing.T) {
+	for name, adjust := range map[string]func(*Config){
+		"model":   func(c *Config) { c.Caps.Model = map[string]int{"google-1": 0} },
+		"account": func(c *Config) { c.Caps.Account = map[string]int{"google": 0} },
+	} {
+		t.Run(name+" falls back", func(t *testing.T) {
+			e := newEnvCfg(t, adjust) // the prefer default
+			author := e.agented("author", "anthropic", "implement")
+			sibling := e.agented("sibling", "anthropic", "review")
+			other := e.agented("other", "google", "review")
+			review := e.runToReview(author)
+
+			if g := e.leaseAny(other); g != nil {
+				t.Fatalf("the reviewer capped at 0 leased %+v", g)
+			}
+			g := e.leaseAny(sibling)
+			if g == nil || g.JobID != review {
+				t.Fatalf("the placeable reviewer leased %+v, want the review %d", g, review)
+			}
+			if got := e.pickPlacement(review); got != placeSameFamily {
+				t.Errorf("placement = %q, want %q", got, placeSameFamily)
+			}
+		})
+		t.Run(name+" waits", func(t *testing.T) {
+			e := newEnvCfg(t, func(c *Config) {
+				adjust(c)
+				// The task runs standard, so the review asks light: the
+				// reviewer capped at 0 serves the asked tier, so only the
+				// zero cap keeps it out.
+				c.Caps.Tier = map[string]string{"other/google-1": "light"}
+			})
+			author := e.agented("author", "anthropic", "implement")
+			other := e.agented("other", "google", "review")
+			e.exec("UPDATE tasks SET effective_tier = 'standard' WHERE id = ?", e.task)
+			review := e.runToReview(author)
+
+			if g := e.leaseAny(other); g != nil {
+				t.Fatalf("the reviewer capped at 0 leased %+v", g)
+			}
+			if got := e.str("SELECT status FROM jobs WHERE id = ?", review); got != statusQueued {
+				t.Errorf("review status = %q, want queued", got)
+			}
+			if got := e.heldLayer(review); got != "" {
+				t.Errorf("hold layer = %q, want none: the reviewer capped at 0 is no candidate", got)
+			}
+			if got := e.jobAgent(review); got != 0 {
+				t.Errorf("review agent = %d, want none", got)
+			}
+		})
+	}
+}
+
 // TestPreferFamilyStepsOutrankTier: a cross-family reviewer on another
 // tier beats a same-family reviewer on the tier the review asked for.
 func TestPreferFamilyStepsOutrankTier(t *testing.T) {
