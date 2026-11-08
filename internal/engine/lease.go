@@ -317,10 +317,36 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 	// reserved keeps, for this call alone, the layer instances a
 	// foreman turn this runner could take is held at.
 	var reserved capReservation
+	// The dispatch pause (§8.3): a job is paused when its project or the
+	// engine is, and the lease hands out nothing of a paused scope — the
+	// walk below skips it whole, so the jobs wait queued and a runner
+	// polling is offered the rest.
+	pausedEngine, pausedProjects, err := livePausesTx(tx)
+	if err != nil {
+		return nil, err
+	}
 	nowStr := fmtTime(now)
 	for _, j := range ordered {
 		if err := activeProjectTx(tx, j.ProjectID); err != nil {
 			return nil, err
+		}
+		// The pause's one exception (§8.3): a foreman turn a user message
+		// waits on still leases — delivered to it, or pending behind the
+		// turn the pause holds queued, which would otherwise trap the
+		// message behind a turn that never runs. The user asking in
+		// person is not what a pause holds: this turn goes, and its
+		// completion wakes the turn that carries the message.
+		if pausedEngine || pausedProjects[j.ProjectID] {
+			if j.Kind != KindForeman {
+				continue
+			}
+			carries, err := foremanTurnCarriesUserTx(tx, j)
+			if err != nil {
+				return nil, err
+			}
+			if !carries {
+				continue
+			}
 		}
 		// A job that lost its runner MaxAttempts times fails here rather
 		// than being offered again — at lease time, not in the sweep, so

@@ -57,6 +57,7 @@ const (
 	WakeBudgetSpent WakeOutcome = "budget_spent"    // the day's wake budget is spent (§4.3)
 	WakeDuplicate   WakeOutcome = "duplicate"       // a user message repeating one sent moments ago (§12.1); nothing new was queued
 	WakeLimited     WakeOutcome = "limited"         // the foreman hit its subscription limit and has not reset (§4.4)
+	WakePaused      WakeOutcome = "paused"          // the project's or the engine's dispatch pause holds the wake (§8.3); the events stay pending
 )
 
 // ForemanInbox is the foreman's pending inbox as it reaches a session
@@ -109,6 +110,26 @@ func (e *Engine) wakeOutcomeTx(tx *sql.Tx, project int64, now time.Time) (WakeOu
 	}
 	if pending == 0 {
 		return WakeNothing, nil
+	}
+	// The dispatch pause (§8.3): while the project's own or the engine's
+	// pause stands, no headless turn is submitted for judgment events —
+	// they stay pending in the inbox for the resume evaluation, which
+	// runs when neither scope pauses the project any longer. A user
+	// message is the exception (§4.2 item 3): the user asking in person
+	// is as attended as a chat, so a wake that carries one submits its
+	// turn, and the lease gate lets that turn run under the pause too.
+	paused, perr := scopePausedTx(tx, project)
+	if perr != nil {
+		return "", perr
+	}
+	if paused {
+		carriesUser, err := pendingUserMessagesTx(tx, project)
+		if err != nil {
+			return "", err
+		}
+		if carriesUser == 0 {
+			return WakePaused, nil
+		}
 	}
 	// An attached chat holds the foreman (§4.2 item 1): while a hold
 	// lives, no headless turn is submitted — the events wait for the
@@ -654,7 +675,18 @@ func (e *Engine) RecoverForemanWakes(ctx context.Context) error {
 			return fmt.Errorf("list the projects with pending inbox rows: %w", err)
 		}
 		rows.Close()
+		// A stored pause keeps its scope's wakes held (§8.3): the pause
+		// survives the restart, so the start-up re-evaluation submits
+		// nothing for a project it covers — the resume evaluation is the
+		// one that frees them.
+		enginePaused, pausedProjects, err := livePausesTx(tx)
+		if err != nil {
+			return err
+		}
 		for _, p := range projects {
+			if enginePaused || pausedProjects[p] {
+				continue
+			}
 			if err := e.wakeForemanTx(tx, p, now); err != nil {
 				return err
 			}

@@ -104,6 +104,8 @@ const (
 	evAgentProbeFailed        = "agent_probe_failed"         // a broken agent's probe failed; the next probe is Until (§8 "Health")
 	evAgentReset              = "agent_reset"                // the user cleared broken and cooling on the agents of a harness and model (§8)
 	evEngineSuspended         = "engine_suspended"           // the engine's host slept; the sweep restarted every wall-clock deadline (§13)
+	evDispatchPaused          = "dispatch_paused"            // dispatch was paused for the engine or one project (§8.3); Origin names who set it — user or drain — Caller who asked; a plain log record, in no inbox, waking no turn
+	evDispatchResumed         = "dispatch_resumed"           // a pause was lifted (§8.3): Origin the lifted pause's, Caller who asked; a plain log record, in no inbox, waking no turn
 )
 
 // eventPayload is the small JSON an event row carries: the fields the
@@ -149,6 +151,7 @@ type eventPayload struct {
 	// Caller names who asked for a retirement (§6.2): the foreman or
 	// the user, recorded beside the reason on each task_retired event.
 	Caller  string `json:"caller,omitempty"`
+	Origin  string `json:"origin,omitempty"` // the origin a dispatch_paused or dispatch_resumed event names: user or drain (§8.3)
 	Harness string `json:"harness,omitempty"`
 	Model   string `json:"model,omitempty"`
 	Effort  string `json:"effort,omitempty"`  // a foreman setting's reasoning-effort level
