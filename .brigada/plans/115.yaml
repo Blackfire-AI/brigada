@@ -29,8 +29,8 @@ tasks:
     base: ""
     effort: medium
     skills: ["bugfix"]
-    state: running
-    branch: "brigada/task-378-r2"
+    state: reviewing
+    branch: "brigada/task-378-r3"
     rounds: 0
   - id: 379
     name: "capacity-pins"
