@@ -53,8 +53,8 @@ tasks:
     base: "pause-clocks"
     effort: medium
     skills: ["cli-flag", "surface-parity"]
-    state: running
-    branch: "brigada/task-431-r1"
+    state: reviewing
+    branch: "brigada/task-431-r2"
     rounds: 0
   - id: 432
     name: "pause-display"
