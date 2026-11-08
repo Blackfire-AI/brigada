@@ -18,7 +18,7 @@ What brigada 1.0 promises until 2.0.
 - `engine`: `--idle-minutes`.
 - `runner`: `--harness`, `--model`, `--worker-script`, `--agent-file`, `--classes`, `--labels`, `--max-parallel`, `--agent` (repeatable), `--no-start`.
 - `start`, `config`, `version`, `agents`, `hold yield`, `hold confirm`: no flags beyond the common two.
-- `stop`: `--engine`, `--drain` (only with `--engine`).
+- `stop`: `--engine`, `--drain` (needs the engine flag).
 - `mcp`: `--coordinator`, `--client`, `--socket`.
 - `status`: `--line`, `--all`, `--no-start`.
 - `task submit`: `--repo`, `--base`, `--spec`, `--check`, `--title`, `--harness`, `--no-start`.
@@ -36,7 +36,7 @@ What brigada 1.0 promises until 2.0.
 - `agents add`: `--classes`, `--effort`, `--now`.
 - `plan approve`: `--and-stop-asking`, `--no-start`; `plan reject`: `--no-start`.
 - `budget`: `--repo`, `--wakes`, `--no-start`.
-- `pause` and `resume`: `--repo`, `--no-start`. An absent or empty `--repo` names the engine.
+- `pause` and `resume`: `--repo`, `--no-start`. Without a repo URL they name the engine.
 - `recover`: `--repo` (repeatable), `--snapshot-dir`.
 - `diff`: `--stat`, `--repo`, `--no-start`.
 - `land`: `--onto`, `--repo`, `--landed` (repeatable), `--no-check`, `--no-start`; `land approve`: `--and-stop-asking`, `--no-start`; `land reject`: `--no-start`. The command and flag names are frozen; the land gate's holds and the land job's internals are experimental.
