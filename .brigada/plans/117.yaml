@@ -40,7 +40,7 @@ tasks:
     base: "short-agent-harness"
     effort: medium
     skills: ["surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 396
