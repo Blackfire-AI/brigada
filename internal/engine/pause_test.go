@@ -342,8 +342,12 @@ func TestPauseDoesNotCountTheTurnTheLeaseGateLetsThrough(t *testing.T) {
 	if len(st.Pauses) != 1 || st.Pauses[0].Queued != 0 {
 		t.Errorf("pauses = %+v, want the turn the user's message waits on left out of the count", st.Pauses)
 	}
-	if len(st.Held) != 0 {
-		t.Errorf("held = %+v, want none", st.Held)
+	// The turn leases through the pause, so whatever holds it is a real
+	// wait (here no runner offers its agent), not the pause's.
+	for _, h := range st.Held {
+		if h.Kind != string(KindForeman) {
+			t.Errorf("held = %+v, want at most the foreman turn", st.Held)
+		}
 	}
 }
 
