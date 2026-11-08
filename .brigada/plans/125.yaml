@@ -5,9 +5,9 @@
 plan: 125
 title: "engine: a parked plan the foreman handles leaves the needs-you queue (#197)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-11-08T20:20:39.902396Z
-updated: 2026-11-08T20:22:24.913083Z
+updated: 2026-11-08T20:44:48.070607Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
