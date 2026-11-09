@@ -8,6 +8,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - The claude adapter sorts the CLI's "You've hit your 5-hour limit" and weekly wordings as limits, so the account cools and the foreman parks until the reset the message names; the reset parser already read the wording's `resets <time> (<zone>)` suffix, which the old classification never reached.
+- A foreman turn's limit cools the account it shares with task workers, as §4.4 says: the workers stop placing on a wall the foreman already hit, the dispatcher serves another tier's agents until the reset, and the status shows every agent of the account cooling. A limit still never counts toward the failure streak.
 
 ## [1.2.0] - 2026-11-09
 
