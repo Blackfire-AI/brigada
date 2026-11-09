@@ -1136,8 +1136,8 @@ func TestTopPlansTreeColours(t *testing.T) {
 		"  " + style.Dim("· #3  q     (queued)"),
 		"  " + style.Warn("?") + " #4  held  " + style.Warn("held: waiting for a runner slot"),
 		"  " + style.Bad("! #5 stuck needs_foreman"),
-		alignRight("#2 done", style.OK("done"), 80),
 		alignRight("#3 gone", style.Bad("cancelled"), 80),
+		alignRight("#2 done", style.OK("done"), 80),
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("tree =\n%q\nwant\n%q", got, want)
@@ -1389,9 +1389,9 @@ func TestTopPlanTotalsLeaveOutCancelledAndRetired(t *testing.T) {
 }
 
 // TestTopPlansLiveFirst: every live plan is listed before every finished
-// one, id order kept in each group, on a plain tree and on a tagged view; a
-// cancelled plan is finished, an awaiting-approval and a reviewing plan are
-// live.
+// one, live plans in id order and finished ones newest first, on a plain
+// tree and on a tagged view; a cancelled plan is finished, an
+// awaiting-approval and a reviewing plan are live.
 func TestTopPlansLiveFirst(t *testing.T) {
 	const repo = "https://example.invalid/acme/brigada.git"
 	st := api.Status{Plans: []engine.StatusPlan{
@@ -1412,7 +1412,7 @@ func TestTopPlansLiveFirst(t *testing.T) {
 		}
 		return out
 	}
-	want := "#2 #4 #6 #1 #3 #5"
+	want := "#2 #4 #6 #5 #3 #1"
 	for _, tagged := range []bool{false, true} {
 		if got := strings.Join(order(tagged), " "); got != want {
 			t.Errorf("tagged=%v order = %s, want %s", tagged, got, want)
@@ -1420,6 +1420,77 @@ func TestTopPlansLiveFirst(t *testing.T) {
 	}
 	if st.Plans[0].ID != 1 || st.Plans[1].ID != 2 {
 		t.Errorf("st.Plans was reordered")
+	}
+}
+
+// TestTopPlansFinishedNewestFirst: the box sorts by plan id, not by the
+// status's order — live plans in id order, finished ones newest first —
+// and a short terminal's class b drop takes the bottom finished line
+// first, so the oldest finished plans go and #9, the newest, is the last
+// finished line left.
+func TestTopPlansFinishedNewestFirst(t *testing.T) {
+	const repo = "https://example.invalid/acme/brigada.git"
+	st := api.Status{Plans: []engine.StatusPlan{
+		{ID: 9, RepoURL: repo, Title: "nine", State: "done"},
+		{ID: 7, RepoURL: repo, Title: "seven", State: "active"},
+		{ID: 2, RepoURL: repo, Title: "two", State: "done"},
+		{ID: 3, RepoURL: repo, Title: "three", State: "active"},
+		{ID: 5, RepoURL: repo, Title: "five", State: "cancelled"},
+	}}
+	style := term.New(logo.Caps{UTF8: true})
+	var out []string
+	for _, l := range newTopPlans(st, false, false, topNow, style, 80) {
+		if strings.HasPrefix(l.text, "#") {
+			out = append(out, strings.Fields(l.text)[0])
+		}
+	}
+	if got, want := strings.Join(out, " "), "#3 #7 #9 #5 #2"; got != want {
+		t.Errorf("order = %s, want %s", got, want)
+	}
+	finished := map[string]bool{"#9": true, "#5": true, "#2": true}
+	sawAll, sawNine := false, false
+	model := topModel{status: st}
+	for height := 18; height >= 3; height-- {
+		lines := strings.Split(plainTop(model, 80, height), "\n")
+		if len(lines) > height {
+			t.Fatalf("height %d: %d lines:\n%s", height, len(lines), strings.Join(lines, "\n"))
+		}
+		var ids []string
+		inPlans := false
+		for _, l := range lines {
+			switch {
+			case strings.Contains(l, "╭─ PLANS"):
+				inPlans = true
+			case strings.HasPrefix(l, "╰"):
+				inPlans = false
+			case inPlans && strings.HasPrefix(l, "│ #"):
+				ids = append(ids, strings.Fields(strings.TrimPrefix(l, "│ "))[0])
+			}
+		}
+		if strings.Join(ids, " ") == "#3 #7 #9 #5 #2" {
+			sawAll = true
+		}
+		var finishedIDs []string
+		for _, id := range ids {
+			if finished[id] {
+				finishedIDs = append(finishedIDs, id)
+			}
+		}
+		// Drops only ever take the tail: #2 first, then #5, so what shows
+		// is always a prefix of the newest-first list.
+		want := strings.Join([]string{"#9", "#5", "#2"}[:len(finishedIDs)], " ")
+		if got := strings.Join(finishedIDs, " "); got != want {
+			t.Errorf("height %d: finished order = %q, want %q:\n%s", height, got, want, strings.Join(lines, "\n"))
+		}
+		if strings.Join(finishedIDs, " ") == "#9" {
+			sawNine = true
+		}
+	}
+	if !sawAll {
+		t.Error("no height shows all five plans in order #3 #7 #9 #5 #2")
+	}
+	if !sawNine {
+		t.Error("no height leaves #9 as the last finished line")
 	}
 }
 
@@ -1882,45 +1953,51 @@ func TestRenderTopHeightYieldOrder(t *testing.T) {
 		want   []string
 		lacks  []string
 	}{
-		{"everything fits", 20, 20, []string{
+		{"everything fits", 21, 21, []string{
 			"#1 fix the frobnicator",
-			"╭─ AGENTS  all ≤ global 8 ─",
-			"↺ codex/g...  □□□□□□□□  until 16:04  ✗ claude/...  ■■□□□□□□  login ex...",
+			"╭─ AGENTS  1 broken · 1 cooling · all ≤ global 8 ─",
+			"↺ codex/gpt-5",
+			"S×2  □□□□□□□□  until 16:04",
+			"✗ claude/sonnet-long-name  L×1  ■■□□□□□□  login expired",
+			"● claude/opus",
 			"╭─ EVENTS ─",
 			"15:02  review      approve  task/3-1-oil-the-gears-after-the-frobnica...",
 		}, nil},
-		{"event row 2", 19, 19, []string{
+		{"event row 2", 20, 20, []string{
 			"╭─ EVENTS ─",
 			"15:02  task    #3  done     oil the gears",
 		}, []string{"review "}},
-		{"the held line", 18, 18, []string{
+		{"the held line", 19, 19, []string{
 			"  ! #2 wire the sprocket should the sprocket be blue?",
 			"  ▸ #3  oil the gears",
 		}, []string{"? #4  polish the knobs  held"}},
-		{"the parked line", 17, 17, []string{
+		{"the parked line", 18, 18, []string{
 			"  ▸ #3  oil the gears",
 		}, []string{"? #4  polish the knobs", "wire the sprocket should"}},
-		{"the running line", 16, 16, []string{
+		{"the running line", 17, 17, []string{
 			"#1 fix the frobnicator",
 			"╭─ EVENTS ─",
 			"15:02  task    #3  done     oil the gears",
 		}, []string{"▸ #3  oil the gears  "}},
 		// The class h drop of event row 1 takes its box with it and leaves a
 		// free row, which goes back to the running line.
-		{"event row 1, its box goes with it, a spare row returns", 15, 14, []string{
+		{"event row 1, its box goes with it, a spare row returns", 16, 15, []string{
 			"#1 fix the frobnicator",
 			"▸ #3",
-			"╭─ AGENTS  all ≤ global 8 ─",
+			"╭─ AGENTS  1 broken · 1 cooling · all ≤ global 8 ─",
 		}, []string{"EVENTS", "task    #3  done"}},
-		// The agents list broken and cooling first, then running, so the
-		// running agent's row is the last and the first to go.
-		{"the running agent's row", 12, 12, []string{
-			"until 16:04  ✗ claude/...  ■■□□□□□□  login ex...",
-		}, []string{"● claude/..."}},
-		{"the broken and cooling row, its box goes with it", 11, 10, []string{
+		// The agents list in name order, so the last by name goes first.
+		{"the last agent's row", 13, 13, []string{
+			"● claude/opus",
+			"✗ claude/sonnet-long-name  L×1  ■■□□□□□□  login expired",
+		}, []string{"codex/gpt-5", "until 16:04"}},
+		{"the second agent's row", 12, 12, []string{
+			"● claude/opus",
+		}, []string{"codex/gpt-5", "✗ claude/sonnet-long-name  L×1"}},
+		{"the first row, its box goes with it", 11, 10, []string{
 			"#1 fix the frobnicator",
 			"▸ #3",
-		}, []string{"AGENTS", "codex/g...", "until 16:04"}},
+		}, []string{"AGENTS", "codex/gpt-5", "● claude/opus"}},
 		{"the plan line, its box goes with it", 8, 6, []string{
 			"! claude/sonnet-long-n...  → brigada agent reset claude/sonnet-long-name",
 		}, []string{"PLANS", "#1 fix the frobnicator"}},
@@ -2194,7 +2271,7 @@ func otherProjectsFake(scoped api.Status) *fakeTop {
 		status:       unscoped,
 		scopedStatus: &scoped,
 		capacity: engine.CapacitySnapshot{Agents: []engine.CapacityAgent{
-			{Harness: "claude", Model: "opus", CapLayer: "none", Quota: "broken"},
+			{Harness: "claude", Model: "opus", CapLayer: "none", Quota: "broken", Tier: "heavy", Cost: 3},
 		}},
 		projects: []engine.ProjectInfo{{ProjectID: 7, RepoURL: "https://example.invalid/r.git"}},
 	}
@@ -2223,7 +2300,7 @@ func TestTopProjectKeepsBrokenAgentsAndNothingElse(t *testing.T) {
 		t.Fatalf("NeedsYou = %+v, want the task, then the agent", model.status.NeedsYou)
 	}
 	got := plainTop(model, 100, 0)
-	for _, want := range []string{"! #3 own task entry", "! claude/opus login expired", "own project plan", "✗ claude/opus  0/none  login expired", "2 needs"} {
+	for _, want := range []string{"! #3 own task entry", "! claude/opus login expired", "own project plan", "✗ claude/opus  H×3  0/none  login expired", "2 needs"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("frame lacks %q:\n%s", want, got)
 		}
@@ -2248,7 +2325,7 @@ func TestTopProjectAgentSurvivesTheCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := plainTop(model, 100, 0)
-	for _, want := range []string{"! #1 own task entry", "! #2 own task entry", "! claude/opus login expired", "+2 more", "✗ claude/opus  0/none  login expired"} {
+	for _, want := range []string{"! #1 own task entry", "! #2 own task entry", "! claude/opus login expired", "+2 more", "✗ claude/opus  H×3  0/none  login expired"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("frame lacks %q:\n%s", want, got)
 		}
@@ -2367,7 +2444,18 @@ func TestTopKeepPrevious(t *testing.T) {
 	}
 }
 
+// pinUTF8Env pins the environment the snapshot's caps are read from to a
+// UTF-8 terminal, as TestTopSnapshotGolden does, so a host with a C
+// locale or TERM=dumb does not render the ASCII fallback.
+func pinUTF8Env(t *testing.T) {
+	t.Helper()
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("LANG", "en_US.UTF-8")
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+}
+
 func TestPrintTopSnapshot(t *testing.T) {
+	pinUTF8Env(t)
 	fake := &fakeTop{
 		status:   busyTopModel().status,
 		capacity: busyTopModel().capacity,
@@ -2405,6 +2493,7 @@ func topEventRowCount(lines []string) int {
 // TestTopSnapshotShowsTenEvents: the piped snapshot renders with height 0,
 // so 12 events show as the newest 10 rows, #12 first.
 func TestTopSnapshotShowsTenEvents(t *testing.T) {
+	pinUTF8Env(t)
 	fake := &fakeTop{
 		status:   busyTopModel().status,
 		capacity: busyTopModel().capacity,
@@ -2963,17 +3052,17 @@ func agentsModel() topModel {
 	four := 4
 	cool := topNow.Add(time.Hour).UTC().Format(engine.TimeLayout)
 	model.capacity.Agents = []engine.CapacityAgent{
-		{Harness: "claude", Model: "opus", Cap: &four, CapLayer: "runner", Running: 1, Quota: "ready"},
-		{Harness: "codex", Model: "gpt-5", CapLayer: "none", Quota: "cooling", CoolingUntil: cool},
-		{Harness: "claude", Model: "sonnet-long-name", CapLayer: "none", Running: 2, Quota: "broken"},
+		{Harness: "claude", Model: "opus", Cap: &four, CapLayer: "runner", Running: 1, Quota: "ready", Tier: "heavy", Cost: 3},
+		{Harness: "codex", Model: "gpt-5", CapLayer: "none", Quota: "cooling", CoolingUntil: cool, Tier: "standard", Cost: 2},
+		{Harness: "claude", Model: "sonnet-long-name", CapLayer: "none", Running: 2, Quota: "broken", Tier: "light", Cost: 1},
 	}
 	model.status.NeedsYou = append(model.status.NeedsYou,
 		engine.NeedsYouItem{Kind: "agent", ID: 7, State: "broken", Title: "claude/sonnet-long-name", Reason: "login expired"})
 	return model
 }
 
-// TestTopAgentsOneColumn: under 72 inner columns the agents list one per
-// row; the marks, the cells and the quota text read per state, and the
+// TestTopAgentsOneColumn: when two cells do not fit whole the agents list one
+// per row, each with its tag; the marks, the cells and the quota text read per state, and the
 // styled text is the plain text with colour.
 func TestTopAgentsOneColumn(t *testing.T) {
 	model := agentsModel()
@@ -2987,10 +3076,10 @@ func TestTopAgentsOneColumn(t *testing.T) {
 	}
 	cool := topNow.Add(time.Hour).In(topNow.Location()).Format("15:04")
 	wants := []string{
-		// Broken and cooling agents first, then the running one.
-		"↺ " + fmt.Sprintf("%-23s", "codex/gpt-5") + "  □□□□□□□□  until " + cool,
-		"✗ claude/sonnet-long-name  ■■□□□□□□  login expired",
-		"● " + fmt.Sprintf("%-23s", "claude/opus") + "  ■□□□",
+		// In the order of the full name, whatever the state.
+		"● " + fmt.Sprintf("%-23s", "claude/opus") + "  H×3  ■□□□",
+		"✗ claude/sonnet-long-name  L×1  ■■□□□□□□  login expired",
+		"↺ " + fmt.Sprintf("%-23s", "codex/gpt-5") + "  S×2  □□□□□□□□  until " + cool,
 	}
 	for i, w := range wants {
 		if got[1+i] != w {
@@ -3002,44 +3091,137 @@ func TestTopAgentsOneColumn(t *testing.T) {
 	if s := term.StripEscapes(strings.Join(styled, "\n")); s != strings.Join(got, "\n") {
 		t.Errorf("styled text differs from plain:\n%s\nvs\n%s", s, strings.Join(got, "\n"))
 	}
-	if !strings.Contains(styled[1], colour.Warn("↺")) || !strings.Contains(styled[1], colour.Warn("until "+cool)) ||
+	if !strings.Contains(styled[3], colour.Warn("↺")) || !strings.Contains(styled[3], colour.Warn("until "+cool)) ||
 		!strings.Contains(styled[2], colour.Bad("✗")) || !strings.Contains(styled[2], colour.Bad("login expired")) ||
-		!strings.Contains(styled[3], colour.OK("●")) {
+		!strings.Contains(styled[1], colour.OK("●")) {
 		t.Errorf("mark and quota styles wrong: %q", styled[1:4])
 	}
 }
 
-// TestTopAgentsTwoColumns: from 72 inner columns the agents fill two columns
-// of equal width row by row, the names padded to the widest listed name.
-func TestTopAgentsTwoColumns(t *testing.T) {
+// fitModel is five agents of four cells each, one broken, one cooling: a cell
+// needs 48 columns (mark 1, space, name 22, gap, tag 3, gap, cells 4, gap,
+// `until HH:MM` 11), so two columns fit from 98.
+func fitModel() topModel {
 	four := 4
 	model := busyTopModel()
 	model.capacity.Layers = nil
 	cool := topNow.Add(time.Hour).UTC().Format(engine.TimeLayout)
 	model.capacity.Agents = []engine.CapacityAgent{
-		{Harness: "claude", Model: "sonnet", Cap: &four, CapLayer: "runner", Running: 1, Quota: "ready"},
-		{Harness: "claude", Model: "opus", Cap: &four, CapLayer: "runner", Quota: "ready"},
-		{Harness: "dsh", Model: "deepseek-flash", Cap: &four, CapLayer: "runner", Quota: "broken"},
-		{Harness: "opencode", Model: "zai-coding-plan/glm-5.3-flash", Cap: &four, CapLayer: "runner", Quota: "cooling", CoolingUntil: cool},
-		{Harness: "claude", Model: "haiku", Cap: &four, CapLayer: "runner", Quota: "ready"},
+		{Harness: "claude", Model: "sonnet", Cap: &four, CapLayer: "runner", Running: 1, Quota: "ready", Tier: "standard", Cost: 2},
+		{Harness: "claude", Model: "opus", Cap: &four, CapLayer: "runner", Quota: "ready", Tier: "heavy", Cost: 3},
+		{Harness: "dsh", Model: "deepseek-flash", Cap: &four, CapLayer: "runner", Quota: "broken", Tier: "light", Cost: 1},
+		{Harness: "opencode", Model: "zai-coding-plan/glm-5.3-flash", Cap: &four, CapLayer: "runner", Quota: "cooling", CoolingUntil: cool, Tier: "light", Cost: 1},
+		{Harness: "claude", Model: "haiku", Cap: &four, CapLayer: "runner", Quota: "ready", Tier: "light", Cost: 1},
 	}
 	model.status.NeedsYou = []engine.NeedsYouItem{{Kind: "agent", State: "broken", Title: "dsh/deepseek-flash", Reason: "login expired"}}
-	got := topAgents(model, topNow, term.New(logo.Caps{UTF8: true}), 90)
+	return model
+}
+
+// TestTopAgentsTwoColumns: when two cells fit whole the agents fill two
+// columns of equal width row by row, the names padded to the widest listed
+// name and the tags to the widest tag.
+func TestTopAgentsTwoColumns(t *testing.T) {
+	model := fitModel()
+	got := topAgents(model, topNow, term.New(logo.Caps{UTF8: true}), 98)
 	clock := topNow.Add(time.Hour).In(topNow.Location()).Format("15:04")
+	name := func(s string) string { return fmt.Sprintf("%-22s", s) }
 	want := []string{
 		"AGENTS",
-		// Broken and cooling first, then running, then idle.
-		"✗ dsh/deepseek-flash  □□□□  login expired     ↺ glm-5.3-flash       □□□□  until " + clock,
-		"● claude/sonnet       ■□□□                    ● claude/opus         □□□□",
-		"● claude/haiku        □□□□",
+		// In the order of the full name, whatever the state.
+		"● " + name("claude/haiku") + "  L×1  □□□□" + strings.Repeat(" ", 15) + "● " + name("claude/opus") + "  H×3  □□□□",
+		"● " + name("claude/sonnet") + "  S×2  ■□□□" + strings.Repeat(" ", 15) + "✗ " + name("dsh/deepseek-flash") + "  L×1  □□□□  login ex...",
+		"↺ " + name("opencode/glm-5.3-flash") + "  L×1  □□□□  until " + clock,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("rows:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	for _, line := range got[1:] {
-		if i := strings.Index(line, "  ↺"); i >= 0 && utf8.RuneCountInString(line[:i]) != 44 {
-			t.Errorf("the second column starts at %d, want 44: %q", utf8.RuneCountInString(line[:i]), line)
+	for _, line := range got[1:3] {
+		if r := []rune(line); len(r) < 51 || r[48] != ' ' || r[49] != ' ' || r[50] == ' ' {
+			t.Errorf("the second column does not start at 50: %q", line)
 		}
+	}
+}
+
+// TestTopAgentsColumnBoundary: one column one cell short of the width that
+// fits two whole cells, two columns at it.
+func TestTopAgentsColumnBoundary(t *testing.T) {
+	model := fitModel()
+	plain := term.New(logo.Caps{UTF8: true})
+	if got := topAgents(model, topNow, plain, 97); len(got) != 6 {
+		t.Errorf("at 97: %d lines, want one column (head and 5 agents):\n%s", len(got), strings.Join(got, "\n"))
+	}
+	if got := topAgents(model, topNow, plain, 98); len(got) != 4 {
+		t.Errorf("at 98: %d lines, want two columns (head and 3 rows):\n%s", len(got), strings.Join(got, "\n"))
+	}
+}
+
+// TestTopAgentsTag: the tag is the tier's letter, the times sign and the cost
+// weight, `?` for an empty tier, `x` for the sign without UTF-8, and Dim.
+func TestTopAgentsTag(t *testing.T) {
+	utf := term.New(logo.Caps{UTF8: true})
+	ascii := term.New(logo.Caps{})
+	for _, tt := range []struct {
+		tier       string
+		cost       int
+		utf, ascii string
+	}{
+		{"heavy", 3, "H×3", "Hx3"},
+		{"standard", 2, "S×2", "Sx2"},
+		{"light", 1, "L×1", "Lx1"},
+		{"", 4, "?×4", "?x4"},
+	} {
+		a := engine.CapacityAgent{Tier: tt.tier, Cost: tt.cost}
+		if got := topAgentTag(a, utf); got != tt.utf {
+			t.Errorf("tag(%q, %d) = %q, want %q", tt.tier, tt.cost, got, tt.utf)
+		}
+		if got := topAgentTag(a, ascii); got != tt.ascii {
+			t.Errorf("ascii tag(%q, %d) = %q, want %q", tt.tier, tt.cost, got, tt.ascii)
+		}
+	}
+	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
+	rows := strings.Join(topAgents(fitModel(), topNow, colour, 98), "\n")
+	if !strings.Contains(rows, colour.Dim("S×2")) {
+		t.Errorf("the tag is not Dim:\n%q", rows)
+	}
+	plain := strings.Join(topAgents(fitModel(), topNow, ascii, 120), "\n")
+	if !strings.Contains(plain, "Sx2") || strings.Contains(plain, "×") {
+		t.Errorf("ASCII tags:\n%s", plain)
+	}
+}
+
+// TestTopAgentsTagPadding: a two-digit cost widens every tag to 4 cells, so
+// the cells after it stay aligned.
+func TestTopAgentsTagPadding(t *testing.T) {
+	two := 2
+	model := busyTopModel()
+	model.capacity.Layers = nil
+	model.capacity.Agents = []engine.CapacityAgent{
+		{Harness: "claude", Model: "opus", Cap: &two, CapLayer: "runner", Running: 1, Quota: "ready", Tier: "heavy", Cost: 10},
+		{Harness: "claude", Model: "haiku", Cap: &two, CapLayer: "runner", Running: 1, Quota: "ready", Tier: "light", Cost: 1},
+	}
+	got := topAgents(model, topNow, term.New(logo.Caps{UTF8: true}), 40)
+	want := []string{
+		"AGENTS",
+		"● claude/haiku  L×1   ■□",
+		"● claude/opus   H×10  ■□",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("rows:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestTopAgentsLongReasonKeepsColumns: a broken agent's reason longer than
+// `until HH:MM` does not count toward the fit, so two columns stay, and the
+// reason is cut at the end of its cell.
+func TestTopAgentsLongReasonKeepsColumns(t *testing.T) {
+	model := fitModel()
+	model.status.NeedsYou[0].Reason = strings.Repeat("login expired ", 6)
+	got := topAgents(model, topNow, term.New(logo.Caps{UTF8: true}), 98)
+	if len(got) != 4 {
+		t.Fatalf("%d lines, want two columns (head and 3 rows):\n%s", len(got), strings.Join(got, "\n"))
+	}
+	if !strings.HasSuffix(got[2], "  login ex...") || utf8.RuneCountInString(got[2]) != 98 {
+		t.Errorf("the long reason is not cut at its cell's end: %q", got[2])
 	}
 }
 
@@ -3065,8 +3247,8 @@ func TestTopAgentsCells(t *testing.T) {
 		{"over 8", engine.CapacityAgent{Cap: &nine, CapLayer: "runner", Running: 1}, nil, "1/9 (runner)"},
 	} {
 		tt.agent.Harness, tt.agent.Model, tt.agent.Quota = "a", "b", "ready"
-		cell := topAgentCell(tt.agent, tt.g, "a/b", 3, 60, "", topNow, plain)
-		if want := "● a/b  " + tt.want; cell != want {
+		cell := topAgentCell(tt.agent, tt.g, "a/b", 3, "S×2", 60, "", topNow, plain)
+		if want := "● a/b  S×2  " + tt.want; cell != want {
 			t.Errorf("%s: cell = %q, want %q", tt.name, cell, want)
 		}
 	}
@@ -3080,7 +3262,7 @@ func TestTopAgentsBrokenFallbackAndCut(t *testing.T) {
 	model.status.NeedsYou = model.status.NeedsYou[:1]
 	plain := term.New(logo.Caps{UTF8: true})
 	got := topAgents(model, topNow, plain, 71)
-	if !strings.HasSuffix(got[2], "✗ claude/sonnet-long-name  ■■□□□□□□  broken") {
+	if !strings.HasSuffix(got[2], "✗ claude/sonnet-long-name  L×1  ■■□□□□□□  broken") {
 		t.Errorf("fallback row = %q", got[2])
 	}
 	model = agentsModel()
@@ -3114,9 +3296,9 @@ func TestTopAgentsFamilyColour(t *testing.T) {
 	}
 	colour := term.New(logo.Caps{Color: logo.Color256, UTF8: true})
 	rows := strings.Join(topAgents(model, topNow, colour, 60), "\n")
-	pad := func(name string) string { return fmt.Sprintf("%-11s", name) }
+	pad := func(name string) string { return fmt.Sprintf("%-16s", name) }
 	for _, want := range []string{
-		colour.Violet(pad("claude/opus")), colour.Blue(pad("glm-5.3")), colour.Mint(pad("dsh/flash")),
+		colour.Violet(pad("claude/opus")), colour.Blue(pad("opencode/glm-5.3")), colour.Mint(pad("dsh/flash")),
 		colour.Dim(pad("codex/gpt-5")), colour.Dim(pad("claude/idle")),
 	} {
 		if !strings.Contains(rows, want) {
@@ -3127,7 +3309,7 @@ func TestTopAgentsFamilyColour(t *testing.T) {
 		t.Errorf("an idle agent takes a family colour:\n%s", rows)
 	}
 	for name, fn := range map[string]func(string) string{
-		"claude/opus": colour.Violet, "glm-5.3": colour.Blue, "dsh/flash": colour.Mint,
+		"claude/opus": colour.Violet, "opencode/glm-5.3": colour.Blue, "dsh/flash": colour.Mint,
 		"opencode/zai-coding-plan/glm-5.3@high": colour.Blue, "codex/gpt-5": colour.Dim, "claude": colour.Violet,
 	} {
 		if got := topFamily(colour, name)("x"); got != fn("x") {
@@ -3187,14 +3369,15 @@ func TestTopAgentsASCII(t *testing.T) {
 			}
 		}
 	}
-	if got := strings.Join(all, "\n"); !strings.Contains(got, "*  claude/opus") || !strings.Contains(got, "all <= global 8") {
+	if got := strings.Join(all, "\n"); !strings.Contains(got, "*  claude/opus") || !strings.Contains(got, "Hx3") || !strings.Contains(got, "all <= global 8") {
 		t.Errorf("ASCII frame:\n%s", got)
 	}
 }
 
 // TestTopAgentsBudget: class e of the drop order — idle agent rows leave
 // the AGENTS section first, uncounted; the busy, cooling and broken agents
-// stay. A row of two cells is idle only when both agents are.
+// stay. In two columns a row is idle only when both its agents are; here the
+// cells do not fit two columns, so each row is one agent's.
 func TestTopAgentsBudget(t *testing.T) {
 	model := agentsModel()
 	model.capacity.Agents = append(model.capacity.Agents,
@@ -3225,19 +3408,23 @@ func TestTopAgentsBudget(t *testing.T) {
 	if len(lines) != base || !strings.Contains(agentLines(lines), "codex/b") {
 		t.Errorf("at %d the idle agents are not all kept:\n%s", base, strings.Join(lines, "\n"))
 	}
-	// The row of two idle agents goes, with nothing counting it; the row
-	// that pairs the busy opus with an idle one stays.
+	// One column: the idle agents' rows go one by one from the bottom.
 	lines = renderTop(model, 76, base-1, topNow, style)
 	got := agentLines(lines)
-	if len(lines) != base-1 || strings.Contains(got, "codex/b") || strings.Contains(got, "codex/c") ||
+	if len(lines) != base-1 || strings.Contains(got, "codex/c") || !strings.Contains(got, "codex/b") ||
 		!strings.Contains(got, "■□□□") || !strings.Contains(got, "codex/a") || strings.Contains(got, "idle") {
 		t.Errorf("at %d the AGENTS section is\n%s\nin\n%s", base-1, got, strings.Join(lines, "\n"))
 	}
+	lines = renderTop(model, 76, base-3, topNow, style)
+	got = agentLines(lines)
+	if len(lines) != base-3 || strings.Contains(got, "codex/a") || !strings.Contains(got, "until 16:04") || !strings.Contains(got, "■□□□") {
+		t.Errorf("at %d the AGENTS section is\n%s\nin\n%s", base-3, got, strings.Join(lines, "\n"))
+	}
 	// The cooling, the broken and the busy agent outlast the idle ones: the
 	// events row, the lowest of the rest, goes next, its borders with it.
-	lines = renderTop(model, 76, base-2, topNow, style)
+	lines = renderTop(model, 76, base-4, topNow, style)
 	got = agentLines(lines)
-	if len(lines) > base-2 || strings.Contains(strings.Join(lines, "\n"), "EVENTS") ||
+	if len(lines) > base-4 || strings.Contains(strings.Join(lines, "\n"), "EVENTS") ||
 		!strings.Contains(got, "until 16:04") || !strings.Contains(got, "login ex") || !strings.Contains(got, "■□□□") {
 		t.Errorf("at %d:\n%s", base-2, strings.Join(lines, "\n"))
 	}
@@ -3260,9 +3447,9 @@ func TestRenderTopFinishedFold(t *testing.T) {
 	if lines := renderTop(model, 100, n, topNow, style); len(lines) != n {
 		t.Fatalf("at %d lines yield:\n%s", n, strings.Join(lines, "\n"))
 	}
-	// One line less: the last finished plan's line goes, with no fold line.
+	// One line less: the oldest finished plan's line goes, with no fold line.
 	got := strings.Join(renderTop(model, 100, n-1, topNow, style), "\n")
-	if strings.Contains(got, "old plan 8") || !strings.Contains(got, "#7 old plan 7") || strings.Contains(got, "finished\n") || len(strings.Split(got, "\n")) != n-1 {
+	if strings.Contains(got, "old plan 7") || !strings.Contains(got, "#8 old plan 8") || strings.Contains(got, "finished\n") || len(strings.Split(got, "\n")) != n-1 {
 		t.Errorf("at %d:\n%s", n-1, got)
 	}
 	got = strings.Join(renderTop(model, 100, n-2, topNow, style), "\n")
@@ -3574,9 +3761,40 @@ func TestTopMetersZeroCountersPlain(t *testing.T) {
 	}
 }
 
+// TestTopAgentsOrderIsStable: an agent going idle, running, then cooling
+// between renders keeps its row; only its mark and colours change.
+func TestTopAgentsOrderIsStable(t *testing.T) {
+	plain := term.New(logo.Caps{UTF8: true})
+	cool := topNow.Add(time.Hour).UTC().Format(engine.TimeLayout)
+	var orders []string
+	for _, a := range []engine.CapacityAgent{
+		{Harness: "b", Model: "m", CapLayer: "none", Quota: "ready"},
+		{Harness: "b", Model: "m", CapLayer: "none", Quota: "ready", Running: 1},
+		{Harness: "b", Model: "m", CapLayer: "none", Quota: "cooling", CoolingUntil: cool},
+	} {
+		model := busyTopModel()
+		model.capacity.Layers = nil
+		model.capacity.Agents = []engine.CapacityAgent{
+			{Harness: "a", Model: "m", CapLayer: "none", Quota: "ready"}, a,
+			{Harness: "c", Model: "m", CapLayer: "none", Quota: "ready"},
+		}
+		var names []string
+		// Narrow, so that one column lists an agent per row.
+		for _, l := range topAgents(model, topNow, plain, 20)[1:] {
+			names = append(names, strings.Fields(l)[1])
+		}
+		orders = append(orders, strings.Join(names, " "))
+	}
+	for _, o := range orders {
+		if o != "a/m b/m c/m" {
+			t.Errorf("orders = %q, want a/m b/m c/m each time", orders)
+		}
+	}
+}
+
 // TestTopAgentsOrderAndOff: off agents — an effective cap of 0, nothing
-// running, a ready quota — never list; the rest go broken and cooling
-// first, then running, then idle, in snapshot order within a group.
+// running, a ready quota — never list; the rest go in the byte order of the
+// full harness/model name, whatever their state.
 func TestTopAgentsOrderAndOff(t *testing.T) {
 	zero := 0
 	cool := topNow.Add(time.Hour).UTC().Format(engine.TimeLayout)
@@ -3596,11 +3814,11 @@ func TestTopAgentsOrderAndOff(t *testing.T) {
 	for _, l := range got[1:] {
 		names = append(names, strings.Fields(l)[1])
 	}
-	if want := "x/cool x/broke x/run x/offbusy x/idle1 x/idle2"; strings.Join(names, " ") != want {
+	if want := "x/broke x/cool x/idle1 x/idle2 x/offbusy x/run"; strings.Join(names, " ") != want {
 		t.Errorf("order = %q, want %q", strings.Join(names, " "), want)
 	}
-	if note := topAgentLines(model, topNow, term.New(logo.Caps{UTF8: true}), 60)[0].box.note; note != "all ≤ global 8 · 1 off" {
-		t.Errorf("note = %q, want the off count", note)
+	if note := agentNoteText(topAgentLines(model, topNow, term.New(logo.Caps{UTF8: true}), 60)[0].box.note); note != "1 broken · 1 cooling · all ≤ global 8 · 1 off" {
+		t.Errorf("note = %q, want the counts in front of the off count", note)
 	}
 	// The global cap makes every ready, idle agent off.
 	model.capacity.Layers = []engine.CapacityLayer{{Layer: "global", Cap: &zero}}
@@ -3618,52 +3836,87 @@ func agentNoteModel(agents []engine.CapacityAgent, layers ...engine.CapacityLaye
 	return model
 }
 
-// TestTopAgentNote: the AGENTS border's note in each form: the global cap
-// when it sits below some agent's own cap or an agent has none, the off
-// count, both joined, `all ready` when nothing is broken, cooling, off or
-// capped, and nothing otherwise; Dim, cut or left out when it does not fit.
+// agentNoteText is an AGENTS note as its parts' plain text, joined by the
+// separator.
+func agentNoteText(parts []topNotePart) string {
+	texts := make([]string, len(parts))
+	for i, p := range parts {
+		texts[i] = p.text
+	}
+	return strings.Join(texts, " · ")
+}
+
+// TestTopAgentNote: the AGENTS border's note, part by part: the broken and
+// cooling counts over the listed agents first, then the global cap when it
+// sits below some agent's own cap or an agent has none, and the off count,
+// each part left out when it does not apply; `all ready` when nothing is
+// broken, cooling, off or capped, and nothing otherwise; in the border the
+// counts Bad and Warn and the rest Dim, cut or left out when it does not
+// fit.
 func TestTopAgentNote(t *testing.T) {
 	two, four, zero := 2, 4, 0
 	cool := topNow.Add(time.Hour).UTC().Format(engine.TimeLayout)
 	ready := engine.CapacityAgent{Harness: "a", Model: "b", CapLayer: "none", Quota: "ready"}
 	capped := engine.CapacityAgent{Harness: "a", Model: "c", Cap: &four, CapLayer: "runner", Quota: "ready"}
 	off := engine.CapacityAgent{Harness: "a", Model: "d", Cap: &zero, CapLayer: "model", Quota: "ready"}
-	cooling := engine.CapacityAgent{Harness: "a", Model: "e", CapLayer: "none", Quota: "cooling", CoolingUntil: cool}
+	broken := engine.CapacityAgent{Harness: "a", Model: "e", CapLayer: "none", Quota: "broken"}
+	cooling := engine.CapacityAgent{Harness: "a", Model: "f", CapLayer: "none", Quota: "cooling", CoolingUntil: cool}
 	global := func(n *int) engine.CapacityLayer { return engine.CapacityLayer{Layer: "global", Cap: n} }
 	tests := []struct {
 		name  string
 		model topModel
 		want  string
 	}{
+		{"broken alone", agentNoteModel([]engine.CapacityAgent{ready, broken, broken}), "2 broken"},
+		{"cooling alone", agentNoteModel([]engine.CapacityAgent{ready, cooling}), "1 cooling"},
+		{"broken and cooling", agentNoteModel([]engine.CapacityAgent{broken, cooling, cooling}), "1 broken · 2 cooling"},
+		{"the counts with the global cap and the off count", agentNoteModel([]engine.CapacityAgent{ready, off, broken, cooling}, global(&two)), "1 broken · 1 cooling · all ≤ global 2 · 1 off"},
 		{"global below an own cap", agentNoteModel([]engine.CapacityAgent{capped}, global(&two)), "all ≤ global 2"},
 		{"global with an uncapped agent", agentNoteModel([]engine.CapacityAgent{capped, ready}, global(&four)), "all ≤ global 4"},
 		{"global above every own cap", agentNoteModel([]engine.CapacityAgent{capped}, global(&four)), ""},
 		{"global and off", agentNoteModel([]engine.CapacityAgent{ready, off}, global(&two)), "all ≤ global 2 · 1 off"},
 		{"off alone", agentNoteModel([]engine.CapacityAgent{capped, off}), "1 off"},
 		{"all ready", agentNoteModel([]engine.CapacityAgent{ready}, engine.CapacityLayer{Layer: "runner", Cap: nil}), "all ready"},
-		{"cooling", agentNoteModel([]engine.CapacityAgent{ready, cooling}), ""},
 		{"an own cap", agentNoteModel([]engine.CapacityAgent{capped}), ""},
 		{"a capped layer", agentNoteModel([]engine.CapacityAgent{ready}, engine.CapacityLayer{Layer: "runner", Cap: &four}), ""},
 		{"no agents", agentNoteModel(nil, global(&two)), ""},
 	}
 	plain := term.New(logo.Caps{UTF8: true})
 	for _, tt := range tests {
-		if got := topAgentLines(tt.model, topNow, plain, 90)[0].box.note; got != tt.want {
+		if got := agentNoteText(topAgentLines(tt.model, topNow, plain, 90)[0].box.note); got != tt.want {
 			t.Errorf("%s: note = %q, want %q", tt.name, got, tt.want)
 		}
 	}
-	// In the border, Dim, and cut or left out when it does not fit.
-	model := agentNoteModel([]engine.CapacityAgent{ready, off}, global(&two))
+	// In the border the counts are Bad and Warn, the rest Dim, and the note
+	// is cut or left out when it does not fit.
+	model := agentNoteModel([]engine.CapacityAgent{ready, off, broken, cooling}, global(&two))
 	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
 	box := *topAgentLines(model, topNow, colour, 86)[0].box
-	if got := topBoxTop(box, colour, 90); !strings.Contains(got, colour.Dim("all ≤ global 2 · 1 off")) || term.CellWidth(got) != 90 {
-		t.Errorf("border = %q", got)
+	top := topBoxTop(box, colour, 90)
+	if !strings.Contains(top, colour.Bad("1 broken")) || !strings.Contains(top, colour.Warn("1 cooling")) ||
+		!strings.Contains(top, colour.Dim("all ≤ global 2")) || !strings.Contains(top, colour.Dim("1 off")) ||
+		term.CellWidth(top) != 90 {
+		t.Errorf("border = %q", top)
 	}
-	if got := topBoxTop(box, plain, 24); !strings.Contains(got, "all ≤ ") || term.CellWidth(got) != 24 {
+	// Too narrow for the whole note: the later parts go first, whole, then
+	// the last one standing is cut with an ellipsis.
+	if got := topBoxTop(box, plain, 24); !strings.Contains(got, "1 broken") ||
+		strings.Contains(got, "cooling") || strings.Contains(got, "global") || term.CellWidth(got) != 24 {
 		t.Errorf("a cut note: %q", got)
 	}
-	if got := topBoxTop(box, plain, 12); strings.Contains(got, "global") || term.CellWidth(got) != 12 {
+	if got := topBoxTop(box, plain, 20); !strings.Contains(got, "1 b...") || term.CellWidth(got) != 20 {
+		t.Errorf("a note cut mid-part: %q", got)
+	}
+	if got := topBoxTop(box, plain, 12); strings.Contains(got, "broken") || term.CellWidth(got) != 12 {
 		t.Errorf("a note that cannot fit stays out: %q", got)
+	}
+	// The cut keeps its escapes whole and the part's colour.
+	cut := topBoxTop(box, colour, 20)
+	if s := term.StripEscapes(cut); term.CellWidth(s) != 20 || strings.Count(cut, "\x1b[")%2 != 0 {
+		t.Errorf("cut styled note = %q", cut)
+	}
+	if want := colour.Bad("1 b..."); !strings.Contains(cut, want) {
+		t.Errorf("the cut part loses its colour: %q", cut)
 	}
 }
 
@@ -3947,6 +4200,56 @@ func TestTopPausedBand(t *testing.T) {
 	}
 }
 
+// TestTopDispatchPauseBand: a dispatch pause (§8.3) shows in a band of its
+// own, naming the scope, the start, the drain origin, the jobs still
+// draining and the queued jobs it holds; the view's own `p` pause keeps its
+// band beside it, and a paused queued job is not a `held` in the counters.
+func TestTopDispatchPauseBand(t *testing.T) {
+	plain := term.New(logo.Caps{UTF8: true})
+	m := busyTopModel()
+	m.statusOK = true
+	started := topNow.Add(-time.Hour).UTC().Format(engine.TimeLayout)
+	m.status.Pauses = []engine.LivePause{
+		{Origin: engine.PauseOriginDrain, StartedAt: started, Queued: 3,
+			Draining: []engine.PauseJob{{ID: 5, TaskID: 3, Kind: "work", Status: "running"}}},
+		{ProjectID: 2, RepoURL: "github.com/o/r", Origin: engine.PauseOriginUser, StartedAt: started, Drained: true},
+	}
+	m.status.Held = nil
+	clock := api.LocalClock(started, topNow)
+	lines := renderTop(m, 120, 0, topNow, plain)
+	engineBand := strings.TrimRight(bandOf(t, lines, "DISPATCH PAUSED"), " ")
+	for _, w := range []string{"engine", "since " + clock, "drain", "draining: task #3 work", "3 queued"} {
+		if !strings.Contains(engineBand, w) {
+			t.Errorf("engine pause band = %q, lacks %q", engineBand, w)
+		}
+	}
+	got := strings.Join(lines, "\n")
+	if !strings.Contains(got, "project github.com/o/r") || !strings.Contains(got, "drained") {
+		t.Errorf("project pause band missing:\n%s", got)
+	}
+	if strings.Contains(got, "PAUSED   at ") || strings.Contains(got, "p resumes") {
+		t.Errorf("the refresh pause band shows without the p key:\n%s", got)
+	}
+	if !strings.Contains(got, "0 held") {
+		t.Errorf("a paused queued job counted as held:\n%s", got)
+	}
+	// The p pause keeps its own band beside the dispatch pause's.
+	m.paused, m.pausedAt = true, topNow
+	lines = renderTop(m, 120, 0, topNow, plain)
+	bandOf(t, lines, "DISPATCH PAUSED")
+	if got := bandOf(t, lines, "ages frozen"); strings.Contains(got, "DISPATCH") || !strings.Contains(got, "p resumes") {
+		t.Errorf("p band = %q", got)
+	}
+	// Narrow widths cut the band to the width, never past it.
+	for _, w := range []int{40, 60} {
+		for _, l := range renderTop(m, w, 0, topNow, plain) {
+			if term.CellWidth(l) > w {
+				t.Errorf("width %d: line %q is wider", w, l)
+			}
+		}
+	}
+}
+
 // TestTopErrorSequence: a failed dial, then a good dial whose fetch fails,
 // reads as a fetch error from a running engine — no `brigada start`, no
 // ENGINE UNREACHABLE; a clean fetch clears the band and sets the good time; a
@@ -4132,9 +4435,12 @@ func TestRenderTopASCIIWithoutUTF8(t *testing.T) {
 		"  > #3  oil the gears     work  claude/sonnet@high  1m40s  Edit",
 		"  ^ #5  ship it           landing: queued",
 		"  -> task #6 work: retry in 5m: dns",
-		"+- AGENTS  all <= global 8 ---",
-		"| -> codex/gpt-5  ........  until 16:04  x  claude/s...  ##......  login ex... |",
-		"| *  claude/opus  #...",
+		"+- AGENTS  1 broken | 1 cooling | all <= global 8 ---",
+		"| -> codex/gpt-5",
+		"Sx2  ........  until 16:04",
+		"| x  claude/sonnet-long-name  Lx1  ##......  login expired",
+		"| *  claude/opus",
+		"Hx3  #...",
 		"+- EVENTS ---",
 		" All landed. -+",
 		"| 15:02  task  #3  landed  oil the gears",

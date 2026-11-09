@@ -7,14 +7,21 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The AGENTS box of `brigada top` lists agents in the order of their `harness/model` name, so a row no longer moves when an agent starts or finishes a job, and its top border counts the broken and cooling agents (`1 broken · 3 cooling`).
+- The AGENTS box of `brigada top` shows each agent's tier and cost weight as `H×3` (`Hx3` without UTF-8) and uses two columns only when every cell fits whole.
+- `brigada top` shortens an agent name of more than two `/` segments to its harness and model, so `opencode/zai-coding-plan/glm-5.3` reads `opencode/glm-5.3` and the harness stays visible.
 - Bare `brigada history` prints a table, one row per event: time, kind, number, what happened and the title, with a landing's short commit and an `after-land failed: --task N` flag. It shows the last 50 rows, oldest first; the new `--all` prints every row. `--task`, `--job`, `--raw` and `--limit` print what they did (issue #191).
+- The PLANS box of `brigada top` lists finished plans newest first (highest plan id first) below the live plans, which keep id order, so a short terminal drops the oldest finished plans first.
 
 ### Fixed
+
+- Plans parked by review leave the needs-you queue while the foreman handles them and notify when it cannot (issue #197).
 
 - `brigada top` lists live plans before finished ones, and a short terminal spends a free row on a running line (issue #184).
 
 ### Added
 
+- `brigada pause` and `brigada resume` pause and resume dispatch for the engine or, with `--repo`, one project; `brigada stop --engine --drain` pauses the engine, waits for its running jobs and then stops. `brigada status` prints a `paused:` line per pause, `brigada top` shows it in a band of its own beside the `p` pause, and the foreman's `status` and `capacity` tools show it; a queued job of a paused scope is counted under the pause, never as `held:` (issue #198). Restart the engine and runner after you upgrade.
 - In the full-screen `brigada top`, a running job's `▸` is a spinner on a 120 ms redraw of its own, with colour and UTF-8 and while a job runs; `--interval` still sets the fetch, a frame makes no API call, and only the lines that changed are written (issue #176).
 
 ## [1.1.1] - 2026-11-05

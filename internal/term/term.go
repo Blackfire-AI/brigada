@@ -209,6 +209,9 @@ func (s Style) Dash() string { return s.symbol("─", "-") }
 // Cross returns a failure mark, or "x" without UTF-8.
 func (s Style) Cross() string { return s.symbol("✗", "x") }
 
+// Times returns the multiplication sign, or "x" without UTF-8.
+func (s Style) Times() string { return s.symbol("×", "x") }
+
 // Dot returns a separator dot, or "|" without UTF-8.
 func (s Style) Dot() string { return s.symbol("·", "|") }
 

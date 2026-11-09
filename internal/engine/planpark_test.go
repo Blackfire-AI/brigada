@@ -364,6 +364,10 @@ func TestASwallowedChangesVerdictIsNamed(t *testing.T) {
 	if entry == nil || entry.State != planNeedsForeman {
 		t.Fatalf("needs-you entry = %+v, want the parked plan", entry)
 	}
+	e.rewake()
+	if p, ok := e.eventPayloadOf(evPlanUnattended); !ok || p.Plan != res.PlanID || p.Reason != entry.Reason || e.countEvents(evPlanUnattended) != 1 {
+		t.Errorf("unattended event = %+v, want one with the queue reason %q", p, entry.Reason)
+	}
 	want := fmt.Sprintf("foreman turn %d ended without answering the changes verdict", turn)
 	if !strings.Contains(entry.Reason, want) || !strings.Contains(entry.Reason, "The second task") {
 		t.Errorf("needs-you reason = %q, want the turn named ahead of the findings", entry.Reason)
@@ -591,6 +595,9 @@ func TestAReParkAfterAnAnswerIsNamedAnew(t *testing.T) {
 		t.Fatalf("plan state after the changes = %q, want parked", got)
 	}
 	e.complete(e.leaseForeman(), Completion{Result: `{"status":"done"}`})
+	if got := e.countEvents(evPlanUnattended); got != 1 {
+		t.Fatalf("plan_unattended events after the swallow = %d", got)
+	}
 	if got := e.countEvents(evPlanVerdictUnanswered); got != 1 {
 		t.Fatalf("plan_verdict_unanswered events after the swallow = %d, want 1", got)
 	}
@@ -618,6 +625,9 @@ func TestAReParkAfterAnAnswerIsNamedAnew(t *testing.T) {
 	}
 	second := e.int("SELECT id FROM jobs WHERE kind = 'foreman' ORDER BY id DESC")
 	e.complete(e.leaseForeman(), Completion{Result: `{"status":"done"}`})
+	if got := e.countEvents(evPlanUnattended); got != 2 {
+		t.Fatalf("plan_unattended events after the re-park = %d", got)
+	}
 	if got := e.countEvents(evPlanVerdictUnanswered); got != 2 {
 		t.Fatalf("plan_verdict_unanswered events after the re-park = %d, want 2", got)
 	}

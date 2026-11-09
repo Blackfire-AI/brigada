@@ -16,6 +16,7 @@ type fakeCapacity struct {
 	projects []engine.ProjectInfo
 	err      error
 	asked    []int64
+	pins     []engine.CapacityPin
 }
 
 func (f *fakeCapacity) Capacity(_ context.Context, projectID int64) (engine.CapacitySnapshot, error) {
@@ -26,7 +27,33 @@ func (f *fakeCapacity) Capacity(_ context.Context, projectID int64) (engine.Capa
 	return engine.CapacitySnapshot{
 		Agents: []engine.CapacityAgent{{Harness: "claude", Model: "sonnet", Tier: "standard", Effort: "default", Cost: 1, CapLayer: "none", Quota: "ready"}},
 		Layers: []engine.CapacityLayer{{Layer: "global"}},
+		Pins:   f.pins,
 	}, nil
+}
+
+func TestPrintCapacityPins(t *testing.T) {
+	fake := &fakeCapacity{pins: []engine.CapacityPin{
+		{JobID: 2980, Kind: "work", TaskID: 366, AgentID: 23, Harness: "claude", Model: "fable", State: engine.PinCappedAtZero},
+		{JobID: 2981, Kind: "work", TaskID: 367, AgentID: 24, Harness: "claude", Model: "sonnet", HeldLayer: "model", HeldKey: "sonnet", State: engine.PinReady},
+		{JobID: 2982, Kind: "work", TaskID: 368, AgentID: 25, Harness: "claude", Model: "haiku", State: engine.PinBroken},
+	}}
+	var stdout, stderr bytes.Buffer
+	if code := printCapacity(context.Background(), fake, "", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"PINS", "2980", "capped_at_0", "model sonnet", "broken"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the output lacks %q:\n%s", want, out)
+		}
+	}
+	stdout.Reset()
+	if code := printCapacity(context.Background(), &fakeCapacity{}, "", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "PINS") {
+		t.Errorf("no pins, yet the output has a PINS table:\n%s", stdout.String())
+	}
 }
 
 func (f *fakeCapacity) Projects(context.Context) ([]engine.ProjectInfo, error) {

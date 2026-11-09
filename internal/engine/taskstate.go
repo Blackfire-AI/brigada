@@ -407,10 +407,11 @@ func infraStreakTx(tx *sql.Tx, key string) (n int, began string, err error) {
 }
 
 // infraStreakSpent reports whether an infra streak has filled the retry
-// window (§5.1): the time elapsed since its first failure is past
-// infraRetryWindow, so the failure being answered is not retried again.
-// An empty began — no streak — is never spent.
-func infraStreakSpent(began string, now time.Time) bool {
+// window (§5.1): the time elapsed since its first failure, less held —
+// the time a dispatch pause held the key since then (§8.3 "Clocks") —
+// is past infraRetryWindow, so the failure being answered is not
+// retried again. An empty began — no streak — is never spent.
+func infraStreakSpent(began string, now time.Time, held time.Duration) bool {
 	if began == "" {
 		return false
 	}
@@ -418,7 +419,32 @@ func infraStreakSpent(began string, now time.Time) bool {
 	if err != nil {
 		return false
 	}
-	return now.Sub(first) > infraRetryWindow
+	return now.Sub(first)-held > infraRetryWindow
+}
+
+// infraStreakSpentTx is the infra-retry window check every streak
+// shares — a task job's retry, the foreman wake and the plan review's
+// retry (§5.1) — with the window shifted by the time a pause of the
+// project or the engine held the streak (§8.3 "Clocks"): the union of
+// the scope's pause intervals since the streak began, overlapping
+// pauses counted once. The streak's start is its oldest failed job's
+// creation, so the held time is computed against it rather than
+// stored: a streak whose wake the pause held with no job queued is
+// shifted the same as one whose retry waited queued, and a pause by
+// itself never spends the window.
+func infraStreakSpentTx(tx *sql.Tx, project int64, began string, now time.Time) (bool, error) {
+	if began == "" {
+		return false, nil
+	}
+	first, err := parseTime(began)
+	if err != nil {
+		return false, nil
+	}
+	held, err := heldSinceTx(tx, project, first, now)
+	if err != nil {
+		return false, err
+	}
+	return infraStreakSpent(began, now, held), nil
 }
 
 // infraOutageText words the park of an infra streak the retry window
@@ -449,7 +475,11 @@ func (e *Engine) retryInfraFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 	if err != nil {
 		return false, err
 	}
-	if streak == 0 || infraStreakSpent(began, now) {
+	spent, err := infraStreakSpentTx(tx, job.ProjectID, began, now)
+	if err != nil {
+		return false, err
+	}
+	if streak == 0 || spent {
 		return false, nil
 	}
 	p := SubmitParams{

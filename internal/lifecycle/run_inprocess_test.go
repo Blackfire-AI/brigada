@@ -169,6 +169,89 @@ func TestRunReopensStrandedPlansAtStartup(t *testing.T) {
 	}
 }
 
+// TestRunIdlesOutWhilePausedWithHeldWakes runs the engine role
+// in-process over a store whose engine is paused (§8.3) with no live
+// job and a judgment event pending for a project whose foreman would
+// wake: the wake the pause holds is not a pending wake-up (§13), so the
+// start-up recovery submits no turn and the idle monitor exits on time,
+// leaving the event pending and the pause standing.
+func TestRunIdlesOutWhilePausedWithHeldWakes(t *testing.T) {
+	state := testsupport.ShortStateDir(t)
+	p := lifecycle.PathsOf(state)
+
+	ctx := context.Background()
+	st, err := store.Open(ctx, p.Store)
+	if err != nil {
+		t.Fatalf("open the store: %v", err)
+	}
+	err = st.Update(ctx, func(tx *sql.Tx) error {
+		const ts = "2026-10-13T00:00:00.000000000Z"
+		for _, q := range []string{
+			`INSERT INTO projects (id, repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
+				VALUES (1, 'https://example.com/r.git', 'main', '{}', 'claude', 'sonnet', ?1, ?1)`,
+			`INSERT INTO plans (id, project_id, title, state, created_at, updated_at) VALUES (1, 1, 'Ship it', 'active', ?1, ?1)`,
+			`INSERT INTO tasks (id, plan_id, title, spec, class, state, base_ref, created_at, updated_at)
+				VALUES (1, 1, 'First', 'spec', 'implement', 'needs_foreman', 'main', ?1, ?1)`,
+			`INSERT INTO events (id, kind, project_id, task_id, job_id, payload, created_at)
+				VALUES (1, 'task_failed', 1, 1, NULL, '{"status":"needs_foreman","reason":"exit 1"}', ?1)`,
+			`INSERT INTO foreman_inbox (event_id, project_id, state) VALUES (1, 1, 'pending')`,
+			`INSERT INTO pauses (project_id, origin, started_at) VALUES (NULL, 'user', ?1)`,
+		} {
+			if _, err := tx.Exec(q, ts); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("seed the paused store: %v", err)
+	}
+	st.Close()
+
+	// A held wake that kept the engine up would run it to this deadline.
+	runCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	err = lifecycle.Run(runCtx, lifecycle.Config{
+		StateDir: state,
+		Notify:   "none",
+		Idle:     300 * time.Millisecond,
+		IdleTick: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("run the engine: %v", err)
+	}
+	if runCtx.Err() != nil {
+		t.Fatal("the paused engine did not exit on idle: the held wake kept it up")
+	}
+
+	st, err = store.Open(ctx, p.Store)
+	if err != nil {
+		t.Fatalf("reopen the store: %v", err)
+	}
+	defer st.Close()
+	var turns, pending, paused int
+	if err := st.View(ctx, func(tx *sql.Tx) error {
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE kind = 'foreman'`).Scan(&turns); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM foreman_inbox WHERE state = 'pending'`).Scan(&pending); err != nil {
+			return err
+		}
+		return tx.QueryRow(`SELECT COUNT(*) FROM pauses WHERE ended_at IS NULL`).Scan(&paused)
+	}); err != nil {
+		t.Fatalf("read the store after the run: %v", err)
+	}
+	if turns != 0 {
+		t.Errorf("foreman turns = %d, want none submitted under the pause", turns)
+	}
+	if pending != 1 {
+		t.Errorf("pending inbox rows = %d, want the held event still pending", pending)
+	}
+	if paused != 1 {
+		t.Errorf("live pauses = %d, want the engine's pause standing after the idle exit", paused)
+	}
+}
+
 // seedNotifyEvent installs one project and one task_check_failed event,
 // the minimal log rows the delivery loop's joins resolve.
 func seedNotifyEvent(t *testing.T, ctx context.Context, st *store.Store) {

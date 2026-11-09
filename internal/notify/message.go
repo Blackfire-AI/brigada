@@ -24,6 +24,7 @@ const (
 	KindForemanLimited         = "foreman_limited"           // the foreman's CLI hit its subscription limit (§4.4, §10)
 	KindForemanWakeBudgetSpent = "foreman_wake_budget_spent" // the day's foreman wake budget is spent (§4.3, §10)
 	KindAgentBroken            = "agent_broken"              // an agent was marked broken (§8 "Health", §10)
+	KindPlanUnattended         = "plan_unattended"           // a parked plan the foreman does not hold (§10)
 	KindTaskUnattended         = "task_unattended"           // a task parked at needs_foreman that the foreman does not hold (§10)
 	// KindReviewUnservable: a task's queued review can never be taken —
 	// no agent of another family offers review (§7, §10).
@@ -158,6 +159,12 @@ func Message(ev Event) (t, body string, ok bool) {
 		// paths); the user answers with approve or reject.
 		return title, oneLine(fmt.Sprintf("plan #%d needs your approval: %s: `brigada plan approve %d` or `brigada plan reject %d`",
 			ev.PlanID, ev.Reason, ev.PlanID, ev.PlanID), bodyLimit), true
+	case ev.Kind == KindPlanUnattended:
+		reason := ev.Reason
+		if reason == "" {
+			reason = ev.Kind
+		}
+		return title, oneLine(fmt.Sprintf("plan #%d needs you: %s", ev.PlanID, reason), bodyLimit), true
 	case ev.Kind == KindReviewUnservable:
 		// Reason is the needs-you entry's own words: what is missing and
 		// what the user can do about it.

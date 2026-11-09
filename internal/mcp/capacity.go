@@ -16,7 +16,13 @@ import (
 // per agent — its tier and configured effort, its effective cap and the layer that sets it, its running
 // jobs, its quota state and its cost weight — then one line per layer:
 // cap, use and queue depth for each runner, each account, each capped
-// model, each active plan of the project and global. That is the read
+// model, each active plan of the project and global — then one line per
+// queued job pinned to an agent ("pin job 7 task 3 work -> agent 2
+// claude/sonnet state=capped_at_0 held=model sonnet"; held= only when a
+// cap hold is stamped), so a pin that can never place reads differently
+// from a wait for a slot — then one `paused:` line per dispatch pause
+// that stands (scope, start, origin when a drain, the jobs still
+// draining, the queued jobs it holds; §8.3) and the reserved headroom. That is the read
 // the foreman plans from (§4.5): how wide the task graph can be, when
 // to sequence instead of fanning out, and which agents are cooling or
 // broken. The tool takes no arguments; a foreman token's scope is its
@@ -49,6 +55,30 @@ func callCapacity(ctx context.Context, c *api.Client, _ json.RawMessage) (string
 			name += " " + key
 		}
 		fmt.Fprintf(&b, "%s cap=%s use=%d queue=%d\n", name, capText(l.Cap), l.Use, l.Queue)
+	}
+	for _, p := range snap.Pins {
+		task := ""
+		if p.TaskID != 0 {
+			task = fmt.Sprintf(" task %d", p.TaskID)
+		}
+		state := p.State
+		if p.State == engine.PinCooling {
+			state += " until " + p.CoolingUntil
+		}
+		held := ""
+		if p.HeldLayer != "" {
+			held = " held=" + p.HeldLayer
+			if p.HeldKey != "" {
+				held += " " + p.HeldKey
+			}
+		}
+		fmt.Fprintf(&b, "pin job %d%s %s -> agent %d %s/%s state=%s%s\n",
+			p.JobID, task, p.Kind, p.AgentID, p.Harness, p.Model, state, held)
+	}
+	// A dispatch pause (§8.3) is why queued work waits with no slot full:
+	// the same line the status prints, so a turn reads it one way.
+	for _, p := range snap.Pauses {
+		fmt.Fprintln(&b, api.PauseLine(p))
 	}
 	for _, h := range snap.Headroom {
 		fmt.Fprintf(&b, "headroom project %d account=%s cap=%s\n", h.ProjectID, h.Account, capText(h.Cap))

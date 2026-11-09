@@ -72,7 +72,8 @@ func (e *Engine) Sweep(ctx context.Context) (SweepReport, error) {
 //     cannot wedge its key — unless a runner keeps finding it held by a
 //     full cap layer, which restarts the clock (§8.1); a job with a task
 //     parks the task at needs_foreman with a task_failed event naming the
-//     TTL, and the foreman is woken, as in round 2;
+//     TTL, and the foreman is woken, as in round 2; a job of a paused
+//     scope is never read by it (§8.3), and its lift shifts the clock;
 //  4. an expired attach hold returns its delivered events to pending
 //     uncounted, revokes its token, and re-evaluates the wake (§4.2
 //     item 1);
@@ -455,10 +456,15 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 		// long as it takes, so the clock counts from the later of
 		// queued_at and the last hold. A job waiting out its own retry
 		// backoff (§3, §5.1) is the same: not_before is a hold the
-		// engine itself placed, so the clock counts from it too.
+		// engine itself placed, so the clock counts from it too. A job of
+		// a paused scope is not read at all (§8.3 "Clocks"): while the
+		// pause lasts the TTL never fails or parks it, and the lift that
+		// frees it shifts these three clocks by its held time
+		// (shiftFreedJobsTx), so the time it was paused never elapses.
 		rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0), kind, COALESCE(require_agent, 0) FROM jobs
 			WHERE status = 'queued' AND queued_at IS NOT NULL
-			AND max(queued_at, COALESCE(cap_held_at, queued_at), COALESCE(not_before, queued_at)) <= ?`, fmtTime(now.Add(-e.cfg.QueueTTL)))
+			AND max(queued_at, COALESCE(cap_held_at, queued_at), COALESCE(not_before, queued_at)) <= ?
+			AND `+notPausedSQL("jobs"), fmtTime(now.Add(-e.cfg.QueueTTL)))
 		if err != nil {
 			return rep, fmt.Errorf("sweep queue TTL: %w", err)
 		}
@@ -486,18 +492,28 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 			if x.requireAgent != 0 {
 				// A pin on a broken agent has no end in sight, so it is not
 				// held (a cooling one is, see holdCoolingTx); the park names
-				// the pin and the state instead of blaming the runners.
-				var harness, model, health, why string
-				err := tx.QueryRow("SELECT harness, model, health, health_reason FROM agents WHERE id = ?", x.requireAgent).
-					Scan(&harness, &model, &health, &why)
+				// the pin and the state instead of blaming the runners. A pin
+				// on an agent capped at exactly 0 is the same: it never
+				// takes the job, so it is no candidate and holds nothing
+				// (issue #195), and the park names the pin and the layer.
+				var harness, model, account, health, why string
+				err := tx.QueryRow("SELECT harness, model, account, health, health_reason FROM agents WHERE id = ?", x.requireAgent).
+					Scan(&harness, &model, &account, &health, &why)
 				if err != nil && !errors.Is(err, sql.ErrNoRows) {
 					return rep, fmt.Errorf("read the pinned agent %d: %w", x.requireAgent, err)
 				}
+				state := ""
 				if err == nil && health == "broken" {
-					state := "broken"
+					state = "broken"
 					if why != "" {
 						state += ": " + why
 					}
+				} else if err == nil {
+					if layer := zeroCapLayer(e.cfg.Caps, Kind(x.kind), account, model); layer != "" {
+						state = "capped at 0 at the " + layer + " layer"
+					}
+				}
+				if state != "" {
 					reason = fmt.Sprintf("queue TTL exceeded: job pinned to %s/%s (%s); no runner leased the job within %s",
 						harness, model, state, capText(e.cfg.QueueTTL))
 				}

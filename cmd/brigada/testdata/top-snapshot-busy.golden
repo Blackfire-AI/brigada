@@ -10,9 +10,10 @@
 │   ! #2 wire the sprocket should the sprocket be blue?                        │
 │   ? #4  polish the knobs  held: waiting for a runner slot                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ AGENTS  all ≤ global 8 ─────────────────────────────────────────────────────╮
-│ ↺ codex/gpt-5   □□□□□□□□  until 16:04  ✗ claude/so...  ■■□□□□□□  login ex... │
-│ ● claude/opus   ■□□□                                                         │
+╭─ AGENTS  1 broken · 1 cooling · all ≤ global 8 ──────────────────────────────╮
+│ ● claude/opus              H×3  ■□□□                                         │
+│ ✗ claude/sonnet-long-name  L×1  ■■□□□□□□  login expired                      │
+│ ↺ codex/gpt-5              S×2  □□□□□□□□  until 16:04                        │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ EVENTS ──────────────── Plan 1 is half done; task 2 waits for your answer. ─╮
 │ 15:02  task  #3  landed  oil the gears                                       │

@@ -25,6 +25,7 @@ const (
 	evPlanAwaitingApproval    = "plan_awaiting_approval"     // CreatePlan: the plan is over the approval limit and waits for the user's yes (§6.3)
 	evPlanReviewQueued        = "plan_review_queued"         // a plan_review job is queued: the plan waits in reviewing for the verdict before any work is queued (§6.2)
 	evPlanReviewed            = "plan_reviewed"              // a plan review round ended: approve, changes (with findings), no verdict, or accepted by the foreman (plan_accept); the plan proceeded, parks at needs_foreman for the foreman's answer, or waits for the user's yes (§6.2)
+	evPlanUnattended          = "plan_unattended"            // a parked plan the foreman does not hold: one plain log event per park, with Plan and the needs-you Reason; wakes no turn (§10)
 	evTaskUnattended          = "task_unattended"            // a task parked at needs_foreman that the foreman does not hold — no harness, the limit, the budget, a stall, an outage, or a done turn that consumed its event — so it waits for the user: one event per park, Reason the needs-you words and ParkKind the parking event's kind; a plain log record, in no inbox, waking no turn (§4.2, §10)
 	evPlanVerdictUnanswered   = "plan_verdict_unanswered"    // a done foreman turn consumed a plan's changes verdict without answering it (issue #164): one event per swallowed verdict names the plan, the verdict's round and the turn that failed to act; the plan stays parked, and the event wakes no turn (§4.2, §6.2)
 	evPlanAmended             = "plan_amended"               // the foreman amended a live plan: tasks added, cancelled or re-pointed (§12.2)
@@ -103,6 +104,8 @@ const (
 	evAgentProbeFailed        = "agent_probe_failed"         // a broken agent's probe failed; the next probe is Until (§8 "Health")
 	evAgentReset              = "agent_reset"                // the user cleared broken and cooling on the agents of a harness and model (§8)
 	evEngineSuspended         = "engine_suspended"           // the engine's host slept; the sweep restarted every wall-clock deadline (§13)
+	evDispatchPaused          = "dispatch_paused"            // dispatch was paused for the engine or one project (§8.3); Origin names who set it — user or drain — Caller who asked; a plain log record, in no inbox, waking no turn
+	evDispatchResumed         = "dispatch_resumed"           // a pause was lifted (§8.3): Origin the lifted pause's, Caller who asked; a plain log record, in no inbox, waking no turn
 )
 
 // eventPayload is the small JSON an event row carries: the fields the
@@ -148,6 +151,7 @@ type eventPayload struct {
 	// Caller names who asked for a retirement (§6.2): the foreman or
 	// the user, recorded beside the reason on each task_retired event.
 	Caller  string `json:"caller,omitempty"`
+	Origin  string `json:"origin,omitempty"` // the origin a dispatch_paused or dispatch_resumed event names: user or drain (§8.3)
 	Harness string `json:"harness,omitempty"`
 	Model   string `json:"model,omitempty"`
 	Effort  string `json:"effort,omitempty"`  // a foreman setting's reasoning-effort level

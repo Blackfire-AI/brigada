@@ -400,6 +400,7 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 		add([]topLine{{class: yieldBlank}, {text: band}, {class: yieldBlank}})
 	}
 	add(topPinned(topHint(model, style, width)))
+	add(topPinned(topPauseBands(model, now, style, width)))
 	add(newTopNeedsYou(model.status, model.soleProject, style, inner))
 	// One mark for every running row of the frame: a spinner frame of the
 	// real clock while the view animates, else the static pointer.
@@ -756,6 +757,45 @@ func topBand(model topModel, now time.Time, style term.Style, width int) string 
 	return paint(body)
 }
 
+// topPauseBands is one full-width band per dispatch pause that stands
+// (§8.3 "What shows it"), apart from the view's own `p` pause and its
+// band: `|| DISPATCH PAUSED`, then the scope, the start, `drain` for a
+// drain's origin, the jobs still draining (`drained` once none is) and
+// the queued jobs the pause holds. The `p` band names the refresh
+// frozen, this one the engine's dispatch.
+func topPauseBands(model topModel, now time.Time, style term.Style, width int) []string {
+	var out []string
+	sep := topEventSep(style)
+	for _, p := range model.status.Pauses {
+		first := "|| DISPATCH PAUSED"
+		parts := []string{api.PauseScope(p), "since " + api.LocalClock(p.StartedAt, now)}
+		if p.Origin == engine.PauseOriginDrain {
+			parts = append(parts, "drain")
+		}
+		if len(p.Draining) == 0 {
+			parts = append(parts, "drained")
+		} else {
+			jobs := make([]string, 0, len(p.Draining))
+			for _, j := range p.Draining {
+				what := fmt.Sprintf("job #%d", j.ID)
+				if j.TaskID != 0 {
+					what = fmt.Sprintf("task #%d", j.TaskID)
+				}
+				jobs = append(jobs, what+" "+j.Kind)
+			}
+			parts = append(parts, "draining: "+strings.Join(jobs, ", "))
+		}
+		if p.Queued > 0 {
+			parts = append(parts, fmt.Sprintf("%d queued", p.Queued))
+		}
+		middle := cutLine(strings.Join(parts, sep), max(width-2-3-term.CellWidth(first), 0))
+		body := " " + style.Bold(first) + "   " + middle
+		used := 1 + term.CellWidth(first) + 3 + term.CellWidth(middle)
+		out = append(out, style.BandWarn(body+strings.Repeat(" ", max(width-used, 0))))
+	}
+	return out
+}
+
 // topHint is the unregistered-models line under the header, Dim, or nothing.
 func topHint(model topModel, style term.Style, width int) []string {
 	if model.hint == "" {
@@ -1050,7 +1090,9 @@ func topFirstRunRows(style term.Style, line func(string, topYield) topLine) []to
 // said nothing and keeps `none`. When plans exist and none is live, the note
 // reads `none live · N finished` and a Dim `idle: last work landed HH:MM`
 // row ends the finished lines, left out when no landing is kept. Every live
-// plan is listed before every finished one, id order kept in each group.
+// plan is listed before every finished one, live plans in id order and
+// finished ones newest first (highest id first), so a short terminal drops
+// the oldest finished plans first.
 func topPlansBox(st api.Status, tagged, fetched bool, events []history.Item, now time.Time, style term.Style, width int, mark string) []topLine {
 	line := func(text string, class topYield) topLine {
 		return topLine{text: text, class: class, section: topSecPlans}
@@ -1065,10 +1107,11 @@ func topPlansBox(st api.Status, tagged, fetched bool, events []history.Item, now
 		}
 	}
 	if fetched {
-		box.note = fmt.Sprintf("%d live%s%d finished", live, topEventSep(style), finished)
+		note := fmt.Sprintf("%d live%s%d finished", live, topEventSep(style), finished)
 		if live == 0 && finished > 0 {
-			box.note = fmt.Sprintf("none live%s%d finished", topEventSep(style), finished)
+			note = fmt.Sprintf("none live%s%d finished", topEventSep(style), finished)
 		}
+		box.note = []topNotePart{{note, style.Dim}}
 	}
 	var lines []topLine
 	if fetched && topFirstRun(st) {
@@ -1088,15 +1131,22 @@ func topPlansBox(st api.Status, tagged, fetched bool, events []history.Item, now
 		}
 	}
 	layout := newTopPlanLayout(st.Plans, running, tagged, style, width)
-	// Live plans first, then finished ones, each group in id order.
-	ordered := make([]engine.StatusPlan, 0, len(st.Plans))
-	for _, finishedGroup := range []bool{false, true} {
-		for _, p := range st.Plans {
-			if topPlanFinished(p) == finishedGroup {
-				ordered = append(ordered, p)
-			}
+	// Live plans first in ascending id order, then finished ones newest
+	// first, descending id: the frame's class b drop takes the bottom
+	// finished line first, so the oldest finished plans are the ones that
+	// go on a short terminal.
+	livePlans := make([]engine.StatusPlan, 0, len(st.Plans))
+	finishedPlans := make([]engine.StatusPlan, 0, len(st.Plans))
+	for _, p := range st.Plans {
+		if topPlanFinished(p) {
+			finishedPlans = append(finishedPlans, p)
+		} else {
+			livePlans = append(livePlans, p)
 		}
 	}
+	sort.Slice(livePlans, func(i, j int) bool { return livePlans[i].ID < livePlans[j].ID })
+	sort.Slice(finishedPlans, func(i, j int) bool { return finishedPlans[i].ID > finishedPlans[j].ID })
+	ordered := append(append(make([]engine.StatusPlan, 0, len(st.Plans)), livePlans...), finishedPlans...)
 	for _, p := range ordered {
 		tag := ""
 		if tagged {

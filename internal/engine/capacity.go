@@ -27,6 +27,47 @@ type CapacitySnapshot struct {
 	// per project and account; empty when no project has one or the
 	// rule is off.
 	Headroom []CapacityHeadroom `json:"headroom,omitempty"`
+	// Pins lists every queued job pinned to one agent (jobs.require_agent)
+	// whether or not a cap holds it, scoped to the project like the plan
+	// layer: a pin on an agent that can never take the job (issue #195)
+	// is an unmet placement with no cap-hold stamp, so it cannot be read
+	// off the layers' queue depths. Empty when no queued job is pinned.
+	Pins []CapacityPin `json:"pins,omitempty"`
+	// Pauses lists the dispatch pauses that stand (§8.3), as the status
+	// carries them (LivePause): scope, start, origin, the jobs still
+	// draining and the queued jobs each holds, scoped to the project
+	// like the plan layer. A paused scope's queued jobs are counted
+	// there, never in a layer's queue depth.
+	Pauses []LivePause `json:"pauses,omitempty"`
+}
+
+// The states a pin's snapshot entry carries: whether the pinned agent can
+// take the job. A pin is capped at 0 when the cap layer that shuts the
+// job's kind out of the agent is exactly 0 — the model cap does not
+// count for a foreman job (§8.1).
+const (
+	PinReady        = quotaReady
+	PinCooling      = quotaCooling
+	PinBroken       = quotaBroken
+	PinCappedAtZero = "capped_at_0"
+)
+
+// CapacityPin is one queued job pinned to an agent as capacity reports
+// it (§12.2, issue #195). HeldLayer and HeldKey are the job's cap-hold
+// stamp, empty when no cap holds it. State says whether the pin can
+// place: ready, cooling (with CoolingUntil, the store's UTC text),
+// broken, or capped_at_0.
+type CapacityPin struct {
+	JobID        int64  `json:"job_id"`
+	Kind         string `json:"kind"`
+	TaskID       int64  `json:"task_id,omitempty"`
+	AgentID      int64  `json:"agent_id"`
+	Harness      string `json:"harness"`
+	Model        string `json:"model"`
+	HeldLayer    string `json:"held_layer,omitempty"`
+	HeldKey      string `json:"held_key,omitempty"`
+	State        string `json:"state"`
+	CoolingUntil string `json:"cooling_until,omitempty"`
 }
 
 // CapacityHeadroom is one reserved account as capacity reports it
@@ -218,14 +259,16 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 	// runner, account or model that actually had no room. A plan hold
 	// stamped before the key column existed falls back to the plan its
 	// task names; a hold with no instance to name — global — counts at
-	// the global layer alone.
+	// the global layer alone. A queued job of a paused scope waits for
+	// the resume, not for a slot (§8.3): the pause counts it, whatever
+	// hold it was stamped with, and no layer's queue does.
 	type hold struct {
 		layer, key string
 		plan       int64 // the task's plan: the fallback for a plan hold without a key
 	}
 	held, err := tx.Query(`SELECT COALESCE(j.cap_held_layer, ''), COALESCE(j.cap_held_key, ''), COALESCE(t.plan_id, 0)
 		FROM jobs j LEFT JOIN tasks t ON t.id = j.task_id
-		WHERE j.status = 'queued' AND j.cap_held_layer IS NOT NULL ORDER BY j.id`)
+		WHERE j.status = 'queued' AND j.cap_held_layer IS NOT NULL AND NOT ` + heldByPauseSQL("j") + ` ORDER BY j.id`)
 	if err != nil {
 		return CapacitySnapshot{}, fmt.Errorf("list held jobs: %w", err)
 	}
@@ -437,6 +480,65 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 				snap.Headroom = append(snap.Headroom, CapacityHeadroom{ProjectID: id, Account: account, Cap: &eff})
 			}
 		}
+	}
+
+	// The pinned queued jobs, held or not, scoped like the plan layer. A
+	// pin whose agent row cannot be found is skipped: the foreign key
+	// nulls a deleted agent's pins, so this is only a defensive guard.
+	pinQuery := `SELECT j.id, j.kind, COALESCE(j.task_id, 0), j.require_agent,
+			COALESCE(j.cap_held_layer, ''), COALESCE(j.cap_held_key, '')
+		FROM jobs j WHERE j.status = 'queued' AND j.require_agent IS NOT NULL`
+	var pargs []any
+	if projectID != 0 {
+		pinQuery += " AND j.project_id = ?"
+		pargs = append(pargs, projectID)
+	}
+	rows, err = tx.Query(pinQuery+" ORDER BY j.id", pargs...)
+	if err != nil {
+		return CapacitySnapshot{}, fmt.Errorf("list pinned jobs: %w", err)
+	}
+	var pinned []CapacityPin
+	for rows.Next() {
+		var p CapacityPin
+		if err := rows.Scan(&p.JobID, &p.Kind, &p.TaskID, &p.AgentID, &p.HeldLayer, &p.HeldKey); err != nil {
+			rows.Close()
+			return CapacitySnapshot{}, fmt.Errorf("list pinned jobs: %w", err)
+		}
+		pinned = append(pinned, p)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return CapacitySnapshot{}, fmt.Errorf("list pinned jobs: %w", err)
+	}
+	rows.Close()
+	byID := make(map[int64]capacityAgent, len(agents))
+	for _, a := range agents {
+		byID[a.id] = a
+	}
+	for _, p := range pinned {
+		a, ok := byID[p.AgentID]
+		if !ok {
+			continue
+		}
+		p.Harness, p.Model = a.harness, a.model
+		quota, until := quotaState(a.health, a.coolingUntil, nowStr)
+		switch {
+		case zeroCapLayer(cfg.Caps, Kind(p.Kind), a.account, a.model) != "":
+			p.State = PinCappedAtZero
+		case quota == quotaBroken:
+			p.State = PinBroken
+		case quota == quotaCooling:
+			p.State, p.CoolingUntil = PinCooling, until
+		default:
+			p.State = PinReady
+		}
+		snap.Pins = append(snap.Pins, p)
+	}
+
+	// The pauses that stand (§8.3), scoped like the status: the engine's
+	// and the project's own, with the jobs each still drains.
+	if snap.Pauses, err = livePausesViewTx(tx, projectID); err != nil {
+		return CapacitySnapshot{}, err
 	}
 	return snap, nil
 }

@@ -9,8 +9,8 @@ import (
 )
 
 // foremanHolds answers, per project, whether the foreman will handle a
-// task parked at needs_foreman (§10): the queue holds only what a rule
-// or the foreman gave the user, so a task the foreman holds stays out of
+// task or plan parked at needs_foreman (§10): the queue holds only what a rule
+// or the foreman gave the user, so an entry the foreman holds stays out of
 // it. It reads and never writes — the limit's expiry is read, not
 // cleared — and caches the project-wide facts for one listing.
 type foremanHolds struct {
@@ -18,7 +18,7 @@ type foremanHolds struct {
 }
 
 // foremanFacts are the project-wide reads the rule shares between its
-// tasks.
+// tasks and plans.
 type foremanFacts struct {
 	limited  bool // the foreman hit its limit and the reset has not passed
 	attached bool // a live attach hold keeps a chat on the foreman
@@ -97,7 +97,20 @@ func (h *foremanHolds) task(tx *sql.Tx, project, event int64, now time.Time) (bo
 	return (row == inboxPending || row == inboxDelivered) && f.turnLive, nil
 }
 
-// announceUnattendedTx names the tasks the user must now look at because
+// plan reports whether the foreman holds the latest review verdict of a parked plan.
+func (h *foremanHolds) plan(tx *sql.Tx, project, plan int64, now time.Time) (bool, error) {
+	var event int64
+	err := tx.QueryRow(`SELECT id FROM events WHERE kind = ? AND json_extract(payload, '$.plan') = ? ORDER BY id DESC LIMIT 1`, evPlanReviewed, plan).Scan(&event)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the review event of plan %d: %w", plan, err)
+	}
+	return h.task(tx, project, event, now)
+}
+
+// announceUnattendedTx names the tasks and plans the user must now look at because
 // the foreman will not (§10): for each task of the project parked at
 // needs_foreman with no land-environment cause, whose parking event has
 // an inbox row, that the foreman does not hold and that no task_unattended
@@ -105,6 +118,8 @@ func (h *foremanHolds) task(tx *sql.Tx, project, event int64, now time.Time) (bo
 // a plain log record like plan_verdict_unanswered — in no inbox, waking no
 // turn — and the notification the park no longer raises rides on it. A
 // park with no inbox row (a plan rule's hold) raises nothing, as before.
+// A parked plan with a review inbox row follows the same rule, with one
+// plan_unattended carrying the plan and its needs-you reason per park.
 func (e *Engine) announceUnattendedTx(tx *sql.Tx, project int64, now time.Time) error {
 	kinds := "'" + strings.Join(needsYouEventKinds, "', '") + "'"
 	rows, err := tx.Query(fmt.Sprintf(`SELECT t.id, e.id, e.kind, e.payload
@@ -151,6 +166,45 @@ func (e *Engine) announceUnattendedTx(tx *sql.Tx, project int64, now time.Time) 
 		}
 		if _, err := appendEventTx(tx, evTaskUnattended, project, p.task, 0,
 			eventPayload{Status: taskNeedsForeman, Reason: needsYouReason(p.kind, p.payload), ParkKind: p.kind}, now); err != nil {
+			return err
+		}
+	}
+	planRows, err := tx.Query(`SELECT p.id FROM plans p
+		JOIN events e ON e.id = (SELECT e2.id FROM events e2 WHERE e2.kind = ? AND json_extract(e2.payload, '$.plan') = p.id ORDER BY e2.id DESC LIMIT 1)
+		JOIN foreman_inbox i ON i.event_id = e.id
+		WHERE p.project_id = ? AND p.state = ?
+		AND NOT EXISTS (SELECT 1 FROM events u WHERE u.kind = ? AND json_extract(u.payload, '$.plan') = p.id AND u.id > e.id)
+		ORDER BY p.id`, evPlanReviewed, project, planNeedsForeman, evPlanUnattended)
+	if err != nil {
+		return fmt.Errorf("list unannounced parked plans of project %d: %w", project, err)
+	}
+	var plans []int64
+	for planRows.Next() {
+		var id int64
+		if err := planRows.Scan(&id); err != nil {
+			planRows.Close()
+			return err
+		}
+		plans = append(plans, id)
+	}
+	if err := planRows.Err(); err != nil {
+		planRows.Close()
+		return err
+	}
+	planRows.Close()
+	for _, plan := range plans {
+		held, err := holds.plan(tx, project, plan, now)
+		if err != nil {
+			return err
+		}
+		if held {
+			continue
+		}
+		reason, err := parkedPlanNeedsYouReasonTx(tx, plan)
+		if err != nil {
+			return err
+		}
+		if _, err := appendEventTx(tx, evPlanUnattended, project, 0, 0, eventPayload{Plan: plan, Reason: reason}, now); err != nil {
 			return err
 		}
 	}

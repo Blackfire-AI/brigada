@@ -16,7 +16,9 @@ import (
 // cost weight, running jobs against its effective cap — its own cap folded
 // with the global layer — and the layer that binds it, then its quota —
 // ready, cooling until a local time, or broken. LAYERS: each cap layer's
-// name and key, its cap, use and queue depth. style supplies the colour;
+// name and key, its cap, use and queue depth. A third table, PINS, lists the
+// queued jobs pinned to an agent — job, task, kind, agent, whether the pin
+// can place and the cap hold if any — and is left out when none is. style supplies the colour;
 // with a plain style the text is the same and has no escapes. The last
 // column of each table is cut to fit width.
 func CapacityTables(snap engine.CapacitySnapshot, now time.Time, style term.Style, width int) string {
@@ -33,6 +35,32 @@ func CapacityTables(snap engine.CapacitySnapshot, now time.Time, style term.Styl
 		})
 	}
 	lines = append(lines, alignCapacity(rows, width)...)
+	if len(snap.Pins) > 0 {
+		lines = append(lines, "", style.Bold("PINS"))
+		rows := [][]capCell{capHeader(style, "JOB", "TASK", "KIND", "AGENT", "STATE", "HELD")}
+		for _, p := range snap.Pins {
+			task := "-"
+			if p.TaskID != 0 {
+				task = strconv.FormatInt(p.TaskID, 10)
+			}
+			held := "-"
+			if p.HeldLayer != "" {
+				held = p.HeldLayer
+				if p.HeldKey != "" {
+					held += " " + p.HeldKey
+				}
+			}
+			rows = append(rows, []capCell{
+				plainCell(strconv.FormatInt(p.JobID, 10)),
+				plainCell(task),
+				plainCell(p.Kind),
+				plainCell(strconv.FormatInt(p.AgentID, 10) + " " + p.Harness + "/" + p.Model),
+				pinStateCell(p, now, style),
+				plainCell(held),
+			})
+		}
+		lines = append(lines, alignCapacity(rows, width)...)
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -89,6 +117,18 @@ func quotaCell(a engine.CapacityAgent, now time.Time, style term.Style) capCell 
 		return capCell{text: "cooling until " + LocalClock(a.CoolingUntil, now), style: style.Warn}
 	}
 	return plainCell("ready")
+}
+
+// pinStateCell is a pin's state: ready, cooling until the local time the
+// cooling lapses, broken, or capped_at_0.
+func pinStateCell(p engine.CapacityPin, now time.Time, style term.Style) capCell {
+	switch p.State {
+	case engine.PinBroken, engine.PinCappedAtZero:
+		return capCell{text: p.State, style: style.Bad}
+	case engine.PinCooling:
+		return capCell{text: "cooling until " + LocalClock(p.CoolingUntil, now), style: style.Warn}
+	}
+	return plainCell(p.State)
 }
 
 // LocalClock is a stored UTC stamp as a clock time in now's zone (the

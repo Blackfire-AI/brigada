@@ -168,6 +168,7 @@ func TestSymbols(t *testing.T) {
 		{"Filled", Style.Filled, "■", "#"},
 		{"Empty", Style.Empty, "□", "."},
 		{"Dash", Style.Dash, "─", "-"},
+		{"Times", Style.Times, "×", "x"},
 		{"Cross", Style.Cross, "✗", "x"},
 		{"Dot", Style.Dot, "·", "|"},
 		{"AtMost", Style.AtMost, "≤", "<="},

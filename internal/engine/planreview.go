@@ -700,7 +700,11 @@ func (e *Engine) retryPlanReviewInfraTx(tx *sql.Tx, job *jobRow, plan int64, c C
 	if err != nil {
 		return false, err
 	}
-	if streak == 0 || infraStreakSpent(began, now) {
+	spent, err := infraStreakSpentTx(tx, job.ProjectID, began, now)
+	if err != nil {
+		return false, err
+	}
+	if streak == 0 || spent {
 		return true, e.planReviewHeldTx(tx, job.ProjectID, plan, infraOutageText(c.Error), now)
 	}
 	// The completing job freed the key earlier in this transaction, so

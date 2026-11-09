@@ -54,6 +54,9 @@ func StatusSections(st Status) string {
 		}
 		lines = append(lines, fmt.Sprintf("held: %s %s: %s", what, h.Kind, HeldWait(h)))
 	}
+	for _, p := range st.Pauses {
+		lines = append(lines, PauseLine(p))
+	}
 	for _, r := range st.Retries {
 		lines = append(lines, "waiting: "+RetryLine(r, time.Now()))
 	}
@@ -256,6 +259,49 @@ func HeldWait(h engine.HeldJob) string {
 		wait = "waiting: agent cooling"
 	}
 	return wait
+}
+
+// PauseScope names a pause's scope (§8.3): "engine", or the project —
+// its repo URL, else its id.
+func PauseScope(p engine.LivePause) string {
+	switch {
+	case p.ProjectID == 0:
+		return "engine"
+	case p.RepoURL != "":
+		return "project " + p.RepoURL
+	default:
+		return fmt.Sprintf("project #%d", p.ProjectID)
+	}
+}
+
+// PauseLine words one standing pause (§8.3 "What shows it") for the
+// status, top's pause band and the foreman's tools:
+// "paused: engine since 2026-11-09T10:00:00Z (drain); draining: task #3
+// work (running), job #9 foreman (leased); 2 queued". The origin shows
+// only for a drain; a drained scope says "drained"; the queued jobs the
+// pause holds are counted here and never as `held:` waits.
+func PauseLine(p engine.LivePause) string {
+	line := fmt.Sprintf("paused: %s since %s", PauseScope(p), p.StartedAt)
+	if p.Origin == engine.PauseOriginDrain {
+		line += " (drain)"
+	}
+	if len(p.Draining) == 0 {
+		line += "; drained"
+	} else {
+		jobs := make([]string, 0, len(p.Draining))
+		for _, j := range p.Draining {
+			what := fmt.Sprintf("job #%d", j.ID)
+			if j.TaskID != 0 {
+				what = fmt.Sprintf("task #%d", j.TaskID)
+			}
+			jobs = append(jobs, fmt.Sprintf("%s %s (%s)", what, j.Kind, j.Status))
+		}
+		line += "; draining: " + strings.Join(jobs, ", ")
+	}
+	if p.Queued > 0 {
+		line += fmt.Sprintf("; %d queued", p.Queued)
+	}
+	return line
 }
 
 // RetryLine words one job waiting on an infra retry (§5.1) for the

@@ -77,8 +77,10 @@ The terms used by [product.md](product.md) and [design.md](design.md). Where a d
 - **Stall:** a worker alive but with no activity for `stall_minutes` (default 10). The runner kills it and completes the job as `stalled` (§5.6).
 - **Cap:** a hard bound on rounds, attempts, time or parallel jobs: per-task round caps, the class time cap, `tool_call_cap_minutes`, the concurrency caps.
 - **Concurrency cap:** a limit on parallel jobs at one layer: runner, account, model, plan or global. A job starts only if every layer has room; a task blocked only by full caps is queued and does not park; a pending foreman turn outranks queued task jobs (§8.1).
-- **Capacity:** what the foreman sees through the `capacity` tool: per agent, the effective cap, running jobs, quota state and cost weight; per layer, cap, use and queue depth (§12.2).
+- **Capacity:** what the foreman sees through the `capacity` tool: per agent, the effective cap, running jobs, quota state and cost weight; per layer, cap, use and queue depth; per queued job pinned to an agent, whether the pin can place; and each dispatch pause that stands, with its draining jobs and the queued jobs it holds (§12.2).
 - **Cost weight:** a relative cost per agent that the user sets (default 1), so the foreman can let tasks wait for a cheaper agent (§8.1).
+- **Pause:** a stored stop of dispatch for the engine or one project, set by the user with `brigada pause` or by a drain: the lease hands out none of the scope's jobs, running jobs finish, and queued jobs wait for `brigada resume`. `brigada status`, `brigada top` and the foreman's `status` and `capacity` tools show it; the foreman cannot lift it (§8.3).
+- **Drain:** the wait until a paused scope has no leased or running job; `brigada stop --engine --drain` pauses the engine with origin `drain`, waits for it, then stops (§8.3).
 - **Foreman headroom:** a slot kept free on the foreman's account so task workers don't leave the foreman limited mid-plan (§8.2).
 - **Budget:** a spending bound the user can raise: per project, foreman wake-ups per day (§4.3).
 

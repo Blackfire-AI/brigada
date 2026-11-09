@@ -101,4 +101,126 @@ func TestServeCallCapacity(t *testing.T) {
 	if !strings.HasPrefix(lines[0], "agent 1 ") || !strings.HasPrefix(lines[3], "runner ") {
 		t.Errorf("capacity lines start %q, %q, want agents first then layers", lines[0], lines[3])
 	}
+	if strings.Contains(text, "pin job") {
+		t.Errorf("capacity text = %q, want no pin line without a pinned job", text)
+	}
+}
+
+// TestServeCallStatusAndCapacityCarryThePause: the foreman's status and
+// capacity tools both show the pauses that stand (§8.3 "What shows it") —
+// the engine's drain and the foreman's own project's — as `paused:`
+// lines, and the status shows no `held:` wait and no needs-you entry for
+// them; neither tool offers a way to pause or resume.
+func TestServeCallStatusAndCapacityCarryThePause(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	started := time.Now().UTC().Add(-time.Hour).Format(engine.TimeLayout)
+	err := e.st.Update(t.Context(), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO pauses (project_id, origin, started_at) VALUES (NULL, 'drain', ?)`, started); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO pauses (project_id, origin, started_at) VALUES (1, 'user', ?)`, started)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed the pauses: %v", err)
+	}
+	s := start(t, e)
+	for i, name := range []string{"status", "capacity"} {
+		text, isError := toolText(t, s.call(i+1, "tools/call", map[string]any{"name": name, "arguments": map[string]any{}}))
+		if isError {
+			t.Fatalf("%s errored: %s", name, text)
+		}
+		for _, want := range []string{
+			"paused: engine since " + started + " (drain); drained",
+			"since " + started + "; drained",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s text = %q, want the line %q", name, text, want)
+			}
+		}
+		if strings.Contains(text, "held:") {
+			t.Errorf("%s text = %q, want no held wait", name, text)
+		}
+	}
+	for _, name := range ToolNames() {
+		if name == "pause" || name == "resume" {
+			t.Errorf("the foreman set offers %q", name)
+		}
+	}
+}
+
+// TestServeCallCapacityPins covers the pin lines (issue #195): a held pin
+// on a ready agent and a pin on a broken one, one line each after the
+// layers; the test above covers a snapshot without pins.
+func TestServeCallCapacityPins(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	err := e.st.Update(t.Context(), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO plans (project_id, title, state, created_at, updated_at)
+			VALUES (1, 'a plan', 'active', ?, ?)`, seedTS, seedTS); err != nil {
+			return err
+		}
+		res, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, class, state, base_ref, caps, created_at, updated_at)
+			VALUES (1, 'a task', 'the spec', 'implement', 'ready', 'main', '{}', ?, ?)`, seedTS, seedTS)
+		if err != nil {
+			return err
+		}
+		task, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		res, err = tx.Exec(`INSERT INTO runners (name, created_at, last_seen_at) VALUES ('runner-1', ?, ?)`, seedTS, seedTS)
+		if err != nil {
+			return err
+		}
+		runner, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		var agents []int64
+		for _, health := range []string{"ready", "broken"} {
+			res, err := tx.Exec(`INSERT INTO agents (runner_id, adapter, harness, model, family, account, classes, health, created_at, updated_at)
+				VALUES (?, 'claude', 'claude', 'sonnet', 'claude', 'work', '[]', ?, ?, ?)`, runner, health, seedTS, seedTS)
+			if err != nil {
+				return err
+			}
+			id, err := res.LastInsertId()
+			if err != nil {
+				return err
+			}
+			agents = append(agents, id)
+		}
+		if _, err := tx.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, require_agent, cap_held_at, cap_held_layer, cap_held_key, created_at, updated_at)
+			VALUES (1, ?, 'work', 'task:1-held', 'fresh', 'prompt', 'queued', ?, ?, 'model', 'sonnet', ?, ?)`,
+			task, agents[0], seedTS, seedTS, seedTS); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`INSERT INTO jobs (project_id, kind, key, mode, prompt, status, require_agent, created_at, updated_at)
+			VALUES (1, 'foreman', 'foreman:1-pin', 'session', 'prompt', 'queued', ?, ?, ?)`,
+			agents[1], seedTS, seedTS)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed the engine: %v", err)
+	}
+	s := start(t, e)
+	text, isError := toolText(t, s.call(1, "tools/call", map[string]any{"name": "capacity", "arguments": map[string]any{}}))
+	if isError {
+		t.Fatalf("capacity errored: %s", text)
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("capacity text = %q, want pin lines", text)
+	}
+	got := lines[len(lines)-2:]
+	want := []string{
+		" task 1 work -> agent 1 claude/sonnet state=ready held=model sonnet",
+		" foreman -> agent 2 claude/sonnet state=broken",
+	}
+	for i := range want {
+		// The job ids depend on the seeded rows; the rest is exact.
+		if !strings.HasPrefix(got[i], "pin job ") || !strings.HasSuffix(got[i], want[i]) ||
+			strings.Count(got[i], " ") != strings.Count("pin job N"+want[i], " ") {
+			t.Errorf("pin line %d = %q, want %q", i, got[i], want[i])
+		}
+	}
 }

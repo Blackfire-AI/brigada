@@ -80,6 +80,40 @@ func (c *Client) PushApprove(ctx context.Context, repoURL string) (engine.PushAp
 	return out, nil
 }
 
+// Pause pauses dispatch for one scope (§8.3): the whole engine with an
+// empty repoURL, one project with it. origin is engine.PauseOriginUser
+// for the caller's own pause or engine.PauseOriginDrain for
+// `stop --engine --drain`; the engine settles the origin an already
+// paused scope keeps.
+func (c *Client) Pause(ctx context.Context, repoURL, origin string) (engine.PauseResult, error) {
+	var res engine.PauseResult
+	if err := c.call(ctx, http.MethodPost, "/v1/pause", pauseRequest{RepoURL: repoURL, Origin: origin}, &res); err != nil {
+		return engine.PauseResult{}, err
+	}
+	return res, nil
+}
+
+// Resume lifts the pause of one scope and no other (§8.3): the engine's
+// with an empty repoURL, one project's with it.
+func (c *Client) Resume(ctx context.Context, repoURL string) (engine.ResumeResult, error) {
+	var res engine.ResumeResult
+	if err := c.call(ctx, http.MethodPost, "/v1/resume", resumeRequest{RepoURL: repoURL}, &res); err != nil {
+		return engine.ResumeResult{}, err
+	}
+	return res, nil
+}
+
+// ResumeDrain is the lift `brigada start` makes (§8.3): the engine's
+// pause only when a drain set it — a resume, with the resume evaluation
+// of the held wakes — and a user's pause alone stands.
+func (c *Client) ResumeDrain(ctx context.Context) (engine.ResumeResult, error) {
+	var res engine.ResumeResult
+	if err := c.call(ctx, http.MethodPost, "/v1/resume", resumeRequest{DrainOnly: true}, &res); err != nil {
+		return engine.ResumeResult{}, err
+	}
+	return res, nil
+}
+
 // Job reads one job (§12.1): its status, and the ids of its transcript
 // and check log artifacts. A job that is not there is a *StatusError
 // with 404.
@@ -117,14 +151,18 @@ type Status struct {
 	HiddenFinishedPlans int                   `json:"hidden_finished_plans,omitempty"`
 	Report              *engine.StatusReport  `json:"report,omitempty"`
 	NeedsYou            []engine.NeedsYouItem `json:"needs_you"`
-	// ForemanHolds lists the tasks the foreman handles (§10): out of
+	// ForemanHolds lists the tasks and plans the foreman handles (§10): out of
 	// needs_you for a caller that is not the foreman, kept apart so the
 	// plan tree still shows the worker's question beside the task.
 	ForemanHolds []engine.NeedsYouItem `json:"foreman_holds,omitempty"`
 	// Cooling lists the agents held back for quota (§8, §10).
 	Cooling []engine.CoolingAgent `json:"cooling,omitempty"`
-	// Held lists the queued jobs a full cap layer holds (§8.1).
+	// Held lists the queued jobs a full cap layer holds (§8.1); a paused
+	// scope's queued jobs are never among them.
 	Held []engine.HeldJob `json:"held,omitempty"`
+	// Pauses lists the dispatch pauses that stand (§8.3): scope, start,
+	// origin, the jobs still draining and the queued jobs each holds.
+	Pauses []engine.LivePause `json:"pauses,omitempty"`
 	// Retries lists the queued jobs waiting out an infrastructure
 	// backoff (§5.1): rendered as `retry in 5m: <failure>`.
 	Retries []engine.InfraRetry `json:"retries,omitempty"`

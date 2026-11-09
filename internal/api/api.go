@@ -85,6 +85,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/tasks/{id}/land/approve", s.authed([]string{roleClient, roleAdmin}, s.handleTaskLandDecision(true)))
 	mux.HandleFunc("/v1/tasks/{id}/land/reject", s.authed([]string{roleClient, roleAdmin}, s.handleTaskLandDecision(false)))
 	mux.HandleFunc("/v1/push/approve", s.authed([]string{roleClient, roleAdmin}, s.handlePushApprove))
+	// The dispatch group (§8.3, §12.1): pause and resume, scoped to the
+	// engine or to one project by its repo URL. Client and admin only,
+	// as plan approval is: a foreman credential cannot call them.
+	mux.HandleFunc("/v1/pause", s.authed([]string{roleClient, roleAdmin}, s.handlePause))
+	mux.HandleFunc("/v1/resume", s.authed([]string{roleClient, roleAdmin}, s.handleResume))
 	// Foreman mutations: a headless turn's lease token or an attached
 	// chat's hold token, scoped to its project, needs nothing more.
 	mux.HandleFunc("/v1/tasks/{id}/answer", s.authed([]string{roleForeman, roleClient, roleAdmin}, s.idempotent(s.handleTaskAnswer)))
