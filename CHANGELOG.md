@@ -5,6 +5,10 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The claude adapter sorts the CLI's "You've hit your 5-hour limit" and weekly wordings as limits, so the account cools and the foreman parks until the reset the message names; the reset parser already read the wording's `resets <time> (<zone>)` suffix, which the old classification never reached.
+
 ## [1.2.0] - 2026-11-09
 
 Pauses dispatch per engine or project, with a draining stop; prints `brigada history` as a table; lists pinned queued jobs in `brigada capacity`; and keeps an automatic retry from pinning a task to an agent capped at 0. One store migration (0072, the pause table) and no new setting: once a 1.2.0 engine has opened the store, an older binary refuses it. Restart the engine and runner after you upgrade.

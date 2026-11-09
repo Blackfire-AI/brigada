@@ -795,6 +795,10 @@ func TestSessionLimit(t *testing.T) {
 	}{
 		{"live message", live, "2026-10-15T18:40:00+03:00"},
 		{"live message as error result", `{"type":"result","is_error":true,"result":"` + live + `"}`, "2026-10-15T18:40:00+03:00"},
+		// The CLI's 2026-11 wording, seen live on 2026-11-09: the window
+		// named by its span, not by "session".
+		{"five-hour message", "You've hit your 5-hour limit · resets 12:30am (Europe/Moscow)", "2026-10-16T00:30:00+03:00"},
+		{"weekly message names a day, not a clock", "You've hit your weekly limit · resets Monday 12:00am (Europe/Moscow)", ""},
 		{"time already past rolls to tomorrow", "You've hit your session limit · resets 9:00am (Europe/Moscow)", "2026-10-16T09:00:00+03:00"},
 		{"no time suffix", "You've hit your session limit", ""},
 		{"unknown zone", "You've hit your session limit · resets 6:40pm (Mars/Olympus)", ""},
