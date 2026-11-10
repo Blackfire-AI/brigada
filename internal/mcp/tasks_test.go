@@ -330,8 +330,16 @@ func TestServeCallTaskRetireRefused(t *testing.T) {
 // call, not a replay.
 func TestServeCallTaskCancelReason(t *testing.T) {
 	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
-	task := seedTask(t, e, "pending", "doomed")
 	s := start(t, e)
+	created := s.call(20, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{
+		"title": "one step",
+		"tasks": []any{map[string]any{"name": "doomed", "spec": "one"}},
+	}})
+	if text, isError := toolText(t, created); isError {
+		t.Fatalf("plan_create errored: %s", text)
+	}
+	task := countOf(t, e, "SELECT id FROM tasks WHERE name = 'doomed'")
+	wantState := strOf(t, e, "SELECT state FROM tasks WHERE id = ?", task)
 
 	for i, args := range []map[string]any{
 		{"task": task},
@@ -343,8 +351,8 @@ func TestServeCallTaskCancelReason(t *testing.T) {
 			t.Errorf("task_cancel %v = %q (error %v), want the reason-is-required error", args, text, isError)
 		}
 	}
-	if state := strOf(t, e, "SELECT state FROM tasks WHERE id = ?", task); state != "pending" {
-		t.Fatalf("task state after the refusals = %q, want pending: nothing was written", state)
+	if state := strOf(t, e, "SELECT state FROM tasks WHERE id = ?", task); state != wantState {
+		t.Fatalf("task state after the refusals = %q, want %q: nothing was written", state, wantState)
 	}
 	if n := countOf(t, e, "SELECT COUNT(*) FROM events WHERE kind = 'task_cancelled_by_amend'"); n != 0 {
 		t.Errorf("task_cancelled_by_amend events after the refusals = %d, want 0", n)

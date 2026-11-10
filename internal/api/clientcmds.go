@@ -485,8 +485,8 @@ type PlanHeldTask struct {
 // idempotency key, minted per logical call by the bridge.
 func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey string) (PlanAmendResult, error) {
 	var body planAmendRequest
-	for _, c := range a.Cancel {
-		body.Cancel = append(body.Cancel, planCancelBody{Task: c.Task, Reason: c.Reason})
+	for _, cn := range a.Cancel {
+		body.Cancel = append(body.Cancel, planCancelBody{Task: cn.Task, Reason: cn.Reason})
 	}
 	for _, t := range a.Add {
 		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills})
