@@ -31,7 +31,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 626
@@ -43,7 +43,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["docs-change"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 629
