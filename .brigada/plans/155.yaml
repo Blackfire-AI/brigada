@@ -5,9 +5,9 @@
 plan: 155
 title: "Restart after a failed push phase lands the new head (#205)"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-10T14:48:45.807189Z
-updated: 2026-11-10T14:52:55.626219Z
+updated: 2026-11-10T14:54:20.742863Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -39,8 +39,23 @@ tasks:
     name: "requeue-stale-base"
     title: "fix(engine): land re-queues from land_ready hold and not-ready take the stale-base check"
     class: "implement"
-    deps: []
-    base: ""
+    deps: ["restart-runner-docs"]
+    base: "restart-runner-docs"
+    continue: "restart-runner-docs"
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    skills: ["bugfix"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 574
+    name: "restart-runner-docs"
+    title: "fix(runner): the next land job deletes a waiting ref a restart made stale; docs for #205"
+    class: "implement"
+    deps: ["restart-waiting"]
+    base: "restart-waiting"
+    continue: "restart-waiting"
     tier: heavy
     effort: medium
     review_tier: heavy
