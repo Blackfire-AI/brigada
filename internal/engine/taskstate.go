@@ -457,7 +457,9 @@ func infraOutageText(text string) string {
 }
 
 // retryInfraFailureTx answers an infrastructure failure of the job's
-// own plumbing (§5.1): a work or fix job is queued again on the same
+// own plumbing (§5.1): a work or fix job (a review job's failure is
+// answered by retryReviewInfraTx, a plan review's by
+// retryPlanReviewInfraTx) is queued again on the same
 // key — the same question, the same placement, held out of leasing for
 // the infra backoff's not-before — until the streak fills the retry
 // window. The network or the remote failed, not the work: the task
@@ -515,6 +517,53 @@ func (e *Engine) retryInfraFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 	_, err = appendEventTx(tx, evTaskInfraRetry, job.ProjectID, job.TaskID, sr.JobID,
 		eventPayload{Run: int64(sr.Run), Reason: boundNote(c.Error)}, now)
 	return err == nil, err
+}
+
+// retryReviewInfraTx answers a review job that failed on the job's own
+// plumbing (§5.1) as a work job's infra failure is answered: the same
+// question is requeued on the review's key — the same prompt, the same
+// exclusions, held out of leasing for the infra backoff's not-before —
+// until the streak fills the retry window. The task stays in review and
+// no review retry, round, restart or foreman wake is spent. A spent
+// window parks the task at needs_foreman with the outage as the reason.
+func (e *Engine) retryReviewInfraTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
+	streak, began, err := infraStreakTx(tx, job.Key)
+	if err != nil {
+		return err
+	}
+	spent, err := infraStreakSpentTx(tx, job.ProjectID, began, now)
+	if err != nil {
+		return err
+	}
+	if streak == 0 || spent {
+		return e.needsForemanTx(tx, job, evReviewNoVerdict,
+			eventPayload{Reason: boundNote(infraOutageText(c.Error))}, now)
+	}
+	reviewPrompt, reviewMeta, err := retryPromptTx(tx, job)
+	if err != nil {
+		return err
+	}
+	sr, err := e.submitTx(tx, SubmitParams{
+		Key:           job.Key,
+		ProjectID:     job.ProjectID,
+		TaskID:        job.TaskID,
+		Kind:          KindReview,
+		Mode:          ModeFresh,
+		Prompt:        reviewPrompt,
+		PromptMeta:    reviewMeta,
+		ExcludeFamily: job.ExcludeFamily,
+		ExcludeAgent:  job.ExcludeAgent,
+		NotBefore:     now.Add(infraDelayFor(streak)),
+	}, now)
+	if err != nil {
+		return err
+	}
+	if sr.Answer != AnsCreated {
+		return fmt.Errorf("queue the infra retry of the review of task %d: submit %s answered %s", job.TaskID, job.Key, sr.Answer)
+	}
+	_, err = appendEventTx(tx, evTaskInfraRetry, job.ProjectID, job.TaskID, sr.JobID,
+		eventPayload{Run: int64(sr.Run), Reason: boundNote(c.Error)}, now)
+	return err
 }
 
 // transientCLIError reports whether a completion's error kind is a
@@ -1130,6 +1179,10 @@ func (e *Engine) reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now ti
 			return err
 		}
 		return e.queueFixRoundTx(tx, job, roundReview, v.Findings, v.Findings, nil, now)
+	case c.Error != "" && c.ErrorKind == ErrorKindInfra:
+		// The job's own plumbing failed, not the reviewer: the infra
+		// backoff and window bound the requeue (§5.1).
+		return e.retryReviewInfraTx(tx, job, c, now)
 	case reviewerUnavailable(c), reReviewNotResumed(job, c):
 		return e.requeueReviewTx(tx, job, c, now)
 	default:
@@ -1151,7 +1204,9 @@ func (e *Engine) reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now ti
 // reviewer could not run at all — its account hit a limit, its login
 // failed, its setup broke or its checkout could not be fetched —
 // rather than that it ran and answered badly. Such a review says
-// nothing about the change.
+// nothing about the change. An infra failure is counted here too, but
+// reviewCompletedTx answers it first, on the infra backoff, so it never
+// reaches the plain requeue.
 func reviewerUnavailable(c Completion) bool {
 	if c.Error == "" {
 		return false
@@ -1179,9 +1234,11 @@ func reReviewNotResumed(job *jobRow, c Completion) bool {
 // rules, and the requeued job waits under the cooling hold like any review
 // whose qualifying agents are all cooling.
 //
-// Requeue and unservable: a requeue cannot loop, since each one needs a
-// lease and a failure of its own, and when every qualifying agent is
-// broken or auth-failed the job just waits queued. When no agent at all
+// Requeue and unservable: an infra failure never comes here, for it is
+// bounded by the infra backoff and window (retryReviewInfraTx); the other
+// unavailable kinds wait on the account cooling and the broken-agent
+// rules, and when every qualifying agent is broken or auth-failed the job
+// just waits queued. When no agent at all
 // qualifies — what reviewUnservableTx tests — the review can never run,
 // so the task parks like an unusable one instead of waiting forever.
 func (e *Engine) requeueReviewTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
