@@ -247,7 +247,7 @@ func TestServeCallPlanAmend(t *testing.T) {
 
 	a = s.call(2, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
 		"plan":     1,
-		"cancel":   []any{"a"},
+		"cancel":   []any{map[string]any{"task": "a", "reason": "dropped"}},
 		"retarget": []any{map[string]any{"task": "b", "deps": []any{}}},
 		"add":      []any{map[string]any{"name": "c", "spec": "three", "deps": []any{1}}},
 	}})
@@ -259,9 +259,29 @@ func TestServeCallPlanAmend(t *testing.T) {
 		t.Fatalf("a refused amendment changed the plan: a %s, b %s", state("a"), state("b"))
 	}
 
+	// A cancel without a reason, blank or missing, and a bare name from
+	// before the reason existed are each the tool's own error naming the
+	// task or the shape, and change nothing.
+	for i, cancel := range []any{
+		[]any{map[string]any{"task": "a"}},
+		[]any{map[string]any{"task": "a", "reason": "  "}},
+		[]any{"a"},
+	} {
+		a = s.call(10+i,"tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+			"plan": 1, "cancel": cancel,
+		}})
+		text, isError = toolText(t, a)
+		if !isError || !strings.Contains(text, "reason") || (i < 2 && !strings.Contains(text, "task a needs a reason")) {
+			t.Errorf("cancel %v = %q, error %v, want a refusal naming the missing reason", cancel, text, isError)
+		}
+		if state("a") != "ready" {
+			t.Fatalf("a refused cancel changed task a to %s", state("a"))
+		}
+	}
+
 	a = s.call(3, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
 		"plan":     1,
-		"cancel":   []any{"a"},
+		"cancel":   []any{map[string]any{"task": "a", "reason": "folded into b, verbatim"}},
 		"retarget": []any{map[string]any{"task": "b", "deps": []any{}}},
 		"add":      []any{map[string]any{"name": "c", "spec": "three", "deps": []any{"b"}}},
 	}})
@@ -276,6 +296,10 @@ func TestServeCallPlanAmend(t *testing.T) {
 	}
 	if state("a") != "cancelled" || state("b") != "ready" || state("c") != "pending" {
 		t.Errorf("states a %s, b %s, c %s; want cancelled, ready, pending", state("a"), state("b"), state("c"))
+	}
+	payload := strOf(t, e, "SELECT payload FROM events WHERE kind = 'task_cancelled_by_amend' AND task_id = 1")
+	if !strings.Contains(payload, `"caller":"foreman"`) || !strings.Contains(payload, "folded into b, verbatim") {
+		t.Errorf("task_cancelled_by_amend payload = %s, want the foreman caller and the reason verbatim", payload)
 	}
 
 	a = s.call(4, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{

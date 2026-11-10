@@ -321,6 +321,51 @@ func TestServeCallTaskRetireRefused(t *testing.T) {
 	}
 }
 
+// TestServeCallTaskCancelReason covers task_cancel's required reason
+// (§6.2, §12.2), in parity with task_retire: a missing or blank reason is
+// the tool's error naming the field, before any API call, and nothing
+// changes; a valid call carries the reason onto the cancelled task's
+// entry so its task_cancelled_by_amend event records it verbatim with
+// the foreman as caller; the same task with another reason is another
+// call, not a replay.
+func TestServeCallTaskCancelReason(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	task := seedTask(t, e, "pending", "doomed")
+	s := start(t, e)
+
+	for i, args := range []map[string]any{
+		{"task": task},
+		{"task": task, "reason": ""},
+		{"task": task, "reason": "   "},
+	} {
+		a := s.call(1+i, "tools/call", map[string]any{"name": "task_cancel", "arguments": args})
+		if text, isError := toolText(t, a); !isError || !strings.Contains(text, "reason is required") {
+			t.Errorf("task_cancel %v = %q (error %v), want the reason-is-required error", args, text, isError)
+		}
+	}
+	if state := strOf(t, e, "SELECT state FROM tasks WHERE id = ?", task); state != "pending" {
+		t.Fatalf("task state after the refusals = %q, want pending: nothing was written", state)
+	}
+	if n := countOf(t, e, "SELECT COUNT(*) FROM events WHERE kind = 'task_cancelled_by_amend'"); n != 0 {
+		t.Errorf("task_cancelled_by_amend events after the refusals = %d, want 0", n)
+	}
+
+	a := s.call(4, "tools/call", map[string]any{
+		"name":      "task_cancel",
+		"arguments": map[string]any{"task": task, "reason": "superseded by task 274"},
+	})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("task_cancel errored: %s", text)
+	}
+	if state := strOf(t, e, "SELECT state FROM tasks WHERE id = ?", task); state != "cancelled" {
+		t.Errorf("task state after the cancel = %q, want cancelled", state)
+	}
+	payload := strOf(t, e, "SELECT payload FROM events WHERE kind = 'task_cancelled_by_amend' AND task_id = ?", task)
+	if !strings.Contains(payload, `"caller":"foreman"`) || !strings.Contains(payload, "superseded by task 274") {
+		t.Errorf("task_cancelled_by_amend payload = %q, want the foreman caller and the reason verbatim", payload)
+	}
+}
+
 // seedTask adds a task of the token's project in the named state, with
 // a plan name other tools may name it by, and returns its id.
 func seedTask(t *testing.T, e *env, state, name string) int64 {

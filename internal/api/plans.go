@@ -306,7 +306,14 @@ func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id iden
 	}
 	// Only a user's token can attest that the user approved the skips;
 	// the foreman's own cancellations are never approved.
-	am := engine.PlanAmendment{Cancel: req.Cancel, SkipApproved: id.role != roleForeman}
+	caller := "user"
+	if id.role == roleForeman {
+		caller = "foreman"
+	}
+	am := engine.PlanAmendment{SkipApproved: id.role != roleForeman, Caller: caller}
+	for _, c := range req.Cancel {
+		am.Cancel = append(am.Cancel, engine.PlanCancel{Task: c.Task, Reason: c.Reason})
+	}
 	for _, t := range req.Add {
 		am.Add = append(am.Add, engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills})
 	}
@@ -357,10 +364,36 @@ func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id iden
 // tasks whose whole dependency set is replaced.
 type planAmendRequest struct {
 	Add      []planTaskBody     `json:"add,omitempty"`
-	Cancel   []string           `json:"cancel,omitempty"`
+	Cancel   []planCancelBody   `json:"cancel,omitempty"`
 	Retarget []planRetargetBody `json:"retarget,omitempty"`
 	Retier   []planRetierBody   `json:"retier,omitempty"`
 	Respec   []planRespecBody   `json:"respec,omitempty"`
+}
+
+// planCancelBody is one task a plan_amend cancels (§12.2): the task, by
+// name or id, and the required reason, recorded verbatim on its cancel
+// event. A caller from before the reason existed sent a bare name or id;
+// that shape is answered with an error saying what to send instead.
+type planCancelBody struct {
+	Task   string `json:"task"`
+	Reason string `json:"reason"`
+}
+
+func (c *planCancelBody) UnmarshalJSON(b []byte) error {
+	var bare any
+	if err := json.Unmarshal(b, &bare); err == nil {
+		switch bare.(type) {
+		case string, float64:
+			return fmt.Errorf("cancel entries are objects {task, reason} and a reason is required: got the bare %s", b)
+		}
+	}
+	type plain planCancelBody
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+	*c = planCancelBody(p)
+	return nil
 }
 
 type planRespecBody struct {

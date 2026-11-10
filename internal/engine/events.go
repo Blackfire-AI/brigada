@@ -65,7 +65,8 @@ const (
 	evTaskRestarted           = "task_restarted"             // a foreman or automatic restart queued a fresh work attempt (§3, §5.6)
 	evTaskFailed              = "task_failed"                // the run failed or said nothing usable; the foreman decides (§3)
 	evTaskRetired             = "task_retired"               // a task that will not land was retired (§6.2); Reason carries the caller's words verbatim, Caller who asked — foreman or user
-	evTaskLoop                = "task_loop"                  // the worker repeats itself: the same check failure across fix rounds, or the same tool call in a window; the foreman decides (§5.6)
+	evTaskCancelledByAmend    = "task_cancelled_by_amend"    // plan_amend cancelled a task (§6.2, §12.2): one event per cancelled task, beside the plan_amended summary; Reason carries the caller's words verbatim, Caller who asked — foreman or user
+	evTaskLoop               = "task_loop"                  // the worker repeats itself: the same check failure across fix rounds, or the same tool call in a window; the foreman decides (§5.6)
 	evReviewChanges           = "review_changes"             // the reviewer wants changes; a fix round answers them (§3, §7)
 	evReviewNoVerdict         = "review_no_verdict"          // the review ended without a usable verdict; the retry is spent or impossible (§7)
 	evReviewVerdict           = "review_verdict"             // a standalone review (no task) ended: approve, changes or no verdict, with the findings and the branch (§7)
@@ -149,7 +150,7 @@ type eventPayload struct {
 	Text       string `json:"text,omitempty"`     // a user message's words (§4.2 item 3)
 	Source     string `json:"source,omitempty"`   // the client token label a user message came from (§12.2)
 	// Caller names who asked for a retirement (§6.2): the foreman or
-	// the user, recorded beside the reason on each task_retired event.
+	// the user, recorded beside the reason on each task_retired and task_cancelled_by_amend event.
 	Caller  string `json:"caller,omitempty"`
 	Origin  string `json:"origin,omitempty"` // the origin a dispatch_paused or dispatch_resumed event names: user or drain (§8.3)
 	Harness string `json:"harness,omitempty"`

@@ -185,10 +185,30 @@ func refStrings(refs []taskRef) []string {
 type planAmendArgs struct {
 	Plan     int64             `json:"plan"`
 	Add      []planAddArg      `json:"add"`
-	Cancel   []taskRef         `json:"cancel"`
+	Cancel   []planCancelArg   `json:"cancel"`
 	Retarget []planRetargetArg `json:"retarget"`
 	Retier   []planRetierArg   `json:"retier"`
 	Respec   []planRespecArg   `json:"respec"`
+}
+
+// planCancelArg is one cancel of plan_amend (§12.2): the task, by name or
+// id, and the required reason, recorded verbatim on its cancel event.
+type planCancelArg struct {
+	Task   taskRef `json:"task"`
+	Reason string  `json:"reason"`
+}
+
+func (c *planCancelArg) UnmarshalJSON(b []byte) error {
+	if t := strings.TrimSpace(string(b)); t != "" && t[0] != '{' {
+		return fmt.Errorf("a cancel entry is an object {task, reason} and a reason is required, got %s", b)
+	}
+	type plain planCancelArg
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+	*c = planCancelArg(p)
+	return nil
 }
 
 type planRespecArg struct {
@@ -264,7 +284,13 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 			a.Add[i].Class = "implement"
 		}
 	}
-	am := api.PlanAmend{Cancel: refStrings(a.Cancel)}
+	am := api.PlanAmend{}
+	for _, c := range a.Cancel {
+		if strings.TrimSpace(c.Reason) == "" {
+			return "", fmt.Errorf("cancel: task %s needs a reason: say why it is cancelled", c.Task)
+		}
+		am.Cancel = append(am.Cancel, api.PlanCancel{Task: string(c.Task), Reason: c.Reason})
+	}
 	for _, t := range a.Add {
 		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Continue: string(t.Continue), Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos), Skills: t.Skills})
 	}

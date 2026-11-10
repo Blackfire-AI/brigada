@@ -23,10 +23,14 @@ func callStats(ctx context.Context, c *api.Client, _ json.RawMessage) (string, e
 // callTaskCancel uses the same atomic graph amendment as plan_amend.
 func callTaskCancel(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
 	var a struct {
-		Task int64 `json:"task"`
+		Task   int64  `json:"task"`
+		Reason string `json:"reason"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", fmt.Errorf("arguments: %w", err)
+	}
+	if strings.TrimSpace(a.Reason) == "" {
+		return "", fmt.Errorf("reason is required: say why the task is cancelled")
 	}
 	status, err := c.Status(ctx)
 	if err != nil {
@@ -35,7 +39,7 @@ func callTaskCancel(ctx context.Context, c *api.Client, args json.RawMessage) (s
 	for _, p := range status.Plans {
 		for _, t := range p.Tasks {
 			if t.ID == a.Task {
-				res, err := c.AmendPlan(ctx, p.ID, api.PlanAmend{Cancel: []string{fmt.Sprint(a.Task)}}, idemKey("task_cancel", a))
+				res, err := c.AmendPlan(ctx, p.ID, api.PlanAmend{Cancel: []api.PlanCancel{{Task: fmt.Sprint(a.Task), Reason: a.Reason}}}, idemKey("task_cancel", a))
 				if err != nil {
 					return "", err
 				}

@@ -243,6 +243,40 @@ func TestPlanAmendRespecRoundTrip(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "follow-up task") {
 		t.Errorf("started task err = %v, want the follow-up advice", err)
 	}
+
+	// A cancel needs its reason: a blank one is refused naming the task, a
+	// bare name from before the reason existed is refused with the shape to
+	// send, and neither changes the plan; a reasoned cancel records the
+	// reason verbatim with the foreman as caller.
+	_, err = c.AmendPlan(ctx, plan.PlanID, PlanAmend{Cancel: []PlanCancel{{Task: "ship", Reason: " "}}}, "cancel-blank")
+	if err == nil || !strings.Contains(err.Error(), "task ship needs a reason") {
+		t.Errorf("blank-reason cancel err = %v, want a refusal naming the task", err)
+	}
+	var out planAmendResponse
+	err = c.callKeyed(ctx, http.MethodPost, "/v1/plans/"+strconv.FormatInt(plan.PlanID, 10)+"/amend", "cancel-bare",
+		map[string]any{"cancel": []string{"ship"}}, &out)
+	if err == nil || !strings.Contains(err.Error(), "reason is required") {
+		t.Errorf("bare-name cancel err = %v, want the reason-is-required answer", err)
+	}
+	var cancelled int64
+	if err := st.View(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT COUNT(*) FROM tasks WHERE name = 'ship' AND state = 'cancelled'").Scan(&cancelled)
+	}); err != nil || cancelled != 0 {
+		t.Errorf("refused cancels left %d cancelled tasks (%v)", cancelled, err)
+	}
+	cres, err := c.AmendPlan(ctx, plan.PlanID, PlanAmend{Cancel: []PlanCancel{{Task: "ship", Reason: "folded into build"}}}, "cancel-ok")
+	if err != nil || len(cres.Cancelled) != 1 {
+		t.Fatalf("reasoned cancel = %+v (%v)", cres, err)
+	}
+	var payload string
+	if err := st.View(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT payload FROM events WHERE kind = 'task_cancelled_by_amend'").Scan(&payload)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(payload, `"caller":"foreman"`) || !strings.Contains(payload, "folded into build") {
+		t.Errorf("task_cancelled_by_amend payload = %s, want the foreman caller and the reason verbatim", payload)
+	}
 }
 
 // Exercise the real request and response codecs with authenticated routes.

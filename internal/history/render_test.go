@@ -92,6 +92,19 @@ func TestRenderEffortBump(t *testing.T) {
 	}
 }
 
+// TestRenderCancelByAmend: a plan_amend cancel's per-task event shows its
+// reason as a retire's does.
+func TestRenderCancelByAmend(t *testing.T) {
+	it := Item{Type: TypeEvent, Kind: "task_cancelled_by_amend", Payload: []byte(`{"status":"cancelled","reason":"superseded by task 274","caller":"foreman","plan":3}`)}
+	if got := summary(it); got != "status=cancelled reason=superseded by task 274" {
+		t.Errorf("summary = %q", got)
+	}
+	retired := Item{Type: TypeEvent, Kind: "task_retired", Payload: []byte(`{"status":"retired","reason":"superseded by task 274","caller":"foreman"}`)}
+	if got := summary(retired); got != "status=retired reason=superseded by task 274" {
+		t.Errorf("retire summary = %q", got)
+	}
+}
+
 // TestRenderLanding: the landing events show the record — the target
 // branch, the resulting commit, the push state the gate made, the exact
 // push command of gate_push never, and an after_land failure reported

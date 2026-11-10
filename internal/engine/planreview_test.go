@@ -247,7 +247,7 @@ func TestPlanReviewCancelAnswerProceeds(t *testing.T) {
 	g := e.lease(e.runner2, nil, nil)
 	e.reviewVerdict(g, verdictChanges, theFindings)
 
-	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: []string{"b"}}); err != nil {
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: cancels("b")}); err != nil {
 		t.Fatalf("amend the reviewing plan: %v", err)
 	}
 	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
@@ -335,7 +335,7 @@ func TestPlanReviewAmendmentHoldsAddedTasks(t *testing.T) {
 	// Cancel, re-point and retier never trigger a review.
 	plain := am.Added[0].TaskID
 	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
-		Cancel: []string{fmt.Sprintf("%d", plain)},
+		Cancel: cancels(fmt.Sprintf("%d", plain)),
 		Retier: []PlanRetier{{Task: "solo", Tier: "heavy"}},
 	}); err != nil {
 		t.Fatalf("cancel-and-retier amendment: %v", err)
@@ -557,7 +557,7 @@ func TestPlanReviewAmendDuringLiveRoundWaits(t *testing.T) {
 	am, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
 		Add:    []PlanTask{{Name: "c", Spec: "do c too"}},
 		Respec: []PlanRespec{{Task: "a", Spec: "do a, and only a"}},
-		Cancel: []string{"b"},
+		Cancel: cancels("b"),
 	})
 	if err != nil {
 		t.Fatalf("amend under a live round: %v", err)
@@ -923,7 +923,7 @@ func TestPlanReviewFailedNoOtherReviewerHolds(t *testing.T) {
 	if !strings.Contains(prompt, "no other agent can take the retry") {
 		t.Errorf("the woken turn's prompt lacks the reason:\n%s", prompt)
 	}
-	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: []string{"b"}}); err != nil {
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: cancels("b")}); err != nil {
 		t.Fatalf("cancel-only answer: %v", err)
 	}
 	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {

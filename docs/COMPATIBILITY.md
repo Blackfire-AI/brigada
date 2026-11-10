@@ -61,11 +61,11 @@ Within schema 1, new keys are added as optional keys. A file that worked before 
 **The foreman's MCP tools.** The `brigada mcp` bridge offers these tools to the foreman — the same set for a headless turn and an attached chat — with these arguments:
 
 - `plan_create`: `title` and `tasks` (both required). Each task takes `spec` (required), and may take `title`, `name`, `deps`, `base`, `continue`, `check`, `class`, `tier`, `effort`, `review_tier`, `review_effort`, `caps`, `extra_repos` and `skills`.
-- `plan_amend`: `plan` (required). It may take `add`, `cancel`, `retier`, `respec` and `retarget`. `add` takes the same task fields as `plan_create`; `cancel` is a list of task references (by name or id); `retier` (experimental) is a list of entries naming a `task`, each of which may set `tier`, `effort`, `review_tier`, `review_effort`, `caps` (merged key by key) and `skills`; `respec` (experimental) is a list of entries naming a `task` with a `spec`, a `mode` (`replace` or `append`) and `skills`; `retarget` is a list of entries naming a `task` with its new `deps`, and may set `base` and `continue`.
+- `plan_amend`: `plan` (required). It may take `add`, `cancel`, `retier`, `respec` and `retarget`. `add` takes the same task fields as `plan_create`; `cancel` is a list of entries naming a `task` (by name or id) with a `reason` (required, recorded verbatim on the task's cancel event; a missing or blank reason refuses the whole amendment, naming the task), and an old caller that sends bare names or ids in `cancel` is answered with an error saying an entry is an object `{task, reason}` and a reason is required, nothing applied; `retier` (experimental) is a list of entries naming a `task`, each of which may set `tier`, `effort`, `review_tier`, `review_effort`, `caps` (merged key by key) and `skills`; `respec` (experimental) is a list of entries naming a `task` with a `spec`, a `mode` (`replace` or `append`) and `skills`; `retarget` is a list of entries naming a `task` with its new `deps`, and may set `base` and `continue`.
 - `plan_accept` (experimental): `plan` and `reason` (both required). It accepts a plan the plan review parked at `needs_foreman` as reviewed, and the plan proceeds as a spent round's verdict does.
 - `answer`: `task` and `text` (both required).
 - `task_restart`: `task` (required) and `note`.
-- `task_cancel`: `task` (required).
+- `task_cancel`: `task` (required), `reason` (required).
 - `task_retire` (experimental): `tasks` and `reason` (both required); `tasks` is a list of task references (by name or id).
 - `land_retry` (experimental): `task` (required).
 - `check_log` (experimental): `job` (required), `offset` and `limit`.

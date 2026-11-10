@@ -7,6 +7,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Each task a `plan_amend` cancels now carries a required `reason` (`cancel` entries are `{task, reason}`), and so does `task_cancel`: a missing or blank reason refuses the whole call, and the reason is recorded verbatim with the caller on one `task_cancelled_by_amend` event per cancelled task, shown in `brigada history`. A caller that sends bare names in `cancel` is refused with an error saying so.
 - The AGENTS box of `brigada top` lists agents in the order of their `harness/model` name, so a row no longer moves when an agent starts or finishes a job, and its top border counts the broken and cooling agents (`1 broken · 3 cooling`).
 - The AGENTS box of `brigada top` shows each agent's tier and cost weight as `H×3` (`Hx3` without UTF-8) and uses two columns only when every cell fits whole.
 - `brigada top` shortens an agent name of more than two `/` segments to its harness and model, so `opencode/zai-coding-plan/glm-5.3` reads `opencode/glm-5.3` and the harness stays visible.
