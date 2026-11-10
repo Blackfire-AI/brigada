@@ -29,8 +29,9 @@ func cancels(refs ...string) []PlanCancel {
 
 // TestAmendCancelRecordsReason: each task an amendment newly cancels
 // records one task_cancelled_by_amend event with the plan, the reason
-// verbatim and the caller; a blank reason cancels as before and leaves
-// the reason out; an already cancelled task records nothing.
+// verbatim and the caller; a blank or missing reason cancels as before
+// and is recorded as "no reason given"; an already cancelled task
+// records nothing.
 func TestAmendCancelRecordsReason(t *testing.T) {
 	e := newEnv(t)
 	res := e.createPlan([]PlanTask{
@@ -77,20 +78,23 @@ func TestAmendCancelRecordsReason(t *testing.T) {
 	if got := read(a); len(got) != 1 || got[0].Reason != why || got[0].Caller != "foreman" || got[0].Plan != res.PlanID || got[0].Status != taskCancelled {
 		t.Errorf("a's events = %+v, want one with the reason verbatim, the foreman caller and the plan", got)
 	}
-	if got := read(b); len(got) != 1 || got[0].Reason != "" || got[0].Caller != "foreman" {
-		t.Errorf("b's events = %+v, want one with no reason", got)
+	if got := read(b); len(got) != 1 || got[0].Reason != "no reason given" || got[0].Caller != "foreman" {
+		t.Errorf("b's events = %+v, want one recorded as no reason given", got)
 	}
 	if got := e.taskState(b); got != taskCancelled {
 		t.Errorf("b = %q, want cancelled despite the blank reason", got)
-	}
-	if got := e.str("SELECT payload FROM events WHERE kind = ? AND task_id = ?", evTaskCancelledByAmend, b); strings.Contains(got, `"reason"`) {
-		t.Errorf("b's payload = %s, want the reason left out", got)
 	}
 
 	// An already cancelled task records nothing more.
 	e.amend(res.PlanID, PlanAmendment{Cancel: []PlanCancel{{Task: "a", Reason: "again"}}, Caller: "user"})
 	if got := read(a); len(got) != 1 {
 		t.Errorf("a's events after a repeat cancel = %+v, want still one", got)
+	}
+
+	// A bare name, no reason at all, is recorded the same way.
+	e.amend(res.PlanID, PlanAmendment{Cancel: cancels("keep"), Caller: "user"})
+	if got := read(res.Tasks[2].TaskID); len(got) != 1 || got[0].Reason != "no reason given" || got[0].Caller != "user" {
+		t.Errorf("keep's events = %+v, want one recorded as no reason given by the user", got)
 	}
 }
 

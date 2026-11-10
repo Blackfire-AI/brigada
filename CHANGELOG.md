@@ -5,6 +5,10 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A cancel can say why. Each `plan_amend` cancel entry may be `{task, reason}` beside the bare task name or id, and `task_cancel` takes an optional `reason`, in the foreman's MCP tools and the API alike. Every task an amendment newly cancels records one `task_cancelled_by_amend` event with the plan, the reason verbatim and the caller (foreman or user), and `brigada history` shows the reason. A reason is expected on every cancel; one without is still accepted, as before, and recorded as "no reason given".
+
 ### Fixed
 
 - A task restarted while its landing waited at the push gate, or sat for a hand push under `gate_push = never`, could not land its reworked head, and `brigada push approve` still pushed the old commit. A restart now forgets that landing and the landings stacked on the same waiting ref, the next landing of the target deletes `refs/brigada/land/<target>` before it stacks, and the re-made landings wait at the push gate again (issue #205). Restart the engine and runner after you upgrade.

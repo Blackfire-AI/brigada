@@ -77,11 +77,16 @@ type PlanRespec struct {
 // PlanCancel names one task an amendment cancels (§6.2): Task accepts a
 // plan task's name or decimal id, and Reason, optional, says why. The
 // reason is recorded verbatim on the task's task_cancelled_by_amend
-// event; a blank one leaves the event without a reason.
+// event; a missing or blank one is recorded as noCancelReason.
 type PlanCancel struct {
 	Task   string
 	Reason string
 }
+
+// noCancelReason is the reason a cancel event records when the cancel
+// gave none: a reason is expected on every cancel, and history shows
+// the cancel that lacked one for what it is.
+const noCancelReason = "no reason given"
 
 // PlanAmendment is what the foreman changes in a live plan (§12.2): tasks
 // to add (their Deps name tasks of the plan, old or added), tasks to
@@ -353,7 +358,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	}
 
 	var cancelled []int
-	cancelReason := map[int]string{} // per newly cancelled task, its reason verbatim; "" when blank
+	cancelReason := map[int]string{} // per newly cancelled task, its reason verbatim; noCancelReason when blank
 	for _, c := range am.Cancel {
 		i, err := resolve(c.Task)
 		if err != nil {
@@ -373,8 +378,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		nodes[i].cancelNow = true
 		nodes[i].state = taskCancelled
 		cancelled = append(cancelled, i)
-		if strings.TrimSpace(c.Reason) != "" {
-			cancelReason[i] = c.Reason
+		cancelReason[i] = c.Reason
+		if strings.TrimSpace(c.Reason) == "" {
+			cancelReason[i] = noCancelReason
 		}
 	}
 	var retargeted []int
@@ -670,7 +676,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 
 	// Write. Cancels first: a cancelled task's live jobs stop with it, and
 	// one task_cancelled_by_amend event carries the plan, the reason
-	// verbatim — left out when blank — and who asked.
+	// verbatim — "no reason given" when blank — and who asked.
 	res := AmendPlanResult{PlanID: plan, State: newState}
 	nowStr := fmtTime(now)
 	for _, i := range cancelled {
