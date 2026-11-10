@@ -140,7 +140,7 @@ func TestLandFailureParksUnderAnOpenPlan(t *testing.T) {
 	// The foreman cancels the parked task in its own plan, without the
 	// user: the plan closes, its report naming what landed and the
 	// cancellation.
-	am := e.amend(plan, PlanAmendment{Cancel: []string{"top"}})
+	am := e.amend(plan, PlanAmendment{Cancel: cancels("top")})
 	if len(am.Cancelled) != 1 || am.Cancelled[0] != top {
 		t.Fatalf("amendment = %+v, want top cancelled", am)
 	}

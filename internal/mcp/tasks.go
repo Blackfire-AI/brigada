@@ -35,7 +35,7 @@ func callTaskCancel(ctx context.Context, c *api.Client, args json.RawMessage) (s
 	for _, p := range status.Plans {
 		for _, t := range p.Tasks {
 			if t.ID == a.Task {
-				res, err := c.AmendPlan(ctx, p.ID, api.PlanAmend{Cancel: []string{fmt.Sprint(a.Task)}}, idemKey("task_cancel", a))
+				res, err := c.AmendPlan(ctx, p.ID, api.PlanAmend{Cancel: []api.PlanCancel{{Task: fmt.Sprint(a.Task)}}}, idemKey("task_cancel", a))
 				if err != nil {
 					return "", err
 				}

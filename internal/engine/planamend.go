@@ -74,6 +74,15 @@ type PlanRespec struct {
 	Skills []string
 }
 
+// PlanCancel names one task an amendment cancels (§6.2): Task accepts a
+// plan task's name or decimal id, and Reason, optional, says why. The
+// reason is recorded verbatim on the task's task_cancelled_by_amend
+// event; a blank one leaves the event without a reason.
+type PlanCancel struct {
+	Task   string
+	Reason string
+}
+
 // PlanAmendment is what the foreman changes in a live plan (§12.2): tasks
 // to add (their Deps name tasks of the plan, old or added), tasks to
 // cancel, waiting tasks whose dependencies are re-pointed, waiting or
@@ -81,7 +90,7 @@ type PlanRespec struct {
 // spec is edited.
 type PlanAmendment struct {
 	Add      []PlanTask
-	Cancel   []string
+	Cancel   []PlanCancel
 	Retarget []PlanRetarget
 	Retier   []PlanRetier
 	Respec   []PlanRespec
@@ -90,6 +99,9 @@ type PlanAmendment struct {
 	// own. Without it a cancelled task is an abandoned one, and the
 	// planner's outcome counts it against the plan.
 	SkipApproved bool
+	// Caller names who asked for the amendment, the foreman or the user,
+	// recorded on each task_cancelled_by_amend event it writes.
+	Caller string
 }
 
 // HeldTask is one task the amendment added or respecified that a plan rule held (§6.3):
@@ -131,7 +143,10 @@ var ErrPlanNotLive = errors.New("plan is not live")
 // the waiting state re-evaluates as creation does (a pending task whose
 // dependencies are all done turns ready and queues its work job), the
 // approval limit is evaluated again for the amended plan, and a plan the
-// amendment closed is finished. One plan_amended event names the change.
+// amendment closed is finished. One plan_amended event names the change,
+// and each task the amendment newly cancels records one
+// task_cancelled_by_amend event with its reason, verbatim, and the
+// caller; a task already cancelled records nothing.
 // project scopes the plan to one project; 0 names any.
 func (e *Engine) AmendPlan(ctx context.Context, project, plan int64, am PlanAmendment) (AmendPlanResult, error) {
 	var res AmendPlanResult
@@ -338,8 +353,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	}
 
 	var cancelled []int
-	for _, ref := range am.Cancel {
-		i, err := resolve(ref)
+	cancelReason := map[int]string{} // per newly cancelled task, its reason verbatim; "" when blank
+	for _, c := range am.Cancel {
+		i, err := resolve(c.Task)
 		if err != nil {
 			return AmendPlanResult{}, fmt.Errorf("cancel: %w", err)
 		}
@@ -357,6 +373,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		nodes[i].cancelNow = true
 		nodes[i].state = taskCancelled
 		cancelled = append(cancelled, i)
+		if strings.TrimSpace(c.Reason) != "" {
+			cancelReason[i] = c.Reason
+		}
 	}
 	var retargeted []int
 	// A re-point may also free a stranded done task (§6.2): one whose
@@ -649,7 +668,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		}
 	}
 
-	// Write. Cancels first: a cancelled task's live jobs stop with it.
+	// Write. Cancels first: a cancelled task's live jobs stop with it, and
+	// one task_cancelled_by_amend event carries the plan, the reason
+	// verbatim — left out when blank — and who asked.
 	res := AmendPlanResult{PlanID: plan, State: newState}
 	nowStr := fmtTime(now)
 	for _, i := range cancelled {
@@ -659,6 +680,10 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if _, err := tx.Exec(`UPDATE tasks SET state = ?, skip_approved = ?, updated_at = ? WHERE id = ?`,
 			taskCancelled, nodes[i].skipApproved, nowStr, nodes[i].id); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("cancel task %d: %w", nodes[i].id, err)
+		}
+		if _, err := appendEventTx(tx, evTaskCancelledByAmend, proj, nodes[i].id, 0,
+			eventPayload{Status: taskCancelled, Plan: plan, Reason: cancelReason[i], Caller: am.Caller}, now); err != nil {
+			return AmendPlanResult{}, err
 		}
 		res.Cancelled = append(res.Cancelled, nodes[i].id)
 	}

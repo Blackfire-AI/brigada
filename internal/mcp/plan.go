@@ -264,7 +264,10 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 			a.Add[i].Class = "implement"
 		}
 	}
-	am := api.PlanAmend{Cancel: refStrings(a.Cancel)}
+	am := api.PlanAmend{}
+	for _, ref := range a.Cancel {
+		am.Cancel = append(am.Cancel, api.PlanCancel{Task: string(ref)})
+	}
 	for _, t := range a.Add {
 		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Continue: string(t.Continue), Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos), Skills: t.Skills})
 	}
