@@ -77,6 +77,6 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["docs-change"]
-    state: reviewing
+    state: running
     branch: "brigada/task-605"
-    rounds: 0
+    rounds: 1
