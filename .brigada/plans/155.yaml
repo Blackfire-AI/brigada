@@ -32,7 +32,7 @@ tasks:
     review_tier: heavy
     review_effort: high
     skills: ["bugfix"]
-    state: reviewing
+    state: done
     branch: "brigada/task-572-r1"
     rounds: 1
   - id: 573
@@ -60,6 +60,6 @@ tasks:
     effort: medium
     review_tier: heavy
     skills: ["bugfix"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
