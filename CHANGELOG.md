@@ -5,6 +5,22 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A task restarted while its landing waited at the push gate, or sat for a hand push under `gate_push = never`, could not land its reworked head, and `brigada push approve` still pushed the old commit. A restart now forgets that landing and the landings stacked on the same waiting ref, the next landing of the target deletes `refs/brigada/land/<target>` before it stacks, and the re-made landings wait at the push gate again (issue #205). Restart the engine and runner after you upgrade.
+- A dependent whose landing was waiting on a `land_ready` re-check or a not-ready retry could land on its dependency's old round after the dependency was rebuilt from a new `-r<n>` branch. A queued land job is now checked for a stale base when it is leased: it is cancelled and the task parks at `needs_foreman` with `task_base_stale`, as a landing the land rule refuses does (issue #205).
+- The claude adapter sorts the CLI's "You've hit your 5-hour limit" and weekly wordings as limits, so the account cools and the foreman parks until the reset the message names; the reset parser already read the wording's `resets <time> (<zone>)` suffix, which the old classification never reached.
+- A foreman turn's limit cools the account it shares with task workers, as §4.4 says: the workers stop placing on a wall the foreman already hit, the dispatcher serves another tier's agents until the reset, and the status shows every agent of the account cooling. A limit still never counts toward the failure streak.
+- The AGENTS box of `brigada top` keeps a zero-capped agent off its rows while the shared account cools or the agent is broken: an agent that can never place was listed as a cooling row the moment its account cooled. The top border's `N off` count carries it as before.
+- A landing whose push git rejected because the target moved (`! [rejected] … (fetch first)`) was sorted as the remote failing, so the task parked under the project's grouped environment wake. It now parks on its own, as the landing's own failure.
+- `brigada top` and `brigada capacity` refused a `--project` that names a local-path remote (`file:/…`), and run inside a repository with such an origin they showed every project. They now read a project's identity as the engine does.
+- `brigada top` left its idle connections to the engine open after every refresh until the engine's idle timeout closed them; each refresh now closes its own.
+- A worker tool call cut for the loop watch could end in a split UTF-8 character.
+
+## [1.2.0] - 2026-11-09
+
+Pauses dispatch per engine or project, with a draining stop; prints `brigada history` as a table; lists pinned queued jobs in `brigada capacity`; and keeps an automatic retry from pinning a task to an agent capped at 0. One store migration (0072, the pause table) and no new setting: once a 1.2.0 engine has opened the store, an older binary refuses it. Restart the engine and runner after you upgrade.
+
 ### Changed
 
 - The AGENTS box of `brigada top` lists agents in the order of their `harness/model` name, so a row no longer moves when an agent starts or finishes a job, and its top border counts the broken and cooling agents (`1 broken · 3 cooling`).
@@ -13,20 +29,17 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Bare `brigada history` prints a table, one row per event: time, kind, number, what happened and the title, with a landing's short commit and an `after-land failed: --task N` flag. It shows the last 50 rows, oldest first; the new `--all` prints every row. `--task`, `--job`, `--raw` and `--limit` print what they did (issue #191).
 - The PLANS box of `brigada top` lists finished plans newest first (highest plan id first) below the live plans, which keep id order, so a short terminal drops the oldest finished plans first.
 
-### Fixed
-
-- A task restarted while its landing waited at the push gate, or sat for a hand push under `gate_push = never`, could not land its reworked head, and `brigada push approve` still pushed the old commit. A restart now forgets that landing and the landings stacked on the same waiting ref, the next landing of the target deletes `refs/brigada/land/<target>` before it stacks, and the re-made landings wait at the push gate again (issue #205). Restart the engine and runner after you upgrade.
-
-- A dependent whose landing was waiting on a `land_ready` re-check or a not-ready retry could land on its dependency's old round after the dependency was rebuilt from a new `-r<n>` branch. A queued land job is now checked for a stale base when it is leased: it is cancelled and the task parks at `needs_foreman` with `task_base_stale`, as a landing the land rule refuses does (issue #205).
-
-- Plans parked by review leave the needs-you queue while the foreman handles them and notify when it cannot (issue #197).
-
-- `brigada top` lists live plans before finished ones, and a short terminal spends a free row on a running line (issue #184).
-
 ### Added
 
-- `brigada pause` and `brigada resume` pause and resume dispatch for the engine or, with `--repo`, one project; `brigada stop --engine --drain` pauses the engine, waits for its running jobs and then stops. `brigada status` prints a `paused:` line per pause, `brigada top` shows it in a band of its own beside the `p` pause, and the foreman's `status` and `capacity` tools show it; a queued job of a paused scope is counted under the pause, never as `held:` (issue #198). Restart the engine and runner after you upgrade.
+- `brigada pause` and `brigada resume` pause and resume dispatch for the engine or, with `--repo`, one project; `brigada stop --engine --drain` pauses the engine, waits for its running jobs and then stops. `brigada status` prints a `paused:` line per pause, `brigada top` shows it in a band of its own beside the `p` pause, and the foreman's `status` and `capacity` tools show it; a queued job of a paused scope is counted under the pause, never as `held:` (issue #198).
+- `brigada capacity` prints a PINS table when queued jobs are pinned to an agent, and the foreman's `capacity` tool lists the same pins: each job with its task, kind, agent, whether the pin can place (`ready`, `cooling` until a time, `broken` or `capped_at_0`) and the cap hold, if any. A wait for a slot that will free now reads apart from a pin that can never place (issue #195).
 - In the full-screen `brigada top`, a running job's `▸` is a spinner on a 120 ms redraw of its own, with colour and UTF-8 and while a job runs; `--interval` still sets the fetch, a frame makes no API call, and only the lines that changed are written (issue #176).
+
+### Fixed
+
+- An automatic retry could pin a task to an agent whose model or account cap is 0, and the task then waited forever for a free slot. Placement now skips an agent capped at 0 for the job's kind (ranked picks, retry pins, the `review.family=prefer` steps and the cooling hold), and a pin on such an agent parks at the queue TTL with a reason naming the pin and the layer. A foreman turn still ignores a model capped at 0 (issue #195).
+- Plans parked by review leave the needs-you queue while the foreman handles them and notify when it cannot (issue #197).
+- `brigada top` lists live plans before finished ones, and a short terminal spends a free row on a running line (issue #184).
 
 ## [1.1.1] - 2026-11-05
 

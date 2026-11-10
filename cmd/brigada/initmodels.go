@@ -41,6 +41,7 @@ type initModelSource struct {
 
 // Notes for aliases live here; the CLI documents no descriptions for them.
 var initClaudeAliasNotes = map[string]string{
+	"fable":  "most capable; uses your plan's limits fastest",
 	"sonnet": "balanced; the usual choice",
 	"opus":   "strong; uses your plan's limits faster",
 	"haiku":  "fastest; fine for small tasks",

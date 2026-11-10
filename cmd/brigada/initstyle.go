@@ -126,21 +126,6 @@ func initNoteTags(note string) (string, string) {
 	return note, ""
 }
 
-func initRowNote(w io.Writer, note, tags string) string {
-	out := initPresentation(w)
-	text := ""
-	if note != "" {
-		text = out.style.Dim(note)
-	}
-	if tags != "" {
-		if text != "" {
-			text += "  "
-		}
-		text += out.style.Accent(tags)
-	}
-	return text
-}
-
 // Keep a multiword tag together and preserve the two spaces before it when
 // wrapping the note. Ordinary prose wrapping normalizes spaces between words.
 func printInitRow(w io.Writer, prefix, continuation, note, tag string) {

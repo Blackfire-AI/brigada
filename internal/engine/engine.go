@@ -55,10 +55,6 @@ const (
 	statusStalled   = "stalled"
 )
 
-func isLive(status string) bool {
-	return status == statusQueued || status == statusLeased || status == statusRunning
-}
-
 func isTerminal(status string) bool {
 	switch status {
 	case statusDone, statusFailed, statusCancelled, statusStalled:

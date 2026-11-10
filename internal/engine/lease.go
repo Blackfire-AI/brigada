@@ -153,6 +153,10 @@ type LeaseGrant struct {
 	SessionGen int64
 }
 
+// leaseDeadline bounds one lease poll's transaction, which does not
+// follow its request's cancellation (heartbeatDeadline's twin).
+const leaseDeadline = 30 * time.Second
+
 // Lease hands the caller the oldest queued job it may run, or nil when
 // there is none (§12.3, §8). A job is offered to owner only if the
 // owner offers its harness and all its labels, is not the runner that
@@ -163,10 +167,6 @@ type LeaseGrant struct {
 // foreman turn outranks every queued task job (§8.1): turns come
 // first, oldest first among themselves, and the layers a held turn
 // waits on are closed to task jobs for the rest of the call.
-// leaseDeadline bounds one lease poll's transaction, which does not
-// follow its request's cancellation (heartbeatDeadline's twin).
-const leaseDeadline = 30 * time.Second
-
 func (e *Engine) Lease(ctx context.Context, owner int64, harnesses, labels []string) (*LeaseGrant, error) {
 	var grant *LeaseGrant
 	// A poll that began is finished on a context of its own: a request

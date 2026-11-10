@@ -51,8 +51,8 @@ func (e *env) leaseForemanRaw() *LeaseGrant {
 // leaseForemanRun leases the project's live foreman turn on the shared
 // runner-foreman and its claude/sonnet agent, and, when reset is set,
 // puts the agent back to ready first — the wake tests stage failed turns
-// on purpose, and the streak must not take the helper's agent out from
-// under the next lease.
+// on purpose, and the streak or the account cooling a limit brought on
+// must not take the helper's agent out from under the next lease.
 func (e *env) leaseForemanRun(reset bool) *LeaseGrant {
 	e.t.Helper()
 	var harness, model string
@@ -69,7 +69,7 @@ func (e *env) leaseForemanRun(reset bool) *LeaseGrant {
 		WHERE NOT EXISTS (SELECT 1 FROM agents WHERE runner_id = ? AND adapter = ? AND model = ?)`,
 		runner, harness, harness, model, harness, harness, seedTS, seedTS, runner, harness, model)
 	if reset {
-		e.exec("UPDATE agents SET health = 'ready', health_reason = '' WHERE runner_id = ?", runner)
+		e.exec("UPDATE agents SET health = 'ready', health_reason = '', cooling_until = NULL WHERE runner_id = ?", runner)
 	}
 	g := e.lease(runner, []string{harness}, nil)
 	if g == nil {

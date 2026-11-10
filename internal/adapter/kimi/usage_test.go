@@ -8,8 +8,7 @@ import (
 	"testing"
 )
 
-func usageInt(n int64) *int64       { return &n }
-func usageFloat(n float64) *float64 { return &n }
+func usageInt(n int64) *int64 { return &n }
 func TestUsageFixture(t *testing.T) {
 	f, err := os.Open("testdata/usage.jsonl")
 	if err != nil {

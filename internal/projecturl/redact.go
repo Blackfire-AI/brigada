@@ -1,3 +1,6 @@
+// Package projecturl strips credentials from repository URLs and from text
+// that may quote one. The canonical identity of design §13.1 is
+// engine.Canonicalize.
 package projecturl
 
 import (

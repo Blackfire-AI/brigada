@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/engine"
@@ -58,6 +59,30 @@ func TestLoopWatchArithmetic(t *testing.T) {
 // TestLoopKeyNamesTheCall: the identity is the tool and its normalised
 // arguments — whitespace collapsed, nothing else, for the arguments are
 // what tells two calls of one tool apart.
+// TestCutRuneSafeNeverSplitsARune: a cut inside a multi-byte rune drops
+// the whole rune, lead byte included, so the text stays valid UTF-8.
+func TestCutRuneSafeNeverSplitsARune(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		max  int
+		want string
+	}{
+		{"abc", 5, "abc"},
+		{"abc", 2, "ab"},
+		{"aéb", 2, "a"},
+		{"aéb", 3, "aé"},
+		{"a€", 2, "a"},
+		{"a€", 3, "a"},
+		{"a😀", 4, "a"},
+		{"é", 1, ""},
+	} {
+		got := cutRuneSafe(tc.in, tc.max)
+		if got != tc.want || !utf8.ValidString(got) {
+			t.Errorf("cutRuneSafe(%q, %d) = %q, want %q", tc.in, tc.max, got, tc.want)
+		}
+	}
+}
+
 func TestLoopKeyNamesTheCall(t *testing.T) {
 	read := adapter.Event{Kind: adapter.EvToolStart, Text: "Read", Args: `{"file_path":"a.go"}`}
 	if key, want := loopKey(read), "Read\x00"+`{"file_path":"a.go"}`; key != want {

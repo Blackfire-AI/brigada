@@ -37,8 +37,8 @@ const topAgentCellsMax = 8
 // and off parts, as `1 broken · 3 cooling · all ≤ global 4 · 2 off`. A row
 // yields in the idle class only when every agent in it is idle (no running
 // job, quota neither cooling nor broken), so the height drops idle rows
-// first, uncounted. Off agents (an effective cap of 0, nothing running, quota ready)
-// never list. The rest go in the order of the full harness/model string,
+// first, uncounted. Off agents (an effective cap of 0 and nothing running,
+// whatever their quota) never list. The rest go in the order of the full harness/model string,
 // byte by byte, so a row moves only when an agent is added or removed; state
 // shows through the mark and the colours alone.
 func topAgentLines(model topModel, now time.Time, style term.Style, width int) []topLine {
@@ -277,10 +277,12 @@ func topAgentNote(snap engine.CapacitySnapshot, g *int, off, broken, cooling int
 }
 
 // topAgentOff says an agent is off: an effective cap of 0 (its own, or the
-// global cap's), no running job and a ready quota.
+// global cap's) and no running job, whatever its quota — an agent that can
+// never take a job stays hidden even while its shared account cools or it is
+// broken; the header's off count carries it.
 func topAgentOff(a engine.CapacityAgent, global *int) bool {
 	limit := topAgentLimit(a, global)
-	return limit != nil && *limit == 0 && a.Running == 0 && a.Quota == "ready"
+	return limit != nil && *limit == 0 && a.Running == 0
 }
 
 // topFamily is the colour of an agent's name by its family, from the name as

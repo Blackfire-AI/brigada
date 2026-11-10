@@ -71,7 +71,7 @@ Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi
 
    | CLI | Model source |
    |---|---|
-   | `claude` | The aliases `sonnet`, `opus`, `haiku` (Anthropic), plus any other models Claude Code's own cache lists. |
+   | `claude` | The aliases `claude --help` names (`fable`, `opus` and `sonnet` in current CLIs; `sonnet` and `opus` when it names none) and `haiku` (Anthropic), plus any other models Claude Code's own cache lists. |
    | `codex` | The CLI default first (shown by the top-level `model` of `$CODEX_HOME/config.toml`, or `~/.codex/config.toml` when `CODEX_HOME` is unset; its note names that config path, and it is stored as `default`), then the catalog models from `codex debug models`. If the config cannot be read, the entry says `CLI default`. |
    | `kimi` | The CLI default and configured models from `~/.kimi-code/config.toml`; worker-only. |
    | `opencode` | The `provider/model` list from `opencode models`; its known-family models are foreman candidates, and workers pick individually across providers. |
@@ -598,7 +598,7 @@ Run it inside the repository; `--repo` says which URL the directory stands for w
 
 On a conflict, land stops, names the files and leaves the tree for you to resolve; commit with the printed `git commit -F` and rerun land for the rest. A check that fails leaves the commits in place and prints the `git reset --hard` that undoes them.
 
-One limit: the runner does not record the head commit the reviewer approved, so land cannot compare it with the branch's head. It prints a warning per task saying the head was not checked against what was reviewed. Look at `brigada diff <task-id>` before you push.
+Land refuses a task whose branch head differs from the head its approving review saw. A verdict recorded without a head only warns that the head was not checked against what was reviewed; look at `brigada diff <task-id>` before you push.
 
 ## 6. Configuring a project
 
@@ -623,7 +623,7 @@ The file is flat: `key: value` lines, no nesting, one document, at most 64 KiB. 
 | `default_check` | command | none | The check a task runs when its spec names none; the land job reruns it on the landed result, and the hand-driven `brigada land` on the squashed tree. A task whose check is another command waits for you at the plan gate ([Gates and rules](#gates-and-rules)). |
 | `worker_tools` | `+`-separated Claude Code tool patterns, or `none` | the agent's own scope | The shell scope of opencode workers on this project (claude workers take their scope from the agent, not from this setting) ([section 8](#8-agents-quota-and-health)). |
 | `approval_max_tasks` | integer | `0` | A plan with more tasks than this waits for you. `0`, the default, turns the count rule off, and so does a negative value; the other approval rules still apply. |
-| `approval_budget` | a whole number of tokens, a `$` amount, or both joined with `+` | none | The plan budget, the approval rule on by default: a plan whose recorded spend passes it holds its new jobs mid-run ([Gates and rules](#gates-and-rules)). |
+| `approval_budget` | a whole number of tokens, a `$` amount, or both joined with `+` | none | The plan budget, which stands in the task count's place: a plan whose recorded spend passes it holds its new jobs mid-run ([Gates and rules](#gates-and-rules)). |
 | `approval_classes` | list of class names | `implement`, `review`, `answer` | A task of a class outside the list holds the plan. |
 | `approval_protected_paths` | list of repo-relative globs | none | A task whose spec or check mentions a matching path holds the plan; at the land gate, a task whose recorded changed paths match holds the landing ([section 5](#5-finishing-the-land-job)). |
 | `gate_plan` | `auto` or `ask` | `auto` | `ask` holds every plan at the plan gate, whatever the approval rules say. |
@@ -1487,7 +1487,6 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 - Model-name tier patterns can go stale as vendors rename models; correct them with `tier.<harness>/<model>` in the config file.
 - Every tier bump spends a restart, including a second bump after the bumped attempt fails; earlier retries can exhaust the cap before a task reaches heavy.
-- The runner does not record the commit a reviewer approved, so `brigada land` only warns that the head was not compared ([section 5](#5-finishing-the-land-job)).
 - Read-only extra repositories are a convention, not a sandbox ([section 7](#another-repository-to-read)).
 - A repository whose `.mcp.json` still carries an older init's `brigada` entry must drop it (rerun `brigada init` or run `brigada remove`), or the two `brigada` servers clash in an attached chat ([section 2](#attach)).
 - An attached Codex session does not carry brigada's tools, and Codex has no verified project-scope registration for the coordinator: init in a parent folder prints a user-level command ([section 3](#3-several-repositories)).

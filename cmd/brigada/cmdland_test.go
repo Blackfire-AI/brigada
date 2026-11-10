@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/landing"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
 
@@ -349,8 +350,8 @@ func TestLandMessageBounds(t *testing.T) {
 	tk := &landTask{id: 9, head: "abc", info: engine.TaskInfo{Branch: "b"},
 		land: engine.TaskLandInfo{Title: long, Spec: strings.Repeat("s", 2000) + "\x00\r", Summary: strings.Repeat("ü", 5000) + "\x1b[31m"}}
 	msg, _ := landMessage(tk)
-	if len(msg) > landMessageBytes {
-		t.Errorf("message is %d bytes, over %d", len(msg), landMessageBytes)
+	if len(msg) > landing.MessageBytes {
+		t.Errorf("message is %d bytes, over %d", len(msg), landing.MessageBytes)
 	}
 	if subject := subjectOf(msg); subject != long {
 		t.Errorf("subject %q must be the whole title, not cut", subject)

@@ -193,16 +193,6 @@ func waitFor(t *testing.T, what string, cond func() bool, diagnose ...func()) {
 	}
 }
 
-// dumpEngineLog quotes the state dir's engine log into the test output.
-func dumpEngineLog(t *testing.T, stateDir string) func() {
-	return func() {
-		t.Helper()
-		if data, err := os.ReadFile(filepath.Join(stateDir, "engine.log")); err == nil {
-			t.Logf("engine log:\n%s", data)
-		}
-	}
-}
-
 // waitHealthy waits until an engine answers on the state dir's socket.
 func waitHealthy(t *testing.T, stateDir string) {
 	t.Helper()

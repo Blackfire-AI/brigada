@@ -18,7 +18,6 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/history"
 	"github.com/Blackfire-AI/brigada/internal/logo"
-	"github.com/Blackfire-AI/brigada/internal/projecturl"
 	"github.com/Blackfire-AI/brigada/internal/term"
 	"golang.org/x/sys/unix"
 )
@@ -86,7 +85,7 @@ func runTop(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	repo := ""
 	if project != "" {
-		canonical, err := projecturl.Canonical(project)
+		canonical, err := engine.Canonicalize(project)
 		if err != nil {
 			return usagef(stderr, "--project: %v", err)
 		}
@@ -2004,6 +2003,9 @@ func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Durati
 		if err != nil {
 			return
 		}
+		// A tick dials afresh, so an engine that exited idle is started
+		// again; its connections are closed once the tick has fetched.
+		defer client.CloseIdleConnections()
 		fetched, err := topFetch(ctx, topAPI{client}, repo)
 		model = afterFetch(model, fetched, err, time.Now())
 		// Each tick reads the cached listing; no CLI runs on a tick.

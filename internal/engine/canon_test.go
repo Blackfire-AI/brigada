@@ -496,3 +496,41 @@ func TestLegacyTaskOverrideWithACredentialIsNotGranted(t *testing.T) {
 		}
 	}
 }
+
+// TestCanonicalizeRoundTripsAndRefusesUserInput carries the cases a
+// user-typed identity meets (`top --project`, `capacity --project`): a
+// canonical identity canonicalizes to itself, and what the string alone
+// cannot settle is refused.
+func TestCanonicalizeRoundTripsAndRefusesUserInput(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"git@EXAMPLE.com:Org/Repo.git/", "example.com/Org/Repo"},
+		{"ssh://git@example.com:22/Org/Repo.git", "example.com/Org/Repo"},
+		{"https://secret:password@EXAMPLE.com:443/Org/Repo.git/", "example.com/Org/Repo"},
+		{"ssh://git@example.com:2222/Org/Repo.git", "example.com:2222/Org/Repo"},
+		{"example.com:2222/Org/Repo", "example.com:2222/Org/Repo"},
+		{"example.com/Org/Repo", "example.com/Org/Repo"},
+		{"ssh://git@[::1]:22/Org/Repo.git", "[::1]/Org/Repo"},
+		{"file:///srv/git/repo", "file:/srv/git/repo"},
+	} {
+		got, err := Canonicalize(tc.raw)
+		if err != nil || got != tc.want {
+			t.Errorf("Canonicalize(%q) = %q, %v; want %q", tc.raw, got, err, tc.want)
+			continue
+		}
+		if again, err := Canonicalize(got); err != nil || again != got {
+			t.Errorf("Canonicalize(%q) does not round-trip: %q, %v", got, again, err)
+		}
+	}
+	for _, raw := range []string{
+		"git@alias:Org/Repo", "git@example.com:/absolute/repo", "git@example.com:~/repo",
+		"https://secret:password@example.com:bad/repo", "https://secret:password@example.com/repo?secret=oops",
+		"example.com/Org/../Repo", "https://example.com:65536/repo",
+	} {
+		got, err := Canonicalize(raw)
+		if err == nil || got != "" {
+			t.Errorf("Canonicalize(%q) = %q, want a refusal", raw, got)
+		} else if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "password") {
+			t.Errorf("Canonicalize(%q) error quotes a credential: %v", raw, err)
+		}
+	}
+}

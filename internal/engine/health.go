@@ -81,14 +81,14 @@ func (e *Engine) agentOutcomeTx(tx *sql.Tx, job *jobRow, c Completion, now time.
 	}
 	switch c.ErrorKind {
 	case "limit":
-		// The foreman's own key already handles its limit (§4.4); whether
-		// the dispatcher should also cool the account a foreman's limit
-		// names is left to a later decision (§4.4), so it is skipped here
-		// on purpose. A limit is quota, not health either way: it never
-		// counts toward the failure streak.
-		if job.Kind == KindForeman {
-			return nil
-		}
+		// A limit is quota, not health: it never counts toward the
+		// failure streak. Any job's limit cools the account it ran on, a
+		// foreman turn's included (§4.4: a foreman limit-hit cools that
+		// account): the quota the CLI names is the account's, so the task
+		// workers sharing its label cool with the foreman, the dispatcher
+		// serves another tier's agents instead of walking into the same
+		// wall, and the status shows every agent of the account cooling
+		// until the reset.
 		return e.coolAccountTx(tx, job, c, now)
 	case "auth":
 		return e.markBrokenTx(tx, job, job.AgentID, brokenAuth, now)
