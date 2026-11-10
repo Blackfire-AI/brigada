@@ -66,7 +66,7 @@ const (
 	evTaskFailed              = "task_failed"                // the run failed or said nothing usable; the foreman decides (§3)
 	evTaskRetired             = "task_retired"               // a task that will not land was retired (§6.2); Reason carries the caller's words verbatim, Caller who asked — foreman or user
 	evTaskCancelledByAmend    = "task_cancelled_by_amend"    // a plan_amend cancelled this task (§6.2), one event per cancelled task beside the amendment's plan_amended; Reason carries the caller's words verbatim, Caller who asked — foreman or user, Plan the plan
-	evTaskLoop               = "task_loop"                  // the worker repeats itself: the same check failure across fix rounds, or the same tool call in a window; the foreman decides (§5.6)
+	evTaskLoop                = "task_loop"                  // the worker repeats itself: the same check failure across fix rounds, or the same tool call in a window; the foreman decides (§5.6)
 	evReviewChanges           = "review_changes"             // the reviewer wants changes; a fix round answers them (§3, §7)
 	evReviewNoVerdict         = "review_no_verdict"          // the review ended without a usable verdict; the retry is spent or impossible (§7)
 	evReviewVerdict           = "review_verdict"             // a standalone review (no task) ended: approve, changes or no verdict, with the findings and the branch (§7)
