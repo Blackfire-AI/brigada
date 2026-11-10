@@ -53,7 +53,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-603-r2"
     rounds: 2
   - id: 604
@@ -77,6 +77,6 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["docs-change"]
-    state: done
+    state: needs_foreman
     branch: "brigada/task-605"
     rounds: 1
