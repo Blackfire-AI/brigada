@@ -30,10 +30,6 @@ type jobRun struct {
 	// staleDropped names the target whose stale waiting ref a land job
 	// deleted; every completion of the job carries it.
 	staleDropped string
-	// staleMarkDone records that a land job acted on its grant's stale-ref
-	// mark (issue #205): the ref is deleted once per job, so a retried
-	// attempt never deletes the waiting ref an earlier attempt re-made.
-	staleMarkDone bool
 
 	mu           sync.Mutex
 	events       []adapter.Event

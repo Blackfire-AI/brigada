@@ -274,7 +274,7 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 	}
 	onto := "refs/heads/" + grant.LandTarget
 	stack := grant.GatePush == engine.GateAsk || grant.GatePush == engine.GateNever
-	if stack || (grant.DropWaitingRef && !r.staleMarkDone) {
+	if stack || grant.DropWaitingRef {
 		if err := r.landFetchWaiting(ctx, dir); err != nil {
 			return nil, err
 		}
@@ -886,23 +886,23 @@ func (r *jobRun) landDropStaleWaiting(ctx context.Context, dir, target string) e
 // (issue #205): a restart forgot the landing that waited on the ref and
 // every landing stacked on it, so their commits must not be stacked on
 // again — even though the target may still fast-forward to the ref, which
-// the positional check (landDropStaleWaiting) would keep. It acts once per
-// job: a retried attempt keeps the ref an earlier attempt re-made. The
-// drop is reported on the job's completion (staleDropped), and the engine
-// settles it as it settles a positional drop; a ref already gone is no
-// drop, and the landing spends the mark.
+// the positional check (landDropStaleWaiting) would keep. Every attempt
+// acts on it: an attempt that pushed the waiting ref never retries, so a
+// ref found again on a retry was pushed by another landing — one leased
+// before the mark, its stack still carrying the forgotten commit — and
+// goes too. The drop is reported on the job's completion (staleDropped),
+// and the engine settles it as it settles a positional drop, forgetting
+// the landings that sat on the ref; a ref already gone is no drop, and the
+// landing spends the mark.
 func (r *jobRun) landDropMarkedWaiting(ctx context.Context, dir string) error {
-	if !r.grant.DropWaitingRef || r.staleMarkDone {
+	if !r.grant.DropWaitingRef {
 		return nil
 	}
 	target := r.grant.LandTarget
-	if r.landHasCommit(ctx, dir, landWaitRef(target)) {
-		if err := r.landDeleteWaiting(ctx, dir, target, "dropped the waiting ref a restart made stale"); err != nil {
-			return err
-		}
+	if !r.landHasCommit(ctx, dir, landWaitRef(target)) {
+		return nil
 	}
-	r.staleMarkDone = true
-	return nil
+	return r.landDeleteWaiting(ctx, dir, target, "dropped the waiting ref a restart made stale")
 }
 
 // landDeleteWaiting deletes the target's waiting ref from the remote and

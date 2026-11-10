@@ -103,7 +103,8 @@ func TestLandDropStaleWaitingDropsMovedPast(t *testing.T) {
 // TestLandDropMarkedWaitingDropsLiveRef (issue #205): the engine's
 // record marks the waiting ref stale after a restart forgot its
 // landings, so the ref goes even though main still fast-forwards to it,
-// the drop is reported, and a retried attempt deletes nothing more.
+// the drop is reported, and a retried attempt drops a ref pushed again
+// since.
 func TestLandDropMarkedWaitingDropsLiveRef(t *testing.T) {
 	ctx := context.Background()
 	r, dir, remote, _ := staleWaitFixture(t)
@@ -124,9 +125,11 @@ func TestLandDropMarkedWaitingDropsLiveRef(t *testing.T) {
 		t.Errorf("staleDropped = %q, want the drop of main reported", r.staleDropped)
 	}
 
-	// The attempt re-makes the waiting ref; its retry keeps it.
+	// Between attempts a landing leased before the mark pushes the ref
+	// again, its stack still on the forgotten commit: the retry drops it
+	// too, before anything stacks on it.
 	git(t, dir, "checkout", "-q", "--detach", "main")
-	remade := commitFile(t, dir, "remade.txt")
+	commitFile(t, dir, "unmarked.txt")
 	git(t, dir, "push", "-q", "origin", "HEAD:"+landWaitRef("main"))
 	if err := r.landFetchWaiting(ctx, dir); err != nil {
 		t.Fatal(err)
@@ -134,8 +137,11 @@ func TestLandDropMarkedWaitingDropsLiveRef(t *testing.T) {
 	if err := r.landDropMarkedWaiting(ctx, dir); err != nil {
 		t.Fatal(err)
 	}
-	if got := remoteRefCommit(t, remote, landWaitRef("main")); got != remade {
-		t.Errorf("the re-made waiting ref = %q, want it kept at %s on the retry", got, remade)
+	if got := remoteRefCommit(t, remote, landWaitRef("main")); got != "" {
+		t.Errorf("the waiting ref re-pushed between attempts = %q, want the retry to drop it", got)
+	}
+	if r.landHasCommit(ctx, dir, landWaitRef("main")) {
+		t.Error("the local copy of the re-pushed ref remains after the retry")
 	}
 }
 
