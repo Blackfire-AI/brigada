@@ -32,8 +32,8 @@ tasks:
     review_tier: heavy
     review_effort: high
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-572-r1"
     rounds: 0
   - id: 573
     name: "requeue-stale-base"
