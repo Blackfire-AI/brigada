@@ -5,9 +5,9 @@
 plan: 162
 title: "Token-usage fixes: review infra loop, opencode cached input, cancel reasons, heavy-task split, chain-rebuild base design"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: needs_foreman
 created: 2026-11-10T21:22:17.508386Z
-updated: 2026-11-10T21:22:17.508386Z
+updated: 2026-11-10T21:30:14.916155Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
