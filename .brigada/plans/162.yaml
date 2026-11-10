@@ -65,7 +65,7 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: reviewing
+    state: done
     branch: "brigada/task-604"
     rounds: 0
   - id: 605
