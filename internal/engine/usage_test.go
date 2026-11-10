@@ -57,6 +57,37 @@ func TestCompletionUsageAndOlderRunner(t *testing.T) {
 	}
 }
 
+// TestCompletionKeepsCachedWithinInput: the engine stores a completion's
+// totals as reported, so cached input stays within input (§8). The totals are
+// what the runner sums from opencode step_finish lines.
+func TestCompletionKeepsCachedWithinInput(t *testing.T) {
+	e := newEnv(t)
+	e.addAgent(e.runner1, "claude", "sonnet", "work")
+	job := e.submit(e.work())
+	g := e.leaseAny(e.runner1)
+	if g == nil {
+		t.Fatal("no lease")
+	}
+	comp := done()
+	comp.Usage = &adapter.Usage{InputTokens: usageInt(415), OutputTokens: usageInt(31), CachedInputTokens: usageInt(310), ModelCalls: usageInt(3)}
+	if ans := e.complete(g, comp); ans != AnsOK {
+		t.Fatal(ans)
+	}
+	err := e.st.View(e.ctx, func(tx *sql.Tx) error {
+		var input, cached int64
+		if err := tx.QueryRow(`SELECT input_tokens,cached_input_tokens FROM jobs WHERE id=?`, job.JobID).Scan(&input, &cached); err != nil {
+			return err
+		}
+		if input != 415 || cached != 310 || cached > input {
+			t.Fatalf("stored input %d cached %d", input, cached)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStatsUsageAllJobKinds(t *testing.T) {
 	e := newEnv(t)
 	author := e.addAgent(e.runner1, "claude", "sonnet", "work")
