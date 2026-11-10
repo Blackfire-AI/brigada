@@ -43,8 +43,8 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-626"
     rounds: 0
   - id: 629
     name: "cancel-reason-mcp"
