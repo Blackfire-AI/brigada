@@ -101,6 +101,24 @@ esac
 	}
 }
 
+func TestInitClaudeModelsFromCLIWithoutCache(t *testing.T) {
+	fakeInitClaudeHelp(t)
+	got := initClaudeModels(context.Background())
+	want := []initModelEntry{
+		{id: 1, name: "fable", value: "fable", note: "most capable; uses your plan's limits fastest"},
+		{id: 2, name: "opus", value: "opus", note: "strong; uses your plan's limits faster"},
+		{id: 3, name: "sonnet", value: "sonnet", note: "balanced; the usual choice"},
+		{id: 4, name: "haiku", value: "haiku", note: "fastest; fine for small tasks"},
+	}
+	for i := range want {
+		want[i].effortLevels = []string{"low", "medium", "high", "xhigh", "max"}
+		want[i].defaultEffort = "Claude Code's default"
+	}
+	if !reflect.DeepEqual(got.entries, want) || got.defaultID != 3 {
+		t.Fatalf("source = %+v", got)
+	}
+}
+
 func TestInitClaudeModelsFromCLIAndAccount(t *testing.T) {
 	fakeInitClaudeHelp(t)
 	home := os.Getenv("HOME")

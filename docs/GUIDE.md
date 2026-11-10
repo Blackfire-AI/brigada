@@ -71,7 +71,7 @@ Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi
 
    | CLI | Model source |
    |---|---|
-   | `claude` | The aliases `sonnet`, `opus`, `haiku` (Anthropic), plus any other models Claude Code's own cache lists. |
+   | `claude` | The aliases `claude --help` names (`fable`, `opus` and `sonnet` in current CLIs; `sonnet` and `opus` when it names none) and `haiku` (Anthropic), plus any other models Claude Code's own cache lists. |
    | `codex` | The CLI default first (shown by the top-level `model` of `$CODEX_HOME/config.toml`, or `~/.codex/config.toml` when `CODEX_HOME` is unset; its note names that config path, and it is stored as `default`), then the catalog models from `codex debug models`. If the config cannot be read, the entry says `CLI default`. |
    | `kimi` | The CLI default and configured models from `~/.kimi-code/config.toml`; worker-only. |
    | `opencode` | The `provider/model` list from `opencode models`; its known-family models are foreman candidates, and workers pick individually across providers. |
