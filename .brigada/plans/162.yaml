@@ -5,9 +5,9 @@
 plan: 162
 title: "Token-usage fixes: review infra loop, opencode cached input, cancel reasons, heavy-task split, chain-rebuild base design"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-10T21:22:17.508386Z
-updated: 2026-11-10T21:30:14.916155Z
+updated: 2026-11-10T21:31:42.555704Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -48,8 +48,8 @@ tasks:
     name: "cancel-reason"
     title: "feat(engine): plan_amend cancel requires a reason per task, recorded as its own event"
     class: "implement"
-    deps: []
-    base: ""
+    deps: ["review-infra"]
+    base: "review-infra"
     effort: medium
     review_tier: standard
     skills: ["surface-parity"]
@@ -72,8 +72,8 @@ tasks:
     name: "rebuild-base-design"
     title: "docs(design): a rebuilt chain's dependent base follows how the chain died"
     class: "implement"
-    deps: []
-    base: ""
+    deps: ["cancel-reason"]
+    base: "cancel-reason"
     effort: medium
     review_tier: standard
     skills: ["docs-change"]
