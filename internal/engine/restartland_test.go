@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"strings"
 	"testing"
+	"time"
 )
 
 // completeLandOf leases the queued land job of task and completes it
@@ -229,5 +231,165 @@ func TestRestartKeepsSettledLandings(t *testing.T) {
 				t.Errorf("restart work jobs = %d, want the restart to go on", n)
 			}
 		})
+	}
+}
+
+// TestUnmarkedLandingDoesNotSpendTheStaleRefMark (issue #205): a land
+// job of the target that was leased before the restart marked the ref
+// stale carries no mark, stacks on the ref as it finds it, and its
+// landing must not spend the mark — the mark stays for the job that
+// follows, so the ref is still deleted before the next stack. The mark
+// rides the job itself, persisted at its lease, and only the landing of
+// a job that carries it clears the row.
+func TestUnmarkedLandingDoesNotSpendTheStaleRefMark(t *testing.T) {
+	e := newEnv(t)
+	e.set(map[string]string{SettingGatePush: GateAsk})
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	a := e.task
+	b := e.addTask("{}")
+	e.runTaskToDone(a, author, reviewer)
+	e.completeLandOf(a, author, `{"target_branch":"main","commit":"aaa111","check_passed":true,"pushed":"waiting"}`)
+	e.runTaskToDone(b, author, reviewer)
+
+	// B's land job is leased before anything marked the ref: its grant
+	// carries no mark, and the mark is persisted on the job as false.
+	bg := e.leaseGit(author)
+	if bg == nil || bg.TaskID != b || bg.Kind != KindLand || bg.DropWaitingRef {
+		t.Fatalf("B's land grant = %+v, want an unmarked squash phase", bg)
+	}
+	if n := e.int("SELECT drop_waiting_ref FROM jobs WHERE id = ?", bg.JobID); n != 0 {
+		t.Fatalf("B's land job drop_waiting_ref = %d, want 0 at its lease", n)
+	}
+
+	// A's push is rejected; A parks and restarts, and the target's ref
+	// goes stale under B's live job.
+	if res, err := e.eng.PushApprove(e.ctx, envRepo); err != nil || res.Released != 1 {
+		t.Fatalf("PushApprove = (%d, %v), want 1 released", res.Released, err)
+	}
+	pg := e.leaseGit(author)
+	if pg == nil || pg.TaskID != a || !pg.Push {
+		t.Fatalf("A's push job was not leased: %+v", pg)
+	}
+	if ans := e.complete(pg, Completion{Error: "! [rejected] main -> main (non-fast-forward)"}); ans != AnsOK {
+		t.Fatalf("complete the rejected push: %s", ans)
+	}
+	if _, err := e.eng.RestartTask(e.ctx, e.project, a, "rework the head"); err != nil {
+		t.Fatalf("RestartTask: %v", err)
+	}
+	if n := e.int("SELECT COUNT(*) FROM stale_land_refs WHERE project_id = ? AND target_branch = 'main'", e.project); n != 1 {
+		t.Fatalf("stale waiting-ref marks after the restart = %d, want 1", n)
+	}
+
+	// B's landing completes now, its job never marked: the landing is
+	// recorded but the mark stands.
+	if ans := e.complete(bg, Completion{Result: `{"target_branch":"main","commit":"bbb222","check_passed":true,"pushed":"waiting"}`}); ans != AnsOK {
+		t.Fatalf("complete B's landing: %s", ans)
+	}
+	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ? AND commit_sha = 'bbb222'", b); n != 1 {
+		t.Errorf("B's landing records = %d, want its waiting commit recorded", n)
+	}
+	if n := e.int("SELECT COUNT(*) FROM stale_land_refs WHERE project_id = ? AND target_branch = 'main'", e.project); n != 1 {
+		t.Fatalf("stale waiting-ref marks after B's unmarked landing = %d, want the mark standing", n)
+	}
+
+	// A's reworked head lands: its land job is the one the mark flags,
+	// its landing spends the mark.
+	g := e.leaseAny(author)
+	if g == nil || g.Kind != KindWork {
+		t.Fatalf("the restart's work job was not leased: %+v", g)
+	}
+	if ans := e.complete(g, doneOn("task/1-2", passCheck)); ans != AnsOK {
+		t.Fatalf("complete the reworked work: %s", ans)
+	}
+	e.runReview(reviewer, `{"verdict":"approve","findings":"`+substantiveFindings+`"}`)
+	lg := e.leaseGit(author)
+	if lg == nil || lg.TaskID != a || lg.Push || !lg.DropWaitingRef {
+		t.Fatalf("the re-made land grant = %+v, want the squash phase with the stale-ref mark", lg)
+	}
+	if n := e.int("SELECT drop_waiting_ref FROM jobs WHERE id = ?", lg.JobID); n != 1 {
+		t.Errorf("the marked land job drop_waiting_ref = %d, want 1 persisted at its lease", n)
+	}
+	if ans := e.complete(lg, Completion{Result: `{"target_branch":"main","commit":"aaa222","check_passed":true,"pushed":"waiting"}`}); ans != AnsOK {
+		t.Fatalf("complete the marked landing: %s", ans)
+	}
+	if n := e.int("SELECT COUNT(*) FROM stale_land_refs WHERE project_id = ? AND target_branch = 'main'", e.project); n != 0 {
+		t.Errorf("stale waiting-ref marks after the marked landing = %d, want the mark spent", n)
+	}
+}
+
+// TestRestartClearsTheLandHoldsOfTheForgottenLanding (issue #205): a
+// push-phase land_ready hold outlives its landing's failed push — the
+// rejected re-check parks the task under the held row — and the row
+// would refuse the reworked head its landing while reading as a hold of
+// a task that no longer holds. The restart drops the landing's holds
+// with the landing, and the reworked head queues its landing.
+func TestRestartClearsTheLandHoldsOfTheForgottenLanding(t *testing.T) {
+	e := newEnv(t)
+	e.set(map[string]string{SettingGatePush: GateAsk})
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+	e.completeLandOf(e.task, author, `{"target_branch":"main","commit":"old123","check_passed":true,"pushed":"waiting"}`)
+
+	// The push phase re-runs the gate; its exit 1 holds the push, and
+	// the engine queues the re-check.
+	if res, err := e.eng.PushApprove(e.ctx, envRepo); err != nil || res.Released != 1 {
+		t.Fatalf("PushApprove = (%d, %v), want 1 released", res.Released, err)
+	}
+	pg := e.leaseGit(author)
+	if pg == nil || !pg.Push {
+		t.Fatalf("the push job was not leased: %+v", pg)
+	}
+	if ans := e.complete(pg, landHeld("the release window is closed")); ans != AnsOK {
+		t.Fatalf("complete the held push: %s", ans)
+	}
+	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ?", e.task); n != 1 {
+		t.Fatalf("land holds after the held push = %d, want 1", n)
+	}
+
+	// The re-check's push is rejected: the task parks under the hold,
+	// the landing still recorded waiting.
+	e.clock.Advance(landReadyRecheckDelay + time.Second)
+	rg := e.leaseGit(author)
+	if rg == nil || !rg.Push {
+		t.Fatalf("the re-check was not leased: %+v", rg)
+	}
+	if ans := e.complete(rg, Completion{Error: "! [rejected] main -> main (non-fast-forward)"}); ans != AnsOK {
+		t.Fatalf("complete the rejected re-check: %s", ans)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+		t.Fatalf("task state after the rejected re-check = %q, want needs_foreman", state)
+	}
+	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ?", e.task); n != 1 {
+		t.Fatalf("land holds after the rejected re-check = %d, want the hold standing", n)
+	}
+
+	// The restart drops the hold with the landing.
+	if _, err := e.eng.RestartTask(e.ctx, e.project, e.task, "rework the head"); err != nil {
+		t.Fatalf("RestartTask: %v", err)
+	}
+	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", e.task); n != 0 {
+		t.Fatalf("landing records after the restart = %d, want the waiting one forgotten", n)
+	}
+	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ?", e.task); n != 0 {
+		t.Fatalf("land holds after the restart = %d, want the stale hold gone with the landing", n)
+	}
+	if _, err := e.eng.LandApprove(e.ctx, e.project, e.task, false); err == nil || !strings.Contains(err.Error(), "not held at the land gate") {
+		t.Errorf("LandApprove after the restart = %v, want a refusal: the hold is gone", err)
+	}
+
+	// The reworked head queues its landing — the stale hold no longer
+	// refuses it.
+	g := e.leaseAny(author)
+	if g == nil || g.Kind != KindWork {
+		t.Fatalf("the restart's work job was not leased: %+v", g)
+	}
+	if ans := e.complete(g, doneOn("task/1-2", passCheck)); ans != AnsOK {
+		t.Fatalf("complete the reworked work: %s", ans)
+	}
+	e.runReview(reviewer, `{"verdict":"approve","findings":"`+substantiveFindings+`"}`)
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land' AND status = 'queued'", e.task); n != 1 {
+		t.Fatalf("queued land jobs for the reworked head = %d, want 1", n)
 	}
 }
