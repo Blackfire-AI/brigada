@@ -46,8 +46,8 @@ tasks:
     effort: medium
     review_tier: heavy
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-573"
     rounds: 0
   - id: 574
     name: "restart-runner-docs"
