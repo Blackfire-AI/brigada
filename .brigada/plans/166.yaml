@@ -5,9 +5,9 @@
 plan: 166
 title: "Cancel reasons and the chain-rebuild base design, rebuilt on the land target"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-11-10T22:50:27.342676Z
-updated: 2026-11-10T23:02:50.316898Z
+updated: 2026-11-10T23:06:19.814437Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -31,7 +31,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["surface-parity"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 626
@@ -43,7 +43,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["docs-change"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 629
