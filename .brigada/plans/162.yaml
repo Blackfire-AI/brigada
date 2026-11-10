@@ -41,8 +41,8 @@ tasks:
     base: ""
     effort: medium
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-602"
     rounds: 0
   - id: 603
     name: "cancel-reason"
