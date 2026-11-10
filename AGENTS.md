@@ -19,7 +19,7 @@ CI runs these; run them before you push:
     CGO_ENABLED=1 go test -race -count=1 ./...
     (cd internal/tools/licenses && go test -count=1 .)
 
-The project's `default_check` runs CI's build-job steps before the tests (gofmt, guard and vet), then `go test`; a test keeps the two in step, while shellcheck, race, licences and macOS stay CI-only.
+The project's `default_check` runs CI's build-job steps before the tests (gofmt, guard and vet), then `go test`; a test keeps the two in step, while shellcheck, race, licences, macOS, govulncheck and gitleaks stay CI-only.
 
 `guard` is the repository's own scanner for private addresses and similar leaks.
 
@@ -33,18 +33,21 @@ The project's `default_check` runs CI's build-job steps before the tests (gofmt,
 `cmd/brigada` is the single binary: client, engine, runner, foreman and MCP bridge. Everything else is under `internal/`:
 
 - `adapter`: one adapter per agent CLI (claude, codex, kimi, opencode, dsh, and a fake for tests)
-- `api`: the engine's JSON HTTP API, on a Unix socket (remote TLS is backlog)
+- `api`: the engine's JSON HTTP API on a Unix socket, its client, and the status and capacity renderers the CLI and the MCP bridge share
 - `caps`: the concurrency-caps model
+- `defaults`: the default role instructions and skills that init writes
 - `engine`: the mailbox, job creation from ready tasks, and the routine rules
 - `foreman`: the foreman's fixed instructions and wake template
 - `history`: the per-project timeline of what happened
+- `installscript`: tests of `install.sh` and `scripts/land-ready.sh`
 - `landing`: the git side of landing an approved task (§7.1)
 - `lifecycle`: the engine's life as a process: lock, start on demand, idle exit
 - `mcp`: the `brigada mcp` stdio bridge offering brigada's tools to the foreman
 - `notify`: local notifications
 - `planfile`: the plan file mirrored into the repo
-- `projecturl`: canonical repository identity
+- `projecturl`: credential redaction for repository URLs (the canonical identity is `engine.Canonicalize`)
 - `prompt`: the fixed templates worker prompts are composed from
+- `release`: tests of the release workflow
 - `runner`: executes jobs for the engine
 - `runnerstate`: the local single-runner protocol
 - `store`: the engine's SQLite state

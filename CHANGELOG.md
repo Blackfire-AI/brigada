@@ -10,6 +10,10 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The claude adapter sorts the CLI's "You've hit your 5-hour limit" and weekly wordings as limits, so the account cools and the foreman parks until the reset the message names; the reset parser already read the wording's `resets <time> (<zone>)` suffix, which the old classification never reached.
 - A foreman turn's limit cools the account it shares with task workers, as §4.4 says: the workers stop placing on a wall the foreman already hit, the dispatcher serves another tier's agents until the reset, and the status shows every agent of the account cooling. A limit still never counts toward the failure streak.
 - The AGENTS box of `brigada top` keeps a zero-capped agent off its rows while the shared account cools or the agent is broken: an agent that can never place was listed as a cooling row the moment its account cooled. The top border's `N off` count carries it as before.
+- A landing whose push git rejected because the target moved (`! [rejected] … (fetch first)`) was sorted as the remote failing, so the task parked under the project's grouped environment wake. It now parks on its own, as the landing's own failure.
+- `brigada top` and `brigada capacity` refused a `--project` that names a local-path remote (`file:/…`), and run inside a repository with such an origin they showed every project. They now read a project's identity as the engine does.
+- `brigada top` left its idle connections to the engine open after every refresh until the engine's idle timeout closed them; each refresh now closes its own.
+- A worker tool call cut for the loop watch could end in a split UTF-8 character.
 
 ## [1.2.0] - 2026-11-09
 
