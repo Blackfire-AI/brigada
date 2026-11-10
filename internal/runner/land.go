@@ -273,16 +273,25 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 		return nil, err
 	}
 	onto := "refs/heads/" + grant.LandTarget
-	if grant.GatePush == engine.GateAsk || grant.GatePush == engine.GateNever {
+	stack := grant.GatePush == engine.GateAsk || grant.GatePush == engine.GateNever
+	if stack || (grant.DropWaitingRef && !r.staleMarkDone) {
+		if err := r.landFetchWaiting(ctx, dir); err != nil {
+			return nil, err
+		}
+	}
+	// The engine's record may mark the waiting ref stale (issue #205): a
+	// restart forgot the landings on it, so it goes before anything
+	// stacks, whatever the target makes of it.
+	if err := r.landDropMarkedWaiting(ctx, dir); err != nil {
+		return nil, err
+	}
+	if stack {
 		// Landings that wait at the push gate — or land under never,
 		// whose push is the user's — stack (§7.1): while the waiting
 		// ref is ahead of the target — some landing still waits for
 		// its push — this one squashes onto it, so it lands after them
 		// and on top of any dependency among them. Once the target
 		// holds the ref, the target is the base again.
-		if err := r.landFetchWaiting(ctx, dir); err != nil {
-			return nil, err
-		}
 		wait := landWaitRef(grant.LandTarget)
 		if err := r.landDropStaleWaiting(ctx, dir, grant.LandTarget); err != nil {
 			return nil, err
@@ -869,14 +878,47 @@ func (r *jobRun) landDropStaleWaiting(ctx context.Context, dir, target string) e
 	if held {
 		return nil
 	}
+	return r.landDeleteWaiting(ctx, dir, target, "dropped a stale waiting ref the target moved past")
+}
+
+// landDropMarkedWaiting deletes the target's waiting ref from the remote,
+// and the local copy, when the grant carries the engine's stale-ref mark
+// (issue #205): a restart forgot the landing that waited on the ref and
+// every landing stacked on it, so their commits must not be stacked on
+// again — even though the target may still fast-forward to the ref, which
+// the positional check (landDropStaleWaiting) would keep. It acts once per
+// job: a retried attempt keeps the ref an earlier attempt re-made. The
+// drop is reported on the job's completion (staleDropped), and the engine
+// settles it as it settles a positional drop; a ref already gone is no
+// drop, and the landing spends the mark.
+func (r *jobRun) landDropMarkedWaiting(ctx context.Context, dir string) error {
+	if !r.grant.DropWaitingRef || r.staleMarkDone {
+		return nil
+	}
+	target := r.grant.LandTarget
+	if r.landHasCommit(ctx, dir, landWaitRef(target)) {
+		if err := r.landDeleteWaiting(ctx, dir, target, "dropped the waiting ref a restart made stale"); err != nil {
+			return err
+		}
+	}
+	r.staleMarkDone = true
+	return nil
+}
+
+// landDeleteWaiting deletes the target's waiting ref from the remote and
+// the landing clone, and records the drop for the job's completion.
+func (r *jobRun) landDeleteWaiting(ctx context.Context, dir, target, msg string) error {
+	wait := landWaitRef(target)
 	if out, err := r.landGit(ctx, dir, "push", "--quiet", "origin", ":"+wait); err != nil {
 		return fmt.Errorf("drop the stale waiting ref %s: %v", wait, trimCmdError(out, err))
 	}
+	// The remote ref is gone: the engine hears so even if the local
+	// cleanup fails.
+	r.staleDropped = target
 	if out, err := r.landGit(ctx, dir, "update-ref", "-d", wait); err != nil {
 		return fmt.Errorf("drop the local %s: %v", wait, trimCmdError(out, err))
 	}
-	r.staleDropped = target
-	r.cfg.Log.WarnContext(ctx, "dropped a stale waiting ref the target moved past", "ref", wait)
+	r.cfg.Log.WarnContext(ctx, msg, "ref", wait)
 	return nil
 }
 

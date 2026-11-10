@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Blackfire-AI/brigada/internal/api"
 )
 
 // commitFile makes one commit in dir and returns its hash.
@@ -95,5 +97,67 @@ func TestLandDropStaleWaitingDropsMovedPast(t *testing.T) {
 	}
 	if r.landHasCommit(context.Background(), dir, landWaitRef("main")) {
 		t.Error("the local copy of the stale ref remains")
+	}
+}
+
+// TestLandDropMarkedWaitingDropsLiveRef (issue #205): the engine's
+// record marks the waiting ref stale after a restart forgot its
+// landings, so the ref goes even though main still fast-forwards to it,
+// the drop is reported, and a retried attempt deletes nothing more.
+func TestLandDropMarkedWaitingDropsLiveRef(t *testing.T) {
+	ctx := context.Background()
+	r, dir, remote, _ := staleWaitFixture(t)
+	r.grant = &api.JobGrant{LandTarget: "main", DropWaitingRef: true}
+	if err := r.landFetchWaiting(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.landDropMarkedWaiting(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	if got := remoteRefCommit(t, remote, landWaitRef("main")); got != "" {
+		t.Errorf("the marked waiting ref = %q, want it dropped", got)
+	}
+	if r.landHasCommit(ctx, dir, landWaitRef("main")) {
+		t.Error("the local copy of the marked ref remains")
+	}
+	if r.staleDropped != "main" {
+		t.Errorf("staleDropped = %q, want the drop of main reported", r.staleDropped)
+	}
+
+	// The attempt re-makes the waiting ref; its retry keeps it.
+	git(t, dir, "checkout", "-q", "--detach", "main")
+	remade := commitFile(t, dir, "remade.txt")
+	git(t, dir, "push", "-q", "origin", "HEAD:"+landWaitRef("main"))
+	if err := r.landFetchWaiting(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.landDropMarkedWaiting(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	if got := remoteRefCommit(t, remote, landWaitRef("main")); got != remade {
+		t.Errorf("the re-made waiting ref = %q, want it kept at %s on the retry", got, remade)
+	}
+}
+
+// TestLandDropMarkedWaitingKeepsUnmarkedRef: without the engine's mark a
+// waiting ref main still fast-forwards to stays, and no drop is reported.
+func TestLandDropMarkedWaitingKeepsUnmarkedRef(t *testing.T) {
+	ctx := context.Background()
+	r, dir, remote, waiting := staleWaitFixture(t)
+	r.grant = &api.JobGrant{LandTarget: "main"}
+	if err := r.landFetchWaiting(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.landDropMarkedWaiting(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.landDropStaleWaiting(ctx, dir, "main"); err != nil {
+		t.Fatal(err)
+	}
+	if got := remoteRefCommit(t, remote, landWaitRef("main")); got != waiting {
+		t.Errorf("the unmarked waiting ref = %q, want it kept at %s", got, waiting)
+	}
+	if r.staleDropped != "" {
+		t.Errorf("staleDropped = %q, want no drop reported", r.staleDropped)
 	}
 }

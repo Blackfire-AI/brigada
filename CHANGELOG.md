@@ -15,6 +15,8 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A task restarted while its landing waited at the push gate, or sat for a hand push under `gate_push = never`, could not land its reworked head, and `brigada push approve` still pushed the old commit. A restart now forgets that landing and the landings stacked on the same waiting ref, the next landing of the target deletes `refs/brigada/land/<target>` before it stacks, and the re-made landings wait at the push gate again (issue #205). Restart the engine and runner after you upgrade.
+
 - Plans parked by review leave the needs-you queue while the foreman handles them and notify when it cannot (issue #197).
 
 - `brigada top` lists live plans before finished ones, and a short terminal spends a free row on a running line (issue #184).
