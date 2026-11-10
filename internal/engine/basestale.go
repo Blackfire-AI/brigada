@@ -106,6 +106,41 @@ func (e *Engine) parkStaleBaseTx(tx *sql.Tx, project, taskID, dep int64, baseRef
 	return err
 }
 
+// refuseStaleLandTx refuses a queued land job about to be leased whose
+// task stacks on a superseded round of its dependency (issue #124,
+// issue #205): the job is cancelled and the task parks through
+// parkStaleBaseTx, exactly as queueLandJobTx refuses such a landing.
+// The land rule checks only when it queues; a land_ready re-check or
+// not-ready retry is queued straight from the completion, and the sweep
+// leaves a dependent with a queued land job to this refusal, so the
+// lease is where every pre-squash landing is checked last. Only a task's
+// own pre-squash land job is checked: a push phase has a landing record
+// and pushes the recorded commit, and a job with no task — a sync — has
+// no base.
+func (e *Engine) refuseStaleLandTx(tx *sql.Tx, j *jobRow, now time.Time) (bool, error) {
+	if j.TaskID == 0 || j.Key != fmt.Sprintf("task:%d", j.TaskID) {
+		return false, nil
+	}
+	var have int
+	if err := tx.QueryRow("SELECT COUNT(*) FROM landings WHERE task_id = ?", j.TaskID).Scan(&have); err != nil {
+		return false, fmt.Errorf("read the landing of task %d: %w", j.TaskID, err)
+	}
+	if have > 0 {
+		return false, nil
+	}
+	dep, baseRef, depBranch, stale, err := staleBaseTx(tx, j.TaskID)
+	if err != nil || !stale {
+		return false, err
+	}
+	if _, err := e.cancelTx(tx, j, "the base is stale", now); err != nil {
+		return false, err
+	}
+	if err := e.parkStaleBaseTx(tx, j.ProjectID, j.TaskID, dep, baseRef, depBranch, "the landing is refused", true, now); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // staleDependent is one dependent the sweep holds on its dependency's
 // superseded round (issue #124): parked at needs_foreman when live is
 // false, its landing refused later when true.
@@ -120,7 +155,8 @@ type staleDependent struct {
 // the branch the task is now done from. Every started, unlanded
 // dependent stacked on a superseded round of dep parks at needs_foreman
 // — one with a live job keeps running and is only named here, for the
-// land rule refuses its landing when it gets there — and one wake, the
+// land rule refuses its landing when it gets there, and the lease
+// refuses a land job queued or re-queued on the old round — and one wake, the
 // dep_rebuilt event, names the dependency and every stale task. A
 // pending dependent is untouched: its base resolves to the new branch
 // when it is released, and a landed one has nothing left to hold.
@@ -173,7 +209,8 @@ func (e *Engine) sweepStaleDependentsTx(tx *sql.Tx, project, dep int64, now time
 		held = append(held, staleDependent{id: c.id, title: c.title, live: live != nil})
 		if live != nil {
 			// Running or reviewing: the park could not hold it, and the
-			// land rule refuses the landing its completion reaches.
+			// land rule refuses the landing its completion reaches. A
+			// queued land job is refused at its lease (refuseStaleLandTx).
 			continue
 		}
 		if err := e.parkStaleBaseTx(tx, project, c.id, dep, c.base, depBranch, "", false, now); err != nil {

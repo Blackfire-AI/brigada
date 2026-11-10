@@ -389,6 +389,20 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 			continue
 		}
+		// A task's pre-squash landing never leases on a stale base (issue
+		// #124, #205): a dependency rebuilt while the land job sat queued —
+		// a land_ready re-check, a not-ready retry, any landing the sweep
+		// found live — leaves the job naming the old round, so the lease
+		// refuses it and parks the task, as the land rule would.
+		if j.Kind == KindLand {
+			refused, err := e.refuseStaleLandTx(tx, j, now)
+			if err != nil {
+				return nil, err
+			}
+			if refused {
+				continue
+			}
+		}
 		// The harness the job is placed on: a foreman turn's is resolved
 		// from its pair (a turn submitted without a harness runs on the
 		// project's), and a turn with no whole pair is held — no poll takes
