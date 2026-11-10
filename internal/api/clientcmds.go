@@ -412,10 +412,17 @@ func (c *Client) CreatePlan(ctx context.Context, p PlanCreate, idemKey string) (
 // by id as a decimal.
 type PlanAmend struct {
 	Add      []PlanTask
-	Cancel   []string
+	Cancel   []PlanCancel
 	Retarget []PlanRetarget
 	Retier   []PlanRetier
 	Respec   []PlanRespec
+}
+
+// PlanCancel cancels one task of a plan (§6.2): the task by name or id, and
+// the required reason, recorded verbatim on the cancel's event.
+type PlanCancel struct {
+	Task   string
+	Reason string
 }
 
 // PlanRespec edits the spec of a pending task: Mode replace (the default)
@@ -477,7 +484,10 @@ type PlanHeldTask struct {
 // AmendPlan amends a live plan (§12.2). idemKey is the call's
 // idempotency key, minted per logical call by the bridge.
 func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey string) (PlanAmendResult, error) {
-	body := planAmendRequest{Cancel: a.Cancel}
+	var body planAmendRequest
+	for _, cn := range a.Cancel {
+		body.Cancel = append(body.Cancel, planCancelBody{Task: cn.Task, Reason: cn.Reason})
+	}
 	for _, t := range a.Add {
 		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills})
 	}

@@ -265,7 +265,7 @@ func TestReopenPassLetsAmendCancelParkedTasks(t *testing.T) {
 	}
 
 	// The cancels the closed plan refused now run, one amendment each.
-	am := e.amend(res.PlanID, PlanAmendment{Cancel: []string{"conflicted"}})
+	am := e.amend(res.PlanID, PlanAmendment{Cancel: cancels("conflicted")})
 	if len(am.Cancelled) != 1 || am.Cancelled[0] != conflicted {
 		t.Fatalf("amendment = %+v, want conflicted cancelled", am)
 	}
@@ -275,7 +275,7 @@ func TestReopenPassLetsAmendCancelParkedTasks(t *testing.T) {
 	if _, ok := e.eventPayloadOf(evPlanDone); ok {
 		t.Error("the plan closed done with a task still parked")
 	}
-	am = e.amend(res.PlanID, PlanAmendment{Cancel: []string{"unchecked"}})
+	am = e.amend(res.PlanID, PlanAmendment{Cancel: cancels("unchecked")})
 	if len(am.Cancelled) != 1 || am.Cancelled[0] != unchecked {
 		t.Fatalf("amendment = %+v, want unchecked cancelled", am)
 	}

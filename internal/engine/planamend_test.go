@@ -2,10 +2,21 @@ package engine
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 )
+
+// cancels words a cancel of each named task with the same reason, for the
+// tests that cancel and do not care why.
+func cancels(refs ...string) []PlanCancel {
+	out := make([]PlanCancel, len(refs))
+	for i, ref := range refs {
+		out[i] = PlanCancel{Task: ref, Reason: "cancelled by the test"}
+	}
+	return out
+}
 
 // amend runs AmendPlan and fails the test on a refusal.
 func (e *env) amend(plan int64, am PlanAmendment) AmendPlanResult {
@@ -46,7 +57,7 @@ func TestAmendAddsAndCancels(t *testing.T) {
 			{Name: "lint", Spec: "lint it", Class: "answer", Tier: "light", Effort: "low"},
 			{Name: "docs", Spec: "document it", Class: "answer", Deps: []string{"build", "lint"}},
 		},
-		Cancel: []string{"ship"},
+		Cancel: cancels("ship"),
 	})
 	if am.State != "active" || len(am.Added) != 2 || len(am.Cancelled) != 1 || am.Cancelled[0] != ship.TaskID {
 		t.Fatalf("amendment = %+v, want 2 added, ship cancelled, plan active", am)
@@ -83,7 +94,7 @@ func TestAmendAddsAndCancels(t *testing.T) {
 	if g == nil || g.TaskID != build.TaskID {
 		t.Fatalf("lease = %+v, want build's job", g)
 	}
-	e.amend(res.PlanID, PlanAmendment{Cancel: []string{"build", "docs"}})
+	e.amend(res.PlanID, PlanAmendment{Cancel: cancels("build", "docs")})
 	if got := e.str("SELECT status FROM jobs WHERE id = ?", build.JobID); got != statusCancelled {
 		t.Errorf("build's job = %q, want cancelled", got)
 	}
@@ -91,7 +102,7 @@ func TestAmendAddsAndCancels(t *testing.T) {
 		t.Errorf("docs state = %q, want cancelled with its dependency", got)
 	}
 	// A done task cannot be cancelled, an unknown one is refused.
-	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: []string{"nope"}}); err == nil {
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: cancels("nope")}); err == nil {
 		t.Error("cancelling an unknown task succeeded")
 	}
 	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{}); err == nil {
@@ -103,6 +114,79 @@ func TestAmendAddsAndCancels(t *testing.T) {
 	}
 	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Add: []PlanTask{{Spec: "x", Deps: []string{"ghost"}}}}); err == nil {
 		t.Error("an unknown dep succeeded")
+	}
+}
+
+// TestAmendCancelRecordsEachReason: every task a plan_amend cancels gets its
+// own task_cancelled_by_amend event carrying its reason verbatim, who asked
+// and the plan, beside the amendment's one plan_amended event (§6.2).
+func TestAmendCancelRecordsEachReason(t *testing.T) {
+	e := newEnv(t)
+	res := e.twoStep()
+	build, ship := res.Tasks[0], res.Tasks[1]
+	buildWhy := `superseded: the "build" work landed in task 12 <by hand> & more`
+	shipWhy := "  no longer needed\nafter the pivot  "
+
+	e.amend(res.PlanID, PlanAmendment{
+		Cancel: []PlanCancel{{Task: "ship", Reason: shipWhy}, {Task: fmt.Sprint(build.TaskID), Reason: buildWhy}},
+		Caller: "foreman",
+	})
+	if got := e.countEvents(evTaskCancelledByAmend); got != 2 {
+		t.Fatalf("task_cancelled_by_amend events = %d, want 2: one per cancelled task", got)
+	}
+	if got := e.countEvents(evPlanAmended); got != 1 {
+		t.Errorf("plan_amended events = %d, want 1 beside the per-task ones", got)
+	}
+	for task, want := range map[int64]string{build.TaskID: buildWhy, ship.TaskID: shipWhy} {
+		payload := e.str("SELECT payload FROM events WHERE kind = ? AND task_id = ?", evTaskCancelledByAmend, task)
+		var p eventPayload
+		if err := json.Unmarshal([]byte(payload), &p); err != nil {
+			t.Fatalf("task %d: payload %q: %v", task, payload, err)
+		}
+		if p.Reason != want || p.Caller != "foreman" || p.Plan != res.PlanID || p.Status != taskCancelled {
+			t.Errorf("task %d: payload = %+v, want reason %q, caller foreman, plan %d, status cancelled", task, p, want, res.PlanID)
+		}
+	}
+}
+
+// TestAmendCancelNeedsAReason: a cancel with no reason — missing, blank or
+// a bare name from an older caller — refuses the whole amendment naming
+// the task, as task_retire refuses a missing reason, and changes nothing.
+func TestAmendCancelNeedsAReason(t *testing.T) {
+	e := newEnv(t)
+	res := e.twoStep()
+	build, ship := res.Tasks[0], res.Tasks[1]
+	events := e.int("SELECT COUNT(*) FROM events")
+
+	cases := []struct {
+		name   string
+		cancel []PlanCancel
+		named  string
+	}{
+		{"missing", []PlanCancel{{Task: "ship"}}, `"ship"`},
+		{"blank", []PlanCancel{{Task: "ship", Reason: " \t\n"}}, `"ship"`},
+		{"one of two", []PlanCancel{{Task: "build", Reason: "why"}, {Task: fmt.Sprint(ship.TaskID)}}, fmt.Sprintf("%q", fmt.Sprint(ship.TaskID))},
+	}
+	for _, tc := range cases {
+		_, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+			Add:    []PlanTask{{Name: "lint", Spec: "lint it", Class: "answer"}},
+			Cancel: tc.cancel,
+		})
+		if err == nil || !strings.Contains(err.Error(), "reason is required") || !strings.Contains(err.Error(), tc.named) {
+			t.Errorf("%s: err = %v, want a refusal naming %s and the missing reason", tc.name, err, tc.named)
+		}
+		if got := e.taskState(build.TaskID); got != taskReady {
+			t.Errorf("%s: build state = %q, want ready: a refusal changes nothing", tc.name, got)
+		}
+		if got := e.taskState(ship.TaskID); got != taskPending {
+			t.Errorf("%s: ship state = %q, want pending", tc.name, got)
+		}
+		if got := e.int("SELECT COUNT(*) FROM tasks WHERE name = 'lint'"); got != 0 {
+			t.Errorf("%s: the refused amendment added %d tasks", tc.name, got)
+		}
+		if got := e.int("SELECT COUNT(*) FROM events"); got != events {
+			t.Errorf("%s: events = %d, want %d: a refusal records nothing", tc.name, got, events)
+		}
 	}
 }
 
@@ -328,7 +412,7 @@ func TestAmendCancellingRepointingRetieringNeverHolds(t *testing.T) {
 	if got := e.str("SELECT tier FROM tasks WHERE id = ?", res.Tasks[0].TaskID); got != "heavy" {
 		t.Errorf("a tier = %q, want heavy", got)
 	}
-	am = e.amend(res.PlanID, PlanAmendment{Cancel: []string{"a"}})
+	am = e.amend(res.PlanID, PlanAmendment{Cancel: cancels("a")})
 	if am.State != "active" || len(am.Held) != 0 {
 		t.Fatalf("cancelling amendment = %+v, want active with nothing held", am)
 	}
@@ -343,7 +427,7 @@ func TestCancelledFailureIsNotPlannerSuccess(t *testing.T) {
 	agent := e.addAgent(e.runner1, "claude", "sonnet", "work")
 	res := e.createPlan([]PlanTask{{Name: "solo", Spec: "do it", Class: "answer"}})
 	e.complete(e.leaseAny(e.runner1), Completion{Result: `{"status":"failed","summary":"no clone"}`})
-	am := e.amend(res.PlanID, PlanAmendment{Cancel: []string{"solo"}})
+	am := e.amend(res.PlanID, PlanAmendment{Cancel: cancels("solo")})
 	if am.State != planDone {
 		t.Fatalf("amendment = %+v, want the plan closed", am)
 	}
@@ -361,7 +445,7 @@ func TestCancelledFailureIsNotPlannerSuccess(t *testing.T) {
 		{Name: "extra", Spec: "extra", Class: "answer", Deps: []string{"one"}},
 	})
 	e.complete(e.leaseAny(e.runner1), done())
-	e.amend(res2.PlanID, PlanAmendment{Cancel: []string{"extra"}})
+	e.amend(res2.PlanID, PlanAmendment{Cancel: cancels("extra")})
 	if got := e.str("SELECT state FROM plans WHERE id = ?", res2.PlanID); got != planDone {
 		t.Fatalf("plan 2 = %q, want done", got)
 	}
@@ -375,7 +459,7 @@ func TestCancelledFailureIsNotPlannerSuccess(t *testing.T) {
 		{Name: "extra", Spec: "extra", Class: "answer", Deps: []string{"one"}},
 	})
 	e.complete(e.leaseAny(e.runner1), done())
-	e.amend(res3.PlanID, PlanAmendment{Cancel: []string{"extra"}, SkipApproved: true})
+	e.amend(res3.PlanID, PlanAmendment{Cancel: cancels("extra"), SkipApproved: true})
 	if a, s := e.planOutcome(agent); a != 3 || s != 1 {
 		t.Errorf("plan outcome = %d/%d, want 1/3: the approved skip is no failure", s, a)
 	}
@@ -395,7 +479,7 @@ func TestRestartedThenCancelledIsNotLaundered(t *testing.T) {
 	if got := e.taskState(res.TaskID); got != taskReady {
 		t.Fatalf("task = %q, want ready after the restart", got)
 	}
-	e.amend(res.PlanID, PlanAmendment{Cancel: []string{"solo"}})
+	e.amend(res.PlanID, PlanAmendment{Cancel: cancels("solo")})
 	if a, s := e.planOutcome(agent); a != 1 || s != 0 {
 		t.Errorf("plan outcome = %d/%d, want a failure", s, a)
 	}
@@ -411,7 +495,7 @@ func TestCancellationThenOtherTaskCompletes(t *testing.T) {
 		{Name: "x", Spec: "x", Class: "answer"},
 		{Name: "y", Spec: "y", Class: "answer"},
 	})
-	e.amend(res.PlanID, PlanAmendment{Cancel: []string{"x"}})
+	e.amend(res.PlanID, PlanAmendment{Cancel: cancels("x")})
 	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
 		t.Fatalf("plan = %q, want active: y is live", got)
 	}
@@ -432,7 +516,7 @@ func TestApproveFinishesAnEmptiedPlan(t *testing.T) {
 	agent := e.addAgent(e.runner1, "claude", "sonnet", "work")
 	e.setSettings(`{"gate_plan": "ask"}`)
 	res := e.createPlan([]PlanTask{{Name: "a", Spec: "a"}, {Name: "b", Spec: "b", Deps: []string{"a"}}})
-	e.amend(res.PlanID, PlanAmendment{Cancel: []string{"a", "b"}, SkipApproved: true})
+	e.amend(res.PlanID, PlanAmendment{Cancel: cancels("a", "b"), SkipApproved: true})
 	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planAwaitingApproval {
 		t.Fatalf("plan = %q, want still awaiting", got)
 	}
@@ -499,7 +583,7 @@ func TestFailedDependencyNamedInDoneReport(t *testing.T) {
 	e.exec("UPDATE tasks SET state = 'failed' WHERE id = ?", res.Tasks[0].TaskID)
 	// Cancelling the failed task now would strand ship's edge, so the
 	// amendment is refused; the plan closes through the waiting rule.
-	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: []string{"build"}}); err == nil {
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: cancels("build")}); err == nil {
 		t.Fatal("cancelling a failed task with a waiting dependent succeeded")
 	}
 	e.amend(res.PlanID, PlanAmendment{Retier: []PlanRetier{{Task: "ship", Tier: "light"}}})
@@ -531,7 +615,7 @@ func TestFailedDependencyNamedInDoneReport(t *testing.T) {
 		t.Errorf("plan outcome = %d/%d, want one failed attempt", s, a)
 	}
 	// A done plan is no longer amended.
-	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: []string{"ship"}}); err == nil {
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: cancels("ship")}); err == nil {
 		t.Error("amending a done plan succeeded")
 	}
 }
@@ -566,7 +650,7 @@ func TestPlanOutcomeLandsOnForemanAgent(t *testing.T) {
 	// A task that failed out: the plan closes as a failure.
 	res2 := e.twoStep()
 	e.exec("UPDATE tasks SET state = 'failed' WHERE id = ?", res2.Tasks[0].TaskID)
-	e.amend(res2.PlanID, PlanAmendment{Cancel: []string{"ship"}})
+	e.amend(res2.PlanID, PlanAmendment{Cancel: cancels("ship")})
 	if a, s := e.planOutcome(foreman); a != 2 || s != 1 {
 		t.Errorf("foreman plan outcome = %d/%d, want 1/2 after a failed task", s, a)
 	}
@@ -614,7 +698,7 @@ func TestAmendValidatesTaskTierEffort(t *testing.T) {
 	} {
 		before := e.int("SELECT COUNT(*) FROM tasks")
 		version := e.int("SELECT version FROM plans WHERE id = ?", res.PlanID)
-		_, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Add: []PlanTask{{Spec: "valid"}, tc.task}, Cancel: []string{"build"}})
+		_, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Add: []PlanTask{{Spec: "valid"}, tc.task}, Cancel: cancels("build")})
 		if err == nil || !strings.Contains(err.Error(), "invalid") || !strings.Contains(err.Error(), tc.words) {
 			t.Fatalf("refusal = %v", err)
 		}

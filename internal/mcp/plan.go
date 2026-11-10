@@ -173,6 +173,30 @@ func (r *taskRef) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// planCancelArg is one entry of plan_amend's cancel (§6.2, §12.2): the task,
+// by name or id, and the required reason. An older caller's bare name or id
+// still decodes, with no reason, so the call is refused naming the task
+// instead of failing to parse.
+type planCancelArg struct {
+	Task   taskRef `json:"task"`
+	Reason string  `json:"reason"`
+}
+
+func (c *planCancelArg) UnmarshalJSON(b []byte) error {
+	var ref taskRef
+	if err := json.Unmarshal(b, &ref); err == nil {
+		*c = planCancelArg{Task: ref}
+		return nil
+	}
+	type plain planCancelArg
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return fmt.Errorf("a cancel is an object with a task and a reason, got %s", b)
+	}
+	*c = planCancelArg(p)
+	return nil
+}
+
 func refStrings(refs []taskRef) []string {
 	out := make([]string, len(refs))
 	for i, r := range refs {
@@ -185,7 +209,7 @@ func refStrings(refs []taskRef) []string {
 type planAmendArgs struct {
 	Plan     int64             `json:"plan"`
 	Add      []planAddArg      `json:"add"`
-	Cancel   []taskRef         `json:"cancel"`
+	Cancel   []planCancelArg   `json:"cancel"`
 	Retarget []planRetargetArg `json:"retarget"`
 	Retier   []planRetierArg   `json:"retier"`
 	Respec   []planRespecArg   `json:"respec"`
@@ -264,7 +288,15 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 			a.Add[i].Class = "implement"
 		}
 	}
-	am := api.PlanAmend{Cancel: refStrings(a.Cancel)}
+	// Each cancel carries its reason, as task_retire's does: a blank one is
+	// refused here, naming the task, before any API call.
+	var am api.PlanAmend
+	for _, cancel := range a.Cancel {
+		if strings.TrimSpace(cancel.Reason) == "" {
+			return "", fmt.Errorf("cancel %q: reason is required: say why the task is cancelled (a cancel entry is {task, reason}; a bare name is refused)", string(cancel.Task))
+		}
+		am.Cancel = append(am.Cancel, api.PlanCancel{Task: string(cancel.Task), Reason: cancel.Reason})
+	}
 	for _, t := range a.Add {
 		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Continue: string(t.Continue), Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos), Skills: t.Skills})
 	}

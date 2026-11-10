@@ -242,7 +242,7 @@ func TestCancelWithDependents(t *testing.T) {
 			version := e.int("SELECT version FROM plans WHERE id = ?", res.PlanID)
 			events := e.int("SELECT COUNT(*) FROM events")
 
-			_, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: []string{"x"}})
+			_, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Cancel: cancels("x")})
 			if err == nil || !strings.Contains(err.Error(), "dependents built on its branch") ||
 				!strings.Contains(err.Error(), fmt.Sprintf("d (%s)", state)) {
 				t.Fatalf("cancel with a %s dependent: err = %v, want a refusal naming the dependent and its state", state, err)
@@ -266,7 +266,7 @@ func TestCancelWithDependents(t *testing.T) {
 			{Name: "x", Spec: "x", Class: "answer"},
 			{Name: "d", Spec: "d", Class: "answer", Deps: []string{"x"}},
 		})
-		e.amend(res.PlanID, PlanAmendment{Cancel: []string{"x", "d"}})
+		e.amend(res.PlanID, PlanAmendment{Cancel: cancels("x", "d")})
 		if got := e.taskState(res.Tasks[0].TaskID); got != taskCancelled {
 			t.Errorf("x = %q, want cancelled", got)
 		}
@@ -284,7 +284,7 @@ func TestCancelWithDependents(t *testing.T) {
 			{Name: "d", Spec: "d", Class: "answer", Deps: []string{"x"}},
 		})
 		e.amend(res.PlanID, PlanAmendment{
-			Cancel:   []string{"x"},
+			Cancel:   cancels("x"),
 			Retarget: []PlanRetarget{{Task: "d", Deps: nil}},
 		})
 		if got := e.taskState(res.Tasks[0].TaskID); got != taskCancelled {
@@ -309,7 +309,7 @@ func TestCancelWithDependents(t *testing.T) {
 			})
 			e.exec("UPDATE tasks SET state = 'running' WHERE id = ?", res.Tasks[0].TaskID)
 			e.exec("UPDATE tasks SET state = ? WHERE id = ?", tc.state, res.Tasks[1].TaskID)
-			e.amend(res.PlanID, PlanAmendment{Cancel: []string{"x"}})
+			e.amend(res.PlanID, PlanAmendment{Cancel: cancels("x")})
 			if got := e.taskState(res.Tasks[0].TaskID); got != taskCancelled {
 				t.Errorf("x = %q, want cancelled beside a %s dependent", got, tc.state)
 			}
@@ -436,7 +436,7 @@ func TestPlanDoneReportsApprovedCancellation(t *testing.T) {
 		{Name: "extra", Spec: "extra", Class: "answer", Deps: []string{"one"}},
 	})
 	e.complete(e.leaseAny(e.runner1), done())
-	e.amend(res.PlanID, PlanAmendment{Cancel: []string{"extra"}, SkipApproved: true})
+	e.amend(res.PlanID, PlanAmendment{Cancel: cancels("extra"), SkipApproved: true})
 	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planDone {
 		t.Fatalf("plan state = %q, want done", got)
 	}

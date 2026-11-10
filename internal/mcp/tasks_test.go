@@ -321,6 +321,147 @@ func TestServeCallTaskRetireRefused(t *testing.T) {
 	}
 }
 
+// TestServeCallTaskCancel covers task_cancel's required reason (§6.2,
+// §12.2), in parity with task_retire's: a missing or blank reason is the
+// tool's error naming the field, before any API call, and a valid call
+// carries the reason verbatim on the cancelled task's entry, so the
+// recorded cancel event has it, with the foreman as the caller.
+func TestServeCallTaskCancel(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	s := start(t, e)
+	a := s.call(1, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{
+		"title": "two roots",
+		"tasks": []any{
+			map[string]any{"name": "a", "spec": "one"},
+			map[string]any{"name": "b", "spec": "two"},
+		},
+	}})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("plan_create errored: %s", text)
+	}
+	taskID := func(name string) int64 {
+		t.Helper()
+		return countOf(t, e, "SELECT id FROM tasks WHERE name = ?", name)
+	}
+	stateOf := func(id int64) string {
+		t.Helper()
+		return strOf(t, e, "SELECT state FROM tasks WHERE id = ?", id)
+	}
+	task := taskID("a")
+
+	for i, args := range []map[string]any{
+		{"task": task},
+		{"task": task, "reason": ""},
+		{"task": task, "reason": " \t\n"},
+	} {
+		a = s.call(2+i, "tools/call", map[string]any{"name": "task_cancel", "arguments": args})
+		if text, isError := toolText(t, a); !isError || !strings.Contains(text, "reason is required") {
+			t.Errorf("task_cancel %v = %q (error %v), want the tool's error naming reason", args, text, isError)
+		}
+	}
+	if state := stateOf(task); state != "ready" {
+		t.Errorf("task state after the refusals = %q, want ready: nothing was sent", state)
+	}
+	if n := countOf(t, e, "SELECT COUNT(*) FROM events WHERE kind IN ('task_cancelled_by_amend', 'plan_amended')"); n != 0 {
+		t.Errorf("cancel events after the refusals = %d, want 0: the refusal came before any API call", n)
+	}
+
+	reason := `already covered by "b" <for now>`
+	a = s.call(5, "tools/call", map[string]any{"name": "task_cancel", "arguments": map[string]any{"task": task, "reason": reason}})
+	if text, isError := toolText(t, a); isError || !strings.Contains(text, "cancelled") {
+		t.Fatalf("task_cancel with a reason = %q (error %v), want it cancelled", text, isError)
+	}
+	if state := stateOf(task); state != "cancelled" {
+		t.Errorf("task state after the cancel = %q, want cancelled", state)
+	}
+	payload := strOf(t, e, "SELECT payload FROM events WHERE kind = 'task_cancelled_by_amend' AND task_id = ?", task)
+	var recorded struct {
+		Reason string `json:"reason"`
+		Caller string `json:"caller"`
+	}
+	if err := json.Unmarshal([]byte(payload), &recorded); err != nil || recorded.Reason != reason || recorded.Caller != "foreman" {
+		t.Errorf("task_cancelled_by_amend payload = %q (%v), want the reason verbatim and the foreman caller", payload, err)
+	}
+	if n := countOf(t, e, "SELECT COUNT(*) FROM events WHERE kind = 'task_cancelled_by_amend'"); n != 1 {
+		t.Errorf("task_cancelled_by_amend events = %d, want 1", n)
+	}
+
+	// The reason is part of the call's idempotency key: the same task
+	// with another reason is another call.
+	k1 := idemKey("task_cancel", taskCancelArgs{Task: task, Reason: "one"})
+	k2 := idemKey("task_cancel", taskCancelArgs{Task: task, Reason: "two"})
+	if k1 == k2 || k1 != idemKey("task_cancel", taskCancelArgs{Task: task, Reason: "one"}) {
+		t.Errorf("idempotency keys %q, %q: want the reason to tell calls apart and a repeat to share one", k1, k2)
+	}
+}
+
+// TestPlanCancelSchema: plan_amend's cancel entries and task_cancel both
+// declare a required reason, described in the schema text (§12.2).
+func TestPlanCancelSchema(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	s := start(t, e)
+	a := s.call(1, "tools/list", nil)
+	var list struct {
+		Tools []toolInfo `json:"tools"`
+	}
+	if err := json.Unmarshal(a.Result, &list); err != nil {
+		t.Fatalf("decode tools/list: %v", err)
+	}
+	schemaOf := func(tool string) map[string]any {
+		t.Helper()
+		for _, tl := range list.Tools {
+			if tl.Name == tool {
+				return tl.InputSchema.(map[string]any)
+			}
+		}
+		t.Fatalf("no tool %s", tool)
+		return nil
+	}
+	required := func(schema map[string]any) []string {
+		t.Helper()
+		var out []string
+		for _, r := range schema["required"].([]any) {
+			out = append(out, r.(string))
+		}
+		return out
+	}
+
+	cancel := schemaOf("plan_amend")["properties"].(map[string]any)["cancel"].(map[string]any)
+	entry := cancel["items"].(map[string]any)
+	reason, ok := entry["properties"].(map[string]any)["reason"].(map[string]any)
+	if !ok || reason["type"] != "string" || !strings.Contains(reason["description"].(string), "task_cancelled_by_amend") {
+		t.Errorf("plan_amend cancel entry reason = %v, want a described string", reason)
+	}
+	if got := required(entry); !slices.Equal(got, []string{"task", "reason"}) {
+		t.Errorf("plan_amend cancel entry requires %v, want task and reason", got)
+	}
+
+	tc := schemaOf("task_cancel")
+	if _, ok := tc["properties"].(map[string]any)["reason"]; !ok {
+		t.Errorf("task_cancel declares no reason: %v", tc["properties"])
+	}
+	if got := required(tc); !slices.Equal(got, []string{"task", "reason"}) {
+		t.Errorf("task_cancel requires %v, want task and reason", got)
+	}
+}
+
+// TestPlanCancelArgDecodes: a cancel entry is an object with a task and a
+// reason; an older caller's bare name or id still decodes, with no reason,
+// so the refusal can name the task.
+func TestPlanCancelArgDecodes(t *testing.T) {
+	var got []planCancelArg
+	if err := json.Unmarshal([]byte(`[{"task":"a","reason":"why"},{"task":7,"reason":"because"},"b",12]`), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := []planCancelArg{{"a", "why"}, {"7", "because"}, {"b", ""}, {"12", ""}}
+	if !slices.Equal(got, want) {
+		t.Errorf("decoded %+v, want %+v", got, want)
+	}
+	if err := json.Unmarshal([]byte(`[true]`), &got); err == nil {
+		t.Error("a boolean decoded as a cancel")
+	}
+}
+
 // seedTask adds a task of the token's project in the named state, with
 // a plan name other tools may name it by, and returns its id.
 func seedTask(t *testing.T, e *env, state, name string) int64 {

@@ -245,6 +245,67 @@ func TestPlanAmendRespecRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPlanAmendCancelReason: each cancel of plan_amend carries a required
+// reason (§6.2, §12.2). An entry without one — an older caller's bare name
+// or id, an object with none, a blank one — is a 400 naming the task, and
+// the whole amendment changes nothing; a valid cancel records the reason
+// verbatim with the caller, the foreman for a foreman token and the user
+// for a client's.
+func TestPlanAmendCancelReason(t *testing.T) {
+	e := newEnv(t)
+	body := `{"title":"cancels","tasks":[{"name":"a","spec":"one"},{"name":"b","spec":"two"},{"name":"c","spec":"three"}]}`
+	code, _, data := e.do(http.MethodPost, "/v1/plans", "foreman1", "cancel-plan", []byte(body))
+	if code != http.StatusOK {
+		t.Fatalf("plan_create: %d %s", code, data)
+	}
+	res := decode[planCreateBody](t, data)
+	path := "/v1/plans/" + strconv.FormatInt(res.PlanID, 10) + "/amend"
+
+	for i, tc := range []struct{ cancel, named string }{
+		{`["a"]`, `cancel \"a\"`},
+		{`[3]`, `cancel \"3\"`},
+		{`[{"task":"a"}]`, `cancel \"a\"`},
+		{`[{"task":"a","reason":" \t"}]`, `cancel \"a\"`},
+		{`[{"task":"b","reason":"fine"},{"task":"c"}]`, `cancel \"c\"`},
+	} {
+		code, _, data := e.do(http.MethodPost, path, "foreman1", "cancel-bad-"+strconv.Itoa(i), []byte(`{"cancel":`+tc.cancel+`}`))
+		if code != http.StatusBadRequest || !strings.Contains(string(data), "reason is required") || !strings.Contains(string(data), tc.named) {
+			t.Errorf("cancel %s: %d %s, want a 400 naming the task and the missing reason", tc.cancel, code, data)
+		}
+	}
+	if n := e.str("SELECT COUNT(*) FROM tasks WHERE state = 'cancelled'"); n != "0" {
+		t.Errorf("cancelled tasks after the refusals = %s, want 0", n)
+	}
+	if n := e.str("SELECT COUNT(*) FROM events WHERE kind IN ('task_cancelled_by_amend', 'plan_amended')"); n != "0" {
+		t.Errorf("cancel events after the refusals = %s, want 0", n)
+	}
+
+	for _, tc := range []struct{ token, idem, task, reason, caller string }{
+		{"foreman1", "cancel-ok-1", "a", `not needed: "a" is covered by <b>`, "foreman"},
+		{"alice", "cancel-ok-2", "b", "the user dropped it", "user"},
+	} {
+		reqBody, err := json.Marshal(map[string]any{"cancel": []any{map[string]any{"task": tc.task, "reason": tc.reason}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if code, _, data := e.do(http.MethodPost, path, tc.token, tc.idem, reqBody); code != http.StatusOK {
+			t.Fatalf("cancel %s as %s: %d %s", tc.task, tc.token, code, data)
+		}
+		payload := e.str("SELECT payload FROM events WHERE kind = 'task_cancelled_by_amend' AND task_id = (SELECT id FROM tasks WHERE name = ?)", tc.task)
+		var p struct {
+			Reason string `json:"reason"`
+			Caller string `json:"caller"`
+			Status string `json:"status"`
+		}
+		if err := json.Unmarshal([]byte(payload), &p); err != nil || p.Reason != tc.reason || p.Caller != tc.caller || p.Status != "cancelled" {
+			t.Errorf("task %s: task_cancelled_by_amend payload = %q (%v), want reason %q and caller %s", tc.task, payload, err, tc.reason, tc.caller)
+		}
+	}
+	if n := e.str("SELECT COUNT(*) FROM events WHERE kind = 'task_cancelled_by_amend'"); n != "2" {
+		t.Errorf("task_cancelled_by_amend events = %s, want 2", n)
+	}
+}
+
 // Exercise the real request and response codecs with authenticated routes.
 func TestPlanAmendRetierRoundTrip(t *testing.T) {
 	ctx := t.Context()

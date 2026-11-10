@@ -74,17 +74,28 @@ type PlanRespec struct {
 	Skills []string
 }
 
+// PlanCancel cancels one task of a plan with the reason why (§6.2): Task
+// names it by name or decimal id, Reason is required and recorded verbatim
+// on the task's task_cancelled_by_amend event.
+type PlanCancel struct {
+	Task   string
+	Reason string
+}
+
 // PlanAmendment is what the foreman changes in a live plan (§12.2): tasks
 // to add (their Deps name tasks of the plan, old or added), tasks to
-// cancel, waiting tasks whose dependencies are re-pointed, waiting or
-// parked tasks whose tier or effort is changed, and pending tasks whose
-// spec is edited.
+// cancel, each with its reason, waiting tasks whose dependencies are
+// re-pointed, waiting or parked tasks whose tier or effort is changed, and
+// pending tasks whose spec is edited.
 type PlanAmendment struct {
 	Add      []PlanTask
-	Cancel   []string
+	Cancel   []PlanCancel
 	Retarget []PlanRetarget
 	Retier   []PlanRetier
 	Respec   []PlanRespec
+	// Caller names who asked for the amendment, the foreman or the user,
+	// recorded beside each cancel's reason.
+	Caller string
 	// SkipApproved says the user themself approved the cancellations of
 	// this amendment: only a user's token can say so, never the foreman's
 	// own. Without it a cancelled task is an abandoned one, and the
@@ -127,7 +138,10 @@ var ErrPlanNotLive = errors.New("plan is not live")
 // re-point dependencies, change waiting or parked tasks' tier or effort, and
 // replace or append to a pending task's spec, validated whole — names
 // unique, deps in the plan and live, no cycle — before anything is
-// written. Cancelling a task stops its live jobs. In the same transaction
+// written. Cancelling a task stops its live jobs and needs a reason, as a
+// retirement does: a cancel without one refuses the whole amendment, naming
+// the task, and each cancelled task records the reason verbatim, with the
+// caller, on its own task_cancelled_by_amend event. In the same transaction
 // the waiting state re-evaluates as creation does (a pending task whose
 // dependencies are all done turns ready and queues its work job), the
 // approval limit is evaluated again for the amended plan, and a plan the
@@ -164,7 +178,8 @@ type amendNode struct {
 	base                    int   // the named base, an index into the node list; -1 = none named
 	cont                    int   // the named continued dep, an index into the node list; -1 = none named
 	cancelNow, retargetedBy bool
-	skipApproved            bool // a cancelled task whose skip the user approved
+	skipApproved            bool   // a cancelled task whose skip the user approved
+	cancelReason            string // the reason the amendment cancels the task with, verbatim
 	// extra is the list the task itself named (§5.8), nil when it inherits
 	// the project default; extraRec is the record an added task carries.
 	extra    []ExtraRepo
@@ -338,7 +353,11 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	}
 
 	var cancelled []int
-	for _, ref := range am.Cancel {
+	for _, c := range am.Cancel {
+		ref := c.Task
+		if strings.TrimSpace(c.Reason) == "" {
+			return AmendPlanResult{}, fmt.Errorf("cancel %q: reason is required: say why the task is cancelled (a cancel entry is {task, reason}; a bare name is refused)", ref)
+		}
 		i, err := resolve(ref)
 		if err != nil {
 			return AmendPlanResult{}, fmt.Errorf("cancel: %w", err)
@@ -354,6 +373,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			continue
 		}
 		nodes[i].skipApproved = am.SkipApproved
+		nodes[i].cancelReason = c.Reason
 		nodes[i].cancelNow = true
 		nodes[i].state = taskCancelled
 		cancelled = append(cancelled, i)
@@ -659,6 +679,10 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if _, err := tx.Exec(`UPDATE tasks SET state = ?, skip_approved = ?, updated_at = ? WHERE id = ?`,
 			taskCancelled, nodes[i].skipApproved, nowStr, nodes[i].id); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("cancel task %d: %w", nodes[i].id, err)
+		}
+		if _, err := appendEventTx(tx, evTaskCancelledByAmend, proj, nodes[i].id, 0,
+			eventPayload{Status: taskCancelled, Reason: nodes[i].cancelReason, Caller: am.Caller, Plan: plan}, now); err != nil {
+			return AmendPlanResult{}, err
 		}
 		res.Cancelled = append(res.Cancelled, nodes[i].id)
 	}

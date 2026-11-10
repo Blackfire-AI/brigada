@@ -247,7 +247,7 @@ func TestServeCallPlanAmend(t *testing.T) {
 
 	a = s.call(2, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
 		"plan":     1,
-		"cancel":   []any{"a"},
+		"cancel":   []any{map[string]any{"task": "a", "reason": "not needed"}},
 		"retarget": []any{map[string]any{"task": "b", "deps": []any{}}},
 		"add":      []any{map[string]any{"name": "c", "spec": "three", "deps": []any{1}}},
 	}})
@@ -261,7 +261,7 @@ func TestServeCallPlanAmend(t *testing.T) {
 
 	a = s.call(3, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
 		"plan":     1,
-		"cancel":   []any{"a"},
+		"cancel":   []any{map[string]any{"task": "a", "reason": `the "a" step moved into b`}},
 		"retarget": []any{map[string]any{"task": "b", "deps": []any{}}},
 		"add":      []any{map[string]any{"name": "c", "spec": "three", "deps": []any{"b"}}},
 	}})
@@ -276,6 +276,32 @@ func TestServeCallPlanAmend(t *testing.T) {
 	}
 	if state("a") != "cancelled" || state("b") != "ready" || state("c") != "pending" {
 		t.Errorf("states a %s, b %s, c %s; want cancelled, ready, pending", state("a"), state("b"), state("c"))
+	}
+	// The cancel's reason rode through the bridge and the API to the
+	// task's own event, verbatim, with the foreman as the caller.
+	payload := strOf(t, e, "SELECT payload FROM events WHERE kind = 'task_cancelled_by_amend' AND task_id = 1")
+	var recorded struct {
+		Reason string `json:"reason"`
+		Caller string `json:"caller"`
+	}
+	if err := json.Unmarshal([]byte(payload), &recorded); err != nil || recorded.Reason != `the "a" step moved into b` || recorded.Caller != "foreman" {
+		t.Errorf("task_cancelled_by_amend payload = %q (%v), want the reason verbatim and the foreman caller", payload, err)
+	}
+
+	// A cancel without a reason — a bare name from an older caller, an
+	// object with none, a blank one — is the tool's error naming the task,
+	// before the engine: nothing changes.
+	for i, cancel := range []any{"c", 3, map[string]any{"task": "c"}, map[string]any{"task": "c", "reason": "  "}} {
+		a = s.call(10+i, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+			"plan":   1,
+			"cancel": []any{cancel},
+		}})
+		if text, isError = toolText(t, a); !isError || !strings.Contains(text, "reason is required") || !strings.Contains(text, "cancel \"") {
+			t.Errorf("cancel %v without a reason = %q, error %v, want the tool's error naming the task", cancel, text, isError)
+		}
+	}
+	if state("c") != "pending" {
+		t.Errorf("c is %s after the refused cancels, want pending", state("c"))
 	}
 
 	a = s.call(4, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
