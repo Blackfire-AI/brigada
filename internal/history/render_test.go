@@ -85,6 +85,20 @@ func TestRenderResumedReview(t *testing.T) {
 	}
 }
 
+// TestRenderCancelByAmend: the per-task cancel event of a plan_amend shows
+// its reason in the text timeline, as a retire's does (§6.2), the reason
+// verbatim.
+func TestRenderCancelByAmend(t *testing.T) {
+	cancel := Item{Type: TypeEvent, Kind: "task_cancelled_by_amend", TaskID: 7, Payload: []byte(`{"plan":3,"status":"cancelled","reason":"superseded by task 274","caller":"foreman"}`)}
+	if got := summary(cancel); got != "status=cancelled reason=superseded by task 274" {
+		t.Errorf("summary = %q", got)
+	}
+	retire := Item{Type: TypeEvent, Kind: "task_retired", TaskID: 7, Payload: []byte(`{"status":"retired","reason":"superseded by task 274","caller":"foreman"}`)}
+	if got := summary(retire); got != "status=retired reason=superseded by task 274" {
+		t.Errorf("retire summary = %q", got)
+	}
+}
+
 func TestRenderEffortBump(t *testing.T) {
 	it := Item{Type: TypeEvent, Kind: "task_effort_bumped", Payload: []byte(`{"reason":"no-result","effort_from":"medium","effort_to":"high"}`)}
 	if got := summary(it); got != "task effort medium -> high: no-result" {

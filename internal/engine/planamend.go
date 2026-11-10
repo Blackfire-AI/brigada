@@ -74,17 +74,29 @@ type PlanRespec struct {
 	Skills []string
 }
 
+// PlanCancel is one task a plan amendment cancels, named by name or id,
+// with the reason it is cancelled for: required, and recorded verbatim on
+// the task's task_cancelled_by_amend event as task_retire's reason is on
+// its own.
+type PlanCancel struct {
+	Task   string
+	Reason string
+}
+
 // PlanAmendment is what the foreman changes in a live plan (§12.2): tasks
 // to add (their Deps name tasks of the plan, old or added), tasks to
-// cancel, waiting tasks whose dependencies are re-pointed, waiting or
-// parked tasks whose tier or effort is changed, and pending tasks whose
-// spec is edited.
+// cancel (each with its reason), waiting tasks whose dependencies are
+// re-pointed, waiting or parked tasks whose tier or effort is changed,
+// and pending tasks whose spec is edited.
 type PlanAmendment struct {
 	Add      []PlanTask
-	Cancel   []string
+	Cancel   []PlanCancel
 	Retarget []PlanRetarget
 	Retier   []PlanRetier
 	Respec   []PlanRespec
+	// Caller names who asked, recorded beside each cancel's reason: the
+	// foreman or the user. Empty records none.
+	Caller string
 	// SkipApproved says the user themself approved the cancellations of
 	// this amendment: only a user's token can say so, never the foreman's
 	// own. Without it a cancelled task is an abandoned one, and the
@@ -164,7 +176,8 @@ type amendNode struct {
 	base                    int   // the named base, an index into the node list; -1 = none named
 	cont                    int   // the named continued dep, an index into the node list; -1 = none named
 	cancelNow, retargetedBy bool
-	skipApproved            bool // a cancelled task whose skip the user approved
+	skipApproved            bool   // a cancelled task whose skip the user approved
+	cancelReason            string // why this amendment cancels the task, verbatim
 	// extra is the list the task itself named (§5.8), nil when it inherits
 	// the project default; extraRec is the record an added task carries.
 	extra    []ExtraRepo
@@ -186,6 +199,13 @@ func (n amendNode) label() string {
 func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, now time.Time) (AmendPlanResult, error) {
 	if len(am.Add) == 0 && len(am.Cancel) == 0 && len(am.Retarget) == 0 && len(am.Retier) == 0 && len(am.Respec) == 0 {
 		return AmendPlanResult{}, fmt.Errorf("nothing to amend: give tasks to add, cancel, retarget, retier or respec")
+	}
+	// Every cancel says why (§6.2), as a retire does: a blank reason
+	// refuses the whole amendment, naming the task, before anything is read.
+	for _, c := range am.Cancel {
+		if strings.TrimSpace(c.Reason) == "" {
+			return AmendPlanResult{}, fmt.Errorf("cancel: task %q: reason is required: say why it is cancelled", c.Task)
+		}
 	}
 	var proj int64
 	var state, baseRef string
@@ -338,8 +358,8 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	}
 
 	var cancelled []int
-	for _, ref := range am.Cancel {
-		i, err := resolve(ref)
+	for _, c := range am.Cancel {
+		i, err := resolve(c.Task)
 		if err != nil {
 			return AmendPlanResult{}, fmt.Errorf("cancel: %w", err)
 		}
@@ -354,6 +374,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			continue
 		}
 		nodes[i].skipApproved = am.SkipApproved
+		nodes[i].cancelReason = c.Reason
 		nodes[i].cancelNow = true
 		nodes[i].state = taskCancelled
 		cancelled = append(cancelled, i)
@@ -659,6 +680,12 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if _, err := tx.Exec(`UPDATE tasks SET state = ?, skip_approved = ?, updated_at = ? WHERE id = ?`,
 			taskCancelled, nodes[i].skipApproved, nowStr, nodes[i].id); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("cancel task %d: %w", nodes[i].id, err)
+		}
+		// One event per cancelled task carries the reason verbatim and
+		// who asked, beside the plan_amended summary written below.
+		if _, err := appendEventTx(tx, evTaskCancelledByAmend, proj, nodes[i].id, 0,
+			eventPayload{Plan: plan, Status: taskCancelled, Reason: nodes[i].cancelReason, Caller: am.Caller}, now); err != nil {
+			return AmendPlanResult{}, err
 		}
 		res.Cancelled = append(res.Cancelled, nodes[i].id)
 	}

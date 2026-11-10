@@ -280,7 +280,7 @@ func TestPlanVersionBumpsOnAmend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.client.AmendPlan(t.Context(), plan, api.PlanAmend{Cancel: []string{strconv.FormatInt(first, 10)}}, "amend-v2"); err != nil {
+	if _, err := e.client.AmendPlan(t.Context(), plan, api.PlanAmend{Cancel: []api.PlanCancel{{Task: strconv.FormatInt(first, 10), Reason: "not needed"}}}, "amend-v2"); err != nil {
 		t.Fatalf("cancel task %d: %v", first, err)
 	}
 	if v := version(); v != 3 {

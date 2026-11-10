@@ -404,15 +404,22 @@ func (c *Client) CreatePlan(ctx context.Context, p PlanCreate, idemKey string) (
 	return res, nil
 }
 
+// PlanCancel is one task a plan_amend cancels: the task by name or id as a
+// decimal, and the required reason, recorded verbatim on its cancel event.
+type PlanCancel struct {
+	Task   string
+	Reason string
+}
+
 // PlanAmend is a plan_amend call as the bridge sends it (§12.2): tasks to
-// add, tasks to cancel, and waiting tasks whose dependencies are
-// re-pointed, tier or effort changes for waiting or parked tasks, and spec
-// edits of pending tasks.
+// add, tasks to cancel (each with its reason), and waiting tasks whose
+// dependencies are re-pointed, tier or effort changes for waiting or
+// parked tasks, and spec edits of pending tasks.
 // Tasks and dependencies name tasks of the plan by name, or
 // by id as a decimal.
 type PlanAmend struct {
 	Add      []PlanTask
-	Cancel   []string
+	Cancel   []PlanCancel
 	Retarget []PlanRetarget
 	Retier   []PlanRetier
 	Respec   []PlanRespec
@@ -477,7 +484,10 @@ type PlanHeldTask struct {
 // AmendPlan amends a live plan (§12.2). idemKey is the call's
 // idempotency key, minted per logical call by the bridge.
 func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey string) (PlanAmendResult, error) {
-	body := planAmendRequest{Cancel: a.Cancel}
+	var body planAmendRequest
+	for _, c := range a.Cancel {
+		body.Cancel = append(body.Cancel, planCancelBody{Task: c.Task, Reason: c.Reason})
+	}
 	for _, t := range a.Add {
 		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills})
 	}

@@ -12,6 +12,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `brigada top` shortens an agent name of more than two `/` segments to its harness and model, so `opencode/zai-coding-plan/glm-5.3` reads `opencode/glm-5.3` and the harness stays visible.
 - Bare `brigada history` prints a table, one row per event: time, kind, number, what happened and the title, with a landing's short commit and an `after-land failed: --task N` flag. It shows the last 50 rows, oldest first; the new `--all` prints every row. `--task`, `--job`, `--raw` and `--limit` print what they did (issue #191).
 - The PLANS box of `brigada top` lists finished plans newest first (highest plan id first) below the live plans, which keep id order, so a short terminal drops the oldest finished plans first.
+- A cancel through `plan_amend` and `task_cancel` now says why: each `cancel` entry of `plan_amend` is an object with a `task` and a required `reason` (a bare name or id, the older shape, and a blank reason refuse the whole amendment, naming the task), and `task_cancel` takes a required `reason` like `task_retire`. The reason is recorded verbatim, with the caller (foreman or user), on one new `task_cancelled_by_amend` event per cancelled task beside the `plan_amended` summary, and `brigada history` shows it. The API's `cancel` entries change shape the same way.
 
 ### Fixed
 

@@ -185,10 +185,34 @@ func refStrings(refs []taskRef) []string {
 type planAmendArgs struct {
 	Plan     int64             `json:"plan"`
 	Add      []planAddArg      `json:"add"`
-	Cancel   []taskRef         `json:"cancel"`
+	Cancel   []planCancelArg   `json:"cancel"`
 	Retarget []planRetargetArg `json:"retarget"`
 	Retier   []planRetierArg   `json:"retier"`
 	Respec   []planRespecArg   `json:"respec"`
+}
+
+// planCancelArg is one cancel of a plan_amend (§6.2, §12.2): the task and
+// the required reason, recorded verbatim, as task_retire's is. A bare name
+// or id — the older shape — decodes with no reason, so the call is refused
+// naming the task and what to add, not with a decoding error.
+type planCancelArg struct {
+	Task   taskRef `json:"task"`
+	Reason string  `json:"reason"`
+}
+
+func (c *planCancelArg) UnmarshalJSON(b []byte) error {
+	var ref taskRef
+	if err := ref.UnmarshalJSON(b); err == nil {
+		*c = planCancelArg{Task: ref}
+		return nil
+	}
+	type plain planCancelArg
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return fmt.Errorf("a cancel is an object with task and reason, got %s", b)
+	}
+	*c = planCancelArg(p)
+	return nil
 }
 
 type planRespecArg struct {
@@ -264,7 +288,13 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 			a.Add[i].Class = "implement"
 		}
 	}
-	am := api.PlanAmend{Cancel: refStrings(a.Cancel)}
+	var am api.PlanAmend
+	for _, cn := range a.Cancel {
+		if strings.TrimSpace(cn.Reason) == "" {
+			return "", fmt.Errorf("cancel: task %q: reason is required: say why it is cancelled", string(cn.Task))
+		}
+		am.Cancel = append(am.Cancel, api.PlanCancel{Task: string(cn.Task), Reason: cn.Reason})
+	}
 	for _, t := range a.Add {
 		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Continue: string(t.Continue), Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos), Skills: t.Skills})
 	}

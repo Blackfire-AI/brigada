@@ -247,7 +247,7 @@ func TestServeCallPlanAmend(t *testing.T) {
 
 	a = s.call(2, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
 		"plan":     1,
-		"cancel":   []any{"a"},
+		"cancel":   []any{map[string]any{"task": "a", "reason": "folded into b"}},
 		"retarget": []any{map[string]any{"task": "b", "deps": []any{}}},
 		"add":      []any{map[string]any{"name": "c", "spec": "three", "deps": []any{1}}},
 	}})
@@ -261,7 +261,7 @@ func TestServeCallPlanAmend(t *testing.T) {
 
 	a = s.call(3, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
 		"plan":     1,
-		"cancel":   []any{"a"},
+		"cancel":   []any{map[string]any{"task": "a", "reason": "folded into b"}},
 		"retarget": []any{map[string]any{"task": "b", "deps": []any{}}},
 		"add":      []any{map[string]any{"name": "c", "spec": "three", "deps": []any{"b"}}},
 	}})
@@ -288,6 +288,108 @@ func TestServeCallPlanAmend(t *testing.T) {
 	a = s.call(5, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{}})
 	if text, isError = toolText(t, a); !isError || !strings.Contains(text, "plan is required") {
 		t.Errorf("no plan = %q, error %v, want the tool's error", text, isError)
+	}
+}
+
+// TestPlanAmendCancelReason covers the reason of a cancel (§6.2, §12.2):
+// plan_amend's schema declares cancel entries as objects with a required
+// task and reason; a bare name (the older shape), a number or a blank
+// reason is refused naming the task, before anything changes; and a
+// reason lands verbatim on the cancelled task's cancel event.
+func TestPlanAmendCancelReason(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	s := start(t, e)
+
+	a := s.call(1, "tools/list", nil)
+	var list struct {
+		Tools []toolInfo `json:"tools"`
+	}
+	if err := json.Unmarshal(a.Result, &list); err != nil {
+		t.Fatalf("decode tools/list: %v", err)
+	}
+	var found bool
+	for _, tl := range list.Tools {
+		if tl.Name != "plan_amend" {
+			continue
+		}
+		found = true
+		props := tl.InputSchema.(map[string]any)["properties"].(map[string]any)
+		cancel := props["cancel"].(map[string]any)
+		item := cancel["items"].(map[string]any)
+		itemProps := item["properties"].(map[string]any)
+		for _, field := range []string{"task", "reason"} {
+			if _, ok := itemProps[field]; !ok {
+				t.Errorf("plan_amend cancel items declare no %q", field)
+			}
+		}
+		if req, _ := item["required"].([]any); len(req) != 2 {
+			t.Errorf("plan_amend cancel items required = %v, want task and reason", item["required"])
+		}
+		if d, _ := itemProps["reason"].(map[string]any)["description"].(string); !strings.Contains(d, "required") {
+			t.Errorf("the cancel reason description = %q, want it to say the reason is required", d)
+		}
+	}
+	if !found {
+		t.Fatal("no plan_amend tool")
+	}
+
+	a = s.call(2, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{
+		"title": "cancel reasons",
+		"tasks": []any{
+			map[string]any{"name": "a", "spec": "one"},
+			map[string]any{"name": "b", "spec": "two"},
+		},
+	}})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("plan_create errored: %s", text)
+	}
+	state := func(name string) string {
+		var st string
+		if err := e.st.View(t.Context(), func(tx *sql.Tx) error {
+			return tx.QueryRow("SELECT state FROM tasks WHERE name = ?", name).Scan(&st)
+		}); err != nil {
+			t.Fatalf("read task %s: %v", name, err)
+		}
+		return st
+	}
+
+	id := 3
+	for _, bad := range []any{
+		"a",
+		1,
+		map[string]any{"task": "a"},
+		map[string]any{"task": "a", "reason": "   "},
+	} {
+		id++
+		a = s.call(id, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+			"plan":   1,
+			"cancel": []any{map[string]any{"task": "b", "reason": "fine"}, bad},
+		}})
+		text, isError := toolText(t, a)
+		if !isError || !strings.Contains(text, "reason is required") || !strings.Contains(text, `task "`) {
+			t.Errorf("cancel %v = %q, error %v, want a refusal naming the task and the reason", bad, text, isError)
+		}
+		if state("a") == "cancelled" || state("b") == "cancelled" {
+			t.Fatalf("a refused amendment cancelled a task: a %s, b %s", state("a"), state("b"))
+		}
+	}
+
+	const why = "superseded by task 274"
+	a = s.call(20, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan":   1,
+		"cancel": []any{map[string]any{"task": "a", "reason": why}},
+	}})
+	if text, isError := toolText(t, a); isError || !strings.Contains(text, "cancelled task 1") {
+		t.Fatalf("plan_amend with a reason = %q, error %v", text, isError)
+	}
+	var payload string
+	if err := e.st.View(t.Context(), func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT payload FROM events WHERE kind = 'task_cancelled_by_amend' AND task_id = 1").Scan(&payload)
+	}); err != nil {
+		t.Fatalf("read the cancel event: %v", err)
+	}
+	if !strings.Contains(payload, `"reason":"`+why+`"`) || !strings.Contains(payload, `"caller":"foreman"`) {
+		t.Errorf("cancel payload = %s, want the reason verbatim and the foreman caller", payload)
 	}
 }
 

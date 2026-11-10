@@ -302,6 +302,69 @@ func TestPlanAmendRetierRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPlanAmendCancelReason: plan_amend's cancel entries carry a required
+// reason (§6.2, §12.2). The older shape, a bare name, and a blank reason
+// are refused as a 400 naming the task, with nothing changed; a reason
+// is recorded verbatim on the task's cancel event with the role that asked.
+func TestPlanAmendCancelReason(t *testing.T) {
+	e := newEnv(t)
+	body := `{"title":"cancel","tasks":[{"name":"build","spec":"build it"},{"name":"ship","spec":"ship it","deps":["build"]}]}`
+	code, _, data := e.do(http.MethodPost, "/v1/plans", "foreman1", "cancel-1", []byte(body))
+	if code != http.StatusOK {
+		t.Fatalf("plan_create: %d %s", code, data)
+	}
+	res := decode[planCreateBody](t, data)
+	path := "/v1/plans/" + strconv.FormatInt(res.PlanID, 10) + "/amend"
+	state := func(name string) string {
+		return e.str("SELECT state FROM tasks WHERE plan_id = ? AND name = ?", res.PlanID, name)
+	}
+
+	for i, bad := range []string{
+		`{"cancel":["ship"]}`,
+		`{"cancel":[7]}`,
+		`{"cancel":[{"task":"ship"}]}`,
+		`{"cancel":[{"task":"ship","reason":" \t"}]}`,
+	} {
+		code, _, data := e.do(http.MethodPost, path, "foreman1", "cancel-bad-"+strconv.Itoa(i), []byte(bad))
+		if code != http.StatusBadRequest || !strings.Contains(string(data), "reason is required") {
+			t.Errorf("cancel %s: %d %s, want a 400 saying the reason is required", bad, code, data)
+		}
+	}
+	if got := state("ship"); got == "cancelled" {
+		t.Fatalf("ship is cancelled after refused amendments")
+	}
+	if n := e.str("SELECT COUNT(*) FROM events WHERE kind = 'task_cancelled_by_amend'"); n != "0" {
+		t.Fatalf("task_cancelled_by_amend events after refusals = %s, want 0", n)
+	}
+
+	const why = "superseded by task 274"
+	code, _, data = e.do(http.MethodPost, path, "foreman1", "cancel-ok",
+		[]byte(`{"cancel":[{"task":"ship","reason":"`+why+`"}]}`))
+	if code != http.StatusOK {
+		t.Fatalf("cancel with a reason: %d %s", code, data)
+	}
+	if got := state("ship"); got != "cancelled" {
+		t.Errorf("ship state = %q, want cancelled", got)
+	}
+	payload := e.str(`SELECT payload FROM events WHERE kind = 'task_cancelled_by_amend'
+		AND task_id = (SELECT id FROM tasks WHERE plan_id = ? AND name = 'ship')`, res.PlanID)
+	if !strings.Contains(payload, `"reason":"`+why+`"`) || !strings.Contains(payload, `"caller":"foreman"`) {
+		t.Errorf("cancel payload = %s, want the reason verbatim and the foreman caller", payload)
+	}
+
+	// A user's token is recorded as the user.
+	code, _, data = e.do(http.MethodPost, path, "root", "cancel-user",
+		[]byte(`{"cancel":[{"task":"build","reason":"the user dropped it"}]}`))
+	if code != http.StatusOK {
+		t.Fatalf("user cancel: %d %s", code, data)
+	}
+	payload = e.str(`SELECT payload FROM events WHERE kind = 'task_cancelled_by_amend'
+		AND task_id = (SELECT id FROM tasks WHERE plan_id = ? AND name = 'build')`, res.PlanID)
+	if !strings.Contains(payload, `"caller":"user"`) || !strings.Contains(payload, "the user dropped it") {
+		t.Errorf("user cancel payload = %s, want the user caller and the reason", payload)
+	}
+}
+
 // TestPlanSkillsRoundTrip: the skills field of a task rides plan_create,
 // plan_amend's respec and retier, and the task submit through the API to
 // the engine's resolver — the ordered names recorded on the task, an
