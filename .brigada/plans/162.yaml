@@ -54,8 +54,8 @@ tasks:
     review_tier: standard
     skills: ["surface-parity"]
     state: running
-    branch: "brigada/task-603"
-    rounds: 0
+    branch: "brigada/task-603-r1"
+    rounds: 1
   - id: 604
     name: "foreman-heavy-split"
     title: "docs(foreman): split heavy tasks until each piece fits the size guide"
