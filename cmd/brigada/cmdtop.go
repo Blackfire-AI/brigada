@@ -18,7 +18,6 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/history"
 	"github.com/Blackfire-AI/brigada/internal/logo"
-	"github.com/Blackfire-AI/brigada/internal/projecturl"
 	"github.com/Blackfire-AI/brigada/internal/term"
 	"golang.org/x/sys/unix"
 )
@@ -86,7 +85,7 @@ func runTop(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	repo := ""
 	if project != "" {
-		canonical, err := projecturl.Canonical(project)
+		canonical, err := engine.Canonicalize(project)
 		if err != nil {
 			return usagef(stderr, "--project: %v", err)
 		}
