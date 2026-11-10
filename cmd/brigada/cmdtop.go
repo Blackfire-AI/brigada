@@ -2004,6 +2004,9 @@ func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Durati
 		if err != nil {
 			return
 		}
+		// A tick dials afresh, so an engine that exited idle is started
+		// again; its connections are closed once the tick has fetched.
+		defer client.CloseIdleConnections()
 		fetched, err := topFetch(ctx, topAPI{client}, repo)
 		model = afterFetch(model, fetched, err, time.Now())
 		// Each tick reads the cached listing; no CLI runs on a tick.
