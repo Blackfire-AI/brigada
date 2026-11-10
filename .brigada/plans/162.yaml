@@ -65,8 +65,8 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-604"
     rounds: 0
   - id: 605
     name: "rebuild-base-design"
