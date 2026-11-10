@@ -267,7 +267,7 @@ func TestServeCallPlanAmend(t *testing.T) {
 		[]any{map[string]any{"task": "a", "reason": "  "}},
 		[]any{"a"},
 	} {
-		a = s.call(10+i,"tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		a = s.call(10+i, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
 			"plan": 1, "cancel": cancel,
 		}})
 		text, isError = toolText(t, a)
