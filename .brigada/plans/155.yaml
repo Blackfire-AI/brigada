@@ -5,9 +5,9 @@
 plan: 155
 title: "Restart after a failed push phase lands the new head (#205)"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-11-10T14:48:45.807189Z
-updated: 2026-11-10T14:54:26.713534Z
+updated: 2026-11-10T14:59:01.624469Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -32,7 +32,7 @@ tasks:
     review_tier: heavy
     review_effort: high
     skills: ["bugfix"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 573
