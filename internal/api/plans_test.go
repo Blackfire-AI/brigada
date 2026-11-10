@@ -427,7 +427,8 @@ func TestPlanCancelBodyShapes(t *testing.T) {
 
 // TestPlanAmendCancelReason: POST /v1/plans/{id}/amend records each
 // cancel's reason verbatim with the role that asked; the legacy shapes —
-// a bare name, a numeric id — cancel as before, with no reason.
+// a bare name, a numeric id — cancel as before, recorded as "no reason
+// given".
 func TestPlanAmendCancelReason(t *testing.T) {
 	e := newEnv(t)
 	seed := func(name string) int64 {
@@ -462,7 +463,7 @@ func TestPlanAmendCancelReason(t *testing.T) {
 		t.Errorf("r's event = %+v, want the reason verbatim and the foreman caller", p)
 	}
 
-	// The legacy shapes still cancel, with no reason.
+	// The legacy shapes still cancel, recorded as "no reason given".
 	body := []byte(`{"cancel":["a",` + strconv.FormatInt(legacyID, 10) + `]}`)
 	if code, _, data := e.do(http.MethodPost, path, "foreman1", "legacy", body); code != http.StatusOK {
 		t.Fatalf("legacy cancel: %d %s, want 200", code, data)
@@ -471,8 +472,8 @@ func TestPlanAmendCancelReason(t *testing.T) {
 		if state := e.str("SELECT state FROM tasks WHERE id = ?", task); state != "cancelled" {
 			t.Errorf("task %d = %q, want cancelled", task, state)
 		}
-		if p := payload(task); p.Reason != "" || p.Caller != "foreman" {
-			t.Errorf("task %d's event = %+v, want no reason and the foreman caller", task, p)
+		if p := payload(task); p.Reason != "no reason given" || p.Caller != "foreman" {
+			t.Errorf("task %d's event = %+v, want no reason given and the foreman caller", task, p)
 		}
 	}
 

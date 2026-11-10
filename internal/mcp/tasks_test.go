@@ -294,6 +294,46 @@ func TestServeCallTaskRetire(t *testing.T) {
 	}
 }
 
+// TestServeCallTaskCancel covers task_cancel's optional reason (§6.2,
+// §12.2): a reason reaches the task's task_cancelled_by_amend event
+// verbatim with the foreman caller, a call without one is recorded as
+// "no reason given", and the reason is part of the minted key while a
+// call without one keeps the key it always had.
+func TestServeCallTaskCancel(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	given := seedTask(t, e, "needs_foreman", "given")
+	bare := seedTask(t, e, "needs_foreman", "bare")
+	s := start(t, e)
+
+	why := "superseded by task 274\n\"<b>\""
+	a := s.call(1, "tools/call", map[string]any{"name": "task_cancel", "arguments": map[string]any{"task": given, "reason": why}})
+	if text, isError := toolText(t, a); isError || !strings.Contains(text, "cancelled") {
+		t.Fatalf("task_cancel with a reason = %q (error %v)", text, isError)
+	}
+	if reason, caller := cancelEvent(t, e, given); reason != why || caller != "foreman" {
+		t.Errorf("event = %q by %q, want the reason verbatim by the foreman", reason, caller)
+	}
+	a = s.call(2, "tools/call", map[string]any{"name": "task_cancel", "arguments": map[string]any{"task": bare}})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("task_cancel without a reason errored: %s", text)
+	}
+	if reason, _ := cancelEvent(t, e, bare); reason != "no reason given" {
+		t.Errorf("event reason = %q, want no reason given", reason)
+	}
+
+	if idemKey("task_cancel", taskCancelArgs{Task: 7}) == idemKey("task_cancel", taskCancelArgs{Task: 7, Reason: "r"}) {
+		t.Error("the same task with a reason minted the key of the call without")
+	}
+	if idemKey("task_cancel", taskCancelArgs{Task: 7, Reason: "r"}) == idemKey("task_cancel", taskCancelArgs{Task: 7, Reason: "s"}) {
+		t.Error("two reasons minted one key")
+	}
+	if idemKey("task_cancel", taskCancelArgs{Task: 7}) != idemKey("task_cancel", struct {
+		Task int64 `json:"task"`
+	}{7}) {
+		t.Error("a call without a reason minted another key than before")
+	}
+}
+
 // TestServeCallTaskRetireRefused covers the tool's error path: a task
 // with a landing record is refused, the engine's reason carried as the
 // tool's error, and nothing changes.
