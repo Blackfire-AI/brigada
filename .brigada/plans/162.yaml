@@ -30,8 +30,8 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-601"
     rounds: 0
   - id: 602
     name: "opencode-cache"
