@@ -126,17 +126,30 @@ func TestLimitResetCappedAtEightDays(t *testing.T) {
 	}
 }
 
-// TestForemanLimitCoolsNoAccount: the foreman key's limit is §4.4's;
-// the dispatcher does not cool the account for it.
-func TestForemanLimitCoolsNoAccount(t *testing.T) {
+// TestForemanLimitCoolsTheSharedAccount is §4.4: beside the foreman
+// key's own limited state, a foreman turn's limit cools the account it
+// ran on — the task workers sharing the label cool until the reset, and
+// no other account does.
+func TestForemanLimitCoolsTheSharedAccount(t *testing.T) {
 	e := newEnv(t)
-	a := e.addAgent(e.runner1, "claude", "sonnet", "work")
-	e.limitForeman(e.clock.Now().Add(2 * time.Hour).Format(time.RFC3339))
-	if h, _, cool := e.agentState(a); h != "ready" || cool != "" {
-		t.Errorf("agent after the foreman's limit: health %q cooling %q, want untouched", h, cool)
+	shared := e.addAgent(e.runner1, "claude", "opus", "claude")
+	other := e.addAgent(e.runner1, "claude", "sonnet", "work")
+	until := e.clock.Now().Add(2 * time.Hour)
+	e.limitForeman(until.Format(time.RFC3339))
+	if h, _, cool := e.agentState(shared); h != "ready" || cool != fmtTime(until) {
+		t.Errorf("shared-account worker after the foreman's limit: health %q cooling %q, want ready, cooling until %s", h, cool, fmtTime(until))
 	}
-	if got := e.countEvents(evAgentCooling); got != 0 {
-		t.Errorf("agent_cooling events = %d, want 0", got)
+	if h, _, cool := e.agentState(other); h != "ready" || cool != "" {
+		t.Errorf("other account's agent: health %q cooling %q, want ready and not cooling", h, cool)
+	}
+	var found bool
+	for _, r := range e.eventRows() {
+		if r.kind == evAgentCooling && r.payload.Account == "claude" && r.payload.Until == fmtTime(until) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no agent_cooling event naming account claude until %s", fmtTime(until))
 	}
 }
 

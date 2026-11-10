@@ -548,6 +548,8 @@ var errorPhrases = []errorPhrase{
 	{adapter.ErrLimit, "limit reached"},
 	{adapter.ErrLimit, "try again at"},
 	{adapter.ErrLimit, "hit your session limit"},
+	{adapter.ErrLimit, "hit your 5-hour limit"},
+	{adapter.ErrLimit, "hit your weekly limit"},
 	// The CLI's login (§8): the agent is broken until a probe passes.
 	{adapter.ErrAuth, "invalid api key"},
 	{adapter.ErrAuth, "please run /login"},
@@ -569,6 +571,8 @@ var stderrPhrases = []errorPhrase{
 	{adapter.ErrResumeFailed, "no session found"},
 	{adapter.ErrLimit, "usage limit reached"},
 	{adapter.ErrLimit, "hit your session limit"},
+	{adapter.ErrLimit, "hit your 5-hour limit"},
+	{adapter.ErrLimit, "hit your weekly limit"},
 	{adapter.ErrAuth, "invalid api key"},
 	{adapter.ErrAuth, "please run /login"},
 	{adapter.ErrAuth, "not logged in"},
