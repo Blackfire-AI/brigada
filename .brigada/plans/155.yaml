@@ -32,9 +32,9 @@ tasks:
     review_tier: heavy
     review_effort: high
     skills: ["bugfix"]
-    state: reviewing
+    state: running
     branch: "brigada/task-572-r1"
-    rounds: 0
+    rounds: 1
   - id: 573
     name: "requeue-stale-base"
     title: "fix(engine): land re-queues from land_ready hold and not-ready take the stale-base check"
