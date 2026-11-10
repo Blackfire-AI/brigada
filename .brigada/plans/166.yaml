@@ -57,6 +57,6 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["surface-parity", "docs-change"]
-    state: reviewing
+    state: done
     branch: "brigada/task-629"
     rounds: 0
