@@ -53,10 +53,9 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["surface-parity"]
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-603-r2"
     rounds: 2
-    question: "Please run `gofmt -l .`, `go vet ./...` and `go test ./...` in this worktree (or give me the check's captured output) and tell me which step fails and on which file/test; the silent exit 1 points at the gofmt -l step, but a hidden vet/test failure or a problem already on the base (brigada/task-601 at ea8b3d5) would look the same."
   - id: 604
     name: "foreman-heavy-split"
     title: "docs(foreman): split heavy tasks until each piece fits the size guide"
