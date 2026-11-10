@@ -52,6 +52,13 @@ func NewClientWithHTTPClient(client *http.Client, token string) *Client {
 	return &Client{http: client, token: token}
 }
 
+// CloseIdleConnections closes the client's idle keep-alive connections,
+// for a caller that builds a client per use and would otherwise leave
+// each one's socket open until the engine's idle timeout.
+func (c *Client) CloseIdleConnections() {
+	c.http.CloseIdleConnections()
+}
+
 // ProjectReader returns a copy of the client whose reads — status,
 // history, stats — name one project, for a caller whose token is not
 // scoped to it (the coordinator's client token).

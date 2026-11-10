@@ -338,6 +338,8 @@ func TestLandEnvClass(t *testing.T) {
 		{"", "the task's diff no longer applies onto main: the merge conflicted", ""},
 		{"", "brigada/task-1 is at abc, not the approved head def: the branch moved after its review; nothing landed", ""},
 		{"", "the push was rejected after 5 attempts (the target moved): non-fast-forward", ""},
+		{"", "the push was rejected after 5 attempts (the target moved): ! [rejected]        HEAD -> main (fetch first)\nerror: failed to push some refs to 'https://example.invalid/brigada.git'", ""},
+		{"", "push abc to main: ! [rejected]        HEAD -> main (fetch first)", ""},
 		{"", "read the fetched head of brigada/task-1: exit 128", ""},
 		{"", "detach the landing clone: exit 1", ""},
 		{"", "the land job is incomplete: target \"main\", branch \"\", base \"main\"", ""},

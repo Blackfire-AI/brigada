@@ -51,6 +51,7 @@ func EnsureEngine(ctx context.Context, o StartOptions) error {
 		return err
 	}
 	probe := api.NewClient(o.Socket, "")
+	defer probe.CloseIdleConnections()
 	if err := probe.HealthProbe(ctx); err == nil {
 		return nil
 	}
@@ -80,7 +81,9 @@ func EnsureEngine(ctx context.Context, o StartOptions) error {
 // EngineRunning probes whether an engine answers on the socket: the
 // start-on-demand question without the start.
 func EngineRunning(ctx context.Context, socket string) bool {
-	return api.NewClient(socket, "").HealthProbe(ctx) == nil
+	probe := api.NewClient(socket, "")
+	defer probe.CloseIdleConnections()
+	return probe.HealthProbe(ctx) == nil
 }
 
 // startEngine spawns `brigada engine` detached (§13): its own session,

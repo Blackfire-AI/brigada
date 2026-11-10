@@ -881,6 +881,12 @@ func landEnvClass(kind, msg string) string {
 			return "network"
 		}
 	}
+	// A rejected push is the target moving under the landing, the
+	// landing's own failure: git's "(fetch first)" hint must not read as
+	// the remote's fetch failing.
+	if pushRejected(m) {
+		return ""
+	}
 	for _, s := range []string{"clone ", "fetch ", "ls-remote", "look for "} {
 		if strings.Contains(m, s) {
 			return "remote"

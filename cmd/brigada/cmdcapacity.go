@@ -9,7 +9,6 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
-	"github.com/Blackfire-AI/brigada/internal/projecturl"
 	"github.com/Blackfire-AI/brigada/internal/term"
 )
 
@@ -45,7 +44,7 @@ func runCapacity(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 	repo := ""
 	if project != "" {
-		canonical, err := projecturl.Canonical(project)
+		canonical, err := engine.Canonicalize(project)
 		if err != nil {
 			return usagef(stderr, "--project: %v", err)
 		}
@@ -103,7 +102,7 @@ func lookupProjectID(ctx context.Context, client capacityClient, repo string) (i
 		if err != nil {
 			return 0, nil
 		}
-		if repo, err = projecturl.Canonical(origin); err != nil {
+		if repo, err = engine.Canonicalize(origin); err != nil {
 			return 0, nil
 		}
 	}

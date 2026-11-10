@@ -4,6 +4,7 @@ import (
 	"hash/fnv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
@@ -116,9 +117,11 @@ func cutRuneSafe(s string, max int) string {
 		return s
 	}
 	s = s[:max]
+	// Drop the bytes of a rune the cut split, lead byte included: a
+	// trailing byte that does not decode alone is part of one.
 	for len(s) > 0 {
-		if b := s[len(s)-1]; b&0xC0 == 0x80 {
-			s = s[:len(s)-1] // a continuation byte: the rune's start is further back
+		if r, size := utf8.DecodeLastRuneInString(s); r == utf8.RuneError && size == 1 {
+			s = s[:len(s)-1]
 			continue
 		}
 		break

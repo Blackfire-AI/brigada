@@ -65,27 +65,6 @@ func (r sectionRecord) separators() int {
 	return n
 }
 
-func (r sectionRecord) String() string {
-	var parts []string
-	if r.created {
-		parts = append(parts, "the file")
-	}
-	if r.newline {
-		parts = append(parts, "a newline")
-	}
-	if r.blank {
-		parts = append(parts, "a blank line")
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	s := recordLead + strings.Join(parts, ", ")
-	if r.separators() > 0 {
-		s += recordAt + strconv.Itoa(r.at)
-	}
-	return s
-}
-
 func parseSectionRecord(marker string) sectionRecord {
 	r := sectionRecord{at: -1}
 	_, rest, ok := strings.Cut(strings.TrimSuffix(marker, "-->"), recordLead)

@@ -149,5 +149,4 @@ brigada is a standalone tool beside your own harness session: not a board, and n
 
 ## 12. Open questions
 
-1. The default task limit at the plan gate, with landing automatic: 5 today; 12 or none proposed.
-2. Tiers and effort ([design.md](design.md) §16 item 12): the tier table as vendors rename models, and whether the effort levels reach a CLI's extremes.
+1. Tiers and effort ([design.md](design.md) §16 item 12): the tier table as vendors rename models, and whether the effort levels reach a CLI's extremes.
