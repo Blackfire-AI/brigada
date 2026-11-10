@@ -53,7 +53,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["surface-parity"]
-    state: ready
+    state: running
     branch: "brigada/task-603-r2"
     rounds: 2
   - id: 604
