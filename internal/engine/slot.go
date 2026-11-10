@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -65,19 +64,4 @@ func slotTx(tx *sql.Tx, project int64, now time.Time) (Slot, error) {
 			Since: since, Events: events}, nil
 	}
 	return slot, nil
-}
-
-// ForemanSlot reads the project's slot: what `brigada status` shows.
-func (e *Engine) ForemanSlot(ctx context.Context, project int64) (Slot, error) {
-	var slot Slot
-	err := e.store.Update(ctx, func(tx *sql.Tx) error {
-		now := e.cfg.Now()
-		if _, err := e.sweepTx(tx, now); err != nil {
-			return err
-		}
-		var err error
-		slot, err = slotTx(tx, project, now)
-		return err
-	})
-	return slot, err
 }

@@ -115,18 +115,13 @@ func heldWorktreeDir(dir string) chan struct{} {
 	return branchHolds.m[dirHoldKey(dir)]
 }
 
-// lockMirrorFor takes the mirror's lock once none of branches is checked
-// out by another live worktree, waiting for them to come down first. The
-// check is repeated under the lock, because the holder's removal needs
-// the lock too: waiting for a branch while holding it would deadlock.
-func lockMirrorFor(ctx context.Context, mirror string, branches ...string) (func(), error) {
-	return lockMirrorHolding(ctx, mirror, branches, nil)
-}
-
-// lockMirrorHolding is lockMirrorFor with worktree directories waited
-// for beside branches: a session-stable path is shared by the jobs of
-// one attempt (§5.1), so its next holder waits for the last one's
-// worktree to come down exactly as a follow-up waits for a branch.
+// lockMirrorHolding takes the mirror's lock once none of branches is
+// checked out by another live worktree and none of dirs is held, waiting
+// for them to come down first. The check is repeated under the lock,
+// because the holder's removal needs the lock too: waiting for a branch
+// while holding it would deadlock. A session-stable path is shared by
+// the jobs of one attempt (§5.1), so its next holder waits for the last
+// one's worktree to come down exactly as a follow-up waits for a branch.
 func lockMirrorHolding(ctx context.Context, mirror string, branches, dirs []string) (func(), error) {
 	for {
 		wait := heldBranch(mirror, branches)

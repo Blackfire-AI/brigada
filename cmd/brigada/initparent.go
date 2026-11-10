@@ -92,12 +92,6 @@ func scanParentWithAliases(ctx context.Context, dir string, acceptAliases bool) 
 	return out, nil
 }
 
-// classifyChild decides whether a directory child is a repository with a
-// usable origin, setting skip when it is not.
-func classifyChild(ctx context.Context, c *parentChild) {
-	classifyChildWithAliases(ctx, c, false)
-}
-
 func classifyChildWithAliases(ctx context.Context, c *parentChild, acceptAliases bool) {
 	st, err := os.Lstat(filepath.Join(c.path, ".git"))
 	switch {

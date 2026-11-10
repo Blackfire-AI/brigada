@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,12 +16,6 @@ const (
 	importBegin = "<!-- brigada-managed: import v1"
 	importEnd   = "<!-- /brigada-managed: import -->"
 )
-
-// addedBlank is the record an older init wrote into a begin marker when
-// it appended the section to a terminated file holding original.
-func addedBlank(original string) string {
-	return fmt.Sprintf("; init added a blank line after byte %d -->", len(original))
-}
 
 func TestWiringRouterRoundTripIsByteExact(t *testing.T) {
 	cases := map[string]*string{

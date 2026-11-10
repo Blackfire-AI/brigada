@@ -33,14 +33,6 @@ type landOptions struct {
 	noCheck bool
 }
 
-// Bounds of the commit message (§7.1), kept by internal/landing.
-const (
-	landSpecBytes     = landing.SpecBytes
-	landSummaryBytes  = landing.SummaryBytes
-	landMessageBytes  = landing.MessageBytes
-	landTruncatedMark = landing.TruncatedMark
-)
-
 // idList is a repeatable integer flag.
 type idList []int64
 

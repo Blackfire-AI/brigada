@@ -119,14 +119,6 @@ func validateSkill(s *Skill) error {
 	return nil
 }
 
-// ValidateSkills checks a skill import whole, as ImportSkills will, so a
-// caller can refuse before it writes anything else. The refusal names the
-// skill.
-func ValidateSkills(skills []Skill) error {
-	_, _, err := validateSkills(skills)
-	return err
-}
-
 // validateSkills returns the import's skills with their defaults filled,
 // and their names in order.
 func validateSkills(skills []Skill) ([]Skill, []string, error) {
