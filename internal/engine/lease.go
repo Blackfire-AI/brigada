@@ -117,6 +117,13 @@ type LeaseGrant struct {
 	// was already released by an approval (issue #87): the runner runs
 	// no command and lands. False on every grant but a released hold's.
 	SkipLandReady bool
+	// DropWaitingRef is true for a land job's squash phase (§7.1) when
+	// the engine has marked the target's waiting ref stale (issue #205):
+	// the landings that sat on it are forgotten, so their commits must
+	// not be stacked on again — the runner deletes
+	// refs/brigada/land/<target> before it stacks. False for the push
+	// phase and every other kind.
+	DropWaitingRef bool
 	// Branch is the branch the engine names a work or fix job to work
 	// on (§5.1): a work job makes it from the base ref, a fix round
 	// continues the task's current branch, and the runner builds and

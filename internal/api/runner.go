@@ -478,6 +478,12 @@ type jobGrant struct {
 	// (issue #87): the engine sets it when an approval already released
 	// the gate's hold.
 	SkipLandReady bool `json:"skip_land_ready,omitempty"`
+	// DropWaitingRef tells a land job's squash phase (issue #205) that
+	// the engine marked the target's waiting ref stale: the landings
+	// that sat on it are forgotten, and the runner deletes
+	// refs/brigada/land/<target> before it stacks. False for the push
+	// phase and every other kind.
+	DropWaitingRef bool `json:"drop_waiting_ref,omitempty"`
 	// LandMessage is, for a land job's squash phase (§7.1), the task
 	// data the squash commit message is built from. nil for the push
 	// phase and every other kind.
@@ -538,6 +544,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		AfterLand:       g.AfterLand,
 		LandReady:       g.LandReady,
 		SkipLandReady:   g.SkipLandReady,
+		DropWaitingRef:  g.DropWaitingRef,
 		LandMessage:     g.LandMessage,
 		Attempt:         g.Attempt,
 		ResumeSessionID: g.ResumeSessionID,
