@@ -318,6 +318,62 @@ func TestUnmarkedLandingDoesNotSpendTheStaleRefMark(t *testing.T) {
 	}
 }
 
+// TestStaleRefMarkSettledByReportedDrop (issue #205): the land job whose
+// grant carries the stale-ref mark deletes the waiting ref and reports
+// it on its completion; the report clears the engine's record even when
+// the job then fails. A job that fails before it dropped the ref reports
+// nothing, and the mark stays for the next land job of the target.
+func TestStaleRefMarkSettledByReportedDrop(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		dropped  string
+		wantMark int64
+	}{
+		{"reported drop clears the mark", "main", 0},
+		{"failure before the drop keeps the mark", "", 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.set(map[string]string{SettingGatePush: GateAsk})
+			author := e.agented("author", "anthropic", "implement")
+			reviewer := e.agented("reviewer", "google", "implement", "review")
+			e.runToDone(author, reviewer)
+			e.completeLandOf(e.task, author, `{"target_branch":"main","commit":"old123","check_passed":true,"pushed":"waiting"}`)
+			if res, err := e.eng.PushApprove(e.ctx, envRepo); err != nil || res.Released != 1 {
+				t.Fatalf("PushApprove = (%d, %v), want 1 released", res.Released, err)
+			}
+			pg := e.leaseGit(author)
+			if pg == nil || !pg.Push {
+				t.Fatalf("the push job was not leased: %+v", pg)
+			}
+			if ans := e.complete(pg, Completion{Error: "! [rejected] main -> main (non-fast-forward)"}); ans != AnsOK {
+				t.Fatalf("complete the rejected push: %s", ans)
+			}
+			if _, err := e.eng.RestartTask(e.ctx, e.project, e.task, "rework the head"); err != nil {
+				t.Fatalf("RestartTask: %v", err)
+			}
+			g := e.leaseAny(author)
+			if g == nil || g.Kind != KindWork {
+				t.Fatalf("the restart's work job was not leased: %+v", g)
+			}
+			if ans := e.complete(g, doneOn("task/1-2", passCheck)); ans != AnsOK {
+				t.Fatalf("complete the reworked work: %s", ans)
+			}
+			e.runReview(reviewer, `{"verdict":"approve","findings":"`+substantiveFindings+`"}`)
+			lg := e.leaseGit(author)
+			if lg == nil || lg.Push || !lg.DropWaitingRef {
+				t.Fatalf("the re-made land grant = %+v, want the squash phase with the stale-ref mark", lg)
+			}
+			if ans := e.complete(lg, Completion{Error: "git fetch origin: connection refused", StaleDropped: c.dropped}); ans != AnsOK {
+				t.Fatalf("complete the failed land job: %s", ans)
+			}
+			if n := e.int("SELECT COUNT(*) FROM stale_land_refs WHERE project_id = ? AND target_branch = 'main'", e.project); n != c.wantMark {
+				t.Errorf("stale waiting-ref marks after the failed land job = %d, want %d", n, c.wantMark)
+			}
+		})
+	}
+}
+
 // TestRestartClearsTheLandHoldsOfTheForgottenLanding (issue #205): a
 // push-phase land_ready hold outlives its landing's failed push — the
 // rejected re-check parks the task under the held row — and the row
