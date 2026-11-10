@@ -31,8 +31,8 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-625"
     rounds: 0
   - id: 626
     name: "rebuild-base-design"
