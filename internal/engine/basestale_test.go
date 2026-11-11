@@ -377,8 +377,11 @@ func TestLandRefusedOnStaleBase(t *testing.T) {
 	}
 
 	// mid finishes on the stale base, its dependency lands from -r1, and
-	// the landing the release would queue is refused: parked, both refs
-	// named, no land job, no record.
+	// the landing the release would queue is refused: parked, no land job,
+	// no record. The dependency's work is on the land target now (§6.1's
+	// rebuild base rule, case (b)), so the refusal names the superseded
+	// base and the land target as the new base, not -r1, and the
+	// foreman's restart rebuilds on it.
 	if ans := e.complete(midWork, doneOn(branchOf(mid), passCheck)); ans != AnsOK {
 		t.Fatalf("complete mid: %s", ans)
 	}
@@ -395,13 +398,22 @@ func TestLandRefusedOnStaleBase(t *testing.T) {
 	}
 	p, ok := e.taskEvent(mid, evTaskBaseStale)
 	if !ok || !strings.Contains(p.Reason, "the landing is refused") ||
-		!strings.Contains(p.Reason, branchOf(lib)) || !strings.Contains(p.Reason, r1) {
-		t.Errorf("mid's task_base_stale = %+v (%t), want the refusal naming both refs", p, ok)
+		!strings.Contains(p.Reason, branchOf(lib)) || !strings.Contains(p.Reason, "now landed; the new base is the land target main") {
+		t.Errorf("mid's task_base_stale = %+v (%t), want the refusal naming the stale base and the land target", p, ok)
+	}
+	if p.Branch != "main" {
+		t.Errorf("mid's task_base_stale branch = %q, want the land target main", p.Branch)
 	}
 	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'", mid); n != 0 {
 		t.Errorf("mid land jobs = %d, want none: a stale base never lands", n)
 	}
 	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", mid); n != 0 {
 		t.Errorf("mid landings = %d, want none", n)
+	}
+	if _, err := e.eng.RestartTask(e.ctx, e.project, mid, "rebuild on the land target"); err != nil {
+		t.Fatalf("restart mid: %v", err)
+	}
+	if got := e.str("SELECT base_ref FROM tasks WHERE id = ?", mid); got != "main" {
+		t.Errorf("mid base_ref after the restart = %q, want the land target main", got)
 	}
 }

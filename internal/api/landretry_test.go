@@ -120,7 +120,9 @@ func TestTaskLandRetryHeld(t *testing.T) {
 
 // TestTaskLandRetryStaleBase: a task whose base is a superseded round of
 // its dependency is parked again by the land rule; the answer names the
-// stale base and task_restart.
+// stale base and task_restart. The dependency's landing is recorded, so
+// the new base named is the land target (§6.1's rebuild base rule, case
+// (b)).
 func TestTaskLandRetryStaleBase(t *testing.T) {
 	e := newEnv(t)
 	task := seedLandRejected(t, e, e.plan)
@@ -133,7 +135,7 @@ func TestTaskLandRetryStaleBase(t *testing.T) {
 
 	res, _ := e.landRetry(task, "foreman1", "")
 	if res.Outcome != "stale_base" || res.JobID != 0 || !strings.Contains(res.Reason, "task_restart") ||
-		!strings.Contains(res.Reason, fmt.Sprintf("brigada/task-%d-r1", lib)) {
+		!strings.Contains(res.Reason, fmt.Sprintf("brigada/task-%d ", lib)) || !strings.Contains(res.Reason, "the land target main") {
 		t.Fatalf("land retry = %+v, want stale_base naming the new base and task_restart", res)
 	}
 	if state := e.str("SELECT state FROM tasks WHERE id = ?", task); state != "needs_foreman" {

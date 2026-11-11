@@ -302,12 +302,14 @@ func TestRetryLandingStaleBase(t *testing.T) {
 	if ans := e.complete(lg, Completion{Error: landRejectedErr}); ans != AnsOK {
 		t.Fatalf("fail mid's push: %s", ans)
 	}
-	// The dependency's result moved to a new round while mid waited.
+	// The dependency's result moved to a new round while mid waited. Its
+	// landing is recorded, so the rebuild base rule (§6.1, case (b)) names
+	// the land target as the new base.
 	e.exec("UPDATE tasks SET branch = ? WHERE id = ?", branchOf(lib)+"-r1", lib)
 
 	res := e.retryLanding(e.project, mid)
 	if res.Outcome != LandRetryStaleBase || res.JobID != 0 ||
-		!strings.Contains(res.Reason, branchOf(lib)+"-r1") || !strings.Contains(res.Reason, "task_restart") {
+		!strings.Contains(res.Reason, "the land target main") || !strings.Contains(res.Reason, "task_restart") {
 		t.Fatalf("RetryLanding = %+v, want stale_base naming the new base and task_restart", res)
 	}
 	if state := e.str("SELECT state FROM tasks WHERE id = ?", mid); state != taskNeedsForeman {
