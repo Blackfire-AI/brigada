@@ -41,7 +41,7 @@ tasks:
     effort: medium
     review_tier: heavy
     skills: ["bugfix"]
-    state: reviewing
+    state: done
     branch: "brigada/task-638"
     rounds: 0
   - id: 639
@@ -52,6 +52,6 @@ tasks:
     base: ""
     effort: medium
     skills: ["docs-change"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
