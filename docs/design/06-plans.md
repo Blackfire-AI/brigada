@@ -1,0 +1,218 @@
+# 6. Plans and tasks
+
+## 6.1 Task graph
+
+A plan is a DAG of tasks with dependencies. Task fields: title, spec, check, class (`implement` | `review` | `answer` | …), deps, repo and base ref, caps, tier and effort, and skills (an ordered list of skill names, §5.10, resolved once at creation with their texts and digests).
+
+### Bases and dependency rounds
+
+**Base ref.** A task's work starts from the project's land target — `land_target` when set (§6.3), else the default branch — the same branch approved work lands on (§7.1): the runner materializes that branch for the worktree (§5.1), and the land job's diff is taken against that base.
+
+A base that is the land target is the target as the remote holds it: 1.0.0 has no sync that keeps the target current with the default branch, so the target's staleness is the user's own to clear; the sync rule that would hold a base while a target's sync runs — pending running, conflicting, or waiting at the push gate — is design only (§7.1).
+
+A land target the remote does not hold yet (the land job creates it) leaves the worktree on the default branch, with a warning in the runner log. A task stacked on a dependency resolves to that dependency's result branch when its work is queued, and a dependency that recorded no branch keeps the land target.
+
+**A dependency reopened under started dependents never leaves them on its old round**. A dependency that leaves done — its landing failed — and is restarted finishes again from a new `-r<n>` branch. Every started, unlanded dependent stacked on a superseded round of it is held: when the dependency completes done from the new branch, the engine parks each dependent whose key is free at `needs_foreman` (`task_base_stale`, naming the superseded base and the new branch), names one with a live job in the one wake that follows — a `dep_rebuilt` event, one per rebuild, naming the dependency and every stale task, the one-wake-per-cause shape of §4.2 — and refuses its landing when it gets there (§7.1).
+
+A pending dependent is untouched: its base resolves to the new branch when it is released, and a landed one has nothing left to hold.
+
+The foreman rebuilds each held task with `task_restart`: the restart chooses the base by the rebuild base rule below — the dependency's current result branch while its new round has not landed, the land target's tip once it has — spends one of the task's restarts like any restart, and starts fresh — a `continue` dependent too, for the continuation is a saving, never a requirement (§5.6).
+
+When `task_restart` or the automatic retry rebuilds a dependent, the restart chooses the base by how the dependency it stacks on ended — the dependency `resolveBase` already selects: the edge named base, else the continued dep, else the only dep — read from the engine's recorded state in this order:
+
+- **(b) The dependency's work is on the land target.** The dependency is `done` and has a landing record (`landings`: task, target branch, landed commit, pushed, waiting or local). The record is written by the dependency's own land job, squashed or not, and by that job's read of the dependency's `Brigada-Task` trailer on the target's history (§7.1); no other path writes it, and the record stores no branch.
+
+  The dependent builds on the land target's tip: for a landing pushed, the tip of the branch `land_target` names; for one still waiting or local, the tip of the base a new squash lands on, the waiting ref's stack (§7.1). The restart records that branch as the dependent's base, not the dependency's result branch, so the dependent's work starts from a tree that already holds the dependency's change.
+- **(c) The chain was abandoned.** The dependency is `cancelled` or `retired` (§6.2). The dependent builds on the land target's tip, as in (b), and the cancelled or retired dependency's result branch is never a base. A dependent that started is only a `failed` one here: cancel and retire refuse every other started state (§6.2), and a retarget off the dead dependency stays within §7.1's rule.
+- **(a) The dependency was restarted and finished again.** The dependency is `done`, has no landing record, and its current result branch differs from the dependent's recorded base, which names one of the dependency's own rounds (`brigada/task-<id>` or `-r<n>`). The dependent builds on the dependency's current result branch, as the paragraph above says.
+
+A dependency in none of these states — running, parked at `needs_foreman`, `failed` — is not an end of the chain, and a restart of its dependent builds on the dependency's current result branch, and a dependency that recorded no branch leaves the dependent's base as it was.
+
+In (a) a dependent that started and has not landed is held by the stale-base rule above, parked at `needs_foreman` with `task_base_stale` when the dependency completes from the new branch. In (b) the same hold applies to a dependent whose recorded base names a round of the dependency other than the dependency's current result branch, and a dependent whose base is that current branch is not stale: it lands by §7.1's diff-base rule, nothing is parked, and only a restart changes its base. In (c) nothing is held or parked by the rule: the failed dependent waits for the foreman, whose restart spends one restart like any restart and starts fresh, a `continue` dependent too (§5.6).
+
+The review of the rebuilt task takes its diff, `base…branch`, against the base the restart recorded: the dependency's new result branch in (a), the land target in (b) and (c), so the review shows the dependent's own change and never the dependency's, whose squash is already in the target's history.
+
+### Cross-plan and continued dependencies
+
+**Dependencies across plans.** A dep normally names a task of the same plan. It may instead name, by id, a task of another plan of the same project whose work is on the land target: the task done, with a landing pushed to the branch `land_target` names (the default branch when none is set). Such a dep is already satisfied at `plan_create` and `plan_amend`: nothing waits on it, and no edge row is written for it, so the plan file and recovery stay within the plan (§6.4). A dep naming a task of another plan that belongs to another project, is not done, has not landed or not pushed, or landed on another branch is refused with the reason.
+
+**Continuing a dep's session.** A chain of tasks in one area — A, then B built on A's branch — pays a cold start per task: B's worker re-reads the files A's worker already held in its head. The optional task field `continue` names one of the task's deps (usually the same dep as its base). When that dep is done and the task starts, its first work job runs in session mode on the agent that authored the dep's approved result — the agent of the dep's latest work or fix job — resuming that session; the prompt (`internal/prompt`, beside the worker template) says a new task follows in the same session: the previous task is approved and landed on the base branch, here is the new spec. Everything else — the check, the review, the rounds, escalation — is unchanged.
+
+`plan_create` and `plan_amend` (an added task, a retarget) validate the field as they validate `base`: it must name one of the task's deps, else the whole call is refused; and the continued dep is the task's base — a base naming another dep is refused, and a base none names defaults to the continued dep, so the work always starts from the branch whose session it resumes. The engine stores it on the dependency's edge, `status` shows `continues <dep>` beside the task, and the plan file carries it (§6.4).
+
+The continuation is a saving, never a requirement: the task starts fresh when the dep's author session id is unknown; when that agent is gone, broken, capped at 0, cooling (§8) or outside the task's tier. A restart of the continuing task always starts fresh (§5.6).
+
+### Tier, effort and round caps
+
+**Tier and effort.** The foreman decides how heavy a model each task needs; the user configures the foreman's model and effort and which CLIs may run tasks (§13.1). Two task fields, both set by the foreman in `plan_create` and `plan_amend` and shown in the plan presented for approval (§6.3) and in the plan file (§6.4):
+
+- `tier`: `light` | `standard` | `heavy`, default `standard`: how heavy a model the task needs. The dispatcher resolves it to an agent (§8). The engine keeps the foreman's `tier` and the `effective_tier` the task runs at, which escalation (§8) may raise; the plan file carries the foreman's value only.
+- `effort`: `low` | `medium` | `high` | `max`, optional: how hard that model should think. This is brigada's own set, one per task, not a harness level.
+
+  The runner maps it to the agent's CLI through the adapter's typed effort control (§5.2):
+
+  - claude and codex take the same word
+  - opencode takes `minimal` for `low`, no variant for `medium`, `high` and `max`
+  - kimi has no effort control and ignores it.
+
+  The job record stores the level actually passed.
+
+  Omitted, the agent's own `effort=` applies, else `medium`, resolved in this vocabulary before the harness maps it, so opencode (`medium` maps to no variant) and kimi (no control) still get nothing; a nonempty mapped task effort overrides the agent's (opencode `medium` still uses the agent's own variant when set), as the foreman effort does (`brigada project foreman --effort`, GUIDE §11: it rides the foreman turn's grant and overrides the serving agent's own level).
+
+**Round caps.** The task's `caps` field overrides the engine's round budgets key by key: `fix_rounds` (fix rounds a failed check asks for), `review_rounds` (fix rounds a review's changes verdict asks for) and `restart` (restarts, §5.6), each an integer from 0 to 10; an absent key keeps the engine default. The engine defaults are 2 fix, 2 review and 3 restarts, set by `rounds.fix`, `rounds.review` and `rounds.restart` in the config file.
+
+`plan_create` and `plan_amend`'s `add` take it as an optional `caps` object per task; an unknown key or an out-of-range value refuses the whole call. `plan_amend`'s `retier` entries take `caps` too, for a `pending`, `ready` or `needs_foreman` task, merged key by key into what the task has, so the foreman can give a parked task more restarts before `task_restart`. The engine stores it in `tasks.caps`; `status` shows a non-default value beside tier and effort (`restarts 4`) and the plan file carries it (§6.4).
+
+Neither tier nor effort is an approval trigger, and caps are not either (§6.3).
+
+### Default check and task states
+
+**Default check.** A task may omit `check` to inherit the project's default check (§13.1). Resolution happens once, when the task is created or amended through the engine: the engine copies the effective command into the task record with its source (`project-default` and the settings version it came from). A later change to the project default never alters a task that already has its check, so the recorded check stays reproducible, and the plan shown for approval (§6.3) carries the real commands, not a reference. The runner runs what the task recorded, never a value read from the worktree at run time (§5.5; product §5 rule 7).
+
+Omission is distinct from an explicit no-check override, which must be spelled out (`check: none`) if it is allowed at all (open, §16), and a plan containing one shows it plainly. A task that omits `check` in a project with no default is rejected at creation, never run unchecked.
+
+Task states: `pending` (deps not done) → `ready` → `running` → `checking` → `reviewing` → `done`; or `needs_foreman`, `needs_user` (reserved: no path enters it today), `failed`, `cancelled`, `retired` (§6.2). Cancelling a task that still has dependents is refused unless the same amendment covers each (§6.2); the foreman re-plans around a task that will never be done.
+
+## 6.2 Plan lifecycle
+
+### States and amendments
+
+`draft` (the foreman builds it) → `reviewing` (the plan review) → `needs_foreman` (a `changes` verdict with a round left parks the plan for the foreman's answer) → `pending_approval` (above the limit) → `active` → `done` | `cancelled`. The foreman can amend an active plan (add, split, drop tasks); each amendment is recorded, and an added task is judged against the plan rules (§6.3).
+
+A `respec` entry replaces or appends to the spec of a pending task, one with no job yet, so a missing requirement costs no cold start; a task that has started is refused, and a follow-up task is the way. The edit is judged like an addition on what it adds (its text against the protected paths, the task's class), and a task it trips is held alone (§6.3).
+
+### Cancelling and retiring tasks
+
+**Cancelling with dependents.** `plan_amend`'s cancel of a task that still has dependents is refused — the whole amendment rejected atomically, nothing applied — unless every dependent is covered: a pending one, with no job yet, cancelled or re-pointed off the cancelled task in the same amendment (its new dependency list may be empty), and a dependent that already ended cancelled or failed never blocks, for it cannot continue work. Every other state does block, because its branch and its approved result are built on the cancelled task's branch: `ready` (a queued job is started work), `running`, `checking`, `reviewing`, `needs_foreman`, `needs_user`, `done` — landed included. The refusal names every offending dependent with its state. To free a started dependent the foreman cancels it first, in its own amendment; a done task is never cancellable.
+
+**Cancelling with a reason.** Each `plan_amend` cancel entry names its task — by name or id — and may carry a reason; `task_cancel` takes the same optional reason. A reason is expected on every cancel, but a missing one refuses nothing: an entry given as a bare name or id, or with a blank reason, cancels as any other. Every task the amendment newly cancels records one `task_cancelled_by_amend` event beside the amendment's `plan_amended`, naming the plan, the reason verbatim — "no reason given" when the cancel gave none, so history shows it — and the caller, the foreman or the user, by the token that asked. A task that is already cancelled records nothing.
+
+**Retiring tasks.** A task that will not land — done work that landed elsewhere or is superseded, a task parked past repair, one held at the land gate, failed, or never run — settles by retirement, the engine operation behind the foreman's `task_retire` tool (§12.2), the API's tasks group (§12.1) and the user's `brigada task retire <id>... --reason TEXT`.
+
+Retire takes any number of tasks of one project, each in any state short of landed, and a required reason recorded verbatim with the caller — the foreman or the user — on one `task_retired` event per task. It stops each task's live jobs (a queued land job or its retry included), drops its land-gate hold, leaves its branch untouched, and moves it to the `retired` state, apart from `cancelled` so the status and the history read the settle for what it is; a landed task is refused, and so is a cancelled or already retired one.
+
+The dependents rule is deliberately narrower than cancel's: a task built on a retired task — a dependent, by dependency or base — blocks the retirement unless it is retired in the same call or is already cancelled or retired; every other state blocks, a failed dependent included, for its branch or its approved result is built on the retired task's branch, and the refusal names each blocking task with its state. One refusal rejects the whole call, and `plan_amend`'s cancel, retarget and dead-dependency rules treat a retired task as they treat a cancelled one.
+
+A retired task is settled: it is never live work, no land path ever lands it — the rule, a hold's release, a dependency's release, `land_retry`, the push gate — and the land decisions on it refuse naming the retirement. The plan then closes by the usual rule, the done report naming each retired task with its reason; the start-up reopen pass does not reopen a plan over a retired task, and a retired task leaves the needs-you queue.
+
+### Blocked and reopened plans
+
+**Blocked plans.** A plan with done tasks that can never land — an implement dependency cancelled or failed under them, the shape a dependency restarted after a land conflict and then failed leaves behind — does not close as done. It stays active as **blocked**: `depsLanded` (§7.1) can never pass for the stranded tasks, and the blockage is transitive over the plan's graph — a dependency that is itself a stranded task strands its dependents, the needs-you line names the root cause (the cancelled or failed task), and the chain clears in landing order once the root is freed. The stranded set is exactly the tasks the land rule would land (§7.1: done, `implement`, approved), so a dependency of a class that never lands strands nothing and a done task of such a class never holds its plan open.
+
+One `plan_blocked` event per blockage wakes the foreman, naming every affected task; the needs-you queue (§10) carries one line per stranded task; `plan_done` is emitted only when the plan truly closes.
+
+The one new legal move on such a done, unlanded task is `plan_amend`'s retarget: dropping or replacing the dead dependency makes the task landable without re-running it — its approved result stands and its branch is unchanged — within §7.1's base rule below; a retarget of any other started task stays refused. Clearing the blockage writes `plan_unblocked`, and a later blockage wakes again.
+
+Plans the earlier behavior already closed as done are brought to this rule once: at start-up, before the wake recovery and before the API serves, one pass reopens every done plan whose nodes still hold live work by the close rule's own test — every done plan, whatever parked its tasks — writing one `plan_reopened` event that names the plan and the task ids that kept it open, marking the plan's file owed so recovery cannot restore `done`, and waking no foreman. The guards that refuse a finished plan stay as they are: the data is brought to the invariant, and the dependents run and the plan closes again through the existing paths. A task parked by a failed landing that a `land_retry` returns to done releases its dependents there, as any finish does. A reopened plan's re-close counts once more on the plan class (§8), which is measurement only. `cancelled` plans and every other state stay untouched, and a second run of the pass changes nothing.
+
+### Plan review rounds
+
+**The plan review.** Unless the project turns it off (`plan_review`, default on; the reviewer's `plan_review.tier` defaults to standard and `plan_review.effort` to medium), or the plan is exactly one task of the review class, a plan is created `reviewing`: every task pending, no work queued, and one `plan_review` job — no task, placed by the `review.family` rule with the foreman as its author (§7): under `prefer`, the default, another family than the foreman's first, then the foreman's family, then the foreman's own agent; under `require`, another family only, today's rule — carrying the plan (every task, its spec verbatim, the check, class, tier, effort and graph) and a summary of the project's other active plans' tasks and branches.
+
+The verdict is §7's verdict block. `approve` runs the approval rules (§6.3) exactly as a no-review creation does, so the plan activates with its first wave or awaits the user's yes with the existing reasons; the review always runs first, the user's rules after.
+
+`changes` parks the plan at `needs_foreman` and carries the findings to the foreman whole (`plan_reviewed`, a judgment event that wakes a turn) under the findings' own review-sized bound of 16 KB — not a note's 500 bytes — while a live foreman turn or attach holds the plan out of the user's needs-you queue (§10), and the short views (§10) cut at render time and end with a pointer to the review job's history.
+
+The foreman answers by amending the plan — allowed from the parked state, the amendment starting the next round — or by accepting the plan as reviewed with `plan_accept`, whose required reason is recorded and whose acceptance runs the same evaluation a spent round's verdict does; a done foreman turn that ends without answering — the plan still parked, its verdict's row consumed — is named by one `plan_verdict_unanswered` event and the needs-you line (§10) while the plan stays parked, waking nothing for it; there are at most two rounds per creation or amendment batch, the second `changes` verdict proceeding through the same evaluation as approve with the findings recorded and shown.
+
+An amendment of an active plan that adds tasks or respecs a pending one queues a round over the added and edited tasks, which stay pending until the verdict releases or holds them by the per-task rules (§6.3); cancelling, re-pointing and retiering never trigger a review. An amendment accepted while a round runs does the same: the running round keeps judging the plan as it was queued, the added and respecified tasks stay pending as waiting amendment work — `brigada status` shows `amendment waits for the review round` — and that round's verdict, `approve` included, queues the next round over them instead of starting their work, a forced conclusion or a spent round cap folding the waiting tasks into the batch the verdict applies over.
+
+An amendment of a plan awaiting approval is not reviewed: it is re-evaluated whole by the approval rules (§6.3), and the user's yes covers it.
+
+A reviewer that runs and gives no verdict — an error or a limit, no block, a malformed one, an approve without substantive findings — is retried once, as a task review is (§7): the same input on the plan's key, the failed agent excluded. When the retry gives no verdict either, or no other agent can take it, the plan stays `reviewing`, the verdict recorded as `no_verdict`, and the reason reaches the foreman (`plan_reviewed`, with a wake); its amendment answers as it answers `changes`, and one that adds and respecs no task — a cancel, a retier — lets the plan proceed through the same evaluation as approve.
+
+A reviewer that cannot be had — under `prefer` no agent offers the review class, under `require` no agent of another family does (the reason ending `, review.family=require`), or the job never runs (the queue TTL), runs past its hard cap or loses its runner `MaxAttempts` times — proceeds the same way, the reason recorded.
+
+A plan `brigada recover` restores as `reviewing` (§6.4) has its round queued again, and proceeds when no reviewer can run it. Cancelling a plan cancels its pending review job.
+
+**Task size.** A task is about 30 minutes of work, about 5 numbered spec items or about 15 files. Bigger work is a chain of tasks, each continued from the last. The project's foreman instructions (`.brigada/instructions/foreman.md`, §5.9) state this guide, and nowhere else; the plan review's check (g) judges against that file, which its prompt carries (§7.2).
+
+## 6.3 Gates and rules
+
+### Approval rules
+
+Approval holds a plan that trips a rule: a task class other than `implement`/`review`/`answer`, a task touching a protected path, a task naming an extra repository outside the project default, a task whose check is not the project's `default_check` — or, mid-run, a spend past the plan budget. The keys `approval_budget`, `approval_classes`, `approval_protected_paths`, `approval_max_tasks` and `default_check` (§13.1) set them; the budget is the rule on by default, the task count is off unless the project sets one, and a negative `approval_max_tasks` is off as `0` is, for the count alone: the other rules still hold.
+
+The check rule (`check_command`) compares each task's check, as the task stores it, with `default_check`: an omitted check takes the default first, so it never differs, and with no default only a task that names a check differs. The runner runs a check as the user, in the user's account, so a command the project did not set waits for the user's yes, its reason reading `check_command: check "…" differs from default_check "…"` with how to release it — `brigada plan approve` for a held plan, `task_restart` once the user agrees for a task held alone — and how to change it: cancel the task and add it again with the default check, or set `default_check`. A task names no setup of its own: it records the project's (§5.7), so the setup never differs. `--and-stop-asking` changes nothing for this rule: moving `default_check` to one task's command would change the check of every task after it.
+
+The plan review (§6.2, §7.2) runs before these rules. Its verdict decides whether the plan reaches them; the rules still decide what the user sees: a plan the review approves is judged by the plan gate's rules as an unreviewed plan is, so it can still wait for the user's yes, and a task that trips a rule is held as it would be without a review.
+
+### The three gates
+
+The loop — plan, work, check, review, land, push — is brigada's, and the user stops it with rules. The engine enforces every stop; the foreman has no tool to pass one, as it has none to approve a plan. There are three **gates**:
+
+- `plan`: before a plan's tasks are queued;
+- `land`: before an approved task is squashed onto the target branch (§7.1);
+- `push`: before the target branch is pushed.
+
+A gate is `auto` or `ask`; `push` may also be `never`, which never pushes the target: the commit waits on the remote's waiting ref as a push-gated landing's does, and the exact fetch-and-push command — runnable from the user's own repository — is recorded and printed, as the hand-driven `brigada land` prints its push.
+
+A **rule** turns `auto` into `ask` for the one plan or task that trips it, and the needs-you entry (§10) names the rule. A task held at the land gate reads `held by rule approval_tiers, approval_protected_paths: heavy; touches infra/**`, the setting keys first and the reasons after, followed by the command that releases the hold and the one that also changes the rule (`--and-stop-asking`); `brigada status` shows the line, and `brigada top` its compact form, `! #N <reason> → <command>`.
+
+The rules are flat keys in `.brigada/project.yaml` (schema 1 is flat by design; no expression language):
+
+**Batch landing, `land_ready` suspect attribution, and the land-target sync are design only, not in 1.0.0** (issues #134 and #127). 1.0.0 lands one task per land job — `land_batch_max` below is refused as an unknown key — a `land_ready` hold carries the command's first output line and no suspects, and no job keeps a land target current with the default branch. The `land_batch_max` row, its attribution sentences, the batch sentences that follow, and §7.1's batch, suspects and sync paragraphs state the designs.
+
+| Key | Gate it holds | Default |
+|---|---|---|
+| `gate_plan` | — | `auto`; a tripped rule holds the plan |
+| `gate_land` | — | `auto` |
+| `gate_push` | — | `auto` |
+| `approval_max_tasks` | plan | `0` (off, as any negative value is; set a count to hold plans over it) |
+| `default_check` | plan | none: a task whose check is another command holds (`check_command`) |
+| `approval_budget` | plan | none: a whole number of tokens, a `$` amount, or both joined with `+` (`2000000+$5`) — the plan's spend passing it holds the plan's new jobs |
+| `approval_classes` | plan | `implement`, `review`, `answer` |
+| `approval_protected_paths` | plan **and land** | none |
+| `approval_tiers` | land | none (`heavy`: the user reads heavy diffs before they land) |
+| `approval_restarted` | land | `false` (`true`: a task that spent a restart or a tier bump waits) |
+| `land_target` | — | the project's default branch; or a staging branch such as `brigada/landed`, which a new task's work builds on too (§6.1) |
+| `land_batch_max` | — | design only (issue #134), not in 1.0.0 — the key is refused as unknown: `5`; an integer from 1 to 20 inclusive, with 1 landing one task per job; any other value is refused naming `land_batch_max`. |
+| `after_land` | — | none: a repo-relative command the runner runs after a successful land, under the environment of a check (§5.8; product §6); its failure is reported, never undone |
+| `land_ready` | land | none: a repo-relative command path inside the repository the land job runs before landing and the push phase runs before its push; exit 0 lands, exit 1 holds the landing on the command's first output line, and any other exit, a spawn failure or a timeout is not ready — nothing lands and the landing is requeued on the not-before backoff (§3). |
+
+**`land_batch_max`.** `project set`, `project show` and schema 1 `project import` use the same validation and provenance as the other land rules.
+
+**`land_ready`.** The hold is created from the job's outcome, not at plan time; the engine re-checks it every 10 minutes, running the command again exactly as the landing ran it, and releases the hold itself when the command exits 0, while `brigada land approve` re-queues the landing with the command skipped (§7.1). For a batch the command runs once before its first squash, not per member or push retry; the push phase keeps its own run before its push. Exit 0 is ready, 1 holds, and 2 is not ready, with the same handling of other exits and execution failures. A stable checked head is required for attribution; a hold preserves the first line verbatim and adds the recorded suspects or `suspects unknown` (§7.1). Unset means no command and no suspects.
+
+### Releasing holds
+
+A gate set to `ask` holds in the needs-you queue, and `brigada plan approve` and the coordinator's `plan_approve` keep their roles for the plan gate; `brigada land approve <task>` and `brigada push approve` release the other two, and reject cancels the landing, leaving the branch — a plan the hold kept open closes over the declined landing, its done report naming it (§7.1).
+
+A batch's `land_ready` hold holds each member separately, with its own needs-you line carrying the same verbatim reason and suspect line (§7.1). `brigada land approve <task>` releases only that member, queued once into one next batch with its `land_ready` gate skipped; other members stay held. The engine re-checks every held member on the same 10-minute interval, running the command again as the landing ran it, and a member whose re-check passes is released exactly as an approval releases it: alone, once, into one next batch with its gate skipped, while the other members' holds wait for their own re-check or the user. Reject cancels only the named member's landing, leaving its branch; its dependents wait under the dependency rule, and a plan with no remaining landing to settle closes over the declined landing as above. Other members stay held until approved or rejected. A land approval reports the land job it queued, or, when a live job or batch reservation already holds the task's key, that job and that nothing was queued. The batch changes neither the one-setting mapping nor the scope of `--and-stop-asking`.
+
+An answer can also change the rule: with `--and-stop-asking` (on `brigada plan approve` and `brigada land approve`; the coordinator's `plan_approve` takes the boolean `and_stop_asking`), the approval releases the hold and changes, through the same code path as `brigada project set` and recorded in the history, the one setting each hold reason maps to — a tier to `approval_tiers`, a path to `approval_protected_paths`, a spent restart to `approval_restarted`, a class to `approval_classes`, an extra repository to `extra_repos`, the task count to `approval_max_tasks`, the spend to `approval_budget`, a gate held at `ask` to its `auto` — each moved just far enough that the hold it answers no longer trips, so the same question is not asked twice. Without the option, the approval only releases the hold, as it always has.
+
+A held task blocks nothing but its dependents' landings: work on the rest of the plan goes on, and the plan itself waits too — a held landing is a landing still to come, nothing recorded and no job running, so the plan stays open until the hold is released and the landing settles. A hold on the push of a landing already recorded is a waiting push, not a held landing (§7.1), and the plan may close over it. A landing recorded for a held task — by its trailer on the default branch, or by its land job — clears the hold and its needs-you line.
+
+An amendment of an active plan is judged by what it adds: each added task is checked against the per-task rules — its class, the protected paths its spec or check mentions, its extra repositories, its check against `default_check` — and one that trips a rule is held alone, parked with a needs-you line naming the rule, while the plan stays active and the rest runs on. The whole-plan triggers — the task count and `gate_plan` — never hold an amendment of a plan already running, and cancelling, re-pointing or retiering never holds. A spec edit (`respec`) is judged the same way, on the text it adds and the task's check.
+
+### Waiting and batched pushes
+
+A landing that waits at the push gate waits for the user's yes even when the project switches `gate_push` from `ask` to `auto`: the switch pushes nothing that waits — a landing, or a land-target sync's merge waiting on the same ref (§7.1) — `brigada push approve` still releases each, and a waiting landing re-made after its waiting ref went stale (§7.1), or a sync that lands again after its waiting ref went stale, waits at `ask` again rather than pushing under the new `auto`.
+
+A batch publishes its surviving commits in one push: to the target under `auto`, to the waiting ref under `ask` or `never`. Each member keeps its own landing record and its place in landing order. Push approval remains per landing: `brigada push approve` releases the named landing's recorded commit and therefore every earlier commit beneath it, including earlier batches, but no later commit. Under `never` each record carries the fetch-and-push command for its recorded commit; the user can push the batch's last commit to release the whole batch. An explicit push approval releases that named landing in the same way without changing `never` for subsequent landings. Changing the gate alone releases none of these waiting commits.
+
+### Plan budget
+
+The budget rule runs mid-plan, never at creation: a new plan has spent nothing. A plan's spend is the usage the engine records per job (§8, per-job usage) summed over the plan's jobs — input plus output tokens, and dollars only where the job's harness reported them, so unknown counters stay out of the sum, never zero. Only the claude CLI reports dollars; codex, opencode, kimi and dsh report tokens, so a harness on a subscription login, without a per-token price, counts tokens and never trips a `$` side.
+
+When the spend passes the budget, the engine holds the plan's new jobs: every task that would newly start — a dependent freed by a done, a task an amendment adds — parks at the plan gate like a rule-held addition, its needs-you line naming the rule and the spend, and no job is queued. Work already running goes on, and its fix rounds, reviews and landings are not new jobs. Raise the budget (`brigada project set`) and restart the held task (`task_restart`) to release it; a parked task still needs `task_restart`.
+
+## 6.4 The plan file in the repo
+
+For fault tolerance, the engine writes each plan as **`.brigada/plans/<plan-id>.yaml`** and pushes it, on every plan change, to a separate branch **`brigada/plans`** in the repo's remote by default, so the engine never commits to `main` on its own; committing to the default branch instead is a per-project setting.
+
+The mirror is on by default and the per-project `plan_files` (`on` or `off`) switches it: off, the engine writes and pushes nothing, and a plan's push stays owed until it is on again. The file holds the graph, task states, branches and open questions, not transcripts. The engine store is authoritative; the file is a mirror. A task with skills carries `skills: [name, ...]` in order (§5.10); recovery from a plan file does not restore the texts, which the store holds.
+
+**Backups.** The engine also snapshots its store (SQLite backup API) daily to a configurable directory outside the store. A snapshot holds the whole store, so it is written owner-only (mode 0600), as are the runner's run records and the engine's artifact blobs (in directories 0700).
+
+**`brigada recover`** when the store is lost:
+- **Restores:** from the latest snapshot if there is one, then plans, task states, branches and open questions from the plan files (newer wins). A plan file that shows a plan `reviewing` has its review round queued again; one that shows a plan parked at `needs_foreman` (§6.2) stays parked — the foreman's answer, never a retry.
+- **Doesn't restore** without a snapshot: messages, transcripts and outcomes; the dispatcher's scores restart from defaults. Said plainly in the command's output.
+- **Tokens** live in a config file outside the store (the store keeps only hashes), so clients, runners and the foreman can still authenticate; runners re-register.
+- **Fence epoch:** recover bumps a store-wide fence epoch, and every lease, heartbeat or complete that references the pre-recovery epoch is rejected, so a late runner can't write into the rebuilt store.
+- **In-flight work:** recover waits one lease-expiry window before re-dispatching, so runners whose heartbeats now fail have killed their workers. Re-dispatched work does not get a new branch name; the rules below decide which branch each kind of re-dispatch works on.
+- **Branch names:** a task's first job works on `brigada/task-<id>`, and the engine names each job's branch.
+  - **Re-lease** (the lease expired or the runner crashed, and the same job is leased again): keeps its job's branch.
+  - **Restart** (§5.6, either mode, or a re-dispatch to another agent): works on `brigada/task-<id>-r<n>`, where `<n>` counts the task's restarts.
+  - **Fix round** (§3): continues the task's branch, the one its last job pushed, so the fix lands on top of the work under review.

@@ -16,7 +16,8 @@ import (
 )
 
 // The docs verifier. It checks, for GUIDE.md, COMPATIBILITY.md and
-// CHANGELOG.md, that every relative link and heading anchor resolves, and
+// CHANGELOG.md, and for the design index and its section files, that every
+// relative link and heading anchor resolves, and
 // for GUIDE.md's code blocks that every `brigada ...` line names a command
 // that exists with flags that command accepts. A third part asserts what the
 // docs must say about instructions and skills.
@@ -556,6 +557,16 @@ func checkNoStaleForemanPath(name, text string) []string {
 
 func TestDocsLinksAndAnchors(t *testing.T) {
 	report(t, checkLinks(docsFiles))
+}
+
+// TestDesignLinksAndAnchors checks the links of the design index and its
+// section files, so the index cannot point at a heading that moved.
+func TestDesignLinksAndAnchors(t *testing.T) {
+	sections, err := filepath.Glob(docPath("docs/design/*.md"))
+	if err != nil || len(sections) == 0 {
+		t.Fatalf("no design section files: %v", err)
+	}
+	report(t, checkLinks(append([]string{docPath("docs/design.md")}, sections...)))
 }
 
 func TestDocsCommandLines(t *testing.T) {
