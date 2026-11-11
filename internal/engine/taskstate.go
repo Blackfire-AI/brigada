@@ -839,19 +839,14 @@ func nextEffort(effort string) string {
 // note beside it — the check's tail or the findings, the shorter line
 // of the same matter — for the foreman's judgment (§3, §10).
 func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note string, failure *checkFailure, now time.Time) error {
-	_, capped, err := e.roundCapReached(tx, SubmitParams{TaskID: job.TaskID, Round: round})
-	if err != nil {
-		return err
-	}
-	if capped {
-		return e.outOfRoundsTx(tx, job, round, note, failure, now)
-	}
-	// A failure repeated across the fix rounds is a loop (§5.6): with
-	// rounds to spend and nothing changed, another round of the same
-	// feedback would answer nothing, so the task parks for the foreman
-	// like a stalled run — same route, the loop as the reason — and the
-	// attempt counts as a spent round's. The spent rounds keep the
-	// escalation ladder (§8); a restart begins a fresh chain.
+	// A failure repeated across the fix rounds is a loop (§5.6): nothing
+	// changed, so another round of the same feedback — or the escalation
+	// a spent budget would start — would answer nothing, and the task
+	// parks for the foreman like a stalled run: same route, the loop as
+	// the reason, and the attempt counts as a spent round's. It is judged
+	// before the round cap, so a loop that fills the budget on its last
+	// round (the defaults: the work job and both fix rounds failing the
+	// same way) still parks as a loop; a restart begins a fresh chain.
 	if round == roundFix && failure != nil {
 		if loop, why, err := e.checkLoopTx(tx, job, failure.Output); err != nil {
 			return err
@@ -861,6 +856,13 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 			}
 			return e.needsForemanTx(tx, job, evTaskLoop, failure.payload(why), now)
 		}
+	}
+	_, capped, err := e.roundCapReached(tx, SubmitParams{TaskID: job.TaskID, Round: round})
+	if err != nil {
+		return err
+	}
+	if capped {
+		return e.outOfRoundsTx(tx, job, round, note, failure, now)
 	}
 	spec, err := taskSpecTx(tx, job.TaskID)
 	if err != nil {

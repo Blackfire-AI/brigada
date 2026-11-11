@@ -56,6 +56,30 @@ func TestCheckLoopParksTheTask(t *testing.T) {
 	}
 }
 
+// TestCheckLoopFiresAtTheDefaultRounds: at the shipped two fix rounds,
+// the work job and both rounds failing the same way fill the budget on
+// the loop's own last repeat; the loop is judged before the cap, so the
+// task parks as a loop, not out of rounds, and nothing escalates.
+func TestCheckLoopFiresAtTheDefaultRounds(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+
+	e.submit(e.work())
+	for i := 0; i < 3; i++ {
+		e.runWork(author, failCheckWith("--- FAIL: TestBoom\nthe frobnicator was off"))
+	}
+	if _, ok := e.eventPayloadOf(evTaskLoop); !ok {
+		t.Fatalf("no %s event at the default rounds; have %v", evTaskLoop, e.eventKinds())
+	}
+	got := e.eventKinds()
+	if containsKind(got, evTaskOutOfRounds) || containsKind(got, evTaskEffortBumped) || containsKind(got, evTaskTierBumped) {
+		t.Errorf("the loop parked as out of rounds or escalated: %v", got)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+		t.Errorf("task state = %q, want %q", state, taskNeedsForeman)
+	}
+}
+
 // TestCheckLoopNeedsTheSameFailure: a failure that changes between
 // rounds is work, not a loop (§5.6): the chain breaks at the first
 // different fingerprint and the fix rounds go on.
