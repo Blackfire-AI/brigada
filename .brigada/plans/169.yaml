@@ -41,8 +41,8 @@ tasks:
     effort: medium
     review_tier: heavy
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-638"
     rounds: 0
   - id: 639
     name: "rebuild-base-docs"
