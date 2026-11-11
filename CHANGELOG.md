@@ -10,6 +10,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A cancel can say why. Each `plan_amend` cancel entry may be `{task, reason}` beside the bare task name or id, and `task_cancel` takes an optional `reason`, in the foreman's MCP tools and the API alike. Every task an amendment newly cancels records one `task_cancelled_by_amend` event with the plan, the reason verbatim and the caller (foreman or user), and `brigada history` shows the reason. A reason is expected on every cancel; one without is still accepted, as before, and recorded as "no reason given".
 - A restarted dependent now rebuilds on the land target, or on the waiting landings' ref `refs/brigada/land/<target>`, when its dependency already landed (squashed or not) or was cancelled or retired, instead of on the dependency's old result branch, whose landing conflicted. The `task_base_stale` reason names that base. A task base may now be the waiting ref, which the runner fetches by name.
 - `plan_file_branch`, a project setting (`brigada project set`, `project show` and `.brigada/project.yaml`), names the branch the plan files are pushed to; `main` or the repository's default branch name commits them to the default branch. The mirror read the key, but nothing could set it (issue #215).
+- `retention_days` in the config file prunes messages and artifacts older than that many days on the engine's sweep; 0, the default, keeps everything, and the event log is never pruned. The engine could prune, but no key set it (issue #217).
 
 ### Fixed
 

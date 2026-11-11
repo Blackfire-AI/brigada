@@ -1344,6 +1344,7 @@ The config file is optional. Its format:
 | `notify` | `auto` or `none` | `auto` | `auto` raises desktop notifications with the OS tool when found; `none` turns them off. |
 | `notify.webhook` | URL | none (off) | One https URL (http only on a loopback host) that receives every notification as a JSON POST ([section 4](#4-while-work-runs)). It may carry a token, so it lives in this file alone. |
 | `snapshot_dir` | absolute path | none (no snapshots) | Where the daily store snapshots go; the last seven are kept ([section 10](#10-backups-and-recovery)). |
+| `retention_days` | integer, 0 or more | `0` (keep everything) | Days of messages and artifacts (transcripts, check and setup logs) the engine keeps; older ones are pruned on its sweep. The event log is never pruned. |
 | `headroom` | `true` or `false` | `true` | Keep one slot free for the foreman on its account ([section 8](#headroom)). |
 | `task_auto_retry` | `true` or `false` | `true` | One automatic restart on another agent after a transient worker failure ([section 8](#automatic-retry)). |
 | `foreman_wakes_per_day` | integer, 1 to 1000 | `20` | Default daily foreman wake-ups per project ([section 4](#the-wake-budget)). `brigada budget --wakes N` sets it per project in the store. |
