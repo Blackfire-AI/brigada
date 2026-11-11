@@ -48,11 +48,7 @@ var unfrozenFlags = map[string][]string{}
 
 // unfrozenToolArgs names arguments a tool's schema offers that the document
 // does not list, by tool, each with a reason.
-var unfrozenToolArgs = map[string][]string{
-	// The coordinator reuses one schema for plan_approve and plan_reject; a
-	// rejection has no rule to change, so the document lists it for approve only.
-	"plan_reject": {"and_stop_asking"},
-}
+var unfrozenToolArgs = map[string][]string{}
 
 var (
 	tokenRE   = regexp.MustCompile("`([^`]+)`")
