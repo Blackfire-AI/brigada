@@ -26,7 +26,7 @@ import (
 // project's set; an empty set drops them all.
 func (e *Engine) ImportProject(ctx context.Context, repoURL string, content []byte, instructions *string, roles map[string]string, skills *[]Skill, accept bool) (ImportResult, error) {
 	if repoURL == "" {
-		return ImportResult{}, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
+		return ImportResult{}, fmt.Errorf("%w: repo URL is required (product §5 rule 4: repos are addressed by URL)", ErrInvalidSetting)
 	}
 	for _, role := range RoleKeys {
 		if text, ok := roles[role]; ok {

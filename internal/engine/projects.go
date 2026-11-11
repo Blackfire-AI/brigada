@@ -60,7 +60,7 @@ func (e *Engine) SetProjectForeman(ctx context.Context, repoURL, harness, model 
 // keeps the session (only a harness change drops it).
 func (e *Engine) SetProjectForemanEffort(ctx context.Context, repoURL, harness, model, effort string) (ForemanSetting, error) {
 	if repoURL == "" {
-		return ForemanSetting{}, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidForeman)
+		return ForemanSetting{}, fmt.Errorf("%w: repo URL is required (product §5 rule 4: repos are addressed by URL)", ErrInvalidForeman)
 	}
 	if harness == "" {
 		return ForemanSetting{}, fmt.Errorf("%w: foreman harness is required: the CLI the foreman runs on (§4.1)", ErrInvalidForeman)
@@ -166,7 +166,7 @@ func (e *Engine) SetProjectForemanEffort(ctx context.Context, repoURL, harness, 
 // sit.
 func (e *Engine) ProjectForeman(ctx context.Context, repoURL string) (*ForemanSetting, error) {
 	if repoURL == "" {
-		return nil, fmt.Errorf("repo URL is required (product §5 rule 6: repos are addressed by URL)")
+		return nil, fmt.Errorf("repo URL is required (product §5 rule 4: repos are addressed by URL)")
 	}
 	shown := RedactRepoURL(repoURL)
 	var setting *ForemanSetting

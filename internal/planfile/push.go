@@ -22,7 +22,7 @@ const (
 
 // Target is where a plan file goes: a branch of the repo's remote.
 type Target struct {
-	URL    string // the remote, as the project names it (product §5 rule 6)
+	URL    string // the remote, as the project names it (product §5 rule 4)
 	Branch string
 	// Default marks Branch as the repo's default branch (§6.4's option):
 	// the file is committed there, and a remote without it is an error —

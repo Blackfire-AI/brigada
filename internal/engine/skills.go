@@ -149,7 +149,7 @@ func validateSkills(skills []Skill) ([]Skill, []string, error) {
 // only, never a created task.
 func (e *Engine) ImportSkills(ctx context.Context, repoURL string, skills []Skill) ([]Skill, error) {
 	if repoURL == "" {
-		return nil, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
+		return nil, fmt.Errorf("%w: repo URL is required (product §5 rule 4: repos are addressed by URL)", ErrInvalidSetting)
 	}
 	if _, cerr := Canonicalize(repoURL); cerr != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidSetting, cerr)
@@ -214,7 +214,7 @@ func (e *Engine) importSkillsTx(tx *sql.Tx, repoURL string, in []Skill, names []
 // no project has none.
 func (e *Engine) Skills(ctx context.Context, repoURL string) ([]Skill, error) {
 	if repoURL == "" {
-		return nil, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
+		return nil, fmt.Errorf("%w: repo URL is required (product §5 rule 4: repos are addressed by URL)", ErrInvalidSetting)
 	}
 	var out []Skill
 	err := e.store.View(ctx, func(tx *sql.Tx) error {

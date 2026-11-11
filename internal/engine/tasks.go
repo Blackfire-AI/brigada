@@ -71,7 +71,7 @@ func (e *Engine) SubmitTask(ctx context.Context, p TaskParams) (TaskResult, erro
 func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResult, error) {
 	switch {
 	case p.RepoURL == "":
-		return TaskResult{}, fmt.Errorf("repo URL is required (product §5 rule 6: repos are addressed by URL)")
+		return TaskResult{}, fmt.Errorf("repo URL is required (product §5 rule 4: repos are addressed by URL)")
 	case p.BaseRef == "":
 		return TaskResult{}, fmt.Errorf("base ref is required: the ref the worktree starts from")
 	case CheckBaseFetchable(p.BaseRef) != nil:

@@ -17,7 +17,7 @@ import (
 // The committed, nonsecret project configuration (design §13.1): the
 // client reads .brigada/project.yaml and sends its bytes; the engine
 // parses and validates them and never reads a repo path itself (product
-// §5 rule 1). Schema 1 holds the keys below and nothing else.
+// §5 rule 6). Schema 1 holds the keys below and nothing else.
 
 // ProjectConfigPath is where the file lives, relative to the repo root.
 const ProjectConfigPath = ".brigada/project.yaml"
@@ -763,7 +763,7 @@ type projectImport struct {
 // and bounded. A refusal leaves every previous value in effect.
 func parseProjectImport(repoURL string, content []byte, instructions *string) (projectImport, error) {
 	if repoURL == "" {
-		return projectImport{}, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
+		return projectImport{}, fmt.Errorf("%w: repo URL is required (product §5 rule 4: repos are addressed by URL)", ErrInvalidSetting)
 	}
 	canon, err := Canonicalize(repoURL)
 	if err != nil {
