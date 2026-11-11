@@ -5,9 +5,9 @@
 plan: 169
 title: "Rebuild base rule: a restarted dependent builds on the land target when its dependency landed or its chain was abandoned"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-11-11T06:14:01.732329Z
-updated: 2026-11-11T06:17:33.279251Z
+updated: 2026-11-11T06:21:02.606714Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -28,7 +28,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 638
@@ -41,7 +41,7 @@ tasks:
     effort: medium
     review_tier: heavy
     skills: ["bugfix"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 639
