@@ -56,7 +56,7 @@ The project's `default_check` runs CI's build-job steps before the tests (gofmt,
 - `tools`: repository tooling, such as `guard`
 - `version`: the binary's version
 
-For the design, read `docs/design.md`, `docs/product.md` and `docs/glossary.md`.
+For the design, read `docs/design.md` (an index of the section files under `docs/design/`), `docs/product.md` and `docs/glossary.md`.
 
 The docs under `docs/` describe the system as it is on main, in the present tense. A change that alters behaviour updates the section it touches in the same commit. No dates, decision or status markers, issue numbers or history: git log, CHANGELOG.md and docs/COMPATIBILITY.md keep those.
 

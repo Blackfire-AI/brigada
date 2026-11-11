@@ -11,7 +11,7 @@ Read a section there instead of guessing.
 The foreman and every worker read their own checkout. A spec that exists only
 in chat is lost to them.
 
-- A design change: an issue first, then amend `docs/design.md` /
+- A design change: an issue first, then amend `docs/design/` /
   `docs/product.md` on a branch, `brigada review --branch <name>` (another
   model family), fix, pull request to main.
 - A bug or small feature: an issue number or a one-paragraph statement is

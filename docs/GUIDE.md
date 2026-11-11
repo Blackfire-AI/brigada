@@ -1025,7 +1025,7 @@ What a worker or reviewer may do is set by its CLI's own permission scope, not b
 | opencode | `OPENCODE_PERMISSION` rules, with external directories denied unless a checkout is named | also denies edit and webfetch | brigada's MCP tools; `OPENCODE_PERMISSION` denies bash, edit, webfetch and reads outside the reading checkout, in a headless turn and an attach alike |
 | dsh | OS-level `workspace-write` (`DSH_PERMISSION_MODE`) | OS-level `read-only` | not available |
 
-Every harness runs in a git worktree on your machine. Workers inherit your environment minus the credential scrub ([design §5.7](design.md#57-an-environment-for-checks-and-reviews)), so none of these scopes keeps a check command, a test run or a kimi worker away from your remaining credentials or the network.
+Every harness runs in a git worktree on your machine. Workers inherit your environment minus the credential scrub ([design §5.7](design/05-workers.md#57-an-environment-for-checks-and-reviews)), so none of these scopes keeps a check command, a test run or a kimi worker away from your remaining credentials or the network.
 
 ### Accounts
 
