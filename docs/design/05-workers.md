@@ -347,7 +347,7 @@ A text that says "ignore the above" is still data: it cannot widen a tool scope,
 
 **Bounds.** Two levels, shared with §5.10.
 
-- Per file, enforced at import: 8192 bytes of UTF-8 for each role text (the whole foreman text is 5.9 KB, under one percent of a typical wake, so one foreman file; a plan-time/every-turn split is §16 item 11 if the bound ever binds).
+- Per file, enforced at import: 8192 bytes of UTF-8 for each role text (the default foreman text is under 5 KB, under one percent of a typical wake, so one foreman file; a plan-time/every-turn split is §16 item 11 if the bound ever binds).
 - Per prompt, enforced at task creation: a worker prompt's instructions plus skills at most 16384 bytes (one role text and two skills at their maxima), a reviewer prompt's at most 24576 bytes (two role texts and two skills), so the design's own maximum pick of two skills (§5.10) is always admitted. A foreman turn carries `foreman.md` alone (the worker text arrives through `status` on request) and a plan review carries `plan_review.md` and `foreman.md`, no skills, so the per-file bound is their per-prompt bound.
 
 Above a bound the set, the import or the `plan_create` is **rejected** with the size, the limit and the task named, and the previous value stays in effect; nothing is ever truncated, because a cut rule is worse than a refused one. Text that is not valid UTF-8 or contains a NUL is rejected too. The engine enforces the bounds on the API; the client checks first, for a readable message.
