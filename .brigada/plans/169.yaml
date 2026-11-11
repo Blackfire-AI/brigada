@@ -7,7 +7,7 @@ title: "Rebuild base rule: a restarted dependent builds on the land target when 
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-11-11T06:14:01.732329Z
-updated: 2026-11-11T06:15:04.005503Z
+updated: 2026-11-11T06:17:33.279251Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
