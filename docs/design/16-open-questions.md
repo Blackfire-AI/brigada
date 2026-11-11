@@ -2,7 +2,7 @@
 
 1. Gemini CLI's headless resume support.
 2. The foreman's wake-up budget defaults.
-3. `tool_call_cap_minutes` defaults per class.
+3. The per-class cap on one tool call (§5.6), fixed in the runner.
 6. Whether an explicit no-check task (`check: none`) is allowed at all (§6.1).
 7. Cross-project plans: out of scope for the coordinator (§4.6); revisit only with a use case. A project is one repo URL with its own foreman, and a plan belongs to one project, so a change spanning `api` and `web` is two plans the user coordinates. Either one foreman over several projects, or a plan whose tasks each name a repo. Either keeps product §5 rule 4 (repos are addressed by URL, never by path or name), and either must settle whose foreman owns the plan, what the foreman token's project wall (§12.1) allows, and how a task waits on a branch of another repo. Read-only context from another repo for a task that still changes one repo is the smaller thing in §5.8, and does not answer this.
 8. Setup and its cache (§5.7; with 15 minutes, 30 days and 3 entries per repository, a copy per job, and no clear command, all open to revision): the default `timeout_minutes`; the age and size bounds and the eviction rule of the cache; whether to share an entry read-only instead of copying it per job; the name and scope of the clear command; whether the key should also cover the toolchain version.

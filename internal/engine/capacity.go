@@ -17,9 +17,9 @@ import (
 // layer that sets it, the jobs running on it, its quota state and its
 // cost weight and tier. Layers carries one entry per cap layer — every runner,
 // every account, every capped model, every active plan of the project,
-// and global — with the layer's cap, its use and its queue depth. The
-// percent-of-window quota figures §12.2 names ride on CodexBar data
-// and are not part of the snapshot yet.
+// and global — with the layer's cap, its use and its queue depth. No
+// percent-of-window quota figure is part of it: nothing reads one
+// (§12.2).
 type CapacitySnapshot struct {
 	Agents []CapacityAgent `json:"agents"`
 	Layers []CapacityLayer `json:"layers"`

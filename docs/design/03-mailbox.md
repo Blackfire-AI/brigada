@@ -16,10 +16,10 @@
 | review "changes", rounds left | rule | fix round: same session, template + review text |
 | transient error (CLI crash, server error, lost runner) | rule | retry the job, capped; a fetch that could not reach the remote arrives as error kind `infra` (§5.1), a failed setup as `setup` (§5.7). |
 | a dependency is done | rule | the dependent task becomes ready |
-| quota limit hit by a worker | rule | cool the account (§8); re-dispatch to another eligible agent as a **fresh** attempt (on the task's next `-r<n>` branch, §6.4) carrying the previous job's summary if it produced one, else its last progress events (a session can't move between agents), counting toward the task's attempt caps; with no eligible agent in any tier (§8), after the queue timeout the task parks and the user is notified when notifications are enabled (§10) |
+| quota limit hit by a worker | rule | cool the account (§8); re-dispatch to another eligible agent as a **fresh** attempt (on the task's next `-r<n>` branch, §6.4) carrying the failure and the job's last progress events (a session can't move between agents), counting toward the task's attempt caps; with no other agent that can take the job the restart is not spent and the task takes the ordinary failure path (Transient failures, below) |
 | worker `needs_help` | **foreman** | answer → next job on the same session, or re-plan |
-| task out of rounds or retries | rule, then **foreman** | the tier escalation of §8 first, while the task is below heavy and its attempts are not spent; then the foreman: re-plan, switch agent, split, or ask the user |
-| worker stalled (§5.6) | **foreman** | restart with a new instruction, switch agent, or ask the user |
+| task out of rounds or retries | rule, then **foreman** | the escalation of §8 first (effort, then tier), until the task is at heavy and high effort or its attempts are spent; then the foreman: re-plan, restart, split, or ask the user |
+| worker stalled (§5.6) | **foreman** | restart with a note, re-plan, or ask the user |
 | plan held by a rule at the plan gate | **user** | approve, edit or reject (§6.3) |
 | task approved, dependencies landed | rule | a `land` job, unless a rule holds the task at the land gate → **user** (§6.3, §7.1) |
 | landed, check on the result passed | rule | push, unless the push gate is `ask` → **user**, or `never` (§6.3, §7.1) |

@@ -42,7 +42,7 @@ One per CLI: build the headless command (fresh or resume), parse the CLI's event
 
 The claude adapter's default worker scope allows exactly `go build`, `go test`, `go vet` and `gofmt` — the worker compiles and tests its own work as it goes; the runner still runs the check, so no new code reaches execution — and an agent config's explicit tool scope replaces the default.
 
-The prompt states the scope in force: an adapter whose rules limit the shell implements the optional `adapter.ShellScoped` and reports its commands (claude from its own `AllowedTools`, opencode from the commands `bashRules` maps), and the runner appends a fixed paragraph naming them to a work or fix job's prompt — what a compound command does under that scope, that a refusal covers one command and not the shell, that git is not needed. A scope with no shell command gets a no-shell wording; a whole-shell scope, a review, a foreman turn and the sandboxed harnesses (codex, kimi, dsh) get no paragraph.
+The prompt states the scope in force: an adapter whose rules limit the shell implements the optional `adapter.ShellScoped` and reports its commands (claude from its own `AllowedTools`, opencode from the commands `bashRules` maps), and the runner appends a fixed paragraph naming them to a work or fix job's prompt — what a compound command does under that scope, that a refusal covers one command and not the shell, that git is not needed. A scope with no shell command gets a no-shell wording; a whole-shell scope, a review, a foreman turn and the harnesses with no shell rules of brigada's — codex and dsh in their OS-level sandboxes, kimi with no scope at all — get no paragraph.
 
 A headless run does not take its configuration from the repository it works on. Claude runs with `--setting-sources user` and `--strict-mcp-config`, so the repository's `.claude/settings.json` (hooks, permission allows) and `.mcp.json` are not loaded; opencode runs with `OPENCODE_DISABLE_PROJECT_CONFIG=1`, so `opencode.json`, `.opencode/` and the project's instruction files (`AGENTS.md`, `CLAUDE.md`) are skipped while the user's global config and provider credentials stay.
 
@@ -108,10 +108,7 @@ Workers sometimes get stuck: alive, but making no progress.
   - Both route to the foreman exactly like a stall — the `task_loop` event lands in the foreman's inbox and wakes a turn — with the loop as the reason. No automatic kill or nudge: the foreman decides, as for stalls.
 - A stalled job **always goes to the foreman**; there is no automatic nudge.
 - A stalled foreman turn is killed and completed like any stalled job, but never routes to the foreman itself: its unconsumed events return to pending and are re-delivered on the next wake or attach (§4.2), the engine may wake it again while wake-up budget remains (§4.3), and the user is notified when it stalls repeatedly or the budget runs out.
-- **Restart:** `restart(task, instruction, mode, agent?)` cancels any live job and creates a new job on the same task with the new instruction.
-  - `mode=resume`: same session, the instruction appended (the worker keeps its context);
-  - `mode=fresh`: a new session, the instruction plus the previous job's summary and last progress (for a worker stuck in a loop);
-  - optional `agent` to move the task to another agent.
+- **Restart:** `task_restart(task, note)` takes a task parked at `needs_foreman` and creates a new work job on it: always a fresh attempt, in a new session from the task's base on a new branch (§6.4), with the note handed to the worker verbatim as feedback. The tool names no agent; the dispatcher places the job (§8). The engine's own restart of a failed work job (§3) is the same fresh attempt, pinned to a different eligible agent, with the failure and the job's last progress as its note.
 - **Who restarts:** the foreman (a judgment event), through `task_restart`; a user who wants a restart asks the foreman. A restart is a new attempt on the task and counts toward its attempt caps. A resume that fails (the session is gone or forked) restarts fresh in place.
 - **A host sleep does not end a hold.** The engine and its runners sleep together; the engine notices its own suspension (§13) and restarts the lease and every other wall-clock deadline from the wake, so the runner's first heartbeat after wake answers `ok` — never "the engine ended our hold" — and a live worker is not killed for the laptop's silence.
 
@@ -155,7 +152,7 @@ The engine copies the effective setting (command, key files, timeout, source and
 
 The engine retries a failed work job up to twice on any eligible agent, as a transient error, charging neither a restart round nor the agent's failure streak; a fix job, a standalone review or a spent retry count goes to the foreman (a review gets its one retry on another reviewer as for any error).
 
-Each retry waits a growing not-before delay before it may be leased — 5s, 15s, 45s, 2m, capped — so a network not yet up after a wake is waited out rather than retried every second. That short table is the one setup retries, transient CLI retries and the foreman's re-wake after a failed turn (§4.2) wait on; an infrastructure failure — a fetch or a CLI that cannot connect — waits on the infra table of §5.1 instead, whose minutes-scale steps and three-hour window carry an outage the seconds-scale table would hammer.
+Each retry waits a growing not-before delay before it may be leased — 5s, 15s, 45s, 2m, capped — so a network not yet up after a wake is waited out rather than retried every second. That short table is the one setup retries, a fix round's transient retry (its first step) and the foreman's re-wake after a failed turn (§4.2) wait on — a work job's transient restart on another agent waits on none; an infrastructure failure — a fetch or a CLI that cannot connect — waits on the infra table of §5.1 instead, whose minutes-scale steps and three-hour window carry an outage the seconds-scale table would hammer.
 
 The log of every setup run is an artifact of kind `setup_log`, linked as `setup_log_id` on the job, next to the check log, so the foreman and the user can see why. The time bound is `timeout_minutes`; the stall clock (§5.6) does not run during setup, which is bounded by that timeout alone, and a timeout kills the process tree.
 
@@ -300,7 +297,7 @@ Judgment is the project's, in files the project owns, and nothing judgment-like 
 
 **The files.** One per role, repo-relative, named in `.brigada/project.yaml` (§13.1) under `instructions: {foreman, plan_review, worker, reviewer}`: by default `.brigada/instructions/foreman.md`, `plan_review.md`, `worker.md` and `reviewer.md`. The 1.0 key `instructions_file` stays valid as the alias of `instructions.worker` (COMPATIBILITY.md), schema 1 unchanged; a file naming both keys is refused naming both, in §13.1's style, never picked silently.
 
-Two sources, both resolved by the client, never by the engine from a path (product §5 rule 1):
+Two sources, both resolved by the client, never by the engine from a path (product §5 rule 6):
 
 - the file, read at import as the rest of `project.yaml` is and sent as text;
 - the local override, `brigada project set instructions.<role>=@<file>` (`@-` reads stdin, or the text itself), for guidance the user does not commit; the plain `instructions` setting is the `instructions.worker` override.

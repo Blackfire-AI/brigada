@@ -40,8 +40,8 @@ const planReviewing = "reviewing"
 const planNeedsForeman = "needs_foreman"
 
 // The shipped approval limit (§6.3): the task count is off unless the
-// project sets one; the cost rule that stands in its place by default is
-// the plan budget (planbudget.go).
+// project sets one, as is its cost counterpart, the plan budget
+// (planbudget.go).
 const defaultApprovalMaxTasks = 0
 
 var defaultApprovalClasses = []string{"implement", "review", "answer"}
@@ -52,8 +52,8 @@ var defaultApprovalClasses = []string{"implement", "review", "answer"}
 //	approval_max_tasks          int; more tasks than this need approval.
 //	                            Absent = 0, off: no count rule. Negative
 //	                            is off too; the other rules still apply.
-//	approval_budget             the plan budget, the cost rule on by
-//	                            default: a whole number of tokens, a $
+//	approval_budget             the plan budget, the cost rule: a
+//	                            whole number of tokens, a $
 //	                            amount, or both joined with "+". Absent =
 //	                            none. A plan whose recorded spend passes
 //	                            it holds its new jobs (planbudget.go).

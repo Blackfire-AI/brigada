@@ -40,9 +40,9 @@ One step sets a repo up. The GUIDE's §1 describes the questions: the foreman mo
 
    Two families are the recommended setup under `review.family=prefer` (the default), where a review falls back to another agent of the author's family or to the author's own agent, visibly labelled (§7), and are required under `require`, where a review no other family can take parks.
 
-   With fewer than two it does not report ready. It stops the normal setup with an actionable warning (sign in to a harness of another family, or add a model of one) and continues only on the user's explicit acknowledgement of a **limited setup** (`--accept-limited`), for either value.
+   With fewer than two under `require` it does not report ready. It stops the normal setup with an actionable warning (sign in to a harness of another family, or add a model of one) and continues only on the user's explicit acknowledgement of a **limited setup** (`--accept-limited`). Under `prefer` it prints the same advice as a warning and goes on: reviews take the fallback.
 
-   A limited setup never disables the family rule (§7): under `require`, reviews it cannot serve are named in `status` and park as designed; under `prefer` they run on the fallback and are labelled `same_family` or `same_agent`; and init never presents such a setup as fully ready.
+   A setup with one family never disables the family rule (§7): under `require`, reviews it cannot serve are named in `status` and park as designed, and init never presents the limited setup as fully ready; under `prefer` they run on the fallback and are labelled `same_family` or `same_agent`.
 
 4. **Foreman.** Pick the foreman harness and model from the usable agents (it needs headless resume, §4.1). The pick is shown and overridable.
 
@@ -84,7 +84,7 @@ Nothing re-reads the CLIs' model lists on its own, so a model a CLI offers later
 
 `brigada agents` (read-only) runs the cheap listings init uses for claude, codex and opencode and reports the models offered but not registered, each with its name-table tier and the account it would share, and the registered models a CLI no longer lists (never claude's, whose alias list is not whole, nor from a listing that left out a model of unknown family). The name-based tier is a guess, corrected by `tier.<harness>/<model>` (§8).
 
-`brigada agents add <harness>/<model>` appends one line carrying the account its harness's registered agents use, refuses a model already registered, validates the line through the same `resolveRunnerAgents` the runner runs at startup, and leaves the running runner as it is: the line is served after a restart. Registration is never automatic, since a new model can spend a paid account.
+`brigada agents add <harness>/<model>` appends one line carrying the account its harness's registered agents use, refuses a model already registered, validates the line through the same `resolveRunnerAgents` the runner runs at startup, and restarts a running runner as §5.1 describes (draining, or cutting its jobs with `--now`), so the line is served from that restart; with no runner running, the next `brigada start` serves it. Registration is never automatic, since a new model can spend a paid account.
 
 `status` and `top` show a one-line hint when the last listing found unregistered models; the listing is cached with its time in `runner/models-offered.json`, `status` lists again only when it is missing or older than twelve hours, and `top` reads the cache on every redraw and refreshes a stale one once in the background, so no CLI runs per call.
 
@@ -108,7 +108,7 @@ It adds no hook and no permission entry, so `plan_approve` and `plan_reject` sta
 
 Only nonsecret repo-level intent goes in it: the canonical repo identity, the default check, the worker-tool policy, the `instructions` map (repo-relative paths to the project's text per role, read by the client at import; `instructions_file` is its 1.0 alias for the worker text, §5.9), `skills_dir` (§5.10), and project defaults and preferences. Accounts, credentials and tokens, local executable and state paths, detected login state and machine overrides never do; they stay local.
 
-Init writes it additively and reviewably (a new file, or a diff the user approves) and never commits or pushes it. The client reads the file and sends its content over the API, so the engine never reads a repo path (product §5 rule 1).
+Init writes it additively and reviewably (a new file, or a diff the user approves) and never commits or pushes it. The client reads the file and sends its content over the API, so the engine never reads a repo path (product §5 rule 6).
 
 Schema 1 of the file holds `schema: 1`, `repo` (the canonical identity, written in canonical form and checked against the selected remote), `default_check`, `worker_tools` (the `tools=` spelling), `approval_max_tasks`, `approval_budget`, `approval_classes`, `approval_protected_paths`, the gates and land rules of §6.3 (`gate_plan`, `gate_land`, `gate_push`, `approval_tiers`, `approval_restarted`, `land_target`, `after_land` — stored, shown and enforced: `gate_plan: ask` holds every plan at the plan gate, the land-gate rules hold a task's landing, the land job obeys `gate_push` and runs `after_land`, §7.1), `land_ready` (a repo-relative command path inside the repository — stored, shown and enforced: the land job runs it as the land gate and the push phase runs it again before pushing, §6.3, §7.1), the environment step's `setup`, `setup_cache_key_files` and `setup_timeout_minutes` (§5.7), the default `extra_repos` (§5.8), the foreman's `foreman_rotate_tokens` (§4.2), the plan-file mirror's `plan_files` (§6.4), the role instructions map `instructions` with the 1.0 alias `instructions_file` of its `worker` entry (both present is refused naming both, §5.9), and `skills_dir` (§5.10), and nothing else; an unknown key or schema version is refused with the key named.
 

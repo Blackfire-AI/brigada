@@ -329,9 +329,11 @@ func (e *Engine) retrySetupFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 // a network that is not up in the seconds after a wake needs time to
 // come back, and a longer outage must not be hammered every second
 // (issue #46). The sequence tops out at a couple of minutes, long enough
-// to cover a wake. Setup retries (§5.7), transient CLI retries and the
-// foreman's re-wake (§4.2) wait on this table; infrastructure failures
-// wait on their own, minutes-scale one above (§5.1).
+// to cover a wake. Setup retries (§5.7), a fix round's transient retry
+// (its first step) and the foreman's re-wake (§4.2) wait on this table;
+// a work job's transient restart on another agent waits on none, and
+// infrastructure failures wait on their own, minutes-scale one below
+// (§5.1).
 var retryDelays = []time.Duration{5 * time.Second, 15 * time.Second, 45 * time.Second, 2 * time.Minute}
 
 // retryDelayFor is the pause before the consecutive-th retry: 5s after

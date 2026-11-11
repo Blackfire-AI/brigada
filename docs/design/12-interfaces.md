@@ -26,7 +26,9 @@ Groups:
 
 `land_retry` alone takes a fresh random key on every call: one task may park and be retried several times, and any 200 — a refusal too — would otherwise replay over a later park. Its repeat needs no shared key, for the engine refuses a task that is not parked or has a live job, so a repeat cannot queue a second landing.
 
-Task jobs are keyed `task:<id>`: one live job per key makes duplicate job creation coalesce into the follow-up flag, which `status` shows. A land batch is keyed `land-batch:<project>` — a project has one land target, so one key covers it — and every member's reservation, `land_batch_job` on the task (§11), holds its `task:<id>` key the way a live job holds it, so a second batch for the target, a second landing job or a duplicate approval coalesces the same way (§7.1).
+Task jobs are keyed `task:<id>`: one live job per key makes duplicate job creation coalesce into the follow-up flag, which `status` shows; a land job takes its task's key too.
+
+**Not implemented: land batches (§7.1).** brigada lands one task per land job, on the task's own key, and no task carries a batch reservation. In the design, a land batch is keyed `land-batch:<project>` — a project has one land target, so one key covers it — and every member's reservation, a `land_batch_job` field on the task that §11 does not have (it is part of the unbuilt design), holds its `task:<id>` key the way a live job holds it, so a second batch for the target, a second landing job or a duplicate approval coalesces the same way (§7.1).
 
 **Credentials.** Foreman credentials are short-lived and scoped to one turn or one chat: a headless turn keeps the job-lease-scoped credential of §12.2, and an attached chat gets a hold-scoped foreman token, minted at attach, carried by the MCP config the client writes for the chat and revoked at detach, so the chat's tools die with it. No direct store access and the engine-as-mailbox rule stand.
 
@@ -66,7 +68,7 @@ It is scoped to one project and has no plan approval or rejection authority, and
 
 ### Capacity reporting
 
-`capacity` returns, per agent: its effective cap and the layer that sets it (§8.1; on the foreman's account, after headroom, §8.2), running jobs, quota state (`ready`, or `cooling` until a time, plus the percent used of the 5-hour and weekly windows when CodexBar data is available), cost weight, tier and the agent's configured effort, or `default` when its runner sets none. It also returns each layer's cap, use and queue depth: per runner, account and any capped model, per active plan of the foreman's project, and global. A queued task has no agent yet, so queue depth is reported per layer, not per agent.
+`capacity` returns, per agent: its effective cap and the layer that sets it (§8.1; on the foreman's account, after headroom, §8.2), running jobs, quota state (`ready`, or `cooling` until a time; no percent-of-window figure, since nothing reads one), cost weight, tier and the agent's configured effort, or `default` when its runner sets none. It also returns each layer's cap, use and queue depth: per runner, account and any capped model, per active plan of the foreman's project, and global. A queued task has no agent yet, so queue depth is reported per layer, not per agent.
 
 The one exception is a pin: each queued job pinned to an agent (`require_agent`), held by a cap or not, is listed with its job, task, kind, the agent and that agent's state for the job — `ready`, `cooling` until a time, `broken` or `capped_at_0` (the account cap, or the model cap except for a foreman job, exactly 0) — and the cap hold stamp when there is one, so the foreman can tell a wait for a slot that will free from a pin on an agent that can never take the job.
 
@@ -94,6 +96,8 @@ Selecting a flag mints nothing, and a selector that the credential in hand does 
 ## 12.3 Runner protocol
 
 ### Land batches
+
+**Not implemented: land batches (§7.1).** brigada lands one task per land job, keyed `task:<id>`, and no grant or completion carries a batch. The paragraphs below describe the design: the grant, the completion and the readers of a batch reservation; the functions they name exist and serve one-task landings.
 
 **Land batch grants and completion.** A grant carries the batch job id, `land-batch:<project>` key, lease and fence, project, remote, target, push phase/gate and ordered member list. Each member carries task and plan ids, result branch, approved head, recorded base, dependencies, message/trailer data and its gate-skip approval; the grant also carries the check and setup settings and command identity needed for gate evidence. A push grant names the recorded commits and ordered prefix it releases. The runner persists progress before publication as §7.1 requires.
 
