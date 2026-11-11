@@ -21,6 +21,11 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `brigada top` and `brigada capacity` refused a `--project` that names a local-path remote (`file:/…`), and run inside a repository with such an origin they showed every project. They now read a project's identity as the engine does.
 - `brigada top` left its idle connections to the engine open after every refresh until the engine's idle timeout closed them; each refresh now closes its own.
 - A worker tool call cut for the loop watch could end in a split UTF-8 character.
+- The `approval_max_tasks` usage error said a negative value turns every approval rule off; it turns off the count rule alone, and the error now says so (issue #218).
+- The coordinator's `plan_reject` advertised `and_stop_asking`, which it ignored; its schema now offers only `repo_url`, `plan` and `version`, and a test holds every coordinator tool's arguments to COMPATIBILITY.md (issue #216).
+- A quota limit counted toward an agent's failure streak: a success, a limit and then one failure marked the agent broken, since the stored limit job was one of the "last two". The streak now skips limit failures as it skips setup and infra ones (issue #212).
+- A failed setup's retry spent one of the task's restarts, though §5.7 says it charges none: a spent restart budget stopped the retry, and after one setup retry the work job's own transient restart no longer fired. The retry now spends no restart, and the restart cap neither gates nor counts it (issue #213).
+- The check-loop rule could not fire at the default two fix rounds: the round cap was checked first, so the third identical failure went out of rounds and escalated. The loop is now judged before the cap and parks the task as a loop (issue #214).
 
 ## [1.2.0] - 2026-11-09
 

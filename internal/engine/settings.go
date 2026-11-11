@@ -312,7 +312,7 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 	if key == SettingApprovalMaxTasks {
 		n, err := strconv.Atoi(value)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s takes an integer (0 = off, the default; negative = every approval rule off), got %q",
+			return nil, fmt.Errorf("%w: %s takes an integer (0 = off, the default; negative = off too; the other rules still apply), got %q",
 				ErrInvalidSetting, key, value)
 		}
 		return json.RawMessage(strconv.Itoa(n)), nil

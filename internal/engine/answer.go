@@ -189,7 +189,7 @@ func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note string, n
 		return RestartResult{}, fmt.Errorf(
 			"the task's restart budget is spent; the task stays parked at needs_foreman")
 	}
-	r, err := e.queueTaskRestartTx(tx, project, taskID, note, 0, time.Time{}, now)
+	r, err := e.queueTaskRestartTx(tx, project, taskID, note, 0, false, time.Time{}, now)
 	if err != nil {
 		return RestartResult{}, err
 	}
@@ -215,7 +215,7 @@ func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note string, n
 // gate, or local under gate_push never, is forgotten with its ref
 // (issue #205), so the new head's landing is the land rule's to queue
 // once it is approved.
-func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note string, agent int64, notBefore time.Time, now time.Time) (RestartResult, error) {
+func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note string, agent int64, retry bool, notBefore time.Time, now time.Time) (RestartResult, error) {
 	if err := e.forgetRestartedLandingTx(tx, taskID, now); err != nil {
 		return RestartResult{}, err
 	}
@@ -244,6 +244,7 @@ func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note stri
 		Prompt:       prompt.ComposeWorkerPrompt(spec, check, note, guidance...),
 		PromptMeta:   meta,
 		Restart:      true,
+		Retry:        retry,
 		RequireAgent: agent,
 		NotBefore:    notBefore,
 	}, now)

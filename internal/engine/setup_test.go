@@ -188,3 +188,62 @@ func TestSetupFailureIsRetriedAsInfrastructure(t *testing.T) {
 		t.Errorf("fix jobs = %d, want none", n)
 	}
 }
+
+// TestSetupRetrySpendsNoRestart: a setup retry is a fresh attempt the
+// restart cap neither gates nor counts (§5.7). With one restart left,
+// a setup failure is retried, and the retried work job's transient
+// failure still gets its automatic restart on another agent — the
+// restart the setup retry did not spend.
+func TestSetupRetrySpendsNoRestart(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "fam", "implement")
+	other := e.agented("other", "fam2", "implement")
+	e.submit(e.work())
+	e.exec(`UPDATE tasks SET caps = '{"restart":1}' WHERE id = ?`, e.task)
+	g := e.leaseAny(author)
+	if g == nil {
+		t.Fatal("nothing to lease")
+	}
+	if ans := e.complete(g, Completion{Error: "setup failed: exit code 1", ErrorKind: ErrorKindSetup}); ans != AnsOK {
+		t.Fatalf("complete = %s", ans)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskReady {
+		t.Fatalf("after the setup failure: task state = %s, want ready (retried)", state)
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1 AND retry = 1", e.task); n != 1 {
+		t.Fatalf("setup retry jobs = %d, want 1 marked retry", n)
+	}
+	e.clock.Advance(retryDelayFor(1))
+	g = e.leaseAny(author)
+	if g == nil {
+		t.Fatal("the setup retry was not leased")
+	}
+	if ans := e.complete(g, Completion{Error: "server error", ErrorKind: "other"}); ans != AnsOK {
+		t.Fatalf("complete = %s", ans)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskReady {
+		t.Fatalf("after the transient failure: task state = %s, want ready (restarted on another agent)", state)
+	}
+	if pin := e.int("SELECT COALESCE(require_agent, 0) FROM jobs WHERE task_id = ? ORDER BY id DESC LIMIT 1", e.task); pin != e.agentOf(other) {
+		t.Errorf("the restart's pin = %d, want the other agent %d", pin, e.agentOf(other))
+	}
+}
+
+// TestSetupRetryIgnoresASpentRestartCap: with no restart left, a setup
+// failure is still retried — the retry is not the restart cap's.
+func TestSetupRetryIgnoresASpentRestartCap(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "fam", "implement")
+	e.submit(e.work())
+	e.exec(`UPDATE tasks SET caps = '{"restart":0}' WHERE id = ?`, e.task)
+	g := e.leaseAny(author)
+	if g == nil {
+		t.Fatal("nothing to lease")
+	}
+	if ans := e.complete(g, Completion{Error: "setup failed: exit code 1", ErrorKind: ErrorKindSetup}); ans != AnsOK {
+		t.Fatalf("complete = %s", ans)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskReady {
+		t.Errorf("task state = %s, want ready: the setup retry spends no restart", state)
+	}
+}

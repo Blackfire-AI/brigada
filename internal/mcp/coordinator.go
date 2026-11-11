@@ -94,17 +94,37 @@ var CoordinatorTools = []Tool{
 	{
 		Name:        "plan_reject",
 		Description: "Reject a plan awaiting approval: its tasks are cancelled and its foreman hears of it. This is the USER's decision, never yours: call it only after you showed the user the plan and they said an explicit no (or asked to drop it) in this chat. Name the plan's id and the version you showed; a plan amended since is refused, then read status again and show it anew.",
-		InputSchema: planDecisionSchema,
+		InputSchema: planRejectSchema,
 		Call:        callPlanReject,
 	},
 }
 
-// planDecisionSchema is plan_approve's and plan_reject's arguments: the
-// project, the plan and the plan version the user was shown (§4.6);
-// plan_approve also takes and_stop_asking (§6.3).
+// planDecisionSchema is plan_approve's arguments: the project, the plan
+// and the plan version the user was shown (§4.6), and and_stop_asking
+// (§6.3).
 var planDecisionSchema = map[string]any{
 	"type": "object",
-	"properties": map[string]any{
+	"properties": planDecisionProperties(map[string]any{
+		"and_stop_asking": map[string]any{
+			"type":        "boolean",
+			"description": "also change the rule that held the plan, the way `brigada project set` would, so the same question is not asked twice; only with the user's say-so",
+		},
+	}),
+	"required": []string{"repo_url", "plan", "version"},
+}
+
+// planRejectSchema is plan_reject's arguments: the same project, plan
+// and version, and no and_stop_asking — a rejection changes no rule.
+var planRejectSchema = map[string]any{
+	"type":       "object",
+	"properties": planDecisionProperties(nil),
+	"required":   []string{"repo_url", "plan", "version"},
+}
+
+// planDecisionProperties is the properties both plan decisions share,
+// with extra added.
+func planDecisionProperties(extra map[string]any) map[string]any {
+	props := map[string]any{
 		"repo_url": map[string]any{
 			"type":        "string",
 			"description": "the plan's project, by canonical repo URL",
@@ -117,12 +137,11 @@ var planDecisionSchema = map[string]any{
 			"type":        "integer",
 			"description": "the plan version the user was shown, as status shows it",
 		},
-		"and_stop_asking": map[string]any{
-			"type":        "boolean",
-			"description": "also change the rule that held the plan, the way `brigada project set` would, so the same question is not asked twice; only with the user's say-so",
-		},
-	},
-	"required": []string{"repo_url", "plan", "version"},
+	}
+	for k, v := range extra {
+		props[k] = v
+	}
+	return props
 }
 
 // CoordinatorToolNames lists the coordinator's tools by name.

@@ -330,6 +330,11 @@ func TestRoundsExhaustedParksTheTask(t *testing.T) {
 				e.runReview(reviewer, verdict)
 			}
 			for i := 0; i < 2; i++ {
+				if tc.path == "check" {
+					// A new failure each round: the same one thrice is a
+					// loop (§5.6), judged before the cap.
+					check = fmt.Sprintf(`{"exit_code":3,"timed_out":false,"output_tail":"FAIL TestBoom%d\nthe frobnicator was off"}`, i)
+				}
 				e.runWork(author, doneOn("task/1-1", check))
 				if verdict != "" {
 					e.runReview(reviewer, verdict)

@@ -65,6 +65,11 @@ type SubmitParams struct {
 	// the key is cancelled first, and the job counts toward the task's
 	// restart cap.
 	Restart bool
+	// Retry marks the job as an engine retry that spends no budget (the
+	// jobs.retry flag). With Restart it is a fresh attempt the restart
+	// cap neither gates nor counts: the setup retry (§5.7), whose
+	// environment failed before any work was judged.
+	Retry bool
 	// Branch is the branch a standalone review (no task) reads: the one
 	// job whose branch the submit names, since no task row holds it. The
 	// engine names the branch of every other job at its first lease.
@@ -203,10 +208,10 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 		notBefore = fmtTime(p.NotBefore)
 	}
 	res, err := tx.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, prompt_meta, status,
-		harness, model, labels, restart, round, exclude_family, exclude_agent, require_agent, branch, queued_at, not_before, skip_land_ready, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		harness, model, labels, restart, retry, round, exclude_family, exclude_agent, require_agent, branch, queued_at, not_before, skip_land_ready, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ProjectID, nullIfZero(p.TaskID), string(p.Kind), p.Key, string(p.Mode), p.Prompt, p.PromptMeta,
-		p.Harness, p.Model, string(labelsJSON), boolInt(p.Restart), round, p.ExcludeFamily, nullIfZero(p.ExcludeAgent),
+		p.Harness, p.Model, string(labelsJSON), boolInt(p.Restart), boolInt(p.Retry), round, p.ExcludeFamily, nullIfZero(p.ExcludeAgent),
 		nullIfZero(p.RequireAgent), branch, nowStr, notBefore, boolInt(p.SkipLandReady), nowStr, nowStr)
 	if err != nil {
 		if !isUniqueViolation(err) {
@@ -308,6 +313,8 @@ func spentRound(p SubmitParams) string {
 	switch {
 	case p.TaskID == 0:
 		return ""
+	case p.Restart && p.Retry:
+		return ""
 	case p.Restart:
 		return roundRestart
 	case p.Round == roundNone:
@@ -338,10 +345,10 @@ func (e *Engine) roundCapReached(tx *sql.Tx, p SubmitParams) (string, bool, erro
 	}
 	// Both fix-round budgets count the same jobs — the task's fix jobs
 	// that spent one of them, restarts excluded (§7) — and the restart
-	// budget counts restarts.
+	// budget counts restarts, less the setup retries that spend none.
 	var count int
 	if round == roundRestart {
-		if err := tx.QueryRow("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1",
+		if err := tx.QueryRow("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1 AND retry = 0",
 			p.TaskID).Scan(&count); err != nil {
 			return round, false, fmt.Errorf("count %s rounds of task %d: %w", round, p.TaskID, err)
 		}
