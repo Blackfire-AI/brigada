@@ -28,8 +28,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-637"
     rounds: 0
   - id: 638
     name: "rebuild-base"
