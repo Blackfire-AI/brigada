@@ -104,7 +104,7 @@ Workers sometimes get stuck: alive, but making no progress.
 - **Detection:** the adapter turns the CLI's event stream into progress events (tool calls, messages); the runner sends the time of the last one in each heartbeat. **Stalled = 10 minutes with no activity at all.** A tool call in flight (a long build or test run) suspends the clock, bounded by its own per-class cap on one tool call (30 minutes). Stalled, or the class time cap reached → the runner kills the process tree and completes the job with the outcome `stalled` or `time_cap`; either ends the job in the terminal `stalled` status, and the result block names which, with the last progress events attached.
 - **Loops:** activity is not progress either — a worker repeating itself stays active until the class time cap. Two signals, deterministic first:
   - **The same check failure across consecutive fix rounds:** the same failing test names, else the same fingerprint of the normalised check-output tail (timings, paths, durations, addresses stripped), repeated 2 times after its first appearance. The engine detects it at the completion that would queue another fix round, parks the task at `needs_foreman` instead and counts the attempt as a spent round's.
-  - **The same tool call in a window:** 8 near-identical tool calls — the same tool with the same normalised arguments — within 10 minutes. The runner measures it from the adapter's progress events and reports it in the heartbeat; the run keeps going. A call the stream names without arguments counts nothing, and a harness whose stream carries no tool-call starts (opencode today) cannot trip the measure: the signal is only as good as the adapter's events.
+  - **The same tool call in a window:** 8 near-identical tool calls — the same tool with the same normalised arguments — within 10 minutes. The runner measures it from the adapter's progress events and reports it in the heartbeat; the run keeps going. A call the stream names without arguments counts nothing, and a harness whose stream carries no tool-call starts (opencode) cannot trip the measure: the signal is only as good as the adapter's events.
   - Both route to the foreman exactly like a stall — the `task_loop` event lands in the foreman's inbox and wakes a turn — with the loop as the reason. No automatic kill or nudge: the foreman decides, as for stalls.
 - A stalled job **always goes to the foreman**; there is no automatic nudge.
 - A stalled foreman turn is killed and completed like any stalled job, but never routes to the foreman itself: its unconsumed events return to pending and are re-delivered on the next wake or attach (§4.2), the engine may wake it again while wake-up budget remains (§4.3), and the user is notified when it stalls repeatedly or the budget runs out.
@@ -296,14 +296,14 @@ Judgment is the project's, in files the project owns, and nothing judgment-like 
 
 ### The instruction files
 
-**Why files.** Workers run official CLIs, and each reads its own harness's project instruction file: `CLAUDE.md` for Claude Code, `AGENTS.md` for Codex and others. A rule written for one harness never reaches a worker of another family. The project therefore has one text per role that brigada puts into that role's prompts itself, whatever the harness. And the weakest part of brigada is plan and check quality, which lived in the binary where only a release could correct it; a reviewer told no convention approves work that breaks every convention (the skill-lab of 2026-10-28 approved ten such diffs). Now the user tunes any role by editing the default itself.
+**Why files.** Workers run official CLIs, and each reads its own harness's project instruction file: `CLAUDE.md` for Claude Code, `AGENTS.md` for Codex and others. A rule written for one harness never reaches a worker of another family. The project therefore has one text per role that brigada puts into that role's prompts itself, whatever the harness. And the weakest part of brigada is plan and check quality, which lived in the binary where only a release could correct it; a reviewer told no convention approves work that breaks every convention (a skill lab approved ten such diffs). The user tunes any role by editing the default itself.
 
 **The files.** One per role, repo-relative, named in `.brigada/project.yaml` (§13.1) under `instructions: {foreman, plan_review, worker, reviewer}`: by default `.brigada/instructions/foreman.md`, `plan_review.md`, `worker.md` and `reviewer.md`. The 1.0 key `instructions_file` stays valid as the alias of `instructions.worker` (COMPATIBILITY.md), schema 1 unchanged; a file naming both keys is refused naming both, in §13.1's style, never picked silently.
 
 Two sources, both resolved by the client, never by the engine from a path (product §5 rule 1):
 
 - the file, read at import as the rest of `project.yaml` is and sent as text;
-- the local override, `brigada project set instructions.<role>=@<file>` (`@-` reads stdin, or the text itself), for guidance the user does not commit; today's `instructions` setting is the `instructions.worker` override.
+- the local override, `brigada project set instructions.<role>=@<file>` (`@-` reads stdin, or the text itself), for guidance the user does not commit; the plain `instructions` setting is the `instructions.worker` override.
 
 Which wins is §13.1's rule: a local override, then the last imported file value. A pulled change to a file applies at the next explicit import, never as a side effect of `git pull`, and `status` flags `changed since import`; a changed file over a store value that is still the previous import applies, over a local override it does not, and the conflict is shown with both texts. Nothing wins silently.
 
@@ -347,7 +347,7 @@ A text that says "ignore the above" is still data: it cannot widen a tool scope,
 
 **Bounds.** Two levels, shared with §5.10.
 
-- Per file, enforced at import: 8192 bytes of UTF-8 for each role text (the whole foreman text today is 5.9 KB, under one percent of a typical wake, so one foreman file; a plan-time/every-turn split is §16 item 11 if the bound ever binds).
+- Per file, enforced at import: 8192 bytes of UTF-8 for each role text (the default foreman text is under 5 KB, under one percent of a typical wake, so one foreman file; a plan-time/every-turn split is §16 item 11 if the bound ever binds).
 - Per prompt, enforced at task creation: a worker prompt's instructions plus skills at most 16384 bytes (one role text and two skills at their maxima), a reviewer prompt's at most 24576 bytes (two role texts and two skills), so the design's own maximum pick of two skills (§5.10) is always admitted. A foreman turn carries `foreman.md` alone (the worker text arrives through `status` on request) and a plan review carries `plan_review.md` and `foreman.md`, no skills, so the per-file bound is their per-prompt bound.
 
 Above a bound the set, the import or the `plan_create` is **rejected** with the size, the limit and the task named, and the previous value stays in effect; nothing is ever truncated, because a cut rule is worse than a refused one. Text that is not valid UTF-8 or contains a NUL is rejected too. The engine enforces the bounds on the API; the client checks first, for a readable message.
@@ -372,7 +372,7 @@ A **skill** is a short procedure for one shape of task ("add a command flag", "c
 
 Workers never see a repository's own skill directories: the Claude adapter runs the CLI with `--setting-sources user` and `--strict-mcp-config` on purpose (the repository is the change's, not the run's to configure), and Codex workers get no repository skill directory either, so a spec that says "use skill X" fails silently. A skill therefore reaches a worker the one way any text does: as verbatim data, chosen by the foreman per task and injected by the engine.
 
-The skill-lab of 2026-10-28 is the evidence: with the matching skill appended to the spec, a standard-tier worker passed its check first try 10 of 10 (bare: 5 of 9) and won a blind convention rubric 9 pairs to 1 at 1.2x the tokens, and the reviewer, reading the same skill, caught a surface-parity miss the bare arm's reviewer had approved.
+A skill lab is the evidence: with the matching skill appended to the spec, a standard-tier worker passed its check first try 10 of 10 (bare: 5 of 9) and won a blind convention rubric 9 pairs to 1 at 1.2x the tokens, and the reviewer, reading the same skill, caught a surface-parity miss the bare arm's reviewer had approved.
 
 ### Skill layers and defaults
 

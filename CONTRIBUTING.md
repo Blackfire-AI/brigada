@@ -15,7 +15,7 @@ To only check that it compiles, run `go build -o /dev/null ./cmd/brigada`.
 
 Read these before you change behaviour:
 
-- `docs/design.md`: how brigada works inside;
+- `docs/design.md`: how brigada works inside, an index of the section files under `docs/design/`;
 - `docs/product.md`: what it is for;
 - `docs/glossary.md`: the terms used in the code and docs;
 - `docs/GUIDE.md`: how to use it.

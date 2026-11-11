@@ -4,7 +4,7 @@
 Judge the plan against the checkout and cite evidence for each finding. Check:
 
 (a) Work already on the default branch or in another active plan.
-(b) Specs contradicting the code or docs/design.md.
+(b) Specs contradicting the code or the design (docs/design.md, an index of docs/design/).
 (c) Tasks or plans touching the same files and risking conflicts.
 (d) Dependency shape and width, including unrelated work chained and dependent work parallel.
 (e) Tier and effort that do not fit task difficulty.

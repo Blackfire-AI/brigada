@@ -12,7 +12,7 @@ A task parked at `needs_foreman` is the foreman's while it will handle it: its p
 
 Any other park at `needs_foreman` with an inbox row is the user's: no foreman harness, a limited foreman, a spent budget, a stalled wake, a spent outage, a cancelled turn, or a done turn that consumed the event and left the task parked. It is listed, and one `task_unattended` event announces it — a plain log record in no inbox that wakes no turn, appended when a wake settles, once per park, carrying the queue's reason and the parking event's kind; its notification reads `task #N needs you: <reason>`, and the webhook's text for a failed check never carries the check's output.
 
-A park with no inbox row (a plan rule's hold) is the user's as before; `needs_user` is reserved, with no path into it today.
+A park with no inbox row (a plan rule's hold) is the user's as before; `needs_user` is reserved, with no path into it.
 
 A plan parked at `needs_foreman` follows the same hold rule, using its latest `plan_reviewed` inbox row. When the foreman will not handle it, one `plan_unattended` event per park announces the queue reason, including the swallowed-turn heading when applicable; it wakes no turn. A plan awaiting approval remains the user's.
 
