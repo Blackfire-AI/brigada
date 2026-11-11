@@ -204,9 +204,12 @@ func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note string, n
 // retry (§3, §5.6). The caller checks the budget and records the decision;
 // an automatic retry pins the new attempt to a different eligible agent.
 // notBefore, when non-zero, holds the new job out of leasing until then
-// (§3: a retry's growing delay). The base is re-resolved first, so a
-// dependent the stale-base rule held (issue #124) rebuilds on its
-// dependency's current result branch, the one that dependency is done
+// (§3: a retry's growing delay). The base is chosen first by the rebuild
+// base rule (§6.1, rebuildBaseTx), for the restart and the retry alike:
+// a dependency whose work is on the land target, or whose chain was
+// abandoned (cancelled or retired), gives the land target's tip; any
+// other gives its current result branch, so a dependent the stale-base
+// rule held (issue #124) rebuilds on the round that dependency is done
 // from — a fresh attempt is the one path that may move the worktree's
 // starting point. The landing the old attempt left waiting at the push
 // gate, or local under gate_push never, is forgotten with its ref
@@ -216,7 +219,7 @@ func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note stri
 	if err := e.forgetRestartedLandingTx(tx, taskID, now); err != nil {
 		return RestartResult{}, err
 	}
-	if err := resolveBaseTx(tx, taskID, now); err != nil {
+	if err := rebuildBaseTx(tx, taskID, now); err != nil {
 		return RestartResult{}, err
 	}
 	spec, err := taskSpecTx(tx, taskID)

@@ -15,8 +15,10 @@ import (
 // -r<n> branch, and every started, unlanded dependent stacked on a
 // superseded round of it is held: parked at needs_foreman when its key
 // is free, and refused at the land gate otherwise and ever after, until
-// the foreman restarts it and the rebuild re-resolves its base to the
-// dependency's new result. One wake per rebuild (the dep_rebuilt event)
+// the foreman restarts it and the rebuild re-resolves its base by the
+// rebuild base rule (rebuildBaseOfTx): the dependency's new result, or
+// the land target's tip once the dependency landed or its chain was
+// abandoned. One wake per rebuild (the dep_rebuilt event)
 // names the dependency and every stale task, the one-wake-per-cause
 // shape of issue #116; the land-path refusal (task_base_stale) parks and
 // wakes per task, as a failure about the task's own content does.
@@ -68,12 +70,92 @@ func staleBaseTx(tx *sql.Tx, taskID int64) (dep int64, baseRef, depBranch string
 	return dep, base, branch, true, nil
 }
 
+// landWaitRef names the remote ref a target's waiting and local
+// landings sit on (§7.1): the runner's own name for it
+// (internal/runner/land.go), outside refs/heads.
+func landWaitRef(target string) string {
+	return "refs/brigada/land/" + target
+}
+
+// The end of the chain a rebuild reads off its stacked dependency (§6.1's
+// rebuild base rule): rebuildLanded for a done dependency with a landing
+// record, (b); the dependency's own cancelled or retired state for an
+// abandoned chain, (c); and "" for every other state, (a) included, which
+// builds on the dependency's current result branch.
+const rebuildLanded = "landed"
+
+// rebuildBaseOfTx names the base a fresh attempt of taskID builds on
+// (§6.1's rebuild base rule): the dependency stackedDepTx selects, read
+// in the order (b), (c), (a). A done dependency with a landing record
+// gives the land target's tip — the record's target branch when pushed,
+// the waiting ref's stack when it still waits or sits local; a cancelled
+// or retired one gives the project's land target; any other state its
+// current result branch. ref is "" when the base stays untouched: no
+// stacked dependency, or one in (a)'s states that recorded no branch.
+// how names the end of the chain, "" for the dependency's own branch.
+func rebuildBaseOfTx(tx *sql.Tx, taskID int64) (dep int64, ref, how string, err error) {
+	dep, branch, err := stackedDepTx(tx, taskID)
+	if err != nil || dep == 0 {
+		return 0, "", "", err
+	}
+	var state, defaultBranch string
+	var project int64
+	if err := tx.QueryRow(`SELECT x.state, pl.project_id, p.default_branch FROM tasks x
+		JOIN plans pl ON pl.id = x.plan_id JOIN projects p ON p.id = pl.project_id
+		WHERE x.id = ?`, dep).Scan(&state, &project, &defaultBranch); err != nil {
+		return 0, "", "", fmt.Errorf("read the stacked dependency %d of task %d: %w", dep, taskID, err)
+	}
+	switch state {
+	case taskDone:
+		var target, pushed string
+		err := tx.QueryRow("SELECT target_branch, pushed FROM landings WHERE task_id = ?", dep).Scan(&target, &pushed)
+		if errors.Is(err, sql.ErrNoRows) {
+			break // (a): done with no landing builds on its current branch
+		}
+		if err != nil {
+			return 0, "", "", fmt.Errorf("read the landing of task %d: %w", dep, err)
+		}
+		if pushed == "pushed" {
+			return dep, target, rebuildLanded, nil
+		}
+		return dep, landWaitRef(target), rebuildLanded, nil
+	case taskCancelled, taskRetired:
+		target, err := effectiveLandTargetTx(tx, project, defaultBranch)
+		if err != nil {
+			return 0, "", "", err
+		}
+		return dep, target, state, nil
+	}
+	return dep, branch, "", nil
+}
+
+// rebuildBaseTx writes the base a restart or an automatic retry builds on
+// (§6.1's rebuild base rule, rebuildBaseOfTx) into tasks.base_ref. A task
+// that stacks on nothing, or on a dependency in (a)'s states that
+// recorded no branch, keeps the base it has, as resolveBaseTx does.
+func rebuildBaseTx(tx *sql.Tx, taskID int64, now time.Time) error {
+	_, ref, _, err := rebuildBaseOfTx(tx, taskID)
+	if err != nil || ref == "" {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE tasks SET base_ref = ?, updated_at = ? WHERE id = ?`, ref, fmtTime(now), taskID); err != nil {
+		return fmt.Errorf("write the base of task %d: %w", taskID, err)
+	}
+	return nil
+}
+
 // staleBaseReason words a stale-base hold (issue #124): the superseded
-// base and the dependency's current branch both named, so the foreman
-// reads what to rebuild on. wants names what the hold refused — the
-// task's own landing, or nothing for the sweep that parks it outright.
-func staleBaseReason(dep int64, baseRef, depBranch, wants string) string {
-	reason := fmt.Sprintf("the base %s is a superseded result of task %d, now on %s", baseRef, dep, depBranch)
+// base and the base a restart rebuilds on both named, so the foreman
+// reads what to rebuild on. newBase is the dependency's current branch,
+// or the land target's tip when how names the end of the chain (§6.1's
+// rebuild base rule: landed, cancelled or retired). wants names what the
+// hold refused — the task's own landing, or nothing for the sweep that
+// parks it outright.
+func staleBaseReason(dep int64, baseRef, newBase, how, wants string) string {
+	reason := fmt.Sprintf("the base %s is a superseded result of task %d, now on %s", baseRef, dep, newBase)
+	if how != "" {
+		reason = fmt.Sprintf("the base %s is a superseded result of task %d, now %s; the new base is the land target %s", baseRef, dep, how, newBase)
+	}
 	if wants != "" {
 		reason = wants + ": " + reason
 	}
@@ -83,10 +165,19 @@ func staleBaseReason(dep int64, baseRef, depBranch, wants string) string {
 // parkStaleBaseTx parks a task on a stale base (issue #124):
 // needs_foreman under no land cause, any held land-gate hold beside it
 // dropped — its landing is refused anyway — and the task_base_stale
-// event naming both refs. inbox sends the event to the foreman's wake
+// event naming both refs. The new base named is the one a restart
+// builds on (§7.1, §6.1's rebuild base rule): the dependency's current
+// branch, or the land target's tip when the dependency landed or its
+// chain was abandoned. inbox sends the event to the foreman's wake
 // with the park; log keeps it to the history when a wake of the cause
 // already carries the task, as the sweep's does.
 func (e *Engine) parkStaleBaseTx(tx *sql.Tx, project, taskID, dep int64, baseRef, depBranch, wants string, inbox bool, now time.Time) error {
+	newBase, how := depBranch, ""
+	if _, ref, end, err := rebuildBaseOfTx(tx, taskID); err != nil {
+		return err
+	} else if end != "" {
+		newBase, how = ref, end
+	}
 	if _, err := tx.Exec(`UPDATE tasks SET state = ?, land_env_cause = '', updated_at = ? WHERE id = ?`,
 		taskNeedsForeman, fmtTime(now), taskID); err != nil {
 		return fmt.Errorf("park task %d on its stale base: %w", taskID, err)
@@ -94,8 +185,8 @@ func (e *Engine) parkStaleBaseTx(tx *sql.Tx, project, taskID, dep int64, baseRef
 	if _, err := tx.Exec(`DELETE FROM land_holds WHERE task_id = ? AND state = 'held'`, taskID); err != nil {
 		return fmt.Errorf("drop the land hold of task %d: %w", taskID, err)
 	}
-	payload := eventPayload{Status: taskNeedsForeman, Branch: depBranch,
-		Reason: boundNote(staleBaseReason(dep, baseRef, depBranch, wants))}
+	payload := eventPayload{Status: taskNeedsForeman, Branch: newBase,
+		Reason: boundNote(staleBaseReason(dep, baseRef, newBase, how, wants))}
 	if inbox {
 		if err := inboxEventTx(tx, evTaskBaseStale, project, taskID, 0, payload, now); err != nil {
 			return err
