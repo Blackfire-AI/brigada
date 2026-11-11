@@ -5,7 +5,7 @@ go 1.27
 require (
 	github.com/mattn/go-isatty v0.0.24
 	golang.org/x/sys v0.49.0
-	modernc.org/sqlite v1.61.0
+	modernc.org/sqlite v1.61.1
 )
 
 require (
