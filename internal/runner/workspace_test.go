@@ -717,3 +717,120 @@ func TestRunnerWorktreeFailureIsInfrastructure(t *testing.T) {
 		t.Errorf("task state = %q, want running: the task keeps its state behind the retry", state)
 	}
 }
+
+// pushWaitRef pushes a new commit to the remote as the target's waiting
+// ref and returns its SHA.
+func pushWaitRef(t *testing.T, remote, target, msg string) string {
+	t.Helper()
+	dir := t.TempDir()
+	git(t, dir, "clone", remote, "c")
+	c := filepath.Join(dir, "c")
+	git(t, c, "-c", "user.name=t", "-c", "user.email=t@brigada.invalid", "commit", "--allow-empty", "-m", msg)
+	git(t, c, "push", remote, "HEAD:"+landWaitRef(target))
+	return strings.TrimSpace(git(t, c, "rev-parse", "HEAD"))
+}
+
+// TestWorkspaceBaseOnWaitingRef: a waiting-ref base the remote holds is
+// fetched by name into a mirror that existed before the ref was pushed.
+func TestWorkspaceBaseOnWaitingRef(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	remote := newRemote(t)
+	cfg := &Config{StateDir: t.TempDir()}
+	ws1, err := prepareWorkspace(ctx, cfg, &api.JobGrant{JobID: 41, TaskID: 20, Attempt: 1, RepoURL: remote, BaseRef: "main"})
+	if err != nil {
+		t.Fatalf("prepare the first workspace: %v", err)
+	}
+	ws1.remove(ctx)
+	sha := pushWaitRef(t, remote, "main", "waiting landing")
+
+	ws2, err := prepareWorkspace(ctx, cfg, &api.JobGrant{JobID: 42, TaskID: 21, Attempt: 1, RepoURL: remote, BaseRef: landWaitRef("main")})
+	if err != nil {
+		t.Fatalf("prepare on the waiting ref: %v", err)
+	}
+	defer ws2.remove(ctx)
+	if ws2.base != sha {
+		t.Errorf("worktree base = %s, want the waiting ref's commit %s", ws2.base, sha)
+	}
+}
+
+// TestWorkspaceBaseOnGoneWaitingRef: a waiting ref the remote no longer
+// holds builds on the target branch it names, and on the default branch
+// when that is missing too.
+func TestWorkspaceBaseOnGoneWaitingRef(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	remote := newRemote(t)
+	cfg := &Config{StateDir: t.TempDir()}
+	dir := t.TempDir()
+	git(t, dir, "clone", remote, "c")
+	c := filepath.Join(dir, "c")
+	main := strings.TrimSpace(git(t, c, "rev-parse", "HEAD"))
+	git(t, c, "-c", "user.name=t", "-c", "user.email=t@brigada.invalid", "commit", "--allow-empty", "-m", "on release")
+	git(t, c, "push", remote, "HEAD:refs/heads/release")
+	sha := strings.TrimSpace(git(t, c, "rev-parse", "HEAD"))
+
+	ws, err := prepareWorkspace(ctx, cfg, &api.JobGrant{JobID: 43, TaskID: 22, Attempt: 1, RepoURL: remote, BaseRef: landWaitRef("release")})
+	if err != nil {
+		t.Fatalf("prepare on a gone waiting ref: %v", err)
+	}
+	if ws.base != sha {
+		t.Errorf("worktree base = %s, want the target branch's commit %s", ws.base, sha)
+	}
+	ws.remove(ctx)
+
+	ws, err = prepareWorkspace(ctx, cfg, &api.JobGrant{JobID: 44, TaskID: 23, Attempt: 1, RepoURL: remote, BaseRef: landWaitRef("unlanded")})
+	if err != nil {
+		t.Fatalf("prepare with the target missing too: %v", err)
+	}
+	defer ws.remove(ctx)
+	if ws.base != main {
+		t.Errorf("worktree base = %s, want the default branch's commit %s", ws.base, main)
+	}
+}
+
+// TestReviewDiffBaseOnWaitingRef: a review job resolves a waiting-ref
+// base like a work job — the diff is against the ref when held, and
+// against the target branch when the ref is gone.
+func TestReviewDiffBaseOnWaitingRef(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	remote := newRemote(t)
+	cfg := &Config{StateDir: t.TempDir()}
+
+	dir := t.TempDir()
+	git(t, dir, "clone", remote, "c")
+	c := filepath.Join(dir, "c")
+	if err := os.WriteFile(filepath.Join(c, "result.txt"), []byte("result\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, c, "add", "-A")
+	git(t, c, "-c", "user.name=t", "-c", "user.email=t@brigada.invalid", "commit", "-m", "result")
+	git(t, c, "push", remote, "HEAD:refs/heads/brigada/task-30")
+
+	review := func(job int64, base string) string {
+		ws, err := prepareWorkspace(ctx, cfg, &api.JobGrant{
+			JobID: job, TaskID: job, Attempt: 1, Kind: string(engine.KindReview),
+			RepoURL: remote, BaseRef: base, ReviewBranch: "brigada/task-30",
+		})
+		if err != nil {
+			t.Fatalf("prepare the review on %s: %v", base, err)
+		}
+		defer ws.remove(ctx)
+		b, err := os.ReadFile(filepath.Join(ws.dir, prompt.ReviewDiffFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+
+	// Gone ref: the diff is against main, so it holds result.txt.
+	if d := review(51, landWaitRef("main")); !strings.Contains(d, "result.txt") {
+		t.Errorf("diff against the target branch lacks result.txt:\n%s", d)
+	}
+	// Held ref at the result commit itself: the diff against it is empty.
+	git(t, c, "push", remote, "HEAD:"+landWaitRef("main"))
+	if d := review(52, landWaitRef("main")); strings.Contains(d, "result.txt") {
+		t.Errorf("diff against the held waiting ref still shows result.txt:\n%s", d)
+	}
+}
