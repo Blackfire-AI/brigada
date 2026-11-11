@@ -308,14 +308,12 @@ func (e *Engine) retrySetupFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 	if failed > setupRetries {
 		return false, nil
 	}
-	// A spent restart budget cannot take the retry's submit: the task goes
-	// to the foreman instead, as for any retry that cannot be queued.
-	if _, capped, err := e.roundCapReached(tx, SubmitParams{TaskID: job.TaskID, Restart: true}); err != nil || capped {
-		return false, err
-	}
+	// The retry is a fresh attempt that spends no restart (§5.7): the
+	// restart cap neither gates nor counts it, so the work job's own
+	// transient restart stays available after it.
 	reason := boundNote(c.Error)
 	note := reason + "\nThe environment failed before any work was judged; nothing of the previous attempt is lost or to be fixed."
-	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, now.Add(retryDelayFor(failed)), now)
+	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, true, now.Add(retryDelayFor(failed)), now)
 	if err != nil {
 		return false, err
 	}
@@ -607,7 +605,9 @@ func (e *Engine) autoRestartTaskTx(tx *sql.Tx, job *jobRow, kind, text string, n
 // judgment event for this failure, with its kind and text in the reason.
 func (e *Engine) autoRestartWorkTx(tx *sql.Tx, job *jobRow, kind, text string, now time.Time) (bool, error) {
 	var restarts int
-	if err := tx.QueryRow("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1", job.TaskID).Scan(&restarts); err != nil {
+	// A setup retry (§5.7) is a restart that spends nothing, so it does
+	// not use up this one.
+	if err := tx.QueryRow("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1 AND retry = 0", job.TaskID).Scan(&restarts); err != nil {
 		return false, fmt.Errorf("count the restarts of task %d: %w", job.TaskID, err)
 	}
 	if restarts != 0 {
@@ -642,7 +642,7 @@ func (e *Engine) autoRestartWorkTx(tx *sql.Tx, job *jobRow, kind, text string, n
 	if lastEvent != "" {
 		note += "\nLast progress: " + boundNote(lastEvent)
 	}
-	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, agent, time.Time{}, now)
+	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, agent, false, time.Time{}, now)
 	if err != nil {
 		return false, err
 	}
@@ -803,7 +803,7 @@ func (e *Engine) escalateTierTx(tx *sql.Tx, job *jobRow, reason, note string, ra
 		}
 	}
 	note = boundNote(fmt.Sprintf("previous attempt (tier %s, effort %s) %s: %s", before, shownEffort, reason, note))
-	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, time.Time{}, now)
+	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, false, time.Time{}, now)
 	if err != nil {
 		return false, err
 	}

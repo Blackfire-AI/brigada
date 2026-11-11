@@ -46,7 +46,7 @@ type jobRow struct {
 	Model          string // a foreman turn's model; '' = none recorded (see foremanPairTx)
 	Labels         string
 	Restart        bool
-	Retry          bool // a fix round's retry after a transient CLI failure (§3); never a restart
+	Retry          bool // an engine retry that spends no budget: a fix round's retry after a transient CLI failure (§3), or a setup retry (§5.7), a restart the restart cap does not count
 	ReleasedBy     int64
 	ReleasedUntil  string
 	ReleaseNote    string

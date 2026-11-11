@@ -844,7 +844,7 @@ The keys are flat in schema 1:
 - Each job works on its own copy. Only the run before the worker of a work job may store it, never a fix or review job, whose worktree already holds a worker's branch; so a worker cannot spoil the next job's cache.
 - Entries unused for 30 days, or beyond the three most recent of a repository, are removed.
 
-**Rules for the command.** It must be idempotent: it runs again before the check, whatever the worker did. A setup that exits non-zero or times out is an infrastructure failure, not a failed check: the task is retried up to twice, then parks at `needs_foreman`, and the setup log is an artifact of the job (`setup_log_id`). Setup output is data, never instructions.
+**Rules for the command.** It must be idempotent: it runs again before the check, whatever the worker did. A setup that exits non-zero or times out is an infrastructure failure, not a failed check: the task is retried up to twice, spending none of its restarts, then parks at `needs_foreman`, and the setup log is an artifact of the job (`setup_log_id`). Setup output is data, never instructions.
 
 ### Another repository to read
 
