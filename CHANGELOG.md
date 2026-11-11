@@ -21,6 +21,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `brigada top` and `brigada capacity` refused a `--project` that names a local-path remote (`file:/…`), and run inside a repository with such an origin they showed every project. They now read a project's identity as the engine does.
 - `brigada top` left its idle connections to the engine open after every refresh until the engine's idle timeout closed them; each refresh now closes its own.
 - A worker tool call cut for the loop watch could end in a split UTF-8 character.
+- The `approval_max_tasks` usage error said a negative value turns every approval rule off; it turns off the count rule alone, and the error now says so (issue #218).
 
 ## [1.2.0] - 2026-11-09
 

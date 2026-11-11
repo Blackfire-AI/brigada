@@ -152,7 +152,7 @@ func TestProjectSettingsGolden(t *testing.T) {
 
 	// A bad value is a usage error naming what the key takes and the help command.
 	code, _, stderr = do("project", "set", "--repo", repo, "approval_max_tasks=many")
-	wantErr = `brigada: invalid project setting: approval_max_tasks takes an integer (0 = off, the default; negative = every approval rule off), got "many"; valid keys: ` + validSettingKeys + "\nRun 'brigada project set --help' for usage.\n"
+	wantErr = `brigada: invalid project setting: approval_max_tasks takes an integer (0 = off, the default; negative = off too; the other rules still apply), got "many"; valid keys: ` + validSettingKeys + "\nRun 'brigada project set --help' for usage.\n"
 	if code != 2 || stderr != wantErr {
 		t.Fatalf("bad value = %d %q, want 2 %q", code, stderr, wantErr)
 	}
