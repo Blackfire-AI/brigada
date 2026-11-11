@@ -237,6 +237,94 @@ func TestInfraRetriesSpentParkNamingTheOutage(t *testing.T) {
 	}
 }
 
+// reviewInfraFail leases the task's review and completes it as an
+// infrastructure failure.
+func reviewInfraFail(e *env, reviewer int64) {
+	e.t.Helper()
+	rg := e.leaseAny(reviewer)
+	if rg == nil || rg.Kind != KindReview {
+		e.t.Fatalf("the review job was not leased: %+v", rg)
+	}
+	if ans := e.complete(rg, Completion{
+		Error:     "fetch the worktree's base: Could not resolve host: github.com",
+		ErrorKind: ErrorKindInfra,
+	}); ans != AnsOK {
+		e.t.Fatalf("complete the review: %s", ans)
+	}
+}
+
+// TestReviewInfraFailureIsRetriedOnTheBackoff: a review that fails on
+// infrastructure is requeued on its key under the infra backoff (§5.1),
+// the task stays in review and nothing is spent.
+func TestReviewInfraFailureIsRetriedOnTheBackoff(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	lone := e.agented("lone", "google", "implement", "review")
+	e.submit(e.work())
+	e.runWork(author, doneOn("task/1-1", passCheck))
+	key := e.str("SELECT key FROM jobs WHERE task_id = ? AND kind = 'review'", e.task)
+	for i := 1; i <= 2; i++ {
+		reviewInfraFail(e, lone)
+		retry := e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review' AND status = 'queued'", e.task)
+		if retry == 0 {
+			t.Fatalf("failure %d: no review retry queued", i)
+		}
+		if k := e.str("SELECT key FROM jobs WHERE id = ?", retry); k != key {
+			t.Errorf("retry key = %s, want %s", k, key)
+		}
+		if nb := e.str("SELECT not_before FROM jobs WHERE id = ?", retry); nb != fmtTime(e.clock.Now().Add(infraDelayFor(i))) {
+			t.Errorf("failure %d: retry not_before = %s, want now + %s", i, nb, infraDelayFor(i))
+		}
+		if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskReviewing {
+			t.Errorf("task state = %s, want reviewing", state)
+		}
+		if g := e.leaseAny(lone); g != nil {
+			t.Fatalf("leased %+v before the retry delay elapsed", g)
+		}
+		e.waitOutInfraRetry(key)
+	}
+	if n := e.countEvents(evTaskInfraRetry); n != 2 {
+		t.Errorf("task_infra_retry events = %d, want 2", n)
+	}
+	if n := e.countEvents(evReviewRetry); n != 0 {
+		t.Errorf("review_retry events = %d, want none: an infra retry spends no review retry", n)
+	}
+	if got := e.foremanJobs(); got != 0 {
+		t.Errorf("foreman turns = %d, want none", got)
+	}
+}
+
+// TestReviewInfraRetriesSpentParkNamingTheOutage: once the streak has
+// filled the window, the next review infra failure parks the task at
+// needs_foreman with the outage as the reason and queues no review.
+func TestReviewInfraRetriesSpentParkNamingTheOutage(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	lone := e.agented("lone", "google", "implement", "review")
+	e.submit(e.work())
+	e.runWork(author, doneOn("task/1-1", passCheck))
+	key := e.str("SELECT key FROM jobs WHERE task_id = ? AND kind = 'review'", e.task)
+	start := e.clock.Now()
+	for {
+		reviewInfraFail(e, lone)
+		if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state == taskNeedsForeman {
+			break
+		}
+		if e.clock.Now().Sub(start) > infraRetryWindow+2*infraDelayFor(len(infraRetryDelays)) {
+			t.Fatal("the outage outlasted the window but the task never parked")
+		}
+		e.waitOutInfraRetry(key)
+	}
+	p, ok := e.eventPayloadOf(evReviewNoVerdict)
+	if !ok || !strings.Contains(p.Reason, "the network outage outlasted the "+capText(infraRetryWindow)+" infra retry window") ||
+		!strings.Contains(p.Reason, "Could not resolve host") {
+		t.Errorf("review_no_verdict payload = %+v (%t), want the outage named", p, ok)
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'review' AND status = 'queued'", e.task); n != 0 {
+		t.Errorf("queued reviews after the park = %d, want none", n)
+	}
+}
+
 // TestInfraFixRoundRetrySpendsNoRound pins the fix side (§5.1, §3): a
 // fix round whose fetch failed is requeued — the author's session and
 // agent, the round's own prompt — under the infra backoff, spending no

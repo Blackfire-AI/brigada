@@ -61,7 +61,7 @@ into one task. Keep tasks that touch the same large files in one chain, with `co
 follow-on so its worker resumes the session. Separate areas (different files, packages) run in
 parallel, one chain each: do not chain unrelated work, since a chain runs one task at a time
 whatever the caps. Choose width for separate areas, a chain for shared files. Name the files and
-sections a spec needs, so workers do not explore. To add a requirement to a task with no job yet, use `plan_amend` `respec` (replace or append) instead of a new task; a started task needs a follow-up task. Task size: a task is about 30 minutes of work, about 5 numbered spec items or about 15 files; bigger work is split into a chain of tasks. Number the spec items.
+sections a spec needs, so workers do not explore. To add a requirement to a task with no job yet, use `plan_amend` `respec` (replace or append) instead of a new task; a started task needs a follow-up task. Give a reason with every cancel, a `plan_amend` cancel `{task, reason}` or `task_cancel`, in the style of `task_retire`'s reason, e.g. "superseded by task 274". Task size: a task is about 30 minutes of work, about 5 numbered spec items or about 15 files; bigger work is split into a chain of tasks. Split a heavy task too, until each piece fits that size guide: per-job input grows with the number of model calls, and heavy jobs average 50-75 calls. Number the spec items.
 
 ## Splits come from the workers
 

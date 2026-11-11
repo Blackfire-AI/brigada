@@ -55,7 +55,7 @@ const (
 	evTaskCheckFailed         = "task_check_failed"          // the check failed; a fix round answers it, or the task waits for the foreman (§3)
 	evTaskFixRound            = "task_fix_round"             // a fix round is queued on the author's session (§3)
 	evTaskFixRetry            = "task_fix_retry"             // a fix round's transient CLI failure was retried, on the author's session or another agent (§3)
-	evTaskInfraRetry          = "task_infra_retry"           // a work or fix job's infrastructure failure was requeued on the infra backoff; no round, restart or wake is spent (§5.1)
+	evTaskInfraRetry          = "task_infra_retry"           // a work, fix or review job's infrastructure failure was requeued on the infra backoff; no round, restart or wake is spent (§5.1)
 	evTaskOutOfRounds         = "task_out_of_rounds"         // the task's rounds are spent and escalation declined; the foreman decides (§3)
 	evTaskNeedsHelp           = "task_needs_help"            // the worker asked its question; the foreman answers (§3)
 	evTaskDiscoveries         = "task_discoveries"           // a worker's result carried discoveries; they reach the foreman, no wake of their own (§4.2)
@@ -65,6 +65,7 @@ const (
 	evTaskRestarted           = "task_restarted"             // a foreman or automatic restart queued a fresh work attempt (§3, §5.6)
 	evTaskFailed              = "task_failed"                // the run failed or said nothing usable; the foreman decides (§3)
 	evTaskRetired             = "task_retired"               // a task that will not land was retired (§6.2); Reason carries the caller's words verbatim, Caller who asked — foreman or user
+	evTaskCancelledByAmend    = "task_cancelled_by_amend"    // a plan_amend newly cancelled the task (§6.2); Plan names the plan, Reason carries the caller's words verbatim, "no reason given" when blank, Caller who asked — foreman or user
 	evTaskLoop                = "task_loop"                  // the worker repeats itself: the same check failure across fix rounds, or the same tool call in a window; the foreman decides (§5.6)
 	evReviewChanges           = "review_changes"             // the reviewer wants changes; a fix round answers them (§3, §7)
 	evReviewNoVerdict         = "review_no_verdict"          // the review ended without a usable verdict; the retry is spent or impossible (§7)
@@ -148,8 +149,9 @@ type eventPayload struct {
 	Report     string `json:"report,omitempty"`   // a foreman turn's final message, its report to the user, bounded to about 4 KB (boundReport) (§3, §10)
 	Text       string `json:"text,omitempty"`     // a user message's words (§4.2 item 3)
 	Source     string `json:"source,omitempty"`   // the client token label a user message came from (§12.2)
-	// Caller names who asked for a retirement (§6.2): the foreman or
-	// the user, recorded beside the reason on each task_retired event.
+	// Caller names who asked for a retirement or an amendment's cancel
+	// (§6.2): the foreman or the user, recorded beside the reason on each
+	// task_retired and task_cancelled_by_amend event.
 	Caller  string `json:"caller,omitempty"`
 	Origin  string `json:"origin,omitempty"` // the origin a dispatch_paused or dispatch_resumed event names: user or drain (§8.3)
 	Harness string `json:"harness,omitempty"`

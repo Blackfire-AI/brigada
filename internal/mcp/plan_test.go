@@ -291,6 +291,135 @@ func TestServeCallPlanAmend(t *testing.T) {
 	}
 }
 
+// cancelEvent reads the one task_cancelled_by_amend event of a task.
+func cancelEvent(t *testing.T, e *env, task int64) (reason, caller string) {
+	t.Helper()
+	if n := countOf(t, e, "SELECT COUNT(*) FROM events WHERE kind = 'task_cancelled_by_amend' AND task_id = ?", task); n != 1 {
+		t.Fatalf("task %d's task_cancelled_by_amend events = %d, want 1", task, n)
+	}
+	var p struct {
+		Reason string `json:"reason"`
+		Caller string `json:"caller"`
+	}
+	raw := strOf(t, e, "SELECT payload FROM events WHERE kind = 'task_cancelled_by_amend' AND task_id = ?", task)
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		t.Fatalf("task %d's payload %q: %v", task, raw, err)
+	}
+	return p.Reason, p.Caller
+}
+
+// TestCancelArgDecode: a plan_amend cancel item is a bare task — a name
+// or an id — or {task, reason}; any other type is refused, and an item
+// with no reason hashes as its bare reference did.
+func TestCancelArgDecode(t *testing.T) {
+	var a planAmendArgs
+	if err := json.Unmarshal([]byte(`{"plan":1,"cancel":["a",3,{"task":"b","reason":"why\n\"<x>\""},{"task":4}]}`), &a); err != nil {
+		t.Fatal(err)
+	}
+	want := []cancelArg{{Task: "a"}, {Task: "3"}, {Task: "b", Reason: "why\n\"<x>\""}, {Task: "4"}}
+	if !reflect.DeepEqual(a.Cancel, want) {
+		t.Errorf("cancel = %+v, want %+v", a.Cancel, want)
+	}
+	for _, bad := range []string{`true`, `{"reason":"no task"}`, `["a"]`} {
+		var b planAmendArgs
+		if err := json.Unmarshal([]byte(`{"plan":1,"cancel":[`+bad+`]}`), &b); err == nil {
+			t.Errorf("cancel item %s decoded to %+v, want a refusal", bad, b.Cancel)
+		}
+	}
+	legacy := struct {
+		Plan   int64     `json:"plan"`
+		Cancel []taskRef `json:"cancel"`
+	}{Plan: 1, Cancel: []taskRef{"a"}}
+	if idemKey("plan_amend", legacy) != idemKey("plan_amend", struct {
+		Plan   int64       `json:"plan"`
+		Cancel []cancelArg `json:"cancel"`
+	}{Plan: 1, Cancel: []cancelArg{{Task: "a"}}}) {
+		t.Error("a cancel item with no reason minted another key than its bare reference")
+	}
+	if idemKey("plan_amend", planAmendArgs{Plan: 1, Cancel: []cancelArg{{Task: "a"}}}) ==
+		idemKey("plan_amend", planAmendArgs{Plan: 1, Cancel: []cancelArg{{Task: "a", Reason: "r"}}}) {
+		t.Error("a cancel with a reason minted the key of one without")
+	}
+}
+
+// TestPlanAmendCancelSchema: plan_amend's cancel items take a bare task
+// or {task, reason}, task required; task_cancel takes an optional reason.
+func TestPlanAmendCancelSchema(t *testing.T) {
+	schemaOf := func(name string) map[string]any {
+		for _, tool := range tools {
+			if tool.Name == name {
+				return tool.InputSchema.(map[string]any)
+			}
+		}
+		t.Fatalf("no %s tool", name)
+		return nil
+	}
+	items := schemaOf("plan_amend")["properties"].(map[string]any)["cancel"].(map[string]any)["items"].(map[string]any)
+	if !reflect.DeepEqual(items["type"], []string{"string", "integer", "object"}) || !reflect.DeepEqual(items["required"], []string{"task"}) {
+		t.Errorf("cancel items = %+v, want a task or an object requiring task", items)
+	}
+	props := items["properties"].(map[string]any)
+	for _, field := range []string{"task", "reason"} {
+		if _, ok := props[field]; !ok {
+			t.Errorf("cancel items lack %s", field)
+		}
+	}
+	tc := schemaOf("task_cancel")
+	if _, ok := tc["properties"].(map[string]any)["reason"]; !ok {
+		t.Error("task_cancel lacks reason")
+	}
+	if !reflect.DeepEqual(tc["required"], []string{"task"}) {
+		t.Errorf("task_cancel required = %v, want task alone: the reason stays optional", tc["required"])
+	}
+	for _, tool := range tools {
+		if (tool.Name == "plan_amend" || tool.Name == "task_cancel") && !strings.Contains(tool.Description, `recorded as "no reason given"`) {
+			t.Errorf("%s description does not say a cancel without a reason is recorded as no reason given", tool.Name)
+		}
+	}
+}
+
+// TestServeCallPlanAmendCancelReason: a plan_amend cancel's reason
+// reaches the task's task_cancelled_by_amend event verbatim with the
+// foreman caller; a bare name is recorded as "no reason given".
+func TestServeCallPlanAmendCancelReason(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	s := start(t, e)
+	a := s.call(1, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{
+		"title": "three",
+		"tasks": []any{
+			map[string]any{"name": "a", "spec": "one"},
+			map[string]any{"name": "b", "spec": "two"},
+			map[string]any{"name": "c", "spec": "three"},
+		},
+	}})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("plan_create errored: %s", text)
+	}
+	why := "superseded by \"task 274\"\n<landed> elsewhere"
+	a = s.call(2, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan":   1,
+		"cancel": []any{map[string]any{"task": "a", "reason": why}, "b"},
+	}})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("plan_amend errored: %s", text)
+	}
+	id := func(name string) int64 {
+		return countOf(t, e, "SELECT id FROM tasks WHERE name = ?", name)
+	}
+	if reason, caller := cancelEvent(t, e, id("a")); reason != why || caller != "foreman" {
+		t.Errorf("a's event = %q by %q, want the reason verbatim by the foreman", reason, caller)
+	}
+	if reason, caller := cancelEvent(t, e, id("b")); reason != "no reason given" || caller != "foreman" {
+		t.Errorf("b's event = %q by %q, want no reason given by the foreman", reason, caller)
+	}
+	a = s.call(3, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan": 1, "cancel": []any{true},
+	}})
+	if text, isError := toolText(t, a); !isError {
+		t.Errorf("a boolean cancel item = %q, want the tool's error", text)
+	}
+}
+
 // TestPlanBaseSchemaAndCalls covers the optional base of a task (§6.1):
 // plan_create's task items, plan_amend's added items and its retarget
 // items all declare it; a base that is a dep is stored on its edge, one

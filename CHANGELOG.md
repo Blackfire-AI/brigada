@@ -5,8 +5,14 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A cancel can say why. Each `plan_amend` cancel entry may be `{task, reason}` beside the bare task name or id, and `task_cancel` takes an optional `reason`, in the foreman's MCP tools and the API alike. Every task an amendment newly cancels records one `task_cancelled_by_amend` event with the plan, the reason verbatim and the caller (foreman or user), and `brigada history` shows the reason. A reason is expected on every cancel; one without is still accepted, as before, and recorded as "no reason given".
+
 ### Fixed
 
+- A task restarted while its landing waited at the push gate, or sat for a hand push under `gate_push = never`, could not land its reworked head, and `brigada push approve` still pushed the old commit. A restart now forgets that landing and the landings stacked on the same waiting ref, the next landing of the target deletes `refs/brigada/land/<target>` before it stacks, and the re-made landings wait at the push gate again (issue #205). Restart the engine and runner after you upgrade.
+- A dependent whose landing was waiting on a `land_ready` re-check or a not-ready retry could land on its dependency's old round after the dependency was rebuilt from a new `-r<n>` branch. A queued land job is now checked for a stale base when it is leased: it is cancelled and the task parks at `needs_foreman` with `task_base_stale`, as a landing the land rule refuses does (issue #205).
 - The claude adapter sorts the CLI's "You've hit your 5-hour limit" and weekly wordings as limits, so the account cools and the foreman parks until the reset the message names; the reset parser already read the wording's `resets <time> (<zone>)` suffix, which the old classification never reached.
 - A foreman turn's limit cools the account it shares with task workers, as §4.4 says: the workers stop placing on a wall the foreman already hit, the dispatcher serves another tier's agents until the reset, and the status shows every agent of the account cooling. A limit still never counts toward the failure streak.
 - The AGENTS box of `brigada top` keeps a zero-capped agent off its rows while the shared account cools or the agent is broken: an agent that can never place was listed as a cooling row the moment its account cooled. The top border's `N off` count carries it as before.

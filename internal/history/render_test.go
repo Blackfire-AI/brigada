@@ -85,6 +85,22 @@ func TestRenderResumedReview(t *testing.T) {
 	}
 }
 
+// TestRenderCancelReason: a plan_amend cancel's reason shows through the
+// generic payload line, as a retirement's does — the reason verbatim, or
+// "no reason given" for a cancel that gave none.
+func TestRenderCancelReason(t *testing.T) {
+	for _, tc := range []struct{ kind, payload, want string }{
+		{"task_cancelled_by_amend", `{"status":"cancelled","plan":3,"reason":"superseded by task 274","caller":"foreman"}`, "status=cancelled reason=superseded by task 274"},
+		{"task_cancelled_by_amend", `{"status":"cancelled","plan":3,"reason":"no reason given","caller":"user"}`, "status=cancelled reason=no reason given"},
+		{"task_retired", `{"status":"retired","reason":"superseded by task 274","caller":"foreman"}`, "status=retired reason=superseded by task 274"},
+	} {
+		it := Item{Type: TypeEvent, Kind: tc.kind, Payload: []byte(tc.payload)}
+		if got := summary(it); got != tc.want {
+			t.Errorf("%s summary = %q, want %q", tc.kind, got, tc.want)
+		}
+	}
+}
+
 func TestRenderEffortBump(t *testing.T) {
 	it := Item{Type: TypeEvent, Kind: "task_effort_bumped", Payload: []byte(`{"reason":"no-result","effort_from":"medium","effort_to":"high"}`)}
 	if got := summary(it); got != "task effort medium -> high: no-result" {

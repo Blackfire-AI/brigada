@@ -208,8 +208,14 @@ func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note string, n
 // dependent the stale-base rule held (issue #124) rebuilds on its
 // dependency's current result branch, the one that dependency is done
 // from — a fresh attempt is the one path that may move the worktree's
-// starting point.
+// starting point. The landing the old attempt left waiting at the push
+// gate, or local under gate_push never, is forgotten with its ref
+// (issue #205), so the new head's landing is the land rule's to queue
+// once it is approved.
 func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note string, agent int64, notBefore time.Time, now time.Time) (RestartResult, error) {
+	if err := e.forgetRestartedLandingTx(tx, taskID, now); err != nil {
+		return RestartResult{}, err
+	}
 	if err := resolveBaseTx(tx, taskID, now); err != nil {
 		return RestartResult{}, err
 	}

@@ -399,3 +399,96 @@ func TestPlanSkillsRoundTrip(t *testing.T) {
 		t.Errorf("a direct submission recorded worker text %q with meta %q, want none with the not-configured source", got, meta)
 	}
 }
+
+// TestPlanCancelBodyShapes: a cancel entry decodes from {task, reason}
+// and from the legacy bare name or numeric id, which carry no reason;
+// the client's object survives the trip.
+func TestPlanCancelBodyShapes(t *testing.T) {
+	var req planAmendRequest
+	if err := json.Unmarshal([]byte(`{"cancel":["a",3,{"task":"b","reason":"why\n\"<x>\""},{"task":"c"}]}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	want := []planCancelBody{{Task: "a"}, {Task: "3"}, {Task: "b", Reason: "why\n\"<x>\""}, {Task: "c"}}
+	if !reflect.DeepEqual(req.Cancel, want) {
+		t.Errorf("cancel = %+v, want %+v", req.Cancel, want)
+	}
+	data, err := json.Marshal(planAmendRequest{Cancel: want[2:]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back planAmendRequest
+	if err := json.Unmarshal(data, &back); err != nil || !reflect.DeepEqual(back.Cancel, want[2:]) {
+		t.Errorf("round trip of %s = %+v (%v), want %+v", data, back.Cancel, err, want[2:])
+	}
+	if err := json.Unmarshal([]byte(`{"cancel":[true]}`), &req); err == nil {
+		t.Error("a boolean cancel entry decoded")
+	}
+}
+
+// TestPlanAmendCancelReason: POST /v1/plans/{id}/amend records each
+// cancel's reason verbatim with the role that asked; the legacy shapes —
+// a bare name, a numeric id — cancel as before, recorded as "no reason
+// given".
+func TestPlanAmendCancelReason(t *testing.T) {
+	e := newEnv(t)
+	seed := func(name string) int64 {
+		id := seedParked(t, e, e.plan, "task_needs_help", `{"question":"x"}`)
+		e.exec(`UPDATE tasks SET name = ? WHERE id = ?`, name, id)
+		return id
+	}
+	reasoned, legacyName, legacyID, users := seed("r"), seed("a"), seed("n"), seed("u")
+	payload := func(task int64) engineEvent {
+		t.Helper()
+		var p engineEvent
+		raw := e.str(`SELECT payload FROM events WHERE kind = 'task_cancelled_by_amend' AND task_id = ?`, task)
+		if err := json.Unmarshal([]byte(raw), &p); err != nil {
+			t.Fatalf("task %d's payload %q: %v", task, raw, err)
+		}
+		return p
+	}
+	path := "/v1/plans/" + strconv.FormatInt(e.plan, 10) + "/amend"
+
+	// The client sends {task, reason}, recorded as the foreman's word.
+	c := NewClientWithHTTPClient(&http.Client{Transport: funcTransport(func(r *http.Request) (*http.Response, error) {
+		w := httptest.NewRecorder()
+		e.api.Handler().ServeHTTP(w, r)
+		return w.Result(), nil
+	})}, e.secrets["foreman1"])
+	why := "superseded by \"task 9\"\n<landed> elsewhere"
+	res, err := c.AmendPlan(e.ctx, e.plan, PlanAmend{Cancel: []PlanCancel{{Task: "r", Reason: why}}}, "cancel-reason")
+	if err != nil || len(res.Cancelled) != 1 || res.Cancelled[0] != reasoned {
+		t.Fatalf("amend = %+v %v, want r cancelled", res, err)
+	}
+	if p := payload(reasoned); p.Reason != why || p.Caller != "foreman" || p.Plan != e.plan {
+		t.Errorf("r's event = %+v, want the reason verbatim and the foreman caller", p)
+	}
+
+	// The legacy shapes still cancel, recorded as "no reason given".
+	body := []byte(`{"cancel":["a",` + strconv.FormatInt(legacyID, 10) + `]}`)
+	if code, _, data := e.do(http.MethodPost, path, "foreman1", "legacy", body); code != http.StatusOK {
+		t.Fatalf("legacy cancel: %d %s, want 200", code, data)
+	}
+	for _, task := range []int64{legacyName, legacyID} {
+		if state := e.str("SELECT state FROM tasks WHERE id = ?", task); state != "cancelled" {
+			t.Errorf("task %d = %q, want cancelled", task, state)
+		}
+		if p := payload(task); p.Reason != "no reason given" || p.Caller != "foreman" {
+			t.Errorf("task %d's event = %+v, want no reason given and the foreman caller", task, p)
+		}
+	}
+
+	// A user's token records the user.
+	if code, _, data := e.do(http.MethodPost, path, "alice", "user", []byte(`{"cancel":[{"task":"u","reason":"by hand"}]}`)); code != http.StatusOK {
+		t.Fatalf("user cancel: %d %s, want 200", code, data)
+	}
+	if p := payload(users); p.Reason != "by hand" || p.Caller != "user" {
+		t.Errorf("u's event = %+v, want the reason and the user caller", p)
+	}
+}
+
+// engineEvent is the part of an event payload the cancel tests read.
+type engineEvent struct {
+	Plan   int64  `json:"plan"`
+	Reason string `json:"reason"`
+	Caller string `json:"caller"`
+}

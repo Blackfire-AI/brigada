@@ -62,6 +62,13 @@ type jobRow struct {
 	// queues to release the land_ready gate's hold (issue #87): the
 	// runner runs no command and lands. False on every other job.
 	SkipLandReady bool
+	// DropWaitingRef is the stale-ref mark a land job's lease carried
+	// (issue #205): the target's waiting ref was marked stale, and this
+	// job deletes it before it stacks. Written at each lease of the
+	// squash phase, so a job leased before the mark stays false; only
+	// the landing of a job that carries the mark spends it. False on
+	// every other job.
+	DropWaitingRef bool
 }
 
 // jobColumns reads a job whole; COALESCE turns NULL into the zero value
@@ -75,7 +82,7 @@ const jobColumns = `id, project_id, COALESCE(task_id, 0), kind, key, mode, promp
 	COALESCE(leased_seconds, 0), harness, model, effort, labels, restart, retry,
 	COALESCE(released_by, 0), COALESCE(released_until, ''), COALESCE(release_note, ''),
 	COALESCE(released_lease, ''), COALESCE(done_lease, ''), COALESCE(not_before, ''), COALESCE(prompt_meta, ''),
-	skip_land_ready`
+	skip_land_ready, drop_waiting_ref`
 
 // scanJob scans one job from a *sql.Row or *sql.Rows.
 func scanJob(row interface{ Scan(dest ...any) error }) (*jobRow, error) {
@@ -88,7 +95,7 @@ func scanJob(row interface{ Scan(dest ...any) error }) (*jobRow, error) {
 		&j.CapHeldAt, &j.CapHeldLayer, &j.CapHeldKey,
 		&j.LeasedSeconds, &j.Harness, &j.Model, &j.Effort, &j.Labels, &j.Restart, &j.Retry,
 		&j.ReleasedBy, &j.ReleasedUntil, &j.ReleaseNote, &j.ReleasedLease,
-		&j.DoneLease, &j.NotBefore, &j.PromptMeta, &j.SkipLandReady)
+		&j.DoneLease, &j.NotBefore, &j.PromptMeta, &j.SkipLandReady, &j.DropWaitingRef)
 	if err != nil {
 		return nil, err
 	}

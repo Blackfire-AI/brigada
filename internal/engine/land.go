@@ -809,13 +809,30 @@ func landingTx(tx *sql.Tx, taskID int64) (*landingRow, error) {
 // follows never pushes without the user's yes: its grant keeps the push
 // gate at ask while the gate is auto (heldPushTx). A landing with a live
 // land job — its push already released — is left for that job, as the
-// push approval leaves it.
+// push approval leaves it. The drop itself settles the engine's stale
+// mark of the ref (issue #205): the ref is gone, so the next land job of
+// the target stacks on whatever it finds.
 func (e *Engine) relandStaleWaitingTx(tx *sql.Tx, job *jobRow, target string, now time.Time) error {
+	if err := e.clearStaleLandRefTx(tx, job.ProjectID, target); err != nil {
+		return err
+	}
+	return e.forgetWaitingLandingsTx(tx, job.ProjectID, target, job.TaskID, now)
+}
+
+// forgetWaitingLandingsTx forgets the waiting and local landings of one
+// target (§7.1) — the ones that sat on a waiting ref now known stale —
+// and re-runs the land rule for each task, so every forgotten landing is
+// queued again and waits at the push gate for the user's yes (heldPushTx
+// keeps it there under auto). except, when not 0, names a task whose
+// landing the caller has already settled. A landing with a live land
+// job — its push already released — is left for that job, as the push
+// approval leaves it.
+func (e *Engine) forgetWaitingLandingsTx(tx *sql.Tx, project int64, target string, except int64, now time.Time) error {
 	rows, err := tx.Query(`SELECT l.task_id FROM landings l WHERE l.project_id = ? AND l.target_branch = ?
 		AND l.pushed IN ('waiting', 'local') AND l.task_id <> ?
 		AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.task_id = l.task_id AND j.kind = 'land'
 			AND j.status IN ('queued', 'leased', 'running'))
-		ORDER BY l.task_id`, job.ProjectID, target, job.TaskID)
+		ORDER BY l.task_id`, project, target, except)
 	if err != nil {
 		return fmt.Errorf("list the landings on the stale waiting ref: %w", err)
 	}
@@ -842,6 +859,108 @@ func (e *Engine) relandStaleWaitingTx(tx *sql.Tx, job *jobRow, target string, no
 		}
 	}
 	return nil
+}
+
+// forgetRestartedLandingTx drops the landing a restart leaves behind
+// (issue #205): a task whose landing waited at the push gate, or sat
+// local under gate_push never, kept its landings row through the
+// restart, and the row refused the reworked head its own landing — the
+// rule reads one record per task — while push approve still released the
+// pre-restart commit. The row goes, and its land_holds rows go with it:
+// a hold — a push-phase land_ready hold whose rejected re-check parked
+// the task under it — decided the forgotten landing, and read as the
+// new head's decision it would refuse the new head a landing while
+// offering LandApprove a task that is no longer done and approved. A
+// pushed record is history and stays, and a local one under a gate no
+// longer never stays too — its hand push command is still exact. The
+// waiting ref still holds the forgotten commit beneath every landing
+// stacked above it, so the ref is stale as a whole: the target's other
+// waiting and local landings are forgotten with it — exactly as
+// relandStaleWaitingTx forgets them after a runner dropped a stale ref
+// — and the target is marked, so the next land job of it deletes the
+// ref before stacking (stale_land_refs). A landing whose push was
+// already released — a live land job on the task — is left to that job,
+// as the push approval leaves it.
+func (e *Engine) forgetRestartedLandingTx(tx *sql.Tx, taskID int64, now time.Time) error {
+	var project int64
+	var target, pushed string
+	err := tx.QueryRow("SELECT project_id, target_branch, pushed FROM landings WHERE task_id = ?", taskID).
+		Scan(&project, &target, &pushed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read the landing of task %d: %w", taskID, err)
+	}
+	if pushed == "pushed" {
+		return nil // history: the work is on the target
+	}
+	if pushed == "local" {
+		s, err := projectApprovalTx(tx, project)
+		if err != nil {
+			return err
+		}
+		if s.GatePush != GateNever {
+			return nil // the gate moved on; the recorded hand push stands
+		}
+	}
+	if live, err := liveLandJobTx(tx, taskID); err != nil {
+		return err
+	} else if live {
+		return nil // the push is already released; its job finishes it
+	}
+	if _, err := tx.Exec("DELETE FROM landings WHERE task_id = ?", taskID); err != nil {
+		return fmt.Errorf("forget the restarted landing of task %d: %w", taskID, err)
+	}
+	// The holds decided the landing that is gone; the new head's landing
+	// is a new question for the gate, held anew if a rule still trips.
+	if _, err := tx.Exec("DELETE FROM land_holds WHERE task_id = ?", taskID); err != nil {
+		return fmt.Errorf("drop the land holds of task %d with its forgotten landing: %w", taskID, err)
+	}
+	if err := e.markStaleLandRefTx(tx, project, target, now); err != nil {
+		return err
+	}
+	return e.forgetWaitingLandingsTx(tx, project, target, taskID, now)
+}
+
+// markStaleLandRefTx records that the target's waiting ref is stale
+// (issue #205): the landings that sat on it are forgotten, so the next
+// land job of the target deletes refs/brigada/land/<target> before it
+// stacks — its grant carries the mark (DropWaitingRef), persisted on
+// the job at its lease. The landing of a job whose lease carried the
+// mark, or a runner's report that it dropped the ref itself, clears the
+// row.
+func (e *Engine) markStaleLandRefTx(tx *sql.Tx, project int64, target string, now time.Time) error {
+	if _, err := tx.Exec(`INSERT INTO stale_land_refs (project_id, target_branch, created_at)
+		VALUES (?, ?, ?) ON CONFLICT (project_id, target_branch) DO UPDATE SET created_at = excluded.created_at`,
+		project, target, fmtTime(now)); err != nil {
+		return fmt.Errorf("mark the waiting ref of %s stale: %w", target, err)
+	}
+	return nil
+}
+
+// clearStaleLandRefTx drops the stale-ref mark once the ref is settled
+// (issue #205): a landing of the target re-made the ref, so the next
+// land job stacks on it as it lies, or a runner reports it deleted the
+// ref itself.
+func (e *Engine) clearStaleLandRefTx(tx *sql.Tx, project int64, target string) error {
+	if _, err := tx.Exec("DELETE FROM stale_land_refs WHERE project_id = ? AND target_branch = ?",
+		project, target); err != nil {
+		return fmt.Errorf("clear the stale waiting ref of %s: %w", target, err)
+	}
+	return nil
+}
+
+// staleLandRefTx reports whether the target's waiting ref is marked
+// stale in the engine's record (issue #205): the next land job of the
+// target deletes refs/brigada/land/<target> before it stacks.
+func staleLandRefTx(tx *sql.Tx, project int64, target string) (bool, error) {
+	var n int
+	if err := tx.QueryRow("SELECT COUNT(*) FROM stale_land_refs WHERE project_id = ? AND target_branch = ?",
+		project, target).Scan(&n); err != nil {
+		return false, fmt.Errorf("read the stale waiting ref of %s: %w", target, err)
+	}
+	return n > 0, nil
 }
 
 // pushRejected reports whether a land job's error is git rejecting a push
@@ -1129,6 +1248,15 @@ func (e *Engine) landSucceededTx(tx *sql.Tx, job *jobRow, rec landRecord, now ti
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.TaskID, job.ProjectID, rec.TargetBranch, rec.Commit, pushed, rec.PushCmd, rec.AfterLandErr, fmtTime(now)); err != nil {
 		return fmt.Errorf("record the landing of task %d: %w", job.TaskID, err)
+	}
+	// A landing whose job carried the stale-ref mark spends it (issue
+	// #205): this job deleted the ref before it stacked, so the next
+	// land job of the target stacks on the ref as it lies. A job leased
+	// before the mark was set carries none and leaves the mark standing.
+	if job.DropWaitingRef {
+		if err := e.clearStaleLandRefTx(tx, job.ProjectID, rec.TargetBranch); err != nil {
+			return err
+		}
 	}
 	if err := e.clearLandHoldTx(tx, job.ProjectID, job.TaskID, now); err != nil {
 		return err
@@ -1506,6 +1634,8 @@ func landMessageTx(tx *sql.Tx, taskID int64) (*LandMessage, error) {
 // No worker, no agent, no prompt. A land job whose task already has a
 // landing record is the push phase (§7.1): the grant carries the target
 // and the recorded commit alone, and the runner pushes — no new squash.
+// A squash-phase grant whose target's waiting ref is marked stale
+// (issue #205) says so: the runner deletes the ref before it stacks.
 func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID string, expires time.Time) (*LeaseGrant, error) {
 	s, err := projectApprovalTx(tx, j.ProjectID)
 	if err != nil {
@@ -1589,6 +1719,20 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 	if err != nil {
 		return nil, err
 	}
+	// The target's waiting ref may be stale in the engine's record
+	// (issue #205): a restart forgot the landings that sat on it, so
+	// their commits must not be stacked on again. The grant says so, and
+	// the runner deletes the ref before it stacks. The mark persists on
+	// the job with this lease: only the landing of a job whose lease
+	// carried it spends the mark, for a job leased before the mark never
+	// carries it and stacks on the ref as it finds it.
+	staleRef, err := staleLandRefTx(tx, j.ProjectID, target)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec("UPDATE jobs SET drop_waiting_ref = ? WHERE id = ?", boolInt(staleRef), j.ID); err != nil {
+		return nil, fmt.Errorf("record the stale-ref mark on land job %d: %w", j.ID, err)
+	}
 	return &LeaseGrant{
 		JobID:          j.ID,
 		LeaseOwner:     owner,
@@ -1610,6 +1754,7 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		DefaultBranch:  defaultBranch,
 		LandMessage:    msg,
 		GatePush:       gatePush,
+		DropWaitingRef: staleRef,
 		AfterLand:      s.AfterLand,
 		LandReady:      s.LandReady,
 		SkipLandReady:  j.SkipLandReady,
@@ -1621,8 +1766,10 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 // was never pushed by brigada with the user's yes (§6.3, §7.1): its
 // latest task_landed event recorded it waiting at the push gate, or
 // local under gate_push never, and no task_pushed followed. Such a
-// landing is re-made only when its waiting ref went stale
-// (relandStaleWaitingTx), and the re-made landing waits at ask again.
+// landing is re-made when its waiting ref went stale
+// (relandStaleWaitingTx) or its task restarted beneath it
+// (forgetRestartedLandingTx), and the re-made landing waits at ask
+// again.
 func heldPushTx(tx *sql.Tx, taskID int64) (bool, error) {
 	var kind, payload string
 	err := tx.QueryRow(`SELECT kind, payload FROM events WHERE task_id = ? AND kind IN (?, ?)

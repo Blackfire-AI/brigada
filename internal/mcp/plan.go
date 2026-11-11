@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -173,6 +174,46 @@ func (r *taskRef) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// cancelArg is one plan_amend cancel item (§6.2, §12.2) as the model
+// writes it: a bare task reference — a name, or a number for an id — or
+// an object naming the task and, optionally, why it is cancelled. Any
+// other type is refused.
+type cancelArg struct {
+	Task   taskRef `json:"task"`
+	Reason string  `json:"reason,omitempty"`
+}
+
+func (c *cancelArg) UnmarshalJSON(b []byte) error {
+	if t := bytes.TrimSpace(b); len(t) > 0 && t[0] == '{' {
+		type plain cancelArg
+		var p plain
+		if err := json.Unmarshal(t, &p); err != nil {
+			return fmt.Errorf("a cancel item is a task or {task, reason}: %w", err)
+		}
+		if p.Task == "" {
+			return fmt.Errorf("a cancel item {task, reason} needs its task, got %s", b)
+		}
+		*c = cancelArg(p)
+		return nil
+	}
+	var r taskRef
+	if err := r.UnmarshalJSON(b); err != nil {
+		return fmt.Errorf("a cancel item is a task, by name or id, or {task, reason}, got %s", b)
+	}
+	*c = cancelArg{Task: r}
+	return nil
+}
+
+// MarshalJSON writes an item with no reason as its bare reference, so a
+// call made in the old shape mints the idempotency key it always did.
+func (c cancelArg) MarshalJSON() ([]byte, error) {
+	if c.Reason == "" {
+		return json.Marshal(string(c.Task))
+	}
+	type plain cancelArg
+	return json.Marshal(plain(c))
+}
+
 func refStrings(refs []taskRef) []string {
 	out := make([]string, len(refs))
 	for i, r := range refs {
@@ -185,7 +226,7 @@ func refStrings(refs []taskRef) []string {
 type planAmendArgs struct {
 	Plan     int64             `json:"plan"`
 	Add      []planAddArg      `json:"add"`
-	Cancel   []taskRef         `json:"cancel"`
+	Cancel   []cancelArg       `json:"cancel"`
 	Retarget []planRetargetArg `json:"retarget"`
 	Retier   []planRetierArg   `json:"retier"`
 	Respec   []planRespecArg   `json:"respec"`
@@ -264,7 +305,10 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 			a.Add[i].Class = "implement"
 		}
 	}
-	am := api.PlanAmend{Cancel: refStrings(a.Cancel)}
+	am := api.PlanAmend{}
+	for _, c := range a.Cancel {
+		am.Cancel = append(am.Cancel, api.PlanCancel{Task: string(c.Task), Reason: c.Reason})
+	}
 	for _, t := range a.Add {
 		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Continue: string(t.Continue), Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos), Skills: t.Skills})
 	}
