@@ -122,9 +122,9 @@ const (
 // §6.1). Fix caps
 // the fix rounds a failed check asks for, Review the fix rounds a
 // review's "changes" asks for — both counted as the task's fix jobs —
-// and Restart the restarts (§5.6); the shipped caps are 2, 2 and 3, the
-// third restart being the foreman's once the escalation ladder (§8) has
-// spent two. A task's caps JSON overrides them
+// and Restart the restarts (§5.6); the shipped caps are 2, 2 and 3, and
+// the escalation ladder (§8) can spend all three restarts: a standard-tier
+// task at medium effort climbs three steps. A task's caps JSON overrides them
 // key by key (fix_rounds, review_rounds, restart).
 type RoundCaps struct {
 	Fix     int
