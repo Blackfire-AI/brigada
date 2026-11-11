@@ -110,7 +110,7 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 	// is the task's, not the job's (§5.1), so a run whose predecessor on
 	// the path is still winding down — a lost lease re-taken, a follow-up
 	// leased before the last worktree came down — waits for it.
-	unlock, err := lockMirrorHolding(ctx, w.mirror, []string{w.branch, grant.Branch, brigadaRef(grant.BaseRef)}, []string{w.dir})
+	unlock, err := lockMirrorHolding(ctx, w.mirror, []string{w.branch, grant.Branch, brigadaRef(landTargetOf(grant.BaseRef))}, []string{w.dir})
 	if err != nil {
 		return nil, err
 	}
@@ -181,10 +181,38 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 // HEAD), the branch the land job creates the target from, and the
 // fallback is logged. A remote that cannot be asked at all fails the job
 // as an infrastructure error instead of reading as absence.
+//
+// A base may also be a target's waiting ref (refs/brigada/land/<target>,
+// §6.1): the task was restarted onto a dependency whose landing waits at
+// the push gate or sits local. The mirror's general fetch takes only
+// refs/heads, so the ref is fetched by name, forced, and is the base —
+// never checked out, so it takes no brigada/ branch hold. Once the waiting
+// landings were pushed the remote no longer holds the ref; the base is then
+// the target branch the ref names, with the usual fallback to the default
+// branch when that is missing too (a warning is logged at each step).
 func (w *workspace) materializeWithBase(ctx context.Context, cfg *Config, grant *api.JobGrant) (string, error) {
 	base := grant.BaseRef
+	waitRef := ""
+	if strings.HasPrefix(base, landWaitPrefix) {
+		holds, err := w.remoteRefHeld(ctx, base)
+		if err != nil {
+			return "", &infraError{err}
+		}
+		if holds {
+			waitRef = base
+		} else {
+			target := landTargetOf(base)
+			if cfg != nil && cfg.Log != nil {
+				cfg.Log.WarnContext(ctx, "waiting ref is gone from the remote (its landings were pushed?); building on the land target branch",
+					"job_id", grant.JobID, "task_id", grant.TaskID, "base_ref", base, "target_branch", target)
+			}
+			base = target
+		}
+	}
 	fetchBase := base
-	if brigadaRef(base) != "" {
+	if waitRef != "" {
+		fetchBase = waitRef
+	} else if brigadaRef(base) != "" {
 		if _, holds, err := w.remoteBranch(ctx, base); err != nil {
 			return "", &infraError{err}
 		} else if !holds {
@@ -193,6 +221,9 @@ func (w *workspace) materializeWithBase(ctx context.Context, cfg *Config, grant 
 	}
 	if err := w.materializeMirror(ctx, fetchBase); err != nil {
 		return "", err
+	}
+	if waitRef != "" {
+		return waitRef, nil
 	}
 	if w.refExists(ctx, "refs/heads/"+base) || (brigadaRef(base) == "" && w.refExists(ctx, base)) {
 		return base, nil
@@ -208,6 +239,31 @@ func (w *workspace) materializeWithBase(ctx context.Context, cfg *Config, grant 
 			"job_id", grant.JobID, "task_id", grant.TaskID, "base_ref", base, "default_branch", def)
 	}
 	return def, nil
+}
+
+// landWaitPrefix starts every target's waiting ref (see landWaitRef).
+const landWaitPrefix = "refs/brigada/land/"
+
+// landTargetOf is the land target branch a waiting ref names, and ref
+// itself when it is not a waiting ref.
+func landTargetOf(ref string) string {
+	return strings.TrimPrefix(ref, landWaitPrefix)
+}
+
+// remoteRefHeld reports whether the remote holds exactly ref: false when
+// it answers cleanly that it does not, an error when it could not be
+// asked.
+func (w *workspace) remoteRefHeld(ctx context.Context, ref string) (bool, error) {
+	out, err := w.git(ctx, "ls-remote", w.repoURL, ref)
+	if err != nil {
+		return false, fmt.Errorf("ask %s for the ref %s: %w", redactURL(w.repoURL), ref, trimCmdError(out, err))
+	}
+	for _, l := range strings.Split(string(out), "\n") {
+		if f := strings.Fields(l); len(f) >= 2 && f[1] == ref {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // refExists reports whether ref resolves to a commit in the mirror.
@@ -244,7 +300,7 @@ func prepareReviewWorkspace(ctx context.Context, cfg *Config, grant *api.JobGran
 	// directory is waited for the same way — the review path is the
 	// task's too (§5.1), shared with the re-review that resumes this
 	// one's session.
-	unlock, err := lockMirrorHolding(ctx, w.mirror, []string{grant.ReviewBranch, brigadaRef(grant.BaseRef)}, []string{w.dir})
+	unlock, err := lockMirrorHolding(ctx, w.mirror, []string{grant.ReviewBranch, brigadaRef(landTargetOf(grant.BaseRef))}, []string{w.dir})
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +353,10 @@ func (e *infraError) Unwrap() error { return e.err }
 
 // materializeMirror clones or fetches the repo's cached mirror (§5.1)
 // and pins its fallback identity, fetching baseRef by name when it
-// lives in the runners' own brigada/ namespace.
+// lives in the runners' own brigada/ namespace, or is a target's waiting
+// ref (refs/brigada/land/...), which no general fetch brings: that one is
+// fetched forced into the same name on a fresh clone as well as an
+// existing mirror, and the caller has checked the remote holds it.
 func (w *workspace) materializeMirror(ctx context.Context, baseRef string) error {
 	if _, err := os.Stat(w.mirror); err == nil {
 		// The fetch takes every branch but the runners' own result
@@ -332,6 +391,11 @@ func (w *workspace) materializeMirror(ctx context.Context, baseRef string) error
 			// must not leave a half mirror the next job would fetch into.
 			_ = os.RemoveAll(w.mirror)
 			return &infraError{fmt.Errorf("clone %s: %w", redactURL(w.repoURL), trimCmdError(out, err))}
+		}
+	}
+	if strings.HasPrefix(baseRef, landWaitPrefix) {
+		if out, err := w.git(ctx, "--git-dir", w.mirror, "fetch", "origin", "+"+baseRef+":"+baseRef); err != nil {
+			return &infraError{fmt.Errorf("fetch the ref %s from %s: %w", baseRef, redactURL(w.repoURL), trimCmdError(out, err))}
 		}
 	}
 	// A fallback identity and no signing, so a fresh worktree can commit
