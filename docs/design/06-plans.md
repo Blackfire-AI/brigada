@@ -8,7 +8,7 @@ A plan is a DAG of tasks with dependencies. Task fields: title, spec, check, cla
 
 **Base ref.** A task's work starts from the project's land target — `land_target` when set (§6.3), else the default branch — the same branch approved work lands on (§7.1): the runner materializes that branch for the worktree (§5.1), and the land job's diff is taken against that base.
 
-A base that is the land target is the target as the remote holds it: 1.0.0 has no sync that keeps the target current with the default branch, so the target's staleness is the user's own to clear; the sync rule that would hold a base while a target's sync runs — pending running, conflicting, or waiting at the push gate — is design only (§7.1).
+A base that is the land target is the target as the remote holds it: brigada has no sync that keeps the target current with the default branch, so the target's staleness is the user's own to clear; the sync rule that would hold a base while a target's sync runs — pending running, conflicting, or waiting at the push gate — is not implemented (§7.1).
 
 A land target the remote does not hold yet (the land job creates it) leaves the worktree on the default branch, with a warning in the runner log. A task stacked on a dependency resolves to that dependency's result branch when its work is queued, and a dependency that recorded no branch keeps the land target.
 
@@ -151,7 +151,7 @@ A **rule** turns `auto` into `ask` for the one plan or task that trips it, and t
 
 The rules are flat keys in `.brigada/project.yaml` (schema 1 is flat by design; no expression language):
 
-**Batch landing, `land_ready` suspect attribution, and the land-target sync are design only, not in 1.0.0** (issues #134 and #127). 1.0.0 lands one task per land job — `land_batch_max` below is refused as an unknown key — a `land_ready` hold carries the command's first output line and no suspects, and no job keeps a land target current with the default branch. The `land_batch_max` row, its attribution sentences, the batch sentences that follow, and §7.1's batch, suspects and sync paragraphs state the designs.
+**Not implemented: batch landing, `land_ready` suspect attribution, and the land-target sync.** brigada lands one task per land job — `land_batch_max` below is refused as an unknown key — a `land_ready` hold carries the command's first output line and no suspects, and no job keeps a land target current with the default branch. The `land_batch_max` row and paragraph, the `land_ready` attribution sentences, the batch sentences that follow, and §7.1's batch, suspects and sync paragraphs state the designs.
 
 | Key | Gate it holds | Default |
 |---|---|---|
@@ -166,7 +166,7 @@ The rules are flat keys in `.brigada/project.yaml` (schema 1 is flat by design; 
 | `approval_tiers` | land | none (`heavy`: the user reads heavy diffs before they land) |
 | `approval_restarted` | land | `false` (`true`: a task that spent a restart or a tier bump waits) |
 | `land_target` | — | the project's default branch; or a staging branch such as `brigada/landed`, which a new task's work builds on too (§6.1) |
-| `land_batch_max` | — | design only (issue #134), not in 1.0.0 — the key is refused as unknown: `5`; an integer from 1 to 20 inclusive, with 1 landing one task per job; any other value is refused naming `land_batch_max`. |
+| `land_batch_max` | — | not implemented — the key is refused as unknown: `5`; an integer from 1 to 20 inclusive, with 1 landing one task per job; any other value is refused naming `land_batch_max`. |
 | `after_land` | — | none: a repo-relative command the runner runs after a successful land, under the environment of a check (§5.8; product §6); its failure is reported, never undone |
 | `land_ready` | land | none: a repo-relative command path inside the repository the land job runs before landing and the push phase runs before its push; exit 0 lands, exit 1 holds the landing on the command's first output line, and any other exit, a spawn failure or a timeout is not ready — nothing lands and the landing is requeued on the not-before backoff (§3). |
 
