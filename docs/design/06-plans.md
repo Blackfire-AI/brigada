@@ -71,7 +71,7 @@ Neither tier nor effort is an approval trigger, and caps are not either (§6.3).
 
 Omission is distinct from an explicit no-check override, which must be spelled out (`check: none`) if it is allowed at all (open, §16), and a plan containing one shows it plainly. A task that omits `check` in a project with no default is rejected at creation, never run unchecked.
 
-Task states: `pending` (deps not done) → `ready` → `running` → `checking` → `reviewing` → `done`; or `needs_foreman`, `needs_user` (reserved: no path enters it today), `failed`, `cancelled`, `retired` (§6.2). Cancelling a task that still has dependents is refused unless the same amendment covers each (§6.2); the foreman re-plans around a task that will never be done.
+Task states: `pending` (deps not done) → `ready` → `running` → `checking` → `reviewing` → `done`; or `needs_foreman`, `needs_user` (reserved: no path enters it), `failed`, `cancelled`, `retired` (§6.2). Cancelling a task that still has dependents is refused unless the same amendment covers each (§6.2); the foreman re-plans around a task that will never be done.
 
 ## 6.2 Plan lifecycle
 
@@ -107,7 +107,7 @@ Plans the earlier behavior already closed as done are brought to this rule once:
 
 ### Plan review rounds
 
-**The plan review.** Unless the project turns it off (`plan_review`, default on; the reviewer's `plan_review.tier` defaults to standard and `plan_review.effort` to medium), or the plan is exactly one task of the review class, a plan is created `reviewing`: every task pending, no work queued, and one `plan_review` job — no task, placed by the `review.family` rule with the foreman as its author (§7): under `prefer`, the default, another family than the foreman's first, then the foreman's family, then the foreman's own agent; under `require`, another family only, today's rule — carrying the plan (every task, its spec verbatim, the check, class, tier, effort and graph) and a summary of the project's other active plans' tasks and branches.
+**The plan review.** Unless the project turns it off (`plan_review`, default on; the reviewer's `plan_review.tier` defaults to standard and `plan_review.effort` to medium), or the plan is exactly one task of the review class, a plan is created `reviewing`: every task pending, no work queued, and one `plan_review` job — no task, placed by the `review.family` rule with the foreman as its author (§7): under `prefer`, the default, another family than the foreman's first, then the foreman's family, then the foreman's own agent; under `require`, another family only — carrying the plan (every task, its spec verbatim, the check, class, tier, effort and graph) and a summary of the project's other active plans' tasks and branches.
 
 The verdict is §7's verdict block. `approve` runs the approval rules (§6.3) exactly as a no-review creation does, so the plan activates with its first wave or awaits the user's yes with the existing reasons; the review always runs first, the user's rules after.
 
