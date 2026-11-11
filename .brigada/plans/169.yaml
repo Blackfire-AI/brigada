@@ -52,6 +52,6 @@ tasks:
     base: ""
     effort: medium
     skills: ["docs-change"]
-    state: reviewing
+    state: done
     branch: "brigada/task-639"
     rounds: 0
