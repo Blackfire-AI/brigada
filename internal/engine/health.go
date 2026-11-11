@@ -102,12 +102,15 @@ func (e *Engine) agentOutcomeTx(tx *sql.Tx, job *jobRow, c Completion, now time.
 	}
 	// The agent's last N completions all failed, the one just written
 	// included. The jobs table is the count: terminal done, failed and
-	// stalled jobs on the agent, newest first.
+	// stalled jobs on the agent, newest first — less the failures that
+	// are not the agent's health: setup and infra (the environment) and
+	// a limit (quota), each of which sits between real failures without
+	// padding or masking them.
 	n := e.cfg.FailureStreak
 	rows, err := tx.Query(`SELECT status FROM jobs
 		WHERE agent_id = ? AND status IN ('done', 'failed', 'stalled')
-		AND NOT (status = 'failed' AND (result LIKE '%"error":"setup failed%' OR error_kind = ?))
-		ORDER BY updated_at DESC, id DESC LIMIT ?`, job.AgentID, ErrorKindInfra, n)
+		AND NOT (status = 'failed' AND (result LIKE '%"error":"setup failed%' OR error_kind IN (?, ?)))
+		ORDER BY updated_at DESC, id DESC LIMIT ?`, job.AgentID, ErrorKindInfra, string(adapter.ErrLimit), n)
 	if err != nil {
 		return fmt.Errorf("count the failures of agent %d: %w", job.AgentID, err)
 	}

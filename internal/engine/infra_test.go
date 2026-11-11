@@ -598,3 +598,43 @@ func TestInfraFailuresDoNotAdvanceTheStreak(t *testing.T) {
 		t.Errorf("health after two real failures = %q (%q), want broken(%q)", h, why, brokenFailures)
 	}
 }
+
+// TestLimitDoesNotAdvanceTheStreak: a limit is quota, not health (§8),
+// so it is not one of the "last two" a failure is judged by. Success,
+// limit, failure leaves the agent ready — the last two real outcomes
+// are a success and a failure — and a second real failure breaks it,
+// the limit between padding nothing.
+func TestLimitDoesNotAdvanceTheStreak(t *testing.T) {
+	e := newEnv(t)
+	e.offerForeman(e.runner1)
+	agent := int64(0)
+	run := func(c Completion) {
+		t.Helper()
+		g := e.leaseClaude(e.runner1)
+		if g == nil {
+			t.Fatal("the foreman turn was not leased")
+		}
+		agent = e.int("SELECT agent_id FROM jobs WHERE id = ?", g.JobID)
+		if ans := e.complete(g, c); ans != AnsOK {
+			t.Fatalf("complete: %s", ans)
+		}
+		// A limit cools the account and marks the foreman limited: lift
+		// both so the next turn leases on the same agent.
+		e.exec("UPDATE agents SET cooling_until = NULL WHERE id = ?", agent)
+		e.exec("UPDATE projects SET foreman_limited = NULL WHERE id = ?", e.project)
+	}
+	e.submit(e.foremanTurn())
+	run(Completion{Result: `{"status":"done"}`})
+	e.submit(e.foremanTurn())
+	run(Completion{Error: "usage limit reached", ErrorKind: "limit"})
+	e.submit(e.foremanTurn())
+	run(Completion{Error: "the harness is on fire"})
+	if h := e.str("SELECT health FROM agents WHERE id = ?", agent); h != "ready" {
+		t.Fatalf("health after success, limit, failure = %q, want ready: the limit is not a failure", h)
+	}
+	e.submit(e.foremanTurn())
+	run(Completion{Error: "the harness is on fire again"})
+	if h, why := e.str("SELECT health FROM agents WHERE id = ?", agent), e.str("SELECT health_reason FROM agents WHERE id = ?", agent); h != "broken" || why != brokenFailures {
+		t.Errorf("health after two real failures = %q (%q), want broken(%q)", h, why, brokenFailures)
+	}
+}
