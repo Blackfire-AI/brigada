@@ -405,3 +405,19 @@ func TestImportRefusals(t *testing.T) {
 		}
 	})
 }
+
+// plan_file_branch is a schema-1 key (§6.4): the file's spelling stores
+// the branch as the setting does, and a value that is no branch name is
+// refused.
+func TestParseProjectConfigPlanFileBranch(t *testing.T) {
+	cfg, err := ParseProjectConfig(cfgFile("plan_file_branch: mirrors/plans\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := string(cfg.Values[SettingPlanFileBranch]); got != `"mirrors/plans"` {
+		t.Errorf("plan_file_branch = %s, want \"mirrors/plans\"", got)
+	}
+	if _, err := ParseProjectConfig(cfgFile("plan_file_branch: -bad\n")); !errors.Is(err, ErrInvalidSetting) {
+		t.Errorf("plan_file_branch: -bad: err = %v, want ErrInvalidSetting", err)
+	}
+}

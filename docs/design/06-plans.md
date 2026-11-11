@@ -200,7 +200,7 @@ When the spend passes the budget, the engine holds the plan's new jobs: every ta
 
 ## 6.4 The plan file in the repo
 
-For fault tolerance, the engine writes each plan as **`.brigada/plans/<plan-id>.yaml`** and pushes it, on every plan change, to a separate branch **`brigada/plans`** in the repo's remote by default, so the engine never commits to `main` on its own; committing to the default branch instead is a per-project setting.
+For fault tolerance, the engine writes each plan as **`.brigada/plans/<plan-id>.yaml`** and pushes it, on every plan change, to a separate branch **`brigada/plans`** in the repo's remote by default, so the engine never commits to `main` on its own; the per-project `plan_file_branch` names another branch, and the literal `main` or the repo's default branch name commits to the default branch instead.
 
 The mirror is on by default and the per-project `plan_files` (`on` or `off`) switches it: off, the engine writes and pushes nothing, and a plan's push stays owed until it is on again. The file holds the graph, task states, branches and open questions, not transcripts. The engine store is authoritative; the file is a mirror. A task with skills carries `skills: [name, ...]` in order (§5.10); recovery from a plan file does not restore the texts, which the store holds.
 

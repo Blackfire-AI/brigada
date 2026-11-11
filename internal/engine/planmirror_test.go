@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -399,4 +400,33 @@ func TestPlanFileMirrorsForemanTierAndEffort(t *testing.T) {
 	if task := taskByName(t, m.mustFile("brigada/plans", res.PlanID), "build"); task.Tier != "light" || task.Effort != "high" {
 		t.Errorf("foreman tier lost: %+v", task)
 	}
+}
+
+// TestPlanFileBranchIsASetting: plan_file_branch is set like any project
+// setting (§6.4), shown with its default, and moves the mirror; a value
+// that is not a branch name is refused.
+func TestPlanFileBranchIsASetting(t *testing.T) {
+	m := newMirrorEnv(t)
+	repo := m.str("SELECT repo_url FROM projects WHERE id = ?", m.project)
+	if _, err := m.eng.SetProjectSettings(m.ctx, repo, map[string]string{SettingPlanFileBranch: "-bad"}); !errors.Is(err, ErrInvalidSetting) {
+		t.Fatalf("set plan_file_branch=-bad: err = %v, want ErrInvalidSetting", err)
+	}
+	ps, err := m.eng.SetProjectSettings(m.ctx, repo, map[string]string{SettingPlanFileBranch: "mirrors/plans"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shown string
+	for _, v := range ps.Settings {
+		if v.Key == SettingPlanFileBranch {
+			shown = v.Value
+		}
+	}
+	if shown != "mirrors/plans" {
+		t.Errorf("shown plan_file_branch = %q, want mirrors/plans", shown)
+	}
+	res, err := m.eng.CreatePlan(m.ctx, m.project, "set branch", []PlanTask{{Name: "a", Spec: "x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.mustFile("mirrors/plans", res.PlanID)
 }
