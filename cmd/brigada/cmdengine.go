@@ -50,6 +50,7 @@ func runEngine(ctx context.Context, args []string, stdout, stderr io.Writer) int
 
 		NotifyWebhook: rt.file.NotifyWebhook,
 		SnapshotDir:   rt.file.SnapshotDir,
+		Retention:     time.Duration(rt.file.RetentionDays) * 24 * time.Hour,
 		TaskAutoRetry: rt.file.TaskAutoRetry,
 		Rounds:        rt.file.Rounds,
 		Review:        rt.file.Review,

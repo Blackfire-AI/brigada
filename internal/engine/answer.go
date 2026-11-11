@@ -293,9 +293,9 @@ func parkedQuestionTx(tx *sql.Tx, project, taskID int64) (string, error) {
 }
 
 // parkedTaskTx validates the task both foreman tools act on: a task of
-// project, parked at needs_foreman. A task of another project, a task
-// in any other state, a task that is not there — each refuses with the
-// reason named.
+// project, parked at needs_foreman, and not held there by a plan rule.
+// A task of another project, a task in any other state, a held task, a
+// task that is not there — each refuses with the reason named.
 func parkedTaskTx(tx *sql.Tx, project, taskID int64) error {
 	var owner int64
 	var state string
@@ -315,6 +315,19 @@ func parkedTaskTx(tx *sql.Tx, project, taskID int64) error {
 	}
 	if state != taskNeedsForeman {
 		return fmt.Errorf("task %d is %s, not parked waiting for the foreman", taskID, state)
+	}
+	// A plan rule's hold is the user's to release (§6.3): no foreman tool
+	// passes it, however the user's yes reached the foreman.
+	held, err := ruleHeldTaskTx(tx, taskID)
+	if err != nil {
+		return err
+	}
+	if held {
+		var plan int64
+		if err := tx.QueryRow("SELECT plan_id FROM tasks WHERE id = ?", taskID).Scan(&plan); err != nil {
+			return fmt.Errorf("read the plan of task %d: %w", taskID, err)
+		}
+		return fmt.Errorf("%w: task %d waits at the plan gate for the user, who releases it with brigada plan approve %d", ErrTaskRuleHeld, taskID, plan)
 	}
 	return nil
 }

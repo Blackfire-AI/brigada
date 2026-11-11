@@ -94,7 +94,7 @@ func TestConfigSavedAgentsAndRunningRunnerOutsideRepo(t *testing.T) {
 		"rounds.fix = 2 (default)", "rounds.review = 2 (default)", "rounds.restart = 3 (default)",
 		"review.tier = below (default)", "review.effort = medium (default)",
 		"review.family = prefer (default)",
-		"snapshot_dir = none (default)", "caps.plan = no cap (default)",
+		"snapshot_dir = none (default)", "retention_days = 0, keep everything (default)", "caps.plan = no cap (default)",
 		"caps.runner = no cap (default)", "caps.account.<label> = no cap (default)",
 		"caps.model.<model> = no cap (default)", "cost.<harness>/<model> = 1 (default)",
 	} {

@@ -9,6 +9,8 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - A cancel can say why. Each `plan_amend` cancel entry may be `{task, reason}` beside the bare task name or id, and `task_cancel` takes an optional `reason`, in the foreman's MCP tools and the API alike. Every task an amendment newly cancels records one `task_cancelled_by_amend` event with the plan, the reason verbatim and the caller (foreman or user), and `brigada history` shows the reason. A reason is expected on every cancel; one without is still accepted, as before, and recorded as "no reason given".
 - A restarted dependent now rebuilds on the land target, or on the waiting landings' ref `refs/brigada/land/<target>`, when its dependency already landed (squashed or not) or was cancelled or retired, instead of on the dependency's old result branch, whose landing conflicted. The `task_base_stale` reason names that base. A task base may now be the waiting ref, which the runner fetches by name.
+- `plan_file_branch`, a project setting (`brigada project set`, `project show` and `.brigada/project.yaml`), names the branch the plan files are pushed to; `main` or the repository's default branch name commits them to the default branch. The mirror read the key, but nothing could set it (issue #215).
+- `retention_days` in the config file prunes messages and artifacts older than that many days on the engine's sweep; 0, the default, keeps everything, and the event log is never pruned. The engine could prune, but no key set it (issue #217).
 
 ### Fixed
 
@@ -26,6 +28,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A quota limit counted toward an agent's failure streak: a success, a limit and then one failure marked the agent broken, since the stored limit job was one of the "last two". The streak now skips limit failures as it skips setup and infra ones (issue #212).
 - A failed setup's retry spent one of the task's restarts, though §5.7 says it charges none: a spent restart budget stopped the retry, and after one setup retry the work job's own transient restart no longer fired. The retry now spends no restart, and the restart cap neither gates nor counts it (issue #213).
 - The check-loop rule could not fire at the default two fix rounds: the round cap was checked first, so the third identical failure went out of rounds and escalated. The loop is now judged before the cap and parks the task as a loop (issue #214).
+- The foreman could release a task a plan rule held alone — an amendment's `check_command`, class, protected-path or extra-repository hold, or the plan budget — with `task_restart`, although plan gates are the user's alone. `task_restart` and `answer` now refuse a held task, and `brigada plan approve` (and the coordinator's `plan_approve`) on a running plan releases its held tasks, as GUIDE §7 already told the user to do; a task still over the budget is held again and named (issue #211).
 
 ## [1.2.0] - 2026-11-09
 

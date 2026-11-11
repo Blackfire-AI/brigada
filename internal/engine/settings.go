@@ -71,6 +71,10 @@ const (
 	// The plan-file mirror (§6.4): on (default) pushes each plan's file to
 	// the repo's remote; off writes and pushes nothing.
 	SettingPlanFiles = "plan_files"
+	// The branch the plan-file mirror pushes to (§6.4): brigada/plans by
+	// default; the literal main, or the repo's default branch name,
+	// commits to the default branch instead.
+	SettingPlanFileBranch = "plan_file_branch"
 )
 
 // The values plan_files takes.
@@ -96,7 +100,7 @@ var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, Setti
 	SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
 	SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
-	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingInstructions}
+	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch, SettingInstructions}
 
 // MaxInstructionsBytes bounds the project instruction text (§5.9): a
 // starting value, open in §16 item 11. Above it a set or an import is
@@ -208,7 +212,7 @@ func parseSettingValue(key, value string) (json.RawMessage, error) {
 		SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
 		SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
 		SettingDefaultCheck, SettingWorkerTools,
-		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingInstructions:
+		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch, SettingInstructions:
 	default:
 		return nil, fmt.Errorf("%w: unknown key %q; valid keys: %s", ErrInvalidSetting, key, strings.Join(SettingKeys, ", "))
 	}
@@ -286,7 +290,7 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 		}
 		return json.Marshal(v)
 	}
-	if key == SettingLandTarget {
+	if key == SettingLandTarget || key == SettingPlanFileBranch {
 		v := strings.TrimSpace(value)
 		if !validBranchName(v) {
 			return nil, fmt.Errorf("%w: %s takes a branch name, got %q", ErrInvalidSetting, key, value)
@@ -493,6 +497,11 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 			}
 		case SettingPlanFiles:
 			sv.Value = PlanFilesOn
+			if s, ok := rawString(cur); ok && s != "" {
+				sv.Value = s
+			}
+		case SettingPlanFileBranch:
+			sv.Value = defaultPlanFileBranch
 			if s, ok := rawString(cur); ok && s != "" {
 				sv.Value = s
 			}

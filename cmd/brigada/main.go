@@ -109,7 +109,8 @@ Commands:
 	                Register one such model as an agent (--classes,
 	                --effort); restart the runner to serve it.
 	plan approve <id>
-	                Approve a plan waiting over the approval limit
+	                Approve a plan waiting at the plan gate, or release
+	                the tasks a rule holds in a running plan
 	                (--and-stop-asking changes the rule that held it).
 	plan reject <id>
 	                Reject such a plan and cancel its tasks.
