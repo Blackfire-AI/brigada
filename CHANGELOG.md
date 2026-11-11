@@ -28,6 +28,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A quota limit counted toward an agent's failure streak: a success, a limit and then one failure marked the agent broken, since the stored limit job was one of the "last two". The streak now skips limit failures as it skips setup and infra ones (issue #212).
 - A failed setup's retry spent one of the task's restarts, though §5.7 says it charges none: a spent restart budget stopped the retry, and after one setup retry the work job's own transient restart no longer fired. The retry now spends no restart, and the restart cap neither gates nor counts it (issue #213).
 - The check-loop rule could not fire at the default two fix rounds: the round cap was checked first, so the third identical failure went out of rounds and escalated. The loop is now judged before the cap and parks the task as a loop (issue #214).
+- The foreman could release a task a plan rule held alone — an amendment's `check_command`, class, protected-path or extra-repository hold, or the plan budget — with `task_restart`, although plan gates are the user's alone. `task_restart` and `answer` now refuse a held task, and `brigada plan approve` (and the coordinator's `plan_approve`) on a running plan releases its held tasks, as GUIDE §7 already told the user to do; a task still over the budget is held again and named (issue #211).
 
 ## [1.2.0] - 2026-11-09
 

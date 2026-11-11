@@ -305,7 +305,7 @@ var tools = []Tool{
 	},
 	{
 		Name:        "task_restart",
-		Description: "Restart a task parked at needs_foreman — failed, out of rounds, or one whose review keeps asking for changes — as a fresh attempt from the task's base on a new branch, with your note handed to the worker verbatim as feedback (what went wrong, what to avoid). Spends one of the task's restarts; the fresh attempt gets its rounds back.",
+		Description: "Restart a task parked at needs_foreman — failed, out of rounds, or one whose review keeps asking for changes — as a fresh attempt from the task's base on a new branch, with your note handed to the worker verbatim as feedback (what went wrong, what to avoid). Spends one of the task's restarts; the fresh attempt gets its rounds back. A task a plan rule holds at the plan gate is refused: the user releases it with brigada plan approve.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

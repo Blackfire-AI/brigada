@@ -27,7 +27,7 @@ func runPlan(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 // changes the one setting each hold reason maps to, the way
 // `brigada project set` does, so the same question is not asked twice.
 func runPlanDecision(ctx context.Context, verb string, args []string, stdout, stderr io.Writer) int {
-	description := "Approve a plan waiting over the approval limit and queue its tasks."
+	description := "Approve a plan waiting at the plan gate and queue its tasks, or release the tasks a plan rule holds alone in a running plan."
 	if verb == "reject" {
 		description = "Reject a plan waiting over the approval limit and cancel its tasks."
 	}
@@ -76,6 +76,9 @@ func printPlanDecision(ctx context.Context, client planDecider, verb string, id 
 		fmt.Fprintf(stdout, "plan #%d approved: %d tasks queued\n", res.PlanID, len(res.Tasks))
 		for _, t := range res.Tasks {
 			fmt.Fprintf(stdout, "task #%d: work job %d\n", t.TaskID, t.JobID)
+		}
+		for _, h := range res.Held {
+			fmt.Fprintf(stdout, "task #%d held again: %s\n", h.TaskID, h.Reason)
 		}
 		for _, s := range res.Settings {
 			fmt.Fprintf(stdout, "rule changed: %s\n", s)

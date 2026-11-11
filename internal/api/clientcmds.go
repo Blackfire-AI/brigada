@@ -520,12 +520,14 @@ func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey
 
 // PlanDecisionResult is what approving or rejecting a plan did (§6.3):
 // the plan's new state, for an approval the first wave's tasks with
-// their queued work jobs, and the key=value pairs a stop-asking
-// approval changed.
+// their queued work jobs — for an active plan's held tasks, the ones
+// released, and in Held those the plan budget held again — and the
+// key=value pairs a stop-asking approval changed.
 type PlanDecisionResult struct {
 	PlanID   int64
 	State    string
 	Tasks    []PlanCreatedTask
+	Held     []PlanHeldTask
 	Settings []string
 }
 
@@ -569,6 +571,9 @@ func (c *Client) decidePlanBody(ctx context.Context, plan int64, verb string, bo
 	res := PlanDecisionResult{PlanID: out.PlanID, State: out.State, Settings: out.Settings}
 	for _, t := range out.Tasks {
 		res.Tasks = append(res.Tasks, PlanCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
+	}
+	for _, h := range out.Held {
+		res.Held = append(res.Held, PlanHeldTask{TaskID: h.TaskID, Name: h.Name, Reason: h.Reason})
 	}
 	return res, nil
 }

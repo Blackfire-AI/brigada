@@ -241,6 +241,9 @@ func (s *Server) handlePlanDecision(approve bool) handler {
 		for _, t := range res.Tasks {
 			out.Tasks = append(out.Tasks, planCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
 		}
+		for _, h := range res.Held {
+			out.Held = append(out.Held, planHeldTask{TaskID: h.TaskID, Name: h.Name, Reason: h.Reason})
+		}
 		writeJSON(w, http.StatusOK, out)
 	}
 }
@@ -264,6 +267,7 @@ type planDecisionResponse struct {
 	PlanID   int64             `json:"plan_id"`
 	State    string            `json:"state"`
 	Tasks    []planCreatedTask `json:"tasks,omitempty"`
+	Held     []planHeldTask    `json:"held,omitempty"`
 	Settings []string          `json:"settings_changed,omitempty"`
 }
 

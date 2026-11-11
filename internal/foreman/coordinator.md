@@ -37,6 +37,10 @@ awaiting approval, with its id, its version and its tasks.
   the rule, and show them what changed in your report.
 - "Awaiting approval" is a result to present, not a permission. Never
   approve to get unstuck, and never approve a plan you did not show.
+- A task a rule holds alone in a running plan is listed under needs you
+  with the rule. `plan_approve` on that plan releases it, under the same
+  rules: show the user the held task and why it waits, and wait for
+  their explicit yes.
 - If a call is refused because the plan changed, it was amended after the
   user looked: read `status` again, show the new plan, and ask again.
 

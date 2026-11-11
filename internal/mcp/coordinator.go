@@ -87,7 +87,7 @@ var CoordinatorTools = []Tool{
 	},
 	{
 		Name:        "plan_approve",
-		Description: "Approve a plan awaiting approval: its first wave of work starts. This is the USER's decision, never yours: call it only after you showed the user the plan (status shows it) and they said an explicit yes in this chat. \"Awaiting approval\" is a result to present, not a permission. Name the plan's id and the version you showed; a plan amended since is refused, then read status again and show it anew. With and_stop_asking true, the approval also changes the rule that held the plan — the one setting each hold reason maps to — the way `brigada project set` would, so the same question is not asked twice; use it only when the user said to change the rule, and show them what changed.",
+		Description: "Approve a plan awaiting approval: its first wave of work starts. On an active plan it releases the tasks a plan rule holds alone (status lists each under needs you), and the plan budget may hold one again. This is the USER's decision, never yours: call it only after you showed the user the plan (status shows it) and they said an explicit yes in this chat. \"Awaiting approval\" is a result to present, not a permission. Name the plan's id and the version you showed; a plan amended since is refused, then read status again and show it anew. With and_stop_asking true, the approval also changes the rule that held the plan — the one setting each hold reason maps to — the way `brigada project set` would, so the same question is not asked twice; use it only when the user said to change the rule, and show them what changed.",
 		InputSchema: planDecisionSchema,
 		Call:        callPlanApprove,
 	},
@@ -311,6 +311,9 @@ func callPlanApprove(ctx context.Context, c *api.Client, args json.RawMessage) (
 	text := fmt.Sprintf("plan %d approved (state %s): %d tasks queued", res.PlanID, res.State, len(res.Tasks))
 	for _, t := range res.Tasks {
 		text += fmt.Sprintf("\n  task %d: work job %d", t.TaskID, t.JobID)
+	}
+	for _, h := range res.Held {
+		text += fmt.Sprintf("\n  task %d held again: %s", h.TaskID, h.Reason)
 	}
 	for _, s := range res.Settings {
 		text += fmt.Sprintf("\n  rule changed: %s", s)

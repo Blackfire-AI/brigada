@@ -75,6 +75,7 @@ const (
 	evTaskLandHeld            = "task_land_held"             // the task waits at the land gate (§6.3); Reason names the rule
 	evTaskPlanHeld            = "task_plan_held"             // a plan rule held a task that had not started — an amendment's added or respecified task, or the plan's spend passing approval_budget — and it waits at the plan gate (§6.3); Reason names the rule
 	evTaskLandReleased        = "task_land_released"         // the user released the land gate; the landing re-evaluates (§6.3)
+	evTaskPlanReleased        = "task_plan_released"         // the user released a task a plan rule held alone (§6.3, brigada plan approve on an active plan); the task waits for its dependencies again
 	evTaskLandRecheckReleased = "task_land_recheck_released" // the engine released a land_ready hold itself (issue #142): the gate passed on the re-check, or the landing settled beside the hold; distinct from the user's release
 	evTaskLandRejected        = "task_land_rejected"         // the user rejected the landing; the branch stays, nothing recorded (§6.3)
 	evTaskLanded              = "task_landed"                // the task's landing succeeded (§7.1); Branch, Commit and Pushed name it
