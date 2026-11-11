@@ -16,8 +16,8 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/landing"
 )
 
-// landClient is what land asks the engine (§7.1): reads only. The engine
-// runs no git for a client (product §5 rule 1).
+// landClient is what land asks the engine (§7.1): reads only. The client
+// runs the git: the engine reads no client's checkout (product §5 rule 6).
 type landClient interface {
 	Task(ctx context.Context, id int64) (engine.TaskInfo, error)
 	TaskLand(ctx context.Context, id int64) (engine.TaskLandInfo, error)

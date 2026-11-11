@@ -52,14 +52,14 @@ The continuation is a saving, never a requirement: the task starts fresh when th
   The runner maps it to the agent's CLI through the adapter's typed effort control (§5.2):
 
   - claude and codex take the same word
-  - opencode takes `minimal` for `low`, no variant for `medium`, `high` and `max`
+  - opencode takes `minimal` for `low`, no variant for `medium`, and `high` and `max` as given
   - kimi has no effort control and ignores it.
 
   The job record stores the level actually passed.
 
   Omitted, the agent's own `effort=` applies, else `medium`, resolved in this vocabulary before the harness maps it, so opencode (`medium` maps to no variant) and kimi (no control) still get nothing; a nonempty mapped task effort overrides the agent's (opencode `medium` still uses the agent's own variant when set), as the foreman effort does (`brigada project foreman --effort`, GUIDE §11: it rides the foreman turn's grant and overrides the serving agent's own level).
 
-**Round caps.** The task's `caps` field overrides the engine's round budgets key by key: `fix_rounds` (fix rounds a failed check asks for), `review_rounds` (fix rounds a review's changes verdict asks for) and `restart` (restarts, §5.6), each an integer from 0 to 10; an absent key keeps the engine default. The engine defaults are 2 fix, 2 review and 3 restarts, set by `rounds.fix`, `rounds.review` and `rounds.restart` in the config file.
+**Round caps.** The task's `caps` field overrides the engine's round budgets key by key: `fix_rounds` (the limit on a fix round a failed check asks for), `review_rounds` (the limit on a fix round a review's changes verdict asks for) and `restart` (restarts, §5.6), each an integer from 0 to 10; an absent key keeps the engine default. The two fix-round limits share one count: every fix round of the task's latest attempt (§5.6), whichever asked for it, and a new fix round is refused once that count reaches the limit of the kind that asks. The engine defaults are 2 fix, 2 review and 3 restarts, set by `rounds.fix`, `rounds.review` and `rounds.restart` in the config file.
 
 `plan_create` and `plan_amend`'s `add` take it as an optional `caps` object per task; an unknown key or an out-of-range value refuses the whole call. `plan_amend`'s `retier` entries take `caps` too, for a `pending`, `ready` or `needs_foreman` task, merged key by key into what the task has, so the foreman can give a parked task more restarts before `task_restart`. The engine stores it in `tasks.caps`; `status` shows a non-default value beside tier and effort (`restarts 4`) and the plan file carries it (§6.4).
 
@@ -69,9 +69,9 @@ Neither tier nor effort is an approval trigger, and caps are not either (§6.3).
 
 **Default check.** A task may omit `check` to inherit the project's default check (§13.1). Resolution happens once, when the task is created or amended through the engine: the engine copies the effective command into the task record with its source (`project-default` and the settings version it came from). A later change to the project default never alters a task that already has its check, so the recorded check stays reproducible, and the plan shown for approval (§6.3) carries the real commands, not a reference. The runner runs what the task recorded, never a value read from the worktree at run time (§5.5; product §5 rule 7).
 
-Omission is distinct from an explicit no-check override, which must be spelled out (`check: none`) if it is allowed at all (open, §16), and a plan containing one shows it plainly. A task that omits `check` in a project with no default is rejected at creation, never run unchecked.
+Omission is distinct from an explicit no-check override, which must be spelled out (`check: none`) if it is allowed at all (open, §16), and a plan containing one shows it plainly. A task that omits `check` in a project with no default is created with no check, and the runner runs none for it.
 
-Task states: `pending` (deps not done) → `ready` → `running` → `checking` → `reviewing` → `done`; or `needs_foreman`, `needs_user` (reserved: no path enters it), `failed`, `cancelled`, `retired` (§6.2). Cancelling a task that still has dependents is refused unless the same amendment covers each (§6.2); the foreman re-plans around a task that will never be done.
+Task states: `pending` (deps not done) → `ready` → `running` (the worker, then the runner's check, reported in one completion) → `reviewing` → `done`; or `needs_foreman`, `failed`, `cancelled`, `retired` (§6.2). `checking` and `needs_user` are reserved: no path enters them. Cancelling a task that still has dependents is refused unless the same amendment covers each (§6.2); the foreman re-plans around a task that will never be done.
 
 ## 6.2 Plan lifecycle
 
@@ -131,7 +131,7 @@ A plan `brigada recover` restores as `reviewing` (§6.4) has its round queued ag
 
 ### Approval rules
 
-Approval holds a plan that trips a rule: a task class other than `implement`/`review`/`answer`, a task touching a protected path, a task naming an extra repository outside the project default, a task whose check is not the project's `default_check` — or, mid-run, a spend past the plan budget. The keys `approval_budget`, `approval_classes`, `approval_protected_paths`, `approval_max_tasks` and `default_check` (§13.1) set them; the budget is the rule on by default, the task count is off unless the project sets one, and a negative `approval_max_tasks` is off as `0` is, for the count alone: the other rules still hold.
+Approval holds a plan that trips a rule: a task class other than `implement`/`review`/`answer`, a task touching a protected path, a task naming an extra repository outside the project default, a task whose check is not the project's `default_check` — or, mid-run, a spend past the plan budget. The keys `approval_budget`, `approval_classes`, `approval_protected_paths`, `approval_max_tasks` and `default_check` (§13.1) set them; the budget is none and the task count is off unless the project sets them, and a negative `approval_max_tasks` is off as `0` is, for the count alone: the other rules still hold.
 
 The check rule (`check_command`) compares each task's check, as the task stores it, with `default_check`: an omitted check takes the default first, so it never differs, and with no default only a task that names a check differs. The runner runs a check as the user, in the user's account, so a command the project did not set waits for the user's yes, its reason reading `check_command: check "…" differs from default_check "…"` with how to release it — `brigada plan approve` for a held plan, `task_restart` once the user agrees for a task held alone — and how to change it: cancel the task and add it again with the default check, or set `default_check`. A task names no setup of its own: it records the project's (§5.7), so the setup never differs. `--and-stop-asking` changes nothing for this rule: moving `default_check` to one task's command would change the check of every task after it.
 
@@ -214,5 +214,5 @@ The mirror is on by default and the per-project `plan_files` (`on` or `off`) swi
 - **In-flight work:** recover waits one lease-expiry window before re-dispatching, so runners whose heartbeats now fail have killed their workers. Re-dispatched work does not get a new branch name; the rules below decide which branch each kind of re-dispatch works on.
 - **Branch names:** a task's first job works on `brigada/task-<id>`, and the engine names each job's branch.
   - **Re-lease** (the lease expired or the runner crashed, and the same job is leased again): keeps its job's branch.
-  - **Restart** (§5.6, either mode, or a re-dispatch to another agent): works on `brigada/task-<id>-r<n>`, where `<n>` counts the task's restarts.
+  - **Restart** (§5.6, the foreman's `task_restart` or the engine's own restart on another agent): works on `brigada/task-<id>-r<n>`, where `<n>` counts the task's restarts.
   - **Fix round** (§3): continues the task's branch, the one its last job pushed, so the fix lands on top of the work under review.

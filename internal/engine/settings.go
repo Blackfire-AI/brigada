@@ -139,9 +139,9 @@ func instructionsSummary(text string) string {
 const settingListSep = "+"
 
 // validBranchName reports whether name is a branch name git takes, by
-// check-ref-format's rules spelled in Go: the engine runs no git (product
-// §5 rule 1), so the check is its own. A branch additionally cannot begin
-// with a dash, which git reads as an option.
+// check-ref-format's rules spelled in Go, so validating a setting runs no
+// git on the engine's host. A branch additionally cannot begin with a
+// dash, which git reads as an option.
 func validBranchName(name string) bool {
 	if name == "" || name == "@" || strings.HasPrefix(name, "-") ||
 		strings.HasSuffix(name, "/") || strings.HasSuffix(name, ".") ||
@@ -579,7 +579,7 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 // no project.
 func (e *Engine) ProjectSettings(ctx context.Context, repoURL string) (*ProjectSettings, error) {
 	if repoURL == "" {
-		return nil, fmt.Errorf("repo URL is required (product §5 rule 6: repos are addressed by URL)")
+		return nil, fmt.Errorf("repo URL is required (product §5 rule 4: repos are addressed by URL)")
 	}
 	var out *ProjectSettings
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
@@ -615,7 +615,7 @@ func (e *Engine) ProjectSettings(ctx context.Context, repoURL string) (*ProjectS
 // the foreman choice's. Returns the settings as they now stand.
 func (e *Engine) SetProjectSettings(ctx context.Context, repoURL string, values map[string]string) (ProjectSettings, error) {
 	if repoURL == "" {
-		return ProjectSettings{}, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
+		return ProjectSettings{}, fmt.Errorf("%w: repo URL is required (product §5 rule 4: repos are addressed by URL)", ErrInvalidSetting)
 	}
 	if len(values) == 0 {
 		return ProjectSettings{}, fmt.Errorf("%w: no key=value given; valid keys: %s", ErrInvalidSetting, strings.Join(SettingKeys, ", "))

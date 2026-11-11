@@ -421,9 +421,10 @@ func landHoldAsksTx(tx *sql.Tx, project, taskID int64) ([]holdAsk, error) {
 		asks = append(asks, holdAsk{kind: holdGateLand})
 	}
 	// The protected-path rule matches the paths the task changed. The
-	// engine runs no git (product §5 rule 1), so the runner records the
-	// task's real changed paths (`git diff --name-only base...branch`)
-	// with the work job's result and they are what the rule matches;
+	// engine works in no checkout of the task's code (product §5 rule 6),
+	// so the runner records the task's real changed paths (`git diff
+	// --name-only base...branch`) with the work job's result and they are
+	// what the rule matches;
 	// the spec and check text stand in only when no paths are recorded
 	// — an older runner, or a task whose work predates the recording —
 	// the same proxy the plan gate uses (§6.3).
@@ -2021,7 +2022,7 @@ type PushApproveResult struct {
 // project, as every client command does.
 func (e *Engine) PushApprove(ctx context.Context, repoURL string) (PushApproveResult, error) {
 	if repoURL == "" {
-		return PushApproveResult{}, fmt.Errorf("repo URL is required (product §5 rule 6: repos are addressed by URL)")
+		return PushApproveResult{}, fmt.Errorf("repo URL is required (product §5 rule 4: repos are addressed by URL)")
 	}
 	var res PushApproveResult
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {

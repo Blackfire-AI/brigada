@@ -10,9 +10,9 @@ import (
 // Brigada-Task trailers (§7.1): a hand squash, or a brigada land in
 // another clone, whose commits the land job never made. The runner's
 // headless foreman turn and the client's attach both refresh the
-// project's checkout and report through here; the engine runs no git
-// (product §5 rule 1), so the caller's read of the branch is the
-// report's evidence.
+// project's checkout and report through here; the engine reads no
+// checkout (product §5 rule 6), so the caller's read of the branch is
+// the report's evidence.
 func (s *Server) handleLanded(w http.ResponseWriter, r *http.Request, _ identity) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return

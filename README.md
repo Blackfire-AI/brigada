@@ -29,7 +29,7 @@ brigada drives the vendors' **unmodified** CLIs, each signed in with your own ac
 
 ## Ask your coding agent to set it up
 
-The quickest door today: paste this into the coding agent you already keep open in your repository. It installs brigada and walks `brigada init`; you confirm the choices, the agent does the typing. Prefer your own hands? [Install](#install) and the [first run](#first-run-brigada-init) are below.
+The quickest door: paste this into the coding agent you already keep open in your repository. It installs brigada and walks `brigada init`; you confirm the choices, the agent does the typing. Prefer your own hands? [Install](#install) and the [first run](#first-run-brigada-init) are below.
 
 ```text
 Install brigada on this machine and set it up for this repository, then
@@ -124,7 +124,7 @@ Replace `<os>` and `<arch>` with your platform, for example `brigada-linux-amd64
 
 To use brigada, you need:
 
-- `git` and a repository with an `origin` remote;
+- `git` and a repository with a git remote (`origin`, or its only remote; `brigada init --remote <name>` picks another);
 - signed-in agent CLIs on `PATH`. Reviews go to a model family other than the author's when one is available (`review.family=prefer`, the default; with one family they fall back to the same family or the same agent), and always with `review.family=require`, so offer review-capable agents from at least two families.
 
 ### What `brigada version` prints
@@ -188,10 +188,12 @@ The [guide](docs/GUIDE.md) covers the rest: a coordinator session over several r
 brigada sends no usage data, analytics or crash reports anywhere. That is a promise about brigada, not about the CLIs it drives:
 
 - each official CLI sends your prompts and the code it reads to its own model provider, as it does when you run it by hand, under your account and that vendor's terms;
-- the runner pushes task branches to your repository's git remote with your git credentials;
-- the engine mirrors plan files (titles, task states, dependencies, branches, open questions, extra repositories) to the `brigada/plans` branch of that remote; `brigada project set plan_files=off` turns that off.
+- the runner pushes task branches, landed commits and the waiting ref `refs/brigada/land/<target>` of a landing held at the push gate to your repository's git remote with your git credentials;
+- the engine mirrors plan files (titles, task states, dependencies, branches, open questions, extra repositories) to the `brigada/plans` branch of that remote; `brigada project set plan_files=off` turns that off;
+- the foreman's `issue_read` tool asks GitHub, through your `gh` login, for an issue or pull request of the project's repository;
+- when you set `notify.webhook`, notifications go to the webhook URL you configured.
 
-brigada has no API-key setting of its own. Workers inherit your environment (minus brigada's own variables and your git-forge, cloud and registry credentials, such as `GH_TOKEN` or `AWS_SECRET_ACCESS_KEY`), so a CLI that you have set up with an API key the way its vendor documents is driven the same way. See [docs/TERMS.md](docs/TERMS.md).
+brigada has no API-key mode of its own; the config file's `env.<harness>.<VAR>` key passes one variable, such as an API key, from the keychain or a mode-0600 file to that harness's jobs only ([docs/GUIDE.md](docs/GUIDE.md#13-configuration-reference)). Workers inherit your environment (minus brigada's own variables and your git-forge, cloud and registry credentials, such as `GH_TOKEN` or `AWS_SECRET_ACCESS_KEY`), so a CLI that you have set up with an API key the way its vendor documents is driven the same way. See [docs/TERMS.md](docs/TERMS.md).
 
 ## Models that built brigada
 

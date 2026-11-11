@@ -29,7 +29,7 @@ type LandedCommit struct {
 // dependent's wait and the status all read the one table.
 func (e *Engine) RecordLanded(ctx context.Context, repoURL, branch string, landed []LandedCommit) error {
 	if repoURL == "" {
-		return fmt.Errorf("repo URL is required (product §5 rule 6: repos are addressed by URL)")
+		return fmt.Errorf("repo URL is required (product §5 rule 4: repos are addressed by URL)")
 	}
 	if branch == "" {
 		return fmt.Errorf("the default branch is required to record a landing")

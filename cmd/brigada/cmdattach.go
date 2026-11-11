@@ -164,10 +164,9 @@ func defaultAdapterForAttach(harness string) (adapter.Adapter, bool) {
 	case "claude":
 		return &claude.Adapter{}, true
 	case "codex":
-		// Codex can drive an interactive attach, but remains excluded from
-		// ResumeCapableHarnesses until its exec path can carry the foreman's
-		// §12.2 MCP bridge. Keep the adapter registered so attach is ready
-		// when that foreman gate is revisited.
+		// Codex drives an interactive attach and is in
+		// ResumeCapableHarnesses: its exec path carries the foreman's §12.2
+		// MCP bridge through -c.
 		return &codex.Adapter{}, true
 	case "kimi":
 		return &kimi.Adapter{}, true

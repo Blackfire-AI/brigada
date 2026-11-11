@@ -117,7 +117,7 @@ The runner detects the limit-hit error from the foreman's CLI. The engine marks 
 - switch the foreman's harness or model (the new session rebuilds its context from the engine, per product §4's kill-and-rebuild test),
 - let approved plans continue without it.
 
-Routine rules keep working throughout. When the same account also serves task workers, a foreman limit-hit cools that account in the dispatcher (§8), and a worker limit-hit on that account stops foreman wakes until the reset.
+Routine rules keep working throughout. Cooling is per account (§8): when the same account also serves task workers, a foreman limit-hit cools it for the workers too, and a worker limit-hit on it cools the foreman's agent, so the foreman's turns wait unleased until the reset, though only a limit on the foreman's own turn marks it `limited`.
 
 ## 4.5 Capacity
 

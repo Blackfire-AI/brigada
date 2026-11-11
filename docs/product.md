@@ -18,7 +18,7 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 
 ## 3. What it does
 
-**The user's role, as the product's stance:** the user is not a gate; the user is the person who defines the rules. Brigada runs the whole loop — plan, work, check, review, land, push. The user writes rules about the change: which paths are protected, which tier may not land unheard, what a spent restart means, what a change may cost. The engine holds a plan or a task only when a rule names it. When a rule holds something, the user's answer can also change the rule, so the same question is not asked twice. The foreman never asks the user what a rule already decides; it asks only intent or product questions no rule answers. Stop, cancel and pause stay the user's, at any time, on the whole engine or on any plan, task or project.
+**The user's role, as the product's stance:** the user is not a gate; the user is the person who defines the rules. Brigada runs the whole loop — plan, work, check, review, land, push. The user writes rules about the change: which paths are protected, which tier may not land unheard, what a spent restart means, what a change may cost. The engine holds a plan or a task only when a rule names it. When a rule holds something, the user's answer can also change the rule, so the same question is not asked twice. The foreman never asks the user what a rule already decides; it asks only intent or product questions no rule answers. Stop and cancel stay the user's, at any time, on the whole engine or on any plan or task, and pause on the whole engine or one project.
 
 **Three roles.** The **user** writes the rules and decides at the gates: approves plans, landings and pushes, changes rules, cuts tags and releases, and can stop or cancel anything, and pause dispatch — the whole engine or one project — beside stop and cancel. The **operator agent** is the user's own coding agent, outside brigada: it passes the user's requests to the foreman with `brigada ask`, watches with `status`, `history` and `diff`, merges the staging pull request once its CI is green (a project that lands on the default branch with `after_land` none has none to merge), and restarts the engine and runner after a brigada upgrade or when their code lands in the repository; it relays the foreman's report to the user and sends the user's answer back with another `brigada ask`; it approves nothing, and `.brigada/operator.md`, written by `brigada init`, tells it how. The **foreman** is brigada's own agent: it plans, answers workers and re-plans, and asks the user only what no rule decides; it has no tool to pass a gate or land anything.
 
@@ -26,7 +26,7 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 
 1. **Understands** your ask in conversation and asks back when it's unclear.
 2. **Plans:** splits the ask into a **task graph**. Each task has a spec, a **check** command, a class (implement, review, answer, …), its dependencies, a **tier** — how heavy a model it needs — and an **effort** — how hard that model should think. The plan is also written into the repo as a file, so it survives the loss of the engine store and can be read and reviewed like code ([design.md](design.md) §6.4).
-3. **Confirms** the plan with you **only where your rules say so** ([design.md](design.md) §6.3): a plan with more tasks than you allow, a class outside your list, or a path you protect waits for you; every other plan starts on its own.
+3. **Confirms** the plan with you **only where your rules say so** ([design.md](design.md) §6.3): a plan with more tasks than you allow, a class outside your list, a path you protect, a check other than the project's default or a repository outside the project's default waits for you, and with `gate_plan=ask` every plan does; every other plan starts on its own, and a plan whose spend passes your budget holds its new jobs.
 4. **Dispatches** each task to an eligible agent chosen by sampling: each agent's measured record for that class on this repo, weighed against its configured cost, among agents with quota left and healthy. With no record yet (a new user or repo) the draws are wide, so every agent gets tried, and `stats` shows how confident each number is. The foreman says per task how heavy a model it needs (light, standard or heavy) and how hard it should think; the engine samples a model of that tier among the CLIs you allowed, by record weighed against cost, never leaving the tier by choice. A failed task first retries at a higher effort, then climbs a tier ([design.md](design.md) §6.1, §8).
 5. **Runs** the agent's official CLI headless in its own git worktree, signed in with your account.
 6. **Checks** the work by running the task's check, never trusting "done".
@@ -36,7 +36,7 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 10. **Reports** progress and results: what landed, what waits at a gate, what needs you. You can **stop or cancel** a plan or a task at any time, and **pause** dispatch — the whole engine or one project — beside stop and cancel.
 11. **Learns:** every outcome feeds the record, so the next pick is better. `brigada stats` shows who wins where.
 
-**The loop is brigada's; the stops are yours.** Every step the check and the review (cross-family when available, `review.family=prefer`; required with `review.family=require`) have already decided — landing, the check on the result, the push — runs without you. You decide where the loop waits by writing rules into the project file, and the defaults are conservative: a plan over the size limit waits, landing is automatic, the push waits for you until you set it to go on its own. A gate is enforced by the engine, never by the foreman, which has no tool to pass one.
+**The loop is brigada's; the stops are yours.** Every step the check and the review (cross-family when available, `review.family=prefer`; required with `review.family=require`) have already decided — landing, the check on the result, the push — runs without you. You decide where the loop waits by writing rules into the project file, and the defaults let the loop run: a plan waits only when it trips a rule, and landing and the push are automatic until a gate or a rule you set holds them. A gate is enforced by the engine, never by the foreman, which has no tool to pass one.
 
 ## 4. How it's built
 
@@ -53,11 +53,11 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 - **The foreman is an agent, not our own model loop.** It runs in an official CLI session (configurable: claude, codex, …) with brigada's MCP tools and foreman instructions — a brigada-owned session: the engine wakes it headless when work needs judgment, and you talk to it with `brigada attach`; the chat and the headless turns are one transcript. The headless foreman is a worker, as every task agent is: an instance of a headless harness plus a model, on the same machinery, differing only in its instructions, permissions and lifecycle. Its turns, headless and attached alike, run in a reading checkout of your repository under brigada's state directory, with your own harness config, so the conversation feels like your own session. A coordinator session in a parent folder can also watch several projects through the coordinator bridge, `brigada mcp --coordinator` ([design.md](design.md) §4.2, §4.6, §13.1).
 - **The engine does the mechanics in code:** who is eligible, healthy and has quota; leases and fencing; caps and budgets; the outcome record; review routing. The foreman decides; the engine enforces.
 - **No state lives only in the foreman's session.** The plan, tasks, decisions, pending questions and outcomes are in the engine store (and the plan also in the repo), so a foreman session can end, crash or resume without losing work. Acceptance test: kill the foreman mid-plan; a fresh session rebuilds the plan, in-flight tasks and open questions from engine tools alone.
-- **You choose the foreman's harness and model** (claude, codex or opencode), e.g. Claude Code with a given model and effort, settable per project. For the workers you choose only which CLIs may run tasks and how many tasks run at once; brigada offers every model those CLIs list, and the foreman chooses the tier and effort per task ([design.md](design.md) §13.1). **When it hits its subscription limit, brigada notifies you and you decide:** wait for the reset, switch the foreman to another harness or model (the new session rebuilds everything from the engine, per the test above), or let approved plans continue without it. Without any foreman, the plain commands still work: `brigada status`, `stats`, `cancel`, and approved plans keep running.
+- **You choose the foreman's harness and model** (claude, codex or opencode), e.g. Claude Code with a given model and effort, settable per project. For the workers you choose only which CLIs may run tasks and how many tasks run at once; brigada offers every model those CLIs list whose family it can tell (a model of unknown family stays out, and a model a CLI offers later waits for `brigada agents add`), and the foreman chooses the tier and effort per task ([design.md](design.md) §13.1). **When it hits its subscription limit, brigada notifies you and you decide:** wait for the reset, switch the foreman to another harness or model (the new session rebuilds everything from the engine, per the test above), or let approved plans continue without it. Without any foreman, the plain commands still work: `brigada status`, `stats`, `cancel`, and approved plans keep running.
 
 ## 5. Local first, remote-ready
 
-**Today is local:** client, engine and runner on one machine. The engine is a background process that `brigada` starts on demand, because tasks run for many minutes after the conversation ends. It runs as a single instance (a lock on its store), shuts down when idle, and recovers from a crash or reboot through the lease protocol: leases expire, fencing holds, capped retries resume.
+**Local:** client, engine and runner on one machine. The engine is a background process that `brigada` starts on demand, because tasks run for many minutes after the conversation ends. It runs as a single instance (a lock on its store), shuts down when idle, and recovers from a crash or reboot through the lease protocol: leases expire, fencing holds, capped retries resume.
 
 **Remote is in the backlog,** but the local version is built for it from day one, so remote later is a deployment change, not a rewrite. The rules:
 
@@ -93,7 +93,7 @@ In:
 - quota learned from the CLIs' own limit errors: an account that hits its limit cools until the reset time;
 - an MCP bridge so other harnesses can call brigada.
 
-**What local gives up:** worktrees instead of containers, so review jobs aren't enforced read-only, there's no per-job credential injection or egress restriction, and checks run as the user, in their account, without their forge and cloud credentials. No worse than running the CLI by hand, and said plainly in the docs.
+**What local gives up:** worktrees instead of containers, so a review is kept read-only by each harness's own permission scope ([design.md](design.md) §5.2) rather than a read-only mount, there's no per-job credential injection or egress restriction, and checks run as the user, in their account, without their forge and cloud credentials. No worse than running the CLI by hand, and said plainly in the docs.
 
 Backlog:
 
@@ -114,7 +114,7 @@ brigada is a standalone tool beside your own harness session: not a board, and n
 | Claude Code Projects, Codex cloud | one vendor each, cloud |
 | Claude Code agent teams (experimental): a lead session, teammates, a shared task list, a mailbox; local | interactive only (no teammates in headless mode); one team per session with a fixed lead, in-process teammates not restored on resume; the lead approves teammates' plans without the user; single vendor; no outcome routing, no checks it runs itself, no cross-family review. A neighbour, not a substitute: it can't run inside brigada's headless workers |
 | Gas Town, Symphony, vibe-kanban, claude-squad | orchestration without outcome routing |
-| CodexBar (22k★) | shows quota only; brigada uses it as a source |
+| CodexBar (22k★) | shows quota only; brigada does not read it |
 
 **Edge:** a foreman that routes by measured outcomes, runs checks, and runs independent review by another family when available (`review.family=prefer`; required with `review.family=require`) to catch problems beyond the check and spread review work across subscriptions; it works headless and sends no telemetry. No tool in this landscape routes by per-repo outcomes.
 
@@ -122,7 +122,7 @@ brigada is a standalone tool beside your own harness session: not a board, and n
 
 - Official CLIs only, unmodified, signed in by the user through the vendor's own flow. Anthropic's Claude Code legal page ("Authentication and credential use") allows an end user to sign in to the unmodified binary with their own subscription, including where it is hosted. Recheck every vendor's terms before launch.
 - No credential pooling; accounts are yours, one login each, and a rate-limited account hands work to another configured one; no reselling, no telemetry: the outcome record and everything else stay on your machine (or your server, later).
-- An API-key mode per adapter as a fallback.
+- No API-key mode per adapter is built; the fallback is a CLI set up for API-key use the way its vendor documents ([TERMS](TERMS.md#api-key-fallback)).
 
 ## 9. Stack
 
@@ -143,7 +143,7 @@ brigada is a standalone tool beside your own harness session: not a board, and n
 | The foreman's subscription hits its limit | you're notified and decide (wait, switch harness or model, or continue without it); plain commands and approved plans work without it |
 | No outcome data on a fresh install | defaults plus wide draws from a thin record, confidence shown in `stats`; standalone `review` seeds the record |
 | Scope: foreman plus engine plus adapters | phase it: one task end to end first, then plans with dependencies, then failure handling and re-planning |
-| Vendor terms on headless subscription use change | official CLIs, own accounts; an API-key fallback |
+| Vendor terms on headless subscription use change | official CLIs, own accounts; the API-key fallback of [TERMS](TERMS.md#api-key-fallback), a CLI set up for API-key use (no per-adapter API-key mode is built) |
 | Untrusted repo content runs with your logins | document it; containers later |
 | The local design blocks remote later | the §5 rules, checked in every design review |
 
