@@ -401,12 +401,21 @@ func (w *workspace) materializeMirror(ctx context.Context, baseRef string) error
 	// A fallback identity and no signing, so a fresh worktree can commit
 	// whatever the host's global git config says; a signed-in CLI sets
 	// its own identity per commit. Mirror mode is unset because it
-	// refuses every refspec push — the runner's own, and a worker's
-	// `git push origin HEAD` if one pushes anyway — while the
-	// fetches above pass explicit refspecs and never needed it.
+	// refuses every refspec push while the fetches above pass explicit
+	// refspecs and never needed it.
+	//
+	// The push URL is disabled: the task, review and plan-review
+	// worktrees are linked worktrees of this mirror and share its
+	// config, so a worker's `git push origin HEAD` is refused in all of
+	// them and the runner is the only push path (§5.7). The fetch side
+	// is untouched. No runner push goes through the mirror's origin: it
+	// pushes by explicit repository URL (ensurePushed, the salvage
+	// push), the landing from its own clone and the plan file from its
+	// own scratch repository, and the mirror itself only fetches.
 	for _, kv := range append(append([][2]string(nil), fallbackIdentity[:]...), [][2]string{
 		{"commit.gpgsign", "false"},
 		{"remote.origin.mirror", "false"},
+		{"remote.origin.pushurl", "disabled://worker-push-refused"},
 	}...) {
 		if out, err := w.git(ctx, "--git-dir", w.mirror, "config", kv[0], kv[1]); err != nil {
 			return fmt.Errorf("set %s on the mirror: %w", kv[0], trimCmdError(out, err))

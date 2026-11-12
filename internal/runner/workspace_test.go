@@ -242,9 +242,10 @@ func TestEnsurePushedRejectsStaleRemoteBranch(t *testing.T) {
 	}
 	defer ws.remove(ctx)
 
-	// The worker pushes an early, empty commit, then keeps working.
+	// An early, empty commit reaches the remote branch (by URL: the
+	// worktree's origin refuses pushes), then the work goes on.
 	git(t, ws.dir, "commit", "--allow-empty", "-m", "early")
-	git(t, ws.dir, "push", "-q", "origin", "HEAD")
+	git(t, ws.dir, "push", "-q", remote, "HEAD:refs/heads/"+ws.branch)
 	git(t, ws.dir, "commit", "--allow-empty", "-m", "the real work")
 
 	if err := ws.ensurePushed(ctx); err != nil {
@@ -832,5 +833,48 @@ func TestReviewDiffBaseOnWaitingRef(t *testing.T) {
 	git(t, c, "push", remote, "HEAD:"+landWaitRef("main"))
 	if d := review(52, landWaitRef("main")); strings.Contains(d, "result.txt") {
 		t.Errorf("diff against the held waiting ref still shows result.txt:\n%s", d)
+	}
+}
+
+// TestMirrorRefusesPushByOriginButFetchesAndPushesByURL pins the mirror's
+// disabled push URL (§5.7): a push through a worktree's origin is
+// refused, the mirror's own fetch still works, and the runner's push by
+// explicit URL still lands the branch.
+func TestMirrorRefusesPushByOriginButFetchesAndPushesByURL(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	remote := newRemote(t)
+	cfg := &Config{StateDir: t.TempDir()}
+
+	ws, err := prepareWorkspace(ctx, cfg, &api.JobGrant{
+		JobID: 51, TaskID: 6, Attempt: 1, RepoURL: remote, BaseRef: "main",
+	})
+	if err != nil {
+		t.Fatalf("prepare the workspace: %v", err)
+	}
+	defer ws.remove(ctx)
+	git(t, ws.dir, "commit", "--allow-empty", "-m", "the work")
+
+	cmd := exec.Command("git", "push", "origin", "HEAD")
+	cmd.Dir = ws.dir
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("git push origin HEAD in the worktree succeeded:\n%s", out)
+	}
+	if remoteBranchCommit(t, remote, ws.branch) != "" {
+		t.Error("the refused push reached the remote")
+	}
+
+	// The fetch side of origin still works from the worktree and the mirror.
+	git(t, ws.dir, "fetch", "origin")
+	if err := ws.fetchBranch(ctx, "main"); err != nil {
+		t.Errorf("the mirror's fetch with the push URL disabled: %v", err)
+	}
+
+	if err := ws.ensurePushed(ctx); err != nil {
+		t.Fatalf("the runner's push by URL: %v", err)
+	}
+	if remoteBranchCommit(t, remote, ws.branch) == "" {
+		t.Error("the runner's push did not land the branch")
 	}
 }
