@@ -44,7 +44,7 @@ tasks:
     effort: medium
     caps: {restart: 2}
     skills: ["surface-parity", "docs-change"]
-    state: reviewing
+    state: done
     branch: "brigada/task-740"
     rounds: 0
   - id: 741
@@ -57,7 +57,7 @@ tasks:
     effort: medium
     caps: {restart: 2}
     skills: ["surface-parity", "docs-change"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 742
