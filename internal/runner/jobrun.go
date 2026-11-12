@@ -260,20 +260,14 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 	// The extra checkouts (§5.8) are named in the prompt — the worker
 	// may have no shell to read their variables with — and granted as
 	// read-only dirs to the adapter, whatever its CLI offers for one.
-	var tools []string // nil: the project set none, the harness's default scope
-	if r.grant.WorkerTools != "" {
-		if t, err := adapter.ParseToolScope(r.grant.WorkerTools); err == nil {
-			tools = t
-		}
-	}
 	cmd, err := ad.Command(adapter.Job{
-		Prompt:    r.grant.Prompt + r.extraPromptOf() + shellScopeNote(ad, r.grant, tools, r.mcpConfig),
-		Model:     model,
-		Review:    isReviewJob(r.grant),
-		Effort:    r.cfg.effortFor(r.grant),
-		MCPConfig: r.mcpConfig,
-		ReadDirs:  r.extraDirs(),
-		Tools:     tools,
+		Prompt:     r.grant.Prompt + r.extraPromptOf(),
+		Model:      model,
+		Review:     isReviewJob(r.grant),
+		Effort:     r.cfg.effortFor(r.grant),
+		Permission: r.cfg.permissionFor(r.grant),
+		MCPConfig:  r.mcpConfig,
+		ReadDirs:   r.extraDirs(),
 	}, workdir, resume)
 	if err != nil {
 		return &noWorkerError{err}

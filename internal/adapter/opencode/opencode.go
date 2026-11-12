@@ -103,7 +103,7 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		env = append(env, "OPENCODE_CONFIG_DIR="+dir)
 		env = foremanPermissions(env)
 	} else {
-		env = workerPermissions(env, job.ReadDirs, job.Tools, job.Review)
+		env = workerPermissions(env, job.ReadDirs, nil, job.Review)
 	}
 	cmd.Env = env
 	return cmd, nil
@@ -458,16 +458,6 @@ func mappedCommands(tools []string) []string {
 	}
 	return cmds
 }
-
-// ShellCommands implements adapter.ShellScoped: the commands bashRules
-// allows a worker, so the prompt names what the rules enforce. A scope
-// that maps to none is a shell denied outright, and opencode has no
-// whole-shell scope.
-func (a *Adapter) ShellCommands(tools []string) (commands []string, whole bool) {
-	return mappedCommands(tools), false
-}
-
-var _ adapter.ShellScoped = (*Adapter)(nil)
 
 // bashCommandOK accepts a plain command prefix: it starts with a letter,
 // digit, dot or slash and holds only letters, digits and . / _ - and

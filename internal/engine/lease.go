@@ -57,9 +57,11 @@ type LeaseGrant struct {
 	RepoURL      string // the task's own repo, else the project's (§6.1)
 	BaseRef      string // the ref the worktree starts from; for a review, the diff's base end (§7)
 	CheckCmd     string // the check the runner runs after a done (§5.5); '' = none — always for a review
-	// WorkerTools is the project's worker_tools in its stored text, for a
-	// work or fix job; '' = unset, the harness's default scope.
-	WorkerTools string
+	// Permission is the picked agent's resolved permission= value, as the
+	// runner advertised it, for every job kind alike — a review included;
+	// '' = none, the harness's own behaviour. The runner passes it through
+	// to the adapter, which hands it to its CLI.
+	Permission string
 	// Setup is the environment step the runner runs before the worker and
 	// again before the check (§5.7); nil = the project had none.
 	Setup *SetupSpec
@@ -577,9 +579,9 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				foremanEffort = projectEffort
 			}
 		}
-		jobEffort := ""
+		jobEffort, agentPermission := "", ""
 		if agent != 0 {
-			if err := tx.QueryRow("SELECT effort FROM agents WHERE id = ?", agent).Scan(&jobEffort); err != nil {
+			if err := tx.QueryRow("SELECT effort, permission FROM agents WHERE id = ?", agent).Scan(&jobEffort, &agentPermission); err != nil {
 				return nil, fmt.Errorf("read the effort of agent %d: %w", agent, err)
 			}
 		}
@@ -793,12 +795,6 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 			extraRepos = def.repos
 		}
-		workerTools := ""
-		if j.Kind == KindWork || j.Kind == KindFix {
-			if workerTools, err = projectWorkerToolsTx(tx, j.ProjectID); err != nil {
-				return nil, err
-			}
-		}
 		resume, reviewSince := "", ""
 		if j.Kind == KindReview && j.Mode == ModeSession && j.TaskID != 0 {
 			// A re-review (§7) resumes the session of the review it answers,
@@ -857,7 +853,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			BaseRef:         baseRef,
 			DefaultBranch:   defaultBranch,
 			CheckCmd:        checkCmd,
-			WorkerTools:     workerTools,
+			Permission:      agentPermission,
 			Setup:           setup,
 			ExtraRepos:      extraRepos,
 			ReviewBranch:    reviewBranch,

@@ -64,7 +64,7 @@ func TestCommand(t *testing.T) {
 		{"default model omits -m", adapter.Job{Prompt: prompt, Model: DefaultModel}, "", append(slicesClone(base), tail...)},
 		{"model", adapter.Job{Prompt: prompt, Model: "qwen-subscription/qwen3.8-flash"}, "", append(append(slicesClone(base), "-m", "qwen-subscription/qwen3.8-flash"), tail...)},
 		{"resume", adapter.Job{Prompt: prompt}, "sess-1", append(append(slicesClone(base), tail...), "--resume", "sess-1")},
-		{"read dirs and tools ignored", adapter.Job{Prompt: prompt, ReadDirs: []string{"/x"}, Tools: []string{"Bash(go test:*)"}}, "", append(slicesClone(base), tail...)},
+		{"read dirs ignored", adapter.Job{Prompt: prompt, ReadDirs: []string{"/x"}}, "", append(slicesClone(base), tail...)},
 		// A foreman turn: the bridge, strict, then the resume.
 		{"mcp", adapter.Job{Prompt: prompt, MCPConfig: "/tmp/mcp.json"}, "sess-1", append(append(slicesClone(base), tail...), "--mcp-config", "/tmp/mcp.json", "--strict-mcp-config", "--resume", "sess-1")},
 	}

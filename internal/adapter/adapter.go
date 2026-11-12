@@ -91,11 +91,11 @@ type Job struct {
 	// allow reads outside the workspace, and kimi has no directory
 	// flag, so those adapters ignore it. Empty adds nothing.
 	ReadDirs []string
-	// Tools is the worker's tool scope in Claude's spelling
-	// (`Bash(go test:*)`), for a harness that maps it onto its own
-	// permission rules; nil is the Go default scope. Claude takes its
-	// scope from its adapter's config instead and ignores this.
-	Tools []string
+	// Permission is the agent's resolved permission= value (§5.2), the
+	// same for a work, fix or review job: the adapter passes it to its CLI
+	// as that CLI's own permission flag or argument and interprets it no
+	// further. Empty adds nothing — the CLI's own behaviour.
+	Permission string
 	// StatusLine is a shell command whose one line of output an
 	// interactive session shows in its status bar, re-run every few
 	// seconds (§10): the attach sets it to `brigada status --line`, so
@@ -103,20 +103,6 @@ type Job struct {
 	// foreman. Only AttachCommand reads it, and an adapter whose CLI has
 	// no status bar ignores it; empty adds nothing.
 	StatusLine string
-}
-
-// ShellScoped is the optional adapter interface for a harness whose
-// permission rules limit a worker's shell to named commands: the runner
-// asks it what the scope in force is, so the worker's prompt can say so.
-// codex, kimi and dsh run in OS sandboxes, implement nothing, and keep
-// their prompt unchanged.
-type ShellScoped interface {
-	// ShellCommands reports the commands a work or fix job's shell may
-	// run, in scope order, as the command prefixes the scope names
-	// (`go test` for `Bash(go test:*)`). tools is Job.Tools. An empty
-	// list with whole false means no shell at all; whole true means the
-	// scope names the whole shell, which refuses nothing.
-	ShellCommands(tools []string) (commands []string, whole bool)
 }
 
 // Interactive is the optional adapter interface for the attach (§4.2

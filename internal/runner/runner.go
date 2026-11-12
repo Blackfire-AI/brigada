@@ -321,6 +321,22 @@ func (cfg *Config) effortFor(grant *api.JobGrant) string {
 	return ""
 }
 
+// permissionFor is the permission value the worker's harness command takes:
+// the grant's, which is the picked agent's resolved permission=, falling
+// back to the named agent's own advertisement when an older engine's grant
+// carries none. It is the same for every job kind, a review included.
+func (cfg *Config) permissionFor(grant *api.JobGrant) string {
+	if grant.Permission != "" {
+		return grant.Permission
+	}
+	for _, a := range cfg.Agents {
+		if agentNamed(a, grant) {
+			return a.Permission
+		}
+	}
+	return ""
+}
+
 // adapterOfAgent returns the adapter paired with the i-th advertised
 // agent. Agents pair with adapters of their adapter name in order: the
 // first agent naming a name takes that name's first adapter, the

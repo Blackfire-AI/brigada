@@ -143,7 +143,7 @@ const foremanTokenValue = "foreman-token-4b7e2d1a9c"
 // what is inside it, so the goldens only need its exact place in argv.
 func wantSettings(t *testing.T, root, statusLine string) string {
 	t.Helper()
-	s, err := foremanSettingsJSON(root, statusLine)
+	s, err := foremanSettingsJSON(root, statusLine, true)
 	if err != nil {
 		t.Fatalf("render the foreman settings: %v", err)
 	}

@@ -49,19 +49,19 @@ const readScopeMatcherPattern = "^(Read|Grep|Glob)$"
 // session's allowed root, its working directory: the project's reading
 // checkout, never brigada's own state, whose tokens and per-turn
 // configs are not the foreman's to read.
-func foremanSettingsJSON(root, statusLine string) (string, error) {
-	command, err := readScopeHookCommand(root)
-	if err != nil {
-		return "", err
-	}
-	settings := foremanSettings{
-		DisableAllHooks: false,
-		Hooks: &foremanHooks{
+func foremanSettingsJSON(root, statusLine string, readScope bool) (string, error) {
+	settings := foremanSettings{DisableAllHooks: false}
+	if readScope {
+		command, err := readScopeHookCommand(root)
+		if err != nil {
+			return "", err
+		}
+		settings.Hooks = &foremanHooks{
 			PreToolUse: []readScopeGroup{{
 				Matcher: readScopeMatcherPattern,
 				Hooks:   []readScopeHook{{Type: "command", Command: command}},
 			}},
-		},
+		}
 	}
 	if statusLine != "" {
 		settings.StatusLine = &statusLineSettings{

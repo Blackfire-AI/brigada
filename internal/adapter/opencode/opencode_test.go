@@ -321,22 +321,20 @@ func TestWorkerPermissions(t *testing.T) {
 	}
 }
 
-func TestCommandCarriesJobTools(t *testing.T) {
+func TestCommandReviewPolicy(t *testing.T) {
 	cases := []struct {
 		name   string
-		tools  []string
 		review bool
 		want   string
 	}{
-		{"project scope", []string{"Bash(npm test:*)"}, false, `"bash":{"*":"deny","npm test":"allow","npm test *":"allow"}`},
-		{"none", []string{}, false, `"bash":"deny"`},
-		{"review", []string{"Bash(npm test:*)"}, true, `"bash":"deny","edit":"deny"`},
-		{"review fetch", nil, true, `"webfetch":"deny"`},
+		{"default scope", false, `"bash":{"*":"deny","go build":"allow"`},
+		{"review", true, `"bash":"deny","edit":"deny"`},
+		{"review fetch", true, `"webfetch":"deny"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			stubCLI(t)
-			cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Tools: tc.tools, Review: tc.review}, t.TempDir(), "")
+			cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Review: tc.review}, t.TempDir(), "")
 			if err != nil {
 				t.Fatal(err)
 			}

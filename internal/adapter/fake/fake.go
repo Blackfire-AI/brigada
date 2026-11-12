@@ -57,11 +57,18 @@ func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
 }
 
 // Command implements adapter.Adapter: run the script in workdir with
-// the prompt on stdin. The resume session id and the MCP config path
+// the prompt on stdin, and `--permission <value>` as its arguments when the
+// job carries a permission. The resume session id and the MCP config path
 // ride in the environment, never the prompt: they are the adapter's
 // plumbing, not the worker's business.
 func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*exec.Cmd, error) {
-	cmd := exec.Command(a.Script)
+	// The job's permission value rides the command line as the fake CLI's
+	// own flag, like a real CLI's permission flag; unset adds nothing.
+	var args []string
+	if job.Permission != "" {
+		args = append(args, "--permission", job.Permission)
+	}
+	cmd := exec.Command(a.Script, args...)
 	cmd.Dir = workdir
 	cmd.Stdin = strings.NewReader(job.Prompt)
 	cmd.Env = append(os.Environ(),
