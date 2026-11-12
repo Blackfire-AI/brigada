@@ -222,6 +222,7 @@ func TestInitEffortInformationOnly(t *testing.T) {
 		{"kimi", "", []string{"low", "high"}},
 		{"opencode", "", nil},
 		{"opencode", "", []string{"high"}},
+		{"qwen-code", "", nil},
 	} {
 		t.Run(tc.harness+tc.defaultEffort+fmt.Sprint(len(tc.levels)), func(t *testing.T) {
 			var out bytes.Buffer

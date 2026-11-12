@@ -60,7 +60,7 @@ One step sets a repo up. The GUIDE's §1 describes the questions: the foreman mo
 
 **Tiers, effort and tasks at once.** With tiers (§6.1, §8) the user chooses which models may work: the foreman picks a tier and an effort per task, and the engine picks the agent. The questions are:
 
-1. **The foreman.** After the sign-in probes, a numbered menu of every model the signed-in claude, codex and opencode CLIs list (Claude's aliases, Codex's `debug models` catalog, OpenCode's `provider/model` list, models of unknown family left out), then its effort: the effort menu, asked once, for the foreman only. Enter picks the first usable resume-capable model, claude before codex before opencode.
+1. **The foreman.** After the sign-in probes, a numbered menu of every model the signed-in claude, codex, opencode and qwen-code CLIs list (Claude's aliases, Codex's `debug models` catalog, OpenCode's `provider/model` list, Qwen Code's static pair of subscription models, models of unknown family left out), then its effort: the effort menu, asked once, for the foreman only. Enter picks the first usable resume-capable model, claude before codex before opencode before qwen-code.
 
    A foreman model whose harness is not used for tasks is registered as an agent with no classes, so it serves foreman turns and nothing else. The runner accepts `classes=none`, and the engine exempts foreman turns from the class filter: the harness-and-model pair is their constraint, so this agent takes no task job.
 

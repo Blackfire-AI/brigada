@@ -106,7 +106,7 @@ func initUseNames(harness string, entries []initModelEntry, tier func(harness, m
 }
 
 // initForemanChoice is one row of the foreman menu: a model of a signed-in
-// claude, codex or opencode CLI.
+// claude, codex, opencode or qwen-code CLI.
 type initForemanChoice struct {
 	harness string
 	entry   initModelEntry
@@ -120,9 +120,9 @@ func (c initForemanChoice) matches(harness, model string) bool {
 	return c.harness == harness && (c.entry.value == model || initMenuModelName(c.entry) == model)
 }
 
-// initForemanCandidates lists every model of the signed-in claude, codex
-// and opencode CLIs, in initHarnesses order: the only CLIs that resume a
-// session can plan.
+// initForemanCandidates lists every model of the signed-in claude, codex,
+// opencode and qwen-code CLIs, in initHarnesses order: the only CLIs that
+// resume a session can plan.
 func initForemanCandidates(sources map[string]initModelSource, signedIn func(string) bool) []initForemanChoice {
 	var candidates []initForemanChoice
 	for _, h := range initHarnesses {
@@ -145,7 +145,7 @@ func initResolveForeman(candidates []initForemanChoice, sources map[string]initM
 		}
 	}
 	if !slices.ContainsFunc(candidates, func(c initForemanChoice) bool { return c.harness == harness }) {
-		return initForemanChoice{}, fmt.Errorf("%s/%s is not a model of a signed-in claude, codex or opencode", harness, model)
+		return initForemanChoice{}, fmt.Errorf("%s/%s is not a model of a signed-in claude, codex, opencode or qwen-code", harness, model)
 	}
 	if _, err := initModelFamily(harness, model); err != nil {
 		return initForemanChoice{}, err
