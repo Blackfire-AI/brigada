@@ -1630,6 +1630,11 @@ func assertInitAgentTable(t *testing.T, out string, longModels bool) {
 		"kimi kimi-code/kimi-for-coding-highspeed Moonshot " + kimiFastTier + " " + kimiRole,
 		"opencode " + opencodeModel + " Zhipu (GLM) " + opencodeTier + " writes code, reviews",
 	}
+	if !longModels {
+		want = append(want,
+			"qwen-code qwen-subscription/qwen3.8-max Alibaba heavy writes code, answers questions",
+			"qwen-code qwen-subscription/qwen3.8-flash Alibaba light writes code, answers questions")
+	}
 	if longModels {
 		want = append(want,
 			"dsh deepseek-flash DeepSeek light writes code, reviews",
@@ -1637,7 +1642,7 @@ func assertInitAgentTable(t *testing.T, out string, longModels bool) {
 	}
 	var rows []string
 	familyColumn, tierColumn, families := -1, -1, 0
-	rowStart := regexp.MustCompile(`^    (claude|codex|kimi|opencode|dsh)\s+`)
+	rowStart := regexp.MustCompile(`^    (claude|codex|kimi|opencode|dsh|qwen-code)\s+`)
 	tierCell := regexp.MustCompile(`\b(heavy|standard|light)\b`)
 	for _, line := range strings.Split(table, "\n") {
 		if rowStart.MatchString(line) {
@@ -1646,7 +1651,7 @@ func assertInitAgentTable(t *testing.T, out string, longModels bool) {
 		if len(rows) > 0 {
 			rows[len(rows)-1] = strings.TrimSpace(rows[len(rows)-1] + " " + strings.Join(strings.Fields(line), " "))
 		}
-		for _, family := range []string{"Anthropic", "OpenAI", "Moonshot", "Zhipu (GLM)", "DeepSeek"} {
+		for _, family := range []string{"Anthropic", "OpenAI", "Moonshot", "Zhipu (GLM)", "DeepSeek", "Alibaba"} {
 			if offset := strings.Index(line, family); offset >= 0 {
 				column := term.VisibleWidth(line[:offset])
 				if familyColumn >= 0 && column != familyColumn {
@@ -1759,7 +1764,11 @@ func initInteractiveTranscript(t *testing.T, longModels bool, forced ...logo.Cap
 	if err := os.WriteFile("uv.lock", nil, 0644); err != nil {
 		t.Fatal(err)
 	}
-	fakeInitPATH(t, initHarnesses...)
+	var binaries []string
+	for _, h := range initHarnesses {
+		binaries = append(binaries, harnessBinary(h))
+	}
+	fakeInitPATH(t, binaries...)
 	// Keep the HOME-relative state socket below the platform path limit.
 	t.Setenv("HOME", testsupport.ShortStateDir(t))
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".codex", "config.toml"), "model = \"gpt-6.1-sol\"\nmodel_reasoning_effort = \"high\"\n")
@@ -1823,13 +1832,15 @@ opencode/deepseek-v3
 		writeInitModelFixture(t, lifecycle.DefaultConfigPath(), "tier.kimi/kimi-code/kimi-for-coding-highspeed = standard\n")
 	}
 	state := filepath.Join(os.Getenv("HOME"), ".local", "state", "brigada")
-	// The golden leaves dsh out (Enter at "Use dsh? [y/N]"); the long-model
-	// variant uses it.
-	input := "\n\n\n\ny\n\n1\n\n\n\nn\n"
+	// The golden leaves dsh out (Enter at "Use dsh? [y/N]") and uses qwen-code
+	// (y at "Use qwen-code? [y/N]"); the long-model
+	// variant uses dsh and leaves qwen-code out.
+	input := "\n\n\n\ny\n\n1\n\ny\n\n\nn\n"
 	if longModels {
-		input = "codex/gpt-6.1-sol\n2\n\n\ny\nY\n1\ny\n\n\nn\n"
+		input = "codex/gpt-6.1-sol\n2\n\n\ny\nY\n1\ny\n\n\n\nn\n"
 	}
 	code, out, errOut := initDo(t, state, input)
+	regenInitGolden(t, longModels, forced, out)
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}

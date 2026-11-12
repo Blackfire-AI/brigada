@@ -946,7 +946,7 @@ The foreman can be `claude`, `codex` or `opencode`; `kimi`, `dsh` and `qwen-code
 
 #### qwen-code (experimental)
 
-`qwen-code` is Qwen Code, Alibaba's coding CLI (`qwen`); the adapter was checked against 1.0.0-preview.1 only and may break on a newer release. It is worker-only: it takes no review class — qwen-code has no read-only review policy, so its agents default to `implement,answer` — and it can be neither a foreman nor an attach. `brigada init` does not offer it yet; register an agent with `--agent` or `brigada agents add`.
+`qwen-code` is Qwen Code, Alibaba's coding CLI (`qwen`); the adapter was checked against 1.0.0-preview.1 only and may break on a newer release. It is worker-only: it takes no review class — qwen-code has no read-only review policy, so its agents default to `implement,answer` — and it can be neither a foreman nor an attach. `brigada init` offers it, as a worker, when `qwen` is on `PATH`: it asks `Use qwen-code? [y/N]:` like dsh and prints the auto-approve warning. You can also register an agent with `--agent` or `brigada agents add`.
 
 - Run it: `brigada runner --agent harness=qwen-code,model=qwen3.8-max` (heavy tier; `qwen3.8-flash` is light). With no `model=`, the agent is the CLI's own default (`model=default`, standard tier) and the adapter passes no `-m`.
 - Each job runs `qwen -p` with the prompt as an argument and stream-json output, with `--yolo`, the auto-approve flag that lets a headless run edit files; a session resumes with `--resume <id>`. brigada sets nothing else: the CLI's own login and configuration stay the ambient environment's, minus brigada's own variables, and `env.qwen-code.<VAR>` works like any harness's. `tools=` and `effort=` are refused.
