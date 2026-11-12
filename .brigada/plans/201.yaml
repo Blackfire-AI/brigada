@@ -79,7 +79,7 @@ tasks:
     continue: "approval-api-gates"
     effort: medium
     skills: ["cli-flag"]
-    state: reviewing
+    state: done
     branch: "brigada/task-765"
     rounds: 0
   - id: 766
