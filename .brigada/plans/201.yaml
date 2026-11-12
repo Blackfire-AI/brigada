@@ -79,8 +79,8 @@ tasks:
     continue: "approval-api-gates"
     effort: medium
     skills: ["cli-flag"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-765"
     rounds: 0
   - id: 766
     name: "permission-config"
