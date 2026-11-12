@@ -53,8 +53,8 @@ func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
 
 // Command passes the prompt as one positional argument after --. OpenCode
 // permits edits headless by default, matching worker policy, and
-// workerPermissions limits bash to the job's mapped tool scope (none for a
-// review) and denies paths outside the worktree. A foreman job — one
+// workerPermissions limits bash to the Go default scope (the job carries no
+// tool scope; none for a review) and denies paths outside the worktree. A foreman job — one
 // carrying an MCP config — instead runs the foreman scope
 // (foremanPermissions), with the bridge offered through a config directory
 // of the adapter's own beside the runner's MCP config.
