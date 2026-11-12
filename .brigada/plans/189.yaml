@@ -1,0 +1,69 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 189
+title: "qwen-code adapter: the Qwen Code CLI as a worker-only harness (#224)"
+repo: "github.com/Blackfire-AI/brigada"
+state: reviewing
+created: 2026-11-12T10:01:08.719721Z
+updated: 2026-11-12T10:01:08.719721Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps — the continued
+# dep when base is empty and continue is set, else the default branch; merge a
+# task after its base. A task with continue, one of deps, starts in the
+# session of the dep's author.
+# States are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1);
+# review_tier and review_effort do the same for its reviews (§7, §8); caps
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1);
+# skills name the project's skills the task carries, in order (§5.10).
+tasks:
+  - id: 724
+    name: "qwen-adapter"
+    title: "feat(adapter/qwencode): the Qwen Code CLI adapter with stream and failure parsing"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 725
+    name: "qwen-runner"
+    title: "feat(runner): register the qwen-code harness for runners, logs and config"
+    class: "implement"
+    deps: ["qwen-adapter"]
+    base: "qwen-adapter"
+    tier: light
+    effort: medium
+    skills: ["surface-parity", "docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 726
+    name: "qwen-init"
+    title: "feat(init): offer the qwen-code harness in brigada init"
+    class: "implement"
+    deps: ["qwen-runner"]
+    base: "qwen-runner"
+    continue: "qwen-runner"
+    tier: light
+    effort: medium
+    skills: ["surface-parity", "docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 727
+    name: "qwen-smoke"
+    title: "test(adapter/qwencode): one live smoke run against the real qwen CLI"
+    class: "implement"
+    deps: ["qwen-init"]
+    base: "qwen-init"
+    effort: medium
+    caps: {restart: 0}
+    state: pending
+    branch: ""
+    rounds: 0
