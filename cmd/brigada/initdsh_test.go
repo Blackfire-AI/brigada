@@ -54,9 +54,14 @@ func TestInitQwenProbe(t *testing.T) {
 	}
 }
 
-func TestInitQwenCodeAskedAndWorkerOnly(t *testing.T) {
+// qwen-code joins the foreman menu only when its sign-in is confirmed
+// (--signed-in qwen-code): its probe cannot check sign-in, and its use
+// question comes later, in step 2.
+func TestInitQwenCodeForemanWhenSignedIn(t *testing.T) {
 	importRepo(t)
 	fakeInitPATH(t, "claude", "codex", "qwen")
+	// Unconfirmed: the foreman menu names no qwen-code model, and step 2
+	// still asks the use question.
 	code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\n\n\n\ny\n\nn\n", "--signed-in", "claude,codex", "--check", "true", "--tools", "none", "--no-wiring")
 	if code != 1 || errOut != "" {
 		t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
@@ -77,9 +82,46 @@ func TestInitQwenCodeAskedAndWorkerOnly(t *testing.T) {
 	if strings.Contains(flat, "qwen-code login") {
 		t.Errorf("qwen-code offered a login hint it cannot verify:\n%s", out)
 	}
-	// Only resume-capable harnesses can be the foreman; qwen-code is worker-only.
+	// Only confirmed resume-capable harnesses are foreman candidates.
 	if strings.Contains(flat, "qwen-code/") {
-		t.Errorf("qwen-code offered as foreman:\n%s", out)
+		t.Errorf("qwen-code offered as foreman before its sign-in is confirmed:\n%s", out)
+	}
+	// Confirmed: qwen-code's models join the foreman menu, the use question
+	// goes, and it still becomes a worker; it has no effort levels, so no
+	// effort question follows its pick.
+	code, out, errOut = initFixedParallel(t, testsupport.ShortStateDir(t), "\n\n\n\n\nn\n", "--signed-in", "claude,codex,qwen-code", "--check", "true", "--tools", "none", "--no-wiring")
+	if code != 1 || errOut != "" {
+		t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
+	}
+	flat = strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"Only claude, codex, opencode and qwen-code can be the foreman.",
+		"qwen-code/qwen-subscription/qwen3.8-max",
+		"qwen-code/qwen-subscription/qwen3.8-flash",
+		"qwen-code (experimental): signed in",
+		"qwen-code runs with auto-approve: when it writes code it can run any command on this machine without asking. It does not review.",
+		"    qwen-code qwen-subscription/qwen3.8-max",
+		"writes code, answers questions",
+	} {
+		if !strings.Contains(flat, strings.Join(strings.Fields(want), " ")) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(flat, "Use qwen-code?") {
+		t.Errorf("asked the use question of a confirmed qwen-code:\n%s", out)
+	}
+}
+
+// parseInitForeman reads --foreman qwen-code/... and names the
+// subscription model whole, provider segment and all.
+func TestInitParseQwenForeman(t *testing.T) {
+	spec, hasEffort, ok := parseInitForeman("qwen-code/qwen-subscription/qwen3.8-max")
+	if !ok || hasEffort || spec.harness != "qwen-code" || spec.model != "qwen-subscription/qwen3.8-max" || spec.effort != "" {
+		t.Errorf("parseInitForeman max = %+v, hasEffort %t, ok %t", spec, hasEffort, ok)
+	}
+	spec, hasEffort, ok = parseInitForeman("qwen-code/qwen-subscription/qwen3.8-flash@high")
+	if !ok || !hasEffort || spec.harness != "qwen-code" || spec.model != "qwen-subscription/qwen3.8-flash" || spec.effort != "high" {
+		t.Errorf("parseInitForeman flash@high = %+v, hasEffort %t, ok %t", spec, hasEffort, ok)
 	}
 }
 

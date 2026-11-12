@@ -23,9 +23,18 @@ func stubCLI(t *testing.T) {
 	t.Setenv("PATH", dir)
 }
 
-func TestName(t *testing.T) {
-	if got := (&Adapter{}).Name(); got != "qwen-code" {
-		t.Errorf("Name() = %q", got)
+func TestNameAndForemanCapability(t *testing.T) {
+	a := &Adapter{}
+	if a.Name() != "qwen-code" {
+		t.Errorf("Name() = %q", a.Name())
+	}
+	if !adapter.ResumeCapable(a.Name()) {
+		t.Fatal("qwen-code must be a harness the foreman can run on: it resumes headless and carries the bridge")
+	}
+	var _ adapter.Interactive = a
+	// The attach forks onto the client's minted id: no write-back.
+	if _, ok := any(a).(adapter.SessionWriteback); ok {
+		t.Error("qwen-code implements SessionWriteback; its attach names the minted id itself")
 	}
 }
 
@@ -56,6 +65,8 @@ func TestCommand(t *testing.T) {
 		{"model", adapter.Job{Prompt: prompt, Model: "qwen-subscription/qwen3.8-flash"}, "", append(append(slicesClone(base), "-m", "qwen-subscription/qwen3.8-flash"), tail...)},
 		{"resume", adapter.Job{Prompt: prompt}, "sess-1", append(append(slicesClone(base), tail...), "--resume", "sess-1")},
 		{"read dirs and tools ignored", adapter.Job{Prompt: prompt, ReadDirs: []string{"/x"}, Tools: []string{"Bash(go test:*)"}}, "", append(slicesClone(base), tail...)},
+		// A foreman turn: the bridge, strict, then the resume.
+		{"mcp", adapter.Job{Prompt: prompt, MCPConfig: "/tmp/mcp.json"}, "sess-1", append(append(slicesClone(base), tail...), "--mcp-config", "/tmp/mcp.json", "--strict-mcp-config", "--resume", "sess-1")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,7 +116,6 @@ func TestCommandRefusals(t *testing.T) {
 		job  adapter.Job
 		want string
 	}{
-		{"mcp", adapter.Job{Prompt: "p", MCPConfig: "/tmp/mcp.json"}, "MCP"},
 		{"review", adapter.Job{Prompt: "p", Review: true}, "no read-only review policy yet; review jobs cannot run on it"},
 		{"effort", adapter.Job{Prompt: "p", Effort: "high"}, "effort"},
 	}
@@ -114,6 +124,128 @@ func TestCommandRefusals(t *testing.T) {
 			cmd, err := (&Adapter{}).Command(tc.job, t.TempDir(), "")
 			if err == nil || cmd != nil {
 				t.Fatalf("Command = %v, %v; want refusal", cmd, err)
+			}
+			if !strings.Contains(err.Error(), tc.want) || !strings.HasPrefix(err.Error(), "qwen-code: ") {
+				t.Errorf("err = %q", err)
+			}
+		})
+	}
+}
+
+// TestCommandMCPConfig is the foreman turn's bridge as an argv assertion:
+// a job carrying an MCP config is no longer refused, and the headless
+// turn is strict.
+func TestCommandMCPConfig(t *testing.T) {
+	stubCLI(t)
+	cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", MCPConfig: "/tmp/mcp.json"}, t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"-p", "p", "-o", "stream-json", "--dangerously-skip-permissions", "--setting-sources", "user", "--mcp-config", "/tmp/mcp.json", "--strict-mcp-config"}
+	if !reflect.DeepEqual(cmd.Args[1:], want) {
+		t.Errorf("args = %q, want %q", cmd.Args[1:], want)
+	}
+}
+
+func TestAttachCommand(t *testing.T) {
+	stubCLI(t)
+	const (
+		prompt = "the opening prompt\nverbatim"
+		config = "/state/mcp/turn-1/config.json"
+		newID  = "11111111-2222-4333-8444-555555555555"
+		status = `brigada status --line --state-dir "/x y"`
+	)
+	statusJSON := `{"statusLine":{"type":"command","command":"brigada status --line --state-dir \"/x y\""}}`
+	tail := []string{"--setting-sources", "user", "--mcp-config", config}
+	cases := []struct {
+		name   string
+		job    adapter.Job
+		resume string
+		want   []string
+	}{
+		{"fresh chat", adapter.Job{Prompt: prompt, MCPConfig: config}, "",
+			append([]string{"-i", prompt, "--session-id", newID}, tail...)},
+		{"resumed chat", adapter.Job{Prompt: prompt, MCPConfig: config}, "old-1",
+			append([]string{"-i", prompt, "--resume", "old-1", "--fork-session", "--session-id", newID}, tail...)},
+		{"fresh chat with status line", adapter.Job{Prompt: prompt, MCPConfig: config, StatusLine: status}, "",
+			append(append([]string{"-i", prompt, "--session-id", newID}, tail...), "--settings", statusJSON)},
+		{"resumed chat with status line and model", adapter.Job{Prompt: prompt, Model: "qwen-subscription/qwen3.8-max", MCPConfig: config, StatusLine: status}, "old-1",
+			append(append([]string{"-i", prompt, "--resume", "old-1", "--fork-session", "--session-id", newID, "-m", "qwen-subscription/qwen3.8-max"}, tail...), "--settings", statusJSON)},
+		{"default model and no prompt", adapter.Job{Model: DefaultModel, MCPConfig: config}, "",
+			append([]string{"--session-id", newID}, tail...)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cmd, err := (&Adapter{}).AttachCommand(tc.job, dir, tc.resume, newID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if filepath.Base(cmd.Path) != "qwen" {
+				t.Errorf("exe = %q", cmd.Path)
+			}
+			if !reflect.DeepEqual(cmd.Args[1:], tc.want) {
+				t.Errorf("args = %q, want %q", cmd.Args[1:], tc.want)
+			}
+			if cmd.Dir != dir {
+				t.Errorf("Dir = %q", cmd.Dir)
+			}
+			if cmd.Stdin != nil || cmd.Stdout != nil || cmd.Stderr != nil {
+				t.Error("the attach wired a stream; they are the caller's")
+			}
+		})
+	}
+}
+
+// TestStrictMCPConfigHeadlessOnly: the headless turn offers the bridge
+// alone, while the attach loads the user's own servers beside it; neither
+// the TUI nor the stream flags leak into the other.
+func TestStrictMCPConfigHeadlessOnly(t *testing.T) {
+	stubCLI(t)
+	job := adapter.Job{Prompt: "p", MCPConfig: "/tmp/mcp.json"}
+	headless, err := (&Adapter{}).Command(job, t.TempDir(), "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attach, err := (&Adapter{}).AttachCommand(job, t.TempDir(), "s", "new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	has := func(args []string, flag string) bool {
+		for _, a := range args {
+			if a == flag {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(headless.Args, "--strict-mcp-config") {
+		t.Errorf("headless turn not strict: %q", headless.Args)
+	}
+	for _, flag := range []string{"--strict-mcp-config", "-p", "-o", "--dangerously-skip-permissions"} {
+		if has(attach.Args, flag) {
+			t.Errorf("attach carries %s: %q", flag, attach.Args)
+		}
+	}
+}
+
+func TestAttachCommandRefusals(t *testing.T) {
+	stubCLI(t)
+	cases := []struct {
+		name  string
+		job   adapter.Job
+		newID string
+		want  string
+	}{
+		{"no new id", adapter.Job{MCPConfig: "/c"}, "", "new session id"},
+		{"no bridge", adapter.Job{}, "n", "no MCP config"},
+		{"effort", adapter.Job{MCPConfig: "/c", Effort: "high"}, "n", "effort"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, err := (&Adapter{}).AttachCommand(tc.job, t.TempDir(), "", tc.newID)
+			if err == nil || cmd != nil {
+				t.Fatalf("AttachCommand = %v, %v; want refusal", cmd, err)
 			}
 			if !strings.Contains(err.Error(), tc.want) || !strings.HasPrefix(err.Error(), "qwen-code: ") {
 				t.Errorf("err = %q", err)

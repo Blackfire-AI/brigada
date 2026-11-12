@@ -20,6 +20,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
 	"github.com/Blackfire-AI/brigada/internal/adapter/fake"
+	"github.com/Blackfire-AI/brigada/internal/adapter/qwencode"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
@@ -700,6 +701,19 @@ func TestDefaultAdapterForAttachCodexIsInteractive(t *testing.T) {
 			t.Errorf("defaultAdapterForAttach(kimi) returned an interactive adapter (%T)", ad)
 		}
 	}
+
+	// qwen-code carries an attached chat and forks onto the minted id, as
+	// claude does: no write-back of its own.
+	ad, ok = defaultAdapterForAttach("qwen-code")
+	if !ok {
+		t.Fatal("defaultAdapterForAttach(qwen-code) = unavailable, want available")
+	}
+	if _, ok := ad.(adapter.Interactive); !ok {
+		t.Fatalf("defaultAdapterForAttach(qwen-code) returned %T, want adapter.Interactive", ad)
+	}
+	if _, ok := ad.(adapter.SessionWriteback); ok {
+		t.Errorf("defaultAdapterForAttach(qwen-code) returned %T, a SessionWriteback; want the minted id", ad)
+	}
 }
 
 // TestAttachFailsOutsideAProjectsRepo covers the project's absences
@@ -890,6 +904,41 @@ func TestAttachClaudeRunsInTheCheckout(t *testing.T) {
 	want, err := filepath.EvalSymlinks(repo)
 	if err != nil || where != want {
 		t.Errorf("cwd = %s, want the checkout %s: %v", where, want, err)
+	}
+}
+
+// TestAttachQwenCodeWritesBackTheMintedID: a qwen-code attach names the
+// client-minted id to the CLI (--session-id) and the release writes that
+// same id back, as claude's does: qwen has no SessionWriteback.
+func TestAttachQwenCodeWritesBackTheMintedID(t *testing.T) {
+	remote := testsupport.NewGitRemote(t)
+	cloneRemote(t, remote)
+	e := newAttachEnv(t, remote, "qwen-code", "qwen3.8-max")
+	script := filepath.Join(t.TempDir(), "qwen")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\0' \"$@\" > argv.txt\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := adapterForAttach
+	adapterForAttach = func(harness string) (adapter.Adapter, bool) {
+		return &qwencode.Adapter{Binary: script}, harness == "qwen-code"
+	}
+	t.Cleanup(func() { adapterForAttach = orig })
+	_, errOut, done := e.runAttachCmd(t)
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("attach exit %d: %s", code, errOut.String())
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("attach did not end")
+	}
+	argv := strings.Split(e.scratchFile(t, "argv.txt"), "\x00")
+	i := slices.Index(argv, "--session-id")
+	if i < 0 || i+1 >= len(argv) || !uuidRe.MatchString(argv[i+1]) {
+		t.Fatalf("attach lacks a minted --session-id: %v", argv)
+	}
+	if written := e.queryRow1(t, "SELECT COALESCE(harness_session_id, '') FROM sessions WHERE key = ?", fmt.Sprintf("foreman:%d", e.project)); written != argv[i+1] {
+		t.Errorf("the key's session id = %q, want the minted %q written back", written, argv[i+1])
 	}
 }
 
