@@ -395,7 +395,7 @@ func parentForeman(flag string, existing []engine.ProjectInfo) (string, string, 
 			return "", "", fmt.Errorf("--foreman wants harness/model, got %q", flag)
 		}
 		if !adapter.ResumeCapable(harness) {
-			return "", "", fmt.Errorf("--foreman must name a harness that resumes headless (claude, codex or opencode); %q does not", harness)
+			return "", "", fmt.Errorf("--foreman must name a harness that resumes headless (claude, codex, opencode or qwen-code); %q does not", harness)
 		}
 		return harness, model, nil
 	}

@@ -428,7 +428,7 @@ func TestInitModelRetries(t *testing.T) {
 		{"whitespace then valid", "claude", "claude/sonnet other\nclaude/sonnet\n", "model must be a nonempty model identifier", "sonnet", 2},
 		{"empty model then valid", "claude", "claude/\nclaude/sonnet\n", "model must be a nonempty model identifier", "sonnet", 2},
 		{"no slash then valid", "claude", "sonnet\nclaude/sonnet\n", "\"sonnet\" is neither a number from the menu nor harness/model", "sonnet", 2},
-		{"kimi cannot plan", "claude", "kimi/k3\nclaude/sonnet\n", "kimi/k3 is not a model of a signed-in claude, codex or opencode", "sonnet", 2},
+		{"kimi cannot plan", "claude", "kimi/k3\nclaude/sonnet\n", "kimi/k3 is not a model of a signed-in claude, codex, opencode or qwen-code", "sonnet", 2},
 		{"provider then valid", "opencode", "glm\nzai-coding-plan/glm-5.3\n", "opencode needs provider/model, e.g. zai-coding-plan/glm-5.3", "zai-coding-plan/glm-5.3", 2},
 		{"unknown provider model then valid", "opencode", "opencode/beam-free\n1\n", "cannot identify the family", "fixture/gpt-5", 2},
 		{"retry then default", "claude", "claude/unknown\n\n", "cannot identify the family", "sonnet", 2},
@@ -1832,14 +1832,19 @@ opencode/deepseek-v3
 		writeInitModelFixture(t, lifecycle.DefaultConfigPath(), "tier.kimi/kimi-code/kimi-for-coding-highspeed = standard\n")
 	}
 	state := filepath.Join(os.Getenv("HOME"), ".local", "state", "brigada")
-	// The golden leaves dsh out (Enter at "Use dsh? [y/N]") and uses qwen-code
-	// (y at "Use qwen-code? [y/N]"); the long-model
-	// variant uses dsh and leaves qwen-code out.
-	input := "\n\n\n\ny\n\n1\n\ny\n\n\nn\n"
+	// The golden leaves dsh out (Enter at "Use dsh? [y/N]") and confirms
+	// qwen-code's sign-in with --signed-in qwen-code, so its two models join
+	// the foreman menu (rows 12 and 13) and step 2 skips its use question;
+	// the long-model variant uses dsh and leaves qwen-code out.
+	input := "\n\n\n\ny\n\n1\n\n\n\nn\n"
 	if longModels {
 		input = "codex/gpt-6.1-sol\n2\n\n\ny\nY\n1\ny\n\n\n\nn\n"
 	}
-	code, out, errOut := initDo(t, state, input)
+	var args []string
+	if !longModels {
+		args = append(args, "--signed-in", "qwen-code")
+	}
+	code, out, errOut := initDo(t, state, input, args...)
 	regenInitGolden(t, longModels, forced, out)
 	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
