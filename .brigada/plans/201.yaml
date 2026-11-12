@@ -175,9 +175,9 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["config-setting"]
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-773"
-    rounds: 1
+    rounds: 0
   - id: 774
     name: "permission-cli"
     title: "`permission=` in init's suggestion and in `brigada config`"
