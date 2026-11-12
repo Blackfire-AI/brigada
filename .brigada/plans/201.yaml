@@ -201,8 +201,8 @@ tasks:
     review_tier: standard
     review_effort: high
     skills: ["surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-775"
     rounds: 0
   - id: 776
     name: "adapter-codex-opencode"
