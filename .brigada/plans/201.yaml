@@ -162,9 +162,9 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["config-setting"]
-    state: reviewing
+    state: running
     branch: "brigada/task-772"
-    rounds: 0
+    rounds: 1
   - id: 773
     name: "permission-plumbing"
     title: "`permission=` plumbed into the job grant and the harness command; the tool scope retired"
