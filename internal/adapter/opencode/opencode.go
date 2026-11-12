@@ -12,12 +12,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
-	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
 )
 
 // Adapter drives the opencode CLI. Its zero value resolves opencode on PATH.
@@ -51,13 +51,17 @@ func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
 	return exec.CommandContext(ctx, binary, "--version")
 }
 
-// Command passes the prompt as one positional argument after --. OpenCode
-// permits edits headless by default, matching worker policy, and
-// workerPermissions limits bash to the Go default scope (the job carries no
-// tool scope; none for a review) and denies paths outside the worktree. A foreman job — one
-// carrying an MCP config — instead runs the foreman scope
+// Command passes the prompt as one positional argument after --. A worker
+// and a review alike (§5.2: a review has no read-only default of
+// brigada's) take workerPermissions, which maps the agent's permission=
+// onto OpenCode's own per-tool rule vocabulary (ask, allow, deny) for
+// bash, edit and webfetch — allow when the agent names none, since a
+// headless run cannot answer an ask — and keeps the read-only
+// confinement to the worktree that job.ReadDirs opens (§5.8). A foreman
+// job — one carrying an MCP config — instead runs the foreman scope
 // (foremanPermissions), with the bridge offered through a config directory
-// of the adapter's own beside the runner's MCP config.
+// of the adapter's own beside the runner's MCP config; the foreman's
+// confinement is brigada's own and does not read permission= at all.
 // Never pass --auto (or its permission-bypass aliases); permission rules
 // ride the environment, not the CLI's project config.
 //
@@ -103,7 +107,11 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		env = append(env, "OPENCODE_CONFIG_DIR="+dir)
 		env = foremanPermissions(env)
 	} else {
-		env = workerPermissions(env, job.ReadDirs, nil, job.Review)
+		var err error
+		env, err = workerPermissions(env, job.ReadDirs, job.Permission)
+		if err != nil {
+			return nil, err
+		}
 	}
 	cmd.Env = env
 	return cmd, nil
@@ -112,12 +120,15 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 // foremanPermissions sets the foreman's read-only scope (§4.1 item d): no
 // bash, no edits, no web fetches, and no file read outside the working
 // directory — which a foreman turn's and an attached chat's is the reading
-// checkout, so external_directory deny confines reads to it. It is the
-// review scope's own keys, set whatever the job: an ambient
-// OPENCODE_PERMISSION keeps every other rule, and these four keys are
-// replaced, so nothing the machine carries reopens the scope.
+// checkout, so external_directory deny confines reads to it. It is
+// brigada's own confinement, never a function of any agent's permission=:
+// these four keys are replaced whatever the job, and an ambient
+// OPENCODE_PERMISSION keeps every other rule, so nothing the machine
+// carries reopens the scope.
 func foremanPermissions(env []string) []string {
-	return workerPermissions(env, nil, nil, true)
+	return mergePermissionRules(env, map[string]any{
+		"bash": "deny", "edit": "deny", "webfetch": "deny", "external_directory": "deny",
+	})
 }
 
 // bridgeConfig is the harness MCP config as opencode reads it: the brigada
@@ -371,11 +382,68 @@ func workerEnv(env []string) []string {
 // object of glob pattern to action where the last matching rule wins, so
 // a "*" deny first and one allow per directory grant exactly those paths.
 //
-// bash is a per-command pattern object too, the last match winning, and
-// the CLI checks each part of a compound command (a && b, a; b, $(...))
-// and refuses it unless every part is allowed. bashRules maps the job's
-// tool scope onto it; a review gets none.
-func workerPermissions(env []string, readDirs []string, tools []string, review bool) []string {
+// bash, edit and webfetch each take one rule of the CLI's own vocabulary
+// (ask, allow, deny), the same rule for the three: the agent's permission=
+// (§5.2), resolved by resolvePermissionRule. Brigada contributes no tool
+// allowlist of its own here — the per-command bash patterns an earlier
+// version derived from a Claude-spelled tool scope are gone, since that
+// scope no longer exists — and a worker and a review take the same path,
+// with no read-only default of brigada's for either.
+func workerPermissions(env []string, readDirs []string, permission string) ([]string, error) {
+	rule, err := resolvePermissionRule(permission)
+	if err != nil {
+		return nil, err
+	}
+	var extDir any = "deny"
+	if len(readDirs) != 0 {
+		// The checkouts are read-only on disk, so allowing their patterns
+		// cannot let a write through; everything else stays denied.
+		patterns := map[string]any{"*": "deny"}
+		for _, dir := range readDirs {
+			patterns[dir] = "allow"
+			patterns[dir+"/**"] = "allow"
+		}
+		extDir = patterns
+	}
+	return mergePermissionRules(env, map[string]any{
+		"bash": rule, "edit": rule, "webfetch": rule, "external_directory": extDir,
+	}), nil
+}
+
+// opencodePermissionDefault is the rule a worker or review job takes when
+// the agent names no permission=: full access, since a headless run
+// cannot answer the CLI's own "ask" (the run auto-rejects it, failing the
+// call back to the model unasked) and "deny" could run nothing at all.
+const opencodePermissionDefault = "allow"
+
+// opencodePermissionRules are the values opencode's own per-tool
+// permission rules take (packages/core/src/v1/config/permission.ts):
+// the CLI's own vocabulary, which permission= passes straight into bash,
+// edit and webfetch.
+var opencodePermissionRules = []string{"allow", "deny", "ask"}
+
+// resolvePermissionRule maps the agent's permission= onto one of
+// opencode's own rule values, refusing — named, never silently dropped —
+// a value that names none of them: the deprecated tools=/worker_tools
+// alias never reaches a non-claude harness (cmdrunner refuses tools=
+// outside claude), so a permission this loose should not arise in
+// practice, but the adapter does not trust that from outside.
+func resolvePermissionRule(permission string) (string, error) {
+	if permission == "" {
+		return opencodePermissionDefault, nil
+	}
+	if !slices.Contains(opencodePermissionRules, permission) {
+		return "", fmt.Errorf("opencode: permission %q names no rule opencode takes; want one of %s", permission, strings.Join(opencodePermissionRules, ", "))
+	}
+	return permission, nil
+}
+
+// mergePermissionRules reads any ambient OPENCODE_PERMISSION already in
+// env, replaces each key set names with its value, and writes the result
+// back as OPENCODE_PERMISSION, appending it when env carries none: an
+// ambient value keeps its other rules, and every key in set is replaced
+// outright, never merged a level deeper.
+func mergePermissionRules(env []string, set map[string]any) []string {
 	var rules map[string]any
 	for _, kv := range env {
 		if v, ok := strings.CutPrefix(kv, "OPENCODE_PERMISSION="); ok {
@@ -386,23 +454,8 @@ func workerPermissions(env []string, readDirs []string, tools []string, review b
 	if rules == nil {
 		rules = map[string]any{}
 	}
-	if len(readDirs) == 0 {
-		rules["external_directory"] = "deny"
-	} else {
-		// The checkouts are read-only on disk, so allowing their patterns
-		// cannot let a write through; everything else stays denied.
-		patterns := map[string]any{"*": "deny"}
-		for _, dir := range readDirs {
-			patterns[dir] = "allow"
-			patterns[dir+"/**"] = "allow"
-		}
-		rules["external_directory"] = patterns
-	}
-	rules["bash"] = bashRules(tools, review)
-	if review {
-		// A reviewer only reads: no edits, no network fetches.
-		rules["edit"] = "deny"
-		rules["webfetch"] = "deny"
+	for k, v := range set {
+		rules[k] = v
 	}
 	value, err := json.Marshal(rules)
 	if err != nil {
@@ -415,66 +468,6 @@ func workerPermissions(env []string, readDirs []string, tools []string, review b
 		}
 	}
 	return append(env, "OPENCODE_PERMISSION="+string(value))
-}
-
-// bashRules maps a Claude-spelled tool scope onto opencode's bash
-// permission: "deny" for a review, else an object with "*" denied first
-// and `Bash(X:*)` allowing both "X" and "X *". A nil scope is the Go
-// default; anything that does not map (other tools, odd forms, a
-// wildcard in X) is left out, so it stays denied.
-func bashRules(tools []string, review bool) any {
-	if review {
-		return "deny"
-	}
-	rules := map[string]any{}
-	for _, cmd := range mappedCommands(tools) {
-		rules[cmd] = "allow"
-		rules[cmd+" *"] = "allow"
-	}
-	if len(rules) == 0 {
-		return "deny"
-	}
-	rules["*"] = "deny" // sorts before every allowed command, so it is read first
-	return rules
-}
-
-// mappedCommands is the commands of a Claude-spelled scope that map onto
-// opencode's bash rules, in scope order; a nil scope is the Go default.
-func mappedCommands(tools []string) []string {
-	if tools == nil {
-		tools = claude.DefaultWorkerTools()
-	}
-	var cmds []string
-	for _, t := range tools {
-		rest, ok := strings.CutPrefix(t, "Bash(")
-		if !ok {
-			continue
-		}
-		cmd, ok := strings.CutSuffix(rest, ":*)")
-		if !ok || !bashCommandOK(cmd) {
-			continue
-		}
-		cmds = append(cmds, cmd)
-	}
-	return cmds
-}
-
-// bashCommandOK accepts a plain command prefix: it starts with a letter,
-// digit, dot or slash and holds only letters, digits and . / _ - and
-// spaces, so no wildcard, quote or shell metacharacter gets through.
-func bashCommandOK(cmd string) bool {
-	if cmd == "" || cmd != strings.TrimSpace(cmd) {
-		return false
-	}
-	for i, r := range cmd {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '/':
-		case i > 0 && (r == '_' || r == '-' || r == ' '):
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 // The JSONL envelope is defined by the v1.19.0 CLI's cli/cmd/run.ts;

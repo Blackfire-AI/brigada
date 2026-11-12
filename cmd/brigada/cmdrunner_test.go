@@ -733,7 +733,7 @@ func TestRunnerAgentFlag(t *testing.T) {
 		{
 			name:    "tools under opencode names its permissions",
 			args:    []string{"runner", "--agent", "harness=opencode,tools=none", "--state-dir", state},
-			wantErr: "bash permission from the project's worker_tools",
+			wantErr: "OpenCode's own per-tool rules",
 		},
 		{
 			name:    "an empty tools list is refused",

@@ -148,15 +148,74 @@ func TestCommandPromptOnStdin(t *testing.T) {
 	}
 }
 
+// TestCommandReviewIsReadOnly: a review no longer gets a brigada-chosen
+// read-only sandbox — the agent's permission= passes through exactly as
+// for a worker, workspace-write when it names none, since the review's
+// own detached, discarded tree carries the invariant instead (§5.2).
 func TestCommandReviewIsReadOnly(t *testing.T) {
 	stubCLI(t)
-	cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Review: true}, t.TempDir(), "")
+	work, err := (&Adapter{}).Command(adapter.Job{Prompt: "p"}, t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Review: true}, t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(work.Args[1:], review.Args[1:]) {
+		t.Errorf("review args = %q, work args = %q, want the same", review.Args, work.Args)
+	}
+	if !strings.Contains(strings.Join(review.Args, " "), "-s workspace-write") {
+		t.Errorf("review args = %q, want workspace-write with no permission=", review.Args)
+	}
+	readOnly, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Review: true, Permission: "read-only"}, t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(readOnly.Args, " "), "-s read-only") {
+		t.Errorf("review with permission=read-only args = %q", readOnly.Args)
+	}
+}
+
+// TestCommandPermissionPassThrough: the agent's permission= names the
+// codex sandbox mode directly, the same path for a worker and a review;
+// a mode codex does not take is refused, named in the error, never
+// silently dropped.
+func TestCommandPermissionPassThrough(t *testing.T) {
+	stubCLI(t)
+	for _, mode := range []string{"read-only", "workspace-write", "danger-full-access"} {
+		cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Permission: mode}, t.TempDir(), "")
+		if err != nil {
+			t.Fatalf("permission %q: %v", mode, err)
+		}
+		if !strings.Contains(strings.Join(cmd.Args, " "), "-s "+mode) {
+			t.Errorf("permission %q: args = %q", mode, cmd.Args)
+		}
+	}
+	if _, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Permission: "acceptEdits"}, t.TempDir(), ""); err == nil {
+		t.Error("an unknown permission mode was accepted")
+	} else if !strings.Contains(err.Error(), "acceptEdits") {
+		t.Errorf("refusal does not name the value: %v", err)
+	}
+}
+
+// TestCommandForemanIgnoresPermission: a foreman turn keeps its own
+// read-only confinement whatever the agent's permission= says — that
+// confinement is brigada's, not the agent's to choose, so job.Permission
+// is not read on this path.
+func TestCommandForemanIgnoresPermission(t *testing.T) {
+	stubCLI(t)
+	config := filepath.Join(t.TempDir(), "mcp.json")
+	if err := os.WriteFile(config, []byte(`{"mcpServers":{"brigada":{"command":"/bin/brigada","args":["mcp"],"env":{}}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", MCPConfig: config, Permission: "danger-full-access"}, t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	args := strings.Join(cmd.Args, " ")
-	if !strings.Contains(args, "-s read-only") || strings.Contains(args, "workspace-write") {
-		t.Errorf("review args = %q", args)
+	if !strings.Contains(args, "-s read-only") || strings.Contains(args, "danger-full-access") {
+		t.Errorf("foreman args = %q, want read-only unaffected by permission=", args)
 	}
 }
 

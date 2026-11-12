@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -65,14 +66,20 @@ func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
 // Command implements adapter.Adapter: the fresh or resume invocation of
 // the CLI, running in workdir:
 //
-// A worker runs `codex exec --json -s workspace-write`; a foreman runs
+// A worker runs `codex exec --json -s <mode>`; a foreman runs
 // `codex exec --json -s read-only` with MCP and approval overrides below.
-// The worker's sandbox lets it edit inside its worktree without approval,
-// while the CLI's default keeps the network off. No --skip-git-repo-check:
-// a worker's directory is a worktree, which is a git repo. The prompt is
-// piped on stdin (the `-` positional), verbatim — the engine's product
-// (§1.4), not the adapter's to edit, and out of argv. A review runs
-// `-s read-only`.
+// <mode> comes from the agent's permission= (§5.2), workspace-write when
+// the agent names none — the mode that lets a worker edit inside its
+// worktree without approval, while the CLI's default keeps the network
+// off. A review takes the same pass-through as a worker, with no
+// read-only default of brigada's: the detached tree the review runs in,
+// never committed or pushed, carries that invariant instead. The
+// foreman's `-s read-only` is unaffected by permission=: it is brigada's
+// own confinement (§4.1), not a mode the agent chose, and job.Permission
+// is not read on that path at all. No --skip-git-repo-check on the
+// worker path: a worker's directory is a worktree, which is a git repo.
+// The prompt is piped on stdin (the `-` positional), verbatim — the
+// engine's product (§1.4), not the adapter's to edit, and out of argv.
 // For a foreman, use the read-only sandbox and independent approval settings.
 // --approve-for-me selects workspace-write and conflicts with -s. Automatic
 // review remains available to MCP; sandbox and permission escalations are
@@ -87,10 +94,9 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	args := []string{"exec", "--json"}
 	var forwarded []string
 	if job.MCPConfig == "" {
-		sandbox := "workspace-write"
-		if job.Review {
-			// A review, plan reviews included, only reads.
-			sandbox = "read-only"
+		sandbox, err := workerSandbox(job.Permission)
+		if err != nil {
+			return nil, err
 		}
 		args = append(args, "-s", sandbox)
 	} else {
@@ -129,6 +135,28 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	cmd.Stdin = strings.NewReader(job.Prompt)
 	cmd.Env = append(workerEnv(os.Environ()), forwarded...)
 	return cmd, nil
+}
+
+// codexSandboxModes are the modes codex's own -s flag accepts; brigada
+// never picks danger-full-access itself, but a worker's permission= may
+// name it.
+var codexSandboxModes = []string{"read-only", "workspace-write", "danger-full-access"}
+
+// workerSandbox resolves the agent's permission= value onto codex's -s
+// flag, the same for a worker and a review (§5.2): workspace-write when
+// the agent names none. permission=, through the deprecated tools= or
+// worker_tools alias, never reaches a non-claude harness — cmdrunner
+// refuses tools= outside claude — but a value naming no mode this CLI
+// takes is refused here too, with the reason named, rather than silently
+// dropped or passed to a CLI that would reject it unexplained.
+func workerSandbox(permission string) (string, error) {
+	if permission == "" {
+		return "workspace-write", nil
+	}
+	if !slices.Contains(codexSandboxModes, permission) {
+		return "", fmt.Errorf("codex: permission %q names no sandbox mode codex takes; want one of %s", permission, strings.Join(codexSandboxModes, ", "))
+	}
+	return permission, nil
 }
 
 // foremanPermissions keeps MCP approval review separate from filesystem
