@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
 
 // The committed, nonsecret project configuration (design §13.1): the
@@ -89,6 +91,13 @@ type ProjectConfig struct {
 	SkillsDir string
 	// Values holds the stored JSON of each setting the file sets.
 	Values map[string]json.RawMessage
+	// Permission is the project-level permission value the file resolves
+	// to (§5.2): the text of the deprecated worker_tools alias, "" when the
+	// file sets none. Nothing here interprets it.
+	Permission string
+	// Warnings lists the deprecation notices the file earns, one per
+	// deprecated key it uses, each naming the key and its replacement.
+	Warnings []string
 }
 
 func configErr(format string, args ...any) error {
@@ -259,6 +268,13 @@ func ParseProjectConfig(content []byte) (ProjectConfig, error) {
 			return ProjectConfig{}, configErr("%s: %s", k, strings.TrimPrefix(err.Error(), ErrInvalidSetting.Error()+": "))
 		}
 		cfg.Values[k] = raw
+	}
+	if raw, ok := cfg.Values[SettingWorkerTools]; ok {
+		// worker_tools is the deprecated project spelling of the permission
+		// the agents run under (§5.2): the stored value stays as written,
+		// and the same text is the resolved Permission.
+		cfg.Permission, _ = rawString(raw)
+		cfg.Warnings = append(cfg.Warnings, adapter.DeprecatedKeyWarning(SettingWorkerTools))
 	}
 	return cfg, nil
 }

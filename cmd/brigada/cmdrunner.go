@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -55,7 +56,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	fs.IntVar(&maxParallel, "max-parallel", 0, "how many concurrent jobs this runner runs, advertised at register (0 = unset, one at a time)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	agents := &agentSpecs{}
-	fs.Var(agents, "agent", "one offered agent, --agent once per harness and model: harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]; account defaults to the harness name; effort is validated per harness (claude, codex, opencode, dsh; kimi and qwen-code have none); tools= (claude only) replaces the Go shell scope with Claude Code tool patterns, none = file tools only; replaces --harness/--model/--classes/--agent-file")
+	fs.Var(agents, "agent", "one offered agent, --agent once per harness and model: harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none][,permission=<mode>][,read-scope=true|false]; permission= is the mode the harness runs in (claude default: bypassPermissions) and tools= its deprecated alias; read-scope= turns the read-scope hook off (default on); account defaults to the harness name; effort is validated per harness (claude, codex, opencode, dsh; kimi and qwen-code have none); tools= (claude only) replaces the Go shell scope with Claude Code tool patterns, none = file tools only; replaces --harness/--model/--classes/--agent-file")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
@@ -94,6 +95,14 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		})
 	}
 
+	for _, w := range rt.file.Warnings {
+		fmt.Fprintf(stderr, "brigada: warning: config: %s\n", w)
+	}
+	for _, spec := range agents.specs {
+		for _, w := range spec.warnings() {
+			fmt.Fprintf(stderr, "brigada: warning: %s\n", w)
+		}
+	}
 	ads, adverts, err := resolveRunnerAgents(rt, agents.specs, workerScript)
 	if err != nil {
 		var pathErr *os.PathError
@@ -187,6 +196,37 @@ type agentSpec struct {
 	// scope as registered, filled once the runner resolves it.
 	tools     []string
 	toolsText string
+	// permission is the explicit permission= mode (§5.2): "" when unset.
+	// tools= is its deprecated alias; resolve gives the effective value.
+	permission string
+	// readScope is the explicit read-scope= switch (#131): nil when unset,
+	// which is on.
+	readScope *bool
+}
+
+// resolve gives the agent's effective permission and read-scope switch:
+// the flag over the config file over the harness default, with tools= read
+// as the deprecated alias of permission=. This is the one resolved value
+// the job grant takes; nothing here interprets the permission string.
+func (s agentSpec) resolve(file lifecycle.FileConfig) (permission string, readScope bool) {
+	model := s.model
+	if model == "" {
+		model = runnerDefaultModel(s.harness)
+	}
+	permission = lifecycle.ResolvePermission(s.harness, s.permission, s.tools, file.AgentPermission(s.harness, model))
+	readScope = file.AgentReadScope(s.harness, model)
+	if s.readScope != nil {
+		readScope = *s.readScope
+	}
+	return permission, readScope
+}
+
+// warnings are the deprecation notices of the agent's own flags.
+func (s agentSpec) warnings() []string {
+	if s.tools != nil {
+		return []string{"--agent tools=: " + adapter.DeprecatedKeyWarning("tools")}
+	}
+	return nil
 }
 
 // accountLabel is the account the agent's quota is shared under (§8): the
@@ -275,9 +315,23 @@ func (s *agentSpecs) Set(v string) error {
 				return fmt.Errorf("--agent %q: tools: %w", v, err)
 			}
 			spec.tools = tools
+		case "permission":
+			if err := adapter.ValidatePermission(value); err != nil {
+				return fmt.Errorf("--agent %q: permission: %w", v, err)
+			}
+			spec.permission = value
+		case "read-scope":
+			on, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("--agent %q: read-scope: want true or false, got %q", v, value)
+			}
+			spec.readScope = &on
 		default:
-			return fmt.Errorf("--agent %q: unknown field %q; want harness, model, classes, account, agent-file, effort or tools", v, key)
+			return fmt.Errorf("--agent %q: unknown field %q; want harness, model, classes, account, agent-file, effort, tools, permission or read-scope", v, key)
 		}
+	}
+	if spec.permission != "" && spec.tools != nil && adapter.ToolsAliasPermission(spec.tools) != spec.permission {
+		return fmt.Errorf("--agent %q: tools= is the deprecated alias of permission= and they disagree; keep permission=", v)
 	}
 	if spec.harness == "" {
 		return fmt.Errorf("--agent %q: harness=<h> is required", v)
@@ -317,6 +371,12 @@ func (s agentSpec) String() string {
 			text = strings.Join(s.tools, "+")
 		}
 		fields = append(fields, "tools="+text)
+	}
+	if s.permission != "" {
+		fields = append(fields, "permission="+s.permission)
+	}
+	if s.readScope != nil {
+		fields = append(fields, "read-scope="+strconv.FormatBool(*s.readScope))
 	}
 	return strings.Join(fields, ",")
 }

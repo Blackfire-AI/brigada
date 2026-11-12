@@ -2,8 +2,10 @@ package lifecycle
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -117,6 +119,47 @@ type FileConfig struct {
 	// Env holds the references of env.<harness>.<VAR> (§5.1), harness then
 	// variable: keychain:<item> or file:<path>. Never a value.
 	Env map[string]map[string]string
+	// Permission is the resolved permission= default per "harness/model"
+	// (§5.2): permission.<harness>/<model>, or the deprecated
+	// tools.claude/<model> spelling mapped onto it. A pair the file never
+	// names has no entry; AgentPermission applies the harness default.
+	Permission map[string]string
+	// ReadScope is read_scope.<harness>/<model> (#131): the read-scope hook
+	// per agent. A pair the file never names has no entry, which is on.
+	ReadScope map[string]bool
+	// Warnings are the deprecation notices the file earned, one per
+	// deprecated key, each naming the key and its replacement.
+	Warnings []string
+}
+
+// AgentPermission is the permission the file sets for the agent, "" when it
+// names none; the harness default is the caller's to apply.
+func (c FileConfig) AgentPermission(harness, model string) string {
+	return c.Permission[harness+"/"+model]
+}
+
+// AgentReadScope reports whether the read-scope hook is on for the agent:
+// on unless read_scope.<harness>/<model> turns it off.
+func (c FileConfig) AgentReadScope(harness, model string) bool {
+	if on, ok := c.ReadScope[harness+"/"+model]; ok {
+		return on
+	}
+	return true
+}
+
+// ResolvePermission resolves an agent's permission: an explicit permission=
+// over a tools= scope (its deprecated alias) over the file's value over the
+// harness default. tools is nil when unset, an empty non-nil list for none.
+func ResolvePermission(harness, permission string, tools []string, file string) string {
+	switch {
+	case permission != "":
+		return permission
+	case tools != nil:
+		return adapter.ToolsAliasPermission(tools)
+	case file != "":
+		return file
+	}
+	return adapter.DefaultPermission(harness)
 }
 
 // RoundsConfig holds the round caps the config file names; nil = unnamed.
@@ -282,16 +325,69 @@ func loadConfigFile(path string, required bool) (FileConfig, error) {
 			err = setCap(&cfg.Caps, key, value)
 		case strings.HasPrefix(key, "tools."):
 			err = setTools(&cfg, key, value)
+		case strings.HasPrefix(key, "permission."):
+			err = setPermission(&cfg, key, value)
+		case strings.HasPrefix(key, "read_scope."):
+			err = setReadScope(&cfg, key, value)
 		case strings.HasPrefix(key, "env."):
 			err = setEnvRef(&cfg, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, notify.webhook, snapshot_dir, retention_days, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, rounds.fix, rounds.review, rounds.restart, review.tier, review.effort, review.family, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model>, a tools.claude/<model> or an env.<harness>.<VAR>", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, notify.webhook, snapshot_dir, retention_days, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, rounds.fix, rounds.review, rounds.restart, review.tier, review.effort, review.family, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model>, a tools.claude/<model>, a permission.<harness>/<model>, a read_scope.<harness>/<model> or an env.<harness>.<VAR>", path, n+1, key)
 		}
 		if err != nil {
 			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)
 		}
 	}
+	// A deprecated tools.claude/<model> maps onto permission.claude/<model>:
+	// the same stored value, so the two spellings read alike. Both set to
+	// different values is refused, whatever their order in the file.
+	for _, pair := range slices.Sorted(maps.Keys(cfg.Tools)) {
+		alias := adapter.ToolsAliasPermission(cfg.Tools[pair])
+		cfg.Warnings = append(cfg.Warnings, adapter.DeprecatedKeyWarning("tools."+pair))
+		if set, ok := cfg.Permission[pair]; ok && set != alias {
+			return FileConfig{}, fmt.Errorf("config %s: tools.%s (%s) and permission.%s (%s) disagree; tools.%s is the deprecated alias of permission.%s, keep one", path, pair, alias, pair, set, pair, pair)
+		}
+		if cfg.Permission == nil {
+			cfg.Permission = map[string]string{}
+		}
+		cfg.Permission[pair] = alias
+	}
 	return cfg, nil
+}
+
+// setPermission sets one permission.<harness>/<model> key.
+func setPermission(cfg *FileConfig, key, value string) error {
+	rest, _ := strings.CutPrefix(key, "permission.")
+	harness, model, ok := strings.Cut(rest, "/")
+	if !ok || harness == "" || model == "" {
+		return fmt.Errorf("want permission.<harness>/<model>")
+	}
+	if err := adapter.ValidatePermission(value); err != nil {
+		return err
+	}
+	if cfg.Permission == nil {
+		cfg.Permission = map[string]string{}
+	}
+	cfg.Permission[harness+"/"+model] = value
+	return nil
+}
+
+// setReadScope sets one read_scope.<harness>/<model> key to a boolean.
+func setReadScope(cfg *FileConfig, key, value string) error {
+	rest, _ := strings.CutPrefix(key, "read_scope.")
+	harness, model, ok := strings.Cut(rest, "/")
+	if !ok || harness == "" || model == "" {
+		return fmt.Errorf("want read_scope.<harness>/<model>")
+	}
+	on, err := strconv.ParseBool(value)
+	if err != nil {
+		return fmt.Errorf("want true or false, got %q", value)
+	}
+	if cfg.ReadScope == nil {
+		cfg.ReadScope = map[string]bool{}
+	}
+	cfg.ReadScope[harness+"/"+model] = on
+	return nil
 }
 
 // setRounds sets one rounds.fix, rounds.review or rounds.restart key to a
