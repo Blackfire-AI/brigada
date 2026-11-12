@@ -15,7 +15,7 @@
 Signed in: claude, codex, opencode (2 providers, opencode providers list).
 kimi: init can't check sign-in.
 dsh (experimental): init can't check sign-in.
-qwen-code: init can't check sign-in.
+qwen-code (experimental): init can't check sign-in.
 
 [1m━━ Step 1 of 4 · the foreman[0m
 [38;2;138;143;152m  The foreman plans the work and decides what happens when a task needs[0m
@@ -85,7 +85,7 @@ qwen-code: init can't check sign-in.
   dsh's own credential store.[0m
 [1m    Use dsh? [0m[38;2;108;198;224m[y/N][0m[1m:[0m
 
-  [1mqwen-code[0m  [38;2;255;215;95m? sign-in can't be checked[0m
+  [1mqwen-code[0m  [38;2;138;143;152mexperimental · [0m[38;2;255;215;95m? sign-in can't be checked[0m
 [1m    Use qwen-code? [0m[38;2;108;198;224m[y/N][0m[1m:[0m
     [38;2;255;215;95m! qwen-code runs with auto-approve: when it writes code it can run any
     command on this machine without asking. It does not review.[0m
@@ -145,6 +145,7 @@ qwen-code: init can't check sign-in.
     qwen-code qwen-subscription/qwen3.8-flash
               [38;2;138;143;152mAlibaba[0m      light     writes code, answers questions
   [1mReviews:[0m 4 model families, so every task can get a reviewer of another one.
+  [38;2;138;143;152mqwen-code is experimental and may change in any release.[0m
   [1mAt once:[0m 4 tasks on this machine; per account: claude 3, codex 2, kimi 1,
     opencode 2, qwen-code 1 (change: brigada config)
   [1mCheck:[0m uv run pytest (init doesn't run it; change it later in

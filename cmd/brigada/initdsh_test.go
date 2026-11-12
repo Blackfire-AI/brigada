@@ -63,7 +63,9 @@ func TestInitQwenCodeAskedAndWorkerOnly(t *testing.T) {
 	}
 	flat := strings.Join(strings.Fields(out), " ")
 	for _, want := range []string{
-		"qwen-code: version 1.0.0-preview.1, sign-in can't be checked",
+		"qwen-code (experimental): init can't check sign-in.",
+		"qwen-code (experimental): version 1.0.0-preview.1, sign-in can't be checked",
+		"qwen-code is experimental and may change in any release.",
 		"Use qwen-code? [y/N]:",
 		"qwen-code runs with auto-approve: when it writes code it can run any command on this machine without asking. It does not review.",
 		"    qwen-code qwen-subscription/qwen3.8-max",

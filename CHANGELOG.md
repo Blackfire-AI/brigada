@@ -7,6 +7,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A `qwen-code` adapter drives Qwen Code (`qwen`) headless as an experimental, worker-only harness: it implements and answers but runs no reviews. It is checked against qwen 1.0.0-preview.1 only; `brigada init` offers it when `qwen` is on `PATH`, marked experimental (issue #224).
 - A cancel can say why. Each `plan_amend` cancel entry may be `{task, reason}` beside the bare task name or id, and `task_cancel` takes an optional `reason`, in the foreman's MCP tools and the API alike. Every task an amendment newly cancels records one `task_cancelled_by_amend` event with the plan, the reason verbatim and the caller (foreman or user), and `brigada history` shows the reason. A reason is expected on every cancel; one without is still accepted, as before, and recorded as "no reason given".
 - A restarted dependent now rebuilds on the land target, or on the waiting landings' ref `refs/brigada/land/<target>`, when its dependency already landed (squashed or not) or was cancelled or retired, instead of on the dependency's old result branch, whose landing conflicted. The `task_base_stale` reason names that base. A task base may now be the waiting ref, which the runner fetches by name.
 

@@ -193,7 +193,7 @@ func initCLIStatus(w io.Writer, harness string, probe harnessProbe, confirmed bo
 	case harness == "opencode" && strings.HasPrefix(probe.status, "no stored provider credentials"):
 		status = out.style.Warn(probe.status)
 	}
-	if harness == "dsh" {
+	if initExperimental(harness) {
 		status = out.style.Dim("experimental"+initSeparator(w)) + status
 	}
 	printInitWrapped(w, "  "+out.style.Bold(harness)+"  ", "    ", status)

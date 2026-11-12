@@ -34,12 +34,21 @@ var _ adapter.Adapter = (*Adapter)(nil)
 // is no -m flag at all.
 const DefaultModel = "default"
 
-// autoApproveFlag lets a headless run edit files. qwen descends from
-// gemini-cli, whose non-interactive mode drops tools that need
-// confirmation, so a worker would otherwise be unable to write. The flag
-// is confirmed against `qwen --help` by the smoke task; until then it is
-// the foreman's best understanding, not a verified fact.
-const autoApproveFlag = "--yolo"
+// autoApproveFlag lets a headless run edit files: `qwen --help`
+// (1.0.0-preview.1) lists it as "Bypass all permission checks", and a live
+// run reports permissionMode "bypassPermissions". Without it a headless
+// worker could not write. The older --yolo is not in --help and is not used.
+const autoApproveFlag = "--dangerously-skip-permissions"
+
+// settingSourcesFlag and settingSourcesValue keep the workspace's own
+// settings (.qwen/settings.json: the "project" and "local" sources) out of a
+// headless run: only the user's settings, which hold the login, load. qwen
+// has no flag that skips context files such as QWEN.md; those are still
+// read from the workspace.
+const (
+	settingSourcesFlag  = "--setting-sources"
+	settingSourcesValue = "user"
+)
 
 // Name implements adapter.Adapter: the harness this adapter drives.
 func (a *Adapter) Name() string { return "qwen-code" }
@@ -74,7 +83,7 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	if err := adapter.ValidateEffort("qwen-code", job.Effort); err != nil {
 		return nil, fmt.Errorf("qwen-code: %w", err)
 	}
-	args := []string{"-p", job.Prompt, "-o", "stream-json"}
+	args := []string{"-p", job.Prompt, "-o", "stream-json", settingSourcesFlag, settingSourcesValue}
 	if job.Model != "" && job.Model != DefaultModel {
 		args = append(args, "-m", job.Model)
 	}
@@ -107,10 +116,8 @@ func workerEnv(env []string) []string {
 	return out
 }
 
-// The stream's shape lives here and nowhere else. It is the foreman's
-// understanding of qwen's Claude Code-compatible stream-json, NOT yet
-// verified against the real CLI: the smoke task corrects names in this
-// block (types, subtypes, block types, usage keys) and in the fixtures.
+// The stream's shape lives here and nowhere else: qwen's Claude Code-style
+// stream-json, as recorded from qwen 1.0.0-preview.1 (testdata/normal.jsonl).
 const (
 	typeSystem    = "system"
 	typeAssistant = "assistant"
@@ -133,7 +140,6 @@ const (
 // type says what it carries. Only the fields the adapter reads are
 // declared.
 type lineJSON struct {
-	Usage     json.RawMessage `json:"usage"`
 	NumTurns  json.RawMessage `json:"num_turns"`
 	Type      string          `json:"type"`
 	Subtype   string          `json:"subtype"`
@@ -143,8 +149,14 @@ type lineJSON struct {
 	Message   messageJSON     `json:"message"`
 }
 
+// messageJSON is an assistant or user message. qwen streams an assistant
+// message twice: first as a partial line with stop_reason null and zeroed
+// usage, then as a final line whose stop_reason is set and whose usage holds
+// the message's real counts.
 type messageJSON struct {
-	Content []blockJSON `json:"content"`
+	StopReason *string         `json:"stop_reason"`
+	Usage      json.RawMessage `json:"usage"`
+	Content    []blockJSON     `json:"content"`
 }
 
 type blockJSON struct {
@@ -166,8 +178,9 @@ type blockJSON struct {
 //	error result, or a plain line naming a known failure → an error event
 //
 // An assistant line that both speaks and calls a tool is its tool call.
-// Usage is counted from the result line only, never from the per-message
-// usage as well, so a run is not counted twice. Unknown and malformed
+// Token usage is counted from the final assistant lines (stop_reason set):
+// the result line's own usage object is zeroed in qwen's stream, so only its
+// num_turns (the model calls) is read there. Nothing is counted twice. Unknown and malformed
 // lines are ignored, never fatal.
 func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 	trimmed := bytes.TrimSpace(line)
@@ -185,7 +198,14 @@ func (a *Adapter) ParseEvent(line []byte) (adapter.Event, bool) {
 		}
 		return adapter.Event{Kind: adapter.EvSession, SessionID: lj.SessionID}, true
 	case typeAssistant:
-		return assistantEvent(lj.Message.Content)
+		ev, ok := assistantEvent(lj.Message.Content)
+		if lj.Message.StopReason != nil {
+			ev.Usage = messageUsage(lj.Message.Usage)
+			if !ok && ev.Usage != nil {
+				ev.Kind, ok = adapter.EvUsage, true
+			}
+		}
+		return ev, ok
 	case typeUser:
 		return toolEnd(lj.Message.Content)
 	case typeResult:
@@ -280,7 +300,8 @@ type errorPhrase struct {
 
 // errorPhrases is conservative on purpose: stderr also carries chatter
 // ("rate limited, retrying"), so only whole failure phrases are here.
-// Unverified against the real CLI; the smoke task refines them.
+// The live run (1.0.0-preview.1) hit no failure, so these are generic
+// failure phrases, not text observed from the CLI.
 var errorPhrases = []errorPhrase{
 	// The session --resume named is gone (§5.6): a fresh run, not another resume.
 	{adapter.ErrResumeFailed, "session not found"},
@@ -322,10 +343,12 @@ func phraseEvent(text string) (adapter.Event, bool) {
 	return adapter.Event{}, false
 }
 
-// resultUsage reads the result's usage. Cached input is a breakdown of
-// input, so it never exceeds it (the opencode fix, a81915b).
-func resultUsage(lj lineJSON) *adapter.Usage {
-	u := adapter.ParseUsage(lj.Usage, usageInput, usageOutput, usageCached, "", "")
+// messageUsage reads a final assistant message's usage. qwen's input_tokens
+// is the whole prompt, cache reads included (the line's context_usage_ratio
+// is input_tokens over the window; cache_read_input_tokens is a part of it),
+// so cached input never exceeds input (the opencode fix, a81915b).
+func messageUsage(raw json.RawMessage) *adapter.Usage {
+	u := adapter.ParseUsage(raw, usageInput, usageOutput, usageCached, "", "")
 	if u != nil && u.CachedInputTokens != nil {
 		if u.InputTokens == nil {
 			u.CachedInputTokens = nil
@@ -334,14 +357,18 @@ func resultUsage(lj lineJSON) *adapter.Usage {
 			u.CachedInputTokens = &n
 		}
 	}
+	return u
+}
+
+// resultUsage reads the result line's model-call count (num_turns). Its
+// usage object is not read: qwen leaves it zeroed, and the tokens are
+// counted from the assistant lines.
+func resultUsage(lj lineJSON) *adapter.Usage {
 	var turns int64
 	if len(lj.NumTurns) > 0 && json.Unmarshal(lj.NumTurns, &turns) == nil && turns >= 0 {
-		if u == nil {
-			u = &adapter.Usage{}
-		}
-		u.Add(adapter.Calls(turns))
+		return adapter.Calls(turns)
 	}
-	return u
+	return nil
 }
 
 // ResultText implements adapter.Adapter: the final text is the result

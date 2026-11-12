@@ -1475,8 +1475,10 @@ func printInitAgents(w io.Writer, agents []agentSpec, families int, requireFamil
 		printInitWrapped(w, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), roles[i])
 	}
 	printInitWrapped(w, "  "+style.Bold("Reviews:")+" ", "    ", initReviewsLine(families, requireFamily))
-	if slices.ContainsFunc(agents, func(s agentSpec) bool { return s.harness == "dsh" }) {
-		printInitWrapped(w, "  ", "  ", style.Dim("dsh is experimental and may change in any release."))
+	for _, h := range []string{"dsh", "qwen-code"} {
+		if slices.ContainsFunc(agents, func(s agentSpec) bool { return s.harness == h }) {
+			printInitWrapped(w, "  ", "  ", style.Dim(h+" is experimental and may change in any release."))
+		}
 	}
 }
 

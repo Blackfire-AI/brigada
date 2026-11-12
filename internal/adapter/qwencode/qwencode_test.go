@@ -41,7 +41,8 @@ func TestCommand(t *testing.T) {
 	stubCLI(t)
 	const prompt = "the task spec\nverbatim"
 	dir := t.TempDir()
-	base := []string{"-p", prompt, "-o", "stream-json"}
+	// --setting-sources user keeps the workspace's .qwen/settings.json out.
+	base := []string{"-p", prompt, "-o", "stream-json", "--setting-sources", "user"}
 	cases := []struct {
 		name   string
 		job    adapter.Job
@@ -164,19 +165,20 @@ func TestParseNormal(t *testing.T) {
 			t.Errorf("event %d kind = %q, want %q", i, events[i].Kind, k)
 		}
 	}
-	if events[0].SessionID != "sess-0001" {
+	const session = "7af062ac-b502-4f29-8990-cc063cf4060a"
+	if events[0].SessionID != session {
 		t.Errorf("init session = %q", events[0].SessionID)
 	}
-	if events[1].Text != "read_file" || events[1].Args == "" {
+	if events[1].Text != "Write" || !strings.Contains(events[1].Args, "hello.txt") {
 		t.Errorf("tool start = %+v", events[1])
 	}
-	if events[2].Text != "call-1" {
+	if events[2].Text != "call_f9109cbe78d5447eb08b1e79" {
 		t.Errorf("tool end = %+v", events[2])
 	}
-	if events[4].SessionID != "sess-0001" {
+	if events[4].SessionID != session {
 		t.Errorf("result session = %q", events[4].SessionID)
 	}
-	if got := a.ResultText(events); got != "All done." {
+	if got := a.ResultText(events); got != "done" {
 		t.Errorf("ResultText = %q", got)
 	}
 }
