@@ -28,7 +28,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-724"
     rounds: 0
   - id: 725
@@ -40,7 +40,7 @@ tasks:
     tier: light
     effort: medium
     skills: ["surface-parity", "docs-change"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 726
