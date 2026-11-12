@@ -32,8 +32,8 @@ tasks:
     review_tier: heavy
     caps: {restart: 2}
     skills: ["surface-parity", "docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-739"
     rounds: 0
   - id: 740
     name: "qwen-attach-client"
