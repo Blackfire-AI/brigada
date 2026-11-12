@@ -28,8 +28,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-724"
     rounds: 0
   - id: 725
     name: "qwen-runner"
