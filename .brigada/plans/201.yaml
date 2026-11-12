@@ -150,7 +150,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["schema-migration", "cli-flag"]
-    state: reviewing
+    state: done
     branch: "brigada/task-771"
     rounds: 0
   - id: 772
