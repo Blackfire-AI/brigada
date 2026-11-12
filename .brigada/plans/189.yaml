@@ -40,9 +40,9 @@ tasks:
     tier: light
     effort: medium
     skills: ["surface-parity", "docs-change"]
-    state: reviewing
+    state: running
     branch: "brigada/task-725"
-    rounds: 1
+    rounds: 2
   - id: 726
     name: "qwen-init"
     title: "feat(init): offer the qwen-code harness in brigada init"
