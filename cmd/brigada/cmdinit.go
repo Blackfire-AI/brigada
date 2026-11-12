@@ -41,7 +41,7 @@ var initCPUCount = goruntime.NumCPU
 // Per-harness account defaults, displayed in initHarnesses order.
 // Every cap is clamped to tasks at once.
 var initAccountDefaults = map[string]int{
-	"claude": 3, "codex": 2, "kimi": 1, "opencode": 2, "dsh": 1,
+	"claude": 3, "codex": 2, "kimi": 1, "opencode": 2, "dsh": 1, "qwen-code": 1,
 }
 
 func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code int) {
@@ -317,6 +317,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			source = initOpenCodeModels(ctx)
 		case "dsh":
 			source = initDshModels(ctx)
+		case "qwen-code":
+			source = initQwenModels(ctx)
 		}
 		// Only OpenCode's picks are individual choices: a saved model its
 		// list no longer shows stays pickable. The other CLIs offer every model.
@@ -374,7 +376,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if spec.accountLabel() != h {
 			name += " account " + spec.accountLabel()
 		}
-		if h == "kimi" || h == "opencode" || h == "dsh" {
+		if h == "kimi" || h == "opencode" || h == "dsh" || h == "qwen-code" {
 			// A rerun that used this CLI keeps using it on Enter.
 			if len(defaultYes) > 0 && defaultYes[0] {
 				v, err := ask("    Use "+name+"? [Y/n]: ", "--signed-in "+h)
@@ -507,6 +509,20 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			}
 			var models []string
 			var classes []string
+			if h == "qwen-code" {
+				// qwen-code runs with auto-approve, so it writes code and answers
+				// questions, never reviews, and gets no question about writing.
+				warning := "qwen-code runs with auto-approve: when it writes code it can run any command on this machine without asking. It does not review."
+				if styled {
+					printInitWrapped(stdout, "    ", "    ", style.Warn(style.Warning()+" "+warning))
+				} else {
+					printInitWrapped(stdout, "    ", "    ", warning)
+				}
+				classes = []string{"implement", "answer"}
+				for _, entry := range entries {
+					models = append(models, entry.value)
+				}
+			}
 			switch h {
 			case "claude", "codex":
 				names := initUseNames(h, entries, rt.file.Caps.TierOf)
@@ -962,6 +978,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			permissions = "edit files and run commands inside codex's sandbox"
 		case "kimi":
 			permissions = "edit files and run any command without asking"
+		case "qwen-code":
+			permissions = "edit files and run any command without asking; no reviews"
 		case "opencode":
 			permissions = "edit files; run only the commands of the worker tools scope"
 		case "dsh":

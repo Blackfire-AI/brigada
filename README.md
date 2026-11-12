@@ -39,7 +39,7 @@ report what you did.
    `curl -fsSL https://raw.githubusercontent.com/Blackfire-AI/brigada/main/install.sh | sh`.
    Confirm with `brigada version`.
 2. List which agent CLIs are installed and signed in — claude, codex,
-   opencode, kimi, dsh — using their status commands only: never run a
+   opencode, kimi, dsh, qwen-code — using their status commands only: never run a
    login, never print keys or tokens.
 3. Run `brigada init --probe` in this repository and show me the plan it
    prints.
@@ -145,7 +145,7 @@ brigada init
 Init walks you through four steps:
 
 1. Pick the foreman model from the signed-in Claude, Codex and OpenCode CLIs, then how hard it should think. `--foreman claude/sonnet@medium` supplies both.
-2. Choose which CLIs' models may run tasks. Opencode offers a menu with multiple picks. Two model families give cross-family reviews (preferred; required with `review.family=require`); Kimi reviews only unless you let it write code.
+2. Choose which CLIs' models may run tasks. Opencode offers a menu with multiple picks. Two model families give cross-family reviews (preferred; required with `review.family=require`); Kimi reviews only unless you let it write code; qwen-code writes code and answers but never reviews.
 3. Set tasks at once on this machine (or pass `--parallel N`). Enter keeps the saved limit, else half the cores, at least 1 and at most 4.
 4. Confirm the check suggested by your build files, type your own command, or enter `-` for none. Init takes worker tools from that choice and never runs the check.
 
