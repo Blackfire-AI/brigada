@@ -162,7 +162,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["config-setting"]
-    state: reviewing
+    state: done
     branch: "brigada/task-772"
     rounds: 1
   - id: 773
