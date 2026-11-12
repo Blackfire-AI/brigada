@@ -7,7 +7,7 @@ title: "#228 implementation: harness-owned permissions, runner-only push, approv
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-11-12T21:47:35.965112Z
-updated: 2026-11-12T23:22:36.295802Z
+updated: 2026-11-12T23:57:58.499822Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -184,8 +184,7 @@ tasks:
     class: "implement"
     deps: ["permission-plumbing"]
     base: "permission-plumbing"
-    tier: light
-    effort: low
+    effort: medium
     skills: ["config-setting"]
     state: needs_foreman
     branch: ""
