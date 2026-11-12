@@ -87,7 +87,7 @@ In:
 - local notifications: an OS notification plus a "needs you" queue in `brigada status` (for the foreman's limit, plan approval, questions);
 - `brigada review --branch <x>` without the foreman (the author's family from the job record or the `Co-Authored-By` trailer): it seeds the record and shows value on its own;
 - the engine and a local runner;
-- adapters for Claude Code, Codex, Kimi and opencode, plus an experimental adapter for dsh ([GUIDE](GUIDE.md#dsh-experimental), [COMPATIBILITY](COMPATIBILITY.md)) (Gemini has no adapter);
+- adapters for Claude Code, Codex, Kimi and opencode, plus experimental adapters for dsh and qwen-code ([GUIDE](GUIDE.md#dsh-experimental), [COMPATIBILITY](COMPATIBILITY.md)) (Gemini has no adapter);
 - check and review, by another family when available (`review.family=prefer`; required with `review.family=require`);
 - the outcome record and `brigada stats`;
 - quota learned from the CLIs' own limit errors: an account that hits its limit cools until the reset time;

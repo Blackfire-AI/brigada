@@ -23,6 +23,7 @@ import (
 //   - dsh: the patch file's reasoningEffort takes off, low, high, max (no
 //     medium); the adapter writes it into a per-job patch file.
 //   - kimi: the CLI documents no effort option; refused.
+//   - qwen-code: the CLI documents no effort option; refused.
 var effortLevels = map[string][]string{
 	"claude": {"low", "medium", "high", "xhigh", "max"},
 	"codex":  {"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"},

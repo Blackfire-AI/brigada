@@ -904,9 +904,9 @@ The fields of an `--agent` value:
 
 | Field | Meaning |
 |---|---|
-| `harness` | `claude`, `kimi`, `codex`, `opencode` or [`dsh`](#dsh-experimental) (experimental; see also [COMPATIBILITY](COMPATIBILITY.md)). |
+| `harness` | `claude`, `kimi`, `codex`, `opencode`, [`dsh`](#dsh-experimental) or [`qwen-code`](#qwen-code-experimental) (both experimental; see also [COMPATIBILITY](COMPATIBILITY.md)). |
 | `model` | Defaults to `sonnet` for claude, `deepseek-flash` for dsh, and to the CLI's own default for the others. For opencode, a model is `provider/model`. |
-| `classes` | A `+`-separated list; default `implement+review+answer`. `classes=none` advertises no task classes (foreman only). |
+| `classes` | A `+`-separated list; default `implement+review+answer`, `implement+answer` for qwen-code (it runs no reviews). `classes=none` advertises no task classes (foreman only). |
 | `account` | The login whose quota the agent spends; defaults to the harness name (see [Accounts](#accounts)). |
 | `agent-file=<path>` | kimi only. Starts work and fix sessions under your own agent definition. Reviews always use the runner's read-only definition. |
 | `effort=<level>` | Validated per harness (see [Effort](#effort)). |
@@ -930,7 +930,7 @@ Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `
 
 A `land` job (see [section 5](#5-finishing-the-land-job)) carries the single label `git` and no agent. Every runner offers the `git` label — its own git does the landing, and the label is the promise that those git credentials work for the repo — so any runner may take it, wherever it runs. The landing happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker. A landing that waits at the push gate — or lands under `gate_push: never`, whose push is yours — is kept on the remote (`refs/brigada/land/<target>`), not in that clone, so its push may run on another runner, or on your machine.
 
-The foreman can be `claude`, `codex` or `opencode`; `kimi` and `dsh` are worker-only. [Section 11](#11-the-foremans-harness-claude-codex-or-opencode) lists what a foreman harness must do and where each harness stands.
+The foreman can be `claude`, `codex` or `opencode`; `kimi`, `dsh` and `qwen-code` are worker-only. [Section 11](#11-the-foremans-harness-claude-codex-or-opencode) lists what a foreman harness must do and where each harness stands.
 
 #### dsh (experimental)
 
@@ -941,6 +941,13 @@ The foreman can be `claude`, `codex` or `opencode`; `kimi` and `dsh` are worker-
 - Run it: `brigada runner --agent harness=dsh,model=deepseek-flash`. The models are `deepseek-flash` (dsh's default, light tier) and `deepseek-v4-pro` (heavy tier).
 - Each job runs `dsh --profile headless --json` with the prompt on stdin, always with `DSH_TELEMETRY_MODE=DISABLED`, and `DSH_PERMISSION_MODE=read-only` for a review or `workspace-write` for other jobs. brigada never sets `danger-full-access`. `tools=` is refused.
 - The model and effort ride a per-job patch file in a fresh directory under the OS temp directory, outside the worktree. brigada does not remove it when the job ends.
+
+#### qwen-code (experimental)
+
+`qwen-code` is Qwen Code, Alibaba's coding CLI (`qwen`); the adapter was checked against 1.0.0-preview.1 only and may break on a newer release. It is worker-only: it takes no review class — qwen-code has no read-only review policy, so its agents default to `implement,answer` — and it can be neither a foreman nor an attach. `brigada init` does not offer it yet; register an agent with `--agent` or `brigada agents add`.
+
+- Run it: `brigada runner --agent harness=qwen-code,model=qwen3.8-max` (heavy tier; `qwen3.8-flash` is light). With no `model=`, the agent is the CLI's own default (`model=default`, standard tier) and the adapter passes no `-m`.
+- Each job runs `qwen -p` with the prompt as an argument and stream-json output, with `--yolo`, the auto-approve flag that lets a headless run edit files; a session resumes with `--resume <id>`. brigada sets nothing else: the CLI's own login and configuration stay the ambient environment's, minus brigada's own variables, and `env.qwen-code.<VAR>` works like any harness's. `tools=` and `effort=` are refused.
 
 **Kimi reviews only by default in interactive init.** After `Use kimi?`, init asks whether it may write code too. Enter or no keeps `classes=review`; yes enables `implement+review+answer`. With `--agent` there is no such question: set `classes=review` explicitly for a review-only Kimi agent. Omitting `classes` keeps the runner's default of all three classes.
 
@@ -956,7 +963,7 @@ The agents file (`runner/agents` in the state directory) is written by `brigada 
 
 `brigada agents` is read-only. It runs the same cheap model listings init uses (the claude, codex and opencode CLIs; none makes a model call) and compares them with the agents file. It prints the models offered but not registered, each with the tier its name gives and the account it would share, and the registered agents whose model the CLI no longer lists. A model is reported as gone only when the CLI's list is whole: claude's aliases are not a complete list, so claude agents are never reported as gone, and a codex or opencode list that left out a model of unknown family reports none. The tier printed is a guess from the name: correct a wrong one with `tier.<harness>/<model>` in the config file (for example a `-highspeed` model is a faster serving of the same model, not a light one).
 
-`brigada agents add <harness>/<model> [--classes CLASSES] [--effort LEVEL] [--now]` appends one line to the agents file and keeps every other line, comments included. For opencode, the model is `provider/model`, so `brigada agents add opencode/zai-coding-plan/glm-5.3-flash` names the harness before the first slash. `--classes` is comma-separated (default `implement,review,answer`; `none` for a foreman-only agent). The line carries the account the harness's registered agents use when that is not the harness name, so the agent shares the account the report named. The line is checked as the runner checks it at startup, so an unknown harness, an unsupported effort or a duplicate is refused and the file stays as it was. A model already registered is refused. A running runner is handed a restart request it honours between jobs: it finishes its running jobs, exits, and the fresh runner serves the new agent — no job is cut. `--now` cuts the running jobs instead, and with no runner running `brigada start` serves the line.
+`brigada agents add <harness>/<model> [--classes CLASSES] [--effort LEVEL] [--now]` appends one line to the agents file and keeps every other line, comments included. For opencode, the model is `provider/model`, so `brigada agents add opencode/zai-coding-plan/glm-5.3-flash` names the harness before the first slash. `--classes` is comma-separated (default `implement,review,answer`, `implement,answer` for qwen-code; `none` for a foreman-only agent). The line carries the account the harness's registered agents use when that is not the harness name, so the agent shares the account the report named. The line is checked as the runner checks it at startup, so an unknown harness, an unsupported effort or a duplicate is refused and the file stays as it was. A model already registered is refused. A running runner is handed a restart request it honours between jobs: it finishes its running jobs, exits, and the fresh runner serves the new agent — no job is cut. `--now` cuts the running jobs instead, and with no runner running `brigada start` serves the line.
 
 `brigada status` and `brigada top` show one hint line when the last listing found unregistered models. The listing is cached in `runner/models-offered.json` in the state directory with its time; `status` lists again only when the cache is missing or older than 12 hours, and `top` reads the cache on each redraw and refreshes a stale one once, in the background. Nothing runs the CLIs when no agents file exists, and `brigada agents` always lists afresh.
 
@@ -1024,6 +1031,7 @@ What a worker or reviewer may do is set by its CLI's own permission scope, not b
 | kimi | no scope from brigada; the CLI's own permissions apply. `agent-file=` replaces the agent definition | the runner's read-only agent file, which disallows `Bash` | not available |
 | opencode | `OPENCODE_PERMISSION` rules, with external directories denied unless a checkout is named | also denies edit and webfetch | brigada's MCP tools; `OPENCODE_PERMISSION` denies bash, edit, webfetch and reads outside the reading checkout, in a headless turn and an attach alike |
 | dsh | OS-level `workspace-write` (`DSH_PERMISSION_MODE`) | OS-level `read-only` | not available |
+| qwen-code | headless `qwen -p` with its auto-approve flag; no scope from brigada | none: its agents never take the review class | not available |
 
 Every harness runs in a git worktree on your machine. Workers inherit your environment minus the credential scrub ([design §5.7](design.md#57-an-environment-for-checks-and-reviews)), so none of these scopes keeps a check command, a test run or a kimi worker away from your remaining credentials or the network.
 

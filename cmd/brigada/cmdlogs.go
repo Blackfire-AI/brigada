@@ -14,6 +14,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter/fake"
 	"github.com/Blackfire-AI/brigada/internal/adapter/kimi"
 	"github.com/Blackfire-AI/brigada/internal/adapter/opencode"
+	"github.com/Blackfire-AI/brigada/internal/adapter/qwencode"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 )
@@ -216,7 +217,7 @@ func splitLines(s string) []string {
 // transcriptAdapters are the parsers a transcript can have been written
 // by; the transcript itself does not say which one ran.
 func transcriptAdapters() []adapter.Adapter {
-	return []adapter.Adapter{&claude.Adapter{}, &kimi.Adapter{}, &codex.Adapter{}, &opencode.Adapter{}, &dsh.Adapter{}, &fake.Adapter{}}
+	return []adapter.Adapter{&claude.Adapter{}, &kimi.Adapter{}, &codex.Adapter{}, &opencode.Adapter{}, &dsh.Adapter{}, &qwencode.Adapter{}, &fake.Adapter{}}
 }
 
 // renderTranscript turns a transcript artifact — the harness's own event

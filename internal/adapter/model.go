@@ -20,6 +20,8 @@ func AgentFamily(harness, model string) (string, error) {
 			return "moonshot", nil
 		case "opencode":
 			return "", nil
+		case "qwen-code":
+			return "alibaba", nil
 		}
 	}
 	family, err := ModelFamily(model)
@@ -41,7 +43,9 @@ var modelFamilyPrefixes = []struct {
 	{"moonshot", []string{"kimi", "k2", "moonshot"}},
 	{"google", []string{"gemini"}},
 	{"deepseek", []string{"deepseek"}},
-	{"alibaba", []string{"qwen"}},
+	// qwen3 also stands alone: qwen's own names glue the version to the
+	// prefix (qwen3.8-max), with no separator for the prefix rule.
+	{"alibaba", []string{"qwen", "qwen3"}},
 	{"meta", []string{"llama"}},
 	{"mistral", []string{"mistral", "codestral", "devstral"}},
 	{"zhipu", []string{"glm"}},

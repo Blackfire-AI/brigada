@@ -188,6 +188,31 @@ func TestAgentsAddRefusals(t *testing.T) {
 	}
 }
 
+func TestAgentsAddQwenCodeDefaultsToImplementAndAnswer(t *testing.T) {
+	fakeInitPATH(t, "opencode")
+	state := testsupport.ShortStateDir(t)
+	saveAgentLines(t, state, "harness=claude,model=sonnet")
+
+	code, out, errOut := agentsDo(t, "agents", "add", "--state-dir", state, "qwen-code/qwen3.8-max")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	got := loadAgentLines(t, state)
+	if last := got[len(got)-1]; last != "harness=qwen-code,model=qwen3.8-max,classes=implement+answer" {
+		t.Fatalf("lines = %q", got)
+	}
+	if !strings.Contains(out, "registered qwen-code/qwen3.8-max (tier heavy, classes implement,answer)") {
+		t.Errorf("output = %s", out)
+	}
+	// An explicit review class is refused: qwen-code runs no reviews.
+	if code, out, errOut := agentsDo(t, "agents", "add", "--state-dir", state, "qwen-code/qwen3.8-flash", "--classes", "review"); code != 2 || out != "" || !strings.Contains(errOut, "no read-only review policy") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if got := loadAgentLines(t, state); len(got) != 2 {
+		t.Fatalf("lines = %q", got)
+	}
+}
+
 func TestAgentsAddCarriesTheHarnessAccount(t *testing.T) {
 	fakeInitPATH(t, "opencode")
 	state := testsupport.ShortStateDir(t)

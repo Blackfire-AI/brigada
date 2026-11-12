@@ -19,7 +19,7 @@ const (
 
 // envKnownHarnesses are the harnesses an env.<harness>.<VAR> key may name.
 var envKnownHarnesses = map[string]bool{
-	"claude": true, "codex": true, "kimi": true, "opencode": true, "dsh": true,
+	"claude": true, "codex": true, "kimi": true, "opencode": true, "dsh": true, "qwen-code": true,
 }
 
 var envVarName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -31,7 +31,7 @@ func setEnvRef(cfg *FileConfig, key, value string) error {
 	rest, _ := strings.CutPrefix(key, "env.")
 	harness, name, ok := strings.Cut(rest, ".")
 	if !ok || !envKnownHarnesses[harness] || !envVarName.MatchString(name) {
-		return fmt.Errorf("want env.<harness>.<VAR> with a harness of claude, codex, kimi, opencode or dsh")
+		return fmt.Errorf("want env.<harness>.<VAR> with a harness of claude, codex, kimi, opencode, dsh or qwen-code")
 	}
 	if envReserved(name) {
 		return fmt.Errorf("%s is set by the runner or the adapter and cannot be configured", name)

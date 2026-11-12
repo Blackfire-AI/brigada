@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -146,9 +148,11 @@ func TestResolveRunnerAgentModels(t *testing.T) {
 		{"opencode", "provider/model", "provider/model", "opencode"},
 		{"dsh", "", "deepseek-flash", "deepseek"},
 		{"dsh", "deepseek-v4-pro", "deepseek-v4-pro", "deepseek"},
+		{"qwen-code", "", "default", "alibaba"},
+		{"qwen-code", "qwen3.8-max", "qwen3.8-max", "alibaba"},
 	} {
 		t.Run(tc.harness+"/"+tc.model, func(t *testing.T) {
-			spec := agentSpec{harness: tc.harness, model: tc.model, classes: splitList(defaultClasses)}
+			spec := agentSpec{harness: tc.harness, model: tc.model, classes: harnessDefaultClasses(tc.harness)}
 			ads, agents, err := resolveRunnerAgents(&runtime{}, []agentSpec{spec}, "")
 			if err != nil {
 				t.Fatal(err)
@@ -305,10 +309,10 @@ func TestRunnerHarnessFlags(t *testing.T) {
 		wantErr  string
 	}{
 		{
-			name:     "an unknown harness names all five",
+			name:     "an unknown harness names every harness",
 			args:     []string{"runner", "--harness", "gemini", "--state-dir", state},
 			wantCode: 2,
-			wantErr:  `unknown harness "gemini"; want claude, kimi, codex, opencode, dsh or fake`,
+			wantErr:  `unknown harness "gemini"; want claude, kimi, codex, opencode, dsh, qwen-code or fake`,
 		},
 		{
 			name:     "agent file with the claude harness is a usage error",
@@ -340,6 +344,36 @@ func TestRunnerHarnessFlags(t *testing.T) {
 			args:     []string{"runner", "--agent", "harness=codex,tools=Bash(ls:*)", "--state-dir", state},
 			wantCode: 2,
 			wantErr:  "codex harness takes no tools scope",
+		},
+		{
+			name:     "agent file with the qwen-code harness is a usage error",
+			args:     []string{"runner", "--agent", "harness=qwen-code,agent-file=" + agentFile, "--state-dir", state},
+			wantCode: 2,
+			wantErr:  "--agent-file is a --harness kimi flag",
+		},
+		{
+			name:     "a review class with the qwen-code harness is a usage error",
+			args:     []string{"runner", "--agent", "harness=qwen-code,classes=implement+review", "--state-dir", state},
+			wantCode: 2,
+			wantErr:  "no read-only review policy",
+		},
+		{
+			name:     "a review class with --harness qwen-code is a usage error",
+			args:     []string{"runner", "--harness", "qwen-code", "--classes", "review", "--state-dir", state},
+			wantCode: 2,
+			wantErr:  "no read-only review policy",
+		},
+		{
+			name:     "tools with the qwen-code harness is a usage error",
+			args:     []string{"runner", "--agent", "harness=qwen-code,tools=Bash(go test:*)", "--state-dir", state},
+			wantCode: 2,
+			wantErr:  "no tool list to narrow",
+		},
+		{
+			name:     "an effort with the qwen-code harness is a usage error",
+			args:     []string{"runner", "--agent", "harness=qwen-code,effort=high", "--state-dir", state},
+			wantCode: 2,
+			wantErr:  `effort is not supported for harness "qwen-code"`,
 		},
 		{
 			name: "a missing agent file fails at startup",
@@ -476,6 +510,95 @@ func TestRunnerAccountLabels(t *testing.T) {
 	})
 }
 
+// registeredClasses starts an engine on a fresh state directory, runs a
+// runner with the given args against it, and returns the classes stored
+// for the named harness's agent — what the engine holds, not what the
+// flag parser produced.
+func registeredClasses(t *testing.T, harness string, args ...string) []string {
+	t.Helper()
+	state := testsupport.ShortStateDir(t)
+	seedMigratedStore(t, lifecycle.PathsOf(state).Store)
+	st, err := store.Open(context.Background(), lifecycle.PathsOf(state).Store)
+	if err != nil {
+		t.Fatalf("open the store: %v", err)
+	}
+	defer st.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- lifecycle.Run(ctx, lifecycle.Config{StateDir: state, Idle: time.Minute}) }()
+	socket := lifecycle.PathsOf(state).Socket
+	deadline := time.Now().Add(10 * time.Second)
+	for !lifecycle.EngineRunning(ctx, socket) {
+		if time.Now().After(deadline) {
+			t.Fatal("the engine did not answer in time")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	rctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	runDone := make(chan int, 1)
+	full := append([]string{"runner", "--state-dir", state, "--no-start"}, args...)
+	go func() { runDone <- run(rctx, full, io.Discard, io.Discard) }()
+	var classes string
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		err := st.View(ctx, func(tx *sql.Tx) error {
+			return tx.QueryRow("SELECT classes FROM agents WHERE harness = ?", harness).Scan(&classes)
+		})
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("read the registered classes: %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the runner did not register its agent in time")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	stop()
+	select {
+	case <-runDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the runner did not stop")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("the engine stopped with an error: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Error("the engine did not stop")
+	}
+	var got []string
+	if err := json.Unmarshal([]byte(classes), &got); err != nil {
+		t.Fatalf("classes %q: %v", classes, err)
+	}
+	return got
+}
+
+// TestRunnerQwenCodeClasses: qwen-code runs no reviews, so an agent
+// registered with no classes takes implement and answer, on the
+// shorthand flags and the --agent form alike; other harnesses keep all
+// three classes (TestRunnerHarnessRegisters).
+func TestRunnerQwenCodeClasses(t *testing.T) {
+	t.Run("the shorthand flags", func(t *testing.T) {
+		classes := registeredClasses(t, "qwen-code", "--harness", "qwen-code")
+		if want := []string{"implement", "answer"}; !reflect.DeepEqual(classes, want) {
+			t.Errorf("classes = %q, want %q", classes, want)
+		}
+	})
+	t.Run("the agent form", func(t *testing.T) {
+		classes := registeredClasses(t, "qwen-code", "--agent", "harness=qwen-code,model=qwen3.8-max")
+		if want := []string{"implement", "answer"}; !reflect.DeepEqual(classes, want) {
+			t.Errorf("classes = %q, want %q", classes, want)
+		}
+	})
+}
+
 // TestAgentSpecAccount: the --agent parser keeps the account= key and
 // round-trips it.
 func TestAgentSpecAccount(t *testing.T) {
@@ -583,9 +706,9 @@ func TestRunnerAgentFlag(t *testing.T) {
 			wantErr: `unknown field "budget"`,
 		},
 		{
-			name:    "an unknown harness names all five",
+			name:    "an unknown harness names every harness",
 			args:    []string{"runner", "--agent", "harness=gemini", "--state-dir", state},
-			wantErr: `unknown harness "gemini"; want claude, kimi, codex, opencode, dsh or fake`,
+			wantErr: `unknown harness "gemini"; want claude, kimi, codex, opencode, dsh, qwen-code or fake`,
 		},
 		{
 			name:    "an agent file under the claude harness is refused",

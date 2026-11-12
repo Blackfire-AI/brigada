@@ -18,6 +18,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter/fake"
 	"github.com/Blackfire-AI/brigada/internal/adapter/kimi"
 	"github.com/Blackfire-AI/brigada/internal/adapter/opencode"
+	"github.com/Blackfire-AI/brigada/internal/adapter/qwencode"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/runner"
@@ -45,8 +46,8 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		maxParallel  int
 		noStart      bool
 	)
-	fs.StringVar(&harness, "harness", "claude", "the harness this runner offers: claude, kimi, codex, opencode, dsh (experimental), or fake with --worker-script")
-	fs.StringVar(&model, "model", "", "the model to run (claude default: sonnet; kimi, codex and opencode default: the CLI's own; opencode model: provider/model; dsh default: deepseek-flash; fake default: fake-1)")
+	fs.StringVar(&harness, "harness", "claude", "the harness this runner offers: claude, kimi, codex, opencode, dsh (experimental), qwen-code (experimental), or fake with --worker-script")
+	fs.StringVar(&model, "model", "", "the model to run (claude default: sonnet; kimi, codex, opencode and qwen-code default: the CLI's own; opencode model: provider/model; dsh default: deepseek-flash; fake default: fake-1)")
 	fs.StringVar(&workerScript, "worker-script", "", "with --harness fake: the scripted worker the fake adapter drives (tests)")
 	fs.StringVar(&agentFile, "agent-file", "", "with --harness kimi: the agent definition file the CLI session starts under")
 	fs.StringVar(&classes, "classes", defaultClasses, "the task classes this runner takes, comma-separated")
@@ -54,7 +55,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	fs.IntVar(&maxParallel, "max-parallel", 0, "how many concurrent jobs this runner runs, advertised at register (0 = unset, one at a time)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	agents := &agentSpecs{}
-	fs.Var(agents, "agent", "one offered agent, --agent once per harness and model: harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]; account defaults to the harness name; effort is validated per harness (claude, codex, opencode, dsh; kimi has none); tools= (claude only) replaces the Go shell scope with Claude Code tool patterns, none = file tools only; replaces --harness/--model/--classes/--agent-file")
+	fs.Var(agents, "agent", "one offered agent, --agent once per harness and model: harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]; account defaults to the harness name; effort is validated per harness (claude, codex, opencode, dsh; kimi and qwen-code have none); tools= (claude only) replaces the Go shell scope with Claude Code tool patterns, none = file tools only; replaces --harness/--model/--classes/--agent-file")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
@@ -82,6 +83,9 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			}
 		}
 	default:
+		if !set["classes"] {
+			classes = strings.Join(harnessDefaultClasses(harness), ",")
+		}
 		if len(splitList(classes)) == 0 {
 			return usagef(stderr, "the agent for harness %q takes no classes: --classes must name at least one", harness)
 		}
@@ -197,8 +201,20 @@ func (s agentSpec) accountLabel() string {
 
 // defaultClasses is what an agent takes when nothing narrows it — the
 // shorthand --classes default and the --agent form's own, kept one
-// constant so the two forms cannot drift.
+// constant so the two forms cannot drift. harnessDefaultClasses carries
+// the per-harness exceptions.
 const defaultClasses = "implement,review,answer"
+
+// harnessDefaultClasses is what an agent of the harness takes when no
+// classes were given. qwen-code runs no reviews, so its default leaves
+// the review class out; an explicit review stays refused when the
+// runner resolves the agent.
+func harnessDefaultClasses(harness string) []string {
+	if harness == "qwen-code" {
+		return []string{"implement", "answer"}
+	}
+	return splitList(defaultClasses)
+}
 
 // agentSpecs is the repeatable --agent flag: one agentSpec per value.
 type agentSpecs struct {
@@ -222,8 +238,9 @@ func (s *agentSpecs) String() string {
 // rest keeps its harness's default. Everything but existence is validated here, so a
 // bad agent is a startup failure, never a job's.
 func (s *agentSpecs) Set(v string) error {
-	spec := agentSpec{classes: splitList(defaultClasses)}
+	var spec agentSpec
 	classesNone := false
+	classesGiven := false
 	for _, field := range strings.Split(v, ",") {
 		field = strings.TrimSpace(field)
 		if field == "" {
@@ -239,6 +256,7 @@ func (s *agentSpecs) Set(v string) error {
 		case "model":
 			spec.model = value
 		case "classes":
+			classesGiven = true
 			classesNone = value == "none"
 			if value == "none" {
 				spec.classes = []string{}
@@ -263,6 +281,9 @@ func (s *agentSpecs) Set(v string) error {
 	}
 	if spec.harness == "" {
 		return fmt.Errorf("--agent %q: harness=<h> is required", v)
+	}
+	if !classesGiven {
+		spec.classes = harnessDefaultClasses(spec.harness)
 	}
 	if !classesNone && len(spec.classes) == 0 {
 		return fmt.Errorf("--agent %q: classes is empty; name at least one, + -separated", v)
@@ -343,6 +364,8 @@ func runnerDefaultModel(harness string) string {
 		return opencode.DefaultModel
 	case "dsh":
 		return dsh.DefaultModel
+	case "qwen-code":
+		return qwencode.DefaultModel
 	case "fake":
 		return "fake-1"
 	}
@@ -411,6 +434,16 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the dsh harness takes none")
 			}
 			ad = &dsh.Adapter{}
+		case "qwen-code":
+			if spec.agentFile != "" {
+				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the qwen-code harness takes none")
+			}
+			// qwen-code runs no reviews: its default classes already
+			// leave the review class out, and an explicit one is refused.
+			if slices.Contains(spec.classes, "review") {
+				return nil, nil, fmt.Errorf("the qwen-code harness takes no review class: qwen-code has no read-only review policy")
+			}
+			ad = &qwencode.Adapter{}
 		case "fake":
 			if spec.agentFile != "" {
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the fake harness takes none")
@@ -420,7 +453,7 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 			}
 			ad = &fake.Adapter{Script: workerScript}
 		default:
-			return nil, nil, fmt.Errorf("unknown harness %q; want claude, kimi, codex, opencode, dsh or fake", spec.harness)
+			return nil, nil, fmt.Errorf("unknown harness %q; want claude, kimi, codex, opencode, dsh, qwen-code or fake", spec.harness)
 		}
 		if err := adapter.ValidateEffort(spec.harness, spec.effort); err != nil {
 			return nil, nil, fmt.Errorf("--agent harness=%s: %v", spec.harness, err)
