@@ -261,14 +261,19 @@ func (a *Adapter) ParseErrEvent(line []byte) (adapter.Event, bool) {
 }
 
 // errorKind sorts a dsh error. The auth cases were reproduced (a missing
-// key, an invalid key); the limit cases were not and are best effort: the
-// HTTP statuses DeepSeek uses for rate limits (429) and insufficient
-// balance (402), and wording about either.
+// key, an invalid key); the quota cases were not and are best effort:
+// DeepSeek answers a rate limit with HTTP 429 and a spent balance with
+// 402, and the wording matches. A spent balance is not a spent window —
+// no clock resolves it but a top-up — so it is a kind of its own, which
+// the engine cools like a limit's long face (§8).
 func errorKind(e errorJSON) adapter.ErrorKind {
 	if e.Code == "MISSING_CREDENTIAL" || e.Code == "AUTH" || e.Status == 401 {
 		return adapter.ErrAuth
 	}
-	if e.Status == 429 || e.Status == 402 {
+	if e.Status == 402 {
+		return adapter.ErrBalance
+	}
+	if e.Status == 429 {
 		return adapter.ErrLimit
 	}
 	if adapter.IsModelRejectedText(e.Message) {
@@ -278,6 +283,11 @@ func errorKind(e errorJSON) adapter.ErrorKind {
 	for _, phrase := range limitPhrases {
 		if strings.Contains(lower, phrase) {
 			return adapter.ErrLimit
+		}
+	}
+	for _, phrase := range balancePhrases {
+		if strings.Contains(lower, phrase) {
+			return adapter.ErrBalance
 		}
 	}
 	if adapter.IsInfraText(e.Message) {
@@ -291,6 +301,10 @@ var limitPhrases = []string{
 	"rate-limit",
 	"ratelimit",
 	"too many requests",
+}
+
+// balancePhrases name an account out of money, not out of window.
+var balancePhrases = []string{
 	"insufficient balance",
 }
 
