@@ -40,8 +40,8 @@ const planReviewing = "reviewing"
 const planNeedsForeman = "needs_foreman"
 
 // The shipped approval limit (§6.3): the task count is off unless the
-// project sets one; the cost rule that stands in its place by default is
-// the plan budget (planbudget.go).
+// project sets one, as is its cost counterpart, the plan budget
+// (planbudget.go).
 const defaultApprovalMaxTasks = 0
 
 var defaultApprovalClasses = []string{"implement", "review", "answer"}
@@ -52,8 +52,8 @@ var defaultApprovalClasses = []string{"implement", "review", "answer"}
 //	approval_max_tasks          int; more tasks than this need approval.
 //	                            Absent = 0, off: no count rule. Negative
 //	                            is off too; the other rules still apply.
-//	approval_budget             the plan budget, the cost rule on by
-//	                            default: a whole number of tokens, a $
+//	approval_budget             the plan budget, the cost rule: a
+//	                            whole number of tokens, a $
 //	                            amount, or both joined with "+". Absent =
 //	                            none. A plan whose recorded spend passes
 //	                            it holds its new jobs (planbudget.go).
@@ -329,19 +329,12 @@ func (s approvalSettings) checkDiffers(check string) bool {
 	return strings.TrimSpace(check) != strings.TrimSpace(s.DefaultCheck)
 }
 
-// checkHoldReason words the check rule's hold of a plan (§6.3): the
-// rule's name, the check and the default it differs from, and how to
-// release or change it.
+// checkHoldReason words the check rule's hold of a plan, or of a task
+// held alone in an active plan (§6.3): the rule's name, the check and
+// the default it differs from, and how to release or change it.
 func checkHoldReason(check, defaultCheck string) string {
 	return checkHoldHead(check, defaultCheck) +
 		" (release: brigada plan approve; change it: cancel the task and add it again with the default check, or set default_check)"
-}
-
-// checkTaskHoldReason is checkHoldReason for one task an amendment
-// added or respecified, held alone while its plan runs on.
-func checkTaskHoldReason(check, defaultCheck string) string {
-	return checkHoldHead(check, defaultCheck) +
-		" (release: task_restart once the user agrees; change it: cancel the task and add it again with the default check, or set default_check)"
 }
 
 func checkHoldHead(check, defaultCheck string) string {
@@ -386,7 +379,7 @@ func (s approvalSettings) taskHoldReasons(t PlanTask) []string {
 		out = append(out, "touches "+p)
 	}
 	if s.checkDiffers(t.Check) {
-		out = append(out, checkTaskHoldReason(t.Check, s.DefaultCheck))
+		out = append(out, checkHoldReason(t.Check, s.DefaultCheck))
 	}
 	inDefault := map[string]bool{}
 	for _, x := range s.ExtraRepos {
@@ -474,9 +467,12 @@ var (
 // job queued for each. Settings holds the key=value pairs an approval
 // that stops asking changed (§6.3).
 type PlanDecision struct {
-	PlanID   int64
-	State    string
-	Tasks    []CreatedTask
+	PlanID int64
+	State  string
+	Tasks  []CreatedTask
+	// Held lists the released tasks the plan budget held again at once
+	// (§6.3): an active plan's spend still past approval_budget.
+	Held     []HeldTask
 	Settings []string
 }
 
@@ -503,8 +499,13 @@ func (e *Engine) ApprovePlanVersion(ctx context.Context, project, plan, version 
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
-		proj, err := awaitingPlanTx(tx, project, plan, version)
+		proj, held, err := approvablePlanTx(tx, project, plan, version)
 		if err != nil {
+			return err
+		}
+		if held != nil {
+			r, err := e.releasePlanHoldsTx(tx, proj, plan, held, stopAsking, now)
+			res = r
 			return err
 		}
 		if stopAsking {
@@ -580,6 +581,78 @@ func (e *Engine) RejectPlanVersion(ctx context.Context, project, plan, version i
 		return PlanDecision{}, fmt.Errorf("reject plan %d: %w", plan, err)
 	}
 	return res, nil
+}
+
+// approvablePlanTx finds the plan the user's yes can act on: one
+// awaiting approval (held nil), or an active plan with tasks a plan
+// rule holds alone (§6.3), which it returns. An active plan with none,
+// or a plan in any other state, is not awaiting approval. The version
+// check is awaitingPlanTx's.
+func approvablePlanTx(tx *sql.Tx, project, plan, version int64) (int64, []int64, error) {
+	proj, err := awaitingPlanTx(tx, project, plan, version)
+	if err == nil || !errors.Is(err, ErrPlanNotAwaiting) {
+		return proj, nil, err
+	}
+	var state string
+	if qerr := tx.QueryRow("SELECT project_id, state FROM plans WHERE id = ?", plan).Scan(&proj, &state); qerr != nil {
+		return 0, nil, fmt.Errorf("read plan %d: %w", plan, qerr)
+	}
+	if state != "active" {
+		return 0, nil, err
+	}
+	held, herr := ruleHeldTasksTx(tx, plan)
+	if herr != nil {
+		return 0, nil, herr
+	}
+	if len(held) == 0 {
+		return 0, nil, fmt.Errorf("%w: plan %d is active and no task of it waits at the plan gate", ErrPlanNotAwaiting, plan)
+	}
+	var have int64
+	if qerr := tx.QueryRow("SELECT version FROM plans WHERE id = ?", plan).Scan(&have); qerr != nil {
+		return 0, nil, fmt.Errorf("read plan %d: %w", plan, qerr)
+	}
+	if version != 0 && version != have {
+		return 0, nil, fmt.Errorf("%w: plan %d is at version %d, not the version %d you were shown; read the plan again and show it to the user", ErrPlanVersionStale, plan, have, version)
+	}
+	return proj, held, nil
+}
+
+// releasePlanHoldsTx is the user's yes to an active plan's held tasks
+// (§6.3): they return to the ready rule, which queues the ones whose
+// dependencies are done and holds again what the plan budget still
+// holds. stopAsking changes the settings the held tasks' own rules map
+// to — a task held alone never tripped the task count or gate_plan.
+func (e *Engine) releasePlanHoldsTx(tx *sql.Tx, proj, plan int64, held []int64, stopAsking bool, now time.Time) (PlanDecision, error) {
+	var changed []string
+	if stopAsking {
+		s, asks, err := heldTaskAsksTx(tx, proj, held)
+		if err != nil {
+			return PlanDecision{}, err
+		}
+		if changed, err = e.stopAskingTx(tx, proj, s, asks, now); err != nil {
+			return PlanDecision{}, fmt.Errorf("stop the plan gate asking: %w", err)
+		}
+	}
+	if err := e.releaseHeldTasksTx(tx, proj, held, now); err != nil {
+		return PlanDecision{}, err
+	}
+	queued, reheld, err := e.readyPlanTasksTx(tx, proj, plan, now)
+	if err != nil {
+		return PlanDecision{}, err
+	}
+	if err := inboxEventTx(tx, evPlanApproved, proj, 0, 0,
+		eventPayload{Plan: plan, Status: "active", Count: int64(len(queued))}, now); err != nil {
+		return PlanDecision{}, err
+	}
+	res := PlanDecision{PlanID: plan, State: "active", Tasks: queued, Held: reheld, Settings: changed}
+	closed, err := e.finishPlanIfClosedTx(tx, proj, plan, 0, 0, now)
+	if err != nil {
+		return PlanDecision{}, err
+	}
+	if closed {
+		res.State = planDone
+	}
+	return res, e.wakeForemanTx(tx, proj, now)
 }
 
 // awaitingPlanTx finds the plan and checks it waits for approval,

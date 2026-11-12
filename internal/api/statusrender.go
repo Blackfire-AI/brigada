@@ -65,8 +65,8 @@ func StatusSections(st Status) string {
 	} else {
 		lines = append(lines, "plans:")
 		for _, p := range st.Plans {
-			// A reviewing plan names its round (§6.2): `plan 12
-			// reviewing (round 1)`; a plan its review parked for the
+			// A reviewing plan names its round (§6.2): `#12 reviewing
+			// (round 1) <title>`; a plan its review parked for the
 			// foreman names its round the same way.
 			state := p.State
 			if state == "reviewing" || state == "needs_foreman" {

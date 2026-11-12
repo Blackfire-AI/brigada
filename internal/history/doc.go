@@ -3,5 +3,6 @@
 // calls and their results, task specs and results, questions and answers,
 // reviews, notifications), full session transcripts uploaded as artifacts
 // after every job, and the append-only event log that messages and transcripts
-// reference. Retention is configurable; the default keeps everything.
+// reference. Retention is the config file's retention_days; the default,
+// 0, keeps everything.
 package history

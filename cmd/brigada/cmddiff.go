@@ -13,7 +13,8 @@ import (
 )
 
 // taskReader is the one thing diff asks the engine: which refs. The
-// engine runs no git for a client (product §5 rule 1).
+// client runs the git: the engine reads no client's checkout (product
+// §5 rule 6).
 type taskReader interface {
 	Task(ctx context.Context, id int64) (engine.TaskInfo, error)
 }

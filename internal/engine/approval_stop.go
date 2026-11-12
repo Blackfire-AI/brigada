@@ -228,20 +228,39 @@ func (e *Engine) stopAskingTx(tx *sql.Tx, project int64, s approvalSettings, ask
 // own asks (landHoldAsksTx) carry the tier, the restart and the paths a
 // landing trips.
 func planHoldAsksTx(tx *sql.Tx, project, plan int64) (approvalSettings, []holdAsk, error) {
+	return holdAsksTx(tx, project, "plan_id = ?", []any{plan}, true)
+}
+
+// heldTaskAsksTx is planHoldAsksTx for the tasks a plan rule holds alone
+// in an active plan (§6.3): the per-task rules alone, for a task held
+// alone never tripped the task count or gate_plan.
+func heldTaskAsksTx(tx *sql.Tx, project int64, held []int64) (approvalSettings, []holdAsk, error) {
+	marks := strings.TrimSuffix(strings.Repeat("?, ", len(held)), ", ")
+	args := make([]any, len(held))
+	for i, id := range held {
+		args[i] = id
+	}
+	return holdAsksTx(tx, project, "id IN ("+marks+")", args, false)
+}
+
+// holdAsksTx evaluates the tasks where names against the project's
+// rules and lists the asks a stop-asking approval answers; wholePlan
+// adds the whole-plan triggers, gate_plan and the task count.
+func holdAsksTx(tx *sql.Tx, project int64, where string, args []any, wholePlan bool) (approvalSettings, []holdAsk, error) {
 	s, err := projectApprovalTx(tx, project)
 	if err != nil {
 		return approvalSettings{}, nil, err
 	}
-	rows, err := tx.Query("SELECT spec, COALESCE(check_cmd, ''), COALESCE(class, ''), COALESCE(extra_repos, '') FROM tasks WHERE plan_id = ?", plan)
+	rows, err := tx.Query("SELECT spec, COALESCE(check_cmd, ''), COALESCE(class, ''), COALESCE(extra_repos, '') FROM tasks WHERE "+where, args...)
 	if err != nil {
-		return approvalSettings{}, nil, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
+		return approvalSettings{}, nil, fmt.Errorf("read the held tasks: %w", err)
 	}
 	defer rows.Close()
 	var tasks []PlanTask
 	for rows.Next() {
 		var spec, check, class, extra string
 		if err := rows.Scan(&spec, &check, &class, &extra); err != nil {
-			return approvalSettings{}, nil, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
+			return approvalSettings{}, nil, fmt.Errorf("read the held tasks: %w", err)
 		}
 		t := PlanTask{Spec: spec, Check: check, Class: class}
 		if spec2 := parseExtraReposRecord(extra); spec2 != nil {
@@ -250,14 +269,14 @@ func planHoldAsksTx(tx *sql.Tx, project, plan int64) (approvalSettings, []holdAs
 		tasks = append(tasks, t)
 	}
 	if err := rows.Err(); err != nil {
-		return approvalSettings{}, nil, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
+		return approvalSettings{}, nil, fmt.Errorf("read the held tasks: %w", err)
 	}
 	v := s.evaluate(tasks)
 	var asks []holdAsk
-	if v.Gate {
+	if wholePlan && v.Gate {
 		asks = append(asks, holdAsk{kind: holdGatePlan})
 	}
-	if v.Limit > 0 && v.Tasks > v.Limit {
+	if wholePlan && v.Limit > 0 && v.Tasks > v.Limit {
 		asks = append(asks, holdAsk{kind: holdMaxTasks, count: v.Tasks})
 	}
 	for _, c := range v.Classes {

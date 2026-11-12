@@ -308,14 +308,12 @@ func (e *Engine) retrySetupFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 	if failed > setupRetries {
 		return false, nil
 	}
-	// A spent restart budget cannot take the retry's submit: the task goes
-	// to the foreman instead, as for any retry that cannot be queued.
-	if _, capped, err := e.roundCapReached(tx, SubmitParams{TaskID: job.TaskID, Restart: true}); err != nil || capped {
-		return false, err
-	}
+	// The retry is a fresh attempt that spends no restart (§5.7): the
+	// restart cap neither gates nor counts it, so the work job's own
+	// transient restart stays available after it.
 	reason := boundNote(c.Error)
 	note := reason + "\nThe environment failed before any work was judged; nothing of the previous attempt is lost or to be fixed."
-	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, now.Add(retryDelayFor(failed)), now)
+	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, true, now.Add(retryDelayFor(failed)), now)
 	if err != nil {
 		return false, err
 	}
@@ -329,9 +327,11 @@ func (e *Engine) retrySetupFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 // a network that is not up in the seconds after a wake needs time to
 // come back, and a longer outage must not be hammered every second
 // (issue #46). The sequence tops out at a couple of minutes, long enough
-// to cover a wake. Setup retries (§5.7), transient CLI retries and the
-// foreman's re-wake (§4.2) wait on this table; infrastructure failures
-// wait on their own, minutes-scale one above (§5.1).
+// to cover a wake. Setup retries (§5.7), a fix round's transient retry
+// (its first step) and the foreman's re-wake (§4.2) wait on this table;
+// a work job's transient restart on another agent waits on none, and
+// infrastructure failures wait on their own, minutes-scale one below
+// (§5.1).
 var retryDelays = []time.Duration{5 * time.Second, 15 * time.Second, 45 * time.Second, 2 * time.Minute}
 
 // retryDelayFor is the pause before the consecutive-th retry: 5s after
@@ -573,7 +573,7 @@ func (e *Engine) retryReviewInfraTx(tx *sql.Tx, job *jobRow, c Completion, now t
 // carries, for a work job and a fix round alike.
 func transientCLIError(kind string) bool {
 	switch kind {
-	case "limit", "auth", string(adapter.ErrModel), string(adapter.ErrOutputLimit), "other", "runner_lost":
+	case "limit", "balance", "auth", string(adapter.ErrModel), string(adapter.ErrOutputLimit), "other", "runner_lost":
 		return true
 	}
 	return false
@@ -605,7 +605,9 @@ func (e *Engine) autoRestartTaskTx(tx *sql.Tx, job *jobRow, kind, text string, n
 // judgment event for this failure, with its kind and text in the reason.
 func (e *Engine) autoRestartWorkTx(tx *sql.Tx, job *jobRow, kind, text string, now time.Time) (bool, error) {
 	var restarts int
-	if err := tx.QueryRow("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1", job.TaskID).Scan(&restarts); err != nil {
+	// A setup retry (§5.7) is a restart that spends nothing, so it does
+	// not use up this one.
+	if err := tx.QueryRow("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1 AND retry = 0", job.TaskID).Scan(&restarts); err != nil {
 		return false, fmt.Errorf("count the restarts of task %d: %w", job.TaskID, err)
 	}
 	if restarts != 0 {
@@ -640,7 +642,7 @@ func (e *Engine) autoRestartWorkTx(tx *sql.Tx, job *jobRow, kind, text string, n
 	if lastEvent != "" {
 		note += "\nLast progress: " + boundNote(lastEvent)
 	}
-	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, agent, time.Time{}, now)
+	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, agent, false, time.Time{}, now)
 	if err != nil {
 		return false, err
 	}
@@ -801,7 +803,7 @@ func (e *Engine) escalateTierTx(tx *sql.Tx, job *jobRow, reason, note string, ra
 		}
 	}
 	note = boundNote(fmt.Sprintf("previous attempt (tier %s, effort %s) %s: %s", before, shownEffort, reason, note))
-	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, time.Time{}, now)
+	r, err := e.queueTaskRestartTx(tx, job.ProjectID, job.TaskID, note, 0, false, time.Time{}, now)
 	if err != nil {
 		return false, err
 	}
@@ -837,19 +839,14 @@ func nextEffort(effort string) string {
 // note beside it — the check's tail or the findings, the shorter line
 // of the same matter — for the foreman's judgment (§3, §10).
 func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note string, failure *checkFailure, now time.Time) error {
-	_, capped, err := e.roundCapReached(tx, SubmitParams{TaskID: job.TaskID, Round: round})
-	if err != nil {
-		return err
-	}
-	if capped {
-		return e.outOfRoundsTx(tx, job, round, note, failure, now)
-	}
-	// A failure repeated across the fix rounds is a loop (§5.6): with
-	// rounds to spend and nothing changed, another round of the same
-	// feedback would answer nothing, so the task parks for the foreman
-	// like a stalled run — same route, the loop as the reason — and the
-	// attempt counts as a spent round's. The spent rounds keep the
-	// escalation ladder (§8); a restart begins a fresh chain.
+	// A failure repeated across the fix rounds is a loop (§5.6): nothing
+	// changed, so another round of the same feedback — or the escalation
+	// a spent budget would start — would answer nothing, and the task
+	// parks for the foreman like a stalled run: same route, the loop as
+	// the reason, and the attempt counts as a spent round's. It is judged
+	// before the round cap, so a loop that fills the budget on its last
+	// round (the defaults: the work job and both fix rounds failing the
+	// same way) still parks as a loop; a restart begins a fresh chain.
 	if round == roundFix && failure != nil {
 		if loop, why, err := e.checkLoopTx(tx, job, failure.Output); err != nil {
 			return err
@@ -859,6 +856,13 @@ func (e *Engine) queueFixRoundTx(tx *sql.Tx, job *jobRow, round, feedback, note 
 			}
 			return e.needsForemanTx(tx, job, evTaskLoop, failure.payload(why), now)
 		}
+	}
+	_, capped, err := e.roundCapReached(tx, SubmitParams{TaskID: job.TaskID, Round: round})
+	if err != nil {
+		return err
+	}
+	if capped {
+		return e.outOfRoundsTx(tx, job, round, note, failure, now)
 	}
 	spec, err := taskSpecTx(tx, job.TaskID)
 	if err != nil {
@@ -1212,7 +1216,7 @@ func reviewerUnavailable(c Completion) bool {
 		return false
 	}
 	switch c.ErrorKind {
-	case "limit", "auth", string(adapter.ErrModel), ErrorKindSetup, ErrorKindInfra:
+	case "limit", "balance", "auth", string(adapter.ErrModel), ErrorKindSetup, ErrorKindInfra:
 		return true
 	}
 	return false

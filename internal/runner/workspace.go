@@ -77,7 +77,7 @@ type workspace struct {
 // the grant's branch — a work job's from the base ref, a fix round's
 // from the head of the task's branch as the remote holds it, so the
 // round builds on the work before it. A repo without a URL is refused
-// outright (product §5 rule 6: repos are addressed by URL): no clone,
+// outright (product §5 rule 4: repos are addressed by URL): no clone,
 // no worktree, no worker. A review job takes the other worktree (§7):
 // the task's result branch, read-only.
 func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*workspace, error) {

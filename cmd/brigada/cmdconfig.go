@@ -257,7 +257,7 @@ func printConfigMachine(rt *runtime, flagStateDir string, stdout, stderr io.Writ
 	defaults := [][2]string{
 		{"notify", "auto"}, {"idle_minutes", "30"},
 		{"state_dir", ""},
-		{"snapshot_dir", "none"}, {"headroom", "true"},
+		{"snapshot_dir", "none"}, {"retention_days", "0, keep everything"}, {"headroom", "true"},
 		{"task_auto_retry", "true"}, {"foreman_wakes_per_day", "20"},
 		{"default_reviewer", "none"},
 		{"rounds.fix", "2"}, {"rounds.review", "2"}, {"rounds.restart", "3"},

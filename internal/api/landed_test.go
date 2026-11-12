@@ -28,7 +28,8 @@ func TestLandedEndpoint(t *testing.T) {
 		t.Fatalf("record landed as client: %d %s", code, data)
 	}
 
-	// A foreman token cannot: the foreman runs no git (product §5 rule 1).
+	// A foreman token cannot: the foreman has no shell to read the branch
+	// with.
 	code, _, data = e.do(http.MethodPost, "/v1/landed", "foreman1", "", []byte(body))
 	if code != http.StatusForbidden {
 		t.Fatalf("record landed as foreman: %d %s, want 403", code, data)

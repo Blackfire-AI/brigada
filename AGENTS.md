@@ -19,7 +19,7 @@ CI runs these; run them before you push:
     CGO_ENABLED=1 go test -race -count=1 ./...
     (cd internal/tools/licenses && go test -count=1 .)
 
-The project's `default_check` runs CI's build-job steps before the tests (gofmt, guard and vet), then `go test`; a test keeps the two in step, while shellcheck, race, licences, macOS, govulncheck and gitleaks stay CI-only.
+The project's `default_check` runs CI's build-job steps before the tests (gofmt, guard and vet), then `go test`; a test keeps the two in step. The licences check runs inside that `go test` too, through `TestThirdPartyNoticesFresh` in `internal/tools` (below), while shellcheck, race, macOS, govulncheck and gitleaks stay CI-only.
 
 `guard` is the repository's own scanner for private addresses and similar leaks.
 
@@ -56,7 +56,7 @@ The project's `default_check` runs CI's build-job steps before the tests (gofmt,
 - `tools`: repository tooling, such as `guard`
 - `version`: the binary's version
 
-For the design, read `docs/design.md`, `docs/product.md` and `docs/glossary.md`.
+For the design, read `docs/design.md` (an index of the section files under `docs/design/`), `docs/product.md` and `docs/glossary.md`.
 
 The docs under `docs/` describe the system as it is on main, in the present tense. A change that alters behaviour updates the section it touches in the same commit. No dates, decision or status markers, issue numbers or history: git log, CHANGELOG.md and docs/COMPATIBILITY.md keep those.
 

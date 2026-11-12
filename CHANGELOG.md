@@ -9,6 +9,8 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - A cancel can say why. Each `plan_amend` cancel entry may be `{task, reason}` beside the bare task name or id, and `task_cancel` takes an optional `reason`, in the foreman's MCP tools and the API alike. Every task an amendment newly cancels records one `task_cancelled_by_amend` event with the plan, the reason verbatim and the caller (foreman or user), and `brigada history` shows the reason. A reason is expected on every cancel; one without is still accepted, as before, and recorded as "no reason given".
 - A restarted dependent now rebuilds on the land target, or on the waiting landings' ref `refs/brigada/land/<target>`, when its dependency already landed (squashed or not) or was cancelled or retired, instead of on the dependency's old result branch, whose landing conflicted. The `task_base_stale` reason names that base. A task base may now be the waiting ref, which the runner fetches by name.
+- `plan_file_branch`, a project setting (`brigada project set`, `project show` and `.brigada/project.yaml`), names the branch the plan files are pushed to; `main` or the repository's default branch name commits them to the default branch. The mirror read the key, but nothing could set it (issue #215).
+- `retention_days` in the config file prunes messages and artifacts older than that many days on the engine's sweep; 0, the default, keeps everything, and the event log is never pruned. The engine could prune, but no key set it (issue #217).
 
 ### Fixed
 
@@ -21,6 +23,13 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `brigada top` and `brigada capacity` refused a `--project` that names a local-path remote (`file:/…`), and run inside a repository with such an origin they showed every project. They now read a project's identity as the engine does.
 - `brigada top` left its idle connections to the engine open after every refresh until the engine's idle timeout closed them; each refresh now closes its own.
 - A worker tool call cut for the loop watch could end in a split UTF-8 character.
+- The `approval_max_tasks` usage error said a negative value turns every approval rule off; it turns off the count rule alone, and the error now says so (issue #218).
+- The coordinator's `plan_reject` advertised `and_stop_asking`, which it ignored; its schema now offers only `repo_url`, `plan` and `version`, and a test holds every coordinator tool's arguments to COMPATIBILITY.md (issue #216).
+- A quota limit counted toward an agent's failure streak: a success, a limit and then one failure marked the agent broken, since the stored limit job was one of the "last two". The streak now skips limit failures as it skips setup and infra ones (issue #212).
+- A spent DeepSeek balance (dsh's HTTP 402 `Insufficient Balance`) was sorted as a plain limit, so the account cooled for the 30-minute default and walked back into the same wall every half hour while still empty. It is now a kind of its own: the account cools for eight days — the cap a suspect reset is capped at — and `brigada agent reset` lifts it once the account is topped up. A foreman turn's balance error marks it limited with an unknown reset, as a limit without a time does, and no balance counts toward an agent's failure streak.
+- A failed setup's retry spent one of the task's restarts, though §5.7 says it charges none: a spent restart budget stopped the retry, and after one setup retry the work job's own transient restart no longer fired. The retry now spends no restart, and the restart cap neither gates nor counts it (issue #213).
+- The check-loop rule could not fire at the default two fix rounds: the round cap was checked first, so the third identical failure went out of rounds and escalated. The loop is now judged before the cap and parks the task as a loop (issue #214).
+- The foreman could release a task a plan rule held alone — an amendment's `check_command`, class, protected-path or extra-repository hold, or the plan budget — with `task_restart`, although plan gates are the user's alone. `task_restart` and `answer` now refuse a held task, and `brigada plan approve` (and the coordinator's `plan_approve`) on a running plan releases its held tasks, as GUIDE §7 already told the user to do; a task still over the budget is held again and named (issue #211).
 
 ## [1.2.0] - 2026-11-09
 

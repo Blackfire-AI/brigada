@@ -11,7 +11,7 @@ import (
 // lives — the repo, the base it started from, its current result branch
 // (the latest attempt's, -r<n> included) — and the job a reader of its
 // record starts from. The engine answers which refs; it never runs git
-// on a client's behalf (product §5 rule 1).
+// on a client's behalf (product §5 rule 6).
 type TaskInfo struct {
 	Tier          string `json:"tier,omitempty"`
 	EffectiveTier string `json:"effective_tier,omitempty"`

@@ -17,7 +17,8 @@ const statsLiveWindow = 10 * time.Minute
 
 // StatsRow is one (agent, class) line of a project's stats (§8): which
 // agent, on which runner, how often it took the class in this repo and
-// how often that succeeded, with the score the dispatcher ranks by.
+// how often that succeeded, with the score: the mean of the draw the
+// dispatcher ranks by.
 // Attempts is also the confidence in the score: the more attempts, the
 // less the prior pulls. An agent that offers the class and has no
 // outcome row yet carries attempts 0 and the bare prior score, so a
@@ -58,9 +59,10 @@ type ProjectStats struct {
 	Rows      []StatsRow `json:"rows"`
 }
 
-// Score is the success rate the dispatcher ranks agents by (§8): a rate
-// with a prior of one pseudo-trial at 50%, (successes + 0.5) /
-// (attempts + 1). With no attempts it is the prior itself, 0.5; each
+// Score is the success rate shown for an agent's record (§8), the mean
+// of the Beta draw the dispatcher ranks agents by: a rate with a prior of
+// one pseudo-trial at 50%, (successes + 0.5) / (attempts + 1). With no
+// attempts it is the prior itself, 0.5; each
 // attempt moves it toward the observed rate, so a lone success reads
 // 0.75, not 1.
 func Score(attempts, successes int) float64 {

@@ -90,6 +90,12 @@ func (e *Engine) agentOutcomeTx(tx *sql.Tx, job *jobRow, c Completion, now time.
 		// wall, and the status shows every agent of the account cooling
 		// until the reset.
 		return e.coolAccountTx(tx, job, c, now)
+	case "balance":
+		// A spent balance is the same quota's permanent face: the account
+		// is out of money, and no clock resets that but a top-up. It
+		// cools the account like a limit, to the cap rather than a reset
+		// time, and the §8 reset lifts it once the account is funded.
+		return e.coolBalanceTx(tx, job, now)
 	case "auth":
 		return e.markBrokenTx(tx, job, job.AgentID, brokenAuth, now)
 	case string(adapter.ErrModel):
@@ -102,12 +108,15 @@ func (e *Engine) agentOutcomeTx(tx *sql.Tx, job *jobRow, c Completion, now time.
 	}
 	// The agent's last N completions all failed, the one just written
 	// included. The jobs table is the count: terminal done, failed and
-	// stalled jobs on the agent, newest first.
+	// stalled jobs on the agent, newest first — less the failures that
+	// are not the agent's health: setup and infra (the environment) and
+	// a limit or a spent balance (quota), each of which sits between
+	// real failures without padding or masking them.
 	n := e.cfg.FailureStreak
 	rows, err := tx.Query(`SELECT status FROM jobs
 		WHERE agent_id = ? AND status IN ('done', 'failed', 'stalled')
-		AND NOT (status = 'failed' AND (result LIKE '%"error":"setup failed%' OR error_kind = ?))
-		ORDER BY updated_at DESC, id DESC LIMIT ?`, job.AgentID, ErrorKindInfra, n)
+		AND NOT (status = 'failed' AND (result LIKE '%"error":"setup failed%' OR error_kind IN (?, ?, ?)))
+		ORDER BY updated_at DESC, id DESC LIMIT ?`, job.AgentID, ErrorKindInfra, string(adapter.ErrLimit), string(adapter.ErrBalance), n)
 	if err != nil {
 		return fmt.Errorf("count the failures of agent %d: %w", job.AgentID, err)
 	}
@@ -141,24 +150,40 @@ const limitResetCap = 8 * 24 * time.Hour
 // coolAccountTx cools every agent sharing the failed job's agent's
 // account label (§8 "Quota"): until the completion's reset time when it
 // lies ahead, else now plus the configured default. A reset beyond
-// eight days out is suspect and capped there. An account already
-// cooling past that keeps its later deadline. An agent with no account
-// label shares its quota with no one and cools alone. One plain event
-// names the account and the deadline; no inbox, no wake.
+// eight days out is suspect and capped there.
 func (e *Engine) coolAccountTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
-	var account string
-	if err := tx.QueryRow("SELECT account FROM agents WHERE id = ?", job.AgentID).Scan(&account); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		return fmt.Errorf("read the account of agent %d: %w", job.AgentID, err)
-	}
 	until := now.Add(e.cfg.LimitCooling)
 	if t, err := time.Parse(time.RFC3339, c.LimitUntil); err == nil && t.After(now) {
 		until = t
 		if t.Sub(now) > limitResetCap {
 			until = now.Add(limitResetCap)
 		}
+	}
+	return e.coolUntilTx(tx, job, until, now)
+}
+
+// coolBalanceTx cools the account of a spent balance (§8 "Quota"): the
+// provider refused payment, and no clock resolves that but a top-up, so
+// the window is the cap itself — long enough to keep the dispatcher off
+// the account until the §8 reset lifts it once the account is funded
+// again. A reset time the completion carried anyway is not honored: an
+// empty account stays empty past any clock.
+func (e *Engine) coolBalanceTx(tx *sql.Tx, job *jobRow, now time.Time) error {
+	return e.coolUntilTx(tx, job, now.Add(limitResetCap), now)
+}
+
+// coolUntilTx stamps cooling_until on every agent sharing the failed
+// job's agent's account label (§8 "Quota"). An account already cooling
+// past that keeps its later deadline. An agent with no account label
+// shares its quota with no one and cools alone. One plain event names
+// the account and the deadline; no inbox, no wake.
+func (e *Engine) coolUntilTx(tx *sql.Tx, job *jobRow, until, now time.Time) error {
+	var account string
+	if err := tx.QueryRow("SELECT account FROM agents WHERE id = ?", job.AgentID).Scan(&account); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("read the account of agent %d: %w", job.AgentID, err)
 	}
 	untilStr := fmtTime(until)
 	query := `UPDATE agents SET cooling_until = ?, updated_at = ?

@@ -189,7 +189,7 @@ func ValidateRoleText(role, text string) error {
 // has no project.
 func (e *Engine) RoleInstruction(ctx context.Context, repoURL, role string) (*RoleInstruction, error) {
 	if repoURL == "" {
-		return nil, fmt.Errorf("repo URL is required (product §5 rule 6: repos are addressed by URL)")
+		return nil, fmt.Errorf("repo URL is required (product §5 rule 4: repos are addressed by URL)")
 	}
 	if !validRole(role) {
 		return nil, fmt.Errorf("%w: unknown role %q; valid roles: %s", ErrInvalidSetting, role, strings.Join(RoleKeys, ", "))
@@ -228,7 +228,7 @@ func (e *Engine) RoleInstruction(ctx context.Context, repoURL, role string) (*Ro
 // project gets one, born by setup like the foreman choice's.
 func (e *Engine) SetRoleInstruction(ctx context.Context, repoURL, role, text string) (*RoleInstruction, error) {
 	if repoURL == "" {
-		return nil, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
+		return nil, fmt.Errorf("%w: repo URL is required (product §5 rule 4: repos are addressed by URL)", ErrInvalidSetting)
 	}
 	if !validRole(role) {
 		return nil, fmt.Errorf("%w: unknown role %q; valid roles: %s", ErrInvalidSetting, role, strings.Join(RoleKeys, ", "))
@@ -403,7 +403,7 @@ func (r RoleFileRemoval) Change() ConfigChange {
 // a project that upgraded without rerunning init keeps its guidance.
 func (e *Engine) UnimportRoleFiles(ctx context.Context, repoURL string, configured map[string]bool) ([]RoleFileRemoval, error) {
 	if repoURL == "" {
-		return nil, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
+		return nil, fmt.Errorf("%w: repo URL is required (product §5 rule 4: repos are addressed by URL)", ErrInvalidSetting)
 	}
 	var out []RoleFileRemoval
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
@@ -493,7 +493,7 @@ func roleImportVersion(role, text string) string {
 // refused with ErrRoleTextKept and the kept local record returned.
 func (e *Engine) ImportRoleFile(ctx context.Context, repoURL, role, text string) (*RoleInstruction, error) {
 	if repoURL == "" {
-		return nil, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
+		return nil, fmt.Errorf("%w: repo URL is required (product §5 rule 4: repos are addressed by URL)", ErrInvalidSetting)
 	}
 	if err := ValidateRoleText(role, text); err != nil {
 		return nil, err

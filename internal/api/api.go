@@ -67,7 +67,8 @@ func (s *Server) Handler() http.Handler {
 	// Landings detected from the default branch's trailers (§7.1): the
 	// runner's headless foreman turn and the client's attach both refresh
 	// the checkout and report here, so the runner and client roles share
-	// it; the foreman runs no git (product §5 rule 1).
+	// it; the foreman has no shell to read the branch with, so its role
+	// is not among them.
 	mux.HandleFunc("/v1/landed", s.authed([]string{roleRunner, roleClient, roleAdmin}, s.handleLanded))
 	mux.HandleFunc("/v1/history", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleHistory))
 	// The foreman's issue read (§12.1 issues, §12.2): GET alone, the

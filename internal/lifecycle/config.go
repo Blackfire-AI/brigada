@@ -95,6 +95,10 @@ type FileConfig struct {
 	// an absolute directory outside the state directory's store. Empty =
 	// no snapshots.
 	SnapshotDir string
+	// RetentionDays is how many days of messages and artifacts the
+	// engine keeps before its sweep prunes them (retention_days, §9); 0,
+	// the default, keeps everything. The event log is never pruned.
+	RetentionDays int
 	// TaskAutoRetry controls one automatic restart after a transient work
 	// failure. Nil keeps the engine default, on.
 	TaskAutoRetry *bool
@@ -234,6 +238,11 @@ func loadConfigFile(path string, required bool) (FileConfig, error) {
 				err = fmt.Errorf("want an absolute directory, got %q", value)
 			}
 			cfg.SnapshotDir = value
+		case key == "retention_days":
+			cfg.RetentionDays, err = strconv.Atoi(value)
+			if err == nil && cfg.RetentionDays < 0 {
+				err = fmt.Errorf("want 0 (keep everything) or a positive number of days")
+			}
 		case key == "headroom":
 			var on bool
 			on, err = strconv.ParseBool(value)
@@ -276,7 +285,7 @@ func loadConfigFile(path string, required bool) (FileConfig, error) {
 		case strings.HasPrefix(key, "env."):
 			err = setEnvRef(&cfg, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, notify.webhook, snapshot_dir, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, rounds.fix, rounds.review, rounds.restart, review.tier, review.effort, review.family, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model>, a tools.claude/<model> or an env.<harness>.<VAR>", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, notify.webhook, snapshot_dir, retention_days, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, rounds.fix, rounds.review, rounds.restart, review.tier, review.effort, review.family, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model>, a tools.claude/<model> or an env.<harness>.<VAR>", path, n+1, key)
 		}
 		if err != nil {
 			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)

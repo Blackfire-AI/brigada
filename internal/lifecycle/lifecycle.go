@@ -50,6 +50,9 @@ type Config struct {
 	// SnapshotDir is where the engine snapshots its store daily (§6.4);
 	// empty takes no snapshots.
 	SnapshotDir string
+	// Retention is how long messages and artifacts are kept before the
+	// sweep prunes them (§9); zero keeps everything.
+	Retention time.Duration
 	// Rounds are the config file's default round caps; unnamed keys keep
 	// the engine defaults.
 	Rounds RoundsConfig
@@ -154,7 +157,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	defer st.Close()
 	roundCaps := cfg.Rounds.Caps()
-	eng := engine.New(st, engine.Config{Now: cfg.Now, SweepInterval: cfg.IdleTick, Caps: cfg.Caps, PlanFiles: true, SnapshotDir: cfg.SnapshotDir, TaskAutoRetry: cfg.TaskAutoRetry, ForemanWakeBudget: cfg.ForemanWakeBudget, DefaultReviewer: cfg.DefaultReviewer, ExactRoundCaps: &roundCaps, Review: cfg.Review})
+	eng := engine.New(st, engine.Config{Now: cfg.Now, SweepInterval: cfg.IdleTick, Caps: cfg.Caps, PlanFiles: true, SnapshotDir: cfg.SnapshotDir, Retention: cfg.Retention, TaskAutoRetry: cfg.TaskAutoRetry, ForemanWakeBudget: cfg.ForemanWakeBudget, DefaultReviewer: cfg.DefaultReviewer, ExactRoundCaps: &roundCaps, Review: cfg.Review})
 	// Project identities are canonical repo URLs (design §13.1): rows
 	// written in an older form are rewritten once, before anything reads
 	// them. Rows that cannot be, or that name one repository twice, stay

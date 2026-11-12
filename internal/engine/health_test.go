@@ -126,6 +126,94 @@ func TestLimitResetCappedAtEightDays(t *testing.T) {
 	}
 }
 
+// TestBalanceCoolsTheAccountToTheCap is §8 "Quota"'s long face: a spent
+// balance has no reset clock — only a top-up resolves it — so the
+// account cools to the eight-day cap whatever reset time the completion
+// carried, and the event names the account like any limit's.
+func TestBalanceCoolsTheAccountToTheCap(t *testing.T) {
+	e := newEnv(t)
+	a1 := e.addAgent(e.runner1, "claude", "sonnet", "work")
+	a2 := e.addAgent(e.runner1, "claude", "opus", "work")
+	soon := e.clock.Now().Add(30 * time.Minute)
+	e.runPinned(e.runner1, "claude", Completion{
+		Error: "worker CLI failed (balance): Insufficient Balance", ErrorKind: "balance", LimitUntil: soon.Format(time.RFC3339)})
+	want := fmtTime(e.clock.Now().Add(8 * 24 * time.Hour))
+	for _, id := range []int64{a1, a2} {
+		if h, _, cool := e.agentState(id); h != "ready" || cool != want {
+			t.Errorf("account agent %d: health %q cooling %q, want ready, cooling until %s", id, h, cool, want)
+		}
+	}
+	if got := e.countEvents(evAgentCooling); got != 1 {
+		t.Errorf("agent_cooling events = %d, want 1", got)
+	}
+	var found bool
+	for _, r := range e.eventRows() {
+		if r.kind == evAgentCooling && r.payload.Account == "work" && r.payload.Until == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no agent_cooling event naming account work until %s", want)
+	}
+}
+
+// TestBalanceBetweenFailuresPadsNoStreak: a spent balance is quota, not
+// health — between two real failures it neither counts nor pads the
+// streak (§8 "Health"), not even once the user's reset brought the
+// agent back after a top-up.
+func TestBalanceBetweenFailuresPadsNoStreak(t *testing.T) {
+	e := newEnv(t)
+	a := e.addAgent(e.runner1, "claude", "sonnet", "work")
+	e.runPinned(e.runner1, "claude", Completion{Error: "worker CLI failed"})
+	if h, _, _ := e.agentState(a); h != "ready" {
+		t.Fatalf("health after one failure = %q, want ready", h)
+	}
+	e.clock.Advance(time.Second)
+	// The failure woke the foreman; its turn would take the agent's next
+	// lease and a done completion would end the streak, so it is cancelled.
+	if turn := e.int("SELECT COALESCE(MAX(id), 0) FROM jobs WHERE kind = 'foreman' AND status = 'queued'"); turn != 0 {
+		e.cancel(turn)
+	}
+
+	p := e.workOn(e.addTask("{}"))
+	p.Kind = KindReview
+	p.Harness = "claude"
+	e.submit(p)
+	g := e.lease(e.runner1, []string{"claude"}, nil)
+	if g == nil || g.Kind != KindReview {
+		e.t.Fatalf("the review job was not leased: %+v", g)
+	}
+	if ans := e.complete(g, Completion{Error: "reviewer CLI failed (balance): Insufficient Balance", ErrorKind: "balance"}); ans != AnsOK {
+		e.t.Fatalf("complete: %s", ans)
+	}
+	if h, why, _ := e.agentState(a); h != "ready" {
+		t.Fatalf("health after a failure and a balance = %q (%q), want ready: quota pads no streak", h, why)
+	}
+
+	// The user tops up and resets the agent (§8): the balance row stays
+	// in the history, and the next real failure breaks on two failures,
+	// not three.
+	e.exec("UPDATE agents SET cooling_until = NULL WHERE id = ?", a)
+	e.clock.Advance(time.Second)
+	if turn := e.int("SELECT COALESCE(MAX(id), 0) FROM jobs WHERE kind = 'foreman' AND status = 'queued'"); turn != 0 {
+		e.cancel(turn)
+	}
+	p2 := e.workOn(e.addTask("{}"))
+	p2.Kind = KindReview
+	p2.Harness = "claude"
+	e.submit(p2)
+	g2 := e.lease(e.runner1, []string{"claude"}, nil)
+	if g2 == nil || g2.Kind != KindReview {
+		e.t.Fatalf("the second review job was not leased: %+v", g2)
+	}
+	if ans := e.complete(g2, Completion{Error: "reviewer CLI failed"}); ans != AnsOK {
+		e.t.Fatalf("complete: %s", ans)
+	}
+	if h, why, _ := e.agentState(a); h != "broken" || why != "repeated failures" {
+		t.Errorf("health after two failures with a balance between = %q (%q), want broken(repeated failures)", h, why)
+	}
+}
+
 // TestForemanLimitCoolsTheSharedAccount is §4.4: beside the foreman
 // key's own limited state, a foreman turn's limit cools the account it
 // ran on — the task workers sharing the label cool until the reset, and

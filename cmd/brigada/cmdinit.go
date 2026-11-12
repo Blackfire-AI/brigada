@@ -417,7 +417,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		case *foreman != "":
 			c, err := initResolveForeman(candidates, sources, foremanWant.harness, foremanWant.model)
 			if err != nil {
-				return agentSpec{}, "", usagef(stderr, "--foreman must name a usable agent that resumes headless (claude/model or codex/model); none matched")
+				return agentSpec{}, "", usagef(stderr, "--foreman must name a usable agent that resumes headless (claude/model, codex/model or opencode/model); none matched")
 			}
 			choice = c
 		case len(candidates) == 1:
@@ -696,7 +696,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			}
 		}
 		if foremanIndex < 0 {
-			return usagef(stderr, "--foreman must name a usable agent that resumes headless (claude/model or codex/model); none matched")
+			return usagef(stderr, "--foreman must name a usable agent that resumes headless (claude/model, codex/model or opencode/model); none matched")
 		}
 		foremanEffort = usable[foremanIndex].effort
 		if foremanHasEffort {

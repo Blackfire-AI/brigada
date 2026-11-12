@@ -52,7 +52,7 @@ func startSettingsEngine(t *testing.T) (context.Context, string) {
 // foreman wake budget (§4.3) and the project instructions (§5.9) at
 // their defaults, the last lines of every settings print.
 const tailDefaults = "setup=none (default)\n" + "setup_cache_key_files=none (default)\n" + "setup_timeout_minutes=15 (default)\n" +
-	"extra_repos=none (default)\n" + "foreman_rotate_tokens=400000 (default)\n" + "foreman_wakes_per_day=20 (default)\n" + "plan_files=on (default)\n" + "instructions=none (default)\n" + "skills_dir=.brigada/skills (default)\n"
+	"extra_repos=none (default)\n" + "foreman_rotate_tokens=400000 (default)\n" + "foreman_wakes_per_day=20 (default)\n" + "plan_files=on (default)\n" + "plan_file_branch=brigada/plans (default)\n" + "instructions=none (default)\n" + "skills_dir=.brigada/skills (default)\n"
 
 // gateDefaults are the gates and land rules (§6.3) and the plan review
 // (§6.2) at their defaults, printed between the approval keys and
@@ -73,7 +73,7 @@ const guidanceDefaults = "instructions.foreman: not configured, file none\n" +
 	"instructions.reviewer: not configured, file none\n" +
 	"skills: none imported\n"
 
-const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes, approval_protected_paths, gate_plan, gate_land, gate_push, plan_review, plan_review.tier, plan_review.effort, approval_tiers, approval_restarted, land_target, after_land, land_ready, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, plan_files, instructions"
+const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes, approval_protected_paths, gate_plan, gate_land, gate_push, plan_review, plan_review.tier, plan_review.effort, approval_tiers, approval_restarted, land_target, after_land, land_ready, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, plan_files, plan_file_branch, instructions"
 
 // TestProjectSettingsGolden covers project set and show: the defaults,
 // one override, the reset, and the usage errors for a bad key and value.
@@ -152,7 +152,7 @@ func TestProjectSettingsGolden(t *testing.T) {
 
 	// A bad value is a usage error naming what the key takes and the help command.
 	code, _, stderr = do("project", "set", "--repo", repo, "approval_max_tasks=many")
-	wantErr = `brigada: invalid project setting: approval_max_tasks takes an integer (0 = off, the default; negative = every approval rule off), got "many"; valid keys: ` + validSettingKeys + "\nRun 'brigada project set --help' for usage.\n"
+	wantErr = `brigada: invalid project setting: approval_max_tasks takes an integer (0 = off, the default; negative = off too; the other rules still apply), got "many"; valid keys: ` + validSettingKeys + "\nRun 'brigada project set --help' for usage.\n"
 	if code != 2 || stderr != wantErr {
 		t.Fatalf("bad value = %d %q, want 2 %q", code, stderr, wantErr)
 	}

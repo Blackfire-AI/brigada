@@ -189,7 +189,7 @@ func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note string, n
 		return RestartResult{}, fmt.Errorf(
 			"the task's restart budget is spent; the task stays parked at needs_foreman")
 	}
-	r, err := e.queueTaskRestartTx(tx, project, taskID, note, 0, time.Time{}, now)
+	r, err := e.queueTaskRestartTx(tx, project, taskID, note, 0, false, time.Time{}, now)
 	if err != nil {
 		return RestartResult{}, err
 	}
@@ -215,7 +215,7 @@ func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note string, n
 // gate, or local under gate_push never, is forgotten with its ref
 // (issue #205), so the new head's landing is the land rule's to queue
 // once it is approved.
-func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note string, agent int64, notBefore time.Time, now time.Time) (RestartResult, error) {
+func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note string, agent int64, retry bool, notBefore time.Time, now time.Time) (RestartResult, error) {
 	if err := e.forgetRestartedLandingTx(tx, taskID, now); err != nil {
 		return RestartResult{}, err
 	}
@@ -244,6 +244,7 @@ func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note stri
 		Prompt:       prompt.ComposeWorkerPrompt(spec, check, note, guidance...),
 		PromptMeta:   meta,
 		Restart:      true,
+		Retry:        retry,
 		RequireAgent: agent,
 		NotBefore:    notBefore,
 	}, now)
@@ -292,9 +293,9 @@ func parkedQuestionTx(tx *sql.Tx, project, taskID int64) (string, error) {
 }
 
 // parkedTaskTx validates the task both foreman tools act on: a task of
-// project, parked at needs_foreman. A task of another project, a task
-// in any other state, a task that is not there — each refuses with the
-// reason named.
+// project, parked at needs_foreman, and not held there by a plan rule.
+// A task of another project, a task in any other state, a held task, a
+// task that is not there — each refuses with the reason named.
 func parkedTaskTx(tx *sql.Tx, project, taskID int64) error {
 	var owner int64
 	var state string
@@ -314,6 +315,19 @@ func parkedTaskTx(tx *sql.Tx, project, taskID int64) error {
 	}
 	if state != taskNeedsForeman {
 		return fmt.Errorf("task %d is %s, not parked waiting for the foreman", taskID, state)
+	}
+	// A plan rule's hold is the user's to release (§6.3): no foreman tool
+	// passes it, however the user's yes reached the foreman.
+	held, err := ruleHeldTaskTx(tx, taskID)
+	if err != nil {
+		return err
+	}
+	if held {
+		var plan int64
+		if err := tx.QueryRow("SELECT plan_id FROM tasks WHERE id = ?", taskID).Scan(&plan); err != nil {
+			return fmt.Errorf("read the plan of task %d: %w", taskID, err)
+		}
+		return fmt.Errorf("%w: task %d waits at the plan gate for the user, who releases it with brigada plan approve %d", ErrTaskRuleHeld, taskID, plan)
 	}
 	return nil
 }

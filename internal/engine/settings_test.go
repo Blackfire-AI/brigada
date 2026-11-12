@@ -111,6 +111,7 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingForemanRotateTokens, Value: "400000", Default: true, Source: SourceDefault},
 		{Key: SettingForemanWakesPerDay, Value: "20", Default: true, Source: SourceDefault},
 		{Key: SettingPlanFiles, Value: "on", Default: true, Source: SourceDefault},
+		{Key: SettingPlanFileBranch, Value: defaultPlanFileBranch, Default: true, Source: SourceDefault},
 		{Key: SettingInstructions, Value: "none", Default: true, Source: SourceDefault},
 		{Key: configKeySkillsDir, Value: DefaultSkillsDir, Default: true, Source: SourceDefault},
 	}

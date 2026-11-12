@@ -71,6 +71,10 @@ const (
 	// The plan-file mirror (§6.4): on (default) pushes each plan's file to
 	// the repo's remote; off writes and pushes nothing.
 	SettingPlanFiles = "plan_files"
+	// The branch the plan-file mirror pushes to (§6.4): brigada/plans by
+	// default; the literal main, or the repo's default branch name,
+	// commits to the default branch instead.
+	SettingPlanFileBranch = "plan_file_branch"
 )
 
 // The values plan_files takes.
@@ -96,7 +100,7 @@ var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, Setti
 	SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
 	SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
-	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingInstructions}
+	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch, SettingInstructions}
 
 // MaxInstructionsBytes bounds the project instruction text (§5.9): a
 // starting value, open in §16 item 11. Above it a set or an import is
@@ -139,9 +143,9 @@ func instructionsSummary(text string) string {
 const settingListSep = "+"
 
 // validBranchName reports whether name is a branch name git takes, by
-// check-ref-format's rules spelled in Go: the engine runs no git (product
-// §5 rule 1), so the check is its own. A branch additionally cannot begin
-// with a dash, which git reads as an option.
+// check-ref-format's rules spelled in Go, so validating a setting runs no
+// git on the engine's host. A branch additionally cannot begin with a
+// dash, which git reads as an option.
 func validBranchName(name string) bool {
 	if name == "" || name == "@" || strings.HasPrefix(name, "-") ||
 		strings.HasSuffix(name, "/") || strings.HasSuffix(name, ".") ||
@@ -208,7 +212,7 @@ func parseSettingValue(key, value string) (json.RawMessage, error) {
 		SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
 		SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
 		SettingDefaultCheck, SettingWorkerTools,
-		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingInstructions:
+		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch, SettingInstructions:
 	default:
 		return nil, fmt.Errorf("%w: unknown key %q; valid keys: %s", ErrInvalidSetting, key, strings.Join(SettingKeys, ", "))
 	}
@@ -286,7 +290,7 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 		}
 		return json.Marshal(v)
 	}
-	if key == SettingLandTarget {
+	if key == SettingLandTarget || key == SettingPlanFileBranch {
 		v := strings.TrimSpace(value)
 		if !validBranchName(v) {
 			return nil, fmt.Errorf("%w: %s takes a branch name, got %q", ErrInvalidSetting, key, value)
@@ -312,7 +316,7 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 	if key == SettingApprovalMaxTasks {
 		n, err := strconv.Atoi(value)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s takes an integer (0 = off, the default; negative = every approval rule off), got %q",
+			return nil, fmt.Errorf("%w: %s takes an integer (0 = off, the default; negative = off too; the other rules still apply), got %q",
 				ErrInvalidSetting, key, value)
 		}
 		return json.RawMessage(strconv.Itoa(n)), nil
@@ -496,6 +500,11 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 			if s, ok := rawString(cur); ok && s != "" {
 				sv.Value = s
 			}
+		case SettingPlanFileBranch:
+			sv.Value = defaultPlanFileBranch
+			if s, ok := rawString(cur); ok && s != "" {
+				sv.Value = s
+			}
 		case SettingPlanReviewTier:
 			sv.Value = adapter.TierStandard
 			if s, ok := rawString(cur); ok && s != "" {
@@ -579,7 +588,7 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 // no project.
 func (e *Engine) ProjectSettings(ctx context.Context, repoURL string) (*ProjectSettings, error) {
 	if repoURL == "" {
-		return nil, fmt.Errorf("repo URL is required (product §5 rule 6: repos are addressed by URL)")
+		return nil, fmt.Errorf("repo URL is required (product §5 rule 4: repos are addressed by URL)")
 	}
 	var out *ProjectSettings
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
@@ -615,7 +624,7 @@ func (e *Engine) ProjectSettings(ctx context.Context, repoURL string) (*ProjectS
 // the foreman choice's. Returns the settings as they now stand.
 func (e *Engine) SetProjectSettings(ctx context.Context, repoURL string, values map[string]string) (ProjectSettings, error) {
 	if repoURL == "" {
-		return ProjectSettings{}, fmt.Errorf("%w: repo URL is required (product §5 rule 6: repos are addressed by URL)", ErrInvalidSetting)
+		return ProjectSettings{}, fmt.Errorf("%w: repo URL is required (product §5 rule 4: repos are addressed by URL)", ErrInvalidSetting)
 	}
 	if len(values) == 0 {
 		return ProjectSettings{}, fmt.Errorf("%w: no key=value given; valid keys: %s", ErrInvalidSetting, strings.Join(SettingKeys, ", "))
