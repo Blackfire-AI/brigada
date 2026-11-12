@@ -191,3 +191,43 @@ func (s *Store) SpentApprovalRequests(ctx context.Context, now time.Time) ([]App
 	}
 	return out, nil
 }
+
+// WaitingApprovalRequests lists the requests still waiting, oldest first,
+// after settling the ones past their expiry to expired.
+func (s *Store) WaitingApprovalRequests(ctx context.Context, now time.Time) ([]ApprovalRequest, error) {
+	var out []ApprovalRequest
+	err := s.Update(ctx, func(tx *sql.Tx) error {
+		if err := expireApprovals(ctx, tx, now); err != nil {
+			return err
+		}
+		var err error
+		out, err = WaitingApprovalRequestsTx(tx, now)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list waiting approval requests: %w", err)
+	}
+	return out, nil
+}
+
+// WaitingApprovalRequestsTx is the read-only half, for a status view: the
+// waiting requests whose expiry has not passed, oldest first. A request
+// past its expiry that nothing has settled yet is left out, as it reads
+// as expired.
+func WaitingApprovalRequestsTx(tx *sql.Tx, now time.Time) ([]ApprovalRequest, error) {
+	rows, err := tx.Query(`SELECT `+approvalColumns+` FROM approval_requests WHERE state = 'waiting' AND expires_at > ? ORDER BY id`,
+		now.UTC().Format(approvalTime))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ApprovalRequest
+	for rows.Next() {
+		r, err := scanApproval(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

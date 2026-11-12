@@ -93,6 +93,26 @@ func TestExpiredApprovalRequestReadsAsExpired(t *testing.T) {
 	}
 }
 
+func TestWaitingApprovalRequestsListsOnlyLiveWaitingOnes(t *testing.T) {
+	ctx := context.Background()
+	s := openMemory(t)
+	now := time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC)
+	live, _ := s.CreateApprovalRequest(ctx, "plan", "1", approvalNonce, now.Add(5*time.Minute), now)
+	signed, _ := s.CreateApprovalRequest(ctx, "plan", "2", approvalNonce, now.Add(5*time.Minute), now)
+	short, _ := s.CreateApprovalRequest(ctx, "plan", "3", approvalNonce, now.Add(time.Minute), now)
+	if won, err := s.SignApprovalRequest(ctx, signed.ID, "sig", "me", now); err != nil || !won {
+		t.Fatal(won, err)
+	}
+	later := now.Add(2 * time.Minute)
+	got, err := s.WaitingApprovalRequests(ctx, later)
+	if err != nil || len(got) != 1 || got[0].ID != live.ID {
+		t.Fatalf("waiting = %+v, %v; want only request %d", got, err, live.ID)
+	}
+	if r, _ := s.ApprovalRequest(ctx, short.ID, later); r.State != ApprovalExpired {
+		t.Errorf("the short request is %s, want expired", r.State)
+	}
+}
+
 func TestRefusedApprovalRequestCannotBeSigned(t *testing.T) {
 	ctx := context.Background()
 	s := openMemory(t)

@@ -36,7 +36,10 @@ func (a *Authority) Request(ctx context.Context, st *store.Store, act Act, ttl t
 	return row.ID, c, nil
 }
 
-func challengeOf(r store.ApprovalRequest) Challenge {
+func challengeOf(r store.ApprovalRequest) Challenge { return RequestChallenge(r) }
+
+// RequestChallenge rebuilds the challenge a stored request carries.
+func RequestChallenge(r store.ApprovalRequest) Challenge {
 	return Challenge{Act: Act{Kind: r.Kind, ID: r.Identity}, Nonce: r.Nonce, Expires: r.Expires}
 }
 

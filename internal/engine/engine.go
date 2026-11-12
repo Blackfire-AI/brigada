@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Blackfire-AI/brigada/internal/approval"
 	"github.com/Blackfire-AI/brigada/internal/caps"
 	"github.com/Blackfire-AI/brigada/internal/store"
 )
@@ -238,6 +239,10 @@ type Config struct {
 	// directory outside the store's own. Empty — the default — takes no
 	// snapshots.
 	SnapshotDir string
+	// ApprovalKeys is the path of the enrolled approval keys' file
+	// (§12.2), <state>/approval_keys. Empty — the default — means no key
+	// is enrolled, so no gated act is ever approved.
+	ApprovalKeys string
 	// SnapshotEvery is the interval between snapshots; zero keeps 24
 	// hours. Tests move it; the shipped engine does not.
 	SnapshotEvery time.Duration
@@ -375,6 +380,10 @@ type Engine struct {
 	// calls may sweep concurrently. It guards the staged tick too: the
 	// tick the transaction sweeping now has measured but not committed,
 	// recorded only when that transaction commits (stageSweep).
+	// approver is the approval authority (§12.2), made at its first use.
+	approverOnce sync.Once
+	approver     *approval.Authority
+
 	sweepMu     sync.Mutex
 	lastSweep   time.Time
 	stagedTx    *sql.Tx   // the transaction whose sweep staged a tick
@@ -467,6 +476,7 @@ func New(s *store.Store, cfg Config) *Engine {
 	if cfg.MaxArtifactBytes > 0 {
 		def.MaxArtifactBytes = cfg.MaxArtifactBytes
 	}
+	def.ApprovalKeys = cfg.ApprovalKeys
 	if cfg.Retention > 0 {
 		def.Retention = cfg.Retention
 	}

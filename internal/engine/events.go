@@ -29,6 +29,7 @@ const (
 	evTaskUnattended          = "task_unattended"            // a task parked at needs_foreman that the foreman does not hold — no harness, the limit, the budget, a stall, an outage, or a done turn that consumed its event — so it waits for the user: one event per park, Reason the needs-you words and ParkKind the parking event's kind; a plain log record, in no inbox, waking no turn (§4.2, §10)
 	evPlanVerdictUnanswered   = "plan_verdict_unanswered"    // a done foreman turn consumed a plan's changes verdict without answering it (issue #164): one event per swallowed verdict names the plan, the verdict's round and the turn that failed to act; the plan stays parked, and the event wakes no turn (§4.2, §6.2)
 	evPlanAmended             = "plan_amended"               // the foreman amended a live plan: tasks added, cancelled or re-pointed (§12.2)
+	evApprovalWanted          = "approval_signature_wanted"  // a gated act (a plan, a landing or a push) asked for the user's approval: a pending request with a one-time challenge waits for a signature out of band; Request names it, Reason the words (§12.2). A plain log record, in no inbox, waking no turn
 	evPlanApproved            = "plan_approved"              // the user approved the plan; its first wave is queued (§6.3)
 	evPlanRejected            = "plan_rejected"              // the user rejected the plan; its tasks are cancelled (§6.3)
 	evJobCreated              = "job_created"                // submit: a queued job now exists
@@ -162,6 +163,7 @@ type eventPayload struct {
 	Until   string `json:"until,omitempty"`   // a deadline, RFC3339: a foreman limit's reset, a probe's next attempt; absent when unknown (§4.4)
 	Job     int64  `json:"job,omitempty"`     // a job the event names besides its own job_id column
 	Hold    int64  `json:"hold,omitempty"`    // the attach hold the event names (§4.2)
+	Request int64  `json:"request,omitempty"` // the approval request an approval_signature_wanted event names (§12.2)
 	Cause   string `json:"cause,omitempty"`   // a land cause key: the error class and the shared resource every task it fails parks under (issue #116)
 	Count   int64  `json:"count,omitempty"`   // how many of something the event counts (§4.2, §4.3)
 	Path    string `json:"path,omitempty"`    // a snapshot's file (§6.4)
