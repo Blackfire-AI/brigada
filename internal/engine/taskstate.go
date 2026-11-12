@@ -573,7 +573,7 @@ func (e *Engine) retryReviewInfraTx(tx *sql.Tx, job *jobRow, c Completion, now t
 // carries, for a work job and a fix round alike.
 func transientCLIError(kind string) bool {
 	switch kind {
-	case "limit", "auth", string(adapter.ErrModel), string(adapter.ErrOutputLimit), "other", "runner_lost":
+	case "limit", "balance", "auth", string(adapter.ErrModel), string(adapter.ErrOutputLimit), "other", "runner_lost":
 		return true
 	}
 	return false
@@ -1216,7 +1216,7 @@ func reviewerUnavailable(c Completion) bool {
 		return false
 	}
 	switch c.ErrorKind {
-	case "limit", "auth", string(adapter.ErrModel), ErrorKindSetup, ErrorKindInfra:
+	case "limit", "balance", "auth", string(adapter.ErrModel), ErrorKindSetup, ErrorKindInfra:
 		return true
 	}
 	return false

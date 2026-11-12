@@ -192,6 +192,12 @@ type ErrorKind string
 const (
 	ErrLimit ErrorKind = "limit"
 	ErrAuth  ErrorKind = "auth"
+	// ErrBalance is the provider refusing payment — HTTP 402,
+	// "Insufficient Balance": the account is out of money, not out of
+	// window. No clock resolves it, only a top-up, so it cools like a
+	// limit but to the long cap, and the user's agent reset (§8) lifts
+	// it once the account is funded again.
+	ErrBalance ErrorKind = "balance"
 	// ErrResumeFailed is a resume that could not happen: the session the
 	// command was told to resume is gone or its conversation cannot be
 	// continued. What answers it is not another resume but a fresh run in

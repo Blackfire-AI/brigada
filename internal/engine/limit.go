@@ -15,12 +15,14 @@ const foremanLimitUnknown = "unknown"
 // foreman_limited event, and — through the event — the user's
 // notification (§10), all in the completion's transaction. Only the
 // foreman's own key marks it: a task job's limit is the dispatcher's
-// business, not the foreman's. The reset time is kept when it parses and
-// lies ahead; anything else — empty, malformed, already passed — is
-// unknown, which stops the wake until the user chooses.
+// business, not the foreman's. A spent balance is a limit with no reset
+// clock at all, so it always lands in the unknown state. The reset time
+// is kept when it parses and lies ahead; anything else — empty,
+// malformed, already passed — is unknown, which stops the wake until
+// the user chooses.
 func foremanLimitHitTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	if job.Kind != KindForeman || job.Key != fmt.Sprintf("foreman:%d", job.ProjectID) ||
-		c.Error == "" || c.ErrorKind != "limit" {
+		c.Error == "" || (c.ErrorKind != "limit" && c.ErrorKind != "balance") {
 		return nil
 	}
 	state := foremanLimitUnknown

@@ -340,9 +340,9 @@ func TestErrorKinds(t *testing.T) {
 		{"missing credential", `{"type":"status","phase":"turn_end","reason":{"kind":"error","error":{"message":"x","code":"MISSING_CREDENTIAL"}}}`, adapter.ErrAuth},
 		{"status 401", `{"type":"status","phase":"turn_end","reason":{"kind":"error","error":{"message":"x","code":"HTTP","status":401}}}`, adapter.ErrAuth},
 		{"status 429", `{"type":"status","phase":"turn_end","reason":{"kind":"error","error":{"message":"x","code":"HTTP","status":429}}}`, adapter.ErrLimit},
-		{"status 402", `{"type":"status","phase":"turn_end","reason":{"kind":"error","error":{"message":"x","code":"HTTP","status":402}}}`, adapter.ErrLimit},
+		{"status 402", `{"type":"status","phase":"turn_end","reason":{"kind":"error","error":{"message":"x","code":"HTTP","status":402}}}`, adapter.ErrBalance},
 		{"rate limit text", `{"type":"status","phase":"turn_end","reason":{"kind":"error","error":{"message":"Rate limit reached for requests","code":"X"}}}`, adapter.ErrLimit},
-		{"balance text", `{"type":"status","phase":"turn_end","reason":{"kind":"error","error":{"message":"Insufficient Balance","code":"X"}}}`, adapter.ErrLimit},
+		{"balance text", `{"type":"status","phase":"turn_end","reason":{"kind":"error","error":{"message":"Insufficient Balance","code":"X"}}}`, adapter.ErrBalance},
 		{"other", `{"type":"status","phase":"turn_end","reason":{"kind":"error","error":{"message":"upstream exploded","code":"INTERNAL","status":500}}}`, adapter.ErrOther},
 		{"no detail", `{"type":"status","phase":"turn_end","reason":{"kind":"error"}}`, adapter.ErrOther},
 	} {
@@ -359,7 +359,7 @@ func TestErrorKinds(t *testing.T) {
 	}{
 		{"dsh: MISSING_CREDENTIAL: no API key", adapter.ErrAuth},
 		{"dsh: RATE_LIMITED: Rate limit exceeded, retry later", adapter.ErrLimit},
-		{"dsh: API: Insufficient Balance", adapter.ErrLimit},
+		{"dsh: API: Insufficient Balance", adapter.ErrBalance},
 		{"dsh: INTERNAL: boom", adapter.ErrOther},
 	} {
 		ev, ok := a.ParseErrEvent([]byte(tc.line))
