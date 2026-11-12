@@ -40,8 +40,8 @@ tasks:
     tier: light
     effort: medium
     skills: ["surface-parity", "docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-725"
     rounds: 0
   - id: 726
     name: "qwen-init"
