@@ -40,7 +40,7 @@ tasks:
     tier: light
     effort: medium
     skills: ["surface-parity", "docs-change"]
-    state: running
+    state: reviewing
     branch: "brigada/task-725"
     rounds: 2
   - id: 726
