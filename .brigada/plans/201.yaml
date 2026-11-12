@@ -102,8 +102,8 @@ tasks:
     base: "permission-plumbing"
     effort: medium
     skills: ["config-setting"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-767"
     rounds: 0
   - id: 768
     name: "adapter-others"
