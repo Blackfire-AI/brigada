@@ -64,7 +64,7 @@ func (a ApprovalPending) Text() string {
 		b.WriteString("    " + line + "\n")
 	}
 	fmt.Fprintf(&b, "sign it with a key you enrolled: ssh-keygen -Y sign -f <your private key> -n %s <file>\n", a.Namespace)
-	fmt.Fprintf(&b, "then repeat the call with request %d and the signature in <file>.sig", a.RequestID)
+	fmt.Fprintf(&b, "then confirm it with request %d and the signature in <file>.sig", a.RequestID)
 	return b.String()
 }
 

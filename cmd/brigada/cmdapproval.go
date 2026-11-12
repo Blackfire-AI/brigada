@@ -9,6 +9,10 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/api"
 )
 
+// connectGate is how the gated commands reach the engine; tests swap it
+// to serve them over an in-process API, as connectPause does.
+var connectGate = connect
+
 // maxSignatureBytes bounds a signature file: an ssh-keygen signature is
 // a few hundred bytes of armor.
 const maxSignatureBytes = 64 << 10

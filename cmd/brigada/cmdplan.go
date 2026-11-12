@@ -59,7 +59,7 @@ func runPlanDecision(ctx context.Context, verb string, args []string, stdout, st
 	if code != 0 {
 		return code
 	}
-	client, code := connect(ctx, rt, "client", *noStart, stderr)
+	client, code := connectGate(ctx, rt, "client", *noStart, stderr)
 	if code != 0 {
 		return code
 	}

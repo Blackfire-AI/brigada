@@ -64,7 +64,7 @@ func runPushApprove(ctx context.Context, args []string, stdout, stderr io.Writer
 	if code != 0 {
 		return code
 	}
-	client, code := connect(ctx, rt, "client", noStart, stderr)
+	client, code := connectGate(ctx, rt, "client", noStart, stderr)
 	if code != 0 {
 		return code
 	}
