@@ -150,8 +150,8 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["schema-migration", "cli-flag"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-771"
     rounds: 0
   - id: 772
     name: "permission-key"
