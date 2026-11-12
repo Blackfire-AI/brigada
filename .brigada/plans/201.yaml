@@ -227,6 +227,6 @@ tasks:
     continue: "adapter-codex-opencode"
     effort: medium
     skills: ["surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
