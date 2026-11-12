@@ -137,7 +137,7 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: high
-    state: reviewing
+    state: done
     branch: "brigada/task-770"
     rounds: 0
   - id: 771
