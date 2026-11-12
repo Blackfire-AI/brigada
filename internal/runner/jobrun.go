@@ -284,6 +284,9 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 	// command's environment, whatever the adapter put there. An unset Env
 	// means inherit, so it is materialized first for the same scrub.
 	cmd.Env = scrubWorkerEnv(cmd.Env, r.cfg.GitEnv)
+	// And its git never prompts for a credential: a push or fetch that
+	// wants a login fails at once.
+	cmd.Env = withEnv(cmd.Env, []string{"GIT_TERMINAL_PROMPT=0"})
 	// The CLI's working directory is its worktree, and so is its PWD:
 	// the runner's own PWD points at the state directory, and a Node CLI
 	// that reads PWD before the cwd would work there.

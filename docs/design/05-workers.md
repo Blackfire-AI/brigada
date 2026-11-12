@@ -223,7 +223,7 @@ The agents' own model logins, `PATH`, `HOME` and the build caches stay. A harnes
 
 A setup command, a check and the `after_land` command (§5.5, §5.7, §6.3) run under the same scrub and also lose every `BRIGADA_` variable of the runner's process, so they hold `PATH`, `HOME`, `GOCACHE` and the like. The `land_ready` command (§6.3) runs under the same scrub. What the job adds back after the scrub is its own: a setup command gets `BRIGADA_CACHE_DIR` and the `BRIGADA_REPO_<NAME>` of the job's extra checkouts, a check gets the `BRIGADA_REPO_<NAME>` alone, and `after_land` and `land_ready` get neither.
 
-The runner's own git commands keep their credentials and run with `GIT_TERMINAL_PROMPT=0`, so a remote that wants a login fails at once. A worker that needs to push does not need a token of its own: the runner pushes the branch itself when the worker has not.
+The runner's own git commands keep their credentials and run with `GIT_TERMINAL_PROMPT=0`, so a remote that wants a login fails at once. A worker needs no token to push: the push path configured in its worktree is refused (the mirror's origin has no push URL, §5.7) and its environment sets `GIT_TERMINAL_PROMPT=0`, so a `git push origin HEAD` fails at once, and the runner pushes the branch itself.
 
 What the runner commits for a worker that left edits uncommitted excludes nothing silently: a new file that looks like a credential or hidden configuration (an env file other than a `.example` template, a key or certificate, `credentials*`, `.netrc`, any dotfile outside well-known ignore, editor, linter and CI names) is refused, and the job fails with the files named; a file the repository already tracks is never refused.
 
