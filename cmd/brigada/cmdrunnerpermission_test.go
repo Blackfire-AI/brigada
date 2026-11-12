@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 )
 
@@ -69,6 +70,26 @@ func TestAgentSpecPermissionFromFile(t *testing.T) {
 	}
 	if perm, scope := s.specs[1].resolve(file); perm != "default" || !scope {
 		t.Errorf("flag over file: permission %q readScope %v, want default and on", perm, scope)
+	}
+}
+
+func TestPrintConfigWarnings(t *testing.T) {
+	old, err := engine.ParseProjectConfig([]byte("schema: 1\nrepo: github.com/acme/widgets\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	printConfigWarnings(&out, old)
+	if out.Len() != 0 {
+		t.Fatalf("a file without worker_tools warned: %q", out.String())
+	}
+	cfg, err := engine.ParseProjectConfig([]byte("schema: 1\nrepo: github.com/acme/widgets\nworker_tools: none\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	printConfigWarnings(&out, cfg)
+	if got := out.String(); !strings.Contains(got, "worker_tools") || !strings.Contains(got, "permission=") || !strings.HasPrefix(got, "warning: ") {
+		t.Fatalf("warning = %q, want one naming worker_tools and permission=", got)
 	}
 }
 
