@@ -57,8 +57,8 @@ tasks:
     effort: medium
     caps: {restart: 2}
     skills: ["surface-parity", "docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-741"
     rounds: 0
   - id: 742
     name: "qwen-foreman-live"
