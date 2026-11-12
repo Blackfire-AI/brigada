@@ -5,9 +5,9 @@
 plan: 201
 title: "#228 implementation: harness-owned permissions, runner-only push, approval authority"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-11-12T21:47:35.965112Z
-updated: 2026-11-12T22:21:17.215367Z
+updated: 2026-11-12T22:21:44.669564Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -150,7 +150,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["schema-migration", "cli-flag"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 772
@@ -162,7 +162,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["config-setting"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 773
