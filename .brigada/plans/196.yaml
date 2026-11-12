@@ -44,7 +44,7 @@ tasks:
     effort: medium
     caps: {restart: 2}
     skills: ["surface-parity", "docs-change"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 741
