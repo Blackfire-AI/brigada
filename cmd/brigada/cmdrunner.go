@@ -466,7 +466,9 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 			if tools == nil {
 				tools = rt.file.Tools["claude/"+spec.model]
 			}
-			ad = &claude.Adapter{AllowedTools: tools, NoReadScope: !readScope}
+			// The scope no longer reaches the adapter: the resolved
+			// permission rides the job grant and the CLI's own flag takes it.
+			ad = &claude.Adapter{NoReadScope: !readScope}
 			spec.toolsText = claude.ScopeText(tools)
 		case "kimi":
 			// The agent file is resolved and checked here, not at the

@@ -112,8 +112,8 @@ func (r *jobRun) extraPromptOf() string {
 
 // extraPromptNote is the short fixed paragraph the runner appends to a
 // job's prompt when the job has extra repositories (§5.8): the worker may
-// have no shell for echo or ls — claude's default worker scope is the Go
-// toolchain alone — so the prompt itself must name each checkout's
+// have no shell for echo or ls — a tools= alias can still narrow
+// claude's shell — so the prompt itself must name each checkout's
 // absolute path. One sentence per repository, in the grant's order, in
 // the grant's own naming; no repositories, no paragraph, and a job
 // without them keeps its prompt unchanged.

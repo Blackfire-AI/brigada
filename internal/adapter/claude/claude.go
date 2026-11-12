@@ -23,26 +23,12 @@ import (
 
 // Adapter drives the official claude CLI (2.x) in its headless print
 // mode. The zero value runs `claude` from PATH with the worker's
-// default permission mode; the fields carry what the agent's
-// configuration passes through, never a hard-coded tool scope.
+// default permission mode; the job carries the agent's permission=
+// value, which passes through to the CLI, never a tool scope of
+// brigada's own.
 type Adapter struct {
 	// Binary is the CLI to run; "claude" when empty.
 	Binary string
-
-	// PermissionMode is --permission-mode for every run. Empty means the
-	// worker's default, acceptEdits: file edits inside the worktree the
-	// command runs in are auto-accepted, and everything else still asks —
-	// and asking, headless, is refusing.
-	PermissionMode string
-
-	// AllowedTools and DisallowedTools are the agent config's tool scope
-	// (§5.2), passed through as the CLI's own flags. They scope a code
-	// worker only: a foreman turn or attach always runs under the
-	// foreman's own scope and never reads them. A nil AllowedTools is
-	// "no explicit scope" and the worker gets the Go default; a non-nil
-	// empty one is explicitly none — the file tools alone, no shell.
-	AllowedTools    []string
-	DisallowedTools []string
 
 	// NoReadScope switches the foreman's read-scope hook off for this
 	// agent (read-scope=false, #131). The zero value keeps it on, so an
@@ -50,10 +36,33 @@ type Adapter struct {
 	NoReadScope bool
 }
 
-// workerPermissionMode is the permission mode a worker runs under when
-// the agent config does not name one: edits inside the working tree are
-// accepted without a prompt, which headless runs cannot answer anyway.
-const workerPermissionMode = "acceptEdits"
+// workerPermissionMode is the permission mode a worker or reviewer runs
+// under when the agent sets no permission= (§5.2): a headless run cannot
+// answer an ask, and acceptEdits with no allowlist refuses every shell
+// command, so the worker could not run its own tests. Only a mode verified
+// to work headless may be the default.
+const workerPermissionMode = "bypassPermissions"
+
+// foremanPermissionMode is the mode a foreman turn runs under when the job
+// names none; its tool scope is brigada's (foremanToolScope), not the mode's.
+const foremanPermissionMode = "acceptEdits"
+
+// permissionFlags maps a job's permission= value onto the CLI's own flags.
+// A mode name passes through as --permission-mode, verbatim; the CLI judges
+// it. The deprecated tools= spelling — "none", or tool patterns joined by
+// "+", whose names start with a capital — keeps its old meaning under
+// acceptEdits: the patterns as --allowedTools, none as no allowlist.
+func permissionFlags(permission, fallback string) (mode string, allowed []string) {
+	switch {
+	case permission == "":
+		return fallback, nil
+	case permission == "none":
+		return "acceptEdits", nil
+	case strings.ContainsAny(permission, "(+") || (permission[0] >= 'A' && permission[0] <= 'Z'):
+		return "acceptEdits", strings.Split(permission, "+")
+	}
+	return permission, nil
+}
 
 // foremanToolScope is the foreman's tool scope (§4): brigada's MCP
 // tools — the bridge's whole offer, in the mcp__<server>__<tool>
@@ -73,27 +82,9 @@ func foremanToolScope() (allowed, disallowed []string) {
 	return allowed, []string{"Bash", "Edit", "NotebookEdit", "NotebookRead", "Write", "WebFetch", "WebSearch"}
 }
 
-// reviewToolScope is a reviewer's tool scope: the read-only file tools and
-// git's read commands, with the editing tools denied by name. The agent
-// config's scope never applies to a review.
-func reviewToolScope() (allowed, disallowed []string) {
-	return []string{"Read", "Grep", "Glob",
-			"Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git status:*)"},
-		[]string{"Edit", "NotebookEdit", "Write"}
-}
-
-// workerToolScope is the code worker's default tool scope (§5.2): the Go
-// toolchain's build, test, vet and format commands, and nothing else of
-// the shell. The worker verifies its own work as it goes; the runner
-// still runs the check on the same tree, so no new code reaches
-// execution — the check already runs what tests the worker wrote. The
-// agent config's explicit scope replaces this default.
-func workerToolScope() (allowed, disallowed []string) {
-	return DefaultWorkerTools(), nil
-}
-
-// DefaultWorkerTools is the Go default scope a worker runs under when
-// the agent names none, as a fresh list.
+// DefaultWorkerTools is the Go scope the opencode adapter and the
+// deprecated tools= display still name, as a fresh list. The claude
+// adapter no longer sets it.
 func DefaultWorkerTools() []string {
 	return []string{"Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)"}
 }
@@ -168,21 +159,17 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	if resumeSessionID != "" {
 		args = append(args, "--resume", resumeSessionID)
 	}
-	mode := a.PermissionMode
-	if mode == "" {
-		mode = workerPermissionMode
+	// The agent's permission= value passes through to the CLI's own flag,
+	// the same for a work, fix or review job: a review's tree is discarded
+	// and a reviewer may run tests, so a review has no read-only default.
+	fallback := workerPermissionMode
+	if job.MCPConfig != "" {
+		fallback = foremanPermissionMode
 	}
-	review := job.Review && job.MCPConfig == ""
-	if review {
-		// Edits are not auto-accepted for a reviewer, and no configured
-		// mode lifts the deny rules below.
-		mode = "default"
-	}
+	mode, allowed := permissionFlags(job.Permission, fallback)
+	var disallowed []string
 	args = append(args, "--permission-mode", mode)
-	allowed, disallowed := a.AllowedTools, a.DisallowedTools
-	if review {
-		allowed, disallowed = reviewToolScope()
-	} else if job.MCPConfig != "" {
+	if job.MCPConfig != "" {
 		// A job that carries an MCP config is a foreman turn (§12.2): the
 		// bridge is the turn's own, and the CLI offers no other server
 		// beside it. The foreman's tool scope is brigada's too (§4), not
@@ -197,10 +184,6 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 			return nil, fmt.Errorf("claude: %w", err)
 		}
 		args = append(args, "--settings", settings)
-	} else if allowed == nil {
-		// A code worker with no explicit scope gets the default (§5.2):
-		// the Go toolchain, so it can build and test as it goes.
-		allowed, disallowed = workerToolScope()
 	}
 	if len(allowed) > 0 {
 		args = append(args, append([]string{"--allowedTools"}, allowed...)...)

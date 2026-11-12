@@ -57,8 +57,7 @@ func TestCommand(t *testing.T) {
 			job:     adapter.Job{Prompt: prompt, Model: "sonnet"},
 			wantExe: "/usr/local/bin/claude",
 			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
-				"--model", "sonnet", "--permission-mode", "acceptEdits",
-				"--allowedTools", "Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)"},
+				"--model", "sonnet", "--permission-mode", "bypassPermissions"},
 		},
 		{
 			name:    "resume run, default binary, no model",
@@ -66,22 +65,42 @@ func TestCommand(t *testing.T) {
 			resume:  "sess-9",
 			wantExe: "claude",
 			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
-				"--resume", "sess-9", "--permission-mode", "acceptEdits",
-				"--allowedTools", "Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)"},
+				"--resume", "sess-9", "--permission-mode", "bypassPermissions"},
 		},
 		{
-			name: "tool scope and permission mode pass through",
-			ad: Adapter{
-				PermissionMode:  "bypassPermissions",
-				AllowedTools:    []string{"Bash(git:*)", "Edit"},
-				DisallowedTools: []string{"WebFetch"},
-			},
-			job:     adapter.Job{Prompt: prompt},
+			name:    "the agent's permission passes through",
+			job:     adapter.Job{Prompt: prompt, Permission: "plan"},
 			wantExe: "claude",
 			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
-				"--permission-mode", "bypassPermissions",
-				"--allowedTools", "Bash(git:*)", "Edit",
-				"--disallowedTools", "WebFetch"},
+				"--permission-mode", "plan"},
+		},
+		{
+			name:    "a review has no read-only default",
+			job:     adapter.Job{Prompt: prompt, Review: true},
+			wantExe: "claude",
+			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
+				"--permission-mode", "bypassPermissions"},
+		},
+		{
+			name:    "a review passes the agent's permission through",
+			job:     adapter.Job{Prompt: prompt, Review: true, Permission: "acceptEdits"},
+			wantExe: "claude",
+			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
+				"--permission-mode", "acceptEdits"},
+		},
+		{
+			name:    "the deprecated tools alias keeps its allowlist under acceptEdits",
+			job:     adapter.Job{Prompt: prompt, Permission: "Bash(npm test:*)+Bash(npx jest:*)"},
+			wantExe: "claude",
+			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
+				"--permission-mode", "acceptEdits", "--allowedTools", "Bash(npm test:*)", "Bash(npx jest:*)"},
+		},
+		{
+			name:    "the deprecated none alias is acceptEdits with no allowlist",
+			job:     adapter.Job{Prompt: prompt, Permission: "none"},
+			wantExe: "claude",
+			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
+				"--permission-mode", "acceptEdits"},
 		},
 		{
 			// The extra repositories' checkouts (§5.8) are readable
@@ -93,8 +112,7 @@ func TestCommand(t *testing.T) {
 				"/runner-state/worktrees/task-9-author-s0.extra/live"}},
 			wantExe: "claude",
 			wantArg: []string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
-				"--permission-mode", "acceptEdits",
-				"--allowedTools", "Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)",
+				"--permission-mode", "bypassPermissions",
 				"--add-dir", "/runner-state/worktrees/task-9-author-s0.extra/schema",
 				"--add-dir", "/runner-state/worktrees/task-9-author-s0.extra/live"},
 		},
@@ -178,9 +196,10 @@ func TestCommandForemanScope(t *testing.T) {
 		"--disallowedTools", "Bash", "Edit", "NotebookEdit", "NotebookRead", "Write", "WebFetch", "WebSearch"}
 	settings := wantSettings(t, dir, "")
 	cases := []struct {
-		name    string
-		ad      Adapter
-		wantArg []string
+		name       string
+		ad         Adapter
+		permission string
+		wantArg    []string
 	}{
 		{
 			name: "bare adapter",
@@ -190,19 +209,22 @@ func TestCommandForemanScope(t *testing.T) {
 				"--mcp-config", config, "--settings", settings}, wantScope...),
 		},
 		{
-			name: "the foreman scope replaces the agent config's",
-			ad: Adapter{
-				PermissionMode:  "bypassPermissions",
-				AllowedTools:    []string{"Bash(git:*)", "Edit"},
-				DisallowedTools: []string{"WebFetch"},
-			},
+			name:       "the foreman scope replaces the agent's tools alias",
+			permission: "Bash(git:*)+Edit",
+			wantArg: append([]string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
+				"--permission-mode", "acceptEdits",
+				"--mcp-config", config, "--settings", settings}, wantScope...),
+		},
+		{
+			name:       "a permission mode passes through to the foreman",
+			permission: "bypassPermissions",
 			wantArg: append([]string{"-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
 				"--permission-mode", "bypassPermissions",
 				"--mcp-config", config, "--settings", settings}, wantScope...),
 		},
 	}
 	for _, tc := range cases {
-		cmd, err := tc.ad.Command(adapter.Job{Prompt: prompt, MCPConfig: config}, dir, "")
+		cmd, err := tc.ad.Command(adapter.Job{Prompt: prompt, MCPConfig: config, Permission: tc.permission}, dir, "")
 		if err != nil {
 			t.Fatalf("%s: build command: %v", tc.name, err)
 		}
@@ -347,74 +369,46 @@ func TestAttachCommandRefusesWhatItCannotBuild(t *testing.T) {
 
 // TestCommandWorkerPathUnchanged covers the other side of §4: a worker
 // job — no MCP config — is built exactly as it always was, with no MCP
-// flag and the agent config's own tool scope.
+// flag and brigada's own tool scope nowhere: the default mode only.
 func TestCommandWorkerPathUnchanged(t *testing.T) {
 	stubCLI(t)
-	ad := Adapter{AllowedTools: []string{"Bash(git:*)"}}
+	var ad Adapter
 	cmd, err := ad.Command(adapter.Job{Prompt: "p", Model: "sonnet"}, t.TempDir(), "sess-9")
 	if err != nil {
 		t.Fatalf("build command: %v", err)
 	}
 	want := []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "user", "--strict-mcp-config",
-		"--model", "sonnet", "--resume", "sess-9", "--permission-mode", "acceptEdits",
-		"--allowedTools", "Bash(git:*)"}
+		"--model", "sonnet", "--resume", "sess-9", "--permission-mode", "bypassPermissions"}
 	if !slices.Equal(cmd.Args, want) {
 		t.Errorf("worker args =\n%v\nwant\n%v", cmd.Args, want)
 	}
 }
 
-// TestCommandWorkerDefaultScope pins the code worker's default tool scope
-// (§5.2): a worker with no explicit scope may run the Go toolchain's
-// build, test, vet and format commands and nothing else of the shell, and
-// denies nothing by name. A foreman turn — a job with an MCP config — is
-// not a worker: it gets the foreman's scope, as TestCommandForemanScope
-// pins it.
-func TestCommandWorkerDefaultScope(t *testing.T) {
+// TestCommandWorkerDefaultMode pins the worker's default (§5.2): a job
+// with no permission= runs under bypassPermissions, brigada sets no tool
+// allowlist or denylist of its own, and never picks the auto mode. A
+// foreman turn — a job with an MCP config — is not a worker: it gets the
+// foreman's scope, as TestCommandForemanScope pins it.
+func TestCommandWorkerDefaultMode(t *testing.T) {
 	stubCLI(t)
 	var ad Adapter
 	cmd, err := ad.Command(adapter.Job{Prompt: "p"}, t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("build worker command: %v", err)
 	}
-	want := []string{"--allowedTools",
-		"Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)"}
-	if !slices.Equal(cmd.Args[len(cmd.Args)-len(want):], want) {
-		t.Errorf("worker args = %v\nwant them to end with %v", cmd.Args, want)
+	if i := slices.Index(cmd.Args, "--permission-mode"); i < 0 || cmd.Args[i+1] != "bypassPermissions" {
+		t.Errorf("worker args = %v, want --permission-mode bypassPermissions", cmd.Args)
 	}
-	if slices.Contains(cmd.Args, "--disallowedTools") {
-		t.Errorf("worker args deny tools by default: %v", cmd.Args)
+	for _, flag := range []string{"--allowedTools", "--disallowedTools"} {
+		if slices.Contains(cmd.Args, flag) {
+			t.Errorf("worker args carry brigada's own %s: %v", flag, cmd.Args)
+		}
 	}
-
-	// An explicit scope replaces the default; an explicit none is file
-	// tools only — no shell flag at all, not the default.
-	over := Adapter{AllowedTools: []string{"Bash(npm test:*)", "Bash(npx jest:*)"}}
-	cmd, err = over.Command(adapter.Job{Prompt: "p"}, t.TempDir(), "")
-	if err != nil {
-		t.Fatalf("build override command: %v", err)
-	}
-	wantOver := []string{"--allowedTools", "Bash(npm test:*)", "Bash(npx jest:*)"}
-	if !slices.Equal(cmd.Args[len(cmd.Args)-len(wantOver):], wantOver) || slices.Contains(cmd.Args, "Bash(go test:*)") {
-		t.Errorf("override args = %v, want them to end with %v and drop the Go default", cmd.Args, wantOver)
-	}
-	none := Adapter{AllowedTools: []string{}}
-	cmd, err = none.Command(adapter.Job{Prompt: "p"}, t.TempDir(), "")
-	if err != nil {
-		t.Fatalf("build none command: %v", err)
-	}
-	if slices.Contains(cmd.Args, "--allowedTools") || slices.Contains(cmd.Args, "Bash(go test:*)") {
-		t.Errorf("tools=none args = %v, want no allowed tools at all", cmd.Args)
+	if slices.Contains(cmd.Args, "auto") {
+		t.Errorf("worker args choose the auto mode: %v", cmd.Args)
 	}
 
 	const config = "/runner-state/mcp/turn-x1/config.json"
-	// A worker scope never reaches a foreman turn.
-	foremanAd := Adapter{AllowedTools: []string{"Bash"}}
-	foremanBypass, err := foremanAd.Command(adapter.Job{Prompt: "p", MCPConfig: config}, t.TempDir(), "")
-	if err != nil {
-		t.Fatalf("build foreman command: %v", err)
-	}
-	if slices.Contains(foremanBypass.Args, "Bash") && !slices.Contains(foremanBypass.Args[slices.Index(foremanBypass.Args, "--disallowedTools"):], "Bash") {
-		t.Errorf("a worker scope reached the foreman: %v", foremanBypass.Args)
-	}
 	dir := t.TempDir()
 	foreman, err := ad.Command(adapter.Job{Prompt: "p", MCPConfig: config}, dir, "")
 	if err != nil {
@@ -819,24 +813,36 @@ func TestSessionLimit(t *testing.T) {
 	}
 }
 
-// TestCommandReviewIsReadOnly: a reviewer gets no edit tool, no go
-// toolchain and no auto-accepted edits, whatever the agent config says.
-func TestCommandReviewIsReadOnly(t *testing.T) {
+// TestCommandReviewPassThrough: a review is built exactly like a work job
+// — the agent's permission passes through, the default is the worker's,
+// and no read-only scope or tool list is added — and keeps the settings
+// isolation that stops the repository granting itself permissions.
+func TestCommandReviewPassThrough(t *testing.T) {
 	stubCLI(t)
-	ad := &Adapter{PermissionMode: "bypassPermissions", AllowedTools: []string{"Bash(go test:*)", "Edit"}}
-	cmd, err := ad.Command(adapter.Job{Prompt: "p", Review: true}, t.TempDir(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	args := strings.Join(cmd.Args, " ")
-	for _, want := range []string{"--permission-mode default", "--allowedTools Read Grep Glob Bash(git diff:*)", "--disallowedTools Edit NotebookEdit Write", "--setting-sources user", "--strict-mcp-config"} {
-		if !strings.Contains(args, want) {
-			t.Errorf("missing %q: %s", want, args)
+	var ad Adapter
+	for _, perm := range []string{"", "plan"} {
+		review, err := ad.Command(adapter.Job{Prompt: "p", Review: true, Permission: perm}, t.TempDir(), "")
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	for _, bad := range []string{"acceptEdits", "bypassPermissions", "go test"} {
-		if strings.Contains(args, bad) {
-			t.Errorf("review args carry %q: %s", bad, args)
+		work, err := ad.Command(adapter.Job{Prompt: "p", Permission: perm}, t.TempDir(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(review.Args, work.Args) {
+			t.Errorf("permission %q: review args = %v, work args = %v, want the same", perm, review.Args, work.Args)
+		}
+		args := strings.Join(review.Args, " ")
+		want := "--permission-mode " + map[string]string{"": "bypassPermissions", "plan": "plan"}[perm]
+		for _, w := range []string{want, "--setting-sources user", "--strict-mcp-config"} {
+			if !strings.Contains(args, w) {
+				t.Errorf("permission %q: missing %q: %s", perm, w, args)
+			}
+		}
+		for _, bad := range []string{"--allowedTools", "--disallowedTools"} {
+			if strings.Contains(args, bad) {
+				t.Errorf("permission %q: review args carry %s: %s", perm, bad, args)
+			}
 		}
 	}
 }
@@ -848,8 +854,8 @@ func TestCommandReviewIsReadOnly(t *testing.T) {
 // read-scope hook's root bound to that same checkout on both.
 func TestForemanRunsInTheCheckout(t *testing.T) {
 	stubCLI(t)
-	ad := &Adapter{PermissionMode: "bypassPermissions"}
-	job := adapter.Job{MCPConfig: "/runner/mcp/config.json", Model: "opus", Effort: "high"}
+	ad := &Adapter{}
+	job := adapter.Job{Permission: "bypassPermissions", MCPConfig: "/runner/mcp/config.json", Model: "opus", Effort: "high"}
 	const checkout = "/runner/foreman/1/repo"
 	headless, err := ad.Command(job, checkout, "saved")
 	if err != nil {
