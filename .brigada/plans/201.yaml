@@ -5,9 +5,9 @@
 plan: 201
 title: "#228 implementation: harness-owned permissions, runner-only push, approval authority"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-12T21:47:35.965112Z
-updated: 2026-11-12T21:48:41.655092Z
+updated: 2026-11-12T21:48:58.126645Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -93,6 +93,40 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["config-setting"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 767
+    name: "adapter-claude"
+    title: "claude adapter: bypassPermissions default, permission pass-through, read-scope toggle"
+    class: "implement"
+    deps: ["permission-config"]
+    base: "permission-config"
+    effort: medium
+    skills: ["config-setting"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 768
+    name: "adapter-others"
+    title: "codex, dsh, opencode, kimi, qwen-code: the same permission pass-through"
+    class: "implement"
+    deps: ["adapter-claude"]
+    base: "adapter-claude"
+    continue: "adapter-claude"
+    effort: medium
+    skills: ["surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 769
+    name: "docs-followups"
+    title: "Docs close of #228: GUIDE, SECURITY, README, COMPATIBILITY, CHANGELOG"
+    class: "implement"
+    deps: ["approval-surfaces", "adapter-others"]
+    base: ""
+    effort: medium
+    skills: ["docs-change"]
     state: pending
     branch: ""
     rounds: 0
