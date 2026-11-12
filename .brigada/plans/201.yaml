@@ -201,7 +201,7 @@ tasks:
     review_tier: standard
     review_effort: high
     skills: ["surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 776
