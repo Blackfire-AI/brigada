@@ -102,7 +102,7 @@ tasks:
     base: "permission-plumbing"
     effort: medium
     skills: ["config-setting"]
-    state: reviewing
+    state: done
     branch: "brigada/task-767"
     rounds: 0
   - id: 768
@@ -215,7 +215,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["surface-parity"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 777
