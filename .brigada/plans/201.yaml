@@ -30,7 +30,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["docs-change"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 762
@@ -43,7 +43,7 @@ tasks:
     effort: medium
     review_tier: heavy
     skills: ["schema-migration"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 763
