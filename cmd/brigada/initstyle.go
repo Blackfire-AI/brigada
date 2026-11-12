@@ -187,13 +187,13 @@ func initCLIStatus(w io.Writer, harness string, probe harnessProbe, confirmed bo
 			command = "opencode auth login"
 		}
 		status = out.style.Warn(out.style.Question() + " sign-in can't be checked")
-		if harness != "dsh" {
+		if harness != "dsh" && harness != "qwen-code" {
 			status += out.style.Dim(initSeparator(w)+"sign in with ") + out.style.Accent(command)
 		}
 	case harness == "opencode" && strings.HasPrefix(probe.status, "no stored provider credentials"):
 		status = out.style.Warn(probe.status)
 	}
-	if harness == "dsh" {
+	if harness == "dsh" || harness == "qwen-code" {
 		status = out.style.Dim("experimental"+initSeparator(w)) + status
 	}
 	printInitWrapped(w, "  "+out.style.Bold(harness)+"  ", "    ", status)

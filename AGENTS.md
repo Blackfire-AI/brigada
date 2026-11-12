@@ -32,7 +32,7 @@ The project's `default_check` runs CI's build-job steps before the tests (gofmt,
 
 `cmd/brigada` is the single binary: client, engine, runner, foreman and MCP bridge. Everything else is under `internal/`:
 
-- `adapter`: one adapter per agent CLI (claude, codex, kimi, opencode, dsh, and a fake for tests)
+- `adapter`: one adapter per agent CLI (claude, codex, kimi, opencode, dsh, qwen-code, and a fake for tests)
 - `api`: the engine's JSON HTTP API on a Unix socket, its client, and the status and capacity renderers the CLI and the MCP bridge share
 - `caps`: the concurrency-caps model
 - `defaults`: the default role instructions and skills that init writes

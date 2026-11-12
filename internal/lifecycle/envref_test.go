@@ -123,6 +123,13 @@ func TestConfigEnvKeys(t *testing.T) {
 	if cfg.Env["dsh"]["SOME_VAR"] != "keychain:brigada-item" {
 		t.Errorf("env = %v", cfg.Env)
 	}
+	cfg, err = LoadConfigFile(write("env.qwen-code.SOME_VAR = keychain:brigada-item"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Env["qwen-code"]["SOME_VAR"] != "keychain:brigada-item" {
+		t.Errorf("env = %v", cfg.Env)
+	}
 	// A value in place of a reference, an unknown harness or a bad name is
 	// refused, and the refusal never echoes the value.
 	for _, line := range []string{

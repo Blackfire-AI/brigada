@@ -44,7 +44,7 @@ The claude adapter's default worker scope allows exactly `go build`, `go test`, 
 
 The prompt states the scope in force: an adapter whose rules limit the shell implements the optional `adapter.ShellScoped` and reports its commands (claude from its own `AllowedTools`, opencode from the commands `bashRules` maps), and the runner appends a fixed paragraph naming them to a work or fix job's prompt — what a compound command does under that scope, that a refusal covers one command and not the shell, that git is not needed. A scope with no shell command gets a no-shell wording; a whole-shell scope, a review, a foreman turn and the harnesses with no shell rules of brigada's — codex and dsh in their OS-level sandboxes, kimi with no scope at all — get no paragraph.
 
-A headless run does not take its configuration from the repository it works on. Claude runs with `--setting-sources user` and `--strict-mcp-config`, so the repository's `.claude/settings.json` (hooks, permission allows) and `.mcp.json` are not loaded; opencode runs with `OPENCODE_DISABLE_PROJECT_CONFIG=1`, so `opencode.json`, `.opencode/` and the project's instruction files (`AGENTS.md`, `CLAUDE.md`) are skipped while the user's global config and provider credentials stay.
+A headless run does not take its configuration from the repository it works on. Claude runs with `--setting-sources user` and `--strict-mcp-config`, so the repository's `.claude/settings.json` (hooks, permission allows) and `.mcp.json` are not loaded; opencode runs with `OPENCODE_DISABLE_PROJECT_CONFIG=1`, so `opencode.json`, `.opencode/` and the project's instruction files (`AGENTS.md`, `CLAUDE.md`) are skipped while the user's global config and provider credentials stay; qwen-code runs with `--setting-sources user`, so the repository's `.qwen/settings.json` is not loaded while the user's settings and login stay (`qwen --help` offers no flag for the `QWEN.md` context files, so they are not scoped).
 
 A review, a plan review included, is read-only in every harness:
 
@@ -52,9 +52,10 @@ A review, a plan review included, is read-only in every harness:
 - codex runs `-s read-only`;
 - opencode denies edit, bash and webfetch;
 - kimi runs under the read-only agent definition even when the agent names its own agent file;
-- dsh runs `read-only`.
+- dsh runs `read-only`;
+- qwen-code runs no reviews, and its agents never take the review class.
 
-The foreman's token never appears in a command line. Claude reads the prompt from stdin, and so does codex (`codex exec -`); codex receives the bridge's environment through its own process environment and forwards it to the bridge by name (`env_vars`). Kimi and opencode take the prompt as an argument, which other local users can read in the process list.
+The foreman's token never appears in a command line. Claude reads the prompt from stdin, and so does codex (`codex exec -`); codex receives the bridge's environment through its own process environment and forwards it to the bridge by name (`env_vars`). Kimi, opencode and qwen take the prompt as an argument, which other local users can read in the process list.
 
 A run's error is the CLI's own verdict. In codex's stream an `error` event or item before `turn.started` is a warning, a startup notice that does not fail the run; from `turn.started` on it is the run's error. `turn.failed` is the closing verdict and names the failure over any error that came before it.
 

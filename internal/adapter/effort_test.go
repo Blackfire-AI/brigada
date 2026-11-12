@@ -45,6 +45,8 @@ func TestValidateEffort(t *testing.T) {
 		{"dsh", "xhigh", false},
 		{"kimi", "", true},
 		{"kimi", "high", false},
+		{"qwen-code", "", true},
+		{"qwen-code", "high", false},
 		{"fake", "high", false},
 	}
 	for _, tc := range cases {

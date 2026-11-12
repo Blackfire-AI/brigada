@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -25,6 +26,60 @@ func TestInitDshProbe(t *testing.T) {
 	fakeInitPATH(t)
 	if p := initDshModels(context.Background()).signIn; p.installed || p.status != "not installed" {
 		t.Errorf("missing dsh probe = %+v", p)
+	}
+}
+
+// qwen-code's binary is qwen: the probe runs `qwen --version` only, never a
+// status, model or credential command.
+func TestInitQwenProbe(t *testing.T) {
+	calls := fakeInitPATH(t, "qwen")
+	source := initQwenModels(context.Background())
+	p := source.signIn
+	if !p.installed || p.signedIn || p.checked || p.status != "version 1.0.0-preview.1, sign-in can't be checked" {
+		t.Errorf("qwen-code probe = %+v", p)
+	}
+	var models []string
+	for _, e := range source.entries {
+		models = append(models, e.value)
+	}
+	if strings.Join(models, ",") != "qwen-subscription/qwen3.8-max,qwen-subscription/qwen3.8-flash" {
+		t.Errorf("models = %v", models)
+	}
+	if data, _ := os.ReadFile(calls); strings.TrimSpace(string(data)) != "qwen --version" {
+		t.Errorf("probe ran %q; want only qwen --version", data)
+	}
+	fakeInitPATH(t)
+	if p := initQwenModels(context.Background()).signIn; p.installed || p.status != "not installed" {
+		t.Errorf("missing qwen-code probe = %+v", p)
+	}
+}
+
+func TestInitQwenCodeAskedAndWorkerOnly(t *testing.T) {
+	importRepo(t)
+	fakeInitPATH(t, "claude", "codex", "qwen")
+	code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "\n\n\n\ny\n\nn\n", "--signed-in", "claude,codex", "--check", "true", "--tools", "none", "--no-wiring")
+	if code != 1 || errOut != "" {
+		t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
+	}
+	flat := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"qwen-code (experimental): version 1.0.0-preview.1, sign-in can't be checked",
+		"Use qwen-code? [y/N]:",
+		"qwen-code runs with auto-approve: when it writes code it can run any command on this machine without asking. It does not review.",
+		"    qwen-code qwen-subscription/qwen3.8-max",
+		"writes code, answers questions",
+		"qwen-code edit files and run any command without asking; no reviews",
+	} {
+		if !strings.Contains(flat, strings.Join(strings.Fields(want), " ")) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(flat, "qwen-code login") {
+		t.Errorf("qwen-code offered a login hint it cannot verify:\n%s", out)
+	}
+	// Only resume-capable harnesses can be the foreman; qwen-code is worker-only.
+	if strings.Contains(flat, "qwen-code/") {
+		t.Errorf("qwen-code offered as foreman:\n%s", out)
 	}
 }
 

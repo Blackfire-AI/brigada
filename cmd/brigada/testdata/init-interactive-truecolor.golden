@@ -15,6 +15,7 @@
 Signed in: claude, codex, opencode (2 providers, opencode providers list).
 kimi: init can't check sign-in.
 dsh (experimental): init can't check sign-in.
+qwen-code (experimental): init can't check sign-in.
 
 [1m━━ Step 1 of 4 · the foreman[0m
 [38;2;138;143;152m  The foreman plans the work and decides what happens when a task needs[0m
@@ -84,6 +85,11 @@ dsh (experimental): init can't check sign-in.
   dsh's own credential store.[0m
 [1m    Use dsh? [0m[38;2;108;198;224m[y/N][0m[1m:[0m
 
+  [1mqwen-code[0m  [38;2;138;143;152mexperimental · [0m[38;2;255;215;95m? sign-in can't be checked[0m
+[1m    Use qwen-code? [0m[38;2;108;198;224m[y/N][0m[1m:[0m
+    [38;2;255;215;95m! qwen-code runs with auto-approve: when it writes code it can run any
+    command on this machine without asking. It does not review.[0m
+
   [38;2;138;143;152m↺ [0m[38;2;138;143;152mchange later: run brigada init again[0m
     [38;2;138;143;152myour own defaults: ~/.codex/config.toml, ~/.kimi-code/config.toml[0m
 
@@ -91,8 +97,8 @@ dsh (experimental): init can't check sign-in.
   [38;2;138;143;152mEach running task is one agent CLI working in its own copy of the repo,
   plus your check command, so this is bounded by your machine. This one
   has 14 cores. Each CLI's account also gets its own limit (claude 3,
-  codex 2, kimi 1, opencode 2, dsh 1, brigada's defaults, never above
-  this number); change any of them later with brigada config.[0m
+  codex 2, kimi 1, opencode 2, dsh 1, qwen-code 1, brigada's defaults,
+  never above this number); change any of them later with brigada config.[0m
 [1m    Tasks at once [0m[38;2;108;198;224m[4][0m[1m:[0m
 
 [1m━━ Step 4 of 4 · the check[0m
@@ -134,15 +140,20 @@ dsh (experimental): init can't check sign-in.
               [38;2;138;143;152mMoonshot[0m     standard  reviews only
     opencode  zai-coding-plan/glm-5.3
               [38;2;138;143;152mZhipu (GLM)[0m  standard  writes code, reviews
+    qwen-code qwen-subscription/qwen3.8-max
+              [38;2;138;143;152mAlibaba[0m      heavy     writes code, answers questions
+    qwen-code qwen-subscription/qwen3.8-flash
+              [38;2;138;143;152mAlibaba[0m      light     writes code, answers questions
   [1mReviews:[0m 4 model families, so every task can get a reviewer of another one.
   [1mAt once:[0m 4 tasks on this machine; per account: claude 3, codex 2, kimi 1,
-    opencode 2 (change: brigada config)
+    opencode 2, qwen-code 1 (change: brigada config)
   [1mCheck:[0m uv run pytest (init doesn't run it; change it later in
     .brigada/project.yaml)
   [1mWhat workers may do:[0m
     claude    edit files; run only: uv run pytest
     codex     edit files and run commands inside codex's sandbox
     opencode  edit files; run only the commands of the worker tools scope
+    qwen-code edit files and run any command without asking; no reviews
   [1mFiles[0m in this repository (brigada never commits them):
     [38;2;95;215;95mnew[0m        .brigada/project.yaml                      [38;2;138;143;152mthe settings above[0m
     [38;2;95;215;95mnew[0m        .brigada/operator.md                       [38;2;138;143;152mtells your own coding

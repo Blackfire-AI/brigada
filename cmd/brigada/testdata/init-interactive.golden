@@ -15,6 +15,7 @@ Nothing is written or started until you confirm at the end.
 Signed in: claude, codex, opencode (2 providers, opencode providers list).
 kimi: init can't check sign-in.
 dsh (experimental): init can't check sign-in.
+qwen-code (experimental): init can't check sign-in.
 
 Step 1 of 4: the foreman
   The foreman plans the work and decides what happens when a task needs
@@ -85,6 +86,11 @@ Step 2 of 4: workers
   dsh's own credential store.
     Use dsh? [y/N]:
 
+  qwen-code (experimental): version 1.0.0-preview.1, sign-in can't be checked
+    Use qwen-code? [y/N]:
+    qwen-code runs with auto-approve: when it writes code it can run any
+    command on this machine without asking. It does not review.
+
   -> change later: run brigada init again
      your own defaults: ~/.codex/config.toml, ~/.kimi-code/config.toml
 
@@ -92,8 +98,8 @@ Step 3 of 4: tasks at once
   Each running task is one agent CLI working in its own copy of the repo,
   plus your check command, so this is bounded by your machine. This one
   has 14 cores. Each CLI's account also gets its own limit (claude 3,
-  codex 2, kimi 1, opencode 2, dsh 1, brigada's defaults, never above
-  this number); change any of them later with brigada config.
+  codex 2, kimi 1, opencode 2, dsh 1, qwen-code 1, brigada's defaults,
+  never above this number); change any of them later with brigada config.
     Tasks at once [4]:
 
 Step 4 of 4: the check
@@ -135,15 +141,20 @@ Plan
               Moonshot     standard  reviews only
     opencode  zai-coding-plan/glm-5.3
               Zhipu (GLM)  standard  writes code, reviews
+    qwen-code qwen-subscription/qwen3.8-max
+              Alibaba      heavy     writes code, answers questions
+    qwen-code qwen-subscription/qwen3.8-flash
+              Alibaba      light     writes code, answers questions
   Reviews: 4 model families, so every task can get a reviewer of another one.
   At once: 4 tasks on this machine; per account: claude 3, codex 2, kimi 1,
-    opencode 2 (change: brigada config)
+    opencode 2, qwen-code 1 (change: brigada config)
   Check: uv run pytest (init doesn't run it; change it later in
     .brigada/project.yaml)
   What workers may do:
     claude    edit files; run only: uv run pytest
     codex     edit files and run commands inside codex's sandbox
     opencode  edit files; run only the commands of the worker tools scope
+    qwen-code edit files and run any command without asking; no reviews
   Files in this repository (brigada never commits them):
     new        .brigada/project.yaml                      the settings above
     new        .brigada/operator.md                       tells your own coding
