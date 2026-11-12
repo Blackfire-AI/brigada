@@ -42,6 +42,7 @@ type env struct {
 	socket string
 	client *api.Client
 	st     *store.Store
+	keys   string // the enrolled approval keys' file (§12.2)
 }
 
 // planReviewOff keeps the fixture's plan creations on the no-review path
@@ -67,7 +68,8 @@ func newEnvToken(t *testing.T, tokens, secret string) *env {
 	if err := os.WriteFile(tokenPath, []byte(tokens), 0o600); err != nil {
 		t.Fatalf("write token file: %v", err)
 	}
-	srv, err := api.New(ctx, st, engine.New(st, engine.Config{PlanReview: &planReviewOff, IssueFetch: issueFetchStub}), nil, tokenPath)
+	keys := filepath.Join(tmp, "approval_keys")
+	srv, err := api.New(ctx, st, engine.New(st, engine.Config{PlanReview: &planReviewOff, IssueFetch: issueFetchStub, ApprovalKeys: keys}), nil, tokenPath)
 	if err != nil {
 		t.Fatalf("build api server: %v", err)
 	}
@@ -83,7 +85,7 @@ func newEnvToken(t *testing.T, tokens, secret string) *env {
 	hs.Start()
 	t.Cleanup(hs.Close)
 
-	e := &env{t: t, socket: socket, client: api.NewClient(socket, secret), st: st}
+	e := &env{t: t, socket: socket, client: api.NewClient(socket, secret), st: st, keys: keys}
 	err = st.Update(ctx, func(tx *sql.Tx) error {
 		res, err := tx.Exec(`INSERT INTO projects (repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
 			VALUES ('https://example.invalid/x.git', 'main', '{}', 'claude', 'sonnet', ?, ?)`, seedTS, seedTS)
