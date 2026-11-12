@@ -44,8 +44,8 @@ tasks:
     effort: medium
     caps: {restart: 2}
     skills: ["surface-parity", "docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-740"
     rounds: 0
   - id: 741
     name: "qwen-init-parity"
