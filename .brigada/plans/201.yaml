@@ -1,0 +1,60 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 201
+title: "#228 implementation: harness-owned permissions, runner-only push, approval authority"
+repo: "github.com/Blackfire-AI/brigada"
+state: reviewing
+created: 2026-11-12T21:47:35.965112Z
+updated: 2026-11-12T21:47:35.965112Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps — the continued
+# dep when base is empty and continue is set, else the default branch; merge a
+# task after its base. A task with continue, one of deps, starts in the
+# session of the dep's author.
+# States are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1);
+# review_tier and review_effort do the same for its reviews (§7, §8); caps
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1);
+# skills name the project's skills the task carries, in order (§5.10).
+tasks:
+  - id: 761
+    name: "docs-decisions"
+    title: "Docs: fold the six answers on #228 into the design and product docs"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    review_tier: standard
+    skills: ["docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 762
+    name: "approval-core"
+    title: "Approval authority: the challenge-signature primitive and key enrollment"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    skills: ["schema-migration"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 763
+    name: "push-path"
+    title: "Runner-only push: task worktrees carry no push URL"
+    class: "implement"
+    deps: ["docs-decisions"]
+    base: "docs-decisions"
+    tier: heavy
+    effort: medium
+    skills: ["surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
