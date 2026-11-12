@@ -5,9 +5,9 @@
 plan: 201
 title: "#228 implementation: harness-owned permissions, runner-only push, approval authority"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-12T21:47:35.965112Z
-updated: 2026-11-12T22:04:45.551548Z
+updated: 2026-11-12T22:07:51.977541Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -63,9 +63,9 @@ tasks:
     deps: ["push-path", "approval-state"]
     base: "approval-state"
     continue: "approval-state"
-    tier: heavy
     effort: medium
-    review_tier: heavy
+    review_tier: standard
+    review_effort: high
     skills: ["surface-parity"]
     state: pending
     branch: ""
@@ -74,9 +74,9 @@ tasks:
     name: "approval-surfaces"
     title: "Approval authority: the CLI and coordinator half of the signature"
     class: "implement"
-    deps: ["approval-gates"]
-    base: "approval-gates"
-    continue: "approval-gates"
+    deps: ["approval-api-gates"]
+    base: "approval-api-gates"
+    continue: "approval-api-gates"
     effort: medium
     skills: ["cli-flag"]
     state: pending
@@ -188,6 +188,20 @@ tasks:
     tier: light
     effort: low
     skills: ["config-setting"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 775
+    name: "approval-api-gates"
+    title: "Approval authority: the API's gated acts require a verified signature"
+    class: "implement"
+    deps: ["approval-gates"]
+    base: "approval-gates"
+    continue: "approval-gates"
+    effort: medium
+    review_tier: standard
+    review_effort: high
+    skills: ["surface-parity"]
     state: pending
     branch: ""
     rounds: 0
