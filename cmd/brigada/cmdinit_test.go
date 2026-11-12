@@ -63,7 +63,7 @@ case "$*" in
      echo 'Commands: no verified authentication status here'
    fi
    exit 0 ;;
- --version) [ "${0##*/}" = dsh ] || exit 89; echo 0.2.1-rc.2 ;;
+ --version) case "${0##*/}" in dsh) echo 0.2.1-rc.2 ;; qwen) echo 1.0.0-preview.1 ;; *) exit 89 ;; esac ;;
  models) [ "${0##*/}" = opencode ] || exit 89; printf 'fixture/gpt-5\nfixture/glm-5.3\n' ;;
  'providers list') [ "${0##*/}" = opencode ] || exit 89; printf '┌ Credentials\n● Provider one oauth\n● Provider two api\n└ 2 credentials\n' ;;
  *) echo 'unexpected harness invocation' >&2; exit 89 ;;

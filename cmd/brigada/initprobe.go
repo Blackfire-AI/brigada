@@ -9,7 +9,16 @@ import (
 	"time"
 )
 
-var initHarnesses = []string{"claude", "codex", "kimi", "opencode", "dsh"}
+var initHarnesses = []string{"claude", "codex", "kimi", "opencode", "dsh", "qwen-code"}
+
+// harnessBinary is the executable a harness runs as: the harness name for all
+// but qwen-code, whose CLI is qwen.
+func harnessBinary(harness string) string {
+	if harness == "qwen-code" {
+		return "qwen"
+	}
+	return harness
+}
 
 // initHarnessLabel is how init names a harness in lists: dsh is experimental.
 func initHarnessLabel(harness string) string {
@@ -34,14 +43,14 @@ type harnessProbe struct {
 // must be documented by its parent's --help on this installation. No doctor,
 // model invocation, credential file read or login command is a probe.
 func probeHarness(ctx context.Context, harness string) harnessProbe {
-	if _, err := exec.LookPath(harness); err != nil {
+	if _, err := exec.LookPath(harnessBinary(harness)); err != nil {
 		return harnessProbe{status: "not installed"}
 	}
 	p := harnessProbe{installed: true, status: "sign-in can't be checked", evidence: "no verified authentication status command; user confirmation required"}
-	if harness == "dsh" {
-		// dsh keeps its key in the environment or in its own store: there is no
-		// status command to run, and init makes no model call. Only the version
-		// is read.
+	if harness == "dsh" || harness == "qwen-code" {
+		// dsh keeps its key in the environment or in its own store, and qwen-code
+		// has no verified status command: there is nothing to run for sign-in,
+		// and init makes no model call. Only the version is read.
 		if out, err := cheapHarnessCommand(ctx, harness, "--version"); err == nil {
 			if v := dshVersion.FindString(string(out)); v != "" {
 				p.status = "version " + v + ", sign-in can't be checked"
@@ -116,7 +125,7 @@ var harnessCommandTimeout = 3 * time.Second
 func cheapHarnessCommand(ctx context.Context, harness string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, harnessCommandTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, harness, args...)
+	cmd := exec.CommandContext(ctx, harnessBinary(harness), args...)
 	cmd.WaitDelay = 500 * time.Millisecond
 	// Output may include account identifiers; it is interpreted in memory only,
 	// never printed or persisted, including on error.

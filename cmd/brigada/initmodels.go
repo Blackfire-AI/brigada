@@ -366,6 +366,18 @@ func initDshModels(ctx context.Context) initModelSource {
 	}
 }
 
+// initQwenModels offers qwen-code's two models as a static list: qwen has no
+// cheap command that lists them, and init makes no model call.
+func initQwenModels(ctx context.Context) initModelSource {
+	return initModelSource{
+		entries: []initModelEntry{
+			{id: 1, name: "qwen-subscription/qwen3.8-max", value: "qwen-subscription/qwen3.8-max", note: "heavy"},
+			{id: 2, name: "qwen-subscription/qwen3.8-flash", value: "qwen-subscription/qwen3.8-flash", note: "light"},
+		},
+		signIn: probeHarness(ctx, "qwen-code"),
+	}
+}
+
 func kimiConfigPath() string {
 	home, _ := os.UserHomeDir()
 	if home == "" {
