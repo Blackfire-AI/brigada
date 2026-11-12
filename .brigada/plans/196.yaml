@@ -5,9 +5,9 @@
 plan: 196
 title: "qwen-code foreman capability: bridge, headless resume and attach (#226)"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-11-12T15:49:06.207966Z
-updated: 2026-11-12T16:20:40.182181Z
+updated: 2026-11-12T16:29:11.126161Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
