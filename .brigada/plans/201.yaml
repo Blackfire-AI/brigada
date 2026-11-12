@@ -5,9 +5,9 @@
 plan: 201
 title: "#228 implementation: harness-owned permissions, runner-only push, approval authority"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-12T21:47:35.965112Z
-updated: 2026-11-12T21:51:22.299948Z
+updated: 2026-11-12T22:04:18.020706Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -43,7 +43,7 @@ tasks:
     effort: medium
     review_tier: heavy
     skills: ["schema-migration"]
-    state: running
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 763
@@ -52,9 +52,7 @@ tasks:
     class: "implement"
     deps: ["docs-decisions"]
     base: "docs-decisions"
-    tier: heavy
     effort: medium
-    skills: ["surface-parity"]
     state: pending
     branch: ""
     rounds: 0
@@ -62,9 +60,9 @@ tasks:
     name: "approval-gates"
     title: "Approval authority: gate the API's approval acts on a verified signature"
     class: "implement"
-    deps: ["approval-core", "push-path"]
-    base: "approval-core"
-    continue: "approval-core"
+    deps: ["push-path", "approval-state"]
+    base: "approval-state"
+    continue: "approval-state"
     tier: heavy
     effort: medium
     review_tier: heavy
@@ -93,15 +91,15 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["config-setting"]
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 767
     name: "adapter-claude"
     title: "claude adapter: bypassPermissions default, permission pass-through, read-scope toggle"
     class: "implement"
-    deps: ["permission-config"]
-    base: "permission-config"
+    deps: ["permission-cli"]
+    base: "permission-cli"
     effort: medium
     skills: ["config-setting"]
     state: pending
@@ -123,10 +121,73 @@ tasks:
     name: "docs-followups"
     title: "Docs close of #228: GUIDE, SECURITY, README, COMPATIBILITY, CHANGELOG"
     class: "implement"
-    deps: ["approval-surfaces", "adapter-others"]
-    base: ""
+    deps: ["adapter-others"]
+    base: "adapter-others"
     effort: medium
     skills: ["docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 770
+    name: "approval-primitive"
+    title: "Approval authority: internal/approval, the challenge-signature primitive"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    review_tier: standard
+    review_effort: high
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 771
+    name: "approval-state"
+    title: "Approval authority: pending requests in the store, key enrollment on the CLI"
+    class: "implement"
+    deps: ["approval-primitive"]
+    base: "approval-primitive"
+    continue: "approval-primitive"
+    effort: medium
+    review_tier: standard
+    skills: ["schema-migration", "cli-flag"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 772
+    name: "permission-key"
+    title: "`permission=` per agent: the config key, its deprecated aliases, settings"
+    class: "implement"
+    deps: ["approval-surfaces"]
+    base: "approval-surfaces"
+    effort: medium
+    review_tier: standard
+    skills: ["config-setting"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 773
+    name: "permission-plumbing"
+    title: "`permission=` plumbed into the job grant and the harness command; the tool scope retired"
+    class: "implement"
+    deps: ["permission-key"]
+    base: "permission-key"
+    continue: "permission-key"
+    effort: medium
+    review_tier: standard
+    skills: ["config-setting"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 774
+    name: "permission-cli"
+    title: "`permission=` in init's suggestion and in `brigada config`"
+    class: "implement"
+    deps: ["permission-plumbing"]
+    base: "permission-plumbing"
+    continue: "permission-plumbing"
+    tier: light
+    effort: low
+    skills: ["config-setting"]
     state: pending
     branch: ""
     rounds: 0
