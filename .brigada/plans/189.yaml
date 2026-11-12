@@ -53,9 +53,9 @@ tasks:
     tier: light
     effort: medium
     skills: ["surface-parity", "docs-change"]
-    state: reviewing
+    state: running
     branch: "brigada/task-726-r1"
-    rounds: 0
+    rounds: 1
   - id: 727
     name: "qwen-smoke"
     title: "test(adapter/qwencode): one live smoke run against the real qwen CLI"
