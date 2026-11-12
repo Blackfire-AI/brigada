@@ -2,12 +2,12 @@
 
 ## 12.1 Engine API
 
-JSON over HTTP on a Unix socket; a remote TLS listener is backlog (§2). Bearer tokens with roles: `client`, `foreman` (scoped to its project), `runner`, `admin`. A role authorizes API calls; approving a plan, a landing or a push is the user's act and needs the user's authority beyond any token (§12.2).
+JSON over HTTP on a Unix socket; a remote TLS listener is backlog (§2). Bearer tokens with roles: `client`, `foreman` (scoped to its project), `runner`, `admin`. A role authorizes API calls; approving a plan, a landing or a push is the user's act and needs the user's signature beyond any token (§12.2).
 
 Groups:
 
 - projects,
-- plans (approve and reject are calls a `client` or `admin` token may make, and they take effect only with the user's approval authority beside the token; a `foreman` credential cannot call them),
+- plans (approve and reject are calls a `client` or `admin` token may make, and they take effect only with the user's signature for that act beside the token, §12.2; a `foreman` credential cannot call them),
 - tasks (create, amend, cancel, retire, restart),
 - questions (answer),
 - foreman messages (a user message, §4.2 item 3: `client` and `admin` only, idempotent; a message identical to one the same token sent to the same project within the last minute is a duplicate — a double Enter, a shell retry — answered with the first one's id),
@@ -30,7 +30,7 @@ Task jobs are keyed `task:<id>`: one live job per key makes duplicate job creati
 
 **Not implemented: land batches (§7.1).** brigada lands one task per land job, on the task's own key, and no task carries a batch reservation. In the design, a land batch is keyed `land-batch:<project>` — a project has one land target, so one key covers it — and every member's reservation, a `land_batch_job` field on the task that §11 does not have (it is part of the unbuilt design), holds its `task:<id>` key the way a live job holds it, so a second batch for the target, a second landing job or a duplicate approval coalesces the same way (§7.1).
 
-**Credentials.** Foreman credentials are short-lived and scoped to one turn or one chat: a headless turn keeps the job-lease-scoped credential of §12.2, and an attached chat gets a hold-scoped foreman token, minted at attach, carried by the MCP config the client writes for the chat and revoked at detach, so the chat's tools die with it. A token's role authorizes API calls and carries no approval authority: an approval needs the user's authority beyond the token, which no token of any role holds (§12.2). No direct store access and the engine-as-mailbox rule stand.
+**Credentials.** Foreman credentials are short-lived and scoped to one turn or one chat: a headless turn keeps the job-lease-scoped credential of §12.2, and an attached chat gets a hold-scoped foreman token, minted at attach, carried by the MCP config the client writes for the chat and revoked at detach, so the chat's tools die with it. A token's role authorizes API calls and carries no approval authority: an approval needs the user's signature beyond the token, and no token of any role holds one (§12.2). No direct store access and the engine-as-mailbox rule stand.
 
 ## 12.2 MCP tools: three sets on one bridge
 
@@ -80,9 +80,23 @@ The MCP server is a `brigada mcp` stdio process started by the foreman's harness
 
 ### Client and coordinator tools
 
-**Ordinary client set.** `brigada mcp --client` is the same bridge for any other harness acting for the user: `ask_foreman` (a user message, §4.2 item 3), `status`, `history`. It authenticates with a client token from the state directory and never holds a foreman token, so a harness can talk to the foreman and watch the work without a person relaying between the two. Every client token speaks with the user's voice, which is the point; the token file can hold several, each with its own label (one per device or harness) and revocable on its own, and the label travels with each message into the foreman's prompt and the history (§9), so it's clear which surface sent what. A client token authenticates its caller and carries no approval authority. Any local process that can read the state directory, a task worker or a foreman with a shell included, can use one to talk to the foreman and watch the work, and none can approve with it: approving a plan, a landing or a push is the user's act, held by a mechanism outside the engine API that a process running as the same OS user cannot obtain, so reading the state directory does not reach it.
+**Ordinary client set.** `brigada mcp --client` is the same bridge for any other harness acting for the user: `ask_foreman` (a user message, §4.2 item 3), `status`, `history`. It authenticates with a client token from the state directory and never holds a foreman token, so a harness can talk to the foreman and watch the work without a person relaying between the two. Every client token speaks with the user's voice, which is the point; the token file can hold several, each with its own label (one per device or harness) and revocable on its own, and the label travels with each message into the foreman's prompt and the history (§9), so it's clear which surface sent what. A client token authenticates its caller and carries no approval authority. Any local process that can read the state directory, a task worker or a foreman with a shell included, can use one to talk to the foreman and watch the work, and none can approve with it: approving a plan, a landing or a push is the user's act, made with a signature (Approval by signature, below), so reading the state directory does not reach it.
 
 **Coordinator set.** `brigada mcp --coordinator` is the client set plus `list_projects`, `plan_approve` and `plan_reject`, every tool taking the project's canonical repo URL (§4.6). It authenticates with a client token, never a foreman credential. Approval is an explicitly user-directed act with a visible confirmation (§4.6): the result "awaiting approval" is never itself a reason to approve.
+
+### Approval by signature
+
+An approval is a signature over a one-time challenge for one named act. The engine issues a challenge that names the act (approving or rejecting a plan at its version, a landing, a push) and expires; the user signs it with a private key, and the engine verifies the signature against a public key it stores. The engine stores public keys only: the private key is the user's, held outside the state directory and never in it, so reading the state directory yields nothing that signs. A signature covers its one challenge, so it cannot be replayed for another act, another plan version or a later moment.
+
+Signing must need something only a human holds:
+
+- a hardware token that asks for a touch,
+- an agent key constrained to ask for a touch on each use, or
+- a key kept off the machine.
+
+The residual risk is plain: a private key that is an ordinary file the same OS user can read lets an agent with a shell sign. Such a key defends nothing against a worker or foreman whose harness grants a shell; only a key that needs a human at signing time does.
+
+The mechanism fails closed. With no enrolled key there is no signature, and the act is refused; a signature over an expired challenge refuses the act too. A headless run does not prompt on a terminal: it waits for a signature that arrives out of band, and an approval nobody signs stays waiting.
 
 ### Set selection
 
