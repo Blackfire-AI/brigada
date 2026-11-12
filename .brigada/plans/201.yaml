@@ -79,7 +79,7 @@ tasks:
     continue: "approval-api-gates"
     effort: medium
     skills: ["cli-flag"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 766
@@ -201,7 +201,7 @@ tasks:
     review_tier: standard
     review_effort: high
     skills: ["surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-775"
     rounds: 0
   - id: 776
