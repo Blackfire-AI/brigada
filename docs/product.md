@@ -63,7 +63,7 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 
 1. API callers (the CLI, the foreman's MCP tools, other harnesses) talk to the engine **only through its API**, never the store directly, even on localhost.
 2. Runners talk to the engine **only through the lease protocol** (lease, heartbeat, complete). The local runner is just a runner on the same host.
-3. **Tokens from day one,** even locally: a client token and a runner token.
+3. **Tokens from day one,** even locally: a client token and a runner token. A token authenticates its caller; approving a plan, a landing or a push is your act, and no token carries it ([design.md](design.md) §12.2).
 4. **No host-local assumptions in task data:** repos are identified by URL plus ref, not by laptop paths; results are pushed branches, not files on disk. A task's repo must have a remote to fetch from and push to; a local-only repo is rejected with a clear error.
 5. **Runners register and advertise their adapters.** The dispatcher picks only from that registry; health and quota attach to it. A remote runner joins without touching dispatch.
 6. **Runners materialize their own workspace:** clone or fetch from the repo URL with their own git credentials, push result branches to the remote, and send check logs with the lease-complete call. Never an engine-side checkout path or a shared disk.
@@ -93,7 +93,7 @@ In:
 - quota learned from the CLIs' own limit errors: an account that hits its limit cools until the reset time;
 - an MCP bridge so other harnesses can call brigada.
 
-**What local gives up:** worktrees instead of containers, so a review is kept read-only by each harness's own permission scope ([design.md](design.md) §5.2) rather than a read-only mount, there's no per-job credential injection or egress restriction, and checks run as the user, in their account, without their forge and cloud credentials. No worse than running the CLI by hand, and said plainly in the docs.
+**What local gives up:** worktrees instead of containers, so a review is kept read-only by the runner discarding its tree, not by a read-only mount or a harness permission scope. What an agent may do comes from your own harness configuration, which brigada passes through; brigada's invariants live in its structure — the runner alone commits, pushes and lands, a review's tree is discarded, the foreman's reading checkout is reset before every turn ([design.md](design.md) §5.2, §5.7). There's no per-job credential injection or egress restriction, and checks run as the user, in their account, without their forge and cloud credentials. No worse than running the CLI by hand, and said plainly in the docs.
 
 Backlog:
 
