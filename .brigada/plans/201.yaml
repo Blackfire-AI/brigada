@@ -5,9 +5,9 @@
 plan: 201
 title: "#228 implementation: harness-owned permissions, runner-only push, approval authority"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-12T21:47:35.965112Z
-updated: 2026-11-12T22:35:36.141218Z
+updated: 2026-11-12T22:44:17.549342Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -98,8 +98,8 @@ tasks:
     name: "adapter-claude"
     title: "claude adapter: bypassPermissions default, permission pass-through, read-scope toggle"
     class: "implement"
-    deps: ["permission-cli"]
-    base: "permission-cli"
+    deps: ["permission-plumbing"]
+    base: "permission-plumbing"
     effort: medium
     skills: ["config-setting"]
     state: pending
@@ -169,9 +169,8 @@ tasks:
     name: "permission-plumbing"
     title: "`permission=` plumbed into the job grant and the harness command; the tool scope retired"
     class: "implement"
-    deps: ["permission-key", "approval-api-gates"]
+    deps: ["permission-key"]
     base: "permission-key"
-    continue: "permission-key"
     effort: medium
     review_tier: standard
     skills: ["config-setting"]
@@ -182,9 +181,8 @@ tasks:
     name: "permission-cli"
     title: "`permission=` in init's suggestion and in `brigada config`"
     class: "implement"
-    deps: ["approval-surfaces", "permission-plumbing"]
+    deps: ["permission-plumbing"]
     base: "permission-plumbing"
-    continue: "permission-plumbing"
     tier: light
     effort: low
     skills: ["config-setting"]
