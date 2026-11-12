@@ -546,7 +546,7 @@ func TestInitNewFileContentsRequireVerbose(t *testing.T) {
 			if !verbose && strings.Contains(out, "default_check:") {
 				t.Errorf("new file contents shown without --verbose:\n%s", out)
 			}
-			project, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none")
+			project, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "", "none")
 			if err != nil {
 				t.Fatal(err)
 			}

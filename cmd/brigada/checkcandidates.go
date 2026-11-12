@@ -8,15 +8,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-
-	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
 )
 
 // checkCandidate is one suggestion for the init check step.
 type checkCandidate struct {
 	Command string // what runs as the check
 	Note    string // where it came from, full length; see truncateNote
-	Tools   string // worker tool scope that lets the command run, "+"-joined
 	File    string // the build file that supplied this candidate
 }
 
@@ -51,17 +48,6 @@ func checkCandidates(root string) ([]checkCandidate, error) {
 		}
 		return ""
 	}
-	goTools := ""
-	if exists("go.mod") {
-		goTools = strings.Join(claude.DefaultWorkerTools(), "+")
-	}
-	tools := func(command string) string {
-		pattern := "Bash(" + command + ":*)"
-		if goTools != "" {
-			return goTools + "+" + pattern
-		}
-		return pattern
-	}
 
 	type ranked struct {
 		rank int
@@ -70,7 +56,7 @@ func checkCandidates(root string) ([]checkCandidate, error) {
 	}
 	var found []ranked
 	add := func(name, command, note, file string) {
-		found = append(found, ranked{checkTargetRank[name], len(found), checkCandidate{command, note, tools(command), file}})
+		found = append(found, ranked{checkTargetRank[name], len(found), checkCandidate{command, note, file}})
 	}
 
 	if f := first("Makefile", "makefile", "GNUmakefile"); f != "" {
@@ -135,13 +121,13 @@ func checkCandidates(root string) ([]checkCandidate, error) {
 	}
 
 	pytest := func(command, file string) {
-		push(checkCandidate{command, "pytest, from " + file, "Bash(" + command + ":*)", file})
+		push(checkCandidate{command, "pytest, from " + file, file})
 	}
 	if exists("go.mod") {
-		push(checkCandidate{"go test ./...", "go test, from go.mod", goTools, "go.mod"})
+		push(checkCandidate{"go test ./...", "go test, from go.mod", "go.mod"})
 	}
 	if exists("Cargo.toml") {
-		push(checkCandidate{"cargo test", "cargo test, from Cargo.toml", "Bash(cargo test:*)", "Cargo.toml"})
+		push(checkCandidate{"cargo test", "cargo test, from Cargo.toml", "Cargo.toml"})
 	}
 	if exists("uv.lock") {
 		pytest("uv run pytest", "uv.lock")

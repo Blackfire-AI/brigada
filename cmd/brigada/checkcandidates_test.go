@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
 )
 
 func candidateRepo(t *testing.T, files map[string]string) string {
@@ -45,9 +43,6 @@ func TestCheckCandidatesOwnersRepo(t *testing.T) {
 	if cs[0].Note != "Makefile: lint format-check type test rig-spec" {
 		t.Errorf("note = %q", cs[0].Note)
 	}
-	if cs[0].Tools != "Bash(make check:*)" {
-		t.Errorf("tools = %q", cs[0].Tools)
-	}
 	if cs[1].Note != "Makefile: uv run pytest -q" {
 		t.Errorf("recipe note = %q", cs[1].Note)
 	}
@@ -67,7 +62,7 @@ func TestCheckCandidatesPackageJSON(t *testing.T) {
 	if got, want := strings.Join(candidateCommands(cs), "|"), "npm run check|npm test|npm run lint"; got != want {
 		t.Fatalf("commands = %q, want %q", got, want)
 	}
-	if cs[0].Note != "package.json: tsc && eslint ." || cs[1].Tools != "Bash(npm test:*)" {
+	if cs[0].Note != "package.json: tsc && eslint ." {
 		t.Errorf("got %+v", cs)
 	}
 }
@@ -99,13 +94,6 @@ func TestCheckCandidatesGoWithMakefile(t *testing.T) {
 	}
 	if got, want := strings.Join(candidateCommands(cs), "|"), "make ci|go test ./..."; got != want {
 		t.Fatalf("commands = %q, want %q", got, want)
-	}
-	goTools := strings.Join(claude.DefaultWorkerTools(), "+")
-	if cs[0].Tools != goTools+"+Bash(make ci:*)" {
-		t.Errorf("make tools = %q", cs[0].Tools)
-	}
-	if cs[1].Tools != goTools {
-		t.Errorf("go tools = %q", cs[1].Tools)
 	}
 }
 

@@ -10,8 +10,17 @@ import (
 // and spelling survive; the caller shows the resulting diff and asks before
 // writing. Empty input creates the minimal schema-1 file, with gate_push auto
 // spelled out; an empty check omits or removes default_check so the project
-// setting is unset.
-func ProjectConfigDefaults(content []byte, repo, check, tools string) ([]byte, error) {
+// setting is unset. permission is the project's permission= value (§5.2),
+// written under its own key; tools is an explicit deprecated tools= scope,
+// written back in the deprecated worker_tools spelling. The two share one
+// line — the alias is the same value in the other spelling — so a value
+// written for one replaces a line of either spelling, and giving both is
+// refused.
+func ProjectConfigDefaults(content []byte, repo, check, permission, tools string) ([]byte, error) {
+	if permission != "" && tools != "" {
+		return nil, configErr("give one of %s and %s; %s is the deprecated alias of %s",
+			SettingPermission, SettingWorkerTools, SettingWorkerTools, SettingPermission)
+	}
 	if len(content) == 0 {
 		content = []byte(fmt.Sprintf("schema: %d\nrepo: %s\n%s: %s\n", ProjectConfigSchema, yamlString(repo), SettingGatePush, GateAuto))
 	}
@@ -23,7 +32,9 @@ func ProjectConfigDefaults(content []byte, repo, check, tools string) ([]byte, e
 		return nil, configErr("repo %q is not this repository's origin %q", cfg.Repo, repo)
 	}
 	lines := strings.Split(string(content), "\n")
-	for _, item := range []struct{ key, value string }{{SettingDefaultCheck, check}, {SettingWorkerTools, tools}} {
+	for _, item := range []struct{ key, value string }{
+		{SettingDefaultCheck, check}, {SettingPermission, permission}, {SettingWorkerTools, tools},
+	} {
 		if err := ValidateSettingValue(item.key, item.value); err != nil {
 			return nil, err
 		}
@@ -36,21 +47,40 @@ func ProjectConfigDefaults(content []byte, repo, check, tools string) ([]byte, e
 			}
 			continue
 		}
+		if item.value == "" {
+			// An empty value sets nothing: the file keeps whatever it has.
+			continue
+		}
 		var old string
 		if json.Unmarshal(cfg.Values[item.key], &old) == nil && old == item.value {
 			continue
 		}
+		// The permission key and its deprecated alias share one line: the
+		// value moves to the spelling this item writes, whatever the line
+		// carried before.
+		keys := []string{item.key}
+		if item.key == SettingPermission {
+			keys = append(keys, SettingWorkerTools)
+		}
+		if item.key == SettingWorkerTools {
+			keys = append(keys, SettingPermission)
+		}
 		replaced := false
-		for i, line := range lines {
-			if strings.HasPrefix(line, item.key+":") {
-				plain := stripYAMLComment(line)
-				comment := strings.TrimPrefix(line, plain)
-				suffix := ""
-				if comment != "" {
-					suffix = " " + comment
+		for _, key := range keys {
+			for i, line := range lines {
+				if strings.HasPrefix(line, key+":") {
+					plain := stripYAMLComment(line)
+					comment := strings.TrimPrefix(line, plain)
+					suffix := ""
+					if comment != "" {
+						suffix = " " + comment
+					}
+					lines[i] = item.key + ": " + yamlString(item.value) + suffix
+					replaced = true
+					break
 				}
-				lines[i] = item.key + ": " + yamlString(item.value) + suffix
-				replaced = true
+			}
+			if replaced {
 				break
 			}
 		}

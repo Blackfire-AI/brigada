@@ -83,6 +83,13 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if len(fs.Args()) != 0 {
 		return usagef(stderr, "init takes no positional arguments; run it inside one repository")
 	}
+	// A --agent value naming the deprecated tools= alias is taken, with the
+	// deprecation notice its parser gives.
+	for _, spec := range agents.specs {
+		for _, w := range spec.warnings() {
+			fmt.Fprintf(stderr, "brigada: warning: %s\n", w)
+		}
+	}
 	if *takeDefault != "" {
 		// Resets one generated file; no probe, plan or engine (§5.9).
 		return runTakeDefault(stdout, stderr, *takeDefault)
@@ -759,6 +766,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			var one agentSpecs
 			if err := one.Set(line); err == nil {
 				spec := one.specs[0]
+				for _, w := range spec.warnings() {
+					fmt.Fprintf(stderr, "brigada: warning: saved agents: %s\n", w)
+				}
 				if askedHarness[spec.harness] || chosenPairs[spec.harness+"/"+spec.model] {
 					continue
 				}
@@ -841,7 +851,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil && !os.IsNotExist(err) {
 		return fail(stderr, err)
 	}
-	projectCheck, projectTools := "", ""
+	projectCheck, filePermission, fileWorkerTools := "", "", ""
 	if exists {
 		cfg, err := engine.ParseProjectConfig(old)
 		if err != nil {
@@ -850,39 +860,62 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if cfg.Repo != canon {
 			return fail(stderr, fmt.Errorf("project.yaml names another repository; correct it before init"))
 		}
+		// The file's deprecation notices (worker_tools, the alias of
+		// permission=) are init's to print: the import it runs stays quiet.
+		printConfigWarnings(stderr, cfg)
 		_ = json.Unmarshal(cfg.Values[engine.SettingDefaultCheck], &projectCheck)
-		_ = json.Unmarshal(cfg.Values[engine.SettingWorkerTools], &projectTools)
+		_ = json.Unmarshal(cfg.Values[engine.SettingPermission], &filePermission)
+		_ = json.Unmarshal(cfg.Values[engine.SettingWorkerTools], &fileWorkerTools)
 	}
 	checkProvided := *check != ""
 	if *check == "none" || *check == "-" {
 		*check = ""
 	}
-	if !checkProvided || !toolsProvided {
+	if !checkProvided {
 		candidates, err := checkCandidates(root)
 		if err != nil {
 			return fail(stderr, err)
 		}
-		entries := initCheckEntries(candidates, projectCheck, projectTools, exists)
-		if !checkProvided {
-			if canAsk {
-				command, exhausted, err := askInitCheck(stdout, ask, entries, candidates)
-				if err != nil {
-					return fail(stderr, err)
-				}
-				if exhausted {
-					return usagef(stderr, "--check: no usable answer; type a command or - for no check, or pass --check COMMAND")
-				}
-				*check = command
-			} else {
-				*check = entries[initCheckDefault(entries)].Command
+		entries := initCheckEntries(candidates, projectCheck, exists)
+		if canAsk {
+			command, exhausted, err := askInitCheck(stdout, ask, entries, candidates)
+			if err != nil {
+				return fail(stderr, err)
 			}
-		}
-		if !toolsProvided {
-			*tools = initCheckTools(*check, entries, candidates)
+			if exhausted {
+				return usagef(stderr, "--check: no usable answer; type a command or - for no check, or pass --check COMMAND")
+			}
+			*check = command
+		} else {
+			*check = entries[initCheckDefault(entries)].Command
 		}
 	}
 
-	proposed, err := engine.ProjectConfigDefaults(old, canon, *check, *tools)
+	// The suggestion init writes is the per-agent permission default (§5.2),
+	// not a worker tool scope of its own: what a claude worker resolves to —
+	// its harness default unless the user set a permission. A file value
+	// keeps its own spelling, the alias included; a value that is not a
+	// permission mode (an alias scope) writes no key. An explicit --tools
+	// overrides all of that and writes its deprecated spelling alone.
+	permission, aliasTools := "", *tools
+	if !toolsProvided {
+		switch {
+		case filePermission != "":
+			permission = filePermission
+		case fileWorkerTools != "":
+			aliasTools = fileWorkerTools
+		default:
+			for _, spec := range usable {
+				if spec.harness == "claude" {
+					if resolved, _ := spec.resolve(rt.file); adapter.ValidatePermission(resolved) == nil {
+						permission = resolved
+					}
+					break
+				}
+			}
+		}
+	}
+	proposed, err := engine.ProjectConfigDefaults(old, canon, *check, permission, aliasTools)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -895,13 +928,18 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil {
 		return fail(stderr, err)
 	}
-	parsedTools, err := lifecycle.ParseTools(*tools)
-	if err != nil {
-		return usagef(stderr, "--tools: %v", err)
-	}
-	for i := range usable {
-		if usable[i].harness == "claude" && usable[i].tools == nil && (toolsProvided || rt.file.Tools["claude/"+usable[i].model] == nil) {
-			usable[i].tools = parsedTools
+	if toolsProvided {
+		// An explicit --tools keeps its deprecated spelling and scope: it
+		// still replaces what a claude worker would take from its config
+		// file or harness default.
+		parsedTools, err := lifecycle.ParseTools(*tools)
+		if err != nil {
+			return usagef(stderr, "--tools: %v", err)
+		}
+		for i := range usable {
+			if usable[i].harness == "claude" && usable[i].tools == nil {
+				usable[i].tools = parsedTools
+			}
 		}
 	}
 	_, adverts, err := resolveRunnerAgents(rt, usable, "")

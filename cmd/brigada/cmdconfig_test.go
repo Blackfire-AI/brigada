@@ -27,6 +27,18 @@ func configDo(t *testing.T, ctx context.Context, args ...string) string {
 	return out.String()
 }
 
+// configDoWarn is configDo for a run whose deprecation notices (a
+// deprecated alias in the config file or the saved agents) are expected.
+func configDoWarn(t *testing.T, ctx context.Context, args ...string) (string, string) {
+	t.Helper()
+	var out, errs bytes.Buffer
+	if code := run(ctx, append([]string{"config"}, args...), &out, &errs); code != 0 {
+		t.Fatalf("config: code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
+	}
+	assertConfigWidth(t, out.String())
+	return out.String(), errs.String()
+}
+
 func assertConfigWidth(t *testing.T, output string) {
 	t.Helper()
 	for _, line := range strings.Split(output, "\n") {
@@ -73,11 +85,23 @@ func TestConfigSavedAgentsAndRunningRunnerOutsideRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := []string{"--state-dir", state, "--config", config}
-	out := configDo(t, context.Background(), args...)
+	out, errs := configDoWarn(t, context.Background(), args...)
+	// The config file and the saved claude line both name the deprecated
+	// alias; each read carries its notice.
+	for _, want := range []string{
+		"brigada: warning: config: tools.claude/sonnet is deprecated",
+		"brigada: warning: --agent tools=: tools is deprecated",
+	} {
+		if !strings.Contains(errs, want) {
+			t.Errorf("missing warning %q in stderr %q", want, errs)
+		}
+	}
 	flat := strings.Join(strings.Fields(out), " ")
 	for _, want := range []string{
 		"Agents (runner; change: brigada init)",
 		"claude sonnet effort: Claude's default writes code, reviews",
+		// The resolved permission of the tools=none alias.
+		"permission: none",
 		"codex gpt-6.1-sol effort: low (codex default) writes code, reviews",
 		"kimi kimi-code/k3 effort: high (kimi config) reviews only",
 		"account: work", "tools: none", "agent-file: reviewer.md",
@@ -128,7 +152,7 @@ func TestConfigSavedAgentsAndRunningRunnerOutsideRepo(t *testing.T) {
 	}
 	release()
 	release = func() {}
-	out = configDo(t, context.Background(), args...)
+	out, _ = configDoWarn(t, context.Background(), args...)
 	if !strings.Contains(out, "runner: stopped") || !strings.Contains(out, "kimi-code/k3") {
 		t.Fatalf("stopped runner lost saved choices:\n%s", out)
 	}
@@ -241,7 +265,10 @@ func TestConfigDefaultsAndLongLines(t *testing.T) {
 	if err := os.WriteFile(config, []byte("idle_minutes = 0\nreview.family = require\ntools.claude/sonnet = Bash("+strings.Repeat("long-command", 20)+")\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	out = configDo(t, context.Background(), "--state-dir", state, "--config", config)
+	out, errs := configDoWarn(t, context.Background(), "--state-dir", state, "--config", config)
+	if !strings.Contains(errs, "brigada: warning: config: tools.claude/sonnet is deprecated") {
+		t.Errorf("alias read without its warning: %q", errs)
+	}
 	if !strings.Contains(out, "idle_minutes = 30 (default; file has 0)") {
 		t.Fatalf("zero idle is not the engine default:\n%s", out)
 	}

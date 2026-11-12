@@ -44,7 +44,7 @@ func oldGenerated(text string, skill bool) string {
 func instructionsRepo(t *testing.T) string {
 	t.Helper()
 	write := importRepo(t)
-	base, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none")
+	base, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestTakeDefaultRestoresRoleKey(t *testing.T) {
 
 	// The worker on the alias: the alias's own file is reset and no map
 	// key appears beside it, for the file refuses naming the text twice.
-	base, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none")
+	base, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none", "")
 	if err != nil {
 		t.Fatal(err)
 	}

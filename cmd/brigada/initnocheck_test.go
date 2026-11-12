@@ -64,13 +64,22 @@ func TestInitNoCheckChoices(t *testing.T) {
 			if strings.Contains(strings.Join(tc.args, " "), "--probe") {
 				wantCode = 0
 			}
-			if code != wantCode || errs != "" || !strings.Contains(out, "  Check: none (work goes straight to review)\n") {
+			if tc.current || strings.Contains(tc.existing, "worker_tools") {
+				// The file's deprecated alias is read with the warning the
+				// parser gives.
+				if !strings.Contains(errs, "warning: .brigada/project.yaml: worker_tools is deprecated") {
+					t.Fatalf("alias read without its warning: %q", errs)
+				}
+			} else if errs != "" {
 				t.Fatalf("init = %d\n%s\n%s", code, out, errs)
 			}
-			permissions := "edit files; no commands"
-			if tc.goRepo {
-				permissions = "edit files; run only: go build, go test, go vet, gofmt"
+			if code != wantCode || !strings.Contains(out, "  Check: none (work goes straight to review)\n") {
+				t.Fatalf("init = %d\n%s\n%s", code, out, errs)
 			}
+			// The suggestion carries no tool scope of its own: the claude
+			// worker line shows the scope its agent resolves to, whatever
+			// the repository builds with.
+			permissions := "edit files; run only: go build, go test, go vet, gofmt"
 			if !strings.Contains(out, "    claude    "+permissions+"\n") {
 				t.Fatalf("wrong no-check permissions:\n%s", out)
 			}
@@ -118,13 +127,13 @@ func TestInitNoCheckApply(t *testing.T) {
 	})
 	base := []string{"--yes", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--no-wiring"}
 	for _, step := range []struct {
-		name, check, tools string
-		args               []string
+		name, check string
+		args        []string
 	}{
-		{"empty", "", "none", nil},
-		{"add check", "echo checked", "Bash(echo checked:*)", []string{"--check", "echo checked"}},
-		{"remove check", "", "none", []string{"--check", "none"}},
-		{"keep no check", "", "none", nil},
+		{"empty", "", nil},
+		{"add check", "echo checked", []string{"--check", "echo checked"}},
+		{"remove check", "", []string{"--check", "none"}},
+		{"keep no check", "", nil},
 	} {
 		t.Run(step.name, func(t *testing.T) {
 			code, out, errs := initFixedParallel(t, state, "", append(append([]string{}, base...), step.args...)...)
@@ -141,11 +150,16 @@ func TestInitNoCheckApply(t *testing.T) {
 				t.Fatal(err)
 			}
 			value, hasCheck := cfg.Values[engine.SettingDefaultCheck]
-			var check, tools string
+			var check, permission string
 			_ = json.Unmarshal(value, &check)
-			_ = json.Unmarshal(cfg.Values[engine.SettingWorkerTools], &tools)
-			if check != step.check || hasCheck != (step.check != "") || tools != step.tools {
+			_ = json.Unmarshal(cfg.Values[engine.SettingPermission], &permission)
+			// The file carries the per-agent permission default and no
+			// worker tool scope of its own.
+			if check != step.check || hasCheck != (step.check != "") || permission != "bypassPermissions" {
 				t.Fatalf("wrong project defaults: %s", content)
+			}
+			if _, deprecated := cfg.Values[engine.SettingWorkerTools]; deprecated {
+				t.Fatalf("init suggested a deprecated worker_tools key: %s", content)
 			}
 			_, token, err := lifecycle.TokenForRole(lifecycle.PathsOf(state).Tokens, "client")
 			if err != nil {
@@ -166,14 +180,17 @@ func TestInitNoCheckApply(t *testing.T) {
 					} else if setting.Value != step.check || setting.Default {
 						t.Errorf("wrong project check: %+v", setting)
 					}
+					if setting.Value == "" {
+						t.Errorf("empty check stored: %+v", setting)
+					}
 				}
 			}
 			if !found {
 				t.Error("default_check missing from settings")
 			}
 			rec, live, err := runnerstate.Running(filepath.Join(state, "runner"))
-			if err != nil || !live || len(rec.Agents) != 2 || rec.Agents[0].Tools != step.tools {
-				t.Fatalf("wrong worker tools: %+v live=%v err=%v", rec, live, err)
+			if err != nil || !live || len(rec.Agents) != 2 {
+				t.Fatalf("wrong runner record: %+v live=%v err=%v", rec, live, err)
 			}
 		})
 	}

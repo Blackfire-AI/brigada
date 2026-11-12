@@ -104,6 +104,7 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingLandReady, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingDefaultCheck, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingWorkerTools, Value: "agent default", Default: true, Source: SourceDefault},
+		{Key: SettingPermission, Value: "agent default", Default: true, Source: SourceDefault},
 		{Key: SettingSetup, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingSetupCacheKeyFiles, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingSetupTimeout, Value: "15", Default: true, Source: SourceDefault},

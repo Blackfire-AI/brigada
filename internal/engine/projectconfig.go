@@ -92,8 +92,9 @@ type ProjectConfig struct {
 	// Values holds the stored JSON of each setting the file sets.
 	Values map[string]json.RawMessage
 	// Permission is the project-level permission value the file resolves
-	// to (§5.2): the text of the deprecated worker_tools alias, "" when the
-	// file sets none. Nothing here interprets it.
+	// to (§5.2): the permission= value, or the text of the deprecated
+	// worker_tools alias, "" when the file sets none. Nothing here
+	// interprets it.
 	Permission string
 	// Warnings lists the deprecation notices the file earns, one per
 	// deprecated key it uses, each naming the key and its replacement.
@@ -133,7 +134,7 @@ var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // budget, for one) does not become shared-file policy by being editable.
 var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
-	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
+	SettingDefaultCheck, SettingWorkerTools, SettingPermission, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
 	SettingExtraRepos, SettingForemanRotateTokens, SettingPlanFiles, SettingPlanFileBranch}
 
 // ParseProjectConfig parses and validates a project.yaml. Anything but
@@ -273,8 +274,24 @@ func ParseProjectConfig(content []byte) (ProjectConfig, error) {
 		// worker_tools is the deprecated project spelling of the permission
 		// the agents run under (§5.2): the stored value stays as written,
 		// and the same text is the resolved Permission.
-		cfg.Permission, _ = rawString(raw)
 		cfg.Warnings = append(cfg.Warnings, adapter.DeprecatedKeyWarning(SettingWorkerTools))
+		alias, _ := rawString(raw)
+		if set, ok := cfg.Values[SettingPermission]; ok {
+			// An explicit permission= beside its deprecated alias is fine
+			// only when the two agree, whatever their order in the file.
+			setText, _ := rawString(set)
+			if setText != alias {
+				return ProjectConfig{}, configErr("%s (%s) and %s (%s) disagree; %s is the deprecated alias of %s, keep one",
+					SettingWorkerTools, alias, SettingPermission, setText, SettingWorkerTools, SettingPermission)
+			}
+			cfg.Permission = setText
+			return cfg, nil
+		}
+		cfg.Permission = alias
+		return cfg, nil
+	}
+	if raw, ok := cfg.Values[SettingPermission]; ok {
+		cfg.Permission, _ = rawString(raw)
 	}
 	return cfg, nil
 }
@@ -324,7 +341,7 @@ func settingText(key string, v yamlValue) (string, error) {
 			return "", configErr("%s (line %d) must be an integer", key, v.line)
 		}
 		return nonEmpty(key, v, v.scalar)
-	case SettingDefaultCheck, SettingWorkerTools, SettingSetup,
+	case SettingDefaultCheck, SettingWorkerTools, SettingPermission, SettingSetup,
 		SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
 		SettingApprovalBudget, SettingPlanFiles, SettingPlanFileBranch:
 		if v.isList {

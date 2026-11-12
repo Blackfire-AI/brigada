@@ -220,12 +220,15 @@ func TestInitTasksAtOnceApply(t *testing.T) {
 		t.Fatalf("saved=%d err=%v", saved, err)
 	}
 	code, out, errs = initDo(t, state, "\nn\n", args...)
-	if code != 1 || errs != "" || !strings.Contains(out, "Tasks at once [2]:") {
+	// The saved claude line names the deprecated tools= alias; init reads
+	// it with the deprecation notice.
+	wantErrs := "brigada: warning: saved agents: --agent tools=: tools is deprecated"
+	if code != 1 || !strings.Contains(errs, wantErrs) || !strings.Contains(out, "Tasks at once [2]:") {
 		t.Fatalf("rerun: %d\n%s\n%s", code, out, errs)
 	}
 	code, out, errs = initDo(t, state, "", append(args, "--yes", "--parallel", "3")...)
 	flat := strings.Join(strings.Fields(out), " ")
-	if code != 0 || errs != "" || !strings.Contains(out, "Runner restarted") ||
+	if code != 0 || !strings.Contains(errs, wantErrs) || !strings.Contains(out, "Runner restarted") ||
 		!strings.Contains(flat, "the engine reads caps when it starts: run brigada stop --engine, then any command starts it with the new values") {
 		t.Fatalf("changed limit: %d\n%s\n%s", code, out, errs)
 	}
@@ -234,7 +237,7 @@ func TestInitTasksAtOnceApply(t *testing.T) {
 		t.Fatalf("runner not restarted with capacity 3: %+v live=%v err=%v", again, live, err)
 	}
 	code, out, errs = initDo(t, state, "", append(args, "--yes")...)
-	if code != 0 || errs != "" || !strings.Contains(out, "Runner already running") ||
+	if code != 0 || !strings.Contains(errs, wantErrs) || !strings.Contains(out, "Runner already running") ||
 		strings.Contains(out, "the engine reads caps") || !strings.Contains(out, "At once: 3 tasks") {
 		t.Fatalf("saved --yes: %d\n%s\n%s", code, out, errs)
 	}

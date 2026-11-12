@@ -153,7 +153,7 @@ dsh (experimental): init can't check sign-in.
   [1mCheck:[0m uv run pytest (init doesn't run it; change it later in
     .brigada/project.yaml)
   [1mWhat workers may do:[0m
-    claude    edit files; run only: uv run pytest
+    claude    edit files; run only: go build, go test, go vet, gofmt
     codex     edit files and run commands inside codex's sandbox
     opencode  edit files; run only the commands of the worker tools scope
     qwen-code edit files and run any command without asking; no reviews

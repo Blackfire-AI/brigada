@@ -386,9 +386,9 @@ func TestInitNoInput(t *testing.T) {
 		{"no foreman input", "", "--foreman", []string{"--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex"}},
 		{"no apply input", "", "--yes", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--foreman", "claude/sonnet@medium"}},
 		{"no check input", "", "--check COMMAND", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--foreman", "claude/sonnet@medium", "--check="}},
-		// A command that cannot be scoped gets file tools only and reaches
-		// the apply prompt, without asking a separate tools question.
-		{"unscopable check reaches apply", "", "--yes", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--foreman", "claude/sonnet@medium", "--check", "a+b", "--tools="}},
+		// An unscopable check still reaches the apply prompt; the agents
+		// take their own resolved scopes, no tool scope from the check.
+		{"unscopable check reaches apply", "", "--yes", []string{"--agent", "harness=claude", "--signed-in", "claude", "--accept-limited", "--foreman", "claude/sonnet@medium", "--check", "a+b"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
@@ -554,7 +554,7 @@ func TestInitApplyPrompts(t *testing.T) {
 			fakeInitPATH(t, "claude", "codex")
 			state := testsupport.ShortStateDir(t)
 			if tc.exists {
-				config, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none")
+				config, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "", "none")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -580,6 +580,12 @@ func TestInitApplyPrompts(t *testing.T) {
 				}
 			}
 			code, out, err := initFixedParallel(t, state, "\n\nn\n", "--agent", "harness=claude", "--agent", "harness=codex", "--signed-in", "claude,codex", "--check", "true", "--tools", "none", "--no-wiring")
+			if tc.exists && !strings.Contains(err, "warning: .brigada/project.yaml: worker_tools is deprecated") {
+				t.Fatalf("existing alias read without its warning: %q", err)
+			}
+			if tc.exists {
+				err = ""
+			}
 			if code != 1 || err != "" || !strings.Contains(out, "\n\n"+tc.prompt+"\n") || strings.Contains(out, "\n\n\n"+tc.prompt) || !strings.Contains(out, "Declined") {
 				t.Fatalf("got %d\n%s\n%s", code, out, err)
 			}
@@ -591,41 +597,40 @@ func TestInitApplyPrompts(t *testing.T) {
 }
 
 // firstCheckCandidate is the entry init offers as 1 for a repository.
-func firstCheckCandidate(t *testing.T, root string) (check, tools string) {
+func firstCheckCandidate(t *testing.T, root string) (check string) {
 	t.Helper()
 	candidates, err := checkCandidates(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(candidates) == 0 {
-		return "", ""
+		return ""
 	}
-	return candidates[0].Command, candidates[0].Tools
+	return candidates[0].Command
 }
 
 // TestInitBuildSuggestions keeps its purpose: each build file yields the
-// check and tools init suggests, and no script is ever run. Changed: the
-// suggestion is now the first of checkCandidates, not suggestInitDefaults.
+// check init suggests, and no script is ever run. Changed: the suggestion
+// is now the first of checkCandidates, not suggestInitDefaults.
 func TestInitBuildSuggestions(t *testing.T) {
-	for _, tc := range []struct{ name, body, check, tools string }{
-		{"go.mod", "module x", "go test ./...", "Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*)"},
-		{"package.json", `{"scripts":{"test":"touch should-never-exist"}}`, "npm test", "Bash(npm test:*)"},
-		{"Cargo.toml", "[package]", "cargo test", "Bash(cargo test:*)"},
-		{"uv.lock", "", "uv run pytest", "Bash(uv run pytest:*)"},
-		{"poetry.lock", "", "poetry run pytest", "Bash(poetry run pytest:*)"},
-		{"pyproject.toml", "[project]", "python -m pytest", "Bash(python -m pytest:*)"},
-		{"pytest.ini", "[pytest]", "python -m pytest", "Bash(python -m pytest:*)"},
-		{"package.json", `{"scripts":{"build":"x"}}`, "", ""},
-		{"unmatched", "", "", ""},
+	for _, tc := range []struct{ name, body, check string }{
+		{"go.mod", "module x", "go test ./..."},
+		{"package.json", `{"scripts":{"test":"touch should-never-exist"}}`, "npm test"},
+		{"Cargo.toml", "[package]", "cargo test"},
+		{"uv.lock", "", "uv run pytest"},
+		{"poetry.lock", "", "poetry run pytest"},
+		{"pyproject.toml", "[project]", "python -m pytest"},
+		{"pytest.ini", "[pytest]", "python -m pytest"},
+		{"package.json", `{"scripts":{"build":"x"}}`, ""},
+		{"unmatched", "", ""},
 	} {
 		t.Run(tc.name+tc.check, func(t *testing.T) {
 			root := t.TempDir()
 			if err := os.WriteFile(filepath.Join(root, tc.name), []byte(tc.body), 0644); err != nil {
 				t.Fatal(err)
 			}
-			check, tools := firstCheckCandidate(t, root)
-			if check != tc.check || tools != tc.tools {
-				t.Fatalf("got %q %q", check, tools)
+			if check := firstCheckCandidate(t, root); check != tc.check {
+				t.Fatalf("got %q", check)
 			}
 			if _, err := os.Stat(filepath.Join(root, "should-never-exist")); !os.IsNotExist(err) {
 				t.Fatal("executed test script")
@@ -661,7 +666,7 @@ func TestInitBuildSuggestionOrder(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if check, _ := firstCheckCandidate(t, root); check != tc.check {
+			if check := firstCheckCandidate(t, root); check != tc.check {
 				t.Fatalf("got %q; want %q", check, tc.check)
 			}
 		})
@@ -669,24 +674,25 @@ func TestInitBuildSuggestionOrder(t *testing.T) {
 }
 
 // The check follows the foreman and workers, names its source files, defaults
-// to the best suggestion on Enter, and accepts a replacement command. Worker
-// tools follow the choice: the candidate's own or a scope for the typed command.
+// to the best suggestion on Enter, and accepts a replacement command. Changed:
+// the suggestion carries no tool scope of its own; the claude worker line
+// shows the Go default scope the agent resolves to.
 func TestInitSuggestedCheckQuestion(t *testing.T) {
 	for _, tc := range []struct {
-		name, source, body, answer, check, tools string
+		name, source, body, answer, check string
 	}{
-		{"make Enter", "Makefile", "check: test\n", "", "make check", "Bash(make check:*)"},
-		{"GNUmakefile Enter", "GNUmakefile", "check: test\n", "", "make check", "Bash(make check:*)"},
-		{"Justfile Enter", "Justfile", "check: test\n", "", "just check", "Bash(just check:*)"},
-		{"go Enter", "go.mod", "module x", "", "go test ./...", "Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*)"},
-		{"npm Enter", "package.json", `{"scripts":{"test":"exit 99"}}`, "", "npm test", "Bash(npm test:*)"},
-		{"cargo Enter", "Cargo.toml", "[package]", "", "cargo test", "Bash(cargo test:*)"},
-		{"uv Enter", "uv.lock", "", "", "uv run pytest", "Bash(uv run pytest:*)"},
-		{"poetry Enter", "poetry.lock", "", "", "poetry run pytest", "Bash(poetry run pytest:*)"},
-		{"pyproject Enter", "pyproject.toml", "[project]", "", "python -m pytest", "Bash(python -m pytest:*)"},
-		{"pytest Enter", "pytest.ini", "[pytest]", "", "python -m pytest", "Bash(python -m pytest:*)"},
-		{"typed suggestion", "uv.lock", "", "uv run pytest", "uv run pytest", "Bash(uv run pytest:*)"},
-		{"typed replacement", "uv.lock", "", "uv run pytest -q", "uv run pytest -q", "Bash(uv run pytest -q:*)"},
+		{"make Enter", "Makefile", "check: test\n", "", "make check"},
+		{"GNUmakefile Enter", "GNUmakefile", "check: test\n", "", "make check"},
+		{"Justfile Enter", "Justfile", "check: test\n", "", "just check"},
+		{"go Enter", "go.mod", "module x", "", "go test ./..."},
+		{"npm Enter", "package.json", `{"scripts":{"test":"exit 99"}}`, "", "npm test"},
+		{"cargo Enter", "Cargo.toml", "[package]", "", "cargo test"},
+		{"uv Enter", "uv.lock", "", "", "uv run pytest"},
+		{"poetry Enter", "poetry.lock", "", "", "poetry run pytest"},
+		{"pyproject Enter", "pyproject.toml", "[project]", "", "python -m pytest"},
+		{"pytest Enter", "pytest.ini", "[pytest]", "", "python -m pytest"},
+		{"typed suggestion", "uv.lock", "", "uv run pytest", "uv run pytest"},
+		{"typed replacement", "uv.lock", "", "uv run pytest -q", "uv run pytest -q"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			importRepo(t)
@@ -710,7 +716,8 @@ func TestInitSuggestedCheckQuestion(t *testing.T) {
 			for _, want := range []string{
 				"Check: " + tc.check + " (init doesn't run it; change it later in .brigada/project.yaml)",
 				"default_check: " + strconv.Quote(tc.check),
-				"claude edit files; run only: " + initToolCommands(tc.tools),
+				"permission: \"bypassPermissions\"",
+				"claude edit files; run only: go build, go test, go vet, gofmt codex",
 			} {
 				if !strings.Contains(strings.Join(strings.Fields(out), " "), want) {
 					t.Errorf("missing %q in:\n%s", want, out)
@@ -840,14 +847,14 @@ func TestInitCheckStepLongNoteStaysNarrow(t *testing.T) {
 
 func TestInitCheckStepAnswers(t *testing.T) {
 	for _, tc := range []struct {
-		name, answer, check, tools string
+		name, answer, check string
 	}{
-		{"Enter picks make check", "", "make check", "make check"},
-		{"typed make check", "make check", "make check", "make check"},
-		{"typed make test", "make test", "make test", "make test"},
-		{"typed uv run pytest", "uv run pytest", "uv run pytest", "uv run pytest"},
-		{"typed command sets its tools", "make lint", "make lint", "make lint"},
-		{"whitespace around a typed command is dropped", "  make lint  ", "make lint", "make lint"},
+		{"Enter picks make check", "", "make check"},
+		{"typed make check", "make check", "make check"},
+		{"typed make test", "make test", "make test"},
+		{"typed uv run pytest", "uv run pytest", "uv run pytest"},
+		{"typed command", "make lint", "make lint"},
+		{"whitespace around a typed command is dropped", "  make lint  ", "make lint"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, out, errOut := initCheckStep(t, tc.answer, "")
@@ -858,7 +865,11 @@ func TestInitCheckStepAnswers(t *testing.T) {
 			for _, want := range []string{
 				"Check: " + tc.check + " (init doesn't run it",
 				"default_check: " + strconv.Quote(tc.check),
-				"claude edit files; run only: " + tc.tools + " codex",
+				// The suggestion carries no tool scope of its own: the file
+				// gains the per-agent permission default, and the claude
+				// worker line shows the scope its agent resolves to.
+				"permission: \"bypassPermissions\"",
+				"claude edit files; run only: go build, go test, go vet, gofmt codex",
 			} {
 				if !strings.Contains(flat, want) {
 					t.Errorf("missing %q in:\n%s", want, out)
@@ -883,10 +894,10 @@ func TestInitCheckStepNoCandidates(t *testing.T) {
 		asked                            int
 		ok                               bool
 	}{
-		{"Enter", "", "none (work goes straight to review)", "edit files; no commands", 1, true},
-		{"blank Enter", "   ", "none (work goes straight to review)", "edit files; no commands", 1, true},
-		{"dash", "-", "none (work goes straight to review)", "edit files; no commands", 1, true},
-		{"typed on third try", "1\n2\ntrue", "true (", "edit files; run only: true", 3, true},
+		{"Enter", "", "none (work goes straight to review)", "edit files; run only: go build, go test, go vet, gofmt", 1, true},
+		{"blank Enter", "   ", "none (work goes straight to review)", "edit files; run only: go build, go test, go vet, gofmt", 1, true},
+		{"dash", "-", "none (work goes straight to review)", "edit files; run only: go build, go test, go vet, gofmt", 1, true},
+		{"typed on third try", "1\n2\ntrue", "true (", "edit files; run only: go build, go test, go vet, gofmt", 3, true},
 		{"three invalid numbers", "1\n2\n3", "", "", 3, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -924,40 +935,49 @@ func TestInitCheckStepNoCandidates(t *testing.T) {
 
 func TestInitRerunShowsCurrentCheckFirst(t *testing.T) {
 	// A rerun with an existing project.yaml asks the step: the current check
-	// is the prompt default; Enter keeps it and its tools.
+	// is the prompt default; Enter keeps it. The file's deprecated alias is
+	// read with the warning the parser gives, and the alias value keeps its
+	// own spelling in what init proposes.
 	existing := "default_check: custom check\nworker_tools: none\n"
 	code, out, errOut := initCheckStep(t, "", existing)
-	if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
+	if code != 1 || !strings.Contains(errOut, "warning: .brigada/project.yaml: worker_tools is deprecated") || !strings.Contains(out, "Declined") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
 	for _, want := range []string{
 		"    custom check  from .brigada/project.yaml  current\n  Found Makefile, uv.lock, so the suggestions are:\n    make check     Makefile: lint",
 		"    uv run pytest  pytest, from uv.lock\n  Check command [custom check]:\n",
 		"  Check: custom check (",
-		"    claude    edit files; no commands\n",
+		"    claude    edit files; run only: go build, go test, go vet, gofmt\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
-	// Typing another suggestion moves the tools with it.
+	// Typing another suggestion changes only the check; no tool scope
+	// follows it any more.
 	code, out, errOut = initCheckStep(t, "make check", existing)
 	flat := strings.Join(strings.Fields(out), " ")
-	if code != 1 || errOut != "" || !strings.Contains(flat, "Check: make check (") || !strings.Contains(flat, "claude edit files; run only: make check codex") {
+	if code != 1 || !strings.Contains(errOut, "warning: .brigada/project.yaml: worker_tools is deprecated") ||
+		!strings.Contains(flat, "Check: make check (") || !strings.Contains(flat, "claude edit files; run only: go build, go test, go vet, gofmt codex") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
 	// A current check that is also a candidate is listed once, as current.
-	_, out, _ = initCheckStep(t, "", "default_check: make check\nworker_tools: Bash(make check:*)\n")
-	if strings.Count(out, "make check  ") != 1 || !strings.Contains(out, "    make check     Makefile: lint format-check type test rig-spec  current\n    make test ") {
-		t.Fatalf("current check not deduplicated:\n%s", out)
+	_, out, errOut = initCheckStep(t, "", "default_check: make check\nworker_tools: Bash(make check:*)\n")
+	if !strings.Contains(errOut, "warning: .brigada/project.yaml: worker_tools is deprecated") ||
+		strings.Count(out, "make check  ") != 1 || !strings.Contains(out, "    make check     Makefile: lint format-check type test rig-spec  current\n    make test ") {
+		t.Fatalf("current check not deduplicated:\n%s\nstderr warning missing: %q", out, errOut)
 	}
 }
 
 func TestInitWorkerPermissions(t *testing.T) {
-	for _, tc := range []struct{ tools, permissions string }{
-		{"", "edit files; run only: uv run pytest"},
-		{",tools=none", "edit files; no commands"},
-		{",tools=Bash(custom check:*)", "edit files; run only: custom check"},
+	for _, tc := range []struct {
+		tools, permissions, stderr string
+	}{
+		{"", "edit files; run only: go build, go test, go vet, gofmt", ""},
+		{",tools=none", "edit files; no commands",
+			"brigada: warning: --agent tools=: tools is deprecated"},
+		{",tools=Bash(custom check:*)", "edit files; run only: custom check",
+			"brigada: warning: --agent tools=: tools is deprecated"},
 	} {
 		t.Run(tc.permissions, func(t *testing.T) {
 			importRepo(t)
@@ -968,8 +988,8 @@ func TestInitWorkerPermissions(t *testing.T) {
 			code, out, errOut := initFixedParallel(t, testsupport.ShortStateDir(t), "", "--probe",
 				"--agent", "harness=claude"+tc.tools, "--agent", "harness=codex", "--agent", "harness=kimi", "--agent", "harness=opencode",
 				"--signed-in", "claude,codex,kimi,opencode", "--no-wiring")
-			if code != 0 || errOut != "" {
-				t.Fatalf("got %d\n%s\n%s", code, out, errOut)
+			if code != 0 || !strings.Contains(errOut, tc.stderr) {
+				t.Fatalf("got %d\n%s\nstderr %q, want %q", code, out, errOut, tc.stderr)
 			}
 			want := "  What workers may do:\n" +
 				"    claude    " + tc.permissions + "\n" +
@@ -1002,7 +1022,7 @@ func TestInitExistingProjectDiffAndOrigin(t *testing.T) {
 	if string(got) != original {
 		t.Fatal("probe modified existing file")
 	}
-	proposed, err2 := engine.ProjectConfigDefaults(got, "example.invalid/imported", "new check", "none")
+	proposed, err2 := engine.ProjectConfigDefaults(got, "example.invalid/imported", "new check", "bypassPermissions", "")
 	if err2 != nil {
 		t.Fatal(err2)
 	}
@@ -1197,7 +1217,9 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 	if e != nil || !live || len(rec.Agents) != 2 {
 		t.Fatalf("runner=%+v %v %v", rec, live, e)
 	}
-	if rec.Agents[0].Tools != "Bash(npm test:*)" || rec.Agents[1].Tools != "" || rec.Agents[0].Family != "anthropic" || rec.Agents[1].Family != "openai" {
+	// The check no longer hands its own tool scope to the agents: the claude
+	// worker advertises the scope it resolves to (the Go default), codex none.
+	if rec.Agents[0].Tools != "Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*)" || rec.Agents[1].Tools != "" || rec.Agents[0].Family != "anthropic" || rec.Agents[1].Family != "openai" {
 		t.Fatalf("wrong agents: %+v", rec.Agents)
 	}
 	assertInitSavedAgents(t, state, rec.Specs)
@@ -1361,7 +1383,10 @@ func TestInitSavedDefaults(t *testing.T) {
 			code, out, errs := initFixedParallel(t, state, strings.Repeat("\n", 6)+"n\n",
 				"--signed-in", strings.Join(initHarnesses, ","),
 				"--check", "true", "--tools", "none", "--no-wiring")
-			if code != 1 || errs != "" || !strings.Contains(out, "Declined") {
+			// The saved claude line names the deprecated tools= alias; init
+			// reads it with the deprecation notice.
+			wantErrs := "brigada: warning: saved agents: --agent tools=: tools is deprecated"
+			if code != 1 || !strings.Contains(errs, wantErrs) || !strings.Contains(out, "Declined") {
 				t.Fatalf("saved defaults: %d\n%s\n%s", code, out, errs)
 			}
 			for _, want := range []string{
@@ -1410,7 +1435,9 @@ func TestInitSavedDefaultsOmitKimi(t *testing.T) {
 	code, out, errs := initFixedParallel(t, state, strings.Repeat("\n", 6)+"n\n",
 		"--signed-in", "claude,codex,opencode",
 		"--check", "true", "--tools", "none", "--no-wiring")
-	if code != 1 || errs != "" || !strings.Contains(out, "Declined") {
+	// The saved claude line names the deprecated tools= alias; init reads
+	// it with the deprecation notice.
+	if code != 1 || !strings.Contains(errs, "brigada: warning: saved agents: --agent tools=: tools is deprecated") || !strings.Contains(out, "Declined") {
 		t.Fatalf("saved defaults: %d\n%s\n%s", code, out, errs)
 	}
 	kimi := strings.Split(strings.Split(out, "kimi: init can't check")[2], "opencode:")[0]

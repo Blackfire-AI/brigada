@@ -192,7 +192,7 @@ func TestInitPlainCheckMenuWidth(t *testing.T) {
 			w := initOutput{Writer: &b, style: term.New(logo.Caps{TTY: true, Width: width})}
 			note := strings.Repeat("n", 72)
 			_, exhausted, err := askInitCheck(w, func(string, string) (string, error) { return "", nil },
-				initCheckEntries([]checkCandidate{{Command: "check", Note: note}}, "", "", false), []checkCandidate{{Command: "check", Note: note, File: "Makefile"}})
+				initCheckEntries([]checkCandidate{{Command: "check", Note: note}}, "", false), []checkCandidate{{Command: "check", Note: note, File: "Makefile"}})
 			if err != nil || exhausted {
 				t.Fatalf("check question: exhausted=%v, err=%v", exhausted, err)
 			}
@@ -218,7 +218,7 @@ func TestInitPlainCurrentCheckWidth(t *testing.T) {
 			w := initOutput{Writer: &b, style: term.New(logo.Caps{TTY: true, Width: tc.width})}
 			command := strings.Repeat("c", tc.commandLength)
 			got, exhausted, err := askInitCheck(w, func(string, string) (string, error) { return "", nil },
-				initCheckEntries(nil, command, "none", true), nil)
+				initCheckEntries(nil, command, true), nil)
 			if err != nil || exhausted || got != command {
 				t.Fatalf("check question = %q, exhausted=%v, err=%v", got, exhausted, err)
 			}
@@ -563,7 +563,7 @@ func TestInitNoCheckMenuPresentation(t *testing.T) {
 					if hasProject {
 						candidates = []checkCandidate{{Command: "make check", Note: "Makefile: test lint", File: "Makefile"}}
 					}
-					entries := initCheckEntries(candidates, "", "", hasProject)
+					entries := initCheckEntries(candidates, "", hasProject)
 					command, exhausted, err := askInitCheck(w, func(prompt, flags string) (string, error) {
 						fmt.Fprintln(w, initPrompt(w, strings.TrimSpace(prompt)))
 						return "", nil

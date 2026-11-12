@@ -48,6 +48,11 @@ const (
 	SettingLandReady         = "land_ready"
 	SettingDefaultCheck      = "default_check"
 	SettingWorkerTools       = "worker_tools"
+	// The project's permission value (§5.2): the mode (or, spelled through
+	// the deprecated worker_tools alias, the tool scope) the project's
+	// agents run under when none of their own names one. worker_tools is
+	// its deprecated alias; both are stored and shown.
+	SettingPermission = "permission"
 	// The environment step (§5.7): the command, the repo-relative files
 	// whose contents key its cache, and its time bound in minutes. Schema
 	// 1 of the shared file is flat, so the three are sibling keys.
@@ -99,7 +104,7 @@ const (
 var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
 	SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
-	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
+	SettingDefaultCheck, SettingWorkerTools, SettingPermission, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
 	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch, SettingInstructions}
 
 // MaxInstructionsBytes bounds the project instruction text (§5.9): a
@@ -211,7 +216,7 @@ func parseSettingValue(key, value string) (json.RawMessage, error) {
 	case SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
 		SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
 		SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
-		SettingDefaultCheck, SettingWorkerTools,
+		SettingDefaultCheck, SettingWorkerTools, SettingPermission,
 		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch, SettingInstructions:
 	default:
 		return nil, fmt.Errorf("%w: unknown key %q; valid keys: %s", ErrInvalidSetting, key, strings.Join(SettingKeys, ", "))
@@ -312,6 +317,13 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 			return nil, fmt.Errorf("%w: %s: %v", ErrInvalidSetting, key, err)
 		}
 		return json.Marshal(toolScopeText(tools))
+	}
+	if key == SettingPermission {
+		v := strings.TrimSpace(value)
+		if err := adapter.ValidatePermission(v); err != nil {
+			return nil, fmt.Errorf("%w: %s: %v", ErrInvalidSetting, key, err)
+		}
+		return json.Marshal(v)
 	}
 	if key == SettingApprovalMaxTasks {
 		n, err := strconv.Atoi(value)
@@ -535,6 +547,11 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 				sv.Value = "none"
 			}
 		case SettingWorkerTools:
+			sv.Value = "agent default"
+			if s, ok := rawString(cur); ok {
+				sv.Value = s
+			}
+		case SettingPermission:
 			sv.Value = "agent default"
 			if s, ok := rawString(cur); ok {
 				sv.Value = s

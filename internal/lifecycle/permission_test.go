@@ -111,3 +111,38 @@ func TestResolvePermission(t *testing.T) {
 		}
 	}
 }
+
+// The config file's set and get round-trip a permission key: what
+// SetConfigValues writes is what LoadConfigFile reads back, with no
+// deprecation notice (permission= is not the alias).
+func TestConfigPermissionSetGetRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	changed, err := SetConfigValues(path, map[string]string{
+		"permission.claude/sonnet": "acceptEdits",
+		"permission.claude/opus":   "plan",
+	})
+	if err != nil || !changed {
+		t.Fatalf("set: changed=%v err=%v", changed, err)
+	}
+	cfg, err := LoadConfigFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.AgentPermission("claude", "sonnet"); got != "acceptEdits" {
+		t.Errorf("sonnet = %q, want acceptEdits", got)
+	}
+	if got := cfg.AgentPermission("claude", "opus"); got != "plan" {
+		t.Errorf("opus = %q, want plan", got)
+	}
+	if len(cfg.Warnings) != 0 {
+		t.Errorf("Warnings = %v, want none", cfg.Warnings)
+	}
+	// A second set of the same values changes nothing.
+	changed, err = SetConfigValues(path, map[string]string{
+		"permission.claude/sonnet": "acceptEdits",
+		"permission.claude/opus":   "plan",
+	})
+	if err != nil || changed {
+		t.Errorf("idempotent set: changed=%v err=%v", changed, err)
+	}
+}

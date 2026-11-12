@@ -15,7 +15,7 @@ import (
 func guidanceRepo(t *testing.T) (string, engine.ProjectConfig) {
 	t.Helper()
 	root := t.TempDir()
-	base, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none")
+	base, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestInitGuidanceFirstRun(t *testing.T) {
 // plan says the roles left out are not configured with the way to
 // restore them.
 func TestInitGuidancePartialRoleMapKept(t *testing.T) {
-	base, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none")
+	base, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestInitGuidancePartialRoleMapKept(t *testing.T) {
 // beside the alias nothing is added, for those keys were left out on
 // purpose.
 func TestInitGuidanceInstructionsFileGainsThreeRoles(t *testing.T) {
-	base, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none")
+	base, err := engine.ProjectConfigDefaults(nil, "example.invalid/imported", "true", "none", "")
 	if err != nil {
 		t.Fatal(err)
 	}

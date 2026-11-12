@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
@@ -33,6 +34,12 @@ func runConfig(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if code != 0 {
 		return code
 	}
+	// A deprecated alias in the config file or the saved agents (tools=,
+	// the alias of permission=) still reads, with the warning the config
+	// loader and the agent parser give.
+	for _, w := range rt.file.Warnings {
+		fmt.Fprintf(stderr, "brigada: warning: config: %s\n", w)
+	}
 	saved, err := runnerstate.LoadAgents(runnerStateDir(rt))
 	if err != nil {
 		return fail(stderr, err)
@@ -41,6 +48,11 @@ func runConfig(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	for _, spec := range saved {
 		if err := agents.Set(spec); err != nil {
 			return fail(stderr, fmt.Errorf("saved agents: %w", err))
+		}
+	}
+	for _, s := range agents.specs {
+		for _, w := range s.warnings() {
+			fmt.Fprintf(stderr, "brigada: warning: %s\n", w)
 		}
 	}
 	rec, running, err := runnerstate.Running(runnerStateDir(rt))
@@ -58,6 +70,12 @@ func runConfig(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	for i, s := range agents.specs {
 		prefix := fmt.Sprintf("  %-9s %-*s effort: %-*s ", s.harness, modelWidth, models[i], effortWidth, efforts[i])
 		printInitWrapped(stdout, prefix, "    ", initAgentRoles(s.classes))
+		// The resolved permission= of the agent (§5.2): the flag over its
+		// config key over the harness default. An agent of a harness with
+		// no default resolves to none, and shows no line.
+		if permission, _ := s.resolve(rt.file); permission != "" {
+			printInitWrapped(stdout, "    permission: ", "      ", permission)
+		}
 		// Show less common saved choices too, rather than hiding the scope or
 		// account that will be used on the next start.
 		if s.account != "" {
@@ -266,6 +284,7 @@ func printConfigMachine(rt *runtime, flagStateDir string, stdout, stderr io.Writ
 		{"caps.account.<label>", "no cap"}, {"caps.model.<model>", "no cap"},
 		{"cost.<harness>/<model>", "1"}, {"tier.<harness>/<model>", "from the model name"},
 		{"tools.claude/<model>", claude.ScopeText(nil)},
+		{"permission.<harness>/<model>", "claude " + adapter.DefaultClaudePermission + "; others none"},
 	}
 	// The loader already validated this file. No accepted key holds a secret;
 	// do not read harness config or credential files into this map.
