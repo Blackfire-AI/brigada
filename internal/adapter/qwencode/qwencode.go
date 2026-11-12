@@ -120,8 +120,11 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 // write-back made possible: a resume forks the key's session onto the
 // client's --session-id (--resume <old> --fork-session --session-id
 // <new>), and a first session starts under the client's id alone, so
-// nobody reads the CLI's own session files. UNVERIFIED: the fork
-// combination has not been run against a live CLI.
+// nobody reads the CLI's own session files. The fork combination is
+// checked headlessly against 1.0.0-preview.1 (TestLiveForkSession, behind
+// the qwenlive tag): the init event names the minted id and the fork
+// remembers the session it resumed. The TUI attach itself is not driven
+// by any test.
 //
 // The session runs in workdir, the foreman's reading checkout. The
 // bridge is added with --mcp-config but without --strict-mcp-config, so
