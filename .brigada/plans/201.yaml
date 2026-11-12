@@ -5,9 +5,9 @@
 plan: 201
 title: "#228 implementation: harness-owned permissions, runner-only push, approval authority"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-12T21:47:35.965112Z
-updated: 2026-11-12T22:10:46.001981Z
+updated: 2026-11-12T22:21:17.215367Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -60,7 +60,7 @@ tasks:
     name: "approval-gates"
     title: "Approval authority: gate the API's approval acts on a verified signature"
     class: "implement"
-    deps: ["push-path", "approval-state"]
+    deps: ["approval-state"]
     base: "approval-state"
     continue: "approval-state"
     effort: medium
@@ -114,15 +114,15 @@ tasks:
     continue: "adapter-claude"
     effort: medium
     skills: ["surface-parity"]
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 769
     name: "docs-followups"
     title: "Docs close of #228: GUIDE, SECURITY, README, COMPATIBILITY, CHANGELOG"
     class: "implement"
-    deps: ["adapter-others"]
-    base: "adapter-others"
+    deps: ["adapter-dsh-kimi-qwen"]
+    base: "adapter-dsh-kimi-qwen"
     effort: medium
     skills: ["docs-change"]
     state: pending
@@ -157,8 +157,8 @@ tasks:
     name: "permission-key"
     title: "`permission=` per agent: the config key, its deprecated aliases, settings"
     class: "implement"
-    deps: ["approval-surfaces"]
-    base: "approval-surfaces"
+    deps: []
+    base: ""
     effort: medium
     review_tier: standard
     skills: ["config-setting"]
@@ -169,7 +169,7 @@ tasks:
     name: "permission-plumbing"
     title: "`permission=` plumbed into the job grant and the harness command; the tool scope retired"
     class: "implement"
-    deps: ["permission-key"]
+    deps: ["permission-key", "approval-api-gates"]
     base: "permission-key"
     continue: "permission-key"
     effort: medium
@@ -182,7 +182,7 @@ tasks:
     name: "permission-cli"
     title: "`permission=` in init's suggestion and in `brigada config`"
     class: "implement"
-    deps: ["permission-plumbing"]
+    deps: ["approval-surfaces", "permission-plumbing"]
     base: "permission-plumbing"
     continue: "permission-plumbing"
     tier: light
@@ -201,6 +201,32 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: high
+    skills: ["surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 776
+    name: "adapter-codex-opencode"
+    title: "codex and opencode: the permission pass-through"
+    class: "implement"
+    deps: ["adapter-claude"]
+    base: "adapter-claude"
+    continue: "adapter-claude"
+    effort: medium
+    review_tier: standard
+    review_effort: medium
+    skills: ["surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 777
+    name: "adapter-dsh-kimi-qwen"
+    title: "dsh, kimi and qwen-code: the same permission pass-through"
+    class: "implement"
+    deps: ["adapter-codex-opencode"]
+    base: "adapter-codex-opencode"
+    continue: "adapter-codex-opencode"
+    effort: medium
     skills: ["surface-parity"]
     state: pending
     branch: ""
