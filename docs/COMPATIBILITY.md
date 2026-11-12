@@ -35,12 +35,12 @@ What brigada 1.0 promises until 2.0.
 - `cancel`: `--no-start`.
 - `agent reset`: `--no-start`.
 - `agents add`: `--classes`, `--effort`, `--now`.
-- `plan approve`: `--and-stop-asking`, `--no-start`; `plan reject`: `--no-start`.
+- `plan approve`: `--and-stop-asking`, `--no-start`, `--request`, `--signature`; `plan reject`: `--no-start`, `--request`, `--signature`.
 - `budget`: `--repo`, `--wakes`, `--no-start`.
 - `recover`: `--repo` (repeatable), `--snapshot-dir`.
 - `diff`: `--stat`, `--repo`, `--no-start`.
-- `land`: `--onto`, `--repo`, `--landed` (repeatable), `--no-check`, `--no-start`; `land approve`: `--and-stop-asking`, `--no-start`; `land reject`: `--no-start`. The command and flag names are frozen; the land gate's holds and the land job's internals are experimental.
-- `push approve`: `--repo`, `--no-start`. The push gate's mechanics are experimental.
+- `land`: `--onto`, `--repo`, `--landed` (repeatable), `--no-check`, `--no-start`; `land approve`: `--and-stop-asking`, `--no-start`, `--request`, `--signature`; `land reject`: `--no-start`, `--request`, `--signature`. The command and flag names are frozen; the land gate's holds and the land job's internals are experimental.
+- `push approve`: `--repo`, `--no-start`, `--request`, `--signature`. The push gate's mechanics are experimental.
 - `approver add`: `--label`, `--public-key`; `approver remove`: `--label`. The approval authority behind them is experimental.
 - `logs`: `--check`, `--follow`, `--tail`, `--task`, `--no-start`.
 
