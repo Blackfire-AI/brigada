@@ -175,7 +175,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["config-setting"]
-    state: done
+    state: needs_foreman
     branch: "brigada/task-773"
     rounds: 1
   - id: 774
